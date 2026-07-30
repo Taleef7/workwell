@@ -1,5 +1,89 @@
 # Architecture Decision Records
 
+## ADR-044: One real mammogram is emitted in BOTH vocabularies — dual-stamping is normalization, and the flip gate gets a command
+
+**Status:** Accepted (2026-07-30). Roadmap §7.4 PR-9 (the numerator prerequisite to PR-9c). Nothing routes
+officially yet.
+
+**Context.** ADR-042 closed the WebChart↔official *initial population* gap and left the **numerator** gap
+open, with the failure direction recorded as the dangerous one. The two engines retrieve different FHIR
+resource types for the same clinical fact:
+
+| | retrieves | value set |
+|---|---|---|
+| authored `cms125.cql` | `[Procedure: "Mammography"]` | includes CPT / HCPCS |
+| official CMS125 ELM | `isDiagnosticStudyPerformed([Observation: "Mammography"])` — additionally requires `status in {final, amended, corrected}` **and** `exists(category ~ imaging)` | **92 LOINC codes and nothing else** |
+
+WebChart records a mammogram as a CPT/HCPCS **procedure** (`77067` / legacy `G0202`). Measured: one
+crosswalk-shaped mammogram → authored COMPLIANT, official **OVERDUE**. That is a *false non-compliance on
+an already-screened woman*, and `case-logic.ts` escalates it to a HIGH-priority "escalate mammogram
+follow-up immediately". A confident wrong answer on the ordinary case — worse than the out-of-population
+read ADR-043 handles, because nothing detects it: those subjects **are** in the initial population, so the
+ADR-043 WARN is silent by design.
+
+Neither representation alone works, and they fail in **opposite directions** — the Procedure clears
+authored and not official; a LOINC Observation clears official and not authored; and a LOINC Observation
+*without* `category` clears neither, which is the trap in the obvious fix.
+
+**Decision.**
+
+1. **The crosswalk dual-stamps.** A screening-mammogram procedure row emits the CPT/HCPCS `Procedure` it
+   always did **and** a LOINC `Observation` (`24606-6`, a verified member of the official value set)
+   carrying `category ~ imaging` and `status = final`. Both mapping sites change —
+   `wcdb-fhir-shim/src/fhir-mapping.ts` and the by-design duplicate
+   `backend-ts/scripts/webchart-devdb-export.ts` — exactly as `us-core-sex` did in ADR-042.
+2. **Served from `/Observation`, and `/Procedure` is untouched.** The derived resource appears where its
+   FHIR type says it belongs, so the authored engine sees byte-identical input to before. Dual-stamping
+   **adds** a representation; it never moves or replaces one.
+3. **This is normalization, not fabrication (ADR-037).** No clinical event is invented — one real,
+   recorded mammogram is expressed in the two vocabularies the two engines read, which is what the
+   synthetic corpus has done since ADR-038. Three properties keep that honest, each tested:
+   - **derived strictly from a real row** — no procedure row, no Observation; the date is the procedure's
+     own, never today's;
+   - **an explicit allowlist, not a category sweep** — only codes that mean "a screening mammogram was
+     performed" dual-stamp, so an unrelated CPT can never mint a diagnostic study;
+   - **non-inflating** — both numerators are `exists(...)`, so one event in two vocabularies is still one
+     event. **This would NOT be safe for a counting measure**, and that limit is stated in
+     `WEBCHART_FHIR_MAPPING.md` §3.2 rather than left to be rediscovered.
+4. **The flip gate gets a COMMAND: `pnpm flip-snapshot`.** ADR-043 moved enforcement onto "the flip gate",
+   and review of #354 made the fair objection that the half which can see a tenant — confirm a non-zero
+   initial population (step 2), take a before/after distribution snapshot (step 4) — shipped as prose with
+   no command, no tooling and no artifact. That is the vacuous-guard shape this branch has now been pulled
+   up on three times. The CLI evaluates a measure both ways over the same bundles and reports the before/
+   after distribution, the official IPP count, and every subject whose roster row would change.
+5. **The snapshot renders a verdict but gates nothing**, and exits 0 even on DO-NOT-FLIP. The judgement it
+   supports is the one ADR-043 established a machine cannot make from shape alone. What it *can* do is
+   compute the comparison a human needs: `authoredActionable > 0 && officialInIpp === 0` means the cohort
+   is not the explanation. Where both engines find nobody it reports **INCONCLUSIVE** rather than picking
+   a side. Wiring it into CI as pass/fail would re-assert exactly the automated judgement ADR-043 rejected.
+
+**Consequences.**
+
+- **The last numerator blocker to PR-9c is closed.** Measured after the change: a dual-stamped mammogram
+  makes both engines report COMPLIANT, and all four failure states stay pinned as tests — three of them
+  are the ways a future "simplification" would silently reopen the gap.
+- **The committed fixture moved by exactly one resource.** Its only mammography record (wc-49, HCPCS
+  `G0202`, 2015) belongs to a 33-year-old outside the `[42..74]` IPP, so **no outcome changed** — which is
+  precisely why the dual stamp is asserted directly rather than inferred from an unchanged distribution.
+- **Measured with the new tool, and it confirms the flip list.** On the **synthetic** roster the
+  demo/production stack evaluates, cms122 and cms125 both admit **5 of 5** subjects to the initial
+  population and agree with authored on every one. Over **WebChart** data cms125 admits 4 of 56 and agrees
+  on all 56, while cms122 admits 0 of 56 and reports INCONCLUSIVE — a data gap (zero Conditions in the
+  seed), not a divergence. Consistent with ADR-043 decision 6: cms122's routability is stack-dependent and
+  it stays in the flip list.
+- **The fixture was NOT re-exported from the dev DB** — Docker was unavailable, so the generator's own
+  insertion rule was replayed over the committed artifact and the diff verified to be exactly the 28 lines
+  of one added Observation. A re-export when the dev DB is up should be a no-op; if it is not, the
+  generator and the fixture have drifted and the fixture is wrong.
+- **Three copies of the mapping now exist** (shim, export script, and the test's injected shapes). That is
+  the same intentional duplication ADR-034 accepted, with `hapi-live.test.ts`'s bucket-parity suite as the
+  drift guard, now joined by a fixture assertion. It is real debt, and the honest place to remove it is
+  M-C's package extraction, not a cross-package import that ADR-034 forbids.
+- **What this does NOT close:** the live third-party path still supplies neither `us-core-sex` nor
+  dual-stamped mammography, because both mapping sites sit upstream of the live FHIR transport and
+  `normalizeWebChartBundle` is untouched by design. For a real WebChart tenant the gap is open exactly as
+  ADR-042 consequence 5 describes. Cypress CVU+ remains the verification bar and has not run.
+
 ## ADR-043: A whole roster out of the initial population is SURFACED at runtime and ENFORCED at the flip gate — never refused mid-run
 
 **Status:** Accepted (2026-07-30). Roadmap §7.4 PR-9 (the PR-9c precondition). Nothing routes officially yet.

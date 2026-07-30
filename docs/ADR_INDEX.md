@@ -11,6 +11,7 @@
 
 ## Titles (newest first)
 
+- ADR-044: One real mammogram is emitted in BOTH vocabularies — dual-stamping is normalization, and the flip gate gets a command
 - ADR-043: A whole roster out of the initial population is SURFACED at runtime and ENFORCED at the flip gate — never refused mid-run
 - ADR-042: The WebChart↔official IPP gap is closed by mapping and guarded by a parity gate — not by refusing the configuration (the NUMERATOR gap stays open)
 - ADR-041: A capped official expansion is completed at vendor time, from a pinned VSAC release, or not at all
