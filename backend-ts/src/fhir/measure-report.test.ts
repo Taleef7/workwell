@@ -14,6 +14,7 @@ import {
   buildIndividualMeasureReport,
   buildMeasureReportBundle,
 } from "./measure-report.ts";
+import { loadOfficialArtifact } from "../wiring/official-artifacts.ts";
 import type { RunRecord } from "../stores/run-store.ts";
 import type { OutcomeRecord, OutcomeStatusCount } from "../stores/outcome-store.ts";
 
@@ -103,7 +104,7 @@ test("individual: subject ref + 0/1 membership; no measureScore", () => {
   }
 });
 
-test("WorkWell canonical and increase notation stay coupled to the compliance-oriented numerator", () => {
+test("AUTHORED outcomes keep the WorkWell canonical and increase notation", () => {
   for (const measureId of ["cms122", "cms125"]) {
     const report = buildSummaryMeasureReport(run, measureId, [oc("COMPLIANT"), oc("OVERDUE")], GENERATED_AT);
     assert.equal(report.measure, `urn:workwell:measure:${measureId}`);
@@ -111,6 +112,75 @@ test("WorkWell canonical and increase notation stay coupled to the compliance-or
     assert.equal(report.improvementNotation?.coding[0]?.code, "increase");
     assert.equal(countOf(report, "numerator"), 1, "COMPLIANT is WorkWell's numerator");
   }
+});
+
+/** An outcome as the official executor persists it: membership IS `populationResults` (ADR-031). */
+const routedOc = (measureId: string, inNumerator: boolean, version = "1.0.000"): OutcomeRecord => ({
+  id: `o${++n}`, runId: "run-1", subjectId: `emp-${n}`, measureId,
+  evaluationPeriod: "2026-06-12", status: inNumerator ? "OVERDUE" : "COMPLIANT",
+  evidence: {
+    official: {
+      ecqmId: measureId === "cms122" ? "CMS122FHIR" : "CMS125FHIR",
+      version,
+      engine: "fqm-execution",
+      artifactSha256: loadOfficialArtifact(measureId)?.manifest.sha256,
+      populationResults: [
+        { populationType: "initial-population", result: true },
+        { populationType: "denominator", result: true },
+        { populationType: "denominator-exclusion", result: false },
+        { populationType: "numerator", result: inNumerator },
+      ],
+    },
+  },
+  evaluatedAt: "2026-06-12T00:01:00.000Z",
+});
+
+test("ADR-046: an OFFICIAL cms122 report declares DECREASE — its numerator counts poor control", () => {
+  // The obligation this file has carried since PR-3: canonical, improvementNotation and membership must
+  // switch TOGETHER or the report contradicts itself. cms122's official numerator is poor glycemic
+  // control, so `increase` over it says higher-is-better about a numerator counting harm. Review of #356
+  // caught that PR-9c shipped without discharging this, which is why cms122 was held out of that flip.
+  //
+  // The old guard could not fail here: its fixtures carried no official evidence, so it only ever
+  // exercised the authored path.
+  const report = buildSummaryMeasureReport(
+    run, "cms122", [routedOc("cms122", true), routedOc("cms122", false)], GENERATED_AT,
+  );
+  assert.equal(report.improvementNotation?.coding[0]?.code, "decrease");
+  assert.equal(countOf(report, "numerator"), 1, "numerator counts the POOR-control subject");
+  // And the canonical moves with it — a WorkWell urn over an official numerator is the same lie.
+  assert.ok(report.measure.includes("madie.cms.gov"), `expected the official canonical, got ${report.measure}`);
+});
+
+test("ADR-046: an OFFICIAL cms125 report stays INCREASE — its numerator means screened", () => {
+  // The trio must track the measure's own semantics, not flip for everything official. cms125's
+  // numerator means compliance, so `increase` is correct and unchanged.
+  const report = buildSummaryMeasureReport(
+    run, "cms125", [routedOc("cms125", true), routedOc("cms125", false)], GENERATED_AT,
+  );
+  assert.equal(report.improvementNotation?.coding[0]?.code, "increase");
+  assert.ok(report.measure.includes("madie.cms.gov"));
+});
+
+test("ADR-046: a re-vendored artifact does NOT get the current canonical retroactively", () => {
+  // A run exported after a re-vendor must not be labelled with a canonical it was never scored by. The
+  // sha in the evidence is the discriminator; a mismatch falls back to a version-qualified urn, which is
+  // less pretty and true.
+  const stale = routedOc("cms125", true);
+  (stale.evidence as { official: { artifactSha256: string } }).official.artifactSha256 = "sha256:not-the-vendored-one";
+  const report = buildSummaryMeasureReport(run, "cms125", [stale], GENERATED_AT);
+  assert.equal(report.measure, "urn:workwell:measure:cms125:official:1.0.000");
+  assert.ok(!report.measure.includes("madie.cms.gov"), "never claims a canonical this run did not use");
+});
+
+test("ADR-046: the INDIVIDUAL report derives the trio from its own outcome", () => {
+  const official = buildIndividualMeasureReport(routedOc("cms122", true), run, "cms122", GENERATED_AT);
+  assert.equal(official.improvementNotation?.coding[0]?.code, "decrease");
+  assert.ok(official.measure.includes("madie.cms.gov"));
+
+  const authored = buildIndividualMeasureReport(oc("COMPLIANT"), run, "cms122", GENERATED_AT);
+  assert.equal(authored.improvementNotation?.coding[0]?.code, "increase");
+  assert.equal(authored.measure, "urn:workwell:measure:cms122");
 });
 
 test("base R4 metadata: UUID id, generation date, and contained WorkWell reporter", () => {

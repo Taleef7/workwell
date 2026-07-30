@@ -126,7 +126,7 @@ const disclaimerFor = (ecqmId: string): string =>
   `LITERAL execution diff: the official multi-library QICore ${ecqmId} artifact (MADiE FHIR export), ` +
   "executed from its PRE-COMPILED ELM via fqm-execution (no translation), per subject against WorkWell's " +
   "authored measure, over the SAME measurement period and the SAME prepared bundle the official " +
-  "executor would use at runtime — so this forecasts the flip rather than describing a configuration " +
+  "executor would use at runtime — so this matches what a routed measure actually runs " +
   "that will never exist. fqm-execution is quarantined behind the @workwell/official-executor package " +
   "boundary and lazily imported (ADR-026 as amended). Descriptive only — CQL " +
   "Outcome Status remains the sole compliance authority (ADR-008)."

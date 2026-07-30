@@ -245,7 +245,7 @@ Full surface in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ## Current focus
 
-Running CMS's official published artifacts in place of the authored implementations, one measure at a time, behind `WORKWELL_OFFICIAL_MEASURES`. **CMS125 is live on the demo/production stack** (2026-07-30); every other measure and every other environment still evaluates the authored CQL. CMS122 is routable but held back until its MeasureReport `improvementNotation` matches its official numerator — a self-contradictory report is worse than a delayed one.
+Running CMS's official published artifacts in place of the authored implementations, one measure at a time, behind `WORKWELL_OFFICIAL_MEASURES`. **CMS122 and CMS125 are live on the demo/production stack** (2026-07-30) — both evaluate CMS's published QI-Core artifacts verbatim. Every other measure, and every other environment, still evaluates the authored CQL. CMS122 shipped a PR later than CMS125: its official numerator counts *poor* glycemic control, so the MeasureReport canonical, `improvementNotation` and population membership all had to switch together first, and a self-contradictory report is worse than a delayed one.
 
 What remains before the first flip, and the verification bar it has to clear, is tracked in [`docs/JOURNAL.md`](docs/JOURNAL.md) (newest first) and the ADR run 036–044 in [`docs/DECISIONS.md`](docs/DECISIONS.md). Cypress **CVU+** is the verification bar and has not yet run.
 

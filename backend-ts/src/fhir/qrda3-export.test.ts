@@ -69,3 +69,46 @@ test("PR-3: exceptions are absent for authored measures and emitted + scored for
   // MeasureReport reports for the same counts.
   assert.ok(officialXml.includes('value="0.8000"'), "exceptions must leave the effective denominator");
 });
+
+/** An outcome as the official executor persists it. */
+const officialOutcome = (measureId: string): OutcomeRecord =>
+  ({
+    id: "o-official", runId: run.id, subjectId: "emp-1", measureId,
+    evaluationPeriod: "2025-12-31", status: "COMPLIANT",
+    evidence: {
+      official: {
+        ecqmId: "122FHIR", version: "1.0.000", engine: "fqm-execution",
+        populationResults: [
+          { populationType: "initial-population", result: true },
+          { populationType: "denominator", result: true },
+          { populationType: "numerator", result: true },
+        ],
+      },
+    },
+    evaluatedAt: "2025-12-31T00:00:00.000Z",
+  }) as OutcomeRecord;
+
+test("ADR-046: an official QRDA references the published measure by its eMeasure UUIDs", () => {
+  // `manifest.cmsId` is the PUBLISHER identifier ("122FHIR") and is NOT what QRDA III references — a
+  // consumer cannot resolve an organizer to a published measure version from it (Codex, #357). The
+  // Measure resource carries the two identifiers that do resolve, typed by `artifact-identifier-type`.
+  const xml = buildQrda3Document(run, "cms122", [officialOutcome("cms122")]);
+
+  // version-specific → the eMeasure Identifier root; names the exact version whose logic scored this.
+  assert.match(xml, /<id root="2\.16\.840\.1\.113883\.4\.738" extension="2ea22cb2-9bcc-4ca6-b2f2-68fc964365ad"\/>/);
+  // version-independent → setId; the measure's identity across versions.
+  assert.match(xml, /<setId root="f04ee808-8ece-4936-8b26-fafa462e1594"\/>/);
+  assert.match(xml, /<versionNumber value="1\.0\.000"\/>/);
+
+  assert.ok(!xml.includes('extension="122FHIR"'), "the publisher id must not stand in for the eMeasure id");
+  assert.ok(!xml.includes('root="urn:workwell:measure"'), "an official export must not claim WorkWell's urn");
+});
+
+test("ADR-046: an AUTHORED QRDA is unchanged — WorkWell's urn, no eMeasure identifiers", () => {
+  const xml = buildQrda3Document(run, "cms122", [
+    { ...officialOutcome("cms122"), evidence: {} } as OutcomeRecord,
+  ]);
+  assert.match(xml, /<id root="urn:workwell:measure" extension="cms122"\/>/);
+  assert.ok(!xml.includes("2.16.840.1.113883.4.738"), "no official identity over authored counts");
+  assert.ok(!xml.includes("<setId"), "no setId on the authored path");
+});

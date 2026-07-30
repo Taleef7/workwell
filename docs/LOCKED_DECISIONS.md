@@ -52,11 +52,11 @@
   > `officialRoutingProblems(["cms122"])` and `(["cms125"])` both return **no problems** — the two measures
   > are ROUTABLE.
   >
-  > **SINCE (2026-07-30, PR-9c / ADR-045): cms125 IS ROUTED on demo/production.**
-  > `deploy-twh-mieweb.yml` and `reconcile-twh-mieweb.yml` both set `WORKWELL_OFFICIAL_MEASURES="cms125"`.
-  > **cms122 is deliberately NOT routed** — its official numerator means failure while
-  > `improvementNotation` still says `increase`, so routing it would emit a self-contradictory
-  > MeasureReport (test-enforced). Every OTHER environment —
+  > **SINCE (2026-07-30, PR-9c / ADR-045 + ADR-046): cms122 AND cms125 ARE ROUTED on demo/production.**
+  > `deploy-twh-mieweb.yml` and `reconcile-twh-mieweb.yml` both set
+  > `WORKWELL_OFFICIAL_MEASURES="cms122,cms125"`. cms122 shipped one PR later than cms125, once ADR-046
+  > made canonical/improvementNotation/membership all derive from the outcome's own evidence — routing it
+  > before that would have emitted a MeasureReport declaring higher-is-better over a poor-control numerator. Every OTHER environment —
   > staging included — still leaves the variable unset, so there `routedEngineForEnv` returns
   > `engineForEnv`'s value by identity and every measure evaluates authored CQL. The flip is **inert on
   > this stack's data** (no roster row changes; cms125 5/5 in the official initial population and
