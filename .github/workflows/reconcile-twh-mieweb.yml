@@ -161,7 +161,7 @@ jobs:
                 # and cms122/cms125 quietly revert to authored CQL with no signal anywhere. Caught by
                 # Codex on #356 before it could happen; `official-flip-config.test.ts` now asserts the two
                 # workflows agree, so this pair cannot drift again.
-                {key: "WORKWELL_OFFICIAL_MEASURES", value: "cms122,cms125"},
+                {key: "WORKWELL_OFFICIAL_MEASURES", value: "cms125"},
                 {key: "WORKWELL_VSAC_API_KEY", value: $vsac_api_key},
                 {key: "WORKWELL_BUCKET_S3_ACCESS_KEY_ID", value: $bucket_key_id},
                 {key: "WORKWELL_BUCKET_S3_SECRET_ACCESS_KEY", value: $bucket_secret},

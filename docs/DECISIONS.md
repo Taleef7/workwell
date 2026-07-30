@@ -1,9 +1,11 @@
 # Architecture Decision Records
 
-## ADR-045: The flip is a WORKFLOW edit, gated by a test that reads what the workflow ships
+## ADR-045: The flip is a WORKFLOW edit, gated by tests that read what the workflow ships — and cms125 goes alone
 
-**Status:** Accepted (2026-07-30). Roadmap §7.4 PR-9c — the completion of milestone M-A. **cms122 and
-cms125 now evaluate CMS's published QI-Core artifacts on the demo/production stack.**
+**Status:** Accepted (2026-07-30). Roadmap §7.4 PR-9c. **cms125 now evaluates CMS's published QI-Core
+artifact on the demo/production stack.** cms122 is routable and agrees with authored, but is held back
+until its reporting trio is discharged (decision 1) — so M-A is complete for one of its two ready
+measures, not both.
 
 **Context.** Everything since ADR-036 built toward one configuration change. The machinery was complete
 and dark: artifacts vendored at v1.0.000, terminology pinned by SHA-256 and completed from VSAC, a
@@ -19,10 +21,20 @@ with the authored engine on every one, across COMPLIANT / OVERDUE / EXCLUDED.
 
 **Decision.**
 
-1. **Flip cms122 AND cms125 together, on the demo/production stack.** ADR-043 decision 6 established that
-   cms122's routability is *stack-dependent*: it reads out-of-population over WebChart data, but
-   `deploy-twh-mieweb.yml` carries **zero** `WORKWELL_WEBCHART_*` (verified), so this stack evaluates the
-   synthetic roster where cms122 scores across all five corpus targets. Staging is unchanged.
+1. **Flip cms125 ONLY.** *(Narrowed from "cms122 + cms125" after review, #356.)* cms122 is routable, and
+   ADR-043 decision 6 correctly established that its stack-dependent WebChart blindness does not bind
+   here — `deploy-twh-mieweb.yml` carries **no** `WORKWELL_WEBCHART_*`, so this stack evaluates the
+   synthetic roster where cms122 scores across all five corpus targets. A **different** blocker stops it:
+   its official numerator means **failure** (`numeratorMeansCompliant: false` — HbA1c > 9% or no
+   assessment), while `measure-bindings.ts` still declares `improvementNotation: "increase"` and
+   `measure-report.ts` still emits the WorkWell canonical. `measure-report.ts:246-252` had already written
+   this down as a **PR-7 obligation** — "the measure that flips MUST switch all three together" — and
+   PR-9c was the flip that had to discharge it and did not. Routing cms122 would ship a MeasureReport
+   declaring higher-is-better over a poor-control numerator (~120 → ~27 on the 150-employee directory),
+   and QRDA III carries **no** `improvementNotation` field at all, so the inverted count would go out
+   unmarked. cms125's trio is already consistent, so it flips alone; cms122 follows once the trio is
+   discharged. **Enforced, not remembered:** `official-flip-config.test.ts` fails if a measure whose
+   official numerator means failure is shipped with `increase`. Staging is unchanged.
 2. **The flag is set in the WORKFLOW, not on the container.** `CONTAINER_ENV_VARS_JSON` is a fixed `jq`
    array and the deploy deletes-and-recreates the container, so a hand-set value is wiped on the next
    deploy. This makes the flip a reviewed, merged, revertable change rather than an operator action —
@@ -49,7 +61,26 @@ with the authored engine on every one, across COMPLIANT / OVERDUE / EXCLUDED.
    refuses a capped expansion by design (ADR-041), so an unconditional assertion would have failed every
    outside contributor's PR for a condition unrelated to their change. Every other problem class is
    asserted always; the credentialed run on merge covers the capped class for real.
-7. **The test does not pin WHICH measures are flipped.** Asserting the literal value would make every
+7. **Every workflow `run:` block is syntax-checked in CI.** *(Added after review, #356 — this PR shipped
+   a broken production deploy step and nothing could see it.)* The flag was added inside a `jq` program
+   that lives in a **single-quoted shell string**, and the surrounding comment contained apostrophes
+   (`CMS's`, `WorkWell's`). The first one CLOSED the quote and turned the whole step into a bash syntax
+   error. Deploy workflows only run on push to `main`, so no PR check could catch it; the new
+   `official-flip-config.test.ts` passed 3/3 because it validates the *semantics* of a line the shell
+   would never execute; and verifying by extracting the jq program and running it standalone — which is
+   what was done — bypasses the shell quoting entirely. The program was always fine; the string
+   containing it was not.
+
+   The second-order effect is why this warranted a guard rather than a fix. `build-backend-ts` would have
+   succeeded and pushed a new `:latest`; the deploy step would have died *before* the delete/recreate, so
+   the live container survives on the old image; and then the 15-minute self-heal reconciler — which now
+   carries the flag and parses cleanly — would have recreated it from the new `:latest`, **delivering the
+   flip unattended through a path nobody reviewed as the delivery mechanism, while the deploy pipeline was
+   red.** Exactly the silent-delivery class this PR exists to prevent.
+   `.github/scripts/workflow-run-blocks.test.sh` now `bash -n`s all 54 run-blocks in the `deploy-helper`
+   CI job. It carries a minimum-block floor, because its own first version reported "all parse" after
+   checking **zero**.
+8. **The test does not pin WHICH measures are flipped.** Asserting the literal value would make every
    future flip a two-file change guarded by a test that only says "you changed what you changed". The
    property that matters is that whatever is shipped is **routable**.
 
@@ -74,9 +105,9 @@ with the authored engine on every one, across COMPLIANT / OVERDUE / EXCLUDED.
 - **Rollback is one line and a redeploy.** `logic_version` carries the artifact identity (ADR-040), so
   flip-on, flip-off and re-vendor each invalidate `eval_state` by construction — no manual cache `DELETE`,
   and no possibility of serving an authored outcome for a routed measure.
-- **The authored cms122/125 subsets are now dead weight in the catalog** and retire to the fidelity lab
-  per locked owner decision #4. Deliberately NOT in this PR: they should retire after the flip is observed
-  running, not in the same change that starts it.
+- **The authored cms125 subset is now dead weight in the catalog** and retires to the fidelity lab per
+  locked owner decision #4 — after the flip is observed running, not in the change that starts it. The
+  authored cms122 subset is still LIVE and must stay until cms122 itself flips.
 - **What this does not establish.** The oracle is our own authored engine, so agreement means the flip
   changes nothing for this data — not that either engine is correct. The external check remains the MADiE
   gate, which runs over CMS's test patients rather than ours. **Cypress CVU+ has not run** and stays the
