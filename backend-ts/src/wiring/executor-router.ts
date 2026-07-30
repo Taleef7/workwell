@@ -225,6 +225,25 @@ export function officialRoutingProblems(env: OfficialMeasuresEnv, deps: RoutingC
           `assumes a proportion measure (a cohort measure has no numerator at all)`,
       );
     }
+    // EPISODE-OF-CARE measures cannot be executed by this adapter (review, #358). CMS68 declares
+    // `populationBasis: "Encounter"`: one patient with N qualifying encounters is N denominator units,
+    // and `outcomeFromPopulations` maps exactly one boolean vector per SUBJECT. Routing it would collapse
+    // four office visits into one COMPLIANT/OVERDUE, so MeasureReport would count subjects where the
+    // measure counts encounters — a wrong denominator with nothing to signal it, which is the same silent
+    // shape ADR-043 exists for.
+    //
+    // The MADiE deck provably cannot catch this: all 19 CMS68 cases have a max expected count of 1 for
+    // every population and not one subject produces more than one episode, so 19/19 is evidence about
+    // single-encounter patients only. A green gate is exactly why this needs a construction-time refusal
+    // rather than a note.
+    if (artifact.manifest.populationBasis && artifact.manifest.populationBasis !== "boolean") {
+      problems.push(
+        `${id}: populationBasis '${artifact.manifest.populationBasis}' is an EPISODE-OF-CARE measure — ` +
+          `the executor maps one population vector per subject, so a subject with several qualifying ` +
+          `episodes would be counted once. Episode support is unbuilt; routing this measure would report ` +
+          `a wrong denominator with no signal.`,
+      );
+    }
     if (!officialMeasureSemantics(id)) {
       problems.push(
         `${id}: no recorded numerator semantics — see official-measure-semantics.ts. There is no safe ` +

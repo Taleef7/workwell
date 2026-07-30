@@ -288,6 +288,11 @@ export function officialMeasurementPeriod(
   measureId: string,
   evaluationDate: string,
 ): { start: string; end: string } {
+  // The 12 is a DEFAULT, not a decision, for a measure absent from the registry — which every measure
+  // onboarded by ADR-047 is (they have no authored counterpart). It is correct today: cms122/cms125 are
+  // registered at 12, and every vendored artifact declares a one-year effectivePeriod. But the next
+  // measure with a non-annual window would inherit 12 silently, so this is provenance worth stating
+  // rather than a value worth trusting (review, #358).
   const periodMonths = MEASURES[measureId]?.periodMonths ?? 12;
   return { start: subtractMonths(evaluationDate, periodMonths), end: normalizePeriodEnd(evaluationDate) };
 }

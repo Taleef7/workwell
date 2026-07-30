@@ -400,3 +400,25 @@ test("PR-8: the unset default offers NO batch path, so the pre-pass cannot engag
   const routed = await routedEngineForEnv({} as never, { authored: authoredEngine() });
   assert.equal((routed as { evaluateBatch?: unknown }).evaluateBatch, undefined);
 });
+
+test("ADR-047: an EPISODE-OF-CARE measure is refused at construction", () => {
+  // CMS68 declares populationBasis "Encounter": one patient with N qualifying encounters is N
+  // denominator units, and `outcomeFromPopulations` maps exactly one boolean vector per SUBJECT. Routing
+  // it would collapse four office visits into one outcome, so MeasureReport would count subjects where
+  // the measure counts encounters.
+  //
+  // The MADiE deck cannot catch this — all 19 CMS68 cases are single-encounter, so 19/19 is a green gate
+  // over exactly the shape that hides the defect (review, #358). Hence a construction-time refusal.
+  const problems = officialRoutingProblems({ WORKWELL_OFFICIAL_MEASURES: "cms68" });
+  assert.equal(problems.length, 1, `expected exactly one problem, got ${JSON.stringify(problems)}`);
+  assert.match(problems[0]!, /populationBasis 'Encounter' is an EPISODE-OF-CARE measure/);
+
+  // The boolean-basis measures are unaffected — the refusal must not be a blanket "official is risky".
+  for (const id of ["cms122", "cms125", "cms2", "cms951"]) {
+    assert.deepEqual(
+      officialRoutingProblems({ WORKWELL_OFFICIAL_MEASURES: id }),
+      [],
+      `${id} has populationBasis boolean and must stay routable`,
+    );
+  }
+});

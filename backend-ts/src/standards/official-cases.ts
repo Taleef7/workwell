@@ -1,5 +1,5 @@
 /**
- * Offline official MADiE case diagnostics for CMS122/CMS125.
+ * Offline official MADiE case diagnostics for every gated official measure.
  *
  * DIAGNOSTIC-ONLY (ADR-026): this module is reachable only from the on-demand CLI. It never serves
  * the request path, worker entrypoint, engine ingress, or production run pipeline.
@@ -27,6 +27,16 @@ export const POPULATION_CODES = [
   // cms122/cms125 declare no exception, so both sides are 0 and their decks are unaffected.
   "denominator-exception",
 ] as const;
+/** Short column labels, keyed by code so the header cannot drift from the compared vector. */
+export const POPULATION_ABBREV: Record<(typeof POPULATION_CODES)[number], string> = {
+  "initial-population": "IPP",
+  denominator: "DENOM",
+  "denominator-exclusion": "DENEX",
+  numerator: "NUMER",
+  "denominator-exception": "DENEXCEP",
+};
+const POPULATION_ABBREV_JOINED = POPULATION_CODES.map((c) => POPULATION_ABBREV[c]).join("/");
+
 export type PopulationCode = (typeof POPULATION_CODES)[number];
 export type PopulationCounts = Record<PopulationCode, number>;
 
@@ -794,11 +804,11 @@ export function renderOfficialCaseReport(runs: OfficialMeasureRun[], metadata: O
     "```powershell",
     "cd backend-ts",
     ".\\scripts\\fetch-official-cases.ps1",
-    "pnpm test:official-cases [--measure cms122|cms125] [--content-dir <path>]",
+    "pnpm test:official-cases [--measure <catalogId>] [--content-dir <path>]",
     "# If pnpm is not directly on PATH: corepack pnpm test:official-cases",
     "```",
     "",
-    "The fetch script sparse-checks out only the two measure bundles and two test-case trees into ignored `.official-content/`; it refuses to overwrite an unrelated non-Git directory.",
+    "The fetch script sparse-checks out only the gated measures' bundles and test-case trees into ignored `.official-content/`; it refuses to overwrite an unrelated non-Git directory.",
     "",
     "## Summary",
     "",
@@ -860,14 +870,18 @@ export function renderOfficialCaseReport(runs: OfficialMeasureRun[], metadata: O
         `Raw expected agreement ${run.summary.expectedAgreements}/${run.summary.total}; ` +
         `reference-adjusted pass ${run.summary.expectedAgreements + run.summary.referenceAgreements}/${run.summary.total}.`,
       "",
-      "| Case | UUID | IPP E/A | DENOM E/A | DENEX E/A | NUMER E/A | Result |",
-      "|---|---|---:|---:|---:|---:|---|",
+      // Columns are DERIVED from the compared vector, not hand-listed. They diverged once: DENEXCEP was
+      // added to `POPULATION_CODES` and the table kept rendering four columns, so the population that
+      // *defines* a case named "DENEXCEPPass…" was invisible — and CMS68's DENEX column reported a
+      // population that measure does not even declare (review, #358). A report that hides the column it
+      // compares invites the opposite conclusion from the evidence.
+      `| Case | UUID | ${POPULATION_CODES.map((c) => `${POPULATION_ABBREV[c]} E/A`).join(" | ")} | Result |`,
+      `|---|---|${POPULATION_CODES.map(() => "---:").join("|")}|---|`,
     );
     for (const item of run.cases) {
       lines.push(
-        `| ${escapeMarkdown(item.name)} | \`${item.uuid}\` | ${populationCell(item, "initial-population")} | ` +
-          `${populationCell(item, "denominator")} | ${populationCell(item, "denominator-exclusion")} | ` +
-          `${populationCell(item, "numerator")} | ${resultLabel(item)} |`,
+        `| ${escapeMarkdown(item.name)} | \`${item.uuid}\` | ` +
+          `${POPULATION_CODES.map((code) => populationCell(item, code)).join(" | ")} | ${resultLabel(item)} |`,
       );
     }
     if (run.draftDrift) {
@@ -902,7 +916,9 @@ export function renderOfficialCaseReport(runs: OfficialMeasureRun[], metadata: O
               "",
             ]
           : []),
-        "| Case | UUID | Changed populations | v1 IPP/DEN/DENEX/NUM | draft IPP/DEN/DENEX/NUM |",
+        // Header derived for the same reason: the row is built with `POPULATION_CODES.map(...)`, so a
+        // hand-written label list silently under-describes it the moment the vector grows.
+        `| Case | UUID | Changed populations | v1 ${POPULATION_ABBREV_JOINED} | draft ${POPULATION_ABBREV_JOINED} |`,
         "|---|---|---|---|---|",
       );
       const changed = run.draftDrift.cases.filter((item) => item.differences.length > 0 || item.error);
