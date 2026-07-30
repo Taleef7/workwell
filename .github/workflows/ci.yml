@@ -212,7 +212,8 @@ jobs:
             src/wiring/official-terminology.test.ts \
             src/wiring/corpus-membership.test.ts \
             src/wiring/official-corpus-outcomes.test.ts \
-            src/standards/literal-diff.test.ts
+            src/standards/literal-diff.test.ts \
+            src/engine/ingress/webchart/devdb-official-eval.test.ts
       - name: Run the official MADiE test-case gate
         id: gate
         run: pnpm test:official-cases

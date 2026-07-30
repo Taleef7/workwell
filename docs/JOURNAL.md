@@ -23,13 +23,14 @@ extension: **0 of 56 patients carried `us-core-sex`**, because both places that 
 the fixture from the dev DB produced a file **byte-identical but for 28 added extensions** (12 female / 16
 male), roster untouched — so nothing else about the sample moved and the outcome change has one cause.
 
-**Three candidates measured and moved nothing** — and two of them were carried in CLAUDE.md as CMS125
-blockers: a LOINC mammography `Observation` mirroring the single HCPCS G0202 procedure (a real mapping gap,
-but all four actionable subjects are OVERDUE, i.e. have no mammogram to find, and the one G0202 in the seed
-belongs to someone outside the IPP), `Condition.onsetDateTime` (cms125's IPP reads no Condition at all —
-only its mastectomy exclusions do), and `Observation.category`. **Counting absent fields overestimates a
-gap.** The structural inventory that produced the "M-D-sized" note counted what was missing rather than
-testing what the measures read.
+**Three candidates moved nothing for IPP membership**, but only one of them is genuinely inapplicable:
+`Condition.onsetDateTime` (cms125's IPP reads no Condition at all — only its mastectomy exclusions do). The
+LOINC mammography `Observation` and `Observation.category` moved no outcome **only because no in-IPP subject
+in this fixture has a mammogram to find** — see the numerator section below, which is where review took
+this apart. **Counting absent fields overestimates an IPP gap and underestimates a numerator one.** The
+structural inventory that produced the "M-D-sized" note counted what was missing rather than testing what
+the measures read; my first write-up then made the mirror-image error, reading "moved no outcome on this
+fixture" as "retired".
 
 **A self-inflicted measurement error worth recording.** The first probe stamped the extension as
 `valueCode: "F"` and reported that four structural fixes together still left everyone out of population —
@@ -45,13 +46,19 @@ fabricate. So routing cms122 over this data changes nothing. The note that offic
 out-of-population over live data too" was true but omitted that authored does the same — which is the half
 that decides whether the flip changes anything.
 
-**Why no refusal (ADR-042, decision 3).** A refusal earns its cost when the alternative is a silently
-*better-looking* answer — ADR-038's case, where official cms122 read 100% compliant and nothing indicated a
-problem. Here the effect was four subjects moving `OVERDUE → MISSING_DATA`; both buckets open a case, so
-the roster read noisier, not rosier. And "both env vars are set" is a proxy for "this data cannot satisfy
+**Why no refusal (ADR-042, decision 3).** "Both env vars are set" is a proxy for "this data cannot satisfy
 the IPP": fix the mapping and the proxy stays true while the property goes false, so the check would refuse
 a *correct* configuration until someone deleted it. A guard that must be removed to allow correct behaviour
 is not fail-closed.
+
+I also argued that the effect was harmless — four subjects moving `OVERDUE → MISSING_DATA`, both buckets
+opening a case, "noisier, not rosier". **Review showed that is wrong on the axis operators actually triage
+by,** and it checked `case-logic.ts` rather than taking my word: `dispositionFor` sends both to `OPEN`, so
+the case *count* is identical and nothing got noisier — but `priorityFor` maps `OVERDUE → HIGH` and
+`MISSING_DATA → MEDIUM`, and `nextActionFor` swaps *"Escalate mammogram follow-up immediately"* for
+*"Collect the missing mammogram documentation"*. So the pre-fix behaviour downgraded four genuinely-overdue
+screenings and pointed the operator at paperwork. That is rosier, and closer to ADR-038's hazard than I
+allowed. The decision not to build the refusal stands on the predicate argument alone.
 
 **What guards it instead.** `devdb-official-eval.test.ts` — official vs authored per subject over the
 committed fixture, through the real ingress path, via `evaluateBatch` (the primitive a routed run uses).
@@ -66,14 +73,48 @@ subjects. It catches "retrieved nothing at all", and these retrieves matched ple
 observations) — they just did not match the conjunct deciding membership. The ADR-038 lesson holds on real
 data exactly as it did on the corpus.
 
+**The review found two blocking problems, and one of them is the defect I caught on the previous PR.**
+
+**(1) The gate never ran in CI.** Its `skip` predicate needs the gitignored terminology sidecar, and
+`pnpm test` runs in a job that has none — so 4 of 6 tests skipped while the ADR and the conformance row
+cited them as evidence. `ci.yml` warns about this failure *by name*, saying PR-8c already shipped two such
+files and had to be told; ADR-038's own consequences say both its guards are "wired into the
+`official-cases` CI job, not just written". I read neither before adding a sidecar-dependent file. This is
+the same class as the vacuous guard I flagged on #350 one PR earlier, made by me. Reproduced by hiding the
+sidecars (2 pass / 4 skip), fixed by adding the file to that job's step.
+
+**(2) The numerator gap is open and fails toward a FALSE OVERDUE.** All four discriminating subjects are
+OVERDUE because none has a mammogram, so the fixture cannot exercise either numerator — and the two engines
+read different resource types: authored `[Procedure: "Mammography"]`, official
+`isDiagnosticStudyPerformed([Observation: "Mammography"])`. The crosswalk emits CPT `77067` / HCPCS `G0202`
+on a **`Procedure`**, and the official `Mammography` value set is **92 LOINC codes and nothing else**.
+Measured on `wc-8` with one crosswalk-shaped mammogram inside the period: **authored COMPLIANT, official
+OVERDUE** — a confident false non-compliance, which `case-logic.ts` turns into a HIGH-priority "escalate
+mammogram follow-up immediately" for a woman already screened.
+
+Verifying it corrected the review's own suggested remedy: a LOINC `Observation` alone **changes nothing**,
+because `Status.isDiagnosticStudyPerformed` also requires `exists(category ~ imaging)` — which is why my
+earlier probe found "`Observation.category` moved no outcome" and drew the wrong lesson from it. With the
+category it flips the error the other way (official COMPLIANT, authored OVERDUE). **The remedy is
+dual-stamping both representations**, as the synthetic corpus already does. All four states are now pinned
+as tests, so the flip's real risk is a tracked expectation instead of an argument.
+
 **Read the limits.** The oracle is our own authored engine, not an external expected answer, so agreement
-is evidence the flip is safe *for this data* — not that either engine is right. 52 of 56 outcomes are
-MISSING_DATA, so **only 4 subjects carry discriminating signal**: a thin proof, guarded against total
-collapse by a non-degeneracy assertion but not against a subtler shared error. Cypress CVU+ is still the
-verification bar and has not run. Nothing is routed — `WORKWELL_OFFICIAL_MEASURES` remains unset
-everywhere. Third-party WebChart servers that omit `us-core-sex` will read out-of-population for CMS125 by
-design (fail closed: reading nobody beats guessing a recorded sex), which is an operational limit to state
-before a tenant is onboarded.
+is evidence the flip is safe *for this data* — not that either engine is right. Only **4 subjects carry
+discriminating signal**, all in one bucket for one reason. The id-set comparison is what guards against a
+collapsed distribution; the `assert.ok` non-degeneracy line is implied by it and is insurance, not the
+guard — I had cited the wrong one in the ADR and the conformance row. One of the three IPP conjuncts is a
+CPT 99213 `Encounter` the OH roster **synthesizes**, since WebChart supplies none, so this is not purely
+EHR-sourced membership. Cypress CVU+ is still the verification bar and has not run. Nothing is routed.
+
+**The residual limit nothing enforces.** Both changed mapping sites are upstream of the live FHIR
+transport, so the fix does not reach a live third-party WebChart tenant — teatea still supplies no
+`us-core-sex`, and `deploy-staging-mieweb.yml` sets `WORKWELL_WEBCHART_BASE_URL`, which is exactly where
+official routing and a live seam can coexist. Review's sharpest point: for *that* path the seam-keyed
+predicate I retired is still an accurate predicate, so decision 3 reasons about the configuration this PR
+fixed and generalizes to one it did not. The limit is now stated in `WEBCHART_FHIR_MAPPING.md` §3.1 where a
+tenant integrator will see it, and enforcing it is recorded as a **PR-9c precondition** rather than assumed
+away.
 
 **Follow-ups deliberately not in this PR:** `docs/ADR_INDEX.md` needs the ADR-042 line and CLAUDE.md's
 Current Focus needs the PR-9b status — both files are being rewritten by the unmerged context-diet PR
