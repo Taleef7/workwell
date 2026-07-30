@@ -25,6 +25,37 @@ const INTERNAL_DEFINES = new Set([
 ]);
 const isInternalDefine = (define: string): boolean => INTERNAL_DEFINES.has(define.trim());
 
+/**
+ * Official-routed outcomes carry POPULATION MEMBERSHIP, not clinical findings.
+ *
+ * The executor names them `official:initial-population`, `official:numerator`, … (lowercase, prefixed)
+ * so they can never be mistaken for authored defines. That prefix is why they slip past
+ * `INTERNAL_DEFINES` above, which matches the capitalised authored names exactly — and the consequence
+ * was the opposite of honest: rendered through the generic true/false chips below, a cms122 patient in
+ * the numerator got a **green ✓ true** under a heading reading "Why Flagged". cms122 is an INVERSE
+ * measure: its official numerator is poor glycemic control, so green there meant "this patient's
+ * diabetes is uncontrolled" (review, #357).
+ *
+ * Membership is not good news or bad news, so it does not get success/failure colours. It renders as a
+ * neutral in/out chip with the population spelled out.
+ */
+const OFFICIAL_DEFINE_PREFIX = "official:";
+const isOfficialPopulation = (define: string): boolean => define.trim().startsWith(OFFICIAL_DEFINE_PREFIX);
+
+const POPULATION_LABEL: Record<string, string> = {
+  "initial-population": "Initial population",
+  denominator: "Denominator",
+  "denominator-exclusion": "Denominator exclusion",
+  "denominator-exception": "Denominator exception",
+  numerator: "Numerator",
+  "numerator-exclusion": "Numerator exclusion",
+};
+
+const populationLabel = (define: string): string => {
+  const key = define.trim().slice(OFFICIAL_DEFINE_PREFIX.length);
+  return POPULATION_LABEL[key] ?? key;
+};
+
 function WhyFlaggedRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-start justify-between gap-4">
@@ -46,6 +77,32 @@ export function CqlExpressionResults({ results }: { results?: Array<Record<strin
       {rows.map((row, index) => {
         const defineStr = String(row.define ?? "define");
         const resultStr = String(row.result ?? "");
+        // Population membership renders on its own path — never through the true/false success colours.
+        if (isOfficialPopulation(defineStr)) {
+          const inPopulation = resultStr.toLowerCase() === "true";
+          return (
+            <div
+              key={`${defineStr}-${index}`}
+              className="flex items-center justify-between gap-4 rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-900/40 px-4 py-2"
+            >
+              <p className="text-sm font-medium text-neutral-900 dark:text-neutral-100">
+                {populationLabel(defineStr)}
+                <span className="ml-2 text-xs font-normal text-neutral-500 dark:text-neutral-400">
+                  official population
+                </span>
+              </p>
+              <span
+                className={`rounded-full px-3 py-1 text-xs ${
+                  inPopulation
+                    ? "bg-sky-100 text-sky-900 dark:bg-sky-900/40 dark:text-sky-200"
+                    : "bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400"
+                }`}
+              >
+                {inPopulation ? "in" : "not in"}
+              </span>
+            </div>
+          );
+        }
         const isOutcomeStatus = defineStr === "Outcome Status";
         const isTrue = resultStr.toLowerCase() === "true";
         const isFalse = resultStr.toLowerCase() === "false";

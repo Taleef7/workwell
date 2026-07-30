@@ -13,10 +13,27 @@ import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
 import { toCsv, csvCell } from "./csv.ts";
 
 const measureName = (measureId: string) => MEASURES[measureId]?.name ?? measureId;
-const measureVersion = (measureId: string) => {
+const authoredVersion = (measureId: string) => {
   const lib = MEASURES[measureId]?.library ?? "";
   const dash = lib.lastIndexOf("-");
   return dash >= 0 ? lib.slice(dash + 1) : "-";
+};
+
+/**
+ * The version that ACTUALLY computed the row (review, #357).
+ *
+ * `measureVersion` answers "what computed this", and the CSV is the artifact people mail around. Deriving
+ * it from `MEASURES[id].library` stamps WorkWell's authored library version — `2.0.0` for cms122 — on a
+ * row that CMS122FHIR **v1.0.000** produced. An official outcome carries its own version in
+ * `evidence.official.version`, so read it from the record rather than from a static table: the same
+ * evidence-first rule ADR-046 applied to MeasureReport and QRDA, for the same reason (a run's provenance
+ * does not change because a flag moved later).
+ */
+const measureVersionFor = (measureId: string, evidence: unknown): string => {
+  const official = (evidence as { official?: { version?: unknown } } | null | undefined)?.official;
+  const version = official?.version;
+  if (typeof version === "string" && version.trim()) return version.trim();
+  return authoredVersion(measureId);
 };
 
 // ---- runs (DATA_MODEL §6.1) --------------------------------------------------
@@ -83,7 +100,7 @@ function outcomeRowCells(o: { id: string; runId: string; subjectId: string; meas
   const wf = whyFlagged(o.evidence, o.measureId);
   return [
     o.id, o.runId, o.subjectId, emp?.name ?? o.subjectId, emp?.role ?? "—", emp?.site ?? "—",
-    measureName(o.measureId), measureVersion(o.measureId), o.evaluationPeriod, o.status,
+    measureName(o.measureId), measureVersionFor(o.measureId, o.evidence), o.evaluationPeriod, o.status,
     wf.lastExamDate, wf.complianceWindowDays, wf.daysOverdue, true, true, wf.waiverStatus, o.evaluatedAt,
   ];
 }
@@ -170,7 +187,10 @@ export async function casesCsv(caseStore: CaseStore, eventStore: CaseEventStore,
       const latest = await eventStore.latestOutreachDeliveryStatus(c.id);
       return [
         c.id, c.employeeId, emp?.name ?? c.employeeId, emp?.role ?? "—", emp?.site ?? "—",
-        measureName(c.measureId), measureVersion(c.measureId), c.evaluationPeriod, c.status, c.priority, c.assignee,
+        // A case row carries no evidence, so this is the AUTHORED version even for a routed measure.
+        // Stated rather than silently wrong: the case CSV is an operational worklist keyed on
+        // `lastRunId`, and the outcomes CSV is the one that answers "what computed this" per row.
+        measureName(c.measureId), authoredVersion(c.measureId), c.evaluationPeriod, c.status, c.priority, c.assignee,
         c.currentOutcomeStatus, c.nextAction, c.lastRunId, c.createdAt, c.updatedAt, c.closedAt, latest,
       ];
     }),
