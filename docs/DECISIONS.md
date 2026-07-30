@@ -51,11 +51,24 @@ false positive recurs and whose prescribed fix does not exist is worse than the 
 
    A consequence of moving it: the check is **no longer gated on the batch path**. An official measure
    evaluated one subject at a time reports membership just the same, and the hazard is identical.
-3. **`undefined` membership means UNKNOWN, not out-of-population.** `inInitialPopulation` is optional on
-   `MeasureOutcome` and the authored engine never sets it, so only outcomes that actually report membership
-   are reasoned about. Treating absent as false would WARN on every batched authored measure the day one
-   becomes batchable — a false alarm on a path with no initial-population concept at all. (Found by reading
-   `run-pipeline.test.ts`'s batch probe, which omits the field.)
+3. **Only an OFFICIALLY-ROUTED measure is checked**, and `undefined` membership means UNKNOWN rather than
+   out-of-population.
+
+   *(Corrected 2026-07-30 after review; both halves of the first version's reasoning here were wrong.)* It
+   claimed "the authored engine never sets `inInitialPopulation`", and therefore that no gate on official
+   routing was needed. **The authored engine sets it always:** `deriveInInitialPopulation`
+   (`engine/cql/cql-execution-engine.ts`) emits the field for every measure carrying a boolean
+   `Initial Population` define — all 16 of ours — and its own docstring says so. Ungated, an authored
+   measure whose evaluated cohort happened to sit wholly outside its own IPP would be told nobody entered
+   the **official** initial population and pointed at the `us-core-sex` extension, for a measure with no
+   official artifact and nothing to do with WebChart. It did not fire only because the synthetic roster
+   puts somebody in every measure's IPP — a property of the fixture, not an invariant. **An
+   official-specific message needs an official-specific trigger.**
+
+   The gate is the engine's own declared identity (ADR-040): `logicVersionFor` returns
+   `official-fqm:…` for a routed measure, the authored ELM hash otherwise. Asking the engine what it ran
+   beats re-reading the environment at the point of use. `undefined` membership is still treated as
+   unknown — absence of evidence, not evidence of absence.
 4. **`> 1`, as with the retrieve check.** For one subject, "not in the initial population" is an ordinary
    correct answer — `/simulate` on somebody outside the age band.
 5. **Enforcement lives at the FLIP GATE, not at runtime.** `devdb-official-eval.test.ts` compares official
@@ -91,7 +104,15 @@ false positive recurs and whose prescribed fix does not exist is worse than the 
   `official.populationResults` on every outcome.
 - **A `WARN` is weaker than the #264 alert**, which fires only on `FAILED`/`PARTIAL_FAILURE` terminals. That
   is the price of not corrupting valid runs. If a stronger non-failing signal is wanted later, the right
-  shape is a run-summary warning count, not a terminal change.
+  shape is a run-summary warning count, not a terminal change. (Precisely: the alert takes `runMessage` as
+  its body, so on a run that is *independently* PARTIAL_FAILURE the ADR-043 sentence does ride along. "The
+  alert stays silent" is true of COMPLETED runs — which is every run this check fires on by itself.)
+- **The enforcement is one automated test over FROZEN data plus one unautomated prose step.**
+  `devdb-official-eval.test.ts` pins the committed 56-patient fixture and cannot see a tenant; confirming a
+  non-zero initial population against the tenant's own data (DEPLOY.md step 2) ships no command, no tooling
+  and no artifact. That is a real reduction in enforcement strength against the refusal it replaced, and it
+  is accepted only because the refusal's false positives were unfixable-by-the-operator. Worth revisiting
+  if a tenant-facing dry-run tool ever exists.
 - **How far the warning actually reaches, stated exactly — the first version overclaimed it** (Codex, #354).
   It is echoed into the run **message**, but that message is returned on the **synchronous** response only.
   Every `ALL_PROGRAMS` and `SITE` run, and a `MEASURE` run on a WebChart-configured stack — *precisely the

@@ -36,13 +36,24 @@ this as a diagnostic, so "impossible" was too strong; "prohibitive per run" is t
 honest conclusion is that this hazard is not runtime-detectable without false positives**, which is weaker
 than what I opened with.
 
-**A second defect, found by reading the test harness rather than by running it.** `inInitialPopulation` is
-optional on `MeasureOutcome` and the **authored** engine never sets it — so `undefined` means *unknown*, not
-*out of population*. My first condition treated them alike, which would WARN on every batched authored
-measure the day one becomes batchable: a false alarm on a path with no initial-population concept at all.
-`run-pipeline.test.ts`'s batch probe omits the field, which is what surfaced it. Both the WARN and this
-distinction are mutation-checked — disabling the condition, and collapsing unknown into false, each fail
-exactly one test.
+**A second defect, and then the review found that my fix for it rested on a false premise.** I had written —
+in five places — that "the authored engine never sets `inInitialPopulation`", and concluded from that the
+check needed no gate on official routing. **It sets it always.** `deriveInInitialPopulation`
+(`engine/cql/cql-execution-engine.ts`) emits the field for every measure carrying a boolean
+`Initial Population` define, which is all 16 of ours, and the function's own docstring says so — I had read
+the *stub probe* in my test file and generalized from it to production. Ungated, an authored measure whose
+cohort sat wholly outside its own IPP would be told nobody entered the **official** initial population and
+pointed at `us-core-sex`, for a measure with no official artifact. It never fired only because the synthetic
+roster happens to put somebody in every measure's IPP — a property of the fixture, not an invariant, so the
+guard was resting on roster composition. Now gated on the engine's declared identity (`logicVersionFor` →
+`official-fqm:`, ADR-040): asking the engine what it ran, rather than inferring it. The test that "proved"
+the old rule tested a shape production never emits; the shape that *does* occur — authored reporting `false`
+for everyone — is now the test. `undefined` still means unknown, but as ordinary defensiveness rather than
+as a load-bearing invariant.
+
+Everything here is mutation-checked rather than asserted: removing the official gate fails the authored
+test, relaxing `> 1` to `> 0` fails the single-subject test, and restoring the pre-pass reading fails the two
+roster-completeness tests — each exactly, with no collateral.
 
 **I also got a scope decision wrong, and review caught it.** Running the check against the real artifacts
 flagged *two* measures, and only one was the target: official cms122 over WebChart data puts all 56 subjects
