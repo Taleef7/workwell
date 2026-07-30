@@ -73,6 +73,51 @@ export interface OfficialArtifact {
   bundle: MeasureBundle;
 }
 
+
+/**
+ * The eMeasure identifiers QRDA III references a measure by (ADR-046, corrected after review of #357).
+ *
+ * `manifest.cmsId` is the **publisher** identifier — `"122FHIR"` for CMS122 — and QRDA III's
+ * `externalDocument/id` is not that. The published Measure carries the two identifiers a receiver
+ * actually resolves, typed by `artifact-identifier-type`:
+ *
+ *   - **version-specific** → `id/@extension` under root `2.16.840.1.113883.4.738` (the eMeasure
+ *     Identifier OID). This names the exact published version whose logic produced the counts.
+ *   - **version-independent** → `setId/@root`, the measure's identity across versions.
+ *
+ * Read from the vendored bundle rather than the manifest so no re-vendor (and no reproducibility-gate
+ * churn) is needed: the bundle IS the published artifact, and these values are part of it.
+ */
+export interface OfficialMeasureIdentifiers {
+  versionSpecific?: string;
+  versionIndependent?: string;
+}
+
+/** Strip the `urn:uuid:` prefix MADiE writes — QRDA carries the bare GUID. */
+const bareUuid = (v: unknown): string | undefined => {
+  const s = typeof v === "string" ? v.trim() : "";
+  return s ? s.replace(/^urn:uuid:/i, "") : undefined;
+};
+
+export function officialMeasureIdentifiers(artifact: OfficialArtifact): OfficialMeasureIdentifiers {
+  const entries = (artifact.bundle as { entry?: Array<{ resource?: Record<string, unknown> }> }).entry ?? [];
+  const measure = entries.map((e) => e.resource).find((r) => r?.["resourceType"] === "Measure");
+  const identifiers = (measure?.["identifier"] as Array<Record<string, unknown>> | undefined) ?? [];
+  const byType = (code: string): string | undefined => {
+    for (const id of identifiers) {
+      const coding = ((id["type"] as { coding?: Array<{ code?: unknown }> } | undefined)?.coding ?? [])[0];
+      if (coding?.code === code) return bareUuid(id["value"]);
+    }
+    return undefined;
+  };
+  const versionSpecific = byType("version-specific");
+  const versionIndependent = byType("version-independent");
+  return {
+    ...(versionSpecific ? { versionSpecific } : {}),
+    ...(versionIndependent ? { versionIndependent } : {}),
+  };
+}
+
 const ARTIFACT_ROOT = new URL("../../measures/official/", import.meta.url);
 
 /**

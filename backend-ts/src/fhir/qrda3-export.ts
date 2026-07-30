@@ -8,6 +8,7 @@
  */
 import type { RunRecord } from "../stores/run-store.ts";
 import type { OutcomeRecord } from "../stores/outcome-store.ts";
+import { loadOfficialArtifact, officialMeasureIdentifiers } from "../wiring/official-artifacts.ts";
 import {
   countPopulations,
   officialReportIdentity,
@@ -37,6 +38,37 @@ const POPULATIONS: Array<{ code: string; label: string }> = [
   // only when the count is non-zero, so every authored measure's QRDA stays byte-identical.
   { code: "DENEXCEP", label: "denominator-exception" },
 ];
+
+
+/**
+ * The `externalDocument` measure reference — official identity when the counts came from an official
+ * artifact, WorkWell's urn otherwise.
+ *
+ * `manifest.cmsId` is the PUBLISHER identifier (`"122FHIR"`), not what QRDA III references (Codex, #357).
+ * The published Measure carries the two identifiers a receiver resolves: the **version-specific** UUID
+ * under the eMeasure Identifier root `2.16.840.1.113883.4.738`, and the **version-independent** UUID as
+ * `setId`. Without them a consumer cannot tie this organizer to the published measure version whose logic
+ * produced the counts — which is the whole point of labelling an official export.
+ *
+ * Falls back to the WorkWell urn if the artifact is missing or carries no typed identifiers, because a
+ * wrong official identity is worse than an honest local one: it would assert a provenance a receiver
+ * would then resolve to the wrong measure.
+ */
+function officialMeasureReference(measureId: string, official: OfficialReportIdentity | null): string {
+  if (!official) return `<id root="urn:workwell:measure" extension="${esc(measureId)}"/>`;
+  const artifact = loadOfficialArtifact(measureId);
+  const ids = artifact ? officialMeasureIdentifiers(artifact) : {};
+  if (!ids.versionSpecific) {
+    return `<id root="urn:workwell:measure" extension="${esc(measureId)}"/>`;
+  }
+  return [
+    `<id root="2.16.840.1.113883.4.738" extension="${esc(ids.versionSpecific)}"/>`,
+    ids.versionIndependent ? `
+                  <setId root="${esc(ids.versionIndependent)}"/>` : "",
+    official.version ? `
+                  <versionNumber value="${esc(official.version)}"/>` : "",
+  ].join("");
+}
 
 export function buildQrda3Document(run: RunRecord, measureId: string, outcomes: OutcomeRecord[]): string {
   const official = outcomes.map((o) => officialReportIdentity(o.evidence)).find((i) => i !== null) ?? null;
@@ -116,10 +148,7 @@ export function buildQrda3DocumentFromCounts(
               <statusCode code="completed"/>
               <reference typeCode="REFR">
                 <externalDocument classCode="DOC" moodCode="EVN">
-                  ${official
-                    ? `<id root="2.16.840.1.113883.4.738" extension="${esc(official.ecqmId ?? measureId)}"/>
-                  <versionNumber value="${esc(official.version ?? "")}"/>`
-                    : `<id root="urn:workwell:measure" extension="${esc(measureId)}"/>`}
+                  ${officialMeasureReference(measureId, official)}
                 </externalDocument>
               </reference>
               <component>

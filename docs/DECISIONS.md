@@ -38,11 +38,18 @@ this and had not — which is why cms122 was held back and cms125 flipped alone.
    artifact's `sha256` no longer matches the `artifactSha256` in the evidence — a re-vendor between run
    and export — the report falls back to `urn:workwell:measure:<id>:official:<version>`. Labelling an old
    report with a new canonical would assert a provenance that never existed.
-4. **QRDA III gets the official measure IDENTITY, not a new element.** QRDA III has no notation field by
-   design; a receiver derives direction from the measure identity. So emitting
-   `urn:workwell:measure|cms122` over counts whose numerator is CMS's poor-control one is the actual
-   defect, and the fix is the identity (`2.16.840.1.113883.4.738` + `versionNumber`). The counts were
-   already correct.
+4. **QRDA III gets the official measure IDENTITY, not a new element — and specifically the eMeasure
+   UUIDs.** QRDA III has no notation field by design; a receiver derives direction from the measure
+   identity. So emitting `urn:workwell:measure|cms122` over counts whose numerator is CMS's poor-control
+   one is the actual defect. *(Corrected after review, #357: the first version emitted
+   `manifest.cmsId` — `"122FHIR"` — which is the **publisher** identifier and resolves to nothing.)* The
+   published Measure carries the two identifiers a receiver actually resolves, typed by
+   `artifact-identifier-type`: the **version-specific** UUID as `id/@extension` under the eMeasure
+   Identifier root `2.16.840.1.113883.4.738`, and the **version-independent** UUID as `setId/@root`, plus
+   `versionNumber`. They are read from the vendored **bundle** rather than the manifest, so no re-vendor
+   and no reproducibility-gate churn is needed — the bundle IS the published artifact. If they are absent
+   the export falls back to WorkWell's urn: a wrong official identity is worse than an honest local one,
+   because a receiver would resolve it to the wrong measure. The counts were already correct.
 5. **The flip guard asserts the BUILT REPORT, not the binding table.** ADR-046 moved the source, so
    comparing `MEASURE_BINDINGS` would now check the wrong thing — the authored binding still says
    `increase` for cms122 and correctly so. `official-flip-config.test.ts` builds a summary report from a
