@@ -542,36 +542,6 @@ export function officialMeasureExecutor(deps: OfficialExecutorDeps): OfficialMea
       });
     }
 
-    // The second batch-level safety net (roadmap §7.4 PR-9c precondition, ADR-042 consequence 5).
-    //
-    // The retrieve check above catches "retrieved NOTHING for anybody". It provably cannot catch
-    // "retrieved the wrong thing": measured on real WebChart data, official CMS125 matched 236 LOINC
-    // Observations and still put all 56 subjects out of the initial population, because the IPP also
-    // reads a `us-core-sex` extension the WebChart mapping did not emit. `retrieveSignal` was true
-    // throughout. That is the failure this check exists for — and the one ADR-042 could only assert in
-    // prose, because both mapping fixes sit upstream of the live FHIR transport and a third-party
-    // WebChart server still supplies no extension.
-    //
-    // Keyed on `outcomes.size`, NOT `subjects.length`, and this matters: a subject fqm returned nothing
-    // for is deliberately ABSENT from this map so the run pipeline can re-evaluate it alone (see the
-    // interface docs). Testing the request size would fire on that omission path and convert a
-    // recoverable per-subject retry into a whole measure's failure.
-    //
-    // > 1 for the same reason as the retrieve check: for one person, "not in the initial population" is
-    // an ordinary, correct answer — `/simulate` on someone out of the age band. Across a roster it is
-    // not, and the two causes are indistinguishable from in here: either the data cannot satisfy this
-    // measure's IPP, or nobody genuinely qualifies. Both mean routing this measure over this data
-    // produces nothing, so failing loudly is right either way — a measure that can see nobody is a
-    // configuration error whichever of the two it is.
-    if (outcomes.size > 1 && ![...outcomes.values()].some((o) => o.inInitialPopulation)) {
-      throw new Error(
-        `${measureId}: not one of ${outcomes.size} subjects entered the official initial population, ` +
-          `though retrieves did match — refusing to report a whole roster out-of-population. Either the ` +
-          `data lacks a structural element this measure's IPP reads (for a WebChart source see ` +
-          `docs/WEBCHART_FHIR_MAPPING.md §3.1 — the us-core-sex extension is the known case), or nobody ` +
-          `qualifies and this measure should not be routed over this data.`,
-      );
-    }
     return outcomes;
   };
 

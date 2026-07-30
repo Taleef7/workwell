@@ -22,11 +22,14 @@
  * all", and these retrieves match plenty (236 LOINC observations); they simply did not match the conjunct
  * that decides membership.
  *
- * **That silence is now closed.** The adapter refuses a batch of >1 in which nobody entered the initial
- * population (ADR-042 consequence 5 / the PR-9c precondition), so the two tests below that used to assert
- * "56 MISSING_DATA" assert a refusal instead. The refusal cannot distinguish "the data lacks an element
- * the IPP reads" from "nobody qualifies" — and does not try to, because both mean routing that measure
- * over that data produces nothing.
+ * **This file IS the enforcement (ADR-043).** At runtime a whole-roster-out-of-IPP is only *surfaced* — the
+ * run pipeline emits a `WARN` and reports the outcomes as computed — because a legitimately all-ineligible
+ * cohort produces the identical shape, cohort composition varies by run, and refusing would replace valid
+ * `official.populationResults` evidence with an engine error. The two causes can only be told apart by
+ * comparing against the authored engine over KNOWN data, which is what happens here: when authored finds
+ * four actionable women in bundles official finds nobody in, "this cohort is ineligible" is demonstrably
+ * false. That comparison is impossible at runtime, since it would mean evaluating both engines for a
+ * measure whose purpose is to replace one.
  *
  * ## What was measured (2026-07-30, EVAL 2024-06-01, official MP 2023-06-01 .. 2024-06-01)
  *
@@ -48,14 +51,15 @@
  * a **false OVERDUE on the first real screening**. Read "one fix, not four" as scoped to the initial
  * population; it is not a statement that the other gaps are retired.
  *
- * **cms122 — official is now REFUSED over this data, and authored returns MISSING_DATA for all 56.** The
- * seed carries zero Conditions and cms122 is deliberately absent from `ROSTER_ELIGIBLE_MEASURES` (its
+ * **cms122 — official puts all 56 out of the IPP, and authored returns MISSING_DATA for all 56.** The seed
+ * carries zero Conditions and cms122 is deliberately absent from `ROSTER_ELIGIBLE_MEASURES` (its
  * "enrollment" is a diabetes *diagnosis*, a clinical fact the roster must never fabricate), so neither
  * engine can see a denominator. **This changes the flip plan:** the roadmap's PR-9 flips "cms122+cms125"
- * together, and cms122 would have contributed 56 silent MISSING_DATA rows while appearing to run. It must
- * stay out of the flip list until the WebChart path supplies diagnoses — at which point the test below
- * flips from a refusal to a distribution, which is the signal that it has become flippable. Nothing is
- * lost by excluding it: the authored path is equally blind, so routing it would change no roster row.
+ * together — but that flip targets the demo/production stack, which has NO WebChart seam and runs the
+ * synthetic roster where official cms122 scores normally. So this constrains STAGING (WebChart-configured),
+ * not the flip: routing official cms122 there yields 56 MISSING_DATA rows while appearing to run. The
+ * authored AGREEMENT is what makes it a data gap rather than a divergence, and that agreement is also the
+ * discrimination a runtime check cannot make (ADR-043).
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -63,7 +67,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
-import type { OutcomeStatus } from "../../evaluate-measure.ts";
+import type { MeasureOutcome, OutcomeStatus } from "../../evaluate-measure.ts";
 import { webChartDataSource } from "../data-source.ts";
 import { fixtureWebChartClient } from "./webchart-client.ts";
 import { parseEnrollmentRoster, stampEnrollment } from "../enrollment/roster.ts";
@@ -131,11 +135,19 @@ async function liveBundles(measureId: string): Promise<unknown[]> {
 
 const officialExecutor = () => officialMeasureExecutor({ expand: officialTerminologyExpander(loadOfficialArtifact) });
 
-async function officialOutcomes(measureId: string, bundles: readonly unknown[]): Promise<Map<string, OutcomeStatus>> {
+/** Full outcomes — needed where a test must distinguish "out of the IPP" from "non-compliant". */
+async function officialFull(measureId: string, bundles: readonly unknown[]): Promise<Map<string, MeasureOutcome>> {
   const subjects: OfficialBatchSubject[] = bundles.map((b) => ({ subjectId: patientId(b), patientBundle: b }));
-  const results = await officialExecutor().evaluateBatch(measureId, subjects, EVAL);
-  return new Map([...results].map(([id, r]) => [id, r.outcome]));
+  return officialExecutor().evaluateBatch(measureId, subjects, EVAL);
 }
+
+async function officialOutcomes(measureId: string, bundles: readonly unknown[]): Promise<Map<string, OutcomeStatus>> {
+  return new Map([...(await officialFull(measureId, bundles))].map(([id, r]) => [id, r.outcome]));
+}
+
+/** How many subjects the official artifact actually admitted to the initial population. */
+const inIppCount = (outcomes: ReadonlyMap<string, MeasureOutcome>): number =>
+  [...outcomes.values()].filter((o) => o.inInitialPopulation).length;
 
 async function authoredOutcomes(measureId: string, bundles: readonly unknown[]): Promise<Map<string, OutcomeStatus>> {
   const authored = new CqlExecutionEngine({ valueSetResolver: bundledEcqmValueSetResolver });
@@ -255,51 +267,50 @@ async function strippedOfSex(): Promise<unknown[]> {
   });
 }
 
-test("cms125: strip us-core-sex and the batch REFUSES — the cause, and the guard that now catches it", { skip }, async () => {
-  // Before the IPP refusal shipped this produced 56 MISSING_DATA: a run that completes, writes 56
-  // outcomes, and reads exactly like a legitimately ineligible roster. That silent state is what
-  // ADR-042 consequence 5 could only warn about in prose, because both mapping fixes sit upstream of the
-  // live FHIR transport — a third-party WebChart server supplying no extension lands here.
+test("cms125: strip us-core-sex and the whole roster leaves the IPP — the cause, pinned", { skip }, async () => {
+  // This is the third-party-WebChart-server state (ADR-042 consequence 5): 56 subjects, every one out of
+  // the initial population, a run that completes, and a roster indistinguishable from a legitimately
+  // ineligible cohort. The run pipeline WARNs on it (ADR-043) rather than failing, because that shape is
+  // also what a genuinely ineligible cohort produces — see `run-pipeline.test.ts`.
   //
-  // This is the end-to-end proof of the guard on the REAL artifacts: the adapter's unit tests use a
-  // stubbed calculator, which can show the refusal fires but not that this data trips it.
-  await assert.rejects(
-    officialOutcomes("cms125", await strippedOfSex()),
-    (err: Error) => {
-      assert.match(err.message, /not one of 56 subjects entered the official initial population/);
-      assert.match(err.message, /though retrieves did match/, "PR-8's retrieve check cannot see this");
-      return true;
-    },
+  // THIS test is the enforcement: a human comparison against the authored engine over known data, which
+  // is the only place the two causes can be told apart. It is why the flip gate is a gate and not a
+  // runtime check.
+  const stripped = await strippedOfSex();
+  const official = await officialFull("cms125", stripped);
+  assert.deepEqual(
+    distribution(new Map([...official].map(([id, o]) => [id, o.outcome]))),
+    { MISSING_DATA: 56 },
+    "without us-core-sex, official cms125 puts the whole roster out of its initial population",
   );
+  assert.equal(inIppCount(official), 0, "and the reason is IPP membership, not a non-compliance verdict");
 
-  // And the authored engine is UNAFFECTED — it reads `Patient.gender`. This is what makes the two
-  // elements worth emitting separately rather than treating one as a substitute for the other, and it is
-  // why the refusal above is about official routing rather than about this roster being unusable.
-  const authored = await authoredOutcomes("cms125", await strippedOfSex());
+  // The authored engine is UNAFFECTED — it reads `Patient.gender`. That asymmetry is the whole signal:
+  // authored finds four actionable women in the same bundles, so "nobody is eligible" is demonstrably
+  // false here and the divergence is a mapping gap, not a cohort.
+  const authored = await authoredOutcomes("cms125", stripped);
   assert.deepEqual(distribution(authored), { MISSING_DATA: 52, OVERDUE: 4 });
 });
 
-test("cms122 over real WebChart data is REFUSED — it must not be in the PR-9c flip list", { skip }, async () => {
-  // Recorded as a hard expectation because it changes the flip plan. The roadmap's PR-9 flips
-  // "cms122+cms125" together, and before this guard official cms122 over WebChart data produced 56
-  // MISSING_DATA silently — a measure contributing nothing while looking like it ran. It cannot see
-  // anybody: the seed carries zero Conditions and cms122 is deliberately outside
-  // `ROSTER_ELIGIBLE_MEASURES`, since its "enrollment" is a diabetes *diagnosis* the roster must never
-  // fabricate. The authored path is equally blind, so nothing is lost by not routing it.
+test("cms122 over real WebChart data: nobody in the IPP — a DATA gap, not a flip blocker", { skip }, async () => {
+  // Scoped carefully, because a first draft of ADR-043 over-read this into removing cms122 from the PR-9c
+  // flip list. It is a statement about WEBCHART data only: the seed carries zero Conditions and cms122 is
+  // deliberately outside `ROSTER_ELIGIBLE_MEASURES`, since its "enrollment" is a diabetes *diagnosis* the
+  // roster must never fabricate. The demo/production stack PR-9c flips has NO WebChart seam
+  // (`deploy-twh-mieweb.yml` carries zero `WORKWELL_WEBCHART_*`) and runs the synthetic roster, where
+  // `official-corpus-outcomes.test.ts` has official cms122 scoring across all five targets. So this
+  // constrains STAGING, not the flip.
   //
-  // This is the guard's intended behaviour, not a false positive: whether the cause is a missing mapping
-  // or a genuinely ineligible roster, a measure that can see nobody should not be routed over that data.
-  // When the WebChart path starts supplying diagnoses, this test flips to a distribution — and that is
-  // the signal that cms122 has become flippable.
-  await assert.rejects(
-    officialOutcomes("cms122", await liveBundles("cms122")),
-    /cms122: not one of 56 subjects entered the official initial population/,
-  );
+  // Unlike the cms125 case above, the authored engine agrees there is nobody to score — so this is a DATA
+  // gap (M-D ingest), not an official-vs-authored divergence, and routing cms122 would change no roster
+  // row. That agreement is precisely what distinguishes "genuinely ineligible" from "mapping gap", and
+  // why a runtime refusal keyed on zero-in-IPP would have been wrong: it cannot see this comparison.
+  const official = await officialFull("cms122", await liveBundles("cms122"));
+  assert.deepEqual(distribution(new Map([...official].map(([id, o]) => [id, o.outcome]))), { MISSING_DATA: 56 });
+  assert.equal(inIppCount(official), 0);
 
-  // The authored engine agrees there is nobody to score — so this is a DATA gap (M-D ingest), not an
-  // official-vs-authored divergence, and routing cms122 would change no roster row today.
   const authored = await authoredOutcomes("cms122", await liveBundles("cms122"));
-  assert.deepEqual(distribution(authored), { MISSING_DATA: 56 });
+  assert.deepEqual(distribution(authored), { MISSING_DATA: 56 }, "authored is equally blind — nothing is lost");
 });
 
 /**

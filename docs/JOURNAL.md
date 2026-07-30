@@ -1,54 +1,81 @@
 # Journal
 
-## 2026-07-30 (later) — the PR-9c precondition: a measure that can see nobody is refused (branch `feat/official-ipp-refusal`)
+## 2026-07-30 (later) — the PR-9c precondition, and the refusal review was right to kill (branch `feat/official-ipp-refusal`)
 
 ADR-042 shipped with a limit it could only assert in prose: both `us-core-sex` mapping fixes sit upstream of
 the live FHIR transport, so a third-party WebChart FHIR server still supplies no extension and its whole
 roster reads out-of-population for official CMS125 — **silently**, as 100% MISSING_DATA rather than an error.
 `deploy-staging-mieweb.yml` sets `WORKWELL_WEBCHART_BASE_URL`, so staging is exactly where official routing
-and a live seam coexist. Review's point was that decision 3 had generalized from the configuration the PR
-fixed to one it did not. This closes it.
+and a live seam coexist. PR-8f's retrieve check cannot see it: official CMS125 matched **236 LOINC
+Observations** on the WebChart fixture and still put all 56 subjects out of the IPP, `retrieveSignal` true
+throughout.
 
-**The guard.** `evaluateBatch` now refuses a batch in which nobody entered the initial population — the same
-shape as PR-8f's retrieve check, one conjunct further in. Two details are load-bearing:
+**I built a refusal. Review (Codex P1) killed it, correctly, and the argument is the substance of the day.**
+The first cut threw inside `evaluateBatch` when a batch of >1 came back with nobody in the initial
+population, reaching the run pipeline's existing batch-failure isolation. That **converts a valid result into
+corruption**: for a site- or program-scoped CMS125 run over an all-male cohort, zero-in-IPP is the *correct*
+answer, and a batch failure re-throws per subject — so every outcome becomes MISSING_DATA carrying an
+`evaluationError` **in place of** its `official.populationResults` evidence, the blob MeasureReport and QRDA
+read (ADR-031), with a `PARTIAL_FAILURE` terminal and the #264 alert. A zero-denominator MeasureReport is a
+legitimate reportable artifact, not an engine failure.
 
-- **Keyed on `outcomes.size > 1`, not `subjects.length`.** A subject fqm returned nothing for is
-  deliberately *absent* from the result map so the run pipeline can re-evaluate it alone. Testing the
-  request size would fire on that omission path and turn a recoverable per-subject retry into a whole
-  measure's failure. This was the one thing I had to get right rather than notice later.
-- **`> 1`, as with retrieves.** For one person, "not in the initial population" is an ordinary correct
-  answer — `/simulate` on somebody outside the age band.
+The decisive point, and the one I had under-weighted when I flagged this as an acceptable trade: **cohort
+composition varies by run**, so "stop routing this measure" is not a remedy an operator can apply. A guard
+whose false positive recurs and whose prescribed fix does not exist is worse than the silence it replaces.
+I had reasoned "a measure that can see nobody is a configuration error whichever cause it is" — true of a
+fixed cohort, false of a live one.
 
-**It does not try to distinguish its two causes,** because from inside it cannot: either the data lacks a
-structural element the IPP reads, or nobody genuinely qualifies. Both mean routing that measure over that
-data produces nothing, so a measure that can see nobody is a configuration error whichever it is. The
-message says so and points at `WEBCHART_FHIR_MAPPING.md` §3.1 for the known case. The accepted false
-positive — a roster of 2+ where nobody genuinely qualifies now fails loudly every run — is the same trade
-the retrieve check already makes.
+**What shipped instead.** The executor reports honestly; the run pipeline emits a **`WARN`** in the batch
+pre-pass naming both causes and pointing at `WEBCHART_FHIR_MAPPING.md` §3.1; the run still reports
+`COMPLETED` with evidence intact. **Enforcement moved to the flip gate** — `devdb-official-eval.test.ts` plus
+a pre-flip checklist — because that is the only place the two causes *can* be told apart: when authored
+finds four actionable women in the same bundles official finds nobody in, "this cohort is ineligible" is
+demonstrably false. That comparison is not available at runtime at acceptable cost — it would mean running
+both engines for every subject of a measure whose purpose is to replace one (`literal-diff.ts` does exactly
+this as a diagnostic, so "impossible" was too strong; "prohibitive per run" is the defensible claim). **The
+honest conclusion is that this hazard is not runtime-detectable without false positives**, which is weaker
+than what I opened with.
 
-**Writing the test proved PR-8f's blindness rather than assuming it.** The existing harness could only turn
-retrieves and IPP membership off *together*, which would have made the real case untestable: on WebChart data
-official CMS125 matched **236 LOINC Observations** and still put all 56 subjects out of the IPP —
-`retrieveSignal` true throughout. The harness now takes `retrieved` and `inIpp` independently.
+**A second defect, found by reading the test harness rather than by running it.** `inInitialPopulation` is
+optional on `MeasureOutcome` and the **authored** engine never sets it — so `undefined` means *unknown*, not
+*out of population*. My first condition treated them alike, which would WARN on every batched authored
+measure the day one becomes batchable: a false alarm on a path with no initial-population concept at all.
+`run-pipeline.test.ts`'s batch probe omits the field, which is what surfaced it. Both the WARN and this
+distinction are mutation-checked — disabling the condition, and collapsing unknown into false, each fail
+exactly one test.
 
-**The consequence that changes a plan: `cms122` is OUT of the PR-9c flip list.** Running the new guard
-against the real artifacts failed *two* tests, and only one was the one I was aiming at. The second was
-official cms122 over the WebChart fixture — refused, because the dev seed carries **zero Conditions** and
-cms122 is deliberately outside `ROSTER_ELIGIBLE_MEASURES` (its "enrollment" is a diabetes *diagnosis* the
-roster must never fabricate). The roadmap's PR-9 flips "cms122+cms125" together; before this guard cms122
-would have contributed **56 silent MISSING_DATA rows while appearing to run**. Nothing is lost by excluding
-it — the authored path is equally blind, so routing it changes no roster row — and it becomes flippable when
-ingest supplies diagnoses, signalled by that test flipping from a refusal to a distribution. That is the
-second time this week that running a check produced a better finding than the check was designed for.
+**I also got a scope decision wrong, and review caught it.** Running the check against the real artifacts
+flagged *two* measures, and only one was the target: official cms122 over WebChart data puts all 56 subjects
+out of the IPP (zero Conditions in the seed; cms122 is deliberately outside `ROSTER_ELIGIBLE_MEASURES`
+because its "enrollment" is a diabetes *diagnosis* the roster must never fabricate). I concluded cms122
+should leave the PR-9c flip list, wrote that into ADR-043, CLAUDE.md and this entry, and told the owner PR-9c
+was now cms125-only.
 
-**What the guard does NOT catch,** stated because the gap is live: an IPP that IS satisfied while the
-numerator reads the wrong shape. That is the mammography gap — official reports a screened woman OVERDUE,
-subjects ARE in the population, and the guard is silent. Dual-stamping the crosswalk is next, and since
-CMS125's numerator is the thing being flipped it is closer to a prerequisite than a follow-up.
+**That was wrong, because it reasoned from the wrong stack.** `deploy-twh-mieweb.yml` — the demo/production
+stack PR-9c actually flips — carries **zero** `WORKWELL_WEBCHART_*` references (verified). It evaluates the
+**synthetic** roster, where `official-corpus-outcomes.test.ts` records official cms122 scoring
+COMPLIANT/OVERDUE/EXCLUDED across all five targets and **agreeing with authored on every one**. So cms122
+**stays in the flip list**. What the finding really establishes is narrower: routing official cms122 on the
+**WebChart-configured staging** stack (11 `WORKWELL_WEBCHART_*`) produces nothing useful, and the WARN will
+say so each run. My "nothing is lost — authored is equally blind" also held only over WebChart data; on the
+synthetic roster authored is not blind, the two engines simply agree. A measured fact about one environment
+got generalized into a plan change for another.
 
-Verified: typecheck clean, **1584 tests / 1570 pass / 0 fail / 14 skipped** (up 3), adapter suite 30/30, and
-the two official suites that use single-subject `evaluate` (`official-corpus-outcomes`, `literal-diff`) are
-untouched by a `> 1` guard — checked rather than assumed.
+**What none of this catches,** stated because the gap is live: an IPP that IS satisfied while the numerator
+reads the wrong shape. That is the mammography gap — official reports a screened woman OVERDUE, subjects
+*are* in the population, and nothing fires. Dual-stamping the crosswalk is next, and since CMS125's numerator
+is what is being flipped it is closer to a prerequisite than a follow-up.
+
+**Closing a gap this ADR opened in itself.** Moving enforcement to "the flip gate" makes the ADR only as
+strong as that gate, and half of it did not exist: the test is real and CI-wired, but the "pre-flip checklist
+step" was a phrase in the ADR and nowhere else — and `WORKWELL_OFFICIAL_MEASURES` had **no row at all** in
+DEPLOY.md's environment reference, so the one variable this whole milestone turns on was undocumented for an
+operator. Writing an unenforceable control into the decision that removes a runtime check is the same
+vacuous-guard shape #350 and #352 were each pulled up on, one PR apart. Both are now written down:
+`DEPLOY.md` §"Flipping a measure to official execution" — five steps per measure per stack, the
+non-zero-IPP confirmation among them, the numerator caveat stated because membership parity is not
+agreement, and a table separating the demo/production stack (no seam, synthetic roster, both measures score)
+from staging (live WebChart, cms122 sees nobody).
 
 ## 2026-07-30 — PR-9b: what the official artifacts make of REAL WebChart data (branch `feat/official-webchart-baseline`)
 
