@@ -4807,6 +4807,34 @@
           },
           "performedDateTime": "2015-07-05"
         }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "subject": {
+            "reference": "Patient/wc-49"
+          },
+          "category": [
+            {
+              "coding": [
+                {
+                  "system": "http://terminology.hl7.org/CodeSystem/observation-category",
+                  "code": "imaging"
+                }
+              ]
+            }
+          ],
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "24606-6"
+              }
+            ]
+          },
+          "effectiveDateTime": "2015-07-05"
+        }
       }
     ]
   },

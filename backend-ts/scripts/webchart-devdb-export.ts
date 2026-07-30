@@ -37,6 +37,27 @@ const SYS = {
 
 /** The wellness/eCQM measures the dev-DB sample can actually exercise (real LOINC/HCPCS present). */
 const US_CORE_SEX_URL = "http://hl7.org/fhir/us/core/StructureDefinition/us-core-sex";
+const OBSERVATION_CATEGORY = "http://terminology.hl7.org/CodeSystem/observation-category";
+/**
+ * Screening-mammogram procedure codes → the LOINC the OFFICIAL artifact retrieves (ADR-044).
+ *
+ * The by-design duplicate of `wcdb-fhir-shim/src/fhir-mapping.ts`'s `MAMMOGRAPHY_CPT_TO_LOINC` — the
+ * same intentional duplication as the rest of this generator (ADR-034 forbids the cross-package import).
+ * `24606-6` is a member of the official `Mammography` value set (…108.12.1018 — 92 LOINC codes, no CPT,
+ * no HCPCS), verified against the vendored expansion.
+ *
+ * **The drift guard for this pair does not exist, stated plainly.** `hapi-live.test.ts` is named as it
+ * elsewhere and CANNOT be: it loads a HAPI server from the committed fixture and compares against the
+ * same committed fixture, so both sides originate from one file — it never runs this script's SQL and
+ * never touches the shim. The `us-core-sex` note below already retracted that claim for its own field;
+ * it is equally false here. What guards this pair today is `devdb-official-eval.test.ts` asserting the
+ * dual stamp on the committed fixture — which covers THIS emitter only. A real shim-vs-generator
+ * comparison is M-C's job, when the mapping stops being duplicated at all.
+ */
+const MAMMOGRAPHY_CPT_TO_LOINC = new Map([
+  ["77067", "24606-6"],
+  ["G0202", "24606-6"],
+]);
 const WELLNESS_MEASURES = ["diabetes_hba1c", "obesity_bmi", "cholesterol_ldl", "hypertension"];
 const FEMALE_MEASURES = ["cms125"]; // screening mammography — enrolled for female patients only
 
@@ -167,6 +188,26 @@ function main(): void {
           ...(fhirDate(p.dt) ? { performedDateTime: fhirDate(p.dt) } : {}),
         },
       });
+      // DUAL-STAMP one real mammogram into the second vocabulary (ADR-044). The authored engine reads the
+      // Procedure above; official CMS125 retrieves `[Observation: "Mammography"]` and additionally requires
+      // `category ~ imaging`, over a LOINC-only value set. Emitting one shape and not the other makes
+      // official report an already-screened woman OVERDUE. Derived strictly from this row — no row, no
+      // Observation, and the date is the procedure's own.
+      // Trimmed + upper-cased, matching `webchart/terminology.ts`'s crosswalk key — an exact-match
+      // lookup would skip the dual stamp on a " g0202" row the authored engine still reconciles (#355).
+      const loinc = MAMMOGRAPHY_CPT_TO_LOINC.get(cpt.trim().toUpperCase());
+      if (loinc) {
+        entries.push({
+          resource: {
+            resourceType: "Observation",
+            status: "final",
+            subject: ref,
+            category: [{ coding: [{ system: OBSERVATION_CATEGORY, code: "imaging" }] }],
+            code: { coding: [{ system: SYS.LOINC, code: loinc }] },
+            ...(fhirDate(p.dt) ? { effectiveDateTime: fhirDate(p.dt) } : {}),
+          },
+        });
+      }
     }
 
     bundles.push({ resourceType: "Bundle", type: "collection", entry: entries });

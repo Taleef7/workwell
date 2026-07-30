@@ -187,24 +187,63 @@ Per measure, per stack:
    Note which corpus is representative for the stack you are flipping: `devdb-official-eval.test.ts` is the
    per-subject official-vs-authored divergence map over the committed 56-patient **WebChart** dev-DB
    fixture; `official-corpus-outcomes.test.ts` covers the **synthetic** roster a seamless stack evaluates.
-2. **Confirm a NON-ZERO initial population against the tenant's own data.** This is the step the runtime
-   cannot perform. If official puts everybody out of the IPP *and* authored finds actionable subjects in the
-   same bundles, that is a mapping gap — do not flip. If both engines agree there is nobody to score, it is a
-   data gap: flipping is harmless but pointless, and every run will carry the WARN.
-3. **Check the numerator, not just membership.** Being in the population is not agreement. The open
-   mammography gap (ADR-042 consequence 3) has official report a *screened* woman OVERDUE because the
-   crosswalk emits a CPT `Procedure` where the official artifact retrieves a LOINC `Observation` with
-   `category ~ imaging`. Nothing fires on this — subjects are in the population. Dual-stamp both
-   representations first.
-4. **Take a before/after distribution snapshot** for the measure on that stack, so the flip's effect on the
-   roster is a recorded number rather than an impression.
-5. **Add the variable to the deploy workflow — setting it on the container by hand does not survive.**
+2. **Take the before/after snapshot and confirm a NON-ZERO initial population** — steps 2 and 4 are one
+   command (ADR-044):
+
+   ```bash
+   # The stack you are flipping decides --source. A stack with NO WORKWELL_WEBCHART_* evaluates the
+   # SYNTHETIC roster and never sees WebChart data.
+   pnpm flip-snapshot --measure cms125 --measure cms122 --source synthetic --eval <YYYY-MM-DD>
+
+   # WebChart-configured stacks: `live` reads THE TENANT via WORKWELL_WEBCHART_*, over the real ingress
+   # path. This is the only source that answers "is the initial population non-zero for MY data".
+   # --roster is REQUIRED — it maps THIS tenant's subject ids → measures. Template:
+   #   pnpm evaluate:webchart-live --list-patients > roster.json
+   WORKWELL_WEBCHART_BASE_URL=… WORKWELL_WEBCHART_CLIENT_ID=… WORKWELL_WEBCHART_PRIVATE_KEY_B64=… \
+     pnpm flip-snapshot --measure cms125 --source live --roster roster.json --eval <YYYY-MM-DD>
+   ```
+
+   It evaluates each measure through **both** engines over the same bundles and reports the before/after
+   outcome distribution, the official initial-population count, and every subject whose roster row would
+   change. Read the verdict:
+
+   | verdict | meaning |
+   |---|---|
+   | no verdict | somebody entered the initial population — proceed to step 3 |
+   | **DO NOT FLIP** | official admits nobody while authored finds actionable subjects in the *same* bundles, so "this cohort is ineligible" is demonstrably false — a data or mapping gap |
+   | **INCONCLUSIVE** | neither engine finds anybody; a genuinely ineligible cohort and a gap that blinds both are the same shape. Routing changes no roster row either way |
+
+   It gates nothing and exits 0 regardless — deliberately. The judgement is the one ADR-043 established a
+   machine cannot make from shape alone; the command computes the comparison, a human draws the conclusion.
+   **Do not wire it into CI as pass/fail.**
+
+   > **`--source fixture` is NOT a substitute for `live`.** It reads the committed 56-patient dev-DB
+   > sample — frozen data that says nothing about a tenant. `--source live` refuses loudly rather than
+   > falling back to it, because a silent fallback is exactly how this step would hand you a healthy
+   > verdict computed from our sample while your tenant's roster falls out of the official initial
+   > population. For the same reason it refuses without `--roster`, and refuses a roster matching none of
+   > the subjects the tenant returned: an unenrolled roster silently drops the qualifying-visit Encounter
+   > the authored side depends on, turning a **DO NOT FLIP** into a false all-clear.
+   >
+   > **`--source synthetic` is an AGREEMENT check, not a roster forecast.** It runs five designed corpus
+   > probes (one per intended outcome) — *not* the synthetic employee directory the demo/production stack
+   > actually evaluates — and the five collapse into three buckets, since `DUE_SOON`/`MISSING_DATA` both
+   > score OVERDUE here. Read it as "do the two engines agree across the outcome space", which is what a
+   > flip turns on. The report prints its source under every measure so the two cannot be confused.
+
+3. **Check the numerator, not just membership.** Being in the population is not agreement. The mammography
+   case is the worked example (ADR-044): the crosswalk emits a CPT `Procedure`, the official artifact
+   retrieves a LOINC `Observation` with `category ~ imaging`, and emitting one and not the other made
+   official report an already-screened woman **OVERDUE** — a HIGH-priority case chasing a mammogram she had.
+   Nothing detects this: those subjects *are* in the population, so the ADR-043 WARN stays silent. It is
+   closed for mammography by dual-stamping; **the same question has to be asked of each new measure.**
+4. **Add the variable to the deploy workflow — setting it on the container by hand does not survive.**
    `deploy-twh-mieweb.yml` builds `CONTAINER_ENV_VARS_JSON` as a fixed `jq -nc '[…]'` array with **no
    `WORKWELL_OFFICIAL_MEASURES` key and no passthrough**, and the deploy script deletes and recreates the
    container — so a hand-set value is wiped on the next deploy. Flipping is a **workflow edit**, reviewed
    and merged like any other change. (Same for staging.)
 
-6. **Redeploy, then check the two signals that exist — neither is a clean boot failure.**
+5. **Redeploy, then check the two signals that exist — neither is a clean boot failure.**
    - The seam line reports `official-measures=on|off` only; it does **not** name the routed measures, so
      `on` confirms the variable was read, not that it says what you intended.
    - **A misconfiguration does NOT refuse at boot.** `worker.ts` logs

@@ -115,6 +115,90 @@ export function procedureToFhir(row: ProcedureRow, ordinal: number): FhirResourc
   };
 }
 
+/** `Observation.category` — the code system `Status.isDiagnosticStudyPerformed` compares against. */
+export const OBSERVATION_CATEGORY = "http://terminology.hl7.org/CodeSystem/observation-category";
+
+/**
+ * WebChart procedure codes for a SCREENING MAMMOGRAM → the LOINC the official artifact retrieves.
+ *
+ * `24606-6` ("MG Breast Screening") is a member of the official `Mammography` value set
+ * (OID 2.16.840.1.113883.3.464.1003.108.12.1018 — **92 LOINC codes and nothing else**, verified against
+ * the vendored expansion). The CPT/HCPCS codes on the left are the ones the backend crosswalk already
+ * recognizes for cms125 (`engine/ingress/webchart/terminology.ts`).
+ */
+export const MAMMOGRAPHY_CPT_TO_LOINC: ReadonlyMap<string, string> = new Map([
+  ["77067", "24606-6"], // screening mammography, bilateral — the active CPT
+  ["G0202", "24606-6"], // screening mammography — HCPCS, deleted 2018, still present on legacy records
+]);
+
+/**
+ * Look a procedure code up the way the CROSSWALK does — trimmed and upper-cased.
+ *
+ * `webchart/terminology.ts` keys on `code.trim().toUpperCase()`, so a WCDB row carrying `" g0202"`
+ * reconciles for the AUTHORED engine while an exact-match lookup here would skip the dual stamp. That
+ * asymmetry reintroduces the exact false non-compliance this whole mapping exists to remove: authored
+ * COMPLIANT, official OVERDUE, through a whitespace seam (review, #355).
+ */
+const mammographyLoincFor = (cpt: string): string | undefined =>
+  MAMMOGRAPHY_CPT_TO_LOINC.get(cpt.trim().toUpperCase());
+
+/**
+ * The SECOND representation of one real screening mammogram (ADR-044), or `undefined`.
+ *
+ * ## Why this exists
+ *
+ * The two engines retrieve different resource types for the same clinical fact:
+ *   - authored `cms125.cql` → `[Procedure: "Mammography"]`, and the authored value set carries CPT/HCPCS
+ *   - official CMS125 ELM → `isDiagnosticStudyPerformed([Observation: "Mammography"])`, which requires
+ *     `status in {final, amended, corrected}` **AND** `exists(category ~ imaging)`, over a value set of
+ *     92 LOINC codes with no CPT and no HCPCS in it
+ *
+ * WebChart records a mammogram as a CPT/HCPCS **procedure**. Emitting only that shape is invisible to the
+ * official numerator, and the failure direction is the dangerous one: official reports a woman who HAS
+ * been screened as OVERDUE, and `case-logic.ts` escalates that to a HIGH-priority "escalate mammogram
+ * follow-up immediately". A confident wrong answer on the ordinary case.
+ *
+ * ## Why this is normalization and not fabrication (ADR-037)
+ *
+ * No clinical event is invented. One real, recorded mammogram is expressed in the two vocabularies the
+ * two engines read — the same dual-stamping the synthetic corpus has done since ADR-038, and the same
+ * justification as `us-core-sex` above: these are alternative representations of one source fact, not
+ * additional facts. Three properties keep that honest, and each is tested:
+ *   - **Derived only from a real row.** No procedure row ⇒ no Observation. The date is the procedure's
+ *     date, never today's.
+ *   - **Only for codes that mean "a screening mammogram was performed."** The map above is an explicit
+ *     allowlist, not a category sweep, so an unrelated CPT can never mint a diagnostic study.
+ *   - **Non-inflating.** Both engines' numerators are `exists(...)`, so one event in two vocabularies is
+ *     still one event. Two limits, both stated in `WEBCHART_FHIR_MAPPING.md` §3.6 rather than left for
+ *     someone to rediscover: this would NOT be safe for a **counting** measure, and — the sharper one —
+ *     not for a **most-recent-value** measure either. `cms122.cql` does a bare unfiltered
+ *     `Last([Observation] …)` and then reads `.value`; a valueless Observation that became "most recent"
+ *     would drive it to a falsely-COMPLIANT outcome. `Status.isLaboratoryTestPerformed` has **no**
+ *     category gate, so the `imaging` category that protects CMS125 protects nothing there. Today the
+ *     only barrier is value-set membership (the HbA1c set is 5 LOINC codes, none of them 24606-6), and
+ *     that barrier is runtime-resolvable — so a future dual stamp must check `Last`/`.value` readers,
+ *     not just `Count`.
+ *
+ * The id is suffixed `-mammo` off the procedure's own ordinal so it is stable across reads and cannot
+ * collide with a real observation row's `{patient}-Observation-{n}` (the client dedupes by `type/id`).
+ */
+export function mammographyObservationFor(row: ProcedureRow, ordinal: number): FhirResource | undefined {
+  const loinc = typeof row.cpt === "string" ? mammographyLoincFor(row.cpt) : undefined;
+  if (!loinc) return undefined;
+  const subjectId = subjectIdFor(row.pat_id);
+  return {
+    resourceType: "Observation",
+    id: `${subjectId}-Observation-${ordinal}-mammo`,
+    status: "final",
+    subject: { reference: `Patient/${subjectId}` },
+    // Not decoration: `isDiagnosticStudyPerformed` gates on it, so a correctly-coded LOINC Observation
+    // WITHOUT this changes no outcome — the trap the obvious fix falls into.
+    category: [{ coding: [{ system: OBSERVATION_CATEGORY, code: "imaging" }] }],
+    code: { coding: [{ system: SYS.LOINC, code: loinc }] },
+    ...(fhirDate(row.dt) ? { effectiveDateTime: fhirDate(row.dt) } : {}),
+  };
+}
+
 /** A FHIR searchset Bundle whose entries are all `search.mode: "match"`. `total` = FULL match count (not page size). */
 export function searchsetBundle(
   resources: FhirResource[],
