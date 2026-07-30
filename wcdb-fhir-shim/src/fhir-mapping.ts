@@ -29,6 +29,32 @@ const fhirDate = (v: unknown): string | undefined => {
 };
 export const cptSystem = (cpt: string): string => (/^\d{5}$/.test(cpt) ? SYS.CPT : SYS.HCPCS);
 
+/**
+ * US Core's `us-core-sex`, emitted ALONGSIDE `Patient.gender` from the same `patients.sex` column.
+ *
+ * These are two different FHIR elements answering two different questions — administrative gender vs
+ * recorded sex — and WebChart's column is the latter, so mapping it only to `gender` dropped the element
+ * the official artifacts actually read. CMS125's official initial population compares this extension's
+ * value against SNOMED `248152002` and never consults `gender`; with the extension absent, every subject
+ * failed that conjunct and the whole roster fell out of the population (measured over the committed
+ * dev-DB fixture: 4 actionable subjects → 0, `devdb-official-eval.test.ts`).
+ *
+ * Emitting both is normalization of a fact already in the source row — not the derivation
+ * `wiring/qicore-preparation.ts` refuses to make, which would be inventing a recorded sex for data that
+ * carries none. A row whose `sex` is neither F nor M still gets neither element.
+ *
+ * The SNOMED code is load-bearing: the ELM compares against the concept id, so an extension carrying
+ * `"F"` is indistinguishable from one that is absent.
+ */
+const US_CORE_SEX_URL = "http://hl7.org/fhir/us/core/StructureDefinition/us-core-sex";
+const SNOMED_SEX: Record<"F" | "M", string> = { F: "248152002", M: "248153007" };
+
+/** The `us-core-sex` extension array for a WCDB `sex` value, or nothing when it names neither sex. */
+export function usCoreSexExtension(sex: string | undefined): Array<{ url: string; valueCode: string }> | undefined {
+  if (sex !== "F" && sex !== "M") return undefined;
+  return [{ url: US_CORE_SEX_URL, valueCode: SNOMED_SEX[sex] }];
+}
+
 export const subjectIdFor = (patId: number | string): string => `wc-${patId}`;
 
 /** Inverse of `subjectIdFor`: "wc-5" → 5. Returns undefined for anything else. */
@@ -45,6 +71,7 @@ export function patientToFhir(row: PatientRow): FhirResource {
     id: subjectId,
     name: [{ text: [str(row.first_name), str(row.last_name)].filter(Boolean).join(" ") || subjectId }],
     ...(sex === "F" ? { gender: "female" } : sex === "M" ? { gender: "male" } : {}),
+    ...(usCoreSexExtension(sex) ? { extension: usCoreSexExtension(sex) } : {}),
     ...(fhirDate(row.birth_date) ? { birthDate: fhirDate(row.birth_date) } : {}),
   };
 }

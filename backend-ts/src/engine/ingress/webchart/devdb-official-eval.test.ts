@@ -9,46 +9,46 @@
  * WebChart data is not: it is what a real EHR happens to hold, and the difference between those two is
  * where the flip's risk actually lives.
  *
- * ## Why a BASELINE test and not a passing one
+ * ## The property under test
  *
- * This records what official execution does over WebChart data TODAY, gaps included, and fails when that
- * changes. It is not asserting the gaps are acceptable — `EXPECTED` below names each one and points at
- * its fix. The reason to commit the gap rather than wait until it is closed is that the gap is currently
- * invisible: official CMS125 puts this entire roster out of its initial population, a run completes, 56
- * outcomes are written, and no check anywhere notices. PR-8f's batch retrieve refusal cannot see it
- * either — it catches "retrieved nothing at all", and these retrieves match plenty (236 LOINC
- * observations); they just do not match the conjunct that decides membership.
+ * **Agreement with the authored engine, subject by subject.** Where the two agree, routing a measure
+ * officially is a configuration change. Where they diverge, the divergence is written into `EXPECTED`
+ * with its measured cause — so a shift is either progress or a regression, and both are deliberate rather
+ * than discovered later from a roster that quietly reads differently.
  *
- * So the property under test is *agreement with the authored engine, subject by subject*. Where the two
- * agree, the flip is a configuration change. Where they diverge, the divergence is written down here with
- * its measured cause, so closing it is a one-line edit to this file and not an investigation.
+ * That framing matters because the failure this guards is invisible everywhere else. When official CMS125
+ * put this entire roster out of its initial population, a run completed, 56 outcomes were written, and no
+ * check anywhere noticed. PR-8f's batch retrieve refusal cannot see it either — it catches "retrieved
+ * nothing at all", and these retrieves match plenty (236 LOINC observations); they simply did not match
+ * the conjunct that decides membership. Confirmed here by the batch returning all 56 subjects.
  *
  * ## What was measured (2026-07-30, EVAL 2024-06-01, official MP 2023-06-01 .. 2024-06-01)
  *
- * **cms125** — authored finds 4 actionable subjects (wc-8, wc-36, wc-45, wc-47, all OVERDUE); official
- * finds 0 and puts all 56 out of the initial population. The official IPP is
+ * **cms125 — official and authored now agree on all 56 subjects** (52 MISSING_DATA, 4 OVERDUE: wc-8,
+ * wc-36, wc-45, wc-47). They did not before this commit: official found 0 actionable and put everyone
+ * out of the initial population, whose official definition is
  * `AgeAt(end of MP) in [42..74] AND us-core-sex = SNOMED 248152002 AND exists Qualifying Encounters`.
- * Age passes (those four are 44–54) and the encounter passes (the OH roster stamps a CPT 99213 office
- * visit inside the period). The single failing conjunct is the extension: **0 of 56 patients carry
- * `us-core-sex`**, because both places that map WebChart's real `patients.sex` column into FHIR emit
- * `Patient.gender` and stop there — `wcdb-fhir-shim/src/fhir-mapping.ts` and the inline duplicate in
- * `scripts/webchart-devdb-export.ts`. `REMEDY` below proves that is the whole cause rather than the
- * first of several: stamping the extension makes official agree with authored on all four.
+ * Age passed (those four are 44–54) and the encounter passed (the OH roster stamps a CPT 99213 office
+ * visit inside the period). The single failing conjunct was the extension: **0 of 56 patients carried
+ * `us-core-sex`**, because both places mapping WebChart's real `patients.sex` column into FHIR emitted
+ * `Patient.gender` and stopped there. Both now emit both, and the fixture was regenerated from the dev DB
+ * — byte-identical but for 28 added extensions, so nothing else about the sample moved.
  *
- * Three other candidates were measured and changed **nothing** on this data, which is worth recording
- * because two of them are named as CMS125 blockers in the project notes: a LOINC mammography
- * `Observation` mirroring the one HCPCS G0202 procedure (real mapping gap — but all four actionable
- * subjects are OVERDUE, i.e. have no mammogram to find, and the single G0202 in the seed belongs to
- * someone outside the IPP), `Condition.onsetDateTime` (CMS125's IPP reads no Condition at all — only its
- * mastectomy exclusions do), and `Observation.category` (not read by this measure's retrieves).
+ * Three other candidates were measured and changed **nothing**, worth recording because two were named as
+ * CMS125 blockers in the project notes: a LOINC mammography `Observation` mirroring the one HCPCS G0202
+ * procedure (a real mapping gap — but all four actionable subjects are OVERDUE, i.e. have no mammogram to
+ * find, and the single G0202 in the seed belongs to someone outside the IPP), `Condition.onsetDateTime`
+ * (CMS125's IPP reads no Condition at all — only its mastectomy exclusions do), and
+ * `Observation.category`. It was one fix, not four; counting absent fields overestimates a gap, which is
+ * why the last test below pins the cause by removing it rather than by listing what is present.
  *
- * **cms122** — official and authored BOTH return MISSING_DATA for all 56, so there is no divergence to
- * gate. The seed carries zero Conditions and cms122 is deliberately absent from
- * `ROSTER_ELIGIBLE_MEASURES` (its "enrollment" is a diabetes *diagnosis*, a clinical fact the roster must
- * never fabricate), so neither engine can see a denominator. This is a data gap that blocks the measure
- * for both paths equally — an M-D ingest question, not a flip risk. Recorded here so that when the
- * WebChart path starts supplying diagnoses, whichever engine starts producing outcomes first does so
- * against a written expectation.
+ * **cms122 — official and authored BOTH return MISSING_DATA for all 56**, so there is no divergence to
+ * gate and routing it changes nothing over this data. The seed carries zero Conditions and cms122 is
+ * deliberately absent from `ROSTER_ELIGIBLE_MEASURES` (its "enrollment" is a diabetes *diagnosis*, a
+ * clinical fact the roster must never fabricate), so neither engine can see a denominator. A data gap
+ * that blocks both paths equally — an M-D ingest question, not a flip risk. Recorded so that when the
+ * WebChart path starts supplying diagnoses, whichever engine produces outcomes first does so against a
+ * written expectation.
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -74,32 +74,21 @@ const roster = parseEnrollmentRoster(JSON.parse(readFileSync(path.join(DIR, "enr
 const EVAL = "2024-06-01";
 
 /**
- * The measured baseline: official outcome distribution, and the subjects where authored disagrees.
+ * The measured baseline: official outcome distribution, and every subject where authored disagrees.
  *
- * `divergence` is the load-bearing field. An empty map would mean official and authored agree
- * subject-for-subject and the flip is inert for this data; a populated one names every subject whose
- * roster row would change the day the measure is routed, with what it changes from and to.
+ * `divergence` is the load-bearing field. Empty means official and authored agree subject-for-subject, so
+ * routing the measure is inert for this data; a populated one names each subject whose roster row would
+ * change the day the measure is routed, and what it changes from and to.
  */
 const EXPECTED: Record<string, { official: Record<string, number>; divergence: Record<string, string> }> = {
-  cms122: {
-    official: { MISSING_DATA: 56 },
-    // No divergence: authored is equally blind (0 Conditions in the seed, and the roster may not
-    // fabricate a diabetes diagnosis). Routing cms122 officially over this data changes nothing.
-    divergence: {},
-  },
-  cms125: {
-    official: { MISSING_DATA: 56 },
-    // Every one of these is `authored OVERDUE → official MISSING_DATA`, caused solely by the absent
-    // `us-core-sex` extension. Closing it (see REMEDY) turns this map empty and the distribution into
-    // { MISSING_DATA: 52, OVERDUE: 4 }.
-    divergence: {
-      "wc-8": "OVERDUE→MISSING_DATA",
-      "wc-36": "OVERDUE→MISSING_DATA",
-      "wc-45": "OVERDUE→MISSING_DATA",
-      "wc-47": "OVERDUE→MISSING_DATA",
-    },
-  },
+  // Both engines blind for the same reason — no Conditions in the seed, and the roster may not invent a
+  // diabetes diagnosis. When ingest starts supplying diagnoses this is the expectation to revisit.
+  cms122: { official: { MISSING_DATA: 56 }, divergence: {} },
+  cms125: { official: { MISSING_DATA: 52, OVERDUE: 4 }, divergence: {} },
 };
+
+/** The subjects the authored engine finds actionable — official must find exactly these. */
+const CMS125_ACTIONABLE = ["wc-8", "wc-36", "wc-45", "wc-47"];
 
 const sidecarsPresent = ["cms122", "cms125"].every((id) => {
   const artifact = loadOfficialArtifact(id);
@@ -154,6 +143,25 @@ test("fixtures loaded: the full 56-patient dev-DB corpus + a roster", () => {
   assert.equal(payloads.length, 56, `expected every is_patient=1 dev-DB row, got ${payloads.length}`);
 });
 
+test("the fixture carries us-core-sex — the element official CMS125's IPP reads", () => {
+  const codes = new Map<string, number>();
+  for (const bundle of payloads) {
+    for (const r of resources(bundle)) {
+      if (r["resourceType"] !== "Patient") continue;
+      for (const ext of (r["extension"] as Array<Record<string, unknown>>) ?? []) {
+        if (String(ext["url"]).endsWith("/us-core-sex")) {
+          const code = String(ext["valueCode"]);
+          codes.set(code, (codes.get(code) ?? 0) + 1);
+        }
+      }
+    }
+  }
+  // SNOMED concept ids, not "F"/"M": the ELM compares against the id, so the wrong value is
+  // indistinguishable from an absent extension. Asserted on the FIXTURE so a regeneration from a mapping
+  // that dropped or mis-coded it fails here, naming the field, rather than as an outcome shift below.
+  assert.deepEqual(Object.fromEntries(codes), { "248152002": 12, "248153007": 16 });
+});
+
 for (const [measureId, expected] of Object.entries(EXPECTED)) {
   test(`official ${measureId} over real WebChart data: the measured baseline`, { skip }, async () => {
     const bundles = await liveBundles(measureId);
@@ -172,8 +180,6 @@ for (const [measureId, expected] of Object.entries(EXPECTED)) {
       const authoredOutcome = authored.get(subjectId);
       if (authoredOutcome !== officialOutcome) divergence[subjectId] = `${authoredOutcome}→${officialOutcome}`;
     }
-    // The whole point of the file. A CHANGE here is either progress (a gap closed) or a regression, and
-    // both must be deliberate — never discovered from a roster that quietly reads differently.
     assert.deepEqual(
       divergence,
       expected.divergence,
@@ -182,59 +188,48 @@ for (const [measureId, expected] of Object.entries(EXPECTED)) {
   });
 }
 
+test("official cms125 finds the same four actionable subjects the authored engine does", { skip }, async () => {
+  const official = await officialOutcomes("cms125", await liveBundles("cms125"));
+  // Non-degeneracy before the per-subject check: "both engines agree nobody is in the population" would
+  // satisfy a subject-wise comparison, and is the failure this file exists to catch rather than a pass.
+  assert.ok(new Set(official.values()).size > 1, "official cms125 collapsed to a single bucket");
+  const actionable = [...official].filter(([, o]) => o !== "MISSING_DATA").map(([id]) => id);
+  assert.deepEqual(actionable.sort(), [...CMS125_ACTIONABLE].sort());
+  for (const id of CMS125_ACTIONABLE) assert.equal(official.get(id), "OVERDUE", `${id} should be OVERDUE`);
+});
+
 /**
- * The remedy, proven rather than asserted.
+ * The cause, pinned by removing it.
  *
- * A gap recorded without its cause invites the wrong fix. This runs the SAME live path with one change —
- * `us-core-sex` stamped from the `Patient.gender` the WebChart mapping already derives from
- * `patients.sex` — and shows official then agreeing with authored subject-for-subject. When the two
- * mappings are corrected at the source, `EXPECTED.cms125` becomes this and this test collapses into the
- * loop above.
+ * The agreement above rests entirely on one element. Asserting that the element is *present* (as the
+ * fixture test does) proves the mapping emits it; it does not prove that is what holds the agreement up.
+ * Stripping it and watching official collapse does — and it is the assertion that survives the next
+ * change to this pipeline, because a future mapping that drops `us-core-sex` would otherwise surface as
+ * an unexplained distribution shift in a table of numbers.
  *
- * Note the SNOMED code matters: the ELM compares the extension's value against `248152002`, so an
- * extension present with the wrong value (`"F"`, say) is indistinguishable from one absent. That cost a
- * measurement pass to discover and is the reason this asserts an outcome rather than the field's
- * presence.
+ * This is also the historical record: 56 MISSING_DATA is exactly what official CMS125 produced over this
+ * fixture before the mapping was fixed.
  */
-test("cms125: stamping us-core-sex is the WHOLE cause — official then matches authored", { skip }, async () => {
-  const bundles = (await liveBundles("cms125")).map((bundle) => {
+test("cms125: strip us-core-sex and official collapses out-of-population — the whole cause", { skip }, async () => {
+  const stripped = (await liveBundles("cms125")).map((bundle) => {
     const b = clone(bundle);
     for (const r of resources(b)) {
       if (r["resourceType"] !== "Patient") continue;
-      const gender = r["gender"];
-      if (gender !== "female" && gender !== "male") continue;
-      r["extension"] = [
-        ...((r["extension"] as unknown[]) ?? []),
-        {
-          url: "http://hl7.org/fhir/us/core/StructureDefinition/us-core-sex",
-          valueCode: gender === "female" ? "248152002" : "248153007",
-        },
-      ];
+      const exts = (r["extension"] as Array<Record<string, unknown>>) ?? [];
+      r["extension"] = exts.filter((e) => !String(e["url"]).endsWith("/us-core-sex"));
     }
     return b;
   });
 
-  const official = await officialOutcomes("cms125", bundles);
-  const authored = await authoredOutcomes("cms125", bundles);
-
+  const official = await officialOutcomes("cms125", stripped);
   assert.deepEqual(
     distribution(official),
-    { MISSING_DATA: 52, OVERDUE: 4 },
-    "with us-core-sex present, official cms125 should find the same 4 actionable subjects",
+    { MISSING_DATA: 56 },
+    "without us-core-sex, official cms125 should put the whole roster out of its initial population",
   );
-  // Non-degeneracy first: a distribution of one bucket would satisfy a subject-wise comparison against
-  // an equally collapsed authored run, and "they agree that nobody is in the population" is the failure
-  // this file exists to catch, not a pass.
-  assert.ok(new Set(official.values()).size > 1, "official cms125 collapsed to one bucket");
 
-  for (const [subjectId, officialOutcome] of official) {
-    assert.equal(
-      officialOutcome,
-      authored.get(subjectId),
-      `${subjectId}: official ${officialOutcome} vs authored ${authored.get(subjectId)}`,
-    );
-  }
-  for (const subjectId of Object.keys(EXPECTED["cms125"]!.divergence)) {
-    assert.equal(official.get(subjectId), "OVERDUE", `${subjectId} should be recovered by the remedy`);
-  }
+  // And the authored engine is UNAFFECTED — it reads `Patient.gender`. This is what makes the two
+  // elements worth emitting separately rather than treating one as a substitute for the other.
+  const authored = await authoredOutcomes("cms125", stripped);
+  assert.deepEqual(distribution(authored), { MISSING_DATA: 52, OVERDUE: 4 });
 });
