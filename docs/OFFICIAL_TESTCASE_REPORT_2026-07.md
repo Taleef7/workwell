@@ -14,11 +14,11 @@ Run from the repository root (the fetch script is Windows/PowerShell-aware and e
 ```powershell
 cd backend-ts
 .\scripts\fetch-official-cases.ps1
-pnpm test:official-cases [--measure cms122|cms125] [--content-dir <path>]
+pnpm test:official-cases [--measure <catalogId>] [--content-dir <path>]
 # If pnpm is not directly on PATH: corepack pnpm test:official-cases
 ```
 
-The fetch script sparse-checks out only the two measure bundles and two test-case trees into ignored `.official-content/`; it refuses to overwrite an unrelated non-Git directory.
+The fetch script sparse-checks out only the gated measures' bundles and test-case trees into ignored `.official-content/`; it refuses to overwrite an unrelated non-Git directory.
 
 ## Summary
 
