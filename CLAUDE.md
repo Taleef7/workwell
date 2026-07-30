@@ -112,8 +112,9 @@ cases only, never reproduced NCQA specs (DUA).
 
 **STATUS (2026-07-27): §7.4 PR-1 → PR-8a shipped; nothing is flipped.** `WORKWELL_OFFICIAL_MEASURES` is
 unset everywhere, so `routedEngineForEnv` returns `engineForEnv`'s own value **by identity** and every
-measure still evaluates authored CQL. Shipped: engine-boundary severance + physical
-`packages/measure-engine` extraction (PR-1/2), evidence-first MeasureReport membership (PR-3),
+measure still evaluates authored CQL. Shipped: engine-boundary severance (PR-1 — the containment test
+that freezes the boundary; the physical `packages/measure-engine` extraction is **PR-2, resequenced
+2026-07-24 to land with M-C** and NOT shipped), evidence-first MeasureReport membership (PR-3),
 `packages/official-executor` — the sole home of `fqm-execution`, reached only by lazy `await import`
 and policed by five boundary tests (PR-4), CMS122+CMS125 v1.0.000 vendored (PR-5), the **MADiE CI
 gate** — 55/55 + 66/66, and no measure may be routed without it (PR-6), ELM-annotation stripping
@@ -170,13 +171,43 @@ indistinguishable from a genuinely ineligible roster); `>1` because for one subj
 is legitimate. It catches *retrieved nothing*, **not** *retrieved the wrong thing* — every ADR-038 corpus
 defect passed it. A failed batch fails ITS measure (MISSING_DATA + PARTIAL_FAILURE + the #264 alert),
 never the run. Wired as a pre-pass gated on `RoutedEngine.evaluateBatch` resolving non-`undefined` —
-absent everywhere today, so the per-subject loop is unchanged. **Next: PR-9** (the flip). It owes ONE
-build step now — the
-deploy-workflow terminology fetch shipped with PR-8b (production + staging): complete the VSAC-capped
-`AdvancedIllness` expansion (1000 of 1997 codes, feeding a DENEX in both measures). Not optional
-bookkeeping — a capped expansion the ELM retrieves is a **routing refusal**, so cms122 and cms125 cannot
-be flipped until it is done. It changes none of the 121 official cases, which is not the same as
-changing no patient. (The PR-8b corpus finding is closed — see PR-8c above.)
+absent everywhere today, so the per-subject loop is unchanged.
+
+**PR-9a shipped (ADR-041) — the capped `AdvancedIllness` expansion is now completable at vendor time.**
+`vendor:official --complete-capped-expansions` re-expands the OIDs upstream capped (today one:
+…1003.110.12.1082, 1000 of 1997, feeding a DENEX in both measures) from VSAC, pinned to
+`Library/ecqm-fhir-update-2025` — the release the upstream content repo itself names, and the one CVU+
+validates the 2026 period against. **Research corrected the stated cause:** the cap is not "VSAC caps at
+1000" but *upstream policy* — the content repo's README says its value sets are limited to expansions of
+1000 because full ones need an NLM licence — so there was never an upstream issue to file, and VSAC's
+`$expand` has supported `offset`/`count` all along (`vsac-client.ts` has paged it since #295). Verified
+against a stub VSAC: 2043 → 3040 codes, `truncated` → `[]`, codes written sorted despite descending
+input, and **two runs produce the same `terminology.sha256`** so CI's reproducibility check stays honest.
+Every failure path (no flag, no key, VSAC down, **or a VSAC expansion that comes back SHORT**) leaves
+upstream's codes untouched so routing keeps refusing — a differently-incomplete set is the one outcome
+worse than staying capped. **Inert until the secret exists**, deliberately: the no-flag path is
+byte-identical to the committed artifacts. **OWNER STEP DONE 2026-07-29** — the
+`WORKWELL_VSAC_API_KEY_VENDOR` secret is set and the re-vendored manifests are committed in the same
+change (DEPLOY.md §"Step 1a"). `AdvancedIllness` is now **2000 codes in both artifacts**, `truncated` is
+`[]`, and **`officialRoutingProblems(["cms122"])` and `(["cms125"])` both return no problems — the two
+measures are ROUTABLE.** Nothing is routed: `WORKWELL_OFFICIAL_MEASURES` is still unset everywhere.
+`test:official-cases` stayed **121/121** (55/55 + 66/66, 0 unexpected, 0 errors) and CI's four
+sidecar-dependent suites pass against the completed expansion, including the corpus-outcomes check.
+Two independent vendor runs against live VSAC produced **byte-identical manifests and sidecars**, so
+CI's reproducibility gate holds. **One observation recorded rather than smoothed over:** VSAC at the
+pinned release returns **2000 codes where the bundle declares 1997**. The guard only rejects a SHORT
+expansion, so this passes; it means upstream's `expansion.total` was captured against a slightly earlier
+terminology snapshot than `ecqm-fhir-update-2025`. Three extra codes in a DENEX widen an exclusion
+slightly, and no official case moved — but it is a real difference between our terminology and the
+bundle's own declaration, and PR-9c's before/after distribution snapshot is where it would show up.
+**Still ahead of the flip:** PR-9b (a construction-time refusal when official routing and the WebChart
+seam are both configured, plus the live-path official gate that does not exist today — **not one test on
+the live WebChart path evaluates anything through an official artifact**) and PR-9c (the flip itself, on
+the demo/production stack only). Measured while planning: the committed dev-DB corpus carries **0
+Conditions, 0 Encounters, no Patient `extension`, and no `Observation.category`** across 56 patients, so
+official *CMS122* would read out-of-population over live data too — the WebChart gap is wider than the
+two recorded CMS125 items and is M-D-sized. Production leaves every `WORKWELL_WEBCHART_*` unset, so it
+gates staging only. (The PR-8b corpus finding is closed — see PR-8c above.)
 
 ## Prior focus (as of 2026-07-22 — live outage resolved; Doug wave below)
 

@@ -41,15 +41,21 @@
   "terminology": {
     "file": "terminology.json",
     "valueSets": 32,
-    "codes": 2043,
-    "truncated": [
-      {
-        "oid": "2.16.840.1.113883.3.464.1003.110.12.1082",
-        "have": 1000,
-        "declaredTotal": 1997
-      }
-    ],
-    "sha256": "sha256:03b68a9962d453241af234eabeec4ac3ac71fa85f9d46b816a568f7cc187b944"
+    "codes": 3043,
+    "truncated": [],
+    "completion": {
+      "source": "vsac",
+      "manifest": "http://cts.nlm.nih.gov/fhir/Library/ecqm-fhir-update-2025",
+      "valueSets": [
+        {
+          "oid": "2.16.840.1.113883.3.464.1003.110.12.1082",
+          "had": 1000,
+          "now": 2000,
+          "declaredTotal": 1997
+        }
+      ]
+    },
+    "sha256": "sha256:3cc553d302907592805c48d199742b69888f257ceca28c15ca7892e8373635b3"
   },
   "sha256": "sha256:97f737fa5262fca1fbb4620e10ce286f612b87b7de4c3fc06fdfe38dfb666ac8"
 }

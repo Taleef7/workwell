@@ -61,11 +61,41 @@
  *
  * The flag stays opt-in at the CLI so an unstripped artifact remains one command away if clause-level
  * debugging is ever needed; every measure vendored for production use passes it.
+ *
+ * ## `--complete-capped-expansions` — the one thing PR-9 owed
+ *
+ * Upstream caps every expansion it ships: *"The value sets in this repository are limited to expansions
+ * of 1000"* (the content repo's own README — full expansions need an NLM licence). That is upstream
+ * policy, not a defect, and nothing can be filed about it. It bites us because `AdvancedIllness`
+ * (…1003.110.12.1082) is **1000 of 1997 codes in both bundles** and feeds the 66+/advanced-illness
+ * DENEX in each, so a capped set does not error — it silently narrows a population, leaving excluded
+ * subjects in the denominator to be scored. `officialRoutingProblems` therefore refuses to route any
+ * measure whose ELM retrieves a capped set, which is why cms122 and cms125 are not routable today.
+ *
+ * With this flag the shortfall is completed from VSAC at vendor time — the roadmap's own rule
+ * (§7.3): *bundle-shipped expansions PRIMARY, VSAC-patched at VENDOR time, no runtime fallback.*
+ * Only the OIDs upstream actually capped are re-expanded (today: one, two pages), pinned to the
+ * release the upstream content itself names — `Library/ecqm-fhir-update-2025`, the same terminology
+ * Cypress/CVU+ validates the 2026 reporting period against — so the same pin yields the same bytes and
+ * CI's `git diff --exit-code measures/official` stays an honest reproducibility check.
+ *
+ * **It fails closed, in the only direction that is safe.** No `WORKWELL_VSAC_API_KEY`, or VSAC
+ * unreachable after retries, and the capped expansion is written exactly as upstream shipped it with
+ * its `truncated` entry intact — so routing keeps refusing rather than a half-expanded exclusion set
+ * quietly scoring people. A shortfall that survives the completion stays recorded for the same reason.
+ * It is not possible to emit a manifest that claims complete over a sidecar that is not: `truncated` is
+ * derived from the codes actually present, after completion, by the same comparison as before.
  */
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  DEFAULT_VSAC_BASE,
+  DEFAULT_VSAC_MANIFEST,
+  completeCappedExpansions,
+  flattenExpansion,
+} from "./vsac-expansion.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const BACKEND_ROOT = resolve(HERE, "..");
@@ -77,17 +107,29 @@ const KEPT_RESOURCE_TYPES = ["Measure", "Library"];
 const KEPT_LIBRARY_CONTENT_TYPE = "application/elm+json";
 
 function parseArgs(argv) {
-  const args = { ref: DEFAULT_REF, stripElmAnnotations: false };
+  const args = {
+    ref: DEFAULT_REF,
+    stripElmAnnotations: false,
+    completeCappedExpansions: false,
+    vsacBase: DEFAULT_VSAC_BASE,
+    vsacManifest: DEFAULT_VSAC_MANIFEST,
+  };
   for (let i = 0; i < argv.length; i += 1) {
     const flag = argv[i];
     if (flag === "--measure") args.measure = argv[++i];
     else if (flag === "--catalog-id") args.catalogId = argv[++i];
     else if (flag === "--ref") args.ref = argv[++i];
     else if (flag === "--strip-elm-annotations") args.stripElmAnnotations = true;
+    else if (flag === "--complete-capped-expansions") args.completeCappedExpansions = true;
+    else if (flag === "--vsac-base") args.vsacBase = argv[++i];
+    else if (flag === "--vsac-manifest") args.vsacManifest = argv[++i];
     else throw new Error(`unknown argument: ${flag}`);
   }
   if (!args.measure || !args.catalogId) {
-    throw new Error("usage: --measure <UpstreamMeasureDir> --catalog-id <cms122> [--ref <sha>] [--strip-elm-annotations]");
+    throw new Error(
+      "usage: --measure <UpstreamMeasureDir> --catalog-id <cms122> [--ref <sha>]" +
+        " [--strip-elm-annotations] [--complete-capped-expansions] [--vsac-manifest <canonical>]",
+    );
   }
   // A branch name would produce an artifact nobody can reproduce; the manifest is only provenance if
   // the ref is immutable. Fail where the mistake is made rather than in a test later.
@@ -186,17 +228,6 @@ function assertExecutable(bundle, measureName) {
   }
 }
 
-/** Flatten a FHIR expansion's `contains` tree. These two bundles are flat, but the field is recursive. */
-function flattenExpansion(contains, out = []) {
-  for (const item of contains ?? []) {
-    if (typeof item.code === "string" && typeof item.system === "string") {
-      out.push({ system: item.system, code: item.code });
-    }
-    flattenExpansion(item.contains, out);
-  }
-  return out;
-}
-
 /**
  * The artifact's own terminology, lifted out of the upstream bundle before the ValueSets are dropped.
  *
@@ -250,7 +281,7 @@ function cqfmExtension(group, name) {
   return ext?.valueCodeableConcept?.coding?.[0]?.code ?? ext?.valueCode ?? ext?.valueString ?? null;
 }
 
-function buildManifest(bundle, args, raw, bundleJson, terminology, terminologyJson) {
+function buildManifest(bundle, args, raw, bundleJson, terminology, terminologyJson, completed) {
   const truncated = terminology.valueSets
     .filter((v) => v.declaredTotal > v.codes.length)
     .map((v) => ({ oid: v.oid, have: v.codes.length, declaredTotal: v.declaredTotal }));
@@ -303,7 +334,18 @@ function buildManifest(bundle, args, raw, bundleJson, terminology, terminologyJs
       // under-expanded set only ever narrows a population — but it can hide a subject who belongs,
       // so a measure whose result depends on one of these must not be routed officially until the
       // set is completed from VSAC under our UMLS licence.
+      //
+      // Derived from the codes actually present AFTER `--complete-capped-expansions` has run, so the
+      // two facts cannot disagree: a manifest with an empty `truncated` is a manifest whose sidecar
+      // holds every code the bundle declared.
       truncated,
+      // Present only when something was actually completed, so an artifact vendored without the flag
+      // is byte-identical to one vendored before it existed. The pin is recorded because it decides
+      // the bytes: re-expanding at a different release is a different artifact, and the terminology
+      // digest below — which feeds `officialLogicVersion` — is what makes that consequential.
+      ...(completed.length > 0
+        ? { completion: { source: "vsac", manifest: args.vsacManifest, valueSets: completed } }
+        : {}),
       sha256: sha256(terminologyJson),
     },
     sha256: sha256(bundleJson),
@@ -355,9 +397,12 @@ const reduced = reduceBundle(upstream, args);
 assertExecutable(reduced, args.measure);
 
 const terminology = collectTerminology(upstream, args);
+// Before serialization, deliberately: the sidecar's bytes are what the manifest pins, so a completion
+// that ran after the hash was taken would be a completion the loader refuses.
+const completed = await completeCappedExpansions(terminology, args);
 const terminologyJson = `${JSON.stringify(terminology, null, 0)}\n`;
 const bundleJson = `${JSON.stringify(reduced, null, 0)}\n`;
-const manifest = buildManifest(reduced, args, raw, bundleJson, terminology, terminologyJson);
+const manifest = buildManifest(reduced, args, raw, bundleJson, terminology, terminologyJson, completed);
 
 const outDir = join(BACKEND_ROOT, "measures", "official", args.catalogId);
 mkdirSync(outDir, { recursive: true });
@@ -377,10 +422,17 @@ console.log(
   `  terminology: ${manifest.terminology.valueSets} value sets, ${manifest.terminology.codes} codes` +
     ` → ${mb(Buffer.byteLength(terminologyJson))} (gitignored)`,
 );
+for (const done of completed) {
+  console.log(
+    `  completed ${done.oid} from VSAC: ${done.had} → ${done.now} codes` +
+      ` (declared ${done.declaredTotal}) @ ${args.vsacManifest}`,
+  );
+}
 for (const cap of manifest.terminology.truncated) {
   console.warn(
     `  WARNING capped expansion ${cap.oid}: ${cap.have}/${cap.declaredTotal} codes present.` +
-      " Complete it from VSAC before routing a measure whose result depends on this set.",
+      " Complete it from VSAC before routing a measure whose result depends on this set" +
+      " (pass --complete-capped-expansions with WORKWELL_VSAC_API_KEY set).",
   );
 }
 console.log(`  wrote ${outDir.replace(BACKEND_ROOT, "backend-ts")}`);

@@ -1,5 +1,107 @@
 # Architecture Decision Records
 
+## ADR-041: A capped official expansion is completed at vendor time, from a pinned VSAC release, or not at all
+
+**Status:** Accepted (2026-07-29). Roadmap §7.3 (terminology) + §7.4 PR-9. Nothing routes officially yet.
+
+**Context.** `officialRoutingProblems` refuses to route any measure whose ELM retrieves a value set the
+manifest records as capped (ADR-036, decision 7). Both vendored artifacts trip it on the same OID:
+`AdvancedIllness` (2.16.840.1.113883.3.464.1003.110.12.1082) ships **1000 of a declared 1997 codes** in
+each bundle and feeds the 66+/advanced-illness denominator exclusion in both. That refusal is the only
+thing standing between cms122/cms125 and the PR-9 flip, and it is correct: a half-expanded exclusion set
+does not error, it silently leaves subjects who should have been excluded in the denominator to be
+scored. The empty-set preflight cannot see it, because half-expanded is not empty.
+
+Two facts settled the shape of the fix. First, **the cap is upstream policy, not a defect** — the
+content repo's README says so outright (*"The value sets in this repository are limited to expansions of
+1000"*; full expansions require an NLM licence), so there is nothing to raise upstream and no version of
+this that is fixed by waiting. Second, **VSAC's `$expand` supports `offset`/`count`**, confirmed against
+its published `OperationDefinition`, and `engine/cql/vsac-client.ts` has been paging it correctly for the
+authored path since #295. The missing piece was never the capability; it was that the two terminology
+paths have no bridge, deliberately — ADR-036 forbids the runtime mixing them, and `resolve-valuesets`
+writes DB rows the official executor must never read.
+
+**Decision.**
+
+1. **The completion happens at VENDOR time, in `vendor-official-measure.mjs`, behind
+   `--complete-capped-expansions`.** This is roadmap §7.3's own rule — *bundle-shipped expansions
+   PRIMARY, VSAC-patched at VENDOR time, no runtime fallback* — and it keeps ADR-036's single authority
+   intact: the sidecar remains the one thing the runtime reads, and it is still pinned by a SHA-256 in
+   the committed manifest. A runtime fallback to VSAC would have been the easy version and would have
+   reintroduced exactly the split PR-8a closed.
+
+2. **Only the OIDs upstream actually capped are re-expanded** — today one, two pages. This is not an
+   import. The 25 or 31 other value sets in each artifact come from the bundle, unchanged and unasked
+   about, so the blast radius of the network call is one value set per measure.
+
+3. **Pinned to `Library/ecqm-fhir-update-2025`**, the release the upstream content repo itself names as
+   the terminology package supporting its measures — and the same eCQM release CVU+ validates the 2026
+   reporting period against, so M-A and M-B stay on one terminology story rather than two. Unpinned,
+   VSAC serves latest-active: a republish would move our expansions, the terminology digest, and
+   therefore `officialLogicVersion` (ADR-040), with the bundle bytes unchanged. CI's
+   `git diff --exit-code measures/official` would catch it — after the fact, on an unrelated PR.
+
+4. **Completed codes are sorted by `system|code` and deduped before they are written.** The sidecar is
+   pinned by hash, so its byte ORDER is part of the artifact and VSAC's page order is not a contract.
+   Code-point comparison rather than `localeCompare`, for the reason `collectTerminology`'s own sort
+   already spells out.
+
+5. **Every failure leaves upstream's codes exactly as shipped.** No flag, no key, VSAC unreachable after
+   the bounded retry — each warns and returns, the manifest's `truncated` entry survives, and routing
+   keeps refusing. There is no path that yields a set which *looks* complete and is not: `truncated` is
+   recomputed from the codes actually present after completion, by the same comparison as before.
+
+6. **A VSAC expansion that comes back SHORT of the declared total, or that does not CONTAIN upstream's
+   shipped codes, is rejected outright rather than merged.** These are the non-obvious ones and the
+   reason they are written down. The short comparison is made AFTER dedupe, so a response padded with
+   duplicate `system|code` pairs cannot clear the bar and then shrink below it — comparing the raw page
+   total was the original mistake, caught in review. The containment check exists because a count cannot
+   distinguish "the full version of this set" from "a different set that happens to be bigger", and that
+   difference is a wrong release pin scoring real patients; it is also what empirically confirms the pin,
+   since VSAC's 2000 codes do contain all 1000 upstream shipped. Merging a shorter, different
+   set would swap upstream's 1000 codes for someone else's 800 — a narrowing dressed as a fix, and the
+   only outcome worse than staying capped. Staying capped is loud; a wrong 800 is not.
+
+7. **The vendor-time credential is a DIFFERENT GitHub secret from the runtime one**
+   (`WORKWELL_VSAC_API_KEY_VENDOR`, not `WORKWELL_VSAC_API_KEY_TWH`), even though both hold the same UMLS
+   key. They serve the two terminology authorities ADR-036 exists to keep apart: one vendors the official
+   artifact's own expansions, the other drives the authored engine's live resolver. Giving them one name
+   would invite precisely the conflation that ADR forbids.
+
+**Consequences.**
+
+- Completing the expansion changes `manifest.terminology.sha256`, and therefore `officialLogicVersion`
+  (`official-fqm:<version>:<artifactSha>:<terminologySha>`), and therefore invalidates every cached
+  `eval_state` row for that measure. Designed behaviour, not a regression — the terminology digest is in
+  that identity for exactly this case.
+- **Landing order is load-bearing.** The flag ships first and is a no-op without the secret, so CI stays
+  green; the secret and the re-vendored manifests must then land *together*. Adding the secret alone
+  means CI completes the expansion while Git still records it as capped, and the reproducibility step
+  goes red on every unrelated PR. The step now says so in its own error message.
+- The MADiE gate is expected to stay 121/121 — its own analysis already reports "Value-set-cap effects:
+  0 observed" across the deck. If a case does move, that is the finding: the cap was load-bearing for a
+  test subject, and the report's own classification rule covers it.
+- Two tests stopped asserting that the cap EXISTS. They were scheduled to be deleted by their own fix —
+  `assert.ok(capped.length > 0)` is only true while the blocker is unfixed. The mechanism is now pinned
+  against a synthetic manifest (never vacuous, never state-dependent), and the real artifacts are checked
+  for the invariant that holds in *both* states: the manifest's caps, the sidecar's own shortfalls, and
+  the routing decision agree. Review caught that this covered `cappedExpansions` the HELPER while leaving
+  `officialRoutingProblems` the GUARD vacuous — with both artifacts now complete, deleting its
+  capped-expansion loop left the suite green. A test stubbing `cappedFor` non-empty now pins the refusal
+  itself, verified by mutation; without it this would have repeated the ADR-036 decision-7 finding
+  (recorded, documented as a guard, and never actually exercised). That last one is a new guard, and it is the one that matters — a manifest
+  claiming `truncated: []` over a still-short sidecar would clear the refusal on a lie.
+- The paging loop is a second implementation of `httpVsacClient`'s, deliberately. The vendor script runs
+  as plain `node` on the deploy path with no install and no build step, which is what makes the deploy's
+  terminology fetch cheap and hard to break; importing TypeScript from `src/` would end that.
+
+**Rejected.** *Completing it in the runtime* — reintroduces the two-authority split of ADR-036.
+*Committing the completed expansion* — it is licensed VSAC/CPT/SNOMED content in a public Apache-2.0
+repo, which is the whole reason the sidecar is gitignored. *Hosting the completed sidecar in the
+`workwell-twh-evidence` bucket and fetching it at build* — workable, and it would keep the UMLS key off
+CI, but it adds a second artifact to keep in sync with the pin and an owner step to every re-vendor, to
+avoid two HTTP requests. *Raising the cap upstream* — it is documented policy with a licensing reason.
+
 ## ADR-040: The engine declares the logic it runs; the incremental cache never infers it
 
 **Status:** Accepted (2026-07-28). Roadmap §7.4, PR-8 (remaining). Nothing routes officially yet.
@@ -387,7 +489,7 @@ Measured against the vendored CMS122 artifact over 25 synthetic subjects:
 
 ## ADR-036: Official terminology is the artifact's own, fetched at build and pinned by hash — not our VSAC import
 
-**Status:** Accepted (2026-07-27). Roadmap §4.3 called this in advance ("bundle-shipped expansions
+**Status:** Accepted (2026-07-27). Roadmap §7.3 called this in advance ("bundle-shipped expansions
 PRIMARY, VSAC-patched at VENDOR time, no runtime fallback. Runtime never mixes two terminology
 authorities"); PR-6a and PR-7a drifted from it, and this ADR records the correction.
 
@@ -450,7 +552,7 @@ Restoring the ValueSets to `bundle.json` was measured (+605 KB cms122, +464 KB c
   where it feeds the 66+/advanced-illness denominator exclusion. It changes none of the 121 official
   cases — that is the claim we can support, and all of it — but "changes none of the test cases" is not
   "changes no patient", so decision 7 refuses to route either measure until it is completed from VSAC at
-  vendor time (§4.3). **cms122 and cms125 are therefore NOT routable today**, and PR-9 must do that
+  vendor time (§7.3). **cms122 and cms125 are therefore NOT routable today**, and PR-9 must do that
   expansion, not merely remember it.
 - Descriptive only (ADR-008): terminology feeds the engine's retrieves; it never sets an `Outcome
   Status`. Nothing routes officially yet, so no current outcome changes.
