@@ -36,7 +36,20 @@ with the authored engine on every one, across COMPLIANT / OVERDUE / EXCLUDED.
    terminology half needs the gitignored sidecar, self-skips without it, and is wired into CI's
    `official-cases` job. A single test would have self-skipped in `pnpm test` and read as covered — the
    defect class this branch has been pulled up on four times (#350, #352, #354, #355).
-5. **The test does not pin WHICH measures are flipped.** Asserting the literal value would make every
+5. **The reconciler ships the SAME value, and a test asserts it does.** *(Added after review, #356.)*
+   `reconcile-twh-mieweb.yml` recreates twh-api-ts from `:latest` on a health event, using its own
+   mirrored env array. It did not carry `WORKWELL_OFFICIAL_MEASURES`, so the **first self-heal after this
+   flip would have silently reverted both measures to authored CQL** — container healthy, image
+   unchanged, no signal at any layer. The two workflows must agree on the *value*, not merely both
+   mention the flag: a reconciler shipping a different subset would flip measures on or off during an
+   incident nobody initiated.
+6. **The routability assertion excuses capped expansions when — and only when — the tree is capped.**
+   Fork and Dependabot PRs get no VSAC secret, so CI deliberately re-vendors without
+   `--complete-capped-expansions` and the working-tree artifacts become capped. `officialRoutingProblems`
+   refuses a capped expansion by design (ADR-041), so an unconditional assertion would have failed every
+   outside contributor's PR for a condition unrelated to their change. Every other problem class is
+   asserted always; the credentialed run on merge covers the capped class for real.
+7. **The test does not pin WHICH measures are flipped.** Asserting the literal value would make every
    future flip a two-file change guarded by a test that only says "you changed what you changed". The
    property that matters is that whatever is shipped is **routable**.
 
