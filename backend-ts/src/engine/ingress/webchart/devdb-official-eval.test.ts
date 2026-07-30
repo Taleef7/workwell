@@ -34,13 +34,13 @@
  * `Patient.gender` and stopped there. Both now emit both, and the fixture was regenerated from the dev DB
  * — byte-identical but for 28 added extensions, so nothing else about the sample moved.
  *
- * Three other candidates were measured and changed **nothing**, worth recording because two were named as
- * CMS125 blockers in the project notes: a LOINC mammography `Observation` mirroring the one HCPCS G0202
- * procedure (a real mapping gap — but all four actionable subjects are OVERDUE, i.e. have no mammogram to
- * find, and the single G0202 in the seed belongs to someone outside the IPP), `Condition.onsetDateTime`
- * (CMS125's IPP reads no Condition at all — only its mastectomy exclusions do), and
- * `Observation.category`. It was one fix, not four; counting absent fields overestimates a gap, which is
- * why the last test below pins the cause by removing it rather than by listing what is present.
+ * Three other candidates changed nothing **for IPP membership on this fixture**, and the reason matters
+ * for two of them: `Condition.onsetDateTime` genuinely does not apply (CMS125's IPP reads no Condition at
+ * all — only its mastectomy exclusions do), but the LOINC mammography `Observation` and
+ * `Observation.category` moved no outcome only because **no in-IPP subject here has a mammogram to find**.
+ * Both are live NUMERATOR blockers, and the tests at the bottom of this file demonstrate that they produce
+ * a **false OVERDUE on the first real screening**. Read "one fix, not four" as scoped to the initial
+ * population; it is not a statement that the other gaps are retired.
  *
  * **cms122 — official and authored BOTH return MISSING_DATA for all 56**, so there is no divergence to
  * gate and routing it changes nothing over this data. The seed carries zero Conditions and cms122 is
@@ -90,6 +90,9 @@ const EXPECTED: Record<string, { official: Record<string, number>; divergence: R
 /** The subjects the authored engine finds actionable — official must find exactly these. */
 const CMS125_ACTIONABLE = ["wc-8", "wc-36", "wc-45", "wc-47"];
 
+const US_CORE_SEX_URL = "http://hl7.org/fhir/us/core/StructureDefinition/us-core-sex";
+const OBSERVATION_CATEGORY = "http://terminology.hl7.org/CodeSystem/observation-category";
+
 const sidecarsPresent = ["cms122", "cms125"].every((id) => {
   const artifact = loadOfficialArtifact(id);
   return !!artifact && loadOfficialTerminology(artifact).ok;
@@ -108,7 +111,14 @@ function patientId(bundle: unknown): string {
   throw new Error("fixture bundle carries no Patient.id");
 }
 
-/** The live run path, reproduced exactly: WebChart normalization, then roster stamping. */
+/**
+ * The run path's INGRESS CODE, reproduced exactly: WebChart normalization, then roster stamping.
+ *
+ * Scope worth being precise about — the transport is `fixtureWebChartClient`, not HTTP. This exercises
+ * every transformation a routed run applies to a WebChart payload, and none of the request shaping.
+ * `hapi-live.test.ts` / `hapi-app-live.test.ts` cover the live HTTP path and remain authored-only, so
+ * "no test evaluates the live HTTP path through an official artifact" is still true after this file.
+ */
 async function liveBundles(measureId: string): Promise<unknown[]> {
   const source = webChartDataSource({ baseUrl: "x", apiKey: "k" }, fixtureWebChartClient(payloads));
   const bundles = await source.loadBundles();
@@ -139,23 +149,39 @@ function distribution(outcomes: ReadonlyMap<string, OutcomeStatus>): Record<stri
   return dist;
 }
 
-test("fixtures loaded: the full 56-patient dev-DB corpus + a roster", () => {
+test("official-eval fixtures loaded: the full 56-patient dev-DB corpus + a roster", () => {
   assert.equal(payloads.length, 56, `expected every is_patient=1 dev-DB row, got ${payloads.length}`);
 });
 
 test("the fixture carries us-core-sex — the element official CMS125's IPP reads", () => {
   const codes = new Map<string, number>();
+  let genderWithoutExt = 0;
+  let extWithoutGender = 0;
   for (const bundle of payloads) {
     for (const r of resources(bundle)) {
       if (r["resourceType"] !== "Patient") continue;
-      for (const ext of (r["extension"] as Array<Record<string, unknown>>) ?? []) {
-        if (String(ext["url"]).endsWith("/us-core-sex")) {
-          const code = String(ext["valueCode"]);
-          codes.set(code, (codes.get(code) ?? 0) + 1);
-        }
+      const exts = ((r["extension"] as Array<Record<string, unknown>>) ?? []).filter(
+        // The EXACT url, not a suffix match: `http://example.org/us-core-sex` would satisfy `endsWith`
+        // and satisfies nothing the ELM asks for.
+        (e) => e["url"] === US_CORE_SEX_URL,
+      );
+      for (const ext of exts) {
+        const code = String(ext["valueCode"]);
+        codes.set(code, (codes.get(code) ?? 0) + 1);
+      }
+      // The invariant that matters is the PAIRING, not the aggregate: both elements come from the same
+      // `patients.sex` column, so one present without the other means a mapping site drifted.
+      const gender = r["gender"];
+      const hasGender = gender === "female" || gender === "male";
+      if (hasGender && exts.length !== 1) genderWithoutExt++;
+      if (!hasGender && exts.length !== 0) extWithoutGender++;
+      if (hasGender && exts.length === 1) {
+        assert.equal(exts[0]!["valueCode"], gender === "female" ? "248152002" : "248153007", `${r["id"]}`);
       }
     }
   }
+  assert.equal(genderWithoutExt, 0, "a Patient with gender is missing its us-core-sex extension");
+  assert.equal(extWithoutGender, 0, "a Patient without gender carries a us-core-sex extension");
   // SNOMED concept ids, not "F"/"M": the ELM compares against the id, so the wrong value is
   // indistinguishable from an absent extension. Asserted on the FIXTURE so a regeneration from a mapping
   // that dropped or mis-coded it fails here, naming the field, rather than as an outcome shift below.
@@ -190,8 +216,10 @@ for (const [measureId, expected] of Object.entries(EXPECTED)) {
 
 test("official cms125 finds the same four actionable subjects the authored engine does", { skip }, async () => {
   const official = await officialOutcomes("cms125", await liveBundles("cms125"));
-  // Non-degeneracy before the per-subject check: "both engines agree nobody is in the population" would
-  // satisfy a subject-wise comparison, and is the failure this file exists to catch rather than a pass.
+  // Non-degeneracy, kept as insurance rather than claimed as the guard: the `deepEqual` below already
+  // implies it (four non-MISSING_DATA ids out of 56 forces two distinct values), so this line cannot fail
+  // alone. It earns its place only if that comparison is ever loosened. The docs should not cite it as
+  // what protects against collapse — the id-set comparison is.
   assert.ok(new Set(official.values()).size > 1, "official cms125 collapsed to a single bucket");
   const actionable = [...official].filter(([, o]) => o !== "MISSING_DATA").map(([id]) => id);
   assert.deepEqual(actionable.sort(), [...CMS125_ACTIONABLE].sort());
@@ -232,4 +260,108 @@ test("cms125: strip us-core-sex and official collapses out-of-population — the
   // elements worth emitting separately rather than treating one as a substitute for the other.
   const authored = await authoredOutcomes("cms125", stripped);
   assert.deepEqual(distribution(authored), { MISSING_DATA: 52, OVERDUE: 4 });
+});
+
+/**
+ * ## The NUMERATOR gap — still open, and it fails in the dangerous direction
+ *
+ * Everything above is a statement about **initial-population membership only**. All four discriminating
+ * subjects are OVERDUE for the same reason — none has a mammogram — and the seed's single mammography
+ * code (HCPCS `G0202` on a `Procedure`) belongs to `wc-49`, who is 33 and outside the `[42..74]` IPP. So
+ * the fixture as committed *cannot* exercise either engine's numerator, and the agreement above must not
+ * be read as numerator parity.
+ *
+ * It is not. The two engines read different resource types:
+ *   - authored `cms125.cql`: `exists([Procedure: "Mammography"] where status = 'completed' …)`
+ *   - official CMS125 ELM: `isDiagnosticStudyPerformed([Observation: "Mammography"])`, where
+ *     `Status.isDiagnosticStudyPerformed` requires `status in {final, amended, corrected}` **AND**
+ *     `exists(category ~ imaging)`
+ *   - the WebChart crosswalk (`webchart/terminology.ts`) emits mammography as CPT `77067` / HCPCS
+ *     `G0202` on a **`Procedure`**
+ *
+ * And the official `Mammography` value set (OID …108.12.1018) is **92 LOINC codes and nothing else** — no
+ * CPT, no HCPCS. So the shape WebChart actually produces is invisible to the official numerator.
+ *
+ * The consequence is worse than an out-of-population read, which is why it is worth a test rather than a
+ * doc line: official reports a **screened woman as OVERDUE**. That is a confident wrong answer on the
+ * ordinary case, and via `case-logic.ts` it becomes a HIGH-priority case telling an operator to "escalate
+ * mammogram follow-up immediately" for a mammogram she already had.
+ *
+ * These are recorded as KNOWN divergences so the flip's real risk is a tracked expectation instead of an
+ * argument. Closing them is a crosswalk change (M-D), not an edit here.
+ */
+const MAMMO_DATE = "2023-09-15"; // inside the official MP (2023-06-01 .. 2024-06-01) for EVAL 2024-06-01
+
+/** Exactly what `webchart/terminology.ts` emits today for one real screening mammogram. */
+const crosswalkProcedure = (subjectId: string) => ({
+  resourceType: "Procedure",
+  id: `${subjectId}-Procedure-mammo`,
+  status: "completed",
+  subject: { reference: `Patient/${subjectId}` },
+  code: { coding: [{ system: "http://www.ama-assn.org/go/cpt", code: "77067" }] },
+  performedDateTime: MAMMO_DATE,
+});
+
+/** The shape the OFFICIAL numerator retrieves. `category` is not decoration — see the note above. */
+const officialObservation = (subjectId: string, withCategory: boolean) => ({
+  resourceType: "Observation",
+  id: `${subjectId}-Observation-mammo`,
+  status: "final",
+  subject: { reference: `Patient/${subjectId}` },
+  code: { coding: [{ system: "http://loinc.org", code: "24606-6" }] },
+  ...(withCategory ? { category: [{ coding: [{ system: OBSERVATION_CATEGORY, code: "imaging" }] }] } : {}),
+  effectiveDateTime: MAMMO_DATE,
+});
+
+async function withResourcesOn(subjectId: string, extra: readonly unknown[]): Promise<unknown[]> {
+  return (await liveBundles("cms125")).map((bundle) => {
+    if (patientId(bundle) !== subjectId) return bundle;
+    const b = clone(bundle) as { entry: Array<{ resource: unknown }> };
+    for (const resource of extra) b.entry.push({ resource: clone(resource) });
+    return b;
+  });
+}
+
+test("KNOWN GAP — a crosswalk-shaped mammogram makes official report a screened woman OVERDUE", { skip }, async () => {
+  const bundles = await withResourcesOn("wc-8", [crosswalkProcedure("wc-8")]);
+  const official = await officialOutcomes("cms125", bundles);
+  const authored = await authoredOutcomes("cms125", bundles);
+
+  assert.equal(authored.get("wc-8"), "COMPLIANT", "authored reads the Procedure and clears her");
+  assert.equal(official.get("wc-8"), "OVERDUE", "official cannot see a CPT Procedure — a FALSE overdue");
+  assert.deepEqual(distribution(authored), { MISSING_DATA: 52, COMPLIANT: 1, OVERDUE: 3 });
+  assert.deepEqual(distribution(official), { MISSING_DATA: 52, OVERDUE: 4 });
+});
+
+test("KNOWN GAP — a LOINC Observation WITHOUT category=imaging leaves official still blind", { skip }, async () => {
+  // The trap in the obvious fix. `isDiagnosticStudyPerformed` gates on `category ~ imaging`, so emitting
+  // a correctly-coded LOINC Observation and stopping there changes nothing — and looks like it should.
+  const bundles = await withResourcesOn("wc-8", [officialObservation("wc-8", false)]);
+  const official = await officialOutcomes("cms125", bundles);
+  assert.equal(official.get("wc-8"), "OVERDUE", "a LOINC mammogram with no category is not a diagnostic study");
+});
+
+test("the remedy is DUAL-STAMPING: both representations, and both engines agree COMPLIANT", { skip }, async () => {
+  // Neither representation alone is enough, and they fail in opposite directions: the Procedure alone
+  // clears authored and not official; the Observation alone clears official and not authored. Emitting
+  // both is what the synthetic corpus already does (ADR-038) and what the crosswalk must do.
+  const bundles = await withResourcesOn("wc-8", [crosswalkProcedure("wc-8"), officialObservation("wc-8", true)]);
+  const official = await officialOutcomes("cms125", bundles);
+  const authored = await authoredOutcomes("cms125", bundles);
+
+  assert.equal(official.get("wc-8"), "COMPLIANT");
+  assert.equal(authored.get("wc-8"), "COMPLIANT");
+  for (const [subjectId, officialOutcome] of official) {
+    assert.equal(officialOutcome, authored.get(subjectId), `${subjectId} diverged under the remedy`);
+  }
+});
+
+test("KNOWN GAP — the Observation alone clears official while authored still reports OVERDUE", { skip }, async () => {
+  // The mirror image, recorded so a future crosswalk change that emits only the official shape is caught
+  // as a divergence rather than celebrated as a fix.
+  const bundles = await withResourcesOn("wc-8", [officialObservation("wc-8", true)]);
+  const official = await officialOutcomes("cms125", bundles);
+  const authored = await authoredOutcomes("cms125", bundles);
+  assert.equal(official.get("wc-8"), "COMPLIANT");
+  assert.equal(authored.get("wc-8"), "OVERDUE");
 });

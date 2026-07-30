@@ -129,9 +129,11 @@ function main(): void {
           ...(sex === "F" ? { gender: "female" } : sex === "M" ? { gender: "male" } : {}),
           // `us-core-sex` alongside `gender`, from the same column — see the long note on
           // `usCoreSexExtension` in `wcdb-fhir-shim/src/fhir-mapping.ts`, which this duplicates by
-          // design (no cross-package import; `hapi-live.test.ts` bucket parity is the drift guard).
-          // The official CMS125 initial population reads THIS element and never `gender`, comparing
-          // against the SNOMED concept id — so `"F"` here would be as good as absent.
+          // design (no cross-package import). The official CMS125 initial population reads THIS element
+          // and never `gender`, comparing against the SNOMED concept id — so `"F"` here would be as good
+          // as absent. NOTE: `hapi-live.test.ts` bucket parity, named as this duplication's drift guard,
+          // cannot see this field (it compares AUTHORED-engine buckets, and authored reads `gender`).
+          // This side is covered by `devdb-official-eval.test.ts`'s assertion on the committed fixture.
           ...(sex === "F" || sex === "M"
             ? { extension: [{ url: US_CORE_SEX_URL, valueCode: sex === "F" ? "248152002" : "248153007" }] }
             : {}),
