@@ -1129,26 +1129,47 @@ interface BatchProbe {
   singles: string[];
 }
 
-/** An engine that batches `batchable` and evaluates everything else one subject at a time. */
-function batchProbe(batchable: Set<string>, opts: { failOn?: string } = {}): BatchProbe {
+/**
+ * An engine that batches `batchable` and evaluates everything else one subject at a time.
+ *
+ * `ipp` models what the OFFICIAL adapter reports and the authored engine does not: `undefined` leaves the
+ * field off entirely (the authored shape), `false` reports every subject out of the initial population
+ * (ADR-043's WARN condition), `true` reports them in it.
+ *
+ * `omit` models the executor's documented per-subject omission — fqm returned nothing for that subject, so
+ * it is deliberately ABSENT from the batch result and the pipeline re-evaluates it alone. `singleIpp` is
+ * what that individual fallback then reports. Together they reproduce the two orderings Codex flagged on
+ * #354, which the batch-time version of this check got wrong in both directions.
+ */
+function batchProbe(
+  batchable: Set<string>,
+  opts: { failOn?: string; ipp?: boolean; omit?: Set<string>; singleIpp?: boolean } = {},
+): BatchProbe {
   const batches: Array<{ measureId: string; size: number }> = [];
   const singles: string[] = [];
   const outcomeFor = (subjectId: string, measureId: string) => ({
     subjectId,
     measure: measureId,
     outcome: "COMPLIANT" as const,
+    ...(opts.ipp === undefined ? {} : { inInitialPopulation: opts.ipp }),
     evidence: { expressionResults: [{ define: "Outcome Status", result: "COMPLIANT" }], via: "batch" },
   });
   return {
     batches,
     singles,
     engine: {
+      // Models the real router's identity contract (ADR-040): a routed measure declares
+      // `official-fqm:…`, everything else declares the authored ELM hash. ADR-043's empty-IPP WARN is
+      // gated on this, so a probe that omitted it would silently make every WARN test vacuous.
+      logicVersionFor: (measureId: string) =>
+        batchable.has(measureId) ? "official-fqm:1.0.000:artifact-sha:terminology-sha" : "sha256:authored",
       async evaluate(input) {
         singles.push(`${input.measureId}`);
         return {
           subjectId: "ignored",
           measure: input.measureId,
           outcome: "OVERDUE" as const,
+          ...(opts.singleIpp === undefined ? {} : { inInitialPopulation: opts.singleIpp }),
           evidence: { expressionResults: [{ define: "Outcome Status", result: "OVERDUE" }], via: "single" },
         };
       },
@@ -1161,7 +1182,11 @@ function batchProbe(batchable: Set<string>, opts: { failOn?: string } = {}): Bat
         if (opts.failOn === measureId) {
           throw new Error(`${measureId}: the official artifact retrieved NOTHING for any of ${subjects.length} subjects`);
         }
-        return new Map(subjects.map((s) => [s.subjectId, outcomeFor(s.subjectId, measureId)]));
+        return new Map(
+          subjects
+            .filter((s) => !opts.omit?.has(s.subjectId))
+            .map((s) => [s.subjectId, outcomeFor(s.subjectId, measureId)]),
+        );
       },
     },
   };
@@ -1172,15 +1197,136 @@ async function runWithProbe(probe: BatchProbe, scope: Parameters<typeof executeM
   const db = await createSqliteD1(p);
   await db.exec(RUN_STORE_FLOOR_DDL.replace(/\n/g, " "));
   const outcomeStore = new SqliteOutcomeStore(db);
+  const runStore = new SqliteRunStore(db);
   const deps: RunPipelineDeps = {
-    runStore: new SqliteRunStore(db),
+    runStore,
     outcomeStore,
     engine: probe.engine,
     employees: [employeeById("emp-001")!, employeeById("emp-002")!, employeeById("emp-003")!],
   };
   const res = await executeManualRun(deps, scope);
-  return { res, outcomes: await outcomeStore.listOutcomes(res.runId) };
+  return {
+    res,
+    outcomes: await outcomeStore.listOutcomes(res.runId),
+    logs: await runStore.listLogs(res.runId, 1000),
+  };
 }
+
+const MEASURE_SCOPE = { scopeType: "MEASURE", measureId: "audiogram", evaluationDate: "2026-06-15" } as const;
+const IPP_WARN = /not one of \d+ subjects entered the official initial population/;
+
+test("ADR-043: a whole roster out of the initial population WARNs — and the run still COMPLETES", async () => {
+  // The hazard ADR-042 could only assert in prose: a live WebChart tenant whose Patients carry no
+  // `us-core-sex` has every subject fall out of official CMS125's IPP, the run completes, and the roster
+  // reads like a legitimately ineligible cohort. Measured, and invisible to PR-8f's retrieve refusal —
+  // official CMS125 matched 236 LOINC Observations on real WebChart data and still put all 56 out.
+  const probe = batchProbe(new Set(["audiogram"]), { ipp: false });
+  const { res, outcomes, logs } = await runWithProbe(probe, MEASURE_SCOPE);
+
+  const warn = logs.find((l) => l.level === "WARN" && IPP_WARN.test(l.message));
+  assert.ok(warn, "a WARN must record that nobody entered the initial population");
+  assert.match(warn!.message, /us-core-sex/, "name the known cause so the message is actionable");
+
+  // And it must reach the RUN MESSAGE, not only `run_logs`. Review's point: this whole change exists
+  // because the failure was invisible, and a log line nobody opens without drilling into a run detail page
+  // is a thin discharge. The message is what the run list and the POST response show.
+  assert.match(res.message, /nobody entered the official initial population for audiogram/);
+
+  // NOT a failure — this is the correction review forced (Codex P1). A site-scoped CMS125 run over an
+  // all-male cohort legitimately has nobody in the IPP, and cohort composition varies by run, so "stop
+  // routing the measure" is not a remedy an operator can apply. Failing would replace every subject's
+  // `official.populationResults` evidence with an `evaluationError` — the blob MeasureReport/QRDA read
+  // (ADR-031) — and turn a valid zero-denominator report into engine errors.
+  assert.equal(res.status, "COMPLETED", "a zero-denominator run is valid, not a PARTIAL_FAILURE");
+  assert.equal(outcomes.length, 3, "every subject keeps an outcome");
+  assert.ok(
+    outcomes.every((o) => (o.evidence as { via?: string }).via === "batch"),
+    "and keeps its real evidence rather than an evaluationError",
+  );
+});
+
+test("ADR-043: no WARN when somebody IS in the initial population", async () => {
+  const { logs } = await runWithProbe(batchProbe(new Set(["audiogram"]), { ipp: true }), MEASURE_SCOPE);
+  assert.ok(!logs.some((l) => IPP_WARN.test(l.message)), "an eligible roster must not be flagged");
+});
+
+test("ADR-043: a SINGLE subject out of the IPP is not warned about — the `> 1` boundary", async () => {
+  // ADR-043 decision 4. For one person "not in the initial population" is an ordinary correct answer —
+  // `/simulate` on somebody outside the age band — so an EMPLOYEE-scoped run of one subject must stay
+  // quiet. Without this, changing `> 1` to `> 0` fails nothing and the boundary is decorative.
+  const probe = batchProbe(new Set(["audiogram"]), { ipp: false });
+  const { res, logs } = await runWithProbe(probe, {
+    scopeType: "EMPLOYEE",
+    employeeExternalId: "emp-001",
+    measureId: "audiogram",
+    evaluationDate: "2026-06-15",
+  } as Parameters<typeof executeManualRun>[1]);
+
+  assert.equal(probe.batches[0]?.size, 1, "exactly one subject was evaluated");
+  assert.ok(!logs.some((l) => IPP_WARN.test(l.message)), "one out-of-IPP subject is not a finding");
+  assert.ok(!/initial population/.test(res.message));
+});
+
+test("ADR-043: an OMITTED subject who lands in the IPP silences the WARN (no false positive)", async () => {
+  // Codex #354, direction one. The batch returns two out-of-IPP outcomes and omits emp-003; the pipeline
+  // re-evaluates emp-003 alone and it IS in the initial population. Concluding at batch time — off
+  // `prefetched`, before the fallback ran — saw only the two and warned about a roster that has an
+  // eligible subject in it. The roster is not complete until the loop is.
+  const probe = batchProbe(new Set(["audiogram"]), {
+    ipp: false,
+    omit: new Set(["emp-003"]),
+    singleIpp: true,
+  });
+  const { res, logs } = await runWithProbe(probe, MEASURE_SCOPE);
+
+  assert.deepEqual(probe.singles, ["audiogram"], "the omitted subject must actually take the fallback path");
+  assert.ok(!logs.some((l) => IPP_WARN.test(l.message)), "somebody IS in the population — no warning");
+  assert.ok(!/initial population/.test(res.message), "and nothing leaks into the run message");
+});
+
+test("ADR-043: omitted subjects who all land OUT of the IPP still trigger the WARN (no false negative)", async () => {
+  // Codex #354, direction two — the quieter half. The batch returns ONE out-of-IPP outcome and omits the
+  // other two, which then evaluate out individually as well. Concluding at batch time saw a sample of one,
+  // failed its own `> 1` guard, and stayed silent on a roster where nobody qualified — the exact silence
+  // this ADR exists to end.
+  const probe = batchProbe(new Set(["audiogram"]), {
+    ipp: false,
+    omit: new Set(["emp-002", "emp-003"]),
+    singleIpp: false,
+  });
+  const { res, logs } = await runWithProbe(probe, MEASURE_SCOPE);
+
+  const warn = logs.find((l) => l.level === "WARN" && IPP_WARN.test(l.message));
+  assert.ok(warn, "all three subjects are out of the population — this must warn");
+  assert.match(warn!.message, /not one of 3 subjects/, "and count the WHOLE roster, not just the batched part");
+  assert.match(res.message, /nobody entered the official initial population for audiogram/);
+});
+
+test("ADR-043: an AUTHORED measure with everyone out of its own IPP is NEVER warned about", async () => {
+  // The premise an earlier version of this check rested on — "the authored engine never sets
+  // `inInitialPopulation`" — is FALSE. `deriveInInitialPopulation` emits the field for every measure with
+  // a boolean `Initial Population` define, which is all 16 of ours. Ungated, an authored measure whose
+  // cohort sits entirely outside its own IPP would be told nobody entered the OFFICIAL initial population
+  // and pointed at `us-core-sex` — for a measure with no official artifact, unnamed in
+  // `WORKWELL_OFFICIAL_MEASURES`, and nothing to do with WebChart.
+  //
+  // Nothing batchable, so every subject takes the individual path and reports `false`. The measure
+  // declares an authored `sha256:` identity, so the check must not look at it at all.
+  const probe = batchProbe(new Set(), { singleIpp: false });
+  const { res, logs } = await runWithProbe(probe, MEASURE_SCOPE);
+
+  assert.equal(probe.singles.length, 3, "all three took the authored per-subject path");
+  assert.ok(!logs.some((l) => IPP_WARN.test(l.message)), "an authored measure must never trigger this");
+  assert.ok(!/initial population/.test(res.message), "and nothing leaks into the run message");
+});
+
+test("ADR-043: an outcome with NO membership field is 'unknown', never 'out of population'", async () => {
+  // `inInitialPopulation` is optional and the AUTHORED engine never sets it. Treating `undefined` as false
+  // would WARN on every batched authored measure the day one becomes batchable — a false alarm on a path
+  // that has no initial-population concept at all. Caught by reading this probe, which omits the field.
+  const { logs } = await runWithProbe(batchProbe(new Set(["audiogram"])), MEASURE_SCOPE);
+  assert.ok(!logs.some((l) => IPP_WARN.test(l.message)), "absent membership data is not evidence of absence");
+});
 
 test("PR-8: a batchable measure is evaluated in ONE call for the whole roster", async () => {
   const probe = batchProbe(new Set(["audiogram"]));

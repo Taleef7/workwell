@@ -137,6 +137,95 @@ To produce it locally: `cd backend-ts && pnpm vendor:official --measure <MADiE n
 `git diff --exit-code measures/official`, so the committed artifact is proven reproducible from its pin
 on every PR.
 
+### Flipping a measure to official execution — pre-flip checklist (ADR-043)
+
+Setting `WORKWELL_OFFICIAL_MEASURES` on a stack is the only irreversible-feeling step in the official-first
+sequence, because from that point the measure's roster rows are produced by the published artifact rather
+than by our authored CQL. Most of what could go wrong already fails loudly — a missing artifact, a missing
+terminology sidecar, or a capped expansion all **refuse at construction** (ADR-036/041), and a batch that
+retrieved nothing for anybody refuses at runtime (PR-8f).
+
+**One failure mode does not, and this checklist exists for it.** A whole roster can land *outside the
+official initial population* while every retrieve matches — measured: official CMS125 matched 236 LOINC
+Observations on real WebChart data and still put all 56 subjects out of the IPP, for want of a `us-core-sex`
+extension. The run completes, writes a full set of MISSING_DATA outcomes, and reads exactly like a cohort in
+which nobody is eligible. ADR-043 decided **not** to refuse that at runtime: a legitimately all-ineligible
+cohort produces the identical shape, cohort composition varies per run, and failing would replace valid
+`official.populationResults` evidence with an engine error. The runtime emits a `WARN` (in `run_logs` and in
+the run message) and reports the outcomes as computed. **Discrimination between the two causes happens
+here, before the flip — comparing official against the authored engine over data whose answer is known.**
+
+Per measure, per stack:
+
+1. **Confirm the gate is green for the data this stack will actually see.** These tests need the fetched
+   terminology sidecar and **self-skip without it** — `pnpm test` does not run them, so run them explicitly.
+   These are the two that decide a flip; CI's `official-cases` job runs them inside a longer list
+   (`official-terminology`, `corpus-membership`, `literal-diff` as well), and **any new sidecar-reading test
+   must be added to that job or it is permanently skipped while reading as covered**:
+
+   ```bash
+   cd backend-ts
+   pwsh -NoProfile -File scripts/fetch-official-cases.ps1   # MADiE cases → .official-content
+   # The terminology SIDECAR comes from vendoring, NOT from the fetch above. Without it every test
+   # below self-skips and the run reads green having verified nothing.
+   WORKWELL_VSAC_API_KEY=<umls-api-key> pnpm vendor:official \
+     --measure CMS122FHIRDiabetesAssessGT9Pct --catalog-id cms122 --strip-elm-annotations --complete-capped-expansions
+   WORKWELL_VSAC_API_KEY=<umls-api-key> pnpm vendor:official \
+     --measure CMS125FHIRBreastCancerScreen --catalog-id cms125 --strip-elm-annotations --complete-capped-expansions
+   pnpm exec node --import tsx --test \
+     src/wiring/official-corpus-outcomes.test.ts \
+     src/engine/ingress/webchart/devdb-official-eval.test.ts
+   pnpm test:official-cases                                 # the MADiE known-answer gate, 121/121
+   ```
+
+   > **Read the `skipped` count, not just `fail`.** Both files self-skip wholesale without the sidecar
+   > (`devdb-official-eval.test.ts`'s skip reason is literally *"run 'pnpm vendor:official' to fetch the
+   > terminology sidecars"*), and `pnpm test:official-cases` silently degrades to a weaker
+   > upstream-terminology fallback. `pass 0, fail 0, skipped N` is **not** a green gate — it is the gate
+   > not running. Expect `skipped 0`.
+
+   Note which corpus is representative for the stack you are flipping: `devdb-official-eval.test.ts` is the
+   per-subject official-vs-authored divergence map over the committed 56-patient **WebChart** dev-DB
+   fixture; `official-corpus-outcomes.test.ts` covers the **synthetic** roster a seamless stack evaluates.
+2. **Confirm a NON-ZERO initial population against the tenant's own data.** This is the step the runtime
+   cannot perform. If official puts everybody out of the IPP *and* authored finds actionable subjects in the
+   same bundles, that is a mapping gap — do not flip. If both engines agree there is nobody to score, it is a
+   data gap: flipping is harmless but pointless, and every run will carry the WARN.
+3. **Check the numerator, not just membership.** Being in the population is not agreement. The open
+   mammography gap (ADR-042 consequence 3) has official report a *screened* woman OVERDUE because the
+   crosswalk emits a CPT `Procedure` where the official artifact retrieves a LOINC `Observation` with
+   `category ~ imaging`. Nothing fires on this — subjects are in the population. Dual-stamp both
+   representations first.
+4. **Take a before/after distribution snapshot** for the measure on that stack, so the flip's effect on the
+   roster is a recorded number rather than an impression.
+5. **Add the variable to the deploy workflow — setting it on the container by hand does not survive.**
+   `deploy-twh-mieweb.yml` builds `CONTAINER_ENV_VARS_JSON` as a fixed `jq -nc '[…]'` array with **no
+   `WORKWELL_OFFICIAL_MEASURES` key and no passthrough**, and the deploy script deletes and recreates the
+   container — so a hand-set value is wiped on the next deploy. Flipping is a **workflow edit**, reviewed
+   and merged like any other change. (Same for staging.)
+
+6. **Redeploy, then check the two signals that exist — neither is a clean boot failure.**
+   - The seam line reports `official-measures=on|off` only; it does **not** name the routed measures, so
+     `on` confirms the variable was read, not that it says what you intended.
+   - **A misconfiguration does NOT refuse at boot.** `worker.ts` logs
+     `WORKWELL_ALERT {"kind":"OFFICIAL_ROUTING_MISCONFIGURED",…}` on the first request and the actual
+     throw is at engine construction, **per request**. `/actuator/health` is deliberately DB-free and
+     stays **200**, so the container reads green while every evaluating route 500s — the exact symptom
+     profile DEPLOY.md's "Watch the right signal" section exists because of. **Grep the logs for
+     `OFFICIAL_ROUTING_MISCONFIGURED` before trusting a green container.**
+   - Then run one population run and read `run_logs`: an `INFO` line per routed measure (`N subject(s)
+     evaluated in one official batch`) proves the artifact ran, and the ADR-043 `WARN` flags a whole
+     roster out of the initial population.
+
+Reversible: remove the variable from the workflow and redeploy. `logic_version` carries the artifact's
+identity (ADR-040), so flip-on, flip-off and re-vendor each invalidate `eval_state` by construction — no
+manual cache `DELETE`.
+
+| stack | seam | what a flip evaluates |
+|---|---|---|
+| demo / production (`deploy-twh-mieweb.yml`) | none — zero `WORKWELL_WEBCHART_*` | the synthetic roster; official cms122 **and** cms125 score and agree with authored |
+| staging (`deploy-staging-mieweb.yml`) | live WebChart (teatea) | official **cms122** puts every subject out of the IPP (zero Conditions in the seed) — routing it there produces nothing useful, and the WARN says so each run |
+
 The deploy script talks to the MIE Container Manager **v1 API** (`<manager-origin>/api/v1`):
 responses are wrapped in a `{"data": ...}` envelope, the create body uses `template` with
 `services` as an array of flat objects, and job polling reads `.data.status` (success value
@@ -667,6 +756,7 @@ shows all services `Up`).
 | `WORKWELL_WEBCHART_PATIENT_SEARCH` | Backend | Raw FHIR query for the population-listing request, **required** for servers that 403 a bare `GET /Patient` (teatea does — verified 2026-07-23). The client drops `_count` automatically on a 400/403, but it will **not** guess a demographic filter (that could silently drop subjects) — so when a bare `/Patient` is also refused it errors unless this is set. Use a query you have verified returns the **whole** population by comparing its `Bundle.total`: prefer the **full FHIR range** `birthdate=le9999-12-31` (teatea = 35, numeric `Bundle.total` present) over a narrow bound like `birthdate=gt1900-01-01` (drops early/default records → 28/35) or `le3000-01-01` (would miss the common `9999-12-31` "unknown" sentinel). The client also fails an authoritative run if it fetches fewer than `Bundle.total` (paging truncation), but it **cannot** detect a query that under-matches, and no birthdate bound reaches a record with no `birthDate` — see the staging section's residual-gap note. |
 | `WORKWELL_WEBCHART_ENROLLMENT_JSON` | Backend | Optional JSON object `{ "raw-patient-id": ["measure_id"] }` controlling live-tenant enrollment. When unset, every live subject is enrolled in the fail-closed `ROSTER_ELIGIBLE_MEASURES` allowlist; clinical age/sex/diagnosis/visit gates in CQL remain authoritative. Inert unless the WebChart seam is configured. |
 | `WORKWELL_WEBCHART_LIVE_TEST_BASE_URL` | Dev/test only | Gates the self-skipping live-HTTP suite (`hapi-live.test.ts`) at a local HAPI "fake WebChart" (ADR-032). **Never set on a deployed stack** — deliberately distinct from `WORKWELL_WEBCHART_BASE_URL` so a runtime `.env` can't make `pnpm test` network-dependent. |
+| `WORKWELL_OFFICIAL_MEASURES` | Backend | Comma-list of catalog ids that evaluate the **official published artifact** instead of authored CQL (roadmap §7.4 / ADR-036..043), e.g. `"cms122,cms125"`. Never `"all"` — that is refused, because "all" is a measure name like any other. **Unset everywhere today**, and while unset `routedEngineForEnv` returns `engineForEnv`'s value *by identity*, so the run loop is byte-identical. Validated at engine construction: an id with no vendored artifact, a missing terminology sidecar, or an incomplete (capped) expansion **refuses rather than degrading** — but note the refusal is **per request**, not a boot failure: the worker logs `WORKWELL_ALERT {"kind":"OFFICIAL_ROUTING_MISCONFIGURED",…}` on the first request while the DB-free `/actuator/health` stays 200, so the container reads green and every evaluating route 500s. Grep for that alert. **Not settable on the container** — it has no key in either deploy workflow's `CONTAINER_ENV_VARS_JSON`, so flipping is a workflow edit. Read the pre-flip checklist above before setting it. |
 | `WORKWELL_VSAC_API_KEY` | Backend | UMLS API key for live VSAC value-set expansion (ADR-023). **Inert unless set — the demo stack leaves it unset** (evaluation stays byte-identical to the inline path). Also required by the `pnpm resolve-valuesets` import CLI. |
 | `WORKWELL_VSAC_BASE_URL` | Backend | NLM FHIR terminology service base for VSAC `$expand` (default `https://cts.nlm.nih.gov/fhir`). |
 | `WORKWELL_IMMZ_ICE_BASE_URL` | Backend | Base URL of a self-hosted **ICE** sidecar (ADR-029), e.g. `http://ice:8080/opencds-decision-support-service`. **Selects the real ICE forecaster on its own** — a self-hosted sidecar has no API key. **Inert unless set — the demo stack leaves it unset** (the simulated forecaster serves; behavior is byte-identical). See "Immunization forecasting (ICE sidecar)" below. |
