@@ -48,7 +48,20 @@ onboarded took the gate — and it disqualified half of them, for three differen
 5. **`OfficialMeasureId` is derived from the gate map** (`keyof typeof MEASURES`) rather than hand-listed
    as a union. The union had to be edited in a second place, and forgetting was a compile error at best
    and a silently ungated measure at worst.
-6. **Nothing is routed by this change.** Routable and routed stay separate steps: these three have no
+6. **An EPISODE-OF-CARE measure is refused at construction — so CMS68 is gated but NOT routable.**
+   *(Added after review, #358.)* CMS68 declares `populationBasis: "Encounter"`: one patient with N
+   qualifying encounters is N denominator units, and `outcomeFromPopulations` maps exactly one boolean
+   vector per **subject**. Routing it would collapse four office visits into one outcome, so
+   MeasureReport would count subjects where the measure counts encounters — a wrong denominator with
+   nothing to signal it.
+
+   **The MADiE deck provably cannot catch this**, which is why it needed a refusal rather than a note:
+   all 19 CMS68 cases have a max expected count of 1 for every population, and not one subject produces
+   more than a single episode. `19/19` is evidence about single-encounter patients, and a green gate over
+   exactly the shape that hides the defect is the most dangerous kind. Episode support is unbuilt;
+   `officialRoutingProblems` now says so at construction. cms2 and cms951 are `populationBasis: boolean`
+   and stay routable.
+7. **Nothing is routed by this change.** Routable and routed stay separate steps: these three have no
    authored counterpart, so a flip has no oracle to be compared against, and `flip-snapshot`'s
    authored-vs-official comparison — the thing every flip so far has been judged on — cannot run for
    them. What that comparison should be replaced by is the open question the next flip has to answer.
