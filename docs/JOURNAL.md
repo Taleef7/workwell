@@ -1,5 +1,62 @@
 # Journal
 
+## 2026-07-30 (later still) — the mammography numerator, and giving the flip gate a command (branch `feat/webchart-mammography-dual-stamp`)
+
+The last thing standing between here and PR-9c was the numerator gap ADR-042 recorded and ADR-043 could not
+see. It is the nastiest of the three WebChart↔official divergences because it is **silent by construction**:
+the subjects it affects *are* in the initial population, so the ADR-043 WARN is correctly quiet while
+official reports a woman who has been screened as OVERDUE — and `case-logic.ts` turns that into a
+HIGH-priority "escalate mammogram follow-up immediately". A confident wrong answer on the ordinary case.
+
+**The cause is two engines reading two resource types for one fact.** Authored `cms125.cql` retrieves
+`[Procedure: "Mammography"]` and its value set carries CPT/HCPCS; official CMS125 retrieves
+`isDiagnosticStudyPerformed([Observation: "Mammography"])` over **92 LOINC codes with no CPT in them**, and
+additionally requires `category ~ imaging`. WebChart records mammograms as CPT `77067` / legacy `G0202`
+procedures. Each single-representation fix fails, and they fail in *opposite* directions — which is why
+"just emit the LOINC Observation" is wrong, and why a LOINC Observation without `category` looks like a fix
+and changes nothing.
+
+**So the crosswalk dual-stamps** — both representations of the one row, in both mapping sites, exactly as
+`us-core-sex` did. What took the most care was writing down *why this is not fabrication* (ADR-037), and
+turning that into three tested properties rather than an assurance: derived strictly from a real row, an
+explicit code allowlist rather than a category sweep, and non-inflating because both numerators are
+`exists(...)`. That third one has a real limit I made sure landed in `WEBCHART_FHIR_MAPPING.md` §3.6 rather
+than in my head: **this pattern would double-count for a counting measure.** The next dual-stamp has to
+re-check it.
+
+**The fixture moved by one resource and no outcome.** Its only mammography record belongs to wc-49, who is
+33 and outside the `[42..74]` IPP. That is exactly why the dual stamp is asserted *directly* on the fixture
+instead of inferred from an unchanged distribution — an unchanged distribution here proves nothing. Docker
+was down, so rather than skip it I replayed the generator's own insertion rule over the committed artifact
+and verified the diff was precisely 28 lines of one Observation. Recorded as such in ADR-044: a re-export
+when the dev DB is up should be a no-op, and if it isn't, the fixture is wrong.
+
+**The second half of the PR is the part review earned.** #354's reviewer made the fair objection that
+ADR-043 moved enforcement onto "the flip gate" while the half of that gate which can actually see a tenant
+— confirm a non-zero initial population, take a before/after snapshot — shipped as prose with no command
+and no artifact. That is the same vacuous-guard shape this branch has now been pulled up on three times
+(#350, #352, #354), and it deserved a tool rather than a third promise. `pnpm flip-snapshot` evaluates a
+measure through both engines over the same bundles and reports the before/after distribution, the official
+IPP count, and every subject whose row would change.
+
+**It renders a verdict and gates nothing, and that split is the whole design.** ADR-043 established that a
+machine cannot tell "nobody qualifies" from "the data lacks an element the IPP reads" by shape alone. What
+a machine *can* do is compute the comparison a human needs — official admits nobody while authored finds
+actionable subjects in the same bundles ⇒ the cohort is not the explanation. So it says **DO NOT FLIP**
+there, **INCONCLUSIVE** where both engines are blind, and exits 0 regardless. Wiring it into CI as pass/fail
+would re-assert exactly the judgement ADR-043 rejected, so the ADR says not to.
+
+**Running it produced the flip's evidence rather than an argument for it.** On the synthetic roster the
+demo/production stack actually evaluates: cms122 and cms125 each admit **5 of 5** to the initial population
+and agree with authored on every subject. Over WebChart data: cms125 admits 4 of 56 and agrees on all 56;
+cms122 admits 0 of 56 and reports INCONCLUSIVE — a data gap, not a divergence. That is ADR-043 decision 6
+confirmed by measurement instead of by reasoning about which stack has which seam.
+
+Verified: typecheck clean both packages; shim 30/30; `devdb-official-eval` **11/11 with 0 skipped**
+(including the four failure states, kept because three of them are how a future simplification reopens the
+gap); flip-snapshot report tests 6/6, deliberately pure so they can never self-skip the way the
+sidecar-gated suites did.
+
 ## 2026-07-30 (later) — the PR-9c precondition, and the refusal review was right to kill (branch `feat/official-ipp-refusal`)
 
 ADR-042 shipped with a limit it could only assert in prose: both `us-core-sex` mapping fixes sit upstream of

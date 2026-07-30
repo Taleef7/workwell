@@ -19,6 +19,7 @@
     "seed:quality-history": "tsx src/run/cli/seed-quality-history-bin.ts",
     "resolve-valuesets": "tsx src/run/cli/resolve-valuesets-bin.ts",
     "test:official-cases": "tsx src/run/cli/official-cases-bin.ts",
+    "flip-snapshot": "tsx src/run/cli/official-flip-snapshot-bin.ts",
     "webchart:export-devdb": "tsx scripts/webchart-devdb-export.ts",
     "evaluate:webchart-devdb": "tsx src/engine/ingress/webchart/devdb-cli-bin.ts",
     "evaluate:webchart-live": "tsx src/engine/ingress/webchart/live-cli-bin.ts",

@@ -343,12 +343,26 @@ test("cms122 over real WebChart data: nobody in the IPP — a DATA gap, not a fl
  * ordinary case, and via `case-logic.ts` it becomes a HIGH-priority case telling an operator to "escalate
  * mammogram follow-up immediately" for a mammogram she already had.
  *
- * These are recorded as KNOWN divergences so the flip's real risk is a tracked expectation instead of an
- * argument. Closing them is a crosswalk change (M-D), not an edit here.
+ * ## CLOSED by ADR-044 — but these tests stay, and are worth reading as a set
+ *
+ * The crosswalk now **dual-stamps**: a screening-mammogram procedure row emits the CPT/HCPCS `Procedure`
+ * it always did AND a LOINC `Observation` carrying `category ~ imaging`
+ * (`wcdb-fhir-shim/src/fhir-mapping.ts` + the by-design duplicate in `scripts/webchart-devdb-export.ts`).
+ *
+ * The four tests below are kept because each pins a DIFFERENT wrong answer, and three of them are the
+ * ways a future "simplification" of the crosswalk would silently reopen the gap:
+ *   - Procedure alone → official false-OVERDUE (the original bug)
+ *   - LOINC Observation without `category` → still blind (the trap in the obvious fix)
+ *   - Observation alone → the mirror image; authored now reports OVERDUE
+ *   - both → the shipped behaviour; the two engines agree
+ *
+ * They inject resources directly rather than importing the crosswalk, because the mapping lives in a
+ * separate package by design (ADR-034) and backend-ts must not import it. The guard against those two
+ * copies drifting is `hapi-live.test.ts`'s bucket-parity suite plus the fixture assertion below.
  */
 const MAMMO_DATE = "2023-09-15"; // inside the official MP (2023-06-01 .. 2024-06-01) for EVAL 2024-06-01
 
-/** Exactly what `webchart/terminology.ts` emits today for one real screening mammogram. */
+/** The CPT/HCPCS half of what the crosswalk emits — on its own, invisible to the official numerator. */
 const crosswalkProcedure = (subjectId: string) => ({
   resourceType: "Procedure",
   id: `${subjectId}-Procedure-mammo`,
@@ -378,7 +392,39 @@ async function withResourcesOn(subjectId: string, extra: readonly unknown[]): Pr
   });
 }
 
-test("KNOWN GAP — a crosswalk-shaped mammogram makes official report a screened woman OVERDUE", { skip }, async () => {
+test("ADR-044: the committed fixture carries the DUAL STAMP for its one real mammogram", { skip }, async () => {
+  // Proves the generator rule actually landed in the committed artifact, not just in the mapping code.
+  // wc-49 is the seed's only mammography record (HCPCS G0202, 2015) — she is 33 and outside the [42..74]
+  // IPP, so this moves no outcome, which is exactly why it needs asserting rather than inferring from
+  // the distribution being unchanged.
+  const bundles = await liveBundles("cms125");
+  const wc49 = bundles.find((b) => patientId(b) === "wc-49") as { entry: Array<{ resource: Record<string, unknown> }> };
+  const resources = wc49.entry.map((e) => e.resource);
+
+  // Specifically the MAMMOGRAPHY procedure — wc-49 carries other procedures too, and matching the first
+  // one made this compare against an unrelated 2016 row.
+  const proc = resources.find(
+    (r) =>
+      r.resourceType === "Procedure" &&
+      ["77067", "G0202"].includes((r.code as { coding: Array<{ code: string }> }).coding[0]!.code),
+  );
+  assert.ok(proc, "the source Procedure must remain — dual-stamping ADDS, never replaces");
+
+  const mammo = resources.find(
+    (r) =>
+      r.resourceType === "Observation" &&
+      (r.code as { coding: Array<{ code: string }> }).coding[0]!.code === "24606-6",
+  ) as Record<string, unknown> | undefined;
+  assert.ok(mammo, "and the LOINC imaging Observation must be beside it");
+  assert.equal(
+    (mammo!.category as Array<{ coding: Array<{ code: string }> }>)[0]!.coding[0]!.code,
+    "imaging",
+    "`isDiagnosticStudyPerformed` gates on this",
+  );
+  assert.equal(mammo!.effectiveDateTime, proc!.performedDateTime, "derived from the row, not minted today");
+});
+
+test("one representation alone — a Procedure makes official report a screened woman OVERDUE", { skip }, async () => {
   const bundles = await withResourcesOn("wc-8", [crosswalkProcedure("wc-8")]);
   const official = await officialOutcomes("cms125", bundles);
   const authored = await authoredOutcomes("cms125", bundles);
@@ -389,7 +435,7 @@ test("KNOWN GAP — a crosswalk-shaped mammogram makes official report a screene
   assert.deepEqual(distribution(official), { MISSING_DATA: 52, OVERDUE: 4 });
 });
 
-test("KNOWN GAP — a LOINC Observation WITHOUT category=imaging leaves official still blind", { skip }, async () => {
+test("one representation alone — a LOINC Observation WITHOUT category=imaging leaves official blind", { skip }, async () => {
   // The trap in the obvious fix. `isDiagnosticStudyPerformed` gates on `category ~ imaging`, so emitting
   // a correctly-coded LOINC Observation and stopping there changes nothing — and looks like it should.
   const bundles = await withResourcesOn("wc-8", [officialObservation("wc-8", false)]);
@@ -397,7 +443,7 @@ test("KNOWN GAP — a LOINC Observation WITHOUT category=imaging leaves official
   assert.equal(official.get("wc-8"), "OVERDUE", "a LOINC mammogram with no category is not a diagnostic study");
 });
 
-test("the remedy is DUAL-STAMPING: both representations, and both engines agree COMPLIANT", { skip }, async () => {
+test("ADR-044 SHIPPED: dual-stamping both representations makes the two engines agree COMPLIANT", { skip }, async () => {
   // Neither representation alone is enough, and they fail in opposite directions: the Procedure alone
   // clears authored and not official; the Observation alone clears official and not authored. Emitting
   // both is what the synthetic corpus already does (ADR-038) and what the crosswalk must do.
@@ -412,7 +458,7 @@ test("the remedy is DUAL-STAMPING: both representations, and both engines agree 
   }
 });
 
-test("KNOWN GAP — the Observation alone clears official while authored still reports OVERDUE", { skip }, async () => {
+test("one representation alone — the Observation clears official while authored reports OVERDUE", { skip }, async () => {
   // The mirror image, recorded so a future crosswalk change that emits only the official shape is caught
   // as a divergence rather than celebrated as a fix.
   const bundles = await withResourcesOn("wc-8", [officialObservation("wc-8", true)]);

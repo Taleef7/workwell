@@ -37,6 +37,19 @@ const SYS = {
 
 /** The wellness/eCQM measures the dev-DB sample can actually exercise (real LOINC/HCPCS present). */
 const US_CORE_SEX_URL = "http://hl7.org/fhir/us/core/StructureDefinition/us-core-sex";
+const OBSERVATION_CATEGORY = "http://terminology.hl7.org/CodeSystem/observation-category";
+/**
+ * Screening-mammogram procedure codes → the LOINC the OFFICIAL artifact retrieves (ADR-044).
+ *
+ * The by-design duplicate of `wcdb-fhir-shim/src/fhir-mapping.ts`'s `MAMMOGRAPHY_CPT_TO_LOINC` — same
+ * ~100-line intentional duplication as the rest of this generator, with `hapi-live.test.ts`'s
+ * bucket-parity suite as the drift guard. `24606-6` is a member of the official `Mammography` value set
+ * (…108.12.1018 — 92 LOINC codes, no CPT, no HCPCS), verified against the vendored expansion.
+ */
+const MAMMOGRAPHY_CPT_TO_LOINC = new Map([
+  ["77067", "24606-6"],
+  ["G0202", "24606-6"],
+]);
 const WELLNESS_MEASURES = ["diabetes_hba1c", "obesity_bmi", "cholesterol_ldl", "hypertension"];
 const FEMALE_MEASURES = ["cms125"]; // screening mammography — enrolled for female patients only
 
@@ -167,6 +180,24 @@ function main(): void {
           ...(fhirDate(p.dt) ? { performedDateTime: fhirDate(p.dt) } : {}),
         },
       });
+      // DUAL-STAMP one real mammogram into the second vocabulary (ADR-044). The authored engine reads the
+      // Procedure above; official CMS125 retrieves `[Observation: "Mammography"]` and additionally requires
+      // `category ~ imaging`, over a LOINC-only value set. Emitting one shape and not the other makes
+      // official report an already-screened woman OVERDUE. Derived strictly from this row — no row, no
+      // Observation, and the date is the procedure's own.
+      const loinc = MAMMOGRAPHY_CPT_TO_LOINC.get(cpt);
+      if (loinc) {
+        entries.push({
+          resource: {
+            resourceType: "Observation",
+            status: "final",
+            subject: ref,
+            category: [{ coding: [{ system: OBSERVATION_CATEGORY, code: "imaging" }] }],
+            code: { coding: [{ system: SYS.LOINC, code: loinc }] },
+            ...(fhirDate(p.dt) ? { effectiveDateTime: fhirDate(p.dt) } : {}),
+          },
+        });
+      }
     }
 
     bundles.push({ resourceType: "Bundle", type: "collection", entry: entries });

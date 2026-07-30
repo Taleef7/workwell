@@ -319,13 +319,32 @@ there produces nothing useful, and the WARN says so each run. **What none of thi
 satisfied while the numerator reads the wrong shape — the open mammography gap, where official reports a
 screened woman OVERDUE and nothing fires.
 
-**Still ahead of the flip:** dual-stamping mammography in the WebChart crosswalk (closes the false-OVERDUE,
-and it is CMS125's own numerator — so effectively a prerequisite, not a follow-up), then PR-9c itself
-(**cms122 + cms125**, on the demo/production stack, with the before/after distribution snapshot). Production
-leaves every `WORKWELL_WEBCHART_*` unset, so the seam gates staging only. (The PR-8b corpus finding is
-closed — see PR-8c above.) *(This line said "cms125 only" until 2026-07-30 — a leftover from the ADR-043
-draft that removed cms122, which review reversed. It contradicted the paragraph above it in an
-always-loaded file, so a session got both answers; corrected on #354.)*
+**The mammography numerator gap is CLOSED (ADR-044), and the flip gate now has a command.** The crosswalk
+**dual-stamps**: a screening-mammogram row emits the CPT/HCPCS `Procedure` it always did AND a LOINC
+`Observation` (`24606-6`) with `status=final` + `category ~ imaging`, in both mapping sites, served from
+`/Observation` so `/Procedure` is byte-identical for the authored engine. Each single representation fails
+in the OPPOSITE direction (Procedure → official false-OVERDUE; Observation → authored OVERDUE; Observation
+without `category` → still blind), so all four states stay pinned as tests. **Normalization, not
+fabrication (ADR-037)**, on three tested properties: derived strictly from a real row, an explicit code
+allowlist rather than a category sweep, and non-inflating because both numerators are `exists(...)` — the
+last of which **would double-count for a counting measure**, stated in `WEBCHART_FHIR_MAPPING.md` §3.6. The
+fixture moved by exactly one resource and **no outcome** (its only mammogram belongs to wc-49, age 33,
+outside the IPP), so the dual stamp is asserted directly rather than inferred. It was NOT re-exported from
+the dev DB (Docker down) — the generator's insertion rule was replayed and the diff verified; a re-export
+should be a no-op. **`pnpm flip-snapshot`** makes pre-flip checklist steps 2+4 executable — the gap review
+caught in ADR-043, whose tenant-facing half was prose with no tooling. It evaluates both engines over the
+same bundles and reports before/after distribution, official IPP count, and every changed subject; it
+renders **DO NOT FLIP** / **INCONCLUSIVE** but **gates nothing and exits 0**, because the discrimination is
+the one ADR-043 says a machine cannot make — do not wire it into CI as pass/fail. **Measured:** on the
+SYNTHETIC roster (what the demo/production stack evaluates) cms122 and cms125 both admit **5/5** to the IPP
+and agree with authored; over WebChart data cms125 admits 4/56 agreeing on all 56, cms122 admits 0/56 and
+reports INCONCLUSIVE (data gap, not divergence) — ADR-043 decision 6 confirmed by measurement.
+
+**Still ahead:** PR-9c itself (**cms122 + cms125**, on the demo/production stack) — which is a **workflow
+edit**, since `deploy-twh-mieweb.yml` has no `WORKWELL_OFFICIAL_MEASURES` key and recreates the container,
+so a hand-set value is wiped. Production leaves every `WORKWELL_WEBCHART_*` unset, so the seam gates staging
+only. **Still open:** the LIVE third-party path gets neither fix (both mapping sites sit upstream of the
+live FHIR transport; `normalizeWebChartBundle` is untouched by design), and Cypress CVU+ has not run.
 
 ---
 

@@ -187,17 +187,36 @@ Per measure, per stack:
    Note which corpus is representative for the stack you are flipping: `devdb-official-eval.test.ts` is the
    per-subject official-vs-authored divergence map over the committed 56-patient **WebChart** dev-DB
    fixture; `official-corpus-outcomes.test.ts` covers the **synthetic** roster a seamless stack evaluates.
-2. **Confirm a NON-ZERO initial population against the tenant's own data.** This is the step the runtime
-   cannot perform. If official puts everybody out of the IPP *and* authored finds actionable subjects in the
-   same bundles, that is a mapping gap — do not flip. If both engines agree there is nobody to score, it is a
-   data gap: flipping is harmless but pointless, and every run will carry the WARN.
-3. **Check the numerator, not just membership.** Being in the population is not agreement. The open
-   mammography gap (ADR-042 consequence 3) has official report a *screened* woman OVERDUE because the
-   crosswalk emits a CPT `Procedure` where the official artifact retrieves a LOINC `Observation` with
-   `category ~ imaging`. Nothing fires on this — subjects are in the population. Dual-stamp both
-   representations first.
-4. **Take a before/after distribution snapshot** for the measure on that stack, so the flip's effect on the
-   roster is a recorded number rather than an impression.
+2. **Take the before/after snapshot and confirm a NON-ZERO initial population** — steps 2 and 4 are one
+   command (ADR-044):
+
+   ```bash
+   # the stack you are flipping decides --source: a stack with NO WORKWELL_WEBCHART_* evaluates the
+   # SYNTHETIC roster and never sees WebChart data.
+   pnpm flip-snapshot --measure cms125 --measure cms122 --source synthetic --eval <YYYY-MM-DD>
+   pnpm flip-snapshot --measure cms125 --source webchart --eval <YYYY-MM-DD>   # WebChart-configured stacks
+   ```
+
+   It evaluates each measure through **both** engines over the same bundles and reports the before/after
+   outcome distribution, the official initial-population count, and every subject whose roster row would
+   change. Read the verdict:
+
+   | verdict | meaning |
+   |---|---|
+   | no verdict | somebody entered the initial population — proceed to step 3 |
+   | **DO NOT FLIP** | official admits nobody while authored finds actionable subjects in the *same* bundles, so "this cohort is ineligible" is demonstrably false — a data or mapping gap |
+   | **INCONCLUSIVE** | neither engine finds anybody; a genuinely ineligible cohort and a gap that blinds both are the same shape. Routing changes no roster row either way |
+
+   It gates nothing and exits 0 regardless — deliberately. The judgement is the one ADR-043 established a
+   machine cannot make from shape alone; the command computes the comparison, a human draws the conclusion.
+   **Do not wire it into CI as pass/fail.**
+
+3. **Check the numerator, not just membership.** Being in the population is not agreement. The mammography
+   case is the worked example (ADR-044): the crosswalk emits a CPT `Procedure`, the official artifact
+   retrieves a LOINC `Observation` with `category ~ imaging`, and emitting one and not the other made
+   official report an already-screened woman **OVERDUE** — a HIGH-priority case chasing a mammogram she had.
+   Nothing detects this: those subjects *are* in the population, so the ADR-043 WARN stays silent. It is
+   closed for mammography by dual-stamping; **the same question has to be asked of each new measure.**
 5. **Add the variable to the deploy workflow — setting it on the container by hand does not survive.**
    `deploy-twh-mieweb.yml` builds `CONTAINER_ENV_VARS_JSON` as a fixed `jq -nc '[…]'` array with **no
    `WORKWELL_OFFICIAL_MEASURES` key and no passthrough**, and the deploy script deletes and recreates the
