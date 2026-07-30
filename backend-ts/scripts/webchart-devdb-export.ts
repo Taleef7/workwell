@@ -36,6 +36,7 @@ const SYS = {
 } as const;
 
 /** The wellness/eCQM measures the dev-DB sample can actually exercise (real LOINC/HCPCS present). */
+const US_CORE_SEX_URL = "http://hl7.org/fhir/us/core/StructureDefinition/us-core-sex";
 const WELLNESS_MEASURES = ["diabetes_hba1c", "obesity_bmi", "cholesterol_ldl", "hypertension"];
 const FEMALE_MEASURES = ["cms125"]; // screening mammography — enrolled for female patients only
 
@@ -126,6 +127,16 @@ function main(): void {
           id: subjectId,
           name: [{ text: [str(pt.first_name), str(pt.last_name)].filter(Boolean).join(" ") || subjectId }],
           ...(sex === "F" ? { gender: "female" } : sex === "M" ? { gender: "male" } : {}),
+          // `us-core-sex` alongside `gender`, from the same column — see the long note on
+          // `usCoreSexExtension` in `wcdb-fhir-shim/src/fhir-mapping.ts`, which this duplicates by
+          // design (no cross-package import). The official CMS125 initial population reads THIS element
+          // and never `gender`, comparing against the SNOMED concept id — so `"F"` here would be as good
+          // as absent. NOTE: `hapi-live.test.ts` bucket parity, named as this duplication's drift guard,
+          // cannot see this field (it compares AUTHORED-engine buckets, and authored reads `gender`).
+          // This side is covered by `devdb-official-eval.test.ts`'s assertion on the committed fixture.
+          ...(sex === "F" || sex === "M"
+            ? { extension: [{ url: US_CORE_SEX_URL, valueCode: sex === "F" ? "248152002" : "248153007" }] }
+            : {}),
           ...(fhirDate(pt.birth_date) ? { birthDate: fhirDate(pt.birth_date) } : {}),
         },
       },

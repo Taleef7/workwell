@@ -75,6 +75,12 @@ test("GET /fhir/Patient pages with same-origin link[next] and full total", async
   assert.equal(body.entry[0].search.mode, "match");
   assert.equal(body.entry[0].resource.id, "wc-5");
   assert.equal(body.entry[0].resource.gender, "female");
+  // `us-core-sex` alongside `gender`, both from `patients.sex`. The official CMS125 initial population
+  // reads THIS element and never `gender`, comparing against the SNOMED concept id — so the code matters
+  // as much as the presence: `"F"` here would be as good as absent (ADR-042).
+  assert.deepEqual(body.entry[0].resource.extension, [
+    { url: "http://hl7.org/fhir/us/core/StructureDefinition/us-core-sex", valueCode: "248152002" },
+  ]);
   assert.equal(body.entry[0].resource.birthDate, "1947-05-09");
 
   const next = body.link.find((l: any) => l.relation === "next");
@@ -94,6 +100,10 @@ test("GET /fhir/Patient handles a patient with null name/sex/birth_date", async 
   assert.equal(p.id, "wc-9");
   assert.equal(p.name[0].text, "wc-9");
   assert.equal(p.gender, undefined);
+  // Neither element is emitted when the column names neither sex. Normalization fills in structure a
+  // profile requires; it does not invent a recorded sex for a row that carries none (ADR-037/ADR-042).
+  // The consequence is deliberate: such a patient stays out of official CMS125's population.
+  assert.equal(p.extension, undefined);
   assert.equal(p.birthDate, undefined);
 });
 

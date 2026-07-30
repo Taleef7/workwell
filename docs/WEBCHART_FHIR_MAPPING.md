@@ -72,6 +72,15 @@ Populated counts in the dev seed (verified): `patients` 72, `patient_mrns` 100, 
 ## 3. Resource-by-resource mapping
 
 ### 3.1 Patient ← `patients` (+ `patient_mrns`)
+
+> **Integrating a live WebChart FHIR server? Read this first (ADR-042).** The `us-core-sex` row below is
+> emitted by **our** SQL→FHIR paths (the `wcdb-fhir-shim` and the dev-DB fixture export). It is *not*
+> synthesized by `normalizeWebChartBundle`, so a WebChart server that serves Patient resources over FHIR
+> without a `us-core-sex` extension will have **its entire roster read out-of-population by official
+> CMS125** — silently, as 100% MISSING_DATA rather than an error. This is deliberate: we assert the
+> extension where a source column records a sex value, and decline to infer it from an
+> `administrative-gender` someone else mapped. If you are onboarding a tenant, confirm the server supplies
+> `us-core-sex` with the SNOMED concept id before routing CMS125 officially.
 | FHIR | WebChart |
 |---|---|
 | `id` | `patients.pat_id` (stable internal id; use as the subject external id) |
@@ -79,6 +88,7 @@ Populated counts in the dev seed (verified): `patients` 72, `patient_mrns` 100, 
 | `name[].given/family` | `first_name`, `last_name`, `middle_name` (+ `preferred_*`) |
 | `birthDate` | `birth_date` (datetime → date) |
 | `gender` | `sex` (map WebChart code → FHIR `administrative-gender`) |
+| `extension[us-core-sex]` | `sex` — **the same column, also emitted as the US Core extension** with the SNOMED concept id (`F` → `248152002`, `M` → `248153007`), because official CMS125's initial population reads *this* element and never `gender`. Neither element is emitted when `sex` names neither. See ADR-042 |
 | `deceasedBoolean/DateTime` | `death_indicator`, `death_date` |
 | `address` | `address1/2/3`, `city`, `state`, `zip_code`, `country` |
 | `telecom` | `home_phone`, `cell_phone`, `work_phone`, `email` |
