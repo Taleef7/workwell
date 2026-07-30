@@ -11,6 +11,7 @@
 
 ## Titles (newest first)
 
+- ADR-045: The flip is a WORKFLOW edit, gated by a test that reads what the workflow ships
 - ADR-044: One real mammogram is emitted in BOTH vocabularies — dual-stamping is normalization, and the flip gate gets a command
 - ADR-043: A whole roster out of the initial population is SURFACED at runtime and ENFORCED at the flip gate — never refused mid-run
 - ADR-042: The WebChart↔official IPP gap is closed by mapping and guarded by a parity gate — not by refusing the configuration (the NUMERATOR gap stays open)

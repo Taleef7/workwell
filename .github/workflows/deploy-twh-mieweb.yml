@@ -229,6 +229,22 @@ jobs:
                 {key: "WORKWELL_AUTH_ACCESS_TTL_SECONDS", value: "2592000"},
                 {key: "WORKWELL_INSTANCE", value: "twh"},
                 {key: "WORKWELL_SCHEDULER_ENABLED", value: "true"},
+                # PR-9c / ADR-045 — THE FLIP. These two measures evaluate CMS's published QI-Core
+                # artifacts instead of WorkWell's authored CQL. Set HERE rather than on the container
+                # because the deploy deletes-and-recreates it, so a hand-set value is wiped.
+                #
+                # Safe on THIS stack for a reason that is measured, not assumed: it carries zero
+                # WORKWELL_WEBCHART_* (verified), so it evaluates the synthetic roster, where
+                # `pnpm flip-snapshot` records both measures admitting 5 of 5 subjects to the official
+                # initial population and agreeing with authored on every one — evidence committed at
+                # docs/evidence/PR9C_FLIP_SNAPSHOT_2026-07-30.md.
+                #
+                # Rollback is removing this line and redeploying. `logic_version` carries the artifact's
+                # identity (ADR-040), so flip-on/flip-off/re-vendor each invalidate `eval_state` by
+                # construction — no manual cache DELETE. If the vendored terminology sidecar is ever
+                # missing, official routing REFUSES at engine construction (per request, not at boot —
+                # grep the logs for OFFICIAL_ROUTING_MISCONFIGURED; /actuator/health stays 200).
+                {key: "WORKWELL_OFFICIAL_MEASURES", value: "cms122,cms125"},
                 {key: "WORKWELL_VSAC_API_KEY", value: $vsac_api_key},
                 {key: "WORKWELL_BUCKET_S3_ACCESS_KEY_ID", value: $bucket_key_id},
                 {key: "WORKWELL_BUCKET_S3_SECRET_ACCESS_KEY", value: $bucket_secret},

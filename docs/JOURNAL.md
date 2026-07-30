@@ -1,5 +1,55 @@
 # Journal
 
+## 2026-07-30 (PR-9c) — the flip: cms122 and cms125 now run CMS's published artifacts (branch `feat/official-flip-pr9c`)
+
+Everything since ADR-036 was building toward one line in a workflow file. It is set:
+`WORKWELL_OFFICIAL_MEASURES="cms122,cms125"` on `deploy-twh-mieweb.yml`. **M-A is complete.**
+
+**What made it decidable rather than a leap.** Two things, both from the last two PRs. ADR-044 closed the
+mammography numerator gap — the last known way official could contradict authored on data this stack
+holds. And `flip-snapshot` turned checklist step 2 from prose into a number: both measures admit **5 of 5**
+corpus subjects to the official initial population and agree with authored on every one, across
+COMPLIANT/OVERDUE/EXCLUDED. The evidence is committed at `docs/evidence/PR9C_FLIP_SNAPSHOT_2026-07-30.md`
+rather than pasted into a PR comment, so the numbers this was approved on outlive the approval.
+
+**cms122 goes too, and that is ADR-043 decision 6 paying off.** An earlier draft had removed it for
+reading out-of-population over WebChart data. It does — but `deploy-twh-mieweb.yml` carries zero
+`WORKWELL_WEBCHART_*`, so this stack evaluates the synthetic roster where cms122 scores normally. The
+finding constrained staging, not the flip, and measuring both stacks separately is what kept a correct
+measure from being dropped on a true observation about a different environment.
+
+**The new guard is the interesting part.** Every check in this area validated a configuration a test
+passed in; nothing validated the string that actually reaches production. So a future edit adding
+`cms130` before it is vendored would deploy green, satisfy `/actuator/health` (deliberately DB-free, so it
+answers 200 regardless), keep the self-heal reconciler quiet — and 500 every evaluating route, because
+official routing refuses at engine construction, **per request**. `official-flip-config.test.ts` now parses
+`WORKWELL_OFFICIAL_MEASURES` out of both deploy workflows and asserts everything named is gated, vendored,
+proportion-scored and routing-clean. Mutation-checked: adding `cms130` fails it with the reason.
+
+Split in two on purpose — the structural half is pure and always runs, the terminology half needs the
+gitignored sidecar and is wired into CI's `official-cases` job. One combined test would have self-skipped
+in `pnpm test` and read as covered, which is the defect class this branch has now been pulled up on four
+times. I also deliberately did NOT pin *which* measures are flipped: that would make every future flip a
+two-file change guarded by a test that only says "you changed what you changed".
+
+**Verified the boring thing that would have been embarrassing:** the flag is added inside a `jq` program
+in a single-quoted shell string, and I wrote `#` comments around it. jq does support comments — but I ran
+the extracted program rather than assuming, and confirmed it still emits all 18 env entries with the new
+one among them.
+
+**The flip is inert on this stack's data**, and that is the expected result. No roster row changes. The
+value is that official execution is running in production at all — the precondition for the remaining six
+priority measures, and for saying WorkWell *executes* published eCQMs rather than reimplementing them.
+
+Post-deploy checks are written into the evidence doc, and the first one matters most: **grep for
+`OFFICIAL_ROUTING_MISCONFIGURED`**, because a green container is not evidence here. The nightly scheduler
+is on, so the first scheduled ALL_PROGRAMS run will exercise the flip without anyone triggering it.
+
+Still not done: the authored cms122/125 subsets retire to the fidelity lab next (locked decision #4,
+deliberately not in the same change that starts the flip), and **Cypress CVU+ has still not run** — it
+remains the verification bar.
+
+
 ## 2026-07-30 (later still) — the mammography numerator, and giving the flip gate a command (branch `feat/webchart-mammography-dual-stamp`)
 
 The last thing standing between here and PR-9c was the numerator gap ADR-042 recorded and ADR-043 could not
