@@ -409,16 +409,22 @@ test("ADR-047: an EPISODE-OF-CARE measure is refused at construction", () => {
   //
   // The MADiE deck cannot catch this — all 19 CMS68 cases are single-encounter, so 19/19 is a green gate
   // over exactly the shape that hides the defect (review, #358). Hence a construction-time refusal.
-  const problems = officialRoutingProblems({ WORKWELL_OFFICIAL_MEASURES: "cms68" });
-  assert.equal(problems.length, 1, `expected exactly one problem, got ${JSON.stringify(problems)}`);
-  assert.match(problems[0]!, /populationBasis 'Encounter' is an EPISODE-OF-CARE measure/);
+  // Asserted by PRESENCE, not by count. The first version required exactly one problem and passed only
+  // because this machine has the gitignored terminology sidecar; CI has none, so cms68 legitimately
+  // reports the episode problem AND a terminology one. A test that is green only where a gitignored file
+  // happens to exist is the self-skip class wearing a different hat.
+  const EPISODE = /populationBasis 'Encounter' is an EPISODE-OF-CARE measure/;
+  assert.ok(
+    officialRoutingProblems({ WORKWELL_OFFICIAL_MEASURES: "cms68" }).some((p) => EPISODE.test(p)),
+    "cms68 declares populationBasis Encounter and must be refused for it",
+  );
 
-  // The boolean-basis measures are unaffected — the refusal must not be a blanket "official is risky".
+  // The boolean-basis measures must not pick up the EPISODE refusal — checked specifically rather than
+  // "no problems at all", which would again depend on the sidecar being present.
   for (const id of ["cms122", "cms125", "cms2", "cms951"]) {
-    assert.deepEqual(
-      officialRoutingProblems({ WORKWELL_OFFICIAL_MEASURES: id }),
-      [],
-      `${id} has populationBasis boolean and must stay routable`,
+    assert.ok(
+      !officialRoutingProblems({ WORKWELL_OFFICIAL_MEASURES: id }).some((p) => EPISODE.test(p)),
+      `${id} has populationBasis boolean and must not be refused as an episode measure`,
     );
   }
 });
