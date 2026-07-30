@@ -1,5 +1,72 @@
 # Architecture Decision Records
 
+## ADR-046: Canonical, improvementNotation and membership all derive from the outcome's own evidence
+
+**Status:** Accepted (2026-07-30). Discharges the PR-7 obligation `fhir/measure-report.ts` has carried
+since PR-3, and unblocks routing **cms122** (PR-9c shipped cms125 alone because of this).
+
+**Context.** PR-3 made MeasureReport membership *evidence-first*: an official-routed outcome's populations
+come from `evidence.official.populationResults`, which is the regulatory truth. But two sibling fields
+stayed static — `measureCanonical` always emitted `urn:workwell:measure:<id>`, and `improvementNotation`
+always read the authored `MEASURE_BINDINGS` table. The file wrote the consequence down itself:
+
+> *"A report that declares higher-is-better over a poor-control numerator is self-contradictory, so the
+> measure that flips MUST switch all three together — canonical, improvementNotation, and membership."*
+
+For cms122 this is not cosmetic. Its official numerator is **poor glycemic control** — being in it is the
+failure — so `improvementNotation: increase` asserts higher-is-better about a numerator counting harm. On
+the 150-employee directory the numerator moves **~120 → ~27**. QRDA III carries **no `improvementNotation`
+element at all**, so there the inverted count would ship with nothing marking it.
+
+The guard that supposedly pinned this could not fail: its fixtures carried no official evidence, so it
+only ever exercised the authored path. Review of #356 caught that PR-9c was the flip obliged to discharge
+this and had not — which is why cms122 was held back and cms125 flipped alone.
+
+**Decision.**
+
+1. **All three derive from the outcome's own `evidence.official`.** Not from the environment: a report
+   describes the run it is built from, and a run's provenance does not change because someone later
+   flipped a flag or re-vendored. Asking `WORKWELL_OFFICIAL_MEASURES` at export time would mislabel every
+   historical export the day the config moves — the same reasoning `aggregateCountsForRun` already
+   applies to counts.
+2. **`improvementNotation` comes from `OFFICIAL_MEASURE_SEMANTICS`, not from the artifact.** For cms122
+   the artifact itself says `increase`, which contradicts eCQI's own description of the measure;
+   `official-measure-semantics.ts` records that human-reviewed decision with its rationale. A routed
+   measure with no recorded semantics emits the greppable `WORKWELL_ALERT` rather than guessing — there is
+   no safe default, since guessing one way reports every failure as compliant.
+3. **The canonical is claimed only for the artifact that actually produced the outcome.** If the vendored
+   artifact's `sha256` no longer matches the `artifactSha256` in the evidence — a re-vendor between run
+   and export — the report falls back to `urn:workwell:measure:<id>:official:<version>`. Labelling an old
+   report with a new canonical would assert a provenance that never existed.
+4. **QRDA III gets the official measure IDENTITY, not a new element.** QRDA III has no notation field by
+   design; a receiver derives direction from the measure identity. So emitting
+   `urn:workwell:measure|cms122` over counts whose numerator is CMS's poor-control one is the actual
+   defect, and the fix is the identity (`2.16.840.1.113883.4.738` + `versionNumber`). The counts were
+   already correct.
+5. **The flip guard asserts the BUILT REPORT, not the binding table.** ADR-046 moved the source, so
+   comparing `MEASURE_BINDINGS` would now check the wrong thing — the authored binding still says
+   `increase` for cms122 and correctly so. `official-flip-config.test.ts` builds a summary report from a
+   synthetic official outcome for every shipped measure and asserts the notation matches the semantics.
+
+**Consequences.**
+
+- **cms122 is now routed** alongside cms125 on the demo/production stack. Its MeasureReport declares
+  `decrease` and CMS's canonical; its QRDA III carries the official eCQM identity and version.
+- **Authored reports are byte-identical.** Every non-routed measure takes the same path it always did —
+  the trio only moves when `evidence.official` is present.
+- **A mixed-provenance run labels itself by the artifact its scored subjects used.** A run where some
+  subjects errored (no `official` block) still names the artifact the rest were scored by. That is a
+  deliberate choice over labelling the whole report authored, and it matches the mixed-provenance
+  trade-off `membershipFor` already documents.
+- **The scale/aggregate path is unchanged and still authored-only.** `populationCountsFromStatus` reduces
+  status buckets, which are authored semantics by construction; its caller passes no identity. That path
+  is `seed:scale` demo data, never official-routed, and `aggregateCountsForRun` routes official runs to
+  the per-subject path instead.
+- **Not addressed here:** the case-detail **CQL Evidence Explorer** still shows four
+  `official:<population>` booleans instead of authored clinical defines for a routed measure, and the
+  **fidelity/Standards tab** still compares authored-vs-official for a measure whose stored outcomes are
+  already official. Both are UI-surface work, tracked separately.
+
 ## ADR-045: The flip is a WORKFLOW edit, gated by tests that read what the workflow ships — and cms125 goes alone
 
 **Status:** Accepted (2026-07-30). Roadmap §7.4 PR-9c. **cms125 now evaluates CMS's published QI-Core
