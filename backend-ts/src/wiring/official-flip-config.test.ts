@@ -39,7 +39,19 @@ import { loadOfficialArtifact } from "./official-artifacts.ts";
 import { loadOfficialTerminology } from "./official-terminology.ts";
 import { OFFICIAL_GATED_MEASURES } from "../standards/official-cases.ts";
 
-const WORKFLOWS = ["deploy-twh-mieweb.yml", "deploy-staging-mieweb.yml"] as const;
+const WORKFLOWS = ["deploy-twh-mieweb.yml", "deploy-staging-mieweb.yml", "reconcile-twh-mieweb.yml"] as const;
+
+/**
+ * Workflows that recreate the SAME container and must therefore ship the same routing configuration.
+ *
+ * `reconcile-twh-mieweb.yml` rebuilds twh-api-ts from `:latest` during a self-heal using its own mirrored
+ * env array. A key present in the deploy and missing here is **silently dropped** the first time the
+ * reconciler fires: the container returns healthy, the image is unchanged, and the routed measures revert
+ * to authored CQL with no signal at any layer. Codex caught exactly that on #356.
+ */
+const MUST_AGREE: ReadonlyArray<readonly [string, string]> = [
+  ["deploy-twh-mieweb.yml", "reconcile-twh-mieweb.yml"],
+];
 
 /**
  * The value each deploy workflow ships, or `null` where the seam is deliberately unset.
@@ -84,6 +96,19 @@ test("PR-9c: every officially-routed measure a deploy workflow ships is gated an
   }
 });
 
+test("PR-9c: a container recreated by SELF-HEAL routes exactly what the deploy routes", () => {
+  // The silent-revert case. Not "both files mention the flag" — the same VALUE, because a reconciler
+  // shipping a different subset would flip measures on or off on a health event nobody initiated.
+  for (const [a, b] of MUST_AGREE) {
+    assert.deepEqual(
+      shippedMeasures(b),
+      shippedMeasures(a),
+      `${b} must ship the same WORKWELL_OFFICIAL_MEASURES as ${a} — it recreates the same container, ` +
+        `so a mismatch silently changes which measures are officially routed on a self-heal`,
+    );
+  }
+});
+
 /**
  * The full construction-time check against the REAL artifacts — the thing production runs.
  *
@@ -97,17 +122,35 @@ const sidecarPresent = (shippedMeasures("deploy-twh-mieweb.yml") ?? []).every((i
 });
 const skip = sidecarPresent ? false : "needs the vendored terminology sidecar (run `pnpm vendor:official`)";
 
+/** A capped-expansion problem, which is a property of how the artifact was VENDORED, not of the flag. */
+const CAPPED = /expands to only \d+ of \d+ codes/;
+
 test("PR-9c: the shipped configuration constructs cleanly — no routing problems", { skip }, () => {
+  // Uncredentialed contexts (fork PRs, Dependabot) deliberately re-vendor WITHOUT
+  // `--complete-capped-expansions`, because GitHub withholds the VSAC secret there. That leaves the
+  // working-tree artifacts capped — and `officialRoutingProblems` refuses a capped expansion by design
+  // (ADR-041), so asserting a clean result unconditionally would fail every outside contributor's PR for
+  // a reason unrelated to their change. Codex caught this on #356 before it went red.
+  //
+  // So: the capped class is EXCUSED only when the artifacts in the tree are actually capped, and every
+  // other class is asserted always. The credentialed run on merge covers the capped class for real.
+  const complete = (shippedMeasures("deploy-twh-mieweb.yml") ?? []).every(
+    (id) => (loadOfficialArtifact(id)?.manifest.terminology?.truncated ?? []).length === 0,
+  );
+
   for (const workflow of WORKFLOWS) {
     const shipped = shippedMeasures(workflow);
     if (shipped === null) continue;
     // Exactly what `routedEngineForEnv` throws on at engine construction. An empty array here is the
     // difference between a deploy that serves and one that answers 500 from every evaluating route
     // while /actuator/health stays green.
+    const problems = officialRoutingProblems({ WORKWELL_OFFICIAL_MEASURES: shipped.join(",") });
+    const asserted = complete ? problems : problems.filter((p) => !CAPPED.test(p));
     assert.deepEqual(
-      officialRoutingProblems({ WORKWELL_OFFICIAL_MEASURES: shipped.join(",") }),
+      asserted,
       [],
-      `${workflow} ships a configuration that official routing would REFUSE at construction`,
+      `${workflow} ships a configuration that official routing would REFUSE at construction` +
+        (complete ? "" : " (capped-expansion problems excused: this context vendored without a VSAC key)"),
     );
   }
 });

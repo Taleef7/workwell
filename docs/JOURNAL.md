@@ -45,6 +45,22 @@ Post-deploy checks are written into the evidence doc, and the first one matters 
 `OFFICIAL_ROUTING_MISCONFIGURED`**, because a green container is not evidence here. The nightly scheduler
 is on, so the first scheduled ALL_PROGRAMS run will exercise the flip without anyone triggering it.
 
+**Codex found the one that would have undone the whole thing.** `reconcile-twh-mieweb.yml` — the self-heal
+that recreates twh-api-ts from `:latest` when the container goes down — builds its OWN mirrored env array,
+and it did not carry `WORKWELL_OFFICIAL_MEASURES`. So the first health event after this flip would have
+silently reverted both measures to authored CQL: container healthy, image unchanged, no signal anywhere.
+The flip would have lasted exactly until the next incident. Fixed, and the guard now asserts the two
+workflows ship the same *value* — not merely that both mention the flag, because a reconciler with a
+different subset would flip measures on or off during an incident nobody initiated. Mutation-checked by
+deleting the line.
+
+It also caught that my new routability assertion would have gone red on **every fork and Dependabot PR**:
+those contexts get no VSAC secret, so CI deliberately re-vendors without `--complete-capped-expansions`,
+and `officialRoutingProblems` refuses a capped expansion by design. The capped class is now excused
+exactly when the tree is actually capped; every other class is asserted always. A guard that fails
+outside contributors for a condition unrelated to their change trains people to ignore it, which is the
+same disease as a guard that cannot fire.
+
 Still not done: the authored cms122/125 subsets retire to the fidelity lab next (locked decision #4,
 deliberately not in the same change that starts the flip), and **Cypress CVU+ has still not run** — it
 remains the verification bar.
