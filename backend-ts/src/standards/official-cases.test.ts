@@ -114,6 +114,7 @@ test("loadOfficialMeasureCases assembles loose resources and expected population
     denominator: 1,
     "denominator-exclusion": 0,
     numerator: 1,
+    "denominator-exception": 0,
   });
   assert.deepEqual(loaded.measurementPeriod, { start: "2026-01-01", end: "2026-12-31" });
   assert.equal(loaded.valueSets.total, 1);
@@ -131,6 +132,7 @@ test("classifyPopulationAgreement adjusts only the six known CMS122 numerator ex
     denominator: 1,
     "denominator-exclusion": 1,
     numerator: 0,
+    "denominator-exception": 0,
   } as const;
   const referenceActual = { ...expected, numerator: 1 };
   const known = module.classifyPopulationAgreement(
@@ -195,6 +197,7 @@ function loadedMeasureForRunner() {
           denominator: 1,
           "denominator-exclusion": 0,
           numerator: 1,
+          "denominator-exception": 0,
         },
         expectedScore: 1,
       },

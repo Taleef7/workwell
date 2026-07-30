@@ -116,7 +116,7 @@ Measurement period: 2026-01-01 → 2026-12-31. Raw expected agreement 55/55; ref
 
 Executed with the RUNTIME configuration — our reduced artifact plus its own vendored terminology sidecar, expanded through the same code path production uses — against the upstream bundle and upstream ValueSets. 0/55 cases changed population vector; 0 drift errors.
 
-Artifact proven: `sha256:c0d99a8ebda8941a1912d6938eb2648b42e8954937d46ea3801f3e71cdcb8552` (2.4 MB, ELM annotations stripped). Compared on population membership (initial-population/denominator/denominator-exclusion/numerator) only; the artifact also returned 419 named statement results for every subject.
+Artifact proven: `sha256:c0d99a8ebda8941a1912d6938eb2648b42e8954937d46ea3801f3e71cdcb8552` (2.4 MB, ELM annotations stripped). Compared on population membership (initial-population/denominator/denominator-exclusion/numerator/denominator-exception) only; the artifact also returned 419 named statement results for every subject.
 
 | Case | UUID | Changed populations | v1 IPP/DEN/DENEX/NUM | draft IPP/DEN/DENEX/NUM |
 |---|---|---|---|---|
@@ -199,7 +199,7 @@ Measurement period: 2026-01-01 → 2026-12-31. Raw expected agreement 66/66; ref
 
 Executed with the RUNTIME configuration — our reduced artifact plus its own vendored terminology sidecar, expanded through the same code path production uses — against the upstream bundle and upstream ValueSets. 0/66 cases changed population vector; 0 drift errors.
 
-Artifact proven: `sha256:97f737fa5262fca1fbb4620e10ce286f612b87b7de4c3fc06fdfe38dfb666ac8` (2.5 MB, ELM annotations stripped). Compared on population membership (initial-population/denominator/denominator-exclusion/numerator) only; the artifact also returned 423 named statement results for every subject.
+Artifact proven: `sha256:97f737fa5262fca1fbb4620e10ce286f612b87b7de4c3fc06fdfe38dfb666ac8` (2.5 MB, ELM annotations stripped). Compared on population membership (initial-population/denominator/denominator-exclusion/numerator/denominator-exception) only; the artifact also returned 423 named statement results for every subject.
 
 | Case | UUID | Changed populations | v1 IPP/DEN/DENEX/NUM | draft IPP/DEN/DENEX/NUM |
 |---|---|---|---|---|
@@ -252,7 +252,7 @@ Measurement period: 2026-01-01 → 2026-12-31. Raw expected agreement 36/36; ref
 
 Executed with the RUNTIME configuration — our reduced artifact plus its own vendored terminology sidecar, expanded through the same code path production uses — against the upstream bundle and upstream ValueSets. 0/36 cases changed population vector; 0 drift errors.
 
-Artifact proven: `sha256:4d69acfa4b5bc6d7010ad89279b9d61be77470cc5e37f38f2357bae176e2f1ec` (2.3 MB, ELM annotations stripped). Compared on population membership (initial-population/denominator/denominator-exclusion/numerator) only; the artifact also returned 396 named statement results for every subject.
+Artifact proven: `sha256:4d69acfa4b5bc6d7010ad89279b9d61be77470cc5e37f38f2357bae176e2f1ec` (2.3 MB, ELM annotations stripped). Compared on population membership (initial-population/denominator/denominator-exclusion/numerator/denominator-exception) only; the artifact also returned 396 named statement results for every subject.
 
 | Case | UUID | Changed populations | v1 IPP/DEN/DENEX/NUM | draft IPP/DEN/DENEX/NUM |
 |---|---|---|---|---|
@@ -288,7 +288,7 @@ Measurement period: 2026-01-01 → 2026-12-31. Raw expected agreement 19/19; ref
 
 Executed with the RUNTIME configuration — our reduced artifact plus its own vendored terminology sidecar, expanded through the same code path production uses — against the upstream bundle and upstream ValueSets. 0/19 cases changed population vector; 0 drift errors.
 
-Artifact proven: `sha256:f114b6edf657db98b6a11b625aa3b5d43e55ab736b0067dda56eeb6f312fb970` (1.7 MB, ELM annotations stripped). Compared on population membership (initial-population/denominator/denominator-exclusion/numerator) only; the artifact also returned 356 named statement results for every subject.
+Artifact proven: `sha256:f114b6edf657db98b6a11b625aa3b5d43e55ab736b0067dda56eeb6f312fb970` (1.7 MB, ELM annotations stripped). Compared on population membership (initial-population/denominator/denominator-exclusion/numerator/denominator-exception) only; the artifact also returned 356 named statement results for every subject.
 
 | Case | UUID | Changed populations | v1 IPP/DEN/DENEX/NUM | draft IPP/DEN/DENEX/NUM |
 |---|---|---|---|---|
@@ -360,7 +360,7 @@ Measurement period: 2026-01-01 → 2026-12-31. Raw expected agreement 55/55; ref
 
 Executed with the RUNTIME configuration — our reduced artifact plus its own vendored terminology sidecar, expanded through the same code path production uses — against the upstream bundle and upstream ValueSets. 0/55 cases changed population vector; 0 drift errors.
 
-Artifact proven: `sha256:a005f4527d70fdd7495b9d75ab03b5ab43f1146fcdad81cbfba7d81b7caf1dae` (2.0 MB, ELM annotations stripped). Compared on population membership (initial-population/denominator/denominator-exclusion/numerator) only; the artifact also returned 392 named statement results for every subject.
+Artifact proven: `sha256:a005f4527d70fdd7495b9d75ab03b5ab43f1146fcdad81cbfba7d81b7caf1dae` (2.0 MB, ELM annotations stripped). Compared on population membership (initial-population/denominator/denominator-exclusion/numerator/denominator-exception) only; the artifact also returned 392 named statement results for every subject.
 
 | Case | UUID | Changed populations | v1 IPP/DEN/DENEX/NUM | draft IPP/DEN/DENEX/NUM |
 |---|---|---|---|---|

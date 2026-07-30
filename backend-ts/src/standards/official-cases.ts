@@ -20,6 +20,12 @@ export const POPULATION_CODES = [
   "denominator",
   "denominator-exclusion",
   "numerator",
+  // DENEXCEP is compared, not assumed absent (Codex, #358). CMS2 declares it alongside DENEX, and CMS68
+  // declares it INSTEAD of DENEX — so omitting it meant CMS68's gate compared a population the measure
+  // does not have while ignoring the one it does. A green 19/19 could coexist with broken exception
+  // handling, which flows straight into the runtime EXCLUDED outcome and into MeasureReport/QRDA.
+  // cms122/cms125 declare no exception, so both sides are 0 and their decks are unaffected.
+  "denominator-exception",
 ] as const;
 export type PopulationCode = (typeof POPULATION_CODES)[number];
 export type PopulationCounts = Record<PopulationCode, number>;
@@ -202,6 +208,7 @@ function populationCounts(report: FhirResource): PopulationCounts {
     denominator: 0,
     "denominator-exclusion": 0,
     numerator: 0,
+    "denominator-exception": 0,
   };
   const group = Array.isArray(report.group) ? report.group[0] as Record<string, unknown> | undefined : undefined;
   const populations = group && Array.isArray(group.population) ? group.population : [];
@@ -456,6 +463,7 @@ function actualPopulationCounts(populations: FqmPopulationResult[]): PopulationC
     denominator: 0,
     "denominator-exclusion": 0,
     numerator: 0,
+    "denominator-exception": 0,
   };
   for (const population of populations) {
     if (POPULATION_CODES.includes(population.populationType as PopulationCode)) {
