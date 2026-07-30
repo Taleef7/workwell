@@ -55,10 +55,12 @@
  *   Any cache must stay scoped per run, not per process — `engineForEnv` deliberately rebuilds its
  *   resolver per call so operator value-set edits stay visible, and a process-lifetime memo
  *   re-introduces that fixed bug.
- * - **`inInitialPopulation` is computed here and dropped at persistence.** `run-pipeline.ts` stores only
- *   `outcome` and `evidence`, and MISSING_DATA opens a case — so today every out-of-IPP subject would
- *   become a case. True of the authored path too, but official routing over a live population makes the
- *   volume matter.
+ * - **`inInitialPopulation` is READ by the run pipeline and dropped at persistence.** It is not decorative
+ *   and must keep being emitted: `run-pipeline.ts` accumulates it per measure and warns when a whole
+ *   roster of an officially-routed measure falls outside the initial population (ADR-043). Persistence
+ *   still stores only `outcome` and `evidence`, and MISSING_DATA opens a case — so every out-of-IPP
+ *   subject becomes a case. True of the authored path too, but official routing over a live population
+ *   makes the volume matter.
  * - **The display vocabulary lies about official EXCLUDED and OVERDUE.** `roster-vocabulary.ts`
  *   hardcodes "Contraindication / exemption on file" for every EXCLUDED — but this adapter routes three
  *   distinct conditions there (DENEX, DENEXCEP, out-of-denominator), and only the first is an exemption.

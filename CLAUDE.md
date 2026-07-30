@@ -286,8 +286,13 @@ cohort zero-in-IPP is the CORRECT answer, and a batch failure replaces every sub
 marks the run `PARTIAL_FAILURE` and alerts. Decisively: **cohort composition varies by run**, so "stop
 routing this measure" is not a remedy an operator can apply. So the executor reports honestly, the run
 pipeline emits a **`WARN`** naming both causes, the run still reports `COMPLETED` with evidence intact, and
-`undefined` membership means UNKNOWN (the authored engine never sets `inInitialPopulation`, so treating
-absent as false would WARN on every batched authored measure). The WARN reads the **final per-subject
+the check is **gated on official routing** via the engine's declared identity (`logicVersionFor` →
+`official-fqm:`, ADR-040). That gate is load-bearing and was missing at first: the stated basis — "the
+authored engine never sets `inInitialPopulation`" — is **FALSE** (`deriveInInitialPopulation` emits it for
+every measure with a boolean `Initial Population` define, all 16 of ours), so ungated an authored measure
+whose cohort sat wholly outside its own IPP would be told nobody entered the *official* IPP and pointed at
+`us-core-sex`. It never fired only because the synthetic roster puts somebody in every measure's IPP — a
+fixture property, not an invariant. The WARN reads the **final per-subject
 outcomes after the evaluation loop**, not the batch pre-pass — review (#354) showed a pre-pass conclusion
 judges an INCOMPLETE roster, since an omitted subject is re-evaluated individually later, and is wrong both
 ways (warns when the omitted subject is in the population; stays silent when the batched sample is 1). It is
@@ -316,9 +321,11 @@ screened woman OVERDUE and nothing fires.
 
 **Still ahead of the flip:** dual-stamping mammography in the WebChart crosswalk (closes the false-OVERDUE,
 and it is CMS125's own numerator — so effectively a prerequisite, not a follow-up), then PR-9c itself
-(**cms125 only**, on the demo/production stack, with the before/after distribution snapshot). Production
+(**cms122 + cms125**, on the demo/production stack, with the before/after distribution snapshot). Production
 leaves every `WORKWELL_WEBCHART_*` unset, so the seam gates staging only. (The PR-8b corpus finding is
-closed — see PR-8c above.)
+closed — see PR-8c above.) *(This line said "cms125 only" until 2026-07-30 — a leftover from the ADR-043
+draft that removed cms122, which review reversed. It contradicted the paragraph above it in an
+always-loaded file, so a session got both answers; corrected on #354.)*
 
 ---
 

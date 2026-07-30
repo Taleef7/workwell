@@ -1158,6 +1158,11 @@ function batchProbe(
     batches,
     singles,
     engine: {
+      // Models the real router's identity contract (ADR-040): a routed measure declares
+      // `official-fqm:…`, everything else declares the authored ELM hash. ADR-043's empty-IPP WARN is
+      // gated on this, so a probe that omitted it would silently make every WARN test vacuous.
+      logicVersionFor: (measureId: string) =>
+        batchable.has(measureId) ? "official-fqm:1.0.000:artifact-sha:terminology-sha" : "sha256:authored",
       async evaluate(input) {
         singles.push(`${input.measureId}`);
         return {
@@ -1245,6 +1250,23 @@ test("ADR-043: no WARN when somebody IS in the initial population", async () => 
   assert.ok(!logs.some((l) => IPP_WARN.test(l.message)), "an eligible roster must not be flagged");
 });
 
+test("ADR-043: a SINGLE subject out of the IPP is not warned about — the `> 1` boundary", async () => {
+  // ADR-043 decision 4. For one person "not in the initial population" is an ordinary correct answer —
+  // `/simulate` on somebody outside the age band — so an EMPLOYEE-scoped run of one subject must stay
+  // quiet. Without this, changing `> 1` to `> 0` fails nothing and the boundary is decorative.
+  const probe = batchProbe(new Set(["audiogram"]), { ipp: false });
+  const { res, logs } = await runWithProbe(probe, {
+    scopeType: "EMPLOYEE",
+    employeeExternalId: "emp-001",
+    measureId: "audiogram",
+    evaluationDate: "2026-06-15",
+  } as Parameters<typeof executeManualRun>[1]);
+
+  assert.equal(probe.batches[0]?.size, 1, "exactly one subject was evaluated");
+  assert.ok(!logs.some((l) => IPP_WARN.test(l.message)), "one out-of-IPP subject is not a finding");
+  assert.ok(!/initial population/.test(res.message));
+});
+
 test("ADR-043: an OMITTED subject who lands in the IPP silences the WARN (no false positive)", async () => {
   // Codex #354, direction one. The batch returns two out-of-IPP outcomes and omits emp-003; the pipeline
   // re-evaluates emp-003 alone and it IS in the initial population. Concluding at batch time — off
@@ -1278,6 +1300,24 @@ test("ADR-043: omitted subjects who all land OUT of the IPP still trigger the WA
   assert.ok(warn, "all three subjects are out of the population — this must warn");
   assert.match(warn!.message, /not one of 3 subjects/, "and count the WHOLE roster, not just the batched part");
   assert.match(res.message, /nobody entered the official initial population for audiogram/);
+});
+
+test("ADR-043: an AUTHORED measure with everyone out of its own IPP is NEVER warned about", async () => {
+  // The premise an earlier version of this check rested on — "the authored engine never sets
+  // `inInitialPopulation`" — is FALSE. `deriveInInitialPopulation` emits the field for every measure with
+  // a boolean `Initial Population` define, which is all 16 of ours. Ungated, an authored measure whose
+  // cohort sits entirely outside its own IPP would be told nobody entered the OFFICIAL initial population
+  // and pointed at `us-core-sex` — for a measure with no official artifact, unnamed in
+  // `WORKWELL_OFFICIAL_MEASURES`, and nothing to do with WebChart.
+  //
+  // Nothing batchable, so every subject takes the individual path and reports `false`. The measure
+  // declares an authored `sha256:` identity, so the check must not look at it at all.
+  const probe = batchProbe(new Set(), { singleIpp: false });
+  const { res, logs } = await runWithProbe(probe, MEASURE_SCOPE);
+
+  assert.equal(probe.singles.length, 3, "all three took the authored per-subject path");
+  assert.ok(!logs.some((l) => IPP_WARN.test(l.message)), "an authored measure must never trigger this");
+  assert.ok(!/initial population/.test(res.message), "and nothing leaks into the run message");
 });
 
 test("ADR-043: an outcome with NO membership field is 'unknown', never 'out of population'", async () => {

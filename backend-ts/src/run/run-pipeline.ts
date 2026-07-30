@@ -18,7 +18,7 @@ import type { OutcomeStore } from "../stores/outcome-store.ts";
 import type { CaseStore, CaseRecord } from "../stores/case-store.ts";
 import { ACTIVE_CASE_STATUSES } from "../case/case-logic.ts";
 import type { EvaluateMeasureBinding, MeasureOutcome } from "../engine/evaluate-measure.ts";
-import type { RoutedEngine } from "../wiring/executor-router.ts";
+import { OFFICIAL_LOGIC_VERSION_PREFIX, type RoutedEngine } from "../wiring/executor-router.ts";
 import { isApplicable } from "../segment/segment-applicability.ts";
 import type { HydratedSegment } from "../stores/segment-store.ts";
 import { EMPLOYEES, employeeById, type EmployeeProfile } from "../engine/synthetic/employee-catalog.ts";
@@ -561,17 +561,17 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
    * Per-measure initial-population membership, as REPORTED by whichever path produced each outcome
    * (ADR-043). Read after the evaluation loop, never during it.
    *
-   * Only outcomes that actually report membership are recorded. `inInitialPopulation` is optional on
-   * `MeasureOutcome` and the authored engine never sets it, so an absent field means UNKNOWN, not
-   * "out of population" — collapsing the two would WARN on every authored measure. That is not
-   * hypothetical: `run-pipeline.test.ts`'s batch probe omits the field, which is what surfaced it.
+   * Read at the END of the roster, not in the batch pre-pass. The first version concluded inside the
+   * pre-pass off `prefetched` alone, and Codex (#354) showed that reads an INCOMPLETE roster: a subject
+   * the executor omits is re-evaluated individually LATER in the loop below, so a batch of two out-of-IPP
+   * outcomes plus one omission warned even when the omitted subject landed squarely in the population,
+   * and one out-of-IPP outcome plus two omissions stayed silent because the sample failed its own `> 1`
+   * guard. Membership is a property of the finished roster, so it is decided where the roster is finished.
    *
-   * Deliberately NOT keyed to the batch pre-pass. The first version concluded inside the pre-pass, off
-   * `prefetched` alone, and Codex (#354) showed that reads an incomplete roster: a subject the executor
-   * omits is re-evaluated individually LATER in the loop below, so a batch returning two out-of-IPP
-   * outcomes plus one omission would warn even when the omitted subject then lands squarely in the
-   * population, and one out-of-IPP outcome plus two omissions would stay silent because the sample size
-   * was 1. Membership is a property of the finished roster, so it is decided where the roster is finished.
+   * Membership is recorded for EVERY measure but only ever READ for an officially-routed one — see
+   * `emptyIppMeasures` below for why that gate is not optional. An absent `inInitialPopulation` still
+   * means UNKNOWN rather than "out of population": the field is optional on `MeasureOutcome`, so absence
+   * is absence of evidence.
    */
   const ippByMeasure = new Map<string, boolean[]>();
   if (deps.engine.evaluateBatch) {
@@ -820,11 +820,28 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
   // job is only to stop being silent.
   //
   // `> 1` because for ONE subject "not in the initial population" is an ordinary correct answer —
-  // `/simulate` on somebody outside the age band. Not gated on the batch path: an official measure
-  // evaluated one subject at a time reports membership just the same, and the hazard is identical.
+  // `/simulate` on somebody outside the age band.
+  //
+  // **Gated on OFFICIAL ROUTING, and that gate is load-bearing.** An earlier version of this ran for every
+  // measure, on the stated basis that "the authored engine never sets `inInitialPopulation`" so authored
+  // measures could never trigger it. That premise is FALSE: `deriveInInitialPopulation`
+  // (`engine/cql/cql-execution-engine.ts`) emits the field for every measure with a boolean
+  // `Initial Population` define, which is all 16 of ours. Ungated, an authored measure whose evaluated
+  // cohort happens to sit entirely outside its own IPP would be told that nobody entered the *official*
+  // initial population and pointed at the `us-core-sex` extension — for a measure with no official
+  // artifact, not named in `WORKWELL_OFFICIAL_MEASURES`, and nothing to do with WebChart. It did not fire
+  // today only because the synthetic roster happens to put somebody in every measure's IPP, which is a
+  // property of the fixture, not an invariant. An official-specific message needs an official-specific
+  // trigger.
+  //
+  // The signal is the engine's own declared identity (ADR-040): `logicVersionFor` returns
+  // `official-fqm:<version>:<artifactSha>:<terminologySha>` for a routed measure and the authored ELM
+  // hash (or nothing) otherwise. Asking the engine what it ran beats re-reading the env here.
+  //
   // De-duped for the same reason the batch pre-pass de-dupes `measureIds` — a repeated id would otherwise
   // name the same measure twice in the run message.
   const emptyIppMeasures = [...new Set(measureIds)].filter((measureId) => {
+    if (!deps.engine.logicVersionFor?.(measureId)?.startsWith(OFFICIAL_LOGIC_VERSION_PREFIX)) return false;
     const seen = ippByMeasure.get(measureId);
     return seen !== undefined && seen.length > 1 && !seen.some(Boolean);
   });

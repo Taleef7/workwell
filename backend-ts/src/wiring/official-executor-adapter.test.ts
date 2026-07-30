@@ -487,11 +487,14 @@ const batchArtifact = (): OfficialArtifact => {
 /**
  * fqm's shape for N subjects.
  *
- * `retrieved: false` is the empty-retrieve catastrophe PR-8 guards. `inIpp: false` is the DIFFERENT one
- * PR-9c's precondition guards, and the pair has to be expressible independently: retrieves matching while
- * nobody enters the initial population is exactly what real WebChart data did (236 LOINC Observations
- * found, all 56 subjects out of CMS125's IPP for want of a `us-core-sex` extension). A harness that could
- * only turn both off at once would make that case untestable.
+ * `retrieved: false` is the empty-retrieve catastrophe PR-8 guards — the only one the EXECUTOR refuses.
+ * `inIpp: false` is the DIFFERENT one, and the executor deliberately does NOT guard it (ADR-043): it
+ * reports honestly and the run pipeline warns, because a legitimately all-ineligible cohort produces the
+ * identical shape. The pair still has to be expressible independently: retrieves matching while nobody
+ * enters the initial population is exactly what real WebChart data did (236 LOINC Observations found, all
+ * 56 subjects out of CMS125's IPP for want of a `us-core-sex` extension), and a harness that could only
+ * turn both off at once would make that case untestable — which is how the executor's refusal came to
+ * look sufficient in the first place.
  */
 const calculatorFor = (
   subjectIds: string[],

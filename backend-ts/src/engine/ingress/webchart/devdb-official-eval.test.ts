@@ -22,7 +22,12 @@
  * all", and these retrieves match plenty (236 LOINC observations); they simply did not match the conjunct
  * that decides membership.
  *
- * **This file IS the enforcement (ADR-043).** At runtime a whole-roster-out-of-IPP is only *surfaced* — the
+ * **This file is the AUTOMATED HALF of the enforcement (ADR-043)** — and the half it is not deserves
+ * stating, since a runtime check was traded for this. It pins the committed 56-patient fixture; it cannot
+ * see a tenant. Confirming a non-zero initial population against a tenant's OWN data is DEPLOY.md
+ * §"Flipping a measure to official execution" step 2, which is a prose instruction with no command and no
+ * tooling behind it. So "enforcement" here means: one automated test over frozen data, plus one
+ * unautomated human step. At runtime a whole-roster-out-of-IPP is only *surfaced* — the
  * run pipeline emits a `WARN` and reports the outcomes as computed — because a legitimately all-ineligible
  * cohort produces the identical shape, cohort composition varies by run, and refusing would replace valid
  * `official.populationResults` evidence with an engine error. The two causes can only be told apart by
