@@ -46,6 +46,8 @@ export interface SnapshotSubject {
 export interface MeasureSnapshot {
   measureId: string;
   subjects: number;
+  /** What the subjects ARE, so the report cannot be read as a roster forecast when it is not one. */
+  sourceLabel?: string;
   /** Outcome distribution as the roster reads TODAY. */
   authored: Record<string, number>;
   /** Outcome distribution the roster would read after the flip. */
@@ -173,8 +175,18 @@ export function renderSnapshot(snapshots: readonly MeasureSnapshot[]): string {
   const lines: string[] = ["# Official flip snapshot", ""];
   for (const s of snapshots) {
     lines.push(`## ${s.measureId} — ${s.subjects} subject(s)`, "");
+    if (s.sourceLabel) lines.push(`_${s.sourceLabel}_`, "");
     if (s.error) {
-      lines.push(`**REFUSED:** ${s.error}`, "", "The measure cannot be routed over this data.", "");
+      // Do NOT blame the data: this branch also catches CONSTRUCTION failures ("no executable official
+      // artifact is vendored"), which say nothing about the roster. Review, #355.
+      lines.push(
+        `**REFUSED:** ${s.error}`,
+        "",
+        "This measure produced no official result. If the message names the DATA (nothing retrieved for " +
+          "anybody) the measure cannot be routed over it; if it names the ARTIFACT or its terminology, " +
+          "the configuration is incomplete and `routedEngineForEnv` would refuse this measure at boot.",
+        "",
+      );
       continue;
     }
     lines.push(

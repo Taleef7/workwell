@@ -43,8 +43,12 @@ authored and not official; a LOINC Observation clears official and not authored;
    - **an explicit allowlist, not a category sweep** — only codes that mean "a screening mammogram was
      performed" dual-stamp, so an unrelated CPT can never mint a diagnostic study;
    - **non-inflating** — both numerators are `exists(...)`, so one event in two vocabularies is still one
-     event. **This would NOT be safe for a counting measure**, and that limit is stated in
-     `WEBCHART_FHIR_MAPPING.md` §3.2 rather than left to be rediscovered.
+     event. **This would NOT be safe for a counting measure — nor for a most-recent-value one.** `cms122.cql`
+     does a bare unfiltered `Last([Observation] …)` and reads `.value`; a valueless Observation that
+     became "most recent" drives it to a falsely-COMPLIANT outcome, and `Status.isLaboratoryTestPerformed`
+     has no category gate, so the `imaging` category protecting CMS125 protects nothing there. Today the
+     only barrier is value-set membership, which is runtime-resolvable. Stated in
+     `WEBCHART_FHIR_MAPPING.md` §3.6 rather than left to be rediscovered.
 4. **The flip gate gets a COMMAND: `pnpm flip-snapshot`.** ADR-043 moved enforcement onto "the flip gate",
    and review of #354 made the fair objection that the half which can see a tenant — confirm a non-zero
    initial population (step 2), take a before/after distribution snapshot (step 4) — shipped as prose with
@@ -59,13 +63,29 @@ authored and not official; a LOINC Observation clears official and not authored;
    thing it gates is the exact failure this tool exists to stop. `--source live` now reads
    `WORKWELL_WEBCHART_*` over the real ingress path and **refuses loudly when the seam is unset** rather
    than falling back; the frozen sample is `--source fixture`, named so nobody reaches it by accident.
-6. **The official side is evaluated batch-then-fallback, exactly as a run evaluates it.** `evaluateBatch`
+6. **`--source live` requires `--roster`, and refuses a roster that enrolls nobody.** *(Added after
+   review, #355 — this was the most serious defect in the PR, and my own fix for the finding above
+   introduced it.)* The committed `enrollment-roster.json` is keyed by the dev-DB's `wc-N` ids, and
+   `stampEnrollment` is a **silent no-op** for any subject absent from the roster. Pointed at a real
+   tenant it would enroll nobody, so the OH roster's synthesized CPT-99213 Encounter — the conjunct
+   authored CMS125's `Has Qualifying Visit` depends on — would never be stamped, `authoredActionable`
+   would collapse to ~0, and the report would print **"the flip is inert rather than wrong"** for a tenant
+   whose official roster reads empty. A **false all-clear on precisely the configuration ADR-042/044
+   document as broken**, and the DO-NOT-FLIP verdict is the tool's whole reason to exist. `live-cli.ts`
+   has always required `--roster`; this now does too.
+7. **The report NAMES its source under every measure.** `--source synthetic` is **five designed corpus
+   probes**, one per intended outcome — *not* the synthetic employee directory the demo/production stack
+   evaluates through the run pipeline, and the five collapse into three buckets because `DUE_SOON` and
+   `MISSING_DATA` both score OVERDUE. It is the right default (the cheapest way to ask "do the two engines
+   agree across the outcome space", which is what a flip turns on) but it is **not a roster forecast**,
+   and an earlier draft of DEPLOY.md said it was. Only `--source live` produces a roster forecast.
+8. **The official side is evaluated batch-then-fallback, exactly as a run evaluates it.** `evaluateBatch`
    omits a subject it returned nothing for and the run pipeline re-evaluates each one individually; a
    snapshot that skipped that step would not forecast the run it claims to forecast, and a roster whose
    omitted subjects DO qualify could report zero-in-IPP and earn a spurious DO-NOT-FLIP. Also review
    (#355) — and the same incomplete-roster mistake ADR-043 decision 2 records, which suggests "did you
    model the omission fallback?" belongs on the checklist for anything reading `evaluateBatch`.
-7. **The snapshot renders a verdict but gates nothing**, and exits 0 even on DO-NOT-FLIP. The judgement it
+9. **The snapshot renders a verdict but gates nothing**, and exits 0 even on DO-NOT-FLIP. The judgement it
    supports is the one ADR-043 established a machine cannot make from shape alone. What it *can* do is
    compute the comparison a human needs: `authoredActionable > 0 && officialInIpp === 0` means the cohort
    is not the explanation. Where both engines find nobody it reports **INCONCLUSIVE** rather than picking
@@ -89,10 +109,18 @@ authored and not official; a LOINC Observation clears official and not authored;
   insertion rule was replayed over the committed artifact and the diff verified to be exactly the 28 lines
   of one added Observation. A re-export when the dev DB is up should be a no-op; if it is not, the
   generator and the fixture have drifted and the fixture is wrong.
-- **Three copies of the mapping now exist** (shim, export script, and the test's injected shapes). That is
-  the same intentional duplication ADR-034 accepted, with `hapi-live.test.ts`'s bucket-parity suite as the
-  drift guard, now joined by a fixture assertion. It is real debt, and the honest place to remove it is
-  M-C's package extraction, not a cross-package import that ADR-034 forbids.
+- **Three copies of the mapping now exist** (shim, export script, and the test's injected shapes), and
+  **no drift guard covers the pair that matters.** *(Corrected after review, #355.)* `hapi-live.test.ts` is
+  named as that guard here and in two code comments, and it demonstrably cannot be one: it loads a HAPI
+  server from the committed fixture and compares against the same committed fixture, so both sides
+  originate from one file — it never runs the export script's SQL and never touches the shim. The
+  `us-core-sex` docstring had already retracted the same claim for its own field; reasserting it
+  un-caveated for mammography was a regression in load-bearing safety documentation, which is the kind
+  that gets believed later. What actually guards this today is `devdb-official-eval.test.ts` asserting the
+  dual stamp on the committed fixture — covering the **export script only**; the shim side is covered by
+  its own unit tests against a stubbed DB. A genuine shim-vs-generator comparison does not exist, and the
+  honest place to remove the need for one is M-C's package extraction, not a cross-package import ADR-034
+  forbids.
 - **What this does NOT close:** the live third-party path still supplies neither `us-core-sex` nor
   dual-stamped mammography, because both mapping sites sit upstream of the live FHIR transport and
   `normalizeWebChartBundle` is untouched by design. For a real WebChart tenant the gap is open exactly as

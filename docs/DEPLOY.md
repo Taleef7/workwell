@@ -197,8 +197,10 @@ Per measure, per stack:
 
    # WebChart-configured stacks: `live` reads THE TENANT via WORKWELL_WEBCHART_*, over the real ingress
    # path. This is the only source that answers "is the initial population non-zero for MY data".
+   # --roster is REQUIRED — it maps THIS tenant's subject ids → measures. Template:
+   #   pnpm evaluate:webchart-live --list-patients > roster.json
    WORKWELL_WEBCHART_BASE_URL=… WORKWELL_WEBCHART_CLIENT_ID=… WORKWELL_WEBCHART_PRIVATE_KEY_B64=… \
-     pnpm flip-snapshot --measure cms125 --source live --eval <YYYY-MM-DD>
+     pnpm flip-snapshot --measure cms125 --source live --roster roster.json --eval <YYYY-MM-DD>
    ```
 
    It evaluates each measure through **both** engines over the same bundles and reports the before/after
@@ -216,10 +218,18 @@ Per measure, per stack:
    **Do not wire it into CI as pass/fail.**
 
    > **`--source fixture` is NOT a substitute for `live`.** It reads the committed 56-patient dev-DB
-   > sample, which is frozen data and says nothing about a tenant. `--source live` refuses loudly rather
-   > than falling back to it, because a silent fallback is exactly how this step would hand you a healthy
+   > sample — frozen data that says nothing about a tenant. `--source live` refuses loudly rather than
+   > falling back to it, because a silent fallback is exactly how this step would hand you a healthy
    > verdict computed from our sample while your tenant's roster falls out of the official initial
-   > population.
+   > population. For the same reason it refuses without `--roster`, and refuses a roster matching none of
+   > the subjects the tenant returned: an unenrolled roster silently drops the qualifying-visit Encounter
+   > the authored side depends on, turning a **DO NOT FLIP** into a false all-clear.
+   >
+   > **`--source synthetic` is an AGREEMENT check, not a roster forecast.** It runs five designed corpus
+   > probes (one per intended outcome) — *not* the synthetic employee directory the demo/production stack
+   > actually evaluates — and the five collapse into three buckets, since `DUE_SOON`/`MISSING_DATA` both
+   > score OVERDUE here. Read it as "do the two engines agree across the outcome space", which is what a
+   > flip turns on. The report prints its source under every measure so the two cannot be confused.
 
 3. **Check the numerator, not just membership.** Being in the population is not agreement. The mammography
    case is the worked example (ADR-044): the crosswalk emits a CPT `Procedure`, the official artifact
@@ -227,13 +237,13 @@ Per measure, per stack:
    official report an already-screened woman **OVERDUE** — a HIGH-priority case chasing a mammogram she had.
    Nothing detects this: those subjects *are* in the population, so the ADR-043 WARN stays silent. It is
    closed for mammography by dual-stamping; **the same question has to be asked of each new measure.**
-5. **Add the variable to the deploy workflow — setting it on the container by hand does not survive.**
+4. **Add the variable to the deploy workflow — setting it on the container by hand does not survive.**
    `deploy-twh-mieweb.yml` builds `CONTAINER_ENV_VARS_JSON` as a fixed `jq -nc '[…]'` array with **no
    `WORKWELL_OFFICIAL_MEASURES` key and no passthrough**, and the deploy script deletes and recreates the
    container — so a hand-set value is wiped on the next deploy. Flipping is a **workflow edit**, reviewed
    and merged like any other change. (Same for staging.)
 
-6. **Redeploy, then check the two signals that exist — neither is a clean boot failure.**
+5. **Redeploy, then check the two signals that exist — neither is a clean boot failure.**
    - The seam line reports `official-measures=on|off` only; it does **not** name the routed measures, so
      `on` confirms the variable was read, not that it says what you intended.
    - **A misconfiguration does NOT refuse at boot.** `worker.ts` logs

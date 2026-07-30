@@ -132,6 +132,17 @@ export const MAMMOGRAPHY_CPT_TO_LOINC: ReadonlyMap<string, string> = new Map([
 ]);
 
 /**
+ * Look a procedure code up the way the CROSSWALK does — trimmed and upper-cased.
+ *
+ * `webchart/terminology.ts` keys on `code.trim().toUpperCase()`, so a WCDB row carrying `" g0202"`
+ * reconciles for the AUTHORED engine while an exact-match lookup here would skip the dual stamp. That
+ * asymmetry reintroduces the exact false non-compliance this whole mapping exists to remove: authored
+ * COMPLIANT, official OVERDUE, through a whitespace seam (review, #355).
+ */
+const mammographyLoincFor = (cpt: string): string | undefined =>
+  MAMMOGRAPHY_CPT_TO_LOINC.get(cpt.trim().toUpperCase());
+
+/**
  * The SECOND representation of one real screening mammogram (ADR-044), or `undefined`.
  *
  * ## Why this exists
@@ -158,14 +169,21 @@ export const MAMMOGRAPHY_CPT_TO_LOINC: ReadonlyMap<string, string> = new Map([
  *   - **Only for codes that mean "a screening mammogram was performed."** The map above is an explicit
  *     allowlist, not a category sweep, so an unrelated CPT can never mint a diagnostic study.
  *   - **Non-inflating.** Both engines' numerators are `exists(...)`, so one event in two vocabularies is
- *     still one event. This would NOT be safe for a counting measure, and that limit is stated in
- *     `WEBCHART_FHIR_MAPPING.md` §3.2 rather than left for someone to rediscover.
+ *     still one event. Two limits, both stated in `WEBCHART_FHIR_MAPPING.md` §3.6 rather than left for
+ *     someone to rediscover: this would NOT be safe for a **counting** measure, and — the sharper one —
+ *     not for a **most-recent-value** measure either. `cms122.cql` does a bare unfiltered
+ *     `Last([Observation] …)` and then reads `.value`; a valueless Observation that became "most recent"
+ *     would drive it to a falsely-COMPLIANT outcome. `Status.isLaboratoryTestPerformed` has **no**
+ *     category gate, so the `imaging` category that protects CMS125 protects nothing there. Today the
+ *     only barrier is value-set membership (the HbA1c set is 5 LOINC codes, none of them 24606-6), and
+ *     that barrier is runtime-resolvable — so a future dual stamp must check `Last`/`.value` readers,
+ *     not just `Count`.
  *
  * The id is suffixed `-mammo` off the procedure's own ordinal so it is stable across reads and cannot
  * collide with a real observation row's `{patient}-Observation-{n}` (the client dedupes by `type/id`).
  */
 export function mammographyObservationFor(row: ProcedureRow, ordinal: number): FhirResource | undefined {
-  const loinc = MAMMOGRAPHY_CPT_TO_LOINC.get(row.cpt);
+  const loinc = typeof row.cpt === "string" ? mammographyLoincFor(row.cpt) : undefined;
   if (!loinc) return undefined;
   const subjectId = subjectIdFor(row.pat_id);
   return {

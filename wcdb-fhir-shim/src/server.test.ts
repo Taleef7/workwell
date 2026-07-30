@@ -26,6 +26,8 @@ const PROCS: Record<number, ProcedureRow[]> = {
   5: [{ pat_id: 5, cpt: "G0202", dt: "2024-02-02" }],
   // A non-mammography procedure, so the ADR-044 allowlist has a negative case to fail against.
   7: [{ pat_id: 7, cpt: "92557", dt: "2024-04-04" }],
+  // Lower-cased + padded, the shape `webchart/terminology.ts` normalizes before matching.
+  9: [{ pat_id: 9, cpt: " g0202 ", dt: "2024-03-03" }],
 };
 
 function stubDb(): ShimDb {
@@ -165,6 +167,21 @@ test("ADR-044: the /Procedure response is UNCHANGED — the authored engine sees
   assert.equal(body.entry.length, 1, "no derived Observation leaks into the Procedure endpoint");
   assert.equal(body.entry[0].resource.resourceType, "Procedure");
   assert.equal(body.entry[0].resource.code.coding[0].code, "G0202");
+});
+
+test("ADR-044: a padded, lower-cased CPT still dual-stamps — matching the crosswalk's normalization", async () => {
+  // `webchart/terminology.ts` keys on `code.trim().toUpperCase()`, so a WCDB row carrying `" g0202 "`
+  // reconciles for the AUTHORED engine. An exact-match lookup here would skip the dual stamp on exactly
+  // that row — reintroducing the false non-compliance this mapping exists to remove (authored COMPLIANT,
+  // official OVERDUE) through a whitespace seam. Review, #355.
+  const { body } = await getJson("/fhir/Observation?patient=wc-9");
+  const mammo = body.entry
+    .map((e: { resource: Record<string, unknown> }) => e.resource)
+    .find((r: Record<string, unknown>) => (r.id as string)?.endsWith("-mammo"));
+
+  assert.ok(mammo, "a padded/lower-cased mammography code must still dual-stamp");
+  assert.equal(mammo.code.coding[0].code, "24606-6");
+  assert.equal(mammo.effectiveDateTime, "2024-03-03");
 });
 
 test("ADR-044: a NON-mammography procedure mints nothing — the map is an allowlist, not a sweep", async () => {

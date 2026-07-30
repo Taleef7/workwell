@@ -52,7 +52,36 @@ and agree with authored on every subject. Over WebChart data: cms125 admits 4 of
 cms122 admits 0 of 56 and reports INCONCLUSIVE — a data gap, not a divergence. That is ADR-043 decision 6
 confirmed by measurement instead of by reasoning about which stack has which seam.
 
-Verified: typecheck clean both packages; shim 30/30; `devdb-official-eval` **11/11 with 0 skipped**
+**Then two review passes found four more, and the worst one was mine.** Codex caught that `--source
+webchart` always loaded the committed fixture — so the command DEPLOY.md sends an operator to for "confirm
+a non-zero initial population against the tenant's own data" could not see a tenant at all. Fixing that by
+adding a real `--source live` **introduced a worse bug**, which my own reviewer then caught: `live` reused
+the committed `enrollment-roster.json`, which is keyed by `wc-N` ids. `stampEnrollment` is a *silent no-op*
+for any subject absent from the roster, so against a real tenant nobody would be enrolled, the roster's
+synthesized CPT-99213 Encounter would never be stamped, authored CMS125's `Has Qualifying Visit` would fail
+for everyone, `authoredActionable` would collapse to 0 — and the report would print **"the flip is inert
+rather than wrong"** for a tenant whose official roster reads empty. A false all-clear on exactly the
+configuration this work documents as broken. `--roster` is now required for `live`, and a roster enrolling
+none of the returned subjects is refused.
+
+Two more worth recording rather than quietly fixing. **`--source synthetic` is not a roster forecast** — it
+is five designed corpus probes, and DEPLOY.md claimed it read "the corpus roster a seamless stack
+evaluates". It doesn't: the demo/production stack evaluates the full employee directory through the run
+pipeline, and the five probes collapse into three buckets anyway. The report now names its source under
+every measure. And **`hapi-live.test.ts` was named three more times as the drift guard between the two
+mapping copies, and cannot be one** — both its sides originate from the committed fixture, so it never
+sees the shim or the export script's SQL. The `us-core-sex` docstring had *already* retracted that claim
+for its own field; I reasserted it un-caveated for mammography. Retracted in all three places, and the
+honest statement is that no shim-vs-generator comparison exists at all.
+
+Also fixed: the code lookup now trims and upper-cases like the crosswalk does (a `" g0202"` row reconciled
+for authored but would have skipped the dual stamp — the same false non-compliance, through a whitespace
+seam); the REFUSED text no longer blames the data for construction failures; and five README claims that
+were simply false (1597 tests, an 8-way sharded CI that does not exist, a two-dependency engine that is
+four, a `skipped 0` CI assertion that was never written, and Node 20 where `package.json` requires 22.16 —
+plus a Quick start missing the submodule init, so it could not work on a fresh clone).
+
+Verified: typecheck clean both packages; shim 31/31; `devdb-official-eval` **11/11 with 0 skipped**
 (including the four failure states, kept because three of them are how a future simplification reopens the
 gap); flip-snapshot report tests 6/6, deliberately pure so they can never self-skip the way the
 sidecar-gated suites did.

@@ -6,7 +6,7 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)](backend-ts/package.json)
 [![Next.js 16](https://img.shields.io/badge/Next.js-16-000000?logo=nextdotjs&logoColor=white)](frontend/package.json)
 [![FHIR R4](https://img.shields.io/badge/FHIR-R4%20%2F%20QI--Core-red)](docs/STANDARDS_CONFORMANCE.md)
-[![Tests](https://img.shields.io/badge/backend%20tests-1597-success)](backend-ts)
+[![Tests](https://img.shields.io/badge/backend%20tests-1604-success)](backend-ts)
 
 **A clinical quality measure engine that runs CMS's *own published* eCQM artifacts — not a reimplementation of them.**
 
@@ -92,7 +92,7 @@ flowchart TB
 
 **Three boundaries are enforced by tests, not convention:**
 
-1. **`src/engine/` reaches nothing outside itself** — a containment test freezes the dependency allowlist, so the eval core stays portable (its only runtime deps are `cql-execution` and `cql-exec-fhir`).
+1. **`src/engine/` reaches nothing outside itself** — a containment test freezes the dependency allowlist, so the eval core stays portable. The *eval core* needs only `cql-execution` and `cql-exec-fhir`; the tree also still carries `@cqframework/cql` (the ELM Explorer) and `node:fs` in four CLI entrypoints, both pinned by that allowlist until the package extraction removes them.
 2. **`fqm-execution` lives in exactly one package** — `packages/official-executor/`, reached only through a lazy `await import`, policed by five boundary tests. The heavyweight official-execution dependency can never leak into the request path.
 3. **Storage is a port with two adapters** — a Postgres *ceiling* and a SQLite *floor* that satisfy the same contract test, so the whole suite runs with no database.
 
@@ -144,7 +144,7 @@ This project is deliberately careful about what it claims. [`docs/STANDARDS_CONF
 |---|---|---|
 | Measure logic | HL7 **CQL** / ELM | Executed — JVM-free, build-time translation |
 | Patient data | **FHIR R4**, US Core / **QI-Core** | Executed — official artifacts evaluate real QI-Core bundles |
-| Known-answer gate | Official **MADiE** test cases (CMS122, CMS125) | **121/121 exact**, a permanent CI gate |
+| Known-answer gate | Official **MADiE** test cases (CMS122, CMS125) | **121/121 exact** — a permanent CI gate, and diagnostic-only until a measure is routed |
 | Terminology | **VSAC** value sets | The artifact's *own* expansions, fetched at build and pinned by SHA-256 |
 | Reporting | FHIR **MeasureReport**, **QRDA-III** | MeasureReport executed; QRDA-III structurally representative |
 | EHR integration | **SMART Backend Services** (`private_key_jwt`) | Executed against a live tenant |
@@ -160,18 +160,21 @@ The parts of this repo worth reading if you care about how it is built:
 - **43 Architecture Decision Records** ([`docs/DECISIONS.md`](docs/DECISIONS.md)) — every non-obvious decision, with the alternatives and the consequences. Several record a decision being *reversed* by measurement or review, with the original reasoning kept rather than deleted.
 - **Measure-first, then decide.** Repeatedly, a planned refusal or guard was killed because measuring showed it would fire on correct inputs. Those reversals are documented as such — the reasoning that was wrong is the useful part.
 - **Guards are mutation-tested.** A check that cannot fail is worse than no check, because it reads as covered. New safety conditions are verified by breaking them and confirming exactly the intended test fails.
-- **Vacuous-guard hunting.** Tests that self-skip when a fixture is missing are treated as a defect class in their own right: CI asserts `skipped 0` for the gates that matter.
+- **Vacuous-guard hunting.** Tests that self-skip when a fixture is missing are treated as a defect class in their own right — a suite that reads green because it never ran is worse than a red one. The sidecar-dependent gates are named explicitly in a CI step so they cannot silently drop out, and the flip checklist tells the operator to read the `skipped` count, not just `fail`.
 - **Ports and adapters throughout** — measure executor, data source, value-set resolver, outreach channel, immunization forecaster, evidence bucket, store layer. Each defaults to an inert simulated implementation and is *inert unless configured*.
 - **Reversibility as a design constraint.** Every seam is switchable by env var, and every switch is byte-identical to the previous behaviour when unset.
-- **1597 backend tests** on the SQLite floor with no external services; a Postgres contract suite that self-skips when no local `postgres:16` is present; Playwright E2E; and an 8-way sharded CI.
+- **1604 backend tests** on the SQLite floor with no external services (1590 pass, 14 self-skip without a local Postgres or the gitignored terminology sidecar); a Postgres contract suite that runs against a local `postgres:16` when present; and Playwright E2E.
 
 ---
 
 ## Quick start
 
-**Prerequisites** — Node.js 20+ (24 recommended), pnpm via Corepack, npm.
+**Prerequisites** — Node.js **22.16+** (24 recommended; `pnpm install` enforces it), pnpm via Corepack, and Git submodules — `@mieweb/cloud` is vendored as one.
 
 ```bash
+git clone https://github.com/Taleef7/workwell.git && cd workwell
+git submodule update --init --recursive     # @mieweb/cloud — the backend will not install without it
+
 # Backend — API, engine, exports  (http://localhost:8080)
 cd backend-ts
 pnpm install
@@ -179,9 +182,9 @@ pnpm typecheck && pnpm test
 pnpm dev
 
 # Frontend — dashboard, Studio, admin  (http://localhost:3000)
-cd frontend
-npm install
-npm run dev
+cd ../frontend
+pnpm install
+pnpm dev
 ```
 
 No database or cloud account is needed: the SQLite floor and the synthetic roster make the whole app runnable offline.
