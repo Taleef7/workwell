@@ -248,7 +248,7 @@ jobs:
                 # PR-9c / ADR-045 — THE FLIP. See the note above this jq invocation.
                 # NO APOSTROPHES BELOW THIS LINE: everything here is inside a single-quoted shell
                 # string, and one apostrophe closes it (review, #356).
-                {key: "WORKWELL_OFFICIAL_MEASURES", value: "cms125"},
+                {key: "WORKWELL_OFFICIAL_MEASURES", value: "cms122,cms125"},
                 {key: "WORKWELL_VSAC_API_KEY", value: $vsac_api_key},
                 {key: "WORKWELL_BUCKET_S3_ACCESS_KEY_ID", value: $bucket_key_id},
                 {key: "WORKWELL_BUCKET_S3_SECRET_ACCESS_KEY", value: $bucket_secret},

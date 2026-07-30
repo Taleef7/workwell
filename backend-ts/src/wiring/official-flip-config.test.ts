@@ -39,7 +39,7 @@ import { loadOfficialArtifact } from "./official-artifacts.ts";
 import { loadOfficialTerminology } from "./official-terminology.ts";
 import { OFFICIAL_GATED_MEASURES } from "../standards/official-cases.ts";
 import { OFFICIAL_MEASURE_SEMANTICS } from "./official-measure-semantics.ts";
-import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
+import { buildSummaryMeasureReport } from "../fhir/measure-report.ts";
 
 const WORKFLOWS = ["deploy-twh-mieweb.yml", "deploy-staging-mieweb.yml", "reconcile-twh-mieweb.yml"] as const;
 
@@ -115,36 +115,52 @@ test("PR-9c: every officially-routed measure a deploy workflow ships is gated an
   }
 });
 
-test("PR-9c: a routed measure's REPORTING trio is self-consistent — numerator, notation, membership", () => {
-  // The obligation `measure-report.ts` wrote down and PR-9c was the change that had to discharge it:
+test("PR-9c/ADR-046: a routed measure's REPORT declares the notation its official numerator implies", () => {
+  // The obligation `measure-report.ts` carried since PR-3: canonical, improvementNotation and membership
+  // must switch TOGETHER or the report contradicts itself. cms122's official numerator is poor glycemic
+  // control, so a report declaring `increase` over it says higher-is-better about a numerator counting
+  // harm (~120 → ~27 on the 150-employee directory), and QRDA III has no notation element at all.
   //
-  //   "Evidence-first membership means an official-routed outcome's numerator is the OFFICIAL one (for
-  //    cms122: poor glycemic control), while measureCanonical/improvementNotation still emit the
-  //    WorkWell canonical and `increase`. A report that declares higher-is-better over a poor-control
-  //    numerator is SELF-CONTRADICTORY, so the measure that flips MUST switch all three together."
-  //
-  // That guard test pinned only the authored path (its fixtures carry no official evidence), so it
-  // could not fail when official evidence arrived. Review (#356) caught the gap: routing cms122 would
-  // have shipped a MeasureReport whose numerator counts poor control while `improvementNotation` still
-  // said `increase` — and QRDA III carries no `improvementNotation` field at all, so the inverted count
-  // would go out with no marker whatsoever. Magnitude on the 150-employee directory: ~120 → ~27.
-  //
-  // Enforced rather than remembered. cms122 is excluded from the flip BECAUSE this fails for it, not
-  // because someone recalled a note; when the trio is discharged, this stops objecting on its own.
+  // This asserts the BUILT REPORT rather than the binding table, because ADR-046 moved the source: the
+  // authored binding still says `increase` for cms122 and correctly so — that is the authored measure's
+  // orientation. What matters is what a routed report emits.
+  const run = {
+    id: "run-flip-guard",
+    measurementPeriodStart: "2025-01-01",
+    measurementPeriodEnd: "2025-12-31",
+  } as never;
   for (const workflow of WORKFLOWS) {
     for (const id of shippedMeasures(workflow) ?? []) {
       const semantics = OFFICIAL_MEASURE_SEMANTICS[id];
       assert.ok(semantics, `${id}: no recorded official numerator semantics — it cannot be routed`);
-      const notation = MEASURE_BINDINGS[id]?.improvementNotation ?? "increase";
+      const outcome = {
+        id: "o1", runId: "run-flip-guard", subjectId: "s1", measureId: id,
+        evaluationPeriod: "2025-12-31", status: "COMPLIANT",
+        evidence: {
+          official: {
+            version: loadOfficialArtifact(id)?.manifest.version,
+            artifactSha256: loadOfficialArtifact(id)?.manifest.sha256,
+            populationResults: [
+              { populationType: "initial-population", result: true },
+              { populationType: "denominator", result: true },
+              { populationType: "numerator", result: true },
+            ],
+          },
+        },
+        evaluatedAt: "2025-12-31T00:00:00.000Z",
+      } as never;
+      const report = buildSummaryMeasureReport(run, id, [outcome], "2025-12-31T00:00:00.000Z");
       const expected = semantics!.numeratorMeansCompliant ? "increase" : "decrease";
       assert.equal(
-        notation,
+        report.improvementNotation?.coding[0]?.code,
         expected,
         `${workflow} routes '${id}', whose OFFICIAL numerator means ` +
-          `${semantics!.numeratorMeansCompliant ? "compliance" : "FAILURE"} — so MeasureReport must declare ` +
-          `improvementNotation '${expected}', not '${notation}'. Routing it would emit a self-contradictory ` +
-          `report (and QRDA III would carry the inverted count with no notation field at all). Discharge ` +
-          `the canonical/notation/membership trio in measure-report.ts before routing this measure.`,
+          `${semantics!.numeratorMeansCompliant ? "compliance" : "FAILURE"} — its MeasureReport must declare ` +
+          `improvementNotation '${expected}'. Discharge the canonical/notation/membership trio before routing it.`,
+      );
+      assert.ok(
+        !report.measure.startsWith("urn:workwell:measure:" + id) || report.measure.includes(":official:"),
+        `${id}: a routed report must not claim the plain WorkWell canonical over an official numerator`,
       );
     }
   }

@@ -268,3 +268,33 @@ test("role gate: MCP_CLIENT is denied (audited); CASE_MANAGER is allowed", async
   const audits = await events.listAuditEvents();
   assert.ok(audits.some((a) => a.eventType === "MCP_TOOL_CALLED" && (a.payload as JsonRecord).success === false));
 });
+
+test("ADR-046: explain_outcome does NOT assert a recency finding for a value-based measure", async () => {
+  // A routed cms122 outcome has no recency criterion — `why_flagged` carries no `last_exam_date` and no
+  // `days_overdue`, because the matchers correctly find nothing in official population evidence. The
+  // unconditional version told an MCP client "their last qualifying exam was unknown date (unknown days
+  // ago), which exceeds the 365-day compliance window", where the 365 came from the AUTHORED binding for
+  // a measure now scored by CMS's artifact (review, #357). Asserted to an external client, labelled
+  // deterministic, with no human in the loop.
+  const { buildOutcomeExplanation } = await import("./tools.ts");
+  const official = buildOutcomeExplanation("Jane Doe", "OVERDUE", "Diabetes: HbA1c Poor Control", {
+    why_flagged: { role_eligible: true, site_eligible: true, waiver_status: "NONE" },
+    expressionResults: [
+      { define: "official:initial-population", result: true },
+      { define: "official:numerator", result: true },
+    ],
+  });
+  assert.ok(!official.includes("last qualifying exam"), "no recency claim without recency evidence");
+  assert.ok(!official.includes("compliance window"), "no window claim for a value-based measure");
+  assert.match(official, /Official population membership: initial-population=true, numerator=true/);
+  assert.match(official, /was flagged as OVERDUE/);
+});
+
+test("ADR-046: a recency measure still gets its recency sentence", async () => {
+  const { buildOutcomeExplanation } = await import("./tools.ts");
+  const authored = buildOutcomeExplanation("Al Smith", "OVERDUE", "Audiogram", {
+    why_flagged: { last_exam_date: "2025-03-10", days_overdue: 55, compliance_window_days: 365 },
+  });
+  assert.match(authored, /last qualifying exam was 2025-03-10 \(55 days ago\), which exceeds the 365-day/);
+  assert.ok(!authored.includes("Official population membership"), "authored outcomes have no official block");
+});

@@ -106,6 +106,52 @@ const NON_COMPLIANT = ["DUE_SOON", "OVERDUE", "MISSING_DATA"];
 
 // ---- tool handlers -----------------------------------------------------------
 
+/**
+ * The deterministic explanation `explain_outcome` returns. Pure and exported so the conditional below is
+ * directly testable — it is asserted to an external MCP client with no human in the loop.
+ *
+ * The recency clause is CONDITIONAL, and that is load-bearing (review, #357). It used to be
+ * unconditional string concatenation, so a routed cms122 outcome — a VALUE-based measure with no recency
+ * criterion at all — was described as "their last qualifying exam was unknown date (unknown days ago),
+ * which exceeds the 365-day compliance window". Three falsehoods in one sentence: there is no
+ * qualifying-exam recency rule, no window was exceeded, and the 365 came from the AUTHORED binding for a
+ * measure now scored by CMS's artifact. It was labelled `deterministic_metadata` and it was the only
+ * path, not a fallback.
+ */
+export function buildOutcomeExplanation(
+  employeeName: string,
+  outcomeStatus: string,
+  measureName: string,
+  evidenceJson: unknown,
+): string {
+  const evidence = (evidenceJson ?? {}) as JsonRecord;
+  const wf = evidence.why_flagged as JsonRecord | undefined;
+  const val = (k: string, fb: string): string => (wf && wf[k] != null ? String(wf[k]) : fb);
+  const recency =
+    wf?.last_exam_date != null && wf?.days_overdue != null
+      ? `Their last qualifying exam was ${val("last_exam_date", "unknown date")} (${val("days_overdue", "unknown")} days ago), ` +
+        `which exceeds the ${val("compliance_window_days", "unknown")}-day compliance window. `
+      : "";
+  // Population membership is what an official-routed outcome actually records, so state that rather than
+  // silently dropping to a shorter sentence that reads as though evidence were missing.
+  const populations =
+    (evidence.expressionResults as Array<{ define?: unknown; result?: unknown }> | undefined)?.filter((r) =>
+      String(r?.define ?? "").startsWith("official:"),
+    ) ?? [];
+  const membership = populations.length
+    ? `Official population membership: ${populations
+        .map((r) => `${String(r.define).slice("official:".length)}=${String(r.result)}`)
+        .join(", ")}. `
+    : "";
+  return (
+    `${employeeName} was flagged as ${outcomeStatus} for the ${measureName} measure. ` +
+    recency +
+    membership +
+    `Role eligibility: ${val("role_eligible", "unknown")}. Site eligibility: ${val("site_eligible", "unknown")}. ` +
+    `Waiver status: ${val("waiver_status", "unknown")}.`
+  );
+}
+
 async function getCase(args: JsonRecord, deps: McpToolDeps): Promise<unknown> {
   const caseId = requireString(args, "caseId");
   if (!UUID_RE.test(caseId)) return safeError("INVALID_ARGUMENT", "caseId must be a valid UUID");
@@ -267,12 +313,7 @@ async function explainOutcome(args: JsonRecord, deps: McpToolDeps): Promise<unkn
   const detail = toCaseDetail(c, outcome);
   const wf = ((detail.evidenceJson ?? {}) as JsonRecord).why_flagged as JsonRecord | undefined;
   const val = (k: string, fb: string): string => (wf && wf[k] != null ? String(wf[k]) : fb);
-  const explanation =
-    `${detail.employeeName} was flagged as ${detail.currentOutcomeStatus} for the ${detail.measureName} measure. ` +
-    `Their last qualifying exam was ${val("last_exam_date", "unknown date")} (${val("days_overdue", "unknown")} days ago), ` +
-    `which exceeds the ${val("compliance_window_days", "unknown")}-day compliance window. ` +
-    `Role eligibility: ${val("role_eligible", "unknown")}. Site eligibility: ${val("site_eligible", "unknown")}. ` +
-    `Waiver status: ${val("waiver_status", "unknown")}.`;
+  const explanation = buildOutcomeExplanation(detail.employeeName, detail.currentOutcomeStatus, detail.measureName, detail.evidenceJson);
   return {
     case_id: caseId,
     employee_name: detail.employeeName,

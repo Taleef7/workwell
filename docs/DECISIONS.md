@@ -1,5 +1,109 @@
 # Architecture Decision Records
 
+## ADR-046: Canonical, improvementNotation and membership all derive from the outcome's own evidence
+
+**Status:** Accepted (2026-07-30). Discharges the PR-7 obligation `fhir/measure-report.ts` has carried
+since PR-3, and unblocks routing **cms122** (PR-9c shipped cms125 alone because of this).
+
+**Context.** PR-3 made MeasureReport membership *evidence-first*: an official-routed outcome's populations
+come from `evidence.official.populationResults`, which is the regulatory truth. But two sibling fields
+stayed static — `measureCanonical` always emitted `urn:workwell:measure:<id>`, and `improvementNotation`
+always read the authored `MEASURE_BINDINGS` table. The file wrote the consequence down itself:
+
+> *"A report that declares higher-is-better over a poor-control numerator is self-contradictory, so the
+> measure that flips MUST switch all three together — canonical, improvementNotation, and membership."*
+
+For cms122 this is not cosmetic. Its official numerator is **poor glycemic control** — being in it is the
+failure — so `improvementNotation: increase` asserts higher-is-better about a numerator counting harm. On
+the 150-employee directory the numerator moves **~120 → ~27**. QRDA III carries **no `improvementNotation`
+element at all**, so there the inverted count would ship with nothing marking it.
+
+The guard that supposedly pinned this could not fail: its fixtures carried no official evidence, so it
+only ever exercised the authored path. Review of #356 caught that PR-9c was the flip obliged to discharge
+this and had not — which is why cms122 was held back and cms125 flipped alone.
+
+**Decision.**
+
+1. **All three derive from the outcome's own `evidence.official`.** Not from the environment: a report
+   describes the run it is built from, and a run's provenance does not change because someone later
+   flipped a flag or re-vendored. Asking `WORKWELL_OFFICIAL_MEASURES` at export time would mislabel every
+   historical export the day the config moves — the same reasoning `aggregateCountsForRun` already
+   applies to counts.
+2. **`improvementNotation` comes from `OFFICIAL_MEASURE_SEMANTICS`, not from the artifact.** For cms122
+   the artifact itself says `increase`, which contradicts eCQI's own description of the measure;
+   `official-measure-semantics.ts` records that human-reviewed decision with its rationale. A routed
+   measure with no recorded semantics emits the greppable `WORKWELL_ALERT` rather than guessing — there is
+   no safe default, since guessing one way reports every failure as compliant.
+3. **The canonical is claimed only for the artifact that actually produced the outcome.** If the vendored
+   artifact's `sha256` no longer matches the `artifactSha256` in the evidence — a re-vendor between run
+   and export — the report falls back to `urn:workwell:measure:<id>:official:<version>`. Labelling an old
+   report with a new canonical would assert a provenance that never existed.
+4. **QRDA III gets the official measure IDENTITY, not a new element — and specifically the eMeasure
+   UUIDs.** QRDA III has no notation field by design; a receiver derives direction from the measure
+   identity. So emitting `urn:workwell:measure|cms122` over counts whose numerator is CMS's poor-control
+   one is the actual defect. *(Corrected after review, #357: the first version emitted
+   `manifest.cmsId` — `"122FHIR"` — which is the **publisher** identifier and resolves to nothing.)* The
+   published Measure carries the two identifiers a receiver actually resolves, typed by
+   `artifact-identifier-type`: the **version-specific** UUID as `id/@extension` under the eMeasure
+   Identifier root `2.16.840.1.113883.4.738`, and the **version-independent** UUID as `setId/@root`, plus
+   `versionNumber`. They are read from the vendored **bundle** rather than the manifest, so no re-vendor
+   and no reproducibility-gate churn is needed — the bundle IS the published artifact. If they are absent
+   the export falls back to WorkWell's urn: a wrong official identity is worse than an honest local one,
+   because a receiver would resolve it to the wrong measure. The counts were already correct.
+5. **The flip guard asserts the BUILT REPORT, not the binding table.** ADR-046 moved the source, so
+   comparing `MEASURE_BINDINGS` would now check the wrong thing — the authored binding still says
+   `increase` for cms122 and correctly so. `official-flip-config.test.ts` builds a summary report from a
+   synthetic official outcome for every shipped measure and asserts the notation matches the semantics.
+
+**Consequences.**
+
+- **cms122 is now routed** alongside cms125 on the demo/production stack. Its MeasureReport declares
+  `decrease` and CMS's canonical; its QRDA III carries the official eCQM identity and version.
+- **Authored reports are byte-identical.** Every non-routed measure takes the same path it always did —
+  the trio only moves when `evidence.official` is present.
+- **A mixed-provenance run labels itself by the artifact its scored subjects used.** A run where some
+  subjects errored (no `official` block) still names the artifact the rest were scored by. That is a
+  deliberate choice over labelling the whole report authored, and it matches the mixed-provenance
+  trade-off `membershipFor` already documents.
+- **The scale/aggregate path is unchanged and still authored-only.** `populationCountsFromStatus` reduces
+  status buckets, which are authored semantics by construction; its caller passes no identity. That path
+  is `seed:scale` demo data, never official-routed, and `aggregateCountsForRun` routes official runs to
+  the per-subject path instead.
+- **Four consumer surfaces were saying the wrong thing about a routed cms122 patient, and are fixed
+  here** *(added after review, #357 — the original consequences list called these "UI-surface work,
+  tracked separately", which understated two of them badly).*
+  - **The CQL Evidence Explorer inverted the colours.** Its `INTERNAL_DEFINES` hide-list matches the
+    capitalised authored names exactly, and official defines are `official:numerator` — lowercase and
+    prefixed — so the prefix chosen to make them *honest* is what defeated the filter. Rendered through
+    the generic true/false chips, a cms122 patient in the numerator got a **green ✓ true** under a
+    heading reading "Why Flagged". Green meant "this patient's diabetes is uncontrolled". Population
+    membership is neither good news nor bad news, so it now renders on its own path as a neutral
+    **in / not in** chip with the population spelled out.
+  - **The MCP `explain_outcome` tool asserted a recency finding that cms122 does not compute.** The
+    sentence was unconditional concatenation, so a routed outcome produced *"their last qualifying exam
+    was unknown date (unknown days ago), which exceeds the 365-day compliance window"* — no recency rule
+    exists, no window was exceeded, and the 365 came from the authored binding. Asserted to an external
+    client, labelled deterministic, no human in the loop, and the only path rather than a fallback. The
+    clause is now conditional, and official outcomes state population membership instead.
+  - **The outcomes CSV stamped the authored library version.** `measureVersion` answers "what computed
+    this", and the CSV is what people mail around; it read `2.0.0` for rows CMS122FHIR **v1.0.000**
+    produced. It now reads `evidence.official.version` when present — the same evidence-first rule this
+    ADR applies to MeasureReport and QRDA. The **cases** CSV still shows the authored version and says so
+    in a comment: a case row carries no evidence, and it is an operational worklist keyed on `lastRunId`.
+  - **The catalog described cms125 as "women 50–74".** Both the authored subset and the official IPP are
+    **42–74**. Pre-existing, but it is the Studio Spec-tab copy an operator reads beside outcomes the
+    artifact now produces.
+- **Genuinely still deferred:** the **fidelity/Standards tab**. Verified NOT vacuous — `routes/measures.ts`
+  constructs its own `CqlExecutionEngine`, so it still runs the authored engine and the comparison is
+  real. What is stale is `literal-diff.ts`'s disclaimer, which says the diff "forecasts the flip rather
+  than describing a configuration that will never exist"; the flip has happened, so it now forecasts the
+  present. Wording only.
+- **One low-severity item recorded rather than fixed:** `case-detail-read-model.ts`'s unanchored
+  `/waiver|exemption|exclusion|contraindication/i` matches `official:denominator-exclusion`, mapping DENEX
+  to `waiver_status: "active"`. For cms122/cms125 that DENEX genuinely is hospice/palliative/mastectomy,
+  so the result is roughly correct — but the adapter's safety comment reads as an exhaustive argument
+  about which matchers the `official:` prefix avoids, and it is not exhaustive.
+
 ## ADR-045: The flip is a WORKFLOW edit, gated by tests that read what the workflow ships — and cms125 goes alone
 
 **Status:** Accepted (2026-07-30). Roadmap §7.4 PR-9c. **cms125 now evaluates CMS's published QI-Core

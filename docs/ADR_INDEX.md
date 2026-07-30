@@ -11,6 +11,7 @@
 
 ## Titles (newest first)
 
+- ADR-046: Canonical, improvementNotation and membership all derive from the outcome's own evidence
 - ADR-045: The flip is a WORKFLOW edit, gated by tests that read what the workflow ships — and cms125 goes alone
 - ADR-044: One real mammogram is emitted in BOTH vocabularies — dual-stamping is normalization, and the flip gate gets a command
 - ADR-043: A whole roster out of the initial population is SURFACED at runtime and ENFORCED at the flip gate — never refused mid-run
