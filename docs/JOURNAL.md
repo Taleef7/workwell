@@ -1,5 +1,85 @@
 # Journal
 
+## 2026-07-30 — PR-9b: what the official artifacts make of REAL WebChart data (branch `feat/official-webchart-baseline`)
+
+PR-9a made cms122 and cms125 routable. This step was supposed to add a construction-time refusal — throw
+when `WORKWELL_OFFICIAL_MEASURES` is set while the WebChart seam is configured — on the recorded basis
+that the WebChart gap was "M-D-sized and wider than the two recorded CMS125 items." **Measuring first
+killed that plan, and the measurement is the substance of the day.**
+
+**The gap that mattered was one field.** Over the committed 56-patient dev-DB fixture, through the real
+path (`normalizeWebChartBundle` → `stampEnrollment` → `evaluateBatch`), at EVAL 2024-06-01:
+
+| | authored | official (before) | official (after) |
+|---|---|---|---|
+| cms125 | 52 MISSING_DATA, **4 OVERDUE** | 56 MISSING_DATA | 52 / **4 OVERDUE** |
+| cms122 | 56 MISSING_DATA | 56 MISSING_DATA | unchanged |
+
+Official CMS125's IPP is `AgeAt(end of MP) in [42..74] AND us-core-sex = SNOMED 248152002 AND exists
+Qualifying Encounters`. Age passed — the four actionable subjects are 44–54 — and the encounter passed,
+because the OH roster stamps a CPT 99213 office visit inside the period. The only failing conjunct was the
+extension: **0 of 56 patients carried `us-core-sex`**, because both places that map WebChart's real
+`patients.sex` column into FHIR emitted `Patient.gender` and stopped there. Fixing both and regenerating
+the fixture from the dev DB produced a file **byte-identical but for 28 added extensions** (12 female / 16
+male), roster untouched — so nothing else about the sample moved and the outcome change has one cause.
+
+**Three candidates measured and moved nothing** — and two of them were carried in CLAUDE.md as CMS125
+blockers: a LOINC mammography `Observation` mirroring the single HCPCS G0202 procedure (a real mapping gap,
+but all four actionable subjects are OVERDUE, i.e. have no mammogram to find, and the one G0202 in the seed
+belongs to someone outside the IPP), `Condition.onsetDateTime` (cms125's IPP reads no Condition at all —
+only its mastectomy exclusions do), and `Observation.category`. **Counting absent fields overestimates a
+gap.** The structural inventory that produced the "M-D-sized" note counted what was missing rather than
+testing what the measures read.
+
+**A self-inflicted measurement error worth recording.** The first probe stamped the extension as
+`valueCode: "F"` and reported that four structural fixes together still left everyone out of population —
+i.e. that the gap was *wider* than believed. The ELM compares against the SNOMED concept id, so a wrong
+value is indistinguishable from an absent extension. Reading the artifact's actual ELM rather than
+reasoning about US Core is what caught it, and it is why the committed test asserts an *outcome* rather
+than the field's presence.
+
+**cms122 has no divergence to gate, and the earlier framing was half a fact.** Official and authored are
+both blind on all 56 — the seed carries zero Conditions and cms122 is deliberately outside
+`ROSTER_ELIGIBLE_MEASURES`, because its "enrollment" is a diabetes *diagnosis* the roster must never
+fabricate. So routing cms122 over this data changes nothing. The note that official cms122 "would read
+out-of-population over live data too" was true but omitted that authored does the same — which is the half
+that decides whether the flip changes anything.
+
+**Why no refusal (ADR-042, decision 3).** A refusal earns its cost when the alternative is a silently
+*better-looking* answer — ADR-038's case, where official cms122 read 100% compliant and nothing indicated a
+problem. Here the effect was four subjects moving `OVERDUE → MISSING_DATA`; both buckets open a case, so
+the roster read noisier, not rosier. And "both env vars are set" is a proxy for "this data cannot satisfy
+the IPP": fix the mapping and the proxy stays true while the property goes false, so the check would refuse
+a *correct* configuration until someone deleted it. A guard that must be removed to allow correct behaviour
+is not fail-closed.
+
+**What guards it instead.** `devdb-official-eval.test.ts` — official vs authored per subject over the
+committed fixture, through the real ingress path, via `evaluateBatch` (the primitive a routed run uses).
+The load-bearing assertion is a **divergence map**: empty means routing is inert for this data, populated
+names every subject whose roster row would change and how. A second test **strips** the extension and
+asserts official collapses to 56 MISSING_DATA while authored is unaffected — pinning the cause by removal,
+which also preserves the pre-fix measurement as the historical record. Asserting the field is merely
+*present* would prove the mapping emits it, not that it is what holds the agreement up.
+
+**PR-8f's batch retrieve refusal does not fire on either measure**, confirmed by the batch returning all 56
+subjects. It catches "retrieved nothing at all", and these retrieves matched plenty (236 LOINC
+observations) — they just did not match the conjunct deciding membership. The ADR-038 lesson holds on real
+data exactly as it did on the corpus.
+
+**Read the limits.** The oracle is our own authored engine, not an external expected answer, so agreement
+is evidence the flip is safe *for this data* — not that either engine is right. 52 of 56 outcomes are
+MISSING_DATA, so **only 4 subjects carry discriminating signal**: a thin proof, guarded against total
+collapse by a non-degeneracy assertion but not against a subtler shared error. Cypress CVU+ is still the
+verification bar and has not run. Nothing is routed — `WORKWELL_OFFICIAL_MEASURES` remains unset
+everywhere. Third-party WebChart servers that omit `us-core-sex` will read out-of-population for CMS125 by
+design (fail closed: reading nobody beats guessing a recorded sex), which is an operational limit to state
+before a tenant is onboarded.
+
+**Follow-ups deliberately not in this PR:** `docs/ADR_INDEX.md` needs the ADR-042 line and CLAUDE.md's
+Current Focus needs the PR-9b status — both files are being rewritten by the unmerged context-diet PR
+(#351), and ADR_INDEX does not exist on `main` yet. Editing them here would guarantee a conflict for no
+benefit.
+
 ## 2026-07-29 (later) — context diet: the always-loaded doc set, and the second rule set that had drifted
 
 **Not a code change — a context and doc-hygiene change.** Session memory was costing ~109,700 est.

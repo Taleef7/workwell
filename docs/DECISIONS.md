@@ -1,5 +1,91 @@
 # Architecture Decision Records
 
+## ADR-042: The WebChart↔official gap is closed by faithful mapping and guarded by a parity gate — not by refusing the configuration
+
+**Status:** Accepted (2026-07-30). Roadmap §7.4 PR-9 (PR-9b). Nothing routes officially yet.
+
+**Context.** No test anywhere evaluated real WebChart data through an official artifact. Every piece of
+evidence that official execution works runs over CMS's MADiE patients (121/121) or over our synthetic
+corpus (ADR-038) — both are bundles *built to be evaluated*. WebChart data is what a real EHR happens to
+hold, and that is where the flip's risk lives.
+
+The plan of record for this step was a **construction-time refusal**: throw when
+`WORKWELL_OFFICIAL_MEASURES` is set while the WebChart seam is configured. That plan predated any
+measurement. It came from a structural inventory of the committed dev-DB fixture — 0 Conditions, 0
+Encounters, no `Patient.extension`, no `Observation.category` across 56 patients — which counted what was
+*absent* rather than testing what the measures actually *read*.
+
+Measuring changed the picture in three ways:
+
+1. **The cms125 gap was one field, not four.** The official IPP is
+   `AgeAt(end of MP) in [42..74] AND us-core-sex = SNOMED 248152002 AND exists Qualifying Encounters`.
+   Age passed and the roster's CPT 99213 visit satisfied the encounter. The sole failing conjunct was the
+   extension: 0 of 56 patients carried it. Three other candidates were measured and moved **no outcome** —
+   a LOINC mammography `Observation` mirroring the one HCPCS G0202 procedure (a real mapping gap, but the
+   four actionable subjects are OVERDUE, i.e. have no mammogram to find), `Condition.onsetDateTime`
+   (cms125's IPP reads no Condition — only its mastectomy exclusions do), and `Observation.category`.
+   Two of those three were recorded as CMS125 blockers in the project notes.
+2. **cms122 has no divergence to refuse.** Official and authored both return MISSING_DATA for all 56, for
+   the same reason: no Conditions in the seed, and cms122 is deliberately outside
+   `ROSTER_ELIGIBLE_MEASURES` because its "enrollment" is a diabetes *diagnosis* the roster must never
+   fabricate. Routing it over this data changes nothing.
+3. **The measured hazard is not the one a refusal is for.** A refusal earns its cost when the alternative
+   is a silently *better-looking* answer — ADR-038's case, where official cms122 read 100% compliant and
+   nothing indicated a problem. Here the effect was four subjects moving `OVERDUE → MISSING_DATA`. Both
+   buckets open a case, so the roster got noisier, not rosier.
+
+**Decision.**
+
+1. **Emit `us-core-sex` from WebChart's `patients.sex`, alongside `Patient.gender`.** These are two FHIR
+   elements answering different questions — administrative gender vs recorded sex — and the WebChart
+   column is the latter, so mapping it only to `gender` dropped the element the official artifacts read.
+   Both mapping sites change together (`wcdb-fhir-shim/src/fhir-mapping.ts` and the by-design duplicate in
+   `backend-ts/scripts/webchart-devdb-export.ts`; `hapi-live.test.ts` bucket parity is the drift guard).
+   The SNOMED concept id is load-bearing: the ELM compares against `248152002`, so an extension carrying
+   `"F"` is indistinguishable from one absent — a distinction that cost a measurement pass to find.
+2. **This is normalization, not derivation — and the difference is where we stop.** The fact comes from
+   the source row. We do **not** stamp the extension from `Patient.gender` inside
+   `normalizeWebChartBundle`, which would cover third-party WebChart FHIR servers too but would be
+   inventing a recorded sex for data carrying none — exactly what ADR-037 refuses in
+   `qicore-preparation`. A server that omits `us-core-sex` stays out of the population, which fails
+   closed: reading nobody beats guessing.
+3. **No construction-time refusal keyed on the seam being configured.** "Both env vars are set" is a proxy
+   for "this data cannot satisfy the IPP"; fix the mapping and the proxy stays true while the property
+   goes false, so the check would refuse a *correct* configuration until someone remembered to delete it.
+   A guard that must be removed to permit correct behaviour is not fail-closed — it is wrong in a safe
+   direction, and those rot.
+4. **The guard is a live-path parity gate instead** (`devdb-official-eval.test.ts`): official vs authored
+   outcomes, per subject, over the committed fixture through the real ingress path, using
+   `evaluateBatch` — the primitive a routed run uses. The load-bearing assertion is a **divergence map**;
+   empty means routing is inert for this data, populated names every subject whose roster row would change
+   and how. A shift is then either progress or a regression, and both are deliberate.
+5. **The cause is pinned by removal, not by presence.** A separate test strips the extension and asserts
+   official collapses to 56 MISSING_DATA while authored is unaffected. Asserting the field is present only
+   proves the mapping emits it; stripping it proves that is what holds the agreement up — and it preserves
+   the pre-fix measurement as the historical record.
+
+**Consequences.**
+
+- Official CMS125 now produces the same outcomes as the authored implementation on all 56 subjects of real
+  WebChart-derived data. This is the first official artifact to do so on anything other than
+  purpose-built bundles.
+- **What this is not.** The oracle is our own authored engine, not an external expected answer, so
+  agreement is evidence the flip is safe *for this data* — not that either engine is right. And 52 of 56
+  outcomes are MISSING_DATA, so **only 4 subjects carry discriminating signal**: a thin proof, guarded
+  against total collapse by a non-degeneracy assertion but not against a subtler shared error. Cypress
+  CVU+ remains the verification bar (locked decision 2) and has not run.
+- PR-8f's batch retrieve refusal does **not** fire on either measure — confirmed by the batch returning
+  all 56 subjects. It catches "retrieved nothing at all", and these retrieves matched plenty (236 LOINC
+  observations); they just did not match the conjunct deciding membership. The ADR-038 lesson holds on
+  real data as it did on the corpus.
+- The WebChart gap is **narrower than recorded** for cms125 (one field, now closed) and **wider in kind**
+  for cms122 (no diagnoses at all, blocking both engines — an M-D ingest question, not a flip risk). The
+  earlier note that official cms122 "would read out-of-population over live data too" was true but omitted
+  that authored does the same, which is the half that decides whether the flip changes anything.
+- Third-party WebChart FHIR servers that omit `us-core-sex` will read out-of-population for CMS125 by
+  design. That is the fail-closed half of decision 2, and it is a real operational limit to state before a
+  tenant is onboarded, not a bug to fix later.
+
 ## ADR-041: A capped official expansion is completed at vendor time, from a pinned VSAC release, or not at all
 
 **Status:** Accepted (2026-07-29). Roadmap §7.3 (terminology) + §7.4 PR-9. Nothing routes officially yet.
