@@ -1,5 +1,58 @@
 # Journal
 
+## 2026-07-29 (later) — context diet: the always-loaded doc set, and the second rule set that had drifted
+
+**Not a code change — a context and doc-hygiene change.** Session memory was costing ~109,700 est.
+tokens before anything was typed, and a second, silently-diverged copy of the hard rules was live.
+
+**What was wrong.** `CLAUDE.md` was 83,308 chars, of which 64,732 were fourteen superseded
+`## Prior focus` / `Historical` blocks — a lossy duplicate of this file. Worse, its "Other docs to
+consult **on demand**" heading sat above nine `@`-imports, and `@` loads eagerly: ~356k chars
+(~88,900 tokens) of ARCHITECTURE, DEPLOY, DATA_MODEL, MEASURES, README and friends were pulled into
+every session whether or not they were relevant. The heading and the mechanism disagreed.
+
+**Separately, `AGENTS.md` was a second rule set that had already drifted.** It mirrored CLAUDE.md's
+twelve sections; all nine hard rules had been reworded and one had drifted **materially** — AGENTS.md
+said a dependency named in a sprint file was "pre-approved", CLAUDE.md requires explicit approval for
+any new dependency. Since Codex implements against AGENTS.md and Claude reviews against CLAUDE.md,
+that is two agents working to different rules. CLAUDE.md's stricter rule is the live one; the
+carve-out was moot anyway because `docs/sprints/` is archived, not an active queue. AGENTS.md also
+carried its own eager `@`-import block including `docs/DECISIONS.md` (176k chars). It is now a 1,651-char
+pointer to CLAUDE.md, and its unique content — one-task-at-a-time, `feat/<slug>`/`fix/<slug>` branch
+naming, one-PR-per-task with the tightly-coupled exception, stop-and-ask before a new workstream — was
+merged INTO CLAUDE.md first so nothing was lost.
+
+**The new always-loaded set is five files, ~6.5k tokens, chosen on one rule:** inject a doc only when
+its absence is *silent* — a rule whose criteria live in an unread file, or a locked decision a session
+could contradict without knowing. `AI_GUARDRAILS.md` and `CQF_FHIR_CR_REFERENCE.md` are named inside
+the hard rules and the stop-and-ask list. Three new extracts carry only the load-bearing part of a
+big doc: `DATA_MODEL_CONTRACTS.md` (§4 idempotency + §5 `evidence_json` + §6 CSV — mandatory on every
+PR by the Definition of Done; §3's 43k of table schemas stays on demand, being derivable from
+`schema-pg.ts`), `ADR_INDEX.md` (40 ADR titles only — 1.1k tokens vs 44k for the bodies, enough for a
+session to know a decision exists), and `LOCKED_DECISIONS.md` (ROADMAP §4–5, the owner-locked
+decisions and verified audit facts). Each parent doc now points at its extract, so there is one
+authoritative home per contract.
+
+**Four episodic docs became skills** — description resident, body on invocation: `deploy`,
+`webchart`, `conformance`, `mcp-surface`. Each front-loads the traps rather than the prose: the
+secret-before-manifests trap, the Neon-quota outage that read green for four days, Variant A built vs
+Variant B documented-not-built, the live-path gaps (0 Conditions / 0 Encounters / no `extension` / no
+`Observation.category` across 56 dev-DB patients), and the never-reproduce-NCQA-specs guardrail.
+
+**Doc freshness.** Supersession banners on `ROADMAP_2026-07-09.md`, `PLAN.md`, and the
+`new instructions/` P0–P9 set (all three still cited elsewhere, so banner rather than move).
+`docs/archive/PROJECT_PLAN.original.md` deleted — 61,015 chars, zero inbound references, 65 differing
+lines against `PROJECT_PLAN_v1.md`. CLAUDE.md now names the ~120-file / ~2.5 MB write-once corpus
+(`superpowers/plans`, `superpowers/specs`, `sprints`, `archive`, `FABLE_REVIEW`, `new instructions`,
+`mieweb-ui-migration`) as do-not-read-unless-asked, so a session stops spelunking history.
+
+**Result: ~109,700 → ~12,400 est. tokens** of always-resident memory; `CLAUDE.md` 83,308 → 21,470
+chars, under the ~40k large-memory warning. **No code, tests, or CI touched.** One thing recorded
+rather than smoothed over: **ADR-033 does not exist** — the sequence runs 031, 032, 034. Verified
+absent from `DECISIONS.md`; noted in `ADR_INDEX.md` so 033 is not reused. Also honest about the
+tradeoff: `ADR_INDEX.md` will go stale the moment ADR-042 lands (regeneration command is in its
+header, `DECISIONS.md` remains authoritative), and `DATA_MODEL.md` is now two files to keep in sync.
+
 ## 2026-07-29 — PR-9a: completing the capped `AdvancedIllness` expansion (branch `feat/official-terminology-completion`)
 
 The one build step PR-9 owed. `officialRoutingProblems` refuses cms122 and cms125 today because both

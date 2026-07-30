@@ -1,5 +1,8 @@
 # WorkWell Studio Agent Handoff and Execution Order
 
+> **SUPERSEDED — this P0–P9 handoff set was executed; sprints 0–7 are all merged.**
+> Kept for the historical record and because other docs cite it. Do not act on it.
+
 ## Purpose
 
 This is the master implementation handoff for the coding agent. The project should be treated as a serious occupational-health compliance prototype, not as a generic dashboard. WorkWell Studio’s goal is to convert OSHA/internal medical-surveillance requirements into versioned, executable, testable CQL/eCQM logic, run that logic against employee health data, and operationalize non-compliant outcomes as auditable follow-up cases.
