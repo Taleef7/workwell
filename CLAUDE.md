@@ -231,14 +231,54 @@ upstream shipped (a containment check added in review now enforces this at vendo
 case moved. What is NOT knowable: how the 2000 compare against upstream's full 1997, since 997 of those
 were never shipped — so "three extra codes" is a size delta, not a measured difference in membership.
 PR-9c's before/after distribution snapshot is where it would show up.
-**Still ahead of the flip:** PR-9b (a construction-time refusal when official routing and the WebChart
-seam are both configured, plus the live-path official gate that does not exist today — **not one test on
-the live WebChart path evaluates anything through an official artifact**) and PR-9c (the flip itself, on
-the demo/production stack only). Measured while planning: the committed dev-DB corpus carries **0
-Conditions, 0 Encounters, no Patient `extension`, and no `Observation.category`** across 56 patients, so
-official *CMS122* would read out-of-population over live data too — the WebChart gap is wider than the
-two recorded CMS125 items and is M-D-sized. Production leaves every `WORKWELL_WEBCHART_*` unset, so it
-gates staging only. (The PR-8b corpus finding is closed — see PR-8c above.)
+**PR-9b shipped (ADR-042) — and measuring first killed its planned shape.** It was specified as a
+construction-time refusal (throw when `WORKWELL_OFFICIAL_MEASURES` and the WebChart seam are both set), on
+the basis that the WebChart gap was "M-D-sized and wider than the two recorded CMS125 items." That basis was
+a structural inventory — 0 Conditions, 0 Encounters, no `Patient.extension`, no `Observation.category` —
+which counted what was ABSENT rather than testing what the measures READ, and **counting overestimates.**
+Measured over the committed 56-patient dev-DB fixture through the real ingress path (EVAL 2024-06-01,
+official MP 2023-06-01..2024-06-01, via `evaluateBatch`): cms125's **initial-population** gap was ONE field
+— the official IPP is `age in [42..74] AND us-core-sex = SNOMED 248152002 AND exists Qualifying Encounters`;
+age passed, the roster's CPT 99213 visit passed, and **0 of 56 patients carried `us-core-sex`** because both
+sites mapping `patients.sex` into FHIR emitted only `Patient.gender`. Fixed in both
+(`wcdb-fhir-shim/src/fhir-mapping.ts` + the by-design duplicate in `scripts/webchart-devdb-export.ts`) and
+the fixture re-exported **byte-identical but for 28 added extensions**; official CMS125 now agrees with
+authored on all 56 (52 MISSING_DATA / 4 OVERDUE). The SNOMED concept id is load-bearing — an extension
+carrying `"F"` is indistinguishable from one absent, which cost a measurement pass. **cms122 has no
+divergence at all:** official AND authored both return MISSING_DATA for all 56 (no Conditions in the seed;
+cms122 is deliberately outside `ROSTER_ELIGIBLE_MEASURES` since its "enrollment" is a diabetes *diagnosis*
+the roster must never fabricate) — so the earlier note that official cms122 "would read out-of-population
+over live data too" was true but omitted that authored does the same, the half that decides whether the flip
+changes anything. **No refusal was built:** a seam-keyed predicate stands in for "this data cannot satisfy
+the IPP", and once the mapping is fixed the predicate stays true while the property goes false, so it would
+refuse a *correct* config until someone deleted it. The guard is `devdb-official-eval.test.ts` instead — a
+per-subject **divergence map** through the real ingress code, wired into the `official-cases` CI job (review
+caught that it self-skipped without the gitignored sidecar, so 4 of 6 tests never ran in CI — the same
+vacuous-guard class flagged on #350 one PR earlier).
+
+**Two gaps stay OPEN, both recorded rather than smoothed over.** (1) **The NUMERATOR.** All four
+discriminating subjects are OVERDUE for want of a mammogram, so the fixture cannot exercise either
+numerator. Authored reads `[Procedure: "Mammography"]`; official reads
+`isDiagnosticStudyPerformed([Observation: "Mammography"])` where the value set is **92 LOINC codes only**
+and `Status.isDiagnosticStudyPerformed` also requires `category ~ imaging`; the crosswalk emits CPT
+`77067`/HCPCS `G0202` on a **`Procedure`**. Measured: one crosswalk-shaped mammogram → authored COMPLIANT,
+official **OVERDUE** — a false non-compliance that `case-logic.ts` escalates to HIGH ("escalate mammogram
+follow-up immediately") for a woman already screened. A LOINC `Observation` alone fixes nothing (no
+`category`); with it the error flips sides. **The remedy is dual-stamping both representations**, as the
+corpus does (ADR-038). All four states are pinned as tests. (2) **The live third-party path.** Both changed
+mapping sites sit upstream of the live FHIR transport, and `normalizeWebChartBundle` is untouched by design
+— so teatea supplies no `us-core-sex` and its roster reads out-of-population, while
+`deploy-staging-mieweb.yml` sets `WORKWELL_WEBCHART_BASE_URL`. For *that* path the retired seam-keyed
+predicate is still accurate, so ADR-042 decision 3 generalized from the config it fixed to one it did not.
+Stated in `WEBCHART_FHIR_MAPPING.md` §3.1 where an integrator will see it, and enforcing it is a **PR-9c
+precondition**. Also on the record: the roster **synthesizes** one of the three IPP conjuncts (the CPT 99213
+Encounter), so this is not purely EHR-sourced membership, and with 52 of 56 outcomes MISSING_DATA only **4
+subjects carry discriminating signal** — the oracle is our own authored engine, not external truth. Cypress
+CVU+ remains the verification bar and has not run.
+
+**Still ahead of the flip:** PR-9c (the flip itself, on the demo/production stack only) plus its
+precondition above. Production leaves every `WORKWELL_WEBCHART_*` unset, so the seam gates staging only.
+(The PR-8b corpus finding is closed — see PR-8c above.)
 
 ---
 

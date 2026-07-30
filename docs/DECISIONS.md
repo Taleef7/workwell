@@ -1,5 +1,143 @@
 # Architecture Decision Records
 
+## ADR-042: The WebChart↔official IPP gap is closed by mapping and guarded by a parity gate — not by refusing the configuration (the NUMERATOR gap stays open)
+
+**Status:** Accepted (2026-07-30). Roadmap §7.4 PR-9 (PR-9b). Nothing routes officially yet.
+
+**Context.** No test anywhere evaluated real WebChart data through an official artifact. Every piece of
+evidence that official execution works runs over CMS's MADiE patients (121/121) or over our synthetic
+corpus (ADR-038) — both are bundles *built to be evaluated*. WebChart data is what a real EHR happens to
+hold, and that is where the flip's risk lives.
+
+The plan of record for this step was a **construction-time refusal**: throw when
+`WORKWELL_OFFICIAL_MEASURES` is set while the WebChart seam is configured. That plan predated any
+measurement. It came from a structural inventory of the committed dev-DB fixture — 0 Conditions, 0
+Encounters, no `Patient.extension`, no `Observation.category` across 56 patients — which counted what was
+*absent* rather than testing what the measures actually *read*.
+
+Measuring changed the picture in three ways:
+
+1. **The cms125 INITIAL-POPULATION gap was one field.** The official IPP is
+   `AgeAt(end of MP) in [42..74] AND us-core-sex = SNOMED 248152002 AND exists Qualifying Encounters`.
+   Age passed and the roster's CPT 99213 visit satisfied the encounter. The sole failing conjunct was the
+   extension: 0 of 56 patients carried it. Of three other candidates, only `Condition.onsetDateTime` is
+   genuinely inapplicable (cms125's IPP reads no Condition — only its mastectomy exclusions do). A LOINC
+   mammography `Observation` and `Observation.category` moved no outcome **only because no in-IPP subject
+   in this fixture has a mammogram at all** — both are live NUMERATOR blockers (consequence 3 below).
+   "One fix, not four" is scoped to the initial population; it is not a claim that the rest are retired.
+   Review caught this file making exactly that elision, which is why the scope is now in the title.
+2. **cms122 has no divergence to refuse.** Official and authored both return MISSING_DATA for all 56, for
+   the same reason: no Conditions in the seed, and cms122 is deliberately outside
+   `ROSTER_ELIGIBLE_MEASURES` because its "enrollment" is a diabetes *diagnosis* the roster must never
+   fabricate. Routing it over this data changes nothing.
+3. **The seam-keyed predicate outlives the problem it describes.** "Both env vars are set" stands in for
+   "this data cannot satisfy the IPP". Fix the mapping and the predicate stays true while the property goes
+   false, so the check refuses a *correct* configuration until someone deletes it. This is the argument that
+   survives; the two below it were weaker than first written.
+
+   **Correction (review, 2026-07-30).** The first version of this ADR also argued that the effect —
+   four subjects moving `OVERDUE → MISSING_DATA` — left the roster "noisier, not rosier", since both
+   buckets open a case. **That is wrong on the axis operators triage by.** From `case/case-logic.ts`:
+   `dispositionFor` sends both to `OPEN` (so the case *count* is identical — nothing got noisier), but
+   `priorityFor` maps `OVERDUE → HIGH` and `MISSING_DATA → MEDIUM`, and `nextActionFor` swaps *"Escalate
+   mammogram follow-up immediately"* for *"Collect the missing mammogram documentation"*. So the pre-fix
+   behaviour **downgraded four genuinely-overdue screenings from HIGH to MEDIUM and misdirected the
+   operator toward paperwork.** That is rosier, and closer to ADR-038's hazard than this ADR first allowed.
+   The decision not to build the refusal still holds — on the predicate argument above, not on this one.
+
+**Decision.**
+
+1. **Emit `us-core-sex` from WebChart's `patients.sex`, alongside `Patient.gender`.** Both mapping sites
+   change together (`wcdb-fhir-shim/src/fhir-mapping.ts` and the by-design duplicate in
+   `backend-ts/scripts/webchart-devdb-export.ts`). The SNOMED concept id is load-bearing: the ELM compares
+   against `248152002`, so an extension carrying `"F"` is indistinguishable from one absent — a distinction
+   that cost a measurement pass to find.
+
+   **On the drift guard, corrected (review, 2026-07-30).** The first version of this ADR repeated
+   `fhir-mapping.ts`'s header claim that `hapi-live.test.ts` bucket parity guards this duplication. **It
+   cannot see this field.** That test compares authored-engine bucket counts, and the authored engine reads
+   `Patient.gender` and never the extension — which is exactly how both sites came to omit it. Real
+   coverage: `server.test.ts` pins the shim's output, `devdb-official-eval.test.ts` pins the export
+   script's committed output. Nothing cross-checks the two sites against each other.
+2. **We assert `us-core-sex` where the SOURCE SYSTEM records a sex value; we do not synthesize it from a
+   FHIR `gender` we did not map ourselves.** So `normalizeWebChartBundle` does not stamp it for third-party
+   WebChart FHIR servers, and such a server's roster reads out-of-population for CMS125 — fail closed,
+   because reading nobody beats guessing.
+
+   **The reason, stated more carefully than at first (review, 2026-07-30).** The original wording claimed
+   `patients.sex` *is* recorded sex rather than administrative gender, making this "normalization, not
+   derivation". `docs/WEBCHART_FHIR_MAPPING.md` §3.1 contradicts that — it calls `patients.sex` the
+   `administrative-gender` source — and a single F/M column in a 675-table schema does not settle the
+   question either way. The rule above needs no such semantic claim: the distinction it draws is between
+   reading a source column and inferring from another system's mapping. The fail-closed conclusion is
+   unchanged; the justification is narrower and defensible.
+3. **No construction-time refusal keyed on the seam being configured** — on the predicate-rot argument in
+   context 3, which is the one that holds. See consequence 5 for the case this decision does *not* cover.
+4. **The guard is a live-path parity gate instead** (`devdb-official-eval.test.ts`): official vs authored
+   outcomes, per subject, over the committed fixture through the real ingress path, using
+   `evaluateBatch` — the primitive a routed run uses. The load-bearing assertion is a **divergence map**;
+   empty means routing is inert for this data, populated names every subject whose roster row would change
+   and how. A shift is then either progress or a regression, and both are deliberate.
+5. **The cause is pinned by removal, not by presence.** A separate test strips the extension and asserts
+   official collapses to 56 MISSING_DATA while authored is unaffected. Asserting the field is present only
+   proves the mapping emits it; stripping it proves that is what holds the agreement up — and it preserves
+   the pre-fix measurement as the historical record.
+
+**Consequences.**
+
+1. Official CMS125 now produces the same outcomes as the authored implementation on all 56 subjects of real
+   WebChart-derived data. This is the first official artifact to do so on anything other than purpose-built
+   bundles.
+2. **What this is not.** The oracle is our own authored engine, not an external expected answer, so
+   agreement is evidence the flip is safe *for this data* — not that either engine is right. And 52 of 56
+   outcomes are MISSING_DATA, so **only 4 subjects carry discriminating signal**, all in one bucket for one
+   reason. The id-set comparison in `devdb-official-eval.test.ts` is what protects against a collapsed
+   distribution (the `assert.ok` non-degeneracy line is implied by it and is insurance, not the guard — the
+   first version of this ADR cited the wrong one). Cypress CVU+ remains the verification bar (locked
+   decision 2) and has not run.
+3. **The NUMERATOR gap is OPEN, and it fails in the dangerous direction.** Everything above concerns
+   initial-population membership. The two engines read different resource types for the numerator —
+   authored `[Procedure: "Mammography"]`, official `isDiagnosticStudyPerformed([Observation: "Mammography"])`
+   — and the WebChart crosswalk emits mammography as CPT `77067` / HCPCS `G0202` on a **`Procedure`**, while
+   the official `Mammography` value set (OID …108.12.1018) is **92 LOINC codes and nothing else**. Measured
+   on `wc-8` with one crosswalk-shaped mammogram inside the period: **authored COMPLIANT, official
+   OVERDUE** — a confident false non-compliance on the ordinary case, which `case-logic.ts` turns into a
+   HIGH-priority "escalate mammogram follow-up immediately" for a woman already screened.
+
+   The obvious fix is a trap worth recording: a correctly-coded LOINC `Observation` **alone changes
+   nothing**, because `Status.isDiagnosticStudyPerformed` also requires `exists(category ~ imaging)`. And
+   the Observation alone (with category) flips the error the other way — official COMPLIANT, authored
+   OVERDUE. **The remedy is dual-stamping both representations**, as the synthetic corpus already does
+   (ADR-038). All four states are pinned as tests. Closing it is a crosswalk change (M-D), not an edit here.
+4. PR-8f's batch retrieve refusal does **not** fire on either measure — confirmed by the batch returning
+   all 56 subjects. It catches "retrieved nothing at all", and these retrieves matched plenty (236 LOINC
+   observations); they just did not match the conjunct deciding membership. The ADR-038 lesson holds on
+   real data as it did on the corpus.
+5. **This fix does not reach a live third-party WebChart tenant, and nothing enforces that.** Both changed
+   mapping sites are upstream of the live FHIR transport: the shim (dev MariaDB) and the offline export
+   script. `normalizeWebChartBundle` is untouched by design (decision 2), so the teatea trial — the only
+   live integration — still supplies no `us-core-sex` and its whole roster would read out-of-population for
+   official CMS125. `deploy-staging-mieweb.yml` sets `WORKWELL_WEBCHART_BASE_URL`, so staging is exactly
+   where official routing and a live seam can coexist.
+
+   Review's point, which stands: for the live third-party path the seam-keyed predicate retired in
+   decision 3 **is** still an accurate predicate — decision 3 reasons about the configuration this ADR
+   fixed and generalizes to one it did not. The residual limit is asserted in prose here and guarded by
+   nothing. Enforcing it (a first-run check that a WebChart-derived roster carries the elements an
+   officially-routed measure's IPP reads, failing the *measure* per PR-8f's MISSING_DATA + PARTIAL_FAILURE
+   pattern rather than the run) is a **PR-9c precondition**, deliberately not taken here.
+6. The WebChart gap is **narrower than recorded** for cms125's IPP (one field, now closed) and **wider in
+   kind** for cms122 (no diagnoses at all, blocking both engines — an M-D ingest question, not a flip risk).
+   The earlier note that official cms122 "would read out-of-population over live data too" was true but
+   omitted that authored does the same, which is the half that decides whether the flip changes anything.
+7. **The pipeline this ADR validates already fabricates one of the three IPP conjuncts.**
+   `engine/ingress/enrollment/roster.ts` synthesizes a CPT 99213 `Encounter` for every cms125-enrolled
+   subject because WebChart supplies none (the fixture has 0 Encounters and 0 Conditions), and that
+   Encounter is what satisfies `exists Qualifying Encounters`. Without it nobody is in population and the
+   whole measured result vanishes. That decision is pre-existing and argued in `roster.ts` (program-visit
+   evidence, not a fabricated clinical mammogram), and this ADR does not reopen it — but an argument about
+   never inventing facts to satisfy an IPP should say plainly that the path being validated invents one.
+
 ## ADR-041: A capped official expansion is completed at vendor time, from a pinned VSAC release, or not at all
 
 **Status:** Accepted (2026-07-29). Roadmap §7.3 (terminology) + §7.4 PR-9. Nothing routes officially yet.
@@ -406,6 +544,12 @@ authored to produce:
   CMS125 fix: `normalizeWebChartBundle` synthesizes no `us-core-sex` extension, and the crosswalk maps
   mammography onto a `Procedure` with no LOINC — so official CMS125 over live teatea data would still
   read out-of-population. That is an M-D question, answerable only against live data.
+  > **Updated by ADR-042 (2026-07-30).** Half of (b) is closed and half is not, and the halves behave
+  > differently. `us-core-sex` is now emitted for data flowing through the **shim / dev-DB export** path,
+  > where official CMS125 agrees with authored on all 56 subjects — but NOT for a live third-party WebChart
+  > FHIR server such as teatea, which still reads out-of-population. The mammography half is fully open, and
+  > measurement showed it is worse than an out-of-population read: with one crosswalk-shaped mammogram,
+  > official reports a screened woman **OVERDUE**. See ADR-042 consequences 3 and 5.
 - **This work moves earlier than the roadmap scheduled it.** §7.4 put per-measure corpus extension at
   PR-10..12. Running the shadow period first would have compared against data that cannot exercise the
   numerator, and then run it again.
