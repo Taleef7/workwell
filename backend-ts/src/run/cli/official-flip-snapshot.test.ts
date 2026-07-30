@@ -19,6 +19,7 @@ import {
   type BatchAndSingle,
   type SnapshotSubject,
 } from "./official-flip-snapshot.ts";
+import { parseArgs } from "./official-flip-snapshot-bin.ts";
 
 const subjects: SnapshotSubject[] = ["s1", "s2", "s3"].map((subjectId) => ({ subjectId, bundle: { subjectId } }));
 const batch = subjects.map((s) => ({ subjectId: s.subjectId, patientBundle: s.bundle }));
@@ -93,6 +94,43 @@ const base: MeasureSnapshot = {
   divergence: {},
 };
 
+test("ADR-044: --source live REFUSES without a tenant roster (the false all-clear)", () => {
+  // Review, #355 — the most serious defect in this PR. The committed `enrollment-roster.json` is keyed by
+  // the dev-DB's `wc-N` ids, and `stampEnrollment` is a silent NO-OP for any subject absent from the
+  // roster. Against a real tenant nobody would be enrolled, the OH roster's synthesized CPT-99213
+  // Encounter would never be stamped, authored cms125's `Has Qualifying Visit` would fail for everyone,
+  // and `authoredActionable` would collapse to 0 — flipping the verdict from DO NOT FLIP to
+  // "inert rather than wrong" on precisely the configuration ADR-042/044 document as broken.
+  assert.throws(() => parseArgs(["--measure", "cms125", "--source", "live"]), /requires --roster/);
+  assert.doesNotThrow(() => parseArgs(["--measure", "cms125", "--source", "live", "--roster", "r.json"]));
+  // The other two sources legitimately have their own rosters (fixture) or none (synthetic).
+  assert.doesNotThrow(() => parseArgs(["--measure", "cms125", "--source", "fixture"]));
+  assert.doesNotThrow(() => parseArgs(["--measure", "cms125"]));
+});
+
+test("ADR-044: an unknown --source is refused rather than silently defaulting", () => {
+  assert.throws(() => parseArgs(["--measure", "cms125", "--source", "webchart"]), /live\|synthetic\|fixture/);
+});
+
+test("ADR-044: the report NAMES its source, so a probe is never read as a roster forecast", () => {
+  // C3: `--source synthetic` is five designed corpus probes, not the employee directory the
+  // demo/production stack evaluates — and the five collapse into three buckets. Printing the source
+  // under every measure is what stops a reader inferring a roster distribution from an agreement check.
+  const out = renderSnapshot([{ ...base, sourceLabel: "Source: 5 designed corpus probes" }]);
+  assert.match(out, /5 designed corpus probes/);
+});
+
+test("ADR-044: a CONSTRUCTION refusal does not blame the data", () => {
+  // The REFUSED branch also catches "no executable official artifact is vendored", which says nothing
+  // about the roster. The old fixed sentence told an operator their data was unroutable (review, #355).
+  const out = renderSnapshot([
+    { ...base, official: {}, error: "audiogram: no executable official artifact is vendored" },
+  ]);
+  assert.match(out, /no executable official artifact/);
+  assert.match(out, /if it names the ARTIFACT or its terminology, the configuration is incomplete/);
+});
+
+
 test("DO NOT FLIP when official admits nobody but authored finds actionable subjects", () => {
   // The exact measured state that motivated ADR-042/043: official CMS125 put all 56 subjects out of the
   // IPP for want of `us-core-sex`, while authored found four actionable women in the SAME bundles. That
@@ -142,7 +180,7 @@ test("a refused batch is reported as a refusal, not as an empty distribution", (
   const out = renderSnapshot([{ ...base, official: {}, error: "cms125: retrieved NOTHING for any of 56 subjects" }]);
   assert.match(out, /REFUSED/);
   assert.match(out, /retrieved NOTHING/);
-  assert.match(out, /cannot be routed over this data/);
+  assert.match(out, /the measure cannot be routed over it/);
 });
 
 test("the single-subject case gets no verdict — one subject out of the IPP is ordinary", () => {

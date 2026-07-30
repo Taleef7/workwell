@@ -357,8 +357,11 @@ test("cms122 over real WebChart data: nobody in the IPP — a DATA gap, not a fl
  *   - both → the shipped behaviour; the two engines agree
  *
  * They inject resources directly rather than importing the crosswalk, because the mapping lives in a
- * separate package by design (ADR-034) and backend-ts must not import it. The guard against those two
- * copies drifting is `hapi-live.test.ts`'s bucket-parity suite plus the fixture assertion below.
+ * separate package by design (ADR-034) and backend-ts must not import it. What guards the two copies from
+ * drifting is the fixture assertion below — and ONLY the export-script side of the pair. `hapi-live.test.ts`
+ * is named as that guard elsewhere and cannot be one: both its sides originate from the committed fixture,
+ * so it never sees the shim or this script's SQL (review, #355). The shim side is covered by its own unit
+ * tests; nothing compares the two emitters to each other.
  */
 const MAMMO_DATE = "2023-09-15"; // inside the official MP (2023-06-01 .. 2024-06-01) for EVAL 2024-06-01
 
