@@ -48,7 +48,7 @@ export interface OfficialManifest {
     codes: number;
     truncated: Array<{ oid: string; have: number; declaredTotal: number }>;
     /**
-     * Present only when `vendor:official --complete-capped-expansions` actually replaced a shortfall
+     * Present only when `vendor:official --complete-terminology` actually replaced a shortfall
      * upstream shipped (PR-9). Optional in the TYPE because an artifact vendored without the flag —
      * or one vendored before it existed — has no such block, and that must read as "nothing was
      * completed" rather than as a crash.
@@ -57,11 +57,26 @@ export interface OfficialManifest {
      * than decorative: re-expanding at a different release yields different codes, a different
      * terminology digest, and therefore a different `officialLogicVersion`. Recording it is what
      * makes the completion reproducible instead of merely repeatable.
+     *
+     * `reason` distinguishes the two things that get completed, and they are not equally evidenced
+     * (ADR-053). A `capped` set was checked against upstream's own declared total AND against
+     * containment of the codes upstream shipped. An `absent-upstream` set had neither check available
+     * — upstream shipped nothing to contain and declared no total — so it is held only to VSAC's own
+     * `expansion.total`, and its `declaredTotal` here is `null` rather than VSAC's number, because
+     * this field means "what the bundle declared" and the bundle declared nothing. Optional in the
+     * TYPE because artifacts completed before ADR-053 carry no `reason`; absent reads as `capped`,
+     * which is what they all were.
      */
     completion?: {
       source: string;
       manifest: string;
-      valueSets: Array<{ oid: string; had: number; now: number; declaredTotal: number }>;
+      valueSets: Array<{
+        oid: string;
+        reason?: "capped" | "absent-upstream";
+        had: number;
+        now: number;
+        declaredTotal: number | null;
+      }>;
     };
     sha256: string;
   };

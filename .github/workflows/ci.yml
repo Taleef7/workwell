@@ -153,7 +153,7 @@ jobs:
       # restored above when it sits at the same pin, so this step downloads nothing. Caching the
       # sidecars themselves would have been worse than useless — the script regenerates unconditionally,
       # so the cache would be restored and immediately overwritten while still paying two ~17MB pulls.
-      # `--complete-capped-expansions` re-expands the OIDs upstream capped at 1000 (today one:
+      # `--complete-terminology` re-expands the OIDs upstream capped at 1000 (today one:
       # AdvancedIllness, 1000 of 1997, feeding a DENEX in both measures) from VSAC at a pinned release.
       #
       # It is passed ONLY when the credential is actually present, and that is not merely an
@@ -169,7 +169,7 @@ jobs:
         run: |
           if [ -n "$WORKWELL_VSAC_API_KEY" ]; then
             echo "credentialed=true" >> "$GITHUB_OUTPUT"
-            COMPLETE=--complete-capped-expansions
+            COMPLETE=--complete-terminology
           else
             echo "credentialed=false" >> "$GITHUB_OUTPUT"
             COMPLETE=
@@ -197,7 +197,7 @@ jobs:
         if: steps.vendor.outputs.credentialed == 'true'
         run: |
           if ! git diff --exit-code measures/official; then
-            echo "::error::measures/official does not match what this pin produces. If WORKWELL_VSAC_API_KEY_VENDOR was just added, re-run 'pnpm vendor:official … --complete-capped-expansions' locally with the key and commit the regenerated manifests in the same change."
+            echo "::error::measures/official does not match what this pin produces. If WORKWELL_VSAC_API_KEY_VENDOR was just added, re-run 'pnpm vendor:official … --complete-terminology' locally with the key and commit the regenerated manifests in the same change."
             exit 1
           fi
       # The uncredentialed half of the same check. `bundle.json` is the artifact that decides what gets
@@ -226,7 +226,8 @@ jobs:
             src/standards/literal-diff.test.ts \
             src/engine/ingress/webchart/devdb-official-eval.test.ts \
             src/wiring/official-flip-config.test.ts \
-            src/fhir/qrda1-import-official.test.ts
+            src/fhir/qrda1-import-official.test.ts \
+            scripts/valueset-parity.test.mjs
       - name: Run the official MADiE test-case gate
         id: gate
         run: pnpm test:official-cases
