@@ -144,7 +144,7 @@ This project is deliberately careful about what it claims. [`docs/STANDARDS_CONF
 |---|---|---|
 | Measure logic | HL7 **CQL** / ELM | Executed — JVM-free, build-time translation |
 | Patient data | **FHIR R4**, US Core / **QI-Core** | Executed — official artifacts evaluate real QI-Core bundles |
-| Known-answer gate | Official **MADiE** test cases (CMS122, CMS125) | **121/121 exact** — a permanent CI gate, and diagnostic-only until a measure is routed |
+| Known-answer gate | Official **MADiE** test cases (5 measures) | **231/231 exact** — a permanent CI gate |
 | Terminology | **VSAC** value sets | The artifact's *own* expansions, fetched at build and pinned by SHA-256 |
 | Reporting | FHIR **MeasureReport**, **QRDA-III** | MeasureReport executed; QRDA-III structurally representative |
 | EHR integration | **SMART Backend Services** (`private_key_jwt`) | Executed against a live tenant |

@@ -1,5 +1,85 @@
 # Architecture Decision Records
 
+## ADR-047: A measure is onboarded when its MADiE gate is green — vendoring is not onboarding
+
+**Status:** Accepted (2026-07-30). Roadmap M-A. **CMS2, CMS68 and CMS951 are vendored, gated and
+ROUTABLE.** None is routed; `WORKWELL_OFFICIAL_MEASURES` still names only cms122 + cms125.
+
+**Context.** With cms122 and cms125 running CMS's published artifacts in production, the remaining six
+priority measures were meant to follow. Vendoring all six took minutes. Deciding which could actually be
+onboarded took the gate — and it disqualified half of them, for three different reasons.
+
+| measure | outcome |
+|---|---|
+| **CMS2** depression screening | **36/36** — onboarded |
+| **CMS68** current medications | **19/19** — onboarded |
+| **CMS951** kidney health eval | **55/55** — onboarded |
+| CMS138 tobacco screening | **0/47, 47 errors** — one value set (…3.526.3.1278) will not expand |
+| CMS130 colorectal screening | capped `AdvancedIllness` expansion — needs the VSAC key |
+| CMS165 controlling high BP | **two** capped expansions — needs the VSAC key |
+
+**Decision.**
+
+1. **Onboard exactly the three the gate passes.** A vendored artifact is not evidence of anything; the
+   MADiE deck is. CMS138 vendors cleanly, loads cleanly, and produces **47 errors out of 47 cases** —
+   there is no version of "ship it and watch" that improves on not shipping it.
+2. **CMS130 and CMS165 are not vendored at all, rather than vendored-but-capped.** Both need
+   `--complete-capped-expansions` with `WORKWELL_VSAC_API_KEY_VENDOR`, which exists only as a GitHub
+   secret. Committing a capped artifact would put a permanently-unroutable measure in the tree whose
+   manifest CI would then rewrite the moment it was added to the vendor list — reproducibility churn for
+   an artifact nobody can use. They wait for a credentialed vendoring run (an owner step, exactly as
+   ADR-041's "Step 1a" was for cms122/cms125).
+3. **The gate harness is driven by `OFFICIAL_GATED_MEASURES`, not by a hardcoded pair.** `parseArgs`
+   defaulted to `["cms122", "cms125"]` and rejected anything else; the sparse checkout fetched two
+   measures' cases; the committed-report predicate was `measures.length === 2`. Every one of those
+   silently stopped meaning "the full gate" the moment a third measure existed — the report predicate
+   most dangerously, since a full run would have written nothing and CI's staleness check would compare
+   a five-measure run against a two-measure file.
+4. **The compared population vector now includes DENEXCEP.** *(Added after review, #358.)* The gate
+   compared IPP/DENOM/DENEX/NUMER only. **CMS68 declares no `denominator-exclusion` at all** — its
+   populations are IPP, DENOM, NUMER, DENEXCEP — so the gate was comparing a population the measure does
+   not have while ignoring the one it does; CMS2 declares both and the exception was ignored there too. A
+   green 19/19 could therefore coexist with broken exception handling, which flows into the runtime
+   EXCLUDED outcome and into MeasureReport/QRDA (`denexcep` leaves the effective denominator, so it moves
+   the score). Not hypothetical arithmetic: **9 of the 55 expected reports carry a non-zero DENEXCEP**,
+   and forcing the actual value to zero drops CMS2 to **28/36** and CMS68 to **18/19**. It was green
+   before that mutation and after it — which is the definition of a check that was not being made.
+   cms122/cms125 declare no exception, so both sides are 0 and their decks are unchanged.
+5. **`OfficialMeasureId` is derived from the gate map** (`keyof typeof MEASURES`) rather than hand-listed
+   as a union. The union had to be edited in a second place, and forgetting was a compile error at best
+   and a silently ungated measure at worst.
+6. **An EPISODE-OF-CARE measure is refused at construction — so CMS68 is gated but NOT routable.**
+   *(Added after review, #358.)* CMS68 declares `populationBasis: "Encounter"`: one patient with N
+   qualifying encounters is N denominator units, and `outcomeFromPopulations` maps exactly one boolean
+   vector per **subject**. Routing it would collapse four office visits into one outcome, so
+   MeasureReport would count subjects where the measure counts encounters — a wrong denominator with
+   nothing to signal it.
+
+   **The MADiE deck provably cannot catch this**, which is why it needed a refusal rather than a note:
+   all 19 CMS68 cases have a max expected count of 1 for every population, and not one subject produces
+   more than a single episode. `19/19` is evidence about single-encounter patients, and a green gate over
+   exactly the shape that hides the defect is the most dangerous kind. Episode support is unbuilt;
+   `officialRoutingProblems` now says so at construction. cms2 and cms951 are `populationBasis: boolean`
+   and stay routable.
+7. **Nothing is routed by this change.** Routable and routed stay separate steps: these three have no
+   authored counterpart, so a flip has no oracle to be compared against, and `flip-snapshot`'s
+   authored-vs-official comparison — the thing every flip so far has been judged on — cannot run for
+   them. What that comparison should be replaced by is the open question the next flip has to answer.
+
+**Consequences.**
+
+- **The gate now covers five measures: 231/231** (55 + 66 + 36 + 19 + 55), 0 unexpected, 0 errors, and it
+  is a permanent CI gate for all five.
+- **Three routable measures with no authored implementation is a new state**, and the roster/catalog do
+  not yet model it: `MEASURE_BINDINGS`, the measure registry and the compliance grid all assume an
+  authored measure exists. That is why this PR stops at routable. Onboarding the *product* surfaces is
+  separate work from onboarding the *artifact*.
+- **CMS138's failure is recorded, not hidden.** One value set will not expand from the artifact's own
+  terminology. Whether that is an upstream packaging gap or something our reducer drops is unknown; the
+  gate says only that the measure cannot be executed today, which is enough to keep it out.
+- **Two measures now depend on an owner step**, and the dependency is narrow and stated: a credentialed
+  `pnpm vendor:official --complete-capped-expansions` run for CMS130 and CMS165.
+
 ## ADR-046: Canonical, improvementNotation and membership all derive from the outcome's own evidence
 
 **Status:** Accepted (2026-07-30). Discharges the PR-7 obligation `fhir/measure-report.ts` has carried

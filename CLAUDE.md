@@ -367,6 +367,17 @@ construction, per request, while the DB-free `/actuator/health` stays 200, so gr
 here, so the nightly ALL_PROGRAMS run exercises the flip unprompted. Rollback = remove the line + redeploy
 (ADR-040 makes `eval_state` invalidate by construction).
 
+**M-A WAVE 2 (ADR-047): CMS2, CMS68 and CMS951 are vendored, MADiE-gated and ROUTABLE — none is routed.**
+The gate is now **231/231** across five measures (55+66+36+19+55, 0 unexpected, 0 errors) and drives the
+harness, the sparse checkout and the committed-report predicate off `OFFICIAL_GATED_MEASURES` instead of a
+hardcoded pair — all three silently stopped meaning "the full gate" the moment a third measure existed.
+**Three of the six did NOT onboard, each for a different reason:** CMS138 scores **0/47 with 47 errors**
+(value set …3.526.3.1278 will not expand — task #11); CMS130 and CMS165 have capped expansions needing
+`WORKWELL_VSAC_API_KEY_VENDOR`, which is a GitHub secret only, so they are **not vendored at all** rather
+than committed capped and permanently unroutable (owner step, task #10). **Routable ≠ routed:** these
+three have no authored counterpart, so `flip-snapshot`'s authored-vs-official comparison — what every flip
+so far was judged on — cannot run for them, and the roster/catalog still assume an authored measure exists.
+
 **Still open:** the authored cms122/125 subsets retire to the fidelity lab (locked decision #4,
 deliberately not in the flip's own PR); the LIVE third-party WebChart path gets neither the `us-core-sex`
 nor the dual-stamp fix (both mapping sites sit upstream of the live FHIR transport;

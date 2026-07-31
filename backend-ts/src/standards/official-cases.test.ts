@@ -114,6 +114,7 @@ test("loadOfficialMeasureCases assembles loose resources and expected population
     denominator: 1,
     "denominator-exclusion": 0,
     numerator: 1,
+    "denominator-exception": 0,
   });
   assert.deepEqual(loaded.measurementPeriod, { start: "2026-01-01", end: "2026-12-31" });
   assert.equal(loaded.valueSets.total, 1);
@@ -131,6 +132,7 @@ test("classifyPopulationAgreement adjusts only the six known CMS122 numerator ex
     denominator: 1,
     "denominator-exclusion": 1,
     numerator: 0,
+    "denominator-exception": 0,
   } as const;
   const referenceActual = { ...expected, numerator: 1 };
   const known = module.classifyPopulationAgreement(
@@ -195,6 +197,7 @@ function loadedMeasureForRunner() {
           denominator: 1,
           "denominator-exclusion": 0,
           numerator: 1,
+          "denominator-exception": 0,
         },
         expectedScore: 1,
       },
@@ -338,12 +341,19 @@ test("renderOfficialCaseReport emits summary and per-case expected/actual popula
     sourceRevision: "ca4b49516de4cbed9f92bfb7c35d97b1bf1022ab",
   });
   assert.match(markdown, /\| CMS122 \| 1 \| 1 \(100\.0%\) \| 0 \| 1 \(100\.0%\) \| 0 \| 0 \|/);
-  assert.match(markdown, /\| IPPass PatientAge75 \| `090ad2fc-274b-4fef-bc5a-2077dbdc28f5` \| 1\/1 \| 1\/1 \| 0\/0 \| 1\/1 \| PASS \|/);
+  // FIVE population columns — the row is derived from `POPULATION_CODES`, so this asserts the report
+  // renders every population it compares. It used to assert four while DENEXCEP was silently compared
+  // and never shown (review, #358).
+  assert.match(
+    markdown,
+    /\| IPPass PatientAge75 \| `090ad2fc-274b-4fef-bc5a-2077dbdc28f5` \| 1\/1 \| 1\/1 \| 0\/0 \| 1\/1 \| 0\/0 \| PASS \|/,
+  );
+  assert.match(markdown, /\| Case \| UUID \| IPP E\/A \| DENOM E\/A \| DENEX E\/A \| NUMER E\/A \| DENEXCEP E\/A \| Result \|/);
   assert.match(markdown, /trustMetaProfile=false/);
   assert.match(markdown, /ValueSets are consumed directly from each official measure Bundle/);
   assert.match(markdown, /ca4b49516de4cbed9f92bfb7c35d97b1bf1022ab/);
   assert.match(markdown, /\.\\scripts\\fetch-official-cases\.ps1/);
-  assert.match(markdown, /pnpm test:official-cases \[--measure cms122\|cms125\]/);
+  assert.match(markdown, /pnpm test:official-cases \[--measure <catalogId>\]/);
 });
 
 test("runCms122DraftDrift reuses official Bundle ValueSets and counts changed population vectors", async () => {

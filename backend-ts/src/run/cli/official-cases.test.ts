@@ -2,17 +2,21 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { resolve } from "node:path";
 
-test("parseArgs defaults to both measures and accepts measure/content overrides", async () => {
+test("parseArgs defaults to EVERY gated measure and accepts measure/content overrides", async () => {
   const module = await import("./official-cases.ts").catch(() => null);
   assert.ok(module, "official-cases CLI module must exist");
 
-  assert.deepEqual(module.parseArgs([]), { measures: ["cms122", "cms125"] });
+  // Driven by the gate list, not a hardcoded pair — onboarding a measure must not silently leave the
+  // default deck behind, which is how a "green" gate ends up covering fewer measures than are vendored.
+  const { OFFICIAL_GATED_MEASURES } = await import("../../standards/official-cases.ts");
+  assert.deepEqual(module.parseArgs([]), { measures: [...OFFICIAL_GATED_MEASURES] });
+  assert.ok(OFFICIAL_GATED_MEASURES.length >= 5, "the gate must not shrink below the onboarded set");
   assert.deepEqual(module.parseArgs(["--measure", "cms122"]), { measures: ["cms122"] });
   assert.deepEqual(module.parseArgs(["--measure", "cms125", "--content-dir", "../fixtures"]), {
     measures: ["cms125"],
     contentDir: "../fixtures",
   });
-  assert.throws(() => module.parseArgs(["--measure", "cms130"]), /cms122\|cms125/);
+  assert.throws(() => module.parseArgs(["--measure", "cms130"]), /--measure must be one of/);
   assert.throws(() => module.parseArgs(["--content-dir"]), /needs a value/);
   assert.throws(() => module.parseArgs(["--unknown"]), /unknown argument/);
 });

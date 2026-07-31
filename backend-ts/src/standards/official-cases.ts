@@ -1,5 +1,5 @@
 /**
- * Offline official MADiE case diagnostics for CMS122/CMS125.
+ * Offline official MADiE case diagnostics for every gated official measure.
  *
  * DIAGNOSTIC-ONLY (ADR-026): this module is reachable only from the on-demand CLI. It never serves
  * the request path, worker entrypoint, engine ingress, or production run pipeline.
@@ -20,12 +20,27 @@ export const POPULATION_CODES = [
   "denominator",
   "denominator-exclusion",
   "numerator",
+  // DENEXCEP is compared, not assumed absent (Codex, #358). CMS2 declares it alongside DENEX, and CMS68
+  // declares it INSTEAD of DENEX — so omitting it meant CMS68's gate compared a population the measure
+  // does not have while ignoring the one it does. A green 19/19 could coexist with broken exception
+  // handling, which flows straight into the runtime EXCLUDED outcome and into MeasureReport/QRDA.
+  // cms122/cms125 declare no exception, so both sides are 0 and their decks are unaffected.
+  "denominator-exception",
 ] as const;
+/** Short column labels, keyed by code so the header cannot drift from the compared vector. */
+export const POPULATION_ABBREV: Record<(typeof POPULATION_CODES)[number], string> = {
+  "initial-population": "IPP",
+  denominator: "DENOM",
+  "denominator-exclusion": "DENEX",
+  numerator: "NUMER",
+  "denominator-exception": "DENEXCEP",
+};
+const POPULATION_ABBREV_JOINED = POPULATION_CODES.map((c) => POPULATION_ABBREV[c]).join("/");
+
 export type PopulationCode = (typeof POPULATION_CODES)[number];
-export type OfficialMeasureId = "cms122" | "cms125";
 export type PopulationCounts = Record<PopulationCode, number>;
 
-const MEASURES: Record<OfficialMeasureId, { name: string; bundleFile: string }> = {
+const MEASURES = {
   cms122: {
     name: "CMS122FHIRDiabetesAssessGT9Pct",
     bundleFile: "CMS122FHIRDiabetesAssessGT9Pct-bundle.json",
@@ -34,7 +49,26 @@ const MEASURES: Record<OfficialMeasureId, { name: string; bundleFile: string }> 
     name: "CMS125FHIRBreastCancerScreen",
     bundleFile: "CMS125FHIRBreastCancerScreen-bundle.json",
   },
+  cms2: {
+    name: "CMS2FHIRPCSDepScreenAndFollowUp",
+    bundleFile: "CMS2FHIRPCSDepScreenAndFollowUp-bundle.json",
+  },
+  cms68: {
+    name: "CMS68FHIRDocumentationCurrentMeds",
+    bundleFile: "CMS68FHIRDocumentationCurrentMeds-bundle.json",
+  },
+  cms951: {
+    name: "CMS951FHIRKidneyHealthEval",
+    bundleFile: "CMS951FHIRKidneyHealthEval-bundle.json",
+  },
 };
+
+/**
+ * Derived from the map rather than hand-listed, so adding a measure cannot leave the two out of step —
+ * the previous union had to be edited in a second place and a mismatch was a compile error at best and a
+ * silently ungated measure at worst.
+ */
+export type OfficialMeasureId = keyof typeof MEASURES;
 
 /**
  * The measures covered by the official MADiE test-case gate (roadmap §7.4 PR-6). THE RULE: a measure
@@ -184,6 +218,7 @@ function populationCounts(report: FhirResource): PopulationCounts {
     denominator: 0,
     "denominator-exclusion": 0,
     numerator: 0,
+    "denominator-exception": 0,
   };
   const group = Array.isArray(report.group) ? report.group[0] as Record<string, unknown> | undefined : undefined;
   const populations = group && Array.isArray(group.population) ? group.population : [];
@@ -438,6 +473,7 @@ function actualPopulationCounts(populations: FqmPopulationResult[]): PopulationC
     denominator: 0,
     "denominator-exclusion": 0,
     numerator: 0,
+    "denominator-exception": 0,
   };
   for (const population of populations) {
     if (POPULATION_CODES.includes(population.populationType as PopulationCode)) {
@@ -768,11 +804,11 @@ export function renderOfficialCaseReport(runs: OfficialMeasureRun[], metadata: O
     "```powershell",
     "cd backend-ts",
     ".\\scripts\\fetch-official-cases.ps1",
-    "pnpm test:official-cases [--measure cms122|cms125] [--content-dir <path>]",
+    "pnpm test:official-cases [--measure <catalogId>] [--content-dir <path>]",
     "# If pnpm is not directly on PATH: corepack pnpm test:official-cases",
     "```",
     "",
-    "The fetch script sparse-checks out only the two measure bundles and two test-case trees into ignored `.official-content/`; it refuses to overwrite an unrelated non-Git directory.",
+    "The fetch script sparse-checks out only the gated measures' bundles and test-case trees into ignored `.official-content/`; it refuses to overwrite an unrelated non-Git directory.",
     "",
     "## Summary",
     "",
@@ -834,14 +870,18 @@ export function renderOfficialCaseReport(runs: OfficialMeasureRun[], metadata: O
         `Raw expected agreement ${run.summary.expectedAgreements}/${run.summary.total}; ` +
         `reference-adjusted pass ${run.summary.expectedAgreements + run.summary.referenceAgreements}/${run.summary.total}.`,
       "",
-      "| Case | UUID | IPP E/A | DENOM E/A | DENEX E/A | NUMER E/A | Result |",
-      "|---|---|---:|---:|---:|---:|---|",
+      // Columns are DERIVED from the compared vector, not hand-listed. They diverged once: DENEXCEP was
+      // added to `POPULATION_CODES` and the table kept rendering four columns, so the population that
+      // *defines* a case named "DENEXCEPPass…" was invisible — and CMS68's DENEX column reported a
+      // population that measure does not even declare (review, #358). A report that hides the column it
+      // compares invites the opposite conclusion from the evidence.
+      `| Case | UUID | ${POPULATION_CODES.map((c) => `${POPULATION_ABBREV[c]} E/A`).join(" | ")} | Result |`,
+      `|---|---|${POPULATION_CODES.map(() => "---:").join("|")}|---|`,
     );
     for (const item of run.cases) {
       lines.push(
-        `| ${escapeMarkdown(item.name)} | \`${item.uuid}\` | ${populationCell(item, "initial-population")} | ` +
-          `${populationCell(item, "denominator")} | ${populationCell(item, "denominator-exclusion")} | ` +
-          `${populationCell(item, "numerator")} | ${resultLabel(item)} |`,
+        `| ${escapeMarkdown(item.name)} | \`${item.uuid}\` | ` +
+          `${POPULATION_CODES.map((code) => populationCell(item, code)).join(" | ")} | ${resultLabel(item)} |`,
       );
     }
     if (run.draftDrift) {
@@ -876,7 +916,9 @@ export function renderOfficialCaseReport(runs: OfficialMeasureRun[], metadata: O
               "",
             ]
           : []),
-        "| Case | UUID | Changed populations | v1 IPP/DEN/DENEX/NUM | draft IPP/DEN/DENEX/NUM |",
+        // Header derived for the same reason: the row is built with `POPULATION_CODES.map(...)`, so a
+        // hand-written label list silently under-describes it the moment the vector grows.
+        `| Case | UUID | Changed populations | v1 ${POPULATION_ABBREV_JOINED} | draft ${POPULATION_ABBREV_JOINED} |`,
         "|---|---|---|---|---|",
       );
       const changed = run.draftDrift.cases.filter((item) => item.differences.length > 0 || item.error);

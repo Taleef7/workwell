@@ -179,6 +179,12 @@ jobs:
           # an empty string that the script's parseArgs rejects as `unknown argument:`. Leave it bare.
           pnpm vendor:official --measure CMS122FHIRDiabetesAssessGT9Pct --catalog-id cms122 --strip-elm-annotations $COMPLETE
           pnpm vendor:official --measure CMS125FHIRBreastCancerScreen --catalog-id cms125 --strip-elm-annotations $COMPLETE
+          # Onboarded 2026-07-30. None of these three has a capped expansion, so $COMPLETE is a no-op for
+          # them and their manifests are byte-identical credentialed or not — which is why they could be
+          # vendored without the VSAC key that cms122/cms125 needed (ADR-047).
+          pnpm vendor:official --measure CMS2FHIRPCSDepScreenAndFollowUp --catalog-id cms2 --strip-elm-annotations $COMPLETE
+          pnpm vendor:official --measure CMS68FHIRDocumentationCurrentMeds --catalog-id cms68 --strip-elm-annotations $COMPLETE
+          pnpm vendor:official --measure CMS951FHIRKidneyHealthEval --catalog-id cms951 --strip-elm-annotations $COMPLETE
       # Re-vendoring must reproduce the COMMITTED artifact byte for byte. Nothing checked this before:
       # the manifest's SHA-256 is written by vendor:official about itself, so it could only ever prove
       # self-consistency. This proves the artifact in Git is what the pinned upstream actually produces.

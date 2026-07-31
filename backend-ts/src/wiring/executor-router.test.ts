@@ -400,3 +400,31 @@ test("PR-8: the unset default offers NO batch path, so the pre-pass cannot engag
   const routed = await routedEngineForEnv({} as never, { authored: authoredEngine() });
   assert.equal((routed as { evaluateBatch?: unknown }).evaluateBatch, undefined);
 });
+
+test("ADR-047: an EPISODE-OF-CARE measure is refused at construction", () => {
+  // CMS68 declares populationBasis "Encounter": one patient with N qualifying encounters is N
+  // denominator units, and `outcomeFromPopulations` maps exactly one boolean vector per SUBJECT. Routing
+  // it would collapse four office visits into one outcome, so MeasureReport would count subjects where
+  // the measure counts encounters.
+  //
+  // The MADiE deck cannot catch this — all 19 CMS68 cases are single-encounter, so 19/19 is a green gate
+  // over exactly the shape that hides the defect (review, #358). Hence a construction-time refusal.
+  // Asserted by PRESENCE, not by count. The first version required exactly one problem and passed only
+  // because this machine has the gitignored terminology sidecar; CI has none, so cms68 legitimately
+  // reports the episode problem AND a terminology one. A test that is green only where a gitignored file
+  // happens to exist is the self-skip class wearing a different hat.
+  const EPISODE = /populationBasis 'Encounter' is an EPISODE-OF-CARE measure/;
+  assert.ok(
+    officialRoutingProblems({ WORKWELL_OFFICIAL_MEASURES: "cms68" }).some((p) => EPISODE.test(p)),
+    "cms68 declares populationBasis Encounter and must be refused for it",
+  );
+
+  // The boolean-basis measures must not pick up the EPISODE refusal — checked specifically rather than
+  // "no problems at all", which would again depend on the sidecar being present.
+  for (const id of ["cms122", "cms125", "cms2", "cms951"]) {
+    assert.ok(
+      !officialRoutingProblems({ WORKWELL_OFFICIAL_MEASURES: id }).some((p) => EPISODE.test(p)),
+      `${id} has populationBasis boolean and must not be refused as an episode measure`,
+    );
+  }
+});
