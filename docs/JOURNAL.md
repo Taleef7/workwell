@@ -43,6 +43,32 @@ document (a CMS125 document posted as `cms122` was calculated *and persisted* as
 timezone offsets were discarded (`…230000-0500` is a different day *and year*); and an Observation
 interval collapsed to an instant, dropping the end a temporal CQL predicate turns on.
 
+**A second review pass found eight more, and the first was the whole feature being wrong on the measure
+this stack actually routes.** The import wrote `Patient.gender` and no `us-core-sex` extension — and
+official CMS125's initial population reads the extension, never `gender` (ADR-042). Measured: source
+bundle in-IPP and COMPLIANT, round-tripped **out of the IPP** and MISSING_DATA. On demo/production, where
+both measures are routed to official, `(c)(2)` would have calculated every imported subject
+out-of-population, persisted it, and returned 201 with an empty gap list. The round trip could not see it
+because it never runs the official engine, and the test meant to cover it asserted `gender === "female"`
+**while citing ADR-042 in its comment** — naming the right hazard and measuring the wrong element. There
+is now a test that asserts population membership itself, mutation-checked, and wired into the CI job that
+has the terminology sidecar (the workflow warns in a comment that a sidecar test not listed there is
+permanently skipped while reading as covered — which is exactly how this class recurs).
+
+The parser needed three fixes and two of its own claims were false. A legal `>` inside an attribute
+(`displayName="HbA1c > 9.0%"` is conformant XML) truncated the element, which then swallowed its siblings
+and silently deleted the date and value from an HbA1c of 9.6 — the round trip *cannot* catch that,
+because our own `esc()` escapes `>` so we never emit the input that breaks us. Unmatched close tags were
+quadratic: **1 MB took 53 seconds** on this single-threaded host, an accidental DoS from a truncated
+document, past nginx's 60 s timeout. And `descendants()` recursed, blowing the stack at ~5 000 levels —
+a ~30 KB document — so "every branch is total" was true of the parser and false of its helpers.
+
+Also: only ONE resource was imported per `<entry>` while the entry was reported fully translated (a
+Result Organizer with two labs is standard CDA, so an HbA1c that is a panel's second component simply
+vanished); two drop reasons named the wrong cause; the reason list was unbounded and duplicated (302
+reasons, 3 unique, 31 KB per subject); and the date-only path had no validation, so `00000000` became
+`"0000-00-00"` in a birth date that CMS125's IPP feeds to `AgeAt(...)`.
+
 Still open for M-B: **Cypress CVU+ has not run.** It needs Docker and remains the bar.
 
 ## 2026-07-30 (M-B) — QRDA Category I was built inside-out; measuring against the right IG showed it (branch `feat/qrda1-patient-data`)

@@ -309,6 +309,32 @@ const LAB_CATEGORIES = new Set(["laboratory", "vital-signs", "survey", "exam"]);
  * Resource order is deliberate: it is the order the bundle presented, so two exports of the same bundle
  * are byte-identical and a diff between them means the DATA moved, not that the exporter did.
  */
+/**
+ * Why one resource produced no entry — the ACTUAL cause, in the operator's terms.
+ *
+ * Getting this wrong is worse than saying nothing, because it sends someone to the wrong place. Two
+ * cases were measurably misreported (review, #362): an Observation whose category is outside both sets
+ * (`social-history`, `activity`, `therapy`) was blamed on terminology even when its code was plain
+ * LOINC; and an Encounter was ALWAYS reported as having "an absent code", because the reason string read
+ * `code` while `encounterPerformed` reads `type[0] ?? code`.
+ */
+function dropReason(resource: FhirResource, type: string): string {
+  if (isNegated(resource)) return "excluded — its status says the event did not happen or was retracted";
+  if (type === "Observation") {
+    const cats = categoryCodes(resource);
+    if (cats.length === 0) return "no category, so its QDM datatype (laboratory vs diagnostic study) is undetermined";
+    if (!cats.some((c) => IMAGING_CATEGORIES.has(c) || LAB_CATEGORIES.has(c))) {
+      return `category '${cats.join("/")}' is not a QDM datatype this mapper routes (it maps laboratory and imaging only)`;
+    }
+  }
+  // Read the SAME field the builder reads, or the reason describes a different resource than the one
+  // that was dropped.
+  const concept = type === "Encounter" ? (resource.type?.[0] ?? resource.code) : resource.code;
+  const systems = [...new Set((concept?.coding ?? []).map((c) => c.system).filter(Boolean))];
+  if (systems.length === 0) return "no code to carry — CDA needs a coded value";
+  return `no CDA code system OID for ${systems.join(", ")} — CDA cannot carry it`;
+}
+
 export interface QdmTranslation {
   entries: string[];
   /**
@@ -346,16 +372,7 @@ export function translateQdm(bundle: unknown, pad = "          "): QdmTranslatio
     // Nothing produced. Say WHY, for the cases an operator can act on; stay silent for the ones that are
     // simply out of scope, where a "gap" would be noise.
     if (!type || type === "Patient" || !(QDM_MAPPED_RESOURCE_TYPES as readonly string[]).includes(type)) return;
-    if (resource && isNegated(resource)) {
-      untranslatable.push(`${type}: excluded — its status says the event did not happen or was retracted`);
-    } else if (type === "Observation" && categoryCodes(resource!).length === 0) {
-      untranslatable.push(`${type}: no category, so its QDM datatype (laboratory vs diagnostic study) is undetermined`);
-    } else {
-      const systems = [...new Set((resource?.code?.coding ?? []).map((c) => c.system).filter(Boolean))];
-      untranslatable.push(
-        `${type}: no CDA code system OID for ${systems.length ? systems.join(", ") : "an absent code"} — CDA cannot carry it`,
-      );
-    }
+    untranslatable.push(`${type}: ${dropReason(resource!, type)}`);
   });
   return { entries, untranslatable };
 }

@@ -17,11 +17,28 @@
  *
  * ## Untrusted input
  *
- * This parses third-party uploads, so every branch is total: malformed markup yields the tree parsed so
- * far rather than an exception, and there is no construct that can cause unbounded work. In particular
- * there is no entity expansion at all, so the billion-laughs class does not exist here — the five
- * predefined entities are the only ones decoded, and `&anything;` else is left as literal text.
+ * This parses third-party uploads, so `parseXml` is total: malformed markup yields the tree parsed so
+ * far rather than an exception. There is no entity expansion at all, so the billion-laughs and XXE
+ * classes do not exist here — the five predefined entities plus numeric references are the only things
+ * decoded, and `&anything;` else stays literal text. (Verified in review: a `<!DOCTYPE>` declaring a
+ * SYSTEM entity yields the literal `&xx;`.)
+ *
+ * **Bounded, and it was not always.** Review measured a 1 MB body of unmatched close tags taking **53
+ * seconds** on this single-threaded host — an accidental DoS from a truncated document, not just a
+ * malicious one. Two things fix it: close-tag matching is O(1) via a name→depth index instead of
+ * scanning the open-element stack, and `MAX_ELEMENTS` bounds total work. `descendants()` uses an
+ * explicit stack because recursion blew at ~5 000 nesting levels, which is a ~30 KB document.
+ *
+ * Deliberate omissions worth naming: unquoted attribute values (`<a b=1/>`) are dropped — they are not
+ * well-formed XML — and namespace prefixes are matched by local name rather than resolved.
  */
+
+/**
+ * Total element budget. A QRDA Category I is ~100–200 KB (the CMS RY2026 sample is 123 KB, ~4 000
+ * elements). Past this the parser stops and returns what it has, so a pathological document costs a
+ * bounded amount of a single-threaded worker rather than every other request's latency.
+ */
+const MAX_ELEMENTS = 250_000;
 
 export interface CdaNode {
   /** Element name as written, prefix included (`ClinicalDocument`, `cda:section`). */
@@ -82,9 +99,39 @@ function parseAttrs(raw: string): Record<string, string> {
  * Comments, processing instructions, DOCTYPE and CDATA sections are handled; CDATA content becomes
  * literal text (undecoded, which is what CDATA means).
  */
+/**
+ * The index of the `>` that closes the tag starting at `lt`, honouring quoted attribute values.
+ *
+ * XML requires only `<` and `&` to be escaped inside an attribute value — a bare `>` is **legal**, and a
+ * lab feed emitting `displayName="HbA1c > 9.0%"` is entirely conformant. Scanning for the first `>`
+ * truncated such an element mid-attribute, which then lost its self-closing slash, was pushed onto the
+ * stack, and swallowed its following siblings as children — so the date and value silently disappeared
+ * from an HbA1c of 9.6 (review, #362). The round trip could not catch it because our own `esc()` escapes
+ * `>`, so we never emit the input that breaks us.
+ */
+function tagEnd(xml: string, lt: number): number {
+  let quote: string | null = null;
+  for (let i = lt + 1; i < xml.length; i++) {
+    const ch = xml[i]!;
+    if (quote) {
+      if (ch === quote) quote = null;
+    } else if (ch === '"' || ch === "'") {
+      quote = ch;
+    } else if (ch === ">") {
+      return i;
+    }
+  }
+  return -1;
+}
+
 export function parseXml(xml: string): CdaNode | null {
   const stack: MutableNode[] = [];
+  // How many elements of each NAME are currently open. A close tag matching nothing is then an O(1)
+  // lookup instead of a full stack scan — the difference between linear and quadratic on a document of
+  // unmatched close tags.
+  const openCount = new Map<string, number>();
   let root: MutableNode | null = null;
+  let elements = 0;
   let i = 0;
 
   const addText = (raw: string) => {
@@ -123,16 +170,22 @@ export function parseXml(xml: string): CdaNode | null {
       continue;
     }
 
-    const gt = xml.indexOf(">", lt);
+    const gt = tagEnd(xml, lt);
     if (gt === -1) break; // truncated markup — keep what we have
     const inner = xml.slice(lt + 1, gt);
     i = gt + 1;
 
     if (inner.startsWith("/")) {
       const name = inner.slice(1).trim();
-      // Pop to the matching open element. A stray close tag is ignored rather than corrupting the tree.
+      // A stray close tag is ignored rather than corrupting the tree — and recognised as stray in O(1),
+      // so a document of unmatched closes is linear rather than quadratic.
+      if ((openCount.get(name) ?? 0) === 0) continue;
       for (let d = stack.length - 1; d >= 0; d--) {
         if (stack[d]!.name === name) {
+          for (let k = d; k < stack.length; k++) {
+            const n = stack[k]!.name;
+            openCount.set(n, (openCount.get(n) ?? 1) - 1);
+          }
           stack.length = d;
           break;
         }
@@ -155,7 +208,11 @@ export function parseXml(xml: string): CdaNode | null {
     const parent = stack[stack.length - 1];
     if (parent) parent.children.push(node);
     else if (!root) root = node;
-    if (!selfClosing) stack.push(node);
+    if (!selfClosing) {
+      stack.push(node);
+      openCount.set(name, (openCount.get(name) ?? 0) + 1);
+    }
+    if (++elements >= MAX_ELEMENTS) break; // bounded work, not best effort — see MAX_ELEMENTS
   }
 
   return root as CdaNode | null;
@@ -171,15 +228,25 @@ export function child(node: CdaNode | undefined, local: string): CdaNode | undef
   return (node?.children ?? []).find((c) => c.local === local);
 }
 
-/** Every descendant with this local name, depth-first, including the node itself. */
+/**
+ * Every descendant with this local name, in document order, including the node itself.
+ *
+ * An EXPLICIT stack, not recursion: review measured `RangeError: Maximum call stack size exceeded` at
+ * ~5 000 nesting levels, which is a ~30 KB document — and `importQrda1Document` calls this on the root
+ * before anything else, so the module's "total on malformed input" claim was true of `parseXml` and not
+ * of its traversal helpers (#362).
+ */
 export function descendants(node: CdaNode | undefined, local: string): CdaNode[] {
   if (!node) return [];
   const out: CdaNode[] = [];
-  const walk = (n: CdaNode) => {
+  const stack: CdaNode[] = [node];
+  while (stack.length > 0) {
+    const n = stack.pop()!;
     if (n.local === local) out.push(n);
-    for (const c of n.children) walk(c);
-  };
-  walk(node);
+    // Pushed in reverse so popping yields document order — callers such as the measure-reference reader
+    // depend on "in document order", and a reversed traversal would silently reorder identifiers.
+    for (let i = n.children.length - 1; i >= 0; i--) stack.push(n.children[i]!);
+  }
   return out;
 }
 

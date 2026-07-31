@@ -191,10 +191,14 @@ test("round trip: an imported Condition is CONFIRMED, so the export's own retrac
   assert.equal(status.coding[0]!.code, "confirmed");
 });
 
-test("round trip: the measure identity comes back as the published UUID", () => {
+test("round trip: BOTH published measure identities come back — version-specific and setId", () => {
+  // `<setId>` is the version-INDEPENDENT eMeasure id. Reading only `<id>` meant a document naming its
+  // measure that way alone matched nothing, and the route's measure check would refuse a correct
+  // request (review, #362).
   const imported = roundTrip();
-  assert.equal(imported.measureIdentifiers.length, 1);
-  assert.match(imported.measureIdentifiers[0]!, /^[0-9a-f-]{36}$/);
+  assert.equal(imported.measureIdentifiers.length, 2);
+  for (const id of imported.measureIdentifiers) assert.match(id, /^[0-9a-f-]{36}$/);
+  assert.notEqual(imported.measureIdentifiers[0], imported.measureIdentifiers[1], "distinct identities");
   assert.equal(imported.localMeasureId, undefined, "an official document carries no WorkWell urn");
 });
 
@@ -342,4 +346,97 @@ test("import reads the CMS RY2026 sample file, if it is available locally", (t) 
   assert.ok(imported.patientId, "a subject is identified");
   assert.ok(imported.bundle.entry.length > 1, "at least one clinical resource was translated");
   assert.ok(imported.measureIdentifiers.length > 0, "the measure is identified by its eMeasure UUID");
+});
+
+// ---------------------------------------------------------------- the parser's hard cases
+
+test("CDA parse: a legal `>` INSIDE an attribute value does not truncate the element", () => {
+  // XML requires only `<` and `&` to be escaped in an attribute; a bare `>` is conformant, and a lab
+  // feed emitting `displayName="HbA1c > 9.0%"` is entirely normal. Scanning for the first `>` truncated
+  // the element mid-attribute, which then lost its self-closing slash, was pushed on the stack, and
+  // SWALLOWED ITS SIBLINGS — so the date and value silently vanished from an HbA1c of 9.6 (review, #362).
+  // The round trip provably cannot catch this: our own `esc()` escapes `>`, so we never emit the input
+  // that breaks us.
+  const root = parseXml(`<o><code displayName="HbA1c > 9.0%"/><effectiveTime value="20250601100000"/><value unit="%"/></o>`)!;
+  assert.equal(root.children.length, 3, "three siblings, not one that ate the others");
+  assert.equal(child(root, "code")?.attrs.displayName, "HbA1c > 9.0%");
+  assert.equal(child(root, "effectiveTime")?.attrs.value, "20250601100000");
+  assert.equal(child(root, "value")?.attrs.unit, "%");
+});
+
+test("CDA parse: unmatched close tags are LINEAR, not quadratic", () => {
+  // A 1 MB body of unmatched closes took 53 SECONDS on this single-threaded host — an accidental DoS
+  // from a truncated document, not only a malicious one (review, #362). Close-tag matching is now an
+  // O(1) name→depth lookup instead of a full stack scan. The bound here is generous so the test is not
+  // flaky on a loaded machine; the point is the ORDER of growth, and the old code took minutes.
+  const n = 20_000;
+  const payload = `<r>${"<a>".repeat(n)}${"</z>".repeat(n)}</r>`;
+  const started = process.hrtime.bigint();
+  const root = parseXml(payload);
+  const ms = Number(process.hrtime.bigint() - started) / 1e6;
+  assert.equal(root?.local, "r");
+  assert.ok(ms < 4000, `parsing ${payload.length} bytes took ${Math.round(ms)}ms — quadratic behaviour is back`);
+});
+
+test("CDA parse: deep nesting does not blow the call stack", () => {
+  // `descendants()` recursed and threw RangeError at ~5 000 levels — a ~30 KB document — and
+  // `importQrda1Document` calls it on the root before anything else. Explicit stack now.
+  const depth = 20_000;
+  const root = parseXml(`${"<a>".repeat(depth)}<target/>${"</a>".repeat(depth)}`)!;
+  assert.doesNotThrow(() => descendants(root, "target"));
+  assert.equal(descendants(root, "target").length, 1);
+});
+
+test("CDA parse: XXE is impossible — a declared external entity stays literal", () => {
+  const root = parseXml(`<!DOCTYPE a [<!ENTITY xx SYSTEM "file:///etc/passwd">]><a>&xx;</a>`)!;
+  assert.equal(root.text, "&xx;", "no entity table means nothing to resolve");
+});
+
+test("import: EVERY translatable datatype in an entry is taken, not just the first (review, #362)", () => {
+  // A Result Organizer carrying two Laboratory Tests, Performed is a standard CDA construct. Stopping at
+  // the first dropped the rest AND marked the entry fully translated — so an HbA1c that is the second
+  // component of a chemistry panel vanished with `untranslatedTemplates: []`.
+  const twoLabs = `<?xml version="1.0" encoding="UTF-8"?>
+<ClinicalDocument xmlns="urn:hl7-org:v3" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <recordTarget><patientRole><id root="urn:workwell:employee" extension="emp-006"/></patientRole></recordTarget>
+  <component><structuredBody><component><section>
+    <templateId root="2.16.840.1.113883.10.20.24.2.1" extension="2021-08-01"/>
+    <entry typeCode="DRIV"><organizer classCode="BATTERY" moodCode="EVN">
+      <observation classCode="OBS" moodCode="EVN">
+        <templateId root="2.16.840.1.113883.10.20.24.3.38" extension="2021-08-01"/>
+        <id root="urn:workwell:fhir" extension="lab-A"/>
+        <code code="4548-4" codeSystem="2.16.840.1.113883.6.1"/>
+        <effectiveTime value="20250601100000"/>
+      </observation>
+      <observation classCode="OBS" moodCode="EVN">
+        <templateId root="2.16.840.1.113883.10.20.24.3.38" extension="2021-08-01"/>
+        <id root="urn:workwell:fhir" extension="lab-B"/>
+        <code code="2345-7" codeSystem="2.16.840.1.113883.6.1"/>
+        <effectiveTime value="20250601100000"/>
+      </observation>
+    </organizer></entry>
+  </section></component></structuredBody></component>
+</ClinicalDocument>`;
+  const imported = importQrda1Document(twoLabs);
+  const ids = imported.bundle.entry.map((e) => (e.resource as { id: string }).id);
+  assert.ok(ids.includes("lab-A") && ids.includes("lab-B"), `both labs must import — got ${ids.join(", ")}`);
+});
+
+test("import: an out-of-range date does not become a FHIR field (review, #362)", () => {
+  // `00000000` — a MariaDB zero date — became `"0000-00-00"` in `Patient.birthDate`, where CMS125's
+  // initial population feeds it to `AgeAt(...)`. The date-only branch had no validation at all.
+  const withZeroDate = `<ClinicalDocument xmlns="urn:hl7-org:v3">
+  <recordTarget><patientRole><id root="urn:workwell:employee" extension="emp-006"/>
+    <patient><birthTime value="00000000"/></patient></patientRole></recordTarget>
+  <component><structuredBody><component><section>
+    <templateId root="2.16.840.1.113883.10.20.24.2.1" extension="2021-08-01"/>
+    <entry typeCode="DRIV"><procedure classCode="PROC" moodCode="EVN">
+      <templateId root="2.16.840.1.113883.10.20.24.3.64" extension="2021-08-01"/>
+      <code code="77067" codeSystem="2.16.840.1.113883.6.12"/>
+      <effectiveTime value="20250510100000"/>
+    </procedure></entry>
+  </section></component></structuredBody></component>
+</ClinicalDocument>`;
+  const patient = importQrda1Document(withZeroDate).bundle.entry[0]!.resource as { birthDate?: string };
+  assert.equal(patient.birthDate, undefined, "an impossible date is absent, not passed through");
 });

@@ -392,7 +392,15 @@ function nonConformanceFrom(measureId: string, translation: QdmTranslation, refe
   // a bundle that was present and full of resources is the misleading half of the truth: WorkWell's
   // authored measures bind synthetic `urn:workwell:vs:*` value sets, which have no CDA code system OID,
   // so their data cannot be carried by a QRDA at all. Found by the import round trip.
-  for (const reason of translation.untranslatable) reasons.push(`not exported — ${reason}`);
+  //
+  // DEDUPED and COUNTED, not one line per resource. `GET /api/runs/:id/qrda1` returns this per subject,
+  // and a WebChart bundle of a few hundred observations produced 300 near-identical strings — 31 KB per
+  // subject of the same three sentences (review, #362).
+  const tally = new Map<string, number>();
+  for (const reason of translation.untranslatable) tally.set(reason, (tally.get(reason) ?? 0) + 1);
+  for (const [reason, count] of tally) {
+    reasons.push(`not exported${count > 1 ? ` (${count} resources)` : ""} — ${reason}`);
+  }
   if (!reference.includes(EMEASURE_ID_ROOT)) {
     reasons.push(`measure ${measureId} has no published eMeasure Identifier (CONF:67-12811) — it was evaluated from authored logic`);
   }

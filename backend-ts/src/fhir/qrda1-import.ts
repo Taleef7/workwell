@@ -66,7 +66,14 @@ function isoFromHl7(value: string | undefined): string | undefined {
   const [y, mo, d] = [value.slice(0, 4), value.slice(4, 6), value.slice(6, 8)];
   const offset = /([+-])(\d{2})(\d{2})$/.exec(value);
   const digits = offset ? value.slice(0, value.length - 5) : value;
-  if (digits.length < 12) return `${y}-${mo}-${d}`;
+  if (digits.length < 12) {
+    // Validate the date-only path too. `00000000` (a MariaDB zero date) used to become
+    // `"0000-00-00"` and flow into `Patient.birthDate`, where CMS125's IPP feeds it to `AgeAt(...)`.
+    // The export has `hl7TsOrNull` guarding the other direction; this branch had nothing (review, #362).
+    const probe = new Date(`${y}-${mo}-${d}T00:00:00Z`);
+    if (Number.isNaN(probe.getTime()) || probe.toISOString().slice(0, 10) !== `${y}-${mo}-${d}`) return undefined;
+    return `${y}-${mo}-${d}`;
+  }
   const [h, mi, s] = [digits.slice(8, 10), digits.slice(10, 12), digits.slice(12, 14) || "00"];
   const zone = offset ? `${offset[1]}${offset[2]}:${offset[3]}` : "Z";
   const parsed = new Date(`${y}-${mo}-${d}T${h}:${mi}:${s}${zone}`);
@@ -96,7 +103,7 @@ function idOf(node: CdaNode, fallback: string): string {
   return own?.attrs.extension ?? fallback;
 }
 
-function encounterFrom(node: CdaNode, i: number): unknown {
+function encounterFrom(node: CdaNode, i: string): unknown {
   const t = times(child(node, "effectiveTime"));
   const type = concept(child(node, "code"));
   return {
@@ -110,7 +117,7 @@ function encounterFrom(node: CdaNode, i: number): unknown {
   };
 }
 
-function conditionFrom(node: CdaNode, i: number): unknown {
+function conditionFrom(node: CdaNode, i: string): unknown {
   const t = times(child(node, "effectiveTime"));
   // The patient's condition is the VALUE; `<code>` says only "this entry is a diagnosis".
   const code = concept(child(node, "value"));
@@ -125,7 +132,7 @@ function conditionFrom(node: CdaNode, i: number): unknown {
   };
 }
 
-function observationFrom(node: CdaNode, i: number, category: string): unknown {
+function observationFrom(node: CdaNode, i: string, category: string): unknown {
   const code = concept(child(node, "code"));
   if (!code) return undefined;
   const t = times(child(node, "effectiveTime"));
@@ -160,7 +167,7 @@ function observationFrom(node: CdaNode, i: number, category: string): unknown {
   };
 }
 
-function procedureFrom(node: CdaNode, i: number): unknown {
+function procedureFrom(node: CdaNode, i: string): unknown {
   const code = concept(child(node, "code"));
   if (!code) return undefined;
   const t = times(child(node, "effectiveTime"));
@@ -186,13 +193,30 @@ function patientFrom(root: CdaNode): { resource: unknown; id: string } {
   const name = child(patient, "name");
   const given = child(name, "given")?.text;
   const family = child(name, "family")?.text;
+  const birthDate = isoFromHl7(child(patient, "birthTime")?.attrs.value);
   return {
     id,
     resource: {
       resourceType: "Patient",
       id,
       ...(GENDER_FOR_SNOMED[sexCode ?? ""] ? { gender: GENDER_FOR_SNOMED[sexCode!] } : {}),
-      ...(isoFromHl7(child(patient, "birthTime")?.attrs.value) ? { birthDate: isoFromHl7(child(patient, "birthTime")!.attrs.value)! } : {}),
+      // **`us-core-sex`, not just `gender`** — and this is the difference between a correct import and a
+      // useless one. Official CMS125's initial population reads the US Core sex EXTENSION, never
+      // `Patient.gender` (ADR-042 cost a measurement pass establishing exactly that, and
+      // `devdb-official-eval.test.ts` pins that stripping it empties the whole roster from the IPP).
+      // Writing only `gender` made every imported subject out-of-population for the measure this stack
+      // actually routes to official — silently, with a 201 and no untranslated templates (review, #362).
+      ...(sexCode
+        ? {
+            extension: [
+              {
+                url: "http://hl7.org/fhir/us/core/StructureDefinition/us-core-sex",
+                valueCode: sexCode,
+              },
+            ],
+          }
+        : {}),
+      ...(birthDate ? { birthDate } : {}),
       ...(given || family ? { name: [{ ...(given ? { given: [given] } : {}), ...(family ? { family } : {}) }] } : {}),
     },
   };
@@ -236,27 +260,35 @@ export function importQrda1Document(xml: string): Qrda1Import {
   const untranslatedTemplates: string[] = [];
 
   childrenNamed(patientData, "entry").forEach((entry, i) => {
-    let translated = false;
+    // EVERY translatable datatype in the entry, not the first. A Result Organizer carrying two
+    // Laboratory Tests, Performed is a standard CDA construct, and stopping at the first one dropped the
+    // rest AND reported the entry as fully translated — so an HbA1c that is the second component of a
+    // chemistry panel vanished with `untranslatedTemplates: []` (review, #362). Diagnosis is nested
+    // inside a Diagnosis Concern Act, so the search descends rather than reading immediate children.
+    const candidates = new Set<CdaNode>();
     for (const node of entry.children) {
-      // Diagnosis is nested inside a Diagnosis Concern Act, so look through the entry rather than only
-      // at its immediate child — the act itself carries no QDM datatype of its own.
-      for (const candidate of [node, ...descendants(node, "observation"), ...descendants(node, "encounter"), ...descendants(node, "procedure")]) {
-        const resource =
-          hasTemplate(candidate, T.encounterPerformed) ? encounterFrom(candidate, i)
-          : hasTemplate(candidate, T.diagnosis) ? conditionFrom(candidate, i)
-          : hasTemplate(candidate, T.labPerformed) ? observationFrom(candidate, i, "laboratory")
-          : hasTemplate(candidate, T.studyPerformed) ? observationFrom(candidate, i, "imaging")
-          : hasTemplate(candidate, T.procedurePerformed) ? procedureFrom(candidate, i)
-          : undefined;
-        if (resource !== undefined) {
-          entries.push({ resource });
-          translated = true;
-          break;
-        }
+      candidates.add(node);
+      for (const kind of ["observation", "encounter", "procedure", "act"] as const) {
+        for (const found of descendants(node, kind)) candidates.add(found);
       }
-      if (translated) break;
     }
-    if (!translated) {
+    let translated = 0;
+    let index = 0;
+    for (const candidate of candidates) {
+      const key = `${i}-${index++}`;
+      const resource =
+        hasTemplate(candidate, T.encounterPerformed) ? encounterFrom(candidate, key)
+        : hasTemplate(candidate, T.diagnosis) ? conditionFrom(candidate, key)
+        : hasTemplate(candidate, T.labPerformed) ? observationFrom(candidate, key, "laboratory")
+        : hasTemplate(candidate, T.studyPerformed) ? observationFrom(candidate, key, "imaging")
+        : hasTemplate(candidate, T.procedurePerformed) ? procedureFrom(candidate, key)
+        : undefined;
+      if (resource !== undefined) {
+        entries.push({ resource });
+        translated++;
+      }
+    }
+    if (translated === 0) {
       // Named, not counted: an operator needs to know WHICH datatype was dropped to know whether the
       // recalculation can be trusted. A bare count would read as "a few things we don't support".
       const roots = descendants(entry, "templateId").map((t) => t.attrs.root).filter((r): r is string => r !== undefined);
@@ -286,6 +318,12 @@ export function importQrda1Document(xml: string): Qrda1Import {
     for (const id of childrenNamed(ref, "id")) {
       if (id.attrs.root === "2.16.840.1.113883.4.738" && id.attrs.extension) measureIdentifiers.push(id.attrs.extension);
       else if (id.attrs.root === "urn:workwell:measure" && id.attrs.extension) localMeasureId ??= id.attrs.extension;
+    }
+    // `<setId>` carries the VERSION-INDEPENDENT eMeasure id. A document naming its measure only that way
+    // would otherwise match nothing, and the route's measure check would refuse a correct request
+    // (review, #362).
+    for (const setId of childrenNamed(ref, "setId")) {
+      if (setId.attrs.root) measureIdentifiers.push(setId.attrs.root);
     }
   }
 
