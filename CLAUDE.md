@@ -368,7 +368,8 @@ here, so the nightly ALL_PROGRAMS run exercises the flip unprompted. Rollback = 
 (ADR-040 makes `eval_state` invalidate by construction).
 
 **M-A WAVE 2 (ADR-047): CMS2, CMS68 and CMS951 are vendored, MADiE-gated and ROUTABLE — none is routed.**
-The gate is now **231/231** across five measures (55+66+36+19+55, 0 unexpected, 0 errors) and drives the
+**CMS138 joined them 2026-07-31 (ADR-053) — the gate is now 278/278 across SIX measures.**
+The gate was **231/231** across five measures (55+66+36+19+55, 0 unexpected, 0 errors) and drives the
 harness, the sparse checkout and the committed-report predicate off `OFFICIAL_GATED_MEASURES` instead of a
 hardcoded pair — all three silently stopped meaning "the full gate" the moment a third measure existed.
 **Three of the six did NOT onboard, each for a different reason:** CMS138 scores **0/47 with 47 errors**

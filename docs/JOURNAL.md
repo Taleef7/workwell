@@ -1,5 +1,49 @@
 # Journal
 
+## 2026-07-31 (M-A) — CMS138 onboarded: 0/47 → 47/47, and the gate learned a new kind of claim (branch `feat/onboard-cms138`)
+
+Three things had to be true and only the first was: the value set had to be sourced, the artifact had to
+be complete, and the deck had to be able to SEE it.
+
+**Sourced.** The credentialed workflow from #365 ran `--complete-terminology` for CMS138 and pulled
+`…3.526.3.1278` ("Tobacco Use Screening") from VSAC at the pinned release — **4 codes**, upstream ships
+none. Its verification step confirmed the artifact complete (`truncated []`, `absent []`) before
+uploading, and refused to upload anything less.
+
+**Then the deck said 0/47 anyway**, with 47 errors, every one `Missing the following valuesets`. That
+falsified ADR-053's own sentence — *"the real check on a sourced value set is the MADiE gate"* — and the
+report explains why in its own words: *"ValueSets are consumed directly from each official measure
+Bundle."* The gate runs on UPSTREAM's terminology, which is exactly what makes it an external check for
+the other five and exactly what makes it blind here, since the bundle is the thing that lacks the set.
+A complete sidecar sat beside it the whole time, unread.
+
+**So the gate now supplements — but only what upstream omits.** `runOfficialMeasureCases` takes the
+artifact's runtime terminology and narrows it to the OIDs the bundle does not ship. The narrowing lives
+next to the `calculate` call, not at the call site, because the natural thing for a caller to do is pass
+the whole cache — which would quietly convert this gate from "upstream's terminology" into "ours" for
+every measure, deck still green, nothing to notice. With nothing missing, `calculate` takes three
+arguments exactly as before; the pre-existing assertion that pins that still passes, which is what makes
+the five complete measures provably unaffected.
+
+**Measured: 47/47, 0 unexpected mismatches, 0 errors.** The gate is now **278/278** across six measures.
+
+**What that 47/47 licenses is NOT what the other five carry, and everything here is built to stop it
+being rounded off.** For that one value set the codes are ours; what stays upstream's is the ANSWER KEY
+— the expected population vectors. So agreement is real evidence the four codes are right, and no
+evidence at all about upstream's terminology. The run records `supplementedOids`, the mode becomes
+`measure-bundle+sourced-supplement`, the CLI says so on stderr, and the report prints it on the measure's
+own line rather than in a footnote.
+
+**Smaller things worth keeping.** A test comment still asserted cms138 "scores 0/47 because one value
+set will not expand" — the misdiagnosis ADR-053 corrected, living on where nobody looks. Two CLI test
+doubles predated `supplementedOids` and threw on it, which surfaced as the CLI returning **exit 2** —
+reading as "the configuration was refused" rather than "the fixture is incomplete". And I re-ran the
+ADR-writing script by accident mid-session, duplicating ADR-053; caught by grepping the heading count
+rather than by reading, which is the only reason it did not ship.
+
+**Still not vendored: CMS130 and CMS165.** Their blockers are capped expansions, which the gate handles
+today — no supplement needed. One dispatch each.
+
 ## 2026-07-31 (M-A) — the "owner step" was a tooling gap: credentialed vendoring gets a command (branch `feat/vendor-workflow-cms138`)
 
 Three measures — CMS130, CMS165 (capped, ADR-041) and CMS138 (absent, ADR-053) — were recorded as

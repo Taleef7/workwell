@@ -21,8 +21,8 @@ import {
   type ReductionArtifactIdentity,
 } from "../../standards/official-cases.ts";
 import { loadOfficialArtifact } from "../../wiring/official-artifacts.ts";
-import { officialTerminologyExpander } from "../../wiring/official-terminology.ts";
-import { expandArtifactTerminology } from "../../wiring/official-executor-adapter.ts";
+import { absentValueSets, officialTerminologyExpander } from "../../wiring/official-terminology.ts";
+import { expandArtifactTerminology, requiredOids } from "../../wiring/official-executor-adapter.ts";
 
 /**
  * Build the reduction check's terminology THE WAY THE RUNTIME DOES — same sidecar, same expander, same
@@ -64,7 +64,8 @@ async function runtimeTerminologyCache(measure: OfficialMeasureId): Promise<Runt
 }
 
 export const USAGE =
-  `Usage: pnpm test:official-cases [--measure ${OFFICIAL_GATED_MEASURES.join("|")}] [--content-dir <path>]`;
+  `Usage: pnpm test:official-cases [--measure ${OFFICIAL_GATED_MEASURES.join("|")}] [--content-dir <path>]` +
+  ` [--allow-missing-terminology]`;
 
 export class OfficialCasesCliUsageError extends Error {
   override readonly name = "OfficialCasesCliUsageError";
@@ -73,11 +74,27 @@ export class OfficialCasesCliUsageError extends Error {
 export interface OfficialCasesArgs {
   measures: OfficialMeasureId[];
   contentDir?: string;
+  /**
+   * Skip a measure whose terminology this CONTEXT cannot complete, instead of running it and reporting
+   * every case as an error (review of #366).
+   *
+   * Only one thing needs this and it is not a corner case: GitHub withholds `WORKWELL_VSAC_API_KEY_VENDOR`
+   * from fork and Dependabot PRs, so CI re-vendors WITHOUT `--complete-terminology`. For a measure whose
+   * upstream bundle omits a value set (ADR-053), the regenerated sidecar omits it too — there is nothing
+   * to supplement from, the deck cannot resolve it, and every external contributor's PR would go red for
+   * a reason that has nothing to do with their change. The `official-flip-config.test.ts` capped-class
+   * excuse exists for exactly this shape.
+   *
+   * It is deliberately NOT the default. A credentialed run must never skip: there, an unresolvable value
+   * set means the artifact is broken, which is precisely what the gate is for.
+   */
+  allowMissingTerminology?: boolean;
 }
 
 export function parseArgs(argv: string[]): OfficialCasesArgs {
   let measure: OfficialMeasureId | undefined;
   let contentDir: string | undefined;
+  let allowMissingTerminology = false;
   for (let index = 0; index < argv.length; index++) {
     const arg = argv[index];
     if (arg === "--measure") {
@@ -94,13 +111,19 @@ export function parseArgs(argv: string[]): OfficialCasesArgs {
       const value = argv[++index];
       if (!value) throw new OfficialCasesCliUsageError(`--content-dir needs a value\n${USAGE}`);
       contentDir = value;
+    } else if (arg === "--allow-missing-terminology") {
+      allowMissingTerminology = true;
     } else if (arg === "--help" || arg === "-h") {
       throw new OfficialCasesCliUsageError(USAGE);
     } else {
       throw new OfficialCasesCliUsageError(`unknown argument '${arg}'\n${USAGE}`);
     }
   }
-  return { measures: measure ? [measure] : [...OFFICIAL_GATED_MEASURES], ...(contentDir ? { contentDir } : {}) };
+  return {
+    measures: measure ? [measure] : [...OFFICIAL_GATED_MEASURES],
+    ...(contentDir ? { contentDir } : {}),
+    ...(allowMissingTerminology ? { allowMissingTerminology: true } : {}),
+  };
 }
 
 /**
@@ -114,6 +137,11 @@ export const REQUIRED_OFFICIAL_CASE_COUNTS: Record<string, number> = {
   cms2: 36,
   cms68: 19,
   cms951: 55,
+  // Counted from the sparse checkout, not copied from a note: 47 case DIRECTORIES under
+  // `input/tests/measure/CMS138FHIRTobaccoScrnCessation` (the three non-directory entries — `.madie`,
+  // the Group resource and README.txt — are not cases). Agrees with the figure ADR-047 recorded when
+  // the measure scored 0/47.
+  cms138: 47,
 };
 
 export function exitCodeForRuns(
@@ -207,7 +235,7 @@ export function readArtifactIdentity(bundlePath: string): ReductionArtifactIdent
 export interface OfficialCasesCliDeps {
   cwd: string;
   load: (contentDir: string, measure: OfficialMeasureId) => LoadedOfficialMeasure;
-  run: (loaded: LoadedOfficialMeasure) => Promise<OfficialMeasureRun>;
+  run: (loaded: LoadedOfficialMeasure, supplementalValueSets?: unknown[]) => Promise<OfficialMeasureRun>;
   render: (runs: OfficialMeasureRun[], metadata: OfficialReportMetadata) => string;
   sourceRevision: (contentDir: string) => string;
   loadDraftBundle: (path: string) => FhirBundle;
@@ -221,6 +249,12 @@ export interface OfficialCasesCliDeps {
   ) => Promise<Cms122DraftDrift>;
   /** The runtime's own terminology for a measure, or the reason it is unavailable. */
   runtimeTerminology: (measure: OfficialMeasureId) => Promise<RuntimeTerminology>;
+  /**
+   * Value sets the measure DECLARES that neither its bundle nor its sidecar can resolve — the same
+   * predicate `officialRoutingProblems` refuses on, so the gate's skip and the router's refusal are
+   * one decision rather than two that can disagree.
+   */
+  unresolvableOids: (measure: OfficialMeasureId) => string[];
   generatedDate: string;
   writeReport: (path: string, markdown: string) => void;
   log: (message: string) => void;
@@ -231,7 +265,10 @@ function defaultDeps(): OfficialCasesCliDeps {
   return {
     cwd: process.cwd(),
     load: loadOfficialMeasureCases,
-    run: runOfficialMeasureCases,
+    run: (loaded, supplementalValueSets) =>
+      runOfficialMeasureCases(loaded, {
+        ...(supplementalValueSets ? { supplementalValueSets } : {}),
+      }),
     render: renderOfficialCaseReport,
     sourceRevision: readContentRevision,
     loadDraftBundle: loadFhirBundleFile,
@@ -243,6 +280,10 @@ function defaultDeps(): OfficialCasesCliDeps {
         ...(terminology?.reason ? { valueSetModeReason: terminology.reason } : {}),
       }),
     runtimeTerminology: runtimeTerminologyCache,
+    unresolvableOids: (measure) => {
+      const artifact = loadOfficialArtifact(measure);
+      return artifact ? absentValueSets(artifact, requiredOids(artifact)) : [];
+    },
     generatedDate: new Date().toISOString().slice(0, 10),
     writeReport: (path, markdown) => writeFileSync(path, markdown, "utf8"),
     log: console.log,
@@ -267,18 +308,47 @@ export async function main(argv: string[], overrides: Partial<OfficialCasesCliDe
   const reportPath = resolve(deps.cwd, "..", "docs", "OFFICIAL_TESTCASE_REPORT_2026-07.md");
   try {
     const runs: OfficialMeasureRun[] = [];
+    const skipped: Array<{ measure: OfficialMeasureId; oids: string[] }> = [];
     for (const measure of parsed.measures) {
       deps.log(`official-cases: loading ${measure.toUpperCase()} from ${contentDir}`);
       const loaded = deps.load(contentDir, measure);
-      const run = await deps.run(loaded);
+      // Loaded BEFORE the gate run, not just before the reduction check, because a measure whose
+      // upstream bundle omits a value set cannot resolve it from the bundle at all — the gate scores
+      // 0/N with N errors and says nothing about the measure (ADR-053; CMS138 declares 32 and ships
+      // 31). `runOfficialMeasureCases` narrows whatever it is handed to exactly those missing OIDs, so
+      // passing the whole cache here cannot substitute our terminology for upstream's anywhere else.
+      const terminology = await deps.runtimeTerminology(measure);
+      // Under `--allow-missing-terminology` ONLY: a measure this context cannot complete is skipped
+      // rather than run into N errors. `deps.unresolvableOids` is the same predicate the ROUTER uses to
+      // refuse the measure, so "the gate skipped it" and "routing would refuse it" cannot drift apart.
+      if (parsed.allowMissingTerminology) {
+        const unresolvable = deps.unresolvableOids(measure);
+        if (unresolvable.length > 0) {
+          skipped.push({ measure, oids: unresolvable });
+          deps.error(
+            `official-cases: ${measure.toUpperCase()} SKIPPED — this context cannot resolve ` +
+              `${unresolvable.join(", ")}, and --allow-missing-terminology was passed. A credentialed ` +
+              `run does NOT skip: there an unresolvable value set means a broken artifact (ADR-053).`,
+          );
+          continue;
+        }
+      }
+      const run = await deps.run(loaded, terminology.cache);
       // Every vendored measure gets the reduction check, not just cms122: it is the ONLY thing that
       // executes our reduced artifact against the upstream bundle, so a measure without it has its
       // vendoring guarded by nothing but a self-consistent SHA-256 that vendor:official wrote itself.
       const artifactPath = resolve(deps.cwd, "measures", "official", measure, "bundle.json");
-      const terminology = await deps.runtimeTerminology(measure);
       // Surfaced here as well as in the report: a downgrade means this run is NOT checking the
       // runtime's terminology, and a developer reading the console should not have to diff a markdown
       // file to discover that.
+      if (run.supplementedOids.length > 0) {
+        deps.error(
+          `official-cases: ${measure.toUpperCase()} gate run SUPPLEMENTED — ${run.supplementedOids.length} ` +
+            `value set(s) came from our vendored sidecar because the upstream bundle ships none: ` +
+            `${run.supplementedOids.join(", ")}. The expected vectors are still upstream's, but the CODES ` +
+            `for these are ours (ADR-053).`,
+        );
+      }
       if (!terminology.cache) {
         deps.error(
           `official-cases: ${measure.toUpperCase()} reduction check DOWNGRADED to upstream value sets` +
@@ -302,8 +372,19 @@ export async function main(argv: string[], overrides: Partial<OfficialCasesCliDe
     // `--measure` subset would otherwise overwrite it with a partial deck and CI's staleness check would
     // then compare the full run against a one-measure file. Keyed on the gate list rather than a literal
     // count, which silently stopped meaning "full run" the moment a third measure was onboarded.
-    const writesCommittedReport = parsed.measures.length === OFFICIAL_GATED_MEASURES.length;
+    // ...and a run that SKIPPED a measure is partial for the same reason, even though it was asked for
+    // the full list (review of #366). Writing here would replace the committed evidence with a deck
+    // that is missing a measure, and CI's staleness check would then read as "the report is current"
+    // on the very run that could not produce it.
+    const writesCommittedReport =
+      parsed.measures.length === OFFICIAL_GATED_MEASURES.length && skipped.length === 0;
     if (writesCommittedReport) deps.writeReport(reportPath, markdown);
+    if (skipped.length > 0) {
+      deps.error(
+        `official-cases: PARTIAL RUN — ${skipped.length} measure(s) skipped ` +
+          `(${skipped.map((s) => s.measure).join(", ")}); the committed report was NOT rewritten.`,
+      );
+    }
     for (const run of runs) {
       const adjusted = run.summary.expectedAgreements + run.summary.referenceAgreements;
       deps.log(
