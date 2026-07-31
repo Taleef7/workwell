@@ -9,8 +9,8 @@
 # That produced a false blocker. Three priority measures (CMS130, CMS165 capped; CMS138 absent — see
 # ADR-041 and ADR-053) were recorded as needing "an owner step", when what they actually needed was a
 # way to run the existing vendor command in the one place the credential already lives. This is that
-# way: a manual trigger that vendors, prints what moved, and uploads `bundle.json` + `manifest.json` as
-# an artifact to download and commit.
+# way: a manual trigger that vendors, VERIFIES, and uploads `bundle.json` + `manifest.json` as an
+# artifact to download and commit.
 #
 # ## Why it uploads rather than commits
 #
@@ -25,6 +25,14 @@
 # thousands of AMA CPT and SNOMED CT codes under an NLM licence and is gitignored for that reason
 # (ADR-036). Uploading it would redistribute licensed content through an artifact URL, so the copy step
 # names the two files explicitly rather than globbing the directory.
+#
+# ## Dispatch inputs never reach a shell (review of #365, P1)
+#
+# Every `${{ inputs.* }}` is passed through `env:` and validated before use. Interpolating them into a
+# `run:` script would splice attacker-controlled text into a step that holds the VSAC credential —
+# command substitution executes inside double quotes, so `$(...)` in an input would run with the secret
+# in the environment. Only users with write access can dispatch, which lowers the odds and not the
+# severity.
 name: Vendor official measure (credentialed)
 
 on:
@@ -48,7 +56,7 @@ permissions:
 
 jobs:
   vendor:
-    name: Vendor ${{ inputs.catalog_id }} with the VSAC credential
+    name: Vendor with the VSAC credential
     runs-on: ubuntu-latest
     timeout-minutes: 20
     defaults:
@@ -58,6 +66,36 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: 24 }
+      - uses: pnpm/action-setup@v4
+        with: { version: 10 }
+
+      # Validated BEFORE anything uses them, and re-exported as step outputs so later steps read a value
+      # this step has already checked rather than the raw input. The character classes are the same ones
+      # `parseArgs` enforces in the vendor script, so a value that passes here cannot be rejected there.
+      - name: Validate dispatch inputs
+        id: inputs
+        env:
+          IN_MEASURE: ${{ inputs.measure }}
+          IN_CATALOG_ID: ${{ inputs.catalog_id }}
+          IN_REF: ${{ inputs.ref }}
+        run: |
+          case "$IN_MEASURE" in
+            *[!A-Za-z0-9]*|"") echo "::error::measure must be alphanumeric (got '$IN_MEASURE')"; exit 1 ;;
+          esac
+          case "$IN_CATALOG_ID" in
+            *[!a-z0-9]*|"") echo "::error::catalog_id must be lowercase alphanumeric (got '$IN_CATALOG_ID')"; exit 1 ;;
+          esac
+          if [ -n "$IN_REF" ]; then
+            case "$IN_REF" in
+              *[!0-9a-f]*) echo "::error::ref must be a 40-char lowercase hex sha"; exit 1 ;;
+            esac
+            [ "${#IN_REF}" -eq 40 ] || { echo "::error::ref must be exactly 40 characters"; exit 1; }
+          fi
+          {
+            echo "measure=$IN_MEASURE"
+            echo "catalog_id=$IN_CATALOG_ID"
+            echo "ref=$IN_REF"
+          } >> "$GITHUB_OUTPUT"
 
       # Fails the job rather than vendoring an incomplete artifact that looks fine. Without the
       # credential the script warns and leaves capped/absent value sets exactly as upstream shipped
@@ -71,6 +109,9 @@ jobs:
             exit 1
           fi
 
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
       # Same sparse checkout the eCQM gate uses, so the bundle is read locally at the pinned commit
       # instead of pulling ~17 MB from raw.githubusercontent.
       - name: Fetch official content (pinned commit)
@@ -81,45 +122,75 @@ jobs:
       # Never fails the job — it is a measurement, and `official-terminology-audit.mjs` exits 0 by design.
       - name: Audit declared-vs-shipped terminology
         continue-on-error: true
-        run: node scripts/official-terminology-audit.mjs "${{ inputs.measure }}"
+        env:
+          MEASURE: ${{ steps.inputs.outputs.measure }}
+        run: node scripts/official-terminology-audit.mjs "$MEASURE"
 
       - name: Vendor with completion
         env:
           WORKWELL_VSAC_API_KEY: ${{ secrets.WORKWELL_VSAC_API_KEY_VENDOR }}
+          MEASURE: ${{ steps.inputs.outputs.measure }}
+          CATALOG_ID: ${{ steps.inputs.outputs.catalog_id }}
+          REF: ${{ steps.inputs.outputs.ref }}
         run: |
-          node scripts/vendor-official-measure.mjs \
-            --measure "${{ inputs.measure }}" \
-            --catalog-id "${{ inputs.catalog_id }}" \
-            --strip-elm-annotations \
-            --complete-terminology \
-            ${{ inputs.ref && format('--ref {0}', inputs.ref) || '' }}
+          set -- --measure "$MEASURE" --catalog-id "$CATALOG_ID" --strip-elm-annotations --complete-terminology
+          if [ -n "$REF" ]; then set -- "$@" --ref "$REF"; fi
+          node scripts/vendor-official-measure.mjs "$@"
 
-      # The manifest is the evidence. Printed into the log so the outcome is visible without
-      # downloading anything: `truncated` must be empty, and `completion` must record what was sourced
-      # and from which VSAC release.
-      - name: Report what the credential actually changed
+      # THE GATE, and it is not a formality (review of #365, P2).
+      #
+      # `completeTerminology` fails CLOSED: an expired key, an unreachable VSAC, a short expansion or a
+      # wrong-OID echo all leave the terminology as upstream shipped it and exit 0. So the vendor step
+      # succeeding says nothing about whether the artifact is usable, and the first cut of this workflow
+      # checked only `manifest.terminology.truncated` — which an ABSENT value set never appears in.
+      # For CMS138, the one measure this was built for, that check was warning-free by construction and
+      # the workflow would have uploaded exactly the unroutable artifact it claims to reject.
+      #
+      # So it now runs the REAL runtime predicates over the produced artifact: `absentValueSets` (the
+      # ELM's declared canonicals minus what the sidecar holds) and the manifest's own `truncated`. Same
+      # functions `officialRoutingProblems` calls, so "this passed here" and "routing will accept it"
+      # cannot drift apart.
+      - name: Verify the artifact is actually complete
+        env:
+          CATALOG_ID: ${{ steps.inputs.outputs.catalog_id }}
         run: |
-          node -e '
-            const m = require("./measures/official/${{ inputs.catalog_id }}/manifest.json");
-            const t = m.terminology ?? {};
+          pnpm exec node --import tsx -e '
+            const id = process.env.CATALOG_ID;
+            const { loadOfficialArtifact } = await import("./src/wiring/official-artifacts.ts");
+            const { absentValueSets } = await import("./src/wiring/official-terminology.ts");
+            const { requiredOids } = await import("./src/wiring/official-executor-adapter.ts");
+            const artifact = loadOfficialArtifact(id);
+            if (!artifact) { console.log(`::error::${id}: the vendor step produced no loadable artifact`); process.exit(1); }
+            const m = artifact.manifest, t = m.terminology ?? {};
             console.log(`measure      ${m.measureName} v${m.version} (${m.cmsId ?? "no cmsId"})`);
             console.log(`terminology  ${t.valueSets} value sets, ${t.codes} codes`);
-            console.log(`truncated    ${JSON.stringify(t.truncated ?? [])}`);
             console.log(`completion   ${JSON.stringify(t.completion ?? null, null, 2)}`);
-            if ((t.truncated ?? []).length > 0) {
-              console.log("::warning::truncated is NOT empty — this artifact is still incomplete and routing will refuse it.");
+            const truncated = t.truncated ?? [];
+            const absent = absentValueSets(artifact, requiredOids(artifact));
+            console.log(`truncated    ${JSON.stringify(truncated)}`);
+            console.log(`absent       ${JSON.stringify(absent)}`);
+            if (truncated.length > 0 || absent.length > 0) {
+              console.log(`::error::${id} is INCOMPLETE — ${truncated.length} capped, ${absent.length} absent. Routing would refuse it, so nothing is uploaded. Check the vendor log above for the VSAC warning that explains why.`);
+              process.exit(1);
             }
+            console.log(`${id}: terminology complete — nothing capped, nothing absent.`);
           '
 
       # Explicit paths, never a directory glob: `terminology.json` sits beside these two and must not
       # leave the runner (see the header).
       - name: Stage the committable files only
+        env:
+          CATALOG_ID: ${{ steps.inputs.outputs.catalog_id }}
         run: |
-          mkdir -p ../_vendored/${{ inputs.catalog_id }}
-          cp measures/official/${{ inputs.catalog_id }}/bundle.json   ../_vendored/${{ inputs.catalog_id }}/
-          cp measures/official/${{ inputs.catalog_id }}/manifest.json ../_vendored/${{ inputs.catalog_id }}/
-          echo "staged:"; ls -la ../_vendored/${{ inputs.catalog_id }}/
+          mkdir -p "../_vendored/$CATALOG_ID"
+          cp "measures/official/$CATALOG_ID/bundle.json" "../_vendored/$CATALOG_ID/"
+          cp "measures/official/$CATALOG_ID/manifest.json" "../_vendored/$CATALOG_ID/"
+          echo "staged:"; ls -la "../_vendored/$CATALOG_ID/"
 
+      # `path:` is the STAGED directory, so the archive root holds the two files. `gh run download -n`
+      # extracts an artifact's contents directly into `-D`, so the documented command points `-D` at the
+      # catalog directory itself (review of #365) — pointing it at `measures/official/` would drop the
+      # files a level too high, where neither the vendor script nor the runtime looks for them.
       - uses: actions/upload-artifact@v4
         with:
           name: vendored-${{ inputs.catalog_id }}

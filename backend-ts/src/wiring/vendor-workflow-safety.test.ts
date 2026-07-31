@@ -103,3 +103,53 @@ test("it passes --complete-terminology, which is the entire point of running it 
   assert.match(yaml, /--strip-elm-annotations/);
   assert.match(yaml, /WORKWELL_VSAC_API_KEY_VENDOR/);
 });
+
+test("no dispatch input is interpolated into a shell script (review, #365)", () => {
+  // `${{ inputs.* }}` inside a `run:` block splices attacker-controlled text into the shell — and
+  // command substitution executes inside double quotes, so `$(...)` in an input would run in a step
+  // that holds the VSAC credential. Only write-access users can dispatch, which lowers the odds and
+  // not the severity. Inputs go through `env:` and are validated first.
+  //
+  // Scanned line-by-line with a `run:`-block tracker rather than over the whole file, because
+  // `env:` mappings and `with:` blocks legitimately carry `${{ inputs.* }}` — that IS the fix.
+  const lines = yaml.split("\n");
+  let inRun = false;
+  let runIndent = 0;
+  const offenders: string[] = [];
+  for (const line of lines) {
+    const indent = line.length - line.trimStart().length;
+    if (/^\s*(- )?run: \|/.test(line) || /^\s*run: \|/.test(line)) {
+      inRun = true;
+      runIndent = indent;
+      continue;
+    }
+    // A `run:` block ends at the next key at or above its own indentation.
+    if (inRun && line.trim() !== "" && indent <= runIndent && /^\s*[-\w]/.test(line)) inRun = false;
+    if (inRun && /\$\{\{\s*inputs\./.test(line)) offenders.push(line.trim());
+  }
+  assert.deepEqual(offenders, [], "dispatch inputs must reach the shell via env:, never by interpolation");
+  // Non-degeneracy: if the tracker never entered a run block, the loop above proves nothing.
+  assert.ok(yaml.includes("run: |"), "expected multi-line run blocks to scan");
+});
+
+test("it REFUSES to upload an artifact whose terminology is still incomplete (review, #365)", () => {
+  // `completeTerminology` fails closed and exits 0 — an expired key, an unreachable VSAC, a short
+  // expansion or a wrong-OID echo all leave the terminology as upstream shipped it. So the vendor step
+  // succeeding says nothing about whether the artifact is usable.
+  //
+  // The first cut checked only `manifest.terminology.truncated`, which an ABSENT value set never
+  // appears in — so for CMS138, the measure this workflow was built for, the check was warning-free by
+  // construction and the workflow would have uploaded exactly the unroutable artifact it claims to
+  // reject. It must consult BOTH conditions, using the real runtime predicates.
+  assert.match(yaml, /Verify the artifact is actually complete/);
+  assert.match(yaml, /absentValueSets/, "must consult absent value sets, not only `truncated`");
+  assert.match(yaml, /requiredOids/, "absentValueSets needs the ELM's declared canonicals");
+  assert.match(yaml, /truncated\.length > 0 \|\| absent\.length > 0/, "both conditions must fail the job");
+
+  // And it must come BEFORE the staging/upload steps, or it reports on an artifact already published.
+  const verifyAt = yaml.indexOf("Verify the artifact is actually complete");
+  const stageAt = yaml.indexOf("Stage the committable files only");
+  const uploadAt = yaml.indexOf("upload-artifact");
+  assert.ok(verifyAt > 0 && stageAt > verifyAt, "verification must precede staging");
+  assert.ok(uploadAt > verifyAt, "verification must precede upload");
+});
