@@ -17,7 +17,7 @@
  * it narrows a population silently, leaving subjects who should have been excluded in the denominator
  * to be scored.
  *
- * **ABSENT (ADR-053).** A value set the ELM retrieves that the bundle does not ship *at all*. Measured
+ * **ABSENT (ADR-053).** A value set the ELM DECLARES that the bundle does not ship *at all*. Measured
  * on CMS138 at the pinned commit: its libraries declare **32** value sets and the bundle carries **31**
  * ValueSet resources — `2.16.840.1.113883.3.526.3.1278` ("Tobacco Use Screening") is simply not there.
  * This was invisible here until ADR-053 because `collectTerminology` enumerates the ValueSets the
@@ -43,8 +43,11 @@
  *   bigger", and the difference is a wrong release pin scoring real patients.
  * - An ABSENT set has neither check available (there are no upstream codes to contain and no declared
  *   total to fall short of), so it is held to the only baseline that exists — VSAC's own
- *   `expansion.total` — and is recorded under a distinct `reason` so it can never be read as evidence
- *   of the same strength as a completed cap.
+ *   `expansion.total` — and REFUSED outright when the server volunteers none, because then there is no
+ *   evidence of completeness at all. (Review of #364 caught the first cut guarding on
+ *   `total > 0 && short`, which cannot fire when `total` is absent — the vacuous shape, inside the
+ *   guard.) It is recorded under a distinct `reason` so it can never be read as evidence of the same
+ *   strength as a completed cap.
  */
 
 /** NLM's FHIR terminology service — the same host `engine/cql/vsac-client.ts` expands against. */
@@ -69,6 +72,28 @@ const VSAC_PAGE = 1000;
 const VSAC_MAX_PAGES = 2000;
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * `http://cts.nlm.nih.gov/fhir/ValueSet/2.16.840...|1.2` → `2.16.840...`.
+ *
+ * The single `.mjs` implementation: the vendor script and the terminology audit both import it rather
+ * than keeping private copies, which is how #364 shipped with three copies of one rule and a
+ * normalization missing from all of them. It deliberately mirrors `oidFromValueSetUrl` in
+ * `@workwell/official-executor` — the duplication is forced (this file runs as bare `node` on the
+ * deploy path and cannot import the workspace package) and `valueset-parity.test.mjs` pins the two
+ * against each other over the real artifacts.
+ *
+ * Stripping the `|version` suffix matters even though **no canonical in any of the six upstream bundles
+ * carries one today** (measured at the pinned commit, review of #364): a shipped `ValueSet.url` never
+ * has a version — it lives in `ValueSet.version` — so a versioned ELM canonical would be keyed
+ * differently from the terminology holding it, and reported ABSENT while present.
+ */
+export function oidFromValueSetUrl(url) {
+  const marker = "/ValueSet/";
+  const withoutPrefix = url.includes(marker) ? url.slice(url.lastIndexOf(marker) + marker.length) : url;
+  const pipe = withoutPrefix.indexOf("|");
+  return pipe === -1 ? withoutPrefix : withoutPrefix.slice(0, pipe);
+}
 
 /** Flatten a FHIR expansion's `contains` tree. VSAC's is flat, but the field is recursive. */
 export function flattenExpansion(contains, out = []) {
@@ -125,6 +150,14 @@ export async function expandFromVsac(oid, { vsacBase, vsacManifest, apiKey }) {
   const codes = [];
   let offset = 0;
   let total = 0;
+  /**
+   * The identity VSAC echoes back, when it echoes one — see the absent-set guard in
+   * `completeTerminology`. Named `echoedUrl` and NOT `url`, because the loop below declares its own
+   * `const url` for the REQUEST: the first cut shadowed this one, so `url === undefined` compared a
+   * request string against undefined, was never true, and the identity check could never fire. Caught
+   * by its own test, which is the only reason it is not in this PR.
+   */
+  let echoedUrl;
 
   for (let page = 0; ; page += 1) {
     if (page >= VSAC_MAX_PAGES) {
@@ -138,6 +171,7 @@ export async function expandFromVsac(oid, { vsacBase, vsacManifest, apiKey }) {
     if (!body.expansion) throw new Error(`VSAC $expand for ${oid}: response carries no expansion`);
     const contains = body.expansion.contains ?? [];
     if (typeof body.expansion.total === "number") total = body.expansion.total;
+    if (echoedUrl === undefined && typeof body.url === "string") echoedUrl = body.url;
     codes.push(...flattenExpansion(contains));
     offset += contains.length;
     if (contains.length === 0 || (total > 0 && codes.length >= total)) break;
@@ -146,11 +180,18 @@ export async function expandFromVsac(oid, { vsacBase, vsacManifest, apiKey }) {
   if (total > 0 && codes.length === 0) {
     throw new Error(`VSAC $expand for ${oid}: claimed ${total} codes and returned none`);
   }
-  return { codes, total };
+  // `total` stays 0 when the server volunteered none. That is NOT "zero codes" and callers must not read
+  // it as a count — the absent-set path refuses on it precisely because it is an absence of evidence.
+  return { codes, total, ...(echoedUrl ? { url: echoedUrl } : {}) };
 }
 
 /**
- * Every distinct value-set canonical the measure's ELM RETRIEVES, across all libraries in a bundle.
+ * Every distinct value-set canonical the measure's ELM DECLARES, across all libraries in a bundle.
+ *
+ * DECLARES, not retrieves: this is `library.valueSets.def`, which lists what the CQL *could* use.
+ * Measured in review of #364, CMS138 declares one it never references in any `Retrieve` — so any
+ * check built on this over-approximates, which is the safe direction and must be said out loud
+ * rather than papered over with the word "retrieves".
  *
  * A deliberate mirror of `referencedValueSets` in `@workwell/official-executor`, reimplemented here
  * because this file runs as bare `node` on the deploy path with no install and no build step (see the
@@ -214,9 +255,9 @@ export function sortValueSets(terminology) {
  *   the completion can be checked for size AND identity. Both checks are enforced below.
  * - An ABSENT set has neither. Upstream shipped nothing, so "does the full expansion contain what
  *   upstream shipped" has no left-hand side, and "is it short of the declared total" has no declared
- *   total. The only baseline that exists is VSAC's own `expansion.total`, and that is what it is held
- *   to — a genuinely weaker check, which is why the completion record carries a distinct `reason` so
- *   nobody downstream reads the two as equally evidenced.
+ *   total. The only baseline that exists is VSAC's own `expansion.total`; a response carrying none is
+ *   refused rather than trusted. A genuinely weaker check either way, which is why the completion record
+ *   carries a distinct `reason` so nobody downstream reads the two as equally evidenced.
  *
  * The real check on an absent set is not here at all: it is the MADiE gate. Upstream's 2026-07-15
  * discrepancy report lists CMS138 under "no discrepancies" across 5826 cases, so its 47 committed
@@ -319,15 +360,42 @@ export async function completeTerminology(terminology, args, env = process.env) 
       stillAbsent.push(want);
       continue;
     }
-    // The ONLY size baseline an absent set has. Deliberately not applied to the capped path above:
-    // upstream's `declaredTotal` is already a baseline there, and tightening a guard we cannot re-run
-    // against live VSAC would risk the reproducibility of the committed artifacts for no measured gain
-    // (ADR-041 measured VSAC returning 2000 where the bundle declares 1997 — a delta the capped guard
-    // is deliberately tolerant of).
-    if (expanded.total > 0 && canonical.length < expanded.total) {
+    // VSAC's own `expansion.total` is the ONLY size baseline an absent set has, so a response that does
+    // not carry one carries NO evidence of completeness and is refused.
+    //
+    // Review of #364 caught the first cut here as `expanded.total > 0 && canonical.length < expanded.total`
+    // — which cannot fire when the server omits `total`, because `expandFromVsac` leaves it 0 and the
+    // paging loop stops on the first empty page regardless. A short response with no `total` was accepted
+    // silently, written with `declaredTotal` equal to whatever arrived, `truncated` empty and no warning:
+    // a set that LOOKS complete and is not, which is the one thing this file's header says no path
+    // produces. That is the vacuous-guard shape, inside the guard added to close a blind spot.
+    if (!(expanded.total > 0)) {
+      console.warn(
+        `  WARNING VSAC returned no expansion.total for absent value set ${want.oid}, so there is no` +
+          " baseline to judge completeness against — an absent set has no upstream codes to contain and" +
+          " no declared total to fall short of. Leaving it absent.",
+      );
+      stillAbsent.push(want);
+      continue;
+    }
+    if (canonical.length < expanded.total) {
       console.warn(
         `  WARNING VSAC claimed ${expanded.total} codes for absent value set ${want.oid} and returned` +
           ` ${canonical.length} distinct — a short read, not an expansion. Leaving it absent.`,
+      );
+      stillAbsent.push(want);
+      continue;
+    }
+    // Identity, when the server volunteers it: a response echoing a DIFFERENT canonical would otherwise
+    // be written under the OID we asked for. Applied here and not to the capped path above, because the
+    // capped path already proves identity a stronger way — the expansion must CONTAIN the codes upstream
+    // shipped (ADR-041) — and tightening a guard we cannot re-run against live VSAC would risk the
+    // reproducibility of the committed artifacts for no measured gain.
+    if (expanded.url && oidFromValueSetUrl(expanded.url) !== want.oid) {
+      console.warn(
+        `  WARNING VSAC answered the request for ${want.oid} with an expansion of ${expanded.url} —` +
+          " a different value set. Leaving it absent rather than filing someone else's codes under this" +
+          " OID.",
       );
       stillAbsent.push(want);
       continue;

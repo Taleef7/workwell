@@ -66,6 +66,25 @@ test("oidFromValueSetUrl strips the canonical prefix, passes a bare oid through"
   assert.equal(oidFromValueSetUrl("2.16.840.1.113883.3.464"), "2.16.840.1.113883.3.464");
 });
 
+test("oidFromValueSetUrl strips a `|version` suffix — a versioned canonical is the SAME value set", () => {
+  // Review of #364. A FHIR canonical may carry `|version`; a shipped `ValueSet.url` never does (the
+  // version lives in `ValueSet.version`). Without this, an ELM declaring `…|1.2` keys as `2.16.1|1.2`
+  // while the artifact's terminology keys as `2.16.1` — so the value set reads as ABSENT though present,
+  // routing refuses a measure that is fine, and `--complete-terminology` asks VSAC for a malformed
+  // version-suffixed id. Measured: zero versioned canonicals across all six upstream bundles at the
+  // pinned commit, so this is latent rather than live — and asserted rather than left to be rediscovered.
+  assert.equal(
+    oidFromValueSetUrl("http://cts.nlm.nih.gov/fhir/ValueSet/2.16.840.1.113883.3.464|1.2"),
+    "2.16.840.1.113883.3.464",
+  );
+  assert.equal(oidFromValueSetUrl("2.16.840.1.113883.3.464|20250101"), "2.16.840.1.113883.3.464");
+  // Both forms must land on ONE key, which is the property `absentValueSets`' de-duplication assumes.
+  assert.equal(
+    oidFromValueSetUrl("http://cts.nlm.nih.gov/fhir/ValueSet/2.16.1|1.2"),
+    oidFromValueSetUrl("http://cts.nlm.nih.gov/fhir/ValueSet/2.16.1"),
+  );
+});
+
 test("buildValueSetCache emits a failed expansion EMPTY-but-PRESENT rather than omitting it", async () => {
   const bundle = {
     resourceType: "Bundle",

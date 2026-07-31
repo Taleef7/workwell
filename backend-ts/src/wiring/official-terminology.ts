@@ -205,7 +205,15 @@ export function cappedExpansions(
 }
 
 /**
- * Value sets this measure's ELM RETRIEVES for which the artifact holds no terminology at all (ADR-053).
+ * Value sets this measure's ELM DECLARES for which the artifact holds no terminology at all (ADR-053).
+ *
+ * **Declares, not retrieves**, and the difference is measurable rather than pedantic: review of #364
+ * found CMS138's ELM carries **zero** `ValueSetRef`/`Retrieve` references to the very OID this check
+ * exists for — it is a `valueset` declaration the CQL never uses. The refusal is still correct, because
+ * fqm resolves terminology from `Library.relatedArtifact`/`dataRequirement`, which does list it, and
+ * throws `Missing the following valuesets`. So this deliberately OVER-approximates: a declared-but-unused
+ * value set is refused too. That is the safe direction — and the reason `requiredOids`, which reads the
+ * same `library.valueSets.def`, should be read as "declared" wherever it is called "referenced".
  *
  * ## Why this is a different condition from every other terminology problem
  *
@@ -217,8 +225,8 @@ export function cappedExpansions(
  *
  * `expandArtifactTerminology` already refuses this, so nothing was ever *routed* on it — but it refuses
  * with "N of M value sets could not be expanded", which reads as a failure of our sidecar, our pin or
- * our fetch. None of those is the cause, and the misdiagnosis is on the record: ADR-047 recorded it as
- * "value set …3.526.3.1278 will not expand". Naming the real condition is most of the value here.
+ * our fetch. None of those is the cause. ADR-047 recorded the symptom — "value set …3.526.3.1278 will
+ * not expand" — and explicitly did not claim a cause for it; naming the real one is the value here.
  *
  * ## Computed, never recorded
  *
@@ -245,8 +253,14 @@ export function absentValueSets(
 ): string[] {
   const loaded = load(artifact);
   if (!loaded.ok) return [];
-  // De-duplicated: two canonicals in the ELM can collapse to one OID, and reporting the same missing
-  // set twice makes a one-value-set problem read as two.
+  // De-duplicated: two canonicals in the ELM can collapse to one OID — a versioned `…|1.2` and its
+  // unversioned form, since `oidFromValueSetUrl` strips both the prefix and the version — and reporting
+  // the same missing set twice makes a one-value-set problem read as two.
+  //
+  // That version-stripping was MISSING when this comment was first written (review of #364): the two
+  // forms produced different keys, so the sentence above described behaviour the code did not have.
+  // Fixed in `oidFromValueSetUrl` itself rather than here, so the vendor step, the routing refusal and
+  // the terminology cache all agree.
   return [...new Set(referencedOids)].filter((oid) => !loaded.codesByOid.has(oid));
 }
 

@@ -26,7 +26,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-import { declaredValueSets } from "./vsac-expansion.mjs";
+import { declaredValueSets, oidFromValueSetUrl } from "./vsac-expansion.mjs";
 // Through the ADAPTER, never `@workwell/official-executor` directly: every direct importer is another
 // door to fqm-execution that the boundary tests have to keep deliberately open (the adapter says so
 // itself), and `requiredOids` is the exact function `officialRoutingProblems` feeds to its refusals —
@@ -35,7 +35,10 @@ import { requiredOids } from "../src/wiring/official-executor-adapter.ts";
 import { loadOfficialArtifact } from "../src/wiring/official-artifacts.ts";
 import { OFFICIAL_GATED_MEASURES } from "../src/standards/official-cases.ts";
 
-const oidOf = (url) => url.split("/ValueSet/").pop();
+// The SHARED normalizer, not a local `split()`. A private copy here would be a fourth
+// implementation of the rule this file exists to keep down to two — and it would hide exactly the
+// version-suffix divergence review of #364 found, by normalizing both sides the same wrong way.
+const oidOf = oidFromValueSetUrl;
 
 test("the vendor script and the executor agree on what an ELM retrieves, on every vendored artifact", () => {
   const checked = [];

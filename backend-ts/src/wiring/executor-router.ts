@@ -29,7 +29,7 @@
  *   4. it is a `proportion` measure (the population mapping assumes a numerator exists);
  *   5. its terminology sidecar is present and matches the pin in its manifest (ADR-036);
  *   6. no value set its ELM retrieves is VSAC-capped (a partial expansion — see below);
- *   7. no value set its ELM retrieves is ABSENT from the artifact entirely (ADR-053); and
+ *   7. no value set its ELM DECLARES is ABSENT from the artifact entirely (ADR-053); and
  *   8. every value set its ELM retrieves expands to a non-empty set.
  *
  * (8) is the one that would otherwise be invisible: fqm treats an unexpandable value set as *empty
@@ -49,7 +49,8 @@
  * diagnosis. "N of M value sets could not be expanded" reads as a failure of our sidecar, our pin or
  * our fetch; the actual condition is that upstream's bundle ships no ValueSet resource for the OID at
  * all, so no amount of re-vendoring at the same pin can help. That misdiagnosis is on the record as
- * ADR-047's "value set …3.526.3.1278 will not expand", and it cost a week.
+ * ADR-047's "value set …3.526.3.1278 will not expand" — which ADR-047 itself flagged as a cause it
+ * did not know.
  *
  * 1-7 are reported TOGETHER, so an operator fixes them in one pass rather than one redeploy at a time.
  * (8) is checked afterwards and stops at the first failure — it costs a real expansion per measure, and
@@ -295,6 +296,14 @@ export function officialRoutingProblems(env: OfficialMeasuresEnv, deps: RoutingC
     // terminology for this OID because the upstream bundle shipped no ValueSet resource for it
     // (ADR-053; CMS138 declares 32 value sets and ships 31).
     //
+    // "DECLARED", not "retrieved", and the distinction is not pedantic — review of #364 measured that
+    // CMS138's ELM contains **zero** `ValueSetRef`/`Retrieve` references to the absent OID: it is a
+    // `valueset` declaration the CQL never uses. The refusal is still right, because fqm reads
+    // `Library.relatedArtifact`/`dataRequirement` (which DOES list it) and throws `Missing the following
+    // valuesets`. So this check OVER-APPROXIMATES on purpose — a declared-but-unused value set is
+    // refused too — and that is the safe direction, but the message must not assert a retrieval that
+    // does not happen.
+    //
     // Reported HERE for the same reason `scoring` and the sidecar check moved up — the expansion
     // refusal below already catches it, but says "N of M value sets could not be expanded", which sends
     // an operator at our sidecar, our pin and our fetch. None of those is the cause, and that exact
@@ -303,7 +312,7 @@ export function officialRoutingProblems(env: OfficialMeasuresEnv, deps: RoutingC
     // week that finding sat open.
     for (const oid of absentFor(artifact)) {
       problems.push(
-        `${id}: value set ${oid} is retrieved by this measure's ELM but the upstream bundle ships no ` +
+        `${id}: value set ${oid} is declared by this measure's ELM but the upstream bundle ships no ` +
           `ValueSet resource for it, so the artifact holds no codes for it at all. This is not an ` +
           `expansion failure and re-pinning will not fix it — source it from VSAC with ` +
           `\`pnpm vendor:official --measure <name> --catalog-id ${id} --strip-elm-annotations ` +

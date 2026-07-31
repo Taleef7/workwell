@@ -1,7 +1,10 @@
 # Official artifact terminology audit — 2026-07-31
 
-Evidence for **ADR-053** and the closure of task #11. Everything here is reproducible from the repo; no
-number in this file was typed by hand.
+Evidence for **ADR-053** and the closure of task #11. Every NUMBER here is produced by a command in this
+repo, not typed by hand. The one exception is §3's citation of upstream's discrepancy report: the sparse
+checkout excludes `scripts/reports/**` (it lists only `bundles/measure/*` and `input/tests/measure/*`),
+and that report post-dates our pin — so it is an external citation, fetched via `gh api`, not something
+`pnpm official:terminology-audit` reproduces.
 
 Upstream pin: `cqframework/dqm-content-qicore-2025` @ `ca4b49516de4cbed9f92bfb7c35d97b1bf1022ab`.
 
@@ -90,6 +93,8 @@ Mutation-checked: re-adding `reason: "capped"` fails two tests.
 | make `absentValueSets` report every OID when terminology will not load | `absentValueSets: reports NOTHING when the terminology will not load` |
 | read `codeSystems.def` instead of `valueSets.def` in `declaredValueSets` | both `valueset-parity` tests |
 | accept an empty VSAC expansion as a completion | `REFUSES an empty expansion — an empty set is the ADR-043 silence, not a completion` |
+| accept a VSAC response carrying no `expansion.total` | `REFUSES a response carrying no expansion.total — no baseline is no evidence` |
+| accept an expansion whose echoed canonical is a different OID | `REFUSES an expansion of a DIFFERENT value set, when VSAC echoes its identity` |
 | re-add `reason: "capped"` to a capped completion record | `produces exactly the keys the committed credentialed artifacts already record` + the capped `deepEqual` |
 | *(control)* no mutation | nothing failed |
 
@@ -99,7 +104,16 @@ Mutation-checked: re-adding `reason: "capped"` fails two tests.
   secret. Committing an artifact that can never be routed is worse than committing none — the same call
   ADR-047 made for CMS130 and CMS165. Folded into owner task #10.
 - **The completion is weaker than a capped one and is recorded as such.** No upstream codes to check
-  containment against, no declared total to check length against. The real oracle is the MADiE gate:
-  0/47 with 47 errors today, and a wrongly-sourced value set does not turn that green.
+  containment against, no declared total to check length against — so it is refused outright unless VSAC
+  volunteers its own `expansion.total`, and refused again if the echoed canonical names a different OID.
+  The real oracle is the MADiE gate: 0/47 with 47 errors today, and a wrongly-sourced value set does not
+  turn that green.
+- **"Declared", not "retrieved".** `library.valueSets.def` lists what the CQL *may* use. Measured in
+  review: CMS138's ELM contains **zero** `ValueSetRef`/`Retrieve` references to the absent OID — it is a
+  declaration the logic never exercises. The refusal is still correct (fqm resolves terminology from the
+  Library's `relatedArtifact`/`dataRequirement`, which does list it, and throws `Missing the following
+  valuesets`), but the check OVER-approximates: a declared-but-unused value set is refused too. That is
+  the safe direction, and the messages now say "declared" rather than asserting a retrieval that does
+  not happen.
 - **Not covered by any of this:** a value set that is present, fully expanded and *wrong*. Size and
   presence are not identity — that is the ADR-038 membership class, and it needs a different check.
