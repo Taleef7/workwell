@@ -42,6 +42,10 @@ test("main loads a selected measure without overwriting the committed combined r
   const fakeLoaded = { measure: "cms125" };
   const fakeRun = {
     measure: "cms125",
+    // Required on OfficialMeasureRun since ADR-053's supplement. The double is cast `as never`, so the
+    // type does not enforce it here — and omitting it made `main` throw and return exit 2, which read
+    // as "the CLI refused this configuration" rather than "the fixture is incomplete".
+    supplementedOids: [],
     summary: {
       total: 66,
       expectedAgreements: 66,
@@ -90,6 +94,7 @@ test("main runs the CMS122 vendored-draft drift stretch after the official batch
   const fakeLoaded = { measure: "cms122" } as never;
   const fakeRun = {
     measure: "cms122",
+    supplementedOids: [],
     summary: { total: 55, expectedAgreements: 55, referenceAgreements: 0, unexpectedMismatches: 0, errors: 0 },
   };
   // changedCases MUST be 0 now: since PR-5 both sides of this comparison are v1.0.000, so any change

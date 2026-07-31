@@ -17,10 +17,15 @@ const vendored = readdirSync(ARTIFACT_ROOT, { withFileTypes: true })
 test("the expected measures are vendored", () => {
   // Hardcoded on purpose: adding a measure should be a conscious edit here, the same way the executor
   // import allowlist is (fqm-isolation.test.ts). A new artifact appearing unannounced is a review event.
-  // ADR-047 onboarded cms2/cms68/cms951 (MADiE 36/36, 19/19, 55/55). NOT here on purpose: cms138 scores
-  // 0/47 because one value set will not expand, and cms130/cms165 have capped expansions needing the
-  // VSAC key — so they are absent from the tree rather than committed unroutable.
-  assert.deepEqual(vendored.sort(), ["cms122", "cms125", "cms2", "cms68", "cms951"]);
+  //
+  // ADR-047 onboarded cms2/cms68/cms951 (MADiE 36/36, 19/19, 55/55). ADR-053 added cms138: its blocker
+  // was never "one value set will not expand" — upstream's bundle declares 32 value sets and ships 31,
+  // so …3.526.3.1278 has no source in the artifact at all. Sourced from VSAC at vendor time through the
+  // credentialed workflow, and the gate now supplements exactly the value sets upstream omits.
+  //
+  // STILL absent on purpose: cms130 and cms165 have capped expansions and are not vendored, rather than
+  // committed unroutable. `pnpm official:terminology-audit` says which condition any candidate has.
+  assert.deepEqual(vendored.sort(), ["cms122", "cms125", "cms138", "cms2", "cms68", "cms951"]);
 });
 
 for (const catalogId of vendored) {
