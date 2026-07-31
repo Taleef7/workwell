@@ -225,7 +225,8 @@ jobs:
             src/wiring/official-corpus-outcomes.test.ts \
             src/standards/literal-diff.test.ts \
             src/engine/ingress/webchart/devdb-official-eval.test.ts \
-            src/wiring/official-flip-config.test.ts
+            src/wiring/official-flip-config.test.ts \
+            src/fhir/qrda1-import-official.test.ts
       - name: Run the official MADiE test-case gate
         id: gate
         run: pnpm test:official-cases

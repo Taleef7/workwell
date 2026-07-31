@@ -1,5 +1,132 @@
 # Architecture Decision Records
 
+## ADR-051: QRDA Category I import is a mapping into the unchanged engine — and it proved the export only works in real terminology
+
+**Status:** Accepted (2026-07-31). Roadmap M-B. **Not CVU+-validated** — that bar is unmet and this ADR
+does not claim it.
+
+**Context.** ADR-050 established that a QRDA Category I carries patient DATA, not an answer, because the
+receiver **recalculates**. §170.315**(c)(2)** is literally "import and calculate", and it is the half we
+had not built: the roadmap's proof chain is *QRDA-I ingest → calculate → QRDA-I/III export → Cypress*.
+
+**Decision.**
+
+1. **Import is a MAPPING, not a second calculator.** `qrda1-import.ts` turns QDM entries back into the
+   FHIR the engine already evaluates, and `POST /api/runs/:id/evaluate` accepts `{ measureId, qrda1 }`
+   in place of `{ measureId, patientBundle }`. Everything downstream — engine, persistence, audit,
+   idempotency — is the existing path, unchanged. A second calculator is the thing this criterion is
+   supposed to detect, not something to build.
+2. **The XML reader is hand-rolled** (`cda-parse.ts`, ~180 lines), matching the emitters' posture,
+   because CLAUDE.md forbids new dependencies and Node ships no DOM parser. It is total on malformed
+   input and decodes **only** the five predefined entities plus numeric refs — there is no entity table
+   for an attacker to grow, so the billion-laughs class does not exist here. Element lookups match the
+   **local name**, since CDA appears in the wild both as `<ClinicalDocument xmlns=…>` and
+   `<cda:ClinicalDocument>`.
+3. **A document we cannot read is a 400 with the reason — never a silent empty bundle.** An empty bundle
+   evaluates out-of-population for every measure, which is indistinguishable from a genuinely ineligible
+   patient: the exact hazard ADR-043 exists for.
+4. **What could not be translated travels with the answer.** `untranslatedTemplates` names each QDM
+   template the mapper does not know, in the evaluate response. Naming rather than counting is
+   deliberate — an operator needs to know *which* datatype was dropped to judge the recalculation. The
+   CMS RY2026 sample file alone carries **47** such entries against our five datatypes.
+
+**The round trip found a defect in the EXPORT, which is what it was written to catch.** Driving the real
+route — evaluate a bundle, export the document, feed the document back — produced a different answer for
+`audiogram`. Cause: that measure's bundle binds **synthetic `urn:workwell:vs:*` value sets, which have no
+CDA code system OID**, so every clinical resource was silently dropped and the export reported only "no
+QDM patient data entries". True, and the misleading half of the truth.
+
+So the translator now returns **why** each resource was dropped (`translateQdm`), and those reasons reach
+the non-conformance list: *"not exported — Procedure: no CDA code system OID for urn:workwell:vs:audiogram
+— CDA cannot carry it"*. The consequence is worth stating plainly and is not a bug to fix later:
+
+> **A QRDA Category I is only a meaningful artifact for measures whose data is in real terminology** —
+> LOINC, SNOMED, CPT, ICD. That means the official measures. WorkWell's authored measures cannot be
+> exported as QRDA at all, and now say so instead of producing an empty document.
+
+That also sharpens locked decision #4 (retiring the authored cms122/125 subsets): the authored catalogue
+is not QRDA-representable, so it cannot participate in the certification rehearsal either way.
+
+**Review found five more, three P1, and one exposed a test whose NAME lied.**
+
+- **A present-but-empty Patient Data section was accepted.** The refusal checked for the section's
+  *existence*, so our own no-bundle export — the document that declares itself non-conformant
+  (CONF:67-14567) — imported to a Patient-only bundle and would have persisted a plausible
+  out-of-population outcome. Worse, the test covering it was called `import REFUSES our own no-bundle
+  export` and asserted that the hollow bundle **came back**. Now it refuses, with a message that
+  distinguishes "there was nothing" from "we could translate none of it" — different operator responses.
+- **The requested measure was not checked against the document.** A CMS125 document posted with
+  `measureId: "cms122"` was calculated *and persisted* as cms122. The route now refuses unless the
+  requested measure is one the document references (by WorkWell id or by published eMeasure UUID), and
+  only when it references any at all, so a document with no measure section stays importable.
+- **The import qualification died with the request.** `untranslatedTemplates` went only into the POST
+  response, so every later read — outcomes, MeasureReport, QRDA — presented a partial calculation as an
+  ordinary one. Now persisted in `evidence.qrda1Import`, additively, the way `official` is.
+- **Timezone offsets were discarded.** `20251231230000-0500` became `2025-12-31T23:00:00Z` instead of
+  `2026-01-01T04:00:00Z` — a different day *and year*, on exactly the half-open boundary a measurement
+  period turns on. Base HL7 asks for the offset (CONF:81-10130) even though the CMS Hospital IG asks for
+  its absence (CMS_0121), so a conformant document may well carry one.
+- **An Observation interval collapsed to an instant**, dropping `<high>` — and a lab or study whose
+  relevant period *overlaps* a measurement window is exactly the case temporal CQL predicates turn on.
+
+**A second review pass found eight more, one of which made the whole feature wrong on the routed measure.**
+
+1. **CRITICAL — the import wrote `Patient.gender` and no `us-core-sex` extension.** Official CMS125's
+   initial population reads the EXTENSION, never `gender` (ADR-042, and `devdb-official-eval.test.ts`
+   already pins that stripping it empties the whole roster from the IPP). Measured: source bundle
+   COMPLIANT / in-IPP, round-tripped MISSING_DATA / out-of-IPP. On demo/production —
+   where `WORKWELL_OFFICIAL_MEASURES="cms122,cms125"` is set — `(c)(2)` calculated **every imported
+   subject out of population**, persisted it, and returned 201 with `untranslatedTemplates: []`. The
+   round trip could not see it because it never runs the official engine, and the test that was meant to
+   cover it asserted `patient.gender === "female"` **while citing ADR-042** — naming the right hazard and
+   measuring the element ADR-042 established is the wrong one. `qrda1-import-official.test.ts` now
+   asserts population membership itself, is mutation-checked, and is wired into the `official-cases` CI
+   job (the workflow warns in a comment that a sidecar test not listed there is permanently skipped
+   while reading as covered — which is exactly how this class recurs).
+2. **HIGH — a legal `>` inside an attribute value corrupted the tree.** XML requires only `<` and `&` to
+   be escaped in attributes, so `displayName="HbA1c > 9.0%"` is conformant; the element was truncated
+   mid-attribute, lost its self-closing slash, and **swallowed its siblings**, silently deleting the date
+   and value from an HbA1c of 9.6. The round trip provably cannot catch this — our own `esc()` escapes
+   `>`, so we never emit the input that breaks us.
+3. **HIGH — unmatched close tags were quadratic: a 1 MB body took 53 seconds** on this single-threaded
+   host, stalling every other request past nginx's 60 s timeout. An accidental DoS from a truncated
+   document, not only a malicious one. Close-tag matching is now an O(1) name→depth lookup, with a
+   `MAX_ELEMENTS` bound. The module's claim that "there is no construct that can cause unbounded work"
+   was simply false, and now describes what is true.
+4. **HIGH — only ONE resource was imported per `<entry>`**, and the rest vanished *while the entry was
+   reported fully translated*. A Result Organizer carrying two Laboratory Tests is a standard CDA
+   construct, so an HbA1c that is the second component of a chemistry panel disappeared with
+   `untranslatedTemplates: []` — breaking decision 4 above on its own terms.
+5. **MEDIUM — `descendants()` recursed** and blew the stack at ~5 000 nesting levels (~30 KB), and
+   `importQrda1Document` calls it on the root first. Explicit stack now, pushing children in reverse so
+   document order is preserved — the measure-reference reader depends on it.
+6. **MEDIUM — two drop reasons were wrong.** An Observation whose category is outside both sets was
+   blamed on terminology even with a plain LOINC code, and an Encounter was *always* reported as having
+   "an absent code" because the reason read `code` while the builder reads `type[0] ?? code`. A wrong
+   reason is worse than none: it sends someone to the wrong place.
+7. **MEDIUM — the reason list was unbounded and duplicated** (measured: 302 reasons, 3 unique, 31 KB per
+   subject). Deduped and counted.
+8. **MEDIUM — no date validation on the date-only path**, so `00000000` became `"0000-00-00"` in
+   `Patient.birthDate`, which CMS125's IPP feeds to `AgeAt(...)`.
+
+Also from that pass: `<setId>` (the version-independent eMeasure id) was never read, so a document naming
+its measure only that way would have been refused by the new measure check; and `qrda1: null` — a common
+client idiom for an absent optional — was treated as "a QRDA was supplied".
+
+**Consequences.**
+
+- The round trip proves our two halves agree; it does **not** prove our reading of the IG is right. The
+  one external check here is the CMS RY2026 sample file, which imports cleanly (1 subject, 6 resources,
+  both eMeasure UUIDs, 47 datatypes correctly named as untranslated). That test **self-skips** without
+  `WORKWELL_QRDA1_SAMPLE`, and says so in its skip message rather than reading as covered — the sample
+  ships in the same manually-downloaded CMS zip as the Schematron.
+- **Cypress CVU+ still has not run.** It needs Docker and remains the M-B bar. Nothing here may be
+  described as certified.
+- Not translated, by scope rather than oversight: medications, assessments, adverse events, and every
+  other QDM datatype outside CMS122/CMS125. They are named on import, so a receiver's gap is visible.
+
+---
+
 ## ADR-050: QRDA Category I is a patient-DATA document, measured against the HL7 base IG — not the CMS Hospital one
 
 **Status:** Accepted (2026-07-30). Roadmap M-B. **Supersedes the central claim of ADR-049**, which is

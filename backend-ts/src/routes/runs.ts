@@ -17,7 +17,8 @@
  *   POST /api/runs                  create a QUEUED run              → 201 RunRecord
  *   POST /api/runs/claim            claim next queued (?workerId)    → 200 RunRecord | 204
  *   POST /api/runs/:id/evaluate     evaluate a subject + persist     → 201 OutcomeRecord
- *                                   body {measureId, patientBundle, evaluationDate?}
+ *                                   body {measureId, patientBundle | qrda1, evaluationDate?}
+ *                                   `qrda1` = a QRDA Category I CDA document — §170.315(c)(2) import+calculate
  */
 import type { CloudDatabase } from "@mieweb/cloud";
 import { getStores } from "../stores/factory.ts";
@@ -60,6 +61,8 @@ import {
 import { isOfficialRouted } from "../wiring/official-routing.ts";
 import { buildQrda3DocumentFromCounts } from "../fhir/qrda3-export.ts";
 import { buildQrda1Documents, indexBundlesBySubject } from "../fhir/qrda1-export.ts";
+import { importQrda1Document, type Qrda1Import } from "../fhir/qrda1-import.ts";
+import { loadOfficialArtifact, officialMeasureIdentifiers } from "../wiring/official-artifacts.ts";
 import { isWebChartConfigured, resolveDataSource, type DataSourceEnv } from "../engine/ingress/data-source.ts";
 import { subjectIdOf } from "../engine/ingress/enrollment/roster.ts";
 
@@ -190,6 +193,21 @@ async function qrda1BundleLookup(env: RunsEnv): Promise<((subjectId: string) => 
     console.error("[workwell] qrda1: WebChart bundle load failed, exporting without patient data:", error);
     return undefined;
   }
+}
+
+/**
+ * Every identifier a QRDA document could legitimately use to name this measure: WorkWell's own id and,
+ * when the measure is vendored, its published version-specific and version-independent eMeasure UUIDs.
+ */
+function measureIdentityFor(measureId: string): Set<string> {
+  const identity = new Set<string>([measureId]);
+  const artifact = loadOfficialArtifact(measureId);
+  if (artifact) {
+    const { versionSpecific, versionIndependent } = officialMeasureIdentifiers(artifact);
+    if (versionSpecific) identity.add(versionSpecific);
+    if (versionIndependent) identity.add(versionIndependent);
+  }
+  return identity;
 }
 
 /**
@@ -511,11 +529,50 @@ export async function handleRuns(
       return json({ error: "run_not_open", id: evalId, status: run.status, hint: "cannot evaluate into a terminal run" }, 409);
     }
     const body = (await req.json().catch(() => null)) as
-      | { measureId?: string; patientBundle?: unknown; evaluationDate?: string }
+      | { measureId?: string; patientBundle?: unknown; qrda1?: string; evaluationDate?: string }
       | null;
-    if (!body?.measureId || !body.patientBundle) {
-      return json({ error: "invalid_request", hint: "body requires { measureId, patientBundle }" }, 400);
+    if (!body?.measureId || (!body.patientBundle && body.qrda1 == null)) {
+      return json(
+        { error: "invalid_request", hint: "body requires { measureId, patientBundle | qrda1 }; qrda1 wins if both are given" },
+        400,
+      );
     }
+    // §170.315(c)(2) "import and calculate": a QRDA Category I document is translated to FHIR and then
+    // evaluated by the SAME unchanged engine — importing is a mapping, not a second calculator (ADR-051).
+    // A document we cannot read is a 400 with the reason, never a silent empty bundle: an empty bundle
+    // evaluates out-of-population for every measure, indistinguishable from a genuinely ineligible
+    // patient (the ADR-043 hazard).
+    let imported: Qrda1Import | undefined;
+    // `!= null` rather than `!== undefined`: JSON `null` for an absent optional field is a common client
+    // idiom, and treating it as "a QRDA was supplied" turned a previously-working request into a 400.
+    if (body.qrda1 != null) {
+      if (typeof body.qrda1 !== "string") {
+        return json({ error: "invalid_request", hint: "qrda1 must be the CDA document as a string" }, 400);
+      }
+      try {
+        imported = importQrda1Document(body.qrda1);
+      } catch (err) {
+        return json({ error: "qrda1_import_failed", message: String((err as Error)?.message ?? err) }, 400);
+      }
+      // The document says WHICH measure it is about. Evaluating it as a different one is a silent
+      // mislabel: a CMS125 document posted as `cms122` would be calculated and PERSISTED as cms122
+      // (Codex, #362). Refuse unless the requested measure is one the document references — and only
+      // when it references any at all, so a document with no measure section is still importable.
+      const identity = measureIdentityFor(body.measureId);
+      const referenced = [...imported.measureIdentifiers, ...(imported.localMeasureId ? [imported.localMeasureId] : [])];
+      if (referenced.length > 0 && !referenced.some((r) => identity.has(r))) {
+        return json(
+          {
+            error: "qrda1_measure_mismatch",
+            message: `the document references ${referenced.join(", ")}, which is not measure '${body.measureId}'`,
+            requested: body.measureId,
+            documentReferences: referenced,
+          },
+          400,
+        );
+      }
+    }
+    const patientBundle = imported?.bundle ?? body.patientBundle;
     // The outcome's evaluation_period must equal the date the engine actually evaluates with,
     // so repeat-non-complier history (grouped by period) doesn't collapse into a blank period.
     // Engine default when omitted is today (cql-execution-engine) — prefer the run's persisted
@@ -532,18 +589,37 @@ export async function handleRuns(
     try {
       const result = await engine.evaluate({
         measureId: body.measureId,
-        patientBundle: body.patientBundle,
+        patientBundle,
         evaluationDate: body.evaluationDate,
       });
+      // What the import could NOT translate is PERSISTED with the outcome, not just returned. A QRDA I
+      // carrying QDM datatypes this mapper does not know is calculable but not necessarily correctly —
+      // the CMS RY2026 sample alone contains 47 such entries. Returning that only in the POST response
+      // meant every later read (outcomes, MeasureReport, QRDA) presented a partial calculation as an
+      // ordinary one, and the qualification died with the request (Codex, #362). Additive under the
+      // `evidence_json` contract, the same way `official` is.
+      const evidence =
+        imported && typeof result.evidence === "object" && result.evidence !== null
+          ? {
+              ...(result.evidence as Record<string, unknown>),
+              qrda1Import: {
+                untranslatedTemplates: imported.untranslatedTemplates,
+                measureReferences: imported.measureIdentifiers,
+              },
+            }
+          : result.evidence;
       const record = await (await outcomes(env)).recordOutcome({
         runId: evalId,
         subjectId: result.subjectId,
         measureId: body.measureId,
         evaluationPeriod,
         status: result.outcome,
-        evidence: result.evidence,
+        evidence,
       });
-      return json(record, 201);
+      return json(
+        imported ? { ...record, qrda1: { untranslatedTemplates: imported.untranslatedTemplates } } : record,
+        201,
+      );
     } catch (err) {
       return json({ error: "evaluation_error", message: String((err as Error)?.message ?? err) }, 500);
     }
