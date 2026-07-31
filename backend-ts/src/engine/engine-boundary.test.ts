@@ -37,14 +37,6 @@ const ALLOWED_BARE: { prefix: string; note: string; onlyIn?: RegExp }[] = [
   { prefix: "cql-execution", note: "the CQL runtime" },
   { prefix: "cql-exec-fhir", note: "the FHIR data-provider for that runtime" },
   {
-    // Extraction debt, tracked in the roadmap: the ELM Explorer's translator is reached from
-    // routes/measures.ts, so it is a real runtime dep of this tree TODAY. PR-2 moves
-    // cql-translator.ts to the app, which is what restores the two-dependency package story.
-    prefix: "@cqframework/cql",
-    note: "the CQL→ELM translator (ELM Explorer) — PR-2 moves this file to the app",
-    onlyIn: /[\\/]cql[\\/]cql-translator\.ts$/,
-  },
-  {
     // ARCHITECTURE's "portable across every @mieweb/cloud target — file I/O lives only at the CLI
     // edge" is an invariant, so enforce it rather than assert it: node built-ins may appear only in
     // the CLI entrypoints, never in a module the worker request path can reach.
@@ -175,13 +167,16 @@ test("the boundary matcher catches every escape form (guard self-test)", () => {
     [],
     "node built-ins must be permitted in a *-cli.ts entrypoint",
   );
-  assert.deepEqual(
+  // The extraction debt this used to carve out is GONE: `cql-translator.ts` moved to `src/measure/`
+  // (M-C), so the ELM Explorer's translator is no longer reachable from the engine tree and
+  // `@cqframework/cql` is refused ANYWHERE in it — which is what restores the two-dependency package
+  // story the allowlist comment promised.
+  assert.ok(
     findBoundaryViolations(
       `${ENGINE_ROOT}/cql/cql-translator.ts`,
       'import { CqlTranslator } from "@cqframework/cql/cql-to-elm";',
-    ),
-    [],
-    "the translator dep must be permitted in cql-translator.ts",
+    ).length > 0,
+    "the translator dep must NOT be permitted anywhere in the engine tree any more",
   );
   assert.ok(
     findBoundaryViolations(

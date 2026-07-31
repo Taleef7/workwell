@@ -24,7 +24,7 @@ import type { ValueSetStore } from "../stores/value-set-store.ts";
 import { routedEngineForEnv } from "../wiring/executor-router.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { ELM_LIBRARIES } from "../engine/cql/elm/index.ts";
-import { compileCql, reconstructCql } from "../engine/cql/cql-translator.ts";
+import { compileCql, reconstructCql } from "../measure/cql-translator.ts";
 import { listMeasures, toMeasureDetail, toVersionHistory, toActivationReadiness, withValueSetResolution } from "../measure/measure-read-models.ts";
 import { seedMeasureStore } from "../measure/measure-seed.ts";
 import { createMeasure, approveMeasure, deprecateMeasure, transitionStatus, MeasureError, type MeasureLifecycleDeps } from "../measure/measure-lifecycle.ts";

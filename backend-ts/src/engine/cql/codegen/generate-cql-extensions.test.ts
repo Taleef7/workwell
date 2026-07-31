@@ -5,7 +5,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { CqlExecutionEngine } from "../cql-execution-engine.ts";
-import { compileCql } from "../cql-translator.ts";
+import { compileCql } from "../../../measure/cql-translator.ts";
 import { generateCql, type GenerateCqlInput } from "./generate-cql.ts";
 
 const EVAL = "2026-06-12";
