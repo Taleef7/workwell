@@ -212,7 +212,7 @@ export function readArtifactIdentity(bundlePath: string): ReductionArtifactIdent
 export interface OfficialCasesCliDeps {
   cwd: string;
   load: (contentDir: string, measure: OfficialMeasureId) => LoadedOfficialMeasure;
-  run: (loaded: LoadedOfficialMeasure) => Promise<OfficialMeasureRun>;
+  run: (loaded: LoadedOfficialMeasure, supplementalValueSets?: unknown[]) => Promise<OfficialMeasureRun>;
   render: (runs: OfficialMeasureRun[], metadata: OfficialReportMetadata) => string;
   sourceRevision: (contentDir: string) => string;
   loadDraftBundle: (path: string) => FhirBundle;
@@ -236,7 +236,10 @@ function defaultDeps(): OfficialCasesCliDeps {
   return {
     cwd: process.cwd(),
     load: loadOfficialMeasureCases,
-    run: runOfficialMeasureCases,
+    run: (loaded, supplementalValueSets) =>
+      runOfficialMeasureCases(loaded, {
+        ...(supplementalValueSets ? { supplementalValueSets } : {}),
+      }),
     render: renderOfficialCaseReport,
     sourceRevision: readContentRevision,
     loadDraftBundle: loadFhirBundleFile,
@@ -275,15 +278,28 @@ export async function main(argv: string[], overrides: Partial<OfficialCasesCliDe
     for (const measure of parsed.measures) {
       deps.log(`official-cases: loading ${measure.toUpperCase()} from ${contentDir}`);
       const loaded = deps.load(contentDir, measure);
-      const run = await deps.run(loaded);
+      // Loaded BEFORE the gate run, not just before the reduction check, because a measure whose
+      // upstream bundle omits a value set cannot resolve it from the bundle at all — the gate scores
+      // 0/N with N errors and says nothing about the measure (ADR-053; CMS138 declares 32 and ships
+      // 31). `runOfficialMeasureCases` narrows whatever it is handed to exactly those missing OIDs, so
+      // passing the whole cache here cannot substitute our terminology for upstream's anywhere else.
+      const terminology = await deps.runtimeTerminology(measure);
+      const run = await deps.run(loaded, terminology.cache);
       // Every vendored measure gets the reduction check, not just cms122: it is the ONLY thing that
       // executes our reduced artifact against the upstream bundle, so a measure without it has its
       // vendoring guarded by nothing but a self-consistent SHA-256 that vendor:official wrote itself.
       const artifactPath = resolve(deps.cwd, "measures", "official", measure, "bundle.json");
-      const terminology = await deps.runtimeTerminology(measure);
       // Surfaced here as well as in the report: a downgrade means this run is NOT checking the
       // runtime's terminology, and a developer reading the console should not have to diff a markdown
       // file to discover that.
+      if (run.supplementedOids.length > 0) {
+        deps.error(
+          `official-cases: ${measure.toUpperCase()} gate run SUPPLEMENTED — ${run.supplementedOids.length} ` +
+            `value set(s) came from our vendored sidecar because the upstream bundle ships none: ` +
+            `${run.supplementedOids.join(", ")}. The expected vectors are still upstream's, but the CODES ` +
+            `for these are ours (ADR-053).`,
+        );
+      }
       if (!terminology.cache) {
         deps.error(
           `official-cases: ${measure.toUpperCase()} reduction check DOWNGRADED to upstream value sets` +

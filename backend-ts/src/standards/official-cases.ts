@@ -454,7 +454,19 @@ export interface OfficialMeasureRun {
   measureName: string;
   measurementPeriod: MeasurementPeriod;
   valueSets: ValueSetStats;
-  valueSetMode: "measure-bundle";
+  /**
+   * `measure-bundle` — every value set the ELM declares came from UPSTREAM's own bundle. That is what
+   * makes this gate an EXTERNAL check: their artifact, their terminology, their expected vectors.
+   *
+   * `measure-bundle+sourced-supplement` — all of that, EXCEPT for the OIDs in `supplementedOids`,
+   * which upstream's bundle does not ship at all and which came from our vendored sidecar instead
+   * (ADR-053). A weaker claim, and it must never be blended into the headline number: for those value
+   * sets the CODES are ours. What stays upstream's is the answer key — the expected population vectors
+   * — which is why a green deck is still real evidence that the sourced codes are right.
+   */
+  valueSetMode: OfficialValueSetMode;
+  /** Bare OIDs taken from the sidecar because the bundle ships no ValueSet for them. Usually empty. */
+  supplementedOids: string[];
   trustMetaProfile: boolean;
   profileRetry: boolean;
   retrieveSignal: boolean;
@@ -503,8 +515,56 @@ function summarizeCases(cases: OfficialCaseResult[]): OfficialRunSummary {
   };
 }
 
+export type OfficialValueSetMode = "measure-bundle" | "measure-bundle+sourced-supplement";
+
 export interface RunOfficialMeasureOptions {
   calculate?: FqmCalculate;
+  /**
+   * Terminology to fall back on for value sets the measure Bundle does NOT ship (ADR-053).
+   *
+   * Pass the artifact's whole runtime cache; this function narrows it (see `supplementFor`). The gate's
+   * value comes from executing upstream's artifact against upstream's terminology, so anything that
+   * could quietly substitute ours for theirs destroys the thing being measured.
+   */
+  supplementalValueSets?: unknown[];
+}
+
+/**
+ * The value sets to hand fqm as an external cache: ONLY those the bundle does not ship.
+ *
+ * ## Why this filters rather than trusting its caller
+ *
+ * The caller has the artifact's entire runtime terminology to hand, and passing all of it would be the
+ * natural thing to do. It would also silently convert this gate from "upstream's terminology" into
+ * "ours", for every measure, in a way no assertion here would notice — the deck would still be green
+ * and would no longer mean what the report says it means.
+ *
+ * So the narrowing happens HERE, next to the `calculate` call it protects, and the OIDs that survive
+ * are recorded on the run and rendered in the report. `supplementedOids` being empty is the normal
+ * case and the strong one.
+ *
+ * Compared on the bare OID because a canonical may carry a `|version` suffix the shipped
+ * `ValueSet.url` does not (review of #364).
+ */
+export function supplementFor(
+  loaded: Pick<LoadedOfficialMeasure, "valueSetResources">,
+  supplemental: unknown[] | undefined,
+): unknown[] {
+  if (!supplemental || supplemental.length === 0) return [];
+  const oidOf = (url: unknown): string => {
+    const raw = typeof url === "string" ? url : "";
+    const marker = "/ValueSet/";
+    const tail = raw.includes(marker) ? raw.slice(raw.lastIndexOf(marker) + marker.length) : raw;
+    const pipe = tail.indexOf("|");
+    return pipe === -1 ? tail : tail.slice(0, pipe);
+  };
+  const shipped = new Set(
+    loaded.valueSetResources.map((resource) => oidOf((resource as { url?: unknown }).url)),
+  );
+  return supplemental.filter((resource) => {
+    const oid = oidOf((resource as { url?: unknown }).url);
+    return oid !== "" && !shipped.has(oid);
+  });
 }
 
 /** Execute all valid cases for one measure in a single fqm-execution batch. */
@@ -519,6 +579,18 @@ export async function runOfficialMeasureCases(
       !item.loadError && !!item.patientId && !!item.patientBundle && !!item.expected,
   );
 
+  // Narrowed to the value sets upstream does not ship — usually none, in which case `calculate` is
+  // invoked with THREE arguments exactly as before, so the default path is byte-identical and the
+  // "upstream's terminology" claim is untouched for every measure that does not need this.
+  const supplement = supplementFor(loaded, options.supplementalValueSets);
+  const supplementedOids = supplement.map((resource) => String((resource as { url?: unknown }).url ?? ""));
+  const valueSetMode: OfficialValueSetMode =
+    supplement.length > 0 ? "measure-bundle+sourced-supplement" : "measure-bundle";
+  // Spread, not a positional `undefined`: fqm's 4th parameter is optional and passing an explicit
+  // `undefined` is not the same call. The existing test asserts a 3-argument invocation on the default
+  // path, which is the property that keeps this change inert for the five complete measures.
+  const cacheArg: [unknown[]] | [] = supplement.length > 0 ? [supplement] : [];
+
   let output: FqmOutput;
   let trustMetaProfile = false;
   let profileRetry = false;
@@ -527,6 +599,7 @@ export async function runOfficialMeasureCases(
       loaded.measureBundle,
       validCases.map((item) => item.patientBundle),
       calculationOptions(loaded.measurementPeriod, false),
+      ...cacheArg,
     );
     if (!hasRetrieveSignal(output) && validCases.length > 0) {
       profileRetry = true;
@@ -535,6 +608,7 @@ export async function runOfficialMeasureCases(
         loaded.measureBundle,
         validCases.map((item) => item.patientBundle),
         calculationOptions(loaded.measurementPeriod, true),
+        ...cacheArg,
       );
     }
   } catch (error) {
@@ -545,7 +619,8 @@ export async function runOfficialMeasureCases(
       measureName: loaded.measureName,
       measurementPeriod: loaded.measurementPeriod,
       valueSets: loaded.valueSets,
-      valueSetMode: "measure-bundle",
+      valueSetMode,
+      supplementedOids,
       trustMetaProfile,
       profileRetry,
       retrieveSignal: false,
@@ -575,7 +650,8 @@ export async function runOfficialMeasureCases(
     measureName: loaded.measureName,
     measurementPeriod: loaded.measurementPeriod,
     valueSets: loaded.valueSets,
-    valueSetMode: "measure-bundle",
+    valueSetMode,
+    supplementedOids,
     trustMetaProfile,
     profileRetry,
     retrieveSignal: hasRetrieveSignal(output),
@@ -839,7 +915,7 @@ export function renderOfficialCaseReport(runs: OfficialMeasureRun[], metadata: O
     "",
     "## Execution and terminology controls",
     "",
-    "`fqm-execution` 1.8.5 reads ValueSet resources from the measure Bundle before adding any optional external cache. ValueSets are consumed directly from each official measure Bundle; no VSAC network call or key is used.",
+    "`fqm-execution` 1.8.5 reads ValueSet resources from the measure Bundle before adding any optional external cache. ValueSets are consumed directly from each official measure Bundle; no VSAC network call is made during this run. **One exception, flagged per measure below:** where an upstream bundle ships no ValueSet resource at all for a value set its ELM declares, that one is supplied from WorkWell's vendored terminology sidecar (ADR-053) — vendored earlier from VSAC at a pinned release, never fetched here. Measures with no such line ran entirely on upstream's terminology.",
     "",
     "**Measurement-period caveat:** date-only period ends are normalized to end-of-day because fqm-execution 1.8.5 parses them as start-of-day (upstream issue filed: projecttacoma/fqm-execution#371); the un-normalized run scores 64/66.",
     "",
@@ -851,6 +927,22 @@ export function renderOfficialCaseReport(runs: OfficialMeasureRun[], metadata: O
       `- **${run.measure.toUpperCase()}:** ${profile}${retry}; ${run.valueSets.expanded}/${run.valueSets.total} Bundle ValueSets carry expansions; ` +
         `${run.valueSets.truncated.length} expansion(s) report more total codes than are present; fqm warnings=${run.engineWarnings}.`,
     );
+    // Rendered right under the measure's own line, not in a footnote: a supplemented run means the
+    // headline number for THIS measure is not the same kind of evidence as the others', and the report
+    // is the thing people quote. Naming the OIDs matters too — "1 value set" invites the reader to
+    // assume it is minor, and whether it is depends entirely on which one.
+    if (run.supplementedOids.length > 0) {
+      lines.push(
+        `  - **Terminology supplement (ADR-053):** ${run.supplementedOids.length} value set(s) came from ` +
+          `WorkWell's vendored sidecar because the upstream bundle ships no ValueSet resource for them — ` +
+          run.supplementedOids.map((oid) => `\`${oid}\``).join(", ") +
+          `. Everything else is upstream's own terminology. **This is a weaker claim than the other ` +
+          `measures carry:** for these value sets the CODES are ours (sourced from VSAC at the pinned ` +
+          `release). What remains upstream's is the ANSWER KEY — the expected population vectors — which ` +
+          `is why agreement here is still real evidence that the sourced codes are right, and is not ` +
+          `evidence about upstream's terminology.`,
+      );
+    }
     for (const truncated of run.valueSets.truncated) {
       lines.push(
         `  - Cap candidate: \`${truncated.url}\` — ${truncated.availableCodes}/${truncated.expectedTotal} codes present. A mismatch involving a missing code from this set must be classified as a value-set-cap candidate, not automatically as an engine bug.`,
