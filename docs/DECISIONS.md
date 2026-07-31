@@ -78,6 +78,38 @@ bundle it has exactly **one** base error — the missing entry — which is the 
   (`author`, `custodian`, race, ethnicity, address, the QDM sections) was base HL7 all along. Two
   genuinely new SHALLs surfaced that #360 never recorded at all: `raceCode` and `ethnicGroupCode`.
 
+**Review found four defects, three of them P1, and one is answered by DISAGREEING (Codex, #361).**
+
+1. **The live lookup could never fire.** A live run persists `subjectId` as the roster external id
+   `wc|<patientId>`, while the bundle carries the bare `Patient.id`. The map was keyed on the bare id,
+   so `bundleFor(outcome.subjectId)` missed every time — on the *only* path meant to produce conformant
+   documents. Present, plausible, structurally incapable of firing: the vacuous-guard shape again. Now
+   keyed both ways.
+2. **A retracted record became a *Performed* entry.** Every entry asserts `statusCode="completed"`, so
+   an `entered-in-error` mammogram would have handed a recalculating receiver a numerator hit off a
+   record WorkWell excludes. Now filtered — as a **denylist** (`entered-in-error`, `not-done`,
+   `cancelled`, …) rather than an allowlist, because real WebChart data carries `status: "unknown"` on
+   genuine clinical rows (measured on teatea), and an allowlist would silently drop them and make a
+   receiver recalculate LOW. Fail closed on retraction, open on ambiguity.
+3. **An identifier was used as a patient name.** `employeeById` knows only the synthetic catalog, so a
+   live subject's name became `wc|123`. The name (and birth date) now come from the FHIR Patient first —
+   which is the better source regardless, being the record the measure was computed from.
+4. **Roster-derived evidence: review asked us to re-stamp; we do not.** The pipeline evaluates
+   `stampEnrollment(bundle, …)`, which overlays a roster enrollment Condition and — for cms125 — a
+   **synthesized CPT 99213 Encounter**, because WebChart supplies none (ADR-042). Re-applying it at
+   export would make a receiver reproduce our answer, which is a real benefit. We decline it: a QDM
+   `Encounter, Performed` asserts a clinical encounter **happened**, the roster's did not, and a
+   receiver cannot tell which entry was inferred. That is precisely ADR-037's normalization-not-
+   fabrication rule, inside a regulatory artifact. So the document exports real data only and **names
+   the omission**, in the section text and in a `caveats` array on the response. The cost is stated
+   rather than hidden: a receiver recalculating from these entries alone may place the subject outside
+   the initial population we scored them in.
+
+   **`caveats` is deliberately a separate axis from `conformant`.** A document omitting roster evidence
+   is still a structurally valid QRDA I; folding the two together would mark every live cms125 document
+   non-conformant for something no validator would ever raise, and would make one boolean mean two
+   different things.
+
 **Consequences.**
 
 - QRDA I now depends on the subject's FHIR bundle at export time, supplied only where the stack can

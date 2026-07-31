@@ -59,7 +59,23 @@ DUE_SOON → MISSING_DATA), so status → bundle is not injective. The synthetic
 exports documents flagged `conformant: false`. QRDA I **import** still does not exist and **Cypress CVU+
 has not run** — it needs Docker and remains the M-B bar.
 
-Full backend suite: **1643 pass / 0 fail / 14 skipped**.
+**Review caught four defects, three P1, and one of them is the vacuous-guard shape again.** A live run
+persists `subjectId` as `wc|<patientId>` while the bundle carries the bare `Patient.id`, so the bundle
+lookup — the whole point of the change — could never match on the only path meant to produce conformant
+documents. Also: an `entered-in-error` mammogram became a `Procedure, Performed` with
+`statusCode="completed"` (now denylisted — a *denylist*, because real WebChart rows arrive
+`status: "unknown"` and an allowlist would silently drop them), and a live subject's name came out as
+`wc|123` because `employeeById` only knows the synthetic catalog.
+
+**On the fourth we disagreed with the reviewer, deliberately.** It asked us to re-apply
+`stampEnrollment` at export so a receiver reproduces our answer. That overlay includes a **synthesized**
+CPT 99213 Encounter (ADR-042) — WebChart supplies none — and a QDM `Encounter, Performed` asserts the
+encounter *happened*. Exporting it would be a silent false clinical assertion inside a regulatory
+artifact, which is exactly what ADR-037 forbids. So we export real data and **name the omission**, and
+`caveats` is kept as a separate field from `conformant`: a document missing roster evidence is still a
+valid QRDA I, and one boolean must not mean two things.
+
+Full backend suite: **1643 pass / 0 fail / 14 skipped** (42 in the two QRDA files after the fixes).
 
 ## 2026-07-30 (M-B) — QRDA Category I exists, and says in the document what it cannot do (branch `feat/qrda1-export`)
 
