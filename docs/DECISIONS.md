@@ -101,16 +101,23 @@ sourced codes are. Run with cms138 in the gate: **0/47, 47 errors, every one of 
 `Missing the following valuesets: …3.526.3.1278`** — byte-for-byte the pre-ADR-053 result, with a
 complete sidecar sitting beside it.
 
-So a sourced-absent value set is validated by neither the vendoring (no containment or declared-total
-baseline) nor the gate as it stands. What CAN validate it, and is not yet built: run the deck with the
-**vendored sidecar** as fqm's value-set cache — the mode the reduction check already models as
-`vendored-terminology-sidecar`. The codes would then be ours while **the expected population vectors
-stay upstream's**, so 47/47 would be real evidence about the codes even though it is no longer evidence
-about upstream's terminology. That is a weaker claim than the other five measures carry and must be
-labelled as one, per-measure, in the report.
+So a sourced-absent value set was validated by neither the vendoring (no containment or declared-total
+baseline) nor the gate as it stood. **Built in the same PR, and then measured: CMS138 went 0/47 →
+47/47, 0 unexpected mismatches, 0 errors.**
 
-Until that exists, **CMS138 stays un-onboarded** — the same call ADR-047 made, for a better-understood
-reason.
+`runOfficialMeasureCases` takes the artifact's runtime terminology and **narrows it to the OIDs the
+bundle does not ship**. The narrowing lives next to the `calculate` call rather than at the call site,
+because the natural thing for a caller to do is pass the whole cache — which would silently convert this
+gate from "upstream's terminology" into "ours" for every measure, with the deck still green and nothing
+to notice it. With nothing missing, `calculate` is invoked with three arguments exactly as before, so
+the five complete measures are provably unaffected.
+
+**What 47/47 licenses, stated precisely, because it is not the claim the other five carry.** For that
+one value set the CODES are ours, sourced from VSAC at the pinned release. What stays upstream's is the
+**answer key** — the expected population vectors in the MADiE deck. Agreement is therefore real evidence
+that the four sourced codes are right, and is *not* evidence about upstream's terminology. The report
+says so on the measure's own line rather than in a footnote, and `supplementedOids` carries it in the
+data so nothing downstream can round it off to "47/47 like the others".
 
 **Decision 4 — routing's diagnosis changes; its verdict does not.** `expandArtifactTerminology` already
 refused an unexpandable value set, so nothing was ever routed on one, and this ADR does not claim to have
