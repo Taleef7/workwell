@@ -131,8 +131,9 @@ export function buildQrda1Document(run: RunRecord, measureId: string, outcome: O
   <realmCode code="US"/>
   <typeId root="2.16.840.1.113883.1.3" extension="POCD_HD000040"/>
   <templateId root="2.16.840.1.113883.10.20.22.1.1" extension="2015-08-01"/>
-  <templateId root="2.16.840.1.113883.10.20.24.1.2" extension="2019-02-01"/>
-  <templateId root="2.16.840.1.113883.10.20.24.1.3" extension="2019-02-01"/>
+  <templateId root="2.16.840.1.113883.10.20.24.1.1" extension="2017-08-01"/>
+  <templateId root="2.16.840.1.113883.10.20.24.1.2" extension="2021-08-01"/>
+  <templateId root="2.16.840.1.113883.10.20.24.1.3" extension="2025-03-01"/>
   <id root="${crypto.randomUUID()}"/>
   <code code="55182-0" codeSystem="${LOINC}" codeSystemName="LOINC" displayName="Quality Measure Report"/>
   <title>WorkWell QRDA Category I — ${esc(measureId)} — ${esc(outcome.subjectId)}</title>
@@ -182,13 +183,13 @@ ${recordTarget(outcome.subjectId)}
         </section>
       </component>
       <component>
-        <section nullFlavor="NI">
+        <section>
           <templateId root="2.16.840.1.113883.10.20.24.2.1"/>
           <code code="55188-7" codeSystem="${LOINC}" displayName="Patient Data"/>
           <title>Patient Data</title>
-          <text>QDM patient data elements are not exported. This document reports population membership
-            only; it does not carry the clinical data a receiving engine would need to recalculate the
-            measure. See docs/STANDARDS_CONFORMANCE.md.</text>
+          <text>EMPTY BY CONSTRUCTION: no QDM patient data elements are exported. This document reports
+            population membership only and CANNOT be used to recalculate the measure. It is not a
+            conformant QRDA Category I document — see docs/STANDARDS_CONFORMANCE.md.</text>
         </section>
       </component>
     </structuredBody>

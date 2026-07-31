@@ -139,13 +139,33 @@ test("QRDA I: an AUTHORED outcome references WorkWell's urn and no eMeasure iden
   assert.ok(!xml.includes("2.16.840.1.113883.4.738"), "no official identity over authored membership");
 });
 
-test("QRDA I: the Patient Data section is marked ABSENT, not faked", () => {
-  // The QDM entries a receiving engine would recalculate from are not exported. A hollow section that
-  // looked populated would be worse than one that says so — this is the claim STANDARDS_CONFORMANCE
-  // records as the gap.
+test("QRDA I: the Patient Data section declares its own emptiness IN PROSE, not via nullFlavor", () => {
+  // The QDM entries a receiving engine would recalculate from are not exported, and the document has to
+  // say so. `nullFlavor="NI"` was the first attempt and is measurably INERT: against the official CMS
+  // 2026 Schematron, stripping a section's children yields the same 5 errors with or without it, because
+  // QRDA section rule contexts carry no `[not(@nullFlavor)]` guard (review, #360). So the attribute is
+  // gone and the `<text>` carries the claim — asserted here so a future edit cannot quietly re-add the
+  // attribute and re-acquire the belief that it does something.
   const xml = buildQrda1Document(run, "cms125", outcome("COMPLIANT"));
-  assert.match(xml, /<section nullFlavor="NI">[\s\S]{0,300}?2\.16\.840\.1\.113883\.10\.20\.24\.2\.1/);
-  assert.match(xml, /QDM patient data elements are not exported/);
+  assert.match(xml, /2\.16\.840\.1\.113883\.10\.20\.24\.2\.1/, "the Patient Data section is present");
+  assert.match(xml, /EMPTY BY CONSTRUCTION/);
+  assert.match(xml, /CANNOT be used to recalculate the measure/);
+  assert.match(xml, /not a\s+conformant QRDA Category I document/);
+  assert.ok(!xml.includes('<section nullFlavor'), "nullFlavor on a section buys nothing and must not imply it does");
+});
+
+test("QRDA I: the RY2026 Category I template roots are all present", () => {
+  // `…24.1.1` (QRDA Category I Report) was missing entirely and the other two carried wrong extensions —
+  // measured against the official CMS 2026 Schematron (review, #360).
+  const xml = buildQrda1Document(run, "cms125", outcome("COMPLIANT"));
+  for (const [root, ext] of [
+    ["2.16.840.1.113883.10.20.22.1.1", "2015-08-01"],
+    ["2.16.840.1.113883.10.20.24.1.1", "2017-08-01"],
+    ["2.16.840.1.113883.10.20.24.1.2", "2021-08-01"],
+    ["2.16.840.1.113883.10.20.24.1.3", "2025-03-01"],
+  ]) {
+    assert.ok(xml.includes(`<templateId root="${root}" extension="${ext}"/>`), `${root} @ ${ext}`);
+  }
 });
 
 test("QRDA I: the reporting period is the RUN's measurement period", () => {
