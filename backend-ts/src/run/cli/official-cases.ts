@@ -114,6 +114,11 @@ export const REQUIRED_OFFICIAL_CASE_COUNTS: Record<string, number> = {
   cms2: 36,
   cms68: 19,
   cms951: 55,
+  // Counted from the sparse checkout, not copied from a note: 47 case DIRECTORIES under
+  // `input/tests/measure/CMS138FHIRTobaccoScrnCessation` (the three non-directory entries — `.madie`,
+  // the Group resource and README.txt — are not cases). Agrees with the figure ADR-047 recorded when
+  // the measure scored 0/47.
+  cms138: 47,
 };
 
 export function exitCodeForRuns(

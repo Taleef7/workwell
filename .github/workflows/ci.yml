@@ -185,6 +185,7 @@ jobs:
           pnpm vendor:official --measure CMS2FHIRPCSDepScreenAndFollowUp --catalog-id cms2 --strip-elm-annotations $COMPLETE
           pnpm vendor:official --measure CMS68FHIRDocumentationCurrentMeds --catalog-id cms68 --strip-elm-annotations $COMPLETE
           pnpm vendor:official --measure CMS951FHIRKidneyHealthEval --catalog-id cms951 --strip-elm-annotations $COMPLETE
+          pnpm vendor:official --measure CMS138FHIRTobaccoScrnCessation --catalog-id cms138 --strip-elm-annotations $COMPLETE
       # Re-vendoring must reproduce the COMMITTED artifact byte for byte. Nothing checked this before:
       # the manifest's SHA-256 is written by vendor:official about itself, so it could only ever prove
       # self-consistency. This proves the artifact in Git is what the pinned upstream actually produces.

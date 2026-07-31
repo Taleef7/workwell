@@ -1,0 +1,62 @@
+{
+  "catalogId": "cms138",
+  "measureName": "CMS138FHIRTobaccoScrnCessation",
+  "version": "1.0.000",
+  "cmsId": "138FHIR",
+  "url": "https://madie.cms.gov/Measure/CMS138FHIRTobaccoScrnCessation",
+  "status": "active",
+  "effectivePeriod": {
+    "start": "2026-01-01",
+    "end": "2026-12-31"
+  },
+  "scoring": "proportion",
+  "populationBasis": "boolean",
+  "improvementNotation": "increase",
+  "populations": [
+    "initial-population",
+    "denominator",
+    "denominator-exclusion",
+    "numerator"
+  ],
+  "source": {
+    "repo": "cqframework/dqm-content-qicore-2025",
+    "ref": "ca4b49516de4cbed9f92bfb7c35d97b1bf1022ab",
+    "path": "bundles/measure/CMS138FHIRTobaccoScrnCessation/CMS138FHIRTobaccoScrnCessation-bundle.json",
+    "rawSha256": "sha256:1056b796f19ee79cb76a6c76022f511efcc0e7b6e2fa18c90637ae9669ab9989"
+  },
+  "reduction": {
+    "keptResourceTypes": [
+      "Measure",
+      "Library"
+    ],
+    "libraryContentTypes": [
+      "application/elm+json"
+    ],
+    "strippedNarratives": true,
+    "strippedElmAnnotations": true,
+    "strippedValueSets": true,
+    "rawBytes": 15842294,
+    "vendoredBytes": 2343564
+  },
+  "terminology": {
+    "file": "terminology.json",
+    "valueSets": 32,
+    "codes": 549,
+    "truncated": [],
+    "completion": {
+      "source": "vsac",
+      "manifest": "http://cts.nlm.nih.gov/fhir/Library/ecqm-fhir-update-2025",
+      "valueSets": [
+        {
+          "oid": "2.16.840.1.113883.3.526.3.1278",
+          "reason": "absent-upstream",
+          "had": 0,
+          "now": 4,
+          "declaredTotal": null
+        }
+      ]
+    },
+    "sha256": "sha256:e2f8b334c9b352f419eeaec736ce9b914b384bf7a34f1453d50db458aea417d8"
+  },
+  "sha256": "sha256:219b52a38363ac6968d47b0d51b6b45656da6b01a9a9d2496bd05aab25280eb4"
+}
