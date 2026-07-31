@@ -1,5 +1,66 @@
 # Journal
 
+## 2026-07-30 (M-B) — QRDA Category I was built inside-out; measuring against the right IG showed it (branch `feat/qrda1-patient-data`)
+
+Yesterday's question — *"is CMS QRDA Category I applicable to Eligible Clinicians at all?"* — was filed
+as a milestone-shaping unknown. Answering it cost an afternoon and invalidated the design shipped hours
+earlier, which is the best possible outcome for a question that cheap.
+
+**The answer is two-part.** What is Hospital-only is the **CMS** QRDA I IG — titled "for Hospital
+Quality Reporting", governing IQR / Medicare PI / OQR — and its Schematron, which is the exact file #360
+validated against. QRDA Category I **itself** is squarely in scope for ECs: §170.315**(c)(1)** "record
+and export" and **(c)(2)** "import and calculate" both require it per §170.205(h)(2) = HL7 QRDA I R1 STU
+5.3, setting-neutral, with (c)(1) in the Base EHR definition. Only **(c)(3)** "report" splits by setting
+(Cat I inpatient, Cat III ambulatory). Cypress supports 56 EP/EC eCQMs with Cat I test data and validates
+Cat I against the HL7 standard, explicitly *not* the extra CMS constraints. So: keep Category I, change
+the ruler.
+
+**Then measuring found something much worse than a wrong ruler.** QRDA Category I does not report
+population membership *at all*. Not one of the four CMS RY2026 sample files contains an `IPOP`, `DENOM`,
+`NUMER` or `MSRAGG` — the document carries the patient's clinical data and a measure reference, and the
+receiver **recalculates**, which is what "(c)(2) import and calculate" literally says. ADR-049 shipped
+Category III machinery (`…27.3.24`) in a Category I envelope *and* an empty Patient Data section, while
+that section **SHALL** contain at least one entry (CONF:67-14567). It was inside-out on both axes.
+
+**So the population assertions came out and the QDM entries went in.** `src/fhir/qdm-entries.ts` maps
+the five datatypes CMS122/CMS125 consume: Encounter Performed, Diagnosis — inside a **Diagnosis Concern
+Act**, a SHALL the first cut missed (CONF:4509-28885) — Laboratory Test Performed (result nested in a
+Result observation, which is what `[Observation: "HbA1c"] where value > 9` actually reads), Diagnostic
+Study Performed (outer `value`, SHALL even for a screening mammogram with no result — `nullFlavor="NA"`,
+the CMS sample's own idiom), and Procedure Performed. An `Observation` routes on **`category`**, the
+same discriminator CMS125's official numerator uses (ADR-044); one we cannot classify is **skipped, not
+guessed**, because absent is visible and wrong-datatype is not.
+
+**Result, measured:** 27 findings / 14 base-HL7 errors → **0 base-HL7 errors**, plus 4 CMS-hospital-only
+findings that are *expected* because we deliberately stopped claiming the CMS document template
+(`…24.1.3` = "QRDA Category I Report CMS" — claiming a template whose IG we don't conform to is a
+misdeclaration). Without a bundle the document has exactly one base error, the missing entry, and says
+so in prose.
+
+**Two of #360's own findings are corrected, both by measurement rather than re-reading.** `<addr>` DOES
+have a nullFlavor escape — element-level `<addr nullFlavor="NI"/>` fails CONF:81-7291/7292, but an
+`<addr>` with **nullFlavor children** passes, so an address is **not** an ingest prerequisite (same for
+`raceCode`/`ethnicGroupCode` via `UNK` — two SHALLs #360 never recorded at all). And the hypothesis that
+re-targeting would shrink the gap list was **wrong**: only 3 of 27 findings were CMS-only; every
+substantive gap was base HL7 all along.
+
+**The measurement is now a command**, not an afternoon: `scripts/qrda-schematron-check.py` runs the
+published Schematron and partitions failures by conformance-number prefix (base HL7 = our bar,
+`CONF:CMS-*` = not). It is deliberately **not** in CI — it needs Python + lxml, which must not become
+backend-ts dependencies — so the structural regressions it catches are pinned in TypeScript, each
+assertion citing the CONF number it stands for. #360's numbers were right and unreproducible; that is
+how one of them stayed wrong.
+
+**Stated rather than smoothed over:** bundles are re-read **at export time**, so a subject whose record
+changed since the run exports the current record. Making it as-evaluated means persisting bundles — a
+schema change, and the owner's. They are **not** reconstructed from the persisted outcome, because
+`deriveExamConfig`'s own contract says the target is a distribution *bucket* that can converge (CMS122
+DUE_SOON → MISSING_DATA), so status → bundle is not injective. The synthetic default stack therefore
+exports documents flagged `conformant: false`. QRDA I **import** still does not exist and **Cypress CVU+
+has not run** — it needs Docker and remains the M-B bar.
+
+Full backend suite: **1643 pass / 0 fail / 14 skipped**.
+
 ## 2026-07-30 (M-B) — QRDA Category I exists, and says in the document what it cannot do (branch `feat/qrda1-export`)
 
 The roadmap audit recorded "**QRDA-I does not exist anywhere**". It does now: one CDA document per
