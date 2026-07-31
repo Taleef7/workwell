@@ -1,6 +1,108 @@
 # Architecture Decision Records
 
+## ADR-050: QRDA Category I is a patient-DATA document, measured against the HL7 base IG — not the CMS Hospital one
+
+**Status:** Accepted (2026-07-30). Roadmap M-B. **Supersedes the central claim of ADR-049**, which is
+now marked. Still **not CVU+-validated** — that bar is unmet and this ADR does not claim it.
+
+**Context.** ADR-049 shipped a QRDA Category I export that reported per-subject population membership and
+carried an empty Patient Data section, and recorded its conformance against the **CMS 2026 QRDA I
+Schematron**. Two things about that turned out to be wrong, and both were found by measurement rather
+than by re-reading the code.
+
+*First, the ruler.* The CMS QRDA I IG is titled "for Hospital Quality Reporting" and governs IQR /
+Medicare PI / OQR. CMS122 and CMS125 are **Eligible Clinician** measures, whose CMS submission format is
+Category **III** (the 2026 CMS QRDA III EC IG covers MIPS/MVP/APP/SSP PI). But QRDA Category I is not
+therefore out of scope for us: §170.315**(c)(1)** "record and export" and **(c)(2)** "import and
+calculate" both require QRDA Category I per §170.205(h)(2) — the **HL7 QRDA I R1 STU 5.3 US Realm** IG —
+setting-neutral, with (c)(1) in the Base EHR definition. Only §170.315**(c)(3)** "report" splits by
+setting. Cypress supports 56 EP/EC eCQMs with Category I test data and validates Category I against the
+HL7 standard, explicitly **not** the additional CMS constraints. So Category I is squarely our path; we
+were simply holding it to the hospital ruler.
+
+*Second, and more seriously, the content.* QRDA Category I **does not report population membership at
+all**. Measured: not one of the four CMS RY2026 Category I sample files contains a single `IPOP`,
+`DENOM`, `NUMER` or `MSRAGG`. The document carries the patient's clinical data plus a reference to the
+measure, and the receiving engine **recalculates** — which is precisely what "(c)(2) import and
+calculate" means. What ADR-049 shipped was Category III machinery (`…27.3.24` Measure Data observations)
+inside a Category I envelope, plus an empty Patient Data section — while the Patient Data Section QDM
+**SHALL contain at least one entry** (CONF:67-14567). It was the inverse of a QRDA I on both axes.
+
+**Decision.**
+
+1. **The bar is the HL7 base IG, and the measurement is a command.** `scripts/qrda-schematron-check.py`
+   runs the published Schematron and **partitions** failures by conformance-number prefix: `CONF:1198-*`
+   (US Realm Header), `CONF:3343-*` (QRDA I), `CONF:4509-*`/`1098-*`/`81-*`/`67-*` (C-CDA + QDM entries)
+   are **base HL7 — our bar**; `CONF:CMS-*` is **Hospital-only — not our bar**. This works because the
+   CMS Schematron embeds the base conformance statements it inherits. #360 measured by hand in a scratch
+   directory, which is why one of its findings could be wrong without anyone being able to see it.
+2. **Population membership comes out.** It is exported by the two artifacts that have a place for it —
+   the FHIR MeasureReport and QRDA Category III. Keeping it in Category I as a non-standard extra risks a
+   receiver rejecting the document, and states something the format does not mean.
+3. **The Patient Data section carries real QDM entries, translated from the evaluated FHIR bundle.**
+   `src/fhir/qdm-entries.ts` maps the five datatypes CMS122/CMS125 consume — Encounter Performed,
+   Diagnosis (inside a **Diagnosis Concern Act**, which is a SHALL, CONF:4509-28885), Laboratory Test
+   Performed (result in the nested Result observation), Diagnostic Study Performed (outer `value`, SHALL,
+   CONF:4509-29332), Procedure Performed. An `Observation` routes on **`category`** — the same
+   discriminator CMS125's official numerator uses (ADR-044) — and an unclassifiable resource is
+   **skipped, not guessed**: absent is visible, wrong-datatype is not.
+4. **We do not claim the CMS document template.** `…24.1.3` is "QRDA Category I Report CMS". Claiming a
+   template whose IG we do not conform to is a misdeclaration, so it is gone — and its absence is why
+   four CMS-only findings remain and are *expected*.
+5. **The header is completed with `nullFlavor`, never with invention.** `author` is an
+   `assignedAuthoringDevice` (WorkWell is software; naming a clinician would be a fabricated
+   attestation), `custodian` is the WorkWell instance, and `raceCode`/`ethnicGroupCode` are `UNK`.
+   There is deliberately **no `legalAuthenticator`**: it is only a SHOULD (CONF:1198-5579) and including
+   it forces an `assignedPerson` with a US Realm name that no real person stands behind.
+6. **A document with no bundle is emitted, marked, and counted.** The route returns `nonConformant` and
+   each document carries a `conformant` flag; the empty section says in prose that it is not conformant
+   and cannot be recalculated from. Bundles are **not** reconstructed from the persisted outcome:
+   `deriveExamConfig`'s own contract says the target is a distribution BUCKET that can converge to a
+   different status (CMS122 DUE_SOON → MISSING_DATA), so status → bundle is not injective and a
+   reconstruction would be fiction wearing provenance.
+
+**Measured.** Against the CMS RY2026 Schematron, a document with patient data went from **27 findings
+(14 base-HL7 errors)** to **0 base-HL7 errors** + 4 CMS-hospital-only findings + warnings. Without a
+bundle it has exactly **one** base error — the missing entry — which is the honest signal.
+
+**Two #360 findings are corrected, both by measurement.**
+
+- **`<addr>` DOES have a nullFlavor escape.** #360 recorded "a hard-error `1..*` with no nullFlavor
+  escape, so a patient without an address cannot validate (an INGEST prerequisite)". Element-level
+  `<addr nullFlavor="NI"/>` indeed fails CONF:81-7291/7292 — but an `<addr>` whose **children** carry
+  `nullFlavor` passes both. Address is **not** an ingest prerequisite. The same is true of
+  `raceCode`/`ethnicGroupCode` via `nullFlavor="UNK"`.
+- **`legalAuthenticator`, `custodian`-with-CCN and the CMS EHR Certification ID `participant` were
+  filed as one undifferentiated gap list.** Partitioned: only 3 of 27 findings were CMS-hospital-only,
+  so the hypothesis that re-targeting would shrink the list was **wrong** — every substantive gap
+  (`author`, `custodian`, race, ethnicity, address, the QDM sections) was base HL7 all along. Two
+  genuinely new SHALLs surfaced that #360 never recorded at all: `raceCode` and `ethnicGroupCode`.
+
+**Consequences.**
+
+- QRDA I now depends on the subject's FHIR bundle at export time, supplied only where the stack can
+  really re-read it (a WebChart-configured seam). The synthetic default exports non-conformant documents
+  that say so. Bundles are read **as of now**, not as of the run — making it as-evaluated means
+  persisting bundles, which is a schema change and the owner's call.
+- The Schematron is **not vendored** (585 KB of yearly third-party artifact) — pinned by SHA-256 in the
+  script, fetched on demand, the ADR-036 pattern. The script is **not in CI**: it needs Python + lxml,
+  which must not become backend-ts dependencies. The structural regressions it would catch are pinned in
+  TypeScript instead, each assertion citing the CONF number it stands for.
+- **Still open:** QRDA I **import** does not exist, and **Cypress CVU+ has not run** — it needs Docker
+  and remains the M-B bar. Nothing here may be described as certified or CVU+-validated.
+
+---
+
 ## ADR-049: QRDA Category I exists, reports population membership only, and says so in the document
+
+> **SUPERSEDED in its central claim by ADR-050 (2026-07-30, same day).** Decisions 1–2 below — that a
+> QRDA I reports per-subject population membership, evidence-first, including the populations the subject
+> is not in — are **wrong**: Category I has no place for population membership at all, and its Patient
+> Data section SHALL carry the QDM entries a receiver recalculates from. Decision 3's conformance
+> assessment was also measured against the CMS **Hospital** Schematron, which is not the bar for the
+> Eligible Clinician measures we route. What survives: the sha-checked measure identity, the refusal to
+> export a mid-run run, and the principle that the document states its own limits in prose (`nullFlavor`
+> on a `<section>` is measurably inert). Read ADR-050 for the current design.
 
 **Status:** Accepted (2026-07-30). Roadmap M-B, first step. **Not CVU+-validated** — that bar is unmet
 and this ADR does not claim it.
