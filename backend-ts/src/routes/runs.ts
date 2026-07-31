@@ -8,6 +8,7 @@
  *   GET  /api/runs                  newest-first run list            → 200 RunListItem[]
  *   GET  /api/runs/:id              run detail/summary               → 200 RunSummary | 404
  *   GET  /api/runs/:id/measure-report  FHIR R4 MeasureReport → 200 | 404 (unknown run) | 422 (multi-measure)
+ *   GET  /api/runs/:id/qrda1          QRDA Category I per-subject documents (JSON envelope) → 200 | 404 | 422
  *   GET  /api/runs/:id/qrda           QRDA Category III aggregate stub (XML) → 200 | 404 | 422
  *                                   ?type=summary (default) → summary report; individual|bundle → the
  *                                   collection Bundle (summary + per-subject individuals; the two are synonyms)
@@ -58,6 +59,7 @@ import {
 } from "../fhir/measure-report.ts";
 import { isOfficialRouted } from "../wiring/official-routing.ts";
 import { buildQrda3DocumentFromCounts } from "../fhir/qrda3-export.ts";
+import { buildQrda1Documents } from "../fhir/qrda1-export.ts";
 import { isWebChartConfigured, type DataSourceEnv } from "../engine/ingress/data-source.ts";
 
 interface RunsEnv extends DataSourceEnv {
@@ -212,6 +214,34 @@ async function aggregateCountsForRun(
   return { counts: countPopulations(rows, measureId), official: identity };
 }
 
+
+/**
+ * A run whose outcomes are FINAL, and therefore safe to export as a regulatory artifact.
+ *
+ * A configured-live or wide-scope run returns `RUNNING` while `finishManualRun` is still persisting
+ * outcomes in the background (`scheduleAsyncRun`). Exporting then yields a document set covering only
+ * the subjects written so far — with every organizer marked `completed` and nothing in the envelope
+ * saying subjects are missing — i.e. a partial roster presented as a complete report. It also weakens
+ * the subject bound, since the count read and the row read can straddle further writes (Codex, #360).
+ *
+ * `PARTIAL_FAILURE` IS reportable: those runs finished, and their failed subjects persist MISSING_DATA
+ * with an `evaluationError`, which is a real outcome rather than an absent one. `FAILED` is not.
+ */
+const REPORTABLE_RUN_STATUSES = new Set(["COMPLETED", "PARTIAL_FAILURE"]);
+
+const notReportable = (status: string): Response | null =>
+  REPORTABLE_RUN_STATUSES.has(status)
+    ? null
+    : json(
+        {
+          error: "run_not_reportable",
+          message:
+            `A quality report may only be exported from a finished run; this one is ${status}. ` +
+            `Exporting a run that is still writing outcomes would present a partial roster as complete.`,
+          status,
+        },
+        409,
+      );
 
 /** The run-detail outcomes grid returns a whole run up to this size (a live ALL_PROGRAMS run is ~2,100
  *  rows); a larger run (a 120k seed:scale run) is capped to the first page so the worker never
@@ -502,12 +532,54 @@ export async function handleRuns(
     });
   }
 
+  // QRDA Category I — PATIENT-level, one CDA document per subject, returned as a JSON envelope of
+  // documents (M-B). Category III below is the aggregate counterpart for the same run.
+  //
+  // Bounded by MAX_INDIVIDUAL_REPORT_SUBJECTS for the same reason the individual MeasureReport bundle is:
+  // this path materializes per-subject rows, and a 120k seed:scale run would otherwise build 120k CDA
+  // documents in the worker. The refusal names the limit rather than truncating — a partial QRDA set that
+  // looked complete is exactly the shape this codebase keeps refusing.
+  const qrda1Id = pathname.match(/^\/api\/runs\/([^/]+)\/qrda1$/)?.[1];
+  if (qrda1Id && req.method === "GET") {
+    const run = await (await store(env)).getRun(qrda1Id);
+    if (!run) return json({ error: "not_found", id: qrda1Id }, 404);
+    const unfinished = notReportable(run.status);
+    if (unfinished) return unfinished;
+    const os = await outcomes(env);
+    const measureIds = await os.distinctMeasuresForRun(qrda1Id, 2);
+    if (measureIds.length !== 1) {
+      return json(
+        { error: "unsupported_run_scope", message: "QRDA I requires a completed single-measure run", measures: measureIds.length },
+        422,
+      );
+    }
+    const measureId = measureIds[0]!;
+    const total = (await os.countOutcomesByStatus(qrda1Id)).reduce((sum, c) => sum + c.count, 0);
+    if (total > MAX_INDIVIDUAL_REPORT_SUBJECTS) {
+      return json(
+        {
+          error: "run_too_large",
+          message:
+            `QRDA I emits one document per subject, which is limited to ` +
+            `${MAX_INDIVIDUAL_REPORT_SUBJECTS} subjects; this run has ${total}.`,
+        },
+        422,
+      );
+    }
+    const documents = buildQrda1Documents(run, measureId, await os.listOutcomes(qrda1Id));
+    return json({ runId: qrda1Id, measureId, count: documents.length, documents });
+  }
+
   // QRDA Category III aggregate export (stub) for a completed single-measure run (#91 / E3.3). Built
   // from the bounded status histogram, not the per-subject rows (Fable H4) — safe at 120k scale.
   const qrdaId = pathname.match(/^\/api\/runs\/([^/]+)\/qrda$/)?.[1];
   if (qrdaId && req.method === "GET") {
     const run = await (await store(env)).getRun(qrdaId);
     if (!run) return json({ error: "not_found", id: qrdaId }, 404);
+    // Pre-existing gap, found while fixing the same one on QRDA I: Category III read the status
+    // histogram of a possibly-RUNNING run and reported its counts as final.
+    const unfinishedIii = notReportable(run.status);
+    if (unfinishedIii) return unfinishedIii;
     const os = await outcomes(env);
     const measureIds = await os.distinctMeasuresForRun(qrdaId, 2);
     if (measureIds.length !== 1) {

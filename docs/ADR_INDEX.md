@@ -11,6 +11,7 @@
 
 ## Titles (newest first)
 
+- ADR-049: QRDA Category I exists, reports population membership only, and says so in the document
 - ADR-048: The TRANSLATOR debt is paid; the CLI-surface debt is not, and the split is not a file move
 - ADR-047: A measure is onboarded when its MADiE gate is green — vendoring is not onboarding
 - ADR-046: Canonical, improvementNotation and membership all derive from the outcome's own evidence

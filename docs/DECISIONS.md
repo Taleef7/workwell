@@ -1,5 +1,106 @@
 # Architecture Decision Records
 
+## ADR-049: QRDA Category I exists, reports population membership only, and says so in the document
+
+**Status:** Accepted (2026-07-30). Roadmap M-B, first step. **Not CVU+-validated** — that bar is unmet
+and this ADR does not claim it.
+
+**Context.** The roadmap's audit recorded "**QRDA-I does not exist anywhere**; QRDA-III is a stub". QRDA I
+is the patient-level artifact — one CDA document per subject — and it is the half of the certification
+rehearsal that carries what a receiving engine would recalculate from. Nothing produced one.
+
+**Decision.**
+
+1. **One document per subject, membership read EVIDENCE-first.** Population membership comes from
+   `membershipFor`, so an official-routed outcome's populations are `evidence.official.populationResults`
+   — the regulatory truth — and never the 5-bucket workflow status, which cannot express DENEXCEP and
+   **inverts** for cms122. A status-derived QRDA I would report a poor-control patient as out of the
+   numerator, which is the same defect ADR-031 fixed for MeasureReport.
+2. **Every population is emitted, including the ones the subject is not in.** A receiver must be able to
+   distinguish "not in the numerator" from "the numerator was not reported"; omitting false members
+   collapses those into one document.
+3. **The measure is referenced by its published eMeasure UUIDs when the outcome was scored officially** —
+   version-specific under the eMeasure Identifier root, version-independent as `setId`, per ADR-046. A
+   receiver resolves the measure's numerator orientation from that identity, so naming WorkWell's urn over
+   CMS's populations would misdescribe the document. Authored outcomes keep the urn.
+4. **The Patient Data section is EMPTY and says so in its own `<text>` — but `nullFlavor` was NOT the
+   mechanism.** *(Corrected after review, #360, by running the official CMS 2026 QRDA Cat I Schematron.)*
+   The first version put `nullFlavor="NI"` on the section believing that encoded "no information".
+   **Measured: it buys exactly nothing.** Against the official CMS sample, stripping a section's children
+   produces the same 5 errors with or without the attribute — QRDA section rule contexts carry no
+   `[not(@nullFlavor)]` guard:
+
+   | official sample variant | errors |
+   |---|---:|
+   | untouched | 0 |
+   | `nullFlavor="NI"` added, children intact | 0 |
+   | children stripped, no nullFlavor | 5 |
+   | children stripped, **with** `nullFlavor="NI"` | **5 — identical** |
+
+   The attribute is removed. What communicates the gap is the prose in `<text>`, which now says plainly
+   that the document cannot be used to recalculate the measure and is not conformant. The intent of the
+   original decision stands; the mechanism was wrong and is not worth preserving as folklore.
+
+5. **This is NOT a conformant QRDA Category I document, and the gap is now measured rather than
+   hedged.** *(Sharpened after review, #360.)* Running the official CMS 2026 Schematron — first
+   reproducing CMS's own published expectation on their sample exactly, so the runner is trustworthy —
+   establishes what is actually missing:
+   - the **QRDA Category I Report** template root `…24.1.1` was absent entirely, and `…24.1.2`/`…24.1.3`
+     carried wrong extensions. Fixed here to the RY2026 set (`2017-08-01`, `2021-08-01`, `2025-03-01`);
+   - required header elements are still absent: `author`, `custodian` (whose id root
+     `2.16.840.1.113883.4.336` carries the CCN), `legalAuthenticator`, and the CMS EHR Certification ID
+     **device** `participant`;
+   - `<addr>` is a hard-error `1..*` **with no nullFlavor escape**, so a document for a patient with no
+     address *cannot* validate. That is a data-ingest prerequisite, not a formatting detail;
+   - `administrativeGenderCode nullFlavor="NI"` is Schematron-clean but IG-wrong — the sanctioned values
+     are `OTH`/`UNK`/`ASKU`. A sharper instance of this file's own theme: **Schematron-clean is not
+     conformant.**
+
+   The claim therefore stays at "well-formed, structurally recognisable", the level QRDA III has carried
+   since ADR-009 — and now with a list of what would have to change, instead of a hedge.
+
+6. **CDA primitives are shared, not duplicated** (`qrda-common.ts`). The two documents describe the same
+   run and the certification loop compares them against each other, so a timestamp format or escaping
+   rule drifting between them would surface as a validation difference nobody introduced deliberately.
+
+7. **The measure reference is ONE shared implementation, sha-checked** *(added after review, #360)*.
+   Both QRDA documents now call `qrdaMeasureReference`, which claims the published identity **only when
+   the vendored artifact's `sha256` matches the `artifactSha256` the outcome was scored under** — the
+   rule ADR-046 decision 3 already applied to MeasureReport's canonical and which this path had not
+   carried over. A re-vendor between run and export would otherwise stamp an old outcome with the new
+   published UUID. A missing artifact degrades to a version-qualified local id instead of crashing; the
+   first version passed `{}` in place of a `null` artifact and read `.bundle` off it, turning the
+   endpoint into a 500.
+8. **A quality report may only be exported from a FINISHED run** *(added after review, #360; the same
+   gap existed on the pre-existing Category III route)*. A configured-live or wide-scope run returns
+   `RUNNING` while `finishManualRun` persists outcomes in the background, so exporting mid-run produced
+   documents covering only the subjects written so far — every organizer marked `completed`, nothing in
+   the envelope saying subjects were missing. `PARTIAL_FAILURE` **is** reportable (those runs finished,
+   and failed subjects persist MISSING_DATA with an `evaluationError`); `RUNNING` and `FAILED` are not,
+   and get a 409 naming the status.
+
+**Consequences.**
+
+- `GET /api/runs/:id/qrda1` returns a JSON envelope of per-subject documents, bounded by
+  `MAX_INDIVIDUAL_REPORT_SUBJECTS` for the reason the individual MeasureReport bundle is: this path
+  materializes per-subject rows, and a 120k `seed:scale` run would otherwise build 120k CDA documents in
+  the worker. It **refuses** rather than truncating.
+- **Well-formedness is tested, not assumed.** The document is hand-built XML, so balance is a property to
+  check: a dependency-free tag-balance/escaping checker runs on every generated document (CLAUDE.md
+  forbids adding an XML parser without approval). Mutation-checked — unbalancing a tag or dropping an
+  escape fails three tests.
+- **An open question that may reshape M-B, flagged rather than acted on.** Review reports that CMS
+  QRDA **Category I is Hospital Quality Reporting only**, and that Eligible Clinicians / MIPS submit
+  Category III — corroborated structurally by Cypress shipping `EH_CAT_I.sch` and `EP_CAT_III.sch` but no
+  `EP_CAT_I.sch`. CMS122 and CMS125 are EC/MIPS measures. If that holds for the *submission* path it does
+  not automatically hold for the *ONC certification* path (§170.315(c) requires QRDA I export, which is
+  what the roadmap's chain is actually about) — so the two must be separated before anything is
+  concluded. **Verify before acting**; it is a milestone-shaping fact, not a PR-shaping one, and nothing
+  in this PR depends on the answer beyond the framing sentence above.
+- **What is still missing for M-B**, stated so the milestone is not read as closed: the QDM patient-data
+  entries (decision 4), QRDA **I import** entirely, and the CVU+ loop that would let any of this be
+  called validated.
+
 ## ADR-048: The TRANSLATOR debt is paid; the CLI-surface debt is not, and the split is not a file move
 
 **Status:** Accepted (2026-07-30). Roadmap §7.4 PR-2 / M-C item C1 — the first of the two extraction

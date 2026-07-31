@@ -146,7 +146,7 @@ This project is deliberately careful about what it claims. [`docs/STANDARDS_CONF
 | Patient data | **FHIR R4**, US Core / **QI-Core** | Executed — official artifacts evaluate real QI-Core bundles |
 | Known-answer gate | Official **MADiE** test cases (5 measures) | **231/231 exact** — a permanent CI gate |
 | Terminology | **VSAC** value sets | The artifact's *own* expansions, fetched at build and pinned by SHA-256 |
-| Reporting | FHIR **MeasureReport**, **QRDA-III** | MeasureReport executed; QRDA-III structurally representative |
+| Reporting | FHIR **MeasureReport**, **QRDA-I**, **QRDA-III** | MeasureReport executed; both QRDA documents structurally representative, neither CVU+-validated |
 | EHR integration | **SMART Backend Services** (`private_key_jwt`) | Executed against a live tenant |
 
 **No measure may be routed to its official artifact without a green MADiE gate.** That is a construction-time refusal, not a review convention.
