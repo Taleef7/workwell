@@ -1,0 +1,128 @@
+# Vendor an official measure artifact WITH the VSAC credential, and hand back the committable files.
+#
+# ## Why this exists
+#
+# `WORKWELL_VSAC_API_KEY_VENDOR` is a GitHub secret. Secrets are write-only — `gh secret list` returns
+# names, never values — so nobody working from a clone can produce a *completed* artifact, even though
+# the credential is configured and CI uses it on every push.
+#
+# That produced a false blocker. Three priority measures (CMS130, CMS165 capped; CMS138 absent — see
+# ADR-041 and ADR-053) were recorded as needing "an owner step", when what they actually needed was a
+# way to run the existing vendor command in the one place the credential already lives. This is that
+# way: a manual trigger that vendors, prints what moved, and uploads `bundle.json` + `manifest.json` as
+# an artifact to download and commit.
+#
+# ## Why it uploads rather than commits
+#
+# It needs no `contents: write`. A workflow that can push to the repo is a standing capability; this is
+# a one-shot that produces two files a human then reviews and commits. The reproducibility gate in
+# `ci.yml` re-derives those exact bytes on the next push, so a bad upload cannot survive review.
+#
+# ## What is safe to upload, and what is not
+#
+# `bundle.json` and `manifest.json` are **committed to this public repo already** — the manifest carries
+# counts, provenance and the sidecar's SHA-256, no codes. `terminology.json` is NOT uploaded: it holds
+# thousands of AMA CPT and SNOMED CT codes under an NLM licence and is gitignored for that reason
+# (ADR-036). Uploading it would redistribute licensed content through an artifact URL, so the copy step
+# names the two files explicitly rather than globbing the directory.
+name: Vendor official measure (credentialed)
+
+on:
+  workflow_dispatch:
+    inputs:
+      measure:
+        description: "Upstream measure directory, e.g. CMS138FHIRTobaccoScrnCessation"
+        required: true
+        type: string
+      catalog_id:
+        description: "WorkWell catalog id, lowercase alphanumeric, e.g. cms138"
+        required: true
+        type: string
+      ref:
+        description: "Upstream commit sha (blank = the pinned default in the vendor script)"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  vendor:
+    name: Vendor ${{ inputs.catalog_id }} with the VSAC credential
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: backend-ts
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 24 }
+
+      # Fails the job rather than vendoring an incomplete artifact that looks fine. Without the
+      # credential the script warns and leaves capped/absent value sets exactly as upstream shipped
+      # them — correct behaviour, and precisely the outcome this workflow exists to avoid producing.
+      - name: Refuse to run without the credential
+        env:
+          WORKWELL_VSAC_API_KEY: ${{ secrets.WORKWELL_VSAC_API_KEY_VENDOR }}
+        run: |
+          if [ -z "$WORKWELL_VSAC_API_KEY" ]; then
+            echo "::error::WORKWELL_VSAC_API_KEY_VENDOR is not available here. A fork PR or a repo without the secret cannot produce a completed artifact — that is the whole point of this workflow."
+            exit 1
+          fi
+
+      # Same sparse checkout the eCQM gate uses, so the bundle is read locally at the pinned commit
+      # instead of pulling ~17 MB from raw.githubusercontent.
+      - name: Fetch official content (pinned commit)
+        run: pwsh -NoProfile -File scripts/fetch-official-cases.ps1
+
+      # The measurement from ADR-053, run BEFORE vendoring: it says whether this measure declares a
+      # value set the bundle does not ship, which decides whether the run below can succeed at all.
+      # Never fails the job — it is a measurement, and `official-terminology-audit.mjs` exits 0 by design.
+      - name: Audit declared-vs-shipped terminology
+        continue-on-error: true
+        run: node scripts/official-terminology-audit.mjs "${{ inputs.measure }}"
+
+      - name: Vendor with completion
+        env:
+          WORKWELL_VSAC_API_KEY: ${{ secrets.WORKWELL_VSAC_API_KEY_VENDOR }}
+        run: |
+          node scripts/vendor-official-measure.mjs \
+            --measure "${{ inputs.measure }}" \
+            --catalog-id "${{ inputs.catalog_id }}" \
+            --strip-elm-annotations \
+            --complete-terminology \
+            ${{ inputs.ref && format('--ref {0}', inputs.ref) || '' }}
+
+      # The manifest is the evidence. Printed into the log so the outcome is visible without
+      # downloading anything: `truncated` must be empty, and `completion` must record what was sourced
+      # and from which VSAC release.
+      - name: Report what the credential actually changed
+        run: |
+          node -e '
+            const m = require("./measures/official/${{ inputs.catalog_id }}/manifest.json");
+            const t = m.terminology ?? {};
+            console.log(`measure      ${m.measureName} v${m.version} (${m.cmsId ?? "no cmsId"})`);
+            console.log(`terminology  ${t.valueSets} value sets, ${t.codes} codes`);
+            console.log(`truncated    ${JSON.stringify(t.truncated ?? [])}`);
+            console.log(`completion   ${JSON.stringify(t.completion ?? null, null, 2)}`);
+            if ((t.truncated ?? []).length > 0) {
+              console.log("::warning::truncated is NOT empty — this artifact is still incomplete and routing will refuse it.");
+            }
+          '
+
+      # Explicit paths, never a directory glob: `terminology.json` sits beside these two and must not
+      # leave the runner (see the header).
+      - name: Stage the committable files only
+        run: |
+          mkdir -p ../_vendored/${{ inputs.catalog_id }}
+          cp measures/official/${{ inputs.catalog_id }}/bundle.json   ../_vendored/${{ inputs.catalog_id }}/
+          cp measures/official/${{ inputs.catalog_id }}/manifest.json ../_vendored/${{ inputs.catalog_id }}/
+          echo "staged:"; ls -la ../_vendored/${{ inputs.catalog_id }}/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vendored-${{ inputs.catalog_id }}
+          path: _vendored/${{ inputs.catalog_id }}
+          if-no-files-found: error
+          retention-days: 7

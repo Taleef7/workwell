@@ -1,5 +1,42 @@
 # Journal
 
+## 2026-07-31 (M-A) — the "owner step" was a tooling gap: credentialed vendoring gets a command (branch `feat/vendor-workflow-cms138`)
+
+Three measures — CMS130, CMS165 (capped, ADR-041) and CMS138 (absent, ADR-053) — were recorded as
+blocked on "an owner step with the VSAC key". **That framing was wrong, and the owner was right to push
+back on it.** `WORKWELL_VSAC_API_KEY_VENDOR` has been a GitHub secret since 2026-07-29. What was missing
+was not the credential but a way to run the vendor command in the one place the credential already
+lives: CI has used it on every push for two days.
+
+`vendor-official-measure.yml` is a `workflow_dispatch` job that vendors one measure with
+`--complete-terminology` and uploads the two committable files as an artifact. It takes **`contents:
+read`** and uploads nothing else — deliberately not a workflow that can push, because that is a standing
+capability where this is a one-shot whose output a human reviews.
+
+**The licensed-content boundary is the load-bearing part.** Three files land in the output directory and
+only two may leave the runner: `bundle.json` and `manifest.json` are already committed to this public
+repo, while `terminology.json` holds thousands of AMA CPT and SNOMED CT codes under an NLM licence and
+is gitignored precisely so it is never redistributed (ADR-036) — an artifact URL is redistribution. The
+difference is one `cp` line, and it would be invisible in review because an artifact is a zip nobody
+opens. `vendor-workflow-safety.test.ts` therefore asserts named files, no wildcard, no recursive copy,
+dispatch-only triggers, `contents: read`, and the fail-closed credential check. Mutation-checked against
+`cp -r …/*` — the exact edit someone makes to "just grab everything" — which fails exactly one test.
+
+Its first cut failed on its OWN comment: the workflow header explains why it does not take
+`contents: write`, and the prohibition matched that sentence. A guard that cannot tell a rule from its
+own rationale gets deleted rather than fixed, so it now scans non-comment lines only.
+
+Also: `fetch-official-cases.ps1` now checks out CMS130/CMS138/CMS165 as **candidates** — sparse-checked
+out but deliberately absent from `OFFICIAL_GATED_MEASURES`, since their artifacts are not vendored and
+adding them to the gate would fail the deck. That is what lets `pnpm official:terminology-audit` read
+their bundles at the pinned commit, which is how ADR-053's finding was made in the first place.
+
+**GitHub requires a `workflow_dispatch` file to exist on the default branch before it can be
+dispatched**, so this lands on its own rather than bundled with the vendored artifacts it produces. The
+artifacts, the gate wiring and the MADiE verdict follow in the next PR — and for CMS138 that verdict is
+the real check, because nothing in the vendoring can distinguish a correct expansion from a wrong one of
+the right size.
+
 ## 2026-07-31 (M-A) — "will not expand" was the wrong sentence: upstream ships CMS138 one value set short (branch `fix/official-terminology-absent-valuesets`)
 
 ADR-047's table reads *"CMS138 tobacco screening | **0/47, 47 errors** — one value set (…3.526.3.1278)
