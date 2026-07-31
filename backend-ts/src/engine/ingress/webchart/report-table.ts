@@ -5,6 +5,15 @@
  */
 import type { OutcomeStatus } from "../../evaluate-measure.ts";
 
+/**
+ * Measures the dev-DB sample can exercise (real LOINC/HCPCS present + reconciled).
+ *
+ * Lives here rather than in `devdb-cli.ts` because `live-cli.ts` needs it, and a CLI entrypoint that
+ * other modules import is not an entrypoint — it is a library with `node:fs` in it, which is precisely
+ * what keeps the engine's library surface from being Workers-portable (M-C).
+ */
+export const DEVDB_WHITELIST = ["diabetes_hba1c", "obesity_bmi", "cholesterol_ldl", "hypertension", "cms125"];
+
 export const BUCKETS: OutcomeStatus[] = ["COMPLIANT", "DUE_SOON", "OVERDUE", "MISSING_DATA", "EXCLUDED"];
 export const BUCKET_LABEL: Record<OutcomeStatus, string> = {
   COMPLIANT: "COMPL",

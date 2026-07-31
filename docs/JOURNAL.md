@@ -1,5 +1,42 @@
 # Journal
 
+## 2026-07-31 (M-C) — `src/engine/` is not the package, and the boundary is now a test (branch `feat/measure-engine-package`)
+
+M-C promises `@workwell/measure-engine` with two dependencies. The workspace and
+`packages/official-executor` already exist, and `engine-boundary.test.ts` already proves `src/engine/` is
+self-contained — so the open question was never "can it be lifted" but **what belongs in it**, which
+task #4 called the published-API decision and which nothing had actually decided.
+
+**Measuring the dependency graph answers it, and the answer is not the directory.** Every cross-area edge
+inside `src/engine/` runs app → core, with exactly one exception (`cql/codegen/generate-sql-cli.ts` →
+`ingress/webchart/terminology.ts`, and that is a CLI entrypoint, so it is app-side too). The core is
+`evaluate-measure.ts` + `measure-executor.ts` + `cql/**`. Everything else — `synthetic/`, `ingress/`,
+`immunization/`, `cli/` — is WorkWell app content that *uses* the core.
+
+That matters because `synthetic/employee-catalog.ts` is **a fictional employee directory and the single
+most-imported module in the tree, 51 call sites**. Shipping the directory as the package would publish our
+fixtures as API, answering "the CQL part, independent and reusable" with its opposite.
+
+**So the boundary is pinned now, by a test, before any file moves.** `engine-core-boundary.test.ts`
+computes the core's transitive closure and asserts it reaches nothing outside the tree, contains no
+app-area file, has **no `node:` import at all**, and declares exactly `cql-execution` + `cql-exec-fhir`.
+Measured: **29 files, 0 escapes, 0 node imports, 2 deps** — the first time locked decision #3's dependency
+claim is a fact rather than a promise. All five assertions are mutation-checked, and the mutation pass
+caught a hole in my own test: a typo'd entry point counted as "in its own closure" because it was recorded
+before the read failed, so the non-degeneracy check passed while checking nothing.
+
+**Two recorded facts were overstated, and measuring corrected both.** ADR-048 said the CLI files "export
+library values consumed by 7+ modules including production `live-cli.ts`" — most of those consumers are
+tests, two are *comments* mentioning the filename, and the real production coupling was **one string
+array** (`DEVDB_WHITELIST`, now moved to `report-table.ts` so the four `*-cli.ts` files are true leaves).
+ADR-048 also concluded "`cql/` is NOT wholesale-liftable"; the accurate statement is that the SQL codegen
+CLI is not part of the package, and the rest of `cql/` is.
+
+**What did NOT ship, stated plainly: `packages/measure-engine` does not exist yet.** The move is ~29 files
+and ~87 import sites — mechanical, and mechanical changes are where regressions hide because nobody reads
+150 files of import rewrites. Doing it against an already-green boundary test is the difference between
+verifying the move and discovering what the move decided. That is the next PR.
+
 ## 2026-07-31 (M-B) — QRDA Category I import exists, and the round trip caught the export lying (branch `feat/qrda1-import`)
 
 `POST /api/runs/:id/evaluate` now accepts `{ measureId, qrda1 }`: a QRDA Category I document is

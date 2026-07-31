@@ -1,5 +1,72 @@
 # Architecture Decision Records
 
+## ADR-052: `src/engine/` is not the package — the eval core is, and the boundary is enforced before the files move
+
+**Status:** Accepted (2026-07-31). Roadmap M-C, locked decision #3. The physical extraction is the NEXT
+PR; this one decides and enforces what it must produce.
+
+**Context.** M-C promises `@workwell/measure-engine` with `cql-execution` + `cql-exec-fhir` as its only
+dependencies. `packages/official-executor` already exists, the pnpm workspace already declares
+`packages/*`, and `engine-boundary.test.ts` already proves `src/engine/` is self-contained. The
+outstanding question was never "can it be lifted" — it was **what should be in it**, which task #4
+called the published-API design decision and which nothing had actually decided.
+
+**The measurement answers it, and the answer is not the directory.**
+
+Mapping every cross-area edge inside `src/engine/`:
+
+| Area | Role | Evidence |
+|---|---|---|
+| `evaluate-measure.ts`, `measure-executor.ts`, `cql/**` | **the package** | depends on nothing else in the tree |
+| `synthetic/`, `ingress/`, `immunization/`, `cli/` | **app content** | every edge runs app → core |
+
+Every cross-area edge runs app → core with **exactly one exception**: `cql/codegen/generate-sql-cli.ts`
+imports `ingress/webchart/terminology.ts`. It is a CLI entrypoint, so it is app-side too.
+
+`src/engine/synthetic/employee-catalog.ts` is a **fictional employee directory** and is the single
+most-imported module in the tree — **51 call sites**. Shipping the directory as the package would publish
+our fixtures as API, to answer a request ("the CQL part, independent and reusable") that asked for the
+opposite.
+
+**Decision.**
+
+1. **The package is the eval core**: `evaluate-measure.ts`, `measure-executor.ts`, and `cql/**` minus the
+   SQL-codegen CLI. `synthetic/`, `ingress/`, `immunization/` and `cli/` stay in the app.
+2. **The boundary is pinned NOW, by a test, before any file moves.** `engine-core-boundary.test.ts`
+   computes the core's transitive closure from its declared entry points and asserts it reaches nothing
+   outside the tree, contains **no** app-area file, has **no `node:` import**, and declares exactly
+   `cql-execution` + `cql-exec-fhir`. Measured: **29 files, 0 escapes, 0 node imports, 2 deps** — which
+   is the first time locked decision #3's dependency claim has been a fact rather than a promise.
+3. **`CORE_ENTRY_POINTS` IS the published API.** Eleven modules, listed explicitly. Adding one widens
+   what the package promises, so it belongs in a PR that says so — as against subpath-exporting the whole
+   tree, which would make every internal file public by default and decide nothing.
+4. **A CLI that other modules import is not an entrypoint.** `DEVDB_WHITELIST` moved out of
+   `devdb-cli.ts` (its only non-test consumer was `live-cli.ts`) into `report-table.ts`, so the four
+   `*-cli.ts` files are now true leaves. This is what lets the *package* rule be "no `node:` at all",
+   where the *directory* rule can only be "no `node:` outside `*-cli.ts`".
+
+**Two recorded facts were overstated, and measuring corrected both.**
+
+- ADR-048 said the CLI files "export library values consumed by 7+ modules including production
+  `live-cli.ts`". Of those consumers, most are **tests**, two are **comments** mentioning the filename,
+  and the actual production coupling was **one string array**. The debt was one `git mv` of a constant.
+- ADR-048 also concluded "`cql/` is NOT wholesale-liftable". The accurate statement is that the **SQL
+  codegen CLI** is not part of the package; the rest of `cql/` is, and its closure is provably clean.
+
+**Consequences.**
+
+- The physical `git mv` is a mechanical change — ~29 files moved, ~87 import sites rewritten — and
+  mechanical changes are where regressions hide, because nobody reads 150 files of import rewrites.
+  Pinning the boundary first means the move either satisfies an already-green test or fails loudly,
+  rather than the boundary becoming whatever the move happened to produce.
+- **This PR does not create `packages/measure-engine`.** That is deliberate and it is the honest limit of
+  what shipped: the decision and its enforcement are here, the file move is next.
+- `engine-boundary.test.ts` (the directory rule) stays. The two are different claims — one says the
+  directory doesn't reach out, the other says the package doesn't reach *into the app* — and the second
+  is the one M-C needs.
+
+---
+
 ## ADR-051: QRDA Category I import is a mapping into the unchanged engine — and it proved the export only works in real terminology
 
 **Status:** Accepted (2026-07-31). Roadmap M-B. **Not CVU+-validated** — that bar is unmet and this ADR
