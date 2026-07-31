@@ -416,6 +416,7 @@ test("renderOfficialCaseReport documents primary end-of-day normalization withou
     measurementPeriod: loaded.measurementPeriod,
     valueSets: loaded.valueSets,
     valueSetMode: "measure-bundle" as const,
+    supplementedOids: [],
     trustMetaProfile: false,
     profileRetry: false,
     retrieveSignal: true,
@@ -445,4 +446,89 @@ test("renderOfficialCaseReport documents primary end-of-day normalization withou
     /date-only period ends are normalized to end-of-day because fqm-execution 1\.8\.5 parses them as start-of-day \(upstream issue filed: projecttacoma\/fqm-execution#371\); the un-normalized run scores 64\/66\./,
   );
   assert.doesNotMatch(markdown, /diagnostic probe|primary table intentionally preserves/i);
+});
+
+/**
+ * ADR-053: the gate runs on UPSTREAM's terminology, which is what makes it an external check — and what
+ * makes it blind to a value set upstream's bundle does not ship. Measured on CMS138: 0/47 with 47
+ * errors, every one "Missing the following valuesets", with a complete sidecar sitting beside it.
+ *
+ * The supplement closes that, and `supplementFor` is the load-bearing part: handed the artifact's whole
+ * runtime cache, it must take ONLY what upstream lacks. Anything wider silently converts this gate from
+ * "upstream's terminology" into "ours" while the deck stays green — a failure invisible precisely
+ * because nothing goes red.
+ */
+const vsRes = (url: string) => ({ resourceType: "ValueSet", url });
+
+test("supplementFor takes ONLY the value sets the bundle does not ship", async () => {
+  const module = await import("./official-cases.ts");
+  const loaded = { valueSetResources: [vsRes("http://x/ValueSet/2.16.1"), vsRes("http://x/ValueSet/2.16.2")] };
+  const supplemental = [vsRes("http://x/ValueSet/2.16.1"), vsRes("http://x/ValueSet/2.16.3")];
+  assert.deepEqual(
+    (module.supplementFor(loaded as never, supplemental) as Array<{ url: string }>).map((r) => r.url),
+    ["http://x/ValueSet/2.16.3"],
+    "2.16.1 is shipped upstream and must keep coming from upstream",
+  );
+});
+
+test("supplementFor matches on the bare OID, so a |version canonical is not treated as missing", async () => {
+  // A canonical may carry `|version` while the shipped ValueSet.url does not (review of #364). Without
+  // normalization the supplement would substitute OUR codes for a value set upstream ships — the exact
+  // silent widening this filter exists to prevent.
+  const module = await import("./official-cases.ts");
+  const loaded = { valueSetResources: [vsRes("http://x/ValueSet/2.16.1")] };
+  assert.deepEqual(module.supplementFor(loaded as never, [vsRes("http://x/ValueSet/2.16.1|1.2")]), []);
+});
+
+test("supplementFor is empty for an absent supplement, and drops unidentifiable resources", async () => {
+  const module = await import("./official-cases.ts");
+  const loaded = { valueSetResources: [vsRes("http://x/ValueSet/2.16.1")] };
+  assert.deepEqual(module.supplementFor(loaded as never, undefined), []);
+  assert.deepEqual(module.supplementFor(loaded as never, []), []);
+  // No url at all: it cannot be SHOWN to be missing upstream, so it must not be injected.
+  assert.deepEqual(module.supplementFor(loaded as never, [{ resourceType: "ValueSet" }]), []);
+});
+
+test("a complete bundle keeps the 3-argument call even when handed a full runtime cache", async () => {
+  // The inertness property for the five measures that need nothing. Handed the WHOLE cache — exactly
+  // what the CLI passes — the run must still execute on upstream's terminology alone.
+  const module = await import("./official-cases.ts");
+  const loaded = loadedMeasureForRunner();
+  const patientId = loaded.cases[0]!.patientId!;
+  const calls: unknown[][] = [];
+  const calculate = (...args: unknown[]) => {
+    calls.push(args);
+    return Promise.resolve(fqmResult(patientId, { "initial-population": true, denominator: true, numerator: true }, []));
+  };
+
+  const run = await module.runOfficialMeasureCases(loaded, {
+    calculate,
+    supplementalValueSets: [...loaded.valueSetResources],
+  });
+
+  assert.equal(calls[0]!.length, 3, "no external cache argument may be added when nothing is missing");
+  assert.equal(run.valueSetMode, "measure-bundle");
+  assert.deepEqual(run.supplementedOids, []);
+});
+
+test("a bundle missing a value set gets it supplemented, recorded, and passed to fqm", async () => {
+  const module = await import("./official-cases.ts");
+  const loaded = loadedMeasureForRunner();
+  const patientId = loaded.cases[0]!.patientId!;
+  const missing = vsRes("http://cts.nlm.nih.gov/fhir/ValueSet/2.16.840.1.113883.3.526.3.1278");
+  const calls: unknown[][] = [];
+  const calculate = (...args: unknown[]) => {
+    calls.push(args);
+    return Promise.resolve(fqmResult(patientId, { "initial-population": true, denominator: true, numerator: true }, []));
+  };
+
+  const run = await module.runOfficialMeasureCases(loaded, {
+    calculate,
+    supplementalValueSets: [...loaded.valueSetResources, missing],
+  });
+
+  assert.equal(calls[0]!.length, 4, "the supplement must reach fqm as the external cache argument");
+  assert.deepEqual(calls[0]![3], [missing], "and it must be ONLY the missing one");
+  assert.equal(run.valueSetMode, "measure-bundle+sourced-supplement");
+  assert.deepEqual(run.supplementedOids, [missing.url]);
 });
