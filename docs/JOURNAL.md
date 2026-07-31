@@ -31,6 +31,17 @@ out but deliberately absent from `OFFICIAL_GATED_MEASURES`, since their artifact
 adding them to the gate would fail the deck. That is what lets `pnpm official:terminology-audit` read
 their bundles at the pinned commit, which is how ADR-053's finding was made in the first place.
 
+**Review (#365) found two more, both of the same family as the rest of this run.** (1) Dispatch inputs
+were interpolated straight into `run:` scripts — including the step holding the VSAC credential, where
+`$(...)` in an input would execute. Only write-access users can dispatch, which lowers the odds and not
+the severity; inputs now pass through `env:` and are validated first. (2) **The completeness report read
+the wrong field.** It warned on non-empty `truncated` — which an ABSENT value set never appears in — so
+for CMS138, the one measure this was built for, it was warning-free by construction and the workflow
+would have uploaded exactly the unroutable artifact it claims to reject. `completeTerminology` fails
+closed and exits 0, so the vendor step succeeding says nothing. There is now a verification step running
+the REAL runtime predicates (`absentValueSets` + `truncated`) before staging, and both new guards are
+mutation-checked. Third instance this run of "a check that reads a field the failure does not appear in".
+
 **GitHub requires a `workflow_dispatch` file to exist on the default branch before it can be
 dispatched**, so this lands on its own rather than bundled with the vendored artifacts it produces. The
 artifacts, the gate wiring and the MADiE verdict follow in the next PR — and for CMS138 that verdict is
