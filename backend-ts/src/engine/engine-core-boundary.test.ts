@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve as resolvePath, relative, sep } from "node:path";
 
@@ -28,13 +28,30 @@ import { dirname, resolve as resolvePath, relative, sep } from "node:path";
  * "`cql/` is NOT wholesale-liftable"; the accurate statement is that the SQL codegen CLI is not part of
  * the package, and the rest of `cql/` is.
  *
- * ## What this test buys
+ * ## Scope, stated because the first draft did not
  *
- * The physical `git mv` is mechanical, and mechanical changes are where regressions hide because nobody
- * reads 150 files of import rewrites. Pinning the boundary FIRST means the move either satisfies an
- * already-passing test or fails loudly — rather than the boundary being whatever the move happened to
- * produce. It also stops the core acquiring an app dependency in the meantime, which is exactly how the
- * two escapes severed in PR-1 came to exist.
+ * "Every cross-area edge runs app to core, with exactly one exception" is true of **production** files.
+ * There are seven further core-to-app edges from TEST files, plus two core tests reaching
+ * `stores/sqlite/**` outside the engine tree entirely — and this closure starts at production entry
+ * points, so it structurally cannot see any of them. ADR-048 §5 already named that hazard, and it is the
+ * extraction's real blocker: the move must either strand those tests or give the package a
+ * devDependency pointing back at the app.
+ *
+ * ## What this test buys — and what it does not
+ *
+ * Between now and the move: the app cannot quietly acquire a core-INTERNAL import, and the core cannot
+ * quietly acquire an app dependency or a third-party one.
+ *
+ * It does NOT mean the move will "satisfy an already-green test". This file resolves every path from its
+ * own location, so leaving it behind makes all eleven entry points unresolvable, while moving it into the
+ * package makes the app-area assertion structurally vacuous — those directories will not exist there —
+ * and blinds the API check, because app imports become the bare specifier `@workwell/measure-engine` and
+ * it inspects only relative ones. Both need rewriting as part of the move (review, #363).
+ *
+ * It also does not settle the substantive question. `cql-execution-engine.ts` hard-imports our 15-measure
+ * catalog, 17 compiled WorkWell ELM libraries (17 of the 29 members here) and a value-set table for the
+ * synthetic corpus. The argument that excludes `synthetic/` applies to those with equal force, so whether
+ * the package SHIPS that content or takes it injected is open — see ADR-052.
  */
 const ENGINE_ROOT = fileURLToPath(new URL("./", import.meta.url)).replace(/[\\/]$/, "");
 
@@ -63,6 +80,13 @@ const CORE_BARE_DEPS = new Set(["cql-execution", "cql-exec-fhir"]);
 
 const SPECIFIER_RE = /(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s+|\brequire\s*\(\s*)(["'`])([^"'`]*)\1/g;
 
+/**
+ * KNOWN LIMIT, inherited from `engine-boundary.test.ts`: `/\*` inside a STRING LITERAL starts a match,
+ * so an import after it can be deleted from the scan. Inert today — the only production occurrence in
+ * the tree is itself inside a doc comment — but `cql/codegen/generate-cql.ts` is in the closure and its
+ * job is emitting CQL, whose block-comment syntax is `/* *\/`. One comment template and the closure
+ * silently shrinks (review, #363). A real tokenizer is the fix if that day comes.
+ */
 function stripComments(source: string): string {
   return source
     .replace(/\/\*[\s\S]*?\*\//g, "")
@@ -92,7 +116,11 @@ function coreClosure(entryPoints: readonly string[]): Closure {
     if (files.has(file) || missing.has(file)) continue;
     // Only TypeScript sources carry imports; the bundled `.elm.json` artifacts are data.
     if (!file.endsWith(".ts")) {
-      files.add(file);
+      // Existence-checked like a `.ts` member. Adding it unconditionally meant a renamed or deleted
+      // bundled ELM library left every assertion green with a HEALTHY-looking 30-file closure, while
+      // test 1's own message says an import resolving to nothing is a hole in the map (review, #363).
+      if (existsSync(file)) files.add(file);
+      else missing.add(file);
       continue;
     }
     let source: string;
@@ -143,9 +171,12 @@ test("the eval core is CONFINED to the package boundary — no synthetic/, ingre
 
 test("the eval core is NODE-FREE, so the package surface stays Workers-portable", () => {
   // ARCHITECTURE states this as an invariant; `engine-boundary.test.ts` permits `node:` in any
-  // `*-cli.ts`, which is right for the directory and wrong for the package. A CLI that other modules
-  // import is not an entrypoint, it is a library with `node:fs` in it — which is why `DEVDB_WHITELIST`
-  // moved out of `devdb-cli.ts` in this same change.
+  // `*-cli.ts`, which is right for the directory and wrong for the package.
+  //
+  // NOT caused by this change, though an earlier draft said so: running this same algorithm against
+  // `main` gives a byte-identical closure with zero `node:` imports, because the closure contains no
+  // `ingress/` file at all. Relocating `DEVDB_WHITELIST` out of `devdb-cli.ts` is a tidy-up worth having
+  // and is not what makes this assertion pass (review, #363).
   const nodeImports = [...closure.bare.entries()].filter(([spec]) => spec.startsWith("node:"));
   assert.deepEqual(nodeImports, [], "file I/O belongs at the CLI edge, which is app-side");
 });
@@ -175,8 +206,19 @@ test("the closure is non-degenerate — this test cannot pass by reaching nothin
  */
 function sourceFiles(dir: string, out: string[] = []): string[] {
   for (const name of readdirSync(dir)) {
+    // `engine-boundary.test.ts`'s own walker already skips this; omitting it meant 39 of the 40 files
+    // found under `packages/` were `fqm-execution`'s shipped .d.ts, reached through a pnpm symlink —
+    // and `statSync` THROWS on a dangling one, so a pruned install failed this test with ENOENT rather
+    // than a boundary violation (review, #363).
+    if (name === "node_modules") continue;
     const full = resolvePath(dir, name);
-    if (statSync(full).isDirectory()) sourceFiles(full, out);
+    let isDir: boolean;
+    try {
+      isDir = statSync(full).isDirectory();
+    } catch {
+      continue; // a broken link is not a boundary violation
+    }
+    if (isDir) sourceFiles(full, out);
     else if (full.endsWith(".ts") && !full.endsWith(".test.ts")) out.push(full);
   }
   return out;
