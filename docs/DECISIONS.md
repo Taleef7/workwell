@@ -92,10 +92,25 @@ them apart:
   completion before this ADR was, so the field marks the weaker provenance rather than labelling both.
   That asymmetry is forced, not stylistic: see the reproducibility consequence below.
 
-**The real check on a sourced value set is not in the code at all: it is the MADiE gate.** CMS138 has 47
-committed cases with upstream's own expected population vectors, currently 0/47 with 47 errors. A wrongly
-sourced value set does not turn that green. That is a stronger oracle than either ADR-041 guard, and it
-is the reason this is safe to do without a containment check.
+**The check on a sourced value set was claimed to be the MADiE gate. MEASURED 2026-07-31, that claim is
+FALSE as written, and the correction matters.** The gate executes each measure against **the upstream
+bundle's own ValueSet resources** — the report says so in its own words: *"ValueSets are consumed
+directly from each official measure Bundle; no VSAC network call or key is used."* For an ABSENT value
+set the bundle is precisely what does not have it, so the gate cannot resolve it however good our
+sourced codes are. Run with cms138 in the gate: **0/47, 47 errors, every one of them
+`Missing the following valuesets: …3.526.3.1278`** — byte-for-byte the pre-ADR-053 result, with a
+complete sidecar sitting beside it.
+
+So a sourced-absent value set is validated by neither the vendoring (no containment or declared-total
+baseline) nor the gate as it stands. What CAN validate it, and is not yet built: run the deck with the
+**vendored sidecar** as fqm's value-set cache — the mode the reduction check already models as
+`vendored-terminology-sidecar`. The codes would then be ours while **the expected population vectors
+stay upstream's**, so 47/47 would be real evidence about the codes even though it is no longer evidence
+about upstream's terminology. That is a weaker claim than the other five measures carry and must be
+labelled as one, per-measure, in the report.
+
+Until that exists, **CMS138 stays un-onboarded** — the same call ADR-047 made, for a better-understood
+reason.
 
 **Decision 4 — routing's diagnosis changes; its verdict does not.** `expandArtifactTerminology` already
 refused an unexpandable value set, so nothing was ever routed on one, and this ADR does not claim to have
