@@ -9,7 +9,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { qdmEntriesFor } from "./qdm-entries.ts";
+import { qdmEntriesFor, translateQdm } from "./qdm-entries.ts";
 
 const bundleOf = (...resources: unknown[]) => ({
   resourceType: "Bundle",
@@ -236,4 +236,34 @@ test("QDM: a Condition dated by onsetPeriod keeps its interval", () => {
   const byPeriod = { ...condition, onsetDateTime: undefined, onsetPeriod: { start: "2019-01-01T00:00:00Z" } };
   const [entry] = qdmEntriesFor(bundleOf(byPeriod));
   assert.ok(entry?.includes('<low value="20190101000000"/>'), "onsetPeriod was previously never read");
+});
+
+test("QDM: a code system with no CDA OID is reported, not silently dropped", () => {
+  // Found by the QRDA I import round trip: WorkWell's authored measures bind synthetic
+  // `urn:workwell:vs:*` value sets, which have no CDA code system OID — so a QRDA cannot carry their
+  // data at all, and every clinical resource vanished with the export reporting only "no entries".
+  // That is a structural limit worth NAMING: QRDA I is meaningful for real terminology only.
+  const synthetic = { ...procedure, code: { coding: [{ system: "urn:workwell:vs:audiogram", code: "AUD" }] } };
+  const { entries, untranslatable } = translateQdm(bundleOf(synthetic));
+  assert.deepEqual(entries, []);
+  assert.equal(untranslatable.length, 1);
+  assert.match(untranslatable[0]!, /Procedure: no CDA code system OID for urn:workwell:vs:audiogram/);
+});
+
+test("QDM: the OTHER drop reasons are named too, and out-of-scope resources stay silent", () => {
+  const retracted = translateQdm(bundleOf({ ...procedure, status: "entered-in-error" }));
+  assert.match(retracted.untranslatable[0]!, /status says the event did not happen or was retracted/);
+
+  const uncategorised = translateQdm(bundleOf({ ...mammogram, category: undefined }));
+  assert.match(uncategorised.untranslatable[0]!, /no category, so its QDM datatype .* is undetermined/);
+
+  // A Patient or a resource type no measure of ours reads is not a gap — reporting it would be noise.
+  const outOfScope = translateQdm(bundleOf({ resourceType: "Patient", id: "p" }, { resourceType: "Coverage", id: "c" }));
+  assert.deepEqual(outOfScope.untranslatable, []);
+});
+
+test("QDM: a healthy bundle reports nothing untranslatable", () => {
+  const { entries, untranslatable } = translateQdm(bundleOf(encounter, condition, hba1c, mammogram, procedure));
+  assert.equal(entries.length, 5);
+  assert.deepEqual(untranslatable, []);
 });

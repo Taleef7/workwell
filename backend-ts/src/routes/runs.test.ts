@@ -14,6 +14,7 @@ import { fileURLToPath } from "node:url";
 // @ts-expect-error — @mieweb/cloud-local ships .mjs without types
 import { createSqliteD1 } from "@mieweb/cloud-local";
 import { handleRuns } from "./runs.ts";
+import { buildQrda1Document, qrda1NonConformance } from "../fhir/qrda1-export.ts";
 import { SqliteCaseStore } from "../stores/sqlite/case-store-sqlite.ts";
 import { SqliteCaseEventStore } from "../stores/sqlite/case-event-store-sqlite.ts";
 import { SqliteOutcomeStore } from "../stores/sqlite/outcome-store-sqlite.ts";
@@ -513,4 +514,108 @@ test("Codex P2: a non-string triggeredBy is coerced to 'manual', never a 500", a
   // and a forged reserved label is still coerced (Fable M1)
   const seed = await post("/api/runs", { scopeType: "MEASURE", scopeId: "audiogram", triggeredBy: "seed:scale" });
   assert.equal(((await seed!.json()) as { triggeredBy: string }).triggeredBy, "manual");
+});
+
+test("POST /api/runs/:id/evaluate accepts a QRDA I document — §170.315(c)(2) import AND calculate", async () => {
+  // The whole point of Category I carrying patient DATA rather than an answer (ADR-050): a receiver
+  // recalculates from it. This drives the real route end to end — export the bundle the engine just
+  // evaluated, feed the DOCUMENT back in, and require the same outcome. Importing is a mapping into the
+  // unchanged engine, not a second calculator (ADR-051).
+  const created = await post("/api/runs", { scopeType: "MEASURE", scopeId: "audiogram", triggeredBy: "test" });
+  const run = (await created!.json()) as { id: string };
+
+  const direct = await post(`/api/runs/${run.id}/evaluate`, {
+    measureId: "audiogram",
+    patientBundle: bundle,
+    evaluationDate: "2026-06-12",
+  });
+  const fromBundle = (await direct!.json()) as { status: string; subjectId: string };
+
+  const runRecord = {
+    id: run.id,
+    measurementPeriodStart: "2025-06-12T00:00:00.000Z",
+    measurementPeriodEnd: "2026-06-12T00:00:00.000Z",
+  } as never;
+  // A REAL-terminology bundle. The audiogram fixture binds synthetic `urn:workwell:vs:*` value sets,
+  // which have no CDA code system OID, so a QRDA cannot carry them at all — the export says so, and the
+  // next test pins that. QRDA I is only a meaningful artifact for data in real terminology.
+  const realCoded = {
+    resourceType: "Bundle",
+    type: "collection",
+    entry: [
+      { resource: { resourceType: "Patient", id: fromBundle.subjectId } },
+      {
+        resource: {
+          resourceType: "Procedure",
+          id: "audio-1",
+          status: "completed",
+          code: { coding: [{ system: "http://snomed.info/sct", code: "77862003", display: "Audiometry" }] },
+          performedDateTime: "2026-03-01T09:00:00Z",
+        },
+      },
+    ],
+  };
+  const document = buildQrda1Document(
+    runRecord,
+    "audiogram",
+    { subjectId: fromBundle.subjectId, measureId: "audiogram", evidence: {} } as never,
+    realCoded,
+  );
+
+  const roundTripped = await post(`/api/runs/${run.id}/evaluate`, {
+    measureId: "audiogram",
+    qrda1: document,
+    evaluationDate: "2026-06-12",
+  });
+  assert.equal(roundTripped?.status, 201);
+  const fromDocument = (await roundTripped!.json()) as {
+    status: string;
+    subjectId: string;
+    qrda1?: { untranslatedTemplates: string[] };
+  };
+  assert.equal(fromDocument.subjectId, fromBundle.subjectId, "the same subject the document names");
+  // What the import could not translate travels with the answer — silence would let a partial import
+  // read as a full one (the CMS RY2026 sample alone carries 47 such entries).
+  assert.deepEqual(fromDocument.qrda1?.untranslatedTemplates, []);
+});
+
+test("POST /api/runs/:id/evaluate REFUSES an unreadable QRDA I with the reason, never a silent empty bundle", async () => {
+  // An empty bundle evaluates out-of-population for every measure — indistinguishable from a genuinely
+  // ineligible patient, which is the hazard ADR-043 exists for.
+  const created = await post("/api/runs", { scopeType: "MEASURE", scopeId: "audiogram", triggeredBy: "test" });
+  const run = (await created!.json()) as { id: string };
+  for (const [payload, expected] of [
+    ["<html>not cda</html>", /not a CDA document/],
+    [`<ClinicalDocument xmlns="urn:hl7-org:v3"/>`, /no Patient Data Section/],
+  ] as const) {
+    const res = await post(`/api/runs/${run.id}/evaluate`, { measureId: "audiogram", qrda1: payload });
+    assert.equal(res?.status, 400);
+    const body = (await res!.json()) as { error: string; message: string };
+    assert.equal(body.error, "qrda1_import_failed");
+    assert.match(body.message, expected);
+  }
+  // A non-string qrda1 is a request error, not a 500.
+  const wrongType = await post(`/api/runs/${run.id}/evaluate`, { measureId: "audiogram", qrda1: 42 });
+  assert.equal(wrongType?.status, 400);
+  assert.equal(((await wrongType!.json()) as { error: string }).error, "invalid_request");
+});
+
+test("a QRDA I export SAYS WHY nothing translated, rather than only that it is empty", async () => {
+  // Found by the import round trip, and it is a structural limit rather than a bug: WorkWell's authored
+  // measures bind synthetic `urn:workwell:vs:*` value sets, which have no CDA code system OID, so a QRDA
+  // cannot carry their data at all. Reporting only "no QDM patient data entries" for a bundle that was
+  // present and full of resources is the misleading half of the truth.
+  const created = await post("/api/runs", { scopeType: "MEASURE", scopeId: "audiogram", triggeredBy: "test" });
+  const run = (await created!.json()) as { id: string };
+  const reasons = qrda1NonConformance(
+    { subjectId: "s", measureId: "audiogram", evidence: {} } as never,
+    "audiogram",
+    bundle,
+  );
+  assert.ok(reasons.some((r) => /no QDM patient data entries/.test(r)), "still says it is not conformant");
+  assert.ok(
+    reasons.some((r) => /no CDA code system OID for urn:workwell:vs:/.test(r)),
+    `and names the cause — got ${JSON.stringify(reasons)}`,
+  );
+  assert.ok(run.id);
 });
