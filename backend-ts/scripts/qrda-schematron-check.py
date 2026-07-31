@@ -52,9 +52,27 @@ from collections import defaultdict
 # 2026 CMS QRDA I v1.0 Support Files/Schematron/2026-CMS-QRDA-I-v1.0.sch
 PINNED = {"1f4e1ff48e80fdd708f3291e212d143afcdd14d8fead9f5427359424dae0abc7": "2026 CMS QRDA I v1.0"}
 
-CMS_ONLY = re.compile(r"CONF:CMS")
-CONF = re.compile(r"CONF:([A-Za-z0-9_]+?)[-_]?\d*\)")
+CONF = re.compile(r"CONF:\s*([A-Za-z0-9_]+?)(?:[-_]\d+)?\s*\)")
 SVRL = {"svrl": "http://purl.oclc.org/dsdl/svrl"}
+
+# CMS-numbered asserts that are NOT CMS policy — they bind any conformant CDA, so a violation is a real
+# defect at OUR bar even though the rule carries a CMS conformance number.
+#
+# This exists because the naive partition ("CONF:CMS-* is not our bar") reports a document with a broken
+# datatype as ZERO base-HL7 errors and exits 0. Demonstrated on the real artifact: a lab result emitted
+# as `<value xsi:type="PQ" value="not-a-number" nullFlavor="NI"/>` trips only a-CMS_0110 and would have
+# been filed under "EXPECTED, not our bar" — and that headline number is quoted in three documents.
+#
+#   CMS_0105-0113  HL7 abstract datatype rules (BL, CS, CD/CE, II, INT, PQ, REAL, ST, TS):
+#                  @value xor @nullFlavor, non-empty ST, and so on. Invalid CDA in any realm.
+#   CMS_0115-0120  NPI and TIN validity (10 digits, all-digits, Luhn checksum, @extension xor
+#                  @nullFlavor). A malformed national identifier is malformed under any programme.
+#
+# Deliberately NOT included: CMS_0121 ("a UTC offset should not be used anywhere in a QRDA Category I"),
+# which directly CONTRADICTS base HL7's CONF:81-10130 ("if more precise than day, SHOULD include
+# time-zone offset"). That one is genuinely CMS policy, and it is the clearest evidence that this
+# partition is doing real work rather than bookkeeping.
+GENERIC_CMS_RULES = re.compile(r"^a-CMS_(010[5-9]|011[0-3]|011[5-9]|0120)\b")
 
 
 def main() -> int:
@@ -88,31 +106,62 @@ def main() -> int:
     validator.validate(etree.parse(args.document))
 
     buckets: dict[str, list[dict]] = defaultdict(list)
+    unclassified: list[str] = []
     for failure in validator.validation_report.xpath("//svrl:failed-assert", namespaces=SVRL):
         text = " ".join("".join(failure.itertext()).split())
         aid = failure.get("id") or ""
-        conf = CONF.search(text)
-        bucket = "CMS" if CMS_ONLY.search(text) or "CMS" in aid else (conf.group(1) if conf else "?")
-        buckets[bucket].append(
-            {
-                "id": aid,
-                "severity": "error" if aid.endswith("-error") or "-error" in aid else "warning",
-                "text": text,
-                "location": failure.get("location", ""),
-            }
-        )
+        # EVERY conformance reference in the message, not just the first: an assert that cites both a CMS
+        # number and a base one is constraining base CDA and belongs in the base bucket.
+        refs = CONF.findall(text)
+        non_cms = [r for r in refs if not r.startswith("CMS")]
+        if non_cms:
+            bucket = non_cms[0]
+        elif GENERIC_CMS_RULES.match(aid):
+            bucket = "generic-CDA"  # CMS-numbered, but binds any conformant CDA — see GENERIC_CMS_RULES
+        elif refs or "CMS" in aid:
+            bucket = "CMS"
+        else:
+            bucket = "?"
+            unclassified.append(aid)
+
+        # Severity from the SVRL role/flag when the artifact provides one; the id suffix is the fallback.
+        # Guessing from the id alone means an IG revision that renames asserts silently downgrades every
+        # error to a warning — so an id we cannot read is reported as an ERROR, not quietly demoted.
+        role = (failure.get("role") or failure.get("flag") or "").lower()
+        if role in ("error", "fatal", "warning", "info"):
+            severity = "warning" if role in ("warning", "info") else "error"
+        elif "-warning" in aid:
+            severity = "warning"
+        elif "-error" in aid:
+            severity = "error"
+        else:
+            severity = "error"
+            unclassified.append(f"{aid} (severity)")
+
+        buckets[bucket].append({"id": aid, "severity": severity, "text": text, "location": failure.get("location", "")})
 
     base = [f for k, v in buckets.items() if k != "CMS" for f in v]
     cms = buckets.get("CMS", [])
     base_errors = [f for f in base if f["severity"] == "error"]
 
     if args.json:
-        print(json.dumps({"document": args.document, "schematron": digest, "base": base, "cms": cms}, indent=2))
-        return 0
+        print(
+            json.dumps(
+                {"document": args.document, "schematron": digest, "base": base, "cms": cms, "unclassified": unclassified},
+                indent=2,
+            )
+        )
+        # Same contract as the human output. Returning 0 unconditionally here would make any check wired
+        # to the machine-readable mode pass always — a green light that cannot go red.
+        return 1 if base_errors else 0
 
     print(f"\n### {args.document}")
     print(f"    BASE HL7 (our bar):        {len(base_errors)} error(s), {len(base) - len(base_errors)} warning(s)")
-    print(f"    CMS Hospital-only:         {len(cms)} finding(s) — EXPECTED, not our bar\n")
+    print(f"      of which generic-CDA:    {len(buckets.get('generic-CDA', []))} (CMS-numbered but binds any CDA)")
+    print(f"    CMS Hospital-only:         {len(cms)} finding(s) — EXPECTED, not our bar")
+    if unclassified:
+        print(f"    ! UNCLASSIFIED:            {len(unclassified)} — counted as base errors: {unclassified[:5]}")
+    print()
     for label, group in (("BASE HL7 — ERRORS", base_errors), ("BASE HL7 — warnings", [f for f in base if f["severity"] == "warning"]), ("CMS hospital-only (informational)", cms)):
         if not group:
             continue

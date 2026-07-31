@@ -59,7 +59,7 @@ import {
 } from "../fhir/measure-report.ts";
 import { isOfficialRouted } from "../wiring/official-routing.ts";
 import { buildQrda3DocumentFromCounts } from "../fhir/qrda3-export.ts";
-import { buildQrda1Documents } from "../fhir/qrda1-export.ts";
+import { buildQrda1Documents, indexBundlesBySubject } from "../fhir/qrda1-export.ts";
 import { isWebChartConfigured, resolveDataSource, type DataSourceEnv } from "../engine/ingress/data-source.ts";
 import { subjectIdOf } from "../engine/ingress/enrollment/roster.ts";
 
@@ -162,28 +162,32 @@ const MAX_INDIVIDUAL_REPORT_SUBJECTS = 5000;
  *    different status (CMS122 DUE_SOON → MISSING_DATA), so status → bundle is not injective and the
  *    reconstruction would be fiction wearing provenance.
  *  - **Never fatal.** A transport failure degrades to non-conformant documents that SAY they are
- *    non-conformant, rather than turning an export into a 500. The run's outcomes are unaffected.
+ *    non-conformant, rather than turning an export into a 500. The run's outcomes are unaffected — but
+ *    the cause is LOGGED and named in the returned reason, because `webChartPrivateKeyFromEnv` throws by
+ *    design ("a silent fall-through would look like a working deploy while the live integration was
+ *    simply off") and a bare `catch {}` here would swallow exactly that (review, #361).
  *  - **Data as of NOW, not as of the run.** These bundles are re-read at export time, so a subject whose
  *    record changed since the run exports the current record. Stated in STANDARDS_CONFORMANCE.md; making
  *    it as-evaluated means persisting bundles, which is a schema change and the owner's call.
+ *
+ * **Known cost, recorded rather than hidden:** `loadBundles()` enumerates the WHOLE tenant sequentially
+ * (`fetchPatientPayloads` — one round trip per patient plus sub-resource searches). It is not scoped to
+ * the run's subjects and not cached, so a 3-subject EMPLOYEE-scope export still crawls the tenant, and
+ * `MAX_INDIVIDUAL_REPORT_SUBJECTS` bounds the DOCUMENTS, not the fetch. That is survivable on the dev
+ * fixture and is the request that times out on a production-sized tenant. Scoping the fetch to the run's
+ * subject ids needs a by-id read on the transport, which `WebChartClient` does not expose today.
  */
 async function qrda1BundleLookup(env: RunsEnv): Promise<((subjectId: string) => unknown | undefined) | undefined> {
   if (!isWebChartConfigured(env)) return undefined;
   try {
     const bundles = await resolveDataSource(env).loadBundles();
-    const bySubject = new Map<string, unknown>();
-    for (const bundle of bundles) {
-      const id = subjectIdOf(bundle as Parameters<typeof subjectIdOf>[0]);
-      // Keyed BOTH ways. A live run persists `subjectId` as the roster external id — `wc|<patientId>`
-      // (`run-pipeline.ts`: `profileForId("wc|" + patientId)` → `employee.externalId`) — while the
-      // bundle itself carries the bare `Patient.id`. Keying only on the bare id meant the lookup could
-      // never match on the one path that was supposed to produce conformant documents: present,
-      // plausible, and structurally incapable of firing (Codex, #361).
-      if (id === undefined) continue;
-      for (const key of [id, `wc|${id}`]) if (!bySubject.has(key)) bySubject.set(key, bundle);
-    }
-    return (subjectId: string) => bySubject.get(subjectId);
-  } catch {
+    // Keying lives in `indexBundlesBySubject` so the contract between what the pipeline PERSISTS and what
+    // this looks up is pinned by a test rather than by a comment (review + Codex, #361).
+    return indexBundlesBySubject(bundles, (b) => subjectIdOf(b as Parameters<typeof subjectIdOf>[0]));
+  } catch (error) {
+    // "not configured", "private key malformed", "token endpoint down" and "transport 403" all end here
+    // and are otherwise indistinguishable from "this subject genuinely has no data".
+    console.error("[workwell] qrda1: WebChart bundle load failed, exporting without patient data:", error);
     return undefined;
   }
 }

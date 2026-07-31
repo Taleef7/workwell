@@ -189,3 +189,51 @@ test("QDM: a junk bundle yields no entries instead of throwing", () => {
     assert.deepEqual(qdmEntriesFor(junk), [], `${JSON.stringify(junk)}`);
   }
 });
+
+test("QDM: VALUE junk skips its own resource and never loses the others (review, #361)", () => {
+  // The structural guard above covers `entry: [null]` and reads as covering the class. It does not:
+  // a malformed date or a numeric id used to throw out of `hl7Ts`/`esc` and reach the worker's
+  // catch-all, turning a 500-subject export into `{"error":"internal_error"}` — losing the 499
+  // documents that were fine. Each poisoned resource must cost exactly itself.
+  const poison = [
+    { ...procedure, id: "p-baddate", performedDateTime: "not-a-date" },
+    { ...hba1c, id: "o-zerodate", effectiveDateTime: "0000-00-00" },
+    { ...encounter, id: "e-badperiod", period: { start: "2025-13-45T99:99:99Z" } },
+    { ...procedure, id: 12345 as unknown as string },
+    { ...procedure, code: { coding: [{ system: "http://www.ama-assn.org/go/cpt", code: 77067 as unknown as string }] } },
+  ];
+  for (const bad of poison) {
+    const entries = qdmEntriesFor(bundleOf(bad, condition));
+    assert.ok(entries.length >= 1, `the healthy Condition must survive alongside ${String(bad.id)}`);
+    assert.ok(entries.some((e) => e.includes("24.3.137")), "the Condition entry is present");
+  }
+});
+
+test("QDM: an unparseable date degrades that FIELD to nullFlavor, keeping the resource", () => {
+  // Losing one date is better than losing the resource: a receiver can still see the event happened.
+  const [entry] = qdmEntriesFor(bundleOf({ ...procedure, performedDateTime: "0000-00-00" }));
+  assert.ok(entry?.includes("24.3.64"), "the Procedure is still exported");
+  assert.ok(entry?.includes('<effectiveTime nullFlavor="UNK"/>'), "only the date is lost");
+});
+
+test("QDM: a RETRACTED Condition is excluded via verificationStatus, which has no `status` (review, #361)", () => {
+  // FHIR Condition carries no `status` element at all, so a denylist reading only `status` was
+  // structurally incapable of firing for the one datatype CMS122's denominator is built on.
+  const retracted = { ...condition, verificationStatus: { coding: [{ code: "entered-in-error" }] } };
+  assert.deepEqual(qdmEntriesFor(bundleOf(retracted)), []);
+  const confirmed = { ...condition, verificationStatus: { coding: [{ code: "confirmed" }] } };
+  assert.equal(qdmEntriesFor(bundleOf(confirmed)).length, 1, "a confirmed diagnosis still exports");
+});
+
+test("QDM: a period carrying only an END is not silently dropped", () => {
+  // It used to fall through both branches to nullFlavor="UNK", discarding a date that was present.
+  const [entry] = qdmEntriesFor(bundleOf({ ...encounter, period: { end: "2025-04-02T09:30:00Z" } }));
+  assert.ok(entry?.includes('<high value="20250402093000"/>'), "the end survives");
+  assert.ok(entry?.includes('<low nullFlavor="UNK"/>'), "and the missing start says so");
+});
+
+test("QDM: a Condition dated by onsetPeriod keeps its interval", () => {
+  const byPeriod = { ...condition, onsetDateTime: undefined, onsetPeriod: { start: "2019-01-01T00:00:00Z" } };
+  const [entry] = qdmEntriesFor(bundleOf(byPeriod));
+  assert.ok(entry?.includes('<low value="20190101000000"/>'), "onsetPeriod was previously never read");
+});

@@ -16,8 +16,15 @@ export const OBS_CAT = "2.16.840.1.113883.5.4";
 /** The eMeasure Identifier root a QRDA measure reference is keyed on. */
 export const EMEASURE_ID_ROOT = "2.16.840.1.113883.4.738";
 
-export const esc = (s: string): string =>
-  s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+/**
+ * XML-escape a value for text or an attribute.
+ *
+ * Coerces rather than assuming a string: these values now come from third-party FHIR, where a numeric
+ * `id` or `code` deserializes as a number and `s.replace is not a function` would take down an entire
+ * export (review, #361). Coercion is safe because every call site interpolates into XML anyway.
+ */
+export const esc = (s: unknown): string =>
+  String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
 /**
  * ISO-8601 → HL7 `YYYYMMDDHHMMSS`, in UTC.
@@ -38,6 +45,24 @@ export const hl7Ts = (iso: string): string => {
 
 /** ISO date → HL7 `YYYYMMDD` (a birth date carries no time of day). */
 export const hl7Date = (iso: string): string => hl7Ts(iso).slice(0, 8);
+
+/**
+ * `hl7Ts` for values that came from OUTSIDE — returns null instead of throwing.
+ *
+ * `hl7Ts` throws on purpose: a run's own measurement period producing `NaN` in a regulatory artifact
+ * should fail loudly at build time. But QDM entries are translated from third-party FHIR, where a
+ * MariaDB zero-date (`0000-00-00`) or a malformed string is a data-quality event, not a programming
+ * error — and throwing there would lose every OTHER subject's document too. The caller degrades that
+ * one field to `nullFlavor` instead.
+ */
+export const hl7TsOrNull = (iso: unknown): string | null => {
+  if (typeof iso !== "string" || iso === "") return null;
+  try {
+    return hl7Ts(iso);
+  } catch {
+    return null;
+  }
+};
 
 /**
  * The measure reference both QRDA documents emit — ONE implementation, because they describe the same

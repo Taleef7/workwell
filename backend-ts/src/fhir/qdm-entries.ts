@@ -37,7 +37,7 @@
  * it is the same reason QDM appears ONLY here and never in the evaluation path (locked decision: the
  * FHIR/QI-Core column is what we execute; QDM is a translation at the reporting edge).
  */
-import { LOINC, esc, hl7Ts } from "./qrda-common.ts";
+import { LOINC, esc, hl7TsOrNull } from "./qrda-common.ts";
 
 /** Code systems a QDM entry can carry. Keyed by FHIR system URL — the only mapping direction we need. */
 const CODE_SYSTEMS: Record<string, { oid: string; name: string }> = {
@@ -75,7 +75,10 @@ interface FhirResource {
   performedPeriod?: { start?: string; end?: string };
   period?: { start?: string; end?: string };
   onsetDateTime?: string;
+  onsetPeriod?: { start?: string; end?: string };
   abatementDateTime?: string;
+  /** `Condition` carries no `status`; retraction lives here (review, #361). */
+  verificationStatus?: FhirCodeableConcept;
   issued?: string;
   valueQuantity?: { value?: number; unit?: string };
   valueCodeableConcept?: FhirCodeableConcept;
@@ -100,29 +103,29 @@ function cdaCode(concept: FhirCodeableConcept | undefined): string | null {
  * whether the interval is open.
  */
 function effectiveTime(resource: FhirResource, indent: string): string {
-  const point = resource.effectiveDateTime ?? resource.performedDateTime ?? resource.onsetDateTime ?? resource.issued;
-  const period = resource.effectivePeriod ?? resource.performedPeriod ?? resource.period;
-  if (period?.start) {
-    const high = period.end
-      ? `<high value="${hl7Ts(period.end)}"/>`
-      : resource.abatementDateTime
-        ? `<high value="${hl7Ts(resource.abatementDateTime)}"/>`
-        : `<high nullFlavor="NA"/>`;
-    return `<effectiveTime>\n${indent}  <low value="${hl7Ts(period.start)}"/>\n${indent}  ${high}\n${indent}</effectiveTime>`;
+  const period = resource.effectivePeriod ?? resource.performedPeriod ?? resource.period ?? resource.onsetPeriod;
+  // Every date goes through the non-throwing conversion: these strings come from third-party FHIR, and a
+  // MariaDB zero-date must degrade this ONE field rather than lose every subject's document (#361).
+  const low = hl7TsOrNull(period?.start ?? resource.effectiveDateTime ?? resource.performedDateTime ?? resource.onsetDateTime ?? resource.issued);
+  const end = hl7TsOrNull(period?.end ?? resource.abatementDateTime);
+  const interval = period !== undefined || resource.resourceType === "Condition";
+
+  if (low === null && end === null) {
+    // ADR-038 recorded that Conditions arriving with no onset are handled INCONSISTENTLY by
+    // `prevalenceInterval` — not merely conservatively. Saying "no information" is the honest encoding of
+    // that, and it keeps the entry (and so the subject's diagnosis) in the document.
+    return `<effectiveTime nullFlavor="UNK"/>`;
   }
-  if (point) {
-    // An instant, not an interval. Diagnosis is interval-typed in QDM even when FHIR gives only an
-    // onset, so it opens an interval at that instant rather than collapsing to a point in time.
-    if (resource.resourceType === "Condition") {
-      const high = resource.abatementDateTime ? `<high value="${hl7Ts(resource.abatementDateTime)}"/>` : `<high nullFlavor="NA"/>`;
-      return `<effectiveTime>\n${indent}  <low value="${hl7Ts(point)}"/>\n${indent}  ${high}\n${indent}</effectiveTime>`;
-    }
-    return `<effectiveTime value="${hl7Ts(point)}"/>`;
+  // Interval-typed: a period on any resource, and Diagnosis always — QDM types it as an interval even
+  // when FHIR supplies only an onset instant, so it opens at that instant rather than collapsing.
+  // `nullFlavor="NA"` on the high bound says the interval has not ended, which is what an active
+  // diagnosis means; omitting `high` would assert nothing either way.
+  if (interval || end !== null) {
+    const lowEl = low !== null ? `<low value="${low}"/>` : `<low nullFlavor="UNK"/>`;
+    const highEl = end !== null ? `<high value="${end}"/>` : `<high nullFlavor="NA"/>`;
+    return `<effectiveTime>\n${indent}  ${lowEl}\n${indent}  ${highEl}\n${indent}</effectiveTime>`;
   }
-  // ADR-038 recorded that Conditions arriving with no onset are handled INCONSISTENTLY by
-  // `prevalenceInterval` — not merely conservatively. Saying "no information" is the honest encoding of
-  // that, and it keeps the entry (and so the subject's diagnosis) in the document.
-  return `<effectiveTime nullFlavor="UNK"/>`;
+  return `<effectiveTime value="${low}"/>`;
 }
 
 /** The FHIR `category` codings, flattened — `category` is 0..* on Observation but 0..1 in some shims. */
@@ -153,9 +156,17 @@ function cdaId(resource: FhirResource, fallback: string): string {
  */
 const NEGATED_STATUSES = new Set(["entered-in-error", "not-done", "cancelled", "nullified", "abandoned"]);
 
-/** True when the resource's own status says the event did not happen or the record was retracted. */
+/**
+ * True when the resource's own status says the event did not happen or the record was retracted.
+ *
+ * `Condition` has **no `status` element** — retraction is `verificationStatus.coding.code`. Reading only
+ * `status` meant a retracted diabetes diagnosis still became a `Diagnosis` with `statusCode="completed"`,
+ * which is the datatype CMS122's denominator is built on: a guard that read as covering all four mapped
+ * types while being structurally incapable of firing for one of them (review, #361).
+ */
 function isNegated(resource: FhirResource): boolean {
-  return typeof resource.status === "string" && NEGATED_STATUSES.has(resource.status);
+  if (typeof resource.status === "string" && NEGATED_STATUSES.has(resource.status)) return true;
+  return (resource.verificationStatus?.coding ?? []).some((c) => c.code !== undefined && NEGATED_STATUSES.has(c.code));
 }
 
 /** QDM `statusCode` — `completed` is the only status a *Performed* datatype can carry. */
@@ -306,10 +317,30 @@ export function qdmEntriesFor(bundle: unknown, pad = "          "): string[] {
   const entries = Array.isArray(raw) ? raw : [];
   const out: string[] = [];
   entries.forEach((item, i) => {
+    // Per-resource isolation, and it has to be a real try/catch rather than input validation. This
+    // module's own contract is "an export that throws on one junk item loses the whole run's documents,
+    // where skipping the item loses one" — but the structural guard below implements that only for
+    // shape junk (`entry: [null]`). VALUE junk is the larger half: a malformed date or a numeric id used
+    // to reach the worker's catch-all and turn a 500-subject export into `{"error":"internal_error"}`,
+    // losing the 499 documents that were fine (review, #361).
+    try {
+      out.push(...entryFor(item, i, pad));
+    } catch {
+      // Deliberately silent per item: the document that results is already marked non-conformant by the
+      // empty-section rule, which is the signal an operator acts on.
+    }
+  });
+  return out.filter(Boolean);
+}
+
+/** The QDM entries for ONE bundle item — zero, one, or (never yet) more. */
+function entryFor(item: unknown, i: number, pad: string): string[] {
+  const out: string[] = [];
+  {
     const resource = (item as { resource?: FhirResource } | null)?.resource;
-    if (!resource?.resourceType) return;
+    if (!resource?.resourceType) return out;
     // A retracted or did-not-happen record must never become a *Performed* entry.
-    if (isNegated(resource)) return;
+    if (isNegated(resource)) return out;
     switch (resource.resourceType) {
       case "Encounter":
         out.push(encounterPerformed(resource, i, pad) ?? "");
@@ -347,7 +378,7 @@ export function qdmEntriesFor(bundle: unknown, pad = "          "): string[] {
       default:
         break; // a resource type no measure of ours reads — silence is correct, not a gap
     }
-  });
+  }
   return out.filter(Boolean);
 }
 
