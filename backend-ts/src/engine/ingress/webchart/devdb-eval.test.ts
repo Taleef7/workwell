@@ -26,7 +26,8 @@ import { webChartDataSource, evaluateSource } from "../data-source.ts";
 import { fixtureWebChartClient } from "./webchart-client.ts";
 import { parseEnrollmentRoster, evaluateSourceWithRoster } from "../enrollment/roster.ts";
 // Single source of truth for the whitelist/excluded sets (the CLI module is import-safe — no side effects).
-import { DEVDB_WHITELIST as WHITELIST, DEVDB_EXCLUDED as EXCLUDED } from "./devdb-cli.ts";
+import { DEVDB_EXCLUDED as EXCLUDED } from "./devdb-cli.ts";
+import { DEVDB_WHITELIST as WHITELIST } from "./report-table.ts";
 
 const DIR = fileURLToPath(new URL("../../../../spike/webchart/", import.meta.url));
 const payloads = JSON.parse(readFileSync(path.join(DIR, "devdb-patients.json"), "utf8")) as unknown[];

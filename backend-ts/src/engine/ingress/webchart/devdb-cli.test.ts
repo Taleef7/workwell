@@ -8,7 +8,8 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { evaluateDevDb, renderReport, DEVDB_WHITELIST, DEVDB_EXCLUDED } from "./devdb-cli.ts";
+import { evaluateDevDb, renderReport, DEVDB_EXCLUDED } from "./devdb-cli.ts";
+import { DEVDB_WHITELIST } from "./report-table.ts";
 
 test("evaluateDevDb: per-measure bucket counts reconcile to the total, over the whole sample", async () => {
   const r = await evaluateDevDb({ evaluationDate: "2024-06-01" });
