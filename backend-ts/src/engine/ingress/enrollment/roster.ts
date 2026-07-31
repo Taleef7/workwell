@@ -90,8 +90,11 @@ function isFhirBundle(v: unknown): v is FhirBundle {
  * WebChart payloads are one-patient-per-bundle (matching `normalizeWebChartBundle`), so the first Patient
  * is the subject. Entry items are guarded (`isObject`) so a junk item (`entry:[null]`) can't throw here —
  * it degrades to "no subject" and stamping no-ops, keeping per-item isolation with `evaluateBatch`.
+ *
+ * Exported because the QRDA Category I export keys bundles by subject the same way (ADR-050). Two
+ * copies of "which Patient is this bundle about" is precisely the kind of near-duplicate that drifts.
  */
-function subjectIdOf(bundle: FhirBundle): string | undefined {
+export function subjectIdOf(bundle: FhirBundle): string | undefined {
   for (const entry of bundle.entry) {
     if (!isObject(entry)) continue;
     const { resource } = entry;
