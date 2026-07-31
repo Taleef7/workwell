@@ -16,12 +16,10 @@ import type { OutcomeStatus } from "../../evaluate-measure.ts";
 import { webChartDataSource } from "../data-source.ts";
 import { fixtureWebChartClient } from "./webchart-client.ts";
 import { parseEnrollmentRoster, evaluateSourceWithRoster } from "../enrollment/roster.ts";
-import { BUCKETS, isValidDate, measureTableLines, type MeasureSummary } from "./report-table.ts";
+import { BUCKETS, DEVDB_WHITELIST, isValidDate, measureTableLines, type MeasureSummary } from "./report-table.ts";
 
 export type { MeasureSummary } from "./report-table.ts";
 
-/** Measures the dev-DB sample can exercise (real LOINC/HCPCS present + reconciled). */
-export const DEVDB_WHITELIST = ["diabetes_hba1c", "obesity_bmi", "cholesterol_ldl", "hypertension", "cms125"];
 /** Named-excluded (no reconcilable data / value-based gate the seed lacks) — shown, never silently dropped. */
 export const DEVDB_EXCLUDED = [
   "audiogram", "tb_surveillance", "hazwoper", "flu_vaccine",

@@ -33,7 +33,7 @@ import { webChartConfigFromEnv, webChartDataSource, type DataSourceEnv } from ".
 import { fixtureWebChartClient, httpWebChartClient, type WebChartClient } from "./webchart-client.ts";
 import { parseEnrollmentRoster, evaluateSourceWithRoster } from "../enrollment/roster.ts";
 import { BUCKETS, isValidDate, measureTableLines, type MeasureSummary } from "./report-table.ts";
-import { DEVDB_WHITELIST } from "./devdb-cli.ts";
+import { DEVDB_WHITELIST } from "./report-table.ts";
 
 const USAGE =
   "usage: evaluate:webchart-live [--list-patients] [--roster <path>] [--date YYYY-MM-DD] " +
