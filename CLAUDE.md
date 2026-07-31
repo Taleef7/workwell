@@ -378,6 +378,16 @@ than committed capped and permanently unroutable (owner step, task #10). **Routa
 three have no authored counterpart, so `flip-snapshot`'s authored-vs-official comparison — what every flip
 so far was judged on — cannot run for them, and the roster/catalog still assume an authored measure exists.
 
+**M-B STARTED (ADR-049): QRDA Category I EXISTS.** The roadmap audit said "QRDA-I does not exist
+anywhere"; `GET /api/runs/:id/qrda1` now returns one CDA document per subject, membership read
+evidence-first (official `populationResults`, never the inverting workflow status) and the measure
+referenced by its published eMeasure UUIDs. **Conformance is "well-formed + structurally representative",
+the same level QRDA III has carried since ADR-009 — Cypress CVU+ has NOT run** (it needs Docker). The
+**Patient Data section is deliberately empty** (`nullFlavor="NI"` plus a note in the document): the QDM
+entries a receiving engine would RECALCULATE from are not exported, so the artifact reports what we
+computed and cannot reproduce it. Still missing for M-B: those QDM entries, QRDA I **import** entirely,
+and the CVU+ loop.
+
 **Still open:** the authored cms122/125 subsets retire to the fidelity lab (locked decision #4,
 deliberately not in the flip's own PR); the LIVE third-party WebChart path gets neither the `us-core-sex`
 nor the dual-stamp fix (both mapping sites sit upstream of the live FHIR transport;

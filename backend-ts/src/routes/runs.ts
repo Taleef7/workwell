@@ -8,6 +8,7 @@
  *   GET  /api/runs                  newest-first run list            → 200 RunListItem[]
  *   GET  /api/runs/:id              run detail/summary               → 200 RunSummary | 404
  *   GET  /api/runs/:id/measure-report  FHIR R4 MeasureReport → 200 | 404 (unknown run) | 422 (multi-measure)
+ *   GET  /api/runs/:id/qrda1          QRDA Category I per-subject documents (JSON envelope) → 200 | 404 | 422
  *   GET  /api/runs/:id/qrda           QRDA Category III aggregate stub (XML) → 200 | 404 | 422
  *                                   ?type=summary (default) → summary report; individual|bundle → the
  *                                   collection Bundle (summary + per-subject individuals; the two are synonyms)
@@ -58,6 +59,7 @@ import {
 } from "../fhir/measure-report.ts";
 import { isOfficialRouted } from "../wiring/official-routing.ts";
 import { buildQrda3DocumentFromCounts } from "../fhir/qrda3-export.ts";
+import { buildQrda1Documents } from "../fhir/qrda1-export.ts";
 import { isWebChartConfigured, type DataSourceEnv } from "../engine/ingress/data-source.ts";
 
 interface RunsEnv extends DataSourceEnv {
@@ -500,6 +502,42 @@ export async function handleRuns(
       status: 200,
       headers: { "content-type": "application/json", "X-Total-Count": String(total) },
     });
+  }
+
+  // QRDA Category I — PATIENT-level, one CDA document per subject, returned as a JSON envelope of
+  // documents (M-B). Category III below is the aggregate counterpart for the same run.
+  //
+  // Bounded by MAX_INDIVIDUAL_REPORT_SUBJECTS for the same reason the individual MeasureReport bundle is:
+  // this path materializes per-subject rows, and a 120k seed:scale run would otherwise build 120k CDA
+  // documents in the worker. The refusal names the limit rather than truncating — a partial QRDA set that
+  // looked complete is exactly the shape this codebase keeps refusing.
+  const qrda1Id = pathname.match(/^\/api\/runs\/([^/]+)\/qrda1$/)?.[1];
+  if (qrda1Id && req.method === "GET") {
+    const run = await (await store(env)).getRun(qrda1Id);
+    if (!run) return json({ error: "not_found", id: qrda1Id }, 404);
+    const os = await outcomes(env);
+    const measureIds = await os.distinctMeasuresForRun(qrda1Id, 2);
+    if (measureIds.length !== 1) {
+      return json(
+        { error: "unsupported_run_scope", message: "QRDA I requires a completed single-measure run", measures: measureIds.length },
+        422,
+      );
+    }
+    const measureId = measureIds[0]!;
+    const total = (await os.countOutcomesByStatus(qrda1Id)).reduce((sum, c) => sum + c.count, 0);
+    if (total > MAX_INDIVIDUAL_REPORT_SUBJECTS) {
+      return json(
+        {
+          error: "run_too_large",
+          message:
+            `QRDA I emits one document per subject, which is limited to ` +
+            `${MAX_INDIVIDUAL_REPORT_SUBJECTS} subjects; this run has ${total}.`,
+        },
+        422,
+      );
+    }
+    const documents = buildQrda1Documents(run, measureId, await os.listOutcomes(qrda1Id));
+    return json({ runId: qrda1Id, measureId, count: documents.length, documents });
   }
 
   // QRDA Category III aggregate export (stub) for a completed single-measure run (#91 / E3.3). Built
