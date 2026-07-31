@@ -55,8 +55,8 @@ from, and the committed manifest's SHA-256 pins the bytes:
   env:
     WORKWELL_VSAC_API_KEY: ${{ secrets.WORKWELL_VSAC_API_KEY_VENDOR }}
   run: |
-    node scripts/vendor-official-measure.mjs --measure CMS122FHIRDiabetesAssessGT9Pct --catalog-id cms122 --strip-elm-annotations --complete-capped-expansions
-    node scripts/vendor-official-measure.mjs --measure CMS125FHIRBreastCancerScreen --catalog-id cms125 --strip-elm-annotations --complete-capped-expansions
+    node scripts/vendor-official-measure.mjs --measure CMS122FHIRDiabetesAssessGT9Pct --catalog-id cms122 --strip-elm-annotations --complete-terminology
+    node scripts/vendor-official-measure.mjs --measure CMS125FHIRBreastCancerScreen --catalog-id cms125 --strip-elm-annotations --complete-terminology
 ```
 
 Invoked as plain `node` — the script imports nothing outside node built-ins and global `fetch`, so this
@@ -64,7 +64,11 @@ needs no install and no package manager on the deploy path. It retries transport
 backoff (a 30-second GitHub blip must not block an emergency **rollback**, which rebuilds the image); a
 4xx at an immutable pin means the path is wrong and is never retried.
 
-#### Step 1a — `--complete-capped-expansions`: the VSAC-capped `AdvancedIllness` set (ADR-041)
+#### Step 1a — `--complete-terminology`: value sets the bundle does not fully carry (ADR-041, ADR-053)
+
+> **Flag renamed 2026-07-31.** It was `--complete-capped-expansions`, which is still accepted (with a
+> notice) so a stale runbook does not hit "unknown argument" mid-incident. The behaviour is WIDER than
+> the old name says — it now also sources value sets upstream omits entirely, below.
 
 Upstream limits every expansion it ships to 1000 codes (its README says so; full expansions need an NLM
 licence). One of them matters: `AdvancedIllness` (`2.16.840.1.113883.3.464.1003.110.12.1082`) is **1000
@@ -101,6 +105,46 @@ period against). Only the capped OIDs are re-expanded — today one, two request
 > exists to keep those two terminology authorities apart; one secret name would invite exactly the
 > conflation it forbids.
 
+##### Step 1a (cont.) — value sets upstream ships **no ValueSet resource for at all** (ADR-053)
+
+A second, different incompleteness, and the same flag now handles it. A measure's ELM can retrieve a
+value set the bundle simply does not carry. That is not a capped expansion and not an expansion failure:
+there is nothing to expand.
+
+Check any measure — including ones not yet vendored — before spending an owner step on it:
+
+```bash
+cd backend-ts
+pnpm official:terminology-audit                        # every measure in .official-content
+pnpm official:terminology-audit CMS138FHIRTobaccoScrnCessation
+```
+
+Measured 2026-07-31 at pin `ca4b4951`, and it is one measure out of six:
+
+| measure | retrieved by the ELM | shipped by the bundle | |
+|---|---:|---:|---|
+| CMS122, CMS125, CMS2, CMS68, CMS951 | 26 / 32 / 15 / 5 / 26 | same | OK |
+| **CMS138** | **32** | **31** | `2.16.840.1.113883.3.526.3.1278` "Tobacco Use Screening" **absent** |
+
+Three things worth knowing before acting on it:
+
+- **The measure is not broken.** Upstream's own discrepancy report (2026-07-15, 72 measures / 5826 test
+  cases) lists CMS138 under *no discrepancies*. Their environment resolves the set from the NLM
+  terminology package their README names; our vendor step never asked for it.
+- **Re-pinning does not fix it.** Upstream HEAD (`f705ee60`) changes no bundle file — only report
+  documents — so there is no newer content to move to.
+- **VSAC is the only remedy**, which makes vendoring CMS138 an owner step alongside CMS130/CMS165. It is
+  a *weaker* completion than a capped one: upstream shipped no codes to check containment against and no
+  declared total to check length against, so the only size baseline is VSAC's own `expansion.total`.
+  `manifest.terminology.completion.valueSets[].reason` records `absent-upstream` rather than `capped` so
+  the two are never read as equally evidenced. **The real check is the MADiE gate** — CMS138 scores
+  0/47 with 47 errors today, and a wrongly-sourced value set does not turn that green.
+
+Routing already refused this (an unexpandable value set is refused as empty), so nothing was ever at
+risk of running on it. What ADR-053 changed is that the vendor step now *warns* instead of writing a
+manifest that reads as complete, and the routing refusal names the actual cause instead of
+"could not be expanded" — which had sent this investigation at our sidecar, our pin and our fetch.
+
 > **⚠ Landing order (this WILL turn CI red — and BLOCK DEPLOYS — if done backwards).** CI runs the same
 > command and then `git diff --exit-code measures/official`. Adding the secret without also committing
 > the re-vendored manifests means CI completes the expansion while Git still records it as capped, and
@@ -113,9 +157,9 @@ period against). Only the capped OIDs are re-expanded — today one, two request
 > ```bash
 > cd backend-ts
 > WORKWELL_VSAC_API_KEY=<umls-api-key> pnpm vendor:official \
->   --measure CMS122FHIRDiabetesAssessGT9Pct --catalog-id cms122 --strip-elm-annotations --complete-capped-expansions
+>   --measure CMS122FHIRDiabetesAssessGT9Pct --catalog-id cms122 --strip-elm-annotations --complete-terminology
 > WORKWELL_VSAC_API_KEY=<umls-api-key> pnpm vendor:official \
->   --measure CMS125FHIRBreastCancerScreen --catalog-id cms125 --strip-elm-annotations --complete-capped-expansions
+>   --measure CMS125FHIRBreastCancerScreen --catalog-id cms125 --strip-elm-annotations --complete-terminology
 > git diff measures/official          # terminology.sha256 moves; truncated → []; completion block appears
 > pnpm test:official-cases            # expect 121/121 unchanged, then commit the regenerated report
 > ```
@@ -169,9 +213,9 @@ Per measure, per stack:
    # The terminology SIDECAR comes from vendoring, NOT from the fetch above. Without it every test
    # below self-skips and the run reads green having verified nothing.
    WORKWELL_VSAC_API_KEY=<umls-api-key> pnpm vendor:official \
-     --measure CMS122FHIRDiabetesAssessGT9Pct --catalog-id cms122 --strip-elm-annotations --complete-capped-expansions
+     --measure CMS122FHIRDiabetesAssessGT9Pct --catalog-id cms122 --strip-elm-annotations --complete-terminology
    WORKWELL_VSAC_API_KEY=<umls-api-key> pnpm vendor:official \
-     --measure CMS125FHIRBreastCancerScreen --catalog-id cms125 --strip-elm-annotations --complete-capped-expansions
+     --measure CMS125FHIRBreastCancerScreen --catalog-id cms125 --strip-elm-annotations --complete-terminology
    pnpm exec node --import tsx --test \
      src/wiring/official-corpus-outcomes.test.ts \
      src/engine/ingress/webchart/devdb-official-eval.test.ts
@@ -298,7 +342,7 @@ responses are wrapped in a `{"data": ...}` envelope, the create body uses `templ
 | `DATABASE_URL_TWH` | Neon pooled connection string for TWH instance |
 | `OPENAI_API_KEY` | AI services (Draft Spec, Explain Why Flagged) |
 | `WORKWELL_AUTH_JWT_SECRET_TWH` | JWT signing secret for TWH instance |
-| `WORKWELL_VSAC_API_KEY_VENDOR` | **Build-time** UMLS key used by `vendor:official --complete-capped-expansions` (ADR-041). Read by CI *and* both deploy workflows. Optional — unset means capped expansions ship as upstream sent them and official routing refuses. Distinct from the runtime `WORKWELL_VSAC_API_KEY_TWH`; see Step 1a above |
+| `WORKWELL_VSAC_API_KEY_VENDOR` | **Build-time** UMLS key used by `vendor:official --complete-terminology` (ADR-041). Read by CI *and* both deploy workflows. Optional — unset means capped expansions ship as upstream sent them and official routing refuses. Distinct from the runtime `WORKWELL_VSAC_API_KEY_TWH`; see Step 1a above |
 
 The deploy workflow maps these `*_TWH` GitHub secrets onto the backend container's runtime
 environment variable names (e.g. `DATABASE_URL_TWH` → `DATABASE_URL`,

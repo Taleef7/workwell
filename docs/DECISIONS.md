@@ -1,5 +1,132 @@
 # Architecture Decision Records
 
+## ADR-053: "the terminology is complete" was only ever a claim about what the bundle DECLARED
+
+**Status:** Accepted (2026-07-31). Task #11. Closes a blind spot in the vendor step and, more usefully,
+answers a question ADR-047 recorded as open.
+
+**Context.** ADR-047 onboarded CMS2, CMS68 and CMS951 and recorded that three of six candidates did not,
+CMS138 among them. Its table reads *"CMS138 tobacco screening | **0/47, 47 errors** — one value set
+(…3.526.3.1278) will not expand"*, and — to its credit — it did **not** claim to know why: *"Whether
+that is an upstream packaging gap or something our reducer drops is unknown."* CLAUDE.md's summary
+dropped that hedge, and "will not expand" is a symptom that points at the wrong system: it reads as a
+failure of our expander, our gitignored sidecar, or our VSAC release pin — every one of which is a thing
+an engineer can go and check, at length, without getting closer. So this ADR answers ADR-047's open
+question rather than correcting a wrong answer.
+
+(The first draft of this ADR quoted that sentence as ADR-047's own words. It was CLAUDE.md's phrasing,
+not ADR-047's — the same misattribution class review caught on #363 one PR earlier. Corrected above,
+against the text.)
+
+**What was actually measured (2026-07-31, at pin `ca4b4951`, by `pnpm official:terminology-audit`).**
+
+| measure | value sets the ELM retrieves | ValueSet resources the bundle ships |
+|---|---:|---:|
+| CMS122 / CMS125 / CMS2 / CMS68 / CMS951 | 26 / 32 / 15 / 5 / 26 | identical |
+| **CMS138** | **32** | **31** |
+
+`2.16.840.1.113883.3.526.3.1278` ("Tobacco Use Screening") is **not in the bundle**. There is nothing to
+expand. Three further facts settle what to do about it, and each one changes the answer:
+
+- **The measure is fine.** Upstream's own discrepancy report at HEAD (2026-07-15; 72 measures, 5826 test
+  cases) lists CMS138 under *Measures with No Discrepancies*. Their environment resolves the set from the
+  NLM terminology package their README names — `vsac.nlm.nih.gov/download/manifest?rel=20251117` — and
+  our vendor step never asked for it. So this is not an upstream bug to file, exactly as ADR-041 found
+  for the 1000-code cap; it is the same licensing boundary in a different shape.
+- **Re-pinning cannot fix it.** The only commit after our pin (`f705ee60`) adds two connectathon report
+  documents and changes no bundle. Checked before writing any code, because "upstream already fixed it"
+  and "we must source it ourselves" are different PRs.
+- **VSAC is the remedy**, so vendoring CMS138 needs `WORKWELL_VSAC_API_KEY_VENDOR` and is an owner step
+  beside CMS130/CMS165 (task #10). CMS138 is deliberately still **not vendored** — the same call ADR-047
+  made for those two: an artifact committed in a state that can never be routed is worse than none.
+
+**Decision 1 — the vendor step reports what it cannot see, instead of writing a manifest that reads as
+complete.** `collectTerminology` enumerated the ValueSets a bundle SHIPS, so an absent one produced no
+sidecar entry, no `truncated` row and no warning. It now diffs the value sets the ELM RETRIEVES against
+those, using the same `library.valueSets.def` read the executor makes, over the same reduced bundle
+`requiredOids` reads at runtime — so the vendor-time record and the routing refusal are computed from one
+input by one algorithm rather than kept in step by hand. The diff is one-directional on purpose: a value
+set shipped but never retrieved is not a problem, because upstream bundles carry dependency closures.
+
+The manifest's existing sentence — *"a manifest with an empty `truncated` is a manifest whose sidecar
+holds every code the bundle declared"* — was **true and narrow**. "Every code the bundle DECLARED" says
+nothing about a value set the bundle never declared. It was doing duty as a completeness record, and
+`official-flip-config.test.ts` read it as one.
+
+**Decision 2 — absent is NOT recorded in the manifest; it is recomputed at runtime.** The list is
+derivable from the artifact's own two committed-or-pinned files (the ELM names what it retrieves, the
+sidecar names what we hold), so persisting it would create a second authority that can disagree with the
+artifact it describes — the exact drift `official-terminology.test.ts` guards `truncated` against, in a
+field that never needed to exist. `truncated` genuinely cannot be recomputed (upstream's declared totals
+are not in the sidecar); this can. Two consequences, both good: the check applies retroactively to
+artifacts vendored before it existed, and it adds nothing to the committed artifacts.
+
+**One claim in this ADR's first version was false, and the way it failed is worth keeping.** It said
+the change "moved no committed byte", verified by re-vendoring cms2 to an empty `git diff` and an
+unchanged sidecar hash. The verification was real and the conclusion did not follow. The first cut also
+tagged CAPPED completions with `reason: "capped"`, and the two credentialed artifacts (cms122, cms125)
+carry a `completion` block recording exactly `{oid, had, now, declaredTotal}` — so a credentialed
+re-vendor produced a different `manifest.json`, and CI's *"The committed artifact is reproducible from
+its pin"* step failed, which is a **deploy-blocking** gate that no contributor can clear locally
+(`WORKWELL_VSAC_API_KEY_VENDOR` is a GitHub secret). cms2 provably could not have caught it: vendored
+without the credential, it has no completion block at all. The check was run against the one artifact
+class the change could not affect.
+
+Fixed by emitting `reason` only for `absent-upstream`, and guarded by a test that compares the record
+the code PRODUCES against the records already COMMITTED — code-versus-artifact rather than
+code-versus-itself, with a non-degeneracy assertion so it cannot pass by finding no completion block.
+
+**Decision 3 — capped and absent are completed by one flag but never conflated.** `--complete-terminology`
+(was `--complete-capped-expansions`, still accepted with a notice, and that alias is *tested* rather than
+asserted in a docblock) now sources absent sets too. They are not equally evidenced, and the code keeps
+them apart:
+
+- A **capped** set is checked against upstream's declared total AND against containment of the codes
+  upstream shipped (ADR-041's two guards).
+- An **absent** set has neither — upstream shipped nothing to contain, and declared no total to fall
+  short of. Its only baseline is VSAC's own `expansion.total`, which is enforced; an empty expansion is
+  refused outright, because an empty value set matches nothing and produces the whole-roster-out-of-
+  population silence of ADR-043. `completion.valueSets[].reason` is emitted **only** as
+  `absent-upstream`, and `declaredTotal` is `null` for it, because that field means "what the bundle
+  declared" and an absent set declared nothing. Its ABSENCE means `capped` — which is what every
+  completion before this ADR was, so the field marks the weaker provenance rather than labelling both.
+  That asymmetry is forced, not stylistic: see the reproducibility consequence below.
+
+**The real check on a sourced value set is not in the code at all: it is the MADiE gate.** CMS138 has 47
+committed cases with upstream's own expected population vectors, currently 0/47 with 47 errors. A wrongly
+sourced value set does not turn that green. That is a stronger oracle than either ADR-041 guard, and it
+is the reason this is safe to do without a containment check.
+
+**Decision 4 — routing's diagnosis changes; its verdict does not.** `expandArtifactTerminology` already
+refused an unexpandable value set, so nothing was ever routed on one, and this ADR does not claim to have
+closed a live hazard. What it changes is the sentence an operator gets: "N of M value sets could not be
+expanded" becomes a named OID, "the upstream bundle ships no ValueSet resource for it", and "re-pinning
+will not fix it". Reported alongside checks 1-6 rather than left to the lazy expansion pass, for the same
+reason `scoring` and the sidecar check were moved up — a precise sentence at boot beats an accurate one
+later.
+
+**Consequences, including the one that bit during implementation.**
+
+- The routing check exposed an **incoherent test stub**. `executor-router.test.ts` returned
+  `{ok: true, codesByOid: new Map()}` for "terminology present" — an artifact whose sidecar loads and
+  holds nothing, which is not a state a real artifact can be in. Once the router could notice it, that
+  stub meant "all 26 of this measure's value sets are absent" and nine routing tests failed on a
+  condition none of them was about. Fixed by making the stub describe a COMPLETE artifact (a code per
+  retrieved OID) rather than by adding a third thing to remember to stub — the `offlineChecks` docblock
+  is already a warning about forgetting one.
+- **Two implementations of "what does this ELM retrieve" now exist**, and that is forced: the vendor
+  script runs as bare `node` on the deploy path with no install, so it cannot import
+  `@workwell/official-executor`. `scripts/valueset-parity.test.mjs` pins them against each other over the
+  real committed artifacts, with a non-degeneracy assertion so it cannot pass by comparing nothing.
+- `pnpm official:terminology-audit` is a **measurement, not a gate** — exit 0 whatever it finds, and
+  deliberately not in CI, because it reads the gitignored `.official-content` checkout and would
+  otherwise be a self-skipping job that reads as covered. Enforcement lives where it can actually run:
+  `absentValueSets` + `officialRoutingProblems`, against the artifact's own files.
+- **What this does not catch:** a value set that is present, fully expanded, and *wrong* — the
+  membership-defect class ADR-038 found in the synthetic corpus. Size and presence are not identity.
+
+---
+
 ## ADR-052: the app-side exclusions are decided and enforced; what the package does with CONTENT is not
 
 **Status:** Accepted (2026-07-31), **narrowed after review**. Roadmap M-C, locked decision #3. It decides
@@ -664,7 +791,10 @@ onboarded took the gate — and it disqualified half of them, for three differen
   terminology. Whether that is an upstream packaging gap or something our reducer drops is unknown; the
   gate says only that the measure cannot be executed today, which is enough to keep it out.
 - **Two measures now depend on an owner step**, and the dependency is narrow and stated: a credentialed
-  `pnpm vendor:official --complete-capped-expansions` run for CMS130 and CMS165.
+  `pnpm vendor:official --complete-terminology` run for CMS130 and CMS165 — and, since ADR-053, for
+  CMS138 too, which needs the wider behaviour only the new flag name describes (the old
+  `--complete-capped-expansions` still works but would read as if the narrower behaviour were what
+  is wanted).
 
 ## ADR-046: Canonical, improvementNotation and membership all derive from the outcome's own evidence
 

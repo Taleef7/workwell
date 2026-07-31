@@ -145,10 +145,30 @@ export function referencedValueSets(bundle: MeasureBundle): Array<{ url: string;
   return [...byUrl.values()];
 }
 
-/** `http://cts.nlm.nih.gov/fhir/ValueSet/2.16.840...` → `2.16.840...` (expanders are keyed by bare OID). */
+/**
+ * `http://cts.nlm.nih.gov/fhir/ValueSet/2.16.840...|1.2` → `2.16.840...` (expanders key by bare OID).
+ *
+ * The **`|version` suffix is stripped too**, and that half was missing until review of #364 found it. A
+ * FHIR canonical may carry one, and shipped `ValueSet.url` never does (the version lives in
+ * `ValueSet.version`). So an ELM declaring `…/2.16.1|1.2` produced the key `2.16.1|1.2` while the
+ * artifact's terminology was keyed `2.16.1` — the value set would be reported ABSENT though present,
+ * and `--complete-terminology` would then ask VSAC for a malformed version-suffixed id.
+ *
+ * Measured before changing it: **zero** versioned canonicals across all six upstream bundles at the
+ * pinned commit, so this fixes nothing that occurs today and changes no current artifact. It is a
+ * latent correctness fix, and it makes the de-duplication in `absentValueSets` mean what its comment
+ * already claimed — a versioned and an unversioned canonical for one set now really do collapse to one
+ * OID.
+ *
+ * Matching on the OID rather than the exact canonical is right here because the artifact IS the
+ * authority: one bundle carries at most one ValueSet per OID, and the sidecar records its `version`
+ * for provenance. There is no second candidate to be ambiguous about.
+ */
 export function oidFromValueSetUrl(url: string): string {
   const marker = "/ValueSet/";
-  return url.includes(marker) ? url.slice(url.lastIndexOf(marker) + marker.length) : url;
+  const withoutPrefix = url.includes(marker) ? url.slice(url.lastIndexOf(marker) + marker.length) : url;
+  const pipe = withoutPrefix.indexOf("|");
+  return pipe === -1 ? withoutPrefix : withoutPrefix.slice(0, pipe);
 }
 
 export interface ExpandedCode {
