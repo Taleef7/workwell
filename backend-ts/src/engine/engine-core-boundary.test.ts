@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve as resolvePath, relative, sep } from "node:path";
 
@@ -168,4 +168,67 @@ test("the closure is non-degenerate — this test cannot pass by reaching nothin
     );
   }
   assert.ok(closure.bare.has("cql-execution"), "the CQL runtime must actually be reached");
+});
+
+/**
+ * Every non-test `.ts` under `src/` and `packages/`, so the API check can see what the app really does.
+ */
+function sourceFiles(dir: string, out: string[] = []): string[] {
+  for (const name of readdirSync(dir)) {
+    const full = resolvePath(dir, name);
+    if (statSync(full).isDirectory()) sourceFiles(full, out);
+    else if (full.endsWith(".ts") && !full.endsWith(".test.ts")) out.push(full);
+  }
+  return out;
+}
+
+/** `src/engine/<rel>` for a path inside the engine tree, else null. */
+function engineRelative(file: string): string | null {
+  if (file !== ENGINE_ROOT && !file.startsWith(ENGINE_ROOT + sep)) return null;
+  return relative(ENGINE_ROOT, file).split(sep).join("/");
+}
+
+const APP_AREAS = ["synthetic/", "ingress/", "immunization/", "cli/"];
+const isCoreArea = (engineRel: string) => !APP_AREAS.some((a) => engineRel.startsWith(a));
+
+test("the app imports the core ONLY through its declared entry points", () => {
+  // Codex (#363) caught that the docblock above calls CORE_ENTRY_POINTS "every module the app is allowed
+  // to import" while NOTHING checked it: an app module importing, say, `cql/vsac-value-set-resolver.ts`
+  // directly left all five other assertions green, because it is already inside the closure. The list
+  // read as an API and enforced nothing — the vacuous-guard shape, inside the test written to pre-empt
+  // that class.
+  //
+  // It matters at the moment of extraction: `package.json#exports` restricted to this list turns every
+  // such import into a build error in a 150-file mechanical PR, which is the worst possible place to
+  // discover an API decision.
+  const SRC_ROOT = resolvePath(ENGINE_ROOT, "..");
+  const PACKAGES_ROOT = resolvePath(SRC_ROOT, "..", "packages");
+  const roots = [SRC_ROOT, PACKAGES_ROOT].filter((d) => {
+    try {
+      return statSync(d).isDirectory();
+    } catch {
+      return false;
+    }
+  });
+
+  const violations: string[] = [];
+  for (const file of roots.flatMap((r) => sourceFiles(r))) {
+    const ownEngineRel = engineRelative(file);
+    // A core file reaching another core file is internal, not API use.
+    if (ownEngineRel !== null && isCoreArea(ownEngineRel)) continue;
+    const source = stripComments(readFileSync(file, "utf8"));
+    for (const [, , specifier] of source.matchAll(SPECIFIER_RE)) {
+      if (specifier === undefined || !specifier.startsWith(".")) continue;
+      const targetRel = engineRelative(resolvePath(dirname(file), specifier));
+      if (targetRel === null || !isCoreArea(targetRel)) continue;
+      if (!CORE_ENTRY_POINTS.includes(targetRel)) {
+        violations.push(`${relative(SRC_ROOT, file).split(sep).join("/")} → engine/${targetRel}`);
+      }
+    }
+  }
+  assert.deepEqual(
+    violations,
+    [],
+    "these reach past the published API — either route them through an entry point, or add one in a PR that says so",
+  );
 });
