@@ -1,6 +1,6 @@
 # Official MADiE eCQM Test-Case Report — July 2026
 
-**Generated:** 2026-07-30
+**Generated:** 2026-07-31
 **Content:** `cqframework/dqm-content-qicore-2025` master (2025 AU / 2026 performance period)
 **Content revision:** `ca4b49516de4cbed9f92bfb7c35d97b1bf1022ab`
 **Engine:** `fqm-execution` 1.8.5 over pre-compiled ELM; offline, no server, DB, VSAC key, or request path
@@ -29,12 +29,13 @@ The fetch script sparse-checks out only the gated measures' bundles and test-cas
 | CMS2 | 36 | 36 (100.0%) | 0 | 36 (100.0%) | 0 | 0 |
 | CMS68 | 19 | 19 (100.0%) | 0 | 19 (100.0%) | 0 | 0 |
 | CMS951 | 55 | 55 (100.0%) | 0 | 55 (100.0%) | 0 | 0 |
+| CMS138 | 47 | 47 (100.0%) | 0 | 47 (100.0%) | 0 | 0 |
 
 † CMS122 reference agreement means the actual vector differs from the committed MADiE expected only at numerator `0→1` for one of the six UUIDs already reported by the source repo. It is an adjusted pass, not an engine defect.
 
 ## Execution and terminology controls
 
-`fqm-execution` 1.8.5 reads ValueSet resources from the measure Bundle before adding any optional external cache. ValueSets are consumed directly from each official measure Bundle; no VSAC network call or key is used.
+`fqm-execution` 1.8.5 reads ValueSet resources from the measure Bundle before adding any optional external cache. ValueSets are consumed directly from each official measure Bundle; no VSAC network call is made during this run. **One exception, flagged per measure below:** where an upstream bundle ships no ValueSet resource at all for a value set its ELM declares, that one is supplied from WorkWell's vendored terminology sidecar (ADR-053) — vendored earlier from VSAC at a pinned release, never fetched here. Measures with no such line ran entirely on upstream's terminology.
 
 **Measurement-period caveat:** date-only period ends are normalized to end-of-day because fqm-execution 1.8.5 parses them as start-of-day (upstream issue filed: projecttacoma/fqm-execution#371); the un-normalized run scores 64/66.
 
@@ -45,6 +46,8 @@ The fetch script sparse-checks out only the gated measures' bundles and test-cas
 - **CMS2:** trustMetaProfile=false (first pass; no retry); 15/15 Bundle ValueSets carry expansions; 0 expansion(s) report more total codes than are present; fqm warnings=0.
 - **CMS68:** trustMetaProfile=false (first pass; no retry); 5/5 Bundle ValueSets carry expansions; 0 expansion(s) report more total codes than are present; fqm warnings=0.
 - **CMS951:** trustMetaProfile=false (first pass; no retry); 26/26 Bundle ValueSets carry expansions; 0 expansion(s) report more total codes than are present; fqm warnings=0.
+- **CMS138:** trustMetaProfile=false (first pass; no retry); 31/31 Bundle ValueSets carry expansions; 0 expansion(s) report more total codes than are present; fqm warnings=0.
+  - **Terminology supplement (ADR-053):** 1 value set(s) came from WorkWell's vendored sidecar because the upstream bundle ships no ValueSet resource for them — `http://cts.nlm.nih.gov/fhir/ValueSet/2.16.840.1.113883.3.526.3.1278`. Everything else is upstream's own terminology. **This is a weaker claim than the other measures carry:** for these value sets the CODES are ours (sourced from VSAC at the pinned release). What remains upstream's is the ANSWER KEY — the expected population vectors — which is why agreement here is still real evidence that the sourced codes are right, and is not evidence about upstream's terminology.
 
 ## Investigated findings
 
@@ -361,6 +364,70 @@ Measurement period: 2026-01-01 → 2026-12-31. Raw expected agreement 55/55; ref
 Executed with the RUNTIME configuration — our reduced artifact plus its own vendored terminology sidecar, expanded through the same code path production uses — against the upstream bundle and upstream ValueSets. 0/55 cases changed population vector; 0 drift errors.
 
 Artifact proven: `sha256:a005f4527d70fdd7495b9d75ab03b5ab43f1146fcdad81cbfba7d81b7caf1dae` (2.0 MB, ELM annotations stripped). Compared on population membership (initial-population/denominator/denominator-exclusion/numerator/denominator-exception) only; the artifact also returned 392 named statement results for every subject.
+
+| Case | UUID | Changed populations | v1 IPP/DENOM/DENEX/NUMER/DENEXCEP | draft IPP/DENOM/DENEX/NUMER/DENEXCEP |
+|---|---|---|---|---|
+| None | — | — | — | — |
+
+## CMS138 — CMS138FHIRTobaccoScrnCessation
+
+Measurement period: 2026-01-01 → 2026-12-31. Raw expected agreement 47/47; reference-adjusted pass 47/47.
+
+| Case | UUID | IPP E/A | DENOM E/A | DENEX E/A | NUMER E/A | DENEXCEP E/A | Result |
+|---|---|---:|---:|---:|---:|---:|---|
+| DEN1EXPass HospiceEncOverlapsMP | `007fe881-a18d-418f-8ddf-0ee94fc9a10a` | 1/1 | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| DEN1EXFail HospiceBeforeMP | `0230f0f5-4d54-4cf0-b33e-606a02061b31` | 1/1 | 1/1 | 0/0 | 0/0 | 0/0 | PASS |
+| DEN1EXPass HospiceDischargeDuringMP | `0d221636-5f14-4074-9337-eb4b0868fb3e` | 1/1 | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| SDEPass SDECoverage | `1352ee39-0e01-41f0-baa3-d3a49c057c3a` | 1/1 | 1/1 | 0/0 | 0/0 | 0/0 | PASS |
+| IPFail Age11SeenForTwoVisitsDuringMP | `13cf64e7-b52f-48b9-a78a-3b0ff592c29b` | 0/0 | 0/0 | 0/0 | 0/0 | 0/0 | PASS |
+| NUM1Pass TwoVisitsScreenedForTobaccoDuringMP | `1a070602-c572-4581-b438-989aaa417e64` | 1/1 | 1/1 | 0/0 | 1/1 | 0/0 | PASS |
+| NUM2Pass ReceivedTobaccoCessation6MonthsPriorMP | `2412ad6a-fce0-4ad0-b200-737e443e5278` | 1/1 | 1/1 | 0/0 | 1/1 | 0/0 | PASS |
+| NUM3Pass ScreenedForTobaccoAndCessationDuringMP | `2c51f593-14ee-4e51-81b1-41748abfa92c` | 1/1 | 1/1 | 0/0 | 1/1 | 0/0 | PASS |
+| IPFail Age11Edge | `42d0d0e3-236c-414b-bea9-88591bc5db70` | 0/0 | 0/0 | 0/0 | 0/0 | 0/0 | PASS |
+| DEN2EXPass HospiceCondEncDiagnosisStartsDuringMP | `44a3e280-b4ad-4725-b806-1ea7592114d8` | 1/1 | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| IPFail Age12SeenForOneVisitsDuringMP | `4adf2e8c-0370-461c-be27-7b00efffff32` | 0/0 | 0/0 | 0/0 | 0/0 | 0/0 | PASS |
+| IPFail Age12SeenForTwoVisitsAfterMP | `4cf51b29-8cce-434d-8fa9-66d73208bc65` | 0/0 | 0/0 | 0/0 | 0/0 | 0/0 | PASS |
+| IPFail SeenForOnePreventativeVisitBeforeMP | `4da83054-dee8-485e-b6c7-da5d45f21722` | 0/0 | 0/0 | 0/0 | 0/0 | 0/0 | PASS |
+| NUM1Fail IncorrectStatusForObservation | `4e4e6417-2724-4dd2-8b94-1e8a8b0c0eb5` | 1/1 | 1/1 | 0/0 | 0/0 | 0/0 | PASS |
+| NUM2Pass MedRequestNotTaskRejected | `4f925a04-43b1-460c-a8ee-89bdff7b38bc` | 1/1 | 1/1 | 0/0 | 1/1 | 0/0 | PASS |
+| DEN2EXFail TobaccoUserMissingValue | `6074ad7e-a5ae-41f1-9bfd-ca04b4e15f8f` | 1/1 | 1/1 | 0/0 | 0/0 | 0/0 | PASS |
+| DEN2EXFail ObservationBeforeMP | `6410550a-c928-415b-b8bc-aa1284ca6933` | 1/1 | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| DEN2EXPass TwoVisitsScreenedForTobaccoAndTobaccoUserWithHospiceDuringMP | `72c8b10f-fffd-411f-bf81-c7d0608ad314` | 1/1 | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| IPFail Age12SeenForThreePreventativeVisitsBeforeMP | `732f736b-a720-4368-8d77-4b12a5a5ca03` | 0/0 | 0/0 | 0/0 | 0/0 | 0/0 | PASS |
+| DEN1EXPass SeenForTwoVisitsWithHospiceDuringMP | `73d69a14-7e70-4c9f-89e3-62da4a370fd3` | 1/1 | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| DEN1EXPass SeenForOnePreventativeVisitsWithHospiceDuringMP | `76e371e4-0363-4fad-9573-a06ada971eef` | 1/1 | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| NUM2Pass ReceivedTobaccoCessationCounselingDuringMP | `7c310440-9998-4c89-9e1d-91bff809d537` | 1/1 | 1/1 | 0/0 | 1/1 | 0/0 | PASS |
+| DEN2EXPass HospiceServiceRequestCompleted | `828caebe-4bd7-4579-85c6-d6340a9f3240` | 1/1 | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| NUM2Pass ReceivedTobaccoCessationDuringMP | `83eadcba-f90b-48d9-ad77-7a1832afae78` | 1/1 | 1/1 | 0/0 | 1/1 | 0/0 | PASS |
+| DEN1EXFail InpatientEncNoHospiceDischarge | `877e7485-e644-4ed7-ab59-4621a9ade7c1` | 1/1 | 1/1 | 0/0 | 0/0 | 0/0 | PASS |
+| IPPass Age12SeenForOnePreventativeVisitDuringMP | `9516c78a-228f-43d5-bed4-ffb1e37853a7` | 1/1 | 1/1 | 0/0 | 0/0 | 0/0 | PASS |
+| NUM1Pass SeenForTwoVisitsTobaccoNonUser  | `9dd6e1c5-59f4-4576-82c3-289904e3284f` | 1/1 | 1/1 | 0/0 | 1/1 | 0/0 | PASS |
+| DEN2EXPass DischargeToHomeInpatient | `9fba5feb-b77c-496f-981f-6d062f3c1d7c` | 1/1 | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| DEN1EXPass HospiceObsValueIsYes | `a0a8fd4f-bfd4-4669-aaef-f66ae5af5eda` | 1/1 | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| DEN2EXPass HospiceDischargeDuringMP | `ab8310c0-bcc3-4197-8ec6-beeb23f0b0b5` | 1/1 | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| SDEPass SDECoverage2 | `b0c3c273-5cd5-4d4d-960e-47e7d19c9240` | 1/1 | 1/1 | 0/0 | 0/0 | 0/0 | PASS |
+| IPPass Age12SeenForTwoVisitsDuringMP | `b1ec669b-7942-4c05-bee7-30ed73912537` | 1/1 | 1/1 | 0/0 | 0/0 | 0/0 | PASS |
+| NUM2Pass TobaccoAbuseCounseling | `baba5342-649a-41f7-bb48-68e76dac1b82` | 1/1 | 1/1 | 0/0 | 1/1 | 0/0 | PASS |
+| DEN1EXPass HospiceServiceRequestDraft | `bac2713c-8165-40ce-8180-fb5d44a10f7f` | 1/1 | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| DEN1EXFail SeenForOneVisitsWithHospiceDuringMP | `bf5f6b32-8ffc-42fa-b847-21a871ad16bd` | 0/0 | 0/0 | 0/0 | 0/0 | 0/0 | PASS |
+| NUM2Pass MedRequestRecievedTobaccoCessation6MonthsPriorMP | `bf7e475b-f251-4930-a394-a19e2a08e846` | 1/1 | 1/1 | 0/0 | 1/1 | 0/0 | PASS |
+| DEN2EXPass HospiceDiagnosisStartsDuringMP | `c56fda5f-6cd9-4057-aaef-5c843a8241f1` | 1/1 | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| NUM2Fail ReceivedTobaccoCessation7MonthsPriorMP | `cefc66eb-f4e0-4e78-b86b-18f7dbfb2dbd` | 1/1 | 1/1 | 0/0 | 1/1 | 0/0 | PASS |
+| DEN1EXPass SeenForOnePreventativeVisitDuringMP | `d7c6ac3f-09f8-46d5-8231-8b32554fef9c` | 1/1 | 1/1 | 0/0 | 0/0 | 0/0 | PASS |
+| NUM2Pass TobaccoAbuseCounselingCondEncDx | `dff55268-f7f0-422d-9163-a8ae7e9192e8` | 1/1 | 1/1 | 0/0 | 1/1 | 0/0 | PASS |
+| DEN1EXPass HospiceDiagnosisStartsDuringMP | `e3422e20-4e31-4c24-a72b-3c1e1f47de95` | 1/1 | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| DEN2EXPass HospiceEncOverlapsMP | `e383c9a2-7b5e-4ab6-b2e2-642a2304d6e2` | 1/1 | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| IPFail Age12SeenForTwoVisitsBeforeMP | `eb9e68a6-6598-4881-84a3-16128e0dfad1` | 0/0 | 0/0 | 0/0 | 0/0 | 0/0 | PASS |
+| DEN2EXPass HospiceObsValueIsYes | `ed2fe491-3eb7-424a-bf95-5d44b6102cec` | 1/1 | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| IPPass Age12Edge | `f63bc56a-9c2f-46da-94f0-44cc12db4a3b` | 1/1 | 1/1 | 0/0 | 0/0 | 0/0 | PASS |
+| IPFail Age12SeenForTwoPreventativeVisitsAfterMP | `f8243613-c002-4c8a-a778-78e1b4f02ae6` | 0/0 | 0/0 | 0/0 | 0/0 | 0/0 | PASS |
+| DEN1EXFail HospiceAfterMP | `fb5b6d6f-fbe8-415b-a101-9d8990fa511e` | 1/1 | 1/1 | 0/0 | 0/0 | 0/0 | PASS |
+
+### CMS138 reduction check — upstream bundle vs vendored artifact v1.0.000
+
+Executed with the RUNTIME configuration — our reduced artifact plus its own vendored terminology sidecar, expanded through the same code path production uses — against the upstream bundle and upstream ValueSets. 0/47 cases changed population vector; 0 drift errors.
+
+Artifact proven: `sha256:219b52a38363ac6968d47b0d51b6b45656da6b01a9a9d2496bd05aab25280eb4` (2.3 MB, ELM annotations stripped). Compared on population membership (initial-population/denominator/denominator-exclusion/numerator/denominator-exception) only; the artifact also returned 414 named statement results for every subject.
 
 | Case | UUID | Changed populations | v1 IPP/DENOM/DENEX/NUMER/DENEXCEP | draft IPP/DENOM/DENEX/NUMER/DENEXCEP |
 |---|---|---|---|---|
