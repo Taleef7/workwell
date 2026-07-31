@@ -619,3 +619,56 @@ test("a QRDA I export SAYS WHY nothing translated, rather than only that it is e
   );
   assert.ok(run.id);
 });
+
+test("POST evaluate REFUSES a QRDA I whose measure is not the one requested (Codex, #362)", async () => {
+  // A CMS125 document posted with measureId "cms122" was calculated AND PERSISTED as cms122 — a silent
+  // mislabel of a regulatory artifact. The document says which measure it is about; honour it.
+  const created = await post("/api/runs", { scopeType: "MEASURE", scopeId: "audiogram", triggeredBy: "test" });
+  const run = (await created!.json()) as { id: string };
+  const runRecord = { id: run.id, measurementPeriodStart: "2025-06-12T00:00:00.000Z", measurementPeriodEnd: "2026-06-12T00:00:00.000Z" } as never;
+  const realCoded = {
+    resourceType: "Bundle", type: "collection",
+    entry: [
+      { resource: { resourceType: "Patient", id: "emp-006" } },
+      { resource: { resourceType: "Procedure", id: "p1", status: "completed", code: { coding: [{ system: "http://snomed.info/sct", code: "77862003" }] }, performedDateTime: "2026-03-01T09:00:00Z" } },
+    ],
+  };
+  // The document names `audiogram` (WorkWell's urn — the measure is authored, so no eMeasure UUID).
+  const document = buildQrda1Document(runRecord, "audiogram", { subjectId: "emp-006", measureId: "audiogram", evidence: {} } as never, realCoded);
+
+  const mismatched = await post(`/api/runs/${run.id}/evaluate`, { measureId: "cms122", qrda1: document });
+  assert.equal(mismatched?.status, 400);
+  const body = (await mismatched!.json()) as { error: string; documentReferences: string[] };
+  assert.equal(body.error, "qrda1_measure_mismatch");
+  assert.deepEqual(body.documentReferences, ["audiogram"]);
+
+  // The matching request still works — the guard must not refuse the correct case.
+  const matched = await post(`/api/runs/${run.id}/evaluate`, { measureId: "audiogram", qrda1: document });
+  assert.equal(matched?.status, 201, "the guard must not block the measure the document names");
+});
+
+test("import gaps are PERSISTED in the outcome evidence, not only in the POST response (Codex, #362)", async () => {
+  // Returning `untranslatedTemplates` only in the immediate response meant every later read — outcomes,
+  // MeasureReport, QRDA — presented a partial calculation as an ordinary one, and the qualification died
+  // with the request.
+  const created = await post("/api/runs", { scopeType: "MEASURE", scopeId: "audiogram", triggeredBy: "test" });
+  const run = (await created!.json()) as { id: string };
+  const runRecord = { id: run.id, measurementPeriodStart: "2025-06-12T00:00:00.000Z", measurementPeriodEnd: "2026-06-12T00:00:00.000Z" } as never;
+  const realCoded = {
+    resourceType: "Bundle", type: "collection",
+    entry: [
+      { resource: { resourceType: "Patient", id: "emp-006" } },
+      { resource: { resourceType: "Procedure", id: "p1", status: "completed", code: { coding: [{ system: "http://snomed.info/sct", code: "77862003" }] }, performedDateTime: "2026-03-01T09:00:00Z" } },
+    ],
+  };
+  const document = buildQrda1Document(runRecord, "audiogram", { subjectId: "emp-006", measureId: "audiogram", evidence: {} } as never, realCoded);
+  const res = await post(`/api/runs/${run.id}/evaluate`, { measureId: "audiogram", qrda1: document });
+  assert.equal(res?.status, 201);
+  const outcome = (await res!.json()) as { evidence: { qrda1Import?: { untranslatedTemplates: string[]; measureReferences: string[] } } };
+  assert.ok(outcome.evidence.qrda1Import, "the import qualification is part of the stored evidence");
+  assert.deepEqual(outcome.evidence.qrda1Import!.untranslatedTemplates, []);
+  // A bundle-supplied evaluation carries no such key — the qualification is only claimed when earned.
+  const plain = await post(`/api/runs/${run.id}/evaluate`, { measureId: "audiogram", patientBundle: bundle, evaluationDate: "2026-06-12" });
+  const plainOutcome = (await plain!.json()) as { evidence: Record<string, unknown> };
+  assert.equal(plainOutcome.evidence.qrda1Import, undefined);
+});

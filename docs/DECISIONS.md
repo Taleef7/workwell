@@ -47,6 +47,28 @@ the non-conformance list: *"not exported — Procedure: no CDA code system OID f
 That also sharpens locked decision #4 (retiring the authored cms122/125 subsets): the authored catalogue
 is not QRDA-representable, so it cannot participate in the certification rehearsal either way.
 
+**Review found five more, three P1, and one exposed a test whose NAME lied.**
+
+- **A present-but-empty Patient Data section was accepted.** The refusal checked for the section's
+  *existence*, so our own no-bundle export — the document that declares itself non-conformant
+  (CONF:67-14567) — imported to a Patient-only bundle and would have persisted a plausible
+  out-of-population outcome. Worse, the test covering it was called `import REFUSES our own no-bundle
+  export` and asserted that the hollow bundle **came back**. Now it refuses, with a message that
+  distinguishes "there was nothing" from "we could translate none of it" — different operator responses.
+- **The requested measure was not checked against the document.** A CMS125 document posted with
+  `measureId: "cms122"` was calculated *and persisted* as cms122. The route now refuses unless the
+  requested measure is one the document references (by WorkWell id or by published eMeasure UUID), and
+  only when it references any at all, so a document with no measure section stays importable.
+- **The import qualification died with the request.** `untranslatedTemplates` went only into the POST
+  response, so every later read — outcomes, MeasureReport, QRDA — presented a partial calculation as an
+  ordinary one. Now persisted in `evidence.qrda1Import`, additively, the way `official` is.
+- **Timezone offsets were discarded.** `20251231230000-0500` became `2025-12-31T23:00:00Z` instead of
+  `2026-01-01T04:00:00Z` — a different day *and year*, on exactly the half-open boundary a measurement
+  period turns on. Base HL7 asks for the offset (CONF:81-10130) even though the CMS Hospital IG asks for
+  its absence (CMS_0121), so a conformant document may well carry one.
+- **An Observation interval collapsed to an instant**, dropping `<high>` — and a lab or study whose
+  relevant period *overlaps* a measurement window is exactly the case temporal CQL predicates turn on.
+
 **Consequences.**
 
 - The round trip proves our two halves agree; it does **not** prove our reading of the IG is right. The

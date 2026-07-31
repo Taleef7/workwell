@@ -222,12 +222,70 @@ test("import REFUSES a document that is not a QRDA Category I", () => {
 });
 
 test("import REFUSES our own no-bundle export, which is the non-conformant state we mark", () => {
-  // The exporter emits a Patient Data section with no entries and says it is not conformant
-  // (CONF:67-14567). The importer must not quietly accept it and produce a hollow bundle.
+  // The exporter emits a Patient Data section with no entries and SAYS it is not conformant
+  // (CONF:67-14567). Accepting it would produce a Patient-only bundle, which evaluates
+  // out-of-population for every measure — laundering a document that declares itself uncalculable
+  // into a plausible-looking result. The first version of this test asserted the hollow bundle came
+  // back rather than that it was refused: the name said REFUSES and the assertion did not (Codex, #362).
   const hollow = buildQrda1Document(run, "cms125", outcome(officialEvidence));
-  const imported = importQrda1Document(hollow);
-  assert.equal(imported.bundle.entry.length, 1, "the Patient only");
-  assert.deepEqual(imported.untranslatedTemplates, [], "there was nothing to fail to translate");
+  assert.throws(() => importQrda1Document(hollow), /no Patient Data entries \(CONF:67-14567\)/);
+});
+
+test("import REFUSES a document whose every entry is a datatype we cannot translate", () => {
+  // Same Patient-only outcome, different cause — and the message says which, because "we dropped
+  // everything" and "there was nothing" call for different operator responses.
+  const onlyMedication = `<?xml version="1.0" encoding="UTF-8"?>
+<ClinicalDocument xmlns="urn:hl7-org:v3">
+  <recordTarget><patientRole><id root="urn:workwell:employee" extension="emp-006"/></patientRole></recordTarget>
+  <component><structuredBody><component><section>
+    <templateId root="2.16.840.1.113883.10.20.24.2.1" extension="2021-08-01"/>
+    <entry typeCode="DRIV">
+      <substanceAdministration classCode="SBADM" moodCode="EVN">
+        <templateId root="2.16.840.1.113883.10.20.24.3.41" extension="2021-08-01"/>
+      </substanceAdministration>
+    </entry>
+  </section></component></structuredBody></component>
+</ClinicalDocument>`;
+  assert.throws(() => importQrda1Document(onlyMedication), /no entry this importer can translate/);
+  assert.throws(() => importQrda1Document(onlyMedication), /2\.16\.840\.1\.113883\.10\.20\.24\.3\.41/);
+});
+
+test("import applies an HL7 TIMEZONE OFFSET rather than discarding it (Codex, #362)", () => {
+  // `20251231230000-0500` is 2026-01-01T04:00:00Z — a different day AND year. A measurement period is
+  // a half-open interval on exactly that boundary, so dropping the offset moves events between
+  // populations. Base HL7 asks for the offset (CONF:81-10130) even though the CMS Hospital IG asks for
+  // its absence (CMS_0121), so a conformant document may well carry one.
+  // Target the PROCEDURE's own timestamp: `.replace` with a string hits only the first match, and the
+  // imaging Observation shares that instant in the shared fixture.
+  const doc = buildQrda1Document(run, "cms125", outcome(officialEvidence), {
+    ...sourceBundle,
+    entry: [sourceBundle.entry[0]!, sourceBundle.entry[5]!],
+  }).replace('value="20250510100000"', 'value="20251231230000-0500"');
+  const imported = importQrda1Document(doc);
+  const procedure = imported.bundle.entry.map((e) => e.resource as Record<string, unknown>).find((r) => r.resourceType === "Procedure")!;
+  assert.equal(procedure.performedDateTime, "2026-01-01T04:00:00Z");
+});
+
+test("import keeps an Observation INTERVAL as a period, not an instant (Codex, #362)", () => {
+  // A lab or study whose relevant period OVERLAPS a measurement window is exactly the case temporal
+  // CQL predicates turn on; collapsing to the start silently drops the end.
+  const doc = buildQrda1Document(run, "cms125", outcome(officialEvidence), {
+    ...sourceBundle,
+    entry: [
+      sourceBundle.entry[0]!,
+      {
+        resource: {
+          resourceType: "Observation", id: "obs-span", status: "final",
+          category: [{ coding: [{ code: "laboratory" }] }],
+          code: { coding: [{ system: "http://loinc.org", code: "4548-4" }] },
+          effectivePeriod: { start: "2025-06-01T10:00:00Z", end: "2025-06-02T10:00:00Z" },
+        },
+      },
+    ],
+  });
+  const observation = importQrda1Document(doc).bundle.entry.map((e) => e.resource as Record<string, unknown>).find((r) => r.resourceType === "Observation")!;
+  assert.deepEqual(observation.effectivePeriod, { start: "2025-06-01T10:00:00Z", end: "2025-06-02T10:00:00Z" });
+  assert.equal(observation.effectiveDateTime, undefined, "an interval must not collapse to an instant");
 });
 
 test("import NAMES an untranslated QDM datatype rather than counting it", () => {

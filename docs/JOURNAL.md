@@ -33,6 +33,16 @@ resources, both eMeasure UUIDs — and **names all 47** QDM datatypes it does no
 dropping them silently. That test self-skips without `WORKWELL_QRDA1_SAMPLE` and says so in its skip
 message, because the sample ships in the same manually-downloaded CMS zip as the Schematron.
 
+**Review found five more, and one exposed a test whose NAME lied.** The refusal checked that the Patient
+Data section *existed*, not that it had entries — so our own no-bundle export (the document that declares
+itself non-conformant) imported to a Patient-only bundle and would have persisted a plausible
+out-of-population outcome. The test covering it was called `import REFUSES our own no-bundle export` and
+asserted the hollow bundle **came back**. Also: the requested measure was not checked against the
+document (a CMS125 document posted as `cms122` was calculated *and persisted* as cms122); the
+`untranslatedTemplates` qualification died with the HTTP response instead of being stored in evidence;
+timezone offsets were discarded (`…230000-0500` is a different day *and year*); and an Observation
+interval collapsed to an instant, dropping the end a temporal CQL predicate turns on.
+
 Still open for M-B: **Cypress CVU+ has not run.** It needs Docker and remains the bar.
 
 ## 2026-07-30 (M-B) — QRDA Category I was built inside-out; measuring against the right IG showed it (branch `feat/qrda1-patient-data`)

@@ -52,14 +52,25 @@ const GENDER_FOR_SNOMED: Record<string, string> = { "248152002": "female", "2481
 
 export class Qrda1ImportError extends Error {}
 
-/** HL7 `YYYYMMDDHHMMSS[±ZZZZ]` → ISO-8601, or undefined when absent/nullFlavored/unparseable. */
+/**
+ * HL7 `YYYYMMDDHHMMSS[±ZZZZ]` → ISO-8601, or undefined when absent/nullFlavored/unparseable.
+ *
+ * The **offset is applied, not discarded** (Codex, #362). `20251231230000-0500` is
+ * `2026-01-01T04:00:00Z`, a different day and a different YEAR — and a measurement period is a
+ * half-open interval on exactly that boundary, so dropping the offset silently moves events in and out
+ * of populations. Base HL7 asks for the offset (CONF:81-10130) even though the CMS Hospital IG asks for
+ * its absence (CMS_0121), so a conformant document may well carry one.
+ */
 function isoFromHl7(value: string | undefined): string | undefined {
   if (!value || !/^\d{8}/.test(value)) return undefined;
   const [y, mo, d] = [value.slice(0, 4), value.slice(4, 6), value.slice(6, 8)];
-  if (value.length < 12) return `${y}-${mo}-${d}`;
-  const [h, mi, s] = [value.slice(8, 10), value.slice(10, 12), value.slice(12, 14) || "00"];
-  const iso = `${y}-${mo}-${d}T${h}:${mi}:${s}Z`;
-  return Number.isNaN(new Date(iso).getTime()) ? undefined : iso;
+  const offset = /([+-])(\d{2})(\d{2})$/.exec(value);
+  const digits = offset ? value.slice(0, value.length - 5) : value;
+  if (digits.length < 12) return `${y}-${mo}-${d}`;
+  const [h, mi, s] = [digits.slice(8, 10), digits.slice(10, 12), digits.slice(12, 14) || "00"];
+  const zone = offset ? `${offset[1]}${offset[2]}:${offset[3]}` : "Z";
+  const parsed = new Date(`${y}-${mo}-${d}T${h}:${mi}:${s}${zone}`);
+  return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString().replace(/\.\d{3}Z$/, "Z");
 }
 
 /** A CDA coded element → a FHIR CodeableConcept, or undefined when it is nullFlavored/unmapped. */
@@ -126,13 +137,24 @@ function observationFrom(node: CdaNode, i: number, category: string): unknown {
     ? { value: Number(valueNode.attrs.value), ...(valueNode.attrs.unit ? { unit: valueNode.attrs.unit } : {}) }
     : undefined;
   const coded = valueNode?.attrs["xsi:type"] === "CD" ? concept(valueNode) : undefined;
+  // An interval stays an interval. Collapsing `<low>`+`<high>` to a single `effectiveDateTime` drops the
+  // end, and a lab or study whose relevant period OVERLAPS a measurement window is exactly the case
+  // temporal CQL predicates turn on (Codex, #362).
+  const when =
+    t.start && t.end
+      ? { effectivePeriod: { start: t.start, end: t.end } }
+      : (t.point ?? t.start)
+        ? { effectiveDateTime: (t.point ?? t.start)! }
+        : t.end
+          ? { effectivePeriod: { end: t.end } }
+          : {};
   return {
     resourceType: "Observation",
     id: idOf(node, `qrda1-observation-${i}`),
     status: "final",
     category: [{ coding: [{ system: "http://terminology.hl7.org/CodeSystem/observation-category", code: category }] }],
     code,
-    ...(t.point ?? t.start ? { effectiveDateTime: t.point ?? t.start } : {}),
+    ...when,
     ...(quantity && Number.isFinite(quantity.value) ? { valueQuantity: quantity } : {}),
     ...(coded ? { valueCodeableConcept: coded } : {}),
   };
@@ -241,6 +263,20 @@ export function importQrda1Document(xml: string): Qrda1Import {
       untranslatedTemplates.push(roots[roots.length - 1] ?? "(no templateId)");
     }
   });
+
+  // A Patient-only bundle is the failure this whole module exists to avoid, and the section being
+  // PRESENT but empty reaches it just as surely as the section being absent (Codex, #362). Our own
+  // no-bundle export is exactly that document — it declares itself non-conformant (CONF:67-14567), so
+  // importing it and persisting a plausible out-of-population outcome would launder a document that
+  // says it cannot be calculated from.
+  if (entries.length <= 1) {
+    throw new Qrda1ImportError(
+      untranslatedTemplates.length === 0
+        ? "QRDA Category I has no Patient Data entries (CONF:67-14567) — nothing to calculate from"
+        : `QRDA Category I has no entry this importer can translate; ${untranslatedTemplates.length} ` +
+          `untranslated: ${[...new Set(untranslatedTemplates)].slice(0, 5).join(", ")}`,
+    );
+  }
 
   const measureSection = sections.find((s) => hasTemplate(s, T.measureSection));
   const references = descendants(measureSection, "externalDocument");
