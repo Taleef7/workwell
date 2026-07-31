@@ -9,6 +9,7 @@
 import type { RunRecord } from "../stores/run-store.ts";
 import type { OutcomeRecord } from "../stores/outcome-store.ts";
 import { loadOfficialArtifact, officialMeasureIdentifiers } from "../wiring/official-artifacts.ts";
+import { ACT, EMEASURE_ID_ROOT, LOINC, esc, hl7Ts } from "./qrda-common.ts";
 import {
   countPopulations,
   officialReportIdentity,
@@ -16,18 +17,8 @@ import {
   type OfficialReportIdentity,
 } from "./measure-report.ts";
 
-const LOINC = "2.16.840.1.113883.6.1";
-const ACT = "2.16.840.1.113883.5.4";
 
-const esc = (s: string): string =>
-  s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
-const hl7Ts = (iso: string): string => {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) throw new Error(`invalid ISO date for QRDA effectiveTime: ${iso}`);
-  const p = (x: number) => String(x).padStart(2, "0");
-  return `${d.getUTCFullYear()}${p(d.getUTCMonth() + 1)}${p(d.getUTCDate())}${p(d.getUTCHours())}${p(d.getUTCMinutes())}${p(d.getUTCSeconds())}`;
-};
 
 const POPULATIONS: Array<{ code: string; label: string }> = [
   { code: "IPOP", label: "initial-population" },
@@ -62,7 +53,7 @@ function officialMeasureReference(measureId: string, official: OfficialReportIde
     return `<id root="urn:workwell:measure" extension="${esc(measureId)}"/>`;
   }
   return [
-    `<id root="2.16.840.1.113883.4.738" extension="${esc(ids.versionSpecific)}"/>`,
+    `<id root="${EMEASURE_ID_ROOT}" extension="${esc(ids.versionSpecific)}"/>`,
     ids.versionIndependent ? `
                   <setId root="${esc(ids.versionIndependent)}"/>` : "",
     official.version ? `

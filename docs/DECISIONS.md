@@ -1,5 +1,57 @@
 # Architecture Decision Records
 
+## ADR-049: QRDA Category I exists, reports population membership only, and says so in the document
+
+**Status:** Accepted (2026-07-30). Roadmap M-B, first step. **Not CVU+-validated** — that bar is unmet
+and this ADR does not claim it.
+
+**Context.** The roadmap's audit recorded "**QRDA-I does not exist anywhere**; QRDA-III is a stub". QRDA I
+is the patient-level artifact — one CDA document per subject — and it is the half of the certification
+rehearsal that carries what a receiving engine would recalculate from. Nothing produced one.
+
+**Decision.**
+
+1. **One document per subject, membership read EVIDENCE-first.** Population membership comes from
+   `membershipFor`, so an official-routed outcome's populations are `evidence.official.populationResults`
+   — the regulatory truth — and never the 5-bucket workflow status, which cannot express DENEXCEP and
+   **inverts** for cms122. A status-derived QRDA I would report a poor-control patient as out of the
+   numerator, which is the same defect ADR-031 fixed for MeasureReport.
+2. **Every population is emitted, including the ones the subject is not in.** A receiver must be able to
+   distinguish "not in the numerator" from "the numerator was not reported"; omitting false members
+   collapses those into one document.
+3. **The measure is referenced by its published eMeasure UUIDs when the outcome was scored officially** —
+   version-specific under the eMeasure Identifier root, version-independent as `setId`, per ADR-046. A
+   receiver resolves the measure's numerator orientation from that identity, so naming WorkWell's urn over
+   CMS's populations would misdescribe the document. Authored outcomes keep the urn.
+4. **The Patient Data section is emitted with `nullFlavor="NI"` and a plain-English note, not populated
+   and not omitted.** This is the honest core of the decision. QRDA I's purpose in a certification
+   setting is to carry the QDM entries — encounters, diagnoses, results — that let a receiving engine
+   **recalculate** the measure. We do not export them. A section that looked populated would be a
+   document that validates structurally and cannot do the one job it exists for; an absent section would
+   hide the gap. `nullFlavor="NI"` states it in the artifact itself, where a recipient sees it, and
+   `STANDARDS_CONFORMANCE.md` records it in the row that matters.
+5. **Conformance is "well-formed and structurally representative", the same level QRDA III has carried
+   since ADR-009.** TemplateIds are the well-known QRDA I OIDs; that is not evidence of conformance, and
+   nothing here may be described as conformant until **Cypress CVU+** actually runs. It has not: CVU+
+   needs Docker, which is unavailable in the environment this was built in.
+6. **CDA primitives are shared, not duplicated** (`qrda-common.ts`). The two documents describe the same
+   run and the certification loop compares them against each other, so a timestamp format or escaping
+   rule drifting between them would surface as a validation difference nobody introduced deliberately.
+
+**Consequences.**
+
+- `GET /api/runs/:id/qrda1` returns a JSON envelope of per-subject documents, bounded by
+  `MAX_INDIVIDUAL_REPORT_SUBJECTS` for the reason the individual MeasureReport bundle is: this path
+  materializes per-subject rows, and a 120k `seed:scale` run would otherwise build 120k CDA documents in
+  the worker. It **refuses** rather than truncating.
+- **Well-formedness is tested, not assumed.** The document is hand-built XML, so balance is a property to
+  check: a dependency-free tag-balance/escaping checker runs on every generated document (CLAUDE.md
+  forbids adding an XML parser without approval). Mutation-checked — unbalancing a tag or dropping an
+  escape fails three tests.
+- **What is still missing for M-B**, stated so the milestone is not read as closed: the QDM patient-data
+  entries (decision 4), QRDA **I import** entirely, and the CVU+ loop that would let any of this be
+  called validated.
+
 ## ADR-048: The TRANSLATOR debt is paid; the CLI-surface debt is not, and the split is not a file move
 
 **Status:** Accepted (2026-07-30). Roadmap §7.4 PR-2 / M-C item C1 — the first of the two extraction
