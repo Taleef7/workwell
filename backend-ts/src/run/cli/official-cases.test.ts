@@ -74,6 +74,7 @@ test("main loads a selected measure without overwriting the committed combined r
     // "stub the world" would parse a 2.4MB bundle and expand 26 value sets, taking a different path
     // on a machine that has the fetched sidecar than on one that does not.
     runtimeTerminology: () => Promise.resolve({ reason: "stubbed" }),
+    unresolvableOids: () => [],
     runDraftDrift: () => Promise.resolve({ total: 66, changedCases: 0, errors: 0 } as never),
     writeReport: (path: string, markdown: string) => {
       writes.push({ path, markdown });
@@ -108,6 +109,7 @@ test("main runs the CMS122 vendored-draft drift stretch after the official batch
     load: () => fakeLoaded,
     run: () => Promise.resolve(fakeRun as never),
     runtimeTerminology: () => Promise.resolve({ reason: "stubbed" }),
+    unresolvableOids: () => [],
     loadDraftBundle: (path) => {
       assert.equal(path, resolve(testCwd, "measures", "official", "cms122", "bundle.json"));
       return { resourceType: "Bundle", entry: [] } as never;
@@ -188,4 +190,99 @@ test("readArtifactIdentity hashes the bytes on disk, not the manifest's claim ab
 
   // A missing artifact is absent identity, not a thrown gate.
   assert.equal(readArtifactIdentity(resolve(malformed, "nope.json")), undefined);
+});
+
+/**
+ * ADR-053 / review of #366. GitHub withholds `WORKWELL_VSAC_API_KEY_VENDOR` from fork and Dependabot
+ * PRs, so CI re-vendors without `--complete-terminology`. For a measure whose upstream bundle omits a
+ * value set, the regenerated sidecar omits it too — the deck cannot resolve it and reports every case
+ * as an error. Unhandled, that turns every external contributor's PR red for a reason unrelated to
+ * their change.
+ *
+ * The accommodation is opt-in, and the opt-OUT is the load-bearing half: a credentialed run must never
+ * skip, because there an unresolvable value set means a broken artifact — which is what the gate is for.
+ */
+test("--allow-missing-terminology SKIPS a measure this context cannot resolve, and says so", async () => {
+  const module = await import("./official-cases.ts");
+  const ran: string[] = [];
+  const errors: string[] = [];
+  const writes: unknown[] = [];
+  const code = await module.main(["--content-dir", "fixtures", "--allow-missing-terminology"], {
+    cwd: resolve("test-repo", "backend-ts"),
+    load: (_dir: string, measure: string) => ({ measure }) as never,
+    run: (loaded: { measure: string }) => {
+      ran.push(loaded.measure);
+      // The REQUIRED deck size for this measure, not 1: `exitCodeForRuns` fails a run whose deck
+      // shrank, so a fixture with total=1 exits 1 for a reason that has nothing to do with the skip.
+      const total = module.REQUIRED_OFFICIAL_CASE_COUNTS[loaded.measure] ?? 1;
+      return Promise.resolve({
+        measure: loaded.measure,
+        supplementedOids: [],
+        summary: { total, expectedAgreements: total, referenceAgreements: 0, unexpectedMismatches: 0, errors: 0 },
+      } as never);
+    },
+    render: () => "report",
+    sourceRevision: () => "rev",
+    loadDraftBundle: () => ({}) as never,
+    artifactIdentity: () => undefined,
+    runDraftDrift: () => Promise.resolve({ total: 1, changedCases: 0, errors: 0 } as never),
+    runtimeTerminology: () => Promise.resolve({ reason: "stubbed" }),
+    unresolvableOids: (measure: string) => (measure === "cms138" ? ["2.16.840.1.113883.3.526.3.1278"] : []),
+    generatedDate: "2026-07-31",
+    writeReport: (path: string, markdown: string) => writes.push({ path, markdown }),
+    log: () => undefined,
+    error: (m: string) => errors.push(m),
+  });
+
+  assert.equal(code, 0, "a skipped measure must not fail the run in this context");
+  assert.ok(!ran.includes("cms138"), "cms138 must not be executed at all");
+  assert.ok(ran.length > 0, "every other measure must still run — this is a skip, not a bypass");
+  assert.match(errors.join(" | "), /CMS138 SKIPPED/);
+  assert.match(errors.join(" | "), /credentialed run does NOT skip/);
+  // A run missing a measure is PARTIAL, so it must not overwrite the committed evidence — otherwise
+  // CI's staleness check reads "current" on the very run that could not produce it.
+  assert.deepEqual(writes, [], "a partial run must not rewrite the committed report");
+  assert.match(errors.join(" | "), /PARTIAL RUN/);
+});
+
+test("WITHOUT the flag the same measure still runs — the gate is not quietly weakened", async () => {
+  const module = await import("./official-cases.ts");
+  const ran: string[] = [];
+  const code = await module.main(["--content-dir", "fixtures"], {
+    cwd: resolve("test-repo", "backend-ts"),
+    load: (_dir: string, measure: string) => ({ measure }) as never,
+    run: (loaded: { measure: string }) => {
+      ran.push(loaded.measure);
+      // The REQUIRED deck size for this measure, not 1: `exitCodeForRuns` fails a run whose deck
+      // shrank, so a fixture with total=1 exits 1 for a reason that has nothing to do with the skip.
+      const total = module.REQUIRED_OFFICIAL_CASE_COUNTS[loaded.measure] ?? 1;
+      return Promise.resolve({
+        measure: loaded.measure,
+        supplementedOids: [],
+        summary: { total, expectedAgreements: total, referenceAgreements: 0, unexpectedMismatches: 0, errors: 0 },
+      } as never);
+    },
+    render: () => "report",
+    sourceRevision: () => "rev",
+    loadDraftBundle: () => ({}) as never,
+    artifactIdentity: () => undefined,
+    runDraftDrift: () => Promise.resolve({ total: 1, changedCases: 0, errors: 0 } as never),
+    runtimeTerminology: () => Promise.resolve({ reason: "stubbed" }),
+    // Reports the SAME unresolvable OID. Without the flag it must be ignored and the measure run, so a
+    // credentialed CI job sees the real 47 errors rather than a green skip.
+    unresolvableOids: (measure: string) => (measure === "cms138" ? ["2.16.840.1.113883.3.526.3.1278"] : []),
+    generatedDate: "2026-07-31",
+    writeReport: () => undefined,
+    log: () => undefined,
+    error: () => undefined,
+  });
+
+  assert.equal(code, 0);
+  assert.ok(ran.includes("cms138"), "without the flag the measure MUST be executed");
+});
+
+test("parseArgs accepts --allow-missing-terminology and defaults it off", async () => {
+  const module = await import("./official-cases.ts");
+  assert.equal(module.parseArgs([]).allowMissingTerminology, undefined, "off unless asked for");
+  assert.equal(module.parseArgs(["--allow-missing-terminology"]).allowMissingTerminology, true);
 });
