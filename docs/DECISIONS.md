@@ -1,5 +1,56 @@
 # Architecture Decision Records
 
+## ADR-048: The extraction debt is paid; `@workwell/measure-engine` is a boundary split, not a file move
+
+**Status:** Accepted (2026-07-30). Roadmap M-C, step 1 of 2.
+
+**Context.** The engine-boundary test has carried an allowlist entry since PR-1 saying, in its own words,
+that `@cqframework/cql` "is a real runtime dep of this tree TODAY. PR-2 moves `cql-translator.ts` to the
+app, which is what restores the two-dependency package story." That was the one thing standing between
+`src/engine/` and the dependency manifest a publishable package would declare.
+
+**Decision.**
+
+1. **`cql-translator.ts` moves to `src/measure/`, with its `resources/` directory.** It is the ELM
+   Explorer's live-compile path, reached from `routes/measures.ts` and `measure-authoring.ts` — an
+   authoring feature, not an evaluation one. Four importers; `scripts/compile-measures.mjs` re-pointed at
+   the moved resources.
+2. **The allowlist entry is deleted and the self-test inverted.** It asserted the translator dep "must be
+   permitted in cql-translator.ts"; it now asserts the dep must **not** be permitted anywhere in the
+   engine tree. The eval core's declared dependencies are `cql-execution` and `cql-exec-fhir`, with
+   `node:` built-ins confined to `*-cli.ts` entrypoints — which is a package manifest, not an aspiration.
+3. **The physical extraction is NOT a wholesale move of `src/engine/`, and the measurement says why.**
+   Counting what the rest of the app actually imports from the engine tree:
+
+   | import | count | belongs to |
+   |---|---:|---|
+   | `synthetic/employee-catalog.ts` | 50 | the app — WorkWell's demo directory |
+   | `cql/measure-registry.ts` | 32 | the engine |
+   | `synthetic/measure-bindings.ts` | 25 | the app |
+   | `ingress/webchart/live-directory.ts` | 20 | the app |
+   | `synthetic/exam-config.ts` | 19 | the app |
+   | `synthetic/fhir-bundle-builder.ts` | 18 | the app |
+   | `cql/cql-execution-engine.ts` | 16 | the engine |
+
+   **The largest single export of a wholesale `@workwell/measure-engine` would be a directory of 150
+   fake employees.** Nobody installs a measure engine to get demo data. The roadmap already scopes the
+   package to "`measure-engine` = cql-execution+cql-exec-fhir only", so `synthetic/` (5 files) and
+   `ingress/` (15 files) are app concerns that happen to live under `engine/`.
+
+4. **That split is tractable, which is also measured:** `cql/` and `evaluate-measure.ts` import **nothing**
+   from `synthetic/` or `ingress/`. The dependency runs one way already, so the split is a move plus an
+   import rewrite, not an untangling.
+
+**Consequences.**
+
+- **The two-dependency package story is true today**, and enforced rather than promised.
+- **Step 2 is a boundary redesign with a published API at stake**, not a mechanical move — which is why it
+  is not bundled here. It has to decide what `@workwell/measure-engine` exports, and that decision is
+  hard to reverse once published. The measurement above is the input to it.
+- **No behaviour changes.** The translator is the same module reached by the same callers.
+- `src/engine/` is now 14 eval-core files plus 24 app-side ones in `synthetic/`, `ingress/` and
+  `immunization/`. The boundary test still guards the whole tree, so nothing regresses in the meantime.
+
 ## ADR-047: A measure is onboarded when its MADiE gate is green — vendoring is not onboarding
 
 **Status:** Accepted (2026-07-30). Roadmap M-A. **CMS2, CMS68 and CMS951 are vendored, gated and

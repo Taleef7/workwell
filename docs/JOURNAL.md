@@ -1,5 +1,42 @@
 # Journal
 
+## 2026-07-30 (later) — M-C step 1: the extraction debt is paid, and the extraction is not what it looked like (branch `feat/measure-engine-package`)
+
+The engine-boundary test has carried an allowlist entry since PR-1 that described its own removal:
+`@cqframework/cql` "is a real runtime dep of this tree TODAY. PR-2 moves `cql-translator.ts` to the app,
+which is what restores the two-dependency package story." Done — four importers, plus its `resources/`
+directory and a re-pointed `compile-measures.mjs`. The allowlist entry is deleted and its self-test
+**inverted**: it used to assert the dep "must be permitted in cql-translator.ts", and now asserts it must
+not be permitted anywhere in the engine tree. The manifest is real rather than aspirational.
+
+**Then I measured what the extraction would actually publish, and it changed the shape of the work.**
+Counting the app's imports from `engine/`:
+
+| import | count |
+|---|---:|
+| `synthetic/employee-catalog.ts` | **50** |
+| `cql/measure-registry.ts` | 32 |
+| `synthetic/measure-bindings.ts` | 25 |
+| `ingress/webchart/live-directory.ts` | 20 |
+| `synthetic/exam-config.ts` | 19 |
+
+**The largest single export of a wholesale `@workwell/measure-engine` would be a directory of 150 fake
+employees.** Nobody installs a measure engine to get demo data. The roadmap already says the package is
+"cql-execution+cql-exec-fhir only" — so `synthetic/` (5 files) and `ingress/` (15) are app concerns that
+happen to live under `engine/`, and M-C is a **boundary split**, not the file move the task name implies.
+
+The good news is also measured: `cql/` and `evaluate-measure.ts` import **nothing** from `synthetic/` or
+`ingress/`. The dependency already runs one way, so step 2 is a move plus an import rewrite rather than an
+untangling.
+
+**I stopped there deliberately.** Step 2 decides what a published package exports, and that is hard to
+reverse once it is on a registry — it is a design review, not a mechanical rewrite, and bundling it into
+an unattended PR would bake in a public surface nobody looked at. The measurement above is the input to
+that decision; ADR-048 records it.
+
+Verified: typecheck clean; 1623 tests / 1609 pass / 0 fail / 14 skipped; boundary test green with the
+tightened rule.
+
 ## 2026-07-30 (later still) — M-A wave 2: three more measures onboarded, three refused (branch `feat/official-measures-wave2`)
 
 Vendoring all six remaining priority measures took minutes. Deciding which could be **onboarded** took the
