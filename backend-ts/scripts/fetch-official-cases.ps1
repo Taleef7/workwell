@@ -14,17 +14,28 @@ param(
 
 $ErrorActionPreference = "Stop"
 $repo = "https://github.com/cqframework/dqm-content-qicore-2025.git"
+# The five GATED measures, plus three CANDIDATES. A candidate is checked out but is deliberately NOT in
+# `OFFICIAL_GATED_MEASURES` — its artifact is not vendored yet, so adding it to the gate would fail the
+# deck. Checking them out is what lets `pnpm official:terminology-audit` and the credentialed
+# `vendor-official-measure.yml` workflow read their bundles at the pinned commit without a 17 MB pull
+# (ADR-053: that audit is how CMS138's absent value set was found).
 $paths = @(
   "bundles/measure/CMS122FHIRDiabetesAssessGT9Pct",
   "bundles/measure/CMS125FHIRBreastCancerScreen",
   "bundles/measure/CMS2FHIRPCSDepScreenAndFollowUp",
   "bundles/measure/CMS68FHIRDocumentationCurrentMeds",
   "bundles/measure/CMS951FHIRKidneyHealthEval",
+  "bundles/measure/CMS130FHIRColorectalCancerScrn",
+  "bundles/measure/CMS138FHIRTobaccoScrnCessation",
+  "bundles/measure/CMS165FHIRControllingHighBP",
   "input/tests/measure/CMS122FHIRDiabetesAssessGT9Pct",
   "input/tests/measure/CMS125FHIRBreastCancerScreen",
   "input/tests/measure/CMS2FHIRPCSDepScreenAndFollowUp",
   "input/tests/measure/CMS68FHIRDocumentationCurrentMeds",
-  "input/tests/measure/CMS951FHIRKidneyHealthEval"
+  "input/tests/measure/CMS951FHIRKidneyHealthEval",
+  "input/tests/measure/CMS130FHIRColorectalCancerScrn",
+  "input/tests/measure/CMS138FHIRTobaccoScrnCessation",
+  "input/tests/measure/CMS165FHIRControllingHighBP"
 )
 $ContentDir = [System.IO.Path]::GetFullPath($ContentDir)
 
