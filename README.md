@@ -92,7 +92,7 @@ flowchart TB
 
 **Three boundaries are enforced by tests, not convention:**
 
-1. **`src/engine/` reaches nothing outside itself** — a containment test freezes the dependency allowlist, so the eval core stays portable. The *eval core* needs only `cql-execution` and `cql-exec-fhir`; the tree also still carries `@cqframework/cql` (the ELM Explorer) and `node:fs` in four CLI entrypoints, both pinned by that allowlist until the package extraction removes them.
+1. **`src/engine/` reaches nothing outside itself** — a containment test freezes the dependency allowlist, so the eval core stays portable. Its runtime dependencies are exactly **`cql-execution` and `cql-exec-fhir`**; `node:` built-ins are confined to `*-cli.ts` entrypoints, and the CQL→ELM translator now lives in the app, so `@cqframework/cql` is *refused* anywhere in the tree rather than carved out.
 2. **`fqm-execution` lives in exactly one package** — `packages/official-executor/`, reached only through a lazy `await import`, policed by five boundary tests. The heavyweight official-execution dependency can never leak into the request path.
 3. **Storage is a port with two adapters** — a Postgres *ceiling* and a SQLite *floor* that satisfy the same contract test, so the whole suite runs with no database.
 
