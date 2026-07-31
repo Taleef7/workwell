@@ -69,6 +69,50 @@ is not QRDA-representable, so it cannot participate in the certification rehears
 - **An Observation interval collapsed to an instant**, dropping `<high>` — and a lab or study whose
   relevant period *overlaps* a measurement window is exactly the case temporal CQL predicates turn on.
 
+**A second review pass found eight more, one of which made the whole feature wrong on the routed measure.**
+
+1. **CRITICAL — the import wrote `Patient.gender` and no `us-core-sex` extension.** Official CMS125's
+   initial population reads the EXTENSION, never `gender` (ADR-042, and `devdb-official-eval.test.ts`
+   already pins that stripping it empties the whole roster from the IPP). Measured: source bundle
+   COMPLIANT / in-IPP, round-tripped MISSING_DATA / out-of-IPP. On demo/production —
+   where `WORKWELL_OFFICIAL_MEASURES="cms122,cms125"` is set — `(c)(2)` calculated **every imported
+   subject out of population**, persisted it, and returned 201 with `untranslatedTemplates: []`. The
+   round trip could not see it because it never runs the official engine, and the test that was meant to
+   cover it asserted `patient.gender === "female"` **while citing ADR-042** — naming the right hazard and
+   measuring the element ADR-042 established is the wrong one. `qrda1-import-official.test.ts` now
+   asserts population membership itself, is mutation-checked, and is wired into the `official-cases` CI
+   job (the workflow warns in a comment that a sidecar test not listed there is permanently skipped
+   while reading as covered — which is exactly how this class recurs).
+2. **HIGH — a legal `>` inside an attribute value corrupted the tree.** XML requires only `<` and `&` to
+   be escaped in attributes, so `displayName="HbA1c > 9.0%"` is conformant; the element was truncated
+   mid-attribute, lost its self-closing slash, and **swallowed its siblings**, silently deleting the date
+   and value from an HbA1c of 9.6. The round trip provably cannot catch this — our own `esc()` escapes
+   `>`, so we never emit the input that breaks us.
+3. **HIGH — unmatched close tags were quadratic: a 1 MB body took 53 seconds** on this single-threaded
+   host, stalling every other request past nginx's 60 s timeout. An accidental DoS from a truncated
+   document, not only a malicious one. Close-tag matching is now an O(1) name→depth lookup, with a
+   `MAX_ELEMENTS` bound. The module's claim that "there is no construct that can cause unbounded work"
+   was simply false, and now describes what is true.
+4. **HIGH — only ONE resource was imported per `<entry>`**, and the rest vanished *while the entry was
+   reported fully translated*. A Result Organizer carrying two Laboratory Tests is a standard CDA
+   construct, so an HbA1c that is the second component of a chemistry panel disappeared with
+   `untranslatedTemplates: []` — breaking decision 4 above on its own terms.
+5. **MEDIUM — `descendants()` recursed** and blew the stack at ~5 000 nesting levels (~30 KB), and
+   `importQrda1Document` calls it on the root first. Explicit stack now, pushing children in reverse so
+   document order is preserved — the measure-reference reader depends on it.
+6. **MEDIUM — two drop reasons were wrong.** An Observation whose category is outside both sets was
+   blamed on terminology even with a plain LOINC code, and an Encounter was *always* reported as having
+   "an absent code" because the reason read `code` while the builder reads `type[0] ?? code`. A wrong
+   reason is worse than none: it sends someone to the wrong place.
+7. **MEDIUM — the reason list was unbounded and duplicated** (measured: 302 reasons, 3 unique, 31 KB per
+   subject). Deduped and counted.
+8. **MEDIUM — no date validation on the date-only path**, so `00000000` became `"0000-00-00"` in
+   `Patient.birthDate`, which CMS125's IPP feeds to `AgeAt(...)`.
+
+Also from that pass: `<setId>` (the version-independent eMeasure id) was never read, so a document naming
+its measure only that way would have been refused by the new measure check; and `qrda1: null` — a common
+client idiom for an absent optional — was treated as "a QRDA was supplied".
+
 **Consequences.**
 
 - The round trip proves our two halves agree; it does **not** prove our reading of the IG is right. The

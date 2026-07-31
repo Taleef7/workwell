@@ -531,8 +531,11 @@ export async function handleRuns(
     const body = (await req.json().catch(() => null)) as
       | { measureId?: string; patientBundle?: unknown; qrda1?: string; evaluationDate?: string }
       | null;
-    if (!body?.measureId || (!body.patientBundle && !body.qrda1)) {
-      return json({ error: "invalid_request", hint: "body requires { measureId, patientBundle | qrda1 }" }, 400);
+    if (!body?.measureId || (!body.patientBundle && body.qrda1 == null)) {
+      return json(
+        { error: "invalid_request", hint: "body requires { measureId, patientBundle | qrda1 }; qrda1 wins if both are given" },
+        400,
+      );
     }
     // §170.315(c)(2) "import and calculate": a QRDA Category I document is translated to FHIR and then
     // evaluated by the SAME unchanged engine — importing is a mapping, not a second calculator (ADR-051).
@@ -540,7 +543,9 @@ export async function handleRuns(
     // evaluates out-of-population for every measure, indistinguishable from a genuinely ineligible
     // patient (the ADR-043 hazard).
     let imported: Qrda1Import | undefined;
-    if (body.qrda1 !== undefined) {
+    // `!= null` rather than `!== undefined`: JSON `null` for an absent optional field is a common client
+    // idiom, and treating it as "a QRDA was supplied" turned a previously-working request into a 400.
+    if (body.qrda1 != null) {
       if (typeof body.qrda1 !== "string") {
         return json({ error: "invalid_request", hint: "qrda1 must be the CDA document as a string" }, 400);
       }
