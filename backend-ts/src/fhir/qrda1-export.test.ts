@@ -170,3 +170,24 @@ test("QRDA I: XML special characters in a subject id cannot break the document",
   assert.equal(xmlProblem(xml), null, "escaping must hold for hostile input");
   assert.ok(!xml.includes('emp<&"006'), "raw special characters must not reach the document");
 });
+
+test("QRDA I: a RE-VENDORED artifact does not relabel an old outcome (Codex, #360)", () => {
+  // The identity is claimed only when the vendored artifact's sha matches the one the outcome was
+  // scored under — the rule ADR-046 decision 3 applies to MeasureReport's canonical, which this path
+  // had not carried over. A re-vendor between run and export would otherwise stamp the OLD outcome with
+  // the NEW published UUID.
+  const stale = outcome("COMPLIANT", { ...officialEvidence(true), artifactSha256: "sha256:not-the-vendored-one" });
+  const xml = buildQrda1Document(run, "cms125", stale);
+  assert.match(xml, /<id root="urn:workwell:measure" extension="cms125:official:1\.0\.000"\/>/);
+  assert.ok(!xml.includes("2.16.840.1.113883.4.738"), "must not claim a published identity it cannot verify");
+  assert.equal(xmlProblem(xml), null);
+});
+
+test("QRDA I: a MISSING artifact degrades instead of crashing (Codex, #360)", () => {
+  // Exporting a historical outcome whose artifact has since been removed used to read `.bundle` off a
+  // `{}` placeholder and turn the endpoint into a 500.
+  const orphan = { ...outcome("COMPLIANT", officialEvidence(true)), measureId: "cms999" } as OutcomeRecord;
+  const xml = buildQrda1Document(run, "cms999", orphan);
+  assert.match(xml, /<id root="urn:workwell:measure" extension="cms999:official:1\.0\.000"\/>/);
+  assert.equal(xmlProblem(xml), null);
+});

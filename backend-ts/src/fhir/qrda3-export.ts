@@ -9,7 +9,7 @@
 import type { RunRecord } from "../stores/run-store.ts";
 import type { OutcomeRecord } from "../stores/outcome-store.ts";
 import { loadOfficialArtifact, officialMeasureIdentifiers } from "../wiring/official-artifacts.ts";
-import { ACT, EMEASURE_ID_ROOT, LOINC, esc, hl7Ts } from "./qrda-common.ts";
+import { ACT, LOINC, esc, hl7Ts, qrdaMeasureReference } from "./qrda-common.ts";
 import {
   countPopulations,
   officialReportIdentity,
@@ -46,19 +46,13 @@ const POPULATIONS: Array<{ code: string; label: string }> = [
  * would then resolve to the wrong measure.
  */
 function officialMeasureReference(measureId: string, official: OfficialReportIdentity | null): string {
-  if (!official) return `<id root="urn:workwell:measure" extension="${esc(measureId)}"/>`;
-  const artifact = loadOfficialArtifact(measureId);
-  const ids = artifact ? officialMeasureIdentifiers(artifact) : {};
-  if (!ids.versionSpecific) {
-    return `<id root="urn:workwell:measure" extension="${esc(measureId)}"/>`;
-  }
-  return [
-    `<id root="${EMEASURE_ID_ROOT}" extension="${esc(ids.versionSpecific)}"/>`,
-    ids.versionIndependent ? `
-                  <setId root="${esc(ids.versionIndependent)}"/>` : "",
-    official.version ? `
-                  <versionNumber value="${esc(official.version)}"/>` : "",
-  ].join("");
+  return qrdaMeasureReference(
+    measureId,
+    official,
+    loadOfficialArtifact(measureId),
+    officialMeasureIdentifiers,
+    "                  ",
+  );
 }
 
 export function buildQrda3Document(run: RunRecord, measureId: string, outcomes: OutcomeRecord[]): string {

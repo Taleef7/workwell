@@ -37,7 +37,7 @@ import type { OutcomeRecord } from "../stores/outcome-store.ts";
 import { employeeById } from "../engine/synthetic/employee-catalog.ts";
 import { loadOfficialArtifact, officialMeasureIdentifiers } from "../wiring/official-artifacts.ts";
 import { membershipFor, officialReportIdentity, type PopulationMembership } from "./measure-report.ts";
-import { ACT, EMEASURE_ID_ROOT, LOINC, esc, hl7Date, hl7Ts } from "./qrda-common.ts";
+import { ACT, LOINC, esc, hl7Date, hl7Ts, qrdaMeasureReference } from "./qrda-common.ts";
 
 /** QRDA population codes, in report order, keyed to our membership vector. */
 const POPULATIONS: ReadonlyArray<{ code: string; label: string; key: keyof PopulationMembership }> = [
@@ -58,16 +58,13 @@ const POPULATIONS: ReadonlyArray<{ code: string; label: string; key: keyof Popul
  * resolve it to the wrong measure.
  */
 function measureReference(measureId: string, evidence: unknown): string {
-  const official = officialReportIdentity(evidence);
-  const ids = official ? officialMeasureIdentifiers(loadOfficialArtifact(measureId) ?? ({} as never)) : {};
-  if (!official || !ids.versionSpecific) {
-    return `<id root="urn:workwell:measure" extension="${esc(measureId)}"/>`;
-  }
-  return [
-    `<id root="${EMEASURE_ID_ROOT}" extension="${esc(ids.versionSpecific)}"/>`,
-    ids.versionIndependent ? `\n              <setId root="${esc(ids.versionIndependent)}"/>` : "",
-    official.version ? `\n              <versionNumber value="${esc(official.version)}"/>` : "",
-  ].join("");
+  return qrdaMeasureReference(
+    measureId,
+    officialReportIdentity(evidence),
+    loadOfficialArtifact(measureId),
+    officialMeasureIdentifiers,
+    "              ",
+  );
 }
 
 /** `<recordTarget>` — the patient this document is about. */

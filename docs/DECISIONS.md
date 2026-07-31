@@ -38,6 +38,22 @@ rehearsal that carries what a receiving engine would recalculate from. Nothing p
    run and the certification loop compares them against each other, so a timestamp format or escaping
    rule drifting between them would surface as a validation difference nobody introduced deliberately.
 
+7. **The measure reference is ONE shared implementation, sha-checked** *(added after review, #360)*.
+   Both QRDA documents now call `qrdaMeasureReference`, which claims the published identity **only when
+   the vendored artifact's `sha256` matches the `artifactSha256` the outcome was scored under** — the
+   rule ADR-046 decision 3 already applied to MeasureReport's canonical and which this path had not
+   carried over. A re-vendor between run and export would otherwise stamp an old outcome with the new
+   published UUID. A missing artifact degrades to a version-qualified local id instead of crashing; the
+   first version passed `{}` in place of a `null` artifact and read `.bundle` off it, turning the
+   endpoint into a 500.
+8. **A quality report may only be exported from a FINISHED run** *(added after review, #360; the same
+   gap existed on the pre-existing Category III route)*. A configured-live or wide-scope run returns
+   `RUNNING` while `finishManualRun` persists outcomes in the background, so exporting mid-run produced
+   documents covering only the subjects written so far — every organizer marked `completed`, nothing in
+   the envelope saying subjects were missing. `PARTIAL_FAILURE` **is** reportable (those runs finished,
+   and failed subjects persist MISSING_DATA with an `evaluationError`); `RUNNING` and `FAILED` are not,
+   and get a 409 naming the status.
+
 **Consequences.**
 
 - `GET /api/runs/:id/qrda1` returns a JSON envelope of per-subject documents, bounded by

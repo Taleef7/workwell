@@ -38,3 +38,41 @@ export const hl7Ts = (iso: string): string => {
 
 /** ISO date → HL7 `YYYYMMDD` (a birth date carries no time of day). */
 export const hl7Date = (iso: string): string => hl7Ts(iso).slice(0, 8);
+
+/**
+ * The measure reference both QRDA documents emit — ONE implementation, because they describe the same
+ * run and a divergence between them reads as a validation finding nobody caused.
+ *
+ * Two failure modes it exists to close, both found by Codex on #360:
+ *
+ *  - **A missing artifact must not crash the export.** The first version passed `{}` in place of a
+ *    `null` artifact and then read `artifact.bundle` off it, so exporting a historical outcome whose
+ *    artifact had since been removed turned the endpoint into a 500.
+ *  - **A re-vendored artifact must not relabel an old outcome.** The identity is claimed only when the
+ *    vendored artifact's `sha256` matches the `artifactSha256` the outcome was scored under — the same
+ *    rule ADR-046 decision 3 applies to MeasureReport's canonical, which this path had not carried over.
+ *    Otherwise it falls back to a version-qualified local id: less pretty, and true.
+ */
+export function qrdaMeasureReference(
+  measureId: string,
+  official: { version?: string; artifactSha256?: string } | null,
+  artifact: { manifest: { sha256: string }; bundle: unknown } | null,
+  identifiers: (a: never) => { versionSpecific?: string; versionIndependent?: string },
+  indent: string,
+): string {
+  if (!official) return `<id root="urn:workwell:measure" extension="${esc(measureId)}"/>`;
+  const shaMatches = artifact && (!official.artifactSha256 || artifact.manifest.sha256 === official.artifactSha256);
+  const ids = shaMatches ? identifiers(artifact as never) : {};
+  if (!ids.versionSpecific) {
+    // Version-qualified so the document still names WHICH official run produced it, without asserting a
+    // published identity this outcome may not have been scored by.
+    return `<id root="urn:workwell:measure" extension="${esc(measureId)}${
+      official.version ? `:official:${esc(official.version)}` : ""
+    }"/>`;
+  }
+  return [
+    `<id root="${EMEASURE_ID_ROOT}" extension="${esc(ids.versionSpecific)}"/>`,
+    ids.versionIndependent ? `\n${indent}<setId root="${esc(ids.versionIndependent)}"/>` : "",
+    official.version ? `\n${indent}<versionNumber value="${esc(official.version)}"/>` : "",
+  ].join("");
+}

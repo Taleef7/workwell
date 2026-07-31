@@ -215,6 +215,34 @@ async function aggregateCountsForRun(
 }
 
 
+/**
+ * A run whose outcomes are FINAL, and therefore safe to export as a regulatory artifact.
+ *
+ * A configured-live or wide-scope run returns `RUNNING` while `finishManualRun` is still persisting
+ * outcomes in the background (`scheduleAsyncRun`). Exporting then yields a document set covering only
+ * the subjects written so far — with every organizer marked `completed` and nothing in the envelope
+ * saying subjects are missing — i.e. a partial roster presented as a complete report. It also weakens
+ * the subject bound, since the count read and the row read can straddle further writes (Codex, #360).
+ *
+ * `PARTIAL_FAILURE` IS reportable: those runs finished, and their failed subjects persist MISSING_DATA
+ * with an `evaluationError`, which is a real outcome rather than an absent one. `FAILED` is not.
+ */
+const REPORTABLE_RUN_STATUSES = new Set(["COMPLETED", "PARTIAL_FAILURE"]);
+
+const notReportable = (status: string): Response | null =>
+  REPORTABLE_RUN_STATUSES.has(status)
+    ? null
+    : json(
+        {
+          error: "run_not_reportable",
+          message:
+            `A quality report may only be exported from a finished run; this one is ${status}. ` +
+            `Exporting a run that is still writing outcomes would present a partial roster as complete.`,
+          status,
+        },
+        409,
+      );
+
 /** The run-detail outcomes grid returns a whole run up to this size (a live ALL_PROGRAMS run is ~2,100
  *  rows); a larger run (a 120k seed:scale run) is capped to the first page so the worker never
  *  materializes 120k hydrated rows (Fable H4 / Codex P2). Above this, page with an explicit ?limit. */
@@ -515,6 +543,8 @@ export async function handleRuns(
   if (qrda1Id && req.method === "GET") {
     const run = await (await store(env)).getRun(qrda1Id);
     if (!run) return json({ error: "not_found", id: qrda1Id }, 404);
+    const unfinished = notReportable(run.status);
+    if (unfinished) return unfinished;
     const os = await outcomes(env);
     const measureIds = await os.distinctMeasuresForRun(qrda1Id, 2);
     if (measureIds.length !== 1) {
@@ -546,6 +576,10 @@ export async function handleRuns(
   if (qrdaId && req.method === "GET") {
     const run = await (await store(env)).getRun(qrdaId);
     if (!run) return json({ error: "not_found", id: qrdaId }, 404);
+    // Pre-existing gap, found while fixing the same one on QRDA I: Category III read the status
+    // histogram of a possibly-RUNNING run and reported its counts as final.
+    const unfinishedIii = notReportable(run.status);
+    if (unfinishedIii) return unfinishedIii;
     const os = await outcomes(env);
     const measureIds = await os.distinctMeasuresForRun(qrdaId, 2);
     if (measureIds.length !== 1) {
