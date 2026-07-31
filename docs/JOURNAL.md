@@ -1,5 +1,23 @@
 # Journal
 
+## 2026-07-31 (M-A) — wave-2 flip gate proposal: what replaces the authored oracle for CMS2/CMS951 (branch `feat/wave2-flip-gate-proposal`)
+
+This proposal answers ADR-047's open question for two measures that are MADiE-green and ROUTABLE but
+have no authored engine to compare. The most important verified finding is deeper than a roster gap:
+`run-pipeline.ts` builds `RUNNABLE_MEASURE_IDS` from `Object.keys(MEASURES)`, and every run scope derives
+its work list from that set, so CMS2/CMS951 currently receive zero evaluations. Their flip is not inert
+on the stack in the CMS122/CMS125 sense; it is a no-op until the official-only measures become runnable.
+
+The recommendation is to extend `flip-snapshot` with an official-only, source-labelled report and a
+human clinical evidence review, replacing the meaningless authored verdict with `BLOCKED` or
+`REVIEW_REQUIRED` and an explicitly human `HUMAN_APPROVED`/`HUMAN_DO_NOT_FLIP` decision. For product
+onboarding, add a parallel official execution descriptor and real synthetic clinical profiles, keep
+CMS2/CMS951 out of `ROSTER_ELIGIBLE_MEASURES`, and update catalog/case display metadata while leaving
+ADR-046's evidence-derived reporting trio unchanged. For sequencing, land one coupled official-only
+onboarding PR first, then a narrowly scoped flip PR that mirrors the workflow value in deploy and
+reconcile, follows the same five-step checklist with wave-2 evidence extensions, and preserves ADR-045's
+structural-plus-terminology test split without pinning the literal measure list.
+
 ## 2026-07-31 (M-A) — CMS138 onboarded: 0/47 → 47/47, and the gate learned a new kind of claim (branch `feat/onboard-cms138`)
 
 Three things had to be true and only the first was: the value set had to be sourced, the artifact had to
