@@ -378,20 +378,37 @@ than committed capped and permanently unroutable (owner step, task #10). **Routa
 three have no authored counterpart, so `flip-snapshot`'s authored-vs-official comparison — what every flip
 so far was judged on — cannot run for them, and the roster/catalog still assume an authored measure exists.
 
-**M-B STARTED (ADR-049): a QRDA Category I EXPORT exists — and is measurably NOT conformant.** The roadmap audit said "QRDA-I does not exist
-anywhere"; `GET /api/runs/:id/qrda1` now returns one CDA document per subject, membership read
-evidence-first (official `populationResults`, never the inverting workflow status) and the measure
-referenced by its published eMeasure UUIDs. **Conformance was MEASURED against the official CMS 2026 Cat I
-Schematron, not asserted**, and the gap is a list: `author`/`custodian`(CCN)/`legalAuthenticator`/CMS-EHR-ID
-`participant` absent; `<addr>` a hard-error `1..*` with **no nullFlavor escape**, so a patient without an
-address cannot validate (an INGEST prerequisite); `administrativeGenderCode nullFlavor="NI"` Schematron-clean
-but IG-wrong. Also corrected: `nullFlavor` on a `<section>` buys **zero** validation relief (measured — 5
-errors either way), so the empty **Patient Data section** says so in its `<text>` instead. The QDM entries a
-receiving engine would RECALCULATE from are not exported. Cypress CVU+ has NOT run (needs Docker).
-**Open, milestone-shaping, unverified:** CMS Cat I may be Hospital-QR-only with ECs/MIPS submitting Cat III
-(Cypress ships `EH_CAT_I.sch`/`EP_CAT_III.sch`, no `EP_CAT_I.sch`) — distinct from the ONC §170.315(c)
-export path the roadmap chain is about. Verify before building further Cat I work. Still missing for M-B: those QDM entries, QRDA I **import** entirely,
-and the CVU+ loop.
+**M-B: a QRDA Category I EXPORT exists (ADR-049) and was then rebuilt inside-out (ADR-050), because the
+milestone-shaping question got answered.** ADR-049's `GET /api/runs/:id/qrda1` reported per-subject
+population membership with an empty Patient Data section, measured against the CMS 2026 Cat I Schematron.
+**Both halves were wrong, and measurement — not re-reading — found it.** (1) The **CMS** Cat I IG is titled
+"for Hospital Quality Reporting" (IQR/PI/OQR) — so that Schematron is the wrong ruler for the EC measures we
+route — but **Cat I itself is squarely in scope**: §170.315**(c)(1)** record-and-export and **(c)(2)**
+import-and-calculate both require it per §170.205(h)(2) = **HL7 QRDA I R1 STU 5.3**, setting-neutral, (c)(1)
+in the Base EHR definition; only **(c)(3)** splits by setting (Cat I inpatient, Cat III ambulatory). Cypress
+covers 56 EP/EC eCQMs with Cat I test data and validates against the HL7 standard, *not* the CMS extras.
+(2) **QRDA Cat I does not report population membership at all** — zero `IPOP`/`DENOM`/`NUMER`/`MSRAGG` in any
+of the four CMS RY2026 samples; the receiver RECALCULATES, which is what (c)(2) literally says. So ADR-049
+shipped Cat III machinery (`…27.3.24`) in a Cat I envelope while the Patient Data Section QDM **SHALL** carry
+≥1 entry (CONF:67-14567). **Now:** membership is gone from Cat I (it lives in MeasureReport + Cat III);
+`src/fhir/qdm-entries.ts` translates the five datatypes CMS122/125 consume from the evaluated FHIR bundle
+(Encounter Performed; Diagnosis inside a **Diagnosis Concern Act**, CONF:4509-28885; Lab Test Performed with
+the nested Result; Diagnostic Study Performed with an outer `value`, CONF:4509-29332; Procedure Performed),
+routing `Observation` on **`category`** — CMS125's own numerator discriminator (ADR-044) — and **skipping**
+what it cannot classify rather than guessing. The CMS document template `…24.1.3` is no longer claimed.
+**Measured: 27 findings / 14 base-HL7 errors → 0 base-HL7 errors** (+4 CMS-hospital-only, expected); with no
+bundle, exactly 1 (the missing entry), and the section says so in prose. **Two #360 findings corrected:**
+`<addr>` DOES have a nullFlavor escape — at the **child** level, so an address is **not** an ingest
+prerequisite (same for `raceCode`/`ethnicGroupCode` via `UNK`, two SHALLs #360 never recorded); and the
+hypothesis that re-targeting would shrink the gap list was **wrong** — only 3 of 27 findings were CMS-only.
+The measurement is now a command (`scripts/qrda-schematron-check.py`, partitioning failures base-HL7 vs
+`CONF:CMS-*`), deliberately **NOT in CI** (needs Python+lxml, which must not become deps) — its regressions
+are pinned in TypeScript with each assertion citing its CONF number. **Stated, not smoothed:** bundles are
+re-read **at export time** (as-evaluated would mean persisting them — a schema change, owner's call) and are
+**not** reconstructed from the persisted outcome, since `deriveExamConfig`'s target is a distribution *bucket*
+that can converge (CMS122 DUE_SOON → MISSING_DATA); so the synthetic default stack exports documents flagged
+`conformant: false`. Still missing for M-B: QRDA I **import** entirely, and the CVU+ loop — **Cypress CVU+
+has NOT run** (needs Docker) and remains the bar.
 
 **Still open:** the authored cms122/125 subsets retire to the fidelity lab (locked decision #4,
 deliberately not in the flip's own PR); the LIVE third-party WebChart path gets neither the `us-core-sex`
