@@ -229,14 +229,30 @@ jobs:
             src/wiring/official-flip-config.test.ts \
             src/fhir/qrda1-import-official.test.ts \
             scripts/valueset-parity.test.mjs
+      # `--allow-missing-terminology` ONLY where the credential is genuinely absent (fork PRs,
+      # Dependabot — GitHub withholds the secret there). Without it, the uncredentialed re-vendor above
+      # produces a cms138 sidecar that omits the value set upstream does not ship, the deck cannot
+      # resolve it, and every external contributor's PR goes red for a reason unrelated to their change
+      # (review of #366). The credentialed run on merge passes NOTHING and therefore skips nothing —
+      # there, an unresolvable value set means a broken artifact, which is what the gate is for.
       - name: Run the official MADiE test-case gate
         id: gate
-        run: pnpm test:official-cases
+        run: |
+          if [ "${{ steps.vendor.outputs.credentialed }}" = "true" ]; then
+            pnpm test:official-cases
+          else
+            echo "::notice::No VSAC credential here — measures whose upstream bundle omits a value set are SKIPPED rather than failed. The credentialed run on merge covers them."
+            pnpm test:official-cases --allow-missing-terminology
+          fi
       # The committed report is evidence, so its RESULTS must match what the harness just produced.
       # The comparison deliberately ignores the "**Generated:**" line: the harness stamps today's date,
       # so a naive `git diff --quiet` would go red the day after every regeneration and train people to
       # ignore this job — the worst possible failure mode for a gate.
+      # Credentialed runs only. An uncredentialed run may skip a measure, which makes it a PARTIAL run —
+      # the CLI deliberately does not rewrite the committed report there, so comparing against it would
+      # always differ and would fail every fork PR (review of #366).
       - name: Committed evidence report is current (results, not timestamp)
+        if: steps.vendor.outputs.credentialed == 'true'
         working-directory: ${{ github.workspace }}
         run: |
           report=docs/OFFICIAL_TESTCASE_REPORT_2026-07.md
