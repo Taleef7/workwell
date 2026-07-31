@@ -164,6 +164,26 @@ test("QDM: entries preserve BUNDLE order", () => {
   assert.ok(entries[2]!.includes("24.3.137"), "diagnosis third");
 });
 
+test("QDM: a RETRACTED or did-not-happen record never becomes a *Performed* entry (Codex, #361)", () => {
+  // Every entry this module emits carries `statusCode="completed"`, which asserts the event occurred.
+  // An entered-in-error mammogram translated into `Procedure, Performed` could satisfy a recalculated
+  // numerator off a record WorkWell's own evaluation excludes.
+  for (const status of ["entered-in-error", "not-done", "cancelled"]) {
+    assert.deepEqual(qdmEntriesFor(bundleOf({ ...procedure, status })), [], `Procedure ${status}`);
+    assert.deepEqual(qdmEntriesFor(bundleOf({ ...mammogram, status })), [], `Observation ${status}`);
+    assert.deepEqual(qdmEntriesFor(bundleOf({ ...condition, status })), [], `Condition ${status}`);
+  }
+});
+
+test("QDM: an ambiguous or absent status is ADMITTED — the filter is a denylist on purpose", () => {
+  // Measured on real WebChart data (teatea): genuine clinical rows arrive `status: "unknown"`. An
+  // allowlist of `final`/`completed` would silently drop them and make a receiver recalculate LOW,
+  // which is as wrong as admitting a retracted row and far more common.
+  for (const status of ["unknown", "final", "completed", undefined]) {
+    assert.equal(qdmEntriesFor(bundleOf({ ...procedure, status })).length, 1, `Procedure ${status}`);
+  }
+});
+
 test("QDM: a junk bundle yields no entries instead of throwing", () => {
   for (const junk of [undefined, null, {}, { entry: null }, { entry: [null, {}, { resource: {} }] }]) {
     assert.deepEqual(qdmEntriesFor(junk), [], `${JSON.stringify(junk)}`);

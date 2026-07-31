@@ -136,6 +136,28 @@ function cdaId(resource: FhirResource, fallback: string): string {
   return `<id root="urn:workwell:fhir" extension="${esc(resource.id ?? fallback)}"/>`;
 }
 
+/**
+ * FHIR statuses that positively mean "this did not happen" or "this record is not valid".
+ *
+ * A *Performed* QDM datatype asserts the event occurred, and every entry this module emits carries
+ * `statusCode="completed"`. Translating an `entered-in-error` mammogram into `Procedure, Performed`
+ * hands a recalculating receiver an event WorkWell's own evaluation excludes — it could satisfy a
+ * numerator off a retracted record (Codex, #361).
+ *
+ * This is a DENYLIST rather than an allowlist on purpose, and the choice is load-bearing. Real WebChart
+ * data carries `status: "unknown"` on genuine clinical rows (measured on teatea — BP panels arrive
+ * `unknown`), so an allowlist of `final`/`completed` would silently drop real events and make a receiver
+ * recalculate LOW. Denying only the explicitly-negating statuses fails closed on retraction and open on
+ * ambiguity, which is the right way round: a dropped real event is as wrong as an admitted retracted
+ * one, and only one of the two is common in practice.
+ */
+const NEGATED_STATUSES = new Set(["entered-in-error", "not-done", "cancelled", "nullified", "abandoned"]);
+
+/** True when the resource's own status says the event did not happen or the record was retracted. */
+function isNegated(resource: FhirResource): boolean {
+  return typeof resource.status === "string" && NEGATED_STATUSES.has(resource.status);
+}
+
 /** QDM `statusCode` — `completed` is the only status a *Performed* datatype can carry. */
 const COMPLETED = `<statusCode code="completed"/>`;
 
@@ -286,6 +308,8 @@ export function qdmEntriesFor(bundle: unknown, pad = "          "): string[] {
   entries.forEach((item, i) => {
     const resource = (item as { resource?: FhirResource } | null)?.resource;
     if (!resource?.resourceType) return;
+    // A retracted or did-not-happen record must never become a *Performed* entry.
+    if (isNegated(resource)) return;
     switch (resource.resourceType) {
       case "Encounter":
         out.push(encounterPerformed(resource, i, pad) ?? "");

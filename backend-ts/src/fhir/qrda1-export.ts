@@ -41,10 +41,35 @@
 import type { RunRecord } from "../stores/run-store.ts";
 import type { OutcomeRecord } from "../stores/outcome-store.ts";
 import { employeeById } from "../engine/synthetic/employee-catalog.ts";
+import { ROSTER_ELIGIBLE_MEASURES } from "../engine/ingress/enrollment/roster.ts";
 import { loadOfficialArtifact, officialMeasureIdentifiers } from "../wiring/official-artifacts.ts";
 import { officialReportIdentity } from "./measure-report.ts";
 import { EMEASURE_ID_ROOT, LOINC, esc, hl7Date, hl7Ts, qrdaMeasureReference } from "./qrda-common.ts";
 import { qdmEntriesFor } from "./qdm-entries.ts";
+
+/**
+ * The run evaluated a bundle this document does NOT reproduce, and that has to be said out loud.
+ *
+ * For a `ROSTER_ELIGIBLE_MEASURES` measure the pipeline evaluates `stampEnrollment(bundle, …)`, which
+ * overlays a roster-derived enrollment Condition and — for cms125 — a **synthesized CPT 99213
+ * Encounter**, because WebChart supplies none (ADR-042). Codex (#361) asked for that overlay to be
+ * reapplied at export so a receiver recalculates our answer. **We deliberately do not**, on the
+ * ADR-037 rule that this exporter normalizes and never fabricates: a QDM `Encounter, Performed` asserts
+ * a clinical encounter *happened*, the roster's does not, and a receiver has no way to tell which entry
+ * was inferred. Exporting real data and naming the omission is the lesser evil — the alternative is a
+ * silent false clinical assertion inside a regulatory artifact.
+ *
+ * The cost is real and is exactly what this string exists to make legible: a receiver recalculating
+ * from this document may put the subject OUT of the initial population that WorkWell scored them in.
+ */
+function rosterEvidenceCaveat(measureId: string): string {
+  return (
+    `${measureId} is roster-eligible: the run evaluated a bundle carrying roster-derived enrollment ` +
+    `evidence (for cms125, a SYNTHESIZED qualifying Encounter — ADR-042) which this document omits ` +
+    `because it is not patient data. A receiver recalculating from these entries alone may place the ` +
+    `subject outside the initial population.`
+  );
+}
 
 /** SNOMED CT concept ids for administrative sex, as US Core / QI-Core carry them (ADR-042). */
 const SEX_CONCEPTS: Record<string, { code: string; display: string }> = {
@@ -80,12 +105,44 @@ function measureReference(measureId: string, evidence: unknown): string {
   );
 }
 
+interface HeaderPatient {
+  gender?: string;
+  birthDate?: string;
+  name?: Array<{ given?: string[]; family?: string; text?: string }>;
+}
+
 /** The bundle's `Patient`, if there is one — the only resource the header reads. */
-function patientOf(bundle: unknown): { gender?: string; birthDate?: string } | undefined {
-  const entries = (bundle as { entry?: Array<{ resource?: { resourceType?: string } }> } | undefined)?.entry ?? [];
-  return entries.find((e) => e.resource?.resourceType === "Patient")?.resource as
-    | { gender?: string; birthDate?: string }
-    | undefined;
+function patientOf(bundle: unknown): HeaderPatient | undefined {
+  const raw = (bundle as { entry?: unknown } | undefined)?.entry;
+  const entries = Array.isArray(raw) ? raw : [];
+  for (const item of entries) {
+    const resource = (item as { resource?: { resourceType?: string } } | null)?.resource;
+    if (resource?.resourceType === "Patient") return resource as HeaderPatient;
+  }
+  return undefined;
+}
+
+/**
+ * The subject's `{given, family}` — from the FHIR Patient first, the synthetic catalog second.
+ *
+ * The catalog is keyed on synthetic external ids, so for a live WebChart subject persisted as
+ * `wc|123` it returns nothing and the name used to fall back to the id itself — putting an identifier
+ * into a CDA name field and misdescribing the patient in every live export (Codex, #361). The bundle
+ * is the better source anyway: it is the record the measure was computed from.
+ */
+function nameOf(subjectId: string, patient: HeaderPatient | undefined): { given: string; family: string } {
+  const fhirName = patient?.name?.[0];
+  const given = fhirName?.given?.[0];
+  const family = fhirName?.family;
+  if (given || family) return { given: given ?? family!, family: family ?? given! };
+  const display = fhirName?.text ?? employeeById(subjectId)?.name;
+  if (display) {
+    const [first, ...rest] = display.split(" ");
+    return { given: first ?? display, family: rest.join(" ") || display };
+  }
+  // No name anywhere. `nullFlavor` is not available on the US Realm name parts we emit, so the id is
+  // the only remaining truthful token — and it is at least not a DIFFERENT person's name.
+  return { given: subjectId, family: subjectId };
 }
 
 /**
@@ -98,12 +155,11 @@ function patientOf(bundle: unknown): { gender?: string; birthDate?: string } | u
  * race for a patient is exactly the fabrication ADR-037 forbids.
  */
 function recordTarget(subjectId: string, bundle: unknown): string {
-  const employee = employeeById(subjectId);
-  const name = employee?.name ?? subjectId;
-  const [given, ...rest] = name.split(" ");
-  const family = rest.join(" ") || subjectId;
-  const sex = SEX_CONCEPTS[patientOf(bundle)?.gender ?? ""];
-  const birthDate = employee?.dateOfBirth ?? patientOf(bundle)?.birthDate;
+  const patient = patientOf(bundle);
+  const { given, family } = nameOf(subjectId, patient);
+  const sex = SEX_CONCEPTS[patient?.gender ?? ""];
+  // The BUNDLE wins on birth date for the same reason it wins on name: it is the record evaluated.
+  const birthDate = patient?.birthDate ?? employeeById(subjectId)?.dateOfBirth;
   const gender = sex
     ? `<administrativeGenderCode nullFlavor="OTH">
           <translation code="${sex.code}" displayName="${sex.display}" codeSystem="2.16.840.1.113883.6.96" codeSystemName="SNOMEDCT"/>
@@ -116,7 +172,7 @@ function recordTarget(subjectId: string, bundle: unknown): string {
       <telecom use="HP" nullFlavor="NI"/>
       <patient>
         <name>
-          <given>${esc(given ?? subjectId)}</given>
+          <given>${esc(given)}</given>
           <family>${esc(family)}</family>
         </name>
         ${gender}
@@ -198,8 +254,12 @@ export function buildQrda1Document(
   // The Patient Data section is where a receiver recalculates from. When it is empty the document says
   // so in prose — `nullFlavor` on a `<section>` is measurably INERT (identical Schematron output with
   // and without it, #360), so the claim has to live somewhere a human will read.
+  const rosterCaveat =
+    patientBundle !== undefined && ROSTER_ELIGIBLE_MEASURES.has(measureId)
+      ? `\n            OMITTED: ${esc(rosterEvidenceCaveat(measureId))}`
+      : "";
   const patientData = entries.length
-    ? `<text>QDM patient data for measure ${esc(measureId)}: ${entries.length} entr${entries.length === 1 ? "y" : "ies"}.</text>
+    ? `<text>QDM patient data for measure ${esc(measureId)}: ${entries.length} entr${entries.length === 1 ? "y" : "ies"}.${rosterCaveat}</text>
 ${entries.join("\n")}`
     : `<text>EMPTY: no FHIR bundle was available for this subject at export time, so no QDM patient
             data elements could be translated. QRDA Category I requires at least one entry here
@@ -298,6 +358,19 @@ export function qrda1NonConformance(outcome: OutcomeRecord, measureId: string, b
 }
 
 /**
+ * Fidelity caveats — things a receiver should know that are NOT conformance failures.
+ *
+ * Kept separate from `qrda1NonConformance` deliberately. A structurally valid QRDA I that omits
+ * roster-derived evidence is still a valid QRDA I; folding the two together would make `conformant`
+ * mean two different things at once and would mark every live cms125 document non-conformant for a
+ * reason no validator would ever raise.
+ */
+export function qrda1Caveats(measureId: string, bundle: unknown): string[] {
+  // Bundles are supplied only on the live path today, which is also the only path that stamps.
+  return bundle !== undefined && ROSTER_ELIGIBLE_MEASURES.has(measureId) ? [rosterEvidenceCaveat(measureId)] : [];
+}
+
+/**
  * Every subject's document for one run, in outcome order.
  *
  * `bundleFor` resolves a subject's FHIR bundle; subjects it cannot resolve still get a document, marked
@@ -309,7 +382,7 @@ export function buildQrda1Documents(
   measureId: string,
   outcomes: readonly OutcomeRecord[],
   bundleFor?: (subjectId: string) => unknown | undefined,
-): Array<{ subjectId: string; xml: string; conformant: boolean; nonConformanceReasons: string[] }> {
+): Array<{ subjectId: string; xml: string; conformant: boolean; nonConformanceReasons: string[]; caveats: string[] }> {
   return outcomes.map((outcome) => {
     const bundle = bundleFor?.(outcome.subjectId);
     const nonConformanceReasons = qrda1NonConformance(outcome, measureId, bundle);
@@ -318,6 +391,7 @@ export function buildQrda1Documents(
       xml: buildQrda1Document(run, measureId, outcome, bundle),
       conformant: nonConformanceReasons.length === 0,
       nonConformanceReasons,
+      caveats: qrda1Caveats(measureId, bundle),
     };
   });
 }

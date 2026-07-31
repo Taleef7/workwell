@@ -174,7 +174,13 @@ async function qrda1BundleLookup(env: RunsEnv): Promise<((subjectId: string) => 
     const bySubject = new Map<string, unknown>();
     for (const bundle of bundles) {
       const id = subjectIdOf(bundle as Parameters<typeof subjectIdOf>[0]);
-      if (id !== undefined && !bySubject.has(id)) bySubject.set(id, bundle);
+      // Keyed BOTH ways. A live run persists `subjectId` as the roster external id — `wc|<patientId>`
+      // (`run-pipeline.ts`: `profileForId("wc|" + patientId)` → `employee.externalId`) — while the
+      // bundle itself carries the bare `Patient.id`. Keying only on the bare id meant the lookup could
+      // never match on the one path that was supposed to produce conformant documents: present,
+      // plausible, and structurally incapable of firing (Codex, #361).
+      if (id === undefined) continue;
+      for (const key of [id, `wc|${id}`]) if (!bySubject.has(key)) bySubject.set(key, bundle);
     }
     return (subjectId: string) => bySubject.get(subjectId);
   } catch {
@@ -608,7 +614,10 @@ export async function handleRuns(
       count: documents.length,
       // Surfaced, not hidden: a document with no QDM patient data cannot be recalculated from and is not
       // a conformant QRDA I (CONF:67-14567). The caller learns that from the response, not by validating.
+      // `withCaveats` is a SEPARATE axis — a structurally conformant document whose recalculation may
+      // still differ from the run's (roster-derived evidence is deliberately not exported).
       nonConformant,
+      withCaveats: documents.filter((d) => d.caveats.length > 0).length,
       documents,
     });
   }

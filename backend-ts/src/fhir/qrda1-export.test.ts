@@ -293,3 +293,46 @@ test("QRDA I: an OFFICIAL outcome with patient data has NO non-conformance reaso
   assert.deepEqual(doc!.nonConformanceReasons, []);
   assert.ok(!doc!.xml.includes("NOT CONFORMANT"), "a conformant document makes no such claim");
 });
+
+test("QRDA I: the patient NAME comes from the FHIR Patient, not from an identifier (Codex, #361)", () => {
+  // `employeeById` only knows the synthetic catalog, so a live WebChart subject persisted as `wc|123`
+  // used to fall back to the id itself — putting an identifier into a CDA name field and misdescribing
+  // the patient in every live export.
+  const live = { ...outcome("COMPLIANT", officialEvidence(true)), subjectId: "wc|123" } as OutcomeRecord;
+  const named = {
+    ...bundle,
+    entry: [{ resource: { resourceType: "Patient", id: "123", gender: "female", name: [{ given: ["Ada"], family: "Lovelace" }] } }, bundle.entry[1]!],
+  };
+  const xml = buildQrda1Document(run, "cms125", live, named);
+  assert.match(xml, /<given>Ada<\/given>\s*<family>Lovelace<\/family>/);
+  assert.ok(!xml.includes("<given>wc|123</given>"), "an identifier must never be used as a name");
+});
+
+test("QRDA I: the BUNDLE's birth date wins over the synthetic catalog's", () => {
+  // The bundle is the record the measure was computed from; the catalog is a directory.
+  const withDob = { ...bundle, entry: [{ resource: { resourceType: "Patient", id: "emp-006", gender: "female", birthDate: "1966-02-03" } }] };
+  assert.match(buildQrda1Document(run, "cms125", outcome("COMPLIANT"), withDob), /<birthTime value="19660203"\/>/);
+});
+
+test("QRDA I: a roster-eligible measure carries a CAVEAT, and a caveat is NOT a conformance failure", () => {
+  // The run evaluated `stampEnrollment(bundle, …)`, which overlays roster-derived enrollment evidence —
+  // for cms125 a SYNTHESIZED qualifying Encounter (ADR-042). Reapplying it here would assert a clinical
+  // encounter that did not happen (ADR-037), so the document omits it and NAMES the omission. That is a
+  // recalculation-fidelity limitation, not a structural defect, so the two are separate fields: folding
+  // them together would mark every live cms125 document non-conformant for something no validator raises.
+  const [doc] = buildQrda1Documents(run, "cms125", [outcome("COMPLIANT", officialEvidence(true))], () => bundle);
+  assert.equal(doc!.conformant, true, "structurally conformant");
+  assert.deepEqual(doc!.nonConformanceReasons, []);
+  assert.equal(doc!.caveats.length, 1);
+  assert.match(doc!.caveats[0]!, /SYNTHESIZED qualifying Encounter/);
+  assert.match(doc!.xml, /OMITTED: cms125 is roster-eligible/, "and the document says so");
+});
+
+test("QRDA I: a measure that is NOT roster-eligible carries no such caveat", () => {
+  // cms122 is deliberately outside ROSTER_ELIGIBLE_MEASURES — its "enrollment" is a diabetes diagnosis
+  // the roster must never fabricate — so nothing is omitted and nothing is claimed.
+  const cms122 = { ...outcome("OVERDUE", officialEvidence(true)), measureId: "cms122" } as OutcomeRecord;
+  const [doc] = buildQrda1Documents(run, "cms122", [cms122], () => bundle);
+  assert.deepEqual(doc!.caveats, []);
+  assert.ok(!doc!.xml.includes("OMITTED:"));
+});
