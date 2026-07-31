@@ -20,7 +20,6 @@ import { BUCKETS, DEVDB_WHITELIST, isValidDate, measureTableLines, type MeasureS
 
 export type { MeasureSummary } from "./report-table.ts";
 
-
 /** Named-excluded (no reconcilable data / value-based gate the seed lacks) — shown, never silently dropped. */
 export const DEVDB_EXCLUDED = [
   "audiogram", "tb_surveillance", "hazwoper", "flu_vaccine",

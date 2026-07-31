@@ -11,7 +11,7 @@
 
 ## Titles (newest first)
 
-- ADR-052: `src/engine/` is not the package — the eval core is, and the boundary is enforced before the files move
+- ADR-052: the app-side exclusions are decided and enforced; what the package does with CONTENT is not
 - ADR-051: QRDA Category I import is a mapping into the unchanged engine — and it proved the export only works in real terminology
 - ADR-050: QRDA Category I is a patient-DATA document, measured against the HL7 base IG — not the CMS Hospital one
 - ADR-049: QRDA Category I exists, reports population membership only, and says so in the document *(central claim superseded by ADR-050)*
