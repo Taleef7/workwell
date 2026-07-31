@@ -16,7 +16,8 @@ import path from "node:path";
 import type { OutcomeStatus } from "../../evaluate-measure.ts";
 import { webChartDataSource, type WebChartConfig } from "../data-source.ts";
 import { parseEnrollmentRoster, evaluateSourceWithRoster } from "../enrollment/roster.ts";
-import { DEVDB_EXCLUDED as EXCLUDED, DEVDB_WHITELIST as WHITELIST } from "./devdb-cli.ts";
+import { DEVDB_EXCLUDED as EXCLUDED } from "./devdb-cli.ts";
+import { DEVDB_WHITELIST as WHITELIST } from "./report-table.ts";
 import {
   fixtureWebChartClient,
   httpWebChartClient,

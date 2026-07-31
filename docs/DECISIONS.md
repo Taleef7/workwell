@@ -1,5 +1,103 @@
 # Architecture Decision Records
 
+## ADR-052: the app-side exclusions are decided and enforced; what the package does with CONTENT is not
+
+**Status:** Accepted (2026-07-31), **narrowed after review**. Roadmap M-C, locked decision #3. It decides
+less than its first draft claimed, because measurement contradicted three of that draft's statements.
+
+**Context.** M-C promises `@workwell/measure-engine` with `cql-execution` + `cql-exec-fhir` as its only
+dependencies. The workspace and `packages/official-executor` exist and `engine-boundary.test.ts` proves
+`src/engine/` is self-contained, so the open question was never "can it be lifted" but **what belongs in
+it** — task #4's published-API decision, which nothing had decided.
+
+**What IS decided (measured, and enforced by `engine-core-boundary.test.ts`).**
+
+1. **`synthetic/`, `ingress/`, `immunization/` and `cli/` are APP content, not package content.** Every
+   cross-area edge among **production** files runs app to core, with exactly one exception:
+   `cql/codegen/generate-sql-cli.ts` imports `ingress/webchart/terminology.ts`, and that is a CLI
+   entrypoint, so app-side too. `synthetic/employee-catalog.ts` is a fictional employee directory and the
+   single most-imported module in the tree (**51** call sites, verified in review); shipping the directory
+   as the package would publish our fixtures as API.
+2. **`CORE_ENTRY_POINTS` is the published API, and app imports are checked against it.** Eleven modules.
+   Verified independently: all eleven have an external importer, and the only closure module *not* listed
+   (`cql/vsac-value-set-resolver.ts`) is reachable solely through `resolve-value-set-resolver.ts`. The
+   check was **missing from the first cut** (Codex, #363): the docblock called the list "every module the
+   app is allowed to import" while nothing verified it, so an app import of a core internal left all
+   assertions green. A list that reads as an API and constrains nobody is the vacuous-guard shape, inside
+   the test written to pre-empt that class. Zero violations today; mutation-checked.
+
+**What is NOT decided, and this is the substantive one (review, #363).**
+
+**Does the package ship WorkWell's measure CONTENT, or take it injected?** `cql-execution-engine.ts`
+hard-imports `MEASURES` (our own 15-measure catalog), `ELM_LIBRARIES` (**17 compiled WorkWell libraries —
+17 of the 29 closure members**) and `withBundledEcqmFallback`, whose own docblock begins "the codes **the
+synthetic corpus** stamps". The argument this ADR uses to exclude `synthetic/` — that no consumer of a
+measure engine wants our fixtures — applies to those three with equal force, and the engine will not
+construct without them.
+
+Two things already on the record make that omission worse rather than better: ROADMAP §7.4 scoped the
+clean-core claim to a **9-file closure**, which the first draft widened to 29 without reconciling; and
+`LOCKED_DECISIONS` records that `evaluate(input.elm, input.metaOverride)` **already supports
+consumer-supplied measures**, so the registry and ELM are a default, not a necessity. Deciding this is
+task #4's actual question. It is deferred, not answered — and the boundary test measures the closure as
+it stands rather than blessing it as final.
+
+**Three first-draft claims were FALSE, and are withdrawn rather than softened.**
+
+- *"Moving `DEVDB_WHITELIST` is what lets the package rule be 'no `node:` at all'."* **Measured false.**
+  Running the identical closure algorithm against `main` gives a byte-identical 29-file closure with zero
+  `node:` imports. The closure contains no `ingress/` file, so relocating a constant between two files it
+  cannot reach could not have affected it. The move is still a tidy-up worth having; it is not
+  load-bearing, and presenting it as the enabling step was the "guard whose premise is false" shape in an
+  ADR rather than in code.
+- *"The four `*-cli.ts` files are now true leaves."* **False.** `cql/codegen/generate-sql-cli.ts` still
+  exports `WCDB_SQL_MEASURES` to two modules, and `engine-boundary.test.ts`'s `node:` carve-out
+  (`onlyIn: /-cli\.ts$/`) is untouched here. ADR-048 said explicitly that the `node:` allowlist entry
+  survives; the first draft read as though this change had discharged that debt.
+- *The ADR-048 "correction".* The first draft put a sentence in quotation marks that **ADR-048 does not
+  contain**. What ADR-048 actually says is that `generate-sql-cli.ts` exports to two test modules and
+  `devdb-cli.ts` exports to five "including **production** `live-cli.ts`" — both counts exact, with the
+  production one already flagged. So the finding **restates** ADR-048 rather than refuting it. What is
+  fair to say: ADR-048's *count* was right, and its *characterization* ("not a `git mv`") was pessimistic
+  **for `devdb-cli.ts` only**.
+
+**Scope of the "exactly one exception" claim, stated because the first draft did not.** It covers
+**production** files. There are **seven** further core-to-app edges from TEST files (four from
+`cql-execution-engine.test.ts` into `synthetic/`, two into `ingress/evaluate-bundle.ts`, one into
+`ingress/webchart/terminology.ts`), plus **two** core tests reaching `stores/sqlite/**`, outside the
+engine tree entirely. The closure starts at production entry points and structurally cannot see any of
+them. ADR-048 §5 already named this hazard for `cql-translator.ts`: the move must either strand those
+tests or give the package a devDependency pointing back at the app. That is the extraction's real
+blocker, and it remains undecided.
+
+**Consequences, corrected.**
+
+- **The move is bigger than the first draft said.** The 29 closure members are **12 TypeScript modules +
+  17 `.elm.json` data files**. "~87 import sites" counted only external imports of the eleven entry
+  points; including engine app-area files and core-area non-closure files it is **125 statements across
+  85 files**. `cql/codegen/` does not move as a unit — `generate-cql.ts` goes, `generate-sql*.ts` stays,
+  and they import each other. And `cql/cql-libs.d.ts` must move too: nothing imports it (it is picked up
+  by `tsconfig` `include`), so a closure computed from imports **cannot see it** — a reminder that an
+  import closure is the wrong instrument for enumerating what moves.
+- **The move will NOT "satisfy an already-green test".** The test resolves paths from its own location,
+  so leaving it behind makes every entry point unresolvable, while moving it into the package makes the
+  app-area assertion structurally vacuous (those directories will not exist there) and blinds the API
+  check (app imports become the bare specifier `@workwell/measure-engine`, and it inspects only relative
+  ones). Both tests need rewriting as part of the move. That is a real cost of this sequencing, and it is
+  better known now than discovered.
+- What the sequencing does buy, and it is smaller than the first draft claimed: between now and the move,
+  the app cannot quietly acquire a core-internal import, and the core cannot quietly acquire an app
+  dependency or a third-party one.
+- `measure-executor.ts` is on the published list although its headline export `sqlPushdownExecutor` is a
+  documented inert stub that throws on use. Publishing a function that exists to reject is a deliberate
+  choice, to revisit alongside the content question.
+- **Known limit of the instrument**, carried rather than hidden: `stripComments` treats `/*` inside a
+  string literal as a comment opener, so an import after one can drop out of the scan. Inert today, and
+  `cql/codegen/generate-cql.ts` — which is in the closure — emits CQL, whose block-comment syntax is
+  exactly that. Noted in the test.
+
+---
+
 ## ADR-051: QRDA Category I import is a mapping into the unchanged engine — and it proved the export only works in real terminology
 
 **Status:** Accepted (2026-07-31). Roadmap M-B. **Not CVU+-validated** — that bar is unmet and this ADR
