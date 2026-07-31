@@ -309,31 +309,71 @@ const LAB_CATEGORIES = new Set(["laboratory", "vital-signs", "survey", "exam"]);
  * Resource order is deliberate: it is the order the bundle presented, so two exports of the same bundle
  * are byte-identical and a diff between them means the DATA moved, not that the exporter did.
  */
-export function qdmEntriesFor(bundle: unknown, pad = "          "): string[] {
-  const raw = (bundle as { entry?: unknown } | undefined)?.entry;
-  // `entry: [null]` and `entry: null` both reach here from a third-party payload. `roster.ts` guards the
-  // same shape for the same reason: an export that throws on one junk item loses the whole run's
-  // documents, where skipping the item loses one.
-  const entries = Array.isArray(raw) ? raw : [];
-  const out: string[] = [];
-  entries.forEach((item, i) => {
-    // Per-resource isolation, and it has to be a real try/catch rather than input validation. This
-    // module's own contract is "an export that throws on one junk item loses the whole run's documents,
-    // where skipping the item loses one" — but the structural guard below implements that only for
-    // shape junk (`entry: [null]`). VALUE junk is the larger half: a malformed date or a numeric id used
-    // to reach the worker's catch-all and turn a 500-subject export into `{"error":"internal_error"}`,
-    // losing the 499 documents that were fine (review, #361).
-    try {
-      out.push(...entryFor(item, i, pad));
-    } catch {
-      // Deliberately silent per item: the document that results is already marked non-conformant by the
-      // empty-section rule, which is the signal an operator acts on.
-    }
-  });
-  return out.filter(Boolean);
+export interface QdmTranslation {
+  entries: string[];
+  /**
+   * Resources this mapper could not express in CDA, as `"<ResourceType>: <why>"`.
+   *
+   * The largest cause is not a bug: a code carrying **no CDA code system OID** cannot appear in a QRDA
+   * at all. WorkWell's authored measures bind synthetic `urn:workwell:vs:*` value sets, so their bundles
+   * translate to *nothing* — which means a QRDA Category I is only a meaningful artifact for measures
+   * whose data carries real terminology (LOINC/SNOMED/CPT/ICD), i.e. the official ones. Discovered by
+   * the round-trip route test, which is precisely what it was written to catch.
+   */
+  untranslatable: string[];
 }
 
-/** The QDM entries for ONE bundle item — zero, one, or (never yet) more. */
+/** Entries plus the reasons anything was dropped — see `QdmTranslation.untranslatable`. */
+export function translateQdm(bundle: unknown, pad = "          "): QdmTranslation {
+  const raw = (bundle as { entry?: unknown } | undefined)?.entry;
+  const items = Array.isArray(raw) ? raw : [];
+  const entries: string[] = [];
+  const untranslatable: string[] = [];
+  items.forEach((item, i) => {
+    const resource = (item as { resource?: FhirResource } | null)?.resource;
+    const type = resource?.resourceType;
+    let produced: string[] = [];
+    try {
+      produced = entryFor(item, i, pad);
+    } catch {
+      if (type) untranslatable.push(`${type}: could not be translated (malformed field)`);
+      return;
+    }
+    if (produced.length > 0) {
+      entries.push(...produced);
+      return;
+    }
+    // Nothing produced. Say WHY, for the cases an operator can act on; stay silent for the ones that are
+    // simply out of scope, where a "gap" would be noise.
+    if (!type || type === "Patient" || !(QDM_MAPPED_RESOURCE_TYPES as readonly string[]).includes(type)) return;
+    if (resource && isNegated(resource)) {
+      untranslatable.push(`${type}: excluded — its status says the event did not happen or was retracted`);
+    } else if (type === "Observation" && categoryCodes(resource!).length === 0) {
+      untranslatable.push(`${type}: no category, so its QDM datatype (laboratory vs diagnostic study) is undetermined`);
+    } else {
+      const systems = [...new Set((resource?.code?.coding ?? []).map((c) => c.system).filter(Boolean))];
+      untranslatable.push(
+        `${type}: no CDA code system OID for ${systems.length ? systems.join(", ") : "an absent code"} — CDA cannot carry it`,
+      );
+    }
+  });
+  return { entries, untranslatable };
+}
+
+export function qdmEntriesFor(bundle: unknown, pad = "          "): string[] {
+  return translateQdm(bundle, pad).entries;
+}
+
+/**
+ * The QDM entries for ONE bundle item — zero, one, or (never yet) more.
+ *
+ * Per-resource isolation lives in `translateQdm`'s try/catch around this call, and it has to be a real
+ * try/catch rather than input validation. This module's own contract is "an export that throws on one
+ * junk item loses the whole run's documents, where skipping the item loses one" — but the structural
+ * guard implements that only for shape junk (`entry: [null]`). VALUE junk is the larger half: a
+ * malformed date or a numeric id used to reach the worker's catch-all and turn a 500-subject export into
+ * `{"error":"internal_error"}`, losing the 499 documents that were fine (review, #361).
+ */
 function entryFor(item: unknown, i: number, pad: string): string[] {
   const out: string[] = [];
   {

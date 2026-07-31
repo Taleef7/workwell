@@ -407,8 +407,19 @@ are pinned in TypeScript with each assertion citing its CONF number. **Stated, n
 re-read **at export time** (as-evaluated would mean persisting them — a schema change, owner's call) and are
 **not** reconstructed from the persisted outcome, since `deriveExamConfig`'s target is a distribution *bucket*
 that can converge (CMS122 DUE_SOON → MISSING_DATA); so the synthetic default stack exports documents flagged
-`conformant: false`. Still missing for M-B: QRDA I **import** entirely, and the CVU+ loop — **Cypress CVU+
-has NOT run** (needs Docker) and remains the bar.
+`conformant: false`. **QRDA I IMPORT now exists (ADR-051)** — `POST /api/runs/:id/evaluate` takes `{measureId, qrda1}` and evaluates the
+imported bundle through the UNCHANGED engine (§170.315(c)(2) "import and calculate"; a second calculator is what that
+criterion detects, not something to build). Hand-rolled `cda-parse.ts` because CLAUDE.md forbids new deps and Node has no
+DOM parser — total on malformed input, decodes ONLY the five predefined entities + numeric refs (no entity table to grow).
+An unreadable document is a 400 naming the reason, never a silent empty bundle (the ADR-043 hazard). Untranslated QDM
+templates are NAMED in the response — the CMS RY2026 sample carries **47** against our five datatypes, and imports cleanly
+otherwise (1 subject, 6 resources, both eMeasure UUIDs). **The round trip caught a defect in the EXPORT:** `audiogram`'s
+bundle binds synthetic `urn:workwell:vs:*` value sets with **no CDA code system OID**, so every clinical resource was
+silently dropped while the export reported only "no QDM patient data entries". Now the translator returns WHY each
+resource was dropped. **Structural consequence: a QRDA Category I is only meaningful for data in REAL terminology**
+(LOINC/SNOMED/CPT/ICD) — i.e. the official measures; the authored catalogue is not QRDA-representable at all, which also
+sharpens locked decision #4. Still missing for M-B: the CVU+ loop — **Cypress CVU+ has NOT run** (needs Docker) and
+remains the bar.
 
 **Still open:** the authored cms122/125 subsets retire to the fidelity lab (locked decision #4,
 deliberately not in the flip's own PR); the LIVE third-party WebChart path gets neither the `us-core-sex`

@@ -11,6 +11,7 @@
 
 ## Titles (newest first)
 
+- ADR-051: QRDA Category I import is a mapping into the unchanged engine — and it proved the export only works in real terminology
 - ADR-050: QRDA Category I is a patient-DATA document, measured against the HL7 base IG — not the CMS Hospital one
 - ADR-049: QRDA Category I exists, reports population membership only, and says so in the document *(central claim superseded by ADR-050)*
 - ADR-048: The TRANSLATOR debt is paid; the CLI-surface debt is not, and the split is not a file move

@@ -17,7 +17,8 @@
  *   POST /api/runs                  create a QUEUED run              → 201 RunRecord
  *   POST /api/runs/claim            claim next queued (?workerId)    → 200 RunRecord | 204
  *   POST /api/runs/:id/evaluate     evaluate a subject + persist     → 201 OutcomeRecord
- *                                   body {measureId, patientBundle, evaluationDate?}
+ *                                   body {measureId, patientBundle | qrda1, evaluationDate?}
+ *                                   `qrda1` = a QRDA Category I CDA document — §170.315(c)(2) import+calculate
  */
 import type { CloudDatabase } from "@mieweb/cloud";
 import { getStores } from "../stores/factory.ts";
@@ -60,6 +61,7 @@ import {
 import { isOfficialRouted } from "../wiring/official-routing.ts";
 import { buildQrda3DocumentFromCounts } from "../fhir/qrda3-export.ts";
 import { buildQrda1Documents, indexBundlesBySubject } from "../fhir/qrda1-export.ts";
+import { importQrda1Document, type Qrda1Import } from "../fhir/qrda1-import.ts";
 import { isWebChartConfigured, resolveDataSource, type DataSourceEnv } from "../engine/ingress/data-source.ts";
 import { subjectIdOf } from "../engine/ingress/enrollment/roster.ts";
 
@@ -511,11 +513,28 @@ export async function handleRuns(
       return json({ error: "run_not_open", id: evalId, status: run.status, hint: "cannot evaluate into a terminal run" }, 409);
     }
     const body = (await req.json().catch(() => null)) as
-      | { measureId?: string; patientBundle?: unknown; evaluationDate?: string }
+      | { measureId?: string; patientBundle?: unknown; qrda1?: string; evaluationDate?: string }
       | null;
-    if (!body?.measureId || !body.patientBundle) {
-      return json({ error: "invalid_request", hint: "body requires { measureId, patientBundle }" }, 400);
+    if (!body?.measureId || (!body.patientBundle && !body.qrda1)) {
+      return json({ error: "invalid_request", hint: "body requires { measureId, patientBundle | qrda1 }" }, 400);
     }
+    // §170.315(c)(2) "import and calculate": a QRDA Category I document is translated to FHIR and then
+    // evaluated by the SAME unchanged engine — importing is a mapping, not a second calculator (ADR-051).
+    // A document we cannot read is a 400 with the reason, never a silent empty bundle: an empty bundle
+    // evaluates out-of-population for every measure, indistinguishable from a genuinely ineligible
+    // patient (the ADR-043 hazard).
+    let imported: Qrda1Import | undefined;
+    if (body.qrda1 !== undefined) {
+      if (typeof body.qrda1 !== "string") {
+        return json({ error: "invalid_request", hint: "qrda1 must be the CDA document as a string" }, 400);
+      }
+      try {
+        imported = importQrda1Document(body.qrda1);
+      } catch (err) {
+        return json({ error: "qrda1_import_failed", message: String((err as Error)?.message ?? err) }, 400);
+      }
+    }
+    const patientBundle = imported?.bundle ?? body.patientBundle;
     // The outcome's evaluation_period must equal the date the engine actually evaluates with,
     // so repeat-non-complier history (grouped by period) doesn't collapse into a blank period.
     // Engine default when omitted is today (cql-execution-engine) — prefer the run's persisted
@@ -532,7 +551,7 @@ export async function handleRuns(
     try {
       const result = await engine.evaluate({
         measureId: body.measureId,
-        patientBundle: body.patientBundle,
+        patientBundle,
         evaluationDate: body.evaluationDate,
       });
       const record = await (await outcomes(env)).recordOutcome({
@@ -543,7 +562,13 @@ export async function handleRuns(
         status: result.outcome,
         evidence: result.evidence,
       });
-      return json(record, 201);
+      // What the import could NOT translate travels with the answer. A QRDA I carrying QDM datatypes
+      // this mapper does not know is calculable but not necessarily correctly — and the CMS RY2026
+      // sample alone contains 47 such entries. Silence here would let a partial import read as a full one.
+      return json(
+        imported ? { ...record, qrda1: { untranslatedTemplates: imported.untranslatedTemplates } } : record,
+        201,
+      );
     } catch (err) {
       return json({ error: "evaluation_error", message: String((err as Error)?.message ?? err) }, 500);
     }

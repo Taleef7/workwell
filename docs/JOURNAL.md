@@ -1,5 +1,40 @@
 # Journal
 
+## 2026-07-31 (M-B) — QRDA Category I import exists, and the round trip caught the export lying (branch `feat/qrda1-import`)
+
+`POST /api/runs/:id/evaluate` now accepts `{ measureId, qrda1 }`: a QRDA Category I document is
+translated to FHIR and evaluated by the **unchanged** engine. That is §170.315**(c)(2)** "import and
+calculate" literally, and it closes the half of the roadmap's proof chain we had not built.
+
+Import is a **mapping**, not a second calculator — a second calculator is the thing that criterion is
+meant to detect. The XML reader is hand-rolled (`cda-parse.ts`, ~180 lines) because CLAUDE.md forbids new
+dependencies and Node ships no DOM parser; it is total on malformed input and decodes **only** the five
+predefined entities plus numeric refs, so there is no entity table for an attacker to grow. Lookups match
+the local name, since CDA appears in the wild both namespaced-by-default and prefixed.
+
+**The round trip immediately caught a defect — in the EXPORT.** Driving the real route (evaluate a
+bundle → export the document → feed the document back) produced a different answer for `audiogram`.
+Cause: that measure's bundle binds synthetic **`urn:workwell:vs:*` value sets, which have no CDA code
+system OID**, so every clinical resource was silently dropped and the export reported only "no QDM
+patient data entries" — true, and the misleading half of the truth. The translator now returns *why*
+each resource was dropped, and those reasons reach the non-conformance list.
+
+The consequence is structural rather than a bug to fix later, and worth saying plainly:
+
+> **A QRDA Category I is only a meaningful artifact for measures whose data is in real terminology** —
+> LOINC, SNOMED, CPT, ICD. That is the official measures. WorkWell's authored measures cannot be
+> exported as QRDA at all, and now say so.
+
+That also sharpens locked decision #4 (retiring the authored cms122/125 subsets): the authored catalogue
+is not QRDA-representable, so it cannot join the certification rehearsal either way.
+
+**Verified against a document we did not write.** The CMS RY2026 sample imports cleanly — 1 subject, 6
+resources, both eMeasure UUIDs — and **names all 47** QDM datatypes it does not translate rather than
+dropping them silently. That test self-skips without `WORKWELL_QRDA1_SAMPLE` and says so in its skip
+message, because the sample ships in the same manually-downloaded CMS zip as the Schematron.
+
+Still open for M-B: **Cypress CVU+ has not run.** It needs Docker and remains the bar.
+
 ## 2026-07-30 (M-B) — QRDA Category I was built inside-out; measuring against the right IG showed it (branch `feat/qrda1-patient-data`)
 
 Yesterday's question — *"is CMS QRDA Category I applicable to Eligible Clinicians at all?"* — was filed
