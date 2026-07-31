@@ -61,6 +61,16 @@ const MEASURES = {
     name: "CMS951FHIRKidneyHealthEval",
     bundleFile: "CMS951FHIRKidneyHealthEval-bundle.json",
   },
+  // ADR-053. The last of the six M-A priority candidates to onboard, and the only one whose blocker was
+  // a value set upstream does not ship at all (…3.526.3.1278 "Tobacco Use Screening" — 32 declared, 31
+  // shipped). Sourced from VSAC at vendor time via `--complete-terminology`, which is a WEAKER
+  // provenance than a completed cap: upstream shipped no codes to check containment against and
+  // declared no total to check length against. The deck below is what licenses it — 47 cases with the
+  // measure steward's own expected population vectors, which a wrong value set does not satisfy.
+  cms138: {
+    name: "CMS138FHIRTobaccoScrnCessation",
+    bundleFile: "CMS138FHIRTobaccoScrnCessation-bundle.json",
+  },
 };
 
 /**
