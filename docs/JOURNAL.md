@@ -2,9 +2,13 @@
 
 ## 2026-07-31 (M-A) — "will not expand" was the wrong sentence: upstream ships CMS138 one value set short (branch `fix/official-terminology-absent-valuesets`)
 
-Task #11 was recorded in ADR-047 as *"CMS138 scores 0/47 with 47 errors — value set …3.526.3.1278 will
-not expand"*. That sentence points at our expander, our gitignored sidecar and our VSAC release pin.
-None of them is the cause, and the first thing worth doing was to stop reading and measure.
+ADR-047's table reads *"CMS138 tobacco screening | **0/47, 47 errors** — one value set (…3.526.3.1278)
+will not expand"*, and — to its credit — it did not claim to know why: *"Whether that is an upstream
+packaging gap or something our reducer drops is unknown."* CLAUDE.md's summary dropped that hedge, and
+"will not expand" points at our expander, our gitignored sidecar and our VSAC release pin. None of them
+is the cause, and the first thing worth doing was to stop reading and measure. (My own first draft of
+ADR-053 quoted CLAUDE.md's phrasing as ADR-047's words — the misattribution class review caught on #363
+one PR earlier. Corrected against the text.)
 
 **Measured, at pin `ca4b4951`:** CMS138's libraries **retrieve 32** value sets and its bundle **ships
 31** ValueSet resources. `2.16.840.1.113883.3.526.3.1278` ("Tobacco Use Screening") is simply not in the

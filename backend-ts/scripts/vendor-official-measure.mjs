@@ -64,7 +64,7 @@
  *
  * ## `--complete-terminology` (was `--complete-capped-expansions`, still accepted)
  *
- * Completes every value set the measure RETRIEVES but cannot fully resolve from the bundle. Two
+ * Completes every value set the measure DECLARES but cannot fully resolve from the bundle. Two
  * distinct conditions, and until ADR-053 only the first was modelled:
  *
  * **Capped (ADR-041).** Upstream caps every expansion it ships: *"The value sets in this repository are
@@ -83,7 +83,7 @@
  * Cypress/CVU+ validates the 2026 reporting period against — so the same pin yields the same bytes and
  * CI's `git diff --exit-code measures/official` stays an honest reproducibility check.
  *
- * **Absent (ADR-053).** A value set the ELM retrieves for which the bundle ships no ValueSet resource
+ * **Absent (ADR-053).** A value set the ELM DECLARES for which the bundle ships no ValueSet resource
  * at all. `collectTerminology` enumerates what the bundle SHIPS, so such a set produced nothing at
  * vendor time — no sidecar entry, no `truncated` row, no warning — and the artifact read as complete
  * while being unrunnable. Measured on CMS138: 32 value sets declared by its ELM, 31 shipped;
@@ -113,6 +113,7 @@ import {
   completeTerminology,
   declaredValueSets,
   flattenExpansion,
+  oidFromValueSetUrl,
   sortValueSets,
 } from "./vsac-expansion.mjs";
 
@@ -267,7 +268,7 @@ function assertExecutable(bundle, measureName) {
  *
  * ## `absent`: what this function could not see until ADR-053
  *
- * The loop below enumerates the ValueSets the bundle SHIPS. A value set the measure's ELM *retrieves*
+ * The loop below enumerates the ValueSets the bundle SHIPS. A value set the measure's ELM *declares*
  * but upstream never shipped produced nothing here — no entry, no `truncated` row, no warning — so the
  * manifest read as terminology-complete while the artifact could not run. CMS138 is the live instance:
  * its libraries declare 32 value sets and the bundle carries 31.
@@ -297,15 +298,18 @@ function collectTerminology(upstreamBundle, reducedBundle, args) {
       codes,
     });
   }
-  // Canonical URLs may carry a `|version` suffix in the ELM while the shipped ValueSet's `url` does
-  // not, so both sides are compared on the bare OID — the same key everything downstream uses.
+  // Compared on the bare OID — the same key everything downstream uses. `oidFromValueSetUrl` strips
+  // both the canonical prefix and a `|version` suffix, so a versioned ELM canonical and the shipped
+  // ValueSet's unversioned `url` land on one key (that suffix-stripping was missing until review of
+  // #364; measured zero versioned canonicals across all six bundles, so it is latent, not live).
   const shipped = new Set(valueSets.map((v) => v.oid));
   const absent = declaredValueSets(reducedBundle)
     .map((v) => ({ oid: oidFromValueSetUrl(v.url), url: v.url, ...(v.name ? { name: v.name } : {}) }))
     .filter((v) => !shipped.has(v.oid));
   // Sorted so the sidecar is a deterministic function of the pinned commit: the manifest pins it by
   // hash, and a hash that depended on upstream entry order would be reproducible only by accident.
-  // `absent` is sorted for the same reason — it is recorded in the committed manifest.
+  // `absent` is sorted so the ORDER OF COMPLETION is deterministic: it is not itself committed
+  // (ADR-053 decision 2), but it drives the order of `completion.valueSets`, which is.
   absent.sort((a, b) => (a.oid < b.oid ? -1 : a.oid > b.oid ? 1 : 0));
   return sortValueSets({
     catalogId: args.catalogId,
@@ -313,12 +317,6 @@ function collectTerminology(upstreamBundle, reducedBundle, args) {
     valueSets,
     absent,
   });
-}
-
-/** `http://cts.nlm.nih.gov/fhir/ValueSet/2.16.840...` → `2.16.840...`. Mirrors the executor package. */
-function oidFromValueSetUrl(url) {
-  const marker = "/ValueSet/";
-  return url.includes(marker) ? url.slice(url.lastIndexOf(marker) + marker.length) : url;
 }
 
 /** cqfm puts scoring and improvementNotation in group extensions, not on the Measure root. */
@@ -507,12 +505,12 @@ for (const cap of manifest.terminology.truncated) {
   );
 }
 // The warning that did not exist before ADR-053, and its absence is what made CMS138 look like an
-// expansion bug for a week. Loud and last, because it is the one condition under which the artifact
-// written above CANNOT run at all — every value set it retrieves must resolve, and this one has no
-// source in the bundle.
+// expansion bug. Loud and last, because it is the one condition under which the artifact
+// written above CANNOT run at all — fqm resolves terminology from the Library's own
+// `relatedArtifact`/`dataRequirement`, and this one has no source in the bundle.
 for (const gap of terminology.absent) {
   console.warn(
-    `  WARNING value set ${gap.oid}${gap.name ? ` ("${gap.name}")` : ""} is RETRIEVED by this measure's` +
+    `  WARNING value set ${gap.oid}${gap.name ? ` ("${gap.name}")` : ""} is DECLARED by this measure's` +
       " ELM but the upstream bundle ships no ValueSet resource for it, so the artifact cannot run." +
       " Source it from VSAC (pass --complete-terminology with WORKWELL_VSAC_API_KEY set) — ADR-053.",
   );

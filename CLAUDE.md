@@ -378,8 +378,10 @@ than committed capped and permanently unroutable (owner step, task #10). **Routa
 three have no authored counterpart, so `flip-snapshot`'s authored-vs-official comparison — what every flip
 so far was judged on — cannot run for them, and the roster/catalog still assume an authored measure exists.
 
-**ADR-053 — CMS138's cause was NOT "the value set will not expand", and that sentence sent this at the
-wrong system for a week.** Measured at pin `ca4b4951` by `pnpm official:terminology-audit`: CMS138's ELM
+**ADR-053 — CMS138's cause was NOT "the value set will not expand"; that sentence names a symptom and
+points at the wrong system** (ADR-047 recorded it and explicitly did not claim a cause: *"whether that is
+an upstream packaging gap or something our reducer drops is unknown"* — a hedge CLAUDE.md's summary had
+dropped). Measured at pin `ca4b4951` by `pnpm official:terminology-audit`: CMS138's ELM
 **retrieves 32** value sets and its bundle **ships 31** — `…3.526.3.1278` ("Tobacco Use Screening") is
 absent from the bundle, so there is nothing to expand. The other five are exact (26/26, 32/32, 15/15,
 5/5, 26/26). Upstream's own 2026-07-15 discrepancy report lists CMS138 under **no discrepancies** across

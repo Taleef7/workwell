@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Does an upstream measure bundle ship every value set its ELM retrieves? (ADR-053)
+ * Does an upstream measure bundle ship every value set its ELM declares? (ADR-053)
  *
  *   pnpm official:terminology-audit                        # every measure in .official-content
  *   pnpm official:terminology-audit CMS138FHIRTobaccoScrnCessation
@@ -38,16 +38,10 @@ import { readdirSync, readFileSync, existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { declaredValueSets } from "./vsac-expansion.mjs";
+import { declaredValueSets, oidFromValueSetUrl } from "./vsac-expansion.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CONTENT = resolve(HERE, "..", ".official-content", "bundles", "measure");
-
-/** `http://cts.nlm.nih.gov/fhir/ValueSet/2.16.840...` → `2.16.840...`. Mirrors the vendor script. */
-const oidFromValueSetUrl = (url) => {
-  const marker = "/ValueSet/";
-  return url.includes(marker) ? url.slice(url.lastIndexOf(marker) + marker.length) : url;
-};
 
 if (!existsSync(CONTENT)) {
   console.error(

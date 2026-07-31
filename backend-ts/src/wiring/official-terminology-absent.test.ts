@@ -15,9 +15,10 @@
  * Absent was invisible at vendor time (`collectTerminology` enumerates what a bundle SHIPS) and
  * mis-diagnosed at runtime: the expansion refusal says "N of M value sets could not be expanded", which
  * sends an operator at our sidecar, our pin and our fetch — none of which is the cause, and none of
- * which re-vendoring at the same pin can change. That misdiagnosis is on the record as ADR-047's
- * "value set …3.526.3.1278 will not expand", and it is the whole reason this exists: it changes no
- * routing DECISION, only what the operator is told.
+ * which re-vendoring at the same pin can change. That reading is on the record as ADR-047's "value set
+ * …3.526.3.1278 will not expand" — a symptom ADR-047 itself declined to attribute a cause to — and
+ * naming the real condition is the whole reason this exists: it changes no routing DECISION, only what
+ * the operator is told.
  *
  * Measured: CMS138's libraries declare 32 value sets and its bundle carries 31.
  * `pnpm official:terminology-audit` reproduces that in one line, and all five VENDORED measures are

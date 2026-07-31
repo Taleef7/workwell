@@ -15,6 +15,7 @@ import {
   completeTerminology,
   declaredValueSets,
   expandFromVsac,
+  oidFromValueSetUrl,
   sortValueSets,
 } from "./vsac-expansion.mjs";
 
@@ -361,6 +362,68 @@ describe("completeTerminology — absent sets (ADR-053)", () => {
     assert.match(warnings.join("\n"), /claimed 9 codes .* and returned 2 distinct/);
   });
 
+  it("REFUSES a response carrying no expansion.total — no baseline is no evidence (review, #364)", async () => {
+    // The first cut guarded on `total > 0 && canonical.length < total`, which cannot fire when the
+    // server omits `total`: `expandFromVsac` leaves it 0 and the paging loop stops on the first empty
+    // page regardless. A short response with no total was accepted SILENTLY — written with a
+    // `declaredTotal` equal to whatever arrived, `truncated` empty, no warning, routing not refusing.
+    // A set that looks complete and is not, inside the guard added to stop exactly that.
+    let page = 0;
+    globalThis.fetch = async () =>
+      page++ === 0 ? expansionPage(["a", "b"], undefined) : expansionPage([], undefined);
+    const terminology = absentTerminology();
+
+    const completed = await completeTerminology(terminology, ARGS, KEYED);
+
+    assert.deepEqual(completed, []);
+    assert.deepEqual(terminology.absent.map((v) => v.oid), [ABSENT_OID], "still absent, so routing refuses");
+    assert.equal(terminology.valueSets.length, 1, "nothing was appended");
+    assert.match(warnings.join("\n"), /returned no expansion\.total/);
+  });
+
+  it("REFUSES an expansion of a DIFFERENT value set, when VSAC echoes its identity", async () => {
+    // A wrong-OID echo would otherwise file someone else's codes under the OID we asked for — and the
+    // size checks cannot see it, because a different set of the right size passes every one of them.
+    globalThis.fetch = async () => ({
+      ok: true,
+      status: 200,
+      text: async () =>
+        JSON.stringify({
+          resourceType: "ValueSet",
+          url: "http://cts.nlm.nih.gov/fhir/ValueSet/9.9.9.9",
+          expansion: { total: 2, contains: [{ system: "s", code: "a" }, { system: "s", code: "b" }] },
+        }),
+    });
+    const terminology = absentTerminology();
+
+    const completed = await completeTerminology(terminology, ARGS, KEYED);
+
+    assert.deepEqual(completed, []);
+    assert.deepEqual(terminology.absent.map((v) => v.oid), [ABSENT_OID]);
+    assert.match(warnings.join("\n"), /answered the request for .* with an expansion of/);
+  });
+
+  it("accepts a matching echo, including a VERSIONED one — same value set, different canonical", async () => {
+    // The other half: the identity check must not refuse a correct answer that happens to carry
+    // `|version`, which is why it compares normalized OIDs rather than raw strings.
+    globalThis.fetch = async () => ({
+      ok: true,
+      status: 200,
+      text: async () =>
+        JSON.stringify({
+          resourceType: "ValueSet",
+          url: `http://cts.nlm.nih.gov/fhir/ValueSet/${ABSENT_OID}|20250101`,
+          expansion: { total: 2, contains: [{ system: "s", code: "a" }, { system: "s", code: "b" }] },
+        }),
+    });
+    const terminology = absentTerminology();
+
+    const completed = await completeTerminology(terminology, ARGS, KEYED);
+
+    assert.equal(completed.length, 1, `expected the completion to be accepted; warnings: ${warnings.join(" | ")}`);
+    assert.deepEqual(terminology.absent, []);
+  });
+
   it("keeps it absent when VSAC fails outright", async () => {
     globalThis.fetch = async () => ({ ok: false, status: 404, text: async () => "" });
     const terminology = absentTerminology();
@@ -559,6 +622,38 @@ describe("vendor-official-measure argument parsing", () => {
   it("still REFUSES a genuinely unknown flag — the alias did not open the door to everything", async () => {
     const stderr = await run(["--complete-capped-expansion"]); // singular typo
     assert.match(stderr, /unknown argument: --complete-capped-expansion/);
+  });
+});
+
+describe("oidFromValueSetUrl", () => {
+  it("strips the canonical prefix AND a `|version` suffix, and passes a bare oid through", () => {
+    // The `|version` half was missing until review of #364. A shipped `ValueSet.url` never carries a
+    // version (it lives in `ValueSet.version`), so a versioned ELM canonical keyed differently from the
+    // terminology holding it — reporting a PRESENT value set as absent, refusing a measure that is fine,
+    // and then asking VSAC for a malformed version-suffixed id.
+    assert.equal(oidFromValueSetUrl("http://cts.nlm.nih.gov/fhir/ValueSet/2.16.1"), "2.16.1");
+    assert.equal(oidFromValueSetUrl("http://cts.nlm.nih.gov/fhir/ValueSet/2.16.1|1.2"), "2.16.1");
+    assert.equal(oidFromValueSetUrl("2.16.1|20250101"), "2.16.1");
+    assert.equal(oidFromValueSetUrl("2.16.1"), "2.16.1");
+  });
+
+  it("agrees with the executor package, which is the whole reason both exist", async () => {
+    // The duplication is forced (this file runs as bare `node` on the deploy path), so the two must be
+    // pinned against each other on the RULE as well as on the artifacts `valueset-parity.test.mjs`
+    // compares. A shared edge case that both get wrong the same way is still a bug, but a divergence is
+    // a silent one — the vendor step and the routing refusal would disagree about what is absent.
+    const { oidFromValueSetUrl: fromPackage } = await import("../src/wiring/official-executor-adapter.ts");
+    for (const input of [
+      "http://cts.nlm.nih.gov/fhir/ValueSet/2.16.1",
+      "http://cts.nlm.nih.gov/fhir/ValueSet/2.16.1|1.2",
+      "2.16.1",
+      "2.16.1|1.2",
+      "",
+      "not-a-url",
+      "http://x/ValueSet/a/ValueSet/b",
+    ]) {
+      assert.equal(oidFromValueSetUrl(input), fromPackage(input), `disagreement on ${JSON.stringify(input)}`);
+    }
   });
 });
 

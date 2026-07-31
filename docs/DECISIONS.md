@@ -3,13 +3,20 @@
 ## ADR-053: "the terminology is complete" was only ever a claim about what the bundle DECLARED
 
 **Status:** Accepted (2026-07-31). Task #11. Closes a blind spot in the vendor step and, more usefully,
-replaces a misdiagnosis that had been on the record since ADR-047.
+answers a question ADR-047 recorded as open.
 
-**Context.** ADR-047 onboarded CMS2, CMS68 and CMS951 and recorded that three of six candidates did not
-onboard, CMS138 among them: *"scores 0/47 with 47 errors (value set …3.526.3.1278 will not expand)"*.
-That sentence describes a symptom and points at the wrong system. "Will not expand" reads as a failure
-of our expander, our gitignored sidecar, or our VSAC release pin — and every one of those is a thing an
-engineer can go and check, at length, without getting closer.
+**Context.** ADR-047 onboarded CMS2, CMS68 and CMS951 and recorded that three of six candidates did not,
+CMS138 among them. Its table reads *"CMS138 tobacco screening | **0/47, 47 errors** — one value set
+(…3.526.3.1278) will not expand"*, and — to its credit — it did **not** claim to know why: *"Whether
+that is an upstream packaging gap or something our reducer drops is unknown."* CLAUDE.md's summary
+dropped that hedge, and "will not expand" is a symptom that points at the wrong system: it reads as a
+failure of our expander, our gitignored sidecar, or our VSAC release pin — every one of which is a thing
+an engineer can go and check, at length, without getting closer. So this ADR answers ADR-047's open
+question rather than correcting a wrong answer.
+
+(The first draft of this ADR quoted that sentence as ADR-047's own words. It was CLAUDE.md's phrasing,
+not ADR-047's — the same misattribution class review caught on #363 one PR earlier. Corrected above,
+against the text.)
 
 **What was actually measured (2026-07-31, at pin `ca4b4951`, by `pnpm official:terminology-audit`).**
 
@@ -784,7 +791,10 @@ onboarded took the gate — and it disqualified half of them, for three differen
   terminology. Whether that is an upstream packaging gap or something our reducer drops is unknown; the
   gate says only that the measure cannot be executed today, which is enough to keep it out.
 - **Two measures now depend on an owner step**, and the dependency is narrow and stated: a credentialed
-  `pnpm vendor:official --complete-capped-expansions` run for CMS130 and CMS165.
+  `pnpm vendor:official --complete-terminology` run for CMS130 and CMS165 — and, since ADR-053, for
+  CMS138 too, which needs the wider behaviour only the new flag name describes (the old
+  `--complete-capped-expansions` still works but would read as if the narrower behaviour were what
+  is wanted).
 
 ## ADR-046: Canonical, improvementNotation and membership all derive from the outcome's own evidence
 
