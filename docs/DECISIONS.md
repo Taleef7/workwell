@@ -1,8 +1,9 @@
 # Architecture Decision Records
 
-## ADR-048: The extraction debt is paid; `@workwell/measure-engine` is a boundary split, not a file move
+## ADR-048: The TRANSLATOR debt is paid; the CLI-surface debt is not, and the split is not a file move
 
-**Status:** Accepted (2026-07-30). Roadmap M-C, step 1 of 2.
+**Status:** Accepted (2026-07-30). Roadmap §7.4 PR-2 / M-C item C1 — the first of the two extraction
+debts that roadmap names.
 
 **Context.** The engine-boundary test has carried an allowlist entry since PR-1 saying, in its own words,
 that `@cqframework/cql` "is a real runtime dep of this tree TODAY. PR-2 moves `cql-translator.ts` to the
@@ -29,7 +30,7 @@ app, which is what restores the two-dependency package story." That was the one 
    | `synthetic/measure-bindings.ts` | 25 | the app |
    | `ingress/webchart/live-directory.ts` | 20 | the app |
    | `synthetic/exam-config.ts` | 19 | the app |
-   | `synthetic/fhir-bundle-builder.ts` | 18 | the app |
+   | `synthetic/fhir-bundle-builder.ts` | 17 | the app |
    | `cql/cql-execution-engine.ts` | 16 | the engine |
 
    **The largest single export of a wholesale `@workwell/measure-engine` would be a directory of 150
@@ -37,9 +38,28 @@ app, which is what restores the two-dependency package story." That was the one 
    package to "`measure-engine` = cql-execution+cql-exec-fhir only", so `synthetic/` (5 files) and
    `ingress/` (15 files) are app concerns that happen to live under `engine/`.
 
-4. **That split is tractable, which is also measured:** `cql/` and `evaluate-measure.ts` import **nothing**
-   from `synthetic/` or `ingress/`. The dependency runs one way already, so the split is a move plus an
-   import rewrite, not an untangling.
+4. **The split is tractable, with ONE named exception.** *(Corrected after review, #359 — the first
+   version of this claimed `cql/` imports nothing from `synthetic/` or `ingress/`, which is false and was
+   the claim the whole conclusion rested on.)* The eval core proper — `evaluate-measure.ts`,
+   `measure-executor.ts` and `cql/` **minus the two `generate-sql` CLI files** — reaches nothing
+   app-side. The exception is real and transitive:
+
+   `cql/codegen/generate-sql-cli.ts` → `ingress/webchart/terminology.ts` → `synthetic/measure-bindings.ts`
+
+   so a `git mv` of `cql/` wholesale would drag the demo employee catalog into the package.
+   `ROADMAP_2026-07-24.md` §7.4 had already recorded exactly this edge and scoped its clean-core claim to
+   a 9-file closure; ADR-048's first draft widened a true narrow claim into a false broad one. The remedy
+   is the same call the roadmap already made for `resolveDataSource`: `generate-sql-cli.ts` is app
+   composition and stays behind.
+
+5. **Two engine TESTS now import the app, and that is this PR's own doing — so they moved.** The boundary
+   test deliberately exempts test files ("the rule protects what would ship"), which is exactly the blind
+   spot that let it happen: relocating `cql-translator.ts` turned two sibling imports in
+   `cql/codegen/*.test.ts` into `../../../measure/` imports, so the engine's YAML→CQL→ELM→evaluate parity
+   gate depended on an app module. Step 2 would then have had to either strand those tests or give the
+   package a devDependency pointing back at the app. Both now live in `src/measure/` beside the
+   translator they exercise — they are integration tests between engine codegen and the app's compiler,
+   and the side that owns the compiler is the honest home.
 
 **Consequences.**
 
@@ -48,8 +68,20 @@ app, which is what restores the two-dependency package story." That was the one 
   is not bundled here. It has to decide what `@workwell/measure-engine` exports, and that decision is
   hard to reverse once published. The measurement above is the input to it.
 - **No behaviour changes.** The translator is the same module reached by the same callers.
-- `src/engine/` is now 14 eval-core files plus 24 app-side ones in `synthetic/`, `ingress/` and
-  `immunization/`. The boundary test still guards the whole tree, so nothing regresses in the meantime.
+- `src/engine/` holds **42 production files**: `cql/` 14, `ingress/` 15, `synthetic/` 5, `immunization/` 4,
+  plus `evaluate-measure.ts`, `measure-executor.ts` and two `cli/` entrypoints. (An earlier draft said
+  "14 + 24" and omitted four files, two of which are the most eval-core in the tree.) The boundary test
+  still guards the whole tree.
+- **The `node:` allowlist entry SURVIVES, and calling it a manifest rather than a debt was wrong.**
+  `ROADMAP_2026-07-24.md` §7.4 names two debts and says PR-2 must drop both. This PR drops one. The
+  roadmap is right that the second is not a `git mv`: `generate-sql-cli.ts` exports `WCDB_SQL_MEASURES`
+  to two test modules and `devdb-cli.ts` exports `DEVDB_WHITELIST`/`DEVDB_EXCLUDED` to five, including
+  **production** `live-cli.ts`. They are not pure entrypoints, so extracting them is a real refactor.
+- **A new build-time edge, recorded rather than smoothed over.** `src/measure/resources/` now supplies the
+  model-info and `FHIRHelpers` that `compile-measures.mjs` uses to generate the ENGINE's committed ELM. It
+  is harmless today because the ELM is committed and the package would ship prebuilt — but if
+  `packages/measure-engine` should be regenerable standalone, `resources/` belongs beside `scripts/`
+  rather than under `src/measure/`. Step 2's call.
 
 ## ADR-047: A measure is onboarded when its MADiE gate is green — vendoring is not onboarding
 

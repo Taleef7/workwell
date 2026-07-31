@@ -168,16 +168,10 @@ test("the boundary matcher catches every escape form (guard self-test)", () => {
     "node built-ins must be permitted in a *-cli.ts entrypoint",
   );
   // The extraction debt this used to carve out is GONE: `cql-translator.ts` moved to `src/measure/`
-  // (M-C), so the ELM Explorer's translator is no longer reachable from the engine tree and
-  // `@cqframework/cql` is refused ANYWHERE in it — which is what restores the two-dependency package
-  // story the allowlist comment promised.
-  assert.ok(
-    findBoundaryViolations(
-      `${ENGINE_ROOT}/cql/cql-translator.ts`,
-      'import { CqlTranslator } from "@cqframework/cql/cql-to-elm";',
-    ).length > 0,
-    "the translator dep must NOT be permitted anywhere in the engine tree any more",
-  );
+  // (ADR-048), so the ELM Explorer's translator is no longer reachable from the engine tree and
+  // `@cqframework/cql` is refused ANYWHERE in it. Asserted once, at a path that still exists — the
+  // earlier pair asserted the same thing twice, once against `cql/cql-translator.ts`, which no longer
+  // does (review, #359).
   assert.ok(
     findBoundaryViolations(
       `${ENGINE_ROOT}/cql/cql-execution-engine.ts`,
