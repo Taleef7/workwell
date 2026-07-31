@@ -23,17 +23,42 @@ rehearsal that carries what a receiving engine would recalculate from. Nothing p
    version-specific under the eMeasure Identifier root, version-independent as `setId`, per ADR-046. A
    receiver resolves the measure's numerator orientation from that identity, so naming WorkWell's urn over
    CMS's populations would misdescribe the document. Authored outcomes keep the urn.
-4. **The Patient Data section is emitted with `nullFlavor="NI"` and a plain-English note, not populated
-   and not omitted.** This is the honest core of the decision. QRDA I's purpose in a certification
-   setting is to carry the QDM entries — encounters, diagnoses, results — that let a receiving engine
-   **recalculate** the measure. We do not export them. A section that looked populated would be a
-   document that validates structurally and cannot do the one job it exists for; an absent section would
-   hide the gap. `nullFlavor="NI"` states it in the artifact itself, where a recipient sees it, and
-   `STANDARDS_CONFORMANCE.md` records it in the row that matters.
-5. **Conformance is "well-formed and structurally representative", the same level QRDA III has carried
-   since ADR-009.** TemplateIds are the well-known QRDA I OIDs; that is not evidence of conformance, and
-   nothing here may be described as conformant until **Cypress CVU+** actually runs. It has not: CVU+
-   needs Docker, which is unavailable in the environment this was built in.
+4. **The Patient Data section is EMPTY and says so in its own `<text>` — but `nullFlavor` was NOT the
+   mechanism.** *(Corrected after review, #360, by running the official CMS 2026 QRDA Cat I Schematron.)*
+   The first version put `nullFlavor="NI"` on the section believing that encoded "no information".
+   **Measured: it buys exactly nothing.** Against the official CMS sample, stripping a section's children
+   produces the same 5 errors with or without the attribute — QRDA section rule contexts carry no
+   `[not(@nullFlavor)]` guard:
+
+   | official sample variant | errors |
+   |---|---:|
+   | untouched | 0 |
+   | `nullFlavor="NI"` added, children intact | 0 |
+   | children stripped, no nullFlavor | 5 |
+   | children stripped, **with** `nullFlavor="NI"` | **5 — identical** |
+
+   The attribute is removed. What communicates the gap is the prose in `<text>`, which now says plainly
+   that the document cannot be used to recalculate the measure and is not conformant. The intent of the
+   original decision stands; the mechanism was wrong and is not worth preserving as folklore.
+
+5. **This is NOT a conformant QRDA Category I document, and the gap is now measured rather than
+   hedged.** *(Sharpened after review, #360.)* Running the official CMS 2026 Schematron — first
+   reproducing CMS's own published expectation on their sample exactly, so the runner is trustworthy —
+   establishes what is actually missing:
+   - the **QRDA Category I Report** template root `…24.1.1` was absent entirely, and `…24.1.2`/`…24.1.3`
+     carried wrong extensions. Fixed here to the RY2026 set (`2017-08-01`, `2021-08-01`, `2025-03-01`);
+   - required header elements are still absent: `author`, `custodian` (whose id root
+     `2.16.840.1.113883.4.336` carries the CCN), `legalAuthenticator`, and the CMS EHR Certification ID
+     **device** `participant`;
+   - `<addr>` is a hard-error `1..*` **with no nullFlavor escape**, so a document for a patient with no
+     address *cannot* validate. That is a data-ingest prerequisite, not a formatting detail;
+   - `administrativeGenderCode nullFlavor="NI"` is Schematron-clean but IG-wrong — the sanctioned values
+     are `OTH`/`UNK`/`ASKU`. A sharper instance of this file's own theme: **Schematron-clean is not
+     conformant.**
+
+   The claim therefore stays at "well-formed, structurally recognisable", the level QRDA III has carried
+   since ADR-009 — and now with a list of what would have to change, instead of a hedge.
+
 6. **CDA primitives are shared, not duplicated** (`qrda-common.ts`). The two documents describe the same
    run and the certification loop compares them against each other, so a timestamp format or escaping
    rule drifting between them would surface as a validation difference nobody introduced deliberately.
@@ -64,6 +89,14 @@ rehearsal that carries what a receiving engine would recalculate from. Nothing p
   check: a dependency-free tag-balance/escaping checker runs on every generated document (CLAUDE.md
   forbids adding an XML parser without approval). Mutation-checked — unbalancing a tag or dropping an
   escape fails three tests.
+- **An open question that may reshape M-B, flagged rather than acted on.** Review reports that CMS
+  QRDA **Category I is Hospital Quality Reporting only**, and that Eligible Clinicians / MIPS submit
+  Category III — corroborated structurally by Cypress shipping `EH_CAT_I.sch` and `EP_CAT_III.sch` but no
+  `EP_CAT_I.sch`. CMS122 and CMS125 are EC/MIPS measures. If that holds for the *submission* path it does
+  not automatically hold for the *ONC certification* path (§170.315(c) requires QRDA I export, which is
+  what the roadmap's chain is actually about) — so the two must be separated before anything is
+  concluded. **Verify before acting**; it is a milestone-shaping fact, not a PR-shaping one, and nothing
+  in this PR depends on the answer beyond the framing sentence above.
 - **What is still missing for M-B**, stated so the milestone is not read as closed: the QDM patient-data
   entries (decision 4), QRDA **I import** entirely, and the CVU+ loop that would let any of this be
   called validated.
