@@ -105,6 +105,48 @@ period against). Only the capped OIDs are re-expanded — today one, two request
 > exists to keep those two terminology authorities apart; one secret name would invite exactly the
 > conflation it forbids.
 
+##### Step 1b — vendoring a NEW measure when you cannot read the secret
+
+`WORKWELL_VSAC_API_KEY_VENDOR` is a GitHub secret. Secrets are write-only — `gh secret list` returns
+names, never values — so a completed artifact cannot be produced from a clone even though the credential
+is configured and CI uses it on every push.
+
+That is a tooling gap, not an owner gap, and it had been recorded as the latter. The fix is a manual
+trigger that runs the existing command in the one place the credential already lives:
+
+```bash
+gh workflow run vendor-official-measure.yml \
+  -f measure=CMS138FHIRTobaccoScrnCessation -f catalog_id=cms138
+gh run watch                        # the log prints truncated + completion
+gh run download <run-id> -n vendored-cms138 -D backend-ts/measures/official/cms138
+```
+
+`-D` points at the **catalog directory**, not at `measures/official/`. With `-n` selecting a single
+artifact, `gh run download` extracts its contents directly into `-D`, and this artifact's root holds
+`bundle.json`/`manifest.json` — so the shorter path drops them one level too high, where neither the
+vendor script nor the runtime looks (review of #365).
+
+It uploads **`bundle.json` and `manifest.json` only**. `terminology.json` stays on the runner: it holds
+thousands of AMA CPT and SNOMED CT codes under an NLM licence, is gitignored for that reason (ADR-036),
+and an artifact URL is redistribution. `vendor-workflow-safety.test.ts` pins that — named files, no
+directory glob, no recursive copy, `contents: read` only — and is mutation-checked against the exact
+edit that would sweep the sidecar in (`cp -r …/*`).
+
+The job **fails** rather than running without the credential: an uncredentialed vendor produces an
+artifact that looks vendored and cannot be routed, which is worse than none. It also **fails rather than
+uploading an incomplete artifact** — `completeTerminology` fails closed and exits 0, so an expired key,
+an unreachable VSAC, a short expansion or a wrong-OID echo all leave the terminology as upstream shipped
+it while the vendor step still succeeds. A verification step runs the real runtime predicates
+(`absentValueSets` + the manifest's `truncated`) over the produced artifact and stops the job if either
+is non-empty. Checking only `truncated` would have been useless for the very measure this was built
+for — an ABSENT value set never appears there.
+
+Then, in one PR: commit the two files, add the measure to `OFFICIAL_GATED_MEASURES`, to the deploy
+workflows' vendor lists, and to `fetch-official-cases.ps1` if it is not already a candidate there. CI
+re-derives the same bytes and runs the measure's MADiE deck — **that deck is the check**, especially for
+an ADR-053 absent value set, where nothing in the vendoring can tell a correct expansion from a wrong
+one of the right size.
+
 ##### Step 1a (cont.) — value sets upstream ships **no ValueSet resource for at all** (ADR-053)
 
 A second, different incompleteness, and the same flag now handles it. A measure's ELM can retrieve a
