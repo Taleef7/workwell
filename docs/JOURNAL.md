@@ -75,7 +75,32 @@ artifact, which is exactly what ADR-037 forbids. So we export real data and **na
 `caveats` is kept as a separate field from `conformant`: a document missing roster evidence is still a
 valid QRDA I, and one boolean must not mean two things.
 
-Full backend suite: **1643 pass / 0 fail / 14 skipped** (42 in the two QRDA files after the fixes).
+**A second review pass changed what the headline number MEANS.** The partition classified every
+`CONF:CMS-*` assert as "not our bar" — but CMS_0105–0113 (HL7 abstract datatype rules) and CMS_0115–0120
+(NPI/TIN validity) carry CMS numbers while binding *any* conformant CDA. Demonstrated on the real
+artifact: a lab result emitted as `value="not-a-number" nullFlavor="NI"` tripped only `a-CMS_0110` and
+was reported as **0 base-HL7 errors, exit 0** — the number quoted in three documents. Now counted as
+ours, with a negative control pinned in `docs/evidence/`. Deliberately *not* reclassified: **CMS_0121**
+("a UTC offset should not be used"), which directly contradicts base HL7's CONF:81-10130 ("SHOULD include
+time-zone offset") — the clearest evidence the partition earns its keep.
+
+**Three more, and one is the vacuous-guard shape inside the fix for the previous vacuous guard.** FHIR
+`Condition` has no `status` element — retraction lives in `verificationStatus` — so the retraction
+denylist could not fire for the one datatype CMS122's denominator is built on. Also: `hl7Ts` throws by
+design and `esc` called `.replace` on its input, so one MariaDB zero-date on subject 200 of 500 lost all
+500 documents (each resource now translates inside its own try/catch — which is what the module's own
+docblock already *claimed*, while implementing it for structural junk only); and `effectiveTime` had a
+dead `abatementDateTime` branch plus two lossy ones.
+
+Recorded rather than fixed: `loadBundles()` crawls the whole tenant, sequentially and uncached, and is
+not scoped to the run's subjects — `MAX_INDIVIDUAL_REPORT_SUBJECTS` bounds the documents, not the fetch.
+Fine on the dev fixture; it is the request that times out on a production tenant. And the endpoint's PHI
+sensitivity changed materially — it used to emit population flags and now emits diagnoses, lab results
+and procedures as CDA, behind JWT with no role gate and no audit event. Consistent with the other export
+endpoints, so no rule is breached, but it is the owner's call under `PRODUCTION_READINESS_2026-07.md`
+rather than something to inherit.
+
+Full backend suite: **1651 pass / 0 fail / 14 skipped** (49 in the two QRDA files after both review rounds).
 
 ## 2026-07-30 (M-B) — QRDA Category I exists, and says in the document what it cannot do (branch `feat/qrda1-export`)
 

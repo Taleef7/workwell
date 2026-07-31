@@ -14,7 +14,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { buildQrda1Document, buildQrda1Documents } from "./qrda1-export.ts";
+import { buildQrda1Document, buildQrda1Documents, indexBundlesBySubject } from "./qrda1-export.ts";
+import { profileForId } from "../engine/ingress/webchart/live-directory.ts";
+import { subjectIdOf } from "../engine/ingress/enrollment/roster.ts";
 import type { RunRecord } from "../stores/run-store.ts";
 import type { OutcomeRecord } from "../stores/outcome-store.ts";
 
@@ -326,6 +328,25 @@ test("QRDA I: a roster-eligible measure carries a CAVEAT, and a caveat is NOT a 
   assert.equal(doc!.caveats.length, 1);
   assert.match(doc!.caveats[0]!, /SYNTHESIZED qualifying Encounter/);
   assert.match(doc!.xml, /OMITTED: cms125 is roster-eligible/, "and the document says so");
+});
+
+test("QRDA I: the bundle index resolves the id the PIPELINE actually persists (review + Codex, #361)", () => {
+  // The bug this pins: a live run stores `subjectId` as the roster external id, while the bundle carries
+  // the bare `Patient.id`. Keying on one form made every live lookup miss — on the only path meant to
+  // produce conformant documents. Asserting against the REAL `profileForId` rather than a hand-written
+  // `"wc|" + id` is the point: if the pipeline's id scheme changes, this fails instead of the export
+  // silently going empty again.
+  const live = { resourceType: "Bundle", type: "collection", entry: [{ resource: { resourceType: "Patient", id: "123" } }] };
+  const persistedSubjectId = profileForId("wc|123")!.externalId;
+  const lookup = indexBundlesBySubject([live], (b) => subjectIdOf(b as never));
+  assert.equal(lookup(persistedSubjectId), live, `the pipeline persists "${persistedSubjectId}"`);
+  assert.equal(lookup("123"), live, "and the bare Patient.id still resolves, for non-live sources");
+  assert.equal(lookup("nobody"), undefined);
+});
+
+test("QRDA I: the bundle index skips bundles with no Patient rather than throwing", () => {
+  const lookup = indexBundlesBySubject([{ entry: [] }, null, undefined], (b) => subjectIdOf(b as never));
+  assert.equal(lookup("anything"), undefined);
 });
 
 test("QRDA I: a measure that is NOT roster-eligible carries no such caveat", () => {

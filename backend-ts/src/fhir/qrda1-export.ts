@@ -233,12 +233,14 @@ export function buildQrda1Document(
   measureId: string,
   outcome: OutcomeRecord,
   patientBundle?: unknown,
+  /** Pre-computed by the batch path so each subject is translated once, never twice. */
+  precomputed?: { entries: string[]; reference: string },
 ): string {
   const now = hl7Ts(new Date().toISOString());
   const low = hl7Ts(run.measurementPeriodStart);
   const high = hl7Ts(run.measurementPeriodEnd);
-  const entries = patientBundle ? qdmEntriesFor(patientBundle) : [];
-  const reference = measureReference(measureId, outcome.evidence);
+  const entries = precomputed?.entries ?? (patientBundle ? qdmEntriesFor(patientBundle) : []);
+  const reference = precomputed?.reference ?? measureReference(measureId, outcome.evidence);
   const official = reference.includes(EMEASURE_ID_ROOT);
   // An eMeasure Reference QDM SHALL identify the measure by its published eMeasure Identifier root
   // (CONF:67-12811). An AUTHORED measure has no such identifier — by definition, it was never published
@@ -341,17 +343,55 @@ ${authorAndCustodian(now)}
 }
 
 /**
+ * Index bundles by every subject id an outcome could carry for them.
+ *
+ * Extracted from the route so the KEY CONTRACT is testable, because that contract is what broke: a live
+ * run persists `subjectId` as the roster external id `wc|<patientId>` (`run-pipeline.ts` builds the work
+ * item from `profileForId("wc|" + patientId)` and stores `employee.externalId`), while the bundle itself
+ * carries the bare `Patient.id`. Keying on one form only made the lookup miss every time on the sole
+ * path meant to produce conformant documents — present, plausible, structurally incapable of firing
+ * (review + Codex, #361). The unit tests inject `bundleFor` with already-matching keys, which is exactly
+ * why they could not see it; `qrda1-export.test.ts` now pins this against the real `profileForId`.
+ */
+export function indexBundlesBySubject(
+  bundles: readonly unknown[],
+  patientIdOf: (bundle: unknown) => string | undefined,
+): (subjectId: string) => unknown | undefined {
+  const bySubject = new Map<string, unknown>();
+  for (const bundle of bundles) {
+    let id: string | undefined;
+    try {
+      id = patientIdOf(bundle);
+    } catch {
+      continue; // `subjectIdOf` reads `bundle.entry` directly and throws on a null payload
+    }
+    if (id === undefined) continue;
+    for (const key of [id, `wc|${id}`]) if (!bySubject.has(key)) bySubject.set(key, bundle);
+  }
+  return (subjectId: string) => bySubject.get(subjectId);
+}
+
+/**
  * Why a document is not a conformant QRDA Category I — empty when it is.
  *
  * Both causes are structural SHALLs, and both are states this exporter deliberately reaches rather than
  * papers over: a bundle it could not read, and a measure with no published identity to name.
  */
 export function qrda1NonConformance(outcome: OutcomeRecord, measureId: string, bundle: unknown): string[] {
+  return nonConformanceFrom(
+    measureId,
+    bundle === undefined ? 0 : qdmEntriesFor(bundle).length,
+    measureReference(measureId, outcome.evidence),
+  );
+}
+
+/** The reasons, from already-computed inputs — so the batch path can translate each subject once. */
+function nonConformanceFrom(measureId: string, entryCount: number, reference: string): string[] {
   const reasons: string[] = [];
-  if (bundle === undefined || qdmEntriesFor(bundle).length === 0) {
+  if (entryCount === 0) {
     reasons.push("no QDM patient data entries (CONF:67-14567) — the measure cannot be recalculated from this document");
   }
-  if (!measureReference(measureId, outcome.evidence).includes(EMEASURE_ID_ROOT)) {
+  if (!reference.includes(EMEASURE_ID_ROOT)) {
     reasons.push(`measure ${measureId} has no published eMeasure Identifier (CONF:67-12811) — it was evaluated from authored logic`);
   }
   return reasons;
@@ -385,10 +425,15 @@ export function buildQrda1Documents(
 ): Array<{ subjectId: string; xml: string; conformant: boolean; nonConformanceReasons: string[]; caveats: string[] }> {
   return outcomes.map((outcome) => {
     const bundle = bundleFor?.(outcome.subjectId);
-    const nonConformanceReasons = qrda1NonConformance(outcome, measureId, bundle);
+    // Translate ONCE and hand the result to both consumers. Recomputing meant `qdmEntriesFor` ran twice
+    // per subject and `measureReference` twice — the latter reaching `loadOfficialArtifact`, a
+    // `readFileSync` of the vendored bundle, so a 5000-subject run did 10,000 artifact reads (#361).
+    const entries = bundle === undefined ? [] : qdmEntriesFor(bundle);
+    const reference = measureReference(measureId, outcome.evidence);
+    const nonConformanceReasons = nonConformanceFrom(measureId, entries.length, reference);
     return {
       subjectId: outcome.subjectId,
-      xml: buildQrda1Document(run, measureId, outcome, bundle),
+      xml: buildQrda1Document(run, measureId, outcome, bundle, { entries, reference }),
       conformant: nonConformanceReasons.length === 0,
       nonConformanceReasons,
       caveats: qrda1Caveats(measureId, bundle),

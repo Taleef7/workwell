@@ -47,8 +47,10 @@ inside a Category I envelope, plus an empty Patient Data section — while the P
    discriminator CMS125's official numerator uses (ADR-044) — and an unclassifiable resource is
    **skipped, not guessed**: absent is visible, wrong-datatype is not.
 4. **We do not claim the CMS document template.** `…24.1.3` is "QRDA Category I Report CMS". Claiming a
-   template whose IG we do not conform to is a misdeclaration, so it is gone — and its absence is why
-   four CMS-only findings remain and are *expected*.
+   template whose IG we do not conform to is a misdeclaration, so it is gone. Four CMS-only findings
+   remain and are *expected* — all four are template-declaration rules. (The count moved 3 → 4 because
+   the new QDM entries trip entry-level CMS rules an empty section could not, **not** because the
+   template was dropped; an earlier draft of this ADR had that causation backwards.)
 5. **The header is completed with `nullFlavor`, never with invention.** `author` is an
    `assignedAuthoringDevice` (WorkWell is software; naming a clinician would be a fabricated
    attestation), `custodian` is the WorkWell instance, and `raceCode`/`ethnicGroupCode` are `UNK`.
@@ -110,16 +112,57 @@ bundle it has exactly **one** base error — the missing entry — which is the 
    non-conformant for something no validator would ever raise, and would make one boolean mean two
    different things.
 
+**A second review pass changed what the headline number MEANS, and four more defects.**
+
+- **The partition was too coarse, and it could hide a broken document.** Classifying every `CONF:CMS-*`
+  assert as "not our bar" is wrong for two families that carry CMS numbers while binding *any* conformant
+  CDA: **CMS_0105–0113** (HL7 abstract datatype rules — `@value` xor `@nullFlavor`, non-empty `ST`, …)
+  and **CMS_0115–0120** (NPI/TIN validity, including the Luhn checksum). Demonstrated on the real
+  artifact: a lab result emitted as `<value xsi:type="PQ" value="not-a-number" nullFlavor="NI"/>` tripped
+  only `a-CMS_0110` and was reported as **0 base-HL7 errors, exit 0** — the number quoted in three
+  documents. Now classified as base, and the script exits non-zero. Kept OUT of that list on purpose:
+  **CMS_0121** ("a UTC offset should not be used anywhere in a QRDA Category I"), which directly
+  *contradicts* base HL7's CONF:81-10130 ("SHOULD include time-zone offset") — the clearest evidence the
+  partition is doing real work. The classifier now also reads every `CONF:` reference in a message rather
+  than the first, prefers the SVRL `role`/`flag` over guessing severity from the assert id, and reports
+  anything it cannot classify as an error rather than silently dropping it.
+- **One malformed date or numeric id 500'd the whole export.** `hl7Ts` throws by design and `esc` called
+  `.replace` on its input; both now see third-party FHIR. A MariaDB zero-date on subject 200 of 500 lost
+  all 500 documents. Each resource is now translated inside its own try/catch, `esc` coerces, and
+  `hl7TsOrNull` degrades one field to `nullFlavor` — which is what the module's own docblock had claimed
+  ("skipping the item loses one") while implementing it for structural junk only.
+- **The retraction guard could not fire for Conditions.** FHIR `Condition` has no `status`; retraction is
+  `verificationStatus`. So a retracted diabetes diagnosis still became a `Diagnosis` with
+  `statusCode="completed"` — the datatype CMS122's denominator is built on. The vacuous-guard shape, in
+  the fix for the previous vacuous guard.
+- **`effectiveTime` had a dead branch and two lossy ones**: an `abatementDateTime` fallback unreachable
+  for every mapped type, a period carrying only `end` silently discarded, and `Condition.onsetPeriod`
+  never read.
+
 **Consequences.**
 
 - QRDA I now depends on the subject's FHIR bundle at export time, supplied only where the stack can
   really re-read it (a WebChart-configured seam). The synthetic default exports non-conformant documents
   that say so. Bundles are read **as of now**, not as of the run — making it as-evaluated means
   persisting bundles, which is a schema change and the owner's call.
-- The Schematron is **not vendored** (585 KB of yearly third-party artifact) — pinned by SHA-256 in the
-  script, fetched on demand, the ADR-036 pattern. The script is **not in CI**: it needs Python + lxml,
-  which must not become backend-ts dependencies. The structural regressions it would catch are pinned in
-  TypeScript instead, each assertion citing the CONF number it stands for.
+- **`loadBundles()` crawls the whole tenant**, sequentially, uncached, and is not scoped to the run's
+  subjects — `MAX_INDIVIDUAL_REPORT_SUBJECTS` bounds the documents, not the fetch. Fine on the dev
+  fixture; this is the request that times out on a production-sized tenant. Scoping it needs a by-id read
+  the transport does not expose. Recorded here rather than discovered later.
+- The Schematron is **not vendored** (585 KB of yearly third-party artifact) and is **not fetched
+  automatically either** — it is downloaded by hand from ecqi.healthit.gov and hash-checked, with a
+  mismatch warning rather than a refusal. That is weaker than ADR-036's build-time fetch pinned by a
+  committed manifest, and this ADR previously described it as if it were the same thing. The script is
+  **not in CI**: it needs Python + lxml, which must not become backend-ts dependencies. The structural
+  regressions it would catch are pinned in TypeScript instead, each assertion citing the CONF number it
+  stands for.
+- **The measured numbers are for ONE document per state**, generated from a hand-built bundle — not a
+  sweep of an endpoint response. Evidence: `docs/evidence/QRDA1_SCHEMATRON_2026-07-31.md`.
+- **PHI posture, for the owner rather than a defect.** This endpoint's sensitivity changed materially: it
+  used to emit population flags and now emits per-patient diagnoses, lab results, procedures and
+  encounters as CDA. It sits behind the global JWT middleware with no role gate and writes no audit
+  event — consistent with the other export endpoints, so no rule is breached, but the right frame for
+  deciding that is `docs/PRODUCTION_READINESS_2026-07.md`, not inheritance.
 - **Still open:** QRDA I **import** does not exist, and **Cypress CVU+ has not run** — it needs Docker
   and remains the M-B bar. Nothing here may be described as certified or CVU+-validated.
 
