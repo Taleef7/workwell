@@ -79,7 +79,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-      # `--complete-capped-expansions` re-expands the OIDs upstream capped at 1000 (today one:
+      # `--complete-terminology` re-expands the OIDs upstream capped at 1000 (today one:
       # AdvancedIllness, feeding a DENEX in both measures) from VSAC at a pinned release. It fails
       # CLOSED: no key, or VSAC unreachable after retries, and the capped codes ship exactly as
       # upstream sent them with the manifest's `truncated` entry intact — so official routing refuses
@@ -97,11 +97,11 @@ jobs:
         env:
           WORKWELL_VSAC_API_KEY: ${{ secrets.WORKWELL_VSAC_API_KEY_VENDOR }}
         run: |
-          node scripts/vendor-official-measure.mjs --measure CMS122FHIRDiabetesAssessGT9Pct --catalog-id cms122 --strip-elm-annotations --complete-capped-expansions
-          node scripts/vendor-official-measure.mjs --measure CMS125FHIRBreastCancerScreen --catalog-id cms125 --strip-elm-annotations --complete-capped-expansions
-          node scripts/vendor-official-measure.mjs --measure CMS2FHIRPCSDepScreenAndFollowUp --catalog-id cms2 --strip-elm-annotations --complete-capped-expansions
-          node scripts/vendor-official-measure.mjs --measure CMS68FHIRDocumentationCurrentMeds --catalog-id cms68 --strip-elm-annotations --complete-capped-expansions
-          node scripts/vendor-official-measure.mjs --measure CMS951FHIRKidneyHealthEval --catalog-id cms951 --strip-elm-annotations --complete-capped-expansions
+          node scripts/vendor-official-measure.mjs --measure CMS122FHIRDiabetesAssessGT9Pct --catalog-id cms122 --strip-elm-annotations --complete-terminology
+          node scripts/vendor-official-measure.mjs --measure CMS125FHIRBreastCancerScreen --catalog-id cms125 --strip-elm-annotations --complete-terminology
+          node scripts/vendor-official-measure.mjs --measure CMS2FHIRPCSDepScreenAndFollowUp --catalog-id cms2 --strip-elm-annotations --complete-terminology
+          node scripts/vendor-official-measure.mjs --measure CMS68FHIRDocumentationCurrentMeds --catalog-id cms68 --strip-elm-annotations --complete-terminology
+          node scripts/vendor-official-measure.mjs --measure CMS951FHIRKidneyHealthEval --catalog-id cms951 --strip-elm-annotations --complete-terminology
       - name: The committed artifact is reproducible from its pin
         run: git diff --exit-code backend-ts/measures/official
       - uses: docker/login-action@v3

@@ -30,6 +30,7 @@
     "gen-cql": "node --import tsx scripts/gen-cql.mjs",
     "generate:sql": "tsx src/engine/cql/codegen/generate-sql-bin.ts",
     "test": "node --import tsx --test \"src/**/*.test.ts\" \"packages/*/src/**/*.test.ts\" \"scripts/**/*.test.mjs\"",
+    "official:terminology-audit": "node scripts/official-terminology-audit.mjs",
     "vendor:official": "node scripts/vendor-official-measure.mjs"
   },
   "dependencies": {

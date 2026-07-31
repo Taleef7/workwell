@@ -204,6 +204,66 @@ export function cappedExpansions(
   return (artifact.manifest.terminology?.truncated ?? []).filter((cap) => referenced.has(cap.oid));
 }
 
+/**
+ * Value sets this measure's ELM DECLARES for which the artifact holds no terminology at all (ADR-053).
+ *
+ * **Declares, not retrieves**, and the difference is measurable rather than pedantic: review of #364
+ * found CMS138's ELM carries **zero** `ValueSetRef`/`Retrieve` references to the very OID this check
+ * exists for — it is a `valueset` declaration the CQL never uses. The refusal is still correct, because
+ * fqm resolves terminology from `Library.relatedArtifact`/`dataRequirement`, which does list it, and
+ * throws `Missing the following valuesets`. So this deliberately OVER-approximates: a declared-but-unused
+ * value set is refused too. That is the safe direction — and the reason `requiredOids`, which reads the
+ * same `library.valueSets.def`, should be read as "declared" wherever it is called "referenced".
+ *
+ * ## Why this is a different condition from every other terminology problem
+ *
+ * `truncated` is *some* of the codes. An empty expansion is *none* of the codes for a set we know
+ * about. This is neither: the sidecar has **no entry for the OID**, because the upstream bundle shipped
+ * no ValueSet resource for it. Measured on CMS138 at the pinned commit — its libraries declare 32 value
+ * sets and the bundle carries 31, so `2.16.840.1.113883.3.526.3.1278` ("Tobacco Use Screening") has no
+ * source in the artifact and all 47 MADiE cases error.
+ *
+ * `expandArtifactTerminology` already refuses this, so nothing was ever *routed* on it — but it refuses
+ * with "N of M value sets could not be expanded", which reads as a failure of our sidecar, our pin or
+ * our fetch. None of those is the cause. ADR-047 recorded the symptom — "value set …3.526.3.1278 will
+ * not expand" — and explicitly did not claim a cause for it; naming the real one is the value here.
+ *
+ * ## Computed, never recorded
+ *
+ * Deliberately derived from the artifact's own two files — the ELM in `bundle.json` names what it
+ * retrieves, the sidecar names what we hold — rather than read from a manifest field. A recorded field
+ * is a second authority that can disagree with the artifact it describes (the exact drift
+ * `official-terminology.test.ts` guards `truncated` against, since `truncated` genuinely *cannot* be
+ * recomputed — upstream's declared totals are not in the sidecar). This one can, so it is. It also
+ * means the check applies retroactively to artifacts vendored before it existed, with no re-vendor and
+ * no committed byte moved.
+ *
+ * Returns `[]` when the terminology will not load at all: that is a different problem, already reported
+ * by `loadOfficialTerminology`, and listing every referenced OID as "absent" on top of it would bury the
+ * one sentence an operator can act on.
+ */
+export function absentValueSets(
+  artifact: OfficialArtifact,
+  referencedOids: string[],
+  // Injectable for the reason every other terminology reader here is: the sidecar is fetched at build
+  // and gitignored, so a test that could only reach the real one would be a test that skips. The router
+  // passes ITS injected loader through, so a stubbed router sees one consistent terminology rather than
+  // a stub for the capped check and the real file for this one.
+  load: (artifact: OfficialArtifact) => LoadedTerminology = loadOfficialTerminology,
+): string[] {
+  const loaded = load(artifact);
+  if (!loaded.ok) return [];
+  // De-duplicated: two canonicals in the ELM can collapse to one OID — a versioned `…|1.2` and its
+  // unversioned form, since `oidFromValueSetUrl` strips both the prefix and the version — and reporting
+  // the same missing set twice makes a one-value-set problem read as two.
+  //
+  // That version-stripping was MISSING when this comment was first written (review of #364): the two
+  // forms produced different keys, so the sentence above described behaviour the code did not have.
+  // Fixed in `oidFromValueSetUrl` itself rather than here, so the vendor step, the routing refusal and
+  // the terminology cache all agree.
+  return [...new Set(referencedOids)].filter((oid) => !loaded.codesByOid.has(oid));
+}
+
 /** @internal test hook */
 export function __clearOfficialTerminologyCache(): void {
   cache.clear();
