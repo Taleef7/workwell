@@ -309,31 +309,88 @@ const LAB_CATEGORIES = new Set(["laboratory", "vital-signs", "survey", "exam"]);
  * Resource order is deliberate: it is the order the bundle presented, so two exports of the same bundle
  * are byte-identical and a diff between them means the DATA moved, not that the exporter did.
  */
-export function qdmEntriesFor(bundle: unknown, pad = "          "): string[] {
-  const raw = (bundle as { entry?: unknown } | undefined)?.entry;
-  // `entry: [null]` and `entry: null` both reach here from a third-party payload. `roster.ts` guards the
-  // same shape for the same reason: an export that throws on one junk item loses the whole run's
-  // documents, where skipping the item loses one.
-  const entries = Array.isArray(raw) ? raw : [];
-  const out: string[] = [];
-  entries.forEach((item, i) => {
-    // Per-resource isolation, and it has to be a real try/catch rather than input validation. This
-    // module's own contract is "an export that throws on one junk item loses the whole run's documents,
-    // where skipping the item loses one" — but the structural guard below implements that only for
-    // shape junk (`entry: [null]`). VALUE junk is the larger half: a malformed date or a numeric id used
-    // to reach the worker's catch-all and turn a 500-subject export into `{"error":"internal_error"}`,
-    // losing the 499 documents that were fine (review, #361).
-    try {
-      out.push(...entryFor(item, i, pad));
-    } catch {
-      // Deliberately silent per item: the document that results is already marked non-conformant by the
-      // empty-section rule, which is the signal an operator acts on.
+/**
+ * Why one resource produced no entry — the ACTUAL cause, in the operator's terms.
+ *
+ * Getting this wrong is worse than saying nothing, because it sends someone to the wrong place. Two
+ * cases were measurably misreported (review, #362): an Observation whose category is outside both sets
+ * (`social-history`, `activity`, `therapy`) was blamed on terminology even when its code was plain
+ * LOINC; and an Encounter was ALWAYS reported as having "an absent code", because the reason string read
+ * `code` while `encounterPerformed` reads `type[0] ?? code`.
+ */
+function dropReason(resource: FhirResource, type: string): string {
+  if (isNegated(resource)) return "excluded — its status says the event did not happen or was retracted";
+  if (type === "Observation") {
+    const cats = categoryCodes(resource);
+    if (cats.length === 0) return "no category, so its QDM datatype (laboratory vs diagnostic study) is undetermined";
+    if (!cats.some((c) => IMAGING_CATEGORIES.has(c) || LAB_CATEGORIES.has(c))) {
+      return `category '${cats.join("/")}' is not a QDM datatype this mapper routes (it maps laboratory and imaging only)`;
     }
-  });
-  return out.filter(Boolean);
+  }
+  // Read the SAME field the builder reads, or the reason describes a different resource than the one
+  // that was dropped.
+  const concept = type === "Encounter" ? (resource.type?.[0] ?? resource.code) : resource.code;
+  const systems = [...new Set((concept?.coding ?? []).map((c) => c.system).filter(Boolean))];
+  if (systems.length === 0) return "no code to carry — CDA needs a coded value";
+  return `no CDA code system OID for ${systems.join(", ")} — CDA cannot carry it`;
 }
 
-/** The QDM entries for ONE bundle item — zero, one, or (never yet) more. */
+export interface QdmTranslation {
+  entries: string[];
+  /**
+   * Resources this mapper could not express in CDA, as `"<ResourceType>: <why>"`.
+   *
+   * The largest cause is not a bug: a code carrying **no CDA code system OID** cannot appear in a QRDA
+   * at all. WorkWell's authored measures bind synthetic `urn:workwell:vs:*` value sets, so their bundles
+   * translate to *nothing* — which means a QRDA Category I is only a meaningful artifact for measures
+   * whose data carries real terminology (LOINC/SNOMED/CPT/ICD), i.e. the official ones. Discovered by
+   * the round-trip route test, which is precisely what it was written to catch.
+   */
+  untranslatable: string[];
+}
+
+/** Entries plus the reasons anything was dropped — see `QdmTranslation.untranslatable`. */
+export function translateQdm(bundle: unknown, pad = "          "): QdmTranslation {
+  const raw = (bundle as { entry?: unknown } | undefined)?.entry;
+  const items = Array.isArray(raw) ? raw : [];
+  const entries: string[] = [];
+  const untranslatable: string[] = [];
+  items.forEach((item, i) => {
+    const resource = (item as { resource?: FhirResource } | null)?.resource;
+    const type = resource?.resourceType;
+    let produced: string[] = [];
+    try {
+      produced = entryFor(item, i, pad);
+    } catch {
+      if (type) untranslatable.push(`${type}: could not be translated (malformed field)`);
+      return;
+    }
+    if (produced.length > 0) {
+      entries.push(...produced);
+      return;
+    }
+    // Nothing produced. Say WHY, for the cases an operator can act on; stay silent for the ones that are
+    // simply out of scope, where a "gap" would be noise.
+    if (!type || type === "Patient" || !(QDM_MAPPED_RESOURCE_TYPES as readonly string[]).includes(type)) return;
+    untranslatable.push(`${type}: ${dropReason(resource!, type)}`);
+  });
+  return { entries, untranslatable };
+}
+
+export function qdmEntriesFor(bundle: unknown, pad = "          "): string[] {
+  return translateQdm(bundle, pad).entries;
+}
+
+/**
+ * The QDM entries for ONE bundle item — zero, one, or (never yet) more.
+ *
+ * Per-resource isolation lives in `translateQdm`'s try/catch around this call, and it has to be a real
+ * try/catch rather than input validation. This module's own contract is "an export that throws on one
+ * junk item loses the whole run's documents, where skipping the item loses one" — but the structural
+ * guard implements that only for shape junk (`entry: [null]`). VALUE junk is the larger half: a
+ * malformed date or a numeric id used to reach the worker's catch-all and turn a 500-subject export into
+ * `{"error":"internal_error"}`, losing the 499 documents that were fine (review, #361).
+ */
 function entryFor(item: unknown, i: number, pad: string): string[] {
   const out: string[] = [];
   {

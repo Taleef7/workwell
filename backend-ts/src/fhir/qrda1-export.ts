@@ -45,7 +45,7 @@ import { ROSTER_ELIGIBLE_MEASURES } from "../engine/ingress/enrollment/roster.ts
 import { loadOfficialArtifact, officialMeasureIdentifiers } from "../wiring/official-artifacts.ts";
 import { officialReportIdentity } from "./measure-report.ts";
 import { EMEASURE_ID_ROOT, LOINC, esc, hl7Date, hl7Ts, qrdaMeasureReference } from "./qrda-common.ts";
-import { qdmEntriesFor } from "./qdm-entries.ts";
+import { qdmEntriesFor, translateQdm, type QdmTranslation } from "./qdm-entries.ts";
 
 /**
  * The run evaluated a bundle this document does NOT reproduce, and that has to be said out loud.
@@ -378,18 +378,28 @@ export function indexBundlesBySubject(
  * papers over: a bundle it could not read, and a measure with no published identity to name.
  */
 export function qrda1NonConformance(outcome: OutcomeRecord, measureId: string, bundle: unknown): string[] {
-  return nonConformanceFrom(
-    measureId,
-    bundle === undefined ? 0 : qdmEntriesFor(bundle).length,
-    measureReference(measureId, outcome.evidence),
-  );
+  const translation = bundle === undefined ? { entries: [], untranslatable: [] } : translateQdm(bundle);
+  return nonConformanceFrom(measureId, translation, measureReference(measureId, outcome.evidence));
 }
 
 /** The reasons, from already-computed inputs — so the batch path can translate each subject once. */
-function nonConformanceFrom(measureId: string, entryCount: number, reference: string): string[] {
+function nonConformanceFrom(measureId: string, translation: QdmTranslation, reference: string): string[] {
   const reasons: string[] = [];
-  if (entryCount === 0) {
+  if (translation.entries.length === 0) {
     reasons.push("no QDM patient data entries (CONF:67-14567) — the measure cannot be recalculated from this document");
+  }
+  // WHY nothing translated, when there is a why an operator can act on. Reporting only "no entries" for
+  // a bundle that was present and full of resources is the misleading half of the truth: WorkWell's
+  // authored measures bind synthetic `urn:workwell:vs:*` value sets, which have no CDA code system OID,
+  // so their data cannot be carried by a QRDA at all. Found by the import round trip.
+  //
+  // DEDUPED and COUNTED, not one line per resource. `GET /api/runs/:id/qrda1` returns this per subject,
+  // and a WebChart bundle of a few hundred observations produced 300 near-identical strings — 31 KB per
+  // subject of the same three sentences (review, #362).
+  const tally = new Map<string, number>();
+  for (const reason of translation.untranslatable) tally.set(reason, (tally.get(reason) ?? 0) + 1);
+  for (const [reason, count] of tally) {
+    reasons.push(`not exported${count > 1 ? ` (${count} resources)` : ""} — ${reason}`);
   }
   if (!reference.includes(EMEASURE_ID_ROOT)) {
     reasons.push(`measure ${measureId} has no published eMeasure Identifier (CONF:67-12811) — it was evaluated from authored logic`);
@@ -428,12 +438,12 @@ export function buildQrda1Documents(
     // Translate ONCE and hand the result to both consumers. Recomputing meant `qdmEntriesFor` ran twice
     // per subject and `measureReference` twice — the latter reaching `loadOfficialArtifact`, a
     // `readFileSync` of the vendored bundle, so a 5000-subject run did 10,000 artifact reads (#361).
-    const entries = bundle === undefined ? [] : qdmEntriesFor(bundle);
+    const translation = bundle === undefined ? { entries: [], untranslatable: [] } : translateQdm(bundle);
     const reference = measureReference(measureId, outcome.evidence);
-    const nonConformanceReasons = nonConformanceFrom(measureId, entries.length, reference);
+    const nonConformanceReasons = nonConformanceFrom(measureId, translation, reference);
     return {
       subjectId: outcome.subjectId,
-      xml: buildQrda1Document(run, measureId, outcome, bundle, { entries, reference }),
+      xml: buildQrda1Document(run, measureId, outcome, bundle, { entries: translation.entries, reference }),
       conformant: nonConformanceReasons.length === 0,
       nonConformanceReasons,
       caveats: qrda1Caveats(measureId, bundle),
