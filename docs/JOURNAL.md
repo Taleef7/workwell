@@ -35,13 +35,23 @@ the MADiE gate — 0/47 with 47 errors today, and a wrong value set does not tur
 **Two decisions worth carrying.** (1) The absent list is **recomputed at runtime, never recorded** — it
 is derivable from the artifact's ELM plus its sidecar, so a manifest field would be a second authority
 that can disagree with the artifact it describes. Consequence: it applies retroactively to artifacts
-vendored before it existed, and **the change moved no committed byte** (verified by re-vendoring cms2 to
-an empty `git diff` and an unchanged sidecar hash, so CI's reproducibility gate is untouched). (2)
+vendored before it existed. (2)
 `pnpm official:terminology-audit` is a **measurement, not a gate** — exit 0 whatever it finds, and
 deliberately not in CI, because it reads the gitignored `.official-content` checkout and would otherwise
 be a self-skipping job that reads as covered.
 
-**What the change broke, and what that taught.** Nine routing tests failed on a condition none of them
+**The claim I got wrong, and how it was caught.** The first push said the change "moved no committed
+byte", verified by re-vendoring cms2 to an empty `git diff`. The verification was real; the conclusion
+did not follow. That cut also tagged CAPPED completions with `reason: "capped"` — and only cms122 and
+cms125 carry a `completion` block, written by a *credentialed* run, recording exactly
+`{oid, had, now, declaredTotal}`. CI's **"The committed artifact is reproducible from its pin"** step
+failed, which blocks deploys and which no contributor can clear locally (the VSAC key is a GitHub
+secret). cms2 could not have caught it: vendored without the credential, it has no completion block at
+all — I checked the one artifact class the change could not affect. Fixed by emitting `reason` only for
+`absent-upstream`, and guarded by a test comparing the record the code PRODUCES against the records
+already COMMITTED, with a non-degeneracy assertion.
+
+**What else the change broke, and what that taught.** Nine routing tests failed on a condition none of them
 was about: `executor-router.test.ts` stubbed "terminology present" as `{ok: true, codesByOid: new
 Map()}` — an artifact whose sidecar loads and holds nothing, which no real artifact can be. Once the
 router could notice that, the stub meant "all 26 of this measure's value sets are absent". Fixed by

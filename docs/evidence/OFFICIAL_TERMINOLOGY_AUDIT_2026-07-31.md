@@ -47,7 +47,7 @@ So upstream can run CMS138 because their environment holds the NLM terminology p
 simply never asked for the one value set the bundle omits. Same licensing boundary as ADR-041's
 1000-code cap, in a different shape — and, as there, nothing to file upstream.
 
-## 4. Reproducibility: this change moved no committed byte
+## 4. Reproducibility — and the check that was run against the wrong artifact
 
 The new check is computed at runtime from the artifact's own two files, not recorded in the manifest
 (ADR-053 decision 2), and `absent` is deliberately excluded from the terminology sidecar. Verified by
@@ -66,9 +66,21 @@ $ sha256(measures/official/cms2/terminology.json)
 0355252109aed497…   # unchanged, before and after
 ```
 
-CI's `git diff --exit-code measures/official` reproducibility gate is therefore unaffected, and the five
-committed manifests — including the two whose `completion` blocks came from a credentialed run — are
-untouched.
+**This verification was necessary and not sufficient, and the first push of the PR proved it.** The
+change also tagged CAPPED completion records with `reason: "capped"`. Only cms122 and cms125 carry a
+`completion` block — written by a *credentialed* run — and they record exactly
+`{oid, had, now, declaredTotal}`. So a credentialed re-vendor produced a different `manifest.json` and
+CI's **"The committed artifact is reproducible from its pin"** step failed. That is a deploy-blocking
+gate, and no contributor can clear it locally: `WORKWELL_VSAC_API_KEY_VENDOR` is a GitHub secret.
+
+cms2 could not possibly have caught it — vendored without the credential, it has **no completion block
+at all**. The check was run against the one class of artifact the change could not affect.
+
+Fixed by emitting `reason` only for `absent-upstream` (its absence means `capped`, which every
+pre-ADR-053 completion was), and guarded by a test that compares the record the code PRODUCES against
+the records already COMMITTED in `measures/official/*/manifest.json` — code-versus-artifact rather than
+code-versus-itself — with a non-degeneracy assertion so it cannot pass by finding no completion block.
+Mutation-checked: re-adding `reason: "capped"` fails two tests.
 
 ## 5. Guards, and the mutation that proves each one fires
 
@@ -78,6 +90,7 @@ untouched.
 | make `absentValueSets` report every OID when terminology will not load | `absentValueSets: reports NOTHING when the terminology will not load` |
 | read `codeSystems.def` instead of `valueSets.def` in `declaredValueSets` | both `valueset-parity` tests |
 | accept an empty VSAC expansion as a completion | `REFUSES an empty expansion — an empty set is the ADR-043 silence, not a completion` |
+| re-add `reason: "capped"` to a capped completion record | `produces exactly the keys the committed credentialed artifacts already record` + the capped `deepEqual` |
 | *(control)* no mutation | nothing failed |
 
 ## 6. What is still open

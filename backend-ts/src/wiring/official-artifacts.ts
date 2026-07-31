@@ -58,14 +58,19 @@ export interface OfficialManifest {
      * terminology digest, and therefore a different `officialLogicVersion`. Recording it is what
      * makes the completion reproducible instead of merely repeatable.
      *
-     * `reason` distinguishes the two things that get completed, and they are not equally evidenced
-     * (ADR-053). A `capped` set was checked against upstream's own declared total AND against
+     * `reason` marks the WEAKER provenance, and is emitted only as `absent-upstream` (ADR-053). Its
+     * absence means `capped`: a set checked against upstream's own declared total AND against
      * containment of the codes upstream shipped. An `absent-upstream` set had neither check available
      * — upstream shipped nothing to contain and declared no total — so it is held only to VSAC's own
      * `expansion.total`, and its `declaredTotal` here is `null` rather than VSAC's number, because
-     * this field means "what the bundle declared" and the bundle declared nothing. Optional in the
-     * TYPE because artifacts completed before ADR-053 carry no `reason`; absent reads as `capped`,
-     * which is what they all were.
+     * this field means "what the bundle declared" and the bundle declared nothing.
+     *
+     * It is NOT emitted for capped completions, and that is a reproducibility constraint rather than a
+     * style choice: the committed cms122/cms125 manifests record exactly `{oid, had, now,
+     * declaredTotal}`, and an extra key changes what a credentialed re-vendor writes — failing CI's
+     * `git diff --exit-code measures/official` gate and blocking deploys. The first cut of ADR-053 did
+     * exactly that. `scripts/vsac-expansion.test.mjs` pins the produced key set against the committed
+     * one.
      */
     completion?: {
       source: string;
