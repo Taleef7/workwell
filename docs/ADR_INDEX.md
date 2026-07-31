@@ -11,7 +11,7 @@
 
 ## Titles (newest first)
 
-- ADR-048: The extraction debt is paid; `@workwell/measure-engine` is a boundary split, not a file move
+- ADR-048: The TRANSLATOR debt is paid; the CLI-surface debt is not, and the split is not a file move
 - ADR-047: A measure is onboarded when its MADiE gate is green — vendoring is not onboarding
 - ADR-046: Canonical, improvementNotation and membership all derive from the outcome's own evidence
 - ADR-045: The flip is a WORKFLOW edit, gated by tests that read what the workflow ships — and cms125 goes alone

@@ -37,6 +37,15 @@
   `@cqframework/cql/cql-to-elm` in `cql/cql-translator.ts` (the ELM Explorer, reached from
   `routes/measures.ts`; §7.1 keeps it in the app) and `node:fs`/`node:path`/`node:url` in the four
   `*-cli.ts` entrypoints. Both are pinned by the boundary test's allowlist, so neither can spread.
+  > **SINCE (2026-07-30, ADR-048): the FIRST of the two debts is PAID.** `cql-translator.ts` and its
+  > `resources/` moved to `src/measure/`, the `@cqframework/cql` allowlist entry is **deleted**, and the
+  > boundary test now REFUSES that dep anywhere in the engine tree (mutation-checked). So the sentence
+  > above — "both are pinned by the boundary test's allowlist" — is true of the `node:` entry only.
+  > That second debt stands and is not a `git mv`: `generate-sql-cli.ts` and `devdb-cli.ts` export library
+  > values consumed by 7+ modules including production `live-cli.ts`. Also measured and worth carrying:
+  > `cql/codegen/generate-sql-cli.ts` reaches `ingress/webchart/terminology.ts` → `synthetic/measure-bindings.ts`,
+  > so `cql/` is NOT wholesale-liftable; the eval core minus those CLI files is.
+  >
   > **SINCE (2026-07-24, same day):** PR-2 — the physical `packages/measure-engine` extraction — was
   > **resequenced to land with M-C** and has NOT shipped. `backend-ts/packages/` today contains only
   > `official-executor/`. The debt described above is therefore still in the tree, still allowlisted, and
