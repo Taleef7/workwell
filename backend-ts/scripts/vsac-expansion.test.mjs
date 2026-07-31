@@ -159,7 +159,13 @@ describe("completeTerminology — capped sets (ADR-041)", () => {
 
     const completed = await completeTerminology(terminology, ARGS, KEYED);
 
-    assert.deepEqual(completed, [{ oid: OID, reason: "capped", had: 2, now: 5, declaredTotal: 5 }]);
+    // `deepEqual`, so the ABSENCE of `reason` is asserted, not merely tolerated. The committed
+    // cms122/cms125 manifests were produced by a credentialed run before ADR-053 and record exactly
+    // these four keys; an extra one changes the bytes a re-vendor produces and fails CI's
+    // `git diff --exit-code measures/official` gate, which blocks deploys. That happened on the first
+    // push of this PR — a local check against cms2 could not see it, because cms2 has no completion
+    // block at all. `reason` is reserved for the weaker `absent-upstream` provenance.
+    assert.deepEqual(completed, [{ oid: OID, had: 2, now: 5, declaredTotal: 5 }]);
     assert.equal(terminology.valueSets[0].codes.length, 5);
     assert.equal(calls.length, 1, "only the capped set is re-expanded");
   });
@@ -390,6 +396,51 @@ describe("completeTerminology — absent sets (ADR-053)", () => {
     assert.deepEqual(await completeTerminology(terminology, ARGS, {}), []);
     assert.deepEqual(terminology.absent.map((v) => v.oid), [ABSENT_OID]);
     assert.match(warnings.join("\n"), /0 capped and 1 absent value set/);
+  });
+});
+
+/**
+ * The completion record's SHAPE is pinned by the artifacts already in Git.
+ *
+ * `manifest.json` is committed; the credentialed CI job re-runs `vendor:official` and then
+ * `git diff --exit-code measures/official`. So any key added to (or removed from) a completion record
+ * fails the eCQM gate and BLOCKS DEPLOYS until someone re-vendors with the VSAC secret — which is a
+ * GitHub secret, so not something a contributor can do locally.
+ *
+ * This PR broke exactly that by adding `reason: "capped"`, and the local verification (re-vendoring
+ * cms2 and diffing) provably could not have caught it: cms2 was vendored WITHOUT the credential and has
+ * no completion block at all. Only the two credentialed artifacts carry one, and only CI regenerates
+ * them. Hence a test that compares what the code PRODUCES against what is COMMITTED, rather than
+ * another test of the code against itself.
+ */
+describe("completion record shape vs the committed manifests", () => {
+  it("produces exactly the keys the committed credentialed artifacts already record", async () => {
+    const { readFileSync, existsSync } = await import("node:fs");
+    const { fileURLToPath } = await import("node:url");
+
+    const committed = [];
+    for (const id of ["cms122", "cms125", "cms2", "cms68", "cms951"]) {
+      const path = fileURLToPath(new URL(`../measures/official/${id}/manifest.json`, import.meta.url));
+      if (!existsSync(path)) continue;
+      for (const entry of JSON.parse(readFileSync(path, "utf8")).terminology?.completion?.valueSets ?? []) {
+        committed.push({ id, keys: Object.keys(entry).sort() });
+      }
+    }
+    // Non-degeneracy: if no committed artifact carries a completion block, this test compares nothing
+    // and must say so rather than pass. That is the shape it exists to catch.
+    assert.ok(committed.length > 0, "no committed completion record found — this test would assert nothing");
+
+    globalThis.fetch = async () => expansionPage(["c", "upstream-2", "a", "b", "upstream-1"], 5);
+    const [produced] = await completeTerminology(cappedTerminology(), ARGS, KEYED);
+
+    for (const { id, keys } of committed) {
+      assert.deepEqual(
+        Object.keys(produced).sort(),
+        keys,
+        `${id}: a capped completion record must keep the exact key set already committed, or a ` +
+          `credentialed re-vendor changes manifest.json and CI's reproducibility gate fails`,
+      );
+    }
   });
 });
 

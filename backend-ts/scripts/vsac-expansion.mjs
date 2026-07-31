@@ -276,9 +276,18 @@ export async function completeTerminology(terminology, args, env = process.env) 
       continue;
     }
     valueSet.codes = canonical;
+    // NO `reason` key on the capped path, deliberately, and this is a REPRODUCIBILITY constraint rather
+    // than a style choice. The committed cms122/cms125 manifests were written by a credentialed run
+    // before ADR-053 and record exactly `{oid, had, now, declaredTotal}`. Adding a field here changes
+    // the bytes a credentialed re-vendor produces, and CI plus both deploy workflows run
+    // `git diff --exit-code measures/official` immediately afterwards — so it fails the eCQM gate and
+    // BLOCKS DEPLOYS until someone re-vendors with the key. It did exactly that on the first push of
+    // this PR, and the local cms2 verification could not have caught it: cms2 has no completion block.
+    //
+    // An absent `reason` reads as `capped`, which is what every completion before ADR-053 was. The field
+    // then means what it should — a marker on the WEAKER provenance, rather than a label on both.
     completed.push({
       oid: valueSet.oid,
-      reason: "capped",
       had,
       now: valueSet.codes.length,
       declaredTotal: valueSet.declaredTotal,

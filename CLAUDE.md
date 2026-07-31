@@ -396,9 +396,13 @@ conflated with capped ones (no containment or declared-total baseline exists for
 held to VSAC's own total, an empty expansion is refused, and the record carries
 `reason: "absent-upstream"`); and routing names the real cause instead of "could not be expanded".
 Routing already refused it, so **no live hazard was closed** — the diagnosis changed, not the verdict.
-The absent list is **recomputed at runtime, never recorded**, so it applies retroactively and **the
-change moved no committed byte** (re-vendored cms2 → empty `git diff`, unchanged sidecar hash). CMS138 is
-**still not vendored**, deliberately. Evidence: `docs/evidence/OFFICIAL_TERMINOLOGY_AUDIT_2026-07-31.md`.
+The absent list is **recomputed at runtime, never recorded**, so it applies retroactively. **The
+"moved no committed byte" claim was WRONG as first pushed** and CI caught it: tagging capped completions
+`reason: "capped"` changed `manifest.json` for a *credentialed* re-vendor and failed the deploy-blocking
+"reproducible from its pin" gate — verified locally against cms2, which has no completion block, i.e. the
+one artifact class the change could not affect. `reason` is now emitted only for `absent-upstream`, and a
+test pins the produced key set against the COMMITTED artifacts. CMS138 is **still not vendored**,
+deliberately. Evidence: `docs/evidence/OFFICIAL_TERMINOLOGY_AUDIT_2026-07-31.md`.
 
 **M-B: a QRDA Category I EXPORT exists (ADR-049) and was then rebuilt inside-out (ADR-050), because the
 milestone-shaping question got answered.** ADR-049's `GET /api/runs/:id/qrda1` reported per-subject

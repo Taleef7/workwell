@@ -52,8 +52,22 @@ sidecar names what we hold), so persisting it would create a second authority th
 artifact it describes — the exact drift `official-terminology.test.ts` guards `truncated` against, in a
 field that never needed to exist. `truncated` genuinely cannot be recomputed (upstream's declared totals
 are not in the sidecar); this can. Two consequences, both good: the check applies retroactively to
-artifacts vendored before it existed, and **adding it moved no committed byte** — verified by
-re-vendoring cms2 and getting an empty `git diff` with an unchanged sidecar hash.
+artifacts vendored before it existed, and it adds nothing to the committed artifacts.
+
+**One claim in this ADR's first version was false, and the way it failed is worth keeping.** It said
+the change "moved no committed byte", verified by re-vendoring cms2 to an empty `git diff` and an
+unchanged sidecar hash. The verification was real and the conclusion did not follow. The first cut also
+tagged CAPPED completions with `reason: "capped"`, and the two credentialed artifacts (cms122, cms125)
+carry a `completion` block recording exactly `{oid, had, now, declaredTotal}` — so a credentialed
+re-vendor produced a different `manifest.json`, and CI's *"The committed artifact is reproducible from
+its pin"* step failed, which is a **deploy-blocking** gate that no contributor can clear locally
+(`WORKWELL_VSAC_API_KEY_VENDOR` is a GitHub secret). cms2 provably could not have caught it: vendored
+without the credential, it has no completion block at all. The check was run against the one artifact
+class the change could not affect.
+
+Fixed by emitting `reason` only for `absent-upstream`, and guarded by a test that compares the record
+the code PRODUCES against the records already COMMITTED — code-versus-artifact rather than
+code-versus-itself, with a non-degeneracy assertion so it cannot pass by finding no completion block.
 
 **Decision 3 — capped and absent are completed by one flag but never conflated.** `--complete-terminology`
 (was `--complete-capped-expansions`, still accepted with a notice, and that alias is *tested* rather than
@@ -65,8 +79,11 @@ them apart:
 - An **absent** set has neither — upstream shipped nothing to contain, and declared no total to fall
   short of. Its only baseline is VSAC's own `expansion.total`, which is enforced; an empty expansion is
   refused outright, because an empty value set matches nothing and produces the whole-roster-out-of-
-  population silence of ADR-043. `completion.valueSets[].reason` records `absent-upstream` vs `capped`,
-  and `declaredTotal` is `null` for the former, because that field means "what the bundle declared".
+  population silence of ADR-043. `completion.valueSets[].reason` is emitted **only** as
+  `absent-upstream`, and `declaredTotal` is `null` for it, because that field means "what the bundle
+  declared" and an absent set declared nothing. Its ABSENCE means `capped` — which is what every
+  completion before this ADR was, so the field marks the weaker provenance rather than labelling both.
+  That asymmetry is forced, not stylistic: see the reproducibility consequence below.
 
 **The real check on a sourced value set is not in the code at all: it is the MADiE gate.** CMS138 has 47
 committed cases with upstream's own expected population vectors, currently 0/47 with 47 errors. A wrongly
