@@ -378,6 +378,21 @@ than committed capped and permanently unroutable (owner step, task #10). **Routa
 three have no authored counterpart, so `flip-snapshot`'s authored-vs-official comparison — what every flip
 so far was judged on — cannot run for them, and the roster/catalog still assume an authored measure exists.
 
+**M-B STARTED (ADR-049): a QRDA Category I EXPORT exists — and is measurably NOT conformant.** The roadmap audit said "QRDA-I does not exist
+anywhere"; `GET /api/runs/:id/qrda1` now returns one CDA document per subject, membership read
+evidence-first (official `populationResults`, never the inverting workflow status) and the measure
+referenced by its published eMeasure UUIDs. **Conformance was MEASURED against the official CMS 2026 Cat I
+Schematron, not asserted**, and the gap is a list: `author`/`custodian`(CCN)/`legalAuthenticator`/CMS-EHR-ID
+`participant` absent; `<addr>` a hard-error `1..*` with **no nullFlavor escape**, so a patient without an
+address cannot validate (an INGEST prerequisite); `administrativeGenderCode nullFlavor="NI"` Schematron-clean
+but IG-wrong. Also corrected: `nullFlavor` on a `<section>` buys **zero** validation relief (measured — 5
+errors either way), so the empty **Patient Data section** says so in its `<text>` instead. The QDM entries a
+receiving engine would RECALCULATE from are not exported. Cypress CVU+ has NOT run (needs Docker).
+**Open, milestone-shaping, unverified:** CMS Cat I may be Hospital-QR-only with ECs/MIPS submitting Cat III
+(Cypress ships `EH_CAT_I.sch`/`EP_CAT_III.sch`, no `EP_CAT_I.sch`) — distinct from the ONC §170.315(c)
+export path the roadmap chain is about. Verify before building further Cat I work. Still missing for M-B: those QDM entries, QRDA I **import** entirely,
+and the CVU+ loop.
+
 **Still open:** the authored cms122/125 subsets retire to the fidelity lab (locked decision #4,
 deliberately not in the flip's own PR); the LIVE third-party WebChart path gets neither the `us-core-sex`
 nor the dual-stamp fix (both mapping sites sit upstream of the live FHIR transport;

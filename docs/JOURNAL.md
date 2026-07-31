@@ -1,5 +1,38 @@
 # Journal
 
+## 2026-07-30 (M-B) — QRDA Category I exists, and says in the document what it cannot do (branch `feat/qrda1-export`)
+
+The roadmap audit recorded "**QRDA-I does not exist anywhere**". It does now: one CDA document per
+subject, at `GET /api/runs/:id/qrda1`.
+
+Three things carried over from work already done, and they mattered more than the XML. Membership is read
+through `membershipFor`, so an official-routed outcome's populations come from `evidence.official` and
+never the workflow status — for cms122 a status-derived document would have reported a poor-control
+patient as OUT of the numerator, the exact inversion ADR-031 fixed for MeasureReport. The measure is
+referenced by its published eMeasure UUIDs (ADR-046), because a receiver resolves numerator orientation
+from that identity. And every population is emitted including the false ones, so "not in the numerator"
+and "the numerator was not reported" stay distinguishable.
+
+**The decision I spent the most care on is the Patient Data section, which is empty on purpose.** QRDA I's
+job in a certification setting is to carry the QDM entries a receiving engine RECALCULATES from. We do not
+export them. So the section ships with `nullFlavor="NI"` and a plain-English note saying exactly that —
+because a section that *looked* populated would be a document that validates structurally and cannot do
+the one thing it exists for, and an absent section would hide the gap. It is stated in the artifact, where
+a recipient sees it, not only in a doc nobody opens.
+
+**Conformance is unchanged in kind:** well-formed and structurally representative, the same level QRDA III
+has carried since ADR-009. TemplateIds are not evidence. **Cypress CVU+ has not run** — it needs Docker,
+which is unavailable here — so nothing in this PR may be called validated, and the conformance row says so.
+
+Two smaller things. CDA primitives moved to `qrda-common.ts` rather than being copied, because the two
+documents describe the same run and the certification loop compares them — a timestamp format drifting
+between them would look like a validation finding nobody caused. And well-formedness is *tested*: this is
+hand-built XML, so balance is a property to check, and CLAUDE.md forbids adding an XML parser without
+approval — so the test carries a dependency-free tag-balance/escaping checker. Mutation-checked:
+unbalancing a tag or dropping an `esc()` fails three tests.
+
+Verified: typecheck clean; **1633 tests / 1619 pass / 0 fail / 14 skipped**.
+
 ## 2026-07-30 (later) — M-C step 1: the extraction debt is paid, and the extraction is not what it looked like (branch `feat/measure-engine-package`)
 
 The engine-boundary test has carried an allowlist entry since PR-1 that described its own removal:
