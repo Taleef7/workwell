@@ -37,9 +37,19 @@ opposite.
    outside the tree, contains **no** app-area file, has **no `node:` import**, and declares exactly
    `cql-execution` + `cql-exec-fhir`. Measured: **29 files, 0 escapes, 0 node imports, 2 deps** — which
    is the first time locked decision #3's dependency claim has been a fact rather than a promise.
-3. **`CORE_ENTRY_POINTS` IS the published API.** Eleven modules, listed explicitly. Adding one widens
-   what the package promises, so it belongs in a PR that says so — as against subpath-exporting the whole
-   tree, which would make every internal file public by default and decide nothing.
+3. **`CORE_ENTRY_POINTS` IS the published API — and app imports are checked against it.** Eleven modules,
+   listed explicitly. Adding one widens what the package promises, so it belongs in a PR that says so —
+   as against subpath-exporting the whole tree, which would make every internal file public by default
+   and decide nothing.
+
+   The check was **missing from the first cut**, and review caught it (Codex, #363): the docblock called
+   the list "every module the app is allowed to import" while nothing verified that. An app module
+   importing a core *internal* — `cql/vsac-value-set-resolver.ts`, say — left all five assertions green,
+   because it is already inside the closure. A list that reads as an API and enforces nothing is the
+   vacuous-guard shape, inside the very test written to pre-empt that class. It matters precisely at
+   extraction: `package.json#exports` restricted to this list turns each such import into a build error
+   in a 150-file mechanical PR, which is the worst place to discover an API decision. Measured at zero
+   violations today, and mutation-checked with Codex's own example.
 4. **A CLI that other modules import is not an entrypoint.** `DEVDB_WHITELIST` moved out of
    `devdb-cli.ts` (its only non-test consumer was `live-cli.ts`) into `report-table.ts`, so the four
    `*-cli.ts` files are now true leaves. This is what lets the *package* rule be "no `node:` at all",
