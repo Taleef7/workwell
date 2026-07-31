@@ -1,5 +1,54 @@
 # Journal
 
+## 2026-07-30 (later) — M-C step 1: the extraction debt is paid, and the extraction is not what it looked like (branch `feat/measure-engine-package`)
+
+The engine-boundary test has carried an allowlist entry since PR-1 that described its own removal:
+`@cqframework/cql` "is a real runtime dep of this tree TODAY. PR-2 moves `cql-translator.ts` to the app,
+which is what restores the two-dependency package story." Done — four importers, plus its `resources/`
+directory and a re-pointed `compile-measures.mjs`. The allowlist entry is deleted and its self-test
+**inverted**: it used to assert the dep "must be permitted in cql-translator.ts", and now asserts it must
+not be permitted anywhere in the engine tree. The manifest is real rather than aspirational.
+
+**Then I measured what the extraction would actually publish, and it changed the shape of the work.**
+Counting the app's imports from `engine/`:
+
+| import | count |
+|---|---:|
+| `synthetic/employee-catalog.ts` | **50** |
+| `cql/measure-registry.ts` | 32 |
+| `synthetic/measure-bindings.ts` | 25 |
+| `ingress/webchart/live-directory.ts` | 20 |
+| `synthetic/exam-config.ts` | 19 |
+
+**The largest single export of a wholesale `@workwell/measure-engine` would be a directory of 150 fake
+employees.** Nobody installs a measure engine to get demo data. The roadmap already says the package is
+"cql-execution+cql-exec-fhir only" — so `synthetic/` (5 files) and `ingress/` (15) are app concerns that
+happen to live under `engine/`, and M-C is a **boundary split**, not the file move the task name implies.
+
+**And my "good news" measurement was wrong** — review caught it, and it was the claim the whole conclusion
+rested on. `cql/` does reach app-side code, transitively:
+`cql/codegen/generate-sql-cli.ts` → `ingress/webchart/terminology.ts` → `synthetic/measure-bindings.ts`.
+My grep looked for `synthetic/` and the specifier was `../../ingress/...`. The roadmap had already recorded
+this exact edge and scoped its clean-core claim to a 9-file closure; I widened a true narrow claim into a
+false broad one. Corrected: the eval core **minus the two `generate-sql` CLI files** is clean, and those
+files are app composition that stays behind — the same call the roadmap already made for
+`resolveDataSource`.
+
+**Worse, this PR created two new engine→app edges and I did not notice.** Moving `cql-translator.ts` turned
+two sibling imports in `cql/codegen/*.test.ts` into `../../../measure/` imports, so the engine's
+YAML→CQL→ELM→evaluate parity gate came to depend on an app module. The boundary test deliberately exempts
+test files ("the rule protects what would ship") — which is precisely the blind spot that let it through.
+Both tests now live in `src/measure/` beside the compiler they exercise. The engine tree is self-contained
+again, verified by grep rather than assumed.
+
+**I stopped there deliberately.** Step 2 decides what a published package exports, and that is hard to
+reverse once it is on a registry — it is a design review, not a mechanical rewrite, and bundling it into
+an unattended PR would bake in a public surface nobody looked at. The measurement above is the input to
+that decision; ADR-048 records it.
+
+Verified: typecheck clean; 1623 tests / 1609 pass / 0 fail / 14 skipped; boundary test green with the
+tightened rule.
+
 ## 2026-07-30 (later still) — M-A wave 2: three more measures onboarded, three refused (branch `feat/official-measures-wave2`)
 
 Vendoring all six remaining priority measures took minutes. Deciding which could be **onboarded** took the

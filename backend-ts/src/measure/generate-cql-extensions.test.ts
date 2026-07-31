@@ -4,9 +4,9 @@
  *   node --import tsx --test src/engine/cql/codegen/generate-cql-extensions.test.ts */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { CqlExecutionEngine } from "../cql-execution-engine.ts";
-import { compileCql } from "../cql-translator.ts";
-import { generateCql, type GenerateCqlInput } from "./generate-cql.ts";
+import { CqlExecutionEngine } from "../engine/cql/cql-execution-engine.ts";
+import { compileCql } from "./cql-translator.ts";
+import { generateCql, type GenerateCqlInput } from "../engine/cql/codegen/generate-cql.ts";
 
 const EVAL = "2026-06-12";
 const engine = new CqlExecutionEngine();

@@ -6,7 +6,7 @@
  *
  *   node scripts/compile-measures.mjs [measures-src-dir] [out-elm-dir]
  *
- * Resources (src/engine/cql/resources): System + FHIR R4 model-info XML and
+ * Resources (src/measure/resources): System + FHIR R4 model-info XML and
  * FHIRHelpers CQL — standard, version-stable config (not a Java dependency).
  */
 import { readFileSync, writeFileSync, mkdirSync, readdirSync } from "node:fs";
@@ -23,7 +23,7 @@ import {
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, "..");
-const resDir = path.join(root, "src/engine/cql/resources");
+const resDir = path.join(root, "src/measure/resources");
 // Measures are authored as .cql/.yaml text resources (language-agnostic, not Java).
 // Source corpus lives in backend-ts/measures/ (relocated from the retired backend/ in #109 PR4).
 const measuresDir = process.argv[2] ?? path.join(root, "measures");
@@ -35,7 +35,7 @@ const fhirModelInfoXml = readFileSync(path.join(resDir, "fhir-modelinfo-4.0.1.xm
 const fhirHelpersCql = readFileSync(path.join(resDir, "FHIRHelpers-4.0.1.cql"), "utf8");
 
 // Bundle the translator resources as a static JSON import so the RUNTIME translator
-// (src/engine/cql/cql-translator.ts, the live /api/measures/compile path) never reads
+// (src/measure/cql-translator.ts, the live /api/measures/compile path) never reads
 // from disk — keeps it portable across every @mieweb/cloud target incl. Cloudflare
 // Workers (no node:fs). Regenerated here so a re-vendor of the raw resources stays in sync.
 writeFileSync(
