@@ -35,7 +35,7 @@ const fhirModelInfoXml = readFileSync(path.join(resDir, "fhir-modelinfo-4.0.1.xm
 const fhirHelpersCql = readFileSync(path.join(resDir, "FHIRHelpers-4.0.1.cql"), "utf8");
 
 // Bundle the translator resources as a static JSON import so the RUNTIME translator
-// (src/engine/cql/cql-translator.ts, the live /api/measures/compile path) never reads
+// (src/measure/cql-translator.ts, the live /api/measures/compile path) never reads
 // from disk — keeps it portable across every @mieweb/cloud target incl. Cloudflare
 // Workers (no node:fs). Regenerated here so a re-vendor of the raw resources stays in sync.
 writeFileSync(
