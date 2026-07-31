@@ -372,11 +372,33 @@ The gate is now **231/231** across five measures (55+66+36+19+55, 0 unexpected, 
 harness, the sparse checkout and the committed-report predicate off `OFFICIAL_GATED_MEASURES` instead of a
 hardcoded pair — all three silently stopped meaning "the full gate" the moment a third measure existed.
 **Three of the six did NOT onboard, each for a different reason:** CMS138 scores **0/47 with 47 errors**
-(value set …3.526.3.1278 will not expand — task #11); CMS130 and CMS165 have capped expansions needing
+(diagnosed 2026-07-31, see below); CMS130 and CMS165 have capped expansions needing
 `WORKWELL_VSAC_API_KEY_VENDOR`, which is a GitHub secret only, so they are **not vendored at all** rather
 than committed capped and permanently unroutable (owner step, task #10). **Routable ≠ routed:** these
 three have no authored counterpart, so `flip-snapshot`'s authored-vs-official comparison — what every flip
 so far was judged on — cannot run for them, and the roster/catalog still assume an authored measure exists.
+
+**ADR-053 — CMS138's cause was NOT "the value set will not expand", and that sentence sent this at the
+wrong system for a week.** Measured at pin `ca4b4951` by `pnpm official:terminology-audit`: CMS138's ELM
+**retrieves 32** value sets and its bundle **ships 31** — `…3.526.3.1278` ("Tobacco Use Screening") is
+absent from the bundle, so there is nothing to expand. The other five are exact (26/26, 32/32, 15/15,
+5/5, 26/26). Upstream's own 2026-07-15 discrepancy report lists CMS138 under **no discrepancies** across
+5826 cases, so the measure is fine — their environment holds the NLM terminology package their README
+names; **re-pinning does not help** (the one newer commit changes no bundle), so VSAC is the remedy and
+vendoring CMS138 folds into owner task #10. **Our own blind spot:** `collectTerminology` enumerated the
+value sets a bundle SHIPS, so an absent one produced no sidecar entry, no `truncated` row and no warning
+— the manifest read as terminology-complete while the artifact could not run, and
+`official-flip-config.test.ts` was reading `truncated: []` as a completeness record it never was ("every
+code the bundle DECLARED" says nothing about a set the bundle never declared). Now: the vendor step
+diffs retrieved-vs-shipped and warns; `--complete-terminology` (renamed from
+`--complete-capped-expansions`, old name still accepted **and tested**) sources absent sets too, never
+conflated with capped ones (no containment or declared-total baseline exists for an absent set, so it is
+held to VSAC's own total, an empty expansion is refused, and the record carries
+`reason: "absent-upstream"`); and routing names the real cause instead of "could not be expanded".
+Routing already refused it, so **no live hazard was closed** — the diagnosis changed, not the verdict.
+The absent list is **recomputed at runtime, never recorded**, so it applies retroactively and **the
+change moved no committed byte** (re-vendored cms2 → empty `git diff`, unchanged sidecar hash). CMS138 is
+**still not vendored**, deliberately. Evidence: `docs/evidence/OFFICIAL_TERMINOLOGY_AUDIT_2026-07-31.md`.
 
 **M-B: a QRDA Category I EXPORT exists (ADR-049) and was then rebuilt inside-out (ADR-050), because the
 milestone-shaping question got answered.** ADR-049's `GET /api/runs/:id/qrda1` reported per-subject

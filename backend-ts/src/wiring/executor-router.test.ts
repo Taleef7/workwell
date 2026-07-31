@@ -7,7 +7,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { officialLogicVersion, officialRoutingProblems, routedEngineForEnv } from "./executor-router.ts";
-import { loadOfficialArtifact } from "./official-artifacts.ts";
+import { loadOfficialArtifact, type OfficialArtifact } from "./official-artifacts.ts";
+import { requiredOids } from "./official-executor-adapter.ts";
 import type { EvaluateMeasureBinding, MeasureOutcome } from "../engine/evaluate-measure.ts";
 import type { LoadedTerminology } from "./official-terminology.ts";
 import type { FqmCalculate } from "@workwell/official-executor";
@@ -16,12 +17,22 @@ import type { FqmCalculate } from "@workwell/official-executor";
  * Terminology lives in a gitignored, fetched-at-build sidecar, so whether it is present is a fact about
  * the working tree. Every test here that is about ROUTING stubs it, so the default suite stays offline
  * and deterministic; `official-terminology.test.ts` covers the real file when it exists.
+ *
+ * It carries a code for **every OID the artifact's ELM retrieves**, rather than an empty map. That is
+ * not decoration — it is what makes the stub represent a state a real artifact can be in. An empty map
+ * says "the sidecar loaded and holds nothing", and once ADR-053 taught the router to notice that, this
+ * stub started meaning "all 26 of this measure's value sets are absent from the artifact" and nine
+ * routing tests failed on a condition none of them was about. A stub that describes an impossible
+ * artifact is a stub that will keep doing this.
  */
-const terminologyPresent = (): LoadedTerminology => ({ ok: true, codesByOid: new Map() });
+const terminologyPresent = (artifact: OfficialArtifact): LoadedTerminology => ({
+  ok: true,
+  codesByOid: new Map(requiredOids(artifact).map((oid) => [oid, [{ system: "urn:test", code: "x" }]])),
+});
 
 /**
- * The two checks whose answer depends on the WORKING TREE rather than on the code, stubbed together
- * as ONE object on purpose.
+ * The checks whose answer depends on the WORKING TREE rather than on the code, stubbed together as ONE
+ * object on purpose.
  *
  * Both vendored artifacts genuinely fail them today: the terminology sidecar is fetched at build (so a
  * fresh clone and CI do not have it), and both carry a capped expansion (AdvancedIllness, 1000 of
@@ -30,6 +41,11 @@ const terminologyPresent = (): LoadedTerminology => ({ ok: true, codesByOid: new
  * They are bundled because applying HALF of them is the exact bug that reached CI: three tests stubbed
  * `cappedFor` and not `loadTerminology`, which passes on a machine with the sidecar and fails on one
  * without. Spreading one object cannot be half-done.
+ *
+ * ADR-053's absent-value-set check deliberately does NOT appear here. It reads the stubbed
+ * `loadTerminology` above, which now describes a complete artifact, so it answers "nothing absent" on
+ * its own — one fewer thing to remember to stub, instead of a third entry in a list whose docblock is
+ * already a warning about forgetting one.
  */
 const offlineChecks = {
   loadTerminology: terminologyPresent,
@@ -232,9 +248,11 @@ test("a capped expansion the ELM retrieves REFUSES routing, whatever the real ar
   assert.equal(problems.length, 1, `exactly the capped-expansion problem: ${JSON.stringify(problems)}`);
   const [problem = ""] = problems;
   assert.match(problem, /expands to only 1000 of 1997 codes/);
-  // The remedy has to be in the message. A warning printed at vendor time is long gone by the time
-  // someone sets the flag and hits this.
-  assert.match(problem, /--complete-capped-expansions/);
+  // The remedy has to be in the message, and it has to be a flag the script still ACCEPTS. A warning
+  // printed at vendor time is long gone by the time someone sets the flag and hits this, and a remedy
+  // naming a removed flag is worse than none — it sends an operator to "unknown argument" mid-incident.
+  // `--complete-capped-expansions` remains accepted as an alias, but the message names the current one.
+  assert.match(problem, /--complete-terminology/);
 });
 
 test("a missing terminology sidecar is a routing problem, named as a build step", async () => {

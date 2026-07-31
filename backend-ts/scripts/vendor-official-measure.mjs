@@ -62,11 +62,15 @@
  * The flag stays opt-in at the CLI so an unstripped artifact remains one command away if clause-level
  * debugging is ever needed; every measure vendored for production use passes it.
  *
- * ## `--complete-capped-expansions` — the one thing PR-9 owed
+ * ## `--complete-terminology` (was `--complete-capped-expansions`, still accepted)
  *
- * Upstream caps every expansion it ships: *"The value sets in this repository are limited to expansions
- * of 1000"* (the content repo's own README — full expansions need an NLM licence). That is upstream
- * policy, not a defect, and nothing can be filed about it. It bites us because `AdvancedIllness`
+ * Completes every value set the measure RETRIEVES but cannot fully resolve from the bundle. Two
+ * distinct conditions, and until ADR-053 only the first was modelled:
+ *
+ * **Capped (ADR-041).** Upstream caps every expansion it ships: *"The value sets in this repository are
+ * limited to expansions of 1000"* (the content repo's own README — full expansions need an NLM
+ * licence). That is upstream policy, not a defect, and nothing can be filed about it. It bites us
+ * because `AdvancedIllness`
  * (…1003.110.12.1082) is **1000 of 1997 codes in both bundles** and feeds the 66+/advanced-illness
  * DENEX in each, so a capped set does not error — it silently narrows a population, leaving excluded
  * subjects in the denominator to be scored. `officialRoutingProblems` therefore refuses to route any
@@ -79,12 +83,25 @@
  * Cypress/CVU+ validates the 2026 reporting period against — so the same pin yields the same bytes and
  * CI's `git diff --exit-code measures/official` stays an honest reproducibility check.
  *
+ * **Absent (ADR-053).** A value set the ELM retrieves for which the bundle ships no ValueSet resource
+ * at all. `collectTerminology` enumerates what the bundle SHIPS, so such a set produced nothing at
+ * vendor time — no sidecar entry, no `truncated` row, no warning — and the artifact read as complete
+ * while being unrunnable. Measured on CMS138: 32 value sets declared by its ELM, 31 shipped;
+ * `2.16.840.1.113883.3.526.3.1278` ("Tobacco Use Screening") is absent, and all 47 MADiE cases error.
+ * Upstream's own 2026-07-15 discrepancy report lists CMS138 under *no discrepancies* across 5826 cases,
+ * so this is not a broken measure — their environment resolves the set from the NLM terminology package
+ * their README names, and ours never asked for it. Upstream HEAD changes no bundle, so re-pinning is
+ * not the remedy; sourcing it from VSAC is.
+ *
  * **It fails closed, in the only direction that is safe.** No `WORKWELL_VSAC_API_KEY`, or VSAC
- * unreachable after retries, and the capped expansion is written exactly as upstream shipped it with
- * its `truncated` entry intact — so routing keeps refusing rather than a half-expanded exclusion set
- * quietly scoring people. A shortfall that survives the completion stays recorded for the same reason.
- * It is not possible to emit a manifest that claims complete over a sidecar that is not: `truncated` is
- * derived from the codes actually present, after completion, by the same comparison as before.
+ * unreachable after retries, and the terminology is written exactly as upstream shipped it with its
+ * `truncated` entry intact and its absent set still absent — so routing keeps refusing rather than a
+ * half-expanded exclusion set quietly scoring people, or an empty set putting a whole roster
+ * out-of-population (ADR-043). A shortfall that survives the completion stays recorded for the same
+ * reason. It is not possible to emit a manifest that claims complete over a sidecar that is not:
+ * `truncated` is derived from the codes actually present, after completion, by the same comparison as
+ * before, and "absent" is recomputed at runtime from the artifact's own two files rather than trusted
+ * from a manifest field.
  */
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
@@ -93,8 +110,10 @@ import { fileURLToPath } from "node:url";
 import {
   DEFAULT_VSAC_BASE,
   DEFAULT_VSAC_MANIFEST,
-  completeCappedExpansions,
+  completeTerminology,
+  declaredValueSets,
   flattenExpansion,
+  sortValueSets,
 } from "./vsac-expansion.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -110,7 +129,7 @@ function parseArgs(argv) {
   const args = {
     ref: DEFAULT_REF,
     stripElmAnnotations: false,
-    completeCappedExpansions: false,
+    completeTerminology: false,
     vsacBase: DEFAULT_VSAC_BASE,
     vsacManifest: DEFAULT_VSAC_MANIFEST,
   };
@@ -120,15 +139,25 @@ function parseArgs(argv) {
     else if (flag === "--catalog-id") args.catalogId = argv[++i];
     else if (flag === "--ref") args.ref = argv[++i];
     else if (flag === "--strip-elm-annotations") args.stripElmAnnotations = true;
-    else if (flag === "--complete-capped-expansions") args.completeCappedExpansions = true;
-    else if (flag === "--vsac-base") args.vsacBase = argv[++i];
+    else if (flag === "--complete-terminology") args.completeTerminology = true;
+    // ADR-041's name for the same flag, kept working rather than removed. It is printed in DEPLOY.md,
+    // in `officialRoutingProblems`' remedy text and in three deploy workflows' history, and an operator
+    // following a slightly stale runbook during an incident must not hit "unknown argument". It selects
+    // the same behavior — which is now WIDER than the old name says, hence the warning.
+    else if (flag === "--complete-capped-expansions") {
+      console.warn(
+        "  NOTE --complete-capped-expansions is the old name for --complete-terminology, which also" +
+          " sources value sets upstream omits entirely (ADR-053). Proceeding.",
+      );
+      args.completeTerminology = true;
+    } else if (flag === "--vsac-base") args.vsacBase = argv[++i];
     else if (flag === "--vsac-manifest") args.vsacManifest = argv[++i];
     else throw new Error(`unknown argument: ${flag}`);
   }
   if (!args.measure || !args.catalogId) {
     throw new Error(
       "usage: --measure <UpstreamMeasureDir> --catalog-id <cms122> [--ref <sha>]" +
-        " [--strip-elm-annotations] [--complete-capped-expansions] [--vsac-manifest <canonical>]",
+        " [--strip-elm-annotations] [--complete-terminology] [--vsac-manifest <canonical>]",
     );
   }
   // A branch name would produce an artifact nobody can reproduce; the manifest is only provenance if
@@ -235,10 +264,25 @@ function assertExecutable(bundle, measureName) {
  * is kept alongside the code count so a VSAC-capped expansion (`expansion.total` greater than the codes
  * actually present) is a recorded fact rather than a silent shortfall — an under-expanded value set
  * narrows a population without erroring anywhere.
+ *
+ * ## `absent`: what this function could not see until ADR-053
+ *
+ * The loop below enumerates the ValueSets the bundle SHIPS. A value set the measure's ELM *retrieves*
+ * but upstream never shipped produced nothing here — no entry, no `truncated` row, no warning — so the
+ * manifest read as terminology-complete while the artifact could not run. CMS138 is the live instance:
+ * its libraries declare 32 value sets and the bundle carries 31.
+ *
+ * So the two lists are now diffed explicitly, against the REDUCED bundle — the same bytes
+ * `requiredOids(artifact)` reads at runtime, so the record here and the routing refusal there are
+ * computed from one input by one algorithm rather than kept in step by hand.
+ *
+ * A shipped-but-unretrieved value set is NOT a problem and is not reported: upstream bundles carry
+ * dependency closures, and a set the ELM never asks for cannot narrow a population. The diff is
+ * deliberately one-directional.
  */
-function collectTerminology(bundle, args) {
+function collectTerminology(upstreamBundle, reducedBundle, args) {
   const valueSets = [];
-  for (const entry of bundle.entry ?? []) {
+  for (const entry of upstreamBundle.entry ?? []) {
     const resource = entry?.resource;
     if (resource?.resourceType !== "ValueSet") continue;
     const url = resource.url ?? resource.id;
@@ -253,20 +297,22 @@ function collectTerminology(bundle, args) {
       codes,
     });
   }
+  // Canonical URLs may carry a `|version` suffix in the ELM while the shipped ValueSet's `url` does
+  // not, so both sides are compared on the bare OID — the same key everything downstream uses.
+  const shipped = new Set(valueSets.map((v) => v.oid));
+  const absent = declaredValueSets(reducedBundle)
+    .map((v) => ({ oid: oidFromValueSetUrl(v.url), url: v.url, ...(v.name ? { name: v.name } : {}) }))
+    .filter((v) => !shipped.has(v.oid));
   // Sorted so the sidecar is a deterministic function of the pinned commit: the manifest pins it by
   // hash, and a hash that depended on upstream entry order would be reproducible only by accident.
-  //
-  // Code-point comparison, NOT `localeCompare`: this ordering decides the bytes that get hashed, and
-  // ICU collation weights punctuation (`.` — every character in an OID that is not a digit) according
-  // to locale and ICU build. It happens to agree with code-point order for these OIDs on this Node,
-  // but a divergence between a dev machine and the CI runner would surface as a hash mismatch whose
-  // remedy message says "re-vendor" — which would reproduce the same mismatch.
-  valueSets.sort((a, b) => (a.oid < b.oid ? -1 : a.oid > b.oid ? 1 : 0));
-  return {
+  // `absent` is sorted for the same reason — it is recorded in the committed manifest.
+  absent.sort((a, b) => (a.oid < b.oid ? -1 : a.oid > b.oid ? 1 : 0));
+  return sortValueSets({
     catalogId: args.catalogId,
     source: { repo: REPO, ref: args.ref, measure: args.measure },
     valueSets,
-  };
+    absent,
+  });
 }
 
 /** `http://cts.nlm.nih.gov/fhir/ValueSet/2.16.840...` → `2.16.840...`. Mirrors the executor package. */
@@ -335,9 +381,14 @@ function buildManifest(bundle, args, raw, bundleJson, terminology, terminologyJs
       // so a measure whose result depends on one of these must not be routed officially until the
       // set is completed from VSAC under our UMLS licence.
       //
-      // Derived from the codes actually present AFTER `--complete-capped-expansions` has run, so the
-      // two facts cannot disagree: a manifest with an empty `truncated` is a manifest whose sidecar
-      // holds every code the bundle declared.
+      // Derived from the codes actually present AFTER `--complete-terminology` has run, so the two
+      // facts cannot disagree: a manifest with an empty `truncated` is a manifest whose sidecar holds
+      // every code the bundle declared.
+      //
+      // Note the exact scope of that sentence, because it is the gap ADR-053 closed: "every code the
+      // bundle DECLARED" says nothing about a value set the bundle never declared at all. An empty
+      // `truncated` is not, and never was, a claim that the artifact's terminology is COMPLETE — that
+      // question is answered at runtime by `absentValueSets`, against the ELM.
       truncated,
       // Present only when something was actually completed, so an artifact vendored without the flag
       // is byte-identical to one vendored before it existed. The pin is recorded because it decides
@@ -396,11 +447,28 @@ const upstream = JSON.parse(raw);
 const reduced = reduceBundle(upstream, args);
 assertExecutable(reduced, args.measure);
 
-const terminology = collectTerminology(upstream, args);
+const terminology = collectTerminology(upstream, reduced, args);
 // Before serialization, deliberately: the sidecar's bytes are what the manifest pins, so a completion
 // that ran after the hash was taken would be a completion the loader refuses.
-const completed = await completeCappedExpansions(terminology, args);
-const terminologyJson = `${JSON.stringify(terminology, null, 0)}\n`;
+const completed = await completeTerminology(terminology, args);
+// Re-sorted AFTER completion because sourcing an absent value set APPENDS one, and the sidecar's
+// ordering is part of the artifact (the manifest pins its bytes by hash).
+sortValueSets(terminology);
+// The sidecar carries TERMINOLOGY, and `absent` is a finding about the artifact rather than terminology
+// data — so it is written explicitly rather than by serializing whatever `collectTerminology` returned.
+//
+// That is not tidiness. The outstanding-absent list is RECOMPUTABLE at runtime (the ELM in bundle.json
+// names what it retrieves; the sidecar names what we hold), so persisting it would create a second
+// authority that can disagree with the artifact — the exact `truncated`-vs-sidecar drift
+// `official-terminology.test.ts` guards against, in a field that never needed to exist. Keeping it out
+// also means adding this check moved no committed byte: the five vendored sidecars and their pinned
+// hashes are untouched. What IS recorded in the manifest is the COMPLETION (below), because a code that
+// came from VSAC rather than from the bundle is provenance and cannot be recomputed from either file.
+const terminologyJson = `${JSON.stringify(
+  { catalogId: terminology.catalogId, source: terminology.source, valueSets: terminology.valueSets },
+  null,
+  0,
+)}\n`;
 const bundleJson = `${JSON.stringify(reduced, null, 0)}\n`;
 const manifest = buildManifest(reduced, args, raw, bundleJson, terminology, terminologyJson, completed);
 
@@ -424,15 +492,29 @@ console.log(
 );
 for (const done of completed) {
   console.log(
-    `  completed ${done.oid} from VSAC: ${done.had} → ${done.now} codes` +
-      ` (declared ${done.declaredTotal}) @ ${args.vsacManifest}`,
+    done.reason === "absent-upstream"
+      ? `  sourced ${done.oid} from VSAC: absent from the upstream bundle → ${done.now} codes` +
+          ` @ ${args.vsacManifest}`
+      : `  completed ${done.oid} from VSAC: ${done.had} → ${done.now} codes` +
+          ` (declared ${done.declaredTotal}) @ ${args.vsacManifest}`,
   );
 }
 for (const cap of manifest.terminology.truncated) {
   console.warn(
     `  WARNING capped expansion ${cap.oid}: ${cap.have}/${cap.declaredTotal} codes present.` +
       " Complete it from VSAC before routing a measure whose result depends on this set" +
-      " (pass --complete-capped-expansions with WORKWELL_VSAC_API_KEY set).",
+      " (pass --complete-terminology with WORKWELL_VSAC_API_KEY set).",
+  );
+}
+// The warning that did not exist before ADR-053, and its absence is what made CMS138 look like an
+// expansion bug for a week. Loud and last, because it is the one condition under which the artifact
+// written above CANNOT run at all — every value set it retrieves must resolve, and this one has no
+// source in the bundle.
+for (const gap of terminology.absent) {
+  console.warn(
+    `  WARNING value set ${gap.oid}${gap.name ? ` ("${gap.name}")` : ""} is RETRIEVED by this measure's` +
+      " ELM but the upstream bundle ships no ValueSet resource for it, so the artifact cannot run." +
+      " Source it from VSAC (pass --complete-terminology with WORKWELL_VSAC_API_KEY set) — ADR-053.",
   );
 }
 console.log(`  wrote ${outDir.replace(BACKEND_ROOT, "backend-ts")}`);

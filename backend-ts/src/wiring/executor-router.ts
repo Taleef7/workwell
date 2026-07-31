@@ -28,27 +28,34 @@
  *   3. WorkWell has recorded what its numerator means (`official-measure-semantics.ts`);
  *   4. it is a `proportion` measure (the population mapping assumes a numerator exists);
  *   5. its terminology sidecar is present and matches the pin in its manifest (ADR-036);
- *   6. no value set its ELM retrieves is VSAC-capped (a partial expansion — see below); and
- *   7. every value set its ELM retrieves expands to a non-empty set.
+ *   6. no value set its ELM retrieves is VSAC-capped (a partial expansion — see below);
+ *   7. no value set its ELM retrieves is ABSENT from the artifact entirely (ADR-053); and
+ *   8. every value set its ELM retrieves expands to a non-empty set.
  *
- * (7) is the one that would otherwise be invisible: fqm treats an unexpandable value set as *empty
+ * (8) is the one that would otherwise be invisible: fqm treats an unexpandable value set as *empty
  * rather than missing*, an empty set matches nothing, and the measure then reports every subject
  * out-of-population — which reads downstream exactly like a genuinely ineligible roster.
  *
- * (6) is the same failure one notch weaker, and (7) cannot catch it: half-expanded is not empty. The
+ * (6) is the same failure one notch weaker, and (8) cannot catch it: half-expanded is not empty. The
  * cap is UPSTREAM POLICY rather than a VSAC limit — the content repo ships every expansion truncated
  * at 1000 because full ones need an NLM licence — and the capped set in both vendored measures feeds a
  * denominator exclusion, so routing would leave excluded subjects in the denominator and score them.
  * **Both cms122 and cms125 failed this check until ADR-041**, deliberately; `vendor:official
- * --complete-capped-expansions` (roadmap §7.3) now completes the shortfall from VSAC at vendor time and
+ * --complete-terminology` (roadmap §7.3) now completes the shortfall from VSAC at vendor time and
  * both pass. The check stays live and tested: a re-vendor without the credential reinstates the refusal
  * rather than shipping a narrowed exclusion.
  *
- * 1-6 are reported TOGETHER, so an operator fixes them in one pass rather than one redeploy at a time.
- * (7) is checked afterwards and stops at the first failure — it costs a real expansion per measure, and
+ * (7) changes no routing DECISION — (8) already refuses it — and exists entirely to change the
+ * diagnosis. "N of M value sets could not be expanded" reads as a failure of our sidecar, our pin or
+ * our fetch; the actual condition is that upstream's bundle ships no ValueSet resource for the OID at
+ * all, so no amount of re-vendoring at the same pin can help. That misdiagnosis is on the record as
+ * ADR-047's "value set …3.526.3.1278 will not expand", and it cost a week.
+ *
+ * 1-7 are reported TOGETHER, so an operator fixes them in one pass rather than one redeploy at a time.
+ * (8) is checked afterwards and stops at the first failure — it costs a real expansion per measure, and
  * the first missing terminology is the one worth acting on.
  *
- * `worker.ts` runs 1-6 at BOOT as well, because everything here is lazy: a typo would otherwise boot
+ * `worker.ts` runs 1-7 at BOOT as well, because everything here is lazy: a typo would otherwise boot
  * clean, log `official-measures=on`, keep /actuator/health green, and 500 every evaluating route.
  *
  * ## Scope of this PR
@@ -73,6 +80,7 @@ import { OFFICIAL_GATED_MEASURES } from "../standards/official-cases.ts";
 import { engineForEnv } from "./engine-factory.ts";
 import { loadOfficialArtifact, type OfficialArtifact } from "./official-artifacts.ts";
 import {
+  absentValueSets,
   cappedExpansions,
   loadOfficialTerminology,
   officialTerminologyExpander,
@@ -192,12 +200,22 @@ export interface RoutingCheckDeps {
    * later check. Both are honest where relaxing the check would not be.
    */
   cappedFor?: (artifact: OfficialArtifact) => Array<{ oid: string; have: number; declaredTotal: number }>;
+  /**
+   * Injectable for the same reasons again, and sharply so: no VENDORED artifact has an absent value set
+   * — the one measure that does (CMS138) is deliberately not vendored, precisely because it cannot run.
+   * A test that only ever saw `measures/official/` would therefore assert an empty list against an empty
+   * list forever and read as covering this. Stubbing it non-empty is the only way to prove the refusal
+   * fires at all.
+   */
+  absentFor?: (artifact: OfficialArtifact) => string[];
 }
 
 /** Everything wrong with the current `WORKWELL_OFFICIAL_MEASURES`, as sentences. Empty means legal. */
 export function officialRoutingProblems(env: OfficialMeasuresEnv, deps: RoutingCheckDeps = {}): string[] {
   const loadTerminology = deps.loadTerminology ?? loadOfficialTerminology;
   const cappedFor = deps.cappedFor ?? ((artifact) => cappedExpansions(artifact, requiredOids(artifact)));
+  const absentFor =
+    deps.absentFor ?? ((artifact) => absentValueSets(artifact, requiredOids(artifact), loadTerminology));
   const problems: string[] = [];
   for (const id of ungatedOfficialMeasures([...OFFICIAL_GATED_MEASURES], env as Record<string, unknown>)) {
     problems.push(
@@ -270,7 +288,26 @@ export function officialRoutingProblems(env: OfficialMeasuresEnv, deps: RoutingC
           `(upstream caps its shipped expansions at 1000) and this measure's ELM retrieves it. Routing ` +
           `would narrow populations silently — re-vendor with ` +
           `\`pnpm vendor:official --measure <name> --catalog-id ${id} --strip-elm-annotations ` +
-          `--complete-capped-expansions\` and WORKWELL_VSAC_API_KEY set (ADR-041, DEPLOY.md "Step 1a").`,
+          `--complete-terminology\` and WORKWELL_VSAC_API_KEY set (ADR-041, DEPLOY.md "Step 1a").`,
+      );
+    }
+    // ABSENT is a third condition, weaker than capped and stronger than empty: the artifact holds no
+    // terminology for this OID because the upstream bundle shipped no ValueSet resource for it
+    // (ADR-053; CMS138 declares 32 value sets and ships 31).
+    //
+    // Reported HERE for the same reason `scoring` and the sidecar check moved up — the expansion
+    // refusal below already catches it, but says "N of M value sets could not be expanded", which sends
+    // an operator at our sidecar, our pin and our fetch. None of those is the cause, and that exact
+    // misdiagnosis is on the record as ADR-047's "value set …3.526.3.1278 will not expand". This
+    // changes no routing decision; it changes what the operator is told, which is the whole cost of the
+    // week that finding sat open.
+    for (const oid of absentFor(artifact)) {
+      problems.push(
+        `${id}: value set ${oid} is retrieved by this measure's ELM but the upstream bundle ships no ` +
+          `ValueSet resource for it, so the artifact holds no codes for it at all. This is not an ` +
+          `expansion failure and re-pinning will not fix it — source it from VSAC with ` +
+          `\`pnpm vendor:official --measure <name> --catalog-id ${id} --strip-elm-annotations ` +
+          `--complete-terminology\` and WORKWELL_VSAC_API_KEY set (ADR-053, DEPLOY.md "Step 1a").`,
       );
     }
   }

@@ -36,7 +36,8 @@ import { fileURLToPath } from "node:url";
 
 import { officialRoutingProblems } from "./executor-router.ts";
 import { loadOfficialArtifact } from "./official-artifacts.ts";
-import { loadOfficialTerminology } from "./official-terminology.ts";
+import { absentValueSets, loadOfficialTerminology } from "./official-terminology.ts";
+import { requiredOids } from "./official-executor-adapter.ts";
 import { OFFICIAL_GATED_MEASURES } from "../standards/official-cases.ts";
 import { OFFICIAL_MEASURE_SEMANTICS } from "./official-measure-semantics.ts";
 import { buildSummaryMeasureReport } from "../fhir/measure-report.ts";
@@ -192,21 +193,40 @@ const sidecarPresent = (shippedMeasures("deploy-twh-mieweb.yml") ?? []).every((i
 });
 const skip = sidecarPresent ? false : "needs the vendored terminology sidecar (run `pnpm vendor:official`)";
 
-/** A capped-expansion problem, which is a property of how the artifact was VENDORED, not of the flag. */
+/**
+ * The two problem classes that are properties of how the artifact was VENDORED, not of the flag.
+ *
+ * Both are "the VSAC credential was not available when this tree's artifacts were produced", so both
+ * are excused by the same condition below. `ABSENT` was added with ADR-053: before it, an artifact
+ * missing a whole value set would have been asserted unconditionally, going red on exactly the
+ * uncredentialed fork PRs the `CAPPED` excuse exists to protect.
+ */
 const CAPPED = /expands to only \d+ of \d+ codes/;
+const ABSENT = /the upstream bundle ships no ValueSet resource for it/;
 
 test("PR-9c: the shipped configuration constructs cleanly — no routing problems", { skip }, () => {
   // Uncredentialed contexts (fork PRs, Dependabot) deliberately re-vendor WITHOUT
-  // `--complete-capped-expansions`, because GitHub withholds the VSAC secret there. That leaves the
+  // `--complete-terminology`, because GitHub withholds the VSAC secret there. That leaves the
   // working-tree artifacts capped — and `officialRoutingProblems` refuses a capped expansion by design
   // (ADR-041), so asserting a clean result unconditionally would fail every outside contributor's PR for
   // a reason unrelated to their change. Codex caught this on #356 before it went red.
   //
-  // So: the capped class is EXCUSED only when the artifacts in the tree are actually capped, and every
-  // other class is asserted always. The credentialed run on merge covers the capped class for real.
-  const complete = (shippedMeasures("deploy-twh-mieweb.yml") ?? []).every(
-    (id) => (loadOfficialArtifact(id)?.manifest.terminology?.truncated ?? []).length === 0,
-  );
+  // So: the two VENDOR-time classes are EXCUSED only when the artifacts in the tree are actually
+  // incomplete, and every other class is asserted always. The credentialed run on merge covers them.
+  //
+  // `complete` must read BOTH conditions. Reading `truncated` alone was true-but-narrow: it means "the
+  // sidecar holds every code the bundle DECLARED", which says nothing about a value set the bundle
+  // never declared at all (ADR-053). No shipped measure has one today — all five vendored artifacts
+  // ship every value set their ELM retrieves — so this changes no verdict now; it stops the predicate
+  // silently meaning less than its name the first time one does.
+  const complete = (shippedMeasures("deploy-twh-mieweb.yml") ?? []).every((id) => {
+    const artifact = loadOfficialArtifact(id);
+    if (!artifact) return false;
+    return (
+      (artifact.manifest.terminology?.truncated ?? []).length === 0 &&
+      absentValueSets(artifact, requiredOids(artifact)).length === 0
+    );
+  });
 
   for (const workflow of WORKFLOWS) {
     const shipped = shippedMeasures(workflow);
@@ -215,7 +235,7 @@ test("PR-9c: the shipped configuration constructs cleanly — no routing problem
     // difference between a deploy that serves and one that answers 500 from every evaluating route
     // while /actuator/health stays green.
     const problems = officialRoutingProblems({ WORKWELL_OFFICIAL_MEASURES: shipped.join(",") });
-    const asserted = complete ? problems : problems.filter((p) => !CAPPED.test(p));
+    const asserted = complete ? problems : problems.filter((p) => !CAPPED.test(p) && !ABSENT.test(p));
     assert.deepEqual(
       asserted,
       [],

@@ -1,5 +1,62 @@
 # Journal
 
+## 2026-07-31 (M-A) — "will not expand" was the wrong sentence: upstream ships CMS138 one value set short (branch `fix/official-terminology-absent-valuesets`)
+
+Task #11 was recorded in ADR-047 as *"CMS138 scores 0/47 with 47 errors — value set …3.526.3.1278 will
+not expand"*. That sentence points at our expander, our gitignored sidecar and our VSAC release pin.
+None of them is the cause, and the first thing worth doing was to stop reading and measure.
+
+**Measured, at pin `ca4b4951`:** CMS138's libraries **retrieve 32** value sets and its bundle **ships
+31** ValueSet resources. `2.16.840.1.113883.3.526.3.1278` ("Tobacco Use Screening") is simply not in the
+bundle. All five other measures are exact (26/26, 32/32, 15/15, 5/5, 26/26). Three follow-up checks
+decided the remedy: upstream's own 2026-07-15 discrepancy report lists CMS138 under **no discrepancies**
+across 5826 test cases, so their environment resolves it and the measure is fine; the only commit after
+our pin changes no bundle, so **re-pinning is not the fix**; and their README names the NLM terminology
+package as the source of full expansions — the same licensing boundary ADR-041 already hit as the
+1000-code cap, in a different shape.
+
+**The blind spot this exposed in our own vendoring.** `collectTerminology` enumerates the ValueSets a
+bundle SHIPS. A value set the ELM retrieves but upstream never shipped produced no sidecar entry, no
+`truncated` row and no warning — so the manifest read as terminology-complete while the artifact could
+not run. The manifest's own sentence, *"a manifest with an empty `truncated` is a manifest whose sidecar
+holds every code the bundle declared"*, is **true and narrow**: it says nothing about a value set the
+bundle never declared, and `official-flip-config.test.ts` was reading it as a completeness record.
+
+**Shipped (ADR-053).** The vendor step now diffs retrieved-vs-shipped and warns; `--complete-terminology`
+(renamed from `--complete-capped-expansions`, old name still accepted — and that alias is *tested*
+against the real CLI rather than claimed in a docblock) sources absent sets from VSAC as well as
+completing capped ones; and `officialRoutingProblems` names the actual condition instead of "could not
+be expanded". Capped and absent are never conflated: a capped set is checked against upstream's declared
+total AND containment of upstream's codes, an absent one has neither baseline available, so it is held
+to VSAC's own `expansion.total`, an empty expansion is refused outright, and the completion record
+carries `reason: "absent-upstream"` with a `null` `declaredTotal`. The real oracle for a sourced set is
+the MADiE gate — 0/47 with 47 errors today, and a wrong value set does not turn that green.
+
+**Two decisions worth carrying.** (1) The absent list is **recomputed at runtime, never recorded** — it
+is derivable from the artifact's ELM plus its sidecar, so a manifest field would be a second authority
+that can disagree with the artifact it describes. Consequence: it applies retroactively to artifacts
+vendored before it existed, and **the change moved no committed byte** (verified by re-vendoring cms2 to
+an empty `git diff` and an unchanged sidecar hash, so CI's reproducibility gate is untouched). (2)
+`pnpm official:terminology-audit` is a **measurement, not a gate** — exit 0 whatever it finds, and
+deliberately not in CI, because it reads the gitignored `.official-content` checkout and would otherwise
+be a self-skipping job that reads as covered.
+
+**What the change broke, and what that taught.** Nine routing tests failed on a condition none of them
+was about: `executor-router.test.ts` stubbed "terminology present" as `{ok: true, codesByOid: new
+Map()}` — an artifact whose sidecar loads and holds nothing, which no real artifact can be. Once the
+router could notice that, the stub meant "all 26 of this measure's value sets are absent". Fixed by
+making the stub describe a COMPLETE artifact rather than by adding a third thing to remember to stub.
+Separately, the parity test between the two implementations of "what does this ELM retrieve" (forced —
+the vendor script runs as bare `node` on the deploy path and cannot import the workspace package) had to
+move from `src/` to `scripts/`: `tsc` will not follow `src/` into a `.mjs`, and the alternative was a
+hand-written `.d.mts` whose drift is the exact defect the parity test exists to catch.
+
+**Not done, deliberately:** CMS138 is still **not vendored**. Sourcing the value set needs
+`WORKWELL_VSAC_API_KEY_VENDOR`, so it folds into owner task #10 beside CMS130/CMS165 — and committing an
+artifact that can never be routed is worse than committing none (ADR-047's call, unchanged). Evidence:
+`docs/evidence/OFFICIAL_TERMINOLOGY_AUDIT_2026-07-31.md`. Suite 1742 pass / 0 fail / 15 skipped;
+typecheck clean; every new guard mutation-checked.
+
 ## 2026-07-31 (M-C) — the app-side exclusions are decided; what the package does with CONTENT is not (branch `feat/measure-engine-package`)
 
 M-C promises `@workwell/measure-engine` with two dependencies. The workspace and
