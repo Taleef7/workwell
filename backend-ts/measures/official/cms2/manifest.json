@@ -1,0 +1,50 @@
+{
+  "catalogId": "cms2",
+  "measureName": "CMS2FHIRPCSDepScreenAndFollowUp",
+  "version": "1.0.000",
+  "cmsId": "2FHIR",
+  "url": "https://madie.cms.gov/Measure/CMS2FHIRPCSDepScreenAndFollowUp",
+  "status": "active",
+  "effectivePeriod": {
+    "start": "2026-01-01",
+    "end": "2026-12-31"
+  },
+  "scoring": "proportion",
+  "populationBasis": "boolean",
+  "improvementNotation": "increase",
+  "populations": [
+    "initial-population",
+    "denominator",
+    "denominator-exclusion",
+    "numerator",
+    "denominator-exception"
+  ],
+  "source": {
+    "repo": "cqframework/dqm-content-qicore-2025",
+    "ref": "ca4b49516de4cbed9f92bfb7c35d97b1bf1022ab",
+    "path": "bundles/measure/CMS2FHIRPCSDepScreenAndFollowUp/CMS2FHIRPCSDepScreenAndFollowUp-bundle.json",
+    "rawSha256": "sha256:13db64b633e07f3d0476b1740a2518991c11fabb704f4f73f889c84bf6102043"
+  },
+  "reduction": {
+    "keptResourceTypes": [
+      "Measure",
+      "Library"
+    ],
+    "libraryContentTypes": [
+      "application/elm+json"
+    ],
+    "strippedNarratives": true,
+    "strippedElmAnnotations": true,
+    "strippedValueSets": true,
+    "rawBytes": 15707621,
+    "vendoredBytes": 2322659
+  },
+  "terminology": {
+    "file": "terminology.json",
+    "valueSets": 15,
+    "codes": 829,
+    "truncated": [],
+    "sha256": "sha256:0355252109aed497a7a72c3fe97f850c796891f11207fb3a61bd592a5a7d02d8"
+  },
+  "sha256": "sha256:4d69acfa4b5bc6d7010ad89279b9d61be77470cc5e37f38f2357bae176e2f1ec"
+}

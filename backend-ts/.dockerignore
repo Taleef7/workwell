@@ -38,12 +38,12 @@ build
 *.tsbuildinfo
 
 # Do NOT exclude measures/official/ — the vendored official measure bundles (~10MB each, currently
-# cms122 + cms125 = ~21MB) are loaded at runtime by wiring/official-artifacts.ts for the
+# 5 stripped measures = ~11MB) are loaded at runtime by wiring/official-artifacts.ts for the
 # fqm-execution fidelity-diff path, and by the executor router once measures flip to official.
 #
 # SIZE WATCH: this grows ~10MB per measure and all 8 priority measures are planned (~80MB). The deploy
 # job-poll window already had to be raised once when the image outgrew it (PR #283). Before vendoring
-# the remaining six, enable `vendor:official --strip-elm-annotations`, which measures 79% smaller
+# further measures, keep `vendor:official --strip-elm-annotations` on (it measures ~79% smaller;
 # (9.8MB → 2.1MB of ELM for CMS122) — gated on the MADiE test-case suite proving it outcome-neutral,
 # since ELM localIds are what fqm uses for clause coverage.
 #

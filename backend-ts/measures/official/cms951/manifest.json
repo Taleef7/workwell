@@ -1,0 +1,49 @@
+{
+  "catalogId": "cms951",
+  "measureName": "CMS951FHIRKidneyHealthEval",
+  "version": "1.0.000",
+  "cmsId": "951FHIR",
+  "url": "https://madie.cms.gov/Measure/CMS951FHIRKidneyHealthEval",
+  "status": "active",
+  "effectivePeriod": {
+    "start": "2026-01-01",
+    "end": "2026-12-31"
+  },
+  "scoring": "proportion",
+  "populationBasis": "boolean",
+  "improvementNotation": "increase",
+  "populations": [
+    "initial-population",
+    "denominator",
+    "denominator-exclusion",
+    "numerator"
+  ],
+  "source": {
+    "repo": "cqframework/dqm-content-qicore-2025",
+    "ref": "ca4b49516de4cbed9f92bfb7c35d97b1bf1022ab",
+    "path": "bundles/measure/CMS951FHIRKidneyHealthEval/CMS951FHIRKidneyHealthEval-bundle.json",
+    "rawSha256": "sha256:c13e0e28a919bb2ee1d12a370053d8dbd6425e33114a80c434dbf27d75f64d34"
+  },
+  "reduction": {
+    "keptResourceTypes": [
+      "Measure",
+      "Library"
+    ],
+    "libraryContentTypes": [
+      "application/elm+json"
+    ],
+    "strippedNarratives": true,
+    "strippedElmAnnotations": true,
+    "strippedValueSets": true,
+    "rawBytes": 13043728,
+    "vendoredBytes": 1958220
+  },
+  "terminology": {
+    "file": "terminology.json",
+    "valueSets": 26,
+    "codes": 1115,
+    "truncated": [],
+    "sha256": "sha256:8879fee0b88622566994b5b80e81d275afa61911a32cd5765841c73aab55337d"
+  },
+  "sha256": "sha256:a005f4527d70fdd7495b9d75ab03b5ab43f1146fcdad81cbfba7d81b7caf1dae"
+}

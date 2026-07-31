@@ -99,6 +99,9 @@ jobs:
         run: |
           node scripts/vendor-official-measure.mjs --measure CMS122FHIRDiabetesAssessGT9Pct --catalog-id cms122 --strip-elm-annotations --complete-capped-expansions
           node scripts/vendor-official-measure.mjs --measure CMS125FHIRBreastCancerScreen --catalog-id cms125 --strip-elm-annotations --complete-capped-expansions
+          node scripts/vendor-official-measure.mjs --measure CMS2FHIRPCSDepScreenAndFollowUp --catalog-id cms2 --strip-elm-annotations --complete-capped-expansions
+          node scripts/vendor-official-measure.mjs --measure CMS68FHIRDocumentationCurrentMeds --catalog-id cms68 --strip-elm-annotations --complete-capped-expansions
+          node scripts/vendor-official-measure.mjs --measure CMS951FHIRKidneyHealthEval --catalog-id cms951 --strip-elm-annotations --complete-capped-expansions
       - name: The committed artifact is reproducible from its pin
         run: git diff --exit-code backend-ts/measures/official
       - uses: docker/login-action@v3

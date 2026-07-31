@@ -6,6 +6,7 @@ import { createHash } from "node:crypto";
 import { readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import {
+  OFFICIAL_GATED_MEASURES,
   loadOfficialMeasureCases,
   loadFhirBundleFile,
   renderOfficialCaseReport,
@@ -63,7 +64,7 @@ async function runtimeTerminologyCache(measure: OfficialMeasureId): Promise<Runt
 }
 
 export const USAGE =
-  "Usage: pnpm test:official-cases [--measure cms122|cms125] [--content-dir <path>]";
+  `Usage: pnpm test:official-cases [--measure ${OFFICIAL_GATED_MEASURES.join("|")}] [--content-dir <path>]`;
 
 export class OfficialCasesCliUsageError extends Error {
   override readonly name = "OfficialCasesCliUsageError";
@@ -81,10 +82,14 @@ export function parseArgs(argv: string[]): OfficialCasesArgs {
     const arg = argv[index];
     if (arg === "--measure") {
       const value = argv[++index];
-      if (value !== "cms122" && value !== "cms125") {
-        throw new OfficialCasesCliUsageError(`--measure must be cms122|cms125\n${USAGE}`);
+      // Driven by the gate list, not a hardcoded pair: a vendored measure absent from the gate is
+      // already refused by `official-gate.test.ts`, so this stays correct as measures are onboarded.
+      if (!value || !(OFFICIAL_GATED_MEASURES as readonly string[]).includes(value)) {
+        throw new OfficialCasesCliUsageError(
+          `--measure must be one of ${OFFICIAL_GATED_MEASURES.join("|")}\n${USAGE}`,
+        );
       }
-      measure = value;
+      measure = value as OfficialMeasureId;
     } else if (arg === "--content-dir") {
       const value = argv[++index];
       if (!value) throw new OfficialCasesCliUsageError(`--content-dir needs a value\n${USAGE}`);
@@ -95,7 +100,7 @@ export function parseArgs(argv: string[]): OfficialCasesArgs {
       throw new OfficialCasesCliUsageError(`unknown argument '${arg}'\n${USAGE}`);
     }
   }
-  return { measures: measure ? [measure] : ["cms122", "cms125"], ...(contentDir ? { contentDir } : {}) };
+  return { measures: measure ? [measure] : [...OFFICIAL_GATED_MEASURES], ...(contentDir ? { contentDir } : {}) };
 }
 
 /**
@@ -103,7 +108,13 @@ export function parseArgs(argv: string[]): OfficialCasesArgs {
  * partial case: if an upstream reorg stops the sparse-checkout patterns matching some case directories,
  * the harness happily reports 12/12 green and exits 0. A shrinking deck is a broken gate, not a pass.
  */
-export const REQUIRED_OFFICIAL_CASE_COUNTS: Record<string, number> = { cms122: 55, cms125: 66 };
+export const REQUIRED_OFFICIAL_CASE_COUNTS: Record<string, number> = {
+  cms122: 55,
+  cms125: 66,
+  cms2: 36,
+  cms68: 19,
+  cms951: 55,
+};
 
 export function exitCodeForRuns(
   runs: Array<Pick<OfficialMeasureRun, "summary"> & Partial<Pick<OfficialMeasureRun, "draftDrift">>>,
@@ -287,7 +298,11 @@ export async function main(argv: string[], overrides: Partial<OfficialCasesCliDe
       generatedDate: deps.generatedDate,
       sourceRevision: deps.sourceRevision(contentDir),
     });
-    const writesCommittedReport = parsed.measures.length === 2;
+    // The committed report is evidence for the WHOLE gate, so it is written only for a full run — a
+    // `--measure` subset would otherwise overwrite it with a partial deck and CI's staleness check would
+    // then compare the full run against a one-measure file. Keyed on the gate list rather than a literal
+    // count, which silently stopped meaning "full run" the moment a third measure was onboarded.
+    const writesCommittedReport = parsed.measures.length === OFFICIAL_GATED_MEASURES.length;
     if (writesCommittedReport) deps.writeReport(reportPath, markdown);
     for (const run of runs) {
       const adjusted = run.summary.expectedAgreements + run.summary.referenceAgreements;
