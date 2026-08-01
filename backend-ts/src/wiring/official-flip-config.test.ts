@@ -21,7 +21,7 @@
  * branch has been pulled up on four times (#350, #352, #354, #355). So:
  *
  *   - the **structural** half is pure and ALWAYS runs: every shipped id must be MADiE-gated and have a
- *     committed artifact. This catches the realistic edit — adding `cms130` before it is vendored;
+ *     committed artifact. This catches the realistic edit — adding `cms999` before it is vendored;
  *   - the **terminology** half self-skips without the sidecar and is wired into CI's `official-cases`
  *     job, where the sidecar exists.
  *
