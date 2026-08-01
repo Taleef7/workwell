@@ -213,6 +213,28 @@ test("scoped HTTP path reads only named patients and never calls the population 
   }
 });
 
+test("scoped HTTP path negotiates away _count and still returns clinical resources", async () => {
+  const selected = "wc-42";
+  const requestedPaths: string[] = [];
+  const routes = countRejectingRoutes();
+  const fetchImpl = fetchShim((url, init) => {
+    requestedPaths.push(url.pathname + url.search);
+    return routes(url, init);
+  });
+
+  const client = httpWebChartClient(CFG, { fetch: fetchImpl, pageSize: 7, maxRetries: 0, retryDelaysMs: [0], timeoutMs: 50 });
+  const [payload] = await client.fetchPatientPayloadsByIds!([selected]);
+  const entries = (payload as Json).entry as Array<{ resource?: Json }>;
+  assert.ok(entries.length > 1, "the scoped retry must return the patient's clinical resources");
+  assert.ok(
+    !entries.some((entry) => entry.resource?.resourceType === "OperationOutcome"),
+    "a successful _count retry must not degrade the patient",
+  );
+  const resourceRequests = requestedPaths.filter((path) => path.includes(`patient=${selected}`));
+  assert.ok(resourceRequests.some((path) => path.includes("_count=7")), "the first resource search must probe _count");
+  assert.ok(resourceRequests.some((path) => !path.includes("_count=")), "the same resource search must retry without _count");
+});
+
 test("scoped HTTP path skips a Patient/{id} 404 and continues with the other subjects", async () => {
   const missing = "wc-missing-since-run";
   const selected = "wc-42";
@@ -226,6 +248,32 @@ test("scoped HTTP path skips a Patient/{id} 404 and continues with the other sub
   const payloads = await client.fetchPatientPayloadsByIds!([missing, selected]);
   assert.equal(payloads.length, 1);
   assert.equal(patientResource(payloads[0]).id, selected);
+});
+
+test("scoped HTTP path isolates a non-404 Patient read failure and preserves the surrounding batch", async () => {
+  const selected = ["wc-13", "wc-42", "wc-5"];
+  const failing = "wc-42";
+  const routes = devDbRoutes();
+  const fetchImpl = fetchShim((url, init) => {
+    if (url.pathname === `/fhir/Patient/${failing}`) return new Response("forbidden", { status: 403 });
+    return routes(url, init);
+  });
+
+  const client = httpWebChartClient(CFG, { fetch: fetchImpl, maxRetries: 0, retryDelaysMs: [0], timeoutMs: 50 });
+  const payloads = await client.fetchPatientPayloadsByIds!(selected);
+  assert.equal(payloads.length, selected.length, "a non-404 failure must produce a degraded payload, not drop the id");
+  assert.deepEqual(payloads.map((payload) => patientResource(payload).id), selected);
+
+  for (const id of selected.filter((candidate) => candidate !== failing)) {
+    const entries = (payloads.find((payload) => patientResource(payload).id === id) as Json).entry as unknown[];
+    assert.ok(entries.length > 1, `${id} must retain its real clinical bundle`);
+    assert.ok(!entries.some((entry) => isObject((entry as { resource?: unknown }).resource) && (entry as { resource: Json }).resource.resourceType === "OperationOutcome"));
+  }
+  const degraded = payloads.find((payload) => patientResource(payload).id === failing) as Json;
+  const degradedEntries = degraded.entry as Array<{ resource?: Json }>;
+  assert.equal(degradedEntries.length, 2, "the failing id must receive the Patient + OperationOutcome fallback");
+  const outcome = degradedEntries.find((entry) => entry.resource?.resourceType === "OperationOutcome")?.resource;
+  assert.match(JSON.stringify(outcome), /403/);
 });
 
 test("scoped HTTP outcomes match the full-crawl outcome for the same subject", async () => {
@@ -658,6 +706,11 @@ function teateaRoutes(counters?: { patientRequests: number }): (url: URL, init: 
 function countRejectingRoutes(): (url: URL, init: FetchInit) => Response {
   return (url) => {
     if (url.searchParams.has("_count")) return new Response("bad _count", { status: 400 });
+    const patientRead = url.pathname.match(/^\/fhir\/Patient\/([^/]+)$/);
+    if (patientRead) {
+      const patient = patientResources.find((candidate) => candidate.id === decodeURIComponent(patientRead[1]!));
+      return patient ? jsonResponse(patient) : new Response("unknown patient", { status: 404 });
+    }
     if (url.pathname === "/fhir/Patient") return jsonResponse(searchsetPage(patientResources, url, patientResources.length));
     const match = RESOURCE_ROUTE.exec(url.pathname);
     if (match) {

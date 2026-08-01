@@ -6,6 +6,8 @@ Closed the production timeout hazard recorded in the 2026-07-30 `feat/qrda1-pati
 
 The optional source/client methods preserve compatibility: JSON buckets filter locally, and fixture or older WebChart clients fall back to the existing full read. The full-crawl read used by population-run cohort discovery is unchanged and remains correct because that path does not know subject ids in advance; export data is still "as of NOW, not as of the run" per ADR-050.
 
+Round 3 closes the silent-data-loss path on `_count`-rejecting servers by negotiating the capability inside scoped resource searches, logs every Patient-only fallback, and returns a specific export reason for degraded retrieval. A single non-404 Patient read now degrades only that subject and the batch continues. Near the 5000-subject refusal, scoped export still performs up to that many sequential reads: a STRICT IMPROVEMENT over the unbounded whole-tenant crawl, but not a complete large-scope solution without concurrency/streaming or true bulk `$export`.
+
 ## 2026-07-31 (M-A) — wave-2 flip gate proposal: what replaces the authored oracle for CMS2/CMS951 (branch `feat/wave2-flip-gate-proposal`)
 
 This proposal answers ADR-047's open question for two measures that are MADiE-green and ROUTABLE but
