@@ -1,0 +1,67 @@
+{
+  "catalogId": "cms165",
+  "measureName": "CMS165FHIRControllingHighBP",
+  "version": "1.0.000",
+  "cmsId": "165FHIR",
+  "url": "https://madie.cms.gov/Measure/CMS165FHIRControllingHighBP",
+  "status": "active",
+  "effectivePeriod": {
+    "start": "2026-01-01",
+    "end": "2026-12-31"
+  },
+  "scoring": "proportion",
+  "populationBasis": "boolean",
+  "improvementNotation": "increase",
+  "populations": [
+    "initial-population",
+    "denominator",
+    "denominator-exclusion",
+    "numerator"
+  ],
+  "source": {
+    "repo": "cqframework/dqm-content-qicore-2025",
+    "ref": "ca4b49516de4cbed9f92bfb7c35d97b1bf1022ab",
+    "path": "bundles/measure/CMS165FHIRControllingHighBP/CMS165FHIRControllingHighBP-bundle.json",
+    "rawSha256": "sha256:22c563043502f81ad8224f8d2d3c7715d361f2334f9e461853270c5489a75d63"
+  },
+  "reduction": {
+    "keptResourceTypes": [
+      "Measure",
+      "Library"
+    ],
+    "libraryContentTypes": [
+      "application/elm+json"
+    ],
+    "strippedNarratives": true,
+    "strippedElmAnnotations": true,
+    "strippedValueSets": true,
+    "rawBytes": 17115529,
+    "vendoredBytes": 2466272
+  },
+  "terminology": {
+    "file": "terminology.json",
+    "valueSets": 33,
+    "codes": 5024,
+    "truncated": [],
+    "completion": {
+      "source": "vsac",
+      "manifest": "http://cts.nlm.nih.gov/fhir/Library/ecqm-fhir-update-2025",
+      "valueSets": [
+        {
+          "oid": "2.16.840.1.113883.3.464.1003.110.12.1082",
+          "had": 1000,
+          "now": 2000,
+          "declaredTotal": 1997
+        },
+        {
+          "oid": "2.16.840.1.113883.3.526.3.378",
+          "had": 1000,
+          "now": 1987,
+          "declaredTotal": 1987
+        }
+      ]
+    },
+    "sha256": "sha256:e8bf24a35340d1a88d352a161b3e574c6088d8c7b09180cf959f8956ca08e740"
+  },
+  "sha256": "sha256:ae317d0db4136e322900ff139982621d547f411d5b0e14fa75ad8fea9a53645e"
+}
