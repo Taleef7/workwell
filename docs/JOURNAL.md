@@ -6,6 +6,29 @@ Closed the production timeout hazard recorded in the 2026-07-30 `feat/qrda1-pati
 
 The optional source/client methods preserve compatibility: JSON buckets filter locally, and fixture or older WebChart clients fall back to the existing full read. The full-crawl read used by population-run cohort discovery is unchanged and remains correct because that path does not know subject ids in advance; export data is still "as of NOW, not as of the run" per ADR-050.
 
+## 2026-07-31 (M-A) — wave-2 flip gate proposal: what replaces the authored oracle for CMS2/CMS951 (branch `feat/wave2-flip-gate-proposal`)
+
+This proposal answers ADR-047's open question for two measures that are MADiE-green and ROUTABLE but
+have no authored engine to compare. The most important verified finding is deeper than a roster gap: a
+targeted `MEASURE` request for `cms2` or `cms951` is rejected outright with an HTTP 400
+(`InvalidRunRequestError`) before any run is created because the id is absent from `MEASURES`, while a
+broad `EMPLOYEE`, `ALL_PROGRAMS`, or `SITE` run completes successfully but silently contains no
+CMS2/CMS951 work item because those scopes build their work lists from `RUNNABLE_MEASURE_IDS` without
+referencing the requested id. CMS2/CMS951 therefore receive no evaluations today, but the targeted and
+broad scopes fail differently: the former is a loud, immediate client error and the latter is a quiet
+omission. Their flip is not inert on the stack in the CMS122/CMS125 sense; it is a no-op until the
+official-only measures become runnable.
+
+The recommendation is to extend `flip-snapshot` with an official-only, source-labelled report and a
+human clinical evidence review, replacing the meaningless authored verdict with `BLOCKED` or
+`REVIEW_REQUIRED` and an explicitly human `HUMAN_APPROVED`/`HUMAN_DO_NOT_FLIP` decision. For product
+onboarding, add a parallel official execution descriptor and real synthetic clinical profiles, keep
+CMS2/CMS951 out of `ROSTER_ELIGIBLE_MEASURES`, and update catalog/case display metadata while leaving
+ADR-046's evidence-derived reporting trio unchanged. For sequencing, land one coupled official-only
+onboarding PR first, then a narrowly scoped flip PR that mirrors the workflow value in deploy and
+reconcile, follows the same five-step checklist with wave-2 evidence extensions, and preserves ADR-045's
+structural-plus-terminology test split without pinning the literal measure list.
+
 ## 2026-07-31 (M-A) — CMS138 onboarded: 0/47 → 47/47, and the gate learned a new kind of claim (branch `feat/onboard-cms138`)
 
 Three things had to be true and only the first was: the value set had to be sourced, the artifact had to
