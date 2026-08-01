@@ -176,8 +176,13 @@ const MAX_INDIVIDUAL_REPORT_SUBJECTS = 5000;
  * **Known cost, recorded rather than hidden:** export-time bundle re-reads are now scoped to the run's
  * subject ids when the configured source/client supports by-id loading, so a 3-subject EMPLOYEE-scope
  * export reads those three patients plus their sub-resource searches rather than crawling the tenant.
- * `MAX_INDIVIDUAL_REPORT_SUBJECTS` still bounds the DOCUMENTS, not the fetch. A source or older client
- * that cannot scope falls back correctly to the full read; that path remains correct, just not fast.
+ * `MAX_INDIVIDUAL_REPORT_SUBJECTS` refuses runs above 5000 before this lookup, but a run near that cap
+ * still performs up to that many sequential by-id-plus-resource-search round trips. That is a STRICT
+ * IMPROVEMENT over the prior whole-tenant crawl, which had no such bound and could be far larger than
+ * 5000, but it is not a complete fix for very large in-cap scopes; closing that needs either a smaller
+ * export-specific concurrency/streaming design or true bulk `$export`, both out of scope here. A source
+ * or older client that cannot scope falls back correctly to the full read; that path remains correct, just
+ * not fast.
  */
 async function qrda1BundleLookup(
   env: RunsEnv,
