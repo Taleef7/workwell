@@ -12,9 +12,10 @@
  *
  *   pnpm --dir backend-ts exec tsx ../scripts/cvu/generate-qrda-fixtures.ts [output-directory]
  *
- * The default output is `cvu-workdir/documents/`. The directory is scratch-only and gitignored.
+ * The default output is `cvu-workdir/documents/`. The directory is scratch-only and gitignored; every
+ * rerun removes that resolved output directory before writing so stale XML cannot survive a blocked run.
  */
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -23,6 +24,7 @@ import type { TargetOutcome } from "../../backend-ts/src/engine/synthetic/exam-c
 import { directSyntheticGenerator } from "../../backend-ts/src/run/scale-generator.ts";
 import { buildQrda1Document } from "../../backend-ts/src/fhir/qrda1-export.ts";
 import { buildQrda3Document } from "../../backend-ts/src/fhir/qrda3-export.ts";
+import { parseXml } from "../../backend-ts/src/fhir/cda-parse.ts";
 import type { OutcomeRecord } from "../../backend-ts/src/stores/outcome-store.ts";
 import type { RunRecord } from "../../backend-ts/src/stores/run-store.ts";
 import {
@@ -53,7 +55,8 @@ interface DocumentManifest {
   outcomeStatus?: string;
   officialInitialPopulation?: boolean;
   byteLength: number;
-  wellFormednessFinding: string | null;
+  clinicalDocumentRootParses: boolean;
+  nestingAndEscapingFinding: string | null;
 }
 
 interface FixtureManifest {
@@ -64,10 +67,11 @@ interface FixtureManifest {
 }
 
 /**
- * Dependency-free XML check used for the manifest. The exporters are hand-built and intentionally have
- * no XML runtime dependency, so this checks nesting and escaped text/attributes at fixture time too.
+ * This catches unbalanced or mismatched tags and unescaped `&` in text or attributes. It does not catch
+ * malformed content after the last closing tag, unquoted attribute values, or a bare `>` inside a quoted
+ * attribute value tripping this regex scanner's tag-boundary detection.
  */
-function xmlProblem(xml: string): string | null {
+function nestingAndEscapingProblem(xml: string): string | null {
   const stack: string[] = [];
   const tag = /<(\/?)([A-Za-z_][\w.:-]*)([^>]*?)(\/?)>/g;
   let match: RegExpExecArray | null;
@@ -123,7 +127,10 @@ function addDocument(
   outputDirectory: string,
   relativeFile: string,
   xml: string,
-  details: Omit<DocumentManifest, "file" | "byteLength" | "wellFormednessFinding">,
+  details: Omit<
+    DocumentManifest,
+    "file" | "byteLength" | "clinicalDocumentRootParses" | "nestingAndEscapingFinding"
+  >,
   manifest: FixtureManifest,
 ): void {
   const file = path.join(outputDirectory, relativeFile);
@@ -132,12 +139,15 @@ function addDocument(
     ...details,
     file: relativeFile,
     byteLength: Buffer.byteLength(xml, "utf8"),
-    wellFormednessFinding: xmlProblem(xml),
+    clinicalDocumentRootParses: parseXml(xml)?.local === "ClinicalDocument",
+    nestingAndEscapingFinding: nestingAndEscapingProblem(xml),
   });
 }
 
 async function generate(outputDirectory: string): Promise<FixtureManifest> {
-  mkdirSync(outputDirectory, { recursive: true });
+  const resolvedOutputDirectory = path.resolve(outputDirectory);
+  rmSync(resolvedOutputDirectory, { recursive: true, force: true });
+  mkdirSync(resolvedOutputDirectory, { recursive: true });
   const manifest: FixtureManifest = {
     generatedAt: new Date().toISOString(),
     evaluationDate: EVALUATION_DATE,
@@ -166,7 +176,7 @@ async function generate(outputDirectory: string): Promise<FixtureManifest> {
         const record = outcomeRecord(measureId, target, evaluated, run);
         const relativeFile = `${measureId}-${target.toLowerCase()}-qrda1.xml`;
         addDocument(
-          outputDirectory,
+          resolvedOutputDirectory,
           relativeFile,
           buildQrda1Document(run, measureId, record, bundle),
           {
@@ -198,7 +208,7 @@ async function generate(outputDirectory: string): Promise<FixtureManifest> {
       try {
         const relativeFile = `${measureId}-qrda3.xml`;
         addDocument(
-          outputDirectory,
+          resolvedOutputDirectory,
           relativeFile,
           buildQrda3Document(run, measureId, records),
           { kind: "qrda3", measureId },
@@ -217,7 +227,11 @@ async function generate(outputDirectory: string): Promise<FixtureManifest> {
     }
   }
 
-  writeFileSync(path.join(outputDirectory, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+  writeFileSync(
+    path.join(resolvedOutputDirectory, "manifest.json"),
+    `${JSON.stringify(manifest, null, 2)}\n`,
+    "utf8",
+  );
   return manifest;
 }
 
