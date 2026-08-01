@@ -132,6 +132,11 @@ and an artifact URL is redistribution. `vendor-workflow-safety.test.ts` pins tha
 directory glob, no recursive copy, `contents: read` only — and is mutation-checked against the exact
 edit that would sweep the sidecar in (`cp -r …/*`).
 
+CMS130 and CMS165 used this same path on 2026-07-31: one credentialed dispatch each, and both were
+verified terminology-complete on first arrival (`truncated: []`, `absent: []`). The
+`--complete-terminology` flag resolved their capped `AdvancedIllness`-class expansions during normal
+vendoring, so neither needed a sourced supplement.
+
 The job **fails** rather than running without the credential: an uncredentialed vendor produces an
 artifact that looks vendored and cannot be routed, which is worse than none. It also **fails rather than
 uploading an incomplete artifact** — `completeTerminology` fails closed and exits 0, so an expired key,
@@ -145,7 +150,9 @@ Then, in one PR: commit the two files, add the measure to `OFFICIAL_GATED_MEASUR
 workflows' vendor lists, and to `fetch-official-cases.ps1` if it is not already a candidate there. CI
 re-derives the same bytes and runs the measure's MADiE deck — **that deck is the check**, especially for
 an ADR-053 absent value set, where nothing in the vendoring can tell a correct expansion from a wrong
-one of the right size.
+one of the right size. The [credentialed CI run](https://github.com/Taleef7/workwell/actions/runs/30718966633)
+scored CMS130 64/64 and CMS165 68/68, with 0 unexpected mismatches and 0 errors for each, and both
+manifests reproduced byte-for-byte.
 
 ##### Step 1a (cont.) — value sets upstream ships **no ValueSet resource for at all** (ADR-053)
 
@@ -161,11 +168,13 @@ pnpm official:terminology-audit                        # every measure in .offic
 pnpm official:terminology-audit CMS138FHIRTobaccoScrnCessation
 ```
 
-Measured 2026-07-31 at pin `ca4b4951`, and it is one measure out of six:
+Measured 2026-07-31 at pin `ca4b4951` across all eight measures currently checked out:
 
 | measure | retrieved by the ELM | shipped by the bundle | |
 |---|---:|---:|---|
 | CMS122, CMS125, CMS2, CMS68, CMS951 | 26 / 32 / 15 / 5 / 26 | same | OK |
+| **CMS130** | **31** | **31** | OK |
+| **CMS165** | **33** | **33** | OK |
 | **CMS138** | **32** | **31** | `2.16.840.1.113883.3.526.3.1278` "Tobacco Use Screening" **absent** |
 
 Three things worth knowing before acting on it:
@@ -175,7 +184,9 @@ Three things worth knowing before acting on it:
   terminology package their README names; our vendor step never asked for it.
 - **Re-pinning does not fix it.** Upstream HEAD (`f705ee60`) changes no bundle file — only report
   documents — so there is no newer content to move to.
-- **VSAC is the only remedy**, which makes vendoring CMS138 an owner step alongside CMS130/CMS165. It is
+- **VSAC is the only remedy for CMS138**, which makes vendoring CMS138 an owner step. CMS130 and CMS165
+  were separately vendored through the same credentialed workflow and arrived complete on their first
+  dispatch, so their case was simpler than CMS138's. It is
   a *weaker* completion than a capped one: upstream shipped no codes to check containment against and no
   declared total to check length against, so the only size baseline is VSAC's own `expansion.total`.
   `manifest.terminology.completion.valueSets[].reason` records `absent-upstream` rather than `capped` so

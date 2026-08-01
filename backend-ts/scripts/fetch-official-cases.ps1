@@ -14,9 +14,8 @@ param(
 
 $ErrorActionPreference = "Stop"
 $repo = "https://github.com/cqframework/dqm-content-qicore-2025.git"
-# The five GATED measures, plus three CANDIDATES. A candidate is checked out but is deliberately NOT in
-# `OFFICIAL_GATED_MEASURES` — its artifact is not vendored yet, so adding it to the gate would fail the
-# deck. Checking them out is what lets `pnpm official:terminology-audit` and the credentialed
+# All eight measures currently checked out are GATED (`OFFICIAL_GATED_MEASURES`); none remain
+# candidate-only. Checking them out is what lets `pnpm official:terminology-audit` and the credentialed
 # `vendor-official-measure.yml` workflow read their bundles at the pinned commit without a 17 MB pull
 # (ADR-053: that audit is how CMS138's absent value set was found).
 $paths = @(
