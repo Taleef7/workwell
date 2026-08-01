@@ -3,10 +3,15 @@
 ## 2026-07-31 (M-A) — wave-2 flip gate proposal: what replaces the authored oracle for CMS2/CMS951 (branch `feat/wave2-flip-gate-proposal`)
 
 This proposal answers ADR-047's open question for two measures that are MADiE-green and ROUTABLE but
-have no authored engine to compare. The most important verified finding is deeper than a roster gap:
-`run-pipeline.ts` builds `RUNNABLE_MEASURE_IDS` from `Object.keys(MEASURES)`, and every run scope derives
-its work list from that set, so CMS2/CMS951 currently receive zero evaluations. Their flip is not inert
-on the stack in the CMS122/CMS125 sense; it is a no-op until the official-only measures become runnable.
+have no authored engine to compare. The most important verified finding is deeper than a roster gap: a
+targeted `MEASURE` request for `cms2` or `cms951` is rejected outright with an HTTP 400
+(`InvalidRunRequestError`) before any run is created because the id is absent from `MEASURES`, while a
+broad `EMPLOYEE`, `ALL_PROGRAMS`, or `SITE` run completes successfully but silently contains no
+CMS2/CMS951 work item because those scopes build their work lists from `RUNNABLE_MEASURE_IDS` without
+referencing the requested id. CMS2/CMS951 therefore receive no evaluations today, but the targeted and
+broad scopes fail differently: the former is a loud, immediate client error and the latter is a quiet
+omission. Their flip is not inert on the stack in the CMS122/CMS125 sense; it is a no-op until the
+official-only measures become runnable.
 
 The recommendation is to extend `flip-snapshot` with an official-only, source-labelled report and a
 human clinical evidence review, replacing the meaningless authored verdict with `BLOCKED` or
