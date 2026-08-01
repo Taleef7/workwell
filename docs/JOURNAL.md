@@ -19,9 +19,11 @@ touched and nothing is routed to either measure. **Routable ≠ routed**, the sa
 This builds on the **278/278** MADiE gate baseline across the six already-gated measures: cms2, cms68,
 cms122, cms125, cms138, and cms951.
 
-**Still open.** `docs/OFFICIAL_TESTCASE_REPORT_2026-07.md` is pending the credentialed CI run, as it was
-on CMS138's first push. The final MADiE total for these two will be recorded in a follow-up entry once CI
-has produced the real reduction-check numbers; this entry does not guess them.
+**Confirmed.** The [credentialed CI run](https://github.com/Taleef7/workwell/actions/runs/30718966633)
+scored CMS130 64/64 and CMS165 68/68, with 0 unexpected mismatches and 0 errors for each; both manifests
+reproduced byte-for-byte, and all six previously-gated measures reproduced their existing numbers with no
+regression. `docs/OFFICIAL_TESTCASE_REPORT_2026-07.md` has been regenerated from that run's own output and
+committed.
 
 ## 2026-07-31 (M-A) — wave-2 flip gate proposal: what replaces the authored oracle for CMS2/CMS951 (branch `feat/wave2-flip-gate-proposal`)
 

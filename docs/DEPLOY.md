@@ -150,8 +150,9 @@ Then, in one PR: commit the two files, add the measure to `OFFICIAL_GATED_MEASUR
 workflows' vendor lists, and to `fetch-official-cases.ps1` if it is not already a candidate there. CI
 re-derives the same bytes and runs the measure's MADiE deck — **that deck is the check**, especially for
 an ADR-053 absent value set, where nothing in the vendoring can tell a correct expansion from a wrong
-one of the right size. CMS130 and CMS165 have now completed this path; their MADiE evidence report is
-the remaining credentialed CI step.
+one of the right size. The [credentialed CI run](https://github.com/Taleef7/workwell/actions/runs/30718966633)
+scored CMS130 64/64 and CMS165 68/68, with 0 unexpected mismatches and 0 errors for each, and both
+manifests reproduced byte-for-byte.
 
 ##### Step 1a (cont.) — value sets upstream ships **no ValueSet resource for at all** (ADR-053)
 
