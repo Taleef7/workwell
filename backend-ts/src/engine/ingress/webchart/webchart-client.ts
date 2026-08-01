@@ -27,6 +27,12 @@ import { smartBackendServicesAuth, staticBearerAuth, type WebChartAuthProvider }
 export interface WebChartClient {
   readonly kind: string;
   fetchPatientPayloads(): Promise<unknown[]>;
+  /**
+   * Fetch only the named patients (bare FHIR Patient.id values, no "wc|" prefix) — scoped to a known
+   * subject set, e.g. a run's own subjects. Optional: a client that does not implement it signals
+   * "cannot scope" to callers, which fall back to the full fetchPatientPayloads().
+   */
+  fetchPatientPayloadsByIds?(patientIds: readonly string[]): Promise<unknown[]>;
 }
 
 /** In-memory client for tests + offline fixtures — the transport-agnostic core runs against this. */
@@ -466,12 +472,36 @@ export function httpWebChartClient(cfg: WebChartConfig, options?: HttpWebChartCl
     }
   }
 
+  async function fetchPatientById(patientId: string): Promise<PatientRef | undefined> {
+    try {
+      const patient = await fetchJson(fhirUrl(base, `/fhir/Patient/${encodeURIComponent(patientId)}`).toString());
+      if (!isObject(patient) || patient.resourceType !== "Patient" || patient.id !== patientId) {
+        throw new Error(`WebChart Patient/${patientId} read returned an invalid Patient resource`);
+      }
+      return { id: patientId, resource: patient };
+    } catch (error) {
+      if (error instanceof WebChartNonRetryableError && error.status === 404) {
+        console.warn(`WebChart Patient/${patientId} was not found during scoped fetch; skipping it.`);
+        return undefined;
+      }
+      throw error;
+    }
+  }
+
   return {
     kind: "http",
     async fetchPatientPayloads(): Promise<unknown[]> {
       const patients = await listPopulation();
       const payloads: unknown[] = [];
       for (const patient of patients) payloads.push(await fetchPatient(patient));
+      return payloads;
+    },
+    async fetchPatientPayloadsByIds(patientIds: readonly string[]): Promise<unknown[]> {
+      const payloads: unknown[] = [];
+      for (const patientId of patientIds) {
+        const patient = await fetchPatientById(patientId);
+        if (patient) payloads.push(await fetchPatient(patient));
+      }
       return payloads;
     },
   };

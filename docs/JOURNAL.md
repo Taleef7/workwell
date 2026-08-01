@@ -1,5 +1,11 @@
 # Journal
 
+## 2026-07-31 (M-B) — QRDA-I export bundle reads are scoped to run subjects (branch `fix/qrda-loadbundles-subject-scope`)
+
+Closed the production timeout hazard recorded in the 2026-07-30 `feat/qrda1-patient-data` entry: `GET /api/runs/:id/qrda1` now re-reads only the run's known `wc|` subjects, using direct WebChart `Patient/{id}` reads and the existing per-resource composition. The route-level seam is covered so a run with a small subject set cannot silently regress to a whole-tenant Patient-list crawl.
+
+The optional source/client methods preserve compatibility: JSON buckets filter locally, and fixture or older WebChart clients fall back to the existing full read. The full-crawl read used by population-run cohort discovery is unchanged and remains correct because that path does not know subject ids in advance; export data is still "as of NOW, not as of the run" per ADR-050.
+
 ## 2026-07-31 (M-A) — CMS138 onboarded: 0/47 → 47/47, and the gate learned a new kind of claim (branch `feat/onboard-cms138`)
 
 Three things had to be true and only the first was: the value set had to be sourced, the artifact had to

@@ -4,9 +4,9 @@
  *
  * The server here is deliberately an in-test `fetch` shim: no new dependency, no network, no deployed
  * service. It serves the VERIFIED public WebChart FHIR contract (docs/INTEGRATION_RESEARCH_2026-07-13.md):
- * `GET /fhir/Patient` searchset paging, then per-resource `GET /fhir/{type}?patient={id}` searches
- * (there is NO Patient/$everything), optionally behind SMART Backend Services auth. Backing data is the
- * committed WebChart dev-DB patient bundles.
+ * `GET /fhir/Patient` searchset paging, direct `GET /fhir/Patient/{id}` reads, then per-resource
+ * `GET /fhir/{type}?patient={id}` searches (there is NO Patient/$everything), optionally behind SMART
+ * Backend Services auth. Backing data is the committed WebChart dev-DB patient bundles.
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -132,8 +132,19 @@ function devDbRoutes(opts?: DevDbShimOptions): (url: URL, init: FetchInit) => Re
   const pageSize = opts?.pageSize ?? 7;
   const attempts = new Map<string, number>();
   return (url) => {
+    const patientRead = url.pathname.match(/^\/fhir\/Patient\/([^/]+)$/);
+    if (patientRead) {
+      const patientId = decodeURIComponent(patientRead[1]!);
+      const patient = patientResources.find((candidate) => candidate.id === patientId);
+      return patient ? jsonResponse(patient) : new Response("unknown patient", { status: 404 });
+    }
     if (url.pathname === "/fhir/Patient") {
       return jsonResponse(searchsetPage(patientResources, url, pageSize));
+    }
+    if (url.pathname.startsWith("/fhir/Patient/")) {
+      const patientId = decodeURIComponent(url.pathname.slice("/fhir/Patient/".length));
+      const patient = patientResources.find((resource) => resource.id === patientId);
+      return patient ? jsonResponse(patient) : new Response("unknown patient", { status: 404 });
     }
     const match = RESOURCE_ROUTE.exec(url.pathname);
     if (match) {
@@ -180,6 +191,57 @@ async function outcomes(source: ReturnType<typeof webChartDataSource>, measureId
     .sort(([a], [b]) => a.localeCompare(b));
 }
 
+test("scoped HTTP path reads only named patients and never calls the population list", async () => {
+  const selected = ["wc-13", "wc-42"];
+  const paths: string[] = [];
+  const routes = devDbRoutes();
+  const fetchImpl = fetchShim((url, init) => {
+    paths.push(`${url.pathname}${url.search}`);
+    return routes(url, init);
+  });
+
+  const client = httpWebChartClient(CFG, { fetch: fetchImpl, maxRetries: 0, retryDelaysMs: [0], timeoutMs: 50 });
+  const payloads = await client.fetchPatientPayloadsByIds!(selected);
+  assert.equal(payloads.length, selected.length);
+  assert.equal(paths.some((path) => path === "/fhir/Patient" || path.startsWith("/fhir/Patient?")), false);
+  assert.deepEqual(
+    paths.filter((path) => path.startsWith("/fhir/Patient/")).map((path) => path.slice("/fhir/Patient/".length)),
+    selected,
+  );
+  for (const id of selected) {
+    assert.ok(paths.some((path) => path.includes(`patient=${id}`)), `expected resource searches for ${id}`);
+  }
+});
+
+test("scoped HTTP path skips a Patient/{id} 404 and continues with the other subjects", async () => {
+  const missing = "wc-missing-since-run";
+  const selected = "wc-42";
+  const routes = devDbRoutes();
+  const fetchImpl = fetchShim((url, init) => {
+    if (url.pathname === `/fhir/Patient/${missing}`) return new Response("gone", { status: 404 });
+    return routes(url, init);
+  });
+
+  const client = httpWebChartClient(CFG, { fetch: fetchImpl, maxRetries: 0, retryDelaysMs: [0], timeoutMs: 50 });
+  const payloads = await client.fetchPatientPayloadsByIds!([missing, selected]);
+  assert.equal(payloads.length, 1);
+  assert.equal(patientResource(payloads[0]).id, selected);
+});
+
+test("scoped HTTP outcomes match the full-crawl outcome for the same subject", async () => {
+  const selected = "wc-42";
+  const fullSource = httpSource(devDbHttpFetch());
+  const full = await outcomes(fullSource, "obesity_bmi");
+  const expected = full.find(([subjectId]) => subjectId === selected)?.[1];
+  assert.ok(expected, `full path did not produce an outcome for ${selected}`);
+
+  const client = httpWebChartClient(CFG, { fetch: devDbHttpFetch(), maxRetries: 0, retryDelaysMs: [0], timeoutMs: 50 });
+  const source = webChartDataSource(CFG, client);
+  const scopedBundles = await source.loadBundlesFor!([selected]);
+  const scoped = await outcomes({ kind: "scoped-webchart", loadBundles: () => Promise.resolve(scopedBundles) }, "obesity_bmi");
+  assert.deepEqual(scoped.find(([subjectId]) => subjectId === selected)?.[1], expected);
+});
+
 test("per-resource HTTP path is outcome-identical to the fixture WebChart path for dev-DB goldens", async () => {
   for (const measureId of [...WHITELIST, ...EXCLUDED]) {
     const expected = await outcomes(fixtureSource(), measureId);
@@ -189,6 +251,28 @@ test("per-resource HTTP path is outcome-identical to the fixture WebChart path f
       assert.deepEqual([...new Set(actual.map(([, outcome]) => outcome))], ["MISSING_DATA"]);
     }
   }
+});
+
+test("scoped HTTP path reads only named patients, skips a missing patient, and preserves outcome parity", async () => {
+  const patientId = patientResources[0]!.id as string;
+  const requestedPaths: string[] = [];
+  const routes = devDbRoutes();
+  const fetchImpl = fetchShim((url, init) => {
+    requestedPaths.push(url.pathname + url.search);
+    return routes(url, init);
+  });
+  const client = httpWebChartClient(CFG, { fetch: fetchImpl, maxRetries: 0, retryDelaysMs: [0], timeoutMs: 50 });
+
+  const scopedPayloads = await client.fetchPatientPayloadsByIds!([patientId, "wc-missing"]);
+  assert.equal(scopedPayloads.length, 1, "a 404 for one requested patient must not fail the batch");
+  assert.ok(requestedPaths.includes(`/fhir/Patient/${patientId}`));
+  assert.ok(!requestedPaths.includes("/fhir/Patient"), "scoped loading must never call the population list");
+  assert.ok(requestedPaths.every((requestPath) => requestPath !== "/fhir/Patient"));
+
+  const fullPayloads = await httpWebChartClient(CFG, { fetch: devDbHttpFetch(), maxRetries: 0, retryDelaysMs: [0], timeoutMs: 50 }).fetchPatientPayloads();
+  const fullOutcome = (await outcomes(webChartDataSource(CFG, fixtureWebChartClient(fullPayloads)), "obesity_bmi")).find(([id]) => id === patientId);
+  const scopedOutcome = (await outcomes(webChartDataSource(CFG, fixtureWebChartClient(scopedPayloads)), "obesity_bmi")).find(([id]) => id === patientId);
+  assert.deepEqual(scopedOutcome, fullOutcome, "by-id and full-crawl paths must evaluate the same subject identically");
 });
 
 test("SMART mode: one token exchange authorizes the whole batch and outcomes match the fixture path", async () => {
