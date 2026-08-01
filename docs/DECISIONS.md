@@ -21,8 +21,9 @@ Unlike CMS138, neither needed an absent-value-set supplement; unlike the origina
 discovery, there was nothing new to build.
 
 **Decision.** Add CMS130 and CMS165 to `OFFICIAL_GATED_MEASURES` and the MADiE/deploy vendor lists, with
-full `measure-bundle` provenance. Leave routing untouched. Their MADiE gate result remains pending the
-credentialed CI run.
+full `measure-bundle` provenance. Leave routing untouched. The [credentialed CI run](https://github.com/Taleef7/workwell/actions/runs/30718966633)
+measured CMS130 at 64/64 and CMS165 at 68/68, with 0 unexpected mismatches and 0 errors for each, and
+reproduced both manifests byte-for-byte against what shipped in this PR.
 
 ## ADR-053: "the terminology is complete" was only ever a claim about what the bundle DECLARED
 
