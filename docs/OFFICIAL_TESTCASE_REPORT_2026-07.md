@@ -1,6 +1,6 @@
 # Official MADiE eCQM Test-Case Report — July 2026
 
-**Generated:** 2026-07-31
+**Generated:** 2026-08-01
 **Content:** `cqframework/dqm-content-qicore-2025` master (2025 AU / 2026 performance period)
 **Content revision:** `ca4b49516de4cbed9f92bfb7c35d97b1bf1022ab`
 **Engine:** `fqm-execution` 1.8.5 over pre-compiled ELM; offline, no server, DB, VSAC key, or request path
@@ -30,6 +30,8 @@ The fetch script sparse-checks out only the gated measures' bundles and test-cas
 | CMS68 | 19 | 19 (100.0%) | 0 | 19 (100.0%) | 0 | 0 |
 | CMS951 | 55 | 55 (100.0%) | 0 | 55 (100.0%) | 0 | 0 |
 | CMS138 | 47 | 47 (100.0%) | 0 | 47 (100.0%) | 0 | 0 |
+| CMS130 | 64 | 64 (100.0%) | 0 | 64 (100.0%) | 0 | 0 |
+| CMS165 | 68 | 68 (100.0%) | 0 | 68 (100.0%) | 0 | 0 |
 
 † CMS122 reference agreement means the actual vector differs from the committed MADiE expected only at numerator `0→1` for one of the six UUIDs already reported by the source repo. It is an adjusted pass, not an engine defect.
 
@@ -48,6 +50,11 @@ The fetch script sparse-checks out only the gated measures' bundles and test-cas
 - **CMS951:** trustMetaProfile=false (first pass; no retry); 26/26 Bundle ValueSets carry expansions; 0 expansion(s) report more total codes than are present; fqm warnings=0.
 - **CMS138:** trustMetaProfile=false (first pass; no retry); 31/31 Bundle ValueSets carry expansions; 0 expansion(s) report more total codes than are present; fqm warnings=0.
   - **Terminology supplement (ADR-053):** 1 value set(s) came from WorkWell's vendored sidecar because the upstream bundle ships no ValueSet resource for them — `http://cts.nlm.nih.gov/fhir/ValueSet/2.16.840.1.113883.3.526.3.1278`. Everything else is upstream's own terminology. **This is a weaker claim than the other measures carry:** for these value sets the CODES are ours (sourced from VSAC at the pinned release). What remains upstream's is the ANSWER KEY — the expected population vectors — which is why agreement here is still real evidence that the sourced codes are right, and is not evidence about upstream's terminology.
+- **CMS130:** trustMetaProfile=false (first pass; no retry); 31/31 Bundle ValueSets carry expansions; 1 expansion(s) report more total codes than are present; fqm warnings=0.
+  - Cap candidate: `http://cts.nlm.nih.gov/fhir/ValueSet/2.16.840.1.113883.3.464.1003.110.12.1082` — 1000/1997 codes present. A mismatch involving a missing code from this set must be classified as a value-set-cap candidate, not automatically as an engine bug.
+- **CMS165:** trustMetaProfile=false (first pass; no retry); 33/33 Bundle ValueSets carry expansions; 2 expansion(s) report more total codes than are present; fqm warnings=0.
+  - Cap candidate: `http://cts.nlm.nih.gov/fhir/ValueSet/2.16.840.1.113883.3.526.3.378` — 1000/1987 codes present. A mismatch involving a missing code from this set must be classified as a value-set-cap candidate, not automatically as an engine bug.
+  - Cap candidate: `http://cts.nlm.nih.gov/fhir/ValueSet/2.16.840.1.113883.3.464.1003.110.12.1082` — 1000/1997 codes present. A mismatch involving a missing code from this set must be classified as a value-set-cap candidate, not automatically as an engine bug.
 
 ## Investigated findings
 
@@ -428,6 +435,172 @@ Measurement period: 2026-01-01 → 2026-12-31. Raw expected agreement 47/47; ref
 Executed with the RUNTIME configuration — our reduced artifact plus its own vendored terminology sidecar, expanded through the same code path production uses — against the upstream bundle and upstream ValueSets. 0/47 cases changed population vector; 0 drift errors.
 
 Artifact proven: `sha256:219b52a38363ac6968d47b0d51b6b45656da6b01a9a9d2496bd05aab25280eb4` (2.3 MB, ELM annotations stripped). Compared on population membership (initial-population/denominator/denominator-exclusion/numerator/denominator-exception) only; the artifact also returned 414 named statement results for every subject.
+
+| Case | UUID | Changed populations | v1 IPP/DENOM/DENEX/NUMER/DENEXCEP | draft IPP/DENOM/DENEX/NUMER/DENEXCEP |
+|---|---|---|---|---|
+| None | — | — | — | — |
+
+## CMS130 — CMS130FHIRColorectalCancerScrn
+
+Measurement period: 2026-01-01 → 2026-12-31. Raw expected agreement 64/64; reference-adjusted pass 64/64.
+
+| Case | UUID | IPP E/A | DENOM E/A | DENEX E/A | NUMER E/A | DENEXCEP E/A | Result |
+|---|---|---:|---:|---:|---:|---:|---|
+| DENEXPass PalliativeCareSurveyOverlapsAfterMP | `007ec5f1-08cf-474a-a472-f6a92cca4b79` | 1/1 | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| DENEXPass HospiceCondEncDiagnosisOverlapsMP | `02488708-2ac0-4814-828c-04b8be9b1e70` | 1/1 | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| DENEXPass FrailtySymObservation | `06934496-0ea0-4ccd-af2e-da5b94410b58` | 1/1 | 1/1 | 0/0 | 0/0 | 0/0 | PASS |
+| DENEXPass NeoplasmsCondEncDxDuringMP | `0750b201-5a60-4757-9809-0db3aa767b50` | 1/1 | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| DENEXPass HospiceObsValueIsYes | `0f930f59-9061-4b28-b2e5-21cc5ab6b613` | 1/1 | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| NUMERPass ColonoscopyDuringMP | `2292adf2-3232-43f8-9497-8448349c51a9` | 1/1 | 1/1 | 0/0 | 1/1 | 0/0 | PASS |
+| DENEXPass ColectomyDuringMP | `27da60c8-3729-4b2a-9241-562e1a0aff30` | 1/1 | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| DENEXFail DementiaStartsAfterMP | `2847411d-a6c5-4f86-ac1f-d229ffa5a00c` | 1/1 | 1/1 | 0/0 | 0/0 | 0/0 | PASS |
+| NUMERPass FOBTDuringMP | `2b0d64f9-9f3a-4adf-aadb-c231a8ab98ac` | 1/1 | 1/1 | 0/0 | 1/1 | 0/0 | PASS |
+| DENEXFail ColectomyAfterMP | `394fbf45-d81c-49d1-be1f-3907227d8940` | 1/1 | 1/1 | 0/0 | 0/0 | 0/0 | PASS |
+| DENEXFail FrailtyDeviceB4MP | `39fd4a5e-0db2-478d-ba85-4400a1b7e35e` | 1/1 | 1/1 | 0/0 | 0/0 | 0/0 | PASS |
+| NUMERFail Colonography5YearsPrior | `3d75185a-d8e1-4861-9b36-528548e57fc4` | 1/1 | 1/1 | 0/0 | 0/0 | 0/0 | PASS |
+| DENEXPass HospiceProcedureDuringMP | `46635c8a-3f72-4424-98ae-01b849d0ff19` | 1/1 | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| DENEXFail LastHousingStatusNotNursingHome | `487de25d-a184-42ed-b1c6-389ed217a0a1` | 1/1 | 1/1 | 0/0 | 0/0 | 0/0 | PASS |
+| DENEXPass PalliativeCareProd | `4e1abf20-b68c-401b-9a33-fdf9bc765005` | 1/1 | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| IPPass 46WithPCSEstablished | `4fc22b6a-0cca-4e61-bedf-2cb73cf66698` | 1/1 | 1/1 | 0/0 | 0/0 | 0/0 | PASS |
+| NUMERFail sDNA3YearsPriorMP | `5445cc72-68a1-4b73-b06d-4cf52098e0db` | 1/1 | 1/1 | 0/0 | 0/0 | 0/0 | PASS |
+| IPPass 46WithOnlineAssessment | `54db46c1-fa2a-4e6e-96aa-da6dd67c5f18` | 1/1 | 1/1 | 0/0 | 0/0 | 0/0 | PASS |
+| SDEPass SDECoverage2 | `58b6a190-8a9c-4631-a102-6048f3e62a19` | 1/1 | 1/1 | 0/0 | 0/0 | 0/0 | PASS |
+| DENEXPass LivingInNursingHome | `59128a5c-f9da-4cb3-9e98-97ee67380533` | 1/1 | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| NUMERFail FlexibleSigmoidoscopy5YearsPrior | `5ebc158d-0736-4467-8bc0-72182bc0f5af` | 1/1 | 1/1 | 0/0 | 0/0 | 0/0 | PASS |
+| DENEXPass PalliativeCareCondEncDiagnosis | `5fd0d61d-d5e0-4138-8a8d-6e3969af6107` | 1/1 | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| IPPass 46WithAnnualWellness | `642aafde-fabb-458d-ae4d-5db7343f310c` | 1/1 | 1/1 | 0/0 | 0/0 | 0/0 | PASS |
+| IPPass 46WithPCSInitial | `650f4ed7-9418-42ad-a9d7-59fe79e951da` | 1/1 | 1/1 | 0/0 | 0/0 | 0/0 | PASS |
+| NUMERFail FOBTBeforeMP | `683cec0c-5368-467b-85f7-4b70c269e8ea` | 1/1 | 1/1 | 0/0 | 0/0 | 0/0 | PASS |
+| DENEXPass DischargeToHomeInpatient | `6dbaf3b3-8c47-4e0a-91fe-2ec06f2f0339` | 1/1 | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| DENEXPass HospiceEncDuringMP | `6f6cdf8c-e562-4113-bf5d-f91237b975a5` | 1/1 | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| STRAT1Pass Patient49Years | `75b2d558-3e98-44d0-b156-6b7854ea2283` | 0/0 | 0/0 | 0/0 | 0/0 | 0/0 | PASS |
+| DENEXFail FrailtyDeviceRequestNotPerformed | `7822bd0a-ba96-46f0-8c57-204d37156184` | 1/1 | 1/1 | 0/0 | 0/0 | 0/0 | PASS |
+| STRAT1Pass Patient46Years | `7c2c93d0-d3ca-48e7-9014-66801a915b24` | 0/0 | 0/0 | 0/0 | 0/0 | 0/0 | PASS |
+| DENEXPass PalliativeCareEnc | `7ee1a25c-a4c7-4bd2-8670-4083b32ecc70` | 1/1 | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| IPPass FrailtyDiag | `84ebbde4-0ea8-42ae-908b-ef1721748290` | 1/1 | 1/1 | 0/0 | 0/0 | 0/0 | PASS |
+| STRAT1Fail Patient45Years | `8b93d5a0-ead1-44f8-b4f8-4f024a0c0a13` | 0/0 | 0/0 | 0/0 | 0/0 | 0/0 | PASS |
+| IPFail 46WithNoQualEnc | `913619cb-66f0-407e-ae78-de8faca176fb` | 0/0 | 0/0 | 0/0 | 0/0 | 0/0 | PASS |
+| NUMERPass sDNA2YearsPriorMP | `95d56325-022c-4bdc-8778-bf02f46139cb` | 1/1 | 1/1 | 0/0 | 1/1 | 0/0 | PASS |
+| DENEXFail FrailtyDeviceRequestNotPerformedTrue | `9943e220-d0f1-4718-8377-0d407a529f52` | 1/1 | 1/1 | 0/0 | 0/0 | 0/0 | PASS |
+| DENEXFail NeoplasmsAfterMP | `9c6fd73e-9005-4518-b7f0-5d9db57a7ef5` | 1/1 | 1/1 | 0/0 | 0/0 | 0/0 | PASS |
+| IPFail 46WithQualEncAfterMP | `a49f6f2d-0c6b-46af-80b2-7829c2007365` | 0/0 | 0/0 | 0/0 | 0/0 | 0/0 | PASS |
+| DENEXPass PalliativeCareDiagnosis | `a989a58f-82c5-4221-addb-5e29c2514df7` | 1/1 | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| NUMERPass Colonoscopy9YearsPrior | `b20cd591-3625-4d95-8081-6f2566c51fa6` | 1/1 | 1/1 | 0/0 | 1/1 | 0/0 | PASS |
+| DENEXPass HospiceServiceRequestCompleted | `b70f2fc0-3254-4240-af70-793cd1bc90b2` | 1/1 | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| NUMERPass sDNADuringMP | `be630df2-cc71-47b9-a600-a715912f90be` | 1/1 | 1/1 | 0/0 | 1/1 | 0/0 | PASS |
+| NUMERPass Colonography4YearsPrior | `bf3f2c9a-a802-4522-8e38-d1c806e71483` | 1/1 | 1/1 | 0/0 | 1/1 | 0/0 | PASS |
+| IPPass FrailtyObservation | `c002ae0a-709f-4a5e-82e3-f0a4d8f3a839` | 1/1 | 1/1 | 0/0 | 0/0 | 0/0 | PASS |
+| IPFail 45WithQualEnc | `c7500ea1-c40b-4d7c-b432-de82cbc4863e` | 0/0 | 0/0 | 0/0 | 0/0 | 0/0 | PASS |
+| NUMERFail FOBTAfterMP | `cdacf996-8b20-49af-8f75-0cfd26fafacb` | 1/1 | 1/1 | 0/0 | 0/0 | 0/0 | PASS |
+| IPPass 46WithHomeHealthcare | `d0306f4f-06a9-407d-ac0d-e5628fd1cc59` | 1/1 | 1/1 | 0/0 | 0/0 | 0/0 | PASS |
+| DENEXPass HospiceDischargeDuringMP | `d0c9e870-5e7b-4a9e-b34d-9d600ff8c1c6` | 1/1 | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| IPPass FrailtyEnc | `da1e1656-54ae-49f6-ab1b-b8ba9f99b6c2` | 1/1 | 1/1 | 0/0 | 0/0 | 0/0 | PASS |
+| DENEXFail PalliativeCareSurveyStatusNotFinal | `dbead888-2672-453c-8005-d4b9f62b72c9` | 1/1 | 1/1 | 0/0 | 0/0 | 0/0 | PASS |
+| NUMERFail Colonoscopy10YearsPrior | `dc337be7-7328-4fce-8f6f-71ee2cb75752` | 1/1 | 1/1 | 0/0 | 0/0 | 0/0 | PASS |
+| DENEXPass FrailtyDeviceDuringMP | `dcaccac3-ef0d-4755-becd-3e6aebe2a06a` | 1/1 | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| DENEXFail MedicationDementiaStartsAfterMP | `df2c9d36-96e4-4ab6-9a2a-d3b5b0a44328` | 1/1 | 1/1 | 0/0 | 0/0 | 0/0 | PASS |
+| DENEXPass AdvancedIllnessCondEncDx | `df62e712-a702-4c1e-82c6-4676578371f9` | 1/1 | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| IPPass FrailtyCondEncDiag | `e4215f63-f195-48bd-865d-ecb718f742ff` | 1/1 | 1/1 | 0/0 | 0/0 | 0/0 | PASS |
+| NUMERPass FlexibleSigmoidoscopy4YearsPrior | `e904e28b-ec42-4ca5-8dab-f1cf72f705e6` | 1/1 | 1/1 | 0/0 | 1/1 | 0/0 | PASS |
+| SDEPass SDECoverage | `e9d86ff6-da48-43c9-9e16-dd95d8bc49c3` | 1/1 | 1/1 | 0/0 | 0/0 | 0/0 | PASS |
+| IPPass 46WithQualEnc | `ecd9203b-716e-49ee-be53-eecdea8bef86` | 1/1 | 1/1 | 0/0 | 0/0 | 0/0 | PASS |
+| NUMERPass FlexibleSigmoidoscopyDuringMP | `f0dae4e3-d82d-422f-883c-4e5238c14a54` | 1/1 | 1/1 | 0/0 | 1/1 | 0/0 | PASS |
+| STRAT1Fail Patient50Years | `f986ef30-1e89-46fc-b7a2-6df69f6951c2` | 0/0 | 0/0 | 0/0 | 0/0 | 0/0 | PASS |
+| DENEXPass DementiaStartsDuringMP | `f9ef1fd1-cced-47ad-a47b-d9c20254511c` | 1/1 | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| DENEXFail HospiceEncB4MP | `fd8d8328-c766-4c9f-a463-ec53957e0276` | 1/1 | 1/1 | 0/0 | 0/0 | 0/0 | PASS |
+| DENEXPass NeoplasmsDuringMP | `fe3decae-ba51-4017-aac7-7a7b02b99707` | 1/1 | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| DENEXPass HospiceDiagnosisOverlapsMP | `fede210f-db17-4e0a-9bcd-5dc383f0fb93` | 1/1 | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+
+### CMS130 reduction check — upstream bundle vs vendored artifact v1.0.000
+
+Executed with the RUNTIME configuration — our reduced artifact plus its own vendored terminology sidecar, expanded through the same code path production uses — against the upstream bundle and upstream ValueSets. 0/64 cases changed population vector; 0 drift errors.
+
+Artifact proven: `sha256:aab26d665b79bc91454640923472f294c77072e36be098f927a4301081d72629` (2.5 MB, ELM annotations stripped). Compared on population membership (initial-population/denominator/denominator-exclusion/numerator/denominator-exception) only; the artifact also returned 423 named statement results for every subject.
+
+| Case | UUID | Changed populations | v1 IPP/DENOM/DENEX/NUMER/DENEXCEP | draft IPP/DENOM/DENEX/NUMER/DENEXCEP |
+|---|---|---|---|---|
+| None | — | — | — | — |
+
+## CMS165 — CMS165FHIRControllingHighBP
+
+Measurement period: 2026-01-01 → 2026-12-31. Raw expected agreement 68/68; reference-adjusted pass 68/68.
+
+| Case | UUID | IPP E/A | DENOM E/A | DENEX E/A | NUMER E/A | DENEXCEP E/A | Result |
+|---|---|---:|---:|---:|---:|---:|---|
+| NUMERFail SBP139DBP89DuringInpatientStay | `045f7e0b-bfb3-4ee0-a06d-83c853f6a81e` | 1/1 | 1/1 | 0/0 | 0/0 | 0/0 | PASS |
+| IPPass InitialOfficeVisit | `048a7212-c19c-4f9d-89e2-13727b23e585` | 1/1 | 1/1 | 0/0 | 0/0 | 0/0 | PASS |
+| DENEXPass ChronicKidneyDiseaseStage5DuringMP | `0b9cb569-149a-4b47-a535-66b59a77bceb` | 1/1 | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| DENEXPass ESRDDxDuringMP | `0e045de9-dd14-461d-b7b9-aac287fb8e70` | 1/1 | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| DENEXPass HospiceProcedureStartsDuringMP | `0e867903-400d-4d71-a7fd-dc9b96d94a17` | 1/1 | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| DENEXPass DementiaStartsDuringMP | `1905549a-1783-4195-95b9-b0879cb81d96` | 1/1 | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| DENEXFail PregnancyAfterMP | `23004f44-4848-4e62-8813-2a56d900613c` | 1/1 | 1/1 | 0/0 | 0/0 | 0/0 | PASS |
+| DENEXPass HospiceDischargeToFacilityDuringMP | `29d930b1-1bb6-4089-9ed6-aa2b7b77d5a4` | 1/1 | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| DENEXPass DementiaMedReqDoNotPerformIsFalse | `2c55811b-1571-43e5-919c-f90bf763b3d4` | 1/1 | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| DENEXPass KidneyTransplantRecipientDuringMP | `30086fb9-0aea-4e5e-86cc-46f4d1aa8dd4` | 1/1 | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| DENEXFail PregnancyAfterMPConditionEncounterDiagnosis | `32edbb16-2029-425a-85e0-6ea9182d1d91` | 1/1 | 1/1 | 0/0 | 0/0 | 0/0 | PASS |
+| DENEXPass HospiceObsValueIsYes | `352a05d3-750c-45bd-a170-a8a8822b7697` | 1/1 | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| DENEXPass PregnancyDuringMP | `398e8703-6704-4c75-9887-41117761d2c7` | 1/1 | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| DENEXPass PalliativeCareDiagnosisDuringMPConditionEncounterDiagnosis | `3e214018-7420-4e1f-a24d-e9426ace2bd8` | 1/1 | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| DENEXFail PalliativeCareSurveyStatusNotFinal | `43efb820-9e6e-4180-9a4d-2d7459896e5f` | 1/1 | 1/1 | 0/0 | 0/0 | 0/0 | PASS |
+| DENEXPass DementiaMedicationRequestAsReference | `45e01fed-56bb-483d-a860-af3d566bda11` | 1/1 | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| DENEXPass FrailtyDeviceUsed | `474b2964-23a1-4c77-ad16-8a21543b2ed3` | 1/1 | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| DENEXPass AdvIllnessDxWithin2Yrs | `481692c7-2cf7-48fc-8269-967f5d7753bc` | 1/1 | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| DENEXPass DialysisServiceDuringMP | `4ade2900-b5fd-4bed-bacb-1e048c83366f` | 1/1 | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| DENEXPass PalliativeCareEncounterDuringMP | `4b31dc2b-7867-4766-8a8c-e1971d1e570a` | 1/1 | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| SDEPass SDECoverage | `4c814ca9-da50-43e3-9e31-dbe755ee5c5e` | 1/1 | 1/1 | 0/0 | 0/0 | 0/0 | PASS |
+| IPPass HypertensionDuringFirst6Months | `4d50f3eb-f56f-4f13-8fcf-4d26e05b9a6a` | 1/1 | 1/1 | 0/0 | 0/0 | 0/0 | PASS |
+| DENEXPass KidneyTransplantRecipientDuringMPConditionEncounterDiagnosis | `4f168366-f0a7-4aad-ab9e-b0bcbecda886` | 1/1 | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| DENEXPass PalliativeCareDiagnosisDuringMP | `50d7cf81-dff4-45eb-b43d-0e40b08c3a75` | 1/1 | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| DENEXPass ChronicKidneyDiseaseStage5DuringMPConditionEncounterDiagnosis | `53abc166-8cd7-46c2-8159-8ed6fc5bcba0` | 1/1 | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| DENEXPass FrailtyDxOverlapsMP | `5421e420-8d42-4628-ba47-9abaf9ebfaa8` | 1/1 | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| IPPass HomeHealthcareService | `546de5d8-f614-41c7-938f-671d14e4f540` | 1/1 | 1/1 | 0/0 | 0/0 | 0/0 | PASS |
+| DENEXFail AdvIllnessDxBefore2Yrs | `598f05e7-83b4-4609-9795-e9ac75f57f36` | 1/1 | 1/1 | 0/0 | 0/0 | 0/0 | PASS |
+| DENEXPass DementiaMedReqDoNotPerformIsMissing | `59d7f239-7614-4e6e-a973-fe107aee5749` | 1/1 | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| IPFail HypertensionOnsetsAfterFirst6Months | `642ef7f9-f9c2-45dc-ab7d-41a000b56d9c` | 0/0 | 0/0 | 0/0 | 0/0 | 0/0 | PASS |
+| IPPass TelephoneVisit | `6769ebe0-1b45-472a-ba7b-8f9a014d94a6` | 1/1 | 1/1 | 0/0 | 0/0 | 0/0 | PASS |
+| SDEPass SDECoverage2 | `6795a52e-1f83-480b-a2a7-b0d0922c0e5b` | 1/1 | 1/1 | 0/0 | 0/0 | 0/0 | PASS |
+| IPFail HospiceProcedureStartsAfterMP | `67ee2f03-89c1-4edb-b0fa-7e07effb4477` | 1/1 | 1/1 | 0/0 | 0/0 | 0/0 | PASS |
+| DENEXPass FrailtySymptomOverlapsMP | `686e2c47-b08f-465c-ab31-1712dd72028b` | 1/1 | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| NUMERFail SBP139DBP89TakenDuringEMER | `6885264d-efbf-4e48-99a2-2e8ce29d61ba` | 1/1 | 1/1 | 0/0 | 0/0 | 0/0 | PASS |
+| IPFail InpatientEncNoHospiceDisch | `698b2574-1170-4438-8400-f3e1992a4807` | 1/1 | 1/1 | 0/0 | 0/0 | 0/0 | PASS |
+| DENEXFail Age80FrailtyOnly | `6d97c086-8776-45f4-898f-cece9e80990a` | 1/1 | 1/1 | 0/0 | 0/0 | 0/0 | PASS |
+| NUMERPass SBP139DBP89StartOfMP | `6f37e357-7575-4b40-a63e-4b882532250f` | 1/1 | 1/1 | 0/0 | 1/1 | 0/0 | PASS |
+| DENEXFail DementiaStartsAfterMP | `75d880c8-4220-4907-b29a-f595dc0df2fb` | 1/1 | 1/1 | 0/0 | 0/0 | 0/0 | PASS |
+| DENEXPass ESRDEncDuringMP | `78fc0433-a72a-45a3-b2c4-995e614674cb` | 1/1 | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| DENEXPass FrailtyObsDuringMP | `7c59efb5-56ab-4a25-af83-bd81daeee026` | 1/1 | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| DENEXPass KidneyTransplantProcedureDuringMP | `7de4b027-eb4c-4a2e-958f-e6b7a3eb6309` | 1/1 | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| DENEXPass FrailtyDeviceReqDoNotPerformExtensionIsMissing | `821185af-e5b2-4552-a63c-36b64a9200a9` | 1/1 | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| DENEXPass ESRDDxDuringMPConditionEncounterDiagnosis | `85ae5a03-576b-4a32-93af-d1a241987a77` | 1/1 | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| IPFail HospiceEncEndsB4MP | `8e477157-81e8-4b7b-ba79-4a441a2a1109` | 1/1 | 1/1 | 0/0 | 0/0 | 0/0 | PASS |
+| DENEXPass PalliativeCareInterventionDuringMP | `926b705a-b222-4c64-9d3f-ad64ead74295` | 1/1 | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| DENEXFail HospiceServiceRequestDraft | `94d2a25e-9eec-44ce-bc34-711452549be8` | 1/1 | 1/1 | 0/0 | 0/0 | 0/0 | PASS |
+| DENEXPass HospiceDiagnosisOverlapsMP | `972c7128-f3c2-401d-89f3-a0752dd02620` | 1/1 | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| DENEXPass FrailtyEncOverlapsMP | `9f063f76-a97a-4bba-9f6a-35e7a429a72c` | 1/1 | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| IPPass AnnualWellness | `a3deee90-5966-4309-b52f-c0a76046f680` | 1/1 | 1/1 | 0/0 | 0/0 | 0/0 | PASS |
+| DENEXPass FrailtyDxOverlapsMPConditionEncounterDiagnosis | `a7ec972f-f0c1-428d-aba5-ba76cba5cd73` | 1/1 | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| DENEXPass PalliativeCareSurveyOverlapsB4MP | `aa1f02c0-ded0-4b30-9f0d-c8be54aa436b` | 1/1 | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| DENEXPass HospiceDiagnosisOverlapsMPConditionEncounterDiagnosis | `aa87ac34-227b-4424-84d2-62aaba57c232` | 1/1 | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| DENEXFail LastHousingStatusNotNursingHome | `b378c30b-ebc2-4378-9a75-8a97711cac81` | 1/1 | 1/1 | 0/0 | 0/0 | 0/0 | PASS |
+| IPPass EstablishedOfficeVisit | `b84bdc08-62ae-4bce-857d-d2492e0c82fd` | 1/1 | 1/1 | 0/0 | 0/0 | 0/0 | PASS |
+| DENEXPass HospiceDischargeToHomeDuringMP | `bfdc37c9-105c-4765-a2ba-d7da92ec9a47` | 1/1 | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| NUMERFail SBP140DBP89DuringMP | `bff7264b-35fc-402b-8a15-22c78e227064` | 1/1 | 1/1 | 0/0 | 0/0 | 0/0 | PASS |
+| IPFail HospiceObsValueIsNo | `c57b8e40-b3be-484f-8874-8ccafa3d5a38` | 1/1 | 1/1 | 0/0 | 0/0 | 0/0 | PASS |
+| DENEXPass PalliativeCareSurveyOverlapsAfterMP | `cdfb5385-a466-4d41-9dce-cc50f88d0666` | 1/1 | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| IPPass HypertensionDuringFirst6MonthsNoVerificationStatus | `d150409f-0616-4565-ba60-7ca732a87288` | 1/1 | 1/1 | 0/0 | 0/0 | 0/0 | PASS |
+| DENEXFail PalliativeCareDiagnosisStartsAfterMP | `d513ed00-6ea1-4522-ae7c-c3bc29082e92` | 1/1 | 1/1 | 0/0 | 0/0 | 0/0 | PASS |
+| DENEXPass HospiceEncOverlapsMP | `d6be5093-9772-4e0f-83e1-b56b26d55529` | 1/1 | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| IPPass OnlineAssessment | `dbc8c8f1-3f10-4352-adbe-e0d4c12ade72` | 1/1 | 1/1 | 0/0 | 0/0 | 0/0 | PASS |
+| DENEXPass HospiceServiceRequestDuringMP | `e56c60ca-d0d0-4910-af2e-1d8a074d129a` | 1/1 | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| DENEXFail HospiceDiagnosisStartsAfterMP | `e94daaa3-ffff-4ca5-b971-7fd4407c3580` | 1/1 | 1/1 | 0/0 | 0/0 | 0/0 | PASS |
+| NUMERPass SBP139DBP89DuringMP | `f2d1fd7e-35ae-45cd-86e6-8b874c3e3fb9` | 1/1 | 1/1 | 0/0 | 1/1 | 0/0 | PASS |
+| DENEXPass Age81FrailtyOnly | `f5b461d7-e382-4616-a763-d745867735d0` | 1/1 | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| DENEXPass LivingInNursingHome | `f9bf76c5-7b85-4fd7-b883-b7c14e8b1801` | 1/1 | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+
+### CMS165 reduction check — upstream bundle vs vendored artifact v1.0.000
+
+Executed with the RUNTIME configuration — our reduced artifact plus its own vendored terminology sidecar, expanded through the same code path production uses — against the upstream bundle and upstream ValueSets. 0/68 cases changed population vector; 0 drift errors.
+
+Artifact proven: `sha256:ae317d0db4136e322900ff139982621d547f411d5b0e14fa75ad8fea9a53645e` (2.5 MB, ELM annotations stripped). Compared on population membership (initial-population/denominator/denominator-exclusion/numerator/denominator-exception) only; the artifact also returned 426 named statement results for every subject.
 
 | Case | UUID | Changed populations | v1 IPP/DENOM/DENEX/NUMER/DENEXCEP | draft IPP/DENOM/DENEX/NUMER/DENEXCEP |
 |---|---|---|---|---|
