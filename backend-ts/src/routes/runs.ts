@@ -173,17 +173,21 @@ const MAX_INDIVIDUAL_REPORT_SUBJECTS = 5000;
  *    record changed since the run exports the current record. Stated in STANDARDS_CONFORMANCE.md; making
  *    it as-evaluated means persisting bundles, which is a schema change and the owner's call.
  *
- * **Known cost, recorded rather than hidden:** `loadBundles()` enumerates the WHOLE tenant sequentially
- * (`fetchPatientPayloads` — one round trip per patient plus sub-resource searches). It is not scoped to
- * the run's subjects and not cached, so a 3-subject EMPLOYEE-scope export still crawls the tenant, and
- * `MAX_INDIVIDUAL_REPORT_SUBJECTS` bounds the DOCUMENTS, not the fetch. That is survivable on the dev
- * fixture and is the request that times out on a production-sized tenant. Scoping the fetch to the run's
- * subject ids needs a by-id read on the transport, which `WebChartClient` does not expose today.
+ * **Known cost, recorded rather than hidden:** export-time bundle re-reads are now scoped to the run's
+ * subject ids when the configured source/client supports by-id loading, so a 3-subject EMPLOYEE-scope
+ * export reads those three patients plus their sub-resource searches rather than crawling the tenant.
+ * `MAX_INDIVIDUAL_REPORT_SUBJECTS` still bounds the DOCUMENTS, not the fetch. A source or older client
+ * that cannot scope falls back correctly to the full read; that path remains correct, just not fast.
  */
-async function qrda1BundleLookup(env: RunsEnv): Promise<((subjectId: string) => unknown | undefined) | undefined> {
+async function qrda1BundleLookup(
+  env: RunsEnv,
+  subjectIds: readonly string[],
+): Promise<((subjectId: string) => unknown | undefined) | undefined> {
   if (!isWebChartConfigured(env)) return undefined;
   try {
-    const bundles = await resolveDataSource(env).loadBundles();
+    const patientIds = subjectIds.map((id) => (id.startsWith("wc|") ? id.slice(3) : id));
+    const source = resolveDataSource(env);
+    const bundles = source.loadBundlesFor ? await source.loadBundlesFor(patientIds) : await source.loadBundles();
     // Keying lives in `indexBundlesBySubject` so the contract between what the pipeline PERSISTS and what
     // this looks up is pinned by a test rather than by a comment (review + Codex, #361).
     return indexBundlesBySubject(bundles, (b) => subjectIdOf(b as Parameters<typeof subjectIdOf>[0]));
@@ -686,7 +690,8 @@ export async function handleRuns(
         422,
       );
     }
-    const documents = buildQrda1Documents(run, measureId, await os.listOutcomes(qrda1Id), await qrda1BundleLookup(env));
+    const rows = await os.listOutcomes(qrda1Id);
+    const documents = buildQrda1Documents(run, measureId, rows, await qrda1BundleLookup(env, rows.map((r) => r.subjectId)));
     const nonConformant = documents.filter((d) => !d.conformant).length;
     return json({
       runId: qrda1Id,

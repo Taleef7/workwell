@@ -219,6 +219,143 @@ test("POST /api/runs/:id/rerun rejects a wc CASE branch with controlled 409", as
   assert.equal((await runStore.listRuns(1000)).length, beforeRuns);
 });
 
+test("GET /api/runs/:id/qrda1 scopes WebChart Patient reads to the run's subjects", async () => {
+  await get("/api/runs");
+  const runStore = new SqliteRunStore(env.DB as never);
+  const outcomeStore = new SqliteOutcomeStore(env.DB as never);
+  const run = await runStore.createRun({
+    scopeType: "MEASURE",
+    scopeId: "audiogram",
+    triggeredBy: "test",
+    requestedScope: { measureId: "audiogram" },
+    measurementPeriodStart: "2026-07-17T00:00:00.000Z",
+    measurementPeriodEnd: "2026-07-17T23:59:59.999Z",
+    status: "COMPLETED",
+    startedAt: "2026-07-17T00:00:00.000Z",
+    completedAt: "2026-07-17T23:59:59.999Z",
+  });
+  const subjects = ["wc|qrda-route-1", "wc|qrda-route-2", "wc|qrda-route-3"];
+  await outcomeStore.recordOutcomes(
+    subjects.map((subjectId) => ({
+      runId: run.id,
+      subjectId,
+      measureId: "audiogram",
+      evaluationPeriod: "2026-07-17",
+      status: "COMPLIANT" as const,
+      evidence: {},
+    })),
+  );
+
+  const originalFetch = globalThis.fetch;
+  const requestedPaths: string[] = [];
+  globalThis.fetch = (async (input) => {
+    const url = new URL(input.toString());
+    requestedPaths.push(url.pathname + url.search);
+    const patientRead = url.pathname.match(/^\/fhir\/Patient\/([^/]+)$/);
+    if (patientRead) {
+      return new Response(JSON.stringify({ resourceType: "Patient", id: decodeURIComponent(patientRead[1]!) }), {
+        status: 200,
+        headers: { "content-type": "application/fhir+json" },
+      });
+    }
+    if (["Observation", "Condition", "Procedure", "Immunization", "Encounter"].some((type) => url.pathname === `/fhir/${type}`)) {
+      return new Response(JSON.stringify({ resourceType: "Bundle", type: "searchset", entry: [], link: [] }), {
+        status: 200,
+        headers: { "content-type": "application/fhir+json" },
+      });
+    }
+    return new Response("not found", { status: 404 });
+  }) as typeof fetch;
+  try {
+    const response = await handleRuns(
+      new Request(`http://x/api/runs/${run.id}/qrda1`, { method: "GET" }),
+      { ...env, WORKWELL_WEBCHART_BASE_URL: "http://webchart.test", WORKWELL_WEBCHART_API_KEY: "fixture-key" } as never,
+      "system",
+      undefined,
+      GENERATED_AT,
+    );
+    assert.equal(response?.status, 200);
+    const patientReads = requestedPaths.filter((requestPath) => /^\/fhir\/Patient\/[^/?]+$/.test(requestPath)).sort();
+    assert.deepEqual(patientReads, subjects.map((subjectId) => `/fhir/Patient/${subjectId.slice(3)}`).sort());
+    assert.equal(requestedPaths.includes("/fhir/Patient"), false, "QRDA-I export must not crawl the population list");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("QRDA I export requests WebChart bundles only for the run's subjects", async () => {
+  const originalFetch = globalThis.fetch;
+  const subjectIds = ["wc|route-export-1", "wc|route-export-2", "wc|route-export-3"];
+  const requestedPaths: string[] = [];
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url);
+    requestedPaths.push(`${url.pathname}${url.search}`);
+    if (url.pathname === "/fhir/Patient") {
+      return new Response("whole-tenant population read is forbidden in this regression", { status: 500 });
+    }
+    if (url.pathname.startsWith("/fhir/Patient/")) {
+      const id = decodeURIComponent(url.pathname.slice("/fhir/Patient/".length));
+      return new Response(JSON.stringify({ resourceType: "Patient", id }), {
+        status: 200,
+        headers: { "content-type": "application/fhir+json" },
+      });
+    }
+    if (url.pathname.startsWith("/fhir/") && url.searchParams.has("patient")) {
+      return new Response(JSON.stringify({ resourceType: "Bundle", type: "searchset", entry: [], link: [] }), {
+        status: 200,
+        headers: { "content-type": "application/fhir+json" },
+      });
+    }
+    return new Response("not found", { status: 404 });
+  }) as typeof fetch;
+
+  try {
+    await get("/api/runs"); // initialize the floor schema when this test is selected in isolation
+    const runStore = new SqliteRunStore(env.DB as never);
+    const outcomeStore = new SqliteOutcomeStore(env.DB as never);
+    const run = await runStore.createRun({
+      scopeType: "MEASURE",
+      scopeId: "audiogram",
+      triggeredBy: "test",
+      requestedScope: { measureId: "audiogram" },
+      measurementPeriodStart: "2026-07-31T00:00:00.000Z",
+      measurementPeriodEnd: "2026-07-31T23:59:59.999Z",
+    });
+    await runStore.markRunning(run.id);
+    for (const subjectId of subjectIds) {
+      await outcomeStore.recordOutcome({
+        runId: run.id,
+        subjectId,
+        measureId: "audiogram",
+        evaluationPeriod: "2026-07-31",
+        status: "MISSING_DATA",
+        evidence: {},
+      });
+    }
+    await runStore.finalizeRun(run.id, "COMPLETED");
+
+    const response = await handleRuns(
+      new Request(`http://x/api/runs/${run.id}/qrda1`, { method: "GET" }),
+      {
+        ...env,
+        WORKWELL_WEBCHART_BASE_URL: "http://webchart.test",
+        WORKWELL_WEBCHART_API_KEY: "fixture-key",
+      } as never,
+      "system",
+      undefined,
+      GENERATED_AT,
+    );
+    assert.equal(response?.status, 200);
+    assert.deepEqual(
+      requestedPaths.filter((path) => path.startsWith("/fhir/Patient/")).map((path) => path.slice("/fhir/Patient/".length)).sort(),
+      subjectIds.map((id) => id.slice(3)).sort(),
+    );
+    assert.equal(requestedPaths.some((path) => path === "/fhir/Patient" || path.startsWith("/fhir/Patient?")), false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("configured MEASURE schedules in waitUntil and returns 201 RUNNING before a blocked fetch settles", async () => {
   const originalFetch = globalThis.fetch;
   let release!: (response: Response) => void;
