@@ -43,9 +43,10 @@ derive their measure lists from `RUNNABLE_MEASURE_IDS` (`run-pipeline.ts:214-261
 zero CMS2 or CMS951 work items. The direct `MEASURE` branch does something different: it validates the
 single requested id against `MEASURES` and rejects it outright when it is absent. Consequently, setting
 `WORKWELL_OFFICIAL_MEASURES=cms2,cms951` today would pass the router's construction-time artifact
-checks but schedule no CMS2 or CMS951 work under any scope. The wave-2 flip is not merely inert on this
-stack's data in the ADR-045 sense; it is currently a no-op because nothing ever evaluates either
-measure.
+checks but leave broad `EMPLOYEE`, `ALL_PROGRAMS`, and `SITE` runs with no CMS2 or CMS951 work items, while a
+targeted `MEASURE` request would be rejected with an HTTP 400 before run creation. The wave-2 flip therefore
+has two failure shapes on this stack today: quiet omission for broad scopes and loud rejection for a targeted
+`MEASURE` request; nothing evaluates either measure until official-only support exists.
 
 The synthetic path has the same assumption in a different form. The request-path bundle construction
 at `run-pipeline.ts:172-175` calls `deriveExamConfig(MEASURE_BINDINGS[item.measureId]!, ...)` and
@@ -335,9 +336,11 @@ ids. The following surfaces are the boundary we must discharge before a flip is 
 | Run bundle construction | `run-pipeline.ts:172-175` and `scale-generator.ts:42-51` require `MEASURE_BINDINGS` and `deriveExamConfig`; the non-null assertion is a hard failure for an absent binding. | Implement the official-only profile contract below in a separate profile registry or bundle builder. CMS2 and CMS951 must each expose distinct IPP, positive, negative/missing-data, and exception/exclusion shapes for fictitious synthetic employees. Do not add fake authored semantics to the generated binding table or reuse these profiles to stamp live WebChart data. |
 | Binding generation | `measure-bindings.ts` is marked AUTO-GENERATED; `scripts/gen-measure-bindings.mjs` reads `measures/*.yaml`. | If an official-only profile is represented in generated data, extend the source/generator deliberately and document that it is a bundle-generation descriptor, not an authored CQL registration. A hand edit to the generated file is not an acceptable onboarding step. A separate official-profile registry is preferable because its fields are clinical resource shapes, not occupational enrollment/event bindings. |
 | WebChart roster stamping | `engine/ingress/enrollment/roster.ts:1-52,196-251` uses a fail-closed `ROSTER_ELIGIBLE_MEASURES` allowlist for genuine OH program membership and deliberately excludes clinical facts such as CMS122 diabetes. | Do not add CMS2 or CMS951 to `ROSTER_ELIGIBLE_MEASURES`. The CMS2 ELM uses age and qualifying encounter plus depression-screen data; the CMS951 ELM uses active diabetes and an outpatient visit plus lab data. The roster may select which WorkWell measures to display, but it must not stamp these clinical Conditions, screening Observations, diagnoses, visits, eGFR, uACR, or urine creatinine. Staging-shaped live coverage must be measured from real WebChart data. |
+| Compliance roster | `compliance/panels.ts:7-11` has no `cms2` or `cms951` in any `PANELS` entry; `compliance/roster-read-model.ts:82-99` builds columns from `PANELS[panel]` (or an active segment's own measure list) intersected with Active catalog ids, and falls back to `MEASURE_BINDINGS[id]?.complianceClass ?? "RECURRING"`. | Treat panel placement as an owner/product decision: add CMS2/CMS951 to an existing panel if the clinical grouping warrants it (the `wellness` panel may be the natural home alongside `cms122`/`cms125`) or define a new panel. The catalog mapping/Active-status fix makes them eligible but does not place them in a panel; without placement they never appear as roster columns. Supply official-only roster metadata, including the intended compliance class, explicitly from the official descriptor and add roster metadata/cell-rendering tests rather than relying on the silent binding fallback. |
 | Catalog/spec tab | `measure-catalog.ts:59,77` exposes `cms2v15` and `cms951v4` as Draft/NOT_COMPILED with generic pending text and empty data requirements. | Preserve the versioned catalog identity for UI/history unless an owner approves a data migration. Add an explicit static mapping to official execution ids `cms2` and `cms951`, rewrite the spec with the official name, population, exclusions, compliance window, required FHIR elements, and artifact version, and mark the lifecycle state consistently with the official-only execution model. Do not make the UI imply authored CQL exists. |
 | MeasureReport and QRDA identity | `fhir/measure-report.ts:271-317` derives the trio from official evidence; `official-measure-semantics.ts` already has correct entries for CMS2/CMS951. | Nothing new for this trio. Keep evidence-first canonical, improvementNotation, and membership. The official evidence must be present before this path is used; never reintroduce a `MEASURE_BINDINGS` fallback for a routed outcome. |
 | Case disposition | `case/case-logic.ts:17-67` is status-driven and measure-agnostic for disposition/priority, but `NEXT_ACTION_LABELS` only has CMS122/CMS125 and older measures. | Add human-reviewed labels for CMS2 and CMS951, while retaining `Outcome Status` as the sole compliance input. CMS2 actionable text should describe depression screening/follow-up; CMS951 should describe kidney health evaluation. Every CREATED, UPDATED, REOPENED, RESOLVED, and EXCLUDED state change continues to emit an audit event; an idempotent unchanged confirmation is not a state change. |
+| Case rerun-to-verify | `case/case-rerun.ts:58-70` requires `MEASURE_BINDINGS[existing.measureId]`; `rerunToVerify` returns `null` for an official-only case whose measure has no binding, which the API exposes as a 404 even though the case exists. This is an action/write path with its own evaluation trigger, not case display metadata. | Add an official-profile/routed-engine rerun path that re-evaluates through the official executor rather than `CqlExecutionEngine`, using the official descriptor's `sourceProfile` rather than a synthetic `MEASURE_BINDINGS`-keyed exam config, and add dedicated rerun tests. Case display coverage is not sufficient. |
 | Case detail | `case/case-detail-read-model.ts:15,68,92,155` reads name/version from authored `MEASURES`, defaults the binding window to 365 days, and derives `why_flagged` from authored expression results. | Resolve official name/version from the official descriptor/catalog mapping, use official measurement-period metadata, and render official population evidence rather than an empty authored `why_flagged`. Do not fabricate `last_exam_date`, a waiver, or a compliance explanation from missing authored defines. |
 | `/api/measures` and Standards | `routes/measures.ts:77-81,364-432,494-553` uses authored `MEASURES`/ELM for CQL, direct evaluation, ELM retrieval, and fidelity tiers; the literal diff constructs its own authored engine. | Show official-only measures as official artifacts with no authored CQL/dual-engine diff. Direct evaluation must route through the official executor when enabled, or state that the measure is not available on an authored-only diagnostic path. The fidelity tab must not report an authored comparison that does not exist. |
 | `/simulate` and employee snapshots | `routes/compliance-simulation.ts:38-39` calls `simulateComplianceAsOf`; `run/employee-compliance-snapshot.ts:52-62` loops over `Object.keys(MEASURES)` and uses `MEASURE_BINDINGS`. | Include official-only measures only through the same routed engine and official bundle profile as a real run. Preserve the distinction between an official result and a missing authored simulation; never pad the list with a fake CQL result. |
@@ -433,7 +436,8 @@ not an authored measure.
 **Pros.** It keeps the current code untouched and avoids deciding how official evidence should be shown
 in cases, simulations, and the catalog.
 
-**Cons.** It leaves the flip as a no-op and makes the environment flag misleading. It also moves the
+**Cons.** It leaves broad-scope runs with no CMS2/CMS951 work items and targeted `MEASURE` requests rejected
+with an HTTP 400 before run creation, making the environment flag misleading. It also moves the
 most important safety question into an unbounded future task. This is not a safe flip sequence and does
 not answer ADR-047.
 
@@ -455,10 +459,14 @@ not a second compliance engine. The onboarding work should:
     is owner-only and is not assigned by this proposal.
 5. Leave ADR-046's report trio unchanged. Extend case/read-model/MCP metadata only so that official
    evidence is displayed accurately; no surface may infer compliance from a label or heuristic.
-6. Audit every state transition introduced by official outcomes. Run completion, case creation, case
+6. Decide panel placement for CMS2/CMS951 as an owner/product grouping decision: add them to `wellness` only
+   if that grouping is approved, or define a new panel. Add explicit official roster metadata, including
+   compliance class, and tests for roster columns and cell rendering; do not rely on the
+   `MEASURE_BINDINGS` fallback.
+7. Audit every state transition introduced by official outcomes. Run completion, case creation, case
    updates, closures, exclusions, and any persisted human review decision must retain an `audit_events`
    row. A read-only snapshot remains non-persistent.
-7. Treat unsupported scale, backfill, fidelity, and simulation paths as explicit refusals or official-aware
+8. Treat unsupported scale, backfill, fidelity, and simulation paths as explicit refusals or official-aware
    paths. Silent omission is not onboarding.
 
 The authored CMS122/CMS125 subsets retire to the fidelity/Standards lab after their flips under locked
@@ -478,7 +486,8 @@ the checklist and does not move enforcement into runtime refusal.
 
 **Pros.** It is one workflow edit and exercises the router quickly.
 
-**Cons.** The run planner schedules zero work items today. After the planner is fixed, the synthetic
+**Cons.** The run planner schedules zero CMS2/CMS951 work items today for the broad scopes; a targeted
+`MEASURE` request is rejected with an HTTP 400 before run creation. After the planner is fixed, the synthetic
 builder still lacks the clinical resources and the WebChart gap is unmeasured. The environment would
 claim a flip while no subject is evaluated, which is the exact failure this proposal is intended to stop.
 Reject.
@@ -517,10 +526,12 @@ We recommend Option 3.
 
 The onboarding PR should contain the official-only descriptor, run-planner union, official synthetic
 profiles, official-aware direct paths, catalog mapping/spec content, case/read-model/MCP display support,
-incremental identity handling, and the extended `flip-snapshot` report. It should include tests that
-prove CMS2 and CMS951 appear in each intended run scope only when routed, that a non-routed official-only
-id never reaches the authored engine, that generated synthetic bundles contain the intended clinical
-shapes, and that official evidence drives reports/cases. It should leave `WORKWELL_OFFICIAL_MEASURES`
+the official-profile/routed-engine case rerun-to-verify action, incremental identity handling, and the
+extended `flip-snapshot` report. It should include tests that prove CMS2 and CMS951 appear in each intended
+run scope only when routed, that a non-routed official-only id never reaches the authored engine, that an
+official-only case rerun-to-verify request re-evaluates through the routed engine rather than returning 404
+for an existing case, that generated synthetic bundles contain the intended clinical shapes, and that
+official evidence drives reports/cases. It should leave `WORKWELL_OFFICIAL_MEASURES`
 unchanged. No test may call a MADiE result proof of run-pipeline behavior; the official-cases harness and
 the product-path tests must remain separate.
 
