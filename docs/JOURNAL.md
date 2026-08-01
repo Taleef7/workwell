@@ -1,5 +1,23 @@
 # Journal
 
+## 2026-08-01 (M-B) — Cypress CVU+ stand-up recorded; QRDA fixture generation remains blocked
+
+Cypress CVU+ v7.5.1 was cloned and booted successfully in Docker in the prior stand-up. The measured
+application image is `workwell/cypress-round1:v7.5.1` with digest
+`sha256:df920e01133ae2f2b22d70dc1e3694d5127257fcf1dc3b486f1194adf40906ac`; the stack is Ruby 3.4.9,
+Rails 8.1, MongoDB 8.0.9, and `mitrehealthdocker/cqm-execution-service:latest`. The external-document
+validation route is `GET /qrda_validation` followed by multipart
+`POST /qrda_validation/:year/:qrda_type/:organization` with form field `file`; it requires a local
+Cypress user and is distinct from the Product/ProductTest Calculation Check path.
+
+This checkpoint added `scripts/cvu/generate-qrda-fixtures.ts`, its reference runbook and Docker files,
+and the evidence record at `docs/evidence/CVU_FIRST_RUN_2026-08-01.md`. The generator attempted all five
+ADR-038 subjects for each of CMS122 and CMS125, but the local official terminology sidecars were absent:
+CMS122 refused at 26/26 value sets and CMS125 at 32/32. It therefore produced 0 QRDA-I and 0 QRDA-III
+documents and recorded the 12 failures in the scratch manifest. Docker is down now, so no document was
+submitted and CVU+ produced no pass/fail result, rule id, or error count. This is a reproducible
+checkpoint toward M-B, not completion of the milestone.
+
 ## 2026-07-31 (M-A) — wave-2 flip gate proposal: what replaces the authored oracle for CMS2/CMS951 (branch `feat/wave2-flip-gate-proposal`)
 
 This proposal answers ADR-047's open question for two measures that are MADiE-green and ROUTABLE but
