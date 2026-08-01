@@ -1,5 +1,29 @@
 # Architecture Decision Records
 
+## ADR-054: CMS130 and CMS165 onboard clean — the credentialed workflow's completion flag was already doing the capped-expansion work ADR-041 built it for
+
+**Status:** Accepted (2026-07-31).
+
+**Context.** ADR-041 built `--complete-terminology` to finish upstream-capped expansions, and ADR-053
+extended it to source a value set that CMS138's bundle omitted entirely. CMS130 and CMS165 were the
+first measures where that machinery already existed and only needed to be run: one credentialed
+`vendor-official-measure.yml` dispatch each, with no new implementation.
+
+**Measured before upload.**
+
+| measure | value sets / codes | MADiE case directories | terminology |
+|---|---:|---:|---|
+| CMS130 | 31 / 3172 | 64 | `truncated: []`, `absent: []` |
+| CMS165 | 33 / 5024 | 68 | `truncated: []`, `absent: []` |
+
+Both arrived complete on the first dispatch, including their capped `AdvancedIllness`-class expansions.
+Unlike CMS138, neither needed an absent-value-set supplement; unlike the original CMS122/CMS125 cap
+discovery, there was nothing new to build.
+
+**Decision.** Add CMS130 and CMS165 to `OFFICIAL_GATED_MEASURES` and the MADiE/deploy vendor lists, with
+full `measure-bundle` provenance. Leave routing untouched. Their MADiE gate result remains pending the
+credentialed CI run.
+
 ## ADR-053: "the terminology is complete" was only ever a claim about what the bundle DECLARED
 
 **Status:** Accepted (2026-07-31). Task #11. Closes a blind spot in the vendor step and, more usefully,

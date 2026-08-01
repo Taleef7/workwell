@@ -71,6 +71,19 @@ const MEASURES = {
     name: "CMS138FHIRTobaccoScrnCessation",
     bundleFile: "CMS138FHIRTobaccoScrnCessation-bundle.json",
   },
+  // Vendored through the credentialed `vendor-official-measure.yml` workflow. Both arrived
+  // terminology-COMPLETE (`truncated: []`, `absent: []`): VSAC resolved their capped
+  // AdvancedIllness-class expansions during normal vendoring, with no absent value set like CMS138
+  // needed and no `measure-bundle+sourced-supplement` caveat. Their provenance is full
+  // `measure-bundle`, the same as CMS122, CMS125, CMS2, CMS68, and CMS951.
+  cms130: {
+    name: "CMS130FHIRColorectalCancerScrn",
+    bundleFile: "CMS130FHIRColorectalCancerScrn-bundle.json",
+  },
+  cms165: {
+    name: "CMS165FHIRControllingHighBP",
+    bundleFile: "CMS165FHIRControllingHighBP-bundle.json",
+  },
 };
 
 /**

@@ -198,7 +198,7 @@ test("construction refuses every shape of misconfiguration, and says which", asy
   await assert.rejects(() => build("cms999"), /cms999: not covered by the official MADiE test-case gate/);
   // "all" is a measure name like any other, and there is no measure called "all".
   await assert.rejects(() => build("all"), /all: not covered/);
-  await assert.rejects(() => build("cms122,cms165"), /cms165: not covered/);
+  await assert.rejects(() => build("cms122,cms999"), /cms999: not covered/);
 
   // Whitespace tolerance, but only around real ids.
   const ok = await build(" cms122 , cms125 ");
@@ -223,12 +223,12 @@ test("officialRoutingProblems names the gate, the artifact, and the semantics se
   );
 
   // ALL the problems, not the first: an operator fixing one at a time, learning about the next only
-  // after a redeploy, is how a five-minute configuration takes an afternoon. cms130 is both ungated and
+  // after a redeploy, is how a five-minute configuration takes an afternoon. cms999 is both ungated and
   // unvendored, and hears about both.
-  const problems = officialRoutingProblems({ WORKWELL_OFFICIAL_MEASURES: "cms130" }, stub);
+  const problems = officialRoutingProblems({ WORKWELL_OFFICIAL_MEASURES: "cms999" }, stub);
   assert.equal(problems.length, 2);
-  assert.match(problems[0]!, /cms130: not covered by the official MADiE test-case gate/);
-  assert.match(problems[1]!, /cms130: no executable official artifact is vendored/);
+  assert.match(problems[0]!, /cms999: not covered by the official MADiE test-case gate/);
+  assert.match(problems[1]!, /cms999: no executable official artifact is vendored/);
 });
 
 // The assertion above is deliberately state-tolerant, which means that since ADR-041 completed the

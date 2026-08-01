@@ -127,8 +127,8 @@ test("THE RULE at the routing edge: WORKWELL_OFFICIAL_MEASURES may not name an u
   // The failure this exists to prevent: flipping a measure to official execution when no external
   // test-case evidence covers it.
   assert.deepEqual(
-    ungatedOfficialMeasures(gated, { WORKWELL_OFFICIAL_MEASURES: "cms122,cms165" }),
-    ["cms165"],
+    ungatedOfficialMeasures(gated, { WORKWELL_OFFICIAL_MEASURES: "cms122,cms999" }),
+    ["cms999"],
   );
   assert.deepEqual(ungatedOfficialMeasures(gated, { WORKWELL_OFFICIAL_MEASURES: "typo" }), ["typo"]);
 });

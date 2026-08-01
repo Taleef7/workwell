@@ -23,9 +23,10 @@ test("the expected measures are vendored", () => {
   // so …3.526.3.1278 has no source in the artifact at all. Sourced from VSAC at vendor time through the
   // credentialed workflow, and the gate now supplements exactly the value sets upstream omits.
   //
-  // STILL absent on purpose: cms130 and cms165 have capped expansions and are not vendored, rather than
-  // committed unroutable. `pnpm official:terminology-audit` says which condition any candidate has.
-  assert.deepEqual(vendored.sort(), ["cms122", "cms125", "cms138", "cms2", "cms68", "cms951"]);
+  // CMS130 and CMS165 are now vendored through the credentialed workflow, both terminology-complete on
+  // arrival: capped expansions were resolved and no value sets were absent. No candidates remain absent
+  // from this list; `pnpm official:terminology-audit` records the same completeness check.
+  assert.deepEqual(vendored.sort(), ["cms122", "cms125", "cms130", "cms138", "cms165", "cms2", "cms68", "cms951"]);
 });
 
 for (const catalogId of vendored) {
@@ -76,9 +77,9 @@ for (const catalogId of vendored) {
   });
 }
 
-test("an unvendored measure is absent, not an error (the tier degrades)", () => {
-  assert.equal(loadOfficialArtifact("cms165"), null);
-  assert.equal(officialArtifactAvailable("cms165"), false);
+test("an unknown measure is absent, not an error (the tier degrades)", () => {
+  assert.equal(loadOfficialArtifact("cms999"), null);
+  assert.equal(officialArtifactAvailable("cms999"), false);
 });
 
 test("a traversing catalogId is REJECTED, not merely absent", () => {
