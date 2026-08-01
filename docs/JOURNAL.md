@@ -8,6 +8,12 @@ The optional source/client methods preserve compatibility: JSON buckets filter l
 
 Round 3 closes the silent-data-loss path on `_count`-rejecting servers by negotiating the capability inside scoped resource searches, logs every Patient-only fallback, and returns a specific export reason for degraded retrieval. A single non-404 Patient read now degrades only that subject and the batch continues. Near the 5000-subject refusal, scoped export still performs up to that many sequential reads: a STRICT IMPROVEMENT over the unbounded whole-tenant crawl, but not a complete large-scope solution without concurrency/streaming or true bulk `$export`.
 
+## 2026-07-31 (M-C) — extraction proposal proposes resolutions for the content and test-edge gates (branch feat/measure-engine-extraction-proposal)
+
+This is a DOCS-ONLY proposal for the later packages/measure-engine extraction; no package or source file was moved. Gate 1 recommends an injected content contract: WorkWell's catalog, WorkWell-authored compiled ELM, and synthetic-oriented value-set fallback belong in a separate sibling content package, while generic FHIRHelpers remains an engine asset and the engine keeps cql-execution + cql-exec-fhir only.
+
+Gate 2 recommends restructuring the 10 out-of-closure edge rows across seven named test files: package tests use minimal fixtures and resolver doubles, while ingress, SQLite, SQL-codegen, and synthetic-corpus integration tests stay app-side. The decision proposal is at docs/proposals/MEASURE_ENGINE_EXTRACTION_PROPOSAL.md.
+
 ## 2026-07-31 (M-A) — CMS130 and CMS165 onboard clean on the first credentialed dispatch (branch `feat/onboard-cms130-cms165`)
 
 This mirrors the CMS138 and CMS2/CMS68/CMS951 onboarding path, but the vendor machinery was already
