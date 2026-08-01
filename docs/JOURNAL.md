@@ -18,6 +18,37 @@ documents and recorded the 12 failures in the scratch manifest. Docker is down n
 submitted and CVU+ produced no pass/fail result, rule id, or error count. This is a reproducible
 checkpoint toward M-B, not completion of the milestone.
 
+## 2026-07-31 (M-C) — extraction proposal proposes resolutions for the content and test-edge gates (branch feat/measure-engine-extraction-proposal)
+
+This is a DOCS-ONLY proposal for the later packages/measure-engine extraction; no package or source file was moved. Gate 1 recommends an injected content contract: WorkWell's catalog, WorkWell-authored compiled ELM, and synthetic-oriented value-set fallback belong in a separate sibling content package, while generic FHIRHelpers remains an engine asset and the engine keeps cql-execution + cql-exec-fhir only.
+
+Gate 2 recommends restructuring the 10 out-of-closure edge rows across seven named test files: package tests use minimal fixtures and resolver doubles, while ingress, SQLite, SQL-codegen, and synthetic-corpus integration tests stay app-side. The decision proposal is at docs/proposals/MEASURE_ENGINE_EXTRACTION_PROPOSAL.md.
+
+## 2026-07-31 (M-A) — CMS130 and CMS165 onboard clean on the first credentialed dispatch (branch `feat/onboard-cms130-cms165`)
+
+This mirrors the CMS138 and CMS2/CMS68/CMS951 onboarding path, but the vendor machinery was already
+complete. CMS130 and CMS165 each took **one** credentialed `vendor-official-measure.yml` dispatch. Unlike
+CMS138, which needed VSAC sourcing for a value set upstream does not ship, and unlike CMS122/CMS125,
+where capped `AdvancedIllness` expansion was a separate discovery and completion concern, these two
+came back complete on the first try: the workflow's `--complete-terminology` flag handled the capped
+AdvancedIllness-class expansions as part of normal vendoring.
+
+**Measured.** CMS130 contains **31 value sets / 3172 codes**; CMS165 contains **33 value sets / 5024
+codes**. Both vendor verifications reported `truncated: []` and `absent: []`, with no sourced supplement
+and full `measure-bundle` provenance. The sparse-checkout case directories are **64 for CMS130** and
+**68 for CMS165**.
+
+**Onboarding only.** Both are now in `OFFICIAL_GATED_MEASURES`, but `WORKWELL_OFFICIAL_MEASURES` was not
+touched and nothing is routed to either measure. **Routable ≠ routed**, the same framing ADR-047/053 use.
+This builds on the **278/278** MADiE gate baseline across the six already-gated measures: cms2, cms68,
+cms122, cms125, cms138, and cms951.
+
+**Confirmed.** The [credentialed CI run](https://github.com/Taleef7/workwell/actions/runs/30718966633)
+scored CMS130 64/64 and CMS165 68/68, with 0 unexpected mismatches and 0 errors for each; both manifests
+reproduced byte-for-byte, and all six previously-gated measures reproduced their existing numbers with no
+regression. `docs/OFFICIAL_TESTCASE_REPORT_2026-07.md` has been regenerated from that run's own output and
+committed.
+
 ## 2026-07-31 (M-A) — wave-2 flip gate proposal: what replaces the authored oracle for CMS2/CMS951 (branch `feat/wave2-flip-gate-proposal`)
 
 This proposal answers ADR-047's open question for two measures that are MADiE-green and ROUTABLE but
