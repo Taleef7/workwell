@@ -86,16 +86,29 @@ cms122: 26 of 26 value sets could not be expanded (...). Official execution woul
 CMS125 produced the corresponding refusal for `32 of 32 value sets`. Both measures have their
 committed terminology pins, but the gitignored `terminology.json` sidecars were absent in this
 worktree. The script therefore skipped each QRDA-I build and correctly withheld each QRDA-III aggregate
-because 0/5 subject outcomes were available. This pass produced no document excerpt or well-formedness
-finding because no QRDA XML file was written.
+because 0/5 subject outcomes were available. This pass produced no document excerpt or per-document
+structural-check fields because no QRDA XML file was written. The generator now names the per-document
+regex field
+`nestingAndEscapingFinding` and adds `clinicalDocumentRootParses`, but the empty `documents` array means
+neither check was exercised against generated XML in this pass.
 
 ## 4. Current M-B state
 
-Docker is unavailable on this machine now. The required live check was:
+Docker is unavailable on this machine now. Both relevant endpoints were checked:
 
 ```text
+--- default pipe ---
 docker ps
-failed to connect to the docker API at npipe:////./pipe/dockerDesktopLinuxEngine; check if the daemon is running: open //./pipe/dockerDesktopLinuxEngine: The system cannot find the file specified.
+failed to connect to the docker API at npipe:////./pipe/dockerDesktopLinuxEngine; check if the path is
+correct and if the daemon is running: open //./pipe/dockerDesktopLinuxEngine: The system cannot find the
+file specified.
+exit=1
+
+--- tcp 127.0.0.1:2375 (scratch config, the endpoint the prior stand-up actually used) ---
+docker --config cvu-workdir/docker-config -H tcp://127.0.0.1:2375 ps
+error during connect: Get "http://127.0.0.1:2375/v1.54/containers/json": dial tcp 127.0.0.1:2375: connectex:
+No connection could be made because the target machine actively refused it.
+exit=1
 ```
 
 No WorkWell document was submitted to CVU+. Consequently, there is no CVU+ validation result: no
@@ -122,3 +135,37 @@ the version-specific validator path, then submit each document as multipart `fil
 `execution_errors` fields verbatim. Only that captured response can establish the first CVU+ structural
 validation result; the separate Calculation Check path remains out of scope for these externally
 supplied WorkWell documents.
+
+## 6. Review follow-up — 2026-08-01
+
+The reference path now checks both Docker endpoints before declaring the service unavailable: the
+default named pipe and the TCP endpoint used by the prior stand-up. The evidence in §4 records both
+probes verbatim, and both returned exit code 1. The compose reference binds Cypress to
+`127.0.0.1:3000:3000`, matching the local-only threat model.
+
+The fixture generator removes and recreates only the resolved `cvu-workdir/documents/` output directory
+before every run. Its manifest now keeps the narrow `nestingAndEscapingFinding` scanner result and adds
+`clinicalDocumentRootParses`, based on the existing CDA reader returning a `ClinicalDocument` root. The
+scanner's limitations are documented; neither field is treated as a CVU+ result or compliance authority.
+
+The runbook now includes a bounded Rails readiness poll, a curl-only sign-in flow that writes and updates
+`cvu-workdir/cypress.cookies` in Netscape cookie-jar format, and explicit notes that the v7.5.1 form field
+names are source-confirmed while live authentication was not re-tested with Docker down. The clone step
+verifies commit `d3459f0e82290d87b8e6405a2e00f0e52b001e3e`; the local image digest is compared with the
+recorded build digest, and the unpinned `cqm-execution-service:latest` limitation is stated.
+
+Verification in this pass:
+
+```text
+corepack pnpm --dir backend-ts exec tsx ../scripts/cvu/generate-qrda-fixtures.ts
+=> 0 documents, 12 failures; 5 CMS122 subject refusals, 5 CMS125 subject refusals, and 2 QRDA III skips.
+```
+
+The refusal counts and messages remained the same: CMS122 refused at 26/26 value sets and CMS125 at
+32/32 because the local official terminology sidecars are absent. The manifest contains no XML files,
+so the new per-document fields are not present in an empty `documents` array and were not exercised
+against real generated XML in this pass.
+
+`corepack pnpm typecheck` from `backend-ts/` was run and failed only on the pre-existing missing
+`@mieweb/cloud` checkout and the dependent implicit-`any` diagnostics; no diagnostic referenced the
+changed CVU script or any file changed in this round. No Docker stand-up or CVU+ submission was run.

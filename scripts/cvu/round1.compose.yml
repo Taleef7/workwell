@@ -17,7 +17,7 @@ services:
       - mongodb
       - cqm-execution-service
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     volumes:
       - cvu-cypress-data:/app/public/data
     environment:
