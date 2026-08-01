@@ -1,0 +1,61 @@
+{
+  "catalogId": "cms130",
+  "measureName": "CMS130FHIRColorectalCancerScrn",
+  "version": "1.0.000",
+  "cmsId": "130FHIR",
+  "url": "https://madie.cms.gov/Measure/CMS130FHIRColorectalCancerScrn",
+  "status": "active",
+  "effectivePeriod": {
+    "start": "2026-01-01",
+    "end": "2026-12-31"
+  },
+  "scoring": "proportion",
+  "populationBasis": "boolean",
+  "improvementNotation": "increase",
+  "populations": [
+    "initial-population",
+    "denominator",
+    "denominator-exclusion",
+    "numerator"
+  ],
+  "source": {
+    "repo": "cqframework/dqm-content-qicore-2025",
+    "ref": "ca4b49516de4cbed9f92bfb7c35d97b1bf1022ab",
+    "path": "bundles/measure/CMS130FHIRColorectalCancerScrn/CMS130FHIRColorectalCancerScrn-bundle.json",
+    "rawSha256": "sha256:ac4bbfb17fc62a0b32f02baf2ca49f9a6f6725fb548d790c184b0078bca5f58b"
+  },
+  "reduction": {
+    "keptResourceTypes": [
+      "Measure",
+      "Library"
+    ],
+    "libraryContentTypes": [
+      "application/elm+json"
+    ],
+    "strippedNarratives": true,
+    "strippedElmAnnotations": true,
+    "strippedValueSets": true,
+    "rawBytes": 17067945,
+    "vendoredBytes": 2459143
+  },
+  "terminology": {
+    "file": "terminology.json",
+    "valueSets": 31,
+    "codes": 3172,
+    "truncated": [],
+    "completion": {
+      "source": "vsac",
+      "manifest": "http://cts.nlm.nih.gov/fhir/Library/ecqm-fhir-update-2025",
+      "valueSets": [
+        {
+          "oid": "2.16.840.1.113883.3.464.1003.110.12.1082",
+          "had": 1000,
+          "now": 2000,
+          "declaredTotal": 1997
+        }
+      ]
+    },
+    "sha256": "sha256:8c32b213e18c1a9e42042b0d4a6e40dc2f40f68988409565457792ba72a81108"
+  },
+  "sha256": "sha256:aab26d665b79bc91454640923472f294c77072e36be098f927a4301081d72629"
+}

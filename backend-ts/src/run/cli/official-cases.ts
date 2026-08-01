@@ -142,6 +142,10 @@ export const REQUIRED_OFFICIAL_CASE_COUNTS: Record<string, number> = {
   // the Group resource and README.txt — are not cases). Agrees with the figure ADR-047 recorded when
   // the measure scored 0/47.
   cms138: 47,
+  // Counted from the sparse checkout's case DIRECTORIES, excluding `.madie`, the Group resource and
+  // README.txt: 64 for CMS130 and 68 for CMS165.
+  cms130: 64,
+  cms165: 68,
 };
 
 export function exitCodeForRuns(
