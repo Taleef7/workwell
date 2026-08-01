@@ -38,11 +38,12 @@ mean a genuinely ineligible cohort, a missing clinical resource, an unbuilt synt
 measure that was never scheduled. The old labels must not be retained with a fabricated authored zero.
 
 The deeper blocker is in the run planner. `backend-ts/src/run/run-pipeline.ts:158` defines
-`RUNNABLE_MEASURE_IDS = Object.keys(MEASURES)`. The `MEASURE`, `EMPLOYEE`, `ALL_PROGRAMS`, and `SITE`
-branches use that authored registry for their measure lists (`run-pipeline.ts:214-261`), and the direct
-`MEASURE` branch rejects any id not present in `MEASURES`. Consequently, setting
+`RUNNABLE_MEASURE_IDS = Object.keys(MEASURES)`. The `EMPLOYEE`, `ALL_PROGRAMS`, and `SITE` branches
+derive their measure lists from `RUNNABLE_MEASURE_IDS` (`run-pipeline.ts:214-261`), so they would build
+zero CMS2 or CMS951 work items. The direct `MEASURE` branch does something different: it validates the
+single requested id against `MEASURES` and rejects it outright when it is absent. Consequently, setting
 `WORKWELL_OFFICIAL_MEASURES=cms2,cms951` today would pass the router's construction-time artifact
-checks and still schedule zero CMS2 or CMS951 work items. The wave-2 flip is not merely inert on this
+checks but schedule no CMS2 or CMS951 work under any scope. The wave-2 flip is not merely inert on this
 stack's data in the ADR-045 sense; it is currently a no-op because nothing ever evaluates either
 measure.
 
@@ -143,12 +144,31 @@ authority.
 **Pros.** It restores the existing `DO NOT FLIP`/`INCONCLUSIVE` shape, exposes per-subject divergence,
 and can be run over the same bundles and the same source modes as the official side.
 
-**Cons.** A hand-authored oracle can agree with the official artifact because it copied the artifact's
-logic, or disagree because it is an incomplete reimplementation. Either result creates a false sense of
-independence. It also cuts directly against the current focus in `CLAUDE.md`: self-authored CQL is the
-product value for measures with no official definition, while these measures have an official definition.
-Maintaining a second depression and kidney implementation would turn the missing oracle into a new
-semantic dependency rather than solve it. The proposal rejects this option.
+**Cons.** This directly contradicts the current-focus framing in `CLAUDE.md`: self-authored CQL is the
+product value only where no official definition exists, specifically the occupational/OSHA and
+HEDIS-insight work, while CMS2 and CMS951 already have official definitions. Authoring a second
+implementation for either measure would invert that principle rather than extend it. It would also create
+an ongoing maintenance obligation whenever CMS updates the measure, without a CMS or NCQA stewardship
+relationship of the kind contemplated for occupational-measure stewardship. Finally, the hand-authored
+oracle would need its own validation story: nothing certifies that it represents CMS2/CMS951 intent, so
+it would need a MADiE-style external check or at minimum documented clinical review. Once that check exists,
+maintaining the second implementation buys little over reviewing the official artifact's own MADiE result
+directly. The proposal rejects this option.
+
+#### Option 2a: independently-authored expected vectors over designed bundles
+
+This option adds a small set of hand-designed bundles whose expected population results are written in
+advance from the clinical facts, without deriving them from the official artifact's implementation. The
+official artifact's actual output is compared with those expected vectors.
+
+**Pros.** It is a narrower and cheaper independent check than a full parallel measure. A handful of
+designed positive, negative, exclusion, and missing-data cases can establish concrete expectations for
+important branches without creating a second production implementation.
+
+**Cons.** It still requires a reviewer to derive each expected answer independently and to maintain the
+cases as the official measure and terminology evolve. It covers only the designed bundles, not the full
+live or synthetic roster, and therefore cannot replace review of real official-only output. It is useful as
+an optional complement to Option 4's sign-off packet, not as its replacement.
 
 #### Option 3: use distribution, time-series, or external epidemiology as the replacement oracle
 
@@ -173,49 +193,120 @@ sanity checks, and a deterministic human-review packet containing official popul
 FHIR resources that support them.
 
 **Pros.** It measures the path that will actually run, works for both synthetic and live stacks, does not
-invent a second compliance engine, and gives a clinical reviewer the missing oracle role without making
-the reviewer or the tool authoritative over `Outcome Status`. It turns the current "nothing to compare"
-fact into a visible report rather than a fabricated zero. It is consistent with ADR-043: runtime keeps
-surfacing the result and the flip gate carries the judgement.
+invent a second compliance engine, and gives a clinical reviewer a bounded evidence-review responsibility
+without making the reviewer or the tool authoritative over `Outcome Status`. It turns the current
+"nothing to compare" fact into a visible report rather than a fabricated zero. It preserves ADR-043's
+separation between runtime result reporting and the human flip decision.
 
 **Cons.** It is slower and less mechanically decisive than a dual-engine comparison. Human review is
 subject to sampling error and requires a reviewer who can inspect FHIR and the measure's plain-English
 case descriptions. It cannot establish correctness for every possible FHIR combination, and it does not
-remove the need for the permanent MADiE gate or the later QRDA/Cypress verification bar.
+remove the need for the permanent MADiE gate or the later QRDA/Cypress verification bar. Option 2a can
+strengthen the packet with a few independently reasoned expected vectors, but it does not close this
+assurance gap for the full source.
 
 ### Recommendation
 
-We recommend Option 4. The official-only report should replace the current authored verdict path with
-an explicit non-authoritative state machine:
+We recommend Option 4. Option 2a may add a small set of independently reasoned expected vectors to the
+review packet, but it does not replace review of the official-only source output. The official-only report
+should replace the current authored verdict path with an explicit, non-authoritative state machine and a
+reproducible review protocol:
 
-1. `BLOCKED` means a prerequisite failed: the MADiE gate is absent or skipped, the artifact or
-   terminology is unavailable, the router reports a construction problem, the measure is not in the
-   runnable official descriptor, the source cannot produce bundles, or evaluation errors prevent a
-   complete evidence set.
-2. `REVIEW_REQUIRED` means the official executor completed over the requested source and produced a
-   reviewable result. It includes the special diagnostic flag `NO_IPP_OBSERVED` when the official IPP
-   count is zero. That flag is not an all-clear and is not the old `INCONCLUSIVE` verdict.
-3. `HUMAN_APPROVED` or `HUMAN_DO_NOT_FLIP` is recorded by the operator in the pre-flip review record,
-   outside the evaluator. The CLI may print the fields to complete, but it must not infer either value.
+1. `BLOCKED` is emitted whenever any prerequisite or completeness check fails. The report must name the
+   failed check and preserve its output:
+
+   * Run `pnpm test:official-cases` for the requested measure. CMS2 must show 36/36 expected cases and
+     CMS951 must show 55/55, with the pass count equal to the expected count, failed count `0`, and
+     skipped count `0`. A missing gate, a failed case, a count mismatch, or any nonzero skipped count is
+     `BLOCKED`.
+   * Check the vendored manifest and terminology sidecar for the artifact version, SHA-256, and
+     terminology identity, and record the returned problem list from `officialRoutingProblems()`. A
+     missing artifact or terminology identity, or any returned problem (the required result is `[]`), is
+     `BLOCKED`.
+   * Run the `flip-snapshot official-only` preflight for the requested source. Its official-only runnable
+     descriptor output must contain the bare requested id and a source profile; if the measure is absent,
+     it is `BLOCKED`, even if the artifact gate is green.
+   * The same run must report the requested source's subject and bundle counts. A source that cannot
+     produce bundles, has a bundle-load failure, or produces zero bundles when the selected source is
+     expected to contain subjects is `BLOCKED`; the report must retain the source error rather than
+     converting it to an empty IPP.
+   * Record the command's batch-error and per-subject fallback results. A batch error is not by itself a
+     block when fallback evaluates every affected subject, but any unrecovered batch error, subject error,
+     missing population result, or other gap that leaves the required sample incomplete is `BLOCKED`.
+
+2. `REVIEW_REQUIRED` is emitted only after all of those checks pass and the official executor has produced
+   a complete result for the requested source. The extended report must contain the fields below before a
+   human can act on it. When the official IPP count is zero it must add `NO_IPP_OBSERVED`; that flag is a
+   request to explain the zero, not an all-clear and not the old `INCONCLUSIVE` verdict.
+
+3. `HUMAN_APPROVED` or `HUMAN_DO_NOT_FLIP` may be recorded only by Taleef as the project owner and
+   decision-maker. Recording `HUMAN_APPROVED` requires the same owner review required by the flip PR's
+    reviewed-and-merged workflow under `docs/DEPLOY.md` and ADR-045's reviewed, merged, revertable
+    framing. Neither the evaluator nor a mechanical check may infer either verdict. The human
+   decision remains outside the evaluator, and `Outcome Status` remains the official CQL result.
+
+4. The sign-off artifact must be a dated Markdown file under `docs/evidence/`, following the existing
+   `docs/evidence/PR9C_FLIP_SNAPSHOT_2026-07-30.md` naming precedent, for example
+   `docs/evidence/WAVE2_<MEASURE>_FLIP_REVIEW_<DATE>.md`. It must be committed in the same PR that flips
+   the measure and contain the command outputs/counts for every `BLOCKED`-condition check, the full
+   official-only report read by the reviewer, the reviewed subject sample and branch cross-references to
+   the MADiE case descriptions, and the explicit `HUMAN_APPROVED` or `HUMAN_DO_NOT_FLIP` verdict with a
+   one-paragraph rationale. The flip PR description must link to this file, as PR-9c linked to its
+   flip-snapshot evidence file. If a review decision is later persisted, its creation and every state
+   transition still require an `audit_events` row; this proposal does not design that schema.
+
+The minimum review sample is one subject for every observed outcome bucket in the source and one subject
+for every distinct combination of IPP admission and numerator branch reachable from the vendored ELM's
+populations, whenever the source contains that combination. This is a branch-coverage rule rather than an
+arbitrary subject count: it requires a positive and negative reading of each branch that actually appears,
+while avoiding a claim that a fixed number of subjects represents every FHIR combination. If the source's
+IPP is empty, there is no positive case to validate. The reviewer must instead confirm a named, checked
+cause in the report, such as no subject carrying a qualifying encounter for CMS2, no subject aged 12 or
+older at measurement-period start, no active diabetes overlapping measurement-period start for CMS951,
+or no qualifying outpatient visit. The report must show the corresponding subject/resource counts; an
+unexplained zero is not reviewable.
+
+For CMS2, the sample must distinguish the age/encounter IPP admission, a qualifying screening Observation
+with its defined code and status, a positive-screen branch with a follow-up-plan resource dated on the
+same day as the positive screen, a negative-screen branch with the valid screening Observation and no
+positive follow-up requirement, and a documented exception or exclusion branch. For CMS951, it must
+distinguish the active-diabetes fact overlapping measurement-period start plus outpatient-visit admission,
+the eGFR-plus-uACR branch, the eGFR-plus-urine-albumin-plus-urine-creatinine branch, a missing or
+out-of-window kidney-laboratory branch, and a documented exception or exclusion branch. Each branch is
+represented only when the source contains it; otherwise the reviewer records why it is absent.
 
 For every measure and source, the extended report should compute and print the following rather than
 trying to manufacture an authored side:
 
 | Evidence | Required report | What it proves | What it cannot prove |
 |---|---|---|---|
-| External gate | MADiE case count, expected count, errors, skipped count, artifact/terminology identity | The published artifact agrees with its external case vectors | That the WorkWell roster reaches the artifact | 
-| Source coverage | source name, target stack, subject count, bundle-load failures, batch omissions, single-subject fallback results | The intended source was actually read and the run-shaped evaluation completed | That the source contains every clinical fact the measure needs | 
-| Official populations | IPP, denominator, exclusions, exceptions, numerator counts and per-subject `evidence.official.populationResults` | What the official artifact computed for these bundles | That the computed answer is clinically correct without review | 
-| Outcome distribution | COMPLIANT, OVERDUE, DUE_SOON, MISSING_DATA, and EXCLUDED counts, plus evaluation errors | Whether the result is empty, degenerate, or materially different from a previous snapshot | Correctness or prevalence | 
-| Clinical sample | Deterministic, stratified subjects with population results and underlying FHIR resources | A human can compare the retrieved resources with the measure's case description | Full-population proof; unsampled branches remain unreviewed | 
+| External gate | measure id, pass/expected counts, failed and skipped counts, artifact version/SHA-256, terminology identity | The published artifact agrees with its external case vectors | That the WorkWell roster reaches the artifact |
+| Source coverage | source name, target stack, measurement period, requested/produced subject and bundle counts, bundle-load failures, batch errors, recovered fallback count, unrecovered errors, and evidence-completeness count | The intended source was actually read and the run-shaped evaluation completed | That the source contains every clinical fact the measure needs |
+| Official populations | IPP, denominator, exclusions, exceptions, numerator counts, population-branch counts, and per-subject `evidence.official.populationResults` | What the official artifact computed for these bundles | That the computed answer is clinically correct without review |
+| Outcome distribution | COMPLIANT, OVERDUE, DUE_SOON, MISSING_DATA, and EXCLUDED counts, plus evaluation errors and the `NO_IPP_OBSERVED` flag when applicable | Whether the result is empty, degenerate, or materially different from a previous snapshot | Correctness or prevalence |
+| Clinical sample | deterministic subject ids, outcome and branch labels, population results, and the underlying FHIR resources or resource references | A human can compare the retrieved resources with the measure's case description | Full-population proof; unsampled branches remain unreviewed |
 
-The official-only sample must include, where the source contains them, subjects in and out of the IPP,
-each observed outcome bucket, denominator exclusions and exceptions, and the measure-specific numerator
-branches. For CMS2 that means reviewing the age/encounter admission, depression-screen Observation,
-positive-screen follow-up, and no-screen/exception shapes. For CMS951 that means reviewing the active
-diabetes/outpatient-visit admission, eGFR, uACR, and the urine-albumin-plus-urine-creatinine alternative.
 The reviewer checks the official evidence against the underlying FHIR resources and the plain-English
-MADiE descriptions; the reviewer does not edit a status.
+MADiE descriptions; the reviewer does not edit a status. A report missing any required field or sample
+branch remains `BLOCKED`, not `REVIEW_REQUIRED`.
+
+### Assurance limitation
+
+This is a reduction in assurance relative to the authored-versus-official comparison established by
+ADR-043 and used for every flip through CMS122/CMS125. It is not a like-for-like substitute. The ADR-043
+gate has a known answer, authored CQL, to diff against, so disagreement is detectable. An official-only
+human sample has no independent answer to diff against: it can catch gross defects such as nothing being
+retrieved, the wrong resource type being used entirely, or an empty IPP where a positive cohort is expected,
+but it cannot catch a plausible-looking wrong answer that agrees with itself. In particular, a legitimately
+zero IPP leaves the reviewer with no positive case to validate; `NO_IPP_OBSERVED` flags that condition but
+does not resolve whether the zero is correct.
+
+Three partial compensations have different limits. The permanent MADiE artifact-level gate proves that
+the published artifact agrees with the steward's own cases, but proves nothing about whether WorkWell's
+data reaches it. Distribution and branch-coverage sanity checks catch degenerate or implausible results,
+but prove nothing about correctness. The human clinical sample against FHIR evidence and MADiE case prose
+is the closest available positive check, but remains bounded by its sample and the reviewer's clinical
+skill. None of these checks may set or override `Outcome Status`.
 
 The existing source split transfers with these explicit limits. `live` remains the tenant-facing source
 and must refuse an unset WebChart seam or a roster matching no returned subject. `fixture` remains a
@@ -226,9 +317,9 @@ as a roster forecast would recreate the vacuous-guard defect ADR-044 corrected.
 
 The command must continue to be descriptive-only: it writes no outcome, case, or compliance state and
 does not persist a review decision. If a future review record is persisted, its creation and every later
-state transition must write an `audit_events` row. No AI or heuristic may approve a sample, classify a
-subject, or set `Outcome Status`; an assistive summary may only quote structured official evidence for a
-human reviewer under the existing AI guardrails.
+state transition must write an `audit_events` row. No evaluator or heuristic may approve a sample, classify
+a subject, or set `Outcome Status`; the report may only display structured official evidence for the human
+reviewer under the existing review controls.
 
 ## Question 2: product-surface onboarding
 
@@ -241,7 +332,7 @@ ids. The following surfaces are the boundary we must discharge before a flip is 
 |---|---|---|
 | Official router | `backend-ts/src/wiring/executor-router.ts:20-70,214-275` validates eight artifact/configuration properties: MADiE coverage, artifact and id, scoring, population basis, semantics, terminology, capped sets, absent sets, and non-empty expansions. CMS2/CMS951 pass. | Keep the eight checks. Add no runtime refusal for a data gap; the router remains an artifact/configuration gate, not a roster-readiness oracle. The official-only runtime descriptor must be accepted by the router without pretending it has authored CQL. |
 | Run planner | `run-pipeline.ts:158` derives `RUNNABLE_MEASURE_IDS` from authored `MEASURES`; all four scope branches and the direct measure validation depend on it. | Add official-only ids to an explicit execution registry/descriptor union and make every scope select them only when the configured engine is official. A non-routed official-only id must not fall through to `CqlExecutionEngine`; it must be omitted or rejected as not enabled. The direct `MEASURE` scope must resolve an official name and source profile without `MEASURES[measureId]`. |
-| Run bundle construction | `run-pipeline.ts:172-175` and `scale-generator.ts:42-51` require `MEASURE_BINDINGS` and `deriveExamConfig`; the non-null assertion is a hard failure for an absent binding. | Supply an official-only synthetic profile or a separate official bundle builder. CMS2 needs encounter, screening Observation, and follow-up shapes; CMS951 needs active-diabetes/visit and kidney-lab shapes. Use this only for fictitious synthetic employees. Do not add fake authored semantics to the generated binding table. |
+| Run bundle construction | `run-pipeline.ts:172-175` and `scale-generator.ts:42-51` require `MEASURE_BINDINGS` and `deriveExamConfig`; the non-null assertion is a hard failure for an absent binding. | Implement the official-only profile contract below in a separate profile registry or bundle builder. CMS2 and CMS951 must each expose distinct IPP, positive, negative/missing-data, and exception/exclusion shapes for fictitious synthetic employees. Do not add fake authored semantics to the generated binding table or reuse these profiles to stamp live WebChart data. |
 | Binding generation | `measure-bindings.ts` is marked AUTO-GENERATED; `scripts/gen-measure-bindings.mjs` reads `measures/*.yaml`. | If an official-only profile is represented in generated data, extend the source/generator deliberately and document that it is a bundle-generation descriptor, not an authored CQL registration. A hand edit to the generated file is not an acceptable onboarding step. A separate official-profile registry is preferable because its fields are clinical resource shapes, not occupational enrollment/event bindings. |
 | WebChart roster stamping | `engine/ingress/enrollment/roster.ts:1-52,196-251` uses a fail-closed `ROSTER_ELIGIBLE_MEASURES` allowlist for genuine OH program membership and deliberately excludes clinical facts such as CMS122 diabetes. | Do not add CMS2 or CMS951 to `ROSTER_ELIGIBLE_MEASURES`. The CMS2 ELM uses age and qualifying encounter plus depression-screen data; the CMS951 ELM uses active diabetes and an outpatient visit plus lab data. The roster may select which WorkWell measures to display, but it must not stamp these clinical Conditions, screening Observations, diagnoses, visits, eGFR, uACR, or urine creatinine. Staging-shaped live coverage must be measured from real WebChart data. |
 | Catalog/spec tab | `measure-catalog.ts:59,77` exposes `cms2v15` and `cms951v4` as Draft/NOT_COMPILED with generic pending text and empty data requirements. | Preserve the versioned catalog identity for UI/history unless an owner approves a data migration. Add an explicit static mapping to official execution ids `cms2` and `cms951`, rewrite the spec with the official name, population, exclusions, compliance window, required FHIR elements, and artifact version, and mark the lifecycle state consistently with the official-only execution model. Do not make the UI imply authored CQL exists. |
@@ -262,6 +353,37 @@ visit, and kidney laboratories must come from the clinical bundle. The distincti
 principle that keeps CMS122 out of the allowlist, even though the actual CMS2/CMS951 resource shapes are
 different from CMS122's Condition-only problem.
 
+### Synthetic profile contract and deferred design work
+
+The official-only synthetic profiles must be named data shapes, not a generic "clinical facts" placeholder.
+Each profile is a separate source-profile entry referenced by the official descriptor and is used only for
+synthetic employees. It must produce the following distinct relationships:
+
+* **CMS2.** The IPP-admission profile has a patient aged 12 or older at measurement-period start and a
+  qualifying Encounter inside the measurement period. The positive-screen profile adds a depression-screening
+  Observation with the defined screening code, a valid status, a positive result, and a follow-up-plan
+  resource dated on the same day as that positive screen. The negative-screen profile has the defined
+  screening Observation with a valid status and a negative result, without treating a follow-up plan as
+  required for that branch. The non-IPP profile removes or invalidates the age/qualifying-Encounter
+  admission. The documented-exception/exclusion profile contains the exception or exclusion resource
+  relationship recognized by the vendored ELM. The profile labels must retain which branch was intended so
+  the snapshot can compare it with the official population result.
+* **CMS951.** The IPP-admission profile has an active-diabetes clinical fact overlapping measurement-period
+  start and an outpatient Encounter inside the measurement period. One numerator profile contains an eGFR
+  observation and a uACR observation within the defined window. A second numerator profile contains an eGFR,
+  urine-albumin, and urine-creatinine observation triple within that window, with each lab dated so the
+  relationship is testable. The negative/missing-data profile has no qualifying kidney evaluation or has a
+  required lab outside the window. The non-IPP profile removes or invalidates the active-diabetes or
+  outpatient-visit admission. The documented-exception/exclusion profile contains the exception or exclusion
+  resource relationship recognized by the vendored ELM. These are separate profiles even when they share
+  the same patient and visit scaffolding.
+
+The exact LOINC and SNOMED code lists, value-set expansions, Observation statuses, exception resources,
+and exact FHIR JSON shapes are **DEFERRED DESIGN WORK** for the onboarding PR. That PR must cross-reference
+the vendored ELM value-set OIDs against VSAC and complete terminology using the process established by
+ADR-041 and ADR-053, then obtain the owner's decision on any code or resource ambiguity. This proposal
+settles the branch and resource relationships; it does not hand-enter a code list or sketch DDL.
+
 ### Options
 
 #### Option 1: place official-only ids into the authored registries with placeholders
@@ -276,9 +398,25 @@ the kind of vacuous coverage this repository rejects. We reject it.
 
 #### Option 2: add a parallel official execution descriptor and make consumers choose an engine
 
-The descriptor would contain the bare official id, artifact identity, display metadata, measurement
-period, population-basis/semantics reference, source-specific bundle strategy, and case/report display
-metadata. It would not contain authored CQL or be added to `MEASURES`.
+The descriptor is a typed execution/product contract, not a second compliance engine. Its minimum fields
+are:
+
+| Field | Type and shape | Source or required owner-side seam |
+|---|---|---|
+| `officialId` | `string`, the bare routing id (`cms2` or `cms951`) | The official artifact loader and router; this is the id accepted by official execution. |
+| `catalogId` | `string`, the versioned catalog id (`cms2v15` or `cms951v4`) | `backend-ts/src/measure/measure-catalog.ts`; add an explicit static mapping to `officialId` to close the current bare-id/versioned-id mismatch. |
+| `engine` | literal `"official"` | The dispatch union; absence of an authored `MEASURES` entry must be structural, not represented by a placeholder. |
+| `displayName` and `versionLabel` | `string` values | Reviewed catalog/spec content, exposed to cases, reports, identity rows, and Standards. |
+| `artifactVersion` and `artifactSha256` | `string` values | The vendored manifest alongside the official artifact; these are read from the manifest, never hand-entered in a run or review packet. |
+| `measurementPeriod` | `{ start: ISODate, end: ISODate, derivation: string }` | Use the run's explicit measurement-period input. If it is absent, apply the reviewed official period rule stored beside the descriptor; never fall back to an authored `MEASURE_BINDINGS` window or an implicit 365-day default. |
+| `populationSemanticsRef` | `string`, the bare semantics key | `backend-ts/src/wiring/official-measure-semantics.ts`; the key must resolve to the reviewed CMS2/CMS951 entry. |
+| `sourceProfile` | `{ source: "synthetic-directory" | "live" | "fixture", profileId: string }` | A reference to the source-profile registry and bundle-generation strategy. Generation logic does not live inline in the descriptor, and live profiles never stamp synthetic clinical facts. |
+| `caseDisplayLabels` | `{ nextAction: Record<string, string>, population: Record<string, string> }` | Human-reviewed labels alongside `case/case-logic.ts` and the case/read-model consumers, keyed by official population/status identifiers. |
+
+The descriptor must be present in the official-only runnable union before any run scope can select the
+measure, and it must not contain authored CQL or be added to `MEASURES`. The onboarding PR must add the
+descriptor, its source-profile entries, and the explicit catalog mapping together so the run planner,
+synthetic generator, catalog, cases, direct routes, and incremental evaluator consume one contract.
 
 **Pros.** It preserves the authored engine boundary, makes the official-only state explicit, and lets
 the run planner, synthetic generator, catalog, cases, direct routes, and incremental evaluator share one
@@ -314,7 +452,7 @@ not a second compliance engine. The onboarding work should:
    gates and measure the gap with the official-only `live` snapshot.
 4. Preserve catalog ids while adding an explicit bare-id mapping and replacing the two placeholder
    specs with reviewed official content. If persisted measure rows require a migration, that migration
-   is owner-only and is not an agent-authored implementation in this proposal.
+    is owner-only and is not assigned by this proposal.
 5. Leave ADR-046's report trio unchanged. Extend case/read-model/MCP metadata only so that official
    evidence is displayed accurately; no surface may infer compliance from a label or heuristic.
 6. Audit every state transition introduced by official outcomes. Run completion, case creation, case
@@ -419,7 +557,7 @@ For each measure and target stack, run the unchanged five-step checklist with th
 The flip PR should add CMS2/CMS951 to the production workflow's `WORKWELL_OFFICIAL_MEASURES` value and
 the reconciler's identical value, with the same ordering and no staging change unless staging has its own
 completed evidence packet. It should not add a code fallback, a placeholder authored library, a runtime
-refusal, a database migration, or an AI judgement.
+    refusal, a database migration, or an inferred judgement.
 
 Its structural test should follow ADR-045's `official-flip-config.test.ts` pattern: parse the values that
 the workflows actually ship, assert that every shipped id is MADiE-gated, vendored, proportion-scored,
@@ -449,15 +587,16 @@ epidemiological plausibility range a compliance oracle. Both remain useful diagn
 blind spots.
 
 It does not propose a schema or DDL change. If a future implementation decides to persist a run warning,
-review decision, or official metadata field, the owner must design and approve the schema change; an agent
-must not write that migration as part of this proposal.
+ review decision, or official metadata field, the owner must design and approve the schema change; this
+ proposal does not assign or sketch that migration.
 
-It does not allow AI, heuristics, case labels, distributions, catalog state, or human-entered prose to set
-or override `Outcome Status`. Every compliance status remains the official CQL result carried in evidence;
+It does not allow heuristics, case labels, distributions, catalog state, or human-entered prose to set or
+override `Outcome Status`. Every compliance status remains the official CQL result carried in evidence;
 every persisted state change remains auditable.
 
-If the product team wants the Standards tab to compare an official artifact with a local diagnostic model,
+If the product team wants the Standards tab to compare an official artifact with a local diagnostic
+implementation,
 that is a separate decision and would revisit the official-first posture. This proposal recommends no such
-model. The only additional documentation that may be needed after approval is an extension of
+comparison. The only additional documentation that may be needed after approval is an extension of
 `docs/DEPLOY.md` and the relevant catalog/spec guidance; this proposal intentionally does not edit those
 files.
