@@ -369,6 +369,7 @@ here, so the nightly ALL_PROGRAMS run exercises the flip unprompted. Rollback = 
 
 **M-A WAVE 2 (ADR-047): CMS2, CMS68 and CMS951 are vendored, MADiE-gated and ROUTABLE — none is routed.**
 **CMS138 joined them 2026-07-31 (ADR-053) — the gate is now 278/278 across SIX measures.**
+**CMS130 and CMS165 joined the gate 2026-07-31 too (ADR-054) — both vendored clean on the first credentialed dispatch; their MADiE gate result is pending the credentialed CI run.** The following pre-ADR-054 status is historical.
 The gate was **231/231** across five measures (55+66+36+19+55, 0 unexpected, 0 errors) and drives the
 harness, the sparse checkout and the committed-report predicate off `OFFICIAL_GATED_MEASURES` instead of a
 hardcoded pair — all three silently stopped meaning "the full gate" the moment a third measure existed.

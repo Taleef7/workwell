@@ -16,7 +16,7 @@ test("parseArgs defaults to EVERY gated measure and accepts measure/content over
     measures: ["cms125"],
     contentDir: "../fixtures",
   });
-  assert.throws(() => module.parseArgs(["--measure", "cms130"]), /--measure must be one of/);
+  assert.throws(() => module.parseArgs(["--measure", "cms999"]), /--measure must be one of/);
   assert.throws(() => module.parseArgs(["--content-dir"]), /needs a value/);
   assert.throws(() => module.parseArgs(["--unknown"]), /unknown argument/);
 });

@@ -1,5 +1,28 @@
 # Journal
 
+## 2026-07-31 (M-A) — CMS130 and CMS165 onboard clean on the first credentialed dispatch (branch `feat/onboard-cms130-cms165`)
+
+This mirrors the CMS138 and CMS2/CMS68/CMS951 onboarding path, but the vendor machinery was already
+complete. CMS130 and CMS165 each took **one** credentialed `vendor-official-measure.yml` dispatch. Unlike
+CMS138, which needed VSAC sourcing for a value set upstream does not ship, and unlike CMS122/CMS125,
+where capped `AdvancedIllness` expansion was a separate discovery and completion concern, these two
+came back complete on the first try: the workflow's `--complete-terminology` flag handled the capped
+AdvancedIllness-class expansions as part of normal vendoring.
+
+**Measured.** CMS130 contains **31 value sets / 3172 codes**; CMS165 contains **33 value sets / 5024
+codes**. Both vendor verifications reported `truncated: []` and `absent: []`, with no sourced supplement
+and full `measure-bundle` provenance. The sparse-checkout case directories are **64 for CMS130** and
+**68 for CMS165**.
+
+**Onboarding only.** Both are now in `OFFICIAL_GATED_MEASURES`, but `WORKWELL_OFFICIAL_MEASURES` was not
+touched and nothing is routed to either measure. **Routable ≠ routed**, the same framing ADR-047/053 use.
+This builds on the **278/278** MADiE gate baseline across the six already-gated measures: cms2, cms68,
+cms122, cms125, cms138, and cms951.
+
+**Still open.** `docs/OFFICIAL_TESTCASE_REPORT_2026-07.md` is pending the credentialed CI run, as it was
+on CMS138's first push. The final MADiE total for these two will be recorded in a follow-up entry once CI
+has produced the real reduction-check numbers; this entry does not guess them.
+
 ## 2026-07-31 (M-A) — CMS138 onboarded: 0/47 → 47/47, and the gate learned a new kind of claim (branch `feat/onboard-cms138`)
 
 Three things had to be true and only the first was: the value set had to be sourced, the artifact had to
