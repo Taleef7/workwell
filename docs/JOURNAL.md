@@ -1,5 +1,11 @@
 # Journal
 
+## 2026-07-31 (M-C) — extraction proposal proposes resolutions for the content and test-edge gates (branch feat/measure-engine-extraction-proposal)
+
+This is a DOCS-ONLY proposal for the later packages/measure-engine extraction; no package or source file was moved. Gate 1 recommends an injected content contract: WorkWell's catalog, WorkWell-authored compiled ELM, and synthetic-oriented value-set fallback belong in a separate sibling content package, while generic FHIRHelpers remains an engine asset and the engine keeps cql-execution + cql-exec-fhir only.
+
+Gate 2 recommends restructuring the 10 out-of-closure edge rows across seven named test files: package tests use minimal fixtures and resolver doubles, while ingress, SQLite, SQL-codegen, and synthetic-corpus integration tests stay app-side. The decision proposal is at docs/proposals/MEASURE_ENGINE_EXTRACTION_PROPOSAL.md.
+
 ## 2026-07-31 (M-A) — CMS130 and CMS165 onboard clean on the first credentialed dispatch (branch `feat/onboard-cms130-cms165`)
 
 This mirrors the CMS138 and CMS2/CMS68/CMS951 onboarding path, but the vendor machinery was already
