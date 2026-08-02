@@ -293,9 +293,12 @@ Ordered by cost-to-fix against value, for a separate decision — not started he
 1. **`@root` URNs → OIDs or UUIDs.** Four emit sites across two files: `urn:workwell:employee`,
    `urn:workwell:device` and `urn:workwell:custodian` in `qrda1-export.ts` (lines 170, 204, 216), and
    `urn:workwell:fhir` in `qdm-entries.ts:139` — the per-resource one, hence its count of 26. Removes 56
-   of the 76 HL7-ruler Category I findings. **This is not a one-line change:** `qrda1-import.ts:100`
-   reads `urn:workwell:fhir` back as "our own root", so ADR-051's round trip moves with it, and an OID
-   would have to be one WorkWell can legitimately assert.
+   of the 76 HL7-ruler Category I findings. **The round trip does NOT move with it** — a first draft of
+   this section claimed it did, on the strength of `qrda1-import.ts:100`'s comment calling
+   `urn:workwell:fhir` "our own root". The comment names it; the code does not read it. `idOf` takes the
+   first `<id>` child carrying an `extension`, whatever its root, so import is root-agnostic and ADR-051's
+   round trip survives the change untouched. What the change does need is a root CDA's `uid` type
+   accepts — an OID WorkWell can legitimately assert, or a UUID.
 2. **`versionNumber`** — `qrda-common.ts:101` emits the eCQM version *string* into a CDA `INT`. Correct as
    identity, wrong as a type; it needs an integer with the version string carried where it belongs. That
    site is shared by both Category I and Category III. Removes 10.
