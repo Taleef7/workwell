@@ -149,5 +149,10 @@ export function qrdaMeasureReference(
 export function cdaVersionNumber(version: string | undefined): string | null {
   if (!version) return null;
   const major = /^(\d+)/.exec(version.trim());
-  return major ? String(Number(major[1])) : null;
+  if (!major) return null;
+  // Strip leading zeros TEXTUALLY. The obvious `String(Number(major[1]))` normalizes "007" to "7"
+  // correctly but turns a 22-digit version into "1e+21" — exponential notation, which is not a valid
+  // CDA INT. A helper whose whole job is to guarantee a valid INT must not have an input that makes it
+  // emit an invalid one, however unlikely that input is (found reviewing this function's own edge cases).
+  return major[1]!.replace(/^0+(?=\d)/, "");
 }
