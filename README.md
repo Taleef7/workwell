@@ -144,7 +144,7 @@ This project is deliberately careful about what it claims. [`docs/STANDARDS_CONF
 |---|---|---|
 | Measure logic | HL7 **CQL** / ELM | Executed — JVM-free, build-time translation |
 | Patient data | **FHIR R4**, US Core / **QI-Core** | Executed — official artifacts evaluate real QI-Core bundles |
-| Known-answer gate | Official **MADiE** test cases (5 measures) | **231/231 exact** — a permanent CI gate |
+| Known-answer gate | Official **MADiE** test cases (8 measures) | **410/410 exact** — a permanent CI gate |
 | Terminology | **VSAC** value sets | The artifact's *own* expansions, fetched at build and pinned by SHA-256 |
 | Reporting | FHIR **MeasureReport**, **QRDA-I**, **QRDA-III** | MeasureReport executed; both QRDA documents structurally representative, neither CVU+-validated |
 | EHR integration | **SMART Backend Services** (`private_key_jwt`) | Executed against a live tenant |
@@ -157,7 +157,7 @@ This project is deliberately careful about what it claims. [`docs/STANDARDS_CONF
 
 The parts of this repo worth reading if you care about how it is built:
 
-- **43 Architecture Decision Records** ([`docs/DECISIONS.md`](docs/DECISIONS.md)) — every non-obvious decision, with the alternatives and the consequences. Several record a decision being *reversed* by measurement or review, with the original reasoning kept rather than deleted.
+- **53 Architecture Decision Records** ([`docs/DECISIONS.md`](docs/DECISIONS.md)) — every non-obvious decision, with the alternatives and the consequences. Several record a decision being *reversed* by measurement or review, with the original reasoning kept rather than deleted.
 - **Measure-first, then decide.** Repeatedly, a planned refusal or guard was killed because measuring showed it would fire on correct inputs. Those reversals are documented as such — the reasoning that was wrong is the useful part.
 - **Guards are mutation-tested.** A check that cannot fail is worse than no check, because it reads as covered. New safety conditions are verified by breaking them and confirming exactly the intended test fails.
 - **Vacuous-guard hunting.** Tests that self-skip when a fixture is missing are treated as a defect class in their own right — a suite that reads green because it never ran is worse than a red one. The sidecar-dependent gates are named explicitly in a CI step so they cannot silently drop out, and the flip checklist tells the operator to read the `skipped` count, not just `fail`.
@@ -231,6 +231,8 @@ e2e/                 Playwright end-to-end tests
 POST /api/runs/manual                                  # scoped evaluation run
 GET  /api/runs/{id}/measure-report?type=summary        # FHIR MeasureReport
 GET  /api/runs/{id}/qrda?format=xml                    # QRDA-III
+GET  /api/runs/{id}/qrda1                              # QRDA-I export (per-subject patient data)
+POST /api/runs/{id}/evaluate                           # evaluate one subject; body {measureId, qrda1} = QRDA-I import
 GET  /api/measures/{id}/fidelity                       # authored vs official spec diff
 GET  /api/measures/{id}/fidelity/diff                  # executed outcome diff
 GET  /api/auditor/cases/{id}/packet?format=json|html   # auditor evidence packet
@@ -245,16 +247,16 @@ Full surface in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ## Current focus
 
-Running CMS's official published artifacts in place of the authored implementations, one measure at a time, behind `WORKWELL_OFFICIAL_MEASURES`. **CMS122 and CMS125 are live on the demo/production stack** (2026-07-30) — both evaluate CMS's published QI-Core artifacts verbatim. Every other measure, and every other environment, still evaluates the authored CQL. CMS122 shipped a PR later than CMS125: its official numerator counts *poor* glycemic control, so the MeasureReport canonical, `improvementNotation` and population membership all had to switch together first, and a self-contradictory report is worse than a delayed one.
+Running CMS's official published artifacts in place of the authored implementations, one measure at a time, behind `WORKWELL_OFFICIAL_MEASURES`. **CMS122 and CMS125 are routed and live in production** (2026-07-30) — both evaluate CMS's published QI-Core artifacts verbatim. CMS122 shipped a PR later than CMS125: its official numerator counts *poor* glycemic control, so the MeasureReport canonical, `improvementNotation` and population membership all had to switch together first (ADR-046), and a self-contradictory report is worse than a delayed one. Six more measures — CMS2, CMS68, CMS130, CMS138, CMS165, and CMS951 — are vendored and MADiE-gated but not routed. CMS2, CMS130, CMS138, CMS165, and CMS951 are routable but not yet routed; CMS68 is additionally not presently routable because the roster does not yet carry the required episode/medications data.
 
-What remains before the first flip, and the verification bar it has to clear, is tracked in [`docs/JOURNAL.md`](docs/JOURNAL.md) (newest first) and the ADR run 036–044 in [`docs/DECISIONS.md`](docs/DECISIONS.md). Cypress **CVU+** is the verification bar and has not yet run.
+The current verification bar is tracked in [`docs/JOURNAL.md`](docs/JOURNAL.md) (newest first) and the ADR run 036–054 in [`docs/DECISIONS.md`](docs/DECISIONS.md). Cypress **CVU+** tooling is stood up but no validation run has executed, so it has not yet produced a validated result.
 
 ## Documentation map
 
 | | |
 |---|---|
 | [Architecture](docs/ARCHITECTURE.md) | system boundaries, module map |
-| [Decisions](docs/DECISIONS.md) | 43 ADRs, newest first |
+| [Decisions](docs/DECISIONS.md) | 53 ADRs, newest first |
 | [Data Model](docs/DATA_MODEL.md) | tables, idempotency + evidence contracts |
 | [Measures](docs/MEASURES.md) | the TWH measure catalog in plain English |
 | [Standards Conformance](docs/STANDARDS_CONFORMANCE.md) | what we may and may not claim |

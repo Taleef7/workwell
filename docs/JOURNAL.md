@@ -1,5 +1,11 @@
 # Journal
 
+## 2026-08-01 — Documentation refresh
+
+Refreshed README.md and docs/ROADMAP_2026-07-24.md to reflect current reality: the MADiE gate now covers eight measures at 410/410 (was five measures at 231/231); cms122 and cms125 are routed to official execution in production, while six more measures are vendored and MADiE-gated but not routed — CMS2, CMS130, CMS138, CMS165, and CMS951 are routable but not yet routed, while CMS68 is currently unroutable because the roster lacks episode/medications data.
+
+Cypress CVU+ tooling is stood up but not yet run, QRDA Category I import/export API routes are documented, and the stale **PR-3 (NEXT)** label is corrected to shipped; this was a docs-freshening pass, not a feature.
+
 ## 2026-08-01 (M-B) — Cypress CVU+ stand-up recorded; QRDA fixture generation remains blocked
 
 Cypress CVU+ v7.5.1 was cloned and booted successfully in Docker in the prior stand-up. The measured
