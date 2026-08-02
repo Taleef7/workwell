@@ -102,22 +102,38 @@ pnpm test:official-cases [--measure <catalogId>] [--content-dir <path>]
 
 The fetch script performs the required Windows-long-path sparse clone into ignored
 `backend-ts/.official-content/`; downloaded FHIR resources are not committed. At content revision
-`ca4b49516de4cbed9f92bfb7c35d97b1bf1022ab`, all five gated measures ran with
+`ca4b49516de4cbed9f92bfb7c35d97b1bf1022ab`, all **eight** gated measures ran with
 `trustMetaProfile:false` on the first pass and consumed their own Bundle ValueSet expansions:
 
 | Measure | Cases | Exact expected agreement | Unexpected mismatch | Errors | Result note |
 |---|---:|---:|---:|---:|---|
 | CMS122 v1.0.000 | 55 | **55/55** | 0 | 0 | All six source-reported bad-expecteds matched their committed numerator=0; 0/6 reproduced the source comparison's numerator=1 |
 | CMS125 v1.0.000 | 66 | **66/66** | 0 | 0 | Primary execution normalizes the official date-only Dec 31 end to `2026-12-31T23:59:59.999Z`, matching MADiE's inclusive-day expected results; the un-normalized run is 64/66 |
+| CMS2 v1.0.000 | 36 | **36/36** | 0 | 0 | Onboarded with wave 2 (ADR-047) |
+| CMS68 v1.0.000 | 19 | **19/19** | 0 | 0 | GATED but **not routable** — `populationBasis: Encounter`, and the executor maps one population vector per subject (ADR-047) |
+| CMS951 v1.0.000 | 55 | **55/55** | 0 | 0 | Onboarded with wave 2 (ADR-047) |
+| CMS138 v1.0.000 | 47 | **47/47** | 0 | 0 | **A weaker claim than the other seven.** Upstream ships this bundle one value set short (`…3.526.3.1278`), so the gate supplements it from VSAC: those four codes are OURS while the expected population vectors stay upstream's. Agreement evidences the four codes, not upstream's terminology. Run mode is recorded as `measure-bundle+sourced-supplement` (ADR-053) |
+| CMS130 v1.0.000 | 64 | **64/64** | 0 | 0 | Vendored clean on the first credentialed dispatch (ADR-054) |
+| CMS165 v1.0.000 | 68 | **68/68** | 0 | 0 | Vendored clean on the first credentialed dispatch (ADR-054) |
+
+**Total: 410/410 exact, 0 unexpected mismatches, 0 errors.** Gated ≠ routed — only CMS122 and CMS125
+are routed, and only on demo/production.
 
 Date-only period ends are normalized before Calculator execution because `fqm-execution` 1.8.5
 parses them as start-of-day. The live `/api/measures/cms122/fidelity/diff` literal tier uses the same
 inclusive end-of-day bound, while its date-only January 1 start remains correct.
 
-The sole truncated expansion is Advanced Illness (1000/1997) in each Bundle; no primary-run mismatch
-depends on it. The older vendored CMS122 v0.5.000 bundle changed **0/55** population vectors when run with
-the v1 Bundle's ValueSets as `valueSetCache`; re-vendoring remains a provenance/currency improvement,
-not an outcome change for this fixture corpus.
+**The Advanced Illness truncation described here is CLOSED and this paragraph is history.** It read
+"the sole truncated expansion is Advanced Illness (1000/1997) in each Bundle; no primary-run mismatch
+depends on it" — true when written, superseded on 2026-07-29 by ADR-041: `vendor:official
+--complete-terminology` re-expands upstream-capped OIDs from VSAC at the pinned
+`Library/ecqm-fhir-update-2025` release, so `AdvancedIllness` is **2000 codes in both artifacts** and
+`truncated` is `[]`. Recorded rather than deleted because the *shape* still matters: upstream caps
+expansions at 1000 by policy (full ones need an NLM licence), so any newly vendored measure starts
+capped until it is completed with the credential — and a capped artifact is refused at routing, not
+silently scored. The older vendored CMS122 v0.5.000 bundle changed **0/55** population vectors when run
+with the v1 Bundle's ValueSets as `valueSetCache`; re-vendoring remains a provenance/currency
+improvement, not an outcome change for this fixture corpus.
 
 ADR-026 isolation remains executable policy: only `standards/literal-diff.ts` and
 `standards/official-cases.ts` may import `fqm-execution`; the architecture test separately preserves
