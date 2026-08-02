@@ -1,5 +1,51 @@
 # Journal
 
+## 2026-08-02 (M-B) — QRDA Category I passes the HL7 base ruler: 76 findings to 0, measured (branch `fix/qrda1-cda-schema-conformance`)
+
+The findings from this morning's CVU+ run were three defects, and the arithmetic said so exactly:
+56 + 10 + 10 = 76. All three are fixed and the same 22 submissions re-run against the same Cypress
+instance. **Category I: 0 against the HL7 base ruler**, XSD and Schematron alike, on all ten documents.
+Not a re-derivation — the documents were regenerated and re-uploaded.
+
+**`@root` (56).** CDA's `II.root` is typed `uid` = `oid|uuid|ruid`, and `urn:workwell:employee`,
+`:device`, `:custodian`, `:fhir` are none of those. Now four UUID constants in `qrda-common.ts`. Two
+decisions inside that: **UUID rather than an OID arc**, because WorkWell holds no registered arc and
+asserting an unregistered OID is a *false claim of a registered identity* — strictly worse than a UUID,
+which asserts a private domain and nothing more (owner's call; if MIE assigns an arc, those four
+constants are the only place that changes). And **generated once, hardcoded**, because a per-run
+`randomUUID()` would give the same employee a different identifier domain on every export — the opposite
+of what a root means, and it would still pass the schema, so nothing would catch it.
+
+**`versionNumber` (10).** The eCQM version STRING `1.0.000` was going into a CDA `INT`. Correct as
+identity, wrong as a type. Now the major component via `cdaVersionNumber`, which returns `null` rather
+than guessing when the version does not start with digits — omitting an optional element is conformant,
+emitting an invalid one is not. Nothing is lost; the exact version is already pinned by the
+version-specific eMeasure UUID in `<id>`.
+
+**`<text>` (10).** It sat inside `<externalDocument>` *after* `setId`/`versionNumber`, where CDA's
+sequence is `id, code, text, setId, versionNumber`. Dropped rather than moved: `ExternalDocument/text`
+is an ED describing the referenced document's content, a bare measure id is not that, and `<id>`/`<setId>`
+already carry the identity.
+
+**The authored path deliberately still fails.** It keeps `urn:workwell:measure`, and a test pins that as
+the ONLY invalid root left. ADR-046 decision 3 forbids inventing a published eMeasure identity and
+ADR-051 concluded the authored catalogue is not QRDA-representable at all — so that document is
+non-conformant *by design*, and the invalid root is the honest marker of it. A valid-looking UUID would
+hide the fact rather than fix it. What the test enforces is that the exception has not spread to the
+subject, device, custodian or resource roots.
+
+**Also corrected, both of the same family as the run that found them.** `qrda1-import.ts`'s `idOf`
+comment called `urn:workwell:fhir` "our own root" in a way that read as a dependency — the function is
+root-agnostic, which is exactly what let the export's root change without touching ADR-051's round trip.
+And `qrda1-export.test.ts`'s header presented "0 base-HL7 errors" as though it were a conformance
+result; it is a **Schematron** result, and the XSD layer it never covered is where all 76 of these lived.
+
+Remaining: **40** Category I findings against the CMS ruler — exactly 4 per document, all CMS Hospital
+templateIds ADR-050 decided not to claim, undisturbed. **QRDA Category III unchanged at 48**; none of
+these three touches its absent structure or templateId version drift, and that is its own piece of work.
+Locked decision #2's bar is still not met — this is the export leg, not the CVU+ loop.
+Backend suite 1790 tests, 0 fail. Evidence: `docs/evidence/CVU_VALIDATION_RUN_2026-08-02.md` §9.
+
 ## 2026-08-02 (M-B) — the first CVU+ result exists, and it says our own ruler had no XSD in it (branch `feat/cvu-validation-findings`)
 
 Twenty-two documents went into Cypress CVU+ 7.5.1 and came back with 240 findings. That is the headline
