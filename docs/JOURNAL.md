@@ -18,6 +18,14 @@ documents and recorded the 12 failures in the scratch manifest. Docker is down n
 submitted and CVU+ produced no pass/fail result, rule id, or error count. This is a reproducible
 checkpoint toward M-B, not completion of the milestone.
 
+## 2026-07-31 (M-B) — QRDA-I export bundle reads are scoped to run subjects (branch `fix/qrda-loadbundles-subject-scope`)
+
+Closed the production timeout hazard recorded in the 2026-07-30 `feat/qrda1-patient-data` entry: `GET /api/runs/:id/qrda1` now re-reads only the run's known `wc|` subjects, using direct WebChart `Patient/{id}` reads and the existing per-resource composition. The route-level seam is covered so a run with a small subject set cannot silently regress to a whole-tenant Patient-list crawl.
+
+The optional source/client methods preserve compatibility: JSON buckets filter locally, and fixture or older WebChart clients fall back to the existing full read. The full-crawl read used by population-run cohort discovery is unchanged and remains correct because that path does not know subject ids in advance; export data is still "as of NOW, not as of the run" per ADR-050.
+
+Round 3 closes the silent-data-loss path on `_count`-rejecting servers by negotiating the capability inside scoped resource searches, logs every Patient-only fallback, and returns a specific export reason for degraded retrieval. A single non-404 Patient read now degrades only that subject and the batch continues. Near the 5000-subject refusal, scoped export still performs up to that many sequential reads: a STRICT IMPROVEMENT over the unbounded whole-tenant crawl, but not a complete large-scope solution without concurrency/streaming or true bulk `$export`.
+
 ## 2026-07-31 (M-C) — extraction proposal proposes resolutions for the content and test-edge gates (branch feat/measure-engine-extraction-proposal)
 
 This is a DOCS-ONLY proposal for the later packages/measure-engine extraction; no package or source file was moved. Gate 1 recommends an injected content contract: WorkWell's catalog, WorkWell-authored compiled ELM, and synthetic-oriented value-set fallback belong in a separate sibling content package, while generic FHIRHelpers remains an engine asset and the engine keeps cql-execution + cql-exec-fhir only.

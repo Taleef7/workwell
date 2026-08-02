@@ -57,6 +57,55 @@ test("jsonBucketDataSource: single object, array, and empty input load to the ri
   assert.equal(jsonBucketDataSource({}).kind, "json");
 });
 
+test("jsonBucketDataSource: loadBundlesFor filters among multiple requested candidates", async () => {
+  const requested = { resourceType: "Bundle", entry: [{ resource: { resourceType: "Patient", id: "patient-1" } }] };
+  const excluded = { resourceType: "Bundle", entry: [{ resource: { resourceType: "Patient", id: "patient-2" } }] };
+  const malformed = { resourceType: "Bundle", entry: "not-an-array" };
+  const source = jsonBucketDataSource([requested, excluded, malformed]);
+
+  assert.deepEqual(await source.loadBundlesFor!(["patient-1"]), [requested]);
+});
+
+test("jsonBucketDataSource: loadBundlesFor returns only requested bare Patient ids", async () => {
+  const bundle = (id: string) => ({ resourceType: "Bundle", entry: [{ resource: { resourceType: "Patient", id } }] });
+  const source = jsonBucketDataSource([bundle("p-1"), bundle("p-2")]);
+
+  assert.deepEqual(await source.loadBundlesFor!(["p-2"]), [bundle("p-2")]);
+});
+
+test("webChartDataSource: loadBundlesFor uses the client's scoped transport and never crawls", async () => {
+  const requested: string[][] = [];
+  let fullFetches = 0;
+  const source = webChartDataSource(
+    { baseUrl: "x", apiKey: "k" },
+    {
+      kind: "test",
+      fetchPatientPayloads: async () => {
+        fullFetches++;
+        return [];
+      },
+      fetchPatientPayloadsByIds: async (ids) => {
+        requested.push([...ids]);
+        return [{ resourceType: "Bundle", entry: [{ resource: { resourceType: "Patient", id: ids[0] } }] }];
+      },
+    },
+  );
+
+  const bundles = await source.loadBundlesFor!(["p-7", "p-8"]);
+  assert.deepEqual(requested, [["p-7", "p-8"]]);
+  assert.equal(fullFetches, 0);
+  assert.equal((bundles[0] as { entry: unknown[] }).entry.length, 1);
+});
+
+test("webChartDataSource: loadBundlesFor falls back for fixture clients without scoped transport", async () => {
+  const bundle = { resourceType: "Bundle", entry: [{ resource: { resourceType: "Patient", id: "p-1" } }] };
+  const source = webChartDataSource({ baseUrl: "x", apiKey: "k" }, fixtureWebChartClient([bundle]));
+
+  const bundles = await source.loadBundlesFor!(["p-1"]);
+  assert.equal(bundles.length, 1);
+  assert.equal((bundles[0] as { entry: Array<{ resource: { id: string } }> }).entry[0]!.resource.id, "p-1");
+});
+
 test("resolveDataSource: defaults to JSON; selects WebChart only when BOTH env vars are set", () => {
   assert.equal(resolveDataSource({}, { a: 1 }).kind, "json");
   assert.equal(resolveDataSource({ WORKWELL_WEBCHART_BASE_URL: "x" }, { a: 1 }).kind, "json"); // only one set → JSON
@@ -142,6 +191,38 @@ test("webChartConfigFromEnv: a malformed PRIVATE_KEY_B64 throws rather than degr
 test("webChartDataSource: the default HTTP transport constructs only on the gated WebChart path", () => {
   const src = webChartDataSource({ baseUrl: "x", apiKey: "k" });
   assert.equal(src.kind, "webchart");
+});
+
+test("webChartDataSource: scoped loading passes exactly the requested ids to a capable client", async () => {
+  const requestedIds: string[] = [];
+  let fullLoadCalls = 0;
+  const bundleFor = (id: string) => ({
+    resourceType: "Bundle",
+    type: "collection",
+    entry: [{ resource: { resourceType: "Patient", id } }],
+  });
+  const client = {
+    kind: "test",
+    fetchPatientPayloads: async () => {
+      fullLoadCalls++;
+      return [];
+    },
+    fetchPatientPayloadsByIds: async (ids: readonly string[]) => {
+      requestedIds.push(...ids);
+      return ids.map(bundleFor);
+    },
+  };
+
+  const bundles = await webChartDataSource({ baseUrl: "x", apiKey: "k" }, client).loadBundlesFor!(["patient-1", "patient-3"]);
+  assert.deepEqual(requestedIds, ["patient-1", "patient-3"]);
+  assert.equal(fullLoadCalls, 0);
+  assert.equal(bundles.length, 2);
+});
+
+test("webChartDataSource: scoped loading falls back to full loading for fixture clients", async () => {
+  const payload = webchartAudiogram({ system: "http://www.ama-assn.org/go/cpt", code: "92557" }, "2026-04-23T00:00:00.000Z");
+  const bundles = await webChartDataSource({ baseUrl: "x", apiKey: "k" }, fixtureWebChartClient([payload])).loadBundlesFor!(["not-in-fixture"]);
+  assert.equal(bundles.length, 1);
 });
 
 test("resolveDataSource: deployed default stays JSON when WebChart env vars are unset or blank", async () => {

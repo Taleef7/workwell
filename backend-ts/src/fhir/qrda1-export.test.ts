@@ -277,6 +277,28 @@ test("QRDA I: a bundle that maps to NO QDM entries is not reported as conformant
   assert.match(doc!.xml, /EMPTY/);
 });
 
+test("QRDA I: a Patient-only fallback reports the source retrieval failure distinctly", () => {
+  const degraded = {
+    resourceType: "Bundle",
+    type: "collection",
+    entry: [
+      { resource: { resourceType: "Patient", id: "emp-006" } },
+      {
+        resource: {
+          resourceType: "OperationOutcome",
+          issue: [{ severity: "warning", code: "processing", diagnostics: "WebChart request failed: 403 Forbidden" }],
+        },
+      },
+    ],
+  };
+  const [doc] = buildQrda1Documents(run, "cms125", [outcome("COMPLIANT", officialEvidence(true))], () => degraded);
+  assert.equal(doc!.conformant, false);
+  assert.equal(doc!.nonConformanceReasons.length, 1);
+  assert.match(doc!.nonConformanceReasons[0]!, /subject data could not be retrieved from the source system/);
+  assert.match(doc!.nonConformanceReasons[0]!, /WebChart request failed: 403 Forbidden/);
+  assert.doesNotMatch(doc!.nonConformanceReasons[0]!, /no QDM patient data entries/);
+});
+
 test("QRDA I: an AUTHORED measure is non-conformant BECAUSE it has no published identity (CONF:67-12811)", () => {
   // An eMeasure Reference QDM SHALL name the measure by its published eMeasure Identifier root. An
   // authored measure has none — it was never published — and ADR-046 decision 3 forbids inventing one.
