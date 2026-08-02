@@ -74,12 +74,21 @@ Sign-up at `POST /users` (Devise; the development settings auto-approve and auto
 `file` upload to `POST /qrda_validation/:year/:qrda_type/:organization`. Credentials are synthetic and
 were kept outside the repository.
 
-**Correction to the runbook:** `scripts/cvu/README.md` says the validators are listed at
-`GET /qrda_validation`. In v7.5.1 that returns **HTTP 500** — `QrdaUploadsController` declares
-`respond_to :xml, :json` and has no HTML template, so Rails raises
-`ActionView::MissingTemplate (Missing template qrda_uploads/index...)`. The route requires an explicit
-format: `GET /qrda_validation.json` returns HTTP 200 and the validator list. The same applies to the
-upload route.
+**Correction to the runbook — and to this document's own first draft.** `QrdaUploadsController` declares
+`respond_to :xml, :json` and ships no HTML template, so a request that negotiates neither fails. The
+first draft of this section, and the runbook edit made alongside it, said "the bare path returns HTTP
+500" and "the explicit format suffix is required". **Both overgeneralized from a single measurement.**
+Codex's review of this PR pointed at the inconsistency; measuring all four combinations showed the defect
+was in the prose, not in the runbook's commands, which already sent `Accept: application/json`:
+
+| Request | `Accept: */*` (curl default) | `Accept: application/json` | `.json` suffix |
+|---|---|---|---|
+| `GET /qrda_validation` | **500** `ActionView::MissingTemplate` | 200 | 200 |
+| `POST /qrda_validation/2026/qrdaI/hl7` | **422** | 201 | 201 |
+
+So it is **content negotiation, not the path**. Either the header or the suffix works; neither is
+required if the other is present. The 500 is worth recording anyway because it reads like a broken
+stand-up rather than a wrong Accept type, which is how a bare `curl` will present it.
 
 Cypress v7.5.1 offers validators for 2023–2027. Per ADR-050 the correct ruler for the EC measures we
 route is the **HL7 base IG**, not the CMS Hospital IG, so `hl7` is the primary target; every QRDA-I was
@@ -120,6 +129,16 @@ Every one of the 22 submissions returned **HTTP 201**. No submission was rejecte
 ADR-050 recorded QRDA Category I as measuring **0 base-HL7 errors**. CVU+ **confirms that exactly**:
 across all 10 Category I documents, against the HL7 base ruler, the base-HL7 **Schematron** produced
 zero findings.
+
+**That zero is not vacuous, and it was worth proving rather than assuming** — a validator that never ran
+reports zero exactly like one that ran clean, which is the whole complaint this section goes on to make
+about our own tooling. `Validators::QrdaUploadValidator` composes `[CDA.instance, qrda_validator]`, and
+its `qrda_1_validator` returns `Cat1R53.instance` for `organization == 'hl7'` when `bundle_year > 2021` —
+but only past a `return unless supported_bundle_versions.include? bundle_year.to_s` guard, which would
+otherwise leave the Schematron slot `nil`. The CMS ruler reached
+`CMSQRDA1HQRSchematronValidator` through **that same guard at the same `bundle_year` (2025)** and produced
+40 findings, so the guard demonstrably passed. Therefore `Cat1R53` was constructed and executed on all 10
+documents and returned nothing.
 
 But CVU+ runs a layer our own tooling never did. `backend-ts/scripts/qrda-schematron-check.py` is, by its
 own first line, a measurement "against the published **Schematron**". It does not validate against the
@@ -257,7 +276,7 @@ curl.exe --silent -o NUL -w '%{http_code}' http://127.0.0.1:3000/users/sign_in  
 # 3. User — POST /users with user[email], user[password], user[password_confirmation],
 #    user[terms_and_conditions] and the form's authenticity_token. Keep credentials out of the repo.
 
-# 4. Validators — note the explicit .json; the bare path 500s.
+# 4. Validators — ask for JSON explicitly, by suffix or Accept header. A bare curl (Accept: */*) 500s.
 curl.exe --silent -b <jar> http://127.0.0.1:3000/qrda_validation.json
 
 # 5. Submit.
