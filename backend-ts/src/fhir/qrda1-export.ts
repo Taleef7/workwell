@@ -44,7 +44,17 @@ import { employeeById } from "../engine/synthetic/employee-catalog.ts";
 import { ROSTER_ELIGIBLE_MEASURES } from "../engine/ingress/enrollment/roster.ts";
 import { loadOfficialArtifact, officialMeasureIdentifiers } from "../wiring/official-artifacts.ts";
 import { officialReportIdentity } from "./measure-report.ts";
-import { EMEASURE_ID_ROOT, LOINC, esc, hl7Date, hl7Ts, qrdaMeasureReference } from "./qrda-common.ts";
+import {
+  CUSTODIAN_ID_ROOT,
+  DEVICE_ID_ROOT,
+  EMEASURE_ID_ROOT,
+  EMPLOYEE_ID_ROOT,
+  LOINC,
+  esc,
+  hl7Date,
+  hl7Ts,
+  qrdaMeasureReference,
+} from "./qrda-common.ts";
 import { qdmEntriesFor, translateQdm, type QdmTranslation } from "./qdm-entries.ts";
 
 /**
@@ -167,7 +177,7 @@ function recordTarget(subjectId: string, bundle: unknown): string {
     : `<administrativeGenderCode nullFlavor="UNK"/>`;
   return `  <recordTarget>
     <patientRole>
-      <id root="urn:workwell:employee" extension="${esc(subjectId)}"/>
+      <id root="${EMPLOYEE_ID_ROOT}" extension="${esc(subjectId)}"/>
       ${NULL_ADDR("HP", "      ")}
       <telecom use="HP" nullFlavor="NI"/>
       <patient>
@@ -201,7 +211,7 @@ function authorAndCustodian(now: string): string {
   return `  <author>
     <time value="${now}"/>
     <assignedAuthor>
-      <id root="urn:workwell:device" extension="workwell-measure-studio"/>
+      <id root="${DEVICE_ID_ROOT}" extension="workwell-measure-studio"/>
       ${NULL_ADDR("WP", "      ")}
       <telecom use="WP" nullFlavor="NI"/>
       <assignedAuthoringDevice>
@@ -213,7 +223,7 @@ function authorAndCustodian(now: string): string {
   <custodian>
     <assignedCustodian>
       <representedCustodianOrganization>
-        <id root="urn:workwell:custodian" extension="workwell-measure-studio"/>
+        <id root="${CUSTODIAN_ID_ROOT}" extension="workwell-measure-studio"/>
         <name>WorkWell Measure Studio</name>
         <telecom use="WP" nullFlavor="NI"/>
         ${NULL_ADDR("WP", "        ")}
@@ -242,6 +252,13 @@ export function buildQrda1Document(
   const entries = precomputed?.entries ?? (patientBundle ? qdmEntriesFor(patientBundle) : []);
   const reference = precomputed?.reference ?? measureReference(measureId, outcome.evidence);
   const official = reference.includes(EMEASURE_ID_ROOT);
+  // The eMeasure Reference `<externalDocument>` below carries NO `<text>`. It used to carry
+  // `<text>{measureId}</text>` after `${reference}`, but CDA's ExternalDocument sequence is
+  // id, code, text, setId, versionNumber — so that text sat after setId/versionNumber and CVU+
+  // rejected it on all 10 Category I documents ("Element 'text': This element is not expected",
+  // docs/evidence/CVU_VALIDATION_RUN_2026-08-02.md §5.2). Moving it before setId would also be
+  // conformant, but ExternalDocument/text is an ED describing the REFERENCED DOCUMENT's content and a
+  // bare measure id is not that; the identity is already carried by `<id>` and `<setId>`.
   // An eMeasure Reference QDM SHALL identify the measure by its published eMeasure Identifier root
   // (CONF:67-12811). An AUTHORED measure has no such identifier — by definition, it was never published
   // — and ADR-046 decision 3 forbids inventing one, so the document falls back to WorkWell's urn and is
@@ -320,7 +337,6 @@ ${authorAndCustodian(now)}
               <reference typeCode="REFR">
                 <externalDocument classCode="DOC" moodCode="EVN">
                   ${reference}
-                  <text>${esc(measureId)}</text>
                 </externalDocument>
               </reference>
             </organizer>
