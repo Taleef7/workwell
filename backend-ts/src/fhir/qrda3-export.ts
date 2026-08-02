@@ -106,7 +106,17 @@ function criterionNamer(
   const byLabel = new Map<string, string>();
   if (official) {
     try {
-      const bundle = loadOfficialArtifact(measureId)?.bundle as
+      const artifact = loadOfficialArtifact(measureId);
+      // The SAME sha gate `qrdaMeasureReference` applies to the measure identity (ADR-046 decision 3).
+      // Without it, exporting a historical run after a re-vendor would name criteria out of the CURRENT
+      // artifact while the measure identity beside them had already fallen back to a version-qualified
+      // local id — one document asserting "these counts are not from the artifact I have" and "these are
+      // its criterion names" at the same time. Falling back to the population codes keeps the whole
+      // document consistent about which artifact it can and cannot speak for (review, #384).
+      const shaMatches =
+        artifact && (!official.artifactSha256 || artifact.manifest.sha256 === official.artifactSha256);
+      if (!shaMatches) return (code) => code;
+      const bundle = artifact.bundle as
         | { entry?: Array<{ resource?: { resourceType?: string; group?: unknown[] } }> }
         | undefined;
       const measure = bundle?.entry?.map((e) => e.resource).find((r) => r?.resourceType === "Measure");

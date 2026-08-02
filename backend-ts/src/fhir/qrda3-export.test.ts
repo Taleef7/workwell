@@ -204,3 +204,24 @@ test("QRDA III: an official measure references its published population criteria
   const authored = buildQrda3Document(run, "audiogram", outcomes);
   assert.match(authored, /<externalObservation[^>]*>\s*<id root="[0-9a-f-]{36}" extension="IPOP"\/>/);
 });
+
+test("QRDA III: a re-vendored artifact must not relabel a historical run's criteria (review, #384)", () => {
+  // ADR-046 decision 3, applied to the population-criterion references this PR added. An outcome scored
+  // under artifact sha X must not have its criteria named out of artifact sha Y — the measure identity
+  // already falls back in that case, and a document that claims a local measure id while naming the
+  // current artifact's criteria contradicts itself about which artifact it speaks for.
+  const stale = {
+    ...officialOutcome("cms122"),
+    evidence: {
+      official: {
+        ...(officialOutcome("cms122").evidence as { official: Record<string, unknown> }).official,
+        artifactSha256: "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      },
+    },
+  } as OutcomeRecord;
+  const xml = buildQrda3Document(run, "cms122", [stale]);
+  assert.ok(!xml.includes('extension="InitialPopulation_1"'), "must not name the current artifact's criteria");
+  assert.match(xml, /<externalObservation[^>]*>\s*<id root="[0-9a-f-]{36}" extension="IPOP"\/>/, "falls back");
+  // And the measure identity falls back in the same document, for the same reason — they agree.
+  assert.ok(xml.includes('root="urn:workwell:measure"'), "measure identity falls back too");
+});
