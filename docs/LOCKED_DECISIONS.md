@@ -74,6 +74,20 @@
 - **QRDA-I does not exist anywhere**; QRDA-III is a stub. Cypress + CVU+ are open source
   (github.com/projectcypress/cypress), Docker-runnable; projecttacoma/cqm-reports (Ruby) is the QRDA-I
   reference implementation (spec reference only, not a dependency).
+  > **SINCE (2026-08-02): QRDA-I EXISTS, both directions, and has been measured by CVU+.** Export
+  > (ADR-049 → ADR-050) and import (ADR-051) both ship. A local Cypress v7.5.1 took 22 submissions and
+  > **QRDA Category I now scores 0 against the HL7 base ruler** — XSD and Schematron alike — after three
+  > CDA schema defects were fixed and re-measured (#380/#381,
+  > `docs/evidence/CVU_VALIDATION_RUN_2026-08-02.md`). The remaining 4-per-document findings are the CMS
+  > **Hospital** templateIds ADR-050 deliberately does not claim.
+  >
+  > **"QRDA-III is a stub" is STILL TRUE and now quantified: 48 CVU+ findings** across the two documents
+  > (2 XSD + 46 Cat III Schematron) — templateId version drift plus absent `recordTarget`, `custodian`,
+  > `author/time`, `methodCode`, `MSRAGG`, `statusCode`, `reference` and Aggregate Count.
+  >
+  > **Decision #2's bar above is NOT met by any of this.** That bar is the LOOP; this measured the
+  > export leg over the synthetic corpus via the externally-supplied-document route. The Cypress
+  > **Calculation Check** path has never run.
 - **All 8 priority measures have official QICore v1.0.000 artifacts + MADiE test cases** in
   `cqframework/dqm-content-qicore-2025` (CMS2FHIRPCSDepScreenAndFollowUp, CMS68FHIRDocumentationCurrentMeds,
   CMS122FHIRDiabetesAssessGT9Pct, CMS125FHIRBreastCancerScreen, CMS130FHIRColorectalCancerScrn,
