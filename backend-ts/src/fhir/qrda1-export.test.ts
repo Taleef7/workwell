@@ -22,6 +22,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { buildQrda1Document, buildQrda1Documents, indexBundlesBySubject } from "./qrda1-export.ts";
+import { cdaVersionNumber } from "./qrda-common.ts";
 import { profileForId } from "../engine/ingress/webchart/live-directory.ts";
 import { subjectIdOf } from "../engine/ingress/enrollment/roster.ts";
 import type { RunRecord } from "../stores/run-store.ts";
@@ -451,4 +452,27 @@ test("QRDA I: an AUTHORED document still carries urn:workwell:measure, and ONLY 
   // and resource roots must all still be valid, so an authored export is invalid in exactly one way.
   const xml = buildQrda1Document(run, "cms125", outcome("COMPLIANT"), bundle);
   assert.deepEqual(invalidRoots(xml), ["urn:workwell:measure"]);
+});
+
+test("cdaVersionNumber: every return is a valid CDA INT, or null", () => {
+  // The helper's contract is total: for ANY input it either yields digits CDA accepts, or omits the
+  // optional element. The 22-digit case is why it strips leading zeros textually rather than via
+  // Number() — `String(Number(...))` returns "1e+21" there, an invalid INT from the guard meant to
+  // prevent exactly that.
+  const INT = /^(0|[1-9]\d*)$/;
+  for (const [input, expected] of [
+    ["1.0.000", "1"],
+    ["14.2.000", "14"],
+    ["007", "7"],
+    ["0", "0"],
+    ["  3.1  ", "3"],
+    ["1000000000000000000000", "1000000000000000000000"],
+    ["v1.0", null],
+    ["", null],
+    [undefined, null],
+  ] as const) {
+    const actual = cdaVersionNumber(input);
+    assert.equal(actual, expected, `cdaVersionNumber(${JSON.stringify(input)})`);
+    if (actual !== null) assert.match(actual, INT, `${JSON.stringify(input)} must yield a valid CDA INT`);
+  }
 });
