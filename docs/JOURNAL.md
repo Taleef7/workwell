@@ -46,10 +46,14 @@ Aggregate Count. The single XSD error is the same finding from the schema side: 
 **What this is not.** It is the externally-supplied-document route, not Calculation Check. Nothing here
 says our calculations are right. Locked decision #2's bar — import → evaluate → export → **CVU+ green** —
 is **not met**; this measures the export leg's distance from it. No conformance claim in `README.md` or
-`STANDARDS_CONFORMANCE.md` was touched, per #379's scope. Also corrected in the runbook: `GET
-/qrda_validation` returns **500**, not a validator listing — the controller is `respond_to :xml, :json`
-with no HTML template, so the `.json` suffix is required, and the bare path fails in a way that reads as
-a broken stand-up.
+`STANDARDS_CONFORMANCE.md` was touched, per #379's scope. Also corrected in the runbook — **and then corrected again, because the
+first correction overgeneralized.** `GET /qrda_validation` returns **500** and the POST returns **422**
+under curl's default `Accept: */*`, since the controller is `respond_to :xml, :json` with no HTML
+template. I wrote that up as "the `.json` suffix is required"; Codex's review flagged that the runbook's
+own commands still used bare routes, and measuring all four combinations showed why that was harmless —
+those commands already sent `Accept: application/json`, which returns 200/201. It is **content
+negotiation, not the path**, and the defect was in my prose rather than in the commands. The suffix is
+now belt-and-braces on both.
 
 Evidence: `docs/evidence/CVU_VALIDATION_RUN_2026-08-02.md`.
 
