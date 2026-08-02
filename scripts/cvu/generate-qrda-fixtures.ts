@@ -94,6 +94,19 @@ function nestingAndEscapingProblem(xml: string): string | null {
 
 const errorMessage = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
+const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * `officialMeasurementPeriod` returns an ASYMMETRIC pair and that asymmetry is deliberate: `start` is
+ * date-only, while `end` has already been through `normalizePeriodEnd` — the fqm-execution#371
+ * workaround that pushes the last day to end-of-day. Appending a time suffix to both produced
+ * `2024-06-01T23:59:59.999ZT23:59:59.999Z`, which the QRDA exporter rejected as an invalid
+ * `effectiveTime`, skipping all 12 documents. So widen only what is still a bare date, exactly as
+ * `normalizePeriodEnd` guards itself — the run record must carry timestamps either way.
+ */
+const atStartOfDay = (value: string): string => (DATE_ONLY.test(value) ? `${value}T00:00:00.000Z` : value);
+const atEndOfDay = (value: string): string => (DATE_ONLY.test(value) ? `${value}T23:59:59.999Z` : value);
+
 function runFor(measureId: string, period: { start: string; end: string }): RunRecord {
   return {
     id: `cvu-fixtures-${measureId}`,
@@ -105,8 +118,8 @@ function runFor(measureId: string, period: { start: string; end: string }): RunR
     requestedScope: { measureId },
     startedAt: `${EVALUATION_DATE}T00:00:00.000Z`,
     completedAt: `${EVALUATION_DATE}T00:00:00.000Z`,
-    measurementPeriodStart: `${period.start}T00:00:00.000Z`,
-    measurementPeriodEnd: `${period.end}T23:59:59.999Z`,
+    measurementPeriodStart: atStartOfDay(period.start),
+    measurementPeriodEnd: atEndOfDay(period.end),
   };
 }
 

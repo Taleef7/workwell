@@ -1,5 +1,62 @@
 # Journal
 
+## 2026-08-02 (M-B) — the first CVU+ result exists, and it says our own ruler had no XSD in it (branch `feat/cvu-validation-findings`)
+
+Twenty-two documents went into Cypress CVU+ 7.5.1 and came back with 240 findings. That is the headline
+only in the sense that a number now exists where none did; the useful part is which of them we already
+believed and which we did not.
+
+**Both recorded blockers were cleared, and only one had been real.** #376 stopped on "absent official
+terminology sidecars" and Docker. The sidecars were never absent — that pass ran inside a git worktree,
+and `terminology.json` is gitignored by design (ADR-036), so it cannot exist there. It was present in the
+primary tree the whole time. The runbook's advice — regenerate through the approved vendoring process —
+would have "worked" by re-fetching what was already on disk one directory up, and the uncredentialed form
+of that command **reverts ADR-041's completed expansions back to capped**. The worktree in question still
+holds exactly that as uncommitted changes to five manifests; left untouched and flagged, because
+committing it would make cms122/cms125 unroutable and fail the deploy-blocking reproducibility gate.
+
+**Then the generator still produced 0 documents**, twelve times over: `invalid ISO date for QRDA
+effectiveTime: 2024-06-01T23:59:59.999ZT23:59:59.999Z`. `officialMeasurementPeriod` returns an asymmetric
+pair on purpose — `start` date-only, `end` already pushed to end-of-day by the fqm#371 workaround — and
+the fixture script appended a time suffix to both, so `start` was right by luck. Fixed by guarding on the
+date-only shape the way `normalizePeriodEnd` guards itself. `literal-diff.ts`, the only other caller,
+hands the pair to `calculateOfficial`, which re-normalizes idempotently, so it was never affected. **12
+documents, 0 failures**, all 10 subjects in the official initial population.
+
+**ADR-050's claim is externally confirmed, and is narrower than it reads.** Across all 10 Category I
+documents the base-HL7 **Schematron** produced **0** findings — exactly what ADR-050 recorded. And the
+CMS ruler costs exactly **+4** on every one of the ten, all four the CMS Hospital templateIds ADR-050
+decided not to claim. CVU+ knows nothing about our partition and reproduced it on the nose.
+
+**But CVU+ runs a layer we never did.** `qrda-schematron-check.py` measures "against the published
+Schematron" — its own first line — and has no XSD in it. CVU+ runs `CqmValidators::CDA` first, and every
+Category I document fails it 6–10 times: `@root` carrying `urn:workwell:*` where CDA's `uid` type wants
+an OID or UUID (56 of the 76), `versionNumber="1.0.000"` in an `INT` (10), and a `<text>` inside
+`externalDocument` (10). 76 accounted for exactly, so fixing those three takes Category I to zero against
+the HL7 base ruler. Not a guard that could not fire — a guard whose scope was narrower than the claim it
+got cited for, and invisible because the only instrument aimed at the document had no schema check in it.
+
+**QRDA Category III is quantified for the first time:** 24 each, 23 of them Cat III Schematron. ADR-009
+called it "a structurally-representative stub" and that is now a number. Two separable causes: templateId
+version drift (`2017-06-01` where R2.1 wants `2020-12-01`), and genuinely absent structure — no
+`recordTarget`, `custodian`, `author/time`, `methodCode`, `MSRAGG`, `statusCode`, `reference`, or
+Aggregate Count. The single XSD error is the same finding from the schema side: `component` sits where
+`recordTarget` should be, because `recordTarget` is not there.
+
+**What this is not.** It is the externally-supplied-document route, not Calculation Check. Nothing here
+says our calculations are right. Locked decision #2's bar — import → evaluate → export → **CVU+ green** —
+is **not met**; this measures the export leg's distance from it. No conformance claim in `README.md` or
+`STANDARDS_CONFORMANCE.md` was touched, per #379's scope. Also corrected in the runbook — **and then corrected again, because the
+first correction overgeneralized.** `GET /qrda_validation` returns **500** and the POST returns **422**
+under curl's default `Accept: */*`, since the controller is `respond_to :xml, :json` with no HTML
+template. I wrote that up as "the `.json` suffix is required"; Codex's review flagged that the runbook's
+own commands still used bare routes, and measuring all four combinations showed why that was harmless —
+those commands already sent `Accept: application/json`, which returns 200/201. It is **content
+negotiation, not the path**, and the defect was in my prose rather than in the commands. The suffix is
+now belt-and-braces on both.
+
+Evidence: `docs/evidence/CVU_VALIDATION_RUN_2026-08-02.md`.
+
 ## 2026-08-01 — Documentation refresh
 
 Refreshed README.md and docs/ROADMAP_2026-07-24.md to reflect current reality: the MADiE gate now covers eight measures at 410/410 (was five measures at 231/231); cms122 and cms125 are routed to official execution in production, while six more measures are vendored and MADiE-gated but not routed — CMS2, CMS130, CMS138, CMS165, and CMS951 are routable but not yet routed, while CMS68 is additionally unroutable because episode-of-care support (population basis = Encounter) is unbuilt in the official executor (ADR-047).
