@@ -10,6 +10,13 @@
  * pinned here in TypeScript because CI has no Python/lxml; `scripts/qrda-schematron-check.py` is how
  * they were derived and how to re-derive them. Against that Schematron the with-bundle document has
  * **0 base-HL7 errors** and 4 CMS-hospital-only findings, which are expected — see ADR-050.
+ *
+ * **That "0 base-HL7 errors" is a SCHEMATRON result and nothing more.** Cypress CVU+ 7.5.1 confirmed it
+ * exactly on 2026-08-02 — the base-HL7 `Cat1R53` Schematron ran and returned zero on all 10 documents —
+ * and then failed the same documents 6–10 times each on the CDA **XSD schema**, which
+ * `qrda-schematron-check.py` does not validate at all. Do not read the sentence above as a conformance
+ * claim. The three defects it was blind to (`@root` URNs, the `versionNumber` string, a misplaced
+ * `<text>`) are pinned below; see `docs/evidence/CVU_VALIDATION_RUN_2026-08-02.md`.
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -201,14 +208,24 @@ test("QRDA I: the Measure Section carries the QDM flavour and an eMeasure Refere
   const xml = buildQrda1Document(run, "cms125", outcome("COMPLIANT"), bundle);
   assert.ok(xml.includes('<templateId root="2.16.840.1.113883.10.20.24.2.3"/>'), "Measure Section QDM");
   assert.ok(xml.includes('<templateId root="2.16.840.1.113883.10.20.24.3.97"/>'), "eMeasure Reference QDM");
-  assert.match(xml, /<externalDocument[\s\S]*<text>cms125<\/text>/, "the reference names the measure");
+  // The reference still NAMES the measure — but through `<id>`, where CDA puts identity, not through a
+  // `<text>` sitting after setId/versionNumber where the schema does not allow one (CVU+, 2026-08-02).
+  assert.match(
+    xml,
+    /<externalDocument[\s\S]*?<id root="urn:workwell:measure" extension="cms125"\/>[\s\S]*?<\/externalDocument>/,
+    "the reference names the measure",
+  );
 });
 
 test("QRDA I: an OFFICIAL outcome references the published eMeasure UUIDs", () => {
   const xml = buildQrda1Document(run, "cms125", outcome("COMPLIANT", officialEvidence(true)), bundle);
   assert.match(xml, /<id root="2\.16\.840\.1\.113883\.4\.738" extension="[0-9a-f-]{36}"\/>/);
   assert.match(xml, /<setId root="[0-9a-f-]{36}"\/>/);
-  assert.match(xml, /<versionNumber value="1\.0\.000"\/>/);
+  // CDA `versionNumber` is an INT, so the eCQM version STRING "1.0.000" cannot go here — CVU+ rejected
+  // it on every document (evidence 2026-08-02 §5.2). The major component is the integer version; the
+  // exact one is already pinned by the version-specific UUID above.
+  assert.match(xml, /<versionNumber value="1"\/>/);
+  assert.ok(!xml.includes('value="1.0.000"'), "the version STRING is not a valid CDA INT");
   assert.ok(!xml.includes('root="urn:workwell:measure"'), "an official document must not claim WorkWell's urn");
 });
 
@@ -378,4 +395,60 @@ test("QRDA I: a measure that is NOT roster-eligible carries no such caveat", () 
   const [doc] = buildQrda1Documents(run, "cms122", [cms122], () => bundle);
   assert.deepEqual(doc!.caveats, []);
   assert.ok(!doc!.xml.includes("OMITTED:"));
+});
+
+/*
+ * ---------------------------------------------------------------------------------------------------
+ * CDA XSD schema conformance — the layer `qrda-schematron-check.py` never validated.
+ *
+ * Each assertion below corresponds to a finding Cypress CVU+ 7.5.1 reported against the HL7 base ruler
+ * on 2026-08-02, quoted in `docs/evidence/CVU_VALIDATION_RUN_2026-08-02.md` §5.2. They are pinned in
+ * TypeScript for the same reason the CONF assertions above are: CI runs neither CVU+ nor a schema
+ * validator, so without these the defects can silently return.
+ * ---------------------------------------------------------------------------------------------------
+ */
+
+test("QRDA I: versionNumber is a CDA INT, not the eCQM version string", () => {
+  const xml = buildQrda1Document(run, "cms125", outcome("COMPLIANT", officialEvidence(true)), bundle);
+  // CVU+: "Element 'versionNumber', attribute 'value': '1.0.000' is not a valid value of the atomic
+  // type '{urn:hl7-org:v3}int'." — 1 per document, 10 across the Category I corpus.
+  assert.match(xml, /<versionNumber value="1"\/>/);
+  assert.ok(!/<versionNumber value="[^"]*[^0-9"][^"]*"\/>/.test(xml), "versionNumber must be digits only");
+});
+
+test("QRDA I: the eMeasure externalDocument carries no misplaced <text>", () => {
+  const xml = buildQrda1Document(run, "cms125", outcome("COMPLIANT", officialEvidence(true)), bundle);
+  // CVU+: "Element 'text': This element is not expected." CDA's ExternalDocument sequence is
+  // id, code, text, setId, versionNumber — ours sat AFTER setId/versionNumber.
+  const externalDocuments = xml.match(/<externalDocument[\s\S]*?<\/externalDocument>/g) ?? [];
+  assert.ok(externalDocuments.length > 0, "the document must carry an eMeasure reference to test");
+  for (const ed of externalDocuments) {
+    assert.ok(!ed.includes("<text>"), `externalDocument must not carry <text>: ${ed}`);
+  }
+});
+
+const OID = /^[0-2](\.(0|[1-9]\d*))+$/;
+const UUID = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+const invalidRoots = (xml: string): string[] => {
+  const roots = [...xml.matchAll(/<id root="([^"]+)"/g)].map((m) => m[1]!);
+  assert.ok(roots.length > 0, "the document must carry ids to test");
+  return [...new Set(roots.filter((r) => !OID.test(r) && !UUID.test(r)))];
+};
+
+test("QRDA I: an OFFICIAL document has no id @root that CDA's uid type rejects", () => {
+  const xml = buildQrda1Document(run, "cms125", outcome("COMPLIANT", officialEvidence(true)), bundle);
+  // CVU+ reported four distinct URN roots (employee, device, custodian, fhir) totalling 56 of the 76
+  // findings against the HL7 base ruler. `uid` is the union oid|uuid|ruid; `urn:...` is none of them.
+  assert.deepEqual(invalidRoots(xml), []);
+});
+
+test("QRDA I: an AUTHORED document still carries urn:workwell:measure, and ONLY that", () => {
+  // Pinned as a deliberate exception rather than left to chance. ADR-046 decision 3 forbids inventing a
+  // published eMeasure identity for a measure that was never published, and ADR-051 concluded the
+  // authored catalogue is not QRDA-representable at all — so this document is non-conformant BY DESIGN
+  // and the invalid root is the honest marker of it. Dressing it in a valid-looking UUID would hide
+  // that. What this test enforces is that the exception has not spread: the subject, device, custodian
+  // and resource roots must all still be valid, so an authored export is invalid in exactly one way.
+  const xml = buildQrda1Document(run, "cms125", outcome("COMPLIANT"), bundle);
+  assert.deepEqual(invalidRoots(xml), ["urn:workwell:measure"]);
 });

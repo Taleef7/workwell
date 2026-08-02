@@ -17,6 +17,34 @@ export const OBS_CAT = "2.16.840.1.113883.5.4";
 export const EMEASURE_ID_ROOT = "2.16.840.1.113883.4.738";
 
 /**
+ * WorkWell's own identifier domains, as CDA `@root` values.
+ *
+ * **These are UUIDs because CDA's `II.root` is typed `uid` — the union of `oid`, `uuid` and `ruid` —
+ * and a URN is none of them.** They used to be `urn:workwell:employee` / `:device` / `:custodian` /
+ * `:fhir`, which Cypress CVU+ 7.5.1 rejected 56 times across the 10 Category I documents on 2026-08-02:
+ * `Element 'id', attribute 'root': 'urn:workwell:employee' is not a valid value of the union type
+ * '{urn:hl7-org:v3}uid'` (`docs/evidence/CVU_VALIDATION_RUN_2026-08-02.md` §5.2).
+ *
+ * A UUID rather than an OID arc is a deliberate choice, not a shortcut: WorkWell holds no registered
+ * OID arc, and asserting an unregistered OID would be a false claim of a registered identity — strictly
+ * worse than a UUID, which asserts a private domain and nothing more. If MIE assigns an arc later,
+ * these four constants are the only place that changes.
+ *
+ * **They are generated ONCE and hardcoded.** A per-run `randomUUID()` here would make every export
+ * declare a different identifier domain for the same employee, which is the opposite of what a root
+ * means — and it would still pass the schema, so nothing would catch it.
+ *
+ * `urn:workwell:measure` is deliberately NOT in this list: it appears as an `<id>` root on the
+ * authored-measure fallback path, where the document is already structurally non-conformant by design
+ * (ADR-046 decision 3 forbids inventing a published eMeasure identity, and QRDA I is a format for
+ * reporting PUBLISHED eCQMs). Giving it a valid-looking UUID would hide that, not fix it.
+ */
+export const EMPLOYEE_ID_ROOT = "2dc2e375-2167-48e8-8ea2-548182034ec4";
+export const DEVICE_ID_ROOT = "676424fb-bdac-4f5e-904a-1d7858834650";
+export const CUSTODIAN_ID_ROOT = "e23d2ca4-6837-4ac9-8032-9735b960c3e9";
+export const FHIR_RESOURCE_ID_ROOT = "1e66ef3d-8340-46fc-a8fe-b2171b404a43";
+
+/**
  * XML-escape a value for text or an attribute.
  *
  * Coerces rather than assuming a string: these values now come from third-party FHIR, where a numeric
@@ -95,9 +123,31 @@ export function qrdaMeasureReference(
       official.version ? `:official:${esc(official.version)}` : ""
     }"/>`;
   }
+  const versionNumber = cdaVersionNumber(official.version);
   return [
     `<id root="${EMEASURE_ID_ROOT}" extension="${esc(ids.versionSpecific)}"/>`,
     ids.versionIndependent ? `\n${indent}<setId root="${esc(ids.versionIndependent)}"/>` : "",
-    official.version ? `\n${indent}<versionNumber value="${esc(official.version)}"/>` : "",
+    versionNumber === null ? "" : `\n${indent}<versionNumber value="${versionNumber}"/>`,
   ].join("");
+}
+
+/**
+ * CDA's `versionNumber` is an `INT`. We were emitting the eCQM version STRING into it — `1.0.000` —
+ * which Cypress CVU+ rejects on all 10 Category I documents and both Category III documents:
+ * `Element 'versionNumber', attribute 'value': '1.0.000' is not a valid value of the atomic type
+ * '{urn:hl7-org:v3}int'` (measured 2026-08-02, `docs/evidence/CVU_VALIDATION_RUN_2026-08-02.md` §5.2).
+ * Correct as identity, wrong as a type.
+ *
+ * The MAJOR component is the eCQM's integer version, which is what the element means. Nothing is lost
+ * by narrowing: the exact version is already pinned by the version-specific eMeasure UUID in `<id>`,
+ * and the version-independent one in `<setId>` — this element is supplementary to both.
+ *
+ * Returns `null` rather than guessing when the version does not begin with digits, so an unparseable
+ * version omits an optional element instead of emitting an invalid one. Omitting is conformant;
+ * emitting `1.0.000` was not.
+ */
+export function cdaVersionNumber(version: string | undefined): string | null {
+  if (!version) return null;
+  const major = /^(\d+)/.exec(version.trim());
+  return major ? String(Number(major[1])) : null;
 }

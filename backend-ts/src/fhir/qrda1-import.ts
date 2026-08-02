@@ -97,7 +97,14 @@ function times(node: CdaNode | undefined): { point?: string; start?: string; end
   return { start: isoFromHl7(child(node, "low")?.attrs.value), end: isoFromHl7(child(node, "high")?.attrs.value) };
 }
 
-/** The FHIR `id` this entry was exported under — `urn:workwell:fhir` is our own root. */
+/**
+ * The FHIR `id` this entry was exported under.
+ *
+ * Deliberately ROOT-AGNOSTIC: it takes the first `<id>` carrying an `extension`, whatever the root. That
+ * is what let the export change its own root (`urn:workwell:fhir` → `FHIR_RESOURCE_ID_ROOT`, so CDA's
+ * `uid` type would accept it) without touching ADR-051's round trip, and it is also what lets us import
+ * a third party's document, whose root will never be ours.
+ */
 function idOf(node: CdaNode, fallback: string): string {
   const own = childrenNamed(node, "id").find((n) => n.attrs.extension);
   return own?.attrs.extension ?? fallback;
