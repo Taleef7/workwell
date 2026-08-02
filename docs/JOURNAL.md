@@ -1,5 +1,39 @@
 # Journal
 
+## 2026-08-02 (M-B) — the conformance matrix catches up, and one row was two onboardings stale (branch `docs/conformance-cvu-claims`)
+
+The CVU+ result was recorded in evidence and CLAUDE.md but the two documents anyone *else* reads —
+`STANDARDS_CONFORMANCE.md` and `README.md` — still said CVU+ had not run. Claiming less than you can
+demonstrate is cheap; the risk in fixing it is claiming more, so every upgrade here is scoped to what
+the validator actually returned.
+
+**QRDA Category I upgraded** from "Schematron-clean … NOT CVU+-validated" to **CVU+-validated at 0
+findings against the HL7 base IG, XSD and Schematron alike** — 10 documents, CMS122/CMS125, five-target
+synthetic corpus, Cypress v7.5.1 at the pinned image digest. The row now carries the correction to its
+own older sentence: that "0 base-HL7 errors" was confirmed *exactly* by CVU+ and was narrower than it
+read, because `qrda-schematron-check.py` has no XSD in it and 76 findings lived in that gap.
+
+**QRDA Category III stays a stub but stops being merely asserted to be one:** 48 findings, split into
+templateId version drift (`2017-06-01` vs R2.1's `2020-12-01`/`2016-09-01`) and genuinely absent
+structure, with each cited CONF number verified present in the captured responses before it was written
+down. The single XSD error is the same finding from the schema side — `component` where `recordTarget`
+should be, because `recordTarget` is absent.
+
+**And a row nobody had touched in two onboardings: the MADiE gate said 231/231 across five measures.**
+It is **410/410 across eight** — CMS138 took it to 278 (ADR-053), CMS130+CMS165 to 410 (ADR-054).
+Verified from `OFFICIAL_GATED_MEASURES` rather than from the journal: eight keys, and
+55+66+36+19+55+47+64+68 = 410. The README had been refreshed to 410 on 2026-08-01; the conformance
+matrix had not, which is the more consequential of the two to be wrong. Also recorded there, because a
+bare "410/410" flattens it: **CMS138's green is a weaker claim than the other seven** — upstream ships
+its bundle one value set short, so four of its codes are ours while the expected vectors stay upstream's.
+
+**What was deliberately NOT upgraded.** Locked decision #2's bar is the import → evaluate → export →
+CVU+ green **loop**; this is the export leg, over synthetic data, via the externally-supplied-document
+route. The **Calculation Check path has never run**, so nothing here says our calculations are right.
+The official-vs-authored parity row keeps "the oracle is our own authored engine" — CVU+ has never been
+pointed at that question. And the authored path still emits `urn:workwell:measure`, non-conformant by
+design and pinned by a test.
+
 ## 2026-08-02 (M-B) — QRDA Category I passes the HL7 base ruler: 76 findings to 0, measured (branch `fix/qrda1-cda-schema-conformance`)
 
 The findings from this morning's CVU+ run were three defects, and the arithmetic said so exactly:
