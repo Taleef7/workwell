@@ -3,6 +3,8 @@
  * FHIR bundles to evaluate; the engine derives each subject id from its bundle. JSON-bucket is the
  * default, in-memory, DB-less source. The WebChart source is an INERT stub until E12 PR-2
  * (inert-unless-configured, mirroring resolveForecaster / resolveChannel / resolveStandingOrderProvider).
+ * Sources may also provide a scoped bundle read for callers that already know the subject ids; callers
+ * must retain the full-load fallback for older sources and fixture clients.
  * NO DB, NO node:fs here — this stays portable across every @mieweb/cloud target.
  */
 import { evaluateBatch, type BatchResult, type EvaluateBundleOptions } from "./evaluate-bundle.ts";
@@ -14,12 +16,42 @@ export interface PatientDataSource {
   readonly kind: string;
   /** The bundles ("bucket") to evaluate. DB-less for the JSON source. */
   loadBundles(): Promise<unknown[]>;
+  /**
+   * Scoped variant of loadBundles: only the bundles for the named subjects (bare FHIR Patient.id values,
+   * no "wc|" prefix). Callers should treat this as optional — when a source does not implement it, fall
+   * back to loadBundles() and filter/index the result as before.
+   */
+  loadBundlesFor?(patientIds: readonly string[]): Promise<unknown[]>;
+}
+
+function patientIdFromBundle(bundle: unknown): string | undefined {
+  if (typeof bundle !== "object" || bundle === null || Array.isArray(bundle)) return undefined;
+  const entry = (bundle as { entry?: unknown }).entry;
+  if (!Array.isArray(entry)) return undefined;
+  for (const item of entry) {
+    if (typeof item !== "object" || item === null || Array.isArray(item)) continue;
+    const resource = (item as { resource?: unknown }).resource;
+    if (typeof resource !== "object" || resource === null || Array.isArray(resource)) continue;
+    const candidate = resource as { resourceType?: unknown; id?: unknown };
+    if (candidate.resourceType === "Patient" && typeof candidate.id === "string") return candidate.id;
+  }
+  return undefined;
 }
 
 /** In-memory JSON bucket: one bundle, an array of bundles, or nothing (→ empty bucket). No DB, no fs. */
 export function jsonBucketDataSource(input?: unknown | unknown[]): PatientDataSource {
   const bundles = input === undefined ? [] : Array.isArray(input) ? input : [input];
-  return { kind: "json", loadBundles: () => Promise.resolve(bundles) };
+  return {
+    kind: "json",
+    loadBundles: () => Promise.resolve(bundles),
+    loadBundlesFor: (patientIds) => {
+      const requested = new Set(patientIds);
+      return Promise.resolve(bundles.filter((bundle) => {
+        const patientId = patientIdFromBundle(bundle);
+        return patientId !== undefined && requested.has(patientId);
+      }));
+    },
+  };
 }
 
 export interface WebChartConfig {
@@ -55,7 +87,8 @@ export interface WebChartConfig {
  * default HTTP client is provisional pending the confirmed API contract (Dave Carlson); tests inject a
  * `fixtureWebChartClient`. Selected only when its env vars are set (inert-unless-configured). The real
  * request shaping lives in `webchart/webchart-client.ts`; the reconciliation/normalization core is
- * transport-agnostic and tested. Descriptive only (ADR-008/ADR-017).
+ * transport-agnostic and tested. A scoped `loadBundlesFor` path uses the transport's optional by-id
+ * method and falls back to the full fetch for older clients. Descriptive only (ADR-008/ADR-017).
  */
 export function webChartDataSource(cfg: WebChartConfig, client?: WebChartClient): PatientDataSource {
   const c = client ?? httpWebChartClient(cfg);
@@ -63,6 +96,12 @@ export function webChartDataSource(cfg: WebChartConfig, client?: WebChartClient)
     kind: "webchart",
     async loadBundles() {
       const payloads = await c.fetchPatientPayloads();
+      return payloads.map(normalizeWebChartBundle);
+    },
+    async loadBundlesFor(patientIds: readonly string[]) {
+      const payloads = c.fetchPatientPayloadsByIds
+        ? await c.fetchPatientPayloadsByIds(patientIds)
+        : await c.fetchPatientPayloads();
       return payloads.map(normalizeWebChartBundle);
     },
   };
