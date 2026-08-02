@@ -37,7 +37,7 @@
  * it is the same reason QDM appears ONLY here and never in the evaluation path (locked decision: the
  * FHIR/QI-Core column is what we execute; QDM is a translation at the reporting edge).
  */
-import { LOINC, esc, hl7TsOrNull } from "./qrda-common.ts";
+import { FHIR_RESOURCE_ID_ROOT, LOINC, esc, hl7TsOrNull } from "./qrda-common.ts";
 
 /** Code systems a QDM entry can carry. Keyed by FHIR system URL — the only mapping direction we need. */
 const CODE_SYSTEMS: Record<string, { oid: string; name: string }> = {
@@ -136,7 +136,7 @@ function categoryCodes(resource: FhirResource): string[] {
 
 /** A stable CDA `<id>` — the FHIR id when there is one, so two exports of one resource agree. */
 function cdaId(resource: FhirResource, fallback: string): string {
-  return `<id root="urn:workwell:fhir" extension="${esc(resource.id ?? fallback)}"/>`;
+  return `<id root="${FHIR_RESOURCE_ID_ROOT}" extension="${esc(resource.id ?? fallback)}"/>`;
 }
 
 /**

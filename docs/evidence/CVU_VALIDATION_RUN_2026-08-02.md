@@ -310,3 +310,37 @@ Ordered by cost-to-fix against value, for a separate decision — not started he
    is now quantified at 23 Schematron findings.
 5. **Add XSD to `qrda-schematron-check.py`, or rename it.** Its output was cited for a conformance claim
    whose scope it never covered.
+
+## 9. Second run — items 1–3 fixed and re-measured, same day
+
+Items 1, 2 and 3 above were implemented and the identical 22 submissions re-run against the same
+Cypress instance. **Not a re-derivation: the documents were regenerated and re-uploaded, and these are
+the responses CVU+ returned.**
+
+| | Before | After |
+|---|---|---|
+| QRDA-I ×10, HL7 base ruler | 76 | **0** |
+| QRDA-I ×10, CMS ruler | 116 | **40** |
+| QRDA-III ×2, HL7 ruler | 48 | 48 |
+| **Total** | **240** | **88** |
+
+**Category I is now clean against the HL7 base ruler — 0 findings, XSD and Schematron alike, on all ten
+documents.** That is the target §8 predicted from the arithmetic (56 + 10 + 10 = 76), reached exactly.
+
+The 40 remaining Category I findings are the CMS ruler's, and every one is a CMS Hospital Quality
+Reporting templateId (`CONF:CMS_0036`, `CONF:CMS_0040`, `CONF:CMS_0044`, and the
+`…10.20.24.1.3` document template) — the four ADR-050 decided **not** to claim, unchanged at exactly 4
+per document. They are a deliberate non-claim, not a defect, and the fix did not disturb them.
+
+QRDA Category III is **unchanged at 48**, as expected: none of the three fixes touches its absent
+structure or its templateId version drift. `versionNumber` is emitted through the same shared helper,
+so that defect is fixed there too — it simply never appeared in Cat III's findings, because the document
+fails XSD earlier at `component` ordering. Item 4 remains open and is its own piece of work.
+
+**What this does and does not license.** WorkWell's QRDA Category I export now passes the HL7 base
+ruler's schema and Schematron for the two officially-routed measures over the synthetic corpus. It is
+still not Calculation Check, still not real patient data, and **locked decision #2's bar is still not
+met** — that bar is the full import → evaluate → export → CVU+ loop, and this is the export leg only.
+The authored path is deliberately untouched and still emits `urn:workwell:measure`, which CDA's `uid`
+type rejects; that document is non-conformant by design (ADR-046 decision 3, ADR-051) and a test pins
+the exception so it cannot spread.

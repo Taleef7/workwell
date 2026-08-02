@@ -98,7 +98,9 @@ test("ADR-046: an official QRDA references the published measure by its eMeasure
   assert.match(xml, /<id root="2\.16\.840\.1\.113883\.4\.738" extension="2ea22cb2-9bcc-4ca6-b2f2-68fc964365ad"\/>/);
   // version-independent → setId; the measure's identity across versions.
   assert.match(xml, /<setId root="f04ee808-8ece-4936-8b26-fafa462e1594"\/>/);
-  assert.match(xml, /<versionNumber value="1\.0\.000"\/>/);
+  // An INT, not the version string — see qrda-common.ts `cdaVersionNumber` and evidence 2026-08-02 §5.2.
+  assert.match(xml, /<versionNumber value="1"\/>/);
+  assert.ok(!xml.includes('value="1.0.000"'), "the version STRING is not a valid CDA INT");
 
   assert.ok(!xml.includes('extension="122FHIR"'), "the publisher id must not stand in for the eMeasure id");
   assert.ok(!xml.includes('root="urn:workwell:measure"'), "an official export must not claim WorkWell's urn");
