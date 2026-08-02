@@ -11,8 +11,13 @@ round-1 scratch record and is intentionally not committed.
 
 Cypress has two separate paths:
 
-- The externally supplied-document path lists validators at `GET /qrda_validation` and accepts a
-  multipart upload at `POST /qrda_validation/:year/:qrda_type/:organization`. The form field is `file`;
+- The externally supplied-document path lists validators at `GET /qrda_validation.json` and accepts a
+  multipart upload at `POST /qrda_validation/:year/:qrda_type/:organization.json`. **The explicit format
+  suffix is required.** `QrdaUploadsController` declares `respond_to :xml, :json` and ships no HTML
+  template, so the bare path returns **HTTP 500** —
+  `ActionView::MissingTemplate (Missing template qrda_uploads/index...)` — which reads like a broken
+  stand-up rather than a wrong Accept type (measured 2026-08-02, see
+  `docs/evidence/CVU_VALIDATION_RUN_2026-08-02.md` §4). The form field is `file`;
   `qrda_type` is `qrdaI` or `qrdaIII`; and `organization` selects the `hl7` or `cms` validator family.
   The application runs CDA plus the selected HL7 or CMS Schematron validators and returns execution
   errors and warnings.
@@ -48,9 +53,13 @@ malformed content after the last closing tag, unquoted attribute values, or a ba
 attribute value. Neither field is a CVU+ validation result or a compliance decision.
 
 Official execution needs each measure's gitignored `terminology.json` sidecar to match its committed
-manifest pin. If the executor reports that value sets could not be expanded, restore or regenerate the
-sidecars with the repository's approved official-vendoring process before treating the generator as
-blocked by document code.
+manifest pin. If the executor reports that value sets could not be expanded, **check where you are
+running before you regenerate anything**: the sidecars are gitignored (ADR-036), so they do not exist in
+a fresh git worktree even though they are present in the primary working tree. Run this generator from
+the primary tree. That is what the 2026-08-01 pass hit, and re-vendoring was the wrong remedy — an
+UNCREDENTIALED `pnpm vendor:official` reverts ADR-041's completed expansions back to capped, which makes
+cms122/cms125 unroutable and fails the reproducibility gate. Only if the sidecars are genuinely absent
+from the primary tree should you regenerate, with the credential.
 
 ## Reproduce the Cypress v7.5.1 stand-up
 
