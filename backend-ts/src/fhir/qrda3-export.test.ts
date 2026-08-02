@@ -23,8 +23,18 @@ const outcomes: OutcomeRecord[] = [
   oc("DUE_SOON"), oc("OVERDUE"), oc("MISSING_DATA"), oc("EXCLUDED"),
 ]; // IPP 10, DENEX 1, DENOM label count 10, effective denominator 9, NUMER 6
 
+/**
+ * Anchors on the Measure Data observation's **CD value** (`<value xsi:type="CD" code="NUMER" …/>`), not
+ * on any `code="NUMER"`.
+ *
+ * It used to match the latter, and that became ambiguous when the Performance Rate observation started
+ * carrying the `reference`/`externalObservation` the IG requires — which names the numerator it rates
+ * with `<code code="NUMER" …/>`. Since that observation is emitted BEFORE the populations, a lazy scan
+ * from the first `code="NUMER"` ran on to the next `INT` value it found, which belonged to IPOP: the
+ * helper reported 10 for a numerator of 6. The document was correct; the locator was not.
+ */
 const aggregateCount = (xml: string, code: string): number => {
-  const match = xml.match(new RegExp(`code="${code}"[\\s\\S]*?xsi:type="INT" value="(\\d+)"`));
+  const match = xml.match(new RegExp(`xsi:type="CD" code="${code}"[\\s\\S]*?xsi:type="INT" value="(\\d+)"`));
   assert.ok(match, `${code} aggregate count`);
   return Number(match[1]);
 };
@@ -113,4 +123,84 @@ test("ADR-046: an AUTHORED QRDA is unchanged — WorkWell's urn, no eMeasure ide
   assert.match(xml, /<id root="urn:workwell:measure" extension="cms122"\/>/);
   assert.ok(!xml.includes("2.16.840.1.113883.4.738"), "no official identity over authored counts");
   assert.ok(!xml.includes("<setId"), "no setId on the authored path");
+});
+
+/*
+ * ---------------------------------------------------------------------------------------------------
+ * QRDA III conformance — pinned because CI runs neither CVU+ nor a schema validator.
+ *
+ * Each assertion corresponds to a finding Cypress CVU+ 7.5.1 reported against the HL7 base ruler on
+ * 2026-08-02 (`docs/evidence/CVU_VALIDATION_RUN_2026-08-02.md` §10), all of which are now 0.
+ * ---------------------------------------------------------------------------------------------------
+ */
+
+test("QRDA III: the CDA header carries recordTarget, author and custodian (all SHALL)", () => {
+  const xml = buildQrda3Document(run, "audiogram", outcomes);
+  // CONF:4484-17212 / 18156+18158 / 17213. recordTarget's id is NULLED, not invented: CDA requires a
+  // patient identifier and an aggregate report is about a population.
+  assert.match(xml, /<recordTarget>\s*<patientRole>\s*<id nullFlavor="NA"\/>/, "recordTarget, id nulled");
+  assert.match(xml, /<author>\s*<time value="\d{14}"\/>[\s\S]*?<assignedAuthoringDevice>/, "author + time");
+  assert.match(xml, /<assignedAuthor>[\s\S]*?<representedOrganization>/, "CONF:4484-18163");
+  assert.match(xml, /<custodian>[\s\S]*<representedCustodianOrganization>/, "custodian");
+  assert.ok(!xml.includes("<assignedPerson>"), "no person is named — same stance as Category I");
+});
+
+test("QRDA III: Measure Data (…27.3.5) WRAPS Aggregate Count (…27.3.3), not the reverse", () => {
+  // The defect this pins is subtle and was worth 12 findings per document: `…27.3.3` IS the Aggregate
+  // Count template and used to sit on the OUTER observation, so the validator applied Aggregate Count's
+  // rules to it (missing MSRAGG / methodCode / INT) while the inner element that satisfied them was
+  // validated as nothing at all. A document can carry every required element and still fail every rule
+  // about them, if they hang off the wrong template.
+  const xml = buildQrda3Document(run, "audiogram", outcomes);
+  assert.ok(!xml.includes("2.16.840.1.113883.10.20.27.3.24"), "…27.3.24 is not a QRDA III template here");
+  const measureData = xml.match(
+    /<observation[^>]*>\s*<templateId root="2\.16\.840\.1\.113883\.10\.20\.27\.3\.5" extension="2016-09-01"\/>[\s\S]*?<\/observation>\s*<\/component>/g,
+  ) ?? [];
+  assert.equal(measureData.length, 4, "one Measure Data observation per population (DENEXCEP absent)");
+  for (const md of measureData) {
+    assert.match(md, /<code code="ASSERTION"/, "CONF:3259-17617");
+    assert.match(md, /<statusCode code="completed"\/>/, "CONF:3259-18199");
+    assert.match(md, /<value xsi:type="CD"/, "CONF:3259-17618");
+    assert.match(
+      md,
+      /<entryRelationship typeCode="SUBJ" inversionInd="true">\s*<observation[^>]*>\s*<templateId root="2\.16\.840\.1\.113883\.10\.20\.27\.3\.3"\/>/,
+      "CONF:3259-17619 — Aggregate Count nested INSIDE Measure Data",
+    );
+    assert.match(md, /<code code="MSRAGG"[\s\S]*?<value xsi:type="INT"[\s\S]*?<methodCode code="COUNT"/, "count");
+    assert.match(md, /<reference typeCode="REFR">\s*<externalObservation[^>]*>\s*<id /, "CONF:3259-18239");
+  }
+});
+
+test("QRDA III: templateIds carry the R2.1 extensions, and no CMS template is claimed", () => {
+  const xml = buildQrda3Document(run, "audiogram", outcomes);
+  for (const [root, ext] of [
+    ["2.16.840.1.113883.10.20.27.1.1", "2020-12-01"], // CONF:4484-17208/21319
+    ["2.16.840.1.113883.10.20.27.2.1", "2020-12-01"], // CONF:4484-17284/21171
+    ["2.16.840.1.113883.10.20.27.3.1", "2020-12-01"], // CONF:4484-17908/21170
+    ["2.16.840.1.113883.10.20.27.3.5", "2016-09-01"], // CONF:3259-17912/21161
+    ["2.16.840.1.113883.10.20.17.3.8", "2020-12-01"], // CONF:4484-21468 Reporting Parameters Act
+  ]) {
+    assert.ok(xml.includes(`root="${root}" extension="${ext}"`), `${root} @ ${ext}`);
+  }
+  // `…27.1.2` is "QRDA Category III Report - CMS (V4)". We do not conform to the CMS Hospital IG, so we
+  // do not claim it — the same call ADR-050 made for Category I's `…24.1.3`. It went UNFLAGGED by the
+  // HL7 ruler because we also had its extension wrong, so it matched no rule at all.
+  assert.ok(!xml.includes("2.16.840.1.113883.10.20.27.1.2"), "no CMS-flavoured Cat III document template");
+});
+
+test("QRDA III: the Reporting Parameters Act appears in the Measure Section too", () => {
+  // CONF:4484-21467 is asserted on the MEASURE section, not only the Reporting Parameters section — so
+  // the act is required in both places. Cypress's own conformant fixture carries it twice for this reason.
+  const xml = buildQrda3Document(run, "audiogram", outcomes);
+  const acts = xml.match(/<templateId root="2\.16\.840\.1\.113883\.10\.20\.17\.3\.8" extension="2020-12-01"\/>/g) ?? [];
+  assert.equal(acts.length, 2, "Reporting Parameters Act in BOTH the reporting-parameters and measure sections");
+});
+
+test("QRDA III: an official measure references its published population criteria by name", () => {
+  const xml = buildQrda3Document(run, "cms122", [officialOutcome("cms122")]);
+  // The extension is the published `Measure.group.population.id`; the root is ours, saying whose
+  // identifier scheme this is. Authored measures have no such criterion and fall back to the code.
+  assert.match(xml, /<externalObservation[^>]*>\s*<id root="[0-9a-f-]{36}" extension="InitialPopulation_1"\/>/);
+  const authored = buildQrda3Document(run, "audiogram", outcomes);
+  assert.match(authored, /<externalObservation[^>]*>\s*<id root="[0-9a-f-]{36}" extension="IPOP"\/>/);
 });
