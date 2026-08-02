@@ -146,7 +146,7 @@ This project is deliberately careful about what it claims. [`docs/STANDARDS_CONF
 | Patient data | **FHIR R4**, US Core / **QI-Core** | Executed — official artifacts evaluate real QI-Core bundles |
 | Known-answer gate | Official **MADiE** test cases (8 measures) | **410/410 exact** — a permanent CI gate |
 | Terminology | **VSAC** value sets | The artifact's *own* expansions, fetched at build and pinned by SHA-256 |
-| Reporting | FHIR **MeasureReport**, **QRDA-I**, **QRDA-III** | MeasureReport executed; both QRDA documents structurally representative, neither CVU+-validated |
+| Reporting | FHIR **MeasureReport**, **QRDA-I**, **QRDA-III** | MeasureReport executed; **QRDA-I validated by Cypress CVU+ at 0 findings against the HL7 base IG**; QRDA-III still a stub, now measured at 48 findings |
 | EHR integration | **SMART Backend Services** (`private_key_jwt`) | Executed against a live tenant |
 
 **No measure may be routed to its official artifact without a green MADiE gate.** That is a construction-time refusal, not a review convention.
@@ -249,7 +249,11 @@ Full surface in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 Running CMS's official published artifacts in place of the authored implementations, one measure at a time, behind `WORKWELL_OFFICIAL_MEASURES`. **CMS122 and CMS125 are routed and live in production** (2026-07-30) — both evaluate CMS's published QI-Core artifacts verbatim. CMS122 shipped a PR later than CMS125: its official numerator counts *poor* glycemic control, so the MeasureReport canonical, `improvementNotation` and population membership all had to switch together first (ADR-046), and a self-contradictory report is worse than a delayed one. Six more measures — CMS2, CMS68, CMS130, CMS138, CMS165, and CMS951 — are vendored and MADiE-gated but not routed. CMS2, CMS130, CMS138, CMS165, and CMS951 are routable but not yet routed; CMS68 is additionally not routable yet — it is an episode-of-care measure (population basis = Encounter), and the official executor's one-population-vector-per-subject mapping does not support episodes (ADR-047).
 
-The current verification bar is tracked in [`docs/JOURNAL.md`](docs/JOURNAL.md) (newest first) and the ADR run 036–054 in [`docs/DECISIONS.md`](docs/DECISIONS.md). Cypress **CVU+** tooling is stood up but no validation run has executed, so it has not yet produced a validated result.
+The current verification bar is tracked in [`docs/JOURNAL.md`](docs/JOURNAL.md) (newest first) and the ADR run 036–054 in [`docs/DECISIONS.md`](docs/DECISIONS.md).
+
+**Cypress CVU+ has now run (2026-08-02).** 22 submissions of 12 generated documents to a local Cypress v7.5.1: **QRDA Category I validates with 0 findings against the HL7 base IG** — CDA schema and Schematron alike — for CMS122 and CMS125 across the five-target synthetic corpus, after three CDA schema defects were found and fixed. Worth stating plainly, because it is the kind of thing a matrix hides: our own Schematron checker had **no XSD layer**, so its "0 base-HL7 errors" was true and *narrower than it read*, and 76 findings lived in the gap.
+
+**This is not the bar.** [Locked decision #2](docs/LOCKED_DECISIONS.md) is the full **import → evaluate → export → CVU+ green loop**; this measured the **export leg** over synthetic data via the externally-supplied-document route. The Cypress **Calculation Check** path has never run, so nothing here speaks to whether our *calculations* are right. Evidence: [`docs/evidence/CVU_VALIDATION_RUN_2026-08-02.md`](docs/evidence/CVU_VALIDATION_RUN_2026-08-02.md).
 
 ## Documentation map
 
