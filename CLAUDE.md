@@ -274,7 +274,9 @@ Stated in `WEBCHART_FHIR_MAPPING.md` §3.1 where an integrator will see it, and 
 precondition**. Also on the record: the roster **synthesizes** one of the three IPP conjuncts (the CPT 99213
 Encounter), so this is not purely EHR-sourced membership, and with 52 of 56 outcomes MISSING_DATA only **4
 subjects carry discriminating signal** — the oracle is our own authored engine, not external truth. Cypress
-CVU+ remains the verification bar and has not run.
+CVU+ remains the verification bar. **(SINCE 2026-08-02: CVU+ has now run against the QRDA EXPORT — see the
+M-B block below. It has NOT been run as the import→evaluate→export loop locked decision #2 names, and it
+has never been pointed at this WebChart parity question, so this paragraph's "not external truth" stands.)**
 
 **The PR-9c precondition is DISCHARGED (ADR-043) — as an OBSERVATION, not a refusal, and it changed the
 flip's scope.** The hazard: a whole roster out of the official initial population is silent, and PR-8f's
@@ -448,14 +450,39 @@ bundle binds synthetic `urn:workwell:vs:*` value sets with **no CDA code system 
 silently dropped while the export reported only "no QDM patient data entries". Now the translator returns WHY each
 resource was dropped. **Structural consequence: a QRDA Category I is only meaningful for data in REAL terminology**
 (LOINC/SNOMED/CPT/ICD) — i.e. the official measures; the authored catalogue is not QRDA-representable at all, which also
-sharpens locked decision #4. Still missing for M-B: the CVU+ loop — **Cypress CVU+ has NOT run** (needs Docker) and
-remains the bar.
+sharpens locked decision #4.
+
+**CVU+ HAS NOW RUN, and QRDA Category I passes the HL7 base ruler clean (2026-08-02, PRs #380/#381).** 22
+submissions of 12 generated documents to a local Cypress v7.5.1 (image digest matching the recorded pin).
+First pass: **240 findings** — and the headline was about our own instrument. ADR-050's "0 base-HL7 errors"
+was confirmed EXACTLY (the `Cat1R53` Schematron ran and returned zero on all 10 Category I documents, and
+the CMS ruler cost exactly **+4** per document, reproducing ADR-050's partition from outside) — but
+`qrda-schematron-check.py` validates **Schematron only, no XSD**, and CVU+ runs the CDA schema first, where
+every Category I document failed 6–10 times. Not a guard that could not fire; a guard whose SCOPE was
+narrower than the claim it was cited for. Three defects accounted for all 76 exactly: `@root` carrying a
+URN where CDA's `uid` admits only an OID or UUID (56), the eCQM version STRING in an `INT` (10), and a
+`<text>` misplaced after `setId`/`versionNumber` (10). All fixed and **re-measured: Category I 76 → 0**
+against the HL7 base ruler, XSD and Schematron alike. Roots are four **hardcoded UUIDs** (owner decision) —
+WorkWell holds no registered OID arc and asserting an unregistered OID is a false claim of a registered
+identity; if MIE assigns an arc, `qrda-common.ts` is the only place that changes. The AUTHORED path
+deliberately still emits `urn:workwell:measure` and a test pins it as the ONLY invalid root, because
+ADR-046 decision 3 and ADR-051 make that document non-conformant BY DESIGN.
+
+**Still missing for M-B — the bar is NOT met.** Locked decision #2 is the **import → evaluate → export →
+CVU+ green LOOP**; this measured the **export leg only**, over the synthetic corpus, via the
+externally-supplied-document route. **The Cypress Calculation Check path has never run**, so nothing here
+says our CALCULATIONS are right. **QRDA Category III is unchanged at 48 findings** (2 XSD + 46 Cat III
+Schematron): templateId version drift (`2017-06-01` where R2.1 wants `2020-12-01`) plus genuinely absent
+structure — no `recordTarget`, `custodian`, `author/time`, `methodCode`, `MSRAGG`, `statusCode`,
+`reference`, or Aggregate Count. Evidence: `docs/evidence/CVU_VALIDATION_RUN_2026-08-02.md`.
 
 **Still open:** the authored cms122/125 subsets retire to the fidelity lab (locked decision #4,
-deliberately not in the flip's own PR); the LIVE third-party WebChart path gets neither the `us-core-sex`
-nor the dual-stamp fix (both mapping sites sit upstream of the live FHIR transport;
-`normalizeWebChartBundle` untouched by design); and **Cypress CVU+ has not run** — it remains the
-verification bar.
+deliberately not in the flip's own PR — issue #377); the LIVE third-party WebChart path gets neither the
+`us-core-sex` nor the dual-stamp fix (both mapping sites sit upstream of the live FHIR transport;
+`normalizeWebChartBundle` untouched by design); **QRDA Category III is 48 CVU+ findings from conformant**;
+and the **CVU+ LOOP** — import → evaluate → export → green, including the Calculation Check path — remains
+the verification bar and has **not** been run. CVU+ itself has now run against the export (2026-08-02),
+which is the export leg of that loop and not the loop.
 
 ---
 
