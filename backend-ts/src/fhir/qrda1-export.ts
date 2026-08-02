@@ -379,14 +379,24 @@ export function indexBundlesBySubject(
  */
 export function qrda1NonConformance(outcome: OutcomeRecord, measureId: string, bundle: unknown): string[] {
   const translation = bundle === undefined ? { entries: [], untranslatable: [] } : translateQdm(bundle);
-  return nonConformanceFrom(measureId, translation, measureReference(measureId, outcome.evidence));
+  const degradationMessage = bundle === undefined ? undefined : patientFallbackDiagnostics(bundle);
+  return nonConformanceFrom(measureId, translation, measureReference(measureId, outcome.evidence), degradationMessage);
 }
 
 /** The reasons, from already-computed inputs — so the batch path can translate each subject once. */
-function nonConformanceFrom(measureId: string, translation: QdmTranslation, reference: string): string[] {
+function nonConformanceFrom(
+  measureId: string,
+  translation: QdmTranslation,
+  reference: string,
+  degradationMessage?: string,
+): string[] {
   const reasons: string[] = [];
   if (translation.entries.length === 0) {
-    reasons.push("no QDM patient data entries (CONF:67-14567) — the measure cannot be recalculated from this document");
+    reasons.push(
+      degradationMessage !== undefined
+        ? `subject data could not be retrieved from the source system: ${degradationMessage}`
+        : "no QDM patient data entries (CONF:67-14567) — the measure cannot be recalculated from this document",
+    );
   }
   // WHY nothing translated, when there is a why an operator can act on. Reporting only "no entries" for
   // a bundle that was present and full of resources is the misleading half of the truth: WorkWell's
@@ -440,7 +450,8 @@ export function buildQrda1Documents(
     // `readFileSync` of the vendored bundle, so a 5000-subject run did 10,000 artifact reads (#361).
     const translation = bundle === undefined ? { entries: [], untranslatable: [] } : translateQdm(bundle);
     const reference = measureReference(measureId, outcome.evidence);
-    const nonConformanceReasons = nonConformanceFrom(measureId, translation, reference);
+    const degradationMessage = bundle === undefined ? undefined : patientFallbackDiagnostics(bundle);
+    const nonConformanceReasons = nonConformanceFrom(measureId, translation, reference, degradationMessage);
     return {
       subjectId: outcome.subjectId,
       xml: buildQrda1Document(run, measureId, outcome, bundle, { entries: translation.entries, reference }),
@@ -449,4 +460,32 @@ export function buildQrda1Documents(
       caveats: qrda1Caveats(measureId, bundle),
     };
   });
+}
+
+/**
+ * The exact shape emitted by `patientFallbackBundle`: one Patient plus one OperationOutcome carrying the
+ * retrieval failure. It is intentionally narrower than "bundle has an OperationOutcome" so a genuine
+ * clinical bundle containing an unrelated outcome is not mislabeled as a transport degradation.
+ */
+function patientFallbackDiagnostics(bundle: unknown): string | undefined {
+  if ((bundle as { resourceType?: unknown } | undefined)?.resourceType !== "Bundle") return undefined;
+  const raw = (bundle as { entry?: unknown } | undefined)?.entry;
+  if (!Array.isArray(raw) || raw.length !== 2) return undefined;
+  const resources = raw.map((item) => {
+    const resource = (item as { resource?: unknown } | null)?.resource;
+    return typeof resource === "object" && resource !== null && !Array.isArray(resource)
+      ? (resource as Record<string, unknown>)
+      : undefined;
+  });
+  if (resources.some((resource) => resource === undefined)) return undefined;
+  const patient = resources.filter((resource) => resource?.resourceType === "Patient");
+  const outcomes = resources.filter((resource) => resource?.resourceType === "OperationOutcome");
+  if (patient.length !== 1 || outcomes.length !== 1) return undefined;
+  const issues = outcomes[0]?.issue;
+  const firstIssue = Array.isArray(issues) ? issues[0] : undefined;
+  const diagnostics =
+    typeof firstIssue === "object" && firstIssue !== null && !Array.isArray(firstIssue)
+      ? (firstIssue as Record<string, unknown>).diagnostics
+      : undefined;
+  return typeof diagnostics === "string" ? diagnostics : "the source system returned an OperationOutcome without diagnostics";
 }
