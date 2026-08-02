@@ -344,3 +344,72 @@ met** — that bar is the full import → evaluate → export → CVU+ loop, and
 The authored path is deliberately untouched and still emits `urn:workwell:measure`, which CDA's `uid`
 type rejects; that document is non-conformant by design (ADR-046 decision 3, ADR-051) and a test pins
 the exception so it cannot spread.
+
+## 10. Third run — QRDA Category III fixed and re-measured, same day
+
+§9 closed Category I and left item 4 open: "QRDA Category III is a larger piece of work and its own
+decision." It was done the same day, by the same method — derive the correct shape from an authority,
+change it, re-upload, report what came back.
+
+| | First run | After §9 | After this |
+|---|---|---|---|
+| QRDA-I ×10, HL7 base ruler | 76 | **0** | **0** |
+| QRDA-I ×10, CMS ruler | 116 | 40 | 40 |
+| QRDA-III ×2, HL7 base ruler | 48 | 48 | **0** |
+| **Total** | **240** | **88** | **40** |
+
+**Both QRDA document types now validate with 0 findings against the HL7 base ruler.** Every remaining
+finding is a CMS **Hospital** Quality Reporting templateId that ADR-050 deliberately does not claim —
+exactly 4 per Category I document, unchanged throughout.
+
+### 10.1 The authority was the validator's own conformant fixture, not the IG prose
+
+`test/fixtures/qrda/cat_III/ep_test_qrda_cat3_good_invalid_id.xml`, read out of the running Cypress
+container. Where that 2018 fixture predates the 2026 Schematron, the Schematron itself
+(`resources/schematron/2026.0.0/EP/EP_CAT_III.sch`) was read directly — which is how the last three
+findings were resolved, since the fixture does not satisfy them either.
+
+### 10.2 What was wrong — three kinds, none visible to a well-formedness check
+
+**(a) The entire CDA header was missing.** No `recordTarget`, `author`/`time` or `custodian`, all SHALL.
+For an aggregate report `recordTarget` carries `<id nullFlavor="NA"/>` — CDA requires a patient
+identifier and this document is about a population, so it is nulled rather than invented. The single XSD
+error was this same gap seen from the schema side: `component` appeared where `recordTarget` was
+expected.
+
+**(b) The population templates were INVERTED — the most interesting defect here.** `…27.3.3` *is* the
+Aggregate Count template, and it sat on the OUTER assertion observation with `…27.3.24` on the inner
+one. So the validator applied Aggregate Count's rules to the outer element and reported it missing
+`MSRAGG`, `methodCode` and an `INT` value — three findings per population, 12 per document — while the
+inner element, which had all three, was validated as nothing at all. **A document can carry every
+required element and still fail every rule about them, if they are attached to the wrong template.**
+Correct nesting is Measure Data `…27.3.5` wrapping Aggregate Count `…27.3.3`.
+
+**(c) TemplateId version drift**, plus a wrong performance-rate template: `…27.3.4` with
+`code="REASON"` where R2.1 wants `…27.3.14`/`…27.3.30`, LOINC `72510-1`, and a `reference` to the
+numerator it rates.
+
+### 10.3 A CMS template we were claiming without conforming to it
+
+`…27.1.2` — **"QRDA Category III Report — CMS (V4)"** — was declared with extension `2017-06-01`. It
+appears only in Cypress's CMS fixture, never its HL7 one, and the real extension is `2022-12-01`.
+**The HL7 ruler never flagged it precisely because the extension was wrong too**, so it matched no rule
+at all: a misdeclaration invisible to the validator that would have caught it if it had been more
+nearly right. Dropped, for the reason ADR-050 dropped Category I's `…24.1.3` — we do not conform to the
+CMS Hospital IG and should not say we do. Found by reading the fixtures, not by a finding.
+
+### 10.4 What the population reference names
+
+CONF:3259-18239 requires each Measure Data observation to carry a `reference`/`externalObservation`/`id`
+identifying the population criterion it counts. For an official measure that criterion is a real element
+of CMS's published `Measure` — `InitialPopulation_1`, `Numerator_1` — so the reference names it under
+WorkWell's own root: the root says whose identifier scheme this is (ours), the extension says which
+criterion (theirs). An authored measure has no published criterion, so it falls back to the population
+code, the most specific thing that is actually true.
+
+### 10.5 Still not the bar
+
+Unchanged from §6 and §9: this is the externally-supplied-document validation route, **not Cypress
+Calculation Check**; the corpus is **synthetic**; and **locked decision #2's bar — import → evaluate →
+export → CVU+ green — is still NOT met.** What is now true is that both document types WorkWell exports
+validate clean against the HL7 base IG, which is the export leg of that loop and no more.

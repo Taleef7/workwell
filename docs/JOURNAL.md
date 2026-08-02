@@ -1,5 +1,42 @@
 # Journal
 
+## 2026-08-02 (M-B) — QRDA Category III: 48 findings to 0, and it was carrying a CMS template it never conformed to (branch `fix/qrda3-cda-conformance`)
+
+The evidence doc called Cat III "a larger piece of work and its own decision". It was — but the decision
+turned out to be *what to read*, not what to build. Cypress ships a conformant Cat III fixture and the
+2026 Schematron inside the container we already had running, so the shape was derivable rather than
+guessable. **Both QRDA document types now validate at 0 findings against the HL7 base ruler.**
+
+**The interesting defect: every required element was present and every rule about them still failed.**
+`…27.3.3` *is* the Aggregate Count template, and it sat on the OUTER assertion observation with
+`…27.3.24` inside. So the validator applied Aggregate Count's rules to the outer element — missing
+`MSRAGG`, `methodCode`, `INT` value, three findings per population, 12 per document — while the inner
+element that satisfied all three was validated as nothing at all. Correct nesting is Measure Data
+`…27.3.5` wrapping Aggregate Count `…27.3.3`. A document can hold everything the IG asks for and score
+zero on all of it, if the elements hang off the wrong template.
+
+**The whole CDA header was also missing** — no `recordTarget`, `author`/`time` or `custodian`, all SHALL,
+which is what the single XSD error was reporting from the other side (`component` where `recordTarget`
+was expected). For an aggregate report `recordTarget` carries `<id nullFlavor="NA"/>`: CDA requires a
+patient identifier and this document is about a population, so it is nulled rather than invented.
+
+**And a misdeclaration nothing flagged.** `…27.1.2` is "QRDA Category III Report — **CMS** (V4)", claimed
+here with extension `2017-06-01` against a real `2022-12-01`. **The HL7 ruler stayed silent precisely
+because the extension was wrong too** — it matched no rule at all, so being more nearly right would have
+made it visible. Dropped, for the reason ADR-050 dropped Cat I's `…24.1.3`. Found by reading fixtures,
+not by a finding, which is the argument for reading them.
+
+Also: templateId version drift, the performance rate moved from `…27.3.4`/`REASON` to
+`…27.3.14`/`…27.3.30` with LOINC `72510-1` and a reference to the numerator it rates, and each Measure
+Data observation now names the population criterion it counts (CONF:3259-18239) — the published
+`Measure.group.population.id` for an official measure, the population code otherwise.
+
+**Measured: 48 → 0.** Five regression tests pin it in TypeScript because CI runs neither CVU+ nor a
+schema validator, and the nesting test is mutation-checked (reverting the templates fails exactly the
+two tests that should catch it). Suite 1791, 0 fail. Running total across the day: 240 → 40, and every
+remaining finding is a CMS Hospital templateId ADR-050 deliberately does not claim. **Locked decision
+#2's bar is still not met** — this is the export leg, not the loop; Calculation Check has never run.
+
 ## 2026-08-02 (M-B) — the conformance matrix catches up, and one row was two onboardings stale (branch `docs/conformance-cvu-claims`)
 
 The CVU+ result was recorded in evidence and CLAUDE.md but the two documents anyone *else* reads —

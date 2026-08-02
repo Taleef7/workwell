@@ -146,7 +146,7 @@ This project is deliberately careful about what it claims. [`docs/STANDARDS_CONF
 | Patient data | **FHIR R4**, US Core / **QI-Core** | Executed — official artifacts evaluate real QI-Core bundles |
 | Known-answer gate | Official **MADiE** test cases (8 measures) | **410/410 exact** — a permanent CI gate |
 | Terminology | **VSAC** value sets | The artifact's *own* expansions, fetched at build and pinned by SHA-256 |
-| Reporting | FHIR **MeasureReport**, **QRDA-I**, **QRDA-III** | MeasureReport executed; **QRDA-I validated by Cypress CVU+ at 0 findings against the HL7 base IG**; QRDA-III still a stub, now measured at 48 findings |
+| Reporting | FHIR **MeasureReport**, **QRDA-I**, **QRDA-III** | MeasureReport executed; **both QRDA-I and QRDA-III validated by Cypress CVU+ at 0 findings against the HL7 base IG** |
 | EHR integration | **SMART Backend Services** (`private_key_jwt`) | Executed against a live tenant |
 
 **No measure may be routed to its official artifact without a green MADiE gate.** That is a construction-time refusal, not a review convention.
@@ -251,7 +251,7 @@ Running CMS's official published artifacts in place of the authored implementati
 
 The current verification bar is tracked in [`docs/JOURNAL.md`](docs/JOURNAL.md) (newest first) and the ADR run 036–054 in [`docs/DECISIONS.md`](docs/DECISIONS.md).
 
-**Cypress CVU+ has now run (2026-08-02).** 22 submissions of 12 generated documents to a local Cypress v7.5.1: **QRDA Category I validates with 0 findings against the HL7 base IG** — CDA schema and Schematron alike — for CMS122 and CMS125 across the five-target synthetic corpus, after three CDA schema defects were found and fixed. Worth stating plainly, because it is the kind of thing a matrix hides: our own Schematron checker had **no XSD layer**, so its "0 base-HL7 errors" was true and *narrower than it read*, and 76 findings lived in the gap.
+**Cypress CVU+ has now run (2026-08-02).** 22 submissions of 12 generated documents to a local Cypress v7.5.1: **both QRDA Category I and Category III validate with 0 findings against the HL7 base IG** — CDA schema and Schematron alike — for CMS122 and CMS125 across the five-target synthetic corpus. It took 240 findings to get there, and two are worth stating plainly because they are the kind a matrix hides. Our own Schematron checker had **no XSD layer**, so its "0 base-HL7 errors" was true and *narrower than it read*, with 76 findings in the gap. And Category III had every required population element attached to the **wrong template** — `…27.3.3` is Aggregate Count and sat on the outer observation — so the validator reported those elements missing while the ones that satisfied the rules were validated as nothing at all.
 
 **This is not the bar.** [Locked decision #2](docs/LOCKED_DECISIONS.md) is the full **import → evaluate → export → CVU+ green loop**; this measured the **export leg** over synthetic data via the externally-supplied-document route. The Cypress **Calculation Check** path has never run, so nothing here speaks to whether our *calculations* are right. Evidence: [`docs/evidence/CVU_VALIDATION_RUN_2026-08-02.md`](docs/evidence/CVU_VALIDATION_RUN_2026-08-02.md).
 

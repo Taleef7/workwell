@@ -45,6 +45,16 @@ export const CUSTODIAN_ID_ROOT = "e23d2ca4-6837-4ac9-8032-9735b960c3e9";
 export const FHIR_RESOURCE_ID_ROOT = "1e66ef3d-8340-46fc-a8fe-b2171b404a43";
 
 /**
+ * The root a QRDA III Measure Data observation references a population CRITERION under
+ * (CONF:3259-18239/18241). Its `extension` is the published `Measure.group.population.id` for an
+ * official measure — so the root says whose identifier scheme this is (ours) and the extension says
+ * which criterion (CMS's). Kept distinct from `FHIR_RESOURCE_ID_ROOT`, which identifies a clinical
+ * RESOURCE in a patient's data: conflating a measure-definition element with patient data under one
+ * root would make two different things indistinguishable to a receiver.
+ */
+export const MEASURE_CRITERION_ID_ROOT = "9f3b1c07-2e5a-4d18-b6a4-70c9e8d5a231";
+
+/**
  * XML-escape a value for text or an attribute.
  *
  * Coerces rather than assuming a string: these values now come from third-party FHIR, where a numeric
