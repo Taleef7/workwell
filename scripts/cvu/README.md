@@ -12,7 +12,14 @@ round-1 scratch record and is intentionally not committed.
 Cypress has two separate paths:
 
 - The externally supplied-document path lists validators at `GET /qrda_validation` and accepts a
-  multipart upload at `POST /qrda_validation/:year/:qrda_type/:organization`. The form field is `file`;
+  multipart upload at `POST /qrda_validation/:year/:qrda_type/:organization`. **Both routes must be asked
+  for XML or JSON explicitly** — `QrdaUploadsController` declares `respond_to :xml, :json` and ships no
+  HTML template, so a request that negotiates neither (curl's default `Accept: */*`) fails: the GET
+  returns **HTTP 500** (`ActionView::MissingTemplate (Missing template qrda_uploads/index...)`, which
+  reads like a broken stand-up rather than a wrong Accept type) and the POST returns **HTTP 422**. Either
+  an `Accept: application/json` header **or** a `.json` path suffix works — measured 2026-08-02 at 200/201
+  for both forms; see `docs/evidence/CVU_VALIDATION_RUN_2026-08-02.md` §4. The commands below send the
+  header and append the suffix, so neither is load-bearing alone. The form field is `file`;
   `qrda_type` is `qrdaI` or `qrdaIII`; and `organization` selects the `hl7` or `cms` validator family.
   The application runs CDA plus the selected HL7 or CMS Schematron validators and returns execution
   errors and warnings.
@@ -48,9 +55,13 @@ malformed content after the last closing tag, unquoted attribute values, or a ba
 attribute value. Neither field is a CVU+ validation result or a compliance decision.
 
 Official execution needs each measure's gitignored `terminology.json` sidecar to match its committed
-manifest pin. If the executor reports that value sets could not be expanded, restore or regenerate the
-sidecars with the repository's approved official-vendoring process before treating the generator as
-blocked by document code.
+manifest pin. If the executor reports that value sets could not be expanded, **check where you are
+running before you regenerate anything**: the sidecars are gitignored (ADR-036), so they do not exist in
+a fresh git worktree even though they are present in the primary working tree. Run this generator from
+the primary tree. That is what the 2026-08-01 pass hit, and re-vendoring was the wrong remedy — an
+UNCREDENTIALED `pnpm vendor:official` reverts ADR-041's completed expansions back to capped, which makes
+cms122/cms125 unroutable and fails the reproducibility gate. Only if the sidecars are genuinely absent
+from the primary tree should you regenerate, with the credential.
 
 ## Reproduce the Cypress v7.5.1 stand-up
 
@@ -217,8 +228,11 @@ running Cypress version; choose the exact path returned by this request rather t
 ```powershell
 $Base = 'http://127.0.0.1:3000'
 curl.exe -i -b cvu-workdir/cypress.cookies `
-  -H 'Accept: application/json' "$Base/qrda_validation"
+  -H 'Accept: application/json' "$Base/qrda_validation.json"
 ```
+
+The `Accept` header alone is sufficient (measured HTTP 200); the `.json` suffix is belt-and-braces so the
+command does not silently depend on the header surviving a copy-paste into a client that rewrites it.
 
 For a listed HL7 Category I validator, submit a generated document as multipart form field `file`:
 
@@ -227,12 +241,12 @@ $Document = (Resolve-Path cvu-workdir/documents/cms122-compliant-qrda1.xml).Path
 curl.exe -i -b cvu-workdir/cypress.cookies `
   -H 'Accept: application/json' `
   -F "file=@$Document" `
-  "$Base/qrda_validation/<year>/qrdaI/hl7"
+  "$Base/qrda_validation/<year>/qrdaI/hl7.json"
 ```
 
 Use `cms` instead of `hl7` for a listed CMS Category I validator. For Category III, use
 `qrdaIII` in the same position. In v7.5.1's checked-in `possible_qrda_uploaders` helper, the CMS
-Category III listing uses an `hl7` path segment; use the path returned by `GET /qrda_validation` and
+Category III listing uses an `hl7` path segment; use the path returned by `GET /qrda_validation.json` and
 record that selected path with the response.
 
 The JSON response has the validator path and an `execution_errors` collection. Each error contains the
