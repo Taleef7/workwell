@@ -27,6 +27,12 @@ import { smartBackendServicesAuth, staticBearerAuth, type WebChartAuthProvider }
 export interface WebChartClient {
   readonly kind: string;
   fetchPatientPayloads(): Promise<unknown[]>;
+  /**
+   * Fetch only the named patients (bare FHIR Patient.id values, no "wc|" prefix) — scoped to a known
+   * subject set, e.g. a run's own subjects. Optional: a client that does not implement it signals
+   * "cannot scope" to callers, which fall back to the full fetchPatientPayloads().
+   */
+  fetchPatientPayloadsByIds?(patientIds: readonly string[]): Promise<unknown[]>;
 }
 
 /** In-memory client for tests + offline fixtures — the transport-agnostic core runs against this. */
@@ -243,10 +249,17 @@ export function httpWebChartClient(cfg: WebChartConfig, options?: HttpWebChartCl
 
   // Server-capability profile — adaptive by default, or pinned via cfg. `countDisabled` governs BOTH
   // the Patient list and the per-patient searches; `patientEnumeration` is the extra query the
-  // Patient-list root carries. Both start from explicit cfg and may be set once by the first-page
-  // fallback in listPopulation (which runs before any per-patient search, so the flag is settled).
+  // Patient-list root carries. Both start from explicit cfg and may be set once by a first-page
+  // fallback in either listPopulation or searchResources.
   let countDisabled = cfg.disableCount ?? false;
   let patientEnumeration = cfg.patientSearch?.trim() || undefined;
+  let countQuirkLogged = false;
+
+  function logCountFallback(scope: string): void {
+    if (countQuirkLogged) return;
+    countQuirkLogged = true;
+    console.warn(`WebChart rejected _count on ${scope}; retrying without _count for this client.`);
+  }
 
   async function fetchJson(url: string): Promise<unknown> {
     let attempt = 0;
@@ -351,6 +364,7 @@ export function httpWebChartClient(cfg: WebChartConfig, options?: HttpWebChartCl
       if (!isCapabilityQuirk(e)) throw e;
       if (!countDisabled) {
         countDisabled = true; // also drops `_count` from the per-patient searches
+        logCountFallback("the Patient population search");
         try {
           return await fetchJson(patientListUrl());
         } catch (e2) {
@@ -428,8 +442,23 @@ export function httpWebChartClient(cfg: WebChartConfig, options?: HttpWebChartCl
     if (!countDisabled) first.searchParams.set("_count", String(pageSize));
     const resources: Json[] = [];
     let url: string | undefined = first.toString();
+    let firstPage = true;
     while (url) {
-      const page = await fetchJson(url);
+      let page: unknown;
+      try {
+        page = await fetchJson(url);
+      } catch (e) {
+        if (!firstPage || countDisabled || !isCapabilityQuirk(e)) throw e;
+        countDisabled = true;
+        logCountFallback(`${resourceType} search`);
+        const retryUrl = new URL(url);
+        retryUrl.searchParams.delete("_count");
+        url = retryUrl.toString();
+        // A second quirk response is deliberately not handled here: it is a real failure for this
+        // search and must propagate to fetchPatient's per-subject degradation path.
+        page = await fetchJson(url);
+      }
+      firstPage = false;
       resources.push(...resourcesFromSearchset(page, patientId));
       url = resolveNext(page, url);
     }
@@ -462,7 +491,24 @@ export function httpWebChartClient(cfg: WebChartConfig, options?: HttpWebChartCl
       // Partial clinical data must never evaluate (a missing Condition/Observation page could flip an
       // outcome) — the whole patient degrades to the fallback bundle and reads MISSING_DATA downstream.
       const message = e instanceof Error ? e.message : String(e);
+      console.warn(`WebChart clinical data fetch degraded for patient ${patient.id}: ${message}`);
       return patientFallbackBundle(patient, message);
+    }
+  }
+
+  async function fetchPatientById(patientId: string): Promise<PatientRef | undefined> {
+    try {
+      const patient = await fetchJson(fhirUrl(base, `/fhir/Patient/${encodeURIComponent(patientId)}`).toString());
+      if (!isObject(patient) || patient.resourceType !== "Patient" || patient.id !== patientId) {
+        throw new Error(`WebChart Patient/${patientId} read returned an invalid Patient resource`);
+      }
+      return { id: patientId, resource: patient };
+    } catch (error) {
+      if (error instanceof WebChartNonRetryableError && error.status === 404) {
+        console.warn(`WebChart Patient/${patientId} was not found during scoped fetch; skipping it.`);
+        return undefined;
+      }
+      throw error;
     }
   }
 
@@ -472,6 +518,25 @@ export function httpWebChartClient(cfg: WebChartConfig, options?: HttpWebChartCl
       const patients = await listPopulation();
       const payloads: unknown[] = [];
       for (const patient of patients) payloads.push(await fetchPatient(patient));
+      return payloads;
+    },
+    async fetchPatientPayloadsByIds(patientIds: readonly string[]): Promise<unknown[]> {
+      const payloads: unknown[] = [];
+      for (const patientId of patientIds) {
+        try {
+          const patient = await fetchPatientById(patientId);
+          if (patient) payloads.push(await fetchPatient(patient));
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          console.warn(`WebChart scoped fetch degraded for patient ${patientId}: ${message}`);
+          payloads.push(
+            patientFallbackBundle(
+              { id: patientId, resource: { resourceType: "Patient", id: patientId } },
+              message,
+            ),
+          );
+        }
+      }
       return payloads;
     },
   };
