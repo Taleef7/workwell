@@ -89,7 +89,9 @@ async function main(argv: readonly string[]): Promise<number> {
     scopeType: "MEASURE",
     scopeId: args.measure,
     triggeredBy: "cypress-c2",
-    requestedScope: { measureId: args.measure, evaluationDate: args.evaluationDate },
+    // `importDriven` is required by both new routes: import-drivenness is a property of the run's
+    // CONSTRUCTION, so a run the pipeline owns can never acquire it and be finalized from outside.
+    requestedScope: { measureId: args.measure, evaluationDate: args.evaluationDate, importDriven: true },
     measurementPeriodStart: `${args.evaluationDate.slice(0, 4)}-01-01T00:00:00.000Z`,
     measurementPeriodEnd: `${args.evaluationDate}T23:59:59.999Z`,
   });

@@ -812,6 +812,18 @@ test("import gaps are PERSISTED in the outcome evidence, not only in the POST re
 
 // ---------------------------------------------------------------- batch import + finalize (M-B / C2)
 
+/**
+ * A run CREATED for imported documents. Both new routes require it: inferring import-drivenness from the
+ * rows was defeated by the window in which a population run is RUNNING with no outcomes yet, which let a
+ * QRDA III be exported from a run that went on to gain 2,100 more outcomes (review, #389).
+ */
+const importRun = {
+  scopeType: "MEASURE",
+  scopeId: "audiogram",
+  triggeredBy: "test",
+  requestedScope: { measureId: "audiogram", importDriven: true },
+};
+
 /** A minimal QRDA I for the audiogram measure's shape — one Encounter, so the import does not refuse it. */
 const importableDocument = (mrn: string, mbi?: string, encounterId = "enc-1") => `<?xml version="1.0" encoding="UTF-8"?>
 <ClinicalDocument xmlns="urn:hl7-org:v3">
@@ -841,7 +853,7 @@ test("import → finalize → export: a batch of documents becomes a reportable 
   // route could do before: `GET /api/runs/:id/qrda` refuses a RUNNING run (correctly — exporting a run
   // that is still writing outcomes presents a partial roster as complete) and NOTHING finalized an
   // imported run, so the loop stopped one step short of a document to submit.
-  const created = await post("/api/runs", { scopeType: "MEASURE", scopeId: "audiogram", triggeredBy: "test" });
+  const created = await post("/api/runs", importRun);
   const run = (await created!.json()) as { id: string };
 
   // Three documents, two people: the first two share a Medicare Beneficiary Identifier the way a
@@ -882,7 +894,7 @@ test("finalize REFUSES a run whose outcomes did not come from imported documents
   // is done; finalizing one from outside would mark a partial roster COMPLETED and make it exportable —
   // the exact harm `notReportable` exists to prevent. Checked without new state: an imported outcome
   // carries `qrda1Import` evidence and a pipeline one does not.
-  const created = await post("/api/runs", { scopeType: "MEASURE", scopeId: "audiogram", triggeredBy: "test" });
+  const created = await post("/api/runs", importRun);
   const run = (await created!.json()) as { id: string };
   const evaluated = await post(`/api/runs/${run.id}/evaluate`, {
     measureId: "audiogram",
@@ -899,7 +911,7 @@ test("finalize REFUSES a run whose outcomes did not come from imported documents
 });
 
 test("finalize REFUSES a run with no outcomes rather than reporting an empty roster", async () => {
-  const created = await post("/api/runs", { scopeType: "MEASURE", scopeId: "audiogram", triggeredBy: "test" });
+  const created = await post("/api/runs", importRun);
   const run = (await created!.json()) as { id: string };
   const finalized = await post(`/api/runs/${run.id}/finalize`);
   assert.equal(finalized?.status, 409);
@@ -907,7 +919,7 @@ test("finalize REFUSES a run with no outcomes rather than reporting an empty ros
 });
 
 test("finalize is not a second chance — a finished run is refused, not re-finalized", async () => {
-  const created = await post("/api/runs", { scopeType: "MEASURE", scopeId: "audiogram", triggeredBy: "test" });
+  const created = await post("/api/runs", importRun);
   const run = (await created!.json()) as { id: string };
   await post(`/api/runs/${run.id}/import`, {
     measureId: "audiogram",
@@ -923,7 +935,7 @@ test("finalize is not a second chance — a finished run is refused, not re-fina
 test("import REFUSES a submission it cannot read at all, instead of reporting an empty population", async () => {
   // Reporting 0 subjects with a 201 is the empty-bundle hazard by another route: it reads as "nobody
   // qualifies" when the truth is "we could not read anything you sent" (ADR-043).
-  const created = await post("/api/runs", { scopeType: "MEASURE", scopeId: "audiogram", triggeredBy: "test" });
+  const created = await post("/api/runs", importRun);
   const run = (await created!.json()) as { id: string };
   const imported = await post(`/api/runs/${run.id}/import`, { measureId: "audiogram", qrda1: ["<nope/>", "<also-nope/>"] });
   assert.equal(imported?.status, 400);
@@ -935,7 +947,7 @@ test("import REFUSES a submission it cannot read at all, instead of reporting an
 test("import REFUSES a submission about a different measure", async () => {
   // A CMS125 submission posted as cms122 would be calculated AND PERSISTED as cms122 (Codex, #362).
   // Checked once across the batch rather than per document.
-  const created = await post("/api/runs", { scopeType: "MEASURE", scopeId: "audiogram", triggeredBy: "test" });
+  const created = await post("/api/runs", importRun);
   const run = (await created!.json()) as { id: string };
   const withMeasureSection = importableDocument("mrn-x", "MBI-X").replace(
     "</section></component></structuredBody></component>",
@@ -949,4 +961,125 @@ test("import REFUSES a submission about a different measure", async () => {
   const imported = await post(`/api/runs/${run.id}/import`, { measureId: "audiogram", qrda1: [withMeasureSection] });
   assert.equal(imported?.status, 400);
   assert.equal(((await imported!.json()) as { error: string }).error, "qrda1_measure_mismatch");
+});
+
+test("import and finalize REFUSE a run that was not created for imported documents", async () => {
+  // The critical guard. `scheduleAsyncRun` returns RUNNING immediately and finishes its fan-out in the
+  // background, so a population run spends a window RUNNING with ZERO outcomes — during which "every
+  // outcome carries qrda1Import" is vacuously true. Review (#389) drove exactly that: one document
+  // imported into an ALL_PROGRAMS run, finalized COMPLETED, a QRDA III exported, and the run then gained
+  // 2,100 more outcomes. Import-drivenness is therefore a property of CONSTRUCTION, which a run the
+  // pipeline owns can never acquire.
+  const created = await post("/api/runs", { scopeType: "MEASURE", scopeId: "audiogram", triggeredBy: "test" });
+  const run = (await created!.json()) as { id: string };
+
+  const imported = await post(`/api/runs/${run.id}/import`, {
+    measureId: "audiogram",
+    qrda1: [importableDocument("mrn-guard", "MBI-GUARD")],
+  });
+  assert.equal(imported?.status, 409);
+  assert.equal(((await imported!.json()) as { error: string }).error, "run_not_import_driven");
+
+  const finalized = await post(`/api/runs/${run.id}/finalize`);
+  assert.equal(finalized?.status, 409);
+  assert.equal(((await finalized!.json()) as { error: string }).error, "run_not_import_driven");
+});
+
+test("a subject the engine cannot evaluate is PERSISTED, and the run finalizes PARTIAL_FAILURE", async () => {
+  // Collecting the failure in the response only loses the subject when the request ends: no row, no log,
+  // no audit, and the exported report counts a roster short with nothing saying so. It also made the
+  // PARTIAL_FAILURE branch structurally dead, since every row `/finalize` could see came from a
+  // SUCCESSFUL evaluate (review, #389). One fix, both halves — so this test pins both.
+  const created = await post("/api/runs", importRun);
+  const run = (await created!.json()) as { id: string };
+  const imported = await post(`/api/runs/${run.id}/import`, {
+    // A measure the engine cannot evaluate: every subject throws.
+    measureId: "no-such-measure-at-all",
+    qrda1: [importableDocument("mrn-f1", "MBI-F1"), importableDocument("mrn-f2", "MBI-F2")],
+  });
+  assert.equal(imported?.status, 201);
+  const body = (await imported!.json()) as { subjects: number; outcomes: unknown[]; evaluationFailures: unknown[] };
+  assert.equal(body.subjects, 2);
+  assert.equal(body.evaluationFailures.length, 2);
+  assert.equal(body.outcomes.length, 2, "a failed subject still has a row — the roster is complete");
+
+  // The persisted ROWS, not the read model: `/outcomes` renders `RunOutcomeRow`, whose status field is
+  // named differently and which does not carry evidence at all.
+  const rows = await new SqliteOutcomeStore(env.DB as never).listOutcomes(run.id);
+  assert.deepEqual(rows.map((r) => r.status), ["MISSING_DATA", "MISSING_DATA"]);
+  const evidenceOf = (r: (typeof rows)[number]) => r.evidence as { evaluationError?: string; qrda1Import?: unknown };
+  assert.ok(rows.every((r) => evidenceOf(r).evaluationError), "the reason is on the row, not just in the response");
+  assert.ok(rows.every((r) => evidenceOf(r).qrda1Import), "and it is still an imported outcome");
+
+  const finalized = await post(`/api/runs/${run.id}/finalize`);
+  assert.equal(finalized?.status, 200);
+  assert.equal(((await finalized!.json()) as { status: string }).status, "PARTIAL_FAILURE");
+});
+
+test("a cross-lineage measure identity is admitted only when ASSERTED, and the claim is recorded", async () => {
+  // The load-bearing path for a real Cypress submission — its documents carry the QDM eMeasure UUID of a
+  // measure we hold as FHIR — and it had no test at all (review, #389). Both halves: the assertion
+  // admits the batch, and it lands in the outcome's evidence so a reader sees a human's claim.
+  const foreign = "DBD9ECCD-C3EA-42DB-9344-72AD44F84F51";
+  const document = importableDocument("mrn-lineage", "MBI-LINEAGE").replace(
+    "</section></component></structuredBody></component>",
+    `</section></component><component><section>
+       <templateId root="2.16.840.1.113883.10.20.24.2.2" extension="2021-08-01"/>
+       <entry><organizer classCode="CLUSTER" moodCode="EVN"><reference typeCode="REFR"><externalDocument classCode="DOC" moodCode="EVN">
+         <id root="2.16.840.1.113883.4.738" extension="${foreign}"/>
+       </externalDocument></reference></organizer></entry>
+     </section></component></structuredBody></component>`,
+  );
+  const runA = (await (await post("/api/runs", importRun))!.json()) as { id: string };
+  const refused = await post(`/api/runs/${runA.id}/import`, { measureId: "audiogram", qrda1: [document] });
+  assert.equal(refused?.status, 400, "refusing is the default");
+
+  const runB = (await (await post("/api/runs", importRun))!.json()) as { id: string };
+  const admitted = await post(`/api/runs/${runB.id}/import`, {
+    measureId: "audiogram",
+    qrda1: [document],
+    assertMeasureIdentifiers: [foreign],
+  });
+  assert.equal(admitted?.status, 201);
+  const rows = await new SqliteOutcomeStore(env.DB as never).listOutcomes(runB.id);
+  const provenance = (rows[0]!.evidence as { qrda1Import?: { assertedMeasureIdentifiers?: string[] } }).qrda1Import;
+  assert.deepEqual(provenance?.assertedMeasureIdentifiers, [foreign]);
+});
+
+test("ONE document about another measure fails the whole batch — the check is per subject", async () => {
+  // Checking the UNION means one matching document licenses the batch: 149 CMS125 documents plus one
+  // CMS122 would pass, and that document's data would be merged, evaluated and PERSISTED as the wrong
+  // measure — the silent mislabel #362 refused, reintroduced by aggregating (review, #389).
+  const stranger = importableDocument("mrn-stranger", "MBI-STRANGER").replace(
+    "</section></component></structuredBody></component>",
+    `</section></component><component><section>
+       <templateId root="2.16.840.1.113883.10.20.24.2.2" extension="2021-08-01"/>
+       <entry><organizer classCode="CLUSTER" moodCode="EVN"><reference typeCode="REFR"><externalDocument classCode="DOC" moodCode="EVN">
+         <id root="2.16.840.1.113883.4.738" extension="a-different-measure"/>
+       </externalDocument></reference></organizer></entry>
+     </section></component></structuredBody></component>`,
+  );
+  const run = (await (await post("/api/runs", importRun))!.json()) as { id: string };
+  const imported = await post(`/api/runs/${run.id}/import`, {
+    measureId: "audiogram",
+    qrda1: [importableDocument("mrn-ok", "MBI-OK"), stranger],
+  });
+  assert.equal(imported?.status, 400);
+  const body = (await imported!.json()) as { error: string; message: string; documentIndexes: number[] };
+  assert.equal(body.error, "qrda1_measure_mismatch");
+  assert.match(body.message, /1 of 2 subject/);
+  assert.deepEqual(body.documentIndexes, [1], "and it names WHICH document");
+});
+
+test("finalize writes an audit event — a run state change with no ledger entry is a hard-rule breach", async () => {
+  const run = (await (await post("/api/runs", importRun))!.json()) as { id: string };
+  await post(`/api/runs/${run.id}/import`, {
+    measureId: "audiogram",
+    evaluationDate: "2026-06-12",
+    qrda1: [importableDocument("mrn-audit", "MBI-AUDIT")],
+  });
+  await post(`/api/runs/${run.id}/finalize`);
+  const events = new SqliteCaseEventStore(env.DB as never);
+  const audited = (await events.recentAuditEventsByType("RUN_COMPLETED", 50)).filter((e) => e.refRunId === run.id);
+  assert.equal(audited.length, 1, "the pipeline audits its terminal state; so must this route");
 });

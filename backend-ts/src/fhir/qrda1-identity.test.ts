@@ -145,3 +145,88 @@ test("merged resources are namespaced per document, so identical ids do not coll
     .filter((id): id is string => id !== undefined);
   assert.equal(new Set(ids).size, ids.length, "no two resources in the merged bundle share an id");
 });
+
+// ---------------------------------------------------------------- defects found in review of #389
+
+test("a nullFlavor identifier is not an identifier — two unknowns are not the same person", () => {
+  // `<id root="…" extension="UNK" nullFlavor="UNK"/>` says the sender does not know this patient's
+  // number. Treating it as one merged two different people, under-counted the population and unioned
+  // their clinical data into one bundle.
+  const unknownId = (given: string) =>
+    doc({ mrn: "unused", given }).replace(
+      `<id extension="unused" root="${MRN_ROOT}"/>`,
+      `<id extension="UNK" root="${MRN_ROOT}" nullFlavor="UNK"/>`,
+    );
+  const resolution = resolveQrda1Documents([unknownId("ALICE"), unknownId("BOB")]);
+  assert.equal(resolution.subjects.length, 2, "an unknown identifier groups nothing");
+});
+
+test("two people who resolve to the same subject id are DISAMBIGUATED, not silently conflated", () => {
+  // Grouping is root-AWARE; the importer's patient id is deliberately root-AGNOSTIC. So the same
+  // extension under two different roots is correctly two people and incorrectly one subject id — and
+  // `outcomes` has no unique key on (run_id, subject_id), so both rows persist and every per-subject
+  // read attributes one person's data to the other.
+  const resolution = resolveQrda1Documents([
+    doc({ mrn: "123", given: "ALICE" }),
+    doc({ mrn: "123", given: "BOB" }).replace(`root="${MRN_ROOT}"`, 'root="9.9.9.9"'),
+  ]);
+  assert.equal(resolution.subjects.length, 2);
+  assert.equal(new Set(resolution.subjects.map((s) => s.subjectId)).size, 2, "distinct people, distinct subject ids");
+});
+
+test("a field only a NON-canonical document states still reaches the merged Patient", () => {
+  // Absence is not disagreement. Official CMS125's initial population reads `us-core-sex` and nothing
+  // else (ADR-042), so taking the canonical Patient WHOLE silently dropped a person out of the IPP when
+  // only their other document recorded sex — and reported it as a `gender` conflict of `["", "female"]`.
+  const withoutSex = doc({ mrn: "aaa", mbi: "MBI-1" }).replace(
+    /<administrativeGenderCode[\s\S]*?<\/administrativeGenderCode>/,
+    "",
+  );
+  const withSex = doc({ mrn: "zzz", mbi: "MBI-1" });
+  const resolution = resolveQrda1Documents([withoutSex, withSex]);
+  assert.equal(resolution.subjects.length, 1);
+  const patient = resolution.subjects[0]!.bundle.entry
+    .map((e) => e.resource as Record<string, any>)
+    .find((r) => r.resourceType === "Patient")!;
+  assert.equal(patient.gender, "female", "filled from the document that states it");
+  assert.ok(
+    (patient.extension ?? []).some((e: { url: string }) => e.url.endsWith("us-core-sex")),
+    "and the extension the official IPP actually reads comes with it",
+  );
+  assert.deepEqual(resolution.subjects[0]!.demographicConflicts, [], "silence is not disagreement");
+});
+
+test("order independence holds where the identifier sets are EQUAL — the case the first test could not reach", () => {
+  // One sender splitting a patient across documents produces members with the SAME identifiers, which is
+  // precisely where the earlier tiebreak fell back to input order: measured at a 28-year birthdate swing
+  // decided by `readdirSync`. The other order test uses documents with DIFFERING identifiers, so it
+  // exercises the sort key and never this branch.
+  const documents = [
+    doc({ mrn: "same", mbi: "MBI-1", given: "ALICE", birth: "19781224203000" }),
+    doc({ mrn: "same", mbi: "MBI-1", given: "BOB", birth: "19501224203000" }),
+  ];
+  const forward = resolveQrda1Documents(documents);
+  const reversed = resolveQrda1Documents([...documents].reverse());
+  const patientOf = (r: typeof forward) =>
+    r.subjects[0]!.bundle.entry.map((e) => e.resource as Record<string, any>).find((x) => x.resourceType === "Patient")!;
+  assert.equal(forward.subjects.length, 1);
+  assert.equal(patientOf(forward).birthDate, patientOf(reversed).birthDate, "the same birthdate either way");
+  assert.deepEqual(patientOf(forward).name, patientOf(reversed).name);
+  assert.equal(forward.subjects[0]!.demographicConflicts.length, 2, "and both disagreements are still reported");
+});
+
+test("a document's LOCAL measure id is carried, so an authored export is checked like any other", () => {
+  // `/evaluate` checks `measureIdentifiers` PLUS `localMeasureId`; dropping the latter here left an
+  // authored-measure export — which carries `urn:workwell:measure` and no published identifier — with
+  // nothing to check against, so re-importing one under the wrong authored measure passed silently.
+  const authored = doc({ mrn: "mrn-authored" }).replace(
+    "</section></component></structuredBody></component>",
+    `</section></component><component><section>
+       <templateId root="2.16.840.1.113883.10.20.24.2.2" extension="2021-08-01"/>
+       <entry><organizer classCode="CLUSTER" moodCode="EVN"><reference typeCode="REFR"><externalDocument classCode="DOC" moodCode="EVN">
+         <id root="urn:workwell:measure" extension="audiogram"/>
+       </externalDocument></reference></organizer></entry>
+     </section></component></structuredBody></component>`,
+  );
+  assert.deepEqual(resolveQrda1Documents([authored]).subjects[0]!.measureIdentifiers, ["audiogram"]);
+});

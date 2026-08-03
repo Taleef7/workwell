@@ -336,6 +336,26 @@ const OUTCOMES_GRID_FULL_CAP = 5000;
 const QRDA1_IMPORT_MAX_DOCUMENTS = 500;
 
 /**
+ * A run may only receive imported documents — and be finalized from outside — if it was CREATED for
+ * that, by a caller that set `requestedScope.importDriven`.
+ *
+ * The first cut inferred this from the rows instead ("every outcome carries `qrda1Import`"), and review
+ * broke it end to end (#389): `scheduleAsyncRun` returns RUNNING immediately and finishes its fan-out in
+ * `ctx.waitUntil`, so there is a window in which an ALL_PROGRAMS run is RUNNING with ZERO outcomes.
+ * Importing one document into that window made every row import-driven, `/finalize` marked it COMPLETED,
+ * and a QRDA III was exported from a run that went on to gain 2,100 more outcomes — a partial roster
+ * presented as a complete quality report, and a terminal run mutated under every read-model cache keyed
+ * on `runId`.
+ *
+ * The flag cannot be retrofitted onto a run the pipeline owns: `executeManualRun` and the scheduler build
+ * their own `requestedScope`, and there is no route that edits one. So it is a property of construction,
+ * which is what the row-level test could never be. Both checks now run — this one says the run was MEANT
+ * for this, the row test says nothing else got in.
+ */
+const isImportDrivenRun = (run: { requestedScope: Record<string, unknown> }): boolean =>
+  run.requestedScope?.importDriven === true;
+
+/**
  * Run an async-scope (ALL_PROGRAMS/SITE or configured-live MEASURE) manual run or rerun: create the run + return RUNNING
  * immediately, finish the fan-out in the background via waitUntil. The background promise gets a
  * rejection handler so a failure AFTER the response (recordOutcome/upsert/finalize) finalizes the
@@ -663,6 +683,18 @@ export async function handleRuns(
     if (TERMINAL_RUN_STATUSES.has(run.status)) {
       return json({ error: "run_not_open", id: importId, status: run.status, hint: "cannot import into a terminal run" }, 409);
     }
+    if (!isImportDrivenRun(run)) {
+      return json(
+        {
+          error: "run_not_import_driven",
+          message:
+            "documents may only be imported into a run created for it — POST /api/runs with " +
+            "requestedScope.importDriven = true. A run the pipeline owns is still writing its own " +
+            "outcomes, and mixing an import into it would let a partial roster be finalized and exported.",
+        },
+        409,
+      );
+    }
     const body = (await req.json().catch(() => null)) as
       | { measureId?: string; qrda1?: unknown; evaluationDate?: string; assertMeasureIdentifiers?: unknown }
       | null;
@@ -713,20 +745,36 @@ export async function handleRuns(
     const asserted = Array.isArray(body.assertMeasureIdentifiers)
       ? body.assertMeasureIdentifiers.filter((value): value is string => typeof value === "string")
       : [];
+    // PER SUBJECT, not over the union. Checking the union means one matching document licenses the whole
+    // batch: 149 CMS125 documents plus one CMS122 would pass, and that document's clinical data would be
+    // merged, evaluated and PERSISTED as cms125 — the silent mislabel #362 refused, reintroduced by the
+    // aggregation. `/evaluate` cannot make this mistake because it sees one document at a time
+    // (review, #389).
     const identity = measureIdentityFor(body.measureId);
-    const referenced = [...new Set(resolution.subjects.flatMap((s) => s.measureIdentifiers))];
-    const unexplained = referenced.filter((r) => !identity.has(r) && !asserted.includes(r));
-    if (referenced.length > 0 && !referenced.some((r) => identity.has(r)) && unexplained.length > 0) {
+    const mismatched = resolution.subjects
+      .map((subject) => ({
+        subject,
+        unexplained: subject.measureIdentifiers.filter((r) => !identity.has(r) && !asserted.includes(r)),
+      }))
+      .filter(
+        ({ subject, unexplained }) =>
+          subject.measureIdentifiers.length > 0 &&
+          !subject.measureIdentifiers.some((r) => identity.has(r)) &&
+          unexplained.length > 0,
+      );
+    if (mismatched.length > 0) {
+      const unexplained = [...new Set(mismatched.flatMap((m) => m.unexplained))];
       return json(
         {
           error: "qrda1_measure_mismatch",
           message:
-            `the submission references ${unexplained.join(", ")}, which is not measure '${body.measureId}'. ` +
-            `If these documents are that measure in another lineage (a QDM eMeasure UUID for a measure we ` +
-            `hold as FHIR, say), assert it explicitly with assertMeasureIdentifiers — the claim is recorded ` +
-            `with every outcome.`,
+            `${mismatched.length} of ${resolution.subjects.length} subject(s) reference ` +
+            `${unexplained.join(", ")}, which is not measure '${body.measureId}'. If these documents are ` +
+            `that measure in another lineage (a QDM eMeasure UUID for a measure we hold as FHIR, say), ` +
+            `assert it explicitly with assertMeasureIdentifiers — the claim is recorded with every outcome.`,
           requested: body.measureId,
-          documentReferences: referenced,
+          documentReferences: unexplained,
+          documentIndexes: [...new Set(mismatched.flatMap((m) => m.subject.documentIndexes))],
         },
         400,
       );
@@ -734,12 +782,34 @@ export async function handleRuns(
 
     const evaluationPeriod =
       body.evaluationDate ?? (run.requestedScope.evaluationDate as string | undefined) ?? new Date().toISOString().slice(0, 10);
+    const outcomeStore = await outcomes(env);
+    // Several imports must not add up to a run `/finalize` can no longer verify. Review (#389) drove two
+    // 300-document imports into one run and left it permanently un-finalizable, with an error message
+    // blaming a pipeline that was never attached.
+    const already = (await outcomeStore.countOutcomesByStatus(importId)).reduce((sum, c) => sum + c.count, 0);
+    if (already + resolution.subjects.length > QRDA1_IMPORT_MAX_DOCUMENTS) {
+      return json(
+        {
+          error: "too_many_documents",
+          message:
+            `this run already holds ${already} outcome(s); importing ${resolution.subjects.length} more ` +
+            `would exceed the ${QRDA1_IMPORT_MAX_DOCUMENTS} this route can verify at finalize time.`,
+        },
+        413,
+      );
+    }
     const engine = await routedEngineForEnv(env);
     await runStore.markRunning(importId);
-    const outcomeStore = await outcomes(env);
     const persisted: unknown[] = [];
     const evaluationFailures: Array<{ subjectId: string; message: string }> = [];
     for (const subject of resolution.subjects) {
+      const provenance = {
+        untranslatedTemplates: subject.untranslatedTemplates,
+        measureReferences: subject.measureIdentifiers,
+        documentCount: subject.documentIndexes.length,
+        ...(asserted.length > 0 ? { assertedMeasureIdentifiers: asserted } : {}),
+        ...(subject.demographicConflicts.length > 0 ? { demographicConflicts: subject.demographicConflicts } : {}),
+      };
       try {
         const result = await engine.evaluate({
           measureId: body.measureId,
@@ -751,17 +821,11 @@ export async function handleRuns(
             ? {
                 ...(result.evidence as Record<string, unknown>),
                 qrda1Import: {
-                  untranslatedTemplates: subject.untranslatedTemplates,
-                  measureReferences: subject.measureIdentifiers,
-                  // The provenance a reader needs to interpret the row: how many documents this person's
-                  // outcome was computed from, and whether those documents disagreed about who they are.
-                  documentCount: subject.documentIndexes.length,
-                  // Recorded because it is a human's claim, not a derivation: these document identities
-                  // were accepted as this measure because the caller said so.
-                  ...(asserted.length > 0 ? { assertedMeasureIdentifiers: asserted } : {}),
-                  ...(subject.demographicConflicts.length > 0
-                    ? { demographicConflicts: subject.demographicConflicts }
-                    : {}),
+                  // The provenance a reader needs to interpret the row: how many documents this
+                  // person's outcome was computed from, whether those documents disagreed about who they
+                  // are, and — because it is a human's claim rather than a derivation — any cross-lineage
+                  // measure identity the caller asserted.
+                  ...provenance,
                 },
               }
             : result.evidence;
@@ -776,12 +840,37 @@ export async function handleRuns(
           }),
         );
       } catch (err) {
-        // One subject's failure must not cost the submission: the run finishes PARTIAL_FAILURE and the
-        // subject is named, which is what the population pipeline does for the same reason.
-        evaluationFailures.push({ subjectId: subject.subjectId, message: String((err as Error)?.message ?? err) });
+        // PERSIST the failure, exactly as `run-pipeline.ts` does. Collecting it in the response only —
+        // which the first cut did — loses the subject the moment the request ends: no row, no log, no
+        // audit, and the exported report counts a roster short with nothing anywhere saying so. Review
+        // (#389) also showed it made the `PARTIAL_FAILURE` branch below structurally dead, since every
+        // row `/finalize` could see came from a SUCCESSFUL evaluate. One fix, both halves.
+        const message = String((err as Error)?.message ?? err);
+        evaluationFailures.push({ subjectId: subject.subjectId, message });
+        persisted.push(
+          await outcomeStore.recordOutcome({
+            runId: importId,
+            subjectId: subject.subjectId,
+            measureId: body.measureId,
+            evaluationPeriod,
+            status: "MISSING_DATA",
+            evidence: { evaluationError: "engine failure", message, qrda1Import: provenance },
+          }),
+        );
       }
     }
 
+    // Every resolved subject is now persisted — successes and failures alike — so a mismatch means a row
+    // was silently lost, which would under-report the population in a document that reads as complete.
+    if (persisted.length !== resolution.subjects.length) {
+      return json(
+        {
+          error: "import_incomplete",
+          message: `resolved ${resolution.subjects.length} subject(s) but persisted ${persisted.length}`,
+        },
+        500,
+      );
+    }
     return json(
       {
         documents: body.qrda1.length,
@@ -820,6 +909,20 @@ export async function handleRuns(
     if (!run) return json({ error: "not_found", id: finalizeId }, 404);
     if (TERMINAL_RUN_STATUSES.has(run.status)) {
       return json({ error: "run_already_finished", id: finalizeId, status: run.status }, 409);
+    }
+    // Constructional first, rows second. See `isImportDrivenRun`: the row test alone was defeated by the
+    // window in which a population run is RUNNING with no outcomes yet (review, #389).
+    if (!isImportDrivenRun(run)) {
+      return json(
+        {
+          error: "run_not_import_driven",
+          message:
+            "only a run created for imported documents (requestedScope.importDriven) can be finalized " +
+            "from outside. A population run is finalized by the pipeline that knows when its fan-out is " +
+            "done; finishing one from here would mark a partial roster COMPLETED and make it exportable.",
+        },
+        409,
+      );
     }
     const rows = await (await outcomes(env)).listOutcomes(finalizeId, { limit: QRDA1_IMPORT_MAX_DOCUMENTS + 1 });
     if (rows.length === 0) {
@@ -864,6 +967,25 @@ export async function handleRuns(
       : "COMPLETED";
     const finalized = await runStore.finalizeRun(finalizeId, status);
     await runStore.appendLog(finalizeId, "INFO", `Finalized ${status} from ${rows.length} imported outcome(s).`);
+    // Every state change writes an audit event (CLAUDE.md hard rule). The store has no events binding, so
+    // it is written here, exactly as `run-pipeline.ts` does for a population run — otherwise the run audit
+    // packet is empty for precisely the runs whose provenance a certification story depends on
+    // (review, #389). Best-effort at the boundary, like the pipeline's: the run IS finalized, and losing
+    // the ledger write must not turn a finished run into a 500.
+    try {
+      await (await getStores(env)).events?.appendAudit({
+        eventType: "RUN_COMPLETED",
+        entityType: "run",
+        entityId: finalizeId,
+        actor: actor ?? "system",
+        refRunId: finalizeId,
+        refCaseId: null,
+        refMeasureVersionId: null,
+        payload: { status, totalEvaluated: rows.length, source: "qrda1-import" },
+      });
+    } catch (err) {
+      await runStore.appendLog(finalizeId, "WARN", `audit write failed: ${String((err as Error)?.message ?? err)}`);
+    }
     return json(finalized);
   }
 

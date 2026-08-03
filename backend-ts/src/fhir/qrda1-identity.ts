@@ -63,11 +63,18 @@ export interface Qrda1Resolution {
   failures: Array<{ index: number; message: string }>;
 }
 
-/** Every `<recordTarget>` identifier a document carries, as stable `root|extension` keys. */
+/**
+ * Every `<recordTarget>` identifier a document carries, as stable `root|extension` keys.
+ *
+ * A `nullFlavor` id is NOT an identifier: `<id root="..." extension="UNK" nullFlavor="UNK"/>` says the
+ * sender does not know this patient's number, and two documents both saying so are not the same person.
+ * Measured in review (#389): without this filter two different people carrying the same placeholder
+ * merged into one subject, under-counting the population and unioning two people's clinical data.
+ */
 export function recordTargetIdentifiers(root: CdaNode | undefined): string[] {
   const patientRole = child(child(root, "recordTarget"), "patientRole");
   return childrenNamed(patientRole, "id")
-    .filter((id) => id.attrs.root && id.attrs.extension)
+    .filter((id) => id.attrs.root && id.attrs.extension && !id.attrs.nullFlavor)
     .map((id) => `${id.attrs.root}|${id.attrs.extension}`);
 }
 
@@ -103,14 +110,23 @@ function group(identifiersPerDocument: string[][]): number[][] {
  * exact failure this merge exists to prevent.
  */
 function merge(
-  members: Array<{ index: number; imported: Qrda1Import; identifiers: string[] }>,
+  members: Array<{ index: number; imported: Qrda1Import; identifiers: string[]; documentId?: string; text: string }>,
 ): Omit<ResolvedSubject, "documentIndexes"> {
-  // Deterministic and input-order independent: the smallest identifier key wins, and a document with no
-  // identifiers at all is a group of one, so its own Patient is the only candidate.
+  // Deterministic and input-order independent — INCLUDING the ordinary case where every member carries
+  // the same identifiers, which is what one sender splitting a patient across documents produces. An
+  // earlier cut tiebroke on input index there, so a birthdate disagreement was resolved by `readdirSync`
+  // order: measured in review (#389) at a 28-year swing across `AgeInYearsAt` bands depending on which
+  // way the array was read, under a doc comment claiming order independence. The tiebreak is now the
+  // document's own id, then its patient id, then the document TEXT — all content, none of it position.
+  // The text is the last resort and it earns its place: two documents can legitimately share every
+  // identifier AND carry no document id (one sender, one patient, two records), and that is exactly the
+  // case where a birthdate disagreement would otherwise be settled by array order.
+  const sortKey = (m: { identifiers: string[]; documentId?: string; imported: Qrda1Import; text: string }) =>
+    `${[...m.identifiers].sort().join(",")}|${m.documentId ?? ""}|${m.imported.patientId}|${m.text}`;
   const canonical =
     [...members].sort((a, b) => {
-      const [ka, kb] = [[...a.identifiers].sort().join(","), [...b.identifiers].sort().join(",")];
-      return ka < kb ? -1 : ka > kb ? 1 : a.index - b.index;
+      const [ka, kb] = [sortKey(a), sortKey(b)];
+      return ka < kb ? -1 : ka > kb ? 1 : 0;
     })[0] ?? members[0]!;
 
   const patients = members.map((m) => ({
@@ -121,19 +137,26 @@ function merge(
   }));
   const chosen = patients.find((p) => p.member === canonical)?.resource;
 
+  // ABSENCE IS NOT DISAGREEMENT, and taking the canonical Patient whole conflates them. Measured in
+  // review (#389): where only a NON-canonical document carried `us-core-sex`, the merged Patient had
+  // none — and official CMS125's initial population reads that extension and nothing else (ADR-042), so
+  // the person silently left the initial population while the report called it a `gender` "conflict" of
+  // `["", "female"]`. So: the canonical value wins where two members both state one, a field the
+  // canonical is SILENT about is filled from whichever member states it, and a conflict is recorded only
+  // for real disagreement. `extension` and `identifier` are compared too — the earlier version read
+  // three fields and `us-core-sex` is in none of them.
   const demographicConflicts: Array<{ field: string; values: string[] }> = [];
-  if (members.length > 1) {
-    for (const [field, read] of [
-      ["birthDate", (p: Record<string, unknown>) => String(p.birthDate ?? "")],
-      ["gender", (p: Record<string, unknown>) => String(p.gender ?? "")],
-      ["name", (p: Record<string, unknown>) => JSON.stringify(p.name ?? [])],
-    ] as const) {
-      const values = [...new Set(patients.map((p) => (p.resource ? read(p.resource) : "")))];
-      if (values.length > 1) demographicConflicts.push({ field, values });
-    }
+  const patient: Record<string, unknown> = { ...(chosen ?? {}) };
+  for (const field of ["birthDate", "gender", "name", "extension", "identifier"]) {
+    const stated = patients
+      .map((p) => p.resource?.[field])
+      .filter((v) => v !== undefined && v !== null && v !== "");
+    const distinct = [...new Set(stated.map((v) => JSON.stringify(v)))];
+    if (members.length > 1 && distinct.length > 1) demographicConflicts.push({ field, values: distinct });
+    if (patient[field] === undefined && stated.length > 0) patient[field] = stated[0];
   }
 
-  const entry: Array<{ resource: unknown }> = chosen ? [{ resource: chosen }] : [];
+  const entry: Array<{ resource: unknown }> = chosen ? [{ resource: patient }] : [];
   for (const m of members) {
     for (const e of m.imported.bundle.entry) {
       const resource = e.resource as { resourceType?: string; id?: string };
@@ -146,7 +169,18 @@ function merge(
     subjectId: canonical.imported.patientId,
     bundle: { resourceType: "Bundle", type: "collection", entry },
     untranslatedTemplates: [...new Set(members.flatMap((m) => m.imported.untranslatedTemplates))],
-    measureIdentifiers: [...new Set(members.flatMap((m) => m.imported.measureIdentifiers))],
+    // BOTH identity kinds, exactly as `/evaluate` checks them. Dropping `localMeasureId` left an
+    // authored-measure export — which carries `urn:workwell:measure` and no published identifier — with
+    // nothing to check against, so re-importing one under the WRONG authored measure passed silently on
+    // this route while `/evaluate` refused the same document (review, #389).
+    measureIdentifiers: [
+      ...new Set(
+        members.flatMap((m) => [
+          ...m.imported.measureIdentifiers,
+          ...(m.imported.localMeasureId ? [m.imported.localMeasureId] : []),
+        ]),
+      ),
+    ],
     demographicConflicts,
   };
 }
@@ -162,10 +196,18 @@ function merge(
  */
 export function resolveQrda1Documents(documents: readonly string[]): Qrda1Resolution {
   const failures: Array<{ index: number; message: string }> = [];
-  const members: Array<{ index: number; imported: Qrda1Import; identifiers: string[] }> = [];
+  const members: Array<{ index: number; imported: Qrda1Import; identifiers: string[]; documentId?: string; text: string }> = [];
   documents.forEach((xml, index) => {
     try {
-      members.push({ index, imported: importQrda1Document(xml), identifiers: recordTargetIdentifiers(parseXml(xml) ?? undefined) });
+      const root = parseXml(xml) ?? undefined;
+      const documentId = child(root, "id")?.attrs.root;
+      members.push({
+        index,
+        imported: importQrda1Document(xml),
+        identifiers: recordTargetIdentifiers(root),
+        text: xml,
+        ...(documentId ? { documentId } : {}),
+      });
     } catch (error) {
       failures.push({ index, message: String((error as Error)?.message ?? error) });
     }
@@ -175,5 +217,20 @@ export function resolveQrda1Documents(documents: readonly string[]): Qrda1Resolu
     const groupMembers = indexes.map((i) => members[i]!);
     return { ...merge(groupMembers), documentIndexes: groupMembers.map((m) => m.index) };
   });
+  // Grouping is root-AWARE; `importQrda1Document`'s patient id is deliberately root-AGNOSTIC (the first
+  // `<id>` carrying an extension, whatever the root) and falls back to a constant. So two documents that
+  // grouping correctly keeps APART — the same extension under different roots, or no extension at all —
+  // can still resolve to the same subject id, and nothing downstream would notice: `outcomes` has no
+  // unique key on `(run_id, subject_id)`, so both rows persist, the population arithmetic survives, and
+  // every per-subject read (`listOutcomesForEmployee`, the QRDA I export's `indexBundlesBySubject`, the
+  // per-subject MeasureReport, the roster) attributes one person's data to another. Measured in review
+  // (#389). Disambiguated rather than refused: the documents are fine, our id derivation is lossy, and a
+  // suffix keeps both people countable and distinguishable.
+  const seen = new Map<string, number>();
+  for (const subject of subjects) {
+    const count = (seen.get(subject.subjectId) ?? 0) + 1;
+    seen.set(subject.subjectId, count);
+    if (count > 1) subject.subjectId = `${subject.subjectId}~${count}`;
+  }
   return { subjects, failures };
 }

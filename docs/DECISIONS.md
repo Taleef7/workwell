@@ -15,6 +15,18 @@ flag on `/evaluate`: identity resolution is inherently cross-document, so a per-
 it at any level of effort. Measured on Cypress's own archives, 68 documents describe 64 people and 153
 describe 150 — a receiver that counts documents fails C2 on arithmetic before any measure logic runs.
 
+**Decision 2a — three things about "identifier" and "deterministic" needed saying, all found by review
+(#389) and all measured.** A `nullFlavor` id is **not** an identifier — two documents both saying "unknown"
+are not the same person, and without that filter two people merged into one subject. The canonical Patient
+is merged **field-wise**: absence is not disagreement, and taking one document's Patient whole dropped a
+`us-core-sex` that only the other stated, which silently removes a person from official CMS125's initial
+population (ADR-042) while reporting it as a `gender` conflict of `["", "female"]`. And the canonical pick
+tiebreaks on CONTENT (document id, then patient id, then the document text) rather than input index: with
+equal identifier sets — one sender, one patient, two records — the earlier tiebreak let `readdirSync` order
+decide a 28-year birthdate difference across `AgeInYearsAt` bands, under a doc comment claiming order
+independence. Two people who still resolve to the same subject id are disambiguated rather than conflated,
+because `outcomes` has no unique key that would catch it.
+
 **Decision 2 — grouping is DETERMINISTIC and identifier-only.** Documents merge when they share any
 `<recordTarget>` identifier, transitively; a document sharing none is its own person, however alike its
 demographics. That is ADR-022's rule one level down, and it was chosen on a measurement: adding a
@@ -25,7 +37,29 @@ documents DISAGREE on demographics the conflict is **reported, never resolved** 
 moves a person between age bands in both routed measures, and review of the C2 harness reproduced exactly
 that failure (a MATCH printed while a supplied birthdate was discarded).
 
-**Decision 3 — `POST /api/runs/:id/finalize` refuses any run that is not import-driven.** A population run
+**Decision 3 — import-drivenness is a property of the run's CONSTRUCTION, not an inference from its rows.**
+A run may receive documents, and be finalized from outside, only if it was created with
+`requestedScope.importDriven`. Finalizing a population run from outside would mark a partial roster
+COMPLETED and make it exportable — the exact harm the export guard exists to prevent.
+
+The first cut inferred it from the rows ("every outcome carries `qrda1Import`") and **review broke that end
+to end** (#389): `scheduleAsyncRun` returns RUNNING immediately and finishes its fan-out in `ctx.waitUntil`,
+so an ALL_PROGRAMS run spends a window RUNNING with **zero** outcomes, during which the row test is
+vacuously true. One document imported into that window, `/finalize` → COMPLETED, a QRDA III exported —
+from a run that then gained 2,100 more outcomes, mutating a terminal run under every read-model cache keyed
+on `runId`. The flag cannot be retrofitted onto a run the pipeline owns, because the pipeline builds its
+own `requestedScope` and no route edits one. **Both checks now run**: construction says the run was meant
+for this, the row test says nothing else got in.
+
+**Decision 3b — a subject the engine cannot evaluate is PERSISTED as `MISSING_DATA` + `evaluationError`,
+exactly as the population pipeline does.** Collecting it in the response alone lost the subject the moment
+the request ended — no row, no log, no audit — so an export counted the roster short with nothing anywhere
+saying so; and it made the `PARTIAL_FAILURE` branch structurally dead, since every row `/finalize` could
+see came from a SUCCESSFUL evaluate. One fix, both halves (review, #389). `/finalize` also writes a
+`RUN_COMPLETED` audit event: a run state change with no ledger entry breaches the repo-wide hard rule, and
+the pipeline has always audited its own.
+
+**Decision 3 (original) — `POST /api/runs/:id/finalize` refuses any run that is not import-driven.** A population run
 is advanced by the pipeline, which knows when its fan-out is done; finalizing one from outside would mark
 a partial roster COMPLETED and make it exportable — the exact harm the export guard exists to prevent. The
 test is stateless and fails closed: **every** outcome in the run must carry `qrda1Import` evidence, which

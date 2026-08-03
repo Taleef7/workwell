@@ -53,6 +53,29 @@ computes that number from the **expected** supplemental values and calls it "Rep
 Taken at face value it would have become "Cypress read our numbers and they matched", which is the
 opposite of what happened.
 
+**Review broke the finalize guard end to end, and it was the worst failure available in the diff.**
+`scheduleAsyncRun` returns RUNNING immediately and finishes its fan-out in the background, so an
+ALL_PROGRAMS run spends a window RUNNING with **zero** outcomes — during which "every outcome carries
+`qrda1Import`" is vacuously true. Measured: one document imported into that window, finalized COMPLETED, a
+QRDA III exported, and the run then gained 2,100 more outcomes. Import-drivenness is now a property of the
+run's **construction** (`requestedScope.importDriven`), which a run the pipeline owns can never acquire;
+both checks run. **And the `PARTIAL_FAILURE` branch was structurally dead** — `/import` did not persist a
+failed subject at all, so every row `/finalize` could see came from a successful evaluate, and 150
+documents with 20 failures would have exported a 130-row roster as a complete report. Failed subjects now
+persist `MISSING_DATA` + `evaluationError` exactly as the pipeline does; one fix, both halves. `/finalize`
+also writes its `RUN_COMPLETED` audit event, which it was skipping.
+
+**Four more, all measured, all in the identity path:** a `nullFlavor` id merged two different people; two
+people could resolve to the SAME subject id (grouping is root-aware, the importer's patient id is
+deliberately root-agnostic, and `outcomes` has no unique key to catch it); taking the canonical Patient
+whole dropped a `us-core-sex` that only the other document stated — silently removing a person from
+official CMS125's IPP while reporting it as a `gender` "conflict" of `["", "female"]`; and the canonical
+tiebreak fell back to input order for equal identifier sets, letting `readdirSync` decide a 28-year
+birthdate swing. Plus two route regressions against `/evaluate`: the measure check ran over the UNION so
+one matching document licensed the whole batch, and `localMeasureId` was dropped so an authored export was
+unchecked. All fixed, all pinned, and the load-bearing `assertMeasureIdentifiers` path — which had no test
+at all — now has one.
+
 **So the bar is unchanged and now precisely located.** The loop exists, runs over a third party's archive,
 and produces the right numbers — measured directly in #388 at 64/64 and 150/150 subjects. It is not green,
 for a lineage split our export deliberately will not fake and supplemental data we do not carry. Evidence:
