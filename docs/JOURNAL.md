@@ -1,5 +1,42 @@
 # Journal
 
+## 2026-08-03 (M-D) — the live WebChart path gets the two elements our SQL mappers add, and the gate that was missing (branch `fix/webchart-live-official-parity`, ADR-057)
+
+M-D's first item, and it was a landmine rather than a feature: ADR-042 mapped `us-core-sex` and ADR-044
+dual-stamped mammography, both in the two SQL→FHIR sites, and both sit **upstream of the live FHIR
+transport**. `normalizeWebChartBundle` was untouched by design, so a third-party WebChart server got
+neither. Recorded and left open in both ADRs: official CMS125 puts a live tenant's ENTIRE roster out of its
+initial population — silently, 100% MISSING_DATA rather than an error — and a woman who WAS screened reads
+OVERDUE, which `case-logic.ts` escalates to HIGH. Inert only because no WebChart-configured stack routes
+officially; the day one does, both fire.
+
+**Both derived now, on the ADR-037/ADR-044 normalization terms.** `us-core-sex` from `Patient.gender`
+through a two-value allowlist (`other`/`unknown` assert NOTHING — there is no concept to assert and
+guessing is what this must not do), never overwriting one the server supplied, tagged
+`derived-from-gender`. A LOINC imaging `Observation` from a CPT/HCPCS mammography `Procedure`: a two-code
+allowlist rather than a category sweep, only from a `completed` Procedure, carrying the `category ~
+imaging` that `Status.isDiagnosticStudyPerformed` also requires, and **suppressed entirely when the server
+already sends the Observation** — checked at bundle level precisely so it can see the whole patient.
+
+**ADR-042 declined to infer sex here, and this reverses that for a stated reason.** The symmetry is the
+argument: administrative gender and recorded sex can legitimately differ, so deriving is an inference — but
+reading a server's own `female` as not-female is *also* an inference, and a worse one, because it is silent
+and it empties the measure. ADR-043 already established that a whole roster out of the initial population
+is the hazard, not the safe answer.
+
+**The gate the webchart skill's trap #4 said did not exist now does.**
+`live-official-parity.test.ts` strips exactly those two elements from the committed fixture to reproduce
+the live shape — a live server sends `Patient.gender` and a CPT Procedure — and pins that official CMS125
+admits **4 of 56** with normalization and **0** without. So it cannot pass on data that never needed the
+fix, which is what the existing `devdb-official-eval.test.ts` does: its fixture comes from one of the
+mappers ADR-042/044 fixed, so the derivation never fires there. It also verifies the fixture still CARRIES
+both elements before stripping them — a guard on the guard — and pins every negative: a non-final
+Procedure, a non-mammogram Procedure, an unmapped gender, a server that already supplies the element.
+
+**Still untested: the live HTTP transport itself.** This exercises every transformation a routed run
+applies to a WebChart payload and none of the request shaping, exactly as `devdb-official-eval.test.ts`
+says of itself. Suite 1850, 0 fail; the new file is wired into CI's sidecar-dependent `official-cases` job.
+
 ## 2026-08-03 (M-B) — the C2 loop runs end to end through the API, and Cypress cannot read the document it produces (branch `feat/qrda1-batch-import-finalize`, ADR-056)
 
 Two routes existed nowhere and #386 §11.1 named one of them: `/evaluate` takes ONE document and one

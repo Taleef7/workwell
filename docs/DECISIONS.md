@@ -1,5 +1,46 @@
 # Architecture Decision Records
 
+## ADR-057: The live third-party WebChart path derives the two elements our SQL mappers add — because reading a server's own "female" as not-female is also an inference, and a worse one
+
+**Status:** Accepted (2026-08-03). **Closes the open item in ADR-042 decision 3 and ADR-044.**
+
+**Context.** ADR-042 mapped `us-core-sex` and ADR-044 dual-stamped mammography, both in the two SQL→FHIR
+sites (`wcdb-fhir-shim`, `scripts/webchart-devdb-export.ts`). Both sit **upstream of the live FHIR
+transport**, and `normalizeWebChartBundle` was left untouched deliberately — so a third-party WebChart
+server, which supplies only what its own FHIR API emits, got neither. Both ADRs recorded the consequence
+and left it open: official CMS125 puts a live tenant's ENTIRE roster out of its initial population (100%
+MISSING_DATA, silently), and a woman who WAS screened reads OVERDUE — which `case-logic.ts` escalates to
+HIGH. It was inert only because no WebChart-configured stack routes officially; the day one does, both fire.
+
+**Decision — derive both, on the ADR-037/ADR-044 normalization terms, and say what is inferred.**
+
+`us-core-sex` is asserted from `Patient.gender` when the server states one and not the other: an explicit
+two-value allowlist (`male`/`female` → the SNOMED concept ids — `other`, `unknown` and anything else assert
+NOTHING, because there is no concept to assert and guessing is precisely what this must not do), never
+overwriting an extension the server supplied, and tagged `derived-from-gender`.
+
+A LOINC imaging `Observation` is derived from a CPT/HCPCS mammography `Procedure`: a two-code allowlist
+rather than a category sweep, only from a `completed` Procedure (a `not-done` screening did not happen),
+carrying the `category ~ imaging` that `Status.isDiagnosticStudyPerformed` also requires, and **suppressed
+entirely when the bundle already carries the LOINC Observation** — checked at bundle level precisely so it
+can see the whole patient. Both numerators are `exists(...)`, so neither can inflate; for a counting
+measure the duplicate would, which is why the allowlist is two codes.
+
+**ADR-042 declined to infer sex here, and this reverses that for a stated reason.** That refusal was
+generalized from the configuration it fixed to one it had not measured (ADR-042 decision 3 says so). The
+symmetry is the argument: administrative gender and recorded sex can legitimately differ, so deriving is an
+inference — but reading a server's own `female` as not-female is *also* an inference, and a worse one,
+because it is silent and it empties the measure. ADR-043 established that a whole roster out of the initial
+population is the hazard, not the safe answer.
+
+**Consequences.** `live-official-parity.test.ts` is the gate the skill's trap #4 said did not exist: it
+strips exactly those two elements from the committed fixture to reproduce the live shape, then pins that
+official CMS125 admits **4 of 56** with normalization and **0** without — so the test cannot pass on data
+that never needed the fix. Every derivation also pins its negative (a non-final Procedure, a non-mammogram
+Procedure, an unmapped gender, a server that already supplies the element). What remains untested is the
+live HTTP transport itself: this exercises every transformation a routed run applies to a WebChart payload
+and none of the request shaping, exactly as `devdb-official-eval.test.ts` says of itself.
+
 ## ADR-056: A batch import and an import-driven finalize — the two routes the certification loop needed, and the guard that keeps finalize from being a "finish this run" button
 
 **Status:** Accepted (2026-08-03). **Extends ADR-051/ADR-055.**
