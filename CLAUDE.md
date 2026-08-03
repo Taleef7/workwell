@@ -519,19 +519,40 @@ forbidding a `SPLY`-coded DeviceRequest could not fail). No export change: `qdm-
 what our bundles carry, so import/export are now asymmetric by design and the round trip cannot reach the
 new mappers. Suite 1807, 0 fail; the MADiE gate never reaches the importer.
 
-**Still missing for M-B — the bar is NOT met.** Locked decision #2 is the **import → evaluate → export →
-CVU+ green LOOP**. CVU+ has graded our EXPORTS (both document types, 0 findings) and the calculation
-comparison above was run **offline against the archive**, going around prerequisite 11.1: **no HTTP route
-calls `finalizeRun`**, so an imported run cannot reach the Cat III export (409 while RUNNING).
-`ExpectedResultsValidator` has therefore still never graded a document we produced.
+**THE LOOP NOW RUNS THROUGH THE PRODUCT API, AND CYPRESS CANNOT READ WHAT IT PRODUCES (2026-08-03,
+ADR-056).** Two routes that existed nowhere: `POST /api/runs/:id/import` (a BATCH, resolved to people
+first — identity is inherently cross-document, so a per-document import cannot do it at any effort) and
+`POST /api/runs/:id/finalize` (refuses any run whose outcomes do not ALL carry `qrda1Import` evidence —
+finalizing a population run from outside would mark a partial roster COMPLETED and make it exportable).
+Grouping is **deterministic and identifier-only**, chosen on a measurement: a name+birthdate pass changes
+nothing on any of the four Cypress archives, so it is not worth the risk of merging two people.
+Demographic conflicts inside a merged group are REPORTED, never resolved. Measured end to end: CMS125 153
+documents → 150 subjects → `{"IPP":150,"DENOM":150,"DENEX":47,"NUMER":2}`; CMS122 68 → 64 →
+`{"IPP":64,"DENOM":64,"DENEX":32,"NUMER":31}` — Cypress's expected results exactly. **Submitted, and it
+is RED for two reasons that are not our arithmetic.** `ExpectedResultsValidator` extracted
+`reported_results: {"PopulationSet_1" => {}, …}` — **nothing** — because Cypress's bundle is the **QDM
+lineage** (CMS125v14) and we run and report the **QI-Core** one (v1.0.000): different eMeasure UUID, set
+id and population identifiers, so `extract_results_by_ids` finds none of ours. **Zero population
+mismatches is NOT a pass here** — `check_population` compares only when the extraction is non-empty, so an
+unreadable document produces no population errors at all. Plus 45/53 supplemental-data errors: QRDA III
+wants RACE/ETHNICITY/SEX/PAYER per population and we emit none (the input is there — Payer is in every
+document and the importer drops it). Relabelling is not the fix: ADR-046 decision 3 forbids claiming an
+eMeasure identity the run did not use. Evidence: `docs/evidence/CVU_C2_SUBMISSION_2026-08-03.md`.
 
-**Still open:** the authored cms122/125 subsets retire to the fidelity lab (locked decision #4,
-deliberately not in the flip's own PR — issue #377); the LIVE third-party WebChart path gets neither the
-`us-core-sex` nor the dual-stamp fix (both mapping sites sit upstream of the live FHIR transport;
-`normalizeWebChartBundle` untouched by design); a real C2 submission needs the **finalize route** AND
-**identity resolution in the product path** (nothing in WorkWell resolves 68 documents to 64 people); only
-`PopulationSet_1` is compared, so a stratum-only disagreement would not be visible; and the **CVU+ LOOP**
-remains the verification bar. (The two QRDA-import defects ARE fixed — ADR-055, above.)
+**Still missing for M-B — the bar is NOT met.** Locked decision #2 asks for the loop to come back GREEN.
+It runs, over a third party's archive, producing numbers measured correct against Cypress's own
+per-patient expected results (#388: 64/64 and 150/150 subjects agreeing on every population). It is red on
+**measure-identity lineage** and **supplemental data**. A green C2 needs either a QDM-lineage reporting
+path — a real decision, not a patch: it means reporting an identity for logic we did not execute, or
+vendoring and executing the QDM artifacts — or Cypress bundles in the FHIR lineage, which CMS does not
+publish for C2.
+
+**Still open:** the authored cms122/125 subsets retire to the fidelity lab (locked decision #4 — issue
+#377); the LIVE third-party WebChart path gets neither the `us-core-sex` nor the dual-stamp fix; **no
+supplemental data anywhere in the chain** (import drops Patient Characteristic Payer and never reads
+race/ethnicity from `<recordTarget>`; the Cat III emits none); only `PopulationSet_1` is compared, so a
+stratum-only disagreement is invisible; and the **QDM-vs-QI-Core lineage decision** above, which is what
+now stands between us and a green C2.
 
 ---
 

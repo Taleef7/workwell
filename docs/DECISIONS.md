@@ -1,5 +1,52 @@
 # Architecture Decision Records
 
+## ADR-056: A batch import and an import-driven finalize — the two routes the certification loop needed, and the guard that keeps finalize from being a "finish this run" button
+
+**Status:** Accepted (2026-08-03). **Extends ADR-051/ADR-055.**
+
+**Context.** §170.315(c)(2) is "import and calculate", and the loop locked decision #2 names ends in a
+QRDA Category III somebody can submit. Two steps of that were missing and #386 §11.1 named one of them:
+`POST /api/runs/:id/evaluate` takes ONE document and one subject, and **no HTTP route called
+`finalizeRun`**, so an imported run stayed RUNNING and `GET /api/runs/:id/qrda` refused it with a 409 —
+correctly, since exporting a run that is still writing outcomes presents a partial roster as complete.
+
+**Decision 1 — `POST /api/runs/:id/import` takes a BATCH, and resolves documents to people first.** Not a
+flag on `/evaluate`: identity resolution is inherently cross-document, so a per-document import cannot do
+it at any level of effort. Measured on Cypress's own archives, 68 documents describe 64 people and 153
+describe 150 — a receiver that counts documents fails C2 on arithmetic before any measure logic runs.
+
+**Decision 2 — grouping is DETERMINISTIC and identifier-only.** Documents merge when they share any
+`<recordTarget>` identifier, transitively; a document sharing none is its own person, however alike its
+demographics. That is ADR-022's rule one level down, and it was chosen on a measurement: adding a
+name+birthdate pass for identifier-less documents changes **nothing** on any of the four Cypress archives,
+because the patients shipped without a Medicare Beneficiary Identifier are never the ones duplicated. A
+rule that buys no accuracy and can merge two different people is not worth having. Where a merged group's
+documents DISAGREE on demographics the conflict is **reported, never resolved** — a `birthDate` conflict
+moves a person between age bands in both routed measures, and review of the C2 harness reproduced exactly
+that failure (a MATCH printed while a supplied birthdate was discarded).
+
+**Decision 3 — `POST /api/runs/:id/finalize` refuses any run that is not import-driven.** A population run
+is advanced by the pipeline, which knows when its fan-out is done; finalizing one from outside would mark
+a partial roster COMPLETED and make it exportable — the exact harm the export guard exists to prevent. The
+test is stateless and fails closed: **every** outcome in the run must carry `qrda1Import` evidence, which
+is true only of a run whose roster came from supplied documents. A run mixing imported and pipeline
+outcomes is refused rather than guessed at, and a run larger than the import cap is refused as a
+population run.
+
+**Decision 4 — a cross-lineage measure identity is an ASSERTION the caller makes and the system records,
+never a relaxation.** Cypress's CMS125v14 documents reference the QDM eMeasure UUID; our vendored artifact
+is the FHIR/QI-Core one. They are the same measure and our system holds nothing that can prove it, so the
+default stays refusal (evaluating a document as a measure it is not about is a mislabel that PERSISTS) and
+`assertMeasureIdentifiers` lets a caller state the mapping explicitly. Every asserted identifier is
+recorded in the outcome evidence, so a later reader sees a human's claim rather than a derivation.
+
+**Consequences.** The loop runs end to end over a third party's archive and produces a Category III
+carrying Cypress's exact expected counts. It is **not green**: Cypress extracted nothing from the
+document, because the same lineage split appears on the way out (`Invalid HQMF ID Found`) and because we
+emit no supplemental data at all. Both are now measured rather than assumed —
+`docs/evidence/CVU_C2_SUBMISSION_2026-08-03.md`. The import cap (500 documents) bounds a request that
+parses everything at once; Cypress's own archives are 66–153.
+
 ## ADR-055: What a QDM datatype becomes in FHIR is read off the artifact's own ELM retrieves — and the importer is now measured against a third party's answers
 
 **Status:** Accepted (2026-08-03). **Supersedes nothing; extends ADR-051.**

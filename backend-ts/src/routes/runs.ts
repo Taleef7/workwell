@@ -19,6 +19,13 @@
  *   POST /api/runs/:id/evaluate     evaluate a subject + persist     → 201 OutcomeRecord
  *                                   body {measureId, patientBundle | qrda1, evaluationDate?}
  *                                   `qrda1` = a QRDA Category I CDA document — §170.315(c)(2) import+calculate
+ *   POST /api/runs/:id/import       import a BATCH of QRDA I docs    → 201 {subjects, outcomes, merged, …}
+ *                                   body {measureId, qrda1: string[], evaluationDate?}
+ *                                   resolves documents→people first: identity is cross-document, so a
+ *                                   per-document import over-reports the population (ADR-055)
+ *   POST /api/runs/:id/finalize     finish an IMPORT-DRIVEN run      → 200 RunRecord | 409
+ *                                   refuses any run whose outcomes did not all come from imported
+ *                                   documents — a population run is finalized by its own pipeline
  */
 import type { CloudDatabase } from "@mieweb/cloud";
 import { getStores } from "../stores/factory.ts";
@@ -62,6 +69,7 @@ import { isOfficialRouted } from "../wiring/official-routing.ts";
 import { buildQrda3DocumentFromCounts } from "../fhir/qrda3-export.ts";
 import { buildQrda1Documents, indexBundlesBySubject } from "../fhir/qrda1-export.ts";
 import { importQrda1Document, type Qrda1Import } from "../fhir/qrda1-import.ts";
+import { resolveQrda1Documents } from "../fhir/qrda1-identity.ts";
 import { loadOfficialArtifact, officialMeasureIdentifiers } from "../wiring/official-artifacts.ts";
 import { isWebChartConfigured, resolveDataSource, type DataSourceEnv } from "../engine/ingress/data-source.ts";
 import { subjectIdOf } from "../engine/ingress/enrollment/roster.ts";
@@ -318,6 +326,14 @@ const notReportable = (status: string): Response | null =>
  *  rows); a larger run (a 120k seed:scale run) is capped to the first page so the worker never
  *  materializes 120k hydrated rows (Fable H4 / Codex P2). Above this, page with an explicit ?limit. */
 const OUTCOMES_GRID_FULL_CAP = 5000;
+
+/**
+ * Documents accepted in one `/import` call, and the size above which `/finalize` stops recognising a run
+ * as import-driven. Every document is parsed and held at once to resolve identity across the batch, so
+ * this bounds the request rather than expressing a belief about submission sizes: Cypress's own C2
+ * archives are 66–153 documents. A larger submission belongs in several runs.
+ */
+const QRDA1_IMPORT_MAX_DOCUMENTS = 500;
 
 /**
  * Run an async-scope (ALL_PROGRAMS/SITE or configured-live MEASURE) manual run or rerun: create the run + return RUNNING
@@ -632,6 +648,223 @@ export async function handleRuns(
     } catch (err) {
       return json({ error: "evaluation_error", message: String((err as Error)?.message ?? err) }, 500);
     }
+  }
+
+  // §170.315(c)(2) at SUBMISSION scale: a batch of QRDA Category I documents, resolved to the people
+  // they describe, evaluated through the unchanged engine. The single-document `/evaluate` above cannot
+  // do this, and not for want of a flag: resolving identity is inherently cross-document, and a receiver
+  // that treats every document as a subject over-reports the population before any measure logic runs
+  // (measured on Cypress's own archives: 68 documents, 64 people — ADR-055 / the C2 evidence §13).
+  const importId = pathname.match(/^\/api\/runs\/([^/]+)\/import$/)?.[1];
+  if (importId && req.method === "POST") {
+    const runStore = await store(env);
+    const run = await runStore.getRun(importId);
+    if (!run) return json({ error: "not_found", id: importId }, 404);
+    if (TERMINAL_RUN_STATUSES.has(run.status)) {
+      return json({ error: "run_not_open", id: importId, status: run.status, hint: "cannot import into a terminal run" }, 409);
+    }
+    const body = (await req.json().catch(() => null)) as
+      | { measureId?: string; qrda1?: unknown; evaluationDate?: string; assertMeasureIdentifiers?: unknown }
+      | null;
+    if (!body?.measureId || !Array.isArray(body.qrda1) || body.qrda1.length === 0) {
+      return json(
+        { error: "invalid_request", hint: "body requires { measureId, qrda1: string[] } with at least one document" },
+        400,
+      );
+    }
+    if (body.qrda1.length > QRDA1_IMPORT_MAX_DOCUMENTS) {
+      // Bounded because every document is parsed and held in memory at once to resolve identity across
+      // them; a submission larger than this belongs in several runs rather than in one request.
+      return json(
+        {
+          error: "too_many_documents",
+          message: `at most ${QRDA1_IMPORT_MAX_DOCUMENTS} documents per request; received ${body.qrda1.length}`,
+        },
+        413,
+      );
+    }
+    if (!body.qrda1.every((document) => typeof document === "string")) {
+      return json({ error: "invalid_request", hint: "each qrda1 entry must be the CDA document as a string" }, 400);
+    }
+
+    const resolution = resolveQrda1Documents(body.qrda1 as string[]);
+    // Every document unreadable is not a partial success — it is the empty-bundle hazard by another
+    // route, and reporting 0 subjects with a 201 would read as "this population is empty".
+    if (resolution.subjects.length === 0) {
+      return json(
+        {
+          error: "qrda1_import_failed",
+          message: "no document in the submission could be imported",
+          failures: resolution.failures,
+        },
+        400,
+      );
+    }
+    // The documents say which measure they are about; evaluating them as another is a silent mislabel
+    // that PERSISTS (Codex, #362). Checked across the whole submission, once.
+    //
+    // `assertMeasureIdentifiers` is the escape hatch, and it is deliberately an ASSERTION rather than a
+    // relaxation. A QRDA about the same measure in a different LINEAGE carries an identity we hold
+    // nothing to match: Cypress's CMS125v14 documents reference the QDM eMeasure UUID
+    // `DBD9ECCD-…`, while our vendored artifact is the FHIR/QI-Core v1.0.000 one. They are the same
+    // measure and our system cannot prove it — so a caller who knows states it explicitly, every asserted
+    // identifier is listed, and the assertion is PERSISTED in the outcome evidence so a later reader sees
+    // that a human claimed the mapping rather than the system deriving it. Refusing stays the default.
+    const asserted = Array.isArray(body.assertMeasureIdentifiers)
+      ? body.assertMeasureIdentifiers.filter((value): value is string => typeof value === "string")
+      : [];
+    const identity = measureIdentityFor(body.measureId);
+    const referenced = [...new Set(resolution.subjects.flatMap((s) => s.measureIdentifiers))];
+    const unexplained = referenced.filter((r) => !identity.has(r) && !asserted.includes(r));
+    if (referenced.length > 0 && !referenced.some((r) => identity.has(r)) && unexplained.length > 0) {
+      return json(
+        {
+          error: "qrda1_measure_mismatch",
+          message:
+            `the submission references ${unexplained.join(", ")}, which is not measure '${body.measureId}'. ` +
+            `If these documents are that measure in another lineage (a QDM eMeasure UUID for a measure we ` +
+            `hold as FHIR, say), assert it explicitly with assertMeasureIdentifiers — the claim is recorded ` +
+            `with every outcome.`,
+          requested: body.measureId,
+          documentReferences: referenced,
+        },
+        400,
+      );
+    }
+
+    const evaluationPeriod =
+      body.evaluationDate ?? (run.requestedScope.evaluationDate as string | undefined) ?? new Date().toISOString().slice(0, 10);
+    const engine = await routedEngineForEnv(env);
+    await runStore.markRunning(importId);
+    const outcomeStore = await outcomes(env);
+    const persisted: unknown[] = [];
+    const evaluationFailures: Array<{ subjectId: string; message: string }> = [];
+    for (const subject of resolution.subjects) {
+      try {
+        const result = await engine.evaluate({
+          measureId: body.measureId,
+          patientBundle: subject.bundle,
+          evaluationDate: body.evaluationDate,
+        });
+        const evidence =
+          typeof result.evidence === "object" && result.evidence !== null
+            ? {
+                ...(result.evidence as Record<string, unknown>),
+                qrda1Import: {
+                  untranslatedTemplates: subject.untranslatedTemplates,
+                  measureReferences: subject.measureIdentifiers,
+                  // The provenance a reader needs to interpret the row: how many documents this person's
+                  // outcome was computed from, and whether those documents disagreed about who they are.
+                  documentCount: subject.documentIndexes.length,
+                  // Recorded because it is a human's claim, not a derivation: these document identities
+                  // were accepted as this measure because the caller said so.
+                  ...(asserted.length > 0 ? { assertedMeasureIdentifiers: asserted } : {}),
+                  ...(subject.demographicConflicts.length > 0
+                    ? { demographicConflicts: subject.demographicConflicts }
+                    : {}),
+                },
+              }
+            : result.evidence;
+        persisted.push(
+          await outcomeStore.recordOutcome({
+            runId: importId,
+            subjectId: result.subjectId,
+            measureId: body.measureId,
+            evaluationPeriod,
+            status: result.outcome,
+            evidence,
+          }),
+        );
+      } catch (err) {
+        // One subject's failure must not cost the submission: the run finishes PARTIAL_FAILURE and the
+        // subject is named, which is what the population pipeline does for the same reason.
+        evaluationFailures.push({ subjectId: subject.subjectId, message: String((err as Error)?.message ?? err) });
+      }
+    }
+
+    return json(
+      {
+        documents: body.qrda1.length,
+        subjects: resolution.subjects.length,
+        outcomes: persisted,
+        // Reported at the top level as well as per-outcome, because "68 documents became 64 people" is
+        // the number a submitter checks first, and a conflict is a reason to look at a document again.
+        merged: resolution.subjects
+          .filter((s) => s.documentIndexes.length > 1)
+          .map((s) => ({ subjectId: s.subjectId, documentIndexes: s.documentIndexes })),
+        demographicConflicts: resolution.subjects
+          .filter((s) => s.demographicConflicts.length > 0)
+          .map((s) => ({ subjectId: s.subjectId, conflicts: s.demographicConflicts })),
+        importFailures: resolution.failures,
+        evaluationFailures,
+      },
+      201,
+    );
+  }
+
+  // Finish a run whose outcomes were supplied from OUTSIDE — the missing step between importing
+  // documents and exporting a quality report from them (`GET /api/runs/:id/qrda*` refuses a run that is
+  // still RUNNING, correctly: exporting a run that is still writing outcomes presents a partial roster
+  // as complete).
+  //
+  // Deliberately NOT a general "finish this run" button. A population run is advanced by the pipeline,
+  // which knows when its fan-out is done; finalizing one from outside would mark a partial roster
+  // COMPLETED and make it exportable — the exact harm the export guard exists to prevent. So this
+  // refuses unless EVERY outcome in the run carries `qrda1Import` evidence, which is true only of a run
+  // whose roster came from documents the caller supplied. That is checkable without new state, and it
+  // fails closed: a run mixing imported and pipeline outcomes is refused rather than guessed at.
+  const finalizeId = pathname.match(/^\/api\/runs\/([^/]+)\/finalize$/)?.[1];
+  if (finalizeId && req.method === "POST") {
+    const runStore = await store(env);
+    const run = await runStore.getRun(finalizeId);
+    if (!run) return json({ error: "not_found", id: finalizeId }, 404);
+    if (TERMINAL_RUN_STATUSES.has(run.status)) {
+      return json({ error: "run_already_finished", id: finalizeId, status: run.status }, 409);
+    }
+    const rows = await (await outcomes(env)).listOutcomes(finalizeId, { limit: QRDA1_IMPORT_MAX_DOCUMENTS + 1 });
+    if (rows.length === 0) {
+      return json(
+        {
+          error: "run_has_no_outcomes",
+          message: "a run with no outcomes has nothing to report; import documents before finalizing",
+        },
+        409,
+      );
+    }
+    if (rows.length > QRDA1_IMPORT_MAX_DOCUMENTS) {
+      return json(
+        {
+          error: "run_too_large_to_finalize",
+          message:
+            `this route verifies every outcome came from an imported document, and this run has more ` +
+            `than ${QRDA1_IMPORT_MAX_DOCUMENTS}. A run that large is a population run, which the run ` +
+            `pipeline finalizes itself.`,
+        },
+        409,
+      );
+    }
+    const notImported = rows.filter((row) => !(row.evidence as Record<string, unknown> | undefined)?.qrda1Import);
+    if (notImported.length > 0) {
+      return json(
+        {
+          error: "run_not_import_driven",
+          message:
+            `${notImported.length} of ${rows.length} outcomes in this run were not produced by a QRDA ` +
+            `import. Only a run whose roster came entirely from supplied documents can be finalized from ` +
+            `outside — a population run is finalized by the pipeline that knows when its fan-out is done.`,
+        },
+        409,
+      );
+    }
+    // Mirrors `case-rerun.ts`: a run whose subjects include an evaluation error finished, but not
+    // cleanly, and PARTIAL_FAILURE is still reportable (those subjects persist MISSING_DATA with the
+    // error, which is a real outcome rather than an absent one).
+    const status = rows.some((row) => (row.evidence as Record<string, unknown> | undefined)?.evaluationError)
+      ? "PARTIAL_FAILURE"
+      : "COMPLETED";
+    const finalized = await runStore.finalizeRun(finalizeId, status);
+    await runStore.appendLog(finalizeId, "INFO", `Finalized ${status} from ${rows.length} imported outcome(s).`);
+    return json(finalized);
   }
 
   // Per-employee outcome rows for the run detail grid (RunOutcomeRow). Bounded for the 120k seed:scale

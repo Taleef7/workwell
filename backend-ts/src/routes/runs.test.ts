@@ -809,3 +809,144 @@ test("import gaps are PERSISTED in the outcome evidence, not only in the POST re
   const plainOutcome = (await plain!.json()) as { evidence: Record<string, unknown> };
   assert.equal(plainOutcome.evidence.qrda1Import, undefined);
 });
+
+// ---------------------------------------------------------------- batch import + finalize (M-B / C2)
+
+/** A minimal QRDA I for the audiogram measure's shape — one Encounter, so the import does not refuse it. */
+const importableDocument = (mrn: string, mbi?: string, encounterId = "enc-1") => `<?xml version="1.0" encoding="UTF-8"?>
+<ClinicalDocument xmlns="urn:hl7-org:v3">
+  <recordTarget><patientRole>
+    <id extension="${mrn}" root="1.3.6.1.4.1.115"/>
+    ${mbi ? `<id extension="${mbi}" root="2.16.840.1.113883.4.927"/>` : ""}
+    <patient>
+      <name><given>ADA</given><family>Lovelace</family></name>
+      <administrativeGenderCode nullFlavor="OTH"><translation code="248152002" codeSystem="2.16.840.1.113883.6.96"/></administrativeGenderCode>
+      <birthTime value='19781224203000'/>
+    </patient>
+  </patientRole></recordTarget>
+  <component><structuredBody><component><section>
+    <templateId root="2.16.840.1.113883.10.20.24.2.1" extension="2021-08-01"/>
+    <entry><encounter classCode="ENC" moodCode="EVN">
+      <templateId extension="2021-08-01" root="2.16.840.1.113883.10.20.24.3.23"/>
+      <id extension="${encounterId}" root="1.3.6.1.4.1.115"/>
+      <code code="99213" codeSystem="2.16.840.1.113883.6.12"/>
+      <statusCode code="completed"/>
+      <effectiveTime><low value='20260331080000'/><high value='20260331081500'/></effectiveTime>
+    </encounter></entry>
+  </section></component></structuredBody></component>
+</ClinicalDocument>`;
+
+test("import → finalize → export: a batch of documents becomes a reportable run", async () => {
+  // The whole §170.315(c)(2) loop over the API, which is what a Cypress C2 submission needs and what no
+  // route could do before: `GET /api/runs/:id/qrda` refuses a RUNNING run (correctly — exporting a run
+  // that is still writing outcomes presents a partial roster as complete) and NOTHING finalized an
+  // imported run, so the loop stopped one step short of a document to submit.
+  const created = await post("/api/runs", { scopeType: "MEASURE", scopeId: "audiogram", triggeredBy: "test" });
+  const run = (await created!.json()) as { id: string };
+
+  // Three documents, two people: the first two share a Medicare Beneficiary Identifier the way a
+  // clinically split patient does, and the third shares nothing.
+  const imported = await post(`/api/runs/${run.id}/import`, {
+    measureId: "audiogram",
+    evaluationDate: "2026-06-12",
+    qrda1: [
+      importableDocument("mrn-a", "MBI-1", "e1"),
+      importableDocument("mrn-b", "MBI-1", "e2"),
+      importableDocument("mrn-c", undefined, "e3"),
+    ],
+  });
+  assert.equal(imported?.status, 201);
+  const result = (await imported!.json()) as {
+    documents: number;
+    subjects: number;
+    outcomes: Array<{ subjectId: string }>;
+    merged: Array<{ subjectId: string; documentIndexes: number[] }>;
+  };
+  assert.equal(result.documents, 3);
+  assert.equal(result.subjects, 2, "documents are resolved to PEOPLE before evaluation");
+  assert.equal(result.outcomes.length, 2, "one outcome per person, not per document");
+  assert.deepEqual(result.merged[0]!.documentIndexes, [0, 1]);
+
+  const finalized = await post(`/api/runs/${run.id}/finalize`);
+  assert.equal(finalized?.status, 200);
+  assert.equal(((await finalized!.json()) as { status: string }).status, "COMPLETED");
+
+  // And now — only now — the run is reportable.
+  const qrda = await get(`/api/runs/${run.id}/qrda`);
+  assert.equal(qrda?.status, 200, "the export that returns 409 for a RUNNING run now succeeds");
+  assert.match(await qrda!.text(), /<ClinicalDocument/);
+});
+
+test("finalize REFUSES a run whose outcomes did not come from imported documents", async () => {
+  // The load-bearing guard. A population run is advanced by the pipeline, which knows when its fan-out
+  // is done; finalizing one from outside would mark a partial roster COMPLETED and make it exportable —
+  // the exact harm `notReportable` exists to prevent. Checked without new state: an imported outcome
+  // carries `qrda1Import` evidence and a pipeline one does not.
+  const created = await post("/api/runs", { scopeType: "MEASURE", scopeId: "audiogram", triggeredBy: "test" });
+  const run = (await created!.json()) as { id: string };
+  const evaluated = await post(`/api/runs/${run.id}/evaluate`, {
+    measureId: "audiogram",
+    patientBundle: bundle,
+    evaluationDate: "2026-06-12",
+  });
+  assert.equal(evaluated?.status, 201);
+
+  const finalized = await post(`/api/runs/${run.id}/finalize`);
+  assert.equal(finalized?.status, 409);
+  const body = (await finalized!.json()) as { error: string; message: string };
+  assert.equal(body.error, "run_not_import_driven");
+  assert.match(body.message, /1 of 1/);
+});
+
+test("finalize REFUSES a run with no outcomes rather than reporting an empty roster", async () => {
+  const created = await post("/api/runs", { scopeType: "MEASURE", scopeId: "audiogram", triggeredBy: "test" });
+  const run = (await created!.json()) as { id: string };
+  const finalized = await post(`/api/runs/${run.id}/finalize`);
+  assert.equal(finalized?.status, 409);
+  assert.equal(((await finalized!.json()) as { error: string }).error, "run_has_no_outcomes");
+});
+
+test("finalize is not a second chance — a finished run is refused, not re-finalized", async () => {
+  const created = await post("/api/runs", { scopeType: "MEASURE", scopeId: "audiogram", triggeredBy: "test" });
+  const run = (await created!.json()) as { id: string };
+  await post(`/api/runs/${run.id}/import`, {
+    measureId: "audiogram",
+    evaluationDate: "2026-06-12",
+    qrda1: [importableDocument("mrn-solo", "MBI-SOLO")],
+  });
+  assert.equal((await post(`/api/runs/${run.id}/finalize`))?.status, 200);
+  const again = await post(`/api/runs/${run.id}/finalize`);
+  assert.equal(again?.status, 409);
+  assert.equal(((await again!.json()) as { error: string }).error, "run_already_finished");
+});
+
+test("import REFUSES a submission it cannot read at all, instead of reporting an empty population", async () => {
+  // Reporting 0 subjects with a 201 is the empty-bundle hazard by another route: it reads as "nobody
+  // qualifies" when the truth is "we could not read anything you sent" (ADR-043).
+  const created = await post("/api/runs", { scopeType: "MEASURE", scopeId: "audiogram", triggeredBy: "test" });
+  const run = (await created!.json()) as { id: string };
+  const imported = await post(`/api/runs/${run.id}/import`, { measureId: "audiogram", qrda1: ["<nope/>", "<also-nope/>"] });
+  assert.equal(imported?.status, 400);
+  const body = (await imported!.json()) as { error: string; failures: Array<{ index: number }> };
+  assert.equal(body.error, "qrda1_import_failed");
+  assert.deepEqual(body.failures.map((f) => f.index), [0, 1], "each unreadable document is named by index");
+});
+
+test("import REFUSES a submission about a different measure", async () => {
+  // A CMS125 submission posted as cms122 would be calculated AND PERSISTED as cms122 (Codex, #362).
+  // Checked once across the batch rather than per document.
+  const created = await post("/api/runs", { scopeType: "MEASURE", scopeId: "audiogram", triggeredBy: "test" });
+  const run = (await created!.json()) as { id: string };
+  const withMeasureSection = importableDocument("mrn-x", "MBI-X").replace(
+    "</section></component></structuredBody></component>",
+    `</section></component><component><section>
+       <templateId root="2.16.840.1.113883.10.20.24.2.2" extension="2021-08-01"/>
+       <entry><organizer classCode="CLUSTER" moodCode="EVN"><reference typeCode="REFR"><externalDocument classCode="DOC" moodCode="EVN">
+         <id root="2.16.840.1.113883.4.738" extension="not-this-measure"/>
+       </externalDocument></reference></organizer></entry>
+     </section></component></structuredBody></component>`,
+  );
+  const imported = await post(`/api/runs/${run.id}/import`, { measureId: "audiogram", qrda1: [withMeasureSection] });
+  assert.equal(imported?.status, 400);
+  assert.equal(((await imported!.json()) as { error: string }).error, "qrda1_measure_mismatch");
+});

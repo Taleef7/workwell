@@ -1,5 +1,63 @@
 # Journal
 
+## 2026-08-03 (M-B) — the C2 loop runs end to end through the API, and Cypress cannot read the document it produces (branch `feat/qrda1-batch-import-finalize`, ADR-056)
+
+Two routes existed nowhere and #386 §11.1 named one of them: `/evaluate` takes ONE document and one
+subject, and **no route called `finalizeRun`**, so an imported run stayed RUNNING and the QRDA export
+refused it. Both are built, and the loop locked decision #2 names now runs through the product:
+
+```text
+CMS125  153 documents → 150 subjects (3 merged, 2 demographic conflicts) → COMPLETED
+        {"IPP":150,"DENOM":150,"DENEX":47,"NUMER":2}
+CMS122   68 documents →  64 subjects (3 merged, 1 unreadable, 3 conflicts) → COMPLETED
+        {"IPP":64,"DENOM":64,"DENEX":32,"NUMER":31}
+```
+
+Both are Cypress's expected results **exactly**. The unreadable CMS122 document is the half of a
+clinically split patient carrying only a payer entry (ADR-051 refuses it); its person is recovered from
+the other half, which is why 68 documents still resolve to 64 people.
+
+**The grouping rule is deterministic and identifier-only, and that was a measurement rather than a
+principle.** Documents merge when they share any `<recordTarget>` identifier, transitively; a document
+sharing none is its own person. Adding a name+birthdate pass for the identifier-less documents changes
+**nothing** on any of the four archives — the patients Cypress ships without an MBI are never the ones it
+duplicates — so a rule that buys no accuracy and can merge two different people is not worth having. It
+is ADR-022's rule one level down. Demographic disagreements inside a merged group are **reported, never
+resolved**: a `birthDate` conflict moves a person between age bands in both routed measures, and review of
+the C2 harness reproduced exactly that failure.
+
+**`/finalize` is not a "finish this run" button, and the guard is stateless.** Finalizing a population run
+from outside would mark a partial roster COMPLETED and make it exportable — the exact harm the export
+guard exists to prevent. So it refuses unless EVERY outcome carries `qrda1Import` evidence, which is true
+only of a run whose roster came from supplied documents. Fails closed on a mixed run.
+
+**Then the submission, and the result is red for reasons that are not our arithmetic.** Cypress's
+`ExpectedResultsValidator` ran against a document we produced for the first time. `state=failed`, and:
+
+- **0 population mismatches — which is NOT a pass, and reading it as one is the trap.**
+  `check_population` compares only `if !reported_result.empty?`, so a document it cannot read produces no
+  population errors at all. Measured directly: `reported_results: {"PopulationSet_1" => {}, …}` — **empty
+  for every population set**. It read no number of ours and compared nothing.
+- **3 identity errors:** `Invalid HQMF ID Found: AE8BC6FE-…`. Cypress's bundle is **CMS125v14, the QDM
+  lineage**; we run and report **CMS125FHIR v1.0.000, the QI-Core one**. Different eMeasure UUID, different
+  set id, population criteria named rather than UUID-identified. `extract_results_by_ids` looks for its own
+  measure's ids and finds none of ours. **Not fixable by relabelling** — ADR-046 decision 3 forbids
+  claiming an eMeasure identity the run did not use.
+- **45 and 53 supplemental-data errors:** QRDA III wants RACE/ETHNICITY/SEX/PAYER per population and we
+  emit none. The input is there and we drop it — Patient Characteristic Payer is in every Cypress document
+  and our importer skips it; race/ethnicity ride in `<recordTarget>` unread.
+
+**A wrong reading I nearly recorded, corrected by checking the source.** `Reported IPP value 150 does not
+match sum 0` looks like Cypress quoting our 150 back — it is not. `check_supplemental_data_matches_pop_sums`
+computes that number from the **expected** supplemental values and calls it "Reported"; the `0` is ours.
+Taken at face value it would have become "Cypress read our numbers and they matched", which is the
+opposite of what happened.
+
+**So the bar is unchanged and now precisely located.** The loop exists, runs over a third party's archive,
+and produces the right numbers — measured directly in #388 at 64/64 and 150/150 subjects. It is not green,
+for a lineage split our export deliberately will not fake and supplemental data we do not carry. Evidence:
+`docs/evidence/CVU_C2_SUBMISSION_2026-08-03.md`.
+
 ## 2026-08-03 (M-B) — the QRDA importer is fixed and now matches Cypress EXACTLY on 214 patients (branch `fix/qrda1-import-datatype-coverage`, ADR-055)
 
 This morning's spike closeout diagnosed two import defects and left them unfixed. Both are fixed, a third
