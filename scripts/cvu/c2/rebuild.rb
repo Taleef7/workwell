@@ -14,8 +14,9 @@ Vendor.where(name: 'WorkWell Measure Studio').each do |v|
     prod.destroy
   end
 end
-# Belt and braces: any result whose correlation_id is not a bundle patient's own precalculation.
-puts "individual_results after teardown: #{CQM::IndividualResult.count}"
+# The global count, which still includes the BUNDLE's own precalculated results (7891 for
+# bundle-2025) — it is a sanity print, not a check, and naming it one would be a guard that cannot fire.
+puts "individual_results after teardown (incl. the bundle's own precalculations): #{CQM::IndividualResult.count}"
 
 b = Bundle.where(active: true).first
 ms = b.measures.select { |m| m.cms_id.to_s =~ /\ACMS(122|125)v/ }.uniq(&:hqmf_id)
@@ -30,7 +31,11 @@ ms.each { |m| product.product_tests.build({ name: m.title, measure_ids: [m.hqmf_
 product.save!
 puts "CREATED product=#{product.id} tests=#{product.product_tests.count} (setup enqueued by after_create)"
 
+# `Delayed::Job.count` is GLOBAL, so an unrelated queued job keeps this spinning to the timeout rather
+# than failing fast. Preferred over per-job bookkeeping anyway: setup enqueues follow-on work, and a
+# loop that stopped at "my two jobs finished" would snapshot a half-built test.
 deadline = Time.now + 600
+states = []
 loop do
   product.reload
   states = product.product_tests.map { |pt| [pt.cms_id, pt.state.to_s] }
@@ -42,4 +47,12 @@ loop do
 
   sleep 5
 end
+
+# `errored` is terminal, so the loop above exits on it just as it does on `ready`. Trap 2 (the
+# root-owned /app/public/data) errors the test AFTER generating and evaluating patients, and the job log
+# still says COMPLETED — so without this the script would print SETUP DONE over a test that has no
+# archive, and the snapshot would record `state: errored` that nobody reads.
+errored = states.reject { |(_, s)| s == 'ready' }
+raise "setup did not complete: #{errored.map { |c, s| "#{c}=#{s}" }.join(' ')}" if errored.any?
+
 puts 'SETUP DONE'

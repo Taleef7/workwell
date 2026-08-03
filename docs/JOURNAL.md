@@ -33,11 +33,21 @@ population membership.
 **The comparison. IPP 64=64 and 150=150; DENOM 64=64 and 150=150; CMS125's NUMER 2=2.** Per subject,
 against Cypress's own per-patient results: **41 of 64 and 122 of 150 agree on every population**, and every
 single difference is one direction — `DENEX: cypress=1 workwell=0`. CMS122's numerator inflation (54 vs 31)
-is exactly its 23 missed exclusions falling through, which for an inverse measure means the numerator; no
-subject is in both DENEX and NUMER, so the columns are comparable as printed rather than a convention
-artefact.
+is exactly its 23 missed exclusions falling through, which for an inverse measure means the numerator.
+**Two artifact properties decide how that table may be read, both verified in the vendored bundles:**
+`Denominator` is an `ExpressionRef` to `Initial Population` in both measures, so **DENOM restates IPP —
+one agreement, not two**; and fqm sets NUMER false whenever DENEX is true for a proportion measure
+(`DetailedResultsBuilder`), so the numerator cannot be read apart from the exclusions. A first draft cited
+a harness check that "no subject is in both DENEX and NUMER" as evidence the columns were comparable —
+**that check cannot return anything else for these measures** and was removed rather than reported; the
+conclusion is carried by the per-subject table, where 23 subjects each show `DENEX −1` and `NUMER +1`.
+**Run against BOTH archives** (66/68 and 152/153 documents): every graded number identical, which is the
+direct answer to "is a MATCH an artefact of which documents happened to be duplicated".
 
-**The cause is QRDA import coverage, twice, and both are confirmed by CONSTRUCTION rather than inferred.**
+**The cause is QRDA import coverage, twice, and the MECHANISM of each is confirmed by CONSTRUCTION —
+`--inject` makes both a reproducible command, though each is n=1 subject, so that the two causes account
+for ALL 23 + 28 differing subjects remains an inference from the datatype inventory and Cypress's own
+patient names.**
 (1) We translate five QDM datatypes; the exclusion logic reads Assessment Performed, Intervention
 Performed/Order, Medication Active, Symptom and Device Order. Adding back the ONE dropped Assessment for
 `TWO N Long Care GP Adult` (LOINC 71802-3, SNOMED 160734000 "lives in a nursing home") as a QI-Core
@@ -47,6 +57,21 @@ systems, so **4 of CMS125's 10 Procedure entries are dropped for being ICD-10-PC
 the SNOMED translation the exclusion value set actually contains; adding those two back flips DENEX the
 same way. **This says nothing bad about the artifacts or the executor** — given the data, the official
 artifact computes Cypress's answer both times. The gap is between the document and the engine.
+
+**Review of this branch found two defects in the HARNESS, both fixed and both recorded** — its output is
+quoted as evidence, so "the instrument was wrong in a way that produced a plausible number" is exactly the
+failure this work is about. The merge picked one document's demographics by **filename sort order**, and
+review demonstrated a **false MATCH** by mutating a birthdate in the document that does not win: the table
+printed `IPP 64 = 64 MATCH` while discarding a birthdate it had been handed. It never fired in either pass
+only because Cypress randomised names both times. Conflicts are now reported (3 people in CMS122, 2 in
+CMS125, all on `name`), and the printed label comes from the same document as the evaluated Patient. And
+the per-patient export selected a population set on `r['stratification']`, **a field that does not
+exist** — so for CMS125 it took whichever of a patient's two rows Mongo returned first; both carry IPP=1,
+so a mixed selection can still sum to the right aggregate. Now keyed on `population_set_key`, asserted to
+match exactly one row, **re-exported and byte-identical to the file the comparison used** — latent, not
+active. Also: `rebuild.rb` printed SETUP DONE over an `errored` test (which is how trap 2 fails), and the
+harness now checks its own people count against the oracle's patient count and the per-patient rows against
+the aggregate, so an identity artefact surfaces as itself rather than as an apparent engine defect.
 
 **Three smaller findings recorded rather than smoothed over.** `untranslatedTemplates` names the LAST
 templateId in the entry, which is routinely a nested ATTRIBUTE template (Author dateTime 31 times, Rank) —

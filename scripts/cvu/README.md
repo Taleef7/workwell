@@ -283,7 +283,7 @@ The four Ruby scripts in `c2/` run inside the Cypress container with
 |---|---|
 | `rebuild.rb` | tears the Product down **including its `CQM::IndividualResult`s**, recreates it, and waits for `ProductTestSetupJob` |
 | `snapshot.rb` | the full oracle: patients, results, archive composition, expected populations, measurement period |
-| `per-patient.rb` | per-patient expected populations, keyed by MBI, for a subject-level comparison |
+| `per-patient.rb` | per-patient expected populations, keyed by MBI, for a subject-level comparison — **run it against the same rebuild the archive came from**, because Cypress regenerates the MBI on every setup run (measured: joining pass A's documents to pass B's rows matched 4 of 64) |
 | `copy-archives.rb` | copies each test's `patient_archive` to `/tmp` for `docker cp` |
 
 Three setup traps, each of which fails silently — all three are handled by `rebuild.rb`, and the third is
@@ -325,6 +325,25 @@ rather than assumed (measured 2026-08-03: zero).
 patients Cypress ships without one — and merges each person's documents into one bundle. Comparing
 document counts to expected patient counts fails C2 on arithmetic before any logic is involved. Nothing in
 the product path does this today.
+
+### Proving a cause instead of correlating one
+
+`--inject <file.json>` adds FHIR resources to one named subject and prints its populations before and
+after, which turns "the datatype we drop is why the exclusion is missed" into an experiment. The file is
+`{ "subjectLabel": "...", "resources": [ ... ] }`; `scripts/cvu/c2/inject-assessment.json` and
+`inject-mastectomy.json` are the two used in Part 3 of the evidence. Each is n=1 subject: it establishes
+the mechanism, not that the mechanism explains every differing subject.
+
+### What the harness checks about ITSELF
+
+A wrong harness reports a plausible number rather than an error, so three self-checks are in the report
+rather than in a reviewer's head: the **people resolved** are compared against the oracle's own patient
+count (the direct detector for an over-merge, an under-merge, or a person lost to an import failure); the
+**per-patient rows** are summed against the aggregate (which is exactly what setup contamination breaks);
+and every **demographic disagreement inside a merged person** is listed. That last one is reported and not
+resolved on purpose: which document's Patient wins is arbitrary, both artifacts gate the initial population
+on `AgeInYearsAt(...)`, and Cypress randomises the duplicate's birthdate about 1 time in 21 — so a silent
+pick can print MATCH while discarding a birthdate that would have changed the answer.
 
 This is still not a Calculation Check RESULT: `ExpectedResultsValidator` has never graded a document we
 produced. Do not report the harness output as a Cypress pass.

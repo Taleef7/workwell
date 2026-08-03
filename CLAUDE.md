@@ -480,13 +480,19 @@ stayed silent precisely because it matched no rule at all**. Both document types
 **THE CALCULATION CHECK COMPARISON HAS NOW RUN — offline, and it found a defect in our IMPORTER, not our
 engine (2026-08-03).** The #386 oracle reproduces once teardown deletes `CQM::IndividualResult`s (that
 alone was the 128-then-93 irreproducibility), and every number is now DERIVED: results = patients ×
-population sets, archive documents = patients + 1 clinical split + `rand(1..3)` duplicates — so the
-document count legitimately VARIES between rebuilds while the expected results do not. Measured against
+(1 unstratified row + 1 for the patient's own stratum), archive documents = patients + 1 clinical split +
+`rand(1..3)` duplicates — so the document count legitimately VARIES between rebuilds while the expected
+results do not. Measured against
 Cypress's own expected results over its 214 generated patients: **IPP 64=64 and 150=150, DENOM 64=64 and
 150=150, CMS125 NUMER 2=2**; per subject **41/64 and 122/150 agree on every population**, and every
 difference is one direction — `DENEX: cypress=1 workwell=0` (CMS122's numerator 54 vs 31 is exactly its 23
-missed exclusions falling through, which for an INVERSE measure means the numerator). **Two import causes,
-both confirmed by construction:** we translate five QDM datatypes while the exclusion logic reads
+missed exclusions falling through, which for an INVERSE measure means the numerator). **`Denominator` is an
+`ExpressionRef` to `Initial Population` in both artifacts, so DENOM restates IPP — one agreement, not
+two**; and fqm zeroes NUMER whenever DENEX is true for a proportion measure, so the numerator cannot be
+read apart from the exclusions. Run against BOTH archives (66/68 and 152/153 documents): every graded
+number identical. **Two import causes, each MECHANISM confirmed by construction (n=1 subject apiece via
+the harness's `--inject`; that they account for ALL 51 differing subjects is inferred from the datatype
+inventory, not measured):** we translate five QDM datatypes while the exclusion logic reads
 Assessment Performed, Intervention Performed/Order, Medication Active, Symptom and Device Order (adding one
 dropped Assessment back flips a subject to Cypress's exact answer); and `concept()` reads only the primary
 `<code>` from six mapped code systems, dropping 4 of CMS125's 10 Procedure entries for being ICD-10-PCS —

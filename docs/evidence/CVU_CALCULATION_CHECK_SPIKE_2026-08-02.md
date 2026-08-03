@@ -277,9 +277,10 @@ Two clean rebuilds (`scripts/cvu/c2/rebuild.rb`, then `snapshot.rb`), each runni
 
 **Every number is now derivable, which is what makes it an oracle rather than an observation:**
 
-- `IndividualResult` = patients × population sets. CMS122 has one set (64×1); CMS125 has an unstratified
-  set plus each patient's OWN stratum (150×2 = 300), and 28 + 122 = 150 confirms every patient lands in
-  exactly one stratum.
+- `IndividualResult` = patients × (1 unstratified row + 1 row for the patient's OWN stratum). CMS122 is
+  unstratified, so 64×1; CMS125 declares three population sets but writes 150×2 = 300, because a patient
+  belongs to exactly one stratum — and 28 + 122 = 150 confirms that. (Not "patients × population sets",
+  which would predict 450.)
 - archive documents = patients + **1** (`ClinicalRandomizer` splits one patient's clinical data across
   two documents) + **k** duplicates, where `k = rand(1..3)` seeded from a per-test `rand_seed`.
 - distinct PEOPLE = patients. Always.
@@ -287,6 +288,18 @@ Two clean rebuilds (`scripts/cvu/c2/rebuild.rb`, then `snapshot.rb`), each runni
 **So the archive document count legitimately VARIES between rebuilds and the expected results do not** —
 66 → 68 for CMS122 and 152 → 153 for CMS125 across the two passes. That is the answer to Part 2's "66 vs
 67" puzzle: not instability, the duplicate test doing its job.
+
+**The comparison in §15 was run against BOTH archives and every graded number is identical** — 64 people
+from 66 documents and from 68, 150 from 152 and from 153, same IPP/DENOM/NUMER/DENEX both times. That
+invariance under the randomised duplication is the direct answer to "is a MATCH an artefact of which
+documents happened to be duplicated": for these numbers, no.
+
+**One thing that is NOT stable across rebuilds, found by trying it: the MBI.** Joining pass A's documents
+to pass B's per-patient rows matched **4 of 64** for CMS122 — exactly the four patients who have no MBI
+and are therefore keyed on name+birth — and **0 of 150** for CMS125. Cypress regenerates the identifier
+on every setup run. The aggregate expected results are pass-invariant; per-patient rows must come from the
+same rebuild as the archive. The harness reports the unmatched count, which is how this was caught rather
+than quietly reported as a 0%-agreement result.
 
 ## 13. A FOURTH prerequisite, found by measuring the archive: identity resolution
 
@@ -338,10 +351,20 @@ Per subject, against Cypress's own per-patient `IndividualResult`s (`scripts/cvu
 - **CMS122: 41 of 64 subjects agree on every population.** All 23 differences are `DENEX: cypress=1
   workwell=0` **and** `NUMER: cypress=0 workwell=1` — one direction, no exceptions.
 - **CMS125: 122 of 150 agree.** All 28 differences are `DENEX: cypress=1 workwell=0`.
-- **No subject is reported in both `denominator-exclusion` and `numerator`**, so the two columns are
-  comparable as printed and CMS122's numerator inflation is not a reporting-convention artefact: it is
-  the 23 missed exclusions falling through, which for an INVERSE measure (numerator = poor control, and
-  "no result" counts) means every one of them lands in the numerator.
+
+**Two properties of these artifacts decide how that table may be READ, and both were verified in the
+vendored bundles rather than assumed.** (1) `Denominator` is an `ExpressionRef` to `Initial Population`
+in **both** measures, so the DENOM row is the IPP row restated — **one agreement, not two**, and any
+phrasing that reads as two independent corroborations is wrong. (2) `fqm-execution` sets NUMER false
+whenever DENEX is true for a proportion measure with a single initial population
+(`DetailedResultsBuilder.handleStandardPopulationValues`, verified in the installed build), so a
+numerator count cannot be read apart from the exclusions. A first draft of this document cited a harness
+check that "no subject is in both DENEX and NUMER" as evidence the columns were comparable; **that check
+is structurally incapable of returning anything else for these measures** and has been removed rather
+than reported. The conclusion it was cited for still holds, and is carried by the per-subject table
+instead: 23 subjects each show `DENEX −1` **and** `NUMER +1`, which is the missed exclusions falling
+through — for an INVERSE measure (numerator = poor control, and "no result" counts) that is the direction
+that reads as non-compliance.
 
 Cypress's patient names state the criterion each exercises, and the differing set reads as a list of the
 exclusions we miss: `TWO N Advanced Illness …`, `TWO N Long Care …`, `TWO Palliative …`,
@@ -366,13 +389,14 @@ Dropped datatypes, by entry count (CMS122 / CMS125) — **Intervention, Performe
 plus Patient Characteristic Payer (68 / 153, supplemental data only). Those are the inputs to hospice,
 palliative care, long-term nursing home, advanced illness and frailty — i.e. to `Denominator Exclusions`.
 
-**Confirmed, not inferred.** `TWO N Long Care GP Adult` carries one Assessment, Performed
-(LOINC 71802-3 "Housing status", value SNOMED 160734000 "Lives in a nursing home"). Adding that single
-entry back as a QI-Core `Observation`:
+**The MECHANISM is confirmed, not inferred** — and it is a reproducible command, not a one-off script:
+`--inject scripts/cvu/c2/inject-assessment.json`. `TWO N Long Care GP Adult` carries one Assessment,
+Performed (LOINC 71802-3 "Housing status", value SNOMED 160734000 "Lives in a nursing home"). Adding that
+single entry back as a QI-Core `Observation`:
 
 ```text
-as imported                {"initial-population":true,"denominator":true,"denominator-exclusion":false,"numerator":true}
-+ Assessment→Observation   {"initial-population":true,"denominator":true,"denominator-exclusion":true,"numerator":false}
+as imported   {"initial-population":true,"denominator":true,"denominator-exclusion":false,"numerator":true}
++ injected    {"initial-population":true,"denominator":true,"denominator-exclusion":true,"numerator":false}
 ```
 
 which is Cypress's expected answer for that patient exactly.
@@ -393,20 +417,37 @@ four carry the SNOMED code CMS125's own exclusion value set contains:
 </code>
 ```
 
-Adding those two back as SNOMED Procedures:
+Adding those two back as SNOMED Procedures (`--inject scripts/cvu/c2/inject-mastectomy.json`):
 
 ```text
-as imported                {"initial-population":true,"denominator":true,"denominator-exclusion":false,"numerator":false}
-+ SNOMED translation read  {"initial-population":true,"denominator":true,"denominator-exclusion":true,"numerator":false}
+as imported   {"initial-population":true,"denominator":true,"denominator-exclusion":false,"numerator":false}
++ injected    {"initial-population":true,"denominator":true,"denominator-exclusion":true,"numerator":false}
 ```
 
-### 16.3 What this does NOT say
+### 16.3 Mechanism vs coverage — what the two injections do and do not establish
+
+Each injection is **n = 1 subject**. They establish the MECHANISM: this datatype, dropped, changes this
+population, and supplying it produces Cypress's exact expected answer. They do **not** establish that
+these two causes account for all 23 + 28 differing subjects. That step is an inference from the §16.1
+inventory (the dropped datatypes are precisely the exclusion inputs) plus Cypress's own patient names,
+which state the criterion each patient exercises — `TWO N Advanced Illness …`, `TWO N Long Care …`,
+`TWO Palliative …`. Strong, and not the same thing as measured.
+
+### 16.4 What this does NOT say
 
 It says nothing bad about the official artifacts or the executor. Given the data, the artifact computes
 Cypress's answer both times — measured above. **The gap is between the document and the engine**, and it
 is a mapping gap. That is a materially better position than a logic divergence would have been, and it is
-also narrower than "our calculations are validated": IPP and DENOM are corroborated by an independent
-QDM implementation over 214 patients; the exclusion paths are not yet exercised end to end.
+also narrower than "our calculations are validated": the **initial population** is corroborated by an
+independent QDM implementation over 214 patients (DENOM restates it, per §15), and the exclusion paths
+are not yet exercised end to end.
+
+One more thing the harness does that flatters the input, and should be stated where the claim is made:
+`preparedForQiCore` stamps `clinicalStatus: active` and a problem `category` on every imported Condition
+(ADR-037), because the importer emits neither. Over our own synthetic corpus that is normalisation of a
+known gap; over a **third party's** document it asserts something the document did not say. It is not
+implicated in either divergence above — both are missing resources, not mis-stated ones — but "given the
+data, the artifact computes Cypress's answer" is true of the data *as prepared*.
 
 ## 17. Three smaller findings, recorded rather than smoothed over
 
@@ -424,6 +465,38 @@ QDM implementation over 214 patients; the exclusion paths are not yet exercised 
    under ADR-051 rather than producing a Patient-only bundle. The merge recovers the person from the
    other half. The refusal is right; it is recorded because "1 document failed to import" reads alarming
    until you know which document.
+
+## 17b. Two defects in the HARNESS, found by review of this branch
+
+Both are fixed; both are recorded because the harness's output is quoted as evidence, and "the measuring
+instrument was wrong in a way that produced a plausible number" is the failure mode this whole document
+is about.
+
+1. **The merge picked one document's demographics by filename sort order, silently.** `readdirSync().sort()`
+   is lexicographic, not Cypress's index order, so `17_F_Heart Adult.xml` sorts before
+   `9_FIVE SIX_Heart Adult.xml` — and in pass B the *augmented* copy won 4 of 7 merges. Review demonstrated
+   the consequence by mutating a birthdate in the document that does NOT win: the harness printed
+   `IPP | 64 | 64 | MATCH` while discarding a birthdate it had been handed. **That is a false MATCH**, and
+   both artifacts gate the initial population on `AgeInYearsAt(...)`, so it is load-bearing. It never fired
+   in either measured pass because Cypress randomised NAMES both times — a `rand_seed` property, not an
+   invariant. The merge now reports every demographic disagreement (measured: 3 people in CMS122, 2 in
+   CMS125, all on `name`, none on `birthDate`), and the printed label now comes from the same document as
+   the evaluated Patient — previously it came from the last document, so a reader following the label
+   opened the wrong file.
+2. **The per-patient export selected a population set on a field that does not exist.**
+   `r['stratification'].nil?` is nil on *every* row, so for CMS125 the export took whichever of a patient's
+   two rows Mongo returned first — the unstratified one or their own stratum. Both carry `IPP=1`, so a
+   mixed selection can still sum to the right aggregate and read as correct. The selector is now
+   `population_set_key == 'PopulationSet_1'`, asserted to match exactly one row. **Re-exported and compared
+   byte-for-byte with the file §15 was computed from: identical** — the defect was latent, not active, and
+   §15 stands as measured.
+
+Also fixed, from the same review: `rebuild.rb` printed `SETUP DONE` when a test ended `errored`, which is
+precisely how trap 2 fails (the test errors *after* generating patients while the job log says COMPLETED);
+the harness now checks the people it resolved against the oracle's own patient count and the per-patient
+rows against the aggregate, so an identity artefact or a contaminated setup surfaces as itself rather than
+as an apparent engine defect; and the "N subjects had no fqm result" warning moved from stderr into the
+report, which is routinely redirected to a file.
 
 ## 18. Where the milestone stands now
 
