@@ -635,7 +635,11 @@ export async function handleRuns(
       const result = await engine.evaluate({
         measureId: body.measureId,
         patientBundle,
-        evaluationDate: body.evaluationDate,
+        // The RESOLVED date, not the body's. With the body silent and the run carrying an
+        // `evaluationDate`, the row was labelled with the run's date while the engine evaluated TODAY —
+        // a regulatory record stating a period it was not computed over (Codex, #389). `evaluationPeriod`
+        // already falls back to today, so this changes nothing when both are absent.
+        evaluationDate: evaluationPeriod,
       });
       // What the import could NOT translate is PERSISTED with the outcome, not just returned. A QRDA I
       // carrying QDM datatypes this mapper does not know is calculable but not necessarily correctly —
@@ -783,19 +787,24 @@ export async function handleRuns(
     const evaluationPeriod =
       body.evaluationDate ?? (run.requestedScope.evaluationDate as string | undefined) ?? new Date().toISOString().slice(0, 10);
     const outcomeStore = await outcomes(env);
-    // Several imports must not add up to a run `/finalize` can no longer verify. Review (#389) drove two
-    // 300-document imports into one run and left it permanently un-finalizable, with an error message
-    // blaming a pipeline that was never attached.
+    // ONE import per run, and that is the idempotency contract (CLAUDE.md's Definition of Done makes it
+    // mandatory). `outcomes` has no unique key on `(run_id, subject_id, measure, period)`, so a client
+    // retrying after a timeout would insert a second row for every subject and DOUBLE the population the
+    // QRDA III reports, with `/finalize` accepting every row as imported (Codex, #389). Refusing is
+    // better than upserting here: a retry is indistinguishable from a deliberate second archive, and
+    // silently merging two archives into one report is the worse of the two mistakes. It also makes the
+    // run the unit of accumulation, so the finalize-time cap cannot be exceeded by repetition.
     const already = (await outcomeStore.countOutcomesByStatus(importId)).reduce((sum, c) => sum + c.count, 0);
-    if (already + resolution.subjects.length > QRDA1_IMPORT_MAX_DOCUMENTS) {
+    if (already > 0) {
       return json(
         {
-          error: "too_many_documents",
+          error: "run_already_imported",
           message:
-            `this run already holds ${already} outcome(s); importing ${resolution.subjects.length} more ` +
-            `would exceed the ${QRDA1_IMPORT_MAX_DOCUMENTS} this route can verify at finalize time.`,
+            `this run already holds ${already} outcome(s). A run takes ONE submission — create another ` +
+            `run for another archive. (Retrying an import would insert a second row per subject and ` +
+            `double the population the report states; the outcomes table has no key that would stop it.)`,
         },
-        413,
+        409,
       );
     }
     const engine = await routedEngineForEnv(env);
@@ -814,7 +823,8 @@ export async function handleRuns(
         const result = await engine.evaluate({
           measureId: body.measureId,
           patientBundle: subject.bundle,
-          evaluationDate: body.evaluationDate,
+          // The resolved date — see `/evaluate` above; the divergence was copied here with it.
+          evaluationDate: evaluationPeriod,
         });
         const evidence =
           typeof result.evidence === "object" && result.evidence !== null

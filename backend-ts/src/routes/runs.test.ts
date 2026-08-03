@@ -1083,3 +1083,49 @@ test("finalize writes an audit event — a run state change with no ledger entry
   const audited = (await events.recentAuditEventsByType("RUN_COMPLETED", 50)).filter((e) => e.refRunId === run.id);
   assert.equal(audited.length, 1, "the pipeline audits its terminal state; so must this route");
 });
+
+test("a run takes ONE submission — a retried import cannot double the population", async () => {
+  // `outcomes` has no unique key on (run_id, subject_id, measure, period), so a client retrying after a
+  // timeout would insert a second row per subject and double what the QRDA III states, with /finalize
+  // accepting every row as imported (Codex, #389). Refusing beats upserting: a retry is
+  // indistinguishable from a deliberate second archive, and silently merging two into one report is the
+  // worse mistake.
+  const run = (await (await post("/api/runs", importRun))!.json()) as { id: string };
+  const documents = { measureId: "audiogram", evaluationDate: "2026-06-12", qrda1: [importableDocument("mrn-once", "MBI-ONCE")] };
+  assert.equal((await post(`/api/runs/${run.id}/import`, documents))?.status, 201);
+
+  const again = await post(`/api/runs/${run.id}/import`, documents);
+  assert.equal(again?.status, 409);
+  assert.equal(((await again!.json()) as { error: string }).error, "run_already_imported");
+  const rows = await new SqliteOutcomeStore(env.DB as never).listOutcomes(run.id);
+  assert.equal(rows.length, 1, "one subject, one row, however many times the client retried");
+});
+
+test("the engine evaluates the date the row is LABELLED with", async () => {
+  // With the body silent and the run carrying an evaluationDate, the row was labelled with the run's
+  // date while the engine evaluated TODAY — a regulatory record stating a period it was not computed
+  // over (Codex, #389). Pinned on a date-derived define rather than on the label, because the label was
+  // never the broken half.
+  const daysSince = async (requestedScope: Record<string, unknown>, body: Record<string, unknown>) => {
+    const run = (await (await post("/api/runs", { ...importRun, requestedScope }))!.json()) as { id: string };
+    await post(`/api/runs/${run.id}/import`, {
+      measureId: "audiogram",
+      qrda1: [importableDocument(`mrn-${crypto.randomUUID()}`, `MBI-${crypto.randomUUID()}`)],
+      ...body,
+    });
+    const [row] = await new SqliteOutcomeStore(env.DB as never).listOutcomes(run.id);
+    const results = (row!.evidence as { expressionResults: Array<{ define: string; result: unknown }> }).expressionResults;
+    return {
+      period: row!.evaluationPeriod,
+      days: results.find((r) => /days since/i.test(r.define))?.result,
+    };
+  };
+
+  const fromRun = await daysSince({ measureId: "audiogram", importDriven: true, evaluationDate: "2025-01-15" }, {});
+  const explicit = await daysSince({ measureId: "audiogram", importDriven: true }, { evaluationDate: "2025-01-15" });
+  const today = await daysSince({ measureId: "audiogram", importDriven: true }, {});
+
+  assert.equal(fromRun.period, "2025-01-15", "the row is labelled with the run's date");
+  assert.equal(fromRun.days, explicit.days, "and the engine computed that date, not another one");
+  assert.notEqual(fromRun.days, today.days, "which is a different answer from today's — so the check can fail");
+});
