@@ -73,14 +73,21 @@ Populated counts in the dev seed (verified): `patients` 72, `patient_mrns` 100, 
 
 ### 3.1 Patient ← `patients` (+ `patient_mrns`)
 
-> **Integrating a live WebChart FHIR server? Read this first (ADR-042).** The `us-core-sex` row below is
-> emitted by **our** SQL→FHIR paths (the `wcdb-fhir-shim` and the dev-DB fixture export). It is *not*
-> synthesized by `normalizeWebChartBundle`, so a WebChart server that serves Patient resources over FHIR
-> without a `us-core-sex` extension will have **its entire roster read out-of-population by official
-> CMS125** — silently, as 100% MISSING_DATA rather than an error. This is deliberate: we assert the
-> extension where a source column records a sex value, and decline to infer it from an
-> `administrative-gender` someone else mapped. If you are onboarding a tenant, confirm the server supplies
-> `us-core-sex` with the SNOMED concept id before routing CMS125 officially.
+> **Integrating a live WebChart FHIR server? (ADR-042, CLOSED 2026-08-03 — ADR-057.)** The `us-core-sex`
+> row below is emitted by **our** SQL→FHIR paths (the `wcdb-fhir-shim` and the dev-DB fixture export),
+> which sit upstream of the live FHIR transport — so a third-party server that serves `Patient.gender` and
+> no extension had its **entire roster read out-of-population by official CMS125**, silently, as 100%
+> MISSING_DATA rather than an error. `normalizeWebChartBundle` now **derives** the extension from
+> `Patient.gender` through an explicit two-value allowlist (`male`/`female` → the SNOMED concept ids;
+> `other`/`unknown` assert nothing), never overwriting one the server supplied, and tags it
+> `derived-from-gender` so an asserted sex is distinguishable from a recorded one. Gated by
+> `live-official-parity.test.ts`, which strips the extension from the committed fixture to reproduce the
+> live shape and pins that official CMS125 admits **4 of 56** with normalization and **0** without.
+>
+> The judgement is stated rather than hidden: administrative gender and recorded sex can legitimately
+> differ, so this is an inference. Reading a server's own `female` as not-female is also an inference —
+> a worse one, because it is silent and it empties the measure (ADR-043).
+
 | FHIR | WebChart |
 |---|---|
 | `id` | `patients.pat_id` (stable internal id; use as the subject external id) |
@@ -158,6 +165,29 @@ WHERE oc.loinc_num IS NOT NULL;
 A screening-mammogram procedure row emits **two** resources: the CPT/HCPCS `Procedure` above, and a LOINC
 `Observation` (`24606-6`) carrying `status = final` and `category ~ imaging`, served from `/Observation`.
 `/Procedure` is unchanged.
+
+> **The LIVE path gets it too, since 2026-08-03 (ADR-057).** The dual stamp above is applied by our SQL→FHIR
+> mappers, which a third-party FHIR server does not run — so over the live transport official CMS125 read a
+> woman who HAD been screened as OVERDUE, a false non-compliance `case-logic.ts` escalates to HIGH.
+> `normalizeWebChartBundle` now derives the same LOINC imaging `Observation` from a CPT/HCPCS mammography
+> `Procedure`: an explicit two-code allowlist, only from a `completed` Procedure, tagged
+> `derived-from-procedure`, and **suppressed entirely when the server already sends the Observation** — so a
+> server recording both is untouched and nothing is double-stamped. Both numerators are `exists(...)`, so it
+> cannot inflate either; for a COUNTING measure it would, which is why the allowlist is two codes rather
+> than a category sweep.
+>
+> **Two limits, stated rather than implied.** (1) The suppression check matches the one canonical LOINC
+> `24606-6`, not the whole 92-member Mammography value set — a server recording the screening under one of
+> the other 91 still gets a derived duplicate. (2) Only **Procedure → Observation** is derived. A server
+> that records mammography as a LOINC `Observation` and no CPT `Procedure` leaves the **authored** engine
+> blind (the crosswalk has entries for 77067 and G0202 only), so authored `cms125` reads OVERDUE — and
+> staging carries eleven `WORKWELL_WEBCHART_*` vars with `WORKWELL_OFFICIAL_MEASURES` unset, which is
+> exactly that configuration. Still open.
+>
+> **And a live tenant's QRDA Category I now carries the screening twice** — `qdm-entries.ts` routes an
+> imaging `Observation` to "Diagnostic Study, Performed" and the `Procedure` to "Procedure, Performed",
+> and the `meta.tag` provenance does not survive into CDA. Harmless for the `exists(...)` numerators a
+> receiver recalculates, and worth knowing before anyone counts entries.
 
 **Why.** The two engines retrieve different resource types for the same clinical fact — authored
 `cms125.cql` reads `[Procedure: "Mammography"]` (CPT/HCPCS), official CMS125 reads
