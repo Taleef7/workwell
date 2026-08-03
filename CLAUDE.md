@@ -504,6 +504,21 @@ split each get a new Cypress MRN; only the **Medicare Beneficiary Identifier** s
 **CY2024**, not 2026). Evidence: `docs/evidence/CVU_CALCULATION_CHECK_SPIKE_2026-08-02.md` Part 3; harness
 `scripts/cvu/c2-calculation-check.ts` + `scripts/cvu/c2/`.
 
+**THE IMPORTER IS FIXED AND THE NUMBERS NOW MATCH EXACTLY (2026-08-03, ADR-055).** IPP 64=64 and
+150=150, DENOM identical, NUMER 31=31 and 2=2, DENEX 32=32 and 47=47 — **64/64 and 150/150 subjects agree
+on every population**, reproduced against a second, independently generated archive. Three fixes, each
+forced by a measurement: six QDM datatypes mapped to what the artifacts' ELM actually **retrieves**
+(Intervention Performed → Procedure, Intervention Order → ServiceRequest, Device Order → DeviceRequest,
+Medication Active → MedicationRequest, Symptom + Assessment → Observation — never off a QDM-to-QI-Core
+table, because an answer that retrieves nothing is indistinguishable from a patient with no data);
+`<translation>` read as an ADDITIONAL coding with a widened code-system map (4 of CMS125's Procedures were
+ICD-10-PCS and vanished whole); and `Encounter.hospitalization.dischargeDisposition`, which alone
+accounted for the last 9 subjects in each measure. **Symptom inverts code and value while Assessment does
+not.** Mutation-checked one fix at a time — which caught a **vacuous assertion of my own** (a test
+forbidding a `SPLY`-coded DeviceRequest could not fail). No export change: `qdm-entries.ts` can only emit
+what our bundles carry, so import/export are now asymmetric by design and the round trip cannot reach the
+new mappers. Suite 1807, 0 fail; the MADiE gate never reaches the importer.
+
 **Still missing for M-B — the bar is NOT met.** Locked decision #2 is the **import → evaluate → export →
 CVU+ green LOOP**. CVU+ has graded our EXPORTS (both document types, 0 findings) and the calculation
 comparison above was run **offline against the archive**, going around prerequisite 11.1: **no HTTP route

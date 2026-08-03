@@ -11,6 +11,7 @@
 
 ## Titles (newest first)
 
+- ADR-055: What a QDM datatype becomes in FHIR is read off the artifact's own ELM retrieves — and the importer is now measured against a third party's answers
 - ADR-054: CMS130 and CMS165 onboard clean — the credentialed workflow's completion flag was already doing the capped-expansion work ADR-041 built it for
 - ADR-053: "the terminology is complete" was only ever a claim about what the bundle DECLARED
 - ADR-052: the app-side exclusions are decided and enforced; what the package does with CONTENT is not

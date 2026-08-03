@@ -521,3 +521,92 @@ in the product path rather than in a script.
 **So the honest statement of the milestone bar is unchanged.** Locked decision #2 is the import →
 evaluate → export → CVU+ green LOOP. This is the calculate leg, measured offline against Cypress's
 expected results. `ExpectedResultsValidator` has still never graded a document we produced.
+
+---
+
+# Part 4 — the importer is fixed, and the numbers now match EXACTLY (2026-08-03, ADR-055)
+
+Part 3 diagnosed two import defects and left them unfixed. Both are fixed, plus a third the fix surfaced,
+and the comparison was re-run over both archives.
+
+## 19. The result
+
+| population | CMS122 expected | reported | CMS125 expected | reported |
+|---|---|---|---|---|
+| IPP | 64 | **64** | 150 | **150** |
+| DENOM | 64 | **64** | 150 | **150** |
+| NUMER | 31 | **31** | 2 | **2** |
+| DENEX | 32 | **32** | 47 | **47** |
+
+**Per subject: 64 of 64 and 150 of 150 agree on every population.** Re-run against the pass-A archive —
+independently generated, differently duplicated (66 documents instead of 68, 152 instead of 153) — every
+graded number identical.
+
+That is the first external, known-answer validation of the chain from a **third party's document**
+through our import into the official executor. It is complementary to the MADiE gate rather than a
+repeat of it: MADiE hands the executor finished bundles and grades the executor; Cypress grades
+everything in front of it.
+
+## 20. What the fix was, in the order the measurements forced
+
+**(a) Six datatypes, each mapped to what the ELM actually RETRIEVES.** Not to a QDM-to-QI-Core table —
+the ELM is what the executed measure will look for, and a plausible second-hand answer that retrieves
+nothing is indistinguishable from a patient with no data. Measured with `cvu-workdir/dbg-retrieves.mjs`:
+
+| QDM datatype | → | proved by |
+|---|---|---|
+| Intervention, Performed | `Procedure` | Hospice Care Ambulatory, Palliative Care Intervention |
+| Intervention, Order | `ServiceRequest` | Hospice Care Ambulatory — same value set, different type |
+| Device, Order | `DeviceRequest` | Frailty Device |
+| Medication, Active | `MedicationRequest` | Dementia Medications |
+| Symptom | `Observation` | Frailty Symptom |
+| Assessment, Performed | `Observation` | screening/assessment |
+
+Two nested-element traps inside that: a Device Order's code is on
+`participant/participantRole/playingDevice/code` — `<supply>` carries none and the only `<code>` up the
+tree is the ActClass literal `SPLY` — and a Medication's drug is on
+`consumable/…/manufacturedMaterial/code`. Also: `<supply>` and `<substanceAdministration>` had to be
+added to the candidate element scan, or those two datatypes stay invisible however good the mapper is.
+
+**And Symptom INVERTS code and value while Assessment does not.** `[Observation: "Frailty Symptom"]`
+filters on `Observation.code`; a QDM Symptom's `<code>` says only "this entry is a symptom" (LOINC
+75325-1) and the `<value>` carries the symptom — the same inversion as Diagnosis. An Assessment keeps
+both: `<code>` the instrument, `<value>` the result.
+
+Result: CMS122 **41 → 55 of 64** agreeing, CMS125 **122 → 141 of 150**.
+
+**(b) `<translation>` as an additional coding, and an unmapped primary code no longer discards the
+resource.** ICD-10-PCS added to the system map (plus RxNorm, CVX and four others), and `concept()` now
+returns every coding the element expresses — CDA's translation is "the same concept in another
+vocabulary", which is exactly what a multi-coding `CodeableConcept` means.
+
+**(c) The remaining 9-per-measure, which the fix surfaced rather than closed.** After (a) and (b) both
+measures were short by exactly nine subjects, and all nine carried the same name shape — `THREE N
+Independent Risk Factors …`. Reading one: an inpatient `Encounter` with
+`<sdtc:dischargeDispositionCode code="428371000124100"/>` — discharge to home for hospice care. The
+Hospice library reads `Encounter.hospitalization.dischargeDisposition`; our encounter mapper carried
+`type` and `period` and nothing else. **One field, 9 subjects in each measure, and it closed both to
+exact agreement.**
+
+## 21. What was NOT changed, and what still is not proven
+
+**The export stays at five datatypes, deliberately.** `qdm-entries.ts` can only emit what our own
+evaluated bundles contain, and those carry no frailty, hospice or palliative data — so import and export
+are now asymmetric, and the round trip cannot reach the new mappers. They are pinned instead by a fixture
+modelled on Cypress's own documents (element nesting, the `sdtc:` prefix and attribute order copied
+rather than invented, because every one of those details is a place data was previously lost), and
+**mutation-checked one fix at a time**: reverting any of the six makes exactly the test that claims it
+fail. One of those checks caught a **vacuous assertion of my own** — a test asserting a Device Order is
+not coded `SPLY` could never fail, because a mapper reading the supply's own code finds nothing and drops
+the resource entirely. The assertion is gone and the unreachable fallback it was guarding with it.
+
+**Still not a Cypress Calculation Check RESULT.** `ExpectedResultsValidator` has never graded a document
+we produced — prerequisite §11.1 (no HTTP route calls `finalizeRun`) is untouched, and this measures the
+calculation directly. **Still `PopulationSet_1` only**: CMS125's two strata carry their own expected
+results and the executor package does not surface fqm's stratifier results. **Still synthetic patients**,
+and the oracle is the QDM lineage of the same measures — agreement between two implementations, not
+truth.
+
+**And the identity resolution this depends on still lives in the harness, not the product.**
+`POST /api/runs/:id/evaluate` keys the subject off the first `<id>` extension, so a real submission would
+still report 68 people where Cypress expects 64.
