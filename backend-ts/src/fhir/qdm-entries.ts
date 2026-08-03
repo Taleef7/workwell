@@ -46,8 +46,15 @@ const CODE_SYSTEMS: Record<string, { oid: string; name: string }> = {
   "http://www.ama-assn.org/go/cpt": { oid: "2.16.840.1.113883.6.12", name: "CPT" },
   "http://hl7.org/fhir/sid/icd-10-cm": { oid: "2.16.840.1.113883.6.90", name: "ICD10CM" },
   "http://hl7.org/fhir/sid/icd-9-cm": { oid: "2.16.840.1.113883.6.103", name: "ICD9CM" },
+  // Three spellings of HCPCS, all mapping to the one OID. The CMS URL is what the official artifacts'
+  // vendored expansions use and what `qrda1-import.ts` now produces; the other two are what our own
+  // crosswalk and older bundles carry. Missing the CMS one would silently drop an HCPCS-only entry from
+  // a re-exported document (review, #388).
+  "http://www.cms.gov/Medicare/Coding/HCPCSReleaseCodeSets": { oid: "2.16.840.1.113883.6.285", name: "HCPCS" },
   "urn:oid:2.16.840.1.113883.6.285": { oid: "2.16.840.1.113883.6.285", name: "HCPCS" },
   "https://bluebutton.cms.gov/resources/codesystem/hcpcs": { oid: "2.16.840.1.113883.6.285", name: "HCPCS" },
+  "http://www.cms.gov/Medicare/Coding/ICD10": { oid: "2.16.840.1.113883.6.4", name: "ICD10PCS" },
+  "http://www.nlm.nih.gov/research/umls/rxnorm": { oid: "2.16.840.1.113883.6.88", name: "RXNORM" },
   "http://terminology.hl7.org/CodeSystem/v3-ActCode": { oid: "2.16.840.1.113883.5.4", name: "ActCode" },
 };
 
@@ -319,6 +326,13 @@ const LAB_CATEGORIES = new Set(["laboratory", "vital-signs", "survey", "exam"]);
  * `code` while `encounterPerformed` reads `type[0] ?? code`.
  */
 function dropReason(resource: FhirResource, type: string): string {
+  // The three types the IMPORT reads and the export has no entry template for (ADR-055). Named
+  // explicitly, because the code-system reason below would be computed off `resource.code` — which none
+  // of these three carries (`codeCodeableConcept`, `medicationCodeableConcept`) — and would report "no
+  // code to carry" about a resource that is fully coded.
+  if (!(QDM_MAPPED_RESOURCE_TYPES as readonly string[]).includes(type)) {
+    return `no QDM entry template — this exporter maps ${QDM_MAPPED_RESOURCE_TYPES.join(", ")} only (ADR-055)`;
+  }
   if (isNegated(resource)) return "excluded — its status says the event did not happen or was retracted";
   if (type === "Observation") {
     const cats = categoryCodes(resource);
@@ -371,7 +385,7 @@ export function translateQdm(bundle: unknown, pad = "          "): QdmTranslatio
     }
     // Nothing produced. Say WHY, for the cases an operator can act on; stay silent for the ones that are
     // simply out of scope, where a "gap" would be noise.
-    if (!type || type === "Patient" || !(QDM_MAPPED_RESOURCE_TYPES as readonly string[]).includes(type)) return;
+    if (!type || type === "Patient" || !(QDM_REPORTABLE_RESOURCE_TYPES as readonly string[]).includes(type)) return;
     untranslatable.push(`${type}: ${dropReason(resource!, type)}`);
   });
   return { entries, untranslatable };
@@ -440,4 +454,22 @@ function entryFor(item: unknown, i: number, pad: string): string[] {
 }
 
 /** Resource types this mapper can translate — used by the export to explain what it dropped. */
+/**
+ * Resource types the EXPORT knows how to turn into a QDM entry — and therefore the only ones whose
+ * omission it can report.
+ *
+ * `ServiceRequest`, `DeviceRequest` and `MedicationRequest` are deliberately absent: the export can only
+ * emit what our own evaluated bundles carry, and those carry no frailty, hospice or palliative data
+ * (ADR-055). They are listed here anyway so that re-exporting an IMPORTED document reports them as
+ * untranslatable rather than dropping them in silence — the asymmetry is intended, the silence was not
+ * (review, #388).
+ */
 export const QDM_MAPPED_RESOURCE_TYPES = ["Encounter", "Condition", "Observation", "Procedure"] as const;
+
+/** Reported-but-not-exported: known clinical types the QDM translator has no entry template for. */
+export const QDM_REPORTABLE_RESOURCE_TYPES = [
+  ...QDM_MAPPED_RESOURCE_TYPES,
+  "ServiceRequest",
+  "DeviceRequest",
+  "MedicationRequest",
+] as const;

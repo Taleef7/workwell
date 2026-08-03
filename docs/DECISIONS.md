@@ -1,5 +1,96 @@
 # Architecture Decision Records
 
+## ADR-055: What a QDM datatype becomes in FHIR is read off the artifact's own ELM retrieves — and the importer is now measured against a third party's answers
+
+**Status:** Accepted (2026-08-03). **Supersedes nothing; extends ADR-051.**
+
+**Context.** ADR-051 shipped QRDA Category I import as "a mapping into the unchanged engine" and translated
+the five QDM datatypes CMS122/CMS125 consume on their IPP → DENOM → NUMER path. #387 measured that
+importer against Cypress's own generated patients — a third party's documents with a third party's
+precalculated answers — and found it right about who is in the measure and wrong about who is excluded:
+**IPP 64=64 and 150=150, DENOM identical, CMS125 NUMER 2=2, but DENEX 9 vs 32 and 19 vs 47**, with every
+one of the 51 differing subjects failing in the same direction. Two causes, both in the importer and
+neither in the measure logic: the exclusion paths (hospice, palliative care, long-term nursing home,
+advanced illness, frailty) read datatypes we dropped, and `concept()` read only the primary `<code>` from
+six mapped code systems, silently discarding any resource coded outside them.
+
+**Decision 1 — the FHIR target of each QDM datatype is read off what the official artifacts' ELM
+RETRIEVES, never off a QDM-to-QI-Core mapping table.** The ELM is what the executed measure will look
+for; a plausible second-hand answer that retrieves nothing is indistinguishable from a patient with no
+data, which is the ADR-043 hazard arriving through a new door. Measured across both artifacts:
+Intervention Performed → `Procedure` (Hospice Care Ambulatory, Palliative Care Intervention),
+Intervention Order → `ServiceRequest` (same value set, different type — so the pair cannot be collapsed),
+Device Order → `DeviceRequest` (Frailty Device), Medication Active → `MedicationRequest` (Dementia
+Medications), Symptom and Assessment Performed → `Observation` (Frailty Symptom). The libraries read
+`authoredOn`, `performed`, `effective` and `value` — **and also `status` and `intent`**: every retrieve on
+an exclusion path is wrapped in a `Status.is*` predicate, and the `Status` library reads `status` 22 times
+and `intent` 6. A first draft of this ADR said the opposite and used it to justify the values chosen. The
+values are all correct, but the reasoning was false and the margins are thin — `isMedicationActive` is an
+`Equal` on `"active"`, so a plausible "just state the QDM shape" edit to `"completed"` silently kills the
+dementia exclusion (review, #388). Each value is now pinned against the predicate it satisfies.
+
+**Decision 2 — a `<translation>` is an ADDITIONAL coding, an unmappable primary code no longer discards
+the resource, and every system URL is the one the ARTIFACTS use.** CDA's translation is "the same concept
+in another vocabulary", which is exactly what a `CodeableConcept` with several `coding` entries means.
+Measured: 4 of CMS125's 10 `Procedure, Performed` entries are coded in **ICD-10-PCS**, absent from the map
+— so the whole Procedure vanished, taking a mastectomy exclusion with it, while the SNOMED code the
+exclusion value set actually contains sat inside the element unread. The map is now a superset of the
+export's (the export need only emit what our bundles carry; the import must read what a third party
+wrote), and `concept()` returns undefined only when nothing at all resolved.
+
+**And a near-miss URL is worse than an absent one** — which review of #388 found live in this very change.
+`cql-execution` compares `system` by exact string equality, so an unmapped system drops the resource
+*visibly* (`untranslatedTemplates` names it) while a wrong URL imports it and leaves it invisible to every
+retrieve, with no diagnostic anywhere. HCPCS was mapped to `urn:oid:2.16.840.1.113883.6.285` against the
+expansions' `http://www.cms.gov/Medicare/Coding/HCPCSReleaseCodeSets` — 103 codes including Annual
+Wellness Visit `G0438` and Hospice Care Ambulatory `G0182` — and **the exact agreement recorded below did
+not catch it**, because the initial population is `exists(...)` and those patients carry other qualifying
+encounters. So every URL is read off the vendored expansions and pinned twice: as literals, and against
+the expansions themselves in a sidecar-gated test that a future re-vendor would trip. Speculative mappings
+are refused — an unvalidatable mapping is a landmine, an absent one is a visible gap.
+
+**Decision 2b — a negated act is skipped, never imported as a positive fact.** `negationInd="true"` means
+the act did not happen; importing it positively would manufacture a denominator exclusion out of a record
+stating the opposite. Cypress's archives carry none, so this is latent and test-covered rather than
+measured, and the diagnostic does not distinguish "negated" from other drops — a known limit.
+
+**Decision 3 — three fields that decide a population and had no mapping at all.** `Encounter.hospitalization.dischargeDisposition` from `<sdtc:dischargeDispositionCode>` (an inpatient
+stay ending in discharge to hospice is an exclusion in both measures — measured as the LAST remaining
+cause of divergence, 9 subjects per measure); the Device Order's code from
+`participant/participantRole/playingDevice/code`, because `<supply>` carries none and the only `<code>`
+up the tree is the ActClass literal `SPLY`; and the Medication's drug from
+`consumable/…/manufacturedMaterial/code`.
+
+**Decision 4 — Symptom INVERTS code and value, Assessment does not.** `[Observation: "Frailty Symptom"]`
+filters on `Observation.code`, and a QDM Symptom's own `<code>` says only "this entry is a symptom"
+(LOINC 75325-1) while the `<value>` carries the symptom — the same inversion as Diagnosis. An Assessment
+keeps both: its `<code>` is the instrument and its `<value>` the result. Getting either backwards leaves
+a bundle that looks complete and retrieves nothing.
+
+**Consequences.**
+
+- **Measured: exact agreement with Cypress on all 214 patients** — 64/64 and 150/150 subjects agree on
+  every population, IPP/DENOM/NUMER/DENEX identical, across TWO independently generated archives. That is
+  the first external, known-answer validation of the chain from a third party's DOCUMENT through our
+  import into the official executor.
+- **The MADiE gate is untouched** (410/410): it hands the executor finished bundles and never reaches the
+  importer. These are complementary oracles — MADiE grades the executor, Cypress grades everything in
+  front of it.
+- **Import stays asymmetric with export, deliberately.** `qdm-entries.ts` still emits five datatypes,
+  because it can only export what our own evaluated bundles contain and those carry no frailty, hospice
+  or palliative data. So the round trip cannot reach the new mappers; they are pinned instead by a
+  fixture modelled on Cypress's own documents, mutation-checked one fix at a time.
+- **`untranslatedTemplates` now names the DATATYPE**, not the last templateId in the entry — which was
+  routinely a nested attribute template (Author dateTime, Rank) and blamed the wrong thing 31 times in
+  one archive. And `Patient.birthDate` is truncated to a FHIR `date`; it changed no population, but it
+  was invalid FHIR our own exporter would never emit.
+- **What this does NOT establish.** Cypress's patients are synthetic and its expected results come from
+  the QDM lineage of the same measures, so this is agreement between two implementations, not truth. It
+  is still not a Cypress Calculation Check RESULT: `ExpectedResultsValidator` has never graded a document
+  we produced, because no HTTP route finalizes an imported run (#387 §11.1). And only `PopulationSet_1`
+  is compared — CMS125's two strata carry their own expected results, and the executor package does not
+  surface fqm's stratifier results.
+
 ## ADR-054: CMS130 and CMS165 onboard clean — the credentialed workflow's completion flag was already doing the capped-expansion work ADR-041 built it for
 
 **Status:** Accepted (2026-07-31).

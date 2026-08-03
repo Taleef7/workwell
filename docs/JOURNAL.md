@@ -1,5 +1,84 @@
 # Journal
 
+## 2026-08-03 (M-B) — the QRDA importer is fixed and now matches Cypress EXACTLY on 214 patients (branch `fix/qrda1-import-datatype-coverage`, ADR-055)
+
+This morning's spike closeout diagnosed two import defects and left them unfixed. Both are fixed, a third
+surfaced during the fix, and the comparison was re-run: **IPP 64=64 and 150=150, DENOM identical, NUMER
+31=31 and 2=2, DENEX 32=32 and 47=47 — 64 of 64 and 150 of 150 subjects agreeing on every population**,
+reproduced against a second, independently generated archive (66/68 and 152/153 documents). That is the
+first external, known-answer validation of the chain from a **third party's document** through our import
+into the official executor — complementary to the MADiE gate rather than a repeat of it, since MADiE
+hands the executor finished bundles and grades only the executor.
+
+**Each datatype's FHIR target was read off what the artifacts' ELM actually RETRIEVES, never off a
+QDM-to-QI-Core table.** The ELM is what the executed measure will look for; a plausible second-hand
+answer that retrieves nothing is indistinguishable from a patient with no data — the ADR-043 hazard
+through a new door. Measured: Intervention Performed → `Procedure`, Intervention Order →
+`ServiceRequest` (same value set, different type, so the pair cannot be collapsed), Device Order →
+`DeviceRequest`, Medication Active → `MedicationRequest`, Symptom and Assessment → `Observation`. The
+libraries read `authoredOn`, `performed`, `effective` and `value` — and notably NOT `status` or `intent`,
+so those are set to what QI-Core requires rather than to satisfy a predicate.
+
+**Two nested-element traps and one inversion, each of which loses data silently.** A Device Order's code
+is on `participant/participantRole/playingDevice/code` — `<supply>` carries none and the only `<code>` up
+the tree is the ActClass literal `SPLY`, so the obvious "walk up" yields a DeviceRequest coded "Supply".
+A Medication's drug is on `consumable/…/manufacturedMaterial/code`. And **Symptom inverts code and value
+while Assessment does not**: `[Observation: "Frailty Symptom"]` filters on `Observation.code`, a QDM
+Symptom's own `<code>` says only "this entry is a symptom" (LOINC 75325-1) and the `<value>` carries the
+symptom — the same inversion as Diagnosis — while an Assessment keeps `<code>` as the instrument and
+`<value>` as the result. Also: `<supply>` and `<substanceAdministration>` had to join the candidate
+element scan, or those two datatypes stay invisible however good the mapper is.
+
+**`<translation>` is an ADDITIONAL coding, not a fallback** — CDA's translation is "the same concept in
+another vocabulary", exactly what a multi-coding `CodeableConcept` means — and an unmappable primary code
+no longer discards the whole resource. ICD-10-PCS, RxNorm, CVX and four others joined the system map.
+
+**Then both measures were short by exactly nine, and all nine had the same name shape.** `THREE N
+Independent Risk Factors …` — an inpatient `Encounter` carrying
+`<sdtc:dischargeDispositionCode code="428371000124100"/>`, discharge to home for hospice care. The
+Hospice library reads `Encounter.hospitalization.dischargeDisposition`; our encounter mapper carried
+`type` and `period` and nothing else. **One field closed both measures to exact agreement.**
+
+**Mutation-checked one fix at a time, and it caught a vacuous assertion of my own.** A test asserting a
+Device Order is not coded `SPLY` could never fail — a mapper reading the supply's own code finds nothing
+and drops the resource entirely — so the assertion is gone along with the unreachable fallback it was
+guarding. Reverting any of the six fixes now fails exactly the test that claims it. Two older tests were
+also corrected rather than left passing for the wrong reason: both used a bare Medication, Active as "a
+datatype we cannot translate", which stopped being true today.
+
+**Review caught a live defect of exactly the class this PR fixes, and the exact agreement did NOT catch
+it.** HCPCS was mapped to `urn:oid:2.16.840.1.113883.6.285` where the vendored expansions say
+`http://www.cms.gov/Medicare/Coding/HCPCSReleaseCodeSets` — 103 codes across the two measures, including
+Annual Wellness Visit `G0438` on 22 documents. `cql-execution` compares `system` by exact string equality,
+so a near-miss URL is **worse than an absent one**: an absent system drops the resource visibly, a wrong
+one imports it and leaves it invisible to every retrieve with no diagnostic anywhere. It read as 64/64
+only because the initial population is `exists(...)` and those patients carry other qualifying
+encounters — a right answer for the wrong reason, which is precisely what this comparison exists to
+catch and did not. Fixed, the speculative mappings I had added alongside it (CVX, CDT, NUCC, plain
+ICD-10) removed for the same reason, and pinned twice: literals in one test, the artifacts' own
+expansions in a sidecar-gated one.
+
+**Three more from the same review.** The ADR claimed the libraries do NOT read `status` or `intent` — they
+read `status` 22 times and `intent` 6, every exclusion retrieve is wrapped in a `Status.is*` predicate, and
+`isMedicationActive` is an `Equal` on `"active"`, so the false rationale was one plausible edit away from
+killing the dementia exclusion. Corrected, with every value pinned against its predicate. `negationInd`
+was unhandled — a negated act would have imported as a positive fact and manufactured an exclusion from a
+record stating the opposite; now skipped and reported. And five mutants survived the new tests: fixtures
+added for the unmapped-primary-with-translation path, the `authoredOn` effectiveTime fallback, and a
+wrapper template preceding its datatype; `symptomFrom`'s fallback to the element's own `<code>` removed
+rather than tested, because it is reachable and actively wrong.
+
+**Scope held deliberately.** No export change — `qdm-entries.ts` can only emit what our own evaluated
+bundles contain, and those carry no frailty, hospice or palliative data, so import and export are now
+asymmetric and the round trip cannot reach the new mappers; they are pinned by a fixture modelled on
+Cypress's own documents instead. Suite 1807, 0 fail. The MADiE gate is untouched by construction — it
+never reaches the importer.
+
+**Still not met:** `ExpectedResultsValidator` has never graded a document we produced (no HTTP route
+finalizes an imported run), only `PopulationSet_1` is compared, the patients are synthetic, and the
+identity resolution this depends on still lives in the harness rather than the product. Next: identity
+resolution on the import path, then the finalize route.
+
 ## 2026-08-03 (M-B) — the C2 oracle reproduces and the comparison ran: IPP and DENOM match, exclusions do not, and the cause is our IMPORTER (branch `docs/cvu-c2-oracle-and-comparison`)
 
 #386 stopped at "establish the oracle before running anything through WorkWell", because across three
