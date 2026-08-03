@@ -201,3 +201,49 @@ Establish the oracle before running anything through WorkWell:
 
 Everything needed for step 3 is already built and already validated (#380/#381/#384). The gap is
 entirely in trusting the expected side.
+
+## 11. CORRECTION — "nothing needs building" is WRONG (review of #386, two P1s)
+
+Both Part 1 §2 and Part 2 §9 concluded *"nothing needs building — the remaining work is running our
+engine over these documents and comparing."* **That is false, and review found two concrete technical
+prerequisites I had classified as untested consequences of the single-file blocker.** Both verified
+against the tree rather than taken on faith.
+
+### 11.1 No HTTP route can finalize an imported run
+
+`POST /api/runs` creates a run `QUEUED`; each `POST /api/runs/:id/evaluate` moves it to `RUNNING`; and
+**no route calls `finalizeRun`.** Verified: `grep -rn finalizeRun backend-ts/src/routes/` returns only
+`*.test.ts` matches, and the real callers are internal — `run-pipeline.ts`, `case-rerun.ts`,
+`backfill-scale.ts`, `batch-evaluate-scale.ts`. `GET /api/runs/:id/qrda` guards on `notReportable` and
+returns **409** for a run that is still `RUNNING`.
+
+So the §2 loop **cannot reach step 4 over the API**. Producing the Cat III that C2 requires needs either
+a new route (or an explicit finalize action on the existing one) or direct store access from a script.
+That is a code change, small but real, and it is on the critical path.
+
+### 11.2 The measurement periods are not aligned
+
+`officialMeasurementPeriod` (`wiring/official-executor-adapter.ts`) deliberately evaluates the
+registry's **rolling** window — `evaluationDate − periodMonths … evaluationDate`. **ADR-039 records this
+exact divergence** from the calendar year `2026-01-01 … 2026-12-31`, and resolved it by aligning the
+shadow diff ONTO the rolling window — the right call then, because the goal was comparing our own two
+engines. It is the wrong window for Cypress, whose expected results are computed over the test's own
+`effective_date` (`product_test.rb#effective_date` ← `product.effective_date`).
+
+A patient whose qualifying event sits near a period boundary can therefore land in a different
+population **even with a correct engine and a correct import**. Aligning the period is a prerequisite,
+not a finding — and had this run gone ahead unaligned, the boundary patients would have shown up as
+population mismatches and been indistinguishable from real defects.
+
+### 11.3 What the spike's conclusion actually is, restated honestly
+
+**Unchanged and still valuable:** the bundle is obtainable and obtained; CMS122/CMS125 (and six more) are
+present; the C2 harness stands up and produces patients, archives and expected results; Cypress hands out
+QRDA Cat I, which our importer reads; and the export validates clean (#384). **The milestone is viable.**
+
+**Corrected:** it is *not* "obtain one file". It is obtain one file **plus** (a) a way to finalize an
+imported run, (b) measurement-period alignment with the Cypress test, and (c) an oracle that reproduces
+(§10). Three prerequisites, all small, none of them zero.
+
+That is still a good answer to the spike's question — **"viable, with three named prerequisites" is
+exactly what a scoping spike is for.** It is just not the answer I first wrote.
