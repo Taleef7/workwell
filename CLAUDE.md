@@ -468,21 +468,54 @@ identity; if MIE assigns an arc, `qrda-common.ts` is the only place that changes
 deliberately still emits `urn:workwell:measure` and a test pins it as the ONLY invalid root, because
 ADR-046 decision 3 and ADR-051 make that document non-conformant BY DESIGN.
 
+**QRDA Category III followed it to 0 the same day (#384).** 48 findings → 0 against the HL7 base ruler.
+The interesting defect: every required element was PRESENT and every rule about them still failed, because
+Aggregate Count `…27.3.3` sat on the OUTER observation with `…27.3.24` inside — so the validator applied
+Aggregate Count's rules to the wrong element (3 findings per population, 12 per document) and validated the
+element that satisfied them as nothing at all. Correct nesting is Measure Data `…27.3.5` wrapping Aggregate
+Count `…27.3.3`. The whole CDA header was also absent (`recordTarget` carries `<id nullFlavor="NA"/>` —
+the document is about a population), and `…27.1.2` was claimed with a wrong extension, so **the HL7 ruler
+stayed silent precisely because it matched no rule at all**. Both document types now validate clean.
+
+**THE CALCULATION CHECK COMPARISON HAS NOW RUN — offline, and it found a defect in our IMPORTER, not our
+engine (2026-08-03).** The #386 oracle reproduces once teardown deletes `CQM::IndividualResult`s (that
+alone was the 128-then-93 irreproducibility), and every number is now DERIVED: results = patients ×
+(1 unstratified row + 1 for the patient's own stratum), archive documents = patients + 1 clinical split +
+`rand(1..3)` duplicates — so the document count legitimately VARIES between rebuilds while the expected
+results do not. Measured against
+Cypress's own expected results over its 214 generated patients: **IPP 64=64 and 150=150, DENOM 64=64 and
+150=150, CMS125 NUMER 2=2**; per subject **41/64 and 122/150 agree on every population**, and every
+difference is one direction — `DENEX: cypress=1 workwell=0` (CMS122's numerator 54 vs 31 is exactly its 23
+missed exclusions falling through, which for an INVERSE measure means the numerator). **`Denominator` is an
+`ExpressionRef` to `Initial Population` in both artifacts, so DENOM restates IPP — one agreement, not
+two**; and fqm zeroes NUMER whenever DENEX is true for a proportion measure, so the numerator cannot be
+read apart from the exclusions. Run against BOTH archives (66/68 and 152/153 documents): every graded
+number identical. **Two import causes, each MECHANISM confirmed by construction (n=1 subject apiece via
+the harness's `--inject`; that they account for ALL 51 differing subjects is inferred from the datatype
+inventory, not measured):** we translate five QDM datatypes while the exclusion logic reads
+Assessment Performed, Intervention Performed/Order, Medication Active, Symptom and Device Order (adding one
+dropped Assessment back flips a subject to Cypress's exact answer); and `concept()` reads only the primary
+`<code>` from six mapped code systems, dropping 4 of CMS125's 10 Procedure entries for being ICD-10-PCS —
+two of which carry the SNOMED translation the exclusion value set contains. **A FOURTH prerequisite the
+#386 review could not see from the tree: identity resolution.** The augmented duplicate and the clinical
+split each get a new Cypress MRN; only the **Medicare Beneficiary Identifier** survives both, and
+`POST /api/runs/:id/evaluate` keys off the first `<id>` extension — so nothing in the product path resolves
+68 documents to 64 people. Prerequisite 11.2 is measured at **zero subjects moved** (the bundle's period is
+**CY2024**, not 2026). Evidence: `docs/evidence/CVU_CALCULATION_CHECK_SPIKE_2026-08-02.md` Part 3; harness
+`scripts/cvu/c2-calculation-check.ts` + `scripts/cvu/c2/`.
+
 **Still missing for M-B — the bar is NOT met.** Locked decision #2 is the **import → evaluate → export →
-CVU+ green LOOP**; this measured the **export leg only**, over the synthetic corpus, via the
-externally-supplied-document route. **The Cypress Calculation Check path has never run**, so nothing here
-says our CALCULATIONS are right. **QRDA Category III is unchanged at 48 findings** (2 XSD + 46 Cat III
-Schematron): templateId version drift (`2017-06-01` where R2.1 wants `2020-12-01`) plus genuinely absent
-structure — no `recordTarget`, `custodian`, `author/time`, `methodCode`, `MSRAGG`, `statusCode`,
-`reference`, or Aggregate Count. Evidence: `docs/evidence/CVU_VALIDATION_RUN_2026-08-02.md`.
+CVU+ green LOOP**. CVU+ has graded our EXPORTS (both document types, 0 findings) and the calculation
+comparison above was run **offline against the archive**, going around prerequisite 11.1: **no HTTP route
+calls `finalizeRun`**, so an imported run cannot reach the Cat III export (409 while RUNNING).
+`ExpectedResultsValidator` has therefore still never graded a document we produced.
 
 **Still open:** the authored cms122/125 subsets retire to the fidelity lab (locked decision #4,
 deliberately not in the flip's own PR — issue #377); the LIVE third-party WebChart path gets neither the
 `us-core-sex` nor the dual-stamp fix (both mapping sites sit upstream of the live FHIR transport;
-`normalizeWebChartBundle` untouched by design); **QRDA Category III is 48 CVU+ findings from conformant**;
-and the **CVU+ LOOP** — import → evaluate → export → green, including the Calculation Check path — remains
-the verification bar and has **not** been run. CVU+ itself has now run against the export (2026-08-02),
-which is the export leg of that loop and not the loop.
+`normalizeWebChartBundle` untouched by design); the **two QRDA-import defects above are diagnosed and NOT
+fixed**; a real C2 submission needs the finalize route AND identity resolution in the product path; and the
+**CVU+ LOOP** remains the verification bar.
 
 ---
 
