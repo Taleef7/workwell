@@ -1,0 +1,19 @@
+{
+  "subjectLabel": "B Masectomy Procedure ONE Cancer Female",
+  "resources": [
+    {
+      "resourceType": "Procedure",
+      "id": "probe-mastectomy-right",
+      "status": "completed",
+      "code": { "coding": [{ "system": "http://snomed.info/sct", "code": "429400009" }] },
+      "performedPeriod": { "start": "2023-02-20T08:00:00Z", "end": "2023-02-20T08:15:00Z" }
+    },
+    {
+      "resourceType": "Procedure",
+      "id": "probe-mastectomy-left",
+      "status": "completed",
+      "code": { "coding": [{ "system": "http://snomed.info/sct", "code": "428571003" }] },
+      "performedPeriod": { "start": "2023-02-20T08:00:00Z", "end": "2023-02-20T08:15:00Z" }
+    }
+  ]
+}

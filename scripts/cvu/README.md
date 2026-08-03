@@ -254,3 +254,96 @@ file name, validator, and message; preserve those fields and the HTTP status as 
 successful HTTP response is not by itself a pass claim: report the returned error and warning counts,
 rule identifiers, locations, and messages. The upload route is structural/CDA/Schematron validation;
 it is not the separate Product/ProductTest Calculation Check.
+
+## The Calculation Check (C2) comparison
+
+This is the second of the two paths above — the Product/ProductTest one — run **offline against the
+downloaded archive** rather than through a Cypress upload. It measures what `ExpectedResultsValidator`
+grades (our population counts against Cypress's precalculated ones) without first needing a run-finalize
+route or a QRDA III submission. Results and the full method are in
+`docs/evidence/CVU_CALCULATION_CHECK_SPIKE_2026-08-02.md` Part 3.
+
+### Prerequisite: a measure bundle, which is NLM-gated
+
+Cypress cannot create a Product without one, and `cypressdemo.healthit.gov/measure_bundles/bundle-<year>.zip`
+returns 401 unauthenticated. It is licensed NLM content in its entirety, so it must be downloaded **on the
+machine running Cypress, by the owner, with the owner's UMLS/NLM key** — routing it through a CI artifact
+would be redistribution. Import it through the admin Bundles page (`BundleUploadJob`); there is no import
+rake task. `bundle-2025.zip` is ~28 MB and imports as 70 measures / 714 patients.
+
+Its measurement period is **CY2024** even though it self-describes as the 2026 performance period. Read
+`measure_period_start` / `effective_date` off the bundle rather than assuming a year.
+
+### Build the oracle (Cypress side)
+
+The four Ruby scripts in `c2/` run inside the Cypress container with
+`bundle exec rails runner /tmp/<script>.rb`:
+
+| script | what it does |
+|---|---|
+| `rebuild.rb` | tears the Product down **including its `CQM::IndividualResult`s**, recreates it, and waits for `ProductTestSetupJob` |
+| `snapshot.rb` | the full oracle: patients, results, archive composition, expected populations, measurement period |
+| `per-patient.rb` | per-patient expected populations, keyed by MBI, for a subject-level comparison — **run it against the same rebuild the archive came from**, because Cypress regenerates the MBI on every setup run (measured: joining pass A's documents to pass B's rows matched 4 of 64) |
+| `copy-archives.rb` | copies each test's `patient_archive` to `/tmp` for `docker cp` |
+
+Three setup traps, each of which fails silently — all three are handled by `rebuild.rb`, and the third is
+why teardown deletes results explicitly:
+
+1. Pre-setting `measure_ids` on the Product creates **zero** tests (`add_measure_tests` builds one per
+   `new_ids - old_ids`), and the Product still saves reporting `tests=0`.
+2. `/app/public/data` is root-owned while the app runs as uid 1001, so `archive_patients` fails **after**
+   generating and evaluating patients — the test shows `errored` while the job log says `COMPLETED`.
+3. Re-running `ProductTestSetupJob` deletes Patients but **not** `IndividualResult`s, and
+   `ExpectedResultsCalculator` aggregates every result carrying the test's `correlation_id`. One re-run
+   doubles every expected population. Used as an oracle, that makes a correct engine look ~50% wrong.
+
+**Run setup exactly once.** `MeasureTest`'s `after_create` already enqueues the job, so calling
+`perform_now` as well runs it twice.
+
+What is stable across rebuilds: patients, `IndividualResult` count, expected populations, supplemental
+data. What is **not**, by design: the archive document count. `archive_patients` splits one patient across
+two documents and appends `rand(1..3)` augmented duplicates from a fresh per-test `rand_seed`.
+
+### Run the comparison (WorkWell side)
+
+```powershell
+corepack pnpm --dir backend-ts exec tsx ../scripts/cvu/c2-calculation-check.ts `
+  --docs ../cvu-workdir/c2/passB/CMS122v14 --measure cms122 `
+  --expected ../cvu-workdir/c2/passB/snapshot.json --expected-key CMS122v14 `
+  --per-patient ../cvu-workdir/c2/passB/per-patient.json --per-patient-key CMS122v14 `
+  --period-start 2024-01-01 --period-end 2024-12-31 --also-rolling
+```
+
+Paths are resolved from `backend-ts/`, so prefix repository paths with `../`. `--period-start/--period-end`
+are required on purpose: the runtime's `officialMeasurementPeriod` is a ROLLING window (ADR-039) and
+Cypress's expected results are computed over the bundle's own calendar period. `--also-rolling` re-runs the
+same subjects on the rolling window and reports how many subjects move, so the difference is measured
+rather than assumed (measured 2026-08-03: zero).
+
+**Documents are not people.** The harness resolves identity by Medicare Beneficiary Identifier
+(`2.16.840.1.113883.4.927`), which survives both archive transforms, falling back to name+birth for the
+patients Cypress ships without one — and merges each person's documents into one bundle. Comparing
+document counts to expected patient counts fails C2 on arithmetic before any logic is involved. Nothing in
+the product path does this today.
+
+### Proving a cause instead of correlating one
+
+`--inject <file.json>` adds FHIR resources to one named subject and prints its populations before and
+after, which turns "the datatype we drop is why the exclusion is missed" into an experiment. The file is
+`{ "subjectLabel": "...", "resources": [ ... ] }`; `scripts/cvu/c2/inject-assessment.json` and
+`inject-mastectomy.json` are the two used in Part 3 of the evidence. Each is n=1 subject: it establishes
+the mechanism, not that the mechanism explains every differing subject.
+
+### What the harness checks about ITSELF
+
+A wrong harness reports a plausible number rather than an error, so three self-checks are in the report
+rather than in a reviewer's head: the **people resolved** are compared against the oracle's own patient
+count (the direct detector for an over-merge, an under-merge, or a person lost to an import failure); the
+**per-patient rows** are summed against the aggregate (which is exactly what setup contamination breaks);
+and every **demographic disagreement inside a merged person** is listed. That last one is reported and not
+resolved on purpose: which document's Patient wins is arbitrary, both artifacts gate the initial population
+on `AgeInYearsAt(...)`, and Cypress randomises the duplicate's birthdate about 1 time in 21 — so a silent
+pick can print MATCH while discarding a birthdate that would have changed the answer.
+
+This is still not a Calculation Check RESULT: `ExpectedResultsValidator` has never graded a document we
+produced. Do not report the harness output as a Cypress pass.
