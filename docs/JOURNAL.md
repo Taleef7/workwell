@@ -58,6 +58,13 @@ the SNOMED translation the exclusion value set actually contains; adding those t
 same way. **This says nothing bad about the artifacts or the executor** — given the data, the official
 artifact computes Cypress's answer both times. The gap is between the document and the engine.
 
+**Codex added two more, both the same silent-skip class and both fixed:** the comparison covers
+`PopulationSet_1` only — CMS125's two strata carry their own expected results and a C2 submission is
+graded on all of them, so the report now names the uncompared sets above the table (the executor package
+surfaces only `detailedResults[0]`, so reading fqm's stratifier results is a production change and out of
+scope); and an unknown `--per-patient-key` returned `undefined`, which skipped the per-subject comparison
+AND the oracle self-check while still printing a plausible aggregate table and exiting 0. It refuses now.
+
 **Review of this branch found two defects in the HARNESS, both fixed and both recorded** — its output is
 quoted as evidence, so "the instrument was wrong in a way that produced a plausible number" is exactly the
 failure this work is about. The merge picked one document's demographics by **filename sort order**, and

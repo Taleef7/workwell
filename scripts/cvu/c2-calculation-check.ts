@@ -396,7 +396,23 @@ export async function main(argv: readonly string[]): Promise<number> {
   for (const [cypressKey, fqmKey] of POPULATION_KEYS) reported[cypressKey] = countTrue(primary.membership, fqmKey);
 
   const expected = readExpected(args);
+  const uncompared = uncomparedSets(args);
   out.push("", "## Populations", "");
+  if (uncompared.length > 0) {
+    // A stratified measure can agree on the unstratified set and disagree WITHIN a stratum, and a C2
+    // submission is graded on every set. fqm reports stratifier results, but the official-executor
+    // package does not surface them (`detailedResults[0]` only), so this harness cannot compare them —
+    // and a table that showed only `PopulationSet_1` while calling itself the C2 comparison would read
+    // as a clean result over a partial one (Codex, #387).
+    out.push(
+      `> **PARTIAL: this compares \`PopulationSet_1\` only.** The oracle also carries ` +
+        uncompared.map((u) => `\`${u.name}\` (${JSON.stringify(u.counts)})`).join(", ") +
+        `, which a real C2 submission is graded on. The executor package does not surface fqm's ` +
+        `stratifier results, so they are NOT checked here — do not read the table below as the ` +
+        `complete comparison.`,
+      "",
+    );
+  }
   out.push("| population | expected (Cypress) | reported (WorkWell) | |", "|---|---|---|---|");
   for (const [cypressKey] of POPULATION_KEYS) {
     const e = expected?.[cypressKey];
@@ -520,10 +536,37 @@ function readOracle(args: Args): { patients?: number } | undefined {
   return key ? raw.tests?.[key] : undefined;
 }
 
-/** Cypress's per-patient populations, keyed by MBI (or a `dem:`-prefixed demographic fallback). */
-function readPerPatient(args: Args): Record<string, Record<string, number>> | undefined {
+/**
+ * Cypress's per-patient populations, keyed by MBI (or a `dem:`-prefixed demographic fallback).
+ *
+ * REFUSES an unknown key rather than returning undefined. `--per-patient-key` exists to stop a silent
+ * comparison against the wrong test, and a typo or a stale CMS version number would otherwise skip the
+ * per-subject comparison AND the oracle-sum self-check while the command still printed a plausible
+ * aggregate table and exited 0 (Codex, #387).
+ */
+function readPerPatient(args: Args): Record<string, Record<string, number>> {
   const raw = JSON.parse(readFileSync(args.perPatient!, "utf8")) as Record<string, Record<string, Record<string, number>>>;
-  return raw[args.perPatientKey!];
+  const rows = raw[args.perPatientKey!];
+  if (!rows) {
+    throw new Error(
+      `--per-patient-key '${args.perPatientKey}' is not in ${args.perPatient} ` +
+        `(it holds: ${Object.keys(raw).join(", ")})`,
+    );
+  }
+  return rows;
+}
+
+/** Every expected population set this harness does NOT compare — named, never silently dropped. */
+function uncomparedSets(args: Args): Array<{ name: string; counts: Record<string, number> }> {
+  if (!args.expected) return [];
+  const raw = JSON.parse(readFileSync(args.expected, "utf8")) as {
+    tests?: Record<string, { expected?: Record<string, Record<string, number>> }>;
+  };
+  const key = args.expectedKey ?? Object.keys(raw.tests ?? {})[0];
+  const sets = key ? raw.tests?.[key]?.expected : undefined;
+  return Object.entries(sets ?? {})
+    .filter(([name]) => name !== "PopulationSet_1")
+    .map(([name, counts]) => ({ name, counts }));
 }
 
 function readExpected(args: Args): Record<string, number> | undefined {

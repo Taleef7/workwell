@@ -346,6 +346,14 @@ artifacts, CY2024:
 | NUMER | 31 | 54 | 2 | **2 MATCH** |
 | DENEX | 32 | 9 | 47 | 19 |
 
+**This compares `PopulationSet_1` only, and CMS125 has two more.** Its expected results also carry
+`PopulationSet_1_Stratification_1` (IPP 28, DENEX 2) and `_Stratification_2` (IPP 122, DENEX 45), and a
+real C2 submission is graded on every set — a measure can agree on the unstratified totals and disagree
+inside a stratum. fqm computes stratifier results, but `packages/official-executor` surfaces only
+`detailedResults[0]`, so this harness cannot read them; extending it is a production change and outside
+this spike. The report now prints the uncompared sets and their expected counts above the table, so it
+cannot be read as the complete comparison (Codex, #387).
+
 Per subject, against Cypress's own per-patient `IndividualResult`s (`scripts/cvu/c2/per-patient.rb`):
 
 - **CMS122: 41 of 64 subjects agree on every population.** All 23 differences are `DENEX: cypress=1
