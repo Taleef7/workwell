@@ -11,7 +11,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 import { buildQrda1Document } from "./qrda1-export.ts";
-import { importQrda1Document, Qrda1ImportError } from "./qrda1-import.ts";
+import { importQrda1Document, Qrda1ImportError, SYSTEM_FOR_OID } from "./qrda1-import.ts";
 import { parseXml, decodeEntities, child, descendants, hasTemplate } from "./cda-parse.ts";
 import type { RunRecord } from "../stores/run-store.ts";
 import type { OutcomeRecord } from "../stores/outcome-store.ts";
@@ -238,20 +238,25 @@ test("import REFUSES our own no-bundle export, which is the non-conformant state
 test("import REFUSES a document whose every entry is a datatype we cannot translate", () => {
   // Same Patient-only outcome, different cause — and the message says which, because "we dropped
   // everything" and "there was nothing" call for different operator responses.
-  const onlyMedication = `<?xml version="1.0" encoding="UTF-8"?>
+  // Patient Characteristic Payer, deliberately: it is supplemental data, it appears in EVERY Cypress
+  // document, and it is genuinely untranslated. This fixture used a bare Medication, Active until #387
+  // taught the importer to read that datatype — at which point the test still passed, for the wrong
+  // reason (an entry carrying no drug code), while its name claimed something no longer true.
+  const onlyPayer = `<?xml version="1.0" encoding="UTF-8"?>
 <ClinicalDocument xmlns="urn:hl7-org:v3">
   <recordTarget><patientRole><id root="urn:workwell:employee" extension="emp-006"/></patientRole></recordTarget>
   <component><structuredBody><component><section>
     <templateId root="2.16.840.1.113883.10.20.24.2.1" extension="2021-08-01"/>
     <entry typeCode="DRIV">
-      <substanceAdministration classCode="SBADM" moodCode="EVN">
-        <templateId root="2.16.840.1.113883.10.20.24.3.41" extension="2021-08-01"/>
-      </substanceAdministration>
+      <observation classCode="OBS" moodCode="EVN">
+        <templateId root="2.16.840.1.113883.10.20.24.3.55"/>
+        <code code="48768-6" codeSystem="2.16.840.1.113883.6.1"/>
+      </observation>
     </entry>
   </section></component></structuredBody></component>
 </ClinicalDocument>`;
-  assert.throws(() => importQrda1Document(onlyMedication), /no entry this importer can translate/);
-  assert.throws(() => importQrda1Document(onlyMedication), /2\.16\.840\.1\.113883\.10\.20\.24\.3\.41/);
+  assert.throws(() => importQrda1Document(onlyPayer), /no entry this importer can translate/);
+  assert.throws(() => importQrda1Document(onlyPayer), /2\.16\.840\.1\.113883\.10\.20\.24\.3\.55/);
 });
 
 test("import applies an HL7 TIMEZONE OFFSET rather than discarding it (Codex, #362)", () => {
@@ -295,16 +300,21 @@ test("import keeps an Observation INTERVAL as a period, not an instant (Codex, #
 test("import NAMES an untranslated QDM datatype rather than counting it", () => {
   // An operator needs to know WHICH datatype was dropped to judge whether the recalculation can be
   // trusted; a bare count reads as "a few things we don't support".
-  const withMedication = buildQrda1Document(run, "cms125", outcome(officialEvidence), sourceBundle).replace(
+  // Patient Characteristic Payer, deliberately: supplemental data, present in every Cypress document,
+  // and genuinely untranslated. This used a bare Medication, Active until #387 taught the importer to
+  // read that datatype — at which point the test still passed for the wrong reason (an entry with no
+  // drug code) while claiming something no longer true.
+  const withPayer = buildQrda1Document(run, "cms125", outcome(officialEvidence), sourceBundle).replace(
     "</section>\n      </component>\n    </structuredBody>",
-    `<entry typeCode="DRIV"><substanceAdministration classCode="SBADM" moodCode="EVN">
-       <templateId root="2.16.840.1.113883.10.20.24.3.41" extension="2021-08-01"/>
-     </substanceAdministration></entry></section>
+    `<entry typeCode="DRIV"><observation classCode="OBS" moodCode="EVN">
+       <templateId root="2.16.840.1.113883.10.20.24.3.55"/>
+       <code code="48768-6" codeSystem="2.16.840.1.113883.6.1"/>
+     </observation></entry></section>
       </component>
     </structuredBody>`,
   );
-  const imported = importQrda1Document(withMedication);
-  assert.deepEqual(imported.untranslatedTemplates, ["2.16.840.1.113883.10.20.24.3.41"], "Medication, Active — named");
+  const imported = importQrda1Document(withPayer);
+  assert.deepEqual(imported.untranslatedTemplates, ["2.16.840.1.113883.10.20.24.3.55"], "Patient Characteristic Payer — named");
 });
 
 test("the exported patient identity is the OUTCOME's subjectId, not the bundle's Patient.id", () => {
@@ -439,4 +449,386 @@ test("import: an out-of-range date does not become a FHIR field (review, #362)",
 </ClinicalDocument>`;
   const patient = importQrda1Document(withZeroDate).bundle.entry[0]!.resource as { birthDate?: string };
   assert.equal(patient.birthDate, undefined, "an impossible date is absent, not passed through");
+});
+
+// ---------------------------------------------------------------------------------------------------
+// The datatypes the EXCLUSION logic reads (#387 measurement, ADR pending)
+//
+// None of these has an export counterpart, so the round trip above cannot reach them: our own evaluated
+// bundles never carry frailty, hospice or palliative data. The fixture below is therefore modelled on
+// Cypress's OWN generated documents — the element nesting, the `sdtc:` prefix and the attribute order
+// are copied from `bundle-2025`'s CMS122 archive rather than invented, because every one of those
+// details is a place this importer previously lost data.
+//
+// What each target resource IS was read off the official artifacts' ELM retrieves, not off a QDM
+// mapping table: Intervention Performed → Procedure, Intervention Order → ServiceRequest, Device Order
+// → DeviceRequest, Medication Active → MedicationRequest, Symptom + Assessment → Observation.
+// ---------------------------------------------------------------------------------------------------
+
+const exclusionDocument = `<?xml version="1.0" encoding="UTF-8"?>
+<ClinicalDocument xmlns="urn:hl7-org:v3" xmlns:sdtc="urn:hl7-org:sdtc">
+  <recordTarget><patientRole>
+    <id extension="cypress-mrn-1" root="1.3.6.1.4.1.115"/>
+    <patient>
+      <name><given>TWO</given><family>Advanced Illness</family></name>
+      <administrativeGenderCode nullFlavor="OTH"><translation code="248152002" codeSystem="2.16.840.1.113883.6.96"/></administrativeGenderCode>
+      <birthTime value='19501224203000'/>
+    </patient>
+  </patientRole></recordTarget>
+  <component><structuredBody><component><section>
+    <templateId root="2.16.840.1.113883.10.20.24.2.1" extension="2021-08-01"/>
+
+    <entry><observation classCode="OBS" moodCode="EVN">
+      <templateId root="2.16.840.1.113883.10.20.24.3.144" extension="2021-08-01"/>
+      <id root="1.3.6.1.4.1.115" extension="assess-1"/>
+      <code code="71802-3" codeSystem="2.16.840.1.113883.6.1" codeSystemName="LOINC"/>
+      <statusCode code="completed"/>
+      <effectiveTime value='20240523081000'/>
+      <value xsi:type="CD" code="160734000" codeSystem="2.16.840.1.113883.6.96"/>
+      <author><templateId root="2.16.840.1.113883.10.20.24.3.155" extension="2019-12-01"/><time value='20240523081000'/></author>
+    </observation></entry>
+
+    <entry><act classCode="ACT" moodCode="EVN">
+      <templateId root="2.16.840.1.113883.10.20.24.3.138" extension="2021-08-01"/>
+      <entryRelationship typeCode="SUBJ"><observation classCode="OBS" moodCode="EVN">
+        <templateId root="2.16.840.1.113883.10.20.24.3.136" extension="2021-08-01"/>
+        <id root="1.3.6.1.4.1.115" extension="symptom-1"/>
+        <code code="75325-1" codeSystem="2.16.840.1.113883.6.1"><translation code="418799008" codeSystem="2.16.840.1.113883.6.96"/></code>
+        <statusCode code="completed"/>
+        <effectiveTime><low value='20221028080000'/><high value='20240101080000'/></effectiveTime>
+        <value xsi:type="CD" code="102492002" codeSystem="2.16.840.1.113883.6.96"><translation code="R63.6" codeSystem="2.16.840.1.113883.6.90"/></value>
+      </observation></entryRelationship>
+    </act></entry>
+
+    <entry><act classCode="ACT" moodCode="EVN">
+      <templateId root="2.16.840.1.113883.10.20.24.3.32" extension="2021-08-01"/>
+      <id root="1.3.6.1.4.1.115" extension="intervention-1"/>
+      <code code="103735009" codeSystem="2.16.840.1.113883.6.96"/>
+      <statusCode code="completed"/>
+      <effectiveTime value='20240602081000'/>
+    </act></entry>
+
+    <entry><act classCode="ACT" moodCode="RQO">
+      <templateId root="2.16.840.1.113883.10.20.24.3.31" extension="2021-08-01"/>
+      <id root="1.3.6.1.4.1.115" extension="order-1"/>
+      <code code="386464006" codeSystem="2.16.840.1.113883.6.96"><translation code="S9449" codeSystem="2.16.840.1.113883.6.285"/></code>
+      <statusCode code="active"/>
+      <author><templateId root="2.16.840.1.113883.10.20.24.3.155" extension="2019-12-01"/><time value='20240314083000'/></author>
+    </act></entry>
+
+    <entry><act classCode="ACT" moodCode="RQO">
+      <templateId root="2.16.840.1.113883.10.20.24.3.130" extension="2021-08-01"/>
+      <code code="SPLY" codeSystem="2.16.840.1.113883.5.6" displayName="Supply"/>
+      <entryRelationship typeCode="SUBJ"><supply classCode="SPLY" moodCode="RQO">
+        <templateId root="2.16.840.1.113883.10.20.24.3.9" extension="2021-08-01"/>
+        <id root="1.3.6.1.4.1.115" extension="device-1"/>
+        <statusCode code="active"/>
+        <author><templateId root="2.16.840.1.113883.10.20.24.3.155" extension="2019-12-01"/><time value='20240620081500'/></author>
+        <participant typeCode="DEV"><participantRole classCode="MANU"><playingDevice classCode="DEV">
+          <code code="360006004" codeSystem="2.16.840.1.113883.6.96"/>
+        </playingDevice></participantRole></participant>
+      </supply></entryRelationship>
+    </act></entry>
+
+    <entry><substanceAdministration classCode="SBADM" moodCode="EVN">
+      <templateId root="2.16.840.1.113883.10.20.24.3.41" extension="2021-08-01"/>
+      <id root="1.3.6.1.4.1.115" extension="med-1"/>
+      <statusCode code="active"/>
+      <effectiveTime xsi:type="IVL_TS"><low value='20230820080000'/><high nullFlavor='UNK'/></effectiveTime>
+      <consumable><manufacturedProduct classCode="MANU">
+        <manufacturedMaterial><code code="1100184" codeSystem="2.16.840.1.113883.6.88" codeSystemName="RXNORM"/></manufacturedMaterial>
+      </manufacturedProduct></consumable>
+    </substanceAdministration></entry>
+
+    <entry><encounter classCode="ENC" moodCode="EVN">
+      <templateId extension="2021-08-01" root="2.16.840.1.113883.10.20.24.3.23"/>
+      <id extension="enc-inpatient" root="1.3.6.1.4.1.115"/>
+      <code code="32485007" codeSystem="2.16.840.1.113883.6.96"/>
+      <statusCode code="completed"/>
+      <effectiveTime><low value='20240813080000'/><high value='20240825081500'/></effectiveTime>
+      <sdtc:dischargeDispositionCode code="428371000124100" codeSystem="2.16.840.1.113883.6.96"/>
+    </encounter></entry>
+
+    <entry><procedure classCode="PROC" moodCode="EVN">
+      <templateId root="2.16.840.1.113883.10.20.24.3.64" extension="2021-08-01"/>
+      <id root="1.3.6.1.4.1.115" extension="proc-icd10pcs"/>
+      <code code="0HTT0ZZ" codeSystem="2.16.840.1.113883.6.4" codeSystemName="ICD10PCS">
+        <translation code="429400009" codeSystem="2.16.840.1.113883.6.96" codeSystemName="SNOMEDCT"/>
+      </code>
+      <statusCode code="completed"/>
+      <effectiveTime><low value='20230220080000'/><high value='20230220081500'/></effectiveTime>
+    </procedure></entry>
+
+  </section></component></structuredBody></component>
+</ClinicalDocument>`;
+
+const exclusionResources = () => {
+  const imported = importQrda1Document(exclusionDocument);
+  const of = (type: string) =>
+    imported.bundle.entry.map((e) => e.resource as Record<string, any>).filter((r) => r.resourceType === type);
+  return { imported, of };
+};
+
+test("import: Assessment, Performed is an Observation whose CODE is the instrument and VALUE the result", () => {
+  const { of } = exclusionResources();
+  const assessment = of("Observation").find((o) => o.code?.coding?.[0]?.code === "71802-3");
+  assert.ok(assessment, "the assessment must survive — it is a long-term-care exclusion input");
+  assert.equal(assessment!.category?.[0]?.coding?.[0]?.code, "survey", "QI-Core screening-assessment");
+  assert.equal(assessment!.valueCodeableConcept?.coding?.[0]?.code, "160734000", "the RESULT is the value");
+  assert.equal(assessment!.effectiveDateTime, "2024-05-23T08:10:00Z");
+});
+
+test("import: a Symptom INVERTS code and value — the symptom itself must land in Observation.code", () => {
+  // `[Observation: "Frailty Symptom"]` filters on `Observation.code`. The element's own `<code>` says
+  // only "this entry is a symptom" (LOINC 75325-1); the `<value>` carries the symptom. Put them the
+  // other way round and the retrieve matches nothing while the bundle looks complete.
+  const { of } = exclusionResources();
+  const symptom = of("Observation").find((o) => o.id === "symptom-1");
+  assert.ok(symptom);
+  assert.equal(symptom!.code?.coding?.[0]?.code, "102492002", "the SYMPTOM is the code");
+  assert.notEqual(symptom!.code?.coding?.[0]?.code, "75325-1", "not the 'this is a symptom' marker");
+  assert.equal(symptom!.valueCodeableConcept, undefined, "and it must not sit in value, where nothing reads it");
+  assert.deepEqual(symptom!.effectivePeriod, { start: "2022-10-28T08:00:00Z", end: "2024-01-01T08:00:00Z" });
+});
+
+test("import: Intervention Performed → Procedure, Intervention Order → ServiceRequest with authoredOn", () => {
+  const { of } = exclusionResources();
+  const intervention = of("Procedure").find((p) => p.id === "intervention-1");
+  assert.ok(intervention, "Intervention, Performed IS a Procedure to the official artifacts");
+  assert.equal(intervention!.code?.coding?.[0]?.code, "103735009");
+  assert.equal(intervention!.performedDateTime, "2024-06-02T08:10:00Z");
+
+  const [order] = of("ServiceRequest");
+  assert.ok(order);
+  assert.equal(order!.code?.coding?.[0]?.code, "386464006");
+  // The exclusion libraries read `authoredOn` and it lives in `<author><time>`, not effectiveTime — an
+  // order imported without it retrieves by code and then fails every temporal predicate.
+  assert.equal(order!.authoredOn, "2024-03-14T08:30:00Z");
+  assert.equal(order!.intent, "order");
+});
+
+test("import: a Device Order is coded from the playingDevice, the only place the device appears", () => {
+  // The `<supply>` carries the template but no code of its own, and the only `<code>` up the tree is the
+  // enclosing act's ActClass literal "SPLY" — so walking up yields a DeviceRequest coded "Supply", which
+  // matches no value set and is indistinguishable from a device the patient does not have.
+  //
+  // Asserting `!= "SPLY"` would look like it forbids that and cannot fail, because a mapper that read
+  // the supply's own code would find nothing and drop the resource. So the load-bearing assertions are
+  // that the resource EXISTS and carries the device code; mutation-checked — reading anything but the
+  // playingDevice fails this test and the "nothing untranslated" one below.
+  const { of } = exclusionResources();
+  const [device] = of("DeviceRequest");
+  assert.ok(device, "a Device, Order must survive — it is a frailty exclusion input");
+  assert.equal(device!.codeCodeableConcept?.coding?.[0]?.code, "360006004");
+  assert.equal(device!.authoredOn, "2024-06-20T08:15:00Z");
+});
+
+test("import: Medication, Active takes the drug from manufacturedMaterial", () => {
+  const { of } = exclusionResources();
+  const [medication] = of("MedicationRequest");
+  assert.ok(medication);
+  assert.equal(medication!.medicationCodeableConcept?.coding?.[0]?.code, "1100184");
+  assert.equal(medication!.medicationCodeableConcept?.coding?.[0]?.system, "http://www.nlm.nih.gov/research/umls/rxnorm");
+});
+
+test("import: an inpatient encounter keeps its DISCHARGE DISPOSITION", () => {
+  // `Encounter.hospitalization.dischargeDisposition` — an inpatient stay ending in "discharge to home
+  // for hospice care" is a denominator exclusion in both routed measures. Measured on Cypress's own
+  // patients, this single field was the last cause of divergence after the missing datatypes were
+  // mapped: 9 subjects in each measure. The element carries an `sdtc:` prefix.
+  const { of } = exclusionResources();
+  const encounter = of("Encounter").find((e) => e.id === "enc-inpatient");
+  assert.ok(encounter);
+  assert.equal(encounter!.hospitalization?.dischargeDisposition?.coding?.[0]?.code, "428371000124100");
+});
+
+test("import: a <translation> is an ADDITIONAL coding, and an unmapped primary code no longer discards the resource", () => {
+  // Measured: 4 of CMS125's 10 Procedure entries are coded in ICD-10-PCS, which was not in the system
+  // map — so `concept()` returned undefined and the caller dropped the whole Procedure, taking a
+  // mastectomy exclusion with it. Both halves are pinned: the system is now mapped, AND the SNOMED
+  // translation (the code the exclusion value set actually contains) rides along.
+  const { of } = exclusionResources();
+  const procedure = of("Procedure").find((p) => p.id === "proc-icd10pcs");
+  assert.ok(procedure, "an ICD-10-PCS-coded procedure must not vanish");
+  const codes = procedure!.code.coding.map((c: { code: string }) => c.code);
+  assert.deepEqual(codes, ["0HTT0ZZ", "429400009"], "primary first, translation second — both present");
+  assert.equal(procedure!.code.coding[1].system, "http://snomed.info/sct");
+});
+
+test("import: Patient.birthDate is a DATE, not a dateTime", () => {
+  // FHIR types it `date`; a QRDA `birthTime` is 14 digits. It changed no population when measured, but
+  // it is invalid FHIR that our own exporter would never produce.
+  const { imported } = exclusionResources();
+  const patient = imported.bundle.entry.map((e) => e.resource as Record<string, any>).find((r) => r.resourceType === "Patient")!;
+  assert.equal(patient.birthDate, "1950-12-24");
+});
+
+test("import: every exclusion datatype in a Cypress-shaped document translates — none is reported untranslated", () => {
+  const { imported } = exclusionResources();
+  assert.deepEqual(imported.untranslatedTemplates, [], "a dropped exclusion input is a wrong answer, not a gap");
+});
+
+test("import NAMES the DATATYPE template, not the nested attribute template inside it", () => {
+  // `untranslatedTemplates` used to report the LAST templateId found anywhere in the entry, and QDM
+  // nests attribute templates (Author dateTime, Rank) inside the element carrying the datatype — so it
+  // blamed Author dateTime for 31 of CMS122's entries. A diagnostic that names the wrong thing is worse
+  // than a count, because it sends the reader somewhere.
+  const withPayer = `<?xml version="1.0" encoding="UTF-8"?>
+<ClinicalDocument xmlns="urn:hl7-org:v3">
+  <recordTarget><patientRole><id root="1.3.6.1.4.1.115" extension="p1"/></patientRole></recordTarget>
+  <component><structuredBody><component><section>
+    <templateId root="2.16.840.1.113883.10.20.24.2.1" extension="2021-08-01"/>
+    <entry><observation classCode="OBS" moodCode="EVN">
+      <templateId root="2.16.840.1.113883.10.20.24.3.55"/>
+      <code code="48768-6" codeSystem="2.16.840.1.113883.6.1"/>
+      <value xsi:type="CD" code="1" codeSystem="2.16.840.1.113883.3.221.5"/>
+      <author><templateId root="2.16.840.1.113883.10.20.24.3.155" extension="2019-12-01"/><time value='20240101080000'/></author>
+    </observation></entry>
+    <entry><procedure classCode="PROC" moodCode="EVN">
+      <templateId root="2.16.840.1.113883.10.20.24.3.64" extension="2021-08-01"/>
+      <code code="0HTT0ZZ" codeSystem="2.16.840.1.113883.6.4"/>
+      <effectiveTime value='20240220080000'/>
+    </procedure></entry>
+  </section></component></structuredBody></component>
+</ClinicalDocument>`;
+  const imported = importQrda1Document(withPayer);
+  assert.deepEqual(
+    imported.untranslatedTemplates,
+    ["2.16.840.1.113883.10.20.24.3.55"],
+    "Patient Characteristic Payer — the datatype, not the Author dateTime nested in it",
+  );
+});
+
+test("import: the status values are the ones Status.is* PREDICATES require, not decoration", () => {
+  // Every retrieve on an exclusion path is wrapped in a `Status.is*` predicate, and the margins are
+  // thin: `isMedicationActive` is an `Equal` on "active", so a plausible-looking edit to "completed"
+  // silently kills the dementia exclusion. Pinned against the predicate each one satisfies, because an
+  // earlier version of the source comment claimed these fields were NOT read (review, #388).
+  const { of } = exclusionResources();
+  assert.equal(of("MedicationRequest")[0]!.status, "active", "isMedicationActive: Equal status 'active'");
+  assert.equal(of("MedicationRequest")[0]!.intent, "order", "isMedicationActive: intent in {order, …}");
+  assert.equal(of("ServiceRequest")[0]!.intent, "order", "isInterventionOrder: intent = 'order'");
+  assert.equal(of("Encounter").find((e) => e.id === "enc-inpatient")!.status, "finished", "isEncounterPerformed");
+  assert.equal(of("Procedure").find((p) => p.id === "intervention-1")!.status, "completed", "isProcedurePerformed");
+  assert.equal(of("Observation").find((o) => o.id === "symptom-1")!.status, "final", "isSymptom: status in {…, final, …}");
+  assert.equal(
+    of("Observation").find((o) => o.code?.coding?.[0]?.code === "71802-3")!.status,
+    "final",
+    "isAssessmentPerformed: status in {final, amended, corrected}",
+  );
+});
+
+test("import: an order with no <author> falls back to its effectiveTime for authoredOn", () => {
+  // The fixture's Medication, Active has no `<author>` — exactly like Cypress's — and `authoredOn` is
+  // what `Has Dementia Medications` reads. Without the fallback the resource imports, retrieves by code,
+  // and then fails every temporal predicate: present in the bundle, invisible to the measure.
+  const { of } = exclusionResources();
+  assert.equal(of("MedicationRequest")[0]!.authoredOn, "2023-08-20T08:00:00Z", "from effectiveTime/low");
+});
+
+test("import: a NEGATED act is not imported as a positive fact", () => {
+  // `negationInd="true"` means the act did NOT happen. Importing it positively would manufacture a
+  // denominator exclusion from a record stating the opposite — silent, and it fabricates
+  // compliance-relevant data. Cypress carries none of these, so nothing but this test covers it.
+  const negated = exclusionDocument.replace(
+    '<act classCode="ACT" moodCode="EVN">\n      <templateId root="2.16.840.1.113883.10.20.24.3.32"',
+    '<act classCode="ACT" moodCode="EVN" negationInd="true">\n      <templateId root="2.16.840.1.113883.10.20.24.3.32"',
+  );
+  assert.notEqual(negated, exclusionDocument, "the fixture must actually have been negated");
+  const resources = importQrda1Document(negated).bundle.entry.map((e) => e.resource as Record<string, any>);
+  assert.equal(
+    resources.find((r) => r.id === "intervention-1"),
+    undefined,
+    "a negated Intervention, Performed must not become a Procedure",
+  );
+  assert.ok(
+    importQrda1Document(negated).untranslatedTemplates.includes("2.16.840.1.113883.10.20.24.3.32"),
+    "and it is reported rather than dropped in silence",
+  );
+});
+
+test("import: an UNMAPPED primary code system keeps the resource when a mapped <translation> is present", () => {
+  // The other half of "an unmappable primary code no longer discards the resource" — the ICD-10-PCS
+  // fixture above cannot test it, because that OID is now IN the map, so the discard branch is never
+  // reached. Mutation testing found this gap: reverting `concept()` to discard-on-unmapped left every
+  // test green (review, #388). CDT is a real code system we deliberately do not map.
+  const withUnmappedPrimary = exclusionDocument.replace(
+    '<code code="0HTT0ZZ" codeSystem="2.16.840.1.113883.6.4" codeSystemName="ICD10PCS">',
+    '<code code="D1110" codeSystem="2.16.840.1.113883.6.13" codeSystemName="CDT">',
+  );
+  assert.notEqual(withUnmappedPrimary, exclusionDocument);
+  const procedure = importQrda1Document(withUnmappedPrimary)
+    .bundle.entry.map((e) => e.resource as Record<string, any>)
+    .find((r) => r.id === "proc-icd10pcs");
+  assert.ok(procedure, "the resource survives on its translation alone");
+  assert.deepEqual(
+    procedure!.code.coding,
+    [{ system: "http://snomed.info/sct", code: "429400009", display: undefined }].map((c) => ({
+      system: c.system,
+      code: c.code,
+    })),
+    "and carries only the coding that resolved",
+  );
+});
+
+test("import: the untranslated diagnostic names the datatype even when a WRAPPER template precedes it", () => {
+  // `ATTRIBUTE_TEMPLATES` earns its keep only when a non-datatype QDM template appears BEFORE the
+  // datatype in document order — which is exactly what a Concern Act wrapper does. Without the set, the
+  // first QDM-looking root wins and the report blames the wrapper (review, #388).
+  const wrappedUnknown = `<?xml version="1.0" encoding="UTF-8"?>
+<ClinicalDocument xmlns="urn:hl7-org:v3">
+  <recordTarget><patientRole><id root="1.3.6.1.4.1.115" extension="p1"/></patientRole></recordTarget>
+  <component><structuredBody><component><section>
+    <templateId root="2.16.840.1.113883.10.20.24.2.1" extension="2021-08-01"/>
+    <entry><act classCode="ACT" moodCode="EVN">
+      <templateId root="2.16.840.1.113883.10.20.24.3.138" extension="2021-08-01"/>
+      <entryRelationship typeCode="SUBJ"><observation classCode="OBS" moodCode="EVN">
+        <templateId root="2.16.840.1.113883.10.20.24.3.55"/>
+        <code code="48768-6" codeSystem="2.16.840.1.113883.6.1"/>
+      </observation></entryRelationship>
+    </act></entry>
+    <entry><procedure classCode="PROC" moodCode="EVN">
+      <templateId root="2.16.840.1.113883.10.20.24.3.64" extension="2021-08-01"/>
+      <code code="0HTT0ZZ" codeSystem="2.16.840.1.113883.6.4"/>
+      <effectiveTime value='20240220080000'/>
+    </procedure></entry>
+  </section></component></structuredBody></component>
+</ClinicalDocument>`;
+  assert.deepEqual(
+    importQrda1Document(wrappedUnknown).untranslatedTemplates,
+    ["2.16.840.1.113883.10.20.24.3.55"],
+    "the datatype inside the Concern Act, not the Concern Act",
+  );
+});
+
+test("import: every code system we map is spelled the way the ARTIFACTS spell it", () => {
+  // `cql-execution` compares `system` by exact string equality, so a near-miss imports the resource and
+  // leaves it invisible to every retrieve — strictly worse than dropping it, because a drop at least
+  // appears in `untranslatedTemplates`. HCPCS was exactly that: `urn:oid:2.16.840.1.113883.6.285` where
+  // the expansions say the CMS URL, across 103 codes including Annual Wellness Visit and Hospice Care
+  // Ambulatory. It never surfaced as a divergence because the IPP is `exists(...)` and those patients
+  // carry other qualifying encounters — a right answer for the wrong reason (review, #388).
+  //
+  // The literals here are the structural half; `qrda1-import-official.test.ts` checks them against the
+  // vendored expansions themselves, which is the half that can catch a future re-vendor moving a URL.
+  assert.equal(SYSTEM_FOR_OID["2.16.840.1.113883.6.285"], "http://www.cms.gov/Medicare/Coding/HCPCSReleaseCodeSets");
+  assert.equal(SYSTEM_FOR_OID["2.16.840.1.113883.6.4"], "http://www.cms.gov/Medicare/Coding/ICD10");
+  assert.equal(SYSTEM_FOR_OID["2.16.840.1.113883.6.88"], "http://www.nlm.nih.gov/research/umls/rxnorm");
+  assert.equal(SYSTEM_FOR_OID["2.16.840.1.113883.6.96"], "http://snomed.info/sct");
+  assert.equal(SYSTEM_FOR_OID["2.16.840.1.113883.6.1"], "http://loinc.org");
+  assert.equal(SYSTEM_FOR_OID["2.16.840.1.113883.6.12"], "http://www.ama-assn.org/go/cpt");
+  assert.equal(SYSTEM_FOR_OID["2.16.840.1.113883.6.90"], "http://hl7.org/fhir/sid/icd-10-cm");
+});
+
+test("import: a birthTime with an OFFSET keeps its own calendar day, not the UTC one", () => {
+  // `Patient.birthDate` is a local calendar fact, not an instant. `isoFromHl7` normalizes to UTC, so
+  // truncating ITS output gives the wrong day near midnight: `20000101010000+1400` is
+  // `1999-12-31T11:00:00Z`. On a measure boundary that moves a patient between age bands, which is a
+  // population change from a formatting decision (Codex, #388).
+  const shifted = exclusionDocument.replace("<birthTime value='19501224203000'/>", "<birthTime value='20000101010000+1400'/>");
+  assert.notEqual(shifted, exclusionDocument);
+  const patient = importQrda1Document(shifted).bundle.entry
+    .map((e) => e.resource as Record<string, any>)
+    .find((r) => r.resourceType === "Patient")!;
+  assert.equal(patient.birthDate, "2000-01-01", "the day the document states, not the UTC-normalized one");
 });

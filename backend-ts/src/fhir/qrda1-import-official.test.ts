@@ -21,9 +21,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { buildQrda1Document } from "./qrda1-export.ts";
-import { importQrda1Document } from "./qrda1-import.ts";
+import { importQrda1Document, SYSTEM_FOR_OID } from "./qrda1-import.ts";
 import { officialMeasureExecutor } from "../wiring/official-executor-adapter.ts";
-import { officialTerminologyExpander } from "../wiring/official-terminology.ts";
+import { officialTerminologyExpander, loadOfficialTerminology } from "../wiring/official-terminology.ts";
 import { loadOfficialArtifact } from "../wiring/official-artifacts.ts";
 import { officialRoutingProblems } from "../wiring/executor-router.ts";
 import type { RunRecord } from "../stores/run-store.ts";
@@ -117,3 +117,50 @@ test("the imported Patient carries us-core-sex, not just gender", { skip: false 
   // indistinguishable from an absent extension — the mistake that cost ADR-042 a measurement pass.
   assert.equal(sex?.valueCode, "248152002");
 });
+
+test(
+  "every code system the ARTIFACTS use is spelled identically in the importer's map",
+  { skip },
+  () => {
+    // `cql-execution` compares `system` by exact string equality:
+    //
+    //     function codesMatch(code1, code2) { return code1.code === code2.code && code1.system === code2.system; }
+    //
+    // So a near-miss URL is worse than an absent one. An absent system drops the resource and says so in
+    // `untranslatedTemplates`; a wrong URL imports it and leaves it invisible to every retrieve, with no
+    // diagnostic anywhere. HCPCS was exactly that until #388 — `urn:oid:2.16.840.1.113883.6.285` against
+    // the expansions' `http://www.cms.gov/Medicare/Coding/HCPCSReleaseCodeSets`, across 103 codes
+    // including Annual Wellness Visit and Hospice Care Ambulatory — and the C2 comparison still read
+    // EXACT because the initial population is `exists(...)` and those patients carry other qualifying
+    // encounters. A right answer for the wrong reason.
+    //
+    // This is the half `qrda1-import.test.ts` cannot do: it pins literals, which stay true after a
+    // re-vendor moves a URL. This reads the vendored expansions themselves.
+    const mapped = new Set(Object.values(SYSTEM_FOR_OID));
+    const unmapped = new Map<string, number>();
+    for (const measure of ["cms122", "cms125"]) {
+      const artifact = loadOfficialArtifact(measure);
+      if (!artifact) continue;
+      const terminology = loadOfficialTerminology(artifact);
+      if (!terminology.ok) continue;
+      for (const codes of terminology.codesByOid.values()) {
+        for (const code of codes) {
+          if (code.system && !mapped.has(code.system)) {
+            unmapped.set(code.system, (unmapped.get(code.system) ?? 0) + 1);
+          }
+        }
+      }
+    }
+    // Supplemental-data vocabularies only: Source of Payment Typology (Patient Characteristic Payer) and
+    // CDCREC (race/ethnicity). Neither appears in a population criterion, and neither datatype is
+    // translated — so they are named here rather than mapped, and this list failing to shrink is the
+    // signal that a clinical system has appeared that we do not read.
+    const SUPPLEMENTAL_ONLY = new Set(["https://nahdo.org/sopt", "urn:oid:2.16.840.1.113883.6.238"]);
+    const clinical = [...unmapped.entries()].filter(([system]) => !SUPPLEMENTAL_ONLY.has(system));
+    assert.deepEqual(
+      clinical,
+      [],
+      `code systems in the artifacts' own expansions that the importer maps to nothing: ${JSON.stringify(clinical)}`,
+    );
+  },
+);
