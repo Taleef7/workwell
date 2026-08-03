@@ -33,6 +33,25 @@ inference — but reading a server's own `female` as not-female is *also* an inf
 because it is silent and it empties the measure. ADR-043 established that a whole roster out of the initial
 population is the hazard, not the safe answer.
 
+**The residual, which is the one thing a reader of the symmetry argument would not learn.** There IS an
+individual the old behaviour got right and this one gets wrong: a person whose administrative gender reads
+`female` while their recorded sex is male — a transgender man whose administrative field was never updated,
+or a plain data-entry error. Before, they had no extension, fell out of the initial population, and read
+MISSING_DATA. Now they enter the denominator, read OVERDUE, and `case-logic.ts` escalates to HIGH, sending
+"escalate mammogram follow-up immediately" to someone for whom it may be clinically inappropriate.
+
+That is still the right trade, and the reason is sharper than symmetry: **it converts a systematic,
+roster-wide, individually-invisible failure into a rare, individual, human-reviewable one.** A case that
+reaches an operator is recoverable; a roster silently reporting 100% MISSING_DATA is not. The
+`derived-from-gender` tag exists so that case can be told apart — and it currently has **no reader**:
+nothing in `evidence_json`, the case surfaces or the QRDA export distinguishes an asserted sex from a
+recorded one. "Tagged so a reader can tell" is true of the bytes, not yet of the system.
+
+**The `male` half of the allowlist is a deliberate choice, not a side effect of the table having two rows.**
+It buys nothing measured — for CMS125's initial population, absent and `248153007` are equally excluding —
+but the extension is not measure-scoped, so every derived male extension is an assertion a future official
+measure reading `us-core-sex` will consume. Kept for symmetry; recorded so the next measure's author knows.
+
 **Consequences.** `live-official-parity.test.ts` is the gate the skill's trap #4 said did not exist: it
 strips exactly those two elements from the committed fixture to reproduce the live shape, then pins that
 official CMS125 admits **4 of 56** with normalization and **0** without — so the test cannot pass on data
@@ -40,6 +59,21 @@ that never needed the fix. Every derivation also pins its negative (a non-final 
 Procedure, an unmapped gender, a server that already supplies the element). What remains untested is the
 live HTTP transport itself: this exercises every transformation a routed run applies to a WebChart payload
 and none of the request shaping, exactly as `devdb-official-eval.test.ts` says of itself.
+
+**Three limits found in review (#390) and left open rather than papered over.** The suppression check
+matches the one canonical LOINC `24606-6`, not the 92-member value set, so a server using one of the other
+91 gets a derived duplicate (widening it would mean reaching the official terminology sidecar from inside
+the engine, which the boundary forbids). Only **Procedure to Observation** is derived — a server recording
+mammography as a LOINC Observation and no CPT Procedure leaves the AUTHORED engine blind, which is a live
+configuration on staging today. And a live tenant's QRDA Category I now carries the screening as two QDM
+entries, since `qdm-entries.ts` routes the imaging Observation and the Procedure separately and `meta.tag`
+does not survive into CDA.
+
+**One defect this change introduced, caught in review before it shipped:** the mammography allowlist
+compared `system|code` exactly while the crosswalk fifty lines away normalizes system aliases and upcases
+the code. Measured on a CPT-as-OID mammogram — the commonest alternate form — the crosswalk recognised it
+and the authored engine read COMPLIANT while the derivation did not fire and official read OVERDUE. The
+derivation created the divergence it exists to remove. Both now go through one exported `codingKey`.
 
 ## ADR-056: A batch import and an import-driven finalize — the two routes the certification loop needed, and the guard that keeps finalize from being a "finish this run" button
 

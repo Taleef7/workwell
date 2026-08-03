@@ -13,7 +13,7 @@
  * builds new resource objects. Descriptive only (ADR-008).
  */
 import type { FhirBundle } from "../../synthetic/fhir-bundle-builder.ts";
-import { reconcileCodings, targetEventType, type Coding } from "./terminology.ts";
+import { codingKey, holderHasCoding, reconcileCodings, targetEventType, type Coding } from "./terminology.ts";
 import { ECQM_CANONICAL_CODES, MAMMOGRAPHY_PROCEDURE_CODES } from "../../cql/bundled-ecqm-expansions.ts";
 
 type Json = Record<string, unknown>;
@@ -141,7 +141,15 @@ function reconcileResource(resource: unknown): unknown[] {
 
 /** US Core sex, as the official CMS125 initial population reads it. */
 const US_CORE_SEX = "http://hl7.org/fhir/us/core/StructureDefinition/us-core-sex";
-const SEX_CONCEPT: Record<string, string> = { female: "248152002", male: "248153007" };
+/**
+ * `Object.create(null)`, not a literal: this is indexed by a string a third-party server sent, and a
+ * plain object would answer `SEX_CONCEPT["constructor"]` with a function — measured in review (#390) to
+ * emit a malformed `us-core-sex` extension for a gender the two-value allowlist supposedly rejects.
+ */
+const SEX_CONCEPT: Record<string, string> = Object.assign(Object.create(null), {
+  female: "248152002",
+  male: "248153007",
+});
 
 /**
  * Assert `us-core-sex` from `Patient.gender` when the server supplies one and not the other.
@@ -168,28 +176,42 @@ const SEX_CONCEPT: Record<string, string> = { female: "248152002", male: "248153
 function withUsCoreSex(patient: Json): Json {
   if (typeof patient.gender !== "string") return patient;
   const concept = SEX_CONCEPT[patient.gender];
-  if (!concept) return patient;
+  if (typeof concept !== "string") return patient;
   const existing = Array.isArray(patient.extension) ? patient.extension : [];
   if (existing.some((e) => isObject(e) && e.url === US_CORE_SEX)) return patient;
+  // `{ url, valueCode }` and nothing else. FHIR's ext-1 invariant is "must have either extensions or
+  // value[x], not both", so the nested provenance extension a first cut carried made every live tenant's
+  // Patient structurally invalid (review, #390) — in a repo whose conformance posture is CVU+ and whose
+  // last two QRDA rounds were about exactly this class. Provenance goes on `meta.tag`, which is where the
+  // mammography derivation below already puts it.
+  const tags = isObject(patient.meta) && Array.isArray(patient.meta.tag) ? patient.meta.tag : [];
   return {
     ...patient,
-    extension: [
-      ...existing,
-      {
-        url: US_CORE_SEX,
-        valueCode: concept,
-        extension: [{ url: "urn:workwell:webchart", valueCode: "derived-from-gender" }],
-      },
-    ],
+    extension: [...existing, { url: US_CORE_SEX, valueCode: concept }],
+    meta: { ...(isObject(patient.meta) ? patient.meta : {}), tag: [...tags, DERIVED_SEX_TAG] },
   };
 }
 
-const MAMMOGRAPHY_PROCEDURE_KEYS = new Set(MAMMOGRAPHY_PROCEDURE_CODES.map((c) => `${c.system}|${c.code}`));
-const MAMMOGRAM_OBSERVATION = ECQM_CANONICAL_CODES.mammogram;
+const DERIVED_SEX_TAG = { system: "urn:workwell:webchart", code: "derived-from-gender" };
 
-function hasCoding(holder: unknown, matches: (key: string) => boolean): boolean {
-  if (!isObject(holder) || !Array.isArray(holder.coding)) return false;
-  return holder.coding.some((c) => isObject(c) && typeof c.code === "string" && matches(`${c.system}|${c.code}`));
+// Through `codingKey`, NOT `${system}|${code}`. An exact match here disagreed with the crosswalk fifty
+// lines away, which normalizes system aliases and upcases the code: measured (#390) on a CPT-as-OID
+// mammogram, the crosswalk recognised it and the authored engine read COMPLIANT while this failed to
+// derive and official read OVERDUE — the divergence this derivation exists to remove.
+const MAMMOGRAPHY_PROCEDURE_KEYS = new Set(
+  MAMMOGRAPHY_PROCEDURE_CODES.map((c) => codingKey(c)).filter((k): k is string => k !== null),
+);
+const MAMMOGRAM_OBSERVATION = ECQM_CANONICAL_CODES.mammogram;
+const MAMMOGRAM_OBSERVATION_KEYS = new Set([codingKey(MAMMOGRAM_OBSERVATION)!]);
+
+/** `subject.reference` (or `subject.identifier.value`), so a multi-patient payload cannot cross-suppress. */
+function subjectKey(resource: Json): string {
+  const subject = resource.subject;
+  if (!isObject(subject)) return "";
+  if (typeof subject.reference === "string") return subject.reference;
+  const identifier = subject.identifier;
+  if (isObject(identifier) && typeof identifier.value === "string") return identifier.value;
+  return "";
 }
 
 /** `performed[x]` → the instant a derived Observation should carry. */
@@ -212,26 +234,37 @@ function procedurePerformed(procedure: Json): string | undefined {
  *
  * Normalization, not fabrication, on the same three tested properties as ADR-044: derived strictly from a
  * real Procedure (never minted), an explicit two-code allowlist rather than a category sweep, and
- * suppressed entirely when the server already supplies the LOINC Observation — so a server that records
- * both is untouched. Bundle-level rather than per-resource precisely so that check can see the whole
- * patient. Both numerators are `exists(...)`, so this cannot inflate either; for a COUNTING measure it
- * would, which is why the allowlist is two codes and not a category.
+ * suppressed when the subject already has an Observation carrying **LOINC 24606-6** — so a server that
+ * records both is untouched. That check is the one canonical code, not the whole 92-member Mammography
+ * value set: a server recording the screening under one of the other 91 would still get a derived
+ * duplicate. Harmless for `exists(...)` and stated rather than implied (review, #390); widening it would
+ * mean reaching the official terminology sidecar from inside the engine, which the boundary forbids.
+ *
+ * Both numerators are `exists(...)`, so this cannot inflate either; for a COUNTING measure it would,
+ * which is why the allowlist is two codes and not a category.
  */
 function withMammographyObservation(entries: Array<{ resource: unknown }>): Array<{ resource: unknown }> {
   const resources = entries.map((e) => e.resource).filter(isObject);
-  const alreadyObserved = resources.some(
-    (r) => r.resourceType === "Observation" && hasCoding(r.code, (k) => k === `${MAMMOGRAM_OBSERVATION.system}|${MAMMOGRAM_OBSERVATION.code}`),
+  // Per SUBJECT, not per bundle. WebChart's transport composes one patient per payload today
+  // (`httpWebChartClient.fetchPatient`), but this function is exported, advertises robustness to shape
+  // drift, and `extractResources` flattens arrays of bundles — so a bundle-wide check would let patient
+  // A's Observation suppress derivation for patient B, and two same-day mammograms across two patients
+  // collapse into one Observation carrying A's subject (review, #390).
+  const alreadyObserved = new Set(
+    resources
+      .filter((r) => r.resourceType === "Observation" && holderHasCoding(r.code, MAMMOGRAM_OBSERVATION_KEYS))
+      .map(subjectKey),
   );
-  if (alreadyObserved) return entries;
 
   const derived: Array<{ resource: unknown }> = [];
   const seen = new Set<string>();
   for (const resource of resources) {
     if (resource.resourceType !== "Procedure") continue;
     if (!isFinalEvent(resource)) continue;
-    if (!hasCoding(resource.code, (k) => MAMMOGRAPHY_PROCEDURE_KEYS.has(k))) continue;
+    if (!holderHasCoding(resource.code, MAMMOGRAPHY_PROCEDURE_KEYS)) continue;
+    if (alreadyObserved.has(subjectKey(resource))) continue;
     const when = procedurePerformed(resource);
-    const key = when ?? "undated";
+    const key = `${subjectKey(resource)}|${when ?? "undated"}`;
     if (seen.has(key)) continue;
     seen.add(key);
     derived.push({

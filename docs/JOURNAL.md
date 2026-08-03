@@ -33,6 +33,23 @@ mappers ADR-042/044 fixed, so the derivation never fires there. It also verifies
 both elements before stripping them — a guard on the guard — and pins every negative: a non-final
 Procedure, a non-mammogram Procedure, an unmapped gender, a server that already supplies the element.
 
+**Review caught this change CREATING the divergence it removes, on the commonest coding form.** The
+mammography allowlist compared `system|code` exactly while the crosswalk fifty lines away normalizes system
+aliases and upcases the code — so a CPT-as-OID mammogram reconciled to a cms125 event (authored read
+COMPLIANT) while the derivation did not fire (official read OVERDUE). Six of eight realistic codings. Both
+now go through one exported `codingKey`, with a matrix test pinning every alias. Also fixed: the derived
+extension violated FHIR's ext-1 (`value[x]` and `extension` together — provenance moved to `meta.tag`);
+`SEX_CONCEPT` was a plain object literal indexed by untrusted input, so `gender: "constructor"` asserted a
+malformed extension the "asserts NOTHING" test could not catch; the mammography suppression was bundle-wide
+rather than per-subject; and the 4-vs-0 negative arm compared "normalized vs not normalized at all", which
+is not attributable — it now normalizes and strips only the derived element.
+
+**And the mammography half had no end-to-end assertion at all** — every test checked the SHAPE of a
+resource, which is precisely what ADR-042 paid a measurement pass to learn is not enough. The fixture
+cannot close it either (its only mammogram belongs to wc-49, age 33, dated 2015). With one in-window
+screening injected into the four IPP subjects, official CMS125 now reads NUMERATOR for all four with the
+derivation and none without.
+
 **Still untested: the live HTTP transport itself.** This exercises every transformation a routed run
 applies to a WebChart payload and none of the request shaping, exactly as `devdb-official-eval.test.ts`
 says of itself. Suite 1850, 0 fail; the new file is wired into CI's sidecar-dependent `official-cases` job.

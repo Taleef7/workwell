@@ -175,6 +175,19 @@ A screening-mammogram procedure row emits **two** resources: the CPT/HCPCS `Proc
 > server recording both is untouched and nothing is double-stamped. Both numerators are `exists(...)`, so it
 > cannot inflate either; for a COUNTING measure it would, which is why the allowlist is two codes rather
 > than a category sweep.
+>
+> **Two limits, stated rather than implied.** (1) The suppression check matches the one canonical LOINC
+> `24606-6`, not the whole 92-member Mammography value set — a server recording the screening under one of
+> the other 91 still gets a derived duplicate. (2) Only **Procedure → Observation** is derived. A server
+> that records mammography as a LOINC `Observation` and no CPT `Procedure` leaves the **authored** engine
+> blind (the crosswalk has entries for 77067 and G0202 only), so authored `cms125` reads OVERDUE — and
+> staging carries eleven `WORKWELL_WEBCHART_*` vars with `WORKWELL_OFFICIAL_MEASURES` unset, which is
+> exactly that configuration. Still open.
+>
+> **And a live tenant's QRDA Category I now carries the screening twice** — `qdm-entries.ts` routes an
+> imaging `Observation` to "Diagnostic Study, Performed" and the `Procedure` to "Procedure, Performed",
+> and the `meta.tag` provenance does not survive into CDA. Harmless for the `exists(...)` numerators a
+> receiver recalculates, and worth knowing before anyone counts entries.
 
 **Why.** The two engines retrieve different resource types for the same clinical fact — authored
 `cms125.cql` reads `[Procedure: "Mammography"]` (CPT/HCPCS), official CMS125 reads

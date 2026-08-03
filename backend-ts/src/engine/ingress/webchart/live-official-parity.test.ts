@@ -47,6 +47,8 @@ const payloads = JSON.parse(readFileSync(path.join(DIR, "devdb-patients.json"), 
 const roster = parseEnrollmentRoster(JSON.parse(readFileSync(path.join(DIR, "enrollment-roster.json"), "utf8")));
 const EVAL = "2024-06-01";
 const US_CORE_SEX = "http://hl7.org/fhir/us/core/StructureDefinition/us-core-sex";
+/** The four subjects `devdb-official-eval.test.ts` finds actionable — the ones the IPP admits. */
+const CMS125_ACTIONABLE = ["wc-8", "wc-36", "wc-45", "wc-47"];
 
 const sidecarsPresent = ["cms125"].every((id) => {
   const artifact = loadOfficialArtifact(id);
@@ -97,12 +99,41 @@ async function officialInIpp(bundles: readonly unknown[]): Promise<number> {
 }
 
 /** The ingress path a routed run applies, over payloads shaped as a live server would send them. */
-function liveBundles(normalize: boolean): unknown[] {
-  const raw = asLiveServerWouldSend();
-  const bundles = normalize
-    ? raw.map((p) => normalizeWebChartBundle(p))
-    : raw.map((p) => ({ resourceType: "Bundle", type: "collection", entry: resourcesOf(p).map((resource) => ({ resource })) }));
-  return bundles.map((b) => stampEnrollment(b as never, "cms125", roster, { evaluationDate: EVAL }));
+function liveBundles(mutate: (bundle: unknown) => unknown = (b) => b): unknown[] {
+  return asLiveServerWouldSend()
+    .map((p) => normalizeWebChartBundle(p))
+    .map((b) => mutate(b))
+    .map((b) => stampEnrollment(b as never, "cms125", roster, { evaluationDate: EVAL }));
+}
+
+/**
+ * Undo ONE derivation after normalization, which is what makes the negative arm attributable.
+ *
+ * A first cut compared "normalized" against "not normalized at all" — which also disables terminology
+ * reconciliation and the Observation→Procedure synthesis, so the 0 could have come from anywhere and a
+ * future change that moved its cause would still read green (review, #390).
+ */
+function withoutDerived(kind: "sex" | "mammogram") {
+  return (bundle: unknown) => {
+    const b = clone(bundle) as { entry: Array<{ resource: Res }> };
+    if (kind === "sex") {
+      for (const { resource } of b.entry) {
+        if (resource.resourceType !== "Patient" || !Array.isArray(resource.extension)) continue;
+        const derived = ((resource.meta as { tag?: Array<{ code?: string }> })?.tag ?? []).some(
+          (t) => t.code === "derived-from-gender",
+        );
+        if (derived) resource.extension = (resource.extension as Res[]).filter((x) => x.url !== US_CORE_SEX);
+      }
+      return b;
+    }
+    b.entry = b.entry.filter(
+      (e) =>
+        !((e.resource.meta as { tag?: Array<{ code?: string }> })?.tag ?? []).some(
+          (t) => t.code === "derived-from-procedure",
+        ),
+    );
+    return b;
+  };
 }
 
 test("the fixture we strip really did carry both elements — otherwise this file proves nothing", () => {
@@ -137,9 +168,9 @@ test("us-core-sex is derived from gender, so a live roster is not silently empti
   // ADR-042 measured this exact failure on the fixture BEFORE the mappers were fixed: 0 of 56 carried the
   // extension and official CMS125 put every one of them out of the initial population. That fix never
   // reached the live transport.
-  const withNormalization = await officialInIpp(liveBundles(true));
-  const without = await officialInIpp(liveBundles(false));
-  assert.equal(without, 0, "the live shape alone empties the initial population — the failure this closes");
+  const withNormalization = await officialInIpp(liveBundles());
+  const without = await officialInIpp(liveBundles(withoutDerived("sex")));
+  assert.equal(without, 0, "removing ONLY the derived extension empties the initial population again");
   // The measured number, pinned: 4 of 56 — the same four `devdb-official-eval.test.ts` finds actionable
   // (wc-8, wc-36, wc-45, wc-47), reached from the LIVE shape rather than from our own SQL mapper's output.
   assert.equal(withNormalization, 4, "normalization must admit exactly the roster the fixture path admits");
@@ -155,17 +186,23 @@ test("the derived extension carries the SNOMED concept id, not the FHIR gender s
   const patient = (bundle.entry as Array<{ resource: Res }>)[0]!.resource;
   const extension = ((patient.extension as Res[]) ?? []).find((x) => x.url === US_CORE_SEX);
   assert.equal(extension?.valueCode, "248152002");
+  // `{ url, valueCode }` and NOTHING else: FHIR's ext-1 is "either extensions or value[x], not both", so
+  // provenance rides on `meta.tag` rather than inside the extension (review, #390).
+  assert.deepEqual(Object.keys(extension!).sort(), ["url", "valueCode"]);
   assert.deepEqual(
-    (extension?.extension as Res[])?.[0],
-    { url: "urn:workwell:webchart", valueCode: "derived-from-gender" },
-    "and it is tagged, so an asserted sex is distinguishable from a recorded one",
+    ((patient.meta as { tag: Res[] }).tag ?? []).at(-1),
+    { system: "urn:workwell:webchart", code: "derived-from-gender" },
+    "tagged, so an asserted sex is distinguishable from a recorded one",
   );
 });
 
 test("a gender the allowlist does not cover asserts NOTHING", () => {
   // There is no SNOMED concept to assert for `other`/`unknown`, and guessing is the thing this must not
   // do. Absent beats wrong: absent reads as MISSING_DATA, wrong reads as a confident answer.
-  for (const gender of ["other", "unknown", "", "FEMALE"]) {
+  // The prototype keys are the point: `SEX_CONCEPT` is indexed by a string a third-party server sent, and
+  // a plain object literal answers `["constructor"]` with a function — measured in review (#390) emitting
+  // a malformed extension for a gender this allowlist supposedly rejects.
+  for (const gender of ["other", "unknown", "", "FEMALE", "constructor", "__proto__", "toString", "hasOwnProperty"]) {
     const bundle = normalizeWebChartBundle({
       resourceType: "Bundle",
       entry: [{ resource: { resourceType: "Patient", id: "p1", gender } }],
@@ -293,4 +330,86 @@ test("a Procedure that is not a mammogram derives nothing — this is an allowli
     .map((e) => e.resource)
     .filter((r) => r.resourceType === "Observation");
   assert.equal(observations.length, 0);
+});
+
+test("the mammography allowlist matches every coding the CROSSWALK matches", () => {
+  // The two comparisons sat fifty lines apart and disagreed: the crosswalk normalizes system aliases and
+  // upcases the code, an exact `system|code` match does neither. Measured in review (#390): a CPT-as-OID
+  // mammogram reconciled to a cms125 event — so the AUTHORED engine read COMPLIANT — while the derivation
+  // did not fire, so OFFICIAL read OVERDUE. The derivation created the divergence it exists to remove.
+  const derivedCount = (system: string, code: string) => {
+    const bundle = normalizeWebChartBundle({
+      resourceType: "Bundle",
+      entry: [
+        {
+          resource: {
+            resourceType: "Procedure",
+            status: "completed",
+            code: { coding: [{ system, code }] },
+            performedDateTime: "2024-03-01T10:00:00Z",
+          },
+        },
+      ],
+    });
+    return (bundle.entry as Array<{ resource: Res }>).filter((e) => e.resource.resourceType === "Observation").length;
+  };
+  for (const [label, system, code] of [
+    ["canonical CPT", "http://www.ama-assn.org/go/cpt", "77067"],
+    ["CPT as OID", "urn:oid:2.16.840.1.113883.6.12", "77067"],
+    ["CPT over https", "https://www.ama-assn.org/go/cpt", "77067"],
+    ["CPT bare name", "cpt", "77067"],
+    ["canonical HCPCS", "http://www.cms.gov/Medicare/Coding/HCPCSReleaseCodeSets", "G0202"],
+    ["HCPCS as OID, lowercase code", "urn:oid:2.16.840.1.113883.6.285", "g0202"],
+    ["code with surrounding space", "http://www.ama-assn.org/go/cpt", " 77067 "],
+  ] as const) {
+    assert.equal(derivedCount(system, code), 1, `${label} must derive the Observation`);
+  }
+  assert.equal(derivedCount("http://snomed.info/sct", "77067"), 0, "and a different SYSTEM must not");
+});
+
+test("the derived Observation actually satisfies the OFFICIAL NUMERATOR, not merely its shape", { skip }, async () => {
+  // Every other mammography test here asserts the shape of a resource in a hand-built bundle. ADR-042
+  // paid a measurement pass to learn that a retrieve can match while the predicate still rejects — so a
+  // shape assertion is exactly the test that cannot see the failure it is written for (review, #390). The
+  // fixture cannot close this either: its only mammogram belongs to wc-49, age 33 and dated 2015, so it
+  // is outside both the age band and every measurement period. So inject one in-window screening into the
+  // four subjects the IPP admits and read the numerator.
+  const screened = (bundle: unknown) => {
+    const b = clone(bundle) as { entry: Array<{ resource: Res }> };
+    const patient = b.entry.find((e) => e.resource.resourceType === "Patient")?.resource;
+    if (patient && CMS125_ACTIONABLE.includes(String(patient.id))) {
+      b.entry.push({
+        resource: {
+          resourceType: "Procedure",
+          status: "completed",
+          code: { coding: [{ system: MAMMOGRAPHY_PROCEDURE_CPT.system, code: MAMMOGRAPHY_PROCEDURE_CPT.code }] },
+          performedDateTime: "2024-03-01T10:00:00Z",
+        },
+      });
+    }
+    return b;
+  };
+
+  // Injected BEFORE normalization, so the derivation sees it exactly as a live server's Procedure.
+  const withScreening = asLiveServerWouldSend()
+    .map((p) => screened({ resourceType: "Bundle", type: "collection", entry: resourcesOf(p).map((resource) => ({ resource })) }))
+    .map((b) => normalizeWebChartBundle(b))
+    .map((b) => stampEnrollment(b as never, "cms125", roster, { evaluationDate: EVAL }));
+
+  const numerator = async (bundles: readonly unknown[]) => {
+    const executor = officialMeasureExecutor({ expand: officialTerminologyExpander(loadOfficialArtifact) });
+    const subjects: OfficialBatchSubject[] = bundles.map((b) => ({ subjectId: patientIdOf(b), patientBundle: b }));
+    const results = await executor.evaluateBatch("cms125", subjects, EVAL);
+    return [...results.entries()]
+      .filter(([, r]) => (r.evidence as { official?: { populationResults?: Array<{ populationType: string; result: boolean }> } })?.official?.populationResults?.some((p) => p.populationType === "numerator" && p.result))
+      .map(([id]) => id)
+      .sort();
+  };
+
+  assert.deepEqual(await numerator(withScreening), [...CMS125_ACTIONABLE].sort(), "the screening is SEEN");
+  assert.deepEqual(
+    await numerator(withScreening.map((b) => withoutDerived("mammogram")(b))),
+    [],
+    "and with only the CPT Procedure the official numerator sees nothing — the false OVERDUE this closes",
+  );
 });
