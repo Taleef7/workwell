@@ -60,10 +60,16 @@ Procedure, an unmapped gender, a server that already supplies the element). What
 live HTTP transport itself: this exercises every transformation a routed run applies to a WebChart payload
 and none of the request shaping, exactly as `devdb-official-eval.test.ts` says of itself.
 
-**Three limits found in review (#390) and left open rather than papered over.** The suppression check
+**Suppression is keyed on (subject, DAY) and counts only an Observation the measure could actually use.**
+Presence of the mammography code is not usability: an Observation that is `preliminary`/`entered-in-error`,
+or carries no `category ~ imaging`, or is simply an old screening from years ago, would otherwise suppress
+derivation for a RECENT valid Procedure — and the patient reads OVERDUE and is escalated HIGH, which is the
+failure this whole derivation exists to remove (Codex, #390).
+
+**Two limits found in review (#390) and left open rather than papered over.** The suppression check
 matches the one canonical LOINC `24606-6`, not the 92-member value set, so a server using one of the other
-91 gets a derived duplicate (widening it would mean reaching the official terminology sidecar from inside
-the engine, which the boundary forbids). Only **Procedure to Observation** is derived — a server recording
+91 gets a derived duplicate for the same day (widening it would mean reaching the official terminology
+sidecar from inside the engine, which the boundary forbids). Only **Procedure to Observation** is derived — a server recording
 mammography as a LOINC Observation and no CPT Procedure leaves the AUTHORED engine blind, which is a live
 configuration on staging today. And a live tenant's QRDA Category I now carries the screening as two QDM
 entries, since `qdm-entries.ts` routes the imaging Observation and the Procedure separately and `meta.tag`

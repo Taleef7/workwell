@@ -413,3 +413,111 @@ test("the derived Observation actually satisfies the OFFICIAL NUMERATOR, not mer
     "and with only the CPT Procedure the official numerator sees nothing — the false OVERDUE this closes",
   );
 });
+
+test("an UNUSABLE mammography Observation does not suppress derivation from a valid Procedure", () => {
+  // Presence of the code is not usability. An Observation the measure cannot count — preliminary,
+  // entered-in-error, or missing `category ~ imaging` — would otherwise suppress the derivation and the
+  // patient reads OVERDUE and is escalated HIGH (Codex, #390). Each unusable shape is pinned separately,
+  // because each fails the official predicate for a different reason.
+  const unusable: Array<[string, Res]> = [
+    ["preliminary status", { status: "preliminary", category: [{ coding: [{ code: "imaging" }] }] }],
+    ["entered-in-error", { status: "entered-in-error", category: [{ coding: [{ code: "imaging" }] }] }],
+    ["no imaging category", { status: "final" }],
+    ["wrong category", { status: "final", category: [{ coding: [{ code: "laboratory" }] }] }],
+  ];
+  for (const [label, shape] of unusable) {
+    const bundle = normalizeWebChartBundle({
+      resourceType: "Bundle",
+      entry: [
+        {
+          resource: {
+            resourceType: "Observation",
+            ...shape,
+            code: { coding: [{ system: ECQM_CANONICAL_CODES.mammogram.system, code: ECQM_CANONICAL_CODES.mammogram.code }] },
+            effectiveDateTime: "2024-03-01T10:00:00Z",
+          },
+        },
+        {
+          resource: {
+            resourceType: "Procedure",
+            status: "completed",
+            code: { coding: [{ system: MAMMOGRAPHY_PROCEDURE_CPT.system, code: MAMMOGRAPHY_PROCEDURE_CPT.code }] },
+            performedDateTime: "2024-03-01T10:00:00Z",
+          },
+        },
+      ],
+    });
+    const derived = (bundle.entry as Array<{ resource: Res }>).filter(
+      (e) => ((e.resource.meta as { tag?: Array<{ code?: string }> })?.tag ?? []).some((t) => t.code === "derived-from-procedure"),
+    );
+    assert.equal(derived.length, 1, `an Observation with ${label} must not suppress a valid Procedure`);
+  }
+});
+
+test("an OLD qualifying Observation does not suppress derivation from a RECENT Procedure", () => {
+  // Suppression is per (subject, day). A screening from years ago is a real Observation the measure can
+  // count — for its own date. Suppressing this year's Procedure because of it is how a currently-screened
+  // woman reads OVERDUE.
+  const bundle = normalizeWebChartBundle({
+    resourceType: "Bundle",
+    entry: [
+      {
+        resource: {
+          resourceType: "Observation",
+          status: "final",
+          category: [{ coding: [{ system: "http://terminology.hl7.org/CodeSystem/observation-category", code: "imaging" }] }],
+          code: { coding: [{ system: ECQM_CANONICAL_CODES.mammogram.system, code: ECQM_CANONICAL_CODES.mammogram.code }] },
+          effectiveDateTime: "2015-07-05T10:00:00Z",
+        },
+      },
+      {
+        resource: {
+          resourceType: "Procedure",
+          status: "completed",
+          code: { coding: [{ system: MAMMOGRAPHY_PROCEDURE_CPT.system, code: MAMMOGRAPHY_PROCEDURE_CPT.code }] },
+          performedDateTime: "2024-03-01T10:00:00Z",
+        },
+      },
+    ],
+  });
+  const derived = (bundle.entry as Array<{ resource: Res }>).filter(
+    (e) => ((e.resource.meta as { tag?: Array<{ code?: string }> })?.tag ?? []).some((t) => t.code === "derived-from-procedure"),
+  );
+  assert.equal(derived.length, 1);
+  assert.equal((derived[0]!.resource as Res).effectiveDateTime, "2024-03-01T10:00:00Z", "and it carries the RECENT date");
+});
+
+test("two patients in one payload do not suppress each other", () => {
+  // `normalizeWebChartBundle` is exported and `extractResources` flattens arrays of bundles, so the
+  // one-patient-per-payload invariant the HTTP transport happens to satisfy is not this function's to
+  // assume. Bundle-wide, patient B's screening would vanish because patient A recorded theirs.
+  const mammogramFor = (subject: string, kind: "observation" | "procedure") =>
+    kind === "observation"
+      ? {
+          resourceType: "Observation",
+          status: "final",
+          subject: { reference: subject },
+          category: [{ coding: [{ system: "http://terminology.hl7.org/CodeSystem/observation-category", code: "imaging" }] }],
+          code: { coding: [{ system: ECQM_CANONICAL_CODES.mammogram.system, code: ECQM_CANONICAL_CODES.mammogram.code }] },
+          effectiveDateTime: "2024-03-01T10:00:00Z",
+        }
+      : {
+          resourceType: "Procedure",
+          status: "completed",
+          subject: { reference: subject },
+          code: { coding: [{ system: MAMMOGRAPHY_PROCEDURE_CPT.system, code: MAMMOGRAPHY_PROCEDURE_CPT.code }] },
+          performedDateTime: "2024-03-01T10:00:00Z",
+        };
+  const bundle = normalizeWebChartBundle({
+    resourceType: "Bundle",
+    entry: [
+      { resource: mammogramFor("Patient/A", "observation") },
+      { resource: mammogramFor("Patient/B", "procedure") },
+    ],
+  });
+  const derived = (bundle.entry as Array<{ resource: Res }>).filter(
+    (e) => ((e.resource.meta as { tag?: Array<{ code?: string }> })?.tag ?? []).some((t) => t.code === "derived-from-procedure"),
+  );
+  assert.equal(derived.length, 1, "B's Procedure must still derive");
+  assert.deepEqual((derived[0]!.resource as Res).subject, { reference: "Patient/B" });
+});

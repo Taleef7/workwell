@@ -204,6 +204,16 @@ const MAMMOGRAPHY_PROCEDURE_KEYS = new Set(
 const MAMMOGRAM_OBSERVATION = ECQM_CANONICAL_CODES.mammogram;
 const MAMMOGRAM_OBSERVATION_KEYS = new Set([codingKey(MAMMOGRAM_OBSERVATION)!]);
 
+const IMAGING_CATEGORY_KEYS = new Set([
+  "http://terminology.hl7.org/CodeSystem/observation-category|IMAGING",
+  "|IMAGING",
+]);
+
+/** Day precision — a Procedure's `performed` and an Observation's `effective` rarely agree below it. */
+function day(value: string | undefined): string {
+  return value ? value.slice(0, 10) : "undated";
+}
+
 /** `subject.reference` (or `subject.identifier.value`), so a multi-patient payload cannot cross-suppress. */
 function subjectKey(resource: Json): string {
   const subject = resource.subject;
@@ -245,15 +255,26 @@ function procedurePerformed(procedure: Json): string | undefined {
  */
 function withMammographyObservation(entries: Array<{ resource: unknown }>): Array<{ resource: unknown }> {
   const resources = entries.map((e) => e.resource).filter(isObject);
-  // Per SUBJECT, not per bundle. WebChart's transport composes one patient per payload today
-  // (`httpWebChartClient.fetchPatient`), but this function is exported, advertises robustness to shape
-  // drift, and `extractResources` flattens arrays of bundles — so a bundle-wide check would let patient
-  // A's Observation suppress derivation for patient B, and two same-day mammograms across two patients
-  // collapse into one Observation carrying A's subject (review, #390).
+  // Suppression is keyed on (SUBJECT, DAY) and counts only an Observation that could actually satisfy the
+  // official predicate. Two narrower-than-obvious conditions, both measured hazards:
+  //
+  //   - per SUBJECT, because this function is exported, advertises robustness to shape drift, and
+  //     `extractResources` flattens arrays of bundles — bundle-wide, patient A's Observation would
+  //     suppress derivation for patient B, and two same-day mammograms across two patients would
+  //     collapse into one Observation carrying A's subject;
+  //   - per DAY and only for a QUALIFYING Observation, because an existing one that the measure cannot
+  //     count — `preliminary`/`entered-in-error`, or missing `category ~ imaging`, or simply an old
+  //     screening from years ago — would otherwise suppress derivation for a RECENT valid Procedure, and
+  //     the patient reads OVERDUE and is escalated HIGH. Presence of the code is not usability
+  //     (Codex, #390).
+  const qualifyingObservation = (r: Json) =>
+    r.resourceType === "Observation" &&
+    holderHasCoding(r.code, MAMMOGRAM_OBSERVATION_KEYS) &&
+    isFinalEvent(r) &&
+    Array.isArray(r.category) &&
+    r.category.some((c) => holderHasCoding(c, IMAGING_CATEGORY_KEYS));
   const alreadyObserved = new Set(
-    resources
-      .filter((r) => r.resourceType === "Observation" && holderHasCoding(r.code, MAMMOGRAM_OBSERVATION_KEYS))
-      .map(subjectKey),
+    resources.filter(qualifyingObservation).map((r) => `${subjectKey(r)}|${day(observationEffective(r))}`),
   );
 
   const derived: Array<{ resource: unknown }> = [];
@@ -262,9 +283,9 @@ function withMammographyObservation(entries: Array<{ resource: unknown }>): Arra
     if (resource.resourceType !== "Procedure") continue;
     if (!isFinalEvent(resource)) continue;
     if (!holderHasCoding(resource.code, MAMMOGRAPHY_PROCEDURE_KEYS)) continue;
-    if (alreadyObserved.has(subjectKey(resource))) continue;
     const when = procedurePerformed(resource);
-    const key = `${subjectKey(resource)}|${when ?? "undated"}`;
+    const key = `${subjectKey(resource)}|${day(when)}`;
+    if (alreadyObserved.has(key)) continue;
     if (seen.has(key)) continue;
     seen.add(key);
     derived.push({
