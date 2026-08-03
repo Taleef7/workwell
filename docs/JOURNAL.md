@@ -1,5 +1,53 @@
 # Journal
 
+## 2026-08-02 (M-B) — Calculation Check spike: the loop is already built, and it is blocked on one file (branch `docs/cvu-calculation-check-spike`)
+
+Timeboxed spike on #385, asking one question: can Cypress run a Calculation Check against WorkWell for
+CMS122/CMS125, and what does it need? **Yes — and every piece WorkWell needs already exists.**
+
+**Calculation Check is the C2 task**, and reading the task models makes the target unambiguous. C1 takes
+QRDA Cat I and validates it against what Cypress generated. C2 takes QRDA Cat III and runs
+`ExpectedResultsValidator` — comparing OUR numbers against Cypress's precalculated answers for its own
+generated patients. C3 adds the CMS Schematron. C2 is §170.315(c)(2) "import and calculate", which is
+exactly the shape of what we built.
+
+**The loop C2 defines is already assembled here.** Cypress hands out its test patients as QRDA Category I
+("always respond with a .qrda.zip file of qrda category I documents"). We import QRDA-I (ADR-051). We
+calculate — and for these two measures on CMS's published artifacts (ADR-045/046). We export QRDA-III,
+which as of today validates at 0 findings (#384). Upload that, and `ExpectedResultsValidator` does the
+rest. **Nothing needs building.**
+
+**The blocker is a measure bundle, and it is NLM-gated.** This Cypress has none — measured against its
+Mongo: products 0, product_tests 0, value sets 0, fs.files 0. Bundles come from
+`cypressdemo.healthit.gov/measure_bundles/bundle-<year>.zip`, years 2022–2026, and
+`BundleDownloadsController` authenticates with basic auth failing as "Could not verify NLM User Account".
+Probed unauthenticated: **HTTP 401**. Same licensing boundary ADR-041 hit for terminology, different
+artifact.
+
+**And the #365 trick does not transfer.** That workflow works because the vendor outputs are two small
+committable files, with a test asserting the licensed sidecar never leaves the runner. A Cypress bundle
+is licensed NLM content *in its entirety*, so routing it through a GitHub artifact IS redistribution —
+the thing `vendor-workflow-safety.test.ts` exists to prevent. It has to be downloaded on the machine
+running Cypress, by the owner, with the owner's key.
+
+**Also corrected, in #385 and here: the MADiE gate already IS external calculation validation.** The
+first draft of #385 called C2 "the first external check of our calculations" and said the document route
+says nothing about whether calculations are correct. The second is true of that route; the first is
+false. MADiE runs CMS's logic over CMS's patients against CMS's expected vectors, 410/410, through the
+executor production uses. What C2 adds is the chain AROUND the executor — ingest, outcome derivation,
+aggregation — which MADiE bypasses by handing it a finished bundle. Narrower claim, and the true one.
+
+**Not verified, and stated as such:** whether CMS122/CMS125 are actually in the bundle (very likely —
+Cypress covers 56 EP/EC measures — but an inference, not a measurement); whether our Cat III passes
+`ExpectedResultsValidator` (conformant ≠ correct, and that is the whole point of C2); and whether our
+QRDA-I import handles Cypress's generated patients, which may carry QDM templates beyond the five we
+translate. One more self-correction: the first draft of the evidence doc recommended
+`rake bundle:import`, which **does not exist** — import is an admin-UI upload driving
+`BundleUploadJob`; the only bundle rake tasks are `precalculate_bundle` (which destroys the bundle) and
+the `bundle:eval:*` diagnostics.
+
+Evidence: `docs/evidence/CVU_CALCULATION_CHECK_SPIKE_2026-08-02.md`. **Owner step: one file.**
+
 ## 2026-08-02 (M-B) — QRDA Category III: 48 findings to 0, and it was carrying a CMS template it never conformed to (branch `fix/qrda3-cda-conformance`)
 
 The evidence doc called Cat III "a larger piece of work and its own decision". It was — but the decision
