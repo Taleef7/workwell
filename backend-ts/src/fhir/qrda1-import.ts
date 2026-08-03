@@ -414,6 +414,25 @@ function symptomFrom(node: CdaNode, i: string): unknown {
   };
 }
 
+/**
+ * An HL7 `YYYYMMDD…` timestamp → the FHIR `date` it denotes, taken from the SOURCE digits.
+ *
+ * Two things this must not do, and the obvious implementation does both. `Patient.birthDate` is a FHIR
+ * **date**, so the full timestamp `isoFromHl7` returns is invalid there — that is what this used to
+ * write. But truncating `isoFromHl7`'s output is also wrong, because that value has been NORMALIZED to
+ * UTC: `20000101010000+1400` is `1999-12-31T11:00:00Z`, so slicing gives the wrong calendar day, and a
+ * birth date is a local calendar fact rather than an instant. On a measure boundary that moves a patient
+ * between age bands (Codex, #388). So the date is read from the leading digits and validated as a real
+ * calendar date — the same round-trip check `isoFromHl7` applies to its own date-only branch.
+ */
+function calendarDate(value: string | undefined): string | undefined {
+  if (!value || !/^\d{8}/.test(value)) return undefined;
+  const [y, mo, d] = [value.slice(0, 4), value.slice(4, 6), value.slice(6, 8)];
+  const probe = new Date(`${y}-${mo}-${d}T00:00:00Z`);
+  if (Number.isNaN(probe.getTime()) || probe.toISOString().slice(0, 10) !== `${y}-${mo}-${d}`) return undefined;
+  return `${y}-${mo}-${d}`;
+}
+
 /** `<recordTarget>` → a FHIR Patient. */
 function patientFrom(root: CdaNode): { resource: unknown; id: string } {
   const patientRole = child(child(root, "recordTarget"), "patientRole");
@@ -424,11 +443,7 @@ function patientFrom(root: CdaNode): { resource: unknown; id: string } {
   const name = child(patient, "name");
   const given = child(name, "given")?.text;
   const family = child(name, "family")?.text;
-  // `Patient.birthDate` is a FHIR **date**, and `isoFromHl7` returns the full timestamp for the 14-digit
-  // `birthTime` a QRDA carries — so this used to write `"1978-12-24T20:30:00Z"` into a date field.
-  // Measured to change no population (the age predicates parsed it anyway), but it is invalid FHIR that
-  // our own exporter would never produce.
-  const birthDate = isoFromHl7(child(patient, "birthTime")?.attrs.value)?.slice(0, 10);
+  const birthDate = calendarDate(child(patient, "birthTime")?.attrs.value);
   return {
     id,
     resource: {

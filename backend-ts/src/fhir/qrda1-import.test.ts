@@ -819,3 +819,16 @@ test("import: every code system we map is spelled the way the ARTIFACTS spell it
   assert.equal(SYSTEM_FOR_OID["2.16.840.1.113883.6.12"], "http://www.ama-assn.org/go/cpt");
   assert.equal(SYSTEM_FOR_OID["2.16.840.1.113883.6.90"], "http://hl7.org/fhir/sid/icd-10-cm");
 });
+
+test("import: a birthTime with an OFFSET keeps its own calendar day, not the UTC one", () => {
+  // `Patient.birthDate` is a local calendar fact, not an instant. `isoFromHl7` normalizes to UTC, so
+  // truncating ITS output gives the wrong day near midnight: `20000101010000+1400` is
+  // `1999-12-31T11:00:00Z`. On a measure boundary that moves a patient between age bands, which is a
+  // population change from a formatting decision (Codex, #388).
+  const shifted = exclusionDocument.replace("<birthTime value='19501224203000'/>", "<birthTime value='20000101010000+1400'/>");
+  assert.notEqual(shifted, exclusionDocument);
+  const patient = importQrda1Document(shifted).bundle.entry
+    .map((e) => e.resource as Record<string, any>)
+    .find((r) => r.resourceType === "Patient")!;
+  assert.equal(patient.birthDate, "2000-01-01", "the day the document states, not the UTC-normalized one");
+});

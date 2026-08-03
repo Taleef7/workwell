@@ -528,9 +528,10 @@ calls `finalizeRun`**, so an imported run cannot reach the Cat III export (409 w
 **Still open:** the authored cms122/125 subsets retire to the fidelity lab (locked decision #4,
 deliberately not in the flip's own PR — issue #377); the LIVE third-party WebChart path gets neither the
 `us-core-sex` nor the dual-stamp fix (both mapping sites sit upstream of the live FHIR transport;
-`normalizeWebChartBundle` untouched by design); the **two QRDA-import defects above are diagnosed and NOT
-fixed**; a real C2 submission needs the finalize route AND identity resolution in the product path; and the
-**CVU+ LOOP** remains the verification bar.
+`normalizeWebChartBundle` untouched by design); a real C2 submission needs the **finalize route** AND
+**identity resolution in the product path** (nothing in WorkWell resolves 68 documents to 64 people); only
+`PopulationSet_1` is compared, so a stratum-only disagreement would not be visible; and the **CVU+ LOOP**
+remains the verification bar. (The two QRDA-import defects ARE fixed — ADR-055, above.)
 
 ---
 
