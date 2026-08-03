@@ -855,8 +855,10 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
         `${measureId}: not one of ${ippByMeasure.get(measureId)!.length} subjects entered the official ` +
           `initial population. Either this cohort genuinely has nobody eligible, or the data lacks a ` +
           `structural element the measure's initial population reads — for a WebChart source see ` +
-          `docs/WEBCHART_FHIR_MAPPING.md §3.1 (the us-core-sex extension is the known case). Outcomes ` +
-          `are reported as computed.`,
+          `docs/WEBCHART_FHIR_MAPPING.md §3.1. The us-core-sex extension WAS the known case and is now ` +
+          `derived (ADR-057), so look instead at: a source that sends no Patient.gender at all, a cohort ` +
+          `with no qualifying encounter in the period, or a genuinely ineligible one. Outcomes are ` +
+          `reported as computed.`,
       )
       .catch(() => {});
   }

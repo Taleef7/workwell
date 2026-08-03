@@ -228,6 +228,7 @@ jobs:
             src/wiring/official-corpus-outcomes.test.ts \
             src/standards/literal-diff.test.ts \
             src/engine/ingress/webchart/devdb-official-eval.test.ts \
+            src/engine/ingress/webchart/live-official-parity.test.ts \
             src/wiring/official-flip-config.test.ts \
             src/fhir/qrda1-import-official.test.ts \
             scripts/valueset-parity.test.mjs

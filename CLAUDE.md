@@ -548,7 +548,11 @@ vendoring and executing the QDM artifacts — or Cypress bundles in the FHIR lin
 publish for C2.
 
 **Still open:** the authored cms122/125 subsets retire to the fidelity lab (locked decision #4 — issue
-#377); the LIVE third-party WebChart path gets neither the `us-core-sex` nor the dual-stamp fix; **no
+#377); the LIVE third-party WebChart path is CLOSED (2026-08-03, ADR-057 — `normalizeWebChartBundle` derives
+`us-core-sex` from `gender` through a two-value allowlist and the LOINC imaging Observation from a
+CPT/HCPCS mammography Procedure, both tagged, both suppressed when the server supplies them;
+`live-official-parity.test.ts` strips them from the fixture to reproduce the live shape and pins 4 of 56
+in the official IPP with normalization, 0 without); **no
 supplemental data anywhere in the chain** (import drops Patient Characteristic Payer and never reads
 race/ethnicity from `<recordTarget>`; the Cat III emits none); only `PopulationSet_1` is compared, so a
 stratum-only disagreement is invisible; and the **QDM-vs-QI-Core lineage decision** above, which is what
