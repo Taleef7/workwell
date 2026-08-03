@@ -1,5 +1,71 @@
 # Journal
 
+## 2026-08-03 (M-B) — the C2 oracle reproduces and the comparison ran: IPP and DENOM match, exclusions do not, and the cause is our IMPORTER (branch `docs/cvu-c2-oracle-and-comparison`)
+
+#386 stopped at "establish the oracle before running anything through WorkWell", because across three
+setup runs CMS122's expected IPP read 128, then 93. **It reproduces exactly, and the irreproducibility
+was one thing: teardown that deletes the Product but not its `CQM::IndividualResult`s.** Two clean
+rebuilds now agree on every graded number — CMS122 64/64/31/32, CMS125 150/150/2/47 plus both strata,
+and the supplemental-data digests byte-identical.
+
+**The oracle is now DERIVED, not recorded, which is the difference between a number and an oracle.**
+`IndividualResult` = patients × population sets (CMS125's 300 is 150 unstratified + each patient's own
+stratum, and 28 + 122 = 150 proves one stratum each). Archive documents = patients + 1 clinical split +
+`rand(1..3)` duplicates. **So the archive document count legitimately varies between rebuilds while the
+expected results do not** — 66 → 68 and 152 → 153 across the two passes. That is Part 2's "66 vs 67"
+puzzle: not instability, the duplicate test doing its job.
+
+**A FOURTH prerequisite, which review of #386 did not find because it needed the archive rather than the
+tree: identity resolution.** The augmented duplicate and the clinical split each get a NEW Cypress MRN,
+and the duplicate also gets a randomized first name, last name **or** birthdate — so `TWO Diabetes Adult`
+and `TWO Diabetes Axult` are one person. The identifier that survives both is the **Medicare Beneficiary
+Identifier**; keyed on it, 66 documents resolve to 64 people and 152 to 150, exactly the counts the
+expected results were computed over. Four CMS122 patients ship with no MBI at all, so name+birth is the
+fallback. `POST /api/runs/:id/evaluate` keys the subject off the first `<id>` extension — the per-document
+MRN — so **nothing in the product path does this**, and a real C2 submission would report 68 people where
+Cypress expects 64 and fail on arithmetic before any logic was involved.
+
+**Prerequisite 11.2 is measured, not argued: zero subjects move.** The bundle's period is **CY2024**
+(despite `bundle-2025.zip` calling itself the 2026 performance period), and the rolling window differs from
+it by one day at the start. Re-running both measures on both windows: 0 of 64 and 0 of 150 change
+population membership.
+
+**The comparison. IPP 64=64 and 150=150; DENOM 64=64 and 150=150; CMS125's NUMER 2=2.** Per subject,
+against Cypress's own per-patient results: **41 of 64 and 122 of 150 agree on every population**, and every
+single difference is one direction — `DENEX: cypress=1 workwell=0`. CMS122's numerator inflation (54 vs 31)
+is exactly its 23 missed exclusions falling through, which for an inverse measure means the numerator; no
+subject is in both DENEX and NUMER, so the columns are comparable as printed rather than a convention
+artefact.
+
+**The cause is QRDA import coverage, twice, and both are confirmed by CONSTRUCTION rather than inferred.**
+(1) We translate five QDM datatypes; the exclusion logic reads Assessment Performed, Intervention
+Performed/Order, Medication Active, Symptom and Device Order. Adding back the ONE dropped Assessment for
+`TWO N Long Care GP Adult` (LOINC 71802-3, SNOMED 160734000 "lives in a nursing home") as a QI-Core
+Observation flips it to `denominator-exclusion: true, numerator: false` — Cypress's expected answer for
+that patient exactly. (2) `concept()` reads only the primary `<code>` and only from six mapped code
+systems, so **4 of CMS125's 10 Procedure entries are dropped for being ICD-10-PCS**, two of them carrying
+the SNOMED translation the exclusion value set actually contains; adding those two back flips DENEX the
+same way. **This says nothing bad about the artifacts or the executor** — given the data, the official
+artifact computes Cypress's answer both times. The gap is between the document and the engine.
+
+**Three smaller findings recorded rather than smoothed over.** `untranslatedTemplates` names the LAST
+templateId in the entry, which is routinely a nested ATTRIBUTE template (Author dateTime 31 times, Rank) —
+so the diagnostic meant to tell an operator which datatype was lost names something that is not a datatype,
+and §16.1's inventory had to be computed independently. `Patient.birthDate` receives a full dateTime
+(`1978-12-24T20:30:00Z`) where FHIR types it `date`; it moved no population here but our own exporter would
+never produce it. And one document is refused correctly — the half of a clinically split patient that
+received only a payer entry, refused under ADR-051, with the merge recovering the person from the other
+half.
+
+**What did NOT happen, and the bar is unchanged.** Prerequisite 11.1 is untouched: no HTTP route calls
+`finalizeRun`, so an imported run still cannot reach the Cat III export. This went around it by calling the
+executor directly — the alternative §11.1 itself named — which measures the calculation and proves nothing
+about the submission. `ExpectedResultsValidator` has still never graded a document we produced, so locked
+decision #2's import → evaluate → export → CVU+ green **loop** remains unmet. Shipped: the harness
+(`scripts/cvu/c2-calculation-check.ts`), the four Cypress-side oracle scripts (`scripts/cvu/c2/`), the
+README method, and Part 3 of the evidence doc. No `backend-ts/src` change — the two importer defects are
+diagnosed here and fixed in their own PR.
+
 ## 2026-08-02 (M-B) — Calculation Check spike: the loop is already built, and it is blocked on one file (branch `docs/cvu-calculation-check-spike`)
 
 Timeboxed spike on #385, asking one question: can Cypress run a Calculation Check against WorkWell for
