@@ -46,6 +46,28 @@ guarding. Reverting any of the six fixes now fails exactly the test that claims 
 also corrected rather than left passing for the wrong reason: both used a bare Medication, Active as "a
 datatype we cannot translate", which stopped being true today.
 
+**Review caught a live defect of exactly the class this PR fixes, and the exact agreement did NOT catch
+it.** HCPCS was mapped to `urn:oid:2.16.840.1.113883.6.285` where the vendored expansions say
+`http://www.cms.gov/Medicare/Coding/HCPCSReleaseCodeSets` — 103 codes across the two measures, including
+Annual Wellness Visit `G0438` on 22 documents. `cql-execution` compares `system` by exact string equality,
+so a near-miss URL is **worse than an absent one**: an absent system drops the resource visibly, a wrong
+one imports it and leaves it invisible to every retrieve with no diagnostic anywhere. It read as 64/64
+only because the initial population is `exists(...)` and those patients carry other qualifying
+encounters — a right answer for the wrong reason, which is precisely what this comparison exists to
+catch and did not. Fixed, the speculative mappings I had added alongside it (CVX, CDT, NUCC, plain
+ICD-10) removed for the same reason, and pinned twice: literals in one test, the artifacts' own
+expansions in a sidecar-gated one.
+
+**Three more from the same review.** The ADR claimed the libraries do NOT read `status` or `intent` — they
+read `status` 22 times and `intent` 6, every exclusion retrieve is wrapped in a `Status.is*` predicate, and
+`isMedicationActive` is an `Equal` on `"active"`, so the false rationale was one plausible edit away from
+killing the dementia exclusion. Corrected, with every value pinned against its predicate. `negationInd`
+was unhandled — a negated act would have imported as a positive fact and manufactured an exclusion from a
+record stating the opposite; now skipped and reported. And five mutants survived the new tests: fixtures
+added for the unmapped-primary-with-translation path, the `authoredOn` effectiveTime fallback, and a
+wrapper template preceding its datatype; `symptomFrom`'s fallback to the element's own `<code>` removed
+rather than tested, because it is reachable and actively wrong.
+
 **Scope held deliberately.** No export change — `qdm-entries.ts` can only emit what our own evaluated
 bundles contain, and those carry no frailty, hospice or palliative data, so import and export are now
 asymmetric and the round trip cannot reach the new mappers; they are pinned by a fixture modelled on

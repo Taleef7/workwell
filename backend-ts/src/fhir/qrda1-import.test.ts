@@ -11,7 +11,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 import { buildQrda1Document } from "./qrda1-export.ts";
-import { importQrda1Document, Qrda1ImportError } from "./qrda1-import.ts";
+import { importQrda1Document, Qrda1ImportError, SYSTEM_FOR_OID } from "./qrda1-import.ts";
 import { parseXml, decodeEntities, child, descendants, hasTemplate } from "./cda-parse.ts";
 import type { RunRecord } from "../stores/run-store.ts";
 import type { OutcomeRecord } from "../stores/outcome-store.ts";
@@ -697,4 +697,125 @@ test("import NAMES the DATATYPE template, not the nested attribute template insi
     ["2.16.840.1.113883.10.20.24.3.55"],
     "Patient Characteristic Payer — the datatype, not the Author dateTime nested in it",
   );
+});
+
+test("import: the status values are the ones Status.is* PREDICATES require, not decoration", () => {
+  // Every retrieve on an exclusion path is wrapped in a `Status.is*` predicate, and the margins are
+  // thin: `isMedicationActive` is an `Equal` on "active", so a plausible-looking edit to "completed"
+  // silently kills the dementia exclusion. Pinned against the predicate each one satisfies, because an
+  // earlier version of the source comment claimed these fields were NOT read (review, #388).
+  const { of } = exclusionResources();
+  assert.equal(of("MedicationRequest")[0]!.status, "active", "isMedicationActive: Equal status 'active'");
+  assert.equal(of("MedicationRequest")[0]!.intent, "order", "isMedicationActive: intent in {order, …}");
+  assert.equal(of("ServiceRequest")[0]!.intent, "order", "isInterventionOrder: intent = 'order'");
+  assert.equal(of("Encounter").find((e) => e.id === "enc-inpatient")!.status, "finished", "isEncounterPerformed");
+  assert.equal(of("Procedure").find((p) => p.id === "intervention-1")!.status, "completed", "isProcedurePerformed");
+  assert.equal(of("Observation").find((o) => o.id === "symptom-1")!.status, "final", "isSymptom: status in {…, final, …}");
+  assert.equal(
+    of("Observation").find((o) => o.code?.coding?.[0]?.code === "71802-3")!.status,
+    "final",
+    "isAssessmentPerformed: status in {final, amended, corrected}",
+  );
+});
+
+test("import: an order with no <author> falls back to its effectiveTime for authoredOn", () => {
+  // The fixture's Medication, Active has no `<author>` — exactly like Cypress's — and `authoredOn` is
+  // what `Has Dementia Medications` reads. Without the fallback the resource imports, retrieves by code,
+  // and then fails every temporal predicate: present in the bundle, invisible to the measure.
+  const { of } = exclusionResources();
+  assert.equal(of("MedicationRequest")[0]!.authoredOn, "2023-08-20T08:00:00Z", "from effectiveTime/low");
+});
+
+test("import: a NEGATED act is not imported as a positive fact", () => {
+  // `negationInd="true"` means the act did NOT happen. Importing it positively would manufacture a
+  // denominator exclusion from a record stating the opposite — silent, and it fabricates
+  // compliance-relevant data. Cypress carries none of these, so nothing but this test covers it.
+  const negated = exclusionDocument.replace(
+    '<act classCode="ACT" moodCode="EVN">\n      <templateId root="2.16.840.1.113883.10.20.24.3.32"',
+    '<act classCode="ACT" moodCode="EVN" negationInd="true">\n      <templateId root="2.16.840.1.113883.10.20.24.3.32"',
+  );
+  assert.notEqual(negated, exclusionDocument, "the fixture must actually have been negated");
+  const resources = importQrda1Document(negated).bundle.entry.map((e) => e.resource as Record<string, any>);
+  assert.equal(
+    resources.find((r) => r.id === "intervention-1"),
+    undefined,
+    "a negated Intervention, Performed must not become a Procedure",
+  );
+  assert.ok(
+    importQrda1Document(negated).untranslatedTemplates.includes("2.16.840.1.113883.10.20.24.3.32"),
+    "and it is reported rather than dropped in silence",
+  );
+});
+
+test("import: an UNMAPPED primary code system keeps the resource when a mapped <translation> is present", () => {
+  // The other half of "an unmappable primary code no longer discards the resource" — the ICD-10-PCS
+  // fixture above cannot test it, because that OID is now IN the map, so the discard branch is never
+  // reached. Mutation testing found this gap: reverting `concept()` to discard-on-unmapped left every
+  // test green (review, #388). CDT is a real code system we deliberately do not map.
+  const withUnmappedPrimary = exclusionDocument.replace(
+    '<code code="0HTT0ZZ" codeSystem="2.16.840.1.113883.6.4" codeSystemName="ICD10PCS">',
+    '<code code="D1110" codeSystem="2.16.840.1.113883.6.13" codeSystemName="CDT">',
+  );
+  assert.notEqual(withUnmappedPrimary, exclusionDocument);
+  const procedure = importQrda1Document(withUnmappedPrimary)
+    .bundle.entry.map((e) => e.resource as Record<string, any>)
+    .find((r) => r.id === "proc-icd10pcs");
+  assert.ok(procedure, "the resource survives on its translation alone");
+  assert.deepEqual(
+    procedure!.code.coding,
+    [{ system: "http://snomed.info/sct", code: "429400009", display: undefined }].map((c) => ({
+      system: c.system,
+      code: c.code,
+    })),
+    "and carries only the coding that resolved",
+  );
+});
+
+test("import: the untranslated diagnostic names the datatype even when a WRAPPER template precedes it", () => {
+  // `ATTRIBUTE_TEMPLATES` earns its keep only when a non-datatype QDM template appears BEFORE the
+  // datatype in document order — which is exactly what a Concern Act wrapper does. Without the set, the
+  // first QDM-looking root wins and the report blames the wrapper (review, #388).
+  const wrappedUnknown = `<?xml version="1.0" encoding="UTF-8"?>
+<ClinicalDocument xmlns="urn:hl7-org:v3">
+  <recordTarget><patientRole><id root="1.3.6.1.4.1.115" extension="p1"/></patientRole></recordTarget>
+  <component><structuredBody><component><section>
+    <templateId root="2.16.840.1.113883.10.20.24.2.1" extension="2021-08-01"/>
+    <entry><act classCode="ACT" moodCode="EVN">
+      <templateId root="2.16.840.1.113883.10.20.24.3.138" extension="2021-08-01"/>
+      <entryRelationship typeCode="SUBJ"><observation classCode="OBS" moodCode="EVN">
+        <templateId root="2.16.840.1.113883.10.20.24.3.55"/>
+        <code code="48768-6" codeSystem="2.16.840.1.113883.6.1"/>
+      </observation></entryRelationship>
+    </act></entry>
+    <entry><procedure classCode="PROC" moodCode="EVN">
+      <templateId root="2.16.840.1.113883.10.20.24.3.64" extension="2021-08-01"/>
+      <code code="0HTT0ZZ" codeSystem="2.16.840.1.113883.6.4"/>
+      <effectiveTime value='20240220080000'/>
+    </procedure></entry>
+  </section></component></structuredBody></component>
+</ClinicalDocument>`;
+  assert.deepEqual(
+    importQrda1Document(wrappedUnknown).untranslatedTemplates,
+    ["2.16.840.1.113883.10.20.24.3.55"],
+    "the datatype inside the Concern Act, not the Concern Act",
+  );
+});
+
+test("import: every code system we map is spelled the way the ARTIFACTS spell it", () => {
+  // `cql-execution` compares `system` by exact string equality, so a near-miss imports the resource and
+  // leaves it invisible to every retrieve — strictly worse than dropping it, because a drop at least
+  // appears in `untranslatedTemplates`. HCPCS was exactly that: `urn:oid:2.16.840.1.113883.6.285` where
+  // the expansions say the CMS URL, across 103 codes including Annual Wellness Visit and Hospice Care
+  // Ambulatory. It never surfaced as a divergence because the IPP is `exists(...)` and those patients
+  // carry other qualifying encounters — a right answer for the wrong reason (review, #388).
+  //
+  // The literals here are the structural half; `qrda1-import-official.test.ts` checks them against the
+  // vendored expansions themselves, which is the half that can catch a future re-vendor moving a URL.
+  assert.equal(SYSTEM_FOR_OID["2.16.840.1.113883.6.285"], "http://www.cms.gov/Medicare/Coding/HCPCSReleaseCodeSets");
+  assert.equal(SYSTEM_FOR_OID["2.16.840.1.113883.6.4"], "http://www.cms.gov/Medicare/Coding/ICD10");
+  assert.equal(SYSTEM_FOR_OID["2.16.840.1.113883.6.88"], "http://www.nlm.nih.gov/research/umls/rxnorm");
+  assert.equal(SYSTEM_FOR_OID["2.16.840.1.113883.6.96"], "http://snomed.info/sct");
+  assert.equal(SYSTEM_FOR_OID["2.16.840.1.113883.6.1"], "http://loinc.org");
+  assert.equal(SYSTEM_FOR_OID["2.16.840.1.113883.6.12"], "http://www.ama-assn.org/go/cpt");
+  assert.equal(SYSTEM_FOR_OID["2.16.840.1.113883.6.90"], "http://hl7.org/fhir/sid/icd-10-cm");
 });

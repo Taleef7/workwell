@@ -32,21 +32,30 @@ import { child, childrenNamed, descendants, hasTemplate, parseXml, type CdaNode 
  * entries are coded in **ICD-10-PCS**, which this map did not carry — and because `concept()` returns
  * undefined for an unmapped system, the whole Procedure was dropped, taking a mastectomy exclusion with
  * it (`docs/evidence/CVU_CALCULATION_CHECK_SPIKE_2026-08-02.md` §16.2).
+ *
+ * **Every URL here is the one the vendored expansions actually use**, not the one a specification says
+ * they should — `cql-execution` matches `system` by exact string equality, so a near-miss imports the
+ * resource and leaves it invisible to every retrieve, which is strictly worse than dropping it (the drop
+ * at least shows up in `untranslatedTemplates`). Pinned by `qrda1-import-official.test.ts`, which reads
+ * the artifacts' own terminology. Speculative entries are deliberately absent for the same reason: a
+ * mapping nothing can validate is a landmine, and an unmapped system is a visible gap.
  */
-const SYSTEM_FOR_OID: Record<string, string> = {
+export const SYSTEM_FOR_OID: Record<string, string> = {
   "2.16.840.1.113883.6.96": "http://snomed.info/sct",
   "2.16.840.1.113883.6.1": "http://loinc.org",
   "2.16.840.1.113883.6.12": "http://www.ama-assn.org/go/cpt",
   "2.16.840.1.113883.6.90": "http://hl7.org/fhir/sid/icd-10-cm",
   "2.16.840.1.113883.6.103": "http://hl7.org/fhir/sid/icd-9-cm",
-  "2.16.840.1.113883.6.285": "urn:oid:2.16.840.1.113883.6.285",
+  // HCPCS. The URN form this used to carry matches NOTHING: `cql-execution` compares `system` by exact
+  // string equality, and the vendored expansions express HCPCS as the CMS URL (103 codes across the two
+  // measures — Annual Wellness Visit `G0438`, Hospice Care Ambulatory `G0182`, Frailty and Hospice
+  // Encounters). Measured: an identical Encounter coded `G0438` gives `initial-population: false` under
+  // the URN and `true` under this URL. It never surfaced as a divergence because the IPP is `exists(...)`
+  // and those patients carry other qualifying encounters — a right answer for the wrong reason, and the
+  // same defect class as the ICD-10-PCS one this change was written to fix (review, #388).
+  "2.16.840.1.113883.6.285": "http://www.cms.gov/Medicare/Coding/HCPCSReleaseCodeSets",
   "2.16.840.1.113883.6.4": "http://www.cms.gov/Medicare/Coding/ICD10",
   "2.16.840.1.113883.6.88": "http://www.nlm.nih.gov/research/umls/rxnorm",
-  "2.16.840.1.113883.12.292": "http://hl7.org/fhir/sid/cvx",
-  "2.16.840.1.113883.6.3": "http://hl7.org/fhir/sid/icd-10",
-  "2.16.840.1.113883.6.104": "http://hl7.org/fhir/sid/icd-9-cm",
-  "2.16.840.1.113883.6.13": "http://www.ada.org/cdt",
-  "2.16.840.1.113883.6.101": "http://nucc.org/provider-taxonomy",
 };
 
 /**
@@ -67,8 +76,14 @@ const SYSTEM_FOR_OID: Record<string, string> = {
  * | Assessment, Performed | `Observation` | (screening/assessment) |
  *
  * The libraries read `authoredOn` (orders), `performed` (Procedure), `effective` (Observation) and
- * `value` — and notably NOT `status` or `intent`, so those are set to what QI-Core requires rather than
- * to satisfy a predicate.
+ * `value`. **They also read `status` and `intent`** — every retrieve on the exclusion paths is wrapped in
+ * a `Status.is*` predicate (`isMedicationActive`, `isEncounterPerformed`, `isProcedurePerformed`,
+ * `isSymptom`, `isAssessmentPerformed`), and the `Status` library reads `status` 22 times and `intent` 6.
+ * So the status values below are chosen **to satisfy those predicates**, not merely to state the QDM
+ * shape — an earlier draft of this comment claimed the opposite, and the margins are thin:
+ * `isMedicationActive` is an `Equal` on `"active"`, so a plausible-looking edit to `"completed"` would
+ * silently kill the dementia exclusion (review, #388). `status-predicates` in the test file pins every
+ * one of them.
  */
 const T = {
   encounterPerformed: "2.16.840.1.113883.10.20.24.3.23",
@@ -305,8 +320,7 @@ function serviceRequestFrom(node: CdaNode, i: string): unknown {
   return {
     resourceType: "ServiceRequest",
     id: idOf(node, `qrda1-servicerequest-${i}`),
-    // QI-Core requires both; neither is read by the measures, so they state the QDM shape rather than
-    // satisfy a predicate — this element is an ORDER that was placed.
+    // Both are READ: `Status.isInterventionOrder` requires `intent = 'order'` and an active-ish status.
     status: "active",
     intent: "order",
     code,
@@ -378,7 +392,11 @@ function medicationRequestFrom(node: CdaNode, i: string): unknown {
  * leave the retrieve matching nothing.
  */
 function symptomFrom(node: CdaNode, i: string): unknown {
-  const code = concept(child(node, "value")) ?? concept(child(node, "code"));
+  // No fallback to the element's own `<code>`: it is the "this entry is a symptom" marker, which is in
+  // no value set, so falling back to it would import a Symptom that retrieves nothing while looking
+  // present. Mutation testing showed the equivalent fallback in `deviceRequestFrom` was unreachable
+  // code that read as a safety net; this one is reachable and actively wrong (review, #388).
+  const code = concept(child(node, "value"));
   if (!code) return undefined;
   const t = times(child(node, "effectiveTime"));
   return {
@@ -496,6 +514,13 @@ export function importQrda1Document(xml: string): Qrda1Import {
     let index = 0;
     for (const candidate of candidates) {
       const key = `${i}-${index++}`;
+      // QDM negation rationale: `negationInd="true"` means the act did NOT happen. Importing it as a
+      // positive Procedure or Intervention would manufacture a denominator exclusion out of a record
+      // stating the opposite — the worst failure available here, since it is silent and it fabricates
+      // compliance-relevant data. Skipped, and the entry therefore reports its datatype as untranslated
+      // (the diagnostic does not distinguish "negated" from other drops, which is a known limit).
+      // Cypress's archives carry none, so this is latent rather than measured (review, #388).
+      if (candidate.attrs.negationInd === "true") continue;
       const resource =
         hasTemplate(candidate, T.encounterPerformed) ? encounterFrom(candidate, key)
         : hasTemplate(candidate, T.diagnosis) ? conditionFrom(candidate, key)

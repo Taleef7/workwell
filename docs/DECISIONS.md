@@ -22,17 +22,37 @@ Intervention Performed → `Procedure` (Hospice Care Ambulatory, Palliative Care
 Intervention Order → `ServiceRequest` (same value set, different type — so the pair cannot be collapsed),
 Device Order → `DeviceRequest` (Frailty Device), Medication Active → `MedicationRequest` (Dementia
 Medications), Symptom and Assessment Performed → `Observation` (Frailty Symptom). The libraries read
-`authoredOn`, `performed`, `effective` and `value` — and notably **not** `status` or `intent`, so those
-are set to what QI-Core requires rather than to satisfy a predicate.
+`authoredOn`, `performed`, `effective` and `value` — **and also `status` and `intent`**: every retrieve on
+an exclusion path is wrapped in a `Status.is*` predicate, and the `Status` library reads `status` 22 times
+and `intent` 6. A first draft of this ADR said the opposite and used it to justify the values chosen. The
+values are all correct, but the reasoning was false and the margins are thin — `isMedicationActive` is an
+`Equal` on `"active"`, so a plausible "just state the QDM shape" edit to `"completed"` silently kills the
+dementia exclusion (review, #388). Each value is now pinned against the predicate it satisfies.
 
-**Decision 2 — a `<translation>` is an ADDITIONAL coding, and an unmappable primary code no longer
-discards the resource.** CDA's translation is "the same concept in another vocabulary", which is exactly
-what a `CodeableConcept` with several `coding` entries means. Measured: 4 of CMS125's 10 `Procedure,
-Performed` entries are coded in **ICD-10-PCS**, absent from the map — so the whole Procedure vanished,
-taking a mastectomy exclusion with it, while the SNOMED code the exclusion value set actually contains
-sat inside the element unread. The map is now a superset of the export's (the export need only emit what
-our bundles carry; the import must read what a third party wrote), and `concept()` returns undefined only
-when nothing at all resolved.
+**Decision 2 — a `<translation>` is an ADDITIONAL coding, an unmappable primary code no longer discards
+the resource, and every system URL is the one the ARTIFACTS use.** CDA's translation is "the same concept
+in another vocabulary", which is exactly what a `CodeableConcept` with several `coding` entries means.
+Measured: 4 of CMS125's 10 `Procedure, Performed` entries are coded in **ICD-10-PCS**, absent from the map
+— so the whole Procedure vanished, taking a mastectomy exclusion with it, while the SNOMED code the
+exclusion value set actually contains sat inside the element unread. The map is now a superset of the
+export's (the export need only emit what our bundles carry; the import must read what a third party
+wrote), and `concept()` returns undefined only when nothing at all resolved.
+
+**And a near-miss URL is worse than an absent one** — which review of #388 found live in this very change.
+`cql-execution` compares `system` by exact string equality, so an unmapped system drops the resource
+*visibly* (`untranslatedTemplates` names it) while a wrong URL imports it and leaves it invisible to every
+retrieve, with no diagnostic anywhere. HCPCS was mapped to `urn:oid:2.16.840.1.113883.6.285` against the
+expansions' `http://www.cms.gov/Medicare/Coding/HCPCSReleaseCodeSets` — 103 codes including Annual
+Wellness Visit `G0438` and Hospice Care Ambulatory `G0182` — and **the exact agreement recorded below did
+not catch it**, because the initial population is `exists(...)` and those patients carry other qualifying
+encounters. So every URL is read off the vendored expansions and pinned twice: as literals, and against
+the expansions themselves in a sidecar-gated test that a future re-vendor would trip. Speculative mappings
+are refused — an unvalidatable mapping is a landmine, an absent one is a visible gap.
+
+**Decision 2b — a negated act is skipped, never imported as a positive fact.** `negationInd="true"` means
+the act did not happen; importing it positively would manufacture a denominator exclusion out of a record
+stating the opposite. Cypress's archives carry none, so this is latent and test-covered rather than
+measured, and the diagnostic does not distinguish "negated" from other drops — a known limit.
 
 **Decision 3 — three fields that decide a population and had no mapping at all.** `Encounter.hospitalization.dischargeDisposition` from `<sdtc:dischargeDispositionCode>` (an inpatient
 stay ending in discharge to hospice is an exclusion in both measures — measured as the LAST remaining

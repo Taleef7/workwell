@@ -539,8 +539,15 @@ and the comparison was re-run over both archives.
 | DENEX | 32 | **32** | 47 | **47** |
 
 **Per subject: 64 of 64 and 150 of 150 agree on every population.** Re-run against the pass-A archive —
-independently generated, differently duplicated (66 documents instead of 68, 152 instead of 153) — every
-graded number identical.
+differently duplicated (66 documents instead of 68, 152 instead of 153) — every graded number identical.
+
+**Read that second run for what it is.** Per §12 it is the SAME 214 people re-serialised with different
+duplication, so it is a robustness check on identity resolution and on the duplicate handling; it cannot
+cover a mapper the first archive never exercised. Two mappers are barely exercised by either: the corpus
+carries **one** `Medication, Active` and **two** `Device, Order` entries per archive, so 64/64 and 150/150
+are not evidence for those two. They are evidenced instead by isolating probes that run each mapper's
+exact output through the real CMS125 artifact with a control — added in review of #388, where a
+`DeviceRequest` alone leaves DENEX false and adding the importer's own `MedicationRequest` flips it true.
 
 That is the first external, known-answer validation of the chain from a **third party's document**
 through our import into the official executor. It is complementary to the MADiE gate rather than a
@@ -576,9 +583,26 @@ both: `<code>` the instrument, `<value>` the result.
 Result: CMS122 **41 → 55 of 64** agreeing, CMS125 **122 → 141 of 150**.
 
 **(b) `<translation>` as an additional coding, and an unmapped primary code no longer discards the
-resource.** ICD-10-PCS added to the system map (plus RxNorm, CVX and four others), and `concept()` now
-returns every coding the element expresses — CDA's translation is "the same concept in another
-vocabulary", which is exactly what a multi-coding `CodeableConcept` means.
+resource.** ICD-10-PCS and RxNorm added to the system map, and `concept()` now returns every coding the
+element expresses — CDA's translation is "the same concept in another vocabulary", which is exactly what
+a multi-coding `CodeableConcept` means. **Subject delta: 0 on this corpus.** The four ICD-10-PCS
+Procedures belong to subjects (a) had already moved, so this fix changed no count here — it is carried by
+its own test and by the constructed proof in §16.2, not by the aggregate.
+
+**(b′) A near-miss URL, found in review and worse than the bug above.** `cql-execution` compares
+`system` by exact string equality, so an unmapped system drops a resource visibly (it appears in
+`untranslatedTemplates`) while a WRONG url imports it and leaves it invisible to every retrieve, silently.
+HCPCS was mapped to `urn:oid:2.16.840.1.113883.6.285` where the vendored expansions say
+`http://www.cms.gov/Medicare/Coding/HCPCSReleaseCodeSets` — **103 codes across the two measures**,
+including Annual Wellness Visit `G0438` (22 documents, on an Encounter Performed with no `<translation>`),
+Hospice Care Ambulatory `G0182`, and the Hospice and Frailty Encounter sets. **It did not show up as a
+divergence because the initial population is `exists(...)` and those patients carry other qualifying
+encounters** — the exact "right aggregate for the wrong reason" this whole comparison was supposed to
+catch, and it survived it. Now pinned twice: literals in `qrda1-import.test.ts`, and
+`qrda1-import-official.test.ts` reading the artifacts' own expansions so a future re-vendor that moves a
+URL fails rather than silently under-matching. Speculative mappings I had added in the same change (CVX,
+CDT, NUCC, plain ICD-10) are **removed** for the same reason: a mapping nothing can validate is a
+landmine, an absent one is a visible gap.
 
 **(c) The remaining 9-per-measure, which the fix surfaced rather than closed.** After (a) and (b) both
 measures were short by exactly nine subjects, and all nine carried the same name shape — `THREE N
@@ -610,3 +634,11 @@ truth.
 **And the identity resolution this depends on still lives in the harness, not the product.**
 `POST /api/runs/:id/evaluate` keys the subject off the first `<id>` extension, so a real submission would
 still report 68 people where Cypress expects 64.
+
+**Datatypes still dropped, named rather than left to be discovered:** Patient Characteristic Payer (68 /
+153 entries — supplemental data, no population reads it) and Patient Characteristic Expired (0 / 14).
+Neither is retrieved by CMS122 or CMS125. **`negationInd` is now handled** — a negated act is skipped
+rather than imported as a positive fact, which would have manufactured an exclusion from a record stating
+the opposite — but Cypress's archives contain none, so that path is covered by a test and by nothing
+else. And a re-EXPORT of an imported document now reports the three new resource types as untranslatable
+instead of dropping them in silence; the asymmetry is deliberate, the silence was not.

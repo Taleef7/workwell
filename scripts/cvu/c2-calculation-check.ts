@@ -382,9 +382,9 @@ export async function main(argv: readonly string[]): Promise<number> {
     out.push(
       "",
       "**Untranslated QDM templates** — an entry we cannot read is a population difference waiting to happen.",
-      "NOTE: `untranslatedTemplates` reports the LAST templateId in the entry, which is routinely a nested",
-      "ATTRIBUTE template (Author dateTime `…24.3.155`, Rank `…24.3.166`) rather than the datatype that was",
-      "dropped. Read the resource tally above for what was actually lost.",
+      "These are DATATYPE templates: the importer used to report the last templateId in the entry, which is",
+      "routinely a nested ATTRIBUTE template (Author dateTime `…24.3.155`, Rank `…24.3.166`); fixed in",
+      "ADR-055. Cross-check against the resource tally above, which is the direct measure of what survived.",
       "",
     );
     for (const [template, count] of [...untranslated.entries()].sort((a, b) => b[1] - a[1])) {
