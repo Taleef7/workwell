@@ -1,6 +1,6 @@
 # Journal
 
-## 2026-08-04 (M-B / B7) — a second engine runs our artifacts for the first time: 56/66, and the 10 exceptions are one population in one direction (branch `feat/cross-engine-check`)
+## 2026-08-04 (M-B / B7) — a second engine runs our artifacts for the first time: 255/278 across six measures, three of them perfect (branch `feat/cross-engine-check`)
 
 The check that changes what we can honestly say. Our MADiE gate is 410/410, but **the execution is entirely
 ours** — and the obvious second opinions do not qualify, because **`fqm-testify` and `deqm-test-server` both
@@ -60,8 +60,10 @@ contribution, and it is the concrete thing to bring to M-E0.
 
 **The JVM is back — deliberately, and only here.** ADR-008 retired it from the product; this is a dev-time
 oracle in Docker, never runtime, packaged or CI. Evidence:
-`docs/evidence/CROSS_ENGINE_2026-08-04.md`. Next: isolate the mechanism by construction, explain the two
-`Procedure`-only cases, sweep CMS122, take it to the track.
+`docs/evidence/CROSS_ENGINE_2026-08-04.md`. **Still open:** the mechanism is characterised, not proven —
+a mutation attempt failed because a hand-PUT resource is not retrieved the way a bundle-loaded one is, and
+until that is understood no mutation experiment on this harness can be trusted. CMS130/CMS165 have no test
+cases checked out and are unmeasured. Then: take the classified discrepancies to the CMS7-FQR track (M-E0).
 
 ## 2026-08-04 (M-B / B6) — the first FHIR-column measurement: base R4 is clean, DEQM is three defects wide (branch `feat/deqm-validate`)
 
