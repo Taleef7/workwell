@@ -74,7 +74,10 @@ Active plan: **`docs/ROADMAP_2026-08-04.md`** (supersedes `ROADMAP_2026-07-24.md
   > `official-executor/`. The debt described above is therefore still in the tree, still allowlisted, and
   > still PR-2's job — just later than this bullet implies.
 - **Official-path machinery exists** (literal-diff + official-cases over fqm-execution, 121/121 MADiE
-  green) but is CMS122-hardcoded, vendored at stale v0.5.000 (CMS125 not vendored), and ADR-026-fenced
+  green — **SINCE 2026-07-31 the gate is 410/410 exact across EIGHT measures**: CMS122 55, CMS125 66,
+  CMS2 36, CMS68 19, CMS951 55, CMS138 47, CMS130 64, CMS165 68, 0 unexpected, 0 errors, per-measure
+  detail and the CMS138 caveat in `docs/STANDARDS_CONFORMANCE.md`; **gated ≠ routed** — only CMS122 and
+  CMS125 route, demo/production only) but is CMS122-hardcoded, vendored at stale v0.5.000 (CMS125 not vendored), and ADR-026-fenced
   diagnostic-only. `MeasureExecutor` seam is clean but env-global; official-first needs per-measure
   routing. MeasureReport D1/D2 were already fixed (PR #294/ADR-031) — PR-3 below only generalizes.
   > **SINCE (2026-07-30): every deficiency in this bullet is closed.** Both CMS122 and CMS125 are vendored
