@@ -1,5 +1,44 @@
 # Journal
 
+## 2026-08-04 (M-B / B6) — the first FHIR-column measurement: base R4 is clean, DEQM is three defects wide (branch `feat/deqm-validate`)
+
+First of the two checks that replaced the retired Cypress bar (ADR-058, ROADMAP §4 V3).
+`backend-ts/scripts/deqm-validate.ts` builds four MeasureReports from the **real production builders** and
+runs the HL7 validator over each **twice**: base R4, then the DEQM STU5 profile requested explicitly.
+
+```text
+base R4 : 0 errors across all four reports   ← the floor
+DEQM    : 12 errors — exactly 3 per report, the SAME 3 every time
+```
+
+**The two runs are different questions and the script says so.** `measure-report.ts` deliberately does not
+stamp `meta.profile` with a DEQM canonical, so nothing here claims DEQM conformance — the validator was
+*pointed* at the profiles with `-profile`. Claiming a profile we do not meet is the misdeclaration ADR-050
+corrected for QRDA's `…24.1.3` and `…27.1.2`; asking what claiming it *would* cost is the honest version.
+**Do not add `meta.profile` on the strength of this run** — the gate is 0 DEQM errors, with the base run
+proving the resource stayed valid R4.
+
+**The identical 3-per-report count across official AND authored is the informative part**: none of the
+three is provenance-dependent, so they are properties of how every report is built rather than of the
+ADR-046 identity split. (1) **`deqm-0`** — the canonical SHALL carry a version, and **we already hold it**
+(`evidence.official.version`, which ADR-046 threads to the QRDA III identity), so this is an omission at one
+call site rather than missing data. (2) **`reporter` fails `qicore-organization`** — our contained
+Organization carries only `name`; that is QI-Core's constraint reaching us *through* DEQM. (3) **`deqm-3`**
+— measure scoring required on the root **or** every group and not both; we emit none.
+
+**Two findings outside the error count.** `measureScore.value` is warned as outside commonly supported
+decimal range: we emit raw float `0.019417475728155338` while `qrda3-export.ts` formats the same quantity
+`.toFixed(4)` — and that file's comment claims the two exporters "must match exactly". They match in value,
+not representation. And the DEQM package **resolves `hl7.fhir.us.qicore#6.0.0` + `hl7.fhir.us.core#6.1.0`**,
+which is independent confirmation of ROADMAP §6 correction 2 arriving from the tool rather than from
+research — the published stack binds **QI-Core 6, not STU7**.
+
+Deliberately **not in CI** (Java 17+, a ~187 MB rolling jar, network to `packages.fhir.org` — none of them
+backend-ts deps), following the `qrda-schematron-check.py` precedent: the script is how a number gets its
+authority, and regressions get pinned in TypeScript citing constraint keys. The jar is gitignored and the
+run **records its SHA-256** rather than pinning one, because pinning a rolling "latest" would be stale
+rather than protective. Evidence: `docs/evidence/DEQM_VALIDATION_2026-08-04.md`. Typecheck clean.
+
 ## 2026-08-04 — the roadmap is reworked: the engine is the product, and the ruler we were chasing does not exist for our column (branch `docs/roadmap-2026-08-04`, ADR-058)
 
 **Started the day intending to build supplemental data. Reading Cypress's source instead killed that plan
