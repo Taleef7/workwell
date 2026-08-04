@@ -109,7 +109,11 @@ is no cache-bust short of a restart, and the failure mode is silent — you get 
 
 - **CMS130/CMS165 are unmeasured** (no test cases checked out locally), and the **CMS2** failure shape
   (`NUMER 1→0`) has a different, undiagnosed cause. Only the CMS125/CMS122 mechanism below is proven.
-- **The two `Procedure`-only cases are unexplained** by the branch account, so there are likely two causes.
+- **The proven mechanism accounts for 14 of the 23, not all of them.** By inventory: CMS122 6/6 and CMS125
+  8/10 of the disagreeing cases carry a `MedicationRequest`, and none of the 25 agreeing `DENEX = 1` cases
+  does. Proven by construction on **one**; consistent-with for the other 13. **The remaining 2 CMS125 cases
+  (`4cf81a94…`, `857fec09…`) are `Procedure`-only and are NOT explained** — same failure shape, different
+  cause, most likely another exclusion branch. Plus CMS2's 7. So **9 of 23 remain unattributed**.
 - **This does not show our engine is "correct" and the Java one "wrong."** It shows that on this artifact,
   this data and **this server configuration**, one implementation diverges from the expected results in a
   characterizable way. A stock HAPI container was used; no alternative CR settings were explored, and a
@@ -238,8 +242,14 @@ CI dependency.
 
 ## Next
 
-1. Isolate the mechanism by construction — remove/alter the `MedicationRequest` on one disagreeing case and
-   confirm the population flips, the way ADR-055's importer causes were proven.
-2. Explain the two `Procedure`-only cases, which the medication hypothesis does not cover.
-3. Sweep CMS122 (55 cases, and note `CMS122_KNOWN_BAD_EXPECTEDS` — 6 expecteds upstream itself flags wrong).
-4. Take the classified discrepancies to the CMS7-FQR track (M-E0).
+1. ~~Isolate the mechanism by construction~~ — **DONE.** The failing conjunct is `"Has Dementia
+   Medications in Year Before or During Measurement Period"`, isolated by three single-variable mutations.
+2. **Explain the two `Procedure`-only CMS125 cases** (`4cf81a94…`, `857fec09…`) — same failure shape,
+   different cause, most likely another exclusion branch. Bilateral mastectomy expressed as two unilateral
+   procedures is the obvious candidate.
+3. **Diagnose CMS2's 7 `NUMER 1→0` cases** — distinct in shape from everything above.
+4. ~~Sweep CMS122~~ — **DONE** (49/55; all 6 disagreements carry a `MedicationRequest`, consistent with
+   Finding 1). Sweep **CMS130 and CMS165** once their test cases are checked out — they need the
+   credentialed vendor workflow.
+5. Take the classified discrepancies to the CMS7-FQR track (M-E0) —
+   `docs/evidence/CONNECTATHON_DISCREPANCIES_2026-08-04.md` is drafted; submission is an owner calendar step.

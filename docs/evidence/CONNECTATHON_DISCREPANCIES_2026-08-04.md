@@ -39,7 +39,11 @@ exclusion is true, so a missed exclusion necessarily reports there as two differ
 
 ## Finding 1 — `medicationRequestPeriod()` when `dosageInstruction` is absent
 
-**Measures affected:** CMS125 (10 cases), CMS122 (6 cases).
+**Measures affected: 14 of the 23 disagreements** — CMS122 **6 of 6**, CMS125 **8 of 10**. Attribution is
+by inventory: every one of those 14 cases carries a `MedicationRequest`, and none of the 25 CMS125 cases
+that *agree* with `DENEX = 1` carries one. **The mechanism below is proven by construction on ONE case**;
+for the other 13 it is consistent-with, not individually demonstrated. The remaining **2 CMS125 cases are
+`Procedure`-only and are NOT explained by this finding** (see Finding 3).
 **Proposed classification: (A) spec clarification**, with **(C) content fix** as an alternative. See below.
 
 ### What diverges
@@ -102,8 +106,8 @@ test case exercising a medication-duration path arguably ought to carry the dosa
 consumes — but that would change the content rather than settle what the function means.
 
 **Question for the track:** what *should* `medicationRequestPeriod()` return when `dosageInstruction` is
-absent but `dispenseRequest.expectedSupplyDuration` is present? A defined answer resolves 16 of our 23
-discrepancies.
+absent but `dispenseRequest.expectedSupplyDuration` is present? A defined answer would account for **14 of
+our 23** discrepancies — not all of them, and see the attribution caveat above.
 
 ---
 
@@ -123,13 +127,20 @@ hand-authored data.
 
 ---
 
-## Finding 3 — CMS2 `NUMER 1→0`, undiagnosed
+## Finding 3 — the 9 disagreements Finding 1 does NOT explain
 
-**Measure affected:** CMS2 (7 cases). **Classification: unknown — we are asking, not reporting.**
+**Classification: unknown — we are asking, not reporting.**
 
-Seven cases where the expected numerator is 1 and `cqf-fhir-cr` returns 0, with the exclusion untouched.
-Distinct in shape from Findings 1 and 2 and not yet isolated. We can supply the case ids and per-case
-vectors on request.
+**(a) CMS125, 2 cases, `Procedure`-only.** `4cf81a94-81fb-4be2-b075-7d8f9ff02a6e` and
+`857fec09-9c8c-4e4b-a123-85f473b8fc2a` carry only `Patient`, `Encounter` and `Procedure` — no
+`MedicationRequest` — so the medication-period finding cannot account for them even though their failure
+shape (`DENEX 1→0`) is identical. Most likely a different exclusion branch (bilateral mastectomy expressed
+as two unilateral procedures is the obvious candidate), not yet isolated.
+
+**(b) CMS2, 7 cases, `NUMER 1→0`.** Expected numerator 1, `cqf-fhir-cr` returns 0, exclusion untouched.
+Distinct in shape from everything above and not yet isolated.
+
+We can supply case ids and per-case vectors for both on request.
 
 ---
 
