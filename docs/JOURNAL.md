@@ -1,5 +1,70 @@
 # Journal
 
+## 2026-08-04 (M-B / B7) — a second engine runs our artifacts for the first time: 255/278 across six measures, three of them perfect (branch `feat/cross-engine-check`)
+
+The check that changes what we can honestly say. Our MADiE gate is 410/410, but **the execution is entirely
+ours** — and the obvious second opinions do not qualify, because **`fqm-testify` and `deqm-test-server` both
+wrap `fqm-execution`**, so they compare our engine to itself. `cqf-fhir-cr` (HAPI Clinical Reasoning) is a
+separate implementation in a different language. This is the first time WorkWell's artifacts have been run
+by anything that is not us.
+
+```text
+SIX measures, 278 MADiE cases, HAPI 8.10.0, completed terminology
+  CMS68   19/19    CMS951  55/55    CMS138  47/47     <- perfect
+  CMS122  49/55    CMS125  56/66    CMS2    29/36
+  total  255/278   (23 disagreements)
+```
+
+IPP and DENOM agree on **all 278**. Within each measure every disagreement has one identical shape:
+CMS125 `DENEX 1→0`; CMS122 `DENEX 1→0` **and** `NUMER 0→1` (the same root — it is inverse, and `fqm` zeroes
+the numerator when an exclusion is true, so one cause reports as two differences); CMS2 `NUMER 1→0`, which
+is a genuinely different failure.
+
+**A tidy hypothesis, killed by measurement.** The first sweep ran on the upstream bundle's terminology,
+where `…1003.110.12.1082` (AdvancedIllness) ships **capped at 1000 of 1997** — the exact gap ADR-041 exists
+to close, and it feeds a DENEX, so it was the obvious suspect. Pushed our completed expansions (32 value
+sets, **3043 codes**, matching ADR-041's recorded figure), **verified the server holds `expansion.total:
+2000`** for that OID, re-ran: **the same 10.** Terminology is excluded.
+
+**Two corrections to my own first reading, both from measurement.** (1) **`$evaluate-measure` CACHES** —
+a `Condition` PUT for an already-evaluated subject was stored and searchable yet the next evaluation
+returned a byte-identical `evaluatedResource` without it. That means the terminology test above ran WARM
+and proved nothing as first evidenced; re-run cold it gives the same 10, so the conclusion stands and now
+the evidence does too. (2) The disagreement is **branch-level, not resource-level**: I first reported a
+`MedicationRequest` correlation (8/10 vs 0/25), but Java **does** retrieve both the `MedicationRequest` and
+the `DeviceRequest` — they are in `evaluatedResource`. What separates the groups is that every agreeing
+DENEX case uses a *simple* branch (hospice, mastectomy history) while every disagreeing one uses the
+compound **Advanced Illness and Frailty** branch. **Stated as characterisation, not cause** — this codebase's standard for a cause is a mutation
+that flips one case (ADR-055), and that has not been done yet. Also stated: this does **not** show ours is
+right and theirs wrong. It shows that on this artifact, this data and **this server configuration**, one
+implementation diverges in a characterizable way; a stock HAPI was used and no alternative CR settings were
+explored.
+
+**Two traps closed in the harness itself.** The CR property is **`hapi.fhir.cr.enabled`** — with
+`cr_enabled` the server starts fine and declares no measure operations, a silent no-op, so the script now
+refuses unless `Measure/$evaluate-measure` is in the CapabilityStatement (otherwise every evaluate 404s and
+the sweep reports "0 agreements" that is really a broken container). And it **refuses a sweep where every
+case returns an all-zero vector** — that is terminology or libraries failing to resolve wearing agreement's
+clothes, the PR-8f/ADR-043 hazard.
+
+**A batch-run number I published and then had to correct:** an initial loop swept all six measures back to
+back and reported **CMS122 at 7/55**. The container answers `/metadata` with 200 before the CR module is
+ready, so that sweep ran against a half-started server. On a settled server CMS122 is **49/55**. A degraded
+server produces *more* disagreement, not less, which is why the three 100% results survived the bad batch —
+but both divergent measures were re-measured before being reported.
+
+**Context that makes the 23 unsurprising:** the CMS7-FQR connectathon's own Java-vs-JS run over 74 measures
+× 3,964 cases found **98.16% pass with 3 measures still disputed**, and the track's stated ask to
+participants is precisely *verify on an alternate engine and classify each discrepancy*. This run is that
+contribution, and it is the concrete thing to bring to M-E0.
+
+**The JVM is back — deliberately, and only here.** ADR-008 retired it from the product; this is a dev-time
+oracle in Docker, never runtime, packaged or CI. Evidence:
+`docs/evidence/CROSS_ENGINE_2026-08-04.md`. **Still open:** the mechanism is characterised, not proven —
+a mutation attempt failed because a hand-PUT resource is not retrieved the way a bundle-loaded one is, and
+until that is understood no mutation experiment on this harness can be trusted. CMS130/CMS165 have no test
+cases checked out and are unmeasured. Then: take the classified discrepancies to the CMS7-FQR track (M-E0).
+
 ## 2026-08-04 (M-B / B6) — the first FHIR-column measurement: base R4 is clean, DEQM is three defects wide (branch `feat/deqm-validate`)
 
 First of the two checks that replaced the retired Cypress bar (ADR-058, ROADMAP §4 V3).

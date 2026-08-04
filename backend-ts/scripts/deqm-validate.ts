@@ -17,6 +17,15 @@
  * arms: clean → `0 base errors, exit 0`; injected → `2 base errors, exit 1`. Re-run both if you touch
  * the exit logic — a guard nobody has watched fail is a guard nobody knows works.
  *
+ * ## The findings ARE pinned in CI — in `src/fhir/measure-report.test.ts`
+ *
+ * Four tests pin the measured gap: `deqm-0` (canonical carries no version), the contained reporter's
+ * inability to satisfy `qicore-organization`, `deqm-3` (no measure-scoring on root or group), and the
+ * full-float `measureScore` that `qrda3-export.ts` formats differently. They pin the NON-CONFORMANT state
+ * deliberately — we do not claim a DEQM `meta.profile`, so they record the distance to it. **When one is
+ * fixed, invert the test rather than deleting it, and re-run this script** so the error count is measured
+ * to have fallen rather than asserted to have.
+ *
  * ## Why this exists as a script and not a test
  *
  * Same reasoning as the Schematron checker, and the same discipline. It needs **Java 17+** and a
