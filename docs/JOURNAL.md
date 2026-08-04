@@ -60,10 +60,22 @@ contribution, and it is the concrete thing to bring to M-E0.
 
 **The JVM is back — deliberately, and only here.** ADR-008 retired it from the product; this is a dev-time
 oracle in Docker, never runtime, packaged or CI. Evidence:
-`docs/evidence/CROSS_ENGINE_2026-08-04.md`. **Still open:** the mechanism is characterised, not proven —
-a mutation attempt failed because a hand-PUT resource is not retrieved the way a bundle-loaded one is, and
-until that is understood no mutation experiment on this harness can be trusted. CMS130/CMS165 have no test
-cases checked out and are unmeasured. Then: take the classified discrepancies to the CMS7-FQR track (M-E0).
+`docs/evidence/CROSS_ENGINE_2026-08-04.md`.
+
+**The mechanism is now PROVEN by construction, and the thing that unblocked it was the failed first
+attempt.** A hand-`PUT` resource with no `meta.profile` is stored, searchable and **silently never
+retrieved** — `cqf-fhir-cr` retrieval is QI-Core profile-sensitive. Stamp the profile and the same resource
+is retrieved immediately. With that, three single-variable mutations on one failing subject: injecting a
+hospice `Condition` flips DENEX 0→1 (so the engine CAN exclude this subject — the failure is
+branch-specific); adding `dosageInstruction` alone does not; injecting an **Advanced Illness** `Condition`
+flips it to 1. That last one bypasses only the medication path, and since the branch is
+`age ≥ 66 AND frailty AND (advanced illness OR dementia meds)`, it proves the age and frailty conjuncts are
+both credited. **The failing conjunct is precisely `"Has Dementia Medications in Year Before or During
+Measurement Period"`** — whose `medicationRequestPeriod()` derives from `dosageInstruction`, which the MADiE
+test cases omit entirely. The two engines disagree on what that yields.
+
+**Still open:** CMS2's `NUMER 1→0` is a different, undiagnosed cause; CMS130/CMS165 have no test cases
+checked out. Next: take the classified discrepancies to the CMS7-FQR track (M-E0).
 
 ## 2026-08-04 (M-B / B6) — the first FHIR-column measurement: base R4 is clean, DEQM is three defects wide (branch `feat/deqm-validate`)
 

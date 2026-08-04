@@ -107,19 +107,13 @@ is no cache-bust short of a restart, and the failure mode is silent — you get 
 
 ## What is NOT established — read this before quoting the number
 
-- **The mechanism is NOT confirmed by construction, and a mutation proof was ATTEMPTED and FAILED.** This
-  codebase's standard for a cause is a mutation that flips one case (ADR-055). The attempt: inject a hospice
-  `Condition` — a branch Java demonstrably credits — into a failing subject on a **cold** server, expecting
-  `DENEX` to flip to 1 and thereby isolate the failure to the Advanced-Illness-and-Frailty branch.
-
-  **It did not flip.** The injected `Condition` was stored and searchable but never appeared in
-  `evaluatedResource`, on a cold server, on repeated calls — while the *real* hospice case
-  (`01c88972…`) evaluated correctly on that same server with its `Condition` present in `evaluatedResource`.
-  So a hand-PUT resource is not picked up the way a bundle-loaded one is, for a reason not isolated here
-  (candidate differences: the id form, `category` display, or something in the CR data-retrieval path).
-  **Until that is understood, no mutation experiment on this harness can be trusted**, which is why the
-  cause remains characterised rather than proven.
-- **The two `Procedure`-only cases are unexplained** by the branch account, so there are likely two causes.
+- **CMS130/CMS165 are unmeasured** (no test cases checked out locally), and the **CMS2** failure shape
+  (`NUMER 1→0`) has a different, undiagnosed cause. Only the CMS125/CMS122 mechanism below is proven.
+- **The proven mechanism accounts for 14 of the 23, not all of them.** By inventory: CMS122 6/6 and CMS125
+  8/10 of the disagreeing cases carry a `MedicationRequest`, and none of the 25 agreeing `DENEX = 1` cases
+  does. Proven by construction on **one**; consistent-with for the other 13. **The remaining 2 CMS125 cases
+  (`4cf81a94…`, `857fec09…`) are `Procedure`-only and are NOT explained** — same failure shape, different
+  cause, most likely another exclusion branch. Plus CMS2's 7. So **9 of 23 remain unattributed**.
 - **This does not show our engine is "correct" and the Java one "wrong."** It shows that on this artifact,
   this data and **this server configuration**, one implementation diverges from the expected results in a
   characterizable way. A stock HAPI container was used; no alternative CR settings were explored, and a
@@ -147,6 +141,56 @@ concrete thing to bring to M-E0.
 
 That is a stronger and more specific claim than the Cypress green ADR-058 retired — and unlike that one, it
 was obtainable.
+
+## MECHANISM — proven by construction (the mutation proof, second attempt)
+
+The first attempt failed and the reason turned out to be the finding that unblocked everything:
+
+**`cqf-fhir-cr` retrieval is QI-Core `meta.profile`-sensitive.** A hand-`PUT` `Condition` with no
+`meta.profile` is stored and searchable but **never retrieved** — it does not appear in
+`evaluatedResource` and the measure evaluates as if it were absent. Add
+`meta.profile: [".../qicore-condition-problems-health-concerns"]` and the *same* resource is retrieved
+immediately. **Anyone hand-building test data for this engine must stamp the QI-Core profile**, and the
+failure mode is silent.
+
+With that understood, three single-variable mutations on a failing subject (`d4540640…`, born 1952 — age
+74, carrying a frailty `DeviceRequest` and rivastigmine, both QI-Core-profiled and both retrieved):
+
+| mutation | DENEX | what it establishes |
+|---|---|---|
+| baseline | 0 | the disagreement |
+| inject a **hospice** `Condition` (profiled) | **1** | the engine CAN exclude this subject — the failure is branch-specific, not patient- or data-specific |
+| add `dosageInstruction` to the MedicationRequest | 0 | not sufficient on its own |
+| inject an **Advanced Illness** `Condition` (profiled) | **1** | **decisive** |
+
+The last one bypasses only the medication path. Since the branch is
+`age ≥ 66 AND frailty AND (advanced illness OR dementia meds)`, DENEX going to 1 proves **the age and
+frailty conjuncts are both credited** by `cqf-fhir-cr`. Therefore:
+
+> **The failing conjunct is precisely `"Has Dementia Medications in Year Before or During Measurement
+> Period"`.**
+
+Reading the CQL confirms the shape of it. That define is
+`[MedicationRequest: "Dementia Medications"].isMedicationActive()` filtered on
+`medicationRequestPeriod() overlaps ...`, and `medicationRequestPeriod()` (in the
+`CumulativeMedicationDuration` library) begins:
+
+```cql
+let dosage: singleton from R.dosageInstruction,
+    doseAndRate: singleton from dosage.doseAndRate, ...
+```
+
+**The MADiE test case's MedicationRequest has no `dosageInstruction` at all** — it carries only
+`dispenseRequest.expectedSupplyDuration`. So the function's inputs are null, and **the two engines
+disagree about what that yields**: `fqm-execution` produces an interval that overlaps the lookback window
+(matching the measure developer's expected result), `cqf-fhir-cr` does not. Adding a minimal
+`dosageInstruction` did not flip it, so the divergence is in the whole derivation, not in that one field.
+
+**This is a contributable finding**, and it is the shape the CMS7-FQR track asks for. Provisional
+classification: **(A) spec clarification** or **(B) tooling fix** — the behaviour of
+`medicationRequestPeriod()` when `dosageInstruction` is absent is not pinned by the spec, and two
+conforming engines read it differently. Arguably also **(C) content fix**, since a test case exercising a
+medication-duration path arguably ought to carry the dosage the calculation needs.
 
 ## The harness's own refusals, and which are proven
 
@@ -198,8 +242,14 @@ CI dependency.
 
 ## Next
 
-1. Isolate the mechanism by construction — remove/alter the `MedicationRequest` on one disagreeing case and
-   confirm the population flips, the way ADR-055's importer causes were proven.
-2. Explain the two `Procedure`-only cases, which the medication hypothesis does not cover.
-3. Sweep CMS122 (55 cases, and note `CMS122_KNOWN_BAD_EXPECTEDS` — 6 expecteds upstream itself flags wrong).
-4. Take the classified discrepancies to the CMS7-FQR track (M-E0).
+1. ~~Isolate the mechanism by construction~~ — **DONE.** The failing conjunct is `"Has Dementia
+   Medications in Year Before or During Measurement Period"`, isolated by three single-variable mutations.
+2. **Explain the two `Procedure`-only CMS125 cases** (`4cf81a94…`, `857fec09…`) — same failure shape,
+   different cause, most likely another exclusion branch. Bilateral mastectomy expressed as two unilateral
+   procedures is the obvious candidate.
+3. **Diagnose CMS2's 7 `NUMER 1→0` cases** — distinct in shape from everything above.
+4. ~~Sweep CMS122~~ — **DONE** (49/55; all 6 disagreements carry a `MedicationRequest`, consistent with
+   Finding 1). Sweep **CMS130 and CMS165** once their test cases are checked out — they need the
+   credentialed vendor workflow.
+5. Take the classified discrepancies to the CMS7-FQR track (M-E0) —
+   `docs/evidence/CONNECTATHON_DISCREPANCIES_2026-08-04.md` is drafted; submission is an owner calendar step.
