@@ -1,18 +1,41 @@
 # Locked decisions + audit facts (always-loaded extract)
 
-> **Authoritative for §4–5.** Extracted from `docs/ROADMAP_2026-07-24.md` (the APPROVED active plan)
-> so the *locked* decisions are in context every session — these are the things a session must not
-> silently contradict. The rest of the roadmap (§1–3 context/critique/north-star, §6–11 milestones,
-> architecture, risks, verification, deliverables — ~44k chars) stays on demand.
+> **Authoritative for §4–5.** This file is `@`-imported into every session so the *locked* decisions are
+> always in context — they are the things a session must not silently contradict.
 >
-> Edit here, not in the roadmap — ROADMAP §4–5 now point at this file.
+> **§4 was rewritten on 2026-08-04** to match `docs/ROADMAP_2026-08-04.md`, the APPROVED active plan
+> (driving ADR: **ADR-058**). **§5 is unchanged**: a dated audit snapshot extracted from the superseded
+> `docs/ROADMAP_2026-07-24.md`, binding on nobody — see its own preamble.
+>
+> The rest of the active roadmap (context, north star, milestones, architecture, risks, verification,
+> deliverables) stays on demand. Edit the decisions here, not in the roadmap.
 
-## 4. Owner decisions (locked 2026-07-24)
+## 4. Owner decisions (locked 2026-08-04 — supersedes the 2026-07-24 set)
 
-1. Spearhead = **M-A official-first execution**.
-2. QRDA bar = **CVU+-validated loop** (import → evaluate → export → Cypress CVU+ green, local Docker).
-3. Packaging = **pnpm workspace now, neutral scope `@workwell/*`**, pitch Doug on `@mieweb/*` later.
-4. Authored cms122/125 subsets **retire from the catalog into the fidelity/Standards lab** post-flip.
+Active plan: **`docs/ROADMAP_2026-08-04.md`** (supersedes `ROADMAP_2026-07-24.md`). Driving ADR: **ADR-058**.
+
+1. **WorkWell is SUPPLEMENTARY to WebChart and does NOT pursue ONC certification.** WebChart carries
+   certification (~33/49 measures). WorkWell carries the engine. **No work is justified by "certification
+   needs it."**
+2. **The verification bar is the FHIR-column verification SET** (`ROADMAP_2026-08-04.md` §4), not a single
+   external pass/fail. A **Cypress Calculation Check green is retired as a goal** — reaching it requires a
+   QDM execution path we are deliberately not building (ADR-058). *(This replaces the 2026-07-24 bar,
+   "import → evaluate → export → Cypress CVU+ green.")*
+3. **We do not relabel, and we do not build a QDM engine.** Emitting a QDM-lineage measure identity over
+   QI-Core-executed counts stays forbidden (ADR-046 d3/d4, reaffirmed by ADR-058). Revisit decision 4 of
+   ADR-058 **only** if MIE states that certification of WorkWell's engine is a business goal.
+4. **QRDA I/III is KEPT as an interoperability bridge**, not a certification target. Both document types
+   validate at 0 findings against the HL7 base ruler; nothing is deleted.
+5. **The engine and its packaging are the primary deliverable** — M-C is promoted ahead of measure breadth.
+   Packaging = **pnpm workspace, neutral scope `@workwell/*`**, pitch Doug on `@mieweb/*` later. The
+   **versioned compliance API** is the contract MIE consumes.
+6. **The differentiator is the measures nobody publishes** (M-E occupational/OSHA). Official eCQMs prove the
+   engine; occupational content is the part no competitor obtains by downloading CMS artifacts.
+7. Authored cms122/125 subsets **retire from the catalog into the fidelity/Standards lab** post-flip
+   *(unchanged from 2026-07-24 #4; issue #377)*.
+
+> **Superseded 2026-07-24 decision, kept for provenance:** *"Spearhead = M-A official-first execution."*
+> M-A is largely complete (six measures gated, two routed); the spearhead is now M-C.
 
 ## 5. Key audit facts (verified 2026-07-24 — a DATED SNAPSHOT, not a live constraint)
 
@@ -88,6 +111,15 @@
   > **Decision #2's bar above is NOT met by any of this.** That bar is the LOOP; this measured the
   > export leg over the synthetic corpus via the externally-supplied-document route. The Cypress
   > **Calculation Check** path has never run.
+  >
+  > **SINCE (2026-08-03 → 2026-08-04): the loop RAN, the calculation comparison PASSED exactly, the
+  > submission came back RED on measure-identity lineage, and decision #2's bar has now been REPLACED.**
+  > Offline against Cypress's own per-patient expected results: **64/64 and 150/150 subjects agreeing on
+  > every population** (ADR-055). Through the product API end to end, emitting Cypress's exact counts
+  > (ADR-056). The submission is red because `extract_results_by_ids` short-circuits on measure identity —
+  > Cypress holds CMS125v14 (QDM), we run CMS125FHIR v1.0.000 (QI-Core) — and the QI-Core artifact has **no
+  > per-population UUIDs** for QRDA III's identity model to carry. **ADR-058** retires the Calculation Check
+  > green as a goal and moves the bar to the FHIR-column set; §4 above is rewritten accordingly.
 - **All 8 priority measures have official QICore v1.0.000 artifacts + MADiE test cases** in
   `cqframework/dqm-content-qicore-2025` (CMS2FHIRPCSDepScreenAndFollowUp, CMS68FHIRDocumentationCurrentMeds,
   CMS122FHIRDiabetesAssessGT9Pct, CMS125FHIRBreastCancerScreen, CMS130FHIRColorectalCancerScrn,
