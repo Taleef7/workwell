@@ -9,12 +9,16 @@ separate implementation in a different language. This is the first time WorkWell
 by anything that is not us.
 
 ```text
-CMS125, 66 MADiE cases, HAPI 8.10.0, completed terminology
-  agreeing    : 56/66
-  disagreeing : 10 — every one of them DENEX expected 1, java 0
+SIX measures, 278 MADiE cases, HAPI 8.10.0, completed terminology
+  CMS68   19/19    CMS951  55/55    CMS138  47/47     <- perfect
+  CMS122  49/55    CMS125  56/66    CMS2    29/36
+  total  255/278   (23 disagreements)
 ```
 
-IPP and DENOM agree on all 66; no other population differs anywhere.
+IPP and DENOM agree on **all 278**. Within each measure every disagreement has one identical shape:
+CMS125 `DENEX 1→0`; CMS122 `DENEX 1→0` **and** `NUMER 0→1` (the same root — it is inverse, and `fqm` zeroes
+the numerator when an exclusion is true, so one cause reports as two differences); CMS2 `NUMER 1→0`, which
+is a genuinely different failure.
 
 **A tidy hypothesis, killed by measurement.** The first sweep ran on the upstream bundle's terminology,
 where `…1003.110.12.1082` (AdvancedIllness) ships **capped at 1000 of 1997** — the exact gap ADR-041 exists
@@ -22,9 +26,15 @@ to close, and it feeds a DENEX, so it was the obvious suspect. Pushed our comple
 sets, **3043 codes**, matching ADR-041's recorded figure), **verified the server holds `expansion.total:
 2000`** for that OID, re-ran: **the same 10.** Terminology is excluded.
 
-**What the data does say:** `MedicationRequest` appears in **8 of the 10 disagreeing** cases and **0 of the
-25 that agree with `DENEX = 1`**. The other 2 carry `Procedure` and no medication, so there are probably
-**two** causes. **Stated as correlation, not cause** — this codebase's standard for a cause is a mutation
+**Two corrections to my own first reading, both from measurement.** (1) **`$evaluate-measure` CACHES** —
+a `Condition` PUT for an already-evaluated subject was stored and searchable yet the next evaluation
+returned a byte-identical `evaluatedResource` without it. That means the terminology test above ran WARM
+and proved nothing as first evidenced; re-run cold it gives the same 10, so the conclusion stands and now
+the evidence does too. (2) The disagreement is **branch-level, not resource-level**: I first reported a
+`MedicationRequest` correlation (8/10 vs 0/25), but Java **does** retrieve both the `MedicationRequest` and
+the `DeviceRequest` — they are in `evaluatedResource`. What separates the groups is that every agreeing
+DENEX case uses a *simple* branch (hospice, mastectomy history) while every disagreeing one uses the
+compound **Advanced Illness and Frailty** branch. **Stated as characterisation, not cause** — this codebase's standard for a cause is a mutation
 that flips one case (ADR-055), and that has not been done yet. Also stated: this does **not** show ours is
 right and theirs wrong. It shows that on this artifact, this data and **this server configuration**, one
 implementation diverges in a characterizable way; a stock HAPI was used and no alternative CR settings were
@@ -37,7 +47,13 @@ the sweep reports "0 agreements" that is really a broken container). And it **re
 case returns an all-zero vector** — that is terminology or libraries failing to resolve wearing agreement's
 clothes, the PR-8f/ADR-043 hazard.
 
-**Context that makes the 10 unsurprising:** the CMS7-FQR connectathon's own Java-vs-JS run over 74 measures
+**A batch-run number I published and then had to correct:** an initial loop swept all six measures back to
+back and reported **CMS122 at 7/55**. The container answers `/metadata` with 200 before the CR module is
+ready, so that sweep ran against a half-started server. On a settled server CMS122 is **49/55**. A degraded
+server produces *more* disagreement, not less, which is why the three 100% results survived the bad batch —
+but both divergent measures were re-measured before being reported.
+
+**Context that makes the 23 unsurprising:** the CMS7-FQR connectathon's own Java-vs-JS run over 74 measures
 × 3,964 cases found **98.16% pass with 3 measures still disputed**, and the track's stated ask to
 participants is precisely *verify on an alternate engine and classify each discrepancy*. This run is that
 contribution, and it is the concrete thing to bring to M-E0.

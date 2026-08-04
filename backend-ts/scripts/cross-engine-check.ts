@@ -39,6 +39,22 @@
  *     curl -X POST http://localhost:8899/fhir -H "Content-Type: application/fhir+json" \
  *       --data-binary @.official-content/bundles/measure/<Name>/<Name>-bundle.json
  *
+ * ## ⚠ `$evaluate-measure` CACHES — use a FRESH container for every changed input
+ *
+ * Results are cached per subject for the life of the server, and the failure mode is **silent**: you get a
+ * plausible previous answer. Proven by PUTting a `Condition` for an already-evaluated subject, confirming
+ * it stored and searchable (`total: 1`), and getting back a byte-identical `evaluatedResource` without it.
+ *
+ * This invalidated a conclusion in the first version of `docs/evidence/CROSS_ENGINE_2026-08-04.md` — the
+ * terminology comparison's second sweep ran warm, so it proved nothing until it was re-run cold. **Any
+ * change to terminology or patient data means `docker rm -f hapi-cr` and a full reload**, and
+ * `--load-terminology` must run BEFORE the first evaluation, which is why this script loads it up front
+ * rather than offering it as a separate step.
+ *
+ * A corollary worth knowing before you try: a hand-`PUT` resource is **not** necessarily picked up the way
+ * a bundle-loaded one is, even on a cold server. That is unexplained, and it is why the mechanism behind
+ * the CMS125 disagreements is characterised rather than proven — see the evidence doc.
+ *
  * ## The degenerate-sweep refusal
  *
  * If EVERY case comes back with an all-zero population vector, that is **not** agreement even when some
@@ -160,7 +176,9 @@ async function main(): Promise<void> {
       });
       if (put.ok) replaced++;
     }
-    console.log(`loaded completed terminology: ${replaced}/${sidecar.valueSets.length} value sets replaced`);
+    // stderr, not stdout: with --json this line would otherwise sit in front of the document and
+    // make the output unparseable — which it did, silently, until a consumer tried to read it.
+    console.error(`loaded completed terminology: ${replaced}/${sidecar.valueSets.length} value sets replaced`);
     // ALL or nothing. The entire purpose of this flag is that both engines read identical codes, so a
     // 31/32 load silently reintroduces the ambiguity it exists to remove — a disagreement could then be
     // terminology rather than engine, and we would attribute it to the engine (Codex, #393).
