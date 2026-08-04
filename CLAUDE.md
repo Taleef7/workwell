@@ -147,15 +147,27 @@ M-C is promoted to spearhead**, with the versioned compliance API as the contrac
 and 150/150 subject-level agreement against Cypress's own per-patient expected results stands (ADR-055).
 What changed is which of those we call the bar.
 
-**Next, in order (ROADMAP §5):** **B6** — FHIR validator + DEQM STU5 package against our MeasureReports
-(structure; the counterpart of ADR-050's XSD+Schematron work on the column we execute). **B7** —
-cross-execute the MADiE cases through Java `cqf-fhir-cr` and diff; this is the *only* independent arithmetic
-oracle, because **`fqm-testify` and `deqm-test-server` both wrap `fqm-execution`**, the library we run.
-Accepted cost: a JVM in the **verification** path only, never runtime or packaged. Then **M-C** (physical
-`packages/measure-engine` extraction + compliance API + publish), **M-D0/D1** (re-aim at US Quality Core;
-run the Inferno **US Quality Core Test Kit** against the shim output), and **M-E0** (take the CMS7-FQR
-connectathon slot — the track's stated ask is to *verify results on an alternate engine*, which is exactly
-what we are). **Deferred, not cancelled:** supplemental data (B8) — real gap, no external number moves today.
+**Done 2026-08-04 (B6, B7, M-E0 draft).** **B6** — our MeasureReports validate at **0 base-R4 errors**;
+the DEQM STU5 gap is exactly **3 per report**, identical on official and authored paths, and pinned in
+`measure-report.test.ts`. We deliberately claim **no DEQM `meta.profile`** — that stays owner-gated on the
+gap reaching 0. **B7** — the official artifacts were cross-executed through HAPI's **`cqf-fhir-cr`**, the
+first execution of our artifacts by an engine that is not ours (`fqm-testify` and `deqm-test-server` both
+WRAP `fqm-execution`, so neither counts): **255/278 across six measures**, CMS68/CMS951/CMS138 at 100%.
+The largest group of exceptions is **proven by construction** to one conjunct — `"Has Dementia
+Medications"`, whose `medicationRequestPeriod()` needs a `dosageInstruction` the MADiE cases omit —
+accounting for **14 of 23**. **M-E0's contribution is written**
+(`docs/evidence/CONNECTATHON_DISCREPANCIES_2026-08-04.md`); submitting it is an owner calendar step.
+
+**Two gotchas that cost real time and are documented in the harness:** `cqf-fhir-cr` retrieval is QI-Core
+**`meta.profile`-sensitive** (an unstamped hand-PUT resource is silently never retrieved), and
+**`$evaluate-measure` CACHES** per subject for the server's life — every changed input needs a fresh
+container, and one published conclusion had to be re-proved cold after this was found.
+
+**Next, in order:** **M-C** — the packaging spearhead (locked decision 5): physical `packages/measure-engine`
+extraction, the versioned **compliance API**, `@workwell/*` publish. Then **M-D0/D1** (re-aim at US Quality
+Core; run the Inferno **US Quality Core Test Kit** against the shim output) and **M-E1** (occupational
+content pack). **Still undiagnosed:** CMS125's 2 `Procedure`-only cases, CMS2's 7 `NUMER 1→0`, and
+CMS130/CMS165 unswept (credentialed vendor workflow). **Deferred, not cancelled:** supplemental data (B8).
 
 **Three standing corrections.** "~2030" for CMS FHIR endpoints is **not CMS-attributable** (say "no
 published date"). **"QI-Core STU7 = US Core 7 = WebChart's exact surface"** is half right: the equality

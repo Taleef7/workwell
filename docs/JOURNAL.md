@@ -1,5 +1,40 @@
 # Journal
 
+## 2026-08-04 (M-E0) — the mechanism is proven by construction, and the connectathon contribution is written (branch `feat/connectathon-contribution`, #394)
+
+**The mutation proof that failed yesterday turned out to BE the finding.** `cqf-fhir-cr` retrieval is
+QI-Core **`meta.profile`-sensitive**: a hand-`PUT` `Condition` with no profile stamp is stored, searchable
+and **silently never retrieved** — absent from `evaluatedResource`, and the measure evaluates as if it were
+not there. Stamp the profile and the identical resource is picked up immediately. That silently invalidates
+any comparison built on hand-authored data, which is worth more to the track than the discrepancy itself.
+
+With that understood, three single-variable mutations on one failing subject, each on a fresh server
+(`$evaluate-measure` caches): inject a hospice `Condition` → **DENEX 0→1**, so the engine CAN exclude this
+subject and the failure is branch-specific; add a minimal `dosageInstruction` → still 0; inject an
+**Advanced Illness** `Condition` → **1**. The last bypasses only the medication arm, and since the branch is
+`age ≥ 66 AND frailty AND (advanced illness OR dementia meds)`, it proves age and frailty are both credited.
+**The failing conjunct is precisely `"Has Dementia Medications in Year Before or During Measurement
+Period"`** — whose `medicationRequestPeriod()` opens `singleton from R.dosageInstruction`, and the MADiE
+cases carry **no `dosageInstruction` at all**, only `dispenseRequest.expectedSupplyDuration`. Two conforming
+engines disagree about what those null inputs yield. ADR-055's standard is met.
+
+**`docs/evidence/CONNECTATHON_DISCREPANCIES_2026-08-04.md`** is the M-E0 deliverable: 255/278 across six
+measures, three findings classified in the track's own A/B/C/D scheme, with a direct question back — *what
+should `medicationRequestPeriod()` return when `dosageInstruction` is absent?*
+
+**Review caught an overstatement that would have gone to a standards body**, and it was the right kind of
+catch. The report attributed all 16 CMS125/CMS122 disagreements to that one finding while the evidence doc
+it cites still said two were unexplained. Measured attribution: CMS122 **6 of 6** and CMS125 **8 of 10**
+disagreeing cases carry a `MedicationRequest`, and **0 of the 25** agreeing `DENEX=1` cases do — so the
+finding accounts for **14 of 23**, not 16. The confidence was overstated too: proven by construction on
+**one** case, consistent-with for the other thirteen. Both corrections shipped, and Finding 3 is retitled
+"the 9 disagreements Finding 1 does NOT explain" — CMS125's two `Procedure`-only cases plus CMS2's seven.
+
+**Still open, and named as such everywhere:** CMS125's 2 `Procedure`-only cases, CMS2's 7 `NUMER 1→0`,
+CMS130/CMS165 unswept (they need the credentialed vendor workflow). Submitting the contribution is an owner
+calendar step, not engineering. **Next milestone is M-C** — the packaging spearhead that locked decision 5
+makes the primary deliverable.
+
 ## 2026-08-04 (M-B / B7) — a second engine runs our artifacts for the first time: 255/278 across six measures, three of them perfect (branch `feat/cross-engine-check`)
 
 The check that changes what we can honestly say. Our MADiE gate is 410/410, but **the execution is entirely
