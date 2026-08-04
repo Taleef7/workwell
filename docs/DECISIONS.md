@@ -1,5 +1,87 @@
 # Architecture Decision Records
 
+## ADR-058: QRDA III carries QDM identity, which the FHIR lineage does not have — so the verification bar moves to the FHIR column rather than the label moving to the QDM one
+
+**Status:** Accepted (2026-08-04). **Supersedes locked decision #2's "Cypress CVU+ green" bar**
+(`docs/LOCKED_DECISIONS.md` §4). Drives `docs/ROADMAP_2026-08-04.md`.
+
+**Context.** M-B built the whole certification-shaped loop and it runs through the product API over a third
+party's archive, producing Cypress's own expected counts exactly (ADR-055, ADR-056). Cypress graded it
+**red**. The cause was read out of `projecttacoma/cqm-validators` rather than inferred:
+`extract_results_by_ids` calls `find_measure_node(measure.hqmf_id, doc)` and **returns `{}` immediately**
+when the document's measure identity is not the one Cypress holds. Cypress has **CMS125v14** (QDM lineage);
+we execute and report **CMS125FHIR v1.0.000** (QI-Core lineage). The two "invalid id" errors it emitted are
+**exactly our own vendored artifact's version-specific and version-independent UUIDs** — the document is
+internally honest; Cypress simply holds a different measure.
+
+Three things the first reading of that result got wrong, each corrected here:
+
+1. **The 45/53 supplemental-data errors are NOT an independent second gap.** Supplemental data is built only
+   inside the matched node and read back as `(reported_result[:supplemental_data] || {})[pop_key]`. With an
+   empty extraction there is nothing to key into. `CVU_C2_SUBMISSION_2026-08-03.md` §4 called this a
+   separate end-to-end gap and said "separately from the lineage problem, this alone would fail a
+   submission" — true, and it would *also* fail with perfect supplemental data, which is the half that
+   decides sequencing. **Building it would not have moved the verdict by one error.**
+2. **It is not a two-identifier relabel.** `extract_component_value` matches each population on
+   `reference/externalObservation/id[@root = <population hqmf_id UUID>]`. **The QI-Core artifact has no
+   per-population UUIDs at all** — read from the vendored bundles, its populations are *named*
+   (`InitialPopulation_1`, `Numerator_1`, …). There is nothing in our lineage to put in `@root`. Making
+   Cypress read us would mean importing the QDM measure's **entire** identifier surface via a hand-asserted
+   crosswalk, taken from the answer key's own internals, with no CMS-published correspondence to cite.
+3. **No FHIR-lineage grader exists to switch to.** `projecttacoma/cvu-fhir` — MITRE's fork of Cypress,
+   README verbatim *"An open source tool for testing electronic Clinical Quality Measure calculation"* —
+   has 3,771 commits and was **last pushed 13 April 2023**. Cypress itself is actively maintained (v7.5.1,
+   30 Jul 2026) and contains **zero** mentions of FHIR, QI-Core or dQM.
+
+**The structural statement:** **QRDA Category III is an HQMF/QDM-identity format.** Its identity model has
+no counterpart in the FHIR measure lineage. That is a property of the format, not a defect in our work.
+
+**Decision.**
+
+1. **The measure identity in every export continues to derive from the artifact that produced the outcome.**
+   ADR-046 decisions 3 and 4 are reaffirmed, not carved out. Emitting `CMS125v14`'s HQMF id over counts
+   `CMS125FHIR v1.0.000` produced would assert a provenance that never existed, and a receiver resolving it
+   would fetch different CQL.
+2. **The deciding argument is informational, not only ethical.** A green obtained by relabelling would teach
+   us **nothing we do not already have**: #388 measured 64/64 and 150/150 subject-level agreement against
+   Cypress's own per-patient expected results (ADR-055). The badge would add no evidence and would put a
+   false provenance claim into a document that leaves the building.
+3. **The bar moves to a NAMED SET of FHIR-column checks** (`ROADMAP_2026-08-04.md` §4), each with a stated
+   scope and limit, replacing one external pass/fail. Immediate additions: the **FHIR validator + DEQM STU5
+   package** against our MeasureReports (structure), and **cross-execution against Java `cqf-fhir-cr`**
+   (arithmetic, against a second independently written engine). **`fqm-testify` and `deqm-test-server` are
+   NOT independent** — both wrap `fqm-execution`, the library we run.
+4. **A Cypress Calculation Check green is retired as a goal**, because reaching it requires a QDM execution
+   path we are not building. **We do not build one**, because WorkWell is supplementary to WebChart and does
+   not pursue ONC certification — WebChart already carries it. Revisit only if MIE states that certification
+   of WorkWell's engine is a business goal.
+5. **The QRDA I/III machinery is KEPT, re-scoped from certification target to interoperability bridge.** It
+   is built, both document types validate at **0 findings** against the HL7 base ruler (#380/#381/#384), and
+   it is what lets WorkWell speak to an EHR audience at all. Nothing is deleted.
+6. **Supplemental data (RACE/ETHNICITY/SEX/PAYER) is DEFERRED, not cancelled** — a real end-to-end gap
+   (import drops Patient Characteristic Payer; race/ethnicity ride unread in `<recordTarget>`; the Cat III
+   emits none), but one that changes **no external number today**: Cypress cannot read past the identity
+   check, and the HL7 base Cat III ruler does not require it. Do it when a receiver reads it, or alongside
+   DEQM supplemental-data elements.
+
+**Consequences.**
+
+- **Locked decision #2 is rewritten** in `docs/LOCKED_DECISIONS.md`, and `docs/STANDARDS_CONFORMANCE.md`
+  plus the `conformance` skill lose the line "Cypress CVU+ is the verification bar." Left stale, that line
+  is a gate quietly enforcing a retired goal.
+- **Issue #385's remaining scope is retired.** The Calculation Check comparison it asked for was **done**
+  offline and passed exactly (ADR-055); what stays undone is the submission verdict, which this ADR says is
+  not obtainable in our lineage.
+- **The claim we can now make is stronger than the one we gave up.** "Two independently written engines
+  agree on CMS's own test cases" (V4, once run) beats "a QDM certification tool read a document we labelled
+  as a measure we did not execute."
+- **What none of this establishes.** No FHIR-column check produces a certificate; every claim must name who
+  graded what. And nothing to date measures our calculations over **real patient data** — every measurement
+  is over synthetic corpora, a WebChart dev-DB fixture, or Cypress's generated patients.
+- **Evidence:** `docs/evidence/FHIR_VERIFICATION_LANDSCAPE_2026-08-04.md` (mechanism, tooling landscape,
+  regulatory position, live-endpoint probes) and `docs/evidence/CVU_C2_SUBMISSION_2026-08-03.md` (the run
+  that produced the red).
+
 ## ADR-057: The live third-party WebChart path derives the two elements our SQL mappers add — because reading a server's own "female" as not-female is also an inference, and a worse one
 
 **Status:** Accepted (2026-08-03). **Closes the open item in ADR-042 decision 3 and ADR-044.**

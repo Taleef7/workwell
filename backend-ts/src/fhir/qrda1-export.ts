@@ -26,8 +26,11 @@
  *
  * Conformance is MEASURED, not asserted: `scripts/qrda-schematron-check.py` runs the published
  * Schematron and partitions failures into base-HL7 (our bar) and CMS-hospital-only (not our bar).
- * `docs/STANDARDS_CONFORMANCE.md` carries the current numbers. Cypress **CVU+** has not run; it needs
- * Docker and remains the M-B bar.
+ * `docs/STANDARDS_CONFORMANCE.md` carries the current numbers. **CVU+ HAS since run** (2026-08-02,
+ * #380/#381): this document type measures **0 findings** against the HL7 base ruler, XSD and Schematron
+ * alike. It is **no longer the M-B bar** — ADR-058 retired the Cypress Calculation Check as a goal, since
+ * Cypress can only grade QDM-lineage documents and no FHIR-lineage grader exists. QRDA I is kept as an
+ * interoperability bridge; the bar is now the FHIR-column set in `docs/ROADMAP_2026-08-04.md` §4.
  *
  * ## Without a bundle, this is not a QRDA I and says so
  *

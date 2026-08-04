@@ -85,14 +85,14 @@ tokens. Do not add to this list without deleting from it — the whole point is 
 - @docs/CQF_FHIR_CR_REFERENCE.md — the "library version doesn't match" stop condition needs it
 - @docs/DATA_MODEL_CONTRACTS.md — idempotency + `evidence_json` + CSV contracts; Definition of Done makes these mandatory on EVERY PR
 - @docs/ADR_INDEX.md — 40 ADR titles only, so a session knows a decision exists; bodies stay in DECISIONS.md
-- @docs/LOCKED_DECISIONS.md — owner-locked decisions + verified audit facts from ROADMAP_2026-07-24 §4–5
+- @docs/LOCKED_DECISIONS.md — owner-locked decisions (§4, rewritten 2026-08-04 per ADR-058) + the dated 2026-07-24 audit facts (§5)
 
 ## Other docs to consult on demand
 Read these when the task needs them. They are deliberately NOT `@`-imported: eagerly loading the set
 cost ~89k tokens per session until 2026-07-29, whether or not any of it was relevant.
 - `docs/JOURNAL.md` — the running narrative; source of truth for recent work (~832k chars — never import)
 - `docs/DECISIONS.md` — numbered ADR bodies (the titles are already in context via ADR_INDEX)
-- `docs/ROADMAP_2026-07-24.md` — the APPROVED active plan (§4–5 are already in context via LOCKED_DECISIONS)
+- `docs/ROADMAP_2026-08-04.md` — **the APPROVED active plan** (owner decisions are in context via LOCKED_DECISIONS §4). Supersedes `ROADMAP_2026-07-24.md`, which is kept only for its §7 target architecture and the reasoning that got us here — **do not act on it**
 - `docs/DEPLOY.md` — MIE Create-a-Container + Neon setup, env vars, rollback → prefer the `deploy` skill
 - `docs/ARCHITECTURE.md` — system architecture + boundaries (the engine boundary is enforced mechanically by PR-1's containment test and PR-4's five boundary tests, so CI catches drift)
 - `docs/DATA_MODEL.md` — §1–3: scope, core tables, full table schemas (derivable from `schema-pg.ts` / `schema.ts`)
@@ -113,7 +113,60 @@ instructions, and reading them burns context without changing what you should do
 - `docs/archive/` (245k), `docs/FABLE_REVIEW_2026-07-02/` (84k), `docs/new instructions/` (69k),
   `docs/mieweb-ui-migration/` (82k)
 
-## Current Focus (as of 2026-07-24 — Nicole recalibration; approved strategic roadmap)
+## Current Focus (as of 2026-08-04 — the engine is the product; `docs/ROADMAP_2026-08-04.md` is the APPROVED active plan)
+
+**READ THIS BLOCK FIRST; everything below it from "2026-07-24" onward is HISTORY.** The 2026-07-24
+recalibration and the M-A/M-B narrative that follows are accurate as a record of how we got here, but the
+*direction* changed on 2026-08-04 (ADR-058, `docs/ROADMAP_2026-08-04.md`).
+
+**What changed, in one paragraph.** M-B built the certification-shaped loop; it runs through the product API
+over Cypress's own archive and emits Cypress's exact expected counts. Cypress graded it **red**, and reading
+`projecttacoma/cqm-validators` gave the mechanism: `extract_results_by_ids` calls
+`find_measure_node(measure.hqmf_id, doc)` and **returns `{}`** when the measure identity is not the one it
+holds. Cypress has **CMS125v14** (QDM); we run **CMS125FHIR v1.0.000** (QI-Core). Two corrections follow
+that were not obvious: the **45/53 supplemental-data errors are DOWNSTREAM of that short-circuit**, not an
+independent gap (supplemental data is built only inside the matched node), so building it moves **no
+external number**; and it is **not a two-id relabel**, because populations match on `@root` carrying a
+per-population **UUID** and **the QI-Core artifact has none** — its populations are *named*
+(`InitialPopulation_1`). **QRDA Category III is an HQMF/QDM-identity format**; the FHIR lineage has no
+identity to carry there. And **no FHIR-lineage grader exists**: MITRE's `cvu-fhir` (Cypress ported to FHIR,
+3,771 commits) was **last pushed 13 Apr 2023**; Cypress itself is active (v7.5.1, 30 Jul 2026) with zero
+mentions of FHIR/QI-Core/dQM.
+
+**The owner decisions (locked 2026-08-04, full text in `docs/LOCKED_DECISIONS.md` §4).** **(1) WorkWell is
+SUPPLEMENTARY to WebChart and does NOT pursue ONC certification** — WebChart carries it (~33/49); no work is
+justified by "certification needs it." **(2) The bar is the FHIR-column verification SET**
+(ROADMAP §4), not one external pass/fail; **a Cypress Calculation Check green is RETIRED as a goal.**
+**(3) No relabelling and no QDM engine** — ADR-046 d3/d4 reaffirmed; reopen only if MIE says certification of
+WorkWell's engine is a business goal. **(4) QRDA I/III is KEPT as an interoperability bridge** (both types at
+0 findings vs the HL7 base ruler; nothing deleted). **(5) The engine + packaging are the primary deliverable —
+M-C is promoted to spearhead**, with the versioned compliance API as the contract MIE consumes.
+**(6) The differentiator is the measures nobody publishes** (M-E occupational/OSHA).
+
+**Nothing measured is withdrawn.** QRDA I and III stay at 0 findings against the HL7 base ruler; the 64/64
+and 150/150 subject-level agreement against Cypress's own per-patient expected results stands (ADR-055).
+What changed is which of those we call the bar.
+
+**Next, in order (ROADMAP §5):** **B6** — FHIR validator + DEQM STU5 package against our MeasureReports
+(structure; the counterpart of ADR-050's XSD+Schematron work on the column we execute). **B7** —
+cross-execute the MADiE cases through Java `cqf-fhir-cr` and diff; this is the *only* independent arithmetic
+oracle, because **`fqm-testify` and `deqm-test-server` both wrap `fqm-execution`**, the library we run.
+Accepted cost: a JVM in the **verification** path only, never runtime or packaged. Then **M-C** (physical
+`packages/measure-engine` extraction + compliance API + publish), **M-D0/D1** (re-aim at US Quality Core;
+run the Inferno **US Quality Core Test Kit** against the shim output), and **M-E0** (take the CMS7-FQR
+connectathon slot — the track's stated ask is to *verify results on an alternate engine*, which is exactly
+what we are). **Deferred, not cancelled:** supplemental data (B8) — real gap, no external number moves today.
+
+**Three standing corrections.** "~2030" for CMS FHIR endpoints is **not CMS-attributable** (say "no
+published date"). **"QI-Core STU7 = US Core 7 = WebChart's exact surface"** is half right: the equality
+holds, but **CMS's shipping content is authored on QI-Core 6** and the direction is **US Quality Core 0.5.0
+over US Core 6.1.0**. **"Cypress CVU+ is the verification bar"** is removed from `STANDARDS_CONFORMANCE.md`
+and the `conformance` skill. **Open owner step:** confirm with Doug/Nicole that certifying WorkWell's engine
+is not a business goal — the one input that would reopen decision 3.
+
+---
+
+## History — Current Focus as of 2026-07-24 (Nicole recalibration; SUPERSEDED 2026-08-04)
 
 **2026-07-24 — the Nicole meeting reset direction; `docs/ROADMAP_2026-07-24.md` is the APPROVED active
 plan (supersedes ROADMAP_2026-07-09.md).** Her corrections: **(1) run the OFFICIAL published CQL for
@@ -539,7 +592,11 @@ wants RACE/ETHNICITY/SEX/PAYER per population and we emit none (the input is the
 document and the importer drops it). Relabelling is not the fix: ADR-046 decision 3 forbids claiming an
 eMeasure identity the run did not use. Evidence: `docs/evidence/CVU_C2_SUBMISSION_2026-08-03.md`.
 
-**Still missing for M-B — the bar is NOT met.** Locked decision #2 asks for the loop to come back GREEN.
+**Still missing for M-B — the bar is NOT met.** *(SUPERSEDED 2026-08-04 by ADR-058 — that bar is RETIRED.
+The paragraph is an accurate record of the 2026-08-03 state; read "a green C2" as a goal we no longer hold,
+and both QDM-lineage routes as ones locked decision 3 now forbids. Two of its claims were also corrected:
+supplemental data is DOWNSTREAM of the identity short-circuit rather than a co-equal second cause, and the
+lineage fix is not a relabel because the QI-Core artifact has no per-population UUIDs.)* Locked decision #2 asks for the loop to come back GREEN.
 It runs, over a third party's archive, producing numbers measured correct against Cypress's own
 per-patient expected results (#388: 64/64 and 150/150 subjects agreeing on every population). It is red on
 **measure-identity lineage** and **supplemental data**. A green C2 needs either a QDM-lineage reporting
@@ -554,9 +611,10 @@ CPT/HCPCS mammography Procedure, both tagged, both suppressed when the server su
 `live-official-parity.test.ts` strips them from the fixture to reproduce the live shape and pins 4 of 56
 in the official IPP with normalization, 0 without); **no
 supplemental data anywhere in the chain** (import drops Patient Characteristic Payer and never reads
-race/ethnicity from `<recordTarget>`; the Cat III emits none); only `PopulationSet_1` is compared, so a
-stratum-only disagreement is invisible; and the **QDM-vs-QI-Core lineage decision** above, which is what
-now stands between us and a green C2.
+race/ethnicity from `<recordTarget>`; the Cat III emits none — **now DEFERRED as ROADMAP B8**, since it
+moves no external number today); only `PopulationSet_1` is compared, so a stratum-only disagreement is
+invisible; and the **QDM-vs-QI-Core lineage decision** above, which was **TAKEN on 2026-08-04 as ADR-058** —
+the bar moved to the FHIR column rather than the label moving to the QDM one.
 
 ---
 

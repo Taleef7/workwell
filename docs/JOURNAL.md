@@ -1,5 +1,83 @@
 # Journal
 
+## 2026-08-04 — the roadmap is reworked: the engine is the product, and the ruler we were chasing does not exist for our column (branch `docs/roadmap-2026-08-04`, ADR-058)
+
+**Started the day intending to build supplemental data. Reading Cypress's source instead killed that plan
+and then the milestone's whole bar.** The plan was defensible on its face — 45/53 of the C2 errors were
+supplemental data, it is unambiguously our gap, and fixing it first would make the residual red
+attributable to lineage alone. Then `projecttacoma/cqm-validators` said otherwise:
+
+```ruby
+nodes = find_measure_node(measure.hqmf_id, doc)
+return {} if nodes.nil? || nodes.empty?
+```
+
+Supplemental data is built **only inside that matched node** and read back as
+`(reported_result[:supplemental_data] || {})[pop_key]`. With an empty extraction there is nothing to key
+into. **The supplemental errors are downstream of the identity short-circuit, not an independent second
+gap** — perfect supplemental data would not have moved the verdict by one error. The sequencing argument was
+backwards: the residual was *already* purely lineage.
+
+**Two more facts from the same file killed the relabel option too.** Populations are matched on
+`reference/externalObservation/id[@root = <UUID>]`, and **the QI-Core artifact has no per-population UUIDs
+at all** — read from the vendored bundles, its populations are *named* (`InitialPopulation_1`, …). So
+"relabel two ids" was never the shape; it would mean importing the QDM measure's entire identifier surface
+via a hand-asserted crosswalk taken from the answer key's own internals. And the two "invalid id" errors
+Cypress emitted are **exactly our own artifact's** version-specific and version-independent UUIDs
+(`ae8bc6fe-…`, `f766afa2-…`), so the document was internally honest all along.
+
+**Then the research pass found the thing that reframes the milestone.** `projecttacoma/cvu-fhir` — MITRE's
+fork of Cypress, README verbatim *"An open source tool for testing electronic Clinical Quality Measure
+calculation"* — has 3,771 commits and was **last pushed 13 April 2023**. Someone tried to build
+Cypress-for-FHIR and shelved it. Cypress itself is actively maintained (v7.5.1, 30 Jul 2026) with **zero**
+mentions of FHIR, QI-Core or dQM. **There is no FHIR-lineage grader.** So the choice was never
+green-versus-red; it was *green on the ruler CMS is migrating away from* versus *measured against the
+ecosystem's own content and an independent engine, where no ruler exists to be green on*.
+
+**The owner decision that settles it: WorkWell is supplementary to WebChart and does not pursue ONC
+certification.** WebChart already carries it (~33/49). Doug's ask was always **packaging** — make the engine
+consumable across MIE — which is a library-and-contract problem. That removes the only reason to build a QDM
+execution path, and it demotes certification-shaped work from spearhead to bridge.
+
+**ADR-058** records all of it. **`docs/ROADMAP_2026-08-04.md`** supersedes the 2026-07-24 roadmap: the five
+milestones survive, but **M-C (packaging) is promoted to spearhead**, the bar becomes a **named set of
+FHIR-column checks** with per-check scope and limits, and M-E (occupational measures) is elevated as the
+differentiator — the part no competitor obtains by downloading CMS artifacts.
+
+**The new bar is stronger than the one it replaces, not weaker.** V4 is cross-execution against Java
+`cqf-fhir-cr`, and the reason it matters is that **`fqm-testify` and `deqm-test-server` both wrap
+`fqm-execution`** — the library we already run — so neither is an independent arithmetic check. Java
+`cqf-fhir-cr` is. "Two independently written engines agree on CMS's own test cases" beats "a QDM
+certification tool read a document we labelled as a measure we did not execute." Accepted cost, stated: that
+puts a JVM back in the **verification** path against ADR-008's direction — dev-time oracle only, never a
+runtime or packaged dep.
+
+**Four corrections to the record, each because leaving them is a gate enforcing a retired goal.**
+(1) "~2030" for CMS FHIR endpoints is **not CMS-attributable** — it traces mostly to NCQA's HEDIS goal;
+CMS's own page states the target with no year and the original RFI said "by 2025", which slipped. Say "no
+published date." (2) "QI-Core STU7 = US Core 7 = WebChart's exact surface" is half right and misleading:
+the equality holds, but **CMS's shipping content is authored on QI-Core 6** and the forward direction is
+**US Quality Core 0.5.0 over US Core 6.1.0**. (3) "Cypress CVU+ is the verification bar" is removed from
+`STANDARDS_CONFORMANCE.md` **and from the `conformance` skill**, which would otherwise keep enforcing it in
+every future session. (4) The supplemental-data gap is re-recorded as downstream, and **deferred, not
+cancelled** (B8) — it changes no external number today.
+
+**Nothing measured is withdrawn.** QRDA I and III both stay at 0 findings against the HL7 base ruler; the
+64/64 and 150/150 subject-level agreement against Cypress's own expected results stands exactly as recorded.
+What changed is which of those we call the bar.
+
+**Two things worth acting on that fell out of the research.** The CMS7-FQR track's stated ask to
+participants is to *verify results on an alternate engine* and classify the remaining discrepancies (74
+measures × 3,964 MADiE cases, 98.16% pass, 3 disputed) — WorkWell is exactly that, and in a space with no
+certification tool, connectathon peer review **is** the third-party verification. And Lantana's
+connectathon FHIR server is **live right now** (probed 2026-08-04: HAPI 8.10.0, 76 Measures, 3,070
+MeasureReports), serving every measure we have vendored or gated at v1.0.000. Metadata reads only; nothing
+was POSTed to a third party.
+
+**Open owner step, and it is the one input that would reopen this:** confirm with Doug/Nicole that
+certification of WorkWell's *engine* is not a business goal. Evidence:
+`docs/evidence/FHIR_VERIFICATION_LANDSCAPE_2026-08-04.md`. Docs only — no code changed.
+
 ## 2026-08-03 (M-D) — the live WebChart path gets the two elements our SQL mappers add, and the gate that was missing (branch `fix/webchart-live-official-parity`, ADR-057)
 
 M-D's first item, and it was a landmine rather than a feature: ADR-042 mapped `us-core-sex` and ADR-044
