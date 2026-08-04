@@ -68,3 +68,8 @@ webchart-import/
 
 # Cypress CVU+ research clone, Docker build context, and round notes (scratch only).
 cvu-workdir/
+
+# FHIR validator artifacts for backend-ts/scripts/deqm-validate.ts — a ~187 MB rolling "latest" jar
+# and its generated reports/OperationOutcomes. Never vendored; the run records the jar's SHA-256.
+validator_cli.jar
+/backend-ts/.deqm-validate/
