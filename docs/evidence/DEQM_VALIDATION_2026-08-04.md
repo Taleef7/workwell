@@ -90,6 +90,17 @@ both arms:**
 | normal | 0 | **0** |
 | `--inject-invalid` | 2 | **1** |
 
+## The findings are pinned in CI
+
+Four tests in `backend-ts/src/fhir/measure-report.test.ts` pin the three defects plus the `measureScore`
+precision finding, each citing its constraint key. They pin the **non-conformant** state on purpose: we do
+not claim a DEQM `meta.profile`, so they are a CI-enforced record of the distance to one. When a defect is
+fixed the test should be **inverted, not deleted**, and this script re-run so the drop in the error count is
+measured rather than asserted.
+
+This discharges the "regressions get pinned in TypeScript" claim the script header makes — which was a
+claim with nothing behind it when B6 first shipped.
+
 ## Reproducing
 
 ```bash

@@ -11,6 +11,7 @@ import {
   membershipFor,
   populationCountsFromStatus,
   buildSummaryMeasureReport,
+  buildSummaryMeasureReportFromCounts,
   buildIndividualMeasureReport,
   buildMeasureReportBundle,
 } from "./measure-report.ts";
@@ -397,4 +398,65 @@ test("PR-3: the histogram path CANNOT see official evidence - the divergence is 
   const histogram = populationCountsFromStatus([{ status: "OVERDUE", count: 1, latestEvaluatedAt: "2026-06-12T00:01:00.000Z" }], "cms122");
   assert.equal(rowBased.numer, 1, "official evidence says this subject IS the numerator");
   assert.equal(histogram.numer, 0, "the status histogram cannot know that - hence the routing guard");
+});
+
+// ---------------------------------------------------------------------------------------------------
+// DEQM STU5 gap — pinned in TypeScript so the measured gap cannot drift silently (B6, ADR-058).
+//
+// `scripts/deqm-validate.ts` measured our MeasureReports against the DEQM STU5 profiles on 2026-08-04:
+// base R4 clean at 0 errors, and exactly THREE profile errors, identical on every report shape and on
+// both the official and authored paths (`docs/evidence/DEQM_VALIDATION_2026-08-04.md`).
+//
+// That script needs Java and a 187 MB validator jar, so it is not in CI. These assertions are how its
+// findings get a CI-enforced home — the `qrda-schematron-check.py` / `qrda1-export.test.ts` discipline,
+// each assertion citing the constraint it stands for.
+//
+// They pin the CURRENT, NON-CONFORMANT state on purpose. We deliberately do not claim a DEQM
+// `meta.profile`, so these are a record of the distance to it. **When one is fixed, the test should be
+// inverted rather than deleted**, and `deqm-validate.ts` re-run to confirm the error count actually fell
+// — otherwise "we fixed it" is a claim with no measurement behind it.
+// ---------------------------------------------------------------------------------------------------
+
+const deqmProbe = () =>
+  buildSummaryMeasureReportFromCounts(
+    run, "cms125", { ipp: 150, denom: 150, denex: 47, numer: 2, denexcep: 0 }, GENERATED_AT,
+    { measureUrl: "https://madie.cms.gov/Measure/CMS125FHIRBreastCancerScreen", version: "1.0.000", ecqmId: "125FHIR" } as never,
+  );
+
+test("DEQM gap [deqm-0]: the measure canonical carries NO version — measured, not assumed", () => {
+  // deqm-0: 'Canonical URL SHALL contain a version.' We hold the version in evidence.official.version
+  // and thread it to the QRDA III identity (ADR-046 d4); the MeasureReport canonical omits it.
+  const mr = deqmProbe();
+  assert.equal(mr.measure, "https://madie.cms.gov/Measure/CMS125FHIRBreastCancerScreen");
+  assert.ok(!mr.measure.includes("|"), "canonical gained a |version — deqm-0 may now pass; re-run deqm-validate.ts");
+});
+
+test("DEQM gap: the contained reporter cannot satisfy qicore-organization", () => {
+  // QI-Core's constraint reaching us through DEQM: the profile needs more than a name.
+  const contained = (deqmProbe() as unknown as { contained?: Array<Record<string, unknown>> }).contained ?? [];
+  const org = contained.find((r) => r.resourceType === "Organization");
+  assert.ok(org, "no contained Organization");
+  assert.deepEqual(Object.keys(org).sort(), ["id", "name", "resourceType"]);
+  assert.equal(org.identifier, undefined, "reporter gained an identifier — re-run deqm-validate.ts");
+  assert.equal(org.active, undefined, "reporter gained active — re-run deqm-validate.ts");
+});
+
+test("DEQM gap [deqm-3]: no measure-scoring is emitted, on the root or any group", () => {
+  // deqm-3: scoring is required on the root OR every group and CANNOT be on both — so a naive fix that
+  // sets it in both places would still fail. That asymmetry is why this asserts BOTH are absent.
+  const mr = deqmProbe() as unknown as { extension?: unknown[]; group: Array<{ extension?: unknown[] }> };
+  assert.equal(mr.extension, undefined, "root gained an extension — check it is not scoring-on-both (deqm-3)");
+  for (const g of mr.group) {
+    assert.equal(g.extension, undefined, "group gained an extension — check it is not scoring-on-both (deqm-3)");
+  }
+});
+
+test("measureScore is emitted at full float precision, unlike the QRDA III exporter's toFixed(4)", () => {
+  // Base-R4 WARNING, not an error, so it is outside the 0/3 counts — but the two exporters describe one
+  // run and qrda3-export.ts claims in a comment that they "must match exactly". They match in value and
+  // not in representation: 0.019417475728155338 vs 0.0194.
+  const score = (deqmProbe() as unknown as { group: Array<{ measureScore?: { value: number } }> }).group[0]?.measureScore;
+  assert.ok(score);
+  assert.equal(score.value, 2 / 103);
+  assert.ok(String(score.value).length > 6, "score got rounded — reconcile with qrda3-export and re-measure");
 });

@@ -158,10 +158,12 @@ saying which is which matters more than the count.
 | server is not CR-enabled | **yes** | pointed at `https://hapi.fhir.org/baseR4` → refused, exit 1 |
 | no cases discovered | **yes** | `--measure cms130`, whose tests are not checked out → refused, exit 1 |
 | terminology partially loaded | **yes** (by construction) | `32/32` required; the run prints the ratio |
-| every case returns an all-zero vector | **NO** | never observed; the condition has not been induced |
+| every case returns an all-zero vector | **yes** | loaded the bundle with all 32 ValueSets stripped → all 66 all-zero → refused, exit 1 |
 
-The all-zero refusal is the one guard here still taken on trust. It is the PR-8f / ADR-043 hazard and the
-reason it exists is sound, but it has not been watched fire.
+**All four have now been watched fire.** The all-zero one was induced by re-loading the measure bundle with
+every ValueSet stripped: the Measure, Libraries and patients load, no code can match, and all 66 cases come
+back all-zero. Without the guard that run would have reported partial agreement — the cases whose expected
+vector is also all-zero would have "agreed" — which is exactly the false pass it exists to stop.
 
 **Three of the four were false greens that the first version shipped**, and one repeats a defect this repo
 already knew about: `POPULATION_CODES` carries a comment recording that the DENEXCEP omission was caught on
