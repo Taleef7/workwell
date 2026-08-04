@@ -46,37 +46,52 @@
  * it would otherwise read as a clean run. Same hazard PR-8f's batch-level retrieve refusal exists for, and
  * the same one ADR-043 says is silent by nature. This REFUSES rather than reporting a false pass.
  */
-import { readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { CMS122_KNOWN_BAD_EXPECTEDS, POPULATION_CODES, officialMeasureName } from "../src/standards/official-cases.ts";
+import {
+  POPULATION_CODES,
+  classifyPopulationAgreement,
+  officialMeasureName,
+  type OfficialMeasureId,
+  type PopulationAgreement,
+  type PopulationCode,
+  type PopulationCounts,
+} from "../src/standards/official-cases.ts";
 
 const CONTENT = ".official-content";
-
-type Counts = Partial<Record<(typeof POPULATION_CODES)[number], number>>;
 
 interface CaseResult {
   case: string;
   patientId: string;
-  expected: Counts;
-  java: Counts | null;
+  expected: PopulationCounts;
+  java: PopulationCounts | null;
   error?: string;
+  agreement?: PopulationAgreement;
   agrees: boolean;
 }
 
-const countsOf = (report: { group?: Array<{ population?: Array<{ code?: { coding?: Array<{ code?: string }> }; count?: number }> }> }): Counts => {
-  const out: Counts = {};
+/**
+ * Read a MeasureReport's populations as a FULL vector, every gated population zero-initialized.
+ *
+ * The zeroes are load-bearing. Reading only the populations a report happens to declare means an engine
+ * reporting `DENEXCEP = 1` for a measure whose expected report omits DENEXCEP compares as agreement — a
+ * false green. `POPULATION_CODES` carries a comment about this exact omission being caught on #358; the
+ * first version of this script reintroduced it in a new file (Codex, #393).
+ */
+const countsOf = (report: {
+  group?: Array<{ population?: Array<{ code?: { coding?: Array<{ code?: string }> }; count?: number }> }>;
+}): PopulationCounts => {
+  const out = Object.fromEntries(POPULATION_CODES.map((c) => [c, 0])) as PopulationCounts;
   for (const p of report.group?.[0]?.population ?? []) {
-    const code = p.code?.coding?.[0]?.code as (typeof POPULATION_CODES)[number] | undefined;
-    if (code && POPULATION_CODES.includes(code)) out[code] = p.count ?? 0;
+    const code = p.code?.coding?.map((c) => c.code).find((c): c is PopulationCode =>
+      POPULATION_CODES.includes(c as PopulationCode),
+    );
+    if (code) out[code] = p.count ?? 0;
   }
   return out;
 };
 
-/** Compare on the populations the EXPECTED report declares — an engine may legitimately report more. */
-const same = (expected: Counts, actual: Counts): boolean =>
-  Object.entries(expected).every(([k, v]) => actual[k as keyof Counts] === v);
-
-const allZero = (c: Counts): boolean => Object.values(c).every((v) => v === 0);
+const allZero = (c: PopulationCounts): boolean => Object.values(c).every((v) => v === 0);
 
 async function main(): Promise<void> {
   const argv = process.argv.slice(2);
@@ -85,12 +100,14 @@ async function main(): Promise<void> {
   const server = arg("--server") ?? "http://localhost:8899/fhir";
   if (!measure) {
     console.error("usage: tsx scripts/cross-engine-check.ts --measure <cms122|cms125|…> [--server URL] [--json]");
-    process.exit(2);
+    process.exitCode = 2;
+    return;
   }
   const name = officialMeasureName(measure);
   if (!name) {
     console.error(`unknown measure '${measure}' — must be one of the gated official measures`);
-    process.exit(2);
+    process.exitCode = 2;
+    return;
   }
 
   // Fail loudly if the server is not actually CR-enabled. Without this the sweep would run, every
@@ -108,7 +125,8 @@ async function main(): Promise<void> {
       `FAIL: ${server} declares no Measure/$evaluate-measure.\n` +
         `The CR module is off — check 'hapi.fhir.cr.enabled=true' (NOT 'cr_enabled', which is a silent no-op).`,
     );
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
 
   // `--load-terminology` replaces the server's ValueSet expansions with OUR completed ones
@@ -143,14 +161,27 @@ async function main(): Promise<void> {
       if (put.ok) replaced++;
     }
     console.log(`loaded completed terminology: ${replaced}/${sidecar.valueSets.length} value sets replaced`);
-    if (replaced === 0) {
-      console.error("FAIL: no value sets were replaced — is the measure bundle loaded on this server?");
-      process.exit(1);
+    // ALL or nothing. The entire purpose of this flag is that both engines read identical codes, so a
+    // 31/32 load silently reintroduces the ambiguity it exists to remove — a disagreement could then be
+    // terminology rather than engine, and we would attribute it to the engine (Codex, #393).
+    if (replaced !== sidecar.valueSets.length) {
+      console.error(
+        `FAIL: ${sidecar.valueSets.length - replaced} of ${sidecar.valueSets.length} value sets did not load.\n` +
+          `Partial terminology makes an engine comparison unattributable — a difference could be either.\n` +
+          `Is the measure bundle loaded on this server?`,
+      );
+      process.exitCode = 1;
+      return;
     }
   }
 
   const testsDir = join(CONTENT, "input", "tests", "measure", name);
-  const caseDirs = readdirSync(testsDir, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name);
+  // An ABSENT directory takes the same path as an empty one. Letting `readdirSync` throw would be loud
+  // enough, but it would report ENOENT rather than the actionable cause — the sparse checkout in
+  // `fetch-official-cases.ps1` not covering this measure.
+  const caseDirs = existsSync(testsDir)
+    ? readdirSync(testsDir, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name)
+    : [];
 
   const results: CaseResult[] = [];
   let period: { start: string; end: string } | undefined;
@@ -178,16 +209,40 @@ async function main(): Promise<void> {
         continue;
       }
       const java = countsOf(body as never);
-      results.push({ case: dir, patientId, expected, java, agrees: same(expected, java) });
+      // The SHARED classifier, not a local rule. It compares every gated population and isolates the
+      // six CMS122 defects NARROWLY — one difference, on numerator, expected 0 vs actual 1. Exempting
+      // those whole cases (the first version of this script) would let an IPP/DENOM/DENEX divergence or
+      // an HTTP error inside them pass unseen (Codex, #393).
+      const agreement = classifyPopulationAgreement(measure as OfficialMeasureId, dir, expected, java);
+      results.push({ case: dir, patientId, expected, java, agreement, agrees: agreement.pass });
     } catch (e) {
       results.push({ case: dir, patientId, expected, java: null, error: String(e), agrees: false });
     }
   }
 
+  // Refuse a sweep that found nothing. An upstream layout change — a renamed `MeasureReport-`/`Patient-`
+  // prefix, a moved tests directory — empties `results`, leaves `unexpected` at zero and exits 0 with a
+  // "0/0 agreement". That is the same false-green family as the all-zero refusal below, and the first
+  // version of this script guarded one and not the other (Codex, #393).
+  if (results.length === 0) {
+    console.error(
+      `\nFAIL: no cases discovered under ${testsDir}.\n` +
+        `Either the measure has no test cases checked out, or the upstream layout changed and the\n` +
+        `MeasureReport-/Patient- filename prefixes no longer match. This is NOT a passing run.`,
+    );
+    process.exitCode = 1;
+    return;
+  }
+
   const evaluated = results.filter((r) => r.java !== null);
+  if (evaluated.length === 0) {
+    console.error(`\nFAIL: ${results.length} case(s) discovered but NONE evaluated — every request failed.`);
+    process.exitCode = 1;
+    return;
+  }
   const agreed = results.filter((r) => r.agrees);
-  const known = measure === "cms122" ? CMS122_KNOWN_BAD_EXPECTEDS : new Set<string>();
-  const unexpected = results.filter((r) => !r.agrees && !known.has(r.case));
+  const referenceAgreements = results.filter((r) => r.agreement?.status === "reference-agreement");
+  const unexpected = results.filter((r) => !r.agrees);
 
   // The degenerate-sweep refusal — see the header. An all-zero sweep is a resolution failure wearing
   // agreement's clothes.
@@ -197,12 +252,14 @@ async function main(): Promise<void> {
         `That is the signature of terminology or libraries failing to resolve, NOT agreement. Confirm the\n` +
         `measure bundle loaded (Measure + Libraries + ValueSets) before believing any number from this run.`,
     );
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
 
   if (argv.includes("--json")) {
     console.log(JSON.stringify({ measure, name, server, period, results }, null, 2));
-    process.exit(unexpected.length === 0 ? 0 : 1);
+    process.exitCode = unexpected.length === 0 ? 0 : 1;
+    return;
   }
 
   console.log(`\nmeasure       : ${measure} (${name})`);
@@ -210,7 +267,12 @@ async function main(): Promise<void> {
   console.log(`period        : ${period?.start} .. ${period?.end}`);
   console.log(`cases         : ${results.length}  (evaluated ${evaluated.length})`);
   console.log(`agreeing      : ${agreed.length}/${results.length}`);
-  if (known.size) console.log(`known-bad     : ${known.size} expecteds upstream itself flags as wrong`);
+  if (referenceAgreements.length) {
+    console.log(
+      `reference-agr : ${referenceAgreements.length} — upstream's own expected is wrong and the engine ` +
+        `matches the REFERENCE (CMS122 numerator 0→1 only)`,
+    );
+  }
   console.log(`UNEXPECTED    : ${unexpected.length}`);
   for (const r of unexpected.slice(0, 20)) {
     console.log(`  - ${r.case}${r.error ? ` ERROR ${r.error}` : ""}`);
@@ -224,7 +286,7 @@ async function main(): Promise<void> {
       ? `\n=== ${agreed.length}/${results.length} — the Java engine agrees with every expected result ===`
       : `\n=== ${unexpected.length} unexpected disagreement(s) — each needs a cause, not a re-run ===`,
   );
-  process.exit(unexpected.length === 0 ? 0 : 1);
+  process.exitCode = unexpected.length === 0 ? 0 : 1;
 }
 
 await main();

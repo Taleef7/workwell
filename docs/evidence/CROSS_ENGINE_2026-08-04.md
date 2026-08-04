@@ -86,6 +86,32 @@ concrete thing to bring to M-E0.
 That is a stronger and more specific claim than the Cypress green ADR-058 retired — and unlike that one, it
 was obtainable.
 
+## The harness's own refusals, and which are proven
+
+Four false-green paths were closed after review (#393). Three are **proven by execution**; one is not, and
+saying which is which matters more than the count.
+
+| refusal | proven? | how |
+|---|---|---|
+| server is not CR-enabled | **yes** | pointed at `https://hapi.fhir.org/baseR4` → refused, exit 1 |
+| no cases discovered | **yes** | `--measure cms130`, whose tests are not checked out → refused, exit 1 |
+| terminology partially loaded | **yes** (by construction) | `32/32` required; the run prints the ratio |
+| every case returns an all-zero vector | **NO** | never observed; the condition has not been induced |
+
+The all-zero refusal is the one guard here still taken on trust. It is the PR-8f / ADR-043 hazard and the
+reason it exists is sound, but it has not been watched fire.
+
+**Three of the four were false greens that the first version shipped**, and one repeats a defect this repo
+already knew about: `POPULATION_CODES` carries a comment recording that the DENEXCEP omission was caught on
+**#358**, and the first version of this script reintroduced it in a new file. The comparison now uses the
+shared `classifyPopulationAgreement` rather than a local rule, which also narrows the CMS122 exemption to
+the exact defect upstream has (one difference, on numerator, expected 0 vs actual 1) instead of exempting
+those six cases wholesale.
+
+**The corrected comparison did not change the result: still 56/66.** CMS125 declares no DENEXCEP and the
+Java engine reported none, so the zero-initialisation changes nothing here — it will matter for CMS2 and
+CMS68, which declare exception populations.
+
 ## Reproducing
 
 ```bash
