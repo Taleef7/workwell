@@ -72,6 +72,24 @@ report, not of the ADR-046 identity split. Fixing them once fixes all four shape
 - The sample is four hand-constructed reports from the real builders, not a sweep of a live endpoint's
   responses — the same scope limit `qrda-schematron-check.py` states about itself.
 
+## The exit code enforces the floor, not the gap
+
+**Exit 1 iff the base-R4 run has errors.** The DEQM count never affects it: a non-zero gap is the expected
+state today, so gating on it would block every run, while a non-zero base count means a builder started
+emitting invalid FHIR — a production regression.
+
+The first version of this script printed *"this is the floor, it must stay at 0"* and **always exited 0**,
+which made the floor invisible to every shell caller. Caught in review (#392); it is the vacuous-guard
+shape — a control that reads as present and cannot fire.
+
+`--inject-invalid` corrupts the first report's `status` so the floor is provably able to fire. **Measured
+both arms:**
+
+| arm | base errors | exit |
+|---|---|---|
+| normal | 0 | **0** |
+| `--inject-invalid` | 2 | **1** |
+
 ## Reproducing
 
 ```bash

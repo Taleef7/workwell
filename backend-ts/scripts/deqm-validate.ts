@@ -2,7 +2,20 @@
  * Measure our FHIR MeasureReports against the DEQM STU5 profiles — the FHIR-column counterpart of
  * `qrda-schematron-check.py` (ROADMAP_2026-08-04 §4 V3, milestone B6).
  *
- *     corepack pnpm exec tsx scripts/deqm-validate.ts --validator <path/to/validator_cli.jar> [--out <dir>] [--json]
+ *     corepack pnpm exec tsx scripts/deqm-validate.ts --validator <path/to/validator_cli.jar> \
+ *         [--out <dir>] [--json] [--inject-invalid]
+ *
+ * ## Exit code: the FLOOR is enforced, the GAP is not
+ *
+ * **Exit 1 iff the base-R4 run has errors.** A non-zero DEQM count is the expected state today, so
+ * gating on it would block every run; a non-zero BASE count means a builder started emitting invalid
+ * FHIR, which is a production regression. An earlier version printed "must stay at 0" and always exited
+ * 0, which left the floor invisible to every shell caller — a control that reads as present and cannot
+ * fire (Codex, #392).
+ *
+ * `--inject-invalid` corrupts the first report's `status` so the floor provably CAN fire. Measured both
+ * arms: clean → `0 base errors, exit 0`; injected → `2 base errors, exit 1`. Re-run both if you touch
+ * the exit logic — a guard nobody has watched fail is a guard nobody knows works.
  *
  * ## Why this exists as a script and not a test
  *
@@ -213,9 +226,18 @@ function main(): void {
   }> = [];
   let packages: string[] = [];
 
-  for (const c of cases()) {
+  // `--inject-invalid` breaks the FIRST report's `status` to an illegal code, so the base-R4 floor
+  // provably CAN fire. A guard nobody has watched fail is a guard nobody knows works — the same
+  // mutation discipline ADR-055's fixes were held to, and the reason this flag exists rather than a
+  // comment claiming the exit code is correct.
+  const inject = argv.includes("--inject-invalid");
+
+  for (const [i, c] of cases().entries()) {
     const file = join(out, `${c.name}.json`);
-    writeFileSync(file, JSON.stringify(c.report, null, 2));
+    const report = inject && i === 0
+      ? { ...c.report, status: "not-a-real-status" as unknown as MeasureReport["status"] }
+      : c.report;
+    writeFileSync(file, JSON.stringify(report, null, 2));
 
     // Run 1 — base R4. The floor: this must stay at 0 errors whatever DEQM says.
     const base = validate(jar, file, []);
@@ -231,9 +253,16 @@ function main(): void {
     });
   }
 
+  // The FLOOR is enforced, the GAP is not — and the asymmetry is the whole exit-code policy.
+  // A non-zero DEQM count is the expected state today, so gating on it would block every run. A
+  // non-zero BASE count means a builder started emitting invalid FHIR, which is a regression in
+  // production output. Documenting "must stay at 0" without returning non-zero left that floor
+  // invisible to any shell caller (Codex, #392) — a control that reads as present and cannot fire.
+  const baseErrors = results.reduce((n, r) => n + r.base.errors, 0);
+
   if (argv.includes("--json")) {
     console.log(JSON.stringify({ validatorSha256: jarSha, deqmIg: DEQM_IG, packages, results }, null, 2));
-    return;
+    process.exit(baseErrors > 0 ? 1 : 0);
   }
 
   console.log(`\nvalidator_cli.jar sha256: ${jarSha}`);
@@ -245,10 +274,8 @@ function main(): void {
     console.log("  ^ the published stack DEQM STU5 binds — see ROADMAP_2026-08-04 §6 correction 2");
   }
 
-  let baseTotal = 0;
   let deqmTotal = 0;
   for (const r of results) {
-    baseTotal += r.base.errors;
     deqmTotal += r.deqm.errors;
     console.log(`\n── ${r.case}  (${r.why})`);
     console.log(`   base R4      : ${r.base.errors} error(s)`);
@@ -258,11 +285,16 @@ function main(): void {
     }
   }
 
-  console.log(`\n=== BASE R4: ${baseTotal} error(s) across ${results.length} reports — this is the floor ===`);
+  console.log(`\n=== BASE R4: ${baseErrors} error(s) across ${results.length} reports — this is the floor ===`);
   console.log(`=== DEQM   : ${deqmTotal} error(s) — the GAP, not a conformance claim ===`);
   console.log(`reports + OperationOutcomes written to ${out}`);
-  // Exit 0 regardless: this is a measurement, and a non-zero DEQM gap is the expected state today.
-  // Making it a gate would either be vacuous or block on a claim we deliberately do not make.
+  if (baseErrors > 0) {
+    console.error(
+      `\nFAIL: the base-R4 floor regressed — ${baseErrors} error(s). A builder is emitting invalid FHIR.\n` +
+        `(The DEQM gap above is expected and does NOT affect this exit code.)`,
+    );
+    process.exit(1);
+  }
 }
 
 main();
