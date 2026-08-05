@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { CqlExecutionEngine } from "../engine/cql/cql-execution-engine.ts";
+import { CqlExecutionEngine } from "@workwell/measure-engine";
 import { engineForEnv } from "./engine-factory.ts";
 import { getStores } from "../stores/factory.ts";
 

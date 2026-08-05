@@ -7,9 +7,9 @@
 # those internal `workspace:*` references). Including them as members below lets
 # pnpm resolve the whole @mieweb/cloud graph from source.
 #
-# `packages/*` are WorkWell's own extractable libraries (roadmap 2026-07-24 M-C).
-# First member: @workwell/official-executor — the fqm-execution quarantine (ADR-026).
-# measure-engine follows once the official-first flip has landed.
+# `packages/*` are WorkWell's own extractable libraries (roadmap M-C).
+#   @workwell/official-executor — the fqm-execution quarantine (ADR-026).
+#   @workwell/measure-engine    — the eval core, content-free (ADR-059).
 packages:
   - "."
   - "packages/*"

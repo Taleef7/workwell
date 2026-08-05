@@ -16,7 +16,7 @@
 import type { Stores, StoresEnv } from "../stores/factory.ts";
 import { getStores } from "../stores/factory.ts";
 import type { HydratedSegment } from "../stores/segment-store.ts";
-import type { EvaluateMeasureBinding } from "../engine/evaluate-measure.ts";
+import type { EvaluateMeasureBinding } from "@workwell/measure-engine";
 import { routedEngineForEnv } from "../wiring/executor-router.ts";
 import type { EmployeeProfile } from "../engine/synthetic/employee-catalog.ts";
 import { ensureSegmentSeed } from "../segment/segment-seed.ts";
@@ -27,7 +27,7 @@ import {
   type WebChartRunEnv,
 } from "../run/run-pipeline.ts";
 import { isIncrementalEnabled } from "../run/incremental/incremental-eval.ts";
-import { isVsacConfigured } from "../engine/cql/resolve-value-set-resolver.ts";
+import { isVsacConfigured } from "@workwell/measure-engine";
 import type { WebChartClient } from "../engine/ingress/webchart/webchart-client.ts";
 import { emitAlert, resolveAlertChannels, type AlertChannel } from "../run/alert-channel.ts";
 

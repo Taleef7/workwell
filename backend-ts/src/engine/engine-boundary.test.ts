@@ -8,8 +8,16 @@ import { dirname, resolve as resolvePath, relative, sep } from "node:path";
  * Engine package boundary guard (extraction PR-1; Doug's Jun-8 "CQL part independent/reusable"
  * mandate; strategic plan 2026-07-24 §7.4).
  *
- * `src/engine/` is the future `@workwell/measure-engine` package. The rule is **containment**, not a
- * blocklist of two bad targets:
+ * **What `src/engine/` is, as of ADR-059:** no longer the future package — the eval core has MOVED to
+ * `backend-ts/packages/measure-engine/`, and what remains here is WorkWell's measure CONTENT (the
+ * catalog, the compiled ELM, the corpus expansions), the data-ingress adapters, the synthetic corpus and
+ * the CLI edge. Containment still matters and for the same reason: this tree is what the app hands to the
+ * engine, so it must not quietly acquire a store, a route, or a third-party dependency of its own. The
+ * package's own two-dependency closure is proven from inside the package
+ * (`packages/measure-engine/src/package-boundary.test.ts`), and how the app may reach in is proven by
+ * `measure-engine-api.test.ts`.
+ *
+ * The rule is **containment**, not a blocklist of two bad targets:
  *
  *   1. every RELATIVE import must resolve to a path inside `src/engine/` — the tree must be
  *      self-contained, because anything reaching out cannot be lifted into a package; and
@@ -30,12 +38,14 @@ import { dirname, resolve as resolvePath, relative, sep } from "node:path";
 const ENGINE_ROOT = fileURLToPath(new URL("./", import.meta.url)).replace(/[\\/]$/, "");
 
 /**
- * The engine package's dependency manifest, enforced. Adding an entry is a deliberate act that
- * widens what `@workwell/measure-engine` would need to declare — do it in a PR that says so.
+ * This tree's dependency manifest, enforced. Adding an entry is a deliberate act — do it in a PR that
+ * says so. `cql-execution` and `cql-exec-fhir` are deliberately NOT here any more: they are the
+ * package's dependencies, declared in `packages/measure-engine/package.json` and enforced by its own
+ * boundary test. A file here reaching for the CQL runtime directly would be evaluating measures beside
+ * the engine instead of through it, so it stays a violation.
  */
 const ALLOWED_BARE: { prefix: string; note: string; onlyIn?: RegExp }[] = [
-  { prefix: "cql-execution", note: "the CQL runtime" },
-  { prefix: "cql-exec-fhir", note: "the FHIR data-provider for that runtime" },
+  { prefix: "@workwell/measure-engine", note: "the extracted eval core (ADR-059) — the only way to evaluate" },
   {
     // ARCHITECTURE's "portable across every @mieweb/cloud target — file I/O lives only at the CLI
     // edge" is an invariant, so enforce it rather than assert it: node built-ins may appear only in
@@ -132,6 +142,11 @@ test("the boundary matcher catches every escape form (guard self-test)", () => {
     ["template-literal specifier", "const m = await import(`../../stores/${name}.ts`);"],
     ["undeclared third-party dep", 'import axios from "axios";'],
     ["node built-in outside a CLI", 'import { readFileSync } from "node:fs";'],
+    // ADR-059: the CQL runtime belongs to the package now. A file here reaching for it directly would be
+    // evaluating measures BESIDE the engine rather than through it — the shape the extraction exists to
+    // prevent, and one that no other assertion in this file would catch.
+    ["the CQL runtime, which is now the package's dependency", 'import cql from "cql-execution";'],
+    ["the FHIR data-provider, likewise", 'import cqlfhir from "cql-exec-fhir";'],
   ];
   for (const [label, source] of violating) {
     assert.ok(
@@ -141,11 +156,11 @@ test("the boundary matcher catches every escape form (guard self-test)", () => {
   }
 
   const clean: [string, string][] = [
-    ["sibling module", 'import { CqlCode } from "./value-set-resolver.ts";'],
-    ["parent-but-inside module", 'import { evaluateMeasure } from "../evaluate-measure.ts";'],
+    ["sibling module", 'import { ELM_LIBRARIES } from "./elm/index.ts";'],
+    ["parent-but-inside module", 'import { buildSyntheticBundle } from "../synthetic/fhir-bundle-builder.ts";'],
     ["deep relative inside the tree", 'import { MEASURES } from "../registry/measure-registry.ts";'],
-    ["allowlisted runtime", 'import { Library } from "cql-execution";'],
-    ["allowlisted runtime subpath", 'import { PatientSource } from "cql-exec-fhir/lib/x.js";'],
+    ["the extracted engine", 'import { CqlExecutionEngine } from "@workwell/measure-engine";'],
+    ["a type from the extracted engine", 'import type { CqlCode } from "@workwell/measure-engine";'],
     // The real false positive the comment stripper closes — doc comments in this repo quote paths:
     ["quoted import inside a doc comment", ' * severed `import x from "../../stores/factory.ts"`'],
     ["quoted import inside a line comment", '// was: import { getStores } from "../../stores/factory.ts";'],
@@ -174,10 +189,10 @@ test("the boundary matcher catches every escape form (guard self-test)", () => {
   // does (review, #359).
   assert.ok(
     findBoundaryViolations(
-      `${ENGINE_ROOT}/cql/cql-execution-engine.ts`,
+      `${ENGINE_ROOT}/cql/workwell-engine.ts`,
       'import { CqlTranslator } from "@cqframework/cql/cql-to-elm";',
     ).length > 0,
-    "the translator dep must NOT leak into the evaluation core",
+    "the translator dep must NOT leak into this tree",
   );
 });
 
@@ -186,15 +201,16 @@ test("src/engine/ is self-contained and declares only its allowlisted dependenci
   walk(ENGINE_ROOT, files);
   const production = files.filter((f) => !f.endsWith(".test.ts"));
 
-  // Pin near the real count (43 at PR-1): a walk that silently found half the tree would otherwise
-  // still pass and report a green boundary over uninspected files.
+  // Pin near the real count: a walk that silently found half the tree would otherwise still pass and
+  // report a green boundary over uninspected files. It was ~43 at PR-1 and ~33 after ADR-059 moved the
+  // eval core out — lowered ONCE, with the reason, rather than left as a bound nothing can reach.
   assert.ok(
-    production.length >= 40,
-    `engine tree walk found only ${production.length} production files — expected ~43; the walk is broken`,
+    production.length >= 30,
+    `engine tree walk found only ${production.length} production files — expected ~33; the walk is broken`,
   );
   assert.ok(
-    production.some((f) => f.endsWith("/cql/cql-execution-engine.ts")),
-    "the evaluation core must be among the scanned files",
+    production.some((f) => f.endsWith("/cql/workwell-engine.ts")),
+    "the content-wiring factory must be among the scanned files — it is what this tree exists to provide",
   );
 
   const violations: string[] = [];

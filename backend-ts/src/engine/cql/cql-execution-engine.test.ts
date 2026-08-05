@@ -9,12 +9,13 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { CqlExecutionEngine, deriveInInitialPopulation } from "./cql-execution-engine.ts";
+import { CqlExecutionEngine, deriveInInitialPopulation } from "@workwell/measure-engine";
 import { MEASURES } from "./measure-registry.ts";
 import { buildSyntheticBundle } from "../synthetic/fhir-bundle-builder.ts";
 import { deriveExamConfig, type TargetOutcome } from "../synthetic/exam-config.ts";
 import { MEASURE_BINDINGS } from "../synthetic/measure-bindings.ts";
 import { EMPLOYEES } from "../synthetic/employee-catalog.ts";
+import { createWorkwellEngine } from "./workwell-engine.ts";
 
 const synthRoot = fileURLToPath(new URL("../../../spike/synthetic", import.meta.url));
 const EVAL = "2026-06-12";
@@ -57,7 +58,7 @@ const expectedFor = (measureId: string, scenario: string): string => {
   return EXPECTED[scenario]!;
 };
 
-const engine = new CqlExecutionEngine();
+const engine = createWorkwellEngine();
 const emp = EMPLOYEES[0]!;
 
 for (const measureId of Object.keys(MEASURES)) {

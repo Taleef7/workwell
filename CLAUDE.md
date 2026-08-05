@@ -163,8 +163,35 @@ accounting for **14 of 23**. **M-E0's contribution is written**
 **`$evaluate-measure` CACHES** per subject for the server's life — every changed input needs a fresh
 container, and one published conclusion had to be re-proved cold after this was found.
 
-**Next, in order:** **M-C** — the packaging spearhead (locked decision 5): physical `packages/measure-engine`
-extraction, the versioned **compliance API**, `@workwell/*` publish. Then **M-D0/D1** (re-aim at US Quality
+**Done 2026-08-05 (M-C / C1 — ADR-059).** **`@workwell/measure-engine` EXISTS**, with `cql-execution` +
+`cql-exec-fhir` as its entire manifest, no `node:` builtins, and one published entry (`src/index.ts`). The
+question that blocked it for two weeks was ADR-052's deferred one, and it is now answered: **measure content
+is INJECTED, never shipped.** The catalog, the 17 compiled ELM libraries (1.2 MB) and `withBundledEcqmFallback`
+stay app-side in `src/engine/cql/`, wired in exactly one place — `createWorkwellEngine()`, which the ~45 former
+`new CqlExecutionEngine()` sites now call. Content is **required**, verified as a compile error (`TS2554`),
+because an empty catalog reports `MISSING_DATA` for a whole roster — the ADR-043 hazard PR-8f's retrieve check
+cannot see. **The interesting part: ADR-052's stated blocker — nine core-test→app edges, "the move must either
+strand those tests or give the package a devDependency pointing back at the app" — DISSOLVED rather than being
+paid.** Under injection every one of those tests is content-configured and therefore app-side by the same rule
+that excludes the content; none was stranded. **Two changes the extraction forced**, both recorded: the
+`MeasureExecutor` factories now **require** their engine binding (they defaulted to a lazily-constructed shared
+engine, impossible without module-level content; zero production callers), and offline expansion is gated on
+`expansionFallback` being **supplied** rather than on the OIDs looking eCQM-shaped (otherwise a consumer with
+neither resolver nor fallback zero-matches every retrieve instead of running the base library). Enforcement was
+**rewritten, not relocated** — the old `engine-core-boundary.test.ts` predicted in its own docblock that the
+move would make it unresolvable or vacuous, so it split into a package-side closure test (refusing a third dep,
+`node:`, escapes, and **any content import by name**) and `measure-engine-api.test.ts` (no deep imports, no
+reach-arounds, every imported name **read from `index.ts`**); `CORE_ENTRY_POINTS` is deleted, and
+`engine-boundary.test.ts` no longer allowlists the CQL runtime inside `src/engine/`. **All eight assertions
+mutation-checked.** Suite **1859 → 1863**, 0 fail — the +4 is exactly the 6→10 test split, so nothing was
+stranded; `compile-measures`/`generate:sql` byte-identical; `flip-snapshot --measure cms125` still 5/5 in the
+official IPP, agreeing with authored. **Not done, named:** the `node:` allowlist for the four `*-cli.ts`
+entrypoints (ADR-048's second debt) is untouched — those files stayed app-side, so the debt did not move.
+
+**Next, in order:** **M-C continues** — **C2** (public surface + one consumer outside `backend-ts`,
+`packages/measure-codegen`, the `cql-tests` conformance harness #296, and ADR-048's remaining `node:` CLI
+debt), **C3** (the versioned **compliance API** — `/compliance/{patient}/{measure}?start&end`, Doug's exact
+question shape), **C4** (`@workwell/*` publish + positioning doc). Then **M-D0/D1** (re-aim at US Quality
 Core; run the Inferno **US Quality Core Test Kit** against the shim output) and **M-E1** (occupational
 content pack). **Still undiagnosed:** CMS125's 2 `Procedure`-only cases, CMS2's 7 `NUMER 1→0`, and
 CMS130/CMS165 unswept (credentialed vendor workflow). **Deferred, not cancelled:** supplemental data (B8).

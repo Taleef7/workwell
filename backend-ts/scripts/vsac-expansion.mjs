@@ -50,7 +50,7 @@
  *   strength as a completed cap.
  */
 
-/** NLM's FHIR terminology service — the same host `engine/cql/vsac-client.ts` expands against. */
+/** NLM's FHIR terminology service — the same host `@workwell/measure-engine`'s `vsac-client.ts` expands against. */
 export const DEFAULT_VSAC_BASE = "https://cts.nlm.nih.gov/fhir";
 
 /**

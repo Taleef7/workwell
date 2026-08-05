@@ -9,7 +9,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { evaluateBundle, evaluateBatch } from "./evaluate-bundle.ts";
-import { CqlExecutionEngine } from "../cql/cql-execution-engine.ts";
+import { createWorkwellEngine } from "../cql/workwell-engine.ts";
 
 const SYNTH = fileURLToPath(new URL("../../../spike/synthetic", import.meta.url));
 const load = (m: string, s: string): unknown => JSON.parse(readFileSync(path.join(SYNTH, m, `${s}.json`), "utf8"));
@@ -20,7 +20,7 @@ test("evaluateBundle: a single JSON bundle → MeasureOutcome, identical to the 
   const got = await evaluateBundle(bundle, "audiogram", { evaluationDate: EVAL });
   assert.equal(got.outcome, "COMPLIANT");
   assert.equal(got.subjectId, "audiogram-present_recent");
-  const direct = await new CqlExecutionEngine().evaluate({ measureId: "audiogram", patientBundle: bundle, evaluationDate: EVAL });
+  const direct = await createWorkwellEngine().evaluate({ measureId: "audiogram", patientBundle: bundle, evaluationDate: EVAL });
   assert.deepEqual(got, direct); // the library entry adds no behavior
 });
 

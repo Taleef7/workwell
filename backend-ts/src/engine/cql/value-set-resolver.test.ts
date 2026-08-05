@@ -16,7 +16,7 @@ import { rmSync } from "node:fs";
 import { createSqliteD1 } from "@mieweb/cloud-local";
 import { SqliteValueSetStore } from "../../stores/sqlite/value-set-store-sqlite.ts";
 import { RUN_STORE_FLOOR_DDL, migrateFloorSchema } from "../../stores/sqlite/schema.ts";
-import { StoreValueSetResolver, buildCodeService } from "./value-set-resolver.ts";
+import { StoreValueSetResolver, buildCodeService } from "@workwell/measure-engine";
 
 const dbPath = join(tmpdir(), `workwell-vsr-${crypto.randomUUID()}.sqlite`);
 const VS = "urn:workwell:vs:audiogram-procedures";
@@ -72,7 +72,7 @@ test("buildCodeService produces a CodeService that resolves the value set by url
 // ---------------------------------------------------------------------------
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { CqlExecutionEngine } from "./cql-execution-engine.ts";
+import { createWorkwellEngine } from "./workwell-engine.ts";
 
 const SYNTH = fileURLToPath(new URL("../../../spike/synthetic/audiogram", import.meta.url));
 const EVAL = "2026-06-12";
@@ -84,8 +84,8 @@ const EXPECTED: Record<string, string> = {
 };
 
 test("audiogram: expansion mode == inline mode == expected, across all scenarios", async () => {
-  const inline = new CqlExecutionEngine();
-  const expansion = new CqlExecutionEngine({ valueSetResolver: new StoreValueSetResolver(store) });
+  const inline = createWorkwellEngine();
+  const expansion = createWorkwellEngine({ valueSetResolver: new StoreValueSetResolver(store) });
   for (const [scenario, expected] of Object.entries(EXPECTED)) {
     const bundle = JSON.parse(readFileSync(join(SYNTH, `${scenario}.json`), "utf8"));
     const inlineOut = await inline.evaluate({ measureId: "audiogram", patientBundle: bundle, evaluationDate: EVAL });

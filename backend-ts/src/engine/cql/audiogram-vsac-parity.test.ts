@@ -14,8 +14,8 @@ import { fileURLToPath } from "node:url";
 import { createSqliteD1 } from "@mieweb/cloud-local";
 import { SqliteValueSetStore } from "../../stores/sqlite/value-set-store-sqlite.ts";
 import { RUN_STORE_FLOOR_DDL, migrateFloorSchema } from "../../stores/sqlite/schema.ts";
-import { CqlExecutionEngine } from "./cql-execution-engine.ts";
-import { resolveValueSetResolver } from "./resolve-value-set-resolver.ts";
+import { resolveValueSetResolver } from "@workwell/measure-engine";
+import { createWorkwellEngine } from "./workwell-engine.ts";
 
 const dbPath = join(tmpdir(), `workwell-vsac-parity-${crypto.randomUUID()}.sqlite`);
 const VS = "urn:workwell:vs:audiogram-procedures";
@@ -51,8 +51,8 @@ after(() => {
 });
 
 test("audiogram: inline == composite(VSAC key on) == expected, across all scenarios", async () => {
-  const inline = new CqlExecutionEngine(); // today's production default (no resolver)
-  const keyed = new CqlExecutionEngine({
+  const inline = createWorkwellEngine(); // today's production default (no resolver)
+  const keyed = createWorkwellEngine({
     valueSetResolver: resolveValueSetResolver({ WORKWELL_VSAC_API_KEY: "test-key-not-used-for-urn" }, store),
   });
   for (const [scenario, expected] of Object.entries(EXPECTED)) {

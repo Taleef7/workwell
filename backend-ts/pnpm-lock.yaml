@@ -32,18 +32,15 @@ importers:
       '@mieweb/cloud-types':
         specifier: workspace:*
         version: link:../external/mieweb-cloud/packages/cloud-types
+      '@workwell/measure-engine':
+        specifier: workspace:*
+        version: link:packages/measure-engine
       '@workwell/official-executor':
         specifier: workspace:*
         version: link:packages/official-executor
       better-sqlite3:
         specifier: ^12.0.0
         version: 12.10.0
-      cql-exec-fhir:
-        specifier: ^2.1.6
-        version: 2.1.6(cql-execution@3.3.2)
-      cql-execution:
-        specifier: ^3.3.2
-        version: 3.3.2
       pg:
         specifier: ^8.21.0
         version: 8.21.0
@@ -133,6 +130,15 @@ importers:
       sqlite-vec:
         specifier: ^0.1.6
         version: 0.1.9
+
+  packages/measure-engine:
+    dependencies:
+      cql-exec-fhir:
+        specifier: ^2.1.6
+        version: 2.1.6(cql-execution@3.3.2)
+      cql-execution:
+        specifier: ^3.3.2
+        version: 3.3.2
 
   packages/official-executor:
     dependencies:

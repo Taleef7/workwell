@@ -7,8 +7,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { CqlExecutionEngine } from "../engine/cql/cql-execution-engine.ts";
 import { compileCql } from "./cql-translator.ts";
+import { createWorkwellEngine } from "../engine/cql/workwell-engine.ts";
 
 const MIGRATED = ["mmr", "varicella", "hepatitis_b_vaccination_series", "audiogram", "hypertension", "cholesterol_ldl"];
 const SCENARIOS = ["present_recent", "present_old", "missing", "excluded"];
@@ -16,7 +16,7 @@ const EVAL = "2026-06-12";
 
 const synthRoot = fileURLToPath(new URL("../../spike/synthetic", import.meta.url));
 const genRoot = fileURLToPath(new URL("../../measures/generated", import.meta.url));
-const engine = new CqlExecutionEngine();
+const engine = createWorkwellEngine();
 
 for (const measureId of MIGRATED) {
   test(`generated CQL matches hand-written Outcome Status for ${measureId}`, async () => {
