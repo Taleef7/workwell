@@ -36,7 +36,7 @@
  */
 import type { OfficialMeasureReference } from "./reference-types.ts";
 import type { EmployeeProfile } from "../engine/synthetic/employee-catalog.ts";
-import type { ValueSetResolver } from "../engine/cql/value-set-resolver.ts";
+import type { ValueSetResolver } from "@workwell/measure-engine";
 
 import type { DiffEngine, SubjectDiff } from "./execution-diff.ts";
 import { buildSyntheticBundle } from "../engine/synthetic/fhir-bundle-builder.ts";

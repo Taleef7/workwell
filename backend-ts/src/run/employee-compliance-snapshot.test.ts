@@ -3,13 +3,13 @@
  *   node --import tsx --test src/run/employee-compliance-snapshot.test.ts */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { CqlExecutionEngine } from "../engine/cql/cql-execution-engine.ts";
 import { EMPLOYEES } from "../engine/synthetic/employee-catalog.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { seededTargetFor } from "./distribution.ts";
 import { simulateComplianceAsOf } from "./employee-compliance-snapshot.ts";
+import { createWorkwellEngine } from "../engine/cql/workwell-engine.ts";
 
-const engine = new CqlExecutionEngine();
+const engine = createWorkwellEngine();
 const TODAY = "2026-06-24";
 const FUTURE = "2036-06-24"; // +10y — past any RECURRING window
 

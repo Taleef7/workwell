@@ -12,7 +12,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import type { OutcomeStatus } from "../../evaluate-measure.ts";
+import type { OutcomeStatus } from "@workwell/measure-engine";
 import { webChartDataSource } from "../data-source.ts";
 import { fixtureWebChartClient } from "./webchart-client.ts";
 import { parseEnrollmentRoster, evaluateSourceWithRoster } from "../enrollment/roster.ts";

@@ -72,15 +72,15 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
-import type { MeasureOutcome, OutcomeStatus } from "../../evaluate-measure.ts";
+import type { MeasureOutcome, OutcomeStatus } from "@workwell/measure-engine";
 import { webChartDataSource } from "../data-source.ts";
 import { fixtureWebChartClient } from "./webchart-client.ts";
 import { parseEnrollmentRoster, stampEnrollment } from "../enrollment/roster.ts";
 import { officialMeasureExecutor, type OfficialBatchSubject } from "../../../wiring/official-executor-adapter.ts";
 import { officialTerminologyExpander, loadOfficialTerminology } from "../../../wiring/official-terminology.ts";
 import { loadOfficialArtifact } from "../../../wiring/official-artifacts.ts";
-import { CqlExecutionEngine } from "../../cql/cql-execution-engine.ts";
 import { bundledEcqmValueSetResolver } from "../../cql/bundled-ecqm-expansions.ts";
+import { createWorkwellEngine } from "../../cql/workwell-engine.ts";
 
 const DIR = fileURLToPath(new URL("../../../../spike/webchart/", import.meta.url));
 const payloads = JSON.parse(readFileSync(path.join(DIR, "devdb-patients.json"), "utf8")) as unknown[];
@@ -155,7 +155,7 @@ const inIppCount = (outcomes: ReadonlyMap<string, MeasureOutcome>): number =>
   [...outcomes.values()].filter((o) => o.inInitialPopulation).length;
 
 async function authoredOutcomes(measureId: string, bundles: readonly unknown[]): Promise<Map<string, OutcomeStatus>> {
-  const authored = new CqlExecutionEngine({ valueSetResolver: bundledEcqmValueSetResolver });
+  const authored = createWorkwellEngine({ valueSetResolver: bundledEcqmValueSetResolver });
   const out = new Map<string, OutcomeStatus>();
   for (const bundle of bundles) {
     const r = await authored.evaluate({ measureId, patientBundle: clone(bundle), evaluationDate: EVAL });

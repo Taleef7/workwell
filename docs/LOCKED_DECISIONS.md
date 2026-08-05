@@ -70,9 +70,18 @@ Active plan: **`docs/ROADMAP_2026-08-04.md`** (supersedes `ROADMAP_2026-07-24.md
   > so `cql/` is NOT wholesale-liftable; the eval core minus those CLI files is.
   >
   > **SINCE (2026-07-24, same day):** PR-2 — the physical `packages/measure-engine` extraction — was
-  > **resequenced to land with M-C** and has NOT shipped. `backend-ts/packages/` today contains only
-  > `official-executor/`. The debt described above is therefore still in the tree, still allowlisted, and
-  > still PR-2's job — just later than this bullet implies.
+  > **resequenced to land with M-C** and had NOT shipped as of that date. *(Superseded 2026-08-05 — see
+  > below.)*
+  >
+  > **SINCE (2026-08-05, ADR-059): the extraction SHIPPED as M-C / C1.**
+  > `backend-ts/packages/measure-engine/` exists with `cql-execution` + `cql-exec-fhir` as its entire
+  > manifest, published through one `src/index.ts`. **Measure content is INJECTED, never shipped** — the
+  > catalog, the 17 compiled ELM libraries and the corpus expansions stay in `src/engine/cql/`, wired once
+  > by `createWorkwellEngine()`. ADR-052's stated blocker (nine core-test→app edges) **dissolved rather than
+  > being paid**: under injection every one of those tests is content-configured and therefore app-side, so
+  > none was stranded and the package took no devDependency back on the app. **The second debt named above
+  > — `node:` in the four `*-cli.ts` entrypoints — is UNCHANGED and still open**: those files stayed
+  > app-side, so the debt did not move; it is C2's. `engine-boundary.test.ts` still allowlists it there.
 - **Official-path machinery exists** (literal-diff + official-cases over fqm-execution, 121/121 MADiE
   green — **SINCE 2026-07-31 the gate is 410/410 exact across EIGHT measures**: CMS122 55, CMS125 66,
   CMS2 36, CMS68 19, CMS951 55, CMS138 47, CMS130 64, CMS165 68, 0 unexpected, 0 errors, per-measure

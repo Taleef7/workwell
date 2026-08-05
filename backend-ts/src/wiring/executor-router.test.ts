@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 import { officialLogicVersion, officialRoutingProblems, routedEngineForEnv } from "./executor-router.ts";
 import { loadOfficialArtifact, type OfficialArtifact } from "./official-artifacts.ts";
 import { requiredOids } from "./official-executor-adapter.ts";
-import type { EvaluateMeasureBinding, MeasureOutcome } from "../engine/evaluate-measure.ts";
+import type { EvaluateMeasureBinding, MeasureOutcome } from "@workwell/measure-engine";
 import type { LoadedTerminology } from "./official-terminology.ts";
 import type { FqmCalculate } from "@workwell/official-executor";
 

@@ -29,16 +29,8 @@ import { listMeasures, toMeasureDetail, toVersionHistory, toActivationReadiness,
 import { seedMeasureStore } from "../measure/measure-seed.ts";
 import { createMeasure, approveMeasure, deprecateMeasure, transitionStatus, MeasureError, type MeasureLifecycleDeps } from "../measure/measure-lifecycle.ts";
 import {
-  updateMeasureSpec,
-  updateMeasureCql,
-  compileMeasureCql,
-  updateMeasureTests,
-  validateMeasureTests,
-  previewRule,
-  saveRule,
-  validateSpecUpdate,
-} from "../measure/measure-authoring.ts";
-import type { Rule, CodegenBindings } from "../engine/cql/codegen/generate-cql.ts";
+  updateMeasureSpec, updateMeasureCql, compileMeasureCql, updateMeasureTests, validateMeasureTests, previewRule, saveRule, validateSpecUpdate, } from "../measure/measure-authoring.ts";
+import type { Rule, CodegenBindings } from "@workwell/measure-engine";
 import { listOshaReferences } from "../measure/osha-references.ts";
 import { generateTraceability } from "../measure/measure-traceability.ts";
 import { computeDataReadiness } from "../measure/data-readiness.ts";
@@ -47,17 +39,7 @@ import { previewImpact, ImpactPreviewError, type ImpactPreviewRequest } from "..
 import type { TestFixture } from "../measure/measure-catalog.ts";
 import { seedValueSets, backfillImmunizationValueSets } from "../measure/value-set-seed.ts";
 import {
-  listValueSets,
-  listValueSetsByVersion,
-  createValueSet,
-  attachValueSet,
-  detachValueSet,
-  resolveCheck,
-  diffValueSets,
-  getValueSetDetail,
-  ValueSetError,
-  type ValueSetGovernanceDeps,
-} from "../measure/value-set-governance.ts";
+  listValueSets, listValueSetsByVersion, createValueSet, attachValueSet, detachValueSet, resolveCheck, diffValueSets, getValueSetDetail, ValueSetError, type ValueSetGovernanceDeps, } from "../measure/value-set-governance.ts";
 import { referenceFor } from "../standards/references/index.ts";
 import { computeFidelity } from "../standards/measure-fidelity.ts";
 import { isCompletedRun, isPopulationRun, latestRunRows } from "../program/rollup-shared.ts";
@@ -65,9 +47,10 @@ import { computeOutcomeDiff } from "../standards/outcome-diff.ts";
 import { computeExecutionDiff } from "../standards/execution-diff.ts";
 import { computeLiteralDiff, literalDiffAvailable } from "../standards/literal-diff.ts";
 import { CMS122_OFFICIAL_META } from "../standards/cms122-official.ts";
-import { StoreValueSetResolver, type ValueSetResolver } from "../engine/cql/value-set-resolver.ts";
-import { CqlExecutionEngine } from "../engine/cql/cql-execution-engine.ts";
+import { StoreValueSetResolver, type ValueSetResolver } from "@workwell/measure-engine";
+
 import { EMPLOYEES } from "../engine/synthetic/employee-catalog.ts";
+import { createWorkwellEngine } from "../engine/cql/workwell-engine.ts";
 
 interface MeasuresEnv {
   DB: CloudDatabase;
@@ -522,7 +505,7 @@ export async function handleMeasures(req: Request, env: MeasuresEnv, actor = "sy
         const runId = latestRows[0]?.runId;
         const run = runId ? await stores.runs.getRun(runId) : null;
         const asOf = run?.measurementPeriodEnd?.slice(0, 10) ?? latestRows[0]?.runStartedAt?.slice(0, 10) ?? today;
-        const deps = { engine: new CqlExecutionEngine({ valueSetResolver: resolver }), resolver, employees: EMPLOYEES, today: asOf, asOf };
+        const deps = { engine: createWorkwellEngine({ valueSetResolver: resolver }), resolver, employees: EMPLOYEES, today: asOf, asOf };
         if (mode === "literal") {
           try {
             return json(await computeLiteralDiff(ref, latestRows, deps));

@@ -2,7 +2,7 @@
  *   node --import tsx --test src/engine/cql/codegen/generate-cql.test.ts */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { generateCql, type Rule, type CodegenBindings } from "./generate-cql.ts";
+import { generateCql, type Rule, type CodegenBindings } from "@workwell/measure-engine";
 
 /** E11.2c helper — build CQL from a rule + bindings with a fixed library/version. */
 const gen = (rule: Rule, bindings: CodegenBindings): string =>

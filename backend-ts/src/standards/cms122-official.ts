@@ -7,7 +7,7 @@
 import type { MeasureMeta } from "../engine/cql/measure-registry.ts";
 import type { EmployeeProfile } from "../engine/synthetic/employee-catalog.ts";
 import type { FhirBundle } from "../engine/synthetic/fhir-bundle-builder.ts";
-import type { CqlCode } from "../engine/cql/value-set-resolver.ts";
+import type { CqlCode } from "@workwell/measure-engine";
 
 /** OID probed to decide real-execution vs the PR-2 estimate (Diabetes value set). */
 export const CMS122_DIABETES_OID = "2.16.840.1.113883.3.464.1003.103.12.1001";

@@ -79,9 +79,23 @@ export function fixtureVsacClient(
  * and if paging exceeds the max-iteration guard (a server that ignores `offset` and never terminates).
  * A legitimately-empty value set (`total === 0` with no members) is VALID → returns `{ contains: [] }`.
  */
+/**
+ * Base64 for HTTP Basic, without `Buffer` — which is a Node global, not a language feature, and absent
+ * from Workers (without `nodejs_compat`) and browsers alike. The package claims portability beyond the
+ * Node container, so a credentialed consumer there must not throw before the request is even made
+ * (Codex, #395). `TextEncoder` + `btoa` exist in all three. The UTF-8 → Latin-1 hop is what makes this
+ * correct rather than merely portable: `btoa` on a raw string throws on any code point above U+00FF.
+ */
+function basicAuthBase64(userPass: string): string {
+  const bytes = new TextEncoder().encode(userPass);
+  let binary = "";
+  for (const b of bytes) binary += String.fromCharCode(b);
+  return btoa(binary);
+}
+
 export function httpVsacClient(cfg: VsacClientConfig): VsacClient {
   const base = cfg.baseUrl.replace(/\/+$/, "");
-  const auth = "Basic " + Buffer.from(`apikey:${cfg.apiKey}`).toString("base64");
+  const auth = "Basic " + basicAuthBase64(`apikey:${cfg.apiKey}`);
   const PAGE = 1000;
   const MAX_PAGES = 2000;
   return {

@@ -16,7 +16,7 @@ import { SqliteOutcomeStore } from "../stores/sqlite/outcome-store-sqlite.ts";
 import { SqliteCaseStore } from "../stores/sqlite/case-store-sqlite.ts";
 import { SqliteCaseEventStore } from "../stores/sqlite/case-event-store-sqlite.ts";
 import type { Stores } from "../stores/factory.ts";
-import type { EvaluateMeasureBinding } from "../engine/evaluate-measure.ts";
+import type { EvaluateMeasureBinding } from "@workwell/measure-engine";
 import { EMPLOYEES } from "../engine/synthetic/employee-catalog.ts";
 import { fixtureWebChartClient } from "../engine/ingress/webchart/webchart-client.ts";
 import {

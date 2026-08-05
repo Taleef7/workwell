@@ -15,7 +15,7 @@
  * Side-effect-free + importable by tests; resolve-valuesets-bin.ts is the runnable entry.
  */
 import { getStores, type StoresEnv } from "../../stores/factory.ts";
-import { httpVsacClient, type VsacClient } from "../../engine/cql/vsac-client.ts";
+import { httpVsacClient, type VsacClient } from "@workwell/measure-engine";
 import { CMS122V14 } from "../../standards/references/cms122v14.ts";
 import { loadOfficialArtifact } from "../../wiring/official-artifacts.ts";
 import { requiredValueSets } from "../../wiring/official-executor-adapter.ts";

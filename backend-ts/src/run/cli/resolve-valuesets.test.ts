@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { runResolve, parseArgs, DEFAULT_OIDS } from "./resolve-valuesets.ts";
-import { fixtureVsacClient, type VsacExpansion } from "../../engine/cql/vsac-client.ts";
+import { fixtureVsacClient, type VsacExpansion } from "@workwell/measure-engine";
 import type { UpsertResolvedValueSetInput, ValueSetStore } from "../../stores/value-set-store.ts";
 import type { AppendAuditInput, CaseEventStore } from "../../stores/case-event-store.ts";
 

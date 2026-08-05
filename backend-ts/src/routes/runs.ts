@@ -53,7 +53,7 @@ import {
   type RunPipelineDeps,
 } from "../run/run-pipeline.ts";
 import { isIncrementalEnabled } from "../run/incremental/incremental-eval.ts";
-import { isVsacConfigured } from "../engine/cql/resolve-value-set-resolver.ts";
+import { isVsacConfigured } from "@workwell/measure-engine";
 import { rerunToVerify, UnsupportedCaseRerunError } from "../case/case-rerun.ts";
 import type { PopulationCounts } from "../fhir/measure-report.ts";
 import {

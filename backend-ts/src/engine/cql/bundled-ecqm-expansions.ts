@@ -28,7 +28,7 @@
  * first, so whichever set it was written for, the other silently matched nothing. Same story for the four
  * mastectomy sets. The names are ugly on purpose — they name a value set, not a concept.
  */
-import type { CqlCode, ValueSetResolver } from "./value-set-resolver.ts";
+import type { CqlCode, ValueSetResolver } from "@workwell/measure-engine";
 
 const SNOMED = "http://snomed.info/sct";
 const LOINC = "http://loinc.org";

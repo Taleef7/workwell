@@ -20,7 +20,6 @@
  * set compliance — CQL `Outcome Status` stays authoritative on every path. NO DB, NO node:fs here — this
  * stays portable across every @mieweb/cloud target.
  */
-import { CqlExecutionEngine } from "./cql/cql-execution-engine.ts";
 import type { EvaluateMeasureBinding, EvaluateMeasureInput, MeasureOutcome } from "./evaluate-measure.ts";
 
 /** Diagnostic tag for the built-in executors. Extensible (a future executor can carry its own kind). */
@@ -35,21 +34,20 @@ export interface MeasureExecutor extends EvaluateMeasureBinding {
   readonly kind: MeasureExecutorKind;
 }
 
-// Lazily-created shared FHIR-native engine — constructing it loads FHIRHelpers ELM once. It is the same
-// engine CLASS `evaluateBundle` uses (a distinct instance), so the executor default is the identical
-// evaluation path — no second evaluator. Callers that need VSAC resolution pass an `engineForEnv(env)`
-// engine (see `fhirNativeExecutor` / `resolveMeasureExecutor` `engine` param).
-let sharedEngine: EvaluateMeasureBinding | undefined;
-
 /**
- * The default executor (Option A): evaluate via the existing CQL→ELM engine. Optionally inject a binding
- * (tests, or an env-built engine with a VSAC resolver via `engineForEnv`); defaults to a shared engine.
+ * The default executor (Option A): evaluate via the CQL→ELM engine.
+ *
+ * `engine` is REQUIRED (ADR-059). It used to be optional, defaulting to a lazily-constructed shared
+ * `CqlExecutionEngine` — which was only possible while the engine imported WorkWell's catalog and ELM at
+ * module level. With content injected, an executor that manufactures its own engine would have to
+ * manufacture a catalog too, and the only catalog it could invent is an empty one. Requiring the binding
+ * puts the question where it belongs: the caller already knows which content it is measuring against.
  */
-export function fhirNativeExecutor(engine?: EvaluateMeasureBinding): MeasureExecutor {
+export function fhirNativeExecutor(engine: EvaluateMeasureBinding): MeasureExecutor {
   return {
     kind: "fhir-native",
     evaluate(input: EvaluateMeasureInput): Promise<MeasureOutcome> {
-      return (engine ?? (sharedEngine ??= new CqlExecutionEngine())).evaluate(input);
+      return engine.evaluate(input);
     },
   };
 }
@@ -95,7 +93,7 @@ export function isSqlPushdownSelected(env: MeasureExecutorEnv): boolean {
  * `WORKWELL_MEASURE_EXECUTOR=sql-pushdown` opt-in — and, being an inert stub, it rejects on use (not on
  * resolve), failing loudly rather than silently. So the deployed default is byte-identical to today.
  */
-export function resolveMeasureExecutor(env: MeasureExecutorEnv, engine?: EvaluateMeasureBinding): MeasureExecutor {
+export function resolveMeasureExecutor(env: MeasureExecutorEnv, engine: EvaluateMeasureBinding): MeasureExecutor {
   if (isSqlPushdownSelected(env)) return sqlPushdownExecutor();
   return fhirNativeExecutor(engine);
 }

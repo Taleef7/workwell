@@ -1,0 +1,21 @@
+{
+  "name": "@workwell/measure-engine",
+  "version": "0.1.0",
+  "description": "Headless eCQM evaluation: executes pre-compiled ELM against a FHIR R4 patient bundle and returns per-define evidence. JVM-free, node:fs-free, and content-free — the measure catalog, ELM and value-set expansions are injected by the consumer (ADR-059).",
+  "type": "module",
+  "license": "Apache-2.0",
+  "private": true,
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "dependencies": {
+    "cql-execution": "^3.3.2",
+    "cql-exec-fhir": "^2.1.6"
+  },
+  "files": [
+    "src"
+  ]
+}

@@ -9,7 +9,7 @@
  */
 import { readFileSync } from "node:fs";
 import { evaluateBundle } from "../ingress/evaluate-bundle.ts";
-import type { MeasureOutcome } from "../evaluate-measure.ts";
+import type { MeasureOutcome } from "@workwell/measure-engine";
 
 export const USAGE =
   "Usage: pnpm evaluate --patient <bundle.json> --measure <id> [--date YYYY-MM-DD] [--pretty]";

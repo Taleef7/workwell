@@ -1,5 +1,83 @@
 # Journal
 
+## 2026-08-05 (M-C / C1) — `@workwell/measure-engine` exists, and the question that blocked it for two weeks was the cheap one to answer (branch `feat/measure-engine-extraction`)
+
+The extraction has been promised since 2026-07-24 and deferred twice. It was never a lifting problem:
+`engine-core-boundary.test.ts` had already decided and enforced where the boundary sits. It was **one
+undecided question** — does the package ship WorkWell's measure content, or take it injected? — and ADR-052
+named it precisely, declined to answer it, and everything stopped there.
+
+**Answered: injected. The package ships zero content.** `CqlExecutionEngine` takes
+`{ measures, elmLibraries, expansionFallback? }` as a **required** constructor argument. Our 15-measure
+catalog, the 17 compiled ELM libraries (1.2 MB) and `withBundledEcqmFallback` — whose own docblock begins
+*"the codes the synthetic corpus stamps"* — stay app-side under `src/engine/cql/`, wired in exactly one
+place: `createWorkwellEngine()`, which the ~45 former `new CqlExecutionEngine()` sites now call. The
+argument that excluded `synthetic/employee-catalog.ts` applies to those three with equal force, and
+`evaluate(input.elm, metaOverride)` already supported consumer-supplied measures — so the registry and ELM
+were always a default, never a necessity.
+
+**Required, not defaulted to empty, and verified as a compile error** (`TS2554` on `new
+CqlExecutionEngine()`). An empty catalog reports `MISSING_DATA` for every subject, which is
+indistinguishable from a genuinely ineligible roster — the ADR-043 hazard, and one PR-8f's retrieve check
+provably cannot see.
+
+**The thing worth recording: ADR-052's "real blocker" DISSOLVED rather than being paid.** It recorded nine
+core-test→app edges and concluded the move must *"either strand those tests or give the package a
+devDependency pointing back at the app."* Neither. Under content injection every one of those tests is
+testing *content-configured* behaviour and is app-side by the same rule that excludes the content —
+`cql-execution-engine.test.ts`, `foreign-condition-scoping.test.ts`, `generate-sql.test.ts`,
+`value-set-resolver.test.ts`, `audiogram-vsac-parity.test.ts`, `measure-executor.test.ts` all stay put and
+import the engine by its package name. **Four** package tests had no app edges and moved with their subjects;
+`package-boundary.test.ts` is new, not moved (git renders it as a rename on a similarity heuristic). The blocker was an artefact of the undecided question, not an independent obstacle.
+
+**Two changes the extraction FORCED, both stated rather than smoothed over.** (1) `fhirNativeExecutor` and
+`resolveMeasureExecutor` now **require** their engine binding — they defaulted to a lazily-constructed
+shared engine, which only worked while the engine imported content at module level; an executor that
+manufactures its own engine would have to manufacture a catalog, and the only one it could invent is empty.
+Zero production callers, so no behavioural surface. (2) Offline expansion is now gated on
+`expansionFallback` being **supplied**, not on the OIDs looking eCQM-shaped. Unchanged, a consumer injecting
+neither resolver nor fallback would have entered expansion mode against an empty `CodeService` and
+zero-matched every retrieve; now they get the base library — a limited answer instead of a silently wrong
+one. WorkWell always injects the fallback, so nothing here moved.
+
+**Enforcement was rewritten, not relocated — the old test predicted its own end.**
+`engine-core-boundary.test.ts` said in its docblock that the move would leave it unresolvable if left behind
+and vacuous if moved verbatim. So: `packages/measure-engine/src/package-boundary.test.ts` recomputes the
+closure from `index.ts` and refuses a third dependency, any `node:` builtin, any escape, and **any import of
+WorkWell content by name** — the assertion that keeps the decision from being quietly reverted.
+`src/engine/measure-engine-api.test.ts` keeps the outside-only half: no deep import past the entry point, no
+relative reach-around into `packages/`, and every imported name **read from `index.ts`** rather than
+restated, so the check cannot drift from the real surface. The eleven-name `CORE_ENTRY_POINTS` list is
+deleted. `engine-boundary.test.ts` still polices `src/engine/`, but its allowlist no longer admits
+`cql-execution`/`cql-exec-fhir` — a file there reaching for the CQL runtime would be evaluating measures
+*beside* the engine instead of through it.
+
+**All eight new or rewritten assertions were mutation-checked** (broken deliberately, confirmed red,
+restored). Not ceremony: a boundary test that survives its own subject moving is exactly the vacuous-guard
+shape caught on #350, #354, #363 and #365.
+
+**Review then found a ninth thing the eight could not see, and it is the same lesson again.**
+`httpVsacClient` built its HTTP Basic header with **`Buffer`** — a Node *global*, which arrives through no
+import — so "the package is NODE-FREE" stayed green while a VSAC-configured Worker or browser consumer
+would have thrown before issuing a request. The blind spot is inherited (the identical `node:`-only check
+has been in `engine-boundary.test.ts` since PR-1); what this change did was **widen the claim being cited**,
+from "file I/O stays at the CLI edge" to "publishable and portable". That is exactly #380's finding about
+`qrda-schematron-check.py`: a guard whose SCOPE is narrower than the sentence quoting it. Fixed both halves
+— `TextEncoder` + `btoa` (verified byte-identical to `Buffer`, and correct rather than merely portable,
+since bare `btoa` throws above U+00FF), and the guard now scans closure SOURCE for `Buffer`, `process.*`,
+`__dirname`, `__filename`, `require(`, with its own non-degeneracy assertion. Mutation-checked.
+
+**Measured.** Suite **1859 → 1863** tests, 0 fail — the +4 is precisely the 6→10 boundary-test split, so no
+test was stranded (the failure mode this PR was most exposed to). `compile-measures` and `generate:sql`
+reproduce byte-identical output. `pnpm evaluate` unchanged. `pnpm flip-snapshot --measure cms125` still
+reports **5 of 5** in the official initial population, agreeing with authored, no roster row changed.
+`src/engine/` is 33 production files, from 43.
+
+**Named, not implied — what C1 did NOT do:** the `node:` allowlist for the four `*-cli.ts` entrypoints
+(ADR-048's second debt) is untouched, because those files stayed app-side, so the debt did not move; it is
+C2's. `packages/measure-codegen`, the external consumer, the `cql-tests` harness (#296) and the versioned
+compliance API are C2/C3/C4. The package is `private: true` until C4.
+
 ## 2026-08-04 (M-E0) — the mechanism is proven by construction, and the connectathon contribution is written (branch `feat/connectathon-contribution`, #394)
 
 **The mutation proof that failed yesterday turned out to BE the finding.** `cqf-fhir-cr` retrieval is

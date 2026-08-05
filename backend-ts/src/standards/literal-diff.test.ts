@@ -2,12 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { computeLiteralDiff, literalDiffAvailable, loadOfficialMeasureBundle, __clearLiteralDiffCache } from "./literal-diff.ts";
 import {
-  CMS122_DIABETES_OID,
-  CMS122_HBA1C_OID,
-  CMS122_QUALIFYING_VISIT_OIDS,
-  CMS122_HOSPICE_OID,
-  CMS122_PALLIATIVE_OID,
-} from "./cms122-official.ts";
+  CMS122_DIABETES_OID, CMS122_HBA1C_OID, CMS122_QUALIFYING_VISIT_OIDS, CMS122_HOSPICE_OID, CMS122_PALLIATIVE_OID, } from "./cms122-official.ts";
 import { CMS122V14 } from "./references/cms122v14.ts";
 import { loadOfficialArtifact } from "../wiring/official-artifacts.ts";
 import { officialMeasurementPeriod } from "../wiring/official-executor-adapter.ts";
@@ -18,8 +13,8 @@ import { deriveExamConfig } from "../engine/synthetic/exam-config.ts";
 import { buildSyntheticBundle } from "../engine/synthetic/fhir-bundle-builder.ts";
 import { seededTargetFor } from "../run/distribution.ts";
 import { EMPLOYEES } from "../engine/synthetic/employee-catalog.ts";
-import { CqlExecutionEngine } from "../engine/cql/cql-execution-engine.ts";
-import type { ValueSetResolver } from "../engine/cql/value-set-resolver.ts";
+import type { ValueSetResolver } from "@workwell/measure-engine";
+import { createWorkwellEngine } from "../engine/cql/workwell-engine.ts";
 
 /**
  * Terminology for the tests that assert MAPPING rather than terminology. Injected so the offline suite
@@ -77,7 +72,7 @@ test("literal diff: injected calculate → per-subject mapping, gate attribution
     return Promise.resolve({ results });
   };
 
-  const deps = { engine: new CqlExecutionEngine({ valueSetResolver: RESOLVER }), resolver: RESOLVER, employees: EMPLOYEES, today: "2026-06-30", asOf: "2026-06-30", valueSetCache: STUB_TERMINOLOGY, calculate: fakeCalculate };
+  const deps = { engine: createWorkwellEngine({ valueSetResolver: RESOLVER }), resolver: RESOLVER, employees: EMPLOYEES, today: "2026-06-30", asOf: "2026-06-30", valueSetCache: STUB_TERMINOLOGY, calculate: fakeCalculate };
   const report = await computeLiteralDiff(CMS122V14, rows(12), deps);
 
   assert.equal(report.mode, "literal");
@@ -118,7 +113,7 @@ test("literal diff: fqm-execution options disable HTML/coverage/RAV output (Code
       })),
     });
   };
-  const deps = { engine: new CqlExecutionEngine({ valueSetResolver: RESOLVER }), resolver: RESOLVER, employees: EMPLOYEES, today: "2026-06-30", asOf: "2026-06-30", valueSetCache: STUB_TERMINOLOGY, calculate: spyCalculate };
+  const deps = { engine: createWorkwellEngine({ valueSetResolver: RESOLVER }), resolver: RESOLVER, employees: EMPLOYEES, today: "2026-06-30", asOf: "2026-06-30", valueSetCache: STUB_TERMINOLOGY, calculate: spyCalculate };
   await computeLiteralDiff(CMS122V14, rows(4), deps);
   assert.ok(capturedOptions, "calculate must be invoked with an options object");
   assert.equal(capturedOptions!.calculateHTML, false, "fqm-execution 1.8.5 has no disableHTMLGeneration option — calculateHTML must be explicitly disabled");
@@ -143,7 +138,7 @@ test("literal diff: REAL fqm-execution runs the official QICore artifact end-to-
   skip: literalDiffAvailable("cms122") ? false : "run 'pnpm vendor:official' to fetch the terminology sidecar",
 }, async () => {
   __clearLiteralDiffCache();
-  const deps = { engine: new CqlExecutionEngine({ valueSetResolver: RESOLVER }), resolver: RESOLVER, employees: EMPLOYEES, today: "2026-06-30", asOf: "2026-06-30" };
+  const deps = { engine: createWorkwellEngine({ valueSetResolver: RESOLVER }), resolver: RESOLVER, employees: EMPLOYEES, today: "2026-06-30", asOf: "2026-06-30" };
   // Small slice so the (real) QICore multi-library execution stays fast; ELM is cached across patients.
   const report = await computeLiteralDiff(CMS122V14, rows(8), deps);
   assert.equal(report.mode, "literal");
@@ -162,7 +157,7 @@ test("ADR-008 guard: the literal diff reports the outcome the RUNTIME authored e
   // WorkWell's side of the diff must equal a direct evaluation of the same subject. If it ever diverges,
   // the diff is reporting a WorkWell outcome that will not occur, and the shadow forecasts nothing.
   __clearLiteralDiffCache();
-  const engine = new CqlExecutionEngine({ valueSetResolver: RESOLVER });
+  const engine = createWorkwellEngine({ valueSetResolver: RESOLVER });
   const noopCalculate = (_mb: unknown, patientBundles: unknown[]) =>
     Promise.resolve({ results: (patientBundles as Array<{ entry: Array<{ resource: { resourceType?: string; id?: string } }> }>).map((pb) => ({ patientId: pb.entry.find((e) => e.resource.resourceType === "Patient")?.resource.id, detailedResults: [{ populationResults: [{ populationType: "initial-population", result: false }] }] })) });
   const report = await computeLiteralDiff(CMS122V14, rows(20), { engine, resolver: RESOLVER, employees: EMPLOYEES, today: "2026-06-30", asOf: "2026-06-30", valueSetCache: STUB_TERMINOLOGY, calculate: noopCalculate });
@@ -212,7 +207,7 @@ test("cms125's numerator is NOT inverted (the mapping is per-measure)", async ()
       })),
     });
   const calculate = (_mb: unknown, patientBundles: unknown[]) => inNumerator(patientBundles);
-  const deps = { engine: new CqlExecutionEngine({ valueSetResolver: RESOLVER }), resolver: RESOLVER, employees: EMPLOYEES, today: "2026-06-30", asOf: "2026-06-30", valueSetCache: STUB_TERMINOLOGY, calculate };
+  const deps = { engine: createWorkwellEngine({ valueSetResolver: RESOLVER }), resolver: RESOLVER, employees: EMPLOYEES, today: "2026-06-30", asOf: "2026-06-30", valueSetCache: STUB_TERMINOLOGY, calculate };
 
   // Deliberately ONE cache clear, at the top. Both calls use the same runId, because that is what an
   // ALL_PROGRAMS run produces: every measure's outcomes under one `runs.id`. Clearing between them
@@ -238,7 +233,7 @@ test("the memo is keyed by MEASURE and run, not run alone", async () => {
         detailedResults: [{ populationResults: [{ populationType: "initial-population", result: false }] }],
       })),
     });
-  const deps = { engine: new CqlExecutionEngine({ valueSetResolver: RESOLVER }), resolver: RESOLVER, employees: EMPLOYEES, today: "2026-06-30", asOf: "2026-06-30", valueSetCache: STUB_TERMINOLOGY, calculate };
+  const deps = { engine: createWorkwellEngine({ valueSetResolver: RESOLVER }), resolver: RESOLVER, employees: EMPLOYEES, today: "2026-06-30", asOf: "2026-06-30", valueSetCache: STUB_TERMINOLOGY, calculate };
 
   __clearLiteralDiffCache();
   const first = await computeLiteralDiff(CMS122V14, rows(2), deps);

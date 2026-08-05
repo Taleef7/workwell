@@ -31,12 +31,13 @@
  *
  * Descriptive only (ADR-008): it writes nothing, persists nothing, and authors no status.
  */
-import { CqlExecutionEngine } from "../../engine/cql/cql-execution-engine.ts";
+
 import { bundledEcqmValueSetResolver } from "../../engine/cql/bundled-ecqm-expansions.ts";
 import { officialMeasureExecutor, type OfficialBatchSubject } from "../../wiring/official-executor-adapter.ts";
 import { officialTerminologyExpander } from "../../wiring/official-terminology.ts";
 import { loadOfficialArtifact } from "../../wiring/official-artifacts.ts";
-import type { MeasureOutcome } from "../../engine/evaluate-measure.ts";
+import type { MeasureOutcome } from "@workwell/measure-engine";
+import { createWorkwellEngine } from "../../engine/cql/workwell-engine.ts";
 
 export interface SnapshotSubject {
   subjectId: string;
@@ -124,7 +125,7 @@ export async function snapshotMeasure(
   subjects: readonly SnapshotSubject[],
   evaluationDate: string,
 ): Promise<MeasureSnapshot> {
-  const authoredEngine = new CqlExecutionEngine({ valueSetResolver: bundledEcqmValueSetResolver });
+  const authoredEngine = createWorkwellEngine({ valueSetResolver: bundledEcqmValueSetResolver });
   const authored = new Map<string, string>();
   for (const { subjectId, bundle } of subjects) {
     const outcome = await authoredEngine.evaluate({ measureId, patientBundle: bundle, evaluationDate });

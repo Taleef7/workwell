@@ -6,7 +6,7 @@
  * exactly the engine's runnable set; `cqlText`/`compileStatus` are derived at request time
  * (reconstructed ELM for runnable measures). Lifecycle mutations need a persisted store (later).
  */
-import type { Rule, CodegenBindings } from "../engine/cql/codegen/generate-cql.ts";
+import type { Rule, CodegenBindings } from "@workwell/measure-engine";
 
 export type MeasureStatus = "Draft" | "Approved" | "Active" | "Deprecated";
 

@@ -13,11 +13,11 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { CqlExecutionEngine } from "../cql/cql-execution-engine.ts";
 import { MEASURE_BINDINGS } from "./measure-bindings.ts";
 import { deriveExamConfig, withRefusal, type TargetOutcome } from "./exam-config.ts";
 import { buildSyntheticBundle } from "./fhir-bundle-builder.ts";
 import { employeeById } from "./employee-catalog.ts";
+import { createWorkwellEngine } from "../cql/workwell-engine.ts";
 
 const QICORE_BASE = "http://hl7.org/fhir/us/qicore/StructureDefinition/";
 
@@ -33,7 +33,7 @@ function assertAllQiCore(bundle: { entry: Array<{ resource: unknown }> }): void 
   }
 }
 
-const engine = new CqlExecutionEngine();
+const engine = createWorkwellEngine();
 const EVAL_DATE = "2026-06-13";
 const emp = employeeById("emp-006")!; // Omar Siddiq, Welder, Plant A
 

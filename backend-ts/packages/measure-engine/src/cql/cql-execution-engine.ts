@@ -7,9 +7,10 @@
  * 10 measures × 4 scenarios (backend-ts/spike). This is the headless
  * "given a patient and a measure, are they compliant?" engine, with no JVM.
  *
- * ELM is bundled via static imports (elm/index.ts) — NO node:fs at import or
- * runtime — so the worker is portable across every @mieweb/cloud target
- * (Cloudflare Workers included), not just the Node container.
+ * Measure CONTENT — the catalog, the compiled ELM, and any offline value-set expansions — is
+ * INJECTED at construction (ADR-059), never imported here. There is no `node:fs` at import or
+ * runtime either way, so the worker stays portable across every @mieweb/cloud target (Cloudflare
+ * Workers included), not just the Node container.
  */
 // eslint-disable-next-line import/no-unresolved
 import cql from "cql-execution";
@@ -21,10 +22,8 @@ import type {
   MeasureOutcome,
   OutcomeStatus,
 } from "../evaluate-measure.ts";
-import { MEASURES, type MeasureMeta } from "./measure-registry.ts";
-import { ELM_LIBRARIES } from "./elm/index.ts";
+import type { MeasureMeta } from "./measure-meta.ts";
 import { buildCodeService, type ValueSetResolver } from "./value-set-resolver.ts";
-import { withBundledEcqmFallback } from "./bundled-ecqm-expansions.ts";
 
 const OUTCOMES: ReadonlySet<string> = new Set(["COMPLIANT", "DUE_SOON", "OVERDUE", "MISSING_DATA", "EXCLUDED"]);
 
@@ -68,30 +67,66 @@ const renderDefine = (v: unknown): unknown => {
   return null; // non-scalar intermediate (FHIR resource/quantity) — not part of the contract
 };
 
+/**
+ * The measure CONTENT a consumer supplies. Required, deliberately (ADR-059): a no-arg construction
+ * would evaluate every measure against an empty catalog and report `MISSING_DATA` for a whole roster —
+ * indistinguishable from a genuinely ineligible one, which is the exact failure shape ADR-043 exists
+ * to keep visible. Making it a compile-time obligation is the cheapest place to catch it.
+ */
+export interface MeasureContent {
+  /** Measure id → evaluation metadata. WorkWell passes its own `MEASURES` registry. */
+  measures: Record<string, MeasureMeta>;
+  /** `MeasureMeta.library` → pre-compiled ELM. Must include `FHIRHelpers-4.0.1`. */
+  elmLibraries: Record<string, unknown>;
+  /**
+   * Optional offline expansion layered UNDER `valueSetResolver` — consulted when the primary
+   * resolver returns nothing, or used alone when there is no primary. Absent means "no fallback":
+   * an unresolvable value set expands empty rather than silently borrowing someone else's codes.
+   */
+  expansionFallback?: (primary?: ValueSetResolver) => ValueSetResolver;
+}
+
+const EMPTY_RESOLVER: ValueSetResolver = { expand: () => Promise.resolve([]) };
+
 export class CqlExecutionEngine implements EvaluateMeasureBinding {
   private readonly fhirHelpers: unknown;
 
-  constructor(private readonly opts: { valueSetResolver?: ValueSetResolver } = {}) {
+  constructor(private readonly opts: MeasureContent & { valueSetResolver?: ValueSetResolver }) {
     this.fhirHelpers = this.loadElm("FHIRHelpers-4.0.1");
   }
 
   private loadElm(library: string): unknown {
-    const elm = ELM_LIBRARIES[library];
-    if (!elm) throw new Error(`ELM not bundled for library '${library}' (re-run pnpm compile-measures)`);
+    const elm = this.opts.elmLibraries[library];
+    if (!elm) throw new Error(`ELM not supplied for library '${library}' (re-run pnpm compile-measures)`);
     return elm;
   }
 
+  /** The resolver the CodeService actually sees: primary, with the injected fallback under it. */
+  private resolver(): ValueSetResolver {
+    const { expansionFallback, valueSetResolver } = this.opts;
+    if (expansionFallback) return expansionFallback(valueSetResolver);
+    return valueSetResolver ?? EMPTY_RESOLVER;
+  }
+
   async evaluate(input: EvaluateMeasureInput & { elm?: unknown; metaOverride?: MeasureMeta }): Promise<MeasureOutcome> {
-    const meta = input.metaOverride ?? MEASURES[input.measureId];
+    const meta = input.metaOverride ?? this.opts.measures[input.measureId];
     if (!meta) throw new Error(`unknown measure '${input.measureId}'`);
     const evalDate = input.evaluationDate ?? new Date().toISOString().slice(0, 10);
 
-    // Expansion mode: measure declares valueSets. eCQM VSAC OIDs (2.16.*) expand offline via
-    // bundled expansions; urn:workwell:* expansion libraries (e.g. audiogram) still require a
-    // store resolver so an empty CodeService never silently zero-matches.
+    // Expansion mode: measure declares valueSets. eCQM VSAC OIDs (2.16.*) expand offline via the
+    // injected `expansionFallback`; urn:workwell:* expansion libraries (e.g. audiogram) still require a
+    // primary resolver so an empty CodeService never silently zero-matches.
+    //
+    // The offline arm is gated on `expansionFallback` being SUPPLIED, not merely on the OIDs looking
+    // eCQM-shaped. Before content injection the fallback was a module-level import and therefore always
+    // present; keeping the old condition would let a consumer who injects neither resolver nor fallback
+    // enter expansion mode against an empty CodeService and zero-match every retrieve — a silent wrong
+    // answer where the pre-existing behaviour (no expansion, run the base library) is merely a limited one.
     const wantsExpand = meta.valueSets != null && meta.valueSets.length > 0;
     const canExpandOffline =
-      wantsExpand && meta.valueSets!.every((u) => /^(urn:oid:)?2\.16\./.test(u));
+      wantsExpand &&
+      this.opts.expansionFallback != null &&
+      meta.valueSets!.every((u) => /^(urn:oid:)?2\.16\./.test(u));
     const expand = wantsExpand && (this.opts.valueSetResolver != null || canExpandOffline);
     const libraryName =
       expand && meta.expansionLibrary != null ? meta.expansionLibrary : meta.library;
@@ -106,7 +141,7 @@ export class CqlExecutionEngine implements EvaluateMeasureBinding {
       true,
     );
     const codeService = expand
-      ? await buildCodeService(withBundledEcqmFallback(this.opts.valueSetResolver), meta.valueSets!)
+      ? await buildCodeService(this.resolver(), meta.valueSets!)
       : new cql.CodeService({});
     const executor = new cql.Executor(library, codeService, { "Measurement Period": measurementPeriod });
 

@@ -17,7 +17,6 @@ import { SqliteCaseStore } from "../stores/sqlite/case-store-sqlite.ts";
 import { SqliteQualitySnapshotStore } from "../stores/sqlite/quality-snapshot-store-sqlite.ts";
 import { SqliteCaseEventStore } from "../stores/sqlite/case-event-store-sqlite.ts";
 import { SqliteEvalStateStore } from "../stores/sqlite/eval-state-store-sqlite.ts";
-import { CqlExecutionEngine } from "../engine/cql/cql-execution-engine.ts";
 import { EMPLOYEES, employeeById } from "../engine/synthetic/employee-catalog.ts";
 import { executeManualRun, executeRerun, planManualRun, finishOrFail, runningResponse, UnsupportedScopeError, InvalidRunRequestError, type RunPipelineDeps } from "./run-pipeline.ts";
 import { bucketPeriodForMeasure } from "./compliance-period.ts";
@@ -29,6 +28,7 @@ import { deriveExamConfig } from "../engine/synthetic/exam-config.ts";
 import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
 import { ROSTER_ELIGIBLE_MEASURES } from "../engine/ingress/enrollment/roster.ts";
 import { profileForId, replaceLiveDirectory } from "../engine/ingress/webchart/live-directory.ts";
+import { createWorkwellEngine } from "../engine/cql/workwell-engine.ts";
 
 const dbPath = join(tmpdir(), `workwell-pipeline-${crypto.randomUUID()}.sqlite`);
 let deps: RunPipelineDeps;
@@ -40,7 +40,7 @@ before(async () => {
     runStore: new SqliteRunStore(db),
     outcomeStore: new SqliteOutcomeStore(db),
     caseStore: new SqliteCaseStore(db),
-    engine: new CqlExecutionEngine(),
+    engine: createWorkwellEngine(),
     employees: EMPLOYEES.slice(0, 4), // emp-001..004 — keeps the test fast
   };
 });
@@ -299,7 +299,7 @@ test("live bundles evaluate through the unchanged CQL engine and persist wc-pref
     const liveDeps: RunPipelineDeps = {
       runStore,
       outcomeStore,
-      engine: new CqlExecutionEngine(),
+      engine: createWorkwellEngine(),
       employees: [],
       webChartEnv: WEBCHART_ENV,
       webChartClient: fixtureWebChartClient([rawBundle]),
@@ -346,7 +346,7 @@ test("a _B64-only SMART env drives the live path (the scheduled-run selector, #3
       {
         runStore,
         outcomeStore,
-        engine: new CqlExecutionEngine(),
+        engine: createWorkwellEngine(),
         employees: [],
         webChartEnv: smartB64Env,
         webChartClient: fixtureWebChartClient([rawBundle]),
@@ -369,7 +369,7 @@ test("a degraded Patient-only WebChart bundle evaluates MISSING_DATA and reports
     const result = await executeManualRun({
       runStore,
       outcomeStore,
-      engine: new CqlExecutionEngine(),
+      engine: createWorkwellEngine(),
       employees: [],
       webChartEnv: WEBCHART_ENV,
       webChartClient: fixtureWebChartClient([patientOnly("degraded-patient", true)]),
@@ -625,7 +625,7 @@ test("a completed population run materializes quality-over-time snapshots when t
   const snapDeps: RunPipelineDeps = {
     runStore: new SqliteRunStore(db),
     outcomeStore: new SqliteOutcomeStore(db),
-    engine: new CqlExecutionEngine(),
+    engine: createWorkwellEngine(),
     employees: EMPLOYEES.slice(0, 4), // all twh / HQ
     qualitySnapshots,
     events: new SqliteCaseEventStore(db),
@@ -679,7 +679,7 @@ test("Codex P1: a failing case-audit write never fails an otherwise-complete run
     runStore,
     outcomeStore: new SqliteOutcomeStore(db),
     caseStore: new SqliteCaseStore(db),
-    engine: new CqlExecutionEngine(),
+    engine: createWorkwellEngine(),
     employees: EMPLOYEES.slice(0, 4),
     actor: "cm@workwell.dev",
     events: {
@@ -741,7 +741,7 @@ test("nightly idempotency (#150 H1): same-cycle reruns bucket to one cycle perio
     runStore: new SqliteRunStore(db),
     outcomeStore: new SqliteOutcomeStore(db),
     caseStore,
-    engine: new CqlExecutionEngine(),
+    engine: createWorkwellEngine(),
     employees: EMPLOYEES.slice(0, 4),
   };
   const r1 = await executeManualRun(nightlyDeps, { scopeType: "ALL_PROGRAMS" });
@@ -765,7 +765,7 @@ test("Fable H1: a population run emits RUN_COMPLETED + case audit events (the ha
     runStore: new SqliteRunStore(db),
     outcomeStore: new SqliteOutcomeStore(db),
     caseStore: new SqliteCaseStore(db),
-    engine: new CqlExecutionEngine(),
+    engine: createWorkwellEngine(),
     employees: EMPLOYEES.slice(0, 4),
     actor: "cm@workwell.dev", // authenticated actor — audit rows must use THIS, not triggeredBy (Codex P1)
     events: {
