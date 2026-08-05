@@ -147,12 +147,13 @@ export class SqliteOutcomeStore implements OutcomeStore {
   async listOutcomesForEmployee(subjectId: string, limit: number): Promise<EmployeeOutcomeRow[]> {
     const { results } = await this.db
       .prepare(
-        `SELECT measure_id, status, evaluation_period, evaluated_at, evidence_json
+        `SELECT run_id, measure_id, status, evaluation_period, evaluated_at, evidence_json
            FROM outcomes WHERE subject_id = ? ORDER BY evaluated_at DESC LIMIT ?`,
       )
       .bind(subjectId, Math.max(1, limit))
-      .all<{ measure_id: string; status: string; evaluation_period: string; evaluated_at: string; evidence_json: string }>();
+      .all<{ run_id: string; measure_id: string; status: string; evaluation_period: string; evaluated_at: string; evidence_json: string }>();
     return (results ?? []).map((r) => ({
+      runId: r.run_id,
       measureId: r.measure_id,
       status: r.status,
       evaluationPeriod: r.evaluation_period,

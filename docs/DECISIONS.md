@@ -18,6 +18,96 @@
 >
 > **Sequence note:** ADR-033 does not exist — verified absent, and the number must not be reused.
 
+## ADR-061: the compliance API says where its numbers came from, and 404s rather than answering an absence
+
+**Status:** Accepted (2026-08-05). Roadmap M-C / C3, locked decision #5 — *"the versioned compliance API is
+the contract MIE consumes."* Consumes ADR-031/ADR-046's evidence readers; adds no new one.
+
+**Context.** Three surfaces nearly answer *"is this patient compliant for this measure?"* and none is a
+contract: the roster grid is a UI read model shaped by the frontend, MCP's `check_compliance` is
+Claude-facing and role-gated to CM/ADMIN, and a run answers for a population and writes records. C1 made
+the engine constructible without WorkWell's content and V7 made it defensible; this is the first piece
+that makes it **consumable**.
+
+**Decision 1 — `/api/v1/` in the path, and exactly one route under it.** Everything else under `/api/` is
+an internal contract that moves with the frontend. `v1` is a promise — fields are never removed or
+retyped — so the existing surface is *not* renamed into a guarantee nobody has audited. A path segment
+beats a header or media type here for an unglamorous reason: an integrator evaluating us pastes a URL into
+a browser, and it is greppable in a log.
+
+**Decision 2 — the response carries `populationsSource`, and this is the honesty-critical field.** The
+owner chose an eCQM-native shape: population membership booleans rather than a bare status. But for a
+WorkWell-**authored** measure only `initialPopulation` is measured — the other four are *inferred from
+`OutcomeStatus`*. The numbers alone cannot distinguish that from an official artifact's own population
+vector, and a consumer treating the second as measured eCQM membership would be wrong with nothing in the
+response to warn them. `populationsSource` is read off the **same field** `membershipFor` branches on, so
+the label cannot disagree with the numbers it describes.
+
+**Decision 3 — `latest` with nothing persisted is a 404, never an empty 200.** *"No run has covered this
+subject"* and *"this subject is compliant"* must not be confusable. The 404 body says which absence it is
+and points at `preview`. This is the single easiest way to make a compliance API dangerous, and it is
+worth spending an error code on.
+
+**Decision 4 — `preview` routes through `routedEngineForEnv`, and REFUSES on a live stack.** Same engine
+as a run: previewing cms125 against authored logic where production runs CMS's artifact would answer a
+different question — a confidently wrong answer. **The first draft of this decision also claimed "preview
+and a run see identical input", and review proved that false on exactly the stack the API exists to
+serve** (#399): the run pipeline's `bundleFor` uses the patient's real `liveBundle` when WebChart is
+configured, while preview composed a bundle from `seededTargetFor` + `buildSyntheticBundle` — which picks
+the intended outcome from a hash of the subject id and manufactures data to produce it. That is
+deterministic demo playback, and reporting it as an evaluation through the contract MIE consumes is the
+worst thing this route could do. Preview now returns **501 on a WebChart-configured deployment**, naming
+the reason. A live composition path is a different design with different failure modes and belongs in its
+own change; refusing is a limitation, answering would have been a lie.
+
+**Decision 6 — every answered request writes a `COMPLIANCE_API_READ` audit event, 404s included.** MCP
+records one for every tool call with its sensitivity label, and `check_compliance` is this same question
+over this same data. Without it there would be no record that anyone read a patient's compliance status
+through a public contract — a larger gap than the role matrix. Best-effort at the response boundary: an
+audit failure logs loudly rather than turning a correct read into a 500.
+
+**Decision 7 — `period` is the ANSWER's measurement window; `filter` echoes the caller's bounds.** The
+first cut returned the request filter as `period`, undocumented, directly above
+`provenance.evaluationPeriod`. In a contract where a field may never change meaning, that had to be fixed
+before merge rather than after.
+
+**Decision 5 — no new evidence reader.** `membershipFor` and `officialReportIdentity`
+(`src/fhir/measure-report.ts`) are the same functions the MeasureReport and QRDA III exporters use. Two
+readers of `evidence_json` that can disagree is the defect class ADR-031 exists to prevent, and a new API
+is exactly where a second one gets written by accident. A test asserts the API's population block agrees
+with `buildIndividualMeasureReport`'s output **for the same record**, against the exporter's real output
+rather than a hand-written expectation.
+
+**Three review findings, all P2, all fixed — and one of them is the field's own failure mode (#399).**
+
+1. **`populationsSource` could lie.** It tested whether `evidence.official.populationResults` was
+   *present*; `membershipFor` branches on whether `officialMembership` can *parse* it, and a malformed
+   vector falls back to status-derived booleans. The label would have read `official-evidence` over
+   inferred numbers — precisely the misleading signal the field exists to prevent. Both now derive from
+   the same `officialMembership` call and are incapable of disagreeing.
+2. **`latest` served mid-run rows.** An outcome exists before its run is terminal and before `/finalize`
+   in the import flow, so the contract could publish a partial result that a later `FAILED` would make
+   wrong. `latest` now requires `COMPLETED` or `PARTIAL_FAILURE`, reports `runId`, and its 404 carries
+   `pendingRuns` rather than pretending nothing was found. This needed `runId` on
+   `EmployeeOutcomeRow` — a projection widening in both adapters, no DDL.
+3. **`preview` let a read-only role trigger compute.** `authorize.ts` states the viewer posture as "may
+   GET but never write … or trigger compute", and a GET costing a CQL evaluation is the loophole in that
+   sentence. `preview` is now gated to CASE_MANAGER/ADMIN — the bar MCP's `check_compliance` already sets
+   for the same question over the same data, so there is one answer to "who may ask the engine about a
+   patient" rather than a quieter second one.
+
+**A plan correction, recorded because it inverted a security claim.** The plan asserted that
+`authorize.ts` falls through to *permit* for an unmatched path, and therefore that a new rule was
+mandatory. Verified false: `RULES` ends with a generic `/api/**` → `AUTHENTICATED` pair, so the new route
+was already gated and the permit default applies only to non-`/api` paths. **No rule was added** — a
+redundant one is noise. A test asserts the 401 anyway, because `RULES` is first-match-wins and a later
+reordering could put a `PERMIT` ahead of it on a route that returns per-subject clinical status.
+
+**Consequences.** `GET /api/v1/compliance/{subject}/{measure}?start&end&mode`, documented as a contract in
+`docs/COMPLIANCE_API.md` with an explicit stability statement. No machine-to-machine credential — that is
+the SSO fork (#265, blocked on MIE) and inventing one here would pre-empt it. No cohort endpoint: a
+population question has different performance characteristics and deserves its own design.
+
 ## ADR-060: a translator gap and an engine gap are different findings, so the conformance harness never merges them
 
 **Status:** Accepted (2026-08-05). Roadmap M-C / V7, issue #296. Extends ADR-059 (adds one export to

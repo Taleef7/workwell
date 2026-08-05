@@ -17,6 +17,7 @@
 
 ## Titles (newest first)
 
+- ADR-061: the compliance API says where its numbers came from, and 404s rather than answering an absence
 - ADR-060: a translator gap and an engine gap are different findings, so the conformance harness never merges them
 - ADR-059: the engine takes its measure content INJECTED — and the test-edge blocker dissolved rather than being paid
 - ADR-058: QRDA III carries QDM identity, which the FHIR lineage does not have — so the verification bar moves to the FHIR column rather than the label moving to the QDM one
