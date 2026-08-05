@@ -1,5 +1,52 @@
 # Journal
 
+## 2026-08-05 (docs) — the ADR record is split into what governs and what is history (branch `docs/prune-adr-record`)
+
+The ADR record had grown past the point where it could be navigated: 58 records, 338k, in one flat file
+with no signal about which of them still govern anything. Git shows **117 of the 118 commits** touching
+`DECISIONS.md` under the owner's identity, but the prose was drafted by Claude inside sessions and committed
+through that account — and only **9 of 58** records carry a written owner or stakeholder input. The rest are
+decisions Claude made and the owner ratified by merging.
+
+Reading all 58 produced a four-way classification that the single flat file had been hiding:
+
+| | | |
+|---|---|---|
+| **20** | still **binding** | constrains what may be done next |
+| **24** | **design records** | how a built thing works; read before touching it |
+| **7** | **historical findings** | a diagnosis written up in ADR form; constrains nothing |
+| **7** | **superseded** | do not act on it |
+
+**The 14 superseded + findings moved to `docs/archive/DECISIONS_ARCHIVE.md`; `DECISIONS.md` is 338k → 267k.**
+Deletion was rejected on a concrete ground rather than caution: these are cross-referenced constantly
+(052 by 059, 043 by 044/045/046, 051 by 055/056, plus `CLAUDE.md`, `LOCKED_DECISIONS`, `ARCHITECTURE` and
+this journal), so removing bodies would have left dozens of dangling pointers. Every **heading stays** in
+`DECISIONS.md` with a dated one-line pointer and a sentence saying what the record found — so an `ADR-0NN`
+reference anywhere in the repo still resolves and one `git revert` undoes it. `ADR_INDEX.md` marks them
+with `·archived`.
+
+**Review changed the answer, and it was the right catch.** The first cut archived **20**; six of them —
+ADR-041, 042, 044, 045, 053, 057 — are cited as *current behaviour* by live code or a runbook. Six test
+names literally begin `"ADR-044:"`; `normalize.ts` states the ADR-042 mapping rule in its doc comments;
+`run-pipeline.ts` names ADR-057 inside an operator-facing warning; `DEPLOY.md` builds the whole vendoring
+runbook on ADR-041 and ADR-053. **A record named by a test, a doc comment, an operator warning or a runbook
+is a design record, however diagnostic its prose reads** — and this file's own taxonomy says design records
+stay. So they moved back rather than the archive being redefined to fit them. **14 archived, not 20**, and
+the win is 338k → 267k rather than 210k. Two other review findings fixed: the archive fragments were dead
+(GitHub slugs the *whole* heading, so `#adr-057` matched nothing — explicit `<a id>` anchors now, all 20…
+14 verified), and `ARCHITECTURE.md` + `DEPLOY.md` each cited **ADR-033**, which has never existed; both
+meant ADR-032.
+
+**The structural finding worth keeping.** The "running CMS's own published measures" group is **18 records —
+nearly a third of the file — and only 6 of them constrain anything.** The other 12 are diagnoses: a value
+set absent from a bundle, a mammogram in the wrong vocabulary, a harness measuring the wrong window. Useful
+history, but the journal already tells each of those stories, and filing them as ADRs is most of why the
+file reached 338k. Findings belong here, not there.
+
+Also delivered: a browsable map of all 58 with the classification and a plain-English line each, as a
+private artifact outside the repo. **Nothing in the record was edited or renumbered** — bodies are verbatim in the archive. ADR-033
+still does not exist and its number is still not to be reused.
+
 ## 2026-08-05 (M-C / C1) — `@workwell/measure-engine` exists, and the question that blocked it for two weeks was the cheap one to answer (branch `feat/measure-engine-extraction`)
 
 The extraction has been promised since 2026-07-24 and deferred twice. It was never a lifting problem:

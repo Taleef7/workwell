@@ -97,7 +97,7 @@ version against it:
   E3.2 (#90) `ValueSetResolver` seam (with frozen QPP code lists as a no-VSAC expansion source). The report
   is advisory — CQL `Outcome Status` remains the sole compliance authority (ADR-008/ADR-018).
 
-**Notes:** All emitted artifacts are produced JVM-free with no external runtime dependency (see ADR-009).
+**Notes:** All emitted artifacts are produced JVM-free with no external runtime dependency (**ADR-008**, which carries the JVM-free rule; ADR-009 first stated it and is archived as superseded, since its other half — "QRDA III is a stub" — is long overtaken).
 The QRDA III stub uses the well-known QRDA III IG template OIDs and carries the aggregate population counts +
 performance rate; **its internal observation `code` values (e.g. on the performance-rate observation) are
 placeholders pending QRDA III IG alignment** — the document is structurally representative, not IG-code-exact.
