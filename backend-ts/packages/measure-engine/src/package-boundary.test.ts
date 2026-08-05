@@ -40,6 +40,25 @@ const BARE_DEPS = new Set(["cql-execution", "cql-exec-fhir"]);
  */
 const CONTENT_PATTERNS = [/measure-registry/, /\/elm\//, /bundled-ecqm-expansions/, /synthetic/];
 
+/**
+ * Node GLOBALS, which no import-specifier check can see.
+ *
+ * Found by review (Codex, #395) and it was a real hole, not a theoretical one: `httpVsacClient` built its
+ * HTTP Basic header with `Buffer`, so a VSAC-configured Worker or browser consumer would have thrown
+ * before making a request — while "the package is NODE-FREE" stayed green, because `Buffer` is a global
+ * and arrives through no import. A guard whose SCOPE is narrower than the claim it is cited for is the
+ * same defect shape #380 found in `qrda-schematron-check.py`.
+ *
+ * Deliberately conservative — `\bprocess\.` rather than `\bprocess\b`, so `processResults` is not a hit.
+ */
+const NODE_GLOBALS: Array<{ pattern: RegExp; name: string }> = [
+  { pattern: /\bBuffer\b/, name: "Buffer" },
+  { pattern: /\bprocess\./, name: "process.*" },
+  { pattern: /\b__dirname\b/, name: "__dirname" },
+  { pattern: /\b__filename\b/, name: "__filename" },
+  { pattern: /\brequire\s*\(/, name: "require()" },
+];
+
 const SPECIFIER_RE = /(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s+|\brequire\s*\(\s*)(["'`])([^"'`]*)\1/g;
 
 /**
@@ -61,6 +80,8 @@ const bare = new Map<string, string[]>();
 const escapes: string[] = [];
 /** Every specifier seen anywhere in the closure, with the file that wrote it. */
 const allSpecifiers: Array<{ file: string; specifier: string }> = [];
+/** Comment-stripped source of every `.ts` closure member, for the checks imports cannot see. */
+const sources = new Map<string, string>();
 
 {
   const queue = [resolvePath(PACKAGE_SRC, ENTRY)];
@@ -81,6 +102,7 @@ const allSpecifiers: Array<{ file: string; specifier: string }> = [];
     }
     files.add(file);
     const rel = relative(PACKAGE_SRC, file).split(sep).join("/");
+    sources.set(rel, source);
     for (const [, , specifier] of source.matchAll(SPECIFIER_RE)) {
       if (specifier === undefined) continue;
       allSpecifiers.push({ file: rel, specifier });
@@ -106,6 +128,16 @@ test("the package reaches nothing outside itself", () => {
 test("the package is NODE-FREE, so it stays portable beyond the Node container", () => {
   const nodeImports = [...bare.entries()].filter(([spec]) => spec.startsWith("node:"));
   assert.deepEqual(nodeImports, [], "file I/O belongs at the CLI edge, which is app-side");
+
+  // The half an import scan cannot see. `Buffer` in `httpVsacClient` passed the check above for as long
+  // as it existed, because a global arrives through no import (Codex, #395).
+  const globals: string[] = [];
+  for (const [file, source] of sources) {
+    for (const { pattern, name } of NODE_GLOBALS) {
+      if (pattern.test(source)) globals.push(`${file} → ${name}`);
+    }
+  }
+  assert.deepEqual(globals, [], "a Node global throws on a Worker or in a browser, exactly like a node: import");
 });
 
 test("the package's third-party dependencies are exactly cql-execution + cql-exec-fhir", () => {
@@ -130,4 +162,7 @@ test("the closure is non-degenerate — this file cannot pass by reaching nothin
   assert.ok(relativeFiles.includes(ENTRY), `${ENTRY} is not in its own closure — it does not exist there`);
   assert.ok(relativeFiles.includes("cql/cql-execution-engine.ts"), "the engine itself must be reached");
   assert.ok(bare.has("cql-execution"), "the CQL runtime must actually be reached");
+  // The globals scan reads `sources`, not `files`, so it has its own way to be vacuous.
+  assert.ok(sources.size >= 10, `retained ${sources.size} sources — the Node-globals scan reads these`);
+  assert.ok(sources.has("cql/vsac-client.ts"), "the file that carried the Buffer defect must be scanned");
 });

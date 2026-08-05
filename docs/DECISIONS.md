@@ -78,6 +78,19 @@ the engine rather than through it.
 restored. That is not ceremony here: the boundary-test-that-survives-its-own-subject-moving is exactly the
 vacuous-guard shape this codebase has caught four times (#350, #354, #363, #365).
 
+**And review found a NINTH thing the eight could not see (Codex, #395) — the portability claim was wider
+than its guard.** `httpVsacClient` built its HTTP Basic header with **`Buffer`**, a Node global that
+arrives through no import, so "the package is NODE-FREE" was green while a VSAC-configured Worker or
+browser consumer would have thrown before issuing a request. Not theoretical, and not introduced by this
+change either — the same `node:`-only check has lived in `engine-boundary.test.ts` since PR-1 with the
+same blind spot. What this change did was **widen the claim** the guard is cited for, from "file I/O
+stays at the CLI edge" to "publishable and portable", which is precisely the shape #380 found in
+`qrda-schematron-check.py`: a control whose SCOPE is narrower than the sentence quoting it. Both halves
+fixed — a `TextEncoder` + `btoa` encoder (verified byte-identical to `Buffer` output, and correct rather
+than merely portable, since bare `btoa` throws above U+00FF), and the guard now scans the closure's
+SOURCE for `Buffer`, `process.*`, `__dirname`, `__filename` and `require(`, with its own non-degeneracy
+assertion because the source map is a second thing that can silently be empty. Mutation-checked.
+
 **Consequences.**
 - `@workwell/measure-engine` is a workspace member with `cql-execution` + `cql-exec-fhir` as its entire
   manifest. Those two left the root `package.json`. `private: true` until C4 publishes.

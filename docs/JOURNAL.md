@@ -56,6 +56,17 @@ deleted. `engine-boundary.test.ts` still polices `src/engine/`, but its allowlis
 restored). Not ceremony: a boundary test that survives its own subject moving is exactly the vacuous-guard
 shape caught on #350, #354, #363 and #365.
 
+**Review then found a ninth thing the eight could not see, and it is the same lesson again.**
+`httpVsacClient` built its HTTP Basic header with **`Buffer`** — a Node *global*, which arrives through no
+import — so "the package is NODE-FREE" stayed green while a VSAC-configured Worker or browser consumer
+would have thrown before issuing a request. The blind spot is inherited (the identical `node:`-only check
+has been in `engine-boundary.test.ts` since PR-1); what this change did was **widen the claim being cited**,
+from "file I/O stays at the CLI edge" to "publishable and portable". That is exactly #380's finding about
+`qrda-schematron-check.py`: a guard whose SCOPE is narrower than the sentence quoting it. Fixed both halves
+— `TextEncoder` + `btoa` (verified byte-identical to `Buffer`, and correct rather than merely portable,
+since bare `btoa` throws above U+00FF), and the guard now scans closure SOURCE for `Buffer`, `process.*`,
+`__dirname`, `__filename`, `require(`, with its own non-degeneracy assertion. Mutation-checked.
+
 **Measured.** Suite **1859 → 1863** tests, 0 fail — the +4 is precisely the 6→10 boundary-test split, so no
 test was stranded (the failure mode this PR was most exposed to). `compile-measures` and `generate:sql`
 reproduce byte-identical output. `pnpm evaluate` unchanged. `pnpm flip-snapshot --measure cms125` still
