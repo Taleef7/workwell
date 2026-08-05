@@ -33,10 +33,15 @@ is 33 cases and the `Long` type is where the most serious defect lives. We claim
 1,835, and report 0 skipped. The mechanism exists and is unit-tested against a fixture so it is not
 vacuous, but adding a real entry needs a PR that says why.
 
-**Decision 4 — the CI gate is a per-file baseline, not a threshold.** "≥N passing" goes green while a
-translator upgrade trades 30 passes for 30 different ones. `regressions()` compares per file and treats
-any drop in `pass`, or any rise in `fail`/`runtime-error`/`invalid-accepted`, as a failure. An improvement
-is reported and requires regenerating the baseline in the same PR.
+**Decision 4 — the CI gate is a PER-CASE baseline, not a threshold and not per file.** "≥N passing" goes
+green while a translator upgrade trades 30 passes for 30 different ones. The first cut fixed that with
+per-FILE tallies — and **review (#398) found the identical hole one level down**: inside a single XML
+file, one case can go `pass`→`fail` while another goes `fail`→`pass`, leaving every count identical and CI
+green. `regressions()` now compares by `file/group/name`. Only the **non-passing** cases are stored (213
+rather than 1,835), which loses nothing: a case absent from that map was passing, so "used to pass, now
+does not" stays decidable for all 1,835. A change between two non-passing outcomes is reported without
+failing, because the evidence document enumerates those buckets and silent drift between them would leave
+it stale. A pre-#398 baseline is **refused** rather than silently compared with the weaker rule.
 
 **Decision 5 — ADR-048's `node:` CLI debt is REFRAMED, not paid; and its stated basis had expired.**
 ADR-048 planned to split library values out of the four `*-cli.ts` files because `devdb-cli.ts` exported

@@ -80,11 +80,34 @@ export function assertNonDegenerate(
   }
 }
 
+/** Stable identity of one case, so the baseline compares like with like across runs. */
+export const caseKey = (r: Pick<CaseResult, "file" | "group" | "name">): string =>
+  `${r.file}/${r.group}/${r.name}`;
+
 export interface Baseline {
   pinned: string;
   total: number;
   counts: Counts;
   perFile: Record<string, Counts>;
+  /**
+   * Every case that is NOT passing, keyed by `file/group/name`.
+   *
+   * **Per CASE, not per file** (review, #398). Per-file tallies cannot see the regression shape this gate
+   * exists for: inside one XML file, a previously passing case can go `fail` while a previously failing one
+   * goes `pass`, leaving both counts identical and CI green — the same "trade 30 passes for 30 different
+   * ones" hazard that ruled out a bare threshold, one level down. The first cut had exactly that hole.
+   *
+   * Only the non-passing cases are stored, and that is not a size optimization dressed up as design: a case
+   * ABSENT from this map was passing, so "used to pass, now does not" is decidable for every one of the
+   * 1,835 without listing them. 213 entries instead of 1,835, and no information lost.
+   */
+  notPassing: Record<string, Outcome>;
+}
+
+export function notPassing(results: readonly CaseResult[]): Record<string, Outcome> {
+  const out: Record<string, Outcome> = {};
+  for (const r of results) if (r.outcome !== "pass") out[caseKey(r)] = r.outcome;
+  return out;
 }
 
 export function perFile(results: readonly CaseResult[]): Record<string, Counts> {
@@ -94,39 +117,52 @@ export function perFile(results: readonly CaseResult[]): Record<string, Counts> 
 }
 
 /**
- * Compare a run against the committed baseline. Returns human-readable regressions.
+ * Compare a run against the committed baseline, PER CASE. Returns human-readable regressions.
  *
- * A bare "at least N passing" threshold would go green while a translator upgrade traded 30 passes for 30
- * different ones, so this compares PER FILE and treats any drop in `pass` — or any rise in `fail`,
- * `runtime-error` or `invalid-accepted` — as a regression. A rise in `pass` is reported as an improvement
- * and is NOT a failure, but it does mean the baseline needs updating in the same PR.
+ * A regression is any individual case that used to pass and no longer does. Reported alongside, but NOT
+ * failing: a case that changed from one non-passing outcome to another (e.g. `fail` → `translation-error`)
+ * — the evidence document describes those buckets, so drift between them should be visible even though it
+ * is not a loss.
+ *
+ * A case that starts passing is an improvement, not a failure — but the baseline must be regenerated in
+ * the same PR so the gate holds the new floor.
  */
 export function regressions(current: readonly CaseResult[], baseline: Baseline): string[] {
   const out: string[] = [];
-  const now = perFile(current);
-  const nowTotals = tally(current);
-
   if (current.length < baseline.total) {
     out.push(`total cases ${current.length} < baseline ${baseline.total} — the corpus shrank`);
   }
-  for (const [file, base] of Object.entries(baseline.perFile)) {
-    const cur = now[file];
-    if (!cur) {
-      out.push(`${file}: contributed no cases (baseline had ${base.pass} passing)`);
-      continue;
-    }
-    if (cur.pass < base.pass) out.push(`${file}: pass ${base.pass} → ${cur.pass}`);
-    for (const worse of ["fail", "runtime-error", "invalid-accepted"] as const) {
-      if (cur[worse] > base[worse]) out.push(`${file}: ${worse} ${base[worse]} → ${cur[worse]}`);
+
+  const base = baseline.notPassing ?? {};
+  const seen = new Set<string>();
+
+  for (const r of current) {
+    const key = caseKey(r);
+    seen.add(key);
+    const was = base[key];
+    if (r.outcome === "pass") continue;
+    if (was === undefined) {
+      out.push(`${key}: pass → ${r.outcome}`);
+    } else if (was !== r.outcome) {
+      // Not a loss, but the evidence doc enumerates these buckets, so a silent shuffle between them
+      // would let the committed findings drift out of date while CI stayed green.
+      out.push(`${key}: ${was} → ${r.outcome} (outcome changed)`);
     }
   }
-  if (nowTotals["translation-error"] > baseline.counts["translation-error"]) {
-    out.push(
-      `translation-error ${baseline.counts["translation-error"]} → ${nowTotals["translation-error"]} — ` +
-        `the JS translator regressed, or its version moved`,
-    );
+
+  // A case in the baseline that did not run at all is a hole in the corpus, not an improvement.
+  for (const key of Object.keys(base)) {
+    if (!seen.has(key)) out.push(`${key}: did not run (baseline had ${base[key]})`);
   }
   return out;
+}
+
+/** Cases that started passing since the baseline — reported, never a failure. */
+export function improvements(current: readonly CaseResult[], baseline: Baseline): string[] {
+  const base = baseline.notPassing ?? {};
+  return current
+    .filter((r) => r.outcome === "pass" && base[caseKey(r)] !== undefined)
+    .map((r) => `${caseKey(r)}: ${base[caseKey(r)]} → pass`);
 }
 
 export function summary(results: readonly CaseResult[], files: readonly string[]): string {

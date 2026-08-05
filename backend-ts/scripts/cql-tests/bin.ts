@@ -17,6 +17,8 @@ import { loadCorpus, runCorpus, type RunFilter } from "./run.ts";
 import {
   assertNonDegenerate,
   DegenerateRunError,
+  improvements,
+  notPassing,
   perFile,
   regressions,
   runnerJson,
@@ -109,7 +111,13 @@ async function main(argv: string[]): Promise<number> {
       console.error("refusing to write a baseline from a FILTERED run — it would encode a subset");
       return 2;
     }
-    const baseline: Baseline = { pinned: pin, total: results.length, counts: tally(results), perFile: perFile(results) };
+    const baseline: Baseline = {
+      pinned: pin,
+      total: results.length,
+      counts: tally(results),
+      perFile: perFile(results),
+      notPassing: notPassing(results),
+    };
     writeFileSync(BASELINE, JSON.stringify(baseline, null, 2) + "\n");
     console.log(`  wrote ${path.relative(BACKEND, BASELINE)}`);
     return 0;
@@ -125,19 +133,29 @@ async function main(argv: string[]): Promise<number> {
       return 2;
     }
     const baseline = JSON.parse(readFileSync(BASELINE, "utf8")) as Baseline;
+    if (!baseline.notPassing) {
+      // A pre-#398 baseline carries per-file tallies only, which cannot see a within-file swap. Refusing
+      // is the point: silently falling back to the weaker comparison is how a gate stops meaning what its
+      // name says.
+      console.error(`baseline at ${BASELINE} predates per-case keying — regenerate it (--write-baseline)`);
+      return 2;
+    }
     const regs = regressions(results, baseline);
+    const wins = improvements(results, baseline);
     if (regs.length > 0) {
-      console.error(`\nREGRESSIONS vs baseline (${baseline.pinned}):\n  ${regs.join("\n  ")}`);
+      const shown = regs.slice(0, 40);
+      console.error(`\nREGRESSIONS vs baseline (${baseline.pinned}) — ${regs.length}:\n  ${shown.join("\n  ")}`);
+      if (regs.length > shown.length) console.error(`  … and ${regs.length - shown.length} more`);
       return 1;
     }
-    const now = tally(results);
-    if (now.pass > baseline.counts.pass) {
+    if (wins.length > 0) {
       console.log(
-        `\n  IMPROVED: pass ${baseline.counts.pass} → ${now.pass}. Not a failure — but regenerate the ` +
-          `baseline (--write-baseline) in this PR so the gate holds the new floor.`,
+        `\n  IMPROVED — ${wins.length} case(s) now pass:\n    ${wins.slice(0, 20).join("\n    ")}\n` +
+          `  Not a failure, but regenerate the baseline (--write-baseline) in this PR so the gate holds ` +
+          `the new floor.`,
       );
     } else {
-      console.log(`\n  no regressions vs baseline (${baseline.pinned})`);
+      console.log(`\n  no regressions vs baseline (${baseline.pinned}) — ${Object.keys(baseline.notPassing).length} known non-passing cases unchanged`);
     }
   }
   return 0;

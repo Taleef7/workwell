@@ -17,6 +17,8 @@ import { validateUnit } from "./ucum.ts";
 import {
   assertNonDegenerate,
   DegenerateRunError,
+  improvements,
+  notPassing,
   regressions,
   tally,
   type Baseline,
@@ -158,24 +160,52 @@ test("a run that did not reach the corpus REFUSES to report", () => {
   assert.throws(() => assertNonDegenerate([], ["A.xml"], { filtered: true }), DegenerateRunError);
 });
 
-test("the baseline check catches a swap that leaves the total unchanged", () => {
-  // The reason this is not a "≥N passing" threshold: a translator upgrade can trade 30 passes for 30
-  // different ones and keep every total identical.
+test("the baseline check catches a WITHIN-FILE swap that leaves every tally unchanged", () => {
+  // The defect this test exists for (review, #398): the first cut keyed the baseline per FILE, so one
+  // case going pass→fail while another in the SAME file went fail→pass left `pass` and `fail` identical
+  // and CI green. That is the "trade 30 passes for 30 different ones" hazard — the one that ruled out a
+  // bare threshold — surviving one level down.
+  const a1 = result({ file: "A.xml", name: "T1" });
+  const a2 = result({ file: "A.xml", name: "T2", outcome: "fail" });
+  const before = [a1, a2];
+
   const baseline: Baseline = {
     pinned: "abc",
     total: 2,
-    counts: tally([result(), result({ file: "B.xml" })]),
-    perFile: {
-      "A.xml": tally([result()]),
-      "B.xml": tally([result({ file: "B.xml" })]),
-    },
+    counts: tally(before),
+    perFile: { "A.xml": tally(before) },
+    notPassing: notPassing(before),
   };
-  assert.deepEqual(regressions([result(), result({ file: "B.xml" })], baseline), []);
+  assert.deepEqual(Object.keys(baseline.notPassing), ["A.xml/G/T2"], "only non-passing cases are stored");
+  assert.deepEqual(regressions(before, baseline), [], "an unchanged run is clean");
 
-  const swapped = [result({ outcome: "fail" }), result({ file: "B.xml" })];
+  // The swap: T1 breaks, T2 is fixed. Per-file tallies are IDENTICAL — 1 pass, 1 fail either way.
+  const swapped = [result({ file: "A.xml", name: "T1", outcome: "fail" }), result({ file: "A.xml", name: "T2" })];
+  assert.deepEqual(tally(swapped), tally(before), "the tallies really are identical — that is the point");
   const regs = regressions(swapped, baseline);
-  assert.ok(regs.some((r) => r.includes("A.xml")), `expected an A.xml regression, got ${JSON.stringify(regs)}`);
+  assert.ok(
+    regs.some((r) => r.includes("A.xml/G/T1")),
+    `the swap must be caught per case, got ${JSON.stringify(regs)}`,
+  );
+  assert.deepEqual(improvements(swapped, baseline), ["A.xml/G/T2: fail → pass"]);
+});
 
-  // A file that vanishes entirely is a regression, not a silent zero.
-  assert.ok(regressions([result()], baseline).some((r) => r.includes("B.xml")));
+test("a case that changes between non-passing outcomes is reported, and one that vanishes is a regression", () => {
+  const before = [result({ name: "T1", outcome: "fail" })];
+  const baseline: Baseline = {
+    pinned: "abc",
+    total: 1,
+    counts: tally(before),
+    perFile: { "A.xml": tally(before) },
+    notPassing: notPassing(before),
+  };
+  // fail → translation-error is not a loss, but the evidence doc enumerates these buckets, so drift
+  // between them must not be silent.
+  assert.ok(
+    regressions([result({ name: "T1", outcome: "translation-error" })], baseline).some((r) =>
+      r.includes("outcome changed"),
+    ),
+  );
+  // A case in the baseline that did not run at all is a hole in the corpus, never an improvement.
+  assert.ok(regressions([], baseline).some((r) => r.includes("did not run")));
 });
