@@ -18,6 +18,62 @@
 >
 > **Sequence note:** ADR-033 does not exist — verified absent, and the number must not be reused.
 
+## ADR-061: the compliance API says where its numbers came from, and 404s rather than answering an absence
+
+**Status:** Accepted (2026-08-05). Roadmap M-C / C3, locked decision #5 — *"the versioned compliance API is
+the contract MIE consumes."* Consumes ADR-031/ADR-046's evidence readers; adds no new one.
+
+**Context.** Three surfaces nearly answer *"is this patient compliant for this measure?"* and none is a
+contract: the roster grid is a UI read model shaped by the frontend, MCP's `check_compliance` is
+Claude-facing and role-gated to CM/ADMIN, and a run answers for a population and writes records. C1 made
+the engine constructible without WorkWell's content and V7 made it defensible; this is the first piece
+that makes it **consumable**.
+
+**Decision 1 — `/api/v1/` in the path, and exactly one route under it.** Everything else under `/api/` is
+an internal contract that moves with the frontend. `v1` is a promise — fields are never removed or
+retyped — so the existing surface is *not* renamed into a guarantee nobody has audited. A path segment
+beats a header or media type here for an unglamorous reason: an integrator evaluating us pastes a URL into
+a browser, and it is greppable in a log.
+
+**Decision 2 — the response carries `populationsSource`, and this is the honesty-critical field.** The
+owner chose an eCQM-native shape: population membership booleans rather than a bare status. But for a
+WorkWell-**authored** measure only `initialPopulation` is measured — the other four are *inferred from
+`OutcomeStatus`*. The numbers alone cannot distinguish that from an official artifact's own population
+vector, and a consumer treating the second as measured eCQM membership would be wrong with nothing in the
+response to warn them. `populationsSource` is read off the **same field** `membershipFor` branches on, so
+the label cannot disagree with the numbers it describes.
+
+**Decision 3 — `latest` with nothing persisted is a 404, never an empty 200.** *"No run has covered this
+subject"* and *"this subject is compliant"* must not be confusable. The 404 body says which absence it is
+and points at `preview`. This is the single easiest way to make a compliance API dangerous, and it is
+worth spending an error code on.
+
+**Decision 4 — `preview` routes through `routedEngineForEnv`, not a bare authored engine.** On a stack
+where cms125 runs CMS's published artifact, previewing against authored logic would answer a different
+question than a run answers — a confidently wrong answer, worse than no answer. It also composes its
+bundle the way the run pipeline's EMPLOYEE scope does (`seededTargetFor` + `buildSyntheticBundle`), so
+preview and a run see identical input; `bundleFor`'s own docblock warns against building it a second,
+subtly different way.
+
+**Decision 5 — no new evidence reader.** `membershipFor` and `officialReportIdentity`
+(`src/fhir/measure-report.ts`) are the same functions the MeasureReport and QRDA III exporters use. Two
+readers of `evidence_json` that can disagree is the defect class ADR-031 exists to prevent, and a new API
+is exactly where a second one gets written by accident. A test asserts the API's population block agrees
+with `buildIndividualMeasureReport`'s output **for the same record**, against the exporter's real output
+rather than a hand-written expectation.
+
+**A plan correction, recorded because it inverted a security claim.** The plan asserted that
+`authorize.ts` falls through to *permit* for an unmatched path, and therefore that a new rule was
+mandatory. Verified false: `RULES` ends with a generic `/api/**` → `AUTHENTICATED` pair, so the new route
+was already gated and the permit default applies only to non-`/api` paths. **No rule was added** — a
+redundant one is noise. A test asserts the 401 anyway, because `RULES` is first-match-wins and a later
+reordering could put a `PERMIT` ahead of it on a route that returns per-subject clinical status.
+
+**Consequences.** `GET /api/v1/compliance/{subject}/{measure}?start&end&mode`, documented as a contract in
+`docs/COMPLIANCE_API.md` with an explicit stability statement. No machine-to-machine credential — that is
+the SSO fork (#265, blocked on MIE) and inventing one here would pre-empt it. No cohort endpoint: a
+population question has different performance characteristics and deserves its own design.
+
 ## ADR-060: a translator gap and an engine gap are different findings, so the conformance harness never merges them
 
 **Status:** Accepted (2026-08-05). Roadmap M-C / V7, issue #296. Extends ADR-059 (adds one export to
