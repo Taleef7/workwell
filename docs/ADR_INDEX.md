@@ -17,6 +17,7 @@
 
 ## Titles (newest first)
 
+- ADR-062: codegen is not the engine, and a consumer that shares no code with the app is the only proof the split worked
 - ADR-061: the compliance API says where its numbers came from, and 404s rather than answering an absence
 - ADR-060: a translator gap and an engine gap are different findings, so the conformance harness never merges them
 - ADR-059: the engine takes its measure content INJECTED — and the test-edge blocker dissolved rather than being paid

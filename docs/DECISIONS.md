@@ -18,6 +18,49 @@
 >
 > **Sequence note:** ADR-033 does not exist — verified absent, and the number must not be reused.
 
+## ADR-062: codegen is not the engine, and a consumer that shares no code with the app is the only proof the split worked
+
+**Status:** Accepted (2026-08-05). Roadmap M-C / C2. Completes what ADR-059 started; C4 (publish) remains.
+
+**Context.** ADR-059 made `@workwell/measure-engine` content-free and proved it with a boundary test over
+the import graph. Two things were still missing before the packaging claim is real: the package carried
+something that is not evaluation, and nothing demonstrated that a consumer *without* WorkWell's content
+could actually use it. An import-graph assertion proves the source tree's shape; it does not prove the
+package works.
+
+**Decision 1 — `generate-cql.ts` moves to `@workwell/measure-codegen`, with zero dependencies.** The
+engine answers "is this patient compliant?" from compiled ELM; codegen answers "what CQL expresses this
+rule?". They shared a directory, not code — **`generate-cql.ts` has zero imports** — so the split costs
+nothing and states something true: codegen is authoring-time, the engine is runtime. A consumer
+evaluating measures should not have to take a CQL emitter; a browser-side rule builder should not have to
+take a CQL runtime. Being dependency-free, the new package can run in one.
+
+`src/engine/`'s allowlist gains the new specifier, with the reason: `cql/codegen/generate-sql.ts`
+validates a rule with it before templating SQL. It emits text; it never evaluates. Adding it was forced
+by the boundary guard rather than anticipated — the guard failed the moment the import appeared, which is
+the guard working.
+
+**Decision 2 — `@workwell/example-consumer` exists, and it is a test, not a sample.** It declares one
+dependency, ships its own measure (`tetanus-booster.cql` plus the ELM compiled from it, neither referenced
+by the app), builds its own FHIR bundle, and evaluates — asserting all three of its own outcomes and that
+`audiogram` is **unknown** to it. If the engine ever re-acquires WorkWell's catalog, this stops evaluating.
+That is a stronger signal than the import-graph assertion because it exercises the path a real integrator
+takes.
+
+**It found an API fact no document stated:** `CqlExecutionEngine`'s constructor loads `FHIRHelpers-4.0.1`
+eagerly, so **every** consumer must supply it in `elmLibraries` or construction throws. Discovered by
+writing the consumer, not by reading the API, and now pinned as its own test — which is the argument for
+building this at all rather than asserting consumability in prose.
+
+**The limitation is stated rather than glossed.** It resolves the engine through `workspace:*`, so it is a
+consumer **outside the app**, not outside the repo. Whether the published tarball contains what a consumer
+needs is a different question and belongs to C4. Calling this "an external consumer" without that caveat
+would be exactly the overclaim this codebase keeps catching in its own docs.
+
+**Consequences.** Three packages in the workspace: `measure-engine` (2 deps), `measure-codegen` (0), and
+`example-consumer` (1, unpublished). The engine's `index.ts` no longer exports codegen — a breaking change
+to a `private: true` package, taken now rather than after C4 makes it a promise. Suite 1885 → 1890.
+
 ## ADR-061: the compliance API says where its numbers came from, and 404s rather than answering an absence
 
 **Status:** Accepted (2026-08-05). Roadmap M-C / C3, locked decision #5 — *"the versioned compliance API is

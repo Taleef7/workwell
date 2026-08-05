@@ -47,6 +47,12 @@ const ENGINE_ROOT = fileURLToPath(new URL("./", import.meta.url)).replace(/[\\/]
 const ALLOWED_BARE: { prefix: string; note: string; onlyIn?: "outside-request-path" }[] = [
   { prefix: "@workwell/measure-engine", note: "the extracted eval core (ADR-059) — the only way to evaluate" },
   {
+    // Authoring-time only, and zero-dependency (ADR-062). Admitted because `cql/codegen/generate-sql.ts`
+    // validates a rule with it before templating SQL — it emits text, it never evaluates.
+    prefix: "@workwell/measure-codegen",
+    note: "rule → CQL codegen (ADR-015/ADR-062) — emits text, never computes an outcome",
+  },
+  {
     // ARCHITECTURE's "portable across every @mieweb/cloud target — file I/O lives only at the CLI edge"
     // is an invariant, so enforce it rather than assert it. The SCOPE of the carve-out is computed below
     // from reachability, not from the filename — see REQUEST_PATH.

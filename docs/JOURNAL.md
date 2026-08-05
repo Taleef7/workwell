@@ -1,5 +1,39 @@
 # Journal
 
+## 2026-08-05 (M-C / C2) — codegen leaves the engine, and a consumer that shares no code with the app proves the split worked (branch `feat/measure-codegen-and-consumer`)
+
+Two packages, ADR-062. C4 (publish) is the only piece of M-C left.
+
+**`@workwell/measure-codegen` — zero dependencies.** `generate-cql.ts` has **zero imports**, so it never
+shared code with the engine, only a directory. The engine answers *"is this patient compliant?"* from
+compiled ELM; codegen answers *"what CQL expresses this rule?"*. Authoring-time versus runtime. A consumer
+evaluating measures should not have to take a CQL emitter, and a browser-side rule builder should not have
+to take a CQL runtime — being dependency-free, this one runs in a browser.
+
+**`@workwell/example-consumer` — a test, not a sample.** ADR-059's boundary test proves the engine imports
+no WorkWell content; that is a claim about the *source tree*, not about whether the package is usable by
+someone who has none. So this package pretends to be that someone: one dependency, its own measure
+(`tetanus-booster.cql` + the ELM compiled from it, neither referenced by the app), its own FHIR bundle. It
+asserts all three of its own outcomes and that `audiogram` is **unknown** to it. If the engine ever
+re-acquires our catalog, this stops evaluating.
+
+**Building it found an API fact no document stated:** `CqlExecutionEngine`'s constructor loads
+`FHIRHelpers-4.0.1` eagerly, so **every** consumer must supply it or construction throws. Found by writing
+the consumer, not by reading the API — which is the whole argument for building one rather than asserting
+consumability in prose. Now its own test.
+
+**The limitation is stated, not glossed:** it resolves through `workspace:*`, so it is a consumer *outside
+the app*, not outside the repo. Whether the published tarball contains what a consumer needs is C4's
+question.
+
+**The boundary guard did its job unprompted.** Moving codegen made `src/engine/cql/codegen/generate-sql.ts`
+import a package its allowlist did not declare, and `engine-boundary.test.ts` failed immediately. The
+allowlist gained the entry with its reason — that file validates a rule before templating SQL; it emits
+text, it never evaluates. Also removed one of my own vacuous assertions in the new consumer test
+(`.constructor.name === "Promise"` — an assertion about JavaScript, not about this codebase).
+
+Suite **1885 → 1890**, 0 fail.
+
 ## 2026-08-05 (M-C / C3) — the compliance API exists, and it refuses to answer an absence (branch `feat/compliance-api`)
 
 `GET /api/v1/compliance/{subject}/{measure}?start&end&mode=latest|preview` — locked decision 5's *"contract

@@ -30,7 +30,7 @@ import { seedMeasureStore } from "../measure/measure-seed.ts";
 import { createMeasure, approveMeasure, deprecateMeasure, transitionStatus, MeasureError, type MeasureLifecycleDeps } from "../measure/measure-lifecycle.ts";
 import {
   updateMeasureSpec, updateMeasureCql, compileMeasureCql, updateMeasureTests, validateMeasureTests, previewRule, saveRule, validateSpecUpdate, } from "../measure/measure-authoring.ts";
-import type { Rule, CodegenBindings } from "@workwell/measure-engine";
+import type { Rule, CodegenBindings } from "@workwell/measure-codegen";
 import { listOshaReferences } from "../measure/osha-references.ts";
 import { generateTraceability } from "../measure/measure-traceability.ts";
 import { computeDataReadiness } from "../measure/data-readiness.ts";

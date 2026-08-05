@@ -1,0 +1,17 @@
+{
+  "name": "@workwell/measure-codegen",
+  "version": "0.1.0",
+  "description": "Declarative measure rules → canonical CQL. Zero dependencies: pure string templating with no engine, no runtime and no I/O. Authoring-time only — the emitted CQL is compiled and executed by @workwell/measure-engine, which remains the sole compliance authority (ADR-015).",
+  "type": "module",
+  "license": "Apache-2.0",
+  "private": true,
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "files": [
+    "src"
+  ]
+}
