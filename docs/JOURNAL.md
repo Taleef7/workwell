@@ -1,5 +1,40 @@
 # Journal
 
+## 2026-08-05 (docs) — the ADR record is split into what governs and what is history (branch `docs/prune-adr-record`)
+
+The ADR record had grown past the point where it could be navigated: 58 records, 338k, in one flat file
+with no signal about which of them still govern anything. Git shows **117 of the 118 commits** touching
+`DECISIONS.md` under the owner's identity, but the prose was drafted by Claude inside sessions and committed
+through that account — and only **9 of 58** records carry a written owner or stakeholder input. The rest are
+decisions Claude made and the owner ratified by merging.
+
+Reading all 58 produced a four-way classification that the single flat file had been hiding:
+
+| | | |
+|---|---|---|
+| **20** | still **binding** | constrains what may be done next |
+| **18** | **design records** | how a built thing works; read before touching it |
+| **13** | **historical findings** | a diagnosis written up in ADR form; constrains nothing |
+| **7** | **superseded** | do not act on it |
+
+**The 20 superseded + findings moved to `docs/archive/DECISIONS_ARCHIVE.md`; `DECISIONS.md` is 338k → 210k.**
+Deletion was rejected on a concrete ground rather than caution: these are cross-referenced constantly
+(052 by 059, 043 by 044/045/046, 051 by 055/056, plus `CLAUDE.md`, `LOCKED_DECISIONS`, `ARCHITECTURE` and
+this journal), so removing bodies would have left dozens of dangling pointers. Every **heading stays** in
+`DECISIONS.md` with a dated one-line pointer and a sentence saying what the record found — so an `ADR-0NN`
+reference anywhere in the repo still resolves, the anchor still works, and one `git revert` undoes it.
+`ADR_INDEX.md` marks the 20 with `·archived`.
+
+**The structural finding worth keeping.** The "running CMS's own published measures" group is **18 records —
+nearly a third of the file — and only 6 of them constrain anything.** The other 12 are diagnoses: a value
+set absent from a bundle, a mammogram in the wrong vocabulary, a harness measuring the wrong window. Useful
+history, but the journal already tells each of those stories, and filing them as ADRs is most of why the
+file reached 338k. Findings belong here, not there.
+
+Also delivered: a browsable map of all 58 with the classification and a plain-English line each (artifact,
+private). **Nothing in the record was edited or renumbered** — bodies are verbatim in the archive. ADR-033
+still does not exist and its number is still not to be reused.
+
 ## 2026-08-05 (M-C / C1) — `@workwell/measure-engine` exists, and the question that blocked it for two weeks was the cheap one to answer (branch `feat/measure-engine-extraction`)
 
 The extraction has been promised since 2026-07-24 and deferred twice. It was never a lifting problem:
