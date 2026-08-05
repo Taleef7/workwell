@@ -10,6 +10,9 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { parseTestFile, ParseError, decodeXmlText } from "./parse-tests.ts";
 import { skipDecision, UNCLAIMED_CAPABILITIES } from "./capabilities.ts";
 import { buildLibrary } from "./run.ts";
@@ -24,6 +27,8 @@ import {
   type Baseline,
 } from "./report.ts";
 import type { CaseResult } from "./run.ts";
+
+const BACKEND = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 
 const FIXTURE = `<?xml version="1.0" encoding="utf-8"?>
 <tests name="FixtureTest" version="1.0">
@@ -67,12 +72,25 @@ test("the reader decodes entities, and &amp; last so &amp;lt; stays literal", ()
   // The ordering property, directly: decoding `&amp;` first would turn this into `<`.
   assert.equal(decodeXmlText("&amp;lt;"), "&lt;");
   assert.equal(decodeXmlText("&#65;&#x42;"), "AB");
+  // The form the chained-replace version got wrong: numeric refs were decoded FIRST, so `&#38;lt;`
+  // became `&lt;` became `<`. A single pass cannot double-decode (review, #398).
+  assert.equal(decodeXmlText("&#38;lt;"), "&lt;");
+  assert.equal(decodeXmlText("&#x26;quot;"), "&quot;");
 });
 
 test("`invalid` is read from <expression>, not <test>, and carries no output", () => {
   const invalid = parseTestFile("FixtureTest.xml", FIXTURE).find((c) => c.name === "Invalid")!;
   assert.equal(invalid.invalid, "true");
   assert.equal(invalid.output, undefined);
+});
+
+test("a single-quoted attribute is read, not silently dropped", () => {
+  // Dropping `invalid='true'` would turn an invalid case into a valid one with no expected output
+  // (review, #398). The corpus uses double quotes today, so this safety was accidental.
+  const xml = `<tests name="T"><group name="G"><test name='A'><expression invalid='true'>Ceiling(2147483648)</expression></test></group></tests>`;
+  const [c] = parseTestFile("t.xml", xml);
+  assert.equal(c!.name, "A");
+  assert.equal(c!.invalid, "true");
 });
 
 test("the reader REFUSES rather than returning fewer cases", () => {
@@ -92,21 +110,39 @@ test("the reader REFUSES rather than returning fewer cases", () => {
 });
 
 test("the skip mechanism works — and claims everything today", () => {
-  // The unclaimed set is empty by design (measuring the delta is the point), so the mechanism would be
-  // untested if only exercised through the real corpus. Drive it directly.
-  const fake = new Map([["system.long", "hypothetical"]]) as ReadonlyMap<string, string>;
-  const saved = new Map(UNCLAIMED_CAPABILITIES);
-  assert.equal(saved.size, 0, "UNCLAIMED_CAPABILITIES must stay empty — adding one needs its own PR");
+  assert.equal(UNCLAIMED_CAPABILITIES.size, 0, "UNCLAIMED_CAPABILITIES must stay empty — adding one needs its own PR");
   assert.deepEqual(skipDecision(["arithmetic-operators", "system.long"]), { skip: false });
-  // The same predicate against a populated map, proving it is the map and not the code that is empty.
-  const decide = (req: string[]) => {
-    for (const c of req) {
-      const reason = fake.get(c);
-      if (reason !== undefined) return { skip: true, capability: c, reason };
+
+  // Drive the REAL function against a populated map. A first cut re-implemented the loop here and
+  // asserted against the re-implementation, which could not have caught a bug in `skipDecision` — the
+  // vacuous-guard shape, in the test written to argue against it (review, #398).
+  const fake: ReadonlyMap<string, string> = new Map([["system.long", "hypothetical"]]);
+  assert.deepEqual(skipDecision(["arithmetic-operators", "system.long"], fake), {
+    skip: true,
+    capability: "system.long",
+    reason: "hypothetical",
+  });
+  assert.deepEqual(skipDecision(["arithmetic-operators"], fake), { skip: false });
+});
+
+test("every quantity unit the real corpus uses validates — derived, not asserted", () => {
+  // The scope claim in `ucum.ts` was wrong by 3× when written by hand (review, #398). Walking the corpus
+  // makes it self-maintaining: if upstream adds a unit our table does not know, this fails instead of the
+  // number silently shifting into `translation-error`.
+  const dir = path.join(BACKEND, ".cql-tests", "tests", "cql");
+  if (!existsSync(dir)) return; // corpus not fetched — the CI job fetches it; a local run stays green
+  const units = new Set<string>();
+  for (const f of readdirSync(dir).filter((n) => n.endsWith(".xml"))) {
+    const xml = readFileSync(path.join(dir, f), "utf8");
+    // Unit-shaped only: the same quote form also encloses code-system names and display strings, which
+    // are not units and must not be held to UCUM.
+    for (const m of xml.matchAll(/[0-9]\s*'([^']{1,40})'/g)) {
+      if (/^[^\s,"]+$/.test(m[1]!)) units.add(m[1]!);
     }
-    return { skip: false };
-  };
-  assert.deepEqual(decide(["system.long"]), { skip: true, capability: "system.long", reason: "hypothetical" });
+  }
+  assert.ok(units.size >= 15, `found only ${units.size} distinct units — the sweep is not reaching the corpus`);
+  const rejected = [...units].filter((u) => validateUnit(u) !== null);
+  assert.deepEqual(rejected, [], "every unit the corpus uses must validate, or the run misreports it");
 });
 
 test("the generated library grades itself in CQL, and an invalid case emits no comparison", () => {
@@ -175,6 +211,7 @@ test("the baseline check catches a WITHIN-FILE swap that leaves every tally unch
     counts: tally(before),
     perFile: { "A.xml": tally(before) },
     notPassing: notPassing(before),
+    gradedInJs: 0,
   };
   assert.deepEqual(Object.keys(baseline.notPassing), ["A.xml/G/T2"], "only non-passing cases are stored");
   assert.deepEqual(regressions(before, baseline), [], "an unchanged run is clean");
@@ -198,6 +235,7 @@ test("a case that changes between non-passing outcomes is reported, and one that
     counts: tally(before),
     perFile: { "A.xml": tally(before) },
     notPassing: notPassing(before),
+    gradedInJs: 0,
   };
   // fail → translation-error is not a loss, but the evidence doc enumerates these buckets, so drift
   // between them must not be silent.

@@ -42,10 +42,39 @@ export type Outcome =
   | "translation-error"
   | "runtime-error"
   | "skipped"
-  /** An `invalid` case that correctly refused to translate. */
-  | "invalid-refused"
-  /** An `invalid` case that translated anyway — the corpus says it should not have. */
+  /** An `invalid` case the TRANSLATOR refused. */
+  | "invalid-refused-at-translation"
+  /** An `invalid` case that translated but threw when executed — still a refusal upstream. */
+  | "invalid-refused-at-runtime"
+  /** An `invalid` case that translated AND evaluated. The corpus says it should have failed. */
   | "invalid-accepted";
+
+/**
+ * How `cqframework/cql-tests-runner` grades an `invalid` case — copied here because getting it wrong
+ * produced a materially overstated finding (review, #398).
+ *
+ * `src/services/test-runner.ts`:
+ * ```ts
+ * const invalid = result.invalid;
+ * if (invalid === 'true' || invalid === 'semantic') {
+ *     result.testStatus = response.status === 200 ? 'fail' : 'pass';
+ * }
+ * ```
+ *
+ * Two things follow that our first cut got wrong:
+ *
+ * 1. **A non-200 is ANY failure — translation or evaluation.** We graded purely on whether the
+ *    expression TRANSLATED, so a case that translated and then threw at runtime was reported as
+ *    `invalid-accepted` when upstream counts it a pass. Measured: **5 of our 36** do exactly that.
+ * 2. **`invalid="syntax"` does not take this branch at all** — it falls through to normal grading
+ *    upstream. There are 2 such cases, and one of them (`Ceiling(2147483648)`) was the headline example
+ *    of a published finding.
+ *
+ * So `invalid` cases are now EXECUTED when they translate, and the refusal bucket is split by where the
+ * refusal happened. `syntax` is tracked separately rather than folded in, because we cannot reproduce
+ * upstream's else-branch grading (those cases carry no `<output>` to compare against).
+ */
+const REFUSAL_IS_ANY_FAILURE = new Set(["true", "semantic"]);
 
 export interface CaseResult {
   file: string;
@@ -171,8 +200,15 @@ export async function runCase(c: CqlTestCase): Promise<CaseResult> {
   }
 
   if (c.invalid !== undefined) {
-    // An `invalid` case is SUPPOSED not to translate. Accepting it is reported, never counted as a pass.
-    return done({ outcome: compiled.ok ? "invalid-accepted" : "invalid-refused" });
+    if (!compiled.ok) return done({ outcome: "invalid-refused-at-translation" });
+    // It translated. Upstream grades on whether the whole request failed, so EXECUTE it: a case that
+    // translates and then throws is a refusal too, and calling it "accepted" overstates the finding.
+    try {
+      await evaluateExpressions(compiled.elm);
+      return done({ outcome: "invalid-accepted" });
+    } catch (err) {
+      return done({ outcome: "invalid-refused-at-runtime", error: String(err).slice(0, 300) });
+    }
   }
 
   let gradedInJs = false;
@@ -192,6 +228,23 @@ export async function runCase(c: CqlTestCase): Promise<CaseResult> {
 
   try {
     const defines = await evaluateExpressions(compiled.elm);
+
+    // The defines we asked for must BE there. If `Passed` is absent — a translator that emits
+    // `context: "Patient"`, an `evaluateExpressions` regression, an ELM shape change — then
+    // `defines["Passed"] === true` is false and the case reads as `fail`, which the report labels
+    // "engine computed the wrong value". That is the exact misattribution ADR-060 decision 1 exists to
+    // prevent, one layer down, and it would fire EN MASSE while still producing a plausible report
+    // (review, #398).
+    const required = gradedInJs ? ["Actual", "Expected"] : ["Actual", "Passed"];
+    const absent = required.filter((d) => !(d in defines));
+    if (absent.length > 0) {
+      return done({
+        outcome: "runtime-error",
+        expected: c.output,
+        error: `harness: define(s) ${absent.join(", ")} absent from the evaluation result — this is a HARNESS fault, not an engine result`,
+      });
+    }
+
     const passed = gradedInJs
       ? valuesEquivalent(defines["Actual"], defines["Expected"])
       : defines["Passed"] === true;

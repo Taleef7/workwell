@@ -74,6 +74,18 @@ const ALLOWED_BARE: { prefix: string; note: string; onlyIn?: "outside-request-pa
  * `*-bin.ts` files are excluded as SOURCES: they are `tsx` process entrypoints run from `package.json`
  * scripts, never imported by the worker. Including them would make every CLI reachable by definition and
  * collapse the distinction this computes.
+ *
+ * **This is a TRADE, not a pure tightening, and saying so is the actual argument for it** (review, #398).
+ * The old rule let only `*-cli.ts` use `node:`; this one lets ANY unreachable engine module — measured,
+ * that newly includes `cql/codegen/generate-sql.ts`, `ingress/index.ts` (a barrel, i.e. library surface),
+ * `ingress/webchart/hapi-transform.ts` and `report-table.ts`. What makes it the better rule is that the
+ * moment a route imports one of those, the guard tightens automatically; the filename rule would have
+ * gone on permitting `node:` in a file the worker had started reaching.
+ *
+ * Known under-approximations, none live today: an extensionless or `.js`-specified import of a `.ts` file
+ * truncates the closure at the `endsWith(".ts")` check; a template-literal specifier resolves to nothing
+ * and is skipped; and seeds come only from `src/**`, so an engine module reached solely from
+ * `packages/` or `scripts/` would read as unreachable.
  */
 function computeRequestPath(): ReadonlySet<string> {
   const SRC_ROOT = resolvePath(ENGINE_ROOT, "..");
@@ -270,9 +282,11 @@ test("the boundary matcher catches every escape form (guard self-test)", () => {
     "node built-ins must be REFUSED in a request-path module",
   );
   // And the converse of the old rule: naming a request-path file `*-cli.ts` must no longer buy it a pass.
+  // Floor raised from 5 to 15 against an actual 21: a closure that half-collapsed would have cleared 5
+  // and reported a green boundary over files it never inspected (review, #398).
   assert.ok(
-    REQUEST_PATH.size > 5,
-    `the request-path closure found only ${REQUEST_PATH.size} files — it is not reaching the tree`,
+    REQUEST_PATH.size >= 15,
+    `the request-path closure found only ${REQUEST_PATH.size} files — expected ~21; it is not reaching the tree`,
   );
   // The extraction debt this used to carve out is GONE: `cql-translator.ts` moved to `src/measure/`
   // (ADR-048), so the ELM Explorer's translator is no longer reachable from the engine tree and

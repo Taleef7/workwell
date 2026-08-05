@@ -191,7 +191,7 @@ entrypoints (ADR-048's second debt) is untouched — those files stayed app-side
 **Done 2026-08-05 (M-C / V7 — ADR-060, #296 closed).** The **CQL language conformance suite runs**:
 `cqframework/cql-tests`, 1,835 cases / 16 files, through our translator (`@cqframework/cql` 4.0.0-beta.1)
 and our engine (`cql-execution` 3.3.2) — **1,622 pass · 155 fail · 12 translation-error · 4 runtime-error ·
-36 invalid-accepted · 0 skipped**, in 11 seconds. **Why this suite:** `cql-execution` 3.3.x has *published*
+11 invalid-refused · 31 invalid-accepted · 0 skipped** (1,633 on the upstream rule), in 11 seconds. **Why this suite:** `cql-execution` 3.3.x has *published*
 results (1,533/81/113/4) but **that run used the JAVA translator**; the JS-translator delta is unpublished
 and this measures it. Our 4 runtime errors are **the same four cases** as theirs. **The lesson worth
 keeping: the harness was the defect, twice, and nearly published.** The first run reported **183**
@@ -199,8 +199,7 @@ translation errors and **171 were ours** — 155 `No default UCUM service availa
 the UCUM service as its *fourth* argument and defaults to one that throws) and 16 our own
 `Actual ~ Expected` line failing to type-check. Real figure **12**; caught only because the plan required
 clustering diagnostics before believing the total. **Real findings, all translator/engine, none in our
-measures:** `Slice` unimplemented (10 of 12); **36 of 42 `invalid` cases translate anyway** (out-of-range
-integer literals, `Exp(1000)`, `Ln(0)`) — relevant because the Studio's CQL editor uses translator
+measures:** `Slice` unimplemented (10 of 12); **31 of 42 `invalid` cases are translated AND evaluated** (`Exp(1000)`, `Ln(0)`) — relevant because the Studio's CQL editor uses translator
 diagnostics as its authoring gate; **`Long` is silently wrong — `1L + 2L` → `12`**, string concatenation,
 no throw; decimal precision unapplied to aggregates; `Ceiling` not nulling at the Integer boundary. Five
 files are perfect (logical, nullological, queries, aggregate, conditional) — the constructs our measure CQL

@@ -29,9 +29,18 @@ if (Test-Path (Join-Path $ContentDir ".git")) {
   git -C $ContentDir sparse-checkout set --no-cone @paths
 }
 
+# $ErrorActionPreference does not cover a native exit code, so the fetch is checked explicitly. Without
+# this, a transiently failed fetch against a WARM .cql-tests would leave the previous FETCH_HEAD in place,
+# `checkout FETCH_HEAD` would succeed against the OLD content, and the new $Ref would still be written to
+# .pin — labelling a results file and a baseline with a commit they were not produced at (review, #398).
 git -C $ContentDir fetch --quiet --depth 1 origin $Ref
+if ($LASTEXITCODE -ne 0) { throw "fetch of $Ref failed" }
 git -C $ContentDir checkout --quiet FETCH_HEAD
 if ($LASTEXITCODE -ne 0) { throw "checkout of $Ref failed" }
+
+# Prove we are actually AT the pin before recording it. .pin is the provenance of a published number.
+$head = (git -C $ContentDir rev-parse HEAD).Trim()
+if ($head -ne $Ref) { throw "checked out $head but expected $Ref" }
 
 # Recorded so a results file is attributable to the content that produced it, without the runner
 # shelling out to git.

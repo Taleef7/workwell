@@ -14,8 +14,16 @@ results (1,533 / 81 / 113 / 4), but that run used the **Java** translator. We tr
 because the engine computed the wrong value, or because our translator would not compile CQL the corpus
 considers valid. Merging them would attribute a translator gap to `cql-execution`, whose own posted
 results say otherwise. **The difference between those two columns is the entire deliverable**, so the
-runner carries seven outcomes (`pass`, `fail`, `translation-error`, `runtime-error`, `invalid-refused`,
-`invalid-accepted`, `skipped`) and the report prints all of them.
+runner carries seven outcomes and the report prints all of them.
+
+**Decision 1b — an `invalid` case is EXECUTED when it translates, because that is what the corpus means.**
+The first cut graded `invalid` purely on whether the expression translated; `cql-tests-runner` grades it a
+pass when the request fails for **any** reason, translation or evaluation. Measured: 5 of our 36
+"accepted" cases threw at runtime and are upstream passes, and the finding's headline example was one of
+only 2 `invalid="syntax"` cases, which upstream does not route through that branch at all. Corrected to
+**11 refused (6 at translation, 5 at runtime) / 31 accepted**, and the upstream-comparable total is stated
+as **1,633** alongside our 1,622 (review, #398). A published finding that misstates the rule it is
+measuring against is worse than no finding.
 
 **Decision 2 — a case is graded by CQL, not by JavaScript.** Each becomes
 `define Actual: <expr>` / `define Expected: <output>` / `define Passed: Actual ~ Expected`, executed
@@ -72,9 +80,14 @@ as a follow-up issue.
 `pnpm test` so an offline local run stays green). The runner **refuses to report** unless it parsed all 16
 files and 1,835 cases with every case in exactly one bucket — a conformance harness that grades a subset
 publishes a flattering number, which is the specific way this could be worse than useless. Results:
-**1,622 pass / 155 fail / 12 translation-error / 4 runtime-error / 36 invalid-accepted / 0 skipped**;
-findings and limits in `docs/evidence/CQL_TESTS_2026-08-05.md`. Phase 2 — a dev-only `$cql` operation so
-the stock `cql-tests-runner` drives us, the entry ticket to posting official vendor results — is not built.
+**1,622 pass / 155 fail / 12 translation-error / 4 runtime-error / 11 invalid-refused / 31 invalid-accepted
+/ 0 skipped** — 1,835 exactly, and **1,633 on the upstream rule**. **16 cases are compared in JS rather
+than by CQL `~`**; that count is printed, serialized and baselined, because a first draft claimed it was
+zero after reading a field `runnerJson` never wrote. `scripts/**/*.ts` is now inside `tsconfig.json`'s
+`include` — the harness that produces a published number was not being typechecked at all, which is how a
+`Baseline` literal missing a required field reached CI. Findings and limits in
+`docs/evidence/CQL_TESTS_2026-08-05.md`. Phase 2 — a dev-only `$cql` operation so the stock
+`cql-tests-runner` drives us, the entry ticket to posting official vendor results — is not built.
 
 ## ADR-059: the engine takes its measure content INJECTED — and the test-edge blocker dissolved rather than being paid
 

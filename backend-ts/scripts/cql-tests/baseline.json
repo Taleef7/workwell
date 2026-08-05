@@ -6,8 +6,9 @@
     "fail": 155,
     "translation-error": 12,
     "runtime-error": 4,
-    "invalid-refused": 6,
-    "invalid-accepted": 36,
+    "invalid-refused-at-translation": 6,
+    "invalid-refused-at-runtime": 5,
+    "invalid-accepted": 31,
     "skipped": 0
   },
   "perFile": {
@@ -16,7 +17,8 @@
       "fail": 4,
       "translation-error": 0,
       "runtime-error": 0,
-      "invalid-refused": 0,
+      "invalid-refused-at-translation": 0,
+      "invalid-refused-at-runtime": 0,
       "invalid-accepted": 0,
       "skipped": 0
     },
@@ -25,7 +27,8 @@
       "fail": 0,
       "translation-error": 0,
       "runtime-error": 0,
-      "invalid-refused": 0,
+      "invalid-refused-at-translation": 0,
+      "invalid-refused-at-runtime": 0,
       "invalid-accepted": 0,
       "skipped": 0
     },
@@ -34,8 +37,9 @@
       "fail": 43,
       "translation-error": 0,
       "runtime-error": 4,
-      "invalid-refused": 0,
-      "invalid-accepted": 12,
+      "invalid-refused-at-translation": 0,
+      "invalid-refused-at-runtime": 2,
+      "invalid-accepted": 10,
       "skipped": 0
     },
     "CqlComparisonOperatorsTest.xml": {
@@ -43,7 +47,8 @@
       "fail": 16,
       "translation-error": 0,
       "runtime-error": 0,
-      "invalid-refused": 2,
+      "invalid-refused-at-translation": 2,
+      "invalid-refused-at-runtime": 0,
       "invalid-accepted": 0,
       "skipped": 0
     },
@@ -52,7 +57,8 @@
       "fail": 0,
       "translation-error": 0,
       "runtime-error": 0,
-      "invalid-refused": 0,
+      "invalid-refused-at-translation": 0,
+      "invalid-refused-at-runtime": 0,
       "invalid-accepted": 0,
       "skipped": 0
     },
@@ -61,7 +67,8 @@
       "fail": 8,
       "translation-error": 1,
       "runtime-error": 0,
-      "invalid-refused": 1,
+      "invalid-refused-at-translation": 1,
+      "invalid-refused-at-runtime": 0,
       "invalid-accepted": 3,
       "skipped": 0
     },
@@ -70,7 +77,8 @@
       "fail": 0,
       "translation-error": 0,
       "runtime-error": 0,
-      "invalid-refused": 0,
+      "invalid-refused-at-translation": 0,
+      "invalid-refused-at-runtime": 0,
       "invalid-accepted": 1,
       "skipped": 0
     },
@@ -79,8 +87,9 @@
       "fail": 40,
       "translation-error": 0,
       "runtime-error": 0,
-      "invalid-refused": 0,
-      "invalid-accepted": 4,
+      "invalid-refused-at-translation": 0,
+      "invalid-refused-at-runtime": 2,
+      "invalid-accepted": 2,
       "skipped": 0
     },
     "CqlListOperatorsTest.xml": {
@@ -88,8 +97,9 @@
       "fail": 31,
       "translation-error": 10,
       "runtime-error": 0,
-      "invalid-refused": 0,
-      "invalid-accepted": 1,
+      "invalid-refused-at-translation": 0,
+      "invalid-refused-at-runtime": 1,
+      "invalid-accepted": 0,
       "skipped": 0
     },
     "CqlLogicalOperatorsTest.xml": {
@@ -97,7 +107,8 @@
       "fail": 0,
       "translation-error": 0,
       "runtime-error": 0,
-      "invalid-refused": 0,
+      "invalid-refused-at-translation": 0,
+      "invalid-refused-at-runtime": 0,
       "invalid-accepted": 0,
       "skipped": 0
     },
@@ -106,7 +117,8 @@
       "fail": 0,
       "translation-error": 0,
       "runtime-error": 0,
-      "invalid-refused": 0,
+      "invalid-refused-at-translation": 0,
+      "invalid-refused-at-runtime": 0,
       "invalid-accepted": 0,
       "skipped": 0
     },
@@ -115,7 +127,8 @@
       "fail": 0,
       "translation-error": 0,
       "runtime-error": 0,
-      "invalid-refused": 0,
+      "invalid-refused-at-translation": 0,
+      "invalid-refused-at-runtime": 0,
       "invalid-accepted": 0,
       "skipped": 0
     },
@@ -124,7 +137,8 @@
       "fail": 2,
       "translation-error": 0,
       "runtime-error": 0,
-      "invalid-refused": 0,
+      "invalid-refused-at-translation": 0,
+      "invalid-refused-at-runtime": 0,
       "invalid-accepted": 0,
       "skipped": 0
     },
@@ -133,7 +147,8 @@
       "fail": 0,
       "translation-error": 1,
       "runtime-error": 0,
-      "invalid-refused": 0,
+      "invalid-refused-at-translation": 0,
+      "invalid-refused-at-runtime": 0,
       "invalid-accepted": 0,
       "skipped": 0
     },
@@ -142,7 +157,8 @@
       "fail": 3,
       "translation-error": 0,
       "runtime-error": 0,
-      "invalid-refused": 3,
+      "invalid-refused-at-translation": 3,
+      "invalid-refused-at-runtime": 0,
       "invalid-accepted": 4,
       "skipped": 0
     },
@@ -151,7 +167,8 @@
       "fail": 8,
       "translation-error": 0,
       "runtime-error": 0,
-      "invalid-refused": 0,
+      "invalid-refused-at-translation": 0,
+      "invalid-refused-at-runtime": 0,
       "invalid-accepted": 11,
       "skipped": 0
     }
@@ -190,10 +207,10 @@
     "CqlArithmeticFunctionsTest.xml/Ln/LnNeg0": "invalid-accepted",
     "CqlArithmeticFunctionsTest.xml/MinValue/LongMinValue": "runtime-error",
     "CqlArithmeticFunctionsTest.xml/MinValue/DateTimeMinValue": "fail",
-    "CqlArithmeticFunctionsTest.xml/MinValue/BooleanMinValue": "invalid-accepted",
+    "CqlArithmeticFunctionsTest.xml/MinValue/BooleanMinValue": "invalid-refused-at-runtime",
     "CqlArithmeticFunctionsTest.xml/MaxValue/LongMaxValue": "runtime-error",
     "CqlArithmeticFunctionsTest.xml/MaxValue/DateTimeMaxValue": "fail",
-    "CqlArithmeticFunctionsTest.xml/MaxValue/BooleanMaxValue": "invalid-accepted",
+    "CqlArithmeticFunctionsTest.xml/MaxValue/BooleanMaxValue": "invalid-refused-at-runtime",
     "CqlArithmeticFunctionsTest.xml/Modulo/Modulo4LBy2L": "fail",
     "CqlArithmeticFunctionsTest.xml/Modulo/ModuloQuantity": "fail",
     "CqlArithmeticFunctionsTest.xml/Modulo/Modulo10By3Quantity": "fail",
@@ -223,8 +240,8 @@
     "CqlComparisonOperatorsTest.xml/Equal/TupleEqDifferentNamesWithOneNullId": "fail",
     "CqlComparisonOperatorsTest.xml/Equal/DateTimeEqNull": "fail",
     "CqlComparisonOperatorsTest.xml/Equivalent/EquivFloatTrailingZero": "fail",
-    "CqlComparisonOperatorsTest.xml/Equivalent/EquivTupleJohnJohnFalse": "invalid-refused",
-    "CqlComparisonOperatorsTest.xml/Equivalent/EquivTupleJohnJohnFalse2": "invalid-refused",
+    "CqlComparisonOperatorsTest.xml/Equivalent/EquivTupleJohnJohnFalse": "invalid-refused-at-translation",
+    "CqlComparisonOperatorsTest.xml/Equivalent/EquivTupleJohnJohnFalse2": "invalid-refused-at-translation",
     "CqlComparisonOperatorsTest.xml/Not Equal/TupleNotEqDifferingNamesWithOneNullId": "fail",
     "CqlComparisonOperatorsTest.xml/Unit Comparison/TestQuantityMonthEqualMo": "fail",
     "CqlComparisonOperatorsTest.xml/Unit Comparison/TestQuantityMonthNotEqualMo": "fail",
@@ -247,7 +264,7 @@
     "CqlDateTimeOperatorsTest.xml/Uncertainty tests/DateTimeDurationBetweenUncertainSubtract": "fail",
     "CqlDateTimeOperatorsTest.xml/Uncertainty tests/DateTimeDurationBetweenUncertainMultiply": "fail",
     "CqlDateTimeOperatorsTest.xml/Uncertainty tests/DateTimeDurationBetweenUncertainDiv": "invalid-accepted",
-    "CqlDateTimeOperatorsTest.xml/Uncertainty tests/TimeDurationBetweenHourDiffPrecision": "invalid-refused",
+    "CqlDateTimeOperatorsTest.xml/Uncertainty tests/TimeDurationBetweenHourDiffPrecision": "invalid-refused-at-translation",
     "CqlDateTimeOperatorsTest.xml/Uncertainty tests/TimeDurationBetweenHourDiffPrecision2": "fail",
     "CqlDateTimeOperatorsTest.xml/Subtract/DateTimeSubtractInvalidYears": "invalid-accepted",
     "CqlDateTimeOperatorsTest.xml/Subtract/DateTimeSubtract1YearInSeconds": "fail",
@@ -292,8 +309,8 @@
     "CqlIntervalOperatorsTest.xml/ProperIn/TimeProperInPrecisionTrue": "fail",
     "CqlIntervalOperatorsTest.xml/ProperIn/TimeProperInPrecisionFalse": "fail",
     "CqlIntervalOperatorsTest.xml/Union/TestUnionNull": "fail",
-    "CqlIntervalOperatorsTest.xml/Width/DateTimeWidth": "invalid-accepted",
-    "CqlIntervalOperatorsTest.xml/Width/TimeWidth": "invalid-accepted",
+    "CqlIntervalOperatorsTest.xml/Width/DateTimeWidth": "invalid-refused-at-runtime",
+    "CqlIntervalOperatorsTest.xml/Width/TimeWidth": "invalid-refused-at-runtime",
     "CqlIntervalOperatorsTest.xml/Interval/InvalidIntegerInterval": "invalid-accepted",
     "CqlIntervalOperatorsTest.xml/Interval/InvalidIntegerIntervalA": "invalid-accepted",
     "CqlListOperatorsTest.xml/Sort/simpleSortAsc": "fail",
@@ -327,7 +344,7 @@
     "CqlListOperatorsTest.xml/ProperIn/ProperIn10": "fail",
     "CqlListOperatorsTest.xml/ProperIn/ProperInTimeTrue": "fail",
     "CqlListOperatorsTest.xml/ProperIn/ProperInTimeNull": "fail",
-    "CqlListOperatorsTest.xml/SingletonFrom/SingletonFrom12": "invalid-accepted",
+    "CqlListOperatorsTest.xml/SingletonFrom/SingletonFrom12": "invalid-refused-at-runtime",
     "CqlListOperatorsTest.xml/Slice/SliceAll": "translation-error",
     "CqlListOperatorsTest.xml/Slice/SliceEmpty": "translation-error",
     "CqlListOperatorsTest.xml/Slice/SliceNull": "translation-error",
@@ -347,9 +364,9 @@
     "CqlTypesTest.xml/DateTime/DateTimeUncertain": "fail",
     "CqlTypesTest.xml/Integer/IntegerUpperBoundExcept": "invalid-accepted",
     "CqlTypesTest.xml/Integer/IntegerLowerBoundExcept": "invalid-accepted",
-    "CqlTypesTest.xml/Time/TimeUpperBoundHours": "invalid-refused",
-    "CqlTypesTest.xml/Time/TimeUpperBoundMinutes": "invalid-refused",
-    "CqlTypesTest.xml/Time/TimeUpperBoundSeconds": "invalid-refused",
+    "CqlTypesTest.xml/Time/TimeUpperBoundHours": "invalid-refused-at-translation",
+    "CqlTypesTest.xml/Time/TimeUpperBoundMinutes": "invalid-refused-at-translation",
+    "CqlTypesTest.xml/Time/TimeUpperBoundSeconds": "invalid-refused-at-translation",
     "CqlTypesTest.xml/Time/TimeMillisParsing": "fail",
     "ValueLiteralsAndSelectors.xml/Integer/Integer2Pow31": "invalid-accepted",
     "ValueLiteralsAndSelectors.xml/Integer/IntegerPos2Pow31": "invalid-accepted",
@@ -370,5 +387,6 @@
     "ValueLiteralsAndSelectors.xml/Decimal/Decimal10Pow28": "invalid-accepted",
     "ValueLiteralsAndSelectors.xml/Decimal/DecimalPos10Pow28": "invalid-accepted",
     "ValueLiteralsAndSelectors.xml/Decimal/DecimalNeg10Pow28": "invalid-accepted"
-  }
+  },
+  "gradedInJs": 16
 }

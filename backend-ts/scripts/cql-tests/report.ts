@@ -26,7 +26,8 @@ export const OUTCOMES: readonly Outcome[] = [
   "fail",
   "translation-error",
   "runtime-error",
-  "invalid-refused",
+  "invalid-refused-at-translation",
+  "invalid-refused-at-runtime",
   "invalid-accepted",
   "skipped",
 ];
@@ -102,6 +103,15 @@ export interface Baseline {
    * 1,835 without listing them. 213 entries instead of 1,835, and no information lost.
    */
   notPassing: Record<string, Outcome>;
+  /**
+   * How many cases were compared in JS rather than by CQL's own `~`.
+   *
+   * Tracked because a first draft of the evidence claimed this was ZERO — a claim only possible because
+   * `runnerJson` was not serializing the field, so both the author and a reviewer read `0` off a key that
+   * was never written (review, #398). It is 16. A number that describes how much of the result rests on
+   * the weaker grading path must be recorded, not inferred from an absent field.
+   */
+  gradedInJs: number;
 }
 
 export function notPassing(results: readonly CaseResult[]): Record<string, Outcome> {
@@ -131,6 +141,10 @@ export function regressions(current: readonly CaseResult[], baseline: Baseline):
   const out: string[] = [];
   if (current.length < baseline.total) {
     out.push(`total cases ${current.length} < baseline ${baseline.total} — the corpus shrank`);
+  }
+  const jsNow = current.filter((r) => r.gradedInJs).length;
+  if (baseline.gradedInJs !== undefined && jsNow > baseline.gradedInJs) {
+    out.push(`gradedInJs ${baseline.gradedInJs} → ${jsNow} — more of the result rests on the weaker path`);
   }
 
   const base = baseline.notPassing ?? {};
@@ -175,11 +189,13 @@ export function summary(results: readonly CaseResult[], files: readonly string[]
     `  fail                ${String(c.fail).padStart(5)}   engine computed the wrong value`,
     `  translation-error   ${String(c["translation-error"]).padStart(5)}   our JS translator rejected valid CQL`,
     `  runtime-error       ${String(c["runtime-error"]).padStart(5)}`,
-    `  invalid-refused     ${String(c["invalid-refused"]).padStart(5)}   correctly rejected an invalid expression`,
-    `  invalid-accepted    ${String(c["invalid-accepted"]).padStart(5)}   accepted CQL the corpus says is invalid`,
+    `  invalid-refused     ${String(c["invalid-refused-at-translation"] + c["invalid-refused-at-runtime"]).padStart(5)}   rejected an invalid expression (${c["invalid-refused-at-translation"]} at translation, ${c["invalid-refused-at-runtime"]} at runtime)`,
+    `  invalid-accepted    ${String(c["invalid-accepted"]).padStart(5)}   translated AND evaluated CQL the corpus says is invalid`,
     `  skipped             ${String(c.skipped).padStart(5)}   capability we do not claim`,
     "",
     `  graded ${graded} of ${results.length}; pass rate ${((c.pass / graded) * 100).toFixed(2)}% of graded`,
+    `  of those, ${results.filter((r) => r.gradedInJs).length} compared in JS rather than by CQL \`~\` ` +
+      `(the weaker path — see ADR-060)`,
   ];
   return lines.join("\n");
 }
@@ -204,6 +220,7 @@ export function runnerJson(results: readonly CaseResult[], meta: { pinned: strin
       ...(r.diagnostic !== undefined ? { error: r.diagnostic } : {}),
       ...(r.error !== undefined ? { error: r.error } : {}),
       ...(r.skippedFor !== undefined ? { skippedFor: r.skippedFor } : {}),
+      ...(r.gradedInJs ? { gradedInJs: true } : {}),
       durationMs: r.durationMs,
     })),
   };

@@ -54,23 +54,31 @@ export interface CqlTestCase {
 
 export class ParseError extends Error {}
 
-/** The five predefined XML entities plus numeric references. No entity table to grow. */
+/**
+ * The five predefined XML entities plus numeric references, in ONE pass.
+ *
+ * A first cut chained `.replace()` calls with `&amp;` last, reasoning that this keeps `&amp;lt;` literal.
+ * That half worked — but numeric references were decoded FIRST, so `&#38;lt;` became `&lt;` became `<`:
+ * the same double-decode, one entity form over (review, #398). A single pass cannot double-decode
+ * anything, because each match consumes its own source text.
+ */
+const ENTITY_RE = /&(?:#x([0-9a-fA-F]+)|#(\d+)|(lt|gt|quot|apos|amp));/g;
+const NAMED: Record<string, string> = { lt: "<", gt: ">", quot: '"', apos: "'", amp: "&" };
+
 export function decodeXmlText(s: string): string {
-  return s
-    .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => String.fromCodePoint(parseInt(h, 16)))
-    .replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(parseInt(d, 10)))
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&apos;/g, "'")
-    // `&amp;` LAST, so `&amp;lt;` decodes to the literal text `&lt;` and not to `<`.
-    .replace(/&amp;/g, "&");
+  return s.replace(ENTITY_RE, (_m, hex: string | undefined, dec: string | undefined, name: string | undefined) => {
+    if (hex !== undefined) return String.fromCodePoint(parseInt(hex, 16));
+    if (dec !== undefined) return String.fromCodePoint(parseInt(dec, 10));
+    return NAMED[name!] ?? _m;
+  });
 }
 
 function attrs(tag: string): Record<string, string> {
   const out: Record<string, string> = {};
-  for (const m of tag.matchAll(/([a-zA-Z_][\w.:-]*)\s*=\s*"([^"]*)"/g)) {
-    out[m[1]!] = decodeXmlText(m[2]!);
+  // Both quote styles. The corpus uses only double quotes today, but a single-quoted `invalid='true'`
+  // would otherwise be silently DROPPED, turning an invalid case into a valid one (review, #398).
+  for (const m of tag.matchAll(/([a-zA-Z_][\w.:-]*)\s*=\s*(?:"([^"]*)"|'([^']*)')/g)) {
+    out[m[1]!] = decodeXmlText(m[2] ?? m[3] ?? "");
   }
   return out;
 }

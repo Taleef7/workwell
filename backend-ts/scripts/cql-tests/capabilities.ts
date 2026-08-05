@@ -51,9 +51,18 @@ export interface SkipDecision {
  * Decide whether a case is skipped, given the capability codes it requires (its own, merged with its
  * group's and its file's — `parseTestFile` does that merge).
  */
-export function skipDecision(required: readonly string[]): SkipDecision {
+/**
+ * `unclaimed` is injectable so a test can drive THIS function against a populated map. The first cut
+ * re-implemented the loop inside the test to prove "it is the map that is empty, not the code" — which
+ * tested a copy and could not have caught a bug here (review, #398). That is the codebase's own
+ * vacuous-guard shape, in the test written to argue against it.
+ */
+export function skipDecision(
+  required: readonly string[],
+  unclaimed: ReadonlyMap<string, string> = UNCLAIMED_CAPABILITIES,
+): SkipDecision {
   for (const code of required) {
-    const reason = UNCLAIMED_CAPABILITIES.get(code);
+    const reason = unclaimed.get(code);
     if (reason !== undefined) return { skip: true, capability: code, reason };
   }
   return { skip: false };

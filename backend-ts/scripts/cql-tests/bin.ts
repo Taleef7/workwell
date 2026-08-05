@@ -117,6 +117,7 @@ async function main(argv: string[]): Promise<number> {
       counts: tally(results),
       perFile: perFile(results),
       notPassing: notPassing(results),
+      gradedInJs: results.filter((r) => r.gradedInJs).length,
     };
     writeFileSync(BASELINE, JSON.stringify(baseline, null, 2) + "\n");
     console.log(`  wrote ${path.relative(BACKEND, BASELINE)}`);
@@ -138,6 +139,15 @@ async function main(argv: string[]): Promise<number> {
       // is the point: silently falling back to the weaker comparison is how a gate stops meaning what its
       // name says.
       console.error(`baseline at ${BASELINE} predates per-case keying — regenerate it (--write-baseline)`);
+      return 2;
+    }
+    if (baseline.pinned !== pin) {
+      // A `-Ref master` fetch that happens to still hold 1,835 cases would otherwise be graded against a
+      // stale baseline without a word (review, #398). The pin is the provenance of a published number.
+      console.error(
+        `corpus is at ${pin} but the baseline was written at ${baseline.pinned} — ` +
+          `re-fetch at the pin, or regenerate the baseline in the PR that moves it`,
+      );
       return 2;
     }
     const regs = regressions(results, baseline);

@@ -22,10 +22,16 @@
  * ## Scope, stated
  *
  * This validates the UCUM *grammar* plus a table of atoms and prefixes — enough to be honest, not a
- * complete UCUM implementation. The corpus uses six distinct units (`cm`, `g`, `m`, `g/cm3`, `cm2`, `1`),
- * so the table is generous relative to what is exercised. An unrecognized atom is reported as invalid
- * rather than waved through; if that ever rejects something legitimate, the fix is to add the atom here
- * with the case that needed it.
+ * complete UCUM implementation. An unrecognized atom is reported as invalid rather than waved through; if
+ * that ever rejects something legitimate, the fix is to add the atom here with the case that needed it.
+ *
+ * **A first draft said "the corpus uses six distinct units". It uses at least 18** — `mg`, `ml`,
+ * `[lb_av]`, `a`, `d`, `h`, `min`, `mo`, `ms`, `s`, `wk` and `{eskimo_kisses}` among them (review, #398).
+ * The table covers all of them, and zero of the run's translation errors are UCUM-caused, so the
+ * measurement was never affected — but a stated scope that is off by 3× in the file whose whole argument
+ * is "the table is generous relative to what is exercised" is exactly the kind of asserted-not-derived
+ * claim this codebase keeps catching. `harness.test.ts` now WALKS the corpus and asserts every quantity
+ * unit in it validates, so the claim maintains itself instead of needing to be believed.
  */
 
 /** UCUM prefix symbols (case-sensitive, as UCUM requires). */
