@@ -9,21 +9,21 @@
 > If the highest number here is lower than the highest in `DECISIONS.md`, this file is stale: trust
 > `DECISIONS.md` and regenerate.
 
-> **`·archived` (20 of 58, as of 2026-08-05)** means the BODY moved to
+> **`·archived` (14 of 58, as of 2026-08-05)** means the BODY moved to
 > `docs/archive/DECISIONS_ARCHIVE.md` — it is either superseded or a historical *finding* rather than a
 > decision that governs. `DECISIONS.md` still carries its heading plus a one-line pointer, so every
-> cross-reference resolves. The 38 unmarked titles are the record that still governs: decisions that
+> cross-reference resolves. The 44 unmarked titles are the record that still governs: decisions that
 > constrain what may be done next, and design records for built features.
 
 ## Titles (newest first)
 
 - ADR-059: the engine takes its measure content INJECTED — and the test-edge blocker dissolved rather than being paid
 - ADR-058: QRDA III carries QDM identity, which the FHIR lineage does not have — so the verification bar moves to the FHIR column rather than the label moving to the QDM one
-- ADR-057: The live third-party WebChart path derives the two elements our SQL mappers add — because reading a server's own "female" as not-female is also an inference, and a worse one  ·archived
+- ADR-057: The live third-party WebChart path derives the two elements our SQL mappers add — because reading a server's own "female" as not-female is also an inference, and a worse one
 - ADR-056: A batch import and an import-driven finalize — the two routes the certification loop needed, and the guard that keeps finalize from being a "finish this run" button  ·archived
 - ADR-055: What a QDM datatype becomes in FHIR is read off the artifact's own ELM retrieves — and the importer is now measured against a third party's answers  ·archived
 - ADR-054: CMS130 and CMS165 onboard clean — the credentialed workflow's completion flag was already doing the capped-expansion work ADR-041 built it for  ·archived
-- ADR-053: "the terminology is complete" was only ever a claim about what the bundle DECLARED  ·archived
+- ADR-053: "the terminology is complete" was only ever a claim about what the bundle DECLARED
 - ADR-052: the app-side exclusions are decided and enforced; what the package does with CONTENT is not
 - ADR-051: QRDA Category I import is a mapping into the unchanged engine — and it proved the export only works in real terminology  ·archived
 - ADR-050: QRDA Category I is a patient-DATA document, measured against the HL7 base IG — not the CMS Hospital one
@@ -31,11 +31,11 @@
 - ADR-048: The TRANSLATOR debt is paid; the CLI-surface debt is not, and the split is not a file move  ·archived
 - ADR-047: A measure is onboarded when its MADiE gate is green — vendoring is not onboarding
 - ADR-046: Canonical, improvementNotation and membership all derive from the outcome's own evidence
-- ADR-045: The flip is a WORKFLOW edit, gated by tests that read what the workflow ships — and cms125 goes alone  ·archived
-- ADR-044: One real mammogram is emitted in BOTH vocabularies — dual-stamping is normalization, and the flip gate gets a command  ·archived
+- ADR-045: The flip is a WORKFLOW edit, gated by tests that read what the workflow ships — and cms125 goes alone
+- ADR-044: One real mammogram is emitted in BOTH vocabularies — dual-stamping is normalization, and the flip gate gets a command
 - ADR-043: A whole roster out of the initial population is SURFACED at runtime and ENFORCED at the flip gate — never refused mid-run
-- ADR-042: The WebChart↔official IPP gap is closed by mapping and guarded by a parity gate — not by refusing the configuration (the NUMERATOR gap stays open)  ·archived
-- ADR-041: A capped official expansion is completed at vendor time, from a pinned VSAC release, or not at all  ·archived
+- ADR-042: The WebChart↔official IPP gap is closed by mapping and guarded by a parity gate — not by refusing the configuration (the NUMERATOR gap stays open)
+- ADR-041: A capped official expansion is completed at vendor time, from a pinned VSAC release, or not at all
 - ADR-040: The engine declares the logic it runs; the incremental cache never infers it
 - ADR-039: The shadow diff is a shadow of the runtime, not a study of its own  ·archived
 - ADR-038: The synthetic corpus is verified against the official artifact's own terminology  ·archived
