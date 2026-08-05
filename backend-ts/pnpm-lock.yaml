@@ -32,6 +32,9 @@ importers:
       '@mieweb/cloud-types':
         specifier: workspace:*
         version: link:../external/mieweb-cloud/packages/cloud-types
+      '@workwell/measure-codegen':
+        specifier: workspace:*
+        version: link:packages/measure-codegen
       '@workwell/measure-engine':
         specifier: workspace:*
         version: link:packages/measure-engine
@@ -130,6 +133,14 @@ importers:
       sqlite-vec:
         specifier: ^0.1.6
         version: 0.1.9
+
+  packages/example-consumer:
+    dependencies:
+      '@workwell/measure-engine':
+        specifier: workspace:*
+        version: link:../measure-engine
+
+  packages/measure-codegen: {}
 
   packages/measure-engine:
     dependencies:

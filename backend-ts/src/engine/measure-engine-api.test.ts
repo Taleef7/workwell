@@ -47,9 +47,14 @@ function stripComments(source: string): string {
 }
 
 /**
- * Every `.ts` under `src/`, tests INCLUDED. The old file skipped tests, which was right while it policed
- * an internal entry-point list and is wrong for an API check: a test that deep-imports the package breaks
- * at publish time exactly like production code does.
+ * Every source file under `src/` AND `scripts/`, tests included, `.ts` **and `.mjs`/`.js`**.
+ *
+ * Tests are in because a test that deep-imports the package breaks at publish time exactly like
+ * production code does. **`.mjs` is in because of a defect this test failed to catch** (review, #400):
+ * `scripts/gen-cql.mjs` imported `generateCql` from `@workwell/measure-engine`, and when ADR-062 moved
+ * codegen to its own package that import silently became invalid — `pnpm gen-cql` would have thrown at
+ * runtime. `tsc` does not typecheck `.mjs`, so nothing else in CI could see it. An API check that only
+ * looks at the files the compiler already checks is checking the wrong half.
  */
 function sourceFiles(dir: string, out: string[] = []): string[] {
   for (const name of readdirSync(dir)) {
@@ -64,12 +69,13 @@ function sourceFiles(dir: string, out: string[] = []): string[] {
       continue;
     }
     if (isDir) sourceFiles(full, out);
-    else if (full.endsWith(".ts")) out.push(full);
+    else if (/\.(ts|mjs|js)$/.test(full)) out.push(full);
   }
   return out;
 }
 
-const APP_FILES = sourceFiles(SRC_ROOT).map((file) => ({
+const SCRIPTS_ROOT = resolvePath(BACKEND_ROOT, "scripts");
+const APP_FILES = [...sourceFiles(SRC_ROOT), ...sourceFiles(SCRIPTS_ROOT)].map((file) => ({
   rel: relative(BACKEND_ROOT, file).split(sep).join("/"),
   dir: resolvePath(file, ".."),
   source: stripComments(readFileSync(file, "utf8")),
@@ -144,6 +150,10 @@ test("the package does not export WorkWell measure content back to the app (ADR-
 test("these assertions are non-degenerate — the app really does use the package", () => {
   // Every check above passes trivially against an empty file list or an unparsed index.
   assert.ok(APP_FILES.length >= 200, `walked ${APP_FILES.length} app files — did SRC_ROOT resolve?`);
+  assert.ok(
+    APP_FILES.some((f) => f.rel.endsWith(".mjs")),
+    "no .mjs file was walked — the half `tsc` cannot check is the half this test exists for",
+  );
   assert.ok(IMPORTERS.length >= 20, `only ${IMPORTERS.length} files import the package — did the name change?`);
   assert.ok(EXPORTED_NAMES.has("CqlExecutionEngine"), "index.ts did not parse — the API check is blind");
   assert.ok(EXPORTED_NAMES.size >= 25, `parsed ${EXPORTED_NAMES.size} exports — index.ts did not parse fully`);
