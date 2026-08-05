@@ -910,7 +910,7 @@ shows all services `Up`).
 the MIE frontend image. `.env.example` at repo root mirrors this list (without values). Env vars
 must be verified manually before deploy; the CI workflow does not validate deployment secrets.
 
-### Local HAPI live-tenant recipe (ADR-032 / ADR-033)
+### Local HAPI live-tenant recipe (ADR-032)
 
 The same runtime seam can point at local HAPI today and a configured WebChart host later; switching
 targets is environment-only and requires no code change:
