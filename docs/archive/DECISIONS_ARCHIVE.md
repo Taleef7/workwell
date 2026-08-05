@@ -13,48 +13,50 @@
 
 ## Contents
 
-- ADR-057: The live third-party WebChart path derives the two elements our SQL mappers add — because reading a server's own "female" as not-female is also an inference, and a worse one  
+- [ADR-057: The live third-party WebChart path derives the two elements our SQL mappers add — because reading a server's own "female" as not-female is also an inference, and a worse one  ](#adr-057)
   _Historical finding._
-- ADR-056: A batch import and an import-driven finalize — the two routes the certification loop needed, and the guard that keeps finalize from being a "finish this run" button  
+- [ADR-056: A batch import and an import-driven finalize — the two routes the certification loop needed, and the guard that keeps finalize from being a "finish this run" button  ](#adr-056)
   _Historical finding._
-- ADR-055: What a QDM datatype becomes in FHIR is read off the artifact's own ELM retrieves — and the importer is now measured against a third party's answers  
+- [ADR-055: What a QDM datatype becomes in FHIR is read off the artifact's own ELM retrieves — and the importer is now measured against a third party's answers  ](#adr-055)
   _Historical finding._
-- ADR-054: CMS130 and CMS165 onboard clean — the credentialed workflow's completion flag was already doing the capped-expansion work ADR-041 built it for  
+- [ADR-054: CMS130 and CMS165 onboard clean — the credentialed workflow's completion flag was already doing the capped-expansion work ADR-041 built it for  ](#adr-054)
   _Historical finding._
-- ADR-053: "the terminology is complete" was only ever a claim about what the bundle DECLARED  
+- [ADR-053: "the terminology is complete" was only ever a claim about what the bundle DECLARED  ](#adr-053)
   _Historical finding._
-- ADR-051: QRDA Category I import is a mapping into the unchanged engine — and it proved the export only works in real terminology  
+- [ADR-051: QRDA Category I import is a mapping into the unchanged engine — and it proved the export only works in real terminology  ](#adr-051)
   _Historical finding._
-- ADR-049: QRDA Category I exists, reports population membership only, and says so in the document  
+- [ADR-049: QRDA Category I exists, reports population membership only, and says so in the document  ](#adr-049)
   _Superseded._
-- ADR-048: The TRANSLATOR debt is paid; the CLI-surface debt is not, and the split is not a file move  
+- [ADR-048: The TRANSLATOR debt is paid; the CLI-surface debt is not, and the split is not a file move  ](#adr-048)
   _Historical finding._
-- ADR-045: The flip is a WORKFLOW edit, gated by tests that read what the workflow ships — and cms125 goes alone  
+- [ADR-045: The flip is a WORKFLOW edit, gated by tests that read what the workflow ships — and cms125 goes alone  ](#adr-045)
   _Historical finding._
-- ADR-044: One real mammogram is emitted in BOTH vocabularies — dual-stamping is normalization, and the flip gate gets a command  
+- [ADR-044: One real mammogram is emitted in BOTH vocabularies — dual-stamping is normalization, and the flip gate gets a command  ](#adr-044)
   _Historical finding._
-- ADR-042: The WebChart↔official IPP gap is closed by mapping and guarded by a parity gate — not by refusing the configuration (the NUMERATOR gap stays open)  
+- [ADR-042: The WebChart↔official IPP gap is closed by mapping and guarded by a parity gate — not by refusing the configuration (the NUMERATOR gap stays open)  ](#adr-042)
   _Historical finding._
-- ADR-041: A capped official expansion is completed at vendor time, from a pinned VSAC release, or not at all  
+- [ADR-041: A capped official expansion is completed at vendor time, from a pinned VSAC release, or not at all  ](#adr-041)
   _Historical finding._
-- ADR-039: The shadow diff is a shadow of the runtime, not a study of its own  
+- [ADR-039: The shadow diff is a shadow of the runtime, not a study of its own  ](#adr-039)
   _Historical finding._
-- ADR-038: The synthetic corpus is verified against the official artifact's own terminology  
+- [ADR-038: The synthetic corpus is verified against the official artifact's own terminology  ](#adr-038)
   _Historical finding._
-- ADR-027: Production CMS122/CMS125 evaluate eCQI v14 faithful-subset CQL (not toy day-count rules); literal QICore remains diagnostic — 2026-07  
+- [ADR-027: Production CMS122/CMS125 evaluate eCQI v14 faithful-subset CQL (not toy day-count rules); literal QICore remains diagnostic — 2026-07  ](#adr-027)
   _Superseded._
-- ADR-024: Official CMS122 fidelity via a faithful subset, not the literal QICore CQL — E14 PR-3 (#186)  
+- [ADR-024: Official CMS122 fidelity via a faithful subset, not the literal QICore CQL — E14 PR-3 (#186)  ](#adr-024)
   _Superseded._
-- ADR-018: Standards fidelity is structural/definitional-first; official-CQL execution deferred — E14 (#186)  
+- [ADR-018: Standards fidelity is structural/definitional-first; official-CQL execution deferred — E14 (#186)  ](#adr-018)
   _Superseded._
-- ADR-014: CQL→SQL bridge (charter Q2) — recommendation recorded, decision DEFERRED to Doug  
+- [ADR-014: CQL→SQL bridge (charter Q2) — recommendation recorded, decision DEFERRED to Doug  ](#adr-014)
   _Superseded._
-- ADR-009: Emit eCQM artifacts JVM-free; QRDA III as a structurally-representative stub  
+- [ADR-009: Emit eCQM artifacts JVM-free; QRDA III as a structurally-representative stub  ](#adr-009)
   _Superseded._
-- ADR-001: Single Spring Boot deployable with modular package boundaries  
+- [ADR-001: Single Spring Boot deployable with modular package boundaries  ](#adr-001)
   _Superseded._
 
 ---
+
+<a id="adr-057"></a>
 
 ## ADR-057: The live third-party WebChart path derives the two elements our SQL mappers add — because reading a server's own "female" as not-female is also an inference, and a worse one
 
@@ -137,6 +139,8 @@ the code. Measured on a CPT-as-OID mammogram — the commonest alternate form �
 and the authored engine read COMPLIANT while the derivation did not fire and official read OVERDUE. The
 derivation created the divergence it exists to remove. Both now go through one exported `codingKey`.
 
+<a id="adr-056"></a>
+
 ## ADR-056: A batch import and an import-driven finalize — the two routes the certification loop needed, and the guard that keeps finalize from being a "finish this run" button
 
 **Status:** Accepted (2026-08-03). **Extends ADR-051/ADR-055.**
@@ -217,6 +221,8 @@ document, because the same lineage split appears on the way out (`Invalid HQMF I
 emit no supplemental data at all. Both are now measured rather than assumed —
 `docs/evidence/CVU_C2_SUBMISSION_2026-08-03.md`. The import cap (500 documents) bounds a request that
 parses everything at once; Cypress's own archives are 66–153.
+
+<a id="adr-055"></a>
 
 ## ADR-055: What a QDM datatype becomes in FHIR is read off the artifact's own ELM retrieves — and the importer is now measured against a third party's answers
 
@@ -309,6 +315,8 @@ a bundle that looks complete and retrieves nothing.
   is compared — CMS125's two strata carry their own expected results, and the executor package does not
   surface fqm's stratifier results.
 
+<a id="adr-054"></a>
+
 ## ADR-054: CMS130 and CMS165 onboard clean — the credentialed workflow's completion flag was already doing the capped-expansion work ADR-041 built it for
 
 **Status:** Accepted (2026-07-31).
@@ -333,6 +341,8 @@ discovery, there was nothing new to build.
 full `measure-bundle` provenance. Leave routing untouched. The [credentialed CI run](https://github.com/Taleef7/workwell/actions/runs/30718966633)
 measured CMS130 at 64/64 and CMS165 at 68/68, with 0 unexpected mismatches and 0 errors for each, and
 reproduced both manifests byte-for-byte against what shipped in this PR.
+
+<a id="adr-053"></a>
 
 ## ADR-053: "the terminology is complete" was only ever a claim about what the bundle DECLARED
 
@@ -483,6 +493,8 @@ later.
 
 ---
 
+<a id="adr-051"></a>
+
 ## ADR-051: QRDA Category I import is a mapping into the unchanged engine — and it proved the export only works in real terminology
 
 **Status:** Accepted (2026-07-31). Roadmap M-B. **Not CVU+-validated** — that bar is unmet and this ADR
@@ -610,6 +622,8 @@ client idiom for an absent optional — was treated as "a QRDA was supplied".
 
 ---
 
+<a id="adr-049"></a>
+
 ## ADR-049: QRDA Category I exists, reports population membership only, and says so in the document
 
 > **SUPERSEDED in its central claim by ADR-050 (2026-07-30, same day).** Decisions 1–2 below — that a
@@ -720,6 +734,8 @@ rehearsal that carries what a receiving engine would recalculate from. Nothing p
   entries (decision 4), QRDA **I import** entirely, and the CVU+ loop that would let any of this be
   called validated.
 
+<a id="adr-048"></a>
+
 ## ADR-048: The TRANSLATOR debt is paid; the CLI-surface debt is not, and the split is not a file move
 
 **Status:** Accepted (2026-07-30). Roadmap §7.4 PR-2 / M-C item C1 — the first of the two extraction
@@ -802,6 +818,8 @@ app, which is what restores the two-dependency package story." That was the one 
   is harmless today because the ELM is committed and the package would ship prebuilt — but if
   `packages/measure-engine` should be regenerable standalone, `resources/` belongs beside `scripts/`
   rather than under `src/measure/`. Step 2's call.
+
+<a id="adr-045"></a>
 
 ## ADR-045: The flip is a WORKFLOW edit, gated by tests that read what the workflow ships — and cms125 goes alone
 
@@ -915,6 +933,8 @@ with the authored engine on every one, across COMPLIANT / OVERDUE / EXCLUDED.
   changes nothing for this data — not that either engine is correct. The external check remains the MADiE
   gate, which runs over CMS's test patients rather than ours. **Cypress CVU+ has not run** and stays the
   verification bar (M-B).
+
+<a id="adr-044"></a>
 
 ## ADR-044: One real mammogram is emitted in BOTH vocabularies — dual-stamping is normalization, and the flip gate gets a command
 
@@ -1041,6 +1061,8 @@ authored and not official; a LOINC Observation clears official and not authored;
   dual-stamped mammography, because both mapping sites sit upstream of the live FHIR transport and
   `normalizeWebChartBundle` is untouched by design. For a real WebChart tenant the gap is open exactly as
   ADR-042 consequence 5 describes. Cypress CVU+ remains the verification bar and has not run.
+
+<a id="adr-042"></a>
 
 ## ADR-042: The WebChart↔official IPP gap is closed by mapping and guarded by a parity gate — not by refusing the configuration (the NUMERATOR gap stays open)
 
@@ -1180,6 +1202,8 @@ Measuring changed the picture in three ways:
    evidence, not a fabricated clinical mammogram), and this ADR does not reopen it — but an argument about
    never inventing facts to satisfy an IPP should say plainly that the path being validated invents one.
 
+<a id="adr-041"></a>
+
 ## ADR-041: A capped official expansion is completed at vendor time, from a pinned VSAC release, or not at all
 
 **Status:** Accepted (2026-07-29). Roadmap §7.3 (terminology) + §7.4 PR-9. Nothing routes officially yet.
@@ -1282,6 +1306,8 @@ repo, which is the whole reason the sidecar is gitignored. *Hosting the complete
 CI, but it adds a second artifact to keep in sync with the pin and an owner step to every re-vendor, to
 avoid two HTTP requests. *Raising the cap upstream* — it is documented policy with a licensing reason.
 
+<a id="adr-039"></a>
+
 ## ADR-039: The shadow diff is a shadow of the runtime, not a study of its own
 
 **Status:** Accepted (2026-07-27). Roadmap §7.4, PR-8d. Nothing routes officially yet.
@@ -1362,6 +1388,8 @@ only because the route gated the literal tier on `diffId === "cms122"`, which is
 - **cms125 can enter the shadow period at all**, which the roadmap assumed it already could.
 - Full suite **1517 pass / 0 fail / 14 skipped**; **1506 / 0 / 25** with the terminology sidecars removed;
   MADiE gate 55/55 + 66/66 with the vendored artifact and the evidence report byte-unchanged.
+
+<a id="adr-038"></a>
 
 ## ADR-038: The synthetic corpus is verified against the official artifact's own terminology
 
@@ -1472,6 +1500,8 @@ authored to produce:
 - **The six remaining measures inherit the guard, not the fix.** Each still needs its own corpus data;
   what they no longer need is to rediscover that a plausible code can belong to the wrong set.
 
+<a id="adr-027"></a>
+
 ## ADR-027: Production CMS122/CMS125 evaluate eCQI v14 faithful-subset CQL (not toy day-count rules); literal QICore remains diagnostic — 2026-07
 
 **Status:** Accepted (2026-07-10).
@@ -1487,6 +1517,8 @@ authored to produce:
 
 **Consequences:** Demo can honestly claim eCQI-aligned production evaluation for the two Active CMS measures. Synthetic outcome distributions change (e.g. missing lab in IPP → OVERDUE for CMS122). Reversible by reverting the CQL/registry/builder commits.
 
+<a id="adr-024"></a>
+
 ## ADR-024: Official CMS122 fidelity via a faithful subset, not the literal QICore CQL — E14 PR-3 (#186)
 
 **Status:** Accepted (2026-07-05).
@@ -1500,6 +1532,8 @@ authored to produce:
 - **`metaOverride` seam; official measure kept out of `MEASURES`.** `CqlExecutionEngine.evaluate` gained an optional `metaOverride?: MeasureMeta` so the official-subset measure (`CMS122_OFFICIAL_META`, `cms122-official.ts`) evaluates **without** being registered in the `MEASURES` registry — which is iterated by `seed:scale`, quality backfill, and segment/order code that must not see a diagnostic-only measure.
 
 **Consequences:** The execution diff is **real** (not an estimate) for CMS122, with **no schema change and no new dependency**, and provably no `Outcome Status` drift. **Revisit the literal-QICore path** when `@cqframework/cql` ships a stable multi-model modelinfo release (all artifacts + wiring are identified in the spike record). Known gaps: the **GMI numerator alternative** is not modeled; the execution diff is **CMS122-only** (other measures return the PR-2 estimate / `{ available: false }`). Reversible by reverting the PR; local/dev without imported VSAC rows transparently serves the PR-2 estimate.
+
+<a id="adr-018"></a>
 
 ## ADR-018: Standards fidelity is structural/definitional-first; official-CQL execution deferred — E14 (#186)
 
@@ -1540,6 +1574,8 @@ are **design-first/aspirational** (`docs/standards/country-aware-regulatory-sour
 engine is unmodified. PR-2 adds the official-CQL execution path behind the `ValueSetResolver` seam; non-US
 regulatory sourcing and the version watcher are later work.
 
+<a id="adr-014"></a>
+
 ## ADR-014: CQL→SQL bridge (charter Q2) — recommendation recorded, decision DEFERRED to Doug
 
 - **Date:** 2026-06-19
@@ -1560,6 +1596,8 @@ regulatory sourcing and the version watcher are later work.
 - **Full analysis:** `docs/CQL_TO_SQL_BRIDGE_DECISION_MEMO.md`. When Doug answers Q2, the chosen path
   becomes a normal epic and this ADR is superseded by the decision record.
 
+<a id="adr-009"></a>
+
 ## ADR-009: Emit eCQM artifacts JVM-free; QRDA III as a structurally-representative stub
 
 - **Date:** 2026-06-18
@@ -1570,6 +1608,8 @@ regulatory sourcing and the version watcher are later work.
   - Conformance levels are documented honestly in `docs/STANDARDS_CONFORMANCE.md` (the matrix marks QRDA III "Stub").
   - Full QRDA III IG/Schematron validation, IG-exact codes, and multi-measure aggregation are tracked as future work; a real validator would reintroduce a JVM or a new dependency (a separate, approved decision).
   - Counts reconcile across artifacts by construction (one `countPopulations` source), so MeasureReport and QRDA III agree for the same run.
+
+<a id="adr-001"></a>
 
 ## ADR-001: Single Spring Boot deployable with modular package boundaries
 
