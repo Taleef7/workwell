@@ -194,10 +194,37 @@ stranded; `compile-measures`/`generate:sql` byte-identical; `flip-snapshot --mea
 official IPP, agreeing with authored. **Not done, named:** the `node:` allowlist for the four `*-cli.ts`
 entrypoints (ADR-048's second debt) is untouched — those files stayed app-side, so the debt did not move.
 
-**Next, in order:** **M-C continues** — **C2** (public surface + one consumer outside `backend-ts`,
-`packages/measure-codegen`, the `cql-tests` conformance harness #296, and ADR-048's remaining `node:` CLI
-debt), **C3** (the versioned **compliance API** — `/compliance/{patient}/{measure}?start&end`, Doug's exact
-question shape), **C4** (`@workwell/*` publish + positioning doc). Then **M-D0/D1** (re-aim at US Quality
+**Done 2026-08-05 (M-C / V7 — ADR-060, #296 closed).** The **CQL language conformance suite runs**:
+`cqframework/cql-tests`, 1,835 cases / 16 files, through our translator (`@cqframework/cql` 4.0.0-beta.1)
+and our engine (`cql-execution` 3.3.2) — **1,622 pass · 155 fail · 12 translation-error · 4 runtime-error ·
+11 invalid-refused · 31 invalid-accepted · 0 skipped** (1,633 on the upstream rule), in 11 seconds. **Why this suite:** `cql-execution` 3.3.x has *published*
+results (1,533/81/113/4) but **that run used the JAVA translator**; the JS-translator delta is unpublished
+and this measures it. Our 4 runtime errors are **the same four cases** as theirs. **The lesson worth
+keeping: the harness was the defect, twice, and nearly published.** The first run reported **183**
+translation errors and **171 were ours** — 155 `No default UCUM service available` (`LibraryManager` takes
+the UCUM service as its *fourth* argument and defaults to one that throws) and 16 our own
+`Actual ~ Expected` line failing to type-check. Real figure **12**; caught only because the plan required
+clustering diagnostics before believing the total. **Real findings, all translator/engine, none in our
+measures:** `Slice` unimplemented (10 of 12); **31 of 42 `invalid` cases are translated AND evaluated** (`Exp(1000)`, `Ln(0)`) — relevant because the Studio's CQL editor uses translator
+diagnostics as its authoring gate; **`Long` is silently wrong — `1L + 2L` → `12`**, string concatenation,
+no throw; decimal precision unapplied to aggregates; `Ceiling` not nulling at the Integer boundary. Five
+files are perfect (logical, nullological, queries, aggregate, conditional) — the constructs our measure CQL
+is built from. **Nothing skipped, deliberately** — the SkipList is expressed as *the capability set we
+claim* and is empty, because skipping the weak clusters would delete the finding. The runner **refuses to
+report** unless it parsed all 16 files and 1,835 cases. **ADR-048's `node:` CLI debt is REFRAMED, not
+paid** — its stated basis (`devdb-cli.ts` exporting to production `live-cli.ts`) had expired, and the real
+hazard was that `engine-boundary.test.ts` keyed the `node:` carve-out on the **filename**; it is now keyed
+on **reachability**, derived rather than listed, mutation-checked both ways. **New: `evaluateExpressions`**
+on `@workwell/measure-engine` (data-free execution — the language suite is defined in that subset).
+**Production gap found and NOT fixed here (issue #397):** the runtime translator has no UCUM service
+either, so the ELM Explorer cannot compile any CQL with a quantity literal; `compileCql` now takes an
+optional `validateUnit` and production passes none, so behaviour is byte-identical. Evidence:
+`docs/evidence/CQL_TESTS_2026-08-05.md`.
+
+**Next, in order:** **M-C continues** — **C2 remainder** (public surface + one consumer outside
+`backend-ts`, `packages/measure-codegen`), **C3** (the versioned **compliance API** —
+`/compliance/{patient}/{measure}?start&end`, Doug's exact question shape), **C4** (`@workwell/*` publish +
+positioning doc). Then **M-D0/D1** (re-aim at US Quality
 Core; run the Inferno **US Quality Core Test Kit** against the shim output) and **M-E1** (occupational
 content pack). **Still undiagnosed:** CMS125's 2 `Procedure`-only cases, CMS2's 7 `NUMER 1→0`, and
 CMS130/CMS165 unswept (credentialed vendor workflow). **Deferred, not cancelled:** supplemental data (B8).

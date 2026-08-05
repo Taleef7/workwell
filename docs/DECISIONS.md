@@ -18,6 +18,95 @@
 >
 > **Sequence note:** ADR-033 does not exist — verified absent, and the number must not be reused.
 
+## ADR-060: a translator gap and an engine gap are different findings, so the conformance harness never merges them
+
+**Status:** Accepted (2026-08-05). Roadmap M-C / V7, issue #296. Extends ADR-059 (adds one export to
+`@workwell/measure-engine`). **Corrects ADR-048's remaining item** — see decision 5.
+
+**Context.** Locked decision 2 makes the FHIR-column verification SET the bar. V7 is a member of it, and
+the reason it is worth doing is specific: `cql-execution` 3.3.x — our exact runtime — has **published**
+results (1,533 / 81 / 113 / 4), but that run used the **Java** translator. We translate with
+`@cqframework/cql` 4.0.0-beta.1. **That delta is unpublished**, and measuring it costs a day.
+
+**Decision 1 — `translation-error` is a first-class outcome, never folded into `fail`.** A case can fail
+because the engine computed the wrong value, or because our translator would not compile CQL the corpus
+considers valid. Merging them would attribute a translator gap to `cql-execution`, whose own posted
+results say otherwise. **The difference between those two columns is the entire deliverable**, so the
+runner carries seven outcomes and the report prints all of them.
+
+**Decision 1b — an `invalid` case is EXECUTED when it translates, because that is what the corpus means.**
+The first cut graded `invalid` purely on whether the expression translated; `cql-tests-runner` grades it a
+pass when the request fails for **any** reason, translation or evaluation. Measured: 5 of our 36
+"accepted" cases threw at runtime and are upstream passes, and the finding's headline example was one of
+only 2 `invalid="syntax"` cases, which upstream does not route through that branch at all. Corrected to
+**11 refused (6 at translation, 5 at runtime) / 31 accepted**, and the upstream-comparable total is stated
+as **1,633** alongside our 1,622 (review, #398). A published finding that misstates the rule it is
+measuring against is worse than no finding.
+
+**Decision 2 — a case is graded by CQL, not by JavaScript.** Each becomes
+`define Actual: <expr>` / `define Expected: <output>` / `define Passed: Actual ~ Expected`, executed
+**unfiltered** (no patient). Writing a CQL literal parser in TypeScript would mean re-implementing CQL
+semantics in order to test CQL semantics — the comparison would then share defects with the thing under
+test. This required one small genuine addition to the package: **`evaluateExpressions`**, data-free
+execution. That is a real engine capability (the whole language suite is defined in the data-free subset),
+not a test hook, and it keeps the harness app-side where the translator lives rather than reaching into
+the package or declaring a second `cql-execution` dependency.
+
+**Decision 3 — the SkipList is the CAPABILITY SET we claim, and it is EMPTY.** The corpus declares
+`<capability>` at file, group and test level; issue #296 proposed a list of test names over the known-weak
+clusters. Names rot. More importantly, skipping the weak clusters would delete the finding — `system.long`
+is 33 cases and the `Long` type is where the most serious defect lives. We claim everything, grade all
+1,835, and report 0 skipped. The mechanism exists and is unit-tested against a fixture so it is not
+vacuous, but adding a real entry needs a PR that says why.
+
+**Decision 4 — the CI gate is a PER-CASE baseline, not a threshold and not per file.** "≥N passing" goes
+green while a translator upgrade trades 30 passes for 30 different ones. The first cut fixed that with
+per-FILE tallies — and **review (#398) found the identical hole one level down**: inside a single XML
+file, one case can go `pass`→`fail` while another goes `fail`→`pass`, leaving every count identical and CI
+green. `regressions()` now compares by `file/group/name`. Only the **non-passing** cases are stored (213
+rather than 1,835), which loses nothing: a case absent from that map was passing, so "used to pass, now
+does not" stays decidable for all 1,835. A change between two non-passing outcomes is reported without
+failing, because the evidence document enumerates those buckets and silent drift between them would leave
+it stale. A pre-#398 baseline is **refused** rather than silently compared with the weaker rule.
+
+**Decision 5 — ADR-048's `node:` CLI debt is REFRAMED, not paid; and its stated basis had expired.**
+ADR-048 planned to split library values out of the four `*-cli.ts` files because `devdb-cli.ts` exported
+to five modules *"including production `live-cli.ts`"*. **Measured 2026-08-05: `live-cli.ts` now takes
+`DEVDB_WHITELIST` from `report-table.ts`, and every remaining importer of the four is a test or a `bin.ts`
+shim.** The split therefore buys nothing. The real hazard was elsewhere and untouched by it:
+`engine-boundary.test.ts` keyed its `node:` carve-out on the **filename** (`/-cli\.ts$/`), so a module the
+worker request path genuinely reaches would have passed merely by being named that way. It is now keyed on
+**reachability** — the request path is *derived* (any engine module imported by a production file outside
+`src/engine/`, plus its closure), never listed, so it cannot drift. Mutation-checked both directions.
+
+**Two harness defects are recorded in the evidence rather than quietly fixed, because they nearly became
+the published headline.** The first full run reported **183 translation errors; 171 were ours.** 155 were
+`No default UCUM service available` — `LibraryManager` takes the UCUM service as its **fourth** argument
+and defaults to one that throws, so every quantity literal failed to translate; 16 were our own
+`Actual ~ Expected` line refusing to type-check when the two sides have different static types. The real
+figure is **12**. Publishing 183 as "the JS translator delta" would have been wrong by a factor of 15,
+and the only reason it was caught is that the plan required clustering the diagnostics before believing
+the number.
+
+**A production gap this uncovered, deliberately NOT fixed here.** The runtime translator has no UCUM
+service either, so the Studio's ELM Explorer **cannot compile any CQL containing a quantity literal**.
+`compileCql` now takes an optional `validateUnit` and the harness passes one; production passes none, so
+its behaviour is byte-identical. Wiring it in is a real behaviour change and belongs in its own PR — filed
+as a follow-up issue.
+
+**Consequences.** `pnpm cql-tests` + a CI job mirroring `official-cases` (pinned fetch, cached, out of
+`pnpm test` so an offline local run stays green). The runner **refuses to report** unless it parsed all 16
+files and 1,835 cases with every case in exactly one bucket — a conformance harness that grades a subset
+publishes a flattering number, which is the specific way this could be worse than useless. Results:
+**1,622 pass / 155 fail / 12 translation-error / 4 runtime-error / 11 invalid-refused / 31 invalid-accepted
+/ 0 skipped** — 1,835 exactly, and **1,633 on the upstream rule**. **16 cases are compared in JS rather
+than by CQL `~`**; that count is printed, serialized and baselined, because a first draft claimed it was
+zero after reading a field `runnerJson` never wrote. `scripts/**/*.ts` is now inside `tsconfig.json`'s
+`include` — the harness that produces a published number was not being typechecked at all, which is how a
+`Baseline` literal missing a required field reached CI. Findings and limits in
+`docs/evidence/CQL_TESTS_2026-08-05.md`. Phase 2 — a dev-only `$cql` operation so the stock
+`cql-tests-runner` drives us, the entry ticket to posting official vendor results — is not built.
+
 ## ADR-059: the engine takes its measure content INJECTED — and the test-edge blocker dissolved rather than being paid
 
 **Status:** Accepted (2026-08-05). **Answers the question ADR-052 explicitly deferred.** Roadmap M-C / C1,

@@ -44,17 +44,97 @@ const ENGINE_ROOT = fileURLToPath(new URL("./", import.meta.url)).replace(/[\\/]
  * boundary test. A file here reaching for the CQL runtime directly would be evaluating measures beside
  * the engine instead of through it, so it stays a violation.
  */
-const ALLOWED_BARE: { prefix: string; note: string; onlyIn?: RegExp }[] = [
+const ALLOWED_BARE: { prefix: string; note: string; onlyIn?: "outside-request-path" }[] = [
   { prefix: "@workwell/measure-engine", note: "the extracted eval core (ADR-059) — the only way to evaluate" },
   {
-    // ARCHITECTURE's "portable across every @mieweb/cloud target — file I/O lives only at the CLI
-    // edge" is an invariant, so enforce it rather than assert it: node built-ins may appear only in
-    // the CLI entrypoints, never in a module the worker request path can reach.
+    // ARCHITECTURE's "portable across every @mieweb/cloud target — file I/O lives only at the CLI edge"
+    // is an invariant, so enforce it rather than assert it. The SCOPE of the carve-out is computed below
+    // from reachability, not from the filename — see REQUEST_PATH.
     prefix: "node:",
-    note: "Node built-ins — CLI entrypoints only, so the library surface stays Workers-portable",
-    onlyIn: /-cli\.ts$/,
+    note: "Node built-ins — outside the request path only, so the worker surface stays portable",
+    onlyIn: "outside-request-path",
   },
 ];
+
+/**
+ * The `node:` carve-out, keyed on REACHABILITY rather than on a filename (ADR-060 §5).
+ *
+ * It used to be `onlyIn: /-cli\.ts$/`. That permitted `node:fs` in any file whose NAME ended `-cli.ts`,
+ * so a module the worker request path genuinely reaches would have passed merely by being named that way
+ * — the guard's shape did not match the invariant it was cited for. ADR-048 planned to fix this by
+ * splitting library values out of the four CLI files; measurement (2026-08-05) showed that plan rested on
+ * a fact that had expired — it said `devdb-cli.ts` exports to production `live-cli.ts`, but `live-cli.ts`
+ * now takes `DEVDB_WHITELIST` from `report-table.ts`, and every remaining importer of the four is a test
+ * or a `bin.ts` shim. So the file split buys nothing and this does.
+ *
+ * **The request path is derived, not listed.** Any engine module imported by a production file OUTSIDE
+ * `src/engine/` is an entry point, and everything reachable from those entry points is request-path.
+ * A hand-maintained list would drift the moment a route imported something new; this cannot.
+ *
+ * `*-bin.ts` files are excluded as SOURCES: they are `tsx` process entrypoints run from `package.json`
+ * scripts, never imported by the worker. Including them would make every CLI reachable by definition and
+ * collapse the distinction this computes.
+ *
+ * **This is a TRADE, not a pure tightening, and saying so is the actual argument for it** (review, #398).
+ * The old rule let only `*-cli.ts` use `node:`; this one lets ANY unreachable engine module — measured,
+ * that newly includes `cql/codegen/generate-sql.ts`, `ingress/index.ts` (a barrel, i.e. library surface),
+ * `ingress/webchart/hapi-transform.ts` and `report-table.ts`. What makes it the better rule is that the
+ * moment a route imports one of those, the guard tightens automatically; the filename rule would have
+ * gone on permitting `node:` in a file the worker had started reaching.
+ *
+ * Known under-approximations, none live today: an extensionless or `.js`-specified import of a `.ts` file
+ * truncates the closure at the `endsWith(".ts")` check; a template-literal specifier resolves to nothing
+ * and is skipped; and seeds come only from `src/**`, so an engine module reached solely from
+ * `packages/` or `scripts/` would read as unreachable.
+ */
+function computeRequestPath(): ReadonlySet<string> {
+  const SRC_ROOT = resolvePath(ENGINE_ROOT, "..");
+  const entries: string[] = [];
+
+  const walkAll = (dir: string, out: string[]): void => {
+    for (const name of readdirSync(dir)) {
+      if (name === "node_modules") continue;
+      const full = `${dir}/${name}`;
+      if (statSync(full).isDirectory()) walkAll(full, out);
+      else if (name.endsWith(".ts") && !name.endsWith(".test.ts") && !name.endsWith("-bin.ts")) out.push(full);
+    }
+  };
+
+  const appFiles: string[] = [];
+  walkAll(SRC_ROOT, appFiles);
+
+  for (const file of appFiles) {
+    const rel = relative(ENGINE_ROOT, file);
+    const insideEngine = !rel.startsWith("..") && !rel.startsWith(`.${sep}..`);
+    if (insideEngine) continue; // engine-internal edges are followed by the closure, not seeded by it
+    for (const m of stripComments(readFileSync(file, "utf8")).matchAll(SPECIFIER_RE)) {
+      const spec = m[2] ?? "";
+      if (!spec.startsWith(".")) continue;
+      const target = resolvePath(dirname(file), spec);
+      const r = relative(ENGINE_ROOT, target);
+      if (!r.startsWith("..") && !r.startsWith(`.${sep}..`)) entries.push(target);
+    }
+  }
+
+  const seen = new Set<string>();
+  const queue = [...entries];
+  while (queue.length > 0) {
+    const file = queue.pop()!;
+    if (seen.has(file) || !file.endsWith(".ts")) continue;
+    let source: string;
+    try {
+      source = stripComments(readFileSync(file, "utf8"));
+    } catch {
+      continue; // an unresolvable import is a containment violation, reported by the main test
+    }
+    seen.add(file);
+    for (const m of source.matchAll(SPECIFIER_RE)) {
+      const spec = m[2] ?? "";
+      if (spec.startsWith(".")) queue.push(resolvePath(dirname(file), spec));
+    }
+  }
+  return seen;
+}
 
 /**
  * Every module-specifier position TypeScript/ESM/CJS offers, including backticks so a template
@@ -74,6 +154,13 @@ function stripComments(source: string): string {
     .filter((line) => !/^\s*(?:\/\/|\*)/.test(line))
     .join("\n");
 }
+
+/**
+ * Computed once. Declared HERE rather than beside `computeRequestPath` because that function closes over
+ * `SPECIFIER_RE` and `stripComments`, which are `const` and therefore in the temporal dead zone until
+ * this point — calling it earlier throws.
+ */
+const REQUEST_PATH = computeRequestPath();
 
 /** Returns one violation label per offending import in `file` (empty = clean). */
 function findBoundaryViolations(file: string, source: string): string[] {
@@ -103,8 +190,11 @@ function findBoundaryViolations(file: string, source: string): string[] {
     );
     if (!allowed) {
       found.push(`"${specifier}" is not on the engine dependency allowlist`);
-    } else if (allowed.onlyIn && !allowed.onlyIn.test(file)) {
-      found.push(`"${specifier}" is allowed only in ${allowed.onlyIn} (${allowed.note})`);
+    } else if (allowed.onlyIn === "outside-request-path" && REQUEST_PATH.has(resolvePath(file))) {
+      found.push(
+        `"${specifier}" is in a module the worker request path REACHES (${relative(ENGINE_ROOT, file)}) — ` +
+          `${allowed.note}`,
+      );
     }
   }
   return found;
@@ -141,7 +231,10 @@ test("the boundary matcher catches every escape form (guard self-test)", () => {
     ["non-normalized path", 'import { getStores } from "./../../../stores/factory.ts";'],
     ["template-literal specifier", "const m = await import(`../../stores/${name}.ts`);"],
     ["undeclared third-party dep", 'import axios from "axios";'],
-    ["node built-in outside a CLI", 'import { readFileSync } from "node:fs";'],
+    // `node:` is NOT in this list any more. Every entry here is checked against `here`
+    // (`cql/probe.ts`, a path that does not exist), and a file that does not exist is by construction
+    // not reachable from the request path — so under the ADR-060 §5 rule it is legitimately allowed
+    // `node:`. The two directions of that rule are asserted explicitly below, against real paths.
     // ADR-059: the CQL runtime belongs to the package now. A file here reaching for it directly would be
     // evaluating measures BESIDE the engine rather than through it — the shape the extraction exists to
     // prevent, and one that no other assertion in this file would catch.
@@ -176,11 +269,24 @@ test("the boundary matcher catches every escape form (guard self-test)", () => {
     );
   }
 
-  // The allowlist's onlyIn scoping must actually scope.
+  // The `node:` carve-out must scope by REACHABILITY, both ways (ADR-060 §5).
   assert.deepEqual(
     findBoundaryViolations(`${ENGINE_ROOT}/cli/evaluate-measure-cli.ts`, 'import { readFileSync } from "node:fs";'),
     [],
-    "node built-ins must be permitted in a *-cli.ts entrypoint",
+    "node built-ins must be permitted in a CLI the request path cannot reach",
+  );
+  // The half the old filename rule got wrong: a module the request path DOES reach must be refused even
+  // though nothing about its name says so. `cql/workwell-engine.ts` is reached from `wiring/`.
+  assert.ok(
+    findBoundaryViolations(`${ENGINE_ROOT}/cql/workwell-engine.ts`, 'import { readFileSync } from "node:fs";').length > 0,
+    "node built-ins must be REFUSED in a request-path module",
+  );
+  // And the converse of the old rule: naming a request-path file `*-cli.ts` must no longer buy it a pass.
+  // Floor raised from 5 to 15 against an actual 21: a closure that half-collapsed would have cleared 5
+  // and reported a green boundary over files it never inspected (review, #398).
+  assert.ok(
+    REQUEST_PATH.size >= 15,
+    `the request-path closure found only ${REQUEST_PATH.size} files — expected ~21; it is not reaching the tree`,
   );
   // The extraction debt this used to carve out is GONE: `cql-translator.ts` moved to `src/measure/`
   // (ADR-048), so the ELM Explorer's translator is no longer reachable from the engine tree and
