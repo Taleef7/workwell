@@ -14,7 +14,7 @@ import type { MeasureStore, MeasureRecord } from "../stores/measure-store.ts";
 import type { MeasureSpec, TestFixture } from "./measure-catalog.ts";
 import { compileCql } from "./cql-translator.ts";
 import { validateTests } from "./measure-read-models.ts";
-import { generateCql, type Rule, type CodegenBindings } from "@workwell/measure-engine";
+import { generateCql, type Rule, type CodegenBindings } from "@workwell/measure-codegen";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
 
 export interface MeasureAuthoringDeps {
