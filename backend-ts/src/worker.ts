@@ -30,6 +30,7 @@ import { handleTenants } from "./routes/tenants.ts";
 import { handleQuality } from "./routes/quality.ts";
 import { handleIdentity } from "./routes/identity.ts";
 import { handleCompliance } from "./routes/compliance.ts";
+import { handleComplianceApi } from "./routes/compliance-api.ts";
 import { handleSegments } from "./routes/segments.ts";
 import { handleOutcomes } from "./routes/outcomes.ts";
 import { handleImmunizationForecast } from "./routes/immunization.ts";
@@ -284,6 +285,12 @@ async function route(req: Request, env: Env, ctx: CloudExecutionContext): Promis
   // Segments — risk-group CRUD + membership preview (#183 E11.3). Writes ADMIN-gated, audited.
   const segmentsResponse = await handleSegments(req, env, actor);
   if (segmentsResponse) return segmentsResponse;
+
+  // The versioned compliance API (M-C / C3, ADR-061) — the contract MIE consumes. Placed BEFORE the
+  // roster so the `/api/v1/` prefix is matched by its own handler rather than falling through the
+  // internal surface; the two paths cannot collide, but the ordering makes that structural.
+  const complianceApiResponse = await handleComplianceApi(req, env, principalRole, actor);
+  if (complianceApiResponse) return complianceApiResponse;
 
   // Compliance roster — individual compliance status grid by panel (#189 E10.2).
   const complianceResponse = await handleCompliance(req, env);

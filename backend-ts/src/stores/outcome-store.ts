@@ -44,6 +44,13 @@ export interface MeasureOutcomeRow {
 
 /** Per-measure outcome history row for one employee (MCP get_employee / check_compliance). */
 export interface EmployeeOutcomeRow {
+  /**
+   * The run that produced this outcome. Added for the compliance API (ADR-061): a row exists as soon as
+   * the evaluation loop writes it, which is BEFORE the run reaches a terminal status — and before
+   * `/finalize` in the QRDA import flow. A public contract must not serve a mid-run row as the persisted
+   * answer, and it cannot tell without this (review, #399).
+   */
+  runId: string;
   measureId: string;
   status: string;
   evaluationPeriod: string;

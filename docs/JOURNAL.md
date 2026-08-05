@@ -1,5 +1,43 @@
 # Journal
 
+## 2026-08-05 (M-C / C3) — the compliance API exists, and it refuses to answer an absence (branch `feat/compliance-api`)
+
+`GET /api/v1/compliance/{subject}/{measure}?start&end&mode=latest|preview` — locked decision 5's *"contract
+MIE consumes"*, and Doug's question shape verbatim. ADR-061; documented as a contract in
+`docs/COMPLIANCE_API.md` with a stability statement.
+
+**Three surfaces nearly answered this already and none was a contract:** the roster grid is a UI read model
+shaped by the frontend, MCP's `check_compliance` is Claude-facing and role-gated, and a run answers for a
+population and writes records. C1 made the engine constructible without our content; this makes it
+consumable.
+
+**The design decision that carries the most weight is `populationsSource`.** The owner chose an eCQM-native
+response — population membership booleans, not a bare status. But for a WorkWell-**authored** measure only
+`initialPopulation` is measured; the other four are *inferred from `OutcomeStatus`*. Nothing in the numbers
+distinguishes that from an official artifact's own population vector, so the response names its own source,
+read off the **same field** `membershipFor` branches on — the label cannot disagree with the numbers it
+describes.
+
+**`latest` with nothing persisted is a 404, not an empty 200.** "No run has covered this subject" and "this
+subject is compliant" must never be confusable; the body says which absence it is and points at `preview`.
+That is the single easiest way to make a compliance API dangerous.
+
+**No second evidence reader.** `membershipFor` and `officialReportIdentity` are the same functions the
+MeasureReport and QRDA III exporters use. A new API is exactly where a second reader gets written by
+accident, and ADR-031 exists because two readers that can disagree is a defect class. The load-bearing test
+asserts the API's population block agrees with `buildIndividualMeasureReport` **for the same record**,
+against the exporter's real output rather than a hand-written expectation.
+
+**A plan correction worth recording, because it inverted a security claim.** The plan said `authorize.ts`
+falls through to *permit* and that a new rule was therefore mandatory. Verified false: `RULES` ends with a
+generic `/api/**` → `AUTHENTICATED` pair, so the route was already gated and the permit default applies
+only to non-`/api` paths. No rule added; a test asserts the 401 anyway, since `RULES` is first-match-wins
+and this route returns per-subject clinical status.
+
+`preview` routes through `routedEngineForEnv` and composes its bundle the way the run pipeline's EMPLOYEE
+scope does, so preview and a run see identical input — and a test asserts a preview writes **nothing**
+rather than trusting the `persisted: false` label. 13 route tests; suite **1876 → 1892**, 0 fail.
+
 ## 2026-08-05 (M-C / V7) — the CQL conformance suite runs, and the first number it produced was 15× wrong in our favour (branch `feat/cql-conformance-harness`)
 
 **1,835 cases / 16 files / 11 seconds: 1,622 pass · 155 fail · 12 translation-error · 4 runtime-error ·
