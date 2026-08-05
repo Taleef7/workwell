@@ -48,12 +48,28 @@ subject"* and *"this subject is compliant"* must not be confusable. The 404 body
 and points at `preview`. This is the single easiest way to make a compliance API dangerous, and it is
 worth spending an error code on.
 
-**Decision 4 — `preview` routes through `routedEngineForEnv`, not a bare authored engine.** On a stack
-where cms125 runs CMS's published artifact, previewing against authored logic would answer a different
-question than a run answers — a confidently wrong answer, worse than no answer. It also composes its
-bundle the way the run pipeline's EMPLOYEE scope does (`seededTargetFor` + `buildSyntheticBundle`), so
-preview and a run see identical input; `bundleFor`'s own docblock warns against building it a second,
-subtly different way.
+**Decision 4 — `preview` routes through `routedEngineForEnv`, and REFUSES on a live stack.** Same engine
+as a run: previewing cms125 against authored logic where production runs CMS's artifact would answer a
+different question — a confidently wrong answer. **The first draft of this decision also claimed "preview
+and a run see identical input", and review proved that false on exactly the stack the API exists to
+serve** (#399): the run pipeline's `bundleFor` uses the patient's real `liveBundle` when WebChart is
+configured, while preview composed a bundle from `seededTargetFor` + `buildSyntheticBundle` — which picks
+the intended outcome from a hash of the subject id and manufactures data to produce it. That is
+deterministic demo playback, and reporting it as an evaluation through the contract MIE consumes is the
+worst thing this route could do. Preview now returns **501 on a WebChart-configured deployment**, naming
+the reason. A live composition path is a different design with different failure modes and belongs in its
+own change; refusing is a limitation, answering would have been a lie.
+
+**Decision 6 — every answered request writes a `COMPLIANCE_API_READ` audit event, 404s included.** MCP
+records one for every tool call with its sensitivity label, and `check_compliance` is this same question
+over this same data. Without it there would be no record that anyone read a patient's compliance status
+through a public contract — a larger gap than the role matrix. Best-effort at the response boundary: an
+audit failure logs loudly rather than turning a correct read into a 500.
+
+**Decision 7 — `period` is the ANSWER's measurement window; `filter` echoes the caller's bounds.** The
+first cut returned the request filter as `period`, undocumented, directly above
+`provenance.evaluationPeriod`. In a contract where a field may never change meaning, that had to be fixed
+before merge rather than after.
 
 **Decision 5 — no new evidence reader.** `membershipFor` and `officialReportIdentity`
 (`src/fhir/measure-report.ts`) are the same functions the MeasureReport and QRDA III exporters use. Two
@@ -61,6 +77,24 @@ readers of `evidence_json` that can disagree is the defect class ADR-031 exists 
 is exactly where a second one gets written by accident. A test asserts the API's population block agrees
 with `buildIndividualMeasureReport`'s output **for the same record**, against the exporter's real output
 rather than a hand-written expectation.
+
+**Three review findings, all P2, all fixed — and one of them is the field's own failure mode (#399).**
+
+1. **`populationsSource` could lie.** It tested whether `evidence.official.populationResults` was
+   *present*; `membershipFor` branches on whether `officialMembership` can *parse* it, and a malformed
+   vector falls back to status-derived booleans. The label would have read `official-evidence` over
+   inferred numbers — precisely the misleading signal the field exists to prevent. Both now derive from
+   the same `officialMembership` call and are incapable of disagreeing.
+2. **`latest` served mid-run rows.** An outcome exists before its run is terminal and before `/finalize`
+   in the import flow, so the contract could publish a partial result that a later `FAILED` would make
+   wrong. `latest` now requires `COMPLETED` or `PARTIAL_FAILURE`, reports `runId`, and its 404 carries
+   `pendingRuns` rather than pretending nothing was found. This needed `runId` on
+   `EmployeeOutcomeRow` — a projection widening in both adapters, no DDL.
+3. **`preview` let a read-only role trigger compute.** `authorize.ts` states the viewer posture as "may
+   GET but never write … or trigger compute", and a GET costing a CQL evaluation is the loophole in that
+   sentence. `preview` is now gated to CASE_MANAGER/ADMIN — the bar MCP's `check_compliance` already sets
+   for the same question over the same data, so there is one answer to "who may ask the engine about a
+   patient" rather than a quieter second one.
 
 **A plan correction, recorded because it inverted a security claim.** The plan asserted that
 `authorize.ts` falls through to *permit* for an unmatched path, and therefore that a new rule was

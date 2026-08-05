@@ -150,17 +150,19 @@ export class PgOutcomeStore implements OutcomeStore {
 
   async listOutcomesForEmployee(subjectId: string, limit: number): Promise<EmployeeOutcomeRow[]> {
     const { rows } = await this.pool.query<{
+      run_id: string;
       measure_id: string;
       status: string;
       evaluation_period: string;
       evaluated_at: Date | string;
       evidence_json: unknown;
     }>(
-      `SELECT measure_id, status, evaluation_period, evaluated_at, evidence_json
+      `SELECT run_id, measure_id, status, evaluation_period, evaluated_at, evidence_json
          FROM ${T} WHERE subject_id = $1 ORDER BY evaluated_at DESC LIMIT $2`,
       [subjectId, Math.max(1, limit)],
     );
     return rows.map((r) => ({
+      runId: r.run_id,
       measureId: r.measure_id,
       status: r.status,
       evaluationPeriod: r.evaluation_period,

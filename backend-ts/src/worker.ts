@@ -289,7 +289,7 @@ async function route(req: Request, env: Env, ctx: CloudExecutionContext): Promis
   // The versioned compliance API (M-C / C3, ADR-061) — the contract MIE consumes. Placed BEFORE the
   // roster so the `/api/v1/` prefix is matched by its own handler rather than falling through the
   // internal surface; the two paths cannot collide, but the ordering makes that structural.
-  const complianceApiResponse = await handleComplianceApi(req, env);
+  const complianceApiResponse = await handleComplianceApi(req, env, principalRole, actor);
   if (complianceApiResponse) return complianceApiResponse;
 
   // Compliance roster — individual compliance status grid by panel (#189 E10.2).
