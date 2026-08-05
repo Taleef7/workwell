@@ -1,5 +1,62 @@
 # Journal
 
+## 2026-08-05 (M-C / V7) — the CQL conformance suite runs, and the first number it produced was 15× wrong in our favour (branch `feat/cql-conformance-harness`)
+
+**1,835 cases / 16 files / 11 seconds: 1,622 pass · 155 fail · 12 translation-error · 4 runtime-error ·
+36 invalid-accepted · 6 invalid-refused · 0 skipped.** Issue #296, open since 2026-07-15, closed. Full
+write-up in `docs/evidence/CQL_TESTS_2026-08-05.md`; the decisions are ADR-060.
+
+**Why this suite and not more tests generally.** `cql-execution` 3.3.x — our exact runtime — already has a
+published report card (1,533 / 81 / 113 / 4). **That run used the Java translator.** We translate with
+`@cqframework/cql` 4.0.0-beta.1, and that delta is unpublished. One directly comparable signal came out
+clean: **our 4 runtime errors are the same four cases as their 4 errors.**
+
+**The thing worth remembering from today: the harness was the defect, twice, and nearly published.** The
+first full run reported **183 translation errors** — a headline number, and 171 of them were ours.
+**155 were `No default UCUM service available`**: `LibraryManager` takes the UCUM service as its *fourth*
+argument and defaults to one that throws, so every expression containing `1.0'cm'` failed to translate.
+**16 more were our own grading line** — `define Passed: Actual ~ Expected` will not type-check when the two
+sides have different static types. The real figure is **12**. It was caught only because the plan required
+clustering the diagnostics before believing the total, which took one command and saved publishing a
+number wrong by a factor of 15.
+
+**Findings that are real** (and all in the translator/engine, none in our measures):
+- **`Slice` is unimplemented in the JS translator** — 10 of the 12 remaining translation errors.
+- **36 of 42 `invalid` cases translate anyway.** Integer literals out of range (`Ceiling(2147483648)`),
+  `Exp(1000)`, `Ln(0)`, `minimum Boolean`. A permissive translator accepts malformed measure logic at
+  authoring time — directly relevant to the Studio's CQL editor, which uses translator diagnostics as its
+  compile gate.
+- **`Long` is broken and silent: `1L + 2L` → `12`.** String concatenation, not addition. No throw, no
+  warning, a number-shaped wrong answer. `Sum({6L,2L,3L,4L,5L})` → `62345`. Independently confirms what
+  the connectathon research predicted. No WorkWell measure uses `Long`, and this is a reason not to start.
+- **Decimal precision is not applied** to aggregates (`PopulationStdDev` at full IEEE-754 width), and
+  **`Ceiling` does not null at the Integer boundary**.
+
+**Five files are perfect** — logical, nullological, queries, aggregate, conditional. Those cover the
+constructs our own measure CQL is actually built from.
+
+**Nothing is skipped, deliberately.** #296 proposed a SkipList over the known-weak clusters; skipping them
+would have deleted the finding (`system.long` is 33 cases and holds the worst defect) and reported a
+better rate over a smaller denominator. The mechanism exists — expressed as *the capability set we claim*,
+the corpus's own vocabulary rather than a rotting list of test names — and is unit-tested against a
+fixture so it is not vacuous. It is empty.
+
+**A production gap fell out of it, and is NOT fixed here:** the runtime translator has no UCUM service
+either, so the Studio's ELM Explorer cannot compile any CQL containing a quantity literal. `compileCql`
+now accepts an optional `validateUnit`; production passes none, so its behaviour is byte-identical.
+Wiring it in is a real behaviour change and gets its own PR.
+
+**ADR-048's `node:` CLI debt is reframed, not paid — its stated basis had expired.** It planned to split
+library values out of the four `*-cli.ts` files because `devdb-cli.ts` exported to production
+`live-cli.ts`; measured today, `live-cli.ts` takes `DEVDB_WHITELIST` from `report-table.ts` and every
+remaining importer of the four is a test or a `bin.ts` shim. The real hazard was that
+`engine-boundary.test.ts` keyed its `node:` carve-out on the **filename**, so a request-path module merely
+*named* `*-cli.ts` would have passed. Now keyed on **reachability**, derived rather than listed.
+Mutation-checked both ways.
+
+Suite **1863 → 1876**, 0 fail. The runner refuses to report at all unless it parsed all 16 files and all
+1,835 cases with every case in exactly one bucket.
+
 ## 2026-08-05 (M-C / C1) — `@workwell/measure-engine` exists, and the question that blocked it for two weeks was the cheap one to answer (branch `feat/measure-engine-extraction`)
 
 The extraction has been promised since 2026-07-24 and deferred twice. It was never a lifting problem:

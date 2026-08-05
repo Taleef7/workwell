@@ -1,0 +1,159 @@
+{
+  "pinned": "727219f492c0c84bf7a9c3589b1214e3b4e60667",
+  "total": 1835,
+  "counts": {
+    "pass": 1622,
+    "fail": 155,
+    "translation-error": 12,
+    "runtime-error": 4,
+    "invalid-refused": 6,
+    "invalid-accepted": 36,
+    "skipped": 0
+  },
+  "perFile": {
+    "CqlAggregateFunctionsTest.xml": {
+      "pass": 46,
+      "fail": 4,
+      "translation-error": 0,
+      "runtime-error": 0,
+      "invalid-refused": 0,
+      "invalid-accepted": 0,
+      "skipped": 0
+    },
+    "CqlAggregateTest.xml": {
+      "pass": 9,
+      "fail": 0,
+      "translation-error": 0,
+      "runtime-error": 0,
+      "invalid-refused": 0,
+      "invalid-accepted": 0,
+      "skipped": 0
+    },
+    "CqlArithmeticFunctionsTest.xml": {
+      "pass": 177,
+      "fail": 43,
+      "translation-error": 0,
+      "runtime-error": 4,
+      "invalid-refused": 0,
+      "invalid-accepted": 12,
+      "skipped": 0
+    },
+    "CqlComparisonOperatorsTest.xml": {
+      "pass": 243,
+      "fail": 16,
+      "translation-error": 0,
+      "runtime-error": 0,
+      "invalid-refused": 2,
+      "invalid-accepted": 0,
+      "skipped": 0
+    },
+    "CqlConditionalOperatorsTest.xml": {
+      "pass": 9,
+      "fail": 0,
+      "translation-error": 0,
+      "runtime-error": 0,
+      "invalid-refused": 0,
+      "invalid-accepted": 0,
+      "skipped": 0
+    },
+    "CqlDateTimeOperatorsTest.xml": {
+      "pass": 305,
+      "fail": 8,
+      "translation-error": 1,
+      "runtime-error": 0,
+      "invalid-refused": 1,
+      "invalid-accepted": 3,
+      "skipped": 0
+    },
+    "CqlErrorsAndMessagingOperatorsTest.xml": {
+      "pass": 3,
+      "fail": 0,
+      "translation-error": 0,
+      "runtime-error": 0,
+      "invalid-refused": 0,
+      "invalid-accepted": 1,
+      "skipped": 0
+    },
+    "CqlIntervalOperatorsTest.xml": {
+      "pass": 367,
+      "fail": 40,
+      "translation-error": 0,
+      "runtime-error": 0,
+      "invalid-refused": 0,
+      "invalid-accepted": 4,
+      "skipped": 0
+    },
+    "CqlListOperatorsTest.xml": {
+      "pass": 200,
+      "fail": 31,
+      "translation-error": 10,
+      "runtime-error": 0,
+      "invalid-refused": 0,
+      "invalid-accepted": 1,
+      "skipped": 0
+    },
+    "CqlLogicalOperatorsTest.xml": {
+      "pass": 39,
+      "fail": 0,
+      "translation-error": 0,
+      "runtime-error": 0,
+      "invalid-refused": 0,
+      "invalid-accepted": 0,
+      "skipped": 0
+    },
+    "CqlNullologicalOperatorsTest.xml": {
+      "pass": 22,
+      "fail": 0,
+      "translation-error": 0,
+      "runtime-error": 0,
+      "invalid-refused": 0,
+      "invalid-accepted": 0,
+      "skipped": 0
+    },
+    "CqlQueryTests.xml": {
+      "pass": 12,
+      "fail": 0,
+      "translation-error": 0,
+      "runtime-error": 0,
+      "invalid-refused": 0,
+      "invalid-accepted": 0,
+      "skipped": 0
+    },
+    "CqlStringOperatorsTest.xml": {
+      "pass": 80,
+      "fail": 2,
+      "translation-error": 0,
+      "runtime-error": 0,
+      "invalid-refused": 0,
+      "invalid-accepted": 0,
+      "skipped": 0
+    },
+    "CqlTypeOperatorsTest.xml": {
+      "pass": 34,
+      "fail": 0,
+      "translation-error": 1,
+      "runtime-error": 0,
+      "invalid-refused": 0,
+      "invalid-accepted": 0,
+      "skipped": 0
+    },
+    "CqlTypesTest.xml": {
+      "pass": 29,
+      "fail": 3,
+      "translation-error": 0,
+      "runtime-error": 0,
+      "invalid-refused": 3,
+      "invalid-accepted": 4,
+      "skipped": 0
+    },
+    "ValueLiteralsAndSelectors.xml": {
+      "pass": 47,
+      "fail": 8,
+      "translation-error": 0,
+      "runtime-error": 0,
+      "invalid-refused": 0,
+      "invalid-accepted": 11,
+      "skipped": 0
+    }
+  }
+}

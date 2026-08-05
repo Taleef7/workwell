@@ -1,5 +1,76 @@
 # Architecture Decision Records
 
+## ADR-060: a translator gap and an engine gap are different findings, so the conformance harness never merges them
+
+**Status:** Accepted (2026-08-05). Roadmap M-C / V7, issue #296. Extends ADR-059 (adds one export to
+`@workwell/measure-engine`). **Corrects ADR-048's remaining item** — see decision 5.
+
+**Context.** Locked decision 2 makes the FHIR-column verification SET the bar. V7 is a member of it, and
+the reason it is worth doing is specific: `cql-execution` 3.3.x — our exact runtime — has **published**
+results (1,533 / 81 / 113 / 4), but that run used the **Java** translator. We translate with
+`@cqframework/cql` 4.0.0-beta.1. **That delta is unpublished**, and measuring it costs a day.
+
+**Decision 1 — `translation-error` is a first-class outcome, never folded into `fail`.** A case can fail
+because the engine computed the wrong value, or because our translator would not compile CQL the corpus
+considers valid. Merging them would attribute a translator gap to `cql-execution`, whose own posted
+results say otherwise. **The difference between those two columns is the entire deliverable**, so the
+runner carries seven outcomes (`pass`, `fail`, `translation-error`, `runtime-error`, `invalid-refused`,
+`invalid-accepted`, `skipped`) and the report prints all of them.
+
+**Decision 2 — a case is graded by CQL, not by JavaScript.** Each becomes
+`define Actual: <expr>` / `define Expected: <output>` / `define Passed: Actual ~ Expected`, executed
+**unfiltered** (no patient). Writing a CQL literal parser in TypeScript would mean re-implementing CQL
+semantics in order to test CQL semantics — the comparison would then share defects with the thing under
+test. This required one small genuine addition to the package: **`evaluateExpressions`**, data-free
+execution. That is a real engine capability (the whole language suite is defined in the data-free subset),
+not a test hook, and it keeps the harness app-side where the translator lives rather than reaching into
+the package or declaring a second `cql-execution` dependency.
+
+**Decision 3 — the SkipList is the CAPABILITY SET we claim, and it is EMPTY.** The corpus declares
+`<capability>` at file, group and test level; issue #296 proposed a list of test names over the known-weak
+clusters. Names rot. More importantly, skipping the weak clusters would delete the finding — `system.long`
+is 33 cases and the `Long` type is where the most serious defect lives. We claim everything, grade all
+1,835, and report 0 skipped. The mechanism exists and is unit-tested against a fixture so it is not
+vacuous, but adding a real entry needs a PR that says why.
+
+**Decision 4 — the CI gate is a per-file baseline, not a threshold.** "≥N passing" goes green while a
+translator upgrade trades 30 passes for 30 different ones. `regressions()` compares per file and treats
+any drop in `pass`, or any rise in `fail`/`runtime-error`/`invalid-accepted`, as a failure. An improvement
+is reported and requires regenerating the baseline in the same PR.
+
+**Decision 5 — ADR-048's `node:` CLI debt is REFRAMED, not paid; and its stated basis had expired.**
+ADR-048 planned to split library values out of the four `*-cli.ts` files because `devdb-cli.ts` exported
+to five modules *"including production `live-cli.ts`"*. **Measured 2026-08-05: `live-cli.ts` now takes
+`DEVDB_WHITELIST` from `report-table.ts`, and every remaining importer of the four is a test or a `bin.ts`
+shim.** The split therefore buys nothing. The real hazard was elsewhere and untouched by it:
+`engine-boundary.test.ts` keyed its `node:` carve-out on the **filename** (`/-cli\.ts$/`), so a module the
+worker request path genuinely reaches would have passed merely by being named that way. It is now keyed on
+**reachability** — the request path is *derived* (any engine module imported by a production file outside
+`src/engine/`, plus its closure), never listed, so it cannot drift. Mutation-checked both directions.
+
+**Two harness defects are recorded in the evidence rather than quietly fixed, because they nearly became
+the published headline.** The first full run reported **183 translation errors; 171 were ours.** 155 were
+`No default UCUM service available` — `LibraryManager` takes the UCUM service as its **fourth** argument
+and defaults to one that throws, so every quantity literal failed to translate; 16 were our own
+`Actual ~ Expected` line refusing to type-check when the two sides have different static types. The real
+figure is **12**. Publishing 183 as "the JS translator delta" would have been wrong by a factor of 15,
+and the only reason it was caught is that the plan required clustering the diagnostics before believing
+the number.
+
+**A production gap this uncovered, deliberately NOT fixed here.** The runtime translator has no UCUM
+service either, so the Studio's ELM Explorer **cannot compile any CQL containing a quantity literal**.
+`compileCql` now takes an optional `validateUnit` and the harness passes one; production passes none, so
+its behaviour is byte-identical. Wiring it in is a real behaviour change and belongs in its own PR — filed
+as a follow-up issue.
+
+**Consequences.** `pnpm cql-tests` + a CI job mirroring `official-cases` (pinned fetch, cached, out of
+`pnpm test` so an offline local run stays green). The runner **refuses to report** unless it parsed all 16
+files and 1,835 cases with every case in exactly one bucket — a conformance harness that grades a subset
+publishes a flattering number, which is the specific way this could be worse than useless. Results:
+**1,622 pass / 155 fail / 12 translation-error / 4 runtime-error / 36 invalid-accepted / 0 skipped**;
+findings and limits in `docs/evidence/CQL_TESTS_2026-08-05.md`. Phase 2 — a dev-only `$cql` operation so
+the stock `cql-tests-runner` drives us, the entry ticket to posting official vendor results — is not built.
+
 ## ADR-059: the engine takes its measure content INJECTED — and the test-edge blocker dissolved rather than being paid
 
 **Status:** Accepted (2026-08-05). **Answers the question ADR-052 explicitly deferred.** Roadmap M-C / C1,

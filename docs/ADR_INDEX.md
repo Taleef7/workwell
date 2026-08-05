@@ -11,6 +11,7 @@
 
 ## Titles (newest first)
 
+- ADR-060: a translator gap and an engine gap are different findings, so the conformance harness never merges them
 - ADR-059: the engine takes its measure content INJECTED — and the test-edge blocker dissolved rather than being paid
 - ADR-058: QRDA III carries QDM identity, which the FHIR lineage does not have — so the verification bar moves to the FHIR column rather than the label moving to the QDM one
 - ADR-057: The live third-party WebChart path derives the two elements our SQL mappers add — because reading a server's own "female" as not-female is also an inference, and a worse one

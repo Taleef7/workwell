@@ -19,6 +19,7 @@ import {
   CqlTranslator,
   createModelInfoProvider,
   createLibrarySourceProvider,
+  createUcumService,
   stringAsSource,
   // @ts-expect-error — @cqframework/cql ships its own bundled types via subpath
 } from "@cqframework/cql/cql-to-elm";
@@ -30,14 +31,44 @@ const { systemModelInfoXml, fhirModelInfoXml, fhirHelpersCql } = resources as {
   fhirHelpersCql: string;
 };
 
-function manager(): unknown {
+/**
+ * Validates a UCUM unit symbol: `null` when valid, a message when not. The convention is the
+ * translator's, not ours.
+ *
+ * **Absent by default, and that is a KNOWN GAP rather than a preference.** `LibraryManager` takes the
+ * UCUM service as its fourth argument and falls back to one that throws `No default UCUM service
+ * available` — so today the runtime translator (the ELM Explorer, `routes/measures.ts`) **cannot compile
+ * any CQL containing a quantity literal**. Discovered while building the V7 conformance harness
+ * (2026-08-05), where it accounted for 155 of 183 apparent translation failures. Wiring a validator into
+ * production is a real fix and a real behaviour change, so it is deliberately NOT bundled into the
+ * harness PR; the harness passes its own. See the follow-up issue named in ADR-060.
+ */
+export type ValidateUnit = (unit: string) => string | null;
+
+function manager(validateUnit?: ValidateUnit): unknown {
   const mm = new ModelManager();
   mm.modelInfoLoader.registerModelInfoProvider(
     createModelInfoProvider((name: string) =>
       name === "System" ? stringAsSource(systemModelInfoXml) : name === "FHIR" ? stringAsSource(fhirModelInfoXml) : null,
     ),
   );
-  const lm = new LibraryManager(mm);
+  // Positional: (modelManager, cqlCompilerOptions, libraryCache, lazyUcumService, elmLibraryReaderProvider).
+  // `undefined` for the middle two keeps their own defaults, so the no-validator path is byte-identical
+  // to the single-argument call this replaced.
+  const lm = validateUnit
+    ? new LibraryManager(
+        mm,
+        undefined,
+        undefined,
+        createUcumService(
+          // Conversion is never requested during translation; refuse rather than invent a factor.
+          (_v: number, from: string, to: string) => {
+            throw new Error(`unit conversion is not provided by this translator (${from} → ${to})`);
+          },
+          validateUnit,
+        ),
+      )
+    : new LibraryManager(mm);
   lm.librarySourceLoader.registerProvider(
     createLibrarySourceProvider((name: string) => (name === "FHIRHelpers" ? stringAsSource(fhirHelpersCql) : null)),
   );
@@ -125,10 +156,10 @@ export function reconstructCql(elm: unknown): string {
 
 /** Translate CQL text → ELM JSON in-process (no JVM). Never throws on CQL errors —
  *  errors come back as diagnostics with `ok: false` so the UI can render them. */
-export function compileCql(cqlText: string): CompileResult {
+export function compileCql(cqlText: string, opts: { validateUnit?: ValidateUnit } = {}): CompileResult {
   let elm: unknown;
   try {
-    const json = (CqlTranslator.fromText(cqlText, manager()) as { toJson(): string }).toJson();
+    const json = (CqlTranslator.fromText(cqlText, manager(opts.validateUnit)) as { toJson(): string }).toJson();
     elm = JSON.parse(json);
   } catch (err) {
     return {
