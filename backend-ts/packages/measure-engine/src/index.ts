@@ -50,6 +50,11 @@ export {
 } from "./cql/cql-execution-engine.ts";
 
 export {
+  evaluateExpressions,
+  type EvaluateExpressionsOptions,
+} from "./cql/evaluate-expressions.ts";
+
+export {
   StoreValueSetResolver,
   buildCodeService,
   type CqlCode,

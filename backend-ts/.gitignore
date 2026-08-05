@@ -6,3 +6,7 @@ dist/
 # Spike: heavy/extractable CQL resources + generated ELM (see spike/README.md to regenerate)
 spike/cqf-resources/
 spike/elm-js/
+
+# V7 conformance corpus (cqframework/cql-tests) — fetched at a pin by scripts/fetch-cql-tests.ps1
+.cql-tests/
+.cql-tests-results/
