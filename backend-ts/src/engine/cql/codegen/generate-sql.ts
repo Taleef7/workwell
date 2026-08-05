@@ -33,7 +33,7 @@
  * Descriptive only (ADR-008): the SQL classifies rows for the shim's demo compliance API; CQL
  * remains the sole `Outcome Status` authority in the product.
  */
-import { validateRule, type Rule } from "./generate-cql.ts";
+import { validateRule, type Rule } from "@workwell/measure-engine";
 
 export interface GenerateSqlInput {
   measureId: string;

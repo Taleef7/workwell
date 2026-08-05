@@ -18,7 +18,7 @@ import type { EvalStateStore } from "../../stores/eval-state-store.ts";
 import type { OutcomeStore } from "../../stores/outcome-store.ts";
 import { MEASURES, type MeasureMeta } from "../../engine/cql/measure-registry.ts";
 import { ELM_LIBRARIES } from "../../engine/cql/elm/index.ts";
-import { isVsacOid } from "../../engine/cql/composite-value-set-resolver.ts";
+import { isVsacOid } from "@workwell/measure-engine";
 import { hashBundle } from "./canonical-hash.ts";
 import { computeLogicVersion } from "./logic-version.ts";
 import { computeNextTransition } from "./next-transition.ts";

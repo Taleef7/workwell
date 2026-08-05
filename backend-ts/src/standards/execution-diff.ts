@@ -7,7 +7,7 @@
  */
 import type { OfficialMeasureReference } from "./reference-types.ts";
 import type { EmployeeProfile } from "../engine/synthetic/employee-catalog.ts";
-import type { ValueSetResolver, CqlCode } from "../engine/cql/value-set-resolver.ts";
+import type { ValueSetResolver, CqlCode } from "@workwell/measure-engine";
 import { CMS122_OFFICIAL_META, enrichForOfficialCms122, type Expansions } from "./cms122-official.ts";
 import { buildSyntheticBundle } from "../engine/synthetic/fhir-bundle-builder.ts";
 import { deriveExamConfig } from "../engine/synthetic/exam-config.ts";

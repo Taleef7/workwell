@@ -35,7 +35,7 @@
 import type { RunStore } from "../stores/run-store.ts";
 import type { OutcomeStore, RecordOutcomeInput } from "../stores/outcome-store.ts";
 import type { CaseEventStore } from "../stores/case-event-store.ts";
-import type { EvaluateMeasureBinding } from "../engine/evaluate-measure.ts";
+import type { EvaluateMeasureBinding } from "@workwell/measure-engine";
 import { EMPLOYEES, type EmployeeProfile } from "../engine/synthetic/employee-catalog.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";

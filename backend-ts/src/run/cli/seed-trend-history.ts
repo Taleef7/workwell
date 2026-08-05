@@ -22,8 +22,9 @@
  * This module is side-effect-free + importable by tests; `bin.ts` is the runnable entry.
  */
 import { getStores, type StoresEnv } from "../../stores/factory.ts";
-import { CqlExecutionEngine } from "../../engine/cql/cql-execution-engine.ts";
+import { CqlExecutionEngine } from "@workwell/measure-engine";
 import { backfillTrendHistory } from "../backfill-trend-history.ts";
+import { createWorkwellEngine } from "../../engine/cql/workwell-engine.ts";
 
 export const USAGE = "Usage: pnpm seed:trend-history [--weeks <n>] [--as-of YYYY-MM-DD]";
 
@@ -87,7 +88,7 @@ export async function main(argv: string[]): Promise<number> {
     const env = await buildEnv();
     const stores = await getStores(env);
     const summary = await backfillTrendHistory(
-      { runStore: stores.runs, outcomeStore: stores.outcomes, auditStore: stores.events, engine: new CqlExecutionEngine() },
+      { runStore: stores.runs, outcomeStore: stores.outcomes, auditStore: stores.events, engine: createWorkwellEngine() },
       parsed,
     );
     const backend = (process.env.DATABASE_URL ?? "").trim() ? "postgres" : "sqlite";

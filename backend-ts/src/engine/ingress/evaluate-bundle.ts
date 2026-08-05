@@ -4,9 +4,10 @@
  * node:fs, so it stays portable across every @mieweb/cloud target (Workers included). File I/O
  * lives only at the CLI edge. The core engine is untouched.
  */
-import { CqlExecutionEngine } from "../cql/cql-execution-engine.ts";
+import { CqlExecutionEngine } from "@workwell/measure-engine";
 import { MEASURES } from "../cql/measure-registry.ts";
-import type { EvaluateMeasureBinding, MeasureOutcome } from "../evaluate-measure.ts";
+import type { EvaluateMeasureBinding, MeasureOutcome } from "@workwell/measure-engine";
+import { createWorkwellEngine } from "../cql/workwell-engine.ts";
 
 export interface EvaluateBundleOptions {
   /** YYYY-MM-DD; defaults to today (the engine's default for single, resolved explicitly for batch). */
@@ -36,7 +37,7 @@ const today = (): string => new Date().toISOString().slice(0, 10);
 // Lazily-created shared default engine — constructing it loads FHIRHelpers ELM once.
 let defaultEngine: EvaluateMeasureBinding | undefined;
 const engineOf = (opts?: EvaluateBundleOptions): EvaluateMeasureBinding =>
-  opts?.engine ?? (defaultEngine ??= new CqlExecutionEngine());
+  opts?.engine ?? (defaultEngine ??= createWorkwellEngine());
 
 /** Evaluate a single JSON/FHIR bundle against a measure. No DB. */
 export function evaluateBundle(

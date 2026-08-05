@@ -4,7 +4,7 @@
 import { readFileSync, writeFileSync, readdirSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { generateCql } from "../src/engine/cql/codegen/generate-cql.ts";
+import { generateCql } from "@workwell/measure-engine";
 import { MEASURES } from "../src/engine/cql/measure-registry.ts";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");

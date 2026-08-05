@@ -10,14 +10,15 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { CqlExecutionEngine } from "../../engine/cql/cql-execution-engine.ts";
+import { CqlExecutionEngine } from "@workwell/measure-engine";
 import { buildSyntheticBundle } from "../../engine/synthetic/fhir-bundle-builder.ts";
 import { EMPLOYEES } from "../../engine/synthetic/employee-catalog.ts";
 import { MEASURE_BINDINGS } from "../../engine/synthetic/measure-bindings.ts";
 import type { ExamConfig } from "../../engine/synthetic/exam-config.ts";
 import { BOUNDARY_SAFE, computeNextTransition } from "./next-transition.ts";
+import { createWorkwellEngine } from "../../engine/cql/workwell-engine.ts";
 
-const engine = new CqlExecutionEngine();
+const engine = createWorkwellEngine();
 const emp = EMPLOYEES[0]!;
 const EVAL = "2026-06-15";
 

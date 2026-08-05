@@ -4,21 +4,13 @@
  * emitted by scripts/compile-measures.mjs. `periodMonths` is the Measurement Period
  * window the Java engine builds: 12 for the season-based flu measure (its CQL uses
  * `occurrence during "Measurement Period"`), single-day (0) for the rest.
+ *
+ * ADR-059: this file is WorkWell's measure CONTENT and stays app-side. The `MeasureMeta` *shape* is the
+ * engine's, so it is re-exported from `@workwell/measure-engine` here — every existing importer keeps its
+ * single `from "./measure-registry.ts"` line, and the package ships none of the catalog below.
  */
-export interface MeasureMeta {
-  id: string;
-  name: string;
-  /** ELM file under src/engine/cql/elm (without .elm.json). */
-  library: string;
-  /** Months before the eval date the Measurement Period starts (0 = single-day). */
-  periodMonths: number;
-  /** ELM library used in value-set-expansion mode (E3.2); falls back to `library` when absent. */
-  expansionLibrary?: string;
-  /** Value-set URLs the expansion-mode library references (expanded into the CodeService). */
-  valueSets?: string[];
-  /** Regulatory jurisdiction this measure's spec belongs to (E14 / #186). Defaults to "US" when absent. */
-  jurisdiction?: string;
-}
+export type { MeasureMeta } from "@workwell/measure-engine";
+import type { MeasureMeta } from "@workwell/measure-engine";
 
 export const MEASURES: Record<string, MeasureMeta> = {
   audiogram: { id: "audiogram", name: "Audiogram", library: "AnnualAudiogramCompleted-1.0.0", periodMonths: 0, expansionLibrary: "AnnualAudiogramCompletedVS-1.0.0", valueSets: ["urn:workwell:vs:audiogram-procedures"] },

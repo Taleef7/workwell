@@ -19,7 +19,7 @@ import type {
   EvaluateMeasureBinding,
   EvaluateMeasureInput,
   MeasureOutcome,
-} from "../engine/evaluate-measure.ts";
+} from "@workwell/measure-engine";
 
 export class UnconfiguredEngine implements EvaluateMeasureBinding {
   constructor(private readonly target: CloudTarget = "local") {}

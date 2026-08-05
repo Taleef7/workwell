@@ -18,11 +18,12 @@ import { SqliteRunStore } from "../stores/sqlite/run-store-sqlite.ts";
 import { SqliteOutcomeStore } from "../stores/sqlite/outcome-store-sqlite.ts";
 import { SqliteCaseStore } from "../stores/sqlite/case-store-sqlite.ts";
 import { SqliteCaseEventStore } from "../stores/sqlite/case-event-store-sqlite.ts";
-import { CqlExecutionEngine } from "../engine/cql/cql-execution-engine.ts";
+import { CqlExecutionEngine } from "@workwell/measure-engine";
 import { EMPLOYEES } from "../engine/synthetic/employee-catalog.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { programTrend, programOverview } from "../program/program-read-models.ts";
 import { backfillTrendHistory } from "./backfill-trend-history.ts";
+import { createWorkwellEngine } from "../engine/cql/workwell-engine.ts";
 
 const created: string[] = [];
 async function freshDb() {
@@ -47,7 +48,7 @@ function deps(db: Awaited<ReturnType<typeof freshDb>>) {
     runStore: new SqliteRunStore(db),
     outcomeStore: new SqliteOutcomeStore(db),
     auditStore: new SqliteCaseEventStore(db), // required — the backfill must audit its writes
-    engine: new CqlExecutionEngine(),
+    engine: createWorkwellEngine(),
   };
 }
 

@@ -89,7 +89,7 @@ import type {
   ExpressionResult,
   MeasureOutcome,
   OutcomeStatus,
-} from "../engine/evaluate-measure.ts";
+} from "@workwell/measure-engine";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { loadOfficialArtifact, type OfficialArtifact } from "./official-artifacts.ts";
 import { officialMeasureSemantics } from "./official-measure-semantics.ts";

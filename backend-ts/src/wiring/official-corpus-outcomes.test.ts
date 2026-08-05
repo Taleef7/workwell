@@ -24,12 +24,13 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import type { TargetOutcome } from "../engine/synthetic/exam-config.ts";
-import { CqlExecutionEngine } from "../engine/cql/cql-execution-engine.ts";
+import { CqlExecutionEngine } from "@workwell/measure-engine";
 import { bundledEcqmValueSetResolver } from "../engine/cql/bundled-ecqm-expansions.ts";
 import { directSyntheticGenerator, webChartRealisticGenerator } from "../run/scale-generator.ts";
 import { officialMeasureExecutor } from "./official-executor-adapter.ts";
 import { officialTerminologyExpander, loadOfficialTerminology } from "./official-terminology.ts";
 import { loadOfficialArtifact } from "./official-artifacts.ts";
+import { createWorkwellEngine } from "../engine/cql/workwell-engine.ts";
 
 const EVALUATION_DATE = "2026-07-27";
 
@@ -79,7 +80,7 @@ for (const generator of SOURCES) {
   for (const [measureId, expected] of Object.entries(EXPECTED)) {
     test(`official ${measureId} scores the ${generator.kind} corpus as authored`, { skip }, async () => {
       const executor = officialMeasureExecutor({ expand: officialTerminologyExpander(loadOfficialArtifact) });
-      const authored = new CqlExecutionEngine({ valueSetResolver: bundledEcqmValueSetResolver });
+      const authored = createWorkwellEngine({ valueSetResolver: bundledEcqmValueSetResolver });
       const actual: Record<string, string> = {};
       const authoredOutcomes: Record<string, string> = {};
 

@@ -1,22 +1,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { CqlExecutionEngine } from "../engine/cql/cql-execution-engine.ts";
-import {
-  CMS122_OFFICIAL_META,
-  CMS122_DIABETES_OID,
-  CMS122_HBA1C_OID,
-  CMS122_QUALIFYING_VISIT_OIDS,
-  CMS122_HOSPICE_OID,
-  CMS122_PALLIATIVE_OID,
-  enrichForOfficialCms122,
-  type Expansions,
-} from "./cms122-official.ts";
-import type { ValueSetResolver } from "../engine/cql/value-set-resolver.ts";
+import { CqlExecutionEngine } from "@workwell/measure-engine";
+import { CMS122_OFFICIAL_META, CMS122_DIABETES_OID, CMS122_HBA1C_OID, CMS122_QUALIFYING_VISIT_OIDS, CMS122_HOSPICE_OID, CMS122_PALLIATIVE_OID, enrichForOfficialCms122, type Expansions, } from "./cms122-official.ts";
+import type { ValueSetResolver } from "@workwell/measure-engine";
 import { buildSyntheticBundle } from "../engine/synthetic/fhir-bundle-builder.ts";
 import { deriveExamConfig } from "../engine/synthetic/exam-config.ts";
 import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
 import { EMPLOYEES } from "../engine/synthetic/employee-catalog.ts";
 import { seededTargetFor } from "../run/distribution.ts";
+import { createWorkwellEngine } from "../engine/cql/workwell-engine.ts";
 
 const DIABETES_CODE = { code: "44054006", system: "http://snomed.info/sct" };
 const HBA1C_CODE = { code: "4548-4", system: "http://loinc.org" };
@@ -53,7 +45,7 @@ function bundle(parts: {
 }
 
 async function evalOfficial(b: unknown, evalDate = "2026-06-30") {
-  const engine = new CqlExecutionEngine({ valueSetResolver: fixtureResolver });
+  const engine = createWorkwellEngine({ valueSetResolver: fixtureResolver });
   return engine.evaluate({ measureId: "cms122_official", metaOverride: CMS122_OFFICIAL_META, patientBundle: b, evaluationDate: evalDate });
 }
 function define(o: Awaited<ReturnType<typeof evalOfficial>>, name: string): unknown {
@@ -150,7 +142,7 @@ test("enrichment appends the diabetes VSAC coding without removing the urn:workw
 // subjects (age-out, hospice, GMI) for the diagnostic fidelity ladder. ADR-008 is preserved by
 // determinism (same bundle twice → same Outcome Status) and by the enricher never writing to stores.
 test("ADR-008 guard: production cms122 is deterministic on a dual-coded synthetic bundle", async () => {
-  const engine = new CqlExecutionEngine();
+  const engine = createWorkwellEngine();
   for (const emp of EMPLOYEES.slice(0, 30)) {
     const { base } = cms122Bundle(emp.externalId);
     const a = await engine.evaluate({ measureId: "cms122", patientBundle: base, evaluationDate: "2026-06-30" });

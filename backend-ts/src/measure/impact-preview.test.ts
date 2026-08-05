@@ -14,11 +14,12 @@ import { RUN_STORE_FLOOR_DDL } from "../stores/sqlite/schema.ts";
 import { SqliteRunStore } from "../stores/sqlite/run-store-sqlite.ts";
 import { SqliteCaseStore } from "../stores/sqlite/case-store-sqlite.ts";
 import { SqliteCaseEventStore } from "../stores/sqlite/case-event-store-sqlite.ts";
-import { CqlExecutionEngine } from "../engine/cql/cql-execution-engine.ts";
+import { CqlExecutionEngine } from "@workwell/measure-engine";
 import { EMPLOYEES } from "../engine/synthetic/employee-catalog.ts";
 import type { MeasureRecord } from "../stores/measure-store.ts";
 import { previewImpact, ImpactPreviewError, type ImpactPreviewDeps } from "./impact-preview.ts";
 import { bucketPeriodForMeasure } from "../run/compliance-period.ts";
+import { createWorkwellEngine } from "../engine/cql/workwell-engine.ts";
 
 const dbPath = join(tmpdir(), `workwell-impact-${crypto.randomUUID()}.sqlite`);
 let db: import("@mieweb/cloud").CloudDatabase;
@@ -51,7 +52,7 @@ function audiogram(): MeasureRecord {
 before(async () => {
   db = await createSqliteD1(dbPath);
   await db.exec(RUN_STORE_FLOOR_DDL.replace(/\n/g, " "));
-  deps = { cases: new SqliteCaseStore(db), events: new SqliteCaseEventStore(db), engine: new CqlExecutionEngine(), employees: population };
+  deps = { cases: new SqliteCaseStore(db), events: new SqliteCaseEventStore(db), engine: createWorkwellEngine(), employees: population };
 });
 after(() => {
   try {

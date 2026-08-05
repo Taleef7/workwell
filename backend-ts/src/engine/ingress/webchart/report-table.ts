@@ -3,7 +3,7 @@
  * (`evaluate:webchart-devdb` over committed fixtures, `evaluate:webchart-live` over a real HTTP
  * endpoint). Extracted from `devdb-cli.ts` unchanged — the devdb report must stay byte-identical.
  */
-import type { OutcomeStatus } from "../../evaluate-measure.ts";
+import type { OutcomeStatus } from "@workwell/measure-engine";
 
 /**
  * Measures the dev-DB sample can exercise (real LOINC/HCPCS present + reconciled).
