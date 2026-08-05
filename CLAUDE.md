@@ -221,10 +221,27 @@ either, so the ELM Explorer cannot compile any CQL with a quantity literal; `com
 optional `validateUnit` and production passes none, so behaviour is byte-identical. Evidence:
 `docs/evidence/CQL_TESTS_2026-08-05.md`.
 
-**Next, in order:** **M-C continues** — **C2 remainder** (public surface + one consumer outside
-`backend-ts`, `packages/measure-codegen`), **C3** (the versioned **compliance API** —
-`/compliance/{patient}/{measure}?start&end`, Doug's exact question shape), **C4** (`@workwell/*` publish +
-positioning doc). Then **M-D0/D1** (re-aim at US Quality
+**Done 2026-08-05 (M-C / C3 + C2 — ADR-061, ADR-062). M-C is one step from complete.**
+**C3:** `GET /api/v1/compliance/{subject}/{measure}?start&end&mode=latest|preview` — locked decision 5's
+contract, documented in `docs/COMPLIANCE_API.md` with a stability statement. The response carries
+**`populationsSource`**, because for an authored measure the population booleans are *inferred from status*
+and nothing in the numbers says so; it is derived from the same `officialMembership` call `membershipFor`
+branches on, so the label cannot disagree with the numbers. `latest` with nothing persisted is a **404**,
+never an empty 200 — "no run covered this subject" and "this subject is compliant" must not be confusable —
+and it requires a **finalized** run, since rows exist mid-run. **Review killed the original preview design:**
+it composed a SYNTHETIC bundle on every stack, so on a WebChart deployment it was demo playback reported as
+an evaluation; it now returns **501** there. Every request writes a `COMPLIANCE_API_READ` audit event.
+**C2:** `@workwell/measure-codegen` (zero deps — `generate-cql.ts` had zero imports, so it never shared code
+with the engine, only a directory) and `@workwell/example-consumer` — a *test*, not a sample: one dependency,
+its own CQL + ELM + bundle, asserting `audiogram` is **unknown** to it. Building it found an undocumented API
+fact: **the engine's constructor loads `FHIRHelpers-4.0.1` eagerly**, so every consumer must supply it.
+**Two guard-scope defects found and closed**, the same shape as #380: `measure-engine-api.test.ts` walked
+`.ts` under `src/` only, so a `.mjs` script importing a moved export was invisible to both it and `tsc`.
+
+**Next, in order:** **C4** — the last piece of M-C: semver + CI publish + provenance for `@workwell/*`, and
+the positioning doc ("composes `fqm-execution`, does not compete with it"); the publish is also what turns
+`example-consumer` from a consumer-outside-the-app into a consumer-outside-the-repo. **Open owner call:**
+neutral `@workwell/*` now vs pitching Doug on `@mieweb/*`. Then **M-D0/D1** (re-aim at US Quality
 Core; run the Inferno **US Quality Core Test Kit** against the shim output) and **M-E1** (occupational
 content pack). **Still undiagnosed:** CMS125's 2 `Procedure`-only cases, CMS2's 7 `NUMER 1→0`, and
 CMS130/CMS165 unswept (credentialed vendor workflow). **Deferred, not cancelled:** supplemental data (B8).
