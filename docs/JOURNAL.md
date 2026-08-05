@@ -32,6 +32,13 @@ allowlist gained the entry with its reason — that file validates a rule before
 text, it never evaluates. Also removed one of my own vacuous assertions in the new consumer test
 (`.constructor.name === "Promise"` — an assertion about JavaScript, not about this codebase).
 
+**Review found the one thing the move broke, and the reason nothing caught it** (#400). `scripts/gen-cql.mjs`
+still imported `generateCql` from the engine, so `pnpm gen-cql` would have thrown. The codemod walked `.ts`
+only — but the deeper problem is that **no guard could have seen it**: `tsc` does not typecheck `.mjs`, and
+`measure-engine-api.test.ts`, whose entire job is checking that imported names are exported, walked `.ts`
+under `src/` only. An API check that inspects only what the compiler already checks is checking the wrong
+half. It now covers `scripts/` and `.mjs`/`.js`, and asserts it saw at least one.
+
 Suite **1885 → 1890**, 0 fail.
 
 ## 2026-08-05 (M-C / C3) — the compliance API exists, and it refuses to answer an absence (branch `feat/compliance-api`)

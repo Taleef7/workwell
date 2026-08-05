@@ -57,6 +57,14 @@ consumer **outside the app**, not outside the repo. Whether the published tarbal
 needs is a different question and belongs to C4. Calling this "an external consumer" without that caveat
 would be exactly the overclaim this codebase keeps catching in its own docs.
 
+**A defect the move caused, and the detection gap behind it (Codex, #400).** `scripts/gen-cql.mjs` still
+imported `generateCql` from `@workwell/measure-engine`, so `pnpm gen-cql` would have thrown on a missing
+export. The repoint codemod walked `.ts` only — and more importantly **nothing in CI could have caught it**:
+`tsc` does not typecheck `.mjs`, and `measure-engine-api.test.ts`, whose whole job is verifying that every
+imported name is actually exported, walked `.ts` under `src/` only. An API check that inspects only the
+files the compiler already checks is checking the wrong half. It now walks `scripts/` as well and includes
+`.mjs`/`.js`, with a non-degeneracy assertion that at least one `.mjs` was seen.
+
 **Consequences.** Three packages in the workspace: `measure-engine` (2 deps), `measure-codegen` (0), and
 `example-consumer` (1, unpublished). The engine's `index.ts` no longer exports codegen — a breaking change
 to a `private: true` package, taken now rather than after C4 makes it a promise. Suite 1885 → 1890.
