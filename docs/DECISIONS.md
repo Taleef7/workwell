@@ -57,7 +57,11 @@ those tests is testing *content-configured* behaviour and is therefore app-side 
 excludes the content. `cql-execution-engine.test.ts` (→ `synthetic/` ×4), `foreign-condition-scoping.test.ts`,
 `generate-sql.test.ts`, `value-set-resolver.test.ts` and `audiogram-vsac-parity.test.ts` (→ `stores/sqlite/`)
 all stay in `src/engine/cql/`, now importing the engine by its package name; `measure-executor.test.ts` stays
-for the same reason. The package's own five tests had no app edges and moved with their subjects. **Stated
+for the same reason. **Four** package tests had no app edges and moved with their subjects
+(`composite-value-set-resolver`, `resolve-value-set-resolver`, `vsac-client`, `vsac-value-set-resolver`);
+`package-boundary.test.ts` is a fifth test in the package but is **new**, not moved — git renders it as a
+rename of `engine-core-boundary.test.ts` on a similarity heuristic, and a first draft of this ADR repeated
+that as "five moved" (review, #395). **Stated
 plainly because it is the interesting part: the blocker was an artefact of the undecided question, not an
 independent obstacle.** Deciding content resolved it at no cost.
 

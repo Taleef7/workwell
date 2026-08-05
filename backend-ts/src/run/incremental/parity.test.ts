@@ -21,7 +21,6 @@ import { RUN_STORE_FLOOR_DDL } from "../../stores/sqlite/schema.ts";
 import { SqliteEvalStateStore } from "../../stores/sqlite/eval-state-store-sqlite.ts";
 import { SqliteOutcomeStore } from "../../stores/sqlite/outcome-store-sqlite.ts";
 import { SqliteRunStore } from "../../stores/sqlite/run-store-sqlite.ts";
-import { CqlExecutionEngine } from "@workwell/measure-engine";
 import { buildSyntheticBundle } from "../../engine/synthetic/fhir-bundle-builder.ts";
 import { EMPLOYEES } from "../../engine/synthetic/employee-catalog.ts";
 import { MEASURE_BINDINGS } from "../../engine/synthetic/measure-bindings.ts";

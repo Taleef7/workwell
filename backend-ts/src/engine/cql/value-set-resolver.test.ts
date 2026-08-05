@@ -72,7 +72,6 @@ test("buildCodeService produces a CodeService that resolves the value set by url
 // ---------------------------------------------------------------------------
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { CqlExecutionEngine } from "@workwell/measure-engine";
 import { createWorkwellEngine } from "./workwell-engine.ts";
 
 const SYNTH = fileURLToPath(new URL("../../../spike/synthetic/audiogram", import.meta.url));

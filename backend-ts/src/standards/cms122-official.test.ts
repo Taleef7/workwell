@@ -1,6 +1,5 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { CqlExecutionEngine } from "@workwell/measure-engine";
 import { CMS122_OFFICIAL_META, CMS122_DIABETES_OID, CMS122_HBA1C_OID, CMS122_QUALIFYING_VISIT_OIDS, CMS122_HOSPICE_OID, CMS122_PALLIATIVE_OID, enrichForOfficialCms122, type Expansions, } from "./cms122-official.ts";
 import type { ValueSetResolver } from "@workwell/measure-engine";
 import { buildSyntheticBundle } from "../engine/synthetic/fhir-bundle-builder.ts";

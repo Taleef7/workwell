@@ -16,7 +16,6 @@
  * This module is side-effect-free + importable by tests; `seed-quality-history-bin.ts` is the entry.
  */
 import { getStores, type StoresEnv } from "../../stores/factory.ts";
-import { CqlExecutionEngine } from "@workwell/measure-engine";
 import { backfillQualityHistory } from "../backfill-quality-history.ts";
 import { createWorkwellEngine } from "../../engine/cql/workwell-engine.ts";
 

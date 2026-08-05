@@ -3,7 +3,6 @@
  *   node --import tsx --test src/run/employee-compliance-snapshot.test.ts */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { CqlExecutionEngine } from "@workwell/measure-engine";
 import { EMPLOYEES } from "../engine/synthetic/employee-catalog.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { seededTargetFor } from "./distribution.ts";

@@ -17,7 +17,6 @@ import { SqliteCaseStore } from "../stores/sqlite/case-store-sqlite.ts";
 import { SqliteQualitySnapshotStore } from "../stores/sqlite/quality-snapshot-store-sqlite.ts";
 import { SqliteCaseEventStore } from "../stores/sqlite/case-event-store-sqlite.ts";
 import { SqliteEvalStateStore } from "../stores/sqlite/eval-state-store-sqlite.ts";
-import { CqlExecutionEngine } from "@workwell/measure-engine";
 import { EMPLOYEES, employeeById } from "../engine/synthetic/employee-catalog.ts";
 import { executeManualRun, executeRerun, planManualRun, finishOrFail, runningResponse, UnsupportedScopeError, InvalidRunRequestError, type RunPipelineDeps } from "./run-pipeline.ts";
 import { bucketPeriodForMeasure } from "./compliance-period.ts";

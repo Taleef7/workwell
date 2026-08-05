@@ -13,7 +13,6 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { CqlExecutionEngine } from "@workwell/measure-engine";
 import { MEASURE_BINDINGS } from "./measure-bindings.ts";
 import { deriveExamConfig, withRefusal, type TargetOutcome } from "./exam-config.ts";
 import { buildSyntheticBundle } from "./fhir-bundle-builder.ts";

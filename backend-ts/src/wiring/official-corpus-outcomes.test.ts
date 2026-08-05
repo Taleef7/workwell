@@ -24,7 +24,6 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import type { TargetOutcome } from "../engine/synthetic/exam-config.ts";
-import { CqlExecutionEngine } from "@workwell/measure-engine";
 import { bundledEcqmValueSetResolver } from "../engine/cql/bundled-ecqm-expansions.ts";
 import { directSyntheticGenerator, webChartRealisticGenerator } from "../run/scale-generator.ts";
 import { officialMeasureExecutor } from "./official-executor-adapter.ts";

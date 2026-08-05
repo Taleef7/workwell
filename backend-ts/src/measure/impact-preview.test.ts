@@ -14,7 +14,6 @@ import { RUN_STORE_FLOOR_DDL } from "../stores/sqlite/schema.ts";
 import { SqliteRunStore } from "../stores/sqlite/run-store-sqlite.ts";
 import { SqliteCaseStore } from "../stores/sqlite/case-store-sqlite.ts";
 import { SqliteCaseEventStore } from "../stores/sqlite/case-event-store-sqlite.ts";
-import { CqlExecutionEngine } from "@workwell/measure-engine";
 import { EMPLOYEES } from "../engine/synthetic/employee-catalog.ts";
 import type { MeasureRecord } from "../stores/measure-store.ts";
 import { previewImpact, ImpactPreviewError, type ImpactPreviewDeps } from "./impact-preview.ts";

@@ -79,7 +79,6 @@ import { parseEnrollmentRoster, stampEnrollment } from "../enrollment/roster.ts"
 import { officialMeasureExecutor, type OfficialBatchSubject } from "../../../wiring/official-executor-adapter.ts";
 import { officialTerminologyExpander, loadOfficialTerminology } from "../../../wiring/official-terminology.ts";
 import { loadOfficialArtifact } from "../../../wiring/official-artifacts.ts";
-import { CqlExecutionEngine } from "@workwell/measure-engine";
 import { bundledEcqmValueSetResolver } from "../../cql/bundled-ecqm-expansions.ts";
 import { createWorkwellEngine } from "../../cql/workwell-engine.ts";
 

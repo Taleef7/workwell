@@ -10,7 +10,6 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { CqlExecutionEngine } from "@workwell/measure-engine";
 import { buildSyntheticBundle } from "../../engine/synthetic/fhir-bundle-builder.ts";
 import { EMPLOYEES } from "../../engine/synthetic/employee-catalog.ts";
 import { MEASURE_BINDINGS } from "../../engine/synthetic/measure-bindings.ts";

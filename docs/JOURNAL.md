@@ -27,8 +27,8 @@ devDependency pointing back at the app."* Neither. Under content injection every
 testing *content-configured* behaviour and is app-side by the same rule that excludes the content —
 `cql-execution-engine.test.ts`, `foreign-condition-scoping.test.ts`, `generate-sql.test.ts`,
 `value-set-resolver.test.ts`, `audiogram-vsac-parity.test.ts`, `measure-executor.test.ts` all stay put and
-import the engine by its package name. The package's own five tests had no app edges and moved with their
-subjects. The blocker was an artefact of the undecided question, not an independent obstacle.
+import the engine by its package name. **Four** package tests had no app edges and moved with their subjects;
+`package-boundary.test.ts` is new, not moved (git renders it as a rename on a similarity heuristic). The blocker was an artefact of the undecided question, not an independent obstacle.
 
 **Two changes the extraction FORCED, both stated rather than smoothed over.** (1) `fhirNativeExecutor` and
 `resolveMeasureExecutor` now **require** their engine binding — they defaulted to a lazily-constructed

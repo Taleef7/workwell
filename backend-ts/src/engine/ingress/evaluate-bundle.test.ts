@@ -9,7 +9,6 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { evaluateBundle, evaluateBatch } from "./evaluate-bundle.ts";
-import { CqlExecutionEngine } from "@workwell/measure-engine";
 import { createWorkwellEngine } from "../cql/workwell-engine.ts";
 
 const SYNTH = fileURLToPath(new URL("../../../spike/synthetic", import.meta.url));

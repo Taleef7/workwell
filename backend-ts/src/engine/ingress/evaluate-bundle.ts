@@ -4,7 +4,6 @@
  * node:fs, so it stays portable across every @mieweb/cloud target (Workers included). File I/O
  * lives only at the CLI edge. The core engine is untouched.
  */
-import { CqlExecutionEngine } from "@workwell/measure-engine";
 import { MEASURES } from "../cql/measure-registry.ts";
 import type { EvaluateMeasureBinding, MeasureOutcome } from "@workwell/measure-engine";
 import { createWorkwellEngine } from "../cql/workwell-engine.ts";

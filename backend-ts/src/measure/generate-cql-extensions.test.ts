@@ -4,7 +4,6 @@
  *   node --import tsx --test src/engine/cql/codegen/generate-cql-extensions.test.ts */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { CqlExecutionEngine } from "@workwell/measure-engine";
 import { compileCql } from "./cql-translator.ts";
 import { generateCql, type GenerateCqlInput } from "@workwell/measure-engine";
 import { createWorkwellEngine } from "../engine/cql/workwell-engine.ts";

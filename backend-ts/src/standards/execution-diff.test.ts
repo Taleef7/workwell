@@ -4,7 +4,6 @@ import { computeExecutionDiff, __clearExecutionDiffCache } from "./execution-dif
 import { CMS122_DIABETES_OID, CMS122_HBA1C_OID, CMS122_QUALIFYING_VISIT_OIDS, CMS122_HOSPICE_OID, CMS122_PALLIATIVE_OID } from "./cms122-official.ts";
 import { CMS122V14 } from "./references/cms122v14.ts";
 import { EMPLOYEES } from "../engine/synthetic/employee-catalog.ts";
-import { CqlExecutionEngine } from "@workwell/measure-engine";
 import type { ValueSetResolver } from "@workwell/measure-engine";
 import { createWorkwellEngine } from "../engine/cql/workwell-engine.ts";
 

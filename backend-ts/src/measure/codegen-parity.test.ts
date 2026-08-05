@@ -7,7 +7,6 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { CqlExecutionEngine } from "@workwell/measure-engine";
 import { compileCql } from "./cql-translator.ts";
 import { createWorkwellEngine } from "../engine/cql/workwell-engine.ts";
 

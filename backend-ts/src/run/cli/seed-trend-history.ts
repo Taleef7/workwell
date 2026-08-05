@@ -22,7 +22,6 @@
  * This module is side-effect-free + importable by tests; `bin.ts` is the runnable entry.
  */
 import { getStores, type StoresEnv } from "../../stores/factory.ts";
-import { CqlExecutionEngine } from "@workwell/measure-engine";
 import { backfillTrendHistory } from "../backfill-trend-history.ts";
 import { createWorkwellEngine } from "../../engine/cql/workwell-engine.ts";
 
