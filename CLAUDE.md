@@ -91,7 +91,11 @@ tokens. Do not add to this list without deleting from it — the whole point is 
 Read these when the task needs them. They are deliberately NOT `@`-imported: eagerly loading the set
 cost ~89k tokens per session until 2026-07-29, whether or not any of it was relevant.
 - `docs/JOURNAL.md` — the running narrative; source of truth for recent work (~832k chars — never import)
-- `docs/DECISIONS.md` — numbered ADR bodies (the titles are already in context via ADR_INDEX)
+- `docs/DECISIONS.md` — the ADR bodies that still GOVERN: decisions constraining what may be done next,
+  plus design records for built features (38 of 58; titles already in context via ADR_INDEX). Split on
+  2026-08-05 — the other 20 are superseded or were findings written in ADR form, and their bodies moved to
+  `docs/archive/DECISIONS_ARCHIVE.md`. Every heading + a one-line pointer stays in `DECISIONS.md`, so an
+  `ADR-0NN` reference anywhere still resolves and nothing was deleted.
 - `docs/ROADMAP_2026-08-04.md` — **the APPROVED active plan** (owner decisions are in context via LOCKED_DECISIONS §4). Supersedes `ROADMAP_2026-07-24.md`, which is kept only for its §7 target architecture and the reasoning that got us here — **do not act on it**
 - `docs/DEPLOY.md` — MIE Create-a-Container + Neon setup, env vars, rollback → prefer the `deploy` skill
 - `docs/ARCHITECTURE.md` — system architecture + boundaries (the engine boundary is enforced mechanically by PR-1's containment test and PR-4's five boundary tests, so CI catches drift)
@@ -110,6 +114,8 @@ instructions, and reading them burns context without changing what you should do
 `docs/JOURNAL.md` for what happened instead.
 - `docs/superpowers/plans/` (45 files, 1.33 MB) and `docs/superpowers/specs/` (39 files, 413k)
 - `docs/sprints/` (9 files, 276k — sprints 0–7 all merged; historical, not an active queue)
+- `docs/archive/DECISIONS_ARCHIVE.md` (133k) — the 20 superseded/finding ADRs. Read a single one when a
+  pointer in `DECISIONS.md` sends you there; never the file.
 - `docs/archive/` (245k), `docs/FABLE_REVIEW_2026-07-02/` (84k), `docs/new instructions/` (69k),
   `docs/mieweb-ui-migration/` (82k)
 
