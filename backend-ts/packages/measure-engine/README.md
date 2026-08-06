@@ -69,11 +69,27 @@ a silently wrong one.
 
 - `MeasureExecutor` — the pluggable execution seam (ADR-025). `fhirNativeExecutor(engine)` is the default
   and the correctness oracle; `sqlPushdownExecutor()` is an inert stub that rejects on use.
-- `generateCql(input)` — declarative rule → CQL codegen (ADR-015), so authored rules compile to the same
-  canonical language the engine executes.
+- `evaluateExpressions(...)` — data-free execution of a library's defines, which is the subset the CQL
+  language conformance suite is written in (ADR-060).
 
-## Status
+Rule → CQL codegen is **not** here. It moved to [`@workwell/measure-codegen`](../measure-codegen) in
+ADR-062: it shares no code with the engine, answers a different question, and a consumer who wants to
+evaluate measures should not have to take a CQL emitter.
 
-`private: true` while the public surface settles (roadmap M-C: C2 adds the external consumer and the
-conformance harness, C4 publishes). The API is `src/index.ts` and nothing else — subpath imports are not
-supported and are refused by tests on both sides of the boundary.
+## Where it sits next to the alternatives
+
+It **composes** `fqm-execution`; it does not compete with it. See
+[`docs/PACKAGES.md`](../../../docs/PACKAGES.md) for the full positioning — the short version is that
+`fqm-execution` evaluates a published FHIR **Measure bundle** end to end, and this evaluates **compiled
+ELM** against a bundle and hands back per-define evidence. WorkWell uses both: official CMS eCQMs route
+through `fqm-execution` (quarantined in `@workwell/official-executor`, ADR-026), and everything else —
+including the occupational measures nobody publishes — runs here.
+
+## Status and stability
+
+Published from CI with npm provenance (ADR-063). **Pre-1.0**, so a minor bump may break: read the semver
+policy in [`docs/PACKAGES.md`](../../../docs/PACKAGES.md) before pinning.
+
+The API is `src/index.ts` and nothing else — subpath imports are not supported and are refused by tests
+on both sides of the boundary. The published tarball is proven to install, run and typecheck outside this
+workspace by `pnpm verify:publish`, which runs on every PR.

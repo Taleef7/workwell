@@ -1,0 +1,120 @@
+# Publishes the `@workwell/*` packages to npm with provenance (roadmap M-C / C4, ADR-063).
+#
+# INERT UNTIL AN OWNER ACTS, deliberately. It is `workflow_dispatch` only — never a push or tag
+# trigger — and it defaults to a dry run. Publishing is irreversible in a way nothing else in this
+# repo is: npm permits unpublish only within 72 hours and never permits reusing a version number, so a
+# mistake here cannot be fixed by a revert commit the way a bad deploy can (DEPLOY.md rollback).
+#
+# It also cannot succeed today, and that is not an oversight: the `@workwell` npm scope does not exist
+# and `NPM_TOKEN` is not set. Claiming the packages are "published" before either is true would be the
+# kind of overclaim this codebase keeps catching in itself. What IS true is that the tarballs build,
+# install, run and typecheck outside the workspace — `pnpm verify:publish`, run in CI on every PR.
+#
+# OWNER STEPS, in order, before the first real run:
+#   1. Create the `@workwell` organisation scope on npmjs.com.
+#   2. Add `NPM_TOKEN` (a granular automation token, write access to the scope) as a repo secret.
+#   3. Run this workflow with `dry_run: true` and read the packed file lists in the log.
+#   4. Re-run with `dry_run: false`.
+#
+# Provenance (`publishConfig.provenance: true` in each manifest) needs `id-token: write` below and a
+# public repository; it attests which commit, workflow and runner produced the tarball, so a consumer
+# can verify the package against this source rather than trusting the registry.
+name: Publish packages
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Pack and validate only — do not publish"
+        type: boolean
+        default: true
+      packages:
+        description: "Which packages to publish"
+        type: choice
+        default: all
+        options: [all, measure-engine, measure-codegen]
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: publish-packages
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Build, verify, publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: backend-ts
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.17.1
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          cache: pnpm
+          cache-dependency-path: backend-ts/pnpm-lock.yaml
+
+      - name: Install deps
+        run: pnpm install --frozen-lockfile
+
+      # A package is not publishable because it packs — it is publishable because the code in it is
+      # the code CI gates. Typecheck and the full suite run here too rather than being inferred from
+      # a green run on the merge commit, since this workflow can be dispatched from any ref.
+      - name: Typecheck
+        run: pnpm typecheck
+      - name: Test
+        run: pnpm test
+
+      # The real gate: build the tarballs and consume them from a directory outside this workspace.
+      - name: Verify the tarballs outside the workspace
+        run: pnpm verify:publish
+
+      - name: Refuse to publish without a token
+        if: ${{ !inputs.dry_run }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "${NODE_AUTH_TOKEN}" ]; then
+            echo "::error::NPM_TOKEN is not set. See the owner steps in .github/workflows/publish-packages.yml."
+            exit 1
+          fi
+
+      - name: Publish
+        if: ${{ !inputs.dry_run }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_CONFIG_PROVENANCE: "true"
+        run: |
+          set -euo pipefail
+          selected='${{ inputs.packages }}'
+          if [ "${selected}" = "all" ]; then
+            targets="measure-engine measure-codegen"
+          else
+            targets="${selected}"
+          fi
+          for pkg in ${targets}; do
+            echo "--- publishing @workwell/${pkg}"
+            # --no-git-checks: the workflow may be dispatched from a ref pnpm considers unclean
+            # (a tag, a detached head). The provenance attestation records the real commit either way,
+            # so the check adds nothing here that the attestation does not already state.
+            pnpm --filter "@workwell/${pkg}" publish --no-git-checks --access public
+          done
+
+      - name: Say what happened
+        run: |
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            echo "### Dry run — nothing was published" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "### Published \`${{ inputs.packages }}\` to npm with provenance" >> "$GITHUB_STEP_SUMMARY"
+          fi

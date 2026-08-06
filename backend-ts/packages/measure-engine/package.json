@@ -4,7 +4,26 @@
   "description": "Headless eCQM evaluation: executes pre-compiled ELM against a FHIR R4 patient bundle and returns per-define evidence. JVM-free, node:fs-free, and content-free — the measure catalog, ELM and value-set expansions are injected by the consumer (ADR-059).",
   "type": "module",
   "license": "Apache-2.0",
-  "private": true,
+  "keywords": [
+    "cql",
+    "ecqm",
+    "fhir",
+    "qi-core",
+    "quality-measures",
+    "elm",
+    "clinical-quality-language"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Taleef7/workwell.git",
+    "directory": "backend-ts/packages/measure-engine"
+  },
+  "homepage": "https://github.com/Taleef7/workwell/tree/main/backend-ts/packages/measure-engine#readme",
+  "bugs": "https://github.com/Taleef7/workwell/issues",
+  "engines": {
+    "node": ">=20"
+  },
+  "sideEffects": false,
   "exports": {
     ".": {
       "types": "./src/index.ts",
@@ -16,6 +35,27 @@
     "cql-exec-fhir": "^2.1.6"
   },
   "files": [
-    "src"
-  ]
+    "dist",
+    "src",
+    "!src/**/*.test.ts",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "node ../../scripts/build-packages.mjs --package measure-engine",
+    "prepack": "node ../../scripts/build-packages.mjs --package measure-engine"
+  },
+  "//publishConfig": "The workspace resolves this package from `src/*.ts` — that is what keeps `pnpm typecheck` checking real sources rather than stale build output, and what lets a change here be seen by the app without a build step. A registry consumer has no such resolution, so pnpm rewrites these fields into the packed manifest and the tarball points at `dist/` instead. `provenance` asks npm to attest, from CI, which commit and workflow produced the tarball.",
+  "publishConfig": {
+    "access": "public",
+    "provenance": true,
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      }
+    },
+    "types": "./dist/index.d.ts",
+    "main": "./dist/index.js"
+  }
 }

@@ -4,7 +4,24 @@
   "description": "Declarative measure rules → canonical CQL. Zero dependencies: pure string templating with no engine, no runtime and no I/O. Authoring-time only — the emitted CQL is compiled and executed by @workwell/measure-engine, which remains the sole compliance authority (ADR-015).",
   "type": "module",
   "license": "Apache-2.0",
-  "private": true,
+  "keywords": [
+    "cql",
+    "ecqm",
+    "quality-measures",
+    "codegen",
+    "clinical-quality-language"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Taleef7/workwell.git",
+    "directory": "backend-ts/packages/measure-codegen"
+  },
+  "homepage": "https://github.com/Taleef7/workwell/tree/main/backend-ts/packages/measure-codegen#readme",
+  "bugs": "https://github.com/Taleef7/workwell/issues",
+  "engines": {
+    "node": ">=20"
+  },
+  "sideEffects": false,
   "exports": {
     ".": {
       "types": "./src/index.ts",
@@ -12,6 +29,26 @@
     }
   },
   "files": [
-    "src"
-  ]
+    "dist",
+    "src",
+    "!src/**/*.test.ts",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "node ../../scripts/build-packages.mjs --package measure-codegen",
+    "prepack": "node ../../scripts/build-packages.mjs --package measure-codegen"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true,
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      }
+    },
+    "types": "./dist/index.d.ts",
+    "main": "./dist/index.js"
+  }
 }

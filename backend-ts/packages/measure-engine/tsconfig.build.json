@@ -1,0 +1,31 @@
+// Emit config for PUBLISHING only — `pnpm typecheck` at the workspace root still checks these sources
+// in place, from `../../tsconfig.json`'s `include`. This file exists because a tarball must contain
+// JavaScript: the workspace resolves `@workwell/measure-engine` to `src/index.ts` through
+// `moduleResolution: Bundler`, which no ordinary Node consumer has.
+//
+// `rewriteRelativeImportExtensions` is what lets the source keep its `./x.ts` specifiers (required by
+// the repo's `allowImportingTsExtensions`) while the emitted JS carries `./x.js`.
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "rewriteRelativeImportExtensions": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "outDir": "dist",
+    "rootDir": "src",
+    // The package claims to use no `node:` builtins and no Node globals (package-boundary.test.ts
+    // enforces it by scanning source). Dropping `@types/node` from the BUILD makes that a type error
+    // too: a `Buffer`, `process` or `__dirname` regression fails here, not only in that test.
+    //
+    // `DOM` is not decoration — it is the ambient surface this package actually targets. `fetch`,
+    // `TextEncoder` and `btoa` are web-standard globals present in Node 18+, Cloudflare-style workers
+    // and browsers alike, which is exactly the portability the package claims. `@types/node` would
+    // supply them too, and would also silently re-admit the Node-only globals.
+    "types": [],
+    "lib": ["ES2023", "DOM"]
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["src/**/*.test.ts"]
+}

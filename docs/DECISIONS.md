@@ -18,6 +18,85 @@
 >
 > **Sequence note:** ADR-033 does not exist — verified absent, and the number must not be reused.
 
+## ADR-063: a package is publishable when its tarball runs outside the workspace — not when it is published
+
+**Status:** Accepted (2026-08-05). Roadmap M-C / C4. **Completes M-C.** Positioning + semver policy:
+`docs/PACKAGES.md`.
+
+**Context.** C1 made `@workwell/measure-engine` content-free (ADR-059) and C2 split codegen out and added
+a consumer that shares no code with the app (ADR-062). Both proofs are about the *source tree*: an
+import-graph assertion and a `workspace:*` consumer. `example-consumer`'s own README says so — it is a
+consumer outside the **app**, not outside the **repo**.
+
+Everything the workspace supplies for free is therefore untested. The workspace resolves these packages
+straight from `src/*.ts` under `moduleResolution: Bundler` with `allowImportingTsExtensions`; no registry
+consumer has either. Whether `files` ships what the code needs, whether the declared `dependencies` are
+sufficient, whether the emitted JavaScript resolves at all — each fails silently in-repo and loudly for
+the first integrator.
+
+**Decision 1 — the packages build to `dist/`, and the workspace keeps resolving source.** `publishConfig`
+repoints `exports`/`types`/`main` at `dist/` **at pack time only**. In the tree, `exports` still names
+`src/index.ts`, so `pnpm typecheck` checks real sources rather than stale build output and a change is
+visible to the app without a build step. The alternative — pointing `exports` at `dist/` permanently —
+makes a fresh clone fail to typecheck until someone runs a build, and makes it possible to ship code that
+no longer matches its own source.
+
+Note this fixes the package manager: `publishConfig` field rewriting is a **pnpm** feature. npm's
+`publishConfig` understands only `registry`, `access` and `tag`, so `npm pack` here would ship a manifest
+still pointing at `src/*.ts`.
+
+**Decision 2 — the verification is packing and consuming, not publishing.** `scripts/verify-publish.mjs`
+packs real tarballs, installs them into a temp directory under the OS temp dir with a plain `npm install`
+and no knowledge of this repo, then runs the engine there on `example-consumer`'s measure content and
+typechecks a TypeScript consumer against the packed declarations. It is CI's `packages` job, **on every
+PR** — a manifest regression should fail when it is introduced, not when someone finally dispatches the
+publish workflow.
+
+Reusing `example-consumer`'s content rather than inventing a second toy measure keeps both proofs about
+the same artifact.
+
+**Decision 3 — nothing is published, and the workflow says why.** `publish-packages.yml` is
+`workflow_dispatch` only, defaults to a dry run, and refuses without `NPM_TOKEN`. Publishing is
+irreversible in a way nothing else here is: npm permits unpublish only within 72 hours and never permits
+reusing a version, so a mistake cannot be fixed by a revert the way a bad deploy can. It also *cannot*
+succeed today — the `@workwell` scope does not exist and the secret is unset — and `docs/PACKAGES.md`
+states that rather than glossing it, because "published" is a claim with a trivial external check. This
+follows ADR-041's pattern: inert until the owner creates the secret, with the owner steps written down.
+
+**Decision 4 — `official-executor` is not published.** It is the sole home of `fqm-execution` and the
+package boundary *is* the ADR-026 quarantine. Publishing it would advertise, as a `@workwell` product,
+precisely the dependency the engine package's manifest exists to exclude.
+
+**Decision 5 — the positioning is "composes `fqm-execution`, does not compete with it", and WorkWell's
+own routing is the evidence.** `fqm-execution` calculates a published FHIR Measure **bundle** end to end;
+this engine executes compiled **ELM** and returns per-define evidence. Both sit on `cql-execution`. The
+claim is credible because we made the choice against our own package: official CMS eCQMs route through
+`fqm-execution` on the production stack (ADR-045/046), because Nicole's *run the official published CQL,
+never reauthor* is a standing rule. **No performance or conformance comparison against `fqm-execution`
+has been run, so none is claimed** — `docs/PACKAGES.md` says that in those words.
+
+**Decision 6 — pre-1.0 with a stricter-than-semver reading**, and 1.0 gated on a consumer outside MIE
+rather than on a date. `0.x` under plain semver promises nothing, which is too vague to hold anyone to;
+the operating rule is that removals, retypes and semantic changes take the **minor**, so a patch never
+breaks you. Integrators are told to pin `~0.1.0`.
+
+**A claim of mine that measurement killed, recorded because the reasoning was plausible and wrong.**
+`rewriteRelativeImportExtensions` rewrites `./x.ts` → `./x.js` in emitted JS but **not** in emitted
+`.d.ts`. I built a post-pass for it and wrote that the TypeScript consumer check (step 5) was what caught
+the failure. Mutation-checking that — disabling the rewrite — showed **step 5 still passes**: `tsc`
+substitutes `.ts` → `.d.ts` when resolving and finds the declaration beside it, so TypeScript consumers
+were never broken. The post-pass is kept (a dangling `.ts` specifier is false on its face and only works
+by a TypeScript-specific rule that non-`tsc` declaration readers do not implement), but it is documented
+as defensive rather than as a bug fix, and the load-bearing assertion is the one covering **`.js`**, where
+dropping the flag would break every consumer at runtime. This is the same guard-scope shape as #380 and
+#400: a check cited for more than it covers.
+
+**Consequences.** M-C is complete. `pnpm build:packages` and `pnpm verify:publish` are the two new
+commands; `verify:publish` needs the network and is a separate CI job for the reason `official-cases` and
+`cql-conformance` are. First publish is an owner step, listed in the workflow header. Scope stays neutral
+`@workwell/*`; `@mieweb/*` remains a pitch for later, which is cheap precisely because there are no
+external consumers yet.
+
 ## ADR-062: codegen is not the engine, and a consumer that shares no code with the app is the only proof the split worked
 
 **Status:** Accepted (2026-08-05). Roadmap M-C / C2. Completes what ADR-059 started; C4 (publish) remains.

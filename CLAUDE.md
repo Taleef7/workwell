@@ -238,13 +238,42 @@ fact: **the engine's constructor loads `FHIRHelpers-4.0.1` eagerly**, so every c
 **Two guard-scope defects found and closed**, the same shape as #380: `measure-engine-api.test.ts` walked
 `.ts` under `src/` only, so a `.mjs` script importing a moved export was invisible to both it and `tsc`.
 
-**Next, in order:** **C4** — the last piece of M-C: semver + CI publish + provenance for `@workwell/*`, and
-the positioning doc ("composes `fqm-execution`, does not compete with it"); the publish is also what turns
-`example-consumer` from a consumer-outside-the-app into a consumer-outside-the-repo. **Open owner call:**
-neutral `@workwell/*` now vs pitching Doug on `@mieweb/*`. Then **M-D0/D1** (re-aim at US Quality
-Core; run the Inferno **US Quality Core Test Kit** against the shim output) and **M-E1** (occupational
-content pack). **Still undiagnosed:** CMS125's 2 `Procedure`-only cases, CMS2's 7 `NUMER 1→0`, and
-CMS130/CMS165 unswept (credentialed vendor workflow). **Deferred, not cancelled:** supplemental data (B8).
+**Done 2026-08-05 (M-C / C4 — ADR-063). M-C IS COMPLETE.** Scope is **neutral `@workwell/*`** (owner call);
+`@mieweb/*` stays a later pitch, cheap to defer because there are no external consumers yet. **The
+publishable set is `measure-engine` + `measure-codegen`** — `official-executor` is deliberately excluded
+(publishing it would advertise, as a `@workwell` product, the `fqm-execution` dependency the engine's
+manifest exists to exclude), and `example-consumer` is a test. **The verification is packing and
+consuming, not publishing:** `pnpm verify:publish` (CI's `packages` job, **every PR**) packs real tarballs,
+installs them into a temp dir with a plain `npm install` and no knowledge of this repo, runs the engine
+there on C2's measure content, and typechecks a TS consumer against the packed `.d.ts` — which is what
+finally turns `example-consumer` from a consumer-outside-the-**app** into one outside the **repo**.
+`publishConfig` keeps the two resolutions apart (tree → `src/*.ts` so `pnpm typecheck` reads real sources;
+tarball → `dist/`), and that **fixes the package manager**: `publishConfig` field rewriting is a pnpm
+feature, so `npm pack` would ship a manifest still pointing at source. **Nothing is published and the docs
+say so** — `publish-packages.yml` is dispatch-only, dry-run by default, and cannot succeed until the
+`@workwell` scope and `NPM_TOKEN` exist (ADR-041's inert-until-the-secret pattern; owner steps in the file
+header). `docs/PACKAGES.md` carries the positioning — **composes `fqm-execution`, does not compete with
+it**, evidenced by our own routing (official eCQMs run on `fqm-execution` in production) — and states that
+**no performance or conformance comparison against it has been run, so none is claimed**. Semver is
+pre-1.0 read strictly (removals/semantic changes take the minor; pin `~0.1.0`), 1.0 gated on a consumer
+outside MIE rather than a date. **A claim of mine that measurement killed:**
+`rewriteRelativeImportExtensions` leaves `.d.ts` specifiers pointing at `./x.ts`, and I wrote that the TS
+consumer check caught it — mutation-checking showed it does **not** (`tsc` substitutes `.ts` → `.d.ts` and
+resolves fine), so the post-pass is documented as defensive rather than as a bug fix and the load-bearing
+assertion is the `.js` one. Same guard-scope shape as #380/#400, caught before publication this time.
+Suite **1910**, 0 fail.
+
+**Next, in order:** **M-E1** (the occupational content pack — locked decision 6's differentiator, the part
+no competitor obtains by downloading CMS artifacts), then **M-D0/D1** (re-aim at US Quality Core; run the
+Inferno **US Quality Core Test Kit** against the shim output). **Smaller open items:** **#397** (the
+production translator has no UCUM service, so the ELM Explorer cannot compile CQL with a quantity literal)
+and **#377** (retire the authored cms122/125 subsets to the fidelity lab — locked decision 7). **Still
+undiagnosed:** CMS125's 2 `Procedure`-only cases, CMS2's 7 `NUMER 1→0`, and CMS130/CMS165 unswept
+(credentialed vendor workflow). **Unsolved, named:** the wave-2 measures are MADiE-gated but unroutable —
+they have no authored counterpart, so `flip-snapshot`'s authored-vs-official comparison cannot run for
+them. **Deferred, not cancelled:** supplemental data (B8). **Owner steps:** create the `@workwell` npm
+scope + `NPM_TOKEN` if/when publishing is wanted; confirm with Doug/Nicole that certifying WorkWell's
+engine is not a business goal.
 
 **Three standing corrections.** "~2030" for CMS FHIR endpoints is **not CMS-attributable** (say "no
 published date"). **"QI-Core STU7 = US Core 7 = WebChart's exact surface"** is half right: the equality
