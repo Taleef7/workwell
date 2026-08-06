@@ -348,6 +348,43 @@ jobs:
           name: cql-conformance-results
           path: backend-ts/.cql-tests-results/results.json
 
+  packages:
+    name: Publishable packages — pack and consume outside the workspace
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # C4 (ADR-063). Everything the workspace supplies for free is invisible to `pnpm test`: whether
+    # `files` ships what the code needs, whether `publishConfig` really repoints `exports` at `dist/`,
+    # whether the declared `dependencies` are sufficient, and whether the emitted JS resolves without
+    # `allowImportingTsExtensions`. Each of those fails silently in-repo and loudly for the first
+    # integrator, so this job packs real tarballs and installs them into a temp directory that knows
+    # nothing about this repository.
+    #
+    # It runs on every PR rather than only at publish time, because the point is to catch a manifest
+    # regression when it is introduced — not when someone finally dispatches publish-packages.yml.
+    #
+    # A separate job because it needs the network for a plain `npm install` of cql-execution and
+    # cql-exec-fhir from the registry, and the default suite must stay runnable offline.
+    defaults:
+      run:
+        working-directory: backend-ts
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.17.1
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: backend-ts/pnpm-lock.yaml
+      - name: Install deps
+        run: pnpm install --frozen-lockfile
+      - name: Pack, install, run and typecheck outside the workspace
+        run: pnpm verify:publish
+
   e2e:
     name: Playwright E2E (manual)
     runs-on: ubuntu-latest

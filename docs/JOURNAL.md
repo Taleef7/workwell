@@ -1,5 +1,62 @@
 # Journal
 
+## 2026-08-05 (M-C / C4) — a package is publishable when its tarball runs outside the workspace, not when it is published (branch `feat/mc-c4-package-publishing`)
+
+ADR-063. **M-C is complete.** Scope stays neutral `@workwell/*` (owner call this session); pitching Doug
+on `@mieweb/*` remains a later option, and it is cheap to defer precisely because there are no external
+consumers yet.
+
+**The gap C4 exists to close.** C1's proof was an import graph and C2's was a `workspace:*` consumer —
+both claims about the *source tree*. `example-consumer`'s own README says it is a consumer outside the
+**app**, not outside the **repo**. So everything the workspace supplies for free was untested: whether
+`files` ships what the code needs, whether the declared `dependencies` suffice, whether the emitted
+JavaScript resolves at all without `moduleResolution: Bundler` and `allowImportingTsExtensions`. Each of
+those fails silently in-repo and loudly for the first integrator.
+
+**`pnpm verify:publish` is the answer, and it runs on every PR** (CI's `packages` job). It packs real
+tarballs, installs them into a temp directory under the OS temp dir with a plain `npm install` and no
+knowledge of this repo, then runs the engine there on `example-consumer`'s measure content — COMPLIANT,
+OVERDUE, and `audiogram` still unknown — and typechecks a TypeScript consumer against the packed
+declarations under `moduleResolution: node16`. Reusing the C2 content rather than inventing a second toy
+measure keeps both proofs about the same artifact.
+
+**`publishConfig` keeps the two resolutions apart.** In the tree, `exports` names `src/index.ts`, so
+`pnpm typecheck` checks real sources and a change reaches the app with no build step; at pack time pnpm
+rewrites `exports`/`types`/`main` to `dist/`. Worth recording because it fixes the package manager:
+`publishConfig` field rewriting is a **pnpm** feature — npm understands only `registry`, `access` and
+`tag`, so `npm pack` would ship a manifest still pointing at `src/*.ts`.
+
+**A claim of mine that measurement killed.** `rewriteRelativeImportExtensions` rewrites `./x.ts` → `./x.js`
+in emitted JS but not in emitted `.d.ts`. I built a post-pass and wrote that the TypeScript consumer check
+was what caught it. Mutation-checking that — disabling the rewrite — showed **step 5 still passes**: `tsc`
+substitutes `.ts` → `.d.ts` when resolving and finds the declaration beside it, so TypeScript consumers
+were never broken. The post-pass stays (the specifiers are false on their face and only work by a
+TypeScript-specific rule that non-`tsc` declaration readers do not implement) but is documented as
+defensive, not as a bug fix. The assertion with teeth is the one covering **`.js`**, where dropping the
+flag breaks every consumer at runtime — and that one was mutation-checked as firing, naming 6 files. Same
+guard-scope shape as #380 and #400: a check cited for more than it covers, caught this time before it was
+published rather than after.
+
+**Two guards fired for real while building.** The tarball first shipped six `*.test.ts` files (`files:
+["src"]` sweeps them in) — now `!src/**/*.test.ts`. And the packed-manifest check reads `package.json` back
+*out of the tarball*, because `publishConfig` is applied at pack time and a typo there leaves `exports`
+pointing at source with nothing else to notice.
+
+**Nothing is published, and the docs say so.** `publish-packages.yml` is `workflow_dispatch` only,
+defaults to a dry run, and refuses without `NPM_TOKEN`; it cannot succeed today because the `@workwell`
+scope does not exist. ADR-041's pattern — inert until the owner creates the secret, owner steps written
+into the file header. `official-executor` is deliberately **not** publishable: it is the sole home of
+`fqm-execution` and the package boundary *is* the ADR-026 quarantine.
+
+**`docs/PACKAGES.md` carries the positioning and the semver policy.** *Composes `fqm-execution`, does not
+compete with it* — and the evidence is our own routing, since official CMS eCQMs run on `fqm-execution` in
+production (ADR-045/046) because *run the official published CQL, never reauthor* is a standing rule. **No
+performance or conformance comparison against `fqm-execution` has been run, so none is claimed.** Semver is
+pre-1.0 with a stricter-than-standard reading (removals and semantic changes take the minor, so a patch
+never breaks you; pin `~0.1.0`), and 1.0 is gated on a consumer outside MIE rather than on a date.
+
+Suite 1910, 0 fail (+5, the rewrite's precision tests). Typecheck clean. `pnpm verify:publish` green.
+
 ## 2026-08-05 (M-C / C2) — codegen leaves the engine, and a consumer that shares no code with the app proves the split worked (branch `feat/measure-codegen-and-consumer`)
 
 Two packages, ADR-062. C4 (publish) is the only piece of M-C left.

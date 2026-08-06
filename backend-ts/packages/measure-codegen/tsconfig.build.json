@@ -1,0 +1,19 @@
+// Emit config for PUBLISHING only — see `../measure-engine/tsconfig.build.json` for why this exists
+// at all. Codegen has zero dependencies and touches no platform global, so it takes neither ambient
+// types nor `DOM`: if a `fetch` or a `node:` builtin ever appears here, this build stops compiling.
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "rewriteRelativeImportExtensions": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "outDir": "dist",
+    "rootDir": "src",
+    "types": [],
+    "lib": ["ES2023"]
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["src/**/*.test.ts"]
+}

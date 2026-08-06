@@ -17,6 +17,7 @@
 
 ## Titles (newest first)
 
+- ADR-063: a package is publishable when its tarball runs outside the workspace — not when it is published
 - ADR-062: codegen is not the engine, and a consumer that shares no code with the app is the only proof the split worked
 - ADR-061: the compliance API says where its numbers came from, and 404s rather than answering an absence
 - ADR-060: a translator gap and an engine gap are different findings, so the conformance harness never merges them

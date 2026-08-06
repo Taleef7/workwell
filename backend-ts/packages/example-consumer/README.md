@@ -30,8 +30,17 @@ import-graph assertion, because it takes the code path a real integrator takes.
 consumer must supply it in `elmLibraries` or construction throws. That is asserted as its own test here,
 because it is the first thing an integrator will hit and nothing else stated it.
 
-## The limitation, stated
+## The limitation, stated — and where it is now answered
 
 This resolves the engine through `workspace:*`, so it is a consumer **outside the app** — not outside the
-repo. Whether the *published tarball* contains what a consumer needs is a different question, and it is
-C4's to answer. Calling this "an external consumer" without that caveat would overclaim.
+repo. Whether the *published tarball* contains what a consumer needs is a different question, and calling
+this "an external consumer" without that caveat would overclaim.
+
+**C4 answers it (ADR-063), and this package stays as it is.** `scripts/verify-publish.mjs` packs real
+tarballs, installs them into a temp directory under the OS temp dir with a plain `npm install`, and runs
+this package's measure content there — outside the workspace, outside the repo, with no `workspace:*`
+resolution and no knowledge of this tree. It runs on every PR as CI's `packages` job.
+
+The two are complementary rather than redundant: this one is a fast in-suite test of the *engine's*
+content-independence, and `verify:publish` is a slow networked test of the *packaging*. A break in the
+first is a code defect; a break in the second is a manifest defect, and neither test sees the other's.
