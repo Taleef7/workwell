@@ -101,6 +101,10 @@ cost ~89k tokens per session until 2026-07-29, whether or not any of it was rele
 - `docs/ARCHITECTURE.md` — system architecture + boundaries (the engine boundary is enforced mechanically by PR-1's containment test and PR-4's five boundary tests, so CI catches drift)
 - `docs/DATA_MODEL.md` — §1–3: scope, core tables, full table schemas (derivable from `schema-pg.ts` / `schema.ts`)
 - `docs/MEASURES.md` — the TWH measure catalog (63 measures) in plain English
+- `docs/COMPLIANCE_API.md` + `docs/PACKAGES.md` — **the two contracts an integrator reads.** The versioned
+  HTTP surface (ADR-061, with its stability statement) and the library surface: what `@workwell/*`
+  publishes, the semver policy, and the positioning vs `fqm-execution`. Locked decision 5 makes these the
+  primary deliverable, so read them before changing anything either one names
 - `docs/STANDARDS_CONFORMANCE.md` — what we may and may not claim to conform to → prefer the `conformance` skill
 - `docs/WEBCHART_API_ASSUMPTIONS_2026-07.md` + `docs/WEBCHART_FHIR_MAPPING.md` — Variant A is BUILT, Variant B is documented-not-built → prefer the `webchart` skill
 - `docs/MCP.md` — MCP security boundary + tool posture → prefer the `mcp` skill
