@@ -18,6 +18,58 @@
 >
 > **Sequence note:** ADR-033 does not exist — verified absent, and the number must not be reused.
 
+## ADR-064: one UCUM validator, shared by every translator we run — and an honest table rather than a new dependency
+
+**Status:** Accepted (2026-08-05). Closes #397, the follow-up ADR-060 named and deliberately did not bundle.
+
+**Context.** `LibraryManager(modelManager, options, cache, lazyUcumService, …)` takes the UCUM service as
+its **fourth** argument and defaults to one that *throws* `No default UCUM service available`. Every
+translator we build passed three arguments. So no CQL containing a quantity literal — `5 'mg'`, `1.0'cm'`,
+any `Quantity` comparison — could be translated at all.
+
+The user-visible surface was the Studio's **ELM Explorer**, which recompiles as the author types: valid
+unit-bearing CQL produced an error naming a missing service rather than anything about their code.
+
+**What makes this worth an ADR is how it hid.** It was invisible to the entire test suite and to
+`pnpm compile-measures` alike, because **no committed measure uses a unit**. Every gate was green and the
+feature was broken. It surfaced only when the V7 conformance harness ran CQL somebody else wrote, where it
+produced **155 of 183 apparent translation errors** — and was very nearly published as "the JS translator
+delta" (ADR-060). A defect that only third-party content can reach is an argument for running third-party
+content, which is the standing case for the conformance suite.
+
+**Decision 1 — one validator, in `src/measure/ucum.ts`, used by all three call sites.** The runtime
+translator, `scripts/compile-measures.mjs` and the conformance harness now share it. They must agree: a
+measure that compiles at build time and fails in the authoring UI — or the reverse — is a defect whose
+cause is invisible from either side. It moved out of `scripts/` because it is production code now.
+
+Consequence: `compile-measures` runs under `node --import tsx` (it imports a `.ts` module), following
+`gen-cql`'s precedent. Bare `node scripts/compile-measures.mjs` now fails, and the script header says so.
+
+**Decision 2 — it does not live in `@workwell/measure-engine`.** UCUM validation is a *translation-time*
+concern and the engine executes pre-compiled ELM; it never translates. Putting it there would add surface
+to a package whose whole claim is a two-dependency manifest, for a consumer that cannot use it.
+
+**Decision 3 — an honest grammar-plus-table, not a UCUM dependency, and it errs toward rejection.** A
+complete UCUM implementation is a new dependency, which CLAUDE.md makes an owner call. The table validates
+UCUM grammar plus a list of atoms and prefixes and **refuses an unrecognized atom rather than waving it
+through**. Now that this gates authoring, the direction of the error matters and this is the safe one:
+rejecting a legitimate unit is a visible complaint an author reports, while accepting a malformed one lets
+bad CQL through the gate and surfaces later as a wrong number. The remedy for a false rejection is adding
+the atom with the case that needed it. Limits are written in the module rather than implied.
+
+**Decision 4 — the previous behaviour stays reachable as `NO_UCUM_SERVICE`.** Not for production, which
+never passes it, but so the fix can be watched failing: the regression test asserts the same library
+compiles under the default and **fails** under it. A fix nobody can watch fail is a fix nobody can verify,
+and this codebase has now caught three guards that could not fire.
+
+**Verification.** `pnpm compile-measures` output is **byte-identical** — 16 measures + FHIRHelpers, not one
+file moved — so no committed measure's ELM changed. The conformance suite is unchanged (1622 pass, 213
+known non-passing, no regressions). A unit-free library compiles to identical ELM with and without the
+service, which is what licenses calling this change inert for everything already in the tree.
+
+**What this does NOT do.** It does not make any existing measure use units, and it does not claim complete
+UCUM conformance. It removes a wall an author would hit on their first unit-bearing measure.
+
 ## ADR-063: a package is publishable when its tarball runs outside the workspace — not when it is published
 
 **Status:** Accepted (2026-08-05). Roadmap M-C / C4. **Completes M-C.** Positioning + semver policy:

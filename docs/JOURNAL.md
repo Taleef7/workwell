@@ -1,5 +1,44 @@
 # Journal
 
+## 2026-08-05 (#397) — the translator gets a UCUM service, and the defect's whole interest is how it hid (branch `fix/ucum-translator-service`)
+
+ADR-064. Closes #397, the follow-up ADR-060 named and deliberately did not bundle.
+
+**The defect.** `LibraryManager` takes the UCUM service as its **fourth** argument and defaults to one
+that *throws*. We passed three. So no CQL with a quantity literal could translate — and the surface was
+the Studio's ELM Explorer, which recompiles as you type: an author writing valid unit-bearing CQL got an
+error naming a missing service rather than anything about their code.
+
+**How it hid, which is the part worth keeping.** It was invisible to the entire suite **and** to
+`pnpm compile-measures`, because no committed measure uses a unit. Every gate green, feature broken. It
+surfaced only when the V7 harness ran CQL somebody else wrote — 155 of 183 apparent translation errors —
+and was nearly published as "the JS translator delta". **A defect only third-party content can reach is
+the standing argument for running third-party content.**
+
+**One validator, three call sites.** `src/measure/ucum.ts` now serves the runtime translator, the
+build-time compiler and the harness. They must agree: a measure that compiles at build time and fails in
+the authoring UI, or the reverse, is a defect invisible from either side. It left `scripts/` because it is
+production code now, and `compile-measures` moved to `node --import tsx` to import it (gen-cql's
+precedent; bare `node` now fails and the header says so).
+
+**Not in `@workwell/measure-engine`** — UCUM validation is translation-time and the engine never
+translates. Adding it would grow the surface of a package whose whole claim is a two-dependency manifest,
+for a consumer that cannot use it.
+
+**An honest table, not a dependency, erring toward rejection.** Full UCUM is a new dep and therefore an
+owner call. Now that this gates authoring the direction of the error matters, and refusing an unrecognized
+atom is the safe one: a false rejection is a visible complaint an author reports; a false acceptance lets
+bad CQL through the gate and shows up later as a wrong number.
+
+**`NO_UCUM_SERVICE` keeps the before-state reachable.** Production never passes it; the regression test
+asserts the same library compiles under the default and **fails** under it. A fix nobody can watch fail is
+a fix nobody can verify — and this codebase has now caught three guards that could not fire.
+
+**Verified:** `pnpm compile-measures` **byte-identical** (16 measures + FHIRHelpers, nothing moved);
+conformance unchanged (1622 pass, 213 known non-passing, no regressions); a unit-free library compiles to
+identical ELM with and without the service, which is what licenses calling this inert for the existing
+tree. 7 new tests.
+
 ## 2026-08-05 (M-C / C4) — a package is publishable when its tarball runs outside the workspace, not when it is published (branch `feat/mc-c4-package-publishing`)
 
 ADR-063. **M-C is complete.** Scope stays neutral `@workwell/*` (owner call this session); pitching Doug

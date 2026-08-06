@@ -1,17 +1,30 @@
 /**
- * A minimal UCUM unit VALIDATOR for the conformance harness.
+ * A minimal UCUM unit VALIDATOR — the one the CQL translator uses, everywhere it runs.
  *
  * ## Why this exists at all — a finding, not a formality
  *
- * The first full run reported **183 translation errors, and 155 of them were the single message
- * `No default UCUM service available`** — i.e. our harness, not the JS translator, was rejecting every
- * expression containing a quantity. Publishing that 183 as "the JS translator delta" would have been
- * badly wrong, which is exactly what the plan's harness-vs-engine check existed to catch.
+ * `LibraryManager(modelManager, options, cache, lazyUcumService, …)` takes the UCUM service as its
+ * FOURTH argument and defaults to one that **throws** `No default UCUM service available`. So a
+ * translator built without one cannot compile any CQL containing a quantity literal — `5 'mg'`,
+ * `1.0'cm'`, any `Quantity` comparison.
  *
- * `LibraryManager(modelManager, options, cache, lazyUcumService, …)` takes the service as its FOURTH
- * argument and defaults to one that throws. `createUcumService(convertUnit, validateUnit)` builds it from
- * two callbacks — and probing showed the translator calls **`validateUnit` only**; conversion happens at
- * runtime inside `cql-execution`, which carries its own UCUM support. So validation is the whole contract.
+ * That was live in production until 2026-08-05 (#397): the Studio's ELM Explorer recompiles as you type,
+ * so an author writing perfectly valid unit-bearing CQL got an error naming a missing service rather than
+ * anything about their code. It went unnoticed because no committed measure uses a unit — the defect was
+ * invisible to every test and to `pnpm compile-measures` alike, and surfaced only when the V7 conformance
+ * harness (#296 / ADR-060) ran CQL somebody else wrote. **It accounted for 155 of that run's 183 apparent
+ * translation errors**, and publishing 183 as "the JS translator delta" would have been badly wrong.
+ *
+ * `createUcumService(convertUnit, validateUnit)` builds the service from two callbacks — and probing
+ * showed the translator calls **`validateUnit` only**; conversion happens at runtime inside
+ * `cql-execution`, which carries its own UCUM support. So validation is the whole contract.
+ *
+ * ## One validator, three call sites
+ *
+ * The runtime translator (`cql-translator.ts` → the ELM Explorer), the build-time compiler
+ * (`scripts/compile-measures.mjs`) and the conformance harness all use this module. They must agree:
+ * a measure that compiles at build time and fails in the authoring UI — or the reverse — is a defect
+ * whose cause is invisible from either side.
  *
  * ## Why not "return valid for everything"
  *
@@ -24,6 +37,12 @@
  * This validates the UCUM *grammar* plus a table of atoms and prefixes — enough to be honest, not a
  * complete UCUM implementation. An unrecognized atom is reported as invalid rather than waved through; if
  * that ever rejects something legitimate, the fix is to add the atom here with the case that needed it.
+ *
+ * **That trade-off is deliberate now that this gates authoring**, and it errs the safe way. Rejecting a
+ * legitimate unit is a visible complaint an author reports; accepting a malformed one lets bad CQL through
+ * the authoring gate and surfaces later as a wrong number. A full UCUM implementation is a dependency
+ * (`@lhncbc/ucum-lit` and friends), and CLAUDE.md's no-new-dependencies rule makes that an owner call —
+ * so the honest table is the choice, with its limits written down rather than implied.
  *
  * **A first draft said "the corpus uses six distinct units". It uses at least 18** — `mg`, `ml`,
  * `[lb_av]`, `a`, `d`, `h`, `min`, `mo`, `ms`, `s`, `wk` and `{eskimo_kisses}` among them (review, #398).
@@ -113,7 +132,7 @@ export function validateUnit(unit: string): string | null {
 export function convertUnit(value: number, from: string, to: string): number {
   if (from === to) return value;
   throw new Error(
-    `the conformance harness does not implement UCUM conversion (${from} → ${to}); ` +
+    `this translator does not implement UCUM conversion (${from} → ${to}); ` +
       `translation never requests it and cql-execution converts at runtime`,
   );
 }

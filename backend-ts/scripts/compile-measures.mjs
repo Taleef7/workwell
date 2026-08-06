@@ -4,7 +4,10 @@
  * Java-free. Emits committed ELM JSON consumed by the runtime engine
  * (src/engine/cql/CqlExecutionEngine).
  *
- *   node scripts/compile-measures.mjs [measures-src-dir] [out-elm-dir]
+ *   pnpm compile-measures [measures-src-dir] [out-elm-dir]
+ *
+ * Runs under `node --import tsx` because it shares the UCUM validator with the runtime translator
+ * (#397) and that module is TypeScript. Invoking it with bare `node` now fails on that import.
  *
  * Resources (src/measure/resources): System + FHIR R4 model-info XML and
  * FHIRHelpers CQL — standard, version-stable config (not a Java dependency).
@@ -18,8 +21,13 @@ import {
   CqlTranslator,
   createModelInfoProvider,
   createLibrarySourceProvider,
+  createUcumService,
   stringAsSource,
 } from "@cqframework/cql/cql-to-elm";
+// The SAME validator the runtime translator uses (#397). Build-time and authoring-time must agree:
+// a measure that compiles here and fails in the ELM Explorer — or the reverse — is a defect whose cause
+// is invisible from either side. Importing a `.ts` module is why this script runs under `--import tsx`.
+import { convertUnit, validateUnit } from "../src/measure/ucum.ts";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, "..");
@@ -50,7 +58,9 @@ function manager() {
       name === "System" ? stringAsSource(systemModelInfoXml) : name === "FHIR" ? stringAsSource(fhirModelInfoXml) : null,
     ),
   );
-  const lm = new LibraryManager(mm);
+  // Positional: (modelManager, cqlCompilerOptions, libraryCache, lazyUcumService, …). Without the
+  // fourth argument the default service THROWS on any quantity literal, so no measure could use a unit.
+  const lm = new LibraryManager(mm, undefined, undefined, createUcumService(convertUnit, validateUnit));
   lm.librarySourceLoader.registerProvider(
     createLibrarySourceProvider((name) => (name === "FHIRHelpers" ? stringAsSource(fhirHelpersCql) : null)),
   );
