@@ -269,9 +269,16 @@ Suite **1910**, 0 fail.
 
 **Next, in order:** **M-E1** (the occupational content pack — locked decision 6's differentiator, the part
 no competitor obtains by downloading CMS artifacts), then **M-D0/D1** (re-aim at US Quality Core; run the
-Inferno **US Quality Core Test Kit** against the shim output). **Smaller open items:** **#397** (the
-production translator has no UCUM service, so the ELM Explorer cannot compile CQL with a quantity literal)
-and **#377** (retire the authored cms122/125 subsets to the fidelity lab — locked decision 7). **Still
+Inferno **US Quality Core Test Kit** against the shim output). **Smaller open items:** **#377** (retire the authored
+cms122/125 subsets to the fidelity lab — locked decision 7). **#397 is CLOSED (ADR-064):** one UCUM
+validator in `src/measure/ucum.ts` now serves the runtime translator, `compile-measures` and the
+conformance harness, so unit-bearing CQL compiles in the ELM Explorer. `compile-measures` output is
+**byte-identical** and conformance is unchanged, so the change is inert for everything already committed.
+The defect's interest is how it hid — invisible to the suite AND to `compile-measures` because no
+committed measure uses a unit, reachable only by CQL somebody else wrote. It is NOT in the engine package
+(translation-time concern; the engine never translates), it uses an honest grammar-plus-table rather than
+a new UCUM dependency (owner call) and **errs toward rejection**, and `NO_UCUM_SERVICE` keeps the
+before-state reachable so the regression test can watch the fix fail. **Still
 undiagnosed:** CMS125's 2 `Procedure`-only cases, CMS2's 7 `NUMER 1→0`, and CMS130/CMS165 unswept
 (credentialed vendor workflow). **Unsolved, named:** the wave-2 measures are MADiE-gated but unroutable —
 they have no authored counterpart, so `flip-snapshot`'s authored-vs-official comparison cannot run for
