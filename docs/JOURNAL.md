@@ -34,6 +34,17 @@ bad CQL through the gate and shows up later as a wrong number.
 asserts the same library compiles under the default and **fails** under it. A fix nobody can watch fail is
 a fix nobody can verify — and this codebase has now caught three guards that could not fire.
 
+**Review found three defects in the table, two of them the exact directions the ADR weighs.** A false
+REJECTION — `mg/(kg.d)`, an ordinary dose rate, split into `["mg", "(kg", "d)"]` by a regex; parenthesised
+subterms are now parsed recursively, which also fixed a **leading solidus** (`/min`, `/uL`) nobody
+reported. And two false ACCEPTANCES: `m[lb_av]` validated because `m` is a prefix and `[lb_av]` an atom,
+but UCUM prefixes attach to **metric** atoms only and there is no millipound (the table is now split
+metric/non-metric; `mmHg` removed as not-a-UCUM-symbol, `mm[Hg]` being milli + `m[Hg]`); and `mg / dL`
+passed because each component was trimmed. **One review point was wrong and is refused with the grammar
+cited:** repeated `/` is legal — `<term>` is left-recursive, so `mg/kg/d` is `(mg/kg)/d` — and "fixing" it
+would have added a fourth false rejection. Pinned as a test. Writing the tests then caught a defect of my
+own: the leading-solidus allowance applied recursively accepted the empty group `mg/()`.
+
 **Verified:** `pnpm compile-measures` **byte-identical** (16 measures + FHIRHelpers, nothing moved);
 conformance unchanged (1622 pass, 213 known non-passing, no regressions); a unit-free library compiles to
 identical ELM with and without the service, which is what licenses calling this inert for the existing

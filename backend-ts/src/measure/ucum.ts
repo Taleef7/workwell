@@ -53,52 +53,130 @@
  * unit in it validates, so the claim maintains itself instead of needing to be believed.
  */
 
-/** UCUM prefix symbols (case-sensitive, as UCUM requires). */
-const PREFIXES = [
-  "Y", "Z", "E", "P", "T", "G", "M", "k", "h", "da",
-  "d", "c", "m", "u", "n", "p", "f", "a", "z", "y",
-];
+/** UCUM prefix symbols (case-sensitive, as UCUM requires), longest first so `da` beats `d`. */
+const PREFIXES = ["da", "Y", "Z", "E", "P", "T", "G", "M", "k", "h", "d", "c", "m", "u", "n", "p", "f", "a", "z", "y"];
 
 /**
- * UCUM atom symbols. Deliberately broader than the corpus needs — clinical quantities that show up in
- * real measure CQL are included so this module is reusable beyond the conformance run.
+ * **Metric** atoms — the only ones a prefix may attach to (UCUM §11: prefixes combine with metric units
+ * alone). Splitting the table this way is what stops `m[lb_av]` from validating: `[lb_av]` is a real atom
+ * and `m` is a real prefix, but an avoirdupois pound is not metric, so "millipound" is not a unit
+ * (Codex review, #402).
  */
-const ATOMS = new Set([
-  // base + common SI
+const METRIC_ATOMS = new Set([
+  // base + derived SI
   "m", "s", "g", "rad", "K", "C", "cd", "mol",
   "L", "l", "Hz", "N", "Pa", "J", "W", "A", "V", "F", "Ohm", "S", "Wb", "T", "H", "lm", "lx", "Bq", "Gy", "Sv",
-  // time
-  "min", "h", "d", "wk", "mo", "a", "ms",
-  // clinical / lab
-  "U", "IU", "eq", "osm", "pH", "kat", "Cel", "bar", "atm",
-  "mmHg", "m[Hg]", "[in_i]", "[ft_i]", "[lb_av]", "[oz_av]", "[degF]",
-  "[iU]", "[IU]", "[pH]", "[ppm]", "[ppb]", "%",
-  // dimensionless
+  // clinical / lab, all metric in UCUM
+  "U", "eq", "osm", "kat", "Cel", "bar", "[iU]", "[IU]",
+  // `m[Hg]` is the metric atom; `mm[Hg]` is milli + m[Hg]. Plain `mmHg` is NOT a UCUM symbol and is
+  // deliberately absent — accepting it would be the false acceptance this module exists to avoid.
+  "m[Hg]", "m[H2O]",
+]);
+
+/**
+ * **Non-metric** atoms — valid on their own, never with a prefix. Time units above the second are the
+ * common surprise: `s` is metric, `min`/`h`/`d`/`wk`/`mo`/`a` are not.
+ */
+const NON_METRIC_ATOMS = new Set([
+  "min", "h", "d", "wk", "mo", "a",
+  "atm", "[in_i]", "[ft_i]", "[lb_av]", "[oz_av]", "[degF]",
+  "[pH]", "[ppm]", "[ppb]", "%",
   "1",
 ]);
 
-/** `{anything}` is a UCUM annotation and is always legal after a term (or standing alone). */
+/** `{anything}` is a UCUM annotation: legal after a unit, or standing alone as a dimensionless label. */
 const ANNOTATION = /\{[^{}]*\}/g;
 
 function validAtom(sym: string): boolean {
-  if (ATOMS.has(sym)) return true;
+  if (METRIC_ATOMS.has(sym) || NON_METRIC_ATOMS.has(sym)) return true;
   // Longest-prefix-first, so `da` is tried before `d` and `mol` is not read as `m` + `ol`.
-  for (const p of [...PREFIXES].sort((a, b) => b.length - a.length)) {
-    if (sym.startsWith(p) && ATOMS.has(sym.slice(p.length))) return true;
+  // Only METRIC atoms are prefixable.
+  for (const p of PREFIXES) {
+    if (sym.startsWith(p) && METRIC_ATOMS.has(sym.slice(p.length))) return true;
   }
   return false;
 }
 
-/** One component: an optional atom with an optional integer exponent, e.g. `cm3`, `s-1`, `10*3`. */
-function validComponent(raw: string): boolean {
-  const c = raw.trim();
+/**
+ * Splits a term on its TOP-LEVEL `.` and `/` operators, leaving parenthesised subterms and annotations
+ * intact. `null` means the parentheses or braces do not balance.
+ *
+ * Splitting with a plain regex — as the first version did — turns `mg/(kg.d)` into `["mg", "(kg", "d)"]`
+ * and rejects a perfectly ordinary dose rate (Codex review, #402). That is a false REJECTION, the
+ * failure mode this module claims to prefer but which still blocks an author for no reason.
+ */
+function splitTopLevel(term: string): string[] | null {
+  const parts: string[] = [];
+  let depth = 0;
+  let inAnnotation = false;
+  let current = "";
+  for (const ch of term) {
+    if (inAnnotation) {
+      current += ch;
+      if (ch === "}") inAnnotation = false;
+      else if (ch === "{") return null; // nested braces are not UCUM
+      continue;
+    }
+    if (ch === "{") { inAnnotation = true; current += ch; continue; }
+    if (ch === "}") return null; // unopened
+    if (ch === "(") { depth += 1; current += ch; continue; }
+    if (ch === ")") { depth -= 1; if (depth < 0) return null; current += ch; continue; }
+    if ((ch === "." || ch === "/") && depth === 0) { parts.push(current); current = ""; continue; }
+    current += ch;
+  }
+  if (depth !== 0 || inAnnotation) return null;
+  parts.push(current);
+  return parts;
+}
+
+/** A `(...)` group whose parenthesis closes only at the very end — i.e. the whole component is one group. */
+function wholeGroup(c: string): string | null {
+  if (!c.startsWith("(")) return null;
+  let depth = 0;
+  for (let i = 0; i < c.length; i += 1) {
+    if (c[i] === "(") depth += 1;
+    else if (c[i] === ")") {
+      depth -= 1;
+      if (depth === 0) return i === c.length - 1 ? c.slice(1, -1) : null;
+    }
+  }
+  return null;
+}
+
+/** One component: a parenthesised term, an annotation, a numeric factor, or an atom with an exponent. */
+function validComponent(c: string): boolean {
   if (c === "") return false;
-  if (c === "1") return true;
+
+  const inner = wholeGroup(c);
+  if (inner !== null) return validTerm(inner);
+
+  // Annotations carry no dimension. `mg{total}` is `mg`; `{tablet}` alone is dimensionless-but-valid.
+  const stripped = c.replace(ANNOTATION, "");
+  if (stripped === "") return true;
+  if (stripped === "1") return true;
   // Numeric factor, e.g. `10*3` or a bare integer.
-  if (/^\d+(\*[+-]?\d+)?$/.test(c)) return true;
-  const m = /^([^\d+-]+)([+-]?\d+)?$/.exec(c);
+  if (/^\d+(\*[+-]?\d+)?$/.test(stripped)) return true;
+  const m = /^([^\d+-]+)([+-]?\d+)?$/.exec(stripped);
   if (!m) return false;
   return validAtom(m[1]!);
+}
+
+/**
+ * A UCUM term: components joined by `.` and `/`.
+ *
+ * **Repeated `/` is legal**, contrary to one review comment: the UCUM grammar is
+ * `<term> ::= <term> "." <component> | <term> "/" <component> | <component>`, which is left-recursive,
+ * so `mg/kg/d` parses as `(mg/kg)/d`.
+ *
+ * A leading `/` is NOT handled here. UCUM puts it on the outermost production only —
+ * `<main-term> ::= "/" <term> | <term>` — so `/min` is a unit while `mg/()` is not. Applying the
+ * allowance recursively (the first cut) accepted the empty group, which a test caught.
+ */
+function validTerm(term: string): boolean {
+  if (term === "") return false;
+  const parts = splitTopLevel(term);
+  if (parts === null) return false;
+  return parts.every((p) => validComponent(p));
 }
 
 /**
@@ -108,18 +186,18 @@ function validComponent(raw: string): boolean {
  * chosen here.
  */
 export function validateUnit(unit: string): string | null {
+  // Trimming the OUTSIDE is our own hygiene; whitespace INSIDE is the author's error. UCUM codes contain
+  // no whitespace at all, and the previous version trimmed each component — which quietly accepted
+  // `mg / dL` (Codex review, #402). That is a false ACCEPTANCE, the direction this module claims not to
+  // fail in, so it is the more serious of the two shapes.
   const u = (unit ?? "").trim();
   if (u === "") return "empty unit";
+  if (/\s/.test(u)) return `'${unit}' is not a valid UCUM unit (UCUM codes contain no whitespace)`;
 
-  // Annotations carry no dimension — strip them, but a unit that is ONLY an annotation is valid.
-  const stripped = u.replace(ANNOTATION, "");
-  if (stripped === "") return null;
-
-  for (const component of stripped.split(/[./]/)) {
-    if (!validComponent(component)) {
-      return `'${unit}' is not a valid UCUM unit (component '${component.trim()}' is unrecognized)`;
-    }
-  }
+  // `<main-term> ::= "/" <term> | <term>` — a leading solidus is the outermost production only, which is
+  // why `/min` is a unit and `mg/()` is not.
+  const term = u.startsWith("/") ? u.slice(1) : u;
+  if (!validTerm(term)) return `'${unit}' is not a valid UCUM unit`;
   return null;
 }
 

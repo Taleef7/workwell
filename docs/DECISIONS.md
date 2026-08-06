@@ -62,6 +62,31 @@ never passes it, but so the fix can be watched failing: the regression test asse
 compiles under the default and **fails** under it. A fix nobody can watch fail is a fix nobody can verify,
 and this codebase has now caught three guards that could not fire.
 
+**What review changed, and one place it was wrong.** The first cut's table was a flat `ATOMS` set split
+on `.` and `/` by regex, and code review found three defects in it — two of which are the two directions
+this ADR claims to weigh, so they are recorded rather than quietly patched:
+
+1. **A false REJECTION: grouped denominators.** `mg/(kg.d)` — an ordinary dose rate — split into
+   `["mg", "(kg", "d)"]` and was refused. Parenthesised subterms are now parsed recursively. The same
+   rewrite fixed a case review did not report: a **leading solidus** (`/min`, `/uL`) was refused, and it
+   is UCUM's `<main-term> ::= "/" <term> | <term>`.
+2. **A false ACCEPTANCE: prefixes on non-metric atoms.** `m[lb_av]` validated because `m` is a prefix and
+   `[lb_av]` an atom — but UCUM permits prefixes on **metric** units only, and there is no millipound.
+   The table is now split into `METRIC_ATOMS` and `NON_METRIC_ATOMS`. Time units above the second are the
+   same trap: `s` is metric, `min`/`h`/`d`/`wk`/`mo`/`a` are not. `mmHg` was also removed — it is not a
+   UCUM symbol; `mm[Hg]` is milli + the metric atom `m[Hg]`.
+3. **A false ACCEPTANCE: internal whitespace.** Per-component `trim()` accepted `mg / dL`. UCUM codes
+   contain no whitespace; trimming the outside is our hygiene, whitespace inside is the author's error.
+
+**Rejected, with the grammar as the reason:** the same review held that an ungrouped expression permits
+only one division operator, making `mg/kg/d` invalid. It does not — `<term>` is left-recursive
+(`<term> ::= <term> "." <component> | <term> "/" <component> | <component>`), so `mg/kg/d` parses as
+`(mg/kg)/d`. "Fixing" it would have introduced a fourth false rejection. It is pinned as a test so nobody
+re-derives the wrong conclusion.
+
+Writing the tests for (1) then caught a defect of my own: applying the leading-solidus allowance inside
+`validTerm` rather than at the main term accepted the empty group `mg/()`.
+
 **Verification.** `pnpm compile-measures` output is **byte-identical** — 16 measures + FHIRHelpers, not one
 file moved — so no committed measure's ELM changed. The conformance suite is unchanged (1622 pass, 213
 known non-passing, no regressions). A unit-free library compiles to identical ELM with and without the
