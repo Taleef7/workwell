@@ -245,7 +245,7 @@ fact: **the engine's constructor loads `FHIRHelpers-4.0.1` eagerly**, so every c
 **Done 2026-08-05 (M-C / C4 — ADR-063). M-C IS COMPLETE.** Scope is **neutral `@work-well/*`** (owner call);
 `@mieweb/*` stays a later pitch, cheap to defer because there are no external consumers yet. **The
 publishable set is `measure-engine` + `measure-codegen`** — `official-executor` is deliberately excluded
-(publishing it would advertise, as a `@workwell` product, the `fqm-execution` dependency the engine's
+(publishing it would advertise, as a `@work-well` product, the `fqm-execution` dependency the engine's
 manifest exists to exclude), and `example-consumer` is a test. **The verification is packing and
 consuming, not publishing:** `pnpm verify:publish` (CI's `packages` job, **every PR**) packs real tarballs,
 installs them into a temp dir with a plain `npm install` and no knowledge of this repo, runs the engine
@@ -254,9 +254,11 @@ finally turns `example-consumer` from a consumer-outside-the-**app** into one ou
 `publishConfig` keeps the two resolutions apart (tree → `src/*.ts` so `pnpm typecheck` reads real sources;
 tarball → `dist/`), and that **fixes the package manager**: `publishConfig` field rewriting is a pnpm
 feature, so `npm pack` would ship a manifest still pointing at source. **Nothing is published and the docs
-say so** — `publish-packages.yml` is dispatch-only, dry-run by default, and cannot succeed until the
-`@workwell` scope and `NPM_TOKEN` exist (ADR-041's inert-until-the-secret pattern; owner steps in the file
-header). `docs/PACKAGES.md` carries the positioning — **composes `fqm-execution`, does not compete with
+say so** — `publish-packages.yml` is dispatch-only and dry-run by default (ADR-041's
+inert-until-the-secret pattern; owner steps in the file header). It could not succeed at all until
+**2026-08-06**, when the `work-well` org and `NPM_TOKEN` were created; **it still has not been run**, and
+the scope is `@work-well/*` rather than `@workwell/*` because an unrelated unscoped `workwell` package
+blocks the org name (ADR-063 amendment). `docs/PACKAGES.md` carries the positioning — **composes `fqm-execution`, does not compete with
 it**, evidenced by our own routing (official eCQMs run on `fqm-execution` in production) — and states that
 **no performance or conformance comparison against it has been run, so none is claimed**. Semver is
 pre-1.0 read strictly (removals/semantic changes take the minor; pin `~0.1.0`), 1.0 gated on a consumer
@@ -282,9 +284,10 @@ before-state reachable so the regression test can watch the fix fail. **Still
 undiagnosed:** CMS125's 2 `Procedure`-only cases, CMS2's 7 `NUMER 1→0`, and CMS130/CMS165 unswept
 (credentialed vendor workflow). **Unsolved, named:** the wave-2 measures are MADiE-gated but unroutable —
 they have no authored counterpart, so `flip-snapshot`'s authored-vs-official comparison cannot run for
-them. **Deferred, not cancelled:** supplemental data (B8). **Owner steps:** create the `@workwell` npm
-scope + `NPM_TOKEN` if/when publishing is wanted; confirm with Doug/Nicole that certifying WorkWell's
-engine is not a business goal.
+them. **Deferred, not cancelled:** supplemental data (B8). **Owner steps:** the npm prerequisites are
+**DONE (2026-08-06)** — the `work-well` org exists and `NPM_TOKEN` is set, so the only remaining publish
+step is dispatching `publish-packages.yml` (dry run first); **nothing is published yet**. Still open:
+confirm with Doug/Nicole that certifying WorkWell's engine is not a business goal.
 
 **Three standing corrections.** "~2030" for CMS FHIR endpoints is **not CMS-attributable** (say "no
 published date"). **"QI-Core STU7 = US Core 7 = WebChart's exact surface"** is half right: the equality

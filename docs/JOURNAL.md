@@ -1,5 +1,55 @@
 # Journal
 
+## 2026-08-06 — the npm scope is `@work-well`, because `@workwell` was never obtainable (branch `chore/npm-scope-work-well`)
+
+ADR-063 amendment + `LOCKED_DECISIONS.md` §4.5 note. **The `work-well` org exists and `NPM_TOKEN` is
+set; nothing is published yet.**
+
+**The cause.** An unrelated unscoped package named `workwell` already exists on npm, and npm refuses an
+**org** name that collides with an existing **package** name. The org could not be created, which is how
+this surfaced — in the owner's browser, at org-creation time.
+
+**My pre-flight check was wrong in a way worth keeping.** It verified `@workwell/measure-engine` (404),
+the `scope:workwell` registry search (empty) and `registry.npmjs.org/-/org/workwell` (404), and concluded
+the scope was unclaimed. All three were true and **none is the gate** — `registry.npmjs.org/workwell`
+returns **200**. Nothing a test could reach; the same shape as ADR-063's other finding, a check cited for
+more than it covers. Hyphen not underscore: npm scopes conventionally use hyphens and `@work_well` reads
+as a typo in an install command.
+
+**The decision did not change** — a neutral scope rather than `@mieweb/*` — only the spelling, so
+LOCKED_DECISIONS §4.5 and ADR-063 carry the reason rather than being silently rewritten.
+
+**Deliberately untouched:** `nurse@workwell.test` email domains and `urn:workwell:*` identifiers. They
+are not the npm scope, and ADR-046 makes the urn form load-bearing for authored-measure identity.
+
+**Three things the rename missed, each found by a different mechanism, and all the same shape — a sweep
+narrower than the claim it was cited for.**
+
+1. **A guard caught the first.** `fqm-isolation.test.ts` writes the specifier as an escaped regex
+   (`@workwell\/official-executor`), so `@workwell/` did not match; test 5/5 — the ADR-026 quarantine
+   door — failed with an **empty importer list** rather than passing vacuously. The one place in the diff
+   where a silent miss would have mattered.
+2. **Review caught the second.** Bare `@workwell` with no trailing slash survived in
+   `publish-packages.yml`'s owner steps, which instructed the owner to create an org npm refuses. A sweep
+   for the class then found **three more in CLAUDE.md** that review had not flagged.
+3. **Review caught the third, and it is the one I should have known better than to do.** The sed rewrote
+   **every dated JOURNAL entry back to 2026-07-24**, making the 2026-08-05 entry claim `@work-well/*` was
+   that day's owner call. It was not. I had been careful not to rewrite LOCKED_DECISIONS for exactly this
+   reason and then did it to the journal by machine. The file is restored to its pre-rename state; this
+   entry is the record instead.
+
+**Also fixed, and larger than a spelling change:** `publish-packages.yml`'s header said the workflow
+"cannot succeed today" because the scope and token do not exist. Both are now false. It also now states
+what the dry run does **not** do — it stops before the publish step, so it never exercises `NPM_TOKEN`,
+and a token whose scope selection misses `@work-well` passes the dry run and fails the real one.
+
+**CI silently ran nothing on the PR.** `ci.yml`'s push trigger did not list `chore/**`, so the branch got
+zero checks — and "no checks" is visually identical to "nothing to run". `chore/**` and `docs/**` added,
+with the hazard named in a comment; the list stays explicit because `official-cases` clones ~34 MB and can
+take 20 minutes.
+
+Suite 1921, 0 fail. `pnpm verify:publish` green under the new scope.
+
 ## 2026-08-05 (#397) — the translator gets a UCUM service, and the defect's whole interest is how it hid (branch `fix/ucum-translator-service`)
 
 ADR-064. Closes #397, the follow-up ADR-060 named and deliberately did not bundle.
@@ -21,7 +71,7 @@ the authoring UI, or the reverse, is a defect invisible from either side. It lef
 production code now, and `compile-measures` moved to `node --import tsx` to import it (gen-cql's
 precedent; bare `node` now fails and the header says so).
 
-**Not in `@work-well/measure-engine`** — UCUM validation is translation-time and the engine never
+**Not in `@workwell/measure-engine`** — UCUM validation is translation-time and the engine never
 translates. Adding it would grow the surface of a package whose whole claim is a two-dependency manifest,
 for a consumer that cannot use it.
 
@@ -52,7 +102,7 @@ tree. 7 new tests.
 
 ## 2026-08-05 (M-C / C4) — a package is publishable when its tarball runs outside the workspace, not when it is published (branch `feat/mc-c4-package-publishing`)
 
-ADR-063. **M-C is complete.** Scope stays neutral `@work-well/*` (owner call this session); pitching Doug
+ADR-063. **M-C is complete.** Scope stays neutral `@workwell/*` (owner call this session); pitching Doug
 on `@mieweb/*` remains a later option, and it is cheap to defer precisely because there are no external
 consumers yet.
 
@@ -111,13 +161,13 @@ Suite 1910, 0 fail (+5, the rewrite's precision tests). Typecheck clean. `pnpm v
 
 Two packages, ADR-062. C4 (publish) is the only piece of M-C left.
 
-**`@work-well/measure-codegen` — zero dependencies.** `generate-cql.ts` has **zero imports**, so it never
+**`@workwell/measure-codegen` — zero dependencies.** `generate-cql.ts` has **zero imports**, so it never
 shared code with the engine, only a directory. The engine answers *"is this patient compliant?"* from
 compiled ELM; codegen answers *"what CQL expresses this rule?"*. Authoring-time versus runtime. A consumer
 evaluating measures should not have to take a CQL emitter, and a browser-side rule builder should not have
 to take a CQL runtime — being dependency-free, this one runs in a browser.
 
-**`@work-well/example-consumer` — a test, not a sample.** ADR-059's boundary test proves the engine imports
+**`@workwell/example-consumer` — a test, not a sample.** ADR-059's boundary test proves the engine imports
 no WorkWell content; that is a claim about the *source tree*, not about whether the package is usable by
 someone who has none. So this package pretends to be that someone: one dependency, its own measure
 (`tetanus-booster.cql` + the ELM compiled from it, neither referenced by the app), its own FHIR bundle. It
@@ -299,7 +349,7 @@ Also delivered: a browsable map of all 58 with the classification and a plain-En
 private artifact outside the repo. **Nothing in the record was edited or renumbered** — bodies are verbatim in the archive. ADR-033
 still does not exist and its number is still not to be reused.
 
-## 2026-08-05 (M-C / C1) — `@work-well/measure-engine` exists, and the question that blocked it for two weeks was the cheap one to answer (branch `feat/measure-engine-extraction`)
+## 2026-08-05 (M-C / C1) — `@workwell/measure-engine` exists, and the question that blocked it for two weeks was the cheap one to answer (branch `feat/measure-engine-extraction`)
 
 The extraction has been promised since 2026-07-24 and deferred twice. It was never a lifting problem:
 `engine-core-boundary.test.ts` had already decided and enforced where the boundary sits. It was **one
@@ -1391,7 +1441,7 @@ typecheck clean; every new guard mutation-checked.
 
 ## 2026-07-31 (M-C) — the app-side exclusions are decided; what the package does with CONTENT is not (branch `feat/measure-engine-package`)
 
-M-C promises `@work-well/measure-engine` with two dependencies. The workspace and
+M-C promises `@workwell/measure-engine` with two dependencies. The workspace and
 `packages/official-executor` already exist, and `engine-boundary.test.ts` already proves `src/engine/` is
 self-contained — so the open question was never "can it be lifted" but **what belongs in it**, which
 task #4 called the published-API decision and which nothing had decided.
@@ -1670,7 +1720,7 @@ Counting the app's imports from `engine/`:
 | `ingress/webchart/live-directory.ts` | 20 |
 | `synthetic/exam-config.ts` | 19 |
 
-**The largest single export of a wholesale `@work-well/measure-engine` would be a directory of 150 fake
+**The largest single export of a wholesale `@workwell/measure-engine` would be a directory of 150 fake
 employees.** Nobody installs a measure engine to get demo data. The roadmap already says the package is
 "cql-execution+cql-exec-fhir only" — so `synthetic/` (5 files) and `ingress/` (15) are app concerns that
 happen to live under `engine/`, and M-C is a **boundary split**, not the file move the task name implies.
@@ -3463,13 +3513,13 @@ rewritten, preserving the decision record. Full suite
 **1450 pass / 0 fail / 14 skipped**.
 
 
-## 2026-07-24 (evening) — PR-4: `@work-well/official-executor`, the fqm quarantine as a package (branch `feat/official-executor-package`)
+## 2026-07-24 (evening) — PR-4: `@workwell/official-executor`, the fqm quarantine as a package (branch `feat/official-executor-package`)
 
 Roadmap §7.4 PR-4. ADR-026 quarantined `fqm-execution` (axios/handlebars/moment/lodash) behind a
 **file-allowlist** arch test, because those deps must never reach the worker's cold-start or request
 path. That allowlist could not survive official-first execution, where fqm legitimately becomes a
 *production* evaluation path (PR-7) — so the quarantine is now **structural**: the dependency lives in
-`backend-ts/packages/official-executor` (`@work-well/official-executor`, pinned 1.8.5) and nowhere else,
+`backend-ts/packages/official-executor` (`@workwell/official-executor`, pinned 1.8.5) and nowhere else,
 and that package's entry imports it only through a lazy `await import`.
 
 **What the package owns** — the fqm-facing machinery that was **duplicated across both call sites** and
@@ -3521,7 +3571,7 @@ sources, which previously included no package test file at all. Five doc inaccur
 `DISCLAIMER` string that **ships in the API response** still calling fqm "diagnostic-only", and a
 Dockerfile comment claiming fqm is a backend-ts dependency — `pnpm list --prod --depth 3` confirms it
 survives the deploy prune transitively through the workspace package. Full suite 1440 pass / 0 fail / 14 skipped. Two further escapes, both found by Codex and neither by me: **(a) nothing guarded who may
-import the PACKAGE** — a route or run-pipeline module could import `@work-well/official-executor` and call
+import the PACKAGE** — a route or run-pipeline module could import `@workwell/official-executor` and call
 `loadCalculator()`, putting the heavy graph on a request path with all guards green; the executor-import
 allowlist was written into roadmap §7.1 and simply not implemented. **(b) the package scan read only
 `index.ts`**, so a helper module with a static fqm import, imported by `index.ts`, would load the graph at
@@ -3618,7 +3668,7 @@ direction; working copy also at `~/.claude/plans/snappy-herding-journal.md`). He
 (promote the fqm-execution literal machinery to a per-measure-routed `officialMeasureExecutor` behind
 `WORKWELL_OFFICIAL_MEASURES`, MADiE cases as permanent CI gates, authored cms122/125 subsets retire to
 the fidelity lab), **M-B QRDA-I/III + Cypress CVU+ validated loop**, **M-C pnpm-workspace extraction
-publishing `@work-well/*`** (measure-engine w/ only cql-execution+cql-exec-fhir deps; official-executor as
+publishing `@workwell/*`** (measure-engine w/ only cql-execution+cql-exec-fhir deps; official-executor as
 the fqm quarantine package), **M-D WebChart breadth + the compliance API contract**, **M-E occupational
 content pack published in the community `dqm-content` shape + CQI WG cadence**. Verified en route: all 8
 priority measures have official QICore v1.0.000 artifacts + MADiE test cases in

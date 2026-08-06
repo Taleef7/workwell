@@ -20,7 +20,7 @@ everyone already knows.
 ### What deliberately does not ship
 
 - **`@work-well/official-executor`** — the sole home of `fqm-execution`, and the package boundary *is*
-  the ADR-026 quarantine. Publishing it would advertise, as a `@workwell` product, exactly the
+  the ADR-026 quarantine. Publishing it would advertise, as a `@work-well` product, exactly the
   dependency the engine package exists to keep out of its own manifest.
 - **`@work-well/example-consumer`** — a test (ADR-062), not a sample.
 - **Measure content.** No catalog, no compiled ELM, no value-set expansions (ADR-059). WorkWell's
@@ -112,13 +112,19 @@ has tested.
 
 ## 4. Provenance
 
-Published from `.github/workflows/publish-packages.yml` with `npm publish --provenance`, which attests
-which commit, workflow and runner produced each tarball. A consumer can verify the package against this
-source rather than trusting the registry.
+Published from `.github/workflows/publish-packages.yml`, which runs `pnpm publish` with
+`NPM_CONFIG_PROVENANCE` and `publishConfig.provenance` set — npm then attests which commit, workflow and
+runner produced each tarball, so a consumer can verify the package against this source rather than
+trusting the registry. Provenance requires a public repository, and this one is public.
 
-**Status: nothing is published yet, and the workflow cannot succeed today.** The `@workwell` npm scope
-does not exist and `NPM_TOKEN` is not set. This is stated rather than glossed because "published" is a
-claim with an easy external check.
+**Status (2026-08-06): nothing is published.** The prerequisites now exist — the `work-well` npm org and
+the `NPM_TOKEN` secret — so the workflow *can* succeed, which it could not before today. It remains
+`workflow_dispatch`-only and defaults to a dry run. This is stated rather than glossed because
+"published" is a claim with a trivial external check (`npm view @work-well/measure-engine`).
+
+**The dry run does not exercise the token.** It stops before the publish step, by design — a dry run that
+could publish would not be one. So a token whose scope selection does not cover `@work-well` passes the
+dry run and fails the real one; that is a known trade, not a gap.
 
 What *is* verified today, on every PR, is the harder half — `pnpm verify:publish` (CI's `packages` job)
 builds real tarballs, installs them into a temp directory with a plain `npm install`, and then runs the
@@ -132,7 +138,16 @@ Owner steps to first publish are listed at the top of the workflow file.
 
 ## 5. Scope name
 
-**`@work-well/*`**, neutral, decided 2026-08-05. `@mieweb/*` remains a live option to pitch once the
-packages have proven themselves; the roadmap's own wording is *"pitch Doug on `@mieweb/*` once proven."*
-Renaming a scope later costs a deprecation notice on two packages that have no external consumers yet —
-which is precisely why now is the cheap moment to defer the decision rather than force it.
+**`@work-well/*`**. What was decided on **2026-08-05** was *neutrality* — a scope of our own rather than
+`@mieweb/*`. The spelling was settled on **2026-08-06** and the two are worth keeping apart, because only
+the first was a judgement.
+
+`@workwell` is not available and never was: an unrelated **unscoped** package named `workwell` exists on
+npm, and npm refuses an **org** name colliding with an existing **package** name. Hyphen rather than
+underscore is npm convention — `@work_well` reads as a typo in an install command. Full reasoning, and the
+pre-flight check that missed it, in the ADR-063 amendment.
+
+`@mieweb/*` remains a live option to pitch once the packages have proven themselves; the roadmap's wording
+is *"pitch Doug on `@mieweb/*` once proven."* Renaming a scope later costs a deprecation notice on two
+packages that have no external consumers yet — which is precisely why this is the cheap moment to defer
+that decision rather than force it.
