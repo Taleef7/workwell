@@ -17,6 +17,7 @@
 
 ## Titles (newest first)
 
+- ADR-064: one UCUM validator, shared by every translator we run — and an honest table rather than a new dependency
 - ADR-063: a package is publishable when its tarball runs outside the workspace — not when it is published
 - ADR-062: codegen is not the engine, and a consumer that shares no code with the app is the only proof the split worked
 - ADR-061: the compliance API says where its numbers came from, and 404s rather than answering an absence

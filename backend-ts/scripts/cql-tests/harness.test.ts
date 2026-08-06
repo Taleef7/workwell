@@ -16,7 +16,7 @@ import { fileURLToPath } from "node:url";
 import { parseTestFile, ParseError, decodeXmlText } from "./parse-tests.ts";
 import { skipDecision, UNCLAIMED_CAPABILITIES } from "./capabilities.ts";
 import { buildLibrary } from "./run.ts";
-import { validateUnit } from "./ucum.ts";
+import { validateUnit } from "../../src/measure/ucum.ts";
 import {
   assertNonDegenerate,
   DegenerateRunError,
