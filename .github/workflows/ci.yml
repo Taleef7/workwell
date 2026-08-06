@@ -1,8 +1,16 @@
 name: CI
 
 on:
+  # A branch prefix that is NOT in this list gets no push CI, and gets it SILENTLY — the PR simply shows
+  # no checks, which reads the same as "nothing to run" rather than "nothing ran". `chore/**` and
+  # `docs/**` were missing and a `chore/` branch reached an open PR with zero checks before anyone
+  # noticed (#403). The list stays explicit rather than becoming "every branch" because the
+  # `official-cases` job clones ~34 MB of upstream content and takes up to 20 minutes; paying that on
+  # every scratch branch is a real cost. If you use a prefix that is not here, add it in the same push —
+  # for a push event GitHub reads the workflow file from the commit being pushed, so it takes effect
+  # immediately.
   push:
-    branches: [main, "claude/**", "fix/**", "feat/**", "perf/**"]
+    branches: [main, "claude/**", "fix/**", "feat/**", "perf/**", "chore/**", "docs/**"]
   pull_request:
     branches: [main]
   workflow_dispatch:
