@@ -73,10 +73,10 @@
  * (`run/batch-evaluate-scale.ts`), the seed CLIs, the DB-less `engine/ingress/evaluate-bundle.ts` and
  * the headless CLI all construct engines directly. PR-8/PR-9 must not assume coverage they do not have.
  */
-import type { EvaluateMeasureBinding, EvaluateMeasureInput, MeasureOutcome } from "@workwell/measure-engine";
+import type { EvaluateMeasureBinding, EvaluateMeasureInput, MeasureOutcome } from "@work-well/measure-engine";
 import type { MeasureMeta } from "../engine/cql/measure-registry.ts";
 import type { StoresEnv } from "../stores/factory.ts";
-import type { VsacEnv } from "@workwell/measure-engine";
+import type { VsacEnv } from "@work-well/measure-engine";
 import { OFFICIAL_GATED_MEASURES } from "../standards/official-cases.ts";
 import { engineForEnv } from "./engine-factory.ts";
 import { loadOfficialArtifact, type OfficialArtifact } from "./official-artifacts.ts";

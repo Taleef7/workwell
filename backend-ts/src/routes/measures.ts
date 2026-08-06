@@ -30,7 +30,7 @@ import { seedMeasureStore } from "../measure/measure-seed.ts";
 import { createMeasure, approveMeasure, deprecateMeasure, transitionStatus, MeasureError, type MeasureLifecycleDeps } from "../measure/measure-lifecycle.ts";
 import {
   updateMeasureSpec, updateMeasureCql, compileMeasureCql, updateMeasureTests, validateMeasureTests, previewRule, saveRule, validateSpecUpdate, } from "../measure/measure-authoring.ts";
-import type { Rule, CodegenBindings } from "@workwell/measure-codegen";
+import type { Rule, CodegenBindings } from "@work-well/measure-codegen";
 import { listOshaReferences } from "../measure/osha-references.ts";
 import { generateTraceability } from "../measure/measure-traceability.ts";
 import { computeDataReadiness } from "../measure/data-readiness.ts";
@@ -47,7 +47,7 @@ import { computeOutcomeDiff } from "../standards/outcome-diff.ts";
 import { computeExecutionDiff } from "../standards/execution-diff.ts";
 import { computeLiteralDiff, literalDiffAvailable } from "../standards/literal-diff.ts";
 import { CMS122_OFFICIAL_META } from "../standards/cms122-official.ts";
-import { StoreValueSetResolver, type ValueSetResolver } from "@workwell/measure-engine";
+import { StoreValueSetResolver, type ValueSetResolver } from "@work-well/measure-engine";
 
 import { EMPLOYEES } from "../engine/synthetic/employee-catalog.ts";
 import { createWorkwellEngine } from "../engine/cql/workwell-engine.ts";

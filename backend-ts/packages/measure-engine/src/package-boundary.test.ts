@@ -1,5 +1,5 @@
 /**
- * The `@workwell/measure-engine` package boundary, enforced from INSIDE the package.
+ * The `@work-well/measure-engine` package boundary, enforced from INSIDE the package.
  *
  * This replaces the package half of the old `src/engine/engine-core-boundary.test.ts`, which decided the
  * boundary before the files moved and said in its own docblock that the move would leave it either
@@ -64,7 +64,7 @@ const SPECIFIER_RE = /(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s+|\brequire\s*\(\s
 /**
  * KNOWN LIMIT, inherited: `/*` inside a STRING LITERAL starts a match, so an import after it can be
  * deleted from the scan. This mattered while `generate-cql.ts` was in the closure — its job was emitting
- * CQL, whose block-comment syntax is that sequence; it moved to `@workwell/measure-codegen` in ADR-062,
+ * CQL, whose block-comment syntax is that sequence; it moved to `@work-well/measure-codegen` in ADR-062,
  * so no closure member emits CQL today. Kept as a known limit rather than deleted, because it is a
  * property of the scanner, not of who happens to be in the closure. A real tokenizer is the fix if a
  * string-literal `/*` ever returns.

@@ -13,7 +13,7 @@ import {
   type FqmCalculationOptions,
   type FqmCalculationResult,
   type FqmPopulationResult,
-} from "@workwell/official-executor";
+} from "@work-well/official-executor";
 
 export const POPULATION_CODES = [
   "initial-population",
@@ -491,7 +491,7 @@ export interface OfficialMeasureRun {
 }
 
 /**
- * The option block + the fqm#371 date-only period-end fix are owned by `@workwell/official-executor`
+ * The option block + the fqm#371 date-only period-end fix are owned by `@work-well/official-executor`
  * so the MADiE harness and the live literal diff can never drift apart on them.
  */
 function calculationOptions(period: MeasurementPeriod, trustMetaProfile: boolean): FqmCalculationOptions {

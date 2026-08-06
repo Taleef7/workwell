@@ -5,7 +5,7 @@
  * lives only at the CLI edge. The core engine is untouched.
  */
 import { MEASURES } from "../cql/measure-registry.ts";
-import type { EvaluateMeasureBinding, MeasureOutcome } from "@workwell/measure-engine";
+import type { EvaluateMeasureBinding, MeasureOutcome } from "@work-well/measure-engine";
 import { createWorkwellEngine } from "../cql/workwell-engine.ts";
 
 export interface EvaluateBundleOptions {

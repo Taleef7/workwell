@@ -11,7 +11,7 @@
  * 24 codes failed.
  *
  * It lives in `wiring/` rather than beside the table it checks: the table is engine data, the artifacts
- * are app wiring, and `engine/` is the future `@workwell/measure-engine` package — a test inside it that
+ * are app wiring, and `engine/` is the future `@work-well/measure-engine` package — a test inside it that
  * imported an artifact loader would not survive extraction.
  */
 import { test } from "node:test";

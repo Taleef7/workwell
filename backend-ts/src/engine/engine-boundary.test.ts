@@ -45,11 +45,11 @@ const ENGINE_ROOT = fileURLToPath(new URL("./", import.meta.url)).replace(/[\\/]
  * the engine instead of through it, so it stays a violation.
  */
 const ALLOWED_BARE: { prefix: string; note: string; onlyIn?: "outside-request-path" }[] = [
-  { prefix: "@workwell/measure-engine", note: "the extracted eval core (ADR-059) — the only way to evaluate" },
+  { prefix: "@work-well/measure-engine", note: "the extracted eval core (ADR-059) — the only way to evaluate" },
   {
     // Authoring-time only, and zero-dependency (ADR-062). Admitted because `cql/codegen/generate-sql.ts`
     // validates a rule with it before templating SQL — it emits text, it never evaluates.
-    prefix: "@workwell/measure-codegen",
+    prefix: "@work-well/measure-codegen",
     note: "rule → CQL codegen (ADR-015/ADR-062) — emits text, never computes an outcome",
   },
   {
@@ -258,8 +258,8 @@ test("the boundary matcher catches every escape form (guard self-test)", () => {
     ["sibling module", 'import { ELM_LIBRARIES } from "./elm/index.ts";'],
     ["parent-but-inside module", 'import { buildSyntheticBundle } from "../synthetic/fhir-bundle-builder.ts";'],
     ["deep relative inside the tree", 'import { MEASURES } from "../registry/measure-registry.ts";'],
-    ["the extracted engine", 'import { CqlExecutionEngine } from "@workwell/measure-engine";'],
-    ["a type from the extracted engine", 'import type { CqlCode } from "@workwell/measure-engine";'],
+    ["the extracted engine", 'import { CqlExecutionEngine } from "@work-well/measure-engine";'],
+    ["a type from the extracted engine", 'import type { CqlCode } from "@work-well/measure-engine";'],
     // The real false positive the comment stripper closes — doc comments in this repo quote paths:
     ["quoted import inside a doc comment", ' * severed `import x from "../../stores/factory.ts"`'],
     ["quoted import inside a line comment", '// was: import { getStores } from "../../stores/factory.ts";'],

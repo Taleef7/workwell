@@ -1,4 +1,4 @@
-# `@workwell/official-executor`
+# `@work-well/official-executor`
 
 Executes **official published eCQM artifacts** — the MADiE/eCQI QICore FHIR bundles CMS ships — from the
 **pre-compiled ELM** inside `Library.content`, via MITRE's [`fqm-execution`](https://github.com/projecttacoma/fqm-execution).
@@ -35,7 +35,7 @@ the module graph.
 ## Usage
 
 ```ts
-import { buildValueSetCache, calculateOfficial, isExecutableMeasureBundle } from "@workwell/official-executor";
+import { buildValueSetCache, calculateOfficial, isExecutableMeasureBundle } from "@work-well/official-executor";
 
 if (!isExecutableMeasureBundle(bundle)) throw new Error("bundle has no pre-compiled ELM");
 

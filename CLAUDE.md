@@ -102,7 +102,7 @@ cost ~89k tokens per session until 2026-07-29, whether or not any of it was rele
 - `docs/DATA_MODEL.md` — §1–3: scope, core tables, full table schemas (derivable from `schema-pg.ts` / `schema.ts`)
 - `docs/MEASURES.md` — the TWH measure catalog (63 measures) in plain English
 - `docs/COMPLIANCE_API.md` + `docs/PACKAGES.md` — **the two contracts an integrator reads.** The versioned
-  HTTP surface (ADR-061, with its stability statement) and the library surface: what `@workwell/*`
+  HTTP surface (ADR-061, with its stability statement) and the library surface: what `@work-well/*`
   publishes, the semver policy, and the positioning vs `fqm-execution`. Locked decision 5 makes these the
   primary deliverable, so read them before changing anything either one names
 - `docs/STANDARDS_CONFORMANCE.md` — what we may and may not claim to conform to → prefer the `conformance` skill
@@ -173,7 +173,7 @@ accounting for **14 of 23**. **M-E0's contribution is written**
 **`$evaluate-measure` CACHES** per subject for the server's life — every changed input needs a fresh
 container, and one published conclusion had to be re-proved cold after this was found.
 
-**Done 2026-08-05 (M-C / C1 — ADR-059).** **`@workwell/measure-engine` EXISTS**, with `cql-execution` +
+**Done 2026-08-05 (M-C / C1 — ADR-059).** **`@work-well/measure-engine` EXISTS**, with `cql-execution` +
 `cql-exec-fhir` as its entire manifest, no `node:` builtins, and one published entry (`src/index.ts`). The
 question that blocked it for two weeks was ADR-052's deferred one, and it is now answered: **measure content
 is INJECTED, never shipped.** The catalog, the 17 compiled ELM libraries (1.2 MB) and `withBundledEcqmFallback`
@@ -219,7 +219,7 @@ report** unless it parsed all 16 files and 1,835 cases. **ADR-048's `node:` CLI 
 paid** — its stated basis (`devdb-cli.ts` exporting to production `live-cli.ts`) had expired, and the real
 hazard was that `engine-boundary.test.ts` keyed the `node:` carve-out on the **filename**; it is now keyed
 on **reachability**, derived rather than listed, mutation-checked both ways. **New: `evaluateExpressions`**
-on `@workwell/measure-engine` (data-free execution — the language suite is defined in that subset).
+on `@work-well/measure-engine` (data-free execution — the language suite is defined in that subset).
 **Production gap found and NOT fixed here (issue #397):** the runtime translator has no UCUM service
 either, so the ELM Explorer cannot compile any CQL with a quantity literal; `compileCql` now takes an
 optional `validateUnit` and production passes none, so behaviour is byte-identical. Evidence:
@@ -235,14 +235,14 @@ never an empty 200 — "no run covered this subject" and "this subject is compli
 and it requires a **finalized** run, since rows exist mid-run. **Review killed the original preview design:**
 it composed a SYNTHETIC bundle on every stack, so on a WebChart deployment it was demo playback reported as
 an evaluation; it now returns **501** there. Every request writes a `COMPLIANCE_API_READ` audit event.
-**C2:** `@workwell/measure-codegen` (zero deps — `generate-cql.ts` had zero imports, so it never shared code
-with the engine, only a directory) and `@workwell/example-consumer` — a *test*, not a sample: one dependency,
+**C2:** `@work-well/measure-codegen` (zero deps — `generate-cql.ts` had zero imports, so it never shared code
+with the engine, only a directory) and `@work-well/example-consumer` — a *test*, not a sample: one dependency,
 its own CQL + ELM + bundle, asserting `audiogram` is **unknown** to it. Building it found an undocumented API
 fact: **the engine's constructor loads `FHIRHelpers-4.0.1` eagerly**, so every consumer must supply it.
 **Two guard-scope defects found and closed**, the same shape as #380: `measure-engine-api.test.ts` walked
 `.ts` under `src/` only, so a `.mjs` script importing a moved export was invisible to both it and `tsc`.
 
-**Done 2026-08-05 (M-C / C4 — ADR-063). M-C IS COMPLETE.** Scope is **neutral `@workwell/*`** (owner call);
+**Done 2026-08-05 (M-C / C4 — ADR-063). M-C IS COMPLETE.** Scope is **neutral `@work-well/*`** (owner call);
 `@mieweb/*` stays a later pitch, cheap to defer because there are no external consumers yet. **The
 publishable set is `measure-engine` + `measure-codegen`** — `official-executor` is deliberately excluded
 (publishing it would advertise, as a `@workwell` product, the `fqm-execution` dependency the engine's
@@ -312,7 +312,7 @@ reporting is the direction but CMS/QPP has no endpoints (~2030). CQI WG = Friday
 cms122/125 subsets retire to the fidelity lab; all 8 measures verified present in
 `cqframework/dqm-content-qicore-2025` w/ test cases) · **M-B** QRDA-I/III + Cypress **CVU+**-validated
 loop (QRDA-I import AND export — the certification rehearsal; Cypress is open-source/Docker) · **M-C**
-pnpm-workspace extraction publishing **`@workwell/*`** (`measure-engine` = cql-execution+cql-exec-fhir
+pnpm-workspace extraction publishing **`@work-well/*`** (`measure-engine` = cql-execution+cql-exec-fhir
 only; `official-executor` = the fqm quarantine package; pitch Doug on `@mieweb/*` once proven) · **M-D**
 WebChart breadth (Condition/Encounter/med paths via the #316 ingest loop) + the versioned **compliance
 API** contract (Doug's question-shape) · **M-E** occupational content pack **published in the community

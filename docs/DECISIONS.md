@@ -45,7 +45,7 @@ cause is invisible from either side. It moved out of `scripts/` because it is pr
 Consequence: `compile-measures` runs under `node --import tsx` (it imports a `.ts` module), following
 `gen-cql`'s precedent. Bare `node scripts/compile-measures.mjs` now fails, and the script header says so.
 
-**Decision 2 — it does not live in `@workwell/measure-engine`.** UCUM validation is a *translation-time*
+**Decision 2 — it does not live in `@work-well/measure-engine`.** UCUM validation is a *translation-time*
 concern and the engine executes pre-compiled ELM; it never translates. Putting it there would add surface
 to a package whose whole claim is a two-dependency manifest, for a consumer that cannot use it.
 
@@ -100,7 +100,7 @@ UCUM conformance. It removes a wall an author would hit on their first unit-bear
 **Status:** Accepted (2026-08-05). Roadmap M-C / C4. **Completes M-C.** Positioning + semver policy:
 `docs/PACKAGES.md`.
 
-**Context.** C1 made `@workwell/measure-engine` content-free (ADR-059) and C2 split codegen out and added
+**Context.** C1 made `@work-well/measure-engine` content-free (ADR-059) and C2 split codegen out and added
 a consumer that shares no code with the app (ADR-062). Both proofs are about the *source tree*: an
 import-graph assertion and a `workspace:*` consumer. `example-consumer`'s own README says so — it is a
 consumer outside the **app**, not outside the **repo**.
@@ -171,20 +171,32 @@ dropping the flag would break every consumer at runtime. This is the same guard-
 **Consequences.** M-C is complete. `pnpm build:packages` and `pnpm verify:publish` are the two new
 commands; `verify:publish` needs the network and is a separate CI job for the reason `official-cases` and
 `cql-conformance` are. First publish is an owner step, listed in the workflow header. Scope stays neutral
-`@workwell/*`; `@mieweb/*` remains a pitch for later, which is cheap precisely because there are no
+`@work-well/*`; `@mieweb/*` remains a pitch for later, which is cheap precisely because there are no
 external consumers yet.
+
+**Amendment (2026-08-06) — the scope is `@work-well/*`, not `@workwell/*`, and the reason is worth
+recording because the check that missed it looked thorough.** Before choosing the name I verified
+`@workwell/measure-engine` (404), the `scope:workwell` registry search (empty) and
+`registry.npmjs.org/-/org/workwell` (404), and called the scope unclaimed. All three were true and none
+of them is the gate: npm refuses an **org** name that collides with an existing **unscoped package**
+name, and `registry.npmjs.org/workwell` returns **200**. The failure surfaced at org-creation time, in
+the owner's browser, rather than anywhere a test could reach — the same shape as this ADR's other
+finding, a check cited for more than it covers. Hyphen over underscore because npm scopes conventionally
+use hyphens and `@work_well` reads as a typo. Nothing about the *decision* changed — a neutral scope
+rather than `@mieweb/*` — only the spelling, so `LOCKED_DECISIONS.md` §4.5 carries the same note rather
+than being silently rewritten.
 
 ## ADR-062: codegen is not the engine, and a consumer that shares no code with the app is the only proof the split worked
 
 **Status:** Accepted (2026-08-05). Roadmap M-C / C2. Completes what ADR-059 started; C4 (publish) remains.
 
-**Context.** ADR-059 made `@workwell/measure-engine` content-free and proved it with a boundary test over
+**Context.** ADR-059 made `@work-well/measure-engine` content-free and proved it with a boundary test over
 the import graph. Two things were still missing before the packaging claim is real: the package carried
 something that is not evaluation, and nothing demonstrated that a consumer *without* WorkWell's content
 could actually use it. An import-graph assertion proves the source tree's shape; it does not prove the
 package works.
 
-**Decision 1 — `generate-cql.ts` moves to `@workwell/measure-codegen`, with zero dependencies.** The
+**Decision 1 — `generate-cql.ts` moves to `@work-well/measure-codegen`, with zero dependencies.** The
 engine answers "is this patient compliant?" from compiled ELM; codegen answers "what CQL expresses this
 rule?". They shared a directory, not code — **`generate-cql.ts` has zero imports** — so the split costs
 nothing and states something true: codegen is authoring-time, the engine is runtime. A consumer
@@ -196,7 +208,7 @@ validates a rule with it before templating SQL. It emits text; it never evaluate
 by the boundary guard rather than anticipated — the guard failed the moment the import appeared, which is
 the guard working.
 
-**Decision 2 — `@workwell/example-consumer` exists, and it is a test, not a sample.** It declares one
+**Decision 2 — `@work-well/example-consumer` exists, and it is a test, not a sample.** It declares one
 dependency, ships its own measure (`tetanus-booster.cql` plus the ELM compiled from it, neither referenced
 by the app), builds its own FHIR bundle, and evaluates — asserting all three of its own outcomes and that
 `audiogram` is **unknown** to it. If the engine ever re-acquires WorkWell's catalog, this stops evaluating.
@@ -214,7 +226,7 @@ needs is a different question and belongs to C4. Calling this "an external consu
 would be exactly the overclaim this codebase keeps catching in its own docs.
 
 **A defect the move caused, and the detection gap behind it (Codex, #400).** `scripts/gen-cql.mjs` still
-imported `generateCql` from `@workwell/measure-engine`, so `pnpm gen-cql` would have thrown on a missing
+imported `generateCql` from `@work-well/measure-engine`, so `pnpm gen-cql` would have thrown on a missing
 export. The repoint codemod walked `.ts` only — and more importantly **nothing in CI could have caught it**:
 `tsc` does not typecheck `.mjs`, and `measure-engine-api.test.ts`, whose whole job is verifying that every
 imported name is actually exported, walked `.ts` under `src/` only. An API check that inspects only the
@@ -318,7 +330,7 @@ population question has different performance characteristics and deserves its o
 ## ADR-060: a translator gap and an engine gap are different findings, so the conformance harness never merges them
 
 **Status:** Accepted (2026-08-05). Roadmap M-C / V7, issue #296. Extends ADR-059 (adds one export to
-`@workwell/measure-engine`). **Corrects ADR-048's remaining item** — see decision 5.
+`@work-well/measure-engine`). **Corrects ADR-048's remaining item** — see decision 5.
 
 **Context.** Locked decision 2 makes the FHIR-column verification SET the bar. V7 is a member of it, and
 the reason it is worth doing is specific: `cql-execution` 3.3.x — our exact runtime — has **published**
@@ -500,7 +512,7 @@ SOURCE for `Buffer`, `process.*`, `__dirname`, `__filename` and `require(`, with
 assertion because the source map is a second thing that can silently be empty. Mutation-checked.
 
 **Consequences.**
-- `@workwell/measure-engine` is a workspace member with `cql-execution` + `cql-exec-fhir` as its entire
+- `@work-well/measure-engine` is a workspace member with `cql-execution` + `cql-exec-fhir` as its entire
   manifest. Those two left the root `package.json`. `private: true` until C4 publishes.
 - **Not yet done, and named rather than implied:** the `node:` allowlist for the four `*-cli.ts` entrypoints
   (ADR-048's second debt) is C2's, not this change's — those files stayed app-side, so the debt did not move.
@@ -824,7 +836,7 @@ later.
   is already a warning about forgetting one.
 - **Two implementations of "what does this ELM retrieve" now exist**, and that is forced: the vendor
   script runs as bare `node` on the deploy path with no install, so it cannot import
-  `@workwell/official-executor`. `scripts/valueset-parity.test.mjs` pins them against each other over the
+  `@work-well/official-executor`. `scripts/valueset-parity.test.mjs` pins them against each other over the
   real committed artifacts, with a non-degeneracy assertion so it cannot pass by comparing nothing.
 - `pnpm official:terminology-audit` is a **measurement, not a gate** — exit 0 whatever it finds, and
   deliberately not in CI, because it reads the gitignored `.official-content` checkout and would
@@ -841,7 +853,7 @@ later.
 **Status:** Accepted (2026-07-31), **narrowed after review**. Roadmap M-C, locked decision #3. It decides
 less than its first draft claimed, because measurement contradicted three of that draft's statements.
 
-**Context.** M-C promises `@workwell/measure-engine` with `cql-execution` + `cql-exec-fhir` as its only
+**Context.** M-C promises `@work-well/measure-engine` with `cql-execution` + `cql-exec-fhir` as its only
 dependencies. The workspace and `packages/official-executor` exist and `engine-boundary.test.ts` proves
 `src/engine/` is self-contained, so the open question was never "can it be lifted" but **what belongs in
 it** — task #4's published-API decision, which nothing had decided.
@@ -918,7 +930,7 @@ blocker, and it remains undecided.
 - **The move will NOT "satisfy an already-green test".** The test resolves paths from its own location,
   so leaving it behind makes every entry point unresolvable, while moving it into the package makes the
   app-area assertion structurally vacuous (those directories will not exist there) and blinds the API
-  check (app imports become the bare specifier `@workwell/measure-engine`, and it inspects only relative
+  check (app imports become the bare specifier `@work-well/measure-engine`, and it inspects only relative
   ones). Both tests need rewriting as part of the move. That is a real cost of this sequencing, and it is
   better known now than discovered.
 - What the sequencing does buy, and it is smaller than the first draft claimed: between now and the move,
@@ -2621,7 +2633,7 @@ was never "fqm-execution is diagnostic-only"; it was **"its heavy transitive dep
 worker's cold-start or request path, and CQL remains the sole outcome authority."** A file allowlist was
 the cheapest way to express that at the time, but it could not survive official-first execution, where
 fqm legitimately becomes a *production* evaluation path (PR-7). The dependency now lives in
-**`@workwell/official-executor`** — one `package.json`, pinned `1.8.5` — whose entry point imports it only
+**`@work-well/official-executor`** — one `package.json`, pinned `1.8.5` — whose entry point imports it only
 through a lazy `await import`, so consuming the package costs nothing until something calculates. The
 single allowlist test is replaced by three that are harder to defeat than one grep: the **manifest**
 (no workspace package other than the executor may declare fqm; the app declares none), the **app tree**

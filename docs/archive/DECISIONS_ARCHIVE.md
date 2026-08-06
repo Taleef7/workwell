@@ -530,7 +530,7 @@ app, which is what restores the two-dependency package story." That was the one 
    | `synthetic/fhir-bundle-builder.ts` | 17 | the app |
    | `cql/cql-execution-engine.ts` | 16 | the engine |
 
-   **The largest single export of a wholesale `@workwell/measure-engine` would be a directory of 150
+   **The largest single export of a wholesale `@work-well/measure-engine` would be a directory of 150
    fake employees.** Nobody installs a measure engine to get demo data. The roadmap already scopes the
    package to "`measure-engine` = cql-execution+cql-exec-fhir only", so `synthetic/` (5 files) and
    `ingress/` (15 files) are app concerns that happen to live under `engine/`.
@@ -562,7 +562,7 @@ app, which is what restores the two-dependency package story." That was the one 
 
 - **The two-dependency package story is true today**, and enforced rather than promised.
 - **Step 2 is a boundary redesign with a published API at stake**, not a mechanical move — which is why it
-  is not bundled here. It has to decide what `@workwell/measure-engine` exports, and that decision is
+  is not bundled here. It has to decide what `@work-well/measure-engine` exports, and that decision is
   hard to reverse once published. The measurement above is the input to it.
 - **No behaviour changes.** The translator is the same module reached by the same callers.
 - `src/engine/` holds **42 production files**: `cql/` 14, `ingress/` 15, `synthetic/` 5, `immunization/` 4,

@@ -1,5 +1,5 @@
 /**
- * @workwell/official-executor unit tests — pure, no fqm-execution loaded.
+ * @work-well/official-executor unit tests — pure, no fqm-execution loaded.
  *   node --import tsx --test packages/official-executor/src/index.test.ts
  */
 import { test } from "node:test";

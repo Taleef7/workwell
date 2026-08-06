@@ -1,10 +1,10 @@
-# @workwell/measure-engine extraction proposal
+# @work-well/measure-engine extraction proposal
 
 **Status:** decision proposal; documentation only. This memo does not perform the extraction, move a file, or change the package graph.
 
 ## Decision summary
 
-- **Gate 1 — content packaging:** recommend an injected content contract. Keep the evaluation engine reusable and put WorkWell's catalog, WorkWell-authored compiled ELM libraries, and WorkWell value-set fallback in a separate sibling content package, tentatively @workwell/workwell-measures. Keep generic FHIRHelpers as a committed engine asset. backend-ts composes the two packages. The engine itself keeps exactly cql-execution and cql-exec-fhir as runtime dependencies.
+- **Gate 1 — content packaging:** recommend an injected content contract. Keep the evaluation engine reusable and put WorkWell's catalog, WorkWell-authored compiled ELM libraries, and WorkWell value-set fallback in a separate sibling content package, tentatively @work-well/workwell-measures. Keep generic FHIRHelpers as a committed engine asset. backend-ts composes the two packages. The engine itself keeps exactly cql-execution and cql-exec-fhir as runtime dependencies.
 - **Gate 2 — test edges:** recommend restructuring the 10 out-of-closure edge rows across 7 named test files by edge class. Package-local tests use minimal fixtures and resolver doubles; app-side tests that exercise ingress, SQLite persistence, SQL code generation, or the synthetic corpus stay in the app, while the committed WorkWell generated-CQL artifact check moves with the sibling content package. Do not strand coverage and do not give the package a dependency back to the app.
 
 These recommendations propose resolutions for the later extraction PR; they are not final owner decisions. No extraction is included here.
@@ -29,7 +29,7 @@ The WorkWell-authored content currently hard-wired into the engine is:
 
 The argument for excluding synthetic/ is that a consumer of a reusable engine does not want WorkWell's fictional employee directory or demo fixtures. That argument applies directly to the value-set table, which is explicitly synthetic-corpus-oriented. It does not apply with equal force to authored measure metadata and compiled ELM: a consumer who wants to evaluate WorkWell's own measures needs those artifacts from somewhere. The right distinction is therefore **engine capability versus WorkWell content**, not “code versus data.”
 
-### Option A — ship bundled WorkWell content in @workwell/measure-engine
+### Option A — ship bundled WorkWell content in @work-well/measure-engine
 
 The package would move the current registry, ELM map, and fallback table with the engine. The engine could retain a no-argument WorkWell default while allowing metaOverride, input.elm, and an injected primary value-set resolver to override parts of it.
 
@@ -49,7 +49,7 @@ Cons:
 
 ### Option B — injected-only engine plus a WorkWell content package
 
-The engine would require a content object at construction. The object would provide the measure metadata map, ELM library map, and value-set resolver/fallback policy. A sibling package, tentatively @workwell/workwell-measures, would export WorkWell's 14 measures, WorkWell-authored compiled libraries, and its WorkWell-specific fallback. FHIRHelpers remains a committed engine asset. backend-ts would depend on both packages and pass the WorkWell content into the engine factory.
+The engine would require a content object at construction. The object would provide the measure metadata map, ELM library map, and value-set resolver/fallback policy. A sibling package, tentatively @work-well/workwell-measures, would export WorkWell's 14 measures, WorkWell-authored compiled libraries, and its WorkWell-specific fallback. FHIRHelpers remains a committed engine asset. backend-ts would depend on both packages and pass the WorkWell content into the engine factory.
 
 Pros:
 
@@ -68,7 +68,7 @@ Cons:
 
 ### Recommendation
 
-**Recommend Option B: injected-only @workwell/measure-engine, with WorkWell content supplied by a separate sibling package.**
+**Recommend Option B: injected-only @work-well/measure-engine, with WorkWell content supplied by a separate sibling package.**
 
 The decisive fact is that evaluate(input.elm, input.metaOverride) already supports consumer-supplied measure logic and metadata, while the current hard imports are an implementation detail rather than a contract. The WorkWell-authored compiled ELM and measure metadata are valuable WorkWell content, but they are not the definition of a generic engine. The value-set table is even more clearly content: its own docblock ties it to the synthetic corpus. Keeping those WorkWell-authored values in a WorkWell content package preserves a one-install default for backend-ts while avoiding a misleading public engine API.
 
@@ -84,11 +84,11 @@ interface MeasureContent {
 
 The override and precedence semantics must mirror the current engine. When present, per-call `input.elm` replaces the resolved `content.elmLibraries[libraryName]` entry entirely; otherwise the engine resolves the library by name from the injected `elmLibraries` map. There is no merge, matching today's `input.elm ?? this.loadElm(libraryName)` behavior with the lookup sourced from injected content. Likewise, per-call `input.metaOverride` replaces the resolved `content.measures[measureId]` entry entirely; otherwise the engine falls back to the injected `measures` map by id. There is no partial-field merge, matching today's `input.metaOverride ?? MEASURES[input.measureId]` behavior.
 
-FHIRHelpers is deliberately not a `MeasureContent` field. It ships as a committed asset inside `@workwell/measure-engine` itself, as it already does today, because it is generic HL7/QI-Core CQL infrastructure rather than WorkWell-authored measure content. That distinction preserves the memo's engine-capability versus WorkWell-content boundary and removes the "what if an injected map omits FHIRHelpers" failure mode by construction: the engine owns and loads it unconditionally from its own bundled asset.
+FHIRHelpers is deliberately not a `MeasureContent` field. It ships as a committed asset inside `@work-well/measure-engine` itself, as it already does today, because it is generic HL7/QI-Core CQL infrastructure rather than WorkWell-authored measure content. That distinction preserves the memo's engine-capability versus WorkWell-content boundary and removes the "what if an injected map omits FHIRHelpers" failure mode by construction: the engine owns and loads it unconditionally from its own bundled asset.
 
 `content.valueSetResolver` is a content-owned fallback factory/table, not a final or sole resolver. The engine composes it behind whatever primary `ValueSetResolver` the caller supplies at construction, preserving today's `withBundledEcqmFallback(this.opts.valueSetResolver)` order: the caller's primary resolver is used first and the content fallback is available underneath it.
 
-The content package's dependency direction is a design constraint. Because its `measures` field uses the engine-owned `MeasureMeta` type and its `valueSetResolver` field uses the engine-owned `ValueSetResolver` type, the content package may depend on `@workwell/measure-engine` for types only, through a `devDependency` or type-only import, never through a runtime `dependencies` entry. The engine package must never depend on the content package at any level, type or runtime. The workspace graph is therefore one-way: content → engine (type-only, build-time), while `backend-ts` (the app) → both packages at runtime. This is what makes the two-dependency engine claim enforceable rather than merely asserted.
+The content package's dependency direction is a design constraint. Because its `measures` field uses the engine-owned `MeasureMeta` type and its `valueSetResolver` field uses the engine-owned `ValueSetResolver` type, the content package may depend on `@work-well/measure-engine` for types only, through a `devDependency` or type-only import, never through a runtime `dependencies` entry. The engine package must never depend on the content package at any level, type or runtime. The workspace graph is therefore one-way: content → engine (type-only, build-time), while `backend-ts` (the app) → both packages at runtime. This is what makes the two-dependency engine claim enforceable rather than merely asserted.
 
 The engine must continue to derive the compliance result from CQL Outcome Status; content injection may change what is evaluated, never who decides compliance.
 
@@ -97,7 +97,7 @@ Under this recommendation, the current CORE_ENTRY_POINTS list is intentionally r
 - the engine retains the execution, resolver, VSAC-client, and generate-cql surfaces;
 - the MeasureMeta type moves into the engine's public contract;
 - the MEASURES value, WorkWell-authored ELM values, and WorkWell fallback move to the sibling content package, while FHIRHelpers remains engine-bundled;
-- the three content exports become that package's public surface, not @workwell/measure-engine's.
+- the three content exports become that package's public surface, not @work-well/measure-engine's.
 
 That is a public API decision, not a claim that the current list was wrong. It is the decision Gate 1 is required to make.
 
@@ -131,7 +131,7 @@ Cons:
 
 ### Option B — move the tests with an app devDependency
 
-The package would keep the tests substantially unchanged and declare a test-only/devDependency back to @workwell/api-ts or an equivalent app module.
+The package would keep the tests substantially unchanged and declare a test-only/devDependency back to @work-well/api-ts or an equivalent app module.
 
 Pros:
 
@@ -179,7 +179,7 @@ Cons:
 | audiogram-vsac-parity.test.ts → stores/sqlite/value-set-store-sqlite.ts and stores/sqlite/schema.ts | Keep the VSAC/SQLite parity test app-side, including its audiogram fixtures. Package tests cover resolver contract behavior without the SQLite floor. |
 | cql/codegen/generated-files.test.ts → measures/generated/ via new URL("../../../../measures/generated", import.meta.url) | Move this committed WorkWell content-artifact test with measures/generated/ into the sibling content package, updating the relative path to that package-local content location. It asserts the authored CQL filenames and shape, not generate-cql.ts or engine behavior; the generated files and their test belong with the content package under Gate 1's engine-capability versus WorkWell-content distinction. |
 
-The package must have no @workwell/api-ts, stores/sqlite/**, ingress/**, or synthetic-catalog devDependency. The app-side tests may import @workwell/measure-engine and the WorkWell content package by public specifier.
+The package must have no @work-well/api-ts, stores/sqlite/**, ingress/**, or synthetic-catalog devDependency. The app-side tests may import @work-well/measure-engine and the WorkWell content package by public specifier.
 
 ## 4. Resulting package.json sketch
 
@@ -189,7 +189,7 @@ Under the recommended injected-content option, the engine package's dependency s
 
 ~~~json
 {
-  "name": "@workwell/measure-engine",
+  "name": "@work-well/measure-engine",
   "version": "0.1.0",
   "description": "Headless CQL-to-ELM measure evaluation over injected measure content.",
   "type": "module",
@@ -251,16 +251,16 @@ The sibling content package should make the type-only direction explicit in its 
 
 ~~~jsonc
 {
-  "name": "@workwell/workwell-measures",
+  "name": "@work-well/workwell-measures",
   "devDependencies": {
-    "@workwell/measure-engine": "workspace:*" // type-only contract import; never a runtime dependency
+    "@work-well/measure-engine": "workspace:*" // type-only contract import; never a runtime dependency
   }
 }
 ~~~
 
 This sketch deliberately does **not** export MEASURES, ELM_LIBRARIES, or withBundledEcqmFallback from the engine. It exports the measure metadata type as an engine contract; the sibling content package owns the WorkWell values. The exact subpath count is therefore nine engine subpaths plus the root barrel, rather than the current 11-entry-point list. A root barrel is useful for the documented consumer path, while explicit subpaths preserve the current entry-point granularity and stop an accidental internal module from becoming public.
 
-The content package is not specified as a committed package in this memo, but it must expose a stable WorkWell content object and its own catalog/ELM/terminology exports. backend-ts would depend on that sibling package; @workwell/measure-engine would not. The sibling package name, whether it is private until M-C3, and the licensing review for publishing its fallback remain owner decisions. Its type-only dependency direction is decided above and is not an allowed runtime dependency. No external dependency is proposed.
+The content package is not specified as a committed package in this memo, but it must expose a stable WorkWell content object and its own catalog/ELM/terminology exports. backend-ts would depend on that sibling package; @work-well/measure-engine would not. The sibling package name, whether it is private until M-C3, and the licensing review for publishing its fallback remain owner decisions. Its type-only dependency direction is decided above and is not an allowed runtime dependency. No external dependency is proposed.
 
 measure-executor.ts remains in the engine surface even though sqlPushdownExecutor is documented as an inert stub that constructs and then rejects on evaluation (lines 57-75). That is an explicit published surface choice to revisit; it is not a reason to make the package depend on SQL or WebChart.
 
@@ -269,7 +269,7 @@ measure-executor.ts remains in the engine surface even though sqlPushdownExecuto
 Both current tests need rewriting. Relocating either file without changing its invariants would produce a false sense of safety:
 
 - engine-core-boundary.test.ts resolves ENGINE_ROOT from its own location and then inspects relative imports. If moved into packages/measure-engine, its synthetic/, ingress/, immunization/, and cli/ check becomes vacuous because those app directories no longer exist inside the package.
-- Its app API check currently looks only at relative specifiers. After migration, app imports are bare @workwell/measure-engine specifiers, so the check would go blind.
+- Its app API check currently looks only at relative specifiers. After migration, app imports are bare @work-well/measure-engine specifiers, so the check would go blind.
 - The older engine-boundary.test.ts proves that the **whole current src/engine/ directory** is self-contained. After extraction, the remaining app-side engine code is expected to import the package; whole-directory self-containment is no longer the right invariant.
 
 ### Post-move package test: package closure
@@ -290,7 +290,7 @@ The test may use node:fs and node:path itself because it is a guard running unde
 
 Rewrite the older engine-boundary.test.ts to stay app-side and assert a different invariant:
 
-1. app production files may import @workwell/measure-engine only at the package root or at a key in the package's declared exports map;
+1. app production files may import @work-well/measure-engine only at the package root or at a key in the package's declared exports map;
 2. no app file may import packages/measure-engine/src/** by relative path, filesystem path, or an unexported package subpath;
 3. app-side synthetic/, ingress/, immunization/, cli/, SQL-codegen, and SQLite modules may depend on the package, but the package may not depend on them; and
 4. WorkWell content imports must use the content package's declared exports, not the content package's source files.
@@ -303,7 +303,7 @@ The current measured scope is larger than the original roadmap sketch. ADR-052 r
 
 ### Codemod
 
-A jscodeshift or ts-morph codemod can rewrite relative imports to the appropriate bare export, for example ../../engine/cql/value-set-resolver.ts to @workwell/measure-engine/value-set-resolver. It can also distinguish the three content paths and send them to the content package.
+A jscodeshift or ts-morph codemod can rewrite relative imports to the appropriate bare export, for example ../../engine/cql/value-set-resolver.ts to @work-well/measure-engine/value-set-resolver. It can also distinguish the three content paths and send them to the content package.
 
 Pros:
 
@@ -322,7 +322,7 @@ Cons:
 Leave short-lived compatibility files at old core paths, for example:
 
 ~~~ts
-export * from "@workwell/measure-engine/value-set-resolver";
+export * from "@work-well/measure-engine/value-set-resolver";
 ~~~
 
 Content paths would re-export from the WorkWell content package, not from the engine. This keeps a staged move buildable while consumers are migrated.
@@ -406,7 +406,7 @@ The proposal does not run it, because this task is docs-only and the extraction 
 
 These are the remaining owner calls after the recommendations above; the proposal recommends a resolution for the gates without recording these calls as final decisions.
 
-- Approve or rename the placeholder @workwell/workwell-measures package and decide whether it remains private until M-C3 publication.
+- Approve or rename the placeholder @work-well/workwell-measures package and decide whether it remains private until M-C3 publication.
 - Decide whether the content package should publish the WorkWell fallback table as-is, subject to the terminology/licensing review that already governs public packages.
 - Confirm whether the root barrel plus explicit subpaths is the desired public API, or whether a smaller root-only API should be exposed first.
 - Decide whether sqlPushdownExecutor remains a published inert stub or is moved behind a diagnostic-only subpath.

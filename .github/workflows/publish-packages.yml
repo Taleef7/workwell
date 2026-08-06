@@ -1,4 +1,4 @@
-# Publishes the `@workwell/*` packages to npm with provenance (roadmap M-C / C4, ADR-063).
+# Publishes the `@work-well/*` packages to npm with provenance (roadmap M-C / C4, ADR-063).
 #
 # INERT UNTIL AN OWNER ACTS, deliberately. It is `workflow_dispatch` only — never a push or tag
 # trigger — and it defaults to a dry run. Publishing is irreversible in a way nothing else in this
@@ -104,11 +104,11 @@ jobs:
             targets="${selected}"
           fi
           for pkg in ${targets}; do
-            echo "--- publishing @workwell/${pkg}"
+            echo "--- publishing @work-well/${pkg}"
             # --no-git-checks: the workflow may be dispatched from a ref pnpm considers unclean
             # (a tag, a detached head). The provenance attestation records the real commit either way,
             # so the check adds nothing here that the attestation does not already state.
-            pnpm --filter "@workwell/${pkg}" publish --no-git-checks --access public
+            pnpm --filter "@work-well/${pkg}" publish --no-git-checks --access public
           done
 
       - name: Say what happened

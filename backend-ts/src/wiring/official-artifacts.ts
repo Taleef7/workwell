@@ -12,7 +12,7 @@
  * into a filename and a literal. Promotion is now a file swap plus a manifest, per measure.
  */
 import { readFileSync } from "node:fs";
-import { isExecutableMeasureBundle, type MeasureBundle } from "@workwell/official-executor";
+import { isExecutableMeasureBundle, type MeasureBundle } from "@work-well/official-executor";
 
 export interface OfficialManifest {
   catalogId: string;

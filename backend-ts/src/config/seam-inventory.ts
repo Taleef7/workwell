@@ -23,8 +23,8 @@ import { isDataChaserConfigured, type ChannelEnv } from "../case/outreach-channe
 import { isIceConfigured, type ForecastEnv } from "../engine/immunization/immunization-forecast.ts";
 import { isEhFhirConfigured, type StandingOrderEnv } from "../order/standing-order-provider.ts";
 import { isWebChartConfigured, type DataSourceEnv } from "../engine/ingress/data-source.ts";
-import { isSqlPushdownSelected, type MeasureExecutorEnv } from "@workwell/measure-engine";
-import { isVsacConfigured, type VsacEnv } from "@workwell/measure-engine";
+import { isSqlPushdownSelected, type MeasureExecutorEnv } from "@work-well/measure-engine";
+import { isVsacConfigured, type VsacEnv } from "@work-well/measure-engine";
 import { isAlertWebhookConfigured, type AlertEnv } from "../run/alert-channel.ts";
 import { isIncrementalEnabled, type IncrementalEnv } from "../run/incremental/incremental-eval.ts";
 import { isOfficialRoutingConfigured, type OfficialMeasuresEnv } from "../wiring/official-routing.ts";

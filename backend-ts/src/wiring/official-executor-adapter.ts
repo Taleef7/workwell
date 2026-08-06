@@ -82,14 +82,14 @@ import {
   type FqmCalculate,
   type FqmStatementResult,
   type PopulationMembership,
-} from "@workwell/official-executor";
+} from "@work-well/official-executor";
 import type {
   EvaluateMeasureBinding,
   EvaluateMeasureInput,
   ExpressionResult,
   MeasureOutcome,
   OutcomeStatus,
-} from "@workwell/measure-engine";
+} from "@work-well/measure-engine";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { loadOfficialArtifact, type OfficialArtifact } from "./official-artifacts.ts";
 import { officialMeasureSemantics } from "./official-measure-semantics.ts";

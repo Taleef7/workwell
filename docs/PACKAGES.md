@@ -1,4 +1,4 @@
-# `@workwell/*` — what ships, what it promises, and where it sits
+# `@work-well/*` — what ships, what it promises, and where it sits
 
 > Roadmap M-C / C4. Driving ADR: **ADR-063**. Companion contract doc: `docs/COMPLIANCE_API.md`
 > (ADR-061), which is the HTTP surface; this is the library surface.
@@ -14,15 +14,15 @@ everyone already knows.
 
 | Package | Dependencies | What it answers |
 |---|---|---|
-| **`@workwell/measure-engine`** | `cql-execution`, `cql-exec-fhir` | *Is this subject compliant with this measure?* Executes pre-compiled ELM against a FHIR R4 bundle and returns the outcome plus per-define evidence. |
-| **`@workwell/measure-codegen`** | none | *What CQL expresses this rule?* Declarative rule params → canonical CQL. Authoring-time only. |
+| **`@work-well/measure-engine`** | `cql-execution`, `cql-exec-fhir` | *Is this subject compliant with this measure?* Executes pre-compiled ELM against a FHIR R4 bundle and returns the outcome plus per-define evidence. |
+| **`@work-well/measure-codegen`** | none | *What CQL expresses this rule?* Declarative rule params → canonical CQL. Authoring-time only. |
 
 ### What deliberately does not ship
 
-- **`@workwell/official-executor`** — the sole home of `fqm-execution`, and the package boundary *is*
+- **`@work-well/official-executor`** — the sole home of `fqm-execution`, and the package boundary *is*
   the ADR-026 quarantine. Publishing it would advertise, as a `@workwell` product, exactly the
   dependency the engine package exists to keep out of its own manifest.
-- **`@workwell/example-consumer`** — a test (ADR-062), not a sample.
+- **`@work-well/example-consumer`** — a test (ADR-062), not a sample.
 - **Measure content.** No catalog, no compiled ELM, no value-set expansions (ADR-059). WorkWell's
   registry names occupational measures and its bundled expansions are, by their own docblock, *"the
   codes the synthetic corpus stamps."* Content is constructor input, and it is **required** — an engine
@@ -40,7 +40,7 @@ published FHIR **Measure bundle** — Measure, Libraries, ValueSets — and calc
 producing a MeasureReport. It is the reference implementation for FHIR-based measure calculation, and it
 is very good at that job.
 
-**`@workwell/measure-engine`** sits one layer down. It takes **compiled ELM** and a patient bundle and
+**`@work-well/measure-engine`** sits one layer down. It takes **compiled ELM** and a patient bundle and
 returns the per-define expression results. It has no concept of a Measure resource, no bundle unpacking,
 and no MeasureReport.
 
@@ -52,16 +52,16 @@ they are neighbours on a stack, not rivals for a slot.
 This is the strongest evidence for the claim, because it is a choice we made against our own package:
 
 - **Official CMS eCQMs run on `fqm-execution`, not on our engine.** CMS122 and CMS125 evaluate the
-  published QI-Core artifacts through `@workwell/official-executor` on the demo/production stack
+  published QI-Core artifacts through `@work-well/official-executor` on the demo/production stack
   (ADR-045/046). Nicole's correction — *run the official published CQL, never reauthor* — is a standing
   rule, and reimplementing bundle-level calculation to avoid a dependency would break it.
-- **Everything else runs on `@workwell/measure-engine`.** The occupational and surveillance measures
+- **Everything else runs on `@work-well/measure-engine`.** The occupational and surveillance measures
   where no official definition exists, and where the value is content nobody publishes rather than
   content everybody can download.
 
 ### When each one is the right choice
 
-| Take `fqm-execution` when | Take `@workwell/measure-engine` when |
+| Take `fqm-execution` when | Take `@work-well/measure-engine` when |
 |---|---|
 | You have a published Measure bundle and want a MeasureReport | You have compiled ELM and want the defines |
 | You want gaps-in-care, `$care-gaps`, DEQM outputs | You want per-define evidence to drive an operational workflow |
@@ -132,7 +132,7 @@ Owner steps to first publish are listed at the top of the workflow file.
 
 ## 5. Scope name
 
-**`@workwell/*`**, neutral, decided 2026-08-05. `@mieweb/*` remains a live option to pitch once the
+**`@work-well/*`**, neutral, decided 2026-08-05. `@mieweb/*` remains a live option to pitch once the
 packages have proven themselves; the roadmap's own wording is *"pitch Doug on `@mieweb/*` once proven."*
 Renaming a scope later costs a deprecation notice on two packages that have no external consumers yet —
 which is precisely why now is the cheap moment to defer the decision rather than force it.
