@@ -80,19 +80,29 @@ define "In Hearing Conservation Program":
   exists([Condition: "Occupational exposure to noise"])
     or exists([Condition: "Hearing conservation program enrolment"])
 
-// Every threshold this measure is allowed to read, recorded on or before the end of the period.
-// Bounding on the period end rather than Now() keeps a historical evaluation reproducible.
+/*
+  Every threshold this measure may read. Bounding on the period end rather than Now() keeps a
+  historical evaluation reproducible.
+
+  Only CLINICALLY FINAL observations count — the same `final | amended | corrected` gate cms122.cql
+  and the WebChart normalizer apply. Without it a `preliminary` or `entered-in-error` threshold can
+  become the baseline or the current audiogram, and since the baseline is the EARLIEST record, a
+  single erroneous early row would silently re-anchor every future shift for that worker (review,
+  #408).
+*/
 define "Right Ear Thresholds":
   ([Observation: "Hearing threshold right 2000 Hz"]
     union [Observation: "Hearing threshold right 3000 Hz"]
     union [Observation: "Hearing threshold right 4000 Hz"]) O
-    where (O.effective as FHIR.dateTime) on or before end of "Measurement Period"
+    where O.status.value in { 'final', 'amended', 'corrected' }
+      and (O.effective as FHIR.dateTime) on or before end of "Measurement Period"
 
 define "Left Ear Thresholds":
   ([Observation: "Hearing threshold left 2000 Hz"]
     union [Observation: "Hearing threshold left 3000 Hz"]
     union [Observation: "Hearing threshold left 4000 Hz"]) O
-    where (O.effective as FHIR.dateTime) on or before end of "Measurement Period"
+    where O.status.value in { 'final', 'amended', 'corrected' }
+      and (O.effective as FHIR.dateTime) on or before end of "Measurement Period"
 
 define "All Thresholds":
   "Right Ear Thresholds" union "Left Ear Thresholds"
@@ -194,9 +204,23 @@ define "Standard Threshold Shift":
   determines the shift is neither work related nor aggravated by occupational noise exposure. The
   regulation attaches no form, timing or retention to that determination, so it may be clinically
   invisible; when it IS recorded, it is a genuine scope exclusion rather than missing data.
+
+  THE DETERMINATION IS ABOUT ONE SHIFT, NOT ABOUT THE WORKER. The first cut asked only whether such a
+  Condition existed, which made it permanent: a worker excused for a shift in 2019 would have every
+  later shift suppressed as EXCLUDED, including a genuinely occupational one (review, #408). That is
+  silent UNDER-detection — the direction this measure otherwise refuses to fail in, and the one that
+  leaves a real hearing loss unactioned.
+
+  A determination recorded BEFORE the current audiogram cannot be a determination about it, so the
+  exclusion requires `recordedDate` on or after the current audiogram date. An UNDATED determination
+  does not exclude: nothing ties it to a shift, and treating it as applying would restore exactly the
+  permanence being fixed. The cost is that a worker with a genuine but undated determination reports
+  OVERDUE and needs human review — the protective error rather than the silent one.
 */
 define "Determined Not Occupational":
-  exists([Condition: "STS determined not occupational"])
+  exists([Condition: "STS determined not occupational"] C
+    where C.recordedDate is not null
+      and date from C.recordedDate on or after "Current Audiogram Date")
 
 /*
   The measure refuses to conclude when the data cannot support a conclusion. An employee with one

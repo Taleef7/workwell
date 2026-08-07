@@ -51,9 +51,11 @@ interface Audiogram {
   date: string;
   right?: EarThresholds;
   left?: EarThresholds;
+  /** FHIR Observation.status. Defaults to `final`; set to exercise the clinical-finality gate. */
+  status?: string;
 }
 
-function bundle(audiograms: Audiogram[], opts: { enrolled?: boolean; notOccupational?: boolean } = {}): unknown {
+function bundle(audiograms: Audiogram[], opts: { enrolled?: boolean; notOccupational?: string | boolean } = {}): unknown {
   const entry: unknown[] = [{ resource: { resourceType: "Patient", id: "w1", birthDate: "1985-04-02" } }];
   if (opts.enrolled !== false) {
     entry.push({
@@ -64,10 +66,17 @@ function bundle(audiograms: Audiogram[], opts: { enrolled?: boolean; notOccupati
     });
   }
   if (opts.notOccupational) {
+    // `recordedDate` is load-bearing: a determination predating the current audiogram cannot be a
+    // determination about it. `true` means "recorded with the latest audiogram".
+    const recordedDate =
+      typeof opts.notOccupational === "string"
+        ? opts.notOccupational
+        : audiograms[audiograms.length - 1]!.date;
     entry.push({
       resource: {
         resourceType: "Condition", id: "not-occ", subject: { reference: "Patient/w1" },
         code: { coding: [{ system: "urn:workwell:vs:sts-not-occupational", code: "sts-not-occupational" }] },
+        recordedDate,
       },
     });
   }
@@ -77,7 +86,7 @@ function bundle(audiograms: Audiogram[], opts: { enrolled?: boolean; notOccupati
       for (const [hz, db] of Object.entries(a[ear] ?? {})) {
         entry.push({
           resource: {
-            resourceType: "Observation", id: `obs-${n++}`, status: "final",
+            resourceType: "Observation", id: `obs-${n++}`, status: a.status ?? "final",
             subject: { reference: "Patient/w1" },
             code: { coding: [{ system: "http://loinc.org", code: CODES[ear][Number(hz) as 2000] }] },
             effectiveDateTime: a.date,
@@ -222,4 +231,69 @@ test("evidence carries the per-ear shifts, so a reviewer can audit the arithmeti
   assert.equal(defines.get("Left Ear Shift"), 3, "left ear shifted 3 dB");
   assert.equal(defines.get("Standard Threshold Shift"), true);
   assert.equal(out.outcome, "OVERDUE");
+});
+
+test("a STALE non-occupational determination does not suppress a LATER shift (review, #408)", async () => {
+  // The first cut asked only whether such a Condition existed, which made the exclusion permanent:
+  // a worker excused for a 2019 shift had every later shift suppressed as EXCLUDED — including a
+  // genuinely occupational one. That is silent UNDER-detection, which leaves a real hearing loss
+  // unactioned. A determination recorded before the current audiogram cannot be about it.
+  const stale = await evaluate(bundle([
+    { date: "2018-05-01", right: ear(5), left: ear(5) },
+    { date: "2026-05-01", right: ear(30), left: ear(5) },
+  ], { notOccupational: "2019-01-01" }));
+  assert.equal(stale, "OVERDUE", "a 2019 determination cannot excuse a 2026 shift");
+
+  // The same determination dated WITH the current audiogram does exclude — proving the test above
+  // fails for the date, not because exclusions stopped working altogether.
+  const current = await evaluate(bundle([
+    { date: "2018-05-01", right: ear(5), left: ear(5) },
+    { date: "2026-05-01", right: ear(30), left: ear(5) },
+  ], { notOccupational: "2026-05-01" }));
+  assert.equal(current, "EXCLUDED");
+});
+
+test("an UNDATED determination does not exclude — it cannot be tied to a shift (review, #408)", async () => {
+  // Treating an undated determination as applying would restore the permanence being fixed. The
+  // worker reports OVERDUE and needs human review: the protective error rather than the silent one.
+  const undated = await evaluate(bundle([
+    { date: "2018-05-01", right: ear(5), left: ear(5) },
+    { date: "2026-05-01", right: ear(30), left: ear(5) },
+  ], { notOccupational: "" }));
+  assert.equal(undated, "OVERDUE");
+});
+
+test("non-final threshold observations are ignored (review, #408)", async () => {
+  // The baseline is the EARLIEST record, so one erroneous early row would silently re-anchor every
+  // future shift for that worker. cms122.cql and the WebChart normalizer apply the same
+  // final|amended|corrected gate.
+  const erroneousBaseline = await evaluate(bundle([
+    { date: "2015-01-01", right: ear(0), left: ear(0), status: "entered-in-error" },
+    { date: "2020-05-01", right: ear(20), left: ear(20) },
+    { date: "2026-05-01", right: ear(25), left: ear(20) },
+  ]));
+  assert.equal(
+    erroneousBaseline,
+    "COMPLIANT",
+    "the entered-in-error row must not become the baseline — against the real 2020 baseline the shift is only 5 dB",
+  );
+
+  // Proof the case is not passing vacuously: the same row marked `final` DOES re-anchor the
+  // baseline to 0 dB and produces a 25 dB shift.
+  const ifItCounted = await evaluate(bundle([
+    { date: "2015-01-01", right: ear(0), left: ear(0) },
+    { date: "2020-05-01", right: ear(20), left: ear(20) },
+    { date: "2026-05-01", right: ear(25), left: ear(20) },
+  ]));
+  assert.equal(ifItCounted, "OVERDUE", "with the early row counted, the same data is an STS");
+});
+
+test("an amended or corrected observation DOES count", async () => {
+  for (const status of ["amended", "corrected"]) {
+    const out = await evaluate(bundle([
+      { date: "2020-05-01", right: ear(5), left: ear(5), status },
+      { date: "2026-05-01", right: ear(25), left: ear(5) },
+    ]));
+    assert.equal(out, "OVERDUE", `${status} must be treated as clinically final`);
+  }
 });
