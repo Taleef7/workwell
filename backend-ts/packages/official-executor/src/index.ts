@@ -1,5 +1,5 @@
 /**
- * `@workwell/official-executor` — execution of OFFICIAL published eCQM artifacts.
+ * `@work-well/official-executor` — execution of OFFICIAL published eCQM artifacts.
  *
  * Runs a measure exactly as its steward published it: the MADiE/eCQI QICore FHIR bundle, executed from
  * the **pre-compiled ELM** shipped inside `Library.content` (`application/elm+json`) via MITRE's

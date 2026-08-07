@@ -27,7 +27,7 @@
  * posture as `evaluate:webchart-devdb`); the CQL engine decides every outcome.
  */
 import { readFileSync } from "node:fs";
-import type { OutcomeStatus } from "@workwell/measure-engine";
+import type { OutcomeStatus } from "@work-well/measure-engine";
 import { MEASURE_BINDINGS } from "../../synthetic/measure-bindings.ts";
 import { webChartConfigFromEnv, webChartDataSource, type DataSourceEnv } from "../data-source.ts";
 import { fixtureWebChartClient, httpWebChartClient, type WebChartClient } from "./webchart-client.ts";

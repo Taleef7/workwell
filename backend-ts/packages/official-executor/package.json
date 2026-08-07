@@ -1,5 +1,5 @@
 {
-  "name": "@workwell/official-executor",
+  "name": "@work-well/official-executor",
   "version": "0.1.0",
   "description": "Executes OFFICIAL published eCQM artifacts (MADiE/eCQI QICore FHIR bundles) from their pre-compiled ELM via fqm-execution. The single home of the fqm-execution dependency — the package boundary IS the ADR-026 quarantine.",
   "type": "module",

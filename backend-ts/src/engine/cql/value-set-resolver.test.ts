@@ -16,7 +16,7 @@ import { rmSync } from "node:fs";
 import { createSqliteD1 } from "@mieweb/cloud-local";
 import { SqliteValueSetStore } from "../../stores/sqlite/value-set-store-sqlite.ts";
 import { RUN_STORE_FLOOR_DDL, migrateFloorSchema } from "../../stores/sqlite/schema.ts";
-import { StoreValueSetResolver, buildCodeService } from "@workwell/measure-engine";
+import { StoreValueSetResolver, buildCodeService } from "@work-well/measure-engine";
 
 const dbPath = join(tmpdir(), `workwell-vsr-${crypto.randomUUID()}.sqlite`);
 const VS = "urn:workwell:vs:audiogram-procedures";

@@ -17,7 +17,7 @@ import {
 import { deriveWhyFlagged } from "../case/case-detail-read-model.ts";
 import { OFFICIAL_MEASURE_SEMANTICS, officialMeasureSemantics } from "./official-measure-semantics.ts";
 import { loadOfficialArtifact, type OfficialArtifact } from "./official-artifacts.ts";
-import type { FqmCalculate } from "@workwell/official-executor";
+import type { FqmCalculate } from "@work-well/official-executor";
 
 const IPP = "initial-population";
 const DENOM = "denominator";

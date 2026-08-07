@@ -17,7 +17,7 @@ import type { RunStore } from "../stores/run-store.ts";
 import type { OutcomeStore } from "../stores/outcome-store.ts";
 import type { CaseStore, CaseRecord } from "../stores/case-store.ts";
 import { ACTIVE_CASE_STATUSES } from "../case/case-logic.ts";
-import type { EvaluateMeasureBinding, MeasureOutcome } from "@workwell/measure-engine";
+import type { EvaluateMeasureBinding, MeasureOutcome } from "@work-well/measure-engine";
 import { OFFICIAL_LOGIC_VERSION_PREFIX, type RoutedEngine } from "../wiring/executor-router.ts";
 import { isApplicable } from "../segment/segment-applicability.ts";
 import type { HydratedSegment } from "../stores/segment-store.ts";

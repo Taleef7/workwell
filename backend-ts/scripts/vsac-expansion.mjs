@@ -50,7 +50,7 @@
  *   strength as a completed cap.
  */
 
-/** NLM's FHIR terminology service — the same host `@workwell/measure-engine`'s `vsac-client.ts` expands against. */
+/** NLM's FHIR terminology service — the same host `@work-well/measure-engine`'s `vsac-client.ts` expands against. */
 export const DEFAULT_VSAC_BASE = "https://cts.nlm.nih.gov/fhir";
 
 /**
@@ -79,7 +79,7 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
  * The single `.mjs` implementation: the vendor script and the terminology audit both import it rather
  * than keeping private copies, which is how #364 shipped with three copies of one rule and a
  * normalization missing from all of them. It deliberately mirrors `oidFromValueSetUrl` in
- * `@workwell/official-executor` — the duplication is forced (this file runs as bare `node` on the
+ * `@work-well/official-executor` — the duplication is forced (this file runs as bare `node` on the
  * deploy path and cannot import the workspace package) and `valueset-parity.test.mjs` pins the two
  * against each other over the real artifacts.
  *
@@ -193,7 +193,7 @@ export async function expandFromVsac(oid, { vsacBase, vsacManifest, apiKey }) {
  * check built on this over-approximates, which is the safe direction and must be said out loud
  * rather than papered over with the word "retrieves".
  *
- * A deliberate mirror of `referencedValueSets` in `@workwell/official-executor`, reimplemented here
+ * A deliberate mirror of `referencedValueSets` in `@work-well/official-executor`, reimplemented here
  * because this file runs as bare `node` on the deploy path with no install and no build step (see the
  * header) — it cannot import the package. The duplication is the cost of that, and it is bounded: the
  * two read the SAME field of the SAME artifact with the same de-duplication, and

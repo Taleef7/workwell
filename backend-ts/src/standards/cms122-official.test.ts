@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { CMS122_OFFICIAL_META, CMS122_DIABETES_OID, CMS122_HBA1C_OID, CMS122_QUALIFYING_VISIT_OIDS, CMS122_HOSPICE_OID, CMS122_PALLIATIVE_OID, enrichForOfficialCms122, type Expansions, } from "./cms122-official.ts";
-import type { ValueSetResolver } from "@workwell/measure-engine";
+import type { ValueSetResolver } from "@work-well/measure-engine";
 import { buildSyntheticBundle } from "../engine/synthetic/fhir-bundle-builder.ts";
 import { deriveExamConfig } from "../engine/synthetic/exam-config.ts";
 import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";

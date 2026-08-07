@@ -14,7 +14,7 @@ import { fileURLToPath } from "node:url";
 import { createSqliteD1 } from "@mieweb/cloud-local";
 import { SqliteValueSetStore } from "../../stores/sqlite/value-set-store-sqlite.ts";
 import { RUN_STORE_FLOOR_DDL, migrateFloorSchema } from "../../stores/sqlite/schema.ts";
-import { resolveValueSetResolver } from "@workwell/measure-engine";
+import { resolveValueSetResolver } from "@work-well/measure-engine";
 import { createWorkwellEngine } from "./workwell-engine.ts";
 
 const dbPath = join(tmpdir(), `workwell-vsac-parity-${crypto.randomUUID()}.sqlite`);

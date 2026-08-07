@@ -1,5 +1,5 @@
 /**
- * `@workwell/example-consumer` — the proof that `@workwell/measure-engine` runs on content that is not
+ * `@work-well/example-consumer` — the proof that `@work-well/measure-engine` runs on content that is not
  * WorkWell's (roadmap M-C / C2, ADR-062).
  *
  * ## What this package is for
@@ -10,7 +10,7 @@
  * who has none.
  *
  * So this package pretends to be that someone. It:
- *   - declares **one** dependency, `@workwell/measure-engine`;
+ *   - declares **one** dependency, `@work-well/measure-engine`;
  *   - ships **its own measure** — `tetanus-booster.cql` and the ELM compiled from it, both committed here
  *     and neither referenced by the app;
  *   - builds **its own** FHIR bundle;
@@ -33,7 +33,7 @@
  * eagerly, so every consumer must supply it — a fact discovered by writing this package, not by reading
  * the API. It is committed here alongside the measure for exactly that reason.
  */
-import { CqlExecutionEngine, type MeasureMeta, type MeasureOutcome } from "@workwell/measure-engine";
+import { CqlExecutionEngine, type MeasureMeta, type MeasureOutcome } from "@work-well/measure-engine";
 import tetanusElm from "./tetanus-booster.elm.json" with { type: "json" };
 import fhirHelpers from "./FHIRHelpers-4.0.1.elm.json" with { type: "json" };
 

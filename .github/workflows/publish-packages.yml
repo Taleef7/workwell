@@ -1,20 +1,28 @@
-# Publishes the `@workwell/*` packages to npm with provenance (roadmap M-C / C4, ADR-063).
+# Publishes the `@work-well/*` packages to npm with provenance (roadmap M-C / C4, ADR-063).
 #
 # INERT UNTIL AN OWNER ACTS, deliberately. It is `workflow_dispatch` only — never a push or tag
 # trigger — and it defaults to a dry run. Publishing is irreversible in a way nothing else in this
 # repo is: npm permits unpublish only within 72 hours and never permits reusing a version number, so a
 # mistake here cannot be fixed by a revert commit the way a bad deploy can (DEPLOY.md rollback).
 #
-# It also cannot succeed today, and that is not an oversight: the `@workwell` npm scope does not exist
-# and `NPM_TOKEN` is not set. Claiming the packages are "published" before either is true would be the
-# kind of overclaim this codebase keeps catching in itself. What IS true is that the tarballs build,
-# install, run and typecheck outside the workspace — `pnpm verify:publish`, run in CI on every PR.
+# PREREQUISITES ARE DONE (2026-08-06): the `work-well` npm org exists and `NPM_TOKEN` is set. **Nothing
+# has been published yet**, and that distinction is the point — this file described a workflow that
+# *could not* succeed until today, and saying so is only honest while it is true.
 #
-# OWNER STEPS, in order, before the first real run:
-#   1. Create the `@workwell` organisation scope on npmjs.com.
-#   2. Add `NPM_TOKEN` (a granular automation token, write access to the scope) as a repo secret.
-#   3. Run this workflow with `dry_run: true` and read the packed file lists in the log.
-#   4. Re-run with `dry_run: false`.
+# The scope is `@work-well`, not `@workwell`: an unrelated unscoped package named `workwell` already
+# exists on npm, and npm refuses an org name that collides with an existing package name (ADR-063
+# amendment). Hyphen over underscore is npm convention.
+#
+# OWNER STEPS, in order, for the first real run:
+#   1. Run this workflow with `dry_run: true` and read the packed file lists in the log.
+#   2. Re-run with `dry_run: false`.
+#
+# NOTE the dry run does NOT exercise `NPM_TOKEN` — it stops before the publish step. A token whose
+# scope selection does not cover `@work-well` will therefore pass the dry run and fail the real one.
+# That is a deliberate trade (the dry run must not be able to publish), not an oversight.
+#
+# What is independently verified, on every PR, is the harder half: the tarballs build, install, run and
+# typecheck outside the workspace — `pnpm verify:publish`, CI's `packages` job.
 #
 # Provenance (`publishConfig.provenance: true` in each manifest) needs `id-token: write` below and a
 # public repository; it attests which commit, workflow and runner produced the tarball, so a consumer
@@ -104,11 +112,11 @@ jobs:
             targets="${selected}"
           fi
           for pkg in ${targets}; do
-            echo "--- publishing @workwell/${pkg}"
+            echo "--- publishing @work-well/${pkg}"
             # --no-git-checks: the workflow may be dispatched from a ref pnpm considers unclean
             # (a tag, a detached head). The provenance attestation records the real commit either way,
             # so the check adds nothing here that the attestation does not already state.
-            pnpm --filter "@workwell/${pkg}" publish --no-git-checks --access public
+            pnpm --filter "@work-well/${pkg}" publish --no-git-checks --access public
           done
 
       - name: Say what happened

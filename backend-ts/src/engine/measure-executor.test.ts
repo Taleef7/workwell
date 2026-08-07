@@ -14,7 +14,7 @@ import {
   sqlPushdownExecutor,
   resolveMeasureExecutor,
   type MeasureExecutor,
-} from "@workwell/measure-engine";
+} from "@work-well/measure-engine";
 import { evaluateBundle } from "./ingress/evaluate-bundle.ts";
 import { createWorkwellEngine } from "./cql/workwell-engine.ts";
 

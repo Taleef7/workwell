@@ -174,6 +174,37 @@ commands; `verify:publish` needs the network and is a separate CI job for the re
 `@workwell/*`; `@mieweb/*` remains a pitch for later, which is cheap precisely because there are no
 external consumers yet.
 
+**Amendment (2026-08-06) — the scope is `@work-well/*`. The body above is left as written**, because it
+records what was decided on 2026-08-05 and a dated record that quietly changes its own wording is worth
+less than one that says why it moved.
+
+`@workwell` was never obtainable: an unrelated **unscoped** package named `workwell` already exists on
+npm, and npm refuses an **org** name that collides with an existing **package** name. Hyphen rather than
+underscore because npm scopes conventionally use hyphens and `@work_well` reads as a typo in an install
+command. **The decision is unchanged** — a neutral scope rather than `@mieweb/*`.
+
+**The check that missed this looked thorough, which is the part worth keeping.** Before choosing the name
+I verified `@workwell/measure-engine` (404), the `scope:workwell` registry search (empty) and
+`registry.npmjs.org/-/org/workwell` (404), and called the scope unclaimed. All three were true and **none
+of them is the gate** — `registry.npmjs.org/workwell` returns **200**. It could only fail at org-creation
+time in a browser, which is nowhere a test reaches. Same shape as this ADR's other finding: a check cited
+for more than it covers.
+
+**Three misses in the rename itself, each caught by a different mechanism, all the same shape.** A guard
+caught the first — `fqm-isolation.test.ts` writes the specifier as an escaped regex
+(`@workwell\/official-executor`), so a search for `@workwell/` skipped it and test 5/5, the ADR-026
+quarantine door, **failed with an empty importer list** rather than passing vacuously. Review caught the
+second, bare `@workwell` with no trailing slash in `publish-packages.yml`'s owner steps and three places
+in `CLAUDE.md`. Review caught the third and worst: the mechanical replace rewrote **every dated record** —
+this ADR's body, `DECISIONS_ARCHIVE.md`, both roadmaps and the JOURNAL back to 2026-07-24 — after I had
+deliberately not done that to `LOCKED_DECISIONS.md`. All are restored; `LOCKED_DECISIONS.md` §4.5 and this
+amendment carry the change instead.
+
+**Prerequisites are now done and nothing is published.** The `work-well` org exists and `NPM_TOKEN` is
+set, so `publish-packages.yml` can succeed for the first time; the dry run remains the first step. Note
+the dry run **does not exercise the token** — it stops before the publish step — so a token whose scope
+selection misses `@work-well` passes it and fails the real run. That is a deliberate trade, not a gap.
+
 ## ADR-062: codegen is not the engine, and a consumer that shares no code with the app is the only proof the split worked
 
 **Status:** Accepted (2026-08-05). Roadmap M-C / C2. Completes what ADR-059 started; C4 (publish) remains.

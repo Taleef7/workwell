@@ -1,5 +1,5 @@
 {
-  "name": "@workwell/api-ts",
+  "name": "@work-well/api-ts",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -45,9 +45,9 @@
     "@mieweb/cloud-local": "workspace:*",
     "@mieweb/cloud-os": "workspace:*",
     "@mieweb/cloud-types": "workspace:*",
-    "@workwell/measure-codegen": "workspace:*",
-    "@workwell/measure-engine": "workspace:*",
-    "@workwell/official-executor": "workspace:*",
+    "@work-well/measure-codegen": "workspace:*",
+    "@work-well/measure-engine": "workspace:*",
+    "@work-well/official-executor": "workspace:*",
     "better-sqlite3": "^12.0.0",
     "pg": "^8.21.0"
   },

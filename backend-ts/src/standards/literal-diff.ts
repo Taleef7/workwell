@@ -7,7 +7,7 @@
  * ADR-024 found intractable under the pinned JS translator); fqm-execution executes the committed ELM on
  * the same `cql-execution` + `cql-exec-fhir` runtime this repo already uses.
  *
- * The fqm machinery lives in `@workwell/official-executor` (extraction PR-4): the PACKAGE BOUNDARY is
+ * The fqm machinery lives in `@work-well/official-executor` (extraction PR-4): the PACKAGE BOUNDARY is
  * the ADR-026 quarantine — `fqm-execution` appears in exactly one package.json, and that package's entry
  * imports it only through a lazy `await import`. This module keeps what is WorkWell-specific: reading the
  * vendored bundle off disk and the diff itself. Reached ONLY from the `/api/measures/:id/fidelity/diff`
@@ -36,7 +36,7 @@
  */
 import type { OfficialMeasureReference } from "./reference-types.ts";
 import type { EmployeeProfile } from "../engine/synthetic/employee-catalog.ts";
-import type { ValueSetResolver } from "@workwell/measure-engine";
+import type { ValueSetResolver } from "@work-well/measure-engine";
 
 import type { DiffEngine, SubjectDiff } from "./execution-diff.ts";
 import { buildSyntheticBundle } from "../engine/synthetic/fhir-bundle-builder.ts";
@@ -49,7 +49,7 @@ import {
   type FqmCalculate,
   type MeasureBundle,
   type PopulationMembership,
-} from "@workwell/official-executor";
+} from "@work-well/official-executor";
 import { loadOfficialArtifact, officialArtifactAvailable } from "../wiring/official-artifacts.ts";
 import { loadOfficialTerminology, officialTerminologyExpander } from "../wiring/official-terminology.ts";
 import {
@@ -127,7 +127,7 @@ const disclaimerFor = (ecqmId: string): string =>
   "executed from its PRE-COMPILED ELM via fqm-execution (no translation), per subject against WorkWell's " +
   "authored measure, over the SAME measurement period and the SAME prepared bundle the official " +
   "executor would use at runtime — so this matches what a routed measure actually runs " +
-  "that will never exist. fqm-execution is quarantined behind the @workwell/official-executor package " +
+  "that will never exist. fqm-execution is quarantined behind the @work-well/official-executor package " +
   "boundary and lazily imported (ADR-026 as amended). Descriptive only — CQL " +
   "Outcome Status remains the sole compliance authority (ADR-008)."
 

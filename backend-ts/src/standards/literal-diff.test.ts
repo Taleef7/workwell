@@ -13,7 +13,7 @@ import { deriveExamConfig } from "../engine/synthetic/exam-config.ts";
 import { buildSyntheticBundle } from "../engine/synthetic/fhir-bundle-builder.ts";
 import { seededTargetFor } from "../run/distribution.ts";
 import { EMPLOYEES } from "../engine/synthetic/employee-catalog.ts";
-import type { ValueSetResolver } from "@workwell/measure-engine";
+import type { ValueSetResolver } from "@work-well/measure-engine";
 import { createWorkwellEngine } from "../engine/cql/workwell-engine.ts";
 
 /**

@@ -36,7 +36,7 @@ import { bundledEcqmValueSetResolver } from "../../engine/cql/bundled-ecqm-expan
 import { officialMeasureExecutor, type OfficialBatchSubject } from "../../wiring/official-executor-adapter.ts";
 import { officialTerminologyExpander } from "../../wiring/official-terminology.ts";
 import { loadOfficialArtifact } from "../../wiring/official-artifacts.ts";
-import type { MeasureOutcome } from "@workwell/measure-engine";
+import type { MeasureOutcome } from "@work-well/measure-engine";
 import { createWorkwellEngine } from "../../engine/cql/workwell-engine.ts";
 
 export interface SnapshotSubject {

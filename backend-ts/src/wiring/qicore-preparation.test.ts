@@ -16,7 +16,7 @@ import { buildSyntheticBundle } from "../engine/synthetic/fhir-bundle-builder.ts
 import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
 import { deriveExamConfig } from "../engine/synthetic/exam-config.ts";
 import { seededTargetFor } from "../run/distribution.ts";
-import { calculateOfficial, type MeasureBundle } from "@workwell/official-executor";
+import { calculateOfficial, type MeasureBundle } from "@work-well/official-executor";
 
 const bundleWith = (...resources: Array<Record<string, unknown>>): PreparableBundle => ({
   resourceType: "Bundle",

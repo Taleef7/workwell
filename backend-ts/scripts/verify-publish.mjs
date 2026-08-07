@@ -1,5 +1,5 @@
 /**
- * Packs the publishable `@workwell/*` packages and consumes them from OUTSIDE the workspace
+ * Packs the publishable `@work-well/*` packages and consumes them from OUTSIDE the workspace
  * (roadmap M-C / C4).
  *
  *   node scripts/verify-publish.mjs
@@ -73,7 +73,7 @@ function packAll(outDir) {
     pnpm(["pack", "--pack-destination", outDir], dir);
     const name = readdirSync(outDir).find((f) => f.includes(pkg) && f.endsWith(".tgz"));
     if (!name) throw new Error(`pnpm pack produced no tarball for ${pkg}`);
-    tarballs[`@workwell/${pkg}`] = join(outDir, name);
+    tarballs[`@work-well/${pkg}`] = join(outDir, name);
     console.log(`  packed ${pkg} → ${name}`);
   }
   return tarballs;
@@ -128,8 +128,8 @@ function assertNoTsSpecifiers(tarball, listing, pkg) {
 const CONSUMER_JS = `
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { CqlExecutionEngine } from "@workwell/measure-engine";
-import { generateCql, validateRule } from "@workwell/measure-codegen";
+import { CqlExecutionEngine } from "@work-well/measure-engine";
+import { generateCql, validateRule } from "@work-well/measure-codegen";
 
 const MEASURES = {
   tetanus_booster: { id: "tetanus_booster", name: "Tetanus Booster Currency", library: "TetanusBooster-1.0.0", periodMonths: 120 },
@@ -184,8 +184,8 @@ console.log("outside-the-repo consumer: COMPLIANT/OVERDUE/unknown-measure all as
 const CONSUMER_TS = `
 // Typechecked with moduleResolution "node16" — the resolution an ordinary consumer has, and the one
 // under which a .d.ts pointing at a "./x.ts" path is an error.
-import { CqlExecutionEngine, type MeasureMeta, type MeasureOutcome, type OutcomeStatus } from "@workwell/measure-engine";
-import { generateCql, type CodegenBindings, type Rule } from "@workwell/measure-codegen";
+import { CqlExecutionEngine, type MeasureMeta, type MeasureOutcome, type OutcomeStatus } from "@work-well/measure-engine";
+import { generateCql, type CodegenBindings, type Rule } from "@work-well/measure-codegen";
 
 const meta: MeasureMeta = { id: "tetanus_booster", name: "Tetanus Booster Currency", library: "TetanusBooster-1.0.0", periodMonths: 120 };
 const rule: Rule = { type: "windowed-recency", windowDays: 365, dueSoonDays: 30 };
@@ -231,7 +231,7 @@ function main() {
     const tarballs = packAll(tarballDir);
 
     console.log("\n2. inspect the packed manifests");
-    for (const pkg of PUBLISHABLE) assertPackedManifest(tarballs[`@workwell/${pkg}`], pkg);
+    for (const pkg of PUBLISHABLE) assertPackedManifest(tarballs[`@work-well/${pkg}`], pkg);
 
     console.log("\n3. install the tarballs into a directory that knows nothing about this repo");
     writeFileSync(

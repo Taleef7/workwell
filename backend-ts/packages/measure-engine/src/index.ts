@@ -1,5 +1,5 @@
 /**
- * `@workwell/measure-engine` — the headless "given a patient bundle and a measure, are they
+ * `@work-well/measure-engine` — the headless "given a patient bundle and a measure, are they
  * compliant?" engine. Two runtime dependencies, `cql-execution` and `cql-exec-fhir`, and no
  * WorkWell content of any kind.
  *

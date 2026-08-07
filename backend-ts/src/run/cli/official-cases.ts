@@ -1,6 +1,6 @@
 /**
  * DB-less CLI orchestration for the official MADiE diagnostic harness.
- * fqm-execution is reached only through @workwell/official-executor; neither this shell nor any src/ file imports it.
+ * fqm-execution is reached only through @work-well/official-executor; neither this shell nor any src/ file imports it.
  */
 import { createHash } from "node:crypto";
 import { readFileSync, statSync, writeFileSync } from "node:fs";

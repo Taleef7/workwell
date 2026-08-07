@@ -1,5 +1,5 @@
 /**
- * Builds the publishable `@workwell/*` packages to `dist/` (roadmap M-C / C4).
+ * Builds the publishable `@work-well/*` packages to `dist/` (roadmap M-C / C4).
  *
  *   node scripts/build-packages.mjs [--package <name>]
  *

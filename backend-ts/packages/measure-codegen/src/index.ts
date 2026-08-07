@@ -1,9 +1,9 @@
 /**
- * `@workwell/measure-codegen` — declarative measure rules compiled to canonical CQL.
+ * `@work-well/measure-codegen` — declarative measure rules compiled to canonical CQL.
  *
  * ## Why this is not part of the engine
  *
- * `@workwell/measure-engine` answers "is this patient compliant?" from compiled ELM. This answers a
+ * `@work-well/measure-engine` answers "is this patient compliant?" from compiled ELM. This answers a
  * different question — "what CQL expresses this rule?" — and it rode along in the engine package only
  * because both started life under `src/engine/cql/`. They share no code: `generate-cql.ts` has **zero
  * imports**, so the separation costs nothing and states something true. Codegen is authoring-time; the

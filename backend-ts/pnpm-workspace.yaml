@@ -8,10 +8,10 @@
 # pnpm resolve the whole @mieweb/cloud graph from source.
 #
 # `packages/*` are WorkWell's own extractable libraries (roadmap M-C).
-#   @workwell/official-executor — the fqm-execution quarantine (ADR-026).
-#   @workwell/measure-engine    — the eval core, content-free (ADR-059).
-#   @workwell/measure-codegen   — rule → CQL, zero deps, authoring-time only (ADR-062).
-#   @workwell/example-consumer  — proves the engine runs on content that is not ours (ADR-062).
+#   @work-well/official-executor — the fqm-execution quarantine (ADR-026).
+#   @work-well/measure-engine    — the eval core, content-free (ADR-059).
+#   @work-well/measure-codegen   — rule → CQL, zero deps, authoring-time only (ADR-062).
+#   @work-well/example-consumer  — proves the engine runs on content that is not ours (ADR-062).
 packages:
   - "."
   - "packages/*"

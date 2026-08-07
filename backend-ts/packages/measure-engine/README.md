@@ -1,10 +1,10 @@
-# `@workwell/measure-engine`
+# `@work-well/measure-engine`
 
 Headless eCQM evaluation. Give it a patient bundle and a measure; get back the outcome and the
 per-define evidence that produced it.
 
 ```ts
-import { CqlExecutionEngine } from "@workwell/measure-engine";
+import { CqlExecutionEngine } from "@work-well/measure-engine";
 
 const engine = new CqlExecutionEngine({ measures, elmLibraries, expansionFallback });
 
@@ -72,7 +72,7 @@ a silently wrong one.
 - `evaluateExpressions(...)` — data-free execution of a library's defines, which is the subset the CQL
   language conformance suite is written in (ADR-060).
 
-Rule → CQL codegen is **not** here. It moved to [`@workwell/measure-codegen`](../measure-codegen) in
+Rule → CQL codegen is **not** here. It moved to [`@work-well/measure-codegen`](../measure-codegen) in
 ADR-062: it shares no code with the engine, answers a different question, and a consumer who wants to
 evaluate measures should not have to take a CQL emitter.
 
@@ -82,7 +82,7 @@ It **composes** `fqm-execution`; it does not compete with it. See
 [`docs/PACKAGES.md`](../../../docs/PACKAGES.md) for the full positioning — the short version is that
 `fqm-execution` evaluates a published FHIR **Measure bundle** end to end, and this evaluates **compiled
 ELM** against a bundle and hands back per-define evidence. WorkWell uses both: official CMS eCQMs route
-through `fqm-execution` (quarantined in `@workwell/official-executor`, ADR-026), and everything else —
+through `fqm-execution` (quarantined in `@work-well/official-executor`, ADR-026), and everything else —
 including the occupational measures nobody publishes — runs here.
 
 ## Status and stability

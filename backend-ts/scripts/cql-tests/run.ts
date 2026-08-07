@@ -30,7 +30,7 @@
  */
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { evaluateExpressions } from "@workwell/measure-engine";
+import { evaluateExpressions } from "@work-well/measure-engine";
 import { compileCql, type CqlDiagnostic } from "../../src/measure/cql-translator.ts";
 import { parseTestFile, ParseError, type CqlTestCase } from "./parse-tests.ts";
 import { skipDecision } from "./capabilities.ts";
