@@ -23,6 +23,9 @@
 #
 # OWNER STEPS for a SUBSEQUENT release:
 #   0. Bump the version in the package's `package.json` and merge that first.
+#      You do NOT have to match `packages:` to what you bumped — the publish step derives that by
+#      asking the registry, skips anything already released at its current version, and FAILS if that
+#      leaves nothing to publish. Leaving it on `all` is the safe default.
 #   1. Run this workflow with `dry_run: true` and read the packed file lists in the log.
 #   2. Re-run with `dry_run: false`.
 #
@@ -120,18 +123,53 @@ jobs:
           else
             targets="${selected}"
           fi
+
+          # WHICH packages publish is DERIVED from what the registry already has, not from the operator
+          # picking correctly. Once both packages exist, a release that bumps only one and runs with the
+          # default `all` is a coin flip on an irreversible path: in one order the engine publishes and
+          # then codegen fails on its unchanged version, leaving a HALF-DONE release; in the other the
+          # engine fails first and `set -e` aborts before codegen, so a valid release publishes NOTHING.
+          # Both are the workflow's fault, not the operator's, so the workflow fixes it.
+          #
+          # A skip is announced, never silent — "I ran the release and nothing happened" must not be a
+          # thing an operator can believe by accident.
+          published=0
+          skipped=""
           for pkg in ${targets}; do
-            echo "--- publishing @work-well/${pkg}"
+            name="@work-well/${pkg}"
+            version="$(node -p "require('./packages/${pkg}/package.json').version")"
+            if npm view "${name}@${version}" version >/dev/null 2>&1; then
+              echo "--- SKIP ${name}@${version}: already on the registry (npm never permits reusing a version)"
+              skipped="${skipped} ${name}@${version}"
+              continue
+            fi
+            echo "--- publishing ${name}@${version}"
             # --no-git-checks: the workflow may be dispatched from a ref pnpm considers unclean
             # (a tag, a detached head). The provenance attestation records the real commit either way,
             # so the check adds nothing here that the attestation does not already state.
-            pnpm --filter "@work-well/${pkg}" publish --no-git-checks --access public
+            pnpm --filter "${name}" publish --no-git-checks --access public
+            published=$((published + 1))
           done
+
+          # Nothing to publish is an ERROR, not a quiet success: it means every selected package is
+          # already released at its current version, which almost always means a forgotten version bump.
+          if [ "${published}" -eq 0 ]; then
+            echo "::error::Nothing was published — every selected package is already on the registry at its current version (${skipped# }). Bump the version first; see docs/PACKAGES.md §3."
+            exit 1
+          fi
+          echo "published=${published}" >> "$GITHUB_ENV"
+          echo "skipped=${skipped# }" >> "$GITHUB_ENV"
 
       - name: Say what happened
         run: |
           if [ "${{ inputs.dry_run }}" = "true" ]; then
             echo "### Dry run — nothing was published" >> "$GITHUB_STEP_SUMMARY"
           else
-            echo "### Published \`${{ inputs.packages }}\` to npm with provenance" >> "$GITHUB_STEP_SUMMARY"
+            # Reports what was PUBLISHED and what was SKIPPED, rather than echoing the selector back.
+            # "Published `all`" would be a lie on any run where a package was already at its version.
+            echo "### Published ${published:-0} package(s) to npm with provenance" >> "$GITHUB_STEP_SUMMARY"
+            if [ -n "${skipped:-}" ]; then
+              echo "" >> "$GITHUB_STEP_SUMMARY"
+              echo "Skipped (already on the registry at this version): \`${skipped}\`" >> "$GITHUB_STEP_SUMMARY"
+            fi
           fi
