@@ -95,6 +95,26 @@ language does not carry over by association. What is made rigorous is the *choic
 cases at the regulation's own numbers (9.99 negative, 10.0 positive) and adversarially
 wrong-by-construction cases, two of which found real bugs.
 
+**Review found four more defects after the ADR was first written, and they are recorded because three
+of them are the under-detection this ADR claims the measure never commits.** (1) Baseline and current
+dates were derived from **both ears combined**, so an unrelated right-ear-only recheck moved the shared
+current date, nulled the left ear's average and made a **confirmed left-ear shift vanish** — dates are
+now per ear. (2) The `(g)(8)(ii)` exclusion was **permanent**: a worker excused once had every later
+shift suppressed; it is now bound to the current shift by `recordedDate`, and an undated determination
+does not exclude. (3) Non-final Observations could anchor the baseline, which is the *earliest* record
+— a `final | amended | corrected` gate now applies. (4) `Numerator` was not conjoined with
+`Denominator`, so it was true outside the initial population; latent in the app under ADR-031, but not
+latent for the IG publication this ADR describes, where a consumer computes `group.population[].count`
+straight from these defines. Duplicate thresholds now **refuse** rather than resolving by bundle order,
+and a threshold in an unexpected unit is refused rather than coerced.
+
+**Three documentation corrections**, on a document whose entire value is traceability: the
+`(g)(8)(ii)` chapeau says "Unless a **physician** determines", not "physician or audiologist";
+`(g)(9)`'s **per-ear** baseline revision is an OSHA interpretation, not CFR text; and the LOINC codes
+do **not** encode conduction method — the bone-conduction panel shares the same 22 members, so a bare
+Observation is ambiguous and the measure cannot currently tell air from bone. That last one is now a
+stated limitation rather than an unnoticed gap.
+
 **Named and not done: independent re-derivation.** The strongest available verification is a second
 author building a decision table from the CFR without seeing this CQL and comparing — disagreement
 would identify an unresolved specification question rather than a coding error.

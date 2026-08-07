@@ -13,14 +13,26 @@
   "hearing conservation compliance" number would hide partial failure — a program could refit every
   employee and notify none, and still score well.
 
-  TERMINOLOGY IS REAL, WITH ONE STATED EXCEPTION. The audiometric thresholds are LOINC codes from
+  TERMINOLOGY IS REAL FOR THE MEASUREMENTS, WITH TWO ADMINISTRATIVE EXCEPTIONS. The thresholds are LOINC from
   the Pure tone air conduction threshold audiometry panel (89015-2), so this measure is portable and
   representable in QRDA (ADR-051 — a QRDA Category I is only meaningful for data in real
   terminology). Program membership is the exception and cannot be otherwise: the regulation's own
   trigger is an 8-hour TWA at or above 85 dBA (1910.95(c)(1)), which is an industrial-hygiene
   measurement, not a clinical observation. It will never appear in a clinical data feed. So
   membership is an employer-asserted fact, and this measure says so rather than pretending to
-  compute exposure.
+  compute exposure. The (g)(8)(ii) exclusion is the SECOND exception and has the same consequence:
+  being non-standard, it is invisible to QRDA Category I under ADR-051's own finding, so an excluded
+  worker cannot be represented in an exported document. An earlier draft of this comment claimed one
+  exception and was wrong (review, #408).
+
+  LIMIT OF THE LOINC CODES. They identify frequency and ear but NOT the conduction method — the FSNs
+  carry an empty Method field, and the bone-conduction panel (100652-7) lists the same 22 members. A
+  bare Observation carrying 89019-4 is therefore ambiguous between air and bone conduction, and this
+  measure retrieves bare Observations with no enclosing-panel check. 1910.95(h)(1) requires AIR
+  conduction, and bone-conduction thresholds are typically lower — so a site recording both for one
+  visit could both mask and manufacture a shift. Disambiguating needs panel or `derivedFrom` context
+  the data model does not currently carry; until then this is a stated limitation, not a solved
+  problem.
 */
 library OshaHearingStandardThresholdShift version '1.0.0'
 using FHIR version '4.0.1'
@@ -55,7 +67,9 @@ code "Hearing threshold left 4000 Hz": '89022-8' from "LOINC" display 'Hearing t
 */
 codesystem "ICD10CM": 'http://hl7.org/fhir/sid/icd-10-cm'
 // The two administrative facts below carry no standard code system, so they use the corpus's own
-// namespace — the same strings the synthetic bundle builder and the WebChart crosswalk already stamp.
+// namespace. `hearing-enrollment` IS already stamped by the roster builder, the value-set seed and
+// the synthetic bundles; `sts-not-occupational` is stamped by NOTHING today and exists only here and
+// in this measure's tests. An earlier comment claimed both were already stamped (review, #408).
 codesystem "WorkWellOccupational": 'urn:workwell:vs:hearing-enrollment'
 codesystem "WorkWellOccupationalExclusion": 'urn:workwell:vs:sts-not-occupational'
 code "Occupational exposure to noise": 'Z57.0' from "ICD10CM" display 'Occupational exposure to noise'
@@ -104,13 +118,23 @@ define "Left Ear Thresholds":
     where O.status.value in { 'final', 'amended', 'corrected' }
       and (O.effective as FHIR.dateTime) on or before end of "Measurement Period"
 
-define "All Thresholds":
-  "Right Ear Thresholds" union "Left Ear Thresholds"
+/*
+  An audiogram is a test session. Thresholds carry no session identifier in FHIR, so the test DATE is
+  the grouping key — the same convention an audiometric record uses on paper.
 
-// An audiogram is a test session. Thresholds carry no session identifier in FHIR, so the test DATE
-// is the grouping key — the same convention an audiometric record uses on paper.
-define "Audiogram Dates":
-  distinct("All Thresholds" O return date from (O.effective as FHIR.dateTime))
+  THE DATES ARE PER EAR, and that is a correctness requirement rather than tidiness. Deriving one
+  shared baseline/current pair from both ears combined lets one ear's test date govern the other
+  ear's comparison window: a right-ear-only recheck moves the shared "current" date forward, the left
+  ear has no thresholds on that date, its average goes null, and a CONFIRMED left-ear shift silently
+  disappears from OVERDUE (review, #408). That is under-detection caused by an unrelated
+  observation arriving — the direction this measure refuses to fail in, and it also breaks the
+  asymmetry rule below, under which a positive finding needs only one computable ear.
+*/
+define "Right Audiogram Dates":
+  distinct("Right Ear Thresholds" O return date from (O.effective as FHIR.dateTime))
+
+define "Left Audiogram Dates":
+  distinct("Left Ear Thresholds" O return date from (O.effective as FHIR.dateTime))
 
 /*
   1910.95(g)(5)(i) — the baseline is the audiogram against which subsequent ones are compared. This
@@ -125,22 +149,57 @@ define "Audiogram Dates":
   first error is the one to prefer, but it is an error, and it is why this measure is a surveillance
   aid and not a legal determination.
 */
-define "Baseline Date":
-  Min("Audiogram Dates")
+define "Right Baseline Date":
+  Min("Right Audiogram Dates")
 
+define "Right Current Date":
+  Max("Right Audiogram Dates")
+
+define "Left Baseline Date":
+  Min("Left Audiogram Dates")
+
+define "Left Current Date":
+  Max("Left Audiogram Dates")
+
+// The latest audiogram date in either ear — used ONLY to date the (g)(8)(ii) determination, never
+// to select thresholds.
 define "Current Audiogram Date":
-  Max("Audiogram Dates")
+  Max({ "Right Current Date", "Left Current Date" })
 
-define "Has Two Distinct Audiograms":
-  "Baseline Date" is not null
-    and "Current Audiogram Date" is not null
-    and "Current Audiogram Date" > "Baseline Date"
+define "Right Has Two Audiograms":
+  "Right Baseline Date" is not null and "Right Current Date" > "Right Baseline Date"
 
-define function "Threshold On"(thresholds List<Observation>, onDate Date, frequency System.Code):
-  Last(thresholds O
+define "Left Has Two Audiograms":
+  "Left Baseline Date" is not null and "Left Current Date" > "Left Baseline Date"
+
+/*
+  Every recorded value for one (ear, frequency, date).
+
+  UNITS ARE CHECKED, not assumed. `(O.value as FHIR.Quantity).value` discards the unit entirely, so a
+  threshold stamped in any other unit would be consumed as decibels (review, #408). An ABSENT unit is
+  accepted — real feeds frequently omit it and these LOINC codes have no other plausible reading —
+  but a unit that is explicitly something else is refused rather than silently coerced.
+*/
+define function "Threshold Values"(thresholds List<Observation>, onDate Date, frequency System.Code):
+  distinct(thresholds O
     where date from (O.effective as FHIR.dateTime) = onDate
       and exists(O.code.coding C where C.code = frequency.code and C.system = frequency.system)
+      and ((O.value as FHIR.Quantity).code is null
+           or (O.value as FHIR.Quantity).code.value in { 'dB', 'dB[HL]', 'dB(HL)' })
     return (O.value as FHIR.Quantity).value)
+
+/*
+  One value, or none. `Last()` over an unsorted query resolves duplicates by DOCUMENT ORDER, so an
+  original and its correction on the same date would be decided by bundle sequence (review, #408) —
+  and widening the status filter to `amended | corrected` makes that pairing routine rather than
+  exotic. There is no reliable recency signal to sort on here, so contradictory duplicates REFUSE:
+  the worker becomes MISSING_DATA and a human decides. Identical duplicates are harmless and collapse
+  via `distinct`.
+*/
+define function "Threshold On"(thresholds List<Observation>, onDate Date, frequency System.Code):
+  if Count("Threshold Values"(thresholds, onDate, frequency)) = 1
+    then First("Threshold Values"(thresholds, onDate, frequency))
+    else null
 
 /*
   1910.95(g)(10)(i): "an average of 10 dB or more at 2000, 3000, and 4000 Hz". The average is of the
@@ -159,16 +218,16 @@ define function "Ear Average"(thresholds List<Observation>, onDate Date, f2000 S
         + "Threshold On"(thresholds, onDate, f4000)) / 3.0
 
 define "Right Baseline Average":
-  "Ear Average"("Right Ear Thresholds", "Baseline Date", "Hearing threshold right 2000 Hz", "Hearing threshold right 3000 Hz", "Hearing threshold right 4000 Hz")
+  "Ear Average"("Right Ear Thresholds", "Right Baseline Date", "Hearing threshold right 2000 Hz", "Hearing threshold right 3000 Hz", "Hearing threshold right 4000 Hz")
 
 define "Right Current Average":
-  "Ear Average"("Right Ear Thresholds", "Current Audiogram Date", "Hearing threshold right 2000 Hz", "Hearing threshold right 3000 Hz", "Hearing threshold right 4000 Hz")
+  "Ear Average"("Right Ear Thresholds", "Right Current Date", "Hearing threshold right 2000 Hz", "Hearing threshold right 3000 Hz", "Hearing threshold right 4000 Hz")
 
 define "Left Baseline Average":
-  "Ear Average"("Left Ear Thresholds", "Baseline Date", "Hearing threshold left 2000 Hz", "Hearing threshold left 3000 Hz", "Hearing threshold left 4000 Hz")
+  "Ear Average"("Left Ear Thresholds", "Left Baseline Date", "Hearing threshold left 2000 Hz", "Hearing threshold left 3000 Hz", "Hearing threshold left 4000 Hz")
 
 define "Left Current Average":
-  "Ear Average"("Left Ear Thresholds", "Current Audiogram Date", "Hearing threshold left 2000 Hz", "Hearing threshold left 3000 Hz", "Hearing threshold left 4000 Hz")
+  "Ear Average"("Left Ear Thresholds", "Left Current Date", "Hearing threshold left 2000 Hz", "Hearing threshold left 3000 Hz", "Hearing threshold left 4000 Hz")
 
 /*
   AGE CORRECTION IS NOT APPLIED, and that is a decision rather than an omission.
@@ -201,7 +260,9 @@ define "Standard Threshold Shift":
 
 /*
   1910.95(g)(8)(ii) chapeau — every follow-up action is excused where a physician or audiologist
-  determines the shift is neither work related nor aggravated by occupational noise exposure. The
+  determines the shift is neither work related nor aggravated by occupational noise exposure.
+  (The chapeau says "Unless a physician determines"; audiologists are named in (g)(9) and 1904.10(b)(6),
+  not here — review, #408.) The
   regulation attaches no form, timing or retention to that determination, so it may be clinically
   invisible; when it IS recorded, it is a genuine scope exclusion rather than missing data.
 
@@ -243,15 +304,13 @@ define "Determined Not Occupational":
   data is incomplete.
 */
 define "Right Ear Determinable":
-  "Right Baseline Average" is not null and "Right Current Average" is not null
+  "Right Has Two Audiograms" and "Right Baseline Average" is not null and "Right Current Average" is not null
 
 define "Left Ear Determinable":
-  "Left Baseline Average" is not null and "Left Current Average" is not null
+  "Left Has Two Audiograms" and "Left Baseline Average" is not null and "Left Current Average" is not null
 
 define "Determinable":
-  "Has Two Distinct Audiograms"
-    and "Right Ear Determinable"
-    and "Left Ear Determinable"
+  "Right Ear Determinable" and "Left Ear Determinable"
 
 define "Initial Population":
   "In Hearing Conservation Program"
@@ -260,12 +319,19 @@ define "Denominator":
   "Initial Population"
 
 define "Denominator Exclusion":
-  "Determined Not Occupational"
+  "Denominator" and "Determined Not Occupational"
 
 // Higher is better: the numerator is employees whose surveillance shows NO shift. A hearing
 // conservation program exists to prevent threshold shifts, so their absence is the outcome.
+// Conjoined with the denominator so the population sets nest correctly. Without it the numerator is
+// true for subjects outside the initial population, and any consumer computing
+// `group.population[].count` from these defines — which is exactly what publishing this as IG content
+// means (ADR-065) — would get numerator > denominator (review, #408).
 define "Numerator":
-  "Determinable" and not "Standard Threshold Shift"
+  "Denominator"
+    and not "Denominator Exclusion"
+    and "Determinable"
+    and not "Standard Threshold Shift"
 
 define "Excluded":
   "Determined Not Occupational"

@@ -135,17 +135,21 @@ test("the average is over 2000/3000/4000 Hz ONLY — a 6000 Hz shift is invisibl
 });
 
 test("the ears are evaluated INDEPENDENTLY — an STS in either ear suffices", async () => {
-  // (g)(10)(i) "in either ear"; 1904.10(a) "one or both ears". A measure requiring BOTH ears, or
-  // averaging across ears, reports a genuinely shifted worker as fine.
+  // (g)(10)(i) "in either ear"; 1904.10(a) "one or both ears".
+  //
+  // The shift is 12 dB, not 20, and the choice is deliberate. With a 20 dB shift in one ear and 0 in
+  // the other, an implementation that AVERAGED ACROSS EARS would get (20+0)/2 = 10 and still report
+  // OVERDUE — so the test would pass against the very mutation its comment claims to kill (review,
+  // #408). At 12 dB the cross-ear mean is 6, below the threshold, so the mutation dies here.
   const rightOnly = await evaluate(bundle([
     { date: "2020-05-01", right: ear(5), left: ear(5) },
-    { date: "2026-05-01", right: ear(25), left: ear(5) },
+    { date: "2026-05-01", right: ear(17), left: ear(5) },
   ]));
-  assert.equal(rightOnly, "OVERDUE", "right ear alone is enough");
+  assert.equal(rightOnly, "OVERDUE", "right ear alone is enough, and 12 dB kills cross-ear averaging");
 
   const leftOnly = await evaluate(bundle([
     { date: "2020-05-01", right: ear(5), left: ear(5) },
-    { date: "2026-05-01", right: ear(5), left: ear(25) },
+    { date: "2026-05-01", right: ear(5), left: ear(17) },
   ]));
   assert.equal(leftOnly, "OVERDUE", "left ear alone is enough — the ears must not be averaged together");
 });
@@ -296,4 +300,88 @@ test("an amended or corrected observation DOES count", async () => {
     ]));
     assert.equal(out, "OVERDUE", `${status} must be treated as clinically final`);
   }
+});
+
+test("a single-ear recheck does NOT erase a confirmed shift in the other ear (review, #408)", async () => {
+  // The worst defect found in review. Baseline/current dates were derived from BOTH ears combined,
+  // so an unrelated right-ear-only observation moved the shared "current" date forward, the left ear
+  // had no thresholds on that date, its average went null — and a confirmed left-ear STS silently
+  // dropped out of OVERDUE. Under-detection caused by data ARRIVING.
+  const confirmed = await evaluate(bundle([
+    { date: "2020-05-01", right: ear(5), left: ear(5) },
+    { date: "2025-05-01", right: ear(5), left: ear(25) },
+  ]));
+  assert.equal(confirmed, "OVERDUE", "a 20 dB left-ear shift");
+
+  const plusRightRecheck = await evaluate(bundle([
+    { date: "2020-05-01", right: ear(5), left: ear(5) },
+    { date: "2025-05-01", right: ear(5), left: ear(25) },
+    { date: "2026-05-01", right: ear(5) },
+  ]));
+  assert.equal(
+    plusRightRecheck,
+    "OVERDUE",
+    "the left ear's shift stands on the left ear's own dates — a right-ear recheck must not erase it",
+  );
+});
+
+test("contradictory duplicate thresholds REFUSE rather than picking by bundle order (review, #408)", async () => {
+  // `Last()` over an unsorted query resolved duplicates by document order, so an original and its
+  // correction on the same date were decided by bundle sequence — and widening the status filter to
+  // amended|corrected makes that pairing routine. There is no reliable recency signal to sort on, so
+  // the measure refuses and a human decides.
+  const b = bundle([
+    { date: "2020-05-01", right: ear(5), left: ear(5) },
+    { date: "2026-05-01", right: ear(30), left: ear(5) },
+  ]) as { entry: { resource: Record<string, unknown> }[] };
+  b.entry.push({
+    resource: {
+      resourceType: "Observation", id: "dup", status: "corrected",
+      subject: { reference: "Patient/w1" },
+      code: { coding: [{ system: "http://loinc.org", code: CODES.right[4000] }] },
+      effectiveDateTime: "2026-05-01",
+      valueQuantity: { value: 5, unit: "dB", system: "http://unitsofmeasure.org", code: "dB" },
+    },
+  });
+  assert.equal(await evaluate(b), "MISSING_DATA", "two different values for one ear/frequency/date is not decidable");
+});
+
+test("a threshold stamped in the wrong unit is refused, an absent unit is accepted (review, #408)", async () => {
+  // `(O.value as FHIR.Quantity).value` discards the unit, so a percentage would have been consumed
+  // as decibels. An absent unit is tolerated because real feeds omit it and these LOINC codes have
+  // no other plausible reading; an explicitly different unit is refused rather than coerced.
+  const wrongUnit = bundle([
+    { date: "2020-05-01", right: ear(5), left: ear(5) },
+    { date: "2026-05-01", right: ear(30), left: ear(5) },
+  ]) as { entry: { resource: Record<string, unknown> }[] };
+  for (const e of wrongUnit.entry) {
+    const q = e.resource.valueQuantity as { code?: string } | undefined;
+    if (q && e.resource.effectiveDateTime === "2026-05-01") q.code = "%";
+  }
+  assert.equal(await evaluate(wrongUnit), "MISSING_DATA", "percent is not decibels");
+
+  const noUnit = bundle([
+    { date: "2020-05-01", right: ear(5), left: ear(5) },
+    { date: "2026-05-01", right: ear(30), left: ear(5) },
+  ]) as { entry: { resource: Record<string, unknown> }[] };
+  for (const e of noUnit.entry) {
+    const q = e.resource.valueQuantity as { code?: string } | undefined;
+    if (q) delete q.code;
+  }
+  assert.equal(await evaluate(noUnit), "OVERDUE", "an absent unit is accepted");
+});
+
+test("population sets nest: the numerator is a subset of the denominator (review, #408)", async () => {
+  // Numerator was not conjoined with Denominator, so it was TRUE for subjects outside the initial
+  // population. Latent in the app (ADR-031 derives MeasureReport membership from status labels) but
+  // not latent for publication as IG content, where a consumer computes group.population[].count
+  // straight from these defines and would get numerator > denominator.
+  const out = await run(bundle([
+    { date: "2020-05-01", right: ear(5), left: ear(5) },
+    { date: "2026-05-01", right: ear(5), left: ear(5) },
+  ], { enrolled: false }));
+  const d = new Map(out.evidence.expressionResults.map((e) => [e.define, e.result]));
+  assert.equal(d.get("Initial Population"), false);
+  assert.equal(d.get("Denominator"), false);
+  assert.equal(d.get("Numerator"), false, "a subject outside the denominator cannot be in the numerator");
 });

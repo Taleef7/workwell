@@ -68,10 +68,18 @@ healthcare-personnel influenza vaccination is an NHSN aggregate facility report 
 and the 25 CSTE/NIOSH Occupational Health Indicators are state-workforce surveillance counts, none
 expressible as a numerator over a patient bundle.
 
-**Reuse that did NOT have to be invented, and is safe to state:** all 22 pure-tone air-conduction
-LOINC codes (panel **89015-2**) are members of `us-core-clinical-test-codes`, bound by the US Core
-Observation Clinical Test Result profile — so an audiogram has a standard US-Core-conformant FHIR
-representation already. Note **100653-5 is deprecated**; do not cite it.
+**Reuse that did NOT have to be invented:** the pure-tone threshold LOINC codes (panel **89015-2**)
+appear in `us-core-clinical-test-codes`, bound by the US Core Observation Clinical Test Result profile
+— so an audiogram has a standard US-Core-conformant FHIR representation already. Note **100653-5 is
+deprecated**; do not cite it. *Scope:* the individual codes used by the measure were each resolved
+against a terminology server; the "all 22 are members" formulation has not been audited concept by
+concept against the current US Core release, so say "these are US Core clinical-test codes" rather
+than quoting a count.
+
+**A limitation to state whenever the codes are cited:** they identify frequency and ear but **not
+conduction method** — the FSNs have an empty Method field and the bone-conduction panel lists the same
+members. `1910.95(h)(1)` requires air conduction, and the measure cannot currently tell the two apart
+from a bare Observation. Do not describe the measure as verifying air-conduction audiometry.
 
 ## MeasureReport population and identity semantics (2026-07-15; ADR-031)
 

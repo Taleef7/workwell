@@ -66,7 +66,22 @@ strongest verification available here. Also: corpus generation so the measure ca
 the `1904.10` recordability rule (an STS **and** a 25 dB total level, age correction permitted for the
 first test and forbidden for the second).
 
-Suite 1936, 0 fail (+15). Typecheck clean. `compile-measures` emits 17 libraries.
+**Review then found four more, three of them the same under-detection.** Baseline/current dates were
+derived from **both ears combined**, so an unrelated right-ear-only recheck nulled the left ear's
+average and made a **confirmed left-ear shift vanish** — under-detection caused by data *arriving*;
+dates are now per ear. The exclusion was **permanent**. Non-final Observations could anchor the
+baseline. And `Numerator` was not conjoined with `Denominator`, so it was true outside the initial
+population — latent in the app under ADR-031, not latent for the IG publication ADR-065 describes.
+Duplicate thresholds now refuse rather than resolving by bundle order; an unexpected unit is refused
+rather than coerced.
+
+**Three documentation corrections on a traceability document**, which is where they matter most: the
+`(g)(8)(ii)` chapeau says "Unless a **physician** determines", not "physician or audiologist";
+`(g)(9)`'s per-ear baseline revision is an OSHA interpretation rather than CFR text; and **the LOINC
+codes do not encode conduction method** — the bone-conduction panel shares the same 22 members, so a
+bare Observation is ambiguous between air and bone. That is now a stated limitation.
+
+Suite 1940, 0 fail (+19). Typecheck clean. `compile-measures` emits 17 libraries.
 
 
 ## 2026-08-07 — `@work-well/measure-engine@0.1.0` and `@work-well/measure-codegen@0.1.0` are published

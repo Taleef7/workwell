@@ -59,14 +59,14 @@ well.
 | CQL define | Paragraph | What the regulation says | Encoding decision |
 |---|---|---|---|
 | `In Hearing Conservation Program` | `(c)(1)`, `(g)(1)` | Program required at an 8-hr TWA **≥ 85 dBA**; audiometric testing made available to all such employees | **Cannot be computed.** The trigger is an industrial-hygiene measurement no clinical system holds. Uses ICD-10-CM **Z57.0** *Occupational exposure to noise* as a documented proxy, OR an employer-asserted enrolment coding. See §5. |
-| `Right/Left Ear Thresholds` | `(h)(1)` | Pure tone, air conduction, **separately for each ear** | LOINC codes from panel **89015-2**; the two ears are never combined |
-| `Audiogram Dates` | — | — | Thresholds carry no session id in FHIR, so the **test date** groups an audiogram — the same convention a paper audiometric record uses |
-| `Baseline Date` | `(g)(5)(i)` | Baseline is the audiogram "against which subsequent audiograms can be compared" | **Earliest** audiogram. Diverges from `(g)(9)` revised baselines — see §6 A4, and note the divergence is *permissive* |
+| `Right/Left Ear Thresholds` | `(h)(1)` | Pure tone, air conduction, **separately for each ear** | LOINC codes from panel **89015-2**; the two ears are never combined. Only `final \| amended \| corrected` observations count, and a threshold in an unexpected unit is refused rather than coerced |
+| `Right/Left Audiogram Dates` | — | — | Thresholds carry no session id in FHIR, so the **test date** groups an audiogram. **Per ear** — a shared date across ears lets one ear's test govern the other's comparison window, which erased a confirmed shift (§4) |
+| `Right/Left Baseline Date` | `(g)(5)(i)` | Baseline is the audiogram "against which subsequent audiograms can be compared" | **Earliest** audiogram **for that ear**. Diverges from `(g)(9)` revised baselines — see §6 A4, and note the divergence is *permissive* |
 | `Ear Average` | `(g)(10)(i)` | "an average of 10 dB or more at **2000, 3000, and 4000 Hz**" | Exactly those three frequencies. 500/1000/6000 Hz are **tested** under `(h)(1)` but excluded from the arithmetic |
 | `Right/Left Ear Shift` | `(g)(10)(i)` | "a change in hearing threshold **relative to the baseline audiogram**" | Average of the three *shifts*, which equals the difference of the two three-frequency averages **only when all three frequencies are present on both dates** — hence the completeness rule below |
 | `Right/Left Ear STS` | `(g)(10)(i)` | "10 dB or more" | `>= 10.0`. Inclusive; `> 10` would miss every shift landing exactly on the definition |
 | `Standard Threshold Shift` | `(g)(10)(i)` | "in **either ear**" | Logical OR across ears. `1904.10(a)` phrases the same concept as "one or both ears" — **not** exclusive-or |
-| `Determined Not Occupational` | `(g)(8)(ii)` chapeau | Follow-up excused where a physician/audiologist determines the shift is not work related or aggravated by occupational noise | A genuine **scope exclusion**, not missing data. See §6 A8 — it may be clinically invisible |
+| `Determined Not Occupational` | `(g)(8)(ii)` chapeau | "**Unless a physician determines** that the standard threshold shift is not work related…" | A genuine **scope exclusion**, not missing data, and bound to the current shift by `recordedDate` — see §6 A8. Note the chapeau names a **physician**; audiologists are named in `(g)(9)` and `1904.10(b)(6)`, which are different provisions |
 | `Determinable` | — | — | **Asymmetric by design**: a positive finding needs one computable ear, a negative finding needs **both**. See §4 |
 | `Outcome Status` | `(g)(8)` | — | `OVERDUE` means "an STS is present and `(g)(8)` follow-up is owed", not that a date passed. There is **no `DUE_SOON`** — the regulation defines no warning band, and inventing one would present a WorkWell convention as a regulatory threshold |
 
@@ -80,9 +80,12 @@ is owed regardless of the left.
 A **negative** finding requires **both** ears complete. Concluding "no shift" while one ear's data is
 missing asserts something about an ear nobody measured.
 
-The first implementation got this wrong — it used OR across ears for determinability, so a worker with
-two of three frequencies on the right and a clean left ear returned `COMPLIANT`. An adversarial test
-caught it. That bug is the shape that makes a compliance product dangerous: it improves the apparent
+The first implementation got this wrong twice. It used OR across ears for determinability, so a
+worker with two of three frequencies on the right and a clean left ear returned `COMPLIANT`. And —
+found in review, and worse — the baseline and current dates were derived from **both ears combined**,
+so a right-ear-only recheck moved the shared "current" date, nulled the left ear's average, and made
+a **confirmed left-ear shift disappear**. Under-detection caused by data *arriving*. The dates are now
+per ear. That bug is the shape that makes a compliance product dangerous: it improves the apparent
 rate by silently absorbing the people whose data is incomplete.
 
 Likewise, an incomplete frequency set does not get averaged over whatever is present. A shift computed
@@ -102,10 +105,23 @@ measured 85 dBA. It is a proxy and is labelled as one everywhere it appears. The
 enrolment coding is accepted as an alternative because on a real deployment the employer knows who is
 in the programme even when the chart does not.
 
-**One thing that did NOT need inventing.** All 22 pure-tone air-conduction LOINC codes are members of
+**One thing that did NOT need inventing.** The pure-tone threshold codes appear in
 `http://hl7.org/fhir/us/core/ValueSet/us-core-clinical-test-codes`, bound by the US Core Observation
-Clinical Test Result profile. An audiogram therefore already has a standard, US-Core-conformant FHIR
-representation, and a certified EHR has a defined place to put one.
+Clinical Test Result profile, so an audiogram has a standard US-Core-conformant FHIR representation
+and a certified EHR has a defined place to put one. *Scope of that check, stated:* the individual
+codes were each resolved against a terminology server and confirmed; the "all 22 are members"
+formulation was asserted from a value-set copy carrying an older panel name and has **not** been
+re-verified concept by concept against the current US Core release. Treat it as "these codes are US
+Core clinical-test codes", not as an audited 22-of-22 count.
+
+**LIMIT OF THE CODES — they do not encode conduction method.** The Fully-Specified Names carry an
+empty Method field, and the **bone**-conduction panel (100652-7) lists the same 22 members. A bare
+Observation carrying `89019-4` is therefore ambiguous between air and bone conduction, and this
+measure retrieves bare Observations with no enclosing-panel check. `(h)(1)` requires **air**
+conduction, and bone-conduction thresholds are typically lower — so a site recording both for one
+visit could both mask a real shift and manufacture one. Disambiguating needs panel or `derivedFrom`
+context the data model does not currently carry. **Stated limitation, not a solved problem**, and the
+highest-value thing for a second author to attack.
 
 > Note: LOINC **100653-5** appears in search results as the air-conduction panel and is **deprecated**.
 > The live panel is **89015-2**.
@@ -137,9 +153,11 @@ the audiogram *and employer policy*.
 is the protective direction. Silently applying Appendix F would be worse than not offering it: it
 would present one employer's lawful policy choice as an objective finding.
 
-**A4 — Revised baselines are discretionary, per-ear, and may be invisible.** `(g)(9)` permits
-substituting a later audiogram as the baseline when a shift is persistent or hearing significantly
-improved — at professional discretion, per ear, with "persistent" undefined. Where a revision happened
+**A4 — Revised baselines are discretionary and may be invisible.** `(g)(9)` permits substituting a
+later audiogram as the baseline when a shift is persistent or hearing significantly improved — at
+professional discretion, with "persistent" undefined. **The regulation text says "the baseline
+audiogram" and is silent on per-ear substitution**; that reading comes from an OSHA interpretation
+letter, not from the CFR, and is flagged here as interpretation rather than text. Where a revision happened
 but was never recorded, this measure compares against a baseline that is too old and **over-detects**.
 Over-detection sends a worker for evaluation they may not need; under-detection lets a real shift go
 unactioned. The first error is preferable — but it is an error, and it is why this is a surveillance
@@ -149,9 +167,15 @@ aid, not a legal determination.
 where additional testing is necessary or pathology is suspected. Both limbs are judgment calls and no
 time window attaches. A "referred after STS" numerator would have to invent its due date.
 
-**A8 — The exclusion may be clinically invisible.** The `(g)(8)(ii)` chapeau lets a physician or
-audiologist switch off every follow-up action, but 1910.95 specifies no form, timing or retention for
-that determination. A worker legitimately excluded may look non-compliant, and vice versa.
+**A8 — The exclusion may be clinically invisible, and it is bound to one shift.** The `(g)(8)(ii)`
+chapeau ("Unless a **physician** determines…") switches off every follow-up action, but 1910.95
+specifies no form, timing or retention for that determination. A worker legitimately excluded may look
+non-compliant, and vice versa.
+
+Because the determination concerns **one shift**, this measure requires its `recordedDate` to fall on
+or after the current audiogram date. An undated determination does not exclude — nothing ties it to a
+shift, and honouring it would make the exclusion permanent, so a worker excused once would have every
+later shift suppressed. That was a real defect in the first implementation.
 
 **Not implemented, and flagged for anyone extending this:** `1904.10` recordability requires **both**
 an STS **and** a total hearing level ≥ 25 dB averaged at the same three frequencies in the same ear —
