@@ -117,14 +117,27 @@ Published from `.github/workflows/publish-packages.yml`, which runs `pnpm publis
 runner produced each tarball, so a consumer can verify the package against this source rather than
 trusting the registry. Provenance requires a public repository, and this one is public.
 
-**Status (2026-08-06): nothing is published.** The prerequisites now exist — the `work-well` npm org and
-the `NPM_TOKEN` secret — so the workflow *can* succeed, which it could not before today. It remains
-`workflow_dispatch`-only and defaults to a dry run. This is stated rather than glossed because
-"published" is a claim with a trivial external check (`npm view @work-well/measure-engine`).
+**Status (2026-08-07): PUBLISHED.** Both packages are on the public registry at **`0.1.0`**, each with a
+**SLSA provenance attestation** (`slsa.dev/provenance/v1`) signed by GitHub Actions and recorded in
+sigstore's transparency log.
 
-**The dry run does not exercise the token.** It stops before the publish step, by design — a dry run that
-could publish would not be one. So a token whose scope selection does not cover `@work-well` passes the
-dry run and fails the real one; that is a known trade, not a gap.
+```bash
+npm view @work-well/measure-engine      # 59 files, 134 kB unpacked
+npm view @work-well/measure-codegen     # 13 files,  51 kB unpacked, zero dependencies
+```
+
+The claim is stated this precisely because it has a trivial external check, and it was verified the way
+that matters rather than by reading the workflow's exit code: both were installed from npm into an empty
+directory — no workspace, no clone — and the engine evaluated `example-consumer`'s measure there,
+returning COMPLIANT, OVERDUE and `unknown measure 'audiogram'`, with codegen emitting CQL. **That
+discharges the caveat `example-consumer` has carried since ADR-062** — it is now a consumer outside the
+repo, not merely outside the app.
+
+**Two things worth knowing about the publish path.** The **dry run does not exercise `NPM_TOKEN`** — it
+stops before the publish step, by design, so a mis-scoped token passes it and fails the real run. And the
+registry is **not immediately consistent**: `npm view` returned 404 for several minutes after a publish
+that had already succeeded and signed provenance. Do not read an early 404 as a failed publish; read the
+workflow log for `+ @work-well/<pkg>@<version>`.
 
 What *is* verified today, on every PR, is the harder half — `pnpm verify:publish` (CI's `packages` job)
 builds real tarballs, installs them into a temp directory with a plain `npm install`, and then runs the
