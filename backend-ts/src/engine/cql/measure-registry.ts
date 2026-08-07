@@ -6,11 +6,11 @@
  * `occurrence during "Measurement Period"`), single-day (0) for the rest.
  *
  * ADR-059: this file is WorkWell's measure CONTENT and stays app-side. The `MeasureMeta` *shape* is the
- * engine's, so it is re-exported from `@workwell/measure-engine` here — every existing importer keeps its
+ * engine's, so it is re-exported from `@work-well/measure-engine` here — every existing importer keeps its
  * single `from "./measure-registry.ts"` line, and the package ships none of the catalog below.
  */
-export type { MeasureMeta } from "@workwell/measure-engine";
-import type { MeasureMeta } from "@workwell/measure-engine";
+export type { MeasureMeta } from "@work-well/measure-engine";
+import type { MeasureMeta } from "@work-well/measure-engine";
 
 export const MEASURES: Record<string, MeasureMeta> = {
   audiogram: { id: "audiogram", name: "Audiogram", library: "AnnualAudiogramCompleted-1.0.0", periodMonths: 0, expansionLibrary: "AnnualAudiogramCompletedVS-1.0.0", valueSets: ["urn:workwell:vs:audiogram-procedures"] },

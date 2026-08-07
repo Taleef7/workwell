@@ -1,7 +1,7 @@
 {
-  "name": "@workwell/example-consumer",
+  "name": "@work-well/example-consumer",
   "version": "0.1.0",
-  "description": "Proves @workwell/measure-engine evaluates content that is not WorkWell's: one dependency, its own measure, its own ELM, its own bundle. Not published — it exists to be run in CI (roadmap M-C / C2, ADR-062).",
+  "description": "Proves @work-well/measure-engine evaluates content that is not WorkWell's: one dependency, its own measure, its own ELM, its own bundle. Not published — it exists to be run in CI (roadmap M-C / C2, ADR-062).",
   "type": "module",
   "license": "Apache-2.0",
   "private": true,
@@ -12,7 +12,7 @@
     }
   },
   "dependencies": {
-    "@workwell/measure-engine": "workspace:*"
+    "@work-well/measure-engine": "workspace:*"
   },
   "files": [
     "src"

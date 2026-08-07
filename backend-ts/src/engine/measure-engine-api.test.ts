@@ -1,5 +1,5 @@
 /**
- * The APP side of the `@workwell/measure-engine` boundary (ADR-059).
+ * The APP side of the `@work-well/measure-engine` boundary (ADR-059).
  *
  * ## What this file used to be
  *
@@ -13,7 +13,7 @@
  *
  * ## The three ways the app could break the boundary
  *
- *   1. **Deep-import** past the published entry — `@workwell/measure-engine/src/cql/...`. That resolves
+ *   1. **Deep-import** past the published entry — `@work-well/measure-engine/src/cql/...`. That resolves
  *      today under `moduleResolution: Bundler` and would break the moment `package.json#exports` is
  *      enforced by a real publish (C4) — the worst possible time to discover it.
  *   2. **Reach around** the specifier entirely — a relative `../../packages/measure-engine/src/...`.
@@ -34,7 +34,7 @@ const SRC_ROOT = resolvePath(ENGINE_ROOT, "..");
 const BACKEND_ROOT = resolvePath(SRC_ROOT, "..");
 const ENGINE_PACKAGE_SRC = resolvePath(BACKEND_ROOT, "packages", "measure-engine", "src");
 
-const PACKAGE_NAME = "@workwell/measure-engine";
+const PACKAGE_NAME = "@work-well/measure-engine";
 
 const SPECIFIER_RE = /(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s+|\brequire\s*\(\s*)(["'`])([^"'`]*)\1/g;
 
@@ -51,7 +51,7 @@ function stripComments(source: string): string {
  *
  * Tests are in because a test that deep-imports the package breaks at publish time exactly like
  * production code does. **`.mjs` is in because of a defect this test failed to catch** (review, #400):
- * `scripts/gen-cql.mjs` imported `generateCql` from `@workwell/measure-engine`, and when ADR-062 moved
+ * `scripts/gen-cql.mjs` imported `generateCql` from `@work-well/measure-engine`, and when ADR-062 moved
  * codegen to its own package that import silently became invalid — `pnpm gen-cql` would have thrown at
  * runtime. `tsc` does not typecheck `.mjs`, so nothing else in CI could see it. An API check that only
  * looks at the files the compiler already checks is checking the wrong half.

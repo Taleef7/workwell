@@ -1,7 +1,7 @@
 /**
  * Two implementations of "which value sets does this ELM retrieve", pinned against each other.
  *
- * `@workwell/official-executor`'s `referencedValueSets` is the one that decides ROUTING;
+ * `@work-well/official-executor`'s `referencedValueSets` is the one that decides ROUTING;
  * `scripts/vsac-expansion.mjs`'s `declaredValueSets` is the one that decides what the VENDOR step
  * records and completes. They must agree, and there is a hard reason they cannot be one function: the
  * vendor script runs as bare `node` on the deploy path — no install, no build step — so it cannot
@@ -27,7 +27,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import { declaredValueSets, oidFromValueSetUrl } from "./vsac-expansion.mjs";
-// Through the ADAPTER, never `@workwell/official-executor` directly: every direct importer is another
+// Through the ADAPTER, never `@work-well/official-executor` directly: every direct importer is another
 // door to fqm-execution that the boundary tests have to keep deliberately open (the adapter says so
 // itself), and `requiredOids` is the exact function `officialRoutingProblems` feeds to its refusals —
 // so this pins the vendor script against the thing that actually decides routing.

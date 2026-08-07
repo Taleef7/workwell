@@ -1,6 +1,6 @@
-# `@workwell/example-consumer`
+# `@work-well/example-consumer`
 
-**The proof that `@workwell/measure-engine` works for someone who is not us.**
+**The proof that `@work-well/measure-engine` works for someone who is not us.**
 
 ADR-059 made the engine content-free and a boundary test proves it imports no WorkWell content. That is an
 architectural claim. It is not the same as proving the package is *usable* by a consumer who has none — so

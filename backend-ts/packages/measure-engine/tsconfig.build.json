@@ -1,6 +1,6 @@
 // Emit config for PUBLISHING only — `pnpm typecheck` at the workspace root still checks these sources
 // in place, from `../../tsconfig.json`'s `include`. This file exists because a tarball must contain
-// JavaScript: the workspace resolves `@workwell/measure-engine` to `src/index.ts` through
+// JavaScript: the workspace resolves `@work-well/measure-engine` to `src/index.ts` through
 // `moduleResolution: Bundler`, which no ordinary Node consumer has.
 //
 // `rewriteRelativeImportExtensions` is what lets the source keep its `./x.ts` specifiers (required by

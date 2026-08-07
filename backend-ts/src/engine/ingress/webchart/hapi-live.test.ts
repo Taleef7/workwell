@@ -22,7 +22,7 @@ import { evaluateDevDb } from "./devdb-cli.ts";
 import { DEVDB_WHITELIST } from "./report-table.ts";
 import { parseEnrollmentRoster, evaluateSourceWithRoster } from "../enrollment/roster.ts";
 import { BUCKETS, type MeasureSummary } from "./report-table.ts";
-import type { OutcomeStatus } from "@workwell/measure-engine";
+import type { OutcomeStatus } from "@work-well/measure-engine";
 
 const BASE_URL = (process.env.WORKWELL_WEBCHART_LIVE_TEST_BASE_URL ?? "").trim().replace(/\/+$/, "");
 const PARITY_DATE = "2024-06-01"; // the devdb CLI's data-contemporaneous default

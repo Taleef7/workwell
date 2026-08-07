@@ -1,16 +1,16 @@
-# `@workwell/measure-codegen`
+# `@work-well/measure-codegen`
 
 Declarative measure rules → canonical CQL. **Zero dependencies.**
 
 ```ts
-import { generateCql, validateRule } from "@workwell/measure-codegen";
+import { generateCql, validateRule } from "@work-well/measure-codegen";
 
 const cql = generateCql({ library: "TdapSeries", version: "1.0.0", rule, bindings });
 ```
 
 ## Why it is not part of the engine
 
-`@workwell/measure-engine` answers *"is this patient compliant?"* from compiled ELM. This answers
+`@work-well/measure-engine` answers *"is this patient compliant?"* from compiled ELM. This answers
 *"what CQL expresses this rule?"*. They shared a directory, not code — `generate-cql.ts` has **zero
 imports** — so separating them costs nothing and states something true: codegen is authoring-time, the
 engine is runtime.

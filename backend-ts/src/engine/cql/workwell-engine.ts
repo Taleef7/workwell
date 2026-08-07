@@ -1,5 +1,5 @@
 /**
- * `createWorkwellEngine` — `@workwell/measure-engine` configured with WorkWell's own content.
+ * `createWorkwellEngine` — `@work-well/measure-engine` configured with WorkWell's own content.
  *
  * The engine takes its measure catalog, compiled ELM and offline value-set expansions as constructor
  * input (ADR-059); this is the one place in the app that supplies them. Every consumer that used to
@@ -9,7 +9,7 @@
  * It lives inside `src/engine/` on purpose: `engine-boundary.test.ts` proves that directory reaches
  * nothing outside itself, and the three content modules it wires are all local to it.
  */
-import { CqlExecutionEngine, type ValueSetResolver } from "@workwell/measure-engine";
+import { CqlExecutionEngine, type ValueSetResolver } from "@work-well/measure-engine";
 import { MEASURES } from "./measure-registry.ts";
 import { ELM_LIBRARIES } from "./elm/index.ts";
 import { withBundledEcqmFallback } from "./bundled-ecqm-expansions.ts";

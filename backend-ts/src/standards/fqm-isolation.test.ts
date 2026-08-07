@@ -9,7 +9,7 @@ import { createRequire } from "node:module";
  *
  * `fqm-execution` (and its heavy transitive deps — axios/handlebars/moment/lodash) must never reach the
  * worker's cold-start or request path. That used to be guarded by a file allowlist here; it is now a
- * package boundary: the dependency lives in `@workwell/official-executor` alone, and that package loads
+ * package boundary: the dependency lives in `@work-well/official-executor` alone, and that package loads
  * it through a lazy `await import`. Five tests replace the allowlist — they check the *manifest*, the
  * *app tree*, the *package source*, the *module graph*, and *who may import the package at all* — so a
  * regression has to defeat five checks rather than one grep.
@@ -42,7 +42,7 @@ function walk(dir: string, out: string[]): void {
   }
 }
 
-test("1/5 manifest: fqm-execution is declared by @workwell/official-executor and NOBODY else", () => {
+test("1/5 manifest: fqm-execution is declared by @work-well/official-executor and NOBODY else", () => {
   const appPkg = JSON.parse(readFileSync(`${BACKEND_ROOT}package.json`, "utf8")) as {
     dependencies?: Record<string, string>;
     devDependencies?: Record<string, string>;
@@ -50,11 +50,11 @@ test("1/5 manifest: fqm-execution is declared by @workwell/official-executor and
   assert.equal(
     appPkg.dependencies?.["fqm-execution"],
     undefined,
-    "the app must not depend on fqm-execution — it consumes @workwell/official-executor",
+    "the app must not depend on fqm-execution — it consumes @work-well/official-executor",
   );
   assert.equal(appPkg.devDependencies?.["fqm-execution"], undefined, "not as a devDependency either");
   assert.equal(
-    appPkg.dependencies?.["@workwell/official-executor"],
+    appPkg.dependencies?.["@work-well/official-executor"],
     "workspace:*",
     "the app must consume the executor package from the workspace",
   );
@@ -104,7 +104,7 @@ test("2/5 app tree: no file under src/ (or any OTHER package) imports fqm-execut
   assert.deepEqual(
     importers,
     [],
-    `fqm-execution must be reached only through @workwell/official-executor; found: ${importers.join(", ")}`,
+    `fqm-execution must be reached only through @work-well/official-executor; found: ${importers.join(", ")}`,
   );
 });
 
@@ -165,7 +165,7 @@ test("4/5 module graph: fqm resolves FROM the package, not from the app, and sta
   assert.equal(appEntry, null, "fqm-execution must NOT be resolvable from the app — it leaked back in");
 
   const loadedBefore = Object.keys(fromPackage.cache).includes(packageEntry!);
-  const pkg = await import("@workwell/official-executor");
+  const pkg = await import("@work-well/official-executor");
   assert.equal(typeof pkg.loadCalculator, "function", "sanity: the package entry loaded");
   assert.equal(
     Object.keys(fromPackage.cache).includes(packageEntry!),
@@ -196,10 +196,10 @@ const EXECUTOR_IMPORTERS_ALLOWLIST = [
   // thing production routes through. Adding it here pre-emptively was wrong, and this guard said so.
 ];
 
-test("5/5 consumers: only the approved app layers may import @workwell/official-executor", () => {
+test("5/5 consumers: only the approved app layers may import @work-well/official-executor", () => {
   const files: string[] = [];
   walk(SRC_ROOT.replace(/[\\/]$/, ""), files);
-  const executorImport = /(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s+|\brequire\s*\(\s*)["']@workwell\/official-executor["']/;
+  const executorImport = /(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s+|\brequire\s*\(\s*)["']@work-well\/official-executor["']/;
   const importers = files
     .filter((f) => !f.endsWith(".test.ts"))
     .filter((f) => executorImport.test(stripComments(readFileSync(f, "utf8"))))

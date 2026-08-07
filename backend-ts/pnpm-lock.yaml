@@ -32,13 +32,13 @@ importers:
       '@mieweb/cloud-types':
         specifier: workspace:*
         version: link:../external/mieweb-cloud/packages/cloud-types
-      '@workwell/measure-codegen':
+      '@work-well/measure-codegen':
         specifier: workspace:*
         version: link:packages/measure-codegen
-      '@workwell/measure-engine':
+      '@work-well/measure-engine':
         specifier: workspace:*
         version: link:packages/measure-engine
-      '@workwell/official-executor':
+      '@work-well/official-executor':
         specifier: workspace:*
         version: link:packages/official-executor
       better-sqlite3:
@@ -136,7 +136,7 @@ importers:
 
   packages/example-consumer:
     dependencies:
-      '@workwell/measure-engine':
+      '@work-well/measure-engine':
         specifier: workspace:*
         version: link:../measure-engine
 

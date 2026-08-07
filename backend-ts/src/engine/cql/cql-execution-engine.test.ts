@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { CqlExecutionEngine, deriveInInitialPopulation } from "@workwell/measure-engine";
+import { CqlExecutionEngine, deriveInInitialPopulation } from "@work-well/measure-engine";
 import { MEASURES } from "./measure-registry.ts";
 import { buildSyntheticBundle } from "../synthetic/fhir-bundle-builder.ts";
 import { deriveExamConfig, type TargetOutcome } from "../synthetic/exam-config.ts";

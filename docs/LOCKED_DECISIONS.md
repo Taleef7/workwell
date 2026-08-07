@@ -27,8 +27,12 @@ Active plan: **`docs/ROADMAP_2026-08-04.md`** (supersedes `ROADMAP_2026-07-24.md
 4. **QRDA I/III is KEPT as an interoperability bridge**, not a certification target. Both document types
    validate at 0 findings against the HL7 base ruler; nothing is deleted.
 5. **The engine and its packaging are the primary deliverable** — M-C is promoted ahead of measure breadth.
-   Packaging = **pnpm workspace, neutral scope `@workwell/*`**, pitch Doug on `@mieweb/*` later. The
+   Packaging = **pnpm workspace, neutral scope `@work-well/*`**, pitch Doug on `@mieweb/*` later. The
    **versioned compliance API** is the contract MIE consumes.
+   > **The scope was decided as `@workwell/*` on 2026-08-04 and is `@work-well/*` since 2026-08-06**, for
+   > a reason outside anyone's judgement: an unrelated unscoped package named `workwell` already exists on
+   > npm, and npm refuses an org name that collides with an existing package name. The *decision* — a
+   > neutral scope rather than `@mieweb/*` — is unchanged; only the spelling is.
 6. **The differentiator is the measures nobody publishes** (M-E occupational/OSHA). Official eCQMs prove the
    engine; occupational content is the part no competitor obtains by downloading CMS artifacts.
 7. Authored cms122/125 subsets **retire from the catalog into the fidelity/Standards lab** post-flip

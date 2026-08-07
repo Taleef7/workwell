@@ -9,9 +9,9 @@ import assert from "node:assert/strict";
 import { officialLogicVersion, officialRoutingProblems, routedEngineForEnv } from "./executor-router.ts";
 import { loadOfficialArtifact, type OfficialArtifact } from "./official-artifacts.ts";
 import { requiredOids } from "./official-executor-adapter.ts";
-import type { EvaluateMeasureBinding, MeasureOutcome } from "@workwell/measure-engine";
+import type { EvaluateMeasureBinding, MeasureOutcome } from "@work-well/measure-engine";
 import type { LoadedTerminology } from "./official-terminology.ts";
-import type { FqmCalculate } from "@workwell/official-executor";
+import type { FqmCalculate } from "@work-well/official-executor";
 
 /**
  * Terminology lives in a gitignored, fetched-at-build sidecar, so whether it is present is a fact about

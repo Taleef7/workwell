@@ -1,5 +1,55 @@
 # Journal
 
+## 2026-08-06 — the npm scope is `@work-well`, because `@workwell` was never obtainable (branch `chore/npm-scope-work-well`)
+
+ADR-063 amendment + `LOCKED_DECISIONS.md` §4.5 note. **The `work-well` org exists and `NPM_TOKEN` is
+set; nothing is published yet.**
+
+**The cause.** An unrelated unscoped package named `workwell` already exists on npm, and npm refuses an
+**org** name that collides with an existing **package** name. The org could not be created, which is how
+this surfaced — in the owner's browser, at org-creation time.
+
+**My pre-flight check was wrong in a way worth keeping.** It verified `@workwell/measure-engine` (404),
+the `scope:workwell` registry search (empty) and `registry.npmjs.org/-/org/workwell` (404), and concluded
+the scope was unclaimed. All three were true and **none is the gate** — `registry.npmjs.org/workwell`
+returns **200**. Nothing a test could reach; the same shape as ADR-063's other finding, a check cited for
+more than it covers. Hyphen not underscore: npm scopes conventionally use hyphens and `@work_well` reads
+as a typo in an install command.
+
+**The decision did not change** — a neutral scope rather than `@mieweb/*` — only the spelling, so
+LOCKED_DECISIONS §4.5 and ADR-063 carry the reason rather than being silently rewritten.
+
+**Deliberately untouched:** `nurse@workwell.test` email domains and `urn:workwell:*` identifiers. They
+are not the npm scope, and ADR-046 makes the urn form load-bearing for authored-measure identity.
+
+**Three things the rename missed, each found by a different mechanism, and all the same shape — a sweep
+narrower than the claim it was cited for.**
+
+1. **A guard caught the first.** `fqm-isolation.test.ts` writes the specifier as an escaped regex
+   (`@workwell\/official-executor`), so `@workwell/` did not match; test 5/5 — the ADR-026 quarantine
+   door — failed with an **empty importer list** rather than passing vacuously. The one place in the diff
+   where a silent miss would have mattered.
+2. **Review caught the second.** Bare `@workwell` with no trailing slash survived in
+   `publish-packages.yml`'s owner steps, which instructed the owner to create an org npm refuses. A sweep
+   for the class then found **three more in CLAUDE.md** that review had not flagged.
+3. **Review caught the third, and it is the one I should have known better than to do.** The sed rewrote
+   **every dated JOURNAL entry back to 2026-07-24**, making the 2026-08-05 entry claim `@work-well/*` was
+   that day's owner call. It was not. I had been careful not to rewrite LOCKED_DECISIONS for exactly this
+   reason and then did it to the journal by machine. The file is restored to its pre-rename state; this
+   entry is the record instead.
+
+**Also fixed, and larger than a spelling change:** `publish-packages.yml`'s header said the workflow
+"cannot succeed today" because the scope and token do not exist. Both are now false. It also now states
+what the dry run does **not** do — it stops before the publish step, so it never exercises `NPM_TOKEN`,
+and a token whose scope selection misses `@work-well` passes the dry run and fails the real one.
+
+**CI silently ran nothing on the PR.** `ci.yml`'s push trigger did not list `chore/**`, so the branch got
+zero checks — and "no checks" is visually identical to "nothing to run". `chore/**` and `docs/**` added,
+with the hazard named in a comment; the list stays explicit because `official-cases` clones ~34 MB and can
+take 20 minutes.
+
+Suite 1921, 0 fail. `pnpm verify:publish` green under the new scope.
+
 ## 2026-08-05 (#397) — the translator gets a UCUM service, and the defect's whole interest is how it hid (branch `fix/ucum-translator-service`)
 
 ADR-064. Closes #397, the follow-up ADR-060 named and deliberately did not bundle.

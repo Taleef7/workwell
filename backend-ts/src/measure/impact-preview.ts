@@ -12,7 +12,7 @@
 import type { MeasureRecord } from "../stores/measure-store.ts";
 import type { CaseStore } from "../stores/case-store.ts";
 import type { CaseEventStore } from "../stores/case-event-store.ts";
-import type { EvaluateMeasureBinding } from "@workwell/measure-engine";
+import type { EvaluateMeasureBinding } from "@work-well/measure-engine";
 import { EMPLOYEES, type EmployeeProfile } from "../engine/synthetic/employee-catalog.ts";
 import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
 import { deriveExamConfig } from "../engine/synthetic/exam-config.ts";

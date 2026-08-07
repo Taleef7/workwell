@@ -5,7 +5,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { compileCql } from "./cql-translator.ts";
-import { generateCql, type GenerateCqlInput } from "@workwell/measure-codegen";
+import { generateCql, type GenerateCqlInput } from "@work-well/measure-codegen";
 import { createWorkwellEngine } from "../engine/cql/workwell-engine.ts";
 
 const EVAL = "2026-06-12";

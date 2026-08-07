@@ -1,5 +1,5 @@
 /**
- * The C2 acceptance test: `@workwell/measure-engine` evaluates a measure it has never heard of, supplied
+ * The C2 acceptance test: `@work-well/measure-engine` evaluates a measure it has never heard of, supplied
  * entirely by a consumer that shares no code with the app.
  *
  *   node --import tsx --test packages/example-consumer/src/index.test.ts
