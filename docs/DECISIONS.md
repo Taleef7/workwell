@@ -18,6 +18,93 @@
 >
 > **Sequence note:** ADR-033 does not exist — verified absent, and the number must not be reused.
 
+## ADR-065: an authored regulatory measure is verified by traceability and adversarial cases — because no external oracle exists, and none can be manufactured
+
+**Status:** Accepted (2026-08-07). Roadmap M-E1, first content. Traceability:
+`docs/measures/OSHA_1910_95_STS.md`. Answers the question filed as #405.
+
+**Context.** Locked decision 6 makes occupational content the differentiator — "the measures nobody
+publishes". That is now evidenced rather than assumed: the 2026 CMS eligible-clinician eCQMs (49), the
+hospital eCQMs (17), HEDIS MY2026 (93), every public `.cql` file on GitHub, the entire `cqframework`
+organisation and the complete HL7 FHIR IG registry contain **zero** occupational-health quality
+measures. The field has *indicators* — CSTE/NIOSH count events across a state workforce from discharge
+and workers-comp data — and no *measures*: what should happen to a named worker by a named date.
+
+Every previous milestone had an external oracle. M-A had the measure stewards' own MADiE expected
+results (410/410). M-C had `cqframework/cql-tests`. M-B had the HL7 schematron. **OSHA publishes
+regulations, not computable artifacts**, so M-E1 has none and cannot acquire one.
+
+**Decision 1 — the author of the CQL is the author of the test cases, and that is the normal state for
+an undefined measure rather than a compromise.** Measures with no official definition do not go
+through the measure-authoring or certification pipeline at all; the value of expressing them in CQL is
+that CQL is standardised, not that someone else has graded them. What converts author-owned content
+into *credible* content is the community route — publishing the measure and its cases in the standard
+shape, with the documentation that lets an organisation act as steward and put it through the
+acceptance process. So the deliverable is not "a measure that passes an external check"; it is **a
+measure packaged so it could be stewarded**.
+
+**Decision 2 — scope is ONE obligation.** 1910.95 creates several: baseline timing `(g)(5)(i)`, annual
+testing `(g)(6)`, STS detection `(g)(10)(i)`, 21-day notification `(g)(8)(i)`, protector refitting
+`(g)(8)(ii)(A)-(B)`, referral `(g)(8)(ii)(C)`. Each has a different trigger, deadline and evidence. A
+single "hearing conservation compliance" percentage would hide partial failure — a programme could
+refit every worker and notify none and still score well. This measure implements **STS detection**,
+the one fully computable from clinical data, and the traceability document lists the others as
+explicitly not implemented with the reason for each. **A traceability table that lists only what was
+built is how a measure ends up a coherent implementation of the wrong legal object.**
+
+**Decision 3 — where the regulation is discretionary, refuse rather than default silently.** Age
+correction is optional under `(g)(10)(ii)`, Appendix F is informational only, and OSHA has since
+permitted tables derived from other datasets — so **two employers can lawfully reach opposite
+conclusions on identical audiograms**, and STS is not a pure function of the audiogram but of the
+audiogram *and employer policy*. This measure applies **no** age correction, which detects more
+workers and is the protective direction, and says so where a reader will see it. Silently applying
+Appendix F would present one employer's lawful policy choice as an objective finding. Correspondingly,
+incomplete data yields `MISSING_DATA` rather than a conclusion: a shift computed from two of the three
+named frequencies is not the regulation's shift.
+
+**Decision 4 — determinability is ASYMMETRIC.** A positive STS is definitive from one ear; a negative
+finding requires both ears complete, because concluding "no shift" while an ear is unmeasured asserts
+something about data nobody has. The first implementation used OR across ears and returned COMPLIANT
+for a worker with an incomplete right ear and a clean left one. **An adversarial test caught it**, and
+that bug is the shape that makes a compliance product dangerous: it improves the apparent rate by
+absorbing the people whose data is incomplete. A second adversarial test caught a missing
+initial-population gate that reported OVERDUE for a worker with no noise exposure at all.
+
+**Decision 5 — real terminology, with the one exception named.** The thresholds are LOINC codes from
+panel **89015-2**, all members of `us-core-clinical-test-codes` — so an audiogram already has a
+US-Core-conformant representation and no data shape had to be invented. The cohort is the exception
+and cannot be otherwise: `(c)(1)`'s trigger is an 8-hour TWA at or above 85 dBA, an industrial-hygiene
+measurement absent from every clinical feed. ICD-10-CM **Z57.0** is used as a documented proxy, with
+employer assertion accepted as an alternative. Structurally the same gap as ADR-042's `us-core-sex`
+problem: clinical data present, eligibility attribute absent.
+
+**Decision 6 — it is NOT in the measure registry.** Registering it would place it in
+`RUNNABLE_MEASURE_IDS` and therefore in every population run, where the synthetic corpus cannot
+produce what it reads — two dated audiograms carrying six LOINC threshold observations each. The
+rule-params bindings that generate every other measure's corpus data describe a recency window
+(enrolment + waiver + one event) and cannot express that shape; **this is the first authored measure
+the codegen template cannot generate.** It is verified through the engine's own consumer path,
+`evaluate({ elm, metaOverride })` — the same surface an external integrator uses for content we do not
+ship. Wiring it into the roster with data that cannot exercise it would report MISSING_DATA for the
+whole population and look integrated while proving nothing.
+
+**What this verification does and does not establish.** The suite establishes that the measure
+computes **what we read the CFR to require**, not that our reading is right — a weaker evidentiary
+position than CMS122/125 enjoy, stated in `STANDARDS_CONFORMANCE.md` in those words so the M-A/M-B
+language does not carry over by association. What is made rigorous is the *choice* of cases: boundary
+cases at the regulation's own numbers (9.99 negative, 10.0 positive) and adversarially
+wrong-by-construction cases, two of which found real bugs.
+
+**Named and not done: independent re-derivation.** The strongest available verification is a second
+author building a decision table from the CFR without seeing this CQL and comparing — disagreement
+would identify an unresolved specification question rather than a coding error.
+
+**Consequences.** Suite 1932, 0 fail (+11). `compile-measures` emits 17 libraries. Follow-up, in
+order: corpus generation so the measure can join the roster; independent re-derivation; then the
+remaining 1910.95 obligations as separate measures. The `1904.10` recordability rule is flagged in the
+traceability doc for whoever extends this — it needs an STS **and** a 25 dB total level, with age
+correction permitted for the first test and forbidden for the second.
+
 ## ADR-064: one UCUM validator, shared by every translator we run — and an honest table rather than a new dependency
 
 **Status:** Accepted (2026-08-05). Closes #397, the follow-up ADR-060 named and deliberately did not bundle.
