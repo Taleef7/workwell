@@ -20,6 +20,11 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      e2e_base_url:
+        description: "E2E target. Allowlisted in .github/scripts/e2e-target-allowed.sh — production is REFUSED, the suite mutates. Default: staging."
+        type: string
+        required: false
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -38,6 +43,11 @@ jobs:
       # the production deploy step into a parse error; nothing before merge could see it (#356).
       - name: Every workflow run-block parses as shell
         run: bash .github/scripts/workflow-run-blocks.test.sh
+      # The E2E allowlist is the only thing standing between a dispatched E2E run and the production
+      # audit log, and the e2e job itself runs on dispatch only — so nothing on a PR would exercise it.
+      # Testing it here means a change that weakens the refusal fails on the PR that makes it.
+      - name: The E2E target allowlist refuses production
+        run: bash .github/scripts/e2e-target-allowed.test.sh
 
   frontend:
     name: Frontend — Lint, Test, Build
@@ -64,7 +74,10 @@ jobs:
         run: pnpm test
       - name: Build
         env:
-          NEXT_PUBLIC_API_BASE_URL: https://workwell-measure-studio-api.fly.dev
+          # Build-time only — the real deploys set their own. It pointed at the Fly.io backend
+          # decommissioned with the Vercel stack (that host no longer resolves), so the built bundle
+          # baked a dead URL into a check whose whole job is "does this build".
+          NEXT_PUBLIC_API_BASE_URL: https://twh-api-ts.os.mieweb.org
           NEXT_PUBLIC_APP_NAME: WorkWell Measure Studio
           NEXT_PUBLIC_DEMO_MODE: "false"
         run: pnpm build
@@ -417,10 +430,42 @@ jobs:
       - name: Install Playwright browsers
         working-directory: e2e
         run: npx playwright install chromium --with-deps
-      - name: Run E2E tests
+      # THE TARGET IS STAGING, NEVER PRODUCTION — this suite MUTATES. `runs.spec.ts` triggers a manual
+      # run and `case-outreach.spec.ts` POSTs `/actions/outreach`, so against the live TWH stack it would
+      # create real runs and case actions, and CLAUDE.md's hard rule means every one of those writes an
+      # `audit_event`. A test suite that pollutes the production audit log is worse than no suite.
+      #
+      # It previously pointed at `workwell-measure-studio.vercel.app` — the Vercel stack decommissioned
+      # when MIE TWH became the sole live one. That host now 404s, so every test burned its full 60s
+      # timeout plus a retry and the job hung ~14 minutes before being cancelled. It read as E2E coverage
+      # and could not pass. The preflight below makes that failure mode take seconds and name itself.
+      # TWO checks, and the ORDER matters. The allowlist runs first and is the one with teeth: a
+      # reachability check alone approves production, because production is reachable. The description
+      # on the `e2e_base_url` input is not an enforcement mechanism (review, #407).
+      - name: Refuse a target that is not on the allowlist
+        env:
+          PLAYWRIGHT_BASE_URL: ${{ inputs.e2e_base_url || 'https://twh-staging.os.mieweb.org' }}
+        run: bash .github/scripts/e2e-target-allowed.sh "${PLAYWRIGHT_BASE_URL}"
+      - name: Refuse to run against an unreachable target
         working-directory: e2e
         env:
-          PLAYWRIGHT_BASE_URL: https://workwell-measure-studio.vercel.app
+          PLAYWRIGHT_BASE_URL: ${{ inputs.e2e_base_url || 'https://twh-staging.os.mieweb.org' }}
+        run: |
+          set -euo pipefail
+          code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 "${PLAYWRIGHT_BASE_URL}" || true)"
+          echo "${PLAYWRIGHT_BASE_URL} -> HTTP ${code}"
+          case "${code}" in
+            2*|3*) ;;
+            *)
+              echo "::error::E2E target ${PLAYWRIGHT_BASE_URL} is not reachable (HTTP ${code}). Deploy staging first, or pass e2e_base_url."
+              exit 1
+              ;;
+          esac
+      - name: Run E2E tests
+        working-directory: e2e
+        timeout-minutes: 20
+        env:
+          PLAYWRIGHT_BASE_URL: ${{ inputs.e2e_base_url || 'https://twh-staging.os.mieweb.org' }}
         run: npx playwright test
       - name: Upload Playwright report
         uses: actions/upload-artifact@v4
