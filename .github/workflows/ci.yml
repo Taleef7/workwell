@@ -22,7 +22,7 @@ on:
   workflow_dispatch:
     inputs:
       e2e_base_url:
-        description: "E2E target (staging by default — NEVER point this at production; the suite mutates)"
+        description: "E2E target. Allowlisted in .github/scripts/e2e-target-allowed.sh — production is REFUSED, the suite mutates. Default: staging."
         type: string
         required: false
 
@@ -43,6 +43,11 @@ jobs:
       # the production deploy step into a parse error; nothing before merge could see it (#356).
       - name: Every workflow run-block parses as shell
         run: bash .github/scripts/workflow-run-blocks.test.sh
+      # The E2E allowlist is the only thing standing between a dispatched E2E run and the production
+      # audit log, and the e2e job itself runs on dispatch only — so nothing on a PR would exercise it.
+      # Testing it here means a change that weakens the refusal fails on the PR that makes it.
+      - name: The E2E target allowlist refuses production
+        run: bash .github/scripts/e2e-target-allowed.test.sh
 
   frontend:
     name: Frontend — Lint, Test, Build
@@ -434,6 +439,13 @@ jobs:
       # when MIE TWH became the sole live one. That host now 404s, so every test burned its full 60s
       # timeout plus a retry and the job hung ~14 minutes before being cancelled. It read as E2E coverage
       # and could not pass. The preflight below makes that failure mode take seconds and name itself.
+      # TWO checks, and the ORDER matters. The allowlist runs first and is the one with teeth: a
+      # reachability check alone approves production, because production is reachable. The description
+      # on the `e2e_base_url` input is not an enforcement mechanism (review, #407).
+      - name: Refuse a target that is not on the allowlist
+        env:
+          PLAYWRIGHT_BASE_URL: ${{ inputs.e2e_base_url || 'https://twh-staging.os.mieweb.org' }}
+        run: bash .github/scripts/e2e-target-allowed.sh "${PLAYWRIGHT_BASE_URL}"
       - name: Refuse to run against an unreachable target
         working-directory: e2e
         env:
