@@ -13,9 +13,10 @@ import lib10 from "./HepatitisBSeries-1.0.0.elm.json" with { type: "json" };
 import lib11 from "./HypertensionBPScreeningCQL-1.0.0.elm.json" with { type: "json" };
 import lib12 from "./MmrSeries-1.0.0.elm.json" with { type: "json" };
 import lib13 from "./ObesityBMIScreeningCQL-1.0.0.elm.json" with { type: "json" };
-import lib14 from "./TbSurveillance-1.3.0.elm.json" with { type: "json" };
-import lib15 from "./VaricellaSeries-1.0.0.elm.json" with { type: "json" };
-import lib16 from "./FHIRHelpers-4.0.1.elm.json" with { type: "json" };
+import lib14 from "./OshaHearingStandardThresholdShift-1.0.0.elm.json" with { type: "json" };
+import lib15 from "./TbSurveillance-1.3.0.elm.json" with { type: "json" };
+import lib16 from "./VaricellaSeries-1.0.0.elm.json" with { type: "json" };
+import lib17 from "./FHIRHelpers-4.0.1.elm.json" with { type: "json" };
 
 export const ELM_LIBRARIES: Record<string, unknown> = {
   "AdultImmunizationTdap-1.0.0": lib0,
@@ -32,7 +33,8 @@ export const ELM_LIBRARIES: Record<string, unknown> = {
   "HypertensionBPScreeningCQL-1.0.0": lib11,
   "MmrSeries-1.0.0": lib12,
   "ObesityBMIScreeningCQL-1.0.0": lib13,
-  "TbSurveillance-1.3.0": lib14,
-  "VaricellaSeries-1.0.0": lib15,
-  "FHIRHelpers-4.0.1": lib16,
+  "OshaHearingStandardThresholdShift-1.0.0": lib14,
+  "TbSurveillance-1.3.0": lib15,
+  "VaricellaSeries-1.0.0": lib16,
+  "FHIRHelpers-4.0.1": lib17,
 };
