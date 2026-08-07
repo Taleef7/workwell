@@ -253,12 +253,15 @@ there on C2's measure content, and typechecks a TS consumer against the packed `
 finally turns `example-consumer` from a consumer-outside-the-**app** into one outside the **repo**.
 `publishConfig` keeps the two resolutions apart (tree → `src/*.ts` so `pnpm typecheck` reads real sources;
 tarball → `dist/`), and that **fixes the package manager**: `publishConfig` field rewriting is a pnpm
-feature, so `npm pack` would ship a manifest still pointing at source. **Nothing is published and the docs
-say so** — `publish-packages.yml` is dispatch-only and dry-run by default (ADR-041's
-inert-until-the-secret pattern; owner steps in the file header). It could not succeed at all until
-**2026-08-06**, when the `work-well` org and `NPM_TOKEN` were created; **it still has not been run**, and
-the scope is `@work-well/*` rather than `@workwell/*` because an unrelated unscoped `workwell` package
-blocks the org name (ADR-063 amendment). `docs/PACKAGES.md` carries the positioning — **composes `fqm-execution`, does not compete with
+feature, so `npm pack` would ship a manifest still pointing at source. **PUBLISHED 2026-08-07:
+`@work-well/measure-engine@0.1.0` and `@work-well/measure-codegen@0.1.0` are on the public registry**, each
+with a SLSA provenance attestation signed by GitHub Actions and logged to sigstore — verified by
+installing them from npm into an empty directory and evaluating a measure there, which **discharges
+ADR-062's caveat**: `example-consumer` is now a consumer outside the REPO, not merely outside the app.
+`publish-packages.yml` stays dispatch-only and dry-run by default. Two traps recorded in its header: the
+dry run never exercises `NPM_TOKEN`, and the registry is **not immediately consistent** (`npm view` 404'd
+for minutes after a publish that had already succeeded). The scope is `@work-well/*` rather than
+`@workwell/*` because an unrelated unscoped `workwell` package blocks the org name (ADR-063 amendment). `docs/PACKAGES.md` carries the positioning — **composes `fqm-execution`, does not compete with
 it**, evidenced by our own routing (official eCQMs run on `fqm-execution` in production) — and states that
 **no performance or conformance comparison against it has been run, so none is claimed**. Semver is
 pre-1.0 read strictly (removals/semantic changes take the minor; pin `~0.1.0`), 1.0 gated on a consumer
@@ -284,10 +287,12 @@ before-state reachable so the regression test can watch the fix fail. **Still
 undiagnosed:** CMS125's 2 `Procedure`-only cases, CMS2's 7 `NUMER 1→0`, and CMS130/CMS165 unswept
 (credentialed vendor workflow). **Unsolved, named:** the wave-2 measures are MADiE-gated but unroutable —
 they have no authored counterpart, so `flip-snapshot`'s authored-vs-official comparison cannot run for
-them. **Deferred, not cancelled:** supplemental data (B8). **Owner steps:** the npm prerequisites are
-**DONE (2026-08-06)** — the `work-well` org exists and `NPM_TOKEN` is set, so the only remaining publish
-step is dispatching `publish-packages.yml` (dry run first); **nothing is published yet**. Still open:
-confirm with Doug/Nicole that certifying WorkWell's engine is not a business goal.
+them. **Deferred, not cancelled:** supplemental data (B8). **Owner steps: publishing is DONE (2026-08-07)**
+— both packages are live at `0.1.0` with provenance. A *re-run* at an unchanged version will fail (npm
+never permits reusing a version), so a release now starts with a version bump. Still open: confirm with
+Doug/Nicole that certifying WorkWell's engine is not a business goal; and **migrate off the 2FA-bypass
+token to npm Trusted Publishing** — npm is restricting bypass tokens for direct publishing, the workflow
+already has `id-token: write`, and it would remove `NPM_TOKEN` entirely.
 
 **Three standing corrections.** "~2030" for CMS FHIR endpoints is **not CMS-attributable** (say "no
 published date"). **"QI-Core STU7 = US Core 7 = WebChart's exact surface"** is half right: the equality

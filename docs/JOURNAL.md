@@ -1,5 +1,39 @@
 # Journal
 
+## 2026-08-07 — `@work-well/measure-engine@0.1.0` and `@work-well/measure-codegen@0.1.0` are published
+
+Dispatched `publish-packages.yml` dry-run first, read the packed file lists, then for real. Both are on
+the public registry with **SLSA provenance** (`slsa.dev/provenance/v1`) signed by GitHub Actions and
+recorded in sigstore's transparency log.
+
+| | files | unpacked | dependencies |
+|---|---|---|---|
+| `@work-well/measure-engine@0.1.0` | 59 | 134 kB | `cql-execution`, `cql-exec-fhir` |
+| `@work-well/measure-codegen@0.1.0` | 13 | 51 kB | none |
+
+**The tarball contents are the ADR-059 claim made visible**: `dist/` + `src/` + README + LICENSE, no test
+files, and **no measure content** — no catalog, no ELM, no value-set expansions.
+
+**Verified the way that matters, not by the workflow's exit code.** Installed both from npm into an empty
+directory — no workspace, no clone — and evaluated `example-consumer`'s measure there: COMPLIANT, OVERDUE,
+and `unknown measure 'audiogram'`, with codegen emitting CQL. **That discharges ADR-062's caveat** —
+`example-consumer` said in its own README that it was a consumer outside the *app*, not the *repo*. It is
+now outside the repo, against the real registry.
+
+**Two traps, both recorded in the workflow header because either will mislead the next person.** The
+**dry run never exercises `NPM_TOKEN`** — it stops before the publish step, so a mis-scoped token passes
+it and fails the real run. And the **registry is not immediately consistent**: `npm view` returned 404 for
+several minutes after a publish that had already succeeded and signed provenance. I read that 404 as
+evidence of npm's staged-packages flow and sent the owner to an empty Staged Packages page; the packages
+simply had not propagated. The log line to trust is `+ @work-well/<pkg>@<version>`.
+
+**Named, not done:** npm is restricting 2FA-bypass tokens for direct publishing (deprecation notice in the
+publish log). The replacement is **Trusted Publishing** via OIDC — the workflow already has
+`id-token: write`, so migrating would delete `NPM_TOKEN` outright.
+
+**A re-run at an unchanged version will now fail** — npm never permits reusing a version number — so a
+release begins with a version bump. Recorded in the workflow header and `docs/PACKAGES.md`.
+
 ## 2026-08-06 — the npm scope is `@work-well`, because `@workwell` was never obtainable (branch `chore/npm-scope-work-well`)
 
 ADR-063 amendment + `LOCKED_DECISIONS.md` §4.5 note. **The `work-well` org exists and `NPM_TOKEN` is

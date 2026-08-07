@@ -5,15 +5,24 @@
 # repo is: npm permits unpublish only within 72 hours and never permits reusing a version number, so a
 # mistake here cannot be fixed by a revert commit the way a bad deploy can (DEPLOY.md rollback).
 #
-# PREREQUISITES ARE DONE (2026-08-06): the `work-well` npm org exists and `NPM_TOKEN` is set. **Nothing
-# has been published yet**, and that distinction is the point — this file described a workflow that
-# *could not* succeed until today, and saying so is only honest while it is true.
+# FIRST PUBLISH DONE (2026-08-07): `@work-well/measure-engine@0.1.0` and `@work-well/measure-codegen@0.1.0`
+# are on the public registry with SLSA provenance. Re-running this workflow at an unchanged version will
+# FAIL — npm never permits reusing a version number — so bump the version first (see the semver policy in
+# `docs/PACKAGES.md`; pre-1.0, removals and semantic changes take the MINOR).
+#
+# Two things learned on that first run, both of which will mislead you otherwise:
+#   * The DRY RUN never exercises `NPM_TOKEN` — it stops before the publish step. A mis-scoped token
+#     passes the dry run and fails the real one.
+#   * The registry is NOT immediately consistent. `npm view` 404'd for several minutes after a publish
+#     that had already succeeded and signed provenance. Read the log for `+ @work-well/<pkg>@<version>`
+#     rather than concluding from an early 404 that nothing was published.
 #
 # The scope is `@work-well`, not `@workwell`: an unrelated unscoped package named `workwell` already
 # exists on npm, and npm refuses an org name that collides with an existing package name (ADR-063
 # amendment). Hyphen over underscore is npm convention.
 #
-# OWNER STEPS, in order, for the first real run:
+# OWNER STEPS for a SUBSEQUENT release:
+#   0. Bump the version in the package's `package.json` and merge that first.
 #   1. Run this workflow with `dry_run: true` and read the packed file lists in the log.
 #   2. Re-run with `dry_run: false`.
 #
