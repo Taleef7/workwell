@@ -17,6 +17,7 @@
 
 ## Titles (newest first)
 
+- ADR-065: an authored regulatory measure is verified by traceability and adversarial cases — no external oracle exists, and none can be manufactured
 - ADR-064: one UCUM validator, shared by every translator we run — and an honest table rather than a new dependency
 - ADR-063: a package is publishable when its tarball runs outside the workspace — not when it is published
 - ADR-062: codegen is not the engine, and a consumer that shares no code with the app is the only proof the split worked

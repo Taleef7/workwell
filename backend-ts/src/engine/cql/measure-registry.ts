@@ -14,6 +14,17 @@ import type { MeasureMeta } from "@work-well/measure-engine";
 
 export const MEASURES: Record<string, MeasureMeta> = {
   audiogram: { id: "audiogram", name: "Audiogram", library: "AnnualAudiogramCompleted-1.0.0", periodMonths: 0, expansionLibrary: "AnnualAudiogramCompletedVS-1.0.0", valueSets: ["urn:workwell:vs:audiogram-procedures"] },
+  // M-E1's OSHA STS measure is DELIBERATELY ABSENT from this registry — see ADR-065. Registering it
+  // here would put it in `RUNNABLE_MEASURE_IDS` and therefore in every population run, where the
+  // synthetic corpus cannot produce what it reads: two dated audiograms carrying six LOINC threshold
+  // observations each. The rule-params bindings that generate every other measure's corpus data
+  // describe a recency window (enrolment + waiver + one event) and cannot express that shape.
+  //
+  // It is compiled, committed and verified (osha-hearing-sts.test.ts) through the engine's own
+  // consumer path — `evaluate({ elm, metaOverride })` — which is exactly how an external integrator
+  // would run measure content we do not ship. Corpus generation is named follow-up work, not a gap
+  // being hidden: a measure wired into the roster with data that cannot exercise it would report
+  // MISSING_DATA for the whole population and look integrated while proving nothing.
   hazwoper: { id: "hazwoper", name: "HAZWOPER Surveillance", library: "HazwoperSurveillance-1.0.0", periodMonths: 0 },
   tb_surveillance: { id: "tb_surveillance", name: "TB Surveillance", library: "TbSurveillance-1.3.0", periodMonths: 0 },
   flu_vaccine: { id: "flu_vaccine", name: "Flu Vaccine", library: "FluVaccineSeasonal-1.0.0", periodMonths: 12 },

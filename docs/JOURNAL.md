@@ -1,5 +1,89 @@
 # Journal
 
+## 2026-08-07 (M-E1) — the first occupational measure: OSHA Standard Threshold Shift (branch `feat/me1-osha-hearing-sts`)
+
+ADR-065. Traceability: `docs/measures/OSHA_1910_95_STS.md`. Answers #405.
+
+**The differentiator is now evidenced, not asserted.** Zero occupational-health quality measures exist
+across the 2026 CMS eligible-clinician eCQMs (49), hospital eCQMs (17), HEDIS MY2026 (93), every public
+`.cql` file on GitHub, the `cqframework` organisation, or the HL7 FHIR IG registry. Two near-misses are
+not counter-examples: CBE #0431 healthcare-personnel influenza vaccination is an **NHSN aggregate
+facility report**, and the 25 CSTE/NIOSH Occupational Health Indicators are **state-workforce
+surveillance counts** sourced from discharge and workers-comp data. The field has *indicators* — what
+already happened, across a population — and no *measures*: what should happen to a named worker by a
+named date.
+
+**#405's oracle question is answered, and it reframes rather than picks.** For a measure with no
+official definition the author of the CQL is also the author of the test cases; such measures never
+enter the authoring or certification pipeline at all. That is the normal state, not a compromise. What
+converts author-owned content into *credible* content is the community route — publishing the measure
+and its cases in the standard shape, with the documentation that lets an organisation act as steward.
+So the deliverable is **a measure packaged so it could be stewarded**, not one that passes an external
+check that does not exist.
+
+**Scope is ONE obligation.** 1910.95 creates several with different triggers, deadlines and evidence;
+a single "hearing conservation compliance" percentage would hide partial failure — a programme could
+refit every worker and notify none and still score well. This implements STS detection `(g)(10)(i)`,
+the one fully computable from clinical data, and the traceability doc lists the others as explicitly
+not implemented with a reason each. **`(g)(8)(i)`'s 21-day notification is NOT COMPUTABLE at all** —
+its clock starts at the *determination*, and OSHA has stated the standard sets no limit between the
+audiogram and that determination.
+
+**Real terminology, and one thing that did not need inventing.** LOINC panel **89015-2**, whose 22
+codes are all members of `us-core-clinical-test-codes` — an audiogram already has a US-Core-conformant
+FHIR representation. (`100653-5`, which search results offer, is **deprecated**.) The cohort is the one
+exception and cannot be otherwise: `(c)(1)`'s trigger is an 8-hour TWA at or above 85 dBA, an
+industrial-hygiene measurement absent from every clinical feed. ICD-10-CM **Z57.0** is a documented
+proxy — structurally the ADR-042 `us-core-sex` gap again.
+
+**Where the regulation is discretionary, the measure refuses rather than defaulting silently.** Age
+correction is optional under `(g)(10)(ii)`, Appendix F is informational only, and OSHA has permitted
+tables from other datasets — so **two employers can lawfully reach opposite conclusions on identical
+audiograms**. STS is a function of the audiogram *and employer policy*. None is applied, which detects
+more workers and is the protective direction, said where a reader sees it.
+
+**Four defects, all found by review rather than by the happy path.** Two by my own adversarial tests:
+`Determinable` used OR across ears, so a worker with an incomplete right ear and a clean left one
+returned COMPLIANT — improving the apparent rate by absorbing the people whose data is incomplete;
+and `Overdue` had no initial-population gate, reporting OVERDUE for a worker with no noise exposure.
+Two by code review (#408): the exclusion was **permanent** — a worker excused for a 2019 shift had
+every later shift suppressed, which is silent under-detection; and non-final Observations were
+accepted, so one `entered-in-error` row could re-anchor the baseline for every future shift, the
+baseline being the earliest record.
+
+**It is deliberately NOT in the measure registry.** Registering it would put it in
+`RUNNABLE_MEASURE_IDS` and every population run, where the synthetic corpus cannot produce two dated
+audiograms carrying six LOINC thresholds each — **the first authored measure the rule-params codegen
+cannot express**, that template being a recency window. It is verified through the engine's consumer
+path, `evaluate({ elm, metaOverride })`, the same surface an external integrator uses.
+
+**`STANDARDS_CONFORMANCE.md` gains a section** so the M-A/M-B verification language cannot carry over
+by association: never "OSHA-conformant" or "OSHA-validated" — **OSHA does not certify software** — and
+never a legal determination. It is a surveillance aid.
+
+**Named and not done:** independent re-derivation by a second author from the CFR alone, which is the
+strongest verification available here. Also: corpus generation so the measure can join the roster, and
+the `1904.10` recordability rule (an STS **and** a 25 dB total level, age correction permitted for the
+first test and forbidden for the second).
+
+**Review then found four more, three of them the same under-detection.** Baseline/current dates were
+derived from **both ears combined**, so an unrelated right-ear-only recheck nulled the left ear's
+average and made a **confirmed left-ear shift vanish** — under-detection caused by data *arriving*;
+dates are now per ear. The exclusion was **permanent**. Non-final Observations could anchor the
+baseline. And `Numerator` was not conjoined with `Denominator`, so it was true outside the initial
+population — latent in the app under ADR-031, not latent for the IG publication ADR-065 describes.
+Duplicate thresholds now refuse rather than resolving by bundle order; an unexpected unit is refused
+rather than coerced.
+
+**Three documentation corrections on a traceability document**, which is where they matter most: the
+`(g)(8)(ii)` chapeau says "Unless a **physician** determines", not "physician or audiologist";
+`(g)(9)`'s per-ear baseline revision is an OSHA interpretation rather than CFR text; and **the LOINC
+codes do not encode conduction method** — the bone-conduction panel shares the same 22 members, so a
+bare Observation is ambiguous between air and bone. That is now a stated limitation.
+
+Suite 1940, 0 fail (+19). Typecheck clean. `compile-measures` emits 17 libraries.
+
+
 ## 2026-08-07 — `@work-well/measure-engine@0.1.0` and `@work-well/measure-codegen@0.1.0` are published
 
 Dispatched `publish-packages.yml` dry-run first, read the packed file lists, then for real. Both are on
