@@ -7,7 +7,10 @@ export default defineConfig({
   workers: 1,
   reporter: [["html", { open: "never" }], ["list"]],
   use: {
-    baseURL: process.env.PLAYWRIGHT_BASE_URL ?? "https://workwell-measure-studio.vercel.app",
+    // STAGING by default, never production: this suite mutates (it triggers runs and POSTs outreach),
+    // and those writes land in the audit log of whatever stack it points at. The previous default was
+    // the decommissioned Vercel host, so every run timed out against a 404.
+    baseURL: process.env.PLAYWRIGHT_BASE_URL ?? "https://twh-staging.os.mieweb.org",
     screenshot: "only-on-failure",
     video: "retain-on-failure",
   },
