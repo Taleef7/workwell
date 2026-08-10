@@ -91,6 +91,29 @@ reason the regression test is worth having: with the regex restored, the timing 
 assertion is the one carrying the fix, and the bound (1,000 ms against an observed 0.5 ms) is about
 1,000× the real cost, far too wide to flake on a slow runner.
 
+**Triage corrected: 3 of the 10 alerts I called test-file noise were real.** The claim was "seven
+highs are `includes()` assertions inside test files" — true of seven, and the remaining three were
+lumped in with them without being read. Reading them:
+
+- **`js/useless-regexp-character-escape`** (`routes/measures.test.ts`) is the interesting one, and
+  it is the vacuous-guard shape in miniature. The filename assertion built its regex from a
+  **template literal** containing a single-backslash dot — and there, that is not an escaped dot.
+  JS drops the backslash, so the regex received a bare `.` and the assertion also passed for
+  `matXxml`. Verified by evaluating both forms: before, `matXxml` matched; after doubling the
+  backslash, it does not. An assertion weaker than it reads.
+- **`js/identity-replacement`** (`vendor-workflow-safety.test.ts`) was a `.replace(":", ":")` —
+  a no-op left over from an escaping intent that regex never needed. Deleted.
+- **`js/incomplete-sanitization`** (`standards/official-cases.ts`) — `escapeMarkdown` escaped `|`
+  but not `\`, so a value ending in a backslash turned `\|` into `\\|`: a literal backslash renders
+  and the pipe closes the cell, silently giving the table an extra column. Backslash is now escaped
+  first. **No committed report changes** — only engine/loader error text reaches that function, and
+  the one backslash in the current report is a static PowerShell path in the template.
+
+Only the other **seven** are genuinely false positives: assertions like
+`report.measure.includes("madie.cms.gov")` checking our own emitted canonical, and one array
+`.includes` CodeQL read as a URL substring check. Dismissed as used-in-tests rather than left to
+make the Security tab a wall nobody reads.
+
 ## 2026-08-10 — the documentation restructure: docs/guide/ is born, the archive absorbs the rest (branch `docs/doug-doc-restructure`)
 
 ADR-066. The owner directive after the 2026-08-08 walkthrough session: trim the redundant docs and
