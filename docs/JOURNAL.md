@@ -37,6 +37,17 @@ committed but were already gitignored and untracked — the local-only rule was 
 CLAUDE.md's doc lists updated (guide added to the Definition of Done's affected-docs list);
 ADR-066 recorded; ADR_INDEX regenerated.
 
+**Review caught the difference between a link that resolves and an instruction that is true.** The
+first sweep repointed `CONTRIBUTING.md`'s sprints link to `docs/archive/sprints/README.md`, so the
+404 was gone — but the sentence around it still told a new contributor to pick their next task out
+of a directory where sprints 0–7 are all merged, which `AGENTS.md` had already called history and
+not a queue. Two files, two answers. "Before you start" now leads with the guide and the roadmap
+and names the archive as context; the branch convention lost its `feat/sprint-1-<slug>` form, which
+had been disagreeing with CLAUDE.md's `feat/<slug>` since the sprints closed; and the PR checklist
+names the affected guide chapter, matching the Definition of Done this PR added. The general shape
+is worth keeping: a mechanical path fix leaves the prose asserting whatever it asserted before, and
+only the prose says whether the destination is somewhere a reader should go.
+
 ## 2026-08-07 (M-E1) — the first occupational measure: OSHA Standard Threshold Shift (branch `feat/me1-osha-hearing-sts`)
 
 ADR-065. Traceability: `docs/measures/OSHA_1910_95_STS.md`. Answers #405.
