@@ -3,15 +3,19 @@
 > Part of the [WorkWell guide](README.md). Previous: [CQL and authoring](02-cql-and-authoring.md) ·
 > Next: [The engine and the router](04-engine-and-routing.md)
 
-There are two clocks in this system. One runs on a developer machine and in CI, where CQL text is
-compiled into ELM and the result is committed to git. The other runs in the server when a request
+There are two clocks in this system. One runs on a developer machine, where CQL text is compiled
+into ELM and the result is committed to git by hand. The other runs in the server when a request
 arrives, where nothing is translated and nothing is compiled — an interpreter walks a tree that is
 already sitting in the repository. Every confusing question about "where does the compiling happen"
 dissolves once the two clocks are kept apart, so this chapter starts there.
 
+Note the first clock precisely: **a person runs it, not CI.** No workflow invokes
+`compile-measures`, so the committed ELM is only as current as the last time somebody regenerated
+it. That is a real gap and it is named in [chapter 9](09-state-and-roadmap.md).
+
 ```mermaid
 flowchart LR
-  subgraph BT["BUILD TIME - once, on a dev machine or in CI. The output is committed to git."]
+  subgraph BT["BUILD TIME - run by hand on a dev machine, never by CI. The output is committed to git."]
     direction TB
     B1["17 CQL files in backend-ts/measures"]
     B2["pnpm compile-measures"]
@@ -19,7 +23,7 @@ flowchart LR
     B4["FHIR R4 + System model info"]
     B5["UCUM unit service"]
     B6["FHIRHelpers library"]
-    B7["ELM JSON: a typed, name-resolved tree. One error fails the build."]
+    B7["ELM JSON: a typed, name-resolved tree. One error fails this command - but only this command."]
     B8["A generated index that imports every tree as a normal module"]
     B1 --> B2 --> B3 --> B7 --> B8
     B4 --> B3

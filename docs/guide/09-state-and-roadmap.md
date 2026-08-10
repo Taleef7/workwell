@@ -46,8 +46,8 @@ to diff against, and that comparison is what every flip so far was judged on
 | Claim | Number | Reproduce / evidence |
 |---|---|---|
 | Test suite | 1,940 total · 1,925 pass · 0 fail · 15 skip (2026-08-08, 279 s) | `cd backend-ts && pnpm test`. The 15 skips need the gitignored terminology sidecar or a local Postgres, and self-skip rather than passing vacuously. |
-| CMS measures vs their own test decks | 410 of 410, 8 measures | `pnpm test:official-cases` |
-| CQL language conformance | 1,622 pass of 1,835 cases (2026-08-05) | `pnpm cql-tests`, against `cqframework/cql-tests`. Failures cluster in the shared translator and engine, not our measures; five of the sixteen files are perfect, and they are the constructs our measures use. |
+| CMS measures vs their own test decks | 410 of 410, 8 measures | `pnpm test:official-cases`, after the two-step setup below |
+| CQL language conformance | 1,622 pass of 1,835 cases (2026-08-05) | `pnpm cql-tests:fetch` then `pnpm cql-tests`, against `cqframework/cql-tests`. Failures cluster in the shared translator and engine, not our measures; five of the sixteen files are perfect, and they are the constructs our measures use. |
 | SQL vs the CQL engine | zero divergence — 4 measures × 56 patients × 2 dates (2026-07-20) | the shim parity suite, [chapter 7](07-sql-and-the-bridge.md) |
 | QRDA Category I vs the HL7 ruler | 0 findings, XSD and Schematron (2026-08-02) | Cypress 7.5.1, 22 submissions |
 | QRDA Category III vs the HL7 ruler | 0 findings (2026-08-02) | same |
@@ -55,6 +55,33 @@ to diff against, and that comparison is what every flip so far was judged on
 | Independent Java engine running our artifacts | 255 of 278 (2026-08-04) | 14 of the 23 exceptions trace to one conjunct whose required field the test cases omit |
 | Subject-level agreement vs Cypress's expected results | 64 of 64 and 150 of 150, every population (2026-08-03) | reproduced against a second independently generated archive |
 | Routed in production | 2 measures | `WORKWELL_OFFICIAL_MEASURES` in `deploy-twh-mieweb.yml` |
+
+### Two of those commands need a corpus the repository does not carry
+
+`pnpm test` and the rest work in a fresh clone. The two conformance rows do not, and they fail
+loudly rather than reporting a smaller number — which is the intended behaviour, not a rough edge.
+Both corpora are third-party content fetched at a pinned commit and deliberately gitignored, so a
+clone stays small and upstream content is never silently re-vendored.
+
+```bash
+cd backend-ts
+
+# CMS measures vs their own test decks — fetch the pinned content, then vendor the terminology
+pwsh -NoProfile -File scripts/fetch-official-cases.ps1   # ~34 MB, into the gitignored .official-content/
+pnpm vendor:official --measure CMS122FHIRDiabetesAssessGT9Pct --catalog-id cms122 --strip-elm-annotations
+# …repeat for the other seven; ci.yml's `official-cases` job is the authoritative list
+pnpm test:official-cases
+
+# CQL language conformance — refuses to report at all until the full corpus is present
+pnpm cql-tests:fetch    # without this, `pnpm cql-tests` exits 2 and tells you to run it
+pnpm cql-tests
+```
+
+**The full 410 of 410 needs a VSAC credential.** Two measures (CMS122 and CMS125) depend on a value
+set upstream ships capped at 1,000 codes; completing it means re-expanding from VSAC, which needs
+`WORKWELL_VSAC_API_KEY_VENDOR` and the `--complete-terminology` flag. Without the key those two
+measures vendor with the capped expansion — CI does exactly this on fork pull requests and says so
+rather than reporting a pass it did not earn. The other six are byte-identical either way.
 
 ## Open gaps, named
 
