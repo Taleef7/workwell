@@ -114,6 +114,18 @@ Only the other **seven** are genuinely false positives: assertions like
 `.includes` CodeQL read as a URL substring check. Dismissed as used-in-tests rather than left to
 make the Security tab a wall nobody reads.
 
+**The five GitHub Actions majors, taken as one change rather than five Dependabot PRs.**
+`actions/checkout` v4→v7, `setup-node` v4→v7, `cache` v4→v6, `upload-artifact` v4→v7 and
+`docker/setup-buildx-action` v3→v4. Merging them one at a time would have meant five rebases and
+five full CI runs over the same lines. **Both classes of breaking change were checked against this
+repository rather than assumed away.** Every major in the set is really "now runs on the Node 24
+runtime, requires Actions Runner 2.327.1+" — which cannot bite here because every job runs on
+GitHub-hosted `ubuntu-latest`, verified across all 24 `runs-on:` lines. The one substantive change
+is `checkout` v6's safer `pull_request_target` default, where it stops checking out the PR head
+unless `allow-unsafe-pr-checkout` is set; `pull_request_target` appears in **zero** workflows here,
+so it does not apply either. The deploy workflows are not exercised by PR CI, but
+`deploy-twh-mieweb.yml` runs on push to main, so the merge itself is the test.
+
 ## 2026-08-10 — the documentation restructure: docs/guide/ is born, the archive absorbs the rest (branch `docs/doug-doc-restructure`)
 
 ADR-066. The owner directive after the 2026-08-08 walkthrough session: trim the redundant docs and

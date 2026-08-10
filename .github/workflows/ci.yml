@@ -44,7 +44,7 @@ jobs:
     name: Deploy helper — Shell test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Test bounded MIE manager requests
         run: bash .github/scripts/mieweb-api-request.test.sh
       # Deploy workflows only RUN on push to main — i.e. after merge — so a shell syntax error in one is
@@ -65,12 +65,12 @@ jobs:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v4
         with:
           version: 10.17.1
           run_install: false
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 20
           cache: pnpm
@@ -116,14 +116,14 @@ jobs:
         working-directory: backend-ts
     steps:
       # backend-ts consumes @mieweb/cloud from the external/mieweb-cloud submodule (public mieweb/cloud).
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: recursive
       - uses: pnpm/action-setup@v4
         with:
           version: 10.17.1
           run_install: false
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: pnpm
@@ -157,14 +157,14 @@ jobs:
       run:
         working-directory: backend-ts
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: recursive
       - uses: pnpm/action-setup@v4
         with:
           version: 10.17.1
           run_install: false
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: pnpm
@@ -174,7 +174,7 @@ jobs:
       # The content is pinned to a fixed commit inside the fetch script, so the cache key is stable and
       # a hit is always correct. Saves a ~34MB clone on every push.
       - name: Cache official content
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: backend-ts/.official-content
           key: official-content-${{ hashFiles('backend-ts/scripts/fetch-official-cases.ps1') }}
@@ -305,7 +305,7 @@ jobs:
       # the file on disk is still the committed copy, and publishing it as "the failing report" is
       # actively misleading — it shows green results for a run that never happened.
       - name: Upload report on failure
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: failure() && steps.gate.outcome != 'skipped'
         with:
           name: official-testcase-report
@@ -322,8 +322,8 @@ jobs:
       run:
         working-directory: wcdb-fhir-shim
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
@@ -353,14 +353,14 @@ jobs:
       run:
         working-directory: backend-ts
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: recursive
       - uses: pnpm/action-setup@v4
         with:
           version: 10.17.1
           run_install: false
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: pnpm
@@ -369,7 +369,7 @@ jobs:
         run: pnpm install --frozen-lockfile
       # The pin lives inside the fetch script, so keying the cache on that file makes a hit always correct.
       - name: Cache cql-tests corpus
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: backend-ts/.cql-tests
           key: cql-tests-${{ hashFiles('backend-ts/scripts/fetch-cql-tests.ps1') }}
@@ -378,7 +378,7 @@ jobs:
       - name: Run the conformance suite
         run: pnpm cql-tests --check
       - name: Upload results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: cql-conformance-results
@@ -404,14 +404,14 @@ jobs:
       run:
         working-directory: backend-ts
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: recursive
       - uses: pnpm/action-setup@v4
         with:
           version: 10.17.1
           run_install: false
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: pnpm
@@ -426,11 +426,11 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name == 'workflow_dispatch'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v4
         with:
           version: 10.17.1
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 20
       - name: Install e2e dependencies
@@ -477,7 +477,7 @@ jobs:
           PLAYWRIGHT_BASE_URL: ${{ inputs.e2e_base_url || 'https://twh-staging.os.mieweb.org' }}
         run: npx playwright test
       - name: Upload Playwright report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: playwright-report
