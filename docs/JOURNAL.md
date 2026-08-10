@@ -48,7 +48,19 @@ exactly the class scanning `actions` was enabled to catch. One high sits in a *p
 (`js/polynomial-redos`, `measure-engine/src/cql/vsac-client.ts`); three are `js/stack-trace-exposure`
 on route handlers; seven more highs are `includes()` assertions inside test files. Dependabot: 104
 alerts, and **`next` 16.2.4 accounts for 44 of them**, patching at 16.2.5 / 16.2.6 / 16.2.11 — one
-patch-level bump. None fixed here; one theme per PR.
+patch-level bump. None fixed here; one theme per PR. Filed as #412 (next), #413 (workflow
+permissions), #414 (the published-package ReDoS) and #415 (stack-trace exposure, filed as review
+rather than fix — how much diagnostic detail an API should return is a contract decision, not a
+find-and-replace).
+
+**#412 done: next 16.2.4 → 16.2.11.** The interesting part is the lockfile. `pnpm up next@16.2.11`
+re-resolved the whole transitive tree — 1,184 lines, dragging `@babel/*` 7.29.0 → 7.29.7 and
+`@typescript-eslint` 8.59.1 → 8.67.0 along with it, which is a great deal of unrelated surface to
+accept in the name of a security patch. Editing `package.json` by hand and running
+`pnpm install --lockfile-only` produces **119 lines**: `@next/*` 16.2.4 → 16.2.11 and a single
+dedupe (`@babel/parser` 7.29.2 was reachable only through the old next chain). Same fix, a tenth of
+the blast radius, and a diff a reviewer can actually read. Verified with `--frozen-lockfile` (the
+gate CI applies), lint, 180 tests across 35 files, and a production build.
 
 ## 2026-08-10 — the documentation restructure: docs/guide/ is born, the archive absorbs the rest (branch `docs/doug-doc-restructure`)
 
