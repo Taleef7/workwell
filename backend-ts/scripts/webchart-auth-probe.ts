@@ -123,7 +123,7 @@ async function main(): Promise<number> {
     return 1;
   }
 
-  out("\nAll three steps green — record token lifetime + granted scope in docs/MIE_INTEGRATION_QUESTIONS_2026-07-09.md (A3).");
+  out("\nAll three steps green — record token lifetime + granted scope in docs/archive/MIE_INTEGRATION_QUESTIONS_2026-07-09.md (A3).");
   return 0;
 }
 

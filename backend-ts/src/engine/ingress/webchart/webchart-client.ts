@@ -2,7 +2,7 @@
  * WebChart transport seam (E12 PR-2 → PR-2c).
  *
  * PR-2c: the HTTP client now implements WebChart's VERIFIED public FHIR contract
- * (docs/INTEGRATION_RESEARCH_2026-07-13.md, live-checked against the public sandbox 2026-07-13):
+ * (docs/archive/INTEGRATION_RESEARCH_2026-07-13.md, live-checked against the public sandbox 2026-07-13):
  * FHIR R4 JSON at `{baseUrl}/fhir`, population via `GET /fhir/Patient` (searchset `link[next]`
  * paging), and — because the CapabilityStatement exposes NO `Patient/$everything` — each patient's
  * clinical data composed from per-resource `GET /fhir/{type}?patient={id}` searches. Auth is SMART

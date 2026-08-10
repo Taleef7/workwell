@@ -1,7 +1,7 @@
 /** Behavioral goldens for E11.2a codegen extensions — translate generated CQL → ELM (compileCql),
  * evaluate inline synthetic bundles, assert the resulting Outcome Status (+ Refused). No hand-written
  * CQL exists for these shapes, so the asserted outcomes ARE the golden.
- *   node --import tsx --test src/engine/cql/codegen/generate-cql-extensions.test.ts */
+ *   node --import tsx --test src/measure/generate-cql-extensions.test.ts */
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { compileCql } from "./cql-translator.ts";

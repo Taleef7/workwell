@@ -14,7 +14,7 @@ was removed rather than re-synced, because two rule sets that disagree are worse
 - Every one of the nine hard rules had been reworded, and one had drifted **materially** — this file
   said a dependency named in a sprint file was "pre-approved", while `CLAUDE.md` requires explicit
   approval for any new dependency. `CLAUDE.md`'s stricter rule is the live one. The carve-out was
-  moot anyway: `docs/sprints/` is archived history, not an active queue.
+  moot anyway: `docs/archive/sprints/` is archived history, not an active queue.
 - This file's phase note ("as of 2026-06-17") and its treatment of `docs/sprints/` as authoritative
   were both stale.
 - It also carried its own `@`-import block that eagerly pulled in ~9 documents including

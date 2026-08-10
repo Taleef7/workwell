@@ -58,7 +58,7 @@ const LOINC = "http://loinc.org";
 const CPT = "http://www.ama-assn.org/go/cpt";
 
 /**
- * One real, ACTIVE code per measure (audit-verified 2026-07-08; `docs/TERMINOLOGY_AUDIT_2026-07-08.md`).
+ * One real, ACTIVE code per measure (audit-verified 2026-07-08; `docs/archive/TERMINOLOGY_AUDIT_2026-07-08.md`).
  * Each code is a verified crosswalk row in `engine/ingress/webchart/terminology.ts`, so the WebChart
  * terminology reconciler maps it back to the synthetic measure-event coding the CQL matches. `hazwoper`
  * is intentionally absent — it has a synthetic-only event code with no real terminology, so its urn:workwell

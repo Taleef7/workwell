@@ -14,7 +14,7 @@
  *   - `local`  → sqlite/fs/memory/inproc, no external services — used for the PR1 container smoke test.
  *
  * Nothing here is wired into the live deploy yet (that is PR 2 shadow / PR 3 flip, gated on the
- * §4 prerequisites in docs/superpowers/plans/2026-06-15-issue-109-deploy-cutover.md).
+ * §4 prerequisites in docs/archive/superpowers/plans/2026-06-15-issue-109-deploy-cutover.md).
  */
 
 import { initSchedulerFromEnv, schedulerTick } from "./admin/scheduler.ts";

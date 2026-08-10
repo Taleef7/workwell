@@ -4,13 +4,13 @@
 the **publicly verified WebChart FHIR R4 contract**, live-checked against the public sandbox
 (`https://fhirr4sandbox.webchartnow.com/webchart.cgi/fhir/` CapabilityStatement +
 `.well-known/smart-configuration`, fetched 2026-07-13; sources + confidence in
-`docs/INTEGRATION_RESEARCH_2026-07-13.md`), and `httpWebChartClient` now implements it. Two original
+`docs/archive/INTEGRATION_RESEARCH_2026-07-13.md`), and `httpWebChartClient` now implements it. Two original
 assumptions were **corrected**: auth is SMART Backend Services (not a static API key), and there is
 **no `Patient/$everything`** (per-resource composition). Rows are tagged **[VERIFIED]** (public
 docs/live sandbox) or **[ASSUMED]** (still needs the MIE answer). **Variant B: proprietary REST over
 `wc_miehr_*` shapes** remains documented as the fallback design; it is not implemented.
 
-Question references point to `docs/MIE_INTEGRATION_QUESTIONS_2026-07-09.md`.
+Question references point to `docs/archive/MIE_INTEGRATION_QUESTIONS_2026-07-09.md`.
 
 ---
 

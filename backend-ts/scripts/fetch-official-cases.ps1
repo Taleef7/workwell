@@ -6,7 +6,7 @@ param(
   # on Unix, so the string is one segment as far as System.IO is concerned. This form does not depend on
   # which layer normalizes it.
   [string]$ContentDir = (Join-Path $PSScriptRoot ".." ".official-content"),
-  # Upstream revision the committed docs/OFFICIAL_TESTCASE_REPORT_2026-07.md was generated against.
+  # Upstream revision the committed docs/evidence/OFFICIAL_TESTCASE_REPORT_2026-07.md was generated against.
   # Pass -Ref master (or another SHA) to test newer content; the committed report is only
   # reproducible at this pin.
   [string]$Ref = "ca4b49516de4cbed9f92bfb7c35d97b1bf1022ab"

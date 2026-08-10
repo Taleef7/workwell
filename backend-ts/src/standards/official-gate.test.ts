@@ -63,7 +63,7 @@ test("the committed evidence report shows real case coverage for every gated mea
   // Asserting the token "CMS122" appears somewhere would be near-vacuous — the renderer emits a
   // heading for every measure it ran, so a measure with ZERO cases would still match. Assert the
   // numbers instead: the required deck size, and a reduction check that actually executed.
-  const report = readFileSync(new URL("../../../docs/OFFICIAL_TESTCASE_REPORT_2026-07.md", import.meta.url), "utf8");
+  const report = readFileSync(new URL("../../../docs/evidence/OFFICIAL_TESTCASE_REPORT_2026-07.md", import.meta.url), "utf8");
   for (const catalogId of OFFICIAL_GATED_MEASURES) {
     const required = REQUIRED_OFFICIAL_CASE_COUNTS[catalogId];
     assert.ok(required, `${catalogId} needs a required case count`);
@@ -97,7 +97,7 @@ test("the evidence report proves the artifact that is actually committed, not so
   // reduction setting produces a v1.0.000 artifact, so without pinning the hash a re-vendor at different
   // settings would leave the committed report looking equally green while proving nothing about what
   // ships. This is the no-network half of that: the hash in the report must be the hash on disk.
-  const report = readFileSync(new URL("../../../docs/OFFICIAL_TESTCASE_REPORT_2026-07.md", import.meta.url), "utf8");
+  const report = readFileSync(new URL("../../../docs/evidence/OFFICIAL_TESTCASE_REPORT_2026-07.md", import.meta.url), "utf8");
   for (const catalogId of OFFICIAL_GATED_MEASURES) {
     const onDisk = createHash("sha256")
       .update(readFileSync(`${ARTIFACT_ROOT}${catalogId}/bundle.json`))

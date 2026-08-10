@@ -70,8 +70,8 @@ export default function ElmExplorerPage() {
   return (
     <section className="space-y-4">
       <div>
-        <Link href="/measures" className="text-xs text-neutral-500 dark:text-neutral-400 hover:underline">
-          Back to Measures
+        <Link href="/studio" className="text-xs text-neutral-500 dark:text-neutral-400 hover:underline">
+          Back to Studio
         </Link>
         <h2 className="text-2xl font-semibold">ELM Explorer</h2>
         <p className="mt-1 max-w-3xl text-sm text-neutral-600 dark:text-neutral-400">
