@@ -71,7 +71,7 @@ jobs:
       #
       # Invoked as plain `node`, not through pnpm: the script imports nothing outside node: builtins and
       # global fetch, so this needs no install and no package manager on the deploy path.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
       # `--complete-terminology` re-expands the OIDs upstream capped at 1000 (today one:

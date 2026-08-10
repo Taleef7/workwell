@@ -76,7 +76,7 @@ jobs:
       # committed, and the image needs it. Staging matters MORE here, not less — it is where the PR-9
       # flip gets validated against live teatea data, so an image whose fidelity route silently
       # degrades from `mode:"literal"` to `"subset"` would invalidate exactly that validation.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
       # `--complete-terminology` re-expands the OIDs upstream capped at 1000 (today one:

@@ -61,7 +61,7 @@ jobs:
         with:
           version: 10.17.1
           run_install: false
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 20
           cache: pnpm
@@ -114,7 +114,7 @@ jobs:
         with:
           version: 10.17.1
           run_install: false
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: pnpm
@@ -155,7 +155,7 @@ jobs:
         with:
           version: 10.17.1
           run_install: false
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: pnpm
@@ -314,7 +314,7 @@ jobs:
         working-directory: wcdb-fhir-shim
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
@@ -351,7 +351,7 @@ jobs:
         with:
           version: 10.17.1
           run_install: false
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: pnpm
@@ -402,7 +402,7 @@ jobs:
         with:
           version: 10.17.1
           run_install: false
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: pnpm
@@ -421,7 +421,7 @@ jobs:
       - uses: pnpm/action-setup@v4
         with:
           version: 10.17.1
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 20
       - name: Install e2e dependencies
