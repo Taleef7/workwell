@@ -567,7 +567,9 @@ test("GET /api/measures/:id/versions/:vid/export/mat → FHIR R4 Bundle XML; for
   const res = await get(`/api/measures/audiogram/versions/${versionId}/export/mat`);
   assert.equal(res?.status, 200);
   assert.equal(res!.headers.get("content-type"), "application/fhir+xml");
-  assert.match(res!.headers.get("content-disposition") ?? "", new RegExp(`attachment; filename="measure-${versionId}-mat\.xml"`));
+  // `\.` inside a TEMPLATE LITERAL is not an escaped dot — JS drops the backslash, so the regex
+  // received a bare `.` and this assertion also passed for `mat<any>xml`. `\\.` is the literal dot.
+  assert.match(res!.headers.get("content-disposition") ?? "", new RegExp(`attachment; filename="measure-${versionId}-mat\\.xml"`));
   const xml = await res!.text();
   assert.match(xml, /<Bundle xmlns="http:\/\/hl7\.org\/fhir">/);
   assert.match(xml, /<Library>/);

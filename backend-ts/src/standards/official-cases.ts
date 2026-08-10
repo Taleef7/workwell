@@ -868,7 +868,12 @@ function percent(count: number, total: number): string {
 }
 
 function escapeMarkdown(value: string): string {
-  return value.replace(/\|/g, "\\|").replace(/\r?\n/g, " ");
+  // Backslash FIRST, or the escaping is self-defeating: a value ending in `\` would turn `\|` into
+  // `\\|`, which renders a literal backslash and lets the pipe close the cell — the row splits and
+  // the table silently gains a column. Only engine/loader error text reaches here, which is why no
+  // committed report changes: the one backslash in the current one is a static PowerShell path in
+  // the template, not a cell.
+  return value.replace(/\\/g, "\\\\").replace(/\|/g, "\\|").replace(/\r?\n/g, " ");
 }
 
 function populationCell(item: OfficialCaseResult, code: PopulationCode): string {

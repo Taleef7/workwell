@@ -40,7 +40,7 @@ test("the vendor workflow exists and is dispatch-only", () => {
   assert.match(yaml, /^on:\s*$/m);
   assert.match(yaml, /^\s{2}workflow_dispatch:/m);
   for (const trigger of ["push:", "pull_request:", "pull_request_target:", "schedule:"]) {
-    assert.ok(!new RegExp(`^\\s{2}${trigger.replace(":", ":")}`, "m").test(yaml), `must not trigger on ${trigger}`);
+    assert.ok(!new RegExp(`^\\s{2}${trigger}`, "m").test(yaml), `must not trigger on ${trigger}`);
   }
 });
 
