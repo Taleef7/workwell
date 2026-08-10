@@ -93,8 +93,26 @@ function basicAuthBase64(userPass: string): string {
   return btoa(binary);
 }
 
+/**
+ * Trim trailing `/` without a regex. `replace(/\/+$/, "")` is quadratic on a long run of slashes that
+ * is not at the end — the engine retries the `+` from each position — which CodeQL reports as
+ * `js/polynomial-redos` (high).
+ *
+ * The real risk here is close to nil: the input is a CONFIG value the consumer of this package
+ * supplies when constructing the client, not request data, so reaching it means configuring your own
+ * VSAC base URL with tens of thousands of slashes. It is fixed anyway for a reason that has nothing
+ * to do with our own exposure — this file ships inside `@work-well/measure-engine`, so the alert
+ * appears in the scan of anyone who installs it, and a one-line loop is cheaper than that
+ * conversation. Behaviour is unchanged for every input: all trailing slashes go, and nothing else.
+ */
+function trimTrailingSlashes(url: string): string {
+  let end = url.length;
+  while (end > 0 && url.charCodeAt(end - 1) === 47 /* "/" */) end--;
+  return url.slice(0, end);
+}
+
 export function httpVsacClient(cfg: VsacClientConfig): VsacClient {
-  const base = cfg.baseUrl.replace(/\/+$/, "");
+  const base = trimTrailingSlashes(cfg.baseUrl);
   const auth = "Basic " + basicAuthBase64(`apikey:${cfg.apiKey}`);
   const PAGE = 1000;
   const MAX_PAGES = 2000;

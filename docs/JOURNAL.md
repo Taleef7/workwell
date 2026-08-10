@@ -77,6 +77,20 @@ beside `packages: write`. `publish-packages.yml` was deliberately not touched �
 write` is what signs the sigstore provenance attestations (ADR-063), and narrowing it would publish
 without provenance rather than fail.
 
+**#414 done: the ReDoS in the published package, fixed and mutation-checked.**
+`cfg.baseUrl.replace(/\/+$/, "")` in `measure-engine/src/cql/vsac-client.ts` is quadratic on a long
+run of slashes that is *not* at the end — the engine consumes the whole run from every start
+position, then fails `$`. Replaced with a backwards scan. **The severity claim is deliberately
+downgraded rather than inflated:** the input is a config value the consumer supplies when
+constructing the client, not request data, so reaching it means configuring your own VSAC base URL
+with tens of thousands of slashes. It is fixed because the file ships inside
+`@work-well/measure-engine` and the alert therefore appears in the scan of anyone who installs it —
+a one-line loop is cheaper than that conversation. **Mutation-checked both ways**, which is the only
+reason the regression test is worth having: with the regex restored, the timing test fails at
+**5,486 ms** on a 100k-slash input while the behavioural trimming test still passes — so the timing
+assertion is the one carrying the fix, and the bound (1,000 ms against an observed 0.5 ms) is about
+1,000× the real cost, far too wide to flake on a slow runner.
+
 ## 2026-08-10 — the documentation restructure: docs/guide/ is born, the archive absorbs the rest (branch `docs/doug-doc-restructure`)
 
 ADR-066. The owner directive after the 2026-08-08 walkthrough session: trim the redundant docs and
