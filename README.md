@@ -263,8 +263,9 @@ The current verification bar is the FHIR-column set in [`docs/ROADMAP_2026-08-04
 
 | | |
 |---|---|
+| **[The guide](docs/guide/README.md)** | **start here — the whole system explained, chapter by chapter, with a diagram per flow** |
 | [Architecture](docs/ARCHITECTURE.md) | system boundaries, module map |
-| [Decisions](docs/DECISIONS.md) | 53 ADRs, newest first |
+| [Decisions](docs/DECISIONS.md) | 59 ADRs, newest first |
 | [Data Model](docs/DATA_MODEL.md) | tables, idempotency + evidence contracts |
 | [Measures](docs/MEASURES.md) | the TWH measure catalog in plain English |
 | [Standards Conformance](docs/STANDARDS_CONFORMANCE.md) | what we may and may not claim |

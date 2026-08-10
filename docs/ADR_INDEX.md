@@ -9,7 +9,7 @@
 > If the highest number here is lower than the highest in `DECISIONS.md`, this file is stale: trust
 > `DECISIONS.md` and regenerate.
 
-> **`·archived` (14 of 58, as of 2026-08-05)** means the BODY moved to
+> **`·archived` (14 of 59, as of 2026-08-10)** means the BODY moved to
 > `docs/archive/DECISIONS_ARCHIVE.md` — it is either superseded or a historical *finding* rather than a
 > decision that governs. `DECISIONS.md` still carries its heading plus a one-line pointer, so every
 > cross-reference resolves. The 44 unmarked titles are the record that still governs: decisions that
@@ -17,6 +17,7 @@
 
 ## Titles (newest first)
 
+- ADR-066: the documentation splits into a maintained guide and a dated archive — because a doc that explains and a doc that records rot at different speeds
 - ADR-065: an authored regulatory measure is verified by traceability and adversarial cases — no external oracle exists, and none can be manufactured
 - ADR-064: one UCUM validator, shared by every translator we run — and an honest table rather than a new dependency
 - ADR-063: a package is publishable when its tarball runs outside the workspace — not when it is published

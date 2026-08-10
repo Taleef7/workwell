@@ -11,7 +11,7 @@
 `docs/archive/PROJECT_PLAN_v1.md` is archived. Do not act on it. But feel free to read it for more context on how we got here and what we're planning and building. It contains the original project proposal, initial architecture sketches, and early measure definitions that informed the spike plan.
 
 ## Tech stack (immutable without ADR in docs/DECISIONS.md)
-- Backend: TypeScript on `@mieweb/cloud` (`backend-ts/`) — a Cloudflare-style worker on a long-lived node-24 host; JVM-free CQL→ELM (build-time); PostgreSQL 16 (Neon, `Pg*Store` ceiling, `workwell_spike` schema; SQLite floor for tests/local). The Java/Spring backend was retired in #109 PR4 (ADR-008). CQL→ELM history: `org.opencds.cqf.fhir:cqf-fhir-cr` 3.26.0 (CQF_FHIR_CR_REFERENCE.md) was the Java path.
+- Backend: TypeScript on `@mieweb/cloud` (`backend-ts/`) — a Cloudflare-style worker on a long-lived node-24 host; JVM-free CQL→ELM (build-time); PostgreSQL 16 (Neon, `Pg*Store` ceiling, `workwell_spike` schema; SQLite floor for tests/local). The Java/Spring backend was retired in #109 PR4 (ADR-008). CQL→ELM history: `org.opencds.cqf.fhir:cqf-fhir-cr` 3.26.0 (`docs/archive/CQF_FHIR_CR_REFERENCE.md`) was the Java path.
 - Frontend: Next.js 16 App Router + React 19 + TypeScript + Tailwind 4 + `@mieweb/ui` (dark mode + Enterprise Health brand + runtime brand switcher; see ADR-004) + Monaco
 - AI: OpenAI via the backend-ts AI surfaces (deterministic fallbacks); MCP read-only tools served from the worker
 - Infra: MIE Create-a-Container + Neon for deploy (Fly.io + Vercel public-preview stack decommissioned — MIE TWH is the sole live stack); GitHub Actions CI + a self-heal reconciler; pnpm
@@ -45,7 +45,7 @@
 ## Definition of done (every PR)
 - Tests pass (idempotency + audit invariants are mandatory; rest smoke-only)
 - CI green
-- Affected docs updated in same PR (ARCHITECTURE, DATA_MODEL, MEASURES, DECISIONS, DEPLOY)
+- Affected docs updated in same PR (docs/guide/ chapters, ARCHITECTURE, DATA_MODEL, MEASURES, DECISIONS, DEPLOY)
 - JOURNAL.md entry started for the day
 - ADR added to DECISIONS.md if non-obvious
 - Conventional commit with a clear scope: `feat(measure): catalog CRUD`
@@ -71,18 +71,18 @@
 ## Stop and ask if
 - A new workstream is about to start — I review before you proceed
 - A spike's stop condition (in `docs/archive/SPIKE_PLAN.md`) appears to trigger
-- A library version doesn't match what CQF_FHIR_CR_REFERENCE.md says works
 - A schema migration would break existing data
 - An AI call is being asked to return a compliance decision
 - An audit log entry would be skipped for "performance" reasons
 - The plan would slip more than half a day
 
-## Always-loaded docs (`@`-imported — keep this list to five)
-These five are in context every session because each one is *load-bearing for a rule above*: a rule
-whose criteria live in an unread file is unenforceable, and its absence is **silent**. Total ~6.5k
-tokens. Do not add to this list without deleting from it — the whole point is that it stays small.
+## Always-loaded docs (`@`-imported — keep this list small)
+These are in context every session because each one is *load-bearing for a rule above*: a rule
+whose criteria live in an unread file is unenforceable, and its absence is **silent**. Do not add
+to this list without deleting from it — the whole point is that it stays small.
+(`CQF_FHIR_CR_REFERENCE.md` was dropped 2026-08-10: it pinned Java-era Maven coordinates for a
+backend retired in #109 PR4, and its stop condition died with the JVM. Now in `docs/archive/`.)
 - @docs/AI_GUARDRAILS.md — the "AI never decides compliance" hard rule lives or dies on this
-- @docs/CQF_FHIR_CR_REFERENCE.md — the "library version doesn't match" stop condition needs it
 - @docs/DATA_MODEL_CONTRACTS.md — idempotency + `evidence_json` + CSV contracts; Definition of Done makes these mandatory on EVERY PR
 - @docs/ADR_INDEX.md — 40 ADR titles only, so a session knows a decision exists; bodies stay in DECISIONS.md
 - @docs/LOCKED_DECISIONS.md — owner-locked decisions (§4, rewritten 2026-08-04 per ADR-058) + the dated 2026-07-24 audit facts (§5)
@@ -90,13 +90,16 @@ tokens. Do not add to this list without deleting from it — the whole point is 
 ## Other docs to consult on demand
 Read these when the task needs them. They are deliberately NOT `@`-imported: eagerly loading the set
 cost ~89k tokens per session until 2026-07-29, whether or not any of it was relevant.
+- `docs/guide/` — **the maintained explanation of the whole system** (10 chapters, mermaid per flow;
+  ADR-066). The Definition of Done includes updating the affected chapter when behaviour it
+  describes changes. Chapter 9 owns the volatile numbers, dated
 - `docs/JOURNAL.md` — the running narrative; source of truth for recent work (~832k chars — never import)
 - `docs/DECISIONS.md` — the ADR bodies that still GOVERN: decisions constraining what may be done next,
   plus design records for built features (38 of 58; titles already in context via ADR_INDEX). Split on
   2026-08-05 — the other 20 are superseded or were findings written in ADR form, and their bodies moved to
   `docs/archive/DECISIONS_ARCHIVE.md`. Every heading + a one-line pointer stays in `DECISIONS.md`, so an
   `ADR-0NN` reference anywhere still resolves and nothing was deleted.
-- `docs/ROADMAP_2026-08-04.md` — **the APPROVED active plan** (owner decisions are in context via LOCKED_DECISIONS §4). Supersedes `ROADMAP_2026-07-24.md`, which is kept only for its §7 target architecture and the reasoning that got us here — **do not act on it**
+- `docs/ROADMAP_2026-08-04.md` — **the APPROVED active plan** (owner decisions are in context via LOCKED_DECISIONS §4). Supersedes `docs/archive/ROADMAP_2026-07-24.md`, which is kept only for its §7 target architecture and the reasoning that got us here — **do not act on it**
 - `docs/DEPLOY.md` — MIE Create-a-Container + Neon setup, env vars, rollback → prefer the `deploy` skill
 - `docs/ARCHITECTURE.md` — system architecture + boundaries (the engine boundary is enforced mechanically by PR-1's containment test and PR-4's five boundary tests, so CI catches drift)
 - `docs/DATA_MODEL.md` — §1–3: scope, core tables, full table schemas (derivable from `schema-pg.ts` / `schema.ts`)
@@ -116,12 +119,14 @@ cost ~89k tokens per session until 2026-07-29, whether or not any of it was rele
 ~120 files / ~2.5 MB of dated, write-once records of finished work. They are history, not
 instructions, and reading them burns context without changing what you should do. Consult
 `docs/JOURNAL.md` for what happened instead.
-- `docs/superpowers/plans/` (45 files, 1.33 MB) and `docs/superpowers/specs/` (39 files, 413k)
-- `docs/sprints/` (9 files, 276k — sprints 0–7 all merged; historical, not an active queue)
+- `docs/archive/superpowers/plans/` (47 files, 1.36 MB) and `docs/archive/superpowers/specs/` (39 files, 403k)
+- `docs/archive/sprints/` (9 files, 269k — sprints 0–7 all merged; historical, not an active queue)
 - `docs/archive/DECISIONS_ARCHIVE.md` (133k) — the 20 superseded/finding ADRs. Read a single one when a
   pointer in `DECISIONS.md` sends you there; never the file.
-- `docs/archive/` (245k), `docs/FABLE_REVIEW_2026-07-02/` (84k), `docs/new instructions/` (69k),
-  `docs/mieweb-ui-migration/` (82k)
+- the rest of `docs/archive/` — since the 2026-08-10 restructure (ADR-066) EVERYTHING dated,
+  superseded or finished lives there: the old roadmaps and demo docs, `FABLE_REVIEW_2026-07-02/`,
+  `new-instructions/`, `mieweb-ui-migration/`, and the 2026-08-08 system walkthrough (absorbed into
+  `docs/guide/`)
 
 ## Current Focus (as of 2026-08-04 — the engine is the product; `docs/ROADMAP_2026-08-04.md` is the APPROVED active plan)
 

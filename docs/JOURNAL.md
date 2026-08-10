@@ -1,5 +1,42 @@
 # Journal
 
+## 2026-08-10 — the documentation restructure: docs/guide/ is born, the archive absorbs the rest (branch `docs/doug-doc-restructure`)
+
+ADR-066. The owner directive after the 2026-08-08 walkthrough session: trim the redundant docs and
+maintain one clear, diagrammed explanation of everything — CQL, authoring, AST/ELM, FHIR, the
+packages, the engine, the compiler, the dependencies, SQL and the CQL→SQL goal, the databases, the
+data sources — plus current state and future.
+
+**Built: `docs/guide/`, ten chapters, 21 mermaid diagrams.** Sourced from the 2026-08-08 system
+walkthrough (which was never committed — it is now, in `docs/archive/`) and the meeting artifact,
+whose compiler-pipeline material (ELM as the intermediate representation, the 26-node-type
+taxonomy, the rewriting-vs-lowering distinction, the three places the analogy breaks) existed
+nowhere in the repo. Four gaps were written fresh because neither source covered them: the Rule
+Builder → YAML `rule:` → `generateCql` mechanics (with the fact that the hand-written `.cql` stays
+the build source and the generated file is the parity artifact), an ELM node reference built from
+the real committed `AnnualAudiogramCompleted` tree, a FHIR primer for a FHIR-naive reader, and the
+SQLite-floor/Pg-ceiling store factory. Chapter 9 owns every volatile number, dated, with its
+reproducing command — the suite figure (1,940 / 1,925 / 0 / 15) is from the 2026-08-08 run, not
+copied from memory.
+
+**Trimmed: top-level `docs/` from 47 markdown files to 20 tracked, all live.** 23 files and five
+directories moved to `docs/archive/` (nothing deleted): the three superseded roadmaps,
+`CQF_FHIR_CR_REFERENCE.md` (also dropped from CLAUDE.md's always-loaded imports — its stop
+condition died with the JVM in #109 PR4), five overlapping demo docs, the May-era
+`WALKTHROUGH_GUIDE.md`, the dated research/QA/strategy snapshots, both source PDFs, `sprints/`,
+`superpowers/{plans,specs}`, `new instructions/`, `FABLE_REVIEW_2026-07-02/` and
+`mieweb-ui-migration/`. `OFFICIAL_TESTCASE_REPORT_2026-07.md` went to `docs/evidence/` instead —
+CI regenerates it and `official-gate.test.ts` reads it, so those paths moved in the same change
+(the one non-docs edit class in the PR, tightly coupled by definition). Live cross-references
+updated in place; `JOURNAL`/`DECISIONS`/`CHANGELOG` keep their historical wording. A false alarm
+worth recording: the three meeting-transcript `.txt` files and the vision-doc screenshots looked
+committed but were already gitignored and untracked — the local-only rule was never violated.
+
+**Rewired:** README's documentation map leads with the guide; `ARCHITECTURE.md` got its light pass
+(the `com.workwell.*` §3 heading finally renamed, a header pointing readers at the guide);
+CLAUDE.md's doc lists updated (guide added to the Definition of Done's affected-docs list);
+ADR-066 recorded; ADR_INDEX regenerated.
+
 ## 2026-08-07 (M-E1) — the first occupational measure: OSHA Standard Threshold Shift (branch `feat/me1-osha-hearing-sts`)
 
 ADR-065. Traceability: `docs/measures/OSHA_1910_95_STS.md`. Answers #405.

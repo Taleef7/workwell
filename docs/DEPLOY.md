@@ -1210,6 +1210,15 @@ If any approaches limit, fix that day. Don't wait.
 
 ## Troubleshooting
 
+**MCP / SSE connections drop every ~60 s behind MIE ingress (504s, "request may have expired")**
+- Cause (diagnosed 2026-07, Java-era but ingress-level so it still applies): MIE's nginx defaults —
+  `proxy_read_timeout 60s` cuts any long-lived SSE stream, and `proxy_buffering` holds SSE frames
+  until the buffer fills. The reconnect gets a new session, so the queued response lands on a dead
+  one and nginx returns 504.
+- Fix is an MIE ops change on the vhost, scoped to the SSE/MCP locations: `proxy_buffering off`,
+  `proxy_read_timeout 3600s`, `proxy_http_version 1.1` with an empty `Connection` header.
+- Local workaround: point the MCP client at a locally run backend, bypassing the ingress.
+
 **Neon connection limit hit**
 - Use the pooled connection string (`DATABASE_URL`), not direct, in the app
 - HikariCP `maximum-pool-size: 10` in `application.yml`
