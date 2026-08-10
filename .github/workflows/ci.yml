@@ -296,7 +296,7 @@ jobs:
       # the file on disk is still the committed copy, and publishing it as "the failing report" is
       # actively misleading — it shows green results for a run that never happened.
       - name: Upload report on failure
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: failure() && steps.gate.outcome != 'skipped'
         with:
           name: official-testcase-report
@@ -369,7 +369,7 @@ jobs:
       - name: Run the conformance suite
         run: pnpm cql-tests --check
       - name: Upload results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: cql-conformance-results
@@ -468,7 +468,7 @@ jobs:
           PLAYWRIGHT_BASE_URL: ${{ inputs.e2e_base_url || 'https://twh-staging.os.mieweb.org' }}
         run: npx playwright test
       - name: Upload Playwright report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: playwright-report

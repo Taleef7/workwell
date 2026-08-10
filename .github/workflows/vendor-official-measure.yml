@@ -191,7 +191,7 @@ jobs:
       # extracts an artifact's contents directly into `-D`, so the documented command points `-D` at the
       # catalog directory itself (review of #365) — pointing it at `measures/official/` would drop the
       # files a level too high, where neither the vendor script nor the runtime looks for them.
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: vendored-${{ inputs.catalog_id }}
           path: _vendored/${{ inputs.catalog_id }}
