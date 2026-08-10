@@ -102,7 +102,7 @@ jobs:
       WORKWELL_BUCKET_S3_REGION: us-east-1
       REPLACE_EXISTING: "true"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Validate required secrets
         run: |
@@ -189,7 +189,7 @@ jobs:
       MIEWEB_API_KEY: ${{ secrets.LAUNCHPAD_API_KEY }}
       REPLACE_EXISTING: "true"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Validate required secrets
         run: |
