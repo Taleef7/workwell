@@ -2,7 +2,7 @@
 
 Phase 0 skeleton for **issue #96** (de-Java re-platform). See **ADR-008**
 (`../docs/DECISIONS.md`), the execution plan
-(`../docs/superpowers/plans/2026-06-12-issue-96-dejava-replatform.md`), and the
+(`../docs/archive/superpowers/plans/2026-06-12-issue-96-dejava-replatform.md`), and the
 companion analysis (`../docs/archive/MIEWEB_CLOUD_REFACTOR_MEMO.md`).
 
 This worker-style TypeScript app replaces the Java/Spring `backend/` **incrementally**

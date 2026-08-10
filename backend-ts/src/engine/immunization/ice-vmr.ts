@@ -2,7 +2,7 @@
  * vMR codec for the ICE (Immunization Calculation Engine) DSS REST contract — pure build/parse,
  * no I/O, NO new deps (string templates + tolerant regex parse, the same hand-rolled-XML pattern
  * as the QRDA stub, `fhir/qrda.ts`). Contract live-verified against `hlnconsulting/ice:latest`
- * on 2026-07-13 (docs/superpowers/specs/2026-07-13-ice-sidecar-spike.md):
+ * on 2026-07-13 (docs/archive/superpowers/specs/2026-07-13-ice-sidecar-spike.md):
  *
  * - Request: DSS JSON envelope; the patient data is a base64-encoded vMR `CDSInput` XML in
  *   `evaluationRequest.dataRequirementItemData[0].data.base64EncodedPayload`. That field is an

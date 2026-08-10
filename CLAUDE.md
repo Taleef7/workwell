@@ -84,7 +84,7 @@ to this list without deleting from it — the whole point is that it stays small
 backend retired in #109 PR4, and its stop condition died with the JVM. Now in `docs/archive/`.)
 - @docs/AI_GUARDRAILS.md — the "AI never decides compliance" hard rule lives or dies on this
 - @docs/DATA_MODEL_CONTRACTS.md — idempotency + `evidence_json` + CSV contracts; Definition of Done makes these mandatory on EVERY PR
-- @docs/ADR_INDEX.md — 40 ADR titles only, so a session knows a decision exists; bodies stay in DECISIONS.md
+- @docs/ADR_INDEX.md — 65 ADR titles only, so a session knows a decision exists; bodies stay in DECISIONS.md
 - @docs/LOCKED_DECISIONS.md — owner-locked decisions (§4, rewritten 2026-08-04 per ADR-058) + the dated 2026-07-24 audit facts (§5)
 
 ## Other docs to consult on demand
@@ -310,7 +310,7 @@ is not a business goal — the one input that would reopen decision 3.
 
 ## History — Current Focus as of 2026-07-24 (Nicole recalibration; SUPERSEDED 2026-08-04)
 
-**2026-07-24 — the Nicole meeting reset direction; `docs/ROADMAP_2026-07-24.md` is the APPROVED active
+**2026-07-24 — the Nicole meeting reset direction; `docs/archive/ROADMAP_2026-07-24.md` is the APPROVED active
 plan (supersedes ROADMAP_2026-07-09.md).** Her corrections: **(1) run the OFFICIAL published CQL for
 official CMS eCQMs — never reauthor** ("if the CQL exists, use it"); **(2)** the real EHR proof path is
 **QRDA-I ingest → calculate → QRDA-I/III export → Cypress → ONC** (MADiE is authoring tooling, not EHR

@@ -9,10 +9,10 @@
 > If the highest number here is lower than the highest in `DECISIONS.md`, this file is stale: trust
 > `DECISIONS.md` and regenerate.
 
-> **`·archived` (14 of 59, as of 2026-08-10)** means the BODY moved to
+> **`·archived` (14 of 65, as of 2026-08-10)** means the BODY moved to
 > `docs/archive/DECISIONS_ARCHIVE.md` — it is either superseded or a historical *finding* rather than a
 > decision that governs. `DECISIONS.md` still carries its heading plus a one-line pointer, so every
-> cross-reference resolves. The 44 unmarked titles are the record that still governs: decisions that
+> cross-reference resolves. The 51 unmarked titles are the record that still governs: decisions that
 > constrain what may be done next, and design records for built features.
 
 ## Titles (newest first)

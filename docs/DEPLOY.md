@@ -583,8 +583,8 @@ or seed fewer `--subjects`.
 > DATABASE_URL=<neon-pooled> pnpm seed:scale --subjects 5000 --as-of 2026-06-26 --mode evaluate --workers 1
 > ```
 >
-> Spec/plan: `docs/superpowers/specs/2026-07-08-option-a-scale-batch-eval-design.md`,
-> `docs/superpowers/plans/2026-07-08-option-a-scale-batch-eval.md`.
+> Spec/plan: `docs/archive/superpowers/specs/2026-07-08-option-a-scale-batch-eval-design.md`,
+> `docs/archive/superpowers/plans/2026-07-08-option-a-scale-batch-eval.md`.
 
 **Rollback (reversible, synthetic data only) — delete tagged outcomes first, then runs**
 (schema-qualify on the Pg ceiling):

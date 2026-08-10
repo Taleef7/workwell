@@ -128,7 +128,7 @@ LEFT JOIN (
   SELECT o.pat_id, MAX(DATE(COALESCE(o.obs_result_dt, o.obs_ts))) AS dt
   FROM observations_current o
   JOIN observation_codes oc ON oc.obs_code = o.obs_code
-  WHERE oc.loinc_num IN ('8480-6','8462-4')
+  WHERE oc.loinc_num IN ('85354-9','8480-6')
     AND COALESCE(o.obs_result_dt, o.obs_ts) IS NOT NULL
     AND DATE(COALESCE(o.obs_result_dt, o.obs_ts)) >= DATE('0001-01-01')
   GROUP BY o.pat_id

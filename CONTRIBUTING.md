@@ -5,7 +5,7 @@ Thanks for contributing. This repository values small, verifiable, and well-docu
 ## Before you start
 
 1. Review [README.md](README.md) and relevant docs under [`docs/`](docs/).
-2. For sprint-scoped work, review [`docs/sprints/README.md`](docs/sprints/README.md) and the target sprint file.
+2. For sprint-scoped work, review [`docs/archive/sprints/README.md`](docs/archive/sprints/README.md) and the target sprint file.
 3. Search existing issues and PRs to avoid duplicate effort.
 
 ## Development setup

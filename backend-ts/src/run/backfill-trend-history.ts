@@ -2,7 +2,7 @@
  * Synthetic TREND HISTORY backfill — writes ~12 weekly BACKDATED `COMPLETED` MEASURE runs per
  * runnable measure so the `/programs` + `/programs/[measureId]` trend charts show a believable,
  * varied compliance line instead of a flat line / "Not enough run history" (design:
- * docs/superpowers/specs/2026-06-20-synthetic-trend-history-design.md).
+ * docs/archive/superpowers/specs/2026-06-20-synthetic-trend-history-design.md).
  *
  * Approach (controlled, idempotent, reversible):
  *   - Each backdated run carries `triggered_by = 'seed:trend-history'` and outcomes tagged
