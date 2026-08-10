@@ -1,5 +1,55 @@
 # Journal
 
+## 2026-08-10 — CodeQL and Dependabot, with four dependencies held back on purpose (branch `chore/security-scanning`)
+
+Neither was running. Checked rather than assumed: `code-scanning/default-setup` reported
+`not-configured` with no analysis ever recorded, the Dependabot alerts API returned "disabled for
+this repository", and there was no `.github/dependabot.yml`. The only two mentions of Dependabot
+anywhere in the tree were `ci.yml` comments explaining how the VSAC-credentialed steps degrade when
+GitHub withholds a secret from a fork or Dependabot PR — so the CI had been written to tolerate
+Dependabot for months without Dependabot existing.
+
+**Enabled in repository settings:** CodeQL default setup over `actions` and `javascript-typescript`
+(the workflows matter as much as the sources here — eight of them, and the deploy and publish jobs
+hold registry, Neon, VSAC and npm credentials), and Dependabot vulnerability alerts repo-wide.
+Automated security *fixes* are deliberately left off: an auto-opened PR against one of the four
+dependencies below is exactly the case that wants a human deciding, and alerts already surface it.
+
+**`.github/dependabot.yml`, scoped rather than blanket.** Weekly PRs for GitHub Actions, `frontend`
+and `wcdb-fhir-shim` (`e2e` monthly), with dev-dependency minor/patch grouped so the PR count stays
+low. Four dependencies are bumped only deliberately —
+`@cqframework/cql`, `cql-execution`, `cql-exec-fhir`, `fqm-execution` — and the reason is the one
+worth recording: their versions are *inputs to published numbers*, so a bump can pass the whole suite
+and still make a committed claim untrue. `compile-measures` runs by hand rather than in CI (#410), so
+a translator bump does not regenerate the ELM it produced; `cql-execution` + `cql-exec-fhir` are the
+entire manifest of the published `@work-well/measure-engine`, making any change a semver event for
+people outside this repository; and the 410/410 MADiE gate was measured against `fqm-execution` 1.8.5
+exactly. All four still raise alerts.
+
+**Review turned a hedge into a measurement, and the answer changed the file.** The first draft
+carried a `backend-ts` entry with the workspace question written down as unverified — its pnpm
+workspace takes five `workspace:*` members from `../external/mieweb-cloud/packages/*`, a git
+submodule stored as a bare gitlink, and Dependabot's npm updater does not initialize submodules.
+Codex reproduced it; so did a fresh clone here with the submodule uninitialized:
+`pnpm -C backend-ts update typescript --lockfile-only` exits 1 with
+`ERR_PNPM_WORKSPACE_PKG_NOT_FOUND` for `@mieweb/cli`, at workspace resolution, before any registry
+dependency is considered. So it is not "might not work" — it can never work, and every scheduled run
+would error. The entry is **deleted**, with the reproduction recorded in the file so nobody re-adds
+it on the theory that Dependabot might cope. A permanently erroring updater is the vacuous-guard
+shape again: it reads as coverage in the config while proposing nothing.
+Consequence stated plainly: backend-ts gets alerts (demonstrated — 16 of the first 104 came from
+`backend-ts/pnpm-lock.yaml`) but no routine version PRs, and its four load-bearing dependencies now
+have no `ignore:` list because there is no updater to ignore them; the rule survives as a
+hand-bumping policy in `CONTRIBUTING.md` and as a day-one requirement on any future entry.
+
+**First scan, reported not fixed.** CodeQL: 27 open alerts, the largest group **12 ×
+`actions/missing-workflow-permissions`** — workflows with no explicit `permissions:` block, which is
+exactly the class scanning `actions` was enabled to catch. One high sits in a *published* package
+(`js/polynomial-redos`, `measure-engine/src/cql/vsac-client.ts`); three are `js/stack-trace-exposure`
+on route handlers; seven more highs are `includes()` assertions inside test files. Dependabot: 104
+alerts, and **`next` 16.2.4 accounts for 44 of them**, patching at 16.2.5 / 16.2.6 / 16.2.11 — one
+patch-level bump. None fixed here; one theme per PR.
+
 ## 2026-08-10 — the documentation restructure: docs/guide/ is born, the archive absorbs the rest (branch `docs/doug-doc-restructure`)
 
 ADR-066. The owner directive after the 2026-08-08 walkthrough session: trim the redundant docs and

@@ -61,6 +61,25 @@ npm run dev
 - [ ] Security and audit invariants preserved
 - [ ] No secrets added to source control
 
+## Dependencies and security scanning
+
+CodeQL analyses this repository on every push and pull request to `main`, covering both the
+TypeScript sources and the workflow files themselves. Findings appear in the Security tab.
+Dependabot vulnerability alerts are on for every ecosystem. Version-update PRs run for GitHub
+Actions, `frontend`, `wcdb-fhir-shim` and `e2e`. They do **not** run for `backend-ts`: its pnpm
+workspace takes members from a git submodule, which Dependabot never initializes, so an updater
+there fails at workspace resolution before it reaches any dependency.
+[`.github/dependabot.yml`](.github/dependabot.yml) carries the reproduction. Backend dependencies are
+bumped by hand; alerts still cover them.
+
+Four of them are bumped only deliberately: `@cqframework/cql`, `cql-execution`, `cql-exec-fhir` and
+`fqm-execution`. Their versions are inputs to numbers this project publishes — the committed ELM, the
+published engine package's manifest, and the MADiE gate — so a bump can leave the suite green while
+making a written claim untrue. Changing one is a PR that re-measures what it affects.
+
+Adding a *new* dependency needs explicit approval and a documented reason, whether or not
+Dependabot is involved.
+
 ## Code style notes
 
 - Prefer existing patterns and module boundaries over introducing new abstractions.
