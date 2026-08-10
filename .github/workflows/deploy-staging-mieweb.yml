@@ -60,6 +60,13 @@ env:
   # trial-data change. NOTE: no birthdate bound can reach a record with NO birthDate at all — see DEPLOY.md.
   STAGING_WEBCHART_PATIENT_SEARCH: "birthdate=le9999-12-31"
 
+# The two BUILD jobs push images to ghcr and restate this block with `packages: write` added — a
+# job-level block replaces the workflow-level one rather than extending it. The two DEPLOY jobs had
+# no block at all and so inherited the repository default; they talk to the MIE Create-a-Container
+# API with its own key and never touch GITHUB_TOKEN, so read access to the code is all they need.
+permissions:
+  contents: read
+
 jobs:
   build-backend-ts:
     name: Build backend-ts image (staging tag)

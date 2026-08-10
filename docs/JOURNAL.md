@@ -62,6 +62,21 @@ dedupe (`@babel/parser` 7.29.2 was reachable only through the old next chain). S
 the blast radius, and a diff a reviewer can actually read. Verified with `--frozen-lockfile` (the
 gate CI applies), lint, 180 tests across 35 files, and a production build.
 
+**#413 done: every job in every workflow now declares its permissions.** The count was **13**, not
+the 12 first reported — eight jobs in `ci.yml`, the two deploy jobs in each of the TWH and staging
+workflows, and the deploy job in the redirect workflow. The pattern is consistent and worth naming:
+in all three deploy workflows the BUILD jobs already declared `contents: read` + `packages: write`,
+because pushing to ghcr forced the question, while the DEPLOY jobs beside them declared nothing and
+inherited the repository default — so the jobs holding the Create-a-Container API key were the ones
+running unscoped. `ci.yml` uses no `GITHUB_TOKEN` at all (verified: no `gh` call, no registry push,
+no commit back), so `contents: read` at workflow level covers all eight; declaring it there rather
+than per job means a job added later inherits the floor instead of silently taking whatever the
+default grants. The trap, written into each file: a job-level block **replaces** the workflow-level
+one rather than extending it, which is why the build jobs must keep restating `contents: read`
+beside `packages: write`. `publish-packages.yml` was deliberately not touched — its `id-token:
+write` is what signs the sigstore provenance attestations (ADR-063), and narrowing it would publish
+without provenance rather than fail.
+
 ## 2026-08-10 — the documentation restructure: docs/guide/ is born, the archive absorbs the rest (branch `docs/doug-doc-restructure`)
 
 ADR-066. The owner directive after the 2026-08-08 walkthrough session: trim the redundant docs and
