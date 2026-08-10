@@ -3,14 +3,19 @@
 # Two related things are enabled in repository SETTINGS rather than here, and this file
 # does not control either of them:
 #   * Dependabot vulnerability ALERTS — repo-wide, every ecosystem, every dependency,
-#     including the four this file refuses to bump automatically.
+#     including the four named below.
 #   * CodeQL default setup — `actions` + `javascript-typescript`, on push/PR to main.
 # What follows governs only the routine "a newer version exists" pull requests.
 #
-# THE SCOPING RULE. Four dependencies are excluded from automatic bumps, not because
-# updating them is risky in the ordinary sense, but because their versions are inputs to
-# numbers this project publishes. A bump that leaves the suite green can still make a
-# committed claim untrue:
+# THE FOUR-DEPENDENCY RULE. It reads as background today because the directory holding
+# all four — backend-ts — has no updater at all (see the block below its neighbours), so
+# there is no `ignore:` list here enforcing it. It is stated anyway for two reasons: it is
+# the standing rule for bumping them BY HAND, and any future backend-ts entry must carry
+# these four as ignores on day one.
+#
+# They are excluded not because updating them is risky in the ordinary sense, but because
+# their versions are inputs to numbers this project publishes. A bump that leaves the suite
+# green can still make a committed claim untrue:
 #
 #   @cqframework/cql   translated every committed .elm.json. `compile-measures` is run by
 #                      hand, not by CI (issue #410), so a version bump does NOT regenerate
@@ -52,31 +57,30 @@ updates:
         update-types: ["minor", "patch"]
 
   # ---------------------------------------------------------------------------
-  # backend-ts — its own pnpm workspace, with members that live OUTSIDE this
-  # directory (`../external/mieweb-cloud/packages/*`, a git submodule). Whether
-  # Dependabot resolves that layout is unverified; if it cannot, the failure shows
-  # up as an errored update job in the Dependabot log, not as a red CI check.
-  # Delete this entry if that happens — alerts cover the directory either way.
-  # ---------------------------------------------------------------------------
-  - package-ecosystem: npm
-    directory: /backend-ts
-    schedule:
-      interval: weekly
-      day: monday
-    open-pull-requests-limit: 5
-    commit-message:
-      prefix: chore
-      include: scope
-    ignore:
-      - dependency-name: "@cqframework/cql"
-      - dependency-name: "cql-execution"
-      - dependency-name: "cql-exec-fhir"
-      - dependency-name: "fqm-execution"
-    groups:
-      backend-dev:
-        dependency-type: development
-        update-types: ["minor", "patch"]
-
+  # backend-ts has NO entry here, and the omission is measured rather than an
+  # oversight. Its pnpm workspace takes five `workspace:*` dependencies from
+  # `../external/mieweb-cloud/packages/*` — a git SUBMODULE, stored as a bare
+  # gitlink. Dependabot's npm updater does not initialize submodules, so it sees an
+  # empty directory. Reproduced in a fresh clone with the submodule uninitialized:
+  #
+  #   $ pnpm -C backend-ts update typescript --lockfile-only
+  #   ERR_PNPM_WORKSPACE_PKG_NOT_FOUND  "@mieweb/cli@workspace:*" is in the
+  #   dependencies but no package named "@mieweb/cli" is present in the workspace
+  #
+  # It fails at workspace resolution, before any registry dependency is considered,
+  # so an entry here would error on every scheduled run forever. A permanently
+  # erroring updater is worse than none: it reads as coverage in the config while
+  # proposing nothing.
+  #
+  # What backend-ts still gets: vulnerability ALERTS, which are repo-wide and owe
+  # nothing to this file — demonstrated, not assumed, by the alerts already raised
+  # against `backend-ts/pnpm-lock.yaml`. What it does not get: routine version-bump
+  # PRs for @aws-sdk/client-s3, better-sqlite3, pg, tsx, typescript and @types/*.
+  # Those are bumped by hand.
+  #
+  # Re-adding this entry requires the workspace to stop depending on submodule
+  # members — vendoring @mieweb/cloud, or consuming it from a registry. Do not
+  # re-add it on the theory that Dependabot might cope; it was tried.
   # ---------------------------------------------------------------------------
   # frontend. `datavis` is a file: link to vendored source (ADR-007) and has no
   # registry version to bump, so Dependabot leaves it alone without being told to.
