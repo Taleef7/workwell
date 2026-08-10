@@ -2,7 +2,7 @@
  * SMART Backend Services auth provider (E12 PR-2c).
  *   node --import tsx --test src/engine/ingress/webchart/smart-backend-auth.test.ts
  *
- * Contract under test: docs/INTEGRATION_RESEARCH_2026-07-13.md §1.1 — WebChart's token endpoint
+ * Contract under test: docs/archive/INTEGRATION_RESEARCH_2026-07-13.md §1.1 — WebChart's token endpoint
  * takes a client_credentials grant with an RS384 private_key_jwt client assertion. Tests generate a
  * real RSA keypair via WebCrypto and VERIFY the assertion signature — no mocked crypto.
  */

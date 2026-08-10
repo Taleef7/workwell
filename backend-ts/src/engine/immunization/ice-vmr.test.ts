@@ -11,7 +11,7 @@ import {
 } from "./ice-vmr.ts";
 
 // Golden fixture: a real DSS response captured live from hlnconsulting/ice:latest (2026-07-13)
-// against the canonical ICE test payload. See docs/superpowers/specs/2026-07-13-ice-sidecar-spike.md.
+// against the canonical ICE test payload. See docs/archive/superpowers/specs/2026-07-13-ice-sidecar-spike.md.
 const GOLDEN = JSON.parse(
   readFileSync(fileURLToPath(new URL("../../../spike/ice/dss-response.json", import.meta.url)), "utf8"),
 ) as Record<string, unknown>;

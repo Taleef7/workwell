@@ -5,7 +5,7 @@ role: System Owner) · **Goal:** register a SMART Backend Services client, seed 
 synthetic population, and run WorkWell's live evaluation against the real WebChart FHIR API.
 
 Everything here is **owner-executed** (the trial admin UI needs your logged-in session). Each step
-says what to record back into `docs/MIE_INTEGRATION_QUESTIONS_2026-07-09.md` (the #254 answer log).
+says what to record back into `docs/archive/MIE_INTEGRATION_QUESTIONS_2026-07-09.md` (the #254 answer log).
 **Synthetic data only — never PHI** (CLAUDE.md hard rule; the trial is still a shared-vendor
 system, treat it as demo-grade).
 

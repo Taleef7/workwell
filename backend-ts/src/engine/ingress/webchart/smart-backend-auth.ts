@@ -1,7 +1,7 @@
 /**
  * SMART Backend Services auth for the WebChart FHIR transport (E12 PR-2c).
  *
- * WebChart's verified public contract (docs/INTEGRATION_RESEARCH_2026-07-13.md §1.1) authenticates
+ * WebChart's verified public contract (docs/archive/INTEGRATION_RESEARCH_2026-07-13.md §1.1) authenticates
  * server-to-server clients with SMART Bulk Backend Services: a `client_credentials` grant carrying an
  * RS384 `private_key_jwt` client assertion, verified against the client's registered JWKS. This module
  * produces `Authorization` header values behind the small `WebChartAuthProvider` port; the legacy

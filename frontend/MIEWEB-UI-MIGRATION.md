@@ -4,7 +4,7 @@
 > **Use every section below.** Do not reorganize, merge, or skip sections — the structure enables cross-project comparison.
 >
 > Living document — created before any code change (per execution-plan), updated after each step.
-> Design spec: `docs/superpowers/specs/2026-06-08-mieweb-ui-migration-design.md`. Reference method: `docs/mieweb-ui-migration/`.
+> Design spec: `docs/archive/superpowers/specs/2026-06-08-mieweb-ui-migration-design.md`. Reference method: `docs/archive/mieweb-ui-migration/`.
 
 ## Project Profile
 
@@ -135,9 +135,9 @@
 | File | Purpose |
 |------|---------|
 | `frontend/MIEWEB-UI-MIGRATION.md` | This migration report |
-| `docs/mieweb-ui-migration/execution-plan.md` | Vendor 10-step plan (reference copy) |
-| `docs/mieweb-ui-migration/component-policy.md` | Vendor component policy (reference copy) |
-| `docs/mieweb-ui-migration/tailwind4-integration.md` | Vendor Tailwind 4 / CSS-var reference copy |
+| `docs/archive/mieweb-ui-migration/execution-plan.md` | Vendor 10-step plan (reference copy) |
+| `docs/archive/mieweb-ui-migration/component-policy.md` | Vendor component policy (reference copy) |
+| `docs/archive/mieweb-ui-migration/tailwind4-integration.md` | Vendor Tailwind 4 / CSS-var reference copy |
 | `frontend/lib/useTheme.ts` | Dark/light hook (sets `.dark` + `data-theme`) |
 | `frontend/lib/useBrand.ts` | Runtime brand switcher hook (default Enterprise Health) |
 | `frontend/components/theme-script.tsx` | Pre-hydration inline script — applies persisted theme+brand to `<html>` before first paint (no-FOUC). Replaced the post-paint `app-theme-initializer.tsx` (removed) per PR #68 review. |

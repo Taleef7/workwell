@@ -1,7 +1,7 @@
 /** Outcome-Status parity (E11.1): for each migrated measure × synthetic scenario, the GENERATED CQL's
  * Outcome Status equals the HAND-WRITTEN measure's — proving codegen ≡ hand-written on the compliance
  * authority (ADR-008). Self-contained (both evaluated in Node).
- *   node --import tsx --test src/engine/cql/codegen/codegen-parity.test.ts */
+ *   node --import tsx --test src/measure/codegen-parity.test.ts */
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";

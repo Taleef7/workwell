@@ -309,7 +309,7 @@ export async function main(argv: string[], overrides: Partial<OfficialCasesCliDe
   }
 
   const contentDir = resolve(deps.cwd, parsed.contentDir ?? ".official-content");
-  const reportPath = resolve(deps.cwd, "..", "docs", "OFFICIAL_TESTCASE_REPORT_2026-07.md");
+  const reportPath = resolve(deps.cwd, "..", "docs", "evidence", "OFFICIAL_TESTCASE_REPORT_2026-07.md");
   try {
     const runs: OfficialMeasureRun[] = [];
     const skipped: Array<{ measure: OfficialMeasureId; oids: string[] }> = [];

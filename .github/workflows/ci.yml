@@ -285,7 +285,7 @@ jobs:
         if: steps.vendor.outputs.credentialed == 'true'
         working-directory: ${{ github.workspace }}
         run: |
-          report=docs/OFFICIAL_TESTCASE_REPORT_2026-07.md
+          report=docs/evidence/OFFICIAL_TESTCASE_REPORT_2026-07.md
           strip_date() { grep -v '^\*\*Generated:\*\*' "$1"; }
           if ! diff -u <(git show "HEAD:$report" | strip_date /dev/stdin) <(strip_date "$report"); then
             echo "::error::$report is stale — run 'pnpm test:official-cases' and commit the result."
@@ -300,7 +300,7 @@ jobs:
         if: failure() && steps.gate.outcome != 'skipped'
         with:
           name: official-testcase-report
-          path: docs/OFFICIAL_TESTCASE_REPORT_2026-07.md
+          path: docs/evidence/OFFICIAL_TESTCASE_REPORT_2026-07.md
 
   wcdb-fhir-shim:
     name: WCDB FHIR Shim — Typecheck & Test

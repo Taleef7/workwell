@@ -583,8 +583,8 @@ or seed fewer `--subjects`.
 > DATABASE_URL=<neon-pooled> pnpm seed:scale --subjects 5000 --as-of 2026-06-26 --mode evaluate --workers 1
 > ```
 >
-> Spec/plan: `docs/superpowers/specs/2026-07-08-option-a-scale-batch-eval-design.md`,
-> `docs/superpowers/plans/2026-07-08-option-a-scale-batch-eval.md`.
+> Spec/plan: `docs/archive/superpowers/specs/2026-07-08-option-a-scale-batch-eval-design.md`,
+> `docs/archive/superpowers/plans/2026-07-08-option-a-scale-batch-eval.md`.
 
 **Rollback (reversible, synthetic data only) — delete tagged outcomes first, then runs**
 (schema-qualify on the Pg ceiling):
@@ -1209,6 +1209,15 @@ Daily check while the stack is live:
 If any approaches limit, fix that day. Don't wait.
 
 ## Troubleshooting
+
+**MCP / SSE connections drop every ~60 s behind MIE ingress (504s, "request may have expired")**
+- Cause (diagnosed 2026-07, Java-era but ingress-level so it still applies): MIE's nginx defaults —
+  `proxy_read_timeout 60s` cuts any long-lived SSE stream, and `proxy_buffering` holds SSE frames
+  until the buffer fills. The reconnect gets a new session, so the queued response lands on a dead
+  one and nginx returns 504.
+- Fix is an MIE ops change on the vhost, scoped to the SSE/MCP locations: `proxy_buffering off`,
+  `proxy_read_timeout 3600s`, `proxy_http_version 1.1` with an empty `Connection` header.
+- Local workaround: point the MCP client at a locally run backend, bypassing the ingress.
 
 **Neon connection limit hit**
 - Use the pooled connection string (`DATABASE_URL`), not direct, in the app

@@ -2,8 +2,8 @@
 
 **Date:** 2026-07-09
 **Status:** Memo (issue #261, milestone M1). No code changes. Supersedes nothing; sits alongside
-`docs/ROADMAP_2026-07-09.md` (the ordered gap list originates there — this memo expands it) and
-`docs/MIE_INTEGRATION_QUESTIONS_2026-07-09.md` (the memo defers PHI/auth decisions to those answers).
+`docs/archive/ROADMAP_2026-07-09.md` (the ordered gap list originates there — this memo expands it) and
+`docs/archive/MIE_INTEGRATION_QUESTIONS_2026-07-09.md` (the memo defers PHI/auth decisions to those answers).
 
 ## Why this exists
 
@@ -15,7 +15,7 @@ issue.
 
 **Hard rule, stated once and meant absolutely: the demo stack never receives PHI.** Every measure and
 every synthetic patient in the live `twh.os.mieweb.org` / `workwell-twh` Neon project is generated demo
-data (see `docs/ROADMAP_2026-07-09.md` "Scale honesty" note — real CQL evaluation over a generated
+data (see `docs/archive/ROADMAP_2026-07-09.md` "Scale honesty" note — real CQL evaluation over a generated
 population, never real patients). Nothing in this memo changes that. A PHI-capable environment is a
 distinct, not-yet-built target described below.
 
@@ -50,7 +50,7 @@ environment** with, at minimum:
 
 None of this is buildable in the abstract — it depends on where WorkWell is permitted to run and under
 whose BAA, which is exactly the open question sent to MIE (Q C14 in
-`docs/MIE_INTEGRATION_QUESTIONS_2026-07-09.md`).
+`docs/archive/MIE_INTEGRATION_QUESTIONS_2026-07-09.md`).
 
 ### BAA chain question (open, sent to MIE — Q C14)
 
@@ -136,7 +136,7 @@ grade token *mechanics*; what it sits on top of — the account directory itself
 ### Recommendation: do not build until MIE answers Q C15
 
 None of these three should be built now. The right one depends entirely on **Q C15** in
-`docs/MIE_INTEGRATION_QUESTIONS_2026-07-09.md`: *"Should WorkWell authenticate users against MIE SSO /
+`docs/archive/MIE_INTEGRATION_QUESTIONS_2026-07-09.md`: *"Should WorkWell authenticate users against MIE SSO /
 WebChart sessions, or run its own directory (OIDC)?"* Building any of the three ahead of that answer
 risks throwing away real engineering effort on the wrong option — the JWT refresh mechanics already in
 place are auth-provider-agnostic (they wrap whatever identity claim is on the token), so the actual
@@ -190,7 +190,7 @@ design conversation with MIE, not a spec WorkWell can write unilaterally.
 
 ## 4) Ordered gap list
 
-From the 2026-07-09 Fable strategy session (`docs/ROADMAP_2026-07-09.md`, "Production gaps, ordered").
+From the 2026-07-09 Fable strategy session (`docs/archive/ROADMAP_2026-07-09.md`, "Production gaps, ordered").
 Each item is marked **required for first integration** (must be resolved before real WebChart/PHI data
 flows) or **nice-to-have** (improves the production posture but does not block the first integration).
 
@@ -214,9 +214,9 @@ and several are explicitly timed against answers MIE hasn't given yet (Q C15, C1
 
 ## Links
 
-- `docs/ROADMAP_2026-07-09.md` — the roadmap this memo's gap list originates from (milestones M1/M2/M3,
+- `docs/archive/ROADMAP_2026-07-09.md` — the roadmap this memo's gap list originates from (milestones M1/M2/M3,
   decision positions, sequencing)
-- `docs/MIE_INTEGRATION_QUESTIONS_2026-07-09.md` — the question package this memo defers PHI/auth/tenancy
+- `docs/archive/MIE_INTEGRATION_QUESTIONS_2026-07-09.md` — the question package this memo defers PHI/auth/tenancy
   decisions to (Q C14 PHI/BAA, Q C15 auth, Q C16 volume, Q B12 employer fields)
 - `docs/DEPLOY.md` — current stack detail (MIE containers + Neon secrets, the evidence-bucket recipe,
   the self-heal reconciler)

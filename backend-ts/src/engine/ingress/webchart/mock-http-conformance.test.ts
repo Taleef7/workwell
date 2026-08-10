@@ -3,7 +3,7 @@
  *   node --import tsx --test src/engine/ingress/webchart/mock-http-conformance.test.ts
  *
  * The server here is deliberately an in-test `fetch` shim: no new dependency, no network, no deployed
- * service. It serves the VERIFIED public WebChart FHIR contract (docs/INTEGRATION_RESEARCH_2026-07-13.md):
+ * service. It serves the VERIFIED public WebChart FHIR contract (docs/archive/INTEGRATION_RESEARCH_2026-07-13.md):
  * `GET /fhir/Patient` searchset paging, direct `GET /fhir/Patient/{id}` reads, then per-resource
  * `GET /fhir/{type}?patient={id}` searches (there is NO Patient/$everything), optionally behind SMART
  * Backend Services auth. Backing data is the committed WebChart dev-DB patient bundles.
