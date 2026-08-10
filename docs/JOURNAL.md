@@ -1,5 +1,34 @@
 # Journal
 
+## 2026-08-10 — CodeQL and Dependabot, with four dependencies held back on purpose (branch `chore/security-scanning`)
+
+Neither was running. Checked rather than assumed: `code-scanning/default-setup` reported
+`not-configured` with no analysis ever recorded, the Dependabot alerts API returned "disabled for
+this repository", and there was no `.github/dependabot.yml`. The only two mentions of Dependabot
+anywhere in the tree were `ci.yml` comments explaining how the VSAC-credentialed steps degrade when
+GitHub withholds a secret from a fork or Dependabot PR — so the CI had been written to tolerate
+Dependabot for months without Dependabot existing.
+
+**Enabled in repository settings:** CodeQL default setup over `actions` and `javascript-typescript`
+(the workflows matter as much as the sources here — eight of them, and the deploy and publish jobs
+hold registry, Neon, VSAC and npm credentials), and Dependabot vulnerability alerts repo-wide.
+Automated security *fixes* are deliberately left off: an auto-opened PR against one of the four
+dependencies below is exactly the case that wants a human deciding, and alerts already surface it.
+
+**`.github/dependabot.yml`, scoped rather than blanket.** Weekly PRs for GitHub Actions and for the
+four npm directories (`backend-ts`, `frontend`, `wcdb-fhir-shim`, `e2e` monthly), with dev-dependency
+minor/patch grouped so the PR count stays low. Four dependencies are excluded from automatic bumps —
+`@cqframework/cql`, `cql-execution`, `cql-exec-fhir`, `fqm-execution` — and the reason is the one
+worth recording: their versions are *inputs to published numbers*, so a bump can pass the whole suite
+and still make a committed claim untrue. `compile-measures` runs by hand rather than in CI (#410), so
+a translator bump does not regenerate the ELM it produced; `cql-execution` + `cql-exec-fhir` are the
+entire manifest of the published `@work-well/measure-engine`, making any change a semver event for
+people outside this repository; and the 410/410 MADiE gate was measured against `fqm-execution` 1.8.5
+exactly. All four still raise alerts. The file states one thing as unverified rather than assuming
+it: whether Dependabot resolves `backend-ts`'s pnpm workspace, whose members include a git submodule
+outside the directory. If it cannot, that surfaces as an errored update job in the Dependabot log,
+never as a red check.
+
 ## 2026-08-10 — the documentation restructure: docs/guide/ is born, the archive absorbs the rest (branch `docs/doug-doc-restructure`)
 
 ADR-066. The owner directive after the 2026-08-08 walkthrough session: trim the redundant docs and

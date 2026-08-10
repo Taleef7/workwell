@@ -1,0 +1,124 @@
+# Dependency version updates, deliberately scoped.
+#
+# Two related things are enabled in repository SETTINGS rather than here, and this file
+# does not control either of them:
+#   * Dependabot vulnerability ALERTS — repo-wide, every ecosystem, every dependency,
+#     including the four this file refuses to bump automatically.
+#   * CodeQL default setup — `actions` + `javascript-typescript`, on push/PR to main.
+# What follows governs only the routine "a newer version exists" pull requests.
+#
+# THE SCOPING RULE. Four dependencies are excluded from automatic bumps, not because
+# updating them is risky in the ordinary sense, but because their versions are inputs to
+# numbers this project publishes. A bump that leaves the suite green can still make a
+# committed claim untrue:
+#
+#   @cqframework/cql   translated every committed .elm.json. `compile-measures` is run by
+#                      hand, not by CI (issue #410), so a version bump does NOT regenerate
+#                      them — the tree would carry ELM from one translator while the
+#                      manifest names another. It also produced the CQL language
+#                      conformance figures in docs/guide/09-state-and-roadmap.md.
+#   cql-execution      together these two ARE the dependency manifest of the published
+#   cql-exec-fhir      @work-well/measure-engine. Changing either is a semver event for a
+#                      package other people install, and the 1,622-of-1,835 conformance
+#                      result was measured against cql-execution 3.3.2 specifically.
+#   fqm-execution      runs CMS's published artifacts. The 410/410 MADiE gate was measured
+#                      against 1.8.5, which is why it is pinned exact rather than caret.
+#                      A bump that moves an expected count fails the gate — that is the
+#                      gate working, but it deserves a deliberate re-measure, not a
+#                      merge-when-green PR.
+#
+# All four still raise alerts. Excluding them means an advisory is handled on purpose.
+
+version: 2
+
+updates:
+  # ---------------------------------------------------------------------------
+  # GitHub Actions. The highest-value entry here: eight workflows, and the deploy
+  # and publish jobs hold real credentials (container registry, Neon, VSAC, npm).
+  # Action versions are the part of this supply chain with the widest blast radius
+  # and the least routine review.
+  # ---------------------------------------------------------------------------
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: chore
+      include: scope
+    groups:
+      github-actions:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+
+  # ---------------------------------------------------------------------------
+  # backend-ts — its own pnpm workspace, with members that live OUTSIDE this
+  # directory (`../external/mieweb-cloud/packages/*`, a git submodule). Whether
+  # Dependabot resolves that layout is unverified; if it cannot, the failure shows
+  # up as an errored update job in the Dependabot log, not as a red CI check.
+  # Delete this entry if that happens — alerts cover the directory either way.
+  # ---------------------------------------------------------------------------
+  - package-ecosystem: npm
+    directory: /backend-ts
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: chore
+      include: scope
+    ignore:
+      - dependency-name: "@cqframework/cql"
+      - dependency-name: "cql-execution"
+      - dependency-name: "cql-exec-fhir"
+      - dependency-name: "fqm-execution"
+    groups:
+      backend-dev:
+        dependency-type: development
+        update-types: ["minor", "patch"]
+
+  # ---------------------------------------------------------------------------
+  # frontend. `datavis` is a file: link to vendored source (ADR-007) and has no
+  # registry version to bump, so Dependabot leaves it alone without being told to.
+  # ---------------------------------------------------------------------------
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: chore
+      include: scope
+    groups:
+      frontend-dev:
+        dependency-type: development
+        update-types: ["minor", "patch"]
+
+  # ---------------------------------------------------------------------------
+  # wcdb-fhir-shim. The only holder of a MariaDB driver in the repository
+  # (ADR-034), and the one package here that speaks to a real database over the
+  # network — so `mysql2` is the dependency most worth keeping current.
+  # ---------------------------------------------------------------------------
+  - package-ecosystem: npm
+    directory: /wcdb-fhir-shim
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: chore
+      include: scope
+
+  # ---------------------------------------------------------------------------
+  # e2e — Playwright only, and it runs against staging rather than in the merge
+  # path, so a bump here cannot block a PR.
+  # ---------------------------------------------------------------------------
+  - package-ecosystem: npm
+    directory: /e2e
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 2
+    commit-message:
+      prefix: chore
+      include: scope
