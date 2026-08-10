@@ -71,7 +71,13 @@ worker stays portable to environments with no filesystem, and a measure cannot g
 because of a deployment mistake. A compiled measure changes in a pull request diff like any other
 code.
 
-A single syntax or type error fails the build, so a broken measure cannot reach the repository.
+A single syntax or type error fails `compile-measures`, so a measure that does not compile cannot
+be compiled into the tree. It can still be *committed*, though, and the difference matters: nothing
+in CI runs `compile-measures`. The backend job installs, typechecks and tests, and the tests read
+the committed ELM. So if you edit a `.cql` file and forget to regenerate, everything stays green
+while the measure that would deploy is the one you last compiled rather than the one you last
+edited. **Regenerating is a manual prerequisite today**, listed as an open gap in
+[chapter 9](09-state-and-roadmap.md).
 
 ## What the tree actually is
 

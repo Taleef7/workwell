@@ -213,5 +213,11 @@ not a solved problem.
 ```bash
 cd backend-ts
 pnpm gen-cql        # regenerate measures/generated/ from the YAML rule blocks
-pnpm test -- --test-name-pattern codegen-parity   # generated ≡ hand-written, through the engine
+
+# generated ≡ hand-written, through the engine — 8 tests, ~25s
+node --import tsx --test src/measure/codegen-parity.test.ts
 ```
+
+Run the parity test by file path, not with `pnpm test --test-name-pattern`. `pnpm` inserts its own
+`--` before forwarded arguments, so Node stops parsing options and the filter is dropped in
+silence — you get the whole suite and no error telling you the filter did nothing.
