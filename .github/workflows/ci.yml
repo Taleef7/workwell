@@ -30,6 +30,15 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Least privilege for all eight jobs. Nothing in this workflow uses GITHUB_TOKEN — no `gh` call, no
+# registry push, no commit back — so read access to the code is the whole requirement. Declaring it
+# here rather than per job means a job added later inherits the floor instead of silently taking
+# whatever the repository default happens to grant. Any job that genuinely needs more overrides this
+# block, and a job-level block REPLACES this one rather than adding to it, so an override must
+# restate `contents: read`.
+permissions:
+  contents: read
+
 jobs:
   deploy-helper:
     name: Deploy helper — Shell test
