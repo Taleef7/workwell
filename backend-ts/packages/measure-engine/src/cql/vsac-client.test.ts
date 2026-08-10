@@ -219,3 +219,34 @@ test("httpVsacClient omits provenance keys when the server sends none (no undefi
     restore();
   }
 });
+
+// --- base-URL normalization, and the ReDoS it used to carry (js/polynomial-redos) --------------
+
+test("httpVsacClient trims every trailing slash from baseUrl and leaves interior ones alone", async () => {
+  const { calls, restore } = installFetch([
+    { expansion: { total: 1, contains: [{ code: "X", system: "S" }] } },
+    { expansion: { total: 1, contains: [{ code: "X", system: "S" }] } },
+  ]);
+  try {
+    await httpVsacClient({ baseUrl: BASE, apiKey: "k" }).expand(EXP_OID);
+    await httpVsacClient({ baseUrl: BASE + "////", apiKey: "k" }).expand(EXP_OID);
+    assert.equal(calls[0]!.url, calls[1]!.url, "four trailing slashes normalize to none");
+    assert.ok(calls[1]!.url.startsWith("https://cts.nlm.nih.gov/fhir/"), "interior slashes survive");
+  } finally {
+    restore();
+  }
+});
+
+test("a pathological baseUrl does not hang the constructor (js/polynomial-redos regression)", () => {
+  // The old implementation was `cfg.baseUrl.replace(/\/+$/, "")`. On a long run of slashes that is
+  // NOT at the end, the engine consumes the whole run from every start position and then fails `$`,
+  // which is quadratic — 100k slashes is ~10^10 character operations, i.e. minutes. The replacement
+  // is a single backwards scan. The bound below is ~1000x the observed time, so this fails on a
+  // reintroduced regex and cannot fail on a slow machine.
+  const pathological = "https://cts.nlm.nih.gov/fhir" + "/".repeat(100_000) + "a";
+  const started = performance.now();
+  const client = httpVsacClient({ baseUrl: pathological, apiKey: "k" });
+  const elapsedMs = performance.now() - started;
+  assert.equal(client.kind, "http");
+  assert.ok(elapsedMs < 1000, `constructing took ${elapsedMs.toFixed(1)}ms — the trim is not linear`);
+});
