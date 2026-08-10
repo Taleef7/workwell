@@ -382,7 +382,7 @@ compliance truth (ADR-008/ADR-017).
 
 ### 8.2 PR-2c pre-build — mock-contract HTTP transport (#255, 2026-07-09)
 
-While the final MIE answers in `docs/MIE_INTEGRATION_QUESTIONS_2026-07-09.md` are still pending,
+While the final MIE answers in `docs/archive/MIE_INTEGRATION_QUESTIONS_2026-07-09.md` are still pending,
 `httpWebChartClient` has been pre-built against the assumed **true FHIR R4** contract documented in
 `docs/WEBCHART_API_ASSUMPTIONS_2026-07.md`: `GET /fhir/Patient?_count=...` for paged population
 listing, FHIR searchset `link[relation=next]` pagination, and `GET /fhir/Patient/{id}/$everything` for

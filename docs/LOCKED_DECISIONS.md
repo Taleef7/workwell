@@ -5,7 +5,7 @@
 >
 > **§4 was rewritten on 2026-08-04** to match `docs/ROADMAP_2026-08-04.md`, the APPROVED active plan
 > (driving ADR: **ADR-058**). **§5 is unchanged**: a dated audit snapshot extracted from the superseded
-> `docs/ROADMAP_2026-07-24.md`, binding on nobody — see its own preamble.
+> `docs/archive/ROADMAP_2026-07-24.md`, binding on nobody — see its own preamble.
 >
 > The rest of the active roadmap (context, north star, milestones, architecture, risks, verification,
 > deliverables) stays on demand. Edit the decisions here, not in the roadmap.
