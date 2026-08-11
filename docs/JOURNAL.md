@@ -1,5 +1,45 @@
 # Journal
 
+## 2026-08-11 — the fqm-execution period-end fix, re-measured: three defects where I had reported one
+
+Went back over upstream issue **projecttacoma/fqm-execution#371** and our PR **#372** against the
+running engine rather than the spec, prompted by a review question — is there a simpler fix using `<`
+instead of `<=`, and why `.999`? It turned up more than it was looking for.
+
+**`.999` is not an approximation, and the half-open alternative is not simpler.** Measured against
+`cql-execution` 3.3.2: millisecond is the finest field its `DateTime` carries,
+`normalizeMillisecondsField` truncates anything finer **downward** (`.9999` becomes `999`), and
+`successor(23:59:59.999)` is the next midnight — so `.999` is the last representable instant of the
+day, with no gap for anything to fall into. The half-open form `[start, next-day)` behaves identically
+**and yields the same `.999`**, because `Interval.end()` calls `toClosed()`, which applies
+`predecessor()`. The most CQL-pure option — keeping day precision on the boundary — returns **null for
+everything**, including a date obviously outside the period, so it would turn every `during` comparison
+null. Four designs, one table, all four run rather than reasoned about.
+
+**Three defects, where the issue reported one.** (1) The PR only matched `YYYY-MM-DD`, but the option's
+README documents partial dates too — `2019-12` resolved to December *1st* and `2019` to January 1st,
+losing 31 and 364 days rather than one. (2) `DataRequirementHelpers.createIntervalFromEndpoints` routes
+through the fixed function only when **both** endpoints are given; its end-only branch parses the end
+directly and had the same bug in a place the first fix cannot reach. (3) `parseTimeStringAsUTC` parses
+with `moment.defaultFormatUtc` — no fractional-second token, and a *literal* trailing Z — so it
+**silently drops milliseconds and ignores a non-UTC offset** (`08:30:00+02:00` read as `08:30:00Z`, a
+two-hour error). (1) and (2) are fixed in #372; (3) is filed as **#376** rather than bundled, because it
+hits the period *start* and every other caller of that function.
+
+**The finding that lands on us: our own workaround does not do what its comment says.**
+`normalizePeriodEnd` appends `T23:59:59.999Z`, and fqm drops the milliseconds on arrival — the effective
+boundary is `23:59:59.000Z`. Our 121/121 against the MADiE decks holds because the deck's boundary
+Procedure sits at exactly `23:59:59Z`; at `23:59:59.500Z` it would have failed and this would have been
+a different issue. The docblock now records the measured behaviour instead of the intended one, and
+states the consequence: **delete the function when #372 lands, do not keep it** — the string it produces
+is not date-only, so it would bypass the new branch and stay a millisecond short of the fix. Also
+recorded upstream: `parseTimeStringAsUTCConvertingToEndOfYear` has no call sites anywhere in that
+repository, and its `add(1,'years').subtract(1,'seconds')` idiom lands 999 ms short of the year it
+names — the helper I originally modelled ours on was both dead and subtly wrong.
+
+Upstream verification on the rebased branch: `npm run check` (484 unit tests, up from 477) and
+`npm run test:integration` (46) both pass.
+
 ## 2026-08-10 — CodeQL and Dependabot, with four dependencies held back on purpose (branch `chore/security-scanning`)
 
 Neither was running. Checked rather than assumed: `code-scanning/default-setup` reported
