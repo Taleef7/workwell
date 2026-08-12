@@ -147,9 +147,9 @@ Three things follow from this that carry through the rest of the guide:
 
 ## The nodes, by name
 
-Counting the distinct node types in one of our compiled measures gives 26. The common ones:
+Counting the distinct node types in the audiogram measure gives 29. The common ones:
 
-| Node | What it is | Example in the audiogram measure |
+| Node | What it is | Example |
 |---|---|---|
 | `Retrieve` | Fetch every resource of a given type, optionally filtered by a code list. The domain-specific instruction — see below. | `[Procedure]` |
 | `Query` | Iterate a source with `where`, `sort`, `return` clauses | `[Procedure] P where … sort by …` |
@@ -210,7 +210,7 @@ frontend over their source — and it was intractable under the pinned translato
 the representation instead is the whole point of the representation existing.
 
 **What kind of intermediate representation.** The answer constrains what can be done with it. The
-26 node types include `If`, `Query`, `And`, `Or`, `Exists`, `Property` and `Retrieve`. What is
+29 node types include `If`, `Query`, `And`, `Or`, `Exists`, `Property` and `Retrieve`. What is
 absent is more informative: no basic blocks, no labels, no branches, no assignments, no phi nodes.
 
 - Control flow is not flattened. An `If` stays an `If`, nested inside another `If`. That is
