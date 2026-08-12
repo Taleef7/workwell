@@ -16,7 +16,7 @@
   },
   "dependencies": {
     "mysql2": "^3.23.2",
-    "tsx": "^4.19.2",
+    "tsx": "^4.23.11",
     "yaml": "^2.9.0"
   },
   "devDependencies": {
