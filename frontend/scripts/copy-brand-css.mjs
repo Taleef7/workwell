@@ -64,7 +64,7 @@ const SELF_HOSTED_IMPORTS = new Map([
 const GOOGLE_IMPORT_RE = /^\s*@import\s+url\(\s*['"]?(https:\/\/fonts\.googleapis\.com\/[^'")]+)['"]?\s*\)\s*;\s*$/;
 
 function selfHostFontImports(css, file) {
-  return css
+  const out = css
     .split("\n")
     .map((line) => {
       const m = line.match(GOOGLE_IMPORT_RE);
@@ -79,6 +79,22 @@ function selfHostFontImports(css, file) {
       return replacement;
     })
     .join("\n");
+  // Output-level backstop, immune to the regex's shape: an @import with a media/layer suffix (or
+  // any other form the line-match above does not anticipate) must not slip through silently — a
+  // guard that only fires on the shapes it expects is narrower than the claim it gets cited for.
+  // Excludes comment lines: upstream files may cite Google Fonts URLs in usage-hint comments
+  // (ccme.css and ozwell.css do), and a comment fetches nothing.
+  const live = out
+    .split("\n")
+    .filter((line) => !line.trim().startsWith("*") && !line.trim().startsWith("/*") && !line.trim().startsWith("//"))
+    .filter((line) => /fonts\.googleapis\.com|fonts\.gstatic\.com/.test(line));
+  if (live.length > 0) {
+    console.error(
+      `[copy-brand-css] ${file}: a Google Fonts reference survived outside a comment — self-host it:\n  ${live.join("\n  ")}`,
+    );
+    process.exit(1);
+  }
+  return out;
 }
 
 if (!existsSync(src)) {
