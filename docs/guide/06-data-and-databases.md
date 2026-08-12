@@ -5,7 +5,8 @@
 
 Two questions get answered here. Where does patient data come from before the engine sees it — there
 are four ways in — and what is stored where afterwards, across the three databases this system
-touches.
+touches. The ingress-to-persistence order is drawn as a sequence in
+[chapter 10, S1 and S2](10-scenarios.md).
 
 ## The four ways data enters the engine
 
@@ -72,7 +73,7 @@ flowchart LR
     P1["22 tables in the workwell_spike schema. Results and workflow. Zero measure logic."]
   end
   subgraph SL["SQLite - the floor"]
-    S1["The same store interfaces over a local file. Tests and local dev - the 1,940-test suite runs with no container."]
+    S1["The same store interfaces over a local file. Tests and local dev - the whole test suite runs with no container. Count and date: chapter 9."]
   end
   subgraph MD["MariaDB - WebChart's own database"]
     M1["675 tables, MIE's schema. Read-only to us, and only ever through the shim."]
@@ -83,7 +84,7 @@ flowchart LR
 ```
 
 **Postgres is the ceiling, SQLite is the floor, and one factory decides.** Route and service code
-sees shared store interfaces — `RunStore`, `OutcomeStore`, `CaseStore` and eleven more — never a
+sees shared store interfaces — `RunStore`, `OutcomeStore`, `CaseStore` and twelve more — never a
 concrete driver. `backend-ts/src/stores/factory.ts` is the single place that picks a backend: a
 `DATABASE_URL` pointing at Postgres selects the `Pg*` implementations over one pooled connection
 scoped to the `workwell_spike` schema; otherwise the `Sqlite*` implementations run over the local
