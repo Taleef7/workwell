@@ -1,5 +1,21 @@
 # Journal
 
+## 2026-08-12 — the action majors are finished, and every GitHub Action in the repo is current
+
+The second and last batch: `docker/login-action` 3→4, `docker/build-push-action` 6→7,
+`pnpm/action-setup` 4→6. Taken as one change again rather than three, for the same reason as #435 —
+three separate merges over the same `uses:` lines means three rebases and three full CI runs.
+
+Checked rather than assumed, and the answers were the same as last time: both Docker actions are
+"Node 24 as default runtime, requires Actions Runner 2.327.1+", which cannot bite because all **24**
+`runs-on:` lines are GitHub-hosted `ubuntu-latest`. `pnpm/action-setup` is the only one with a
+different story — v5 moved to Node 24 and v6 "added support for pnpm v11" — and it matters not at
+all here because every invocation pins `version: 10.17.1` explicitly, so the action installs the
+pnpm we ask for regardless of which it supports.
+
+With this, no action in the repository is behind: checkout v7, setup-node v7, cache v6,
+upload-artifact v7, setup-buildx v4, login v4, build-push v7, pnpm/action-setup v6.
+
 ## 2026-08-11 — the first Dependabot triage, and two of my own holds overturned by reading the notes
 
 Six PRs sat held from the 2026-08-10 batch. Working through them properly reversed two of my own calls,
