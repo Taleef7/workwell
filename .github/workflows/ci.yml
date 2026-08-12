@@ -72,7 +72,7 @@ jobs:
           run_install: false
       - uses: actions/setup-node@v7
         with:
-          node-version: 20
+          node-version: 24
           cache: pnpm
           cache-dependency-path: frontend/pnpm-lock.yaml
       - name: Install deps
@@ -432,7 +432,7 @@ jobs:
           version: 10.17.1
       - uses: actions/setup-node@v7
         with:
-          node-version: 20
+          node-version: 24
       - name: Install e2e dependencies
         working-directory: e2e
         run: pnpm install

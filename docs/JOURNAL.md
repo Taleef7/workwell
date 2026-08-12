@@ -1,5 +1,27 @@
 # Journal
 
+## 2026-08-12 — the frontend leaves Node 20, and the backend-ts half turned out not to be free (#452)
+
+The frontend was the last thing in the repository on Node 20 (EOL April 2026): the `ci.yml` frontend
+job, the e2e job, and all three stages of `frontend/Dockerfile`. All five pins are now 24, matching
+`backend-ts` and the shim, and `frontend`'s `@types/node` moved `^20` → `^24` so the types track the
+runtime. The lockfile diff is exactly the `@types/node` 20.19.39 → 24.13.3 peer-dep cascade (plus
+`undici-types`, its own dependency) — nothing else moved. Verified locally: lint, 180/180 tests, and
+a production build, all on the updated lockfile. The Dockerfile change proves itself on the next
+push to `main`, when `deploy-twh-mieweb.yml` builds the image. This unparks #430 (jest-dom 7, held
+solely on the Node floor).
+
+**The issue's "while there" half is NOT in this PR, and the reason is a measurement.** #452 suggested
+moving `backend-ts`'s `@types/node` `^22` → `^24` in the same change. Doing it produces ~50 typecheck
+errors, all one shape: `@cloudflare/workers-types` declares the global `URL`, `@types/node` 24's
+`node:url` functions now demand Node's own `URL` (whose `searchParams.entries()` returns a
+`URLSearchParamsIterator` carrying `[Symbol.dispose]`), and the workers-types `URL` — every published
+entrypoint of it, `latest` included, checked in `node_modules` — still returns a plain
+`IterableIterator` with no dispose. Structurally incompatible, and no version of either package
+currently fixes it: bumping workers-types to 4.20260702.1 changes nothing. So `backend-ts` stays on
+`^22` deliberately — its types lag its runtime, but they compile — and the conflict is recorded on
+the issue rather than papered over with 50 call-site casts.
+
 ## 2026-08-12 — the action majors are finished, and every GitHub Action in the repo is current
 
 The second and last batch: `docker/login-action` 3→4, `docker/build-push-action` 6→7,
