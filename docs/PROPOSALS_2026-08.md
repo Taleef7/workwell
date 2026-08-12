@@ -93,8 +93,12 @@ identifies them.
 
 The compliance half exists. The worklist read model (`backend-ts/src/case/case-read-models.ts`) resolves
 each open case to its employee, site, measure and current outcome status, and outcomes persist evaluation
-dates plus `evidence_json.why_flagged.last_exam_date` (`docs/DATA_MODEL_CONTRACTS.md` §5). Filtering,
-grouping and CSV export over cases are established surfaces.
+dates plus the CQL define results. The readable `why_flagged` block — including `last_exam_date` — is
+**derived at read time**, not stored: the engine persists `expressionResults` only, and `deriveWhyFlagged`
+(`backend-ts/src/case/case-detail-read-model.ts:90`, applied at `:175`) builds `why_flagged` from them
+when a case is read. `docs/DATA_MODEL_CONTRACTS.md` §5 shows the block inside the canonical
+`evidence_json` shape without noting the derivation, which is misleading on exactly this point (#463).
+Filtering, grouping and CSV export over cases are established surfaces.
 
 Encounters are already part of the data model the engine reads: `Encounter` is one of the five clinical
 resource types composed per patient by the transport, and it feeds the qualifying-visit logic in the
@@ -107,7 +111,10 @@ official eCQMs (`webchart-client.ts:70–72`).
   afterwards. So this is either a value computed at read time from the source, or a value persisted per
   subject, and the second is a schema question and therefore the owner's.
 - **A read model or API filter** that takes the recency threshold and returns the joined view. Whether it
-  is a Studio view, a contract MIE consumes, or both is open (below).
+  is a Studio view, a contract MIE consumes, or both is open (below). Note that the compliance half of
+  each row is a *derivation*, not a column read: any surface showing `last_exam_date` has to run
+  `deriveWhyFlagged` over the stored define results, which is a per-row cost and a per-row dependency on
+  logic that lives in the case read model today.
 - **A definition of "seen."** This is the load-bearing decision, not a detail. *Any* encounter and *a
   qualifying encounter as the measure's own initial population defines it* produce different lists for the
   same patients — CMS125's initial population, for example, requires a qualifying visit, and our synthetic
@@ -150,21 +157,30 @@ scope for this proposal in every variant of it.
 
 ### How it maps onto what exists
 
-The inputs are already persisted. `evidence_json.why_flagged` carries `last_exam_date` and
-`compliance_window_days` for each outcome (`docs/DATA_MODEL_CONTRACTS.md` §5), and the window itself is
-measure configuration rather than a derived quantity — `complianceWindowDays` on the measure binding
+The inputs exist, but one of them is **derived, not stored** — a distinction that changes the shape of
+the work. The engine persists `expressionResults`, the raw CQL define outputs; the readable `why_flagged`
+block carrying `last_exam_date` and `compliance_window_days` is built at read time by `deriveWhyFlagged`
+(`backend-ts/src/case/case-detail-read-model.ts:90`, applied at `:175`), whose own docblock says so at
+`:4–6`. `docs/DATA_MODEL_CONTRACTS.md` §5 shows `why_flagged` inside the canonical `evidence_json` shape
+without that note, which is why an earlier draft of this proposal claimed the fields were persisted per
+outcome (#463). The window itself is genuine configuration — `complianceWindowDays` on the measure binding
 (the field at `backend-ts/src/engine/synthetic/measure-bindings.ts:33`; 365 days for the audiogram at
 `:46`, 820 for CMS125 at `:49`).
 
-The arithmetic itself already exists twice, in two places that cannot see each other:
+The arithmetic itself already exists twice, in two places that cannot see each other — and both reach the
+derivation the long way round:
 
 - `computeDueDate` in `backend-ts/src/case/case-outreach.ts:132–148` computes last exam + window, falling
   back to the evaluation period, and clamps a past date to today so outreach never renders a due-by date
-  in the past.
+  in the past. It cannot read the stored evidence directly: `renderContext` builds a whole `CaseDetail`
+  via `toCaseDetail` first, purely to get the derived block, and the code says why — "the raw stored
+  outcome evidence has no `why_flagged` block" (`case-outreach.ts:164–175`).
 - `daysUntilDue` in `backend-ts/src/run/employee-profile.ts:154–164` computes window − days since last
   exam for the employee profile read model, negative meaning overdue. It is a **day count, not a date**,
   and not even a function — an inline expression in an object literal (`:164`), so it is less reusable
-  than the private helper above rather than more.
+  than the private helper above rather than more. It calls `deriveWhyFlagged` directly (`:153`) to get
+  its window, so the run module already depends on a derivation that lives in the *case detail* read
+  model.
 
 Cases carry a `nextAction` today, but it is an instruction string, not a date — `nextActionFor` returns
 text like "Schedule the mammogram before the due date"
@@ -175,12 +191,22 @@ So there is no next-due *date* on a case, and the two computations above are pri
 
 ### What would have to be built
 
-A single derived next-due date per outcome, computed from the same persisted evidence, surfaced where
-operators work — the worklist, the compliance API response, or both. The most useful part of the work may
-be consolidation rather than addition: two independent expressions of the same underlying arithmetic —
-one producing a clamped date, the other a signed day count — can drift apart, and today nothing would
-notice if they did. Any new persisted column is a schema change and therefore the
-owner's; a computed-at-read-time field is not.
+A single derived next-due date per outcome, computed from the persisted define results, surfaced where
+operators work — the worklist, the compliance API response, or both.
+
+The most useful part of the work is probably consolidation rather than addition, and the derivation is
+the reason. Two independent expressions of the same arithmetic — one producing a clamped date, the other
+a signed day count — can already drift apart, and nothing would notice if they did. But both sit on top
+of a *third* thing that is also duplicated in effect: `deriveWhyFlagged`, reached by `toCaseDetail` in
+one caller and called directly in the other, from a module named for the case detail page rather than for
+the derivation it owns. Adding a next-due date to the compliance API without addressing that would make a
+third consumer of the same read-time derivation through a fourth path — the exact drift risk this section
+already names, one layer down and harder to see. So the work includes pulling `deriveWhyFlagged` and the
+due-date arithmetic into one place both read models and the API can share, rather than adding a caller.
+
+Any new persisted column is a schema change and therefore the owner's; a computed-at-read-time field is
+not — though "computed at read time" is now a cost to size rather than a free alternative, since it means
+running the derivation per row on every list that shows a date.
 
 ### Open questions
 
