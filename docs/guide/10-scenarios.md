@@ -222,3 +222,37 @@ sequenceDiagram
 The finalize gate is the interesting arrow: it refuses to mark a run COMPLETED unless every
 outcome came from an imported document, because finalizing a partially-imported population run
 from outside would make a partial roster exportable as a finished result.
+
+## S6 — An AI client over MCP, read-only
+
+Claude Desktop (or any MCP client) talking to the worker's own MCP server. Everything is a read;
+the interesting ordering is the SSE handshake and the role gate. Mechanisms: `docs/MCP.md` (the
+security boundary), [chapter 1](01-big-picture.md) (where MCP sits).
+
+```mermaid
+sequenceDiagram
+  autonumber
+  actor C as MCP client (Claude Desktop)
+  participant T as MCP transport
+  participant D as Dispatch + role gate
+  participant DB as Stores (read-only)
+  C->>T: GET /sse — open the event stream
+  T-->>C: event: endpoint → /mcp/message?sessionId=…
+  C->>T: POST initialize (202; result arrives over SSE)
+  T-->>C: initialize result
+  C->>T: tools/list
+  T-->>C: 13 read-only tools
+  C->>T: tools/call — e.g. list_noncompliant
+  T->>D: dispatch with auth context (actor, role)
+  alt role gate refuses (e.g. check_compliance needs CM/ADMIN)
+    D-->>C: refusal, no data
+  else allowed
+    D->>DB: read
+    D->>DB: tool-call audit event
+    D-->>C: result, pushed over the SSE stream
+  end
+```
+
+No MCP tool mutates anything: the server exposes reads plus explain-shaped tools, every call is
+audited, and role gating happens at dispatch — the transport authenticates, the dispatcher
+authorizes.
