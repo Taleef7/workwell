@@ -85,14 +85,11 @@ rather than reporting a pass it did not earn. The other six are byte-identical e
 
 ## Open gaps, named
 
-- **Nothing in CI checks that the committed ELM matches the CQL it came from.** The backend job
-  installs, typechecks and tests; no workflow runs `compile-measures`. Edit a `.cql` file, forget to
-  regenerate, and CI stays green while the deployed measure runs the previously compiled logic —
-  a stale-input failure that is silent, which is the class this project keeps getting bitten by
-  (ADR-040 closed the same shape for the evaluation cache). The fix is cheap and nobody has done it:
-  recompile in CI and fail on a non-empty diff, which is sound because the compiler's output is
-  byte-identical run to run (ADR-064). Found by review on the documentation PR that first wrote the
-  guarantee down as though it existed.
+- ~~**Nothing in CI checks that the committed ELM matches the CQL it came from.**~~ **CLOSED
+  2026-08-12 (#410):** the backend CI job now recompiles and fails on any difference — see
+  [chapter 3](03-compiler-and-elm.md). Kept here because the gap was found by review on the
+  documentation PR that first wrote the guarantee down as though it existed, and that provenance
+  is the lesson.
 - **No screen shows the FHIR bundle an evaluation used.** Bundles are transient by design
   ([chapter 6](06-data-and-databases.md)), so the thing a developer most wants when debugging a
   retrieve is the one thing the UI cannot show. Small build, high value.

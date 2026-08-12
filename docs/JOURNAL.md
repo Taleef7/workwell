@@ -1,5 +1,58 @@
 # Journal
 
+## 2026-08-12 — CI now proves the committed ELM is what the CQL produces (#410)
+
+The gap chapter 3 documented as a manual prerequisite is closed: the backend CI job recompiles all
+17 measures (+FHIRHelpers) after typecheck and fails on any difference from the committed output.
+Edit a `.cql`, forget to regenerate, and CI now says so — instead of staying green while the
+deployed measure runs the last-compiled logic. ADR-040's sentence, one layer up, finally with a
+guard.
+
+**The pre-wiring checks the issue demanded, all run before a line of YAML.** (1) Determinism:
+`compile-measures` twice on a clean tree — byte-identical, ~9 s per run, so the check is sound and
+cheap enough to live in the existing backend job (fail-fast between typecheck and the long suite)
+rather than paying a second install in its own job. (2) The committed tree is in sync today, so the
+gate lands green. (3) No double-report: the `official-cases` job's "reproducible from its pin" gate
+covers the VENDORED CMS artifacts; this covers the AUTHORED measures, which that gate never sees.
+
+**Mutation-checking changed the shape of the fix, which is why it happens before wiring.** A version
+bump in one measure produced a NEW `.elm.json` — an *untracked* file, which `git diff --exit-code`
+(the issue's sketched command) silently ignores. The landed check does `git add` on the output paths
+first and diffs the index, so new files fail too. It also covers all THREE outputs the script
+writes, not just `elm/`: the compiler regenerates `src/measure/resources/cql-resources.json`
+(the bundled translator resources) on every run, and the issue's sketch missed it. Both are the
+vacuous-guard shape — a check narrower than the claim it gets cited for — caught this time before
+the guard shipped rather than after.
+
+**And then the gate's first clean-runner run FAILED, and the failure was a real finding.** The
+issue's third pre-wiring check — "confirm byte-determinism holds on a clean runner, not just
+locally" — was the one I could not fully discharge from a Windows machine, and it is exactly where
+the defect was. On the Linux runner all 18 ELM files and `index.ts` reproduced byte-identical, but
+`cql-resources.json` differed by one line: it embeds the RAW text of the three translator
+resources, so it encodes the line-ending flavor of the checkout that generated it — committed from
+a CRLF working copy, regenerated on an LF one. The local determinism check was blind to this by
+construction (same machine, same flavor, both runs agree). `compile-measures` now normalizes CRLF
+on read — inert for the translator (ELM carries no source text; locators count lines the same
+either way, which the 18-identical-files result demonstrates) — and the sidecar is regenerated in
+its platform-independent form. The claim "byte-deterministic" was true per-machine and false
+across machines, and only the gate itself could tell the difference.
+
+**Codex's review then found the third gap in the same guard, and the repository already contained
+its proof.** The compiler only ever WRITES: a committed `.elm.json` the current CQL no longer
+produces — a deleted or version-bumped library — is touched by nothing, stages no deletion, and
+passes forever. Two such orphans were already committed (`BreastCancerScreeningCQL-1.0.0`,
+`DiabetesHbA1cPoorControlCQL-1.0.0` — superseded by 2.0.0s, absent from the generated index,
+loadable by nothing in the runtime; chapter 3's "a few measures keep two versions" was, it turns
+out, describing them). The gate now `rm`s the generated directory before recompiling, which turns
+an orphan into a staged deletion; verified to fail on exactly those two files before they were
+deleted, and to pass after. Three guard-scope defects in one small check — untracked additions,
+embedded line endings, orphaned deletions — each found by a different instrument (mutation, the
+clean runner, review), none by re-reading the code.
+
+Guide chapters 3 and 9 updated; the chapter 9 gap entry stays struck-through rather than deleted,
+because "found by review on the documentation PR that wrote the guarantee down as though it
+existed" is the provenance worth keeping.
+
 ## 2026-08-12 — the fonts are self-hosted, and a Google outage can no longer fail a deploy (#453)
 
 `next/font/google` downloads font binaries at build time, which made fonts.gstatic.com a hard build
@@ -56,6 +109,7 @@ entrypoint of it, `latest` included, checked in `node_modules` — still returns
 currently fixes it: bumping workers-types to 4.20260702.1 changes nothing. So `backend-ts` stays on
 `^22` deliberately — its types lag its runtime, but they compile — and the conflict is recorded on
 the issue rather than papered over with 50 call-site casts.
+
 
 ## 2026-08-12 — the action majors are finished, and every GitHub Action in the repo is current
 
