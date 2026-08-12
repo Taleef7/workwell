@@ -145,3 +145,40 @@ Two invariants worth reading off the lanes. Every mutating arrow into `API` prod
 arrow into `DB` — no state change without an audit row. And the `AI` lane never touches `DB`
 except to log that it spoke: compliance state is authored by the engine alone, and a human
 closure (`closed_by` set) is never reopened by a later run.
+
+## S4 — Authoring a measure, from draft to active
+
+The Studio authoring loop — including the fact the whole guide keeps repeating: compilation
+happens at authoring/build time, never while somebody is being evaluated. Mechanisms:
+[chapter 2](02-cql-and-authoring.md) (CQL + authoring), [chapter 3](03-compiler-and-elm.md)
+(translator + ELM).
+
+```mermaid
+sequenceDiagram
+  autonumber
+  actor Au as Author
+  participant M as Measures API
+  participant AI as AI draft (assistive)
+  participant T as Translator (CQL→ELM)
+  participant Eng as Engine
+  participant Cat as Measure catalog
+  Au->>M: POST /api/measures — a Draft
+  opt draft from policy text
+    Au->>M: POST /api/measures/:id/ai/draft-spec
+    M->>AI: policy text (no compliance determinations allowed)
+    AI-->>Au: draft spec JSON — review banner, human edits before save
+  end
+  Au->>M: edit CQL, then POST /api/measures/compile
+  M->>T: compile (UCUM-validated quantities)
+  T-->>Au: ELM — or diagnostics, which are the authoring gate
+  Au->>M: save CQL + test fixtures, validate
+  M->>Eng: run fixtures against the compiled ELM
+  Eng-->>M: fixture outcomes (all five statuses exercised)
+  Au->>M: GET /api/measures/:id/activation-readiness
+  Au->>M: POST /api/measures/:id/approve — a human decision, always
+  Cat-->>Au: measure Active — the next run picks it up
+  Note over T,Eng: The 17 committed libraries compile at BUILD time<br/>(pnpm compile-measures); CI refuses a tree where the committed<br/>ELM is not what the CQL produces. Nothing compiles during a run.
+```
+
+The AI lane is the same shape as S3: it can draft a spec or CQL, it cannot approve, activate, or
+decide anything — activation is a gated human action with an audit row.
