@@ -31,6 +31,14 @@ for the shim (the native Go port; the diff pulls in `@typescript/typescript-darw
 and **6.0.3** for the frontend. Merging both would put the repository on three TypeScript majors at
 once, with `backend-ts` on 5 and no updater that will ever propose its half.
 
+**The same defect found a third time, and this one failed loudly.** After the grouping landed,
+Dependabot's next round proposed `react` 19.2.4 → 19.2.8 while leaving `react-dom` at 19.2.4. React
+refuses to start — *"Incompatible React versions: the react and react-dom packages must have the exact
+same version"* — and all 35 frontend test files failed at **collection**, not on an assertion. Same
+defect as the `eslint-config-next` split: an exact-pinned pair moved by half. The difference is
+instructive: this one is unmissable, whereas the eslint-config-next split would have merged green.
+A `react` group now covers `react`, `react-dom`, `@types/react` and `@types/react-dom`.
+
 **#426 and the durable fix.** The group PR wanted to move `eslint-config-next` alone, and `next` +
 `eslint-config-next` are the only two exact-pinned frontend dependencies, deliberately pinned to the
 same version. Merging #429 first resolved it in the right direction. To stop it recurring,
