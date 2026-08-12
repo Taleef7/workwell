@@ -102,3 +102,46 @@ the official executor or inferred from status — the one fact a consumer cannot
 the numbers. `mode=preview` deliberately returns **501 on a WebChart-configured stack**: the
 preview composes a synthetic bundle, and reporting demo playback as an evaluation of a live
 tenant would be a lie (ADR-061).
+
+## S3 — A flagged person, worked by an operator
+
+From an overdue outcome to a resolved case, with the AI lane shown honestly: assistive text with
+a deterministic fallback, never a decision. Mechanisms: [chapter 1](01-big-picture.md) (cases,
+worklist), [chapter 6](06-data-and-databases.md) (the idempotent upsert),
+`docs/AI_GUARDRAILS.md` (the non-negotiable rule).
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant Pipe as Run pipeline
+  participant DB as Stores + audit
+  actor CM as Case manager
+  participant API as Cases API
+  participant AI as AI assist (OpenAI)
+  participant FB as Deterministic fallback
+  participant Ch as Outreach channel
+  Pipe->>DB: OVERDUE outcome → case OPEN (CASE_CREATED audit)
+  CM->>API: GET /api/cases — the worklist
+  CM->>API: GET /api/cases/:id — evidence, why_flagged, timeline
+  CM->>API: POST /api/cases/:id/ai/explain
+  API->>AI: evidence JSON, fenced + nonce-marked (untrusted data, never instructions)
+  alt AI available
+    AI-->>API: 2–3 plain-English sentences (assistive only)
+  else AI unavailable
+    API->>FB: derive from why_flagged + expressionResults
+    FB-->>API: deterministic explanation, labeled fallback-rules
+  end
+  API->>DB: AI_CASE_EXPLANATION_GENERATED audit
+  CM->>API: GET …/actions/outreach/preview, then POST …/actions/outreach
+  API->>Ch: send via configured channel (simulated by default)
+  API->>DB: case_action + audit event
+  Ch-->>API: delivery status → POST …/actions/outreach/delivery
+  CM->>API: POST /api/cases/:id/rerun-to-verify
+  API->>Pipe: re-evaluate this subject now
+  Pipe->>DB: COMPLIANT → case RESOLVED (AUTO_RESOLVED) + CASE_RESOLVED audit
+```
+
+Two invariants worth reading off the lanes. Every mutating arrow into `API` produces a matching
+arrow into `DB` — no state change without an audit row. And the `AI` lane never touches `DB`
+except to log that it spoke: compliance state is authored by the engine alone, and a human
+closure (`closed_by` set) is never reopened by a later run.
