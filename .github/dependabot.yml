@@ -108,6 +108,19 @@ updates:
         patterns:
           - next
           - eslint-config-next
+      # Same shape, found the same way. Dependabot proposed `react` 19.2.4 -> 19.2.8 while leaving
+      # `react-dom` at 19.2.4, and React refuses to start: "Incompatible React versions: the react
+      # and react-dom packages must have the exact same version." All 35 frontend test files failed
+      # at collection. That one at least fails loudly — the eslint-config-next split above would
+      # have merged green — but it is the same defect, an exact-pinned pair moved by half.
+      # The `@types/*` packages ride along so the types cannot drift from the runtime either.
+      react:
+        applies-to: version-updates
+        patterns:
+          - react
+          - react-dom
+          - "@types/react"
+          - "@types/react-dom"
       # Declared AFTER `nextjs` deliberately. Dependabot assigns a dependency to the first
       # group whose patterns match, so a broad dependency-type group listed first would
       # swallow `eslint-config-next` (a devDependency) before the pair could claim it.
