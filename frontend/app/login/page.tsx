@@ -3,7 +3,6 @@
 import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Fraunces } from "next/font/google";
 import {
   ArrowRight,
   BadgeCheck,
@@ -20,8 +19,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/components/auth-provider";
 import { DEMO_EMAIL, DEMO_PASSWORD, signInWithCredentials } from "@/lib/auth/demo-login";
-
-const fraunces = Fraunces({ subsets: ["latin"], weight: ["600", "700"] });
+import { fraunces } from "@/app/fonts";
 
 const demoMode = process.env.NEXT_PUBLIC_DEMO_MODE === "true";
 
