@@ -177,7 +177,7 @@ sequenceDiagram
   Au->>M: GET /api/measures/:id/activation-readiness
   Au->>M: POST /api/measures/:id/approve — a human decision, always
   Cat-->>Au: measure Active — the next run picks it up
-  Note over T,Eng: The 17 committed libraries compile at BUILD time<br/>(pnpm compile-measures); CI refuses a tree where the committed<br/>ELM is not what the CQL produces. Nothing compiles during a run.
+  Note over T,Eng: The 17 measure libraries (+FHIRHelpers) compile at BUILD time<br/>(pnpm compile-measures); CI refuses a tree where the committed<br/>ELM is not what the CQL produces. Nothing compiles during a run.
 ```
 
 The AI lane is the same shape as S3: it can draft a spec or CQL, it cannot approve, activate, or
