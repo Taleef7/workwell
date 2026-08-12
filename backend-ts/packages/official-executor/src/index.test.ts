@@ -104,6 +104,11 @@ test("buildValueSetCache emits a failed expansion EMPTY-but-PRESENT rather than 
 });
 
 test("normalizePeriodEnd fixes the fqm#371 date-only start-of-day parse, and only that", () => {
+  // This pins the string we PRODUCE. It is not a claim about the instant fqm ends up evaluating:
+  // fqm 1.8.5 parses it with a format carrying no fractional-second token, so the `.999` is dropped
+  // on arrival and the effective boundary is `23:59:59.000Z` (measured; upstream #376). The docblock
+  // on normalizePeriodEnd carries the detail, including why this function is deleted rather than kept
+  // once fqm#372 lands.
   assert.equal(normalizePeriodEnd("2026-12-31"), "2026-12-31T23:59:59.999Z");
   const alreadyTimed = "2026-12-31T18:00:00.000Z";
   assert.equal(normalizePeriodEnd(alreadyTimed), alreadyTimed, "an explicit instant must be left alone");

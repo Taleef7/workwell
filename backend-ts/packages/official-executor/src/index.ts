@@ -214,8 +214,20 @@ export async function buildValueSetCache(
 /**
  * fqm-execution 1.8.5 parses a **date-only** `measurementPeriodEnd` as START-of-day, silently dropping
  * everything that happened on the last day of the period (upstream: projecttacoma/fqm-execution#371,
- * filed by this project 2026-07-15 and maintainer-confirmed). Normalizing to end-of-day is what makes
- * the official test cases pass — without it the CMS125 MADiE deck scores 64/66.
+ * filed by this project 2026-07-15 and maintainer-confirmed; fix proposed in #372). Normalizing to
+ * end-of-day is what makes the official test cases pass — without it the CMS125 MADiE deck scores 64/66.
+ *
+ * **What this actually achieves is `23:59:59.000Z`, not `.999`**, and the difference is worth writing
+ * down rather than leaving to be discovered. fqm parses the string we hand it with
+ * `moment.defaultFormatUtc` — `YYYY-MM-DDTHH:mm:ss[Z]`, which carries no fractional-second token — so
+ * our milliseconds are dropped on arrival (measured; upstream #376). The `.999` is therefore aspirational
+ * today and becomes real when #376 lands. The MADiE deck passes because its boundary Procedure sits at
+ * exactly `23:59:59Z`; an event at `23:59:59.500Z` would still be read as outside the period.
+ *
+ * **Delete this function when #372 merges, do not keep it.** After that fix a bare `2026-12-31` resolves
+ * to the full `.999` inside fqm, whereas the string this produces is not date-only, bypasses the new
+ * branch, and stays truncated at `.000` — so keeping the workaround would leave us a millisecond short
+ * of the behaviour the upstream fix provides.
  */
 export function normalizePeriodEnd(periodEnd: string): string {
   return /^\d{4}-\d{2}-\d{2}$/.test(periodEnd) ? `${periodEnd}T23:59:59.999Z` : periodEnd;
