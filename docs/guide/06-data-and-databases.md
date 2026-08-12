@@ -5,7 +5,8 @@
 
 Two questions get answered here. Where does patient data come from before the engine sees it — there
 are four ways in — and what is stored where afterwards, across the three databases this system
-touches.
+touches. The ingress-to-persistence order is drawn as a sequence in
+[chapter 10, S1 and S2](10-scenarios.md).
 
 ## The four ways data enters the engine
 

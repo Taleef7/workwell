@@ -7,7 +7,8 @@ There are two clocks in this system. One runs on a developer machine, where CQL 
 into ELM and the result is committed to git by hand. The other runs in the server when a request
 arrives, where nothing is translated and nothing is compiled — an interpreter walks a tree that is
 already sitting in the repository. Every confusing question about "where does the compiling happen"
-dissolves once the two clocks are kept apart, so this chapter starts there.
+dissolves once the two clocks are kept apart, so this chapter starts there. Where compilation sits
+in the authoring flow: [chapter 10, S4](10-scenarios.md).
 
 Note the first clock precisely: **a person runs it, not CI.** No workflow invokes
 `compile-measures`, so the committed ELM is only as current as the last time somebody regenerated

@@ -23,6 +23,7 @@ specific question answered:
 | Where SQL fits — all three places, including CQL→SQL | [7. SQL](07-sql-and-the-bridge.md) |
 | What the two npm packages do and refuse to do | [8. The npm packages](08-packages.md) |
 | Current state, the numbers, the gaps, what is next | [9. State and roadmap](09-state-and-roadmap.md) |
+| The flows in time order — run, WebChart end-to-end, cases, authoring, standards loop, MCP | [10. Scenarios](10-scenarios.md) |
 
 Two topics deliberately have no chapter of their own: **exports** split by audience (the standards
 documents are in chapter 5, the product outputs in chapter 1, the import direction in chapter 6),
@@ -35,54 +36,59 @@ Worth reading last rather than first. Each cluster names the chapter that explai
 
 ```mermaid
 flowchart TB
-  subgraph BUILD["BUILD TIME - happens once, output committed to git - chapters 2, 3 and 4"]
+  subgraph ONCE["① BUILD TIME — happens once, output committed to git — chapters 2, 3 and 4"]
     direction LR
-    C1["Our 17 CQL files, through the HL7 translator, into committed ELM trees"]
+    C1["Our 17 CQL libraries, through the HL7 translator, into committed ELM trees"]
     V1["CMS content at a pinned commit, reduced and checksummed, gated on 410 of 410"]
   end
-  subgraph DATA["DATA IN - chapter 6"]
-    direction LR
-    D1["WebChart, read over SQL and turned into FHIR"]
-    D2["Synthetic roster, 150 people"]
-    D3["A quality report from another system"]
+  subgraph EVERYRUN["EVERY RUN — read top to bottom, in time order"]
+    direction TB
+    subgraph DATA["② DATA IN — chapter 6"]
+      direction LR
+      D1["WebChart, read over SQL and turned into FHIR"]
+      D2["Synthetic roster, 150 people"]
+      D3["A quality report from another system"]
+    end
+    subgraph PREP["③ PREPARATION — chapters 4 and 5"]
+      direction LR
+      P1["One FHIR record per person"] --> P2["Resolve the code lists"] --> P3["Decide the compliance period"]
+    end
+    subgraph RUNBOX["④ EVALUATION, routed per measure — chapter 4"]
+      direction LR
+      R1["12 of 14: our engine walks the trees built at build time"]
+      R2["2 of 14: the reference calculator runs the CMS files"]
+    end
+    subgraph SAVE["⑤ PERSISTENCE — chapter 6"]
+      direction LR
+      S1["Outcome plus every rule value"] --> S2["Case, keyed so it cannot duplicate"] --> S3["Audit row"] --> S4["Monthly figures"]
+    end
+    subgraph OUTBOX["⑥ WHAT COMES OUT — chapters 1 and 5"]
+      direction LR
+      O1["Dashboard, worklist, Studio"]
+      O2["Versioned API for MIE"]
+      O3["Spreadsheets"]
+      O4["FHIR result and two quality report formats"]
+      O5["Audit pack"]
+    end
+    DATA ==> PREP
+    PREP ==> RUNBOX
+    RUNBOX ==> SAVE
+    SAVE ==> OUTBOX
   end
-  subgraph PREP["PREPARATION - chapters 4 and 5"]
-    direction LR
-    P1["One FHIR record per person"] --> P2["Resolve the code lists"] --> P3["Decide the compliance period"]
-  end
-  subgraph RUNBOX["EVALUATION, routed per measure - chapter 4"]
-    direction LR
-    R1["12 of 14: our engine walks the trees built at build time"]
-    R2["2 of 14: the reference calculator runs the CMS files"]
-  end
-  subgraph SAVE["PERSISTENCE - chapter 6"]
-    direction LR
-    S1["Outcome plus every rule value"] --> S2["Case, keyed so it cannot duplicate"] --> S3["Audit row"] --> S4["Monthly figures"]
-  end
-  subgraph OUTBOX["WHAT COMES OUT - chapters 1 and 5"]
-    direction LR
-    O1["Dashboard, worklist, Studio"]
-    O2["Versioned API for MIE"]
-    O3["Spreadsheets"]
-    O4["FHIR result and two quality report formats"]
-    O5["Audit pack"]
-  end
-  subgraph SQLPATH["ALONGSIDE - the CQL to SQL path - chapter 7"]
+  subgraph SQLPATH["ALONGSIDE — the CQL to SQL path — chapter 7"]
     direction LR
     G1["The same rule description"] --> G2["generates committed SQL"] --> G3["that runs in WebChart's database"]
   end
-  BUILD ==> PREP
-  DATA ==> PREP
-  PREP ==> RUNBOX ==> SAVE ==> OUTBOX
+  ONCE ==>|"committed artifacts, ready before any run starts"| EVERYRUN
   RUNBOX -. "differentially tested against" .-> SQLPATH
 ```
 
-Read it as a spine with two things feeding the top. Build time is the only place anything is
-compiled or fetched, and both of its outputs are committed artifacts — which is why evaluation can
-walk trees rather than build them. The lane at the bottom is the SQL executor, dotted rather than
-solid because it is real and checked against the engine but deliberately not connected to the
-application; whether it becomes solid is one of the two open decisions in
-[chapter 9](09-state-and-roadmap.md).
+Read it top to bottom: stage ① happens once and its outputs are committed to git; everything
+under "EVERY RUN" happens, in that order, each time anybody is evaluated. The lane at the bottom
+is the SQL executor, dotted rather than solid because it is real and checked against the engine
+but deliberately not connected to the application; whether it becomes solid is one of the two
+open decisions in [chapter 9](09-state-and-roadmap.md). For the same flows drawn as *sequences* —
+who calls what, in what order — see [chapter 10](10-scenarios.md).
 
 ## If you remember five things
 

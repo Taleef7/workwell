@@ -8,6 +8,7 @@ standard reporting artifacts. WebChart is the data source and the eventual consu
 the thing that turns "here is a population" into "here is who is non-compliant, and here is the
 per-rule evidence for why." It runs both our own occupational measures and CMS's published ones —
 the published ones unmodified, on the reference calculator, gated by their authors' own test cases.
+The case and worklist flow is drawn as a sequence in [chapter 10, S3](10-scenarios.md).
 
 ```mermaid
 flowchart TB
