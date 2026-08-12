@@ -1,5 +1,33 @@
 # Journal
 
+## 2026-08-12 — CI now proves the committed ELM is what the CQL produces (#410)
+
+The gap chapter 3 documented as a manual prerequisite is closed: the backend CI job recompiles all
+17 measures (+FHIRHelpers) after typecheck and fails on any difference from the committed output.
+Edit a `.cql`, forget to regenerate, and CI now says so — instead of staying green while the
+deployed measure runs the last-compiled logic. ADR-040's sentence, one layer up, finally with a
+guard.
+
+**The pre-wiring checks the issue demanded, all run before a line of YAML.** (1) Determinism:
+`compile-measures` twice on a clean tree — byte-identical, ~9 s per run, so the check is sound and
+cheap enough to live in the existing backend job (fail-fast between typecheck and the long suite)
+rather than paying a second install in its own job. (2) The committed tree is in sync today, so the
+gate lands green. (3) No double-report: the `official-cases` job's "reproducible from its pin" gate
+covers the VENDORED CMS artifacts; this covers the AUTHORED measures, which that gate never sees.
+
+**Mutation-checking changed the shape of the fix, which is why it happens before wiring.** A version
+bump in one measure produced a NEW `.elm.json` — an *untracked* file, which `git diff --exit-code`
+(the issue's sketched command) silently ignores. The landed check does `git add` on the output paths
+first and diffs the index, so new files fail too. It also covers all THREE outputs the script
+writes, not just `elm/`: the compiler regenerates `src/measure/resources/cql-resources.json`
+(the bundled translator resources) on every run, and the issue's sketch missed it. Both are the
+vacuous-guard shape — a check narrower than the claim it gets cited for — caught this time before
+the guard shipped rather than after.
+
+Guide chapters 3 and 9 updated; the chapter 9 gap entry stays struck-through rather than deleted,
+because "found by review on the documentation PR that wrote the guarantee down as though it
+existed" is the provenance worth keeping.
+
 ## 2026-08-12 — the fonts are self-hosted, and a Google outage can no longer fail a deploy (#453)
 
 `next/font/google` downloads font binaries at build time, which made fonts.gstatic.com a hard build
@@ -56,6 +84,7 @@ entrypoint of it, `latest` included, checked in `node_modules` — still returns
 currently fixes it: bumping workers-types to 4.20260702.1 changes nothing. So `backend-ts` stays on
 `^22` deliberately — its types lag its runtime, but they compile — and the conflict is recorded on
 the issue rather than papered over with 50 call-site casts.
+
 
 ## 2026-08-12 — the action majors are finished, and every GitHub Action in the repo is current
 

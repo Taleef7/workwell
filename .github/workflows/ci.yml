@@ -132,6 +132,22 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Typecheck
         run: pnpm typecheck
+      # Edit a .cql, forget to regenerate, and the tests stay green against the COMMITTED ELM while
+      # the measure that deploys is the one last compiled — a silent stale-input path, the ADR-040
+      # class one layer up (#410). Recompiling here and failing on any difference closes it. Sound
+      # because the compiler is byte-deterministic: measured for ADR-064, re-measured when this
+      # landed (two consecutive runs, byte-identical, ~9 s). The `git add` before the diff is
+      # load-bearing: a NEW output file (a version bump writes a fresh .elm.json) is untracked, and
+      # `git diff` alone ignores untracked files — mutation-checked both ways before wiring. The
+      # paths cover ALL THREE outputs the script writes: the ELM, its import index, and the bundled
+      # translator resources (cql-resources.json). The vendored CMS artifacts are covered separately
+      # by the official-cases job's "reproducible from its pin" gate; this covers the AUTHORED
+      # measures, which that gate does not see.
+      - name: The committed ELM is what this CQL produces (#410)
+        run: |
+          pnpm compile-measures
+          git add -A -- src/engine/cql/elm src/measure/resources/cql-resources.json
+          git diff --cached --exit-code --stat -- src/engine/cql/elm src/measure/resources/cql-resources.json
       - name: Test (SQLite floor + Postgres ceiling)
         env:
           WORKWELL_TEST_PG_URL: postgres://workwell:workwell@localhost:5432/workwell
