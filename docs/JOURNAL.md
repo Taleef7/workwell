@@ -37,6 +37,18 @@ either way, which the 18-identical-files result demonstrates) — and the sideca
 its platform-independent form. The claim "byte-deterministic" was true per-machine and false
 across machines, and only the gate itself could tell the difference.
 
+**Codex's review then found the third gap in the same guard, and the repository already contained
+its proof.** The compiler only ever WRITES: a committed `.elm.json` the current CQL no longer
+produces — a deleted or version-bumped library — is touched by nothing, stages no deletion, and
+passes forever. Two such orphans were already committed (`BreastCancerScreeningCQL-1.0.0`,
+`DiabetesHbA1cPoorControlCQL-1.0.0` — superseded by 2.0.0s, absent from the generated index,
+loadable by nothing in the runtime; chapter 3's "a few measures keep two versions" was, it turns
+out, describing them). The gate now `rm`s the generated directory before recompiling, which turns
+an orphan into a staged deletion; verified to fail on exactly those two files before they were
+deleted, and to pass after. Three guard-scope defects in one small check — untracked additions,
+embedded line endings, orphaned deletions — each found by a different instrument (mutation, the
+clean runner, review), none by re-reading the code.
+
 Guide chapters 3 and 9 updated; the chapter 9 gap entry stays struck-through rather than deleted,
 because "found by review on the documentation PR that wrote the guarantee down as though it
 existed" is the provenance worth keeping.

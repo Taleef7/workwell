@@ -32,7 +32,7 @@ flowchart LR
   end
   subgraph RT["RUN TIME - per request, in the worker"]
     direction TB
-    R1["The committed ELM: 19 libraries plus FHIRHelpers, 1.3 MB"]
+    R1["The committed ELM: 17 libraries plus FHIRHelpers, 1.2 MB"]
     R2["cql-execution interprets the tree. Nothing is translated. Nothing is compiled."]
     R1 --> R2
   end
@@ -68,8 +68,12 @@ writing a parser means our reading of the language cannot quietly drift from eve
    conformance harness.
 
 **The output is committed.** `pnpm compile-measures` writes one `.elm.json` per library into
-`backend-ts/src/engine/cql/elm/` — 19 libraries (a few measures keep two versions) plus FHIRHelpers,
-1.3 MB in total — and regenerates `index.ts`, a static import index. That index is why the running
+`backend-ts/src/engine/cql/elm/` — 17 libraries plus FHIRHelpers, 1.2 MB in total — and regenerates
+`index.ts`, a static import index. (Until #410's gate landed, the directory also carried two
+orphaned trees from superseded library versions that nothing imported — "a few measures keep two
+versions" in an earlier revision of this chapter was, in fact, those orphans. The gate now cleans
+the directory before recompiling, so a committed tree the current CQL no longer produces fails CI
+as a staged deletion.) That index is why the running
 server never reads a file from disk to load a measure: the ELM is bundled into the JavaScript, the
 worker stays portable to environments with no filesystem, and a measure cannot go missing at runtime
 because of a deployment mistake. A compiled measure changes in a pull request diff like any other
