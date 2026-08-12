@@ -6,7 +6,8 @@
 CQL — Clinical Quality Language — is HL7's language for writing clinical logic that a machine can
 execute and a clinician can read. CMS writes its quality measures in it. So do we, for the
 occupational measures nobody else publishes. This chapter reads a real measure line by line, then
-covers the three ways a measure enters this system.
+covers the three ways a measure enters this system. The authoring loop is drawn as a sequence in
+[chapter 10, S4](10-scenarios.md).
 
 ## Reading a measure
 

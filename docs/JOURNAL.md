@@ -21,6 +21,55 @@ since) for the profile read model — and is **never** an AI prediction (`docs/A
 demonstration run so it does not evaporate ([#461](https://github.com/Taleef7/workwell/issues/461)).
 Nothing was built, nothing is scheduled, and every proposal awaits owner review.
 
+## 2026-08-12 — the guide gets a scenarios chapter, a chronological one-pager, and a numbers audit
+
+Owner review of the documentation asked for three things: sequence diagrams per user flow, a
+one-page overview whose layout actually expresses time order, and every number verified. All
+three land in one PR; the product-shaped ideas from the same review are deliberately NOT built
+here — they become written proposals in a follow-up PR, per the approved design
+(`docs/archive/superpowers/specs/2026-08-12-guide-scenarios-and-feature-proposals-design.md`).
+
+**Chapter 10 exists: six sequence diagrams, the guide's first.** The 21 prior diagrams are 20
+flowcharts and a timeline — structure and history, never sequence. The selection criterion is stated in the chapter and is
+the reason the set is six and not sixteen: a flow earns a sequence diagram when the *order of
+handoffs* is the content. S1 a run (scheduled or manual — one pipeline after the trigger), S2
+WebChart end-to-end (SMART auth → FHIR reads → normalization → evaluation → the versioned
+compliance API, with the 404-not-empty-200 and preview-501 semantics drawn), S3 a flagged
+person worked by an operator (the AI lane shown with its deterministic fallback, never touching
+compliance state), S4 authoring draft-to-active (the build-time/run-time compile split as a
+Note), S5 the standards loop (import → identity grouping → finalize refusal gate → three export
+formats), S6 an MCP consumer (SSE handshake, role gate at dispatch). Admin CRUD flows are
+excluded by the criterion and the chapter says why; the auth/session flow is deferred, cheap to
+add if a security review wants it. Every route path, audit event name, disposition list and
+count in the diagrams was verified against the tree before drawing, and spec reviewers
+re-verified independently (the S6 role-gate claim traced to `tools.ts` CM/ADMIN and
+`dispatch.ts` enforcement).
+
+**The README one-pager now reads chronologically.** The old diagram put BUILD TIME and DATA IN
+side by side at the top — two stages that happen at different times, drawn as peers, which was
+the owner's exact critique. Now: ① BUILD TIME (happens once, output committed) sits alone above
+an "EVERY RUN" band whose five stages ②–⑥ chain strictly top to bottom; the CQL→SQL lane stays
+a dotted side-track. Node wording is untouched except "17 CQL files" → "17 CQL libraries".
+**A sweep of the other 20 diagrams found zero further offenders** — chapter 3 already carried
+the explicit BUILD/RUN split, and every other time-ordered diagram reads in true order; the
+verdict table is at `docs/evidence/GUIDE_DIAGRAM_SWEEP_2026-08-12.md`. The critique was about one
+diagram, and one diagram is what changed.
+
+**The numbers audit corrected five things and verified everything else.** Corrections:
+chapter 6's store-interface count ("eleven more" → "twelve more"; the factory holds 15);
+chapter 1's "nine artifacts in total" → "eight", matching its own enumeration (the MAT export
+is a measure *definition*, not a run output, so the count moved rather than the list growing);
+chapter 3's node-type count re-anchored from an unlabeled 26 — true only of HepatitisBSeries —
+to 29 on the audiogram, the measure the chapter actually walks, with the node-family table's
+example column generalized (the audiogram carries `LessOrEqual` and `IntervalTypeSpecifier`,
+not `Less`/`First`/`Interval` by name, so attributing family examples to it was the blocker);
+chapter 10's S4 note tightened to "17 measure libraries (+FHIRHelpers)"; and chapter 6's
+undated 1,940-test count destabilized to point at chapter 9, which owns it dated. Verified and
+left alone: 14 registry measures / 12 authored / 2 routed, the 410/410 MADiE split and its
+per-measure addends, 150-person roster, 13 MCP tools, 18 committed ELM files, 22 tables, the
+conformance and cross-engine figures, and chapter 9's dated history — which stays historical by
+the audit's own rule.
+
 ## 2026-08-12 — CI now proves the committed ELM is what the CQL produces (#410)
 
 The gap chapter 3 documented as a manual prerequisite is closed: the backend CI job recompiles all
