@@ -182,3 +182,43 @@ sequenceDiagram
 
 The AI lane is the same shape as S3: it can draft a spec or CQL, it cannot approve, activate, or
 decide anything — activation is a gated human action with an audit row.
+
+## S5 — The standards loop: import, evaluate, export
+
+Another system's QRDA Category I documents in; our calculation; standard documents out. This is
+the interoperability bridge (locked decision 4) — kept at 0 findings against the HL7 base
+ruler, not a certification path. Mechanisms: [chapter 5](05-fhir.md) (the standards documents),
+[chapter 4](04-engine-and-routing.md) (evaluation).
+
+```mermaid
+sequenceDiagram
+  autonumber
+  actor Ext as External system
+  participant R as Runs API
+  participant Id as Identity grouping
+  participant Imp as QRDA I importer
+  participant Eng as Engine (unchanged)
+  participant DB as Stores
+  Ext->>R: POST /api/runs → a run to import into
+  Ext->>R: POST /api/runs/:id/import {measureId, qrda1: [documents]}
+  R->>Id: group documents into people (identifier-only)
+  Note over Id: identity is cross-document — a per-document import<br/>over-reports the population; demographic conflicts are<br/>reported, never silently resolved
+  Id-->>R: one person per group
+  loop per person
+    R->>Imp: parse + translate the QDM entries
+    Imp-->>Eng: a FHIR bundle (mapped to what the artifact's ELM retrieves)
+    Eng-->>DB: outcome + qrda1Import evidence
+  end
+  Ext->>R: POST /api/runs/:id/finalize
+  alt any outcome lacks qrda1Import evidence
+    R-->>Ext: 409 — a population run is finalized by its own pipeline, not from outside
+  else all outcomes are import-driven
+    R-->>Ext: 200 — run COMPLETED, exportable
+  end
+  Ext->>R: GET …/measure-report | …/qrda1 | …/qrda
+  R-->>Ext: FHIR MeasureReport / QRDA I / QRDA III
+```
+
+The finalize gate is the interesting arrow: it refuses to mark a run COMPLETED unless every
+outcome came from an imported document, because finalizing a partially-imported population run
+from outside would make a partial roster exportable as a finished result.
