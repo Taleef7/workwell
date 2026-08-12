@@ -100,6 +100,7 @@ cost ~89k tokens per session until 2026-07-29, whether or not any of it was rele
   `docs/archive/DECISIONS_ARCHIVE.md`. Every heading + a one-line pointer stays in `DECISIONS.md`, so an
   `ADR-0NN` reference anywhere still resolves and nothing was deleted.
 - `docs/ROADMAP_2026-08-04.md` — **the APPROVED active plan** (owner decisions are in context via LOCKED_DECISIONS §4). Supersedes `docs/archive/ROADMAP_2026-07-24.md`, which is kept only for its §7 target architecture and the reasoning that got us here — **do not act on it**
+- `docs/PROPOSALS_2026-08.md` — three feature proposals awaiting owner/MIE review (encounter-close quality check, "not seen in a while" view, deterministic next-due date). **None is approved or scheduled** — read it to know an idea has been written down, never as a work queue
 - `docs/DEPLOY.md` — MIE Create-a-Container + Neon setup, env vars, rollback → prefer the `deploy` skill
 - `docs/ARCHITECTURE.md` — system architecture + boundaries (the engine boundary is enforced mechanically by PR-1's containment test and PR-4's five boundary tests, so CI catches drift)
 - `docs/DATA_MODEL.md` — §1–3: scope, core tables, full table schemas (derivable from `schema-pg.ts` / `schema.ts`)
