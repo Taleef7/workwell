@@ -73,7 +73,7 @@ Monthly numerator/denominator figures roll up at the end. [Chapter 6](06-data-an
 database and no compliance decision is ever made by a query. Three things are deliberately absent:
 the patient bundles we evaluated, any executable form of the measures, and the licensed code lists.
 
-**Stage 6 — what comes out.** Five kinds of output, nine artifacts in total. The dashboard and
+**Stage 6 — what comes out.** Five kinds of output, eight artifacts in total. The dashboard and
 worklist for daily use. A versioned compliance API for MIE's own code — one person, one measure,
 one answer, with a 404 rather than an empty success when no run covers the question
 ([`docs/COMPLIANCE_API.md`](../COMPLIANCE_API.md) is the contract). Spreadsheets for the
