@@ -8,8 +8,8 @@ three land in one PR; the product-shaped ideas from the same review are delibera
 here — they become written proposals in a follow-up PR, per the approved design
 (`docs/archive/superpowers/specs/2026-08-12-guide-scenarios-and-feature-proposals-design.md`).
 
-**Chapter 10 exists: six sequence diagrams, the guide's first.** All 21 prior diagrams are
-flowcharts — structure, never sequence. The selection criterion is stated in the chapter and is
+**Chapter 10 exists: six sequence diagrams, the guide's first.** The 21 prior diagrams are 20
+flowcharts and a timeline — structure and history, never sequence. The selection criterion is stated in the chapter and is
 the reason the set is six and not sixteen: a flow earns a sequence diagram when the *order of
 handoffs* is the content. S1 a run (scheduled or manual — one pipeline after the trigger), S2
 WebChart end-to-end (SMART auth → FHIR reads → normalization → evaluation → the versioned
@@ -31,7 +31,8 @@ an "EVERY RUN" band whose five stages ②–⑥ chain strictly top to bottom; th
 a dotted side-track. Node wording is untouched except "17 CQL files" → "17 CQL libraries".
 **A sweep of the other 20 diagrams found zero further offenders** — chapter 3 already carried
 the explicit BUILD/RUN split, and every other time-ordered diagram reads in true order; the
-verdict table is in the PR. The critique was about one diagram, and one diagram is what changed.
+verdict table is at `docs/evidence/GUIDE_DIAGRAM_SWEEP_2026-08-12.md`. The critique was about one
+diagram, and one diagram is what changed.
 
 **The numbers audit corrected five things and verified everything else.** Corrections:
 chapter 6's store-interface count ("eleven more" → "twelve more"; the factory holds 15);

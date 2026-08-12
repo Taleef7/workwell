@@ -25,10 +25,11 @@ specific question answered:
 | Current state, the numbers, the gaps, what is next | [9. State and roadmap](09-state-and-roadmap.md) |
 | The flows in time order — run, WebChart end-to-end, cases, authoring, standards loop, MCP | [10. Scenarios](10-scenarios.md) |
 
-Two topics deliberately have no chapter of their own: **exports** split by audience (the standards
+Three topics deliberately have no chapter of their own: **exports** split by audience (the standards
 documents are in chapter 5, the product outputs in chapter 1, the import direction in chapter 6),
-and **where to see things in the app**, which appears as a short section at the end of most
-chapters instead.
+**where to see things in the app**, which appears as a short section at the end of most
+chapters instead, and **MCP**, whose security boundary and tool posture live in
+[`docs/MCP.md`](../MCP.md).
 
 ## The whole thing on one page
 

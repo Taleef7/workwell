@@ -10,13 +10,15 @@ already sitting in the repository. Every confusing question about "where does th
 dissolves once the two clocks are kept apart, so this chapter starts there. Where compilation sits
 in the authoring flow: [chapter 10, S4](10-scenarios.md).
 
-Note the first clock precisely: **a person runs it, not CI.** No workflow invokes
-`compile-measures`, so the committed ELM is only as current as the last time somebody regenerated
-it. That is a real gap and it is named in [chapter 9](09-state-and-roadmap.md).
+Note the first clock precisely: **a person runs it, and CI re-runs it.** Regenerating the ELM is a
+deliberate act on a developer machine — nothing recompiles on deploy — but since #410 the backend CI
+job recompiles every measure and refuses a tree where the committed ELM differs from what the CQL
+produces, so "current as of the last time somebody remembered" is no longer a way the repository can
+end up. The mechanics of that gate are below.
 
 ```mermaid
 flowchart LR
-  subgraph BT["BUILD TIME - run by hand on a dev machine, never by CI. The output is committed to git."]
+  subgraph BT["BUILD TIME - run by hand on a dev machine, re-run by CI to prove the committed output is current. The output is committed to git."]
     direction TB
     B1["17 CQL files in backend-ts/measures"]
     B2["pnpm compile-measures"]
@@ -147,7 +149,8 @@ Three things follow from this that carry through the rest of the guide:
 
 ## The nodes, by name
 
-Counting the distinct node types in the audiogram measure gives 29. The common ones:
+Counting the distinct node types in the audiogram measure gives 29 (counting distinct `type` values
+across the library JSON — translator metadata such as `CqlToElmInfo` included). The common ones:
 
 | Node | What it is | Example |
 |---|---|---|

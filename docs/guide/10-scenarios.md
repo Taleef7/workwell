@@ -5,8 +5,8 @@ calls what, in which order, when a real person uses the system. Each scenario is
 diagram plus a short narrative, and links to the chapters that own the mechanisms it touches.
 The selection rule: a flow earns a diagram here when the *order of handoffs* is the content.
 Admin configuration screens (programs, scheduler settings, email provider) are deliberately
-absent — they are reads and writes with an audit row, and [chapter 6](06-data-and-databases.md)
-already covers them structurally.
+absent — they are reads and writes with an audit row, with no temporal story a sequence diagram
+would add.
 
 ## S1 — A run, scheduled or manual
 
@@ -27,10 +27,10 @@ sequenceDiagram
   participant Eng as Authored engine
   participant Off as Official executor
   participant DB as Postgres (runs, outcomes, cases, audit_events)
-  Op->>API: POST /api/runs (scope: programs / site / measure)
+  Op->>API: POST /api/runs/manual (scope: programs / site / measure)
   Note over Sch,Pipe: or: nightly tick — same pipeline from here on
-  API->>Pipe: execute (async scopes are queued and claimed)
-  Pipe->>DB: run row RUNNING + audit
+  API->>Pipe: execute (large scopes continue as a background promise; the response says RUNNING)
+  Pipe->>DB: run row RUNNING + run log
   Pipe->>Pipe: resolve roster + compliance period per measure
   loop each measure in scope
     Pipe->>Rt: which engine runs this measure?
@@ -61,7 +61,10 @@ timeline does.
 
 The measures — the ELM trees and the CMS artifacts alike — running against a real WebChart
 environment, and the answer being read back over the versioned API. This is the documented shape
-of the already-built live path (ADR-028 transport, ADR-057 normalization, ADR-061 API).
+of the already-built live path (ADR-028 transport, ADR-057 normalization, ADR-061 API). One
+configuration note: no deployed stack currently pairs the WebChart seam with official routing —
+staging, the WebChart-configured stack, leaves `WORKWELL_OFFICIAL_MEASURES` unset — so the diagram
+shows the mechanism end to end, not a currently-deployed pairing.
 Mechanisms: [chapter 5](05-fhir.md) (FHIR + the shim), [chapter 6](06-data-and-databases.md)
 (ingress), [chapter 4](04-engine-and-routing.md) (evaluation).
 
@@ -108,7 +111,7 @@ tenant would be a lie (ADR-061).
 From an overdue outcome to a resolved case, with the AI lane shown honestly: assistive text with
 a deterministic fallback, never a decision. Mechanisms: [chapter 1](01-big-picture.md) (cases,
 worklist), [chapter 6](06-data-and-databases.md) (the idempotent upsert),
-`docs/AI_GUARDRAILS.md` (the non-negotiable rule).
+[docs/AI_GUARDRAILS.md](../AI_GUARDRAILS.md) (the non-negotiable rule).
 
 ```mermaid
 sequenceDiagram
@@ -173,9 +176,10 @@ sequenceDiagram
   T-->>Au: ELM — or diagnostics, which are the authoring gate
   Au->>M: save CQL + test fixtures, validate
   M->>Eng: run fixtures against the compiled ELM
-  Eng-->>M: fixture outcomes (all five statuses exercised)
+  Eng-->>M: fixture outcomes (each fixture names its expected outcome)
   Au->>M: GET /api/measures/:id/activation-readiness
   Au->>M: POST /api/measures/:id/approve — a human decision, always
+  Au->>M: POST /api/measures/:id/status — Approved → Active
   Cat-->>Au: measure Active — the next run picks it up
   Note over T,Eng: The 17 measure libraries (+FHIRHelpers) compile at BUILD time<br/>(pnpm compile-measures); CI refuses a tree where the committed<br/>ELM is not what the CQL produces. Nothing compiles during a run.
 ```
@@ -226,8 +230,8 @@ from outside would make a partial roster exportable as a finished result.
 ## S6 — An AI client over MCP, read-only
 
 Claude Desktop (or any MCP client) talking to the worker's own MCP server. Everything is a read;
-the interesting ordering is the SSE handshake and the role gate. Mechanisms: `docs/MCP.md` (the
-security boundary), [chapter 1](01-big-picture.md) (where MCP sits).
+the interesting ordering is the SSE handshake and the role gate.
+Mechanisms: [docs/MCP.md](../MCP.md) (the security boundary and tool posture).
 
 ```mermaid
 sequenceDiagram
@@ -245,6 +249,7 @@ sequenceDiagram
   C->>T: tools/call — e.g. list_noncompliant
   T->>D: dispatch with auth context (actor, role)
   alt role gate refuses (e.g. check_compliance needs CM/ADMIN)
+    D->>DB: tool-call audit event (denied)
     D-->>C: refusal, no data
   else allowed
     D->>DB: read
