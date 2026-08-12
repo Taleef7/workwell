@@ -29,7 +29,7 @@ sequenceDiagram
   participant DB as Postgres (runs, outcomes, cases, audit_events)
   Op->>API: POST /api/runs/manual (scope: programs / site / measure)
   Note over Sch,Pipe: or: nightly tick — same pipeline from here on
-  API->>Pipe: execute (large scopes continue as a background promise; the response says RUNNING)
+  API->>Pipe: execute (large scopes continue as a background promise — the response says RUNNING)
   Pipe->>DB: run row RUNNING + run log
   Pipe->>Pipe: resolve roster + compliance period per measure
   loop each measure in scope
@@ -163,7 +163,6 @@ sequenceDiagram
   participant M as Measures API
   participant AI as AI draft (assistive)
   participant T as Translator (CQL→ELM)
-  participant Eng as Engine
   participant Cat as Measure catalog
   Au->>M: POST /api/measures — a Draft
   opt draft from policy text
@@ -171,17 +170,19 @@ sequenceDiagram
     M->>AI: policy text (no compliance determinations allowed)
     AI-->>Au: draft spec JSON — review banner, human edits before save
   end
-  Au->>M: edit CQL, then POST /api/measures/compile
+  Au->>M: edit CQL, then POST /api/measures/:id/cql/compile
   M->>T: compile (UCUM-validated quantities)
-  T-->>Au: ELM — or diagnostics, which are the authoring gate
-  Au->>M: save CQL + test fixtures, validate
-  M->>Eng: run fixtures against the compiled ELM
-  Eng-->>M: fixture outcomes (each fixture names its expected outcome)
+  T-->>M: ELM, or diagnostics
+  M->>Cat: persist CQL + compile status
+  M-->>Au: COMPILED / WARNINGS / ERROR — diagnostics, which are the authoring gate
+  Au->>M: save test fixtures, then validate
+  M->>M: validate fixtures — structural only (name, subject, a recognized expected outcome — no engine run)
   Au->>M: GET /api/measures/:id/activation-readiness
   Au->>M: POST /api/measures/:id/approve — a human decision, always
   Au->>M: POST /api/measures/:id/status — Approved → Active
-  Cat-->>Au: measure Active — the next run picks it up
-  Note over T,Eng: The 17 measure libraries (+FHIRHelpers) compile at BUILD time<br/>(pnpm compile-measures); CI refuses a tree where the committed<br/>ELM is not what the CQL produces. Nothing compiles during a run.
+  Cat-->>Au: measure Active in the catalog
+  Note over T,Cat: The 17 measure libraries (+FHIRHelpers) compile at BUILD time<br/>(pnpm compile-measures), and CI refuses a tree where the committed<br/>ELM is not what the CQL produces. Nothing compiles during a run.
+  Note over M,Cat: Active governs the catalog, not the run pipeline: population runs<br/>enumerate the build-time measure registry, and Studio compilation does<br/>not install ELM there. An authored measure joins runs when its CQL lands<br/>in the repo and compile-measures commits its ELM — the CI gate above.
 ```
 
 The AI lane is the same shape as S3: it can draft a spec or CQL, it cannot approve, activate, or
@@ -206,7 +207,7 @@ sequenceDiagram
   Ext->>R: POST /api/runs → a run to import into
   Ext->>R: POST /api/runs/:id/import {measureId, qrda1: [documents]}
   R->>Id: group documents into people (identifier-only)
-  Note over Id: identity is cross-document — a per-document import<br/>over-reports the population; demographic conflicts are<br/>reported, never silently resolved
+  Note over Id: identity is cross-document — a per-document import<br/>over-reports the population — demographic conflicts are<br/>reported, never silently resolved
   Id-->>R: one person per group
   loop per person
     R->>Imp: parse + translate the QDM entries
@@ -242,7 +243,7 @@ sequenceDiagram
   participant DB as Stores (read-only)
   C->>T: GET /sse — open the event stream
   T-->>C: event: endpoint → /mcp/message?sessionId=…
-  C->>T: POST initialize (202; result arrives over SSE)
+  C->>T: POST initialize (202 — result arrives over SSE)
   T-->>C: initialize result
   C->>T: tools/list
   T-->>C: 13 read-only tools
