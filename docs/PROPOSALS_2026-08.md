@@ -10,7 +10,8 @@ Each proposal names its open questions rather than answering them. Some of those
 shape of the feature, not just its polish; a proposal whose open questions were quietly resolved in the
 writing would be a design document pretending to be a sketch.
 
-Companion to the guide work of the same date, which documented existing behaviour and proposed nothing.
+Companion to the guide work of the same date (PR #457), which documented existing behaviour and proposed
+nothing.
 
 ---
 
@@ -36,14 +37,18 @@ ask where a number came from.
 
 Patient identity across the seam also exists: the WebChart transport (ADR-028) composes a per-patient
 bundle over the real FHIR contract (`backend-ts/src/engine/ingress/webchart/webchart-client.ts`), so a
-WebChart patient id is already a subject id WorkWell can be asked about.
+WebChart patient id maps onto a WorkWell subject id the API can be asked about. Note the namespace — the
+live directory persists subjects as `wc|<patientId>`
+(`backend-ts/src/engine/ingress/webchart/live-directory.ts:91`,
+`backend-ts/src/run/run-pipeline.ts:433`), and the compliance API looks up exactly that string, so a bare
+WebChart id is a 404 rather than an answer.
 
 ### What would have to be built
 
 Three distinct pieces, none of them a configuration change.
 
 1. **A trigger and a surface on the WebChart side.** Nothing in WorkWell can observe an encounter closing.
-   This is a WebChart-side hook or embedded view, which makes it MIE's change as much as ours.
+   This would require a WebChart-side change, which is MIE's to make.
 2. **A multi-measure variant of the question.** The v1 contract is deliberately one subject and one
    measure per request, with no cohort endpoint (`docs/COMPLIANCE_API.md`, "Limits, stated"). "All gaps
    for this patient" is a different response shape and a different performance profile, so it is a new
@@ -148,7 +153,8 @@ scope for this proposal in every variant of it.
 The inputs are already persisted. `evidence_json.why_flagged` carries `last_exam_date` and
 `compliance_window_days` for each outcome (`docs/DATA_MODEL_CONTRACTS.md` §5), and the window itself is
 measure configuration rather than a derived quantity — `complianceWindowDays` on the measure binding
-(`backend-ts/src/engine/synthetic/measure-bindings.ts:33`), 365 days for the audiogram, 820 for CMS125.
+(the field at `backend-ts/src/engine/synthetic/measure-bindings.ts:33`; 365 days for the audiogram at
+`:46`, 820 for CMS125 at `:49`).
 
 The arithmetic itself already exists twice, in two places that cannot see each other:
 
@@ -156,19 +162,24 @@ The arithmetic itself already exists twice, in two places that cannot see each o
   back to the evaluation period, and clamps a past date to today so outreach never renders a due-by date
   in the past.
 - `daysUntilDue` in `backend-ts/src/run/employee-profile.ts:154–164` computes window − days since last
-  exam for the employee profile read model, negative meaning overdue.
+  exam for the employee profile read model, negative meaning overdue. It is a **day count, not a date**,
+  and not even a function — an inline expression in an object literal (`:164`), so it is less reusable
+  than the private helper above rather than more.
 
 Cases carry a `nextAction` today, but it is an instruction string, not a date — `nextActionFor` returns
 text like "Schedule the mammogram before the due date"
-(`backend-ts/src/case/case-logic.ts:59–73`, column `next_action` in `backend-ts/src/stores/case-store.ts`).
+(`backend-ts/src/case/case-logic.ts:59–73`; the TS field is `nextAction` on the case record in
+`backend-ts/src/stores/case-store.ts`, backed by the `next_action` column at
+`backend-ts/src/stores/postgres/schema-pg.ts:80`).
 So there is no next-due *date* on a case, and the two computations above are private to their own callers.
 
 ### What would have to be built
 
 A single derived next-due date per outcome, computed from the same persisted evidence, surfaced where
 operators work — the worklist, the compliance API response, or both. The most useful part of the work may
-be consolidation rather than addition: two independent implementations of the same date can disagree, and
-today nothing would notice if they did. Any new persisted column is a schema change and therefore the
+be consolidation rather than addition: two independent expressions of the same underlying arithmetic —
+one producing a clamped date, the other a signed day count — can drift apart, and today nothing would
+notice if they did. Any new persisted column is a schema change and therefore the
 owner's; a computed-at-read-time field is not.
 
 ### Open questions

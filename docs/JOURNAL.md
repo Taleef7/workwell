@@ -2,8 +2,9 @@
 
 ## 2026-08-12 — three product ideas become written proposals, not code
 
-The 2026-08 feedback carried three product-shaped ideas, and per the design spec they are written up
-rather than built: `docs/PROPOSALS_2026-08.md` sketches each in one page — what it is, how it maps onto
+The 2026-08 feedback carried three product-shaped ideas, and they are written up rather than built —
+none is understood well enough yet for building to be the cheaper way to find out what it should be.
+`docs/PROPOSALS_2026-08.md` sketches each in one page — what it is, how it maps onto
 machinery that already exists, what would actually have to be built, and the questions still open.
 **P1**, an encounter-close quality check, leans on the compliance API (ADR-061), which already answers
 per-subject-per-measure and says where its numbers came from; the honest part is that `mode=preview`
@@ -13,8 +14,9 @@ check is a new live-composition path, not a flag flip ([#458](https://github.com
 today — and a decision about what "seen" means, since any-encounter and the measure's own qualifying
 encounter produce different lists ([#459](https://github.com/Taleef7/workwell/issues/459)).
 **P3**, a next-action due date, is arithmetic over evidence the engine already wrote — last exam plus
-the measure's configured window, which `case-outreach.ts` and `employee-profile.ts` each compute
-privately today — and is **never** an AI prediction (`docs/AI_GUARDRAILS.md`)
+the measure's configured window, which `case-outreach.ts` already computes privately as a clamped date
+for outreach templates while `employee-profile.ts` computes the related *day count* (window − days
+since) for the profile read model — and is **never** an AI prediction (`docs/AI_GUARDRAILS.md`)
 ([#460](https://github.com/Taleef7/workwell/issues/460)). A fourth issue names the live WebChart
 demonstration run so it does not evaporate ([#461](https://github.com/Taleef7/workwell/issues/461)).
 Nothing was built, nothing is scheduled, and every proposal awaits owner review.
