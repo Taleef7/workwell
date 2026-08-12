@@ -56,3 +56,49 @@ writes no case event, so a nightly run records one `RUN_COMPLETED`, not hundreds
 events. One honesty note: for asynchronous scopes the run *message* (e.g. the zero-in-IPP
 warning) exists only on the synchronous response; the run list does not carry it — the log
 timeline does.
+
+## S2 — WebChart end-to-end: from a live EHR to a compliance answer
+
+The measures — the ELM trees and the CMS artifacts alike — running against a real WebChart
+environment, and the answer being read back over the versioned API. This is the documented shape
+of the already-built live path (ADR-028 transport, ADR-057 normalization, ADR-061 API).
+Mechanisms: [chapter 5](05-fhir.md) (FHIR + the shim), [chapter 6](06-data-and-databases.md)
+(ingress), [chapter 4](04-engine-and-routing.md) (evaluation).
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant Pipe as Run pipeline / engine
+  participant TX as WebChart transport
+  participant WC as WebChart FHIR server
+  participant N as Normalization
+  participant DB as Postgres
+  actor MIE as API consumer (MIE)
+  participant CAPI as Compliance API (/api/v1)
+  Pipe->>TX: need this subject's record
+  TX->>WC: SMART Backend Services — signed JWT assertion
+  WC-->>TX: access token
+  loop per resource type
+    TX->>WC: GET /Patient, /Observation, /Procedure, …
+    WC-->>TX: FHIR resources
+  end
+  TX->>N: raw bundle
+  Note over N: derives us-core-sex from gender and the LOINC imaging<br/>Observation from a mammography Procedure — both tagged,<br/>both suppressed when the server supplies its own (ADR-057)
+  N-->>Pipe: one normalized FHIR record per person
+  Pipe->>Pipe: evaluate, routed per measure (see S1)
+  Pipe->>DB: outcome + evidence_json
+  MIE->>CAPI: GET /api/v1/compliance/{subject}/{measure}?mode=latest
+  CAPI->>DB: latest finalized-run outcome
+  alt nothing persisted for this subject
+    CAPI-->>MIE: 404 — "no run covered this subject" is never an empty 200
+  else outcome exists
+    CAPI-->>MIE: 200 with status, populations, populationsSource
+  end
+  CAPI->>DB: COMPLIANCE_API_READ audit event
+```
+
+The response's `populationsSource` field says whether the population booleans were measured by
+the official executor or inferred from status — the one fact a consumer cannot reconstruct from
+the numbers. `mode=preview` deliberately returns **501 on a WebChart-configured stack**: the
+preview composes a synthetic bundle, and reporting demo playback as an evaluation of a live
+tenant would be a lie (ADR-061).
