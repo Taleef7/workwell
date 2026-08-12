@@ -52,7 +52,13 @@ const rosterImmun = {
 };
 
 beforeEach(() => {
-  getWithHeaders.mockReset().mockResolvedValue(rosterImmun);
+  // Resolved on a MACROTASK, not immediately. An immediate resolve lets the fetch promise and the
+  // React commit land in the same tick often enough that a test awaiting the CALL rather than the
+  // RENDER passes locally and fails only on a loaded CI runner. The delay makes that gap deterministic,
+  // so this class of bug fails here instead of intermittently in CI. Verified both ways: with the
+  // delay in place, awaiting the call reproduces the exact CI error, and awaiting the element passes.
+  // Tests below that install their own mock resolve immediately and do not get this property.
+  getWithHeaders.mockReset().mockImplementation(() => new Promise((r) => setTimeout(() => r(rosterImmun), 40)));
   get.mockReset().mockResolvedValue([]);
   post.mockReset().mockResolvedValue({ runId: "run-9", status: "REQUESTED" });
   startTracking.mockReset();
@@ -66,8 +72,11 @@ describe("CompliancePage", () => {
   it("renders the panel's columns and a chip per cell", async () => {
     render(<CompliancePage />);
     expect(await screen.findByText("Individual Compliance Status")).toBeInTheDocument();
-    await waitFor(() => expect(getWithHeaders).toHaveBeenCalled());
-    expect(screen.getByRole("columnheader", { name: /MMR/ })).toBeInTheDocument();
+    // Wait for the RENDER, not for the fetch to have been called. `getWithHeaders` resolving is not
+    // the same event as React committing the resulting state, and a synchronous query in the gap
+    // between them reads the empty table — which is how this failed intermittently in CI while
+    // passing locally and on a less loaded runner.
+    expect(await screen.findByRole("columnheader", { name: /MMR/ })).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: /Varicella/ })).toBeInTheDocument();
     const row = within(screen.getByRole("table")).getByText("Ada Lovelace").closest("tr")!;
     expect(within(row).getByText("Compliant")).toBeInTheDocument();
@@ -87,8 +96,7 @@ describe("CompliancePage", () => {
 
   it("Recalculate triggers an ALL_PROGRAMS run and tracks it", async () => {
     render(<CompliancePage />);
-    await waitFor(() => expect(getWithHeaders).toHaveBeenCalled());
-    await userEvent.click(screen.getByRole("button", { name: /Recalculate/i }));
+    await userEvent.click(await screen.findByRole("button", { name: /Recalculate/i }));
     await waitFor(() => expect(post).toHaveBeenCalledWith("/api/runs/manual", { scopeType: "ALL_PROGRAMS" }));
     expect(startTracking).toHaveBeenCalledWith("run-9", "REQUESTED");
   });
@@ -100,8 +108,9 @@ describe("CompliancePage", () => {
       headers: new Headers({ "X-Total-Count": "200" })
     });
     const { rerender } = render(<CompliancePage />);
-    await waitFor(() => expect(getWithHeaders).toHaveBeenCalled());
-    await userEvent.click(screen.getByRole("button", { name: /next/i }));
+    // `next` is enabled off the X-Total-Count the fetch returns, so it is data-dependent: waiting for
+    // the call rather than the element could click a control the render had not produced yet.
+    await userEvent.click(await screen.findByRole("button", { name: /next/i }));
     await waitFor(() => expect(String(getWithHeaders.mock.calls.at(-1)?.[0])).toContain("page=2"));
 
     siteHolder.siteId = "Plant A"; // dashboard site selector changes externally
