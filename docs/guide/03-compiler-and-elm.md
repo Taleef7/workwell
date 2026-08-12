@@ -32,7 +32,7 @@ flowchart LR
   end
   subgraph RT["RUN TIME - per request, in the worker"]
     direction TB
-    R1["The committed ELM: 19 libraries plus FHIRHelpers, 1.3 MB"]
+    R1["The committed ELM: 17 libraries plus FHIRHelpers, 1.2 MB"]
     R2["cql-execution interprets the tree. Nothing is translated. Nothing is compiled."]
     R1 --> R2
   end
@@ -68,20 +68,26 @@ writing a parser means our reading of the language cannot quietly drift from eve
    conformance harness.
 
 **The output is committed.** `pnpm compile-measures` writes one `.elm.json` per library into
-`backend-ts/src/engine/cql/elm/` — 19 libraries (a few measures keep two versions) plus FHIRHelpers,
-1.3 MB in total — and regenerates `index.ts`, a static import index. That index is why the running
+`backend-ts/src/engine/cql/elm/` — 17 libraries plus FHIRHelpers, 1.2 MB in total — and regenerates
+`index.ts`, a static import index. (Until #410's gate landed, the directory also carried two
+orphaned trees from superseded library versions that nothing imported — "a few measures keep two
+versions" in an earlier revision of this chapter was, in fact, those orphans. The gate now cleans
+the directory before recompiling, so a committed tree the current CQL no longer produces fails CI
+as a staged deletion.) That index is why the running
 server never reads a file from disk to load a measure: the ELM is bundled into the JavaScript, the
 worker stays portable to environments with no filesystem, and a measure cannot go missing at runtime
 because of a deployment mistake. A compiled measure changes in a pull request diff like any other
 code.
 
 A single syntax or type error fails `compile-measures`, so a measure that does not compile cannot
-be compiled into the tree. It can still be *committed*, though, and the difference matters: nothing
-in CI runs `compile-measures`. The backend job installs, typechecks and tests, and the tests read
-the committed ELM. So if you edit a `.cql` file and forget to regenerate, everything stays green
-while the measure that would deploy is the one you last compiled rather than the one you last
-edited. **Regenerating is a manual prerequisite today**, listed as an open gap in
-[chapter 9](09-state-and-roadmap.md).
+be compiled into the tree. And since #410 (2026-08-12), stale ELM cannot merge either: the backend
+CI job recompiles every measure and fails on any difference from what is committed — covering the
+`.elm.json` files, the generated `index.ts`, and the bundled translator resources
+(`cql-resources.json`), including a *new* output file, which a plain `git diff` would ignore as
+untracked. So if you edit a `.cql` file and forget to regenerate, CI tells you, instead of staying
+green while the measure that would deploy is the one you last compiled rather than the one you last
+edited. The check is sound because the compiler's output is byte-identical run to run (ADR-064,
+re-measured when the gate landed).
 
 ## What the tree actually is
 

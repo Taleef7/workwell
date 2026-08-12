@@ -38,9 +38,16 @@ const measuresDir = process.argv[2] ?? path.join(root, "measures");
 const outDir = process.argv[3] ?? path.join(root, "src/engine/cql/elm");
 mkdirSync(outDir, { recursive: true });
 
-const systemModelInfoXml = readFileSync(path.join(resDir, "system-modelinfo.xml"), "utf8");
-const fhirModelInfoXml = readFileSync(path.join(resDir, "fhir-modelinfo-4.0.1.xml"), "utf8");
-const fhirHelpersCql = readFileSync(path.join(resDir, "FHIRHelpers-4.0.1.cql"), "utf8");
+// Line endings are normalized because these strings are EMBEDDED in cql-resources.json below:
+// without this, the sidecar encodes the line-ending flavor of the checkout that generated it
+// (CRLF on a Windows working copy, LF on the CI runner), and the #410 drift gate fails on a
+// byte difference that is git config, not content. Found by that gate's first clean-runner run.
+// Inert for the translator itself — ELM carries no source text and locators count lines the
+// same either way (verified: only cql-resources.json moved, all 18 ELM files were identical).
+const readText = (p) => readFileSync(p, "utf8").replace(/\r\n/g, "\n");
+const systemModelInfoXml = readText(path.join(resDir, "system-modelinfo.xml"));
+const fhirModelInfoXml = readText(path.join(resDir, "fhir-modelinfo-4.0.1.xml"));
+const fhirHelpersCql = readText(path.join(resDir, "FHIRHelpers-4.0.1.cql"));
 
 // Bundle the translator resources as a static JSON import so the RUNTIME translator
 // (src/measure/cql-translator.ts, the live /api/measures/compile path) never reads
