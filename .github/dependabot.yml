@@ -95,6 +95,22 @@ updates:
       prefix: chore
       include: scope
     groups:
+      # `next` and `eslint-config-next` are the only two exact-pinned dependencies in
+      # frontend/package.json, and they are deliberately pinned to the SAME version — the
+      # lint rules are published per framework release. Nothing enforced that, and the
+      # first `frontend-dev` group PR quietly proposed moving `eslint-config-next` alone,
+      # leaving the linter a minor ahead of the framework it lints. Grouping them means
+      # Dependabot can only ever propose them together. `applies-to: version-updates` is
+      # the default and is stated so the security-update path is not accidentally grouped:
+      # a security fix for one should not wait on the other.
+      nextjs:
+        applies-to: version-updates
+        patterns:
+          - next
+          - eslint-config-next
+      # Declared AFTER `nextjs` deliberately. Dependabot assigns a dependency to the first
+      # group whose patterns match, so a broad dependency-type group listed first would
+      # swallow `eslint-config-next` (a devDependency) before the pair could claim it.
       frontend-dev:
         dependency-type: development
         update-types: ["minor", "patch"]

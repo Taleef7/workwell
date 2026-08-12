@@ -1,5 +1,46 @@
 # Journal
 
+## 2026-08-11 — the first Dependabot triage, and two of my own holds overturned by reading the notes
+
+Six PRs sat held from the 2026-08-10 batch. Working through them properly reversed two of my own calls,
+which is the point of reading release notes rather than version numbers.
+
+**#429 `next` 16.3.0 — merged, and my hold was wrong.** I had recorded it as "a plain feature minor
+with no remaining security value" now that 16.2.11 had cleared the advisories. The first line of
+16.3.0's core changes is **"Update vendored lodash to 4.17.23 to fix CVE-2025-13465"**. It is a security
+release; Dependabot did not label it one because the vulnerable lodash is *vendored inside* next rather
+than resolved as a dependency, so it raises no alert of its own. A version number cannot tell you that.
+
+**#430 jest-dom 7.0.0 — still held, but for a completely different reason than I gave.** I had warned
+that a matcher-library major "fails by quietly asserting something slightly different, which green CI
+cannot detect". Reading 7.0.0: the only changes are *additive* (`toContainAnyBy*`, `toContainOneBy*`)
+plus two structural breaks — `@testing-library/dom` becomes a required peer, and the **minimum Node is
+now 22**. No matcher semantics moved. The real blocker is the Node floor: the frontend runs **Node 20**,
+in `ci.yml` and in all three stages of `frontend/Dockerfile`, while the backend and shim are on 24. So
+CI is green on a runtime the package no longer claims to support, which is not evidence worth merging on.
+The frontend being the Node-20 outlier is now the tracked blocker.
+
+**#419 `@types/node` 24 → 26 — closed, wrong direction.** Types should track the runtime. The shim
+builds `FROM node:24-alpine` and pins node 24 in CI, so its `^24` is already right and 26 would type it
+a year ahead of what it ships on. The genuine inconsistency is the opposite one and this PR does not
+touch it: `backend-ts` declares `^22` against a `node:24` image, so its types *lag*. And `frontend`'s
+`^20` is correct rather than drift — it really does run Node 20.
+
+**#416 / #428 TypeScript — held, now with the number that settles it.** Dependabot proposes **7.0.2**
+for the shim (the native Go port; the diff pulls in `@typescript/typescript-darwin-arm64` and friends)
+and **6.0.3** for the frontend. Merging both would put the repository on three TypeScript majors at
+once, with `backend-ts` on 5 and no updater that will ever propose its half.
+
+**#426 and the durable fix.** The group PR wanted to move `eslint-config-next` alone, and `next` +
+`eslint-config-next` are the only two exact-pinned frontend dependencies, deliberately pinned to the
+same version. Merging #429 first resolved it in the right direction. To stop it recurring,
+`.github/dependabot.yml` now has a **`nextjs` group** covering both, declared **before** `frontend-dev`
+— Dependabot's documented rule is that "if a dependency matches more than one rule, it's included in
+the first group that it matches", so a broad dependency-type group listed first would swallow
+`eslint-config-next` before the pair could claim it. Both the ordering rule and `applies-to` defaulting
+to version updates were checked against the docs rather than assumed; the group is explicitly scoped to
+version updates so a security fix for one never waits on the other.
+
 ## 2026-08-11 — the fqm-execution period-end fix, re-measured: three defects where I had reported one
 
 Went back over upstream issue **projecttacoma/fqm-execution#371** and our PR **#372** against the
