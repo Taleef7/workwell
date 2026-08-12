@@ -25,7 +25,7 @@ sequenceDiagram
   participant Pipe as Run pipeline
   participant Rt as Per-measure router
   participant Eng as Authored engine
-  participant Off as Official executor
+  participant OFx as Official executor
   participant DB as Postgres (runs, outcomes, cases, audit_events)
   Op->>API: POST /api/runs/manual (scope: programs / site / measure)
   Note over Sch,Pipe: or: nightly tick — same pipeline from here on
@@ -35,8 +35,8 @@ sequenceDiagram
   loop each measure in scope
     Pipe->>Rt: which engine runs this measure?
     alt routed official (cms122, cms125 on demo/production)
-      Rt->>Off: evaluate the batch against the CMS artifact
-      Off-->>Pipe: population results + evidence
+      Rt->>OFx: evaluate the batch against the CMS artifact
+      OFx-->>Pipe: population results + evidence
     else authored (the other 12)
       Rt->>Eng: walk the committed ELM tree per subject
       Eng-->>Pipe: Outcome Status + every rule value
