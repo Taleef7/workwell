@@ -16,7 +16,7 @@ Companion to the guide work of the same date, which documented existing behaviou
 
 ## P1 — Encounter-close quality check
 
-*Tracking: #TBD*
+*Tracking: [#458](https://github.com/Taleef7/workwell/issues/458)*
 
 ### What it is
 
@@ -75,7 +75,7 @@ Three distinct pieces, none of them a configuration change.
 
 ## P2 — "Not seen in a while," with quality status
 
-*Tracking: #TBD*
+*Tracking: [#459](https://github.com/Taleef7/workwell/issues/459)*
 
 ### What it is
 
@@ -128,7 +128,7 @@ today, whatever we decide to do with it.
 
 ## P3 — Next-action date estimate
 
-*Tracking: #TBD*
+*Tracking: [#460](https://github.com/Taleef7/workwell/issues/460)*
 
 ### What it is
 
