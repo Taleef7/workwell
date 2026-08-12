@@ -24,6 +24,19 @@ writes, not just `elm/`: the compiler regenerates `src/measure/resources/cql-res
 vacuous-guard shape — a check narrower than the claim it gets cited for — caught this time before
 the guard shipped rather than after.
 
+**And then the gate's first clean-runner run FAILED, and the failure was a real finding.** The
+issue's third pre-wiring check — "confirm byte-determinism holds on a clean runner, not just
+locally" — was the one I could not fully discharge from a Windows machine, and it is exactly where
+the defect was. On the Linux runner all 18 ELM files and `index.ts` reproduced byte-identical, but
+`cql-resources.json` differed by one line: it embeds the RAW text of the three translator
+resources, so it encodes the line-ending flavor of the checkout that generated it — committed from
+a CRLF working copy, regenerated on an LF one. The local determinism check was blind to this by
+construction (same machine, same flavor, both runs agree). `compile-measures` now normalizes CRLF
+on read — inert for the translator (ELM carries no source text; locators count lines the same
+either way, which the 18-identical-files result demonstrates) — and the sidecar is regenerated in
+its platform-independent form. The claim "byte-deterministic" was true per-machine and false
+across machines, and only the gate itself could tell the difference.
+
 Guide chapters 3 and 9 updated; the chapter 9 gap entry stays struck-through rather than deleted,
 because "found by review on the documentation PR that wrote the guarantee down as though it
 existed" is the provenance worth keeping.
