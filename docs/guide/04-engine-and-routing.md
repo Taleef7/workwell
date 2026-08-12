@@ -5,7 +5,8 @@
 
 "Run the CQL" hides about twenty mechanical steps, and "get the CQL for a CMS measure" hides twelve
 more. This chapter walks both, then explains the router that lets one run use two different engines,
-and the three numbers that shaped it: 68, 171, and 11.
+and the three numbers that shaped it: 68, 171, and 11. A full run, trigger to audit row, is drawn as
+a sequence in [chapter 10, S1](10-scenarios.md).
 
 ## One run, start to finish
 

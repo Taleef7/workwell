@@ -6,7 +6,8 @@
 The engine never reads a database row, a CSV, or an HL7 v2 message. Everything it evaluates arrives
 as FHIR, and most of what it reports leaves as FHIR. This chapter defines the handful of FHIR terms
 the rest of the guide leans on, shows how WebChart rows become FHIR, and covers the standard
-reporting documents that come out the other end.
+reporting documents that come out the other end. The standards loop end to end:
+[chapter 10, S5](10-scenarios.md); the live WebChart path: [chapter 10, S2](10-scenarios.md).
 
 ## FHIR in five terms
 
