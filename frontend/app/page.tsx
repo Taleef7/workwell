@@ -1,9 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { Fraunces } from "next/font/google";
 import { ArrowRight } from "lucide-react";
-
-const fraunces = Fraunces({ subsets: ["latin"], weight: ["600", "700"] });
+import { fraunces } from "./fonts";
 
 const repoUrl = "https://github.com/Taleef7/workwell";
 const videoUrl = "https://www.youtube.com/shorts/SgzDt4TBd9k?si=vHE9vppgxeGO6OM8";

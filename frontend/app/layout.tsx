@@ -1,11 +1,8 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import { geistSans, geistMono } from "./fonts";
 import { ClientProviders } from "@/components/client-providers";
 import { ThemeScript } from "@/components/theme-script";
-
-const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
-const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
 
 const APP_NAME = process.env.NEXT_PUBLIC_APP_NAME ?? "WorkWell Measure Studio";
 const APP_TAGLINE = process.env.NEXT_PUBLIC_APP_TAGLINE ?? "occupational-health compliance.";

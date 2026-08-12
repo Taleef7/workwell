@@ -1,5 +1,8 @@
-/* 1. Brand CSS (Enterprise Health) in a layer so it can be overridden by runtime brand switch */
-@import '@mieweb/ui/brands/enterprise-health.css' layer(theme);
+/* 1. Brand CSS (Enterprise Health) in a layer so it can be overridden by runtime brand switch.
+   Imported from public/brands (the `pnpm sync:brands` copy of @mieweb/ui's file, byte-identical
+   except that its Google Fonts @import is rewritten to self-hosted @font-face — #453) rather than
+   from the package, so the built bundle carries no fonts.googleapis.com URL. */
+@import '../public/brands/enterprise-health.css' layer(theme);
 
 /* 2. Tailwind 4 */
 @import "tailwindcss";
