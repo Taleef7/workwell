@@ -38,14 +38,14 @@ below it has the detail.
 
 ```mermaid
 flowchart TB
-  BUILD["① Build time<br/>CQL → ELM · CMS content pinned"]
+  BUILD["① Build time<br/>compiled, pinned"]
   subgraph RUN["Every run, top to bottom"]
     direction TB
-    DATA["② Data in<br/>WebChart · synthetic roster · uploads"]
-    PREP["③ Prepare<br/>FHIR bundle → codes resolved → period set"]
+    DATA["② Data in<br/>WebChart, roster"]
+    PREP["③ Prepare<br/>codes, period"]
     EVAL["④ Evaluate<br/>routed per measure"]
-    SAVE["⑤ Persist<br/>outcome → case → audit → rollup"]
-    OUT["⑥ Outputs<br/>dashboards · API · exports · audit pack"]
+    SAVE["⑤ Persist<br/>case, audit"]
+    OUT["⑥ Outputs<br/>dashboards, API"]
     DATA ==> PREP ==> EVAL ==> SAVE ==> OUT
   end
   SQL["Alongside: the SQL path<br/>same rules, generated SQL"]
