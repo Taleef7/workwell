@@ -33,63 +33,50 @@ chapters instead, and **MCP**, whose security boundary and tool posture live in
 
 ## The whole thing on one page
 
-Worth reading last rather than first. Each cluster names the chapter that explains it.
+Worth reading last rather than first. The diagram is the shape only; what each stage does is in
+the list below it.
 
 ```mermaid
 flowchart TB
-  subgraph ONCE["① BUILD TIME — happens once, output committed to git — chapters 2, 3 and 4"]
-    direction LR
-    C1["Our 17 CQL libraries, through the HL7 translator, into committed ELM trees"]
-    V1["CMS content at a pinned commit, reduced and checksummed, gated on 410 of 410"]
-  end
-  subgraph EVERYRUN["EVERY RUN — read top to bottom, in time order"]
+  BUILD["① Build time"]
+  subgraph RUN["Every run, top to bottom"]
     direction TB
-    subgraph DATA["② DATA IN — chapter 6"]
-      direction LR
-      D1["WebChart, read over SQL and turned into FHIR"]
-      D2["Synthetic roster, 150 people"]
-      D3["A quality report from another system"]
-    end
-    subgraph PREP["③ PREPARATION — chapters 4 and 5"]
-      direction LR
-      P1["One FHIR record per person"] --> P2["Resolve the code lists"] --> P3["Decide the compliance period"]
-    end
-    subgraph RUNBOX["④ EVALUATION, routed per measure — chapter 4"]
-      direction LR
-      R1["12 of 14: our engine walks the trees built at build time"]
-      R2["2 of 14: the reference calculator runs the CMS files"]
-    end
-    subgraph SAVE["⑤ PERSISTENCE — chapter 6"]
-      direction LR
-      S1["Outcome plus every rule value"] --> S2["Case, keyed so it cannot duplicate"] --> S3["Audit row"] --> S4["Monthly figures"]
-    end
-    subgraph OUTBOX["⑥ WHAT COMES OUT — chapters 1 and 5"]
-      direction LR
-      O1["Dashboard, worklist, Studio"]
-      O2["Versioned API for MIE"]
-      O3["Spreadsheets"]
-      O4["FHIR result and two quality report formats"]
-      O5["Audit pack"]
-    end
-    DATA ==> PREP
-    PREP ==> RUNBOX
-    RUNBOX ==> SAVE
-    SAVE ==> OUTBOX
+    DATA["② Data in"]
+    PREP["③ Prepare"]
+    EVAL["④ Evaluate"]
+    SAVE["⑤ Persist"]
+    OUT["⑥ Outputs"]
+    DATA ==> PREP ==> EVAL ==> SAVE ==> OUT
   end
-  subgraph SQLPATH["ALONGSIDE — the CQL to SQL path — chapter 7"]
-    direction LR
-    G1["The same rule description"] --> G2["generates committed SQL"] --> G3["that runs in WebChart's database"]
-  end
-  ONCE ==>|"committed artifacts, ready before any run starts"| EVERYRUN
-  RUNBOX -. "differentially tested against" .-> SQLPATH
+  SQL["Alongside: the SQL path"]
+  BUILD ==>|"committed artifacts, ready before any run"| RUN
+  EVAL -. "differentially tested against" .-> SQL
 ```
 
-Read it top to bottom: stage ① happens once and its outputs are committed to git; everything
-under "EVERY RUN" happens, in that order, each time anybody is evaluated. The lane at the bottom
-is the SQL executor, dotted rather than solid because it is real and checked against the engine
-but deliberately not connected to the application; whether it becomes solid is one of the two
-open decisions in [chapter 9](09-state-and-roadmap.md). For the same flows drawn as *sequences* —
-who calls what, in what order — see [chapter 10](10-scenarios.md).
+1. **① Build time** — happens once, output committed to git ([ch. 2](02-cql-and-authoring.md),
+   [3](03-compiler-and-elm.md), [4](04-engine-and-routing.md)). Our 17 CQL libraries compile
+   through the HL7 translator into committed ELM trees; CMS's content is vendored at a pinned
+   commit, reduced and checksummed, gated on 410 of 410 test cases.
+2. **② Data in** ([ch. 6](06-data-and-databases.md)) — WebChart, read over SQL and turned into
+   FHIR; the synthetic roster (150 people); or a quality report uploaded from another system.
+3. **③ Prepare** ([ch. 4](04-engine-and-routing.md), [5](05-fhir.md)) — one FHIR record per
+   person, the code lists resolved, the compliance period decided.
+4. **④ Evaluate**, routed per measure ([ch. 4](04-engine-and-routing.md)) — 12 of 14 measures run
+   through our engine, walking the trees built at build time; 2 of 14 run the reference
+   calculator directly against CMS's own files.
+5. **⑤ Persist** ([ch. 6](06-data-and-databases.md)) — the outcome plus every rule value, a case
+   keyed so it cannot duplicate, an audit row, and the monthly rollup figures.
+6. **⑥ Outputs** ([ch. 1](01-big-picture.md), [5](05-fhir.md)) — the dashboard/worklist/Studio, a
+   versioned API for MIE, spreadsheets, the FHIR result plus two quality-report formats, and the
+   audit pack.
+7. **Alongside — the SQL path** ([ch. 7](07-sql-and-the-bridge.md)) — the same rule description
+   generates committed SQL that runs directly inside WebChart's database. It is dotted rather than
+   solid because it is differentially tested against the engine but deliberately not wired into
+   the application; whether it becomes solid is one of the two open decisions in
+   [chapter 9](09-state-and-roadmap.md).
+
+For the same flows drawn as *sequences* — who calls what, in what order — see
+[chapter 10](10-scenarios.md).
 
 ## If you remember five things
 
