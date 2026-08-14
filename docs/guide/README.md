@@ -33,25 +33,39 @@ chapters instead, and **MCP**, whose security boundary and tool posture live in
 
 ## The whole thing on one page
 
-Worth reading last rather than first. The diagram is the shape only; what each stage does is in
-the list below it.
+Worth reading last rather than first. The diagram is a one-line orientation per stage; the list
+below it has the detail.
 
 ```mermaid
 flowchart TB
-  BUILD["① Build time"]
+  BUILD["① Build time\nCQL → ELM · CMS content pinned"]
   subgraph RUN["Every run, top to bottom"]
     direction TB
-    DATA["② Data in"]
-    PREP["③ Prepare"]
-    EVAL["④ Evaluate"]
-    SAVE["⑤ Persist"]
-    OUT["⑥ Outputs"]
+    DATA["② Data in\nWebChart · synthetic roster · uploads"]
+    PREP["③ Prepare\nFHIR bundle → codes resolved → period set"]
+    EVAL["④ Evaluate\nrouted per measure"]
+    SAVE["⑤ Persist\noutcome → case → audit → rollup"]
+    OUT["⑥ Outputs\ndashboards · API · exports · audit pack"]
     DATA ==> PREP ==> EVAL ==> SAVE ==> OUT
   end
-  SQL["Alongside: the SQL path"]
+  SQL["Alongside: the SQL path\nsame rules, generated SQL"]
   BUILD ==>|"committed artifacts, ready before any run"| RUN
   EVAL -. "differentially tested against" .-> SQL
 ```
+
+**The two arrow labels, in plain English:**
+
+- *"committed artifacts, ready before any run"* — the line between build time and every run.
+  Everything above it (compiled ELM trees, pinned CMS content) is produced once and checked into
+  git; everything below it just reads those files. There is no compiling, translating, or
+  downloading while a real person is being evaluated — see point 1 below. Committing rather than
+  fetching-on-demand is deliberate: it keeps a JVM-only compiler and live pulls of licensed CMS
+  terminology out of the request path, and it means a logic change shows up as an ordinary,
+  reviewable PR diff instead of an invisible runtime recompile.
+- *"differentially tested against"* — the SQL path is not part of a run's request path. It
+  evaluates the same data independently, and its output is diffed against the engine's as a
+  correctness check, not a second production path. That is also why it is dotted rather than
+  solid — see item 7 below.
 
 1. **① Build time** — happens once, output committed to git ([ch. 2](02-cql-and-authoring.md),
    [3](03-compiler-and-elm.md), [4](04-engine-and-routing.md)). Our 17 CQL libraries compile
