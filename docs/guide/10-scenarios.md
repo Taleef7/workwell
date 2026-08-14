@@ -24,7 +24,7 @@ sequenceDiagram
   participant Pipe as Run pipeline
   participant Eng as Authored engine
   participant OFx as Official executor
-  participant DB as Postgres
+  participant DB as Database
   Op->>API: start a run — manual scope, or the nightly tick
   API->>Pipe: execute (large scopes continue in the background — the response says RUNNING)
   Pipe->>DB: run row RUNNING
@@ -78,50 +78,64 @@ response — the run list doesn't carry it, the log timeline does.
 
 The measures — the ELM trees and the CMS artifacts alike — running against a real WebChart
 environment, and the answer being read back over the versioned API. This is the documented shape
-of the already-built live path (ADR-028 transport, ADR-057 normalization, ADR-061 API). One
-configuration note: no deployed stack currently pairs the WebChart seam with official routing —
-staging, the WebChart-configured stack, leaves `WORKWELL_OFFICIAL_MEASURES` unset — so the diagram
-shows the mechanism end to end, not a currently-deployed pairing.
+of the already-built live path (ADR-028 transport, ADR-057 normalization, ADR-061 API).
 Mechanisms: [chapter 5](05-fhir.md) (FHIR + the shim), [chapter 6](06-data-and-databases.md)
 (ingress), [chapter 4](04-engine-and-routing.md) (evaluation).
 
 ```mermaid
 sequenceDiagram
   autonumber
-  participant Pipe as Run pipeline / engine
+  participant Pipe as Run pipeline
   participant TX as WebChart transport
   participant WC as WebChart FHIR server
-  participant N as Normalization
-  participant DB as Postgres
+  participant DB as Database
   actor MIE as API consumer (MIE)
-  participant CAPI as Compliance API (/api/v1)
-  Pipe->>TX: need this subject's record
-  TX->>WC: SMART Backend Services — signed JWT assertion
-  WC-->>TX: access token
-  loop per resource type
-    TX->>WC: GET /Patient, /Observation, /Procedure, …
-    WC-->>TX: FHIR resources
-  end
-  TX->>N: raw bundle
-  Note over N: derives us-core-sex from gender and the LOINC imaging<br/>Observation from a mammography Procedure — both tagged,<br/>both suppressed when the server supplies its own (ADR-057)
-  N-->>Pipe: one normalized FHIR record per person
+  participant CAPI as Compliance API
+  Pipe->>TX: fetch this subject's record
+  TX->>WC: SMART Backend Services auth, then paged FHIR reads
+  WC-->>TX: Patient, Observation, Procedure, …
+  TX-->>Pipe: one normalized FHIR record per person
   Pipe->>Pipe: evaluate, routed per measure (see S1)
-  Pipe->>DB: outcome + evidence_json
-  MIE->>CAPI: GET /api/v1/compliance/{subject}/{measure}?mode=latest
+  Pipe->>DB: outcome + evidence
+  MIE->>CAPI: ask for one subject's compliance answer
   CAPI->>DB: latest finalized-run outcome
   alt nothing persisted for this subject
-    CAPI-->>MIE: 404 — "no run covered this subject" is never an empty 200
+    CAPI-->>MIE: 404 — never an empty 200
   else outcome exists
-    CAPI-->>MIE: 200 with status, populations, populationsSource
+    CAPI-->>MIE: 200 — status, populations, populationsSource
   end
-  CAPI->>DB: COMPLIANCE_API_READ audit event
+  CAPI->>DB: audit the read
 ```
 
-The response's `populationsSource` field says whether the population booleans were measured by
-the official executor or inferred from status — the one fact a consumer cannot reconstruct from
-the numbers. `mode=preview` deliberately returns **501 on a WebChart-configured stack**: the
-preview composes a synthetic bundle, and reporting demo playback as an evaluation of a live
-tenant would be a lie (ADR-061).
+What happens, in order:
+
+1. **Fetching is per subject, and strict.** The pipeline asks the transport for one person's
+   record; the transport authenticates with SMART Backend Services (a signed JWT assertion, no
+   static API key) and pages through `/Patient`, `/Observation`, `/Procedure` and the rest,
+   composed per resource because the real server exposes no `$everything` operation.
+2. **Normalization happens on the way back, and only fills in what's missing.** Two fields the
+   official CMS logic needs but WebChart doesn't natively carry are derived rather than
+   fabricated: `us-core-sex` from `gender`, and a LOINC imaging Observation from a mammography
+   Procedure. Both are tagged as derived and suppressed the moment the server supplies its own
+   value (ADR-057) — normalization, never invention.
+3. **Evaluation is the same pipeline as S1** — routed per measure, same engine split. Nothing
+   about the data's origin changes how it gets evaluated.
+4. **Reading the answer back is a second, independent call.** An API consumer like MIE's own code
+   asks the versioned compliance API for one subject's answer to one measure. A 404 means "no run
+   has covered this subject yet" — never an empty 200, because those two things must never be
+   confusable.
+5. **`populationsSource` says where the population booleans came from** — measured by the
+   official CMS executor, or inferred from the outcome status — the one fact a consumer cannot
+   reconstruct from the numbers alone.
+6. **Every read is audited, too, not just every write** — a `COMPLIANCE_API_READ` event for each
+   call.
+
+Two things the diagram doesn't show. No deployed stack currently pairs this WebChart ingress with
+official measure routing — staging, the WebChart-configured stack, leaves
+`WORKWELL_OFFICIAL_MEASURES` unset — so this is the mechanism end to end, not a
+currently-deployed pairing. And `mode=preview` deliberately returns **501 on a WebChart-configured
+stack**: the preview composes a synthetic bundle, and reporting demo playback as an evaluation of
+a live tenant would be a lie (ADR-061).
 
 ## S3 — A flagged person, worked by an operator
 
@@ -134,35 +148,53 @@ worklist), [chapter 6](06-data-and-databases.md) (the idempotent upsert),
 sequenceDiagram
   autonumber
   participant Pipe as Run pipeline
-  participant DB as Stores + audit
+  participant DB as Database
   actor CM as Case manager
   participant API as Cases API
-  participant AI as AI assist (OpenAI)
-  participant FB as Deterministic fallback
+  participant AI as AI assist
   participant Ch as Outreach channel
-  Pipe->>DB: OVERDUE outcome → case OPEN (CASE_CREATED audit)
-  CM->>API: GET /api/cases — the worklist
-  CM->>API: GET /api/cases/:id — evidence, why_flagged, timeline
-  CM->>API: POST /api/cases/:id/ai/explain
-  API->>AI: evidence JSON, fenced + nonce-marked (untrusted data, never instructions)
+  Pipe->>DB: OVERDUE outcome → case OPEN
+  CM->>API: open the case — evidence, why flagged, timeline
+  CM->>API: ask for a plain-English explanation
   alt AI available
-    AI-->>API: 2–3 plain-English sentences (assistive only)
+    API->>AI: evidence, fenced as untrusted data
+    AI-->>API: 2–3 sentences, assistive only
   else AI unavailable
-    API->>FB: derive from why_flagged + expressionResults
-    FB-->>API: deterministic explanation, labeled fallback-rules
+    API->>API: deterministic fallback from the same evidence
   end
-  API->>DB: AI_CASE_EXPLANATION_GENERATED audit
-  CM->>API: GET …/actions/outreach/preview, then POST …/actions/outreach
-  API->>Ch: send via configured channel (simulated by default)
-  API->>DB: case_action + audit event
-  Ch-->>API: delivery status → POST …/actions/outreach/delivery
-  CM->>API: POST /api/cases/:id/rerun-to-verify
+  API->>DB: log which explanation was used
+  CM->>API: send outreach — preview, then confirm
+  API->>Ch: deliver via the configured channel
+  Ch-->>API: delivery status
+  API->>DB: record the action + audit
+  CM->>API: rerun to verify
   API->>Pipe: re-evaluate this subject now
-  Pipe->>DB: COMPLIANT → case RESOLVED (AUTO_RESOLVED) + CASE_RESOLVED audit
+  Pipe->>DB: COMPLIANT → case RESOLVED
 ```
 
+What happens, in order:
+
+1. **The case starts from a run, not from an operator.** An OVERDUE outcome opens a case
+   automatically, with a `CASE_CREATED` audit event — a case manager never creates one by hand.
+2. **The worklist and the case detail are both reads.** The case screen shows the same structured
+   evidence a run persisted (`why_flagged`, `expressionResults`), not a re-derived summary.
+3. **The AI explanation is assistive, and fenced against its own input.** The evidence JSON is
+   wrapped in per-request nonce'd markers, and the model is told explicitly to treat it as data,
+   never instructions — the defense against a WebChart-sourced string one day containing
+   something that reads like a command ([`docs/AI_GUARDRAILS.md`](../AI_GUARDRAILS.md)).
+4. **Unavailable AI degrades to a deterministic explanation from the same evidence**, not a blank
+   field. The fallback is rule-based, not a second model call, and is labeled `fallback-rules` so
+   nobody mistakes it for the model's own words.
+5. **Every explanation, sent or fallback, is logged** — which one fired is itself an audit fact,
+   independent of what it said.
+6. **Outreach is preview-then-confirm**, sent through whichever channel is configured (simulated
+   by default), and both the action and its delivery status are recorded.
+7. **Rerun-to-verify calls back into the exact same run pipeline as S1.** A COMPLIANT result
+   auto-resolves the case (`AUTO_RESOLVED`) — the same idempotent upsert logic that opened the
+   case decides whether it can close.
+
 Two invariants worth reading off the lanes. Every mutating arrow into `API` produces a matching
-arrow into `DB` — no state change without an audit row. And the `AI` lane never touches `DB`
+arrow into `DB` — no state change without an audit row. And the `AI` lane never writes to `DB`
 except to log that it spoke: compliance state is authored by the engine alone, and a human
 closure (`closed_by` set) is never reopened by a later run.
 
@@ -178,29 +210,46 @@ sequenceDiagram
   autonumber
   actor Au as Author
   participant M as Measures API
-  participant AI as AI draft (assistive)
+  participant AI as AI draft
   participant T as Translator (CQL→ELM)
-  participant Cat as Measure catalog
-  Au->>M: POST /api/measures — a Draft
+  participant DB as Database
+  Au->>M: create a Draft
   opt draft from policy text
-    Au->>M: POST /api/measures/:id/ai/draft-spec
-    M->>AI: policy text (no compliance determinations allowed)
-    AI-->>Au: draft spec JSON — review banner, human edits before save
+    M->>AI: policy text — no compliance determinations
+    AI-->>Au: draft spec — review banner, human edits before save
   end
-  Au->>M: edit CQL, then POST /api/measures/:id/cql/compile
-  M->>T: compile (UCUM-validated quantities)
+  Au->>M: edit CQL, then compile
+  M->>T: compile — UCUM-validated
   T-->>M: ELM, or diagnostics
-  M->>Cat: persist CQL + compile status
-  M-->>Au: COMPILED / WARNINGS / ERROR — diagnostics, which are the authoring gate
-  Au->>M: save test fixtures, then validate
-  M->>M: validate fixtures — structural only (name, subject, a recognized expected outcome — no engine run)
-  Au->>M: GET /api/measures/:id/activation-readiness
-  Au->>M: POST /api/measures/:id/approve — a human decision, always
-  Au->>M: POST /api/measures/:id/status — Approved → Active
-  Cat-->>Au: measure Active in the catalog
-  Note over T,Cat: The 17 measure libraries (+FHIRHelpers) compile at BUILD time<br/>(pnpm compile-measures), and CI refuses a tree where the committed<br/>ELM is not what the CQL produces. Nothing compiles during a run.
-  Note over M,Cat: Active governs the catalog, not the run pipeline: population runs<br/>enumerate the build-time measure registry, and Studio compilation does<br/>not install ELM there. An authored measure joins runs when its CQL lands<br/>in the repo and compile-measures commits its ELM — the CI gate above.
+  M->>DB: persist CQL + compile status
+  M-->>Au: COMPILED / WARNINGS / ERROR
+  Au->>M: save + validate test fixtures
+  Au->>M: check activation readiness
+  Au->>M: approve — a human decision, always
+  Au->>M: activate — Approved → Active
+  DB-->>Au: measure Active in the catalog
 ```
+
+What happens, in order:
+
+1. **A measure starts life as a Draft**, optionally seeded from an AI-drafted spec generated from
+   policy text — the model is explicitly told it must not make compliance determinations, and the
+   draft carries a review banner until a human edits and saves it.
+2. **Compilation happens here, at authoring time — never during a run.** The CQL→ELM translator
+   runs synchronously on save, checking UCUM units along the way, and returns either compiled ELM
+   or diagnostics. Those diagnostics *are* the authoring gate: a measure with a compile error
+   cannot proceed.
+3. **Fixture validation is structural only** — name, subject, a recognized expected-outcome value
+   — not an engine run. Actually exercising the CQL happens later, at `pnpm compile-measures`
+   build time, where the 17 measure libraries (plus `FHIRHelpers`) compile for real and CI
+   refuses a committed tree that the current CQL no longer produces.
+4. **Approval and activation are two separate, always-human steps** — an activation-readiness
+   check, then an explicit approve, then an explicit status change from Approved to Active.
+   Neither is inferable from a passing compile.
+5. **"Active" governs the catalog, not the run pipeline.** Population runs enumerate the
+   build-time measure registry; Studio compilation does not install ELM there. An authored
+   measure only joins actual runs once its CQL lands in the repo and `compile-measures` commits
+   its ELM — the CI gate in point 2.
 
 The AI lane is the same shape as S3: it can draft a spec or CQL, it cannot approve, activate, or
 decide anything — activation is a gated human action with an audit row.
@@ -217,33 +266,44 @@ sequenceDiagram
   autonumber
   actor Ext as External system
   participant R as Runs API
-  participant Id as Identity grouping
   participant Imp as QRDA I importer
   participant Eng as Engine (unchanged)
-  participant DB as Stores
-  Ext->>R: POST /api/runs → a run to import into
-  Ext->>R: POST /api/runs/:id/import {measureId, qrda1: [documents]}
-  R->>Id: group documents into people (identifier-only)
-  Note over Id: identity is cross-document — a per-document import<br/>over-reports the population — demographic conflicts are<br/>reported, never silently resolved
-  Id-->>R: one person per group
+  participant DB as Database
+  Ext->>R: create a run, then import a batch of QRDA I documents
+  R->>R: group documents into people — identifier-only
   loop per person
     R->>Imp: parse + translate the QDM entries
-    Imp-->>Eng: a FHIR bundle (mapped to what the artifact's ELM retrieves)
-    Eng-->>DB: outcome + qrda1Import evidence
+    Imp-->>Eng: a FHIR bundle, mapped to what the artifact retrieves
+    Eng-->>DB: outcome + import evidence
   end
-  Ext->>R: POST /api/runs/:id/finalize
-  alt any outcome lacks qrda1Import evidence
-    R-->>Ext: 409 — a population run is finalized by its own pipeline, not from outside
-  else all outcomes are import-driven
-    R-->>Ext: 200 — run COMPLETED, exportable
+  Ext->>R: finalize the run
+  alt any outcome lacks import evidence
+    R-->>Ext: 409 — refused
+  else fully import-driven
+    R-->>Ext: 200 — COMPLETED, exportable
   end
-  Ext->>R: GET …/measure-report | …/qrda1 | …/qrda
-  R-->>Ext: FHIR MeasureReport / QRDA I / QRDA III
+  Ext->>R: export — MeasureReport, QRDA I, or QRDA III
+  R-->>Ext: the requested document
 ```
 
-The finalize gate is the interesting arrow: it refuses to mark a run COMPLETED unless every
-outcome came from an imported document, because finalizing a partially-imported population run
-from outside would make a partial roster exportable as a finished result.
+What happens, in order:
+
+1. **Import is a batch, not a document at a time**, because resolving which documents describe
+   the same person is inherently cross-document — a per-document import would over-report the
+   population by treating duplicates as distinct people.
+2. **Grouping is identifier-only, deterministic, and conservative.** Demographic conflicts inside
+   a group are reported, never silently resolved — merging two people who are not the same
+   person is the one mistake this step refuses to risk.
+3. **The engine underneath doesn't change.** The importer parses each document's QDM entries and
+   translates them to whatever the target artifact's ELM actually retrieves — the same engine S1
+   routes a run through, fed a differently-sourced bundle.
+4. **Finalize is a gate, not a formality.** It refuses (`409`) to mark the run `COMPLETED` unless
+   every single outcome came from an imported document — finalizing a partially-imported
+   population run from outside would make a partial roster exportable as though it were a
+   finished result.
+5. **Export produces the same three standards documents S2's live path can produce** — a FHIR
+   MeasureReport and both QRDA formats — the loop is symmetric: documents in, the identical
+   engine runs, documents out.
 
 ## S6 — An AI client over MCP, read-only
 
@@ -257,24 +317,35 @@ sequenceDiagram
   actor C as MCP client (Claude Desktop)
   participant T as MCP transport
   participant D as Dispatch + role gate
-  participant DB as Stores (read-only)
-  C->>T: GET /sse — open the event stream
-  T-->>C: event: endpoint → /mcp/message?sessionId=…
-  C->>T: POST initialize (202 — result arrives over SSE)
-  T-->>C: initialize result
-  C->>T: tools/list
+  participant DB as Database (read-only)
+  C->>T: open the SSE stream, then initialize
+  T-->>C: session ready, over SSE
+  C->>T: list tools
   T-->>C: 13 read-only tools
-  C->>T: tools/call — e.g. list_noncompliant
-  T->>D: dispatch with auth context (actor, role)
-  alt role gate refuses (e.g. check_compliance needs CM/ADMIN)
-    D->>DB: tool-call audit event (denied)
+  C->>T: call a tool — e.g. list_noncompliant
+  T->>D: dispatch with auth context — actor, role
+  alt role gate refuses
     D-->>C: refusal, no data
   else allowed
     D->>DB: read
-    D->>DB: tool-call audit event
-    D-->>C: result, pushed over the SSE stream
+    D-->>C: result, over SSE
   end
+  D->>DB: audit the call, either way
 ```
+
+What happens, in order:
+
+1. **The handshake is SSE-first, HTTP-second.** The client opens `GET /sse` and gets back the
+   actual endpoint to POST to (`/mcp/message?sessionId=…`); `initialize` then returns `202`
+   immediately, and its real result arrives asynchronously over the already-open stream — a
+   two-channel handshake, not a single request/response.
+2. **The tool list is fixed and small**: 13 read-only tools, discoverable before any are called.
+3. **Authorization happens at dispatch, not at the transport.** The transport authenticates the
+   connection; the dispatcher separately checks the caller's role against the specific tool
+   requested (`check_compliance`, for instance, needs Case Manager or Admin) — two different
+   questions, asked in two different places.
+4. **Every call is audited regardless of outcome** — a refusal is logged just as a successful
+   read is, so a denied attempt is as visible in the audit trail as an allowed one.
 
 No MCP tool mutates anything: the server exposes reads plus explain-shaped tools, every call is
 audited, and role gating happens at dispatch — the transport authenticates, the dispatcher
