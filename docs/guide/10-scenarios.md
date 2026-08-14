@@ -8,6 +8,40 @@ Admin configuration screens (programs, scheduler settings, email provider) are d
 absent — they are reads and writes with an audit row, with no temporal story a sequence diagram
 would add.
 
+## Who's who across these diagrams
+
+The same handful of components show up under different names depending on which scenario they're
+in — defined once here instead of six times below.
+
+- **Worker API / Cases API / Measures API / Runs API** — the same backend worker every time; the
+  label just names which route group a scenario is hitting (`/api/runs`, `/api/cases`,
+  `/api/measures`).
+- **Run pipeline** — the code that turns a scope into evaluated outcomes: resolve the roster,
+  route each measure, persist the result. [Chapter 4](04-engine-and-routing.md).
+- **Authored engine / Official executor** — the two things that can answer "is this measure
+  satisfied": our own compiled CQL, walked by `cql-execution`, or CMS's own published artifact run
+  through a quarantined package. [Chapter 4](04-engine-and-routing.md).
+- **Database** — Postgres in production, SQLite in tests, the same contract either way. Runs,
+  outcomes, cases and audit events live here — never the measure logic itself.
+  [Chapter 6](06-data-and-databases.md).
+- **WebChart transport** — the code that authenticates to a real WebChart FHIR server and pages
+  through its API to fetch one person's clinical record. [Chapter 5](05-fhir.md).
+- **WebChart FHIR server** — the actual EHR: MIE's WebChart, exposing patient data as FHIR
+  resources over the wire.
+- **Compliance API** — the versioned, external-facing endpoint (`/api/v1/compliance/...`) that
+  other MIE systems read a compliance answer from.
+  [`docs/COMPLIANCE_API.md`](../COMPLIANCE_API.md).
+- **AI assist** — OpenAI, called only for assistive text (draft specs, plain-English case
+  explanations), never for a compliance decision. [`docs/AI_GUARDRAILS.md`](../AI_GUARDRAILS.md).
+- **Outreach channel** — however a case's notification actually gets sent — email, SMS, and so
+  on — simulated by default.
+- **Translator** — the CQL→ELM compiler: HL7's own reference implementation.
+  [Chapter 3](03-compiler-and-elm.md).
+- **QRDA I importer** — the hand-rolled parser that turns another system's quality documents into
+  the same FHIR shape the engine already reads. [Chapter 6](06-data-and-databases.md).
+- **MCP transport / Dispatch + role gate** — the SSE-based protocol layer, and the code behind it
+  that checks a caller's role before running a tool. [`docs/MCP.md`](../MCP.md).
+
 ## S1 — A run, scheduled or manual
 
 The core flow everything else references. Two triggers, one pipeline: the nightly scheduler
@@ -89,14 +123,13 @@ sequenceDiagram
   participant TX as WebChart transport
   participant WC as WebChart FHIR server
   participant DB as Database
-  actor MIE as API consumer (MIE)
   participant CAPI as Compliance API
+  actor MIE as API consumer (MIE)
   Pipe->>TX: fetch this subject's record
   TX->>WC: SMART Backend Services auth, then paged FHIR reads
   WC-->>TX: Patient, Observation, Procedure, …
   TX-->>Pipe: one normalized FHIR record per person
-  Pipe->>Pipe: evaluate, routed per measure (see S1)
-  Pipe->>DB: outcome + evidence
+  Pipe->>DB: evaluate (see S1), then persist outcome + evidence
   MIE->>CAPI: ask for one subject's compliance answer
   CAPI->>DB: latest finalized-run outcome
   alt nothing persisted for this subject
@@ -113,13 +146,15 @@ What happens, in order:
    record; the transport authenticates with SMART Backend Services (a signed JWT assertion, no
    static API key) and pages through `/Patient`, `/Observation`, `/Procedure` and the rest,
    composed per resource because the real server exposes no `$everything` operation.
-2. **Normalization happens on the way back, and only fills in what's missing.** Two fields the
-   official CMS logic needs but WebChart doesn't natively carry are derived rather than
-   fabricated: `us-core-sex` from `gender`, and a LOINC imaging Observation from a mammography
-   Procedure. Both are tagged as derived and suppressed the moment the server supplies its own
-   value (ADR-057) — normalization, never invention.
-3. **Evaluation is the same pipeline as S1** — routed per measure, same engine split. Nothing
-   about the data's origin changes how it gets evaluated.
+2. **Normalization means adapting the data's shape to what the measure logic expects — filling
+   gaps, never inventing facts.** WebChart's raw FHIR doesn't natively carry two fields the
+   official CMS logic reads: it emits `Patient.gender` but not the `us-core-sex` extension, and a
+   screening mammogram as a `Procedure` rather than the `Observation` the CMS artifact's numerator
+   specifically looks for. Both are derived from the real WebChart data, tagged as derived, and
+   suppressed the moment the server supplies its own version (ADR-057) — the distinction that
+   keeps this from becoming fabrication.
+3. **Evaluation happens between fetching and persisting** — the same pipeline as S1, routed per
+   measure, same engine split. Nothing about the data's origin changes how it gets evaluated.
 4. **Reading the answer back is a second, independent call.** An API consumer like MIE's own code
    asks the versioned compliance API for one subject's answer to one measure. A 404 means "no run
    has covered this subject yet" — never an empty 200, because those two things must never be
@@ -147,15 +182,14 @@ worklist), [chapter 6](06-data-and-databases.md) (the idempotent upsert),
 ```mermaid
 sequenceDiagram
   autonumber
-  participant Pipe as Run pipeline
-  participant DB as Database
   actor CM as Case manager
   participant API as Cases API
+  participant DB as Database
+  participant Pipe as Run pipeline
   participant AI as AI assist
   participant Ch as Outreach channel
   Pipe->>DB: OVERDUE outcome → case OPEN
-  CM->>API: open the case — evidence, why flagged, timeline
-  CM->>API: ask for a plain-English explanation
+  CM->>API: review the case, ask for an explanation
   alt AI available
     API->>AI: evidence, fenced as untrusted data
     AI-->>API: 2–3 sentences, assistive only
@@ -176,8 +210,9 @@ What happens, in order:
 
 1. **The case starts from a run, not from an operator.** An OVERDUE outcome opens a case
    automatically, with a `CASE_CREATED` audit event — a case manager never creates one by hand.
-2. **The worklist and the case detail are both reads.** The case screen shows the same structured
-   evidence a run persisted (`why_flagged`, `expressionResults`), not a re-derived summary.
+2. **Opening a case is a read that already carries an explanation.** The screen shows the same
+   structured evidence a run persisted (`why_flagged`, `expressionResults`), and asking for a
+   plain-English explanation is part of the same action, not a second navigation.
 3. **The AI explanation is assistive, and fenced against its own input.** The evidence JSON is
    wrapped in per-request nonce'd markers, and the model is told explicitly to treat it as data,
    never instructions — the defense against a WebChart-sourced string one day containing
@@ -216,7 +251,8 @@ sequenceDiagram
   Au->>M: create a Draft
   opt draft from policy text
     M->>AI: policy text — no compliance determinations
-    AI-->>Au: draft spec — review banner, human edits before save
+    AI-->>M: draft spec JSON
+    M-->>Au: draft spec — review banner, human edits before save
   end
   Au->>M: edit CQL, then compile
   M->>T: compile — UCUM-validated
@@ -227,7 +263,7 @@ sequenceDiagram
   Au->>M: check activation readiness
   Au->>M: approve — a human decision, always
   Au->>M: activate — Approved → Active
-  DB-->>Au: measure Active in the catalog
+  M-->>Au: measure Active in the catalog
 ```
 
 What happens, in order:
@@ -325,11 +361,12 @@ sequenceDiagram
   C->>T: call a tool — e.g. list_noncompliant
   T->>D: dispatch with auth context — actor, role
   alt role gate refuses
-    D-->>C: refusal, no data
+    D-->>T: refusal, no data
   else allowed
     D->>DB: read
-    D-->>C: result, over SSE
+    D-->>T: result
   end
+  T-->>C: delivered over SSE
   D->>DB: audit the call, either way
 ```
 
@@ -343,7 +380,8 @@ What happens, in order:
 3. **Authorization happens at dispatch, not at the transport.** The transport authenticates the
    connection; the dispatcher separately checks the caller's role against the specific tool
    requested (`check_compliance`, for instance, needs Case Manager or Admin) — two different
-   questions, asked in two different places.
+   questions, asked in two different places. Either way, the dispatcher's answer is relayed back
+   through the transport, the same channel that opened the connection.
 4. **Every call is audited regardless of outcome** — a refusal is logged just as a successful
    read is, so a denied attempt is as visible in the audit trail as an allowed one.
 
