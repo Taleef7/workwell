@@ -38,17 +38,17 @@ below it has the detail.
 
 ```mermaid
 flowchart TB
-  BUILD["① Build time\nCQL → ELM · CMS content pinned"]
+  BUILD["① Build time<br/>CQL → ELM · CMS content pinned"]
   subgraph RUN["Every run, top to bottom"]
     direction TB
-    DATA["② Data in\nWebChart · synthetic roster · uploads"]
-    PREP["③ Prepare\nFHIR bundle → codes resolved → period set"]
-    EVAL["④ Evaluate\nrouted per measure"]
-    SAVE["⑤ Persist\noutcome → case → audit → rollup"]
-    OUT["⑥ Outputs\ndashboards · API · exports · audit pack"]
+    DATA["② Data in<br/>WebChart · synthetic roster · uploads"]
+    PREP["③ Prepare<br/>FHIR bundle → codes resolved → period set"]
+    EVAL["④ Evaluate<br/>routed per measure"]
+    SAVE["⑤ Persist<br/>outcome → case → audit → rollup"]
+    OUT["⑥ Outputs<br/>dashboards · API · exports · audit pack"]
     DATA ==> PREP ==> EVAL ==> SAVE ==> OUT
   end
-  SQL["Alongside: the SQL path\nsame rules, generated SQL"]
+  SQL["Alongside: the SQL path<br/>same rules, generated SQL"]
   BUILD ==>|"committed artifacts, ready before any run"| RUN
   EVAL -. "differentially tested against" .-> SQL
 ```
