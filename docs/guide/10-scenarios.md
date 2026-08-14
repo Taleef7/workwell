@@ -8,6 +8,10 @@ Admin configuration screens (programs, scheduler settings, email provider) are d
 absent — they are reads and writes with an audit row, with no temporal story a sequence diagram
 would add.
 
+**S1 through S6 document behaviour that ships today. [S7](#s7--quality-inside-the-encounter-target-state)
+is the one exception** — it is the target architecture for the WebChart integration, not built,
+and it says so at the top and again in a table of what exists today.
+
 ## Who's who across these diagrams
 
 The same handful of components show up under different names depending on which scenario they're
@@ -41,6 +45,15 @@ in — defined once here instead of six times below.
   the same FHIR shape the engine already reads. [Chapter 6](06-data-and-databases.md).
 - **MCP transport / Dispatch + role gate** — the SSE-based protocol layer, and the code behind it
   that checks a caller's role before running a tool. [`docs/MCP.md`](../MCP.md).
+- **Nurse practitioner / Quality manager** — the two clinical-side readers in
+  [S7](#s7--quality-inside-the-encounter-target-state). The practitioner is mid-visit and needs
+  one patient's answer now; the manager is looking across a population and never sees a patient.
+  Different questions, so deliberately different surfaces.
+
+One note on granularity: S1 through S6 draw WorkWell's *insides* (the pipeline, the engine, the
+database as separate lanes) because that is where those flows happen. S7 draws WorkWell as a
+single lane, because that scenario is about the boundary between two systems — the seam is the
+subject, and the internals behind it are S1's.
 
 ## S1 — A run, scheduled or manual
 
@@ -388,3 +401,100 @@ What happens, in order:
 No MCP tool mutates anything: the server exposes reads plus explain-shaped tools, every call is
 audited, and role gating happens at dispatch — the transport authenticates, the dispatcher
 authorizes.
+
+## S7 — Quality inside the encounter (target state)
+
+> **This one is not built.** Every scenario above documents shipped behaviour; this is the target
+> architecture for the WebChart integration, and today's implementation is close to its opposite —
+> WorkWell *pulls* from WebChart on a schedule rather than receiving pushes, there is no endpoint
+> that takes a bundle and returns findings, and nothing writes back into the EHR. The table at the
+> end of this section names exactly which parts exist. Mechanisms it would build on:
+> [chapter 5](05-fhir.md) (FHIR), [chapter 4](04-engine-and-routing.md) (evaluation),
+> [`docs/COMPLIANCE_API.md`](../COMPLIANCE_API.md) (the contract it extends).
+
+The idea in one sentence: **quality stops being a report somebody visits and becomes an answer
+that arrives while the clinician can still act on it.**
+
+```mermaid
+sequenceDiagram
+  autonumber
+  actor NP as Nurse practitioner
+  participant WC as WebChart
+  participant WW as WorkWell
+  actor MGR as Quality manager
+  NP->>WC: open an encounter, enter patient data
+  loop as the visit progresses
+    WC->>WW: submit what the chart holds so far
+    WW-->>WC: quality findings for this patient
+    WC-->>NP: alerts, in the chart already open
+  end
+  Note over WC,WW: weekly — the same exchange, run as a batch
+  WC->>WW: everything since the last exchange
+  WW-->>WC: findings across the population
+  WW->>WC: follow-up tasks and documents
+  WC-->>NP: work lands in the queue
+  MGR->>WW: population dashboards, already accumulated
+```
+
+What happens, in order:
+
+1. **An encounter is an event, not a document.** The practitioner opens one and starts entering
+   what the visit produces — a blood pressure, a medication, a history. Nothing waits for the
+   visit to be finished and signed.
+2. **WebChart pushes; WorkWell does not pull.** Each submission carries what the chart holds so
+   far. This is the inversion that matters, and the reason is arithmetic: a physician sees around
+   thirty patients a day, so pulling a month of encounters for a ten-physician practice means
+   fetching, assembling and evaluating tens of thousands of records before anybody sees a single
+   answer. Pushing as it happens spreads that same work across the day and turns the population
+   view into a read of something already computed.
+3. **Findings come back in-band, during the visit.** The exchange repeats as the visit progresses
+   — at check-in, after the nurse's intake, after the clinician's assessment, before close — so
+   each round of alerts reflects what is in the chart at that moment. An alert after the encounter
+   closes is a letter; an alert during it is a decision.
+4. **The practitioner never leaves WebChart.** WorkWell returns structured findings and WebChart
+   renders them in the chart that is already open. This is the "embed quality in WebChart" half of
+   the idea, and doing it at the data level rather than as an embedded panel is deliberate: a panel
+   is still somewhere you have to go and look, which is the problem it was meant to solve.
+5. **Weekly, the same exchange runs as a batch.** Same endpoint, same evaluation, wider window —
+   it catches whatever the real-time path missed and gives both sides a natural reconciliation
+   point.
+6. **Follow-up becomes work, not a report.** Findings that need action land in WebChart as tasks
+   and documents in somebody's queue. This is the piece furthest from today's build, because it is
+   the only one that requires WorkWell to *write* into a certified EHR rather than read from it.
+7. **Managers read WorkWell directly.** Population dashboards stay where they are; a quality
+   manager is asking a different question than a practitioner mid-visit, and the two surfaces are
+   different on purpose rather than by omission.
+8. **Periodically, both sides reconcile what was sent against what was received.** Encounters
+   WorkWell never got, and encounters it got that WebChart has no record of sending, are both
+   findings — a sink that silently drops messages looks exactly like a quiet week.
+
+### Why this is not just another quality dashboard
+
+Dashboards that accumulate encounters and display measure results are a solved, crowded
+problem — there are a great many of them, and building one more would be the least interesting
+thing this engine could do. Three things here are not that: the finding arrives **inside the
+workflow, mid-encounter**, while the clinician can still change what happens; the follow-up
+becomes **real work in the EHR** rather than a list somebody is supposed to check; and the
+answer is **traceable to a published measure** run on a reference engine, which
+[chapter 1](01-big-picture.md) covers.
+
+### What exists today
+
+| Part of the flow | Status |
+|---|---|
+| The engine, the measures, the evidence per rule | **Built** — [ch. 3](03-compiler-and-elm.md), [ch. 4](04-engine-and-routing.md) |
+| FHIR ingest from a live WebChart tenant | **Built, but pulling** — SMART Backend Services, read-only, on a schedule (S2) |
+| A compliance answer per subject and measure | **Built** — versioned, read-only `GET` ([`COMPLIANCE_API.md`](../COMPLIANCE_API.md)) |
+| Population dashboards for a quality manager | **Built** — the manager surface is the one part of this diagram that is real |
+| WebChart pushing an encounter as it happens | Not built |
+| Submit a bundle, get findings back synchronously | Not built — the closest thing is the QRDA import route (S5), which evaluates a supplied document but is not shaped for a live encounter |
+| Quality rendered inside WebChart's own UI | Not built |
+| Tasks and documents written back into WebChart | Not built — the integration is read-only in both directions today |
+| Send/receive reconciliation between the two systems | Not built |
+
+One connection worth drawing, because it turns an existing refusal into a feature. The compliance
+API's `mode=preview` deliberately returns **501 on a WebChart-configured stack** (ADR-061): preview
+composes a *synthetic* bundle, and reporting demo playback as an evaluation of a live tenant would
+be a lie. An endpoint where WebChart submits a **real** bundle and gets findings back is exactly
+what makes that answer honest — the caller supplies the data, so nothing is being simulated. The
+501-shaped hole in today's API is the shape of step 2 above.
