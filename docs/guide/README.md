@@ -69,25 +69,59 @@ flowchart TB
 
 1. **① Build time** — happens once, output committed to git ([ch. 2](02-cql-and-authoring.md),
    [3](03-compiler-and-elm.md), [4](04-engine-and-routing.md)). Our 17 CQL libraries compile
-   through the HL7 translator into committed ELM trees; CMS's content is vendored at a pinned
-   commit, reduced and checksummed, gated on 410 of 410 test cases.
-2. **② Data in** ([ch. 6](06-data-and-databases.md)) — WebChart, read over SQL and turned into
-   FHIR; the synthetic roster (150 people); or a quality report uploaded from another system.
-3. **③ Prepare** ([ch. 4](04-engine-and-routing.md), [5](05-fhir.md)) — one FHIR record per
-   person, the code lists resolved, the compliance period decided.
+   through HL7's own JavaScript translator (no JVM anywhere) into committed ELM trees — 1.2 MB
+   across those 17 libraries plus `FHIRHelpers`, bundled straight into the deployed code so the
+   running worker never reads a measure from disk. CMS's content is vendored from a pinned commit,
+   never `HEAD`: the ~16 MB bundle is trimmed to the Measure, Libraries and compiled ELM, its
+   licensed code lists split into a gitignored sidecar whose SHA-256 is committed instead of the
+   codes themselves, capped or absent value sets completed from VSAC at a pinned release, and the
+   result graded against CMS's own test patients — **410 of 410 exact**, across all 8 vendored
+   measures, before anything runs against a real person.
+2. **② Data in** ([ch. 6](06-data-and-databases.md)) — four ways in, all producing the same
+   shape. The synthetic roster: 150 employees generated from a fixed seed, carrying real LOINC/CPT
+   codes so the official CMS logic has something genuine to match. WebChart, read two ways behind
+   one seam — locally over SQL through the shim (56 patients, opt-in), or a live tenant over SMART
+   Backend Services auth. And QRDA Category I import: someone else's patient-level quality
+   documents, parsed by a hand-rolled CDA parser and mapped into the same FHIR shape — the path
+   that proved the engine's answers against a third party's own published results, matching on all
+   150 of 150 and 64 of 64 subjects tested.
+3. **③ Prepare** ([ch. 4](04-engine-and-routing.md), [5](05-fhir.md)) — whatever the source, the
+   engine only ever sees one shape: one FHIR bundle per person, holding the patient, their program
+   enrollment, any documented exemption, and the clinical events the measure reads, stamped with
+   the QI-Core profiles CMS's logic checks for. Code lists are resolved — a measure never says "a
+   mammogram," it says "any code in this list of 92" — and the evaluation is assigned to the
+   measure's own compliance cycle rather than today's date, the one decision that makes a nightly
+   rerun update a case instead of duplicating it.
 4. **④ Evaluate**, routed per measure ([ch. 4](04-engine-and-routing.md)) — 12 of 14 measures run
-   through our engine, walking the trees built at build time; 2 of 14 run the reference
-   calculator directly against CMS's own files.
-5. **⑤ Persist** ([ch. 6](06-data-and-databases.md)) — the outcome plus every rule value, a case
-   keyed so it cannot duplicate, an audit row, and the monthly rollup figures.
-6. **⑥ Outputs** ([ch. 1](01-big-picture.md), [5](05-fhir.md)) — the dashboard/worklist/Studio, a
-   versioned API for MIE, spreadsheets, the FHIR result plus two quality-report formats, and the
-   audit pack.
-7. **Alongside — the SQL path** ([ch. 7](07-sql-and-the-bridge.md)) — the same rule description
-   generates committed SQL that runs directly inside WebChart's database. It is dotted rather than
-   solid because it is differentially tested against the engine but deliberately not wired into
-   the application; whether it becomes solid is one of the two open decisions in
-   [chapter 9](09-state-and-roadmap.md).
+   through our own engine: the compiled tree, the resolved code lists and the bundle handed to
+   `cql-execution`, about 68 ms per person, returning a value for every named rule plus the
+   verdict. 2 of 14 run the CMS reference calculator directly against CMS's own unmodified file, in
+   a quarantined package reached only by a lazy import, returning population membership instead —
+   translated to our five verdicts using per-measure recorded semantics, because there is no safe
+   default (a diabetes measure's numerator means poor control, the inverse of most).
+5. **⑤ Persist** ([ch. 6](06-data-and-databases.md)) — one row per person per measure per run: the
+   verdict plus the value of every rule evaluated, never just the conclusion. The case is upserted
+   under a key that cannot duplicate — an operator's in-progress status is preserved, a
+   human-closed case is never reopened by a machine. A re-confirmation that changed nothing writes
+   no audit row; everything else writes an append-only `audit_events` row, no exceptions. Older
+   open cycles for the same person and measure are closed as rolled over, the run finishes, and the
+   monthly figures roll up last, once the run is already finished and structurally unable to fail
+   it.
+6. **⑥ Outputs** ([ch. 1](01-big-picture.md), [5](05-fhir.md)) — five kinds of output, eight
+   artifacts. The dashboard, worklist and Studio for daily use. A versioned compliance API for
+   MIE's own code — one person, one measure, one answer, a 404 rather than an empty success when
+   no run covers the question. Spreadsheets for the compliance officer. The standards documents — a
+   FHIR MeasureReport and both QRDA formats, all validating clean against their official rulers.
+   And an audit pack that puts a run, its outcomes, cases, audit rows and uploaded documents into
+   one artifact a surveyor can hold.
+7. **Alongside — the SQL path** ([ch. 7](07-sql-and-the-bridge.md)) — a rule simple enough to have
+   a second backend safely (a windowed-recency check: a day count, a due-soon threshold, a code
+   list) generates both the CQL the engine runs and parameterized SQL from one shared description —
+   never two independent implementations of the same measure. The SQL runs directly inside
+   WebChart's own database and is differentially tested against the engine's own answer over the
+   same patients: four measures, 56 patients, two evaluation dates, zero divergence today. It is
+   drawn dotted because it is checked but deliberately not wired into the application; whether it
+   becomes solid is one of the two open decisions in [chapter 9](09-state-and-roadmap.md).
 
 For the same flows drawn as *sequences* — who calls what, in what order — see
 [chapter 10](10-scenarios.md).
