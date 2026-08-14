@@ -1,5 +1,92 @@
 # Journal
 
+## 2026-08-14 — two questions from Nicole: there is no CQF Ruler anywhere, and the engine was never the differentiator
+
+Recorded because both answers were arrived at by reading the tree rather than from memory, and both
+will otherwise be re-derived expensively later.
+
+**Q1 — does WorkWell use CQF Ruler to alert the provider? No, and nothing like it.** Verified by
+search: **zero** references to `cqf-ruler`, no CDS Hooks implementation, no `PlanDefinition`, no
+`$apply`. The only CDS Hooks mentions in the repo are in the archived ICE immunization-forecasting
+design docs, where it was weighed as a transport option and **not taken** (ADR-012 / ADR-029). Two
+things from that family *are* used and neither is alerting: stock **HAPI FHIR** is the local "fake
+WebChart" simulator (ADR-032), and **`cqf-fhir-cr`** — cqf-ruler's successor, cqf-ruler itself being
+archived in favour of HAPI plus the clinical-reasoning module — was used **once**, as B7's
+independent second opinion, cross-executing the CMS artifacts through an engine sharing no code with
+ours (**255/278** across six measures). A verification exercise, not a runtime component. The larger
+fact underneath the question: **WorkWell does not alert providers at all today**, which is the gap
+S7 exists to describe.
+
+**The finding worth keeping: CDS Hooks is the published standard for S7's alerting shape, and the
+S7 sketch is currently designed *around* it rather than *with* it.** The mapping is close enough to
+be uncomfortable. Hooks fire at workflow moments (`patient-view`, `encounter-start`, `order-sign`) —
+that is the four in-encounter checkpoints. Cards carry summary / detail / indicator
+(info · warning · critical) / suggestions / links — that is the alert shape, already specified. A
+card's **suggestion** can carry a proposed action the EHR applies — that is the task write-back,
+**standardised, and without WorkWell needing write credentials into a certified EHR**, which is the
+single heaviest requirement in S7 as written. A card's **link** can launch a SMART app — which is
+exactly the narrow "embed WorkWell for the drill-down" case, without embedding it on the alert path.
+Since every layer here having an outside authority attached is the actual product, inventing a
+proprietary submit-bundle-get-findings endpoint cuts against the thing being sold. **This is not a
+decision, and nothing was changed** — S7 still documents the bespoke endpoint. It is a candidate
+mechanism to weigh before anyone builds one.
+
+**Open, cheap to answer, and it changes the design rather than the estimate: does WebChart already
+speak CDS Hooks?** Not determinable from this repo. If it does, S7's largest unbuilt piece gets
+substantially cheaper *and* standards-shaped; if it does not, the bespoke endpoint is back on the
+table. Worth putting to Doug/MIE before anyone designs the endpoint. Note this is the same territory
+as **P1 / [#458](https://github.com/Taleef7/workwell/issues/458)** (the encounter-close quality
+check) — P1 is a slice of what S7 draws whole, and both run into ADR-061's `mode=preview` 501. That
+501 is worth reading as a *feature* here: preview refuses because it composes a **synthetic** bundle,
+so an endpoint (or a hook) where the EHR supplies a **real** bundle is precisely what makes that
+answer honest. The hole in today's API is the shape of the thing that would fill it.
+
+**Q2 — what makes WorkWell a better engine than the existing ones? It is not one, and
+`docs/PACKAGES.md` already says so in writing.** The engine *composes* `cql-execution` rather than
+competing with it, and PACKAGES states that **no performance or conformance comparison against
+`fqm-execution` has been run, so none is claimed**. The strongest evidence is a routing choice made
+against our own package: **the two CMS measures live in production run on `fqm-execution`, not on
+`@work-well/measure-engine`.** That is deliberate rather than a shortfall — a claim like "this
+person is overdue" is checkable by somebody who does not trust us *because* it traces to a published
+measure on a reference engine against NLM code lists graded by the measure authors' own cases. A
+proprietary "better" engine would make the claim **less** checkable, not more.
+
+**What is actually differentiated, in descending order of defensibility.** (1) **The occupational
+content** — nobody publishes CQL for OSHA hearing conservation, respirator surveillance or hazwoper
+medical monitoring, so a competitor can download every CMS artifact in existence and still not have
+it (locked decision 6). (2) **Evidence retention as a deliberate non-optimisation** — every named
+rule is evaluated and kept even when nothing downstream asks for it; an optimiser would delete
+exactly the thing we sell. (3) **Packaging** — two dependencies, no `node:` builtins, content
+**injected rather than shipped** (enforced as a compile error), Workers-portable; `fqm-execution`
+drags a large dependency tree, which is why `official-executor` is deliberately unpublished
+(ADR-063). This is the one place a measurable engineering claim exists. (4) Everything around the
+engine — cases, audit, exports, the Studio — which is most of the product and none of it engine work.
+
+**Counter-evidence recorded rather than smoothed over.** On speed the comparison runs *against* us:
+the authored engine is ~**68 ms/subject**, while `fqm-execution` batched is **11–16 ms** (171 ms
+unbatched). Not apples to apples — authored returns a value per rule, the reference calculator
+returns population booleans, so it is more information for more work — but nobody should read it as
+a speed win. And ADR-060's **1,622 of 1,835** language-conformance result has its failures in the
+**shared** translator and engine, not in anything we wrote: we inherit upstream's gaps along with
+its credibility, including `1L + 2L` evaluating to `12`.
+
+**A third thing surfaced on the way: the patient feedback loop is outbound only.** Outreach goes out
+over `EMAIL` / `SMS` / `PHONE` (simulated by default), a delivery status comes back, and it is
+recorded as a `case_action` with an audit row. There is **no inbound path** — no `Questionnaire`, no
+survey, no patient-reported outcome, no capture of a reply. The consequence worth stating: **"did the
+outreach work?" is answered by re-evaluating clinical data** (`rerun-to-verify` checks whether the
+EHR now shows the test happened), not by hearing from the person. A patient replying "I already had
+that done elsewhere" has nowhere to land, and delivery status is "the message sent", which is a much
+weaker signal than "the person engaged".
+
+Also today, and unrelated to the above: the guide's diagrams were simplified across the board — the
+whole-thing-on-one-page flowchart cut from 22 sentence-length nodes to 7 short-labelled ones with the
+detail moved beneath it, all six scenario diagrams abstracted (implementation lanes folded, `Postgres`
+renamed `Database`, arrow routing corrected where a response was drawn bypassing the intermediary
+that actually relays it), and a "who's who" glossary added. **S7 was added** as the first scenario in
+the chapter that documents behaviour which does not exist — the target architecture for the WebChart
+seam — marked as such in three places, with a per-part table of what exists today.
+
 ## 2026-08-12 — three product ideas become written proposals, not code
 
 The 2026-08 feedback carried three product-shaped ideas, and they are written up rather than built —
