@@ -19,43 +19,60 @@ Mechanisms: [chapter 4](04-engine-and-routing.md) (engine + router),
 ```mermaid
 sequenceDiagram
   autonumber
-  actor Op as Operator (Studio)
-  participant Sch as Scheduler (nightly)
-  participant API as Worker API (/api/runs)
+  actor Op as Operator (Studio), or the nightly scheduler
+  participant API as Worker API
   participant Pipe as Run pipeline
-  participant Rt as Per-measure router
   participant Eng as Authored engine
   participant OFx as Official executor
-  participant DB as Postgres (runs, outcomes, cases, audit_events)
-  Op->>API: POST /api/runs/manual (scope: programs / site / measure)
-  Note over Sch,Pipe: or: nightly tick — same pipeline from here on
-  API->>Pipe: execute (large scopes continue as a background promise — the response says RUNNING)
-  Pipe->>DB: run row RUNNING + run log
-  Pipe->>Pipe: resolve roster + compliance period per measure
+  participant DB as Postgres
+  Op->>API: start a run — manual scope, or the nightly tick
+  API->>Pipe: execute (large scopes continue in the background — the response says RUNNING)
+  Pipe->>DB: run row RUNNING
   loop each measure in scope
-    Pipe->>Rt: which engine runs this measure?
-    alt routed official (cms122, cms125 on demo/production)
-      Rt->>OFx: evaluate the batch against the CMS artifact
+    alt routed official (cms122, cms125 — demo/production only)
+      Pipe->>OFx: evaluate the batch against the CMS artifact
       OFx-->>Pipe: population results + evidence
     else authored (the other 12)
-      Rt->>Eng: walk the committed ELM tree per subject
+      Pipe->>Eng: walk the committed ELM tree per subject
       Eng-->>Pipe: Outcome Status + every rule value
     end
-    Pipe->>DB: outcome + evidence_json per subject
-    Pipe->>DB: case upsert → CREATED / UPDATED / REOPENED / RESOLVED / EXCLUDED / UNCHANGED
-    Pipe->>DB: CASE_* audit event (every disposition except UNCHANGED)
+    Pipe->>DB: persist outcome, case upsert, audit event
   end
-  Pipe->>DB: close strictly-older-cycle cases, then RUN_COMPLETED audit
-  Op->>API: GET /api/runs/:id — summary, distribution, pass rate
+  Pipe->>DB: close older cycles, mark run COMPLETED
+  Op->>API: GET the result — summary, distribution, pass rate
 ```
 
-Three things the diagram encodes on purpose. **Routing is per measure** — the router decides
-inside the loop, not once per run. **Every state change writes an audit row** — the `DB`
-lane accumulates them. And **an idempotent re-confirm is silent**: the `UNCHANGED` disposition
-writes no case event, so a nightly run records one `RUN_COMPLETED`, not hundreds of noise
-events. One honesty note: for asynchronous scopes the run *message* (e.g. the zero-in-IPP
-warning) exists only on the synchronous response; the run list does not carry it — the log
-timeline does.
+What happens, in order:
+
+1. **A run starts one of two ways that land in the same pipeline.** An operator presses Run in
+   the Studio with a scope — one measure, one site, one person, or everything — or the nightly
+   scheduler fires on its own (`WORKWELL_SCHEDULER_ENABLED`, demo/production only). From here the
+   two are indistinguishable; nothing downstream knows or cares which one started the run.
+2. **Large scopes don't hold the request open.** A full run takes about a minute, so the API
+   answers `RUNNING` immediately and the pipeline keeps going in the background while the Studio
+   polls for the result.
+3. **The run row is written before anything is evaluated**, so a crash partway through still
+   leaves a `RUNNING` row an operator can see, rather than no record at all.
+4. **Routing happens per measure, inside the loop — not once for the whole run.** Twelve of the
+   fourteen runnable measures walk our own committed ELM tree. Two (`cms122`, `cms125`, and only
+   where an environment sets `WORKWELL_OFFICIAL_MEASURES`) run CMS's own published artifact
+   through the quarantined official executor instead. Both branches return the same shape, so
+   nothing downstream needs to know which one answered.
+5. **"Persist" on the diagram is three writes folded into one arrow:** the outcome row (verdict
+   plus the value of every rule), an idempotent case upsert (keyed so a rerun updates instead of
+   duplicating — one of six dispositions, from `CREATED` to `UNCHANGED`), and an audit event for
+   every disposition except `UNCHANGED` — a re-confirmation that changed nothing writes nothing,
+   which is why a nightly run logs one `RUN_COMPLETED`, not a few thousand identical rows.
+6. **Finalizing also closes stale cases.** Once every subject in scope has been evaluated, any
+   case still open from a strictly older compliance cycle for someone this run touched is closed
+   as rolled over, before the run itself is marked `COMPLETED`.
+7. **Reading the result is a separate call**, independent of whether the run answered
+   synchronously or is still finishing in the background: `GET /api/runs/:id` returns the
+   evaluated count, the pass rate, and the per-outcome distribution.
+
+One honesty note the diagram can't show: for asynchronous scopes, a run-level warning (for
+example, nobody at all in a measure's initial population) exists only on the *synchronous*
+response — the run list doesn't carry it, the log timeline does.
 
 ## S2 — WebChart end-to-end: from a live EHR to a compliance answer
 
