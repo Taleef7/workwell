@@ -1,5 +1,86 @@
 # Journal
 
+## 2026-08-14 — M-E1 leads with immunization, and CDS Hooks turns out to be a specification rather than a dependency
+
+Two owner decisions, taken off the back of the questions in the entry below.
+
+**TODO — publish the WorkWell API contract as OpenAPI and serve Swagger UI.** The TypeScript backend is
+live, but authenticated probes against both production and staging confirm that `/api/openapi.json`,
+`/api/swagger`, `/swagger-ui`, and `/api/docs` all return `501 not_implemented`. The Swagger UI at
+`manager.os.mieweb.org/api` documents MIE Create-a-Container, not WorkWell. Add a versioned OpenAPI
+document for the WorkWell integration surface (beginning with `/api/v1/compliance`), expose a Swagger UI,
+test both routes in CI/deployment smoke checks, and correct the stale OpenAPI claim in `ARCHITECTURE.md`.
+
+**Decision 1 — M-E1's first content pack is immunization, not OSHA.** Three reasons, in order of
+weight. **A written specification already exists**: WebChart's immunization surveillance system
+reports carry a denominator (has a qualifying encounter, with a few age exceptions — shingles at 50+),
+a numerator (met the appropriate dose count), and a next-due forecast with the appropriate spacing
+(hep B at four weeks, then six months). Authoring from an existing implementation is far cheaper than
+authoring from regulation text, which is what `OshaHearingStandardThresholdShift` demanded and why it
+took the care it did. **It is unambiguously occupational**: healthcare employers require immunizations
+*above* the general population — two MMR doses where most people need one, because their staff are
+continuously exposed — which is exactly locked decision 6's "the measures nobody publishes". And **it
+has a counterpart waiting**: a parallel MIE workstream owns configurable per-client vaccine rules, with
+WorkWell's half being compliance display and alerts. M-E1 previously had nobody downstream of it.
+What changes: M-E1 led with OSHA (hearing conservation, respirator, hazwoper) and now leads with
+immunization, the OSHA content sitting behind it. The hearing-conservation measure stays as the worked
+example of authoring straight from a regulation.
+
+**On the port itself: do not hand-translate the SQL into CQL.** That is the same intractable direction
+as ELM→SQL and fails for the same reason — two implementations of one set of semantics, with no way to
+say which is right (chapter 7, ADR-025). The better answer is the architecture already built: express
+the rule at the **parameter tier** and generate *both* sides from it (`@work-well/measure-codegen` plus
+`generate-sql.ts`), which is already parity-tested at 4 measures × 56 patients × 2 dates with zero
+divergence. **Stated rather than glossed**: today's codegen knows only *windowed recency*, and
+immunization needs a new rule shape — dose count, minimum spacing, next-due forecast. That is the same
+pattern extended, not a new architecture. **Consequence worth noticing**: this would answer the
+question that has sat open in chapter 7 since July — whether the CQL→SQL path is a product path or a
+proof that has done its job. It would make it a product path, and give it its first real consumer.
+**Unknown until the rule definitions are actually seen**: whether the parallel workstream's per-client
+rule shape maps onto rule parameters. If it does, those definitions feed codegen directly and nobody
+ports anything by hand.
+
+**Decision 2 — CDS Hooks is adopted as a SPECIFICATION. ADR-008 stands, and `cqf-fhir-cr` does not
+enter the runtime.** The distinction that decides it: **CDS Hooks is a JSON request/response contract
+over HTTPS** — a `/cds-services` discovery endpoint plus one invoke endpoint per service, returning
+cards (summary · detail · indicator · suggestions · links). Serving it requires **no Java at all**; it
+is two routes on the worker that already exists. `cqf-fhir-cr` is merely *one implementation* that
+serves CDS Hooks by evaluating `PlanDefinition`s — and WorkWell already evaluates measures. Adopting it
+at runtime would not be reusing a wheel we lack; it would be **replacing a working engine with a second
+one**, which is the exact failure mode "don't reinvent the wheel" warns against, pointed the other way.
+So: **reuse the standard** — free, JVM-free, and the strongest available form of not-reinventing, since
+it adopts the community's contract instead of the bespoke submit-a-bundle endpoint S7 currently
+sketches. **Do not reuse the implementation** at runtime, absent a specific capability our engine
+lacks; none was found. `cqf-fhir-cr` keeps the role it has already earned — B7's independent
+cross-check by an engine sharing no code with ours (255/278). **S7 is deliberately NOT yet updated**:
+it still documents the bespoke endpoint, and rewriting it waits on whether WebChart speaks CDS Hooks as
+a client.
+
+**Recorded so it is not re-litigated: reaching for a Java engine later would not cost ADR-008 either.**
+ADR-029 already runs **ICE — Java, OpenCDS, Drools** — as a long-lived self-hosted sidecar behind a
+port, with the TypeScript adapter falling back to the simulated forecaster when the base URL is unset
+("inert-unless-configured holds… behavior is byte-identical"). That ADR **cites ADR-008 approvingly
+while doing it**, because ADR-008's constraint is that WorkWell must not *require* a JVM to run, test
+or deploy — and an optional sidecar does not. Local dev, CI and the SQLite floor all stay JVM-free. A
+Java engine behind a port is therefore an established shape here, not a precedent that needs setting.
+Also worth carrying: ADR-029's own context shows the transport question — *"CDS Hooks vs ICE API vs a
+WebChart-ICE bridge"* — was deferred to MIE back in July, so CDS Hooks has been an open thread in this
+repo since then rather than a new idea.
+
+**A related doubt, recorded undecided: ICE may be the wrong instrument for this particular use case.**
+ICE scores the general ACIP schedule, while the occupational requirement is deliberately *above* it.
+ADR-029 already establishes that ICE and WorkWell can legitimately disagree and that this is not a
+defect — but for immunization *compliance* the forecast probably wants to come from the same rule
+parameters (spacing arithmetic) rather than from ICE. Not decided, and it should be.
+
+**Open for the next joint session** (gated on the MIE outage clearing). Does WebChart already speak
+CDS Hooks as a **client**? — this changes the design, not merely the estimate, and it is the cheapest
+question on the list. The shape of the per-client vaccine rule definitions. Where the forecast comes
+from. And one correction to carry in explicitly: **no CDS hook fires in WorkWell today** — no hook, no
+card, no `PlanDefinition`, no `$apply`; the alerts exist only on WorkWell's own screens. Saying so
+plainly and early matters, because an assumption that point-of-care alerting already works would leave
+S7 unprioritised and the gap found much later.
+
 ## 2026-08-14 — two questions from Nicole: there is no CQF Ruler anywhere, and the engine was never the differentiator
 
 Recorded because both answers were arrived at by reading the tree rather than from memory, and both
