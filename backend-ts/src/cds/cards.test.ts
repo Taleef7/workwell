@@ -9,8 +9,11 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readdirSync, readFileSync } from "node:fs";
 import { buildComplianceCards, cardUuid, noEvaluationCard, suggestionUuid, type CardInput } from "./cards.ts";
 import { ORDER_CATALOG } from "../order/order-catalog.ts";
+import { dispositionFor } from "../case/case-logic.ts";
+import { proposeOrders } from "../order/order-proposal.ts";
 import type { StandingOrderProvider } from "../order/standing-order-provider.ts";
 
 /** No standing orders, so suppression never confounds a suggestion assertion. */
@@ -41,6 +44,7 @@ function row(measureId: string, status: string, extra: Partial<CardInput> = {}):
 
 const opts = (approved: ReadonlySet<string> = APPROVED) => ({
   subjectId: "emp-006",
+  patientId: "emp-006",
   approvedOrderCodes: approved,
   standingOrders: NO_STANDING_ORDERS,
   studioBaseUrl: "https://studio.example.org",
@@ -63,23 +67,48 @@ test("an open gap becomes one card carrying the answer, its provenance and a lin
   ]);
 });
 
-test("`critical` is never emitted, for any open status", async () => {
+test("`critical` is never emitted: OVERDUE is the ceiling, and it is `warning`", async () => {
   // In CDS Hooks `critical` means the user must not proceed. WorkWell is SUPPLEMENTARY to WebChart
-  // (locked decision 1) and is not entitled to say that about someone else's encounter. `CdsCard` makes
-  // it a type error; this asserts the runtime consequence over every status that produces a card.
-  for (const status of ["OVERDUE", "DUE_SOON", "MISSING_DATA"]) {
+  // (locked decision 1) and is not entitled to say that about someone else's encounter.
+  //
+  // **The type is the enforcement, not this test.** `CdsCard.indicator` is `"info" | "warning"`, so an
+  // assertion that the value is one of those two cannot fail for any implementation — a first version of
+  // this test did exactly that and read as coverage while being unfailable (review). What IS failable, and
+  // what actually pins the ceiling, is the `priorityFor` mapping below: flip either branch and this fails.
+  const byStatus: Array<[string, string]> = [
+    ["OVERDUE", "warning"],
+    ["DUE_SOON", "info"],
+    ["MISSING_DATA", "info"],
+  ];
+  for (const [status, expected] of byStatus) {
     const cards = await buildComplianceCards([row("audiogram", status)], opts());
     assert.equal(cards.length, 1, `${status} must produce a card`);
-    assert.ok(
-      cards[0]!.indicator === "info" || cards[0]!.indicator === "warning",
-      `${status} produced indicator ${cards[0]!.indicator}`,
-    );
+    assert.equal(cards[0]!.indicator, expected, `${status} must map to ${expected}`);
   }
-  // OVERDUE is the most urgent thing we say, and it is `warning` — the ceiling.
-  const overdue = await buildComplianceCards([row("audiogram", "OVERDUE")], opts());
-  assert.equal(overdue[0]!.indicator, "warning");
-  const dueSoon = await buildComplianceCards([row("audiogram", "DUE_SOON")], opts());
-  assert.equal(dueSoon[0]!.indicator, "info");
+  // And read through a widened type, so this keeps working — and keeps failing — if `CdsCard` ever admits
+  // `critical`. Without the widening the compiler makes the comparison unreachable.
+  const emitted = (await buildComplianceCards([row("audiogram", "OVERDUE")], opts()))[0]!;
+  assert.notEqual((emitted.indicator as string), "critical");
+});
+
+test("a FAILED evaluation is reported as ours, not as a missing record in the chart", async () => {
+  // PARTIAL_FAILURE is terminal, so its rows are served, and a subject whose evaluation threw is persisted
+  // MISSING_DATA + evidence.evaluationError (DATA_MODEL_CONTRACTS §5). Without a branch for it, `deriveCell`
+  // falls through to "No record on file" and `nextActionFor` says "Collect the missing documentation" —
+  // asserting a fact about the PATIENT when our engine threw (review).
+  const failed = row("audiogram", "MISSING_DATA", {
+    evidence: { evaluationError: "CQL engine failure", message: "boom" },
+  });
+  const cards = await buildComplianceCards([failed], opts());
+  assert.equal(cards.length, 1);
+  const card = cards[0]!;
+  assert.match(card.summary, /could not be evaluated/);
+  assert.equal(card.indicator, "info", "our failure is never a warning about the patient");
+  assert.match(card.detail!, /no compliance gap is being asserted either way/);
+  assert.doesNotMatch(card.detail!, /Collect the missing/);
+  assert.doesNotMatch(card.summary, /missing data/i);
+  // And it must never carry an order derived from a status the engine did not compute.
+  assert.equal(card.suggestions, undefined);
 });
 
 test("a suggestion is offered ONLY for an APPROVED order code", async () => {
@@ -156,6 +185,22 @@ test("no studio base URL means no links, never a broken one", async () => {
   assert.equal(cards[0]!.source.url, undefined);
 });
 
+test("a suggested order references the id the CLIENT sent, not WorkWell's internal subject id", async () => {
+  // On a live tenant these differ: WorkWell persists `wc|4821`, the hook supplies `4821`. A ServiceRequest
+  // referencing `Patient/wc|4821` names nothing the client can resolve, and `|` is not a legal FHIR id — so
+  // the suggestion could not be applied (Codex review).
+  const cards = await buildComplianceCards([row("audiogram", "OVERDUE")], {
+    ...opts(),
+    subjectId: "wc|4821",
+    patientId: "4821",
+  });
+  const resource = cards[0]!.suggestions![0]!.actions[0]!.resource as { subject: { reference: string } };
+  assert.equal(resource.subject.reference, "Patient/4821");
+  assert.doesNotMatch(resource.subject.reference, /\|/, "a FHIR id may not contain a pipe");
+  // The internal id still keys card identity, so feedback correlation is unaffected.
+  assert.equal(cards[0]!.uuid, await cardUuid(RUN, "wc|4821", "audiogram"));
+});
+
 test("card and suggestion uuids are deterministic, UUID-shaped, and distinct per measure", async () => {
   // Determinism is what lets the feedback endpoint exist with no schema change: the id is recomputable
   // from (runId, subjectId, measureId) rather than stored.
@@ -163,6 +208,11 @@ test("card and suggestion uuids are deterministic, UUID-shaped, and distinct per
   const again = await cardUuid(RUN, "emp-006", "audiogram");
   assert.equal(a, again, "the same card must always get the same uuid");
   assert.match(a, /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+  // A CONFORMANT uuid, not merely a hash in uuid shape: CDS Hooks types `card.uuid` as a UUID, so a client
+  // validating the version nibble or storing it in a native `uuid` column would reject a bare hash (review).
+  // Version 8 = RFC 9562 "custom", which is what a deterministic application-defined id is; variant 10xx.
+  assert.equal(a[14], "8", "version nibble must be 8");
+  assert.ok("89ab".includes(a[19]!), `variant nibble must be 8/9/a/b, got ${a[19]}`);
   assert.notEqual(a, await cardUuid(RUN, "emp-006", "cms125"), "different measure → different uuid");
   assert.notEqual(a, await cardUuid(RUN, "emp-007", "audiogram"), "different subject → different uuid");
   assert.notEqual(a, await cardUuid("other-run", "emp-006", "audiogram"), "different run → different uuid");
@@ -172,6 +222,41 @@ test("card and suggestion uuids are deterministic, UUID-shaped, and distinct per
   const cards = await buildComplianceCards([row("audiogram", "OVERDUE")], opts());
   assert.equal(cards[0]!.uuid, a, "the emitted card must carry the derived uuid");
   assert.equal(cards[0]!.suggestions![0]!.uuid, await suggestionUuid(RUN, "emp-006", "audiogram"));
+});
+
+test("the carded statuses and the order-proposal statuses are the SAME set — the coupling the dedupe rests on", () => {
+  // Cards are selected by `dispositionFor(status) === "OPEN"`; proposals by `AT_RISK` in order-proposal.ts.
+  // Today those sets are identical, which is why the first card to claim a collapsed proposal is always the
+  // row that created it. If they diverge — someone adds a status to one and not the other — the claiming
+  // card and the ServiceRequest's `reasonCode` would name DIFFERENT measures, and the genuinely at-risk
+  // measure would silently lose its suggestion to a non-at-risk one (review flagged this as load-bearing and
+  // unpinned). This test is the pin; it has no other purpose.
+  const ALL = ["COMPLIANT", "DUE_SOON", "OVERDUE", "MISSING_DATA", "EXCLUDED", "DECLINED", "IN_PROGRESS"];
+  const carded = ALL.filter((s) => dispositionFor(s) === "OPEN").sort();
+  // Mirrors AT_RISK's keys. Kept as a literal so a change to either side shows up as a diff here.
+  const atRisk = ["OVERDUE", "DUE_SOON", "MISSING_DATA"].sort();
+  assert.deepEqual(carded, atRisk);
+  // And prove the consequence rather than just the sets: an at-risk status yields a proposal for a mapped
+  // measure, so a carded row can always claim one.
+  for (const status of carded) {
+    const { proposed } = proposeOrders([{ subjectId: "emp-006", measureId: "audiogram", status }], NO_STANDING_ORDERS);
+    assert.equal(proposed.length, 1, `${status} is carded, so it must also propose`);
+  }
+});
+
+test("the CDS sources contain no invisible control characters", () => {
+  // Twice in one session a `sed -i` over this UTF-8 source replaced a space with a literal NUL byte, which
+  // reached a commit: it typechecked, every test passed, and the only symptom was `grep` reporting the file
+  // as binary. An invisible byte in a string literal that feeds a hash is exactly the kind of thing that is
+  // correct-by-accident until it is not. Cheap to assert, and it would have caught both occurrences.
+  const dir = new URL(".", import.meta.url);
+  for (const name of readdirSync(dir)) {
+    if (!name.endsWith(".ts")) continue;
+    const text = readFileSync(new URL(name, dir), "utf8");
+    // Tab, LF and CR are legitimate; nothing else below 0x20 is, and neither is a NUL.
+    const bad = [...text].filter((ch) => ch < " " && ch !== "\n" && ch !== "\r" && ch !== "\t");
+    assert.deepEqual(bad, [], `${name} contains ${bad.length} control character(s)`);
+  }
 });
 
 test("an absence of data is a CARD, and it does not claim compliance", async () => {

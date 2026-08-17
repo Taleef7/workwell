@@ -25,6 +25,7 @@ import { createSqliteD1 } from "@mieweb/cloud-local";
 import { RUN_STORE_FLOOR_DDL } from "../stores/sqlite/schema.ts";
 import { SqliteRunStore } from "../stores/sqlite/run-store-sqlite.ts";
 import { SqliteOutcomeStore } from "../stores/sqlite/outcome-store-sqlite.ts";
+import { SqliteValueSetStore } from "../stores/sqlite/value-set-store-sqlite.ts";
 import { openApiDocument, type OpenApiSchema } from "../openapi/spec.ts";
 import { OPENAPI_PATH } from "./openapi.ts";
 import { PATIENT_VIEW_SERVICE_ID } from "../cds/discovery.ts";
@@ -112,6 +113,18 @@ before(async () => {
     WORKWELL_WEBCHART_API_KEY: "k",
   } as unknown as Env;
 
+  // An APPROVED mapping, so the card this fixture produces carries a `suggestion`. Without it
+  // `approvedOrderCodes` is empty and the deepest, most drift-prone subschemas in the document —
+  // `suggestions[].actions[].resource`, and `selectionBehavior` — were never validated against a real
+  // response, while the test that DOES produce a suggestion does no schema validation (review).
+  const valueSets = new SqliteValueSetStore(db);
+  await valueSets.createTerminologyMapping({
+    id: crypto.randomUUID(),
+    localCode: "LOCAL-AUD-002", localDisplay: "Annual audiogram", localSystem: "urn:workwell:demo",
+    standardCode: "92557", standardDisplay: "Comprehensive audiometry evaluation",
+    standardSystem: "http://www.ama-assn.org/go/cpt", mappingStatus: "APPROVED", mappingConfidence: 0.98, notes: null,
+  });
+
   const runs = new SqliteRunStore(db);
   const outcomes = new SqliteOutcomeStore(db);
   const run = await runs.createRun({
@@ -149,17 +162,28 @@ test("the document is a well-formed OpenAPI 3.1 description with no dangling ref
   const operationIds = new Set<string>();
   const tagNames = new Set(doc.tags.map((t) => t.name));
 
+  /**
+   * Mark everything reachable from the PATHS outward, following `$ref` into its target.
+   *
+   * Two corrections from review. (1) Reachability must start at the paths, not at every component: the
+   * first version walked all component schemas, so a dead schema referencing another marked its target
+   * "referenced" and a pair of mutually-referencing dead schemas both survived. (2) It must follow a `$ref`
+   * into the referenced schema, or a schema reachable only through another (CdsService, via
+   * CdsDiscoveryResponse) reads as dead.
+   */
   const walk = (s: OpenApiSchema): void => {
     if (s.$ref) {
       const name = s.$ref.replace("#/components/schemas/", "");
       assert.ok(schemaNames.has(name), `dangling $ref: ${s.$ref}`);
-      referenced.add(name);
+      if (!referenced.has(name)) {
+        referenced.add(name);
+        walk(doc.components.schemas[name]!); // follow it; the guard above makes this cycle-safe
+      }
     }
     Object.values(s.properties ?? {}).forEach(walk);
     if (s.items) walk(s.items);
     if (typeof s.additionalProperties === "object") walk(s.additionalProperties);
   };
-  Object.values(doc.components.schemas).forEach(walk);
 
   for (const [path, item] of Object.entries(doc.paths)) {
     // Every `{param}` in the path must be declared, and every declared path param must be in the path.
@@ -175,6 +199,9 @@ test("the document is a well-formed OpenAPI 3.1 description with no dangling ref
         Object.values(r.content ?? {}).forEach((c) => walk(c.schema)),
       );
       Object.values(op.requestBody?.content ?? {}).forEach((c) => walk(c.schema));
+      // Parameter schemas too: the first version skipped them, so a dangling `$ref` in a query or path
+      // parameter passed silently (review).
+      (op.parameters ?? []).forEach((p) => walk(p.schema));
     }
   }
 
@@ -189,12 +216,35 @@ test("the document is served, publicly, at one canonical path", async () => {
   const served = (await res.json()) as { openapi: string; paths: Record<string, unknown> };
   assert.equal(served.openapi, "3.1.1");
   assert.deepEqual(Object.keys(served.paths).sort(), Object.keys(doc.paths).sort());
-  // Public: readable with no token, because reading a contract should not need credentials.
-  assert.deepEqual(authorize("GET", OPENAPI_PATH, null), { ok: true });
-  // The aliases the journal probed are deliberately NOT served — one canonical URL.
-  for (const alias of ["/api/openapi.json", "/api/swagger", "/swagger-ui", "/api/docs"]) {
-    assert.notEqual(authorize("GET", alias, null).ok && alias === OPENAPI_PATH, true);
+  // Public: readable with no token, because reading a contract should not need credentials. Proved by the
+  // `probe` above — an unauthenticated request through the real worker — NOT by an `authorize` assertion:
+  // `handleOpenApi` runs before the auth gate, so no rule participates in the decision (review).
+  assert.equal(res.status, 200);
+
+  // The aliases the journal probed are deliberately NOT served — one canonical URL. This must assert that
+  // they are UNROUTED, which means the worker's 501 catch-all. A previous version wrote
+  // `assert.notEqual(authorize(...).ok && alias === OPENAPI_PATH, true)`, where the `&&` is always false, so
+  // it passed for every possible implementation — the worst of the new guards, and not one I had
+  // mutation-checked (review).
+  // WITH a token, so this proves "not served" rather than merely "not reachable" — the three `/api/*`
+  // aliases match the AUTHENTICATED `/api/**` tail, so unauthenticated they are 401 and would pass a
+  // sloppier version of this assertion for the wrong reason.
+  const cm = await login("cm@workwell.dev");
+  for (const alias of ["/api/openapi.json", "/api/swagger", "/api/docs"]) {
+    const aliasRes = await worker.fetch(
+      new Request(`http://x${alias}`, { headers: { authorization: `Bearer ${cm}` } }),
+      env,
+      ctx,
+    );
+    const body = (await aliasRes.json()) as { error?: string };
+    assert.equal(aliasRes.status, 501, `${alias} must not be served`);
+    assert.equal(body.error, "not_implemented", `${alias} must fall through to the catch-all`);
   }
+  // `/swagger-ui` is outside `/api/`, where `authorize` permits by default, so it reaches the catch-all
+  // even anonymously — asserted separately so that difference is deliberate rather than assumed.
+  const swaggerUi = await worker.fetch(new Request("http://x/swagger-ui"), env, ctx);
+  assert.equal(swaggerUi.status, 501);
+  assert.equal(((await swaggerUi.json()) as { error?: string }).error, "not_implemented");
 });
 
 test("every documented status is produced by a real request through the real worker", async () => {

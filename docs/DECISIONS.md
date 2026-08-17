@@ -34,8 +34,9 @@ simultaneously claiming a document it did not serve and omitting the one contrac
 1. **Serve a hand-authored OpenAPI 3.1.1 document at one canonical path**, `GET /api/v1/openapi.json`,
    built by `backend-ts/src/openapi/spec.ts`. PERMIT: reading a contract should not require credentials, and
    the document carries shapes and role names, not patient data.
-2. **Scope is the PROMISED surface** — `/api/v1/compliance`, the three `/cds-services` operations, health
-   and version — and the document *says so*. The ~40 internal `/api/**` routes are excluded because
+2. **Scope is the PROMISED surface** — `/api/v1/compliance`, the three `/cds-services` operations, this
+   document itself, health and version: **seven operations** — and the document *says so*. The ~40 internal
+   `/api/**` routes are excluded because
    `COMPLIANCE_API.md` already draws that line ("everything else under `/api/` is internal and moves with
    the frontend"), and documenting them would advertise stability over paths that carry none.
 3. **Hand-authored, guarded by a contract test.** The alternatives each cost a dependency or a rewrite: zod
@@ -43,15 +44,22 @@ simultaneously claiming a document it did not serve and omitting the one contrac
    have, and TypeSpec would add a second hand-maintained source of truth with no coupling to a hand-rolled
    dispatcher. The recognised risk of hand-authoring is drift and the recognised answer is a contract test,
    so the test is treated as the other half of this decision rather than as optional garnish.
-4. **The guard is two-way coverage.** Every `(path, method, status)` the document declares is produced by a
-   real request through the real worker, and every response the tests observe is declared. A documented path
-   that is not routed fails with `documented but NOT ROUTED`; an undocumented status fails the other
-   direction. Mutation-checked three ways — deleting the route, removing a produced status, and requiring an
-   absent property each fail the intended assertion.
+4. **The guard is two-way coverage, and the second direction is bounded.** Every `(path, method, status)` the
+   document declares is produced by a real request through the real worker — that direction is complete, and a
+   documented path that is not routed fails with `documented but NOT ROUTED`. The reverse direction sees only
+   statuses some probe produced, so a real status no test exercises is neither documented nor caught: a
+   path-level `405`, a `500` on a DB outage, a `503` from `startupGuard`. Stating the bound rather than
+   implying completeness (review). Mutation-checked three ways — deleting the route, removing a produced
+   status, and requiring an absent property each fail the intended assertion.
 5. **Redocly lints the document in CI**, pinned exactly, telemetry off, with **no ignore file**, because it
    catches a class the contract test cannot. It did so immediately: five uses of `nullable`, which OpenAPI
    3.1 removed in favour of type unions. The five remaining warnings are explained in `spec.ts` rather than
-   silenced.
+   silenced. **Stated precisely, because "pinned exactly" overstates it:** the *top-level* version is pinned,
+   but `npx --yes` resolves that package's transitive tree fresh on each run with no lockfile, in a job that
+   holds repository credentials. Elsewhere this repo pins by SHA-256 and gates on byte-reproducibility. The
+   trade taken here is a non-reproducible dev tree in exchange for not adding a `package.json` dependency;
+   if that becomes unacceptable, the alternative is a committed devDependency, not a different linter
+   (review).
 6. **3.1.1, not 3.2.** Renderer support for 3.2 is worse than absent, it is *silent* — Redoc 2.5.3 accepts a
    3.2 document by aliasing it to 3.1, so 3.2-only constructs are ignored rather than flagged, and Spectral
    caps at 3.1. 3.1's Schema Objects are literal JSON Schema 2020-12, which is what makes a zero-dependency
@@ -137,8 +145,31 @@ implementation* at runtime would have replaced a working engine with a second on
     client re-firing the hook for an unchanged run gets the same uuid, so repeat feedback does not fragment.
     The handler records the uuid verbatim and asserts nothing about what it referred to.
 
+11. **A FAILED evaluation is reported as ours.** `PARTIAL_FAILURE` is terminal, so its rows are served, and a
+    subject whose evaluation threw is persisted `MISSING_DATA` with an `evaluationError`
+    (`DATA_MODEL_CONTRACTS.md` §5). `deriveCell` has no branch for that and falls through to "No record on
+    file", after which `nextActionFor` says "Collect the missing documentation" — asserting a fact about the
+    **patient** when the truth is that our engine threw. Tolerable on a dashboard; in someone else's chart it
+    is the same confusion decision 4 exists to prevent. Such a row now gets a "could not be evaluated" card,
+    `info`, with no suggested order (review).
+12. **A suggested resource references the id the CLIENT sent.** `toServiceRequest` writes
+    `Patient/<workwell subject id>`, which is right for `GET /api/orders/proposals` and wrong the moment the
+    resource crosses into an EHR: on a live tenant that is `Patient/wc|4821`, which names nothing the client
+    can resolve and is not a legal FHIR id. Re-pointed at the hook's `patientId` in the CDS layer only, so
+    the existing orders surface is unchanged. Card identity still uses the internal id (Codex review).
+13. **Feedback fails loudly, and is bounded.** Because the audit event is the only record, a failed write
+    returns **503** with `recorded`/`of` rather than a `200` that tells the client never to retry — invoke
+    stays best-effort, since its cards are correct regardless. And a request carries at most 100 entries with
+    `userComment` capped at 8000 characters, because each entry is an append to the append-only ledger by a
+    machine credential (review; both reviewers raised the first independently).
+
 **Consequences.** WorkWell can now be pointed at by any conformant CDS client, which changes the joint-call
-question from "should we do this?" to "does WebChart speak it?". CORS is **not** relaxed: production keeps its
+question from "should we do this?" to "does WebChart speak it?". The card-selection predicate
+(`dispositionFor(...) === "OPEN"`) and the order-proposal predicate (`AT_RISK`) must stay the same set, or a
+carded measure could claim a proposal created for a different one; a test now pins that equality, since
+nothing in either file mentioned the other. `userComment` is the first path putting unstructured clinical
+prose into `audit_events`, which reaches `GET /api/audit-events/export` — noted in
+`PRODUCTION_READINESS_2026-07.md`. CORS is **not** relaxed: production keeps its
 exact-origin allowlist, so a browser-based client's origin must be added deliberately — the spec requires CORS
 support but explicitly declines to specify an allowlist rule. Nothing here is justified by certification: ONC's
 (b)(11) DSI criterion does not name CDS Hooks.

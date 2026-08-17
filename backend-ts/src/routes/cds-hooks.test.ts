@@ -216,10 +216,24 @@ test("every invocation writes an audit event carrying the uuids it emitted", asy
   await post(INVOKE, hookBody("nobody-at-all"));
   assert.equal(await count("CDS_HOOKS_INVOKED"), before + 2);
 
-  const latest = (await stores.events.listAuditEvents(1000)).find((e) => e.eventType === "CDS_HOOKS_INVOKED")!;
-  const payload = latest.payload as Record<string, unknown>;
-  assert.equal(payload["sensitivityLabel"], "restricted");
-  assert.ok(Array.isArray(payload["cardUuids"]), "the emitted uuids must be recorded for correlation");
+  // `listAuditEvents` orders occurred_at ASC, so `.find` returns the OLDEST — a first version of this named
+  // the variable `latest` and inspected the wrong row (review). Take the last, and assert CONTENT: that the
+  // recorded uuids are exactly the ones the response carried. `Array.isArray(...)` alone cannot fail for any
+  // card content, which made it pin the field name and nothing else.
+  const invoked = (await stores.events.listAuditEvents(1000)).filter((e) => e.eventType === "CDS_HOOKS_INVOKED");
+  const newest = invoked[invoked.length - 1]!;
+  assert.equal((newest.payload as Record<string, unknown>)["sensitivityLabel"], "restricted");
+
+  const res = (await post(INVOKE, hookBody("emp-006")))!;
+  const returned = ((await res.json()) as { cards: Array<{ uuid?: string }> }).cards.map((c) => c.uuid);
+  const after = (await stores.events.listAuditEvents(1000)).filter((e) => e.eventType === "CDS_HOOKS_INVOKED");
+  const forThatCall = after[after.length - 1]!.payload as Record<string, unknown>;
+  const recorded = (forThatCall["cards"] as Array<{ uuid: string; measureId: string | null }>).map((c) => c.uuid);
+  assert.deepEqual(recorded, returned, "the ledger must record exactly the uuids the client received");
+  // And the run, so recovering a measure from a feedback uuid is one recomputation per measure rather than a
+  // search over every run in the subject's history.
+  assert.equal(forThatCall["runId"], completedRunId);
+  assert.equal(newest.refRunId ?? forThatCall["runId"], completedRunId, "ref_run_id must be populated");
 
   // Discovery must NOT write: it carries no patient data, and a public endpoint writing per request is a
   // denial-of-service amplifier against our own ledger.
@@ -256,6 +270,51 @@ test("feedback validates the spec's conditional fields and records the outcome",
   const rows = (await stores.events.listAuditEvents(1000)).filter((e) => e.eventType === "CDS_HOOKS_FEEDBACK_RECEIVED");
   const overridden = rows.find((r) => (r.payload as Record<string, unknown>)["outcome"] === "overridden")!;
   assert.equal((overridden.payload as Record<string, unknown>)["overrideReasonCode"], "not-now");
+});
+
+test("feedback FAILS LOUDLY when the audit write fails — the event is the only record", async () => {
+  // For invoke, best-effort auditing is right: the cards are still correct. For feedback the audit event IS
+  // the persistence (ADR-067 d10), so swallowing a failure would make the endpoint a silent no-op that told
+  // the client never to retry — and the spec gives feedback no response body to signal otherwise. Both this
+  // review and Codex flagged it independently; CLAUDE.md's "every state change writes audit_event — no
+  // exceptions" is what decides it.
+  const broken = { ...env, DB: { ...(env["DB"] as object), prepare: () => { throw new Error("ledger down"); } } };
+  const res = (await handleCdsHooks(
+    new Request(`http://x${INVOKE}/feedback`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ feedback: [{ card: "c", outcome: "overridden", outcomeTimestamp: "2026-06-12T00:00:00Z" }] }),
+    }),
+    broken as never,
+    "tester@workwell.dev",
+  ))!;
+  assert.equal(res.status, 503, "a lost feedback event must not be reported as success");
+  const body = (await res.json()) as { error: string; recorded: number; of: number };
+  assert.equal(body.error, "audit_write_failed");
+  assert.equal(body.recorded, 0);
+  assert.equal(body.of, 1);
+});
+
+test("feedback is bounded: entry count and free-text comment length", async () => {
+  const path = `${INVOKE}/feedback`;
+  const entry = { card: "c", outcome: "overridden", outcomeTimestamp: "2026-06-12T00:00:00Z" };
+  // 100k entries would be 100k appends to the append-only ledger from one request by a machine credential —
+  // the amplification the discovery endpoint's no-audit decision avoided one route over (review).
+  const tooMany = (await post(path, { feedback: Array.from({ length: 101 }, () => entry) }))!;
+  assert.equal(tooMany.status, 400);
+  assert.match(((await tooMany.json()) as { message: string }).message, /at most 100 entries/);
+  assert.equal((await post(path, { feedback: Array.from({ length: 100 }, () => entry) }))!.status, 200);
+
+  // A clinician's free text is capped and truncation-marked, matching AI_GUARDRAILS §2.2's bound.
+  const stores = await getStores(env as never);
+  await post(path, {
+    feedback: [{ ...entry, overrideReason: { reason: { code: "x", system: "urn:x" }, userComment: "z".repeat(9000) } }],
+  });
+  const rows = (await stores.events.listAuditEvents(2000)).filter((e) => e.eventType === "CDS_HOOKS_FEEDBACK_RECEIVED");
+  const withComment = rows.reverse().find((r) => (r.payload as Record<string, unknown>)["userComment"])!;
+  const comment = String((withComment.payload as Record<string, unknown>)["userComment"]);
+  assert.ok(comment.length < 9000, `comment was ${comment.length} chars`);
+  assert.match(comment, /\[truncated\]$/);
 });
 
 test("the auth matrix: discovery is public, invoke and feedback are not", () => {

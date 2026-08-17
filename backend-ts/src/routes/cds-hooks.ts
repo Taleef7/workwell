@@ -87,12 +87,22 @@ function studioBaseUrl(env: CdsHooksEnv): string | undefined {
   return parseAllowedOrigins(env.WORKWELL_CORS_ALLOWED_ORIGINS)[0];
 }
 
+/**
+ * Write one audit event. Returns whether it succeeded — and the two callers treat that differently, on
+ * purpose (review).
+ *
+ * For **invoke** a failure is best-effort: the cards returned are still correct, and turning a correct
+ * clinical answer into a 500 because the ledger hiccuped would be the worse outcome. For **feedback** the
+ * audit event IS the entire persistence (ADR-067 d10 — nothing else is stored, which is why the endpoint
+ * needed no schema change), so swallowing a failure would make it a silent no-op that told the client not to
+ * retry. CLAUDE.md's "every state change writes `audit_event` — no exceptions" is the rule that decides it.
+ */
 async function auditCds(
   env: CdsHooksEnv,
   actor: string,
   eventType: "CDS_HOOKS_INVOKED" | "CDS_HOOKS_FEEDBACK_RECEIVED",
   detail: Record<string, unknown>,
-): Promise<void> {
+): Promise<boolean> {
   try {
     const stores = await getStores(env);
     await stores.events.appendAudit({
@@ -100,22 +110,29 @@ async function auditCds(
       entityType: "cds_hooks",
       entityId: crypto.randomUUID(),
       actor,
-      refRunId: (detail["runId"] as string | undefined) ?? null,
+      // The run the cards came from, so the ledger row is joinable on `ref_run_id` rather than only through
+      // the payload. Earlier this read `detail["runId"]`, which no caller ever set — a line that looked like
+      // wiring and could not fire (review).
+      refRunId: (detail["runId"] as string | null | undefined) ?? null,
       refCaseId: null,
       refMeasureVersionId: null,
       payload: { sensitivityLabel: "restricted", timestamp: new Date().toISOString(), ...detail },
     });
+    return true;
   } catch (err) {
-    // Best-effort at the response boundary: an audit failure must not turn a correct answer into a 500.
-    console.error(`WORKWELL_ALERT cds-hooks audit write failed: ${String(err)}`);
+    console.error(`WORKWELL_ALERT cds-hooks audit write failed (${eventType}): ${String(err)}`);
+    return false;
   }
 }
 
 /**
  * The newest FINALIZED outcome per measure for the first subject id that resolves to any row at all.
  *
- * Returns the subject id it used, so the caller can tell "this patient is unknown to WorkWell" from "this
- * patient has only mid-run rows" — two absences that must not be reported identically.
+ * Returns the subject id it used. To the CLIENT both absences render as the same informational card, which
+ * is deliberate — a clinician does not need our run bookkeeping — but the audit trail distinguishes them
+ * (`subjectId: null` for an id that resolved to nothing at all, versus a value for a subject whose only rows
+ * belong to an unfinished run). An earlier version of this comment claimed the two were reported
+ * differently to the caller; they are not (review).
  */
 async function latestFinalizedByMeasure(
   env: CdsHooksEnv,
@@ -243,11 +260,17 @@ async function invoke(
       ? [noEvaluationCard(patientId, base)]
       : await buildComplianceCards(found.rows, {
           subjectId: found.subjectId,
+          // The id the CLIENT sent, which is the only one it can act on. See `CardOptions.patientId`.
+          patientId,
           approvedOrderCodes: await approvedOrderCodes(env),
           standingOrders: resolveStandingOrderProvider(env),
           studioBaseUrl: base,
         });
 
+  // The runs these cards came from. One value is the overwhelmingly common case (a nightly ALL_PROGRAMS run
+  // covers every measure), so `refRunId` is set when it is unambiguous and left null when it is not, rather
+  // than picking one arbitrarily.
+  const runIds = [...new Set((found?.rows ?? []).map((r) => r.runId))];
   await auditCds(env, actor, "CDS_HOOKS_INVOKED", {
     serviceId,
     hook: body.hook,
@@ -255,12 +278,29 @@ async function invoke(
     patientId,
     subjectId: found?.subjectId ?? null,
     cardCount: cards.length,
-    // The uuids this invocation emitted. This is what makes a later feedback event correlatable without
-    // persisting a card table: feedback cites a uuid, this event maps that uuid to a patient and subject,
-    // and `cardUuid` recomputes the measure from the subject's own outcomes. See `feedback` below.
-    cardUuids: cards.map((c) => c.uuid).filter((u): u is string => !!u),
+    runId: runIds.length === 1 ? runIds[0]! : null,
+    // What makes a later feedback event correlatable without persisting a card table: feedback cites a uuid,
+    // and this event maps that uuid to the subject AND the run it came from — so recovering the measure is
+    // one `cardUuid` recomputation per measure, not a search over every run in the subject's history
+    // (review: without `runId` the documented claim overstated by a step).
+    cards: cards
+      .filter((c): c is typeof c & { uuid: string } => !!c.uuid)
+      .map((c) => ({ uuid: c.uuid, measureId: measureIdOfCard(c, found?.rows ?? []) })),
   });
   return json({ cards });
+}
+
+/**
+ * Which measure a built card describes, for the audit payload only.
+ *
+ * Matched on the `source.url` the card already carries (`.../measures/<id>`), falling back to a `summary`
+ * prefix match on the catalog name. Descriptive: it never changes what the client receives, and a card we
+ * cannot attribute records `null` rather than a guess.
+ */
+function measureIdOfCard(card: { source: { url?: string }; summary: string }, rows: readonly CardInput[]): string | null {
+  const fromUrl = /\/measures\/([^/?#]+)$/.exec(card.source.url ?? "")?.[1];
+  if (fromUrl && rows.some((r) => r.measureId === fromUrl)) return fromUrl;
+  return null;
 }
 
 /**
@@ -288,6 +328,17 @@ async function feedback(
   if (!Array.isArray(entries) || entries.length === 0) {
     return json({ error: "invalid_request", message: "feedback must be a non-empty array" }, 400);
   }
+  // Bounded, because each entry is an append to the audit ledger and the caller is a machine credential.
+  // The spec permits batching "for multiple hook instances or multiple cards at the same time"; it does not
+  // ask a service to accept an unbounded batch, and one request driving 100k inserts is amplification
+  // against our own append-only ledger — the hazard the discovery endpoint's no-audit decision avoided one
+  // route over (review).
+  if (entries.length > MAX_FEEDBACK_ENTRIES) {
+    return json(
+      { error: "invalid_request", message: `feedback accepts at most ${MAX_FEEDBACK_ENTRIES} entries per request` },
+      400,
+    );
+  }
   for (const e of entries) {
     if (!e.card || !e.outcomeTimestamp) {
       return json({ error: "invalid_request", message: "each feedback entry needs card and outcomeTimestamp" }, 400);
@@ -307,16 +358,48 @@ async function feedback(
     }
   }
 
+  let written = 0;
   for (const e of entries) {
-    await auditCds(env, actor, "CDS_HOOKS_FEEDBACK_RECEIVED", {
+    const ok = await auditCds(env, actor, "CDS_HOOKS_FEEDBACK_RECEIVED", {
       serviceId,
       card: e.card,
       outcome: e.outcome,
       outcomeTimestamp: e.outcomeTimestamp,
+      acceptedSuggestions: (e.acceptedSuggestions ?? []).map((s) => s.id ?? null),
       ...(e.overrideReason?.reason?.code ? { overrideReasonCode: e.overrideReason.reason.code } : {}),
-      ...(e.overrideReason?.userComment ? { userComment: e.overrideReason.userComment } : {}),
+      // Clinician free text about an encounter. Capped and truncation-marked, matching the 8000-char bound
+      // AI_GUARDRAILS §2.2 already sets for interpolated untrusted text — and noted in the PHI posture,
+      // because this is the first path putting unstructured clinical prose into `audit_events` (review).
+      ...(e.overrideReason?.userComment
+        ? { userComment: truncateComment(e.overrideReason.userComment) }
+        : {}),
     });
+    if (!ok) {
+      // The audit event is the ONLY record of this action, so a failed write must not report success: the
+      // spec gives feedback no response body, so a 200 tells the client never to retry and the accepted
+      // order is lost silently. `written` says how much of the batch did land, so a retry is informed.
+      return json(
+        {
+          error: "audit_write_failed",
+          message:
+            "feedback could not be recorded — the audit event is the only record of this action, so this " +
+            "request is reported as failed rather than silently dropped. Retry is safe: feedback is " +
+            "idempotent by (card, outcome, outcomeTimestamp).",
+          recorded: written,
+          of: entries.length,
+        },
+        503,
+      );
+    }
+    written++;
   }
   // 200 with no body: the spec defines no response payload for feedback.
   return new Response(null, { status: 200 });
+}
+
+const MAX_FEEDBACK_ENTRIES = 100;
+const MAX_USER_COMMENT = 8000;
+
+function truncateComment(s: string): string {
+  return s.length <= MAX_USER_COMMENT ? s : `${s.slice(0, MAX_USER_COMMENT)}…[truncated]`;
 }

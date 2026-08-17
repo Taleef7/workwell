@@ -59,9 +59,10 @@ const RULES: Rule[] = [
   { pattern: rx("/api/health"), access: "PERMIT" },
   { pattern: rx("/api/version"), access: "PERMIT" },
   { pattern: rx("/health"), access: "PERMIT" },
-  // The OpenAPI document (ADR-068) — shapes and role names, no patient data. Public because reading the
-  // contract without credentials is most of its value to an integrator. Must precede the `/api/**` tails.
-  { pattern: rx("/api/v1/openapi.json"), access: "PERMIT" },
+  // NOTE: `/api/v1/openapi.json` deliberately has NO rule. Like health and version, `handleOpenApi` runs in
+  // the worker BEFORE the auth gate, so a rule here would never be consulted — a control that reads as
+  // load-bearing and cannot fire (review). Its public-ness is asserted by an actual unauthenticated request
+  // in `openapi.test.ts`, which is the only thing that proves it.
 
   { pattern: rx("/sse"), access: [A, CM, MCP] },
   { pattern: rx("/mcp/**"), access: [A, CM, MCP] },

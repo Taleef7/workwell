@@ -21,7 +21,7 @@ POST /cds-services/workwell-compliance-patient-view/feedback    → 200
 | `serviceId` | path, required | An `id` from discovery. Today there is exactly one. An unknown id is a **404** that lists what exists. |
 | `hook` | body, required | Must be `patient-view`. A hook this service does not serve is a **400**, not a guess. |
 | `hookInstance` | body, required | A UUID for this invocation, per the specification. |
-| `context.patientId` | body, required | The FHIR `Patient.id`. A bare WebChart id is also tried as `wc|<id>` — see *Subject resolution*. |
+| `context.patientId` | body, required | The FHIR `Patient.id`. A bare WebChart id is also tried in the `wc` namespace — see *Subject resolution*. |
 | `context.userId` | body, optional | `Practitioner/abc` or `PractitionerRole/123`. Recorded, not used for gating. |
 | `fhirServer`, `fhirAuthorization`, `prefetch` | body, optional | **Accepted and not evaluated.** See *Limits, stated*. |
 
@@ -122,6 +122,18 @@ suggestion with no code change.
 Two measures sharing one order code (`diabetes_hba1c` and `cms122` both map to CPT 83036) collapse to a
 single suggestion, because one order is the correct clinical action.
 
+> **The `ServiceRequest` references the id YOU sent, not WorkWell's internal subject id.** On a live tenant
+> those differ — we persist `wc|4821`, the hook supplies `4821` — and a reference into the `wc` namespace
+> would name nothing the client can resolve (`|` is not a legal FHIR id either). Card identity still uses the
+> internal id, so feedback correlation is unaffected.
+
+### A failed evaluation is reported as ours
+
+A run can finish `PARTIAL_FAILURE`, and a subject whose evaluation threw is persisted `MISSING_DATA` with an
+`evaluationError`. Such a subject gets a card that says the measure **could not be evaluated**, with `info`
+and no suggestion — never "no record on file / collect the missing documentation", which would assert a fact
+about the patient when the truth is that our engine failed.
+
 ## Feedback
 
 `POST /cds-services/{serviceId}/feedback` reports what a clinician did with a card. Optional in the
@@ -143,20 +155,34 @@ can build alone.
 
 Each entry writes one `CDS_HOOKS_FEEDBACK_RECEIVED` audit event. Nothing else is persisted, and nothing else
 needed to be: `card.uuid` is derived from `(runId, subjectId, measureId)`, so correlating a uuid back to a
-measure is a recomputation over that subject's outcomes rather than a lookup — which is why this endpoint
-needs no schema change. The `CDS_HOOKS_INVOKED` event records the uuids it emitted, so the join runs from the
-ledger. Deterministic ids also mean a client re-firing the hook for an unchanged run gets the same uuid, so
-repeat feedback does not fragment across ids.
+measure is a recomputation rather than a lookup — which is why this endpoint needs no schema change. The
+`CDS_HOOKS_INVOKED` event records each emitted uuid **with its measure and run**, so the join runs from the
+ledger in one step. Deterministic ids also mean a client re-firing the hook for an unchanged run gets the same
+uuid, so repeat feedback does not fragment across ids.
+
+> **A failed write is a `503`, not a silent `200`.** Because the audit event is the *only* record of the
+> action, and the specification gives feedback no response body to signal partial success, reporting success
+> on a lost write would tell the client never to retry. `recorded` / `of` say how much of the batch landed.
+> Retry is safe — feedback is idempotent by `(card, outcome, outcomeTimestamp)`.
+
+**Bounds.** At most **100** entries per request, and `overrideReason.userComment` is truncated at 8000
+characters (truncation-marked). Each entry is an append to an append-only ledger and the caller is a machine
+credential, so an unbounded batch would be amplification against our own audit trail.
 
 ## Errors
 
 | status | `error` | when |
 |---|---|---|
-| 400 | `invalid_request` | body is not a JSON object; missing `hook`/`hookInstance`/`context.patientId`; a hook this service does not serve; empty `feedback`; an `outcome` other than `accepted`/`overridden`; `accepted` without `acceptedSuggestions` |
+| 400 | `invalid_request` | body is not a JSON object; missing `hook`/`hookInstance`/`context.patientId`; a hook this service does not serve; empty `feedback`; more than 100 feedback entries; an `outcome` other than `accepted`/`overridden`; `accepted` without `acceptedSuggestions` |
 | 401 | `unauthenticated` | no bearer token on invoke or feedback |
 | 403 | `forbidden` | authenticated, but the role may not invoke a CDS service |
 | 404 | `unknown_service` | unknown `serviceId`; the response lists the ids that exist |
-| 405 | `method_not_allowed` | non-GET on discovery, non-POST on invoke or feedback |
+| 405 | `method_not_allowed` | non-POST on invoke or feedback; a non-GET on discovery **when authenticated** — see below |
+| 503 | `audit_write_failed` | feedback could not be recorded. The audit event is the only record of the action, so this is reported as failed rather than dropped silently. Carries `recorded` / `of` so a retry is informed; retry is safe. |
+
+> **Method vs auth precedence on discovery.** `GET /cds-services` is public, but the *path* is gated for every
+> other method, so an anonymous `POST /cds-services` is **401**, not 405 — the auth gate runs before the
+> handler. An authenticated `POST` there is 405. Stated because the order is not guessable from the table.
 
 ## What this promises
 

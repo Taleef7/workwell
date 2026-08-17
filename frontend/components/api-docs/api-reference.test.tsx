@@ -36,6 +36,20 @@ const doc: OpenApiDoc = {
       // No tag at all — this operation must still appear.
       get: { operationId: "cdsDiscovery", summary: "Discover services", security: [], responses: { "200": { description: "Catalog." } } },
     },
+    "/cds-services/{serviceId}": {
+      // A path-level `parameters` key, which OpenAPI allows and which is NOT an operation. Iterating every
+      // key of a path item would render it as a ghost card with an undefined method (review).
+      parameters: [{ name: "serviceId", in: "path", required: true, schema: { type: "string" } }],
+      post: {
+        operationId: "cdsInvoke",
+        summary: "Invoke a service",
+        tags: ["compliance"],
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: "serviceId", in: "path", required: true, schema: { type: "string", example: "svc-1" } }],
+        requestBody: { required: true, content: { "application/json": { schema: { $ref: "#/components/schemas/Invoke" } } } },
+        responses: { "200": { description: "Cards." } },
+      },
+    } as never,
   },
   components: {
     schemas: {
@@ -47,29 +61,50 @@ const doc: OpenApiDoc = {
           period: { type: "object", properties: { start: { type: ["string", "null"], description: "ISO-8601 or null." } } },
         },
       },
+      Invoke: {
+        type: "object",
+        required: ["hook"],
+        properties: { hook: { type: "string", description: "The hook name.", example: "patient-view" } },
+      },
     },
   },
 };
 
 describe("ApiReference", () => {
-  it("renders every operation in the document, including untagged ones", () => {
+  it("renders every operation in the document, including untagged ones, and no ghost operations", () => {
     render(<ApiReference doc={doc} origin="https://api.example.org" />);
-    // Two operations exist; both must be on the page.
-    expect(endpointsOf(doc)).toHaveLength(2);
+    // Three operations exist across three paths — and the fourth path item key, a path-level `parameters`,
+    // is NOT one of them.
+    expect(endpointsOf(doc)).toHaveLength(3);
+    expect(endpointsOf(doc).map((e) => e.method).sort()).toEqual(["GET", "GET", "POST"]);
     expect(screen.getByText("Is this subject compliant?")).toBeInTheDocument();
     expect(screen.getByText("Discover services")).toBeInTheDocument();
+    expect(screen.getByText("Invoke a service")).toBeInTheDocument();
     // The untagged one lands under "Other" rather than vanishing.
     expect(screen.getByText("Other")).toBeInTheDocument();
     expect(screen.getByText("compliance")).toBeInTheDocument();
+  });
+
+  it("renders a request body, following its $ref, and puts it in the curl", () => {
+    // The real document's two POSTs both carry a requestBody; the original fixture had none, so this
+    // rendering path was untested (review).
+    render(<ApiReference doc={doc} origin="https://api.example.org" />);
+    expect(screen.getByText("Request body")).toBeInTheDocument();
+    expect(screen.getByText("The hook name.")).toBeInTheDocument();
+    const curl = screen.getByText(/^curl -sS -X POST/);
+    expect(curl.textContent).toContain(`-d '{"hook":"patient-view"}'`);
+    expect(curl.textContent).toContain("/cds-services/svc-1");
   });
 
   it("shows the method, path, auth posture, parameters and status codes", () => {
     render(<ApiReference doc={doc} origin="https://api.example.org" />);
     expect(screen.getByText("/api/v1/compliance/{subjectId}/{measureId}")).toBeInTheDocument();
     expect(screen.getAllByText("GET").length).toBe(2);
-    // A bearer-gated operation and a public one must be distinguishable at a glance.
-    expect(screen.getByText("bearer token")).toBeInTheDocument();
-    expect(screen.getByText("public")).toBeInTheDocument();
+    expect(screen.getAllByText("POST").length).toBe(1);
+    // A bearer-gated operation and a public one must be distinguishable at a glance. Two of the three
+    // operations are gated, so this counts rather than asserting uniqueness.
+    expect(screen.getAllByText("bearer token")).toHaveLength(2);
+    expect(screen.getAllByText("public")).toHaveLength(1);
     expect(screen.getByText("subjectId")).toBeInTheDocument();
     expect(screen.getByText("latest | preview")).toBeInTheDocument();
     expect(screen.getByText("No finalized outcome.")).toBeInTheDocument();

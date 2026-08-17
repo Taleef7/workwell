@@ -55,10 +55,20 @@ export interface Endpoint {
   op: Operation;
 }
 
+/**
+ * The HTTP methods OpenAPI allows in a Path Item. Everything else a path item may carry —
+ * `parameters`, `summary`, `description`, `servers`, `$ref` — is NOT an operation, and iterating every key
+ * would render those as ghost operations with an undefined method and summary (review). The real document
+ * carries none today; a renderer that degrades rather than crashes should not depend on that.
+ */
+const HTTP_METHODS = new Set(["get", "put", "post", "delete", "options", "head", "patch", "trace"]);
+
 export function endpointsOf(doc: OpenApiDoc): Endpoint[] {
   const out: Endpoint[] = [];
   for (const [path, item] of Object.entries(doc.paths ?? {})) {
     for (const [method, op] of Object.entries(item)) {
+      if (!HTTP_METHODS.has(method.toLowerCase())) continue;
+      if (typeof op !== "object" || op === null || typeof op.operationId !== "string") continue;
       out.push({ path, method: method.toUpperCase(), op });
     }
   }
