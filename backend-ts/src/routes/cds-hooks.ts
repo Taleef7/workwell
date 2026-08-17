@@ -349,12 +349,23 @@ async function feedback(
         400,
       );
     }
-    if (e.outcome === "accepted" && (!Array.isArray(e.acceptedSuggestions) || e.acceptedSuggestions.length === 0)) {
-      // CONDITIONAL in the spec: acceptedSuggestions is REQUIRED for an `accepted` outcome.
-      return json(
-        { error: "invalid_request", message: "acceptedSuggestions is required when outcome is 'accepted'" },
-        400,
-      );
+    if (e.outcome === "accepted") {
+      // CONDITIONAL in the spec: `acceptedSuggestions` is REQUIRED for an `accepted` outcome, and each
+      // **AcceptedSuggestion** has a REQUIRED `id` — the `card.suggestion.uuid` we emitted. Checking only
+      // that the array exists accepted `[{}]`, which carries no information and would be recorded as an
+      // accepted suggestion nobody can identify (Codex review surfaced this while arguing a different point).
+      if (!Array.isArray(e.acceptedSuggestions) || e.acceptedSuggestions.length === 0) {
+        return json(
+          { error: "invalid_request", message: "acceptedSuggestions is required when outcome is 'accepted'" },
+          400,
+        );
+      }
+      if (!e.acceptedSuggestions.every((s) => typeof s?.id === "string" && s.id.length > 0)) {
+        return json(
+          { error: "invalid_request", message: "each acceptedSuggestions entry requires a non-empty `id`" },
+          400,
+        );
+      }
     }
   }
 

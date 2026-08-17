@@ -250,6 +250,10 @@ test("feedback validates the spec's conditional fields and records the outcome",
     { feedback: [{ card: uuid, outcome: "declined", outcomeTimestamp: "2026-06-12T00:00:00Z" }] },
     { feedback: [{ card: uuid, outcome: "accepted", outcomeTimestamp: "2026-06-12T00:00:00Z" }] },
     { feedback: [{ outcome: "overridden", outcomeTimestamp: "2026-06-12T00:00:00Z" }] },
+    // `[{}]` satisfies "the array is present" and identifies nothing. The spec makes AcceptedSuggestion.id
+    // REQUIRED, so accepting this would record an accepted suggestion nobody can resolve.
+    { feedback: [{ card: uuid, outcome: "accepted", acceptedSuggestions: [{}], outcomeTimestamp: "2026-06-12T00:00:00Z" }] },
+    { feedback: [{ card: uuid, outcome: "accepted", acceptedSuggestions: [{ id: "" }], outcomeTimestamp: "2026-06-12T00:00:00Z" }] },
   ];
   for (const body of bad) {
     assert.equal((await post(path, body))!.status, 400, JSON.stringify(body));
