@@ -278,6 +278,36 @@ resolves fine), so the post-pass is documented as defensive rather than as a bug
 assertion is the `.js` one. Same guard-scope shape as #380/#400, caught before publication this time.
 Suite **1910**, 0 fail.
 
+**Done 2026-08-17 (#469 — ADR-067, ADR-068). The integration surface is real: a CDS Hooks service and the
+OpenAPI document that had been *claimed* for a year.** Taken because every M-E1 item is blocked on other
+people and this was the substantial unblocked work. **CDS Hooks 2.0.1** — `GET /cds-services` (public),
+`POST /cds-services/{id}`, `POST .../feedback` — returns cards built from the most recent **finalized** run,
+so a card is a rendering of a completed evaluation and never triggers one. Four refusals are the substance,
+each mutation-checked: `critical` and `systemActions` are **never** emitted (locked decision 1 — WorkWell may
+not tell a clinician not to proceed); **no `prefetch` is declared because none is evaluated**, said in the
+spec's own `usageRequirements`; an **absence is a CARD, not `{"cards":[]}`**, since an empty list at the point
+of care reads as "no gaps" and would have hidden the `wc|<patientId>` namespace trap; and a suggestion is
+offered **only for an APPROVED terminology mapping**, read from the store — so **cms122 and cms125 carry a
+link and no order**, which is the rule working, not an oversight. Feedback needed **no schema change**:
+`card.uuid` derives from `(runId, subjectId, measureId)`. **The auth rules were mandatory, not a refinement**
+— `/cds-services` is outside `/api/` where `authorize` ends in permitAll, so without them invoke would have
+served per-patient clinical status anonymously. **Authentication is WorkWell's bearer token and NOT the CDS
+Hooks JWT profile** (which forbids symmetric algorithms, so HS256 can never satisfy it) — a *named gap*, and
+the joint-call question is now precise: does WebChart act as a CDS Hooks client, and what are its `iss` and
+JWKS URL? **`GET /api/v1/openapi.json`** is hand-authored **3.1.1** over the promised surface only, public,
+rendered at the frontend's public `/api-docs` (hand-rolled: `swagger-ui-react` peers on `react@<19`).
+**Two independent guards, neither implying the other** — a two-way coverage test failing with `documented but
+NOT ROUTED`, which is exactly how ARCHITECTURE came to claim a springdoc document for a year after the JVM
+died; and `redocly lint` in CI, which immediately caught five uses of `nullable` (removed in 3.1). Both stale
+ARCHITECTURE claims corrected. **The mapping outcome→card is OURS** — HL7 blesses
+`PlanDefinition/$apply` → `RequestOrchestration` → cards, but nobody publishes a DEQM care-gap→card bridge,
+and **no external CDS Hooks grader exists** (validator last pushed 2018; Inferno has no kit), so
+`STANDARDS_CONFORMANCE.md` says structurally conformant, self-graded. **Review found seven real defects**,
+including feedback returning 200 when its audit write failed and a failed CQL evaluation rendering as "no
+record on file — collect the missing documentation" about the *patient*; all fixed. **Open: #470** — a CDS
+invocation scans the subject's whole outcome history (a pre-existing constant shared by five callers); stated
+as a limit in `CDS_HOOKS.md`, fix is a per-measure store query. S7 rewritten; `docs/CDS_HOOKS.md` added.
+
 **Next, in order:** **M-E1** (the occupational content pack — locked decision 6's differentiator, the part
 no competitor obtains by downloading CMS artifacts), then **M-D0/D1** (re-aim at US Quality Core; run the
 Inferno **US Quality Core Test Kit** against the shim output). **Smaller open items:** **#377** (retire the authored
