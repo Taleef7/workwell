@@ -6,7 +6,17 @@ import { usePathname, useRouter } from "next/navigation";
 const TOKEN_KEY = "ww_token";
 const USER_KEY = "ww_user";
 const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "").trim().replace(/\/+$/, "");
-const PUBLIC_ROUTES = ["/", "/sandbox"];
+/**
+ * Routes that render without a session, and therefore must not trigger a silent refresh or a redirect
+ * to `/login`.
+ *
+ * This list is the authority for the whole app, and it is easy to forget: a page can be correct in every
+ * other respect — outside `app/(dashboard)/`, fetching without a bearer token — and still be unreachable
+ * because it is absent here. `/api-docs` shipped that way (ADR-068), and an HTTP probe could not see it,
+ * since the redirect is client-side and the server still returns 200. `auth-provider.test.tsx` derives
+ * the expected set from `app/` so a new public route cannot be added without landing here.
+ */
+export const PUBLIC_ROUTES = ["/", "/sandbox", "/api-docs"];
 
 type AuthUser = {
   email: string;

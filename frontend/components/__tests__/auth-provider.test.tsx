@@ -15,7 +15,7 @@ import { act, render, waitFor } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { server } from "../../test/msw/server";
-import { AuthProvider, useAuth } from "../auth-provider";
+import { AuthProvider, PUBLIC_ROUTES, useAuth } from "../auth-provider";
 
 // ── Next.js navigation mocks ──────────────────────────────────────────────────
 const mockReplace = vi.fn();
@@ -260,5 +260,46 @@ describe("AuthProvider — silent refresh on page load", () => {
     const sameAcctToken = buildJwt(Math.floor(Date.now() / 1000) + 1800, "admin@workwell.dev");
     act(() => ctx!.updateToken(sameAcctToken));
     expect(localStorage.getItem(TOKEN_KEY)).toBe(JSON.stringify(sameAcctToken));
+  });
+});
+
+/**
+ * The public-route allowlist, derived rather than enumerated.
+ *
+ * `/api-docs` shipped outside `app/(dashboard)/`, fetching without a token, and was still unreachable —
+ * absent from `PUBLIC_ROUTES`, the provider redirected it to `/login`. Nothing caught it: the page's own
+ * tests render the component directly, and an HTTP probe returns 200 because the redirect is client-side.
+ *
+ * So this reads `app/` instead of restating the list. A top-level route that is neither the authenticated
+ * dashboard group nor `/login` is public by construction, and must appear in `PUBLIC_ROUTES`.
+ */
+describe("PUBLIC_ROUTES", () => {
+  const AUTHENTICATED = new Set(["(dashboard)", "login"]);
+
+  it("covers every top-level route outside the dashboard group", async () => {
+    const { readdirSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const discovered = readdirSync(join(process.cwd(), "app"), { withFileTypes: true })
+      .filter((e) => e.isDirectory() && !AUTHENTICATED.has(e.name) && e.name !== "fonts")
+      .map((e) => `/${e.name}`);
+
+    // The fixture is only meaningful if it found the directories at all.
+    expect(discovered).toContain("/api-docs");
+    for (const route of discovered) {
+      expect(PUBLIC_ROUTES, `app${route}/ renders outside the dashboard group but is not in PUBLIC_ROUTES`)
+        .toContain(route);
+    }
+    // `/` is the root page, which has no directory of its own.
+    expect(PUBLIC_ROUTES).toContain("/");
+  });
+
+  it("does not redirect any route it lists", async () => {
+    for (const route of PUBLIC_ROUTES) {
+      mockReplace.mockClear();
+      mockPathname.mockReturnValue(route);
+      renderProvider();
+      await new Promise((r) => setTimeout(r, 20));
+      expect(mockReplace, `${route} is listed as public but redirected`).not.toHaveBeenCalled();
+    }
   });
 });
