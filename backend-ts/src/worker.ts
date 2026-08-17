@@ -31,6 +31,7 @@ import { handleQuality } from "./routes/quality.ts";
 import { handleIdentity } from "./routes/identity.ts";
 import { handleCompliance } from "./routes/compliance.ts";
 import { handleComplianceApi } from "./routes/compliance-api.ts";
+import { handleCdsHooks } from "./routes/cds-hooks.ts";
 import { handleSegments } from "./routes/segments.ts";
 import { handleOutcomes } from "./routes/outcomes.ts";
 import { handleImmunizationForecast } from "./routes/immunization.ts";
@@ -291,6 +292,12 @@ async function route(req: Request, env: Env, ctx: CloudExecutionContext): Promis
   // internal surface; the two paths cannot collide, but the ordering makes that structural.
   const complianceApiResponse = await handleComplianceApi(req, env, principalRole, actor);
   if (complianceApiResponse) return complianceApiResponse;
+
+  // CDS Hooks (ADR-067) — the standards-shaped delivery of the same answer the compliance API returns, for
+  // a CDS client rather than an integrator. Placed beside it because they are the same contract surface;
+  // `/cds-services` is outside `/api/`, so it cannot collide with anything above.
+  const cdsResponse = await handleCdsHooks(req, env, actor);
+  if (cdsResponse) return cdsResponse;
 
   // Compliance roster — individual compliance status grid by panel (#189 E10.2).
   const complianceResponse = await handleCompliance(req, env);
