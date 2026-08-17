@@ -59,6 +59,9 @@ const RULES: Rule[] = [
   { pattern: rx("/api/health"), access: "PERMIT" },
   { pattern: rx("/api/version"), access: "PERMIT" },
   { pattern: rx("/health"), access: "PERMIT" },
+  // The OpenAPI document (ADR-068) — shapes and role names, no patient data. Public because reading the
+  // contract without credentials is most of its value to an integrator. Must precede the `/api/**` tails.
+  { pattern: rx("/api/v1/openapi.json"), access: "PERMIT" },
 
   { pattern: rx("/sse"), access: [A, CM, MCP] },
   { pattern: rx("/mcp/**"), access: [A, CM, MCP] },

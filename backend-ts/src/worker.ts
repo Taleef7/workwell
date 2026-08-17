@@ -32,6 +32,7 @@ import { handleIdentity } from "./routes/identity.ts";
 import { handleCompliance } from "./routes/compliance.ts";
 import { handleComplianceApi } from "./routes/compliance-api.ts";
 import { handleCdsHooks } from "./routes/cds-hooks.ts";
+import { handleOpenApi } from "./routes/openapi.ts";
 import { handleSegments } from "./routes/segments.ts";
 import { handleOutcomes } from "./routes/outcomes.ts";
 import { handleImmunizationForecast } from "./routes/immunization.ts";
@@ -214,6 +215,11 @@ async function route(req: Request, env: Env, ctx: CloudExecutionContext): Promis
   if (pathname === "/api/version") {
     return json({ api: "v1", stack: "typescript", build: "workwell-api-ts" });
   }
+
+  // The OpenAPI document (ADR-068) — served before the auth gate, like health and version, because it is
+  // the contract an integrator reads before they have a token.
+  const openApiResponse = handleOpenApi(req);
+  if (openApiResponse) return openApiResponse;
 
   // Authorization gate — port of JwtAuthFilter + SecurityConfig (#105). Skipped
   // entirely when auth is disabled (no secret), mirroring authEnabled=false → permitAll.
