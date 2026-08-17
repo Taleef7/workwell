@@ -155,6 +155,19 @@ jobs:
           pnpm compile-measures
           git add -A -- src/engine/cql/elm src/measure/resources/cql-resources.json
           git diff --cached --exit-code --stat -- src/engine/cql/elm src/measure/resources/cql-resources.json
+      # The OpenAPI document must be valid OpenAPI, which `openapi.test.ts` deliberately does NOT check: its
+      # job is agreement between the document and the running worker, and no amount of that catches a 3.0-ism
+      # like `nullable` (which 3.1 removed, and which this found on the first run). Two different guards.
+      # Pinned exactly — `@latest` would make the gate non-reproducible, the same reason the terminology fetch
+      # is pinned. REDOCLY_TELEMETRY=off is not optional: the CLI otherwise reports environment-variable
+      # values and the names of the rules that fired. Exits 0 on warnings, non-zero on errors; the five
+      # expected warnings are explained in src/openapi/spec.ts and are deliberately not ignore-filed.
+      - name: The OpenAPI document is valid OpenAPI 3.1
+        env:
+          REDOCLY_TELEMETRY: "off"
+        run: |
+          node --import tsx scripts/openapi-emit.mjs "$RUNNER_TEMP/openapi.json"
+          npx --yes @redocly/cli@2.46.1 lint "$RUNNER_TEMP/openapi.json"
       - name: Test (SQLite floor + Postgres ceiling)
         env:
           WORKWELL_TEST_PG_URL: postgres://workwell:workwell@localhost:5432/workwell

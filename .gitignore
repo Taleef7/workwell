@@ -56,6 +56,9 @@ docs/vision doc screenshots
 webchart-import/
 
 # Local-only call transcripts (personal/personnel content - never commit, never reference in docs).
+# The directory AND the filename globs, because the globs below match on the BASENAME: a file named
+# `docs/transcripts/2026-08-16 call.md` matches none of them and was committable by accident.
+docs/transcripts/
 # Any depth, any of the formats a recorder/transcriber emits.
 **/*transcript*.txt
 **/*transcript*.md

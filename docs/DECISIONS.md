@@ -18,6 +18,164 @@
 >
 > **Sequence note:** ADR-033 does not exist — verified absent, and the number must not be reused.
 
+## ADR-068: the OpenAPI document covers the PROMISED surface only, and a routed-path test is what makes hand-authoring defensible
+
+**Status:** Accepted (2026-08-17). Closes the tracked TODO at the top of `docs/JOURNAL.md`.
+
+**Context.** Doug asked whether WorkWell has a Swagger API. It did not: authenticated probes against
+production and staging returned `501 not_implemented` from `/api/openapi.json`, `/api/swagger`,
+`/swagger-ui` and `/api/docs`, while `ARCHITECTURE.md` §9 asserted *"The OpenAPI document
+(`workwell.swagger.enabled=true`) advertises version `v1`"* — a springdoc property belonging to the Java
+backend retired in #109 PR4. §7 did not mention `/api/v1/compliance` at all. So the repository was
+simultaneously claiming a document it did not serve and omitting the one contract it does.
+
+**Decision.**
+
+1. **Serve a hand-authored OpenAPI 3.1.1 document at one canonical path**, `GET /api/v1/openapi.json`,
+   built by `backend-ts/src/openapi/spec.ts`. PERMIT: reading a contract should not require credentials, and
+   the document carries shapes and role names, not patient data.
+2. **Scope is the PROMISED surface** — `/api/v1/compliance`, the three `/cds-services` operations, this
+   document itself, health and version: **seven operations** — and the document *says so*. The ~40 internal
+   `/api/**` routes are excluded because
+   `COMPLIANCE_API.md` already draws that line ("everything else under `/api/` is internal and moves with
+   the frontend"), and documenting them would advertise stability over paths that carry none.
+3. **Hand-authored, guarded by a contract test.** The alternatives each cost a dependency or a rewrite: zod
+   earns its keep only as a *runtime* validator, `@hono/zod-openapi` presupposes Hono and a router we do not
+   have, and TypeSpec would add a second hand-maintained source of truth with no coupling to a hand-rolled
+   dispatcher. The recognised risk of hand-authoring is drift and the recognised answer is a contract test,
+   so the test is treated as the other half of this decision rather than as optional garnish.
+4. **The guard is two-way coverage, and the second direction is bounded.** Every `(path, method, status)` the
+   document declares is produced by a real request through the real worker — that direction is complete, and a
+   documented path that is not routed fails with `documented but NOT ROUTED`. The reverse direction sees only
+   statuses some probe produced, so a real status no test exercises is neither documented nor caught: a
+   path-level `405`, a `500` on a DB outage, a `503` from `startupGuard`. Stating the bound rather than
+   implying completeness (review). Mutation-checked three ways — deleting the route, removing a produced
+   status, and requiring an absent property each fail the intended assertion.
+5. **Redocly lints the document in CI**, pinned exactly, telemetry off, with **no ignore file**, because it
+   catches a class the contract test cannot. It did so immediately: five uses of `nullable`, which OpenAPI
+   3.1 removed in favour of type unions. The five remaining warnings are explained in `spec.ts` rather than
+   silenced. **Stated precisely, because "pinned exactly" overstates it:** the *top-level* version is pinned,
+   but `npx --yes` resolves that package's transitive tree fresh on each run with no lockfile, in a job that
+   holds repository credentials. Elsewhere this repo pins by SHA-256 and gates on byte-reproducibility. The
+   trade taken here is a non-reproducible dev tree in exchange for not adding a `package.json` dependency;
+   if that becomes unacceptable, the alternative is a committed devDependency, not a different linter
+   (review).
+6. **3.1.1, not 3.2.** Renderer support for 3.2 is worse than absent, it is *silent* — Redoc 2.5.3 accepts a
+   3.2 document by aliasing it to 3.1, so 3.2-only constructs are ignored rather than flagged, and Spectral
+   caps at 3.1. 3.1's Schema Objects are literal JSON Schema 2020-12, which is what makes a zero-dependency
+   response check tractable.
+7. **The reference page is hand-rolled and public** (`frontend/app/api-docs`). Not only on the
+   no-new-dependency rule: `swagger-ui-react` peers on `react@">=16.8 <19"` and this app is on React 19, so
+   the React integration does not exist for us; Swagger UI's dark mode is a hard-coded `html.dark-mode` class
+   that would contest ownership of `<html>`; and Scalar and Redoc both default to a CDN script the CSP and
+   the offline demo rule out. The trade is no try-it-out console — a copyable `curl` instead.
+
+**Consequences.** A 405 is **not representable** under a `get` operation, so the four unauthenticated GETs
+keep an `operation-4xx-response` warning rather than mis-modelling their path-level 405 — the coverage test
+refused the mis-modelling on the first attempt, which is the guard working. Adding a route to the promised
+surface now means adding it to the document, because CI fails otherwise. Writing the document also exposed
+a second stale ARCHITECTURE claim (§9 said `/api/version` returns `uptime`; it does not), corrected here.
+
+---
+
+## ADR-067: CDS Hooks cards render a completed evaluation and never trigger one — and the outcome-to-card mapping is ours, which is stated rather than implied
+
+**Status:** Accepted (2026-08-17). Implements the 2026-08-14 decision that CDS Hooks is adopted as a
+*specification* (ADR-008 stands; `cqf-fhir-cr` does not enter the runtime). Partially delivers proposal P1
+(#458).
+
+**Context.** WorkWell did not alert providers at all: verified by search, there was no CDS Hooks
+implementation, no `PlanDefinition`, no `$apply`, and no hook fired anywhere — the alerts existed only on
+WorkWell's own screens, which is the gap guide S7 describes. CDS Hooks is a JSON request/response contract
+over HTTPS, so serving it requires no Java: two routes on the worker that already exists. Nicole's concern
+was reinventing wheels, and adopting the community standard is the direct answer; adopting its *reference
+implementation* at runtime would have replaced a working engine with a second one.
+
+**Decision.**
+
+1. **One service, `patient-view`.** In the separately versioned CDS Hooks Library IG (v1.0.1, 2025-03-12)
+   it carries maturity 5; `encounter-start`, the other hook that fits an in-encounter check, is at maturity
+   1 and would return the same cards from the same outcomes. A second hook is a discovery entry and a
+   validation branch when a client asks for one.
+2. **Cards render persisted outcomes of a FINALIZED run.** Never a preview, never a synthetic bundle. This
+   is why no `501` twin of ADR-061's `preview_unavailable` is needed — the answer is truthful on any stack —
+   and it answers P1's latency question by not incurring it. The cost, stated: a card is as fresh as the
+   last run, not as fresh as this encounter.
+3. **No `prefetch` is declared, because none is evaluated**, and `usageRequirements` — the spec's own field
+   for telling a caller what it must know — says so in the machine-readable contract. `fhirServer`,
+   `fhirAuthorization` and `prefetch` are accepted and ignored. Declaring a template we would ignore would
+   make a client fetch and transmit data for nothing; *honouring* it means evaluating a caller-supplied
+   bundle per request, which is a different capability and is where S7's step 2 would land.
+4. **An absence is a CARD, not an empty list.** A patient with no finalized outcome — including one whose id
+   did not resolve — gets one `info` card saying so. `{"cards": []}` at the point of care reads as "no
+   gaps", the confusion ADR-061's 404 exists to prevent, and because a hook's `context.patientId` is a bare
+   EHR id while WorkWell persists live subjects as `wc|<patientId>`, a namespace mismatch would otherwise be
+   indistinguishable from a clean bill of health. Silence is reserved for a subject we *did* evaluate and
+   found compliant. Not `412`, which means a failure to retrieve FHIR data.
+5. **`critical` is never emitted, and is unrepresentable in the card type.** In CDS Hooks it means the user
+   must not proceed; WorkWell is supplementary to WebChart (locked decision 1) and is not entitled to say
+   that about someone else's encounter. `systemActions` is likewise never emitted — nothing WorkWell returns
+   may change a chart without a human choosing it.
+6. **A suggestion is offered only where the order code carries an APPROVED terminology mapping**, read from
+   the store rather than the seed array so that approving a mapping unlocks it without a code change.
+   `order-catalog.ts` describes its codes as "representative (demo, not billing-certified)", and a CDS
+   suggestion is a one-click order into a certified EHR. **The consequence is deliberate: `cms122` and
+   `cms125` get no suggestion**, because their CPT codes have no mapping at all — so the two
+   officially-routed CMS measures carry information and a link. Getting them a suggestion is a terminology
+   review, not a code change.
+7. **The measure-outcome-to-card mapping is OURS.** HL7's blessed route is `PlanDefinition/$apply` →
+   `RequestOrchestration` → cards; DEQM's `$care-gaps` stops at a `DetectedIssue`, and **no published mapping
+   carries a care gap into a card**. We map `outcomes.evidence_json` directly, reusing the readers the roster
+   and case detail already use, and `STANDARDS_CONFORMANCE.md` records that the gap-to-card leg is local.
+8. **Discovery is public; invoke and feedback are not.** `/cds-services` matches no `/api/**` rule and
+   `authorize` ends in permitAll for non-`/api` paths, so the two rules are mandatory rather than a
+   refinement — asserted both as a unit call and end-to-end through the worker, and both assertions fail when
+   either rule is removed. Invoke reuses the `/sse` and `/mcp/**` authority (`ROLE_MCP_CLIENT` /
+   `CASE_MANAGER` / `ADMIN`) rather than inventing a role, since the user directory stays hardcoded.
+9. **Authentication is WorkWell's bearer token, and the spec's JWT profile is a NAMED GAP.** CDS Hooks
+   defines its own scheme — a JWT the *client* signs, verified against a JWKS, with `aud` equal to the
+   invoked endpoint and an `iss`/`jku` allowlist — and it **SHALL NOT** be signed with a symmetric algorithm,
+   so our HS256 token can never be a conformant CDS Hooks JWT. The profile is not built: `jku` fetching is
+   SSRF-by-design, and a verifier whose allowlist nobody has populated is a control that reads as present
+   and cannot fire. This becomes a precise question for MIE — *does WebChart act as a CDS Hooks client, and
+   if so what are its `iss` and JWKS URL?*
+10. **The feedback endpoint is built, with no schema change.** `card.uuid` and `suggestion.uuid` derive from
+    `(runId, subjectId, measureId)`, so correlating feedback is a recomputation over the subject's own
+    outcomes rather than a lookup in a table — and schema is the owner's alone. Deterministic ids also mean a
+    client re-firing the hook for an unchanged run gets the same uuid, so repeat feedback does not fragment.
+    The handler records the uuid verbatim and asserts nothing about what it referred to.
+
+11. **A FAILED evaluation is reported as ours.** `PARTIAL_FAILURE` is terminal, so its rows are served, and a
+    subject whose evaluation threw is persisted `MISSING_DATA` with an `evaluationError`
+    (`DATA_MODEL_CONTRACTS.md` §5). `deriveCell` has no branch for that and falls through to "No record on
+    file", after which `nextActionFor` says "Collect the missing documentation" — asserting a fact about the
+    **patient** when the truth is that our engine threw. Tolerable on a dashboard; in someone else's chart it
+    is the same confusion decision 4 exists to prevent. Such a row now gets a "could not be evaluated" card,
+    `info`, with no suggested order (review).
+12. **A suggested resource references the id the CLIENT sent.** `toServiceRequest` writes
+    `Patient/<workwell subject id>`, which is right for `GET /api/orders/proposals` and wrong the moment the
+    resource crosses into an EHR: on a live tenant that is `Patient/wc|4821`, which names nothing the client
+    can resolve and is not a legal FHIR id. Re-pointed at the hook's `patientId` in the CDS layer only, so
+    the existing orders surface is unchanged. Card identity still uses the internal id (Codex review).
+13. **Feedback fails loudly, and is bounded.** Because the audit event is the only record, a failed write
+    returns **503** with `recorded`/`of` rather than a `200` that tells the client never to retry — invoke
+    stays best-effort, since its cards are correct regardless. And a request carries at most 100 entries with
+    `userComment` capped at 8000 characters, because each entry is an append to the append-only ledger by a
+    machine credential (review; both reviewers raised the first independently).
+
+**Consequences.** WorkWell can now be pointed at by any conformant CDS client, which changes the joint-call
+question from "should we do this?" to "does WebChart speak it?". The card-selection predicate
+(`dispositionFor(...) === "OPEN"`) and the order-proposal predicate (`AT_RISK`) must stay the same set, or a
+carded measure could claim a proposal created for a different one; a test now pins that equality, since
+nothing in either file mentioned the other. `userComment` is the first path putting unstructured clinical
+prose into `audit_events`, which reaches `GET /api/audit-events/export` — noted in
+`PRODUCTION_READINESS_2026-07.md`. CORS is **not** relaxed: production keeps its
+exact-origin allowlist, so a browser-based client's origin must be added deliberately — the spec requires CORS
+support but explicitly declines to specify an allowlist rule. Nothing here is justified by certification: ONC's
+(b)(11) DSI criterion does not name CDS Hooks.
+
+---
+
 ## ADR-066: the documentation splits into a maintained guide and a dated archive — because a doc that explains and a doc that records rot at different speeds
 
 **Status:** Accepted (2026-08-10). Implements the owner directive to trim the documentation and

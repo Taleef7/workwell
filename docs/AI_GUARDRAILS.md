@@ -5,6 +5,27 @@ AI never decides compliance.
 
 Authoritative compliance state is computed by CQL evaluation (`Outcome Status`) and persisted structured evidence (`outcomes.evidence_json`). AI outputs are assistive text only.
 
+### 1.1 CDS Hooks cards are a rendering, and carry nothing from an AI surface (ADR-067)
+
+The CDS Hooks service (`docs/CDS_HOOKS.md`) returns cards into someone else's clinical workflow, which makes
+it the surface where the non-negotiable rule matters most. Three consequences, all enforced in code:
+
+- **Every clinical statement in a card is the CQL outcome verbatim** — the status, the display method and the
+  next-action line come from `deriveCell` / `deriveWhyFlagged` / `nextActionFor`, the same readers the roster
+  and case detail use. **No AI surface contributes to a card**, and none may: an `AiAssistService` explanation
+  is assistive text for an operator reading a case, not something to put in front of a clinician mid-encounter
+  as a finding.
+- **`systemActions` is never emitted.** In CDS Hooks it is the array a client auto-applies with no user
+  interaction. Nothing WorkWell returns may change a chart without a human choosing it, which is the
+  human-in-the-loop contract of §7 applied to an outbound integration.
+- **`critical` is never emitted**, and is unrepresentable in the card type. It means *the user must not
+  proceed*; WorkWell is supplementary to WebChart and is not entitled to say that about someone else's
+  encounter.
+
+A card `suggestion` is a *proposal* — a `ServiceRequest` with `intent=proposal`, `status=draft`, offered only
+where the order code carries an APPROVED terminology mapping, and accepted only by a clinician's explicit
+action.
+
 ## 2) Active AI Surfaces and Prompt Templates
 All current prompts are implemented in `com.workwell.ai.AiAssistService`.
 
