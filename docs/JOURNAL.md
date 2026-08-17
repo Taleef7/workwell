@@ -94,6 +94,53 @@ return the same cards); no `prefetch` evaluation; no OpenAPI path aliases beyond
 try-it-out console on `/api-docs`, since `swagger-ui-react` peers on `react@">=16.8 <19"` and this app is on
 React 19 — a copyable `curl` instead.
 
+**The review round changed real things, and two of them were mine to be embarrassed about (#469).** A
+code-review pass plus Codex's PR comments produced seven substantive fixes.
+
+The one both reviewers found independently: **feedback returned `200` when its audit write failed.**
+Best-effort auditing is right for *invoke* — the cards are still correct — but for feedback the audit event
+IS the persistence, which is the whole reason the endpoint needed no schema change, so a swallowed failure
+was a silent no-op that told the client never to retry. Now `503` with `recorded`/`of`. It also collided
+verbatim with CLAUDE.md's "every state change writes `audit_event` — no exceptions".
+
+The one that mattered clinically: **a failed CQL evaluation rendered as a fact about the patient.**
+`PARTIAL_FAILURE` is terminal so its rows are served, and a subject whose evaluation threw persists as
+`MISSING_DATA` with an `evaluationError` — which `deriveCell` turned into "No record on file" and
+`nextActionFor` into "Collect the missing documentation". On a dashboard that is an approximation; in
+someone else's chart it is the same confusion `noEvaluationCard` exists to prevent, one layer in. Such a row
+now gets a "could not be evaluated" card with no suggested order.
+
+Codex's best catch: **the suggested `ServiceRequest` referenced `Patient/wc|4821`** — WorkWell's internal
+subject id, which names nothing in the client's namespace and is not a legal FHIR id, so the suggestion
+could not be applied. Only bites on the deployment the feature exists for. Fixed in the CDS layer alone,
+because `GET /api/orders/proposals` shares `toServiceRequest` and the internal id is correct there.
+
+**Four of my own guards could not fail**, which is worth recording in a change whose selling point is guard
+rigour. The worst: `assert.notEqual(authorize(...).ok && alias === OPENAPI_PATH, true)` — the `&&` is always
+false, so it passed for every possible implementation, and it was not one I had mutation-checked. Also a
+`critical` assertion against a type that permits only two values, an `Array.isArray` that pinned a field name
+and nothing else, and a `.find()` that returned the oldest audit event while being named `latest`.
+
+**One Codex comment I did not act on, and said so on the thread.** It argued `acceptedSuggestions` should be
+an array of UUID strings; the spec defines "an array of json objects identifying one or more of the user's
+**AcceptedSuggestion**s", each with a REQUIRED `id`, and every example is `[{"id": …}]`. Complying would have
+made the published contract non-conformant. But checking it properly found something real underneath — our
+runtime accepted `[{}]` — so the `id` is now required, and I had to push a second commit because I had
+already *claimed* that in the reply before it was true.
+
+**And a self-inflicted one worth carrying: `sed -i` over UTF-8 source replaced a space with a literal NUL
+byte, twice, and it reached a commit.** It typechecked, all 1,976 tests passed, and the only symptom was
+`grep` reporting the file as binary — a signal I saw and dismissed as a bad measurement. It sat in the
+separator feeding the card-uuid hash. Fixed, with a six-line test over `src/cds/` that would have caught
+both. The rule going forward is simply: do not `sed` UTF-8 source.
+
+**Deferred with a reason, not forgotten: [#470](https://github.com/Taleef7/workwell/issues/470).** Resolving
+a patient scans that subject's entire outcome history and parses each row's evidence. Real, but **not this
+change's defect** — five callers share the constant, and the CDS route copied it deliberately; what is new
+is a *latency budget* for it. The fix is a per-measure store query with a `store-contract.ts` case, which is
+a different review surface, and nothing fires the hook today so it is unobserved. Stated in
+`CDS_HOOKS.md` → *Limits, stated* rather than left for an integrator to discover.
+
 ---
 
 ## 2026-08-14 — M-E1 leads with immunization, and CDS Hooks turns out to be a specification rather than a dependency
