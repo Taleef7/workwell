@@ -33,6 +33,19 @@ write every record in the database. There is no per-customer isolation, no encry
 beyond whatever Neon's default tier provides, and no retention policy. That is fine for synthetic data
 and disqualifying for real patient data.
 
+### New since 2026-08-17: the first unstructured clinical prose in `audit_events` (ADR-067)
+
+The CDS Hooks feedback endpoint records `overrideReason.userComment` — **free text a clinician typed about a
+specific patient encounter** — into `audit_events.payload`, which is reachable through
+`GET /api/audit-events/export?format=csv`. Every other payload in that ledger is structured, bounded and
+derived (ids, statuses, counts), so this is a category change rather than more of the same, and it is worth
+naming here even though the demo stack cannot receive PHI: on a PHI-capable deployment it would be PHI in the
+audit trail, and the audit trail is append-only by design.
+
+Bounded, not solved: the comment is truncated at 8000 characters and the batch at 100 entries. The open
+questions for a PHI environment are retention (the ledger has none) and whether the CSV export should redact
+it. Neither is a demo-stack concern; both belong in the gap list below.
+
 ### Required environment split
 
 A PHI-capable deployment cannot be "the demo stack with real data typed in." It needs to be a **separate

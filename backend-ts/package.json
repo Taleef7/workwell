@@ -34,6 +34,7 @@
     "test": "node --import tsx --test \"src/**/*.test.ts\" \"packages/*/src/**/*.test.ts\" \"scripts/**/*.test.mjs\" \"scripts/**/*.test.ts\"",
     "build:packages": "node scripts/build-packages.mjs",
     "verify:publish": "node scripts/verify-publish.mjs",
+    "openapi:emit": "node --import tsx scripts/openapi-emit.mjs",
     "official:terminology-audit": "node scripts/official-terminology-audit.mjs",
     "vendor:official": "node scripts/vendor-official-measure.mjs"
   },

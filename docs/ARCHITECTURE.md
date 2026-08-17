@@ -266,6 +266,25 @@ Public API actions derive audit identity from the authenticated security context
 - Frontend demo prefill is a local convenience only; `NEXT_PUBLIC_DEMO_MODE=true` fails the production frontend build.
 
 ## 7) External Interfaces
+
+**The integration surface — the versioned, documented contract (ADR-061/067/068).** Everything else in this
+section is internal: it is logically v1 but moves with the frontend and carries no stability promise. These
+four route groups are the ones an integrator builds against, and the only ones the OpenAPI document describes.
+- `GET /api/v1/compliance/{subjectId}/{measureId}?start=&end=&mode=latest|preview` — one subject, one measure,
+  one stable answer, carrying `populationsSource` so a consumer can tell a measured population vector from
+  one inferred from status. `latest` requires a FINALIZED run and 404s rather than answering an absence;
+  `preview` is CM/ADMIN-only and 501s on a WebChart-configured stack rather than reporting a synthetic bundle
+  as an evaluation. Every answered request writes `COMPLIANCE_API_READ`. Contract: `docs/COMPLIANCE_API.md`.
+- `GET /cds-services` (**public** — metadata only) and `POST /cds-services/{serviceId}` — a CDS Hooks 2.0.1
+  service for the `patient-view` hook, returning cards built from persisted outcomes of a completed run. No
+  `prefetch` is declared because none is evaluated; `critical` and `systemActions` are never emitted; a
+  suggestion is offered only for an APPROVED terminology mapping; and a patient with no evaluation gets an
+  informational card, never an empty card list. Contract: `docs/CDS_HOOKS.md`.
+- `POST /cds-services/{serviceId}/feedback` — accepted/overridden per card, audited. Needs no schema because
+  `card.uuid` derives from `(runId, subjectId, measureId)`.
+- `GET /api/v1/openapi.json` (**public**) — the OpenAPI 3.1.1 document for the above, plus health and version.
+  Kept honest by a two-way coverage test and a pinned `redocly lint` in CI.
+
 - Live WebChart population: configured `ALL_PROGRAMS`/`MEASURE` runs fetch in the background and fail the whole run before outcomes on a population-fetch error; FAILED runs are ignored by read models, so the prior successful population remains authoritative. The seam unset path is unchanged. `SITE=WebChart` and `wc|` CASE rerun-to-verify are phase-2 deferrals; CASE returns a non-mutating 409 rather than reusing a stale bundle or fabricating `MISSING_DATA`.
 - REST API: measure, run, case, admin, export, and auditor packet endpoints.
 - REST API: evidence upload/download on case detail, role-gated to case manager/admin.
@@ -331,18 +350,27 @@ No microservice decomposition is used in MVP; package boundaries are the future 
 
 ## 9) API Versioning Convention
 - The current API contract is **v1**. `GET /api/version` returns
-  `{"api":"v1","build":"<impl-version-or-unknown>","uptime":"<seconds>s"}`
-  and is unauthenticated for health/discovery use.
+  `{"api":"v1","stack":"typescript","build":"workwell-api-ts"}` and is unauthenticated for
+  health/discovery use. *(Corrected 2026-08-17: this row claimed an `uptime` field for years. The worker
+  emits none — writing the OpenAPI document surfaced it, because the document describes what the route
+  actually returns and a test compares the two.)*
 - Existing endpoints remain under the unprefixed `/api/...` path for the MVP
-  demo; they are logically v1. Migrating controllers to an explicit `/api/v1/...`
-  prefix is intentionally deferred (Sprint 4 note) to avoid churn across
-  Actuator, Swagger, CORS, and the frontend client.
+  demo; they are logically v1. Migrating them to an explicit `/api/v1/...` prefix
+  is intentionally deferred to avoid churn across health/discovery, CORS, and the
+  frontend client. **`/api/v1/` is reserved for the deliberately versioned
+  integration surface** — see §7 — rather than being the eventual home of every route.
 - **Convention for future breaking changes:** when a response shape change cannot
   be made backward-compatible, introduce the new endpoint under `/api/v2/...`
   rather than mutating the v1 path. The old `/api/v1/...` (or current unprefixed)
   path must be retained for at least one minor version cycle so integrators have
   a migration window. Additive, backward-compatible changes stay on v1.
-- The OpenAPI document (`workwell.swagger.enabled=true`) advertises version `v1`.
+- **The OpenAPI document is `GET /api/v1/openapi.json`** — hand-authored OpenAPI **3.1.1**, unauthenticated,
+  covering the *promised* surface only (§7's "integration surface" block). Rendered for humans at the
+  frontend's public `/api-docs`. ADR-068. *(Corrected 2026-08-17: this row previously read "The OpenAPI
+  document (`workwell.swagger.enabled=true`) advertises version `v1`" — a springdoc property from the
+  Java/Spring backend retired in #109 PR4. No document was served at all; probes against production and
+  staging returned `501 not_implemented`. A routed-path test now fails if a documented path stops being
+  served, so this row cannot go stale the same way again.)*
 
 ## 10) Inert-seam inventory
 

@@ -150,8 +150,8 @@ For the same flows drawn as *sequences* — who calls what, in what order — se
 
 The guide explains; these specify. [`ARCHITECTURE.md`](../ARCHITECTURE.md) (module-level detail),
 [`DATA_MODEL.md`](../DATA_MODEL.md) and [`DATA_MODEL_CONTRACTS.md`](../DATA_MODEL_CONTRACTS.md)
-(schemas and contracts), [`COMPLIANCE_API.md`](../COMPLIANCE_API.md) and
-[`PACKAGES.md`](../PACKAGES.md) (the two integrator contracts),
+(schemas and contracts), [`COMPLIANCE_API.md`](../COMPLIANCE_API.md), [`CDS_HOOKS.md`](../CDS_HOOKS.md) and
+[`PACKAGES.md`](../PACKAGES.md) (the integrator contracts — one answer, one workflow surface, one library),
 [`MEASURES.md`](../MEASURES.md) (the measure catalog in plain English),
 [`STANDARDS_CONFORMANCE.md`](../STANDARDS_CONFORMANCE.md) (what we claim and refuse to claim),
 [`ROADMAP_2026-08-04.md`](../ROADMAP_2026-08-04.md) (the approved plan), and

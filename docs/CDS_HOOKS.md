@@ -1,0 +1,231 @@
+# WorkWell CDS Hooks service — `2.0.1`
+
+*This patient is in front of a clinician right now. What is outstanding?*
+
+WorkWell implements the [CDS Hooks](https://cds-hooks.hl7.org/2.0/) contract so a quality gap can arrive
+inside someone else's workflow instead of on a dashboard they would have to visit. We serve the standard's
+shapes; we do not redefine them.
+
+---
+
+## Request
+
+```
+GET  /cds-services                                              → discovery (public)
+POST /cds-services/workwell-compliance-patient-view             → cards
+POST /cds-services/workwell-compliance-patient-view/feedback    → 200
+```
+
+| | | |
+|---|---|---|
+| `serviceId` | path, required | An `id` from discovery. Today there is exactly one. An unknown id is a **404** that lists what exists. |
+| `hook` | body, required | Must be `patient-view`. A hook this service does not serve is a **400**, not a guess. |
+| `hookInstance` | body, required | A UUID for this invocation, per the specification. |
+| `context.patientId` | body, required | The FHIR `Patient.id`. A bare WebChart id is also tried in the `wc` namespace — see *Subject resolution*. |
+| `context.userId` | body, optional | `Practitioner/abc` or `PractitionerRole/123`. Recorded, not used for gating. |
+| `fhirServer`, `fhirAuthorization`, `prefetch` | body, optional | **Accepted and not evaluated.** See *Limits, stated*. |
+
+**Authentication:** discovery is public — it returns service metadata and no patient data. Invoke and
+feedback require the standard bearer token with `ROLE_MCP_CLIENT`, `ROLE_CASE_MANAGER` or `ROLE_ADMIN`, the
+same authority as `/sse` and `/mcp/**`. An anonymous invoke is **401**.
+
+> **This is not the CDS Hooks JWT profile, and that is a stated gap.** The specification defines its own
+> scheme — a JWT the *client* signs (RS384/ES384), verified against a JWKS, with `aud` equal to the invoked
+> endpoint URL and an allowlist of trusted `iss`/`jku` values — and it **SHALL NOT** be signed with a
+> symmetric algorithm. WorkWell's token is HS256 and self-issued, so it can never be a conformant CDS Hooks
+> JWT. The profile is deliberately not implemented: `jku` fetching is an SSRF surface by design, and a
+> verifier whose allowlist nobody has populated is a control that reads as present and cannot fire. If a real
+> CDS client appears, the two things needed from it are its `iss` and its JWKS URL.
+
+## Response
+
+A successful invoke is `200` with a `cards` array, per the specification.
+
+```jsonc
+{
+  "cards": [
+    {
+      "summary": "Annual Audiogram Completed — overdue",   // ≤ 140 chars, per the spec
+      "indicator": "warning",                              // info | warning — never `critical`
+      "source": {
+        "label": "WorkWell Measure Studio",
+        "url": "https://studio.example.org/measures/audiogram"
+      },
+      "detail": "**Overdue — last 2025-03-10 (55d over).** Escalate audiogram follow-up immediately.\n\n- Last completed: 2025-03-10\n- Days overdue: 55\n- Compliance window: 365 days\n\n_Computed by CQL and evaluated 2026-06-12T03:00:11.482Z (WorkWell run 7f3a…)._",
+      "uuid": "3c1d…",                                     // derived, stable — cite it in feedback
+      "links": [
+        { "label": "Open in WorkWell", "url": "https://studio.example.org/compliance?subjectId=emp-006", "type": "absolute" }
+      ],
+      "suggestions": [                                     // only for an APPROVED order code — see below
+        {
+          "label": "Order Comprehensive audiometry evaluation",
+          "uuid": "9b02…",
+          "actions": [
+            {
+              "type": "create",
+              "description": "Draft order proposal for Comprehensive audiometry evaluation (Annual Audiogram Completed). Advisory — a clinician reviews and submits; WorkWell orders nothing.",
+              "resource": { "resourceType": "ServiceRequest", "intent": "proposal", "status": "draft" }
+            }
+          ]
+        }
+      ],
+      "selectionBehavior": "at-most-one"
+    }
+  ]
+}
+```
+
+### An empty `cards` array means something specific
+
+| response | meaning |
+|---|---|
+| `{"cards": []}` | This patient **was** evaluated by a completed run and has no open gap. |
+| one `info` card, *"No WorkWell evaluation on record…"* | Nothing has been evaluated for this patient — including the case where the id did not resolve. |
+
+> **These are deliberately not the same answer.** An empty array at the point of care reads as "no gaps",
+> which is the confusion ADR-061's 404 exists to prevent. Because a hook's `patientId` is a bare EHR id while
+> WorkWell persists live subjects as `wc|<patientId>`, a namespace mismatch would otherwise be
+> indistinguishable from a clean bill of health. `412 Precondition Failed` is also not used: it means the
+> service could not retrieve FHIR data, and this is a truthful "nothing has been evaluated yet".
+
+### `indicator` never reaches `critical`
+
+The specification allows `info | warning | critical`, and `critical` means *the user must not proceed*.
+WorkWell is supplementary to WebChart and is not entitled to say that about someone else's encounter, so
+`OVERDUE` maps to `warning` and everything else to `info`. This is enforced by the card type, not by
+convention.
+
+### Subject resolution
+
+`wc|<patientId>` is tried first, then the bare id. So a WebChart client sending `4821` reaches the subject
+WorkWell stored as `wc|4821`, and a synthetic-roster client sending `emp-006` reaches `emp-006`.
+
+### Suggestions are gated on an APPROVED terminology mapping
+
+A suggestion is a one-click order into an EHR, and `order-catalog.ts` describes its codes as
+"representative (demo, not billing-certified)". So one is offered only where the order code carries an
+**`APPROVED`** mapping in `terminology_mappings`, read from the store — approving a mapping unlocks a
+suggestion with no code change.
+
+| measure | order code | offered? |
+|---|---|---|
+| `audiogram` | CPT 92557 | yes — APPROVED |
+| `tb_surveillance` | CPT 86580 | yes — APPROVED |
+| `flu_vaccine` | CVX 141 | yes — APPROVED |
+| `hazwoper` | internal `hazwoper-exam` | no — mapping is `REVIEWED`, and the code is not a public standard |
+| **`cms122`, `cms125`** | CPT 83036 / 77067 | **no — no mapping exists at all** |
+
+> **The consequence is intended, not an oversight.** The two officially-routed CMS measures carry
+> information and a link rather than an order. Offering a demo-grade CPT for creation in a certified EHR is
+> the harm the rule exists to prevent; giving them a suggestion is a terminology review, not a code change.
+
+Two measures sharing one order code (`diabetes_hba1c` and `cms122` both map to CPT 83036) collapse to a
+single suggestion, because one order is the correct clinical action.
+
+> **The `ServiceRequest` references the id YOU sent, not WorkWell's internal subject id.** On a live tenant
+> those differ — we persist `wc|4821`, the hook supplies `4821` — and a reference into the `wc` namespace
+> would name nothing the client can resolve (`|` is not a legal FHIR id either). Card identity still uses the
+> internal id, so feedback correlation is unaffected.
+
+### A failed evaluation is reported as ours
+
+A run can finish `PARTIAL_FAILURE`, and a subject whose evaluation threw is persisted `MISSING_DATA` with an
+`evaluationError`. Such a subject gets a card that says the measure **could not be evaluated**, with `info`
+and no suggestion — never "no record on file / collect the missing documentation", which would assert a fact
+about the patient when the truth is that our engine failed.
+
+## Feedback
+
+`POST /cds-services/{serviceId}/feedback` reports what a clinician did with a card. Optional in the
+specification; implemented here because it is the one leg of guide S7's send/receive reconciliation WorkWell
+can build alone.
+
+```jsonc
+{
+  "feedback": [
+    {
+      "card": "3c1d…",                                  // card.uuid from the invoke response
+      "outcome": "accepted",                            // accepted | overridden — there is no `declined`
+      "acceptedSuggestions": [{ "id": "9b02…" }],       // REQUIRED when outcome is `accepted`
+      "outcomeTimestamp": "2026-06-12T10:05:31Z"
+    }
+  ]
+}
+```
+
+Each entry writes one `CDS_HOOKS_FEEDBACK_RECEIVED` audit event. Nothing else is persisted, and nothing else
+needed to be: `card.uuid` is derived from `(runId, subjectId, measureId)`, so correlating a uuid back to a
+measure is a recomputation rather than a lookup — which is why this endpoint needs no schema change. The
+`CDS_HOOKS_INVOKED` event records each emitted uuid **with its measure and run**, so the join runs from the
+ledger in one step. Deterministic ids also mean a client re-firing the hook for an unchanged run gets the same
+uuid, so repeat feedback does not fragment across ids.
+
+> **A failed write is a `503`, not a silent `200`.** Because the audit event is the *only* record of the
+> action, and the specification gives feedback no response body to signal partial success, reporting success
+> on a lost write would tell the client never to retry. `recorded` / `of` say how much of the batch landed.
+> Retry is safe — feedback is idempotent by `(card, outcome, outcomeTimestamp)`.
+
+**Bounds.** At most **100** entries per request, and `overrideReason.userComment` is truncated at 8000
+characters (truncation-marked). Each entry is an append to an append-only ledger and the caller is a machine
+credential, so an unbounded batch would be amplification against our own audit trail.
+
+## Errors
+
+| status | `error` | when |
+|---|---|---|
+| 400 | `invalid_request` | body is not a JSON object; missing `hook`/`hookInstance`/`context.patientId`; a hook this service does not serve; empty `feedback`; more than 100 feedback entries; an `outcome` other than `accepted`/`overridden`; `accepted` without `acceptedSuggestions` |
+| 401 | `unauthenticated` | no bearer token on invoke or feedback |
+| 403 | `forbidden` | authenticated, but the role may not invoke a CDS service |
+| 404 | `unknown_service` | unknown `serviceId`; the response lists the ids that exist |
+| 405 | `method_not_allowed` | non-POST on invoke or feedback; a non-GET on discovery **when authenticated** — see below |
+| 503 | `audit_write_failed` | feedback could not be recorded. The audit event is the only record of the action, so this is reported as failed rather than dropped silently. Carries `recorded` / `of` so a retry is informed; retry is safe. |
+
+> **Method vs auth precedence on discovery.** `GET /cds-services` is public, but the *path* is gated for every
+> other method, so an anonymous `POST /cds-services` is **401**, not 405 — the auth gate runs before the
+> handler. An authenticated `POST` there is 405. Stated because the order is not guessable from the table.
+
+## What this promises
+
+**Stable:** the paths above, the CDS Hooks 2.0.1 response shape, the `indicator` ceiling of `warning`, the
+distinction between an empty card list and an informational card, and the derivation of `card.uuid` from
+`(runId, subjectId, measureId)`.
+
+**Not stable:** card `summary` and `detail` wording, which measures produce cards, and the set of order codes
+eligible for a suggestion — the last of these moves when a terminology mapping is approved, by design.
+
+## Limits, stated
+
+- **`prefetch`, `fhirServer` and `fhirAuthorization` are accepted and NOT evaluated**, and the service says
+  so in its own `usageRequirements`. No prefetch template is declared, because declaring one would make a
+  client fetch and transmit data we ignore. Honouring it means evaluating a caller-supplied bundle per
+  request — a different capability, and the piece guide S7 still calls not built.
+- **Cards are as fresh as the last completed run, not as fresh as this encounter.** They render persisted
+  outcomes of a FINALIZED run; a mid-run row is never served.
+- **An invocation is a bounded but unindexed read, not a constant-time one.** Resolving a patient scans that
+  subject's outcome history (up to 100,000 rows) and parses each row's evidence, then keeps the newest
+  finalized row per measure. The window has to be that large or an older valid outcome would read as "never
+  evaluated" — the confusion this whole design exists to prevent — so the fix is a per-measure query in the
+  store rather than a smaller window. Today a subject accrues roughly one row per measure per nightly run.
+  Tracked as [#470](https://github.com/Taleef7/workwell/issues/470); the same scan backs
+  `/api/v1/compliance`, MCP's `check_compliance` and the employee profile, so it is not specific to this
+  endpoint — but this is the only one of them on an interactive, point-of-care path.
+- **One hook.** `patient-view` is maturity 5 in the CDS Hooks Library IG; `encounter-start` is maturity 1 and
+  would return the same cards.
+- **`systemActions` is never emitted.** Nothing WorkWell returns may change a chart without a human choosing
+  it (see `docs/AI_GUARDRAILS.md`).
+- **No `overrideReasons`.** Offering a coded dismissal vocabulary we do not analyse would be decoration.
+- **No tenant or site scoping** — a caller with a token may ask about any subject. A known posture, on the
+  production-readiness gap list (#269).
+- **CORS is an exact-origin allowlist and is not relaxed.** A browser-based CDS client (including the public
+  sandbox at `sandbox.cds-hooks.org`) needs its origin added to `WORKWELL_CORS_ALLOWED_ORIGINS`. The
+  specification requires CORS support but explicitly declines to specify an allowlist rule.
+- **Nothing in WebChart fires this hook today.** Whether WebChart acts as a CDS Hooks client is an open
+  question with MIE, and there is no public evidence either way.
+- **Conformance is self-graded.** No external CDS Hooks conformance suite exists — the community validator is
+  JSON Schemas last touched in 2018, the sandbox is ungraded, and Inferno has no CDS Hooks kit. See
+  `docs/STANDARDS_CONFORMANCE.md`.
+- **Compliance is computed by CQL and only by CQL** (ADR-008). A card is a rendering of a completed
+  evaluation, never a decision.
+
+*Implemented in `backend-ts/src/routes/cds-hooks.ts` and `backend-ts/src/cds/` · ADR-067 · guide
+[S7](guide/10-scenarios.md) · proposal P1 (#458).*

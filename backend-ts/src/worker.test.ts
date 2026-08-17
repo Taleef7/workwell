@@ -58,6 +58,28 @@ test("a protected route without a token is 401", async () => {
   assert.equal((await call("/api/runs")).status, 401);
 });
 
+test("CDS Hooks: discovery is reachable with no token, invoking is not", async () => {
+  // Through the REAL worker with auth ENABLED, because that is the only place the ordering of the auth
+  // gate and the handler is exercised. `/cds-services` is outside `/api/`, where `authorize` ends in
+  // permitAll — so an omitted rule would show up here as a 200 on the invoke path, not as a unit failure.
+  const discovery = await call("/cds-services");
+  assert.equal(discovery.status, 200);
+  const { services } = (await discovery.json()) as { services: Array<{ hook: string; id: string }> };
+  assert.equal(services.length, 1);
+  assert.equal(services[0]!.hook, "patient-view");
+
+  const invoke = await call(`/cds-services/${services[0]!.id}`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ hook: "patient-view", hookInstance: "i", context: { patientId: "emp-006" } }),
+  });
+  assert.equal(invoke.status, 401, "invoking must require a token — it returns per-patient clinical status");
+  assert.equal(
+    (await call(`/cds-services/${services[0]!.id}/feedback`, { method: "POST", body: "{}" })).status,
+    401,
+  );
+});
+
 test("login → token → authorized access, and role gates return 403", async () => {
   const login = await call("/api/auth/login", {
     method: "POST",

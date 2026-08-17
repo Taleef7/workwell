@@ -67,6 +67,29 @@ st=$(req POST /api/auth/refresh)
 rt="$(jq -r '.token // empty' "$BODY")"
 { [ "$st" = "200" ] && [ -n "$rt" ] && pass "POST /api/auth/refresh → rotated token (cookie round-trips)" && TOKEN="$rt"; } || fail "POST /api/auth/refresh → $st (refresh cookie not honored?)"
 
+# 2b. the integration surface: the OpenAPI document, the CDS Hooks service, and the v1 contract.
+# These are what an integrator (and MIE) reach for, and until now none of them was smoke-checked at all.
+# The OpenAPI document and CDS discovery are PUBLIC, so they are probed before any token matters — but
+# `req` sends the token once set, which is harmless here.
+echo "[integration surface]"
+st=$(req GET /api/v1/openapi.json); ver="$(jq -r '.openapi // empty' "$BODY")"
+{ [ "$st" = "200" ] && [ -n "$ver" ] && pass "GET /api/v1/openapi.json → OpenAPI $ver"; } || fail "GET /api/v1/openapi.json → $st (the document is not served)"
+st=$(req GET /cds-services); svc="$(jq -r '[.services[]?.id] | join(",")' "$BODY" 2>/dev/null || echo "")"
+{ [ "$st" = "200" ] && [ -n "$svc" ] && pass "GET /cds-services → $svc"; } || fail "GET /cds-services → $st (CDS Hooks discovery is not served)"
+# One real card assembly, through the standard contract. emp-006 is an OVERDUE audiogram in the synthetic
+# roster; a patient WorkWell has never evaluated would return one informational card instead, so a non-empty
+# array here is not by itself proof of a gap — the summary is.
+st=$(req POST "/cds-services/workwell-compliance-patient-view" \
+  "{\"hook\":\"patient-view\",\"hookInstance\":\"smoke-$$\",\"context\":{\"userId\":\"Practitioner/smoke\",\"patientId\":\"emp-006\"}}")
+cards="$(jq -r '.cards | length' "$BODY" 2>/dev/null || echo "?")"
+{ [ "$st" = "200" ] && pass "POST /cds-services/... → $cards card(s): $(jq -r '[.cards[]?.summary] | join(" | ")' "$BODY" 2>/dev/null | head -c 120)"; } || fail "CDS Hooks invoke → $st $(head -c 120 "$BODY")"
+st=$(req GET "/api/v1/compliance/emp-006/audiogram")
+if [ "$st" = "200" ]; then
+  pass "GET /api/v1/compliance/emp-006/audiogram → $(jq -r '.status' "$BODY") (source: $(jq -r '.populationsSource' "$BODY"))"
+elif [ "$st" = "404" ]; then
+  warn "GET /api/v1/compliance/emp-006/audiogram → 404 (no finalized run has covered this subject yet)"
+else fail "GET /api/v1/compliance/emp-006/audiogram → $st $(head -c 120 "$BODY")"; fi
+
 # 3. measures: catalog count + a detail with value sets
 echo "[measures]"
 st=$(req GET /api/measures); n=$(jq 'length' "$BODY" 2>/dev/null || echo "?")

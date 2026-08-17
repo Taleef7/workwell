@@ -12,6 +12,7 @@ import {
   ListChecks,
   LogOut,
   Send,
+  Code2,
   Settings,
   Shield,
   Users,
@@ -60,6 +61,9 @@ const nav = [
   { href: "/studio", label: "Studio", icon: FileClock, roles: [ROLES.AUTHOR, ROLES.APPROVER, ROLES.ADMIN] },
   { href: "/runs", label: "Runs", icon: Activity },
   { href: "/admin", label: "Admin", icon: Settings, roles: [ROLES.ADMIN] },
+  // The integration contract (ADR-068). No `roles`: the page and the document it renders are both public,
+  // so every authenticated role can reach it — and so can anyone without an account.
+  { href: "/api-docs", label: "API", icon: Code2 },
 ] as const;
 
 const DATE_PRESETS = [

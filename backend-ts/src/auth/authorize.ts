@@ -59,9 +59,29 @@ const RULES: Rule[] = [
   { pattern: rx("/api/health"), access: "PERMIT" },
   { pattern: rx("/api/version"), access: "PERMIT" },
   { pattern: rx("/health"), access: "PERMIT" },
+  // NOTE: `/api/v1/openapi.json` deliberately has NO rule. Like health and version, `handleOpenApi` runs in
+  // the worker BEFORE the auth gate, so a rule here would never be consulted — a control that reads as
+  // load-bearing and cannot fire (review). Its public-ness is asserted by an actual unauthenticated request
+  // in `openapi.test.ts`, which is the only thing that proves it.
 
   { pattern: rx("/sse"), access: [A, CM, MCP] },
   { pattern: rx("/mcp/**"), access: [A, CM, MCP] },
+
+  // CDS Hooks (ADR-067). These rules are MANDATORY, not a refinement: `/cds-services` matches no `/api/**`
+  // rule, and `authorize` ends with `return { ok: true }` for non-`/api` paths (permitAll, mirroring
+  // Spring's anyRequest().permitAll()) — so without them the invoke endpoint would serve per-patient
+  // clinical status to anonymous callers.
+  //
+  // Discovery is PERMIT: it returns service metadata and no patient data, and a CDS client must be able to
+  // discover the service during onboarding (the spec imposes no auth on it). Invoke and feedback are
+  // machine-client work, so they reuse the SAME authority as /sse and /mcp/** rather than inventing a role
+  // — the user directory stays hardcoded (CLAUDE.md hard rule).
+  //
+  // Order is load-bearing: `rx("/cds-services/**")` expands to `^/cds-services(?:/.*)?$`, which ALSO
+  // matches the bare path, so the GET-exact PERMIT must come first. A non-GET on `/cds-services` therefore
+  // falls to the gated rule and is authenticated before the handler answers 405.
+  { method: "GET", pattern: rx("/cds-services"), access: "PERMIT" },
+  { pattern: rx("/cds-services/**"), access: [A, CM, MCP] },
 
   // Outreach templates: the picker on the case-detail outreach action is the CASE_MANAGER's
   // primary consumer, so READING the template list/preview is CM/ADMIN (Fable M23). Writes

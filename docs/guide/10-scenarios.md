@@ -404,13 +404,16 @@ authorizes.
 
 ## S7 — Quality inside the encounter (target state)
 
-> **This one is not built.** Every scenario above documents shipped behaviour; this is the target
-> architecture for the WebChart integration, and today's implementation is close to its opposite —
-> WorkWell *pulls* from WebChart on a schedule rather than receiving pushes, there is no endpoint
-> that takes a bundle and returns findings, and nothing writes back into the EHR. The table at the
-> end of this section names exactly which parts exist. Mechanisms it would build on:
+> **This flow is not built, but its delivery half now is.** Every scenario above documents shipped
+> behaviour. This one is the target architecture for the WebChart integration, and it has moved: since
+> 2026-08-17 WorkWell serves a **CDS Hooks** service — the community standard for exactly this shape of
+> alert — so a clinician's system can ask "what is outstanding for this patient?" and get structured
+> findings back. What is still absent is the half that makes it *live*: WorkWell answers from the last
+> completed run rather than from data supplied on the request, nothing in WebChart fires the hook today,
+> and nothing writes back into the EHR. The table at the end of this section names each part. Mechanisms:
 > [chapter 5](05-fhir.md) (FHIR), [chapter 4](04-engine-and-routing.md) (evaluation),
-> [`docs/COMPLIANCE_API.md`](../COMPLIANCE_API.md) (the contract it extends).
+> [`docs/CDS_HOOKS.md`](../CDS_HOOKS.md) (the built contract),
+> [`docs/COMPLIANCE_API.md`](../COMPLIANCE_API.md) (the per-measure one it complements).
 
 The idea in one sentence: **quality stops being a report somebody visits and becomes an answer
 that arrives while the clinician can still act on it.**
@@ -424,17 +427,19 @@ sequenceDiagram
   actor MGR as Quality manager
   NP->>WC: open an encounter, enter patient data
   loop as the visit progresses
-    WC->>WW: submit what the chart holds so far
-    WW-->>WC: quality findings for this patient
+    WC->>WW: fire the patient-view hook
+    WW-->>WC: cards — gaps, reasons, a draft order
     WC-->>NP: alerts, in the chart already open
+    NP->>WC: accept or dismiss a card
+    WC->>WW: feedback — accepted or overridden
   end
-  Note over WC,WW: weekly — the same exchange, run as a batch
-  WC->>WW: everything since the last exchange
-  WW-->>WC: findings across the population
-  WW->>WC: follow-up tasks and documents
-  WC-->>NP: work lands in the queue
+  Note over WC,WW: still missing — the chart's own data, sent for evaluation
+  WC-->>WW: submit what the chart holds so far
   MGR->>WW: population dashboards, already accumulated
 ```
+
+Solid arrows are built; the dashed one at the bottom is step 2, the piece that would make a card
+reflect *this* visit rather than the last completed run.
 
 What happens, in order:
 
@@ -446,15 +451,23 @@ What happens, in order:
    thirty patients a day, so pulling a month of encounters for a ten-physician practice means
    fetching, assembling and evaluating tens of thousands of records before anybody sees a single
    answer. Pushing as it happens spreads that same work across the day and turns the population
-   view into a read of something already computed.
-3. **Findings come back in-band, during the visit.** The exchange repeats as the visit progresses
-   — at check-in, after the nurse's intake, after the clinician's assessment, before close — so
-   each round of alerts reflects what is in the chart at that moment. An alert after the encounter
-   closes is a letter; an alert during it is a decision.
-4. **The practitioner never leaves WebChart.** WorkWell returns structured findings and WebChart
-   renders them in the chart that is already open. This is the "embed quality in WebChart" half of
-   the idea, and doing it at the data level rather than as an embedded panel is deliberate: a panel
-   is still somewhere you have to go and look, which is the problem it was meant to solve.
+   view into a read of something already computed. **This is the part still missing.** CDS Hooks has
+   a place for it — `prefetch`, where a client ships FHIR resources alongside the invocation — and
+   WorkWell deliberately declares no prefetch template, because it does not evaluate data supplied
+   on the request and advertising otherwise would make a client fetch and transmit for nothing.
+3. **Findings come back in-band, during the visit.** *Built, over yesterday's evaluation.* The
+   exchange is a CDS Hooks invocation: the client fires the `patient-view` hook with a patient id and
+   gets back **cards** — a one-line summary, a plain-English reason, the run and date it was computed
+   from, and a link into WorkWell. An alert after the encounter closes is a letter; an alert during it
+   is a decision. The honest limit is freshness, not delivery: cards reflect the last completed run,
+   so data entered five minutes ago is not yet in them.
+4. **The practitioner never leaves WebChart.** *Built at the data level; not built as rendering.*
+   Cards are structured for the client to draw in its own UI, which is what makes this an
+   integration rather than an embedded panel — a panel is still somewhere you have to go and look.
+   How WebChart would render them is WebChart's to decide, and nothing renders them today.
+   Follow-up is a card **suggestion**: a `ServiceRequest` with `intent=proposal`, `status=draft`,
+   which the clinician accepts or ignores. That is write-back **without WorkWell holding write
+   credentials into a certified EHR** — the standard carries the proposal, the EHR performs the write.
 5. **Weekly, the same exchange runs as a batch.** Same endpoint, same evaluation, wider window —
    it catches whatever the real-time path missed and gives both sides a natural reconciliation
    point.
@@ -466,7 +479,10 @@ What happens, in order:
    different on purpose rather than by omission.
 8. **Periodically, both sides reconcile what was sent against what was received.** Encounters
    WorkWell never got, and encounters it got that WebChart has no record of sending, are both
-   findings — a sink that silently drops messages looks exactly like a quiet week.
+   findings — a sink that silently drops messages looks exactly like a quiet week. *Half built:* the
+   CDS Hooks **feedback** endpoint records whether each card was accepted or overridden, so "did
+   anyone act on this?" is now answerable from the audit ledger. Reconciling *encounters* still needs
+   step 2.
 
 ### Why this is not just another quality dashboard
 
@@ -486,15 +502,35 @@ answer is **traceable to a published measure** run on a reference engine, which
 | FHIR ingest from a live WebChart tenant | **Built, but pulling** — SMART Backend Services, read-only, on a schedule (S2) |
 | A compliance answer per subject and measure | **Built** — versioned, read-only `GET` ([`COMPLIANCE_API.md`](../COMPLIANCE_API.md)) |
 | Population dashboards for a quality manager | **Built** — the manager surface is the one part of this diagram that is real |
-| WebChart pushing an encounter as it happens | Not built |
-| Submit a bundle, get findings back synchronously | Not built — the closest thing is the QRDA import route (S5), which evaluates a supplied document but is not shaped for a live encounter |
-| Quality rendered inside WebChart's own UI | Not built |
-| Tasks and documents written back into WebChart | Not built — the integration is read-only in both directions today |
-| Send/receive reconciliation between the two systems | Not built |
+| **A standards-shaped way to deliver findings into a workflow** | **Built** — a CDS Hooks 2.0.1 service for the `patient-view` hook ([`CDS_HOOKS.md`](../CDS_HOOKS.md)); cards over the most recent **completed run** |
+| **Follow-up offered as an order the clinician accepts** | **Built** — a card `suggestion` carrying a draft `ServiceRequest`, so nothing is written by WorkWell. Only for order codes with an APPROVED terminology mapping, which today excludes cms122/cms125 |
+| **Did anyone act on the finding** | **Built** — the CDS Hooks feedback endpoint, audited |
+| Evaluating data supplied on the request | Not built — this is step 2, and `prefetch` is where it would go. WorkWell declares none, because it evaluates none |
+| WebChart pushing an encounter as it happens | Not built — and no public evidence either way that WebChart acts as a CDS Hooks client |
+| Quality rendered inside WebChart's own UI | Not built — cards are structured for a client to draw; nothing draws them today |
+| Tasks and documents written back into WebChart | Not built — a suggestion proposes an order; there is no task or document write path |
+| Send/receive reconciliation of encounters | Not built — card feedback answers "was it acted on", not "did every encounter arrive" |
 
 One connection worth drawing, because it turns an existing refusal into a feature. The compliance
 API's `mode=preview` deliberately returns **501 on a WebChart-configured stack** (ADR-061): preview
 composes a *synthetic* bundle, and reporting demo playback as an evaluation of a live tenant would
-be a lie. An endpoint where WebChart submits a **real** bundle and gets findings back is exactly
-what makes that answer honest — the caller supplies the data, so nothing is being simulated. The
-501-shaped hole in today's API is the shape of step 2 above.
+be a lie. A path where the caller submits a **real** bundle and gets findings back is exactly what
+makes that answer honest — the caller supplies the data, so nothing is being simulated. The
+501-shaped hole in today's API is the shape of step 2 above, and in CDS Hooks it has a name:
+`prefetch`. Serving it is the same refusal in a different place — the service declares no prefetch
+template *because* it evaluates none, rather than accepting resources and quietly ignoring them.
+
+### Why CDS Hooks rather than an endpoint of our own
+
+The earlier sketch of this scenario described a bespoke submit-a-bundle endpoint. Building one would
+have meant asking MIE to write a client against a contract only WorkWell speaks. CDS Hooks is the
+published standard for this exact shape — discovery plus one invocation per service, returning cards
+— and it is a JSON contract over HTTPS, so serving it needed no new dependency and no JVM: two routes
+on the worker that already existed. Its `suggestion` mechanism also solves the hardest part of step 6
+for free, since a proposed order travels as data the EHR performs rather than as a write WorkWell
+would need credentials for.
+
+What the standard does **not** settle: whether WebChart acts as a CDS Hooks client, and how it would
+authenticate. CDS Hooks defines its own signed-JWT profile which forbids symmetric algorithms, so
+WorkWell's bearer token is not it — the gap is named in [`CDS_HOOKS.md`](../CDS_HOOKS.md) rather than
+papered over, and it reduces to two things to ask for: an issuer and a JWKS URL.

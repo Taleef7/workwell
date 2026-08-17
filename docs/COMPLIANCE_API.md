@@ -5,6 +5,11 @@
 One subject, one measure, one stable answer. This is the contract an integrator builds against; everything
 else under `/api/` is internal and moves with the frontend.
 
+> **Machine-readable and browsable.** This endpoint is described in the OpenAPI 3.1 document at
+> `GET /api/v1/openapi.json`, rendered for humans at the frontend's public `/api-docs` (ADR-068). For the
+> same answer delivered *into* a clinician's workflow rather than pulled per measure, see
+> [`CDS_HOOKS.md`](CDS_HOOKS.md) (ADR-067).
+
 ---
 
 ## Request

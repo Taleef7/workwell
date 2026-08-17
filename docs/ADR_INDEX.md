@@ -9,14 +9,16 @@
 > If the highest number here is lower than the highest in `DECISIONS.md`, this file is stale: trust
 > `DECISIONS.md` and regenerate.
 
-> **`·archived` (14 of 65, as of 2026-08-10)** means the BODY moved to
+> **`·archived` (14 of 67, as of 2026-08-17)** means the BODY moved to
 > `docs/archive/DECISIONS_ARCHIVE.md` — it is either superseded or a historical *finding* rather than a
 > decision that governs. `DECISIONS.md` still carries its heading plus a one-line pointer, so every
-> cross-reference resolves. The 51 unmarked titles are the record that still governs: decisions that
+> cross-reference resolves. The 53 unmarked titles are the record that still governs: decisions that
 > constrain what may be done next, and design records for built features.
 
 ## Titles (newest first)
 
+- ADR-068: the OpenAPI document covers the PROMISED surface only, and a routed-path test is what makes hand-authoring defensible
+- ADR-067: CDS Hooks cards render a completed evaluation and never trigger one — and the outcome-to-card mapping is ours, which is stated rather than implied
 - ADR-066: the documentation splits into a maintained guide and a dated archive — because a doc that explains and a doc that records rot at different speeds
 - ADR-065: an authored regulatory measure is verified by traceability and adversarial cases — no external oracle exists, and none can be manufactured
 - ADR-064: one UCUM validator, shared by every translator we run — and an honest table rather than a new dependency
