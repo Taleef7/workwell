@@ -1,15 +1,112 @@
 # Journal
 
+## 2026-08-17 — the integration surface becomes real: a CDS Hooks service, and the OpenAPI document that was claimed for a year
+
+Both of the 2026-08-14 asks are now built, on one branch, because they are the same theme: a CDS Hooks
+discovery endpoint is itself an API that wants documenting alongside `/api/v1/compliance`. **ADR-067**
+(CDS Hooks) and **ADR-068** (OpenAPI). The TODO that stood at the top of this file is discharged.
+
+**What ships.** `GET /cds-services` (public), `POST /cds-services/{id}` and `POST .../{id}/feedback`
+(bearer-gated) — a CDS Hooks **2.0.1** service for the `patient-view` hook, returning cards built from the
+most recent **finalized** run. And `GET /api/v1/openapi.json`, a hand-authored OpenAPI **3.1.1** document
+for the promised surface only, rendered for humans at the frontend's public `/api-docs`. Suite 1964 → 1969
+plus 6 frontend tests; 0 fail; `redocly lint` 0 errors.
+
+**Research corrected me three times before any code was written, and each correction changed the design.**
+(1) **The auth model is not RFC 7523.** CDS Hooks defines a bespoke signed-JWT bearer scheme (RFC
+7515/7517/7518): no `sub`, no token endpoint, `aud` equal to the invoked endpoint URL, an `iss`/`jku`
+allowlist — and it **SHALL NOT** be signed with a symmetric algorithm. Our HS256 token therefore can never be
+a conformant CDS Hooks JWT, so the profile is a *named gap* rather than something to claim. It is
+deliberately not built: `jku` fetching is SSRF-by-design, and a verifier whose allowlist nobody has
+populated is a control that reads as present and cannot fire. (2) **No graded conformance ruler exists** —
+`cds-hooks/cds-validator` is JSON Schemas last pushed 2018-02-05, the sandbox emits no score, and Inferno has
+no CDS Hooks kit (only the CRD-scoped one). So the claim is ADR-065's shape: conforms structurally,
+self-graded, unverified by any external suite. (3) **The measure-outcome→card mapping is ours.** HL7's
+blessed route is `PlanDefinition/$apply` → `RequestOrchestration` → cards, and CQF Ruler and AHRQ's CQL
+Services both do CQL→cards that way — but **DEQM's `$care-gaps` stops at a `DetectedIssue` and nobody
+publishes the gap→card bridge.** Recorded as a local mapping in `STANDARDS_CONFORMANCE.md` rather than cited
+to an IG.
+
+**Three refusals are the substance of the CDS work, and each is mutation-checked.** `critical` is never
+emitted and is *unrepresentable in the card type* — it means "the user must not proceed", which WorkWell is
+not entitled to say about someone else's encounter (locked decision 1); `systemActions` likewise. A
+suggestion is offered only where the order code carries an **APPROVED** terminology mapping read from the
+store, so **cms122 and cms125 get no suggestion** — their CPT codes have no mapping at all, and
+`order-catalog.ts` calls its codes "representative (demo, not billing-certified)". That consequence is
+stated up front in three places rather than discovered at a demo; unlocking it is a terminology review, not a
+code change. And **an absence is a CARD, not an empty list**: a patient with no finalized outcome gets one
+informational card, because `{"cards":[]}` at the point of care reads as "no gaps" — the confusion ADR-061's
+404 exists to prevent, and the one that would have hidden the `wc|<patientId>` namespace trap
+`PROPOSALS_2026-08.md` §P1 names.
+
+**The feedback endpoint exists with no schema change**, which is why it was worth building at all: `card.uuid`
+derives from `(runId, subjectId, measureId)`, so correlating a uuid is a recomputation over the subject's own
+outcomes rather than a lookup in a table only the owner may create. Deterministic ids also mean a client
+re-firing the hook for an unchanged run gets the same uuid, so repeat feedback does not fragment.
+
+**The security-relevant part is small and was nearly invisible.** `/cds-services` is outside `/api/`, and
+`authorize` ends in `return { ok: true }` for non-`/api` paths — permitAll, mirroring Spring's
+`anyRequest().permitAll()`. Without an explicit rule the invoke endpoint would have served per-patient
+clinical status to anonymous callers. Two rules added, order load-bearing (`/cds-services/**` also matches the
+bare path), asserted both as a unit call and end-to-end through the worker; deleting either rule fails both
+assertions.
+
+**On the OpenAPI side the guard found things immediately, which is the point.** The document is hand-authored
+— zod earns its keep only as a runtime validator, `@hono/zod-openapi` presupposes a router we do not have, and
+TypeSpec would add a second hand-maintained source of truth with no coupling to a hand-rolled dispatcher — so
+the contract test is treated as the other half of the decision, not garnish. It asserts **two-way coverage**:
+every documented `(path, method, status)` produced by a real request through the real worker, and every
+observed response documented. Mutation-checked three ways. Then `redocly lint`, which catches a class the
+contract test cannot, rejected **five uses of `nullable`** — a 3.0 keyword OpenAPI 3.1 removed in favour of
+type unions. Two different guards, neither implying the other: the same lesson as the CVU+ XSD/Schematron
+episode, where a check's scope was narrower than the claim it was cited for.
+
+**And the coverage test refused a mis-modelling of mine.** I documented a `405` under the `get` operations of
+the GET-only paths to silence a Redocly `operation-4xx-response` warning. A 405 belongs to the *path*, not to
+the GET, so the document would have been asserting that a GET returns 405 — false. The test failed, the 405s
+came out, and four warnings remain with a written reason instead. No ignore file.
+
+**Two stale ARCHITECTURE claims are corrected, one of which I did not go looking for.** §9's
+"The OpenAPI document (`workwell.swagger.enabled=true`) advertises version `v1`" was a springdoc property
+belonging to a backend retired in #109 PR4 — and §7 did not mention `/api/v1/compliance` at all, so the file
+was simultaneously claiming a document it did not serve and omitting the one contract it does. Writing the
+document also surfaced that §9 promised `/api/version` returns `uptime`; it does not, and never did here.
+
+**S7 is rewritten** and its per-part table now splits along the line that matters: *delivering a finding into
+a workflow*, *offering follow-up as an order*, and *did anyone act on it* move to **built**, while
+**evaluating data supplied on the request** stays not built — that is step 2, and `prefetch` is exactly where
+it would go. The service declares none *because* it evaluates none, which is the same refusal as ADR-061's
+`mode=preview` 501, in a different place. The sequence diagram now draws that missing leg as a dashed arrow.
+
+**Also: `docs/transcripts/` is now gitignored.** Only basename globs (`**/*transcript*.md`) matched before, so
+`docs/transcripts/2026-08-16 call.md` was committable by accident. Verified with `git check-ignore`.
+
+**Owner steps this creates.** Two, both cheap and both for other people. **MIE's CHPL entry could not be
+read** — chpl.healthit.gov is an SPA and its API is key-gated — so whether WebChart holds §170.315(b)(11) is
+a manual lookup; note that (b)(11) and HTI-1 **do not name CDS Hooks**, so nothing here is justified by
+certification. And the joint call now has a precise question instead of an open one: **does WebChart act as a
+CDS Hooks client, and if so what are its `iss` and JWKS URL?** There is no public evidence either way — zero
+hits for CDS Hooks across both MIE docs sites, and their FHIR API is documented as new with essentially no
+adoption.
+
+**Not done, deliberately.** No `encounter-start` service (maturity 1 in the CDS Hooks Library IG, and it would
+return the same cards); no `prefetch` evaluation; no OpenAPI path aliases beyond the canonical one; no
+try-it-out console on `/api-docs`, since `swagger-ui-react` peers on `react@">=16.8 <19"` and this app is on
+React 19 — a copyable `curl` instead.
+
+---
+
 ## 2026-08-14 — M-E1 leads with immunization, and CDS Hooks turns out to be a specification rather than a dependency
 
 Two owner decisions, taken off the back of the questions in the entry below.
 
-**TODO — publish the WorkWell API contract as OpenAPI and serve Swagger UI.** The TypeScript backend is
-live, but authenticated probes against both production and staging confirm that `/api/openapi.json`,
-`/api/swagger`, `/swagger-ui`, and `/api/docs` all return `501 not_implemented`. The Swagger UI at
-`manager.os.mieweb.org/api` documents MIE Create-a-Container, not WorkWell. Add a versioned OpenAPI
-document for the WorkWell integration surface (beginning with `/api/v1/compliance`), expose a Swagger UI,
-test both routes in CI/deployment smoke checks, and correct the stale OpenAPI claim in `ARCHITECTURE.md`.
+**TODO — publish the WorkWell API contract as OpenAPI and serve Swagger UI.** *(DONE 2026-08-17 — ADR-068;
+see the entry above. Kept here because the probe result it records is the reason the work happened.)* The
+TypeScript backend is live, but authenticated probes against both production and staging confirm that
+`/api/openapi.json`, `/api/swagger`, `/swagger-ui`, and `/api/docs` all return `501 not_implemented`. The
+Swagger UI at `manager.os.mieweb.org/api` documents MIE Create-a-Container, not WorkWell. Add a versioned
+OpenAPI document for the WorkWell integration surface (beginning with `/api/v1/compliance`), expose a Swagger
+UI, test both routes in CI/deployment smoke checks, and correct the stale OpenAPI claim in `ARCHITECTURE.md`.
 
 **Decision 1 — M-E1's first content pack is immunization, not OSHA.** Three reasons, in order of
 weight. **A written specification already exists**: WebChart's immunization surveillance system

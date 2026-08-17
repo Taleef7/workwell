@@ -84,7 +84,7 @@ to this list without deleting from it — the whole point is that it stays small
 backend retired in #109 PR4, and its stop condition died with the JVM. Now in `docs/archive/`.)
 - @docs/AI_GUARDRAILS.md — the "AI never decides compliance" hard rule lives or dies on this
 - @docs/DATA_MODEL_CONTRACTS.md — idempotency + `evidence_json` + CSV contracts; Definition of Done makes these mandatory on EVERY PR
-- @docs/ADR_INDEX.md — 65 ADR titles only, so a session knows a decision exists; bodies stay in DECISIONS.md
+- @docs/ADR_INDEX.md — 67 ADR titles only, so a session knows a decision exists; bodies stay in DECISIONS.md
 - @docs/LOCKED_DECISIONS.md — owner-locked decisions (§4, rewritten 2026-08-04 per ADR-058) + the dated 2026-07-24 audit facts (§5)
 
 ## Other docs to consult on demand
