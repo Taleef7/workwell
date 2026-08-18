@@ -1,5 +1,46 @@
 # Journal
 
+## 2026-08-17 — `/api-docs` redirected to login, and three guards each watched the wrong side of it (#471)
+
+The API reference page shipped in #469 was unreachable. It was correct in every other respect — a
+top-level route outside `app/(dashboard)/`, fetching the spec with a plain `fetch` and no bearer token —
+but `PUBLIC_ROUTES` in `auth-provider.tsx` listed only `/` and `/sandbox`, and that provider is mounted in
+the **root** layout. Every visitor was redirected to `/login`, which is the exact opposite of the page's
+purpose: an integrator should be able to read the contract before they have credentials.
+
+**Why nothing caught it is the part worth keeping.** Three guards sit adjacent to this and each is true
+about its own subject. The page's own component tests render `ApiReference` directly, so the provider
+never mounts. `openapi.test.ts` asserts the **backend** serves the document, which it does. And the
+post-deploy probe was `curl`, where the redirect is invisible — the server returns **200** and the bounce
+happens in the browser. Server-side correctness, client-side failure, and no guard positioned on the seam.
+This is the vacuous-guard family again, in the shape where every individual control fires correctly and
+the defect lives in the gap between their scopes.
+
+So the fix is not the missing entry. `auth-provider.test.tsx` now **walks `app/`** for real `page` files
+and checks each resolved URL against the provider's own predicate.
+
+**Review (Codex P2) caught that the first version of that walk was itself the same defect, one layer up.**
+It mapped top-level *directory names* to URL segments, which the App Router does not do. A public page at
+`app/(public)/help/page.tsx` would have made the test demand a nonexistent `/(public)` entry — and once
+somebody added that bogus entry to silence it, the guard would **pass** while `/help` still redirected. A
+regression test stepping over the very defect it exists to catch. The walk now recurses and resolves URLs
+the way the router does: a route group contributes no segment, `(dashboard)` marks everything beneath it
+authenticated however deeply nested, and a dynamic segment is skipped because matching is prefix-based, so
+its static ancestor is what must be listed.
+
+Two changes the fix pulled in. **`isPublicRoute` is extracted and exported**, so the test asserts against
+the provider's real matching rather than a reimplementation that would only ever agree with itself. And a
+**second assertion covers the converse** — nothing in the allowlist may exempt the authenticated group —
+because a lone `/` entry would satisfy the coverage direction while unlocking the whole app.
+
+Mutation-checked in both directions and on the route-group case specifically:
+`app serves /help outside (dashboard) but it is not public`, and
+`/programs is inside (dashboard) but PUBLIC_ROUTES exempts it`. Frontend suite 190, 0 fail.
+
+**Carried forward:** an HTTP probe is not evidence that a page loads. For anything behind a client-side
+router, the deployment check has to be a browser, or a test that mounts what the browser mounts.
+
+
 ## 2026-08-17 — the integration surface becomes real: a CDS Hooks service, and the OpenAPI document that was claimed for a year
 
 Both of the 2026-08-14 asks are now built, on one branch, because they are the same theme: a CDS Hooks
