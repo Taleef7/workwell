@@ -13,10 +13,23 @@ const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "").trim().replace(/\/
  * This list is the authority for the whole app, and it is easy to forget: a page can be correct in every
  * other respect — outside `app/(dashboard)/`, fetching without a bearer token — and still be unreachable
  * because it is absent here. `/api-docs` shipped that way (ADR-068), and an HTTP probe could not see it,
- * since the redirect is client-side and the server still returns 200. `auth-provider.test.tsx` derives
- * the expected set from `app/` so a new public route cannot be added without landing here.
+ * since the redirect is client-side and the server still returns 200. `auth-provider.test.tsx` walks
+ * `app/` for the URLs it really serves, so a new public route cannot be added without landing here — and
+ * asserts the converse too, that nothing here exempts the authenticated group.
  */
 export const PUBLIC_ROUTES = ["/", "/sandbox", "/api-docs"];
+
+/**
+ * Whether `pathname` renders without a session. An entry covers itself and everything nested under it,
+ * so a public section needs one entry rather than one per page.
+ *
+ * Exported because `auth-provider.test.tsx` checks the real routes of `app/` against this predicate. A
+ * test that reimplemented the matching would agree with itself rather than with the provider.
+ */
+export function isPublicRoute(pathname: string | null | undefined): boolean {
+  if (!pathname) return false;
+  return PUBLIC_ROUTES.some((route) => pathname === route || pathname.startsWith(`${route}/`));
+}
 
 type AuthUser = {
   email: string;
@@ -136,9 +149,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [token]);
 
   useEffect(() => {
-    if (pathname && PUBLIC_ROUTES.some((route) => pathname === route || pathname.startsWith(`${route}/`))) {
-      return;
-    }
+    if (isPublicRoute(pathname)) return;
     if (pathname?.startsWith("/login")) return;
     if (token) return;
 

@@ -11,11 +11,13 @@
  */
 
 import React from "react";
+import { readdirSync } from "node:fs";
+import { join } from "node:path";
 import { act, render, waitFor } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { server } from "../../test/msw/server";
-import { AuthProvider, PUBLIC_ROUTES, useAuth } from "../auth-provider";
+import { AuthProvider, PUBLIC_ROUTES, isPublicRoute, useAuth } from "../auth-provider";
 
 // ── Next.js navigation mocks ──────────────────────────────────────────────────
 const mockReplace = vi.fn();
@@ -270,27 +272,69 @@ describe("AuthProvider — silent refresh on page load", () => {
  * absent from `PUBLIC_ROUTES`, the provider redirected it to `/login`. Nothing caught it: the page's own
  * tests render the component directly, and an HTTP probe returns 200 because the redirect is client-side.
  *
- * So this reads `app/` instead of restating the list. A top-level route that is neither the authenticated
- * dashboard group nor `/login` is public by construction, and must appear in `PUBLIC_ROUTES`.
+ * So this walks `app/` for real `page` files instead of restating the list. Directory names are NOT URL
+ * segments (review): a route group `(public)` contributes nothing to the URL, so scanning top-level
+ * directory names would demand a nonexistent `/(public)` entry while never checking the `/help` a reader
+ * would actually visit. Routes are resolved the way the App Router resolves them, and then checked
+ * against the provider's own `isPublicRoute` rather than a reimplementation of its matching.
  */
 describe("PUBLIC_ROUTES", () => {
-  const AUTHENTICATED = new Set(["(dashboard)", "login"]);
+  /** A route group — `(dashboard)` — wraps pages without contributing a URL segment. */
+  const isRouteGroup = (name: string) => name.startsWith("(") && name.endsWith(")");
+  /** `[id]` / `[...slug]`. Matching is prefix-based, so the static ancestor is what must be listed. */
+  const isDynamic = (name: string) => name.startsWith("[");
+  /** The one authenticated group. A route inside it needs a session by design. */
+  const AUTHENTICATED_GROUP = "(dashboard)";
 
-  it("covers every top-level route outside the dashboard group", async () => {
-    const { readdirSync } = await import("node:fs");
-    const { join } = await import("node:path");
-    const discovered = readdirSync(join(process.cwd(), "app"), { withFileTypes: true })
-      .filter((e) => e.isDirectory() && !AUTHENTICATED.has(e.name) && e.name !== "fonts")
-      .map((e) => `/${e.name}`);
+  /** Every URL `app/` actually serves, paired with whether it sits inside the authenticated group. */
+  function appRoutes(): Array<{ url: string; authenticated: boolean }> {
+    const found: Array<{ url: string; authenticated: boolean }> = [];
 
-    // The fixture is only meaningful if it found the directories at all.
-    expect(discovered).toContain("/api-docs");
-    for (const route of discovered) {
-      expect(PUBLIC_ROUTES, `app${route}/ renders outside the dashboard group but is not in PUBLIC_ROUTES`)
-        .toContain(route);
+    const walk = (dir: string, segments: string[], authenticated: boolean) => {
+      const entries = readdirSync(dir, { withFileTypes: true });
+      if (entries.some((e) => e.isFile() && /^page\.(tsx|ts|jsx|js)$/.test(e.name))) {
+        found.push({ url: `/${segments.join("/")}`.replace(/\/+$/, "") || "/", authenticated });
+      }
+      for (const entry of entries) {
+        if (!entry.isDirectory()) continue;
+        if (isRouteGroup(entry.name)) {
+          // Contributes no URL segment — but `(dashboard)` marks everything beneath it as authenticated.
+          walk(join(dir, entry.name), segments, authenticated || entry.name === AUTHENTICATED_GROUP);
+          continue;
+        }
+        // A dynamic segment is covered by its static ancestor, since matching is prefix-based.
+        if (isDynamic(entry.name)) continue;
+        walk(join(dir, entry.name), [...segments, entry.name], authenticated);
+      }
+    };
+
+    walk(join(process.cwd(), "app"), [], false);
+    return found;
+  }
+
+  it("covers every route app/ serves outside the authenticated group", () => {
+    const routes = appRoutes();
+    // The walk is only meaningful if it resolved real URLs — including one inside a route group, which
+    // is the case that a directory-name scan gets wrong.
+    expect(routes.map((r) => r.url)).toEqual(expect.arrayContaining(["/", "/api-docs", "/sandbox", "/login"]));
+    expect(routes.filter((r) => r.authenticated).length).toBeGreaterThan(0);
+    expect(routes.some((r) => r.url.includes("("))).toBe(false);
+
+    for (const { url, authenticated } of routes) {
+      if (authenticated || url === "/login") continue;
+      expect(isPublicRoute(url), `app serves ${url} outside ${AUTHENTICATED_GROUP} but it is not public`)
+        .toBe(true);
     }
-    // `/` is the root page, which has no directory of its own.
-    expect(PUBLIC_ROUTES).toContain("/");
+  });
+
+  it("keeps the authenticated group gated", () => {
+    // The converse: the allowlist must not accidentally open the dashboard. `/` covering everything
+    // by prefix would satisfy the test above while unlocking the whole app.
+    for (const { url, authenticated } of appRoutes()) {
+      if (!authenticated) continue;
+      expect(isPublicRoute(url), `${url} is inside ${AUTHENTICATED_GROUP} but PUBLIC_ROUTES exempts it`)
+        .toBe(false);
+    }
   });
 
   it("does not redirect any route it lists", async () => {
