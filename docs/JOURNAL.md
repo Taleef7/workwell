@@ -1,5 +1,47 @@
 # Journal
 
+## 2026-08-24 — a three-sided alignment audit: original intent, stakeholder guidance, and where HL7/CMS are actually going
+
+Run so the next planning round starts from a verified picture instead of memory; the full audit lives
+in local working notes (kept out of the repo by owner preference — this entry carries the findings that
+matter). Method: one audit pass over the tree (every stakeholder ask scored against evidence with
+paths), one research pass over primary sources (CMS rules, ONC, HL7 IG publication records, the
+Connectathon 43 track pages, npm/GitHub state of the JS CQL stack).
+
+**The three verdicts.** (1) *Original intent:* nearly everything achieved or evolved-with-ADR; the one
+real drift is that occupational **content** — the original differentiator, reaffirmed as locked
+decision 6 — has grown by exactly one lab-only measure since May. (2) *Stakeholder guidance:* aligned
+on every concrete technical ask; the exposures are legibility, not code — **gated ≠ routed is
+stakeholder-invisible** (2 of 8 priority measures route; six run only inside the CI harness; CMS68 is
+structurally unroutable and CLAUDE.md's wave-2 summary wrongly said otherwise), and ADR-058's
+retirement of the Cypress bar still awaits its ratifying owner conversation. (3) *External:* the
+strongest finding — **the QDM/QRDA column is being wound down by both CMS and ONC**. CY2027 PFS
+proposed rule: FHIR reporting voluntary PY2028–29, **mandatory PY2030**, MIPS CQMs sunsetting; HTI-5
+proposes removing the eCQM certification criteria; US Quality Core 0.5.0 is Active and ONC-published.
+The FHIR-column bet of ADR-058 / locked decisions 1–3 is now citable to CMS as the published direction
+rather than defended as a judgment call.
+
+**Two findings that convert directly into September work.** The Connectathon 43 Clinical Reasoning
+track's *CQL Engine Parity* scenario is `cql-tests-runner` driving a **system-level `$cql`** operation —
+and the engine already evaluates data-free expressions (`evaluateExpressions`, ADR-060); the gap is an
+HTTP facade and the CQL→FHIR `Parameters` serialization. And the *USQC Refactored Measure Parity*
+scenario is `dqm-content-cms-2025` — the same eight measures, refactored QI-Core → US Quality Core, in
+the same per-patient test-case format the MADiE gate already consumes. Both are named scenarios where
+the existing 410/410 discipline is the preparation. Also learned: the JS translator shipped a released
+**5.2.0** (we pin 4.0.0-beta.1 — a full major behind), CQL 2.0 published 2026-07-29 with `Slice` — one
+of our recorded `cql-execution` gaps — now a specified function, and the new CQM IG (`hl7.fhir.uv.cqm`,
+QM IG's successor) publishes **normative population-membership formulas** our evidence-first membership
+derivation can be pinned against directly.
+
+**Stale-claim sweep** (each a pending fix): CLAUDE.md's "~785 tests" vs its own 1,910;
+AI_GUARDRAILS still naming retired Java classes; README's 1604 badge and two contradictory ADR counts;
+DATA_MODEL_CONTRACTS §5 vs read-time `why_flagged` (#463); the CMS68 routability error; and the "~2030
+not CMS-attributable" standing correction, now itself superseded by CMS-1848-P (proposed).
+
+**Nothing beyond docs changed today.** The proposed next-step sequence (three doc PRs — truth fixes,
+README refresh, stakeholder explainers — plus the owner conversations and the two pre-September
+standards items) is PROPOSED and awaits owner review.
+
 ## 2026-08-17 — `/api-docs` redirected to login, and three guards each watched the wrong side of it (#471)
 
 The API reference page shipped in #469 was unreachable. It was correct in every other respect — a
