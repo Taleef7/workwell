@@ -162,6 +162,45 @@ test("a datetime interval is a Period declaring its cqlType", async () => {
   assert.match(period.end, /^2018-12-31T23:59:59/);
 });
 
+test("INT32_MIN is still a valueInteger — the abs() shortcut was off by one at the bottom", async () => {
+  assert.deepEqual(params(await serialize("-2147483648")), [
+    { name: "return", valueInteger: -2147483648 },
+  ]);
+});
+
+test("a tuple whose field names collide with interval flags is STILL a tuple", async () => {
+  // cql-execution intervals and temporals are class instances; tuples are plain objects. Detection
+  // must discriminate on that, or `Tuple { lowClosed: true, foo: 1 }` serializes as an empty Range
+  // and silently DROPS foo (review finding).
+  assert.deepEqual(params(await serialize("Tuple { lowClosed: true, foo: 1 }")), [
+    {
+      name: "return",
+      part: [
+        { name: "lowClosed", valueBoolean: true },
+        { name: "foo", valueInteger: 1 },
+      ],
+    },
+  ]);
+});
+
+test("a nested list nests under parts named `element`", async () => {
+  assert.deepEqual(params(await serialize("{{1, 2}, {3}}")), [
+    {
+      name: "return",
+      part: [
+        { name: "element", valueInteger: 1 },
+        { name: "element", valueInteger: 2 },
+      ],
+    },
+    { name: "return", part: [{ name: "element", valueInteger: 3 }] },
+  ]);
+});
+
+test("a time result is valueTime with no leading T", async () => {
+  const p = firstParam(await serialize("@T10:30:00"));
+  assert.match(String(p.valueTime), /^10:30:00/);
+});
+
 test("an evaluation error is the `evaluation error` parameter carrying an OperationOutcome", () => {
   const out = evaluationErrorParameters("boom");
   const p = firstParam(out);

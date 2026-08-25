@@ -98,6 +98,22 @@ test("other paths fall through; a non-POST on /$cql is 405", async () => {
   assert.equal(wrongMethod!.status, 405);
 });
 
+test("statement injection is REFUSED, not analyzed-harmless: a second define is a 400", async () => {
+  // The expression is interpolated after `define Result:`. CQL's grammar already blocks injected
+  // declarations (include/using/valueset must precede the first statement), but additional
+  // STATEMENTS compile and are evaluated by the executor. The def-count guard turns that from
+  // "measured to have no escalation" into "refused".
+  const res = await call(cqlRequest("1\ndefine Evil: 2"));
+  assert.equal(res!.status, 400);
+  const body = (await res!.json()) as { issue: { diagnostics?: string }[] };
+  assert.match(String(body.issue[0]?.diagnostics ?? ""), /single expression/i);
+});
+
+test("a body that is not a Parameters resource is a 400 (the documented schema is enforced)", async () => {
+  const res = await call({ parameter: [{ name: "expression", valueString: "1" }] });
+  assert.equal(res!.status, 400);
+});
+
 test("the auth rule exists: anonymous POST /$cql is 401, machine-client roles pass", () => {
   const admin: JwtPrincipal = { email: "a@workwell.dev", role: "ROLE_ADMIN" } as JwtPrincipal;
   const cm: JwtPrincipal = { email: "cm@workwell.dev", role: "ROLE_CASE_MANAGER" } as JwtPrincipal;

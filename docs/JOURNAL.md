@@ -27,9 +27,12 @@ ADR-067 hazard), and it executes caller-supplied CQL — so it carries an explic
 rule, asserted as pure `authorize` calls.
 
 **The acceptance run: 1,823 cases over live HTTP, runner-graded — 1,589 pass / 223 fail / 11 skip /
-0 errors** (`docs/evidence/CQL_EVALUATION_SERVICE_2026-08-25.md`). Beside the published reference JS
-submission (1,533 pass / **113 skip**, Java translator), this passes more with 102 fewer skips and an
-empty SkipList — the ADR-060 posture that skipping the weak clusters would delete the finding. Failure
+0 errors** (`docs/evidence/CQL_EVALUATION_SERVICE_2026-08-25.md`). The published reference JS
+submission (1,533 pass / **113 skip** / 1,731 graded, Java translator, April 2026 corpus) is **not
+like-for-like** — its corpus was ~92 cases smaller, and on pass-rate over cases graded it is higher
+(88.6% vs 87.2%); the review caught the first draft of this entry claiming "passes more", which the
+corpus delta does not establish. The defensible comparison is skip discipline: 11 runner-own skips vs
+113, with an empty SkipList — the ADR-060 posture that skipping the weak clusters would delete the finding. Failure
 clusters match the known upstream gaps (Long, `Slice`, decimal precision, 27 invalid-accepted);
 logical/nullological/conditional — the constructs the measure CQL is built from — are at 0 fails.
 Named, not smoothed: the runner-vs-ADR-060 case-by-case diff (separating serialization-mapping losses

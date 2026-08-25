@@ -27,6 +27,7 @@ const CQL_TYPE = "http://hl7.org/fhir/StructureDefinition/cqf-cqlType";
 /** CQL's Decimal step — successor/predecessor granularity per the spec (8 decimal places). */
 const DECIMAL_STEP = 1e-8;
 const INT32_MAX = 2147483647;
+const INT32_MIN = -2147483648;
 
 export interface FhirParameter {
   name: string;
@@ -146,7 +147,7 @@ function scalarParam(name: string, v: unknown): FhirParameter {
     case "boolean":
       return { name, valueBoolean: v };
     case "number":
-      return Number.isInteger(v) && Math.abs(v) <= INT32_MAX
+      return Number.isInteger(v) && v >= INT32_MIN && v <= INT32_MAX
         ? { name, valueInteger: v }
         : { name, valueDecimal: v };
     case "string":
@@ -160,6 +161,18 @@ function scalarParam(name: string, v: unknown): FhirParameter {
   }
 
   const obj = v as Record<string, unknown> & object;
+
+  // A PLAIN object is a CQL Tuple and nothing else: cql-execution's quantities, intervals,
+  // temporals, codes and concepts are all class instances. Discriminating on the prototype first
+  // means a tuple whose field names collide with the flags below (`Tuple { lowClosed: true, … }`,
+  // `Tuple { isTime: true }`) still serializes as a tuple instead of a corrupted Range/Time
+  // (review finding on #481).
+  const proto = Object.getPrototypeOf(obj) as object | null;
+  if (proto === Object.prototype || proto === null) {
+    const entries = Object.entries(obj);
+    if (entries.length === 0) return emptyTupleParam(name);
+    return { name, part: entries.flatMap(([field, fieldValue]) => valueToParams(field, fieldValue)) };
+  }
 
   if (flag(obj, "isTime")) return { name, valueTime: temporalString(obj) };
   if (flag(obj, "isDate")) return { name, valueDate: temporalString(obj) };
@@ -209,7 +222,9 @@ function scalarParam(name: string, v: unknown): FhirParameter {
     return intervalParam(name, obj as unknown as IntervalLike);
   }
 
-  // A plain object is a CQL Tuple: fields become parts. Empty tuple gets its explicit encoding.
+  // A class instance none of the flags claim — serialize its fields as a tuple rather than losing
+  // it. (The empty-tuple encoding above is reachable only through this fallback in principle:
+  // `Tuple {}` is a CQL syntax error, so real pipelines cannot produce an empty plain object.)
   const entries = Object.entries(obj);
   if (entries.length === 0) return emptyTupleParam(name);
   return { name, part: entries.flatMap(([field, fieldValue]) => valueToParams(field, fieldValue)) };

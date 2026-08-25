@@ -30,9 +30,12 @@
  *
  * `/$cql` is outside `/api/`, where `authorize` ends in permitAll (the ADR-067 hazard) — and this
  * endpoint executes caller-supplied CQL, so the explicit rule in `authorize.ts` gates it to the
- * machine-client authority (`/sse`, `/mcp/**`, CDS invoke). The translator bounds the blast radius
- * (data-free subset, no retrieves resolve, UCUM validation per ADR-064), but "anonymous compute
- * service" is not a surface this app offers.
+ * machine-client authority (`/sse`, `/mcp/**`, CDS invoke). On the injection surface, measured
+ * rather than assumed (#481 review): injected DECLARATIONS (include/using/valueset) are grammar
+ * errors, injected retrieves cannot resolve a model, and the engine runs data-free with no
+ * code service — but injected STATEMENTS do compile and evaluate, so the def-count guard below
+ * refuses them outright. The residual exposure is compute consumption (no evaluation timeout),
+ * bounded by the bearer gate.
  *
  * No audit event is written: nothing here reads or changes application state — no subject, no
  * store, no clinical data. The hard rule audits state changes; a pure computation has none.
@@ -94,6 +97,9 @@ export async function handleCqlEvaluation(req: Request): Promise<Response | null
   } catch {
     return operationOutcome(400, ["request body is not valid JSON"]);
   }
+  if (body?.resourceType !== "Parameters") {
+    return operationOutcome(400, ["the request body must be a FHIR Parameters resource"]);
+  }
 
   const parameters = Array.isArray(body?.parameter) ? body.parameter : [];
   const unsupported = parameters
@@ -121,6 +127,19 @@ export async function handleCqlEvaluation(req: Request): Promise<Response | null
       (d) => (d as { message?: string }).message ?? JSON.stringify(d),
     );
     return operationOutcome(400, diagnostics.length > 0 ? diagnostics : ["CQL translation failed"]);
+  }
+
+  // Statement-injection guard (#481 review). CQL's grammar already refuses injected DECLARATIONS
+  // (include/using/valueset must precede the first statement, and `define Result:` is one), but
+  // additional STATEMENTS — `1\ndefine Evil: 2`, or a `context` switch — compile, and the executor
+  // evaluates every define. Analysis found no escalation (data-free engine, results discarded), but
+  // "refused" outlives "analyzed harmless": the compiled library must carry exactly the one
+  // expression statement the wrapper wrote.
+  const defs = (compiled.elm as { library?: { statements?: { def?: unknown[] } } }).library?.statements?.def;
+  if (!Array.isArray(defs) || defs.length !== 1) {
+    return operationOutcome(400, [
+      "the expression must be a single expression — additional CQL statements are not accepted",
+    ]);
   }
 
   try {

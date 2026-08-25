@@ -10,19 +10,22 @@ deliberately bearer-gated) → the worker under `MIEWEB_TARGET=local`. Corpus: t
 
 **Headline.**
 
-| | total | pass | fail | skip | error |
+| | total graded | pass | fail | skip | error |
 |---|---|---|---|---|---|
-| **This run (runner-graded, over HTTP)** | 1,823 | **1,589** | 223 | **11** | 0 |
-| Published reference JS submission (cql-execution 3.3.0, Java translator, `cql-tests-results`) | — | 1,533 | 81 | **113** | 4 |
-| ADR-060 in-process harness (our own grader, same corpus) | 1,835 | 1,622 | 155\* | 0 | 4\* |
+| **This run (runner-graded, over HTTP, corpus at the 2026-08 sidecar)** | 1,823 | **1,589** | 223 | **11** | 0 |
+| Published reference JS submission (cql-execution 3.3.0, Java translator, run 2026-04-02, `cql-tests-results`) | 1,731 | 1,533 | 81 | **113** | 4 |
+| ADR-060 in-process harness (our own grader, same sidecar corpus) | 1,835 | 1,622 | 155\* | 0 | 4\* |
 
 \* ADR-060 keeps translation errors (12), runtime errors (4) and the invalid-case buckets in separate
-columns by design; the runner folds everything into pass/fail. The two gradings are therefore not
-row-comparable — the point of this table is that the runner's own grading of our service lands in the
-same band as our self-grading, and **passes more cases with 102 fewer skips than the published JS
-reference submission**. The 11 skips here are the runner's own (library-style tests needing
-`Library/$evaluate`, which this service does not yet expose); our SkipList is empty, per the ADR-060
-posture that skipping the weak clusters would delete the finding.
+columns by design; the runner folds everything into pass/fail. **No row here is like-for-like with any
+other** (#481 review): the reference submission graded a corpus ~92 cases smaller (its April 2026
+snapshot vs our sidecar), so its raw pass count is not comparable — and on pass-rate over cases graded
+it is *higher* (88.6% vs 87.2%), which any external use of these numbers must say. The defensible
+headline is the **skip discipline**: this run's 11 skips are the runner's own (library-style tests
+needing `Library/$evaluate`, not yet exposed) against the reference's 113, and our SkipList is empty,
+per the ADR-060 posture that skipping the weak clusters would delete the finding. Also unreconciled:
+the ADR-060 harness parses 1,835 cases from the same sidecar where the runner grades 1,823 — the
+12-case delta is unexplained and belongs to the case-diff below.
 
 **Per-file** (runner grading):
 
