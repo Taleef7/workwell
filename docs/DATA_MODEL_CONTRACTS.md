@@ -115,6 +115,14 @@ SQLite floor and the Pg ceiling read the current row and apply the shared pure `
 - `evaluatedResource`: resource-level context used during evaluation.
 - `why_flagged`: derived/explainer fields used by UI for readable case diagnostics.
 
+> **`why_flagged` is DERIVED AT READ TIME, not persisted (#463).** In the TypeScript backend the
+> persisted `evidence_json` carries `expressionResults` + `evaluatedResource` (+ `evaluationError`
+> on failure); `why_flagged` is computed on read by `deriveWhyFlagged`
+> (`backend-ts/src/case/case-detail-read-model.ts`) from the expression results and measure config.
+> The canonical shape above shows the *logical* contract a consumer sees on read surfaces (case
+> detail, exports, MCP tools), not the stored bytes. This was true of the TS engine from the start;
+> the section predates the re-platform (ADR-008).
+
 If evaluation fails for one employee, `evidence_json` includes:
 ```json
 { "evaluationError": "CQL engine failure", "message": "<error text>" }

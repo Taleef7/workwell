@@ -17,7 +17,7 @@
 - Infra: MIE Create-a-Container + Neon for deploy (Fly.io + Vercel public-preview stack decommissioned — MIE TWH is the sole live stack); GitHub Actions CI + a self-heal reconciler; pnpm
 
 ## Build & verify
-- Backend: `cd backend-ts; pnpm install --frozen-lockfile; pnpm typecheck; pnpm test` — ~785 tests (SQLite floor; the Pg-ceiling store contract runs against a local `postgres:16`, else self-skips). Gated in `ci.yml`.
+- Backend: `cd backend-ts; pnpm install --frozen-lockfile; pnpm typecheck; pnpm test` — ~1,976 tests as of 2026-08-24 (SQLite floor; the Pg-ceiling store contract runs against a local `postgres:16`, else self-skips). Gated in `ci.yml`.
 - Frontend: `cd frontend; npm run lint; npm run build`
 - Run the app: backend `cd backend-ts; pnpm dev`; frontend `npm run dev`
 
@@ -330,8 +330,11 @@ Doug/Nicole that certifying WorkWell's engine is not a business goal; and **migr
 token to npm Trusted Publishing** — npm is restricting bypass tokens for direct publishing, the workflow
 already has `id-token: write`, and it would remove `NPM_TOKEN` entirely.
 
-**Three standing corrections.** "~2030" for CMS FHIR endpoints is **not CMS-attributable** (say "no
-published date"). **"QI-Core STU7 = US Core 7 = WebChart's exact surface"** is half right: the equality
+**Three standing corrections.** The CMS FHIR-reporting timeline is now **CMS-attributable but
+PROPOSED** (supersedes the old form of this correction, "~2030 is not CMS-attributable"): the CY2027
+PFS proposed rule (CMS-1848-P, July 2026) proposes FHIR-based reporting voluntary PY2028–29 and
+**mandatory PY2030** for applicable APP Plus measures, MIPS CQMs sunsetting ~PY2030 — cite as
+*proposed* until the final rule (~Nov 2026). **"QI-Core STU7 = US Core 7 = WebChart's exact surface"** is half right: the equality
 holds, but **CMS's shipping content is authored on QI-Core 6** and the direction is **US Quality Core 0.5.0
 over US Core 6.1.0**. **"Cypress CVU+ is the verification bar"** is removed from `STANDARDS_CONFORMANCE.md`
 and the `conformance` skill. **Open owner step:** confirm with Doug/Nicole that certifying WorkWell's engine
@@ -595,7 +598,7 @@ construction, per request, while the DB-free `/actuator/health` stays 200, so gr
 here, so the nightly ALL_PROGRAMS run exercises the flip unprompted. Rollback = remove the line + redeploy
 (ADR-040 makes `eval_state` invalidate by construction).
 
-**M-A WAVE 2 (ADR-047): CMS2, CMS68 and CMS951 are vendored, MADiE-gated and ROUTABLE — none is routed.**
+**M-A WAVE 2 (ADR-047): CMS2, CMS68 and CMS951 are vendored and MADiE-gated; CMS2 and CMS951 are ROUTABLE — none is routed. CMS68 is NOT routable: it is an episode-of-care measure, refused at construction (`executor-router.ts`; ADR-047 and README state this correctly — this sentence previously over-claimed it as routable).**
 **CMS138 joined them 2026-07-31 (ADR-053) — the gate is now 278/278 across SIX measures.**
 **CMS130 and CMS165 joined the gate 2026-07-31 too (ADR-054) — both vendored clean on the first credentialed dispatch; their credentialed MADiE CI gate passed: CMS130 scored 64/64 and CMS165 68/68 (0 unexpected mismatches, 0 errors each), and both manifests reproduced byte-for-byte.** The following pre-ADR-054 status is historical.
 The gate was **231/231** across five measures (55+66+36+19+55, 0 unexpected, 0 errors) and drives the

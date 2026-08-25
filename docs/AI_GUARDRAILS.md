@@ -27,7 +27,9 @@ where the order code carries an APPROVED terminology mapping, and accepted only 
 action.
 
 ## 2) Active AI Surfaces and Prompt Templates
-All current prompts are implemented in `com.workwell.ai.AiAssistService`.
+All current prompts are implemented in `backend-ts/src/ai/ai-assist.ts` (the Java-era
+`com.workwell.ai.AiAssistService` was retired with the JVM in #109 PR4; endpoint wiring lives in
+`backend-ts/src/routes/ai.ts`).
 
 ### 2.1 Draft Spec (`POST /api/measures/{id}/ai/draft-spec`)
 System prompt:
@@ -117,7 +119,8 @@ Failure contract:
 - Response returns fallback=true and empty insight list (safe no-op).
 
 ## 3) Model, Options, and Fallback Model
-Configured in `application.yml` and `AiAssistService`:
+Configured in `backend-ts/src/routes/ai.ts` (defaults) and `backend-ts/src/ai/openai-chat.ts`
+(the Java-era `application.yml` is retired):
 - Primary model: `gpt-5.4-nano`
 - Fallback model: `gpt-4o-mini`
 - Temperature: `0.3`
