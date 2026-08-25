@@ -136,6 +136,7 @@ export function openApiDocument(): OpenApiDocument {
     tags: [
       { name: "compliance", description: "Per-subject, per-measure compliance answers." },
       { name: "cds-hooks", description: "CDS Hooks 2.0.1 service — decision support cards for a patient." },
+      { name: "cql", description: "The CQL IG `$cql` Evaluation Service operation — data-free expression evaluation." },
       { name: "meta", description: "Discovery and health." },
     ],
     paths: {
@@ -235,6 +236,38 @@ export function openApiDocument(): OpenApiDocument {
             "401": errorResponse("No bearer token."),
             "403": errorResponse("The authenticated role may not submit feedback."),
             "404": errorResponse("Unknown service id."),
+          },
+        },
+      },
+      "/$cql": {
+        post: {
+          operationId: "cqlEvaluate",
+          summary: "Evaluate one data-free CQL expression",
+          description: [
+            "The system-level `$cql` operation of the CQL IG (\"Using CQL With FHIR\"), in the data-free subset",
+            "`cqframework/cql-tests-runner` drives for engine parity testing: an `expression` parameter in, a",
+            "`return` parameter out. No patient, no data model, no terminology — operation inputs implying",
+            "patient-context evaluation (`subject`, `data`, `library`, endpoints…) are refused with a 400",
+            "rather than accepted and ignored.",
+            "",
+            "A TRANSLATION failure is a 400 OperationOutcome (the request is defective). A RUNTIME failure is a",
+            "**200** whose `Parameters` carries an `evaluation error` parameter holding an OperationOutcome —",
+            "an evaluation that errs is a *result*, per the Evaluation Service convention.",
+          ].join("\n"),
+          tags: ["cql"],
+          security: BEARER,
+          requestBody: { required: true, content: jsonBody("FhirParameters") },
+          responses: {
+            "200": {
+              description: "The evaluated value under a `return` parameter — or an in-band `evaluation error` parameter for a runtime failure.",
+              content: jsonBody("FhirParameters"),
+            },
+            "400": {
+              description: "Not valid JSON, no `expression`, an unsupported operation input, or CQL that does not translate (diagnostics included).",
+              content: jsonBody("FhirOperationOutcome"),
+            },
+            "401": errorResponse("No bearer token."),
+            "403": errorResponse("The authenticated role may not evaluate CQL."),
           },
         },
       },
@@ -357,6 +390,24 @@ export function openApiDocument(): OpenApiDocument {
             title: str("Human-readable name."),
             description: str("What the service returns."),
             usageRequirements: str("What a caller must know — including what this service does NOT do."),
+          },
+        },
+        FhirParameters: {
+          type: "object",
+          description: "A FHIR R4 `Parameters` resource. For `$cql`: one `expression` parameter in; the result under `return` parameter(s) out, serialized per the CQL IG type mapping (numeric intervals as unity-coded Ranges with a `cqf-cqlType` extension, `null` as `data-absent-reason`, empty lists/tuples as `cqf-isEmptyList`/`cqf-isEmptyTuple`).",
+          required: ["resourceType"],
+          properties: {
+            resourceType: { type: "string", description: "Always `Parameters`.", example: "Parameters" },
+            parameter: { type: "array", description: "Operation inputs or outputs.", items: { type: "object", description: "A `Parameters.parameter` entry." } },
+          },
+        },
+        FhirOperationOutcome: {
+          type: "object",
+          description: "A FHIR R4 `OperationOutcome` carrying error diagnostics.",
+          required: ["resourceType", "issue"],
+          properties: {
+            resourceType: { type: "string", description: "Always `OperationOutcome`.", example: "OperationOutcome" },
+            issue: { type: "array", description: "One entry per diagnostic.", items: { type: "object", description: "severity / code / diagnostics." } },
           },
         },
         CdsDiscoveryResponse: {

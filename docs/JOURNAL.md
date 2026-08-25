@@ -1,5 +1,49 @@
 # Journal
 
+## 2026-08-25 — the `$cql` Evaluation Service exists, and HL7's own runner has graded it (#474)
+
+**The entry ticket to the Connectathon 43 CQL Engine Parity scenario is built and measured.**
+`POST /$cql` — the CQL IG's system-level operation in the exact subset `cqframework/cql-tests-runner`
+drives: an `expression` in, a `return` parameter out, no patient, no data, no terminology. The engine
+side existed since ADR-060 (`evaluateExpressions`); what was missing was the transport and the CQL→FHIR
+serialization. TDD throughout: 23 new tests (serializer + route), RED first, suite 1,976 → 1,999, 0 fail.
+
+**The serialization contract was read out of the consumer, not invented.** The runner's extractor chain
+(read at source, 2026-08-24) defines what an engine must emit: lists as repeated `return` parameters;
+`null` as `data-absent-reason` on `_valueBoolean`; empty list/tuple as `cqf-isEmptyList`/`cqf-isEmptyTuple`
+(absence must be SAID — an absent parameter reads as "no result", a different answer); numeric intervals
+as unity-coded Ranges declaring `Interval<System.X>` via `cqf-cqlType` (FHIR-56226), with open boundaries
+**closed-normalized** because the reader derives closedness from boundary presence. The serializer tests
+produce their values through the real translate→evaluate pipeline rather than hand-built engine objects.
+
+**Two structural choices worth keeping.** The **error split is load-bearing**: a translation failure is a
+400 OperationOutcome (the request is defective); a runtime failure is a **200** carrying an in-band
+`evaluation error` parameter (the evaluation's outcome IS a result) — the runner grades
+`invalid="semantic"` vs `invalid="true"` on exactly this line. And **unsupported operation inputs are
+refused by name** (`subject`, `data`, `library`…), never accepted-and-ignored — ADR-061's preview-501
+reasoning in a new place: an answer computed while silently dropping `subject` would look
+patient-specific and not be. `/$cql` sits outside `/api/` where `authorize` ends in permitAll (the
+ADR-067 hazard), and it executes caller-supplied CQL — so it carries an explicit machine-client auth
+rule, asserted as pure `authorize` calls.
+
+**The acceptance run: 1,823 cases over live HTTP, runner-graded — 1,589 pass / 223 fail / 11 skip /
+0 errors** (`docs/evidence/CQL_EVALUATION_SERVICE_2026-08-25.md`). Beside the published reference JS
+submission (1,533 pass / **113 skip**, Java translator), this passes more with 102 fewer skips and an
+empty SkipList — the ADR-060 posture that skipping the weak clusters would delete the finding. Failure
+clusters match the known upstream gaps (Long, `Slice`, decimal precision, 27 invalid-accepted);
+logical/nullological/conditional — the constructs the measure CQL is built from — are at 0 fails.
+Named, not smoothed: the runner-vs-ADR-060 case-by-case diff (separating serialization-mapping losses
+from engine gaps) has not been produced and should precede any external submission of these numbers.
+
+**The bug the acceptance leg caught that no unit test could.** The route passed a shared module-level
+headers object into every `Response`; the local host layer writes its computed `Content-Length` INTO
+the object it is handed, so the first response poisoned every later one (measured: a 321-byte
+`Parameters` under `Content-Length: 78` — clients hang on shorter bodies, parse-error on longer). Hours
+of client-side misdiagnosis (keepalive, header sets, three HTTP clients) until a raw-socket capture
+showed the declared length was the FIRST body's. Fixed with per-response fresh headers; recorded in the
+route's docblock. In-process route tests can never see this class — the Response never traverses the
+host's serialization layer — which is the argument for the live acceptance leg being part of done.
+
 ## 2026-08-24 — a three-sided alignment audit: original intent, stakeholder guidance, and where HL7/CMS are actually going
 
 Run so the next planning round starts from a verified picture instead of memory; the full audit lives
