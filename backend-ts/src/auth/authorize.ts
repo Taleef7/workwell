@@ -83,6 +83,12 @@ const RULES: Rule[] = [
   { method: "GET", pattern: rx("/cds-services"), access: "PERMIT" },
   { pattern: rx("/cds-services/**"), access: [A, CM, MCP] },
 
+  // The `$cql` Evaluation Service (#474). Same shape and same reasoning as the CDS Hooks rules above:
+  // `/$cql` is outside `/api/`, where this function ends in permitAll, and the endpoint executes
+  // caller-supplied CQL — without this rule it would be an anonymous compute service. Machine-client
+  // authority, matching /sse, /mcp/** and CDS invoke.
+  { pattern: rx("/$cql"), access: [A, CM, MCP] },
+
   // Outreach templates: the picker on the case-detail outreach action is the CASE_MANAGER's
   // primary consumer, so READING the template list/preview is CM/ADMIN (Fable M23). Writes
   // (create/update/delete) stay ADMIN via the /api/admin/** rule below. First-match-wins, so
