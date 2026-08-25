@@ -62,6 +62,46 @@ interval point type should come from the compiled ELM, not a whole-number heuris
 CI's full suite (SQLite floor + Postgres ceiling) **2,085 tests, 0 fail**; every job green; squash
 `2bbb6dae`.
 
+**Later the same day — the #475 bounded spike answered its named unknown: USQC content COMPILES under
+the JS translator, 6/8 clean, and both failures are ONE upstream gap.** The approach fork first:
+`dqm-content-cms-2025` commits **no built bundles** (`bundles/measure/` is a `.gitkeep`; the Library
+resources are 1.2 KB stubs), unlike the qicore repo our vendor pipeline consumes — so the plan's
+"re-point the vendor scripts" premise was wrong, and per the recommend-first rule the options went to
+the owner. Decision: ask the track community for the blessed bundle packages (Sept 2 kickoff / Zulip),
+run the bounded translation spike now, do #476 meanwhile. The spike (all inputs pinned:
+`dqm-content-cms-2025` @ `9f5f2298`, `HL7/us-cql-ig` @ tag `2.0.0-ballot`, `HL7/cql-ig` STU2): all 8
+target measures through our runtime `@cqframework/cql` 4.0.0-beta.1 wiring with the USQualityCore
+0.1.0-cibuild + USCore 6.1.0-derived modelinfos registered. **Six compile at 0 errors** (CMS122/125/
+130/165/2/68); CMS138 and CMS951 fail on exactly one operator — `prevalenceInterval` over a **union of
+two Condition profiles**: the JS translator does not resolve `choice<A,B>` against a fluent signature
+both alternatives convert to (`FHIRCommon`'s `prevalenceInterval(Condition)`), reproduced in 8 lines,
+Java-accepted (the repo commits Java-built ELM for CMS125/CMS2). Two API findings for our own wiring:
+namespaced includes need namespace registration and the curated `cql-to-elm` JS surface exposes no
+`NamespaceInfo` (the spike reached the Kotlin-mangled export); include-version matching is enforced
+(`2.0.0` ≠ `2.0.0-ballot`). Also on the record: the USQC measure CQL headers say *"for internal use
+only. Not for use or distribution in commercial products"* — the distribution posture is a question for
+the track before any vendoring. Full detail: issue #475 comment (2026-08-25); spike artifacts stay
+local scratch.
+
+**#476 shipped the same day (ADR-069): population membership now applies the CQM IG's published
+formulas per subject, pinned by a test that quotes its ruler.** `hl7.fhir.uv.cqm` STU1's proportion
+formulas (*Denominator Membership = IP ∧ DENOM ∧ ¬DENEX ∧ ¬(DENEXCEP ∧ ¬NUMER)*; *Numerator Membership
+= … ∧ NUMER ∧ ¬NUMEX*) are exactly what marginal-count score arithmetic assumes — and our per-subject
+flags did not encode the interactions: a DENEXCEP∧NUMER subject was subtracted from the effective
+denominator while staying in the numerator (a score that can exceed 1.0), DENEX∧NUMER kept a numerator
+the spec removes, and `numerator-exclusion` was **absent from the population-code map entirely**, so a
+NUMEX entry was silently skipped and the numerator overstated — the unrecognized-input-reads-as-covered
+shape again (#380/#400). RED first (6 of 8 new assertions failing for the predicted reasons), then the
+fix confined to `normalizeMembership` + the two evidence readers; the folds are SILENT where the subset
+clamps stay ALERTED, because a writer reporting raw co-true flags is spec-conformant while an inverted
+subset pair is corruption (the loudness split is the ADR's core). Deliberately narrow: NUMEX folds into
+`numer` and is NOT a reported population (no shipped measure declares one). The suite proves the change
+inert on every existing surface — **2,018 tests, 0 fail, no snapshot moved** — because fqm pre-zeroes
+the interactions it computes and the authored status rule cannot produce co-true flags; the defect was
+reachable only through evidence a different writer would produce, which is why nothing external ever
+caught it. In-test oracle computes the IG formulas independently over a mixed cohort and cross-checks
+`countPopulations` → `measureScore` against them.
+
 ## 2026-08-24 — a three-sided alignment audit: original intent, stakeholder guidance, and where HL7/CMS are actually going
 
 Run so the next planning round starts from a verified picture instead of memory; the full audit lives

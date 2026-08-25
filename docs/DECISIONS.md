@@ -18,6 +18,54 @@
 >
 > **Sequence note:** ADR-033 does not exist — verified absent, and the number must not be reused.
 
+## ADR-069: population membership applies the CQM IG's formulas per subject — and spec application is silent where corruption is loud
+
+**Status:** Accepted (2026-08-25). Issue #476.
+
+**Context.** The exporters compute the proportion score from marginal counts —
+`numer / (denom − denex − denexcep)` in both `buildSummaryMeasureReportFromCounts` and the QRDA III
+exporter. The CQM IG (`hl7.fhir.uv.cqm` v1.0.0 STU1, published 2025-09-11, measure-conformance.html
+§ "Subject-based Calculation") defines proportion membership normatively:
+*Denominator Membership = IP and Denominator and not DENEX and not (DENEXCEP and not Numerator)*;
+*Numerator Membership = IP and Denominator and not DENEX and Numerator and not NUMEX*. Marginal
+arithmetic equals those formulas **only if the per-subject flags already encode the interactions**.
+Ours did not: a DENEXCEP∧NUMER subject was subtracted from the effective denominator while staying in
+the numerator (a score that can exceed 1.0), a DENEX∧NUMER subject kept a numerator the spec removes,
+and `numerator-exclusion` was absent from `POPULATION_CODE_TO_KEY` entirely — an unrecognized entry is
+*skipped*, so a NUMEX'd subject silently kept an overstated numerator (the same
+unrecognized-input-reads-as-covered shape as #380/#400). In practice every measured surface was
+unaffected — fqm-execution zeroes the interactions it computes before we read them, and the authored
+status rule (one status per subject) cannot produce co-true flags — which is precisely why nothing
+external ever caught it: the defect was reachable only through evidence some *other* writer produced.
+
+**Decision.**
+
+1. **`normalizeMembership` has two stages with different loudness.** Subset clamps
+   (`numer/denex/denexcep ⊆ denom ⊆ ipp`) stay ALERTED — no spec formula produces a violation, so one
+   indicates an unreadable writer. The CQM IG interaction folds
+   (`numer := numer ∧ ¬denex ∧ ¬numex`; `denexcep := denexcep ∧ ¬denex ∧ ¬numer`) are SILENT — a
+   writer reporting raw co-true flags is behaving; which interactions a given engine pre-applies is
+   its implementation detail, and the reader must not depend on it.
+2. **The fold is per subject, not at the score.** With normalized flags,
+   `denom − denex − denexcep = |Denominator Membership|` and `numer = |Numerator Membership|` hold by
+   construction, so both existing score sites become exact without changing their arithmetic — and
+   the population COUNTS still report populations as evaluated (DENOM includes DENEX'd subjects),
+   preserving the Cypress-verified reconciliation contract.
+3. **NUMEX is an input, not a reported population.** `numerator-exclusion` is now recognized in both
+   evidence shapes and folds into `numer`; it is deliberately NOT added to `PopulationMembership` —
+   no shipped measure declares one, so a NUMEX population count would be plumbing with no consumer.
+   Widen the public shape when a measure with a numerator exclusion ships.
+4. **The formulas are pinned verbatim** in `src/fhir/cqm-membership-formulas.test.ts`, with an
+   in-test oracle computing the IG formulas independently over a mixed cohort — so a future revision
+   of the IG's formulas, or a regression in ours, fails a test that QUOTES its ruler (#476's
+   acceptance criterion: a spec change is a visible diff, not silent drift).
+
+**Consequences.** Inert on every existing surface (suite 2,018, 0 fail, no snapshot moved): the folds
+only fire on flag combinations no current writer emits. This converts "agrees with fqm-execution" into
+"agrees with the specification" for the membership reduction — fqm's zeroing behaviour, observed
+during the Cypress work, is now something we implement from the spec text rather than inherit as a
+side effect of one dependency's internals.
+
 ## ADR-068: the OpenAPI document covers the PROMISED surface only, and a routed-path test is what makes hand-authoring defensible
 
 **Status:** Accepted (2026-08-17). Closes the tracked TODO at the top of `docs/JOURNAL.md`.

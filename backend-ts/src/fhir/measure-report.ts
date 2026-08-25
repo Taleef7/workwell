@@ -80,13 +80,25 @@ export type OfficialPopulationResults =
   | Array<{ populationType?: unknown; result?: unknown }>
   | Record<string, unknown>;
 
+/**
+ * The raw flags a writer reports, before the CQM IG membership formulas are applied. `numex`
+ * (numerator exclusion) exists only at this stage: it folds into `numer` during normalization and is
+ * deliberately NOT part of {@link PopulationMembership} — no shipped measure declares one, so
+ * reporting a NUMEX population count would be plumbing with no consumer. When a measure with a
+ * numerator exclusion ships, widen the public shape then.
+ */
+interface RawPopulationFlags extends PopulationMembership {
+  numex: boolean;
+}
+
 /** fqm/FHIR population codes → our membership keys. */
-const POPULATION_CODE_TO_KEY: Record<string, keyof PopulationMembership> = {
+const POPULATION_CODE_TO_KEY: Record<string, keyof RawPopulationFlags> = {
   "initial-population": "ipp",
   denominator: "denom",
   "denominator-exclusion": "denex",
   "denominator-exception": "denexcep",
   numerator: "numer",
+  "numerator-exclusion": "numex",
 };
 
 /**
@@ -107,14 +119,34 @@ function alertUnreadableOfficialEvidence(reason: string, results: unknown): void
 }
 
 /**
- * Enforce the subset semantics a proportion measure guarantees (`numer ⊆ denom ⊆ ipp`,
- * `denex`/`denexcep ⊆ denom`). The old status rule made these true by construction; reading membership
- * from evidence does not, and an inverted pair would emit a non-conformant MeasureReport that Cypress
- * would reject. Violations are clamped and alerted rather than trusted.
+ * Two normalization stages with different meanings and different loudness (#476):
+ *
+ * 1. **Subset clamps, ALERTED** — `numer ⊆ denom ⊆ ipp`, `denex`/`denexcep ⊆ denom`. No spec formula
+ *    produces a violation, so one indicates an unreadable writer; violations are clamped and alerted
+ *    rather than trusted (an inverted pair would emit a non-conformant MeasureReport that Cypress
+ *    would reject).
+ *
+ * 2. **The CQM IG membership formulas, SILENT** — hl7.fhir.uv.cqm v1.0.0 STU1 (2025-09-11),
+ *    measure-conformance.html § "Subject-based Calculation", proportion scoring:
+ *
+ *      Denominator Membership = IP and Denominator and not DENEX and not (DENEXCEP and not Numerator)
+ *      Numerator Membership   = IP and Denominator and not DENEX and Numerator and not NUMEX
+ *
+ *    Applied per subject so the marginal-count arithmetic downstream is EXACT:
+ *    `numer := numer ∧ ¬denex ∧ ¬numex` and `denexcep := denexcep ∧ ¬denex ∧ ¬numer` make
+ *    `denom − denex − denexcep` equal |Denominator Membership| and `numer` equal
+ *    |Numerator Membership| by construction — which is what `buildSummaryMeasureReportFromCounts`
+ *    and the QRDA III exporter divide. Without the per-subject fold, a DENEXCEP∧NUMER subject is
+ *    subtracted from the effective denominator while staying in the numerator (a score above 1.0),
+ *    and a NUMEX'd or DENEX'd subject keeps a numerator the spec removes. These folds are spec
+ *    application, not corruption repair — a writer that reports raw co-true flags (fqm zeroes some
+ *    interactions itself; the reader must not depend on which) is behaving, so no alert.
+ *
+ *    `cqm-membership-formulas.test.ts` pins the formulas verbatim; a spec revision should fail there.
  */
-function normalizeMembership(m: PopulationMembership): PopulationMembership {
+function normalizeMembership(m: RawPopulationFlags): PopulationMembership {
   const denom = m.denom && m.ipp;
-  const normalized: PopulationMembership = {
+  const subset: PopulationMembership = {
     ipp: m.ipp,
     denom,
     denex: m.denex && denom,
@@ -122,12 +154,19 @@ function normalizeMembership(m: PopulationMembership): PopulationMembership {
     numer: m.numer && denom,
   };
   if (
-    normalized.ipp !== m.ipp || normalized.denom !== m.denom || normalized.denex !== m.denex ||
-    normalized.denexcep !== m.denexcep || normalized.numer !== m.numer
+    subset.ipp !== m.ipp || subset.denom !== m.denom || subset.denex !== m.denex ||
+    subset.denexcep !== m.denexcep || subset.numer !== m.numer
   ) {
     alertUnreadableOfficialEvidence("population membership violates numer/denex ⊆ denom ⊆ ipp", m);
   }
-  return normalized;
+  const numer = subset.numer && !subset.denex && !m.numex;
+  return {
+    ipp: subset.ipp,
+    denom: subset.denom,
+    denex: subset.denex,
+    numer,
+    denexcep: subset.denexcep && !subset.denex && !numer,
+  };
 }
 
 /**
@@ -143,7 +182,7 @@ export function officialMembership(evidence: unknown): PopulationMembership | nu
     return null;
   }
 
-  const raw: PopulationMembership = { ipp: false, denom: false, denex: false, numer: false, denexcep: false };
+  const raw: RawPopulationFlags = { ipp: false, denom: false, denex: false, numer: false, denexcep: false, numex: false };
   if (Array.isArray(results)) {
     let recognized = 0;
     for (const entry of results) {
@@ -173,6 +212,7 @@ export function officialMembership(evidence: unknown): PopulationMembership | nu
     denex: bool(r["denex"]),
     numer: bool(r["numer"]),
     denexcep: bool(r["denexcep"]),
+    numex: bool(r["numex"]),
   });
 }
 
