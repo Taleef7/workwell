@@ -268,6 +268,10 @@ export function openApiDocument(): OpenApiDocument {
             },
             "401": errorResponse("No bearer token."),
             "403": errorResponse("The authenticated role may not evaluate CQL."),
+            "413": {
+              description: "The expression exceeds 64 KiB — the same bound the Studio compile endpoint applies to the in-process translator.",
+              content: jsonBody("FhirOperationOutcome"),
+            },
           },
         },
       },

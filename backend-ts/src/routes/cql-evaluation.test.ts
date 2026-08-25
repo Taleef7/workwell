@@ -114,6 +114,16 @@ test("a body that is not a Parameters resource is a 400 (the documented schema i
   assert.equal(res!.status, 400);
 });
 
+test("an oversized expression is 413 before it reaches the translator (Codex P1)", async () => {
+  // /api/measures/compile bounds the same in-process translator at 64 KiB (measures.ts
+  // MAX_CQL_BYTES); an unbounded expression here would let one authenticated client block the
+  // long-lived worker on synchronous translation.
+  const res = await call(cqlRequest(`'${"x".repeat(65 * 1024)}'`));
+  assert.equal(res!.status, 413);
+  const body = (await res!.json()) as { resourceType: string };
+  assert.equal(body.resourceType, "OperationOutcome");
+});
+
 test("the auth rule exists: anonymous POST /$cql is 401, machine-client roles pass", () => {
   const admin: JwtPrincipal = { email: "a@workwell.dev", role: "ROLE_ADMIN" } as JwtPrincipal;
   const cm: JwtPrincipal = { email: "cm@workwell.dev", role: "ROLE_CASE_MANAGER" } as JwtPrincipal;

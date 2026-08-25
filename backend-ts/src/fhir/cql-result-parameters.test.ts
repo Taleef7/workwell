@@ -196,6 +196,25 @@ test("a nested list nests under parts named `element`", async () => {
   ]);
 });
 
+test("an open temporal boundary is closed-normalized via successor/predecessor (Codex P2)", async () => {
+  const openHigh = firstParam(await serialize("Interval[@2018-01-01, @2018-01-05)"));
+  assert.equal((openHigh.valuePeriod as { end: string }).end, "2018-01-04");
+  const openLow = firstParam(await serialize("Interval(@2018-01-01, @2018-01-05]"));
+  assert.equal((openLow.valuePeriod as { start: string }).start, "2018-01-02");
+});
+
+test("a ratio uses valueRatio with UCUM-coded quantities", async () => {
+  assert.deepEqual(params(await serialize("1 'mg' : 2 'mL'")), [
+    {
+      name: "return",
+      valueRatio: {
+        numerator: { value: 1, unit: "mg", system: "http://unitsofmeasure.org", code: "mg" },
+        denominator: { value: 2, unit: "mL", system: "http://unitsofmeasure.org", code: "mL" },
+      },
+    },
+  ]);
+});
+
 test("a time result is valueTime with no leading T", async () => {
   const p = firstParam(await serialize("@T10:30:00"));
   assert.match(String(p.valueTime), /^10:30:00/);

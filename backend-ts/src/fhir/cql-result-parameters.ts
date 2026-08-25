@@ -93,9 +93,26 @@ function intervalParam(name: string, v: IntervalLike): FhirParameter {
   if (sample !== null && typeof sample === "object") {
     if (flag(sample, "isTime") || flag(sample, "isDate") || flag(sample, "isDateTime")) {
       const point = flag(sample, "isTime") ? "Time" : flag(sample, "isDate") ? "Date" : "DateTime";
+      // Open temporal boundaries are closed-normalized just like the numeric branch (Codex P2 on
+      // #481): the reader infers every present Period endpoint as closed, so an open-low Date
+      // interval emitted raw would round-trip WIDER than the true interval. cql-execution's own
+      // successor()/predecessor() honor the value's precision; if a boundary cannot step (already
+      // at the type's extreme), the raw value is the least-wrong fallback.
+      const step = (b: unknown, closed: boolean, fn: "successor" | "predecessor"): object | null => {
+        if (b === null || b === undefined) return null;
+        if (closed) return b as object;
+        try {
+          const stepped = (b as Record<string, unknown>)[fn];
+          return typeof stepped === "function" ? ((stepped as () => object).call(b) ?? (b as object)) : (b as object);
+        } catch {
+          return b as object;
+        }
+      };
+      const lowT = step(low, v.lowClosed, "successor");
+      const highT = step(high, v.highClosed, "predecessor");
       const period: Record<string, unknown> = {};
-      if (low !== null && low !== undefined) period.start = temporalString(low as object);
-      if (high !== null && high !== undefined) period.end = temporalString(high as object);
+      if (lowT !== null) period.start = temporalString(lowT);
+      if (highT !== null) period.end = temporalString(highT);
       return {
         name,
         extension: [{ url: CQL_TYPE, valueString: `Interval<System.${point}>` }],

@@ -53,6 +53,13 @@ import { resultToParameters, evaluationErrorParameters } from "../fhir/cql-resul
  */
 const jsonHeaders = () => ({ "content-type": "application/json" });
 
+/**
+ * Same bound, same reason as `/api/measures/compile` (`measures.ts` MAX_CQL_BYTES): the translator
+ * runs synchronously in the long-lived worker, so an unbounded expression is a one-request DoS
+ * (Codex P1 on #481). 413, matching that precedent.
+ */
+const MAX_EXPRESSION_BYTES = 64 * 1024;
+
 /** Inputs of the `$cql` OperationDefinition this service deliberately does not evaluate. */
 const UNSUPPORTED_INPUTS = new Set([
   "subject",
@@ -116,6 +123,9 @@ export async function handleCqlEvaluation(req: Request): Promise<Response | null
   const expression = expressions[0]?.valueString;
   if (expressions.length !== 1 || typeof expression !== "string" || expression.trim() === "") {
     return operationOutcome(400, ["exactly one `expression` parameter with a valueString is required"]);
+  }
+  if (expression.length > MAX_EXPRESSION_BYTES) {
+    return operationOutcome(413, [`expression exceeds ${MAX_EXPRESSION_BYTES} bytes`]);
   }
 
   // One define wrapping the caller's expression; the translator's own diagnostics decide validity.

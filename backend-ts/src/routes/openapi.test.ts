@@ -298,6 +298,8 @@ test("every documented status is produced by a real request through the real wor
   );
   assert.equal((await probe("/$cql", { template: "/$cql", method: "POST", body: cqlBody })).status, 401);
   assert.equal((await probe("/$cql", { template: "/$cql", method: "POST", token: author, body: cqlBody })).status, 403);
+  const hugeCql = { resourceType: "Parameters", parameter: [{ name: "expression", valueString: `'${"x".repeat(65 * 1024)}'` }] };
+  assert.equal((await probe("/$cql", { template: "/$cql", method: "POST", token: cm, body: hugeCql })).status, 413);
 });
 
 test("coverage is two-way: nothing documented is unexercised, nothing observed is undocumented", () => {
