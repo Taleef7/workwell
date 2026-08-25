@@ -1458,6 +1458,9 @@ bundle it has exactly **one** base error — the missing entry — which is the 
 
 **Status:** Accepted (2026-07-30). Roadmap M-A. **CMS2, CMS68 and CMS951 are vendored, gated and
 ROUTABLE.** None is routed; `WORKWELL_OFFICIAL_MEASURES` still names only cms122 + cms125.
+*(Status correction 2026-08-24: "routable" holds for CMS2 and CMS951 only — CMS68 is refused at
+construction as an episode-of-care measure, exactly as decision point 6 below records; this line
+over-claimed relative to the ADR's own body.)*
 
 **Context.** With cms122 and cms125 running CMS's published artifacts in production, the remaining six
 priority measures were meant to follow. Vendoring all six took minutes. Deciding which could actually be

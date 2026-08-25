@@ -6,7 +6,7 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)](backend-ts/package.json)
 [![Next.js 16](https://img.shields.io/badge/Next.js-16-000000?logo=nextdotjs&logoColor=white)](frontend/package.json)
 [![FHIR R4](https://img.shields.io/badge/FHIR-R4%20%2F%20QI--Core-red)](docs/STANDARDS_CONFORMANCE.md)
-[![Tests](https://img.shields.io/badge/backend%20tests-1604-success)](backend-ts)
+[![Tests](https://img.shields.io/badge/backend%20tests-1976-success)](backend-ts)
 
 **A clinical quality measure engine that runs CMS's *own published* eCQM artifacts — not a reimplementation of them.**
 
@@ -158,13 +158,13 @@ This project is deliberately careful about what it claims. [`docs/STANDARDS_CONF
 
 The parts of this repo worth reading if you care about how it is built:
 
-- **53 Architecture Decision Records** ([`docs/DECISIONS.md`](docs/DECISIONS.md)) — every non-obvious decision, with the alternatives and the consequences. Several record a decision being *reversed* by measurement or review, with the original reasoning kept rather than deleted.
+- **67 Architecture Decision Records** ([`docs/DECISIONS.md`](docs/DECISIONS.md)) — every non-obvious decision, with the alternatives and the consequences. Several record a decision being *reversed* by measurement or review, with the original reasoning kept rather than deleted.
 - **Measure-first, then decide.** Repeatedly, a planned refusal or guard was killed because measuring showed it would fire on correct inputs. Those reversals are documented as such — the reasoning that was wrong is the useful part.
 - **Guards are mutation-tested.** A check that cannot fail is worse than no check, because it reads as covered. New safety conditions are verified by breaking them and confirming exactly the intended test fails.
 - **Vacuous-guard hunting.** Tests that self-skip when a fixture is missing are treated as a defect class in their own right — a suite that reads green because it never ran is worse than a red one. The sidecar-dependent gates are named explicitly in a CI step so they cannot silently drop out, and the flip checklist tells the operator to read the `skipped` count, not just `fail`.
 - **Ports and adapters throughout** — measure executor, data source, value-set resolver, outreach channel, immunization forecaster, evidence bucket, store layer. Each defaults to an inert simulated implementation and is *inert unless configured*.
 - **Reversibility as a design constraint.** Every seam is switchable by env var, and every switch is byte-identical to the previous behaviour when unset.
-- **1604 backend tests** on the SQLite floor with no external services (1590 pass, 14 self-skip without a local Postgres or the gitignored terminology sidecar); a Postgres contract suite that runs against a local `postgres:16` when present; and Playwright E2E.
+- **1976 backend tests** on the SQLite floor with no external services (1961 pass, 15 self-skip without a local Postgres or the gitignored terminology sidecar — measured 2026-08-24); a Postgres contract suite that runs against a local `postgres:16` when present; and Playwright E2E.
 
 ---
 
@@ -265,7 +265,7 @@ The current verification bar is the FHIR-column set in [`docs/ROADMAP_2026-08-04
 |---|---|
 | **[The guide](docs/guide/README.md)** | **start here — the whole system explained, chapter by chapter, with a diagram per flow** |
 | [Architecture](docs/ARCHITECTURE.md) | system boundaries, module map |
-| [Decisions](docs/DECISIONS.md) | 65 ADRs, newest first |
+| [Decisions](docs/DECISIONS.md) | 67 ADRs, newest first |
 | [Data Model](docs/DATA_MODEL.md) | tables, idempotency + evidence contracts |
 | [Measures](docs/MEASURES.md) | the TWH measure catalog in plain English |
 | [Standards Conformance](docs/STANDARDS_CONFORMANCE.md) | what we may and may not claim |
