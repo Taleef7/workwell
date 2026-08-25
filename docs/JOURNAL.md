@@ -40,7 +40,22 @@ not CMS-attributable" standing correction, now itself superseded by CMS-1848-P (
 
 **Nothing beyond docs changed today.** The proposed next-step sequence (three doc PRs — truth fixes,
 README refresh, stakeholder explainers — plus the owner conversations and the two pre-September
-standards items) is PROPOSED and awaits owner review.
+standards items) was approved by the owner the same day; the tracker now carries it as milestone
+"Connectathon 43 readiness" (#474 `$cql` facade, #475 USQC content vendor, #476 membership-formula
+test) plus #477/#478 (docs) and #479 (translator upgrade, post-September).
+
+**The truth-fix PR landed the same evening (#480, closes #463) — and the review process earned its
+keep twice.** The code-review pass caught that the PR's own new `evidence_json` note had introduced a
+fresh false claim while fixing a stale one (it asserted `evaluatedResource` is persisted and omitted
+the load-bearing `official` key — exactly the error class the PR exists to remove), plus ADR-047's
+Status line carrying the same CMS68 over-claim its own point 6 refutes, and two undocumented AI
+authoring surfaces in `ai-assist.ts`. Codex then added what both had missed: `qrda1Import` is a third
+persisted evidence key (ADR-051/056), and a failed evaluation **replaces** evidence rather than
+appending. Both verified against the tree (`runs.ts:654/833/867`, `run-pipeline.ts:693`) before the
+note was amended. A contract doc that had been wrong in one way for months was nearly re-committed
+wrong in a different way on the day it was "fixed" — three independent readers is what caught it.
+Suite measured on the tree: **1,976 tests, 1,961 pass, 0 fail, 15 self-skip**; CI green across all
+jobs; squash-merged as `0c526f84`.
 
 ## 2026-08-17 — `/api-docs` redirected to login, and three guards each watched the wrong side of it (#471)
 
