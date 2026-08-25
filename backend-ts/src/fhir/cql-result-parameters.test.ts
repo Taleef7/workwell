@@ -203,6 +203,15 @@ test("an open temporal boundary is closed-normalized via successor/predecessor (
   assert.equal((openLow.valuePeriod as { start: string }).start, "2018-01-02");
 });
 
+test("an open quantity-interval boundary is closed-normalized by the decimal step (Codex round 2)", async () => {
+  // Quantities carry no successor()/predecessor() (probed), so the CQL Decimal step applies to the
+  // value. Presence means closed to the reader, same as every other interval branch.
+  const p = firstParam(await serialize("Interval[1 'mg', 10 'mg')"));
+  const range = p.valueRange as { high: { value: number; code: string } };
+  assert.equal(range.high.value, 9.99999999);
+  assert.equal(range.high.code, "mg");
+});
+
 test("a ratio uses valueRatio with UCUM-coded quantities", async () => {
   assert.deepEqual(params(await serialize("1 'mg' : 2 'mL'")), [
     {

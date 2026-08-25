@@ -124,7 +124,9 @@ export async function handleCqlEvaluation(req: Request): Promise<Response | null
   if (expressions.length !== 1 || typeof expression !== "string" || expression.trim() === "") {
     return operationOutcome(400, ["exactly one `expression` parameter with a valueString is required"]);
   }
-  if (expression.length > MAX_EXPRESSION_BYTES) {
+  // Encoded bytes, not UTF-16 code units (Codex round 2): `.length` under-counts multibyte text by
+  // up to 3×, which would let a nominally-capped expression reach the translator at ~192 KiB.
+  if (new TextEncoder().encode(expression).length > MAX_EXPRESSION_BYTES) {
     return operationOutcome(413, [`expression exceeds ${MAX_EXPRESSION_BYTES} bytes`]);
   }
 

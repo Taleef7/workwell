@@ -124,6 +124,13 @@ test("an oversized expression is 413 before it reaches the translator (Codex P1)
   assert.equal(body.resourceType, "OperationOutcome");
 });
 
+test("the 64 KiB bound counts ENCODED bytes, not UTF-16 code units (Codex round 2)", async () => {
+  // 40,000 CJK characters: string .length ≈ 40k (under the cap) but ~120 KB in UTF-8 — the size
+  // the synchronous translator actually chews on.
+  const res = await call(cqlRequest(`'${"漢".repeat(40 * 1024)}'`));
+  assert.equal(res!.status, 413);
+});
+
 test("the auth rule exists: anonymous POST /$cql is 401, machine-client roles pass", () => {
   const admin: JwtPrincipal = { email: "a@workwell.dev", role: "ROLE_ADMIN" } as JwtPrincipal;
   const cm: JwtPrincipal = { email: "cm@workwell.dev", role: "ROLE_CASE_MANAGER" } as JwtPrincipal;

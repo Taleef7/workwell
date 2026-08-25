@@ -120,9 +120,22 @@ function intervalParam(name: string, v: IntervalLike): FhirParameter {
       };
     }
     if (flag(sample, "isQuantity")) {
+      // Open boundaries closed-normalize by the CQL Decimal step on the VALUE (Codex round 2 on
+      // #481): cql-execution quantities carry no successor()/predecessor() (probed), and presence
+      // means closed to the reader, same as every other interval branch.
+      const stepQ = (b: unknown, closed: boolean, direction: 1 | -1): Record<string, unknown> | null => {
+        if (b === null || b === undefined) return null;
+        const q = quantityValue(b as { value?: unknown; unit?: unknown });
+        if (!closed && typeof q.value === "number") {
+          q.value = Number((q.value + direction * DECIMAL_STEP).toFixed(8));
+        }
+        return q;
+      };
+      const lowQ = stepQ(low, v.lowClosed, 1);
+      const highQ = stepQ(high, v.highClosed, -1);
       const range: Record<string, unknown> = {};
-      if (low !== null && low !== undefined) range.low = quantityValue(low as { value?: unknown; unit?: unknown });
-      if (high !== null && high !== undefined) range.high = quantityValue(high as { value?: unknown; unit?: unknown });
+      if (lowQ !== null) range.low = lowQ;
+      if (highQ !== null) range.high = highQ;
       return {
         name,
         extension: [{ url: CQL_TYPE, valueString: "Interval<System.Quantity>" }],
