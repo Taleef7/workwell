@@ -116,12 +116,15 @@ SQLite floor and the Pg ceiling read the current row and apply the shared pure `
 - `why_flagged`: derived/explainer fields used by UI for readable case diagnostics.
 
 > **`why_flagged` is DERIVED AT READ TIME, not persisted (#463).** In the TypeScript backend the
-> persisted `evidence_json` carries `expressionResults` + `evaluatedResource` (+ `evaluationError`
-> on failure); `why_flagged` is computed on read by `deriveWhyFlagged`
-> (`backend-ts/src/case/case-detail-read-model.ts`) from the expression results and measure config.
-> The canonical shape above shows the *logical* contract a consumer sees on read surfaces (case
-> detail, exports, MCP tools), not the stored bytes. This was true of the TS engine from the start;
-> the section predates the re-platform (ADR-008).
+> persisted `evidence_json` carries **`expressionResults`** — plus **`official`** when the measure is
+> official-routed (load-bearing: MeasureReport/QRDA read `evidence_json.official.populationResults`,
+> ADR-031/046), and `evaluationError`/`message` on failure
+> (`backend-ts/packages/measure-engine/src/evaluate-measure.ts`). `why_flagged` is computed on read
+> by `deriveWhyFlagged` (`backend-ts/src/case/case-detail-read-model.ts`) from the expression results
+> and measure config. The `evaluatedResource` block in the canonical example above is **Java-era**:
+> it is neither persisted nor derived on any TS surface today. The canonical shape shows the
+> *logical* contract a consumer sees on read surfaces (case detail, exports, MCP tools), not the
+> stored bytes; the section predates the re-platform (ADR-008).
 
 If evaluation fails for one employee, `evidence_json` includes:
 ```json

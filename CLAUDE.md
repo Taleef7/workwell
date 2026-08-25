@@ -332,9 +332,10 @@ already has `id-token: write`, and it would remove `NPM_TOKEN` entirely.
 
 **Three standing corrections.** The CMS FHIR-reporting timeline is now **CMS-attributable but
 PROPOSED** (supersedes the old form of this correction, "~2030 is not CMS-attributable"): the CY2027
-PFS proposed rule (CMS-1848-P, July 2026) proposes FHIR-based reporting voluntary PY2028–29 and
-**mandatory PY2030** for applicable APP Plus measures, MIPS CQMs sunsetting ~PY2030 — cite as
-*proposed* until the final rule (~Nov 2026). **"QI-Core STU7 = US Core 7 = WebChart's exact surface"** is half right: the equality
+PFS proposed rule (CMS-1848-P, July 2026) **seeks comment on a two-year transition** — FHIR-based
+reporting voluntary PY2028–29, **mandatory PY2030** for applicable APP Plus measures, MIPS CQMs
+sunsetting ~PY2030 — a comment solicitation, so cite it as *proposed/under comment*, never as final
+(final rule ~Nov 2026). **"QI-Core STU7 = US Core 7 = WebChart's exact surface"** is half right: the equality
 holds, but **CMS's shipping content is authored on QI-Core 6** and the direction is **US Quality Core 0.5.0
 over US Core 6.1.0**. **"Cypress CVU+ is the verification bar"** is removed from `STANDARDS_CONFORMANCE.md`
 and the `conformance` skill. **Open owner step:** confirm with Doug/Nicole that certifying WorkWell's engine
