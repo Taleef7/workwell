@@ -43,18 +43,27 @@ external ever caught it: the defect was reachable only through evidence some *ot
 1. **`normalizeMembership` has two stages with different loudness.** Subset clamps
    (`numer/denex/denexcep ⊆ denom ⊆ ipp`) stay ALERTED — no spec formula produces a violation, so one
    indicates an unreadable writer. The CQM IG interaction folds
-   (`numer := numer ∧ ¬denex ∧ ¬numex`; `denexcep := denexcep ∧ ¬denex ∧ ¬numer`) are SILENT — a
+   (`numer := numer ∧ ¬denex ∧ ¬numex`; `denexcep := denexcep ∧ ¬denex ∧ ¬numer_RAW`) are SILENT — a
    writer reporting raw co-true flags is behaving; which interactions a given engine pre-applies is
-   its implementation detail, and the reader must not depend on it.
+   its implementation detail, and the reader must not depend on it. The exception folds against the
+   **raw** (subset-clamped) numerator, not the NUMEX-folded one: the DM formula negates the exception
+   on the "Numerator" criteria result, and NUMEX applies only inside Numerator Membership — so a
+   DENEXCEP∧NUMER∧NUMEX subject stays in the effective denominator as a scored failure. (The first
+   cut folded against the NUMEX-adjusted numerator; review caught the divergence on exactly that
+   triple, the one combination the hand-picked cohort omitted.)
 2. **The fold is per subject, not at the score.** With normalized flags,
    `denom − denex − denexcep = |Denominator Membership|` and `numer = |Numerator Membership|` hold by
-   construction, so both existing score sites become exact without changing their arithmetic — and
-   the population COUNTS still report populations as evaluated (DENOM includes DENEX'd subjects),
-   preserving the Cypress-verified reconciliation contract.
+   construction — **exhaustively verified over all 64 raw flag combinations**, subset-violating
+   vectors included, not claimed from a hand-picked cohort — so both existing score sites become
+   exact without changing their arithmetic, and the population COUNTS still report populations as
+   evaluated (DENOM includes DENEX'd subjects), preserving the Cypress-verified reconciliation
+   contract.
 3. **NUMEX is an input, not a reported population.** `numerator-exclusion` is now recognized in both
    evidence shapes and folds into `numer`; it is deliberately NOT added to `PopulationMembership` —
    no shipped measure declares one, so a NUMEX population count would be plumbing with no consumer.
-   Widen the public shape when a measure with a numerator exclusion ships.
+   Widen the public shape when a measure with a numerator exclusion ships. Because it is a modifier
+   rather than a membership population, a results array recognizing ONLY `numerator-exclusion` is
+   still an unreadable writer (alert + `null` → status-rule fallback), not a valid all-false vector.
 4. **The formulas are pinned verbatim** in `src/fhir/cqm-membership-formulas.test.ts`, with an
    in-test oracle computing the IG formulas independently over a mixed cohort — so a future revision
    of the IG's formulas, or a regression in ours, fails a test that QUOTES its ruler (#476's

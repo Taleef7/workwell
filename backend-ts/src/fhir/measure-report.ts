@@ -133,9 +133,11 @@ function alertUnreadableOfficialEvidence(reason: string, results: unknown): void
  *      Numerator Membership   = IP and Denominator and not DENEX and Numerator and not NUMEX
  *
  *    Applied per subject so the marginal-count arithmetic downstream is EXACT:
- *    `numer := numer ∧ ¬denex ∧ ¬numex` and `denexcep := denexcep ∧ ¬denex ∧ ¬numer` make
+ *    `numer := numer ∧ ¬denex ∧ ¬numex` and `denexcep := denexcep ∧ ¬denex ∧ ¬numer_RAW` (the raw
+ *    numerator — the DM formula negates the exception on the criteria result, before NUMEX) make
  *    `denom − denex − denexcep` equal |Denominator Membership| and `numer` equal
- *    |Numerator Membership| by construction — which is what `buildSummaryMeasureReportFromCounts`
+ *    |Numerator Membership| by construction, exhaustively verified over all 64 raw flag
+ *    combinations — which is what `buildSummaryMeasureReportFromCounts`
  *    and the QRDA III exporter divide. Without the per-subject fold, a DENEXCEP∧NUMER subject is
  *    subtracted from the effective denominator while staying in the numerator (a score above 1.0),
  *    and a NUMEX'd or DENEX'd subject keeps a numerator the spec removes. These folds are spec
@@ -159,13 +161,16 @@ function normalizeMembership(m: RawPopulationFlags): PopulationMembership {
   ) {
     alertUnreadableOfficialEvidence("population membership violates numer/denex ⊆ denom ⊆ ipp", m);
   }
-  const numer = subset.numer && !subset.denex && !m.numex;
   return {
     ipp: subset.ipp,
     denom: subset.denom,
     denex: subset.denex,
-    numer,
-    denexcep: subset.denexcep && !subset.denex && !numer,
+    numer: subset.numer && !subset.denex && !m.numex,
+    // The RAW (subset-clamped) numerator, NOT the NUMEX-folded one: the IG's Denominator Membership
+    // negates the exception on the "Numerator" criteria result, and NUMEX applies only inside
+    // Numerator Membership. A DENEXCEP∧NUMER∧NUMEX subject therefore stays in the effective
+    // denominator as a scored failure (#484 review, finding 1).
+    denexcep: subset.denexcep && !subset.denex && !subset.numer,
   };
 }
 
@@ -188,7 +193,9 @@ export function officialMembership(evidence: unknown): PopulationMembership | nu
     for (const entry of results) {
       const key = POPULATION_CODE_TO_KEY[String((entry as { populationType?: unknown })?.populationType)];
       if (!key) continue;
-      recognized += 1;
+      // NUMEX is a numerator MODIFIER, not a membership population: a vector naming it and none of
+      // the required populations is still an unreadable writer (recognized stays 0 → alert + null).
+      if (key !== "numex") recognized += 1;
       raw[key] = bool((entry as { result?: unknown })?.result);
     }
     if (recognized === 0) {

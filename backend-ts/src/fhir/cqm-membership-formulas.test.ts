@@ -137,6 +137,26 @@ test("NUMEX: `numerator-exclusion` is recognized and removes an achieved numerat
   assert.equal(m.denom, true, "NUMEX removes from the numerator only, never the denominator");
 });
 
+test("DENEXCEP and NUMER and NUMEX: the RAW numerator negates the exception — the subject stays a scored denominator failure", () => {
+  // The IG's Denominator Membership negates the exception on the raw "Numerator" criteria result;
+  // NUMEX applies only inside Numerator Membership. So a subject with all three flags is IN the
+  // denominator (met the criteria, so the exception is void) and OUT of the numerator (excluded) —
+  // a scored failure. Folding denexcep against the NUMEX-adjusted numerator instead would remove
+  // them from the effective denominator, diverging from the pinned formula (#484 review, finding 1).
+  const m = officialMembership({
+    official: {
+      populationResults: [
+        entry("initial-population", true), entry("denominator", true),
+        entry("denominator-exception", true), entry("numerator", true), entry("numerator-exclusion", true),
+      ],
+    },
+  });
+  assert.ok(m);
+  assert.equal(m.numer, false, "NUMEX removes the numerator");
+  assert.equal(m.denexcep, false, "the raw numerator voids the exception — Denominator Membership stays true");
+  assert.equal(m.denom, true);
+});
+
 test("DENEX and DENEXCEP: exclusion wins; the exception is not also counted", () => {
   // Denominator Membership is already false via DENEX. The exception flag must not ALSO survive
   // into the marginal counts, or `denom - denex - denexcep` double-subtracts this subject.
@@ -216,6 +236,70 @@ test("performance rate over a mixed cohort equals |Numerator Membership| / |Deno
   assert.ok(score.value <= 1, "a proportion score can never exceed 1.0");
 });
 
+test("EXHAUSTIVE: every one of the 64 raw flag combinations reduces to the IG formulas exactly", () => {
+  // The cohort above is readable; this is the proof. For every raw vector — subset-violating ones
+  // included, which the clamps repair before the folds — the normalized flags must satisfy
+  // `denom − denex − denexcep = Denominator Membership` and `numer = Numerator Membership`
+  // per subject, which is what makes the exporters' marginal arithmetic exact by construction.
+  const originalError = console.error;
+  console.error = () => {}; // subset-violating vectors alert by design; not this test's subject
+  try {
+    for (let bits = 0; bits < 64; bits++) {
+      const raw = {
+        ipp: (bits & 1) !== 0, denom: (bits & 2) !== 0, denex: (bits & 4) !== 0,
+        denexcep: (bits & 8) !== 0, numer: (bits & 16) !== 0, numex: (bits & 32) !== 0,
+      };
+      const m = officialMembership({
+        official: {
+          populationResults: [
+            entry("initial-population", raw.ipp), entry("denominator", raw.denom),
+            entry("denominator-exclusion", raw.denex), entry("denominator-exception", raw.denexcep),
+            entry("numerator", raw.numer), entry("numerator-exclusion", raw.numex),
+          ],
+        },
+      });
+      assert.ok(m, `combo ${bits} must be readable`);
+      // The oracle applies the formulas to the CLAMPED subset flags — the IG formulas presuppose a
+      // writer whose populations nest; the clamps restore that before the folds apply.
+      const clamped = {
+        ipp: raw.ipp, denom: raw.denom && raw.ipp,
+        denex: raw.denex && raw.denom && raw.ipp, denexcep: raw.denexcep && raw.denom && raw.ipp,
+        numer: raw.numer && raw.denom && raw.ipp, numex: raw.numex,
+      };
+      const ig = igMembership(clamped);
+      const effectiveDenominator = (m.denom ? 1 : 0) - (m.denex ? 1 : 0) - (m.denexcep ? 1 : 0);
+      assert.equal(
+        effectiveDenominator, ig.denominatorMembership ? 1 : 0,
+        `combo ${bits} (${JSON.stringify(raw)}): denom − denex − denexcep must equal Denominator Membership`,
+      );
+      assert.equal(
+        m.numer, ig.numeratorMembership,
+        `combo ${bits} (${JSON.stringify(raw)}): numer must equal Numerator Membership`,
+      );
+    }
+  } finally {
+    console.error = originalError;
+  }
+});
+
+test("a results array recognizing ONLY numerator-exclusion is an unreadable writer — alert and null, not a valid all-false vector", () => {
+  // NUMEX is a modifier of the numerator, not a membership population. A vector naming it and none
+  // of the required populations used to fall back to the status rule (recognized === 0) and must
+  // keep doing so (#484 review, finding 4).
+  const alerts: string[] = [];
+  const originalError = console.error;
+  console.error = (...args: unknown[]) => { alerts.push(String(args[0])); };
+  try {
+    const m = officialMembership({
+      official: { populationResults: [entry("numerator-exclusion", true)] },
+    });
+    assert.equal(m, null);
+    assert.equal(alerts.filter((a) => a.includes("WORKWELL_ALERT")).length, 1);
+  } finally {
+    console.error = originalError;
+  }
+});
+
 // ---------------------------------------------------------------------------
 // The spec clamps are silent; the subset-violation alert still fires
 // ---------------------------------------------------------------------------
@@ -251,5 +335,6 @@ test("interaction clamps are silent; subset violations still alert", () => {
 });
 
 // Keep the type import load-bearing so a rename of the membership shape shows up here.
+// (Enforced by `pnpm typecheck`, not by the tsx test run — tsx strips types without checking.)
 const _shape: PopulationMembership = { ipp: true, denom: true, denex: false, numer: false, denexcep: false };
 void _shape;

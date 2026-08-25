@@ -100,7 +100,18 @@ inert on every existing surface — **2,018 tests, 0 fail, no snapshot moved** �
 the interactions it computes and the authored status rule cannot produce co-true flags; the defect was
 reachable only through evidence a different writer would produce, which is why nothing external ever
 caught it. In-test oracle computes the IG formulas independently over a mixed cohort and cross-checks
-`countPopulations` → `measureScore` against them.
+`countPopulations` → `measureScore` against them. **The independent review then caught the fix
+diverging from its own ruler** on the one triple the cohort omitted: the first cut folded the
+exception against the NUMEX-adjusted numerator, where the IG's DM formula negates it on the RAW
+criteria result — so a DENEXCEP∧NUMER∧NUMEX subject was dropped from the effective denominator
+instead of staying a scored failure. Fixed RED-first; the hand-picked cohort is now backed by an
+**exhaustive 64-combination sweep** against the in-test oracle (subset-violating vectors included),
+so "exact for all flag combinations" is measured rather than claimed. Two more review catches folded
+in: `COMPLIANCE_API.md`'s `populationsSource: official-evidence` row said "persisted verbatim" about
+booleans that are now the IG derivation of the persisted vector (reworded — the persisted evidence IS
+verbatim; the served block is derived); and a results array recognizing ONLY `numerator-exclusion`
+had silently become a valid all-false vector where it used to alert as unreadable — NUMEX is a
+modifier, not a membership population, so it no longer counts toward `recognized`.
 
 ## 2026-08-24 — a three-sided alignment audit: original intent, stakeholder guidance, and where HL7/CMS are actually going
 
