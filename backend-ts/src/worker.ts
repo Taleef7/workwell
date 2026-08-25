@@ -32,6 +32,7 @@ import { handleIdentity } from "./routes/identity.ts";
 import { handleCompliance } from "./routes/compliance.ts";
 import { handleComplianceApi } from "./routes/compliance-api.ts";
 import { handleCdsHooks } from "./routes/cds-hooks.ts";
+import { handleCqlEvaluation } from "./routes/cql-evaluation.ts";
 import { handleOpenApi } from "./routes/openapi.ts";
 import { handleSegments } from "./routes/segments.ts";
 import { handleOutcomes } from "./routes/outcomes.ts";
@@ -304,6 +305,12 @@ async function route(req: Request, env: Env, ctx: CloudExecutionContext): Promis
   // `/cds-services` is outside `/api/`, so it cannot collide with anything above.
   const cdsResponse = await handleCdsHooks(req, env, actor);
   if (cdsResponse) return cdsResponse;
+
+  // The `$cql` Evaluation Service (#474) — the CQL IG operation `cql-tests-runner` drives for engine
+  // parity testing. Data-free evaluation only; also outside `/api/`, with its own authorize rule
+  // (same hazard and same remedy as CDS Hooks above).
+  const cqlResponse = await handleCqlEvaluation(req);
+  if (cqlResponse) return cqlResponse;
 
   // Compliance roster — individual compliance status grid by panel (#189 E10.2).
   const complianceResponse = await handleCompliance(req, env);

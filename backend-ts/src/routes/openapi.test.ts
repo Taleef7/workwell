@@ -287,6 +287,19 @@ test("every documented status is produced by a real request through the real wor
   assert.equal((await probe(`${INVOKE}/feedback`, { template: FEEDBACK_TEMPLATE, method: "POST", body: fb })).status, 401);
   assert.equal((await probe(`${INVOKE}/feedback`, { template: FEEDBACK_TEMPLATE, method: "POST", token: author, body: fb })).status, 403);
   assert.equal((await probe("/cds-services/nope/feedback", { template: FEEDBACK_TEMPLATE, method: "POST", token: cm, body: fb })).status, 404);
+
+  // --- $cql evaluation service (#474) ---
+  const cqlBody = { resourceType: "Parameters", parameter: [{ name: "expression", valueString: "1 + 2" }] };
+  assert.equal((await probe("/$cql", { template: "/$cql", method: "POST", token: cm, body: cqlBody })).status, 200);
+  assert.equal(
+    (await probe("/$cql", { template: "/$cql", method: "POST", token: cm, body: { resourceType: "Parameters" } })).status,
+    400,
+    "no expression parameter refuses",
+  );
+  assert.equal((await probe("/$cql", { template: "/$cql", method: "POST", body: cqlBody })).status, 401);
+  assert.equal((await probe("/$cql", { template: "/$cql", method: "POST", token: author, body: cqlBody })).status, 403);
+  const hugeCql = { resourceType: "Parameters", parameter: [{ name: "expression", valueString: `'${"x".repeat(65 * 1024)}'` }] };
+  assert.equal((await probe("/$cql", { template: "/$cql", method: "POST", token: cm, body: hugeCql })).status, 413);
 });
 
 test("coverage is two-way: nothing documented is unexercised, nothing observed is undocumented", () => {
