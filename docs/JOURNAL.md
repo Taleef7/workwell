@@ -47,6 +47,21 @@ showed the declared length was the FIRST body's. Fixed with per-response fresh h
 route's docblock. In-process route tests can never see this class — the Response never traverses the
 host's serialization layer — which is the argument for the live acceptance leg being part of done.
 
+**Merged as #481 after two review rounds, every finding RED-tested before its fix.** The independent
+pass: the statement-injection analysis written out (no escalation possible — declarations are grammar
+errors, retrieves resolve no model, the engine is data-free) and then made moot by a def-count guard
+that refuses injected statements anyway; plain-object-prototype tuple detection (a `Tuple { lowClosed:
+… }` no longer serializes as a corrupted Range); INT32_MIN off-by-one; and the comparison-honesty fix
+above. Codex round 1: a 64 KiB expression bound before the synchronous translator (413, the
+`/api/measures/compile` precedent) and open TEMPORAL boundaries closed-normalized via the values' own
+`successor()`/`predecessor()`. Codex round 2: the same normalization for QUANTITY intervals (no
+stepping methods — the Decimal step applies to the value), and the size bound corrected to count
+**encoded bytes** rather than UTF-16 code units — verifying that claim found the identical defect at
+three sites in `measures.ts`, filed as #483 rather than folded in. Deferred with a pinned example:
+interval point type should come from the compiled ELM, not a whole-number heuristic (#482). Final:
+CI's full suite (SQLite floor + Postgres ceiling) **2,085 tests, 0 fail**; every job green; squash
+`2bbb6dae`.
+
 ## 2026-08-24 — a three-sided alignment audit: original intent, stakeholder guidance, and where HL7/CMS are actually going
 
 Run so the next planning round starts from a verified picture instead of memory; the full audit lives
