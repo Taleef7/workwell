@@ -180,11 +180,15 @@ export class PgOutcomeStore implements OutcomeStore {
       evaluated_at: Date | string;
       evidence_json: unknown;
     }>(
-      `SELECT DISTINCT ON (o.measure_id)
-              o.run_id, o.measure_id, o.status, o.evaluation_period, o.evaluated_at, o.evidence_json
-         FROM ${T} o JOIN ${SPIKE_SCHEMA}.runs r ON r.id = o.run_id
-        WHERE o.subject_id = $1 AND UPPER(r.status) IN ('COMPLETED', 'PARTIAL_FAILURE')
-        ORDER BY o.measure_id, o.evaluated_at DESC, o.id DESC`,
+      // Winner IDS first over narrow columns, wide row joined back — the history-sized DISTINCT ON
+      // sort never carries `evidence_json`; only the O(measures) survivors are fetched wide (#486
+      // review, same shape as the SQLite floor).
+      `SELECT o.run_id, o.measure_id, o.status, o.evaluation_period, o.evaluated_at, o.evidence_json
+         FROM ${T} o
+         JOIN (SELECT DISTINCT ON (o2.measure_id) o2.id
+                 FROM ${T} o2 JOIN ${SPIKE_SCHEMA}.runs r ON r.id = o2.run_id
+                WHERE o2.subject_id = $1 AND UPPER(r.status) IN ('COMPLETED', 'PARTIAL_FAILURE')
+                ORDER BY o2.measure_id, o2.evaluated_at DESC, o2.id DESC) pick ON pick.id = o.id`,
       [subjectId],
     );
     return rows.map((r) => ({
