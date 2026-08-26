@@ -93,6 +93,31 @@ test("a single-quoted attribute is read, not silently dropped", () => {
   assert.equal(c!.invalid, "true");
 });
 
+test("a commented-out test is NOT parsed as live — upstream disabled it (runner-diff finding)", () => {
+  // The corpus disables tests by wrapping them in XML comments (12 such in CqlTypesTest +
+  // CqlDateTimeOperatorsTest at the current pin). cql-tests-runner's parser respects comments;
+  // a regex reader that matches through `<!-- -->` grades cases upstream deliberately turned off,
+  // which is how ADR-060's "1,835 cases" silently included 12 dead ones (true count 1,823).
+  const xml = `<tests name="T"><group name="G">
+    <test name="Live"><expression>1</expression><output>1</output></test>
+    <!-- REPLACED: <test name="Dead"><expression>2</expression><output>2</output></test> -->
+    <!-- <test name="AlsoDead">
+      <expression>3</expression>
+      <output>3</output>
+    </test> -->
+  </group></tests>`;
+  const cases = parseTestFile("t.xml", xml);
+  assert.deepEqual(cases.map((c) => c.name), ["Live"], "commented-out tests must not be graded");
+});
+
+test("a commented-out GROUP disappears whole, and comments cannot resurrect via nesting", () => {
+  const xml = `<tests name="T"><group name="G">
+    <test name="Live"><expression>1</expression><output>1</output></test>
+  </group><!-- <group name="Dead"><test name="X"><expression>9</expression><output>9</output></test></group> --></tests>`;
+  const cases = parseTestFile("t.xml", xml);
+  assert.deepEqual(cases.map((c) => c.name), ["Live"]);
+});
+
 test("the reader REFUSES rather than returning fewer cases", () => {
   // Each of these would otherwise shrink the denominator silently, inflating the pass rate.
   assert.throws(() => parseTestFile("x.xml", "<notatestfile/>"), ParseError);

@@ -82,6 +82,26 @@ itself (`WORKWELL_WEBCHART_BASE_URL=http://127.0.0.1:8085`, not `…/8085/fhir` 
 404'd on `/fhir/fhir/…`), and the login response's token key is `token`, not `accessToken`. Demo
 artifacts are local scratch; the Docker containers stay up for instant re-demo.
 
+**The runner-vs-ADR-060 case diff is DONE — and its biggest finding was a defect in OUR harness.**
+(`docs/evidence/CQL_RUNNER_HARNESS_DIFF_2026-08-26.md`.) The "unexplained 12-case delta" resolved as:
+the harness's regex XML reader parsed **through comments**, grading 12 tests upstream had deliberately
+disabled (plus a pure file-rename artifact, `CqlQueryTest` vs `CqlQueryTests`). ADR-060's "1,835
+cases, nothing skipped" therefore included 12 dead tests — true corpus 1,823, corrected headline
+**1,612 pass** (−10) and 29 invalid-accepted (−2), no live case moved. Fixed RED-first (commented-out
+test and commented-out group fixtures), `EXPECTED_CASES` moved with the reason in its docblock — the
+refuse-to-report guard fired on the fix, which is that guard working — baseline regenerated, `--check`
+green. The diff's other verdict is the one worth quoting: the 41 cases the runner fails where the
+harness passes contain **zero engine-wrongness** — 38 are DateTime timezone-rendering (CQL partial
+DateTimes vs FHIR's required offset, a spec tension worth raising on the track), 1 is
+Date-rendered-as-DateTime (#482 family), 2 are real Long serialization defects (filed #488: precision
+loss through JS `Number` and the lost `L` identity). Six cases grade BETTER over HTTP than in-process
+— three because the runner tolerates decimal-precision trailing digits the harness strictly flags, two
+because the serializer's closed-normalization is more spec-correct than the harness's weaker JS
+comparison path, one a harness display defect. With every off-diagonal cell explained, the two
+headline numbers (1,589/1,823 over HTTP, 1,612/1,823 in-process) are now safe to cite together —
+the prerequisite `CQL_EVALUATION_SERVICE_2026-08-25.md` named before external submission.
+`STANDARDS_CONFORMANCE.md` corrected in the same change.
+
 ## 2026-08-25 — the `$cql` Evaluation Service exists, and HL7's own runner has graded it (#474)
 
 **The entry ticket to the Connectathon 43 CQL Engine Parity scenario is built and measured.**

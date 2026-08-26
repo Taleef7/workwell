@@ -109,6 +109,13 @@ function child(xml: string, name: string): { text: string; attributes: Record<st
 export function parseTestFile(fileName: string, xml: string): CqlTestCase[] {
   if (!/<tests\b/.test(xml)) throw new ParseError(`${fileName}: no <tests> root — is this a test file?`);
 
+  // Strip XML comments BEFORE any matching: the corpus disables tests by commenting them out
+  // (12 such at the current pin), and a regex reader that matches through `<!-- -->` grades cases
+  // upstream deliberately turned off. This is how ADR-060's "1,835 cases" silently included 12 dead
+  // ones — found by the runner-vs-harness diff (2026-08-26), where cql-tests-runner's real XML
+  // parser produced 1,823. Non-greedy so a comment cannot swallow the live tests between two of them.
+  xml = xml.replace(/<!--[\s\S]*?-->/g, "");
+
   // File-level capabilities are the ones before the first <group>; anything after belongs to a group.
   const firstGroup = xml.search(/<group\b/);
   const fileCaps = capabilitiesIn(firstGroup < 0 ? xml : xml.slice(0, firstGroup));
