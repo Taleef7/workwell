@@ -1,5 +1,29 @@
 # Journal
 
+## 2026-08-26 — #484 merged after a Codex round resolved by measurement; chapter 10 becomes the two integration flows
+
+**PR #484 (the CQM membership formulas, ADR-069) is merged — squash `84d4bc6b`, #476 closed, all 17
+checks green.** Codex's one finding was a P2 worth taking seriously: serving the IG membership
+derivation under `populationsSource: official-evidence` could change what a v1 integration receives,
+and the v1 stability statement says the field's meaning must not change. **Resolved by verification,
+not by splitting the derivation:** both routed measures declare only
+`initial-population / denominator / denominator-exclusion / numerator` (checked in the vendored
+bundles — no DENEXCEP or NUMEX population exists in anything any deployment routes), and
+`fqm-execution` zeroes NUMER under DENEX itself (ADR-055), so for every evidence row any deployed
+writer has persisted the derivation is the identity function — no v1 response changes by a byte. The
+meaning of the field (*measured* vs *inferred*) is unchanged, and the prior "persisted verbatim"
+wording was already inaccurate (subset clamping predates ADR-069). Keeping raw flags on v1 while the
+exporters fold would have reintroduced the two-membership-notions drift the PR closes. All of this
+now stands in `COMPLIANCE_API.md` under `populationsSource`, where an integrator will look.
+
+**The same PR carries the chapter-10 rewrite:** `docs/guide/10-scenarios.md` now holds the two flows
+an integration conversation needs — the scheduled population batch (built; the former S1+S2 merged at
+stakeholder granularity) and S7 in-encounter (target state; heading and anchor unchanged so
+`CDS_HOOKS.md` links resolve). The five internal operator flows moved to git history with a note; the
+batch scenario names the open question — whether results should also render inside WebChart's UI —
+as a question for the WebChart side rather than a decision. Prepared for the Maui conversation
+(meeting postponed; the material keeps).
+
 ## 2026-08-25 — the `$cql` Evaluation Service exists, and HL7's own runner has graded it (#474)
 
 **The entry ticket to the Connectathon 43 CQL Engine Parity scenario is built and measured.**
