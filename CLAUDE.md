@@ -17,7 +17,7 @@
 - Infra: MIE Create-a-Container + Neon for deploy (Fly.io + Vercel public-preview stack decommissioned — MIE TWH is the sole live stack); GitHub Actions CI + a self-heal reconciler; pnpm
 
 ## Build & verify
-- Backend: `cd backend-ts; pnpm install --frozen-lockfile; pnpm typecheck; pnpm test` — ~1,976 tests as of 2026-08-24 (SQLite floor; the Pg-ceiling store contract runs against a local `postgres:16`, else self-skips). Gated in `ci.yml`.
+- Backend: `cd backend-ts; pnpm install --frozen-lockfile; pnpm typecheck; pnpm test` — ~2,021 tests as of 2026-08-26 (SQLite floor; the Pg-ceiling store contract runs against a local `postgres:16`, else self-skips). Gated in `ci.yml`.
 - Frontend: `cd frontend; npm run lint; npm run build`
 - Run the app: backend `cd backend-ts; pnpm dev`; frontend `npm run dev`
 
@@ -95,10 +95,11 @@ cost ~89k tokens per session until 2026-07-29, whether or not any of it was rele
   describes changes. Chapter 9 owns the volatile numbers, dated
 - `docs/JOURNAL.md` — the running narrative; source of truth for recent work (~832k chars — never import)
 - `docs/DECISIONS.md` — the ADR bodies that still GOVERN: decisions constraining what may be done next,
-  plus design records for built features (38 of 58; titles already in context via ADR_INDEX). Split on
-  2026-08-05 — the other 20 are superseded or were findings written in ADR form, and their bodies moved to
-  `docs/archive/DECISIONS_ARCHIVE.md`. Every heading + a one-line pointer stays in `DECISIONS.md`, so an
-  `ADR-0NN` reference anywhere still resolves and nothing was deleted.
+  plus design records for built features (54 of 68 as of 2026-08-26; titles already in context via
+  ADR_INDEX). Split on 2026-08-05 — 20 bodies moved to `docs/archive/DECISIONS_ARCHIVE.md` as superseded
+  or findings-in-ADR-form, 6 of which review #396 brought back as load-bearing design records, so 14
+  remain archived. Every heading + a one-line pointer stays in `DECISIONS.md`, so an `ADR-0NN` reference
+  anywhere still resolves and nothing was deleted.
 - `docs/ROADMAP_2026-08-04.md` — **the APPROVED active plan** (owner decisions are in context via LOCKED_DECISIONS §4). Supersedes `docs/archive/ROADMAP_2026-07-24.md`, which is kept only for its §7 target architecture and the reasoning that got us here — **do not act on it**
 - `docs/PROPOSALS_2026-08.md` — three feature proposals awaiting owner/MIE review (encounter-close quality check, "not seen in a while" view, deterministic next-due date). **None is approved or scheduled** — read it to know an idea has been written down, never as a work queue
 - `docs/DEPLOY.md` — MIE Create-a-Container + Neon setup, env vars, rollback → prefer the `deploy` skill

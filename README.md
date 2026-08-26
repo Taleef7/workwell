@@ -6,11 +6,13 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)](backend-ts/package.json)
 [![Next.js 16](https://img.shields.io/badge/Next.js-16-000000?logo=nextdotjs&logoColor=white)](frontend/package.json)
 [![FHIR R4](https://img.shields.io/badge/FHIR-R4%20%2F%20QI--Core-red)](docs/STANDARDS_CONFORMANCE.md)
-[![Tests](https://img.shields.io/badge/backend%20tests-1976-success)](backend-ts)
+[![Tests](https://img.shields.io/badge/backend%20tests-2021-success)](backend-ts)
 
 **A clinical quality measure engine that runs CMS's *own published* eCQM artifacts — not a reimplementation of them.**
 
 WorkWell Measure Studio is an occupational-health compliance platform for **Total Worker Health**: it authors quality measures, evaluates them against FHIR patient data with a CQL engine, opens and tracks the resulting cases, and exports the evidence auditors ask for. It is built to plug into a real EHR — and does, against a live [WebChart](https://www.mieweb.com/webchart/) tenant.
+
+**Where it sits.** WorkWell is **supplementary to WebChart** — the EHR carries ONC certification, and WorkWell deliberately does not pursue it. In the JS quality-measure ecosystem it **composes** [`fqm-execution`](https://github.com/projecttacoma/fqm-execution) and [`cql-execution`](https://github.com/cqframework/cql-execution) rather than competing with them: official eCQMs run through `fqm-execution` in production, the authored engine runs on `cql-execution`, and the packaging ([`@work-well/measure-engine`](https://www.npmjs.com/package/@work-well/measure-engine), [`docs/PACKAGES.md`](docs/PACKAGES.md)) exists so a consumer can take the engine without the occupational-health catalog.
 
 > **The interesting engineering problem.** A quality measure like *"CMS125: Breast Cancer Screening"* has an official, published definition. Most systems reimplement it and hope the reimplementation agrees. This one runs the published artifact **verbatim** — the same ELM CMS ships to MADiE — and keeps a second, independently-authored implementation alongside it as a correctness oracle. Where the two disagree, the disagreement is measured, written down, and turned into a test before anything ships.
 
@@ -18,9 +20,9 @@ WorkWell Measure Studio is an occupational-health compliance platform for **Tota
 
 ## Contents
 
-- [What it does](#what-it-does) · [Architecture](#architecture) · [How a measure is evaluated](#how-a-measure-is-evaluated)
-- [Standards](#standards-and-conformance) · [Engineering practices](#engineering-practices) · [Quick start](#quick-start)
-- [Repository layout](#repository-layout) · [API](#api-highlights) · [Docs](#documentation-map)
+- [What it does](#what-it-does) · [A tour of the product](#a-tour-of-the-product) · [Architecture](#architecture) · [How a measure is evaluated](#how-a-measure-is-evaluated)
+- [What runs where](#what-runs-where) · [Standards](#standards-and-conformance) · [Engineering practices](#engineering-practices) · [Quick start](#quick-start)
+- [Repository layout](#repository-layout) · [Integration surface](#the-integration-surface) · [Docs](#documentation-map)
 
 ---
 
@@ -35,6 +37,18 @@ WorkWell Measure Studio is an occupational-health compliance platform for **Tota
 | **Integrate** | FHIR R4 ingest from a live WebChart tenant over SMART Backend Services, a SQL-backed FHIR shim, a read-only MCP server (13 role-gated tools), and a MAT-compatible measure export. |
 
 **Guardrail, enforced structurally:** AI never decides compliance. It drafts CQL and test fixtures; the CQL engine is the sole authority on outcome status. See [`docs/AI_GUARDRAILS.md`](docs/AI_GUARDRAILS.md).
+
+---
+
+## A tour of the product
+
+| | |
+|---|---|
+| ![Programs overview — per-measure compliance, trends, and reasons](docs/assets/01-programs.png) **Programs** — every measure's compliance at a glance: status buckets, trend since last run, top sites and roles, and the reasons cases are open. | ![Compliance roster — every employee × measure](docs/assets/02-compliance.png) **Compliance** — the roster grid: every employee × every measure, each cell clickable through to the evidence that produced it. |
+| ![Measure catalog with lifecycle states](docs/assets/03-measures.png) **Measures** — the catalog with lifecycle states (`Draft → Approved → Active`); each measure opens into the Studio for CQL authoring with live compilation. | ![Run history and outcome distributions](docs/assets/04-runs.png) **Runs** — every evaluation run with its scope, trigger, duration, and outcome distribution; large scopes run in the background. |
+| ![Case worklist — filter, bulk-act, export](docs/assets/05-cases.png) **Cases** — the daily worklist of flagged employees; filter, assign, bulk-act, export, with structured evidence and waiver context on every card. | ![Bulk outreach campaigns](docs/assets/06-campaigns.png) **Campaigns** — bulk outreach over a filtered case set, preview-then-confirm, with delivery status recorded per recipient. |
+| ![Integration and scheduler admin](docs/assets/07-admin.png) **Admin** — integration settings, the nightly scheduler, and the email provider; every setting is an audited write. (The runtime brand switcher lives in the dashboard header as a per-browser preference, not here.) | ![Cross-system identity review](docs/assets/08-people.png) **People** — cross-system identity: potential duplicates are surfaced for human review, never auto-merged. |
+| ![Enterprise → location → provider → patient drill-down](docs/assets/09-hierarchy.png) **Hierarchy** — the enterprise → location → provider → patient drill-down a multi-site quality manager works from. | |
 
 ---
 
@@ -136,6 +150,27 @@ Every state change writes an `audit_event` — no exceptions. Case upsert is key
 
 ---
 
+## What runs where
+
+Per priority measure, three different claims — **gated** (its official MADiE test cases are a permanent CI gate), **routable** (the router's construction-time checks pass), and **routed** (a deployed environment actually runs the official artifact). Each is strictly stronger than the last, and the differences are the point:
+
+| Measure | MADiE gate | Routable | Routed in production |
+|---|---|---|---|
+| CMS122 (Diabetes: HbA1c > 9%) | 55/55 | ✓ | **✓ demo/production** (2026-07-30) |
+| CMS125 (Breast Cancer Screening) | 66/66 | ✓ | **✓ demo/production** (2026-07-30) |
+| CMS2 (Depression Screening) | 36/36 | ✓ | — |
+| CMS68 (Documentation of Medications) | 19/19 | **✗ episode-of-care** | — |
+| CMS130 (Colorectal Cancer Screening) | 64/64 | ✓ | — |
+| CMS138 (Tobacco Screening & Cessation) | 47/47 * | ✓ | — |
+| CMS165 (Controlling High Blood Pressure) | 68/68 | ✓ | — |
+| CMS951 (Kidney Health Evaluation) | 55/55 | ✓ | — |
+
+CMS68 is refused at **construction time**, not by convention: it declares `populationBasis: Encounter`, and the executor maps one population vector per subject, which cannot represent episodes ([ADR-047](docs/DECISIONS.md)). \* CMS138's green is a weaker claim than the other seven — upstream ships its bundle one value set short, so four codes are sourced from VSAC by us rather than shipped by CMS ([ADR-053](docs/DECISIONS.md)). Unrouted measures still evaluate their authored implementations everywhere.
+
+**Alerting today is WorkWell-screens-only.** The CDS Hooks service is live and standards-conformant, but no client — WebChart included — invokes it yet; cards render the most recent finalized run when asked ([`docs/CDS_HOOKS.md`](docs/CDS_HOOKS.md), [guide ch. 10](docs/guide/10-scenarios.md)).
+
+---
+
 ## Standards and conformance
 
 This project is deliberately careful about what it claims. [`docs/STANDARDS_CONFORMANCE.md`](docs/STANDARDS_CONFORMANCE.md) states, per surface, what is *executed and verified* versus what is *structurally aligned*.
@@ -158,13 +193,13 @@ This project is deliberately careful about what it claims. [`docs/STANDARDS_CONF
 
 The parts of this repo worth reading if you care about how it is built:
 
-- **67 Architecture Decision Records** ([`docs/DECISIONS.md`](docs/DECISIONS.md)) — every non-obvious decision, with the alternatives and the consequences. Several record a decision being *reversed* by measurement or review, with the original reasoning kept rather than deleted.
+- **68 Architecture Decision Records** ([`docs/DECISIONS.md`](docs/DECISIONS.md)) — every non-obvious decision, with the alternatives and the consequences. Several record a decision being *reversed* by measurement or review, with the original reasoning kept rather than deleted.
 - **Measure-first, then decide.** Repeatedly, a planned refusal or guard was killed because measuring showed it would fire on correct inputs. Those reversals are documented as such — the reasoning that was wrong is the useful part.
 - **Guards are mutation-tested.** A check that cannot fail is worse than no check, because it reads as covered. New safety conditions are verified by breaking them and confirming exactly the intended test fails.
 - **Vacuous-guard hunting.** Tests that self-skip when a fixture is missing are treated as a defect class in their own right — a suite that reads green because it never ran is worse than a red one. The sidecar-dependent gates are named explicitly in a CI step so they cannot silently drop out, and the flip checklist tells the operator to read the `skipped` count, not just `fail`.
 - **Ports and adapters throughout** — measure executor, data source, value-set resolver, outreach channel, immunization forecaster, evidence bucket, store layer. Each defaults to an inert simulated implementation and is *inert unless configured*.
 - **Reversibility as a design constraint.** Every seam is switchable by env var, and every switch is byte-identical to the previous behaviour when unset.
-- **1976 backend tests** on the SQLite floor with no external services (1961 pass, 15 self-skip without a local Postgres or the gitignored terminology sidecar — measured 2026-08-24); a Postgres contract suite that runs against a local `postgres:16` when present; and Playwright E2E.
+- **2021 backend tests** on the SQLite floor with no external services (2006 pass, 15 self-skip without a local Postgres or the gitignored terminology sidecar — measured 2026-08-26); a Postgres contract suite that runs against a local `postgres:16` when present; and Playwright E2E.
 
 ---
 
@@ -227,7 +262,19 @@ e2e/                 Playwright end-to-end tests
 
 `/compliance` roster grid · `/programs` overview · `/programs/[id]` trend + risk outlook · `/programs/hierarchy` enterprise→location→provider→patient drill-down · `/runs` history · `/cases` worklist · `/campaigns` bulk outreach · `/measures` catalog · `/studio/[id]` authoring · `/people` cross-system identity · `/admin` integration + scheduler
 
-## API highlights
+## The integration surface
+
+What another system builds against — each contract versioned, documented, and refusing dishonest answers rather than guessing:
+
+| Contract | What it is |
+|---|---|
+| [`GET /api/v1/compliance/{subject}/{measure}`](docs/COMPLIANCE_API.md) | One subject, one measure, one stable answer — status, population membership, and `populationsSource` saying where the booleans came from. **404 when no run has covered the subject**, never an empty 200 ([ADR-061](docs/DECISIONS.md)). |
+| [CDS Hooks 2.0.1](docs/CDS_HOOKS.md) — `GET /cds-services`, invoke, feedback | Care-gap **cards** into a clinician's workflow: summary, plain-English reason, provenance, and a draft-order `suggestion` the clinician accepts — never `systemActions`, never `critical` ([ADR-067](docs/DECISIONS.md)). |
+| `GET /api/v1/openapi.json` · public `/api-docs` | Hand-authored OpenAPI 3.1.1 over the **promised** surface only, guarded by a two-way routed-path test ([ADR-068](docs/DECISIONS.md)). |
+| [MCP server](docs/MCP.md) | 13 read-only, role-gated tools (`/sse` stream + `/mcp/**` message endpoint) — an AI client reads compliance state; nothing mutates. |
+| [`@work-well/measure-engine`](https://www.npmjs.com/package/@work-well/measure-engine) · [`@work-well/measure-codegen`](https://www.npmjs.com/package/@work-well/measure-codegen) | The content-free eval core and codegen on the public registry, with SLSA provenance ([`docs/PACKAGES.md`](docs/PACKAGES.md)). |
+
+### Internal API highlights
 
 ```http
 POST /api/runs/manual                                  # scoped evaluation run
@@ -235,6 +282,7 @@ GET  /api/runs/{id}/measure-report?type=summary        # FHIR MeasureReport
 GET  /api/runs/{id}/qrda?format=xml                    # QRDA-III
 GET  /api/runs/{id}/qrda1                              # QRDA-I export (per-subject patient data)
 POST /api/runs/{id}/evaluate                           # evaluate one subject; body {measureId, qrda1} = QRDA-I import
+POST /$cql                                             # CQL IG Evaluation Service — data-free expression evaluation
 GET  /api/measures/{id}/fidelity                       # authored vs official spec diff
 GET  /api/measures/{id}/fidelity/diff                  # executed outcome diff
 GET  /api/auditor/cases/{id}/packet?format=json|html   # auditor evidence packet
@@ -251,7 +299,7 @@ Full surface in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 Running CMS's official published artifacts in place of the authored implementations, one measure at a time, behind `WORKWELL_OFFICIAL_MEASURES`. **CMS122 and CMS125 are routed and live in production** (2026-07-30) — both evaluate CMS's published QI-Core artifacts verbatim. CMS122 shipped a PR later than CMS125: its official numerator counts *poor* glycemic control, so the MeasureReport canonical, `improvementNotation` and population membership all had to switch together first (ADR-046), and a self-contradictory report is worse than a delayed one. Six more measures — CMS2, CMS68, CMS130, CMS138, CMS165, and CMS951 — are vendored and MADiE-gated but not routed. CMS2, CMS130, CMS138, CMS165, and CMS951 are routable but not yet routed; CMS68 is additionally not routable yet — it is an episode-of-care measure (population basis = Encounter), and the official executor's one-population-vector-per-subject mapping does not support episodes (ADR-047).
 
-The current verification bar is the FHIR-column set in [`docs/ROADMAP_2026-08-04.md`](docs/ROADMAP_2026-08-04.md) §4; the ADR run 036–058 is in [`docs/DECISIONS.md`](docs/DECISIONS.md) and the running narrative in [`docs/JOURNAL.md`](docs/JOURNAL.md) (newest first).
+The current verification bar is the FHIR-column set in [`docs/ROADMAP_2026-08-04.md`](docs/ROADMAP_2026-08-04.md) §4; the ADR run 036–069 is in [`docs/DECISIONS.md`](docs/DECISIONS.md) and the running narrative in [`docs/JOURNAL.md`](docs/JOURNAL.md) (newest first).
 
 **Cypress CVU+ has now run (2026-08-02).** 22 submissions of 12 generated documents to a local Cypress v7.5.1: **both QRDA Category I and Category III validate with 0 findings against the HL7 base IG** — CDA schema and Schematron alike — for CMS122 and CMS125 across the five-target synthetic corpus. It took 240 findings to get there, and two are worth stating plainly because they are the kind a matrix hides. Our own Schematron checker had **no XSD layer**, so its "0 base-HL7 errors" was true and *narrower than it read*, with 76 findings in the gap. And Category III had every required population element attached to the **wrong template** — `…27.3.3` is Aggregate Count and sat on the outer observation — so the validator reported those elements missing while the ones that satisfied the rules were validated as nothing at all.
 
@@ -265,7 +313,7 @@ The current verification bar is the FHIR-column set in [`docs/ROADMAP_2026-08-04
 |---|---|
 | **[The guide](docs/guide/README.md)** | **start here — the whole system explained, chapter by chapter, with a diagram per flow** |
 | [Architecture](docs/ARCHITECTURE.md) | system boundaries, module map |
-| [Decisions](docs/DECISIONS.md) | 67 ADRs, newest first |
+| [Decisions](docs/DECISIONS.md) | 68 ADRs, newest first |
 | [Data Model](docs/DATA_MODEL.md) | tables, idempotency + evidence contracts |
 | [Measures](docs/MEASURES.md) | the TWH measure catalog in plain English |
 | [Standards Conformance](docs/STANDARDS_CONFORMANCE.md) | what we may and may not claim |
