@@ -375,14 +375,14 @@ jobs:
     name: CQL language conformance — cqframework/cql-tests
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    # V7 (#296 / ADR-060). Runs the 1,835-case CQL language suite through OUR translator
+    # V7 (#296 / ADR-060). Runs the 1,823-case CQL language suite through OUR translator
     # (@cqframework/cql 4.0.0-beta.1) and OUR engine (cql-execution), and fails on a REGRESSION against
     # the committed baseline — never on a bare threshold, because a translator upgrade can trade 30
     # passes for 30 different ones and leave every total identical.
     #
     # A separate job, not part of `pnpm test`, for the reason the official-cases job records: it clones
     # upstream content at a pinned commit, and a developer with no network must still get a green local
-    # suite. The harness REFUSES to report at all unless it parsed the full corpus (16 files, 1,835
+    # suite. The harness REFUSES to report at all unless it parsed the full corpus (16 files, 1,823
     # cases) — a conformance harness that silently grades a subset publishes a flattering number, which
     # is the specific way this job could be worse than useless.
     defaults:

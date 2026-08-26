@@ -24,7 +24,7 @@
 #                      conformance figures in docs/guide/09-state-and-roadmap.md.
 #   cql-execution      together these two ARE the dependency manifest of the published
 #   cql-exec-fhir      @work-well/measure-engine. Changing either is a semver event for a
-#                      package other people install, and the 1,622-of-1,835 conformance
+#                      package other people install, and the 1,612-of-1,823 conformance
 #                      result was measured against cql-execution 3.3.2 specifically.
 #   fqm-execution      runs CMS's published artifacts. The 410/410 MADiE gate was measured
 #                      against 1.8.5, which is why it is pinned exact rather than caret.

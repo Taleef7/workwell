@@ -208,7 +208,11 @@ entrypoints (ADR-048's second debt) is untouched — those files stayed app-side
 **Done 2026-08-05 (M-C / V7 — ADR-060, #296 closed).** The **CQL language conformance suite runs**:
 `cqframework/cql-tests`, 1,835 cases / 16 files, through our translator (`@cqframework/cql` 4.0.0-beta.1)
 and our engine (`cql-execution` 3.3.2) — **1,622 pass · 155 fail · 12 translation-error · 4 runtime-error ·
-11 invalid-refused · 31 invalid-accepted · 0 skipped** (1,633 on the upstream rule), in 11 seconds. **Why this suite:** `cql-execution` 3.3.x has *published*
+11 invalid-refused · 31 invalid-accepted · 0 skipped** (1,633 on the upstream rule), in 11 seconds.
+*(CORRECTED 2026-08-26 — the harness was the defect a THIRD time: its regex XML reader parsed through
+comments, grading 12 tests upstream had disabled. True corpus **1,823**, pass **1,612**,
+invalid-accepted **29** (29 of 40 live invalid cases accepted, not 31 of 42);
+`docs/evidence/CQL_RUNNER_HARNESS_DIFF_2026-08-26.md`.)* **Why this suite:** `cql-execution` 3.3.x has *published*
 results (1,533/81/113/4) but **that run used the JAVA translator**; the JS-translator delta is unpublished
 and this measures it. Our 4 runtime errors are **the same four cases** as theirs. **The lesson worth
 keeping: the harness was the defect, twice, and nearly published.** The first run reported **183**

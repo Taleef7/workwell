@@ -24,11 +24,12 @@
  * ```
  *
  * Facts that corrected issue #296's description:
- *   - **`invalid` is an attribute of `<expression>`, not `<test>`** — 42 cases: 37 `true`, 3 `semantic`,
- *     2 `syntax`. #296 said `<test invalid=…>`, which matches nothing in the corpus.
+ *   - **`invalid` is an attribute of `<expression>`, not `<test>`** — 40 live cases: 35 `true`,
+ *     3 `semantic`, 2 `syntax` (12 more sit inside XML comments — disabled upstream, stripped before
+ *     parsing). #296 said `<test invalid=…>`, which matches nothing in the corpus.
  *   - `<output>` carries **no attributes**; the expected value is always element text.
  *   - `<capability>` appears at all three levels and is how the corpus expects a runner to skip.
- *   - 1,835 `<test>` elements across 16 files, not "~1,731".
+ *   - 1,823 live `<test>` elements across 16 files (12 more are commented out — see parseTestFile), not "~1,731".
  *
  * ## Totality
  *
@@ -108,6 +109,19 @@ function child(xml: string, name: string): { text: string; attributes: Record<st
  */
 export function parseTestFile(fileName: string, xml: string): CqlTestCase[] {
   if (!/<tests\b/.test(xml)) throw new ParseError(`${fileName}: no <tests> root — is this a test file?`);
+
+  // Strip XML comments BEFORE any matching: the corpus disables tests by commenting them out
+  // (12 such at the current pin), and a regex reader that matches through `<!-- -->` grades cases
+  // upstream deliberately turned off. This is how ADR-060's "1,835 cases" silently included 12 dead
+  // ones — found by the runner-vs-harness diff (2026-08-26), where cql-tests-runner's real XML
+  // parser produced 1,823. Non-greedy so a comment cannot swallow the live tests between two of them,
+  // and looped to a FIXED POINT: a single pass over `<!<!-- a -->-- … -->` would remove the inner
+  // comment and COMPOSE a new `<!-- … -->` whose contents then parse as live (CodeQL
+  // js/incomplete-multi-character-sanitization on #489; pinned by a harness test).
+  for (let prev = ""; prev !== xml; ) {
+    prev = xml;
+    xml = xml.replace(/<!--[\s\S]*?-->/g, "");
+  }
 
   // File-level capabilities are the ones before the first <group>; anything after belongs to a group.
   const firstGroup = xml.search(/<group\b/);

@@ -1,14 +1,14 @@
 {
   "pinned": "727219f492c0c84bf7a9c3589b1214e3b4e60667",
-  "total": 1835,
+  "total": 1823,
   "counts": {
-    "pass": 1622,
+    "pass": 1612,
     "fail": 155,
     "translation-error": 12,
     "runtime-error": 4,
     "invalid-refused-at-translation": 6,
     "invalid-refused-at-runtime": 5,
-    "invalid-accepted": 31,
+    "invalid-accepted": 29,
     "skipped": 0
   },
   "perFile": {
@@ -63,7 +63,7 @@
       "skipped": 0
     },
     "CqlDateTimeOperatorsTest.xml": {
-      "pass": 305,
+      "pass": 304,
       "fail": 8,
       "translation-error": 1,
       "runtime-error": 0,
@@ -153,13 +153,13 @@
       "skipped": 0
     },
     "CqlTypesTest.xml": {
-      "pass": 29,
+      "pass": 20,
       "fail": 3,
       "translation-error": 0,
       "runtime-error": 0,
       "invalid-refused-at-translation": 3,
       "invalid-refused-at-runtime": 0,
-      "invalid-accepted": 4,
+      "invalid-accepted": 2,
       "skipped": 0
     },
     "ValueLiteralsAndSelectors.xml": {
@@ -362,8 +362,6 @@
     "CqlTypesTest.xml/DateTime/DateTimeUpperBoundExcept": "invalid-accepted",
     "CqlTypesTest.xml/DateTime/DateTimeLowerBoundExcept": "invalid-accepted",
     "CqlTypesTest.xml/DateTime/DateTimeUncertain": "fail",
-    "CqlTypesTest.xml/Integer/IntegerUpperBoundExcept": "invalid-accepted",
-    "CqlTypesTest.xml/Integer/IntegerLowerBoundExcept": "invalid-accepted",
     "CqlTypesTest.xml/Time/TimeUpperBoundHours": "invalid-refused-at-translation",
     "CqlTypesTest.xml/Time/TimeUpperBoundMinutes": "invalid-refused-at-translation",
     "CqlTypesTest.xml/Time/TimeUpperBoundSeconds": "invalid-refused-at-translation",

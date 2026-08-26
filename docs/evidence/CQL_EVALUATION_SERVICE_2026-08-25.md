@@ -14,7 +14,7 @@ deliberately bearer-gated) → the worker under `MIEWEB_TARGET=local`. Corpus: t
 |---|---|---|---|---|---|
 | **This run (runner-graded, over HTTP, corpus at the 2026-08 sidecar)** | 1,823 | **1,589** | 223 | **11** | 0 |
 | Published reference JS submission (cql-execution 3.3.0, Java translator, run 2026-04-02, `cql-tests-results`) | 1,731 | 1,533 | 81 | **113** | 4 |
-| ADR-060 in-process harness (our own grader, same sidecar corpus) | 1,835 | 1,622 | 155\* | 0 | 4\* |
+| ADR-060 in-process harness (our own grader, same sidecar corpus; **corrected 2026-08-26**) | 1,823 | 1,612 | 155\* | 0 | 4\* |
 
 \* ADR-060 keeps translation errors (12), runtime errors (4) and the invalid-case buckets in separate
 columns by design; the runner folds everything into pass/fail. **No row here is like-for-like with any
@@ -23,9 +23,11 @@ snapshot vs our sidecar), so its raw pass count is not comparable — and on pas
 it is *higher* (88.6% vs 87.2%), which any external use of these numbers must say. The defensible
 headline is the **skip discipline**: this run's 11 skips are the runner's own (library-style tests
 needing `Library/$evaluate`, not yet exposed) against the reference's 113, and our SkipList is empty,
-per the ADR-060 posture that skipping the weak clusters would delete the finding. Also unreconciled:
-the ADR-060 harness parses 1,835 cases from the same sidecar where the runner grades 1,823 — the
-12-case delta is unexplained and belongs to the case-diff below.
+per the ADR-060 posture that skipping the weak clusters would delete the finding. *(This table
+originally showed the harness row as 1,835 / 1,622 with a "12-case delta unexplained" note — the diff
+resolved it as a defect in OUR harness: it parsed through XML comments and graded 12 tests upstream
+had disabled. Corrected figures above; full account in
+[`CQL_RUNNER_HARNESS_DIFF_2026-08-26.md`](CQL_RUNNER_HARNESS_DIFF_2026-08-26.md).)*
 
 **Per-file** (runner grading):
 
@@ -49,14 +51,18 @@ the ADR-060 harness parses 1,835 cases from the same sidecar where the runner gr
 | ValueLiteralsAndSelectors | 47 | 19 | 0 |
 
 **Reading the 223 fails.** The clusters match ADR-060's known translator/engine findings, none in our
-transport or serialization additions so far as inspected: 27 of the 223 are `invalid` cases the stack
-accepts and evaluates (the translator-diagnostics gap ADR-060 recorded), and the heavy files are
+transport or serialization additions so far as inspected: 29 of the 223 are `invalid` cases the stack
+accepts and evaluates *(the full join says 29; a first pass estimated 27)* — the
+translator-diagnostics gap ADR-060 recorded — and the heavy files are
 arithmetic (Long semantics, decimal precision on aggregates), intervals, and lists (`Slice`
 unimplemented upstream — now a published CQL 2.0 function). The logical / nullological / conditional
-files — the constructs our measure CQL is built from — are at 0 fails, as in ADR-060. **Not yet done:**
-a case-by-case diff of runner-graded vs ADR-060-graded outcomes to separate genuine
-serialization-mapping losses from the known engine gaps; that diff is the natural next artifact and
-should happen before any external submission of these numbers.
+files — the constructs our measure CQL is built from — are at 0 fails, as in ADR-060. **The
+case-by-case diff HAS now been produced**
+([`CQL_RUNNER_HARNESS_DIFF_2026-08-26.md`](CQL_RUNNER_HARNESS_DIFF_2026-08-26.md)): the 41
+runner-fails-harness-passes cases contain **zero engine-wrongness** — 38 are DateTime
+timezone-rendering (a CQL-partial-DateTime vs FHIR-required-offset spec tension), 1 is
+Date-rendered-as-DateTime (#482 family), and 2 are real Long serialization defects (#488) — so these
+numbers are safe to cite together, with the timezone cluster named.
 
 **A defect this run caught that no unit test could.** The route initially passed a shared
 module-level headers object into every `Response`; the local host layer writes the computed

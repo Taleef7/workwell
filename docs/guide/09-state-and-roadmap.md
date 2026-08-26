@@ -47,7 +47,7 @@ to diff against, and that comparison is what every flip so far was judged on
 |---|---|---|
 | Test suite | 1,940 total · 1,925 pass · 0 fail · 15 skip (2026-08-08, 279 s) | `cd backend-ts && pnpm test`. The 15 skips need the gitignored terminology sidecar or a local Postgres, and self-skip rather than passing vacuously. |
 | CMS measures vs their own test decks | 410 of 410, 8 measures | `pnpm test:official-cases`, after the two-step setup below |
-| CQL language conformance | 1,622 pass of 1,835 cases (2026-08-05) | `pnpm cql-tests:fetch` then `pnpm cql-tests`, against `cqframework/cql-tests`. Failures cluster in the shared translator and engine, not our measures; five of the sixteen files are perfect, and they are the constructs our measures use. |
+| CQL language conformance | 1,612 pass of 1,823 cases (2026-08-05; corrected 2026-08-26 — the harness had graded 12 commented-out tests, `docs/evidence/CQL_RUNNER_HARNESS_DIFF_2026-08-26.md`) | `pnpm cql-tests:fetch` then `pnpm cql-tests`, against `cqframework/cql-tests`. Failures cluster in the shared translator and engine, not our measures; five of the sixteen files are perfect, and they are the constructs our measures use. |
 | SQL vs the CQL engine | zero divergence — 4 measures × 56 patients × 2 dates (2026-07-20) | the shim parity suite, [chapter 7](07-sql-and-the-bridge.md) |
 | QRDA Category I vs the HL7 ruler | 0 findings, XSD and Schematron (2026-08-02) | Cypress 7.5.1, 22 submissions |
 | QRDA Category III vs the HL7 ruler | 0 findings (2026-08-02) | same |
