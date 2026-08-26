@@ -162,6 +162,40 @@ export class SqliteOutcomeStore implements OutcomeStore {
     }));
   }
 
+  async listLatestFinalizedOutcomePerMeasure(subjectId: string): Promise<EmployeeOutcomeRow[]> {
+    // Winner IDS are picked over narrow columns first, then joined back for the wide row, so the
+    // history-sized scan never materializes `evidence_json` — only the O(measures) survivors do
+    // (#486 review; measured 1.5× vs the naive window over a 20k-row history on the floor).
+    const { results } = await this.db
+      .prepare(
+        `SELECT o.run_id, o.measure_id, o.status, o.evaluation_period, o.evaluated_at, o.evidence_json
+           FROM outcomes o
+           JOIN (SELECT id FROM (
+                   SELECT o2.id, ROW_NUMBER() OVER (PARTITION BY o2.measure_id ORDER BY o2.evaluated_at DESC, o2.id DESC) AS rn
+                     FROM outcomes o2 JOIN runs r ON r.id = o2.run_id
+                    WHERE o2.subject_id = ? AND UPPER(r.status) IN ('COMPLETED', 'PARTIAL_FAILURE')
+                 ) WHERE rn = 1) pick ON pick.id = o.id`,
+      )
+      .bind(subjectId)
+      .all<{ run_id: string; measure_id: string; status: string; evaluation_period: string; evaluated_at: string; evidence_json: string }>();
+    return (results ?? []).map((r) => ({
+      runId: r.run_id,
+      measureId: r.measure_id,
+      status: r.status,
+      evaluationPeriod: r.evaluation_period,
+      evaluatedAt: r.evaluated_at,
+      evidence: JSON.parse(r.evidence_json),
+    }));
+  }
+
+  async hasOutcomes(subjectId: string): Promise<boolean> {
+    const { results } = await this.db
+      .prepare(`SELECT 1 AS one FROM outcomes WHERE subject_id = ? LIMIT 1`)
+      .bind(subjectId)
+      .all<{ one: number }>();
+    return (results ?? []).length > 0;
+  }
+
   async listOutcomesForMeasure(measureId: string, opts?: MeasureScanOptions): Promise<MeasureOutcomeRow[]> {
     // E13 PR-2: excludeScale drops the population-scale tenant's (mhn-prefixed) rows in SQL.
     const alias = opts?.successfulPopulationOnly ? "o." : "";
