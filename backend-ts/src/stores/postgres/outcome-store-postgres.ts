@@ -171,6 +171,40 @@ export class PgOutcomeStore implements OutcomeStore {
     }));
   }
 
+  async listLatestFinalizedOutcomePerMeasure(subjectId: string): Promise<EmployeeOutcomeRow[]> {
+    const { rows } = await this.pool.query<{
+      run_id: string;
+      measure_id: string;
+      status: string;
+      evaluation_period: string;
+      evaluated_at: Date | string;
+      evidence_json: unknown;
+    }>(
+      `SELECT DISTINCT ON (o.measure_id)
+              o.run_id, o.measure_id, o.status, o.evaluation_period, o.evaluated_at, o.evidence_json
+         FROM ${T} o JOIN ${SPIKE_SCHEMA}.runs r ON r.id = o.run_id
+        WHERE o.subject_id = $1 AND UPPER(r.status) IN ('COMPLETED', 'PARTIAL_FAILURE')
+        ORDER BY o.measure_id, o.evaluated_at DESC, o.id DESC`,
+      [subjectId],
+    );
+    return rows.map((r) => ({
+      runId: r.run_id,
+      measureId: r.measure_id,
+      status: r.status,
+      evaluationPeriod: r.evaluation_period,
+      evaluatedAt: r.evaluated_at instanceof Date ? r.evaluated_at.toISOString() : r.evaluated_at,
+      evidence: r.evidence_json,
+    }));
+  }
+
+  async hasOutcomes(subjectId: string): Promise<boolean> {
+    const { rows } = await this.pool.query<{ one: number }>(
+      `SELECT 1 AS one FROM ${T} WHERE subject_id = $1 LIMIT 1`,
+      [subjectId],
+    );
+    return rows.length > 0;
+  }
+
   async listOutcomesForMeasure(measureId: string, opts?: MeasureScanOptions): Promise<MeasureOutcomeRow[]> {
     // E13 PR-2: when excludeScale is set, drop the population-scale tenant's rows IN SQL (its subject
     // ids are mhn-prefixed) so the per-measure analytics never fetch the 120k rows into app memory.

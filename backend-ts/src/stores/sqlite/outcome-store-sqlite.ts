@@ -162,6 +162,36 @@ export class SqliteOutcomeStore implements OutcomeStore {
     }));
   }
 
+  async listLatestFinalizedOutcomePerMeasure(subjectId: string): Promise<EmployeeOutcomeRow[]> {
+    const { results } = await this.db
+      .prepare(
+        `SELECT run_id, measure_id, status, evaluation_period, evaluated_at, evidence_json FROM (
+           SELECT o.run_id, o.measure_id, o.status, o.evaluation_period, o.evaluated_at, o.evidence_json,
+                  ROW_NUMBER() OVER (PARTITION BY o.measure_id ORDER BY o.evaluated_at DESC, o.id DESC) AS rn
+             FROM outcomes o JOIN runs r ON r.id = o.run_id
+            WHERE o.subject_id = ? AND UPPER(r.status) IN ('COMPLETED', 'PARTIAL_FAILURE')
+         ) WHERE rn = 1`,
+      )
+      .bind(subjectId)
+      .all<{ run_id: string; measure_id: string; status: string; evaluation_period: string; evaluated_at: string; evidence_json: string }>();
+    return (results ?? []).map((r) => ({
+      runId: r.run_id,
+      measureId: r.measure_id,
+      status: r.status,
+      evaluationPeriod: r.evaluation_period,
+      evaluatedAt: r.evaluated_at,
+      evidence: JSON.parse(r.evidence_json),
+    }));
+  }
+
+  async hasOutcomes(subjectId: string): Promise<boolean> {
+    const { results } = await this.db
+      .prepare(`SELECT 1 AS one FROM outcomes WHERE subject_id = ? LIMIT 1`)
+      .bind(subjectId)
+      .all<{ one: number }>();
+    return (results ?? []).length > 0;
+  }
+
   async listOutcomesForMeasure(measureId: string, opts?: MeasureScanOptions): Promise<MeasureOutcomeRow[]> {
     // E13 PR-2: excludeScale drops the population-scale tenant's (mhn-prefixed) rows in SQL.
     const alias = opts?.successfulPopulationOnly ? "o." : "";
