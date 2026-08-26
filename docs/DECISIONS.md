@@ -793,7 +793,7 @@ as a follow-up issue.
 files and 1,835 cases with every case in exactly one bucket — a conformance harness that grades a subset
 publishes a flattering number, which is the specific way this could be worse than useless. Results:
 **1,622 pass / 155 fail / 12 translation-error / 4 runtime-error / 11 invalid-refused / 31 invalid-accepted
-/ 0 skipped** — 1,835 exactly, and **1,633 on the upstream rule**. **16 cases are compared in JS rather
+/ 0 skipped** — 1,835 exactly, and **1,633 on the upstream rule**. *(CORRECTED 2026-08-26: the reader was parsing through XML comments, so 12 upstream-disabled tests were graded as live — true corpus 1,823, pass 1,612, invalid-accepted 29; `docs/evidence/CQL_RUNNER_HARNESS_DIFF_2026-08-26.md`.)* **16 cases are compared in JS rather
 than by CQL `~`**; that count is printed, serialized and baselined, because a first draft claimed it was
 zero after reading a field `runnerJson` never wrote. `scripts/**/*.ts` is now inside `tsconfig.json`'s
 `include` — the harness that produces a published number was not being typechecked at all, which is how a

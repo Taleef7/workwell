@@ -17,8 +17,13 @@ import type { CaseResult, Outcome } from "./run.ts";
  * The corpus at the pinned commit (727219f, 2026-08-03). A parse that returns a different number means
  * upstream moved or our reader broke — either way the run must say so rather than grade a subset.
  * Update deliberately, in the PR that moves the pin.
+ *
+ * 1835 → 1823 on 2026-08-26 WITHOUT a pin move: the reader was parsing through XML comments, so 12
+ * tests upstream deliberately disabled (commented out) were being graded as live. Found by diffing
+ * against cql-tests-runner, whose real XML parser reads 1823 from the same pin. This guard fired on
+ * the fix — the count change is the correction, not drift.
  */
-export const EXPECTED_CASES = 1835;
+export const EXPECTED_CASES = 1823;
 export const EXPECTED_FILES = 16;
 
 export const OUTCOMES: readonly Outcome[] = [
@@ -100,7 +105,7 @@ export interface Baseline {
    *
    * Only the non-passing cases are stored, and that is not a size optimization dressed up as design: a case
    * ABSENT from this map was passing, so "used to pass, now does not" is decidable for every one of the
-   * 1,835 without listing them. 213 entries instead of 1,835, and no information lost.
+   * 1,823 without listing them. 211 entries instead of 1,823, and no information lost.
    */
   notPassing: Record<string, Outcome>;
   /**
