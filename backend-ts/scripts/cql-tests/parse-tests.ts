@@ -114,8 +114,14 @@ export function parseTestFile(fileName: string, xml: string): CqlTestCase[] {
   // (12 such at the current pin), and a regex reader that matches through `<!-- -->` grades cases
   // upstream deliberately turned off. This is how ADR-060's "1,835 cases" silently included 12 dead
   // ones — found by the runner-vs-harness diff (2026-08-26), where cql-tests-runner's real XML
-  // parser produced 1,823. Non-greedy so a comment cannot swallow the live tests between two of them.
-  xml = xml.replace(/<!--[\s\S]*?-->/g, "");
+  // parser produced 1,823. Non-greedy so a comment cannot swallow the live tests between two of them,
+  // and looped to a FIXED POINT: a single pass over `<!<!-- a -->-- … -->` would remove the inner
+  // comment and COMPOSE a new `<!-- … -->` whose contents then parse as live (CodeQL
+  // js/incomplete-multi-character-sanitization on #489; pinned by a harness test).
+  for (let prev = ""; prev !== xml; ) {
+    prev = xml;
+    xml = xml.replace(/<!--[\s\S]*?-->/g, "");
+  }
 
   // File-level capabilities are the ones before the first <group>; anything after belongs to a group.
   const firstGroup = xml.search(/<group\b/);
