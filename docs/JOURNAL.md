@@ -24,6 +24,20 @@ batch scenario names the open question — whether results should also render in
 as a question for the WebChart side rather than a decision. Prepared for the Maui conversation
 (meeting postponed; the material keeps).
 
+**#477 — the README refresh, per the alignment audit's communication verdict.** Four additions and a
+sync: a **positioning paragraph** in the lead (supplementary to WebChart, which carries certification;
+composes `fqm-execution`/`cql-execution` rather than competing — previously stated only in
+`PACKAGES.md` §2); **a tour of the product** — the nine screenshots that sat untracked at the repo
+root moved to `docs/assets/` and embedded with one-line captions, ending the README's zero-imagery
+state; a **"What runs where" table** making the gated ⊂ routable ⊂ routed distinction per priority
+measure explicit (CMS68's episode-basis construction refusal and CMS138's weaker-green footnote
+included), with the plain statement that **alerting is WorkWell-screens-only today** — the CDS Hooks
+service is live but no client invokes it; and an **integration-surface table** leading with the four
+external contracts (compliance API, CDS Hooks, OpenAPI/`/api-docs`, MCP) plus the published packages,
+with `POST /$cql` added to the internal highlights. Counts synced to measured 2026-08-26 values
+(2,021 backend tests, 68 ADRs), and the CLAUDE.md "38 of 58" DECISIONS count — stale since the #396
+review moved six ADRs back — corrected to 54 of 68 with the 20-moved/6-returned history stated.
+
 ## 2026-08-25 — the `$cql` Evaluation Service exists, and HL7's own runner has graded it (#474)
 
 **The entry ticket to the Connectathon 43 CQL Engine Parity scenario is built and measured.**
