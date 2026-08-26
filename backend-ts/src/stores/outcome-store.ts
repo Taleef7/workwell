@@ -173,7 +173,8 @@ export interface OutcomeStore {
    * `PARTIAL_FAILURE`) — the CDS Hooks read (#470), bounded by the measure count instead of the
    * subject's whole outcome history. A measure whose only rows belong to unfinished runs is ABSENT
    * (a mid-run row is not the persisted answer — the compliance-api FINAL rule), never served stale.
-   * Newest = `evaluated_at DESC` tie-broken by `id DESC`, matching `listOutcomes`' paging order.
+   * Newest = `evaluated_at DESC` tie-broken by `id DESC` — the same `(evaluated_at, id)` composite
+   * `listOutcomes` pages by, read in the opposite direction.
    */
   listLatestFinalizedOutcomePerMeasure(subjectId: string): Promise<EmployeeOutcomeRow[]>;
   /**

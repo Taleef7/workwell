@@ -382,15 +382,19 @@ export function outcomeStoreContract(
 
   test(`[${label}] listLatestFinalizedOutcomePerMeasure: one newest terminal-run row per measure; unfinalized rows invisible (#470)`, async () => {
     const { runStore, outcomeStore } = await fresh();
-    // Run A (COMPLETED): the older audiogram row + the only hazwoper row.
+    // INSERTION ORDER DELIBERATELY DISAGREES WITH `evaluated_at` ORDER (#486 review, mutation-proven):
+    // run B's NEWER audiogram row is inserted FIRST and run A's older one after, so an implementation
+    // ordered by insertion/rowid instead of evaluated_at picks A and fails here. Not hypothetical —
+    // backfill-trend-history inserts older-evaluatedAt rows after current ones, exactly this shape.
     const runA = await runStore.createRun(sampleRun("audiogram"));
     await runStore.finalizeRun(runA.id, "COMPLETED");
-    await outcomeStore.recordOutcome({ runId: runA.id, subjectId: "emp-006", measureId: "audiogram", evaluationPeriod: "2026-06-12", status: "OVERDUE", evidence: { from: "A" }, evaluatedAt: "2026-06-10T00:00:00.000Z" });
-    await outcomeStore.recordOutcome({ runId: runA.id, subjectId: "emp-006", measureId: "hazwoper", evaluationPeriod: "2026-06-12", status: "COMPLIANT", evidence: { from: "A" }, evaluatedAt: "2026-06-10T00:00:00.000Z" });
-    // Run B (COMPLETED): the newer audiogram row — must win for audiogram.
     const runB = await runStore.createRun(sampleRun("audiogram"));
     await runStore.finalizeRun(runB.id, "COMPLETED");
+    // Run B (COMPLETED): the newer audiogram row — must win for audiogram despite being inserted first.
     await outcomeStore.recordOutcome({ runId: runB.id, subjectId: "emp-006", measureId: "audiogram", evaluationPeriod: "2026-06-13", status: "COMPLIANT", evidence: { from: "B" }, evaluatedAt: "2026-06-11T00:00:00.000Z" });
+    // Run A (COMPLETED): the older audiogram row (backfill-shaped: inserted later) + the only hazwoper row.
+    await outcomeStore.recordOutcome({ runId: runA.id, subjectId: "emp-006", measureId: "audiogram", evaluationPeriod: "2026-06-12", status: "OVERDUE", evidence: { from: "A" }, evaluatedAt: "2026-06-10T00:00:00.000Z" });
+    await outcomeStore.recordOutcome({ runId: runA.id, subjectId: "emp-006", measureId: "hazwoper", evaluationPeriod: "2026-06-12", status: "COMPLIANT", evidence: { from: "A" }, evaluatedAt: "2026-06-10T00:00:00.000Z" });
     // Run C (RUNNING — never finalized): the NEWEST audiogram row plus the only tb_surveillance row.
     // Neither may surface: a mid-run row is not the persisted answer (the compliance-api FINAL rule).
     const runC = await runStore.createRun(sampleRun("audiogram"));
