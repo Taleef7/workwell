@@ -271,7 +271,7 @@ What another system builds against — each contract versioned, documented, and 
 | [`GET /api/v1/compliance/{subject}/{measure}`](docs/COMPLIANCE_API.md) | One subject, one measure, one stable answer — status, population membership, and `populationsSource` saying where the booleans came from. **404 when no run has covered the subject**, never an empty 200 ([ADR-061](docs/DECISIONS.md)). |
 | [CDS Hooks 2.0.1](docs/CDS_HOOKS.md) — `GET /cds-services`, invoke, feedback | Care-gap **cards** into a clinician's workflow: summary, plain-English reason, provenance, and a draft-order `suggestion` the clinician accepts — never `systemActions`, never `critical` ([ADR-067](docs/DECISIONS.md)). |
 | `GET /api/v1/openapi.json` · public `/api-docs` | Hand-authored OpenAPI 3.1.1 over the **promised** surface only, guarded by a two-way routed-path test ([ADR-068](docs/DECISIONS.md)). |
-| [MCP server](docs/MCP.md) | 13 read-only, role-gated tools over SSE — an AI client reads compliance state; nothing mutates. |
+| [MCP server](docs/MCP.md) | 13 read-only, role-gated tools (`/sse` stream + `/mcp/**` message endpoint) — an AI client reads compliance state; nothing mutates. |
 | [`@work-well/measure-engine`](https://www.npmjs.com/package/@work-well/measure-engine) · [`@work-well/measure-codegen`](https://www.npmjs.com/package/@work-well/measure-codegen) | The content-free eval core and codegen on the public registry, with SLSA provenance ([`docs/PACKAGES.md`](docs/PACKAGES.md)). |
 
 ### Internal API highlights
@@ -284,6 +284,7 @@ GET  /api/runs/{id}/qrda1                              # QRDA-I export (per-subj
 POST /api/runs/{id}/evaluate                           # evaluate one subject; body {measureId, qrda1} = QRDA-I import
 POST /$cql                                             # CQL IG Evaluation Service — data-free expression evaluation
 GET  /api/measures/{id}/fidelity                       # authored vs official spec diff
+GET  /api/measures/{id}/fidelity/diff                  # executed outcome diff
 GET  /api/auditor/cases/{id}/packet?format=json|html   # auditor evidence packet
 GET  /api/cases?status=open                            # case worklist
 GET  /api/exports/outcomes?format=csv                  # evidence export
