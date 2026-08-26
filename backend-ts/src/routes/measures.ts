@@ -103,6 +103,14 @@ export async function chooseDiffMode(
 /** Cap on live-compile input so the playground can't be used to DoS the translator. */
 const MAX_CQL_BYTES = 64 * 1024;
 
+/**
+ * Encoded BYTES, not `String.prototype.length` (#483): `.length` counts UTF-16 code units and
+ * under-counts multibyte text by up to 3×, so a nominally-capped document could reach the
+ * synchronous translator at ~192 KiB — the defect class Codex found on the `$cql` route (#481),
+ * present at these three older guard sites since they were written.
+ */
+const cqlTooLarge = (text: string): boolean => new TextEncoder().encode(text).length > MAX_CQL_BYTES;
+
 // One-shot catalog + value-set demo seed, run once per env over the factory's stores (SQLite floor
 // or Postgres ceiling — the factory has already run schema init). The seed uses non-idempotent
 // INSERTs with fixed catalog ids, so concurrent cold-start requests must NOT each run it — an
@@ -193,7 +201,7 @@ export async function handleMeasures(req: Request, env: MeasuresEnv, actor = "sy
     const body = (await req.json().catch(() => null)) as { cql?: unknown } | null;
     const cql = body?.cql;
     if (typeof cql !== "string") return json({ error: "invalid_cql" }, 400);
-    if (cql.length > MAX_CQL_BYTES) return json({ error: "cql_too_large", maxBytes: MAX_CQL_BYTES }, 413);
+    if (cqlTooLarge(cql)) return json({ error: "cql_too_large", maxBytes: MAX_CQL_BYTES }, 413);
     return json(compileCql(cql));
   }
 
@@ -210,7 +218,7 @@ export async function handleMeasures(req: Request, env: MeasuresEnv, actor = "sy
     if (cqlId) {
       const cqlText = ((await req.json().catch(() => ({}))) as { cqlText?: unknown }).cqlText;
       if (typeof cqlText !== "string") return json({ error: "invalid_cql" }, 400);
-      if (cqlText.length > MAX_CQL_BYTES) return json({ error: "cql_too_large", maxBytes: MAX_CQL_BYTES }, 413);
+      if (cqlTooLarge(cqlText)) return json({ error: "cql_too_large", maxBytes: MAX_CQL_BYTES }, 413);
       const ok = await updateMeasureCql(await lifecycleDeps(env), cqlId, cqlText, actor);
       return ok ? json({ status: "saved" }) : json({ error: "not_found", measureId: cqlId }, 404);
     }
@@ -284,7 +292,7 @@ export async function handleMeasures(req: Request, env: MeasuresEnv, actor = "sy
     if (compileId) {
       const cqlText = ((await req.json().catch(() => ({}))) as { cqlText?: unknown }).cqlText;
       if (typeof cqlText !== "string") return json({ error: "invalid_cql" }, 400);
-      if (cqlText.length > MAX_CQL_BYTES) return json({ error: "cql_too_large", maxBytes: MAX_CQL_BYTES }, 413);
+      if (cqlTooLarge(cqlText)) return json({ error: "cql_too_large", maxBytes: MAX_CQL_BYTES }, 413);
       const res = await compileMeasureCql(await lifecycleDeps(env), compileId, cqlText, actor);
       return res ? json(res) : json({ error: "not_found", measureId: compileId }, 404);
     }

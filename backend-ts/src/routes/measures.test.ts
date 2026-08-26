@@ -499,6 +499,17 @@ test("CQL authoring enforces type + size cap (translator DoS guard)", async () =
   assert.equal((await put("/api/measures/audiogram/cql", { cqlText: null }))?.status, 400);
 });
 
+test("the size cap counts encoded BYTES, not UTF-16 code units (#483)", async () => {
+  // 30,000 CJK chars: 30,000 code units — comfortably under the 65,536 cap `.length` would apply —
+  // but 90,000 UTF-8 bytes, well over it. `.length` under-counts multibyte text by up to 3×, so a
+  // nominally-capped document could reach the synchronous translator at ~192 KiB (the defect class
+  // Codex found on the $cql route in #481; these are the same guard at three older sites).
+  const multibyte = "日".repeat(30000);
+  assert.equal((await post("/api/measures/compile", { cql: multibyte }))?.status, 413, "playground compile");
+  assert.equal((await post("/api/measures/audiogram/cql/compile", { cqlText: multibyte }))?.status, 413, "save+compile");
+  assert.equal((await put("/api/measures/audiogram/cql", { cqlText: multibyte }))?.status, 413, "raw CQL save");
+});
+
 test("PUT /api/measures/:id/tests replaces fixtures; POST /tests/validate validates them", async () => {
   const fixtures = [
     { fixtureName: "f-compliant", employeeExternalId: "emp-001", expectedOutcome: "COMPLIANT", notes: "" },
