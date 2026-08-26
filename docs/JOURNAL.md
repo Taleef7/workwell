@@ -38,6 +38,21 @@ with `POST /$cql` added to the internal highlights. Counts synced to measured 20
 (2,021 backend tests, 68 ADRs), and the CLAUDE.md "38 of 58" DECISIONS count — stale since the #396
 review moved six ADRs back — corrected to 54 of 68 with the 20-moved/6-returned history stated.
 
+**#485 merged (squash `792af88b`) after two review rounds that each caught something real.** The
+independent reviewer verified every truth claim against the tree (all eight MADiE counts, the two
+routed-flag workflow sites, the CMS68 refusal, all four integration routes — live-probed, not just
+declared — the ADR arithmetic, all nine image blobs) and caught one accidental trim: the
+`fidelity/diff` route had silently dropped out of the highlights. Codex then caught what no
+tree-reading could: **three of the nine screenshots (campaigns, admin, people) were captured as the
+VIEWER role and showed access-denied screens** under captions describing the features — the
+product-tour equivalent of a vacuous guard, an image that reads as coverage and isn't. Fixed by
+recapture, not retreat: booted the app, logged in as admin, same viewport — campaigns now shows a
+dispatched simulated campaign with per-recipient delivery status, admin the scheduler +
+integration-health panels, people the directory with live MOVED/DUPLICATE badges. Codex's second
+finding was also right: the caption claimed brand switching as an audited admin setting, while
+`applyBrand` writes only DOM + localStorage from the dashboard header — reworded to a per-browser
+preference. Replies on all threads; #477 closed.
+
 ## 2026-08-25 — the `$cql` Evaluation Service exists, and HL7's own runner has graded it (#474)
 
 **The entry ticket to the Connectathon 43 CQL Engine Parity scenario is built and measured.**
