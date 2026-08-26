@@ -53,6 +53,35 @@ finding was also right: the caption claimed brand switching as an audited admin 
 `applyBrand` writes only DOM + localStorage from the dashboard header — reworded to a per-browser
 preference. Replies on all threads; #477 closed.
 
+**The choice-of-profiles translator gap is FILED UPSTREAM:
+`cqframework/clinical_quality_language#1831`.** Tightened before filing: the repro is now 7 lines with
+zero includes (a locally-defined function on `FHIR.Condition`, one single-profile retrieve that
+compiles, one union-of-profiles that does not); it is **not fluent-specific** (plain function calls
+fail identically) and the explicit cast workaround is also refused
+(`choice<…> cannot be cast as Condition`), so there is no in-language workaround. **Confirmed current
+on 5.2.0** — installed the latest KMP JS artifact in scratch and reproduced identically, which also
+answers a #479 question early: that upgrade will not unblock CMS138/CMS951. The Java-accepts evidence
+is CMS's own pipeline: the committed CMS951 ELM in `dqm-content-qicore-2025` (translator 3.27.0 per
+its annotations) contains the union + `prevalenceInterval()` construct 5.2.0 refuses. Two 5.2.0 API
+notes recorded on #479: the model-info provider callback signature is now `(name, ?, version)`, and
+required-model loading is stricter (USQC's modelinfo declares USCore required; omitting it reads as
+"could not load model information"). Offered upstream to test candidate fixes against the
+eight-measure set.
+
+**The S7 demo is REAL end to end — the in-encounter scenario now runs over MIE's own WebChart data,
+with only the chart UI mocked.** The chain, every link live: Docker `dev-wcdb` (Doug's seeded
+WebChart MariaDB, 56 patients) → `wcdb-fhir-shim` on :8085 → the backend with the WebChart seam
+configured → a cms125 MEASURE run over the live connection (run `7a95bffe`: 206 evaluated, 57
+OVERDUE, 27 cases) → `POST /cds-services/workwell-compliance-patient-view` for patient `wc-8`
+(Ellen Thompson, 56F — genuinely overdue for a mammogram) returning **14 real cards** (2 warnings, 12
+info) with per-card provenance naming the run — and the **feedback leg exercised** (an `overridden`
+POST, audited). Deliverable: a mock-encounter artifact rendering the real cards beside an honest
+real-vs-mock table and the wire transcript — the piece that makes guide S7 tangible for the
+rescheduled Maui conversation. Two operational notes for re-running it: the transport appends `/fhir`
+itself (`WORKWELL_WEBCHART_BASE_URL=http://127.0.0.1:8085`, not `…/8085/fhir` — the first attempt
+404'd on `/fhir/fhir/…`), and the login response's token key is `token`, not `accessToken`. Demo
+artifacts are local scratch; the Docker containers stay up for instant re-demo.
+
 ## 2026-08-25 — the `$cql` Evaluation Service exists, and HL7's own runner has graded it (#474)
 
 **The entry ticket to the Connectathon 43 CQL Engine Parity scenario is built and measured.**
