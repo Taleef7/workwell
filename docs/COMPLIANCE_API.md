@@ -91,6 +91,18 @@ This field exists because the two cases are indistinguishable from the numbers a
 second as measured eCQM membership would be wrong. If your integration depends on true population
 membership, require `populationsSource == "official-evidence"`.
 
+> **Why the ADR-069 derivation is not a v1 break** (Codex review, #484): the meaning of
+> `populationsSource` is unchanged — `official-evidence` still means *measured by the official
+> executor*, `status-derived` still means *inferred from status*. What ADR-069 changed is that the
+> served booleans can no longer present a spec-invalid combination (a numerator on a
+> denominator-excluded subject) as measured membership. **No existing response changes:** every
+> measure any deployment routes (cms122, cms125) declares only
+> `initial-population / denominator / denominator-exclusion / numerator` — no exception, no
+> numerator-exclusion — and `fqm-execution` itself zeroes NUMER under DENEX, so for all evidence any
+> deployed writer has persisted the derivation is the identity function. The folds exist so a
+> *future* writer's raw co-true flags cannot serve invalid membership under this label. (The prior
+> wording "persisted verbatim" was already inaccurate — subset-violation clamping predates ADR-069.)
+
 ## Modes
 
 ### `mode=latest` (default)
