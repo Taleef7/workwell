@@ -82,6 +82,12 @@ itself (`WORKWELL_WEBCHART_BASE_URL=http://127.0.0.1:8085`, not `…/8085/fhir` 
 404'd on `/fhir/fhir/…`), and the login response's token key is `token`, not `accessToken`. Demo
 artifacts are local scratch; the Docker containers stay up for instant re-demo.
 
+**#483 closed the same way it was found:** the three `MAX_CQL_BYTES` guards in `measures.ts`
+(playground compile, raw CQL save, save+compile) counted UTF-16 code units, so 30,000 CJK characters
+passed a 64 KiB cap while weighing 90,000 bytes — the identical defect class Codex caught on the
+`$cql` route in #481, filed then instead of folded in per one-task-per-PR. RED first (one multibyte
+test covering all three sites), then a shared `cqlTooLarge` helper on `TextEncoder` bytes.
+
 ## 2026-08-25 — the `$cql` Evaluation Service exists, and HL7's own runner has graded it (#474)
 
 **The entry ticket to the Connectathon 43 CQL Engine Parity scenario is built and measured.**
