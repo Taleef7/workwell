@@ -380,6 +380,57 @@ export function outcomeStoreContract(
     assert.deepEqual(await outcomeStore.listOutcomesForEmployee("emp-404", 5), [], "unknown employee → []");
   });
 
+  test(`[${label}] listLatestFinalizedOutcomePerMeasure: one newest terminal-run row per measure; unfinalized rows invisible (#470)`, async () => {
+    const { runStore, outcomeStore } = await fresh();
+    // INSERTION ORDER DELIBERATELY DISAGREES WITH `evaluated_at` ORDER (#486 review, mutation-proven):
+    // run B's NEWER audiogram row is inserted FIRST and run A's older one after, so an implementation
+    // ordered by insertion/rowid instead of evaluated_at picks A and fails here. Not hypothetical —
+    // backfill-trend-history inserts older-evaluatedAt rows after current ones, exactly this shape.
+    const runA = await runStore.createRun(sampleRun("audiogram"));
+    await runStore.finalizeRun(runA.id, "COMPLETED");
+    const runB = await runStore.createRun(sampleRun("audiogram"));
+    await runStore.finalizeRun(runB.id, "COMPLETED");
+    // Run B (COMPLETED): the newer audiogram row — must win for audiogram despite being inserted first.
+    await outcomeStore.recordOutcome({ runId: runB.id, subjectId: "emp-006", measureId: "audiogram", evaluationPeriod: "2026-06-13", status: "COMPLIANT", evidence: { from: "B" }, evaluatedAt: "2026-06-11T00:00:00.000Z" });
+    // Run A (COMPLETED): the older audiogram row (backfill-shaped: inserted later) + the only hazwoper row.
+    await outcomeStore.recordOutcome({ runId: runA.id, subjectId: "emp-006", measureId: "audiogram", evaluationPeriod: "2026-06-12", status: "OVERDUE", evidence: { from: "A" }, evaluatedAt: "2026-06-10T00:00:00.000Z" });
+    await outcomeStore.recordOutcome({ runId: runA.id, subjectId: "emp-006", measureId: "hazwoper", evaluationPeriod: "2026-06-12", status: "COMPLIANT", evidence: { from: "A" }, evaluatedAt: "2026-06-10T00:00:00.000Z" });
+    // Run C (RUNNING — never finalized): the NEWEST audiogram row plus the only tb_surveillance row.
+    // Neither may surface: a mid-run row is not the persisted answer (the compliance-api FINAL rule).
+    const runC = await runStore.createRun(sampleRun("audiogram"));
+    await runStore.markRunning(runC.id);
+    await outcomeStore.recordOutcome({ runId: runC.id, subjectId: "emp-006", measureId: "audiogram", evaluationPeriod: "2026-06-14", status: "OVERDUE", evidence: { from: "C" }, evaluatedAt: "2026-06-12T00:00:00.000Z" });
+    await outcomeStore.recordOutcome({ runId: runC.id, subjectId: "emp-006", measureId: "tb_surveillance", evaluationPeriod: "2026-06-14", status: "OVERDUE", evidence: { from: "C" }, evaluatedAt: "2026-06-12T00:00:00.000Z" });
+    // Run D (PARTIAL_FAILURE): terminal, so its row counts.
+    const runD = await runStore.createRun(sampleRun("cholesterol_ldl"));
+    await runStore.finalizeRun(runD.id, "PARTIAL_FAILURE");
+    await outcomeStore.recordOutcome({ runId: runD.id, subjectId: "emp-006", measureId: "cholesterol_ldl", evaluationPeriod: "2026-06-13", status: "MISSING_DATA", evidence: { from: "D" }, evaluatedAt: "2026-06-11T12:00:00.000Z" });
+    // Another subject's row — must never leak in.
+    await outcomeStore.recordOutcome({ runId: runA.id, subjectId: "emp-001", measureId: "audiogram", evaluationPeriod: "2026-06-12", status: "COMPLIANT", evidence: {}, evaluatedAt: "2026-06-12T00:00:00.000Z" });
+
+    const rows = await outcomeStore.listLatestFinalizedOutcomePerMeasure("emp-006");
+    const byMeasure = new Map(rows.map((r) => [r.measureId, r]));
+    assert.equal(rows.length, 3, "one row per measure with a finalized-run outcome (audiogram, hazwoper, cholesterol_ldl)");
+    assert.equal(byMeasure.get("audiogram")?.runId, runB.id, "newest FINALIZED row wins — run C's newer mid-run row is invisible");
+    assert.equal(byMeasure.get("audiogram")?.status, "COMPLIANT");
+    assert.deepEqual(byMeasure.get("audiogram")?.evidence, { from: "B" }, "evidence round-trips");
+    assert.equal(byMeasure.get("hazwoper")?.runId, runA.id);
+    assert.equal(byMeasure.get("cholesterol_ldl")?.runId, runD.id, "PARTIAL_FAILURE is terminal and counts");
+    assert.equal(byMeasure.has("tb_surveillance"), false, "a measure with only mid-run rows is absent, not stale");
+    assert.deepEqual(await outcomeStore.listLatestFinalizedOutcomePerMeasure("emp-404"), [], "unknown subject → []");
+  });
+
+  test(`[${label}] hasOutcomes distinguishes no-rows-at-all from rows-awaiting-finalization (#470)`, async () => {
+    const { runStore, outcomeStore } = await fresh();
+    const run = await runStore.createRun(sampleRun("audiogram"));
+    await runStore.markRunning(run.id);
+    await outcomeStore.recordOutcome({ runId: run.id, subjectId: "emp-pending", measureId: "audiogram", evaluationPeriod: "2026-06-13", status: "OVERDUE", evidence: {} });
+
+    assert.equal(await outcomeStore.hasOutcomes("emp-pending"), true, "rows exist even though none is finalized");
+    assert.deepEqual(await outcomeStore.listLatestFinalizedOutcomePerMeasure("emp-pending"), [], "…but none is servable yet");
+    assert.equal(await outcomeStore.hasOutcomes("emp-404"), false, "no rows at all");
+  });
+
   test(`[${label}] listOutcomes pages with {limit, offset} deterministically (Fable H4)`, async () => {
     const { runStore, outcomeStore } = await fresh();
     const run = await runStore.createRun(sampleRun("audiogram"));

@@ -169,6 +169,22 @@ export interface OutcomeStore {
    */
   listOutcomesForEmployee(subjectId: string, limit: number): Promise<EmployeeOutcomeRow[]>;
   /**
+   * One row per measure: the subject's newest outcome whose run is TERMINAL (`COMPLETED` or
+   * `PARTIAL_FAILURE`) — the CDS Hooks read (#470), bounded by the measure count instead of the
+   * subject's whole outcome history. A measure whose only rows belong to unfinished runs is ABSENT
+   * (a mid-run row is not the persisted answer — the compliance-api FINAL rule), never served stale.
+   * Newest = `evaluated_at DESC` tie-broken by `id DESC` — the same `(evaluated_at, id)` composite
+   * `listOutcomes` pages by, read in the opposite direction.
+   */
+  listLatestFinalizedOutcomePerMeasure(subjectId: string): Promise<EmployeeOutcomeRow[]>;
+  /**
+   * Whether ANY outcome row exists for this subject, regardless of run status — the cheap existence
+   * probe that lets a caller of {@link listLatestFinalizedOutcomePerMeasure} tell "no run has ever
+   * touched this subject" apart from "rows exist but none is finalized yet" (#470). The CDS route
+   * audits those two absences differently.
+   */
+  hasOutcomes(subjectId: string): Promise<boolean>;
+  /**
    * Aggregate a population-scale run's outcomes by (location, provider, status), parsing the encoded
    * subject_id (`mhn|Lxx|Pxx|n`) — a single GROUP BY that never materializes the per-subject rows.
    * Used by the hierarchy rollup + programs KPIs for the scale tenant (#185 E13 PR-2).

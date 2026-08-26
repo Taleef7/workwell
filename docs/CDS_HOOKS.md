@@ -201,14 +201,14 @@ eligible for a suggestion — the last of these moves when a terminology mapping
   request — a different capability, and the piece guide S7 still calls not built.
 - **Cards are as fresh as the last completed run, not as fresh as this encounter.** They render persisted
   outcomes of a FINALIZED run; a mid-run row is never served.
-- **An invocation is a bounded but unindexed read, not a constant-time one.** Resolving a patient scans that
-  subject's outcome history (up to 100,000 rows) and parses each row's evidence, then keeps the newest
-  finalized row per measure. The window has to be that large or an older valid outcome would read as "never
-  evaluated" — the confusion this whole design exists to prevent — so the fix is a per-measure query in the
-  store rather than a smaller window. Today a subject accrues roughly one row per measure per nightly run.
-  Tracked as [#470](https://github.com/Taleef7/workwell/issues/470); the same scan backs
-  `/api/v1/compliance`, MCP's `check_compliance` and the employee profile, so it is not specific to this
-  endpoint — but this is the only one of them on an interactive, point-of-care path.
+- **An invocation is bounded by the measure count, not the subject's history** (#470, closed). Resolving a
+  patient is one per-measure store query (`listLatestFinalizedOutcomePerMeasure` — the newest terminal-run
+  row per measure, computed in SQL on both stores) plus a constant-time existence probe that keeps
+  "never evaluated" distinguishable from "rows exist, none finalized yet". The former 100,000-row
+  evidence-parsing scan is gone from this path; `/api/v1/compliance`, MCP's `check_compliance` and the
+  employee profile still use the wide scan (batch/operator surfaces with different semantics — period
+  bounds, a pending-run count, no finalization check respectively), and none of them is on the
+  point-of-care path.
 - **One hook.** `patient-view` is maturity 5 in the CDS Hooks Library IG; `encounter-start` is maturity 1 and
   would return the same cards.
 - **`systemActions` is never emitted.** Nothing WorkWell returns may change a chart without a human choosing

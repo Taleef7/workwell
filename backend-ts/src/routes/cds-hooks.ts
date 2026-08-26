@@ -42,17 +42,11 @@ interface CdsHooksEnv extends StandingOrderEnv {
 const json = (data: unknown, status = 200): Response =>
   new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json" } });
 
-/** A run whose outcomes are an answer. Mirrors ADR-061's set exactly — `PARTIAL_FAILURE` IS terminal. */
-const FINAL: ReadonlySet<string> = new Set(["COMPLETED", "PARTIAL_FAILURE"]);
-
-/**
- * The same bounded window `mode=latest` and MCP's `check_compliance` use.
- *
- * `outcomes` has no uniqueness on (subject, measure, period), so every run inserts a fresh row — a nightly
- * ALL_PROGRAMS run over ~16 measures writes ~16 rows per subject per night. A small window would make an
- * older valid outcome read as "never evaluated", which is the one confusion this route must not create.
- */
-const SCAN = 100000;
+// The FINALIZED-run rule (ADR-061's set, `PARTIAL_FAILURE` included) now lives in the STORE query
+// (`listLatestFinalizedOutcomePerMeasure`, #470) rather than in a 100k-row scan here: `outcomes` has no
+// uniqueness on (subject, measure, period), so a subject's history grows by ~16 rows per nightly run, and
+// this route renders while a clinician waits — the work must be bounded by the measure count, not by how
+// long the deployment has been running. The contract test pins the mid-run-row exclusion both stores.
 
 /** `/cds-services`, `/cds-services/{id}`, `/cds-services/{id}/feedback` — or null when not ours. */
 export function parseCdsPath(
@@ -139,34 +133,24 @@ async function latestFinalizedByMeasure(
   patientId: string,
 ): Promise<{ subjectId: string; rows: CardInput[] } | null> {
   const stores = await getStores(env);
-  const runStatus = new Map<string, boolean>();
-  const isFinal = async (runId: string): Promise<boolean> => {
-    const cached = runStatus.get(runId);
-    if (cached !== undefined) return cached;
-    const run = await stores.runs.getRun(runId);
-    const ok = !!run && FINAL.has(run.status);
-    runStatus.set(runId, ok);
-    return ok;
-  };
-
   for (const subjectId of candidateSubjectIds(patientId)) {
-    const all = await stores.outcomes.listOutcomesForEmployee(subjectId, SCAN);
-    if (all.length === 0) continue;
-    const byMeasure = new Map<string, CardInput>();
-    for (const r of all) {
-      // Newest-first, so the first finalized row per measure wins.
-      if (byMeasure.has(r.measureId)) continue;
-      if (!(await isFinal(r.runId))) continue;
-      byMeasure.set(r.measureId, {
-        measureId: r.measureId,
-        status: r.status,
-        evidence: r.evidence,
-        evaluationPeriod: r.evaluationPeriod,
-        runId: r.runId,
-        evaluatedAt: r.evaluatedAt,
-      });
+    const rows = await stores.outcomes.listLatestFinalizedOutcomePerMeasure(subjectId);
+    if (rows.length > 0) {
+      return {
+        subjectId,
+        rows: rows.map((r) => ({
+          measureId: r.measureId,
+          status: r.status,
+          evidence: r.evidence,
+          evaluationPeriod: r.evaluationPeriod,
+          runId: r.runId,
+          evaluatedAt: r.evaluatedAt,
+        })),
+      };
     }
-    return { subjectId, rows: [...byMeasure.values()] };
+    // Rows exist but none is finalized: this subject IS the resolution (stop trying candidates) and
+    // renders the informational card — same behaviour as the old scan, now two bounded queries.
+    if (await stores.outcomes.hasOutcomes(subjectId)) return { subjectId, rows: [] };
   }
   return null;
 }
