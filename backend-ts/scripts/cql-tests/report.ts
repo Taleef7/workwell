@@ -105,7 +105,7 @@ export interface Baseline {
    *
    * Only the non-passing cases are stored, and that is not a size optimization dressed up as design: a case
    * ABSENT from this map was passing, so "used to pass, now does not" is decidable for every one of the
-   * 1,835 without listing them. 213 entries instead of 1,835, and no information lost.
+   * 1,823 without listing them. 211 entries instead of 1,823, and no information lost.
    */
   notPassing: Record<string, Outcome>;
   /**

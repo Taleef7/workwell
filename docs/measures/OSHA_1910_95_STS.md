@@ -189,7 +189,7 @@ is load-bearing and easy to get wrong.
 **There is no external oracle for this measure, and there is no way to manufacture one.**
 
 The official eCQMs are checked against the measure stewards' own MADiE expected results — 410/410
-across eight measures. The engine is checked against `cqframework/cql-tests` — 1,622 of 1,835. QRDA is
+across eight measures. The engine is checked against `cqframework/cql-tests` — 1,612 of 1,823 (corrected 2026-08-26). QRDA is
 checked against the HL7 schematron. **No equivalent exists for any OSHA standard**, because OSHA
 publishes regulations, not computable artifacts with expected results.
 

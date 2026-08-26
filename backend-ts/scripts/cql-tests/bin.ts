@@ -142,7 +142,7 @@ async function main(argv: string[]): Promise<number> {
       return 2;
     }
     if (baseline.pinned !== pin) {
-      // A `-Ref master` fetch that happens to still hold 1,835 cases would otherwise be graded against a
+      // A `-Ref master` fetch that happens to still hold 1,823 cases would otherwise be graded against a
       // stale baseline without a word (review, #398). The pin is the provenance of a published number.
       console.error(
         `corpus is at ${pin} but the baseline was written at ${baseline.pinned} — ` +

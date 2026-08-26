@@ -51,8 +51,9 @@ had disabled. Corrected figures above; full account in
 | ValueLiteralsAndSelectors | 47 | 19 | 0 |
 
 **Reading the 223 fails.** The clusters match ADR-060's known translator/engine findings, none in our
-transport or serialization additions so far as inspected: 27 of the 223 are `invalid` cases the stack
-accepts and evaluates (the translator-diagnostics gap ADR-060 recorded), and the heavy files are
+transport or serialization additions so far as inspected: 29 of the 223 are `invalid` cases the stack
+accepts and evaluates *(the full join says 29; a first pass estimated 27)* — the
+translator-diagnostics gap ADR-060 recorded — and the heavy files are
 arithmetic (Long semantics, decimal precision on aggregates), intervals, and lists (`Slice`
 unimplemented upstream — now a published CQL 2.0 function). The logical / nullological / conditional
 files — the constructs our measure CQL is built from — are at 0 fails, as in ADR-060. **The

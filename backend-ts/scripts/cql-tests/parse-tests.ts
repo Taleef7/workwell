@@ -24,11 +24,12 @@
  * ```
  *
  * Facts that corrected issue #296's description:
- *   - **`invalid` is an attribute of `<expression>`, not `<test>`** — 42 cases: 37 `true`, 3 `semantic`,
- *     2 `syntax`. #296 said `<test invalid=…>`, which matches nothing in the corpus.
+ *   - **`invalid` is an attribute of `<expression>`, not `<test>`** — 40 live cases: 35 `true`,
+ *     3 `semantic`, 2 `syntax` (12 more sit inside XML comments — disabled upstream, stripped before
+ *     parsing). #296 said `<test invalid=…>`, which matches nothing in the corpus.
  *   - `<output>` carries **no attributes**; the expected value is always element text.
  *   - `<capability>` appears at all three levels and is how the corpus expects a runner to skip.
- *   - 1,835 `<test>` elements across 16 files, not "~1,731".
+ *   - 1,823 live `<test>` elements across 16 files (12 more are commented out — see parseTestFile), not "~1,731".
  *
  * ## Totality
  *
