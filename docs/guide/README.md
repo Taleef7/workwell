@@ -23,7 +23,7 @@ specific question answered:
 | Where SQL fits — all three places, including CQL→SQL | [7. SQL](07-sql-and-the-bridge.md) |
 | What the two npm packages do and refuse to do | [8. The npm packages](08-packages.md) |
 | Current state, the numbers, the gaps, what is next | [9. State and roadmap](09-state-and-roadmap.md) |
-| The flows in time order — run, WebChart end-to-end, cases, authoring, standards loop, MCP, and the proposed in-encounter integration | [10. Scenarios](10-scenarios.md) |
+| The two integration flows — the scheduled population batch (built) and quality inside the encounter (target state) | [10. Scenarios](10-scenarios.md) |
 
 Three topics deliberately have no chapter of their own: **exports** split by audience (the standards
 documents are in chapter 5, the product outputs in chapter 1, the import direction in chapter 6),
