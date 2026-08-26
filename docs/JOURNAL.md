@@ -82,6 +82,21 @@ itself (`WORKWELL_WEBCHART_BASE_URL=http://127.0.0.1:8085`, not `…/8085/fhir` 
 404'd on `/fhir/fhir/…`), and the login response's token key is `token`, not `accessToken`. Demo
 artifacts are local scratch; the Docker containers stay up for instant re-demo.
 
+**#470 closed: the CDS invoke is now bounded by the measure count, not the subject's history.** The
+point-of-care path scanned up to 100k outcome rows and `JSON.parse`d every row's evidence to keep the
+newest finalized row per measure. Per the issue's own spec: a store-level
+`listLatestFinalizedOutcomePerMeasure(subjectId)` (Pg `DISTINCT ON`, SQLite window function, both
+joining `runs` so the COMPLETED/PARTIAL_FAILURE rule lives IN the query) plus a constant-time
+`hasOutcomes(subjectId)` probe that preserves the route's two-absence distinction — "never evaluated"
+(try the next candidate id) vs "rows exist, none finalized" (this subject resolves, renders the
+informational card, audits differently). Contract-tested on both stores RED-first, including the case
+that matters: a measure whose only rows belong to a still-RUNNING run is ABSENT, never served stale,
+even when its row is the newest of all. The other four wide-scan callers stay deliberately: the
+compliance API needs period bounds + its `pendingRuns` count, MCP's `check_compliance` currently
+serves mid-run rows (a separate defect to decide on, not to smuggle into this change), and
+identity/profile are operator surfaces. `CDS_HOOKS.md`'s stated limit updated to say what the read is
+now. Suite 2,023, 0 fail.
+
 **#483 closed the same way it was found:** the three `MAX_CQL_BYTES` guards in `measures.ts`
 (playground compile, raw CQL save, save+compile) counted UTF-16 code units, so 30,000 CJK characters
 passed a 64 KiB cap while weighing 90,000 bytes — the identical defect class Codex caught on the
