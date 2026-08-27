@@ -16,11 +16,14 @@ so the harness numbers did not move; `compile-measures` builds its own LibraryMa
 untouched.
 
 **The runner re-run: 1,589 → 1,606 pass over live HTTP, 17 fail→pass, zero regressions.** The
-decomposition corrected two of the 2026-08-26 diff's bucket claims. **Ten Long arithmetic cases**
-(`Negate1L`, `AbsLong`, `Multiply2LBy3L`, `ProductLong`, …) had been sitting in the `fail‖fail`
-"engine gap" cluster — but the engine's arithmetic was CORRECT on every one; the runner failed on
-serialization identity (fixed) and the in-process harness failed on upstream's representation split
-(a Long literal is a string, Long arithmetic returns a number). **Five Except cases** flipped for a
+decomposition corrected two of the 2026-08-26 diff's bucket claims. **Nine Long arithmetic cases**
+(`AbsLong`, `Multiply2LBy3L`, `ProductLong`, …) had been sitting in the `fail‖fail` "engine gap"
+cluster — but the engine's arithmetic was CORRECT on every one; the runner failed on serialization
+identity (fixed) and the in-process harness failed on upstream's representation split (a Long
+literal is a string, Long arithmetic returns a number). The tenth Long flip, `Negate1L`, was
+already correctly attributed as a serialization loss in the diff's `pass‖fail` cluster. (My first
+draft of this entry put all ten in `fail‖fail`; the #494 review caught the miscount against the
+regenerated harness results.) **Five Except cases** flipped for a
 reason that is not this change at all: the published 2026-08-25 run predated the #481 review round's
 temporal/quantity closed-normalization, so this is the first HTTP measurement of the tree as merged.
 And **`RolledOutIntervals` is reclassified, no code change**: the test's own cast makes the static

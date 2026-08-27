@@ -89,14 +89,15 @@ result type (`EnableResultTypes`, `cql-result-parameters.ts`). **pass 1,606 · f
   `Subtract1LAnd1L`, `Modulo4LBy2L`, `TruncatedDivide10LBy3L`, `Power2LTo2L`, `Power2LTo3L`,
   `ProductLong`) — the engine's Long arithmetic computes the CORRECT value for every one of these;
   the failures were serialization identity (a Long shipped as `valueInteger`/`valueDecimal`, which
-  the runner's BigInt comparison refuses). This corrects the 2026-08-26 diff's bucketing: these 10
-  sat in the 149 `fail‖fail` "engine gap" cluster, but the in-process harness failed them for its
-  own reason (upstream represents a Long LITERAL as a string while Long ARITHMETIC returns a
-  number, so the harness's native comparison sees `"100" ≠ 100`) — a representation
-  inconsistency, not wrong arithmetic. The genuinely-lossy Long cases (`NegateMaxLong` — the
-  engine coerces the literal string through `Number`; `1L + 2L` string concatenation) still fail,
-  and are upstream `cql-execution` gaps (ADR-060), now precisely separated from the serialization
-  losses.
+  the runner's BigInt comparison refuses). This corrects the 2026-08-26 diff's bucketing for **9 of
+  the 10**: they sat in the 149 `fail‖fail` "engine gap" cluster, but the in-process harness failed
+  them for its own reason (upstream represents a Long LITERAL as a string while Long ARITHMETIC
+  returns a number, so the harness's native comparison sees `"100" ≠ 100`) — a representation
+  inconsistency, not wrong arithmetic. The tenth, `Negate1L`, was already correctly placed in the
+  41 `pass‖fail` cluster (the diff's finding 3, cluster 3) and is simply fixed. The
+  genuinely-lossy Long cases (`NegateMaxLong` — the engine coerces the literal string through
+  `Number`; `1L + 2L` string concatenation) still fail, and are upstream `cql-execution` gaps
+  (ADR-060), now precisely separated from the serialization losses.
 - **2 numeric-interval cases** (`DecimalIntervalExcept1to3`, `ExpandPer0D1`) — #482 exactly: the
   whole-number heuristic labeled Decimal intervals Integer and closed-normalized open boundaries by
   step 1 (`[1.0, 4.0)` shipped as `[1, 3]`; true coverage `[1, 3.99999999]`).
