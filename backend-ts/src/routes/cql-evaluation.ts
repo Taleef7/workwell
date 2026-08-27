@@ -42,7 +42,7 @@
  */
 import { evaluateExpressions } from "@work-well/measure-engine";
 import { compileCql } from "../measure/cql-translator.ts";
-import { resultToParameters, evaluationErrorParameters } from "../fhir/cql-result-parameters.ts";
+import { resultToParameters, evaluationErrorParameters, declaredResultType } from "../fhir/cql-result-parameters.ts";
 
 /**
  * Every response gets a FRESH headers object — never a shared module-level one. The local host layer
@@ -157,7 +157,10 @@ export async function handleCqlEvaluation(req: Request): Promise<Response | null
   try {
     const results = await evaluateExpressions(compiled.elm);
     const value = (results as Record<string, unknown>).Result;
-    return new Response(JSON.stringify(resultToParameters(value)), { status: 200, headers: jsonHeaders() });
+    // The define's STATIC type (EnableResultTypes, #482) — what lets the serializer tell a Decimal
+    // interval from an Integer one and a Long from an Integer, which the runtime values cannot.
+    const declared = declaredResultType(defs[0]);
+    return new Response(JSON.stringify(resultToParameters(value, declared)), { status: 200, headers: jsonHeaders() });
   } catch (err) {
     // A runtime error is a RESULT (see the module docblock): in-band `evaluation error`, HTTP 200.
     const message = err instanceof Error ? err.message : String(err);

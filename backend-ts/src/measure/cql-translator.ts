@@ -17,6 +17,7 @@ import {
   ModelManager,
   LibraryManager,
   CqlTranslator,
+  CqlCompilerOptions,
   createModelInfoProvider,
   createLibrarySourceProvider,
   createUcumService,
@@ -63,14 +64,23 @@ function manager(validateUnit: ValidateUnit | typeof NO_UCUM_SERVICE): unknown {
       name === "System" ? stringAsSource(systemModelInfoXml) : name === "FHIR" ? stringAsSource(fhirModelInfoXml) : null,
     ),
   );
+  // defaultOptions() plus EnableResultTypes (#482): the translator stamps each define's STATIC type
+  // (`resultTypeName`/`resultTypeSpecifier`) into the ELM, which is what lets the `$cql` serializer
+  // tell a Decimal interval from an Integer one and a Long from an Integer — the runtime values
+  // cannot. `withOptions` ADDS to the default set (verified: the defaults' behavior is unchanged and
+  // the conformance baseline is byte-identical), so everything else keeps the translator's defaults.
+  // Additive only for every other consumer: the ELM Explorer and the harness see extra fields.
+  // Build-time compilation (`scripts/compile-measures.mjs`) builds its OWN LibraryManager and is
+  // untouched — the committed ELM artifacts do not change.
+  const compilerOptions = CqlCompilerOptions.defaultOptions().withOptions([CqlCompilerOptions.Options.EnableResultTypes]);
   // Positional: (modelManager, cqlCompilerOptions, libraryCache, lazyUcumService, elmLibraryReaderProvider).
-  // `undefined` for the middle two keeps their own defaults.
+  // `undefined` for libraryCache keeps its own default.
   const lm =
     validateUnit === NO_UCUM_SERVICE
-      ? new LibraryManager(mm)
+      ? new LibraryManager(mm, compilerOptions)
       : new LibraryManager(
           mm,
-          undefined,
+          compilerOptions,
           undefined,
           createUcumService(
             // Conversion is never requested during translation; refuse rather than invent a factor.
