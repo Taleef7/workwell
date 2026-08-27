@@ -55,6 +55,10 @@ If the token expires, mint a fresh JWT and update the environment value.
 - Invalid tool arguments return safe structured errors and still generate audit records.
 - MCP tools never decide compliance; CQL remains the source of truth.
 - `check_compliance` derives status from persisted CQL outcomes only — AI is never consulted.
+- `check_compliance` and `get_employee` serve only outcomes from FINALIZED runs (`COMPLETED`/
+  `PARTIAL_FAILURE`) — the same rule as the compliance API (ADR-061). A row written by a run still in
+  progress is never an answer; with no finalized outcome, `check_compliance` returns `NO_OUTCOME`
+  and says so (#491).
 - `explain_rule` returns deterministic metadata from measure spec and CQL; no AI is used.
 
 ## Tool inventory (v2.0.0)
@@ -98,7 +102,7 @@ Returns: `employeeExternalId`, `name`, `role`, `site`, `active`, `latestOutcomes
   "mode": "latest"
 }
 ```
-`mode` values: `latest` (persisted outcome), `preview` (same data, labeled preview — no new records). `complianceDecisionSource` is always `cql_outcome`. `decisionAvailable` is `true` when an outcome row exists and `false` when the status is `NO_OUTCOME`.
+`mode` values: `latest` (persisted outcome), `preview` (same data, labeled preview — no new records). `complianceDecisionSource` is always `cql_outcome`. `decisionAvailable` is `true` when a **finalized** outcome row exists and `false` when the status is `NO_OUTCOME` — a row written by a run still in progress does not count (#491). `evaluationDate` is reserved and currently ignored; the latest finalized outcome is served regardless. An unresolved `measureName` returns `MEASURE_NOT_FOUND`, and the returned `caseId` is only ever a case whose own outcome status matches the served status (a case reshaped mid-run by a newer, unfinished evaluation is not attached).
 
 ### `list_noncompliant`
 ```json
