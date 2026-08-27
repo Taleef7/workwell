@@ -102,7 +102,7 @@ Returns: `employeeExternalId`, `name`, `role`, `site`, `active`, `latestOutcomes
   "mode": "latest"
 }
 ```
-`mode` values: `latest` (persisted outcome), `preview` (same data, labeled preview — no new records). `complianceDecisionSource` is always `cql_outcome`. `decisionAvailable` is `true` when an outcome row exists and `false` when the status is `NO_OUTCOME`.
+`mode` values: `latest` (persisted outcome), `preview` (same data, labeled preview — no new records). `complianceDecisionSource` is always `cql_outcome`. `decisionAvailable` is `true` when a **finalized** outcome row exists and `false` when the status is `NO_OUTCOME` — a row written by a run still in progress does not count (#491). `evaluationDate` is reserved and currently ignored; the latest finalized outcome is served regardless. An unresolved `measureName` returns `MEASURE_NOT_FOUND`, and the returned `caseId` is only ever a case whose own outcome status matches the served status (a case reshaped mid-run by a newer, unfinished evaluation is not attached).
 
 ### `list_noncompliant`
 ```json

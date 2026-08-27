@@ -379,3 +379,89 @@ test("#491 get_employee latestOutcomes excludes mid-run rows and dedups to one p
   assert.equal(audiogram.length, 1, "one row per measure");
   assert.equal(audiogram[0]!.status, "OVERDUE", "the finalized run's outcome, never the mid-run row");
 });
+
+test("#492 check_compliance with an unknown measure name is MEASURE_NOT_FOUND, not advice to wait", async () => {
+  // The generic absence message ("wait for the current run to finalize") is actively misleading for a
+  // measure that does not exist — an AI client would retry forever (review on #492). Same rule as
+  // list_cases / list_noncompliant: an unresolved measure filter errors, never a lookalike answer.
+  const { payload } = await call("check_compliance", { employeeExternalId: "emp-006", measureName: "No Such Measure" });
+  assert.equal(payload.code, "MEASURE_NOT_FOUND");
+});
+
+test("#492 a case reshaped by a still-running run is not attached to the finalized answer (Codex P2)", async () => {
+  // Finalized run: COMPLIANT (no open case). A still-running run then writes OVERDUE for the SAME
+  // period and opens a case. The served status is the finalized COMPLIANT; attaching the case the
+  // unfinished evaluation just opened would pair two runs' worldviews in one answer.
+  const done = await deps.runStore.createRun({
+    scopeType: "EMPLOYEE",
+    scopeId: "emp-013",
+    triggeredBy: "test",
+    requestedScope: { employeeId: "emp-013" },
+    measurementPeriodStart: "2026-06-15T00:00:00.000Z",
+    measurementPeriodEnd: "2026-06-15T00:00:00.000Z",
+  });
+  await deps.runStore.finalizeRun(done.id, "COMPLETED");
+  await deps.outcomeStore.recordOutcome({
+    runId: done.id,
+    subjectId: "emp-013",
+    measureId: "audiogram",
+    evaluationPeriod: "2026-06-15",
+    status: "COMPLIANT",
+    evidence: { expressionResults: [] },
+    evaluatedAt: "2026-06-15T00:00:00.000Z",
+  });
+  const running = await deps.runStore.createRun({
+    scopeType: "EMPLOYEE",
+    scopeId: "emp-013",
+    triggeredBy: "test",
+    requestedScope: { employeeId: "emp-013" },
+    measurementPeriodStart: "2026-06-15T00:00:00.000Z",
+    measurementPeriodEnd: "2026-06-15T00:00:00.000Z",
+  });
+  await deps.outcomeStore.recordOutcome({
+    runId: running.id,
+    subjectId: "emp-013",
+    measureId: "audiogram",
+    evaluationPeriod: "2026-06-15",
+    status: "OVERDUE",
+    evidence: { expressionResults: [] },
+    evaluatedAt: "2026-06-16T00:00:00.000Z",
+  });
+  await deps.caseStore.upsertFromOutcome({ runId: running.id, subjectId: "emp-013", measureId: "audiogram", evaluationPeriod: "2026-06-15", outcomeStatus: "OVERDUE" });
+  const { payload } = await call("check_compliance", { employeeExternalId: "emp-013", measureName: "Annual Audiogram Completed" });
+  assert.equal(payload.status, "COMPLIANT", "the finalized run's outcome");
+  assert.equal(payload.caseId, null, "a case whose state reflects an unfinished run must not be attached");
+});
+
+test("#492 get_employee orders same-timestamp measures deterministically by measureId", async () => {
+  // Same evaluated_at for several measures is the nightly ALL_PROGRAMS shape; without a tie-break the
+  // top-5 cap depends on join order and can differ between the SQLite floor and the Pg ceiling.
+  const done = await deps.runStore.createRun({
+    scopeType: "EMPLOYEE",
+    scopeId: "emp-014",
+    triggeredBy: "test",
+    requestedScope: { employeeId: "emp-014" },
+    measurementPeriodStart: "2026-06-15T00:00:00.000Z",
+    measurementPeriodEnd: "2026-06-15T00:00:00.000Z",
+  });
+  await deps.runStore.finalizeRun(done.id, "COMPLETED");
+  // hazwoper inserted FIRST: a stable sort with no tie-break preserves store order and fails this.
+  for (const measureId of ["hazwoper", "audiogram"]) {
+    await deps.outcomeStore.recordOutcome({
+      runId: done.id,
+      subjectId: "emp-014",
+      measureId,
+      evaluationPeriod: "2026-06-15",
+      status: "COMPLIANT",
+      evidence: { expressionResults: [] },
+      evaluatedAt: "2026-06-15T00:00:00.000Z",
+    });
+  }
+  const { payload } = await call("get_employee", { employeeExternalId: "emp-014" });
+  const rows = payload.latestOutcomes as Array<{ measureName: string }>;
+  assert.deepEqual(
+    rows.map((r) => r.measureName),
+    ["Audiogram", "HAZWOPER Surveillance"],
+    "equal timestamps order by measureId",
+  );
+});
