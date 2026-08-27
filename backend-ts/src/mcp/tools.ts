@@ -328,7 +328,11 @@ async function getEmployee(args: JsonRecord, deps: McpToolDeps): Promise<unknown
   const externalId = requireString(args, "employeeExternalId");
   const emp = employeeById(externalId);
   if (!emp) return safeError("EMPLOYEE_NOT_FOUND", `Employee not found: ${externalId}`);
-  const outcomes = await deps.outcomeStore.listOutcomesForEmployee(externalId, 5);
+  // #491: only a FINALIZED run's outcome is served (ADR-061's FINAL rule — a row exists before its run
+  // reaches a terminal status, and a mid-run partial result is not an answer). One row per measure,
+  // newest-first, capped at 5 to keep the response shape the tool has always had.
+  const perMeasure = await deps.outcomeStore.listLatestFinalizedOutcomePerMeasure(externalId);
+  const outcomes = perMeasure.sort((a, b) => b.evaluatedAt.localeCompare(a.evaluatedAt)).slice(0, 5);
   const latestOutcomes = outcomes.map((o) => ({
     measureName: MEASURES[o.measureId]?.name ?? o.measureId,
     version: measureVersionOf(o.measureId),
@@ -345,8 +349,11 @@ async function checkCompliance(args: JsonRecord, deps: McpToolDeps): Promise<unk
   const mode = args.mode != null ? String(args.mode) : "latest";
   if (mode !== "latest" && mode !== "preview") return safeError("INVALID_ARGUMENT", "mode must be 'latest' or 'preview'");
   const rec = await resolveMeasure(deps, { measureName });
-  const outcomes = rec ? (await deps.outcomeStore.listOutcomesForEmployee(externalId, 100000)).filter((o) => o.measureId === rec.measureId) : [];
-  const latest = outcomes[0] ?? null; // newest-first
+  // #491: only a FINALIZED run's outcome is the persisted answer (ADR-061's FINAL rule, enforced in SQL
+  // by the store — `COMPLETED`/`PARTIAL_FAILURE` runs only). The previous newest-row-wins read served a
+  // mid-run partial result as the compliance answer, which silently became wrong if that run FAILED.
+  const perMeasure = rec ? await deps.outcomeStore.listLatestFinalizedOutcomePerMeasure(externalId) : [];
+  const latest = perMeasure.find((o) => o.measureId === rec?.measureId) ?? null;
   if (!rec || !latest) {
     return {
       employeeExternalId: externalId,
@@ -355,7 +362,7 @@ async function checkCompliance(args: JsonRecord, deps: McpToolDeps): Promise<unk
       source: mode,
       complianceDecisionSource: "cql_outcome",
       decisionAvailable: false,
-      message: "No outcome found. Run a measure evaluation first.",
+      message: "No finalized outcome found — a row from a run still in progress is never served. Run a measure evaluation, or wait for the current run to finalize.",
     };
   }
   const openCases = await deps.caseStore.listCases({ statuses: ["OPEN"], measureId: rec.measureId, limit: 100000, offset: 0 });

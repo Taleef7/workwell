@@ -235,7 +235,8 @@ export async function backfillTrendHistory(
           status,
           // Backdate evaluated_at to the run's completion (NOT now), or these synthetic historical
           // rows would out-sort the real latest outcome in `evaluated_at DESC` reads
-          // (listOutcomesForEmployee / check_compliance) and mask current compliance (Codex P1).
+          // (listOutcomesForEmployee, listLatestFinalizedOutcomePerMeasure — the check_compliance /
+          // CDS latest-answer reads) and mask current compliance (Codex P1).
           evaluatedAt: completedAt,
           evidence: { seedTrendHistory: true, target: a.target, rate },
         };

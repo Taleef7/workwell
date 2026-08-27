@@ -298,3 +298,84 @@ test("ADR-046: a recency measure still gets its recency sentence", async () => {
   assert.match(authored, /last qualifying exam was 2025-03-10 \(55 days ago\), which exceeds the 365-day/);
   assert.ok(!authored.includes("Official population membership"), "authored outcomes have no official block");
 });
+
+// #491 — the finalized-run rule (ADR-061's FINAL rule, applied to the MCP surface). An outcome row
+// exists as soon as the evaluation loop writes it — BEFORE its run reaches a terminal status — so a
+// newest-row read with no run-status check serves a mid-run partial result as the compliance answer.
+// Dedicated subject (emp-011) + dedicated runs so nothing leaks into the shared fixture above.
+test("#491 check_compliance never serves a mid-run row over an older finalized one", async () => {
+  const done = await deps.runStore.createRun({
+    scopeType: "EMPLOYEE",
+    scopeId: "emp-011",
+    triggeredBy: "test",
+    requestedScope: { employeeId: "emp-011" },
+    measurementPeriodStart: "2026-06-13T00:00:00.000Z",
+    measurementPeriodEnd: "2026-06-13T00:00:00.000Z",
+  });
+  await deps.runStore.finalizeRun(done.id, "COMPLETED");
+  await deps.outcomeStore.recordOutcome({
+    runId: done.id,
+    subjectId: "emp-011",
+    measureId: "audiogram",
+    evaluationPeriod: "2026-06-13",
+    status: "OVERDUE",
+    evidence: { expressionResults: [] },
+    evaluatedAt: "2026-06-13T00:00:00.000Z",
+  });
+  // A newer row from a run that is still RUNNING — not an answer yet.
+  const running = await deps.runStore.createRun({
+    scopeType: "EMPLOYEE",
+    scopeId: "emp-011",
+    triggeredBy: "test",
+    requestedScope: { employeeId: "emp-011" },
+    measurementPeriodStart: "2026-06-14T00:00:00.000Z",
+    measurementPeriodEnd: "2026-06-14T00:00:00.000Z",
+  });
+  await deps.outcomeStore.recordOutcome({
+    runId: running.id,
+    subjectId: "emp-011",
+    measureId: "audiogram",
+    evaluationPeriod: "2026-06-14",
+    status: "COMPLIANT",
+    evidence: { expressionResults: [] },
+    evaluatedAt: "2026-06-14T00:00:00.000Z",
+  });
+  const { payload } = await call("check_compliance", { employeeExternalId: "emp-011", measureName: "Annual Audiogram Completed" });
+  assert.equal(payload.status, "OVERDUE", "the finalized run's outcome is the answer, not the mid-run row");
+  assert.equal(payload.evaluationPeriod, "2026-06-13");
+  assert.equal(payload.decisionAvailable, true);
+});
+
+test("#491 check_compliance with ONLY mid-run rows → NO_OUTCOME, and the message says finalized", async () => {
+  const running = await deps.runStore.createRun({
+    scopeType: "EMPLOYEE",
+    scopeId: "emp-012",
+    triggeredBy: "test",
+    requestedScope: { employeeId: "emp-012" },
+    measurementPeriodStart: "2026-06-14T00:00:00.000Z",
+    measurementPeriodEnd: "2026-06-14T00:00:00.000Z",
+  });
+  await deps.outcomeStore.recordOutcome({
+    runId: running.id,
+    subjectId: "emp-012",
+    measureId: "audiogram",
+    evaluationPeriod: "2026-06-14",
+    status: "COMPLIANT",
+    evidence: { expressionResults: [] },
+    evaluatedAt: "2026-06-14T00:00:00.000Z",
+  });
+  const { payload } = await call("check_compliance", { employeeExternalId: "emp-012", measureName: "Annual Audiogram Completed" });
+  assert.equal(payload.status, "NO_OUTCOME");
+  assert.equal(payload.decisionAvailable, false);
+  assert.match(String(payload.message), /finalized/i, "the absence message must not read as 'no run ever covered this subject'");
+});
+
+test("#491 get_employee latestOutcomes excludes mid-run rows and dedups to one per measure", async () => {
+  // emp-011 now has: audiogram OVERDUE (finalized) + audiogram COMPLIANT (mid-run, newer).
+  const { payload } = await call("get_employee", { employeeExternalId: "emp-011" });
+  const rows = payload.latestOutcomes as Array<{ measureName: string; status: string }>;
+  // The registry display name (`MEASURES[id].name`), not the measure-store name resolveMeasure matches.
+  const audiogram = rows.filter((r) => r.measureName === "Audiogram");
+  assert.equal(audiogram.length, 1, "one row per measure");
+  assert.equal(audiogram[0]!.status, "OVERDUE", "the finalized run's outcome, never the mid-run row");
+});
