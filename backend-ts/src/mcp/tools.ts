@@ -328,7 +328,15 @@ async function getEmployee(args: JsonRecord, deps: McpToolDeps): Promise<unknown
   const externalId = requireString(args, "employeeExternalId");
   const emp = employeeById(externalId);
   if (!emp) return safeError("EMPLOYEE_NOT_FOUND", `Employee not found: ${externalId}`);
-  const outcomes = await deps.outcomeStore.listOutcomesForEmployee(externalId, 5);
+  // #491: only a FINALIZED run's outcome is served (ADR-061's FINAL rule — a row exists before its run
+  // reaches a terminal status, and a mid-run partial result is not an answer). One row per measure,
+  // newest-first, capped at 5 to keep the response shape the tool has always had.
+  const perMeasure = await deps.outcomeStore.listLatestFinalizedOutcomePerMeasure(externalId);
+  // measureId tie-break: a nightly ALL_PROGRAMS run stamps many measures with one timestamp, and
+  // without it WHICH measures survive the cap of 5 depends on join order (floor vs ceiling drift).
+  const outcomes = perMeasure
+    .sort((a, b) => b.evaluatedAt.localeCompare(a.evaluatedAt) || a.measureId.localeCompare(b.measureId))
+    .slice(0, 5);
   const latestOutcomes = outcomes.map((o) => ({
     measureName: MEASURES[o.measureId]?.name ?? o.measureId,
     version: measureVersionOf(o.measureId),
@@ -345,9 +353,16 @@ async function checkCompliance(args: JsonRecord, deps: McpToolDeps): Promise<unk
   const mode = args.mode != null ? String(args.mode) : "latest";
   if (mode !== "latest" && mode !== "preview") return safeError("INVALID_ARGUMENT", "mode must be 'latest' or 'preview'");
   const rec = await resolveMeasure(deps, { measureName });
-  const outcomes = rec ? (await deps.outcomeStore.listOutcomesForEmployee(externalId, 100000)).filter((o) => o.measureId === rec.measureId) : [];
-  const latest = outcomes[0] ?? null; // newest-first
-  if (!rec || !latest) {
+  // An unresolved measure is an ERROR, not a lookalike absence (review on #492): the NO_OUTCOME
+  // message advises waiting for a run, which for a measure that does not exist sends an AI client
+  // into an endless retry. Same rule as list_cases / list_noncompliant.
+  if (!rec) return safeError("MEASURE_NOT_FOUND", `Measure not found: ${measureName}`);
+  // #491: only a FINALIZED run's outcome is the persisted answer (ADR-061's FINAL rule, enforced in SQL
+  // by the store — `COMPLETED`/`PARTIAL_FAILURE` runs only). The previous newest-row-wins read served a
+  // mid-run partial result as the compliance answer, which silently became wrong if that run FAILED.
+  const perMeasure = await deps.outcomeStore.listLatestFinalizedOutcomePerMeasure(externalId);
+  const latest = perMeasure.find((o) => o.measureId === rec.measureId) ?? null;
+  if (!latest) {
     return {
       employeeExternalId: externalId,
       measureName,
@@ -355,11 +370,20 @@ async function checkCompliance(args: JsonRecord, deps: McpToolDeps): Promise<unk
       source: mode,
       complianceDecisionSource: "cql_outcome",
       decisionAvailable: false,
-      message: "No outcome found. Run a measure evaluation first.",
+      message: "No finalized outcome found — a row from a run still in progress is never served. Run a measure evaluation, or wait for the current run to finalize.",
     };
   }
   const openCases = await deps.caseStore.listCases({ statuses: ["OPEN"], measureId: rec.measureId, limit: 100000, offset: 0 });
-  const openCase = openCases.find((c) => c.employeeId === externalId && c.evaluationPeriod === latest.evaluationPeriod) ?? null;
+  // The attached case must be CONSISTENT with the served answer (Codex P2 on #492): case rows are
+  // written mid-run by design, so a still-running re-evaluation can have reshaped this period's case
+  // (e.g. served COMPLIANT from the finalized run, case just opened OVERDUE by the unfinished one).
+  // Requiring the case's own outcome status to match the served status excludes exactly those — while
+  // a long-lived case re-confirmed by an in-flight run (same status, advanced lastRunId) stays
+  // attached, which a lastRunId filter would wrongly hide for the duration of every nightly run.
+  const openCase =
+    openCases.find(
+      (c) => c.employeeId === externalId && c.evaluationPeriod === latest.evaluationPeriod && c.currentOutcomeStatus === latest.status,
+    ) ?? null;
   return {
     status: latest.status,
     evaluationPeriod: latest.evaluationPeriod,
@@ -542,7 +566,12 @@ export const MCP_TOOLS: McpTool[] = [
       "Return latest or preview compliance status for an employee/measure. mode=latest retrieves the persisted outcome; mode=preview returns the same data labeled as preview (no official records created). AI is never used.",
     inputSchema: {
       type: "object",
-      properties: { employeeExternalId: { type: "string" }, measureName: { type: "string" }, evaluationDate: { type: "string" }, mode: { type: "string", enum: ["latest", "preview"] } },
+      properties: {
+        employeeExternalId: { type: "string" },
+        measureName: { type: "string" },
+        evaluationDate: { type: "string", description: "Reserved — currently ignored; the latest finalized outcome is served regardless of this value" },
+        mode: { type: "string", enum: ["latest", "preview"] },
+      },
       required: ["employeeExternalId", "measureName"],
     },
     roles: [CM, ADMIN],
