@@ -1,5 +1,20 @@
 # Runner-vs-harness case diff — and the harness defect it found (2026-08-26)
 
+> **Updated 2026-08-27 (#482/#488):** the serializer now reads the ELM-declared result type, and the
+> runner re-run moved the HTTP headline **1,589 → 1,606 pass, zero regressions**
+> (`CQL_EVALUATION_SERVICE_2026-08-25.md`, re-run section, has the 17-case decomposition). Two
+> corrections to this document's buckets: **(1)** the 149 `fail‖fail` cluster contained **9 Long
+> arithmetic cases whose arithmetic was CORRECT** — the runner side failed on serialization identity
+> (fixed), and the harness side failed on upstream's own representation split (a Long literal is a
+> string, Long arithmetic returns a number), so they were never engine-wrongness (the tenth Long
+> flip, `Negate1L`, was already correctly attributed in cluster 3 of finding 3 below); **(2)** finding 3's
+> cluster 2 (`RolledOutIntervals`, "Date rendered as DateTime") is **reclassified as a
+> grader-semantics artifact, not a serializer defect** — the test's own cast makes the static type
+> `Interval<DateTime>`, the engine faithfully produces day-precision DateTimes, and `@2012-01-01T`
+> is the correct rendering of that value; the corpus writes `Date` literals and the runner
+> string-compares. Cluster 3's `Negate1L` is fixed; `NegateMaxLong` remains, precisely attributed to
+> the engine's `Number` coercion (upstream, ADR-060).
+
 **What this is.** The case-by-case reconciliation `CQL_EVALUATION_SERVICE_2026-08-25.md` named as the
 prerequisite before any external submission of the `$cql` numbers: every test in
 `cqframework/cql-tests` (pin `727219f4`), graded by HL7's `cql-tests-runner` over live HTTP on one

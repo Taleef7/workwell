@@ -14,7 +14,47 @@ built from and never got the same fix. Both tools now read `listLatestFinalizedO
 `check_compliance`'s absence message says "no finalized outcome" rather than implying no run ever
 covered the subject, and `get_employee` dedups to one row per measure. Three tests written RED first
 (the mid-run row was served over an older finalized one; mid-run-only read as an answer; get_employee
-returned both rows for one measure).
+returned both rows for one measure). The review round (#492) added: an unresolved `measureName` is
+`MEASURE_NOT_FOUND` rather than advice to wait; the attached `caseId` must be status-consistent with
+the served answer (Codex's P2 — a case reshaped mid-run by an unfinished re-evaluation is not
+attached, while a re-confirmed same-status case stays); a deterministic `measureId` tie-break on the
+top-5 cap; `evaluationDate` declared reserved-and-ignored. #493 filed for the employee-profile read —
+the last newest-row-wins latest-answer reader.
+
+**The runtime translator now runs with `EnableResultTypes` and the `$cql` route threads the define's
+static type into the serializer.** The engine's runtime numbers carry no type, so the serializer had
+been discriminating Integer-vs-Decimal intervals by whether the boundaries were whole numbers —
+`Interval[1.0, 2.0)` shipped as `Interval<System.Integer>` with `high = 1` (true coverage
+1.99999999) — and a Long that reached JS as a plain number was indistinguishable from an Integer.
+Now the declared type is authoritative exactly where the runtime value is mute (numeric interval
+point types, Long identity → `valueString` integer literal labeled `System.Long`, never through
+`Number`); temporal intervals keep value-flag detection; no declared type falls back to the old
+heuristics byte-identically, pinned. The translator flag is one addition on top of `defaultOptions()`
+and the conformance baseline reproduced **byte-identically** (211 known non-passing cases unchanged),
+so the harness numbers did not move; `compile-measures` builds its own LibraryManager and is
+untouched.
+
+**The runner re-run: 1,589 → 1,606 pass over live HTTP, 17 fail→pass, zero regressions.** The
+decomposition corrected two of the 2026-08-26 diff's bucket claims. **Nine Long arithmetic cases**
+(`AbsLong`, `Multiply2LBy3L`, `ProductLong`, …) had been sitting in the `fail‖fail` "engine gap"
+cluster — but the engine's arithmetic was CORRECT on every one; the runner failed on serialization
+identity (fixed) and the in-process harness failed on upstream's representation split (a Long
+literal is a string, Long arithmetic returns a number). The tenth Long flip, `Negate1L`, was
+already correctly attributed as a serialization loss in the diff's `pass‖fail` cluster. (My first
+draft of this entry put all ten in `fail‖fail`; the #494 review caught the miscount against the
+regenerated harness results.) **Five Except cases** flipped for a
+reason that is not this change at all: the published 2026-08-25 run predated the #481 review round's
+temporal/quantity closed-normalization, so this is the first HTTP measurement of the tree as merged.
+And **`RolledOutIntervals` is reclassified, no code change**: the test's own cast makes the static
+type `Interval<DateTime>`, our engine faithfully produces day-precision DateTimes, and
+`@2012-01-01T` is the correct rendering — the corpus writes `Date` literals and the runner
+string-compares, so it joins the timezone cluster as a grader-semantics artifact. What remains ours:
+nothing — `NegateMaxLong` (the engine coerces the Long literal through `Number` in Negate) and
+`1L + 2L` string concatenation are upstream `cql-execution` gaps, now precisely separated from the
+serialization losses. `STANDARDS_CONFORMANCE.md`'s "phase 2, not built" clause about the `$cql`
+endpoint — stale since #474 — corrected with the runner-graded figures.
+
+## 2026-08-26 — #484 merged after a Codex round resolved by measurement; chapter 10 becomes the two integration flows
 
 **PR #484 (the CQM membership formulas, ADR-069) is merged — squash `84d4bc6b`, #476 closed, all 17
 checks green.** Codex's one finding was a P2 worth taking seriously: serving the IG membership

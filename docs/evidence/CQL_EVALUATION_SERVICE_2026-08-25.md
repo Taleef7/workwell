@@ -76,3 +76,42 @@ objects never traverse the host's serialization layer.
 **Raw results:** the runner's `local_results/202608251540_results.json` (local scratch; not
 committed — the numbers above are the record, and the run is reproducible: runner at its README
 defaults + `CQL_TESTS_PATH` at the sidecar + any bearer-injecting proxy).
+
+---
+
+## Re-run 2026-08-27 — after #482/#488 (declared result types): 1,589 → **1,606 pass**, zero regressions
+
+Same runner, same sidecar corpus, same proxy setup, against the serializer reading the ELM-declared
+result type (`EnableResultTypes`, `cql-result-parameters.ts`). **pass 1,606 · fail 206 · skip 11**
+(88.6% of graded). All 17 status changes are fail→pass; the case-by-case decomposition:
+
+- **10 Long arithmetic cases** (`AbsLong`, `Negate1L`, `NegateNeg1L`, `Multiply2LBy3L`,
+  `Subtract1LAnd1L`, `Modulo4LBy2L`, `TruncatedDivide10LBy3L`, `Power2LTo2L`, `Power2LTo3L`,
+  `ProductLong`) — the engine's Long arithmetic computes the CORRECT value for every one of these;
+  the failures were serialization identity (a Long shipped as `valueInteger`/`valueDecimal`, which
+  the runner's BigInt comparison refuses). This corrects the 2026-08-26 diff's bucketing for **9 of
+  the 10**: they sat in the 149 `fail‖fail` "engine gap" cluster, but the in-process harness failed
+  them for its own reason (upstream represents a Long LITERAL as a string while Long ARITHMETIC
+  returns a number, so the harness's native comparison sees `"100" ≠ 100`) — a representation
+  inconsistency, not wrong arithmetic. The tenth, `Negate1L`, was already correctly placed in the
+  41 `pass‖fail` cluster (the diff's finding 3, cluster 3) and is simply fixed. The
+  genuinely-lossy Long cases (`NegateMaxLong` — the engine coerces the literal string through
+  `Number`; `1L + 2L` string concatenation) still fail, and are upstream `cql-execution` gaps
+  (ADR-060), now precisely separated from the serialization losses.
+- **2 numeric-interval cases** (`DecimalIntervalExcept1to3`, `ExpandPer0D1`) — #482 exactly: the
+  whole-number heuristic labeled Decimal intervals Integer and closed-normalized open boundaries by
+  step 1 (`[1.0, 4.0)` shipped as `[1, 3]`; true coverage `[1, 3.99999999]`).
+- **5 cases measured for the first time** (`QuantityIntervalExcept1to4`, `ExceptDateTimeInterval`,
+  `ExceptDateTime2`, `ExceptTimeInterval`, `ExceptTime2`) — these flips are NOT from this change:
+  the 2026-08-25 acceptance run predated the #481 review round's quantity/temporal
+  closed-normalization fixes (the old actuals show raw open boundaries), so the published 1,589
+  slightly understated the merged #481 code. This re-run is the first HTTP measurement of the tree
+  as merged.
+
+**One reclassification, no code change:** `CqlAggregateTest/RolledOutIntervals` (the "Date rendered
+as DateTime" case, #488 item 3) is NOT a serializer defect. The test's own CQL casts through
+`List<Interval<DateTime>>`, our engine faithfully produces day-precision DateTime boundaries, and
+`@2012-01-01T` is the correct CQL rendering of that value — the corpus writes the expected output as
+`Date` literals and the runner string-compares, while the in-process harness passes it via the
+Date→DateTime equivalence conversion. It joins the timezone cluster as a grader-semantics artifact.
+Raw results: `local_results/202608271111_results.json` (local scratch).

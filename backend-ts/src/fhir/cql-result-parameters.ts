@@ -34,6 +34,54 @@ export interface FhirParameter {
   [key: string]: unknown;
 }
 
+/**
+ * The define's STATIC type, parsed from the compiled ELM (#482/#488). The engine's runtime numbers
+ * carry no type, so without this a Decimal interval with whole-number boundaries closed-normalizes by
+ * the Integer step (wrong arithmetic AND wrong `cqf-cqlType` label), and a Long that reaches JS as a
+ * plain number is indistinguishable from an Integer. The declared type is authoritative exactly where
+ * the runtime value is mute; where the runtime value knows more (temporal point types, which carry
+ * their own precision), the value flags keep deciding and the declared type is ignored.
+ */
+export type DeclaredType =
+  | { kind: "named"; name: string }
+  | { kind: "interval"; point: DeclaredType | null }
+  | { kind: "list"; element: DeclaredType | null };
+
+const SYSTEM_TYPE_NS = "{urn:hl7-org:elm-types:r1}";
+
+function parseTypeName(name: unknown): DeclaredType | null {
+  if (typeof name !== "string" || !name.startsWith(SYSTEM_TYPE_NS)) return null;
+  return { kind: "named", name: name.slice(SYSTEM_TYPE_NS.length) };
+}
+
+function parseTypeSpecifier(spec: unknown): DeclaredType | null {
+  if (spec === null || typeof spec !== "object") return null;
+  const s = spec as Record<string, unknown>;
+  switch (s.type) {
+    case "NamedTypeSpecifier":
+      return parseTypeName(s.name);
+    case "IntervalTypeSpecifier":
+      return { kind: "interval", point: parseTypeSpecifier(s.pointType) };
+    case "ListTypeSpecifier":
+      return { kind: "list", element: parseTypeSpecifier(s.elementType) };
+    default:
+      // Choice/Tuple/foreign-model types derive nothing — the value-shape heuristics apply.
+      return null;
+  }
+}
+
+/**
+ * The declared result type of one compiled ELM define (`resultTypeName` for named types,
+ * `resultTypeSpecifier` for intervals/lists), or `null` when the ELM carries neither — which is the
+ * case unless the translator ran with `EnableResultTypes`. `null` anywhere means "fall back to the
+ * pre-#482 value-shape heuristics", so an older ELM serializes byte-identically.
+ */
+export function declaredResultType(def: unknown): DeclaredType | null {
+  if (def === null || typeof def !== "object") return null;
+  const d = def as Record<string, unknown>;
+  return parseTypeName(d.resultTypeName) ?? parseTypeSpecifier(d.resultTypeSpecifier);
+}
+
 export interface FhirParameters {
   resourceType: "Parameters";
   parameter: FhirParameter[];
@@ -83,7 +131,15 @@ interface IntervalLike {
   highClosed: boolean;
 }
 
-function intervalParam(name: string, v: IntervalLike): FhirParameter {
+/** The numeric point types a declared interval type may authoritatively name (#482). */
+const NUMERIC_POINTS = new Set(["Integer", "Long", "Decimal"]);
+
+function declaredNumericPoint(declared: DeclaredType | null): "Integer" | "Long" | "Decimal" | null {
+  if (declared?.kind !== "interval" || declared.point?.kind !== "named") return null;
+  return NUMERIC_POINTS.has(declared.point.name) ? (declared.point.name as "Integer" | "Long" | "Decimal") : null;
+}
+
+function intervalParam(name: string, v: IntervalLike, declared: DeclaredType | null): FhirParameter {
   const { low, high } = v;
   const sample = low ?? high;
 
@@ -144,11 +200,15 @@ function intervalParam(name: string, v: IntervalLike): FhirParameter {
     }
   }
 
-  // Numeric interval (FHIR-56226): unity-coded Range + declared point type. Integer when every present
-  // boundary is a whole number — the engine's numbers carry no static type, so this is the honest
-  // best available discrimination (a whole-valued Decimal interval will grade with the Integer step).
+  // Numeric interval (FHIR-56226): unity-coded Range + declared point type. The ELM's declared point
+  // type is authoritative when the route threads one in (#482) — the engine's runtime numbers carry
+  // no static type, so `Interval[1.0, 2.0)` is indistinguishable from `Interval[1, 2)` by value.
+  // Without a declared type: Integer when every present boundary is a whole number — the honest best
+  // available discrimination (a whole-valued Decimal interval grades with the Integer step).
+  const declaredPoint = declaredNumericPoint(declared);
   const nums = [low, high].filter((b): b is number => typeof b === "number");
-  const isInteger = nums.length > 0 && nums.every((n) => Number.isInteger(n));
+  const point = declaredPoint ?? (nums.length > 0 && nums.every((n) => Number.isInteger(n)) ? "Integer" : "Decimal");
+  const isInteger = point !== "Decimal"; // Integer and Long points both step by 1
   const step = isInteger ? 1 : DECIMAL_STEP;
   const lowN = closedBoundary(typeof low === "number" ? low : null, v.lowClosed, true, step);
   const highN = closedBoundary(typeof high === "number" ? high : null, v.highClosed, false, step);
@@ -157,9 +217,7 @@ function intervalParam(name: string, v: IntervalLike): FhirParameter {
   if (highN !== null) range.high = unityQuantity(highN);
   return {
     name,
-    extension: [
-      { url: CQL_TYPE, valueString: `Interval<System.${isInteger ? "Integer" : "Decimal"}>` },
-    ],
+    extension: [{ url: CQL_TYPE, valueString: `Interval<System.${point}>` }],
     valueRange: range,
   };
 }
@@ -172,7 +230,20 @@ function temporalString(v: object): string {
   return s.startsWith("T") ? s.slice(1) : s;
 }
 
-function scalarParam(name: string, v: unknown): FhirParameter {
+function scalarParam(name: string, v: unknown, declared: DeclaredType | null): FhirParameter {
+  // System.Long (#488): FHIR R4 has no integer64, so the wire form is a valueString integer literal
+  // (what the runner's longEquals reads back via BigInt), labeled by cqf-cqlType. Only the DECLARED
+  // type can identify one: cql-execution has no Long runtime type — a Long literal passes through as
+  // its string (shipped byte-exact; a Number round-trip would destroy values past 2^53), and Long
+  // arithmetic comes back as a plain JS number (shipped as given; where the engine itself already
+  // lost precision, that loss is upstream's — ADR-060's Long finding — not re-introduced here).
+  if (declared?.kind === "named" && declared.name === "Long" && (typeof v === "number" || typeof v === "string")) {
+    return {
+      name,
+      extension: [{ url: CQL_TYPE, valueString: "System.Long" }],
+      valueString: String(v),
+    };
+  }
   switch (typeof v) {
     case "boolean":
       return { name, valueBoolean: v };
@@ -201,7 +272,7 @@ function scalarParam(name: string, v: unknown): FhirParameter {
   if (proto === Object.prototype || proto === null) {
     const entries = Object.entries(obj);
     if (entries.length === 0) return emptyTupleParam(name);
-    return { name, part: entries.flatMap(([field, fieldValue]) => valueToParams(field, fieldValue)) };
+    return { name, part: entries.flatMap(([field, fieldValue]) => valueToParams(field, fieldValue, null)) };
   }
 
   if (flag(obj, "isTime")) return { name, valueTime: temporalString(obj) };
@@ -249,7 +320,7 @@ function scalarParam(name: string, v: unknown): FhirParameter {
     };
   }
   if ("lowClosed" in obj || "highClosed" in obj || flag(obj, "isInterval")) {
-    return intervalParam(name, obj as unknown as IntervalLike);
+    return intervalParam(name, obj as unknown as IntervalLike, declared);
   }
 
   // A class instance none of the flags claim — serialize its fields as a tuple rather than losing
@@ -257,30 +328,37 @@ function scalarParam(name: string, v: unknown): FhirParameter {
   // `Tuple {}` is a CQL syntax error, so real pipelines cannot produce an empty plain object.)
   const entries = Object.entries(obj);
   if (entries.length === 0) return emptyTupleParam(name);
-  return { name, part: entries.flatMap(([field, fieldValue]) => valueToParams(field, fieldValue)) };
+  return { name, part: entries.flatMap(([field, fieldValue]) => valueToParams(field, fieldValue, null)) };
 }
 
-/** A list ELEMENT that is itself a list nests under parts named `element` (the reader's convention). */
-function elementParams(name: string, element: unknown): FhirParameter[] {
+/** A list ELEMENT that is itself a list nests under parts named `element` (the reader's convention).
+ *  `declared` is the ELEMENT's declared type (already unwrapped one List level by the caller). */
+function elementParams(name: string, element: unknown, declared: DeclaredType | null): FhirParameter[] {
   if (Array.isArray(element)) {
     if (element.length === 0) return [emptyListParam(name)];
-    return [{ name, part: element.flatMap((e) => elementParams("element", e)) }];
+    const inner = declared?.kind === "list" ? declared.element : null;
+    return [{ name, part: element.flatMap((e) => elementParams("element", e, inner)) }];
   }
-  return valueToParams(name, element);
+  return valueToParams(name, element, declared);
 }
 
-function valueToParams(name: string, value: unknown): FhirParameter[] {
+function valueToParams(name: string, value: unknown, declared: DeclaredType | null): FhirParameter[] {
   if (value === null || value === undefined) return [nullParam(name)];
   if (Array.isArray(value)) {
     if (value.length === 0) return [emptyListParam(name)];
-    return value.flatMap((element) => elementParams(name, element));
+    const element = declared?.kind === "list" ? declared.element : null;
+    return value.flatMap((el) => elementParams(name, el, element));
   }
-  return [scalarParam(name, value)];
+  return [scalarParam(name, value, declared)];
 }
 
-/** The whole `$cql` success response: the evaluated value under the standard `return` parameter. */
-export function resultToParameters(value: unknown): FhirParameters {
-  return { resourceType: "Parameters", parameter: valueToParams("return", value) };
+/**
+ * The whole `$cql` success response: the evaluated value under the standard `return` parameter.
+ * `declared` is the define's static type from the compiled ELM ({@link declaredResultType}), or
+ * `null`/omitted for the pre-#482 value-shape heuristics (byte-identical output).
+ */
+export function resultToParameters(value: unknown, declared: DeclaredType | null = null): FhirParameters {
+  return { resourceType: "Parameters", parameter: valueToParams("return", value, declared) };
 }
 
 /**
