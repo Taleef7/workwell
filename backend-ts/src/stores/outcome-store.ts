@@ -17,7 +17,8 @@ export interface RecordOutcomeInput {
   /**
    * When the outcome was evaluated (ISO-8601). Defaults to now. Pass an explicit value ONLY for
    * backdated synthetic seeding (the trend-history backfill) so historical rows don't out-sort the
-   * real latest outcome in `evaluated_at DESC` reads (`listOutcomesForEmployee`, check_compliance).
+   * real latest outcome in `evaluated_at DESC` reads (`listOutcomesForEmployee`,
+   * `listLatestFinalizedOutcomePerMeasure` — the compliance-api / MCP / CDS latest-answer reads).
    */
   evaluatedAt?: string;
 }
@@ -164,13 +165,16 @@ export interface OutcomeStore {
    */
   listOutcomesForMeasure(measureId: string, opts?: MeasureScanOptions): Promise<MeasureOutcomeRow[]>;
   /**
-   * The latest `limit` outcomes for one employee (by subjectId), newest-first — the MCP
-   * get_employee history and check_compliance lookup. Bounded scan over the outcomes table.
+   * The latest `limit` outcomes for one employee (by subjectId), newest-first — the employee-profile
+   * history, identity resolution, and the compliance API's windowed `latest` scan (which applies its
+   * own finalization check per row). Bounded scan over the outcomes table. The MCP tools moved to
+   * {@link listLatestFinalizedOutcomePerMeasure} (#491) — a raw read here has no run-status filter.
    */
   listOutcomesForEmployee(subjectId: string, limit: number): Promise<EmployeeOutcomeRow[]>;
   /**
    * One row per measure: the subject's newest outcome whose run is TERMINAL (`COMPLETED` or
-   * `PARTIAL_FAILURE`) — the CDS Hooks read (#470), bounded by the measure count instead of the
+   * `PARTIAL_FAILURE`) — the CDS Hooks read (#470) and the MCP check_compliance / get_employee
+   * reads (#491), bounded by the measure count instead of the
    * subject's whole outcome history. A measure whose only rows belong to unfinished runs is ABSENT
    * (a mid-run row is not the persisted answer — the compliance-api FINAL rule), never served stale.
    * Newest = `evaluated_at DESC` tie-broken by `id DESC` — the same `(evaluated_at, id)` composite

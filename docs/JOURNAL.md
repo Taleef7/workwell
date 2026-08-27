@@ -1,6 +1,20 @@
 # Journal
 
-## 2026-08-26 — #484 merged after a Codex round resolved by measurement; chapter 10 becomes the two integration flows
+## 2026-08-27 — the MCP tools get the FINAL rule (#491); the serializer takes the declared result type (#482/#488)
+
+**#491 filed and fixed — MCP `check_compliance` served mid-run rows as the compliance answer.** The
+defect the #470 work surfaced and deliberately left out of that PR: `check_compliance` (and
+`get_employee`'s `latestOutcomes`) picked the newest outcome row with no run-finalization check, so a
+row written mid-run — before the run reaches a terminal status, or before `/finalize` in the QRDA
+import flow — was handed to an AI client as *the* persisted answer, `decisionAvailable: true`. The
+compliance API has enforced exactly this rule since the #399 review (ADR-061: only a
+`COMPLETED`/`PARTIAL_FAILURE` run's outcome is served); the MCP tool was the model that route was
+built from and never got the same fix. Both tools now read `listLatestFinalizedOutcomePerMeasure`
+(#486's primitive — the FINAL rule in SQL, bounded by measure count instead of history size);
+`check_compliance`'s absence message says "no finalized outcome" rather than implying no run ever
+covered the subject, and `get_employee` dedups to one row per measure. Three tests written RED first
+(the mid-run row was served over an older finalized one; mid-run-only read as an answer; get_employee
+returned both rows for one measure).
 
 **PR #484 (the CQM membership formulas, ADR-069) is merged — squash `84d4bc6b`, #476 closed, all 17
 checks green.** Codex's one finding was a P2 worth taking seriously: serving the IG membership
