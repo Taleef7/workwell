@@ -7,6 +7,15 @@ import { SLOW_LOAD_HINT } from "@/lib/useSlowLoadHint";
 const getWithHeaders = vi.fn();
 const get = vi.fn();
 const post = vi.fn();
+// Reactive router mock: push/replace update the params and re-render, like the real App Router.
+// (The page derives panel/status from the URL, so a static params mock would make the panel
+// <select> a no-op under test.)
+const navHolder = vi.hoisted(() => ({ current: undefined as unknown as { navigation: unknown; setUrl: (u: string) => void } }));
+vi.mock("next/navigation", async () => {
+  const { createNavMock } = await import("@/test/mocks/next-navigation-reactive");
+  navHolder.current = createNavMock("/compliance");
+  return navHolder.current.navigation as Record<string, unknown>;
+});
 // The page calls the token-bound useApi() hook (mirrors cases/page.tsx). The real hook returns a
 // MEMOIZED (stable) client; mirror that here with a single stable object so the page's effect deps
 // don't see a new reference every render (which would refetch on every render).
@@ -52,6 +61,7 @@ const rosterImmun = {
 };
 
 beforeEach(() => {
+  navHolder.current.setUrl("/compliance");
   // Resolved on a MACROTASK, not immediately. An immediate resolve lets the fetch promise and the
   // React commit land in the same tick often enough that a test awaiting the CALL rather than the
   // RENDER passes locally and fails only on a loaded CI runner. The delay makes that gap deterministic,

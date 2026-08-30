@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useApi } from "@/lib/api/hooks";
 import { fmtCount } from "@/lib/format";
 import { useRunStatus } from "@/components/run-status-provider";
@@ -16,10 +17,24 @@ import { SLOW_LOAD_HINT, useSlowLoadHint } from "@/lib/useSlowLoadHint";
 import { PANEL_OPTIONS, type PanelId, type Roster, type TenantOption } from "@/features/compliance/types";
 
 const STATUS_FILTER_OPTIONS = Object.keys(COMPLIANCE_STATUS_LABELS);
+const STATUS_FILTER_VALUES = new Set(STATUS_FILTER_OPTIONS);
 const PAGE_SIZES = [25, 50, 100, 200];
+
+function normalizeStatusFilter(raw: string | null): string {
+  return raw && STATUS_FILTER_VALUES.has(raw) ? raw : "";
+}
+
+function normalizePanelFilter(raw: string | null): PanelId {
+  return raw && PANEL_OPTIONS.some((option) => option.id === raw)
+    ? (raw as PanelId)
+    : "immunizations";
+}
 
 export default function CompliancePage() {
   const api = useApi();
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const { user } = useAuth();
   const { startTracking, isActive } = useRunStatus();
   // Site scoping comes from the shared dashboard site selector (header) / `?site=` URL — same as the
@@ -27,8 +42,10 @@ export default function CompliancePage() {
   const { siteId } = useGlobalFilters();
   const canRecalc = canRunMeasures(user?.role);
 
-  const [panel, setPanel] = useState<PanelId>("immunizations");
-  const [status, setStatus] = useState<string>("");
+  // Derived from the URL rather than useState-initialized, so browser back/forward between two
+  // filtered /compliance URLs re-renders with the right filter.
+  const panel: PanelId = normalizePanelFilter(searchParams.get("panel"));
+  const status: string = normalizeStatusFilter(searchParams.get("status"));
   const [q, setQ] = useState<string>("");
   const [segment, setSegment] = useState<string>("");
   const [segmentOptions, setSegmentOptions] = useState<{ id: string; name: string }[]>([]);
@@ -45,6 +62,16 @@ export default function CompliancePage() {
   const [prevSiteId, setPrevSiteId] = useState(siteId);
   if (siteId !== prevSiteId) {
     setPrevSiteId(siteId);
+    setPage(1);
+  }
+
+  // panel/status are URL-derived, so like siteId they can change externally (back/forward, deep link),
+  // not only through their selects — the same render-adjust reset covers both paths.
+  const [prevPanel, setPrevPanel] = useState(panel);
+  const [prevStatus, setPrevStatus] = useState(status);
+  if (panel !== prevPanel || status !== prevStatus) {
+    setPrevPanel(panel);
+    setPrevStatus(status);
     setPage(1);
   }
 
@@ -174,6 +201,24 @@ export default function CompliancePage() {
     }
   }, [api, canRecalc, isActive, startTracking]);
 
+  const setPanelAndUrl = useCallback((nextPanel: PanelId) => {
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("panel", nextPanel);
+    const query = params.toString();
+    router.push(query ? `${pathname}?${query}` : pathname);
+  }, [pathname, router, searchParams]);
+
+  const setStatusAndUrl = useCallback((nextStatus: string) => {
+    const params = new URLSearchParams(searchParams.toString());
+    if (nextStatus) {
+      params.set("status", nextStatus);
+    } else {
+      params.delete("status");
+    }
+    const query = params.toString();
+    router.push(query ? `${pathname}?${query}` : pathname);
+  }, [pathname, router, searchParams]);
+
   const columns = roster?.columns ?? [];
   const rows = roster?.rows ?? [];
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
@@ -205,7 +250,7 @@ export default function CompliancePage() {
           <span className="mb-1">Panel</span>
           <select
             value={panel}
-            onChange={(e) => { setPage(1); setPanel(e.target.value as PanelId); }}
+            onChange={(e) => setPanelAndUrl(e.target.value as PanelId)}
             className="rounded border border-neutral-300 bg-transparent px-2 py-1 text-sm dark:border-neutral-700"
           >
             {PANEL_OPTIONS.map((p) => (<option key={p.id} value={p.id}>{p.label}</option>))}
@@ -239,7 +284,7 @@ export default function CompliancePage() {
           <span className="mb-1">Status</span>
           <select
             value={status}
-            onChange={(e) => { setPage(1); setStatus(e.target.value); }}
+            onChange={(e) => setStatusAndUrl(e.target.value)}
             className="rounded border border-neutral-300 bg-transparent px-2 py-1 text-sm dark:border-neutral-700"
           >
             <option value="">All statuses</option>

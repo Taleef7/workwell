@@ -267,11 +267,24 @@ export default function ProgramsPage() {
               </div>
 
               <div className="mt-3 flex flex-wrap gap-2 text-xs">
-                <Badge label={`${labelFor(OUTCOME_LABELS, "COMPLIANT")} ${fmtCount(program.compliant)}`} tone="green" />
-                <Badge label={`${labelFor(OUTCOME_LABELS, "DUE_SOON")} ${fmtCount(program.dueSoon)}`} tone="amber" />
-                <Badge label={`${labelFor(OUTCOME_LABELS, "OVERDUE")} ${fmtCount(program.overdue)}`} tone="red" />
-                <Badge label={`${labelFor(OUTCOME_LABELS, "MISSING_DATA")} ${fmtCount(program.missingData)}`} tone="violet" />
-                <Badge label={`${labelFor(OUTCOME_LABELS, "EXCLUDED")} ${fmtCount(program.excluded)}`} tone="slate" />
+                {([
+                  ["COMPLIANT", "green", program.compliant],
+                  ["DUE_SOON", "amber", program.dueSoon],
+                  ["OVERDUE", "red", program.overdue],
+                  ["MISSING_DATA", "violet", program.missingData],
+                  ["EXCLUDED", "slate", program.excluded],
+                ] as const).map(([bucket, tone, count]) => {
+                  const text = `${labelFor(OUTCOME_LABELS, bucket)} ${fmtCount(count)}`;
+                  return (
+                    <Badge
+                      key={bucket}
+                      label={text}
+                      tone={tone}
+                      href={chipHref(program.measureId, bucket, { siteId, from, to })}
+                      ariaLabel={`${program.measureName}: ${text}`}
+                    />
+                  );
+                })}
               </div>
 
               <div className="relative z-10 mt-4">
@@ -375,7 +388,29 @@ function KpiCard({ label, value }: { label: string; value: string }) {
   );
 }
 
-function Badge({ label, tone }: { label: string; tone: "green" | "amber" | "red" | "slate" | "violet" }) {
+function chipHref(
+  measureId: string,
+  bucket: "COMPLIANT" | "DUE_SOON" | "OVERDUE" | "MISSING_DATA" | "EXCLUDED",
+  scope: { siteId: string; from: string; to: string },
+): string | undefined {
+  // COMPLIANT/EXCLUDED have no destination that reproduces their count today: the roster's status
+  // filter is any-cell-per-panel, not per-measure, and the measure may not even be in the default
+  // panel — a link that opens the wrong population is worse than none, so those chips stay static
+  // until a measure-scoped roster drill-down exists.
+  if (bucket === "COMPLIANT" || bucket === "EXCLUDED") return undefined;
+  const params = new URLSearchParams();
+  params.set("measureId", measureId);
+  params.set("outcome", bucket);
+  // Carry the active global scope; otherwise the click silently resets the site/date filter and the
+  // destination list no longer matches the clicked count (same rule as the /worklist redirect).
+  // The local System (tenant) selector cannot transfer: /api/cases has no tenant filter.
+  if (scope.siteId) params.set("site", scope.siteId);
+  if (scope.from) params.set("from", scope.from);
+  if (scope.to) params.set("to", scope.to);
+  return `/cases?${params.toString()}`;
+}
+
+function Badge({ label, tone, href, ariaLabel }: { label: string; tone: "green" | "amber" | "red" | "slate" | "violet"; href?: string; ariaLabel?: string }) {
   const style = tone === "green"
     ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300"
     : tone === "amber"
@@ -385,7 +420,12 @@ function Badge({ label, tone }: { label: string; tone: "green" | "amber" | "red"
     : tone === "violet"
     ? "bg-violet-100 text-violet-800 dark:bg-violet-900/30 dark:text-violet-300"
     : "bg-neutral-100 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300";
-  return <span className={`rounded-full px-2 py-1 font-medium ${style}`}>{label}</span>;
+  // A linked chip must stack above the card's stretched overlay Link (absolute inset-0 z-0), or the
+  // overlay swallows the click; hover/focus styles signal that these chips, unlike static ones, navigate.
+  const className = `rounded-full px-2 py-1 font-medium ${style}${href ? " relative z-10 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500" : ""}`;
+  return href
+    ? <Link href={href} aria-label={ariaLabel} className={className}>{label}</Link>
+    : <span className={className}>{label}</span>;
 }
 
 function TrendChart({ data, loading, caption }: { data: TrendPoint[]; loading?: boolean; caption: string }) {
