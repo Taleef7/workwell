@@ -18,6 +18,62 @@
 >
 > **Sequence note:** ADR-033 does not exist — verified absent, and the number must not be reused.
 
+## ADR-070: the spearhead moves to a patient-driven pilot deployment — and the ACO's measure set finds the engine five-sixths already built
+
+**Status:** Accepted (2026-08-30). Active plan: `docs/ROADMAP_2026-08-30.md` (supersedes
+`ROADMAP_2026-08-04.md` as direction; that document's §4 verification set remains the bar per locked
+decision 2).
+
+**Context.** A primary-care group on WebChart (repo name: **the pilot group**; deployment name: **Maui**)
+is entering an MSSP ACO for PY2027 (measurement begins 2027-01-01). Its proposed quality set is the APP
+Plus set; the six EMR-computable measures decode from MIPS quality IDs to CMS122, CMS2, CMS165, CMS125,
+CMS130 and CMS137. Five of the six are already vendored and MADiE-gated in this tree, and two run CMS's
+official artifacts in production — the 2026-07-24 priority-measure selection turns out to match what an
+MSSP ACO demands. The 2026-08-27 working session with MIE and the pilot's quality team established the
+consumer's actual shape: a quality staff organized by **provider panel** (never by measure), needing
+patient-centric work lists, pre-filtered drill-downs from every dashboard count, and — the substantive
+product finding — **cards that resolve rather than alert**: the card actions are *place the order that
+closes the gap* (a standing order for simple measures; a discretion-requiring pick list for colorectal and
+breast screening) and *document a denominator exclusion/exception*, never accept/dismiss. The hard
+integration problem is that **orders are local** — practice order catalogs carry local names and billing
+codes, frequently no LOINC, and imaging centers are not obliged to return LOINC on results; MIE's plan
+(mapping LOINC onto order rows so pick lists derive from value sets, results inheriting the order's code)
+is MIE-side work WorkWell will consume.
+
+**Decision.**
+
+1. **Milestone M-M (the Maui pilot) supersedes M-E1 as the spearhead.** M-E1 defers; locked decision 6
+   (occupational content as the long-term differentiator) stands. Sequencing is cheap-first: MM-0
+   (second deployment, patient terminology as deployment config extending ADR-004's switcher, clickable
+   status-chip drill-downs, sandbox accounts, primary-care synthetic roster, MIPS↔CMS crosswalk in the
+   UI) before the externally-blocked milestones.
+2. **The pilot's catalog is the APP Plus computable set.** CMS137 is the one gap and is **spiked before
+   promised** — it is multi-rate (initiation ≤14d; engagement ≤34d), which every routed surface currently
+   assumes away; ADR-047's MADiE-gate precondition applies unchanged; and having no authored counterpart
+   it forces the general official-only flip gate the wave-2 measures have been waiting for. CMS2's 7
+   unexplained mismatches and the CMS130/165 sweep become customer-facing debts.
+3. **Cards resolve, not alert — inside ADR-067's unchanged refusals.** Order suggestions stay gated on
+   APPROVED terminology mappings; `critical`/`systemActions` stay never-emitted; a card remains a
+   rendering of a completed evaluation (encounter-time freshness comes from evaluating sooner on ingest,
+   never from card-triggered evaluation — if that line cannot hold, ADR-067 is revisited explicitly).
+   The exception path must produce **structured data the measure logic reads on the next run** — WorkWell
+   never overrides CQL (ADR-008, AI_GUARDRAILS §1).
+4. **The versioned compliance API is demoted from "the contract MIE consumes" to a served surface.**
+   The 2026-08-04 decision 5 framing is superseded: the integration contract is the card/CDS surface plus
+   the Maui deployment. The API is kept — versioned, documented, tested — and nothing is deleted; no new
+   work is justified by the API contract alone.
+5. **Naming policy:** repository documents use the deployment name "Maui" and "the pilot group" only — no
+   client legal names, no client staff names, no client-provided documents; source materials stay under
+   the gitignored local-only path.
+
+**Consequences.** `docs/ROADMAP_2026-08-30.md` carries the milestone detail, verification gates, and the
+named external dependencies (MIE's order-mapping documentation, new-UI access, container provisioning;
+the Nicole exceptions consultation; ACO answers on attribution and reporting mechanism; the CY2027 final
+rule ~Nov 2026). `LOCKED_DECISIONS.md` §4A records the locked set. ADR-058 decisions 1–4, the QRDA
+bridge, and the published packages are all untouched. The known risk is honest: CMS137's multi-rate
+support is sized only after the spike, and the pilot can launch on five measures if it proves
+milestone-sized-or-larger.
+
 ## ADR-069: population membership applies the CQM IG's formulas per subject — and spec application is silent where corruption is loud
 
 **Status:** Accepted (2026-08-25). Issue #476.

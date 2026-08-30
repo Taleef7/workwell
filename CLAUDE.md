@@ -100,7 +100,7 @@ cost ~89k tokens per session until 2026-07-29, whether or not any of it was rele
   or findings-in-ADR-form, 6 of which review #396 brought back as load-bearing design records, so 14
   remain archived. Every heading + a one-line pointer stays in `DECISIONS.md`, so an `ADR-0NN` reference
   anywhere still resolves and nothing was deleted.
-- `docs/ROADMAP_2026-08-04.md` — **the APPROVED active plan** (owner decisions are in context via LOCKED_DECISIONS §4). Supersedes `docs/archive/ROADMAP_2026-07-24.md`, which is kept only for its §7 target architecture and the reasoning that got us here — **do not act on it**
+- `docs/ROADMAP_2026-08-30.md` — **the APPROVED active plan** (the Maui pilot; owner decisions in context via LOCKED_DECISIONS §4A). `docs/ROADMAP_2026-08-04.md` is superseded as direction but **stays in docs/**: its §4 verification set remains the bar (locked decision 2). `docs/archive/ROADMAP_2026-07-24.md` is kept only for its §7 target architecture — **do not act on it**
 - `docs/PROPOSALS_2026-08.md` — three feature proposals awaiting owner/MIE review (encounter-close quality check, "not seen in a while" view, deterministic next-due date). **None is approved or scheduled** — read it to know an idea has been written down, never as a work queue
 - `docs/DEPLOY.md` — MIE Create-a-Container + Neon setup, env vars, rollback → prefer the `deploy` skill
 - `docs/ARCHITECTURE.md` — system architecture + boundaries (the engine boundary is enforced mechanically by PR-1's containment test and PR-4's five boundary tests, so CI catches drift)
@@ -130,9 +130,54 @@ instructions, and reading them burns context without changing what you should do
   `new-instructions/`, `mieweb-ui-migration/`, and the 2026-08-08 system walkthrough (absorbed into
   `docs/guide/`)
 
-## Current Focus (as of 2026-08-04 — the engine is the product; `docs/ROADMAP_2026-08-04.md` is the APPROVED active plan)
+## Current Focus (as of 2026-08-30 — the Maui pilot is the spearhead; `docs/ROADMAP_2026-08-30.md` is the APPROVED active plan)
 
-**READ THIS BLOCK FIRST; everything below it from "2026-07-24" onward is HISTORY.** The 2026-07-24
+**READ THIS BLOCK FIRST; the 2026-08-04 block below it is standing context, and everything from
+"2026-07-24" onward is HISTORY.** Driving ADR: **ADR-070**; locked decisions in `LOCKED_DECISIONS.md` §4A.
+
+**What changed, in one paragraph.** WorkWell has its first real customer: a primary-care group on WebChart
+(repo name **"the pilot group"**; deployment name **"Maui"** — the naming policy is locked: no client legal
+or staff names in repo docs, source materials gitignored local-only) entering an **MSSP ACO** for
+**PY2027** (measurement begins 2027-01-01). Its quality set is the **APP Plus** set, whose six
+EMR-computable measures decode from MIPS IDs to **CMS122, CMS2, CMS165, CMS125, CMS130** — all five
+already vendored + MADiE-gated, two routed official in production — plus **CMS137 (SUD initiation &
+engagement), the one gap: multi-rate, no authored counterpart, spiked before promised**. The three
+non-computable members (two claims-calculated, CAHPS) get informational tiles at most. The consumer's
+shape from the 2026-08-27 working session: a quality staff organized **by provider panel** (never by
+measure) needing patient-centric work lists and pre-filtered drill-downs; **cards that resolve, not
+alert** (place-the-order pick lists + exception documentation — inside ADR-067's unchanged refusals, and
+exceptions must be structured data CQL reads next run, never a WorkWell-side override); and an orders
+problem that is MIE-side (**orders are local** — LOINC-on-order-rows mapping is MIE's work, WorkWell
+consumes it).
+
+**Milestones (`ROADMAP_2026-08-30.md` §5), cheap-first:** **MM-0** Maui instance + UX wins (second
+deployment, "patient" terminology as deployment config extending the ADR-004 switcher, clickable
+status-chip drill-downs, sandbox accounts — hardcoded per the auth rule, primary-care synthetic roster,
+MIPS↔CMS crosswalk in the UI) → **MM-1** measure set (CMS137 spike → vendor → gate; flip the five on the
+Maui workflow via the ADR-045 mechanism; run down CMS2's 7 mismatches; sweep CMS130/165) → **MM-2** work
+lists & assignment (PCP attribution field — schema is owner-owned; PCP/location filters; saved per-staff
+filters; attribution *semantics* deferred until the ACO answers) → **MM-3** resolution actions (order pick
+lists **blocked on** MIE's order-mapping docs; exception path **blocked on** the Nicole consultation for
+specifics) → **MM-4** encounter-time integration (**blocked on** MIE new-UI access; a card stays a
+rendering of a completed evaluation — freshness = evaluate sooner on ingest; the encounter must not get
+slower). **None of the external blockers blocks MM-0.**
+
+**What is demoted / deferred, named:** the versioned compliance API keeps existing but loses its
+"contract MIE consumes" framing (LOCKED_DECISIONS §4 decision 5 SINCE-note); **M-E1 defers behind M-M**
+(locked decision 6 stands long-term); ADR-058 decisions 1–4, the QRDA bridge, and the published
+`@work-well/*` packages are untouched. The old "Next, in order: M-E1 then M-D0/D1" line in the 2026-08-04
+block below is superseded by this paragraph.
+
+**Open externals (ROADMAP §7):** MIE — order-mapping documentation, new-UI source access, Maui container
+provisioning; Nicole — exceptions guidance; ACO — attribution basis + reporting mechanism (eCQM vs
+Medicare CQM vs MIPS CQM); CMS — the CY2027 **final** rule (~Nov 2026; same CMS-1848-P as the standing
+FHIR-timeline correction) — recheck the measure table and reporting mechanics after it lands.
+
+---
+
+## History — Current Focus as of 2026-08-04 (the engine is the product; SUPERSEDED as the active plan 2026-08-30 — its decisions largely stand, see LOCKED_DECISIONS §4)
+
+**The 2026-08-04 direction below remains accurate standing context (M-A…M-C statuses, corrections, gotchas); its *sequencing* is superseded by the block above.** The 2026-07-24
 recalibration and the M-A/M-B narrative that follows are accurate as a record of how we got here, but the
 *direction* changed on 2026-08-04 (ADR-058, `docs/ROADMAP_2026-08-04.md`).
 

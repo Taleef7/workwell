@@ -1,5 +1,54 @@
 # Journal
 
+## 2026-08-30 — ADR-070: the Maui pilot re-spearheads the roadmap; the ACO's measure set finds the engine five-sixths already built
+
+**`docs/ROADMAP_2026-08-30.md` is the new APPROVED active plan (ADR-070; LOCKED_DECISIONS §4A).**
+WorkWell has its first real customer: a primary-care group on WebChart — repo name "the pilot group,"
+deployment name "Maui," under a locked naming policy (no client legal or staff names in repo docs; source
+materials gitignored local-only) — entering an **MSSP ACO for PY2027**, measurement starting 2027-01-01.
+The 2026-08-27 working session with MIE and the pilot's quality team set the direction; the owner locked
+it 2026-08-30.
+
+**The headline is a position, not a plan: five of the six computable APP Plus measures are already in the
+tree.** The ACO's EMR-reported set decodes from MIPS quality IDs to CMS122 (MIPS 001), CMS2 (134), CMS165
+(236), CMS125 (112), CMS130 (113) — every one vendored and MADiE-gated, two routed official in production
+— plus **CMS137 (305, SUD initiation & engagement), the one gap**. CMS137 is deliberately *spiked before
+promised*: it is a **multi-rate** measure (initiation ≤14d, engagement ≤34d) and every routed surface —
+router, MeasureReport/QRDA builders, evidence shape, one-status-per-subject — assumes single-rate; it has
+no authored counterpart, so it forces the general official-only flip gate the wave-2 measures have been
+waiting for; and ADR-047's MADiE-gate precondition applies unchanged. Two existing debts become
+customer-facing and rise accordingly: CMS2's 7 unexplained `NUMER 1→0` mismatches and the CMS130/165
+sweep. The set's other three members (two CMS-claims outcome measures, CAHPS) are not EMR-computed —
+informational tiles at most.
+
+**What the customer meeting changed about the product, in three findings.** (1) The engine's consumer is
+a quality team working **provider panels** — never by measure — so the UI grows patient-centric work
+lists, PCP/location filters, saved per-staff filters, and clickable status-chip drill-downs ("click the
+number, land on the patients to work"). (2) **Cards resolve, not alert**: accept/dismiss is rejected in
+favor of place-the-order (standing order for simple measures; a discretion-requiring pick list for
+colorectal/breast) and document-the-exception — both inside ADR-067's unchanged refusals, and the
+exception path must produce **structured data CQL reads on the next run**, never a WorkWell-side status
+override (ADR-008, AI_GUARDRAILS §1). (3) **Orders are local** — practice order catalogs carry local
+names and billing codes, often no LOINC, and imaging centers need not return LOINC on results; MIE's
+LOINC-on-order-rows mapping (results inheriting the requisition's code) is MIE-side work WorkWell will
+consume, and its documentation is a named external dependency.
+
+**Milestones, cheap-first (ROADMAP §5):** MM-0 Maui instance + UX wins (second deployment, "patient"
+terminology as deployment config, chip drill-downs, sandbox accounts, primary-care synthetic roster,
+MIPS↔CMS crosswalk in the UI) → MM-1 measure set → MM-2 work lists/assignment (attribution semantics
+deferred until the ACO answers) → MM-3 resolution actions (blocked on MIE order docs + Nicole) → MM-4
+encounter-time integration (blocked on MIE new-UI access; a card stays a rendering of a completed
+evaluation — freshness comes from evaluating sooner on ingest). **No external blocker blocks MM-0.**
+
+**Demotions, named rather than silent:** the versioned compliance API keeps existing but loses its
+"contract MIE consumes" framing (decision 5 SINCE-note in LOCKED_DECISIONS §4) — the integration contract
+is the card/CDS surface plus the Maui deployment; **M-E1 defers behind M-M** (locked decision 6 stands as
+the long-term differentiator). ADR-058 decisions 1–4, the §4 verification set (ROADMAP_2026-08-04 §4 —
+that file stays in docs/ because locked decision 2 cites it), the QRDA bridge, and the published
+`@work-well/*` packages are all untouched. Docs updated in this change: ROADMAP_2026-08-30 (new),
+ROADMAP_2026-08-04 (superseded banner), DECISIONS + ADR_INDEX (ADR-070), LOCKED_DECISIONS (§4A + two
+SINCE notes), CLAUDE.md (Current Focus rotation), this entry.
+
 ## 2026-08-27 — the MCP tools get the FINAL rule (#491); the serializer takes the declared result type (#482/#488)
 
 **#491 filed and fixed — MCP `check_compliance` served mid-run rows as the compliance answer.** The
