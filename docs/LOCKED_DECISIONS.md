@@ -60,19 +60,33 @@ document's §4 verification set stays the bar per §4 decision 2 above).
 
 1. **The Maui pilot is the spearhead.** A patient-driven deployment for a primary-care group on WebChart
    entering an MSSP ACO (PY2027 begins 2027-01-01). Milestone **M-M supersedes M-E1 as next-up**; M-E1
-   defers, not cancelled. Cheap-first sequencing: MM-0 (instance + UX wins) before externally-blocked work.
-2. **The pilot's measure catalog is the APP Plus computable set** — CMS122, CMS2, CMS165, CMS125, CMS130
-   (already vendored + MADiE-gated) plus **CMS137**, which is **spiked before promised** (multi-rate; no
-   authored counterpart; ADR-047's MADiE-gate precondition applies unchanged). The MIPS↔CMS crosswalk
-   becomes a first-class UI surface.
-3. **Cards resolve, not alert** — order suggestions (gated on APPROVED terminology mappings) and
-   exception documentation (structured data the measure logic reads next run; WorkWell never overrides
-   CQL). ADR-067's refusals are unchanged: no `critical`, no `systemActions`, a card renders a completed
-   evaluation — encounter-time freshness comes from evaluating sooner on ingest, never from
-   card-triggered evaluation.
-4. **Naming policy:** repo documents say "Maui" (deployment name) and "the pilot group" only — no client
-   legal names, no client staff names, no client-provided documents; source materials stay under the
-   gitignored local-only path.
+   defers, not cancelled. **Scope limit:** the milestones deliver a *sandbox*; the pilot running its real
+   year (PHI) is a separate, later, `PRODUCTION_READINESS`-gated decision nothing in M-M authorizes.
+2. **The pilot's measure catalog is the ACO's computable set** — CMS122, CMS2, CMS165, CMS125, CMS130
+   (already vendored + MADiE-gated; CMS2/CMS130/CMS165 additionally need **official-only onboarding**
+   before they can run — gated ≠ routable ≠ runnable, ROADMAP §1.1/§4) plus **CMS137 only if measure 305
+   survives the ACO's final set** — the CY2027 proposed rule (CMS-1848-P) proposes removing 305 from APP
+   Plus for PY2027, so confirmation precedes the multi-rate spike, which precedes any promise (ADR-047's
+   MADiE-gate precondition applies unchanged). The MIPS↔CMS crosswalk becomes a first-class UI surface.
+   The vendored artifacts are 2026-vintage (`effectivePeriod` 2026-only): PY2027 needs a re-vendor +
+   full re-gate (ROADMAP MM-1d).
+3. **Cards resolve, not alert** — order suggestions (gated on APPROVED terminology mappings; **an order
+   is a proposal and never changes compliance** — the gap closes only when the qualifying result data
+   arrives and CQL re-evaluates) and exception documentation (structured data the measure logic reads
+   next run; WorkWell never overrides CQL). ADR-067's refusals are unchanged: no `critical`, no
+   `systemActions`, a card renders a completed evaluation — encounter-time freshness comes from
+   evaluating sooner on ingest, never from card-triggered evaluation.
+4. **The compliance API is demoted** from "the contract MIE consumes" (§4 decision 5's SINCE note) to a
+   kept, versioned, served surface — the integration contract is the card/CDS surface plus the Maui
+   deployment, and no work is justified by the API contract alone. (The CDS service is a parallel surface
+   reading the finalized-outcome stores directly, not an API consumer.)
+5. **Cheap-first sequencing:** MM-0 (instance + UX wins) before externally-blocked work; within MM-1,
+   **no known-unverified measure is routed to the pilot** — CMS2's 7 mismatches are run down and
+   CMS130/CMS165 swept before their flips.
+6. **Naming policy:** repo documents say "Maui" (deployment name) and "the pilot group" only — no
+   **client-side** legal or staff names, no client-provided documents (MIE-side names such as Doug and
+   Nicole are unaffected, consistent with repo practice); pilot user accounts use pseudonymous
+   identifiers in configuration; source materials stay under the gitignored local-only path.
 
 ## 5. Key audit facts (verified 2026-07-24 — a DATED SNAPSHOT, not a live constraint)
 

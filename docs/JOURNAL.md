@@ -9,17 +9,25 @@ materials gitignored local-only) — entering an **MSSP ACO for PY2027**, measur
 The 2026-08-27 working session with MIE and the pilot's quality team set the direction; the owner locked
 it 2026-08-30.
 
-**The headline is a position, not a plan: five of the six computable APP Plus measures are already in the
-tree.** The ACO's EMR-reported set decodes from MIPS quality IDs to CMS122 (MIPS 001), CMS2 (134), CMS165
-(236), CMS125 (112), CMS130 (113) — every one vendored and MADiE-gated, two routed official in production
-— plus **CMS137 (305, SUD initiation & engagement), the one gap**. CMS137 is deliberately *spiked before
-promised*: it is a **multi-rate** measure (initiation ≤14d, engagement ≤34d) and every routed surface —
-router, MeasureReport/QRDA builders, evidence shape, one-status-per-subject — assumes single-rate; it has
-no authored counterpart, so it forces the general official-only flip gate the wave-2 measures have been
-waiting for; and ADR-047's MADiE-gate precondition applies unchanged. Two existing debts become
-customer-facing and rise accordingly: CMS2's 7 unexplained `NUMER 1→0` mismatches and the CMS130/165
-sweep. The set's other three members (two CMS-claims outcome measures, CAHPS) are not EMR-computed —
-informational tiles at most.
+**The headline is a position, not a plan: five of the six computable measures are already gated in the
+tree — and the review round (below) forced the position to be stated exactly.** The ACO's EMR-reported
+set decodes from MIPS quality IDs to CMS122 (MIPS 001), CMS2 (134), CMS165 (236), CMS125 (112), CMS130
+(113) — every one vendored and MADiE-gated, two routed official in production — plus **CMS137 (305, SUD
+initiation & engagement), the one gap**. But **gated ≠ routable ≠ runnable**: the run pipeline derives
+its runnable set from the authored registry (`RUNNABLE_MEASURE_IDS = Object.keys(MEASURES)`),
+CMS2/CMS130/CMS165 exist product-side only as Draft/NOT_COMPILED catalog rows, and CMS130/CMS165 have no
+`OFFICIAL_MEASURE_SEMANTICS` entry (construction refuses them) — so **official-only measure onboarding
+is MM-1's real substance**, not a workflow edit. And **CMS137 is doubly conditional**: the CY2027
+proposed rule (CMS-1848-P — the very rule the standing FHIR-timeline correction tracks) **proposes
+removing Quality IDs 305 and 493 from APP Plus for PY2027**, so ACO/final-rule confirmation precedes the
+multi-rate spike (initiation ≤14d, engagement ≤34d — every routed surface assumes single-rate), which
+precedes any promise; ADR-047's MADiE-gate precondition applies unchanged. A third review finding:
+**every vendored artifact's `effectivePeriod` is 2026-only and the runtime never checks it** — PY2027
+needs a re-vendor + full re-gate (MM-1d) or stale 2026 logic runs silently into 2027. Two existing debts
+become customer-facing and rise accordingly — CMS2's 7 unexplained `NUMER 1→0` mismatches and the
+CMS130/165 sweep — and the milestone order now says **no known-unverified measure is routed to the
+pilot**: each measure's debt clears before its flip. The set's other three members (two CMS-claims
+outcome measures, CAHPS) are not EMR-computed — informational tiles at most.
 
 **What the customer meeting changed about the product, in three findings.** (1) The engine's consumer is
 a quality team working **provider panels** — never by measure — so the UI grows patient-centric work
@@ -34,20 +42,43 @@ LOINC-on-order-rows mapping (results inheriting the requisition's code) is MIE-s
 consume, and its documentation is a named external dependency.
 
 **Milestones, cheap-first (ROADMAP §5):** MM-0 Maui instance + UX wins (second deployment, "patient"
-terminology as deployment config, chip drill-downs, sandbox accounts, primary-care synthetic roster,
-MIPS↔CMS crosswalk in the UI) → MM-1 measure set → MM-2 work lists/assignment (attribution semantics
-deferred until the ACO answers) → MM-3 resolution actions (blocked on MIE order docs + Nicole) → MM-4
-encounter-time integration (blocked on MIE new-UI access; a card stays a rendering of a completed
-evaluation — freshness comes from evaluating sooner on ingest). **No external blocker blocks MM-0.**
+terminology as deployment config, chip drill-downs, pseudonymous sandbox accounts, primary-care synthetic
+roster, MIPS↔CMS crosswalk in the UI) → MM-1 measure set (confirm-305 → onboarding → per-measure gated
+flips → PY2027 re-vendor → CMS137 conditional) → MM-2 work lists/assignment (attribution semantics
+deferred until the ACO answers) → MM-3 resolution actions (blocked on MIE order docs + Nicole; an offered
+order is a proposal and never changes compliance) → MM-4 encounter-time integration (blocked on MIE
+new-UI access AND ADR-067's named CDS client-auth gap; a card stays a rendering of a completed
+evaluation — freshness comes from evaluating sooner on ingest). **MM-0's build-and-test work is fully
+unblocked; container provisioning gates only its final deploy step.** The milestones deliver a
+**sandbox**; the pilot's production/PHI phase is a separate `PRODUCTION_READINESS`-gated decision.
 
 **Demotions, named rather than silent:** the versioned compliance API keeps existing but loses its
 "contract MIE consumes" framing (decision 5 SINCE-note in LOCKED_DECISIONS §4) — the integration contract
-is the card/CDS surface plus the Maui deployment; **M-E1 defers behind M-M** (locked decision 6 stands as
-the long-term differentiator). ADR-058 decisions 1–4, the §4 verification set (ROADMAP_2026-08-04 §4 —
+is the card/CDS surface plus the Maui deployment (and precisely: the CDS service is a *parallel* surface
+reading the finalized-outcome stores directly, not an API consumer); **M-E1 defers behind M-M**, and so
+does **M-D0/D1** (Inferno US Quality Core) — both deferred, neither cancelled (locked decision 6 stands
+as the long-term differentiator). ADR-058 decisions 1–4, the §4 verification set (ROADMAP_2026-08-04 §4 —
 that file stays in docs/ because locked decision 2 cites it), the QRDA bridge, and the published
-`@work-well/*` packages are all untouched. Docs updated in this change: ROADMAP_2026-08-30 (new),
-ROADMAP_2026-08-04 (superseded banner), DECISIONS + ADR_INDEX (ADR-070), LOCKED_DECISIONS (§4A + two
-SINCE notes), CLAUDE.md (Current Focus rotation), this entry.
+`@work-well/*` packages are all untouched.
+
+**The PR's review round was three streams, and each earned its keep.** Codex's PR line comments found
+the runnability gap (the P1 that became "gated ≠ routable ≠ runnable") and the blocked/unblocked
+contradiction. The code-reviewer pass found the stale guide chapter 9 / guide README (the Definition of
+Done's own requirement), the false claim that `official-flip-config.test.ts` validates "any" workflow
+(its `WORKFLOWS` array is three hardcoded TWH/staging files and its sidecar predicates read
+`deploy-twh-mieweb.yml` only — the #380/#400 guard-scope class, now named as MM-1b work), the
+§4A-vs-ROADMAP-§2 decision-count mismatch, and the stale always-loaded ADR counts. The adversarial Sol
+pass found the two biggest: **CMS-1848-P proposes removing 305 from APP Plus** (verified against the CMS
+fact sheet and Federal Register — potentially cancelling the largest new-engineering item) and the
+**2026-only `effectivePeriod`** on every vendored artifact with no runtime check; it also caught
+CMS130/CMS165 mislabelled "routable" (no semantics entry — README's standing claim was wrong too, now
+corrected), the sandbox-vs-"running its ACO year" over-promise, the missing CDS-auth blocker on MM-4, and
+the "order closes the gap" wording that an order-is-not-a-result reading rightly kills. One Sol finding
+was rejected on adjudication: Doug/Nicole in repo docs is not a naming-policy violation — the policy
+forbids *client-side* names, and its text now says so explicitly. Docs updated in this change:
+ROADMAP_2026-08-30 (new), ROADMAP_2026-08-04 (superseded banner), DECISIONS + ADR_INDEX (ADR-070),
+LOCKED_DECISIONS (§4A + SINCE notes), CLAUDE.md (Current Focus rotation + count refresh), README (current
+focus + routable correction), guide README + chapter 9, this entry.
 
 ## 2026-08-27 — the MCP tools get the FINAL rule (#491); the serializer takes the declared result type (#482/#488)
 

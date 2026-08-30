@@ -110,18 +110,26 @@ rather than reporting a pass it did not earn. The other six are byte-identical e
 
 ## What comes next
 
-The approved plan is `docs/ROADMAP_2026-08-04.md`; the owner-locked decisions constraining it are
-in `docs/LOCKED_DECISIONS.md` §4. In order:
+The approved plan is `docs/ROADMAP_2026-08-30.md` (**the Maui pilot** — ADR-070, 2026-08-30); the
+owner-locked decisions constraining it are in `docs/LOCKED_DECISIONS.md` §4 and §4A. The prior plan's
+§4 verification set (`docs/ROADMAP_2026-08-04.md`) remains the bar. In order:
 
-1. **More occupational content (M-E).** The first regulation-authored measure — OSHA hearing STS,
-   [chapter 2](02-cql-and-authoring.md) — merged as ADR-065. The differentiator is the measures
-   nobody publishes; official eCQMs prove the engine, occupational content is what no competitor
-   obtains by downloading CMS artifacts.
-2. **US Quality Core verification (M-D).** Run Inferno's US Quality Core test kit against the
-   shim's FHIR output — the direction CMS's own content is heading.
-3. **Retire the authored cms122/125 subsets to the fidelity lab** (issue #377) now that the
+1. **The Maui pilot (M-M).** A patient-driven sandbox deployment for a primary-care group entering
+   an MSSP ACO (PY2027). Cheap-first: MM-0 (second deployment, "patient" terminology as config,
+   clickable status-chip drill-downs, primary-care synthetic roster, MIPS↔CMS crosswalk in the UI)
+   → MM-1 (official-only measure onboarding for CMS2/CMS130/CMS165 — gated ≠ routable ≠ runnable —
+   per-measure gated flips, the PY2027 re-vendor, and CMS137 only if measure 305 survives the CY2027
+   final rule) → MM-2 (provider-panel work lists and assignment) → MM-3 (cards that resolve: order
+   proposals + exception documentation, inside ADR-067's refusals) → MM-4 (encounter-time
+   integration). Roadmap §7 tabulates the external dependencies.
+2. **More occupational content (M-E) — deferred behind M-M, not cancelled.** The first
+   regulation-authored measure — OSHA hearing STS, [chapter 2](02-cql-and-authoring.md) — merged as
+   ADR-065; the differentiator claim (locked decision 6) stands long-term.
+3. **US Quality Core verification (M-D) — likewise deferred behind M-M.** Run Inferno's US Quality
+   Core test kit against the shim's FHIR output — the direction CMS's own content is heading.
+4. **Retire the authored cms122/125 subsets to the fidelity lab** (issue #377) now that the
    official artifacts are routed.
-4. **Owner steps:** migrate npm publishing from the 2FA-bypass token to Trusted Publishing, and
+5. **Owner steps:** migrate npm publishing from the 2FA-bypass token to Trusted Publishing, and
    close the certification question below.
 
 ## The two decisions this document exists to surface

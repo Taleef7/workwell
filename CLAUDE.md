@@ -84,7 +84,7 @@ to this list without deleting from it — the whole point is that it stays small
 backend retired in #109 PR4, and its stop condition died with the JVM. Now in `docs/archive/`.)
 - @docs/AI_GUARDRAILS.md — the "AI never decides compliance" hard rule lives or dies on this
 - @docs/DATA_MODEL_CONTRACTS.md — idempotency + `evidence_json` + CSV contracts; Definition of Done makes these mandatory on EVERY PR
-- @docs/ADR_INDEX.md — 67 ADR titles only, so a session knows a decision exists; bodies stay in DECISIONS.md
+- @docs/ADR_INDEX.md — 69 ADR titles only, so a session knows a decision exists; bodies stay in DECISIONS.md
 - @docs/LOCKED_DECISIONS.md — owner-locked decisions (§4, rewritten 2026-08-04 per ADR-058) + the dated 2026-07-24 audit facts (§5)
 
 ## Other docs to consult on demand
@@ -95,7 +95,7 @@ cost ~89k tokens per session until 2026-07-29, whether or not any of it was rele
   describes changes. Chapter 9 owns the volatile numbers, dated
 - `docs/JOURNAL.md` — the running narrative; source of truth for recent work (~832k chars — never import)
 - `docs/DECISIONS.md` — the ADR bodies that still GOVERN: decisions constraining what may be done next,
-  plus design records for built features (54 of 68 as of 2026-08-26; titles already in context via
+  plus design records for built features (55 of 69 as of 2026-08-30; titles already in context via
   ADR_INDEX). Split on 2026-08-05 — 20 bodies moved to `docs/archive/DECISIONS_ARCHIVE.md` as superseded
   or findings-in-ADR-form, 6 of which review #396 brought back as load-bearing design records, so 14
   remain archived. Every heading + a one-line pointer stays in `DECISIONS.md`, so an `ADR-0NN` reference
@@ -138,11 +138,17 @@ instructions, and reading them burns context without changing what you should do
 **What changed, in one paragraph.** WorkWell has its first real customer: a primary-care group on WebChart
 (repo name **"the pilot group"**; deployment name **"Maui"** — the naming policy is locked: no client legal
 or staff names in repo docs, source materials gitignored local-only) entering an **MSSP ACO** for
-**PY2027** (measurement begins 2027-01-01). Its quality set is the **APP Plus** set, whose six
-EMR-computable measures decode from MIPS IDs to **CMS122, CMS2, CMS165, CMS125, CMS130** — all five
-already vendored + MADiE-gated, two routed official in production — plus **CMS137 (SUD initiation &
-engagement), the one gap: multi-rate, no authored counterpart, spiked before promised**. The three
-non-computable members (two claims-calculated, CAHPS) get informational tiles at most. The consumer's
+**PY2027** (measurement begins 2027-01-01). Its **proposed** quality set is APP
+Plus-shaped; its six EMR-computable measures decode from MIPS IDs to **CMS122, CMS2, CMS165, CMS125,
+CMS130** — all five vendored + MADiE-gated, two routed official in production, **but gated ≠ routable ≠
+runnable**: the run pipeline derives runnable measures from the authored registry, CMS2/130/165 are
+Draft/NOT_COMPILED catalog rows, and CMS130/165 have no `OFFICIAL_MEASURE_SEMANTICS` entry, so
+**official-only onboarding is MM-1's substance** — plus **CMS137 (SUD initiation & engagement), which is
+DOUBLY conditional: CMS-1848-P proposes REMOVING Quality ID 305 from APP Plus for PY2027 (confirm with
+the ACO/final rule first), and if kept it is multi-rate with no authored counterpart, spiked before
+promised**. The vendored artifacts are 2026-vintage (`effectivePeriod` 2026-only, unvalidated at
+runtime) — PY2027 needs a re-vendor + full re-gate (MM-1d). The three non-computable members (two
+claims-calculated, CAHPS) get informational tiles at most. The consumer's
 shape from the 2026-08-27 working session: a quality staff organized **by provider panel** (never by
 measure) needing patient-centric work lists and pre-filtered drill-downs; **cards that resolve, not
 alert** (place-the-order pick lists + exception documentation — inside ADR-067's unchanged refusals, and
@@ -153,14 +159,19 @@ consumes it).
 **Milestones (`ROADMAP_2026-08-30.md` §5), cheap-first:** **MM-0** Maui instance + UX wins (second
 deployment, "patient" terminology as deployment config extending the ADR-004 switcher, clickable
 status-chip drill-downs, sandbox accounts — hardcoded per the auth rule, primary-care synthetic roster,
-MIPS↔CMS crosswalk in the UI) → **MM-1** measure set (CMS137 spike → vendor → gate; flip the five on the
-Maui workflow via the ADR-045 mechanism; run down CMS2's 7 mismatches; sweep CMS130/165) → **MM-2** work
-lists & assignment (PCP attribution field — schema is owner-owned; PCP/location filters; saved per-staff
-filters; attribution *semantics* deferred until the ACO answers) → **MM-3** resolution actions (order pick
-lists **blocked on** MIE's order-mapping docs; exception path **blocked on** the Nicole consultation for
-specifics) → **MM-4** encounter-time integration (**blocked on** MIE new-UI access; a card stays a
-rendering of a completed evaluation — freshness = evaluate sooner on ingest; the encounter must not get
-slower). **None of the external blockers blocks MM-0.**
+MIPS↔CMS crosswalk in the UI) → **MM-1** measure set (MM-1a confirm-305-then-spike; MM-1b official-only
+onboarding incl. the flip-snapshot successor and extending `official-flip-config.test.ts`'s hardcoded
+`WORKFLOWS` + TWH-only sidecar predicates; MM-1c **per-measure gated flips** — CMS2's 7 mismatches run
+down and CMS130/165 swept BEFORE their flips, no known-unverified measure routed to the pilot; MM-1d
+PY2027 re-vendor; MM-1e CMS137, conditional) → **MM-2** work lists & assignment (PCP attribution field —
+schema is owner-owned; PCP/location filters; saved per-staff filters; attribution *semantics* deferred
+until the ACO answers) → **MM-3** resolution actions (order pick lists **blocked on** MIE's order-mapping
+docs — an offered order is a proposal and never changes compliance; exception path **blocked on** the
+Nicole consultation for specifics) → **MM-4** encounter-time integration (**blocked on** MIE new-UI
+access AND the ADR-067 CDS client-auth answer; a card stays a rendering of a completed evaluation —
+freshness = evaluate sooner on ingest; the encounter must not get slower). **MM-0's build-and-test work
+is fully unblocked; container provisioning gates only its final deploy step.** The milestones deliver a
+SANDBOX — the pilot's production/PHI phase is a separate `PRODUCTION_READINESS`-gated decision.
 
 **What is demoted / deferred, named:** the versioned compliance API keeps existing but loses its
 "contract MIE consumes" framing (LOCKED_DECISIONS §4 decision 5 SINCE-note); **M-E1 defers behind M-M**
@@ -169,9 +180,12 @@ slower). **None of the external blockers blocks MM-0.**
 block below is superseded by this paragraph.
 
 **Open externals (ROADMAP §7):** MIE — order-mapping documentation, new-UI source access, Maui container
-provisioning; Nicole — exceptions guidance; ACO — attribution basis + reporting mechanism (eCQM vs
-Medicare CQM vs MIPS CQM); CMS — the CY2027 **final** rule (~Nov 2026; same CMS-1848-P as the standing
-FHIR-timeline correction) — recheck the measure table and reporting mechanics after it lands.
+provisioning, and the CDS Hooks client-auth answer (WebChart's `iss` + JWKS — ADR-067's named gap);
+Nicole — exceptions guidance; ACO — attribution basis + reporting mechanism (eCQM vs Medicare CQM vs
+MIPS CQM) + whether measure 305 stays in the pilot's final set; CMS — the CY2027 **final** rule (~Nov
+2026; same CMS-1848-P as the standing FHIR-timeline correction — it PROPOSES removing 305 and 493 from
+APP Plus) and the PY2027 artifact publication — recheck the measure table and reporting mechanics after
+the final rule lands.
 
 ---
 
