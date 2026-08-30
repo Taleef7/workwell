@@ -434,6 +434,12 @@ Total catalog: **63 measures**, 14 runnable (see `docs/MEASURES.md` for the full
 > (`Clinic`, `HQ`, `North Campus`, `Outpatient Clinic`, `Plant A`, `Plant B`, `South Campus`).
 > `SEGMENT_UPDATED` audit event recorded; `updatedAt` → 2026-06-29T15:12:24Z.
 > If the stack is ever re-provisioned from a fresh DB, the seed auto-covers all sites — no repair needed.
+>
+> **maui (added 2026-08-30) needs NO repair yet**: the tenant is directory-only
+> (`EVALUATION_EXCLUDED_TENANTS` in `employee-catalog.ts`), so no outcomes or cases are produced for it and
+> segment applicability never fires. When MM-1 activates evaluation for the pilot cohort, the live
+> `All Employees` baseline must be widened to include `Wailuku Clinic` and `Kihei Clinic` via the same
+> audited `PUT /api/segments/:id` repair — that step belongs to the MM-1 activation checklist.
 
 The demo **risk-group segments** seed (`backend-ts/src/segment/segment-seed.ts`) is **name-idempotent**:
 a boot over an already-seeded DB adds no duplicates and **never mutates an existing segment** (so it

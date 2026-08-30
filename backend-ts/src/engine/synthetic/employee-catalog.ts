@@ -346,6 +346,21 @@ function assignProviders(base: readonly EmployeeBase[]): EmployeeProfile[] {
 export const EMPLOYEES: readonly EmployeeProfile[] = assignProviders(EMPLOYEE_BASE);
 
 /**
+ * Tenants whose people are DIRECTORY-ONLY for now: visible in /api/tenants, people search and
+ * rosters, but excluded from every seeded-distribution/evaluation surface. The maui pilot cohort
+ * waits for MM-1's measure-set wiring — evaluating it today would (a) change the global seeded
+ * distribution's input and silently reshuffle existing tenants' outcomes (case churn on the live
+ * demo), and (b) enroll patients in occupational-health measures. Remove a tenant from this set
+ * only together with per-tenant distribution/applicability (ROADMAP_2026-08-30 MM-1).
+ */
+export const EVALUATION_EXCLUDED_TENANTS: ReadonlySet<string> = new Set(["maui"]);
+
+/** The population every evaluation surface uses: the directory minus evaluation-excluded tenants. */
+export const EVALUABLE_EMPLOYEES: readonly EmployeeProfile[] = EMPLOYEES.filter(
+  (e) => !EVALUATION_EXCLUDED_TENANTS.has(e.tenantId),
+);
+
+/**
  * The four hardcoded demo-login personas (`emp-001..004`, the system roles Author/Approver/Case
  * Manager/Admin). They carry no occupational measures, so the compliance roster floats them to the
  * BOTTOM (UX-1) — by this explicit marker rather than a has-data heuristic: an `All Employees` segment

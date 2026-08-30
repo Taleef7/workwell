@@ -21,7 +21,7 @@ import type { EvaluateMeasureBinding, MeasureOutcome } from "@work-well/measure-
 import { OFFICIAL_LOGIC_VERSION_PREFIX, type RoutedEngine } from "../wiring/executor-router.ts";
 import { isApplicable } from "../segment/segment-applicability.ts";
 import type { HydratedSegment } from "../stores/segment-store.ts";
-import { EMPLOYEES, employeeById, type EmployeeProfile } from "../engine/synthetic/employee-catalog.ts";
+import { employeeById, type EmployeeProfile, EVALUABLE_EMPLOYEES, EVALUATION_EXCLUDED_TENANTS } from "../engine/synthetic/employee-catalog.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
 import { MEASURE_CATALOG } from "../measure/measure-catalog.ts";
@@ -231,6 +231,12 @@ function resolveScope(req: ManualRunRequest, employees: readonly EmployeeProfile
       const id = req.employeeExternalId;
       if (!id || !employeeById(id)) throw new InvalidRunRequestError(`Unknown employee: ${id}`);
       const employee = employeeById(id)!;
+      if (EVALUATION_EXCLUDED_TENANTS.has(employee.tenantId)) {
+        // Directory-only tenant (see employee-catalog): the subject is visible but not evaluable yet.
+        throw new InvalidRunRequestError(
+          `Employee '${id}' belongs to tenant '${employee.tenantId}', which is directory-only until its measure set is wired (ROADMAP MM-1).`,
+        );
+      }
       const items: WorkItem[] = RUNNABLE_MEASURE_IDS.map((measureId) => ({
         employee,
         measureId,
@@ -286,7 +292,7 @@ export interface PlannedRun {
 
 /** Create the run (RUNNING) + resolve work items, without evaluating — fast, safe to await inline. */
 export async function planManualRun(deps: RunPipelineDeps, req: ManualRunRequest): Promise<PlannedRun> {
-  const employees = deps.employees ?? EMPLOYEES;
+  const employees = deps.employees ?? EVALUABLE_EMPLOYEES;
   const evalDate = req.evaluationDate ?? new Date().toISOString().slice(0, 10);
   const webChartEnv = deps.webChartEnv ?? {};
   const webChartConfigured = isWebChartConfigured(webChartEnv);
