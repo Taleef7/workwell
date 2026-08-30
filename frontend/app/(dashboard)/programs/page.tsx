@@ -267,11 +267,11 @@ export default function ProgramsPage() {
               </div>
 
               <div className="mt-3 flex flex-wrap gap-2 text-xs">
-                <Badge label={`${labelFor(OUTCOME_LABELS, "COMPLIANT")} ${fmtCount(program.compliant)}`} tone="green" />
-                <Badge label={`${labelFor(OUTCOME_LABELS, "DUE_SOON")} ${fmtCount(program.dueSoon)}`} tone="amber" />
-                <Badge label={`${labelFor(OUTCOME_LABELS, "OVERDUE")} ${fmtCount(program.overdue)}`} tone="red" />
-                <Badge label={`${labelFor(OUTCOME_LABELS, "MISSING_DATA")} ${fmtCount(program.missingData)}`} tone="violet" />
-                <Badge label={`${labelFor(OUTCOME_LABELS, "EXCLUDED")} ${fmtCount(program.excluded)}`} tone="slate" />
+                <Badge label={`${labelFor(OUTCOME_LABELS, "COMPLIANT")} ${fmtCount(program.compliant)}`} tone="green" href={chipHref(program.measureId, "COMPLIANT")} />
+                <Badge label={`${labelFor(OUTCOME_LABELS, "DUE_SOON")} ${fmtCount(program.dueSoon)}`} tone="amber" href={chipHref(program.measureId, "DUE_SOON")} />
+                <Badge label={`${labelFor(OUTCOME_LABELS, "OVERDUE")} ${fmtCount(program.overdue)}`} tone="red" href={chipHref(program.measureId, "OVERDUE")} />
+                <Badge label={`${labelFor(OUTCOME_LABELS, "MISSING_DATA")} ${fmtCount(program.missingData)}`} tone="violet" href={chipHref(program.measureId, "MISSING_DATA")} />
+                <Badge label={`${labelFor(OUTCOME_LABELS, "EXCLUDED")} ${fmtCount(program.excluded)}`} tone="slate" href={chipHref(program.measureId, "EXCLUDED")} />
               </div>
 
               <div className="relative z-10 mt-4">
@@ -375,7 +375,12 @@ function KpiCard({ label, value }: { label: string; value: string }) {
   );
 }
 
-function Badge({ label, tone }: { label: string; tone: "green" | "amber" | "red" | "slate" | "violet" }) {
+function chipHref(measureId: string, bucket: "COMPLIANT" | "DUE_SOON" | "OVERDUE" | "MISSING_DATA" | "EXCLUDED"): string {
+  if (bucket === "COMPLIANT" || bucket === "EXCLUDED") return `/compliance?status=${bucket}`;
+  return `/cases?measureId=${encodeURIComponent(measureId)}&outcome=${bucket}`;
+}
+
+function Badge({ label, tone, href }: { label: string; tone: "green" | "amber" | "red" | "slate" | "violet"; href?: string }) {
   const style = tone === "green"
     ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300"
     : tone === "amber"
@@ -385,7 +390,8 @@ function Badge({ label, tone }: { label: string; tone: "green" | "amber" | "red"
     : tone === "violet"
     ? "bg-violet-100 text-violet-800 dark:bg-violet-900/30 dark:text-violet-300"
     : "bg-neutral-100 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300";
-  return <span className={`rounded-full px-2 py-1 font-medium ${style}`}>{label}</span>;
+  const className = `rounded-full px-2 py-1 font-medium ${style}${href ? " relative z-10" : ""}`;
+  return href ? <Link href={href} className={className}>{label}</Link> : <span className={className}>{label}</span>;
 }
 
 function TrendChart({ data, loading, caption }: { data: TrendPoint[]; loading?: boolean; caption: string }) {
