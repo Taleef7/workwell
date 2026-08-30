@@ -1,5 +1,46 @@
 # Journal
 
+## 2026-08-30 (closeout) — the three MM-0 PRs merge; and the Maui deployment was never blocked on anyone
+
+**Merged in order — #497 → #498 → #499 — and `main` is at `fd2e5f51`.** #499 was rebased onto the other
+two first; the only conflict was the predictable one (all three inserting a JOURNAL entry at the top),
+resolved by stacking rather than choosing. Every review thread across the three PRs is replied to and
+resolved; the frontend suite is 41 files / 208 tests, lint clean, build clean, and the 19-check CI run
+was green before the squash. Housekeeping done: three worktrees removed, all six local+remote `mm0`
+branches deleted, refs pruned, and a superseded local plan draft deleted after diffing it against the
+committed version (the committed one was a strict superset).
+
+**The post-merge deploy failed once and it was not ours.** `Deploy TWH OS MIEWeb` died in the
+Create-a-Container step with `curl: (28) Operation timed out after 30002 milliseconds` on the container
+DELETE — a transient MIE API timeout, not a code fault: nothing in #499 touches the backend or the deploy
+path, and #498's identical deploy had succeeded 18 minutes earlier. `gh run rerun --failed` came back
+green in 1m40s. Final board on `main`: CI ✅ (13m25s), Deploy ✅, CodeQL ✅.
+
+**One review lesson worth keeping, because it cost the only real regression of the day.** Task 2 was the
+one lane that shipped without the independent reviewer pass — the implementer was itself a capable agent,
+which is exactly the rationalization that skips the step. Running it late found the employee-mode
+whitespace regression described in the entry below. **The reviewer step is not conditional on who
+implemented.**
+
+**A standing assumption was checked and is FALSE: the Maui container is not an MIE gate.** ROADMAP §7.3
+listed "Maui container provisioning + DNS" as owed by MIE, and §9.1 as an owner step to *confirm the
+path*. Confirmed, and the answer discharges it: the Container Manager lists all five existing containers
+under the owner's own account with a New-container action and an API-keys page, and
+`.github/scripts/deploy-mieweb-container.sh` already **creates** a container when the hostname does not
+exist — which is how `twh-api-ts`, `twh` and both `twh-staging*` containers came to exist — authenticated
+by the `LAUNCHPAD_API_KEY` secret every TWH deploy uses. So the Maui sandbox is not up for one reason
+only: **nobody has written `deploy-maui-mieweb.yml` yet.** That workflow is TWH's with `maui-api-ts` /
+`maui` hostnames, `NEXT_PUBLIC_SUBJECT_TERM=patient` passed as a frontend build ARG, and
+`WORKWELL_INSTANCE=maui`; the two things only the owner can supply are a separate Neon database
+(`DATABASE_URL_MAUI` — the `workwell_spike` schema self-creates, so no migration) and
+`WORKWELL_AUTH_JWT_SECRET_MAUI`. §7.3 and §9.1 are marked discharged in the roadmap.
+
+**Where MM-0 stands.** Code: Tasks 1–3 merged and deployed; Task 4 (the MIPS↔CMS crosswalk UI) is the
+last code item and is unblocked. Deployment: the Maui instance is now a *self-service* piece of work
+ahead of or beside Task 4, not a wait. Still genuinely external: MIE's order-mapping docs and new-UI
+access, the CDS client-auth answer, Nicole on exceptions, the ACO on attribution and measure 305, and the
+CY2027 final rule.
+
 ## 2026-08-30 (later) — MM-0 Task 2: subject terminology becomes deployment config (PR #499)
 
 `NEXT_PUBLIC_SUBJECT_TERM` (`employee` default | `patient`) drives a `SUBJECT` term set in
