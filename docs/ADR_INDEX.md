@@ -9,14 +9,15 @@
 > If the highest number here is lower than the highest in `DECISIONS.md`, this file is stale: trust
 > `DECISIONS.md` and regenerate.
 
-> **`·archived` (14 of 68, as of 2026-08-25)** means the BODY moved to
+> **`·archived` (14 of 69, as of 2026-08-30)** means the BODY moved to
 > `docs/archive/DECISIONS_ARCHIVE.md` — it is either superseded or a historical *finding* rather than a
 > decision that governs. `DECISIONS.md` still carries its heading plus a one-line pointer, so every
-> cross-reference resolves. The 54 unmarked titles are the record that still governs: decisions that
+> cross-reference resolves. The 55 unmarked titles are the record that still governs: decisions that
 > constrain what may be done next, and design records for built features.
 
 ## Titles (newest first)
 
+- ADR-070: the spearhead moves to a patient-driven pilot deployment — and the ACO's measure set finds the engine five-sixths already built
 - ADR-069: population membership applies the CQM IG's formulas per subject — and spec application is silent where corruption is loud
 - ADR-068: the OpenAPI document covers the PROMISED surface only, and a routed-path test is what makes hand-authoring defensible
 - ADR-067: CDS Hooks cards render a completed evaluation and never trigger one — and the outcome-to-card mapping is ours, which is stated rather than implied
