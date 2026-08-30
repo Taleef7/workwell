@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Button, Input, Select } from "@mieweb/ui";
 import { OUTCOME_LABELS, labelFor } from "@/lib/status";
+import { SUBJECT } from "@/lib/terminology";
 import { emitToast } from "@/lib/toast";
 import type { ApiClient } from "@/lib/api/client";
 import type { TestFixture } from "../types";
@@ -193,7 +194,7 @@ export function TestsTab({ measureId, api, initialFixtures, onSaved, onError, ca
             <Button variant="secondary" size="sm" onClick={() => remove(index)}>Remove</Button>
           </div>
           <Input label="Fixture Name" hideLabel placeholder="Fixture Name" value={fixture.fixtureName} onChange={(e) => update(index, "fixtureName", e.target.value)} />
-          <Input label="Employee External ID" hideLabel placeholder="Employee External ID" value={fixture.employeeExternalId} onChange={(e) => update(index, "employeeExternalId", e.target.value)} />
+          <Input label={`${SUBJECT.Singular} External ID`} hideLabel placeholder={`${SUBJECT.Singular} External ID`} value={fixture.employeeExternalId} onChange={(e) => update(index, "employeeExternalId", e.target.value)} />
           <Select
             label="Expected outcome"
             hideLabel

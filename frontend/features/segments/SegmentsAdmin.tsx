@@ -6,6 +6,7 @@ import { useAuth } from "@/components/auth-provider";
 import { useApi } from "@/lib/api/hooks";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { normalizeEnumValue } from "@/lib/status";
+import { SUBJECT } from "@/lib/terminology";
 import { canManageSegments } from "@/lib/rbac";
 import { useSegments } from "./hooks/useSegments";
 import { SegmentsList } from "./SegmentsList";
@@ -120,7 +121,7 @@ export function SegmentsAdmin() {
           <p className="text-xs uppercase tracking-[0.2em] text-neutral-500 dark:text-neutral-400">risk groups</p>
           <h3 className="mt-1 text-2xl font-semibold text-neutral-900 dark:text-neutral-100">Configure groups</h3>
           <p className="mt-1 text-sm text-neutral-600 dark:text-neutral-400">
-            A group maps a cohort (role / site rule + per-employee include/exclude overrides) to the measures that
+            A group maps a cohort (role / site rule + per-{SUBJECT.singular} include/exclude overrides) to the measures that
             apply to it. Applicability gates roster display and case creation only — never compliance.
           </p>
         </div>

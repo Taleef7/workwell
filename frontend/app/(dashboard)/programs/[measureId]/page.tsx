@@ -16,6 +16,7 @@ import { useRunStatus } from "@/components/run-status-provider";
 import { SkeletonCard } from "@/components/skeleton-loader";
 import { canRunMeasures } from "@/lib/rbac";
 import { OUTCOME_LABELS, ROLE_LABELS, labelFor } from "@/lib/status";
+import { SUBJECT } from "@/lib/terminology";
 import { niceDomain, chartTooltipStyle } from "@/lib/charts";
 import { useTheme } from "@/lib/useTheme";
 import { ChartDataTable } from "@/components/chart-data-table";
@@ -296,7 +297,7 @@ export default function ProgramDetailPage() {
                   <table className="min-w-full text-xs">
                     <thead className="text-left text-neutral-600 dark:text-neutral-400">
                       <tr>
-                        <th scope="col" className="py-1 pr-3">Employee</th>
+                        <th scope="col" className="py-1 pr-3">{SUBJECT.Singular}</th>
                         <th scope="col" className="py-1 pr-3">Site</th>
                         <th scope="col" className="py-1 pr-3">Streak</th>
                       </tr>

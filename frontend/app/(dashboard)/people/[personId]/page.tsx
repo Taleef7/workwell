@@ -9,6 +9,7 @@ import { useAuth } from "@/components/auth-provider";
 import { canReconcileIdentity } from "@/lib/rbac";
 import { emitToast } from "@/lib/toast";
 import { SkeletonCard } from "@/components/skeleton-loader";
+import { SUBJECT } from "@/lib/terminology";
 import { OUTCOME_LABELS, labelFor } from "@/lib/status";
 
 const OUTCOME_CHIP: Record<string, string> = {
@@ -280,7 +281,7 @@ export default function PersonDetailPage() {
                         // clicked (CONFIRM_LINK'd) under a new query; the debounced effect refetches.
                         setMergeResults([]);
                       }}
-                      placeholder="Search by name, employee id, or national id…"
+                      placeholder={`Search by name, ${SUBJECT.singular} id, or national id…`}
                       aria-label="Search for a record to link"
                       className="w-full rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-2 py-1 text-sm"
                     />

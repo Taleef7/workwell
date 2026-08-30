@@ -13,6 +13,7 @@ import { canRunMeasures } from "@/lib/rbac";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import type { TenantOption } from "@/features/compliance/types";
 import { OUTCOME_LABELS, ROLE_LABELS, labelFor } from "@/lib/status";
+import { SUBJECT } from "@/lib/terminology";
 import { niceDomain, chartTooltipStyle } from "@/lib/charts";
 import { useTheme } from "@/lib/useTheme";
 import {
@@ -366,7 +367,7 @@ export default function ProgramsPage() {
       <ConfirmDialog
         open={showRunConfirm}
         title="Run all active programs?"
-        description={`This evaluates every tracked employee across all ${programs.length} active measures. It cannot be undone, though results are recomputed on each run.`}
+        description={`This evaluates every tracked ${SUBJECT.singular} across all ${programs.length} active measures. It cannot be undone, though results are recomputed on each run.`}
         confirmLabel="Run all measures"
         cancelLabel="Cancel"
         onCancel={() => setShowRunConfirm(false)}
