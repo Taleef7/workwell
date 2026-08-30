@@ -412,7 +412,7 @@ export default function RunsPage() {
         payload.site = runSite.trim();
       } else if (runScopeType === "EMPLOYEE") {
         if (!runEmployeeExternalId.trim()) {
-          throw new Error("Enter an employee external ID before running an employee-scoped job.");
+          throw new Error(`Enter ${SUBJECT.singular === "employee" ? "an" : "a"} ${SUBJECT.singular} external ID before running ${SUBJECT.singular === "employee" ? "an" : "a"} ${SUBJECT.singular}-scoped job.`);
         }
         payload.employeeExternalId = runEmployeeExternalId.trim();
       } else if (runScopeType === "CASE") {

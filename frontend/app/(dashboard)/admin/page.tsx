@@ -1425,7 +1425,7 @@ export default function AdminPage() {
                 <p>Case: {event.caseId ?? "-"}</p>
                 <p>Run: {event.runId ?? "-"}</p>
                 <p>Measure: {event.measureName ?? "-"}</p>
-                <p>Employee: {event.employeeExternalId ?? "-"}</p>
+                <p>{SUBJECT.Singular}: {event.employeeExternalId ?? "-"}</p>
               </div>
               {event.detail ? <pre className="mt-3 overflow-x-auto rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3 text-[11px] leading-5 text-neutral-700 dark:text-neutral-300">{event.detail}</pre> : null}
             </div>

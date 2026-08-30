@@ -1,6 +1,7 @@
 'use client';
 
 import { useParams } from 'next/navigation';
+import { SUBJECT } from "@/lib/terminology";
 import Link from 'next/link';
 import { useEmployeeProfile } from '@/features/employee/hooks/useEmployeeProfile';
 import { ComplianceSummaryBar } from '@/features/employee/components/ComplianceSummaryBar';
@@ -37,7 +38,7 @@ export default function EmployeeProfilePage() {
   if (error || !profile) {
     return (
       <div className="p-8 text-sm text-red-500 dark:text-red-400">
-        {error ?? 'Employee not found.'}
+        {error ?? `${SUBJECT.Singular} not found.`}
       </div>
     );
   }

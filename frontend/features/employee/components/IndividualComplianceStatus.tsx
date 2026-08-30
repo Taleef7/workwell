@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useState } from "react";
+import { SUBJECT } from "@/lib/terminology";
 import { useApi } from "@/lib/api/hooks";
 import { useAuth } from "@/components/auth-provider";
 import { useRunStatus } from "@/components/run-status-provider";
@@ -155,7 +156,7 @@ export function IndividualComplianceStatus({
       {loading ? (
         <p className="text-sm text-neutral-500 dark:text-neutral-400">Loading compliance…</p>
       ) : rows.length === 0 ? (
-        <p className="text-sm text-neutral-500 dark:text-neutral-400">No evaluated measures for this employee yet.</p>
+        <p className="text-sm text-neutral-500 dark:text-neutral-400">No evaluated measures for this {SUBJECT.singular} yet.</p>
       ) : (
         <table className="min-w-full text-sm">
           <thead>
