@@ -65,6 +65,16 @@ export default function CompliancePage() {
     setPage(1);
   }
 
+  // panel/status are URL-derived, so like siteId they can change externally (back/forward, deep link),
+  // not only through their selects — the same render-adjust reset covers both paths.
+  const [prevPanel, setPrevPanel] = useState(panel);
+  const [prevStatus, setPrevStatus] = useState(status);
+  if (panel !== prevPanel || status !== prevStatus) {
+    setPrevPanel(panel);
+    setPrevStatus(status);
+    setPage(1);
+  }
+
   // Debounce the free-text search so a fetch fires once the typing settles, not per keystroke
   // (matches the cases page). The selects + paging + global site filter drive `load` immediately.
   const [debouncedQ, setDebouncedQ] = useState<string>("");
@@ -194,7 +204,6 @@ export default function CompliancePage() {
   const setPanelAndUrl = useCallback((nextPanel: PanelId) => {
     const params = new URLSearchParams(searchParams.toString());
     params.set("panel", nextPanel);
-    setPage(1);
     const query = params.toString();
     router.push(query ? `${pathname}?${query}` : pathname);
   }, [pathname, router, searchParams]);
@@ -206,7 +215,6 @@ export default function CompliancePage() {
     } else {
       params.delete("status");
     }
-    setPage(1);
     const query = params.toString();
     router.push(query ? `${pathname}?${query}` : pathname);
   }, [pathname, router, searchParams]);

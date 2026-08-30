@@ -1,5 +1,6 @@
 import React from "react";
-import { act, render, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { createNavMock } from "@/test/mocks/next-navigation-reactive";
 
@@ -66,6 +67,26 @@ describe("CompliancePage URL filters", () => {
       const latest = rosterCalls().at(-1);
       expect(latest).toContain("status=EXCLUDED");
       expect(latest).not.toContain("status=COMPLIANT");
+    });
+  });
+
+  it("changing the status select writes the URL and refetches", async () => {
+    render(<CompliancePage />);
+    await waitFor(() => expect(rosterCalls().length).toBeGreaterThan(0));
+    await userEvent.selectOptions(screen.getByLabelText(/Status/i), "OVERDUE");
+    await waitFor(() => {
+      expect(navHolder.current.params.get("status")).toBe("OVERDUE");
+      expect(rosterCalls().at(-1)).toContain("status=OVERDUE");
+    });
+  });
+
+  it("drops an unknown status value rather than sending it", async () => {
+    navHolder.current.setUrl("/compliance?status=NOT_A_STATUS");
+    render(<CompliancePage />);
+    await waitFor(() => {
+      const latest = rosterCalls().at(-1);
+      expect(latest).toBeDefined();
+      expect(latest).not.toContain("status=");
     });
   });
 

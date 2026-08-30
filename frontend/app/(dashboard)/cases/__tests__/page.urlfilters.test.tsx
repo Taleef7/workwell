@@ -1,5 +1,6 @@
 import React from "react";
-import { act, render, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { createNavMock } from "@/test/mocks/next-navigation-reactive";
 
@@ -62,6 +63,17 @@ describe("CasesPage URL filters", () => {
       const latest = caseCalls().at(-1);
       expect(latest).toContain("outcome=DUE_SOON");
       expect(latest).not.toContain("outcome=OVERDUE");
+    });
+  });
+
+  it("changing the outcome select writes the URL and refetches", async () => {
+    render(<CasesPage />);
+    await waitFor(() => expect(caseCalls().length).toBeGreaterThan(0));
+    await userEvent.click(screen.getByRole("combobox", { name: /outcome/i }));
+    await userEvent.click(screen.getByRole("option", { name: /overdue/i }));
+    await waitFor(() => {
+      expect(navHolder.current.params.get("outcome")).toBe("OVERDUE");
+      expect(caseCalls().at(-1)).toContain("outcome=OVERDUE");
     });
   });
 
