@@ -72,11 +72,19 @@ function normalizeCaseStatusFilter(value: string | null): CaseStatusFilter {
   }
 }
 
+const OUTCOME_FILTER_VALUES = new Set(Object.keys(OUTCOME_LABELS));
+
+function normalizeOutcomeFilter(raw: string | null): string {
+  return raw && OUTCOME_FILTER_VALUES.has(raw) ? raw : "";
+}
+
 export default function CasesPage() {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const urlStatus = searchParams.get("status");
+  const urlMeasure = searchParams.get("measureId") ?? "";
+  const urlOutcome = normalizeOutcomeFilter(searchParams.get("outcome"));
   const urlSearch = searchParams.get("search") ?? "";
   const view = searchParams.get("view") ?? "all";
   const { user } = useAuth();
@@ -86,7 +94,9 @@ export default function CasesPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const statusFilter = normalizeCaseStatusFilter(urlStatus);
-  const [measureFilter, setMeasureFilter] = useState<string>("");
+  // Derived from the URL (like statusFilter) rather than useState-initialized, so browser
+  // back/forward between two filtered /cases URLs re-renders with the right filter.
+  const measureFilter = urlMeasure;
   const [priorityFilter, setPriorityFilter] = useState<string>("");
   const [assigneeFilter, setAssigneeFilter] = useState<string>("");
   const [siteFilter, setSiteFilter] = useState<string>("");
@@ -100,7 +110,7 @@ export default function CasesPage() {
   const { siteId, from, to } = useGlobalFilters();
   const api = useApi();
   const [pageSize, setPageSize] = useState(25);
-  const [outcomeFilter, setOutcomeFilter] = useState<string>("");
+  const outcomeFilter = urlOutcome;
   const [viewMode, setViewMode] = useState<"cards" | "table">("cards");
 
   // Track the most recent search value we ourselves wrote to the URL so we can
@@ -262,6 +272,28 @@ export default function CasesPage() {
       params.delete("status");
     } else {
       params.set("status", nextStatus);
+    }
+    const query = params.toString();
+    router.push(query ? `${pathname}?${query}` : pathname);
+  }, [pathname, router, searchParams]);
+
+  const setMeasureAndUrl = useCallback((nextMeasure: string) => {
+    const params = new URLSearchParams(searchParams.toString());
+    if (nextMeasure) {
+      params.set("measureId", nextMeasure);
+    } else {
+      params.delete("measureId");
+    }
+    const query = params.toString();
+    router.push(query ? `${pathname}?${query}` : pathname);
+  }, [pathname, router, searchParams]);
+
+  const setOutcomeAndUrl = useCallback((nextOutcome: string) => {
+    const params = new URLSearchParams(searchParams.toString());
+    if (nextOutcome) {
+      params.set("outcome", nextOutcome);
+    } else {
+      params.delete("outcome");
     }
     const query = params.toString();
     router.push(query ? `${pathname}?${query}` : pathname);
@@ -471,7 +503,7 @@ export default function CasesPage() {
           size="sm"
           className="w-48"
           value={measureFilter}
-          onValueChange={setMeasureFilter}
+          onValueChange={setMeasureAndUrl}
           options={measureOptions}
         />
         <Select
@@ -503,7 +535,7 @@ export default function CasesPage() {
           size="sm"
           className="w-44"
           value={outcomeFilter}
-          onValueChange={setOutcomeFilter}
+          onValueChange={setOutcomeAndUrl}
           options={outcomeOptions}
         />
         <Input
