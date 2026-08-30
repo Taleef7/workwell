@@ -93,7 +93,7 @@ export function ImpactPreviewPanel({ measureId, api }: Props) {
           </div>
 
           <p className="text-xs text-neutral-500 dark:text-neutral-400">
-            Evaluated {data.populationEvaluated} {SUBJECT.plural} as of {data.evaluationDate}.
+            Evaluated {data.populationEvaluated} {data.populationEvaluated === 1 ? SUBJECT.singular : SUBJECT.plural} as of {data.evaluationDate}.
           </p>
 
           {data.warnings.length > 0 ? (

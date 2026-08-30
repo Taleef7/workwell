@@ -383,7 +383,7 @@ export function SegmentEditorModal({ open, initial, activeMeasures, onClose, onS
           <div role="status" aria-live="polite" className="grid gap-1 rounded border border-neutral-200 bg-neutral-50 p-3 text-xs dark:border-neutral-800 dark:bg-neutral-950">
             {preview ? (
               <>
-                <p className="font-medium">{`${preview.count} ${SUBJECT.plural} match`}</p>
+                <p className="font-medium">{preview.count === 1 ? `1 ${SUBJECT.singular} matches` : `${preview.count} ${SUBJECT.plural} match`}</p>
                 {preview.members.length > 0 ? (
                   <p className="text-neutral-500">{preview.members.slice(0, PREVIEW_LIMIT).join(", ")}{preview.members.length > PREVIEW_LIMIT ? "…" : ""}</p>
                 ) : null}

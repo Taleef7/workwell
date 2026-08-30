@@ -3,10 +3,20 @@
  *  default is employee so every existing deployment is byte-identical. */
 export type SubjectTerm = {
   singular: string; plural: string; Singular: string; Plural: string;
+  /** Indefinite article for the singular: "an employee", "a patient". */
+  an: string;
+  /** The evaluated population as a collective noun: "workforce", "patient population". */
+  population: string;
 };
 const TERMS: Record<"employee" | "patient", SubjectTerm> = {
-  employee: { singular: "employee", plural: "employees", Singular: "Employee", Plural: "Employees" },
-  patient: { singular: "patient", plural: "patients", Singular: "Patient", Plural: "Patients" },
+  employee: {
+    singular: "employee", plural: "employees", Singular: "Employee", Plural: "Employees",
+    an: "an", population: "workforce",
+  },
+  patient: {
+    singular: "patient", plural: "patients", Singular: "Patient", Plural: "Patients",
+    an: "a", population: "patient population",
+  },
 };
 const raw = process.env.NEXT_PUBLIC_SUBJECT_TERM;
 export const SUBJECT: SubjectTerm = TERMS[raw === "patient" ? "patient" : "employee"];

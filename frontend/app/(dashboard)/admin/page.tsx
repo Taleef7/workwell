@@ -1122,7 +1122,7 @@ export default function AdminPage() {
           <div className="rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800/50 p-4">
             <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Grant waiver</p>
             <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
-              {`Use ${SUBJECT.singular === "employee" ? "an" : "a"} ${SUBJECT.singular} external ID from the seeded dataset. The latest active version for the selected measure will be used.`}
+              {`Use ${SUBJECT.an} ${SUBJECT.singular} external ID from the seeded dataset. The latest active version for the selected measure will be used.`}
             </p>
             <div className="mt-4 grid gap-3">
               <Input

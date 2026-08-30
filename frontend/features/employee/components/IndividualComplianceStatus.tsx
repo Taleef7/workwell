@@ -115,7 +115,7 @@ export function IndividualComplianceStatus({
   // pattern as the /compliance grid's Recalculate.
   const recalculate = useCallback(async () => {
     if (!canRecalc || isActive) return; // a run is already in flight — don't fan out a duplicate
-    if (!window.confirm("Recalculate compliance for all programs? This runs every active measure across the workforce.")) return;
+    if (!window.confirm(`Recalculate compliance for all programs? This runs every active measure across the ${SUBJECT.population}.`)) return;
     setRecalcBusy(true);
     setError(null);
     try {

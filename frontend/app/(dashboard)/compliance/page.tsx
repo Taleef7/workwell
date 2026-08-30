@@ -187,7 +187,7 @@ export default function CompliancePage() {
 
   const recalculate = useCallback(async () => {
     if (!canRecalc || isActive) return; // a run is already in flight — don't fan out a duplicate
-    if (!window.confirm("Recalculate compliance for all programs? This runs every active measure across the workforce.")) return;
+    if (!window.confirm(`Recalculate compliance for all programs? This runs every active measure across the ${SUBJECT.population}.`)) return;
     setRecalcBusy(true);
     try {
       const result = await api.post<{ scopeType: string }, { runId: string; status?: string }>(
@@ -320,7 +320,7 @@ export default function CompliancePage() {
       ) : null}
 
       <span className="sr-only" role="status" aria-live="polite">
-        {loading ? (slow ? `${SLOW_LOAD_HINT} Still loading.` : "Loading roster…") : `${rows.length} ${SUBJECT.plural} loaded`}
+        {loading ? (slow ? `${SLOW_LOAD_HINT} Still loading.` : "Loading roster…") : `${rows.length} ${rows.length === 1 ? SUBJECT.singular : SUBJECT.plural} loaded`}
       </span>
 
       {slow && loading ? (

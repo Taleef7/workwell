@@ -412,7 +412,7 @@ export default function RunsPage() {
         payload.site = runSite.trim();
       } else if (runScopeType === "EMPLOYEE") {
         if (!runEmployeeExternalId.trim()) {
-          throw new Error(`Enter ${SUBJECT.singular === "employee" ? "an" : "a"} ${SUBJECT.singular} external ID before running ${SUBJECT.singular === "employee" ? "an" : "a"} ${SUBJECT.singular}-scoped job.`);
+          throw new Error(`Enter ${SUBJECT.an} ${SUBJECT.singular} external ID before running ${SUBJECT.an} ${SUBJECT.singular}-scoped job.`);
         }
         payload.employeeExternalId = runEmployeeExternalId.trim();
       } else if (runScopeType === "CASE") {
@@ -733,7 +733,7 @@ export default function RunsPage() {
                 size="sm"
                 value={runEmployeeExternalId}
                 onChange={(e) => setRunEmployeeExternalId(e.target.value)}
-                placeholder={`Enter ${SUBJECT.singular === "employee" ? "an" : "a"} ${SUBJECT.singular} external ID, for example emp-041`}
+                placeholder={`Enter ${SUBJECT.an} ${SUBJECT.singular} external ID, for example emp-041`}
               />
             </div>
           ) : null}
@@ -760,8 +760,7 @@ export default function RunsPage() {
           </Button>
         </div>
         <p className="mt-2 text-xs text-neutral-500 dark:text-neutral-400">
-          {`MEASURE runs require a measure selection. SITE runs require a site name. EMPLOYEE runs require ${SUBJECT.singular === "employee" ? "an" : "a"} ${SUBJECT.singular} external ID.`}
-          CASE runs require a case UUID.
+          {`MEASURE runs require a measure selection. SITE runs require a site name. ${SCOPE_LABELS.EMPLOYEE.toUpperCase()} runs require ${SUBJECT.an} ${SUBJECT.singular} external ID. CASE runs require a case UUID.`}
         </p>
       </div>
       ) : null}
