@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Button } from "@mieweb/ui";
 import { formatStatusLabel } from "@/lib/status";
+import { SUBJECT } from "@/lib/terminology";
 import type { ApiClient } from "@/lib/api/client";
 import type { ImpactPreviewResponse } from "../types";
 
@@ -92,7 +93,7 @@ export function ImpactPreviewPanel({ measureId, api }: Props) {
           </div>
 
           <p className="text-xs text-neutral-500 dark:text-neutral-400">
-            Evaluated {data.populationEvaluated} employees as of {data.evaluationDate}.
+            Evaluated {data.populationEvaluated} {SUBJECT.plural} as of {data.evaluationDate}.
           </p>
 
           {data.warnings.length > 0 ? (

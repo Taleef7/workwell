@@ -10,6 +10,7 @@ import { useGlobalFilters } from "@/components/global-filter-context";
 import { useAuth } from "@/components/auth-provider";
 import { canRunMeasures } from "@/lib/rbac";
 import { COMPLIANCE_STATUS_LABELS } from "@/lib/status";
+import { SUBJECT } from "@/lib/terminology";
 import { ComplianceChip } from "@/features/compliance/ComplianceChip";
 import { RosterMobileCards } from "@/features/compliance/RosterMobileCards";
 import { usePanelCache } from "@/features/compliance/usePanelCache";
@@ -229,7 +230,7 @@ export default function CompliancePage() {
         <div>
           <h1 className="text-xl font-semibold">Individual Compliance Status</h1>
           <p className="text-sm text-neutral-500 dark:text-neutral-400">
-            Every employee across the selected panel — compliant and excluded included. The inverse of the worklist.
+            {`Every ${SUBJECT.singular} across the selected panel — compliant and excluded included. The inverse of the worklist.`}
           </p>
         </div>
         {canRecalc ? (
@@ -319,7 +320,7 @@ export default function CompliancePage() {
       ) : null}
 
       <span className="sr-only" role="status" aria-live="polite">
-        {loading ? (slow ? `${SLOW_LOAD_HINT} Still loading.` : "Loading roster…") : `${rows.length} employees loaded`}
+        {loading ? (slow ? `${SLOW_LOAD_HINT} Still loading.` : "Loading roster…") : `${rows.length} ${SUBJECT.plural} loaded`}
       </span>
 
       {slow && loading ? (
@@ -334,7 +335,7 @@ export default function CompliancePage() {
           <thead className="bg-neutral-50 dark:bg-neutral-900/60">
             <tr>
               <th scope="col" className="sticky left-0 z-10 bg-neutral-50 px-3 py-2 text-left font-semibold dark:bg-neutral-900/60">
-                Employee
+                {SUBJECT.Singular}
               </th>
               {columns.map((c) => (
                 <th key={c.measureId} scope="col" className="px-3 py-2 text-left font-semibold">
@@ -348,7 +349,7 @@ export default function CompliancePage() {
             {loading && rows.length === 0 ? (
               <tr><td colSpan={columns.length + 1} className="px-3 py-6 text-center text-neutral-500">Loading…</td></tr>
             ) : rows.length === 0 ? (
-              <tr><td colSpan={columns.length + 1} className="px-3 py-6 text-center text-neutral-500">No employees match these filters.</td></tr>
+              <tr><td colSpan={columns.length + 1} className="px-3 py-6 text-center text-neutral-500">{`No ${SUBJECT.plural} match these filters.`}</td></tr>
             ) : (
               rows.map((r) => (
                 <tr key={r.subject.externalId} className="border-t border-neutral-200 hover:bg-neutral-50 dark:border-neutral-800 dark:hover:bg-neutral-900/40">
@@ -376,7 +377,7 @@ export default function CompliancePage() {
       <RosterMobileCards columns={columns} rows={rows} loading={loading} />
 
       <div className="flex items-center justify-between text-sm text-neutral-500 dark:text-neutral-400">
-        <span>{fmtCount(total)} employee{total === 1 ? "" : "s"}</span>
+        <span>{fmtCount(total)} {total === 1 ? SUBJECT.singular : SUBJECT.plural}</span>
         <div className="flex items-center gap-2">
           <button
             type="button"

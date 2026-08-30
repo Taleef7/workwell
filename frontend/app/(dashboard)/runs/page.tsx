@@ -20,6 +20,7 @@ import {
   runStatusClass,
   triggerBadgeClass
 } from "@/lib/status";
+import { SUBJECT } from "@/lib/terminology";
 import { useGlobalFilters } from "@/components/global-filter-context";
 import { useApi } from "@/lib/api/hooks";
 import { useAuth } from "@/components/auth-provider";
@@ -477,7 +478,7 @@ export default function RunsPage() {
   // NITRO grid for the run Outcomes table (employee/role/site/outcome/days/waiver/case).
   const outcomeColumns = useMemo<NitroGridColumn[]>(
     () => [
-      { field: "employee", header: "Employee" },
+      { field: "employee", header: SUBJECT.Singular },
       { field: "role", header: "Role" },
       { field: "site", header: "Site" },
       { field: "outcome", header: "Outcome" },
@@ -728,11 +729,11 @@ export default function RunsPage() {
           {runScopeType === "EMPLOYEE" ? (
             <div className="md:col-span-2">
               <Input
-                label="Employee External ID"
+                label={`${SUBJECT.Singular} External ID`}
                 size="sm"
                 value={runEmployeeExternalId}
                 onChange={(e) => setRunEmployeeExternalId(e.target.value)}
-                placeholder="Enter an employee external ID, for example emp-041"
+                placeholder={`Enter ${SUBJECT.singular === "employee" ? "an" : "a"} ${SUBJECT.singular} external ID, for example emp-041`}
               />
             </div>
           ) : null}
@@ -759,7 +760,7 @@ export default function RunsPage() {
           </Button>
         </div>
         <p className="mt-2 text-xs text-neutral-500 dark:text-neutral-400">
-          MEASURE runs require a measure selection. SITE runs require a site name. EMPLOYEE runs require an employee external ID.
+          {`MEASURE runs require a measure selection. SITE runs require a site name. EMPLOYEE runs require ${SUBJECT.singular === "employee" ? "an" : "a"} ${SUBJECT.singular} external ID.`}
           CASE runs require a case UUID.
         </p>
       </div>
@@ -767,7 +768,7 @@ export default function RunsPage() {
 
       {error ? <p role="alert" className="text-sm text-red-700 dark:text-red-400">{error}</p> : null}
       {selectedRun && !rerunSupported ? (
-        <p className="text-xs text-amber-700">Rerun is available only for all-programs, measure-scoped, site-scoped, employee-scoped, or case-scoped runs.</p>
+        <p className="text-xs text-amber-700">{`Rerun is available only for all-programs, measure-scoped, site-scoped, ${SUBJECT.singular}-scoped, or case-scoped runs.`}</p>
       ) : null}
       {loading ? (
         <div className="overflow-x-auto rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900">
@@ -1016,7 +1017,7 @@ export default function RunsPage() {
         title="Start this run?"
         description={
           runScopeType === "ALL_PROGRAMS"
-            ? "This evaluates every tracked employee across all active measures (~1,000 evaluations) and can take a few minutes to complete."
+            ? `This evaluates every tracked ${SUBJECT.singular} across all active measures (~1,000 evaluations) and can take a few minutes to complete.`
             : `This starts a ${labelFor(SCOPE_LABELS, runScopeType)}-scoped run.`
         }
         confirmLabel="Start run"

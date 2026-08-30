@@ -1,0 +1,12 @@
+/** Deployment-level subject noun (ROADMAP_2026-08-30 MM-0): the Maui pilot says
+ *  "patient", TWH says "employee". Build-time config like every NEXT_PUBLIC_* var;
+ *  default is employee so every existing deployment is byte-identical. */
+export type SubjectTerm = {
+  singular: string; plural: string; Singular: string; Plural: string;
+};
+const TERMS: Record<"employee" | "patient", SubjectTerm> = {
+  employee: { singular: "employee", plural: "employees", Singular: "Employee", Plural: "Employees" },
+  patient: { singular: "patient", plural: "patients", Singular: "Patient", Plural: "Patients" },
+};
+const raw = process.env.NEXT_PUBLIC_SUBJECT_TERM;
+export const SUBJECT: SubjectTerm = TERMS[raw === "patient" ? "patient" : "employee"];

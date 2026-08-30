@@ -7,6 +7,7 @@ import { useAuth } from "@/components/auth-provider";
 import { AccessDenied } from "@/components/access-denied";
 import { canViewPeople } from "@/lib/rbac";
 import { SkeletonCard } from "@/components/skeleton-loader";
+import { SUBJECT } from "@/lib/terminology";
 
 /**
  * E15 PR-1 — cross-system People directory. Resolves one person across ≥1 WebChart systems and
@@ -120,7 +121,7 @@ export default function PeoplePage() {
           setQuery(e.target.value);
           setPage(1); // reset to the first page when the search changes
         }}
-        placeholder="Search by name, employee id, or national id…"
+        placeholder={`Search by name, ${SUBJECT.singular} id, or national id…`}
         aria-label="Search people"
         className="w-full max-w-md rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2 text-sm"
       />

@@ -7,6 +7,7 @@ import { useAuth } from "@/components/auth-provider";
 import { useGlobalFilters } from "@/components/global-filter-context";
 import { useApi } from "@/lib/api/hooks";
 import { formatStatusLabel, normalizeEnumValue } from "@/lib/status";
+import { SUBJECT } from "@/lib/terminology";
 import NitroGrid, { type NitroGridColumn } from "@/features/datavis/NitroGridClient";
 import type { RowData, TableColumn } from "datavis/src/components/table/types";
 import { SegmentsAdmin } from "@/features/segments/SegmentsAdmin";
@@ -386,7 +387,7 @@ export default function AdminPage() {
   async function grantWaiver() {
     if (!isAdmin) return;
     if (!waiverEmployeeExternalId.trim() || !waiverMeasureId) {
-      setError("Employee external ID and measure are required");
+      setError(`${SUBJECT.Singular} external ID and measure are required`);
       return;
     }
     if (!waiverExclusionReason.trim()) {
@@ -1029,7 +1030,7 @@ export default function AdminPage() {
             <h3 className="mt-1 text-2xl font-semibold text-neutral-900 dark:text-neutral-100">Excluded case support</h3>
             <p className="mt-1 text-sm text-neutral-600 dark:text-neutral-400">
               Global site filter applies automatically. Use the filters below to inspect active and expired waivers, or
-              grant one manually for a specific employee and measure.
+              grant one manually for a specific {SUBJECT.singular} and measure.
             </p>
           </div>
           <Button
@@ -1121,11 +1122,11 @@ export default function AdminPage() {
           <div className="rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800/50 p-4">
             <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Grant waiver</p>
             <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
-              Use an employee external ID from the seeded dataset. The latest active version for the selected measure will be used.
+              {`Use ${SUBJECT.singular === "employee" ? "an" : "a"} ${SUBJECT.singular} external ID from the seeded dataset. The latest active version for the selected measure will be used.`}
             </p>
             <div className="mt-4 grid gap-3">
               <Input
-                label="Employee external ID"
+                label={`${SUBJECT.Singular} external ID`}
                 placeholder="patient-003"
                 value={waiverEmployeeExternalId}
                 onChange={(e) => setWaiverEmployeeExternalId(e.target.value)}
@@ -1319,7 +1320,7 @@ export default function AdminPage() {
         <p className="text-xs uppercase tracking-[0.2em] text-red-600">demo tools</p>
         <h3 className="mt-1 text-2xl font-semibold text-red-700">Reset demo data</h3>
         <p className="mt-1 text-sm text-neutral-600 dark:text-neutral-400">
-          Clears all runs, cases, outcomes, outreach, and audit events. Employees, measures, and value sets are
+          Clears all runs, cases, outcomes, outreach, and audit events. {SUBJECT.Plural}, measures, and value sets are
           preserved. Only available outside production.
         </p>
         {resetMessage ? <p className="mt-3 text-sm font-medium text-emerald-700">{resetMessage}</p> : null}

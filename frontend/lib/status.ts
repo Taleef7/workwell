@@ -1,3 +1,5 @@
+import { SUBJECT } from "./terminology";
+
 export const MEASURE_STATUS_LABELS: Record<string, string> = {
   DRAFT: "Draft",
   APPROVED: "Approved",
@@ -48,7 +50,8 @@ export const SCOPE_LABELS: Record<string, string> = {
   ALL_PROGRAMS: "All Programs",
   MEASURE: "Measure",
   SITE: "Site",
-  EMPLOYEE: "Employee",
+  // The key mirrors the backend scope enum; only the display value follows the deployment term.
+  EMPLOYEE: SUBJECT.Singular,
   CASE: "Case"
 };
 

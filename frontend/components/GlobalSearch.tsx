@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { useApi } from '@/lib/api/hooks';
+import { SUBJECT } from '@/lib/terminology';
 
 interface SearchResult {
   externalId: string;
@@ -95,13 +96,13 @@ export function GlobalSearch() {
         </svg>
         <input
           type="text"
-          aria-label="Search employees"
+          aria-label={`Search ${SUBJECT.plural}`}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === 'Escape') setOpen(false);
           }}
-          placeholder="Search employees…"
+          placeholder={`Search ${SUBJECT.plural}…`}
           className="h-8 w-56 rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 pl-7 pr-3 text-xs text-neutral-700 dark:text-neutral-300 placeholder:text-neutral-400 focus:border-neutral-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500"
         />
       </div>
@@ -109,9 +110,9 @@ export function GlobalSearch() {
       <span role="status" aria-live="polite" className="sr-only">
         {open
           ? results.length > 0
-            ? `${results.length} employee${results.length === 1 ? "" : "s"} found`
+            ? `${results.length} ${results.length === 1 ? SUBJECT.singular : SUBJECT.plural} found`
             : query.length >= 2 && !loading
-              ? "No employees found"
+              ? `No ${SUBJECT.plural} found`
               : ""
           : ""}
       </span>
@@ -145,7 +146,7 @@ export function GlobalSearch() {
               ))}
             </ul>
           ) : (
-            <div className="px-3 py-4 text-center text-xs text-neutral-600 dark:text-neutral-400">No employees found</div>
+            <div className="px-3 py-4 text-center text-xs text-neutral-600 dark:text-neutral-400">{`No ${SUBJECT.plural} found`}</div>
           )}
         </div>
       )}
