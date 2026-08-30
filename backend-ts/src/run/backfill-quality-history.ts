@@ -25,7 +25,7 @@ import type { OutcomeStore } from "../stores/outcome-store.ts";
 import type { QualitySnapshotInput, QualitySnapshotStore } from "../stores/quality-snapshot-store.ts";
 import type { CaseEventStore } from "../stores/case-event-store.ts";
 import { buildSnapshotRows, type ScaleGroup, type ScopeRef } from "../quality/materialize-snapshot.ts";
-import { EMPLOYEES, employeeById, providerById, type EmployeeProfile } from "../engine/synthetic/employee-catalog.ts";
+import { employeeById, providerById, type EmployeeProfile, EVALUABLE_EMPLOYEES } from "../engine/synthetic/employee-catalog.ts";
 import { SCALE_TENANT } from "../engine/synthetic/scale-structure.ts";
 import { SCALE_TRIGGER } from "./backfill-scale.ts";
 import { isCompletedRun } from "../program/rollup-shared.ts";
@@ -103,7 +103,7 @@ export async function backfillQualityHistory(
   const asOf = args.asOf ?? `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
   const resume = args.resume ?? true;
   const today = deps.today ?? now.toISOString().slice(0, 10);
-  const employees = deps.employees ?? EMPLOYEES;
+  const employees = deps.employees ?? EVALUABLE_EMPLOYEES;
   const computedAt = new Date().toISOString();
 
   // Latest COMPLETED seed:scale run per measure → the bounded mhn fold (same as materialize-run).

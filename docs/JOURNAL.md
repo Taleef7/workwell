@@ -1,5 +1,35 @@
 # Journal
 
+## 2026-08-30 (later) — MM-0 lands its first slices, and review makes the Maui tenant directory-only
+
+**MM-0 Tasks 1 and 3 are implemented (PRs #497, #498), each through a triple review** (an
+implementation lane, an independent reviewer pass with mutation checks, and the PR-time Codex bot), and
+both reviews earned their keep. **#497** (clickable status chips + URL-backed case/roster filters): the
+filters ended up **derived from the URL per render** rather than state-initialized — browser back/forward
+correctness, pinned by tests that use a new *reactive* `next/navigation` mock whose `push` actually
+updates the params (a static mock made every write-back invisible, a mutation check proved it); chips
+carry the active site/date scope so the destination matches the clicked count; and **COMPLIANT/EXCLUDED
+chips went back to static** — the roster's status filter is any-cell-per-panel, not per-measure, so no
+destination reproduces those counts today, and a wrong list is worse than no link (measure-scoped roster
+drill-down recorded as MM-2 backlog). It also fixed the previously-dead `/cases?measureId=` footer link.
+
+**#498's review verdict changed the design: the maui tenant is DIRECTORY-ONLY until MM-1**
+(`EVALUATION_EXCLUDED_TENANTS` / `EVALUABLE_EMPLOYEES` in `employee-catalog.ts`; every evaluation
+surface — run pipeline, backfills, case-rerun, impact preview, compliance-api preview — now reads the
+evaluable population). Two measured findings forced it: appending 48 rows to the global seeded
+distribution **reshuffled ~181/900 existing twh/ihn targets** (e.g. `emp-053` diabetes_hba1c
+EXCLUDED→COMPLIANT — case churn on the live demo at the next nightly run), and the `pat-*` ids
+hash-cluster in `orderKey`'s Java-hash band so the cohort lands in one or two buckets — meaning the
+planned per-tenant bucket-coverage test verified a distribution the product never computes (the
+vacuous-guard shape again, caught before merge). Also on the record from review: patients would have
+received occupational-health evaluations (audiogram/HAZWOPER cases), the live demo's seeded
+`All Employees` segment doesn't cover the new clinics (repair deferred to the MM-1 activation checklist,
+noted in DEPLOY.md), and the persona `dateOfBirth` fields are display-only today — the bundle builder
+derives ages from ids, so the plan's IPP rationale for them was wrong. The anti-churn invariant is now
+pinned in tests: `EVALUABLE_EMPLOYEES` is byte-identical to the pre-maui population, with `emp-053`'s
+seeded target as the reshuffle canary. Bucket coverage for the pilot cohort moves to MM-1, where
+per-tenant distribution / id de-clustering gets designed deliberately.
+
 ## 2026-08-30 — ADR-070: the Maui pilot re-spearheads the roadmap; the ACO's measure set finds the engine five-sixths already built
 
 **`docs/ROADMAP_2026-08-30.md` is the new APPROVED active plan (ADR-070; LOCKED_DECISIONS §4A).**

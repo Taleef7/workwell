@@ -14,6 +14,7 @@ import { fileURLToPath } from "node:url";
 // @ts-expect-error — @mieweb/cloud-local ships .mjs without types
 import { createSqliteD1 } from "@mieweb/cloud-local";
 import { handleRuns } from "./runs.ts";
+import { EVALUABLE_EMPLOYEES } from "../engine/synthetic/employee-catalog.ts";
 import { buildQrda1Document, qrda1NonConformance } from "../fhir/qrda1-export.ts";
 import { SqliteCaseStore } from "../stores/sqlite/case-store-sqlite.ts";
 import { SqliteCaseEventStore } from "../stores/sqlite/case-event-store-sqlite.ts";
@@ -386,7 +387,7 @@ test("configured MEASURE schedules in waitUntil and returns 201 RUNNING before a
     assert.equal(response?.status, 201);
     const body = (await response!.json()) as { status: string; totalEvaluated: number; message: string };
     assert.equal(body.status, "RUNNING");
-    assert.equal(body.totalEvaluated, 150, "immediate count remains the known static population");
+    assert.equal(body.totalEvaluated, EVALUABLE_EMPLOYEES.length, "immediate count remains the known static EVALUABLE population (maui is directory-only)");
     assert.match(body.message, /live population count pending/i);
     assert.equal(tasks.length, 1);
     assert.equal(calls, 1, "background preparation started exactly one population fetch");

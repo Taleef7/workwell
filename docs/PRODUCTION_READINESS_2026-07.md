@@ -164,9 +164,9 @@ MIE.
 ### What exists today: read-time synthetic tenancy (demo-grade)
 
 WorkWell already models a tenant/system dimension — "WebChart system" / employer — above the existing
-enterprise→location→provider→patient hierarchy (E13 PR-1, ADR-019). Two synthetic systems ship today
-(`twh` — Total Worker Health, `ihn` — Indus Hospital Network) plus a population-scale synthetic third
-(`mhn`). This is **read-time grouping over one shared in-memory directory and one shared Postgres
+enterprise→location→provider→patient hierarchy (E13 PR-1, ADR-019). Three synthetic systems ship today
+(`twh` — Total Worker Health, `ihn` — Indus Hospital Network, and the directory-only `maui` — Maui Pilot
+Clinic, evaluation-excluded until ROADMAP MM-1) plus a population-scale synthetic fourth (`mhn`). This is **read-time grouping over one shared in-memory directory and one shared Postgres
 schema** (`workwell_spike`) — every tenant's data lives in the same tables, distinguished only by a
 `tenantId` field resolved from the synthetic employee catalog (DATA_MODEL §3.6, ARCHITECTURE §3). It is
 sufficient to demo multi-employer rollups and prove the aggregation reconciles (All = Σ tenants), but it

@@ -15,7 +15,7 @@ import type { CaseEventStore } from "../stores/case-event-store.ts";
 import type { OutcomeStore } from "../stores/outcome-store.ts";
 import type { RunStore } from "../stores/run-store.ts";
 import type { EvaluateMeasureBinding } from "@work-well/measure-engine";
-import { EMPLOYEES, employeeById, type EmployeeProfile } from "../engine/synthetic/employee-catalog.ts";
+import { employeeById, type EmployeeProfile, EVALUABLE_EMPLOYEES } from "../engine/synthetic/employee-catalog.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
 import { deriveExamConfig } from "../engine/synthetic/exam-config.ts";
@@ -63,7 +63,7 @@ export async function rerunToVerify(deps: RerunDeps, caseId: string, actor: stri
   // Reject before creating a run or writing outcomes/case/audit state: stale population bundles are
   // never reused and a fabricated MISSING_DATA verification is never persisted.
   if (existing.employeeId.startsWith("wc|")) throw new UnsupportedCaseRerunError();
-  const employees = deps.employees ?? EMPLOYEES;
+  const employees = deps.employees ?? EVALUABLE_EMPLOYEES;
   const employee = employeeById(existing.employeeId);
   const binding = MEASURE_BINDINGS[existing.measureId];
   // Unknown subject/measure can't be verified — leave the case untouched (no state change).

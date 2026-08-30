@@ -18,7 +18,7 @@ import { SqliteRunStore } from "../stores/sqlite/run-store-sqlite.ts";
 import { SqliteOutcomeStore } from "../stores/sqlite/outcome-store-sqlite.ts";
 import { SqliteCaseStore } from "../stores/sqlite/case-store-sqlite.ts";
 import { SqliteCaseEventStore } from "../stores/sqlite/case-event-store-sqlite.ts";
-import { EMPLOYEES } from "../engine/synthetic/employee-catalog.ts";
+import { EVALUABLE_EMPLOYEES } from "../engine/synthetic/employee-catalog.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { programTrend, programOverview } from "../program/program-read-models.ts";
 import { backfillTrendHistory } from "./backfill-trend-history.ts";
@@ -104,7 +104,7 @@ test("each backfilled run records ~100 outcomes (one per employee)", async () =>
   const runs = await d.runStore.listRuns(100000);
   for (const r of runs.slice(0, 5)) {
     const outcomes = await d.outcomeStore.listOutcomes(r.id);
-    assert.equal(outcomes.length, EMPLOYEES.length, "one outcome per employee");
+    assert.equal(outcomes.length, EVALUABLE_EMPLOYEES.length, "one outcome per evaluable employee (maui is directory-only)");
     assert.ok(
       outcomes.every((o) => (o.evidence as { seedTrendHistory?: boolean })?.seedTrendHistory === true),
       "outcomes carry the seedTrendHistory marker",
@@ -130,7 +130,7 @@ test("backfilled outcomes are stamped with the run's BACKDATED evaluatedAt, not 
 
   // listOutcomesForEmployee orders by evaluated_at DESC — the employee's 'latest' seeded row must be
   // backdated (≤ asOf), so it can never out-sort a real current run's outcome stamped at run time.
-  const emp = EMPLOYEES[0]!.externalId;
+  const emp = EVALUABLE_EMPLOYEES[0]!.externalId;
   const latest = await d.outcomeStore.listOutcomesForEmployee(emp, 1);
   assert.equal(latest.length, 1);
   assert.ok(latest[0]!.evaluatedAt <= `${ASOF}T23:59:59.999Z`, "employee's latest seeded outcome is backdated, not now");
@@ -166,7 +166,7 @@ test("seeded history is anchored before a measure's latest real run — overview
     measurementPeriodEnd: `${ASOF}T00:00:00.000Z`,
   });
   await d.outcomeStore.recordOutcomes(
-    EMPLOYEES.map((e) => ({ runId: realRun.id, subjectId: e.externalId, measureId: "audiogram", evaluationPeriod: "2026-01-01", status: "COMPLIANT", evidence: {} })),
+    EVALUABLE_EMPLOYEES.map((e) => ({ runId: realRun.id, subjectId: e.externalId, measureId: "audiogram", evaluationPeriod: "2026-01-01", status: "COMPLIANT", evidence: {} })),
   );
 
   await backfillTrendHistory(d, { weeks: WEEKS, asOf: ASOF });
@@ -199,7 +199,7 @@ test("a real run on the same day as a seeded week is still the overview latest (
     measurementPeriodEnd: `${ASOF}T00:00:00.000Z`,
   });
   await d.outcomeStore.recordOutcomes(
-    EMPLOYEES.map((e) => ({ runId: real.id, subjectId: e.externalId, measureId: "audiogram", evaluationPeriod: "2026-01-01", status: "COMPLIANT", evidence: {} })),
+    EVALUABLE_EMPLOYEES.map((e) => ({ runId: real.id, subjectId: e.externalId, measureId: "audiogram", evaluationPeriod: "2026-01-01", status: "COMPLIANT", evidence: {} })),
   );
 
   // Seed, then resume with more weeks. latestRealRunMs must recognize the real run by its marker
@@ -234,7 +234,7 @@ test("idempotency keys on the seeded START day, not evaluated_at — no dupes wh
     measurementPeriodEnd: `${ASOF}T00:00:00.000Z`,
   });
   await d.outcomeStore.recordOutcomes(
-    EMPLOYEES.map((e) => ({ runId: real.id, subjectId: e.externalId, measureId: "audiogram", evaluationPeriod: "2026-01-01", status: "COMPLIANT", evidence: {} })),
+    EVALUABLE_EMPLOYEES.map((e) => ({ runId: real.id, subjectId: e.externalId, measureId: "audiogram", evaluationPeriod: "2026-01-01", status: "COMPLIANT", evidence: {} })),
   );
 
   const seededCount = async () =>
