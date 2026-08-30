@@ -259,7 +259,8 @@ test("buildRoster — tenant filter scopes rows; rows carry tenantId/tenantName"
   assert.ok(twh.total < all.total, "twh-only total is smaller than the all-tenant total");
 
   const ihn = await buildRoster({ outcomeStore: fakeStore([], {}), segments: [] }, { panel: "osha", tenant: "ihn", pageSize: 200 });
-  assert.equal(twh.total + ihn.total, all.total, "twh + ihn partitions the full directory");
+  const maui = await buildRoster({ outcomeStore: fakeStore([], {}), segments: [] }, { panel: "osha", tenant: "maui", pageSize: 200 });
+  assert.equal(twh.total + ihn.total + maui.total, all.total, "twh + ihn + maui partitions the full directory");
 });
 
 // — E11.3 segment applicability overlay + filter —

@@ -34,7 +34,7 @@ import type { CloudDatabase } from "@mieweb/cloud";
 import { getStores } from "../stores/factory.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
-import { EMPLOYEES } from "../engine/synthetic/employee-catalog.ts";
+import { EVALUABLE_EMPLOYEES } from "../engine/synthetic/employee-catalog.ts";
 import { buildSyntheticBundle } from "../engine/synthetic/fhir-bundle-builder.ts";
 import { deriveExamConfig } from "../engine/synthetic/exam-config.ts";
 import { seededTargetFor } from "../run/distribution.ts";
@@ -391,7 +391,7 @@ async function preview(
   }
 
   const evalDate = end ?? new Date().toISOString().slice(0, 10);
-  const target = seededTargetFor(EMPLOYEES, binding.rateKey, subjectId) ?? "MISSING_DATA";
+  const target = seededTargetFor(EVALUABLE_EMPLOYEES, binding.rateKey, subjectId) ?? "MISSING_DATA";
   const bundle = buildSyntheticBundle(employee, deriveExamConfig(binding, target), evalDate);
 
   const engine = await routedEngineForEnv(env);

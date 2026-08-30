@@ -148,9 +148,12 @@ PRIMARY KEY(measure_version_id, value_set_id)
 > employer** (the level above enterprise, E13 PR-1 / #185). The directory also exports `PROVIDERS`
 > (synthetic occupational-health clinicians, 2 per location — the **provider** level, each carrying a
 > `tenantId`), `TENANTS` + `enterpriseForTenant` (one enterprise per tenant in PR-1), giving the
-> **tenant→enterprise→location→provider→patient** hierarchy. Two tenants ship: `twh` (Total Worker
-> Health — the original 100 employees) and `ihn` (Indus Hospital Network — a second synthetic system,
-> 50 employees / 3 campuses / 6 providers). `outcomes` and `cases` persist only the `subjectId`; every
+> **tenant→enterprise→location→provider→patient** hierarchy. Three directory tenants ship: `twh` (Total
+> Worker Health — the original 100 employees), `ihn` (Indus Hospital Network — a second synthetic system,
+> 50 employees / 3 campuses / 6 providers), and `maui` (Maui Pilot Clinic — 48 patient personas across two
+> clinics, **directory-only**: listed in `EVALUATION_EXCLUDED_TENANTS`, so no evaluation surface includes
+> it until ROADMAP MM-1 wires the pilot measure set; `EVALUABLE_EMPLOYEES` = twh + ihn, byte-identical to
+> the pre-maui population). `outcomes` and `cases` persist only the `subjectId`; every
 > level above a subject — provider, location, enterprise, **tenant** — is resolved at read-time from
 > the directory, so the multi-level rollup (`hierarchy-rollup.ts`, #74/E4; multi-tenant #185/E13)
 > requires **no SQL and no `employees`/`tenants` table** (the #93 schema stop-and-ask gate is satisfied

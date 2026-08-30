@@ -9,7 +9,7 @@
  * (today - daysSince), so a later asOf ages a RECURRING measure toward OVERDUE while PERMANENT
  * (series-completion, no recency) measures stay constant.
  */
-import { EMPLOYEES, type EmployeeProfile } from "../engine/synthetic/employee-catalog.ts";
+import { type EmployeeProfile, EVALUABLE_EMPLOYEES } from "../engine/synthetic/employee-catalog.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
 import { deriveExamConfig } from "../engine/synthetic/exam-config.ts";
@@ -44,7 +44,7 @@ export async function simulateComplianceAsOf(
   asOf: string,
   deps: SnapshotDeps,
 ): Promise<EmployeeComplianceSnapshot | null> {
-  const employees = deps.employees ?? EMPLOYEES;
+  const employees = deps.employees ?? EVALUABLE_EMPLOYEES;
   const employee = employees.find((e) => e.externalId === externalId);
   if (!employee) return null;
 
