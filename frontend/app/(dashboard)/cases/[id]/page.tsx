@@ -6,6 +6,7 @@ import { useParams } from "next/navigation";
 import { Button, Input, Modal, ModalBody, ModalFooter, ModalHeader, ModalTitle, Select, Textarea } from "@mieweb/ui";
 import { emitToast } from "@/lib/toast";
 import { CASE_STATUS_LABELS, OUTCOME_LABELS, PRIORITY_LABELS, caseStatusClass, labelFor, normalizeEnumValue, outcomeStatusClass } from "@/lib/status";
+import { SUBJECT } from "@/lib/terminology";
 import { useApi } from "@/lib/api/hooks";
 import { useAuth } from "@/components/auth-provider";
 import { canManageCases } from "@/lib/rbac";
@@ -505,7 +506,7 @@ export default function CaseDetailPage() {
               <p className="text-xs text-neutral-600 dark:text-neutral-400">Period: {caseDetail.evaluationPeriod}</p>
               <p className="text-xs text-neutral-700 dark:text-neutral-300">{caseDetail.nextAction}</p>
               <Link href={`/employees/${caseDetail.employeeId}`} className="text-xs font-semibold text-primary-700 dark:text-primary-400 hover:underline">
-                Open Employee Profile
+                {`Open ${SUBJECT.Singular} Profile`}
               </Link>
             </div>
           </details>

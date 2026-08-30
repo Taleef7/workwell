@@ -14,6 +14,7 @@ import {
   normalizeEnumValue,
   outcomeStatusClass
 } from "@/lib/status";
+import { SUBJECT } from "@/lib/terminology";
 import { useGlobalFilters } from "@/components/global-filter-context";
 import { useApi } from "@/lib/api/hooks";
 import { SkeletonRow } from "@/components/skeleton-loader";
@@ -420,7 +421,7 @@ export default function CasesPage() {
         <p className="text-sm uppercase tracking-[0.3em] text-neutral-300">Caseflow</p>
         <h2 className="mt-2 text-3xl font-semibold">Why Flagged cases</h2>
         <p className="mt-3 max-w-2xl text-neutral-300">
-          Your daily worklist of employees flagged by the latest measure runs. Each card links to the structured
+          Your daily worklist of {SUBJECT.plural} flagged by the latest measure runs. Each card links to the structured
           evidence that explains why the case is open, including waiver context when an exclusion applies.
         </p>
       </div>
@@ -542,7 +543,7 @@ export default function CasesPage() {
           label="Search"
           size="sm"
           className="w-56"
-          placeholder="Employee name or ID"
+          placeholder={`${SUBJECT.Singular} name or ID`}
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
         />
@@ -783,7 +784,7 @@ function CasesTable({
         <thead className="border-b border-neutral-200 bg-neutral-50 text-left text-xs uppercase tracking-wide text-neutral-500 dark:border-neutral-800 dark:bg-neutral-800/50 dark:text-neutral-400">
           <tr>
             {canManage ? <th scope="col" className="w-10 px-3 py-2" aria-label="Select" /> : null}
-            <th scope="col" className="px-3 py-2">Employee</th>
+            <th scope="col" className="px-3 py-2">{SUBJECT.Singular}</th>
             <th scope="col" className="px-3 py-2">Measure</th>
             <th scope="col" className="px-3 py-2">Site</th>
             <th scope="col" className="px-3 py-2">Status</th>

@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useState } from "react";
+import { SUBJECT } from "@/lib/terminology";
 import { useApi } from "@/lib/api/hooks";
 import { useAuth } from "@/components/auth-provider";
 import { useRunStatus } from "@/components/run-status-provider";
@@ -114,7 +115,7 @@ export function IndividualComplianceStatus({
   // pattern as the /compliance grid's Recalculate.
   const recalculate = useCallback(async () => {
     if (!canRecalc || isActive) return; // a run is already in flight — don't fan out a duplicate
-    if (!window.confirm("Recalculate compliance for all programs? This runs every active measure across the workforce.")) return;
+    if (!window.confirm(`Recalculate compliance for all programs? This runs every active measure across the ${SUBJECT.population}.`)) return;
     setRecalcBusy(true);
     setError(null);
     try {
@@ -155,7 +156,7 @@ export function IndividualComplianceStatus({
       {loading ? (
         <p className="text-sm text-neutral-500 dark:text-neutral-400">Loading compliance…</p>
       ) : rows.length === 0 ? (
-        <p className="text-sm text-neutral-500 dark:text-neutral-400">No evaluated measures for this employee yet.</p>
+        <p className="text-sm text-neutral-500 dark:text-neutral-400">No evaluated measures for this {SUBJECT.singular} yet.</p>
       ) : (
         <table className="min-w-full text-sm">
           <thead>

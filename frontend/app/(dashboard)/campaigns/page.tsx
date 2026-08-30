@@ -6,6 +6,7 @@ import { useAuth } from "@/components/auth-provider";
 import { AccessDenied } from "@/components/access-denied";
 import { canRunCampaigns } from "@/lib/rbac";
 import { ConfirmDialog } from "@/components/confirm-dialog";
+import { SUBJECT } from "@/lib/terminology";
 
 // ── Backend contract (issue #75 E5 — outreach at scale) ────────────────────────
 type ProgramSummary = {
@@ -567,7 +568,7 @@ function RecipientTable({ recipients }: { recipients: CampaignRecipient[] }) {
       <table className="w-full border-collapse text-sm">
         <thead>
           <tr className="border-b border-neutral-200 text-left text-xs uppercase tracking-[0.1em] text-neutral-500 dark:border-neutral-800 dark:text-neutral-400">
-            <th scope="col" className="px-4 py-2 font-semibold">Employee</th>
+            <th scope="col" className="px-4 py-2 font-semibold">{SUBJECT.Singular}</th>
             <th scope="col" className="px-4 py-2 font-semibold">Channel</th>
             <th scope="col" className="px-4 py-2 font-semibold">To</th>
             <th scope="col" className="px-4 py-2 font-semibold">Status</th>

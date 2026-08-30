@@ -1,6 +1,7 @@
 import React from "react";
 import Link from "next/link";
 import { ComplianceChip } from "./ComplianceChip";
+import { SUBJECT } from "@/lib/terminology";
 import type { RosterColumn, RosterRow, RosterCell } from "./types";
 
 const NA_FALLBACK: RosterCell = { status: "NA", method: "Not evaluated" };
@@ -24,7 +25,7 @@ export function RosterMobileCards({
     return <p className="rounded-lg border border-neutral-200 p-4 text-center text-sm text-neutral-500 dark:border-neutral-800 md:hidden">Loading…</p>;
   }
   if (rows.length === 0) {
-    return <p className="rounded-lg border border-neutral-200 p-4 text-center text-sm text-neutral-500 dark:border-neutral-800 md:hidden">No employees match these filters.</p>;
+    return <p className="rounded-lg border border-neutral-200 p-4 text-center text-sm text-neutral-500 dark:border-neutral-800 md:hidden">{`No ${SUBJECT.plural} match these filters.`}</p>;
   }
   return (
     <ul className="space-y-3 md:hidden">

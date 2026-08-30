@@ -1,5 +1,23 @@
 # Journal
 
+## 2026-08-30 (later) — MM-0 Task 2: subject terminology becomes deployment config (PR #499)
+
+`NEXT_PUBLIC_SUBJECT_TERM` (`employee` default | `patient`) drives a `SUBJECT` term set in
+`frontend/lib/terminology.ts` — singular/plural/capitalized forms plus the indefinite article and the
+collective noun ("workforce" / "patient population") — and a ~20-file sweep moves every user-visible
+"employee" display string onto it. **Display text only, byte-identical in employee mode by design**: API
+paths, payload keys (`employeeExternalId`), routes (`/employees/...`) and grid field keys are deliberately
+untouched, and the Dockerfile takes the var as a build ARG the TWH workflows never pass. The review pass
+earned its keep here too: it caught **one real employee-mode regression** — folding a two-line JSX text
+node into a template literal ate the space between two sentences in the runs-page hint (JSX strips a
+newline-adjacent-to-expression whitespace run entirely; verified by rendering both shapes) — plus a missed
+"Employee External ID" label in the Studio Tests tab that hid behind its same-line identifier, the
+"workforce" phrasing in two Recalculate confirms, and five copies of an untested inline article ternary,
+now a tested `SUBJECT.an` field. Copilot's PR pass added three always-plural strings ("1 patients"), now
+count-aware. Env row + Maui build-arg note in DEPLOY.md; the patient-mode scope-name seam in the runs hint
+(the dropdown says "Patient" while the API scope stays `EMPLOYEE`) is rendered from `SCOPE_LABELS` so the
+hint matches what the user sees.
+
 ## 2026-08-30 (later) — MM-0 lands its first slices, and review makes the Maui tenant directory-only
 
 **MM-0 Tasks 1 and 3 are implemented (PRs #497, #498), each through a triple review** (an

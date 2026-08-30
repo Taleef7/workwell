@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Modal, ModalHeader, ModalTitle, ModalBody, ModalFooter } from "@mieweb/ui";
 import { usePreview } from "./hooks/usePreview";
 import { useDirectorySearch } from "./hooks/useDirectorySearch";
+import { SUBJECT } from "@/lib/terminology";
 import type {
   Segment,
   SegmentCondition,
@@ -326,9 +327,9 @@ export function SegmentEditorModal({ open, initial, activeMeasures, onClose, onS
             <p className="text-xs font-semibold uppercase text-neutral-500">Membership overrides</p>
             <div className="relative">
               <input
-                aria-label="search employees"
+                aria-label={`search ${SUBJECT.plural}`}
                 value={employeeQuery}
-                placeholder="Search employees to include/exclude…"
+                placeholder={`Search ${SUBJECT.plural} to include/exclude…`}
                 onChange={(e) => setEmployeeQuery(e.target.value)}
                 className={`w-full ${inputClass}`}
               />
@@ -382,7 +383,7 @@ export function SegmentEditorModal({ open, initial, activeMeasures, onClose, onS
           <div role="status" aria-live="polite" className="grid gap-1 rounded border border-neutral-200 bg-neutral-50 p-3 text-xs dark:border-neutral-800 dark:bg-neutral-950">
             {preview ? (
               <>
-                <p className="font-medium">{preview.count} employees match</p>
+                <p className="font-medium">{preview.count === 1 ? `1 ${SUBJECT.singular} matches` : `${preview.count} ${SUBJECT.plural} match`}</p>
                 {preview.members.length > 0 ? (
                   <p className="text-neutral-500">{preview.members.slice(0, PREVIEW_LIMIT).join(", ")}{preview.members.length > PREVIEW_LIMIT ? "…" : ""}</p>
                 ) : null}
