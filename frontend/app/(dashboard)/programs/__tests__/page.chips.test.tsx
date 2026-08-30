@@ -56,12 +56,16 @@ describe("ProgramsPage status chips", () => {
       "href", "/cases?measureId=cms125&outcome=MISSING_DATA");
   });
 
-  it("links compliant and excluded chips to the status-filtered roster", async () => {
+  it("keeps compliant and excluded chips static — no roster view can reproduce their count today", async () => {
     render(<ProgramsPage />);
-    expect(await screen.findByRole("link", { name: /: compliant/i })).toHaveAttribute(
-      "href", "/compliance?status=COMPLIANT");
-    expect(screen.getByRole("link", { name: /excluded/i })).toHaveAttribute(
-      "href", "/compliance?status=EXCLUDED");
+    await screen.findByRole("link", { name: /overdue/i });
+    // The roster's status filter is any-cell-per-panel, not per-measure, so a COMPLIANT/EXCLUDED
+    // link would open a population that does not match the clicked number. Static until a
+    // measure-scoped roster drill-down exists.
+    expect(screen.queryByRole("link", { name: /: compliant/i })).toBeNull();
+    expect(screen.queryByRole("link", { name: /excluded/i })).toBeNull();
+    expect(screen.getByText("Compliant 2")).toBeInTheDocument();
+    expect(screen.getByText("Excluded 2")).toBeInTheDocument();
   });
 
   it("carries the active global site/date scope so the destination matches the clicked count", async () => {
@@ -71,10 +75,6 @@ describe("ProgramsPage status chips", () => {
     expect(overdue).toHaveAttribute(
       "href",
       "/cases?measureId=cms125&outcome=OVERDUE&site=clinic-1&from=2026-01-01&to=2026-06-30",
-    );
-    expect(screen.getByRole("link", { name: /: compliant/i })).toHaveAttribute(
-      "href",
-      "/compliance?status=COMPLIANT&site=clinic-1&from=2026-01-01&to=2026-06-30",
     );
   });
 

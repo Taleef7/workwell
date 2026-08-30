@@ -392,21 +392,22 @@ function chipHref(
   measureId: string,
   bucket: "COMPLIANT" | "DUE_SOON" | "OVERDUE" | "MISSING_DATA" | "EXCLUDED",
   scope: { siteId: string; from: string; to: string },
-): string {
+): string | undefined {
+  // COMPLIANT/EXCLUDED have no destination that reproduces their count today: the roster's status
+  // filter is any-cell-per-panel, not per-measure, and the measure may not even be in the default
+  // panel — a link that opens the wrong population is worse than none, so those chips stay static
+  // until a measure-scoped roster drill-down exists.
+  if (bucket === "COMPLIANT" || bucket === "EXCLUDED") return undefined;
   const params = new URLSearchParams();
-  const rosterBucket = bucket === "COMPLIANT" || bucket === "EXCLUDED";
-  if (rosterBucket) {
-    params.set("status", bucket);
-  } else {
-    params.set("measureId", measureId);
-    params.set("outcome", bucket);
-  }
+  params.set("measureId", measureId);
+  params.set("outcome", bucket);
   // Carry the active global scope; otherwise the click silently resets the site/date filter and the
   // destination list no longer matches the clicked count (same rule as the /worklist redirect).
+  // The local System (tenant) selector cannot transfer: /api/cases has no tenant filter.
   if (scope.siteId) params.set("site", scope.siteId);
   if (scope.from) params.set("from", scope.from);
   if (scope.to) params.set("to", scope.to);
-  return `${rosterBucket ? "/compliance" : "/cases"}?${params.toString()}`;
+  return `/cases?${params.toString()}`;
 }
 
 function Badge({ label, tone, href, ariaLabel }: { label: string; tone: "green" | "amber" | "red" | "slate" | "violet"; href?: string; ariaLabel?: string }) {

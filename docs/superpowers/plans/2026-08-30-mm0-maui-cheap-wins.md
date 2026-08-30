@@ -8,6 +8,22 @@
 
 **Tech Stack:** Next.js 16 / React 19 / TypeScript / vitest / @testing-library/react / MSW (frontend); TypeScript + node test runner via `pnpm test` (backend-ts).
 
+> **Review adjudications (2026-08-30, recorded after the fact — the steps below are the original
+> plan; where they conflict, this note wins):**
+> 1. *Task 1:* COMPLIANT/EXCLUDED chips stay **static** — the roster's status filter is
+>    any-cell-per-panel, not per-measure, so no destination reproduces those counts today; a link
+>    that opens the wrong population is worse than none. Actionable chips carry the active
+>    `site`/`from`/`to` scope (the tenant selector has no `/api/cases` equivalent — stated residual).
+>    A measure-scoped roster drill-down is MM-2 backlog.
+> 2. *Task 1:* filters are **derived from the URL per render**, not useState-initialized — browser
+>    back/forward correctness; tests use a reactive `next/navigation` mock.
+> 3. *Task 3:* the Maui tenant is **directory-only** (`EVALUATION_EXCLUDED_TENANTS`) until MM-1
+>    wires the pilot measure set: the global seeded distribution otherwise reshuffles ~20% of
+>    existing twh/ihn targets (demo churn), enrolls patients in occupational measures, and the
+>    pat-* ids hash-cluster into single buckets so per-tenant bucket coverage is not real under
+>    the product's full-population distribution. The bucket-coverage requirement moves to MM-1,
+>    where per-tenant distribution / id de-clustering is designed deliberately.
+
 **Out of scope for this plan (tracked in ROADMAP §5/§7, done separately):** the second Create-a-Container deployment + DNS (owner/MIE step), sandbox account provisioning, anything requiring MM-1 measure onboarding (CMS2/CMS130/CMS165/CMS137 cohorts — their data lands WITH their onboarding so no dead data is generated).
 
 **Standing rules for every task (from CLAUDE.md + owner):** no new dependencies; no Claude attribution anywhere in commits or PRs; no client-side names — "Maui" and "the pilot group" only; minimal diffs, no drive-by refactors; every commit message is conventional (`feat(scope): …`); one PR per task on a `feat/<slug>` branch; frontend gate = `pnpm lint && pnpm test && pnpm build` in `frontend/`; backend gate = `pnpm typecheck && pnpm test` in `backend-ts/`.
