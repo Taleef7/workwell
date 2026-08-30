@@ -50,10 +50,11 @@ test("provider attribution is deterministic (stable across imports)", () => {
 
 // ---- multi-tenant (#185 E13 PR-1) ----
 
-test("tenants exist with stable ids/names (twh + ihn live; mhn is the scale tenant)", () => {
-  assert.deepEqual(TENANTS.map((t) => t.id).sort(), ["ihn", "mhn", "twh"]);
+test("tenants exist with stable ids/names (twh + ihn + maui live; mhn is the scale tenant)", () => {
+  assert.deepEqual(TENANTS.map((t) => t.id).sort(), ["ihn", "maui", "mhn", "twh"]);
   assert.equal(tenantById("twh")?.name, "Total Worker Health");
   assert.equal(tenantById("ihn")?.name, "Indus Hospital Network");
+  assert.equal(tenantById("maui")?.name, "Maui Pilot Clinic");
   assert.equal(tenantById("mhn")?.name, "MetroHealth Network");
   assert.equal(tenantById("nope"), null);
 });
@@ -78,12 +79,12 @@ test("tenant 1 keeps the original 100 employees unchanged on twh", () => {
   assert.equal(employeeById("emp-006")?.providerId, "prov-002");
 });
 
-test("tenant 2 (ihn) adds ~50 employees with distinct ids/providers, partitioning EMPLOYEES", () => {
+test("tenant 2 (ihn) keeps ~50 distinct employees while twh + ihn + maui partition EMPLOYEES", () => {
   const ihn = employeesForTenant("ihn");
   assert.ok(ihn.length >= 40 && ihn.length <= 60, `ihn size ${ihn.length}`);
   assert.ok(ihn.every((e) => e.externalId.startsWith("ihn-emp-")));
   assert.ok(ihn.every((e) => e.tenantId === "ihn"));
-  assert.equal(employeesForTenant("twh").length + ihn.length, EMPLOYEES.length);
+  assert.equal(employeesForTenant("twh").length + ihn.length + employeesForTenant("maui").length, EMPLOYEES.length);
   const p = providerById(ihn[0]!.providerId)!;
   assert.equal(p.tenantId, "ihn");
 });
