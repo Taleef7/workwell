@@ -25,7 +25,14 @@ import type { OutcomeStore } from "../stores/outcome-store.ts";
 import type { QualitySnapshotInput, QualitySnapshotStore } from "../stores/quality-snapshot-store.ts";
 import type { CaseEventStore } from "../stores/case-event-store.ts";
 import { buildSnapshotRows, type ScaleGroup, type ScopeRef } from "../quality/materialize-snapshot.ts";
-import { employeeById, providerById, type EmployeeProfile, EVALUABLE_EMPLOYEES } from "../engine/synthetic/employee-catalog.ts";
+import {
+  employeeById,
+  providerById,
+  type EmployeeProfile,
+  EVALUABLE_EMPLOYEES,
+  isRunnableMeasure,
+  RUNNABLE_MEASURE_IDS,
+} from "../config/deployment-profile.ts";
 import { SCALE_TENANT } from "../engine/synthetic/scale-structure.ts";
 import { SCALE_TRIGGER } from "./backfill-scale.ts";
 import { isCompletedRun } from "../program/rollup-shared.ts";
@@ -122,7 +129,7 @@ export async function backfillQualityHistory(
     if (groups.length > 0) scaleGroupsByMeasure.set(measureId, groups);
   }
 
-  const measureIds = Object.keys(MEASURES).filter((id) => MEASURE_BINDINGS[id]);
+  const measureIds = RUNNABLE_MEASURE_IDS.filter((id) => isRunnableMeasure(id) && MEASURE_BINDINGS[id]);
   const periods = monthRange(asOf, months);
   let monthsWritten = 0;
   let monthsSkipped = 0;

@@ -7,7 +7,7 @@ import type { OutcomeStore, OutcomeWithRun } from "../stores/outcome-store.ts";
 import type { CaseStore, CaseQuery } from "../stores/case-store.ts";
 import type { CaseEventStore } from "../stores/case-event-store.ts";
 import { toRunSummaryFromCounts } from "../run/read-models.ts";
-import { employeeById } from "../engine/synthetic/employee-catalog.ts";
+import { employeeById } from "../config/deployment-profile.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
 import { toCsv, csvCell } from "./csv.ts";

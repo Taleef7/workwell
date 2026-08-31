@@ -43,7 +43,7 @@
  */
 import type { RunRecord } from "../stores/run-store.ts";
 import type { OutcomeRecord } from "../stores/outcome-store.ts";
-import { employeeById } from "../engine/synthetic/employee-catalog.ts";
+import { employeeById } from "../config/deployment-profile.ts";
 import { ROSTER_ELIGIBLE_MEASURES } from "../engine/ingress/enrollment/roster.ts";
 import { loadOfficialArtifact, officialMeasureIdentifiers } from "../wiring/official-artifacts.ts";
 import { officialReportIdentity } from "./measure-report.ts";

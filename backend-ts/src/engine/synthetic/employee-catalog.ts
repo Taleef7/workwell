@@ -38,6 +38,18 @@ export interface Tenant { id: string; name: string; }
 /** An employer org under a tenant (1 per tenant in PR-1; the level is retained for future multi-org tenants). */
 export interface Enterprise { id: string; name: string; tenantId: string; }
 
+export interface SyntheticDirectoryView {
+  readonly EMPLOYEES: readonly EmployeeProfile[];
+  readonly PROVIDERS: readonly Provider[];
+  readonly TENANTS: readonly Tenant[];
+  readonly employeeById: (externalId: string) => EmployeeProfile | null;
+  readonly providerById: (id: string, env?: DataSourceEnv) => Provider | null;
+  readonly tenantById: (id: string, env?: DataSourceEnv) => Tenant | null;
+  readonly enterpriseForTenant: (tenantId: string, env?: DataSourceEnv) => Enterprise | null;
+  readonly employeesForTenant: (tenantId: string) => EmployeeProfile[];
+  readonly providersForLocation: (location: string) => Provider[];
+}
+
 /** The tenants/systems whose compliance rolls up into one dashboard (#185 E13 PR-1; `mhn` scale
  *  tenant added in PR-2 — its 120k subjects live only as outcome rows, not in this directory). */
 export const TENANTS: readonly Tenant[] = [
@@ -312,11 +324,17 @@ const MAUI_BASE: readonly EmployeeBase[] = [
 /** All directory rows, including the Maui primary-care panel. */
 const EMPLOYEE_BASE: readonly EmployeeBase[] = [...TWH_BASE, ...IHN_BASE, ...MAUI_BASE];
 
-const PROVIDERS_BY_LOCATION = new Map<string, Provider[]>();
-for (const p of PROVIDERS) {
-  (PROVIDERS_BY_LOCATION.get(p.location) ?? PROVIDERS_BY_LOCATION.set(p.location, []).get(p.location)!).push(p);
+function providerIndexByLocation(providers: readonly Provider[]): Map<string, Provider[]> {
+  const index = new Map<string, Provider[]>();
+  for (const p of providers) {
+    (index.get(p.location) ?? index.set(p.location, []).get(p.location)!).push(p);
+  }
+  for (const list of index.values()) list.sort((a, b) => a.id.localeCompare(b.id));
+  return index;
 }
-for (const list of PROVIDERS_BY_LOCATION.values()) list.sort((a, b) => a.id.localeCompare(b.id));
+
+// Full-provider index: assignProviders must see every provider before any profile visibility filter.
+const PROVIDERS_BY_LOCATION = providerIndexByLocation(PROVIDERS);
 
 /** Providers serving a location (sorted by id); [] for an unknown location. */
 export function providersForLocation(location: string): Provider[] {
@@ -417,4 +435,39 @@ export function webChartTenant(env: DataSourceEnv): Tenant | null {
 /** Employees belonging to a tenant, in directory order. */
 export function employeesForTenant(tenantId: string): EmployeeProfile[] {
   return EMPLOYEES.filter((e) => e.tenantId === tenantId);
+}
+
+/** Pure scoped views over the fully assigned synthetic directory. */
+export function scopedSyntheticDirectory(visibleTenantIds: ReadonlySet<string>): SyntheticDirectoryView {
+  const employees = EMPLOYEES.filter((e) => visibleTenantIds.has(e.tenantId));
+  const providers = PROVIDERS.filter((p) => visibleTenantIds.has(p.tenantId));
+  const tenants = TENANTS.filter((t) => visibleTenantIds.has(t.id));
+  const byEmployeeId = new Map(employees.map((e) => [e.externalId, e]));
+  const byProviderId = new Map(providers.map((p) => [p.id, p]));
+  const byTenantId = new Map(tenants.map((t) => [t.id, t]));
+  const byEnterpriseTenantId = new Map(
+    ENTERPRISES.filter((e) => visibleTenantIds.has(e.tenantId)).map((e) => [e.tenantId, e]),
+  );
+  const providersByLocation = providerIndexByLocation(providers);
+
+  return {
+    EMPLOYEES: employees,
+    PROVIDERS: providers,
+    TENANTS: tenants,
+    employeeById: (externalId) => byEmployeeId.get(externalId) ?? null,
+    providerById: (id, env) => {
+      if (id === WEBCHART_PROVIDER.id && visibleTenantIds.has("wc") && env && isWebChartConfigured(env)) return WEBCHART_PROVIDER;
+      return byProviderId.get(id) ?? null;
+    },
+    tenantById: (id, env) => {
+      if (id === "wc" && visibleTenantIds.has("wc") && env) return webChartTenant(env);
+      return byTenantId.get(id) ?? null;
+    },
+    enterpriseForTenant: (tenantId, env) => {
+      if (tenantId === "wc" && visibleTenantIds.has("wc") && env && isWebChartConfigured(env)) return WEBCHART_ENTERPRISE;
+      return byEnterpriseTenantId.get(tenantId) ?? null;
+    },
+    employeesForTenant: (tenantId) => employees.filter((e) => e.tenantId === tenantId),
+    providersForLocation: (location) => providersByLocation.get(location) ?? [],
+  };
 }

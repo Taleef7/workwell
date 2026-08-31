@@ -11,7 +11,7 @@
 import type { CaseStore } from "../stores/case-store.ts";
 import type { OutcomeStore } from "../stores/outcome-store.ts";
 import type { CaseEventStore } from "../stores/case-event-store.ts";
-import { employeeById, EMPLOYEES } from "../engine/synthetic/employee-catalog.ts";
+import { employeeById, EMPLOYEES } from "../config/deployment-profile.ts";
 import { directoryForRows } from "../engine/ingress/webchart/live-directory.ts";
 import { isWebChartConfigured, type DataSourceEnv } from "../engine/ingress/data-source.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";

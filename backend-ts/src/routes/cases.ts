@@ -43,7 +43,7 @@ import { resolveForecaster } from "../engine/immunization/resolve-forecaster.ts"
 import { resolveBucket } from "../case/resolve-bucket.ts";
 import { isWebChartConfigured } from "../engine/ingress/data-source.ts";
 import { profileForId } from "../engine/ingress/webchart/live-directory.ts";
-import { employeeById } from "../engine/synthetic/employee-catalog.ts";
+import { employeeById } from "../config/deployment-profile.ts";
 
 interface CasesEnv {
   DB: CloudDatabase;
