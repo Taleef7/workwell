@@ -18,7 +18,7 @@ import { ACTIVE_CASE_STATUSES } from "../case/case-logic.ts";
 import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
 import { day, isCompletedRun, isPopulationRun, round1 } from "./rollup-shared.ts";
 import { directoryForRows, type DirectorySnapshot } from "../engine/ingress/webchart/live-directory.ts";
-import { DIRECTORY } from "../config/deployment-profile.ts";
+import { DEPLOYMENT_PROFILE, DIRECTORY } from "../config/deployment-profile.ts";
 import { isWebChartConfigured, type DataSourceEnv } from "../engine/ingress/data-source.ts";
 
 export interface ProgramSummary {
@@ -199,6 +199,17 @@ const tenantMatcher = (filters: ProgramFilters, employeeLookup = employeeById) =
   return (subjectId: string) => !tenant || (employeeLookup(subjectId)?.tenantId ?? null) === tenant;
 };
 
+/**
+ * On scoped profiles (e.g. Maui), isolate data by excluding subjects that do not resolve in the
+ * profile directory. On the default profile, this is a no-op: a TWH database legitimately holds
+ * non-catalog subjects (notably QRDA Category I imports keyed by Cypress MRNs), which must not be
+ * silently dropped from /api/programs.
+ */
+const profileMatcher = (employeeLookup = employeeById) => {
+  if (DEPLOYMENT_PROFILE.id === "default") return (_subjectId: string) => true;
+  return (subjectId: string) => employeeLookup(subjectId) !== null;
+};
+
 /** Hide only live-tenant ids when the existing runtime seam is off; all non-wc legacy behavior stays unchanged. */
 const subjectVisible = (subjectId: string, webChartConfigured: boolean): boolean =>
   webChartConfigured || !subjectId.startsWith("wc|");
@@ -227,8 +238,13 @@ export async function programOverview(deps: ProgramDeps, filters: ProgramFilters
   const directory = directoryForRows(successfulRows, webChartConfigured, deps.webChartEnv, DIRECTORY);
   const siteMatch = siteMatcher(filters, directory.employeeById);
   const tenantMatch = tenantMatcher(filters, directory.employeeById);
+  const profileMatch = profileMatcher(directory.employeeById);
   const rows = successfulRows.filter(
-    (row) => subjectVisible(row.subjectId, webChartConfigured) && siteMatch(row.subjectId) && tenantMatch(row.subjectId),
+    (row) =>
+      subjectVisible(row.subjectId, webChartConfigured) &&
+      profileMatch(row.subjectId) &&
+      siteMatch(row.subjectId) &&
+      tenantMatch(row.subjectId),
   );
   const byMeasure = new Map<string, OutcomeWithRun[]>();
   for (const r of rows) (byMeasure.get(r.measureId) ?? byMeasure.set(r.measureId, []).get(r.measureId)!).push(r);
@@ -247,6 +263,7 @@ export async function programOverview(deps: ProgramDeps, filters: ProgramFilters
         c.measureId === m.id &&
         (ACTIVE_CASE_STATUSES as readonly string[]).includes(c.status) &&
         subjectVisible(c.employeeId, webChartConfigured) &&
+        profileMatch(c.employeeId) &&
         siteMatch(c.employeeId) &&
         tenantMatch(c.employeeId) &&
         inPeriod(c.createdAt),
@@ -344,8 +361,13 @@ async function runsWithOutcomes(
   const directory = directoryForRows(successfulRows, webChartConfigured, deps.webChartEnv, DIRECTORY);
   const siteMatch = siteMatcher(filters, directory.employeeById);
   const tenantMatch = tenantMatcher(filters, directory.employeeById);
+  const profileMatch = profileMatcher(directory.employeeById);
   const rows = successfulRows.filter(
-    (row) => subjectVisible(row.subjectId, webChartConfigured) && siteMatch(row.subjectId) && tenantMatch(row.subjectId),
+    (row) =>
+      subjectVisible(row.subjectId, webChartConfigured) &&
+      profileMatch(row.subjectId) &&
+      siteMatch(row.subjectId) &&
+      tenantMatch(row.subjectId),
   );
   return { groups: groupByRun(rows), directory, hasWebChartRows };
 }
