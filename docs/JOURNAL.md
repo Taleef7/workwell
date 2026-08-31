@@ -1,6 +1,46 @@
 # Journal
 
-## 2026-08-31 — the Maui deploy workflow, and a shared image tag that could have healed the live demo onto unmerged code
+## 2026-08-31 — the Maui sandbox becomes real: a deployment profile, its workflow, and a shared image tag that could have healed the live demo onto unmerged code
+
+**`WORKWELL_INSTANCE` is load-bearing again, and it is what makes the Maui sandbox a sandbox.** The
+synthetic directory and the runnable measure set were compile-time constants, so the second deployment
+would have come up showing and evaluating TWH's people while refusing its own — a live URL with an
+empty work list. The env var (set by all three deploy workflows and, until today, read by *nothing* in
+`backend-ts/src` — a Java-era leftover whose consumer died with the JVM) now selects a deployment
+profile controlling which tenants are visible, which are evaluable, and which measures are runnable.
+Default is today's behaviour exactly; `maui` is the 48 patients and `cms122`/`cms125`/`hypertension` —
+MIPS 001/112/236, the ACO-aligned measures that are runnable today. Measured on both profiles: maui
+48 visible / 48 evaluable / one tenant / three measures; default unchanged.
+
+**The architecture was forced, and finding that out cost nothing because the brief was reviewed before
+it was implemented.** The obvious design — have `employee-catalog.ts` read the profile — is illegal
+here: the catalog lives inside `src/engine/` and `engine-boundary.test.ts` forbids production imports
+escaping that tree. A spec-review pass caught it before any code was written, along with a bucket
+assertion in the same brief that could not have failed. The catalog therefore stays env-free and
+exports pure scoping helpers; `src/config/deployment-profile.ts` reads env and composes; app-side
+consumers import from there. That also avoids an ESM temporal-dead-zone cycle the naive version would
+have had. **Provider attribution is preserved by construction** — `assignProviders` still runs over the
+full base before any filtering, behind an internal full-provider index, because filtering first would
+silently renumber existing providers.
+
+**One predicate, enforced everywhere, not just where the list is derived.** `isRunnableMeasure` gates
+every evaluation path including the *explicit* MEASURE-scope run, which previously accepted any id in
+the registry — without that, the Maui sandbox could have run audiogram and HAZWOPER against patients.
+
+**Recorded rather than "fixed":** `orderKey` clusters over sequential ids, so the maui ordering is
+effectively `pat-001…pat-048` for every rate key and cms122/cms125 assign identical targets. It is
+pre-existing (TWH's `emp-*` ids share it) and unfixable without reshuffling TWH. Consequence worth
+stating: the sandbox shows ~5 actionable patients on each of cms122 and cms125 — *the same five* — and
+8 on hypertension. Thin for a team meant to beat on it; profile-scoped compliance-rate overrides are
+the lever, deliberately not taken here.
+
+**Deliberately unchanged, so it is not mistaken for coverage:** `src/program/` read models and segment
+validation still derive from the full directory and full registry, so a Maui operator can still see
+occupational programs listed. A worry that turned out to be unfounded and is recorded because the
+reasoning matters: `isApplicable` returns true only when no segment is enabled, and `ensureSegmentSeed`
+runs on the scheduler and on `/api/compliance`, so Maui could plausibly have evaluated everyone and
+created zero cases. It does not — the seeded baseline's `measureIds` include all three Maui measures and
+its site list derives from the unscoped catalog, which contains the Maui clinics.
 
 **MM-0's deployment plumbing exists: `deploy-maui-mieweb.yml`, four pseudonymous sandbox accounts, and
 the flip-config guard finally derives its own workflow list.** The workflow is TWH's with Maui's
