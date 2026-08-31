@@ -30,6 +30,12 @@ export const DEMO_USERS: readonly DemoUser[] = [
   // this so anonymous visitors can browse every read surface but cannot mutate shared demo state or
   // trigger compute (authorize.ts blocks all non-GET for VIEWER). Frontend rbac already treats it read-only.
   { email: "viewer@workwell.dev", role: "ROLE_VIEWER", passwordHash: DEMO_PASSWORD_HASH },
+  // Sandbox logins for the Maui pilot deployment (pseudonymous by policy). DEMO_USERS is shared
+  // across deployments, so these rows exist on every instance.
+  { email: "quality-lead@maui.workwell.dev", role: "ROLE_CASE_MANAGER", passwordHash: DEMO_PASSWORD_HASH },
+  { email: "quality-staff@maui.workwell.dev", role: "ROLE_CASE_MANAGER", passwordHash: DEMO_PASSWORD_HASH },
+  { email: "clinician@maui.workwell.dev", role: "ROLE_VIEWER", passwordHash: DEMO_PASSWORD_HASH },
+  { email: "admin@maui.workwell.dev", role: "ROLE_ADMIN", passwordHash: DEMO_PASSWORD_HASH },
 ];
 
 /** Case-insensitive lookup, matching the Java `LOWER(email) = LOWER(?)` query. */

@@ -4,7 +4,8 @@
 **Status:** Current deployment reference for the merged WorkWell Measure Studio stack.
 **Cost target:** keep the live stack under about $25/month.
 
-> The MIE TWH stack below is the **sole live deployment**. The earlier Vercel + Fly.io
+> The MIE TWH stack below is the **live primary deployment**. The Maui sandbox is documented below.
+> The earlier Vercel + Fly.io
 > public-preview stack is **decommissioned** — its setup is retained only as
 > [Appendix A](#appendix-a--decommissioned-vercel--flyio-stack-historical-reference) for historical reference.
 
@@ -13,7 +14,7 @@
 ## MIE Create-a-Container Deployment (sole live stack)
 
 The deployment runs on MIE's internal container platform (`os.mieweb.org`).
-**One instance only: TWH** — Total Worker Health. Encompasses all OSHA safety + eCQM wellness measures.
+**The live primary instance is TWH** — Total Worker Health. Encompasses all OSHA safety + eCQM wellness measures.
 
 | Service | Hostname | Image |
 |---------|----------|-------|
@@ -717,6 +718,54 @@ DELETE FROM workwell_spike.value_sets WHERE source = 'VSAC';
 ### Manual re-deploy (force update existing containers)
 
 Use `workflow_dispatch` with `replace_existing: true` from the GitHub Actions UI.
+
+### Maui sandbox deployment
+
+Maui is a separate sandbox for the pilot group on the same MIE Create-a-Container platform. It has its
+own Neon database and JWT secret, and uses the same backend image build and deployment script as TWH:
+
+| Service | Hostname | Image |
+|---------|----------|-------|
+| Frontend | `maui.os.mieweb.org` | `ghcr.io/taleef7/workwell-maui-frontend` |
+| Backend API | `maui-api-ts.os.mieweb.org` | `ghcr.io/taleef7/workwell-api-ts` |
+
+Run `.github/workflows/deploy-maui-mieweb.yml` from **Actions → Deploy Maui OS MIEWeb → Run workflow**.
+It is **`workflow_dispatch` only** because the two Maui-only secrets are not present on every push;
+an automatic trigger would fail until those secrets were set.
+
+Owner-set GitHub secrets:
+
+| Secret | Purpose |
+|--------|---------|
+| `DATABASE_URL_MAUI` | Pooled Neon connection string for the Maui sandbox |
+| `WORKWELL_AUTH_JWT_SECRET_MAUI` | JWT signing secret for the Maui sandbox |
+
+The workflow reuses these secrets from TWH: `LAUNCHPAD_API_URL`, `LAUNCHPAD_API_KEY`,
+`OPENAI_API_KEY`, `WORKWELL_VSAC_API_KEY_VENDOR`, and `WORKWELL_VSAC_API_KEY_TWH`. The workflow maps
+the two Maui-only secrets onto the runtime names `DATABASE_URL` and `WORKWELL_AUTH_JWT_SECRET`.
+It sets `WORKWELL_INSTANCE=maui` and passes `NEXT_PUBLIC_SUBJECT_TERM=patient` while building the
+frontend image. `WORKWELL_OFFICIAL_MEASURES` is deliberately **unset**; Maui uses authored CQL until
+each pilot measure passes its own flip gate. Maui has no self-heal reconciler, so dispatch the workflow
+again for a replacement or recovery.
+
+**Backend image tags are namespaced, and that is load-bearing — do not "simplify" it.** Maui and TWH
+share one GHCR backend repository (`ghcr.io/taleef7/workwell-api-ts`), and
+`reconcile-twh-mieweb.yml` heals the live `twh-api-ts` container by recreating it from that
+repository's `:latest`. So the Maui workflow pushes **`maui-latest`** and **`maui-sha-<SHA>`** and
+deploys from `maui-sha-<SHA>`; it must never publish `:latest`, or a Maui dispatch from an unmerged
+branch would leave the live TWH demo able to self-heal onto that code. `deploy-staging-mieweb.yml`
+namespaces its tags (`staging-*`) for the same reason. The frontend needs no namespacing — Maui
+builds a different image repository. **Maui rollback:** re-dispatch with `replace_existing: true` at
+an earlier commit, whose image is `maui-sha-<that SHA>`.
+
+Sandbox accounts (all use the documented demo password `Workwell123!`):
+
+| Identifier | Role |
+|------------|------|
+| `quality-lead@maui.workwell.dev` | `ROLE_CASE_MANAGER` |
+| `quality-staff@maui.workwell.dev` | `ROLE_CASE_MANAGER` |
+| `clinician@maui.workwell.dev` | `ROLE_VIEWER` |
+| `admin@maui.workwell.dev` | `ROLE_ADMIN` |
 
 ### Staging environment — live WebChart against teatea (separate stack; NOT the demo)
 

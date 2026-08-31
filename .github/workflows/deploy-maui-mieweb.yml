@@ -1,0 +1,291 @@
+name: Deploy Maui OS MIEWeb
+
+# Maui sandbox deployment. On manual dispatch this builds + deploys the TypeScript backend
+# (backend-ts/ → maui-api-ts.os.mieweb.org) and the Maui frontend (pointed at it). Backend images are
+# tagged maui-latest and maui-sha-<SHA> in GHCR to avoid tag collision with TWH.
+# Rollback = redeploy an earlier known-good maui-api-ts image (workflow_dispatch with replace_existing=true
+# at an earlier SHA; each build is tagged maui-sha-<SHA> in GHCR).
+
+on:
+  workflow_dispatch:
+    inputs:
+      replace_existing:
+        description: Delete and recreate existing MIE containers if the hostnames already exist.
+        required: true
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+
+# A constant Maui group (NOT keyed on github.ref) keeps manual container operations serialized.
+# cancel-in-progress: false → the later run queues behind the in-flight one rather than racing or being dropped.
+concurrency:
+  group: maui-mieweb-container-ops
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+  # TypeScript backend — the sole live backend (the frontend points at it).
+  BACKEND_TS_IMAGE: ghcr.io/taleef7/workwell-api-ts
+  BACKEND_TS_URL: https://maui-api-ts.os.mieweb.org
+  API_TS_HOSTNAME: maui-api-ts
+  FRONTEND_IMAGE: ghcr.io/taleef7/workwell-maui-frontend
+  FRONTEND_URL: https://maui.os.mieweb.org
+  FRONTEND_HOSTNAME: maui
+  SITE_ID: 1
+  APP_NAME: "WorkWell Maui"
+  APP_TAGLINE: "Primary care quality measures — clinical wellness and patient health."
+  APP_DESCRIPTION: "Primary care clinical quality measures, patient population wellness, complete case management, and a full audit trail — one reviewable dashboard."
+
+# The two BUILD jobs push images to ghcr and restate this block with `packages: write` added — a
+# job-level block replaces the workflow-level one rather than extending it. The two DEPLOY jobs had
+# no block at all and so inherited the repository default; they talk to the MIE Create-a-Container
+# API with its own key and never touch GITHUB_TOKEN, so read access to the code is all they need.
+permissions:
+  contents: read
+
+jobs:
+  build-backend-ts:
+    name: Build backend-ts image (TypeScript — primary)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      # The image COPYs both backend-ts/ and the external/mieweb-cloud submodule, so the build context
+      # is the repo ROOT and the checkout MUST include the submodule (public mieweb/cloud).
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - uses: docker/setup-buildx-action@v4
+
+      # Official measure TERMINOLOGY is fetched at build and never committed (ADR-036): the expansions
+      # carry licensed AMA CPT / SNOMED CT content that a public repo must not redistribute, so the
+      # artifact's own value sets live in a gitignored `terminology.json` pinned by a SHA-256 in the
+      # committed manifest. The image needs it — `.dockerignore` deliberately keeps `measures/official/`
+      # and the Dockerfile COPYs the tree, so producing the file here is what puts it in the image.
+      #
+      # Without this step the fidelity route's LITERAL tier degrades to the subset tier (visibly, in its
+      # `mode` field) because terminology cannot be expanded, and PR-9's routed measures would refuse at
+      # boot. Deliberately NOT fail-soft: an image missing this is incomplete, and a deploy that hides
+      # that is how "the monitoring said green" happens.
+      #
+      # Invoked as plain `node`, not through pnpm: the script imports nothing outside node: builtins and
+      # global fetch, so this needs no install and no package manager on the deploy path.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      # `--complete-terminology` re-expands the OIDs upstream capped at 1000 (today one:
+      # AdvancedIllness, feeding a DENEX in both measures) from VSAC at a pinned release. It fails
+      # CLOSED: no key, or VSAC unreachable after retries, and the capped codes ship exactly as
+      # upstream sent them with the manifest's `truncated` entry intact — so official routing refuses
+      # at construction rather than a half-expanded exclusion set quietly scoring people. That is the
+      # reason this step is not `|| true`.
+      #
+      # Since ADR-041 committed the COMPLETED manifests, that failure no longer degrades quietly to a
+      # capped artifact: the regenerated manifest stops matching the committed one and the
+      # reproducibility gate below fails the deploy outright. So this step now couples deploys to NLM
+      # VSAC availability. Deliberate — the alternative is an image whose sidecar the runtime refuses,
+      # silently losing the literal fidelity diff — but see DEPLOY.md "Step 1a" for the consequence:
+      # rolling BACK to a pre-ADR-041 image still works during an outage, rolling forward does not.
+      - name: Vendor official terminology into the build context
+        working-directory: backend-ts
+        env:
+          WORKWELL_VSAC_API_KEY: ${{ secrets.WORKWELL_VSAC_API_KEY_VENDOR }}
+        run: |
+          node scripts/vendor-official-measure.mjs --measure CMS122FHIRDiabetesAssessGT9Pct --catalog-id cms122 --strip-elm-annotations --complete-terminology
+          node scripts/vendor-official-measure.mjs --measure CMS125FHIRBreastCancerScreen --catalog-id cms125 --strip-elm-annotations --complete-terminology
+          node scripts/vendor-official-measure.mjs --measure CMS2FHIRPCSDepScreenAndFollowUp --catalog-id cms2 --strip-elm-annotations --complete-terminology
+          node scripts/vendor-official-measure.mjs --measure CMS68FHIRDocumentationCurrentMeds --catalog-id cms68 --strip-elm-annotations --complete-terminology
+          node scripts/vendor-official-measure.mjs --measure CMS951FHIRKidneyHealthEval --catalog-id cms951 --strip-elm-annotations --complete-terminology
+          node scripts/vendor-official-measure.mjs --measure CMS138FHIRTobaccoScrnCessation --catalog-id cms138 --strip-elm-annotations --complete-terminology
+          node scripts/vendor-official-measure.mjs --measure CMS130FHIRColorectalCancerScrn --catalog-id cms130 --strip-elm-annotations --complete-terminology
+          node scripts/vendor-official-measure.mjs --measure CMS165FHIRControllingHighBP --catalog-id cms165 --strip-elm-annotations --complete-terminology
+      # The vendored artifact must not have changed — only the gitignored sidecar is new. A non-empty
+      # diff means the committed bundle does not match its pin, which must never reach a deploy image.
+      - name: The committed artifact is reproducible from its pin
+        run: git diff --exit-code backend-ts/measures/official
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./backend-ts/Dockerfile
+          push: true
+          tags: |
+            ${{ env.BACKEND_TS_IMAGE }}:maui-latest
+            ${{ env.BACKEND_TS_IMAGE }}:maui-sha-${{ github.sha }}
+
+  build-frontend:
+    name: Build maui frontend image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-buildx-action@v4
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v7
+        with:
+          context: ./frontend
+          file: ./frontend/Dockerfile
+          push: true
+          build-args: |
+            NEXT_PUBLIC_API_URL=${{ env.BACKEND_TS_URL }}
+            NEXT_PUBLIC_APP_NAME=${{ env.APP_NAME }}
+            NEXT_PUBLIC_APP_TAGLINE=${{ env.APP_TAGLINE }}
+            NEXT_PUBLIC_APP_DESCRIPTION=${{ env.APP_DESCRIPTION }}
+            NEXT_PUBLIC_SUBJECT_TERM=patient
+            NEXT_PUBLIC_CODIFY_INDEX_URL=${{ vars.NEXT_PUBLIC_CODIFY_INDEX_URL }}
+          tags: |
+            ${{ env.FRONTEND_IMAGE }}:latest
+            ${{ env.FRONTEND_IMAGE }}:sha-${{ github.sha }}
+
+  deploy-backend-ts:
+    name: Deploy maui-api-ts backend container (TypeScript — primary)
+    runs-on: ubuntu-latest
+    needs: build-backend-ts
+    env:
+      MIEWEB_API_URL: ${{ secrets.LAUNCHPAD_API_URL }}
+      MIEWEB_API_KEY: ${{ secrets.LAUNCHPAD_API_KEY }}
+      DATABASE_URL: ${{ secrets.DATABASE_URL_MAUI }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      WORKWELL_AUTH_JWT_SECRET: ${{ secrets.WORKWELL_AUTH_JWT_SECRET_MAUI }}
+      # Optional (E14/ADR-023): VSAC/UMLS value-set expansion. Inert when unset — the backend
+      # treats a blank key as "not configured" (StoreValueSetResolver only). Set the
+      # WORKWELL_VSAC_API_KEY_TWH secret to enable.
+      WORKWELL_VSAC_API_KEY: ${{ secrets.WORKWELL_VSAC_API_KEY_TWH }}
+      REPLACE_EXISTING: ${{ inputs.replace_existing == 'true' }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Validate required secrets
+        run: |
+          missing=()
+          [ -z "$MIEWEB_API_URL" ] && missing+=("LAUNCHPAD_API_URL")
+          [ -z "$MIEWEB_API_KEY" ] && missing+=("LAUNCHPAD_API_KEY")
+          [ -z "$DATABASE_URL" ] && missing+=("DATABASE_URL_MAUI")
+          [ -z "$OPENAI_API_KEY" ] && missing+=("OPENAI_API_KEY")
+          [ -z "$WORKWELL_AUTH_JWT_SECRET" ] && missing+=("WORKWELL_AUTH_JWT_SECRET_MAUI")
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::Missing required secret(s): ${missing[*]}"
+            exit 1
+          fi
+
+      - name: Prepare backend-ts environment variables
+        id: backend-ts-env
+        # TS production env (cutover plan §7). MIEWEB_TARGET=local → in-process bindings (no companion
+        # services, port 8080); DATABASE_URL routes the store factory to the Neon Pg ceiling.
+        # WORKWELL_ENVIRONMENT=production keeps the startup-safety fail-fast active. No JAVA_OPTS.
+        run: |
+          # node-postgres' pg.Pool needs a postgres:// URI, so strip a leading `jdbc:` (no-op if
+          # already a pg URI). Fail legibly on any other scheme.
+          db_url="${DATABASE_URL#jdbc:}"
+          case "$db_url" in
+            postgres://*|postgresql://*) : ;;
+            *)
+              echo "::error::DATABASE_URL_MAUI must be a postgres:// or jdbc:postgresql:// URL." >&2
+              exit 1
+              ;;
+          esac
+          if [ "$db_url" != "$DATABASE_URL" ]; then
+            echo "Normalized DATABASE_URL: stripped 'jdbc:' prefix for node-postgres (value not logged)."
+          fi
+          {
+            echo 'json<<EOF'
+            jq -nc \
+              --arg database_url "$db_url" \
+              --arg openai_api_key "$OPENAI_API_KEY" \
+              --arg jwt_secret "$WORKWELL_AUTH_JWT_SECRET" \
+              --arg frontend_url "$FRONTEND_URL" \
+              --arg vsac_api_key "$WORKWELL_VSAC_API_KEY" \
+              '[
+                {key: "MIEWEB_TARGET", value: "local"},
+                {key: "WORKWELL_ENVIRONMENT", value: "production"},
+                {key: "DATABASE_URL", value: $database_url},
+                {key: "OPENAI_API_KEY", value: $openai_api_key},
+                {key: "WORKWELL_CORS_ALLOWED_ORIGINS", value: $frontend_url},
+                {key: "CORS_ALLOWED_ORIGINS", value: $frontend_url},
+                {key: "WORKWELL_AUTH_COOKIE_SAME_SITE", value: "None"},
+                {key: "WORKWELL_AUTH_COOKIE_SECURE", value: "true"},
+                {key: "WORKWELL_AUTH_JWT_SECRET", value: $jwt_secret},
+                {key: "WORKWELL_AUTH_ACCESS_TTL_SECONDS", value: "2592000"},
+                {key: "WORKWELL_INSTANCE", value: "maui"},
+                {key: "WORKWELL_SCHEDULER_ENABLED", value: "true"},
+                {key: "WORKWELL_VSAC_API_KEY", value: $vsac_api_key}
+              ]'
+            echo EOF
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Deploy backend-ts through Create-a-Container API
+        env:
+          CONTAINER_HOSTNAME: ${{ env.API_TS_HOSTNAME }}
+          CONTAINER_IMAGE: ${{ env.BACKEND_TS_IMAGE }}:maui-sha-${{ github.sha }}
+          INTERNAL_PORT: 8080
+          CONTAINER_ENV_VARS_JSON: ${{ steps.backend-ts-env.outputs.json }}
+        run: bash .github/scripts/deploy-mieweb-container.sh
+
+  deploy-frontend:
+    name: Deploy maui frontend container
+    runs-on: ubuntu-latest
+    # Gated on the TS backend deploy SUCCEEDING (default `needs` success gate). The frontend points at
+    # ${BACKEND_TS_URL}, and the deploy script deletes-then-recreates the maui-api-ts container — so if
+    # that deploy fails, shipping a frontend aimed at a now-dead/old TS backend would only worsen the
+    # outage. Skipping here preserves the last-working frontend.
+    # Rollback: redeploy an earlier known-good maui-api-ts image — workflow_dispatch with replace_existing=true
+    # at an earlier maui-sha-<SHA>. See docs/DEPLOY.md → Rollback.
+    needs: [build-frontend, deploy-backend-ts]
+    env:
+      MIEWEB_API_URL: ${{ secrets.LAUNCHPAD_API_URL }}
+      MIEWEB_API_KEY: ${{ secrets.LAUNCHPAD_API_KEY }}
+      REPLACE_EXISTING: ${{ inputs.replace_existing == 'true' }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Validate required secrets
+        run: |
+          missing=()
+          [ -z "$MIEWEB_API_URL" ] && missing+=("LAUNCHPAD_API_URL")
+          [ -z "$MIEWEB_API_KEY" ] && missing+=("LAUNCHPAD_API_KEY")
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::Missing required secret(s): ${missing[*]}"
+            exit 1
+          fi
+
+      - name: Prepare frontend environment variables
+        id: frontend-env
+        run: |
+          {
+            echo 'json<<EOF'
+            jq -nc \
+              --arg backend_url "$BACKEND_TS_URL" \
+              '[
+                {key: "NODE_ENV", value: "production"},
+                {key: "NEXT_PUBLIC_API_URL", value: $backend_url},
+                {key: "NEXT_PUBLIC_API_BASE_URL", value: $backend_url}
+              ]'
+            echo EOF
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Deploy frontend through Create-a-Container API
+        env:
+          CONTAINER_HOSTNAME: ${{ env.FRONTEND_HOSTNAME }}
+          CONTAINER_IMAGE: ${{ env.FRONTEND_IMAGE }}:sha-${{ github.sha }}
+          INTERNAL_PORT: 3000
+          CONTAINER_ENV_VARS_JSON: ${{ steps.frontend-env.outputs.json }}
+        run: bash .github/scripts/deploy-mieweb-container.sh

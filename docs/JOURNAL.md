@@ -1,5 +1,46 @@
 # Journal
 
+## 2026-08-31 — the Maui deploy workflow, and a shared image tag that could have healed the live demo onto unmerged code
+
+**MM-0's deployment plumbing exists: `deploy-maui-mieweb.yml`, four pseudonymous sandbox accounts, and
+the flip-config guard finally derives its own workflow list.** The workflow is TWH's with Maui's
+identity — `maui-api-ts` / `maui` hostnames, `DATABASE_URL_MAUI` + `WORKWELL_AUTH_JWT_SECRET_MAUI`,
+`WORKWELL_INSTANCE=maui`, `NEXT_PUBLIC_SUBJECT_TERM=patient` as a frontend build ARG — and
+`workflow_dispatch`-only, because the two Maui secrets do not exist yet and a push trigger would fail
+every push until they do. `WORKWELL_OFFICIAL_MEASURES` is deliberately absent: no pilot measure has
+been through its own flip gate, so Maui evaluates authored CQL (locked decision 4A.5).
+
+**The finding worth keeping is one review caught and two passes had missed.** The workflow, copied
+from TWH, pushed `ghcr.io/taleef7/workwell-api-ts:latest` — and TWH's backend image repository is the
+*same* repository. `reconcile-twh-mieweb.yml` heals the live `twh-api-ts` container every 15 minutes
+by recreating it from that repository's `:latest`. So a Maui dispatch from any unmerged branch would
+republish `:latest`, and the next time the live demo went unhealthy it could have healed itself onto
+that code. `deploy-staging-mieweb.yml` had already solved this with `staging-*` tags, which is the
+tell: the hazard was known once and not carried forward. Maui now pushes `maui-latest` /
+`maui-sha-<SHA>` and deploys the namespaced sha; the frontend needs no namespacing because it builds a
+different repository. **Nothing was ever at risk** — the workflow had not been dispatched — but the
+window between merging it and first dispatch is exactly when it would have been. Documented in
+DEPLOY.md as load-bearing rather than left as a tag convention someone could tidy away.
+
+**`official-flip-config.test.ts` stops being a three-name allowlist.** Its `WORKFLOWS` array was
+hardcoded to the three TWH/staging files, so a new deploy workflow was invisible to a test whose whole
+claim is that it validates "the string that actually ships" — the #380/#400 guard-scope class, named
+as MM-1b work in the roadmap and paid down here instead. Discovery is now derived from the filesystem:
+a workflow qualifies when it deploys through the shared container script **and** sets
+`WORKWELL_INSTANCE`. Both halves are needed — the script reference alone also matches
+`deploy-workwell-redirect-mieweb.yml`, a redirect container that ships no measure routing and so
+passes every assertion **vacuously**. That was measured, not argued: with the redirect included the
+other three tests stayed green and only a new `deepEqual` on the discovered set failed, naming it. The
+predicate is keyed on `WORKWELL_INSTANCE` rather than on an image variable name because a future
+workflow can rename its variables and stay a WorkWell deployment.
+
+**Also on the record: `WORKWELL_INSTANCE` was, until today, read by nothing in `backend-ts/src`.** All
+three deploy workflows set it; it is a Java-era leftover whose consumer died with the JVM. It is being
+made load-bearing again as the deployment-profile selector rather than documented as inert.
+
+Gate: 2049 tests, 2008 pass, 0 fail, 41 skipped — run by the orchestrator independently of the
+implementing lane, not taken from its self-report.
+
 ## 2026-08-30 (closeout) — the three MM-0 PRs merge; and the Maui deployment was never blocked on anyone
 
 **Merged in order — #497 → #498 → #499 — and `main` is at `fd2e5f51`.** #499 was rebased onto the other
