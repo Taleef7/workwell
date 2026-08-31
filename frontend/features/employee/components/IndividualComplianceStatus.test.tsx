@@ -159,4 +159,54 @@ describe("IndividualComplianceStatus", () => {
     expect(keyWarnings).toHaveLength(0);
     errorSpy.mockRestore();
   });
+
+  it("makes exactly one roster request when the first response specifies availablePanels: ['wellness']", async () => {
+    getWithHeaders.mockReset().mockResolvedValue({
+      data: {
+        panel: "wellness",
+        availablePanels: ["wellness"],
+        columns: [
+          { measureId: "cms122", name: "Diabetes HbA1c", complianceClass: "PERMANENT" },
+        ],
+        rows: [{
+          subject: { externalId: "emp-001", name: "Ada Lovelace", role: "Nurse", site: "HQ" },
+          cells: {
+            cms122: { status: "COMPLIANT", method: "1 valid test" },
+          }
+        }]
+      },
+      headers: new Headers({ "X-Total-Count": "1" })
+    });
+
+    render(<IndividualComplianceStatus externalId="emp-001" />);
+    expect(await screen.findByText("Diabetes HbA1c")).toBeInTheDocument();
+    expect(getWithHeaders).toHaveBeenCalledTimes(1);
+    expect(getWithHeaders).toHaveBeenCalledWith(
+      expect.stringContaining("/api/compliance/roster?panel=immunizations")
+    );
+  });
+
+  it("older backend fallback: makes all three requests when availablePanels is omitted, and deduplicates identical served panels", async () => {
+    getWithHeaders.mockReset().mockResolvedValue({
+      data: {
+        panel: "wellness",
+        // availablePanels intentionally omitted
+        columns: [
+          { measureId: "cms122", name: "Diabetes HbA1c", complianceClass: "PERMANENT" },
+        ],
+        rows: [{
+          subject: { externalId: "emp-001", name: "Ada Lovelace", role: "Nurse", site: "HQ" },
+          cells: {
+            cms122: { status: "COMPLIANT", method: "1 valid test" },
+          }
+        }]
+      },
+      headers: new Headers({ "X-Total-Count": "1" })
+    });
+
+    render(<IndividualComplianceStatus externalId="emp-001" />);
+    expect(await screen.findByText("Diabetes HbA1c")).toBeInTheDocument();
+    expect(getWithHeaders).toHaveBeenCalledTimes(3);
+    expect(screen.getAllByText("Diabetes HbA1c")).toHaveLength(1);
+  });
 });

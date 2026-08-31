@@ -16,7 +16,7 @@ import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { isCompletedRun, isPopulationRun, latestRunRows } from "../program/rollup-shared.ts";
 import { isApplicable, matchesCohort } from "../segment/segment-applicability.ts";
 import type { HydratedSegment } from "../stores/segment-store.ts";
-import { PANELS, isPanelId, AVAILABLE_PANELS, PROFILE_DEFAULT_PANEL, type PanelId } from "./panels.ts";
+import { isPanelId, AVAILABLE_PANELS, PROFILE_DEFAULT_PANEL, RUNNABLE_PANELS, type PanelId } from "./panels.ts";
 import { deriveCell, type Cell } from "./roster-vocabulary.ts";
 
 export interface RosterColumn {
@@ -94,7 +94,7 @@ export async function buildRoster(deps: RosterDeps, filters: RosterFilters): Pro
   const activeSegment = filters.segment ? segments.find((s) => s.id === filters.segment && s.enabled) ?? null : null;
   const measureIds = activeSegment
     ? activeSegment.measureIds.filter((m) => active.has(m) && isRunnableMeasure(m))
-    : PANELS[panel].filter((m) => active.has(m) && isRunnableMeasure(m));
+    : (RUNNABLE_PANELS[panel] ?? []);
   const columns: RosterColumn[] = measureIds.map((id) => ({
     measureId: id,
     name: MEASURES[id]?.name ?? id,
