@@ -339,7 +339,18 @@ test("default profile — non-catalog subjects (e.g. QRDA Cypress imports) are i
     closedBy: null,
   };
 
-  const d = deps([row], { cases: [caseRec] });
+  const measureRow: OutcomeRecord = {
+    id: "out-cypress-1",
+    runId: "run-cypress-1",
+    subjectId: nonCatalogSubjectId,
+    measureId: "audiogram",
+    evaluationPeriod: "2026-01-01",
+    status: "COMPLIANT",
+    evidence: {},
+    evaluatedAt: "2026-07-17T00:00:00.000Z",
+  };
+
+  const d = deps([row], { cases: [caseRec], measureRows: [measureRow] });
   const overview = await programOverview(d, {});
   const audiogram = overview.find((m) => m.measureId === "audiogram")!;
   assert.equal(audiogram.totalEvaluated, 1, "unresolved QRDA subject must be evaluated on default profile");
@@ -350,11 +361,16 @@ test("default profile — non-catalog subjects (e.g. QRDA Cypress imports) are i
   assert.equal(trend.length, 1);
   assert.equal(trend[0]!.totalEvaluated, 1);
   assert.equal(trend[0]!.compliant, 1);
+
+  const outlook = await programRiskOutlook(d, "audiogram", 30);
+  assert.ok(outlook);
+  const unknownSite = outlook!.siteComplianceRates.find((s) => s.site === "Unknown");
+  assert.equal(unknownSite?.total, 1, "unresolved QRDA subject is included in risk outlook under Unknown site on default profile");
 });
 
 test("scoped profile (Maui) — isolates data by excluding foreign and unresolved subjects from read models", () => {
   const output = runProfileChild("maui", `
-    import { programOverview, programTrend } from "./src/program/program-read-models.ts";
+    import { programOverview, programRiskOutlook, programTrend } from "./src/program/program-read-models.ts";
 
     const mauiRow = {
       runId: "run-maui-1", runStartedAt: "2026-07-17T00:00:00.000Z", runScopeType: "MEASURE",
@@ -373,6 +389,12 @@ test("scoped profile (Maui) — isolates data by excluding foreign and unresolve
       runStatus: "COMPLETED", runTriggeredBy: "manual", subjectId: "wc|maui-live-1", measureId: "cms122", status: "COMPLIANT",
     };
 
+    const twhStreakRows = ["2024-01-01", "2025-01-01", "2026-01-01"].map((period, index) => ({
+      id: \`out-twh-\${index}\`, runId: "run-maui-1", runStartedAt: "2026-07-17T00:00:00.000Z", runScopeType: "MEASURE",
+      runStatus: "COMPLETED", runTriggeredBy: "manual", subjectId: "emp-001", measureId: "cms122", evaluationPeriod: period,
+      status: "OVERDUE", evidence: {}, evaluatedAt: \`\${period}T00:00:00.000Z\`,
+    }));
+
     const mauiCase = {
       id: "case-1", employeeId: "pat-001", measureId: "cms122", status: "OPEN", createdAt: "2026-07-17T00:00:00.000Z",
     };
@@ -384,11 +406,13 @@ test("scoped profile (Maui) — isolates data by excluding foreign and unresolve
     };
 
     const rows = [mauiRow, twhRow, unresolvableRow, liveWcRow];
+    const riskRows = [mauiRow, ...twhStreakRows, unresolvableRow, liveWcRow];
     const cases = [mauiCase, twhCase, unresolvableCase];
 
     const fakeDeps = {
       outcomeStore: {
         listOutcomesWithRun: async () => rows,
+        listOutcomesForMeasure: async () => riskRows,
         aggregateScaleRun: async () => [],
       },
       runStore: { listRuns: async () => [] },
@@ -399,6 +423,7 @@ test("scoped profile (Maui) — isolates data by excluding foreign and unresolve
     const overview = await programOverview(fakeDeps, {});
     const cms122 = overview.find((m) => m.measureId === "cms122");
     const trend = await programTrend(fakeDeps, "cms122", {});
+    const outlook = await programRiskOutlook(fakeDeps, "cms122", 30);
 
     console.log(JSON.stringify({
       totalEvaluated: cms122?.totalEvaluated,
@@ -406,6 +431,9 @@ test("scoped profile (Maui) — isolates data by excluding foreign and unresolve
       overdue: cms122?.overdue,
       openCaseCount: cms122?.openCaseCount,
       trendPoints: trend.map((p) => ({ totalEvaluated: p.totalEvaluated, compliant: p.compliant, overdue: p.overdue })),
+      outlookSiteRates: outlook?.siteComplianceRates,
+      outlookRepeatNonCompliers: outlook?.repeatNonCompliers,
+      outlookUpcomingExpirations: outlook?.upcomingExpirations,
     }));
   `);
 
@@ -414,5 +442,17 @@ test("scoped profile (Maui) — isolates data by excluding foreign and unresolve
   assert.equal(output.overdue, 0, "non-Maui overdue subjects emp-001 and cypress-mrn-foreign must be excluded");
   assert.equal(output.openCaseCount, 1, "only the Maui subject's open case is counted");
   assert.deepEqual(output.trendPoints, [{ totalEvaluated: 2, compliant: 2, overdue: 0 }]);
+
+  const siteRates = output.outlookSiteRates as Array<{ site: string; total: number; compliant: number }>;
+  assert.equal(siteRates.some((s) => s.site === "Unknown"), false, "foreign and unresolvable subjects must not produce an Unknown site in risk outlook");
+  const wailuku = siteRates.find((s) => s.site === "Wailuku Clinic");
+  assert.ok(wailuku, "Maui-resolvable subject pat-001 site must be present in risk outlook");
+  assert.equal(wailuku.total, 1, "Maui-resolvable subject is counted in its site");
+  assert.equal(wailuku.compliant, 1);
+
+  const repeatNonCompliers = output.outlookRepeatNonCompliers as Array<{ externalId: string }>;
+  assert.equal(repeatNonCompliers.some((r) => r.externalId === "emp-001" || r.externalId === "cypress-mrn-foreign"), false, "foreign subjects must not appear in repeatNonCompliers");
+  const upcomingExpirations = output.outlookUpcomingExpirations as Array<{ externalId: string }>;
+  assert.equal(upcomingExpirations.some((u) => u.externalId === "emp-001" || u.externalId === "cypress-mrn-foreign"), false, "foreign subjects must not appear in upcomingExpirations");
 });
 

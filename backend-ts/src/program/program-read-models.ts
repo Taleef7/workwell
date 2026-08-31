@@ -205,7 +205,7 @@ const tenantMatcher = (filters: ProgramFilters, employeeLookup = employeeById) =
  * non-catalog subjects (notably QRDA Category I imports keyed by Cypress MRNs), which must not be
  * silently dropped from /api/programs.
  */
-const profileMatcher = (employeeLookup = employeeById) => {
+const profileMatcher = (employeeLookup: (id: string) => EmployeeProfile | null) => {
   if (DEPLOYMENT_PROFILE.id === "default") return (_subjectId: string) => true;
   return (subjectId: string) => employeeLookup(subjectId) !== null;
 };
@@ -550,7 +550,11 @@ export async function programRiskOutlook(
   });
   const webChartConfigured = isWebChartConfigured(deps.webChartEnv ?? {});
   const directory = directoryForRows(rows, webChartConfigured, deps.webChartEnv, DIRECTORY);
-  const visibleRows = rows.filter((row) => subjectVisible(row.subjectId, webChartConfigured));
+  // Isolate data on scoped profiles (e.g. Maui) — missed in initial profileMatcher rollout.
+  const profileMatch = profileMatcher(directory.employeeById);
+  const visibleRows = rows.filter(
+    (row) => subjectVisible(row.subjectId, webChartConfigured) && profileMatch(row.subjectId),
+  );
 
   // Latest outcome per subject (rows arrive oldest-first, so the last write wins).
   const latestBySubject = new Map<string, MeasureOutcomeRow>();
