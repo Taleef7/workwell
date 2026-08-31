@@ -7,7 +7,7 @@ import type { CaseStore } from "../stores/case-store.ts";
 import type { CaseEventStore } from "../stores/case-event-store.ts";
 import type { OutcomeStore } from "../stores/outcome-store.ts";
 import type { CampaignStore, CampaignRecord, CampaignRecipientRecord } from "../stores/campaign-store.ts";
-import { employeeById } from "../engine/synthetic/employee-catalog.ts";
+import { employeeById } from "../config/deployment-profile.ts";
 import { dispatchOutreach, type OutreachDeps } from "./case-outreach.ts";
 import { isChannelType, type ChannelType, type OutreachChannel } from "./outreach-channel.ts";
 
