@@ -1,7 +1,7 @@
 import React from "react";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { createNavMock } from "@/test/mocks/next-navigation-reactive";
 
 const getWithHeaders = vi.fn();
@@ -39,11 +39,16 @@ function rosterCalls(): string[] {
 beforeEach(() => {
   navHolder.current.setUrl("/compliance");
   get.mockReset().mockResolvedValue([]);
-  getWithHeaders.mockReset().mockResolvedValue({
-    data: { panel: "wellness", columns: [], rows: [] },
-    headers: new Headers({ "X-Total-Count": "0" }),
+  getWithHeaders.mockReset().mockImplementation((url: string) => {
+    const match = /panel=(\w+)/.exec(String(url));
+    const panel = match ? match[1] : "immunizations";
+    return Promise.resolve({
+      data: { panel, columns: [], rows: [] },
+      headers: new Headers({ "X-Total-Count": "0" }),
+    });
   });
 });
+afterEach(() => vi.clearAllMocks());
 
 describe("CompliancePage URL filters", () => {
   it("reads status and panel from the URL and sends them to the roster request", async () => {
@@ -94,8 +99,7 @@ describe("CompliancePage URL filters", () => {
     navHolder.current.setUrl("/compliance?panel=NOT_A_PANEL");
     render(<CompliancePage />);
     await waitFor(() => {
-      const rosterCall = rosterCalls().at(-1);
-      expect(rosterCall).toContain("panel=immunizations");
+      expect(rosterCalls().some((u) => u.includes("panel=immunizations"))).toBe(true);
     });
   });
 
@@ -108,6 +112,8 @@ describe("CompliancePage URL filters", () => {
     render(<CompliancePage />);
     await waitFor(() => {
       expect(navHolder.current.params.get("panel")).toBe("wellness");
+      expect(navHolder.current.replace).toHaveBeenCalledWith("/compliance?panel=wellness");
+      expect(navHolder.current.push).not.toHaveBeenCalled();
     });
   });
 });

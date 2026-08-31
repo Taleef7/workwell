@@ -118,4 +118,45 @@ describe("IndividualComplianceStatus", () => {
     await userEvent.click(infoButtons[0]);
     expect(await screen.findByText("Evidence unavailable.")).toBeInTheDocument();
   });
+
+  it("Maui profile: merges only availablePanels and renders each measure at most once (no duplicate keys)", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    getWithHeaders.mockReset().mockResolvedValue({
+      data: {
+        panel: "wellness",
+        availablePanels: ["wellness"],
+        columns: [
+          { measureId: "cms122", name: "Diabetes HbA1c", complianceClass: "PERMANENT" },
+          { measureId: "cms125", name: "Breast Cancer Screening", complianceClass: "RECURRING" },
+          { measureId: "hypertension", name: "Hypertension", complianceClass: "RECURRING" },
+        ],
+        rows: [{
+          subject: { externalId: "emp-001", name: "Ada Lovelace", role: "Nurse", site: "HQ" },
+          cells: {
+            cms122: { status: "COMPLIANT", method: "1 valid test" },
+            cms125: { status: "COMPLIANT", method: "Screened" },
+            hypertension: { status: "COMPLIANT", method: "Controlled" },
+          }
+        }]
+      },
+      headers: new Headers({ "X-Total-Count": "1" })
+    });
+
+    render(<IndividualComplianceStatus externalId="emp-001" />);
+    expect(await screen.findByText("Diabetes HbA1c")).toBeInTheDocument();
+    expect(screen.getByText("Breast Cancer Screening")).toBeInTheDocument();
+    expect(screen.getByText("Hypertension")).toBeInTheDocument();
+
+    // Assert each measure appears exactly once in the table
+    expect(screen.getAllByText("Diabetes HbA1c")).toHaveLength(1);
+    expect(screen.getAllByText("Breast Cancer Screening")).toHaveLength(1);
+    expect(screen.getAllByText("Hypertension")).toHaveLength(1);
+
+    // No React duplicate key warning emitted
+    const keyWarnings = errorSpy.mock.calls.filter((call) =>
+      call.some((arg) => typeof arg === "string" && arg.includes("Encountered two children with the same key"))
+    );
+    expect(keyWarnings).toHaveLength(0);
+    errorSpy.mockRestore();
+  });
 });
