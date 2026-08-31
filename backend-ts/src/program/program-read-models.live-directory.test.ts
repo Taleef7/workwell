@@ -1,11 +1,29 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import { dirname, resolve } from "node:path";
 import type { MeasureScanOptions, OutcomeRecord, OutcomeStore, OutcomeWithRun } from "../stores/outcome-store.ts";
 import type { RunStore } from "../stores/run-store.ts";
-import type { CaseStore } from "../stores/case-store.ts";
+import type { CaseRecord, CaseStore } from "../stores/case-store.ts";
 import type { QualitySnapshotRow, QualitySnapshotStore } from "../stores/quality-snapshot-store.ts";
 import { programOverview, programRiskOutlook, programTopDrivers, programTrend } from "./program-read-models.ts";
 import { replaceLiveDirectory } from "../engine/ingress/webchart/live-directory.ts";
+
+const backendRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
+
+function runProfileChild(instance: string | undefined, source: string): Record<string, unknown> {
+  const env = { ...process.env };
+  if (instance === undefined) delete env.WORKWELL_INSTANCE;
+  else env.WORKWELL_INSTANCE = instance;
+  const result = spawnSync(
+    process.execPath,
+    ["--import", "tsx", "--input-type=module", "-e", source],
+    { cwd: backendRoot, env, encoding: "utf8" },
+  );
+  assert.equal(result.status, 0, result.stderr);
+  return JSON.parse(result.stdout.trim()) as Record<string, unknown>;
+}
 
 const wcRow: OutcomeWithRun = {
   runId: "run-wc-program", runStartedAt: "2026-07-17T00:00:00.000Z", runScopeType: "MEASURE",
@@ -20,6 +38,7 @@ function deps(
     snapshots?: QualitySnapshotStore;
     configured?: boolean;
     calls?: { joined: number; byRun: number; measureScan: number; measureScanOptions?: MeasureScanOptions };
+    cases?: CaseRecord[];
   } = {},
 ) {
   const outcomeStore = {
@@ -41,7 +60,7 @@ function deps(
     aggregateScaleRun: async () => [],
   } as unknown as OutcomeStore;
   const runStore = { listRuns: async () => [] } as unknown as RunStore;
-  const caseStore = { listCases: async () => [] } as unknown as CaseStore;
+  const caseStore = { listCases: async () => options.cases ?? [] } as unknown as CaseStore;
   return {
     outcomeStore,
     runStore,
@@ -289,3 +308,111 @@ test("programRiskOutlook — successful wc history rehydrates raw name and a new
     replaceLiveDirectory([]);
   }
 });
+
+test("default profile — non-catalog subjects (e.g. QRDA Cypress imports) are included in read models", async () => {
+  const nonCatalogSubjectId = "cypress-mrn-non-catalog-99";
+  const row: OutcomeWithRun = {
+    runId: "run-cypress-1",
+    runStartedAt: "2026-07-17T00:00:00.000Z",
+    runScopeType: "MEASURE",
+    runStatus: "COMPLETED",
+    runTriggeredBy: "manual",
+    subjectId: nonCatalogSubjectId,
+    measureId: "audiogram",
+    status: "COMPLIANT",
+  };
+  const caseRec: CaseRecord = {
+    id: "case-cypress-1",
+    employeeId: nonCatalogSubjectId,
+    measureId: "audiogram",
+    evaluationPeriod: "2026-01-01",
+    status: "OPEN",
+    priority: "HIGH",
+    assignee: null,
+    nextAction: null,
+    currentOutcomeStatus: "COMPLIANT",
+    lastRunId: "run-cypress-1",
+    createdAt: "2026-07-17T00:00:00.000Z",
+    updatedAt: "2026-07-17T00:00:00.000Z",
+    closedAt: null,
+    closedReason: null,
+    closedBy: null,
+  };
+
+  const d = deps([row], { cases: [caseRec] });
+  const overview = await programOverview(d, {});
+  const audiogram = overview.find((m) => m.measureId === "audiogram")!;
+  assert.equal(audiogram.totalEvaluated, 1, "unresolved QRDA subject must be evaluated on default profile");
+  assert.equal(audiogram.compliant, 1, "unresolved QRDA subject contributes to compliant total on default profile");
+  assert.equal(audiogram.openCaseCount, 1, "unresolved QRDA subject open case must be counted on default profile");
+
+  const trend = await programTrend(d, "audiogram", {});
+  assert.equal(trend.length, 1);
+  assert.equal(trend[0]!.totalEvaluated, 1);
+  assert.equal(trend[0]!.compliant, 1);
+});
+
+test("scoped profile (Maui) — isolates data by excluding foreign and unresolved subjects from read models", () => {
+  const output = runProfileChild("maui", `
+    import { programOverview, programTrend } from "./src/program/program-read-models.ts";
+
+    const mauiRow = {
+      runId: "run-maui-1", runStartedAt: "2026-07-17T00:00:00.000Z", runScopeType: "MEASURE",
+      runStatus: "COMPLETED", runTriggeredBy: "manual", subjectId: "pat-001", measureId: "cms122", status: "COMPLIANT",
+    };
+    const twhRow = {
+      runId: "run-maui-1", runStartedAt: "2026-07-17T00:00:00.000Z", runScopeType: "MEASURE",
+      runStatus: "COMPLETED", runTriggeredBy: "manual", subjectId: "emp-001", measureId: "cms122", status: "OVERDUE",
+    };
+    const unresolvableRow = {
+      runId: "run-maui-1", runStartedAt: "2026-07-17T00:00:00.000Z", runScopeType: "MEASURE",
+      runStatus: "COMPLETED", runTriggeredBy: "manual", subjectId: "cypress-mrn-foreign", measureId: "cms122", status: "OVERDUE",
+    };
+    const liveWcRow = {
+      runId: "run-maui-1", runStartedAt: "2026-07-17T00:00:00.000Z", runScopeType: "MEASURE",
+      runStatus: "COMPLETED", runTriggeredBy: "manual", subjectId: "wc|maui-live-1", measureId: "cms122", status: "COMPLIANT",
+    };
+
+    const mauiCase = {
+      id: "case-1", employeeId: "pat-001", measureId: "cms122", status: "OPEN", createdAt: "2026-07-17T00:00:00.000Z",
+    };
+    const twhCase = {
+      id: "case-2", employeeId: "emp-001", measureId: "cms122", status: "OPEN", createdAt: "2026-07-17T00:00:00.000Z",
+    };
+    const unresolvableCase = {
+      id: "case-3", employeeId: "cypress-mrn-foreign", measureId: "cms122", status: "OPEN", createdAt: "2026-07-17T00:00:00.000Z",
+    };
+
+    const rows = [mauiRow, twhRow, unresolvableRow, liveWcRow];
+    const cases = [mauiCase, twhCase, unresolvableCase];
+
+    const fakeDeps = {
+      outcomeStore: {
+        listOutcomesWithRun: async () => rows,
+        aggregateScaleRun: async () => [],
+      },
+      runStore: { listRuns: async () => [] },
+      caseStore: { listCases: async () => cases },
+      webChartEnv: { WORKWELL_WEBCHART_BASE_URL: "http://webchart.test", WORKWELL_WEBCHART_API_KEY: "fixture-key" },
+    };
+
+    const overview = await programOverview(fakeDeps, {});
+    const cms122 = overview.find((m) => m.measureId === "cms122");
+    const trend = await programTrend(fakeDeps, "cms122", {});
+
+    console.log(JSON.stringify({
+      totalEvaluated: cms122?.totalEvaluated,
+      compliant: cms122?.compliant,
+      overdue: cms122?.overdue,
+      openCaseCount: cms122?.openCaseCount,
+      trendPoints: trend.map((p) => ({ totalEvaluated: p.totalEvaluated, compliant: p.compliant, overdue: p.overdue })),
+    }));
+  `);
+
+  assert.equal(output.totalEvaluated, 2, "only Maui-resolvable subjects (pat-001 and wc|) contribute to totalEvaluated");
+  assert.equal(output.compliant, 2, "both pat-001 and wc| are COMPLIANT");
+  assert.equal(output.overdue, 0, "non-Maui overdue subjects emp-001 and cypress-mrn-foreign must be excluded");
+  assert.equal(output.openCaseCount, 1, "only the Maui subject's open case is counted");
+  assert.deepEqual(output.trendPoints, [{ totalEvaluated: 2, compliant: 2, overdue: 0 }]);
+});
+
