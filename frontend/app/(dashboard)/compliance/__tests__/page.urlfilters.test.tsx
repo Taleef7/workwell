@@ -98,4 +98,16 @@ describe("CompliancePage URL filters", () => {
       expect(rosterCall).toContain("panel=immunizations");
     });
   });
+
+  it("canonicalizes the URL to the served panel when the server responds with a different panel", async () => {
+    navHolder.current.setUrl("/compliance?panel=immunizations");
+    getWithHeaders.mockReset().mockResolvedValue({
+      data: { panel: "wellness", availablePanels: ["wellness"], columns: [], rows: [] },
+      headers: new Headers({ "X-Total-Count": "0" }),
+    });
+    render(<CompliancePage />);
+    await waitFor(() => {
+      expect(navHolder.current.params.get("panel")).toBe("wellness");
+    });
+  });
 });

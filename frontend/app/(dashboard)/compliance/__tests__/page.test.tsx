@@ -256,4 +256,22 @@ describe("CompliancePage", () => {
     const table = await screen.findByRole("table");
     expect(within(table).getByText("No employees match these filters.")).toBeInTheDocument();
   });
+
+  it("renders only availablePanels in the select when supplied by the server", async () => {
+    getWithHeaders.mockReset().mockResolvedValue({
+      data: {
+        panel: "wellness",
+        availablePanels: ["wellness"],
+        columns: [{ measureId: "hypertension", name: "Hypertension", complianceClass: "RECURRING" }],
+        rows: []
+      },
+      headers: new Headers({ "X-Total-Count": "0" })
+    });
+    render(<CompliancePage />);
+    await screen.findByRole("columnheader", { name: /Hypertension/ });
+    const panelSelect = screen.getByLabelText(/Panel/i);
+    const options = within(panelSelect).getAllByRole("option");
+    expect(options).toHaveLength(1);
+    expect(options[0]).toHaveTextContent("Wellness & eCQM");
+  });
 });

@@ -8,7 +8,7 @@
 import type { OutcomeStore, OutcomeWithRun, OutcomeRecord } from "../stores/outcome-store.ts";
 import { isDemoPersona } from "../engine/synthetic/employee-catalog.ts";
 import { directoryForRows } from "../engine/ingress/webchart/live-directory.ts";
-import { DIRECTORY } from "../config/deployment-profile.ts";
+import { DIRECTORY, isRunnableMeasure } from "../config/deployment-profile.ts";
 import { isWebChartConfigured, type DataSourceEnv } from "../engine/ingress/data-source.ts";
 import { MEASURE_CATALOG } from "../measure/measure-catalog.ts";
 import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
@@ -16,7 +16,7 @@ import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { isCompletedRun, isPopulationRun, latestRunRows } from "../program/rollup-shared.ts";
 import { isApplicable, matchesCohort } from "../segment/segment-applicability.ts";
 import type { HydratedSegment } from "../stores/segment-store.ts";
-import { PANELS, DEFAULT_PANEL, isPanelId, type PanelId } from "./panels.ts";
+import { PANELS, isPanelId, AVAILABLE_PANELS, PROFILE_DEFAULT_PANEL, type PanelId } from "./panels.ts";
 import { deriveCell, type Cell } from "./roster-vocabulary.ts";
 
 export interface RosterColumn {
@@ -33,6 +33,7 @@ export interface RosterRow {
 }
 export interface Roster {
   panel: PanelId;
+  availablePanels: PanelId[];
   columns: RosterColumn[];
   rows: RosterRow[];
   total: number;
@@ -80,7 +81,8 @@ export interface RosterFilters {
 }
 
 export async function buildRoster(deps: RosterDeps, filters: RosterFilters): Promise<Roster> {
-  const panel: PanelId = filters.panel && isPanelId(filters.panel) ? filters.panel : DEFAULT_PANEL;
+  const requestedPanel: PanelId = filters.panel && isPanelId(filters.panel) ? filters.panel : PROFILE_DEFAULT_PANEL;
+  const panel: PanelId = AVAILABLE_PANELS.includes(requestedPanel) ? requestedPanel : PROFILE_DEFAULT_PANEL;
   const active = new Set(MEASURE_CATALOG.filter((m) => m.status === "Active").map((m) => m.id));
 
   // E11.3 segments: an active `segment` filter scopes columns to that segment's rule-set (∩ Active);
@@ -91,8 +93,8 @@ export async function buildRoster(deps: RosterDeps, filters: RosterFilters): Pro
   // overlay below only counts enabled segments). Keeps the filter consistent with applicability.
   const activeSegment = filters.segment ? segments.find((s) => s.id === filters.segment && s.enabled) ?? null : null;
   const measureIds = activeSegment
-    ? activeSegment.measureIds.filter((m) => active.has(m))
-    : PANELS[panel].filter((m) => active.has(m));
+    ? activeSegment.measureIds.filter((m) => active.has(m) && isRunnableMeasure(m))
+    : PANELS[panel].filter((m) => active.has(m) && isRunnableMeasure(m));
   const columns: RosterColumn[] = measureIds.map((id) => ({
     measureId: id,
     name: MEASURES[id]?.name ?? id,
@@ -227,5 +229,5 @@ export async function buildRoster(deps: RosterDeps, filters: RosterFilters): Pro
   const page = Math.max(1, Math.trunc(filters.page ?? 1));
   const pageSize = Math.max(1, Math.min(Math.trunc(filters.pageSize ?? 50), 200));
   const start = (page - 1) * pageSize;
-  return { panel, columns, rows: rows.slice(start, start + pageSize), total };
+  return { panel, availablePanels: AVAILABLE_PANELS, columns, rows: rows.slice(start, start + pageSize), total };
 }

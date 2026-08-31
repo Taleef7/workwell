@@ -61,7 +61,7 @@ export async function handleCompliance(req: Request, env: ComplianceEnv): Promis
     },
   );
   return json(
-    { panel: roster.panel, columns: roster.columns, rows: roster.rows },
+    { panel: roster.panel, availablePanels: roster.availablePanels, columns: roster.columns, rows: roster.rows },
     200,
     { "X-Total-Count": String(roster.total) },
   );

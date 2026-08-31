@@ -2,6 +2,8 @@
  * Roster column sets (E10.2). Each panel scopes the roster grid to a coherent group of measures,
  * standing in for E11's risk-group/segment column scoping. Ids are the runnable measure ids.
  */
+import { isRunnableMeasure } from "../config/deployment-profile.ts";
+
 export type PanelId = "immunizations" | "osha" | "wellness";
 
 export const PANELS: Record<PanelId, string[]> = {
@@ -13,3 +15,15 @@ export const PANELS: Record<PanelId, string[]> = {
 export const DEFAULT_PANEL: PanelId = "immunizations";
 
 export const isPanelId = (s: string): s is PanelId => Object.prototype.hasOwnProperty.call(PANELS, s);
+
+export const RUNNABLE_PANELS: Record<PanelId, string[]> = {
+  immunizations: PANELS.immunizations.filter(isRunnableMeasure),
+  osha: PANELS.osha.filter(isRunnableMeasure),
+  wellness: PANELS.wellness.filter(isRunnableMeasure),
+};
+
+export const AVAILABLE_PANELS: PanelId[] = (["immunizations", "osha", "wellness"] as const).filter(
+  (id) => RUNNABLE_PANELS[id].length > 0,
+);
+
+export const PROFILE_DEFAULT_PANEL: PanelId = AVAILABLE_PANELS[0] ?? DEFAULT_PANEL;
