@@ -156,6 +156,42 @@ test("the Maui roster uses only the profile-scoped static directory", () => {
   assert.deepEqual(output.tenantCounts, { maui: 48 });
 });
 
+/**
+ * The segment membership preview returns member `externalId`s to the client, so an unscoped read
+ * there hands a user the OTHER deployment's subject identifiers — the same class as the roster leak,
+ * reached through a path that a sweep for catalog imports in read models does not obviously cover.
+ */
+test("segment membership preview returns only the active profile's subjects", () => {
+  const output = runProfileChild("maui", `
+    // Drives the REAL route handler, not the profile export — importing the scoped EMPLOYEES here
+    // and filtering it would only re-prove that the profile is scoped, and would still pass if
+    // segments.ts went back to reading the raw catalog. Mutation-checked against that exact revert.
+    import { handleSegments } from "./src/routes/segments.ts";
+    // Deliberately a rule that SPANS deployments: "Wailuku Clinic" and "Kihei Clinic" are Maui's two
+    // sites, but TWH has a site named exactly "Clinic" and IHN has "Outpatient Clinic". So an
+    // unscoped read returns emp-*/ihn-emp- identifiers here, while a scoped one cannot. A
+    // match-everyone rule would not distinguish the two.
+    const rule = { match: "ANY", conditions: [{ attr: "site", op: "contains", value: "Clinic" }] };
+    const res = await handleSegments(
+      new Request("http://x/api/segments/preview", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ rule, overrides: [] }),
+      }),
+      {}, { sub: "admin@workwell.dev", roles: ["ROLE_ADMIN"] },
+    );
+    const json = await res.json();
+    console.log(JSON.stringify({
+      status: res.status,
+      total: json.count ?? json.members?.length ?? 0,
+      foreign: (json.members ?? []).filter((id) => !id.startsWith("pat-")),
+    }));
+  `);
+  assert.equal(output.status, 200, "the preview route must answer");
+  assert.equal(output.total, 48);
+  assert.deepEqual(output.foreign, [], "no twh/ihn identifier may appear in a Maui segment preview");
+});
+
 test("the default roster keeps the pre-Maui row count and tenant mix", () => {
   const output = runProfileChild(undefined, `
     import { buildRoster } from "./src/compliance/roster-read-model.ts";
