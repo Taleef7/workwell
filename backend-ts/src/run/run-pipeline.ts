@@ -29,6 +29,7 @@ import {
   isRunnableMeasure,
   RUNNABLE_MEASURE_IDS as PROFILE_RUNNABLE_MEASURE_IDS,
   DEPLOYMENT_PROFILE,
+  DIRECTORY,
 } from "../config/deployment-profile.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
@@ -452,7 +453,7 @@ async function prepareLivePopulation(
     for (const bundle of bundles) {
       const patientId = patientIdOf(bundle);
       if (!patientId) continue;
-      const employee = profileForId(`wc|${patientId}`);
+      const employee = profileForId(`wc|${patientId}`, DIRECTORY);
       if (!employee) continue;
       for (const measureId of planned.measureIds) items.push({ employee, measureId, liveBundle: bundle });
     }

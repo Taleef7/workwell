@@ -39,7 +39,7 @@ Production endpoints:
 
 Deploy workflow: `.github/workflows/deploy-twh-mieweb.yml` — triggers on every push to `main` and via `workflow_dispatch`. Builds the TypeScript backend and the TWH-branded frontend (pointed at `twh-api-ts`) as Docker images, pushes to GHCR, and deploys both containers via MIE Create-a-Container API. A self-heal reconciler (`reconcile-twh-mieweb.yml`) recreates a down container from `:latest` every 15 min.
 
-Instance model: `WORKWELL_INSTANCE=twh` seeds all three measure categories on startup (OSHA safety, HEDIS wellness, CMS eCQM catalog). A single TWH deployment is the canonical demo environment.
+Deployment profile model: `WORKWELL_INSTANCE` selects which tenants are visible, which are evaluable, and which measures are runnable. Unset/default/`twh` reproduces the pre-existing TWH behavior; `maui` selects the Maui profile. A single TWH deployment is the canonical demo environment.
 
 ## 3) Backend Module Boundaries (`backend-ts/src/*`)
 

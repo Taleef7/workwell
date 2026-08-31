@@ -203,13 +203,6 @@ export async function handleComplianceApi(
       400,
     );
   }
-  if (!isRunnableMeasure(measureId)) {
-    return json(
-      { error: "measure_not_runnable", message: `measure '${measureId}' is not runnable for deployment profile '${DEPLOYMENT_PROFILE.id}'` },
-      400,
-    );
-  }
-
   const q = url.searchParams;
   const start = q.get("start");
   const end = q.get("end");
@@ -392,6 +385,12 @@ async function preview(
   if (!binding) {
     return json(
       { error: "measure_not_runnable", message: `measure '${measureId}' has no binding and cannot be evaluated` },
+      400,
+    );
+  }
+  if (!isRunnableMeasure(measureId)) {
+    return json(
+      { error: "measure_not_in_profile", message: `measure '${measureId}' is not runnable for deployment profile '${DEPLOYMENT_PROFILE.id}'` },
       400,
     );
   }

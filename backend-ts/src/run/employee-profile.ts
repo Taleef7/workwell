@@ -12,6 +12,7 @@ import type { CaseStore } from "../stores/case-store.ts";
 import type { OutcomeStore } from "../stores/outcome-store.ts";
 import type { CaseEventStore } from "../stores/case-event-store.ts";
 import { employeeById, EMPLOYEES } from "../config/deployment-profile.ts";
+import { DIRECTORY } from "../config/deployment-profile.ts";
 import { directoryForRows } from "../engine/ingress/webchart/live-directory.ts";
 import { isWebChartConfigured, type DataSourceEnv } from "../engine/ingress/data-source.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
@@ -128,7 +129,7 @@ export async function getEmployeeProfile(deps: EmployeeProfileDeps, externalId: 
   const webChartConfigured = isWebChartConfigured(deps.webChartEnv ?? {});
   const emp = employeeById(externalId) ?? (
     webChartConfigured && history.length > 0
-      ? directoryForRows([{ subjectId: externalId }], true, deps.webChartEnv).employeeById(externalId)
+      ? directoryForRows([{ subjectId: externalId }], true, deps.webChartEnv, DIRECTORY).employeeById(externalId)
       : null
   );
   if (!emp) return null;

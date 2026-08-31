@@ -34,9 +34,33 @@ stating: the sandbox shows ~5 actionable patients on each of cms122 and cms125 �
 8 on hypertension. Thin for a team meant to beat on it; profile-scoped compliance-rate overrides are
 the lever, deliberately not taken here.
 
+**The leak that scoping the population did NOT close, and how it hid.** Review found the flagship
+roster on Maui rendering **198 rows — 100 twh, 50 ihn, 48 maui** — led by occupational-health
+employees at "Plant A" under immunization columns Maui cannot run. The cause is one level deeper than
+the profile: `engine/ingress/webchart/live-directory.ts` builds its `STATIC_DIRECTORY` from the RAW
+catalog, and `roster-read-model.ts` renders from `directoryForRows()`. A leak sweep that greps
+app-side files for imports of `employee-catalog.ts` cannot see it — `roster-read-model.ts` imports
+only `isDemoPersona` from the catalog and looks clean. The read goes through an **engine-side** module,
+which structurally cannot import the app-side profile, and that is exactly the seam that opens when a
+population becomes configurable while a directory stays imported. Fixed by injection: the static half
+of the directory snapshot is now supplied by app-side callers (roster, hierarchy rollup, program read
+models, quality materialization, employee profile, run pipeline, cases route) and defaults to the raw
+catalog, so the engine boundary is intact and the default deployment is unchanged. Pinned by a test
+that fails on the old code with `198 !== 48`.
+
+**Also from review, each a different class:** the runnable-measure gate was refusing `mode=latest` on
+the compliance API — a *read* of already-computed, persisted, audited history, which a runnability
+*config* must never make unretrievable (ADR-061 deliberately made "no run covered this subject" a 404
+and nothing else); the new profile test carried two `f(x) deepEqual f(x)` assertions comparing the
+profile module's exports against themselves rather than against the raw catalog; and the resolved
+profile was invisible at boot, so the one misconfiguration that reproduces the roster leak
+deployment-wide would have shown a healthy container and a 200 on `/actuator/health`. All fixed, with
+the profile id now logged once at init in the style operators already grep for.
+
 **Deliberately unchanged, so it is not mistaken for coverage:** `src/program/` read models and segment
 validation still derive from the full directory and full registry, so a Maui operator can still see
-occupational programs listed. A worry that turned out to be unfounded and is recorded because the
+occupational programs listed. The run picker likewise offers all 14 registry measures and 11 of them
+refuse at submit — the refusal is correct and loud, but offering the button is a gap. A worry that turned out to be unfounded and is recorded because the
 reasoning matters: `isApplicable` returns true only when no segment is enabled, and `ensureSegmentSeed`
 runs on the scheduler and on `/api/compliance`, so Maui could plausibly have evaluated everyone and
 created zero cases. It does not — the seeded baseline's `measureIds` include all three Maui measures and

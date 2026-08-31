@@ -8,8 +8,10 @@ import {
   type SyntheticDirectoryView,
   type Tenant,
 } from "../engine/synthetic/employee-catalog.ts";
+import type { DirectorySnapshot } from "../engine/ingress/webchart/live-directory.ts";
 import type { DataSourceEnv } from "../engine/ingress/data-source.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
+import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
 
 export type DeploymentProfileId = "default" | "maui";
 type VisibleTenantSelection = "all" | readonly ["maui"];
@@ -25,8 +27,23 @@ export interface DeploymentDirectory extends SyntheticDirectoryView {
   readonly EVALUATION_EXCLUDED_TENANTS: ReadonlySet<string>;
 }
 
+export function validateRunnableMeasureIds(ids: readonly string[]): readonly string[] {
+  const missingFromMeasures = ids.filter((id) => !MEASURES[id]);
+  const missingFromBindings = ids.filter((id) => !MEASURE_BINDINGS[id]);
+  if (missingFromMeasures.length > 0 || missingFromBindings.length > 0) {
+    const details = [
+      missingFromMeasures.length > 0 ? `missing from MEASURES: ${missingFromMeasures.join(", ")}` : null,
+      missingFromBindings.length > 0 ? `missing from MEASURE_BINDINGS: ${missingFromBindings.join(", ")}` : null,
+    ].filter((detail): detail is string => detail !== null);
+    throw new Error(`[workwell] Invalid runnable measure id(s): ${details.join("; ")}`);
+  }
+  return ids;
+}
+
 const MAUI_MEASURE_IDS = ["cms122", "cms125", "hypertension"] as const;
 const DEFAULT_MEASURE_IDS = Object.keys(MEASURES);
+validateRunnableMeasureIds(MAUI_MEASURE_IDS);
+validateRunnableMeasureIds(DEFAULT_MEASURE_IDS);
 
 /** Pure profile resolution. Input normalization is deliberately separate from warning side effects. */
 export function resolveDeploymentProfile(name: string | undefined): DeploymentProfile {
@@ -66,7 +83,19 @@ if (normalizedInstance && normalizedInstance !== "default" && normalizedInstance
 }
 
 export const DEPLOYMENT_PROFILE = resolveDeploymentProfile(requestedInstance);
+console.warn(
+  `[workwell] WORKWELL_INSTANCE=${JSON.stringify(requestedInstance ?? "")} resolved deployment profile=${DEPLOYMENT_PROFILE.id}`,
+);
 const DEPLOYMENT_DIRECTORY = composeDeploymentDirectory(DEPLOYMENT_PROFILE);
+
+/** Lower-case directory snapshot for app-side consumers of the engine's live-directory seam. */
+export const DIRECTORY: DirectorySnapshot = {
+  employees: DEPLOYMENT_DIRECTORY.EMPLOYEES,
+  employeeById: DEPLOYMENT_DIRECTORY.employeeById,
+  providerById: DEPLOYMENT_DIRECTORY.providerById,
+  tenantById: DEPLOYMENT_DIRECTORY.tenantById,
+  enterpriseForTenant: DEPLOYMENT_DIRECTORY.enterpriseForTenant,
+};
 
 export const EMPLOYEES = DEPLOYMENT_DIRECTORY.EMPLOYEES;
 export const PROVIDERS = DEPLOYMENT_DIRECTORY.PROVIDERS;

@@ -7,6 +7,7 @@ import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
 import {
   EMPLOYEES as RAW_EMPLOYEES,
+  EVALUABLE_EMPLOYEES as RAW_EVALUABLE_EMPLOYEES,
   PROVIDERS as RAW_PROVIDERS,
   TENANTS as RAW_TENANTS,
 } from "../engine/synthetic/employee-catalog.ts";
@@ -25,6 +26,7 @@ import {
   employeeById,
   providerById,
 } from "./deployment-profile.ts";
+import * as deploymentProfile from "./deployment-profile.ts";
 
 const backendRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 
@@ -57,7 +59,7 @@ test("pure directory composition scopes both profiles after full attribution", (
   assert.deepEqual(defaultDirectory.EMPLOYEES, RAW_EMPLOYEES);
   assert.deepEqual(defaultDirectory.PROVIDERS, RAW_PROVIDERS);
   assert.deepEqual(defaultDirectory.TENANTS, RAW_TENANTS);
-  assert.deepEqual(defaultDirectory.EVALUABLE_EMPLOYEES, EVALUABLE_EMPLOYEES);
+  assert.deepEqual(defaultDirectory.EVALUABLE_EMPLOYEES, RAW_EVALUABLE_EMPLOYEES);
   assert.deepEqual([...defaultDirectory.EVALUATION_EXCLUDED_TENANTS], ["maui"]);
 
   const maui = composeDeploymentDirectory(resolveDeploymentProfile("maui"));
@@ -99,7 +101,7 @@ test("Maui distribution counts stay pinned to the measured target buckets", () =
 test("the loaded default module exports the default scoped directory and measure set", () => {
   assert.equal(DEPLOYMENT_PROFILE.id, "default");
   assert.deepEqual(EMPLOYEES, RAW_EMPLOYEES);
-  assert.deepEqual(PROVIDERS, RAW_EMPLOYEES.length > 0 ? composeDeploymentDirectory(resolveDeploymentProfile(undefined)).PROVIDERS : []);
+  assert.deepEqual(PROVIDERS, RAW_PROVIDERS);
   assert.deepEqual(TENANTS, RAW_TENANTS);
   assert.equal(EVALUABLE_EMPLOYEES.length, 150);
   assert.deepEqual([...EVALUATION_EXCLUDED_TENANTS], ["maui"]);
@@ -108,6 +110,72 @@ test("the loaded default module exports the default scoped directory and measure
   assert.equal(isRunnableMeasure("hazwoper"), true);
   assert.equal(employeeById("pat-001")?.tenantId, "maui");
   assert.equal(providerById("maui-prov-001")?.tenantId, "maui");
+});
+
+test("runnable measure validation fails clearly when an id is absent from the registries", () => {
+  const validate = (deploymentProfile as unknown as {
+    validateRunnableMeasureIds?: (ids: readonly string[]) => readonly string[];
+  }).validateRunnableMeasureIds;
+  assert.equal(typeof validate, "function");
+  assert.throws(
+    () => validate!(["not-a-real-measure"]),
+    /missing from MEASURES: not-a-real-measure; missing from MEASURE_BINDINGS: not-a-real-measure/,
+  );
+});
+
+test("profile initialization logs the resolved profile id", () => {
+  const env = { ...process.env, WORKWELL_INSTANCE: "maui" };
+  const result = spawnSync(
+    process.execPath,
+    ["--import", "tsx", "--input-type=module", "-e", `import "./src/config/deployment-profile.ts";`],
+    { cwd: backendRoot, env, encoding: "utf8" },
+  );
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stderr, /resolved deployment profile=maui/);
+});
+
+test("the Maui roster uses only the profile-scoped static directory", () => {
+  const output = runProfileChild("maui", `
+    import { buildRoster } from "./src/compliance/roster-read-model.ts";
+    const roster = await buildRoster({
+      outcomeStore: {
+        async listLatestPopulationOutcomes() { return []; },
+        async listOutcomes() { return []; },
+      },
+      segments: [],
+    }, { panel: "immunizations", pageSize: 200 });
+    const tenantCounts = Object.fromEntries(
+      [...new Set(roster.rows.map((row) => row.subject.tenantId))].map((tenant) => [
+        tenant,
+        roster.rows.filter((row) => row.subject.tenantId === tenant).length,
+      ]),
+    );
+    console.log(JSON.stringify({ total: roster.total, tenantCounts }));
+  `);
+  assert.equal(output.total, 48);
+  assert.deepEqual(output.tenantCounts, { maui: 48 });
+});
+
+test("the default roster keeps the pre-Maui row count and tenant mix", () => {
+  const output = runProfileChild(undefined, `
+    import { buildRoster } from "./src/compliance/roster-read-model.ts";
+    const roster = await buildRoster({
+      outcomeStore: {
+        async listLatestPopulationOutcomes() { return []; },
+        async listOutcomes() { return []; },
+      },
+      segments: [],
+    }, { panel: "immunizations", pageSize: 200 });
+    const tenantCounts = Object.fromEntries(
+      [...new Set(roster.rows.map((row) => row.subject.tenantId))].map((tenant) => [
+        tenant,
+        roster.rows.filter((row) => row.subject.tenantId === tenant).length,
+      ]),
+    );
+    console.log(JSON.stringify({ total: roster.total, tenantCounts }));
+  `);
+  assert.equal(output.total, RAW_EMPLOYEES.length);
+  assert.deepEqual(output.tenantCounts, { twh: 100, ihn: 50, maui: 48 });
 });
 
 test("a fresh Maui process wires the profile into counts and /api/tenants", async () => {

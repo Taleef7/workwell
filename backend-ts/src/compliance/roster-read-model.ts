@@ -8,6 +8,7 @@
 import type { OutcomeStore, OutcomeWithRun, OutcomeRecord } from "../stores/outcome-store.ts";
 import { isDemoPersona } from "../engine/synthetic/employee-catalog.ts";
 import { directoryForRows } from "../engine/ingress/webchart/live-directory.ts";
+import { DIRECTORY } from "../config/deployment-profile.ts";
 import { isWebChartConfigured, type DataSourceEnv } from "../engine/ingress/data-source.ts";
 import { MEASURE_CATALOG } from "../measure/measure-catalog.ts";
 import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
@@ -116,7 +117,7 @@ export async function buildRoster(deps: RosterDeps, filters: RosterFilters): Pro
   const popRows = (await deps.outcomeStore.listLatestPopulationOutcomes({ excludeScale: true, excludeTrendHistory: true })).filter(
     (r) => isPopulationRun(r.runScopeType) && isCompletedRun(r.runStatus), // redundant guard: the store already applies both (defense-in-depth)
   );
-  const directory = directoryForRows(popRows, isWebChartConfigured(deps.webChartEnv ?? {}), deps.webChartEnv);
+  const directory = directoryForRows(popRows, isWebChartConfigured(deps.webChartEnv ?? {}), deps.webChartEnv, DIRECTORY);
   const byMeasure = new Map<string, OutcomeWithRun[]>();
   for (const r of popRows) {
     if (!measureIds.includes(r.measureId)) continue;

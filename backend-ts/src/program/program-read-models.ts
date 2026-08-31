@@ -18,6 +18,7 @@ import { ACTIVE_CASE_STATUSES } from "../case/case-logic.ts";
 import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
 import { day, isCompletedRun, isPopulationRun, round1 } from "./rollup-shared.ts";
 import { directoryForRows, type DirectorySnapshot } from "../engine/ingress/webchart/live-directory.ts";
+import { DIRECTORY } from "../config/deployment-profile.ts";
 import { isWebChartConfigured, type DataSourceEnv } from "../engine/ingress/data-source.ts";
 
 export interface ProgramSummary {
@@ -166,7 +167,7 @@ export async function programSites(deps: Pick<ProgramDeps, "outcomeStore" | "web
   const rows = (await deps.outcomeStore.listLatestPopulationOutcomes({ excludeScale: true, excludeTrendHistory: true })).filter(
     (row) => isPopulationRun(row.runScopeType) && isCompletedRun(row.runStatus) && row.runTriggeredBy !== "seed:scale",
   );
-  return listSites(directoryForRows(rows, isWebChartConfigured(deps.webChartEnv ?? {}), deps.webChartEnv).employees);
+  return listSites(directoryForRows(rows, isWebChartConfigured(deps.webChartEnv ?? {}), deps.webChartEnv, DIRECTORY).employees);
 }
 
 /** One run's site-filtered outcome rows (the unit overview/trend/top-drivers aggregate). */
@@ -223,7 +224,7 @@ export async function programOverview(deps: ProgramDeps, filters: ProgramFilters
     (row) => isPopulationRun(row.runScopeType) && isCompletedRun(row.runStatus) && row.runTriggeredBy !== "seed:scale",
   );
   const webChartConfigured = isWebChartConfigured(deps.webChartEnv ?? {});
-  const directory = directoryForRows(successfulRows, webChartConfigured, deps.webChartEnv);
+  const directory = directoryForRows(successfulRows, webChartConfigured, deps.webChartEnv, DIRECTORY);
   const siteMatch = siteMatcher(filters, directory.employeeById);
   const tenantMatch = tenantMatcher(filters, directory.employeeById);
   const rows = successfulRows.filter(
@@ -340,7 +341,7 @@ async function runsWithOutcomes(
   const successfulRows = persistedRows.filter((row) => isPopulationRun(row.runScopeType) && isCompletedRun(row.runStatus));
   const hasWebChartRows = successfulRows.some((row) => row.subjectId.startsWith("wc|"));
   const webChartConfigured = isWebChartConfigured(deps.webChartEnv ?? {});
-  const directory = directoryForRows(successfulRows, webChartConfigured, deps.webChartEnv);
+  const directory = directoryForRows(successfulRows, webChartConfigured, deps.webChartEnv, DIRECTORY);
   const siteMatch = siteMatcher(filters, directory.employeeById);
   const tenantMatch = tenantMatcher(filters, directory.employeeById);
   const rows = successfulRows.filter(
@@ -526,7 +527,7 @@ export async function programRiskOutlook(
     successfulPopulationOnly: true,
   });
   const webChartConfigured = isWebChartConfigured(deps.webChartEnv ?? {});
-  const directory = directoryForRows(rows, webChartConfigured, deps.webChartEnv);
+  const directory = directoryForRows(rows, webChartConfigured, deps.webChartEnv, DIRECTORY);
   const visibleRows = rows.filter((row) => subjectVisible(row.subjectId, webChartConfigured));
 
   // Latest outcome per subject (rows arrive oldest-first, so the last write wins).

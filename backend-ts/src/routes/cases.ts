@@ -43,7 +43,7 @@ import { resolveForecaster } from "../engine/immunization/resolve-forecaster.ts"
 import { resolveBucket } from "../case/resolve-bucket.ts";
 import { isWebChartConfigured } from "../engine/ingress/data-source.ts";
 import { profileForId } from "../engine/ingress/webchart/live-directory.ts";
-import { employeeById } from "../config/deployment-profile.ts";
+import { DIRECTORY, employeeById } from "../config/deployment-profile.ts";
 
 interface CasesEnv {
   DB: CloudDatabase;
@@ -129,7 +129,7 @@ const day = (s: string): string => s.slice(0, 10);
 export async function handleCases(req: Request, env: CasesEnv, actor = "system"): Promise<Response | null> {
   const url = new URL(req.url);
   const employeeLookup = isWebChartConfigured(env)
-    ? (externalId: string) => employeeById(externalId) ?? profileForId(externalId)
+    ? (externalId: string) => employeeById(externalId) ?? profileForId(externalId, DIRECTORY)
     : employeeById;
 
   // Case actions (POST) — assign / escalate / outreach send / outreach delivery.
