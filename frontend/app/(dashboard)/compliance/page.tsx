@@ -270,7 +270,7 @@ export default function CompliancePage() {
           <span className="mb-1">Panel</span>
           <select
             aria-label="Panel"
-            value={roster?.panel ?? panel}
+            value={loadedPanel === panel ? (roster?.panel ?? panel) : panel}
             onChange={(e) => setPanelAndUrl(e.target.value as PanelId)}
             className="rounded border border-neutral-300 bg-transparent px-2 py-1 text-sm dark:border-neutral-700"
           >
