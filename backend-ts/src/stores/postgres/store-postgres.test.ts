@@ -141,10 +141,12 @@ if (!reachable && process.env.WORKWELL_TEST_PG_URL) {
 
     await seedMeasureStore(store, () => "", events);
     assert.equal((await store.getLatest("cms2v15"))?.status, "Deprecated");
-    assert.equal(
-      (await events.auditEventsByMeasureVersion("cms2v15-v1.0")).filter((event) => event.eventType === "MEASURE_DEPRECATED").length,
-      1,
-    );
+    const deprecatedEvents = async () =>
+      (await events.auditEventsByMeasureVersion("cms2v15-v1.0")).filter((event) => event.eventType === "MEASURE_DEPRECATED").length;
+    assert.equal(await deprecatedEvents(), 1);
+    // Second seed: the row is already Deprecated and the event exists, so hasAuditEvent must find it and nothing is written.
+    await seedMeasureStore(store, () => "", events);
+    assert.equal(await deprecatedEvents(), 1);
   });
 
   evidenceStoreContract("postgres", async () => {

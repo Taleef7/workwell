@@ -138,6 +138,9 @@ async function store(env: MeasuresEnv): Promise<MeasureStore> {
       // first hit to any of those seeds them (this measures initializer is not on their path).
     })();
     seeding.set(env, seed);
+    // A rejected seed (e.g. a transient audit_events failure) must not pin every later request to
+    // the same rejection: drop it so the next request re-runs the seed, which is built to repair.
+    seed.catch(() => seeding.delete(env));
   }
   await seed;
   return stores.measures;

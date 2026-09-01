@@ -64,7 +64,7 @@ export interface PacketExportInput {
 export interface CaseEventStore {
   insertAction(input: InsertActionInput): Promise<void>;
   appendAudit(input: AppendAuditInput): Promise<void>;
-  /** True when the exact audit event identity already exists. */
+  /** True when an event with the same event type, entity id and measure version already exists. */
   hasAuditEvent(input: Pick<AppendAuditInput, "eventType" | "entityId" | "refMeasureVersionId">): Promise<boolean>;
   /**
    * Write a case_action AND its audit_event atomically (D1 batch on the floor,

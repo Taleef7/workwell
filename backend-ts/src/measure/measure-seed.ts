@@ -71,8 +71,8 @@ async function deprecateLegacyOfficialRows(store: MeasureStore, events: CaseEven
     if (!row) continue;
     const audit: AppendAuditInput = {
       eventType: "MEASURE_DEPRECATED",
-      entityType: "measure",
-      entityId: legacyId,
+      entityType: "measure_version",
+      entityId: row.versionId,
       actor: "system",
       refRunId: null,
       refCaseId: null,
@@ -85,7 +85,11 @@ async function deprecateLegacyOfficialRows(store: MeasureStore, events: CaseEven
       }
       continue;
     }
-    if (!isUnmodifiedLegacySeed(row, catalogId, legacyId)) continue;
+    if (!isUnmodifiedLegacySeed(row, catalogId, legacyId)) {
+      // Left alone on purpose (someone edited it), but say so: the bare row now coexists with it.
+      console.warn(`[measure-seed] legacy row ${legacyId} does not match the seed fingerprint; not deprecated, ${catalogId} coexists with it`);
+      continue;
+    }
     await store.setVersionStatus(legacyId, row.versionId, { status: "Deprecated" });
     await events.appendAudit(audit);
   }

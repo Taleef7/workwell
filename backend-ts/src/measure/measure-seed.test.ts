@@ -266,8 +266,8 @@ test("seedMeasureStore — deprecates a legacy cms2v15 row once and audits it on
   ).all<{ event_type: string; entity_type: string; entity_id: string; ref_measure_version_id: string; payload_json: string }>()).results ?? [];
   assert.equal(firstAuditRows.length, 1);
   assert.equal(firstAuditRows[0]!.event_type, "MEASURE_DEPRECATED");
-  assert.equal(firstAuditRows[0]!.entity_type, "measure");
-  assert.equal(firstAuditRows[0]!.entity_id, "cms2v15");
+  assert.equal(firstAuditRows[0]!.entity_type, "measure_version");
+  assert.equal(firstAuditRows[0]!.entity_id, "cms2v15-v1.0");
   assert.equal(firstAuditRows[0]!.ref_measure_version_id, "cms2v15-v1.0");
   assert.equal(
     (JSON.parse(firstAuditRows[0]!.payload_json) as { reason: string }).reason,
@@ -361,7 +361,7 @@ test("seedMeasureStore — repairs a missing legacy deprecation audit on retry",
   await seedMeasureStore(store, () => "", events);
   const auditRows = await db
     .prepare("SELECT event_type FROM audit_events WHERE entity_id = ? AND ref_measure_version_id = ?")
-    .bind("cms2v15", "cms2v15-v1.0")
+    .bind("cms2v15-v1.0", "cms2v15-v1.0")
     .all<{ event_type: string }>();
   assert.deepEqual(
     ((auditRows.results ?? []) as Array<{ event_type: string }>).map((row) => row.event_type),
