@@ -315,7 +315,7 @@ The approved active plan is [`docs/ROADMAP_2026-08-30.md`](docs/ROADMAP_2026-08-
 | [What WorkWell is](docs/WHAT_WORKWELL_IS.md) | one-page stakeholder explainer for non-engineers |
 | [Normalization](docs/guide/normalization-for-quality-teams.md) | how clinical records move from the clinic EHR to a quality result |
 | [Architecture](docs/ARCHITECTURE.md) | system boundaries, module map |
-| [Decisions](docs/DECISIONS.md) | 68 ADRs, newest first |
+| [Decisions](docs/DECISIONS.md) | 69 ADRs, newest first |
 | [Data Model](docs/DATA_MODEL.md) | tables, idempotency + evidence contracts |
 | [Measures](docs/MEASURES.md) | the TWH measure catalog in plain English |
 | [Standards Conformance](docs/STANDARDS_CONFORMANCE.md) | what we may and may not claim |

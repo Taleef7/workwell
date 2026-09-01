@@ -6,7 +6,7 @@ This diagram shows how clinical records move from the clinic's EHR to a quality 
 
 ```mermaid
 sequenceDiagram
-    actor NP as Quality nurse practitioner
+    actor NP as Quality coordinator
     participant WW as WorkWell run pipeline
     participant EHR as Clinic EHR / WebChart
     participant N as WorkWell normalization
@@ -14,10 +14,12 @@ sequenceDiagram
     participant QR as Quality results
 
     NP->>WW: Start a quality-measure run
+    Note over WW,EHR: Live-EHR deployments only; the demo and the sandbox evaluate a synthetic roster instead
     WW->>EHR: Request patient and clinical records
     EHR-->>WW: Return FHIR records<br/>(Patient, Observation, Procedure, etc.)
-    WW->>N: Prepare the records for evaluation
-    N-->>ME: Send a consistent FHIR patient record
+    WW->>N: Prepare (normalize) the records
+    N-->>WW: One consistent FHIR record per patient
+    WW->>ME: Evaluate one patient record
 
     ME->>ME: Apply the clinical measure logic
     ME-->>WW: Return the result and supporting evidence
