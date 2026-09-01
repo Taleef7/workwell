@@ -1,24 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { PANELS, DEFAULT_PANEL, isPanelId, AVAILABLE_PANELS, PROFILE_DEFAULT_PANEL, RUNNABLE_PANELS } from "./panels.ts";
-import { spawnSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
-import { dirname, resolve } from "node:path";
-
-const backendRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
-
-function runProfileChild(instance: string | undefined, source: string): Record<string, unknown> {
-  const env = { ...process.env };
-  if (instance === undefined) delete env.WORKWELL_INSTANCE;
-  else env.WORKWELL_INSTANCE = instance;
-  const result = spawnSync(
-    process.execPath,
-    ["--import", "tsx", "--input-type=module", "-e", source],
-    { cwd: backendRoot, env, encoding: "utf8" },
-  );
-  assert.equal(result.status, 0, result.stderr);
-  return JSON.parse(result.stdout.trim()) as Record<string, unknown>;
-}
+import { runProfileChild } from "../test-support/run-profile-child.ts";
 
 test("panels expose the three column sets and a default", () => {
   assert.deepEqual(Object.keys(PANELS).sort(), ["immunizations", "osha", "wellness"]);

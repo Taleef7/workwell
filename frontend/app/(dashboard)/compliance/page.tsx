@@ -244,6 +244,7 @@ export default function CompliancePage() {
   const columns = roster?.columns ?? [];
   const rows = roster?.rows ?? [];
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const emptyPanels = roster?.availablePanels !== undefined && roster.availablePanels.length === 0;
 
   return (
     <div className="space-y-4">
@@ -267,162 +268,170 @@ export default function CompliancePage() {
         ) : null}
       </header>
 
-      <div className="flex flex-wrap items-end gap-3 rounded-lg border border-neutral-200 p-3 dark:border-neutral-800">
-        <label className="flex flex-col text-xs font-medium">
-          <span className="mb-1">Panel</span>
-          <select
-            aria-label="Panel"
-            value={loadedPanel === panel ? (roster?.panel ?? panel) : panel}
-            onChange={(e) => setPanelAndUrl(e.target.value as PanelId)}
-            className="rounded border border-neutral-300 bg-transparent px-2 py-1 text-sm dark:border-neutral-700"
-          >
-            {(roster?.availablePanels
-              ? PANEL_OPTIONS.filter((p) => roster.availablePanels!.includes(p.id))
-              : PANEL_OPTIONS
-            ).map((p) => (<option key={p.id} value={p.id}>{p.label}</option>))}
-          </select>
-        </label>
-        <label className="flex flex-col text-xs font-medium">
-          <span className="mb-1">System</span>
-          <select
-            aria-label="System"
-            value={tenant}
-            onChange={(e) => { setPage(1); setTenant(e.target.value); }}
-            className="rounded border border-neutral-300 bg-transparent px-2 py-1 text-sm dark:border-neutral-700"
-          >
-            <option value="">All systems</option>
-            {tenantOptions.map((o) => (<option key={o.id} value={o.id}>{o.name}</option>))}
-          </select>
-        </label>
-        <label className="flex flex-col text-xs font-medium">
-          <span className="mb-1">Segment</span>
-          <select
-            aria-label="Segment"
-            value={segment}
-            onChange={(e) => { setPage(1); setSegment(e.target.value); }}
-            className="rounded border border-neutral-300 bg-transparent px-2 py-1 text-sm dark:border-neutral-700"
-          >
-            <option value="">All segments</option>
-            {segmentOptions.map((o) => (<option key={o.id} value={o.id}>{o.name}</option>))}
-          </select>
-        </label>
-        <label className="flex flex-col text-xs font-medium">
-          <span className="mb-1">Status</span>
-          <select
-            value={status}
-            onChange={(e) => setStatusAndUrl(e.target.value)}
-            className="rounded border border-neutral-300 bg-transparent px-2 py-1 text-sm dark:border-neutral-700"
-          >
-            <option value="">All statuses</option>
-            {STATUS_FILTER_OPTIONS.map((s) => (<option key={s} value={s}>{COMPLIANCE_STATUS_LABELS[s]}</option>))}
-          </select>
-        </label>
-        <label className="flex flex-col text-xs font-medium">
-          <span className="mb-1">Search</span>
-          <input
-            value={q}
-            onChange={(e) => { setPage(1); setQ(e.target.value); }}
-            placeholder="Name or ID"
-            className="rounded border border-neutral-300 bg-transparent px-2 py-1 text-sm dark:border-neutral-700"
-          />
-        </label>
-        <label className="flex flex-col text-xs font-medium">
-          <span className="mb-1">Page size</span>
-          <select
-            value={pageSize}
-            onChange={(e) => { setPage(1); setPageSize(Number(e.target.value)); }}
-            className="rounded border border-neutral-300 bg-transparent px-2 py-1 text-sm dark:border-neutral-700"
-          >
-            {PAGE_SIZES.map((n) => (<option key={n} value={n}>{n}</option>))}
-          </select>
-        </label>
-      </div>
-
-      {error ? (
-        <p role="alert" className="rounded border border-rose-300 bg-rose-50 p-2 text-sm text-rose-700 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-300">
-          {error}
+      {emptyPanels ? (
+        <p className="rounded-lg border border-neutral-200 p-6 text-center text-sm text-neutral-500 dark:border-neutral-800">
+          No compliance panel is configured for this deployment.
         </p>
-      ) : null}
-
-      <span className="sr-only" role="status" aria-live="polite">
-        {loading ? (slow ? `${SLOW_LOAD_HINT} Still loading.` : "Loading roster…") : `${rows.length} ${rows.length === 1 ? SUBJECT.singular : SUBJECT.plural} loaded`}
-      </span>
-
-      {slow && loading ? (
-        <p className="flex items-center gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-800 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-200">
-          <span aria-hidden="true" className="h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-blue-400 border-t-transparent" />
-          {SLOW_LOAD_HINT}
-        </p>
-      ) : null}
-
-      <div className="hidden overflow-x-auto rounded-lg border border-neutral-200 md:block dark:border-neutral-800">
-        <table className="min-w-full border-collapse text-sm">
-          <thead className="bg-neutral-50 dark:bg-neutral-900/60">
-            <tr>
-              <th scope="col" className="sticky left-0 z-10 bg-neutral-50 px-3 py-2 text-left font-semibold dark:bg-neutral-900/60">
-                {SUBJECT.Singular}
-              </th>
-              {columns.map((c) => (
-                <th key={c.measureId} scope="col" className="px-3 py-2 text-left font-semibold">
-                  {measureLabelFor(c.measureId, c.name)}
-                  <span className="ml-1 text-[10px] font-normal uppercase text-neutral-400">{c.complianceClass === "PERMANENT" ? "perm" : "rec"}</span>
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {loading && rows.length === 0 ? (
-              <tr><td colSpan={columns.length + 1} className="px-3 py-6 text-center text-neutral-500">Loading…</td></tr>
-            ) : rows.length === 0 ? (
-              <tr><td colSpan={columns.length + 1} className="px-3 py-6 text-center text-neutral-500">{`No ${SUBJECT.plural} match these filters.`}</td></tr>
-            ) : (
-              rows.map((r) => (
-                <tr key={r.subject.externalId} className="border-t border-neutral-200 hover:bg-neutral-50 dark:border-neutral-800 dark:hover:bg-neutral-900/40">
-                  <th scope="row" className="sticky left-0 z-10 bg-white px-3 py-2 text-left font-normal dark:bg-neutral-950">
-                    <Link href={`/employees/${encodeURIComponent(r.subject.externalId)}`} className="font-medium text-blue-600 hover:underline dark:text-blue-400">
-                      {r.subject.name}
-                    </Link>
-                    <div className="text-[11px] text-neutral-500 dark:text-neutral-400">{r.subject.tenantName} · {r.subject.site} · {r.subject.role}</div>
-                  </th>
-                  {columns.map((c) => {
-                    const cell = r.cells[c.measureId] ?? { status: "NA" as const, method: "Not evaluated" };
-                    return (
-                      <td key={c.measureId} className="px-3 py-2 align-top">
-                        <ComplianceChip cell={cell} />
-                      </td>
-                    );
-                  })}
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
-
-      <RosterMobileCards columns={columns} rows={rows} loading={loading} labelFor={measureLabelFor} />
-
-      <div className="flex items-center justify-between text-sm text-neutral-500 dark:text-neutral-400">
-        <span>{fmtCount(total)} {total === 1 ? SUBJECT.singular : SUBJECT.plural}</span>
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => setPage((p) => Math.max(1, p - 1))}
-            disabled={page <= 1}
-            className="rounded border border-neutral-300 px-2 py-1 disabled:opacity-50 dark:border-neutral-700"
-          >
-            Prev
-          </button>
-          <span>Page {page} of {totalPages}</span>
-          <button
-            type="button"
-            onClick={() => setPage((p) => (p < totalPages ? p + 1 : p))}
-            disabled={page >= totalPages}
-            className="rounded border border-neutral-300 px-2 py-1 disabled:opacity-50 dark:border-neutral-700"
-          >
-            Next
-          </button>
+      ) : (
+        <>
+          <div className="flex flex-wrap items-end gap-3 rounded-lg border border-neutral-200 p-3 dark:border-neutral-800">
+            <label className="flex flex-col text-xs font-medium">
+              <span className="mb-1">Panel</span>
+              <select
+                aria-label="Panel"
+                value={loadedPanel === panel ? (roster?.panel ?? panel) : panel}
+                onChange={(e) => setPanelAndUrl(e.target.value as PanelId)}
+                className="rounded border border-neutral-300 bg-transparent px-2 py-1 text-sm dark:border-neutral-700"
+              >
+              {(roster?.availablePanels
+                ? PANEL_OPTIONS.filter((p) => roster.availablePanels!.includes(p.id))
+                : PANEL_OPTIONS
+              ).map((p) => (<option key={p.id} value={p.id}>{p.label}</option>))}
+            </select>
+          </label>
+          <label className="flex flex-col text-xs font-medium">
+            <span className="mb-1">System</span>
+            <select
+              aria-label="System"
+              value={tenant}
+              onChange={(e) => { setPage(1); setTenant(e.target.value); }}
+              className="rounded border border-neutral-300 bg-transparent px-2 py-1 text-sm dark:border-neutral-700"
+            >
+              <option value="">All systems</option>
+              {tenantOptions.map((o) => (<option key={o.id} value={o.id}>{o.name}</option>))}
+            </select>
+          </label>
+          <label className="flex flex-col text-xs font-medium">
+            <span className="mb-1">Segment</span>
+            <select
+              aria-label="Segment"
+              value={segment}
+              onChange={(e) => { setPage(1); setSegment(e.target.value); }}
+              className="rounded border border-neutral-300 bg-transparent px-2 py-1 text-sm dark:border-neutral-700"
+            >
+              <option value="">All segments</option>
+              {segmentOptions.map((o) => (<option key={o.id} value={o.id}>{o.name}</option>))}
+            </select>
+          </label>
+          <label className="flex flex-col text-xs font-medium">
+            <span className="mb-1">Status</span>
+            <select
+              value={status}
+              onChange={(e) => setStatusAndUrl(e.target.value)}
+              className="rounded border border-neutral-300 bg-transparent px-2 py-1 text-sm dark:border-neutral-700"
+            >
+              <option value="">All statuses</option>
+              {STATUS_FILTER_OPTIONS.map((s) => (<option key={s} value={s}>{COMPLIANCE_STATUS_LABELS[s]}</option>))}
+            </select>
+          </label>
+          <label className="flex flex-col text-xs font-medium">
+            <span className="mb-1">Search</span>
+            <input
+              value={q}
+              onChange={(e) => { setPage(1); setQ(e.target.value); }}
+              placeholder="Name or ID"
+              className="rounded border border-neutral-300 bg-transparent px-2 py-1 text-sm dark:border-neutral-700"
+            />
+          </label>
+          <label className="flex flex-col text-xs font-medium">
+            <span className="mb-1">Page size</span>
+            <select
+              value={pageSize}
+              onChange={(e) => { setPage(1); setPageSize(Number(e.target.value)); }}
+              className="rounded border border-neutral-300 bg-transparent px-2 py-1 text-sm dark:border-neutral-700"
+            >
+              {PAGE_SIZES.map((n) => (<option key={n} value={n}>{n}</option>))}
+            </select>
+          </label>
         </div>
-      </div>
+
+        {error ? (
+          <p role="alert" className="rounded border border-rose-300 bg-rose-50 p-2 text-sm text-rose-700 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-300">
+            {error}
+          </p>
+        ) : null}
+
+        <span className="sr-only" role="status" aria-live="polite">
+          {loading ? (slow ? `${SLOW_LOAD_HINT} Still loading.` : "Loading roster…") : `${rows.length} ${rows.length === 1 ? SUBJECT.singular : SUBJECT.plural} loaded`}
+        </span>
+
+        {slow && loading ? (
+          <p className="flex items-center gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-800 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-200">
+            <span aria-hidden="true" className="h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-blue-400 border-t-transparent" />
+            {SLOW_LOAD_HINT}
+          </p>
+        ) : null}
+
+        <div className="hidden overflow-x-auto rounded-lg border border-neutral-200 md:block dark:border-neutral-800">
+          <table className="min-w-full border-collapse text-sm">
+            <thead className="bg-neutral-50 dark:bg-neutral-900/60">
+              <tr>
+                <th scope="col" className="sticky left-0 z-10 bg-neutral-50 px-3 py-2 text-left font-semibold dark:bg-neutral-900/60">
+                  {SUBJECT.Singular}
+                </th>
+                {columns.map((c) => (
+                  <th key={c.measureId} scope="col" className="px-3 py-2 text-left font-semibold">
+                    {measureLabelFor(c.measureId, c.name)}
+                    <span className="ml-1 text-[10px] font-normal uppercase text-neutral-400">{c.complianceClass === "PERMANENT" ? "perm" : "rec"}</span>
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {loading && rows.length === 0 ? (
+                <tr><td colSpan={columns.length + 1} className="px-3 py-6 text-center text-neutral-500">Loading…</td></tr>
+              ) : rows.length === 0 ? (
+                <tr><td colSpan={columns.length + 1} className="px-3 py-6 text-center text-neutral-500">{`No ${SUBJECT.plural} match these filters.`}</td></tr>
+              ) : (
+                rows.map((r) => (
+                  <tr key={r.subject.externalId} className="border-t border-neutral-200 hover:bg-neutral-50 dark:border-neutral-800 dark:hover:bg-neutral-900/40">
+                    <th scope="row" className="sticky left-0 z-10 bg-white px-3 py-2 text-left font-normal dark:bg-neutral-950">
+                      <Link href={`/employees/${encodeURIComponent(r.subject.externalId)}`} className="font-medium text-blue-600 hover:underline dark:text-blue-400">
+                        {r.subject.name}
+                      </Link>
+                      <div className="text-[11px] text-neutral-500 dark:text-neutral-400">{r.subject.tenantName} · {r.subject.site} · {r.subject.role}</div>
+                    </th>
+                    {columns.map((c) => {
+                      const cell = r.cells[c.measureId] ?? { status: "NA" as const, method: "Not evaluated" };
+                      return (
+                        <td key={c.measureId} className="px-3 py-2 align-top">
+                          <ComplianceChip cell={cell} />
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        <RosterMobileCards columns={columns} rows={rows} loading={loading} labelFor={measureLabelFor} />
+
+        <div className="flex items-center justify-between text-sm text-neutral-500 dark:text-neutral-400">
+          <span>{fmtCount(total)} {total === 1 ? SUBJECT.singular : SUBJECT.plural}</span>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={page <= 1}
+              className="rounded border border-neutral-300 px-2 py-1 disabled:opacity-50 dark:border-neutral-700"
+            >
+              Prev
+            </button>
+            <span>Page {page} of {totalPages}</span>
+            <button
+              type="button"
+              onClick={() => setPage((p) => (p < totalPages ? p + 1 : p))}
+              disabled={page >= totalPages}
+              className="rounded border border-neutral-300 px-2 py-1 disabled:opacity-50 dark:border-neutral-700"
+            >
+              Next
+            </button>
+          </div>
+        </div>
+        </>
+      )}
     </div>
   );
 }
