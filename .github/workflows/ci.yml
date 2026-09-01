@@ -53,6 +53,13 @@ jobs:
       # unless it is tested here.
       - name: An ambiguous container DELETE is resolved by reading the manager back
         run: bash .github/scripts/mieweb-delete-confirmed.test.sh
+      # The test above fakes request(), which is the right boundary for the DECISIONS but blind to
+      # how the real request() behaves. That blind spot let a guard ship that could not run: an
+      # unconditional `set -e` inside request() re-armed errexit before returning and aborted the
+      # deploy at the very failure the guard existed to handle (2026-09-01, production). This one
+      # drives the real request() under the deploy's own `set -euo pipefail` and fakes only curl.
+      - name: The confirmed delete survives a real transport failure
+        run: bash .github/scripts/mieweb-delete-confirmed.integration.test.sh
       # Deploy workflows only RUN on push to main — i.e. after merge — so a shell syntax error in one is
       # invisible to every PR check. PR-9c put an apostrophe inside a single-quoted jq program and turned
       # the production deploy step into a parse error; nothing before merge could see it (#356).
