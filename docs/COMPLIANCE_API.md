@@ -164,6 +164,7 @@ the same *data* a live run would; that is why it refuses on a live stack rather 
 | 400 | `unknown_measure` | the measure id is not in the catalog (the body lists valid ids) |
 | 400 | `invalid_request` | malformed date, `start` after `end`, an unknown `mode`, `start` with `mode=preview`, or a bad percent-escape in the path |
 | 400 | `measure_not_runnable` | preview requested for a measure with no evaluation binding |
+| 400 | `measure_not_in_profile` | preview requested for a measure excluded by the deployment profile's runnable set |
 | 401 | — | no/invalid token |
 | 403 | `forbidden` | `mode=preview` from a role that may not trigger evaluation |
 | 404 | `no_outcome` | `latest` with nothing persisted in range |

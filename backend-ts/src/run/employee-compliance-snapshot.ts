@@ -9,7 +9,12 @@
  * (today - daysSince), so a later asOf ages a RECURRING measure toward OVERDUE while PERMANENT
  * (series-completion, no recency) measures stay constant.
  */
-import { type EmployeeProfile, EVALUABLE_EMPLOYEES } from "../engine/synthetic/employee-catalog.ts";
+import {
+  type EmployeeProfile,
+  EVALUABLE_EMPLOYEES,
+  isRunnableMeasure,
+  RUNNABLE_MEASURE_IDS,
+} from "../config/deployment-profile.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
 import { deriveExamConfig } from "../engine/synthetic/exam-config.ts";
@@ -49,9 +54,9 @@ export async function simulateComplianceAsOf(
   if (!employee) return null;
 
   const evaluations: SnapshotEvaluation[] = [];
-  for (const measureId of Object.keys(MEASURES)) {
+  for (const measureId of RUNNABLE_MEASURE_IDS.filter(isRunnableMeasure)) {
     // Every runnable measure is expected to have a binding; a gap is caught by the length-parity
-    // assertions in the snapshot/route tests (evaluations.length === Object.keys(MEASURES).length).
+    // assertions in the snapshot/route tests (evaluations.length === the runnable measure count).
     const binding = MEASURE_BINDINGS[measureId];
     if (!binding) continue;
     const name = MEASURES[measureId]!.name;

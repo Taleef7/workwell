@@ -14,7 +14,7 @@
  * probabilistic matcher drops in later, E15 PR-3). A record with no shared identifier is its own
  * singleton person — nothing is grouped by accident.
  */
-import { EMPLOYEES, tenantById, type EmployeeProfile } from "../engine/synthetic/employee-catalog.ts";
+import { EMPLOYEES, tenantById, type EmployeeProfile } from "../config/deployment-profile.ts";
 import { normalizePair, type PersonLink, type PersonLinkRef } from "../stores/person-link-store.ts";
 
 export type SourceStatus = "ACTIVE" | "PRIOR";

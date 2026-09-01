@@ -18,7 +18,7 @@ import { getStores } from "../stores/factory.ts";
 import { resolvePeople, duplicateCandidates, personById, type Person } from "../identity/identity-model.ts";
 import { mergedComplianceTimeline, type TimelineOutcome } from "../identity/compliance-timeline.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
-import { employeeById } from "../engine/synthetic/employee-catalog.ts";
+import { employeeById } from "../config/deployment-profile.ts";
 import { normalizePair, type PersonLinkRef } from "../stores/person-link-store.ts";
 
 const refKey = (r: PersonLinkRef): string => `${r.tenantId}|${r.externalId}`;

@@ -1,5 +1,208 @@
 # Journal
 
+## 2026-09-01 — closing the profile leak surface: column scoping, four-site row isolation, pre-aggregated aggregate guards, and server canonicalisation
+
+**The roster's columns follow the deployment profile, not just its rows.** Scoping the directory
+without scoping the panel definitions caused `/compliance` on Maui to render 48 patients under five
+occupational immunization columns (`PANELS.immunizations`) that could never evaluate an outcome.
+`panels.ts` introduces `RUNNABLE_PANELS`, `AVAILABLE_PANELS`, and `PROFILE_DEFAULT_PANEL`. Availability
+and column derivation now share one source of truth (`RUNNABLE_PANELS`), folding the catalog-Active
+conjunct (`active.has(m) && isRunnableMeasure(m)`) into availability so that `availablePanels` cannot
+offer a panel that renders zero columns. The panel list derives dynamically from `Object.keys(PANELS)`
+rather than a hardcoded tuple. The roster response shape gains `availablePanels`; requesting a panel
+with no runnable measures canonicalises to the profile default (`wellness` on Maui) rather than returning
+a 400 error. The degenerate case where no panel is runnable preserves the non-null `panel` string contract,
+returns `availablePanels: []` with zero columns, and logs a startup warning naming the cause.
+
+**Server-side panel canonicalisation broke three client assumptions.** With the server now capable of
+answering with a different panel than requested, three frontend areas required remediation:
+(1) `IndividualComplianceStatus` fanned out across all `PANEL_OPTIONS` and merged columns. On Maui, all
+three requests canonicalised to `wellness`, triple-rendering columns with duplicate React keys
+(`Encountered two children with the same key, 'hypertension'`) and corrupting expansion state. It now
+reads `availablePanels` from the first response, requests only remaining unserved panels, and dedupes by
+`measureId` for older backends. (2) The panel `<select>` `value={roster?.panel ?? panel}` displayed the
+last-loaded panel, snapping the control back to the previous value during cold fetches (11.8–12.5s)
+before flipping; it now displays the selected panel immediately. (3) Mock order-dependence in
+`page.test.tsx` and `page.urlfilters.test.tsx`, where `beforeEach` mocks had hardcoded `panel: "wellness"`
+and triggered an unintended canonicalisation `router.replace` fetch, was resolved by echoing the requested
+panel back in mocks and strengthening assertions back from `.some()` to `.at(-1)`.
+
+**Four-site `profileMatcher` data isolation and the two pre-aggregated leaks.** In `program-read-models.ts`,
+`siteMatcher` and `tenantMatcher` short-circuit when query filters are absent, allowing foreign subjects
+to reach headline totals and risk outlooks. Row-level profile isolation (`profileMatcher(directory.employeeById)`)
+was rolled out across all four sites: `programOverview` rows, `programOverview` open cases (`openCaseCount`),
+`runsWithOutcomes` in `programTrend`, and `programRiskOutlook` (`latestBySubject`, `repeatNonCompliers`,
+`siteComplianceRates`, `upcomingExpirations`). Live `wc|` subjects and default-profile uncatalogued QRDA
+Cypress MRN subjects remain preserved. Two pre-aggregated paths bypassed row-level predicates entirely:
+(1) `foldScaleCounts` SQL-aggregates scale runs via `aggregateScaleRun`, which on a restored database
+would fold ~120k foreign subjects into summaries; it now returns early when `tenantById("mhn")` is
+invisible on the active profile. (2) `programTrend`'s monthly snapshot path reads `quality_snapshots`
+keyed by `(measureId, scopeLevel, scopeId, period)` without a deployment profile dimension; scoped profiles
+now fall through to per-run trend series where `runsWithOutcomes` applies isolation.
+
+**Closing test defects in the branch's own live-directory test suite.** Review identified two defective
+assertions in `program-read-models.live-directory.test.ts`: (A) The `upcomingExpirations` assertion was
+vacuous because foreign subjects were `OVERDUE` without recency evidence and could never qualify; fixed by
+providing `COMPLIANT` status with matching recency evidence (`Most Recent Exam Date`) to both Maui-resolvable
+and foreign subjects, ensuring Maui-resolvable subjects appear while foreign subjects are excluded.
+(B) The `repeatNonCompliers` mutation check crashed with a `TypeError` on `b.evaluatedAt.localeCompare`
+inside child processes due to missing fixture timestamps rather than failing the assertion; fixed by
+providing `evaluationPeriod` and `evaluatedAt` to `mauiRow`, `twhRow`, `unresolvableRow`, and `liveWcRow`.
+Both mutations verified: removing `profileMatch` fails both assertions as clean assertion failures with
+`result.status === 0`.
+
+**Deliberately deferred:** `programOverview`, `hierarchy-rollup.ts`, and `routes/orders.ts` iterating all
+Active catalog measures rather than profile-scoped measures; `export-csv.ts`, `mcp/tools.ts`, and
+`case-read-models.ts` resolving names without filtering rows; degenerate empty-`availablePanels` client
+rendering as "no measures for this patient"; and adding a deployment profile dimension to the
+`quality_snapshots` schema.
+
+## 2026-08-31 — the Maui sandbox becomes real: a deployment profile, its workflow, and a shared image tag that could have healed the live demo onto unmerged code
+
+**`WORKWELL_INSTANCE` is load-bearing again, and it is what makes the Maui sandbox a sandbox.** The
+synthetic directory and the runnable measure set were compile-time constants, so the second deployment
+would have come up showing and evaluating TWH's people while refusing its own — a live URL with an
+empty work list. The env var (set by all three deploy workflows and, until today, read by *nothing* in
+`backend-ts/src` — a Java-era leftover whose consumer died with the JVM) now selects a deployment
+profile controlling which tenants are visible, which are evaluable, and which measures are runnable.
+Default is today's behaviour exactly; `maui` is the 48 patients and `cms122`/`cms125`/`hypertension` —
+MIPS 001/112/236, the ACO-aligned measures that are runnable today. Measured on both profiles: maui
+48 visible / 48 evaluable / one tenant / three measures; default unchanged.
+
+**The architecture was forced, and finding that out cost nothing because the brief was reviewed before
+it was implemented.** The obvious design — have `employee-catalog.ts` read the profile — is illegal
+here: the catalog lives inside `src/engine/` and `engine-boundary.test.ts` forbids production imports
+escaping that tree. A spec-review pass caught it before any code was written, along with a bucket
+assertion in the same brief that could not have failed. The catalog therefore stays env-free and
+exports pure scoping helpers; `src/config/deployment-profile.ts` reads env and composes; app-side
+consumers import from there. That also avoids an ESM temporal-dead-zone cycle the naive version would
+have had. **Provider attribution is preserved by construction** — `assignProviders` still runs over the
+full base before any filtering, behind an internal full-provider index, because filtering first would
+silently renumber existing providers.
+
+**One predicate, enforced everywhere, not just where the list is derived.** `isRunnableMeasure` gates
+every evaluation path including the *explicit* MEASURE-scope run, which previously accepted any id in
+the registry — without that, the Maui sandbox could have run audiogram and HAZWOPER against patients.
+
+**Recorded rather than "fixed":** `orderKey` clusters over sequential ids, so the maui ordering is
+effectively `pat-001…pat-048` for every rate key and cms122/cms125 assign identical targets. It is
+pre-existing (TWH's `emp-*` ids share it) and unfixable without reshuffling TWH. Consequence worth
+stating: the sandbox shows ~5 actionable patients on each of cms122 and cms125 — *the same five* — and
+8 on hypertension. Thin for a team meant to beat on it; profile-scoped compliance-rate overrides are
+the lever, deliberately not taken here.
+
+**The leak that scoping the population did NOT close, and how it hid.** Review found the flagship
+roster on Maui rendering **198 rows — 100 twh, 50 ihn, 48 maui** — led by occupational-health
+employees at "Plant A" under immunization columns Maui cannot run. The cause is one level deeper than
+the profile: `engine/ingress/webchart/live-directory.ts` builds its `STATIC_DIRECTORY` from the RAW
+catalog, and `roster-read-model.ts` renders from `directoryForRows()`. A leak sweep that greps
+app-side files for imports of `employee-catalog.ts` cannot see it — `roster-read-model.ts` imports
+only `isDemoPersona` from the catalog and looks clean. The read goes through an **engine-side** module,
+which structurally cannot import the app-side profile, and that is exactly the seam that opens when a
+population becomes configurable while a directory stays imported. Fixed by injection: the static half
+of the directory snapshot is now supplied by app-side callers (roster, hierarchy rollup, program read
+models, quality materialization, employee profile, run pipeline, cases route) and defaults to the raw
+catalog, so the engine boundary is intact and the default deployment is unchanged. Pinned by a test
+that fails on the old code with `198 !== 48`.
+
+**Also from review, each a different class:** the runnable-measure gate was refusing `mode=latest` on
+the compliance API — a *read* of already-computed, persisted, audited history, which a runnability
+*config* must never make unretrievable (ADR-061 deliberately made "no run covered this subject" a 404
+and nothing else); the new profile test carried two `f(x) deepEqual f(x)` assertions comparing the
+profile module's exports against themselves rather than against the raw catalog; and the resolved
+profile was invisible at boot, so the one misconfiguration that reproduces the roster leak
+deployment-wide would have shown a healthy container and a 200 on `/actuator/health`. All fixed, with
+the profile id now logged once at init in the style operators already grep for.
+
+**Deliberately unchanged, so it is not mistaken for coverage:** `src/program/` read models and segment
+validation still derive from the full directory and full registry, so a Maui operator can still see
+occupational programs listed. The run picker likewise offers all 14 registry measures and 11 of them
+refuse at submit — the refusal is correct and loud, but offering the button is a gap. A worry that turned out to be unfounded and is recorded because the
+reasoning matters: `isApplicable` returns true only when no segment is enabled, and `ensureSegmentSeed`
+runs on the scheduler and on `/api/compliance`, so Maui could plausibly have evaluated everyone and
+created zero cases. It does not — the seeded baseline's `measureIds` include all three Maui measures and
+its site list derives from the unscoped catalog, which contains the Maui clinics.
+
+**MM-0's deployment plumbing exists: `deploy-maui-mieweb.yml`, four pseudonymous sandbox accounts, and
+the flip-config guard finally derives its own workflow list.** The workflow is TWH's with Maui's
+identity — `maui-api-ts` / `maui` hostnames, `DATABASE_URL_MAUI` + `WORKWELL_AUTH_JWT_SECRET_MAUI`,
+`WORKWELL_INSTANCE=maui`, `NEXT_PUBLIC_SUBJECT_TERM=patient` as a frontend build ARG — and
+`workflow_dispatch`-only, because the two Maui secrets do not exist yet and a push trigger would fail
+every push until they do. `WORKWELL_OFFICIAL_MEASURES` is deliberately absent: no pilot measure has
+been through its own flip gate, so Maui evaluates authored CQL (locked decision 4A.5).
+
+**The finding worth keeping is one review caught and two passes had missed.** The workflow, copied
+from TWH, pushed `ghcr.io/taleef7/workwell-api-ts:latest` — and TWH's backend image repository is the
+*same* repository. `reconcile-twh-mieweb.yml` heals the live `twh-api-ts` container every 15 minutes
+by recreating it from that repository's `:latest`. So a Maui dispatch from any unmerged branch would
+republish `:latest`, and the next time the live demo went unhealthy it could have healed itself onto
+that code. `deploy-staging-mieweb.yml` had already solved this with `staging-*` tags, which is the
+tell: the hazard was known once and not carried forward. Maui now pushes `maui-latest` /
+`maui-sha-<SHA>` and deploys the namespaced sha; the frontend needs no namespacing because it builds a
+different repository. **Nothing was ever at risk** — the workflow had not been dispatched — but the
+window between merging it and first dispatch is exactly when it would have been. Documented in
+DEPLOY.md as load-bearing rather than left as a tag convention someone could tidy away.
+
+**`official-flip-config.test.ts` stops being a three-name allowlist.** Its `WORKFLOWS` array was
+hardcoded to the three TWH/staging files, so a new deploy workflow was invisible to a test whose whole
+claim is that it validates "the string that actually ships" — the #380/#400 guard-scope class, named
+as MM-1b work in the roadmap and paid down here instead. Discovery is now derived from the filesystem:
+a workflow qualifies when it deploys through the shared container script **and** sets
+`WORKWELL_INSTANCE`. Both halves are needed — the script reference alone also matches
+`deploy-workwell-redirect-mieweb.yml`, a redirect container that ships no measure routing and so
+passes every assertion **vacuously**. That was measured, not argued: with the redirect included the
+other three tests stayed green and only a new `deepEqual` on the discovered set failed, naming it. The
+predicate is keyed on `WORKWELL_INSTANCE` rather than on an image variable name because a future
+workflow can rename its variables and stay a WorkWell deployment.
+
+**Also on the record: `WORKWELL_INSTANCE` was, until today, read by nothing in `backend-ts/src`.** All
+three deploy workflows set it; it is a Java-era leftover whose consumer died with the JVM. It is being
+made load-bearing again as the deployment-profile selector rather than documented as inert.
+
+Gate: 2049 tests, 2008 pass, 0 fail, 41 skipped — run by the orchestrator independently of the
+implementing lane, not taken from its self-report.
+
+## 2026-08-30 (closeout) — the three MM-0 PRs merge; and the Maui deployment was never blocked on anyone
+
+**Merged in order — #497 → #498 → #499 — and `main` is at `fd2e5f51`.** #499 was rebased onto the other
+two first; the only conflict was the predictable one (all three inserting a JOURNAL entry at the top),
+resolved by stacking rather than choosing. Every review thread across the three PRs is replied to and
+resolved; the frontend suite is 41 files / 208 tests, lint clean, build clean, and the 19-check CI run
+was green before the squash. Housekeeping done: three worktrees removed, all six local+remote `mm0`
+branches deleted, refs pruned, and a superseded local plan draft deleted after diffing it against the
+committed version (the committed one was a strict superset).
+
+**The post-merge deploy failed once and it was not ours.** `Deploy TWH OS MIEWeb` died in the
+Create-a-Container step with `curl: (28) Operation timed out after 30002 milliseconds` on the container
+DELETE — a transient MIE API timeout, not a code fault: nothing in #499 touches the backend or the deploy
+path, and #498's identical deploy had succeeded 18 minutes earlier. `gh run rerun --failed` came back
+green in 1m40s. Final board on `main`: CI ✅ (13m25s), Deploy ✅, CodeQL ✅.
+
+**One review lesson worth keeping, because it cost the only real regression of the day.** Task 2 was the
+one lane that shipped without the independent reviewer pass — the implementer was itself a capable agent,
+which is exactly the rationalization that skips the step. Running it late found the employee-mode
+whitespace regression described in the entry below. **The reviewer step is not conditional on who
+implemented.**
+
+**A standing assumption was checked and is FALSE: the Maui container is not an MIE gate.** ROADMAP §7.3
+listed "Maui container provisioning + DNS" as owed by MIE, and §9.1 as an owner step to *confirm the
+path*. Confirmed, and the answer discharges it: the Container Manager lists all five existing containers
+under the owner's own account with a New-container action and an API-keys page, and
+`.github/scripts/deploy-mieweb-container.sh` already **creates** a container when the hostname does not
+exist — which is how `twh-api-ts`, `twh` and both `twh-staging*` containers came to exist — authenticated
+by the `LAUNCHPAD_API_KEY` secret every TWH deploy uses. So the Maui sandbox is not up for one reason
+only: **nobody has written `deploy-maui-mieweb.yml` yet.** That workflow is TWH's with `maui-api-ts` /
+`maui` hostnames, `NEXT_PUBLIC_SUBJECT_TERM=patient` passed as a frontend build ARG, and
+`WORKWELL_INSTANCE=maui`; the two things only the owner can supply are a separate Neon database
+(`DATABASE_URL_MAUI` — the `workwell_spike` schema self-creates, so no migration) and
+`WORKWELL_AUTH_JWT_SECRET_MAUI`. §7.3 and §9.1 are marked discharged in the roadmap.
+
+**Where MM-0 stands.** Code: Tasks 1–3 merged and deployed; Task 4 (the MIPS↔CMS crosswalk UI) is the
+last code item and is unblocked. Deployment: the Maui instance is now a *self-service* piece of work
+ahead of or beside Task 4, not a wait. Still genuinely external: MIE's order-mapping docs and new-UI
+access, the CDS client-auth answer, Nicole on exceptions, the ACO on attribution and measure 305, and the
+CY2027 final rule.
+
 ## 2026-08-30 (later) — MM-0 Task 2: subject terminology becomes deployment config (PR #499)
 
 `NEXT_PUBLIC_SUBJECT_TERM` (`employee` default | `patient`) drives a `SUBJECT` term set in

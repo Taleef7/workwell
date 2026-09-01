@@ -13,7 +13,12 @@ import type { MeasureRecord } from "../stores/measure-store.ts";
 import type { CaseStore } from "../stores/case-store.ts";
 import type { CaseEventStore } from "../stores/case-event-store.ts";
 import type { EvaluateMeasureBinding } from "@work-well/measure-engine";
-import { type EmployeeProfile, EVALUABLE_EMPLOYEES } from "../engine/synthetic/employee-catalog.ts";
+import {
+  type EmployeeProfile,
+  EVALUABLE_EMPLOYEES,
+  DEPLOYMENT_PROFILE,
+  isRunnableMeasure,
+} from "../config/deployment-profile.ts";
 import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
 import { deriveExamConfig } from "../engine/synthetic/exam-config.ts";
 import { buildSyntheticBundle } from "../engine/synthetic/fhir-bundle-builder.ts";
@@ -147,6 +152,11 @@ export async function previewImpact(deps: ImpactPreviewDeps, measure: MeasureRec
   // Only runnable measures (compiled CQL + a synthetic binding) can be previewed.
   if (!binding) {
     warnings.push("CQL evaluation unavailable: measure has no runnable CQL binding.");
+    await writePreviewAudit(deps, measure, evaluationDate, 0, zeroCounts(), warnings, actor);
+    return emptyResponse(measure, evaluationDate, warnings);
+  }
+  if (!isRunnableMeasure(measure.measureId)) {
+    warnings.push(`CQL evaluation unavailable: measure is not runnable for deployment profile '${DEPLOYMENT_PROFILE.id}'.`);
     await writePreviewAudit(deps, measure, evaluationDate, 0, zeroCounts(), warnings, actor);
     return emptyResponse(measure, evaluationDate, warnings);
   }

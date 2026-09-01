@@ -85,6 +85,7 @@ export default function CompliancePage() {
   }, [q]);
 
   const [roster, setRoster] = useState<Roster | null>(null);
+  const [loadedPanel, setLoadedPanel] = useState<PanelId | null>(null);
   const [total, setTotal] = useState<number>(0);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
@@ -118,6 +119,7 @@ export default function CompliancePage() {
     if (cached) {
       reqIdRef.current++;
       setRoster(cached.roster);
+      setLoadedPanel(panel);
       setTotal(cached.total);
       setError(null);
       setLoading(false);
@@ -131,6 +133,7 @@ export default function CompliancePage() {
       const { data, headers } = await api.getWithHeaders<Roster>(`/api/compliance/roster?${query}`);
       if (reqId !== reqIdRef.current) return;
       setRoster(data);
+      setLoadedPanel(panel);
       const matchTotal = Number(headers.get("X-Total-Count") ?? data.rows.length);
       const resolvedTotal = Number.isFinite(matchTotal) ? matchTotal : data.rows.length;
       setTotal(resolvedTotal);
@@ -139,6 +142,7 @@ export default function CompliancePage() {
       if (reqId !== reqIdRef.current) return;
       setError(err instanceof Error ? err.message : "Failed to load the compliance roster.");
       setRoster(null);
+      setLoadedPanel(null);
       setTotal(0);
     } finally {
       if (reqId === reqIdRef.current) setLoading(false);
@@ -202,12 +206,27 @@ export default function CompliancePage() {
     }
   }, [api, canRecalc, isActive, startTracking]);
 
-  const setPanelAndUrl = useCallback((nextPanel: PanelId) => {
+  const writePanelToUrl = useCallback((nextPanel: PanelId, replace = false) => {
     const params = new URLSearchParams(searchParams.toString());
     params.set("panel", nextPanel);
     const query = params.toString();
-    router.push(query ? `${pathname}?${query}` : pathname);
+    const target = query ? `${pathname}?${query}` : pathname;
+    if (replace) {
+      router.replace(target);
+    } else {
+      router.push(target);
+    }
   }, [pathname, router, searchParams]);
+
+  const setPanelAndUrl = useCallback((nextPanel: PanelId) => {
+    writePanelToUrl(nextPanel, false);
+  }, [writePanelToUrl]);
+
+  useEffect(() => {
+    if (roster && loadedPanel === panel && roster.panel !== panel) {
+      writePanelToUrl(roster.panel, true);
+    }
+  }, [roster, loadedPanel, panel, writePanelToUrl]);
 
   const setStatusAndUrl = useCallback((nextStatus: string) => {
     const params = new URLSearchParams(searchParams.toString());
@@ -250,11 +269,15 @@ export default function CompliancePage() {
         <label className="flex flex-col text-xs font-medium">
           <span className="mb-1">Panel</span>
           <select
-            value={panel}
+            aria-label="Panel"
+            value={loadedPanel === panel ? (roster?.panel ?? panel) : panel}
             onChange={(e) => setPanelAndUrl(e.target.value as PanelId)}
             className="rounded border border-neutral-300 bg-transparent px-2 py-1 text-sm dark:border-neutral-700"
           >
-            {PANEL_OPTIONS.map((p) => (<option key={p.id} value={p.id}>{p.label}</option>))}
+            {(roster?.availablePanels
+              ? PANEL_OPTIONS.filter((p) => roster.availablePanels!.includes(p.id))
+              : PANEL_OPTIONS
+            ).map((p) => (<option key={p.id} value={p.id}>{p.label}</option>))}
           </select>
         </label>
         <label className="flex flex-col text-xs font-medium">

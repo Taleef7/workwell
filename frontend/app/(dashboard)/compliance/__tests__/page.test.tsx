@@ -3,6 +3,7 @@ import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SLOW_LOAD_HINT } from "@/lib/useSlowLoadHint";
+import type { createNavMock } from "@/test/mocks/next-navigation-reactive";
 
 const getWithHeaders = vi.fn();
 const get = vi.fn();
@@ -10,7 +11,7 @@ const post = vi.fn();
 // Reactive router mock: push/replace update the params and re-render, like the real App Router.
 // (The page derives panel/status from the URL, so a static params mock would make the panel
 // <select> a no-op under test.)
-const navHolder = vi.hoisted(() => ({ current: undefined as unknown as { navigation: unknown; setUrl: (u: string) => void } }));
+const navHolder = vi.hoisted(() => ({ current: undefined as unknown as ReturnType<typeof createNavMock> }));
 vi.mock("next/navigation", async () => {
   const { createNavMock } = await import("@/test/mocks/next-navigation-reactive");
   navHolder.current = createNavMock("/compliance");
@@ -68,7 +69,23 @@ beforeEach(() => {
   // so this class of bug fails here instead of intermittently in CI. Verified both ways: with the
   // delay in place, awaiting the call reproduces the exact CI error, and awaiting the element passes.
   // Tests below that install their own mock resolve immediately and do not get this property.
-  getWithHeaders.mockReset().mockImplementation(() => new Promise((r) => setTimeout(() => r(rosterImmun), 40)));
+  getWithHeaders.mockReset().mockImplementation((url: string) => {
+    const match = /panel=(\w+)/.exec(String(url));
+    const panel = match ? match[1] : "immunizations";
+    return new Promise((r) =>
+      setTimeout(
+        () =>
+          r({
+            data: {
+              ...rosterImmun.data,
+              panel,
+            },
+            headers: rosterImmun.headers,
+          }),
+        40
+      )
+    );
+  });
   get.mockReset().mockResolvedValue([]);
   post.mockReset().mockResolvedValue({ runId: "run-9", status: "REQUESTED" });
   startTracking.mockReset();
@@ -99,8 +116,8 @@ describe("CompliancePage", () => {
     await waitFor(() => expect(getWithHeaders).toHaveBeenCalledTimes(1));
     await userEvent.selectOptions(screen.getByLabelText(/Panel/i), "osha");
     await waitFor(() => {
-      const lastUrl = String(getWithHeaders.mock.calls.at(-1)?.[0] ?? "");
-      expect(lastUrl).toContain("panel=osha");
+      const calls = getWithHeaders.mock.calls.map((c) => String(c[0]));
+      expect(calls.at(-1)).toContain("panel=osha");
     });
   });
 
@@ -255,5 +272,93 @@ describe("CompliancePage", () => {
     // assertion to the table row this test is about.
     const table = await screen.findByRole("table");
     expect(within(table).getByText("No employees match these filters.")).toBeInTheDocument();
+  });
+
+  it("renders only availablePanels in the select when supplied by the server", async () => {
+    getWithHeaders.mockReset().mockResolvedValue({
+      data: {
+        panel: "wellness",
+        availablePanels: ["wellness"],
+        columns: [{ measureId: "hypertension", name: "Hypertension", complianceClass: "RECURRING" }],
+        rows: []
+      },
+      headers: new Headers({ "X-Total-Count": "0" })
+    });
+    render(<CompliancePage />);
+    await screen.findByRole("columnheader", { name: /Hypertension/ });
+    const panelSelect = screen.getByLabelText(/Panel/i);
+    const options = within(panelSelect).getAllByRole("option");
+    expect(options).toHaveLength(1);
+    expect(options[0]).toHaveTextContent("Wellness & eCQM");
+  });
+
+  it("pins panel select value: shows canonicalised panel on Maui responses, and shows selected panel immediately while loading a cold panel", async () => {
+    // Part 1: Maui canonicalised panel
+    // Start with panel=immunizations in URL, server canonicalises to "wellness".
+    // Keep URL panel as immunizations to assert select reflects the canonicalised roster.panel.
+    navHolder.current.setUrl("/compliance?panel=immunizations");
+    navHolder.current.replace.mockImplementationOnce(() => {});
+    getWithHeaders.mockReset().mockResolvedValue({
+      data: {
+        panel: "wellness",
+        availablePanels: ["immunizations", "osha", "wellness"],
+        columns: [{ measureId: "m1", name: "Hypertension", complianceClass: "RECURRING" }],
+        rows: []
+      },
+      headers: new Headers({ "X-Total-Count": "0" })
+    });
+    const { unmount } = render(<CompliancePage />);
+    await waitFor(() => {
+      const select = screen.getByLabelText<HTMLSelectElement>(/Panel/i);
+      expect(select.value).toBe("wellness");
+    });
+    unmount();
+
+    // Part 2: Cold panel selection on default profile
+    // Start loaded with panel=immunizations
+    navHolder.current.setUrl("/compliance?panel=immunizations");
+    let resolveCold: (val: unknown) => void;
+    getWithHeaders.mockReset().mockImplementation((url: string) => {
+      if (String(url).includes("panel=osha")) {
+        return new Promise((resolve) => {
+          resolveCold = resolve;
+        });
+      }
+      return Promise.resolve({
+        data: {
+          panel: "immunizations",
+          availablePanels: ["immunizations", "osha", "wellness"],
+          columns: [{ measureId: "mmr", name: "MMR", complianceClass: "PERMANENT" }],
+          rows: []
+        },
+        headers: new Headers({ "X-Total-Count": "0" })
+      });
+    });
+
+    render(<CompliancePage />);
+    await waitFor(() => {
+      const select = screen.getByLabelText<HTMLSelectElement>(/Panel/i);
+      expect(select.value).toBe("immunizations");
+    });
+
+    // User selects "osha" (cold panel)
+    await userEvent.selectOptions(screen.getByLabelText(/Panel/i), "osha");
+
+    // While osha is still loading (resolveCold not called yet), the select must show "osha" immediately
+    const select = screen.getByLabelText<HTMLSelectElement>(/Panel/i);
+    expect(select.value).toBe("osha");
+
+    // Resolve the pending fetch
+    await act(async () => {
+      resolveCold!({
+        data: {
+          panel: "osha",
+          availablePanels: ["immunizations", "osha", "wellness"],
+          columns: [{ measureId: "audiogram", name: "Audiogram", complianceClass: "PERMANENT" }],
+          rows: []
+        },
+        headers: new Headers({ "X-Total-Count": "0" })
+      });
+    });
   });
 });

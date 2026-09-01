@@ -8,7 +8,7 @@ import { useRunStatus } from "@/components/run-status-provider";
 import { canRunMeasures } from "@/lib/rbac";
 import { ComplianceChip } from "@/features/compliance/ComplianceChip";
 import { CqlEvidence, type EvidenceJson } from "@/features/evidence/CqlEvidence";
-import { PANEL_OPTIONS, type Roster, type RosterCell } from "@/features/compliance/types";
+import { PANEL_OPTIONS, type PanelId, type Roster, type RosterCell } from "@/features/compliance/types";
 
 interface Row {
   measureId: string;
@@ -48,24 +48,54 @@ export function IndividualComplianceStatus({
   const load = useCallback(async () => {
     setLoading(true);
     const params = new URLSearchParams({ q: externalId, pageSize: "200" });
-    const results = await Promise.all(
-      PANEL_OPTIONS.map(async (p) => {
+    const firstPanel = PANEL_OPTIONS[0];
+    let firstRoster: Roster | null = null;
+    try {
+      const { data } = await api.getWithHeaders<Roster>(
+        `/api/compliance/roster?panel=${firstPanel.id}&${params.toString()}`
+      );
+      firstRoster = data;
+    } catch {
+      // one bad panel never blanks the card
+    }
+
+    // Determine remaining panels to fetch: if availablePanels is provided, query only available
+    // panels that were not already served by the initial request; otherwise fallback for older backends.
+    let remainingPanels: PanelId[];
+    if (firstRoster?.availablePanels) {
+      const servedPanel = firstRoster.panel;
+      remainingPanels = firstRoster.availablePanels.filter(
+        (p) => p !== firstPanel.id && p !== servedPanel && PANEL_OPTIONS.some((opt) => opt.id === p)
+      );
+    } else {
+      remainingPanels = PANEL_OPTIONS.slice(1).map((p) => p.id);
+    }
+
+    const remainingResults = await Promise.all(
+      remainingPanels.map(async (panelId) => {
         try {
-          const { data } = await api.getWithHeaders<Roster>(`/api/compliance/roster?panel=${p.id}&${params.toString()}`);
+          const { data } = await api.getWithHeaders<Roster>(
+            `/api/compliance/roster?panel=${panelId}&${params.toString()}`
+          );
           return data;
         } catch {
           return null; // one bad panel never blanks the card
         }
       })
     );
+
+    const allResults = [firstRoster, ...remainingResults];
     const merged: Row[] = [];
-    for (const roster of results) {
+    const seen = new Set<string>();
+    for (const roster of allResults) {
       if (!roster) continue;
       const match = roster.rows.find((r) => r.subject.externalId === externalId);
       if (!match) continue;
       for (const col of roster.columns) {
+        if (seen.has(col.measureId)) continue;
         const cell = match.cells[col.measureId];
         if (!cell) continue;
+        seen.add(col.measureId);
         merged.push({ measureId: col.measureId, name: col.name, complianceClass: col.complianceClass, cell });
       }
     }

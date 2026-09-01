@@ -11,13 +11,43 @@ test("seeds the four Java demo roles plus the read-only viewer (public sandbox)"
   assert.deepEqual(
     DEMO_USERS.map((u) => `${u.email}:${u.role}`).sort(),
     [
+      "admin@maui.workwell.dev:ROLE_ADMIN",
       "admin@workwell.dev:ROLE_ADMIN",
       "approver@workwell.dev:ROLE_APPROVER",
       "author@workwell.dev:ROLE_AUTHOR",
+      "clinician@maui.workwell.dev:ROLE_VIEWER",
       "cm@workwell.dev:ROLE_CASE_MANAGER",
+      "quality-lead@maui.workwell.dev:ROLE_CASE_MANAGER",
+      "quality-staff@maui.workwell.dev:ROLE_CASE_MANAGER",
       "viewer@workwell.dev:ROLE_VIEWER",
     ],
   );
+});
+
+test("Maui sandbox accounts resolve case-insensitively with their expected roles", () => {
+  const accounts = [
+    ["quality-lead@maui.workwell.dev", "ROLE_CASE_MANAGER"],
+    ["quality-staff@maui.workwell.dev", "ROLE_CASE_MANAGER"],
+    ["clinician@maui.workwell.dev", "ROLE_VIEWER"],
+    ["admin@maui.workwell.dev", "ROLE_ADMIN"],
+  ] as const;
+
+  for (const [email, role] of accounts) {
+    assert.equal(findDemoUser(email.toUpperCase())?.role, role);
+  }
+});
+
+test("Maui sandbox accounts authenticate with the documented demo password", async () => {
+  const accounts = [
+    ["quality-lead@maui.workwell.dev", "ROLE_CASE_MANAGER"],
+    ["quality-staff@maui.workwell.dev", "ROLE_CASE_MANAGER"],
+    ["clinician@maui.workwell.dev", "ROLE_VIEWER"],
+    ["admin@maui.workwell.dev", "ROLE_ADMIN"],
+  ] as const;
+
+  for (const [email, role] of accounts) {
+    assert.equal((await authenticate(email, "Workwell123!"))?.role, role);
+  }
 });
 
 test("findDemoUser is case-insensitive and trims", () => {

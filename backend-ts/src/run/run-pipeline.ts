@@ -21,7 +21,16 @@ import type { EvaluateMeasureBinding, MeasureOutcome } from "@work-well/measure-
 import { OFFICIAL_LOGIC_VERSION_PREFIX, type RoutedEngine } from "../wiring/executor-router.ts";
 import { isApplicable } from "../segment/segment-applicability.ts";
 import type { HydratedSegment } from "../stores/segment-store.ts";
-import { employeeById, type EmployeeProfile, EVALUABLE_EMPLOYEES, EVALUATION_EXCLUDED_TENANTS } from "../engine/synthetic/employee-catalog.ts";
+import {
+  employeeById,
+  type EmployeeProfile,
+  EVALUABLE_EMPLOYEES,
+  EVALUATION_EXCLUDED_TENANTS,
+  isRunnableMeasure,
+  RUNNABLE_MEASURE_IDS as PROFILE_RUNNABLE_MEASURE_IDS,
+  DEPLOYMENT_PROFILE,
+  DIRECTORY,
+} from "../config/deployment-profile.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
 import { MEASURE_CATALOG } from "../measure/measure-catalog.ts";
@@ -155,7 +164,7 @@ export class UnsupportedScopeError extends Error {
 export class InvalidRunRequestError extends Error {}
 
 const NON_COMPLIANT = new Set(["DUE_SOON", "OVERDUE", "MISSING_DATA"]);
-const RUNNABLE_MEASURE_IDS = Object.keys(MEASURES);
+const RUNNABLE_MEASURE_IDS = PROFILE_RUNNABLE_MEASURE_IDS.filter(isRunnableMeasure);
 
 interface WorkItem {
   employee: EmployeeProfile;
@@ -221,6 +230,11 @@ function resolveScope(req: ManualRunRequest, employees: readonly EmployeeProfile
           inCatalog
             ? `Measure '${measureId}' is not Active/runnable (no compiled CQL); only Active measures can be run.`
             : `Unknown measure: ${measureId}`,
+        );
+      }
+      if (!isRunnableMeasure(measureId)) {
+        throw new InvalidRunRequestError(
+          `Measure '${measureId}' is not runnable for deployment profile '${DEPLOYMENT_PROFILE.id}'.`,
         );
       }
       const rateKey = MEASURE_BINDINGS[measureId]!.rateKey;
@@ -439,7 +453,7 @@ async function prepareLivePopulation(
     for (const bundle of bundles) {
       const patientId = patientIdOf(bundle);
       if (!patientId) continue;
-      const employee = profileForId(`wc|${patientId}`);
+      const employee = profileForId(`wc|${patientId}`, DIRECTORY);
       if (!employee) continue;
       for (const measureId of planned.measureIds) items.push({ employee, measureId, liveBundle: bundle });
     }

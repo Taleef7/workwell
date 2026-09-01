@@ -71,6 +71,7 @@ test("buildRoster — columns reflect the panel; a COMPLIANT mmr cell carries th
   const roster = await buildRoster({ outcomeStore: fakeStore(withRun, byRun), segments: [] }, { panel: "immunizations" });
 
   assert.equal(roster.panel, "immunizations");
+  assert.deepEqual(roster.availablePanels, ["immunizations", "osha", "wellness"]);
   assert.ok(roster.columns.some((c) => c.measureId === "mmr" && c.complianceClass === "PERMANENT"));
   const row = roster.rows.find((r) => r.subject.externalId === EMP)!;
   assert.equal(row.cells["mmr"]!.status, "COMPLIANT");
