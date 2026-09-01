@@ -7,7 +7,7 @@
  */
 import { MEASURE_CATALOG, type MeasureStatus } from "./measure-catalog.ts";
 import type { MeasureStore } from "../stores/measure-store.ts";
-import type { CaseEventStore } from "../stores/case-event-store.ts";
+import type { AppendAuditInput, CaseEventStore } from "../stores/case-event-store.ts";
 
 // Newest-first per status (Active recently activated), mirroring Java COALESCE(activated_at, …).
 const TIER: Record<MeasureStatus, string> = {
@@ -23,9 +23,25 @@ const LEGACY_OFFICIAL_IDS = [
   { legacyId: "cms165v14", catalogId: "cms165" },
 ] as const;
 
-const sameJson = (left: unknown, right: unknown): boolean => JSON.stringify(left) === JSON.stringify(right);
+const deepEqual = (left: unknown, right: unknown): boolean => {
+  if (left === right) return true;
+  if (typeof left !== "object" || left === null || typeof right !== "object" || right === null) return false;
+  if (Array.isArray(left) || Array.isArray(right)) {
+    return Array.isArray(left) && Array.isArray(right) && left.length === right.length && left.every((value, i) => deepEqual(value, right[i]));
+  }
+  const leftRecord = left as Record<string, unknown>;
+  const rightRecord = right as Record<string, unknown>;
+  const leftKeys = Object.keys(leftRecord);
+  const rightKeys = Object.keys(rightRecord);
+  return leftKeys.length === rightKeys.length && leftKeys.every((key) => Object.hasOwn(rightRecord, key) && deepEqual(leftRecord[key], rightRecord[key]));
+};
 
-function isUnmodifiedLegacySeed(row: Awaited<ReturnType<MeasureStore["getLatest"]>>, catalogId: string, legacyId: string): boolean {
+function isUnmodifiedLegacySeed(
+  row: Awaited<ReturnType<MeasureStore["getLatest"]>>,
+  catalogId: string,
+  legacyId: string,
+  expectedStatus?: string,
+): boolean {
   const catalog = MEASURE_CATALOG.find((m) => m.id === catalogId);
   if (!row || !catalog) return false;
   return (
@@ -33,28 +49,27 @@ function isUnmodifiedLegacySeed(row: Awaited<ReturnType<MeasureStore["getLatest"
     row.name === catalog.name &&
     row.policyRef === catalog.policyRef &&
     row.owner === catalog.owner &&
-    sameJson(row.tags, catalog.tags) &&
+    deepEqual(row.tags, catalog.tags) &&
     row.versionId === `${legacyId}-${catalog.version}` &&
     row.version === catalog.version &&
-    row.status === catalog.status &&
-    sameJson(row.spec, catalog.spec) &&
+    row.status === (expectedStatus ?? catalog.status) &&
+    deepEqual(row.spec, catalog.spec) &&
     row.cqlText === "" &&
     row.compileStatus === catalog.compileStatus &&
     row.changeSummary === "Seeded measure version" &&
     row.approvedBy === null &&
     row.activatedAt === null &&
     row.createdAt === TIER[catalog.status] &&
-    row.updatedAt === TIER[catalog.status]
+    (expectedStatus === "Deprecated" || row.updatedAt === TIER[catalog.status])
   );
 }
 
 async function deprecateLegacyOfficialRows(store: MeasureStore, events: CaseEventStore): Promise<void> {
   for (const { legacyId, catalogId } of LEGACY_OFFICIAL_IDS) {
     const row = await store.getLatest(legacyId);
-    if (!row || row.status === "Deprecated" || !isUnmodifiedLegacySeed(row, catalogId, legacyId)) continue;
     const reason = `superseded by ${catalogId} (catalog id rename, 2026-09)`;
-    await store.setVersionStatus(legacyId, row.versionId, { status: "Deprecated" });
-    await events.appendAudit({
+    if (!row) continue;
+    const audit: AppendAuditInput = {
       eventType: "MEASURE_DEPRECATED",
       entityType: "measure",
       entityId: legacyId,
@@ -63,7 +78,16 @@ async function deprecateLegacyOfficialRows(store: MeasureStore, events: CaseEven
       refCaseId: null,
       refMeasureVersionId: row.versionId,
       payload: { measureId: legacyId, version: row.version, reason, deprecatedBy: "system" },
-    });
+    };
+    if (row.status === "Deprecated") {
+      if (isUnmodifiedLegacySeed(row, catalogId, legacyId, "Deprecated") && !(await events.hasAuditEvent(audit))) {
+        await events.appendAudit(audit);
+      }
+      continue;
+    }
+    if (!isUnmodifiedLegacySeed(row, catalogId, legacyId)) continue;
+    await store.setVersionStatus(legacyId, row.versionId, { status: "Deprecated" });
+    await events.appendAudit(audit);
   }
 }
 

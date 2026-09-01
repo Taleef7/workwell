@@ -17,6 +17,7 @@ import { createSqliteD1 } from "@mieweb/cloud-local";
 import { RUN_STORE_FLOOR_DDL } from "../stores/sqlite/schema.ts";
 import { SqliteMeasureStore } from "../stores/sqlite/measure-store-sqlite.ts";
 import { SqliteCaseEventStore } from "../stores/sqlite/case-event-store-sqlite.ts";
+import type { CaseEventStore } from "../stores/case-event-store.ts";
 import { MEASURE_CATALOG } from "./measure-catalog.ts";
 import { seedMeasureStore } from "./measure-seed.ts";
 
@@ -277,4 +278,94 @@ test("seedMeasureStore — deprecates a legacy cms2v15 row once and audits it on
   assert.equal((await store.getLatest("cms2v15"))?.status, "Deprecated");
   const secondAuditRows = (await db.prepare("SELECT event_type FROM audit_events").all<{ event_type: string }>()).results ?? [];
   assert.equal(secondAuditRows.length, 1, "the second seed must not append another deprecation audit");
+});
+
+test("seedMeasureStore — deprecates an untouched legacy row when persisted spec keys are reordered", async () => {
+  const db = await freshDb();
+  const store = new SqliteMeasureStore(db);
+  const events = new SqliteCaseEventStore(db);
+  const catalog = MEASURE_CATALOG.find((m) => m.id === "cms2")!;
+  const persistedSpec = {
+    testFixtures: catalog.spec.testFixtures,
+    requiredDataElements: catalog.spec.requiredDataElements,
+    complianceWindow: catalog.spec.complianceWindow,
+    exclusions: catalog.spec.exclusions,
+    eligibilityCriteria: catalog.spec.eligibilityCriteria,
+    description: catalog.spec.description,
+  };
+  assert.notEqual(JSON.stringify(persistedSpec), JSON.stringify(catalog.spec), "test must reorder persisted spec keys");
+
+  await store.seedMeasure({
+    measureId: "cms2v15",
+    name: catalog.name,
+    policyRef: catalog.policyRef,
+    owner: catalog.owner,
+    tags: [...catalog.tags],
+    versionId: "cms2v15-v1.0",
+    version: catalog.version,
+    status: catalog.status,
+    spec: persistedSpec,
+    cqlText: "",
+    compileStatus: catalog.compileStatus,
+    createdAt: "2026-02-01T00:00:00.000Z",
+    changeSummary: "Seeded measure version",
+  });
+
+  await seedMeasureStore(store, () => "", events);
+  assert.equal((await store.getLatest("cms2v15"))?.status, "Deprecated");
+});
+
+test("seedMeasureStore — repairs a missing legacy deprecation audit on retry", async () => {
+  const db = await freshDb();
+  const store = new SqliteMeasureStore(db);
+  const realEvents = new SqliteCaseEventStore(db);
+  let failFirstAudit = true;
+  const events = {
+    appendAudit: async (input: Parameters<CaseEventStore["appendAudit"]>[0]) => {
+      if (failFirstAudit) {
+        failFirstAudit = false;
+        throw new Error("transient audit failure");
+      }
+      await realEvents.appendAudit(input);
+    },
+    hasAuditEvent: (input: { eventType: string; entityId: string | null; refMeasureVersionId: string | null }) =>
+      db
+        .prepare(
+          "SELECT 1 FROM audit_events WHERE event_type = ? AND entity_id = ? AND ref_measure_version_id = ? LIMIT 1",
+        )
+        .bind(input.eventType, input.entityId, input.refMeasureVersionId)
+        .first<{ one: number }>()
+        .then((row: { one: number } | null) => row !== null),
+  } as unknown as CaseEventStore;
+  const catalog = MEASURE_CATALOG.find((m) => m.id === "cms2")!;
+
+  await store.seedMeasure({
+    measureId: "cms2v15",
+    name: catalog.name,
+    policyRef: catalog.policyRef,
+    owner: catalog.owner,
+    tags: [...catalog.tags],
+    versionId: "cms2v15-v1.0",
+    version: catalog.version,
+    status: catalog.status,
+    spec: catalog.spec,
+    cqlText: "",
+    compileStatus: catalog.compileStatus,
+    createdAt: "2026-02-01T00:00:00.000Z",
+    changeSummary: "Seeded measure version",
+  });
+
+  await assert.rejects(() => seedMeasureStore(store, () => "", events), /transient audit failure/);
+  assert.equal((await store.getLatest("cms2v15"))?.status, "Deprecated");
+
+  await seedMeasureStore(store, () => "", events);
+  const auditRows = await db
+    .prepare("SELECT event_type FROM audit_events WHERE entity_id = ? AND ref_measure_version_id = ?")
+    .bind("cms2v15", "cms2v15-v1.0")
+    .all<{ event_type: string }>();
+  assert.deepEqual(
+    ((auditRows.results ?? []) as Array<{ event_type: string }>).map((row) => row.event_type),
+    ["MEASURE_DEPRECATED"],
+    "retry must repair the missing event without duplicating it",
+  );
 });
