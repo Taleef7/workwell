@@ -1,5 +1,62 @@
 # Journal
 
+## 2026-09-01 — closing the profile leak surface: column scoping, four-site row isolation, pre-aggregated aggregate guards, and server canonicalisation
+
+**The roster's columns follow the deployment profile, not just its rows.** Scoping the directory
+without scoping the panel definitions caused `/compliance` on Maui to render 48 patients under five
+occupational immunization columns (`PANELS.immunizations`) that could never evaluate an outcome.
+`panels.ts` introduces `RUNNABLE_PANELS`, `AVAILABLE_PANELS`, and `PROFILE_DEFAULT_PANEL`. Availability
+and column derivation now share one source of truth (`RUNNABLE_PANELS`), folding the catalog-Active
+conjunct (`active.has(m) && isRunnableMeasure(m)`) into availability so that `availablePanels` cannot
+offer a panel that renders zero columns. The panel list derives dynamically from `Object.keys(PANELS)`
+rather than a hardcoded tuple. The roster response shape gains `availablePanels`; requesting a panel
+with no runnable measures canonicalises to the profile default (`wellness` on Maui) rather than returning
+a 400 error. The degenerate case where no panel is runnable preserves the non-null `panel` string contract,
+returns `availablePanels: []` with zero columns, and logs a startup warning naming the cause.
+
+**Server-side panel canonicalisation broke three client assumptions.** With the server now capable of
+answering with a different panel than requested, three frontend areas required remediation:
+(1) `IndividualComplianceStatus` fanned out across all `PANEL_OPTIONS` and merged columns. On Maui, all
+three requests canonicalised to `wellness`, triple-rendering columns with duplicate React keys
+(`Encountered two children with the same key, 'hypertension'`) and corrupting expansion state. It now
+reads `availablePanels` from the first response, requests only remaining unserved panels, and dedupes by
+`measureId` for older backends. (2) The panel `<select>` `value={roster?.panel ?? panel}` displayed the
+last-loaded panel, snapping the control back to the previous value during cold fetches (11.8–12.5s)
+before flipping; it now displays the selected panel immediately. (3) Mock order-dependence in
+`page.test.tsx` and `page.urlfilters.test.tsx`, where `beforeEach` mocks had hardcoded `panel: "wellness"`
+and triggered an unintended canonicalisation `router.replace` fetch, was resolved by echoing the requested
+panel back in mocks and strengthening assertions back from `.some()` to `.at(-1)`.
+
+**Four-site `profileMatcher` data isolation and the two pre-aggregated leaks.** In `program-read-models.ts`,
+`siteMatcher` and `tenantMatcher` short-circuit when query filters are absent, allowing foreign subjects
+to reach headline totals and risk outlooks. Row-level profile isolation (`profileMatcher(directory.employeeById)`)
+was rolled out across all four sites: `programOverview` rows, `programOverview` open cases (`openCaseCount`),
+`runsWithOutcomes` in `programTrend`, and `programRiskOutlook` (`latestBySubject`, `repeatNonCompliers`,
+`siteComplianceRates`, `upcomingExpirations`). Live `wc|` subjects and default-profile uncatalogued QRDA
+Cypress MRN subjects remain preserved. Two pre-aggregated paths bypassed row-level predicates entirely:
+(1) `foldScaleCounts` SQL-aggregates scale runs via `aggregateScaleRun`, which on a restored database
+would fold ~120k foreign subjects into summaries; it now returns early when `tenantById("mhn")` is
+invisible on the active profile. (2) `programTrend`'s monthly snapshot path reads `quality_snapshots`
+keyed by `(measureId, scopeLevel, scopeId, period)` without a deployment profile dimension; scoped profiles
+now fall through to per-run trend series where `runsWithOutcomes` applies isolation.
+
+**Closing test defects in the branch's own live-directory test suite.** Review identified two defective
+assertions in `program-read-models.live-directory.test.ts`: (A) The `upcomingExpirations` assertion was
+vacuous because foreign subjects were `OVERDUE` without recency evidence and could never qualify; fixed by
+providing `COMPLIANT` status with matching recency evidence (`Most Recent Exam Date`) to both Maui-resolvable
+and foreign subjects, ensuring Maui-resolvable subjects appear while foreign subjects are excluded.
+(B) The `repeatNonCompliers` mutation check crashed with a `TypeError` on `b.evaluatedAt.localeCompare`
+inside child processes due to missing fixture timestamps rather than failing the assertion; fixed by
+providing `evaluationPeriod` and `evaluatedAt` to `mauiRow`, `twhRow`, `unresolvableRow`, and `liveWcRow`.
+Both mutations verified: removing `profileMatch` fails both assertions as clean assertion failures with
+`result.status === 0`.
+
+**Deliberately deferred:** `programOverview`, `hierarchy-rollup.ts`, and `routes/orders.ts` iterating all
+Active catalog measures rather than profile-scoped measures; `export-csv.ts`, `mcp/tools.ts`, and
+`case-read-models.ts` resolving names without filtering rows; degenerate empty-`availablePanels` client
+rendering as "no measures for this patient"; and adding a deployment profile dimension to the
+`quality_snapshots` schema.
+
 ## 2026-08-31 — the Maui sandbox becomes real: a deployment profile, its workflow, and a shared image tag that could have healed the live demo onto unmerged code
 
 **`WORKWELL_INSTANCE` is load-bearing again, and it is what makes the Maui sandbox a sandbox.** The

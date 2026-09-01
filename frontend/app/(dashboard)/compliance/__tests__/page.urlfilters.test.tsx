@@ -65,7 +65,7 @@ describe("CompliancePage URL filters", () => {
     navHolder.current.setUrl("/compliance?status=COMPLIANT");
     render(<CompliancePage />);
     await waitFor(() => {
-      expect(rosterCalls().some((u) => u.includes("status=COMPLIANT"))).toBe(true);
+      expect(rosterCalls().at(-1)).toContain("status=COMPLIANT");
     });
     act(() => navHolder.current.setUrl("/compliance?status=EXCLUDED"));
     await waitFor(() => {
@@ -99,7 +99,7 @@ describe("CompliancePage URL filters", () => {
     navHolder.current.setUrl("/compliance?panel=NOT_A_PANEL");
     render(<CompliancePage />);
     await waitFor(() => {
-      expect(rosterCalls().some((u) => u.includes("panel=immunizations"))).toBe(true);
+      expect(rosterCalls().at(-1)).toContain("panel=immunizations");
     });
   });
 

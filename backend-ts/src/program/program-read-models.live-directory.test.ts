@@ -372,21 +372,33 @@ test("scoped profile (Maui) — isolates data by excluding foreign and unresolve
   const output = runProfileChild("maui", `
     import { programOverview, programRiskOutlook, programTrend } from "./src/program/program-read-models.ts";
 
+    const recentExam = new Date(Date.now() - 320 * 86400000).toISOString().slice(0, 10);
+
     const mauiRow = {
       runId: "run-maui-1", runStartedAt: "2026-07-17T00:00:00.000Z", runScopeType: "MEASURE",
-      runStatus: "COMPLETED", runTriggeredBy: "manual", subjectId: "pat-001", measureId: "cms122", status: "COMPLIANT",
+      runStatus: "COMPLETED", runTriggeredBy: "manual", subjectId: "pat-001", measureId: "cms122",
+      evaluationPeriod: "2026-01-01", status: "COMPLIANT",
+      evidence: { expressionResults: [{ define: "Most Recent Exam Date", result: recentExam }] },
+      evaluatedAt: "2026-07-17T00:00:00.000Z",
     };
     const twhRow = {
       runId: "run-maui-1", runStartedAt: "2026-07-17T00:00:00.000Z", runScopeType: "MEASURE",
-      runStatus: "COMPLETED", runTriggeredBy: "manual", subjectId: "emp-001", measureId: "cms122", status: "OVERDUE",
+      runStatus: "COMPLETED", runTriggeredBy: "manual", subjectId: "emp-001", measureId: "cms122",
+      evaluationPeriod: "2026-01-01", status: "OVERDUE", evidence: {},
+      evaluatedAt: "2026-07-17T00:00:00.000Z",
     };
     const unresolvableRow = {
       runId: "run-maui-1", runStartedAt: "2026-07-17T00:00:00.000Z", runScopeType: "MEASURE",
-      runStatus: "COMPLETED", runTriggeredBy: "manual", subjectId: "cypress-mrn-foreign", measureId: "cms122", status: "OVERDUE",
+      runStatus: "COMPLETED", runTriggeredBy: "manual", subjectId: "cypress-mrn-foreign", measureId: "cms122",
+      evaluationPeriod: "2026-01-01", status: "COMPLIANT",
+      evidence: { expressionResults: [{ define: "Most Recent Exam Date", result: recentExam }] },
+      evaluatedAt: "2026-07-17T00:00:00.000Z",
     };
     const liveWcRow = {
       runId: "run-maui-1", runStartedAt: "2026-07-17T00:00:00.000Z", runScopeType: "MEASURE",
-      runStatus: "COMPLETED", runTriggeredBy: "manual", subjectId: "wc|maui-live-1", measureId: "cms122", status: "COMPLIANT",
+      runStatus: "COMPLETED", runTriggeredBy: "manual", subjectId: "wc|maui-live-1", measureId: "cms122",
+      evaluationPeriod: "2026-01-01", status: "COMPLIANT", evidence: {},
+      evaluatedAt: "2026-07-17T00:00:00.000Z",
     };
 
     const twhStreakRows = ["2024-01-01", "2025-01-01", "2026-01-01"].map((period, index) => ({
@@ -453,6 +465,8 @@ test("scoped profile (Maui) — isolates data by excluding foreign and unresolve
   const repeatNonCompliers = output.outlookRepeatNonCompliers as Array<{ externalId: string }>;
   assert.equal(repeatNonCompliers.some((r) => r.externalId === "emp-001" || r.externalId === "cypress-mrn-foreign"), false, "foreign subjects must not appear in repeatNonCompliers");
   const upcomingExpirations = output.outlookUpcomingExpirations as Array<{ externalId: string }>;
+  assert.equal(upcomingExpirations.length, 1, "Maui-resolvable subject must appear in upcomingExpirations");
+  assert.equal(upcomingExpirations[0]?.externalId, "pat-001");
   assert.equal(upcomingExpirations.some((u) => u.externalId === "emp-001" || u.externalId === "cypress-mrn-foreign"), false, "foreign subjects must not appear in upcomingExpirations");
 });
 

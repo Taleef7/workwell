@@ -117,7 +117,7 @@ describe("CompliancePage", () => {
     await userEvent.selectOptions(screen.getByLabelText(/Panel/i), "osha");
     await waitFor(() => {
       const calls = getWithHeaders.mock.calls.map((c) => String(c[0]));
-      expect(calls.some((u) => u.includes("panel=osha"))).toBe(true);
+      expect(calls.at(-1)).toContain("panel=osha");
     });
   });
 
