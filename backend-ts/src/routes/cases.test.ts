@@ -103,9 +103,10 @@ after(() => {
 test("GET /api/cases returns CaseSummary rows resolved to employee + measure", async () => {
   const res = await get("?status=open");
   assert.equal(res?.status, 200);
-  const rows = (await res!.json()) as Array<{ caseId: string; employeeName: string; measureName: string; priority: string; site: string }>;
+  const rows = (await res!.json()) as Array<{ caseId: string; employeeName: string; measureId: string; measureName: string; priority: string; site: string }>;
   assert.equal(rows.length, 2, "two OPEN cases (EXCLUDED is filtered out)");
   const omar = rows.find((r) => r.employeeName === "Omar Siddiq")!;
+  assert.equal(omar.measureId, "audiogram");
   assert.equal(omar.measureName, "Audiogram");
   assert.equal(omar.priority, "HIGH"); // OVERDUE
   assert.equal(omar.site, "Plant A");

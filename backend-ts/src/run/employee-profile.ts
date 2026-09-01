@@ -20,6 +20,7 @@ import { deriveWhyFlagged } from "../case/case-detail-read-model.ts";
 import { ACTIVE_CASE_STATUSES } from "../case/case-logic.ts";
 
 export interface MeasureOutcomeSummary {
+  measureId: string;
   measureVersionId: string;
   measureName: string;
   measureVersion: string;
@@ -31,6 +32,7 @@ export interface MeasureOutcomeSummary {
 }
 export interface OpenCaseSummary {
   caseId: string;
+  measureId: string;
   measureName: string;
   outcomeStatus: string;
   priority: string;
@@ -156,6 +158,7 @@ export async function getEmployeeProfile(deps: EmployeeProfileDeps, externalId: 
     // daysSinceLastExam = actual recency; daysUntilDue = window − recency (negative ⇒ overdue).
     const daysSince = actualDaysSince(o.evidence);
     measureOutcomes.push({
+      measureId: o.measureId,
       measureVersionId: o.measureId,
       measureName: measureNameOf(o.measureId),
       measureVersion: measureVersionOf(o.measureId),
@@ -171,6 +174,7 @@ export async function getEmployeeProfile(deps: EmployeeProfileDeps, externalId: 
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
     .map((c) => ({
       caseId: c.id,
+      measureId: c.measureId,
       measureName: measureNameOf(c.measureId),
       outcomeStatus: c.currentOutcomeStatus,
       priority: c.priority,

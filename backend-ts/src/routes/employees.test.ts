@@ -82,7 +82,7 @@ test("GET /api/employees/:id/profile returns identity + outcomes + open cases + 
     name: string;
     site: string;
     active: boolean;
-    measureOutcomes: Array<{ measureName: string; outcomeStatus: string; daysSinceLastExam: number | null; daysUntilDue: number | null; openCaseId: string | null }>;
+    measureOutcomes: Array<{ measureId: string; measureName: string; outcomeStatus: string; daysSinceLastExam: number | null; daysUntilDue: number | null; openCaseId: string | null }>;
     openCases: Array<{ caseId: string; outcomeStatus: string }>;
     recentAuditEvents: Array<{ eventType: string; summary: string }>;
   };
@@ -91,6 +91,7 @@ test("GET /api/employees/:id/profile returns identity + outcomes + open cases + 
   assert.equal(p.active, true);
   // employee-profile uses the engine registry name (consistent with cases/runs), i.e. "Audiogram".
   const audiogram = p.measureOutcomes.find((o) => o.outcomeStatus === "OVERDUE")!;
+  assert.equal(audiogram.measureId, "audiogram");
   assert.equal(audiogram.measureName, "Audiogram");
   assert.equal(audiogram.outcomeStatus, "OVERDUE");
   // ACTUAL recency, not the overdue amount: exam was 420 days ago against a 365-day window.
