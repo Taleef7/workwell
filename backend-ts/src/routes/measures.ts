@@ -49,7 +49,7 @@ import { computeLiteralDiff, literalDiffAvailable } from "../standards/literal-d
 import { CMS122_OFFICIAL_META } from "../standards/cms122-official.ts";
 import { StoreValueSetResolver, type ValueSetResolver } from "@work-well/measure-engine";
 
-import { EMPLOYEES } from "../engine/synthetic/employee-catalog.ts";
+import { EMPLOYEES } from "../config/deployment-profile.ts";
 import { createWorkwellEngine } from "../engine/cql/workwell-engine.ts";
 
 interface MeasuresEnv {

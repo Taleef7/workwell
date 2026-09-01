@@ -1,11 +1,29 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import { dirname, resolve } from "node:path";
 import type { MeasureScanOptions, OutcomeRecord, OutcomeStore, OutcomeWithRun } from "../stores/outcome-store.ts";
 import type { RunStore } from "../stores/run-store.ts";
-import type { CaseStore } from "../stores/case-store.ts";
+import type { CaseRecord, CaseStore } from "../stores/case-store.ts";
 import type { QualitySnapshotRow, QualitySnapshotStore } from "../stores/quality-snapshot-store.ts";
 import { programOverview, programRiskOutlook, programTopDrivers, programTrend } from "./program-read-models.ts";
 import { replaceLiveDirectory } from "../engine/ingress/webchart/live-directory.ts";
+
+const backendRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
+
+function runProfileChild(instance: string | undefined, source: string): Record<string, unknown> {
+  const env = { ...process.env };
+  if (instance === undefined) delete env.WORKWELL_INSTANCE;
+  else env.WORKWELL_INSTANCE = instance;
+  const result = spawnSync(
+    process.execPath,
+    ["--import", "tsx", "--input-type=module", "-e", source],
+    { cwd: backendRoot, env, encoding: "utf8" },
+  );
+  assert.equal(result.status, 0, result.stderr);
+  return JSON.parse(result.stdout.trim()) as Record<string, unknown>;
+}
 
 const wcRow: OutcomeWithRun = {
   runId: "run-wc-program", runStartedAt: "2026-07-17T00:00:00.000Z", runScopeType: "MEASURE",
@@ -20,6 +38,7 @@ function deps(
     snapshots?: QualitySnapshotStore;
     configured?: boolean;
     calls?: { joined: number; byRun: number; measureScan: number; measureScanOptions?: MeasureScanOptions };
+    cases?: CaseRecord[];
   } = {},
 ) {
   const outcomeStore = {
@@ -41,7 +60,7 @@ function deps(
     aggregateScaleRun: async () => [],
   } as unknown as OutcomeStore;
   const runStore = { listRuns: async () => [] } as unknown as RunStore;
-  const caseStore = { listCases: async () => [] } as unknown as CaseStore;
+  const caseStore = { listCases: async () => options.cases ?? [] } as unknown as CaseStore;
   return {
     outcomeStore,
     runStore,
@@ -289,3 +308,278 @@ test("programRiskOutlook — successful wc history rehydrates raw name and a new
     replaceLiveDirectory([]);
   }
 });
+
+test("default profile — non-catalog subjects (e.g. QRDA Cypress imports) are included in read models", async () => {
+  const nonCatalogSubjectId = "cypress-mrn-non-catalog-99";
+  const row: OutcomeWithRun = {
+    runId: "run-cypress-1",
+    runStartedAt: "2026-07-17T00:00:00.000Z",
+    runScopeType: "MEASURE",
+    runStatus: "COMPLETED",
+    runTriggeredBy: "manual",
+    subjectId: nonCatalogSubjectId,
+    measureId: "audiogram",
+    status: "COMPLIANT",
+  };
+  const caseRec: CaseRecord = {
+    id: "case-cypress-1",
+    employeeId: nonCatalogSubjectId,
+    measureId: "audiogram",
+    evaluationPeriod: "2026-01-01",
+    status: "OPEN",
+    priority: "HIGH",
+    assignee: null,
+    nextAction: null,
+    currentOutcomeStatus: "COMPLIANT",
+    lastRunId: "run-cypress-1",
+    createdAt: "2026-07-17T00:00:00.000Z",
+    updatedAt: "2026-07-17T00:00:00.000Z",
+    closedAt: null,
+    closedReason: null,
+    closedBy: null,
+  };
+
+  const measureRow: OutcomeRecord = {
+    id: "out-cypress-1",
+    runId: "run-cypress-1",
+    subjectId: nonCatalogSubjectId,
+    measureId: "audiogram",
+    evaluationPeriod: "2026-01-01",
+    status: "COMPLIANT",
+    evidence: {},
+    evaluatedAt: "2026-07-17T00:00:00.000Z",
+  };
+
+  const d = deps([row], { cases: [caseRec], measureRows: [measureRow] });
+  const overview = await programOverview(d, {});
+  const audiogram = overview.find((m) => m.measureId === "audiogram")!;
+  assert.equal(audiogram.totalEvaluated, 1, "unresolved QRDA subject must be evaluated on default profile");
+  assert.equal(audiogram.compliant, 1, "unresolved QRDA subject contributes to compliant total on default profile");
+  assert.equal(audiogram.openCaseCount, 1, "unresolved QRDA subject open case must be counted on default profile");
+
+  const trend = await programTrend(d, "audiogram", {});
+  assert.equal(trend.length, 1);
+  assert.equal(trend[0]!.totalEvaluated, 1);
+  assert.equal(trend[0]!.compliant, 1);
+
+  const outlook = await programRiskOutlook(d, "audiogram", 30);
+  assert.ok(outlook);
+  const unknownSite = outlook!.siteComplianceRates.find((s) => s.site === "Unknown");
+  assert.equal(unknownSite?.total, 1, "unresolved QRDA subject is included in risk outlook under Unknown site on default profile");
+});
+
+test("scoped profile (Maui) — isolates data by excluding foreign and unresolved subjects from read models", () => {
+  const output = runProfileChild("maui", `
+    import { programOverview, programRiskOutlook, programTrend } from "./src/program/program-read-models.ts";
+
+    const recentExam = new Date(Date.now() - 320 * 86400000).toISOString().slice(0, 10);
+
+    const mauiRow = {
+      runId: "run-maui-1", runStartedAt: "2026-07-17T00:00:00.000Z", runScopeType: "MEASURE",
+      runStatus: "COMPLETED", runTriggeredBy: "manual", subjectId: "pat-001", measureId: "cms122",
+      evaluationPeriod: "2026-01-01", status: "COMPLIANT",
+      evidence: { expressionResults: [{ define: "Most Recent Exam Date", result: recentExam }] },
+      evaluatedAt: "2026-07-17T00:00:00.000Z",
+    };
+    const twhRow = {
+      runId: "run-maui-1", runStartedAt: "2026-07-17T00:00:00.000Z", runScopeType: "MEASURE",
+      runStatus: "COMPLETED", runTriggeredBy: "manual", subjectId: "emp-001", measureId: "cms122",
+      evaluationPeriod: "2026-01-01", status: "OVERDUE", evidence: {},
+      evaluatedAt: "2026-07-17T00:00:00.000Z",
+    };
+    const unresolvableRow = {
+      runId: "run-maui-1", runStartedAt: "2026-07-17T00:00:00.000Z", runScopeType: "MEASURE",
+      runStatus: "COMPLETED", runTriggeredBy: "manual", subjectId: "cypress-mrn-foreign", measureId: "cms122",
+      evaluationPeriod: "2026-01-01", status: "COMPLIANT",
+      evidence: { expressionResults: [{ define: "Most Recent Exam Date", result: recentExam }] },
+      evaluatedAt: "2026-07-17T00:00:00.000Z",
+    };
+    const liveWcRow = {
+      runId: "run-maui-1", runStartedAt: "2026-07-17T00:00:00.000Z", runScopeType: "MEASURE",
+      runStatus: "COMPLETED", runTriggeredBy: "manual", subjectId: "wc|maui-live-1", measureId: "cms122",
+      evaluationPeriod: "2026-01-01", status: "COMPLIANT", evidence: {},
+      evaluatedAt: "2026-07-17T00:00:00.000Z",
+    };
+
+    const twhStreakRows = ["2024-01-01", "2025-01-01", "2026-01-01"].map((period, index) => ({
+      id: \`out-twh-\${index}\`, runId: "run-maui-1", runStartedAt: "2026-07-17T00:00:00.000Z", runScopeType: "MEASURE",
+      runStatus: "COMPLETED", runTriggeredBy: "manual", subjectId: "emp-001", measureId: "cms122", evaluationPeriod: period,
+      status: "OVERDUE", evidence: {}, evaluatedAt: \`\${period}T00:00:00.000Z\`,
+    }));
+
+    const mauiCase = {
+      id: "case-1", employeeId: "pat-001", measureId: "cms122", status: "OPEN", createdAt: "2026-07-17T00:00:00.000Z",
+    };
+    const twhCase = {
+      id: "case-2", employeeId: "emp-001", measureId: "cms122", status: "OPEN", createdAt: "2026-07-17T00:00:00.000Z",
+    };
+    const unresolvableCase = {
+      id: "case-3", employeeId: "cypress-mrn-foreign", measureId: "cms122", status: "OPEN", createdAt: "2026-07-17T00:00:00.000Z",
+    };
+
+    const rows = [mauiRow, twhRow, unresolvableRow, liveWcRow];
+    const riskRows = [mauiRow, ...twhStreakRows, unresolvableRow, liveWcRow];
+    const cases = [mauiCase, twhCase, unresolvableCase];
+
+    const fakeDeps = {
+      outcomeStore: {
+        listOutcomesWithRun: async () => rows,
+        listOutcomesForMeasure: async () => riskRows,
+        aggregateScaleRun: async () => [],
+      },
+      runStore: { listRuns: async () => [] },
+      caseStore: { listCases: async () => cases },
+      webChartEnv: { WORKWELL_WEBCHART_BASE_URL: "http://webchart.test", WORKWELL_WEBCHART_API_KEY: "fixture-key" },
+    };
+
+    const overview = await programOverview(fakeDeps, {});
+    const cms122 = overview.find((m) => m.measureId === "cms122");
+    const trend = await programTrend(fakeDeps, "cms122", {});
+    const outlook = await programRiskOutlook(fakeDeps, "cms122", 30);
+
+    console.log(JSON.stringify({
+      totalEvaluated: cms122?.totalEvaluated,
+      compliant: cms122?.compliant,
+      overdue: cms122?.overdue,
+      openCaseCount: cms122?.openCaseCount,
+      trendPoints: trend.map((p) => ({ totalEvaluated: p.totalEvaluated, compliant: p.compliant, overdue: p.overdue })),
+      outlookSiteRates: outlook?.siteComplianceRates,
+      outlookRepeatNonCompliers: outlook?.repeatNonCompliers,
+      outlookUpcomingExpirations: outlook?.upcomingExpirations,
+    }));
+  `);
+
+  assert.equal(output.totalEvaluated, 2, "only Maui-resolvable subjects (pat-001 and wc|) contribute to totalEvaluated");
+  assert.equal(output.compliant, 2, "both pat-001 and wc| are COMPLIANT");
+  assert.equal(output.overdue, 0, "non-Maui overdue subjects emp-001 and cypress-mrn-foreign must be excluded");
+  assert.equal(output.openCaseCount, 1, "only the Maui subject's open case is counted");
+  assert.deepEqual(output.trendPoints, [{ totalEvaluated: 2, compliant: 2, overdue: 0 }]);
+
+  const siteRates = output.outlookSiteRates as Array<{ site: string; total: number; compliant: number }>;
+  assert.equal(siteRates.some((s) => s.site === "Unknown"), false, "foreign and unresolvable subjects must not produce an Unknown site in risk outlook");
+  const wailuku = siteRates.find((s) => s.site === "Wailuku Clinic");
+  assert.ok(wailuku, "Maui-resolvable subject pat-001 site must be present in risk outlook");
+  assert.equal(wailuku.total, 1, "Maui-resolvable subject is counted in its site");
+  assert.equal(wailuku.compliant, 1);
+
+  const repeatNonCompliers = output.outlookRepeatNonCompliers as Array<{ externalId: string }>;
+  assert.equal(repeatNonCompliers.some((r) => r.externalId === "emp-001" || r.externalId === "cypress-mrn-foreign"), false, "foreign subjects must not appear in repeatNonCompliers");
+  const upcomingExpirations = output.outlookUpcomingExpirations as Array<{ externalId: string }>;
+  assert.equal(upcomingExpirations.length, 1, "Maui-resolvable subject must appear in upcomingExpirations");
+  assert.equal(upcomingExpirations[0]?.externalId, "pat-001");
+  assert.equal(upcomingExpirations.some((u) => u.externalId === "emp-001" || u.externalId === "cypress-mrn-foreign"), false, "foreign subjects must not appear in upcomingExpirations");
+});
+
+test("foldScaleCounts — completed seed:scale run skipped on Maui profile and folded on default profile", () => {
+  const source = `
+    import { programOverview } from "./src/program/program-read-models.ts";
+
+    const mauiRow = {
+      runId: "run-maui-1", runStartedAt: "2026-07-17T00:00:00.000Z", runScopeType: "MEASURE",
+      runStatus: "COMPLETED", runTriggeredBy: "manual", subjectId: "pat-001", measureId: "cms122", status: "COMPLIANT",
+    };
+    const scaleRun = {
+      id: "run-scale-1", scopeId: "cms122", triggeredBy: "seed:scale", status: "COMPLETED",
+      startedAt: "2026-07-17T00:00:00.000Z", scopeType: "MEASURE",
+    };
+    const fakeDeps = {
+      outcomeStore: {
+        listOutcomesWithRun: async () => [mauiRow],
+        aggregateScaleRun: async () => [
+          { status: "COMPLIANT", count: 50 },
+          { status: "OVERDUE", count: 10 },
+        ],
+      },
+      runStore: {
+        listRuns: async () => [scaleRun],
+      },
+      caseStore: { listCases: async () => [] },
+      webChartEnv: { WORKWELL_WEBCHART_BASE_URL: "http://webchart.test", WORKWELL_WEBCHART_API_KEY: "fixture-key" },
+    };
+
+    const overview = await programOverview(fakeDeps, {});
+    const cms122 = overview.find((m) => m.measureId === "cms122");
+    console.log(JSON.stringify({
+      totalEvaluated: cms122?.totalEvaluated,
+      compliant: cms122?.compliant,
+      overdue: cms122?.overdue,
+      latestRunId: cms122?.latestRunId,
+    }));
+  `;
+
+  const mauiOutput = runProfileChild("maui", source);
+  assert.equal(mauiOutput.totalEvaluated, 1, "Maui profile must not fold scale counts into summary totalEvaluated");
+  assert.equal(mauiOutput.compliant, 1, "Maui profile must not fold scale counts into summary compliant");
+  assert.equal(mauiOutput.overdue, 0, "Maui profile must not fold scale counts into summary overdue");
+
+  const defaultOutput = runProfileChild(undefined, source);
+  assert.equal(defaultOutput.totalEvaluated, 61, "default profile must fold scale counts into summary totalEvaluated (1 live + 60 scale)");
+  assert.equal(defaultOutput.compliant, 51, "default profile must fold scale counts into summary compliant (1 live + 50 scale)");
+  assert.equal(defaultOutput.overdue, 10, "default profile must fold scale counts into summary overdue (0 live + 10 scale)");
+});
+
+test("programTrend — monthly snapshot scope fallback on Maui profile and snapshot series on default profile", () => {
+  const source = `
+    import { programTrend } from "./src/program/program-read-models.ts";
+
+    const mauiRow = {
+      runId: "run-maui-per-run-1", runStartedAt: "2026-07-17T00:00:00.000Z", runScopeType: "MEASURE",
+      runStatus: "COMPLETED", runTriggeredBy: "manual", subjectId: "pat-001", measureId: "cms122", status: "COMPLIANT",
+    };
+    const allSnapshots = [
+      {
+        id: "snap-2026-06", measureId: "cms122", period: "2026-06",
+        periodStart: "2026-06-01T00:00:00.000Z", periodEnd: "2026-06-30T00:00:00.000Z",
+        scopeLevel: "all", scopeId: "ALL", tenantId: null, numerator: 80, denominator: 100,
+        compliant: 80, dueSoon: 0, overdue: 20, missingData: 0, excluded: 0,
+        sourceRunId: "run-snap-2026-06", computedAt: "2026-06-30T00:00:00.000Z",
+      },
+      {
+        id: "snap-2026-07", measureId: "cms122", period: "2026-07",
+        periodStart: "2026-07-01T00:00:00.000Z", periodEnd: "2026-07-31T00:00:00.000Z",
+        scopeLevel: "all", scopeId: "ALL", tenantId: null, numerator: 90, denominator: 100,
+        compliant: 90, dueSoon: 0, overdue: 10, missingData: 0, excluded: 0,
+        sourceRunId: "run-snap-2026-07", computedAt: "2026-07-31T00:00:00.000Z",
+      },
+    ];
+    let snapshotQueried = false;
+    const fakeDeps = {
+      outcomeStore: {
+        listOutcomesWithRun: async () => [mauiRow],
+      },
+      runStore: { listRuns: async () => [] },
+      caseStore: { listCases: async () => [] },
+      qualitySnapshots: {
+        querySnapshots: async () => {
+          snapshotQueried = true;
+          return allSnapshots;
+        },
+        upsertSnapshots: async () => {},
+      },
+      webChartEnv: { WORKWELL_WEBCHART_BASE_URL: "http://webchart.test", WORKWELL_WEBCHART_API_KEY: "fixture-key" },
+    };
+
+    const trend = await programTrend(fakeDeps, "cms122", {}, { monthly: true });
+    console.log(JSON.stringify({
+      trend,
+      snapshotQueried,
+    }));
+  `;
+
+  const mauiOutput = runProfileChild("maui", source);
+  const mauiTrend = mauiOutput.trend as Array<{ runId: string; period?: string; totalEvaluated: number; compliant: number }>;
+  assert.equal(mauiTrend.length, 1, "Maui profile must return per-run series (1 point)");
+  assert.equal(mauiTrend[0]!.runId, "run-maui-per-run-1", "Maui profile must return per-run runId");
+  assert.equal(mauiTrend[0]!.period, undefined, "Maui profile fallback points must carry no period");
+  assert.equal(mauiTrend[0]!.totalEvaluated, 1, "Maui profile must evaluate only profile-isolated subjects");
+  assert.equal(mauiTrend[0]!.compliant, 1);
+
+  const defaultOutput = runProfileChild(undefined, source);
+  const defaultTrend = defaultOutput.trend as Array<{ runId: string; period?: string; totalEvaluated: number; compliant: number }>;
+  assert.equal(defaultTrend.length, 2, "default profile must return monthly snapshot series (2 points)");
+  assert.deepEqual(defaultTrend.map((p) => p.period), ["2026-07", "2026-06"], "default profile must return monthly snapshot periods newest-first");
+  assert.deepEqual(defaultTrend.map((p) => p.runId), ["run-snap-2026-07", "run-snap-2026-06"]);
+  assert.equal(defaultTrend[0]!.totalEvaluated, 100);
+  assert.equal(defaultTrend[0]!.compliant, 90);
+});
+

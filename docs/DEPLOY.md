@@ -4,7 +4,8 @@
 **Status:** Current deployment reference for the merged WorkWell Measure Studio stack.
 **Cost target:** keep the live stack under about $25/month.
 
-> The MIE TWH stack below is the **sole live deployment**. The earlier Vercel + Fly.io
+> The MIE TWH stack below is the **live primary deployment**. The Maui sandbox is documented below.
+> The earlier Vercel + Fly.io
 > public-preview stack is **decommissioned** — its setup is retained only as
 > [Appendix A](#appendix-a--decommissioned-vercel--flyio-stack-historical-reference) for historical reference.
 
@@ -13,7 +14,7 @@
 ## MIE Create-a-Container Deployment (sole live stack)
 
 The deployment runs on MIE's internal container platform (`os.mieweb.org`).
-**One instance only: TWH** — Total Worker Health. Encompasses all OSHA safety + eCQM wellness measures.
+**The live primary instance is TWH** — Total Worker Health. Encompasses all OSHA safety + eCQM wellness measures.
 
 | Service | Hostname | Image |
 |---------|----------|-------|
@@ -404,7 +405,7 @@ environment variable names (e.g. `DATABASE_URL_TWH` → `DATABASE_URL`,
 
 ### Backend runtime configuration (set by the workflow / container)
 
-- `WORKWELL_INSTANCE=twh` — selects TWH seeding (see below)
+- `WORKWELL_INSTANCE=twh` — selects the default deployment profile: the pre-existing TWH behavior
 - `SPRING_PROFILES_ACTIVE=prod`
 - `WORKWELL_AUTH_ENABLED=true`, `WORKWELL_AUTH_JWT_SECRET=<strong-random-secret>`
 - `WORKWELL_AUTH_COOKIE_SAME_SITE=None`, `WORKWELL_AUTH_COOKIE_SECURE=true`
@@ -417,13 +418,12 @@ environment variable names (e.g. `DATABASE_URL_TWH` → `DATABASE_URL`,
 > cookie on the `POST /api/auth/refresh` fetch — otherwise silent token refresh fails and
 > users are logged out on every reload.
 
-### Instance seeding
+### Deployment profiles
 
-The backend detects `WORKWELL_INSTANCE=twh` (set in the workflow) and seeds:
-- 4 OSHA surveillance measures with full CQL (Audiogram, HAZWOPER, TB, Flu) + 2 OSHA catalog-only
-- 5 HEDIS wellness measures with full CQL (Cholesterol, BMI, Diabetes HbA1c, Hypertension, Adult Immunization AIS-E)
-- 3 permanent immunization-panel measures with full CQL (MMR, Varicella, Hep B series — E10.6)
-- 49 CMS eCQM catalog entries (CMS122v14 + CMS125v14 Active with full CQL; 47 Draft)
+`WORKWELL_INSTANCE` selects the deployment profile: which tenants are visible, which tenants are
+evaluable, and which measures are runnable. Unset, `default`, and `twh` reproduce the pre-existing TWH
+behavior; `maui` exposes the 48-patient Maui directory and currently allows `cms122`, `cms125`, and
+`hypertension` to run. The measure catalog and database seeding remain shared across profiles.
 
 Total catalog: **63 measures**, 14 runnable (see `docs/MEASURES.md` for the full breakdown).
 
@@ -718,6 +718,57 @@ DELETE FROM workwell_spike.value_sets WHERE source = 'VSAC';
 
 Use `workflow_dispatch` with `replace_existing: true` from the GitHub Actions UI.
 
+### Maui sandbox deployment
+
+Maui is a separate sandbox for the pilot group on the same MIE Create-a-Container platform. It has its
+own Neon database and JWT secret, and uses the same backend image build and deployment script as TWH:
+
+| Service | Hostname | Image |
+|---------|----------|-------|
+| Frontend | `maui.os.mieweb.org` | `ghcr.io/taleef7/workwell-maui-frontend` |
+| Backend API | `maui-api-ts.os.mieweb.org` | `ghcr.io/taleef7/workwell-api-ts` |
+
+Run `.github/workflows/deploy-maui-mieweb.yml` from **Actions → Deploy Maui OS MIEWeb → Run workflow**.
+It is **`workflow_dispatch` only** because the two Maui-only secrets are not present on every push;
+an automatic trigger would fail until those secrets were set.
+
+Owner-set GitHub secrets:
+
+| Secret | Purpose |
+|--------|---------|
+| `DATABASE_URL_MAUI` | Pooled Neon connection string for the Maui sandbox |
+| `WORKWELL_AUTH_JWT_SECRET_MAUI` | JWT signing secret for the Maui sandbox |
+
+The workflow reuses these secrets from TWH: `LAUNCHPAD_API_URL`, `LAUNCHPAD_API_KEY`,
+`OPENAI_API_KEY`, `WORKWELL_VSAC_API_KEY_VENDOR`, and `WORKWELL_VSAC_API_KEY_TWH`. The workflow maps
+the two Maui-only secrets onto the runtime names `DATABASE_URL` and `WORKWELL_AUTH_JWT_SECRET`.
+It sets `WORKWELL_INSTANCE=maui` and passes `NEXT_PUBLIC_SUBJECT_TERM=patient` while building the
+frontend image. `WORKWELL_OFFICIAL_MEASURES` is deliberately **unset**; Maui uses authored CQL until
+each pilot measure passes its own flip gate. Maui has no self-heal reconciler, so dispatch the workflow
+again for a replacement or recovery.
+
+Evidence bytes deliberately remain on the in-container `fs` binding for now; the Maui workflow omits the
+four `WORKWELL_BUCKET_S3_*` variables, so evidence is lost whenever the container is recreated.
+
+**Backend image tags are namespaced, and that is load-bearing — do not "simplify" it.** Maui and TWH
+share one GHCR backend repository (`ghcr.io/taleef7/workwell-api-ts`), and
+`reconcile-twh-mieweb.yml` heals the live `twh-api-ts` container by recreating it from that
+repository's `:latest`. So the Maui workflow pushes **`maui-latest`** and **`maui-sha-<SHA>`** and
+deploys from `maui-sha-<SHA>`; it must never publish `:latest`, or a Maui dispatch from an unmerged
+branch would leave the live TWH demo able to self-heal onto that code. `deploy-staging-mieweb.yml`
+namespaces its tags (`staging-*`) for the same reason. The frontend needs no namespacing — Maui
+builds a different image repository. **Maui rollback:** re-dispatch with `replace_existing: true` at
+an earlier commit, whose image is `maui-sha-<that SHA>`.
+
+Sandbox accounts (all use the documented demo password `Workwell123!`):
+
+| Identifier | Role |
+|------------|------|
+| `quality-lead@maui.workwell.dev` | `ROLE_CASE_MANAGER` |
+| `quality-staff@maui.workwell.dev` | `ROLE_CASE_MANAGER` |
+| `clinician@maui.workwell.dev` | `ROLE_VIEWER` |
+| `admin@maui.workwell.dev` | `ROLE_ADMIN` |
+
 ### Staging environment — live WebChart against teatea (separate stack; NOT the demo)
 
 `deploy-staging-mieweb.yml` provisions a **separate, non-demo** environment that runs the app **live
@@ -874,7 +925,7 @@ shows all services `Up`).
 | `DATABASE_URL_DIRECT` | Backend | Direct Neon connection for Flyway migrations |
 | `OPENAI_API_KEY` | Backend | AI calls (drafting and explanation surfaces) |
 | `SPRING_PROFILES_ACTIVE` | Backend | Always `prod` in deployed env |
-| `WORKWELL_INSTANCE` | Backend | `twh` selects the TWH seed set |
+| `WORKWELL_INSTANCE` | Backend | Selects the deployment profile: visible tenants, evaluable tenants, and runnable measures. Unset/default/`twh` reproduces the pre-existing TWH behavior; `maui` selects the Maui profile. |
 | `WORKWELL_AUTH_ENABLED` | Backend | Enable auth; set `true` in deployed env |
 | `WORKWELL_AUTH_JWT_SECRET` | Backend | Required when auth is enabled; use a strong secret |
 | `WORKWELL_AUTH_COOKIE_SAME_SITE` | Backend | Refresh-cookie SameSite. **Must be `None` in production** (split frontend/API origins). Default `Lax` for local same-origin dev. |

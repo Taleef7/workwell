@@ -15,7 +15,12 @@ import type { CaseEventStore } from "../stores/case-event-store.ts";
 import type { OutcomeStore } from "../stores/outcome-store.ts";
 import type { RunStore } from "../stores/run-store.ts";
 import type { EvaluateMeasureBinding } from "@work-well/measure-engine";
-import { employeeById, type EmployeeProfile, EVALUABLE_EMPLOYEES } from "../engine/synthetic/employee-catalog.ts";
+import {
+  employeeById,
+  type EmployeeProfile,
+  EVALUABLE_EMPLOYEES,
+  isRunnableMeasure,
+} from "../config/deployment-profile.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
 import { deriveExamConfig } from "../engine/synthetic/exam-config.ts";
@@ -67,7 +72,7 @@ export async function rerunToVerify(deps: RerunDeps, caseId: string, actor: stri
   const employee = employeeById(existing.employeeId);
   const binding = MEASURE_BINDINGS[existing.measureId];
   // Unknown subject/measure can't be verified — leave the case untouched (no state change).
-  if (!employee || !binding) return null;
+  if (!employee || !binding || !isRunnableMeasure(existing.measureId)) return null;
 
   // Re-evaluate AS-OF today so the day-math (days overdue, etc.) is CURRENT, while the outcome
   // stays keyed to the case's existing compliance-cycle period (`existing.evaluationPeriod`, the

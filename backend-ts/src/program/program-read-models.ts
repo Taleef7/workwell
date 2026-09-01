@@ -18,6 +18,7 @@ import { ACTIVE_CASE_STATUSES } from "../case/case-logic.ts";
 import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
 import { day, isCompletedRun, isPopulationRun, round1 } from "./rollup-shared.ts";
 import { directoryForRows, type DirectorySnapshot } from "../engine/ingress/webchart/live-directory.ts";
+import { DEPLOYMENT_PROFILE, DIRECTORY, tenantById } from "../config/deployment-profile.ts";
 import { isWebChartConfigured, type DataSourceEnv } from "../engine/ingress/data-source.ts";
 
 export interface ProgramSummary {
@@ -166,7 +167,7 @@ export async function programSites(deps: Pick<ProgramDeps, "outcomeStore" | "web
   const rows = (await deps.outcomeStore.listLatestPopulationOutcomes({ excludeScale: true, excludeTrendHistory: true })).filter(
     (row) => isPopulationRun(row.runScopeType) && isCompletedRun(row.runStatus) && row.runTriggeredBy !== "seed:scale",
   );
-  return listSites(directoryForRows(rows, isWebChartConfigured(deps.webChartEnv ?? {}), deps.webChartEnv).employees);
+  return listSites(directoryForRows(rows, isWebChartConfigured(deps.webChartEnv ?? {}), deps.webChartEnv, DIRECTORY).employees);
 }
 
 /** One run's site-filtered outcome rows (the unit overview/trend/top-drivers aggregate). */
@@ -198,6 +199,17 @@ const tenantMatcher = (filters: ProgramFilters, employeeLookup = employeeById) =
   return (subjectId: string) => !tenant || (employeeLookup(subjectId)?.tenantId ?? null) === tenant;
 };
 
+/**
+ * On scoped profiles (e.g. Maui), isolate data by excluding subjects that do not resolve in the
+ * profile directory. On the default profile, this is a no-op: a TWH database legitimately holds
+ * non-catalog subjects (notably QRDA Category I imports keyed by Cypress MRNs), which must not be
+ * silently dropped from /api/programs.
+ */
+const profileMatcher = (employeeLookup: (id: string) => EmployeeProfile | null) => {
+  if (DEPLOYMENT_PROFILE.id === "default") return (_subjectId: string) => true;
+  return (subjectId: string) => employeeLookup(subjectId) !== null;
+};
+
 /** Hide only live-tenant ids when the existing runtime seam is off; all non-wc legacy behavior stays unchanged. */
 const subjectVisible = (subjectId: string, webChartConfigured: boolean): boolean =>
   webChartConfigured || !subjectId.startsWith("wc|");
@@ -223,11 +235,16 @@ export async function programOverview(deps: ProgramDeps, filters: ProgramFilters
     (row) => isPopulationRun(row.runScopeType) && isCompletedRun(row.runStatus) && row.runTriggeredBy !== "seed:scale",
   );
   const webChartConfigured = isWebChartConfigured(deps.webChartEnv ?? {});
-  const directory = directoryForRows(successfulRows, webChartConfigured, deps.webChartEnv);
+  const directory = directoryForRows(successfulRows, webChartConfigured, deps.webChartEnv, DIRECTORY);
   const siteMatch = siteMatcher(filters, directory.employeeById);
   const tenantMatch = tenantMatcher(filters, directory.employeeById);
+  const profileMatch = profileMatcher(directory.employeeById);
   const rows = successfulRows.filter(
-    (row) => subjectVisible(row.subjectId, webChartConfigured) && siteMatch(row.subjectId) && tenantMatch(row.subjectId),
+    (row) =>
+      subjectVisible(row.subjectId, webChartConfigured) &&
+      profileMatch(row.subjectId) &&
+      siteMatch(row.subjectId) &&
+      tenantMatch(row.subjectId),
   );
   const byMeasure = new Map<string, OutcomeWithRun[]>();
   for (const r of rows) (byMeasure.get(r.measureId) ?? byMeasure.set(r.measureId, []).get(r.measureId)!).push(r);
@@ -246,6 +263,7 @@ export async function programOverview(deps: ProgramDeps, filters: ProgramFilters
         c.measureId === m.id &&
         (ACTIVE_CASE_STATUSES as readonly string[]).includes(c.status) &&
         subjectVisible(c.employeeId, webChartConfigured) &&
+        profileMatch(c.employeeId) &&
         siteMatch(c.employeeId) &&
         tenantMatch(c.employeeId) &&
         inPeriod(c.createdAt),
@@ -276,13 +294,18 @@ export async function programOverview(deps: ProgramDeps, filters: ProgramFilters
   return summaries.sort((a, b) => a.measureName.localeCompare(b.measureName));
 }
 
+const SCALE_TENANT_ID = "mhn";
+
 /** Add (or, for ?tenant=mhn, replace with) the scale tenant's per-measure counts from the latest
  *  seed:scale run per measure. Bounded — aggregateScaleRun never materializes the per-subject rows.
  *  Skipped when a site filter is active (scale data has no equivalent site dimension) or when the
  *  date window excludes the scale run's startedAt (keeps filtered KPIs consistent). */
 async function foldScaleCounts(deps: ProgramDeps, summaries: ProgramSummary[], filters: ProgramFilters): Promise<void> {
+  // Scale counts are pre-aggregated in SQL across subjects, so row-level profile filtering
+  // provably cannot reach them; skip when the scale tenant is not visible on this deployment.
+  if (!tenantById(SCALE_TENANT_ID)) return;
   const tenant = filters.tenant?.trim() || null;
-  if (tenant && tenant !== "mhn") return; // scoped to a non-scale tenant → no scale data
+  if (tenant && tenant !== SCALE_TENANT_ID) return; // scoped to a non-scale tenant → no scale data
   // Scale data is not filterable by the live-tenant site dimension — skip when site is active so
   // a scoped view like ?site=Plant+A doesn't silently add the full 120k mhn population.
   if (filters.site?.trim()) return;
@@ -300,13 +323,13 @@ async function foldScaleCounts(deps: ProgramDeps, summaries: ProgramSummary[], f
   for (const s of summaries) {
     const runId = latest.get(s.measureId);
     if (!runId) {
-      if (tenant === "mhn") zeroSummary(s); // mhn-scoped but no scale data for this measure
+      if (tenant === SCALE_TENANT_ID) zeroSummary(s); // mhn-scoped but no scale data for this measure
       continue;
     }
     const groups = await deps.outcomeStore.aggregateScaleRun(runId);
     const n = (st: string) => groups.filter((g) => g.status === st).reduce((a, g) => a + g.count, 0);
-    const baseTotal = tenant === "mhn" ? 0 : s.totalEvaluated;
-    const base = (cur: number) => (tenant === "mhn" ? 0 : cur);
+    const baseTotal = tenant === SCALE_TENANT_ID ? 0 : s.totalEvaluated;
+    const base = (cur: number) => (tenant === SCALE_TENANT_ID ? 0 : cur);
     s.compliant = base(s.compliant) + n("COMPLIANT");
     s.dueSoon = base(s.dueSoon) + n("DUE_SOON");
     s.overdue = base(s.overdue) + n("OVERDUE");
@@ -314,7 +337,7 @@ async function foldScaleCounts(deps: ProgramDeps, summaries: ProgramSummary[], f
     s.excluded = base(s.excluded) + n("EXCLUDED");
     s.totalEvaluated = baseTotal + groups.reduce((a, g) => a + g.count, 0);
     s.complianceRate = round1(s.compliant, s.totalEvaluated);
-    if (tenant === "mhn") s.latestRunId = runId;
+    if (tenant === SCALE_TENANT_ID) s.latestRunId = runId;
   }
 }
 
@@ -340,11 +363,16 @@ async function runsWithOutcomes(
   const successfulRows = persistedRows.filter((row) => isPopulationRun(row.runScopeType) && isCompletedRun(row.runStatus));
   const hasWebChartRows = successfulRows.some((row) => row.subjectId.startsWith("wc|"));
   const webChartConfigured = isWebChartConfigured(deps.webChartEnv ?? {});
-  const directory = directoryForRows(successfulRows, webChartConfigured, deps.webChartEnv);
+  const directory = directoryForRows(successfulRows, webChartConfigured, deps.webChartEnv, DIRECTORY);
   const siteMatch = siteMatcher(filters, directory.employeeById);
   const tenantMatch = tenantMatcher(filters, directory.employeeById);
+  const profileMatch = profileMatcher(directory.employeeById);
   const rows = successfulRows.filter(
-    (row) => subjectVisible(row.subjectId, webChartConfigured) && siteMatch(row.subjectId) && tenantMatch(row.subjectId),
+    (row) =>
+      subjectVisible(row.subjectId, webChartConfigured) &&
+      profileMatch(row.subjectId) &&
+      siteMatch(row.subjectId) &&
+      tenantMatch(row.subjectId),
   );
   return { groups: groupByRun(rows), directory, hasWebChartRows };
 }
@@ -376,6 +404,9 @@ function monthlySnapshotScopeIsSafe(
   webChartConfigured: boolean,
   hasWebChartRows: boolean,
 ): boolean {
+  // Snapshot keys carry no deployment-profile dimension and pre-aggregate across subjects in SQL,
+  // so row-level predicates cannot reach them; scoped profiles must fall back to the per-run trend.
+  if (DEPLOYMENT_PROFILE.id !== "default") return false;
   if (webChartConfigured) return true;
   if (scope.scopeLevel === "all") return !hasWebChartRows;
   return scope.scopeId !== "wc" && !scope.scopeId.startsWith("wc|");
@@ -526,8 +557,12 @@ export async function programRiskOutlook(
     successfulPopulationOnly: true,
   });
   const webChartConfigured = isWebChartConfigured(deps.webChartEnv ?? {});
-  const directory = directoryForRows(rows, webChartConfigured, deps.webChartEnv);
-  const visibleRows = rows.filter((row) => subjectVisible(row.subjectId, webChartConfigured));
+  const directory = directoryForRows(rows, webChartConfigured, deps.webChartEnv, DIRECTORY);
+  // Isolate data on scoped profiles (e.g. Maui) — missed in initial profileMatcher rollout.
+  const profileMatch = profileMatcher(directory.employeeById);
+  const visibleRows = rows.filter(
+    (row) => subjectVisible(row.subjectId, webChartConfigured) && profileMatch(row.subjectId),
+  );
 
   // Latest outcome per subject (rows arrive oldest-first, so the last write wins).
   const latestBySubject = new Map<string, MeasureOutcomeRow>();

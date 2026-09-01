@@ -31,7 +31,8 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { officialRoutingProblems } from "./executor-router.ts";
@@ -42,7 +43,35 @@ import { OFFICIAL_GATED_MEASURES } from "../standards/official-cases.ts";
 import { OFFICIAL_MEASURE_SEMANTICS } from "./official-measure-semantics.ts";
 import { buildSummaryMeasureReport } from "../fhir/measure-report.ts";
 
-const WORKFLOWS = ["deploy-twh-mieweb.yml", "deploy-staging-mieweb.yml", "reconcile-twh-mieweb.yml"] as const;
+/**
+ * DERIVED, not listed. The previous hardcoded three-name array was the #380/#400 guard-scope shape:
+ * the test read as "the string that actually ships" while a NEW deploy workflow was invisible to it.
+ *
+ * A workflow is in scope when it (a) deploys a container through the shared deploy script and
+ * (b) runs a WorkWell APP instance — the second half keyed on `WORKWELL_INSTANCE`, which every app
+ * deployment sets and the redirect-container workflow does not. Both conditions are needed: the
+ * script reference alone also matches `deploy-workwell-redirect-mieweb.yml`, which ships no measure
+ * routing at all, so including it would pass vacuously and dilute what this guard claims to check.
+ * Keyed on semantics rather than on an image variable name, which a future workflow could rename.
+ */
+const WORKFLOW_DIR = fileURLToPath(new URL("../../../.github/workflows/", import.meta.url));
+const WORKFLOWS = readdirSync(WORKFLOW_DIR)
+  .filter((filename) => filename.endsWith(".yml") || filename.endsWith(".yaml"))
+  .filter((filename) => {
+    const yaml = readFileSync(join(WORKFLOW_DIR, filename), "utf8");
+    return /\.github\/scripts\/deploy-mieweb-container\.sh/.test(yaml) && /WORKWELL_INSTANCE/.test(yaml);
+  })
+  .sort();
+
+test("workflow discovery finds every WorkWell app deployment and excludes the redirect container", () => {
+  assert.deepEqual(WORKFLOWS, [
+    "deploy-maui-mieweb.yml",
+    "deploy-staging-mieweb.yml",
+    "deploy-twh-mieweb.yml",
+    "reconcile-twh-mieweb.yml",
+  ]);
+});
+
 
 /**
  * Workflows that recreate the SAME container and must therefore ship the same routing configuration.

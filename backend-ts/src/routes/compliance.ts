@@ -4,12 +4,12 @@
  * /api/hierarchy/rollup.
  *
  *   GET /api/compliance/roster?panel=&status=&site=&role=&q=&segment=&tenant=&page=&pageSize=
- *     → { panel, columns, rows }  + X-Total-Count header (full filtered match count)
+ *     → { panel, availablePanels, columns, rows }  + X-Total-Count header (full filtered match count)
  */
 import type { CloudDatabase } from "@mieweb/cloud";
 import { getStores } from "../stores/factory.ts";
 import { buildRoster, rosterCellCache } from "../compliance/roster-read-model.ts";
-import { isPanelId } from "../compliance/panels.ts";
+import { isPanelId, PANELS } from "../compliance/panels.ts";
 import { ensureSegmentSeed } from "../segment/segment-seed.ts";
 import type { DataSourceEnv } from "../engine/ingress/data-source.ts";
 
@@ -33,10 +33,10 @@ export async function handleCompliance(req: Request, env: ComplianceEnv): Promis
 
   const q = url.searchParams;
   // A present-but-unknown panel is a client error (Fable L24) — 400, matching the roster's own 400s on
-  // malformed dates/scopeLevel. An omitted panel still defaults (immunizations) in the read model.
+  // malformed dates/scopeLevel. An omitted panel still defaults (PROFILE_DEFAULT_PANEL) in the read model.
   const panelParam = q.get("panel");
   if (panelParam !== null && !isPanelId(panelParam)) {
-    return json({ error: "invalid_request", message: `unknown panel '${panelParam}' (expected immunizations | osha | wellness)` }, 400);
+    return json({ error: "invalid_request", message: `unknown panel '${panelParam}' (known panels: ${Object.keys(PANELS).join(" | ")})` }, 400);
   }
   await ensureSegmentSeed(env);
   const stores = await getStores(env);
@@ -61,7 +61,7 @@ export async function handleCompliance(req: Request, env: ComplianceEnv): Promis
     },
   );
   return json(
-    { panel: roster.panel, columns: roster.columns, rows: roster.rows },
+    { panel: roster.panel, availablePanels: roster.availablePanels, columns: roster.columns, rows: roster.rows },
     200,
     { "X-Total-Count": String(roster.total) },
   );

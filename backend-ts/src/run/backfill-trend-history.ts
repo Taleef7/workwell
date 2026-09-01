@@ -36,7 +36,7 @@ import type { RunStore } from "../stores/run-store.ts";
 import type { OutcomeStore, RecordOutcomeInput } from "../stores/outcome-store.ts";
 import type { CaseEventStore } from "../stores/case-event-store.ts";
 import type { EvaluateMeasureBinding } from "@work-well/measure-engine";
-import { type EmployeeProfile, EVALUABLE_EMPLOYEES } from "../engine/synthetic/employee-catalog.ts";
+import { type EmployeeProfile, EVALUABLE_EMPLOYEES, isRunnableMeasure, RUNNABLE_MEASURE_IDS as PROFILE_RUNNABLE_MEASURE_IDS } from "../config/deployment-profile.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
 import { deriveExamConfig, type TargetOutcome } from "../engine/synthetic/exam-config.ts";
@@ -52,7 +52,7 @@ export const TREND_HISTORY_SEEDED_EVENT = "TREND_HISTORY_SEEDED";
 
 const DEFAULT_WEEKS = 12;
 const DAY_MS = 86_400_000;
-const RUNNABLE_MEASURE_IDS = Object.keys(MEASURES);
+const RUNNABLE_MEASURE_IDS = PROFILE_RUNNABLE_MEASURE_IDS.filter(isRunnableMeasure);
 const TARGETS: TargetOutcome[] = ["COMPLIANT", "DUE_SOON", "OVERDUE", "MISSING_DATA", "EXCLUDED"];
 
 export interface BackfillTrendHistoryDeps {

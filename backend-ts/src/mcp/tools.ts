@@ -12,7 +12,7 @@ import type { OutcomeStore } from "../stores/outcome-store.ts";
 import type { RunStore } from "../stores/run-store.ts";
 import type { MeasureStore, MeasureRecord } from "../stores/measure-store.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
-import { employeeById } from "../engine/synthetic/employee-catalog.ts";
+import { employeeById } from "../config/deployment-profile.ts";
 import { toCaseDetail } from "../case/case-detail-read-model.ts";
 import { toCaseSummary } from "../case/case-read-models.ts";
 import { toRunSummaryFromCounts, toRunListItemFromCounts } from "../run/read-models.ts";

@@ -40,6 +40,7 @@ export interface TenantOption {
 
 export interface Roster {
   panel: PanelId;
+  availablePanels?: PanelId[];
   columns: RosterColumn[];
   rows: RosterRow[];
 }

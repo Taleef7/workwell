@@ -14,7 +14,11 @@ import type { CloudDatabase } from "@mieweb/cloud";
 import { getStores } from "../stores/factory.ts";
 import { matchesCohort } from "../segment/segment-applicability.ts";
 import { ensureSegmentSeed } from "../segment/segment-seed.ts";
-import { EMPLOYEES } from "../engine/synthetic/employee-catalog.ts";
+// The PROFILE-SCOPED directory, not the raw catalog: `previewResponse` returns member
+// `externalId`s to the client, so on a scoped deployment the raw list would hand a user the OTHER
+// deployment's subject identifiers. Same class as the roster leak — a read that reaches the full
+// directory through a path a catalog-import sweep does not obviously cover.
+import { EMPLOYEES } from "../config/deployment-profile.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
 import type { SegmentRule, SegmentOverride, HydratedSegment } from "../stores/segment-store.ts";
 import type { CaseEventStore } from "../stores/case-event-store.ts";

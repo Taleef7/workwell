@@ -34,12 +34,12 @@ import type { CloudDatabase } from "@mieweb/cloud";
 import { getStores } from "../stores/factory.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
-import { EVALUABLE_EMPLOYEES } from "../engine/synthetic/employee-catalog.ts";
+import { EVALUABLE_EMPLOYEES, isRunnableMeasure } from "../config/deployment-profile.ts";
 import { buildSyntheticBundle } from "../engine/synthetic/fhir-bundle-builder.ts";
 import { deriveExamConfig } from "../engine/synthetic/exam-config.ts";
 import { seededTargetFor } from "../run/distribution.ts";
 import { isWebChartConfigured } from "../engine/ingress/data-source.ts";
-import { employeeById } from "../engine/synthetic/employee-catalog.ts";
+import { DEPLOYMENT_PROFILE, employeeById } from "../config/deployment-profile.ts";
 import { routedEngineForEnv } from "../wiring/executor-router.ts";
 import { membershipFor, officialMembership, officialReportIdentity, type PopulationMembership } from "../fhir/measure-report.ts";
 import type { OutcomeRecord } from "../stores/outcome-store.ts";
@@ -203,7 +203,6 @@ export async function handleComplianceApi(
       400,
     );
   }
-
   const q = url.searchParams;
   const start = q.get("start");
   const end = q.get("end");
@@ -386,6 +385,12 @@ async function preview(
   if (!binding) {
     return json(
       { error: "measure_not_runnable", message: `measure '${measureId}' has no binding and cannot be evaluated` },
+      400,
+    );
+  }
+  if (!isRunnableMeasure(measureId)) {
+    return json(
+      { error: "measure_not_in_profile", message: `measure '${measureId}' is not runnable for deployment profile '${DEPLOYMENT_PROFILE.id}'` },
       400,
     );
   }

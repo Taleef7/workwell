@@ -8,7 +8,7 @@
  * slices); they are optional/nullable in the frontend type.
  */
 import type { CaseRecord } from "../stores/case-store.ts";
-import { employeeById } from "../engine/synthetic/employee-catalog.ts";
+import { employeeById } from "../config/deployment-profile.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
 
 export interface CaseSummary {

@@ -14,6 +14,7 @@ import type { OutcomeStore, OutcomeWithRun, ScaleGroupCount } from "../stores/ou
 import type { CaseStore } from "../stores/case-store.ts";
 import type { RunStore } from "../stores/run-store.ts";
 import { directoryForRows } from "../engine/ingress/webchart/live-directory.ts";
+import { DIRECTORY } from "../config/deployment-profile.ts";
 import { isWebChartConfigured, type DataSourceEnv } from "../engine/ingress/data-source.ts";
 import { MEASURE_CATALOG } from "../measure/measure-catalog.ts";
 import { ACTIVE_CASE_STATUSES } from "../case/case-logic.ts";
@@ -97,7 +98,7 @@ export async function buildHierarchyRollup(deps: HierarchyDeps, filters: Hierarc
         (r) => isPopulationRun(r.runScopeType) && isCompletedRun(r.runStatus) && r.runTriggeredBy !== SCALE_TRIGGER,
       )
     : [];
-  const directory = directoryForRows(allRows, isWebChartConfigured(deps.webChartEnv ?? {}), deps.webChartEnv);
+  const directory = directoryForRows(allRows, isWebChartConfigured(deps.webChartEnv ?? {}), deps.webChartEnv, DIRECTORY);
 
   const byPatient = new Map<string, MutableTotals>();
   const ensure = (subjectId: string): MutableTotals | null => {

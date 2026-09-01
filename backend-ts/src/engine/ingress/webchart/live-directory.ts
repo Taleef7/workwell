@@ -109,10 +109,13 @@ export function replaceLiveDirectory(bundles: readonly unknown[]): readonly Empl
   return liveEmployees;
 }
 
-export function profileForId(externalId: string): EmployeeProfile | null {
+export function profileForId(
+  externalId: string,
+  staticDirectory: DirectorySnapshot = STATIC_DIRECTORY,
+): EmployeeProfile | null {
   const cached = liveEmployees.find((employee) => employee.externalId === externalId);
   if (cached) return cached;
-  return externalId.startsWith("wc|") ? minimalProfile(externalId) : null;
+  return externalId.startsWith("wc|") ? minimalProfile(externalId) : staticDirectory.employeeById(externalId);
 }
 
 /** Build one immutable lookup view from static rows, the current registry, and persisted wc outcome ids. */
@@ -120,12 +123,13 @@ export function directoryForRows(
   rows: readonly { subjectId: string }[],
   webChartConfigured = true,
   webChartEnv?: DataSourceEnv,
+  staticDirectory: DirectorySnapshot = STATIC_DIRECTORY,
 ): DirectorySnapshot {
-  if (!webChartConfigured) return STATIC_DIRECTORY;
+  if (!webChartConfigured) return staticDirectory;
   const webChartTenant = webChartEnv
     ? configuredWebChartTenant(webChartEnv) ?? WEBCHART_TENANT
     : WEBCHART_TENANT;
-  const mergedById = new Map<string, EmployeeProfile>(EMPLOYEES.map((employee) => [employee.externalId, employee]));
+  const mergedById = new Map<string, EmployeeProfile>(staticDirectory.employees.map((employee) => [employee.externalId, employee]));
   for (const employee of liveEmployees) mergedById.set(employee.externalId, employee);
   for (const row of rows) {
     if (row.subjectId.startsWith("wc|") && !mergedById.has(row.subjectId)) {
@@ -133,16 +137,16 @@ export function directoryForRows(
     }
   }
 
-  if (mergedById.size === EMPLOYEES.length) {
-    return STATIC_DIRECTORY;
+  if (mergedById.size === staticDirectory.employees.length) {
+    return staticDirectory;
   }
 
   const employees = [...mergedById.values()];
   return {
     employees,
     employeeById: (externalId) => mergedById.get(externalId) ?? (externalId.startsWith("wc|") ? minimalProfile(externalId) : null),
-    providerById: (id) => id === WEBCHART_PROVIDER.id ? WEBCHART_PROVIDER : staticProviderById(id),
-    tenantById: (id) => id === webChartTenant.id ? webChartTenant : staticTenantById(id),
-    enterpriseForTenant: (tenantId) => tenantId === "wc" ? WEBCHART_ENTERPRISE : staticEnterpriseForTenant(tenantId),
+    providerById: (id) => id === WEBCHART_PROVIDER.id ? WEBCHART_PROVIDER : staticDirectory.providerById(id),
+    tenantById: (id) => id === webChartTenant.id ? webChartTenant : staticDirectory.tenantById(id),
+    enterpriseForTenant: (tenantId) => tenantId === "wc" ? WEBCHART_ENTERPRISE : staticDirectory.enterpriseForTenant(tenantId),
   };
 }

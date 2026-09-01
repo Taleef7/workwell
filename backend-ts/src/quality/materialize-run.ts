@@ -15,6 +15,7 @@ import type { QualitySnapshotInput, QualitySnapshotStore } from "../stores/quali
 import type { CaseEventStore } from "../stores/case-event-store.ts";
 import { buildSnapshotRows, type ScaleGroup, type ScopeRef } from "./materialize-snapshot.ts";
 import { directoryForRows } from "../engine/ingress/webchart/live-directory.ts";
+import { DIRECTORY } from "../config/deployment-profile.ts";
 import { SCALE_TENANT } from "../engine/synthetic/scale-structure.ts";
 import { SCALE_TRIGGER } from "../run/backfill-scale.ts";
 import { isCompletedRun } from "../program/rollup-shared.ts";
@@ -64,7 +65,7 @@ export async function materializeRun(runId: string, deps: MaterializeDeps): Prom
   // scale subjects — those live only under separate `seed:scale` runs and fold in via aggregation.
   const live = await deps.outcomeStore.listOutcomes(runId);
   if (live.length === 0) return skip("run has no outcomes");
-  const directory = directoryForRows(live);
+  const directory = directoryForRows(live, true, undefined, DIRECTORY);
   /** Resolve through this run's one merged directory snapshot, including restart-rehydrated wc rows. */
   const resolveScope = (subjectId: string): ScopeRef | null => {
     const emp = directory.employeeById(subjectId);

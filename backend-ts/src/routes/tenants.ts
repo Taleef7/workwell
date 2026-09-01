@@ -4,7 +4,7 @@
  *
  *   GET /api/tenants → { id, name }[]
  */
-import { TENANTS, webChartTenant } from "../engine/synthetic/employee-catalog.ts";
+import { TENANTS, webChartTenant } from "../config/deployment-profile.ts";
 import type { DataSourceEnv } from "../engine/ingress/data-source.ts";
 
 const json = (data: unknown): Response =>

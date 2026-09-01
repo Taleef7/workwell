@@ -11,7 +11,7 @@
 import type { CaseEventStore } from "../stores/case-event-store.ts";
 import type { MeasureStore } from "../stores/measure-store.ts";
 import type { WaiverQuery, WaiverRow, WaiverStore } from "../stores/waiver-store.ts";
-import { employeeById } from "../engine/synthetic/employee-catalog.ts";
+import { employeeById } from "../config/deployment-profile.ts";
 
 export class WaiverError extends Error {}
 

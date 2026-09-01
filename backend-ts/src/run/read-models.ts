@@ -16,7 +16,7 @@
 import type { RunRecord, RunLogRow } from "../stores/run-store.ts";
 import type { OutcomeRecord, OutcomeStatusCount } from "../stores/outcome-store.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
-import { employeeById } from "../engine/synthetic/employee-catalog.ts";
+import { employeeById } from "../config/deployment-profile.ts";
 
 export interface RunListItem {
   runId: string;

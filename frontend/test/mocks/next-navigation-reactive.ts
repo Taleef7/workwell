@@ -1,4 +1,5 @@
 import React from "react";
+import { vi } from "vitest";
 
 /**
  * A reactive next/navigation mock: `push`/`replace` actually update the URLSearchParams and
@@ -10,12 +11,25 @@ export function createNavMock(pathname: string) {
   const state = {
     params: new URLSearchParams(),
     listeners: new Set<() => void>(),
+    history: [] as Array<{ method: "push" | "replace"; url: string }>,
   };
   function setUrl(url: string) {
     const q = url.includes("?") ? url.slice(url.indexOf("?") + 1) : "";
     state.params = new URLSearchParams(q);
     for (const listener of Array.from(state.listeners)) listener();
   }
+  const push = vi.fn((url: string) => {
+    state.history.push({ method: "push", url });
+    setUrl(url);
+  });
+  const replace = vi.fn((url: string) => {
+    state.history.push({ method: "replace", url });
+    setUrl(url);
+  });
+  const router = {
+    push,
+    replace,
+  };
   const navigation = {
     useSearchParams: () =>
       React.useSyncExternalStore(
@@ -26,8 +40,17 @@ export function createNavMock(pathname: string) {
         () => state.params,
         () => state.params,
       ),
-    useRouter: () => ({ push: setUrl, replace: setUrl }),
+    useRouter: () => router,
     usePathname: () => pathname,
   };
-  return { navigation, setUrl, get params() { return state.params; } };
+  return {
+    navigation,
+    setUrl,
+    get params() { return state.params; },
+    get history() { return state.history; },
+    router,
+    push,
+    replace,
+  };
 }
+
