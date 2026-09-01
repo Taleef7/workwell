@@ -8,7 +8,13 @@ const STATUS_COLORS: Record<string, string> = {
   EXCLUDED: 'bg-neutral-50 text-neutral-500 border border-neutral-100 dark:bg-neutral-800/50 dark:text-neutral-400 dark:border-neutral-800',
 };
 
-export function ComplianceSummaryBar({ outcomes }: { outcomes: MeasureOutcomeSummary[] }) {
+export function ComplianceSummaryBar({
+  outcomes,
+  labelFor = (_measureId, fallbackName) => fallbackName,
+}: {
+  outcomes: MeasureOutcomeSummary[];
+  labelFor?: (measureId: string, fallbackName: string) => string;
+}) {
   return (
     <div className="flex flex-wrap gap-2 py-2">
       {outcomes.map((o) => (
@@ -17,7 +23,7 @@ export function ComplianceSummaryBar({ outcomes }: { outcomes: MeasureOutcomeSum
           href={`#measure-${o.measureVersionId}`}
           className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-medium transition-opacity hover:opacity-80 ${STATUS_COLORS[o.outcomeStatus] ?? 'bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-400'}`}
         >
-          {o.measureName} — {o.outcomeStatus.replace(/_/g, ' ')}
+          {labelFor(o.measureId, o.measureName)} — {o.outcomeStatus.replace(/_/g, ' ')}
         </a>
       ))}
       {outcomes.length === 0 && (

@@ -29,3 +29,8 @@ test("toCaseSummary includes measureId matching the case record", () => {
   const summary = toCaseSummary(CASE);
   assert.equal(summary.measureId, "adult_immunization");
 });
+
+test("toCaseSummary preserves a CMS catalog measureId", () => {
+  const summary = toCaseSummary({ ...CASE, measureId: "cms125" });
+  assert.equal(summary.measureId, "cms125");
+});

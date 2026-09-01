@@ -51,6 +51,15 @@ before(async () => {
       ],
     },
   });
+  await outcomes.recordOutcome({
+    runId: run.id,
+    subjectId: "emp-006",
+    measureId: "cms125",
+    evaluationPeriod: "2026-06-13",
+    status: "MISSING_DATA",
+    evidence: {},
+    evaluatedAt: "2026-06-12T00:00:00.000Z",
+  });
   const store = new SqliteCaseStore(db);
   const c = await store.upsertFromOutcome({ runId: run.id, subjectId: "emp-006", measureId: "audiogram", evaluationPeriod: "2026-06-13", outcomeStatus: "OVERDUE" });
   caseId = c!.id;
@@ -98,6 +107,9 @@ test("GET /api/employees/:id/profile returns identity + outcomes + open cases + 
   assert.equal(audiogram.daysSinceLastExam, 420, "actual days since last exam");
   assert.equal(audiogram.daysUntilDue, 365 - 420, "window − recency (negative ⇒ overdue)");
   assert.equal(audiogram.openCaseId, caseId, "outcome links its open case");
+  const cms125 = p.measureOutcomes.find((o) => o.measureId === "cms125")!;
+  assert.equal(cms125.measureId, "cms125");
+  assert.equal(cms125.measureName, "Breast Cancer Screening");
   assert.ok(p.openCases.some((c) => c.caseId === caseId));
   assert.ok(p.recentAuditEvents.some((e) => e.eventType === "CASE_CREATED" && /opened a case/.test(e.summary)));
 });

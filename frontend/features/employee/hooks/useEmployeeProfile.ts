@@ -15,7 +15,7 @@ export interface MeasureOutcomeSummary {
 
 export interface OpenCaseSummary {
   caseId: string;
-  measureId?: string;
+  measureId: string;
   measureName: string;
   outcomeStatus: string;
   priority: string;

@@ -23,6 +23,7 @@ import { replaceLiveDirectory } from "../engine/ingress/webchart/live-directory.
 // seasonal (Jul 1 of the current season).
 const TODAY = new Date().toISOString().slice(0, 10);
 const CYCLE = bucketPeriodForMeasure("audiogram", TODAY);
+const CMS125_CYCLE = bucketPeriodForMeasure("cms125", TODAY);
 const FLU_CYCLE = bucketPeriodForMeasure("flu_vaccine", TODAY);
 const FLU_PRIOR = bucketPeriodForMeasure("flu_vaccine", `${Number(TODAY.slice(0, 4)) - 2}-${TODAY.slice(5)}`);
 
@@ -56,6 +57,7 @@ before(async () => {
   const omar = await store.upsertFromOutcome({ runId, subjectId: "emp-006", measureId: "audiogram", evaluationPeriod: CYCLE, outcomeStatus: "OVERDUE" });
   omarCaseId = omar!.id;
   await store.upsertFromOutcome({ runId, subjectId: "emp-001", measureId: "hazwoper", evaluationPeriod: CYCLE, outcomeStatus: "MISSING_DATA" });
+  await store.upsertFromOutcome({ runId, subjectId: "emp-002", measureId: "cms125", evaluationPeriod: CMS125_CYCLE, outcomeStatus: "MISSING_DATA" });
   await store.upsertFromOutcome({ runId, subjectId: "emp-008", measureId: "audiogram", evaluationPeriod: CYCLE, outcomeStatus: "EXCLUDED" });
   // evidence for Omar's case (drives the detail's why_flagged): a real exam 420 days ago.
   await outcomes.recordOutcome({
@@ -104,12 +106,15 @@ test("GET /api/cases returns CaseSummary rows resolved to employee + measure", a
   const res = await get("?status=open");
   assert.equal(res?.status, 200);
   const rows = (await res!.json()) as Array<{ caseId: string; employeeName: string; measureId: string; measureName: string; priority: string; site: string }>;
-  assert.equal(rows.length, 2, "two OPEN cases (EXCLUDED is filtered out)");
+  assert.equal(rows.length, 3, "three OPEN cases (EXCLUDED is filtered out)");
   const omar = rows.find((r) => r.employeeName === "Omar Siddiq")!;
   assert.equal(omar.measureId, "audiogram");
   assert.equal(omar.measureName, "Audiogram");
   assert.equal(omar.priority, "HIGH"); // OVERDUE
   assert.equal(omar.site, "Plant A");
+  const cms125 = rows.find((r) => r.measureId === "cms125")!;
+  assert.equal(cms125.measureId, "cms125");
+  assert.equal(cms125.measureName, "Breast Cancer Screening");
 });
 
 test("status=excluded selects EXCLUDED; site and search filters apply", async () => {
@@ -122,21 +127,21 @@ test("status=excluded selects EXCLUDED; site and search filters apply", async ()
 
 test("missing status defaults to OPEN (not all); status=all is the unfiltered view", async () => {
   const def = (await get().then((r) => r!.json())) as Array<{ status: string }>;
-  assert.equal(def.length, 2, "default worklist shows only OPEN cases");
+  assert.equal(def.length, 3, "default worklist shows only OPEN cases");
   assert.ok(def.every((c) => c.status === "OPEN"));
   const all = (await get("?status=all").then((r) => r!.json())) as unknown[];
-  assert.equal(all.length, 3, "status=all includes the EXCLUDED case");
+  assert.equal(all.length, 4, "status=all includes the EXCLUDED case");
 });
 
 test("assignee=unassigned matches the NULL-assignee cases", async () => {
-  assert.equal(((await get("?status=open&assignee=unassigned").then((r) => r!.json())) as unknown[]).length, 2);
+  assert.equal(((await get("?status=open&assignee=unassigned").then((r) => r!.json())) as unknown[]).length, 3);
   assert.equal(((await get("?status=open&assignee=someone@workwell.dev").then((r) => r!.json())) as unknown[]).length, 0);
 });
 
 test("from/to filter by case creation day (inclusive)", async () => {
   assert.equal(((await get("?status=open&from=2999-01-01").then((r) => r!.json())) as unknown[]).length, 0, "future from → none");
   assert.equal(((await get("?status=open&to=2000-01-01").then((r) => r!.json())) as unknown[]).length, 0, "past to → none");
-  assert.equal(((await get("?status=open&from=2000-01-01&to=2999-12-31").then((r) => r!.json())) as unknown[]).length, 2, "wide range → all open");
+  assert.equal(((await get("?status=open&from=2000-01-01&to=2999-12-31").then((r) => r!.json())) as unknown[]).length, 3, "wide range → all open");
 });
 
 test("GET /api/cases/:id returns CaseDetail with evidence + derived why_flagged", async () => {
@@ -179,7 +184,7 @@ test("GET /api/cases/:id for an unknown case → 404", async () => {
 
 test("paging via limit/offset", async () => {
   assert.equal(((await get("?status=open&limit=1&offset=0").then((r) => r!.json())) as unknown[]).length, 1);
-  assert.equal(((await get("?status=open&limit=1&offset=2").then((r) => r!.json())) as unknown[]).length, 0);
+  assert.equal(((await get("?status=open&limit=1&offset=3").then((r) => r!.json())) as unknown[]).length, 0);
 });
 
 test("POST /api/cases/:id/assign sets the assignee and records ASSIGNED on the timeline", async () => {

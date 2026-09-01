@@ -78,12 +78,12 @@ export default function EmployeeProfilePage() {
         <p className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500 dark:text-neutral-400 pb-2">
           Compliance Posture
         </p>
-        <ComplianceSummaryBar outcomes={profile.measureOutcomes} />
+        <ComplianceSummaryBar outcomes={profile.measureOutcomes} labelFor={measureLabelFor} />
       </div>
 
       <div className="grid gap-6 lg:grid-cols-3">
       <div className="space-y-6 lg:col-span-2">
-      <IndividualComplianceStatus externalId={externalId} onRecalculated={refetch} />
+      <IndividualComplianceStatus externalId={externalId} onRecalculated={refetch} labelFor={measureLabelFor} />
       <SimulateComplianceHistory externalId={externalId} />
       {/* Open cases */}
       {profile.openCases.length > 0 && (
@@ -107,7 +107,7 @@ export default function EmployeeProfilePage() {
                       href={`/cases/${c.caseId}`}
                       className="text-primary-600 dark:text-primary-400 hover:underline font-medium"
                     >
-                      {measureLabelFor(c.measureId ?? '', c.measureName)}
+                      {measureLabelFor(c.measureId, c.measureName)}
                     </Link>
                   </td>
                   <td className="py-2">
@@ -148,7 +148,7 @@ export default function EmployeeProfilePage() {
             >
               <div className="flex items-center justify-between">
                 <span className="font-medium text-neutral-900 dark:text-neutral-100">
-                  {measureLabelFor(o.measureId, o.measureName)}{' '}
+                  <span>{measureLabelFor(o.measureId, o.measureName)}</span>{' '}
                   <span className="text-xs font-normal text-neutral-600 dark:text-neutral-400">{o.measureVersion}</span>
                 </span>
                 <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${outcomeStatusClass(o.outcomeStatus)}`}>

@@ -1,5 +1,5 @@
 import React from "react";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import EmployeeProfilePage from "../page";
 
@@ -98,15 +98,17 @@ describe("EmployeeProfilePage crosswalk identity rendering", () => {
 
   it("renders crosswalk label for cms125 outcome row and plain name for audiogram", async () => {
     render(<EmployeeProfilePage />);
-    await waitFor(() => {
-      const elements = screen.getAllByText(/MIPS 112 · CMS125 · Breast Cancer Screening/);
-      expect(elements.length).toBeGreaterThanOrEqual(1);
-    });
+    await waitFor(() => expect(screen.getByText("Compliance Posture")).toBeInTheDocument());
 
-    const audiogramElements = screen.getAllByText(/Annual Audiogram Completed/);
-    expect(audiogramElements.length).toBeGreaterThanOrEqual(1);
-    const measureSection = screen.getByText("Measure Details").closest("div");
-    expect(measureSection).toHaveTextContent("Annual Audiogram Completed");
-    expect(measureSection).toHaveTextContent("MIPS 112 · CMS125 · Breast Cancer Screening");
+    const summaryBar = screen.getByText("Compliance Posture").parentElement!;
+    expect(within(summaryBar).getByText(
+      "MIPS 112 · CMS125 · Breast Cancer Screening — OVERDUE",
+      { exact: true },
+    )).toBeInTheDocument();
+    expect(within(summaryBar).getByText("Annual Audiogram Completed — COMPLIANT", { exact: true })).toBeInTheDocument();
+
+    const oshaOutcomeRow = document.getElementById("measure-audiogram")!;
+    expect(within(oshaOutcomeRow).getByText("Annual Audiogram Completed", { exact: true })).toBeInTheDocument();
+    expect(within(oshaOutcomeRow).queryByText(/^MIPS/)).not.toBeInTheDocument();
   });
 });
