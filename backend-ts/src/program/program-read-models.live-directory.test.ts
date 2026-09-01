@@ -456,3 +456,116 @@ test("scoped profile (Maui) — isolates data by excluding foreign and unresolve
   assert.equal(upcomingExpirations.some((u) => u.externalId === "emp-001" || u.externalId === "cypress-mrn-foreign"), false, "foreign subjects must not appear in upcomingExpirations");
 });
 
+test("foldScaleCounts — completed seed:scale run skipped on Maui profile and folded on default profile", () => {
+  const source = `
+    import { programOverview } from "./src/program/program-read-models.ts";
+
+    const mauiRow = {
+      runId: "run-maui-1", runStartedAt: "2026-07-17T00:00:00.000Z", runScopeType: "MEASURE",
+      runStatus: "COMPLETED", runTriggeredBy: "manual", subjectId: "pat-001", measureId: "cms122", status: "COMPLIANT",
+    };
+    const scaleRun = {
+      id: "run-scale-1", scopeId: "cms122", triggeredBy: "seed:scale", status: "COMPLETED",
+      startedAt: "2026-07-17T00:00:00.000Z", scopeType: "MEASURE",
+    };
+    const fakeDeps = {
+      outcomeStore: {
+        listOutcomesWithRun: async () => [mauiRow],
+        aggregateScaleRun: async () => [
+          { status: "COMPLIANT", count: 50 },
+          { status: "OVERDUE", count: 10 },
+        ],
+      },
+      runStore: {
+        listRuns: async () => [scaleRun],
+      },
+      caseStore: { listCases: async () => [] },
+      webChartEnv: { WORKWELL_WEBCHART_BASE_URL: "http://webchart.test", WORKWELL_WEBCHART_API_KEY: "fixture-key" },
+    };
+
+    const overview = await programOverview(fakeDeps, {});
+    const cms122 = overview.find((m) => m.measureId === "cms122");
+    console.log(JSON.stringify({
+      totalEvaluated: cms122?.totalEvaluated,
+      compliant: cms122?.compliant,
+      overdue: cms122?.overdue,
+      latestRunId: cms122?.latestRunId,
+    }));
+  `;
+
+  const mauiOutput = runProfileChild("maui", source);
+  assert.equal(mauiOutput.totalEvaluated, 1, "Maui profile must not fold scale counts into summary totalEvaluated");
+  assert.equal(mauiOutput.compliant, 1, "Maui profile must not fold scale counts into summary compliant");
+  assert.equal(mauiOutput.overdue, 0, "Maui profile must not fold scale counts into summary overdue");
+
+  const defaultOutput = runProfileChild(undefined, source);
+  assert.equal(defaultOutput.totalEvaluated, 61, "default profile must fold scale counts into summary totalEvaluated (1 live + 60 scale)");
+  assert.equal(defaultOutput.compliant, 51, "default profile must fold scale counts into summary compliant (1 live + 50 scale)");
+  assert.equal(defaultOutput.overdue, 10, "default profile must fold scale counts into summary overdue (0 live + 10 scale)");
+});
+
+test("programTrend — monthly snapshot scope fallback on Maui profile and snapshot series on default profile", () => {
+  const source = `
+    import { programTrend } from "./src/program/program-read-models.ts";
+
+    const mauiRow = {
+      runId: "run-maui-per-run-1", runStartedAt: "2026-07-17T00:00:00.000Z", runScopeType: "MEASURE",
+      runStatus: "COMPLETED", runTriggeredBy: "manual", subjectId: "pat-001", measureId: "cms122", status: "COMPLIANT",
+    };
+    const allSnapshots = [
+      {
+        id: "snap-2026-06", measureId: "cms122", period: "2026-06",
+        periodStart: "2026-06-01T00:00:00.000Z", periodEnd: "2026-06-30T00:00:00.000Z",
+        scopeLevel: "all", scopeId: "ALL", tenantId: null, numerator: 80, denominator: 100,
+        compliant: 80, dueSoon: 0, overdue: 20, missingData: 0, excluded: 0,
+        sourceRunId: "run-snap-2026-06", computedAt: "2026-06-30T00:00:00.000Z",
+      },
+      {
+        id: "snap-2026-07", measureId: "cms122", period: "2026-07",
+        periodStart: "2026-07-01T00:00:00.000Z", periodEnd: "2026-07-31T00:00:00.000Z",
+        scopeLevel: "all", scopeId: "ALL", tenantId: null, numerator: 90, denominator: 100,
+        compliant: 90, dueSoon: 0, overdue: 10, missingData: 0, excluded: 0,
+        sourceRunId: "run-snap-2026-07", computedAt: "2026-07-31T00:00:00.000Z",
+      },
+    ];
+    let snapshotQueried = false;
+    const fakeDeps = {
+      outcomeStore: {
+        listOutcomesWithRun: async () => [mauiRow],
+      },
+      runStore: { listRuns: async () => [] },
+      caseStore: { listCases: async () => [] },
+      qualitySnapshots: {
+        querySnapshots: async () => {
+          snapshotQueried = true;
+          return allSnapshots;
+        },
+        upsertSnapshots: async () => {},
+      },
+      webChartEnv: { WORKWELL_WEBCHART_BASE_URL: "http://webchart.test", WORKWELL_WEBCHART_API_KEY: "fixture-key" },
+    };
+
+    const trend = await programTrend(fakeDeps, "cms122", {}, { monthly: true });
+    console.log(JSON.stringify({
+      trend,
+      snapshotQueried,
+    }));
+  `;
+
+  const mauiOutput = runProfileChild("maui", source);
+  const mauiTrend = mauiOutput.trend as Array<{ runId: string; period?: string; totalEvaluated: number; compliant: number }>;
+  assert.equal(mauiTrend.length, 1, "Maui profile must return per-run series (1 point)");
+  assert.equal(mauiTrend[0]!.runId, "run-maui-per-run-1", "Maui profile must return per-run runId");
+  assert.equal(mauiTrend[0]!.period, undefined, "Maui profile fallback points must carry no period");
+  assert.equal(mauiTrend[0]!.totalEvaluated, 1, "Maui profile must evaluate only profile-isolated subjects");
+  assert.equal(mauiTrend[0]!.compliant, 1);
+
+  const defaultOutput = runProfileChild(undefined, source);
+  const defaultTrend = defaultOutput.trend as Array<{ runId: string; period?: string; totalEvaluated: number; compliant: number }>;
+  assert.equal(defaultTrend.length, 2, "default profile must return monthly snapshot series (2 points)");
+  assert.deepEqual(defaultTrend.map((p) => p.period), ["2026-07", "2026-06"], "default profile must return monthly snapshot periods newest-first");
+  assert.deepEqual(defaultTrend.map((p) => p.runId), ["run-snap-2026-07", "run-snap-2026-06"]);
+  assert.equal(defaultTrend[0]!.totalEvaluated, 100);
+  assert.equal(defaultTrend[0]!.compliant, 90);
+});
+
