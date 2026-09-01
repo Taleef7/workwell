@@ -36,7 +36,8 @@ test("drift guard: catalog entries match MEASURE_IDENTITY, non-cms have none, an
   }
 
   for (const m of MEASURE_CATALOG) {
-    const isCms = m.id.startsWith("cms");
+    // Keyed on the policy reference, not the id prefix, so a CMS row under any id shape is still checked.
+    const isCms = /^CMS\d+/i.test(m.policyRef);
     const identity = MEASURE_IDENTITY[m.id];
 
     if (!isCms) {
