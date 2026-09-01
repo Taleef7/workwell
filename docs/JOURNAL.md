@@ -41,6 +41,9 @@ applicability and needs that path checked first), and the 100k store caps that p
 filtering in the CSV, MCP, programs and hierarchy readers — a known limit stated here rather than
 fixed, because a Maui database holds no foreign rows today.
 
+The auditor run packet (`backend-ts/src/audit/audit-packet.ts`) still emits unscoped outcome rows on a
+scoped profile — a downloadable artifact, so it is filed as a follow-up rather than left silent.
+
 ## 2026-09-01 (night) — MM-0's last task lands in #505, and the Maui sandbox is live for the first time
 
 **The Maui sandbox had never been deployed.** `deploy-maui-mieweb.yml` is dispatch-only and had zero runs;

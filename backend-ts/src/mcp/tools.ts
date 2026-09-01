@@ -252,7 +252,9 @@ async function getRunSummary(args: JsonRecord, deps: McpToolDeps): Promise<unkno
 async function listMeasures(args: JsonRecord, deps: McpToolDeps): Promise<unknown> {
   const status = args.status != null && String(args.status).trim() ? String(args.status).trim() : "Active";
   const records = (await deps.measureStore.listLatest()).filter(
-    (m) => m.status.toLowerCase() === status.toLowerCase() && isRunnableMeasure(m.measureId),
+    // The runnable-set scope is a Maui concern; the default profile keeps listing every catalog and
+    // Studio-authored row (Draft/Deprecated ids outside the authored registry), as it always has.
+    (m) => m.status.toLowerCase() === status.toLowerCase() && (DEPLOYMENT_PROFILE.id === "default" || isRunnableMeasure(m.measureId)),
   );
   records.sort((a, b) => a.name.localeCompare(b.name));
   const results = records.map((r) => ({

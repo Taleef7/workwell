@@ -71,6 +71,8 @@ const testScript = `
   const checkPersistedRes = await callTool("check_compliance", { employeeExternalId: "wc|persisted-mcp-subject", measureName: "Diabetes: Glycemic Status Assessment Greater Than 9%" }, ctx);
   const listMeasuresRes = await callTool("list_measures", {}, ctx);
   const listMeasuresJson = JSON.parse(listMeasuresRes.content[0].text);
+  const listDraftRes = await callTool("list_measures", { status: "Draft" }, ctx);
+  const listDraftJson = JSON.parse(listDraftRes.content[0].text);
 
   console.log(JSON.stringify({
     patFound: !getEmpPat.error,
@@ -89,6 +91,7 @@ const testScript = `
     getEmpPersisted: JSON.parse(getEmpPersistedRes.content[0].text),
     checkPersisted: JSON.parse(checkPersistedRes.content[0].text),
     measures: listMeasuresJson.results.map(r => r.measureId),
+    draftMeasures: listDraftJson.results.map(r => r.measureId),
   }));
 `;
 
@@ -117,6 +120,7 @@ test("scoped profile (Maui) — MCP tools isolate subjects to Maui profile direc
   assert.notEqual((output.getCaseLive as Record<string, unknown>).code, "CASE_NOT_FOUND", "live wc get_case must resolve through the injected directory");
   assert.notEqual((output.checkLive as Record<string, unknown>).code, "EMPLOYEE_NOT_FOUND", "live wc check_compliance must resolve through the injected directory");
   const measures = output.measures as string[];
+  assert.ok(!(output.draftMeasures as string[]).includes("cms2v15"), "a Draft catalog row outside the Maui runnable set must not be listed on Maui");
   assert.ok(measures.includes("cms122"), "runnable cms122 must be listed on Maui");
   assert.ok(!measures.includes("audiogram"), "unrunnable audiogram must not be listed on Maui");
 });
@@ -152,4 +156,5 @@ test("default profile — MCP by-id tools preserve foreign subjects and list all
   assert.equal((output.getCaseUnresolved as Record<string, unknown>).caseId != null, true);
   assert.notEqual((output.checkForeign as Record<string, unknown>).code, "EMPLOYEE_NOT_FOUND");
   assert.ok((output.measures as string[]).includes("audiogram"), "audiogram must remain listed on default profile");
+  assert.ok((output.draftMeasures as string[]).includes("cms2v15"), "a Draft catalog row outside the authored registry must stay listed on the default profile");
 });

@@ -67,7 +67,7 @@ test("scoped profile (Maui) — hierarchy rollup excludes open cases for unrunna
 
 test("default profile — hierarchy rollup includes all active measures", () => {
   const output = runProfileChild(undefined, testScript);
-  assert.equal(output.allEvaluated, 3, "default profile includes the unresolvable subject alongside cms122 and audiogram");
+  assert.equal(output.allEvaluated, 2, "default profile counts cms122 and audiogram; an unresolvable subject has no node, exactly as before this change");
   assert.equal(output.audiogramEvaluated, 1, "audiogram measure rollup evaluated on default profile");
   assert.equal(output.allOpenCases, 1, "default profile preserves the open audiogram case");
 });

@@ -107,7 +107,9 @@ export async function buildHierarchyRollup(deps: HierarchyDeps, filters: Hierarc
 
   const byPatient = new Map<string, MutableTotals>();
   const ensure = (subjectId: string): MutableTotals | null => {
-    if (!subjectVisible(subjectId) || !profileMatch(subjectId)) return null;
+    // Unchanged from before the profile work: a subject that does not resolve in the (request-local,
+    // profile-scoped) directory has no node on ANY profile — never a fabricated "unknown" tenant.
+    if (!subjectVisible(subjectId) || !directory.employeeById(subjectId)) return null;
     return byPatient.get(subjectId) ?? byPatient.set(subjectId, zero()).get(subjectId)!;
   };
 
@@ -132,7 +134,7 @@ export async function buildHierarchyRollup(deps: HierarchyDeps, filters: Hierarc
     }
     const openCases = await deps.caseStore.listCases({ statuses: [...ACTIVE_CASE_STATUSES], measureId: measureId ?? undefined, limit: 100000 });
     for (const c of openCases) {
-      if (!scopeMeasures.includes(c.measureId)) continue;
+      if (DEPLOYMENT_PROFILE.id !== "default" && !scopeMeasures.includes(c.measureId)) continue;
       if (from && day(c.createdAt) < day(from)) continue;
       if (to && day(c.createdAt) > day(to)) continue;
       const acc = ensure(c.employeeId);
@@ -152,9 +154,8 @@ export async function buildHierarchyRollup(deps: HierarchyDeps, filters: Hierarc
 
   for (const [subjectId, t] of byPatient) {
     if (t.evaluated === 0 && t.openCases === 0) continue;
-    const emp: EmployeeProfile = directory.employeeById(subjectId) ?? {
-      externalId: subjectId, name: subjectId, role: "unknown", site: "Unknown", providerId: "unknown", tenantId: "unknown",
-    };
+    const emp: EmployeeProfile | null = directory.employeeById(subjectId);
+    if (!emp) continue;
     if (tenantFilter && emp.tenantId !== tenantFilter) continue;
     const prov = directory.providerById(emp.providerId);
     const location = prov?.location ?? "Unknown";
@@ -218,7 +219,7 @@ export async function buildHierarchyRollup(deps: HierarchyDeps, filters: Hierarc
   let scaleNode: HierarchyNode | null = null;
   if (deps.runStore && (!tenantFilter || tenantFilter === SCALE_TENANT.id)) {
     const scaleRuns = (await deps.runStore.listRuns(100_000))
-      .filter((r) => r.triggeredBy === SCALE_TRIGGER && r.status === "COMPLETED" && isRunnableMeasure(r.scopeId ?? "") && profileMatch(SCALE_TENANT.id))
+      .filter((r) => r.triggeredBy === SCALE_TRIGGER && r.status === "COMPLETED" && isRunnableMeasure(r.scopeId ?? "") && DEPLOYMENT_PROFILE.id === "default")
       // Honor the date window: skip scale runs seeded outside the requested [from, to] period so
       // a date-filtered rollup doesn't silently include the full 120k mhn population when it
       // shouldn't (the live branch already filters live outcomes by the same window).
