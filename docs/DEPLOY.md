@@ -395,12 +395,21 @@ responses are wrapped in a `{"data": ...}` envelope, the create body uses `templ
 > image until someone re-ran the workflow by hand.
 >
 > `.github/scripts/mieweb-delete-confirmed.sh` closes that. On a DELETE that does not return cleanly
-> it polls `GET /sites/{id}/containers?hostname=…` (6× / 10 s) and decides on what the manager
-> reports: **absent → the delete landed, continue**; **still registered → re-issue**, which is no
-> longer a blind retry because the request demonstrably did not take effect. Bounded at three
-> attempts. A list read that *fails* counts as still-present, never as absent — collapsing "could not
-> tell" into "it's gone" would let the deploy create over a running container. All five behaviours
-> are pinned in `.github/scripts/mieweb-delete-confirmed.test.sh`, which runs on every PR.
+> it polls `GET /sites/{id}/containers?hostname=…` (6× / 10 s) and takes **three** verdicts, not two:
+>
+> | read-back says | action |
+> |---|---|
+> | **absent** | the delete landed — continue to the create |
+> | **still registered** | **re-issue** — not a blind retry, because the request demonstrably did not take effect; re-targets the id the manager itself just reported |
+> | **could not tell** (the read failed) | **refuse and fail the job** — never guess |
+>
+> Bounded at three attempts. The third verdict is the one that matters: "could not tell" must collapse
+> into neither of the others. Read as *absent*, the deploy creates over a container that is still
+> running. Read as *present*, the deploy re-issues a state-changing request into a state it cannot
+> see — the very ambiguity the once-only rule exists to respect, and it could target an id the manager
+> has since reused. Only the **last** observation in the window decides, so a manager that answers and
+> then goes away is unknown, not present. All of that is pinned in
+> `.github/scripts/mieweb-delete-confirmed.test.sh`, which runs on every PR.
 
 ### Required GitHub Secrets for MIE deploy
 

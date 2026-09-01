@@ -32,42 +32,55 @@ container_id_for_hostname() {
   printf '%s' "$json" | jq -r '.data[0].id // empty'
 }
 
-# Exit 0 only when the manager has AFFIRMATIVELY reported the hostname absent. A list read that
-# fails is reported as still-present, because a manager we cannot reach is exactly when a false
-# "it's gone" would do the most damage: the caller would proceed to create over a container that is
-# still running.
+# Three-valued on purpose, because "still there" and "could not tell" must lead to different actions:
+#   0 = confirmed ABSENT      (a successful read reported no container for this hostname)
+#   1 = confirmed PRESENT     (a successful read reported one; its id is in CONFIRMED_CONTAINER_ID)
+#   2 = COULD NOT TELL        (the read itself failed)
+# Collapsing 2 into 1 is what makes a helper like this dangerous rather than useful: the caller would
+# re-issue a DELETE into a state it cannot see, which is the ambiguity the whole file exists to
+# respect, and could target an id the manager has since reused for a different container.
+# Collapsing 2 into 0 is worse still -- the caller would create over a container that is still running.
+CONFIRMED_CONTAINER_ID=""
 wait_for_container_absent() {
   local hostname="$1"
   local attempts="${MIEWEB_DELETE_CONFIRM_ATTEMPTS:-6}"
   local delay="${MIEWEB_DELETE_CONFIRM_DELAY_SECONDS:-10}"
-  local attempt id
-
-  require_positive_request_integer MIEWEB_DELETE_CONFIRM_ATTEMPTS "$attempts" || return 1
+  local attempt id last_read="unknown"
+  CONFIRMED_CONTAINER_ID=""
 
   for attempt in $(seq 1 "$attempts"); do
     if id="$(container_id_for_hostname "$hostname")"; then
       if [ -z "$id" ]; then
         return 0
       fi
+      last_read="present"
+      CONFIRMED_CONTAINER_ID="$id"
       echo "Container '${hostname}' is still registered as ID ${id} (check ${attempt}/${attempts})." >&2
     else
-      echo "::warning::Could not read the container list while confirming deletion of '${hostname}' (check ${attempt}/${attempts}); treating as still-present." >&2
+      # A transient read failure is retried inside this window rather than being decisive; only the
+      # LAST observation decides, so a manager that is unreachable at the end of the window yields 2.
+      last_read="unknown"
+      CONFIRMED_CONTAINER_ID=""
+      echo "::warning::Could not read the container list while confirming deletion of '${hostname}' (check ${attempt}/${attempts})." >&2
     fi
     if [ "$attempt" -lt "$attempts" ] && [ "$delay" -gt 0 ]; then
       sleep "$delay"
     fi
   done
-  return 1
+
+  [ "$last_read" = "present" ] && return 1
+  return 2
 }
 
 # delete_container_confirmed <hostname> <container_id>
-# Exit 0 when the container is gone — whether the DELETE said so or the manager did.
+# Exit 0 when the container is gone -- whether the DELETE said so or the manager did.
 delete_container_confirmed() {
   local hostname="$1" container_id="$2"
   local attempts="${MIEWEB_DELETE_ATTEMPTS:-3}"
-  local attempt delete_exit refreshed
+  local attempt delete_exit confirm_result
 
   require_positive_request_integer MIEWEB_DELETE_ATTEMPTS "$attempts" || return 1
+  require_positive_request_integer MIEWEB_DELETE_CONFIRM_ATTEMPTS "${MIEWEB_DELETE_CONFIRM_ATTEMPTS:-6}" || return 1
 
   for attempt in $(seq 1 "$attempts"); do
     set +e
@@ -79,16 +92,26 @@ delete_container_confirmed() {
     fi
 
     echo "::warning::DELETE of '${hostname}' (ID ${container_id}) did not return cleanly on attempt ${attempt}/${attempts}; reading the manager back to find out whether it applied anyway." >&2
-    if wait_for_container_absent "$hostname"; then
-      echo "::notice::'${hostname}' is gone — the manager applied the delete despite the failed response. Continuing." >&2
-      return 0
-    fi
+    set +e
+    wait_for_container_absent "$hostname"
+    confirm_result=$?
+    set -e
 
-    # Still registered, so the request demonstrably did not take effect. Re-target in case the id
-    # moved under us, then re-issue: this is no longer a blind retry into an unknown state.
-    if refreshed="$(container_id_for_hostname "$hostname")" && [ -n "$refreshed" ]; then
-      container_id="$refreshed"
-    fi
+    case "$confirm_result" in
+      0)
+        echo "::notice::'${hostname}' is gone -- the manager applied the delete despite the failed response. Continuing." >&2
+        return 0
+        ;;
+      2)
+        echo "::error::DELETE of '${hostname}' failed AND the manager could not be read back, so whether it applied is unknown." >&2
+        echo "::error::Refusing to re-issue: a blind state-changing retry could delete a container recreated under a reused id. Wait for manager.os.mieweb.org to recover, confirm the container's state, then rerun this workflow." >&2
+        return 1
+        ;;
+    esac
+
+    # Confirmed still registered, so the request demonstrably did not take effect and re-issuing is
+    # not blind. Re-target the id the manager itself just reported, in case it moved under us.
+    container_id="$CONFIRMED_CONTAINER_ID"
   done
 
   echo "::error::Could not confirm deletion of '${hostname}' after ${attempts} attempt(s); it is still registered with the manager." >&2

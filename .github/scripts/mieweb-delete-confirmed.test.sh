@@ -73,14 +73,22 @@ request() {
           echo EMPTY > "$registry_file"
           return 0
           ;;
-        always-timeout-persisting | manager-unreadable)
+        always-timeout-persisting | manager-unreadable | unreadable-then-present | present-then-unreadable)
           return 1
           ;;
       esac
       ;;
     GET)
-      bump "$get_count_file" >/dev/null
+      count="$(bump "$get_count_file")"
       if [ "$mode" = "manager-unreadable" ]; then
+        return 1
+      fi
+      # Flaky manager: the first read fails, later reads succeed and show the container present.
+      if [ "$mode" = "unreadable-then-present" ] && [ "$count" -eq 1 ]; then
+        return 1
+      fi
+      # The manager answers once, then goes away mid-window.
+      if [ "$mode" = "present-then-unreadable" ] && [ "$count" -gt 1 ]; then
         return 1
       fi
       cat "$registry_file"
@@ -115,12 +123,35 @@ if delete_container_confirmed twh-api-ts 2026 2>/dev/null; then
 fi
 [ "$(cat "$delete_count_file")" = "3" ] || fail "the re-issue loop is not bounded by MIEWEB_DELETE_ATTEMPTS"
 
-# 5. An unreachable manager must NOT read as a successful delete. This is the assertion that keeps
-#    the guard from being vacuous: collapsing "could not tell" into "absent" would let the deploy
-#    proceed to create over a container that is still running.
+# 5. An unreachable manager must NOT read as a successful delete. Collapsing "could not tell" into
+#    "absent" would let the deploy proceed to create over a container that is still running.
 reset manager-unreadable
 if delete_container_confirmed twh-api-ts 2026 2>/dev/null; then
   fail "an unreadable container list was treated as proof of deletion"
 fi
 
-echo "PASS: an ambiguous container DELETE is resolved by reading the manager back, and bounded"
+# 6. ...and it must not read as "still present" either. Collapsing "could not tell" into "present"
+#    makes the caller re-issue a DELETE into a state it cannot see -- the exact ambiguity this helper
+#    exists to respect, and it could target an id the manager has since reused. Exactly ONE DELETE.
+[ "$(cat "$delete_count_file")" = "1" ] || fail "an unreadable manager triggered a blind DELETE retry"
+
+# 7. A read failure INSIDE the confirmation window is not decisive: the poll retries, sees the
+#    container present, and the re-issue proceeds. Without this, one flaky read would abort a deploy
+#    that the very next read would have resolved.
+reset unreadable-then-present
+if delete_container_confirmed twh-api-ts 2026 2>/dev/null; then
+  fail "a persistently registered container was reported deleted"
+fi
+[ "$(cat "$delete_count_file")" = "3" ] || fail "a transient read failure stopped the re-issue loop"
+
+# 8. A manager that answers "present" and then goes away mid-window is still UNKNOWN at the end of
+#    it. Only the LAST observation may decide: letting a stale "present" survive a later read failure
+#    reintroduces the blind retry, just from a different direction. (Found by mutation-checking test 6
+#    -- clearing the stale value was in the code but nothing watched it fail.)
+reset present-then-unreadable
+if delete_container_confirmed twh-api-ts 2026 2>/dev/null; then
+  fail "a manager that went unreachable mid-window was treated as proof of deletion"
+fi
+[ "$(cat "$delete_count_file")" = "1" ] || fail "a stale 'present' observation survived a later read failure and triggered a blind retry"
+
+echo "PASS: an ambiguous container DELETE is resolved by reading the manager back; a manager that cannot be read is never guessed at"
