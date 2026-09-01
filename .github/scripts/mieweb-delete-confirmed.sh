@@ -29,18 +29,14 @@
 # deploy or heal from recreating the hostname while this one holds the group. If that group is ever
 # removed or a fourth workflow starts touching these containers, this assumption goes with it.
 container_id_for_hostname() {
-  local hostname="$1" json id request_exit
-  set +e
+  local hostname="$1" json id
   # ONE attempt, deliberately: this function is the inner call of wait_for_container_absent's own poll
   # loop, so letting request() retry six more times would compound a 30 s timeout into a ~5 min read,
   # a ~29 min confirmation window, and a job that holds the container-ops concurrency group for hours
   # -- starving the self-heal reconciler this whole change exists to stop depending on.
-  json="$(MIEWEB_REQUEST_ATTEMPTS=1 request GET "/sites/${SITE_ID}/containers?hostname=${hostname}")"
-  request_exit=$?
-  set -e
-  if [ "$request_exit" -ne 0 ]; then
-    return 1
-  fi
+  # `|| return 1`, not `set +e` + `$?`: the left side of `||` is exempt from errexit no matter what
+  # the callee does to the shell's flags, so this cannot be defeated from inside request().
+  json="$(MIEWEB_REQUEST_ATTEMPTS=1 request GET "/sites/${SITE_ID}/containers?hostname=${hostname}")" || return 1
   if [ -z "$json" ]; then
     # A 2xx with no body (e.g. 204) says nothing about what is registered.
     return 1
@@ -112,7 +108,7 @@ wait_for_container_absent() {
 delete_container_confirmed() {
   local hostname="$1" container_id="$2"
   local attempts="${MIEWEB_DELETE_ATTEMPTS:-3}"
-  local attempt delete_exit confirm_result
+  local attempt confirm_result
 
   require_positive_request_integer MIEWEB_DELETE_ATTEMPTS "$attempts" || return 1
   require_positive_request_integer MIEWEB_DELETE_CONFIRM_ATTEMPTS "${MIEWEB_DELETE_CONFIRM_ATTEMPTS:-6}" || return 1
@@ -126,19 +122,15 @@ delete_container_confirmed() {
   fi
 
   for attempt in $(seq 1 "$attempts"); do
-    set +e
-    request DELETE "/sites/${SITE_ID}/containers/${container_id}" >/dev/null
-    delete_exit=$?
-    set -e
-    if [ "$delete_exit" -eq 0 ]; then
+    # Condition context: errexit is suppressed here by the shell itself, so a callee that re-arms
+    # `set -e` cannot abort the deploy before this guard gets to look at the failure.
+    if request DELETE "/sites/${SITE_ID}/containers/${container_id}" >/dev/null; then
       return 0
     fi
 
     echo "::warning::DELETE of '${hostname}' (ID ${container_id}) did not return cleanly on attempt ${attempt}/${attempts}; reading the manager back to find out whether it applied anyway." >&2
-    set +e
-    wait_for_container_absent "$hostname"
-    confirm_result=$?
-    set -e
+    confirm_result=0
+    wait_for_container_absent "$hostname" || confirm_result=$?
 
     case "$confirm_result" in
       0)

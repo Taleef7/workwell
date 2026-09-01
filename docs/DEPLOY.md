@@ -429,7 +429,18 @@ responses are wrapped in a `{"data": ...}` envelope, the create body uses `templ
 > the same reason every container-ops job now carries `timeout-minutes: 45`.
 >
 > All of that is pinned in `.github/scripts/mieweb-delete-confirmed.test.sh` (11 cases), which runs on
-> every PR.
+> every PR — **and in `mieweb-delete-confirmed.integration.test.sh`, which exists because the first
+> one was not enough.** That test fakes `request()`, which is the right boundary for the *decisions*
+> but blind to how the real `request()` behaves. On 2026-09-01 the confirmed-delete path failed on its
+> first production run for exactly that reason: an unconditional `set -e` inside `request()` re-armed
+> errexit **before the function returned**, reaching across the function boundary to undo the caller's
+> `set +e`, so the shell exited on `request()`'s own non-zero return. The guard existed, was tested,
+> and could not run. `request()` now saves and restores the caller's errexit, the call sites are
+> errexit-immune by construction (`||` and condition contexts), and the integration test drives the
+> real `request()` under the deploy's own `set -euo pipefail` while faking only `curl`.
+>
+> **The rule worth carrying**: when a guard's job is to survive a failure, test it against the real
+> thing that fails. A double that cannot reproduce the failure mode is not coverage.
 
 ### Required GitHub Secrets for MIE deploy
 
