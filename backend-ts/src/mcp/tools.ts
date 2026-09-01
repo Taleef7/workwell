@@ -12,7 +12,7 @@ import type { OutcomeStore } from "../stores/outcome-store.ts";
 import type { RunStore } from "../stores/run-store.ts";
 import type { MeasureStore, MeasureRecord } from "../stores/measure-store.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
-import { DIRECTORY, isRunnableMeasure, profileSubjectMatcher } from "../config/deployment-profile.ts";
+import { DEPLOYMENT_PROFILE, DIRECTORY, isRunnableMeasure, profileSubjectMatcher } from "../config/deployment-profile.ts";
 import { directoryForRows } from "../engine/ingress/webchart/live-directory.ts";
 import { isWebChartConfigured, type DataSourceEnv } from "../engine/ingress/data-source.ts";
 import { toCaseDetail } from "../case/case-detail-read-model.ts";
@@ -49,6 +49,20 @@ function directoryForSubjects(deps: McpToolDeps, subjectIds: readonly string[]) 
     deps.webChartEnv,
     DIRECTORY,
   );
+}
+
+async function persistedDirectory(deps: McpToolDeps) {
+  const webChartConfigured = isWebChartConfigured(deps.webChartEnv ?? {});
+  const rows = !webChartConfigured
+    ? []
+    : DEPLOYMENT_PROFILE.id === "default"
+      ? await deps.outcomeStore.listLatestPopulationOutcomes({ excludeScale: true, excludeTrendHistory: true })
+      : await deps.outcomeStore.listOutcomesWithRun({ excludeScale: true, excludeTrendHistory: true });
+  const directory = directoryForRows(rows, webChartConfigured, deps.webChartEnv, DIRECTORY);
+  return {
+    ...directory,
+    employeeById: (externalId: string) => directory.employees.find((employee) => employee.externalId === externalId) ?? null,
+  };
 }
 
 const CM = "ROLE_CASE_MANAGER";
@@ -348,7 +362,7 @@ async function explainOutcome(args: JsonRecord, deps: McpToolDeps): Promise<unkn
 
 async function getEmployee(args: JsonRecord, deps: McpToolDeps): Promise<unknown> {
   const externalId = requireString(args, "employeeExternalId");
-  const emp = directoryForSubjects(deps, [externalId]).employeeById(externalId);
+  const emp = (await persistedDirectory(deps)).employeeById(externalId);
   if (!emp) return safeError("EMPLOYEE_NOT_FOUND", `Employee not found: ${externalId}`);
   // #491: only a FINALIZED run's outcome is served (ADR-061's FINAL rule — a row exists before its run
   // reaches a terminal status, and a mid-run partial result is not an answer). One row per measure,
@@ -379,7 +393,7 @@ async function checkCompliance(args: JsonRecord, deps: McpToolDeps): Promise<unk
   // message advises waiting for a run, which for a measure that does not exist sends an AI client
   // into an endless retry. Same rule as list_cases / list_noncompliant.
   if (!rec) return safeError("MEASURE_NOT_FOUND", `Measure not found: ${measureName}`);
-  const directory = directoryForSubjects(deps, [externalId]);
+  const directory = await persistedDirectory(deps);
   if (!profileSubjectMatcher(directory.employeeById)(externalId)) return safeError("EMPLOYEE_NOT_FOUND", `Employee not found: ${externalId}`);
   // #491: only a FINALIZED run's outcome is the persisted answer (ADR-061's FINAL rule, enforced in SQL
   // by the store — `COMPLETED`/`PARTIAL_FAILURE` runs only). The previous newest-row-wins read served a

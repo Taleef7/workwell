@@ -44,6 +44,8 @@ const testScript = `
   const foreignCase = await deps.caseStore.upsertFromOutcome({ runId: run.id, subjectId: "emp-001", measureId: "cms122", evaluationPeriod: "2026-06-13", outcomeStatus: "OVERDUE" });
   const unresolvedCase = await deps.caseStore.upsertFromOutcome({ runId: run.id, subjectId: "cypress-mrn-foreign", measureId: "cms122", evaluationPeriod: "2026-06-13", outcomeStatus: "OVERDUE" });
   const liveCase = await deps.caseStore.upsertFromOutcome({ runId: run.id, subjectId: "wc|live-mcp-subject", measureId: "cms122", evaluationPeriod: "2026-06-13", outcomeStatus: "OVERDUE" });
+  await deps.outcomeStore.recordOutcome({ runId: run.id, subjectId: "wc|live-mcp-subject", measureId: "cms122", status: "OVERDUE", evidence: {} });
+  await deps.outcomeStore.recordOutcome({ runId: run.id, subjectId: "wc|persisted-mcp-subject", measureId: "cms122", status: "COMPLIANT", evidence: {} });
 
   const ctx = { deps, events, actor: "cm@workwell.dev", role: "ROLE_ADMIN", enforce: true };
 
@@ -63,6 +65,10 @@ const testScript = `
   const getCaseLiveRes = await callTool("get_case", { caseId: liveCase.id }, ctx);
   const checkForeignRes = await callTool("check_compliance", { employeeExternalId: "emp-001", measureName: "Diabetes: Glycemic Status Assessment Greater Than 9%" }, ctx);
   const checkLiveRes = await callTool("check_compliance", { employeeExternalId: "wc|live-mcp-subject", measureName: "Diabetes: Glycemic Status Assessment Greater Than 9%" }, ctx);
+  const getEmpInventedRes = await callTool("get_employee", { employeeExternalId: "wc|not-a-patient" }, ctx);
+  const checkInventedRes = await callTool("check_compliance", { employeeExternalId: "wc|not-a-patient", measureName: "Diabetes: Glycemic Status Assessment Greater Than 9%" }, ctx);
+  const getEmpPersistedRes = await callTool("get_employee", { employeeExternalId: "wc|persisted-mcp-subject" }, ctx);
+  const checkPersistedRes = await callTool("check_compliance", { employeeExternalId: "wc|persisted-mcp-subject", measureName: "Diabetes: Glycemic Status Assessment Greater Than 9%" }, ctx);
   const listMeasuresRes = await callTool("list_measures", {}, ctx);
   const listMeasuresJson = JSON.parse(listMeasuresRes.content[0].text);
 
@@ -78,6 +84,10 @@ const testScript = `
     getCaseLive: JSON.parse(getCaseLiveRes.content[0].text),
     checkForeign: JSON.parse(checkForeignRes.content[0].text),
     checkLive: JSON.parse(checkLiveRes.content[0].text),
+    getEmpInvented: JSON.parse(getEmpInventedRes.content[0].text),
+    checkInvented: JSON.parse(checkInventedRes.content[0].text),
+    getEmpPersisted: JSON.parse(getEmpPersistedRes.content[0].text),
+    checkPersisted: JSON.parse(checkPersistedRes.content[0].text),
     measures: listMeasuresJson.results.map(r => r.measureId),
   }));
 `;
@@ -109,6 +119,14 @@ test("scoped profile (Maui) — MCP tools isolate subjects to Maui profile direc
   const measures = output.measures as string[];
   assert.ok(measures.includes("cms122"), "runnable cms122 must be listed on Maui");
   assert.ok(!measures.includes("audiogram"), "unrunnable audiogram must not be listed on Maui");
+});
+
+test("scoped profile (Maui) — MCP rejects invented wc ids but resolves persisted wc subjects", () => {
+  const output = runProfileChild("maui", testScript);
+  assert.equal((output.getEmpInvented as Record<string, unknown>).code, "EMPLOYEE_NOT_FOUND");
+  assert.equal((output.checkInvented as Record<string, unknown>).code, "EMPLOYEE_NOT_FOUND");
+  assert.equal((output.getEmpPersisted as Record<string, unknown>).employeeExternalId, "wc|persisted-mcp-subject");
+  assert.equal((output.checkPersisted as Record<string, unknown>).status, "COMPLIANT");
 });
 
 test("default profile — MCP tools preserve unresolvable and foreign subjects", () => {

@@ -132,6 +132,7 @@ export async function buildHierarchyRollup(deps: HierarchyDeps, filters: Hierarc
     }
     const openCases = await deps.caseStore.listCases({ statuses: [...ACTIVE_CASE_STATUSES], measureId: measureId ?? undefined, limit: 100000 });
     for (const c of openCases) {
+      if (!scopeMeasures.includes(c.measureId)) continue;
       if (from && day(c.createdAt) < day(from)) continue;
       if (to && day(c.createdAt) > day(to)) continue;
       const acc = ensure(c.employeeId);

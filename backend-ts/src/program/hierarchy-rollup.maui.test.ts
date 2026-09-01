@@ -40,6 +40,7 @@ const testScript = `
   });
   await outcomeStore.recordOutcome({ runId: newerRun.id, subjectId: "emp-001", measureId: "cms122", status: "OVERDUE", evidence: {} });
   await outcomeStore.recordOutcome({ runId: newerRun.id, subjectId: "emp-006", measureId: "audiogram", status: "OVERDUE", evidence: {} });
+  await caseStore.upsertFromOutcome({ runId: newerRun.id, subjectId: "pat-001", measureId: "audiogram", evaluationPeriod: "2026-07-18", outcomeStatus: "OVERDUE" });
   await runStore.finalizeRun(newerRun.id, "COMPLETED");
 
   const deps = { outcomeStore, caseStore, runStore, webChartEnv: {} };
@@ -49,6 +50,7 @@ const testScript = `
   console.log(JSON.stringify({
     allEvaluated: root.totals.evaluated,
     audiogramEvaluated: audiogramRoot.totals.evaluated,
+    allOpenCases: root.totals.openCases,
   }));
 `;
 
@@ -58,10 +60,16 @@ test("scoped profile (Maui) — hierarchy rollup scopes to runnable measures", (
   assert.equal(output.audiogramEvaluated, 0, "audiogram measure is not runnable on Maui profile");
 });
 
+test("scoped profile (Maui) — hierarchy rollup excludes open cases for unrunnable measures", () => {
+  const output = runProfileChild("maui", testScript);
+  assert.equal(output.allOpenCases, 0, "Maui must not count an open audiogram case when audiogram is unrunnable");
+});
+
 test("default profile — hierarchy rollup includes all active measures", () => {
   const output = runProfileChild(undefined, testScript);
   assert.equal(output.allEvaluated, 3, "default profile includes the unresolvable subject alongside cms122 and audiogram");
   assert.equal(output.audiogramEvaluated, 1, "audiogram measure rollup evaluated on default profile");
+  assert.equal(output.allOpenCases, 1, "default profile preserves the open audiogram case");
 });
 
 test("scoped profile (Maui) — hierarchy scale rollup excludes hidden tenant and unrunnable measures", () => {
