@@ -28,7 +28,7 @@ request() {
   local retry_delay="${MIEWEB_REQUEST_RETRY_DELAY_SECONDS:-20}"
   local connect_timeout="${MIEWEB_REQUEST_CONNECT_TIMEOUT_SECONDS:-10}"
   local max_time="${MIEWEB_REQUEST_MAX_TIME_SECONDS:-30}"
-  local attempts=1 response_file status curl_exit attempt
+  local attempts=1 response_file status curl_exit attempt errexit_was_set
 
   require_positive_request_integer MIEWEB_REQUEST_ATTEMPTS "$configured_attempts" || return 1
   require_positive_request_integer MIEWEB_REQUEST_CONNECT_TIMEOUT_SECONDS "$connect_timeout" || return 1
@@ -44,6 +44,14 @@ request() {
   response_file="$(mktemp)"
   for attempt in $(seq 1 "$attempts"); do
     : > "$response_file"
+    # Save the caller's errexit rather than asserting it. An unconditional `set -e` below re-arms
+    # errexit BEFORE this function returns, which silently undoes a caller's `set +e` and makes the
+    # shell exit on our own non-zero return -- so a caller that deliberately wants to INSPECT a
+    # failure never gets to. That is not hypothetical: on 2026-09-01 it defeated
+    # delete_container_confirmed entirely on its first production run. The guard existed, was tested,
+    # and could not run, because this line reached across the function boundary and took errexit back.
+    errexit_was_set=""
+    case "$-" in *e*) errexit_was_set=1 ;; esac
     set +e
     if [ -n "$body_file" ]; then
       status=$(curl -sS --connect-timeout "$connect_timeout" --max-time "$max_time" \
@@ -62,7 +70,7 @@ request() {
         -H "Accept: application/json")
       curl_exit=$?
     fi
-    set -e
+    if [ -n "$errexit_was_set" ]; then set -e; fi
 
     if [ "$curl_exit" -ne 0 ]; then
       if [ "$method" = "GET" ] && is_transient_curl_exit "$curl_exit" && [ "$attempt" -lt "$attempts" ]; then

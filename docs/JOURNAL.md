@@ -1,5 +1,57 @@
 # Journal
 
+## 2026-09-01 (later still) — the guard shipped, could not run, and production went down for the third time in the same place
+
+**#502 merged at 18:02. The deploy it triggered failed at 18:04, at the same DELETE, with the same
+`curl: (28)`, and the fix did not fire.** No read-back. No warning. `twh-api-ts` deleted, the deploy
+stopped before recreating it, backend down. Restored by re-running the job; all four surfaces
+verified back at 200.
+
+**The cause is one line, and it is inside `request()`, not inside the new guard.** Its retry loop
+does `set +e` around curl and then an unconditional **`set -e`** — and errexit is a property of the
+*shell*, not of the function. So `request()` re-armed errexit **before returning**, reaching across
+the function boundary to undo the caller's `set +e`, and the shell exited on `request()`'s own
+non-zero return. `delete_container_confirmed` never reached the line after the DELETE. Reduced, it is
+unambiguous:
+
+```
+inner() { set +e; false; set -e; return 1; }
+outer() { set +e; inner; local rc=$?; set -e; echo "REACHED: rc=$rc"; }
+outer            # prints nothing; the script exits 1
+```
+
+**Why nothing caught it, which is the part worth keeping.** The unit test substitutes a fake
+`request()`. That is the right boundary for testing the *decisions* — when to read back, when to
+re-issue, when to refuse — and eight mutations confirm it tests them well. But a double defines away
+everything about the real thing that it does not model, and what it did not model here was the one
+behaviour that mattered: the real `request()` manipulates the caller's shell flags. Two review passes
+looked at this code. The independent one **did** flag the save-versus-assert pattern — as a MINOR
+point about the *new* file, on the grounds that it was "correct here". I agreed and skipped it. The
+same pattern in the file it *calls* was the outage.
+
+**Fixed three ways, because the first two are each sufficient and neither is where the lesson is:**
+
+1. `request()` saves the caller's errexit (`case "$-" in *e*)`) and restores it only if it was set.
+   The class fix — every caller was exposed, not just the new one.
+2. The call sites are errexit-immune **by construction**: `|| return 1`, and a condition context.
+   Both are exempt from errexit no matter what the callee does to the shell, so this cannot be
+   defeated from inside `request()` again.
+3. **`mieweb-delete-confirmed.integration.test.sh`** drives the *real* `request()` and the *real*
+   `delete_container_confirmed` under the deploy's own `set -euo pipefail`, faking only `curl`.
+   Reverting both fixes makes it fail, reproducing the production log line exactly.
+
+**And the harness got the same lesson wrong once more before getting it right.** The first draft of
+that integration test called the function as `delete_container_confirmed … && echo ok || echo fail`
+— a condition context, which suppresses errexit for the call *and everything beneath it*. It passed
+with the production bug fully restored. The deploy calls it **bare**; the test now does too. A
+harness gentler than the caller it stands in for is not a test of that caller.
+
+**What I would take from all three of today's rounds:** every defect — Codex's, the reviewer's four,
+and this one — was the same shape, a control that reads as present and cannot fire. Mutation testing
+found it in the code. Review found it in two guards and two tests. Production found it in the seam
+between a test double and the thing it stood for, which is the one place none of the earlier passes
+could look. **Test a survival guard against the real thing that fails.**
+
 ## 2026-09-01 (later) — the deploy stops failing over a DELETE it cannot see the result of, and the always-loaded doc set is halved
 
 **The recurring outage has a name now, and it is not the manager.** Merging #500 triggered
