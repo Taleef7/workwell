@@ -35,6 +35,8 @@ api_root="${api_root%/api}"
 api_base="${api_root}/api/v1"
 # shellcheck source=mieweb-api-request.sh
 source "$(dirname "${BASH_SOURCE[0]}")/mieweb-api-request.sh"
+# shellcheck source=mieweb-delete-confirmed.sh
+source "$(dirname "${BASH_SOURCE[0]}")/mieweb-delete-confirmed.sh"
 
 echo "$CONTAINER_ENV_VARS_JSON" | jq -e '
   type == "array" and all(.[]; type == "object" and has("key") and has("value"))
@@ -63,7 +65,10 @@ if [ -n "$existing_id" ]; then
     exit 1
   fi
   echo "Deleting existing container '${CONTAINER_HOSTNAME}' (ID ${existing_id}) before recreate..."
-  request DELETE "/sites/${SITE_ID}/containers/${existing_id}" >/dev/null
+  # Confirmed rather than fire-and-hope: a DELETE that times out at the client may still have been
+  # applied, and aborting the deploy there is what took production down twice. See
+  # mieweb-delete-confirmed.sh for the full account.
+  delete_container_confirmed "$CONTAINER_HOSTNAME" "$existing_id"
 fi
 
 payload_file="$(mktemp)"
@@ -95,7 +100,9 @@ cleanup_existing_for_retry() {
   retry_existing_id="$(echo "$retry_existing_json" | jq -r '.data[0].id // empty')"
   if [ -n "$retry_existing_id" ]; then
     echo "Cleaning up container '${CONTAINER_HOSTNAME}' (ID ${retry_existing_id}) before retry..."
-    request DELETE "/sites/${SITE_ID}/containers/${retry_existing_id}" >/dev/null || true
+    # Non-fatal: if the cleanup cannot be confirmed, the create below fails with a clearer message
+    # than anything this path could raise.
+    delete_container_confirmed "$CONTAINER_HOSTNAME" "$retry_existing_id" || true
   fi
 }
 
