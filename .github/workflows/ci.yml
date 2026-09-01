@@ -47,6 +47,12 @@ jobs:
       - uses: actions/checkout@v7
       - name: Test bounded MIE manager requests
         run: bash .github/scripts/mieweb-api-request.test.sh
+      # A DELETE that times out at the client may still have been applied by the manager. Aborting
+      # the deploy there took production down twice (2026-08-30, 2026-09-01), so the read-back that
+      # resolves the ambiguity is load-bearing — and, like every deploy script, invisible to PR CI
+      # unless it is tested here.
+      - name: An ambiguous container DELETE is resolved by reading the manager back
+        run: bash .github/scripts/mieweb-delete-confirmed.test.sh
       # Deploy workflows only RUN on push to main — i.e. after merge — so a shell syntax error in one is
       # invisible to every PR check. PR-9c put an apostrophe inside a single-quoted jq program and turned
       # the production deploy step into a parse error; nothing before merge could see it (#356).

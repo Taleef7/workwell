@@ -1,19 +1,16 @@
 # ADR Index (always-loaded extract)
 
-> **`docs/DECISIONS.md` is authoritative — this index may lag it.** Only the ADR titles live here, so
-> a session knows a decision *exists* and roughly what it says, and knows to open `DECISIONS.md` for
-> the reasoning, alternatives, and consequences. ~1.1k tokens here vs ~44k for the bodies.
+> **Titles only.** `docs/DECISIONS.md` is authoritative and may be ahead of this file; open it for the
+> reasoning, alternatives and consequences. This exists so a session knows a decision *exists* and
+> roughly what it says (~1.1k tokens, vs ~44k for the bodies). Regenerate after adding an ADR:
+> `grep -o '^#\+ ADR-[0-9]*.*' docs/DECISIONS.md`, newest first. If the highest number here is lower
+> than the highest there, this file is stale.
 >
-> Regenerate after adding an ADR:
-> `grep -o '^#\+ ADR-[0-9]*.*' docs/DECISIONS.md` — newest first, then paste below the marker.
-> If the highest number here is lower than the highest in `DECISIONS.md`, this file is stale: trust
-> `DECISIONS.md` and regenerate.
-
-> **`·archived` (14 of 69, as of 2026-08-30)** means the BODY moved to
-> `docs/archive/DECISIONS_ARCHIVE.md` — it is either superseded or a historical *finding* rather than a
-> decision that governs. `DECISIONS.md` still carries its heading plus a one-line pointer, so every
-> cross-reference resolves. The 55 unmarked titles are the record that still governs: decisions that
-> constrain what may be done next, and design records for built features.
+> **`·archived`** (14 of 69) means the BODY moved to `docs/archive/DECISIONS_ARCHIVE.md` — superseded,
+> or a historical *finding* rather than a decision that governs. `DECISIONS.md` keeps every heading plus
+> a pointer, so every cross-reference still resolves. The 55 unmarked titles are the record that governs.
+>
+> **ADR-033 does not exist** — the sequence runs 031, 032, 034. Verified absent 2026-07-29. Do not reuse it.
 
 ## Titles (newest first)
 
@@ -86,6 +83,3 @@
 - ADR-001: Single Spring Boot deployable with modular package boundaries  ·archived
 - ADR-003: Single all-encompassing TWH instance (consolidation from three-instance model)
 - ADR-002: evidence_json shape and define-level traceability
-
-> Numbering note: **ADR-033 does not exist** — the sequence runs 031, 032, 034. Not a gap in this
-> index; verified absent from `docs/DECISIONS.md` on 2026-07-29. Do not reuse 033.

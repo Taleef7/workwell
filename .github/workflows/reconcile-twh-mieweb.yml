@@ -23,9 +23,15 @@ name: Reconcile TWH stack (self-heal)
 # build) and undo it — so follow a fast rollback with a DURABLE one (revert the bad commit on main so
 # `:latest` rebuilds to the good image), or disable this workflow, before relying on it. See docs/DEPLOY.md.
 
+# CADENCE, MEASURED — do not read the cron below as a recovery-time guarantee. Over 2026-08-30..09-01
+# the twelve most recent scheduled runs came 2.5-7.5 HOURS apart, never 15 minutes: GitHub queues
+# `schedule` on a best-effort basis and drops runs under load. So this is a slow backstop, not a
+# watchdog. Anything that must not stay broken for hours has to fail safe on its own — which is why
+# the deploy path resolves an ambiguous DELETE itself (.github/scripts/mieweb-delete-confirmed.sh)
+# rather than relying on this workflow to clean up after it. To heal now, dispatch it by hand.
 on:
   schedule:
-    - cron: "*/15 * * * *" # every 15 minutes
+    - cron: "*/15 * * * *" # requested every 15 min; GitHub actually delivers every few hours
   workflow_dispatch:
 
 # Shared with deploy-twh-mieweb.yml: a constant group (NOT keyed on github.ref) so heals and deploys
@@ -51,6 +57,11 @@ jobs:
   check:
     name: Health-check the live stack
     runs-on: ubuntu-latest
+    # Bounded because this job holds the `twh-mieweb-container-ops` concurrency group while it runs,
+    # and the GitHub default is 360 min. A flaky manager can compound retries (request 6x, the
+    # delete read-back 6x, the create 3x) into hours of held group -- starving the self-heal
+    # reconciler, which is the failure mode this whole change exists to stop depending on.
+    timeout-minutes: 45
     outputs:
       backend_down: ${{ steps.probe.outputs.backend_down }}
       frontend_down: ${{ steps.probe.outputs.frontend_down }}
@@ -85,6 +96,11 @@ jobs:
   heal-backend-ts:
     name: Heal twh-api-ts (recreate from :latest)
     runs-on: ubuntu-latest
+    # Bounded because this job holds the `twh-mieweb-container-ops` concurrency group while it runs,
+    # and the GitHub default is 360 min. A flaky manager can compound retries (request 6x, the
+    # delete read-back 6x, the create 3x) into hours of held group -- starving the self-heal
+    # reconciler, which is the failure mode this whole change exists to stop depending on.
+    timeout-minutes: 45
     needs: check
     if: needs.check.outputs.backend_down == 'true'
     env:
@@ -182,6 +198,11 @@ jobs:
   heal-frontend:
     name: Heal twh frontend (recreate from :latest)
     runs-on: ubuntu-latest
+    # Bounded because this job holds the `twh-mieweb-container-ops` concurrency group while it runs,
+    # and the GitHub default is 360 min. A flaky manager can compound retries (request 6x, the
+    # delete read-back 6x, the create 3x) into hours of held group -- starving the self-heal
+    # reconciler, which is the failure mode this whole change exists to stop depending on.
+    timeout-minutes: 45
     needs: check
     if: needs.check.outputs.frontend_down == 'true'
     env:

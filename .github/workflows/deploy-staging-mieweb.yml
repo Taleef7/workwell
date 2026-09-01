@@ -71,6 +71,11 @@ jobs:
   build-backend-ts:
     name: Build backend-ts image (staging tag)
     runs-on: ubuntu-latest
+    # Bounded because this job holds the `twh-mieweb-container-ops` concurrency group while it runs,
+    # and the GitHub default is 360 min. A flaky manager can compound retries (request 6x, the
+    # delete read-back 6x, the create 3x) into hours of held group -- starving the self-heal
+    # reconciler, which is the failure mode this whole change exists to stop depending on.
+    timeout-minutes: 45
     permissions:
       contents: read
       packages: write
@@ -131,6 +136,11 @@ jobs:
   build-frontend:
     name: Build staging frontend image (points at the staging backend)
     runs-on: ubuntu-latest
+    # Bounded because this job holds the `twh-mieweb-container-ops` concurrency group while it runs,
+    # and the GitHub default is 360 min. A flaky manager can compound retries (request 6x, the
+    # delete read-back 6x, the create 3x) into hours of held group -- starving the self-heal
+    # reconciler, which is the failure mode this whole change exists to stop depending on.
+    timeout-minutes: 45
     permissions:
       contents: read
       packages: write
@@ -162,6 +172,11 @@ jobs:
   deploy-backend-ts:
     name: Deploy staging backend (live WebChart → teatea)
     runs-on: ubuntu-latest
+    # Bounded because this job holds the `twh-mieweb-container-ops` concurrency group while it runs,
+    # and the GitHub default is 360 min. A flaky manager can compound retries (request 6x, the
+    # delete read-back 6x, the create 3x) into hours of held group -- starving the self-heal
+    # reconciler, which is the failure mode this whole change exists to stop depending on.
+    timeout-minutes: 45
     needs: build-backend-ts
     env:
       MIEWEB_API_URL: ${{ secrets.LAUNCHPAD_API_URL }}
@@ -277,6 +292,11 @@ jobs:
   deploy-frontend:
     name: Deploy staging frontend
     runs-on: ubuntu-latest
+    # Bounded because this job holds the `twh-mieweb-container-ops` concurrency group while it runs,
+    # and the GitHub default is 360 min. A flaky manager can compound retries (request 6x, the
+    # delete read-back 6x, the create 3x) into hours of held group -- starving the self-heal
+    # reconciler, which is the failure mode this whole change exists to stop depending on.
+    timeout-minutes: 45
     needs: [build-frontend, deploy-backend-ts]
     env:
       MIEWEB_API_URL: ${{ secrets.LAUNCHPAD_API_URL }}
