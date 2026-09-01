@@ -19,17 +19,49 @@
 # request provably did not take effect and there is no ambiguity left to respect.
 
 # Echo the container id currently registered for a hostname; empty when none is.
-# Exit 1 means "could not tell" — a failed or unparseable list read — which is NOT the same as
-# "absent" and must never be collapsed into it (see wait_for_container_absent).
+# Exit 1 means "could not tell" -- a failed, empty or unrecognisable list read -- which is NOT the
+# same as "absent" and must never be collapsed into it (see wait_for_container_absent).
+#
+# NOTE the read is keyed on HOSTNAME, not on the id being deleted. If the original DELETE landed and
+# something recreated the hostname inside the confirmation window, the id reported here is the NEW
+# container and a re-issue would delete it. Nothing in this file refuses that; what prevents it is the
+# `twh-mieweb-container-ops` concurrency group (`cancel-in-progress: false`), which stops a sibling
+# deploy or heal from recreating the hostname while this one holds the group. If that group is ever
+# removed or a fourth workflow starts touching these containers, this assumption goes with it.
 container_id_for_hostname() {
-  local hostname="$1" json
+  local hostname="$1" json id request_exit
   set +e
-  json="$(request GET "/sites/${SITE_ID}/containers?hostname=${hostname}")"
-  local request_exit=$?
+  # ONE attempt, deliberately: this function is the inner call of wait_for_container_absent's own poll
+  # loop, so letting request() retry six more times would compound a 30 s timeout into a ~5 min read,
+  # a ~29 min confirmation window, and a job that holds the container-ops concurrency group for hours
+  # -- starving the self-heal reconciler this whole change exists to stop depending on.
+  json="$(MIEWEB_REQUEST_ATTEMPTS=1 request GET "/sites/${SITE_ID}/containers?hostname=${hostname}")"
+  request_exit=$?
   set -e
-  [ "$request_exit" -eq 0 ] || return 1
-  [ -n "$json" ] || return 1
-  printf '%s' "$json" | jq -r '.data[0].id // empty'
+  if [ "$request_exit" -ne 0 ]; then
+    return 1
+  fi
+  if [ -z "$json" ]; then
+    # A 2xx with no body (e.g. 204) says nothing about what is registered.
+    return 1
+  fi
+  # ABSENCE MUST BE AN AFFIRMATIVE SHAPE, never merely an empty extraction. `.data[0].id // empty`
+  # yields "" for `{"data":[]}` (genuinely absent) but ALSO for `{"data":null}`, for an error envelope
+  # served with a 200, and for any future response whose shape moved -- and "" is the verdict that
+  # lets the deploy proceed to CREATE. Reading a shape we do not recognise as "nothing is there" is
+  # how this guard would create over a container that is still running: its own worst outcome,
+  # reached through the guard itself. So confirm the envelope first, and report anything else as
+  # could-not-tell.
+  id="$(printf '%s' "$json" | jq -r '
+    if (type == "object" and has("data") and (.data | type == "array"))
+    then (.data[0].id // "")
+    else "__workwell_unreadable__"
+    end')" || return 1
+  if [ "$id" = "__workwell_unreadable__" ]; then
+    echo "::warning::The container list for '${hostname}' came back in an unrecognised shape; treating as could-not-tell rather than as absent." >&2
+    return 1
+  fi
+  printf '%s' "$id"
 }
 
 # Three-valued on purpose, because "still there" and "could not tell" must lead to different actions:
@@ -59,6 +91,9 @@ wait_for_container_absent() {
     else
       # A transient read failure is retried inside this window rather than being decisive; only the
       # LAST observation decides, so a manager that is unreachable at the end of the window yields 2.
+      # `last_read` is the load-bearing half here -- it is what makes the verdict below "unknown"
+      # rather than a stale "present". Clearing CONFIRMED_CONTAINER_ID is defensive only: the sole
+      # exit that reads it requires last_read="present", set in the same iteration that sets the id.
       last_read="unknown"
       CONFIRMED_CONTAINER_ID=""
       echo "::warning::Could not read the container list while confirming deletion of '${hostname}' (check ${attempt}/${attempts})." >&2
@@ -81,6 +116,14 @@ delete_container_confirmed() {
 
   require_positive_request_integer MIEWEB_DELETE_ATTEMPTS "$attempts" || return 1
   require_positive_request_integer MIEWEB_DELETE_CONFIRM_ATTEMPTS "${MIEWEB_DELETE_CONFIRM_ATTEMPTS:-6}" || return 1
+  # Validated rather than left to `[ "$delay" -gt 0 ]`, which on garbage errors inside an `if`
+  # condition: no abort, the sleep silently skipped, and the confirmation window collapses to six
+  # back-to-back reads. For an asynchronously-applied deletion that is a materially weaker read-back
+  # that still returns "present" and re-issues -- the guard degrading in silence.
+  if ! [[ "${MIEWEB_DELETE_CONFIRM_DELAY_SECONDS:-10}" =~ ^[0-9]+$ ]]; then
+    echo "::error::MIEWEB_DELETE_CONFIRM_DELAY_SECONDS must be a non-negative integer (got '${MIEWEB_DELETE_CONFIRM_DELAY_SECONDS}')." >&2
+    return 1
+  fi
 
   for attempt in $(seq 1 "$attempts"); do
     set +e

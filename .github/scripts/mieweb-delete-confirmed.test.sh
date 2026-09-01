@@ -26,15 +26,30 @@ MIEWEB_DELETE_CONFIRM_DELAY_SECONDS=0
 # because the real `{"data":[]}` is too — conflating the two would hide the difference between a
 # manager that answered "nothing here" and one that did not answer at all.
 jq() {
-  local body
+  local filter="$*" body
   body="$(cat)"
-  [ "$body" = "EMPTY" ] || printf '%s' "$body"
+  case "$body" in
+    EMPTY) printf '' ;; # a well-formed, genuinely empty list
+    GARBAGE)
+      # Valid JSON whose shape the extractor does not recognise. This branch MUST depend on the
+      # filter, not just the body: real `jq -r '.data[0].id // ""'` extracts "" from an error
+      # envelope exactly as it does from an empty list, and only a filter that checks the envelope
+      # can tell them apart. Keying the stub on the body alone would make test 9 pass on the stub's
+      # say-so even with the production shape check deleted -- a test that cannot fail.
+      case "$filter" in
+        *'has("data")'*) printf '__workwell_unreadable__' ;;
+        *)               printf '' ;;
+      esac
+      ;;
+    *) printf '%s' "$body" ;;
+  esac
 }
 
 mode=""
 delete_count_file="${tmp_dir}/delete_count"
 get_count_file="${tmp_dir}/get_count"
-registry_file="${tmp_dir}/registry" # the id the manager currently reports; empty = absent
+registry_file="${tmp_dir}/registry"   # what the manager reports: an id, EMPTY, or GARBAGE
+targets_file="${tmp_dir}/delete_targets" # the container id each DELETE was aimed at, one per line
 
 bump() {
   local file="$1" count
@@ -48,16 +63,19 @@ reset() {
   mode="$1"
   echo 0 > "$delete_count_file"
   echo 0 > "$get_count_file"
+  : > "$targets_file"
   echo "2026" > "$registry_file"
 }
 
 # Test double for the request boundary. delete_container_confirmed() still owns every decision
 # under test: when to read back, when to re-issue, and when to give up.
 request() {
-  local method="$1" count
+  local method="$1" path="$2" count
   case "$method" in
     DELETE)
       count="$(bump "$delete_count_file")"
+      printf '%s
+' "${path##*/}" >> "$targets_file"
       case "$mode" in
         clean)
           echo EMPTY > "$registry_file"
@@ -73,7 +91,12 @@ request() {
           echo EMPTY > "$registry_file"
           return 0
           ;;
-        always-timeout-persisting | manager-unreadable | unreadable-then-present | present-then-unreadable)
+        id-moves)
+          if [ "$count" -eq 1 ]; then return 1; fi
+          echo EMPTY > "$registry_file"
+          return 0
+          ;;
+        always-timeout-persisting | manager-unreadable | unreadable-then-present           | present-then-unreadable | unexpected-shape | empty-body)
           return 1
           ;;
       esac
@@ -81,7 +104,15 @@ request() {
     GET)
       count="$(bump "$get_count_file")"
       if [ "$mode" = "manager-unreadable" ]; then
+        # A failed read may still have written a partial body. Emitting one here is what forces the
+        # request-exit check to carry its own weight: without it the body below would be parsed as a
+        # live answer. (The two guards otherwise cover for each other and are individually vacuous.)
+        printf '2026'
         return 1
+      fi
+      # A 2xx with no body at all -- says nothing, and must not read as absent.
+      if [ "$mode" = "empty-body" ]; then
+        return 0
       fi
       # Flaky manager: the first read fails, later reads succeed and show the container present.
       if [ "$mode" = "unreadable-then-present" ] && [ "$count" -eq 1 ]; then
@@ -154,4 +185,31 @@ if delete_container_confirmed twh-api-ts 2026 2>/dev/null; then
 fi
 [ "$(cat "$delete_count_file")" = "1" ] || fail "a stale 'present' observation survived a later read failure and triggered a blind retry"
 
-echo "PASS: an ambiguous container DELETE is resolved by reading the manager back; a manager that cannot be read is never guessed at"
+# 9. A 200 carrying valid JSON of an UNRECOGNISED shape must read as could-not-tell, not as absent.
+#    `.data[0].id // empty` extracts "" from an error envelope served 200 just as readily as from a
+#    genuinely empty list, and "" is the verdict that lets the deploy CREATE -- over a container that
+#    is still running. This is the highest-blast-radius path in the file.
+reset unexpected-shape
+echo GARBAGE > "$registry_file"
+if delete_container_confirmed twh-api-ts 2026 2>/dev/null; then
+  fail "an unrecognised list shape was treated as proof of deletion"
+fi
+[ "$(cat "$delete_count_file")" = "1" ] || fail "an unrecognised list shape triggered a blind DELETE retry"
+
+# 10. Likewise a 2xx with no body at all (a 204 reaches request() as success + empty stdout).
+reset empty-body
+if delete_container_confirmed twh-api-ts 2026 2>/dev/null; then
+  fail "an empty-bodied list response was treated as proof of deletion"
+fi
+[ "$(cat "$delete_count_file")" = "1" ] || fail "an empty-bodied list response triggered a blind DELETE retry"
+
+# 11. The re-issue targets the id the MANAGER reported, not the stale one the caller was handed.
+#     Without this the docblock's "in case it moved under us" and DEPLOY.md's "re-targets the id the
+#     manager itself just reported" are claims nothing verifies.
+reset id-moves
+echo "3099" > "$registry_file"
+delete_container_confirmed twh-api-ts 2026 2>/dev/null || fail "the re-targeted DELETE did not succeed"
+[ "$(sed -n 1p "$targets_file")" = "2026" ] || fail "the first DELETE did not target the id it was given"
+[ "$(sed -n 2p "$targets_file")" = "3099" ] || fail "the re-issued DELETE did not target the id the manager reported"
+
+echo "PASS: an ambiguous container DELETE is resolved by reading the manager back; a manager that cannot be read -- for any reason -- is never guessed at"

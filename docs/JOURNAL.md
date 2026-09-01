@@ -39,6 +39,47 @@ three hours before the deploy failed. The reconciler is a slow backstop, not a w
 workflow header and DEPLOY.md now say so with the measurement attached. Nothing that must not stay
 broken for hours can be left to it — which is exactly why the fix above lives in the deploy path.
 
+**Two review rounds, and both found the same class of defect in my own guard.** Codex (P2): the
+read-back returned the same status for *confirmed still present* and *the read itself failed*, so a
+timed-out DELETE plus an unreachable manager produced up to three blind state-changing retries — the
+ambiguity the helper exists to respect, reintroduced by the helper. I had handled the unreadable case
+correctly on one side (it must not read as *absent*) and not the other (it must not read as *present*
+either). The verdict is now three-valued, and only the **last** observation in the window decides.
+
+The independent review then found four more, of which two were mine and two were the tests lying about
+their own coverage:
+
+- **`.data[0].id // empty` extracts `""` from an error envelope served with a 200 exactly as it does
+  from a genuinely empty list** — and `""` is the verdict that lets the deploy CREATE. The highest
+  blast radius in the file, reached *through* the guard. Absence now requires an affirmative envelope
+  shape; anything unrecognised is could-not-tell.
+- **No wall-clock bound.** Six confirmation checks × six inner curl retries × three delete attempts,
+  against a job with GitHub's 360-minute default, holding the `twh-mieweb-container-ops` concurrency
+  group throughout — the same starvation this entry is about, from the other direction. The
+  confirmation GETs now run with `MIEWEB_REQUEST_ATTEMPTS=1` (the poll loop *is* the retry) and every
+  container-ops job across all four workflows carries `timeout-minutes: 45`.
+- **Two guards that were individually vacuous**: the request-exit check and the empty-body check each
+  covered for the other, because the stub returned non-zero *and* printed nothing. The stub now emits
+  a partial body on failure, so each has to carry its own weight.
+- **The re-target line had no test at all**, so the docblock's "in case it moved under us" was a claim
+  nothing verified. It has one now — and the hostname-keying assumption behind it (the read is keyed
+  on hostname, not on the id being deleted, so the concurrency group is what makes it safe) is written
+  down instead of being an unstated property of a different file.
+
+**And a correction to what this entry said an hour ago.** I wrote that mutation-checking had found
+test 8's guard missing. The mutation I ran deleted two lines at once; the review separated them and
+showed the load-bearing one is `last_read="unknown"` — clearing `CONFIRMED_CONTAINER_ID` is
+unobservable, because the only exit that could read a stale id requires `last_read="present"`, set in
+the same iteration. The comment in the test claimed coverage that did not exist, in a repo whose whole
+point is not doing that. Fixed at the source.
+
+**The sharpest finding was about a test, not the code.** Test 9 — the one guarding the
+highest-blast-radius path — passed with the production shape check deleted, because the `jq` stub keyed
+its answer on the response body and ignored the filter entirely. It was asserting the stub's opinion.
+The stub now branches on the filter, modelling what real `jq` does with each, and the mutation fails as
+it should. Eleven cases, eight mutations, seven caught; the eighth is the single-attempt read, which is
+a performance change with no behavioural signature and is not claimed as covered.
+
 **Separately: the always-loaded doc set went from ~128k chars to ~58k**, a little under half, and
 `JOURNAL.md` from 1.17 MB to 234k. **Nothing was compressed and nothing was summarised** — the cut was
 made on a single test, *does a session have to avoid silently contradicting this?*, and everything

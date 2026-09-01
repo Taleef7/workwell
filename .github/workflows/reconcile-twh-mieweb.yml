@@ -57,6 +57,11 @@ jobs:
   check:
     name: Health-check the live stack
     runs-on: ubuntu-latest
+    # Bounded because this job holds the `twh-mieweb-container-ops` concurrency group while it runs,
+    # and the GitHub default is 360 min. A flaky manager can compound retries (request 6x, the
+    # delete read-back 6x, the create 3x) into hours of held group -- starving the self-heal
+    # reconciler, which is the failure mode this whole change exists to stop depending on.
+    timeout-minutes: 45
     outputs:
       backend_down: ${{ steps.probe.outputs.backend_down }}
       frontend_down: ${{ steps.probe.outputs.frontend_down }}
@@ -91,6 +96,11 @@ jobs:
   heal-backend-ts:
     name: Heal twh-api-ts (recreate from :latest)
     runs-on: ubuntu-latest
+    # Bounded because this job holds the `twh-mieweb-container-ops` concurrency group while it runs,
+    # and the GitHub default is 360 min. A flaky manager can compound retries (request 6x, the
+    # delete read-back 6x, the create 3x) into hours of held group -- starving the self-heal
+    # reconciler, which is the failure mode this whole change exists to stop depending on.
+    timeout-minutes: 45
     needs: check
     if: needs.check.outputs.backend_down == 'true'
     env:
@@ -188,6 +198,11 @@ jobs:
   heal-frontend:
     name: Heal twh frontend (recreate from :latest)
     runs-on: ubuntu-latest
+    # Bounded because this job holds the `twh-mieweb-container-ops` concurrency group while it runs,
+    # and the GitHub default is 360 min. A flaky manager can compound retries (request 6x, the
+    # delete read-back 6x, the create 3x) into hours of held group -- starving the self-heal
+    # reconciler, which is the failure mode this whole change exists to stop depending on.
+    timeout-minutes: 45
     needs: check
     if: needs.check.outputs.frontend_down == 'true'
     env:

@@ -408,8 +408,28 @@ responses are wrapped in a `{"data": ...}` envelope, the create body uses `templ
 > running. Read as *present*, the deploy re-issues a state-changing request into a state it cannot
 > see — the very ambiguity the once-only rule exists to respect, and it could target an id the manager
 > has since reused. Only the **last** observation in the window decides, so a manager that answers and
-> then goes away is unknown, not present. All of that is pinned in
-> `.github/scripts/mieweb-delete-confirmed.test.sh`, which runs on every PR.
+> then goes away is unknown, not present — though a read failure *inside* the window is retried
+> inside it, so one flaky read does not abort a deploy the next read would have resolved.
+>
+> **Absence is required to be an affirmative shape**, not merely an empty extraction:
+> `.data[0].id // empty` yields `""` for an error envelope served with a 200 exactly as it does for a
+> genuinely empty list, and `""` is the verdict that lets the deploy proceed to CREATE. A response
+> whose envelope is not recognised is reported as could-not-tell.
+>
+> **One exception to the "refuse" row**, deliberately: the create-retry cleanup path
+> (`cleanup_existing_for_retry`) calls the same helper with `|| true` and proceeds, because the create
+> that follows fails with a clearer message than anything that path could raise. Everywhere else a
+> failure to confirm fails the job.
+>
+> Knobs, all with safe defaults and all validated (a bad value fails fast rather than silently
+> weakening the read-back): `MIEWEB_DELETE_ATTEMPTS` (3), `MIEWEB_DELETE_CONFIRM_ATTEMPTS` (6),
+> `MIEWEB_DELETE_CONFIRM_DELAY_SECONDS` (10). The confirmation GETs deliberately run with
+> `MIEWEB_REQUEST_ATTEMPTS=1` — the poll loop *is* the retry, and compounding the two would turn a
+> flaky manager into a job that holds the `twh-mieweb-container-ops` concurrency group for hours. For
+> the same reason every container-ops job now carries `timeout-minutes: 45`.
+>
+> All of that is pinned in `.github/scripts/mieweb-delete-confirmed.test.sh` (11 cases), which runs on
+> every PR.
 
 ### Required GitHub Secrets for MIE deploy
 
