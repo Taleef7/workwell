@@ -22,6 +22,7 @@ import {
 } from "recharts";
 import { ChartDataTable } from "@/components/chart-data-table";
 import { SkeletonCard } from "@/components/skeleton-loader";
+import { useMeasureIdentities } from "@/lib/measure-identity";
 import { trendMeta, type TrendPoint } from "./trend-meta";
 
 type ProgramSummary = {
@@ -53,6 +54,7 @@ export default function ProgramsPage() {
   const mayRun = canRunMeasures(user?.role);
   const { isActive: runActive, startTracking } = useRunStatus();
   const { siteId, from, to } = useGlobalFilters();
+  const { labelFor: measureLabelFor } = useMeasureIdentities();
   const [programs, setPrograms] = useState<ProgramSummary[]>([]);
   const [tenant, setTenant] = useState("");
   const [tenantOptions, setTenantOptions] = useState<TenantOption[]>([]);
@@ -256,12 +258,12 @@ export default function ProgramsPage() {
                   children below carry `relative z-10` so they keep their own click targets. */}
               <Link
                 href={`/programs/${program.measureId}`}
-                aria-label={`View ${program.measureName} detail`}
+                aria-label={`View ${measureLabelFor(program.measureId, program.measureName)} detail`}
                 className="absolute inset-0 z-0 rounded-md focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500"
               />
               <div className="flex items-start justify-between">
                 <div>
-                  <h3 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">{program.measureName}</h3>
+                  <h3 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">{measureLabelFor(program.measureId, program.measureName)}</h3>
                   <p className="text-xs text-neutral-600 dark:text-neutral-400">{program.policyRef} • {program.version}</p>
                 </div>
                 <p className="text-2xl font-semibold text-neutral-900 dark:text-neutral-100">{program.complianceRate.toFixed(1)}%</p>
@@ -282,7 +284,7 @@ export default function ProgramsPage() {
                       label={text}
                       tone={tone}
                       href={chipHref(program.measureId, bucket, { siteId, from, to })}
-                      ariaLabel={`${program.measureName}: ${text}`}
+                      ariaLabel={`${measureLabelFor(program.measureId, program.measureName)}: ${text}`}
                     />
                   );
                 })}

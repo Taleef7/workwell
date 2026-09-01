@@ -240,6 +240,13 @@ as **DECLINED** by the roster read model (E10.5) and keeps the case open (same p
 
 Two CMS eCQM measures promoted from Draft catalog to Active with full CQL evaluation:
 
+> **MIPS↔CMS crosswalk in the UI (2026-09-01, MM-0 Task 4).** Every CMS catalog row carries a structured
+> identity — `{cmsId, mipsQualityId}` in `backend-ts/src/measure/measure-identity.ts`, served as `identity`
+> on `GET /api/measures` — and the product renders it wherever a measure is named: the catalog's Identity
+> column, case detail, the roster column headers, and the programs pages read "MIPS 112 · CMS125 · Breast
+> Cancer Screening". A drift test ties each entry to the MIPS text in the catalog row so the two cannot
+> disagree. Occupational measures have no identity and render as before.
+
 ### 3b.1 Breast Cancer Screening (CMS125v14 / MIPS 112)
 - Policy reference: **CMS125v14** (2026 eCQI; v15/2027 annual roll-forward — stay on v14 for 2026)
 - CQL file: `backend-ts/measures/cms125.cql` (v2.0.0 production faithful-subset)

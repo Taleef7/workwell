@@ -75,6 +75,7 @@ export const handlers = [
         owner: "admin",
         tags: [],
         updatedAt: new Date().toISOString(),
+        identity: null,
       },
     ]);
   }),

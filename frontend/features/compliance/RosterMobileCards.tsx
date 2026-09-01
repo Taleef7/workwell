@@ -16,10 +16,12 @@ export function RosterMobileCards({
   columns,
   rows,
   loading,
+  labelFor,
 }: {
   columns: RosterColumn[];
   rows: RosterRow[];
   loading: boolean;
+  labelFor?: (measureId: string, fallbackName: string) => string;
 }) {
   if (loading && rows.length === 0) {
     return <p className="rounded-lg border border-neutral-200 p-4 text-center text-sm text-neutral-500 dark:border-neutral-800 md:hidden">Loading…</p>;
@@ -44,7 +46,7 @@ export function RosterMobileCards({
             {columns.map((c) => (
               <div key={c.measureId} className="flex items-start justify-between gap-3 py-1.5">
                 <dt className="text-sm text-neutral-700 dark:text-neutral-300">
-                  {c.name}
+                  {labelFor ? labelFor(c.measureId, c.name) : c.name}
                   <span className="ml-1 text-[10px] font-normal uppercase text-neutral-400">
                     {c.complianceClass === "PERMANENT" ? "perm" : "rec"}
                   </span>

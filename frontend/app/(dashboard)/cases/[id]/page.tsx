@@ -16,6 +16,7 @@ import { ConfirmDialog } from "@/components/confirm-dialog";
 import { CqlExpressionResults, CqlWhyFlagged } from "@/features/evidence/CqlEvidence";
 import { EvidenceDropzone } from "@/features/evidence/EvidenceDropzone";
 import { DeliveryChip } from "@/features/outreach/DeliveryChip";
+import { useMeasureIdentities } from "@/lib/measure-identity";
 
 // Type-ahead suggestions for the assignee field — the operational accounts that can own a case.
 // The input still accepts any free-text handle; this only offers quick picks.
@@ -32,6 +33,7 @@ type CaseDetail = {
   caseId: string;
   employeeId: string;
   employeeName: string;
+  measureId: string;
   measureName: string;
   measureVersionId: string;
   measureVersion: string;
@@ -143,6 +145,7 @@ export default function CaseDetailPage() {
   // backend; read-only roles previously saw every control and got a guaranteed 403 (Fable H9). Mirror
   // the API gate so those controls simply don't render for read roles.
   const canManage = canManageCases(user?.role);
+  const { labelFor: measureLabelFor } = useMeasureIdentities();
   const [caseDetail, setCaseDetail] = useState<CaseDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [acting, setActing] = useState<"outreach" | "rerun" | "delivery" | null>(null);
@@ -494,7 +497,7 @@ export default function CaseDetailPage() {
             <div className="mt-3 space-y-2 text-sm">
               <p className="font-semibold text-neutral-900 dark:text-neutral-100">{caseDetail.employeeName}</p>
               <p className="text-xs text-neutral-500 dark:text-neutral-400">{caseDetail.employeeId}</p>
-              <p className="text-xs text-neutral-600 dark:text-neutral-400">{caseDetail.measureName}</p>
+              <p className="text-xs text-neutral-600 dark:text-neutral-400">{measureLabelFor(caseDetail.measureId, caseDetail.measureName)}</p>
               <div className="flex flex-wrap items-center gap-2">
                 <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${caseStatusClass(caseDetail.status)}`}>
                   {labelFor(CASE_STATUS_LABELS, caseDetail.status)}
@@ -641,7 +644,7 @@ export default function CaseDetailPage() {
             <div className="rounded-3xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-6 shadow-sm">
               <div className="flex flex-wrap items-start justify-between gap-4">
                 <div>
-                  <p className="text-xs uppercase tracking-[0.2em] text-neutral-500 dark:text-neutral-400">{caseDetail.measureName}</p>
+                  <p className="text-xs uppercase tracking-[0.2em] text-neutral-500 dark:text-neutral-400">{measureLabelFor(caseDetail.measureId, caseDetail.measureName)}</p>
                   <h3 className="mt-1 text-2xl font-semibold text-neutral-900 dark:text-neutral-100">
                     <Link href={`/employees/${caseDetail.employeeId}`} className="hover:underline hover:text-primary-700 dark:text-primary-400">
                       {caseDetail.employeeName}
