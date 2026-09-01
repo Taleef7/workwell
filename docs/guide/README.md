@@ -31,6 +31,11 @@ documents are in chapter 5, the product outputs in chapter 1, the import directi
 chapters instead, and **MCP**, whose security boundary and tool posture live in
 [`docs/MCP.md`](../MCP.md).
 
+## For quality teams and non-engineers
+
+- [What WorkWell is](../WHAT_WORKWELL_IS.md) — one-page stakeholder explainer on what WorkWell is, what it is not, and how it fits quality workflows
+- [From the clinic EHR to a quality result](normalization-for-quality-teams.md) — sequence diagram showing how clinical records move from WebChart to a quality result through normalization
+
 ## The whole thing on one page
 
 Worth reading last rather than first. The diagram is a one-line orientation per stage; the list

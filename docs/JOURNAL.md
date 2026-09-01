@@ -125,6 +125,19 @@ undefined). The bundle with my adjudication is a local plan file for owner revie
 (rename to bare `cms2`/`cms130`/`cms165` vs an alias layer) and catalog activation's visibility on TWH
 are owner calls.
 
+## 2026-09-01 (evening) — the stakeholder one-pager exists, and the quality-teams explainer is finally tracked (#478)
+
+`docs/WHAT_WORKWELL_IS.md` is the page a non-engineer reads first: what WorkWell is beside WebChart,
+what it is not, what differentiates it, what runs where, and how it fits a quality team's day. Two
+things were deliberately written as *planned* rather than present — provider-panel work lists (MM-2)
+and cards that resolve by order or exception (MM-3) — because the first draft described both as if
+they shipped, and the whole point of the page is that a stakeholder can trust it. Conformance claims
+defer to `STANDARDS_CONFORMANCE.md` by link rather than restating them.
+
+`docs/guide/normalization-for-quality-teams.md`, the one clinical-audience artifact, had sat untracked
+since the 2026-08-24 alignment audit noticed it; it is committed and linked from the README and the
+guide index alongside the one-pager.
+
 ## 2026-09-01 (later still) — the guard shipped, could not run, and production went down for the third time in the same place
 
 **#502 merged at 18:02. The deploy it triggered failed at 18:04, at the same DELETE, with the same
