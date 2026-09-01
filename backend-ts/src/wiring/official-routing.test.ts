@@ -7,6 +7,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { isOfficialRouted, officialMeasureIds } from "./official-routing.ts";
+import { officialRoutingProblems } from "./executor-router.ts";
 
 test("unset or blank means NO measure is official-routed (the demo-stack default)", () => {
   for (const env of [{}, { WORKWELL_OFFICIAL_MEASURES: "" }, { WORKWELL_OFFICIAL_MEASURES: "   " }]) {
@@ -32,4 +33,14 @@ test('"all" is not a wildcard — every flip stays a deliberate per-measure act'
 test("a non-string value is ignored rather than coerced", () => {
   assert.equal(officialMeasureIds({ WORKWELL_OFFICIAL_MEASURES: ["cms122"] }).size, 0);
   assert.equal(officialMeasureIds({ WORKWELL_OFFICIAL_MEASURES: 1 }).size, 0);
+});
+
+test("cms130 and cms165 construct without a missing-semantics routing problem", () => {
+  for (const catalogId of ["cms130", "cms165"]) {
+    const problems = officialRoutingProblems({ WORKWELL_OFFICIAL_MEASURES: catalogId });
+    assert.ok(
+      !problems.some((problem) => problem.includes("no recorded numerator semantics")),
+      `${catalogId} should have reviewed semantics: ${JSON.stringify(problems)}`,
+    );
+  }
 });

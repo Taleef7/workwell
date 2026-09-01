@@ -490,9 +490,9 @@ test("POST /api/runs/manual maps invalid requests (unknown site → 400, missing
 });
 
 test("POST /api/runs/manual on a catalog-but-non-runnable (Draft) measure → 400 with an honest message", async () => {
-  // cms2v15 is a Draft catalog entry (no compiled CQL) — the run picker lists all 60, but
+  // cms2 is a Draft catalog entry (no compiled CQL) — the run picker lists all 60, but
   // only Active measures run (same as Java). The error must say so, not "Unknown measure".
-  const res = await post("/api/runs/manual", { scopeType: "MEASURE", measureId: "cms2v15" });
+  const res = await post("/api/runs/manual", { scopeType: "MEASURE", measureId: "cms2" });
   assert.equal(res?.status, 400);
   const body = (await res!.json()) as { message: string };
   assert.match(body.message, /not Active\/runnable/i);

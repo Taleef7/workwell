@@ -124,6 +124,14 @@ critical: CMS130/CMS165 semantics entries were missing from the plan, and pre-fl
 undefined). The bundle with my adjudication is a local plan file for owner review — the id model
 (rename to bare `cms2`/`cms130`/`cms165` vs an alias layer) and catalog activation's visibility on TWH
 are owner calls.
+## 2026-09-01 (late night) — MM-1b begins: the three official-only measures get one honest id and the semantics routing needs (slice 1)
+
+**The id was the first thing in the way.** `cms2`, `cms130`, `cms165` were catalog rows keyed
+`cms2v15`/`cms130v14`/`cms165v14`, but the official executor requires the requested id to equal the
+manifest's `catalogId`, and `cms122`/`cms125` already use the bare form. Nothing anywhere references
+the versioned ids — the measures have never run — so they are renamed rather than aliased (ADR-071).
+The seed deprecates a legacy row once, with one `MEASURE_DEPRECATED` audit event, and only when the row
+still carries the exact seed fingerprint; an edited row is left alone. A second seed is a no-op.
 
 ## 2026-09-01 (evening) — the stakeholder one-pager exists, and the quality-teams explainer is finally tracked (#478)
 
@@ -140,21 +148,18 @@ guide index alongside the one-pager.
 
 ## 2026-09-01 (later still) — the guard shipped, could not run, and production went down for the third time in the same place
 
-**#502 merged at 18:02. The deploy it triggered failed at 18:04, at the same DELETE, with the same
-`curl: (28)`, and the fix did not fire.** No read-back. No warning. `twh-api-ts` deleted, the deploy
-stopped before recreating it, backend down. Restored by re-running the job; all four surfaces
-verified back at 200.
+**`OFFICIAL_MEASURE_SEMANTICS` gains `cms130` and `cms165`** — numerator means compliant for both,
+verified against each artifact's `improvementNotation: increase` — so `officialRoutingProblems` no
+longer refuses them for missing semantics. The rows stay Draft/NOT_COMPILED; runnable-ness, the
+official-only Active state, the synthetic corpus and the flip gate are the next slices, in the order
+the reviewed plan sets.
 
-**The cause is one line, and it is inside `request()`, not inside the new guard.** Its retry loop
-does `set +e` around curl and then an unconditional **`set -e`** — and errexit is a property of the
-*shell*, not of the function. So `request()` re-armed errexit **before returning**, reaching across
-the function boundary to undo the caller's `set +e`, and the shell exited on `request()`'s own
-non-zero return. `delete_container_confirmed` never reached the line after the DELETE. Reduced, it is
-unambiguous:
+**Planning record.** Flash inventoried the pipeline; Luna drafted seven slices; Sol's spec review found
+14 issues, two critical (the plan had omitted the CMS130/CMS165 semantics entirely, and left pre-flip
+Maui behaviour undefined); the owner chose the rename over an alias layer and accepted that the three
+rows are visible on TWH's catalog. Gemini's meter ran out mid-evening (429), so this slice finished on
+Codex.
 
-```
-inner() { set +e; false; set -e; return 1; }
-outer() { set +e; inner; local rc=$?; set -e; echo "REACHED: rc=$rc"; }
 outer            # prints nothing; the script exits 1
 ```
 

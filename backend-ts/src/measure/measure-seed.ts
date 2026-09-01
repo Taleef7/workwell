@@ -7,6 +7,7 @@
  */
 import { MEASURE_CATALOG, type MeasureStatus } from "./measure-catalog.ts";
 import type { MeasureStore } from "../stores/measure-store.ts";
+import type { CaseEventStore } from "../stores/case-event-store.ts";
 
 // Newest-first per status (Active recently activated), mirroring Java COALESCE(activated_at, …).
 const TIER: Record<MeasureStatus, string> = {
@@ -16,6 +17,56 @@ const TIER: Record<MeasureStatus, string> = {
   Deprecated: "2025-06-01T00:00:00.000Z",
 };
 
+const LEGACY_OFFICIAL_IDS = [
+  { legacyId: "cms2v15", catalogId: "cms2" },
+  { legacyId: "cms130v14", catalogId: "cms130" },
+  { legacyId: "cms165v14", catalogId: "cms165" },
+] as const;
+
+const sameJson = (left: unknown, right: unknown): boolean => JSON.stringify(left) === JSON.stringify(right);
+
+function isUnmodifiedLegacySeed(row: Awaited<ReturnType<MeasureStore["getLatest"]>>, catalogId: string, legacyId: string): boolean {
+  const catalog = MEASURE_CATALOG.find((m) => m.id === catalogId);
+  if (!row || !catalog) return false;
+  return (
+    row.measureId === legacyId &&
+    row.name === catalog.name &&
+    row.policyRef === catalog.policyRef &&
+    row.owner === catalog.owner &&
+    sameJson(row.tags, catalog.tags) &&
+    row.versionId === `${legacyId}-${catalog.version}` &&
+    row.version === catalog.version &&
+    row.status === catalog.status &&
+    sameJson(row.spec, catalog.spec) &&
+    row.cqlText === "" &&
+    row.compileStatus === catalog.compileStatus &&
+    row.changeSummary === "Seeded measure version" &&
+    row.approvedBy === null &&
+    row.activatedAt === null &&
+    row.createdAt === TIER[catalog.status] &&
+    row.updatedAt === TIER[catalog.status]
+  );
+}
+
+async function deprecateLegacyOfficialRows(store: MeasureStore, events: CaseEventStore): Promise<void> {
+  for (const { legacyId, catalogId } of LEGACY_OFFICIAL_IDS) {
+    const row = await store.getLatest(legacyId);
+    if (!row || row.status === "Deprecated" || !isUnmodifiedLegacySeed(row, catalogId, legacyId)) continue;
+    const reason = `superseded by ${catalogId} (catalog id rename, 2026-09)`;
+    await store.setVersionStatus(legacyId, row.versionId, { status: "Deprecated" });
+    await events.appendAudit({
+      eventType: "MEASURE_DEPRECATED",
+      entityType: "measure",
+      entityId: legacyId,
+      actor: "system",
+      refRunId: null,
+      refCaseId: null,
+      refMeasureVersionId: row.versionId,
+      payload: { measureId: legacyId, version: row.version, reason, deprecatedBy: "system" },
+    });
+  }
+}
+
 /**
  * Seeds the measure store from MEASURE_CATALOG. On a fresh (empty) store every catalog entry
  * is inserted. On an already-seeded store (e.g. the live stack) only catalog measures that are
@@ -23,8 +74,9 @@ const TIER: Record<MeasureStatus, string> = {
  * create/lifecycle edits made since the initial seed (idempotent back-fill, #76).
  * `cqlOf` reconstructs CQL text for runnable measures.
  */
-export async function seedMeasureStore(store: MeasureStore, cqlOf: (measureId: string) => string): Promise<void> {
+export async function seedMeasureStore(store: MeasureStore, cqlOf: (measureId: string) => string, events: CaseEventStore): Promise<void> {
   const empty = await store.isEmpty();
+  await deprecateLegacyOfficialRows(store, events);
   for (const m of MEASURE_CATALOG) {
     // Fast path on a fresh store: seed everything. On an already-seeded store, back-fill ONLY
     // catalog measures missing from the store (e.g. adult_immunization, added after the initial

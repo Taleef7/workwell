@@ -121,7 +121,7 @@ async function store(env: MeasuresEnv): Promise<MeasureStore> {
   let seed = seeding.get(env);
   if (!seed) {
     seed = (async () => {
-      await seedMeasureStore(stores.measures, measureCql);
+      await seedMeasureStore(stores.measures, measureCql, stores.events);
       // Value-set governance demo seed — after measures (links target version ids).
       const records = await stores.measures.listLatest();
       const versionBySlug = new Map(records.map((r) => [r.measureId, r.versionId]));

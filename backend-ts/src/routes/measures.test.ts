@@ -61,12 +61,12 @@ const profileCatalogScript = `
   const env = { DB: db };
   const list = await handleMeasures(new Request("http://x/api/measures"), env);
   const rows = await list.json();
-  const detail = await handleMeasures(new Request("http://x/api/measures/cms2v15"), env);
+  const detail = await handleMeasures(new Request("http://x/api/measures/cms2"), env);
   console.log(JSON.stringify({
     listStatus: list.status,
     count: rows.length,
     ids: rows.map(r => r.id),
-    draftStatus: rows.find(r => r.id === "cms2v15")?.status ?? null,
+    draftStatus: rows.find(r => r.id === "cms2")?.status ?? null,
     detailStatus: detail.status,
     detailBody: await detail.json(),
   }));
@@ -79,17 +79,17 @@ test("scoped profile (Maui) — measures catalog exposes only runnable rows and 
   assert.equal(output.count, 3);
   assert.equal(output.draftStatus, null);
   assert.equal(output.detailStatus, 404);
-  assert.deepEqual(output.detailBody, { error: "not_found", measureId: "cms2v15" });
+  assert.deepEqual(output.detailBody, { error: "not_found", measureId: "cms2" });
 });
 
 test("default profile — measures catalog preserves the full catalog and draft detail", () => {
   const output = runProfileChild(undefined, profileCatalogScript);
   assert.equal(output.listStatus, 200);
   assert.equal(output.count, 63);
-  assert.ok((output.ids as string[]).includes("cms2v15"));
+  assert.ok((output.ids as string[]).includes("cms2"));
   assert.equal(output.draftStatus, "Draft");
   assert.equal(output.detailStatus, 200);
-  assert.equal((output.detailBody as { id: string }).id, "cms2v15");
+  assert.equal((output.detailBody as { id: string }).id, "cms2");
 });
 
 test("GET /api/measures returns the full 63-measure catalog (Measure shape), Active-first", async () => {
@@ -181,6 +181,9 @@ test("GET /api/measures/:id for a catalog-only draft: generic spec, empty CQL, N
     description: string;
     identity: { cmsId: string; mipsQualityId: string | null } | null;
   };
+=======
+  const d = (await get("/api/measures/cms2").then((r) => r!.json())) as { cqlText: string; compileStatus: string; description: string };
+>>>>>>> 3ce48987 (feat(measure): official-only measures take the manifest id; cms130/cms165 semantics; legacy rows deprecated once (MM-1b slice 1, ADR-071))
   assert.equal(d.compileStatus, "NOT_COMPILED");
   assert.equal(d.cqlText, "", "no compiled CQL for a draft");
   assert.match(d.description, /CQL authoring pending/);
@@ -237,7 +240,7 @@ test("GET /api/measures/:id/activation-readiness reflects the compile + fixture 
   assert.ok(!h.activationBlockers.some((b) => /Compile status/i.test(b)), "COMPILED → no compile blocker");
 
   // Draft (NOT_COMPILED, no fixtures) → both blockers.
-  const d = (await get("/api/measures/cms2v15/activation-readiness").then((r) => r!.json())) as { ready: boolean; activationBlockers: string[]; compileStatus: string };
+  const d = (await get("/api/measures/cms2/activation-readiness").then((r) => r!.json())) as { ready: boolean; activationBlockers: string[]; compileStatus: string };
   assert.equal(d.ready, false);
   assert.equal(d.compileStatus, "NOT_COMPILED");
   assert.ok(d.activationBlockers.some((b) => /Compile status must be COMPILED or WARNINGS/.test(b)));
