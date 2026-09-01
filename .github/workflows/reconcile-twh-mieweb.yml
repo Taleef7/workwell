@@ -23,9 +23,15 @@ name: Reconcile TWH stack (self-heal)
 # build) and undo it — so follow a fast rollback with a DURABLE one (revert the bad commit on main so
 # `:latest` rebuilds to the good image), or disable this workflow, before relying on it. See docs/DEPLOY.md.
 
+# CADENCE, MEASURED — do not read the cron below as a recovery-time guarantee. Over 2026-08-30..09-01
+# the twelve most recent scheduled runs came 2.5-7.5 HOURS apart, never 15 minutes: GitHub queues
+# `schedule` on a best-effort basis and drops runs under load. So this is a slow backstop, not a
+# watchdog. Anything that must not stay broken for hours has to fail safe on its own — which is why
+# the deploy path resolves an ambiguous DELETE itself (.github/scripts/mieweb-delete-confirmed.sh)
+# rather than relying on this workflow to clean up after it. To heal now, dispatch it by hand.
 on:
   schedule:
-    - cron: "*/15 * * * *" # every 15 minutes
+    - cron: "*/15 * * * *" # requested every 15 min; GitHub actually delivers every few hours
   workflow_dispatch:
 
 # Shared with deploy-twh-mieweb.yml: a constant group (NOT keyed on github.ref) so heals and deploys

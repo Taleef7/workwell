@@ -381,11 +381,26 @@ responses are wrapped in a `{"data": ...}` envelope, the create body uses `templ
 
 > **Manager-request resilience.** Every Container Manager call has a 10-second connection timeout
 > and a 30-second overall timeout. Safe `GET` calls retry transient curl transport failures up to
-> six times with 20-second spacing; `POST` and `DELETE` are attempted
-> once because a lost response is ambiguous (the manager may already have applied the state change).
-> CI runs `.github/scripts/mieweb-api-request.test.sh` to pin the timeout, retry, and method-safety
-> behavior. A manager outage longer than this bounded window still fails the deploy honestly; wait
-> for `manager.os.mieweb.org:443` to recover, then rerun the failed workflow jobs.
+> six times with 20-second spacing; `POST` and `DELETE` are attempted **once**, because a lost
+> response is ambiguous — the manager may already have applied the state change. CI runs
+> `.github/scripts/mieweb-api-request.test.sh` to pin the timeout, retry, and method-safety behavior.
+> A manager outage longer than this bounded window still fails the deploy honestly; wait for
+> `manager.os.mieweb.org:443` to recover, then rerun the failed workflow jobs.
+
+> **An ambiguous container DELETE is resolved by reading the manager back, not by failing.** The
+> once-only rule above is about not *re-issuing* blindly; it is not a reason to abandon a deploy
+> mid-replace. Twice — 2026-08-30 and 2026-09-01 — `DELETE /sites/1/containers/<id>` returned
+> `curl: (28)` after 30 s with zero bytes, **the manager had already applied the deletion**, and the
+> deploy aborted before recreating: the live backend was gone and the frontend stayed on the old
+> image until someone re-ran the workflow by hand.
+>
+> `.github/scripts/mieweb-delete-confirmed.sh` closes that. On a DELETE that does not return cleanly
+> it polls `GET /sites/{id}/containers?hostname=…` (6× / 10 s) and decides on what the manager
+> reports: **absent → the delete landed, continue**; **still registered → re-issue**, which is no
+> longer a blind retry because the request demonstrably did not take effect. Bounded at three
+> attempts. A list read that *fails* counts as still-present, never as absent — collapsing "could not
+> tell" into "it's gone" would let the deploy create over a running container. All five behaviours
+> are pinned in `.github/scripts/mieweb-delete-confirmed.test.sh`, which runs on every PR.
 
 ### Required GitHub Secrets for MIE deploy
 
@@ -872,13 +887,17 @@ What was verified directly against the manager API (`GET /api/v1/sites/1/contain
 > reboot), and rebooting a shared Proxmox node is not an option.
 
 **Self-healing reconciler (covers reboot recovery regardless of `onboot`).**
-`.github/workflows/reconcile-twh-mieweb.yml` runs every 15 minutes (+ `workflow_dispatch`): it
+`.github/workflows/reconcile-twh-mieweb.yml` is scheduled every 15 minutes (+ `workflow_dispatch`): it
 health-checks the live surfaces (`twh` → 200; `twh-api-ts` → `/actuator/health` `UP`, retrying up to
 6× over ~3 min so a transient blip or a normal cold start never registers as down) and, if any is
 down, **recreates that container from its last-good GHCR `:latest` image** via
 `deploy-mieweb-container.sh` (`REPLACE_EXISTING=true`). This recovers the stack from a node reboot, a
 container crash/OOM, or accidental deletion — **independent of `onboot`** — so the `onboot` question
-above is no longer a blocker. Worst-case recovery latency ≈ the 15-min interval; a recreate is
+above is no longer a blocker. **Do not treat the 15-minute cron as a recovery-time guarantee.** Measured 2026-08-30..09-01, the
+twelve most recent scheduled runs arrived **2.5–7.5 hours apart** — GitHub queues `schedule` on a
+best-effort basis and drops runs under load. That gap is what left production down for ~3 hours after
+the 2026-09-01 deploy failure. Treat this as a slow backstop, dispatch it by hand when you need a
+heal now, and make anything that must not break for hours fail safe on its own. A recreate is
 ~30–120s of that container's downtime; no data loss (Neon persists). It heals both live containers
 (`twh` + `twh-api-ts`); since the JVM was retired (#109 PR4) there is no separate Java rollback
 container to exclude. The env blocks are duplicated from `deploy-twh-mieweb.yml` and marked
@@ -1316,7 +1335,8 @@ If any approaches limit, fix that day. Don't wait.
   single eager read, so a brief startup window no longer fails an otherwise-good deploy.
 - If it still fails after the full poll window, the container genuinely failed to start — check the
   image tag, the container env vars, and (for the backend) `DATABASE_URL`/auth secrets; the self-heal
-  reconciler will also retry from `:latest` within ~15 min.
+  reconciler will also retry from `:latest` — but on its real cadence (hours, not the 15-minute cron;
+  see the reconciler section above), so dispatch it by hand rather than waiting.
 
 ---
 
