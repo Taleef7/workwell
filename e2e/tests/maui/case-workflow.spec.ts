@@ -70,7 +70,7 @@ test.describe("Maui case workflow", () => {
       const sendBtn = page.getByRole("button", { name: /send outreach/i }).filter({ visible: true }).first();
       await expect(sendBtn).toBeEnabled({ timeout: 30_000 });
       await sendBtn.click();
-      await expect(page.getByText(/Outreach Sent/i).first()).toBeVisible({ timeout: 30_000 });
+      await expect(page.getByText(/Outreach Sent/i).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
     }
   });
 
@@ -93,12 +93,14 @@ test.describe("Maui case workflow", () => {
     expect(cases.length, "Maui should have open cases after its completed run").toBeGreaterThan(0);
     const caseId = cases[0].caseId;
 
-    // Assign it to quality-staff
-    const assignRes = await request.post(`${API_BASE}/api/cases/${caseId}/assign`, {
-      headers: { Authorization: `Bearer ${leadToken.token}` },
-      data: { assignee: MAUI_ACCOUNTS.qualityStaff.email },
-    });
+    // Assign it to quality-staff — the assignee travels as a query parameter (what the cases page sends).
+    const assignRes = await request.post(
+      `${API_BASE}/api/cases/${caseId}/assign?assignee=${encodeURIComponent(MAUI_ACCOUNTS.qualityStaff.email)}`,
+      { headers: { Authorization: `Bearer ${leadToken.token}` } },
+    );
     expect(assignRes.ok()).toBe(true);
+    const assigned = (await assignRes.json()) as { assignee?: string | null };
+    expect(assigned.assignee, "the API must record the assignee we sent").toBe(MAUI_ACCOUNTS.qualityStaff.email);
 
     // Log in as quality-staff and check "My Cases" (the cases page's assignee-scoped view; the
     // /worklist page is the gap list, which does not link cases by id).
