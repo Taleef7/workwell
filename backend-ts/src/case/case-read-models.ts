@@ -16,6 +16,7 @@ export interface CaseSummary {
   employeeId: string;
   employeeName: string;
   site: string;
+  measureId: string;
   measureVersionId: string;
   measureName: string;
   measureVersion: string;
@@ -56,6 +57,7 @@ export function toCaseSummary(
     employeeId: c.employeeId,
     employeeName: emp?.name ?? c.employeeId,
     site: emp?.site ?? "—",
+    measureId: c.measureId,
     measureVersionId: c.measureId, // slug stands in for the canonical version UUID
     measureName: MEASURES[c.measureId]?.name ?? c.measureId,
     measureVersion: measureVersion(c.measureId),

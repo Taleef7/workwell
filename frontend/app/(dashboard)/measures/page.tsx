@@ -9,6 +9,7 @@ import { useAuth } from "@/components/auth-provider";
 import { canAuthorMeasures } from "@/lib/rbac";
 import NitroGrid, { type NitroGridColumn } from "@/features/datavis/NitroGridClient";
 import type { RowData, TableColumn, TableRow } from "datavis/src/components/table/types";
+import { formatMeasureIdentity, type MeasureIdentity } from "@/lib/measure-identity";
 
 type Measure = {
   id: string;
@@ -21,6 +22,7 @@ type Measure = {
   tags: string[];
   statusUpdatedAt: string;
   statusUpdatedBy: string;
+  identity: MeasureIdentity | null;
 };
 
 const statusFilters = ["All", "Draft", "Approved", "Active", "Deprecated"] as const;
@@ -94,6 +96,7 @@ export default function MeasuresPage() {
   const gridColumns = useMemo<NitroGridColumn[]>(
     () => [
       { field: "name", header: "Name" },
+      { field: "identity", header: "Identity" },
       { field: "policyRef", header: "Policy Ref" },
       { field: "version", header: "Version" },
       { field: "status", header: "Status" },
@@ -111,6 +114,7 @@ export default function MeasuresPage() {
     () =>
       items.map((item) => ({
         name: item.name,
+        identity: formatMeasureIdentity(item.identity) || "—",
         policyRef: item.policyRef,
         version: item.version,
         status: labelFor(MEASURE_STATUS_LABELS, item.status),
@@ -128,6 +132,11 @@ export default function MeasuresPage() {
   // status pill, and tag chips. NITRO's formatCell returns a ReactNode per cell.
   const formatCell = useCallback(
     (value: unknown, row: RowData, column: TableColumn) => {
+      if (column.field === "identity") {
+        const text = String(value ?? "");
+        if (text === "—") return <span className="text-neutral-400">—</span>;
+        return text;
+      }
       if (column.field === "policyRef") {
         const ref = String(value ?? "");
         if (ref && /^CMS\d+/.test(ref)) {

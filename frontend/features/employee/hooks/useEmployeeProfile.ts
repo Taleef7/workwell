@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useApi } from '@/lib/api/hooks';
 
 export interface MeasureOutcomeSummary {
+  measureId: string;
   measureVersionId: string;
   measureName: string;
   measureVersion: string;
@@ -14,6 +15,7 @@ export interface MeasureOutcomeSummary {
 
 export interface OpenCaseSummary {
   caseId: string;
+  measureId: string;
   measureName: string;
   outcomeStatus: string;
   priority: string;

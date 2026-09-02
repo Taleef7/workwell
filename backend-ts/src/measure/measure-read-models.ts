@@ -7,6 +7,7 @@
 import type { MeasureRecord } from "../stores/measure-store.ts";
 import type { MeasureSpec, MeasureStatus } from "./measure-catalog.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
+import { measureIdentityFor, type MeasureIdentity } from "./measure-identity.ts";
 
 export interface Measure {
   id: string;
@@ -19,6 +20,7 @@ export interface Measure {
   tags: string[];
   statusUpdatedAt: string;
   statusUpdatedBy: string;
+  identity: MeasureIdentity | null;
 }
 
 /** Java's COALESCE(activated_at, created_at, updated_at) — the version's effective recency. */
@@ -37,6 +39,7 @@ export function toMeasure(r: MeasureRecord): Measure {
     tags: r.tags,
     statusUpdatedAt: ts,
     statusUpdatedBy: r.approvedBy ?? r.owner ?? "system",
+    identity: measureIdentityFor(r.measureId),
   };
 }
 
@@ -88,6 +91,7 @@ export interface MeasureDetail {
   rule?: MeasureSpec["rule"];
   ruleBindings?: MeasureSpec["ruleBindings"];
   jurisdiction: string;
+  identity: MeasureIdentity | null;
 }
 
 export interface VersionHistoryItem {
@@ -125,6 +129,7 @@ export function toMeasureDetail(r: MeasureRecord, valueSets: unknown[] = []): Me
     rule: r.spec.rule,
     ruleBindings: r.spec.ruleBindings,
     jurisdiction: MEASURES[r.measureId]?.jurisdiction ?? "US",
+    identity: measureIdentityFor(r.measureId),
   };
 }
 

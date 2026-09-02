@@ -22,12 +22,14 @@ import { useAuth } from "@/components/auth-provider";
 import { canManageCases } from "@/lib/rbac";
 import { SlaChip } from "@/components/SlaChip";
 import { ChevronRight } from "lucide-react";
+import { useMeasureIdentities } from "@/lib/measure-identity";
 
 type CaseSummary = {
   caseId: string;
   employeeId: string;
   employeeName: string;
   site: string;
+  measureId: string;
   measureVersionId: string;
   measureName: string;
   measureVersion: string;
@@ -90,6 +92,7 @@ export default function CasesPage() {
   const view = searchParams.get("view") ?? "all";
   const { user } = useAuth();
   const canManage = canManageCases(user?.role);
+  const { labelFor: measureLabelFor } = useMeasureIdentities();
   const [cases, setCases] = useState<CaseSummary[]>([]);
   const [measures, setMeasures] = useState<MeasureOption[]>([]);
   const [loading, setLoading] = useState(false);
@@ -644,7 +647,7 @@ export default function CasesPage() {
             >
               <div className="min-w-0">
                 <p className="truncate text-sm font-semibold text-neutral-900 dark:text-neutral-100">{item.employeeName}</p>
-                <p className="truncate text-xs text-neutral-500 dark:text-neutral-400">{item.measureName}</p>
+                <p className="truncate text-xs text-neutral-500 dark:text-neutral-400">{measureLabelFor(item.measureId, item.measureName)}</p>
               </div>
               <div className="ml-3 flex items-center gap-2">
                 <span className={`rounded-full px-2 py-1 text-[10px] font-semibold ${outcomeStatusClass(item.currentOutcomeStatus)}`}>
@@ -658,7 +661,7 @@ export default function CasesPage() {
       </div>
 
       {viewMode === "table" ? (
-        <CasesTable items={filteredCases} selectedCaseIds={selectedCaseIds} onToggle={toggleCase} canManage={canManage} />
+        <CasesTable items={filteredCases} selectedCaseIds={selectedCaseIds} onToggle={toggleCase} canManage={canManage} measureLabelFor={measureLabelFor} />
       ) : (
       <div className="hidden gap-4 md:grid md:grid-cols-2 xl:grid-cols-3">
         {filteredCases.map((item) => {
@@ -688,7 +691,7 @@ export default function CasesPage() {
               </div>
 
               <div className="mt-2">
-                <p className="text-xs uppercase tracking-[0.2em] text-neutral-500 dark:text-neutral-400">{item.measureName}</p>
+                <p className="text-xs uppercase tracking-[0.2em] text-neutral-500 dark:text-neutral-400">{measureLabelFor(item.measureId, item.measureName)}</p>
                 <h4 className="mt-1 text-lg font-semibold text-neutral-900 dark:text-neutral-100">
                   <Link href={`/employees/${item.employeeId}`} className="hover:text-primary-700 hover:underline dark:hover:text-primary-400">
                     {item.employeeName}
@@ -771,11 +774,13 @@ function CasesTable({
   selectedCaseIds,
   onToggle,
   canManage,
+  measureLabelFor,
 }: {
   items: CaseSummary[];
   selectedCaseIds: string[];
   onToggle: (caseId: string) => void;
   canManage: boolean;
+  measureLabelFor: (measureId: string, fallbackName: string) => string;
 }) {
   if (items.length === 0) return null;
   return (
@@ -819,7 +824,7 @@ function CasesTable({
                 </Link>
                 <p className="text-xs text-neutral-500 dark:text-neutral-400">{item.employeeId}</p>
               </td>
-              <td className="px-3 py-2 text-neutral-700 dark:text-neutral-300">{item.measureName}</td>
+              <td className="px-3 py-2 text-neutral-700 dark:text-neutral-300">{measureLabelFor(item.measureId, item.measureName)}</td>
               <td className="px-3 py-2 text-neutral-600 dark:text-neutral-400">{item.site}</td>
               <td className="px-3 py-2">
                 <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${caseStatusClass(item.status)}`}>

@@ -142,14 +142,21 @@ describe("IndividualComplianceStatus", () => {
       headers: new Headers({ "X-Total-Count": "1" })
     });
 
-    render(<IndividualComplianceStatus externalId="emp-001" />);
+    render(
+      <IndividualComplianceStatus
+        externalId="emp-001"
+        labelFor={(measureId, fallbackName) =>
+          measureId === "cms125" ? "MIPS 112 · CMS125 · Breast Cancer Screening" : fallbackName
+        }
+      />,
+    );
     expect(await screen.findByText("Diabetes HbA1c")).toBeInTheDocument();
-    expect(screen.getByText("Breast Cancer Screening")).toBeInTheDocument();
+    expect(screen.getByText("MIPS 112 · CMS125 · Breast Cancer Screening")).toBeInTheDocument();
     expect(screen.getByText("Hypertension")).toBeInTheDocument();
 
     // Assert each measure appears exactly once in the table
     expect(screen.getAllByText("Diabetes HbA1c")).toHaveLength(1);
-    expect(screen.getAllByText("Breast Cancer Screening")).toHaveLength(1);
+    expect(screen.getAllByText("MIPS 112 · CMS125 · Breast Cancer Screening")).toHaveLength(1);
     expect(screen.getAllByText("Hypertension")).toHaveLength(1);
 
     // No React duplicate key warning emitted

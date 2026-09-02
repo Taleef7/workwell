@@ -49,6 +49,7 @@ interface CatalogRow {
   lastUpdated: string;
   statusUpdatedAt: string;
   statusUpdatedBy: string;
+  identity: { cmsId: string; mipsQualityId: string | null } | null;
 }
 
 test("GET /api/measures returns the full 63-measure catalog (Measure shape), Active-first", async () => {
@@ -65,6 +66,25 @@ test("GET /api/measures returns the full 63-measure catalog (Measure shape), Act
   assert.ok(audiogram.tags.includes("hearing"));
   // exactly the 14 runnable measures are Active
   assert.equal(rows.filter((m) => m.status === "Active").length, 14);
+});
+
+test("GET /api/measures and GET /api/measures/:id include identity field ({cmsId, mipsQualityId} or null)", async () => {
+  const rows = (await get("/api/measures").then((r) => r!.json())) as CatalogRow[];
+  const cms125Row = rows.find((m) => m.id === "cms125")!;
+  assert.deepEqual(cms125Row.identity, { cmsId: "CMS125", mipsQualityId: "112" });
+  const cms122Row = rows.find((m) => m.id === "cms122")!;
+  assert.deepEqual(cms122Row.identity, { cmsId: "CMS122", mipsQualityId: "001" });
+  const audiogramRow = rows.find((m) => m.id === "audiogram")!;
+  assert.equal(audiogramRow.identity, null);
+
+  const cms125Detail = (await get("/api/measures/cms125").then((r) => r!.json())) as { identity: { cmsId: string; mipsQualityId: string | null } | null };
+  assert.deepEqual(cms125Detail.identity, { cmsId: "CMS125", mipsQualityId: "112" });
+
+  const cms122Detail = (await get("/api/measures/cms122").then((r) => r!.json())) as { identity: { cmsId: string; mipsQualityId: string | null } | null };
+  assert.deepEqual(cms122Detail.identity, { cmsId: "CMS122", mipsQualityId: "001" });
+
+  const audiogramDetail = (await get("/api/measures/audiogram").then((r) => r!.json())) as { identity: { cmsId: string; mipsQualityId: string | null } | null };
+  assert.equal(audiogramDetail.identity, null);
 });
 
 test("GET /api/measures?status=Draft filters by lifecycle status", async () => {
@@ -95,6 +115,7 @@ test("GET /api/measures/:id returns MeasureDetail with spec + reconstructed CQL 
     compileStatus: string;
     valueSets: unknown[];
     testFixtures: unknown[];
+    identity: { cmsId: string; mipsQualityId: string | null } | null;
   };
   assert.equal(d.id, "audiogram");
   assert.equal(d.name, "Annual Audiogram Completed");
@@ -110,13 +131,20 @@ test("GET /api/measures/:id returns MeasureDetail with spec + reconstructed CQL 
   assert.ok((d.valueSets as Array<{ name: string }>).some((v) => v.name === "Audiogram Procedures"));
   // V015 seeds 5 demo fixtures for audiogram — they must be carried into the detail.
   assert.equal((d.testFixtures as unknown[]).length, 5);
+  assert.equal(d.identity, null);
 });
 
 test("GET /api/measures/:id for a catalog-only draft: generic spec, empty CQL, NOT_COMPILED", async () => {
-  const d = (await get("/api/measures/cms2v15").then((r) => r!.json())) as { cqlText: string; compileStatus: string; description: string };
+  const d = (await get("/api/measures/cms2v15").then((r) => r!.json())) as {
+    cqlText: string;
+    compileStatus: string;
+    description: string;
+    identity: { cmsId: string; mipsQualityId: string | null } | null;
+  };
   assert.equal(d.compileStatus, "NOT_COMPILED");
   assert.equal(d.cqlText, "", "no compiled CQL for a draft");
   assert.match(d.description, /CQL authoring pending/);
+  assert.deepEqual(d.identity, { cmsId: "CMS2", mipsQualityId: "134" });
 });
 
 test("GET /api/measures/:id/versions returns the version history; unknown measure → 404", async () => {

@@ -111,6 +111,56 @@ describe("CompliancePage", () => {
     expect(within(row).getByText("1 of 2 doses on file")).toBeInTheDocument();
   });
 
+  it("renders crosswalk label in column header for CMS measures and plain name for OSHA measures", async () => {
+    get.mockImplementation((url: string) => {
+      if (url === "/api/measures") {
+        return Promise.resolve([
+          {
+            id: "cms125",
+            name: "Breast Cancer Screening",
+            identity: { cmsId: "CMS125", mipsQualityId: "112" },
+          },
+          {
+            id: "audiogram",
+            name: "Annual Audiogram Completed",
+            identity: null,
+          },
+        ]);
+      }
+      return Promise.resolve([]);
+    });
+
+    getWithHeaders.mockReset().mockResolvedValue({
+      data: {
+        panel: "wellness",
+        columns: [
+          { measureId: "cms125", name: "Breast Cancer Screening", complianceClass: "RECOMMENDED" },
+          { measureId: "audiogram", name: "Annual Audiogram Completed", complianceClass: "PERMANENT" },
+        ],
+        rows: [
+          {
+            subject: { externalId: "emp-001", name: "Ada Lovelace", role: "Nurse", site: "HQ" },
+            cells: {
+              cms125: { status: "COMPLIANT", method: "Mammogram on file" },
+              audiogram: { status: "COMPLIANT", method: "Audiogram on file" },
+            },
+          },
+        ],
+      },
+      headers: new Headers({ "X-Total-Count": "1" }),
+    });
+
+    render(<CompliancePage />);
+    expect(await screen.findByRole("columnheader", { name: /MIPS 112 · CMS125 · Breast Cancer Screening/ })).toBeInTheDocument();
+    const audiogramHeader = screen.getByRole("columnheader", { name: /^Annual Audiogram Completed/ });
+    expect(audiogramHeader).toBeInTheDocument();
+    expect(audiogramHeader).not.toHaveTextContent(/MIPS|CMS/);
+
+    const dt = screen.getByText(/MIPS 112 · CMS125/, { selector: "dt" });
+    expect(dt).toBeInTheDocument();
+    expect(dt).toHaveTextContent("MIPS 112 · CMS125");
+  });
+
   it("refetches when the panel changes", async () => {
     render(<CompliancePage />);
     await waitFor(() => expect(getWithHeaders).toHaveBeenCalledTimes(1));
