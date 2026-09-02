@@ -243,4 +243,14 @@ export class PgRunStore implements RunStore {
       ...queued.rows.map((r) => ({ id: r.id, previousStatus: "QUEUED" as const })),
     ];
   }
+
+  async restoreRecoveredRun(id: string, previousStatus: "QUEUED" | "RUNNING"): Promise<boolean> {
+    const res = await this.pool.query<{ id: string }>(
+      `UPDATE ${T} SET status = $1, completed_at = NULL
+         WHERE id = $2 AND status = 'FAILED'
+       RETURNING id`,
+      [previousStatus, id],
+    );
+    return res.rows.length > 0;
+  }
 }

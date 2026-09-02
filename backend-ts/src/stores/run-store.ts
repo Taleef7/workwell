@@ -127,4 +127,12 @@ export interface RunStore {
    * distinguishing the two cases.
    */
   failStuckRuns(olderThanMs?: number, unclaimedQueuedOlderThanMs?: number): Promise<RecoveredRun[]>;
+  /**
+   * Compensation for a failed RUN_RECOVERED audit write. If writing the audit event fails after
+   * `failStuckRuns` marks a run FAILED, this moves the run back to its previousStatus and clears
+   * completed_at (`UPDATE runs SET status = <previousStatus>, completed_at = NULL WHERE id = ? AND status = 'FAILED'`)
+   * so the next recovery sweep finds it again. Returns true when a row changed, false if the run
+   * was not in FAILED status (or does not exist).
+   */
+  restoreRecoveredRun(id: string, previousStatus: "QUEUED" | "RUNNING"): Promise<boolean>;
 }

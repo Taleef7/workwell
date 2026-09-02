@@ -218,4 +218,16 @@ export class SqliteRunStore implements RunStore {
       ...(queued.results ?? []).map((r) => ({ id: r.id, previousStatus: "QUEUED" as const })),
     ];
   }
+
+  async restoreRecoveredRun(id: string, previousStatus: "QUEUED" | "RUNNING"): Promise<boolean> {
+    const res = await this.db
+      .prepare(
+        `UPDATE runs SET status = ?, completed_at = NULL
+           WHERE id = ? AND status = 'FAILED'
+         RETURNING id`,
+      )
+      .bind(previousStatus, id)
+      .first<{ id: string }>();
+    return Boolean(res);
+  }
 }

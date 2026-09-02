@@ -113,11 +113,22 @@ test("recoverStuckRuns fails stuck RUNNING and unclaimed QUEUED runs AND writes 
 });
 
 test("recoverStuckRuns continues audit loop if appendAudit fails for a run (best-effort per run)", async () => {
+  // Mutation note: Removing the restoreRecoveredRun compensation call causes run1 to remain FAILED
+  // with completed_at set, leaves run1 in the returned recovered list, and omits the restore mention in its alert.
   const dbPath = join(tmpdir(), `workwell-recover-${crypto.randomUUID()}.sqlite`);
   const db = await createSqliteD1(dbPath);
   await db.exec(RUN_STORE_FLOOR_DDL.replace(/\n/g, " "));
   const runs = new SqliteRunStore(db);
   const events = new SqliteCaseEventStore(db);
+  const capturedAlerts: RunAlert[] = [];
+  const alertChannels: AlertChannel[] = [
+    {
+      name: "capturing",
+      async send(alert) {
+        capturedAlerts.push(alert);
+      },
+    },
+  ];
   try {
     const run1 = await runs.createRun(sampleRun());
     await runs.markRunning(run1.id);
@@ -136,16 +147,37 @@ test("recoverStuckRuns continues audit loop if appendAudit fails for a run (best
       return originalAppendAudit(event);
     };
 
-    const recovered = await recoverStuckRuns({ runs, events }, 0);
-    assert.equal(recovered.length, 2, "still returns every recovered run");
-    assert.equal((await runs.getRun(run1.id))?.status, "FAILED");
-    assert.equal((await runs.getRun(run2.id))?.status, "FAILED");
+    const recovered = await recoverStuckRuns({ runs, events, alertChannels }, 0);
+    // run1 audit failed -> compensated with restoreRecoveredRun -> excluded from returned list
+    assert.deepEqual(
+      recovered,
+      [{ id: run2.id, previousStatus: "RUNNING" }],
+      "first run is absent from returned list; only successfully recovered runs returned",
+    );
+
+    // run1 is restored to its previous status (RUNNING) with completed_at null
+    const run1Record = await runs.getRun(run1.id);
+    assert.equal(run1Record?.status, "RUNNING", "first run is back to its previous status");
+    assert.equal(run1Record?.completedAt, null, "first run has completed_at null");
+
+    // run2 is FAILED with completed_at stamped
+    const run2Record = await runs.getRun(run2.id);
+    assert.equal(run2Record?.status, "FAILED", "second run is recovered as FAILED");
+    assert.ok(run2Record?.completedAt, "second run has completed_at set");
 
     const run1Audits = (await events.auditEventsByRun(run1.id)).filter((a) => a.eventType === "RUN_RECOVERED");
     const run2Audits = (await events.auditEventsByRun(run2.id)).filter((a) => a.eventType === "RUN_RECOVERED");
 
     assert.equal(run1Audits.length, 0, "first run audit failed due to simulated error");
     assert.equal(run2Audits.length, 1, "second run still gets its audit event despite first failure");
+
+    // Alert assertions: run1 alert message mentions the restore
+    const run1Alerts = capturedAlerts.filter((a) => a.runId === run1.id);
+    assert.equal(run1Alerts.length, 1, "first run still emitted an alert");
+    assert.match(run1Alerts[0]!.message, /restore/i, "first run alert message mentions the restore");
+
+    const run2Alerts = capturedAlerts.filter((a) => a.runId === run2.id);
+    assert.equal(run2Alerts.length, 1, "second run emitted normal recovery alert");
   } finally {
     try {
       rmSync(dbPath, { force: true });

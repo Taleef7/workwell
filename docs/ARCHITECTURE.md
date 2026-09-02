@@ -250,7 +250,7 @@ Public API actions derive audit identity from the authenticated security context
   backdated/historical rerun never resolves today's actionable case (Codex P2).
 - The roster display vocabulary never masks a canonically COMPLIANT outcome as DECLINED (Fable M12): a documented
   refusal shows DECLINED only when the CQL bucket is non-compliant. Display-only — CQL stays authoritative (ADR-008).
-- `failStuckRuns` uses two independent statements, each atomic on its own (RUNNING then QUEUED; a failure between them leaves the untouched rows in a state the next boot's sweep will find, which is why no transaction is needed), and excludes `seed:%` runs; `finalizeRun` is
+- `failStuckRuns` uses two independent statements, each atomic on its own (RUNNING then QUEUED; a failure between them leaves the untouched rows in a state the next boot's sweep will find, which is why no transaction is needed), and excludes `seed:%` runs; an audit failure restores the run so the next boot retries; `finalizeRun` is
   terminal-status-guarded (`WHERE status IN ('QUEUED','RUNNING')`) so a swept-FAILED run is never resurrected
   to COMPLETED and a backdated seed run is never swept mid-seed (Fable M7/M15).
 - Persisted `evidence_json` dates are host-timezone-independent (Fable M18): an offset-less CQL DateTime is

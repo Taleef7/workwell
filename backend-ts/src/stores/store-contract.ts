@@ -274,6 +274,40 @@ export function runStoreContract(label: string, freshStore: () => Promise<RunSto
     assert.equal((await store.getRun(claimed.id))?.status, "RUNNING", "a CLAIMED worker run is left alone");
     assert.equal((await store.getRun(done.id))?.status, "COMPLETED", "terminal runs are untouched");
   });
+
+  test(`[${label}] restoreRecoveredRun compensates a failed recovery: a recovered (FAILED) run restored to QUEUED is retryable`, async () => {
+    const store = await freshStore();
+    const run = await store.createRun(sampleRun("to-restore"));
+    await new Promise((r) => setTimeout(r, 10));
+
+    // Restoring a run that is not FAILED returns false and changes nothing
+    const nonFailedRes = await store.restoreRecoveredRun(run.id, "QUEUED");
+    assert.equal(nonFailedRes, false, "restoring a run that is not FAILED returns false");
+    const stillQueued = await store.getRun(run.id);
+    assert.equal(stillQueued?.status, "QUEUED");
+    assert.equal(stillQueued?.completedAt, null);
+
+    // Fail the run via sweep
+    const recovered = await store.failStuckRuns(0, 0);
+    assert.ok(recovered.some((r) => r.id === run.id), "run was recovered to FAILED");
+    const failedRun = await store.getRun(run.id);
+    assert.equal(failedRun?.status, "FAILED");
+    assert.ok(failedRun?.completedAt, "completed_at stamped on recovery");
+
+    // A recovered (FAILED) run restored to QUEUED is QUEUED with completedAt null and is picked up again by failStuckRuns(0, 0)
+    const restored = await store.restoreRecoveredRun(run.id, "QUEUED");
+    assert.equal(restored, true, "restoring a FAILED run returns true");
+    const restoredRun = await store.getRun(run.id);
+    assert.equal(restoredRun?.status, "QUEUED", "restored run is QUEUED");
+    assert.equal(restoredRun?.completedAt, null, "completedAt is null");
+
+    // Re-sweep picks up the restored run again
+    const reRecovered = await store.failStuckRuns(0, 0);
+    assert.ok(reRecovered.some((r) => r.id === run.id), "picked up again by failStuckRuns(0, 0)");
+    const reRecoveredRun = await store.getRun(run.id);
+    assert.equal(reRecoveredRun?.status, "FAILED");
+    assert.ok(reRecoveredRun?.completedAt);
+  });
 }
 
 /** Registers the OutcomeStore contract. `fresh` → isolated, empty {run, outcome} pair. */

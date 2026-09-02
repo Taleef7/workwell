@@ -811,7 +811,7 @@ four `WORKWELL_BUCKET_S3_*` variables, so evidence is lost whenever the containe
 restart (30-minute threshold), boot recovery (`failStuckRuns`) sweeps unclaimed `QUEUED` runs whose
 `claimed_by` worker ID is null and whose timestamp is older than 6 hours (`UNCLAIMED_QUEUED_THRESHOLD_MS`).
 Because live deployments do not run a separate claiming worker daemon, any run left queued without a worker
-is recovered to `FAILED` with an audited `RUN_RECOVERED` event and alert.
+is recovered to `FAILED` with an audited `RUN_RECOVERED` event and alert. An audit failure restores the run so the next boot retries.
 
 **Backend image tags are namespaced, and that is load-bearing — do not "simplify" it.** Maui and TWH
 share one GHCR backend repository (`ghcr.io/taleef7/workwell-api-ts`), and
