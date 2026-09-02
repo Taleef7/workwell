@@ -20,18 +20,18 @@ fails if the map disagrees, has an extra entry, or a CMS row lacks a MIPS mentio
 witnessed failing on a deliberately altered entry before it passed. Occupational measures have no
 identity and render exactly as before, asserted with anchored negatives.
 
-**Two review rounds, three reviewers, disjoint findings again.** The cross-family review (Luna) found the
+**Two review rounds, three reviewers, disjoint findings again.** The external cross-model review found the
 drift guard matched only one of the two MIPS text forms in the catalog and that the hook had no
 stale-response guard; the second reviewer found case detail keyed the lookup on `measureVersionId`, which
 works only because the read model emits the slug as a stand-in — fixed by adding a real `measureId` to
 `CaseDetail` — plus a test that claimed to assert a dash and did not. Neither reviewer found the other's.
 
-**Operationally, a lesson for the orchestrator file:** a resumed Gemini conversation carrying ~1.7M tokens
-was killed within a minute of start three times in a row; a fresh conversation with the same brief ran
-to completion. And background shell tasks were being stopped mid-lane for a while this evening —
+**Operationally, a lesson for the orchestrator file:** resuming a delegate conversation that had grown to
+~1.7M tokens was killed within a minute of start three times in a row; a fresh conversation with the same
+brief ran to completion. And background shell tasks were being stopped mid-lane for a while this evening —
 launching lanes detached via `Start-Process` and watching their output files made them survive.
 
-**MM-1b is planned but not started.** Flash inventoried, Luna drafted, Sol reviewed (14 findings, two
+**MM-1b is planned but not started.** An inventory pass, a drafted plan, and an adversarial spec review (14 findings, two
 critical: CMS130/CMS165 semantics entries were missing from the plan, and pre-flip Maui behaviour was
 undefined). The bundle with my adjudication is a local plan file for owner review — the id model
 (rename to bare `cms2`/`cms130`/`cms165` vs an alias layer) and catalog activation's visibility on TWH
