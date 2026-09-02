@@ -15,6 +15,7 @@ import { ComplianceChip } from "@/features/compliance/ComplianceChip";
 import { RosterMobileCards } from "@/features/compliance/RosterMobileCards";
 import { usePanelCache } from "@/features/compliance/usePanelCache";
 import { SLOW_LOAD_HINT, useSlowLoadHint } from "@/lib/useSlowLoadHint";
+import { useMeasureIdentities } from "@/lib/measure-identity";
 import { PANEL_OPTIONS, type PanelId, type Roster, type TenantOption } from "@/features/compliance/types";
 
 const STATUS_FILTER_OPTIONS = Object.keys(COMPLIANCE_STATUS_LABELS);
@@ -42,6 +43,7 @@ export default function CompliancePage() {
   // cases & programs pages — not a page-local field, so the global filter actually applies here.
   const { siteId } = useGlobalFilters();
   const canRecalc = canRunMeasures(user?.role);
+  const { labelFor: measureLabelFor } = useMeasureIdentities();
 
   // Derived from the URL rather than useState-initialized, so browser back/forward between two
   // filtered /compliance URLs re-renders with the right filter.
@@ -362,7 +364,7 @@ export default function CompliancePage() {
               </th>
               {columns.map((c) => (
                 <th key={c.measureId} scope="col" className="px-3 py-2 text-left font-semibold">
-                  {c.name}
+                  {measureLabelFor(c.measureId, c.name)}
                   <span className="ml-1 text-[10px] font-normal uppercase text-neutral-400">{c.complianceClass === "PERMANENT" ? "perm" : "rec"}</span>
                 </th>
               ))}
@@ -397,7 +399,7 @@ export default function CompliancePage() {
         </table>
       </div>
 
-      <RosterMobileCards columns={columns} rows={rows} loading={loading} />
+      <RosterMobileCards columns={columns} rows={rows} loading={loading} labelFor={measureLabelFor} />
 
       <div className="flex items-center justify-between text-sm text-neutral-500 dark:text-neutral-400">
         <span>{fmtCount(total)} {total === 1 ? SUBJECT.singular : SUBJECT.plural}</span>

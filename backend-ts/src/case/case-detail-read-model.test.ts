@@ -36,6 +36,11 @@ const CASE: CaseRecord = {
 // simulated one still resolves synchronously in practice, so awaiting it once here is enough.
 const FORECAST = await simulatedForecaster.forecast("emp-006", "2026-06-19");
 
+test("toCaseDetail includes measureId matching the case record", () => {
+  const detail = toCaseDetail(CASE, null);
+  assert.equal(detail.measureId, "adult_immunization");
+});
+
 test("toCaseDetail omits immunizationForecast key when param is not provided", () => {
   const detail = toCaseDetail(CASE, null);
   assert.equal("immunizationForecast" in detail, false, "key must be absent (not undefined) when not provided");

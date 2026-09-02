@@ -29,9 +29,11 @@ interface EvidenceState {
 export function IndividualComplianceStatus({
   externalId,
   onRecalculated,
+  labelFor = (_measureId, fallbackName) => fallbackName,
 }: {
   externalId: string;
   onRecalculated?: () => void;
+  labelFor?: (measureId: string, fallbackName: string) => string;
 }) {
   const api = useApi();
   const { user } = useAuth();
@@ -200,18 +202,19 @@ export function IndividualComplianceStatus({
             {rows.map((row) => {
               const isOpen = open[row.measureId] ?? false;
               const ev = row.cell.evidenceRef ? evidenceByOutcome[row.cell.evidenceRef.outcomeId] : undefined;
+              const measureLabel = labelFor(row.measureId, row.name);
               return (
                 <React.Fragment key={row.measureId}>
                   <tr className="border-t border-neutral-200 dark:border-neutral-800">
                     <td className="py-2 pr-3 align-top">
-                      <span className="font-medium">{row.name}</span>
+                      <span className="font-medium">{measureLabel}</span>
                       <span className="ml-1 text-[10px] uppercase text-neutral-400">{row.complianceClass === "PERMANENT" ? "perm" : "rec"}</span>
                     </td>
                     <td className="py-2 pr-3 align-top"><ComplianceChip cell={row.cell} /></td>
                     <td className="py-2 align-top">
                       <button
                         type="button"
-                        aria-label={`Info: ${row.name}`}
+                        aria-label={`Info: ${measureLabel}`}
                         aria-expanded={isOpen}
                         aria-controls={`compliance-detail-${row.measureId}`}
                         onClick={() => void toggle(row.measureId, row.cell)}

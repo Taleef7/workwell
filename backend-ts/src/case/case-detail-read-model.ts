@@ -20,6 +20,7 @@ export interface CaseDetail {
   caseId: string;
   employeeId: string;
   employeeName: string;
+  measureId: string;
   measureName: string;
   measureVersionId: string;
   measureVersion: string;
@@ -152,6 +153,7 @@ export function toCaseDetail(
     caseId: c.id,
     employeeId: c.employeeId,
     employeeName: emp?.name ?? c.employeeId,
+    measureId: c.measureId,
     measureName: MEASURES[c.measureId]?.name ?? c.measureId,
     measureVersionId: c.measureId,
     measureVersion: measureVersion(c.measureId),

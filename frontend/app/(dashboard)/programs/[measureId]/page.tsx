@@ -20,6 +20,7 @@ import { SUBJECT } from "@/lib/terminology";
 import { niceDomain, chartTooltipStyle } from "@/lib/charts";
 import { useTheme } from "@/lib/useTheme";
 import { ChartDataTable } from "@/components/chart-data-table";
+import { useMeasureIdentities } from "@/lib/measure-identity";
 
 type ProgramSummary = {
   measureId: string;
@@ -125,6 +126,7 @@ export default function ProgramDetailPage() {
   const mayRun = canRunMeasures(user?.role);
   const { startTracking } = useRunStatus();
   const { theme } = useTheme();
+  const { labelFor: measureLabelFor } = useMeasureIdentities();
 
   const [program, setProgram] = useState<ProgramSummary | null>(null);
   const [trend, setTrend] = useState<TrendPoint[]>([]);
@@ -199,7 +201,7 @@ export default function ProgramDetailPage() {
         <>
           <div className="rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4">
             <p className="text-xs uppercase tracking-[0.15em] text-neutral-500 dark:text-neutral-400">{program.policyRef}</p>
-            <h2 className="text-2xl font-semibold text-neutral-900 dark:text-neutral-100">{program.measureName}</h2>
+            <h2 className="text-2xl font-semibold text-neutral-900 dark:text-neutral-100">{measureLabelFor(measureId, program.measureName)}</h2>
             <p className="text-sm text-neutral-600 dark:text-neutral-400">Version {program.version}</p>
             <div className="mt-3 flex items-end gap-3">
               <p className="text-4xl font-semibold text-neutral-900 dark:text-neutral-100">{program.complianceRate.toFixed(1)}%</p>

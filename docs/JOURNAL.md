@@ -1,5 +1,38 @@
 # Journal
 
+## 2026-09-01 (night) — MM-0's last task lands in #505, and the Maui sandbox is live for the first time
+
+**The Maui sandbox had never been deployed.** `deploy-maui-mieweb.yml` is dispatch-only and had zero runs;
+both Maui hostnames returned 404 while the docs said MM-0 had shipped. Dispatched at 14:40, green at
+15:0x; verified from the API rather than from a 200 — a sandbox login returns the wellness panel with
+the three ACO-aligned columns over 48 patients, and the 15:00 scheduler run populated every bucket
+(38/3/7 on CMS122 and CMS125, a five-way spread on hypertension). One stray QUEUED row in Maui's run
+list is mine: I posted to the worker-queue endpoint instead of `/api/runs/manual` while probing; it is
+inert and only a database delete removes it.
+
+**MM-0 Task 4 — the MIPS↔CMS crosswalk — was the other unshipped piece.** MIPS ids existed only inside
+catalog description strings. Now `backend-ts/src/measure/measure-identity.ts` is the one source of truth
+(`{cmsId, mipsQualityId}` per catalog row), `GET /api/measures` serves it as `identity`, and the
+frontend renders "MIPS 112 · CMS125 · Breast Cancer Screening" (the catalog page from the row's own
+`identity`; every other surface through the `useMeasureIdentities` hook) on the
+catalog (an Identity column), case detail, the roster headers and mobile cards, and the programs
+pages including the chip aria-labels. A drift test parses the MIPS text out of every CMS catalog row and
+fails if the map disagrees, has an extra entry, or a CMS row lacks a MIPS mention without a null id —
+witnessed failing on a deliberately altered entry before it passed. Occupational measures have no
+identity and render exactly as before, asserted with anchored negatives.
+
+**Two review rounds, three reviewers, disjoint findings again.** The external cross-model review found the
+drift guard matched only one of the two MIPS text forms in the catalog and that the hook had no
+stale-response guard; the second reviewer found case detail keyed the lookup on `measureVersionId`, which
+works only because the read model emits the slug as a stand-in — fixed by adding a real `measureId` to
+`CaseDetail` — plus a test that claimed to assert a dash and did not. Neither reviewer found the other's.
+
+**MM-1b is planned but not started.** An inventory pass, a drafted plan, and an adversarial spec review (14 findings, two
+critical: CMS130/CMS165 semantics entries were missing from the plan, and pre-flip Maui behaviour was
+undefined). The bundle with my adjudication is a local plan file for owner review — the id model
+(rename to bare `cms2`/`cms130`/`cms165` vs an alias layer) and catalog activation's visibility on TWH
+are owner calls.
+
 ## 2026-09-01 (later still) — the guard shipped, could not run, and production went down for the third time in the same place
 
 **#502 merged at 18:02. The deploy it triggered failed at 18:04, at the same DELETE, with the same
