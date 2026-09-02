@@ -81,3 +81,7 @@ npx playwright test --project=maui
 
 When you are done, stop the backend and frontend dev servers.
 
+
+## Running in CI
+
+Actions → CI → Run workflow → `e2e_profile: maui`. The `e2e-maui` job boots the backend (`WORKWELL_INSTANCE=maui`, SQLite) and a patient-mode frontend build on the runner and runs this project against them; nothing shared is touched. It runs the authored cms122/cms125 (no official routing) because the vendored terminology sidecars are not available in CI; with no VSAC key the authored path yields the same 38/7/3 distribution. Local runs on a Windows developer box tend to die with `0xC0000142` (desktop-heap exhaustion) — use CI.
