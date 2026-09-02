@@ -176,15 +176,12 @@ test("GET /api/measures/:id returns MeasureDetail with spec + reconstructed CQL 
 });
 
 test("GET /api/measures/:id for a catalog-only draft: generic spec, empty CQL, NOT_COMPILED", async () => {
-  const d = (await get("/api/measures/cms2v15").then((r) => r!.json())) as {
+  const d = (await get("/api/measures/cms2").then((r) => r!.json())) as {
     cqlText: string;
     compileStatus: string;
     description: string;
     identity: { cmsId: string; mipsQualityId: string | null } | null;
   };
-=======
-  const d = (await get("/api/measures/cms2").then((r) => r!.json())) as { cqlText: string; compileStatus: string; description: string };
->>>>>>> 3ce48987 (feat(measure): official-only measures take the manifest id; cms130/cms165 semantics; legacy rows deprecated once (MM-1b slice 1, ADR-071))
   assert.equal(d.compileStatus, "NOT_COMPILED");
   assert.equal(d.cqlText, "", "no compiled CQL for a draft");
   assert.match(d.description, /CQL authoring pending/);

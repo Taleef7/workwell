@@ -127,7 +127,7 @@ test("scoped profile (Maui) — MCP tools isolate subjects to Maui profile direc
   assert.notEqual((output.getCaseLive as Record<string, unknown>).code, "CASE_NOT_FOUND", "live wc get_case must resolve through the injected directory");
   assert.notEqual((output.checkLive as Record<string, unknown>).code, "EMPLOYEE_NOT_FOUND", "live wc check_compliance must resolve through the injected directory");
   const measures = output.measures as string[];
-  assert.ok(!(output.draftMeasures as string[]).includes("cms2v15"), "a Draft catalog row outside the Maui runnable set must not be listed on Maui");
+  assert.ok(!(output.draftMeasures as string[]).includes("cms2"), "a Draft catalog row outside the Maui runnable set must not be listed on Maui");
   assert.ok(measures.includes("cms122"), "runnable cms122 must be listed on Maui");
   assert.ok(!measures.includes("audiogram"), "unrunnable audiogram must not be listed on Maui");
 });
@@ -169,5 +169,5 @@ test("default profile — MCP by-id tools preserve foreign subjects and list all
   assert.equal((output.getCaseUnresolved as Record<string, unknown>).caseId != null, true);
   assert.notEqual((output.checkForeign as Record<string, unknown>).code, "EMPLOYEE_NOT_FOUND");
   assert.ok((output.measures as string[]).includes("audiogram"), "audiogram must remain listed on default profile");
-  assert.ok((output.draftMeasures as string[]).includes("cms2v15"), "a Draft catalog row outside the authored registry must stay listed on the default profile");
+  assert.ok((output.draftMeasures as string[]).includes("cms2"), "a Draft catalog row outside the authored registry must stay listed on the default profile");
 });
