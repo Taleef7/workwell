@@ -30,8 +30,10 @@ async function readChips(page: import("@playwright/test").Page, measureId: strin
     const bucketMatch = href.match(/outcome=([A-Z_]+)/);
     if (!bucketMatch) continue;
     if (!OPEN_BUCKETS.includes(bucketMatch[1] as (typeof OPEN_BUCKETS)[number])) continue;
-    const ariaLabel = (await chip.getAttribute("aria-label")) ?? "";
-    const countMatch = ariaLabel.match(/(\d+)/);
+    // The visible text is "Overdue 7"; the aria-label is prefixed with the crosswalk
+    // ("MIPS 112 · CMS125 · …: Overdue 7"), so the count is the LAST number of the visible text.
+    const text = ((await chip.textContent()) ?? "").trim();
+    const countMatch = text.match(/(\d+)\s*$/);
     if (!countMatch) continue;
     chips.push({ bucket: bucketMatch[1], count: parseInt(countMatch[1], 10), href });
   }
