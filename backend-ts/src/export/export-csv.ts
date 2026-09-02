@@ -7,7 +7,7 @@ import type { OutcomeStore, OutcomeWithRun } from "../stores/outcome-store.ts";
 import type { CaseStore, CaseQuery } from "../stores/case-store.ts";
 import type { CaseEventStore } from "../stores/case-event-store.ts";
 import { toRunSummaryFromCounts } from "../run/read-models.ts";
-import { DIRECTORY, employeeById, profileSubjectMatcher } from "../config/deployment-profile.ts";
+import { DEPLOYMENT_PROFILE, DIRECTORY, employeeById, profileSubjectMatcher } from "../config/deployment-profile.ts";
 import { directoryForRows } from "../engine/ingress/webchart/live-directory.ts";
 import { isWebChartConfigured, type DataSourceEnv } from "../engine/ingress/data-source.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
@@ -110,6 +110,35 @@ function outcomeRowCells(
   ];
 }
 
+function directoryForProfileRows(
+  rows: readonly { subjectId: string }[],
+  webChartEnv?: DataSourceEnv,
+) {
+  return DEPLOYMENT_PROFILE.id === "default"
+    ? DIRECTORY
+    : directoryForRows(rows, isWebChartConfigured(webChartEnv ?? {}), webChartEnv, DIRECTORY);
+}
+
+async function latestVisibleOutcomeRunId(
+  outcomeStore: OutcomeStore,
+  runStore: RunStore,
+  webChartEnv?: DataSourceEnv,
+): Promise<string | undefined> {
+  const runs = await runStore.listRuns(DEPLOYMENT_PROFILE.id === "default" ? 1 : 100000);
+  if (DEPLOYMENT_PROFILE.id === "default") return runs[0]?.id;
+  for (const run of runs) {
+    let offset = 0;
+    while (true) {
+      const records = await outcomeStore.listOutcomes(run.id, { limit: OUTCOME_STREAM_PAGE, offset });
+      const directory = directoryForProfileRows(records, webChartEnv);
+      if (records.some((record) => profileSubjectMatcher(directory.employeeById)(record.subjectId))) return run.id;
+      if (records.length < OUTCOME_STREAM_PAGE) break;
+      offset += records.length;
+    }
+  }
+  return undefined;
+}
+
 export async function outcomesCsv(
   outcomeStore: OutcomeStore,
   runStore: RunStore,
@@ -118,9 +147,9 @@ export async function outcomesCsv(
 ): Promise<string> {
   // Java exportOutcomeCsv: an explicit runId, otherwise the LATEST run (not every run's
   // outcomes — that would mix historical duplicate employee rows). Export exactly one run.
-  const resolvedRunId = runId ?? (await runStore.listRuns(1))[0]?.id;
+  const resolvedRunId = runId ?? (await latestVisibleOutcomeRunId(outcomeStore, runStore, webChartEnv));
   const records = resolvedRunId ? await outcomeStore.listOutcomes(resolvedRunId) : [];
-  const directory = directoryForRows(records, isWebChartConfigured(webChartEnv ?? {}), webChartEnv, DIRECTORY);
+  const directory = directoryForProfileRows(records, webChartEnv);
   const profileMatch = profileSubjectMatcher(directory.employeeById);
   const out = records
     .filter((r) => profileMatch(r.subjectId))
@@ -155,7 +184,7 @@ export function outcomesCsvStream(
       if (!wroteHeader) {
         controller.enqueue(encoder.encode(OUTCOME_HEADERS.join(",")));
         wroteHeader = true;
-        resolvedRunId = runId ?? (await runStore.listRuns(1))[0]?.id;
+        resolvedRunId = runId ?? (await latestVisibleOutcomeRunId(outcomeStore, runStore, webChartEnv));
         if (!resolvedRunId) {
           controller.close();
           return;
@@ -167,7 +196,7 @@ export function outcomesCsvStream(
         return;
       }
       offset += records.length;
-      const directory = directoryForRows(records, isWebChartConfigured(webChartEnv ?? {}), webChartEnv, DIRECTORY);
+      const directory = directoryForProfileRows(records, webChartEnv);
       const profileMatch = profileSubjectMatcher(directory.employeeById);
       const matching = records.filter((o) => profileMatch(o.subjectId));
       const chunk = matching.map((o) => "\r\n" + outcomeRowCells(o, directory.employeeById).map(csvCell).join(",")).join("");
@@ -198,12 +227,7 @@ export async function casesCsv(
   webChartEnv?: DataSourceEnv,
 ): Promise<string> {
   let cases = await caseStore.listCases({ ...filter, limit: 100000 });
-  const directory = directoryForRows(
-    cases.map((c) => ({ subjectId: c.employeeId })),
-    isWebChartConfigured(webChartEnv ?? {}),
-    webChartEnv,
-    DIRECTORY,
-  );
+  const directory = directoryForProfileRows(cases.map((c) => ({ subjectId: c.employeeId })), webChartEnv);
   const profileMatch = profileSubjectMatcher(directory.employeeById);
   cases = cases.filter((c) => profileMatch(c.employeeId));
   // caseIds + site aren't SQL-filterable here (site lives in the directory), so apply them in-app.

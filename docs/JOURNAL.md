@@ -36,13 +36,14 @@ the patient — on any panel response, not only the first.
 `CASE_NOT_FOUND` safe-error payload for an unknown id instead of throwing `ToolArgError`, as documented
 in `docs/MCP.md`.
 
-**Deliberately still open from #501:** `segment-seed.ts` (its site list is load-bearing for Maui
-applicability and needs that path checked first), and the 100k store caps that precede profile
-filtering in the CSV, MCP, programs and hierarchy readers — a known limit stated here rather than
-fixed, because a Maui database holds no foreign rows today.
-
-The auditor run packet (`backend-ts/src/audit/audit-packet.ts`) still emits unscoped outcome rows on a
-scoped profile — a downloadable artifact, so it is filed as a follow-up rather than left silent.
+**Deliberately still open from #501:** the auditor run packet and CASE packet (`backend-ts/src/audit/audit-packet.ts`,
+served by `routes/auditor.ts`) still emit unscoped outcome rows on a scoped profile — downloadable
+artifacts, so they are filed as a follow-up rather than left silent; the run summaries (runs CSV
+`export-csv.ts`, `/api/runs`, and MCP run summaries in `tools.ts`) still use raw
+`countOutcomesByStatus`; `segment-seed.ts` (its site list is load-bearing for Maui applicability and
+needs that path checked first), and the 100k store caps that precede profile filtering in the CSV, MCP,
+programs and hierarchy readers are also known limits tracked in #508, because a Maui database holds
+no foreign rows today.
 
 ## 2026-09-01 (night) — MM-0's last task lands in #505, and the Maui sandbox is live for the first time
 

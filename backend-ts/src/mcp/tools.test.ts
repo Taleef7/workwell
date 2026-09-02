@@ -116,9 +116,10 @@ test("get_case rejects a non-UUID caseId (INVALID_ARGUMENT, not isError)", async
   assert.equal(payload.code, "INVALID_ARGUMENT");
 });
 
-test("get_case unknown UUID → tool error", async () => {
-  const { isError } = await call("get_case", { caseId: crypto.randomUUID() });
-  assert.equal(isError, true);
+test("get_case unknown UUID → CASE_NOT_FOUND safe payload", async () => {
+  const { payload, isError } = await call("get_case", { caseId: crypto.randomUUID() });
+  assert.equal(isError, false);
+  assert.equal(payload.code, "CASE_NOT_FOUND");
 });
 
 test("list_cases returns snake_case rows; status filter scopes", async () => {

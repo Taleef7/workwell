@@ -594,6 +594,16 @@ test("programSites — returns distinct site options only from visible rows", ()
         measureId: "cms122",
         status: "COMPLIANT",
       },
+      {
+        runId: "run-1",
+        runStartedAt: "2026-07-17T00:00:00.000Z",
+        runScopeType: "MEASURE",
+        runStatus: "COMPLETED",
+        runTriggeredBy: "manual",
+        subjectId: "cypress-mrn-unresolvable",
+        measureId: "cms122",
+        status: "COMPLIANT",
+      },
     ];
 
     const fakeDeps = {

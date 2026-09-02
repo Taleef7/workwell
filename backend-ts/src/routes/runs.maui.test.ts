@@ -57,3 +57,15 @@ test("scoped profile (Maui) — outcomes paging counts and slices visible rows",
   assert.deepEqual([...first.ids, ...second.ids].sort(), ["pat-001", "pat-002"]);
   assert.deepEqual(third.ids, []);
 });
+
+test("default profile — outcomes paging retains unresolvable subjects in rows and totals", () => {
+  const output = runProfileChild(undefined, testScript);
+  const first = output.first as { total: string; ids: string[] };
+  const second = output.second as { total: string; ids: string[] };
+  const third = output.third as { total: string; ids: string[] };
+
+  assert.equal(first.total, "3", "default total count must include the unresolvable subject");
+  assert.equal(second.total, "3");
+  assert.equal(third.total, "3");
+  assert.deepEqual([...first.ids, ...second.ids, ...third.ids].sort(), ["emp-001", "pat-001", "pat-002"]);
+});

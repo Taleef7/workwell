@@ -141,6 +141,7 @@ test("MM-1 shape: a profile whose runnable measures belong to no panel serves ze
   // The pairing is what matters: a served panel absent from availablePanels must carry NO columns, so a
   // client can never render a populated grid for a panel it was told is unavailable.
   assert.deepEqual(output.availablePanels, []);
+  assert.match(String(output.stderr), /No roster panel has a runnable/, "startup warning must be returned from the profile child");
   assert.equal(output.defaultPanel, "immunizations");
   assert.equal(output.servedPanel, "immunizations");
   assert.deepEqual(output.columns, []);

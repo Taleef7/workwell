@@ -15,5 +15,5 @@ export function runProfileChild(instance: string | undefined, source: string): R
     { cwd: backendRoot, env, encoding: "utf8" },
   );
   assert.equal(result.status, 0, result.stderr);
-  return JSON.parse(result.stdout.trim()) as Record<string, unknown>;
+  return { ...(JSON.parse(result.stdout.trim()) as Record<string, unknown>), stderr: result.stderr };
 }

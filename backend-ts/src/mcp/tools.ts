@@ -43,6 +43,7 @@ export interface McpTool {
 }
 
 function directoryForSubjects(deps: McpToolDeps, subjectIds: readonly string[]) {
+  if (DEPLOYMENT_PROFILE.id === "default") return DIRECTORY;
   return directoryForRows(
     subjectIds.map((subjectId) => ({ subjectId })),
     isWebChartConfigured(deps.webChartEnv ?? {}),
@@ -52,12 +53,11 @@ function directoryForSubjects(deps: McpToolDeps, subjectIds: readonly string[]) 
 }
 
 async function persistedDirectory(deps: McpToolDeps) {
+  if (DEPLOYMENT_PROFILE.id === "default") return DIRECTORY;
   const webChartConfigured = isWebChartConfigured(deps.webChartEnv ?? {});
   const rows = !webChartConfigured
     ? []
-    : DEPLOYMENT_PROFILE.id === "default"
-      ? await deps.outcomeStore.listLatestPopulationOutcomes({ excludeScale: true, excludeTrendHistory: true })
-      : await deps.outcomeStore.listOutcomesWithRun({ excludeScale: true, excludeTrendHistory: true });
+    : await deps.outcomeStore.listOutcomesWithRun({ excludeScale: true, excludeTrendHistory: true });
   const directory = directoryForRows(rows, webChartConfigured, deps.webChartEnv, DIRECTORY);
   return {
     ...directory,
@@ -183,9 +183,9 @@ async function getCase(args: JsonRecord, deps: McpToolDeps): Promise<unknown> {
   const caseId = requireString(args, "caseId");
   if (!UUID_RE.test(caseId)) return safeError("INVALID_ARGUMENT", "caseId must be a valid UUID");
   const c = await deps.caseStore.getCase(caseId);
-  if (!c) throw new ToolArgError(`Case not found: ${caseId}`);
+  if (!c) return safeError("CASE_NOT_FOUND", "Case not found");
   const directory = directoryForSubjects(deps, [c.employeeId]);
-  if (!profileSubjectMatcher(directory.employeeById)(c.employeeId)) return safeError("CASE_NOT_FOUND", `Case not found: ${caseId}`);
+  if (!profileSubjectMatcher(directory.employeeById)(c.employeeId)) return safeError("CASE_NOT_FOUND", "Case not found");
   const outcomes = await deps.outcomeStore.listOutcomes(c.lastRunId);
   const outcome = outcomes.find((o) => o.subjectId === c.employeeId && o.measureId === c.measureId) ?? null;
   const detail = toCaseDetail(c, outcome, [], null, undefined, directory.employeeById);
@@ -343,9 +343,9 @@ async function explainOutcome(args: JsonRecord, deps: McpToolDeps): Promise<unkn
   const caseId = requireString(args, "caseId");
   if (!UUID_RE.test(caseId)) return safeError("INVALID_ARGUMENT", "caseId must be a valid UUID");
   const c = await deps.caseStore.getCase(caseId);
-  if (!c) throw new ToolArgError(`Case not found: ${caseId}`);
+  if (!c) return safeError("CASE_NOT_FOUND", "Case not found");
   const directory = directoryForSubjects(deps, [c.employeeId]);
-  if (!profileSubjectMatcher(directory.employeeById)(c.employeeId)) return safeError("CASE_NOT_FOUND", `Case not found: ${caseId}`);
+  if (!profileSubjectMatcher(directory.employeeById)(c.employeeId)) return safeError("CASE_NOT_FOUND", "Case not found");
   const outcomes = await deps.outcomeStore.listOutcomes(c.lastRunId);
   const outcome = outcomes.find((o) => o.subjectId === c.employeeId && o.measureId === c.measureId) ?? null;
   const detail = toCaseDetail(c, outcome, [], null, undefined, directory.employeeById);

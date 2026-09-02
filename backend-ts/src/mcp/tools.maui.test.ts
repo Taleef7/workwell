@@ -63,6 +63,9 @@ const testScript = `
   const explainForeignRes = await callTool("explain_outcome", { caseId: foreignCase.id }, ctx);
   const getCaseUnresolvedRes = await callTool("get_case", { caseId: unresolvedCase.id }, ctx);
   const getCaseLiveRes = await callTool("get_case", { caseId: liveCase.id }, ctx);
+  const nonexistentCaseId = "00000000-0000-4000-8000-000000000000";
+  const getCaseMissingRes = await callTool("get_case", { caseId: nonexistentCaseId }, ctx);
+  const explainMissingRes = await callTool("explain_outcome", { caseId: nonexistentCaseId }, ctx);
   const checkForeignRes = await callTool("check_compliance", { employeeExternalId: "emp-001", measureName: "Diabetes: Glycemic Status Assessment Greater Than 9%" }, ctx);
   const checkLiveRes = await callTool("check_compliance", { employeeExternalId: "wc|live-mcp-subject", measureName: "Diabetes: Glycemic Status Assessment Greater Than 9%" }, ctx);
   const getEmpInventedRes = await callTool("get_employee", { employeeExternalId: "wc|not-a-patient" }, ctx);
@@ -84,6 +87,10 @@ const testScript = `
     explainForeign: JSON.parse(explainForeignRes.content[0].text),
     getCaseUnresolved: JSON.parse(getCaseUnresolvedRes.content[0].text),
     getCaseLive: JSON.parse(getCaseLiveRes.content[0].text),
+    getCaseForeignRaw: getCaseForeignRes,
+    getCaseMissingRaw: getCaseMissingRes,
+    explainForeignRaw: explainForeignRes,
+    explainMissingRaw: explainMissingRes,
     checkForeign: JSON.parse(checkForeignRes.content[0].text),
     checkLive: JSON.parse(checkLiveRes.content[0].text),
     getEmpInvented: JSON.parse(getEmpInventedRes.content[0].text),
@@ -131,6 +138,12 @@ test("scoped profile (Maui) — MCP rejects invented wc ids but resolves persist
   assert.equal((output.checkInvented as Record<string, unknown>).code, "EMPLOYEE_NOT_FOUND");
   assert.equal((output.getEmpPersisted as Record<string, unknown>).employeeExternalId, "wc|persisted-mcp-subject");
   assert.equal((output.checkPersisted as Record<string, unknown>).status, "COMPLIANT");
+});
+
+test("scoped profile (Maui) — nonexistent UUIDs use the same CASE_NOT_FOUND payload as hidden cases", () => {
+  const output = runProfileChild("maui", testScript);
+  assert.deepEqual(output.getCaseMissingRaw, output.getCaseForeignRaw, "get_case must not expose existence through its error result");
+  assert.deepEqual(output.explainMissingRaw, output.explainForeignRaw, "explain_outcome must not expose existence through its error result");
 });
 
 test("default profile — MCP tools preserve unresolvable and foreign subjects", () => {
