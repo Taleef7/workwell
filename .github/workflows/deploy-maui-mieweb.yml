@@ -259,7 +259,8 @@ jobs:
                 {key: "WORKWELL_AUTH_ACCESS_TTL_SECONDS", value: "2592000"},
                 {key: "WORKWELL_INSTANCE", value: "maui"},
                 {key: "WORKWELL_SCHEDULER_ENABLED", value: "true"},
-                {key: "WORKWELL_VSAC_API_KEY", value: $vsac_api_key}
+                {key: "WORKWELL_VSAC_API_KEY", value: $vsac_api_key},
+                {key: "WORKWELL_OFFICIAL_MEASURES", value: "cms122,cms125"}
               ]'
             echo EOF
           } >> "$GITHUB_OUTPUT"

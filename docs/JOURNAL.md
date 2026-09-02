@@ -1,3 +1,30 @@
+## 2026-09-02 (later) — Maui routes cms122/cms125 official: the authored breast-cancer subset was hostage to VSAC reachability
+
+**Found while verifying the redeployed sandbox.** Breast Cancer Screening on Maui read 0% compliant, 45
+overdue, where the previous day's run had 38 compliant and 7 overdue — on identical code and an identical
+synthetic roster. Only cms125 moved. The per-patient evidence said why: initial population true, `Has
+Qualifying Mammogram` false, for a patient whose bundle always carries a mammogram 180 days back.
+
+**The mechanism is terminology, not dates.** The authored `cms125` numerator retrieves `[Procedure:
+"Mammography"]`. With `WORKWELL_VSAC_API_KEY` set (it is, on every deployed stack) the engine resolves
+that OID through VSAC live, whose expansion is 92 LOINC codes and no CPT — the fact ADR-044 recorded when
+it dual-stamped the synthetic mammogram as a CPT Procedure *and* a LOINC Observation. The bundled
+CPT-bearing expansion is only consulted when the live answer is *empty*. So the authored measure is
+correct exactly when VSAC fails, which it did the day before and did not today. Reproduced three ways:
+locally with no key every evaluation date is COMPLIANT; a fresh manual run on the new container gives
+45 OVERDUE again; the two production runs' evidence differs only in that one define. TWH never showed it
+because TWH routes cms125 to the official artifact, which reads the LOINC Observation.
+
+**Decision (owner, 2026-09-02): route cms122 and cms125 official on Maui, as TWH does.** The Maui
+image already vendors both artifacts and sidecars; official routing does not use the runtime VSAC key;
+both measures are MADiE-gated and routed in production. Gate before the flip: the official executors
+over all 48 Maui patients return the designed distribution for both measures — 38 COMPLIANT / 7
+OVERDUE / 3 EXCLUDED, zero mismatches — and `flip-snapshot --source synthetic` reports the flip inert on
+the designed probes. One workflow env line; `official-flip-config.test.ts` reads the shipped value.
+The authored cms122/cms125 subsets stay in the catalog for now (#377 retires them). The finding is the
+sharpest evidence yet for that issue: an authored subset that is right only when the terminology
+service is down is not a subset, it is a coincidence.
+
 # Journal
 
 ## 2026-09-02 — the Maui sandbox is handed over: unclaimed runs recover, demo accounts are profile-scoped, public-demo affordances become deployment config
