@@ -1,10 +1,3 @@
-/**
- * Demo-segment seed test (#183 E11.3). Proves seedSegments creates the demo cohorts, is idempotent by
- * name (a second run / a boot over an already-seeded DB adds no duplicates), and that the cohorts'
- * rule-sets together cover EVERY Active runnable measure (no measure is silently orphaned by the seed —
- * which, since the seed ships ENABLED, would otherwise read NOT_APPLICABLE for everyone on the roster).
- *   node --import tsx --test src/segment/segment-seed.test.ts
- */
 import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import { tmpdir } from "node:os";
@@ -14,14 +7,51 @@ import { rmSync } from "node:fs";
 import { createSqliteD1 } from "@mieweb/cloud-local";
 import { RUN_STORE_FLOOR_DDL } from "../stores/sqlite/schema.ts";
 import { SqliteSegmentStore } from "../stores/sqlite/segment-store-sqlite.ts";
-import { seedSegments, DEMO_SEGMENTS } from "./segment-seed.ts";
+import { seedSegments, DEMO_SEGMENTS, demoSegmentsFor } from "./segment-seed.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { EMPLOYEES, employeesForTenant } from "../engine/synthetic/employee-catalog.ts";
 import { isApplicable } from "./segment-applicability.ts";
 import { WEBCHART_LIVE_SITE } from "../engine/ingress/webchart/live-directory.ts";
-import type { HydratedSegment } from "../stores/segment-store.ts";
+import type { CreateSegmentInput, HydratedSegment } from "../stores/segment-store.ts";
+import { composeDeploymentDirectory, resolveDeploymentProfile, type DeploymentProfileId } from "../config/deployment-profile.ts";
 
 const baselineRule = () => DEMO_SEGMENTS.find((s) => s.name === "All Employees")!.rule;
+
+// Snapshot pinning the pre-change default seed byte-for-byte (default profile is unchanged).
+const DEFAULT_SNAPSHOT: CreateSegmentInput[] = [
+  {
+    name: "All Employees",
+    description: "Universal occupational-health baseline — wellness screening, preventive eCQMs, and the adult Td/Tdap booster, applicable to everyone.",
+    rule: { match: "ANY", conditions: [{ attr: "site", op: "in", value: ["Clinic", "HQ", "Kihei Clinic", "North Campus", "Outpatient Clinic", "Plant A", "Plant B", "South Campus", "Wailuku Clinic", "WebChart"] }] },
+    measureIds: ["hypertension", "diabetes_hba1c", "obesity_bmi", "cholesterol_ldl", "cms125", "cms122", "adult_immunization"],
+  },
+  {
+    name: "OSHA Safety-Sensitive",
+    description: "Field roles in OSHA surveillance programs — adds audiometry, HAZWOPER, and TB screening.",
+    rule: { match: "ANY", conditions: [
+      { attr: "role", op: "contains", value: "Welder" },
+      { attr: "role", op: "contains", value: "Maintenance" },
+      { attr: "role", op: "contains", value: "Hazwoper" },
+      { attr: "role", op: "contains", value: "Industrial Hygienist" },
+    ] },
+    measureIds: ["audiogram", "hazwoper", "tb_surveillance"],
+  },
+  {
+    name: "Clinical Staff",
+    description: "Clinic-based and nursing staff — adds influenza, TB screening, and the MMR/Varicella/Hep B immunity series.",
+    rule: { match: "ANY", conditions: [
+      { attr: "site", op: "equals", value: "Clinic" },
+      { attr: "role", op: "contains", value: "Nurse" },
+    ] },
+    measureIds: ["flu_vaccine", "tb_surveillance", "mmr", "varicella", "hepatitis_b_vaccination_series"],
+  },
+];
+
+function mauiSegments(): CreateSegmentInput[] {
+  const profile = resolveDeploymentProfile("maui");
+  const dir = composeDeploymentDirectory(profile);
+  return demoSegmentsFor("maui" as DeploymentProfileId, dir.EMPLOYEES, [...profile.runnableMeasureIds]);
+}
 
 const created: string[] = [];
 
@@ -81,8 +111,6 @@ test("IHN employees are applicable to the baseline wellness/eCQM measures under 
 test("seeding is name-idempotent — an already-seeded baseline is left untouched (owner-gated repair)", async () => {
   const db = await freshDb();
   const store = new SqliteSegmentStore(db);
-  // An operator-customized "All Employees" already exists; a re-seed must not clobber it (the
-  // E13 site widening for an already-seeded row is an owner-gated audited route edit, not a boot write).
   const operatorRule = { match: "ANY" as const, conditions: [{ attr: "role" as const, op: "contains" as const, value: "Nurse" }] };
   await store.createSegment({ name: "All Employees", description: "operator", rule: operatorRule, measureIds: ["hypertension"] });
   await seedSegments(store);
@@ -90,15 +118,48 @@ test("seeding is name-idempotent — an already-seeded baseline is left untouche
   assert.deepEqual(after.rule, operatorRule, "existing baseline must be left as-is");
 });
 
-test("demo seed covers every Active runnable measure (no measure orphaned)", () => {
+// ---- per-profile seed invariants (2026-09-02) ----
+
+test("demo seed covers every runnable measure on the default profile (no measure orphaned)", () => {
   const covered = new Set(DEMO_SEGMENTS.flatMap((s) => s.measureIds));
   const orphaned = Object.keys(MEASURES).filter((id) => !covered.has(id));
   assert.deepEqual(orphaned, [], `every runnable measure must be in ≥1 demo cohort; orphaned: ${orphaned.join(", ")}`);
-  // And every seeded measure id must be a real runnable measure (no typos).
   const unknown = [...covered].filter((id) => !(id in MEASURES));
   assert.deepEqual(unknown, [], `demo cohorts reference unknown measure ids: ${unknown.join(", ")}`);
 });
 
+test("maui seed covers every runnable measure on the maui profile (no measure orphaned)", () => {
+  const maui = mauiSegments();
+  const profile = resolveDeploymentProfile("maui");
+  const runnable = profile.runnableMeasureIds;
+  const covered = new Set(maui.flatMap((s) => s.measureIds));
+  const orphaned = [...runnable].filter((id) => !covered.has(id));
+  assert.deepEqual(orphaned, [], `every maui runnable measure must be in the maui seed; orphaned: ${orphaned.join(", ")}`);
+  const extra = [...covered].filter((id) => !runnable.includes(id));
+  assert.deepEqual(extra, [], `maui seed must reference only profile-runnable measures; extra: ${extra.join(", ")}`);
+});
+
+test("maui seed has one All Patients segment scoped to the maui directory sites with no employee/OSHA wording", () => {
+  const maui = mauiSegments();
+  assert.equal(maui.length, 1, "maui profile seeds exactly one segment");
+  assert.equal(maui[0]!.name, "All Patients");
+  const dir = composeDeploymentDirectory(resolveDeploymentProfile("maui"));
+  const expectedSites = [...new Set(dir.EMPLOYEES.map((e) => e.site))].sort((a, b) => a.localeCompare(b));
+  const cond = maui[0]!.rule.conditions.find((c: any) => c.attr === "site" && c.op === "in");
+  assert.ok(cond, "maui seed matches by site IN a list");
+  assert.deepEqual(cond.value, expectedSites, "maui seed site list must equal the maui directory's distinct sites");
+  const serialized = JSON.stringify(maui).toLowerCase();
+  assert.ok(!serialized.includes("employee"), "maui seed must not contain employee wording");
+  assert.ok(!serialized.includes("osha"), "maui seed must not contain OSHA wording");
+});
+
+test("default seed is deep-equal to the pinned pre-change constant (byte-identical default profile)", () => {
+  assert.deepEqual(DEMO_SEGMENTS, DEFAULT_SNAPSHOT, "DEMO_SEGMENTS must remain byte-identical on the default profile");
+  const defaultDir = composeDeploymentDirectory(resolveDeploymentProfile("default"));
+  const mauiFromDefault = demoSegmentsFor("maui" as DeploymentProfileId, defaultDir.EMPLOYEES, ["hypertension"]);
+  assert.equal(mauiFromDefault.length, 1, "demoSegmentsFor must select the maui set regardless of the loaded process profile");
+  assert.equal(mauiFromDefault[0]!.name, "All Patients");
+});
 // ---------------------------------------------------------------------------
 // Demo-readiness (#): the universal baseline must cover the live WebChart site.
 //
