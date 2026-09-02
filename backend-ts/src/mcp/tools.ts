@@ -12,8 +12,11 @@ import type { OutcomeStore } from "../stores/outcome-store.ts";
 import type { RunStore } from "../stores/run-store.ts";
 import type { MeasureStore, MeasureRecord } from "../stores/measure-store.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
-import { employeeById } from "../config/deployment-profile.ts";
+import { DEPLOYMENT_PROFILE, DIRECTORY, isRunnableMeasure, profileSubjectMatcher } from "../config/deployment-profile.ts";
+import { directoryForRows } from "../engine/ingress/webchart/live-directory.ts";
+import { isWebChartConfigured, type DataSourceEnv } from "../engine/ingress/data-source.ts";
 import { toCaseDetail } from "../case/case-detail-read-model.ts";
+
 import { toCaseSummary } from "../case/case-read-models.ts";
 import { toRunSummaryFromCounts, toRunListItemFromCounts } from "../run/read-models.ts";
 import { toMeasureDetail } from "../measure/measure-read-models.ts";
@@ -26,6 +29,7 @@ export interface McpToolDeps {
   outcomeStore: OutcomeStore;
   runStore: RunStore;
   measureStore: MeasureStore;
+  webChartEnv?: DataSourceEnv;
 }
 
 export interface McpTool {
@@ -36,6 +40,29 @@ export interface McpTool {
   roles: string[];
   sensitivity: "restricted" | "internal" | "unclassified";
   handler: (args: JsonRecord, deps: McpToolDeps) => Promise<unknown>;
+}
+
+function directoryForSubjects(deps: McpToolDeps, subjectIds: readonly string[]) {
+  if (DEPLOYMENT_PROFILE.id === "default") return DIRECTORY;
+  return directoryForRows(
+    subjectIds.map((subjectId) => ({ subjectId })),
+    isWebChartConfigured(deps.webChartEnv ?? {}),
+    deps.webChartEnv,
+    DIRECTORY,
+  );
+}
+
+async function persistedDirectory(deps: McpToolDeps) {
+  if (DEPLOYMENT_PROFILE.id === "default") return DIRECTORY;
+  const webChartConfigured = isWebChartConfigured(deps.webChartEnv ?? {});
+  const rows = !webChartConfigured
+    ? []
+    : await deps.outcomeStore.listOutcomesWithRun({ excludeScale: true, excludeTrendHistory: true });
+  const directory = directoryForRows(rows, webChartConfigured, deps.webChartEnv, DIRECTORY);
+  return {
+    ...directory,
+    employeeById: (externalId: string) => directory.employees.find((employee) => employee.externalId === externalId) ?? null,
+  };
 }
 
 const CM = "ROLE_CASE_MANAGER";
@@ -156,10 +183,12 @@ async function getCase(args: JsonRecord, deps: McpToolDeps): Promise<unknown> {
   const caseId = requireString(args, "caseId");
   if (!UUID_RE.test(caseId)) return safeError("INVALID_ARGUMENT", "caseId must be a valid UUID");
   const c = await deps.caseStore.getCase(caseId);
-  if (!c) throw new ToolArgError(`Case not found: ${caseId}`);
+  if (!c) return safeError("CASE_NOT_FOUND", "Case not found");
+  const directory = directoryForSubjects(deps, [c.employeeId]);
+  if (!profileSubjectMatcher(directory.employeeById)(c.employeeId)) return safeError("CASE_NOT_FOUND", "Case not found");
   const outcomes = await deps.outcomeStore.listOutcomes(c.lastRunId);
   const outcome = outcomes.find((o) => o.subjectId === c.employeeId && o.measureId === c.measureId) ?? null;
-  const detail = toCaseDetail(c, outcome);
+  const detail = toCaseDetail(c, outcome, [], null, undefined, directory.employeeById);
   const evidence = detail.evidenceJson ?? {};
   const whyFlagged = (evidence as JsonRecord).why_flagged ?? {};
   return { ...detail, evidence_payload: evidence, why_flagged: whyFlagged };
@@ -172,9 +201,12 @@ async function listCases(args: JsonRecord, deps: McpToolDeps): Promise<unknown> 
   const ref = measureFilterRef(args);
   const measure = ref ? await resolveMeasure(deps, args) : null;
   if (ref && !measure) return safeError("MEASURE_NOT_FOUND", `Measure not found: ${ref}`);
-  const rows = await deps.caseStore.listCases({ statuses: caseStatusesFor(status), measureId: measure?.measureId, limit: 100000, offset: 0 });
+  let rows = await deps.caseStore.listCases({ statuses: caseStatusesFor(status), measureId: measure?.measureId, limit: 100000, offset: 0 });
+  const directory = directoryForSubjects(deps, rows.map((c) => c.employeeId));
+  const profileMatch = profileSubjectMatcher(directory.employeeById);
+  rows = rows.filter((c) => profileMatch(c.employeeId));
   const results = rows.map((c) => {
-    const s = toCaseSummary(c);
+    const s = toCaseSummary(c, 0, directory.employeeById);
     return {
       case_id: s.caseId,
       employee_id: s.employeeId,
@@ -219,7 +251,11 @@ async function getRunSummary(args: JsonRecord, deps: McpToolDeps): Promise<unkno
 
 async function listMeasures(args: JsonRecord, deps: McpToolDeps): Promise<unknown> {
   const status = args.status != null && String(args.status).trim() ? String(args.status).trim() : "Active";
-  const records = (await deps.measureStore.listLatest()).filter((m) => m.status.toLowerCase() === status.toLowerCase());
+  const records = (await deps.measureStore.listLatest()).filter(
+    // The runnable-set scope is a Maui concern; the default profile keeps listing every catalog and
+    // Studio-authored row (Draft/Deprecated ids outside the authored registry), as it always has.
+    (m) => m.status.toLowerCase() === status.toLowerCase() && (DEPLOYMENT_PROFILE.id === "default" || isRunnableMeasure(m.measureId)),
+  );
   records.sort((a, b) => a.name.localeCompare(b.name));
   const results = records.map((r) => ({
     measureId: r.measureId,
@@ -307,10 +343,12 @@ async function explainOutcome(args: JsonRecord, deps: McpToolDeps): Promise<unkn
   const caseId = requireString(args, "caseId");
   if (!UUID_RE.test(caseId)) return safeError("INVALID_ARGUMENT", "caseId must be a valid UUID");
   const c = await deps.caseStore.getCase(caseId);
-  if (!c) throw new ToolArgError(`Case not found: ${caseId}`);
+  if (!c) return safeError("CASE_NOT_FOUND", "Case not found");
+  const directory = directoryForSubjects(deps, [c.employeeId]);
+  if (!profileSubjectMatcher(directory.employeeById)(c.employeeId)) return safeError("CASE_NOT_FOUND", "Case not found");
   const outcomes = await deps.outcomeStore.listOutcomes(c.lastRunId);
   const outcome = outcomes.find((o) => o.subjectId === c.employeeId && o.measureId === c.measureId) ?? null;
-  const detail = toCaseDetail(c, outcome);
+  const detail = toCaseDetail(c, outcome, [], null, undefined, directory.employeeById);
   const wf = ((detail.evidenceJson ?? {}) as JsonRecord).why_flagged as JsonRecord | undefined;
   const val = (k: string, fb: string): string => (wf && wf[k] != null ? String(wf[k]) : fb);
   const explanation = buildOutcomeExplanation(detail.employeeName, detail.currentOutcomeStatus, detail.measureName, detail.evidenceJson);
@@ -326,7 +364,7 @@ async function explainOutcome(args: JsonRecord, deps: McpToolDeps): Promise<unkn
 
 async function getEmployee(args: JsonRecord, deps: McpToolDeps): Promise<unknown> {
   const externalId = requireString(args, "employeeExternalId");
-  const emp = employeeById(externalId);
+  const emp = (await persistedDirectory(deps)).employeeById(externalId);
   if (!emp) return safeError("EMPLOYEE_NOT_FOUND", `Employee not found: ${externalId}`);
   // #491: only a FINALIZED run's outcome is served (ADR-061's FINAL rule — a row exists before its run
   // reaches a terminal status, and a mid-run partial result is not an answer). One row per measure,
@@ -357,6 +395,8 @@ async function checkCompliance(args: JsonRecord, deps: McpToolDeps): Promise<unk
   // message advises waiting for a run, which for a measure that does not exist sends an AI client
   // into an endless retry. Same rule as list_cases / list_noncompliant.
   if (!rec) return safeError("MEASURE_NOT_FOUND", `Measure not found: ${measureName}`);
+  const directory = await persistedDirectory(deps);
+  if (!profileSubjectMatcher(directory.employeeById)(externalId)) return safeError("EMPLOYEE_NOT_FOUND", `Employee not found: ${externalId}`);
   // #491: only a FINALIZED run's outcome is the persisted answer (ADR-061's FINAL rule, enforced in SQL
   // by the store — `COMPLETED`/`PARTIAL_FAILURE` runs only). The previous newest-row-wins read served a
   // mid-run partial result as the compliance answer, which silently became wrong if that run FAILED.
@@ -415,13 +455,16 @@ async function listNoncompliant(args: JsonRecord, deps: McpToolDeps): Promise<un
   // Same leak guard as list_cases: an unresolved measure filter must error, not return all cases.
   if (measureNameFilter && !measure) return safeError("MEASURE_NOT_FOUND", `Measure not found: ${measureNameFilter}`);
   let rows = await deps.caseStore.listCases({ statuses: ["OPEN"], measureId: measure?.measureId, limit: 100000, offset: 0 });
+  const directory = directoryForSubjects(deps, rows.map((c) => c.employeeId));
+  const profileMatch = profileSubjectMatcher(directory.employeeById);
+  rows = rows.filter((c) => profileMatch(c.employeeId));
   rows = rows.filter((c) => NON_COMPLIANT.includes(c.currentOutcomeStatus));
   if (statusFilter) rows = rows.filter((c) => c.currentOutcomeStatus === statusFilter);
-  if (siteFilter) rows = rows.filter((c) => (employeeById(c.employeeId)?.site ?? "").toLowerCase() === siteFilter.toLowerCase());
+  if (siteFilter) rows = rows.filter((c) => (directory.employeeById(c.employeeId)?.site ?? "").toLowerCase() === siteFilter.toLowerCase());
   rows.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   rows = rows.slice(0, limit);
   const results = rows.map((c) => {
-    const emp = employeeById(c.employeeId);
+    const emp = directory.employeeById(c.employeeId);
     return {
       caseId: c.id,
       employeeExternalId: c.employeeId,

@@ -43,7 +43,7 @@ import { resolveForecaster } from "../engine/immunization/resolve-forecaster.ts"
 import { resolveBucket } from "../case/resolve-bucket.ts";
 import { isWebChartConfigured } from "../engine/ingress/data-source.ts";
 import { profileForId } from "../engine/ingress/webchart/live-directory.ts";
-import { DIRECTORY, employeeById } from "../config/deployment-profile.ts";
+import { DIRECTORY, employeeById, profileSubjectMatcher } from "../config/deployment-profile.ts";
 
 interface CasesEnv {
   DB: CloudDatabase;
@@ -284,6 +284,7 @@ export async function handleCases(req: Request, env: CasesEnv, actor = "system")
   if (detailId && req.method === "GET") {
     const c = await (await caseStore(env)).getCase(detailId);
     if (!c) return json({ error: "not_found", id: detailId }, 404);
+    if (!profileSubjectMatcher(employeeLookup)(c.employeeId)) return json({ error: "not_found", id: detailId }, 404);
     const outcomes = await (await outcomeStore(env)).listOutcomes(c.lastRunId);
     const outcome = outcomes.find((o) => o.subjectId === c.employeeId && o.measureId === c.measureId) ?? null;
     const events = (await getStores(env)).events;
@@ -340,6 +341,9 @@ export async function handleCases(req: Request, env: CasesEnv, actor = "system")
   // from/to filter case creation time (day-granular, inclusive) — matches the Java route.
   if (from) rows = rows.filter((c) => day(c.createdAt) >= day(from));
   if (to) rows = rows.filter((c) => day(c.createdAt) <= day(to));
+
+  const profileMatch = profileSubjectMatcher(employeeLookup);
+  rows = rows.filter((c) => profileMatch(c.employeeId));
 
   // outreachRecordCount per case (derived from OUTREACH_SENT actions) — drives the
   // frontend worklist-gap badge (open cases with count 0). One grouped query for the set.

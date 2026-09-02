@@ -1,29 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
-import { dirname, resolve } from "node:path";
+import { runProfileChild } from "../test-support/run-profile-child.ts";
 import type { MeasureScanOptions, OutcomeRecord, OutcomeStore, OutcomeWithRun } from "../stores/outcome-store.ts";
 import type { RunStore } from "../stores/run-store.ts";
 import type { CaseRecord, CaseStore } from "../stores/case-store.ts";
 import type { QualitySnapshotRow, QualitySnapshotStore } from "../stores/quality-snapshot-store.ts";
 import { programOverview, programRiskOutlook, programTopDrivers, programTrend } from "./program-read-models.ts";
 import { replaceLiveDirectory } from "../engine/ingress/webchart/live-directory.ts";
-
-const backendRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
-
-function runProfileChild(instance: string | undefined, source: string): Record<string, unknown> {
-  const env = { ...process.env };
-  if (instance === undefined) delete env.WORKWELL_INSTANCE;
-  else env.WORKWELL_INSTANCE = instance;
-  const result = spawnSync(
-    process.execPath,
-    ["--import", "tsx", "--input-type=module", "-e", source],
-    { cwd: backendRoot, env, encoding: "utf8" },
-  );
-  assert.equal(result.status, 0, result.stderr);
-  return JSON.parse(result.stdout.trim()) as Record<string, unknown>;
-}
 
 const wcRow: OutcomeWithRun = {
   runId: "run-wc-program", runStartedAt: "2026-07-17T00:00:00.000Z", runScopeType: "MEASURE",
@@ -438,6 +421,7 @@ test("scoped profile (Maui) — isolates data by excluding foreign and unresolve
     const outlook = await programRiskOutlook(fakeDeps, "cms122", 30);
 
     console.log(JSON.stringify({
+      overviewMeasures: overview.map((m) => m.measureId),
       totalEvaluated: cms122?.totalEvaluated,
       compliant: cms122?.compliant,
       overdue: cms122?.overdue,
@@ -449,6 +433,7 @@ test("scoped profile (Maui) — isolates data by excluding foreign and unresolve
     }));
   `);
 
+  assert.deepEqual(output.overviewMeasures, ["cms125", "cms122", "hypertension"], "Maui profile overview only includes runnable measures");
   assert.equal(output.totalEvaluated, 2, "only Maui-resolvable subjects (pat-001 and wc|) contribute to totalEvaluated");
   assert.equal(output.compliant, 2, "both pat-001 and wc| are COMPLIANT");
   assert.equal(output.overdue, 0, "non-Maui overdue subjects emp-001 and cypress-mrn-foreign must be excluded");
@@ -583,3 +568,98 @@ test("programTrend — monthly snapshot scope fallback on Maui profile and snaps
   assert.equal(defaultTrend[0]!.compliant, 90);
 });
 
+test("programSites — returns distinct site options only from visible rows", () => {
+  const source = `
+    import { DIRECTORY } from "./src/config/deployment-profile.ts";
+    import { listSites, programSites } from "./src/program/program-read-models.ts";
+
+    const rows = [
+      {
+        runId: "run-1",
+        runStartedAt: "2026-07-17T00:00:00.000Z",
+        runScopeType: "MEASURE",
+        runStatus: "COMPLETED",
+        runTriggeredBy: "manual",
+        subjectId: "pat-001",
+        measureId: "cms122",
+        status: "COMPLIANT",
+      },
+      {
+        runId: "run-1",
+        runStartedAt: "2026-07-17T00:00:00.000Z",
+        runScopeType: "MEASURE",
+        runStatus: "COMPLETED",
+        runTriggeredBy: "manual",
+        subjectId: "emp-001",
+        measureId: "cms122",
+        status: "COMPLIANT",
+      },
+      {
+        runId: "run-1",
+        runStartedAt: "2026-07-17T00:00:00.000Z",
+        runScopeType: "MEASURE",
+        runStatus: "COMPLETED",
+        runTriggeredBy: "manual",
+        subjectId: "cypress-mrn-unresolvable",
+        measureId: "cms122",
+        status: "COMPLIANT",
+      },
+    ];
+
+    const fakeDeps = {
+      outcomeStore: {
+        listLatestPopulationOutcomes: async () => rows,
+        listOutcomesWithRun: async () => rows,
+      },
+      webChartEnv: {},
+    };
+
+    const sites = await programSites(fakeDeps);
+    console.log(JSON.stringify({ sites, catalogSites: listSites(DIRECTORY.employees) }));
+  `;
+
+  const mauiOutput = runProfileChild("maui", source);
+  const mauiSites = mauiOutput.sites as string[];
+  assert.deepEqual(mauiSites, ["Wailuku Clinic"], "Maui profile must only return sites from visible rows, excluding foreign subjects and un-evaluated catalog sites");
+
+  const defaultOutput = runProfileChild(undefined, source);
+  const defaultSites = defaultOutput.sites as string[];
+  assert.deepEqual(
+    defaultSites,
+    ["Clinic", "HQ", "Kihei Clinic", "North Campus", "Outpatient Clinic", "Plant A", "Plant B", "South Campus", "Wailuku Clinic"],
+    "default profile must preserve the full pre-change catalog site list",
+  );
+});
+test("programSites — scoped profile selects the latest run from visible rows", () => {
+  const source = `
+    import { programSites } from "./src/program/program-read-models.ts";
+
+    const olderVisible = {
+      runId: "run-old", runStartedAt: "2026-07-17T00:00:00.000Z", runScopeType: "MEASURE",
+      runStatus: "COMPLETED", runTriggeredBy: "manual", subjectId: "pat-001", measureId: "cms122", status: "COMPLIANT",
+    };
+    const newerForeign = {
+      runId: "run-new", runStartedAt: "2026-07-18T00:00:00.000Z", runScopeType: "MEASURE",
+      runStatus: "COMPLETED", runTriggeredBy: "manual", subjectId: "emp-001", measureId: "cms122", status: "OVERDUE",
+    };
+    const fakeDeps = {
+      outcomeStore: {
+        listLatestPopulationOutcomes: async () => [newerForeign],
+        listOutcomesWithRun: async () => [olderVisible, newerForeign],
+      },
+      webChartEnv: {},
+    };
+
+    console.log(JSON.stringify({ sites: await programSites(fakeDeps) }));
+  `;
+
+  const mauiOutput = runProfileChild("maui", source);
+  assert.deepEqual(mauiOutput.sites, ["Wailuku Clinic"], "Maui must retain the older visible run when the newest run is foreign");
+
+  const defaultOutput = runProfileChild(undefined, source);
+  assert.deepEqual(
+    defaultOutput.sites,
+    ["Clinic", "HQ", "Kihei Clinic", "North Campus", "Outpatient Clinic", "Plant A", "Plant B", "South Campus", "Wailuku Clinic"],
+    "default profile must keep the full catalog site list",
+  );
+});

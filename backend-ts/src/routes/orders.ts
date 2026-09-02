@@ -11,8 +11,11 @@ import { parseQueryDate, QueryDateError } from "./query-dates.ts";
 import { proposeOrders, type AtRiskOutcome } from "../order/order-proposal.ts";
 import { resolveStandingOrderProvider, type StandingOrderEnv } from "../order/standing-order-provider.ts";
 import { bundleOf } from "../order/proposed-order.ts";
+import { DEPLOYMENT_PROFILE, DIRECTORY, isRunnableMeasure, profileSubjectMatcher } from "../config/deployment-profile.ts";
+import { directoryForRows } from "../engine/ingress/webchart/live-directory.ts";
+import { isWebChartConfigured, type DataSourceEnv } from "../engine/ingress/data-source.ts";
 
-interface OrdersEnv extends StandingOrderEnv {
+interface OrdersEnv extends StandingOrderEnv, DataSourceEnv {
   DB: CloudDatabase;
   DATABASE_URL?: string;
 }
@@ -39,7 +42,7 @@ export async function handleOrders(req: Request, env: OrdersEnv): Promise<Respon
   const subjectId = q.get("subjectId")?.trim() || null;
   const fhir = (q.get("format") ?? "domain") === "fhir";
 
-  const active = MEASURE_CATALOG.filter((m) => m.status === "Active").map((m) => m.id);
+  const active = MEASURE_CATALOG.filter((m) => m.status === "Active" && isRunnableMeasure(m.id)).map((m) => m.id);
   const scope = measureId ? (active.includes(measureId) ? [measureId] : []) : active;
 
   const s = await getStores(env);
@@ -48,8 +51,12 @@ export async function handleOrders(req: Request, env: OrdersEnv): Promise<Respon
     // excludeScale: order proposals derive from the latest live population run per measure; the
     // generated scale tenant (~120k rows) is excluded in SQL (E13 PR-2 — bounded + never proposes for it).
     const all = (await s.outcomes.listOutcomesWithRun({ from, to, excludeScale: true })).filter((r) => isPopulationRun(r.runScopeType) && isCompletedRun(r.runStatus));
+    const webChartConfigured = isWebChartConfigured(env);
+    const directory = directoryForRows(all, webChartConfigured, env, DIRECTORY);
+    const profileMatch = profileSubjectMatcher(directory.employeeById);
+    const visibleRows = DEPLOYMENT_PROFILE.id === "default" ? all : all.filter((r) => profileMatch(r.subjectId));
     const byMeasure = new Map<string, typeof all>();
-    for (const r of all) (byMeasure.get(r.measureId) ?? byMeasure.set(r.measureId, []).get(r.measureId)!).push(r);
+    for (const r of visibleRows) (byMeasure.get(r.measureId) ?? byMeasure.set(r.measureId, []).get(r.measureId)!).push(r);
     for (const m of scope) {
       for (const r of latestRunRows(byMeasure.get(m) ?? [])) {
         if (subjectId && r.subjectId !== subjectId) continue;

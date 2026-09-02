@@ -216,4 +216,38 @@ describe("IndividualComplianceStatus", () => {
     expect(getWithHeaders).toHaveBeenCalledTimes(3);
     expect(screen.getAllByText("Diabetes HbA1c")).toHaveLength(1);
   });
+
+  it("renders deployment empty-panels state when availablePanels is empty", async () => {
+    getWithHeaders.mockReset().mockResolvedValue({
+      data: {
+        panel: "immunizations",
+        availablePanels: [],
+        columns: [],
+        rows: [],
+      },
+      headers: new Headers({ "X-Total-Count": "0" }),
+    });
+
+    render(<IndividualComplianceStatus externalId="emp-001" />);
+    expect(
+      await screen.findByText("No compliance panel is configured for this deployment.")
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/No evaluated measures for this employee yet/i)).not.toBeInTheDocument();
+  });
+
+  it("renders deployment empty-panels state when a later panel response reports availablePanels: []", async () => {
+    getWithHeaders.mockReset()
+      .mockRejectedValueOnce(new Error("initial panel unavailable"))
+      .mockResolvedValueOnce({
+        data: { panel: "osha", availablePanels: [], columns: [], rows: [] },
+        headers: new Headers({ "X-Total-Count": "0" }),
+      })
+      .mockRejectedValueOnce(new Error("remaining panel unavailable"));
+
+    render(<IndividualComplianceStatus externalId="emp-001" />);
+    expect(
+      await screen.findByText("No compliance panel is configured for this deployment.")
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/No evaluated measures for this employee yet/i)).not.toBeInTheDocument();
+  });
 });

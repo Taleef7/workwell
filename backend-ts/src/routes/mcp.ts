@@ -19,8 +19,9 @@ import { ensureMeasureStore } from "./measures.ts";
 import { MCP_TOOLS } from "../mcp/tools.ts";
 import { callTool, type DispatchCtx } from "../mcp/dispatch.ts";
 import type { JsonRecord } from "../mcp/tool-audit.ts";
+import type { DataSourceEnv } from "../engine/ingress/data-source.ts";
 
-interface McpEnv {
+interface McpEnv extends DataSourceEnv {
   DB: CloudDatabase;
   DATABASE_URL?: string;
 }
@@ -66,6 +67,7 @@ async function dispatchCtx(env: McpEnv, auth: McpAuth): Promise<DispatchCtx> {
       outcomeStore: s.outcomes,
       runStore: s.runs,
       measureStore,
+      webChartEnv: env,
     },
     events: s.events,
     actor: auth.actor,

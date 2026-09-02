@@ -72,6 +72,8 @@ import { importQrda1Document, type Qrda1Import } from "../fhir/qrda1-import.ts";
 import { resolveQrda1Documents } from "../fhir/qrda1-identity.ts";
 import { loadOfficialArtifact, officialMeasureIdentifiers } from "../wiring/official-artifacts.ts";
 import { isWebChartConfigured, resolveDataSource, type DataSourceEnv } from "../engine/ingress/data-source.ts";
+import { directoryForRows } from "../engine/ingress/webchart/live-directory.ts";
+import { DEPLOYMENT_PROFILE, DIRECTORY, profileSubjectMatcher } from "../config/deployment-profile.ts";
 import { subjectIdOf } from "../engine/ingress/enrollment/roster.ts";
 
 interface RunsEnv extends DataSourceEnv {
@@ -1008,6 +1010,25 @@ export async function handleRuns(
   const outcomesId = pathname.match(/^\/api\/runs\/([^/]+)\/outcomes$/)?.[1];
   if (outcomesId && req.method === "GET") {
     const os = await outcomes(env);
+    if (DEPLOYMENT_PROFILE.id !== "default") {
+      const allRows = await os.listOutcomes(outcomesId);
+      const directory = directoryForRows(allRows, isWebChartConfigured(env), env, DIRECTORY);
+      const profileMatch = profileSubjectMatcher(directory.employeeById);
+      const visibleRows = allRows.filter((row) => profileMatch(row.subjectId));
+      const hasExplicitPaging = url.searchParams.has("limit") || url.searchParams.has("offset");
+      let rows = visibleRows;
+      if (hasExplicitPaging) {
+        const limit = clampInt(url.searchParams.get("limit"), 500, 1, 2000);
+        const offset = Math.max(0, Number.parseInt(url.searchParams.get("offset") ?? "0", 10) || 0);
+        rows = visibleRows.slice(offset, offset + limit);
+      } else if (visibleRows.length > OUTCOMES_GRID_FULL_CAP) {
+        rows = visibleRows.slice(0, OUTCOMES_GRID_FULL_CAP);
+      }
+      return new Response(JSON.stringify(toRunOutcomeRows(rows, directory.employeeById)), {
+        status: 200,
+        headers: { "content-type": "application/json", "X-Total-Count": String(visibleRows.length) },
+      });
+    }
     const total = (await os.countOutcomesByStatus(outcomesId)).reduce((sum, c) => sum + c.count, 0);
     const hasExplicitPaging = url.searchParams.has("limit") || url.searchParams.has("offset");
     let rows;
