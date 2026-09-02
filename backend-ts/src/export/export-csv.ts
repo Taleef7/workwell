@@ -7,7 +7,9 @@ import type { OutcomeStore, OutcomeWithRun } from "../stores/outcome-store.ts";
 import type { CaseStore, CaseQuery } from "../stores/case-store.ts";
 import type { CaseEventStore } from "../stores/case-event-store.ts";
 import { toRunSummaryFromCounts } from "../run/read-models.ts";
-import { employeeById } from "../config/deployment-profile.ts";
+import { DEPLOYMENT_PROFILE, DIRECTORY, employeeById, profileSubjectMatcher } from "../config/deployment-profile.ts";
+import { directoryForRows } from "../engine/ingress/webchart/live-directory.ts";
+import { isWebChartConfigured, type DataSourceEnv } from "../engine/ingress/data-source.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
 import { toCsv, csvCell } from "./csv.ts";
@@ -95,8 +97,11 @@ function whyFlagged(evidence: unknown, measureId: string) {
 }
 
 /** One outcome CSV row (shared by the string + streamed builders). */
-function outcomeRowCells(o: { id: string; runId: string; subjectId: string; measureId: string; evaluationPeriod: string; status: string; evidence: unknown; evaluatedAt: string }): unknown[] {
-  const emp = employeeById(o.subjectId);
+function outcomeRowCells(
+  o: { id: string; runId: string; subjectId: string; measureId: string; evaluationPeriod: string; status: string; evidence: unknown; evaluatedAt: string },
+  employeeLookup = employeeById,
+): unknown[] {
+  const emp = employeeLookup(o.subjectId);
   const wf = whyFlagged(o.evidence, o.measureId);
   return [
     o.id, o.runId, o.subjectId, emp?.name ?? o.subjectId, emp?.role ?? "—", emp?.site ?? "—",
@@ -105,15 +110,52 @@ function outcomeRowCells(o: { id: string; runId: string; subjectId: string; meas
   ];
 }
 
-export async function outcomesCsv(outcomeStore: OutcomeStore, runStore: RunStore, runId?: string): Promise<string> {
+function directoryForProfileRows(
+  rows: readonly { subjectId: string }[],
+  webChartEnv?: DataSourceEnv,
+) {
+  return DEPLOYMENT_PROFILE.id === "default"
+    ? DIRECTORY
+    : directoryForRows(rows, isWebChartConfigured(webChartEnv ?? {}), webChartEnv, DIRECTORY);
+}
+
+async function latestVisibleOutcomeRunId(
+  outcomeStore: OutcomeStore,
+  runStore: RunStore,
+  webChartEnv?: DataSourceEnv,
+): Promise<string | undefined> {
+  const runs = await runStore.listRuns(DEPLOYMENT_PROFILE.id === "default" ? 1 : 100000);
+  if (DEPLOYMENT_PROFILE.id === "default") return runs[0]?.id;
+  for (const run of runs) {
+    let offset = 0;
+    while (true) {
+      const records = await outcomeStore.listOutcomes(run.id, { limit: OUTCOME_STREAM_PAGE, offset });
+      const directory = directoryForProfileRows(records, webChartEnv);
+      if (records.some((record) => profileSubjectMatcher(directory.employeeById)(record.subjectId))) return run.id;
+      if (records.length < OUTCOME_STREAM_PAGE) break;
+      offset += records.length;
+    }
+  }
+  return undefined;
+}
+
+export async function outcomesCsv(
+  outcomeStore: OutcomeStore,
+  runStore: RunStore,
+  runId?: string,
+  webChartEnv?: DataSourceEnv,
+): Promise<string> {
   // Java exportOutcomeCsv: an explicit runId, otherwise the LATEST run (not every run's
   // outcomes — that would mix historical duplicate employee rows). Export exactly one run.
-  const resolvedRunId = runId ?? (await runStore.listRuns(1))[0]?.id;
+  const resolvedRunId = runId ?? (await latestVisibleOutcomeRunId(outcomeStore, runStore, webChartEnv));
   const records = resolvedRunId ? await outcomeStore.listOutcomes(resolvedRunId) : [];
+  const directory = directoryForProfileRows(records, webChartEnv);
+  const profileMatch = profileSubjectMatcher(directory.employeeById);
   const out = records
+    .filter((r) => profileMatch(r.subjectId))
     .slice()
     .sort((a, b) => a.subjectId.localeCompare(b.subjectId)) // Java ORDER BY e.external_id ASC
-    .map(outcomeRowCells);
+    .map((r) => outcomeRowCells(r, directory.employeeById));
   return toCsv(OUTCOME_HEADERS, out);
 }
 
@@ -127,7 +169,12 @@ const OUTCOME_STREAM_PAGE = 1000;
  * subject_id sort — a single run's outcomes share an evaluation time, so the difference is cosmetic and
  * every row is still present. The bytes match {@link toCsv}: header then `\r\n`-prefixed rows.
  */
-export function outcomesCsvStream(outcomeStore: OutcomeStore, runStore: RunStore, runId?: string): ReadableStream<Uint8Array> {
+export function outcomesCsvStream(
+  outcomeStore: OutcomeStore,
+  runStore: RunStore,
+  runId?: string,
+  webChartEnv?: DataSourceEnv,
+): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
   let resolvedRunId: string | null | undefined;
   let offset = 0;
@@ -137,7 +184,7 @@ export function outcomesCsvStream(outcomeStore: OutcomeStore, runStore: RunStore
       if (!wroteHeader) {
         controller.enqueue(encoder.encode(OUTCOME_HEADERS.join(",")));
         wroteHeader = true;
-        resolvedRunId = runId ?? (await runStore.listRuns(1))[0]?.id;
+        resolvedRunId = runId ?? (await latestVisibleOutcomeRunId(outcomeStore, runStore, webChartEnv));
         if (!resolvedRunId) {
           controller.close();
           return;
@@ -149,8 +196,11 @@ export function outcomesCsvStream(outcomeStore: OutcomeStore, runStore: RunStore
         return;
       }
       offset += records.length;
-      const chunk = records.map((o) => "\r\n" + outcomeRowCells(o).map(csvCell).join(",")).join("");
-      controller.enqueue(encoder.encode(chunk));
+      const directory = directoryForProfileRows(records, webChartEnv);
+      const profileMatch = profileSubjectMatcher(directory.employeeById);
+      const matching = records.filter((o) => profileMatch(o.subjectId));
+      const chunk = matching.map((o) => "\r\n" + outcomeRowCells(o, directory.employeeById).map(csvCell).join(",")).join("");
+      if (chunk) controller.enqueue(encoder.encode(chunk));
       if (records.length < OUTCOME_STREAM_PAGE) controller.close();
     },
   });
@@ -170,8 +220,16 @@ export interface CaseExportFilter extends CaseQuery {
   site?: string;
 }
 
-export async function casesCsv(caseStore: CaseStore, eventStore: CaseEventStore, filter: CaseExportFilter): Promise<string> {
+export async function casesCsv(
+  caseStore: CaseStore,
+  eventStore: CaseEventStore,
+  filter: CaseExportFilter,
+  webChartEnv?: DataSourceEnv,
+): Promise<string> {
   let cases = await caseStore.listCases({ ...filter, limit: 100000 });
+  const directory = directoryForProfileRows(cases.map((c) => ({ subjectId: c.employeeId })), webChartEnv);
+  const profileMatch = profileSubjectMatcher(directory.employeeById);
+  cases = cases.filter((c) => profileMatch(c.employeeId));
   // caseIds + site aren't SQL-filterable here (site lives in the directory), so apply them in-app.
   if (filter.caseIds?.length) {
     const wanted = new Set(filter.caseIds);
@@ -179,11 +237,11 @@ export async function casesCsv(caseStore: CaseStore, eventStore: CaseEventStore,
   }
   if (filter.site) {
     const site = filter.site.toLowerCase();
-    cases = cases.filter((c) => (employeeById(c.employeeId)?.site ?? "").toLowerCase() === site);
+    cases = cases.filter((c) => (directory.employeeById(c.employeeId)?.site ?? "").toLowerCase() === site);
   }
   const rows = await Promise.all(
     cases.map(async (c) => {
-      const emp = employeeById(c.employeeId);
+      const emp = directory.employeeById(c.employeeId);
       const latest = await eventStore.latestOutreachDeliveryStatus(c.id);
       return [
         c.id, c.employeeId, emp?.name ?? c.employeeId, emp?.role ?? "—", emp?.site ?? "—",

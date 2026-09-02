@@ -114,6 +114,12 @@ const RUNNABLE_MEASURE_ID_SET = new Set(RUNNABLE_MEASURE_IDS);
 /** True only when the loaded deployment profile permits this registry measure to run. */
 export const isRunnableMeasure = (measureId: string): boolean => RUNNABLE_MEASURE_ID_SET.has(measureId);
 
+/** True for every subject on the default profile; scoped profiles require a directory match. */
+export const profileSubjectMatcher = (employeeLookup: (externalId: string) => EmployeeProfile | null) =>
+  DEPLOYMENT_PROFILE.id === "default"
+    ? (_subjectId: string) => true
+    : (subjectId: string) => employeeLookup(subjectId) !== null;
+
 /** The configured live WebChart tenant is visible only on the default profile. */
 export const webChartTenant = (env: DataSourceEnv): Tenant | null =>
   DEPLOYMENT_PROFILE.id === "default" ? rawWebChartTenant(env) : null;

@@ -41,6 +41,7 @@ export function IndividualComplianceStatus({
   const canRecalc = canRunMeasures(user?.role);
 
   const [rows, setRows] = useState<Row[]>([]);
+  const [emptyPanels, setEmptyPanels] = useState(false);
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const [recalcBusy, setRecalcBusy] = useState(false);
@@ -61,6 +62,12 @@ export function IndividualComplianceStatus({
       // one bad panel never blanks the card
     }
 
+    if (firstRoster?.availablePanels && firstRoster.availablePanels.length === 0) {
+      setEmptyPanels(true);
+      setRows([]);
+      setLoading(false);
+      return;
+    }
     // Determine remaining panels to fetch: if availablePanels is provided, query only available
     // panels that were not already served by the initial request; otherwise fallback for older backends.
     let remainingPanels: PanelId[];
@@ -87,6 +94,13 @@ export function IndividualComplianceStatus({
     );
 
     const allResults = [firstRoster, ...remainingResults];
+    if (allResults.some((roster) => roster?.availablePanels?.length === 0)) {
+      setEmptyPanels(true);
+      setRows([]);
+      setLoading(false);
+      return;
+    }
+    setEmptyPanels(false);
     const merged: Row[] = [];
     const seen = new Set<string>();
     for (const roster of allResults) {
@@ -187,6 +201,8 @@ export function IndividualComplianceStatus({
 
       {loading ? (
         <p className="text-sm text-neutral-500 dark:text-neutral-400">Loading compliance…</p>
+      ) : emptyPanels ? (
+        <p className="text-sm text-neutral-500 dark:text-neutral-400">No compliance panel is configured for this deployment.</p>
       ) : rows.length === 0 ? (
         <p className="text-sm text-neutral-500 dark:text-neutral-400">No evaluated measures for this {SUBJECT.singular} yet.</p>
       ) : (

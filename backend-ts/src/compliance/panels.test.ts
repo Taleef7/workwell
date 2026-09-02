@@ -1,24 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { PANELS, DEFAULT_PANEL, isPanelId, AVAILABLE_PANELS, PROFILE_DEFAULT_PANEL, RUNNABLE_PANELS } from "./panels.ts";
-import { spawnSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
-import { dirname, resolve } from "node:path";
-
-const backendRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
-
-function runProfileChild(instance: string | undefined, source: string): Record<string, unknown> {
-  const env = { ...process.env };
-  if (instance === undefined) delete env.WORKWELL_INSTANCE;
-  else env.WORKWELL_INSTANCE = instance;
-  const result = spawnSync(
-    process.execPath,
-    ["--import", "tsx", "--input-type=module", "-e", source],
-    { cwd: backendRoot, env, encoding: "utf8" },
-  );
-  assert.equal(result.status, 0, result.stderr);
-  return JSON.parse(result.stdout.trim()) as Record<string, unknown>;
-}
+import { runProfileChild } from "../test-support/run-profile-child.ts";
 
 test("panels expose the three column sets and a default", () => {
   assert.deepEqual(Object.keys(PANELS).sort(), ["immunizations", "osha", "wellness"]);
@@ -158,6 +141,7 @@ test("MM-1 shape: a profile whose runnable measures belong to no panel serves ze
   // The pairing is what matters: a served panel absent from availablePanels must carry NO columns, so a
   // client can never render a populated grid for a panel it was told is unavailable.
   assert.deepEqual(output.availablePanels, []);
+  assert.match(String(output.stderr), /No roster panel has a runnable/, "startup warning must be returned from the profile child");
   assert.equal(output.defaultPanel, "immunizations");
   assert.equal(output.servedPanel, "immunizations");
   assert.deepEqual(output.columns, []);

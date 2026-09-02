@@ -411,4 +411,22 @@ describe("CompliancePage", () => {
       });
     });
   });
+
+  it("renders deployment empty-panels state when availablePanels is empty", async () => {
+    getWithHeaders.mockReset().mockResolvedValue({
+      data: {
+        panel: "immunizations",
+        availablePanels: [],
+        columns: [],
+        rows: [],
+      },
+      headers: new Headers({ "X-Total-Count": "0" }),
+    });
+
+    render(<CompliancePage />);
+    expect(
+      await screen.findByText("No compliance panel is configured for this deployment.")
+    ).toBeInTheDocument();
+    expect(screen.queryByLabelText(/Panel/i)).not.toBeInTheDocument();
+  });
 });

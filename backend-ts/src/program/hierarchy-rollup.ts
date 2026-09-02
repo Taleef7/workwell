@@ -14,7 +14,7 @@ import type { OutcomeStore, OutcomeWithRun, ScaleGroupCount } from "../stores/ou
 import type { CaseStore } from "../stores/case-store.ts";
 import type { RunStore } from "../stores/run-store.ts";
 import { directoryForRows } from "../engine/ingress/webchart/live-directory.ts";
-import { DIRECTORY } from "../config/deployment-profile.ts";
+import { DEPLOYMENT_PROFILE, DIRECTORY, isRunnableMeasure, profileSubjectMatcher, type EmployeeProfile } from "../config/deployment-profile.ts";
 import { isWebChartConfigured, type DataSourceEnv } from "../engine/ingress/data-source.ts";
 import { MEASURE_CATALOG } from "../measure/measure-catalog.ts";
 import { ACTIVE_CASE_STATUSES } from "../case/case-logic.ts";
@@ -87,22 +87,29 @@ export async function buildHierarchyRollup(deps: HierarchyDeps, filters: Hierarc
   const to = filters.to?.trim() || undefined;
   const measureId = filters.measureId?.trim() || null;
 
-  const active = MEASURE_CATALOG.filter((m) => m.status === "Active").map((m) => m.id);
+  const active = MEASURE_CATALOG.filter((m) => m.status === "Active" && isRunnableMeasure(m.id)).map((m) => m.id);
   const scopeMeasures = measureId ? (active.includes(measureId) ? [measureId] : []) : active;
 
   // Build exactly one request-local directory view from the persisted latest population rows.
   // This rehydrates unknown wc subjects after a worker restart while keeping the static seam-off
   // lookup functions byte-identical.
   const allRows = scopeMeasures.length > 0
-    ? (await deps.outcomeStore.listLatestPopulationOutcomes({ from, to, excludeScale: true, excludeTrendHistory: true })).filter(
+    ? (DEPLOYMENT_PROFILE.id === "default"
+      ? await deps.outcomeStore.listLatestPopulationOutcomes({ from, to, excludeScale: true, excludeTrendHistory: true })
+      : await deps.outcomeStore.listOutcomesWithRun({ from, to, excludeScale: true, excludeTrendHistory: true })).filter(
         (r) => isPopulationRun(r.runScopeType) && isCompletedRun(r.runStatus) && r.runTriggeredBy !== SCALE_TRIGGER,
       )
     : [];
-  const directory = directoryForRows(allRows, isWebChartConfigured(deps.webChartEnv ?? {}), deps.webChartEnv, DIRECTORY);
+  const webChartConfigured = isWebChartConfigured(deps.webChartEnv ?? {});
+  const directory = directoryForRows(allRows, webChartConfigured, deps.webChartEnv, DIRECTORY);
+  const profileMatch = profileSubjectMatcher(directory.employeeById);
+  const subjectVisible = (subjectId: string): boolean => webChartConfigured || !subjectId.startsWith("wc|");
 
   const byPatient = new Map<string, MutableTotals>();
   const ensure = (subjectId: string): MutableTotals | null => {
-    if (!directory.employeeById(subjectId)) return null;
+    // Unchanged from before the profile work: a subject that does not resolve in the (request-local,
+    // profile-scoped) directory has no node on ANY profile — never a fabricated "unknown" tenant.
+    if (!subjectVisible(subjectId) || !directory.employeeById(subjectId)) return null;
     return byPatient.get(subjectId) ?? byPatient.set(subjectId, zero()).get(subjectId)!;
   };
 
@@ -115,7 +122,10 @@ export async function buildHierarchyRollup(deps: HierarchyDeps, filters: Hierarc
     // gone. The JS filter + per-measure `latestRunRows` stay as defense-in-depth and a passthrough —
     // the store-contract asserts this returns exactly the pre-reduction path's result set.
     const byMeasure = new Map<string, OutcomeWithRun[]>();
-    for (const r of allRows) (byMeasure.get(r.measureId) ?? byMeasure.set(r.measureId, []).get(r.measureId)!).push(r);
+    for (const r of allRows) {
+      if (!profileMatch(r.subjectId)) continue;
+      (byMeasure.get(r.measureId) ?? byMeasure.set(r.measureId, []).get(r.measureId)!).push(r);
+    }
     for (const m of scopeMeasures) {
       for (const r of latestRunRows(byMeasure.get(m) ?? [])) {
         const acc = ensure(r.subjectId);
@@ -124,6 +134,7 @@ export async function buildHierarchyRollup(deps: HierarchyDeps, filters: Hierarc
     }
     const openCases = await deps.caseStore.listCases({ statuses: [...ACTIVE_CASE_STATUSES], measureId: measureId ?? undefined, limit: 100000 });
     for (const c of openCases) {
+      if (DEPLOYMENT_PROFILE.id !== "default" && !scopeMeasures.includes(c.measureId)) continue;
       if (from && day(c.createdAt) < day(from)) continue;
       if (to && day(c.createdAt) > day(to)) continue;
       const acc = ensure(c.employeeId);
@@ -143,7 +154,8 @@ export async function buildHierarchyRollup(deps: HierarchyDeps, filters: Hierarc
 
   for (const [subjectId, t] of byPatient) {
     if (t.evaluated === 0 && t.openCases === 0) continue;
-    const emp = directory.employeeById(subjectId)!;
+    const emp: EmployeeProfile | null = directory.employeeById(subjectId);
+    if (!emp) continue;
     if (tenantFilter && emp.tenantId !== tenantFilter) continue;
     const prov = directory.providerById(emp.providerId);
     const location = prov?.location ?? "Unknown";
@@ -207,7 +219,7 @@ export async function buildHierarchyRollup(deps: HierarchyDeps, filters: Hierarc
   let scaleNode: HierarchyNode | null = null;
   if (deps.runStore && (!tenantFilter || tenantFilter === SCALE_TENANT.id)) {
     const scaleRuns = (await deps.runStore.listRuns(100_000))
-      .filter((r) => r.triggeredBy === SCALE_TRIGGER && r.status === "COMPLETED")
+      .filter((r) => r.triggeredBy === SCALE_TRIGGER && r.status === "COMPLETED" && DEPLOYMENT_PROFILE.id === "default")
       // Honor the date window: skip scale runs seeded outside the requested [from, to] period so
       // a date-filtered rollup doesn't silently include the full 120k mhn population when it
       // shouldn't (the live branch already filters live outcomes by the same window).

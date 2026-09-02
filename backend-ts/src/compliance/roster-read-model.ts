@@ -10,13 +10,12 @@ import { isDemoPersona } from "../engine/synthetic/employee-catalog.ts";
 import { directoryForRows } from "../engine/ingress/webchart/live-directory.ts";
 import { DIRECTORY, isRunnableMeasure } from "../config/deployment-profile.ts";
 import { isWebChartConfigured, type DataSourceEnv } from "../engine/ingress/data-source.ts";
-import { MEASURE_CATALOG } from "../measure/measure-catalog.ts";
 import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { isCompletedRun, isPopulationRun, latestRunRows } from "../program/rollup-shared.ts";
 import { isApplicable, matchesCohort } from "../segment/segment-applicability.ts";
 import type { HydratedSegment } from "../stores/segment-store.ts";
-import { isPanelId, AVAILABLE_PANELS, PROFILE_DEFAULT_PANEL, RUNNABLE_PANELS, type PanelId } from "./panels.ts";
+import { isPanelId, ACTIVE_CATALOG_MEASURE_IDS, AVAILABLE_PANELS, PROFILE_DEFAULT_PANEL, RUNNABLE_PANELS, type PanelId } from "./panels.ts";
 import { deriveCell, type Cell } from "./roster-vocabulary.ts";
 
 export interface RosterColumn {
@@ -83,8 +82,6 @@ export interface RosterFilters {
 export async function buildRoster(deps: RosterDeps, filters: RosterFilters): Promise<Roster> {
   const requestedPanel: PanelId = filters.panel && isPanelId(filters.panel) ? filters.panel : PROFILE_DEFAULT_PANEL;
   const panel: PanelId = AVAILABLE_PANELS.includes(requestedPanel) ? requestedPanel : PROFILE_DEFAULT_PANEL;
-  const active = new Set(MEASURE_CATALOG.filter((m) => m.status === "Active").map((m) => m.id));
-
   // E11.3 segments: an active `segment` filter scopes columns to that segment's rule-set (∩ Active);
   // otherwise columns are the panel set. `segments` (the configured set) drives the N/A overlay below.
   const segments = deps.segments ?? [];
@@ -93,8 +90,8 @@ export async function buildRoster(deps: RosterDeps, filters: RosterFilters): Pro
   // overlay below only counts enabled segments). Keeps the filter consistent with applicability.
   const activeSegment = filters.segment ? segments.find((s) => s.id === filters.segment && s.enabled) ?? null : null;
   const measureIds = activeSegment
-    ? activeSegment.measureIds.filter((m) => active.has(m) && isRunnableMeasure(m))
-    : (RUNNABLE_PANELS[panel] ?? []);
+    ? activeSegment.measureIds.filter((m) => ACTIVE_CATALOG_MEASURE_IDS.has(m) && isRunnableMeasure(m))
+    : RUNNABLE_PANELS[panel];
   const columns: RosterColumn[] = measureIds.map((id) => ({
     measureId: id,
     name: MEASURES[id]?.name ?? id,

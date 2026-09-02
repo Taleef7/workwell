@@ -17,12 +17,13 @@ export const DEFAULT_PANEL: PanelId = "immunizations";
 
 export const isPanelId = (s: string): s is PanelId => Object.prototype.hasOwnProperty.call(PANELS, s);
 
-const activeCatalogMeasures = new Set(
+// Safe as a module-level snapshot because the measure catalog is a compile-time constant.
+export const ACTIVE_CATALOG_MEASURE_IDS = new Set(
   MEASURE_CATALOG.filter((m) => m.status === "Active").map((m) => m.id),
 );
 
 const isCatalogActiveRunnable = (measureId: string): boolean =>
-  activeCatalogMeasures.has(measureId) && isRunnableMeasure(measureId);
+  ACTIVE_CATALOG_MEASURE_IDS.has(measureId) && isRunnableMeasure(measureId);
 
 export const RUNNABLE_PANELS: Record<PanelId, string[]> = Object.fromEntries(
   (Object.keys(PANELS) as PanelId[]).map((id) => [id, PANELS[id].filter(isCatalogActiveRunnable)]),

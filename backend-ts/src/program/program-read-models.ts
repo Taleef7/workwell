@@ -18,7 +18,7 @@ import { ACTIVE_CASE_STATUSES } from "../case/case-logic.ts";
 import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
 import { day, isCompletedRun, isPopulationRun, round1 } from "./rollup-shared.ts";
 import { directoryForRows, type DirectorySnapshot } from "../engine/ingress/webchart/live-directory.ts";
-import { DEPLOYMENT_PROFILE, DIRECTORY, tenantById } from "../config/deployment-profile.ts";
+import { DEPLOYMENT_PROFILE, DIRECTORY, isRunnableMeasure, profileSubjectMatcher, tenantById } from "../config/deployment-profile.ts";
 import { isWebChartConfigured, type DataSourceEnv } from "../engine/ingress/data-source.ts";
 
 export interface ProgramSummary {
@@ -164,10 +164,19 @@ export function listSites(employees: readonly EmployeeProfile[] = EMPLOYEES): st
 
 /** Distinct sites from one restart-safe snapshot of the latest successful population rows. */
 export async function programSites(deps: Pick<ProgramDeps, "outcomeStore" | "webChartEnv">): Promise<string[]> {
-  const rows = (await deps.outcomeStore.listLatestPopulationOutcomes({ excludeScale: true, excludeTrendHistory: true })).filter(
+  const sourceRows = DEPLOYMENT_PROFILE.id === "default"
+    ? await deps.outcomeStore.listLatestPopulationOutcomes({ excludeScale: true, excludeTrendHistory: true })
+    : await deps.outcomeStore.listOutcomesWithRun({ excludeScale: true, excludeTrendHistory: true });
+  const rows = sourceRows.filter(
     (row) => isPopulationRun(row.runScopeType) && isCompletedRun(row.runStatus) && row.runTriggeredBy !== "seed:scale",
   );
-  return listSites(directoryForRows(rows, isWebChartConfigured(deps.webChartEnv ?? {}), deps.webChartEnv, DIRECTORY).employees);
+  const webChartConfigured = isWebChartConfigured(deps.webChartEnv ?? {});
+  const directory = directoryForRows(rows, webChartConfigured, deps.webChartEnv, DIRECTORY);
+  if (DEPLOYMENT_PROFILE.id === "default") return listSites(directory.employees);
+  const profileMatch = profileSubjectMatcher(directory.employeeById);
+  const visibleRows = rows.filter((row) => subjectVisible(row.subjectId, webChartConfigured) && profileMatch(row.subjectId));
+  const employees = visibleRows.map((r) => directory.employeeById(r.subjectId)).filter((e): e is EmployeeProfile => e !== null);
+  return listSites(employees);
 }
 
 /** One run's site-filtered outcome rows (the unit overview/trend/top-drivers aggregate). */
@@ -205,11 +214,6 @@ const tenantMatcher = (filters: ProgramFilters, employeeLookup = employeeById) =
  * non-catalog subjects (notably QRDA Category I imports keyed by Cypress MRNs), which must not be
  * silently dropped from /api/programs.
  */
-const profileMatcher = (employeeLookup: (id: string) => EmployeeProfile | null) => {
-  if (DEPLOYMENT_PROFILE.id === "default") return (_subjectId: string) => true;
-  return (subjectId: string) => employeeLookup(subjectId) !== null;
-};
-
 /** Hide only live-tenant ids when the existing runtime seam is off; all non-wc legacy behavior stays unchanged. */
 const subjectVisible = (subjectId: string, webChartConfigured: boolean): boolean =>
   webChartConfigured || !subjectId.startsWith("wc|");
@@ -238,7 +242,7 @@ export async function programOverview(deps: ProgramDeps, filters: ProgramFilters
   const directory = directoryForRows(successfulRows, webChartConfigured, deps.webChartEnv, DIRECTORY);
   const siteMatch = siteMatcher(filters, directory.employeeById);
   const tenantMatch = tenantMatcher(filters, directory.employeeById);
-  const profileMatch = profileMatcher(directory.employeeById);
+  const profileMatch = profileSubjectMatcher(directory.employeeById);
   const rows = successfulRows.filter(
     (row) =>
       subjectVisible(row.subjectId, webChartConfigured) &&
@@ -250,7 +254,7 @@ export async function programOverview(deps: ProgramDeps, filters: ProgramFilters
   for (const r of rows) (byMeasure.get(r.measureId) ?? byMeasure.set(r.measureId, []).get(r.measureId)!).push(r);
   const cases = await deps.caseStore.listCases({ limit: 100000 });
 
-  const active = MEASURE_CATALOG.filter((m) => m.status === "Active");
+  const active = MEASURE_CATALOG.filter((m) => m.status === "Active" && isRunnableMeasure(m.id));
   const summaries = active.map((m): ProgramSummary => {
     const groups = groupByRun(byMeasure.get(m.id) ?? []);
     const best = groups.length ? groups.reduce((a, b) => (b.runStartedAt > a.runStartedAt ? b : a)) : null;
@@ -366,7 +370,7 @@ async function runsWithOutcomes(
   const directory = directoryForRows(successfulRows, webChartConfigured, deps.webChartEnv, DIRECTORY);
   const siteMatch = siteMatcher(filters, directory.employeeById);
   const tenantMatch = tenantMatcher(filters, directory.employeeById);
-  const profileMatch = profileMatcher(directory.employeeById);
+  const profileMatch = profileSubjectMatcher(directory.employeeById);
   const rows = successfulRows.filter(
     (row) =>
       subjectVisible(row.subjectId, webChartConfigured) &&
@@ -559,7 +563,7 @@ export async function programRiskOutlook(
   const webChartConfigured = isWebChartConfigured(deps.webChartEnv ?? {});
   const directory = directoryForRows(rows, webChartConfigured, deps.webChartEnv, DIRECTORY);
   // Isolate data on scoped profiles (e.g. Maui) — missed in initial profileMatcher rollout.
-  const profileMatch = profileMatcher(directory.employeeById);
+  const profileMatch = profileSubjectMatcher(directory.employeeById);
   const visibleRows = rows.filter(
     (row) => subjectVisible(row.subjectId, webChartConfigured) && profileMatch(row.subjectId),
   );

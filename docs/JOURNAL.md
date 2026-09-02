@@ -1,5 +1,50 @@
 # Journal
 
+## 2026-09-01 (night) — #501: the Maui profile stops leaking foreign rows on every surface, and lists only measures it can run
+
+**One predicate, shared, gated, injected.** `profileSubjectMatcher(lookup)` now lives in
+`backend-ts/src/config/deployment-profile.ts` beside `isRunnableMeasure`: a subject must resolve in the
+*injected* directory to appear, and on the default profile the predicate is a no-op by construction —
+a TWH database legitimately holds subjects absent from the synthetic catalog (QRDA Category I imports
+keyed by Cypress MRNs), and an ungated filter would silently drop them. Every surface the #500 review
+named applies it before aggregation, paging and totals: the outcomes and cases CSVs, `/api/cases` and
+`/api/cases/:id`, the run-outcome rows (including `X-Total-Count`), the MCP tools (`list_cases`,
+`list_noncompliant`, `get_case`, `explain_outcome`, `check_compliance`), the programs site list, and
+the orders route. The programs overview, the hierarchy rollup (both the live path and the scale path),
+the orders route and MCP `list_measures` enumerate the profile's runnable set instead of the whole
+catalog. Latest-run selection on a scoped profile happens *after* the predicate, so a newer run holding
+only foreign subjects no longer hides the visible ones.
+
+**Every surface carries a pair of tests**: a Maui test that fails on `main` (a foreign subject id
+reaching the client, or a non-runnable measure in the list) and a default-profile companion asserting
+an *unresolvable* subject is still included. The profile is selected by spawning a child per profile
+(`backend-ts/src/test-support/run-profile-child.ts`), so the module-level profile cache cannot leak
+between test files.
+
+**Review found a default-profile regression before it shipped.** The first cut derived the programs
+site list from evaluated rows on every profile; TWH would have lost sites whose staff had never been
+evaluated. It is restored to the pre-change behaviour on default and asserted against the full site
+list. Two reviewers (cross-model and independent) found disjoint sets again: one the site regression
+and the six duplicated matchers, the other the unscoped hierarchy scale path, latest-run ordering, and
+the MCP measure list.
+
+**Frontend:** when a deployment leaves no panel runnable, the roster and the per-patient card now say
+"No compliance panel is configured for this deployment." instead of an empty select or a claim about
+the patient — on any panel response, not only the first.
+
+**One intentional default-visible change:** MCP `get_case` and `explain_outcome` now return the coded
+`CASE_NOT_FOUND` safe-error payload for an unknown id instead of throwing `ToolArgError`, as documented
+in `docs/MCP.md`.
+
+**Deliberately still open from #501:** the auditor run packet and CASE packet (`backend-ts/src/audit/audit-packet.ts`,
+served by `routes/auditor.ts`) still emit unscoped outcome rows on a scoped profile — downloadable
+artifacts, so they are filed as a follow-up rather than left silent; the run summaries (runs CSV
+`export-csv.ts`, `/api/runs`, and MCP run summaries in `tools.ts`) still use raw
+`countOutcomesByStatus`; `segment-seed.ts` (its site list is load-bearing for Maui applicability and
+needs that path checked first), and the 100k store caps that precede profile filtering in the CSV, MCP,
+programs and hierarchy readers are also known limits tracked in #508, because a Maui database holds
+no foreign rows today.
+
 ## 2026-09-01 (night) — MM-0's last task lands in #505, and the Maui sandbox is live for the first time
 
 **The Maui sandbox had never been deployed.** `deploy-maui-mieweb.yml` is dispatch-only and had zero runs;

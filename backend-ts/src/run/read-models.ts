@@ -16,7 +16,7 @@
 import type { RunRecord, RunLogRow } from "../stores/run-store.ts";
 import type { OutcomeRecord, OutcomeStatusCount } from "../stores/outcome-store.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
-import { employeeById } from "../config/deployment-profile.ts";
+import { employeeById, profileSubjectMatcher } from "../config/deployment-profile.ts";
 
 export interface RunListItem {
   runId: string;
@@ -197,8 +197,8 @@ function waiverStatus(evidence: unknown): string | null {
   return e && typeof e.result === "boolean" ? (e.result ? "active" : "none") : null;
 }
 
-export function toRunOutcomeRow(outcome: OutcomeRecord): RunOutcomeRow {
-  const emp = employeeById(outcome.subjectId); // null → degrade gracefully, never throw
+export function toRunOutcomeRow(outcome: OutcomeRecord, employeeLookup = employeeById): RunOutcomeRow {
+  const emp = employeeLookup(outcome.subjectId); // null → degrade gracefully, never throw
   return {
     employeeName: emp?.name ?? outcome.subjectId,
     employeeExternalId: outcome.subjectId,
@@ -212,8 +212,12 @@ export function toRunOutcomeRow(outcome: OutcomeRecord): RunOutcomeRow {
 }
 
 /** Outcome rows for a run, sorted by employee name (matches the Java ORDER BY e.name). */
-export function toRunOutcomeRows(outcomes: OutcomeRecord[]): RunOutcomeRow[] {
-  return outcomes.map(toRunOutcomeRow).sort((a, b) => a.employeeName.localeCompare(b.employeeName));
+export function toRunOutcomeRows(outcomes: OutcomeRecord[], employeeLookup = employeeById): RunOutcomeRow[] {
+  const profileMatch = profileSubjectMatcher(employeeLookup);
+  return outcomes
+    .filter((o) => profileMatch(o.subjectId))
+    .map((o) => toRunOutcomeRow(o, employeeLookup))
+    .sort((a, b) => a.employeeName.localeCompare(b.employeeName));
 }
 
 /** `/api/runs` list filters (the params the Runs page sends). All optional/AND-ed. */

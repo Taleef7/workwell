@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
+import { runProfileChild } from "../test-support/run-profile-child.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
 import {
@@ -29,19 +30,6 @@ import {
 import * as deploymentProfile from "./deployment-profile.ts";
 
 const backendRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
-
-function runProfileChild(instance: string | undefined, source: string): Record<string, unknown> {
-  const env = { ...process.env };
-  if (instance === undefined) delete env.WORKWELL_INSTANCE;
-  else env.WORKWELL_INSTANCE = instance;
-  const result = spawnSync(
-    process.execPath,
-    ["--import", "tsx", "--input-type=module", "-e", source],
-    { cwd: backendRoot, env, encoding: "utf8" },
-  );
-  assert.equal(result.status, 0, result.stderr);
-  return JSON.parse(result.stdout.trim()) as Record<string, unknown>;
-}
 
 test("resolveDeploymentProfile is pure, normalized, and defaults safely", () => {
   assert.deepEqual(resolveDeploymentProfile(undefined), resolveDeploymentProfile(""));
@@ -110,6 +98,32 @@ test("the loaded default module exports the default scoped directory and measure
   assert.equal(isRunnableMeasure("hazwoper"), true);
   assert.equal(employeeById("pat-001")?.tenantId, "maui");
   assert.equal(providerById("maui-prov-001")?.tenantId, "maui");
+});
+
+test("profileSubjectMatcher is a no-op on default and resolves only the active profile", () => {
+  const output = runProfileChild("maui", `
+    import * as profile from "./src/config/deployment-profile.ts";
+    const matcher = profile.profileSubjectMatcher;
+    console.log(JSON.stringify({
+      type: typeof matcher,
+      pat: typeof matcher === "function" ? matcher(profile.employeeById)("pat-001") : null,
+      foreign: typeof matcher === "function" ? matcher(profile.employeeById)("emp-001") : null,
+    }));
+  `);
+  assert.equal(output.type, "function");
+  assert.equal(output.pat, true);
+  assert.equal(output.foreign, false);
+
+  const defaultOutput = runProfileChild(undefined, `
+    import * as profile from "./src/config/deployment-profile.ts";
+    const matcher = profile.profileSubjectMatcher;
+    console.log(JSON.stringify({
+      type: typeof matcher,
+      unknown: typeof matcher === "function" ? matcher(profile.employeeById)("cypress-mrn-foreign") : null,
+    }));
+  `);
+  assert.equal(defaultOutput.type, "function");
+  assert.equal(defaultOutput.unknown, true);
 });
 
 test("runnable measure validation fails clearly when an id is absent from the registries", () => {

@@ -4,6 +4,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { runProfileChild } from "../test-support/run-profile-child.ts";
 import { toRunListItem, toRunSummary, toRunListItemFromCounts, toRunSummaryFromCounts, toRunLogEntries, matchesRunFilters, toRunOutcomeRows } from "./read-models.ts";
 import type { RunRecord } from "../stores/run-store.ts";
 import type { OutcomeRecord, OutcomeStatusCount } from "../stores/outcome-store.ts";
@@ -22,7 +23,6 @@ const run = (over: Partial<RunRecord> = {}): RunRecord => ({
   measurementPeriodEnd: "2026-06-13T00:00:00.000Z",
   ...over,
 });
-
 const outcome = (status: string, evaluatedAt: string): OutcomeRecord => ({
   id: crypto.randomUUID(),
   runId: "run-1",
@@ -33,7 +33,6 @@ const outcome = (status: string, evaluatedAt: string): OutcomeRecord => ({
   evidence: {},
   evaluatedAt,
 });
-
 const sample: OutcomeRecord[] = [
   outcome("COMPLIANT", "2026-06-13T10:00:01.000Z"),
   outcome("COMPLIANT", "2026-06-13T10:00:02.000Z"),
@@ -199,4 +198,85 @@ test("toRunLogEntries maps the store row (ts) to the frontend shape (timestamp)"
   assert.deepEqual(toRunLogEntries([{ ts: "2026-06-13T10:00:00.000Z", level: "INFO", message: "started" }]), [
     { timestamp: "2026-06-13T10:00:00.000Z", level: "INFO", message: "started" },
   ]);
+});
+
+const outcomeRowsScript = `
+  import { toRunOutcomeRows } from "./src/run/read-models.ts";
+
+  const rows = [
+    {
+      id: "out-1",
+      runId: "run-1",
+      subjectId: "pat-001",
+      measureId: "cms122",
+      evaluationPeriod: "2026-01-01",
+      status: "COMPLIANT",
+      evidence: {},
+      evaluatedAt: "2026-07-17T00:00:00.000Z",
+    },
+    {
+      id: "out-2",
+      runId: "run-1",
+      subjectId: "emp-001",
+      measureId: "cms122",
+      evaluationPeriod: "2026-01-01",
+      status: "OVERDUE",
+      evidence: {},
+      evaluatedAt: "2026-07-17T00:00:00.000Z",
+    },
+    {
+      id: "out-live",
+      runId: "run-1",
+      subjectId: "wc|live-run-subject",
+      measureId: "cms122",
+      evaluationPeriod: "2026-01-01",
+      status: "COMPLIANT",
+      evidence: {},
+      evaluatedAt: "2026-07-17T00:00:00.000Z",
+    },
+    {
+      id: "out-3",
+      runId: "run-1",
+      subjectId: "cypress-mrn-foreign",
+      measureId: "cms122",
+      evaluationPeriod: "2026-01-01",
+      status: "COMPLIANT",
+      evidence: {},
+      evaluatedAt: "2026-07-17T00:00:00.000Z",
+    },
+  ];
+
+  const { directoryForRows } = await import("./src/engine/ingress/webchart/live-directory.ts");
+  const { DIRECTORY } = await import("./src/config/deployment-profile.ts");
+  const liveDirectory = directoryForRows(rows, true, {
+    WORKWELL_WEBCHART_BASE_URL: "http://webchart.test",
+    WORKWELL_WEBCHART_API_KEY: "fixture-key",
+  }, DIRECTORY);
+  const result = toRunOutcomeRows(rows, liveDirectory.employeeById);
+  console.log(JSON.stringify({
+    subjectIds: result.map(r => r.employeeExternalId),
+    names: result.map(r => r.employeeName),
+  }));
+`;
+
+test("scoped profile (Maui) — toRunOutcomeRows excludes foreign and unresolvable subjects", () => {
+  const output = runProfileChild("maui", outcomeRowsScript);
+  const subjectIds = output.subjectIds as string[];
+  const names = output.names as string[];
+
+  assert.ok(subjectIds.includes("pat-001"), "pat-001 must be present in run outcome rows on Maui");
+  assert.ok(subjectIds.includes("wc|live-run-subject"), "live wc subject must be present when resolved by the injected directory");
+  assert.ok(!subjectIds.includes("emp-001"), "emp-001 must be excluded from run outcome rows on Maui");
+  assert.ok(!subjectIds.includes("cypress-mrn-foreign"), "unresolvable subject must be excluded from run outcome rows on Maui");
+  assert.ok(!names.includes("cypress-mrn-foreign"), "unresolvable subject ID must never appear as employeeName on Maui");
+  assert.ok(names.includes("live-run-subject"), "live wc name must come from the injected directory");
+});
+
+test("default profile — toRunOutcomeRows preserves unresolvable and foreign subjects", () => {
+  const output = runProfileChild(undefined, outcomeRowsScript);
+  const subjectIds = output.subjectIds as string[];
+
+  assert.ok(subjectIds.includes("pat-001"), "pat-001 present on default profile");
+  assert.ok(subjectIds.includes("emp-001"), "emp-001 present on default profile");
+  assert.ok(subjectIds.includes("cypress-mrn-foreign"), "cypress-mrn-foreign present on default profile");
 });
