@@ -553,7 +553,10 @@ jobs:
     # than on a developer box because Chromium + two dev servers + a test worker exhaust a Windows
     # desktop heap long before they exhaust RAM (measured 2026-09-02).
     steps:
+      # backend-ts consumes @mieweb/cloud + @mieweb/cli from the external/mieweb-cloud submodule.
       - uses: actions/checkout@v7
+        with:
+          submodules: recursive
       - uses: pnpm/action-setup@v6
         with:
           version: 10.17.1
