@@ -242,7 +242,7 @@ Two CMS eCQM measures promoted from Draft catalog to Active with full CQL evalua
 
 > **MIPS↔CMS crosswalk in the UI (2026-09-01, MM-0 Task 4).** Every CMS catalog row carries a structured
 > identity — `{cmsId, mipsQualityId}` in `backend-ts/src/measure/measure-identity.ts`, served as `identity`
-> on `GET /api/measures` — and the product renders it wherever a measure is named: the catalog's Identity
+> on `GET /api/measures` — and the product renders it on the surfaces a quality user works from: the catalog's Identity
 > column, case detail, the cases work list, the roster column headers and mobile cards, the patient
 > profile, and the programs pages read "MIPS 112 · CMS125 · Breast
 > Cancer Screening". A drift test ties each entry to the MIPS text in the catalog row so the two cannot

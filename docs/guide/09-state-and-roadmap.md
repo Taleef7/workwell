@@ -117,7 +117,7 @@ owner-locked decisions constraining it are in `docs/LOCKED_DECISIONS.md` §4 and
 1. **The Maui pilot (M-M).** A patient-driven sandbox deployment for a primary-care group entering
    an MSSP ACO (PY2027). Cheap-first: MM-0 (second deployment, "patient" terminology as config,
    clickable status-chip drill-downs, primary-care synthetic roster, MIPS↔CMS crosswalk in the UI —
-   **all shipped by 2026-09-01**, the crosswalk last, and the Maui sandbox is live)
+   **all landed by 2026-09-01** — the crosswalk last, in #505 — and the Maui sandbox is live)
    → MM-1 (official-only measure onboarding for CMS2/CMS130/CMS165 — gated ≠ routable ≠ runnable —
    per-measure gated flips, the PY2027 re-vendor, and CMS137 only if measure 305 survives the CY2027
    final rule) → MM-2 (provider-panel work lists and assignment) → MM-3 (cards that resolve: order

@@ -1,6 +1,6 @@
 # Journal
 
-## 2026-09-01 (night) — MM-0 actually closes: the crosswalk ships, and the Maui sandbox is live for the first time
+## 2026-09-01 (night) — MM-0's last task lands in #505, and the Maui sandbox is live for the first time
 
 **The Maui sandbox had never been deployed.** `deploy-maui-mieweb.yml` is dispatch-only and had zero runs;
 both Maui hostnames returned 404 while the docs said MM-0 had shipped. Dispatched at 14:40, green at
@@ -13,7 +13,8 @@ inert and only a database delete removes it.
 **MM-0 Task 4 — the MIPS↔CMS crosswalk — was the other unshipped piece.** MIPS ids existed only inside
 catalog description strings. Now `backend-ts/src/measure/measure-identity.ts` is the one source of truth
 (`{cmsId, mipsQualityId}` per catalog row), `GET /api/measures` serves it as `identity`, and the
-frontend's `useMeasureIdentities` hook renders "MIPS 112 · CMS125 · Breast Cancer Screening" on the
+frontend renders "MIPS 112 · CMS125 · Breast Cancer Screening" (the catalog page from the row's own
+`identity`; every other surface through the `useMeasureIdentities` hook) on the
 catalog (an Identity column), case detail, the roster headers and mobile cards, and the programs
 pages including the chip aria-labels. A drift test parses the MIPS text out of every CMS catalog row and
 fails if the map disagrees, has an extra entry, or a CMS row lacks a MIPS mention without a null id —
@@ -25,11 +26,6 @@ drift guard matched only one of the two MIPS text forms in the catalog and that 
 stale-response guard; the second reviewer found case detail keyed the lookup on `measureVersionId`, which
 works only because the read model emits the slug as a stand-in — fixed by adding a real `measureId` to
 `CaseDetail` — plus a test that claimed to assert a dash and did not. Neither reviewer found the other's.
-
-**Operationally, a lesson for the orchestrator file:** resuming a delegate conversation that had grown to
-~1.7M tokens was killed within a minute of start three times in a row; a fresh conversation with the same
-brief ran to completion. And background shell tasks were being stopped mid-lane for a while this evening —
-launching lanes detached via `Start-Process` and watching their output files made them survive.
 
 **MM-1b is planned but not started.** An inventory pass, a drafted plan, and an adversarial spec review (14 findings, two
 critical: CMS130/CMS165 semantics entries were missing from the plan, and pre-flip Maui behaviour was
