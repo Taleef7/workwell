@@ -14,6 +14,7 @@ import { RUN_STORE_FLOOR_DDL } from "../stores/sqlite/schema.ts";
 import { SqliteRunStore } from "../stores/sqlite/run-store-sqlite.ts";
 import { SqliteCaseEventStore } from "../stores/sqlite/case-event-store-sqlite.ts";
 import type { CreateRunInput } from "../stores/run-store.ts";
+import type { AlertChannel, RunAlert } from "./alert-channel.ts";
 import { recoverStuckRuns } from "./recover-stuck-runs.ts";
 
 const sampleRun = (): CreateRunInput => ({
@@ -24,12 +25,21 @@ const sampleRun = (): CreateRunInput => ({
   measurementPeriodEnd: "2026-06-17T00:00:00.000Z",
 });
 
-test("recoverStuckRuns fails stuck RUNNING runs (not QUEUED) AND writes a RUN_RECOVERED audit per run", async () => {
+test("recoverStuckRuns fails stuck RUNNING and unclaimed QUEUED runs AND writes a distinct RUN_RECOVERED audit per run", async () => {
   const dbPath = join(tmpdir(), `workwell-recover-${crypto.randomUUID()}.sqlite`);
   const db = await createSqliteD1(dbPath);
   await db.exec(RUN_STORE_FLOOR_DDL.replace(/\n/g, " "));
   const runs = new SqliteRunStore(db);
   const events = new SqliteCaseEventStore(db);
+  const capturedAlerts: RunAlert[] = [];
+  const alertChannels: AlertChannel[] = [
+    {
+      name: "capturing",
+      async send(alert) {
+        capturedAlerts.push(alert);
+      },
+    },
+  ];
   try {
     const running = await runs.createRun(sampleRun());
     await runs.markRunning(running.id); // QUEUED → RUNNING (the orphaned-async-run case)
@@ -38,25 +48,136 @@ test("recoverStuckRuns fails stuck RUNNING runs (not QUEUED) AND writes a RUN_RE
     await runs.finalizeRun(done.id, "COMPLETED"); // terminal
 
     await new Promise((r) => setTimeout(r, 10)); // ensure started_at precedes the threshold-0 cutoff
-    const recovered = await recoverStuckRuns({ runs, events }, 0);
+    // With olderThanMs = 0 and default queued threshold: only RUNNING is recovered.
+    const recoveredRunning = await recoverStuckRuns({ runs, events, alertChannels }, 0);
 
-    assert.deepEqual(recovered, [running.id], "only the RUNNING run is recovered");
+    assert.deepEqual(
+      recoveredRunning,
+      [{ id: running.id, previousStatus: "RUNNING" }],
+      "only the RUNNING run is recovered when queued threshold is not exceeded",
+    );
     assert.equal((await runs.getRun(running.id))?.status, "FAILED");
-    assert.equal((await runs.getRun(queued.id))?.status, "QUEUED", "QUEUED is left for the claim path");
+    assert.equal((await runs.getRun(queued.id))?.status, "QUEUED", "QUEUED is retained when below queued threshold");
     assert.equal((await runs.getRun(done.id))?.status, "COMPLETED", "terminal run untouched");
 
-    // The recovery is audited (the hard rule). QUEUED + terminal runs get no recovery audit.
-    assert.ok(
-      (await events.auditEventsByRun(running.id)).some((a) => a.eventType === "RUN_RECOVERED"),
-      "the recovered RUNNING run has a RUN_RECOVERED audit event",
+    // With unclaimedQueuedOlderThanMs = 0: unclaimed QUEUED is also recovered.
+    const recoveredQueued = await recoverStuckRuns({ runs, events, alertChannels }, 0, 0);
+    assert.deepEqual(
+      recoveredQueued,
+      [{ id: queued.id, previousStatus: "QUEUED" }],
+      "unclaimed QUEUED run is recovered when exceeding queued threshold",
     );
-    for (const id of [queued.id, done.id]) {
-      assert.equal(
-        (await events.auditEventsByRun(id)).filter((a) => a.eventType === "RUN_RECOVERED").length,
-        0,
-        `run ${id} is not audited as recovered`,
-      );
+    assert.equal((await runs.getRun(queued.id))?.status, "FAILED");
+
+    // Both recoveries are audited with distinct reasons — assert EXACTLY one per recovered run.
+    const runningAudits = (await events.auditEventsByRun(running.id)).filter((a) => a.eventType === "RUN_RECOVERED");
+    const queuedAudits = (await events.auditEventsByRun(queued.id)).filter((a) => a.eventType === "RUN_RECOVERED");
+    const doneAudits = (await events.auditEventsByRun(done.id)).filter((a) => a.eventType === "RUN_RECOVERED");
+
+    assert.equal(runningAudits.length, 1, "exactly one RUN_RECOVERED audit event for RUNNING run");
+    assert.match(
+      (runningAudits[0]!.payload as { reason: string }).reason,
+      /restart/i,
+      "RUNNING recovery reason mentions container restart",
+    );
+
+    assert.equal(queuedAudits.length, 1, "exactly one RUN_RECOVERED audit event for QUEUED run");
+    assert.match(
+      (queuedAudits[0]!.payload as { reason: string }).reason,
+      /queued/i,
+      "QUEUED recovery reason mentions queued / worker timeout",
+    );
+
+    assert.equal(doneAudits.length, 0, `terminal run ${done.id} is not audited as recovered`);
+
+    // Alert assertions: exactly one alert per recovered run distinguishing QUEUED from RUNNING.
+    assert.equal(capturedAlerts.length, 2, "exactly one alert per recovered run");
+    const runningAlerts = capturedAlerts.filter((a) => a.runId === running.id);
+    assert.equal(runningAlerts.length, 1, "exactly one alert for RUNNING run");
+    assert.equal(runningAlerts[0]!.kind, "RUN_RECOVERED");
+    assert.match(runningAlerts[0]!.message, /restart/i, "RUNNING alert message mentions container restart");
+
+    const queuedAlerts = capturedAlerts.filter((a) => a.runId === queued.id);
+    assert.equal(queuedAlerts.length, 1, "exactly one alert for QUEUED run");
+    assert.equal(queuedAlerts[0]!.kind, "RUN_RECOVERED");
+    assert.match(queuedAlerts[0]!.message, /queued/i, "QUEUED alert message mentions queued timeout");
+
+    assert.equal(capturedAlerts.filter((a) => a.runId === done.id).length, 0, "no alert for terminal run");
+  } finally {
+    try {
+      rmSync(dbPath, { force: true });
+    } catch {
+      /* best effort */
     }
+  }
+});
+
+test("recoverStuckRuns continues audit loop if appendAudit fails for a run (best-effort per run)", async () => {
+  // Mutation note: Removing the restoreRecoveredRun compensation call causes run1 to remain FAILED
+  // with completed_at set, leaves run1 in the returned recovered list, and omits the restore mention in its alert.
+  const dbPath = join(tmpdir(), `workwell-recover-${crypto.randomUUID()}.sqlite`);
+  const db = await createSqliteD1(dbPath);
+  await db.exec(RUN_STORE_FLOOR_DDL.replace(/\n/g, " "));
+  const runs = new SqliteRunStore(db);
+  const events = new SqliteCaseEventStore(db);
+  const capturedAlerts: RunAlert[] = [];
+  const alertChannels: AlertChannel[] = [
+    {
+      name: "capturing",
+      async send(alert) {
+        capturedAlerts.push(alert);
+      },
+    },
+  ];
+  try {
+    const run1 = await runs.createRun(sampleRun());
+    await runs.markRunning(run1.id);
+    const run2 = await runs.createRun(sampleRun());
+    await runs.markRunning(run2.id);
+
+    await new Promise((r) => setTimeout(r, 10));
+
+    let auditAttempts = 0;
+    const originalAppendAudit = events.appendAudit.bind(events);
+    events.appendAudit = async (event) => {
+      auditAttempts++;
+      if (auditAttempts === 1) {
+        throw new Error("simulated transient audit DB failure");
+      }
+      return originalAppendAudit(event);
+    };
+
+    const recovered = await recoverStuckRuns({ runs, events, alertChannels }, 0);
+    // run1 audit failed -> compensated with restoreRecoveredRun -> excluded from returned list
+    assert.deepEqual(
+      recovered,
+      [{ id: run2.id, previousStatus: "RUNNING" }],
+      "first run is absent from returned list; only successfully recovered runs returned",
+    );
+
+    // run1 is restored to its previous status (RUNNING) with completed_at null
+    const run1Record = await runs.getRun(run1.id);
+    assert.equal(run1Record?.status, "RUNNING", "first run is back to its previous status");
+    assert.equal(run1Record?.completedAt, null, "first run has completed_at null");
+
+    // run2 is FAILED with completed_at stamped
+    const run2Record = await runs.getRun(run2.id);
+    assert.equal(run2Record?.status, "FAILED", "second run is recovered as FAILED");
+    assert.ok(run2Record?.completedAt, "second run has completed_at set");
+
+    const run1Audits = (await events.auditEventsByRun(run1.id)).filter((a) => a.eventType === "RUN_RECOVERED");
+    const run2Audits = (await events.auditEventsByRun(run2.id)).filter((a) => a.eventType === "RUN_RECOVERED");
+
+    assert.equal(run1Audits.length, 0, "first run audit failed due to simulated error");
+    assert.equal(run2Audits.length, 1, "second run still gets its audit event despite first failure");
+
+    // Alert assertions: run1 alert message mentions the restore
+    const run1Alerts = capturedAlerts.filter((a) => a.runId === run1.id);
+    assert.equal(run1Alerts.length, 1, "first run still emitted an alert");
+    assert.match(run1Alerts[0]!.message, /restore/i, "first run alert message mentions the restore");
+
+    const run2Alerts = capturedAlerts.filter((a) => a.runId === run2.id);
+    assert.equal(run2Alerts.length, 1, "second run emitted normal recovery alert");
   } finally {
     try {
       rmSync(dbPath, { force: true });
@@ -81,7 +202,7 @@ test("Fable M7: a backdated RUNNING seed:scale run is NOT swept (its started_at 
     await new Promise((r) => setTimeout(r, 10));
 
     const recovered = await recoverStuckRuns({ runs, events }, 0);
-    assert.deepEqual(recovered, [orphan.id], "only the real orphan is recovered; the seed run is skipped");
+    assert.deepEqual(recovered, [{ id: orphan.id, previousStatus: "RUNNING" }], "only the real orphan is recovered; the seed run is skipped");
     assert.equal((await runs.getRun(seed.id))?.status, "RUNNING", "the seed run is left RUNNING for its CLI to finalize");
   } finally {
     try {
@@ -101,7 +222,7 @@ test("Fable M15: finalizeRun does not resurrect a run already FAILED by the swee
     const r = await runs.createRun(sampleRun());
     await runs.markRunning(r.id);
     await new Promise((res) => setTimeout(res, 10));
-    assert.deepEqual(await runs.failStuckRuns(0), [r.id]); // swept → FAILED
+    assert.deepEqual(await runs.failStuckRuns(0), [{ id: r.id, previousStatus: "RUNNING" }]); // swept → FAILED
     // A late in-flight completion must NOT overwrite the FAILED verdict (terminal-status guard).
     await runs.finalizeRun(r.id, "COMPLETED");
     assert.equal((await runs.getRun(r.id))?.status, "FAILED", "terminal FAILED is preserved");

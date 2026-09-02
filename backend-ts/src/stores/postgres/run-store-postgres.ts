@@ -12,8 +12,8 @@
  */
 import { isUuid, type PgPool } from "./pg-database.ts";
 import { SPIKE_SCHEMA } from "./schema-pg.ts";
-import type { CreateRunInput, RunLogRow, RunRecord, RunStore, RunStatus } from "../run-store.ts";
-import { STUCK_RUN_THRESHOLD_MS } from "../run-store.ts";
+import type { CreateRunInput, RunLogRow, RunRecord, RunStore, RunStatus, RecoveredRun } from "../run-store.ts";
+import { STUCK_RUN_THRESHOLD_MS, UNCLAIMED_QUEUED_THRESHOLD_MS } from "../run-store.ts";
 
 interface RunRow {
   id: string;
@@ -207,22 +207,50 @@ export class PgRunStore implements RunStore {
     return this.getRun(runId);
   }
 
-  async failStuckRuns(olderThanMs = STUCK_RUN_THRESHOLD_MS): Promise<string[]> {
-    const cutoff = new Date(Date.now() - olderThanMs).toISOString();
-    // Single atomic UPDATE … RETURNING (Fable M15) — the prior SELECT-then-UPDATE could fail a run that
-    // crossed the threshold or was finalized between the two statements (an unaudited state change / a
-    // false RUN_RECOVERED). Only UNCLAIMED RUNNING runs — the in-process ctx.waitUntil orphans:
-    // markRunning leaves claimed_by NULL, claimNextQueuedRun stamps it, so a CLAIMED worker job is never
-    // recovered; QUEUED is the claim path's "waiting for a worker", not an orphan. `seed:%` runs are
-    // excluded (Fable M7): the seed CLIs create backdated RUNNING rows whose started_at is far in the
-    // past by design and must not be swept mid-seed (fail → double-seed). A NULL triggered_by is still swept.
-    const res = await this.pool.query<{ id: string }>(
+  async failStuckRuns(
+    olderThanMs = STUCK_RUN_THRESHOLD_MS,
+    unclaimedQueuedOlderThanMs = UNCLAIMED_QUEUED_THRESHOLD_MS,
+  ): Promise<RecoveredRun[]> {
+    const runningCutoff = new Date(Date.now() - olderThanMs).toISOString();
+    const queuedCutoff = new Date(Date.now() - unclaimedQueuedOlderThanMs).toISOString();
+    const now = new Date().toISOString();
+
+    // Two independent statements, each atomic on its own (RUNNING then QUEUED); a failure between
+    // them leaves the untouched rows in a state the next boot's sweep will find, which is why no
+    // transaction is needed. Only UNCLAIMED runs: markRunning leaves claimed_by NULL, claimNextQueuedRun
+    // stamps it, so a CLAIMED worker job is never recovered. Unclaimed QUEUED runs older than
+    // unclaimedQueuedOlderThanMs are failed because no claiming worker runs on live deployments. `seed:%` runs
+    // are excluded (Fable M7): the seed CLIs create backdated rows whose started_at is far in the past by design.
+    // A NULL triggered_by is still swept.
+    const running = await this.pool.query<{ id: string }>(
       `UPDATE ${T} SET status = 'FAILED', completed_at = $1
          WHERE status = 'RUNNING' AND claimed_by IS NULL AND started_at < $2
            AND (triggered_by IS NULL OR triggered_by NOT LIKE 'seed:%')
-         RETURNING id`,
-      [new Date().toISOString(), cutoff],
+       RETURNING id`,
+      [now, runningCutoff],
     );
-    return res.rows.map((r) => r.id);
+
+    const queued = await this.pool.query<{ id: string }>(
+      `UPDATE ${T} SET status = 'FAILED', completed_at = $1
+         WHERE status = 'QUEUED' AND claimed_by IS NULL AND started_at < $2
+           AND (triggered_by IS NULL OR triggered_by NOT LIKE 'seed:%')
+       RETURNING id`,
+      [now, queuedCutoff],
+    );
+
+    return [
+      ...running.rows.map((r) => ({ id: r.id, previousStatus: "RUNNING" as const })),
+      ...queued.rows.map((r) => ({ id: r.id, previousStatus: "QUEUED" as const })),
+    ];
+  }
+
+  async restoreRecoveredRun(id: string, previousStatus: "QUEUED" | "RUNNING"): Promise<boolean> {
+    const res = await this.pool.query<{ id: string }>(
+      `UPDATE ${T} SET status = $1, completed_at = NULL
+         WHERE id = $2 AND status = 'FAILED'
+       RETURNING id`,
+      [previousStatus, id],
+    );
+    return res.rows.length > 0;
   }
 }

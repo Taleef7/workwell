@@ -71,11 +71,25 @@ export interface RunLogRow {
 }
 
 /**
- * Runs left RUNNING/QUEUED longer than this are treated as orphaned by a restart (see
+ * Runs left RUNNING longer than this are treated as orphaned by a restart (see
  * {@link RunStore.failStuckRuns}). Far beyond the longest real run (~5-6 min for ALL_PROGRAMS on
  * the Postgres ceiling), so the boot-time sweep can never fail a legitimately in-flight run.
  */
 export const STUCK_RUN_THRESHOLD_MS = 30 * 60 * 1000;
+
+/**
+ * Runs left QUEUED without a claiming worker longer than this are treated as abandoned (see
+ * {@link RunStore.failStuckRuns}). No live deployment runs a claiming worker, so a QUEUED row
+ * created by a bare `POST /api/runs` sits forever and the dashboard banner shows "Measure run queued"
+ * indefinitely unless swept. 6 hours is far beyond any worker claim latency while recovering
+ * abandoned runs.
+ */
+export const UNCLAIMED_QUEUED_THRESHOLD_MS = 6 * 60 * 60 * 1000;
+
+export interface RecoveredRun {
+  id: string;
+  previousStatus: "QUEUED" | "RUNNING";
+}
 
 export interface RunStore {
   createRun(input: CreateRunInput): Promise<RunRecord>;
@@ -101,16 +115,24 @@ export interface RunStore {
   finalizeRun(runId: string, status: RunStatus): Promise<RunRecord | null>;
   /**
    * Recover runs stuck **RUNNING** for longer than `olderThanMs` (default
-   * {@link STUCK_RUN_THRESHOLD_MS}) by marking them FAILED + setting completed_at. In the in-process
-   * job model an ALL_PROGRAMS/SITE run is advanced by a `ctx.waitUntil` task that does NOT survive a
-   * container restart, leaving the run RUNNING forever (async runs are marked RUNNING synchronously,
-   * so every orphan is RUNNING). Scoped to **unclaimed** RUNNING runs (`claimed_by IS NULL`): the
-   * async path (`markRunning`) leaves claimed_by NULL, whereas `claimNextQueuedRun` stamps it, so a
-   * legitimately CLAIMED worker job is never recovered. QUEUED runs are also left alone (the claim
-   * path's "waiting for a worker" state, not an orphan). Run once per process on the first runs
-   * access; the threshold guards against failing a live run. Returns the recovered run ids so the
-   * caller can write an `audit_event` per run (the "every state change is audited" hard rule lives
-   * above the store, which has no events binding).
+   * {@link STUCK_RUN_THRESHOLD_MS}) or **QUEUED** without a claiming worker for longer than
+   * `unclaimedQueuedOlderThanMs` (default {@link UNCLAIMED_QUEUED_THRESHOLD_MS}) by marking them
+   * FAILED + setting completed_at. In the in-process job model an ALL_PROGRAMS/SITE run is advanced
+   * by a `ctx.waitUntil` task that does NOT survive a container restart, leaving the run RUNNING
+   * forever. Furthermore, without a claiming worker, bare QUEUED runs sit indefinitely. Scoped to
+   * **unclaimed** runs (`claimed_by IS NULL`): `claimNextQueuedRun` stamps claimed_by, so a
+   * legitimately CLAIMED worker job is never recovered. `seed:%` runs are excluded. Run once per
+   * process on the first runs access; thresholds guard against failing a live run. Returns the
+   * recovered runs with their previous status so the caller can write an `audit_event` per run
+   * distinguishing the two cases.
    */
-  failStuckRuns(olderThanMs?: number): Promise<string[]>;
+  failStuckRuns(olderThanMs?: number, unclaimedQueuedOlderThanMs?: number): Promise<RecoveredRun[]>;
+  /**
+   * Compensation for a failed RUN_RECOVERED audit write. If writing the audit event fails after
+   * `failStuckRuns` marks a run FAILED, this moves the run back to its previousStatus and clears
+   * completed_at (`UPDATE runs SET status = <previousStatus>, completed_at = NULL WHERE id = ? AND status = 'FAILED'`)
+   * so the next recovery sweep finds it again. Returns true when a row changed, false if the run
+   * was not in FAILED status (or does not exist).
+   */
+  restoreRecoveredRun(id: string, previousStatus: "QUEUED" | "RUNNING"): Promise<boolean>;
 }

@@ -1,5 +1,25 @@
 # Journal
 
+## 2026-09-02 — the Maui sandbox is handed over: unclaimed runs recover, demo accounts are profile-scoped, public-demo affordances become deployment config
+
+The Maui sandbox deployment is being handed to the pilot group for quality-lead review, which requires
+hardening the sandbox against state leaks and operational dead ends:
+
+1. **Unclaimed QUEUED run recovery (`failStuckRuns`):** On live deployments without an active background
+worker daemon, runs placed into `QUEUED` status could sit pending indefinitely. Boot recovery now sweeps
+unclaimed `QUEUED` runs older than 6 hours alongside interrupted `RUNNING` runs, transitioning them to
+`FAILED` with distinct audited reasons (`RUN_RECOVERED`) and alerts so backlogs never hang silently.
+
+2. **Profile-scoped demo accounts:** On the Maui deployment (`WORKWELL_INSTANCE=maui`), demo authentication
+is restricted strictly to `@maui.workwell.dev` accounts. The standard `@workwell.dev` demo logins—including
+the public viewer—are refused, ensuring the pilot group's workspace access remains cleanly separated.
+
+3. **Public-demo affordances as deployment config (`NEXT_PUBLIC_PUBLIC_DEMO`):** With `NEXT_PUBLIC_PUBLIC_DEMO=off`,
+the public sandbox entry cards, the walkthrough video (which references employee terminology), and GitHub
+repository links are suppressed, and the landing page elevates "Sign in" to the primary CTA while the
+login screen renders the clinical quality measure domain copy. Defaulting to `on` keeps existing TWH demo
+deployments byte-identical while Maui boots cleanly scoped for the pilot review.
+
 ## 2026-09-01 (night) — #501: the Maui profile stops leaking foreign rows on every surface, and lists only measures it can run
 
 **One predicate, shared, gated, injected.** `profileSubjectMatcher(lookup)` now lives in
