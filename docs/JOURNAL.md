@@ -124,6 +124,7 @@ critical: CMS130/CMS165 semantics entries were missing from the plan, and pre-fl
 undefined). The bundle with my adjudication is a local plan file for owner review — the id model
 (rename to bare `cms2`/`cms130`/`cms165` vs an alias layer) and catalog activation's visibility on TWH
 are owner calls.
+
 ## 2026-09-01 (late night) — MM-1b begins: the three official-only measures get one honest id and the semantics routing needs (slice 1)
 
 **The id was the first thing in the way.** `cms2`, `cms130`, `cms165` were catalog rows keyed
@@ -168,6 +169,23 @@ rather than fixed: two worker processes seeding concurrently are not coordinated
 has no unique constraint, so a duplicate deprecation event is possible under a race — schema is
 owner-owned.
 
+## 2026-09-01 (later still) — the guard shipped, could not run, and production went down for the third time in the same place
+
+**#502 merged at 18:02. The deploy it triggered failed at 18:04, at the same DELETE, with the same
+`curl: (28)`, and the fix did not fire.** No read-back. No warning. `twh-api-ts` deleted, the deploy
+stopped before recreating it, backend down. Restored by re-running the job; all four surfaces
+verified back at 200.
+
+**The cause is one line, and it is inside `request()`, not inside the new guard.** Its retry loop
+does `set +e` around curl and then an unconditional **`set -e`** — and errexit is a property of the
+*shell*, not of the function. So `request()` re-armed errexit **before returning**, reaching across
+the function boundary to undo the caller's `set +e`, and the shell exited on `request()`'s own
+non-zero return. `delete_container_confirmed` never reached the line after the DELETE. Reduced, it is
+unambiguous:
+
+```
+inner() { set +e; false; set -e; return 1; }
+outer() { set +e; inner; local rc=$?; set -e; echo "REACHED: rc=$rc"; }
 outer            # prints nothing; the script exits 1
 ```
 

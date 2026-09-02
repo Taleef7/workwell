@@ -17,8 +17,10 @@ const testScript = `
   await db.exec(RUN_STORE_FLOOR_DDL.replace(/\\n/g, " "));
   await migrateFloorSchema(db);
   const measureStore = new SqliteMeasureStore(db);
-  await seedMeasureStore(measureStore, () => "");
   const events = new SqliteCaseEventStore(db);
+  // The real three-argument seed: this script is a template string tsc never sees, so a stale
+  // signature here would only surface at runtime — and only once the fixture store is non-empty.
+  await seedMeasureStore(measureStore, () => "", events);
   const deps = {
     caseStore: new SqliteCaseStore(db),
     outcomeStore: new SqliteOutcomeStore(db),

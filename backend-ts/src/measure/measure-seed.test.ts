@@ -485,7 +485,7 @@ test("seedMeasureStore — deprecates an untouched legacy row when persisted spe
   assert.equal((await store.getLatest("cms2v15"))?.status, "Deprecated");
 });
 
-test("seedMeasureStore — repairs a missing legacy deprecation audit on retry", async () => {
+test("seedMeasureStore — a failed catalog back-fill audit is retried without duplication, and the legacy row is then deprecated", async () => {
   const db = await freshDb();
   const store = new SqliteMeasureStore(db);
   const realEvents = new SqliteCaseEventStore(db);
@@ -538,4 +538,45 @@ test("seedMeasureStore — repairs a missing legacy deprecation audit on retry",
     ["MEASURE_DEPRECATED"],
     "retry must repair the missing event without duplicating it",
   );
+});
+
+test("seedMeasureStore — repairs a legacy row already Deprecated but missing its audit event (crash between audit and state, or a pre-PR deprecation)", async () => {
+  // Exercises the `row.status === "Deprecated"` repair branch in deprecateLegacyOfficialRows, which
+  // the retry test above never reaches (its first failure is the catalog back-fill audit).
+  const db = await freshDb();
+  const store = new SqliteMeasureStore(db);
+  const events = new SqliteCaseEventStore(db);
+  const catalog = MEASURE_CATALOG.find((m) => m.id === "cms2")!;
+
+  await store.seedMeasure({
+    measureId: "cms2v15",
+    name: catalog.name,
+    policyRef: catalog.policyRef,
+    owner: catalog.owner,
+    tags: [...catalog.tags],
+    versionId: "cms2v15-v1.0",
+    version: catalog.version,
+    status: "Deprecated",
+    spec: catalog.spec,
+    cqlText: "",
+    compileStatus: catalog.compileStatus,
+    createdAt: "2026-02-01T00:00:00.000Z",
+    changeSummary: "Seeded measure version",
+  });
+
+  const countDeprecated = async () => {
+    const rows = await db
+      .prepare("SELECT event_type FROM audit_events WHERE event_type = 'MEASURE_DEPRECATED' AND entity_id = ?")
+      .bind("cms2v15-v1.0")
+      .all<{ event_type: string }>();
+    return (rows.results ?? []).length;
+  };
+  assert.equal(await countDeprecated(), 0, "precondition: the deprecation is unaudited");
+
+  await seedMeasureStore(store, () => "", events);
+  assert.equal((await store.getLatest("cms2v15"))?.status, "Deprecated", "status is untouched");
+  assert.equal(await countDeprecated(), 1, "the repair writes the missing MEASURE_DEPRECATED event");
+
+  await seedMeasureStore(store, () => "", events);
+  assert.equal(await countDeprecated(), 1, "a second seed does not duplicate it");
 });
