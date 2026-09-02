@@ -8,8 +8,8 @@
  * the contract for the spike.
  */
 import type { CloudDatabase } from "@mieweb/cloud";
-import type { CreateRunInput, RunLogRow, RunRecord, RunStore, RunStatus } from "../run-store.ts";
-import { STUCK_RUN_THRESHOLD_MS } from "../run-store.ts";
+import type { CreateRunInput, RunLogRow, RunRecord, RunStore, RunStatus, RecoveredRun } from "../run-store.ts";
+import { STUCK_RUN_THRESHOLD_MS, UNCLAIMED_QUEUED_THRESHOLD_MS } from "../run-store.ts";
 
 interface RunRow {
   id: string;
@@ -178,25 +178,44 @@ export class SqliteRunStore implements RunStore {
     return this.getRun(runId);
   }
 
-  async failStuckRuns(olderThanMs = STUCK_RUN_THRESHOLD_MS): Promise<string[]> {
-    const cutoff = new Date(Date.now() - olderThanMs).toISOString();
-    // Single atomic UPDATE … RETURNING (Fable M15) — the prior SELECT-then-UPDATE could fail a run that
-    // crossed the threshold or was finalized between the two statements, producing an unaudited state
-    // change or a false RUN_RECOVERED. Only UNCLAIMED RUNNING runs: markRunning (the async ctx.waitUntil
+  async failStuckRuns(
+    olderThanMs = STUCK_RUN_THRESHOLD_MS,
+    unclaimedQueuedOlderThanMs = UNCLAIMED_QUEUED_THRESHOLD_MS,
+  ): Promise<RecoveredRun[]> {
+    const runningCutoff = new Date(Date.now() - olderThanMs).toISOString();
+    const queuedCutoff = new Date(Date.now() - unclaimedQueuedOlderThanMs).toISOString();
+    const now = new Date().toISOString();
+
+    // Two independent statements, each atomic on its own (RUNNING then QUEUED); a failure between
+    // them leaves the untouched rows in a state the next boot's sweep will find, which is why no
+    // transaction is needed. Only UNCLAIMED runs: markRunning (the async ctx.waitUntil
     // path) leaves claimed_by NULL; claimNextQueuedRun stamps it, so a CLAIMED worker job is never
-    // recovered; QUEUED is the claim-path "waiting for a worker", not an orphan. `seed:%` runs are
-    // excluded (Fable M7): the seed CLIs create backdated RUNNING rows whose started_at is far in the
-    // past by design, so they must not be swept mid-seed (which would fail then double-seed them). A
-    // NULL triggered_by is still swept.
-    const { results } = await this.db
+    // recovered. Unclaimed QUEUED runs older than unclaimedQueuedOlderThanMs are failed because no
+    // claiming worker runs on live deployments. `seed:%` runs are excluded (Fable M7): the seed CLIs
+    // create backdated rows whose started_at is far in the past by design. A NULL triggered_by is still swept.
+    const running = await this.db
       .prepare(
         `UPDATE runs SET status = 'FAILED', completed_at = ?
            WHERE status = 'RUNNING' AND claimed_by IS NULL AND started_at < ?
              AND (triggered_by IS NULL OR triggered_by NOT LIKE 'seed:%')
            RETURNING id`,
       )
-      .bind(new Date().toISOString(), cutoff)
+      .bind(now, runningCutoff)
       .all<{ id: string }>();
-    return (results ?? []).map((r) => r.id);
+
+    const queued = await this.db
+      .prepare(
+        `UPDATE runs SET status = 'FAILED', completed_at = ?
+           WHERE status = 'QUEUED' AND claimed_by IS NULL AND started_at < ?
+             AND (triggered_by IS NULL OR triggered_by NOT LIKE 'seed:%')
+           RETURNING id`,
+      )
+      .bind(now, queuedCutoff)
+      .all<{ id: string }>();
+
+    return [
+      ...(running.results ?? []).map((r) => ({ id: r.id, previousStatus: "RUNNING" as const })),
+      ...(queued.results ?? []).map((r) => ({ id: r.id, previousStatus: "QUEUED" as const })),
+    ];
   }
 }

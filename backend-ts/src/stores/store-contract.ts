@@ -186,7 +186,7 @@ export function runStoreContract(label: string, freshStore: () => Promise<RunSto
     assert.ok(done?.completedAt, "completed_at is stamped");
   });
 
-  test(`[${label}] failStuckRuns recovers only UNCLAIMED stuck RUNNING runs (ctx.waitUntil orphans)`, async () => {
+  test(`[${label}] failStuckRuns recovers UNCLAIMED stuck RUNNING and QUEUED runs`, async () => {
     const store = await freshStore();
     // A CLAIMED worker run: claimNextQueuedRun stamps claimed_by → not an orphan, never recovered.
     const claimed = await store.createRun(sampleRun("claimed"));
@@ -194,22 +194,84 @@ export function runStoreContract(label: string, freshStore: () => Promise<RunSto
     // An async (ctx.waitUntil) run: markRunning leaves claimed_by NULL → the orphan case.
     const orphan = await store.createRun(sampleRun("orphan"));
     await store.markRunning(orphan.id);
-    const queued = await store.createRun(sampleRun("q")); // stays QUEUED — claim-path pending work
+    const queued = await store.createRun(sampleRun("q")); // stays QUEUED — fresh claim-path pending work
     const done = await store.createRun(sampleRun("d"));
     await store.finalizeRun(done.id, "COMPLETED"); // terminal
 
-    // The default threshold (30 min) is far beyond these just-created runs → nothing recovered.
-    assert.equal((await store.failStuckRuns()).length, 0, "recent runs are not failed");
+    // Queued seed run: older than the queued cutoff (7 hours ago) with triggeredBy="seed:trend-history"
+    const seedQueued = await store.createRun({
+      ...sampleRun("seed-q"),
+      triggeredBy: "seed:trend-history",
+      status: "QUEUED",
+      startedAt: new Date(Date.now() - 7 * 60 * 60 * 1000).toISOString(),
+    });
+    // Unclaimed QUEUED run started 7 hours ago (> default 6 hour cutoff)
+    const staleQueued7h = await store.createRun({
+      ...sampleRun("stale-7h"),
+      status: "QUEUED",
+      startedAt: new Date(Date.now() - 7 * 60 * 60 * 1000).toISOString(),
+    });
+    // Unclaimed QUEUED run started 5 hours ago (< default 6 hour cutoff)
+    const staleQueued5h = await store.createRun({
+      ...sampleRun("stale-5h"),
+      status: "QUEUED",
+      startedAt: new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString(),
+    });
+
+    // Default thresholds (30 min for RUNNING, 6 hours for QUEUED):
+    // 7h queued run is failed; 5h queued run, fresh queued run, queued seed run, fresh orphan all survive.
+    const recoveredDefaults = await store.failStuckRuns();
+    assert.deepEqual(
+      recoveredDefaults,
+      [{ id: staleQueued7h.id, previousStatus: "QUEUED" }],
+      "default thresholds fail only the unclaimed QUEUED run started 7 hours ago",
+    );
+    const recovered7h = await store.getRun(staleQueued7h.id);
+    assert.equal(recovered7h?.status, "FAILED", "QUEUED run started 7 hours ago IS failed by failStuckRuns() with defaults");
+    assert.ok(recovered7h?.completedAt, "completed_at is stamped on recovered 7h QUEUED run");
+
+    assert.equal((await store.getRun(queued.id))?.status, "QUEUED", "fresh QUEUED run survives failStuckRuns() with no arguments");
+    assert.equal((await store.getRun(staleQueued5h.id))?.status, "QUEUED", "QUEUED run started 5 hours ago is NOT failed by failStuckRuns() with defaults");
+    assert.equal((await store.getRun(seedQueued.id))?.status, "QUEUED", "QUEUED run with seed:trend-history older than queued cutoff is NOT failed (queued seed exclusion)");
+    assert.equal((await store.getRun(orphan.id))?.status, "RUNNING", "fresh RUNNING run survives defaults");
+    assert.equal((await store.getRun(claimed.id))?.status, "RUNNING", "a CLAIMED worker run is left alone");
+    assert.equal((await store.getRun(done.id))?.status, "COMPLETED", "terminal runs are untouched");
 
     await new Promise((r) => setTimeout(r, 10)); // ensure started_at precedes the threshold-0 cutoff
-    // Threshold 0 → every currently UNCLAIMED RUNNING run is treated as stuck (orphaned by a restart).
-    const recoveredIds = await store.failStuckRuns(0);
-    assert.deepEqual(recoveredIds, [orphan.id], "only the UNCLAIMED RUNNING run (the ctx.waitUntil orphan) is recovered");
+    // Threshold 0 for RUNNING only (default for QUEUED) → only UNCLAIMED RUNNING run is recovered.
+    const recoveredRunning = await store.failStuckRuns(0);
+    assert.deepEqual(
+      recoveredRunning,
+      [{ id: orphan.id, previousStatus: "RUNNING" }],
+      "only the UNCLAIMED RUNNING run (the ctx.waitUntil orphan) is recovered",
+    );
     const recovered = await store.getRun(orphan.id);
     assert.equal(recovered?.status, "FAILED");
     assert.ok(recovered?.completedAt, "completed_at is stamped on recovery");
     assert.equal((await store.getRun(claimed.id))?.status, "RUNNING", "a CLAIMED worker run is left alone (not an orphan)");
-    assert.equal((await store.getRun(queued.id))?.status, "QUEUED", "QUEUED runs are left for the claim path, never failed");
+    assert.equal((await store.getRun(queued.id))?.status, "QUEUED", "a QUEUED run younger than the queued threshold is retained");
+    assert.equal((await store.getRun(staleQueued5h.id))?.status, "QUEUED");
+    assert.equal((await store.getRun(seedQueued.id))?.status, "QUEUED", "queued seed exclusion preserved");
+    assert.equal((await store.getRun(done.id))?.status, "COMPLETED", "terminal runs are untouched");
+
+    // With the queued threshold passed as 0, unclaimed non-seed QUEUED runs are failed, completed_at stamped.
+    const recoveredQueued = await store.failStuckRuns(0, 0);
+    const recoveredQueuedIds = recoveredQueued.map((r) => r.id).sort();
+    const expectedQueuedIds = [queued.id, staleQueued5h.id].sort();
+    assert.deepEqual(
+      recoveredQueuedIds,
+      expectedQueuedIds,
+      "unclaimed non-seed QUEUED runs older than the queued threshold (0) are failed",
+    );
+    for (const r of recoveredQueued) {
+      assert.equal(r.previousStatus, "QUEUED");
+    }
+    const recoveredQ = await store.getRun(queued.id);
+    assert.equal(recoveredQ?.status, "FAILED", "unclaimed QUEUED run is failed");
+    assert.ok(recoveredQ?.completedAt, "completed_at is stamped on recovered QUEUED run");
+    assert.equal((await store.getRun(staleQueued5h.id))?.status, "FAILED");
+    assert.equal((await store.getRun(seedQueued.id))?.status, "QUEUED", "queued seed run is NOT failed even with queued threshold 0 (queued seed exclusion)");
+    assert.equal((await store.getRun(claimed.id))?.status, "RUNNING", "a CLAIMED worker run is left alone");
     assert.equal((await store.getRun(done.id))?.status, "COMPLETED", "terminal runs are untouched");
   });
 }

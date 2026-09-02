@@ -8,7 +8,7 @@
  * audit_event — no exceptions" is a hard rule (AGENTS.md / CLAUDE.md), so the audit lives here, above
  * the store, where both the run store and the events store are in scope.
  */
-import type { RunStore } from "../stores/run-store.ts";
+import type { RunStore, RecoveredRun } from "../stores/run-store.ts";
 import type { CaseEventStore } from "../stores/case-event-store.ts";
 import { emitAlert, resolveAlertChannels, type AlertChannel } from "./alert-channel.ts";
 
@@ -20,35 +20,49 @@ export interface RecoverStuckRunsDeps {
 }
 
 /**
- * Fail + audit any runs stuck RUNNING beyond the threshold (see {@link RunStore.failStuckRuns};
- * QUEUED runs are left for the claim path). Returns the recovered run ids. Best-effort: callers run
- * it fire-and-forget on boot. Emits one WORKWELL_ALERT per recovered run (#264) so orphaned failures
- * are not silent.
+ * Fail + audit any runs stuck RUNNING or unclaimed QUEUED beyond their respective thresholds (see
+ * {@link RunStore.failStuckRuns}). Returns the recovered runs with their previous status.
+ * Best-effort: callers run it fire-and-forget on boot. Emits one WORKWELL_ALERT per recovered run
+ * (#264) so orphaned failures are not silent.
  */
-export async function recoverStuckRuns(deps: RecoverStuckRunsDeps, olderThanMs?: number): Promise<string[]> {
-  const recovered = await deps.runs.failStuckRuns(olderThanMs);
+export async function recoverStuckRuns(
+  deps: RecoverStuckRunsDeps,
+  olderThanMs?: number,
+  unclaimedQueuedOlderThanMs?: number,
+): Promise<RecoveredRun[]> {
+  const recovered = await deps.runs.failStuckRuns(olderThanMs, unclaimedQueuedOlderThanMs);
   const channels = deps.alertChannels ?? resolveAlertChannels({});
-  for (const runId of recovered) {
-    await deps.events.appendAudit({
-      eventType: "RUN_RECOVERED",
-      entityType: "run",
-      entityId: runId,
-      actor: "system",
-      refRunId: runId,
-      refCaseId: null,
-      refMeasureVersionId: null,
-      payload: {
-        reason:
-          "Orphaned by a container restart (the in-process run job did not survive); failed by boot recovery.",
-      },
-    });
+  for (const item of recovered) {
+    const isQueued = item.previousStatus === "QUEUED";
+    try {
+      await deps.events.appendAudit({
+        eventType: "RUN_RECOVERED",
+        entityType: "run",
+        entityId: item.id,
+        actor: "system",
+        refRunId: item.id,
+        refCaseId: null,
+        refMeasureVersionId: null,
+        payload: {
+          reason: isQueued
+            ? "Unclaimed QUEUED run exceeded timeout threshold (no claiming worker active); failed by boot recovery."
+            : "Orphaned by a container restart (the in-process run job did not survive); failed by boot recovery.",
+        },
+      });
+    } catch (err) {
+      // Per-run, not per-sweep: one transient audit failure must not leave the runs after it
+      // unaudited, and the alert below still fires so the failed write is not silent either.
+      console.error(`[workwell] RUN_RECOVERED audit failed for ${item.id}:`, err);
+    }
     // Best-effort alert — never let observability fail boot recovery.
     await emitAlert(channels, {
       kind: "RUN_RECOVERED",
       at: new Date().toISOString(),
       status: "FAILED",
-      runId,
-      message: `Stuck run ${runId} recovered as FAILED (orphaned by container restart)`,
+      runId: item.id,
+      message: isQueued
+        ? `Stuck run ${item.id} recovered as FAILED (unclaimed QUEUED run timed out)`
+        : `Stuck run ${item.id} recovered as FAILED (orphaned by container restart)`,
     });
   }
   return recovered;

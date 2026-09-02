@@ -797,13 +797,21 @@ Owner-set GitHub secrets:
 The workflow reuses these secrets from TWH: `LAUNCHPAD_API_URL`, `LAUNCHPAD_API_KEY`,
 `OPENAI_API_KEY`, `WORKWELL_VSAC_API_KEY_VENDOR`, and `WORKWELL_VSAC_API_KEY_TWH`. The workflow maps
 the two Maui-only secrets onto the runtime names `DATABASE_URL` and `WORKWELL_AUTH_JWT_SECRET`.
-It sets `WORKWELL_INSTANCE=maui` and passes `NEXT_PUBLIC_SUBJECT_TERM=patient` while building the
-frontend image. `WORKWELL_OFFICIAL_MEASURES` is deliberately **unset**; Maui uses authored CQL until
+It sets `WORKWELL_INSTANCE=maui` and passes `NEXT_PUBLIC_SUBJECT_TERM=patient` and
+`NEXT_PUBLIC_PUBLIC_DEMO=off` while building the frontend image (suppressing public sandbox links,
+walkthrough videos, and GitHub source links, and making Sign in the primary CTA).
+`WORKWELL_OFFICIAL_MEASURES` is deliberately **unset**; Maui uses authored CQL until
 each pilot measure passes its own flip gate. Maui has no self-heal reconciler, so dispatch the workflow
 again for a replacement or recovery.
 
 Evidence bytes deliberately remain on the in-container `fs` binding for now; the Maui workflow omits the
 four `WORKWELL_BUCKET_S3_*` variables, so evidence is lost whenever the container is recreated.
+
+**Unclaimed QUEUED run recovery:** In addition to recovering in-process `RUNNING` runs orphaned by a container
+restart (30-minute threshold), boot recovery (`failStuckRuns`) sweeps unclaimed `QUEUED` runs whose
+`claimed_by` worker ID is null and whose timestamp is older than 6 hours (`UNCLAIMED_QUEUED_THRESHOLD_MS`).
+Because live deployments do not run a separate claiming worker daemon, any run left queued without a worker
+is recovered to `FAILED` with an audited `RUN_RECOVERED` event and alert.
 
 **Backend image tags are namespaced, and that is load-bearing — do not "simplify" it.** Maui and TWH
 share one GHCR backend repository (`ghcr.io/taleef7/workwell-api-ts`), and
@@ -816,6 +824,10 @@ builds a different image repository. **Maui rollback:** re-dispatch with `replac
 an earlier commit, whose image is `maui-sha-<that SHA>`.
 
 Sandbox accounts (all use the documented demo password `Workwell123!`):
+
+Demo accounts are strictly profile-scoped: on the Maui profile (`WORKWELL_INSTANCE=maui`), only
+`@maui.workwell.dev` accounts authenticate. The standard `@workwell.dev` demo accounts (including the
+public `/sandbox` viewer) are refused.
 
 | Identifier | Role |
 |------------|------|
@@ -994,6 +1006,7 @@ shows all services `Up`).
 | `NEXT_PUBLIC_APP_NAME` | Frontend | App display name |
 | `NEXT_PUBLIC_DEMO_MODE` | Frontend | Prefill login form for local/demo builds only; `true` **fails the production frontend build** |
 | `NEXT_PUBLIC_SUBJECT_TERM` | Frontend | Subject noun for all display text (`frontend/lib/terminology.ts`, ROADMAP MM-0): `employee` (default) or `patient` (the Maui pilot). Build-time like every `NEXT_PUBLIC_*` var — the Dockerfile takes it as a build ARG, so the Maui deploy workflow must pass `--build-arg NEXT_PUBLIC_SUBJECT_TERM=patient` (goes on the MM-1 activation checklist; the TWH workflows pass nothing and keep the byte-identical employee default). The match is exact and case-sensitive; any other value silently falls back to `employee`, so verify the rendered UI after a Maui build. Display text only — API paths, payload keys (`employeeExternalId`) and routes (`/employees/...`) are deliberately unchanged. |
+| `NEXT_PUBLIC_PUBLIC_DEMO` | Frontend | Build-time toggle for public demo affordances (`frontend/lib/public-demo.ts`): `on` (default) or `off` (the Maui pilot). When `off`, public sandbox shortcuts, walkthrough video links, and GitHub repository links are not rendered, and Sign in is promoted to primary CTA. On `/sandbox`, requests redirect to `/login` without signing in. Default `on` keeps all other deployments byte-identical. |
 | `WORKWELL_EMAIL_PROVIDER` | Backend | Outreach email provider. **Stays `simulated` on the demo stack (default + CLAUDE.md hard rule).** |
 | `WORKWELL_EMAIL_SENDGRID_API_KEY` | Backend | SendGrid API key. Wiring exists in code but **must remain unset on the demo stack**; only set in an explicit non-demo deployment alongside `WORKWELL_EMAIL_PROVIDER=sendgrid`. |
 | `WORKWELL_EMAIL_FROM_ADDRESS` | Backend | From address for outreach (default `noreply@workwell-demo.dev`). |

@@ -99,4 +99,37 @@ describe("LoginPage", () => {
     expect(screen.getByRole("button", { name: /fill demo credentials/i })).toBeTruthy();
     expect(screen.getByText(/admin@workwell\.dev/i)).toBeTruthy();
   });
+
+  it("renders domain text configured by NEXT_PUBLIC_SUBJECT_TERM", async () => {
+    vi.stubEnv("NEXT_PUBLIC_SUBJECT_TERM", "patient");
+    vi.resetModules();
+    const { default: PatientLoginPage } = await import("../page");
+    const { unmount } = render(<PatientLoginPage />);
+    expect(screen.getByText(/Primary care clinical quality measures, deterministic CQL evaluation/)).toBeTruthy();
+    unmount();
+
+    vi.stubEnv("NEXT_PUBLIC_SUBJECT_TERM", "employee");
+    vi.resetModules();
+    const { default: EmployeeLoginPage } = await import("../page");
+    render(<EmployeeLoginPage />);
+    expect(screen.getByText(/OSHA safety and clinical wellness measures, deterministic CQL evaluation/)).toBeTruthy();
+  });
+
+  it("renders public sandbox card and link when NEXT_PUBLIC_PUBLIC_DEMO is on (default)", async () => {
+    vi.stubEnv("NEXT_PUBLIC_PUBLIC_DEMO", "on");
+    vi.resetModules();
+    const { default: FreshLoginPage } = await import("../page");
+    render(<FreshLoginPage />);
+    expect(screen.getByText(/Try the public sandbox/i)).toBeTruthy();
+    expect(screen.getByRole("link", { name: /open public sandbox/i })).toBeTruthy();
+  });
+
+  it("hides public sandbox card and link when NEXT_PUBLIC_PUBLIC_DEMO is off", async () => {
+    vi.stubEnv("NEXT_PUBLIC_PUBLIC_DEMO", "off");
+    vi.resetModules();
+    const { default: FreshLoginPage } = await import("../page");
+    render(<FreshLoginPage />);
+    expect(screen.queryByText(/Try the public sandbox/i)).toBeNull();
+    expect(screen.queryByRole("link", { name: /open public sandbox/i })).toBeNull();
+  });
 });

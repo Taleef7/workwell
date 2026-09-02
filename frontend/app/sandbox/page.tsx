@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { ArrowRight, Circle, Loader2 } from "lucide-react";
 import { useAuth } from "@/components/auth-provider";
 import { SANDBOX_EMAIL, SANDBOX_PASSWORD, signInWithCredentials } from "@/lib/auth/demo-login";
+import { PUBLIC_DEMO } from "@/lib/public-demo";
 
 const APP_NAME = process.env.NEXT_PUBLIC_APP_NAME ?? "WorkWell Measure Studio";
 
@@ -24,6 +25,11 @@ export default function SandboxPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!PUBLIC_DEMO) {
+      router.replace("/login");
+      return;
+    }
+
     let active = true;
 
     async function enterSandbox() {
@@ -53,6 +59,10 @@ export default function SandboxPage() {
       active = false;
     };
   }, [login, router, token]);
+
+  if (!PUBLIC_DEMO) {
+    return null;
+  }
 
   return (
     <main className="relative flex min-h-dvh items-center justify-center overflow-hidden bg-slate-950">
