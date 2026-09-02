@@ -133,9 +133,9 @@ async function store(env: RunsEnv): Promise<RunStore> {
       events: stores.events,
       alertChannels: resolveAlertChannels(env),
     })
-      .then((ids) => {
-        if (ids.length > 0)
-          console.warn(`[workwell] recovered ${ids.length} stuck run(s) (RUNNING/QUEUED → FAILED, audited) on boot`);
+      .then((recovered) => {
+        if (recovered.length > 0)
+          console.warn(`[workwell] recovered ${recovered.length} stuck run(s) (RUNNING/QUEUED → FAILED, audited) on boot`);
       })
       .catch((err) => console.error("[workwell] stuck-run recovery failed:", err));
   }

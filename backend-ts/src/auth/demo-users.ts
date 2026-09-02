@@ -9,6 +9,7 @@
  * own store, consistent with the strangler running alongside the JVM during cutover.
  */
 import { verifyPassword } from "./password.ts";
+import { DEPLOYMENT_PROFILE } from "../config/deployment-profile.ts";
 
 export interface DemoUser {
   email: string;
@@ -41,7 +42,12 @@ export const DEMO_USERS: readonly DemoUser[] = [
 /** Case-insensitive lookup, matching the Java `LOWER(email) = LOWER(?)` query. */
 export function findDemoUser(email: string): DemoUser | null {
   const needle = email.trim().toLowerCase();
-  return DEMO_USERS.find((u) => u.email.toLowerCase() === needle) ?? null;
+  const user = DEMO_USERS.find((u) => u.email.toLowerCase() === needle) ?? null;
+  if (!user) return null;
+  if (DEPLOYMENT_PROFILE.id === "maui" && !user.email.toLowerCase().endsWith("@maui.workwell.dev")) {
+    return null;
+  }
+  return user;
 }
 
 /** Validate credentials; returns the user on success, else null. */

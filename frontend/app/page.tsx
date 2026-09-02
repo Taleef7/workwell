@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 import { fraunces } from "./fonts";
+import { PUBLIC_DEMO } from "@/lib/public-demo";
 
 const repoUrl = "https://github.com/Taleef7/workwell";
 const videoUrl = "https://www.youtube.com/shorts/SgzDt4TBd9k?si=vHE9vppgxeGO6OM8";
@@ -43,32 +44,34 @@ export default function HomePage() {
             </span>
           </Link>
 
-          <nav className="flex items-center gap-5 text-sm" aria-label="Primary">
-            <a
-              href={videoUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              aria-label="Watch product walkthrough video"
-              className="text-neutral-600 dark:text-neutral-400 transition-colors hover:text-neutral-950 dark:hover:text-neutral-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-400 focus-visible:ring-offset-2"
-            >
-              Walkthrough
-            </a>
-            <a
-              href={repoUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              aria-label="View source on GitHub"
-              className="text-neutral-600 dark:text-neutral-400 transition-colors hover:text-neutral-950 dark:hover:text-neutral-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-400 focus-visible:ring-offset-2"
-            >
-              GitHub
-            </a>
-          </nav>
+          {PUBLIC_DEMO && (
+            <nav className="flex items-center gap-5 text-sm" aria-label="Primary">
+              <a
+                href={videoUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label="Watch product walkthrough video"
+                className="text-neutral-600 dark:text-neutral-400 transition-colors hover:text-neutral-950 dark:hover:text-neutral-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-400 focus-visible:ring-offset-2"
+              >
+                Walkthrough
+              </a>
+              <a
+                href={repoUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label="View source on GitHub"
+                className="text-neutral-600 dark:text-neutral-400 transition-colors hover:text-neutral-950 dark:hover:text-neutral-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-400 focus-visible:ring-offset-2"
+              >
+                GitHub
+              </a>
+            </nav>
+          )}
         </header>
 
         {/* ── Hero ───────────────────────────────────────────────────── */}
         <section className="flex flex-1 flex-col justify-center py-12">
           <p className="text-xs font-semibold uppercase tracking-[0.26em] text-neutral-500 dark:text-neutral-400">
-            Public sandbox · No login required
+            {PUBLIC_DEMO ? "Public sandbox · No login required" : "Pilot sandbox · Sign in required"}
           </p>
 
           <h1
@@ -82,30 +85,38 @@ export default function HomePage() {
           </p>
 
           <div className="mt-8 flex flex-wrap items-center gap-x-6 gap-y-3">
-            <Link
-              href="/sandbox"
-              className="inline-flex items-center gap-2 rounded-xl bg-primary-600 px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-primary-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400 focus-visible:ring-offset-2"
-            >
-              Open sandbox
-              <ArrowRight className="h-4 w-4" />
-            </Link>
+            {PUBLIC_DEMO && (
+              <Link
+                href="/sandbox"
+                className="inline-flex items-center gap-2 rounded-xl bg-primary-600 px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-primary-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400 focus-visible:ring-offset-2"
+              >
+                Open sandbox
+                <ArrowRight className="h-4 w-4" />
+              </Link>
+            )}
             <Link
               href="/login"
-              className="inline-flex items-center gap-1.5 text-sm font-medium text-neutral-700 dark:text-neutral-300 transition-colors hover:text-neutral-950 dark:hover:text-neutral-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-400 focus-visible:ring-offset-2"
+              className={
+                PUBLIC_DEMO
+                  ? "inline-flex items-center gap-1.5 text-sm font-medium text-neutral-700 dark:text-neutral-300 transition-colors hover:text-neutral-950 dark:hover:text-neutral-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-400 focus-visible:ring-offset-2"
+                  : "inline-flex items-center gap-2 rounded-xl bg-primary-600 px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-primary-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400 focus-visible:ring-offset-2"
+              }
             >
               Sign in
-              <ArrowRight className="h-3.5 w-3.5" />
+              <ArrowRight className={PUBLIC_DEMO ? "h-3.5 w-3.5" : "h-4 w-4"} />
             </Link>
           </div>
 
-          <a
-            href={videoUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="mt-5 w-fit text-sm text-neutral-500 dark:text-neutral-400 underline-offset-4 transition-colors hover:text-neutral-700 dark:hover:text-neutral-300 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-400 focus-visible:ring-offset-2"
-          >
-            Watch the 5-min walkthrough →
-          </a>
+          {PUBLIC_DEMO && (
+            <a
+              href={videoUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-5 w-fit text-sm text-neutral-500 dark:text-neutral-400 underline-offset-4 transition-colors hover:text-neutral-700 dark:hover:text-neutral-300 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-400 focus-visible:ring-offset-2"
+            >
+              Watch the 5-min walkthrough →
+            </a>
+          )}
 
           <div className="mt-10 border-t border-neutral-200 dark:border-neutral-800 pt-6">
             <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-neutral-500 dark:text-neutral-400">

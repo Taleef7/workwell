@@ -7,15 +7,19 @@ export type SubjectTerm = {
   an: string;
   /** The evaluated population as a collective noun: "workforce", "patient population". */
   population: string;
+  /** Clinical/measure domain description for landing/login copy. */
+  domain: string;
 };
 const TERMS: Record<"employee" | "patient", SubjectTerm> = {
   employee: {
     singular: "employee", plural: "employees", Singular: "Employee", Plural: "Employees",
     an: "an", population: "workforce",
+    domain: "OSHA safety and clinical wellness measures",
   },
   patient: {
     singular: "patient", plural: "patients", Singular: "Patient", Plural: "Patients",
     an: "a", population: "patient population",
+    domain: "Primary care clinical quality measures",
   },
 };
 const raw = process.env.NEXT_PUBLIC_SUBJECT_TERM;

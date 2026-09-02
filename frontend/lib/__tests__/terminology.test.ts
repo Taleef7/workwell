@@ -20,6 +20,7 @@ const EMPLOYEE_TERMS = {
   Plural: "Employees",
   an: "an",
   population: "workforce",
+  domain: "OSHA safety and clinical wellness measures",
 };
 
 describe("terminology", () => {
@@ -40,6 +41,7 @@ describe("terminology", () => {
       Plural: "Patients",
       an: "a",
       population: "patient population",
+      domain: "Primary care clinical quality measures",
     });
   });
   it("falls back to employee on an unknown value", async () => {

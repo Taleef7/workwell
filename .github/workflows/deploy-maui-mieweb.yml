@@ -161,6 +161,7 @@ jobs:
             NEXT_PUBLIC_APP_TAGLINE=${{ env.APP_TAGLINE }}
             NEXT_PUBLIC_APP_DESCRIPTION=${{ env.APP_DESCRIPTION }}
             NEXT_PUBLIC_SUBJECT_TERM=patient
+            NEXT_PUBLIC_PUBLIC_DEMO=off
             NEXT_PUBLIC_CODIFY_INDEX_URL=${{ vars.NEXT_PUBLIC_CODIFY_INDEX_URL }}
           tags: |
             ${{ env.FRONTEND_IMAGE }}:latest
