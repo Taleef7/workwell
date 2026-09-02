@@ -132,7 +132,7 @@ what it is not, what differentiates it, what runs where, and how it fits a quali
 things were deliberately written as *planned* rather than present — provider-panel work lists (MM-2)
 and cards that resolve by order or exception (MM-3) — because the first draft described both as if
 they shipped, and the whole point of the page is that a stakeholder can trust it. Conformance claims
-defer to `STANDARDS_CONFORMANCE.md` by link rather than restating them.
+are restated in qualified form and linked to `STANDARDS_CONFORMANCE.md`.
 
 `docs/guide/normalization-for-quality-teams.md`, the one clinical-audience artifact, had sat untracked
 since the 2026-08-24 alignment audit noticed it; it is committed and linked from the README and the

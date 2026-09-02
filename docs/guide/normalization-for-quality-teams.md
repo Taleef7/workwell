@@ -19,11 +19,12 @@ sequenceDiagram
     EHR-->>WW: Return FHIR records<br/>(Patient, Observation, Procedure, etc.)
     WW->>N: Prepare (normalize) the records
     N-->>WW: One consistent FHIR record per patient
-    WW->>ME: Evaluate one patient record
+    WW->>ME: Evaluate the prepared records
+    Note over WW,ME: Official measures are evaluated in a batch
 
     ME->>ME: Apply the clinical measure logic
     ME-->>WW: Return the result and supporting evidence
-    WW->>QR: Save the result and audit history
+    WW->>QR: Save the result; record audit events for case changes and the run
 
     NP->>QR: Review patient or population results
     QR-->>NP: Show the status and the evidence behind it
