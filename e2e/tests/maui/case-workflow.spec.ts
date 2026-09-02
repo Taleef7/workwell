@@ -25,18 +25,19 @@ test.describe("Maui case workflow", () => {
     // Crosswalk label rendered in the detail header — assert presence, not viewport visibility.
     await expect(page.getByText(/MIPS 112 · CMS125/).first()).toBeAttached({ timeout: 20_000 });
 
-    // Outcome status pill
-    await expect(page.getByText(/Overdue/i).first()).toBeVisible({ timeout: 10_000 });
+    // Outcome status pill — the detail page renders it twice (a responsive duplicate is display:none),
+    // so pick the VISIBLE one rather than the first in DOM order.
+    await expect(page.getByText(/Overdue/i).filter({ visible: true }).first()).toBeVisible({ timeout: 10_000 });
 
     // "Why Flagged" evidence block
-    const whyFlagged = page.getByText(/Why Flagged|Evidence/i).first();
+    const whyFlagged = page.getByText(/Why Flagged|Evidence/i).filter({ visible: true }).first();
     await expect(whyFlagged).toBeVisible({ timeout: 10_000 });
 
     // "Next action" text
-    await expect(page.getByText(/Next action/i).first()).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByText(/Next action/i).filter({ visible: true }).first()).toBeVisible({ timeout: 10_000 });
 
     // Audit timeline section
-    const timeline = page.getByText(/Audit timeline/i).first();
+    const timeline = page.getByText(/Audit timeline/i).filter({ visible: true }).first();
     await expect(timeline).toBeVisible({ timeout: 10_000 });
 
     // Assign to quality-staff
@@ -99,10 +100,11 @@ test.describe("Maui case workflow", () => {
     });
     expect(assignRes.ok()).toBe(true);
 
-    // Log in as quality-staff and check the worklist
+    // Log in as quality-staff and check "My Cases" (the cases page's assignee-scoped view; the
+    // /worklist page is the gap list, which does not link cases by id).
     await loginAs(page, MAUI_ACCOUNTS.qualityStaff.email);
-    await page.goto("/worklist");
+    await page.goto("/cases?view=mine");
     await expect(page.getByRole("heading").first()).toBeVisible({ timeout: 20_000 });
-    await expect(page.locator(`a[href*="${caseId}"]`).first()).toBeVisible({ timeout: 20_000 });
+    await expect(page.locator(`a[href*="${caseId}"]`).filter({ visible: true }).first()).toBeVisible({ timeout: 20_000 });
   });
 });

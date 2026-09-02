@@ -12,10 +12,11 @@ test.describe("Maui runs", () => {
     await page.goto("/runs");
     await expect(page.getByRole("heading", { name: /Run History/i })).toBeVisible({ timeout: 20_000 });
 
-    // Trigger a manual run from the UI
-    const runButton = page.getByRole("button", { name: /^Run$/i }).first();
+    // Trigger a manual run from the UI: "Run Now" opens a confirm dialog whose confirm is "Start run".
+    const runButton = page.getByRole("button", { name: /^Run Now$/i }).filter({ visible: true }).first();
     await expect(runButton).toBeEnabled({ timeout: 20_000 });
     await runButton.click();
+    await page.getByRole("button", { name: /^Start run$/i }).click();
 
     // Watch for the banner lifecycle: queued/running then clears
     await expect(page.getByText(/queued|running/i).first()).toBeVisible({ timeout: 30_000 });

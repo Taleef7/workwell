@@ -60,15 +60,20 @@ test.describe("Maui compliance roster", () => {
     await page.goto("/compliance");
     await expect(page.getByRole("heading", { name: /Individual Compliance/i })).toBeVisible({ timeout: 20_000 });
 
-    const panelSelect = page.getByLabel("Panel");
-    await expect(panelSelect).toBeVisible({ timeout: 10_000 });
-    await panelSelect.selectOption({ label: "Kihei Clinic" });
+    // The site filter is the GLOBAL header filter (a custom combobox, rendered twice for the
+    // responsive layouts), not a roster control. The roster footer reads "<total> patients".
+    const total = page.getByText(/^\d+ patients?$/).filter({ visible: true }).first();
+    await expect(total).toHaveText(/^48 patients$/, { timeout: 20_000 });
 
-    const rows = page.locator("tbody tr");
-    await expect.poll(() => rows.count(), { timeout: 10_000 }).toBeLessThan(48);
-    const rowCount = await rows.count();
-    expect(rowCount).toBeGreaterThan(0);
-    expect(rowCount).toBeLessThan(48);
+    const siteFilter = page.getByRole("combobox", { name: "Filter by site" }).filter({ visible: true }).first();
+    await siteFilter.click();
+    await page.getByRole("option", { name: "Kihei Clinic" }).first().click();
+
+    await expect(total).not.toHaveText(/^48 patients$/, { timeout: 20_000 });
+    const totalText = (await total.textContent()) ?? "";
+    const filteredTotal = Number(totalText.match(/^(\d+)/)?.[1]);
+    expect(filteredTotal).toBeGreaterThan(0);
+    expect(filteredTotal).toBeLessThan(48);
   });
 
   test("search by patient name narrows rows", async ({ page }) => {

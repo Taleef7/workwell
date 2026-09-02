@@ -72,12 +72,18 @@ test.describe("Maui status chips (jelly beans)", () => {
         // Reload to confirm filters are URL-backed and survive refresh
         await page.reload();
         await expect(page).toHaveURL(new RegExp(`measureId=${measure.id}&outcome=${chip.bucket}`));
-        await expect(page.locator("tbody tr").first().or(page.getByText("No cases match these filters."))).toBeVisible({ timeout: 30_000 });
+        // Wait for the list to settle: either a visible case link or one of the page's empty states.
+        const firstCase = page.locator("a[href^='/cases/']").filter({ visible: true }).first();
+        const emptyState = page.getByText(/^No (open |excluded |closed )?cases|^No results match/);
+        await expect(firstCase.or(emptyState)).toBeVisible({ timeout: 30_000 });
 
-        // Count visible case rows matching this measure+outcome
-        const caseRows = page.locator("a[href^='/cases/']").filter({ visible: true });
-        const rowCount = await caseRows.count();
-        expect(rowCount, `case rows (${rowCount}) should match chip count (${chip.count}) for ${chip.bucket}`).toBe(chip.count);
+        // Count DISTINCT cases: a row renders more than one link to the same case (name + "View"),
+        // and the mobile card layout duplicates rows in the DOM.
+        const hrefs = await page.locator("a[href^='/cases/']").evaluateAll((els) =>
+          els.map((el) => (el as HTMLAnchorElement).getAttribute("href") ?? ""),
+        );
+        const rowCount = new Set(hrefs.filter((h) => /^\/cases\/[^?]+$/.test(h))).size;
+        expect(rowCount, `distinct cases (${rowCount}) should match chip count (${chip.count}) for ${chip.bucket}`).toBe(chip.count);
       }
     });
   }

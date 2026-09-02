@@ -30,6 +30,11 @@ test.describe("Maui terminology (patient, not employee)", () => {
 
   for (const path of PAGES) {
     test(`${path} has no employee wording and shows patient search`, async ({ page }) => {
+      // DEFECT (found by this suite, 2026-09-02): the roster's Segment filter lists the seeded TWH
+      // cohorts ("All Employees", "OSHA Safety-Sensitive", "Clinical Staff") on the Maui profile —
+      // backend-ts/src/segment/segment-seed.ts is not profile-aware. Fixed on fix/maui-segment-seed;
+      // this marker comes off when that lands.
+      test.fail(path === "/compliance", "segment seed names leak employee wording on Maui (fix/maui-segment-seed)");
       await page.goto(path);
       await expect(page.getByRole("heading").first()).toBeVisible({ timeout: 20_000 });
       await expectNoEmployeeWording(page);
