@@ -125,4 +125,33 @@ describe("useMeasureIdentities hook", () => {
       "MIPS 112 · CMS125 · Breast Cancer Screening"
     );
   });
+
+  it("does not update state, trigger warnings, or throw when request resolves after unmount", async () => {
+    let resolveRequest!: (value: unknown) => void;
+    const requestPromise = new Promise((resolve) => {
+      resolveRequest = resolve;
+    });
+    get.mockReturnValue(requestPromise);
+
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const { unmount } = renderHook(() => useMeasureIdentities());
+
+    // Unmount with the request still outstanding
+    unmount();
+
+    // Resolve the request after unmount
+    await act(async () => {
+      resolveRequest([
+        {
+          id: "cms125",
+          name: "Breast Cancer Screening",
+          identity: { cmsId: "CMS125", mipsQualityId: "112" },
+        },
+      ]);
+    });
+
+    expect(consoleErrorSpy).not.toHaveBeenCalled();
+    consoleErrorSpy.mockRestore();
+  });
 });

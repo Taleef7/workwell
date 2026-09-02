@@ -107,6 +107,17 @@ describe("EmployeeProfilePage crosswalk identity rendering", () => {
     )).toBeInTheDocument();
     expect(within(summaryBar).getByText("Annual Audiogram Completed — COMPLIANT", { exact: true })).toBeInTheDocument();
 
+    // Open-case row: assert CMS label on the open-case link/row (page.tsx ~110)
+    const openCaseLink = screen.getByRole("link", { name: "MIPS 112 · CMS125 · Breast Cancer Screening" });
+    expect(openCaseLink).toHaveAttribute("href", "/cases/case-001");
+    const openCaseRow = openCaseLink.closest<HTMLTableRowElement>("tr")!;
+    expect(within(openCaseRow).getByText("MIPS 112 · CMS125 · Breast Cancer Screening", { exact: true })).toBeInTheDocument();
+
+    // CMS measure-detail row (page.tsx ~151)
+    const cmsOutcomeRow = document.getElementById("measure-cms125")!;
+    expect(within(cmsOutcomeRow).getByText("MIPS 112 · CMS125 · Breast Cancer Screening", { exact: true })).toBeInTheDocument();
+
+    // OSHA measure-detail row
     const oshaOutcomeRow = document.getElementById("measure-audiogram")!;
     expect(within(oshaOutcomeRow).getByText("Annual Audiogram Completed", { exact: true })).toBeInTheDocument();
     expect(within(oshaOutcomeRow).queryByText(/^MIPS/)).not.toBeInTheDocument();

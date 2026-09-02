@@ -71,15 +71,15 @@ describe("CaseDetailPage crosswalk identity rendering", () => {
     });
   });
 
-  it("renders crosswalk label MIPS 112 · CMS125 · Breast Cancer Screening for cms125 case", async () => {
+  it("renders crosswalk label MIPS 112 · CMS125 · Breast Cancer Screening for cms125 case in both mobile and desktop views", async () => {
     render(<CaseDetailPage />);
     await waitFor(() => {
       const elements = screen.getAllByText("MIPS 112 · CMS125 · Breast Cancer Screening");
-      expect(elements.length).toBeGreaterThanOrEqual(1);
+      expect(elements).toHaveLength(2);
     });
   });
 
-  it("renders plain name for an OSHA measure without identity crosswalk", async () => {
+  it("renders plain name for an OSHA measure without identity crosswalk in both mobile and desktop views", async () => {
     get.mockImplementation((url: string) => {
       if (url === "/api/measures") {
         return Promise.resolve([
@@ -128,7 +128,7 @@ describe("CaseDetailPage crosswalk identity rendering", () => {
     render(<CaseDetailPage />);
     await waitFor(() => {
       const elements = screen.getAllByText("Annual Audiogram Completed", { exact: true });
-      expect(elements.length).toBeGreaterThanOrEqual(1);
+      expect(elements).toHaveLength(2);
     });
     expect(screen.queryByText(/^MIPS/)).not.toBeInTheDocument();
   });

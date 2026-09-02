@@ -21,6 +21,7 @@ import { replaceLiveDirectory } from "../engine/ingress/webchart/live-directory.
 const dbPath = join(tmpdir(), `workwell-employees-${crypto.randomUUID()}.sqlite`);
 let env: { DB: unknown };
 let caseId: string;
+let cmsCaseId: string;
 
 const get = (path: string) => handleEmployees(new Request(`http://x${path}`, { method: "GET" }), env as never);
 
@@ -63,6 +64,8 @@ before(async () => {
   const store = new SqliteCaseStore(db);
   const c = await store.upsertFromOutcome({ runId: run.id, subjectId: "emp-006", measureId: "audiogram", evaluationPeriod: "2026-06-13", outcomeStatus: "OVERDUE" });
   caseId = c!.id;
+  const cmsCase = await store.upsertFromOutcome({ runId: run.id, subjectId: "emp-006", measureId: "cms125", evaluationPeriod: "2026-06-13", outcomeStatus: "MISSING_DATA" });
+  cmsCaseId = cmsCase!.id;
   // an audit event tied to the case so the profile timeline has an entry
   await new SqliteCaseEventStore(db).appendAudit({
     eventType: "CASE_CREATED",
@@ -92,7 +95,7 @@ test("GET /api/employees/:id/profile returns identity + outcomes + open cases + 
     site: string;
     active: boolean;
     measureOutcomes: Array<{ measureId: string; measureName: string; outcomeStatus: string; daysSinceLastExam: number | null; daysUntilDue: number | null; openCaseId: string | null }>;
-    openCases: Array<{ caseId: string; outcomeStatus: string }>;
+    openCases: Array<{ caseId: string; measureId: string; outcomeStatus: string }>;
     recentAuditEvents: Array<{ eventType: string; summary: string }>;
   };
   assert.equal(p.externalId, "emp-006");
@@ -110,7 +113,13 @@ test("GET /api/employees/:id/profile returns identity + outcomes + open cases + 
   const cms125 = p.measureOutcomes.find((o) => o.measureId === "cms125")!;
   assert.equal(cms125.measureId, "cms125");
   assert.equal(cms125.measureName, "Breast Cancer Screening");
-  assert.ok(p.openCases.some((c) => c.caseId === caseId));
+  assert.equal(cms125.openCaseId, cmsCaseId, "cms125 outcome links its open case");
+  const audiogramCase = p.openCases.find((c) => c.caseId === caseId);
+  assert.ok(audiogramCase);
+  assert.equal(audiogramCase.measureId, "audiogram");
+  const cmsCase = p.openCases.find((c) => c.caseId === cmsCaseId);
+  assert.ok(cmsCase);
+  assert.equal(cmsCase.measureId, "cms125");
   assert.ok(p.recentAuditEvents.some((e) => e.eventType === "CASE_CREATED" && /opened a case/.test(e.summary)));
 });
 

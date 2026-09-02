@@ -82,4 +82,3 @@ export function useMeasureIdentities() {
 
   return { identities, labelFor, loading, error, refetch: fetchIdentities };
 }
-

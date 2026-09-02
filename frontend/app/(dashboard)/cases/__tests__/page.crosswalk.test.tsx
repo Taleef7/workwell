@@ -1,5 +1,5 @@
 import React from "react";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import CasesPage from "../page";
 
@@ -101,14 +101,40 @@ describe("CasesPage crosswalk identity rendering", () => {
     });
   });
 
-  it("renders crosswalk label MIPS 112 · CMS125 · Breast Cancer Screening for cms125 case and plain name for audiogram", async () => {
+  it("renders crosswalk label MIPS 112 · CMS125 · Breast Cancer Screening for cms125 case and plain name for audiogram in cards and table views", async () => {
     render(<CasesPage />);
     await waitFor(() => {
-      const elements = screen.getAllByText("MIPS 112 · CMS125 · Breast Cancer Screening");
-      expect(elements.length).toBeGreaterThanOrEqual(1);
+      expect(screen.getByRole("heading", { name: "Alice Walker" })).toBeInTheDocument();
     });
 
-    const audiogramElements = screen.getAllByText("Annual Audiogram Completed", { exact: true });
-    expect(audiogramElements.length).toBeGreaterThanOrEqual(1);
+    // 1. Cards view (default): assert CMS label and OSHA plain name inside the respective cards
+    const aliceCard = screen.getByRole("heading", { name: "Alice Walker" }).closest<HTMLElement>("div.rounded-2xl")!;
+    expect(aliceCard).toBeInTheDocument();
+    expect(within(aliceCard).getByText("MIPS 112 · CMS125 · Breast Cancer Screening")).toBeInTheDocument();
+
+    const bobCard = screen.getByRole("heading", { name: "Bob Builder" }).closest<HTMLElement>("div.rounded-2xl")!;
+    expect(bobCard).toBeInTheDocument();
+    expect(within(bobCard).getByText("Annual Audiogram Completed", { exact: true })).toBeInTheDocument();
+    expect(within(bobCard).queryByText(/^MIPS/)).not.toBeInTheDocument();
+
+    // 2. Switch to table view: click the 'table' view button
+    fireEvent.click(screen.getByRole("button", { name: "table" }));
+
+    // Assert inside the table cells for each row
+    const aliceLink = screen.getByRole("link", { name: "Alice Walker" });
+    const aliceRow = aliceLink.closest<HTMLTableRowElement>("tr")!;
+    expect(aliceRow).toBeInTheDocument();
+    const cmsCell = within(aliceRow).getByText("MIPS 112 · CMS125 · Breast Cancer Screening");
+    expect(cmsCell).toBeInTheDocument();
+    expect(cmsCell.tagName).toBe("TD");
+
+    const bobLink = screen.getByRole("link", { name: "Bob Builder" });
+    const bobRow = bobLink.closest<HTMLTableRowElement>("tr")!;
+    expect(bobRow).toBeInTheDocument();
+    const oshaCell = within(bobRow).getByText("Annual Audiogram Completed", { exact: true });
+    expect(oshaCell).toBeInTheDocument();
+    expect(oshaCell.tagName).toBe("TD");
+    expect(within(bobRow).queryByText(/^MIPS/)).not.toBeInTheDocument();
   });
-});
+}
+);
