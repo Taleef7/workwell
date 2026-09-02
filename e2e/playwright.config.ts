@@ -2,6 +2,7 @@ import { defineConfig, devices } from "@playwright/test";
 
 export default defineConfig({
   testDir: "./tests",
+  globalSetup: "./global-setup.ts",
   timeout: 60_000,
   retries: 1,
   workers: 1,
@@ -17,6 +18,13 @@ export default defineConfig({
   projects: [
     {
       name: "chromium",
+      use: { ...devices["Desktop Chrome"] },
+      testIgnore: "tests/maui/**",
+    },
+    {
+      name: "maui",
+      testDir: "./tests/maui",
+      testMatch: "tests/maui/**/*.spec.ts",
       use: { ...devices["Desktop Chrome"] },
     },
   ],
