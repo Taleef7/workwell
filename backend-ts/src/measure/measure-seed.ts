@@ -68,7 +68,7 @@ async function deprecateLegacyOfficialRows(store: MeasureStore, events: CaseEven
   for (const { legacyId, catalogId } of LEGACY_OFFICIAL_IDS) {
     const row = await store.getLatest(legacyId);
     const reason = `superseded by ${catalogId} (catalog id rename, 2026-09)`;
-    if (!row) continue;
+    if (!row || !(await store.getLatest(catalogId))) continue;
     const audit: AppendAuditInput = {
       eventType: "MEASURE_DEPRECATED",
       entityType: "measure_version",
@@ -90,8 +90,8 @@ async function deprecateLegacyOfficialRows(store: MeasureStore, events: CaseEven
       console.warn(`[measure-seed] legacy row ${legacyId} does not match the seed fingerprint; not deprecated, ${catalogId} coexists with it`);
       continue;
     }
+    if (!(await events.hasAuditEvent(audit))) await events.appendAudit(audit);
     await store.setVersionStatus(legacyId, row.versionId, { status: "Deprecated" });
-    await events.appendAudit(audit);
   }
 }
 
@@ -104,12 +104,26 @@ async function deprecateLegacyOfficialRows(store: MeasureStore, events: CaseEven
  */
 export async function seedMeasureStore(store: MeasureStore, cqlOf: (measureId: string) => string, events: CaseEventStore): Promise<void> {
   const empty = await store.isEmpty();
-  await deprecateLegacyOfficialRows(store, events);
   for (const m of MEASURE_CATALOG) {
     // Fast path on a fresh store: seed everything. On an already-seeded store, back-fill ONLY
     // catalog measures missing from the store (e.g. adult_immunization, added after the initial
     // seed — #76). Never overwrite an existing row: create/lifecycle edits are the source of truth.
     if (!empty && (await store.getLatest(m.id)) !== null) continue;
+    if (!empty) {
+      // Existing-store catalog back-fills are audited; fresh boot intentionally keeps its historical
+      // no-audit path for the full 63-row seed.
+      const audit: AppendAuditInput = {
+        eventType: "MEASURE_CREATED",
+        entityType: "measure_version",
+        entityId: `${m.id}-${m.version}`,
+        actor: "system",
+        refRunId: null,
+        refCaseId: null,
+        refMeasureVersionId: `${m.id}-${m.version}`,
+        payload: { measureId: m.id, version: m.version, reason: "catalog back-fill" },
+      };
+      if (!(await events.hasAuditEvent(audit))) await events.appendAudit(audit);
+    }
     await store.seedMeasure({
       measureId: m.id,
       name: m.name,
@@ -126,6 +140,8 @@ export async function seedMeasureStore(store: MeasureStore, cqlOf: (measureId: s
       changeSummary: "Seeded measure version",
     });
   }
+
+  await deprecateLegacyOfficialRows(store, events);
 
   // Idempotent promotion backfill (E10.6): `hepatitis_b_vaccination_series` existed as an Approved,
   // catalog-only row before it became a runnable Active measure. seedMeasure() above skips existing

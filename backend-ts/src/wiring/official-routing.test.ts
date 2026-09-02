@@ -8,6 +8,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { isOfficialRouted, officialMeasureIds } from "./official-routing.ts";
 import { officialRoutingProblems } from "./executor-router.ts";
+import { loadOfficialArtifact } from "./official-artifacts.ts";
+import { officialMeasureSemantics } from "./official-measure-semantics.ts";
 
 test("unset or blank means NO measure is official-routed (the demo-stack default)", () => {
   for (const env of [{}, { WORKWELL_OFFICIAL_MEASURES: "" }, { WORKWELL_OFFICIAL_MEASURES: "   " }]) {
@@ -38,9 +40,11 @@ test("a non-string value is ignored rather than coerced", () => {
 test("cms130 and cms165 construct without a missing-semantics routing problem", () => {
   for (const catalogId of ["cms130", "cms165"]) {
     const problems = officialRoutingProblems({ WORKWELL_OFFICIAL_MEASURES: catalogId });
+    assert.ok(loadOfficialArtifact(catalogId), `${catalogId} artifact must load before routing checks run`);
+    assert.ok(officialMeasureSemantics(catalogId), `${catalogId} semantics must be recorded`);
     assert.ok(
       !problems.some((problem) => problem.includes("no recorded numerator semantics")),
-      `${catalogId} should have reviewed semantics: ${JSON.stringify(problems)}`,
+      `${catalogId} semantics check must be reached: ${JSON.stringify(problems)}`,
     );
   }
 });

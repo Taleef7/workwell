@@ -154,11 +154,19 @@ longer refuses them for missing semantics. The rows stay Draft/NOT_COMPILED; run
 official-only Active state, the synthetic corpus and the flip gate are the next slices, in the order
 the reviewed plan sets.
 
-**Planning record.** Flash inventoried the pipeline; Luna drafted seven slices; Sol's spec review found
-14 issues, two critical (the plan had omitted the CMS130/CMS165 semantics entirely, and left pre-flip
+**Planning record.** An inventory pass mapped the pipeline; a drafted plan cut it into seven slices; an
+adversarial spec review found 14 issues, two critical (the plan had omitted the CMS130/CMS165 semantics entirely, and left pre-flip
 Maui behaviour undefined); the owner chose the rename over an alias layer and accepted that the three
-rows are visible on TWH's catalog. Gemini's meter ran out mid-evening (429), so this slice finished on
-Codex.
+rows are visible on TWH's catalog. The secondary delegate meter ran out mid-evening, so this slice
+finished on the primary one.
+
+**Review-driven hardening of the seed.** The deprecation audit is written *before* the status change
+(the repo's audit-before-state contract), successors are inserted before predecessors are deprecated,
+rows back-filled into an existing database now get their own audit event (a fresh first boot stays
+unaudited, as it always was), and an edited legacy row is asserted to stay Draft. Known limit, recorded
+rather than fixed: two worker processes seeding concurrently are not coordinated and `audit_events`
+has no unique constraint, so a duplicate deprecation event is possible under a race — schema is
+owner-owned.
 
 outer            # prints nothing; the script exits 1
 ```

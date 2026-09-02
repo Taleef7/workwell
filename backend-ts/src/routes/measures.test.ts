@@ -15,6 +15,7 @@ import { rmSync } from "node:fs";
 import { createSqliteD1 } from "@mieweb/cloud-local";
 import { handleMeasures } from "./measures.ts";
 import { SqliteCaseEventStore } from "../stores/sqlite/case-event-store-sqlite.ts";
+import { SqliteMeasureStore } from "../stores/sqlite/measure-store-sqlite.ts";
 import { SqliteRunStore } from "../stores/sqlite/run-store-sqlite.ts";
 import { SqliteOutcomeStore } from "../stores/sqlite/outcome-store-sqlite.ts";
 import { runProfileChild } from "../test-support/run-profile-child.ts";
@@ -380,6 +381,37 @@ test("concurrent cold-start requests seed the store once (no duplicate-PK 500)",
   for (const res of both) {
     assert.equal(res?.status, 200, "no 500 from a racing duplicate seed");
     assert.equal(((await res!.json()) as unknown[]).length, 63, "seeded exactly once");
+  }
+});
+
+test("a rejected seed is retried on the next request", async () => {
+  const retryDbPath = join(tmpdir(), `workwell-measures-retry-${crypto.randomUUID()}.sqlite`);
+  const retryDb = await createSqliteD1(retryDbPath);
+  const retryEnv = { DB: retryDb } as never;
+  const originalSeedMeasure = SqliteMeasureStore.prototype.seedMeasure;
+  let rejectOnce = true;
+  SqliteMeasureStore.prototype.seedMeasure = async function (input) {
+    if (rejectOnce) {
+      rejectOnce = false;
+      throw new Error("transient seed failure");
+    }
+    return originalSeedMeasure.call(this, input);
+  };
+  try {
+    await assert.rejects(
+      () => handleMeasures(new Request("http://x/api/measures", { method: "GET" }), retryEnv, "a@b.c"),
+      /transient seed failure/,
+    );
+    const res = await handleMeasures(new Request("http://x/api/measures", { method: "GET" }), retryEnv, "a@b.c");
+    assert.equal(res?.status, 200);
+    assert.equal(((await res!.json()) as unknown[]).length, 63);
+  } finally {
+    SqliteMeasureStore.prototype.seedMeasure = originalSeedMeasure;
+    try {
+      rmSync(retryDbPath, { force: true });
+    } catch {
+      /* best effort */
+    }
   }
 });
 

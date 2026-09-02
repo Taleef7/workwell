@@ -18,6 +18,7 @@ import { RUN_STORE_FLOOR_DDL } from "../stores/sqlite/schema.ts";
 import { SqliteMeasureStore } from "../stores/sqlite/measure-store-sqlite.ts";
 import { SqliteCaseEventStore } from "../stores/sqlite/case-event-store-sqlite.ts";
 import type { CaseEventStore } from "../stores/case-event-store.ts";
+import type { MeasureStore } from "../stores/measure-store.ts";
 import { MEASURE_CATALOG } from "./measure-catalog.ts";
 import { seedMeasureStore } from "./measure-seed.ts";
 
@@ -42,6 +43,58 @@ after(() => {
     }
   }
 });
+
+const LEGACY_ROWS = [
+  { legacyId: "cms2v15", catalogId: "cms2" },
+  { legacyId: "cms130v14", catalogId: "cms130" },
+  { legacyId: "cms165v14", catalogId: "cms165" },
+] as const;
+
+async function seedLegacyRow(store: MeasureStore, legacyId: string, catalogId: string, edited = false): Promise<void> {
+  const catalog = MEASURE_CATALOG.find((m) => m.id === catalogId)!;
+  await store.seedMeasure({
+    measureId: legacyId,
+    name: catalog.name,
+    policyRef: catalog.policyRef,
+    owner: catalog.owner,
+    tags: [...catalog.tags],
+    versionId: `${legacyId}-${catalog.version}`,
+    version: catalog.version,
+    status: "Draft",
+    spec: edited ? { ...catalog.spec, description: `${catalog.spec.description} (edited)` } : catalog.spec,
+    cqlText: "",
+    compileStatus: catalog.compileStatus,
+    createdAt: "2026-02-01T00:00:00.000Z",
+    changeSummary: "Seeded measure version",
+  });
+}
+
+async function seedCatalogExcept(store: MeasureStore, omittedId: string): Promise<void> {
+  const TIER: Record<string, string> = {
+    Active: "2026-06-10T00:00:00.000Z",
+    Approved: "2026-04-01T00:00:00.000Z",
+    Draft: "2026-02-01T00:00:00.000Z",
+    Deprecated: "2025-06-01T00:00:00.000Z",
+  };
+  for (const m of MEASURE_CATALOG) {
+    if (m.id === omittedId) continue;
+    await store.seedMeasure({
+      measureId: m.id,
+      name: m.name,
+      policyRef: m.policyRef,
+      owner: m.owner,
+      tags: [...m.tags],
+      versionId: `${m.id}-${m.version}`,
+      version: m.version,
+      status: m.status,
+      spec: m.spec,
+      cqlText: "",
+      compileStatus: m.compileStatus,
+      createdAt: TIER[m.status]!,
+      changeSummary: "Seeded measure version",
+    });
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Test A1: Fresh store seeds all catalog entries
@@ -262,8 +315,8 @@ test("seedMeasureStore — deprecates a legacy cms2v15 row once and audits it on
   await seedMeasureStore(store, () => "", events);
   assert.equal((await store.getLatest("cms2v15"))?.status, "Deprecated");
   const firstAuditRows = (await db.prepare(
-    "SELECT event_type, entity_type, entity_id, ref_measure_version_id, payload_json FROM audit_events",
-  ).all<{ event_type: string; entity_type: string; entity_id: string; ref_measure_version_id: string; payload_json: string }>()).results ?? [];
+    "SELECT event_type, entity_type, entity_id, ref_measure_version_id, payload_json FROM audit_events WHERE entity_id = ? AND ref_measure_version_id = ?",
+  ).bind("cms2v15-v1.0", "cms2v15-v1.0").all<{ event_type: string; entity_type: string; entity_id: string; ref_measure_version_id: string; payload_json: string }>()).results ?? [];
   assert.equal(firstAuditRows.length, 1);
   assert.equal(firstAuditRows[0]!.event_type, "MEASURE_DEPRECATED");
   assert.equal(firstAuditRows[0]!.entity_type, "measure_version");
@@ -276,8 +329,125 @@ test("seedMeasureStore — deprecates a legacy cms2v15 row once and audits it on
 
   await seedMeasureStore(store, () => "", events);
   assert.equal((await store.getLatest("cms2v15"))?.status, "Deprecated");
-  const secondAuditRows = (await db.prepare("SELECT event_type FROM audit_events").all<{ event_type: string }>()).results ?? [];
+  const secondAuditRows = (await db.prepare("SELECT event_type FROM audit_events WHERE entity_id = ? AND ref_measure_version_id = ?").bind("cms2v15-v1.0", "cms2v15-v1.0").all<{ event_type: string }>()).results ?? [];
   assert.equal(secondAuditRows.length, 1, "the second seed must not append another deprecation audit");
+});
+
+test("seedMeasureStore — audits before state and retries a failed status write without duplicating", async () => {
+  const db = await freshDb();
+  const realStore = new SqliteMeasureStore(db);
+  const events = new SqliteCaseEventStore(db);
+  await seedLegacyRow(realStore, "cms2v15", "cms2");
+
+  const setVersionStatus = realStore.setVersionStatus.bind(realStore);
+  let failStatusOnce = true;
+  realStore.setVersionStatus = async (measureId, versionId, change) => {
+    if (failStatusOnce && measureId === "cms2v15") {
+      failStatusOnce = false;
+      throw new Error("transient status failure");
+    }
+    return setVersionStatus(measureId, versionId, change);
+  };
+
+  await assert.rejects(() => seedMeasureStore(realStore, () => "", events), /transient status failure/);
+  assert.equal((await realStore.getLatest("cms2v15"))?.status, "Draft");
+  const afterAudit = await db
+    .prepare("SELECT event_type FROM audit_events WHERE entity_id = ? AND ref_measure_version_id = ?")
+    .bind("cms2v15-v1.0", "cms2v15-v1.0")
+    .all<{ event_type: string }>();
+  assert.deepEqual(((afterAudit.results ?? []) as Array<{ event_type: string }>).map((row) => row.event_type), ["MEASURE_DEPRECATED"]);
+
+  await seedMeasureStore(realStore, () => "", events);
+  assert.equal((await realStore.getLatest("cms2v15"))?.status, "Deprecated");
+  const finalAudit = await db
+    .prepare("SELECT event_type FROM audit_events WHERE entity_id = ? AND ref_measure_version_id = ?")
+    .bind("cms2v15-v1.0", "cms2v15-v1.0")
+    .all<{ event_type: string }>();
+  assert.deepEqual(((finalAudit.results ?? []) as Array<{ event_type: string }>).map((row) => row.event_type), ["MEASURE_DEPRECATED"]);
+});
+
+test("seedMeasureStore — deprecates all three untouched legacy official rows exactly once", async () => {
+  const db = await freshDb();
+  const store = new SqliteMeasureStore(db);
+  const events = new SqliteCaseEventStore(db);
+  for (const { legacyId, catalogId } of LEGACY_ROWS) await seedLegacyRow(store, legacyId, catalogId);
+
+  await seedMeasureStore(store, () => "", events);
+  for (const { legacyId } of LEGACY_ROWS) {
+    assert.equal((await store.getLatest(legacyId))?.status, "Deprecated");
+    const rows = await db
+      .prepare("SELECT event_type FROM audit_events WHERE entity_id = ? AND ref_measure_version_id = ?")
+      .bind(`${legacyId}-v1.0`, `${legacyId}-v1.0`)
+      .all<{ event_type: string }>();
+    assert.deepEqual(((rows.results ?? []) as Array<{ event_type: string }>).map((row) => row.event_type), ["MEASURE_DEPRECATED"], legacyId);
+  }
+
+  await seedMeasureStore(store, () => "", events);
+  for (const { legacyId } of LEGACY_ROWS) {
+    const rows = await db
+      .prepare("SELECT event_type FROM audit_events WHERE entity_id = ? AND ref_measure_version_id = ?")
+      .bind(`${legacyId}-v1.0`, `${legacyId}-v1.0`)
+      .all<{ event_type: string }>();
+    assert.equal((rows.results ?? []).length, 1, `${legacyId} must remain exactly-once`);
+  }
+});
+
+test("seedMeasureStore — leaves an edited legacy row Draft with no deprecation event", async () => {
+  const db = await freshDb();
+  const store = new SqliteMeasureStore(db);
+  const events = new SqliteCaseEventStore(db);
+  await seedLegacyRow(store, "cms2v15", "cms2", true);
+
+  await seedMeasureStore(store, () => "", events);
+  assert.equal((await store.getLatest("cms2v15"))?.status, "Draft");
+  const rows = await db
+    .prepare("SELECT event_type FROM audit_events WHERE entity_id = ? AND ref_measure_version_id = ?")
+    .bind("cms2v15-v1.0", "cms2v15-v1.0")
+    .all<{ event_type: string }>();
+  assert.deepEqual(rows.results ?? [], []);
+});
+
+test("seedMeasureStore — does not deprecate a legacy row when successor insertion fails", async () => {
+  const db = await freshDb();
+  const store = new SqliteMeasureStore(db);
+  const events = new SqliteCaseEventStore(db);
+  await seedLegacyRow(store, "cms2v15", "cms2");
+
+  const seedMeasure = store.seedMeasure.bind(store);
+  store.seedMeasure = async (input) => {
+    if (input.measureId === "cms2") throw new Error("successor insertion failure");
+    return seedMeasure(input);
+  };
+
+  await assert.rejects(() => seedMeasureStore(store, () => "", events), /successor insertion failure/);
+  assert.equal((await store.getLatest("cms2v15"))?.status, "Draft");
+});
+
+test("seedMeasureStore — audits one catalog back-fill and none on fresh boot", async () => {
+  const existingDb = await freshDb();
+  const existingStore = new SqliteMeasureStore(existingDb);
+  const existingEvents = new SqliteCaseEventStore(existingDb);
+  await seedCatalogExcept(existingStore, "cms2");
+
+  await seedMeasureStore(existingStore, () => "", existingEvents);
+  const backfillRows = await existingDb
+    .prepare("SELECT event_type, entity_type, entity_id, actor, payload_json FROM audit_events WHERE entity_id = ?")
+    .bind("cms2-v1.0")
+    .all<{ event_type: string; entity_type: string; entity_id: string; actor: string; payload_json: string }>();
+  assert.equal((backfillRows.results ?? []).length, 1);
+  assert.deepEqual(backfillRows.results?.[0], {
+    event_type: "MEASURE_CREATED",
+    entity_type: "measure_version",
+    entity_id: "cms2-v1.0",
+    actor: "system",
+    payload_json: JSON.stringify({ measureId: "cms2", version: "v1.0", reason: "catalog back-fill" }),
+  });
+
+  const freshDbInstance = await freshDb();
+  const freshStore = new SqliteMeasureStore(freshDbInstance);
+  await seedMeasureStore(freshStore, () => "", new SqliteCaseEventStore(freshDbInstance));
+  const freshAudits = await freshDbInstance.prepare("SELECT event_type FROM audit_events").all<{ event_type: string }>();
+  assert.deepEqual(freshAudits.results ?? [], [], "fresh 63-row seed keeps its existing no-audit path");
 });
 
 test("seedMeasureStore — deprecates an untouched legacy row when persisted spec keys are reordered", async () => {
@@ -356,7 +526,7 @@ test("seedMeasureStore — repairs a missing legacy deprecation audit on retry",
   });
 
   await assert.rejects(() => seedMeasureStore(store, () => "", events), /transient audit failure/);
-  assert.equal((await store.getLatest("cms2v15"))?.status, "Deprecated");
+  assert.equal((await store.getLatest("cms2v15"))?.status, "Draft");
 
   await seedMeasureStore(store, () => "", events);
   const auditRows = await db
