@@ -27,6 +27,17 @@ The authored cms122/cms125 subsets stay in the catalog for now (#377 retires the
 sharpest evidence yet for that issue: an authored subset that is right only when the terminology
 service is down is not a subset, it is a coincidence.
 
+## 2026-09-02 (night) — Maui demo account restriction enforced per request
+
+While login and refresh previously restricted authentication on the Maui deployment profile to
+`@maui.workwell.dev` accounts, access tokens minted earlier (such as the public sandbox's
+`viewer@workwell.dev`, with a 30-day TTL) continued to be accepted because `extractPrincipal`
+only verified JWT signature and expiry. The worker's authorization gate now re-resolves
+`findDemoUser(principal.email)` immediately after extracting a principal, setting it to null
+if not allowed on the active profile so that protected routes return 401 unauthenticated.
+To support this cleanly, `findDemoUser` accepts a defaulted `profileId = DEPLOYMENT_PROFILE.id`
+parameter so profile scoping is tested in-process as well as end-to-end via child process.
+
 ## 2026-09-02 — the segment seed follows the deployment profile
 
 The demo segment seed (`segment-seed.ts`) now selects its cohort set by `WORKWELL_INSTANCE` instead of hardcoding

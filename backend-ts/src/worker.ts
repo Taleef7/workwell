@@ -47,6 +47,7 @@ import { handleAuditor } from "./routes/auditor.ts";
 import { createAuthHandler, type AuthHandler, type RefreshTokenRevocation } from "./routes/auth.ts";
 import { createJwt, type JwtService } from "./auth/jwt.ts";
 import { authorize, extractPrincipal } from "./auth/authorize.ts";
+import { findDemoUser } from "./auth/demo-users.ts";
 import { assertSafeStartup, type StartupEnv } from "./config/startup-safety.ts";
 import { parseAllowedOrigins, preflightResponse, withCors } from "./config/cors.ts";
 import { formatSeamLogLine } from "./config/seam-inventory.ts";
@@ -229,7 +230,10 @@ async function route(req: Request, env: Env, ctx: CloudExecutionContext): Promis
   let principalRole: string | null = null;
   const enforceAuth = authEnabled(env);
   if (enforceAuth) {
-    const principal = extractPrincipal(req, getVerifier(env)!);
+    let principal = extractPrincipal(req, getVerifier(env)!);
+    if (principal && !findDemoUser(principal.email)) {
+      principal = null;
+    }
     const decision = authorize(req.method, pathname, principal);
     if (!decision.ok) {
       return json({ error: decision.status === 403 ? "forbidden" : "unauthenticated" }, decision.status!);

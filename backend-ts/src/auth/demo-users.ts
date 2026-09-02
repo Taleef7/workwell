@@ -40,11 +40,11 @@ export const DEMO_USERS: readonly DemoUser[] = [
 ];
 
 /** Case-insensitive lookup, matching the Java `LOWER(email) = LOWER(?)` query. */
-export function findDemoUser(email: string): DemoUser | null {
+export function findDemoUser(email: string, profileId = DEPLOYMENT_PROFILE.id): DemoUser | null {
   const needle = email.trim().toLowerCase();
   const user = DEMO_USERS.find((u) => u.email.toLowerCase() === needle) ?? null;
   if (!user) return null;
-  if (DEPLOYMENT_PROFILE.id === "maui" && !user.email.toLowerCase().endsWith("@maui.workwell.dev")) {
+  if (profileId === "maui" && !user.email.toLowerCase().endsWith("@maui.workwell.dev")) {
     return null;
   }
   return user;
