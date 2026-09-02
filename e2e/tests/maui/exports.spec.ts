@@ -21,15 +21,12 @@ test.describe("Maui case CSV export", () => {
     const { token } = (await login.json()) as { token: string };
     const authHeaders = { Authorization: `Bearer ${token}` };
 
-    const rosterRes = await request.get(`${API_BASE}/api/compliance?limit=100`, { headers: authHeaders });
+    const rosterRes = await request.get(`${API_BASE}/api/compliance/roster?pageSize=100`, { headers: authHeaders });
     expect(rosterRes.ok()).toBe(true);
-    const rosterPayload = await rosterRes.json();
-    const rosterRows = Array.isArray(rosterPayload)
-      ? rosterPayload
-      : (rosterPayload.rows ?? rosterPayload.data?.rows ?? rosterPayload.data ?? rosterPayload.items ?? []);
+    const rosterPayload = (await rosterRes.json()) as { rows?: Array<{ subject?: { name?: string } }> };
     const rosterNames = new Set(
-      rosterRows
-        .map((row: { employeeName?: string; patientName?: string; name?: string }) => row.employeeName ?? row.patientName ?? row.name)
+      (rosterPayload.rows ?? [])
+        .map((row) => row.subject?.name)
         .filter((name: unknown): name is string => typeof name === "string"),
     );
     expect(rosterNames.size, "Maui compliance roster should provide patient names").toBeGreaterThan(0);

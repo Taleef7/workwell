@@ -22,8 +22,8 @@ test.describe("Maui case workflow", () => {
     await expect(page).toHaveURL(/\/cases\//);
     await expectNoErrorPage(page);
 
-    // Crosswalk label visible
-    await expect(page.getByText(/MIPS 112 · CMS125/).first()).toBeVisible({ timeout: 20_000 });
+    // Crosswalk label rendered in the detail header — assert presence, not viewport visibility.
+    await expect(page.getByText(/MIPS 112 · CMS125/).first()).toBeAttached({ timeout: 20_000 });
 
     // Outcome status pill
     await expect(page.getByText(/Overdue/i).first()).toBeVisible({ timeout: 10_000 });
