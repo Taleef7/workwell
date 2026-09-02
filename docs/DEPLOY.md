@@ -800,9 +800,16 @@ the two Maui-only secrets onto the runtime names `DATABASE_URL` and `WORKWELL_AU
 It sets `WORKWELL_INSTANCE=maui` and passes `NEXT_PUBLIC_SUBJECT_TERM=patient` and
 `NEXT_PUBLIC_PUBLIC_DEMO=off` while building the frontend image (suppressing public sandbox links,
 walkthrough videos, and GitHub source links, and making Sign in the primary CTA).
-`WORKWELL_OFFICIAL_MEASURES` is deliberately **unset**; Maui uses authored CQL until
-each pilot measure passes its own flip gate. Maui has no self-heal reconciler, so dispatch the workflow
-again for a replacement or recovery.
+`WORKWELL_OFFICIAL_MEASURES` is **`cms122,cms125`** (since 2026-09-02) — the same two official
+artifacts TWH routes, vendored into the Maui image with their terminology sidecars by the same build
+step. Each further pilot measure stays authored until it passes its own flip gate. The two were flipped
+on Maui after the authored `cms125` subset was caught depending on VSAC reachability: its numerator
+retrieves a *Procedure* by the Mammography value set, VSAC's expansion of that set is LOINC-only, and
+the bundled CPT fallback only fires when VSAC returns nothing — so the same roster scored 38 compliant
+one day and 0 the next. The official artifact reads the LOINC-coded Observation and is deterministic.
+Gate evidence: the official executors evaluate all 48 Maui patients to their designed distribution
+(38 compliant / 7 overdue / 3 excluded per measure, no mismatches). Maui has no self-heal reconciler,
+so dispatch the workflow again for a replacement or recovery.
 
 Evidence bytes deliberately remain on the in-container `fs` binding for now; the Maui workflow omits the
 four `WORKWELL_BUCKET_S3_*` variables, so evidence is lost whenever the container is recreated.
