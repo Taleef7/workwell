@@ -122,6 +122,12 @@ test("get_case unknown UUID → CASE_NOT_FOUND safe payload", async () => {
   assert.equal(payload.code, "CASE_NOT_FOUND");
 });
 
+test("explain_outcome unknown UUID → CASE_NOT_FOUND safe payload", async () => {
+  const { payload, isError } = await call("explain_outcome", { caseId: crypto.randomUUID() });
+  assert.equal(isError, false);
+  assert.deepEqual(payload, { error: true, code: "CASE_NOT_FOUND", message: "Case not found" });
+});
+
 test("list_cases returns snake_case rows; status filter scopes", async () => {
   const { payload } = await call("list_cases", { status: "open" });
   const results = payload.results as JsonRecord[];

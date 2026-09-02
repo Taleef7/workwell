@@ -17,6 +17,7 @@ import { handleMeasures } from "./measures.ts";
 import { SqliteCaseEventStore } from "../stores/sqlite/case-event-store-sqlite.ts";
 import { SqliteRunStore } from "../stores/sqlite/run-store-sqlite.ts";
 import { SqliteOutcomeStore } from "../stores/sqlite/outcome-store-sqlite.ts";
+import { runProfileChild } from "../test-support/run-profile-child.ts";
 
 const dbPath = join(tmpdir(), `workwell-measures-${crypto.randomUUID()}.sqlite`);
 let env: { DB: unknown };
@@ -51,6 +52,45 @@ interface CatalogRow {
   statusUpdatedBy: string;
   identity: { cmsId: string; mipsQualityId: string | null } | null;
 }
+
+const profileCatalogScript = `
+  import { createSqliteD1 } from "@mieweb/cloud-local";
+  import { handleMeasures } from "./src/routes/measures.ts";
+
+  const db = await createSqliteD1(":memory:");
+  const env = { DB: db };
+  const list = await handleMeasures(new Request("http://x/api/measures"), env);
+  const rows = await list.json();
+  const detail = await handleMeasures(new Request("http://x/api/measures/cms2v15"), env);
+  console.log(JSON.stringify({
+    listStatus: list.status,
+    count: rows.length,
+    ids: rows.map(r => r.id),
+    draftStatus: rows.find(r => r.id === "cms2v15")?.status ?? null,
+    detailStatus: detail.status,
+    detailBody: await detail.json(),
+  }));
+`;
+
+test("scoped profile (Maui) — measures catalog exposes only runnable rows and hides draft detail", () => {
+  const output = runProfileChild("maui", profileCatalogScript);
+  assert.equal(output.listStatus, 200);
+  assert.deepEqual((output.ids as string[]).sort(), ["cms122", "cms125", "hypertension"]);
+  assert.equal(output.count, 3);
+  assert.equal(output.draftStatus, null);
+  assert.equal(output.detailStatus, 404);
+  assert.deepEqual(output.detailBody, { error: "not_found", measureId: "cms2v15" });
+});
+
+test("default profile — measures catalog preserves the full catalog and draft detail", () => {
+  const output = runProfileChild(undefined, profileCatalogScript);
+  assert.equal(output.listStatus, 200);
+  assert.equal(output.count, 63);
+  assert.ok((output.ids as string[]).includes("cms2v15"));
+  assert.equal(output.draftStatus, "Draft");
+  assert.equal(output.detailStatus, 200);
+  assert.equal((output.detailBody as { id: string }).id, "cms2v15");
+});
 
 test("GET /api/measures returns the full 63-measure catalog (Measure shape), Active-first", async () => {
   const res = await get("/api/measures");

@@ -219,7 +219,7 @@ export async function buildHierarchyRollup(deps: HierarchyDeps, filters: Hierarc
   let scaleNode: HierarchyNode | null = null;
   if (deps.runStore && (!tenantFilter || tenantFilter === SCALE_TENANT.id)) {
     const scaleRuns = (await deps.runStore.listRuns(100_000))
-      .filter((r) => r.triggeredBy === SCALE_TRIGGER && r.status === "COMPLETED" && isRunnableMeasure(r.scopeId ?? "") && DEPLOYMENT_PROFILE.id === "default")
+      .filter((r) => r.triggeredBy === SCALE_TRIGGER && r.status === "COMPLETED" && DEPLOYMENT_PROFILE.id === "default")
       // Honor the date window: skip scale runs seeded outside the requested [from, to] period so
       // a date-filtered rollup doesn't silently include the full 120k mhn population when it
       // shouldn't (the live branch already filters live outcomes by the same window).

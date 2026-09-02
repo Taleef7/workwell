@@ -49,7 +49,7 @@ import { computeLiteralDiff, literalDiffAvailable } from "../standards/literal-d
 import { CMS122_OFFICIAL_META } from "../standards/cms122-official.ts";
 import { StoreValueSetResolver, type ValueSetResolver } from "@work-well/measure-engine";
 
-import { EMPLOYEES } from "../config/deployment-profile.ts";
+import { DEPLOYMENT_PROFILE, EMPLOYEES, isRunnableMeasure } from "../config/deployment-profile.ts";
 import { createWorkwellEngine } from "../engine/cql/workwell-engine.ts";
 
 interface MeasuresEnv {
@@ -182,7 +182,8 @@ export async function handleMeasures(req: Request, env: MeasuresEnv, actor = "sy
 
   if (pathname === "/api/measures" && req.method === "GET") {
     const records = await (await store(env)).listLatest();
-    return json(listMeasures(records, { status: url.searchParams.get("status"), search: url.searchParams.get("search") }));
+    const visibleRecords = DEPLOYMENT_PROFILE.id === "default" ? records : records.filter((r) => isRunnableMeasure(r.measureId));
+    return json(listMeasures(visibleRecords, { status: url.searchParams.get("status"), search: url.searchParams.get("search") }));
   }
 
   if (pathname === "/api/measures" && req.method === "POST") {
@@ -556,7 +557,9 @@ export async function handleMeasures(req: Request, env: MeasuresEnv, actor = "sy
   const detailId = pathname.match(/^\/api\/measures\/([^/]+)$/)?.[1];
   if (detailId && detailId !== "compile" && req.method === "GET") {
     const r = await (await store(env)).getLatest(detailId);
-    if (!r) return json({ error: "not_found", measureId: detailId }, 404);
+    if (!r || (DEPLOYMENT_PROFILE.id !== "default" && !isRunnableMeasure(r.measureId))) {
+      return json({ error: "not_found", measureId: detailId }, 404);
+    }
     const valueSets = await listValueSetsByVersion(await valueSetStore(env), r.versionId);
     return json(toMeasureDetail(r, valueSets));
   }

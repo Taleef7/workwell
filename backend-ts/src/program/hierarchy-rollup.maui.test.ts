@@ -72,19 +72,18 @@ test("default profile — hierarchy rollup includes all active measures", () => 
   assert.equal(output.allOpenCases, 1, "default profile preserves the open audiogram case");
 });
 
-test("scoped profile (Maui) — hierarchy scale rollup excludes hidden tenant and unrunnable measures", () => {
+test("scoped profile (Maui) — hierarchy scale rollup obeys the deployment profile guard", () => {
   const source = `
     import { buildHierarchyRollup } from "./src/program/hierarchy-rollup.ts";
 
     const runs = [
       { id: "scale-cms122", scopeId: "cms122", triggeredBy: "seed:scale", status: "COMPLETED", startedAt: "2026-07-17T00:00:00.000Z" },
-      { id: "scale-audiogram", scopeId: "audiogram", triggeredBy: "seed:scale", status: "COMPLETED", startedAt: "2026-07-18T00:00:00.000Z" },
     ];
     const deps = {
       outcomeStore: {
         listLatestPopulationOutcomes: async () => [],
         listOutcomesWithRun: async () => [],
-        aggregateScaleRun: async (runId) => [{ status: "COMPLIANT", count: runId === "scale-cms122" ? 5 : 7 }],
+        aggregateScaleRun: async () => [{ status: "COMPLIANT", count: 5 }],
       },
       caseStore: { listCases: async () => [] },
       runStore: { listRuns: async () => runs },
@@ -100,6 +99,34 @@ test("scoped profile (Maui) — hierarchy scale rollup excludes hidden tenant an
   assert.equal(mauiOutput.mhn, 0, "Maui must not expose the hidden mhn subtree even when explicitly requested");
 
   const defaultOutput = runProfileChild(undefined, source);
-  assert.equal(defaultOutput.root, 12, "default profile retains scale counts for active measures");
-  assert.equal(defaultOutput.mhn, 12, "default profile retains the mhn scale subtree");
+  assert.equal(defaultOutput.root, 5, "default profile retains the mhn scale subtree");
+  assert.equal(defaultOutput.mhn, 5, "default profile retains the mhn scale subtree");
+});
+
+test("hierarchy scale rollup uses the profile guard rather than a measure-runnable predicate", () => {
+  const source = `
+    import { buildHierarchyRollup } from "./src/program/hierarchy-rollup.ts";
+
+    const runs = [
+      { id: "scale-catalog-only", scopeId: "catalog-only-draft", triggeredBy: "seed:scale", status: "COMPLETED", startedAt: "2026-07-17T00:00:00.000Z" },
+    ];
+    const deps = {
+      outcomeStore: {
+        listLatestPopulationOutcomes: async () => [],
+        listOutcomesWithRun: async () => [],
+        aggregateScaleRun: async () => [{ status: "COMPLIANT", count: 5 }],
+      },
+      caseStore: { listCases: async () => [] },
+      runStore: { listRuns: async () => runs },
+      webChartEnv: {},
+    };
+    const root = await buildHierarchyRollup(deps, {});
+    console.log(JSON.stringify({ evaluated: root.totals.evaluated }));
+  `;
+
+  const defaultOutput = runProfileChild(undefined, source);
+  assert.equal(defaultOutput.evaluated, 5, "default profile guard admits the completed scale run");
+
+  const mauiOutput = runProfileChild("maui", source);
+  assert.equal(mauiOutput.evaluated, 0, "scoped profile guard excludes the hidden scale tenant");
 });
