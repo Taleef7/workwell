@@ -32,8 +32,11 @@ on:
         default: twh
         required: false
 
+# The event name is part of the group so a manual dispatch (the e2e jobs) is not cancelled by the push
+# or pull_request run that a `git push` of the same branch starts a second later — measured 2026-09-02:
+# three dispatches in a row were "cancelled" before their first step for exactly this reason.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 # Least privilege for all eight jobs. Nothing in this workflow uses GITHUB_TOKEN — no `gh` call, no
