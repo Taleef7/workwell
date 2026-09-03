@@ -4,6 +4,8 @@
  * a priority, and a next-action hint.
  */
 
+import { DEPLOYMENT_PROFILE } from "../config/deployment-profile.ts";
+
 export type CaseDisposition = "OPEN" | "EXCLUDED" | "RESOLVE";
 
 /**
@@ -66,7 +68,9 @@ export function nextActionFor(outcomeStatus: string, measureId: string): string 
     case "DUE_SOON":
       return `Schedule the ${label} before the due date.`;
     case "EXCLUDED":
-      return "Review the active waiver and rerun before it expires.";
+      return DEPLOYMENT_PROFILE.subjectTerm === "patient"
+        ? "Review the documented exclusion and rerun before it lapses."
+        : "Review the active waiver and rerun before it expires.";
     default:
       return "No action required.";
   }

@@ -23,6 +23,7 @@ import { canManageCases } from "@/lib/rbac";
 import { SlaChip } from "@/components/SlaChip";
 import { ChevronRight } from "lucide-react";
 import { useMeasureIdentities } from "@/lib/measure-identity";
+import { formatEvaluationPeriod } from "@/lib/format";
 
 type CaseSummary = {
   caseId: string;
@@ -92,6 +93,7 @@ export default function CasesPage() {
   const view = searchParams.get("view") ?? "all";
   const { user } = useAuth();
   const canManage = canManageCases(user?.role);
+  const isPatientTerm = SUBJECT.singular === "patient";
   const { labelFor: measureLabelFor } = useMeasureIdentities();
   const [cases, setCases] = useState<CaseSummary[]>([]);
   const [measures, setMeasures] = useState<MeasureOption[]>([]);
@@ -422,10 +424,10 @@ export default function CasesPage() {
     <section className="space-y-6">
       <div className="rounded-3xl border border-neutral-800 bg-gradient-to-br from-neutral-900 via-neutral-800 to-neutral-950 p-8 text-white shadow-lg">
         <p className="text-sm uppercase tracking-[0.3em] text-neutral-300">Caseflow</p>
-        <h2 className="mt-2 text-3xl font-semibold">Why Flagged cases</h2>
+        <h2 className="mt-2 text-3xl font-semibold text-white">Why Flagged cases</h2>
         <p className="mt-3 max-w-2xl text-neutral-300">
           Your daily worklist of {SUBJECT.plural} flagged by the latest measure runs. Each card links to the structured
-          evidence that explains why the case is open, including waiver context when an exclusion applies.
+          evidence that explains why the case is open, including {isPatientTerm ? "exclusion" : "waiver"} context when an exclusion applies.
         </p>
       </div>
 
@@ -715,8 +717,8 @@ export default function CasesPage() {
                   </dd>
                 </div>
                 <div className="flex items-center justify-between gap-3">
-                  <dt className="text-neutral-500 dark:text-neutral-400">Period</dt>
-                  <dd className="font-medium">{item.evaluationPeriod}</dd>
+                  <dt className="text-neutral-500 dark:text-neutral-400">{isPatientTerm ? "Measurement year" : "Period"}</dt>
+                  <dd className="font-medium">{isPatientTerm ? formatEvaluationPeriod(item.evaluationPeriod) : item.evaluationPeriod}</dd>
                 </div>
                 {item.slaRemainingDays != null ? (
                   <div className="flex items-center justify-between gap-3">
@@ -729,11 +731,11 @@ export default function CasesPage() {
                     <div className="flex items-start justify-between gap-3">
                       <dt className="text-neutral-500 dark:text-neutral-400">Exclusion reason</dt>
                       <dd className="max-w-[220px] text-right text-xs text-neutral-700 dark:text-neutral-300">
-                        {item.exclusionReason ?? "Excluded by active waiver or exemption."}
+                        {item.exclusionReason ?? (isPatientTerm ? "Excluded by a documented exclusion." : "Excluded by active waiver or exemption.")}
                       </dd>
                     </div>
                     <div className="flex items-center justify-between gap-3">
-                      <dt className="text-neutral-500 dark:text-neutral-400">Waiver</dt>
+                      <dt className="text-neutral-500 dark:text-neutral-400">{isPatientTerm ? "Exclusion" : "Waiver"}</dt>
                       <dd className="text-right text-xs font-medium text-neutral-700 dark:text-neutral-300">
                         {item.waiverExpiresAt ? (
                           <span className={`rounded-full px-2 py-1 ${item.waiverExpired ? "bg-rose-100 text-rose-800 dark:bg-rose-900/30 dark:text-rose-300" : "bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-300"}`}>

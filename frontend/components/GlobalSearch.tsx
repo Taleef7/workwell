@@ -131,7 +131,7 @@ export function GlobalSearch() {
                     <div className="min-w-0">
                       <p className="text-sm font-medium text-neutral-900 dark:text-neutral-100 truncate">{r.name}</p>
                       <p className="text-xs text-neutral-600 dark:text-neutral-400 truncate">
-                        {r.role} · {r.site}
+                        {SUBJECT.singular === "patient" ? r.site : `${r.role} · ${r.site}`}
                       </p>
                     </div>
                     {r.latestOutcome && (

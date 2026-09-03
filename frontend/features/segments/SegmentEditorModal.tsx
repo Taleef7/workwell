@@ -53,7 +53,12 @@ function genId(): string {
 }
 
 const emptyRule = (): EditRule => ({ match: "ANY", conditions: [] });
-const newCondition = (): EditCondition => ({ id: genId(), attr: "role", op: "contains", value: "" });
+const newCondition = (isPatientTerm: boolean): EditCondition => ({
+  id: genId(),
+  attr: isPatientTerm ? "site" : "role",
+  op: "contains",
+  value: "",
+});
 
 // Split the raw "in" buffer into trimmed, non-empty tokens (only at validity / draft / preview time).
 const parseInValues = (raw: string): string[] => raw.split(",").map((v) => v.trim()).filter((v) => v !== "");
@@ -97,6 +102,7 @@ const inputClass =
   "rounded border border-neutral-300 bg-transparent px-2 py-1 text-sm dark:border-neutral-700";
 
 export function SegmentEditorModal({ open, initial, activeMeasures, onClose, onSaved, onSave }: Props) {
+  const isPatientTerm = SUBJECT.singular === "patient";
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [enabled, setEnabled] = useState(true);
@@ -262,7 +268,7 @@ export function SegmentEditorModal({ open, initial, activeMeasures, onClose, onS
                   <label className="flex flex-col text-xs">
                     <span className="mb-1">Attribute</span>
                     <select aria-label={`condition ${i + 1} attribute`} value={c.attr} onChange={(e) => updateCondition(i, { attr: e.target.value as ConditionAttr })} className={inputClass}>
-                      <option value="role">role</option>
+                      {!isPatientTerm ? <option value="role">role</option> : null}
                       <option value="site">site</option>
                     </select>
                   </label>
@@ -297,7 +303,7 @@ export function SegmentEditorModal({ open, initial, activeMeasures, onClose, onS
             })}
             <button
               type="button"
-              onClick={() => setRule((prev) => ({ ...prev, conditions: [...prev.conditions, newCondition()] }))}
+              onClick={() => setRule((prev) => ({ ...prev, conditions: [...prev.conditions, newCondition(isPatientTerm)] }))}
               className="justify-self-start rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-800"
             >
               Add condition
@@ -344,7 +350,7 @@ export function SegmentEditorModal({ open, initial, activeMeasures, onClose, onS
                       onClick={() => addOverride(h.externalId, h.name)}
                     >
                       <span className="font-medium text-neutral-900 dark:text-neutral-100">{h.name}</span>
-                      <span className="text-neutral-500">{h.externalId} · {h.role} · {h.site}</span>
+                      <span className="text-neutral-500">{isPatientTerm ? `${h.externalId} · ${h.site}` : `${h.externalId} · ${h.role} · ${h.site}`}</span>
                     </button>
                   ))}
                 </div>

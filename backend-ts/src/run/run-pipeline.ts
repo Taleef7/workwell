@@ -29,6 +29,7 @@ import {
   isRunnableMeasure,
   RUNNABLE_MEASURE_IDS as PROFILE_RUNNABLE_MEASURE_IDS,
   DEPLOYMENT_PROFILE,
+  subjectNoun,
   DIRECTORY,
 } from "../config/deployment-profile.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
@@ -165,6 +166,8 @@ export class InvalidRunRequestError extends Error {}
 
 const NON_COMPLIANT = new Set(["DUE_SOON", "OVERDUE", "MISSING_DATA"]);
 const RUNNABLE_MEASURE_IDS = PROFILE_RUNNABLE_MEASURE_IDS.filter(isRunnableMeasure);
+const SUBJECT_SINGULAR = subjectNoun(DEPLOYMENT_PROFILE).singular;
+const SUBJECT_LABEL = SUBJECT_SINGULAR.charAt(0).toUpperCase() + SUBJECT_SINGULAR.slice(1);
 
 interface WorkItem {
   employee: EmployeeProfile;
@@ -243,12 +246,12 @@ function resolveScope(req: ManualRunRequest, employees: readonly EmployeeProfile
     }
     case "EMPLOYEE": {
       const id = req.employeeExternalId;
-      if (!id || !employeeById(id)) throw new InvalidRunRequestError(`Unknown employee: ${id}`);
+      if (!id || !employeeById(id)) throw new InvalidRunRequestError(`Unknown ${SUBJECT_SINGULAR}: ${id}`);
       const employee = employeeById(id)!;
       if (EVALUATION_EXCLUDED_TENANTS.has(employee.tenantId)) {
         // Directory-only tenant (see employee-catalog): the subject is visible but not evaluable yet.
         throw new InvalidRunRequestError(
-          `Employee '${id}' belongs to tenant '${employee.tenantId}', which is directory-only until its measure set is wired (ROADMAP MM-1).`,
+          `${SUBJECT_LABEL} '${id}' belongs to tenant '${employee.tenantId}', which is directory-only until its measure set is wired (ROADMAP MM-1).`,
         );
       }
       const items: WorkItem[] = RUNNABLE_MEASURE_IDS.map((measureId) => ({
@@ -256,7 +259,7 @@ function resolveScope(req: ManualRunRequest, employees: readonly EmployeeProfile
         measureId,
         target: seededTargetFor(employees, MEASURE_BINDINGS[measureId]!.rateKey, id) ?? "MISSING_DATA",
       }));
-      return { items, measureIds: RUNNABLE_MEASURE_IDS, scopeId: null, scopeLabel: `Employee: ${id}` };
+      return { items, measureIds: RUNNABLE_MEASURE_IDS, scopeId: null, scopeLabel: `${SUBJECT_LABEL}: ${id}` };
     }
     case "ALL_PROGRAMS": {
       // Every runnable measure × every employee, each at its measure's seeded target bucket.

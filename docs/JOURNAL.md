@@ -1,5 +1,79 @@
 # Journal
 
+## 2026-09-03 — the pilot sandbox stops saying "employee": a deployment subject term reaches the backend, and every occupational label on the patient profile is gone
+
+**Why now.** A full walk of the live Maui sandbox from the quality lead's seat — every nav item and the
+routes hidden from nav, both roles, desktop and phone, both themes — found that the first ten minutes
+would surface a dozen trust-breakers. The single largest class was occupational-health vocabulary
+surviving the "patient" terminology switch: it had only ever been a *frontend* build flag, so anything
+the backend rendered still said employee. This PR closes that class; the rate/copy and pilot-surface
+classes follow in their own PRs.
+
+**Backend: the profile carries a subject term.** `DEPLOYMENT_PROFILE.subjectTerm` (`employee` on the
+default profile, `patient` on `maui`) plus `subjectNoun()`, in `deployment-profile.ts`. It drives the
+three places the backend puts words in front of a person: the AI prompts and deterministic fallback
+(`buildDraftSpecSystemPrompt` / `buildExplainSystemPrompt`; the default-profile strings are pinned
+byte-identical, and the fallback says "result date" / "exclusion status" instead of "exam/vaccine" /
+"waiver" on a patient deployment), the outreach templates (`PATIENT_TEMPLATES`: a clinic message with
+no "requirement", no "compliance", and no due-date line — the previous text read like an HR notice
+with a due date eight months in the past), and the two subject columns of the outcomes/cases CSVs
+(`patientExternalId`/`patientName`; `DATA_MODEL_CONTRACTS` §6 records it). Every branch is tested on
+both profiles through the child-process pattern.
+
+**The hypertension placeholder reads as clinical.** Its CQL defines were "In Wellness Program" and
+"Has Medical Exemption", which the evidence panel showed verbatim, and its catalog row cited "HEDIS BPC
+/ JPMC Wellness Rewards". Renamed to "In Eligible Population" / "Has Documented Exclusion", the ELM
+recompiled (only that one ELM file changed), the catalog row and YAML relabelled as a CMS165
+placeholder. Because the seed is name-idempotent an already-seeded database keeps the old row, so the
+seed now carries a fingerprint-gated repair for exactly this row: each of policyRef and the whole spec is
+classified as old, new or edited against the pre-change and current catalog values; when nothing is
+edited and something is still old it writes one `MEASURE_SEED_UPDATED` audit event, then `updateSpec`,
+then refreshes the stored CQL text so Studio shows the renamed defines; an edited row is left alone
+with a warning; a repaired row is a silent no-op on every later boot. Tags are not repaired — no store method
+updates them and the store is owner-owned — which the lane that hit the boundary reported rather than
+worked around.
+
+**Frontend, on the patient term only.** The evidence panel drops "Role eligible"/"Site eligible", says
+"Exclusion status" and "Last result date", and no longer dumps the raw `why_flagged` JSON; the Programs
+overview and measure detail drop the "Top Roles" card and their driver grids lose the empty column; the
+roster (desktop table *and* the mobile cards), the header search results, the people page and the
+segment editor drop the role; the patient profile hides job role and supervisor; the Runs grid drops
+its Role column and says "Exclusion" / "Days since result"; the panel label reads "Quality measures";
+the appointment dialog offers clinic visit types instead of Audiogram/TB Test/Flu Vaccine; "Period
+2026-01-01" reads "Measurement year 2026"; the hero copy and the expired-exclusion banner say
+"exclusion" instead of "waiver". The employee term is unchanged, pinned by paired tests, with one
+deliberate exception for every profile: the Cases hero heading now carries an explicit `text-white`,
+because a global heading colour overrode the section's colour and made it invisible in light mode.
+
+**What is still occupational on the patient profile, on purpose.** The admin page and Studio (waiver
+tables, OSHA references, role filters) are reachable only through the admin account and are
+route-guarded for everyone else in the pilot-mode PR that follows; the MCP tool descriptions; the
+`role`/`roleEligible`/`siteEligible` CSV columns (a contract change deferred, noted in
+`DATA_MODEL_CONTRACTS` §6); and the hypertension value-set *names* ("Wellness Program Enrollment"),
+which are shared with the obesity measure and only surface in Studio.
+
+**Review record.** Four reviewers on the whole diff (GLM 5.3 Flash, Gemini 3.8 Flash, Sol, and the
+orchestrator's own reviewer) found four largely disjoint sets: 13, 11, 23 and 12 findings. The real
+ones, all fixed in a second round: the seed repair warned "row edited" on every boot after the first
+and never refreshed the stored CQL text (Studio would have kept showing the old defines); an explicit
+`templateId` bypassed the patient outreach templates on preview, send, campaign and the admin list;
+outreach dispatch wrote "Wait for employee follow-up" into the case's next action; the fixture and
+CQL-drafting prompts still said "occupational health"; and roughly a dozen frontend leaks the first pass
+had not reached. Rejected on adjudication: that the TWH catalog's employer reference is a client-side
+name (it is the demo tenant's own pre-existing label across the whole catalog), and the
+concurrent-boot double-audit, which is the documented ADR-071 class. One implementation lane, asked to
+keep JSON schema keys unchanged *and* to make the patient prompt free of the words those keys contain,
+resolved the contradiction by writing the keys as unicode escapes — a prompt the model could not have
+parsed. The gate that caught it was the orchestrator reading the diff, not a test; the test now strips
+schema keys before matching prose. One GLM implementation lane looped on a UTF-8 `apply_patch` failure
+(127 attempts, no edits) and was killed and re-routed; its RED test was kept. A second review pass
+confirmed every first-pass item closed and left a short residual list (the admin template preview, the
+EXCLUDED next-action sentence, the roster cell vocabulary, the escalation string, the audit CSV header,
+the CDS card and discovery text, a CQL-only half-applied seed repair, the landing fallback copy), each
+closed by a single-purpose lane with a both-profiles test. Verified on a local stack booted as the Maui
+profile after each of the first two rounds: the built pages, the CSV headers, the AI fallback text and
+the outreach preview all read as described here.
+
 ## 2026-09-02 (later) — Maui routes cms122/cms125 official: the authored breast-cancer subset was hostage to VSAC reachability
 
 **Found while verifying the redeployed sandbox.** Breast Cancer Screening on Maui read 0% compliant, 45

@@ -7,9 +7,9 @@ import type { RosterColumn, RosterRow, RosterCell } from "./types";
 const NA_FALLBACK: RosterCell = { status: "NA", method: "Not evaluated" };
 
 /**
- * UX-11 — the `/compliance` roster as per-employee cards for phones (the wide table shows ~1.5
+ * UX-11 — the `/compliance` roster as profile cards for phones (the wide table shows ~1.5
  * columns per screen). Same data as the table; hidden at `md`+ (the table takes over). Each card is
- * an employee header (name link + tenant · site · role) over a `<dl>` of measure → ComplianceChip,
+ * a profile header (name link + tenant · site · role) over a `<dl>` of measure → ComplianceChip,
  * so assistive tech gets an explicit measure→status pairing without the table's off-screen columns.
  */
 export function RosterMobileCards({
@@ -23,6 +23,7 @@ export function RosterMobileCards({
   loading: boolean;
   labelFor?: (measureId: string, fallbackName: string) => string;
 }) {
+  const isPatientTerm = SUBJECT.singular === "patient";
   if (loading && rows.length === 0) {
     return <p className="rounded-lg border border-neutral-200 p-4 text-center text-sm text-neutral-500 dark:border-neutral-800 md:hidden">Loading…</p>;
   }
@@ -40,7 +41,7 @@ export function RosterMobileCards({
             {r.subject.name}
           </Link>
           <div className="text-[11px] text-neutral-500 dark:text-neutral-400">
-            {r.subject.tenantName} · {r.subject.site} · {r.subject.role}
+            {r.subject.tenantName} · {r.subject.site}{isPatientTerm ? null : <> · {r.subject.role}</>}
           </div>
           <dl className="mt-2 divide-y divide-neutral-100 dark:divide-neutral-800/70">
             {columns.map((c) => (

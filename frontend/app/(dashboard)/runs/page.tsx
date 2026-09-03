@@ -475,21 +475,23 @@ export default function RunsPage() {
     }
   }
 
+  const isPatientTerm = SUBJECT.singular === "patient";
+
   // NITRO grid for the run Outcomes table (employee/role/site/outcome/days/waiver/case).
   const outcomeColumns = useMemo<NitroGridColumn[]>(
     () => [
       { field: "employee", header: SUBJECT.Singular },
-      { field: "role", header: "Role" },
+      ...(isPatientTerm ? [] : [{ field: "role", header: "Role" }]),
       { field: "site", header: "Site" },
       { field: "outcome", header: "Outcome" },
-      { field: "daysSinceExam", header: "Days Since Exam" },
-      { field: "waiver", header: "Waiver" },
+      { field: "daysSinceExam", header: isPatientTerm ? "Days Since Result" : "Days Since Exam" },
+      { field: "waiver", header: isPatientTerm ? "Exclusion" : "Waiver" },
       { field: "case", header: "Case" },
       { field: "employeeExternalId", header: "External ID", visible: false },
       { field: "rawOutcome", header: "Raw Outcome", visible: false },
       { field: "caseId", header: "Case ID", visible: false },
     ],
-    [],
+    [isPatientTerm],
   );
 
   const outcomeRows = useMemo(
@@ -733,7 +735,7 @@ export default function RunsPage() {
                 size="sm"
                 value={runEmployeeExternalId}
                 onChange={(e) => setRunEmployeeExternalId(e.target.value)}
-                placeholder={`Enter ${SUBJECT.an} ${SUBJECT.singular} external ID, for example emp-041`}
+                placeholder={`Enter ${SUBJECT.an} ${SUBJECT.singular} external ID, for example ${isPatientTerm ? "pat-048" : "emp-041"}`}
               />
             </div>
           ) : null}

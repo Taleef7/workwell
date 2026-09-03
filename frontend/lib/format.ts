@@ -10,3 +10,8 @@ export function fmtCount(n: number | null | undefined): string {
   if (n === null || n === undefined || !Number.isFinite(n)) return "—";
   return Math.trunc(n).toLocaleString("en-US");
 }
+
+export function formatEvaluationPeriod(value: string | null | undefined): string {
+  if (value === null || value === undefined) return "";
+  return /^\d{4}-01-01$/.test(value) ? value.slice(0, 4) : value;
+}

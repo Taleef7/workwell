@@ -1,6 +1,8 @@
 import React from "react";
 import { render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { setSubject, subject } from "@/test/mocks/terminology";
+vi.mock("@/lib/terminology", () => ({ SUBJECT: subject }));
 import ProgramDetailPage from "../page";
 
 const get = vi.fn();
@@ -55,6 +57,7 @@ const oshaProgram = {
 
 describe("ProgramDetailPage crosswalk heading rendering", () => {
   beforeEach(() => {
+    setSubject("employee");
     currentMeasureId = "cms125";
     get.mockImplementation((url: string) => {
       if (url === "/api/measures") {
@@ -78,7 +81,7 @@ describe("ProgramDetailPage crosswalk heading rendering", () => {
         return Promise.resolve([]);
       }
       if (url.includes("/top-drivers")) {
-        return Promise.resolve({ bySite: [], byRole: [], byOutcomeReason: [] });
+        return Promise.resolve({ bySite: [], byRole: [{ role: "Nurse", overdueCount: 1 }], byOutcomeReason: [] });
       }
       if (url.includes("/risk-outlook")) {
         return Promise.resolve(null);
@@ -104,5 +107,20 @@ describe("ProgramDetailPage crosswalk heading rendering", () => {
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: "Annual Audiogram Completed" })).toBeInTheDocument();
     });
+  });
+
+  it("hides the Top roles card for the patient term", async () => {
+    setSubject("patient");
+    render(<ProgramDetailPage />);
+    await waitFor(() => expect(screen.getByText("Top sites")).toBeInTheDocument());
+    expect(screen.queryByText("Top roles")).not.toBeInTheDocument();
+    expect(screen.getByText("Top sites").closest("div.grid")).toHaveClass("lg:grid-cols-2");
+  });
+
+  it("keeps the Top roles card for the employee term", async () => {
+    render(<ProgramDetailPage />);
+    expect(await screen.findByText("Top roles")).toBeInTheDocument();
+    expect(screen.getByText("Nurse: 1")).toBeInTheDocument();
+    expect(screen.getByText("Top sites").closest("div.grid")).toHaveClass("lg:grid-cols-3");
   });
 });

@@ -8,6 +8,8 @@ import type {
   OutreachTemplateRecord,
   OutreachTemplateStore,
 } from "../stores/outreach-template-store.ts";
+import { PATIENT_TEMPLATES } from "../case/case-outreach.ts";
+import { DEPLOYMENT_PROFILE } from "../config/deployment-profile.ts";
 
 export class OutreachTemplateError extends Error {}
 
@@ -93,18 +95,37 @@ export interface TemplatePreview {
 
 /** OutreachTemplateService.render — sample placeholder values for the Admin preview. */
 function render(raw: string): string {
+  const measureName = DEPLOYMENT_PROFILE.subjectTerm === "patient" ? "Breast Cancer Screening" : "Annual Audiogram";
   return raw
-    .replace(/\{employee_name\}/g, "Jane Smith")
-    .replace(/\{measure_name\}/g, "Annual Audiogram")
-    .replace(/\{due_date\}/g, "2026-05-30")
-    .replace(/\{assignee_name\}/g, "Sarah Mitchell");
+    .replace(/\{employee_name\}|\{\{employeeName\}\}/g, "Jane Smith")
+    .replace(/\{measure_name\}|\{\{measureName\}\}/g, measureName)
+    .replace(/\{due_date\}|\{\{dueDate\}\}/g, "2026-05-30")
+    .replace(/\{assignee_name\}|\{\{assigneeName\}\}/g, "Sarah Mitchell");
 }
 
 export async function listTemplates(store: OutreachTemplateStore): Promise<OutreachTemplateRecord[]> {
+  if (DEPLOYMENT_PROFILE.subjectTerm === "patient") {
+    return Object.values(PATIENT_TEMPLATES).map((template) => ({
+      id: template.id!,
+      name: template.name,
+      subject: template.subject,
+      bodyText: template.bodyText,
+      type: "OUTREACH",
+      createdBy: "system",
+      createdAt: "",
+      updatedAt: "",
+      active: true,
+    }));
+  }
   return store.listActive();
 }
 
 export async function previewTemplate(store: OutreachTemplateStore, id: string): Promise<TemplatePreview> {
+  if (DEPLOYMENT_PROFILE.subjectTerm === "patient") {
+    const t = Object.values(PATIENT_TEMPLATES).find((tmpl) => tmpl.id === id);
+    if (!t) throw new OutreachTemplateError(`Outreach template not found: ${id}`);
+    return { id: t.id!, name: t.name, subject: render(t.subject), bodyText: render(t.bodyText) };
+  }
   const t = await store.getById(id);
   if (!t) throw new OutreachTemplateError(`Outreach template not found: ${id}`);
   return { id: t.id, name: t.name, subject: render(t.subject), bodyText: render(t.bodyText) };
@@ -155,6 +176,23 @@ export async function updateTemplate(
 ): Promise<OutreachTemplateRecord | null> {
   if (!req.name?.trim() || !req.subject?.trim() || !req.bodyText?.trim()) {
     throw new OutreachTemplateError("name, subject, and bodyText are required");
+  }
+  if (DEPLOYMENT_PROFILE.subjectTerm === "patient") {
+    const t = Object.values(PATIENT_TEMPLATES).find((tmpl) => tmpl.id === id);
+    if (!t) return null;
+    const updated: OutreachTemplateRecord = {
+      id: t.id!,
+      name: req.name.trim(),
+      subject: req.subject.trim(),
+      bodyText: req.bodyText.trim(),
+      type: normalizeType(req.type),
+      createdBy: "system",
+      createdAt: "",
+      updatedAt: new Date().toISOString(),
+      active: req.active,
+    };
+    await auditTemplate(events, "OUTREACH_TEMPLATE_UPDATED", updated, actor);
+    return updated;
   }
   const updated = await store.update(id, {
     name: req.name.trim(),

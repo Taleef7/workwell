@@ -183,8 +183,9 @@ function expressionResults(evidence: unknown): ExprResult[] {
  * the Java why_flagged semantics: waiver_status is "active"/"none" off the measure's
  * waiver/exemption/exclusion define (CqlEvaluationService), and days-since is the recency
  * define's value. The exemption flag is named one of (consistent across runnable measures):
- * "Has Active Waiver" (OSHA audiogram), "Has Medical Exemption" (HAZWOPER/TB/HEDIS),
- * "Has Valid Exemption" (flu), "Has Exclusion" (CMS eCQM 125/122).
+ * "Has Active Waiver" (OSHA audiogram), "Has Medical Exemption" (HAZWOPER/TB/other authored
+ * wellness measures), "Has Documented Exclusion" (hypertension), "Has Valid Exemption" (flu),
+ * "Has Exclusion" (CMS eCQM 125/122).
  */
 const EXEMPTION_DEFINE = /waiver|exemption|exclusion|contraindication/i;
 

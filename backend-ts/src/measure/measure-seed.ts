@@ -23,6 +23,18 @@ const LEGACY_OFFICIAL_IDS = [
   { legacyId: "cms165v14", catalogId: "cms165" },
 ] as const;
 
+const HYPERTENSION_PRE_CHANGE = {
+  policyRef: "HEDIS BPC / JPMC Wellness Rewards",
+  spec: {
+    description: "Annual blood pressure screening for employees enrolled in the wellness program.",
+    eligibilityCriteria: { roleFilter: "All", siteFilter: "All Sites", programEnrollmentText: "Wellness Program" },
+    exclusions: [{ label: "Medical Exemption", criteriaText: "Documented medical exemption on file" }],
+    complianceWindow: "Annual",
+    requiredDataElements: ["Last BP screening date", "Program enrollment", "Exemption status"],
+    testFixtures: [],
+  },
+};
+
 const deepEqual = (left: unknown, right: unknown): boolean => {
   if (left === right) return true;
   if (typeof left !== "object" || left === null || typeof right !== "object" || right === null) return false;
@@ -95,6 +107,39 @@ async function deprecateLegacyOfficialRows(store: MeasureStore, events: CaseEven
   }
 }
 
+async function repairHypertensionSeedRow(
+  store: MeasureStore,
+  cqlOf: (measureId: string) => string,
+  events: CaseEventStore,
+): Promise<void> {
+  const measureId = "hypertension";
+  const row = await store.getLatest(measureId);
+  if (!row) return;
+  const catalog = MEASURE_CATALOG.find((m) => m.id === measureId)!;
+  const fieldState = (value: unknown, oldValue: unknown, newValue: unknown): "old" | "new" | "edited" =>
+    deepEqual(value, oldValue) ? "old" : deepEqual(value, newValue) ? "new" : "edited";
+  const policyState = fieldState(row.policyRef, HYPERTENSION_PRE_CHANGE.policyRef, catalog.policyRef);
+  const specState = fieldState(row.spec, HYPERTENSION_PRE_CHANGE.spec, catalog.spec);
+  if (policyState === "edited" || specState === "edited") {
+    console.warn(`[measure-seed] hypertension row does not match the pre-change seed fingerprint; not updated`);
+    return;
+  }
+  if (policyState === "new" && specState === "new" && row.cqlText === cqlOf(measureId)) return;
+  const audit: AppendAuditInput = {
+    eventType: "MEASURE_SEED_UPDATED",
+    entityType: "measure_version",
+    entityId: row.versionId,
+    actor: "system",
+    refRunId: null,
+    refCaseId: null,
+    refMeasureVersionId: row.versionId,
+    payload: { measureId, fields: ["policyRef", "spec", "cqlText"] },
+  };
+  if (!(await events.hasAuditEvent(audit))) await events.appendAudit(audit);
+  await store.updateSpec(measureId, catalog.spec, catalog.policyRef);
+  await store.updateCql(measureId, cqlOf(measureId));
+}
+
 /**
  * Seeds the measure store from MEASURE_CATALOG. On a fresh (empty) store every catalog entry
  * is inserted. On an already-seeded store (e.g. the live stack) only catalog measures that are
@@ -103,6 +148,7 @@ async function deprecateLegacyOfficialRows(store: MeasureStore, events: CaseEven
  * `cqlOf` reconstructs CQL text for runnable measures.
  */
 export async function seedMeasureStore(store: MeasureStore, cqlOf: (measureId: string) => string, events: CaseEventStore): Promise<void> {
+  await repairHypertensionSeedRow(store, cqlOf, events);
   const empty = await store.isEmpty();
   for (const m of MEASURE_CATALOG) {
     // Fast path on a fresh store: seed everything. On an already-seeded store, back-fill ONLY

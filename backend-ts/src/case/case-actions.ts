@@ -16,9 +16,12 @@
 import type { CaseStore } from "../stores/case-store.ts";
 import type { CaseEventStore } from "../stores/case-event-store.ts";
 import type { OutcomeStore } from "../stores/outcome-store.ts";
+import { DEPLOYMENT_PROFILE } from "../config/deployment-profile.ts";
 import { toCaseDetail, type CaseDetail } from "./case-detail-read-model.ts";
 
-const ESCALATION_NEXT_ACTION = "Escalated to supervisor queue for immediate handling.";
+const ESCALATION_NEXT_ACTION = DEPLOYMENT_PROFILE.subjectTerm === "patient"
+  ? "Escalated for immediate handling."
+  : "Escalated to supervisor queue for immediate handling.";
 
 /** 400 — an action precondition failed (e.g. resolving a non-open case, missing closure note). */
 export class CaseActionError extends Error {}

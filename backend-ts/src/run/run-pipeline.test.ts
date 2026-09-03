@@ -29,6 +29,7 @@ import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
 import { ROSTER_ELIGIBLE_MEASURES } from "../engine/ingress/enrollment/roster.ts";
 import { profileForId, replaceLiveDirectory } from "../engine/ingress/webchart/live-directory.ts";
 import { createWorkwellEngine } from "../engine/cql/workwell-engine.ts";
+import { runProfileChild } from "../test-support/run-profile-child.ts";
 
 const dbPath = join(tmpdir(), `workwell-pipeline-${crypto.randomUUID()}.sqlite`);
 let deps: RunPipelineDeps;
@@ -50,6 +51,35 @@ after(() => {
   } catch {
     /* best effort */
   }
+});
+
+test("patient profile uses patient terminology in case outcome summaries and run labels while default stays unchanged", () => {
+  const script = `
+    import { toCaseDetail } from "./src/case/case-detail-read-model.ts";
+    import { planManualRun } from "./src/run/run-pipeline.ts";
+    import { DEPLOYMENT_PROFILE } from "./src/config/deployment-profile.ts";
+    const subjectId = DEPLOYMENT_PROFILE.subjectTerm === "patient" ? "pat-001" : "emp-001";
+    const caseRecord = {
+      id: "case-1", employeeId: subjectId, measureId: "cms122", evaluationPeriod: "2026-01-01", status: "OPEN",
+      priority: "HIGH", assignee: null, nextAction: null, currentOutcomeStatus: "EXCLUDED", lastRunId: "run-1",
+      createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z", closedAt: null, closedReason: null, closedBy: null,
+    };
+    const runStore = { createRun: async () => ({ id: "run-1" }), markRunning: async () => {}, appendLog: async () => {} };
+    const read = toCaseDetail(caseRecord, null);
+    const plan = await planManualRun({ runStore }, { scopeType: "EMPLOYEE", employeeExternalId: subjectId });
+    let unknown = "";
+    try { await planManualRun({ runStore }, { scopeType: "EMPLOYEE", employeeExternalId: "missing" }); }
+    catch (error) { unknown = error.message; }
+    console.log(JSON.stringify({ summary: read.outcomeSummary, scopeLabel: plan.scopeLabel, unknown }));
+  `;
+  const defaultOutput = runProfileChild(undefined, script);
+  const mauiOutput = runProfileChild("maui", script);
+  assert.equal(defaultOutput.summary, "Measure outcome is excluded due to documented exemption/waiver.");
+  assert.equal(defaultOutput.scopeLabel, "Employee: emp-001");
+  assert.equal(defaultOutput.unknown, "Unknown employee: missing");
+  assert.equal(mauiOutput.summary, "Measure outcome is excluded due to documented exclusion.");
+  assert.equal(mauiOutput.scopeLabel, "Patient: pat-001");
+  assert.equal(mauiOutput.unknown, "Unknown patient: missing");
 });
 
 test("MEASURE manual run evaluates the population, persists outcomes, and completes", async () => {

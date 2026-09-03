@@ -15,6 +15,7 @@ import { ORDER_CATALOG } from "../order/order-catalog.ts";
 import { dispositionFor } from "../case/case-logic.ts";
 import { proposeOrders } from "../order/order-proposal.ts";
 import type { StandingOrderProvider } from "../order/standing-order-provider.ts";
+import { runProfileChild } from "../test-support/run-profile-child.ts";
 
 /** No standing orders, so suppression never confounds a suggestion assertion. */
 const NO_STANDING_ORDERS: StandingOrderProvider = { activeOrdersFor: () => [] };
@@ -49,6 +50,49 @@ const opts = (approved: ReadonlySet<string> = APPROVED) => ({
   standingOrders: NO_STANDING_ORDERS,
   studioBaseUrl: "https://studio.example.org",
   authoredOn: "2026-06-12",
+});
+
+const profileScript = `
+  import { buildComplianceCards } from "./src/cds/cards.ts";
+  import { CDS_SERVICES } from "./src/cds/discovery.ts";
+  const cards = await buildComplianceCards([{
+    measureId: "audiogram",
+    status: "OVERDUE",
+    evidence: { expressionResults: [{ define: "Has Contraindication", result: true }] },
+    evaluationPeriod: "2026-06-12",
+    runId: "11111111-2222-3333-4444-555555555555",
+    evaluatedAt: "2026-06-12T00:00:00.000Z",
+  }], {
+    subjectId: "emp-006",
+    patientId: "emp-006",
+    approvedOrderCodes: new Set(),
+    standingOrders: { activeOrdersFor: () => [] },
+  });
+  console.log(JSON.stringify({ detail: cards[0].detail, service: CDS_SERVICES[0] }));
+`;
+
+test("default profile — cards say `Waiver`, discovery says occupational-health", () => {
+  const output = runProfileChild(undefined, profileScript);
+  const detail = String(output.detail);
+  const service = output.service as { title: string; description: string };
+
+  assert.match(detail, /Waiver: active/);
+  assert.doesNotMatch(detail, /Exclusion:/);
+  assert.equal(service.title, "WorkWell occupational-health compliance gaps");
+  assert.match(service.description, /occupational surveillance \(OSHA\)/);
+  assert.doesNotMatch(service.description, /clinical quality measure gaps/);
+});
+
+test("patient profile (Maui) — cards say `Exclusion`, discovery says clinical quality measure gaps", () => {
+  const output = runProfileChild("maui", profileScript);
+  const detail = String(output.detail);
+  const service = output.service as { title: string; description: string };
+
+  assert.match(detail, /Exclusion: active/);
+  assert.doesNotMatch(detail, /Waiver:/);
+  assert.equal(service.title, "WorkWell clinical quality measure gaps");
+  assert.match(service.description, /clinical quality measure gaps/);
+  assert.doesNotMatch(service.description, /OSHA|occupational/i);
 });
 
 test("an open gap becomes one card carrying the answer, its provenance and a link", async () => {

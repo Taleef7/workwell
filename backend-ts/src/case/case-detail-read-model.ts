@@ -11,7 +11,7 @@
  */
 import type { CaseRecord } from "../stores/case-store.ts";
 import type { OutcomeRecord } from "../stores/outcome-store.ts";
-import { employeeById } from "../config/deployment-profile.ts";
+import { DEPLOYMENT_PROFILE, employeeById } from "../config/deployment-profile.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
 import { type ImmunizationForecast } from "../engine/immunization/immunization-forecast.ts";
@@ -59,7 +59,9 @@ function outcomeSummaryFor(outcome: string): string {
     case "MISSING_DATA":
       return "Measure outcome could not be evaluated due to missing data.";
     case "EXCLUDED":
-      return "Measure outcome is excluded due to documented exemption/waiver.";
+      return DEPLOYMENT_PROFILE.subjectTerm === "patient"
+        ? "Measure outcome is excluded due to documented exclusion."
+        : "Measure outcome is excluded due to documented exemption/waiver.";
     default:
       return "Unknown status.";
   }

@@ -101,6 +101,13 @@ spike/
 
 ## All 10 measures (#106) — **40/40 exact**
 
+> **2026-09-03:** the hypertension measure's defines were renamed in the shipped CQL ("In Wellness
+> Program" → "In Eligible Population", "Has Medical Exemption" → "Has Documented Exclusion"). The Java
+> golden (`synthetic/_java_golden.json`) and the spike ELM under `elm/` predate the rename and keep the
+> old keys deliberately — they are the historical Java answers. A fresh translate-and-compare of
+> hypertension against that golden will therefore report the two renamed keys as mismatches; the
+> outcome logic is unchanged.
+
 Scaled the proof to the whole runnable catalog. For all 10 measures × 4 scenarios
 (`present_recent` / `present_old` / `missing` / `excluded`), the Node engine matches
 the Java engine on **every define** — **452 define comparisons, 0 divergences**.

@@ -6,6 +6,7 @@
  */
 import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
 import { deriveWhyFlagged, expressionResults } from "../case/case-detail-read-model.ts";
+import { DEPLOYMENT_PROFILE } from "../config/deployment-profile.ts";
 
 export type DisplayState =
   | "COMPLIANT" | "DUE_SOON" | "OVERDUE" | "MISSING_DATA" | "EXCLUDED" | "DECLINED" | "IN_PROGRESS" | "NA" | "NOT_APPLICABLE";
@@ -22,7 +23,7 @@ export function deriveCell(canonicalStatus: string, evidence: unknown, measureId
   const binding = MEASURE_BINDINGS[measureId];
   const refused = get(/refus/i) === true;
 
-  if (canonicalStatus === "EXCLUDED") return { status: "EXCLUDED", method: "Contraindication / exemption on file" };
+  if (canonicalStatus === "EXCLUDED") return { status: "EXCLUDED", method: DEPLOYMENT_PROFILE.subjectTerm === "patient" ? "Documented exclusion on file" : "Contraindication / exemption on file" };
   // Deliberately class-agnostic: a documented refusal displays DECLINED for PERMANENT (the vaccine
   // panel) AND for RECURRING `adult_immunization` (which keeps the case open, never excludes — see
   // MEASURES.md). The canonical bucket is unchanged; only the display is.
