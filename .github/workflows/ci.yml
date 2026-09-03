@@ -25,9 +25,18 @@ on:
         description: "E2E target. Allowlisted in .github/scripts/e2e-target-allowed.sh — production is REFUSED, the suite mutates. Default: staging."
         type: string
         required: false
+      e2e_profile:
+        description: "Which Playwright project to run: 'twh' (the existing suite against e2e_base_url) or 'maui' (the Maui pilot project against a stack the runner boots itself as WORKWELL_INSTANCE=maui — no external target, nothing shared is mutated)."
+        type: choice
+        options: [twh, maui]
+        default: twh
+        required: false
 
+# The event name is part of the group so a manual dispatch (the e2e jobs) is not cancelled by the push
+# or pull_request run that a `git push` of the same branch starts a second later — measured 2026-09-02:
+# three dispatches in a row were "cancelled" before their first step for exactly this reason.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 # Least privilege for all eight jobs. Nothing in this workflow uses GITHUB_TOKEN — no `gh` call, no
@@ -473,7 +482,7 @@ jobs:
   e2e:
     name: Playwright E2E (manual)
     runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' && (inputs.e2e_profile || 'twh') == 'twh'
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
@@ -531,3 +540,89 @@ jobs:
         with:
           name: playwright-report
           path: e2e/playwright-report/
+
+  e2e-maui:
+    name: Playwright E2E — Maui pilot (manual)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && inputs.e2e_profile == 'maui'
+    timeout-minutes: 45
+    # The Maui project runs against a stack THIS RUNNER boots — backend on the SQLite floor with
+    # WORKWELL_INSTANCE=maui, frontend built in patient terminology with the public-demo affordances
+    # off — so nothing shared is mutated and the allowlist never comes into play. It deliberately
+    # runs the authored cms122/cms125 (no WORKWELL_OFFICIAL_MEASURES): the official artifacts need
+    # the vendored terminology sidecars, which are fetched at build with a VSAC key this job does not
+    # have, and with no VSAC key at runtime the authored path resolves the bundled expansions and
+    # yields the same designed 38/7/3 distribution the tests assert. Browser e2e lives here rather
+    # than on a developer box because Chromium + two dev servers + a test worker exhaust a Windows
+    # desktop heap long before they exhaust RAM (measured 2026-09-02).
+    steps:
+      # backend-ts consumes @mieweb/cloud + @mieweb/cli from the external/mieweb-cloud submodule.
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10.17.1
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Install backend dependencies
+        working-directory: backend-ts
+        run: pnpm install --frozen-lockfile
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile
+      - name: Install e2e dependencies + Chromium
+        working-directory: e2e
+        run: |
+          pnpm install --frozen-lockfile
+          npx playwright install chromium --with-deps
+      - name: Start the backend as Maui
+        working-directory: backend-ts
+        env:
+          WORKWELL_INSTANCE: maui
+          WORKWELL_AUTH_JWT_SECRET: maui-e2e-ci-secret-key-32-characters-minimum
+        run: |
+          nohup pnpm dev > ../backend-maui.log 2>&1 &
+          for i in $(seq 1 60); do
+            code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://localhost:8080/api/version || true)"
+            [ "$code" = "200" ] && { echo "backend up after $((i*2))s"; exit 0; }
+            sleep 2
+          done
+          echo "::error::backend did not answer /api/version within 120s"; tail -50 ../backend-maui.log; exit 1
+      - name: Build and start the frontend in patient mode
+        working-directory: frontend
+        env:
+          NEXT_PUBLIC_SUBJECT_TERM: patient
+          NEXT_PUBLIC_PUBLIC_DEMO: "off"
+          NEXT_PUBLIC_API_URL: http://localhost:8080
+          NEXT_PUBLIC_API_BASE_URL: http://localhost:8080
+          NEXT_PUBLIC_APP_NAME: WorkWell Maui
+          NEXT_PUBLIC_DEMO_MODE: "false"
+        run: |
+          pnpm build
+          nohup pnpm start -p 3000 > ../frontend-maui.log 2>&1 &
+          for i in $(seq 1 60); do
+            code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://localhost:3000/login || true)"
+            [ "$code" = "200" ] && { echo "frontend up after $((i*2))s"; exit 0; }
+            sleep 2
+          done
+          echo "::error::frontend did not answer /login within 120s"; tail -50 ../frontend-maui.log; exit 1
+      - name: Run the Maui project
+        working-directory: e2e
+        timeout-minutes: 25
+        env:
+          PLAYWRIGHT_PROFILE: maui
+          PLAYWRIGHT_BASE_URL: http://localhost:3000
+          PLAYWRIGHT_API_BASE_URL: http://localhost:8080
+        run: npx playwright test --project=maui --reporter=list,html
+      - name: Upload Playwright report and server logs
+        uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: playwright-report-maui
+          path: |
+            e2e/playwright-report/
+            e2e/test-results/
+            backend-maui.log
+            frontend-maui.log
