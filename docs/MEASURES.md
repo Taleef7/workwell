@@ -298,6 +298,10 @@ Outcome mapping (lower-is-better eCQM rate; NUMER maps to OVERDUE):
 
 ## Category 4 — CMS eCQM Catalog (2026 Performance Period)
 
+> **Id convention (ADR-071, 2026-09-01):** an official-vendored measure's catalog id is the vendored
+> manifest's bare `catalogId` (`cms2`, `cms130`, `cms165`, like `cms122`/`cms125`); the CMS version
+> lives in `policyRef`. Legacy versioned rows on an existing database are deprecated once by the seed.
+
 47 official CMS electronic Clinical Quality Measures seeded as Draft v1.0 catalog entries (CMS125v14 and CMS122v14 are now Active with full CQL — see Category 3b). The `policy_ref` field stores the CMS eCQM ID (e.g., `CMS128v14`). The `spec_json` stores `cmsEcqmId` and `mipsQualityId` for downstream tooling. CQL authoring for the remaining catalog entries is future work.
 
 The measures page renders CMS IDs as blue mono badges to distinguish them from OSHA CFR citations and HEDIS references.

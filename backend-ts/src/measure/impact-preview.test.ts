@@ -121,12 +121,12 @@ test("rejects malformed AND impossible calendar dates (400)", async () => {
 });
 
 test("a non-runnable measure returns an empty preview with a warning AND still writes a dry-run audit", async () => {
-  const draft = { ...audiogram(), measureId: "cms2v15", versionId: "cms2v15-v1.0" };
+  const draft = { ...audiogram(), measureId: "cms2", versionId: "cms2-v1.0" };
   const r = await previewImpact(deps, draft, { evaluationDate: "2093-04-04" }, "approver@x");
   assert.equal(r.populationEvaluated, 0);
   assert.ok(r.warnings.some((w) => /no runnable CQL binding/i.test(w)));
   const audits = await new SqliteCaseEventStore(db).listAuditEvents();
-  const ev = audits.find((a) => a.eventType === "MEASURE_IMPACT_PREVIEWED" && (a.payload as { measureVersionId: string }).measureVersionId === "cms2v15-v1.0");
+  const ev = audits.find((a) => a.eventType === "MEASURE_IMPACT_PREVIEWED" && (a.payload as { measureVersionId: string }).measureVersionId === "cms2-v1.0");
   assert.ok(ev, "non-runnable preview still audited");
   assert.equal((ev!.payload as { populationEvaluated: number; dryRun: boolean }).populationEvaluated, 0);
   assert.equal((ev!.payload as { dryRun: boolean }).dryRun, true);

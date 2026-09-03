@@ -15,6 +15,7 @@
  */
 import test, { after } from "node:test";
 import pg from "pg";
+import assert from "node:assert/strict";
 import { createPgPool } from "./pg-database.ts";
 import { RUN_STORE_PG_DDL, SPIKE_SCHEMA } from "./schema-pg.ts";
 import { PgRunStore } from "./run-store-postgres.ts";
@@ -31,6 +32,8 @@ import { PgSegmentStore } from "./segment-store-postgres.ts";
 import { PgQualitySnapshotStore } from "./quality-snapshot-store-postgres.ts";
 import { PgPersonLinkStore } from "./person-link-store-postgres.ts";
 import { PgEvalStateStore } from "./eval-state-store-postgres.ts";
+import { MEASURE_CATALOG } from "../../measure/measure-catalog.ts";
+import { seedMeasureStore } from "../../measure/measure-seed.ts";
 import {
   runStoreContract,
   outcomeStoreContract,
@@ -113,6 +116,37 @@ if (!reachable && process.env.WORKWELL_TEST_PG_URL) {
   measureStoreContract("postgres", async () => {
     await truncate();
     return new PgMeasureStore(pool);
+  });
+
+  test("[postgres] seedMeasureStore deprecates a legacy official row", async () => {
+    await truncate();
+    const store = new PgMeasureStore(pool);
+    const events = new PgCaseEventStore(pool);
+    const catalog = MEASURE_CATALOG.find((m) => m.id === "cms2")!;
+    await store.seedMeasure({
+      measureId: "cms2v15",
+      name: catalog.name,
+      policyRef: catalog.policyRef,
+      owner: catalog.owner,
+      tags: [...catalog.tags],
+      versionId: "cms2v15-v1.0",
+      version: catalog.version,
+      status: catalog.status,
+      spec: catalog.spec,
+      cqlText: "",
+      compileStatus: catalog.compileStatus,
+      createdAt: "2026-02-01T00:00:00.000Z",
+      changeSummary: "Seeded measure version",
+    });
+
+    await seedMeasureStore(store, () => "", events);
+    assert.equal((await store.getLatest("cms2v15"))?.status, "Deprecated");
+    const deprecatedEvents = async () =>
+      (await events.auditEventsByMeasureVersion("cms2v15-v1.0")).filter((event) => event.eventType === "MEASURE_DEPRECATED").length;
+    assert.equal(await deprecatedEvents(), 1);
+    // Second seed: the row is already Deprecated and the event exists, so hasAuditEvent must find it and nothing is written.
+    await seedMeasureStore(store, () => "", events);
+    assert.equal(await deprecatedEvents(), 1);
   });
 
   evidenceStoreContract("postgres", async () => {

@@ -15,7 +15,7 @@ test("measureIdentityFor returns identity for CMS measures and null for non-CMS 
     cmsId: "CMS122",
     mipsQualityId: "001",
   });
-  assert.deepEqual(measureIdentityFor("cms2v15"), {
+  assert.deepEqual(measureIdentityFor("cms2"), {
     cmsId: "CMS2",
     mipsQualityId: "134",
   });

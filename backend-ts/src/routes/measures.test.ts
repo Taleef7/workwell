@@ -15,6 +15,7 @@ import { rmSync } from "node:fs";
 import { createSqliteD1 } from "@mieweb/cloud-local";
 import { handleMeasures } from "./measures.ts";
 import { SqliteCaseEventStore } from "../stores/sqlite/case-event-store-sqlite.ts";
+import { SqliteMeasureStore } from "../stores/sqlite/measure-store-sqlite.ts";
 import { SqliteRunStore } from "../stores/sqlite/run-store-sqlite.ts";
 import { SqliteOutcomeStore } from "../stores/sqlite/outcome-store-sqlite.ts";
 import { runProfileChild } from "../test-support/run-profile-child.ts";
@@ -61,12 +62,12 @@ const profileCatalogScript = `
   const env = { DB: db };
   const list = await handleMeasures(new Request("http://x/api/measures"), env);
   const rows = await list.json();
-  const detail = await handleMeasures(new Request("http://x/api/measures/cms2v15"), env);
+  const detail = await handleMeasures(new Request("http://x/api/measures/cms2"), env);
   console.log(JSON.stringify({
     listStatus: list.status,
     count: rows.length,
     ids: rows.map(r => r.id),
-    draftStatus: rows.find(r => r.id === "cms2v15")?.status ?? null,
+    draftStatus: rows.find(r => r.id === "cms2")?.status ?? null,
     detailStatus: detail.status,
     detailBody: await detail.json(),
   }));
@@ -79,17 +80,17 @@ test("scoped profile (Maui) — measures catalog exposes only runnable rows and 
   assert.equal(output.count, 3);
   assert.equal(output.draftStatus, null);
   assert.equal(output.detailStatus, 404);
-  assert.deepEqual(output.detailBody, { error: "not_found", measureId: "cms2v15" });
+  assert.deepEqual(output.detailBody, { error: "not_found", measureId: "cms2" });
 });
 
 test("default profile — measures catalog preserves the full catalog and draft detail", () => {
   const output = runProfileChild(undefined, profileCatalogScript);
   assert.equal(output.listStatus, 200);
   assert.equal(output.count, 63);
-  assert.ok((output.ids as string[]).includes("cms2v15"));
+  assert.ok((output.ids as string[]).includes("cms2"));
   assert.equal(output.draftStatus, "Draft");
   assert.equal(output.detailStatus, 200);
-  assert.equal((output.detailBody as { id: string }).id, "cms2v15");
+  assert.equal((output.detailBody as { id: string }).id, "cms2");
 });
 
 test("GET /api/measures returns the full 63-measure catalog (Measure shape), Active-first", async () => {
@@ -175,7 +176,7 @@ test("GET /api/measures/:id returns MeasureDetail with spec + reconstructed CQL 
 });
 
 test("GET /api/measures/:id for a catalog-only draft: generic spec, empty CQL, NOT_COMPILED", async () => {
-  const d = (await get("/api/measures/cms2v15").then((r) => r!.json())) as {
+  const d = (await get("/api/measures/cms2").then((r) => r!.json())) as {
     cqlText: string;
     compileStatus: string;
     description: string;
@@ -237,7 +238,7 @@ test("GET /api/measures/:id/activation-readiness reflects the compile + fixture 
   assert.ok(!h.activationBlockers.some((b) => /Compile status/i.test(b)), "COMPILED → no compile blocker");
 
   // Draft (NOT_COMPILED, no fixtures) → both blockers.
-  const d = (await get("/api/measures/cms2v15/activation-readiness").then((r) => r!.json())) as { ready: boolean; activationBlockers: string[]; compileStatus: string };
+  const d = (await get("/api/measures/cms2/activation-readiness").then((r) => r!.json())) as { ready: boolean; activationBlockers: string[]; compileStatus: string };
   assert.equal(d.ready, false);
   assert.equal(d.compileStatus, "NOT_COMPILED");
   assert.ok(d.activationBlockers.some((b) => /Compile status must be COMPILED or WARNINGS/.test(b)));
@@ -377,6 +378,37 @@ test("concurrent cold-start requests seed the store once (no duplicate-PK 500)",
   for (const res of both) {
     assert.equal(res?.status, 200, "no 500 from a racing duplicate seed");
     assert.equal(((await res!.json()) as unknown[]).length, 63, "seeded exactly once");
+  }
+});
+
+test("a rejected seed is retried on the next request", async () => {
+  const retryDbPath = join(tmpdir(), `workwell-measures-retry-${crypto.randomUUID()}.sqlite`);
+  const retryDb = await createSqliteD1(retryDbPath);
+  const retryEnv = { DB: retryDb } as never;
+  const originalSeedMeasure = SqliteMeasureStore.prototype.seedMeasure;
+  let rejectOnce = true;
+  SqliteMeasureStore.prototype.seedMeasure = async function (input) {
+    if (rejectOnce) {
+      rejectOnce = false;
+      throw new Error("transient seed failure");
+    }
+    return originalSeedMeasure.call(this, input);
+  };
+  try {
+    await assert.rejects(
+      () => handleMeasures(new Request("http://x/api/measures", { method: "GET" }), retryEnv, "a@b.c"),
+      /transient seed failure/,
+    );
+    const res = await handleMeasures(new Request("http://x/api/measures", { method: "GET" }), retryEnv, "a@b.c");
+    assert.equal(res?.status, 200);
+    assert.equal(((await res!.json()) as unknown[]).length, 63);
+  } finally {
+    SqliteMeasureStore.prototype.seedMeasure = originalSeedMeasure;
+    try {
+      rmSync(retryDbPath, { force: true });
+    } catch {
+      /* best effort */
+    }
   }
 });
 
