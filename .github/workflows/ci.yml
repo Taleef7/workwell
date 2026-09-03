@@ -615,7 +615,7 @@ jobs:
           PLAYWRIGHT_PROFILE: maui
           PLAYWRIGHT_BASE_URL: http://localhost:3000
           PLAYWRIGHT_API_BASE_URL: http://localhost:8080
-        run: npx playwright test --project=maui --reporter=list
+        run: npx playwright test --project=maui --reporter=list,html
       - name: Upload Playwright report and server logs
         uses: actions/upload-artifact@v7
         if: always()

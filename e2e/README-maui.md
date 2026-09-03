@@ -34,12 +34,18 @@ run it against a local stack.
 ```powershell
 cd backend-ts
 $env:WORKWELL_INSTANCE = "maui"
-$env:WORKWELL_OFFICIAL_MEASURES = "cms122,cms125"
 $env:WORKWELL_AUTH_JWT_SECRET = "maui-e2e-dev-secret-key-32chars-minimum!!"
 corepack pnpm@10 dev
 ```
 
 The backend serves on http://localhost:8080 — verify with `GET /api/version`.
+This boot runs the authored cms122/cms125, the same setup the CI job uses. Do
+NOT set `WORKWELL_OFFICIAL_MEASURES` on a clean checkout: the official
+artifacts need their vendored terminology sidecars
+(`measures/official/*/terminology.json`, gitignored), and without them
+`officialRoutingProblems()` refuses every evaluation route the global setup
+depends on. To exercise official routing locally, run the credentialed vendor
+step first (`docs/DEPLOY.md`, "vendoring official terminology").
 If the port differs, read `@mieweb/cli`'s config output and use what it prints.
 A fresh SQLite file is used by default; the dev CLI accepts a custom path if
 you need one.
@@ -65,12 +71,14 @@ before running the suite.
 ```powershell
 cd e2e
 npx playwright install chromium   # first time only
+$env:PLAYWRIGHT_PROFILE = "maui"
 npx playwright test --project=maui
 ```
 
-Playwright reads `PLAYWRIGHT_BASE_URL`, `PLAYWRIGHT_API_BASE_URL`, and
-`PLAYWRIGHT_PROFILE` from the environment. Defaults are the local URLs above.
-In PowerShell:
+`PLAYWRIGHT_PROFILE=maui` is REQUIRED: every Maui spec skips itself when it
+is unset, and the global setup seeds no run, so Playwright exits green with
+every test skipped. The URLs default to the local ports above
+(`PLAYWRIGHT_BASE_URL`, `PLAYWRIGHT_API_BASE_URL`). The full PowerShell form:
 
 ```powershell
 $env:PLAYWRIGHT_PROFILE = "maui"

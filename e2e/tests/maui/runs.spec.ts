@@ -9,6 +9,20 @@ test.describe("Maui runs", () => {
   test("trigger a manual ALL_PROGRAMS run and verify 144 evaluated", async ({ page, request }) => {
     test.setTimeout(240_000);
     await loginAs(page, MAUI_ACCOUNTS.qualityLead.email);
+
+    // Snapshot the run ids that exist BEFORE the click, so the assertion below is about the run this
+    // test triggers and not the completed run the global setup seeded.
+    const login = await request.post(`${API_BASE}/api/auth/login`, {
+      data: { email: MAUI_ACCOUNTS.qualityLead.email, password: MAUI_PASSWORD },
+    });
+    expect(login.ok()).toBe(true);
+    const { token } = (await login.json()) as { token: string };
+    const headers = { Authorization: `Bearer ${token}` };
+    type RunRow = { runId: string; status: string; scopeType: string; totalEvaluated: number };
+    const before = await request.get(`${API_BASE}/api/runs`, { headers });
+    expect(before.ok()).toBe(true);
+    const knownIds = new Set(((await before.json()) as RunRow[]).map((r) => r.runId));
+
     await page.goto("/runs");
     await expect(page.getByRole("heading", { name: /Run History/i })).toBeVisible({ timeout: 20_000 });
 
@@ -22,21 +36,16 @@ test.describe("Maui runs", () => {
     await expect(page.getByText(/queued|running/i).first()).toBeVisible({ timeout: 30_000 });
     await expect(page.getByText(/queued|running/i)).toHaveCount(0, { timeout: 180_000 });
 
-    // Verify the completed run via API
-    const login = await request.post(`${API_BASE}/api/auth/login`, {
-      data: { email: MAUI_ACCOUNTS.qualityLead.email, password: MAUI_PASSWORD },
-    });
-    expect(login.ok()).toBe(true);
-    const { token } = (await login.json()) as { token: string };
-
-    const runsRes = await request.get(`${API_BASE}/api/runs`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
+    // Verify THE run this click created — a run that FAILED would clear the banner too, and the
+    // setup run must not be allowed to stand in for it.
+    const runsRes = await request.get(`${API_BASE}/api/runs`, { headers });
     expect(runsRes.ok()).toBe(true);
-    const runs = (await runsRes.json()) as Array<{ status: string; scopeType: string; totalEvaluated: number }>;
-    const completed = runs.find((r) => r.status === "COMPLETED" && r.scopeType === "ALL_PROGRAMS");
-    expect(completed).toBeDefined();
-    expect(completed!.totalEvaluated).toBe(144);
+    const runs = (await runsRes.json()) as RunRow[];
+    const created = runs.filter((r) => !knownIds.has(r.runId));
+    expect(created, "the Start run click must have created exactly one new run").toHaveLength(1);
+    expect(created[0].scopeType).toBe("ALL_PROGRAMS");
+    expect(created[0].status).toBe("COMPLETED");
+    expect(created[0].totalEvaluated).toBe(144);
     await expectNoErrorPage(page);
   });
 
