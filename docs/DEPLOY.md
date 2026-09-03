@@ -840,8 +840,9 @@ an earlier commit, whose image is `maui-sha-<that SHA>`.
 Sandbox accounts (all use the documented demo password `Workwell123!`):
 
 Demo accounts are strictly profile-scoped: on the Maui profile (`WORKWELL_INSTANCE=maui`), only
-`@maui.workwell.dev` accounts authenticate. The standard `@workwell.dev` demo accounts (including the
-public `/sandbox` viewer) are refused.
+`@maui.workwell.dev` accounts authenticate; the check runs per request, so a token minted before the
+restriction is refused too. The standard `@workwell.dev` demo accounts (including the public `/sandbox`
+viewer) are refused.
 
 | Identifier | Role |
 |------------|------|

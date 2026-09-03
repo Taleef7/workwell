@@ -55,6 +55,17 @@ test("findDemoUser is case-insensitive and trims", () => {
   assert.equal(findDemoUser("nobody@workwell.dev"), null);
 });
 
+test("findDemoUser scopes by profileId in-process without child process", () => {
+  assert.equal(findDemoUser("viewer@workwell.dev", "maui"), null);
+  assert.equal(findDemoUser("admin@workwell.dev", "maui"), null);
+  assert.equal(findDemoUser("quality-lead@maui.workwell.dev", "maui")?.role, "ROLE_CASE_MANAGER");
+  assert.equal(findDemoUser("clinician@maui.workwell.dev", "maui")?.role, "ROLE_VIEWER");
+
+  assert.equal(findDemoUser("viewer@workwell.dev", "default")?.role, "ROLE_VIEWER");
+  assert.equal(findDemoUser("admin@workwell.dev", "default")?.role, "ROLE_ADMIN");
+  assert.equal(findDemoUser("quality-lead@maui.workwell.dev", "default")?.role, "ROLE_CASE_MANAGER");
+});
+
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
