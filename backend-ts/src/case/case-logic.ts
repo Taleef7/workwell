@@ -59,14 +59,14 @@ export const NEXT_ACTION_LABELS: Record<string, string> = {
 };
 
 export function nextActionFor(outcomeStatus: string, measureId: string): string {
-  const label = NEXT_ACTION_LABELS[measureId] ?? "compliance assessment";
+  const label = NEXT_ACTION_LABELS[measureId] ?? "required screening";
   switch (outcomeStatus) {
     case "OVERDUE":
-      return `Escalate ${label} follow-up immediately.`;
+      return `No ${label} on file for this measurement period. Order or document one.`;
     case "MISSING_DATA":
-      return `Collect the missing ${label} documentation.`;
+      return `No ${label} result could be found. Check for outside records before ordering.`;
     case "DUE_SOON":
-      return `Schedule the ${label} before the due date.`;
+      return `A ${label} is due before the end of this measurement period.`;
     case "EXCLUDED":
       return DEPLOYMENT_PROFILE.subjectTerm === "patient"
         ? "Review the documented exclusion and rerun before it lapses."

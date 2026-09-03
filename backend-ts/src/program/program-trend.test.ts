@@ -7,7 +7,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 // Task 2 adds `monthlyTrendPoints` and Task 3 adds `programDeps`/`ProgramDeps` + `programTrend` to this
 // import as those tasks are implemented. Task 1 uses only `snapshotScopeFor`.
-import { snapshotScopeFor, monthlyTrendPoints, programTrend, isWholeMonthRange } from "./program-read-models.ts";
+import { snapshotScopeFor, monthlyTrendPoints, programTrend, isWholeMonthRange, complianceRateOf } from "./program-read-models.ts";
 import type { ProgramDeps } from "./program-read-models.ts";
 import type { QualitySnapshotRow } from "../stores/quality-snapshot-store.ts";
 import type { OutcomeWithRun } from "../stores/outcome-store.ts";
@@ -53,7 +53,7 @@ const snap = (period: string, num: number, den: number): QualitySnapshotRow => (
   computedAt: `${period}-28T00:00:00.000Z`,
 });
 
-test("monthlyTrendPoints — newest-first order, stamps period, rate = round1(compliant,total)", () => {
+test("monthlyTrendPoints — newest-first order, stamps period, rate = complianceRateOf (denominator-based)", () => {
   const pts = monthlyTrendPoints([snap("2026-06", 8, 10), snap("2026-04", 5, 10), snap("2026-05", 9, 10)]);
   assert.deepEqual(pts.map((p) => p.period), ["2026-06", "2026-05", "2026-04"]); // newest-first
   assert.equal(pts[0]!.complianceRate, 80); // 8/10 (newest = 2026-06)
@@ -73,9 +73,9 @@ test("monthlyTrendPoints — caps to the newest 12 months (newest-first)", () =>
   assert.equal(pts[11]!.period, "2025-04"); // oldest kept
 });
 
-test("monthlyTrendPoints — rate uses total-including-excluded, not the E16 denominator", () => {
+test("monthlyTrendPoints — rate uses CMS denominator (excluded removed), stamps denominator", () => {
   // compliant=8, dueSoon=0, overdue=1, missingData=0, excluded=1 → numerator=8, denominator=9, total=10.
-  // The per-run path + /programs headline use compliant/total (=80%), NOT numerator/denominator (~88.9%).
+  // Updated to CMS rate: compliant / (total - excluded) = 8 / (10 - 1) = 88.9% with excluded removed from denominator.
   const withExcluded: QualitySnapshotRow = {
     ...snap("2026-06", 8, 9), // numerator=8, denominator=9 (deliberately != total)
     compliant: 8,
@@ -85,8 +85,14 @@ test("monthlyTrendPoints — rate uses total-including-excluded, not the E16 den
     excluded: 1,
   };
   const [pt] = monthlyTrendPoints([withExcluded]);
-  assert.equal(pt!.totalEvaluated, 10); // 8+0+1+0+1, not the denominator 9
-  assert.equal(pt!.complianceRate, 80); // 8/10, not 8/9
+  assert.equal(pt!.totalEvaluated, 10); // evaluated count keeps all 5 buckets
+  assert.equal(pt!.denominator, 9); // total - excluded
+  assert.equal(pt!.complianceRate, 88.9); // 8/9, not 8/10
+});
+
+test("complianceRateOf — pins CMS denominator (e.g. 38 compliant, 7 overdue, 3 excluded -> 84.4)", () => {
+  assert.equal(complianceRateOf({ compliant: 38, dueSoon: 0, overdue: 7, missingData: 0, excluded: 3 }), 84.4);
+  assert.equal(complianceRateOf({ compliant: 0, dueSoon: 0, overdue: 0, missingData: 0, excluded: 5 }), 0); // 0 when denominator is 0
 });
 
 // Minimal fakes: programTrend only touches outcomeStore.listOutcomesWithRun (per-run path) and
@@ -104,8 +110,8 @@ function fakeDeps(opts: { snaps?: QualitySnapshotRow[]; perRun?: OutcomeWithRun[
   return deps;
 }
 
-const perRunRow = (runId: string, startedAt: string, status: string): OutcomeWithRun => ({
-  runId, runStartedAt: startedAt, runScopeType: "ALL_PROGRAMS", runStatus: "COMPLETED", runTriggeredBy: "manual",
+const perRunRow = (runId: string, startedAt: string, status: string, runStatus = "COMPLETED"): OutcomeWithRun => ({
+  runId, runStartedAt: startedAt, runScopeType: "ALL_PROGRAMS", runStatus, runTriggeredBy: "manual",
   subjectId: "emp-006", measureId: "audiogram", status,
 });
 
@@ -166,4 +172,77 @@ test("programTrend — partial-month range → per-run fallback even with ≥2 s
   const pts = await programTrend(deps, "audiogram", { from: "2026-06-27", to: "2026-07-04" }, { monthly: true });
   assert.ok(pts.every((p) => p.period === undefined), "partial-month range falls back to per-run");
   assert.deepEqual(new Set(pts.map((p) => p.runId)), new Set(["run-a", "run-b"]));
+});
+
+test("programTrend — collapses to at most one point per calendar day, keeping the later completed run", async () => {
+  const deps = fakeDeps({
+    withSnapshots: false,
+    perRun: [
+      perRunRow("run-early", "2026-06-01T09:00:00Z", "COMPLIANT"),
+      perRunRow("run-late", "2026-06-01T15:00:00Z", "OVERDUE"),
+      perRunRow("run-next-day", "2026-06-02T10:00:00Z", "COMPLIANT"),
+    ],
+  });
+  const pts = await programTrend(deps, "audiogram", {});
+  assert.equal(pts.length, 2, "collapsed two runs on 2026-06-01 to one");
+  assert.equal(pts[0]!.runId, "run-next-day", "newest first");
+  assert.equal(pts[1]!.runId, "run-late", "later completed run of 2026-06-01 kept");
+});
+
+test("programTrend — a PARTIAL_FAILURE run is a trend point; a FAILED/QUEUED run is not", async () => {
+  const deps = fakeDeps({
+    withSnapshots: false,
+    perRun: [
+      perRunRow("run-completed", "2026-06-01T09:00:00Z", "COMPLIANT", "COMPLETED"),
+      perRunRow("run-partial", "2026-06-02T10:00:00Z", "OVERDUE", "PARTIAL_FAILURE"),
+      perRunRow("run-failed", "2026-06-03T15:00:00Z", "OVERDUE", "FAILED"),
+      perRunRow("run-queued", "2026-06-04T12:00:00Z", "OVERDUE", "QUEUED"),
+    ],
+  });
+  const pts = await programTrend(deps, "audiogram", {});
+  assert.equal(pts.length, 2, "PARTIAL_FAILURE and COMPLETED are trend points; FAILED/QUEUED are not");
+  assert.deepEqual(pts.map((p) => p.runId), ["run-partial", "run-completed"]);
+});
+
+test("programTrend — per-run points include denominator and CMS compliance rate", async () => {
+  // 38 compliant, 7 overdue, 3 excluded -> total 48, denominator 45, rate 84.4
+  const rows: OutcomeWithRun[] = [];
+  for (let i = 0; i < 38; i++) rows.push(perRunRow("run-cms", "2026-06-01T12:00:00Z", "COMPLIANT"));
+  for (let i = 0; i < 7; i++) rows.push(perRunRow("run-cms", "2026-06-01T12:00:00Z", "OVERDUE"));
+  for (let i = 0; i < 3; i++) rows.push(perRunRow("run-cms", "2026-06-01T12:00:00Z", "EXCLUDED"));
+
+  const deps = fakeDeps({ withSnapshots: false, perRun: rows });
+  const pts = await programTrend(deps, "audiogram", {});
+  assert.equal(pts.length, 1);
+  assert.equal(pts[0]!.totalEvaluated, 48);
+  assert.equal(pts[0]!.denominator, 45);
+  assert.equal(pts[0]!.complianceRate, 84.4);
+});
+
+test("programTrend — timezone-correct day collapse (Pacific/Honolulu collapses across UTC midnight, invalid tz falls back to UTC)", async () => {
+  const deps = fakeDeps({
+    withSnapshots: false,
+    perRun: [
+      perRunRow("run-hst-early", "2026-09-02T23:30:00.000Z", "COMPLIANT"),
+      perRunRow("run-hst-late", "2026-09-03T01:30:00.000Z", "OVERDUE"),
+    ],
+  });
+
+  // tz=Pacific/Honolulu: 23:30Z is 13:30 HST, 01:30Z is 15:30 HST -> both on 2026-09-02 local day.
+  // Collapses to ONE point, keeping the later run (run-hst-late).
+  const hstPts = await programTrend(deps, "audiogram", {}, { tz: "Pacific/Honolulu" });
+  assert.equal(hstPts.length, 1, "Pacific/Honolulu collapses to 1 point");
+  assert.equal(hstPts[0]!.runId, "run-hst-late", "keeps the later run of that local day");
+
+  // UTC: 2026-09-02 and 2026-09-03 are distinct UTC days -> TWO points.
+  const utcPts = await programTrend(deps, "audiogram", {}, { tz: "UTC" });
+  assert.equal(utcPts.length, 2, "UTC produces 2 points");
+
+  // Default (no tz specified): behaves as UTC -> TWO points.
+  const defPts = await programTrend(deps, "audiogram", {});
+  assert.equal(defPts.length, 2, "default tz produces 2 points");
+
+  // Invalid tz: falls back to UTC -> TWO points.
+  const invalidPts = await programTrend(deps, "audiogram", {}, { tz: "Invalid/Timezone" });
+  assert.equal(invalidPts.length, 2, "invalid tz falls back to UTC (2 points)");
 });

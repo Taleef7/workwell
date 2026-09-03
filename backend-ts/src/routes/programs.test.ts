@@ -44,7 +44,7 @@ before(async () => {
   const runStore = new SqliteRunStore(db);
   const outcomes = new SqliteOutcomeStore(db);
   const cases = new SqliteCaseStore(db);
-  const mkRun = () =>
+  const mkRun = (startedAt?: string) =>
     runStore.createRun({
       scopeType: "MEASURE",
       scopeId: "audiogram",
@@ -55,15 +55,16 @@ before(async () => {
       requestedScope: { measureId: "audiogram" },
       measurementPeriodStart: "2026-06-13T00:00:00.000Z",
       measurementPeriodEnd: "2026-06-13T00:00:00.000Z",
+      startedAt,
     });
 
-  // An older run (should be superseded by the newer one in the overview).
-  const older = await mkRun();
+  // Older run dated to previous calendar day so one-point-per-day trend collapse keeps both days.
+  const older = await mkRun("2026-06-12T00:00:00.000Z");
   await outcomes.recordOutcome({ runId: older.id, subjectId: "emp-006", measureId: "audiogram", status: "COMPLIANT", evidence: {} });
   await new Promise((r) => setTimeout(r, 8)); // ensure a strictly later started_at
 
   // The latest run: emp-006 (Plant A) OVERDUE + emp-001 (HQ) COMPLIANT → 2 evaluated, 50% compliant.
-  const latest = await mkRun();
+  const latest = await mkRun("2026-06-13T00:00:00.000Z");
   latestRunId = latest.id;
   await outcomes.recordOutcome({ runId: latest.id, subjectId: "emp-006", measureId: "audiogram", status: "OVERDUE", evidence: {} });
   await outcomes.recordOutcome({ runId: latest.id, subjectId: "emp-001", measureId: "audiogram", status: "COMPLIANT", evidence: {} });
@@ -166,6 +167,34 @@ test("GET /api/programs/:id/trend returns per-run points newest-first (complianc
   assert.equal(trend[0]!.complianceRate, 50);
   assert.equal(trend[1]!.complianceRate, 100, "older run was all-compliant");
 });
+
+test("GET /api/programs/:id/trend honors ?tz= query param for day collapse", async () => {
+  const runStore = new SqliteRunStore(env.DB as never);
+  const outcomes = new SqliteOutcomeStore(env.DB as never);
+  const r1 = await runStore.createRun({
+    scopeType: "MEASURE", scopeId: "mmr", triggeredBy: "test", status: "COMPLETED",
+    requestedScope: { measureId: "mmr" }, measurementPeriodStart: "2026-09-02T00:00:00.000Z",
+    measurementPeriodEnd: "2026-09-02T23:59:59.999Z", startedAt: "2026-09-02T23:30:00.000Z",
+  });
+  const r2 = await runStore.createRun({
+    scopeType: "MEASURE", scopeId: "mmr", triggeredBy: "test", status: "COMPLETED",
+    requestedScope: { measureId: "mmr" }, measurementPeriodStart: "2026-09-03T00:00:00.000Z",
+    measurementPeriodEnd: "2026-09-03T23:59:59.999Z", startedAt: "2026-09-03T01:30:00.000Z",
+  });
+  await outcomes.recordOutcome({ runId: r1.id, subjectId: "emp-001", measureId: "mmr", status: "COMPLIANT", evidence: {} });
+  await outcomes.recordOutcome({ runId: r2.id, subjectId: "emp-001", measureId: "mmr", status: "COMPLIANT", evidence: {} });
+
+  const hstTrend = (await get("/mmr/trend?tz=Pacific/Honolulu").then((r) => r!.json())) as Array<{ runId: string }>;
+  assert.equal(hstTrend.length, 1, "Honolulu timezone collapses runs to 1 point");
+  assert.equal(hstTrend[0]!.runId, r2.id, "later completed run kept");
+
+  const utcTrend = (await get("/mmr/trend?tz=UTC").then((r) => r!.json())) as Array<{ runId: string }>;
+  assert.equal(utcTrend.length, 2, "UTC produces 2 points");
+
+  const invalidTrend = (await get("/mmr/trend?tz=Invalid/Zone").then((r) => r!.json())) as Array<{ runId: string }>;
+  assert.equal(invalidTrend.length, 2, "invalid tz falls back to UTC");
+});
+
 
 test("GET /api/programs/:id/top-drivers ranks overdue by site/role + flagged-reason mix", async () => {
   const d = (await get("/audiogram/top-drivers").then((r) => r!.json())) as {

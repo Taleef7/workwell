@@ -9,6 +9,7 @@ import { useApi } from "@/lib/api/hooks";
 import { fmtCount } from "@/lib/format";
 import { useAuth } from "@/components/auth-provider";
 import { useRunStatus } from "@/components/run-status-provider";
+import { SkeletonCard } from "@/components/skeleton-loader";
 import { canRunMeasures } from "@/lib/rbac";
 import { canSeeEngineering } from "@/lib/public-demo";
 import { ConfirmDialog } from "@/components/confirm-dialog";
@@ -22,8 +23,8 @@ import {
   CartesianGrid, ResponsiveContainer,
 } from "recharts";
 import { ChartDataTable } from "@/components/chart-data-table";
-import { SkeletonCard } from "@/components/skeleton-loader";
-import { useMeasureIdentities } from "@/lib/measure-identity";
+import { useMeasureIdentities, type MeasureIdentity } from "@/lib/measure-identity";
+import { displayRate } from "@/lib/measure-rate";
 import { trendMeta, type TrendPoint } from "./trend-meta";
 
 type ProgramSummary = {
@@ -34,6 +35,7 @@ type ProgramSummary = {
   latestRunId: string | null;
   latestRunAt: string | null;
   totalEvaluated: number;
+  denominator?: number;
   compliant: number;
   dueSoon: number;
   overdue: number;
@@ -56,7 +58,7 @@ export default function ProgramsPage() {
   const { isActive: runActive, startTracking } = useRunStatus();
   const { siteId, from, to } = useGlobalFilters();
   const isPatientTerm = SUBJECT.singular === "patient";
-  const { labelFor: measureLabelFor } = useMeasureIdentities();
+  const { identities, labelFor: measureLabelFor } = useMeasureIdentities();
   const [programs, setPrograms] = useState<ProgramSummary[]>([]);
   const [tenant, setTenant] = useState("");
   const [tenantOptions, setTenantOptions] = useState<TenantOption[]>([]);
@@ -162,8 +164,12 @@ export default function ProgramsPage() {
 
   const totalEvaluations = programs.reduce((sum, p) => sum + p.totalEvaluated, 0);
   const totalCompliant = programs.reduce((sum, p) => sum + p.compliant, 0);
-  const totalEvaluated = programs.reduce((sum, p) => sum + p.totalEvaluated, 0);
-  const overallComplianceRate = totalEvaluated === 0 ? 0 : Math.round((totalCompliant * 1000) / totalEvaluated) / 10;
+  const totalDenominator = programs.reduce(
+    (sum, p) => sum + (p.denominator ?? (p.totalEvaluated - p.excluded)),
+    0
+  );
+  const overallComplianceRate =
+    totalDenominator === 0 ? 0 : Math.round((totalCompliant * 1000) / totalDenominator) / 10;
   const openCases = programs.reduce((sum, p) => sum + p.openCaseCount, 0);
   const lastRunTimestamp = programs
     .map((p) => p.latestRunAt)
@@ -256,6 +262,10 @@ export default function ProgramsPage() {
         {programs.map((program) => {
           const trend = trendByMeasure[program.measureId] ?? [];
           const drivers = driversByMeasure[program.measureId] ?? { bySite: [], byRole: [], byOutcomeReason: [] };
+          const programIdentity = identities[program.measureId];
+          const programRate = displayRate(program, programIdentity);
+          const numerator = programRate.lowerIsBetter ? program.overdue : program.compliant;
+          const noteId = `lower-note-${program.measureId}`;
           return (
             <div key={program.measureId} className="group relative rounded-md border border-neutral-200 bg-white p-4 transition hover:border-primary-400 hover:shadow-sm dark:border-neutral-800 dark:bg-neutral-900 dark:hover:border-primary-600">
               {/* Stretched link makes the whole card open the measure detail; interactive
@@ -270,7 +280,22 @@ export default function ProgramsPage() {
                   <h3 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">{measureLabelFor(program.measureId, program.measureName)}</h3>
                   <p className="text-xs text-neutral-600 dark:text-neutral-400">{program.policyRef} • {program.version}</p>
                 </div>
-                <p className="text-2xl font-semibold text-neutral-900 dark:text-neutral-100">{program.complianceRate.toFixed(1)}%</p>
+                <div className="text-right">
+                  <p
+                    aria-describedby={programRate.lowerIsBetter ? noteId : undefined}
+                    className="text-2xl font-semibold text-neutral-900 dark:text-neutral-100"
+                  >
+                    {programRate.label} {programRate.value.toFixed(1)}%
+                  </p>
+                  {programRate.lowerIsBetter ? (
+                    <p id={noteId} className="text-xs text-neutral-500 dark:text-neutral-400">Lower is better</p>
+                  ) : null}
+                  {program.denominator !== undefined ? (
+                    <p className="text-xs text-neutral-500 dark:text-neutral-400">
+                      {fmtCount(numerator)} / {fmtCount(program.denominator)}
+                    </p>
+                  ) : null}
+                </div>
               </div>
 
               <div className="mt-3 flex flex-wrap gap-2 text-xs">
@@ -296,7 +321,12 @@ export default function ProgramsPage() {
 
               <div className="relative z-10 mt-4">
                 <p className="mb-1 text-xs font-semibold uppercase tracking-[0.15em] text-neutral-500 dark:text-neutral-400">Trend</p>
-                <TrendChart data={trend} loading={detailsLoading} caption={`${program.measureName} compliance trend`} />
+                <TrendChart
+                  data={trend}
+                  loading={detailsLoading}
+                  caption={`${program.measureName} ${programRate.label.toLowerCase()} trend`}
+                  identity={programIdentity}
+                />
               </div>
 
               <div className="mt-4 grid gap-2 text-xs text-neutral-700 sm:grid-cols-2 dark:text-neutral-300">
@@ -443,7 +473,17 @@ function Badge({ label, tone, href, ariaLabel }: { label: string; tone: "green" 
     : <span className={className}>{label}</span>;
 }
 
-function TrendChart({ data, loading, caption }: { data: TrendPoint[]; loading?: boolean; caption: string }) {
+function TrendChart({
+  data,
+  loading,
+  caption,
+  identity,
+}: {
+  data: TrendPoint[];
+  loading?: boolean;
+  caption: string;
+  identity?: MeasureIdentity | null;
+}) {
   const { theme } = useTheme();
   const sorted = [...(data ?? [])]
     .filter((t) => t.totalEvaluated > 0)
@@ -461,16 +501,19 @@ function TrendChart({ data, loading, caption }: { data: TrendPoint[]; loading?: 
     );
   }
 
-  const meta = trendMeta(sorted);
+  const isDecrease = identity?.improvementNotation === "decrease";
+  const rateLabel = isDecrease ? "Poor control" : "Compliance";
+  const meta = trendMeta(sorted, identity);
   const { chartData, delta, deltaLabel, dateHeader } = meta;
   const [domainLo, domainHi] = niceDomain(chartData.map((d) => d.rate));
-  const deltaPositive = delta >= 0;
+  const isGood = isDecrease ? delta <= 0 : delta >= 0;
 
   return (
     <div className="space-y-1 text-primary-600 dark:text-primary-400">
       <div className="flex items-center gap-1">
-        <span className={`text-xs font-medium ${deltaPositive ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
-          {deltaPositive ? "↑" : "↓"} {Math.abs(Math.round(delta * 10) / 10)}% {deltaLabel}
+        <span className={`text-xs font-medium ${isGood ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
+          {delta >= 0 ? "↑" : "↓"} {Math.abs(Math.round(delta * 10) / 10)}% {deltaLabel}
+          <span className="sr-only"> ({isDecrease ? "lower is better" : "higher is better"})</span>
         </span>
       </div>
       {/* The sr-only ChartDataTable below is the accessible alternative, so the chart is
@@ -492,7 +535,7 @@ function TrendChart({ data, loading, caption }: { data: TrendPoint[]; loading?: 
               width={36}
             />
             <Tooltip
-              formatter={(v) => [`${v}%`, "Compliance"]}
+              formatter={(v) => [`${v}%`, rateLabel]}
               {...chartTooltipStyle(theme)}
             />
             <Line
@@ -508,7 +551,7 @@ function TrendChart({ data, loading, caption }: { data: TrendPoint[]; loading?: 
       </div>
       <ChartDataTable
         caption={`${caption} by ${meta.monthly ? "month" : "run"}`}
-        columns={[dateHeader, "Compliance"]}
+        columns={[dateHeader, rateLabel]}
         rows={chartData.map((d) => [d.label, `${d.rate}%`])}
       />
     </div>

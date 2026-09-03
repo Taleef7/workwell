@@ -138,7 +138,7 @@ test("`critical` is never emitted: OVERDUE is the ceiling, and it is `warning`",
 test("a FAILED evaluation is reported as ours, not as a missing record in the chart", async () => {
   // PARTIAL_FAILURE is terminal, so its rows are served, and a subject whose evaluation threw is persisted
   // MISSING_DATA + evidence.evaluationError (DATA_MODEL_CONTRACTS §5). Without a branch for it, `deriveCell`
-  // falls through to "No record on file" and `nextActionFor` says "Collect the missing documentation" —
+  // falls through to "No record on file" and `nextActionFor` says "Check for outside records before ordering" —
   // asserting a fact about the PATIENT when our engine threw (review).
   const failed = row("audiogram", "MISSING_DATA", {
     evidence: { evaluationError: "CQL engine failure", message: "boom" },

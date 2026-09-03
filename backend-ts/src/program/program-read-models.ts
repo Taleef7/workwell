@@ -4,7 +4,7 @@
  *
  * Overview, per Active measure: the LATEST run (filtered by employee site + run period)
  * that produced outcomes for that measure, its outcome-bucket counts, complianceRate
- * (compliant/total × 100, 1 decimal), and the OPEN case count (same site/period filter on
+ * (compliant / (total - excluded) × 100, 1 decimal), and the OPEN case count (same site/period filter on
  * the case). Active measures are the catalog's Active set = the engine's runnable set.
  * Employee site is resolved from the synthetic directory (outcomes carry only subjectId).
  */
@@ -16,10 +16,12 @@ import type { QualitySnapshotStore, QualitySnapshotRow, QualityScopeLevel } from
 import { MEASURE_CATALOG } from "../measure/measure-catalog.ts";
 import { ACTIVE_CASE_STATUSES } from "../case/case-logic.ts";
 import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
-import { day, isCompletedRun, isPopulationRun, round1 } from "./rollup-shared.ts";
+import { day, isCompletedRun, isPopulationRun, round1, complianceRateOf, type ComplianceRateCounts } from "./rollup-shared.ts";
 import { directoryForRows, type DirectorySnapshot } from "../engine/ingress/webchart/live-directory.ts";
 import { DEPLOYMENT_PROFILE, DIRECTORY, isRunnableMeasure, profileSubjectMatcher, tenantById } from "../config/deployment-profile.ts";
 import { isWebChartConfigured, type DataSourceEnv } from "../engine/ingress/data-source.ts";
+
+export { complianceRateOf, type ComplianceRateCounts };
 
 export interface ProgramSummary {
   measureId: string;
@@ -29,6 +31,7 @@ export interface ProgramSummary {
   latestRunId: string | null;
   latestRunAt: string | null;
   totalEvaluated: number;
+  denominator: number;
   compliant: number;
   dueSoon: number;
   overdue: number;
@@ -73,9 +76,8 @@ export function snapshotScopeFor(
 /**
  * Map monthly snapshot rows → trend points for the newest 12 months (UX-8). Returned NEWEST-FIRST
  * to match the per-run branch's contract (the measure page reads `trend[1]` as the previous point).
- * `complianceRate`/`totalEvaluated` use total-INCLUDING-excluded (the sum of all five buckets) so the
- * monthly series reconciles with the per-run branch and the `/programs` headline KPI — not the E16
- * proportion denominator (`total − excluded`).
+ * `complianceRate` uses the CMS proportion denominator (`total − excluded`), while `totalEvaluated`
+ * keeps reporting the full evaluated count including excluded (a count, not a denominator).
  */
 export function monthlyTrendPoints(rows: QualitySnapshotRow[]): ProgramTrendPoint[] {
   return rows
@@ -84,12 +86,20 @@ export function monthlyTrendPoints(rows: QualitySnapshotRow[]): ProgramTrendPoin
     .slice(0, 12)
     .map((r): ProgramTrendPoint => {
       const total = r.compliant + r.dueSoon + r.overdue + r.missingData + r.excluded;
+      const denominator = total - r.excluded;
       return {
         runId: r.sourceRunId ?? r.id,
         startedAt: r.periodEnd,
         period: r.period,
-        complianceRate: round1(r.compliant, total),
+        complianceRate: complianceRateOf({
+          compliant: r.compliant,
+          dueSoon: r.dueSoon,
+          overdue: r.overdue,
+          missingData: r.missingData,
+          excluded: r.excluded,
+        }),
         totalEvaluated: total,
+        denominator,
         compliant: r.compliant,
         dueSoon: r.dueSoon,
         overdue: r.overdue,
@@ -118,6 +128,7 @@ export interface ProgramTrendPoint {
   period?: string;
   complianceRate: number;
   totalEvaluated: number;
+  denominator: number;
   compliant: number;
   dueSoon: number;
   overdue: number;
@@ -183,6 +194,7 @@ export async function programSites(deps: Pick<ProgramDeps, "outcomeStore" | "web
 interface RunGroup {
   runId: string;
   runStartedAt: string;
+  runStatus: string;
   rows: OutcomeWithRun[];
 }
 
@@ -191,7 +203,7 @@ function groupByRun(rows: OutcomeWithRun[]): RunGroup[] {
   const byRun = new Map<string, RunGroup>();
   for (const r of rows) {
     let g = byRun.get(r.runId);
-    if (!g) byRun.set(r.runId, (g = { runId: r.runId, runStartedAt: r.runStartedAt, rows: [] }));
+    if (!g) byRun.set(r.runId, (g = { runId: r.runId, runStartedAt: r.runStartedAt, runStatus: r.runStatus, rows: [] }));
     g.rows.push(r);
   }
   return [...byRun.values()];
@@ -262,6 +274,11 @@ export async function programOverview(deps: ProgramDeps, filters: ProgramFilters
     const n = (status: string) => os.filter((o) => o.status === status).length;
     const total = os.length;
     const compliant = n("COMPLIANT");
+    const dueSoon = n("DUE_SOON");
+    const overdue = n("OVERDUE");
+    const missingData = n("MISSING_DATA");
+    const excluded = n("EXCLUDED");
+    const denominator = total - excluded;
     const openCaseCount = cases.filter(
       (c) =>
         c.measureId === m.id &&
@@ -280,12 +297,13 @@ export async function programOverview(deps: ProgramDeps, filters: ProgramFilters
       latestRunId: best?.runId ?? null,
       latestRunAt: best?.runStartedAt ?? null,
       totalEvaluated: total,
+      denominator,
       compliant,
-      dueSoon: n("DUE_SOON"),
-      overdue: n("OVERDUE"),
-      missingData: n("MISSING_DATA"),
-      excluded: n("EXCLUDED"),
-      complianceRate: round1(compliant, total),
+      dueSoon,
+      overdue,
+      missingData,
+      excluded,
+      complianceRate: complianceRateOf({ compliant, dueSoon, overdue, missingData, excluded }),
       openCaseCount,
     };
   });
@@ -340,13 +358,14 @@ async function foldScaleCounts(deps: ProgramDeps, summaries: ProgramSummary[], f
     s.missingData = base(s.missingData) + n("MISSING_DATA");
     s.excluded = base(s.excluded) + n("EXCLUDED");
     s.totalEvaluated = baseTotal + groups.reduce((a, g) => a + g.count, 0);
-    s.complianceRate = round1(s.compliant, s.totalEvaluated);
+    s.denominator = s.totalEvaluated - s.excluded;
+    s.complianceRate = complianceRateOf(s);
     if (tenant === SCALE_TENANT_ID) s.latestRunId = runId;
   }
 }
 
 function zeroSummary(s: ProgramSummary): void {
-  s.totalEvaluated = 0; s.compliant = 0; s.dueSoon = 0; s.overdue = 0; s.missingData = 0;
+  s.totalEvaluated = 0; s.denominator = 0; s.compliant = 0; s.dueSoon = 0; s.overdue = 0; s.missingData = 0;
   s.excluded = 0; s.complianceRate = 0; s.latestRunId = null; s.latestRunAt = null; s.openCaseCount = 0;
 }
 
@@ -416,12 +435,32 @@ function monthlySnapshotScopeIsSafe(
   return scope.scopeId !== "wc" && !scope.scopeId.startsWith("wc|");
 }
 
-/** Per-run compliance trend for a measure — outcome-based, newest-first, capped at 10 (Java parity). */
+function createDayFormatter(tz?: string): Intl.DateTimeFormat {
+  let timeZone = "UTC";
+  if (tz) {
+    try {
+      new Intl.DateTimeFormat("en-CA", { timeZone: tz });
+      timeZone = tz;
+    } catch {
+      timeZone = "UTC";
+    }
+  }
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+}
+
+/** Per-run compliance trend for a measure — outcome-based, newest-first, capped at 10 (Java parity).
+ *  Includes completed runs (COMPLETED or PARTIAL_FAILURE per isCompletedRun) so the headline
+ *  and "from previous" compare like with like; FAILED and non-completed runs are excluded. */
 export async function programTrend(
   deps: ProgramDeps,
   measureId: string,
   filters: ProgramFilters,
-  opts?: { monthly?: boolean },
+  opts?: { monthly?: boolean; tz?: string },
 ): Promise<ProgramTrendPoint[]> {
   // UX-8: the monthly quality_snapshots series is OPT-IN (only the /programs card requests it via
   // ?granularity=month). Other consumers (the measure page, which has its own E16 "Quality over
@@ -458,23 +497,46 @@ export async function programTrend(
   // table has no compliant/total columns, so every TS run with data has outcomes — the
   // outcome-based branch is complete here.
   const n = (os: OutcomeWithRun[], s: string) => os.filter((o) => o.status === s).length;
-  return groups
-    .map(({ runId, runStartedAt, rows }): ProgramTrendPoint => {
+  // Completed runs (COMPLETED or PARTIAL_FAILURE per isCompletedRun) are included as trend points
+  // so the headline rate and "from previous" compare like with like; FAILED/QUEUED runs are not.
+  const completed = groups.filter((g) => isCompletedRun(g.runStatus));
+
+  // Collapse to at most one point per calendar day in the requested timezone (default UTC),
+  // keeping the last (latest runStartedAt by epoch ms) completed run of that day.
+  const dtf = createDayFormatter(opts?.tz);
+  const latestByDay = new Map<string, { group: RunGroup; epochMs: number }>();
+  for (const g of completed) {
+    const epochMs = Date.parse(g.runStartedAt);
+    const dayKey = dtf.format(epochMs);
+    const existing = latestByDay.get(dayKey);
+    if (!existing || epochMs > existing.epochMs) {
+      latestByDay.set(dayKey, { group: g, epochMs });
+    }
+  }
+
+  return [...latestByDay.values()]
+    .map(({ group: { runId, runStartedAt, rows } }): ProgramTrendPoint => {
       const total = rows.length;
       const compliant = n(rows, "COMPLIANT");
+      const dueSoon = n(rows, "DUE_SOON");
+      const overdue = n(rows, "OVERDUE");
+      const missingData = n(rows, "MISSING_DATA");
+      const excluded = n(rows, "EXCLUDED");
+      const denominator = total - excluded;
       return {
         runId,
         startedAt: runStartedAt,
-        complianceRate: round1(compliant, total),
+        complianceRate: complianceRateOf({ compliant, dueSoon, overdue, missingData, excluded }),
         totalEvaluated: total,
+        denominator,
         compliant,
-        dueSoon: n(rows, "DUE_SOON"),
-        overdue: n(rows, "OVERDUE"),
-        missingData: n(rows, "MISSING_DATA"),
-        excluded: n(rows, "EXCLUDED"),
+        dueSoon,
+        overdue,
+        missingData,
+        excluded,
       };
     })
-    .sort((a, b) => b.startedAt.localeCompare(a.startedAt))
+    .sort((a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt))
     .slice(0, 10);
 }
 
@@ -526,7 +588,6 @@ export async function programTopDrivers(
 
 // ---- risk outlook (#107) ----------------------------------------------------
 const DUE_SOON_BUFFER_DAYS = 30;
-const pct1 = (num: number, den: number) => (den <= 0 ? 0 : Math.round((num / den) * 1000) / 10);
 const daysBetween = (fromIso: string, toIso: string) =>
   Math.floor((Date.parse(`${toIso}T00:00:00Z`) - Date.parse(`${fromIso}T00:00:00Z`)) / 86400000);
 const addDays = (iso: string, n: number) => new Date(Date.parse(`${iso}T00:00:00Z`) + n * 86400000).toISOString().slice(0, 10);
@@ -572,14 +633,41 @@ export async function programRiskOutlook(
   const latestBySubject = new Map<string, MeasureOutcomeRow>();
   for (const r of visibleRows) latestBySubject.set(r.subjectId, r);
 
-  const siteAcc = new Map<string, { total: number; compliant: number; upcoming: number }>();
+  const siteAcc = new Map<
+    string,
+    {
+      total: number;
+      compliant: number;
+      dueSoon: number;
+      overdue: number;
+      missingData: number;
+      excluded: number;
+      upcoming: number;
+    }
+  >();
   const upcomingExpirations: RiskOutlook["upcomingExpirations"] = [];
   for (const snap of latestBySubject.values()) {
     const emp = directory.employeeById(snap.subjectId);
     const site = emp?.site || "Unknown";
-    const acc = siteAcc.get(site) ?? siteAcc.set(site, { total: 0, compliant: 0, upcoming: 0 }).get(site)!;
+    const acc =
+      siteAcc.get(site) ??
+      siteAcc
+        .set(site, {
+          total: 0,
+          compliant: 0,
+          dueSoon: 0,
+          overdue: 0,
+          missingData: 0,
+          excluded: 0,
+          upcoming: 0,
+        })
+        .get(site)!;
     acc.total++;
     if (snap.status === "COMPLIANT") acc.compliant++;
+    else if (snap.status === "DUE_SOON") acc.dueSoon++;
+    else if (snap.status === "OVERDUE") acc.overdue++;
+    else if (snap.status === "MISSING_DATA") acc.missingData++;
+    else if (snap.status === "EXCLUDED") acc.excluded++;
 
     const lastExam = lastExamDateOf(snap.evidence);
     if (snap.status !== "COMPLIANT" || !lastExam) continue;
@@ -609,8 +697,14 @@ export async function programRiskOutlook(
       total: a.total,
       compliant: a.compliant,
       upcomingExpirations: a.upcoming,
-      currentComplianceRate: pct1(a.compliant, a.total),
-      predictedComplianceRate: pct1(Math.max(0, a.compliant - a.upcoming), a.total),
+      currentComplianceRate: complianceRateOf(a),
+      predictedComplianceRate: complianceRateOf({
+        compliant: Math.max(0, a.compliant - a.upcoming),
+        dueSoon: a.dueSoon + Math.min(a.compliant, a.upcoming),
+        overdue: a.overdue,
+        missingData: a.missingData,
+        excluded: a.excluded,
+      }),
     }))
     .sort((a, b) => a.currentComplianceRate - b.currentComplianceRate);
 

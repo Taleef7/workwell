@@ -22,9 +22,9 @@ test("priorityFor: OVERDUE=HIGH, DUE_SOON/MISSING_DATA=MEDIUM, else LOW", () => 
 });
 
 test("nextActionFor uses the measure label + outcome", () => {
-  assert.match(nextActionFor("OVERDUE", "tb_surveillance"), /Escalate TB screening/);
-  assert.match(nextActionFor("MISSING_DATA", "audiogram"), /Collect the missing audiogram/);
-  assert.match(nextActionFor("DUE_SOON", "flu_vaccine"), /Schedule the flu vaccine before the due date/);
+  assert.match(nextActionFor("OVERDUE", "tb_surveillance"), /No TB screening on file for this measurement period\. Order or document one\./);
+  assert.match(nextActionFor("MISSING_DATA", "audiogram"), /No audiogram result could be found\. Check for outside records before ordering\./);
+  assert.match(nextActionFor("DUE_SOON", "flu_vaccine"), /A flu vaccine is due before the end of this measurement period\./);
 });
 
 test("nextActionFor EXCLUDED wording follows the deployment profile", () => {
@@ -55,7 +55,7 @@ test("nextActionFor is measure-aware for non-OSHA measures (M1: no longer defaul
 
 test("nextActionFor: an unknown measure falls back to a generic noun, never 'audiogram'", () => {
   const action = nextActionFor("MISSING_DATA", "not_a_real_measure");
-  assert.match(action, /compliance assessment/);
+  assert.match(action, /required screening/);
   assert.doesNotMatch(action, /audiogram/);
 });
 

@@ -1,7 +1,18 @@
 import { describe, it, expect } from "vitest";
 import { trendMeta, type TrendPoint } from "./trend-meta";
 
-const p = (over: Partial<TrendPoint>): TrendPoint => ({ runId: "r", startedAt: "2026-06-15T00:00:00Z", complianceRate: 80, totalEvaluated: 10, ...over });
+const p = (over: Partial<TrendPoint>): TrendPoint => ({
+  runId: "r",
+  startedAt: "2026-06-15T00:00:00Z",
+  complianceRate: 80,
+  totalEvaluated: 10,
+  compliant: 8,
+  dueSoon: 0,
+  overdue: 2,
+  missingData: 0,
+  excluded: 0,
+  ...over,
+});
 
 describe("trendMeta", () => {
   it("monthly (period present) → month/year labels, 'from last month', 'Month' header", () => {
@@ -26,5 +37,19 @@ describe("trendMeta", () => {
     expect(m.deltaLabel).toBe("from last run");
     expect(m.dateHeader).toBe("Run date");
     expect(m.delta).toBeCloseTo(8, 1);
+  });
+
+  it("computes rate and delta via displayRate for decrease measure", () => {
+    const identity = { cmsId: "CMS122", mipsQualityId: "001", improvementNotation: "decrease" as const };
+    const m = trendMeta(
+      [
+        p({ startedAt: "2026-08-01T00:00:00Z", compliant: 35, dueSoon: 0, overdue: 10 }),
+        p({ startedAt: "2026-08-15T00:00:00Z", compliant: 38, dueSoon: 0, overdue: 7 }),
+      ],
+      identity
+    );
+    expect(m.chartData[0]!.rate).toBe(22.2); // 10 / 45
+    expect(m.chartData[1]!.rate).toBe(15.6); // 7 / 45
+    expect(m.delta).toBeCloseTo(-6.6, 1);
   });
 });

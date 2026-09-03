@@ -1,5 +1,52 @@
 # Journal
 
+## 2026-09-03 — one compliance rate, computed the way CMS scores it; the inverse measure reads as inverse; next actions state the gap
+
+**Two numbers for one measure.** The Maui walkthrough found the measure detail page showing 79.2% as its
+headline and 84.4% (38/45) two panels lower under "Quality over time (source of truth)". The Programs
+overview, per-run trend, hierarchy rollup, scale rollup and MCP summaries all divided by every bucket
+including EXCLUDED; the quality-snapshot store had used `total − excluded` since E16, and the two were
+documented as deliberately reconciling with each other by having the *snapshot* copy the overview's
+denominator. The ACO divides by denominator minus exclusions and exceptions, and so does every eCQM
+report WorkWell emits, so the overview was the odd one out. One exported `complianceRateOf` in
+`program-read-models.ts` now serves every rate; `denominator` (= total − excluded) rides alongside
+`totalEvaluated` (which stays a count) on `ProgramSummary` and `ProgramTrendPoint`; hierarchy, scale
+and MCP use the same helper. The synthetic Maui roster reads 84.4% everywhere now, and the pinned tests
+say so on the designed 38/7/3 distribution.
+
+**One point per day, in the viewer's day.** The per-run trend plotted every run, so two bad runs on
+2026-09-02 (the authored cms125 subset's VSAC dependence, fixed the same day) drew a 79 → 0 → 0 → 79 → 79
+line with five identical "Sep 2" labels. `programTrend` now keeps the last completed run per calendar
+day — *completed* meaning what `isCompletedRun` already means everywhere else, COMPLETED or
+PARTIAL_FAILURE, so the headline and "from previous" compare like with like — and never plots a failed
+or queued run. The day is the viewer's: the page sends its IANA zone as `tz` and the backend keys the
+collapse in that zone (default UTC), because the pilot is at UTC-10 and a UTC day split every Hawaiian
+afternoon into two points. The bad runs still exist as runs; they simply are not the day's point.
+
+**CMS122 displayed as what it is.** Diabetes A1c > 9% is an inverse measure — the numerator is poor
+control or no A1c, and lower is better — and the tile showed a green 79.2% "compliance". Measure
+identity now carries `improvementNotation` (`decrease` for cms122; a test ties it to the official
+semantics table's `numeratorMeansCompliant: false` so the next inverse measure cannot be declared in one
+table only), the API serves it, and every rate on the two Programs pages — headline, quality-over-time
+block, chart tooltips, run history — renders decrease measures as "Poor control X%" with a "Lower is
+better" line, through one tested helper (`frontend/lib/measure-rate.ts`). X is overdue over
+(compliant + due-soon + overdue): on the official path MISSING_DATA means outside the initial population
+(or an evaluation failure), which is outside the denominator, so it counts in neither. Chips, worklist
+links and the delta keep working, with the delta's good/bad tone inverted for decrease measures.
+
+**What deliberately did not change.** The run-level `passRate` (run list, runs CSV §6.1, MCP run
+summary, AI insight, audit packet) still divides by the evaluated total including excluded: it is an
+operational per-run statistic, not the CMS rate, and the CSV column is a documented contract. The
+"Overall compliance" KPI on the overview, which is a CMS-style number, now uses the denominator.
+
+**Next actions state the gap.** `nextActionFor` said "Escalate mammogram follow-up immediately." for
+every overdue case and "Schedule the … before the due date." for due-soon. It now says what is missing
+and what closes it ("No mammogram on file for this measurement period. Order or document one.";
+"No … result could be found. Check for outside records before ordering."; "A … is due before the end
+of this measurement period."); the EXCLUDED sentence is profile-gated in the terminology PR. Case
+detail, the cases list, CSV exports and CDS cards all read the persisted string, so this changes what
+the pilot's staff see on every open case.
+
 ## 2026-09-03 — pilot mode: the engineering surfaces leave the quality team's view, and four broken affordances work
 
 **Pilot mode.** The Maui walkthrough found a quality lead's sidebar carrying Measures, Studio, Runs and
