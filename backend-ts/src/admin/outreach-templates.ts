@@ -2,6 +2,10 @@
  * Outreach template service (#108 admin write CRUD) — TS port of OutreachTemplateService.
  * list / preview (with placeholder render) / create / update over the OutreachTemplateStore,
  * plus the V007 demo-template seed. Backs Admin → Outreach Templates.
+ *
+ * On the patient profile (`DEPLOYMENT_PROFILE.subjectTerm === "patient"`) the templates are code
+ * (`PATIENT_TEMPLATES`): list and preview read them from there, and create/update are refused
+ * with `PATIENT_TEMPLATES_READ_ONLY` because there is nothing an update could persist.
  */
 import type { CaseEventStore } from "../stores/case-event-store.ts";
 import type {
@@ -12,6 +16,10 @@ import { PATIENT_TEMPLATES } from "../case/case-outreach.ts";
 import { DEPLOYMENT_PROFILE } from "../config/deployment-profile.ts";
 
 export class OutreachTemplateError extends Error {}
+
+/** Why a patient-profile template cannot be created or edited through the admin API (see updateTemplate). */
+export const PATIENT_TEMPLATES_READ_ONLY =
+  "Outreach templates are fixed on this deployment profile and cannot be created or edited here.";
 
 /** Audit sink for template writes (CLAUDE.md/AGENTS.md: every state change writes audit_event). */
 type TemplateAudit = Pick<CaseEventStore, "appendAudit">;
@@ -147,6 +155,7 @@ export async function createTemplate(
   if (!req.name?.trim() || !req.subject?.trim() || !req.bodyText?.trim()) {
     throw new OutreachTemplateError("name, subject, and bodyText are required");
   }
+  if (DEPLOYMENT_PROFILE.subjectTerm === "patient") throw new OutreachTemplateError(PATIENT_TEMPLATES_READ_ONLY);
   const created = await store.create({
     id: crypto.randomUUID(),
     name: req.name.trim(),
@@ -178,21 +187,12 @@ export async function updateTemplate(
     throw new OutreachTemplateError("name, subject, and bodyText are required");
   }
   if (DEPLOYMENT_PROFILE.subjectTerm === "patient") {
+    // The patient-profile templates are code (`PATIENT_TEMPLATES`) and every list/preview/send reads
+    // them from there, so there is nothing an update could persist. Say so, rather than acknowledging
+    // (and auditing) a change that the next request would not show.
     const t = Object.values(PATIENT_TEMPLATES).find((tmpl) => tmpl.id === id);
     if (!t) return null;
-    const updated: OutreachTemplateRecord = {
-      id: t.id!,
-      name: req.name.trim(),
-      subject: req.subject.trim(),
-      bodyText: req.bodyText.trim(),
-      type: normalizeType(req.type),
-      createdBy: "system",
-      createdAt: "",
-      updatedAt: new Date().toISOString(),
-      active: req.active,
-    };
-    await auditTemplate(events, "OUTREACH_TEMPLATE_UPDATED", updated, actor);
-    return updated;
+    throw new OutreachTemplateError(PATIENT_TEMPLATES_READ_ONLY);
   }
   const updated = await store.update(id, {
     name: req.name.trim(),

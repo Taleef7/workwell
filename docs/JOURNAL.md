@@ -74,6 +74,18 @@ closed by a single-purpose lane with a both-profiles test. Verified on a local s
 profile after each of the first two rounds: the built pages, the CSV headers, the AI fallback text and
 the outreach preview all read as described here.
 
+**Review follow-ups (post-open).** Two findings on the open PR, both real. (1) The seed repair compared
+policy and spec against the pre-change fingerprint but replaced the CQL unconditionally, so a Studio
+author who had edited only the CQL would have lost that work on every boot. The CQL is now fingerprinted
+the same way: the stored text (line endings normalized) must equal either the pre-change reconstruction
+(`hypertension-pre-change-cql.ts` — `reconstructCql` of the old ELM, which is what the seed wrote) or the
+current one; anything else was authored, and the whole row is left alone with a warning rather than
+half-repaired. (2) On the patient profile `updateTemplate` returned a "successful" record and wrote an
+`OUTREACH_TEMPLATE_UPDATED` audit event without persisting anything — list, preview and dispatch all read
+`PATIENT_TEMPLATES` from code, so the next request showed the old text. Create and update now refuse on
+that profile (HTTP 400 with the reason, which the admin page already surfaces), unknown ids stay 404, and
+no audit row is written for a change that did not happen.
+
 ## 2026-09-02 (later) — Maui routes cms122/cms125 official: the authored breast-cancer subset was hostage to VSAC reachability
 
 **Found while verifying the redeployed sandbox.** Breast Cancer Screening on Maui read 0% compliant, 45

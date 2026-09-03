@@ -9,6 +9,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { rmSync } from "node:fs";
@@ -21,6 +22,7 @@ import type { CaseEventStore } from "../stores/case-event-store.ts";
 import type { MeasureStore } from "../stores/measure-store.ts";
 import { MEASURE_CATALOG, type MeasureSpec } from "./measure-catalog.ts";
 import { seedMeasureStore } from "./measure-seed.ts";
+import { HYPERTENSION_PRE_CHANGE_CQL } from "./hypertension-pre-change-cql.ts";
 
 const created: string[] = [];
 
@@ -595,7 +597,7 @@ const HYPERTENSION_PRE_CHANGE: { policyRef: string; spec: MeasureSpec } = {
 
 async function seedOldHypertensionRow(
   store: MeasureStore,
-  options: { edited?: boolean; halfApplied?: boolean; staleCqlOnly?: boolean; status?: string } = {},
+  options: { edited?: boolean; halfApplied?: boolean; staleCqlOnly?: boolean; status?: string; cqlText?: string } = {},
 ): Promise<void> {
   const catalog = MEASURE_CATALOG.find((m) => m.id === "hypertension")!;
   await store.seedMeasure({
@@ -612,7 +614,9 @@ async function seedOldHypertensionRow(
       : options.staleCqlOnly
         ? catalog.spec
         : HYPERTENSION_PRE_CHANGE.spec,
-    cqlText: options.staleCqlOnly ? 'define "Stale CQL": true' : "",
+    // The seed wrote the pre-change reconstruction into cql_text; that exact text is the fingerprint
+    // the repair recognises (a stale-CQL-only row carries it too — only its spec/policy were repaired).
+    cqlText: options.cqlText ?? HYPERTENSION_PRE_CHANGE_CQL,
     compileStatus: catalog.compileStatus,
     createdAt: "2026-02-01T00:00:00.000Z",
     changeSummary: "Seeded measure version",
@@ -709,6 +713,80 @@ test("seedMeasureStore — repairs a CQL-only half-applied row and makes no upda
   assert.equal(store.updateSpecCalls, specCallsAfterFirstSeed, "the fully repaired row makes no updateSpec call on the second seed");
   assert.equal(store.updateCqlCalls, cqlCallsAfterFirstSeed, "the fully repaired row makes no updateCql call on the second seed");
   assert.equal(await countSeedUpdatedEvents(db), 1);
+});
+
+test("seedMeasureStore — leaves Studio-authored hypertension CQL untouched, whether the spec is pre-change or already repaired", async () => {
+  const catalog = MEASURE_CATALOG.find((m) => m.id === "hypertension")!;
+  const authored = 'define "In Eligible Population": exists([Observation])  // authored in Studio';
+  const cqlOf = () => 'define "In Eligible Population": true';
+
+  // pre-change row; policy already repaired (spec still old); policy AND spec already repaired.
+  const shapes = [
+    { halfApplied: false, expectPolicy: HYPERTENSION_PRE_CHANGE.policyRef },
+    { halfApplied: true, expectPolicy: catalog.policyRef },
+    { staleCqlOnly: true, expectPolicy: catalog.policyRef },
+  ] as const;
+  for (const shape of shapes) {
+    const halfApplied = "halfApplied" in shape ? shape.halfApplied : "staleCqlOnly";
+    const db = await freshDb();
+    const store = new SqliteMeasureStore(db);
+    const events = new SqliteCaseEventStore(db);
+    await seedOldHypertensionRow(store, { ...shape, cqlText: authored });
+
+    const warnings: unknown[][] = [];
+    const originalWarn = console.warn;
+    console.warn = (...args: unknown[]) => warnings.push(args);
+    try {
+      await seedMeasureStore(store, cqlOf, events);
+      await seedMeasureStore(store, cqlOf, events);
+    } finally {
+      console.warn = originalWarn;
+    }
+    const stored = (await store.getLatest("hypertension"))!;
+    assert.equal(stored.cqlText, authored, `authored CQL survives the seed (shape=${String(halfApplied)})`);
+    assert.equal(stored.policyRef, shape.expectPolicy, "the row is left whole, not half-repaired");
+    assert.equal(await countSeedUpdatedEvents(db), 0, "no repair event for a row someone edited");
+    assert.equal(warnings.length, 2, "each boot says why it left the row alone");
+  }
+});
+
+test("seedMeasureStore — a CRLF copy, or an editor re-save with a trailing newline, of the pre-change CQL is still recognised as the seed's own text", async () => {
+  for (const variant of [HYPERTENSION_PRE_CHANGE_CQL.replace(/\n/g, "\r\n"), `${HYPERTENSION_PRE_CHANGE_CQL}\n`]) {
+    const db = await freshDb();
+    const store = new SqliteMeasureStore(db);
+    const events = new SqliteCaseEventStore(db);
+    await seedOldHypertensionRow(store, { cqlText: variant });
+    await seedMeasureStore(store, () => 'define "In Eligible Population": true', events);
+    assert.match((await store.getLatest("hypertension"))!.cqlText, /In Eligible Population/);
+    assert.equal(await countSeedUpdatedEvents(db), 1);
+  }
+});
+
+test("HYPERTENSION_PRE_CHANGE_CQL is the exact text the pre-change seed stored (provenance digest, not self-referential)", () => {
+  // Pinned from `reconstructCql` of the pre-change ELM (`HypertensionBPScreeningCQL-1.0.0.elm.json` at
+  // beb8c72d, the last commit before the relabel), computed independently of the constant: 2057 chars.
+  // The other tests build the simulated live row FROM the constant, so a typo in it would be
+  // self-consistent there; this digest is what ties it to the real stored value.
+  const digest = createHash("sha256").update(HYPERTENSION_PRE_CHANGE_CQL, "utf8").digest("hex");
+  assert.equal(HYPERTENSION_PRE_CHANGE_CQL.length, 2057);
+  assert.equal(digest, "17e133992cf4b59ebe764bff4f34ae0741a22860828b160825e5eac824095d1d");
+});
+
+test("seedMeasureStore — the fingerprint warning names which field was edited", async () => {
+  const db = await freshDb();
+  const store = new SqliteMeasureStore(db);
+  const events = new SqliteCaseEventStore(db);
+  await seedOldHypertensionRow(store, { cqlText: 'define "Authored": true' });
+  const warnings: unknown[][] = [];
+  const originalWarn = console.warn;
+  console.warn = (...args: unknown[]) => warnings.push(args);
+  try {
+    await seedMeasureStore(store, () => "", events);
+  } finally {
+    console.warn = originalWarn;
+  }
+  assert.equal(warnings.length, 1);
+  assert.match(String(warnings[0]![0]), /policyRef=old, spec=old, cqlText=edited/);
 });
 
 test("seedMeasureStore — leaves an edited hypertension spec untouched with a warning and no audit", async () => {

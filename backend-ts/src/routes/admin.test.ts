@@ -139,12 +139,17 @@ test("Maui outreach-template preview and update are profile-aware (patient previ
       "admin@pilot.test",
     );
 
+    const updatePatientBody = updatePatient?.status === 400 ? await updatePatient.json() : null;
+    const listAfter = await (await handleAdmin(new Request("http://x/api/admin/outreach-templates"), { DB: db }, "admin@pilot.test")).json();
+
     console.log(JSON.stringify({
       patientPreviewStatus: previewPatient?.status,
       employeePreviewStatus: previewEmployee?.status,
       patientPreviewBody: patientBody,
       updatePatientStatus: updatePatient?.status,
+      updatePatientBody,
       updateEmployeeStatus: updateEmployee?.status,
+      listAfter,
     }));
   `);
 
@@ -153,8 +158,13 @@ test("Maui outreach-template preview and update are profile-aware (patient previ
   const patientBody = output.patientPreviewBody as { id: string; subject: string; bodyText: string };
   assert.equal(patientBody.id, "patient-general");
   assert.match(patientBody.subject, /Breast Cancer Screening/);
-  assert.equal(output.updatePatientStatus, 200);
+  // The patient templates are code: an update has nothing to persist, so it is refused (not
+  // acknowledged and then forgotten on the next list) and the list is unchanged.
+  assert.equal(output.updatePatientStatus, 400);
+  assert.match((output.updatePatientBody as { message: string }).message, /fixed on this deployment profile/);
   assert.equal(output.updateEmployeeStatus, 404);
+  const listAfter = output.listAfter as Array<{ id: string; name: string }>;
+  assert.ok(listAfter.every((t) => t.name !== "Updated"), "the refused update did not change the list");
 });
 
 test("deferred subsystems return their empty shape (dashboard renders)", async () => {

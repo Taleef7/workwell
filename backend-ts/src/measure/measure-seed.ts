@@ -6,6 +6,7 @@
  * Active-first list ordering until real authoring timestamps accrue.
  */
 import { MEASURE_CATALOG, type MeasureStatus } from "./measure-catalog.ts";
+import { HYPERTENSION_PRE_CHANGE_CQL } from "./hypertension-pre-change-cql.ts";
 import type { MeasureStore } from "../stores/measure-store.ts";
 import type { AppendAuditInput, CaseEventStore } from "../stores/case-event-store.ts";
 
@@ -120,11 +121,22 @@ async function repairHypertensionSeedRow(
     deepEqual(value, oldValue) ? "old" : deepEqual(value, newValue) ? "new" : "edited";
   const policyState = fieldState(row.policyRef, HYPERTENSION_PRE_CHANGE.policyRef, catalog.policyRef);
   const specState = fieldState(row.spec, HYPERTENSION_PRE_CHANGE.spec, catalog.spec);
-  if (policyState === "edited" || specState === "edited") {
-    console.warn(`[measure-seed] hypertension row does not match the pre-change seed fingerprint; not updated`);
+  // The CQL is fingerprinted too (by normalized text rather than deepEqual): only the text the seed
+  // itself wrote (the pre-change or the current reconstruction) is ever replaced. Anything else was authored in Studio and is kept — a
+  // CQL-only edit is as much someone's work as a spec edit. Line endings and trailing whitespace are
+  // normalized because the stored text may have crossed a CRLF boundary or been re-saved from an
+  // editor that terminates the buffer with a newline; neither can turn authored text into the seed's.
+  const norm = (s: string) => s.replace(/\r\n/g, "\n").trimEnd();
+  const currentCql = cqlOf(measureId);
+  const cqlState = fieldState(norm(row.cqlText), norm(HYPERTENSION_PRE_CHANGE_CQL), norm(currentCql));
+  if (policyState === "edited" || specState === "edited" || cqlState === "edited") {
+    console.warn(
+      `[measure-seed] hypertension row does not match the pre-change seed fingerprint ` +
+        `(policyRef=${policyState}, spec=${specState}, cqlText=${cqlState}); not updated`,
+    );
     return;
   }
-  if (policyState === "new" && specState === "new" && row.cqlText === cqlOf(measureId)) return;
+  if (policyState === "new" && specState === "new" && cqlState === "new") return;
   const audit: AppendAuditInput = {
     eventType: "MEASURE_SEED_UPDATED",
     entityType: "measure_version",
@@ -137,7 +149,7 @@ async function repairHypertensionSeedRow(
   };
   if (!(await events.hasAuditEvent(audit))) await events.appendAudit(audit);
   await store.updateSpec(measureId, catalog.spec, catalog.policyRef);
-  await store.updateCql(measureId, cqlOf(measureId));
+  await store.updateCql(measureId, currentCql);
 }
 
 /**
