@@ -27,6 +27,16 @@ The authored cms122/cms125 subsets stay in the catalog for now (#377 retires the
 sharpest evidence yet for that issue: an authored subset that is right only when the terminology
 service is down is not a subset, it is a coincidence.
 
+## 2026-09-02 — the segment seed follows the deployment profile
+
+The demo segment seed (`segment-seed.ts`) now selects its cohort set by `WORKWELL_INSTANCE` instead of hardcoding
+the TWH occupational-health set for every deployment. The default profile keeps the three cohorts byte-identical
+(snapshot-pinned in the test); the maui profile seeds a single "All Patients" segment scoped to the Maui directory's
+sites with the profile's runnable measure set. An already-seeded Maui database keeps its old rows (name-idempotent,
+never mutates) — the owner repairs it once via the audited segments API (see docs/DEPLOY.md). The per-profile
+coverage invariant (`no-orphaned-measure-in-demo-seed`) is now asserted for both profiles, and the maui assertions
+fail if the profile branch is removed.
+
 ## 2026-09-02 — the Maui sandbox is handed over: unclaimed runs recover, demo accounts are profile-scoped, public-demo affordances become deployment config
 
 The Maui sandbox deployment is being handed to the pilot group for quality-lead review, which requires

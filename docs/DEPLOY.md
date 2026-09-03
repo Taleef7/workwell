@@ -811,6 +811,13 @@ Gate evidence: the official executors evaluate all 48 Maui patients to their des
 (38 compliant / 7 overdue / 3 excluded per measure, no mismatches). Maui has no self-heal reconciler,
 so dispatch the workflow again for a replacement or recovery.
 
+
+The demo segment seed is profile-aware since 2026-09-02 (`fix/maui-segment-seed`): the maui profile seeds a
+single "All Patients" cohort scoped to the Maui directory's sites, replacing the TWH occupational-health
+cohorts. An already-seeded Maui database keeps its old TWH rows — seeding is name-idempotent and never
+mutates — so the owner repairs it once through the audited segments API (`PUT`/`DELETE /api/segments/:id`,
+events `SEGMENT_UPDATED`/`SEGMENT_DELETED`) from the Configure Groups editor or curl.
+
 Evidence bytes deliberately remain on the in-container `fs` binding for now; the Maui workflow omits the
 four `WORKWELL_BUCKET_S3_*` variables, so evidence is lost whenever the container is recreated.
 
