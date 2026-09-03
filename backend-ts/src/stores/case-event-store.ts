@@ -64,6 +64,8 @@ export interface PacketExportInput {
 export interface CaseEventStore {
   insertAction(input: InsertActionInput): Promise<void>;
   appendAudit(input: AppendAuditInput): Promise<void>;
+  /** True when an event with the same event type, entity id and measure version already exists. */
+  hasAuditEvent(input: Pick<AppendAuditInput, "eventType" | "entityId" | "refMeasureVersionId">): Promise<boolean>;
   /**
    * Write a case_action AND its audit_event atomically (D1 batch on the floor,
    * a single-client transaction on the ceiling) so the two halves of a mutating

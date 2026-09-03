@@ -48,6 +48,21 @@ export const OFFICIAL_MEASURE_SEMANTICS: Readonly<Record<string, OfficialMeasure
       "days before the encounter AND, if positive, a follow-up plan documented on the date of the " +
       "positive screen. Being in it is the care being delivered.",
   },
+  // Verified against the manifest.json and vendored Measure resource in measures/official/cms130.
+  cms130: {
+    numeratorMeansCompliant: true,
+    rationale:
+      "Numerator = one or more colorectal cancer screenings in the measure's defined windows. Being in " +
+      "it is the screening having happened, and the artifact's improvementNotation ('increase') agrees.",
+  },
+  // Verified against the manifest.json and vendored Measure resource in measures/official/cms165.
+  cms165: {
+    numeratorMeansCompliant: true,
+    rationale:
+      "Numerator = the most recent blood pressure is adequately controlled (systolic < 140 mmHg and " +
+      "diastolic < 90 mmHg) during the measurement period. Being in it is the blood pressure being " +
+      "controlled, and the artifact's improvementNotation ('increase') agrees.",
+  },
   cms68: {
     numeratorMeansCompliant: true,
     rationale:

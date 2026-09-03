@@ -46,8 +46,8 @@ before(async () => {
   await db.exec(RUN_STORE_FLOOR_DDL.replace(/\n/g, " "));
   await migrateFloorSchema(db);
   const measureStore = new SqliteMeasureStore(db);
-  await seedMeasureStore(measureStore, (id) => CQL_BY_ID[id] ?? "");
   events = new SqliteCaseEventStore(db);
+  await seedMeasureStore(measureStore, (id) => CQL_BY_ID[id] ?? "", events);
   deps = {
     caseStore: new SqliteCaseStore(db),
     outcomeStore: new SqliteOutcomeStore(db),

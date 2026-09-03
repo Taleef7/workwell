@@ -86,6 +86,16 @@ export class SqliteCaseEventStore implements CaseEventStore {
     await this.auditStmt(input).run();
   }
 
+  async hasAuditEvent(input: Pick<AppendAuditInput, "eventType" | "entityId" | "refMeasureVersionId">): Promise<boolean> {
+    const row = await this.db
+      .prepare(
+        "SELECT 1 FROM audit_events WHERE event_type = ? AND entity_id IS ? AND ref_measure_version_id IS ? LIMIT 1",
+      )
+      .bind(input.eventType, input.entityId, input.refMeasureVersionId)
+      .first();
+    return row !== null;
+  }
+
   async recordCaseEvent(input: { action: InsertActionInput; audit: AppendAuditInput }): Promise<void> {
     // D1 runs a batch atomically (single transaction) — action + audit commit together or not at all.
     await this.db.batch([this.actionStmt(input.action), this.auditStmt(input.audit)]);

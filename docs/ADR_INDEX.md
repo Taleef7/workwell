@@ -6,14 +6,15 @@
 > `grep -o '^#\+ ADR-[0-9]*.*' docs/DECISIONS.md`, newest first. If the highest number here is lower
 > than the highest there, this file is stale.
 >
-> **`·archived`** (14 of 69) means the BODY moved to `docs/archive/DECISIONS_ARCHIVE.md` — superseded,
+> **`·archived`** (14 of 70) means the BODY moved to `docs/archive/DECISIONS_ARCHIVE.md` — superseded,
 > or a historical *finding* rather than a decision that governs. `DECISIONS.md` keeps every heading plus
-> a pointer, so every cross-reference still resolves. The 55 unmarked titles are the record that governs.
+> a pointer, so every cross-reference still resolves. The 56 unmarked titles are the record that governs.
 >
 > **ADR-033 does not exist** — the sequence runs 031, 032, 034. Verified absent 2026-07-29. Do not reuse it.
 
 ## Titles (newest first)
 
+- ADR-071: official-only measures take the vendored manifest's id — and a legacy catalog row is deprecated, never rewritten
 - ADR-070: the spearhead moves to a patient-driven pilot deployment — and the ACO's measure set finds the engine five-sixths already built
 - ADR-069: population membership applies the CQM IG's formulas per subject — and spec application is silent where corruption is loud
 - ADR-068: the OpenAPI document covers the PROMISED surface only, and a routed-path test is what makes hand-authoring defensible

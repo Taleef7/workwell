@@ -18,6 +18,33 @@
 >
 > **Sequence note:** ADR-033 does not exist — verified absent, and the number must not be reused.
 
+## ADR-071: official-only measures take the vendored manifest's id — and a legacy catalog row is deprecated, never rewritten
+
+**Status:** Accepted (2026-09-01). Milestone MM-1b slice 1 (`docs/ROADMAP_2026-08-30.md` §5).
+
+**Context.** `cms2`, `cms130` and `cms165` are vendored and MADiE-gated but had catalog rows keyed
+`cms2v15`, `cms130v14`, `cms165v14`, while the official executor requires the requested id to equal the
+manifest's `catalogId` (bare). The two runnable official measures, `cms122` and `cms125`, already use
+bare ids. No outcome, case or run anywhere references the versioned ids — the three measures have never
+been runnable — so the only persisted rows are the seeded catalog rows on each deployment's database.
+
+**Decision.** The catalog ids are **renamed to the bare manifest ids**; `policyRef` and the version
+string keep the CMS version (`CMS2v15`). `seedMeasureStore` deprecates a legacy versioned row **once**
+(reason: "superseded by `<bare id>` (catalog id rename, 2026-09)"), writes one `MEASURE_DEPRECATED`
+audit event for it, and only touches rows that still carry the exact seed fingerprint — a legacy row
+anyone edited is left alone and coexists as a Draft. Nothing is deleted. `OFFICIAL_MEASURE_SEMANTICS`
+gains `cms130` and `cms165` (numerator ⇒ COMPLIANT, both artifacts `improvementNotation: increase`),
+so the routing construction no longer refuses them for missing semantics.
+
+**Alternative rejected.** An alias layer mapping the versioned catalog id to the bare execution id.
+Rejected because it would have to be applied on every read, filter, upsert and rerun (the stores
+filter on exact `measure_id` and cases are unique on it) to protect data that does not exist.
+
+**Consequences.** The three rows stay `Draft` / `NOT_COMPILED` in this slice; runnable-ness, the
+official-only `Active` state, synthetic corpus and the flip gate are later MM-1b slices. Catalog
+visibility of the three rows is deployment-global (TWH sees them too); execution on the default
+profile is unchanged.
+
 ## ADR-070: the spearhead moves to a patient-driven pilot deployment — and the ACO's measure set finds the engine five-sixths already built
 
 **Status:** Accepted (2026-08-30). Active plan: `docs/ROADMAP_2026-08-30.md` (supersedes

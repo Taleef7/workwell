@@ -167,10 +167,24 @@ test("every vendored measure has recorded semantics — the table cannot silentl
       `${catalogId} has semantics recorded but no vendored artifact`,
     );
   }
-  for (const catalogId of ["cms122", "cms125"]) {
+  for (const catalogId of ["cms122", "cms125", "cms130", "cms165"]) {
     const semantics = officialMeasureSemantics(catalogId);
     assert.ok(semantics, `${catalogId} is vendored but has no recorded semantics`);
     assert.ok(semantics.rationale.length > 40, `${catalogId}: the rationale must say WHY`);
+  }
+});
+
+test("cms130 and cms165 treat numerator membership as COMPLIANT", () => {
+  for (const catalogId of ["cms130", "cms165"]) {
+    const artifact = loadOfficialArtifact(catalogId);
+    assert.ok(artifact, `${catalogId} must have a vendored artifact`);
+    assert.equal(artifact.manifest.improvementNotation, "increase");
+    const semantics = officialMeasureSemantics(catalogId);
+    assert.equal(semantics?.numeratorMeansCompliant, true, `${catalogId} numerator means compliant`);
+    assert.equal(
+      outcomeFromPopulations({ [IPP]: true, [DENOM]: true, [NUMER]: true }, semantics!.numeratorMeansCompliant).outcome,
+      "COMPLIANT",
+    );
   }
 });
 

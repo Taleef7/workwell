@@ -9,7 +9,7 @@ export interface MeasureIdentity {
 }
 
 export const MEASURE_IDENTITY: Record<string, MeasureIdentity> = {
-  cms2v15: { cmsId: "CMS2", mipsQualityId: "134" },
+  cms2: { cmsId: "CMS2", mipsQualityId: "134" },
   cms128v14: { cmsId: "CMS128", mipsQualityId: "009" },
   cms159v14: { cmsId: "CMS159", mipsQualityId: "370" },
   cms177v14: { cmsId: "CMS177", mipsQualityId: "382" },
@@ -20,7 +20,7 @@ export const MEASURE_IDENTITY: Record<string, MeasureIdentity> = {
   cms135v14: { cmsId: "CMS135", mipsQualityId: "005" },
   cms144v14: { cmsId: "CMS144", mipsQualityId: "008" },
   cms145v14: { cmsId: "CMS145", mipsQualityId: "007" },
-  cms165v14: { cmsId: "CMS165", mipsQualityId: "236" },
+  cms165: { cmsId: "CMS165", mipsQualityId: "236" },
   cms347v9: { cmsId: "CMS347", mipsQualityId: "438" },
   cms90v15: { cmsId: "CMS90", mipsQualityId: "377" },
   cms1173v1: { cmsId: "CMS1173", mipsQualityId: "514" },
@@ -31,7 +31,7 @@ export const MEASURE_IDENTITY: Record<string, MeasureIdentity> = {
   cms1154v1: { cmsId: "CMS1154", mipsQualityId: "515" },
   cms124v14: { cmsId: "CMS124", mipsQualityId: "309" },
   cms125: { cmsId: "CMS125", mipsQualityId: "112" },
-  cms130v14: { cmsId: "CMS130", mipsQualityId: "113" },
+  cms130: { cmsId: "CMS130", mipsQualityId: "113" },
   cms69v14: { cmsId: "CMS69", mipsQualityId: "128" },
   cms138v14: { cmsId: "CMS138", mipsQualityId: "226" },
   cms139v14: { cmsId: "CMS139", mipsQualityId: "318" },

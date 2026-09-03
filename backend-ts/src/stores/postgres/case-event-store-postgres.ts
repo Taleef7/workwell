@@ -77,6 +77,16 @@ export class PgCaseEventStore implements CaseEventStore {
     await this.pool.query(PgCaseEventStore.AUDIT_SQL, PgCaseEventStore.auditParams(input));
   }
 
+  async hasAuditEvent(input: Pick<AppendAuditInput, "eventType" | "entityId" | "refMeasureVersionId">): Promise<boolean> {
+    const { rows } = await this.pool.query(
+      `SELECT 1 FROM ${SPIKE_SCHEMA}.audit_events
+        WHERE event_type = $1 AND entity_id IS NOT DISTINCT FROM $2 AND ref_measure_version_id IS NOT DISTINCT FROM $3
+        LIMIT 1`,
+      [input.eventType, input.entityId, input.refMeasureVersionId],
+    );
+    return rows.length > 0;
+  }
+
   async recordCaseEvent(input: { action: InsertActionInput; audit: AppendAuditInput }): Promise<void> {
     // Single client + BEGIN/COMMIT so the action + audit insert commit atomically.
     const client = await this.pool.connect();
