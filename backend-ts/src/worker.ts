@@ -47,7 +47,7 @@ import { handleAuditor } from "./routes/auditor.ts";
 import { createAuthHandler, type AuthHandler, type RefreshTokenRevocation } from "./routes/auth.ts";
 import { createJwt, type JwtService } from "./auth/jwt.ts";
 import { authorize, extractPrincipal } from "./auth/authorize.ts";
-import { findDemoUser } from "./auth/demo-users.ts";
+import { isDemoAccountRefusedOnProfile } from "./auth/demo-users.ts";
 import { assertSafeStartup, type StartupEnv } from "./config/startup-safety.ts";
 import { parseAllowedOrigins, preflightResponse, withCors } from "./config/cors.ts";
 import { formatSeamLogLine } from "./config/seam-inventory.ts";
@@ -231,7 +231,9 @@ async function route(req: Request, env: Env, ctx: CloudExecutionContext): Promis
   const enforceAuth = authEnabled(env);
   if (enforceAuth) {
     let principal = extractPrincipal(req, getVerifier(env)!);
-    if (principal && !findDemoUser(principal.email)) {
+    // Profile rule, per request: a demo account from another deployment is refused even with a token
+    // minted before the restriction. Service-account principals are not demo rows and pass through.
+    if (principal && isDemoAccountRefusedOnProfile(principal.email)) {
       principal = null;
     }
     const decision = authorize(req.method, pathname, principal);

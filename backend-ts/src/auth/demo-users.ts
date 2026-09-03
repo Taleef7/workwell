@@ -44,10 +44,26 @@ export function findDemoUser(email: string, profileId = DEPLOYMENT_PROFILE.id): 
   const needle = email.trim().toLowerCase();
   const user = DEMO_USERS.find((u) => u.email.toLowerCase() === needle) ?? null;
   if (!user) return null;
-  if (profileId === "maui" && !user.email.toLowerCase().endsWith("@maui.workwell.dev")) {
-    return null;
-  }
+  if (isDemoAccountRefusedOnProfile(user, profileId)) return null;
   return user;
+}
+
+/**
+ * The per-request form of the profile rule (worker auth gate). It answers "is this a demo account that
+ * belongs to ANOTHER deployment?" — and only that. A signed principal that is not a demo row at all
+ * (a `ROLE_MCP_CLIENT` service account, for instance) is NOT refused here: DEMO_USERS is the login
+ * directory, not an allowlist for every subject the verifier accepts.
+ */
+export function isDemoAccountRefusedOnProfile(
+  userOrEmail: DemoUser | string,
+  profileId = DEPLOYMENT_PROFILE.id,
+): boolean {
+  const user =
+    typeof userOrEmail === "string"
+      ? DEMO_USERS.find((u) => u.email.toLowerCase() === userOrEmail.trim().toLowerCase()) ?? null
+      : userOrEmail;
+  if (!user) return false;
+  return profileId === "maui" && !user.email.toLowerCase().endsWith("@maui.workwell.dev");
 }
 
 /** Validate credentials; returns the user on success, else null. */

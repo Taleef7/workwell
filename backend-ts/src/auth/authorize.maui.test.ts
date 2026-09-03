@@ -46,6 +46,33 @@ const testScript = `
   console.log(JSON.stringify({ status: res.status }));
 `;
 
+// A signed service-account principal (ROLE_MCP_CLIENT) is not a demo-user row on any profile. The Maui
+// rule refuses demo accounts that belong to another deployment; it must not turn DEMO_USERS into an
+// allowlist for every signed subject, or /sse, /mcp/** and authenticated CDS calls go dark on Maui.
+const serviceAccountScript = `
+  import worker from "./src/worker.ts";
+  import { createJwt } from "./src/auth/jwt.ts";
+  import { createSqliteD1 } from "@mieweb/cloud-local";
+
+  const secret = "x".repeat(40);
+  const jwt = createJwt({ secret });
+  const token = jwt.issueAccessToken("mcp-client@integrations.example", "ROLE_MCP_CLIENT");
+  const db = await createSqliteD1(":memory:");
+  const env = { DB: db, WORKWELL_AUTH_JWT_SECRET: secret };
+  const res = await worker.fetch(
+    new Request("http://x/mcp", { method: "POST", headers: { authorization: "Bearer " + token, "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }) }),
+    env,
+    {},
+  );
+  console.log(JSON.stringify({ status: res.status }));
+`;
+
+test("on maui, a signed ROLE_MCP_CLIENT service-account token is still authorized (not a demo row, not refused)", () => {
+  const output = runProfileChild("maui", serviceAccountScript);
+  assert.notEqual(output.status, 401, "a service-account principal must not be nulled by the demo-account rule");
+  assert.notEqual(output.status, 403, "ROLE_MCP_CLIENT is explicitly permitted on /mcp/**");
+});
+
 test("on maui, a validly signed access token for viewer@workwell.dev gets 401 from protected GET", () => {
   const output = runProfileChild("maui", testScript);
   assert.equal(output.status, 401, "viewer@workwell.dev must be refused with 401 on maui");
