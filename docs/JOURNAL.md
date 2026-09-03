@@ -1,5 +1,37 @@
 # Journal
 
+## 2026-09-03 — pilot mode: the engineering surfaces leave the quality team's view, and four broken affordances work
+
+**Pilot mode.** The Maui walkthrough found a quality lead's sidebar carrying Measures, Studio, Runs and
+API, a header offering MIE's brand list (Enterprise Health, MIE Web, BlueHive, WebChart, Ozwell,
+WaggleLine), a "System" selector for a single-clinic deployment, a "Run All Measures Now" button on the
+dashboard, and a case page with Escalate, Rerun to verify and Mark queued/sent/failed. Role gating was
+nav-only: the clinician account could open every case by URL and the case manager could open the Studio
+editor. `NEXT_PUBLIC_PUBLIC_DEMO=off` (already the Maui build's setting) now means *pilot mode*:
+`isPilotMode()` / `canSeeEngineering(role)` in `frontend/lib/public-demo.ts` hide those items and
+controls from every non-admin role and make `/measures`, `/studio*`, `/runs` and `/api-docs` render the
+existing access-denied component for them (and skip their data fetches), so a URL cannot reach a page
+the nav hides. Admins see everything; with the flag on (TWH, the public demo) nothing changes for anyone.
+This is a UI convenience layered over the existing server-side role checks, not a replacement for them:
+the case-action and run endpoints keep their CASE_MANAGER/ADMIN gates unchanged, so a pilot case manager
+could still call them directly — the point of hiding is to stop the *accidental* click, not to add a
+permission.
+
+**Four affordances that did not work.** (1) The assignee pick list was a hardcoded pair of TWH accounts
+the Maui profile refuses at login; `GET /api/users/assignable` now serves the case-manager and admin
+accounts allowed on the active profile (gated in the security matrix, no hashes) and the case page reads
+it. (2) Typing a patient's name and pressing Enter did nothing: the backend search was scoped correctly,
+but the dropdown only opened on a successful non-empty response, so a failed response was silence, and
+Enter had no handler. It now shows "No patients found" (in the deployment's term) on empty or failed
+responses and navigates on Enter when exactly one result is shown. (3) The Compliant and Excluded chips
+were the only two that were not links; the roster API and page gained a `measureId` parameter that
+scopes the status filter to one measure's column (resolving the panel from the measure, so a link needs
+no panel), and the chips link there. On the Maui roster the destination count equals the chip; on TWH it
+can differ, because the overview folds in the scale tenant and honours the date range while the roster
+does neither, so the chips do not forward a date scope the roster cannot honour. (4) The
+Compliant/Excluded destination previously did not exist because the roster's status filter matched any
+column.
+
 ## 2026-09-03 — the pilot sandbox stops saying "employee": a deployment subject term reaches the backend, and every occupational label on the patient profile is gone
 
 **Why now.** A full walk of the live Maui sandbox from the quality lead's seat — every nav item and the

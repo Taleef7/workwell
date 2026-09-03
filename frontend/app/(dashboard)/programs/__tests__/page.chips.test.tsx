@@ -56,14 +56,20 @@ describe("ProgramsPage status chips", () => {
       "href", "/cases?measureId=cms125&outcome=MISSING_DATA");
   });
 
-  it("keeps compliant and excluded chips static — no roster view can reproduce their count today", async () => {
+  it("links compliant and excluded chips to the measure-scoped compliance roster", async () => {
     render(<ProgramsPage />);
     await screen.findByRole("link", { name: /overdue/i });
-    // The roster's status filter is any-cell-per-panel, not per-measure, so a COMPLIANT/EXCLUDED
-    // link would open a population that does not match the clicked number. Static until a
-    // measure-scoped roster drill-down exists.
-    expect(screen.queryByRole("link", { name: /: compliant/i })).toBeNull();
-    expect(screen.queryByRole("link", { name: /excluded/i })).toBeNull();
+    expect(screen.getByRole("link", { name: /: compliant/i })).toHaveAttribute(
+      "href", "/compliance?measureId=cms125&status=COMPLIANT");
+    expect(screen.getByRole("link", { name: /: excluded/i })).toHaveAttribute(
+      "href", "/compliance?measureId=cms125&status=EXCLUDED");
+  });
+
+  it("renders the compliant and excluded chips with their labels and counts", async () => {
+    render(<ProgramsPage />);
+    await screen.findByRole("link", { name: /overdue/i });
+    // The chip labels are always rendered as text (link or not); the deep-link test above pins
+    // that Compliant/Excluded are now links, so these assertions just confirm the labels survive.
     expect(screen.getByText("Compliant 2")).toBeInTheDocument();
     expect(screen.getByText("Excluded 2")).toBeInTheDocument();
   });
@@ -75,6 +81,14 @@ describe("ProgramsPage status chips", () => {
     expect(overdue).toHaveAttribute(
       "href",
       "/cases?measureId=cms125&outcome=OVERDUE&site=clinic-1&from=2026-01-01&to=2026-06-30",
+    );
+    expect(screen.getByRole("link", { name: /: compliant/i })).toHaveAttribute(
+      "href",
+      "/compliance?measureId=cms125&status=COMPLIANT&site=clinic-1",
+    );
+    expect(screen.getByRole("link", { name: /: excluded/i })).toHaveAttribute(
+      "href",
+      "/compliance?measureId=cms125&status=EXCLUDED&site=clinic-1",
     );
   });
 

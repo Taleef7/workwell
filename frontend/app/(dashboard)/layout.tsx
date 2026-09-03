@@ -40,6 +40,7 @@ import { RunStatusProvider, useRunStatus } from "@/components/run-status-provide
 import { ROLE_LABELS, labelFor } from "@/lib/status";
 import { GlobalSearch } from "@/components/GlobalSearch";
 import { ThemeBrandSwitcher } from "@/components/theme-brand-switcher";
+import { canSeeEngineering } from "@/lib/public-demo";
 
 const APP_NAME = process.env.NEXT_PUBLIC_APP_NAME ?? "WorkWell Measure Studio";
 const [APP_BADGE, ...appRest] = APP_NAME.split(" ");
@@ -65,6 +66,8 @@ const nav = [
   // so every authenticated role can reach it — and so can anyone without an account.
   { href: "/api-docs", label: "API", icon: Code2 },
 ] as const;
+
+const ENGINEERING_HREFS = new Set(["/measures", "/studio", "/runs", "/api-docs"]);
 
 const DATE_PRESETS = [
   { value: "7d", label: "Last 7 days" },
@@ -175,7 +178,12 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
     return <div className="min-h-dvh bg-neutral-50 dark:bg-neutral-950" />;
   }
 
-  const navItems = nav.filter((item) => !("roles" in item && item.roles) || hasAnyRole(user?.role, item.roles));
+  const navItems = nav.filter((item) => {
+    if (ENGINEERING_HREFS.has(item.href) && !canSeeEngineering(user?.role)) {
+      return false;
+    }
+    return !("roles" in item && item.roles) || hasAnyRole(user?.role, item.roles);
+  });
 
   return (
     <SidebarProvider>
@@ -280,7 +288,7 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
                 />
               </GlobalFilterGroup>
               <RunStatusIndicator />
-              <ThemeBrandSwitcher />
+              {canSeeEngineering(user?.role) && <ThemeBrandSwitcher />}
             </AppHeaderSection>
           </AppHeader>
 

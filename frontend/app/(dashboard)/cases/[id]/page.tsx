@@ -10,6 +10,7 @@ import { SUBJECT } from "@/lib/terminology";
 import { useApi } from "@/lib/api/hooks";
 import { useAuth } from "@/components/auth-provider";
 import { canManageCases } from "@/lib/rbac";
+import { canSeeEngineering } from "@/lib/public-demo";
 import { AuditPacketExportButton } from "@/components/audit-packet-export-button";
 import { CopyableId } from "@/components/copyable-id";
 import { ConfirmDialog } from "@/components/confirm-dialog";
@@ -18,10 +19,6 @@ import { EvidenceDropzone } from "@/features/evidence/EvidenceDropzone";
 import { DeliveryChip } from "@/features/outreach/DeliveryChip";
 import { useMeasureIdentities } from "@/lib/measure-identity";
 import { formatEvaluationPeriod } from "@/lib/format";
-
-// Type-ahead suggestions for the assignee field — the operational accounts that can own a case.
-// The input still accepts any free-text handle; this only offers quick picks.
-const ASSIGNEE_SUGGESTIONS = ["cm@workwell.dev", "admin@workwell.dev"] as const;
 
 const EMPLOYEE_APPOINTMENT_TYPE_OPTIONS = [
   { value: "Audiogram", label: "Audiogram" },
@@ -163,6 +160,7 @@ export default function CaseDetailPage() {
   // backend; read-only roles previously saw every control and got a guaranteed 403 (Fable H9). Mirror
   // the API gate so those controls simply don't render for read roles.
   const canManage = canManageCases(user?.role);
+  const canEngineering = canSeeEngineering(user?.role);
   const { labelFor: measureLabelFor } = useMeasureIdentities();
   const [caseDetail, setCaseDetail] = useState<CaseDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -197,6 +195,7 @@ export default function CaseDetailPage() {
   const [evidenceDescription, setEvidenceDescription] = useState("");
   const [uploadingEvidence, setUploadingEvidence] = useState(false);
   const [escalationConfirmOpen, setEscalationConfirmOpen] = useState(false);
+  const [assignableEmails, setAssignableEmails] = useState<string[]>([]);
   const caseStatus = caseDetail ? normalizeEnumValue(caseDetail.status) : "";
 
   // Option lists for @mieweb/ui Select controls.
@@ -266,6 +265,15 @@ export default function CaseDetailPage() {
     }
   }, [api, caseId]);
 
+  const loadAssignableUsers = useCallback(async () => {
+    try {
+      const users = await api.get<Array<{ email: string; role: string }>>("/api/users/assignable");
+      setAssignableEmails(users.map((user) => user.email));
+    } catch {
+      setAssignableEmails([]);
+    }
+  }, [api]);
+
   useEffect(() => {
     if (caseId) {
       const timer = setTimeout(() => {
@@ -273,10 +281,11 @@ export default function CaseDetailPage() {
         void loadTemplates();
         void loadAppointments();
         void loadEvidence();
+        if (canManage) void loadAssignableUsers();
       }, 0);
       return () => clearTimeout(timer);
     }
-  }, [caseId, loadAppointments, loadEvidence, loadCase]);
+  }, [caseId, canManage, loadAppointments, loadEvidence, loadCase, loadAssignableUsers]);
 
   async function runAction(action: "outreach" | "rerun") {
     if (!caseId) return;
@@ -503,6 +512,11 @@ export default function CaseDetailPage() {
 
       {caseDetail ? (
         <>
+        <datalist id="case-assignees">
+          {assignableEmails.map((a) => (
+            <option key={a} value={a} />
+          ))}
+        </datalist>
         <div className="space-y-3 md:hidden">
           <details open className="rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3">
             <summary className="cursor-pointer text-sm font-semibold text-neutral-900 dark:text-neutral-100">Case Summary</summary>
@@ -567,28 +581,32 @@ export default function CaseDetailPage() {
                 >
                   Send Outreach
                 </Button>
-                <Button
-                  type="button"
-                  variant="primary"
-                  size="sm"
-                  onClick={() => void runAction("rerun")}
-                  disabled={acting !== null}
-                  isLoading={acting === "rerun"}
-                  loadingText="Verifying..."
-                >
-                  Rerun to Verify
-                </Button>
-                <Button
-                  type="button"
-                  variant="danger"
-                  size="sm"
-                  onClick={() => setEscalationConfirmOpen(true)}
-                  disabled={escalating}
-                  isLoading={escalating}
-                  loadingText="Escalating..."
-                >
-                  Escalate
-                </Button>
+                {canEngineering && (
+                  <Button
+                    type="button"
+                    variant="primary"
+                    size="sm"
+                    onClick={() => void runAction("rerun")}
+                    disabled={acting !== null}
+                    isLoading={acting === "rerun"}
+                    loadingText="Verifying..."
+                  >
+                    Rerun to Verify
+                  </Button>
+                )}
+                {canEngineering && (
+                  <Button
+                    type="button"
+                    variant="danger"
+                    size="sm"
+                    onClick={() => setEscalationConfirmOpen(true)}
+                    disabled={escalating}
+                    isLoading={escalating}
+                    loadingText="Escalating..."
+                  >
+                    Escalate
+                  </Button>
+                )}
               </div>
               <div className="grid gap-2">
                 <Input
@@ -597,7 +615,7 @@ export default function CaseDetailPage() {
                   list="case-assignees"
                   value={assigneeInput}
                   onChange={(e) => setAssigneeInput(e.target.value)}
-                  placeholder="Type or pick — e.g. cm@workwell.dev"
+                  placeholder="Type or pick an email"
                 />
                 <Button
                   type="button"
@@ -708,17 +726,19 @@ export default function CaseDetailPage() {
                 {canManage && caseStatus !== "CLOSED" && caseStatus !== "EXCLUDED" && caseStatus !== "RESOLVED" ? (
                   <div className="mt-3">
                     {caseDetail.latestOutreachDeliveryStatus ? (
-                      <Button
-                        type="button"
-                        variant="primary"
-                        size="sm"
-                        onClick={() => void runAction("rerun")}
-                        disabled={acting !== null}
-                        isLoading={acting === "rerun"}
-                        loadingText="Verifying..."
-                      >
-                        Rerun to verify →
-                      </Button>
+                      canEngineering ? (
+                        <Button
+                          type="button"
+                          variant="primary"
+                          size="sm"
+                          onClick={() => void runAction("rerun")}
+                          disabled={acting !== null}
+                          isLoading={acting === "rerun"}
+                          loadingText="Verifying..."
+                        >
+                          Rerun to verify →
+                        </Button>
+                      ) : null
                     ) : (
                       <Button
                         type="button"
@@ -770,11 +790,6 @@ export default function CaseDetailPage() {
                 </div>
                 <div className="mt-4 grid gap-2">
                   <span className="text-xs font-semibold uppercase tracking-[0.15em] text-amber-700 dark:text-amber-300">Assignee</span>
-                  <datalist id="case-assignees">
-                    {ASSIGNEE_SUGGESTIONS.map((a) => (
-                      <option key={a} value={a} />
-                    ))}
-                  </datalist>
                   <div className="flex items-end gap-2">
                     <Input
                       label="Assignee"
@@ -783,7 +798,7 @@ export default function CaseDetailPage() {
                       className="w-full"
                       value={assigneeInput}
                       onChange={(e) => setAssigneeInput(e.target.value)}
-                      placeholder="Type or pick — e.g. cm@workwell.dev"
+                      placeholder="Type or pick an email"
                     />
                     <Button
                       type="button"
@@ -819,26 +834,30 @@ export default function CaseDetailPage() {
                   >
                     Send outreach
                   </Button>
-                  <Button
-                    type="button"
-                    variant="danger"
-                    onClick={() => setEscalationConfirmOpen(true)}
-                    disabled={escalating}
-                    isLoading={escalating}
-                    loadingText="Escalating..."
-                  >
-                    Escalate
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => void runAction("rerun")}
-                    disabled={acting !== null || caseStatus === "CLOSED"}
-                    isLoading={acting === "rerun"}
-                    loadingText="Verifying..."
-                  >
-                    Rerun to verify
-                  </Button>
+                  {canEngineering && (
+                    <Button
+                      type="button"
+                      variant="danger"
+                      onClick={() => setEscalationConfirmOpen(true)}
+                      disabled={escalating}
+                      isLoading={escalating}
+                      loadingText="Escalating..."
+                    >
+                      Escalate
+                    </Button>
+                  )}
+                  {canEngineering && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => void runAction("rerun")}
+                      disabled={acting !== null || caseStatus === "CLOSED"}
+                      isLoading={acting === "rerun"}
+                      loadingText="Verifying..."
+                    >
+                      Rerun to verify
+                    </Button>
+                  )}
                   <Button
                     type="button"
                     variant="outline"
@@ -950,7 +969,7 @@ export default function CaseDetailPage() {
                 ) : (
                   <p className="mt-3 text-xs text-amber-800 dark:text-amber-300">Preview the outreach message before sending.</p>
                 )}
-                {canManage && (
+                {canManage && canEngineering && (
                 <div className="mt-3 flex flex-wrap gap-2">
                   <Button type="button" variant="outline" size="sm" onClick={() => void updateDeliveryStatus("QUEUED")} disabled={acting !== null}>
                     Mark queued

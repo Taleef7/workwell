@@ -146,6 +146,17 @@ test("non-/api routes default to permit", () => {
   assert.equal(authorize("GET", "/", null).ok, true);
 });
 
+test("the assignable-users pick list is CM/ADMIN-only, not the AUTHENTICATED fallback", () => {
+  // GET /api/users/assignable exposes the profile's user emails/roles - it must match the
+  // dedicated security-matrix rule, not fall through to generic authenticated GET access.
+  assert.equal(authorize("GET", "/api/users/assignable", cm).ok, true);
+  assert.equal(authorize("GET", "/api/users/assignable", admin).ok, true);
+  assert.deepEqual(authorize("GET", "/api/users/assignable", viewer), { ok: false, status: 403 });
+  assert.deepEqual(authorize("GET", "/api/users/assignable", author), { ok: false, status: 403 });
+  assert.deepEqual(authorize("GET", "/api/users/assignable", approver), { ok: false, status: 403 });
+  assert.deepEqual(authorize("GET", "/api/users/assignable", null), { ok: false, status: 401 });
+});
+
 test("Fable M4: AI write endpoints (bare + measure-scoped) are AUTHOR/ADMIN, not any authenticated role", () => {
   assert.equal(authorize("POST", "/api/ai/draft-spec", author).ok, true);
   assert.equal(authorize("POST", "/api/ai/draft-spec", admin).ok, true);

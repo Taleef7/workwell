@@ -1,3 +1,5 @@
+"use client";
+
 /**
  * Studio landing page.
  *
@@ -12,6 +14,9 @@
  */
 import Link from "next/link";
 import { FileClock, ListTree } from "lucide-react";
+import { useAuth } from "@/components/auth-provider";
+import { canSeeEngineering } from "@/lib/public-demo";
+import { AccessDenied } from "@/components/access-denied";
 
 const ENTRIES = [
   {
@@ -35,6 +40,17 @@ const ENTRIES = [
 ] as const;
 
 export default function StudioPage() {
+  const { user } = useAuth();
+
+  if (!canSeeEngineering(user?.role)) {
+    return (
+      <AccessDenied
+        title="Studio"
+        message="Your current role does not have access to this section."
+      />
+    );
+  }
+
   return (
     <section className="space-y-6">
       <div>

@@ -30,6 +30,8 @@ import { canManageCases, canRunMeasures } from "@/lib/rbac";
 import { SkeletonRow } from "@/components/skeleton-loader";
 import { AuditPacketExportButton } from "@/components/audit-packet-export-button";
 import { ConfirmDialog } from "@/components/confirm-dialog";
+import { canSeeEngineering } from "@/lib/public-demo";
+import { AccessDenied } from "@/components/access-denied";
 
 type RunListItem = {
   runId: string;
@@ -373,12 +375,14 @@ export default function RunsPage() {
   }, [urlRunId]);
 
   useEffect(() => {
+    if (!canSeeEngineering(user?.role)) return;
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadRuns();
     void loadMeasures();
-  }, [loadMeasures, loadRuns]);
+  }, [loadMeasures, loadRuns, user?.role]);
 
   useEffect(() => {
+    if (!canSeeEngineering(user?.role)) return;
     if (selectedRunId) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setRunInsight(null); // clear the prior run's insight; the AI insight is now on-demand (UX-19)
@@ -390,7 +394,7 @@ export default function RunsPage() {
       // NOTE: loadRunInsight is intentionally NOT auto-fired here — merely viewing a run detail used to
       // trigger a billed OpenAI call per selected run (UX-19). It now runs only on an explicit button.
     }
-  }, [selectedRunId, loadSelectedRun]);
+  }, [selectedRunId, loadSelectedRun, user?.role]);
 
   async function runManualScope() {
     setError(null);
@@ -620,6 +624,15 @@ export default function RunsPage() {
     ],
     [measures],
   );
+
+  if (!canSeeEngineering(user?.role)) {
+    return (
+      <AccessDenied
+        title="Runs"
+        message="Your current role does not have access to this section."
+      />
+    );
+  }
 
   return (
     <section className="space-y-4">

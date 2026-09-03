@@ -10,6 +10,7 @@ import { fmtCount } from "@/lib/format";
 import { useAuth } from "@/components/auth-provider";
 import { useRunStatus } from "@/components/run-status-provider";
 import { canRunMeasures } from "@/lib/rbac";
+import { canSeeEngineering } from "@/lib/public-demo";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import type { TenantOption } from "@/features/compliance/types";
 import { OUTCOME_LABELS, ROLE_LABELS, labelFor } from "@/lib/status";
@@ -51,7 +52,7 @@ type TopDrivers = {
 export default function ProgramsPage() {
   const api = useApi();
   const { user } = useAuth();
-  const mayRun = canRunMeasures(user?.role);
+  const mayRun = canRunMeasures(user?.role) && canSeeEngineering(user?.role);
   const { isActive: runActive, startTracking } = useRunStatus();
   const { siteId, from, to } = useGlobalFilters();
   const isPatientTerm = SUBJECT.singular === "patient";
@@ -178,20 +179,22 @@ export default function ProgramsPage() {
       <div className="flex items-center justify-between">
         <h2 className="text-2xl font-semibold text-neutral-900 dark:text-neutral-100">Programs Overview</h2>
         <div className="flex items-center gap-3">
-          <label className="flex items-center gap-1.5 text-xs uppercase tracking-[0.15em] text-neutral-500 dark:text-neutral-400">
-            System
-            <select
-              value={tenant}
-              onChange={(e) => setTenant(e.target.value)}
-              aria-label="System"
-              className="rounded-md border border-neutral-300 bg-white px-2 py-1 text-sm normal-case tracking-normal text-neutral-900 focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100"
-            >
-              <option value="">All systems</option>
-              {tenantOptions.map((t) => (
-                <option key={t.id} value={t.id}>{t.name}</option>
-              ))}
-            </select>
-          </label>
+          {canSeeEngineering(user?.role) && (
+            <label className="flex items-center gap-1.5 text-xs uppercase tracking-[0.15em] text-neutral-500 dark:text-neutral-400">
+              System
+              <select
+                value={tenant}
+                onChange={(e) => setTenant(e.target.value)}
+                aria-label="System"
+                className="rounded-md border border-neutral-300 bg-white px-2 py-1 text-sm normal-case tracking-normal text-neutral-900 focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100"
+              >
+                <option value="">All systems</option>
+                {tenantOptions.map((t) => (
+                  <option key={t.id} value={t.id}>{t.name}</option>
+                ))}
+              </select>
+            </label>
+          )}
           <Link
             href="/programs/hierarchy"
             className="text-sm font-medium text-primary-700 hover:underline dark:text-primary-400"
@@ -399,12 +402,18 @@ function chipHref(
   bucket: "COMPLIANT" | "DUE_SOON" | "OVERDUE" | "MISSING_DATA" | "EXCLUDED",
   scope: { siteId: string; from: string; to: string },
 ): string | undefined {
-  // COMPLIANT/EXCLUDED have no destination that reproduces their count today: the roster's status
-  // filter is any-cell-per-panel, not per-measure, and the measure may not even be in the default
-  // panel — a link that opens the wrong population is worse than none, so those chips stay static
-  // until a measure-scoped roster drill-down exists.
-  if (bucket === "COMPLIANT" || bucket === "EXCLUDED") return undefined;
+  // COMPLIANT/EXCLUDED drill into the compliance roster scoped to that measure's column (the
+  // measureId param restricts the roster's status filter per column); the other three land on the
+  // pre-filtered cases list. Both destinations must reproduce the chip's count.
   const params = new URLSearchParams();
+  if (bucket === "COMPLIANT" || bucket === "EXCLUDED") {
+    params.set("measureId", measureId);
+    params.set("status", bucket);
+    // The roster has no date filter; forwarding from/to implies a scope it cannot honour.
+    // Site filter is honoured by the roster so forward it.
+    if (scope.siteId) params.set("site", scope.siteId);
+    return `/compliance?${params.toString()}`;
+  }
   params.set("measureId", measureId);
   params.set("outcome", bucket);
   // Carry the active global scope; otherwise the click silently resets the site/date filter and the

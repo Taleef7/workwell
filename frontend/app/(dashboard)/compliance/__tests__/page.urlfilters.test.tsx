@@ -6,11 +6,9 @@ import type { createNavMock } from "@/test/mocks/next-navigation-reactive";
 
 const getWithHeaders = vi.fn();
 const get = vi.fn();
-// Keep the mocked client stable across renders, matching the real memoized useApi() client.
 const apiMock = { getWithHeaders, get };
 vi.mock("@/lib/api/hooks", () => ({ useApi: () => apiMock }));
 
-// Reactive router mock: push/replace update the params and re-render, like the real App Router.
 const navHolder = vi.hoisted(() => ({ current: undefined as unknown as ReturnType<typeof createNavMock> }));
 vi.mock("next/navigation", async () => {
   const { createNavMock } = await import("@/test/mocks/next-navigation-reactive");
@@ -18,11 +16,11 @@ vi.mock("next/navigation", async () => {
   return navHolder.current.navigation;
 });
 
-vi.mock("@/components/global-filter-context", () => ({
-  useGlobalFilters: () => ({ siteId: "" }),
-}));
 vi.mock("@/components/auth-provider", () => ({
   useAuth: () => ({ user: { role: "ROLE_ADMIN" } }),
+}));
+vi.mock("@/components/global-filter-context", () => ({
+  useGlobalFilters: () => ({ siteId: "", from: "", to: "" }),
 }));
 vi.mock("@/components/run-status-provider", () => ({
   useRunStatus: () => ({ isActive: false, startTracking: vi.fn() }),
@@ -31,9 +29,7 @@ vi.mock("@/components/run-status-provider", () => ({
 import CompliancePage from "../page";
 
 function rosterCalls(): string[] {
-  return getWithHeaders.mock.calls
-    .map((c) => String(c[0]))
-    .filter((u) => u.startsWith("/api/compliance/roster?"));
+  return getWithHeaders.mock.calls.map((c) => String(c[0])).filter((u) => u.startsWith("/api/compliance/roster?"));
 }
 
 beforeEach(() => {
@@ -114,6 +110,74 @@ describe("CompliancePage URL filters", () => {
       expect(navHolder.current.params.get("panel")).toBe("wellness");
       expect(navHolder.current.replace).toHaveBeenCalledWith("/compliance?panel=wellness");
       expect(navHolder.current.push).not.toHaveBeenCalled();
+    });
+  });
+
+  it("reads measureId from the URL and sends it to the roster API", async () => {
+    navHolder.current.setUrl("/compliance?measureId=cms125&status=COMPLIANT");
+    render(<CompliancePage />);
+    await waitFor(() => {
+      const call = rosterCalls().at(-1);
+      expect(call).toContain("measureId=cms125");
+      expect(call).toContain("status=COMPLIANT");
+    });
+  });
+
+  it("drops the measureId param when the URL no longer carries one", async () => {
+    navHolder.current.setUrl("/compliance?measureId=cms125");
+    render(<CompliancePage />);
+    await waitFor(() => expect(rosterCalls().some((u) => u.includes("measureId=cms125"))).toBe(true));
+    navHolder.current.setUrl("/compliance");
+    await waitFor(() => {
+      const call = rosterCalls().at(-1);
+      expect(call).not.toContain("measureId=");
+    });
+  });
+
+  it("shows a Scoped to affordance when measureId is in the URL and removes it on Clear click", async () => {
+    get.mockImplementation((url: string) => {
+      if (url === "/api/measures") {
+        return Promise.resolve([
+          { id: "cms125", name: "Breast Cancer Screening", identity: { cmsId: "CMS125", mipsQualityId: "112" } },
+        ]);
+      }
+      return Promise.resolve([]);
+    });
+    navHolder.current.setUrl("/compliance?measureId=cms125");
+    render(<CompliancePage />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/Scoped to/i)).toBeInTheDocument();
+    });
+    expect(screen.getByRole("button", { name: /Clear/i })).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: /Clear/i }));
+    await waitFor(() => {
+      expect(navHolder.current.params.get("measureId")).toBeNull();
+    });
+  });
+
+  it("switching panel clears measureId from the URL", async () => {
+    navHolder.current.setUrl("/compliance?panel=immunizations&measureId=cms125");
+    render(<CompliancePage />);
+    await waitFor(() => expect(rosterCalls().length).toBeGreaterThan(0));
+
+    await userEvent.selectOptions(screen.getByLabelText(/Panel/i), "wellness");
+    await waitFor(() => {
+      expect(navHolder.current.params.get("panel")).toBe("wellness");
+      expect(navHolder.current.params.get("measureId")).toBeNull();
+    });
+  });
+
+  it("changing status keeps measureId in the URL", async () => {
+    navHolder.current.setUrl("/compliance?panel=immunizations&measureId=cms125");
+    render(<CompliancePage />);
+    await waitFor(() => expect(rosterCalls().length).toBeGreaterThan(0));
+
+    await userEvent.selectOptions(screen.getByLabelText(/Status/i), "OVERDUE");
+    await waitFor(() => {
+      expect(navHolder.current.params.get("status")).toBe("OVERDUE");
+      expect(navHolder.current.params.get("measureId")).toBe("cms125");
     });
   });
 });

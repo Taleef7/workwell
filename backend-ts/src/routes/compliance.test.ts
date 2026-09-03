@@ -25,6 +25,8 @@ before(async () => {
   env = { DB: db };
   const runStore = new SqliteRunStore(db);
   const outcomes = new SqliteOutcomeStore(db);
+  // A second measure's COMPLIANT cell proves the any-column status filter is broader than the
+  // measure-scoped one (the Programs chip contract pins the scoped count to that column only).
   const run = await runStore.createRun({
     scopeType: "MEASURE", scopeId: "mmr", triggeredBy: "test", requestedScope: { measureId: "mmr" },
     measurementPeriodStart: "2026-06-12T00:00:00.000Z", measurementPeriodEnd: "2026-06-12T00:00:00.000Z",
@@ -38,8 +40,52 @@ before(async () => {
   });
   // The roster only reads terminal (COMPLETED/PARTIAL_FAILURE) population runs — finalize so the cell shows.
   await runStore.finalizeRun(run.id, "COMPLETED");
+  const fluRun = await runStore.createRun({
+    scopeType: "MEASURE", scopeId: "flu_vaccine", triggeredBy: "test", requestedScope: { measureId: "flu_vaccine" },
+    measurementPeriodStart: "2026-06-12T00:00:00.000Z", measurementPeriodEnd: "2026-06-12T00:00:00.000Z",
+  });
+  await outcomes.recordOutcome({
+    runId: fluRun.id, subjectId: "emp-042", measureId: "flu_vaccine", status: "COMPLIANT", evaluationPeriod: "2026-06-12",
+    evidence: { expressionResults: [] },
+  });
+  await runStore.finalizeRun(fluRun.id, "COMPLETED");
 });
 after(() => { try { rmSync(dbPath, { force: true }); } catch { /* best effort */ } });
+
+test("measureId scopes the status filter to that measure's column", async () => {
+  const parse = async (qs: string) => {
+    const res = (await get(qs))!;
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as { rows: Array<{ cells: Record<string, { status: string }> }> };
+    return { total: Number(res.headers.get("X-Total-Count")), statuses: body.rows.map((r) => r.cells["mmr"]?.status) };
+  };
+
+  const unscoped = await parse("?status=COMPLIANT&pageSize=200");
+  assert.ok(unscoped.total >= 2, "fixture needs a compliant cell outside mmr to make the scope meaningful");
+
+  const scoped = await parse("?status=COMPLIANT&measureId=mmr&pageSize=200");
+  assert.equal(scoped.total, 1);
+  assert.equal(scoped.statuses.filter((s) => s === "COMPLIANT").length, 1);
+  assert.ok(scoped.statuses.every((s) => s === "COMPLIANT" || s === undefined));
+
+  // Without measureId the any-column view may include other compliant cells; with it, the count
+  // equals that column's cell count (the Programs chip contract).
+  assert.ok(scoped.total <= unscoped.total);
+});
+
+test("measureId outside the defaulted panel resolves the roster to the panel containing that measure", async () => {
+  const res = (await get("?measureId=cms125&status=COMPLIANT&pageSize=200"))!;
+  assert.equal(res.status, 200);
+  const body = (await res.json()) as {
+    panel: string;
+    rows: Array<{ cells: Record<string, { status: string }> }>;
+  };
+  // The measure lives in the wellness panel, not the immunizations default — the roster must
+  // resolve to wellness so the drill-down can return its column instead of silently zero rows.
+  assert.equal(body.panel, "wellness");
+  const compliant = body.rows.filter((r) => r.cells["cms125"]?.status === "COMPLIANT");
+  assert.equal(body.rows.length, compliant.length);
+});
 
 test("non-roster path returns null (not this route)", async () => {
   assert.equal(await handleCompliance(new Request("http://x/api/other", { method: "GET" }), env as never), null);

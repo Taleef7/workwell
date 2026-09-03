@@ -153,6 +153,10 @@ const RULES: Rule[] = [
   { method: "GET", pattern: rx("/api/auditor/runs/*/packet"), access: [CM, A] },
   { method: "GET", pattern: rx("/api/auditor/cases/*/packet"), access: [CM, A] },
   { method: "GET", pattern: rx("/api/auditor/measure-versions/*/packet"), access: [APPROVER, A] },
+  // Assignable case-assignee pick list: only CASE_MANAGER/ADMIN (matches the hard-coded frontend
+  // suggestions it replaces, minus the accounts the Maui profile refuses). Must precede the
+  // generic AUTHENTICATED /api/** rule so the CM/ADMIN gate actually fires.
+  { method: "GET", pattern: rx("/api/users/assignable"), access: [CM, A] },
   { method: "GET", pattern: rx("/api/**"), access: "AUTHENTICATED" },
   { pattern: rx("/api/**"), access: "AUTHENTICATED" },
 ];
