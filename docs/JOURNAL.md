@@ -32,6 +32,13 @@ does neither, so the chips do not forward a date scope the roster cannot honour.
 Compliant/Excluded destination previously did not exist because the roster's status filter matched any
 column.
 
+**Review follow-ups (post-open).** (1) When the server canonicalized the panel — a chip deep link whose
+measure lives in another panel, or the Maui default `immunizations` request being served as `wellness` —
+the page also dropped `measureId`, so the roster refetched unscoped and the destination count no longer
+matched the chip. Canonicalization now keeps the measure scope; a person changing the panel still clears
+it. (2) The System selector on `/compliance` was still rendered for everyone in pilot mode; it is gated by
+`canSeeEngineering` like the Programs and Hierarchy selectors.
+
 ## 2026-09-03 — the pilot sandbox stops saying "employee": a deployment subject term reaches the backend, and every occupational label on the patient profile is gone
 
 **Why now.** A full walk of the live Maui sandbox from the quality lead's seat — every nav item and the

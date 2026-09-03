@@ -113,6 +113,27 @@ describe("CompliancePage URL filters", () => {
     });
   });
 
+  it("keeps measureId when the server canonicalizes the panel (a chip deep link into another panel)", async () => {
+    navHolder.current.setUrl("/compliance?panel=immunizations&measureId=cms125&status=COMPLIANT");
+    getWithHeaders.mockReset().mockResolvedValue({
+      data: { panel: "wellness", availablePanels: ["wellness"], columns: [], rows: [] },
+      headers: new Headers({ "X-Total-Count": "0" }),
+    });
+    render(<CompliancePage />);
+    await waitFor(() => {
+      expect(navHolder.current.params.get("panel")).toBe("wellness");
+      expect(navHolder.current.replace).toHaveBeenCalledTimes(1);
+    });
+    expect(navHolder.current.params.get("measureId")).toBe("cms125");
+    expect(navHolder.current.params.get("status")).toBe("COMPLIANT");
+    await waitFor(() => {
+      const call = rosterCalls().at(-1);
+      expect(call).toContain("panel=wellness");
+      expect(call).toContain("measureId=cms125");
+      expect(call).toContain("status=COMPLIANT");
+    });
+  });
+
   it("reads measureId from the URL and sends it to the roster API", async () => {
     navHolder.current.setUrl("/compliance?measureId=cms125&status=COMPLIANT");
     render(<CompliancePage />);

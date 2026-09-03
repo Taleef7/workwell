@@ -211,10 +211,13 @@ export default function CompliancePage() {
     }
   }, [api, canRecalc, isActive, startTracking]);
 
-  const writePanelToUrl = useCallback((nextPanel: PanelId, replace = false) => {
+  // `keepMeasureId` distinguishes the server canonicalizing the panel (a chip deep link whose measure
+  // lives in another panel — the scope must survive) from a person choosing a panel (the measure
+  // scope no longer applies).
+  const writePanelToUrl = useCallback((nextPanel: PanelId, replace = false, keepMeasureId = false) => {
     const params = new URLSearchParams(searchParams.toString());
     params.set("panel", nextPanel);
-    params.delete("measureId");
+    if (!keepMeasureId) params.delete("measureId");
     const query = params.toString();
     const target = query ? `${pathname}?${query}` : pathname;
     if (replace) {
@@ -237,7 +240,7 @@ export default function CompliancePage() {
 
   useEffect(() => {
     if (roster && loadedPanel === panel && roster.panel !== panel) {
-      writePanelToUrl(roster.panel, true);
+      writePanelToUrl(roster.panel, true, true);
     }
   }, [roster, loadedPanel, panel, writePanelToUrl]);
 
@@ -300,18 +303,20 @@ export default function CompliancePage() {
               ).map((p) => (<option key={p.id} value={p.id}>{p.label}</option>))}
             </select>
           </label>
-          <label className="flex flex-col text-xs font-medium">
-            <span className="mb-1">System</span>
-            <select
-              aria-label="System"
-              value={tenant}
-              onChange={(e) => { setPage(1); setTenant(e.target.value); }}
-              className="rounded border border-neutral-300 bg-transparent px-2 py-1 text-sm dark:border-neutral-700"
-            >
-              <option value="">All systems</option>
-              {tenantOptions.map((o) => (<option key={o.id} value={o.id}>{o.name}</option>))}
-            </select>
-          </label>
+          {canSeeEngineering(user?.role) && (
+            <label className="flex flex-col text-xs font-medium">
+              <span className="mb-1">System</span>
+              <select
+                aria-label="System"
+                value={tenant}
+                onChange={(e) => { setPage(1); setTenant(e.target.value); }}
+                className="rounded border border-neutral-300 bg-transparent px-2 py-1 text-sm dark:border-neutral-700"
+              >
+                <option value="">All systems</option>
+                {tenantOptions.map((o) => (<option key={o.id} value={o.id}>{o.name}</option>))}
+              </select>
+            </label>
+          )}
           <label className="flex flex-col text-xs font-medium">
             <span className="mb-1">Segment</span>
             <select
