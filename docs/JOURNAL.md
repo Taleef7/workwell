@@ -1,3 +1,5 @@
+# Journal
+
 ## 2026-09-02 (later) — Maui routes cms122/cms125 official: the authored breast-cancer subset was hostage to VSAC reachability
 
 **Found while verifying the redeployed sandbox.** Breast Cancer Screening on Maui read 0% compliant, 45
@@ -24,8 +26,6 @@ the designed probes. One workflow env line; `official-flip-config.test.ts` reads
 The authored cms122/cms125 subsets stay in the catalog for now (#377 retires them). The finding is the
 sharpest evidence yet for that issue: an authored subset that is right only when the terminology
 service is down is not a subset, it is a coincidence.
-
-# Journal
 
 ## 2026-09-02 — the Maui sandbox is handed over: unclaimed runs recover, demo accounts are profile-scoped, public-demo affordances become deployment config
 
