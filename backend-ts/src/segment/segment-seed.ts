@@ -1,63 +1,76 @@
 /**
  * Demo risk-group seed (#183 E11.3). Idempotent by segment name: existing names are left untouched,
- * so re-running on boot is safe and operator edits are never clobbered. Seeds three ENABLED cohorts
- * whose rule-sets together cover EVERY Active runnable measure (no measure is orphaned) while giving the
- * roster grid a meaningful applicable/N-A mix:
- *   - All Employees      — the universal occupational-health baseline (wellness + preventive eCQM + Td/Tdap)
- *   - OSHA Safety-Sensitive — field roles add the OSHA surveillance program
- *   - Clinical Staff     — clinic/nursing roles add infection control + the healthcare-worker immunity series
- * `no-orphaned-measure-in-demo-seed` (segment-seed.test.ts) guards the coverage invariant.
+ * so re-running on boot is safe and operator edits are never clobbered. Seeds ENABLED cohorts whose
+ * rule-sets together cover every runnable measure for the deployment profile (no measure is
+ * orphaned):
+ *   - default profile: three cohorts covering the full TWH/IHN occupational-health set
+ *     (All Employees, OSHA Safety-Sensitive, Clinical Staff)
+ *   - maui profile: one cohort — All Patients — scoped to the maui directory's sites, with CQL
+ *     deciding per-patient eligibility within each profile-runnable measure
+ * `no-orphaned-measure-in-demo-seed` (segment-seed.test.ts) guards the coverage invariant per profile.
  */
 import type { CreateSegmentInput, SegmentStore, SegmentRule } from "../stores/segment-store.ts";
 import { getStores, type StoresEnv } from "../stores/factory.ts";
-import { EMPLOYEES } from "../engine/synthetic/employee-catalog.ts";
+import { DEPLOYMENT_PROFILE, EMPLOYEES, RUNNABLE_MEASURE_IDS, type DeploymentProfileId, type EmployeeProfile } from "../config/deployment-profile.ts";
 import { WEBCHART_LIVE_SITE } from "../engine/ingress/webchart/live-directory.ts";
 
-/** Every distinct site across ALL tenants — so the universal baseline auto-covers a new tenant's
- *  sites without hand-editing this list (E13 PR-1: the IHN campuses join twh's sites here). The live
- *  WebChart tenant's fixed site is included explicitly: it is not in the static directory (added at
- *  runtime when the seam loads), so without it every WebChart roster cell would read NOT_APPLICABLE.
- *  Harmless when the seam is off — no subject carries that site, so it is just an unused list entry. */
-const ALL_SITES: string[] = [
-  ...new Set([...EMPLOYEES.map((e) => e.site), WEBCHART_LIVE_SITE]),
-].sort((a, b) => a.localeCompare(b));
+/**
+ * Pure seed-set selector by deployment profile. `employees` is the profile-scoped directory; the
+ * default branch derives its baseline site list from it plus the live WebChart site, exactly as
+ * before. The maui branch derives its single cohort's site list and measure set from the passed
+ * directory and runnable-measure list, so both branches track the profile without literals.
+ */
+export function demoSegmentsFor(
+  profileId: DeploymentProfileId,
+  employees: readonly EmployeeProfile[],
+  runnableMeasureIds: readonly string[],
+): CreateSegmentInput[] {
+  if (profileId === "maui") {
+    const mauiSites = [...new Set(employees.map((e) => e.site))].sort((a, b) => a.localeCompare(b));
+    return [{
+      name: "All Patients",
+      description: "Every attributed patient across the pilot's clinics — the ACO measure set applies to everyone; CQL decides per-patient eligibility within each measure.",
+      rule: { match: "ANY", conditions: [{ attr: "site", op: "in", value: mauiSites }] },
+      measureIds: [...runnableMeasureIds],
+    }];
+  }
+  const ALL_SITES: string[] = [
+    ...new Set([...employees.map((e) => e.site), WEBCHART_LIVE_SITE]),
+  ].sort((a, b) => a.localeCompare(b));
+  const BASELINE_RULE: SegmentRule = { match: "ANY", conditions: [{ attr: "site", op: "in", value: ALL_SITES }] };
+  return [
+    {
+      name: "All Employees",
+      description: "Universal occupational-health baseline — wellness screening, preventive eCQMs, and the adult Td/Tdap booster, applicable to everyone.",
+      rule: BASELINE_RULE,
+      measureIds: [
+        "hypertension", "diabetes_hba1c", "obesity_bmi", "cholesterol_ldl", "cms125", "cms122", "adult_immunization",
+      ],
+    },
+    {
+      name: "OSHA Safety-Sensitive",
+      description: "Field roles in OSHA surveillance programs — adds audiometry, HAZWOPER, and TB screening.",
+      rule: { match: "ANY", conditions: [
+        { attr: "role", op: "contains", value: "Welder" },
+        { attr: "role", op: "contains", value: "Maintenance" },
+        { attr: "role", op: "contains", value: "Hazwoper" },
+        { attr: "role", op: "contains", value: "Industrial Hygienist" },
+      ] },
+      measureIds: ["audiogram", "hazwoper", "tb_surveillance"],
+    },
+    {
+      name: "Clinical Staff",
+      description: "Clinic-based and nursing staff — adds influenza, TB screening, and the MMR/Varicella/Hep B immunity series.",
+      rule: { match: "ANY", conditions: [
+        { attr: "site", op: "equals", value: "Clinic" },
+        { attr: "role", op: "contains", value: "Nurse" },
+      ] },
+      measureIds: ["flu_vaccine", "tb_surveillance", "mmr", "varicella", "hepatitis_b_vaccination_series"],
+    },
+  ];
+}
 
-const BASELINE_NAME = "All Employees";
-/** The universal baseline cohort rule — matches every employee by site, across all tenants. */
-const BASELINE_RULE: SegmentRule = { match: "ANY", conditions: [{ attr: "site", op: "in", value: ALL_SITES }] };
-
-export const DEMO_SEGMENTS: CreateSegmentInput[] = [
-  {
-    // Everyone: chronic-disease + preventive screening (incl. the two CMS eCQMs) and the routine
-    // adult Td/Tdap booster. CQL still decides per-subject eligibility WITHIN each measure.
-    name: BASELINE_NAME,
-    description: "Universal occupational-health baseline — wellness screening, preventive eCQMs, and the adult Td/Tdap booster, applicable to everyone.",
-    rule: BASELINE_RULE,
-    measureIds: [
-      "hypertension", "diabetes_hba1c", "obesity_bmi", "cholesterol_ldl", "cms125", "cms122", "adult_immunization",
-    ],
-  },
-  {
-    name: "OSHA Safety-Sensitive",
-    description: "Field roles in OSHA surveillance programs — adds audiometry, HAZWOPER, and TB screening.",
-    rule: { match: "ANY", conditions: [
-      { attr: "role", op: "contains", value: "Welder" },
-      { attr: "role", op: "contains", value: "Maintenance" },
-      { attr: "role", op: "contains", value: "Hazwoper" },
-      { attr: "role", op: "contains", value: "Industrial Hygienist" },
-    ] },
-    measureIds: ["audiogram", "hazwoper", "tb_surveillance"],
-  },
-  {
-    name: "Clinical Staff",
-    description: "Clinic-based and nursing staff — adds influenza, TB screening, and the MMR/Varicella/Hep B immunity series.",
-    rule: { match: "ANY", conditions: [
-      { attr: "site", op: "equals", value: "Clinic" },
-      { attr: "role", op: "contains", value: "Nurse" },
-    ] },
-    measureIds: ["flu_vaccine", "tb_surveillance", "mmr", "varicella", "hepatitis_b_vaccination_series"],
-  },
-];
+export const DEMO_SEGMENTS: CreateSegmentInput[] = demoSegmentsFor(DEPLOYMENT_PROFILE.id, EMPLOYEES, RUNNABLE_MEASURE_IDS);
 
 /**
  * Idempotently seed the demo segments — skips any whose name already exists (a boot over an
