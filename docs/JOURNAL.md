@@ -44,8 +44,22 @@ every overdue case and "Schedule the … before the due date." for due-soon. It 
 and what closes it ("No mammogram on file for this measurement period. Order or document one.";
 "No … result could be found. Check for outside records before ordering."; "A … is due before the end
 of this measurement period."); the EXCLUDED sentence is profile-gated in the terminology PR. Case
-detail, the cases list, CSV exports and CDS cards all read the persisted string, so this changes what
-the pilot's staff see on every open case.
+detail, the cases list and CSV exports read the persisted string (written at case upsert, so an open case
+shows the new copy after the next population run refreshes it) and CDS cards recompute it live, so this
+changes what the pilot's staff see on every open case from the next run on.
+
+**Review follow-ups (post-open).** (1) cms122 is inverse: its numerator is most-recent glycemic status assessment (HbA1c *or* GMI — the
+vendored bundle carries the GMI LOINC) > 9%, *or* no assessment in the period, so an OVERDUE patient may have a
+documented poor-control result, and "No HbA1c test on file … Order or document one." was wrong for that patient —
+and the string is persisted on the case and rendered in CDS cards. `nextActionFor` now carries a per-measure
+override; the cms122 OVERDUE sentence names both readings and states what closes the gap in the measure's own
+terms (a result at or below 9% documented in the period), never an order the data may not support. The noun for
+MISSING_DATA/DUE_SOON no longer narrows the measure to HbA1c either. (2) The "Quality over time" tile and its data table paired "Poor control 15.6%" with the
+persisted compliant numerator (38 / 45). `displayRate` now returns the numerator and the denominator the
+displayed percentage was made of, and every n / d on the two Programs pages renders those. (3) The overview
+read cms122 as "Compliance 84.4%" until `/api/measures` resolved, and forever if that request failed.
+`ProgramSummary` now carries `improvementNotation` from the identity table, and both pages fall back to the
+summary's own notation, so the inverse reading never depends on a second request.
 
 ## 2026-09-03 — pilot mode: the engineering surfaces leave the quality team's view, and four broken affordances work
 

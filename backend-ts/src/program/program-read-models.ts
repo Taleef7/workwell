@@ -14,6 +14,7 @@ import type { CaseStore } from "../stores/case-store.ts";
 import { EMPLOYEES, employeeById, type EmployeeProfile } from "../engine/synthetic/employee-catalog.ts";
 import type { QualitySnapshotStore, QualitySnapshotRow, QualityScopeLevel } from "../stores/quality-snapshot-store.ts";
 import { MEASURE_CATALOG } from "../measure/measure-catalog.ts";
+import { measureIdentityFor } from "../measure/measure-identity.ts";
 import { ACTIVE_CASE_STATUSES } from "../case/case-logic.ts";
 import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
 import { day, isCompletedRun, isPopulationRun, round1, complianceRateOf, type ComplianceRateCounts } from "./rollup-shared.ts";
@@ -38,6 +39,12 @@ export interface ProgramSummary {
   missingData: number;
   excluded: number;
   complianceRate: number;
+  /**
+   * Which way the measure improves (`MEASURE_IDENTITY`; "increase" when the measure has no identity
+   * row). Carried on the summary so a client can render an inverse measure (cms122: the numerator is
+   * poor control) from this one response, never depending on `/api/measures` resolving first.
+   */
+  improvementNotation: "increase" | "decrease";
   openCaseCount: number;
 }
 
@@ -304,6 +311,7 @@ export async function programOverview(deps: ProgramDeps, filters: ProgramFilters
       missingData,
       excluded,
       complianceRate: complianceRateOf({ compliant, dueSoon, overdue, missingData, excluded }),
+      improvementNotation: measureIdentityFor(m.id)?.improvementNotation ?? "increase",
       openCaseCount,
     };
   });

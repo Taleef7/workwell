@@ -53,6 +53,28 @@ test("nextActionFor is measure-aware for non-OSHA measures (M1: no longer defaul
   }
 });
 
+test("nextActionFor: cms122 OVERDUE names both readings of the inverse numerator (poor control OR no result), never 'no HbA1c on file' alone", () => {
+  const action = nextActionFor("OVERDUE", "cms122");
+  assert.match(action, /glycemic status assessment \(HbA1c or GMI\) is above 9%/);
+  assert.match(action, /or none is on file/);
+  assert.match(action, /most recent qualifying assessment in the period is at or below 9%/, "states what closes the gap, in the measure's own terms");
+  assert.doesNotMatch(action, /^No .* on file/);
+  assert.doesNotMatch(action, /Order or document one/);
+  // DUE_SOON uses the generic wording with the assessment noun, which must not narrow the measure to
+  // HbA1c (it also reads GMI).
+  assert.match(nextActionFor("DUE_SOON", "cms122"), /A glycemic status assessment \(HbA1c or GMI\) is due/);
+});
+
+test("nextActionFor: on the official-routed measures MISSING_DATA means 'not in the initial population', never 'no result could be found'", () => {
+  for (const m of ["cms122", "cms125"]) {
+    const action = nextActionFor("MISSING_DATA", m);
+    assert.match(action, /Not in this measure's initial population/);
+    assert.doesNotMatch(action, /could be found|before ordering/);
+  }
+  // Authored measures keep the data-gap reading: their MISSING_DATA really is a missing result.
+  assert.match(nextActionFor("MISSING_DATA", "audiogram"), /No audiogram result could be found/);
+});
+
 test("nextActionFor: an unknown measure falls back to a generic noun, never 'audiogram'", () => {
   const action = nextActionFor("MISSING_DATA", "not_a_real_measure");
   assert.match(action, /required screening/);

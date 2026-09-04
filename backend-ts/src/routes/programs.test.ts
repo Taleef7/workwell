@@ -94,6 +94,13 @@ test("overview aggregates the LATEST run's outcomes + complianceRate + open case
   assert.equal(a.openCaseCount, 1);
 });
 
+test("overview rows carry the measure's improvementNotation so the UI never has to wait on /api/measures to read an inverse rate", async () => {
+  const rows = (await get("/overview").then((r) => r!.json())) as Array<Summary & { improvementNotation: string }>;
+  assert.equal(rows.find((p) => p.measureId === "cms122")!.improvementNotation, "decrease");
+  assert.equal(rows.find((p) => p.measureId === "cms125")!.improvementNotation, "increase");
+  assert.equal(rows.find((p) => p.measureId === "audiogram")!.improvementNotation, "increase", "no identity row ⇒ increase");
+});
+
 test("a measure with no outcomes reports zeros + null latest run", async () => {
   const rows = (await get("/overview").then((r) => r!.json())) as Summary[];
   const empty = rows.find((p) => p.measureId === "flu_vaccine")!;

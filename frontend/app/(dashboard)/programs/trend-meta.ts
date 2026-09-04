@@ -3,8 +3,7 @@
  * (quality_snapshots) carry a `period` (`YYYY-MM`); per-run points don't. Pure + testable so the
  * chart renderer stays a thin view.
  */
-import { displayRate, type TrendPoint } from "@/lib/measure-rate";
-import type { MeasureIdentity } from "@/lib/measure-identity";
+import { displayRate, type NotationSource, type TrendPoint } from "@/lib/measure-rate";
 
 export type { TrendPoint };
 
@@ -17,13 +16,13 @@ export interface TrendMeta {
 }
 
 /** `data` must already be filtered to points with totalEvaluated > 0 and sorted chronologically. */
-export function trendMeta(data: TrendPoint[], identity?: MeasureIdentity | null): TrendMeta {
+export function trendMeta(data: TrendPoint[], notation?: NotationSource | null): TrendMeta {
   const monthly = data.length > 0 && !!data[0]!.period;
   const chartData = data.map((t) => ({
     label: monthly && t.period
       ? new Date(`${t.period}-01T00:00:00Z`).toLocaleDateString("en", { month: "short", year: "2-digit", timeZone: "UTC" })
       : new Date(t.startedAt).toLocaleDateString("en", { month: "short", day: "numeric" }),
-    rate: identity ? displayRate(t, identity).value : Math.round(t.complianceRate * 10) / 10,
+    rate: notation ? displayRate(t, notation).value : Math.round(t.complianceRate * 10) / 10,
   }));
   const last = chartData.length ? chartData[chartData.length - 1]!.rate : 0;
   const prev = chartData.length > 1 ? chartData[chartData.length - 2]!.rate : last;

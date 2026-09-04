@@ -23,8 +23,8 @@ import {
   CartesianGrid, ResponsiveContainer,
 } from "recharts";
 import { ChartDataTable } from "@/components/chart-data-table";
-import { useMeasureIdentities, type MeasureIdentity } from "@/lib/measure-identity";
-import { displayRate } from "@/lib/measure-rate";
+import { useMeasureIdentities } from "@/lib/measure-identity";
+import { displayRate, type NotationSource } from "@/lib/measure-rate";
 import { trendMeta, type TrendPoint } from "./trend-meta";
 
 type ProgramSummary = {
@@ -42,6 +42,8 @@ type ProgramSummary = {
   missingData: number;
   excluded: number;
   complianceRate: number;
+  /** Which way the measure improves; sent by the overview API so the rate never waits on /api/measures. */
+  improvementNotation?: "increase" | "decrease";
   openCaseCount: number;
 };
 
@@ -262,9 +264,12 @@ export default function ProgramsPage() {
         {programs.map((program) => {
           const trend = trendByMeasure[program.measureId] ?? [];
           const drivers = driversByMeasure[program.measureId] ?? { bySite: [], byRole: [], byOutcomeReason: [] };
+          // The summary carries its own improvementNotation, so an inverse measure reads correctly
+          // before (or without) /api/measures. When the identity row is present it wins (both come from
+          // the backend's MEASURE_IDENTITY table, so they agree) and it also supplies the MIPS/CMS label.
           const programIdentity = identities[program.measureId];
-          const programRate = displayRate(program, programIdentity);
-          const numerator = programRate.lowerIsBetter ? program.overdue : program.compliant;
+          const notation = programIdentity ?? program;
+          const programRate = displayRate(program, notation);
           const noteId = `lower-note-${program.measureId}`;
           return (
             <div key={program.measureId} className="group relative rounded-md border border-neutral-200 bg-white p-4 transition hover:border-primary-400 hover:shadow-sm dark:border-neutral-800 dark:bg-neutral-900 dark:hover:border-primary-600">
@@ -292,7 +297,7 @@ export default function ProgramsPage() {
                   ) : null}
                   {program.denominator !== undefined ? (
                     <p className="text-xs text-neutral-500 dark:text-neutral-400">
-                      {fmtCount(numerator)} / {fmtCount(program.denominator)}
+                      {fmtCount(programRate.numerator)} / {fmtCount(programRate.denominator)}
                     </p>
                   ) : null}
                 </div>
@@ -325,7 +330,7 @@ export default function ProgramsPage() {
                   data={trend}
                   loading={detailsLoading}
                   caption={`${program.measureName} ${programRate.label.toLowerCase()} trend`}
-                  identity={programIdentity}
+                  identity={notation}
                 />
               </div>
 
@@ -482,7 +487,7 @@ function TrendChart({
   data: TrendPoint[];
   loading?: boolean;
   caption: string;
-  identity?: MeasureIdentity | null;
+  identity?: NotationSource | null;
 }) {
   const { theme } = useTheme();
   const sorted = [...(data ?? [])]

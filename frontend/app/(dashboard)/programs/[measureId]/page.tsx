@@ -20,8 +20,8 @@ import { SUBJECT } from "@/lib/terminology";
 import { niceDomain, chartTooltipStyle } from "@/lib/charts";
 import { useTheme } from "@/lib/useTheme";
 import { ChartDataTable } from "@/components/chart-data-table";
-import { useMeasureIdentities, type MeasureIdentity } from "@/lib/measure-identity";
-import { displayRate, type TrendPoint } from "@/lib/measure-rate";
+import { useMeasureIdentities } from "@/lib/measure-identity";
+import { displayRate, type DisplayRate, type NotationSource, type TrendPoint } from "@/lib/measure-rate";
 
 type ProgramSummary = {
   measureId: string;
@@ -38,6 +38,8 @@ type ProgramSummary = {
   missingData: number;
   excluded: number;
   complianceRate: number;
+  /** Which way the measure improves; sent by the programs API so the rate never waits on /api/measures. */
+  improvementNotation?: "increase" | "decrease";
   openCaseCount: number;
 };
 
@@ -169,9 +171,14 @@ export default function ProgramDetailPage() {
     return () => window.removeEventListener("ww:run-complete", onComplete);
   }, [load]);
 
-  const identity = identities[measureId];
+  // The program summary carries its own improvementNotation, so an inverse measure reads correctly
+  // before (or without) /api/measures. When the identity row is present it wins (both come from the
+  // backend's MEASURE_IDENTITY table, so they agree) and it also supplies the MIPS/CMS label.
+  const identity: NotationSource | null | undefined = identities[measureId] ?? program;
   const isDecrease = identity?.improvementNotation === "decrease";
-  const rate = program ? displayRate(program, identity) : { label: "Compliance", value: 0, lowerIsBetter: false };
+  const rate: DisplayRate = program
+    ? displayRate(program, identity)
+    : { label: "Compliance", value: 0, lowerIsBetter: false, numerator: 0, denominator: 0 };
   const prevCounts = trend.length > 1 ? trend[1] : program;
   const prevRate = prevCounts ? displayRate(prevCounts, identity) : null;
   const delta = program && prevRate ? rate.value - prevRate.value : 0;
@@ -338,8 +345,11 @@ export default function ProgramDetailPage() {
                     <thead className="text-left text-neutral-600 dark:text-neutral-400">
                       <tr>
                         <th scope="col" className="py-1 pr-3">Site</th>
-                        <th scope="col" className="py-1 pr-3">Current rate</th>
-                        <th scope="col" className="py-1 pr-3">Predicted 90d</th>
+                        {/* The outlook rates are compliant ÷ denominator from the backend. For a decrease
+                            measure "compliant" is the in-control bucket, so say that rather than showing a
+                            compliance-looking number under a "Poor control" headline. */}
+                        <th scope="col" className="py-1 pr-3">{isDecrease ? "In control now" : "Current rate"}</th>
+                        <th scope="col" className="py-1 pr-3">{isDecrease ? "In control in 90d" : "Predicted 90d"}</th>
                         <th scope="col" className="py-1 pr-3">Expiring</th>
                       </tr>
                     </thead>
@@ -533,7 +543,7 @@ function QualityOverTime({
 }: {
   measureId: string;
   measureName: string;
-  identity?: MeasureIdentity | null;
+  identity?: NotationSource | null;
 }) {
   const api = useApi();
   const { theme } = useTheme();
@@ -583,9 +593,13 @@ function QualityOverTime({
 
   const rateLabel = identity?.improvementNotation === "decrease" ? "Poor control" : "Compliance";
   const selected = snapshots.find((s) => s.period === asOf) ?? null;
+  // One view per snapshot: the displayed percentage AND the numerator/denominator it was made of, so
+  // an inverse measure never pairs "Poor control 15.6%" with the compliant numerator.
+  const viewOf = (s: QualitySnapshot) => displayRate({ ...s, complianceRate: rateOf(s) }, identity);
+  const selectedView = selected ? viewOf(selected) : null;
   const data = snapshots.map((s) => ({
     label: monthLabel(s.period),
-    rate: displayRate({ ...s, complianceRate: rateOf(s) }, identity).value,
+    rate: viewOf(s).value,
   }));
   const [lo, hi] = niceDomain(data.map((d) => d.rate));
 
@@ -626,17 +640,17 @@ function QualityOverTime({
         </div>
       </div>
 
-      {selected ? (
+      {selected && selectedView ? (
         <div className="mt-3 grid gap-3 sm:grid-cols-3">
           <div className="rounded border border-emerald-200 bg-emerald-50 p-3 dark:border-emerald-900 dark:bg-emerald-950/40">
             <p className="text-xs text-emerald-800 dark:text-emerald-300">{rateLabel} on {monthLabel(selected.period)}</p>
             <p className="text-2xl font-semibold text-emerald-900 dark:text-emerald-200">
-              {displayRate({ ...selected, complianceRate: rateOf(selected) }, identity).value.toFixed(1)}%
+              {selectedView.value.toFixed(1)}%
             </p>
           </div>
           <div className="rounded border border-neutral-200 bg-neutral-50 p-3 dark:border-neutral-800 dark:bg-neutral-800/40">
             <p className="text-xs text-neutral-600 dark:text-neutral-400">Numerator / Denominator</p>
-            <p className="text-2xl font-semibold text-neutral-900 dark:text-neutral-100">{fmtCount(selected.numerator)} / {fmtCount(selected.denominator)}</p>
+            <p className="text-2xl font-semibold text-neutral-900 dark:text-neutral-100">{fmtCount(selectedView.numerator)} / {fmtCount(selectedView.denominator)}</p>
           </div>
           <div className="rounded border border-neutral-200 bg-neutral-50 p-3 dark:border-neutral-800 dark:bg-neutral-800/40">
             <p className="text-xs text-neutral-600 dark:text-neutral-400">Excluded (not in denominator)</p>
@@ -671,12 +685,10 @@ function QualityOverTime({
           <ChartDataTable
             caption={`Monthly ${rateLabel.toLowerCase()} for ${measureName} (materialized snapshots)`}
             columns={["Month", rateLabel, "Numerator", "Denominator"]}
-            rows={snapshots.map((s) => [
-              monthLabel(s.period),
-              `${displayRate({ ...s, complianceRate: rateOf(s) }, identity).value.toFixed(1)}%`,
-              fmtCount(s.numerator),
-              fmtCount(s.denominator),
-            ])}
+            rows={snapshots.map((s) => {
+              const v = viewOf(s);
+              return [monthLabel(s.period), `${v.value.toFixed(1)}%`, fmtCount(v.numerator), fmtCount(v.denominator)];
+            })}
           />
         </div>
       ) : (
@@ -692,7 +704,7 @@ function QualityOverTime({
   );
 }
 
-function ComplianceTrendChart({ points, identity }: { points: TrendPoint[]; identity?: MeasureIdentity | null }) {
+function ComplianceTrendChart({ points, identity }: { points: TrendPoint[]; identity?: NotationSource | null }) {
   const { theme } = useTheme();
   if (!points.length) {
     return (

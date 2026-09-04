@@ -85,6 +85,35 @@ describe("ProgramsPage inverse measure rendering", () => {
     expect(screen.getAllByText(/lower is better/i).length).toBe(1);
   });
 
+  it("renders CMS122 as Poor control from the summary's own improvementNotation when /api/measures fails", async () => {
+    get.mockImplementation((url: string) => {
+      if (url === "/api/measures") return Promise.reject(new Error("identities unavailable"));
+      if (url.startsWith("/api/programs/overview")) {
+        return Promise.resolve([{ ...cms122Program, improvementNotation: "decrease" }, { ...cms125Program, improvementNotation: "increase" }]);
+      }
+      if (url.includes("/top-drivers")) return Promise.resolve({ bySite: [], byRole: [], byOutcomeReason: [] });
+      return Promise.resolve([]);
+    });
+    render(<ProgramsPage />);
+    expect(await screen.findByText("Poor control 15.6%")).toBeInTheDocument();
+    expect(screen.getByText("7 / 45")).toBeInTheDocument();
+    expect(screen.getByText("Compliance 79.2%")).toBeInTheDocument();
+    expect(screen.queryByText("Compliance 84.4%")).toBeNull();
+  });
+
+  it("renders CMS122 as Poor control when /api/measures resolves with a null identity row (falls back to the summary's notation)", async () => {
+    get.mockImplementation((url: string) => {
+      if (url === "/api/measures") {
+        return Promise.resolve([{ id: "cms122", name: "Diabetes: Glycemic Status Assessment", identity: null }]);
+      }
+      if (url.startsWith("/api/programs/overview")) return Promise.resolve([{ ...cms122Program, improvementNotation: "decrease" }]);
+      if (url.includes("/top-drivers")) return Promise.resolve({ bySite: [], byRole: [], byOutcomeReason: [] });
+      return Promise.resolve([]);
+    });
+    render(<ProgramsPage />);
+    expect(await screen.findByText("Poor control 15.6%")).toBeInTheDocument();
+  });
+
   it("computes Overall compliance KPI using denominator fallback (compliant 38 / excluded 3 / totalEvaluated 48 -> 84.4%)", async () => {
     const singleProg = {
       ...cms122Program,

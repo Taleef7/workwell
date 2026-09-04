@@ -55,10 +55,44 @@ export const NEXT_ACTION_LABELS: Record<string, string> = {
   varicella: "varicella immunization",
   hepatitis_b_vaccination_series: "hepatitis B vaccination",
   cms125: "mammogram",
-  cms122: "HbA1c test",
+  // CMS122v14 reads the most recent glycemic status ASSESSMENT — HbA1c or GMI (the vendored bundle
+  // carries the GMI LOINC) — so the noun must not narrow it to HbA1c.
+  cms122: "glycemic status assessment (HbA1c or GMI)",
+};
+
+/**
+ * Measures whose OVERDUE does not mean "nothing on file". cms122's numerator (the failure — see
+ * `OFFICIAL_MEASURE_SEMANTICS`) is most-recent glycemic status assessment > 9% OR no assessment in the
+ * period, so a patient with a documented poor-control result is OVERDUE too; telling staff to order a
+ * test that may already exist would be wrong, and this string is persisted on the case and rendered in
+ * CDS cards. `nextActionFor` has only the status and the measure, so the wording names both readings
+ * and states what closes the gap (the measure's own logic), never an order the data may not support.
+ */
+const OFFICIAL_MISSING_DATA =
+  "Not in this measure's initial population for the measurement period, or the evaluation could not " +
+  "complete. Check eligibility and the record before acting.";
+
+const NEXT_ACTION_OVERRIDES: Record<string, Partial<Record<string, string>>> = {
+  cms122: {
+    OVERDUE:
+      "Most recent glycemic status assessment (HbA1c or GMI) is above 9%, or none is on file for this " +
+      "measurement period. Review glycemic control; the gap closes when the most recent qualifying " +
+      "assessment in the period is at or below 9%.",
+    // On the official path MISSING_DATA means "not in the initial population" (or an evaluation
+    // failure — see official-executor-adapter.ts), not "no result could be found".
+    MISSING_DATA: OFFICIAL_MISSING_DATA,
+  },
+  cms125: {
+    MISSING_DATA: OFFICIAL_MISSING_DATA,
+  },
+  // cms2 / cms130 / cms165 take their overrides when MM-1c flips them: cms165's failure is
+  // "BP not < 140/90" and cms2's can be "screened positive, no follow-up plan" — neither is
+  // "nothing on file".
 };
 
 export function nextActionFor(outcomeStatus: string, measureId: string): string {
+  const override = NEXT_ACTION_OVERRIDES[measureId]?.[outcomeStatus];
+  if (override) return override;
   const label = NEXT_ACTION_LABELS[measureId] ?? "required screening";
   switch (outcomeStatus) {
     case "OVERDUE":
