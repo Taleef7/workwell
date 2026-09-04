@@ -9,7 +9,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { runProfileChild } from "../test-support/run-profile-child.ts";
 
-const assignableScript = `
+const assignableScriptFor = (tokenEmail: string) => `
   // runProfileChild parses the whole stdout, so swallow the worker boot log (not the JSON result).
   const workerLog = console.log;
   console.log = () => {};
@@ -21,7 +21,7 @@ const assignableScript = `
 
   const secret = "x".repeat(40);
   const jwt = createJwt({ secret });
-  const token = jwt.issueAccessToken("quality-lead@maui.workwell.dev", "ROLE_CASE_MANAGER");
+  const token = jwt.issueAccessToken(${JSON.stringify(tokenEmail)}, "ROLE_CASE_MANAGER");
   const db = await createSqliteD1(":memory:");
   const env = { DB: db, WORKWELL_AUTH_JWT_SECRET: secret };
   const originalLog = console.log;
@@ -40,15 +40,12 @@ const assignableScript = `
   console.log(JSON.stringify({ status: res.status, users }));
 `;
 
-test("GET /api/users/assignable on default returns CM/ADMIN demo users, email-sorted", () => {
-  const output = runProfileChild(undefined, assignableScript);
+test("GET /api/users/assignable on default returns the non-Maui CM/ADMIN demo users, email-sorted", () => {
+  const output = runProfileChild(undefined, assignableScriptFor("cm@workwell.dev"));
   assert.equal(output.status, 200);
   assert.deepEqual(output.users, [
-    { email: "admin@maui.workwell.dev", role: "ROLE_ADMIN" },
     { email: "admin@workwell.dev", role: "ROLE_ADMIN" },
     { email: "cm@workwell.dev", role: "ROLE_CASE_MANAGER" },
-    { email: "quality-lead@maui.workwell.dev", role: "ROLE_CASE_MANAGER" },
-    { email: "quality-staff@maui.workwell.dev", role: "ROLE_CASE_MANAGER" },
   ]);
   for (const user of output.users) {
     assert.ok(!/ROLE_(AUTHOR|APPROVER|VIEWER)/.test(user.role), "only CM/ADMIN roles are assignable");
@@ -56,7 +53,7 @@ test("GET /api/users/assignable on default returns CM/ADMIN demo users, email-so
 });
 
 test("GET /api/users/assignable on maui returns only maui CM/ADMIN users, email-sorted", () => {
-  const output = runProfileChild("maui", assignableScript);
+  const output = runProfileChild("maui", assignableScriptFor("quality-lead@maui.workwell.dev"));
   assert.equal(output.status, 200);
   assert.deepEqual(output.users, [
     { email: "admin@maui.workwell.dev", role: "ROLE_ADMIN" },

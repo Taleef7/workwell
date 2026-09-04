@@ -24,7 +24,7 @@ test("seeds the four Java demo roles plus the read-only viewer (public sandbox)"
   );
 });
 
-test("Maui sandbox accounts resolve case-insensitively with their expected roles", () => {
+test("Maui sandbox accounts resolve case-insensitively with their expected roles on the maui profile", () => {
   const accounts = [
     ["quality-lead@maui.workwell.dev", "ROLE_CASE_MANAGER"],
     ["quality-staff@maui.workwell.dev", "ROLE_CASE_MANAGER"],
@@ -33,21 +33,30 @@ test("Maui sandbox accounts resolve case-insensitively with their expected roles
   ] as const;
 
   for (const [email, role] of accounts) {
-    assert.equal(findDemoUser(email.toUpperCase())?.role, role);
+    assert.equal(findDemoUser(email.toUpperCase(), "maui")?.role, role);
   }
 });
 
-test("Maui sandbox accounts authenticate with the documented demo password", async () => {
-  const accounts = [
-    ["quality-lead@maui.workwell.dev", "ROLE_CASE_MANAGER"],
-    ["quality-staff@maui.workwell.dev", "ROLE_CASE_MANAGER"],
-    ["clinician@maui.workwell.dev", "ROLE_VIEWER"],
-    ["admin@maui.workwell.dev", "ROLE_ADMIN"],
-  ] as const;
+test("Maui sandbox accounts authenticate with the documented demo password on the maui profile", () => {
+  const output = runProfileChild("maui", `
+    import { DEMO_USERS, authenticate } from "./src/auth/demo-users.ts";
 
-  for (const [email, role] of accounts) {
-    assert.equal((await authenticate(email, "Workwell123!"))?.role, role);
+    const results = {};
+    for (const u of DEMO_USERS) {
+      const res = await authenticate(u.email, "Workwell123!");
+      results[u.email] = res?.role ?? null;
+    }
+    console.log(JSON.stringify(results));
+  `);
+  const mauiAccounts = DEMO_USERS.filter((u) => u.email.endsWith("@maui.workwell.dev"));
+  for (const u of DEMO_USERS) {
+    if (mauiAccounts.includes(u)) continue;
+    assert.equal(output[u.email], null, `${u.email} returns null on maui`);
   }
+  assert.equal(output["quality-lead@maui.workwell.dev"], "ROLE_CASE_MANAGER");
+  assert.equal(output["quality-staff@maui.workwell.dev"], "ROLE_CASE_MANAGER");
+  assert.equal(output["clinician@maui.workwell.dev"], "ROLE_VIEWER");
+  assert.equal(output["admin@maui.workwell.dev"], "ROLE_ADMIN");
 });
 
 test("findDemoUser is case-insensitive and trims", () => {
@@ -63,7 +72,7 @@ test("findDemoUser scopes by profileId in-process without child process", () => 
 
   assert.equal(findDemoUser("viewer@workwell.dev", "default")?.role, "ROLE_VIEWER");
   assert.equal(findDemoUser("admin@workwell.dev", "default")?.role, "ROLE_ADMIN");
-  assert.equal(findDemoUser("quality-lead@maui.workwell.dev", "default")?.role, "ROLE_CASE_MANAGER");
+  assert.equal(findDemoUser("quality-lead@maui.workwell.dev", "default"), null);
 });
 
 import { spawnSync } from "node:child_process";
@@ -109,7 +118,7 @@ test("profile scoping: on Maui profile only @maui.workwell.dev accounts authenti
   assert.equal(output.qualityLead, "quality-lead@maui.workwell.dev", "quality-lead@maui.workwell.dev succeeds on maui");
 });
 
-test("profile scoping: on default profile all nine demo accounts authenticate", () => {
+test("profile scoping: on default profile the non-Maui demo accounts authenticate", () => {
   const output = runProfileChild(undefined, `
     import { authenticate, DEMO_USERS } from "./src/auth/demo-users.ts";
 
@@ -120,7 +129,29 @@ test("profile scoping: on default profile all nine demo accounts authenticate", 
     }
     console.log(JSON.stringify(results));
   `);
-  for (const u of DEMO_USERS) {
+  for (const u of DEMO_USERS.filter((u) => !u.email.endsWith("@maui.workwell.dev"))) {
     assert.equal(output[u.email], u.role, `${u.email} authenticates on default`);
+  }
+  for (const u of DEMO_USERS.filter((u) => u.email.endsWith("@maui.workwell.dev"))) {
+    assert.equal(output[u.email], null, `${u.email} returns null on default`);
+  }
+});
+
+test("profile scoping: on default profiles @maui.workwell.dev accounts are refused", () => {
+  for (const instance of [undefined, "default", "twh"] as const) {
+    const output = runProfileChild(instance, `
+      import { authenticate, DEMO_USERS } from "./src/auth/demo-users.ts";
+
+      const results = {};
+      for (const u of DEMO_USERS) {
+        const res = await authenticate(u.email, "Workwell123!");
+        results[u.email] = res?.role ?? null;
+      }
+      console.log(JSON.stringify(results));
+    `);
+    for (const u of DEMO_USERS) {
+      const expected = u.email.endsWith("@maui.workwell.dev") ? null : u.role;
+      assert.equal(output[u.email], expected, `${u.email} on ${instance ?? "unset"} profile`);
+    }
   }
 });

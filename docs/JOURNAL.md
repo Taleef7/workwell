@@ -56,6 +56,16 @@ that distinguishes the states, and a mechanical test rejects any wording that as
 refusal. A wording change is idempotent by construction: `planCaseUpsert` never reads `next_action`, and
 both stores rewrite it on the `UNCHANGED` path without an audit event.
 
+## 2026-09-04 — the Maui account rule is symmetric (#520)
+
+`isDemoAccountRefusedOnProfile` refused only on the Maui profile, so the four `@maui.workwell.dev`
+accounts could log in to TWH and were offered as assignees there. The rule is now an exact two-way
+test: a Maui account is refused on every profile except `maui`, non-Maui accounts on `maui`. The
+per-request gate from #514 applies it to already-minted access tokens, and the refresh path to refresh
+tokens, with no further change. The child-process tests now carry positive controls (a non-Maui login
+returning 200 with a token, a non-Maui token reaching `/api/runs`) beside every refusal assertion, so a
+refusal cannot pass because login itself is broken; every demo account is asserted in both directions.
+
 ## 2026-09-03 — one compliance rate, computed the way CMS scores it; the inverse measure reads as inverse; next actions state the gap
 
 **Two numbers for one measure.** The Maui walkthrough found the measure detail page showing 79.2% as its

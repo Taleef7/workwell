@@ -875,10 +875,12 @@ point.
 
 Sandbox accounts (all use the documented demo password `Workwell123!`):
 
-Demo accounts are strictly profile-scoped: on the Maui profile (`WORKWELL_INSTANCE=maui`), only
-`@maui.workwell.dev` accounts authenticate; the check runs per request, so a token minted before the
-restriction is refused too. The standard `@workwell.dev` demo accounts (including the public `/sandbox`
-viewer) are refused.
+Demo accounts are strictly profile-scoped, in both directions (since 2026-09-04, #520): on the Maui
+profile (`WORKWELL_INSTANCE=maui`) only `@maui.workwell.dev` accounts authenticate and the standard
+`@workwell.dev` demo accounts (including the public `/sandbox` viewer) are refused; on every other
+profile (TWH, default) the `@maui.workwell.dev` accounts are refused and do not appear in
+`GET /api/users/assignable`. The check runs per request, so a token minted before the restriction is
+refused too, as is a refresh token.
 
 | Identifier | Role |
 |------------|------|
