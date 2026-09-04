@@ -45,5 +45,7 @@ describe("CompliancePage terminology (NEXT_PUBLIC_SUBJECT_TERM=patient)", () => 
     const table = await screen.findByRole("table");
     expect(within(table).getByText("No patients match these filters.")).toBeInTheDocument();
     expect(within(table).getByRole("columnheader", { name: "Patient" })).toBeInTheDocument();
+    expect(within(screen.getByLabelText("Panel")).getByRole("option", { name: "Quality measures" })).toBeInTheDocument();
+    expect(within(screen.getByLabelText("Panel")).queryByRole("option", { name: "Wellness & eCQM" })).not.toBeInTheDocument();
   });
 });

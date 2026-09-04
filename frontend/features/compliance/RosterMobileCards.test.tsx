@@ -1,6 +1,9 @@
 import React from "react";
 import { render, screen } from "@testing-library/react";
-import { describe, it, expect } from "vitest";
+import { beforeEach, describe, it, expect, vi } from "vitest";
+
+import { setSubject, subject } from "@/test/mocks/terminology";
+vi.mock("@/lib/terminology", () => ({ SUBJECT: subject }));
 import { RosterMobileCards } from "./RosterMobileCards";
 import type { RosterColumn, RosterRow } from "./types";
 
@@ -19,13 +22,21 @@ const rows: RosterRow[] = [
 ];
 
 describe("RosterMobileCards", () => {
+  beforeEach(() => setSubject("employee"));
+
   it("renders a card per employee with a name link and context subtext", () => {
     render(<RosterMobileCards columns={columns} rows={rows} loading={false} />);
     const link = screen.getByRole("link", { name: "Ada Lovelace" });
     expect(link).toHaveAttribute("href", "/employees/emp-006");
-    expect(screen.getByText(/Total Worker Health/)).toBeInTheDocument();
-    expect(screen.getByText(/HQ/)).toBeInTheDocument();
-    expect(screen.getByText(/Nurse/)).toBeInTheDocument();
+    expect(screen.getByText("Total Worker Health · HQ · Nurse")).toBeInTheDocument();
+  });
+
+  it("omits the role from the patient roster subtitle", () => {
+    setSubject("patient");
+    render(<RosterMobileCards columns={columns} rows={rows} loading={false} />);
+
+    expect(screen.getByText("Total Worker Health · HQ")).toBeInTheDocument();
+    expect(screen.queryByText("Total Worker Health · HQ · Nurse")).not.toBeInTheDocument();
   });
 
   it("renders a chip per column and falls back to NA for a missing cell", () => {

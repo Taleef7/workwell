@@ -2,14 +2,24 @@
  * Outreach template service (#108 admin write CRUD) — TS port of OutreachTemplateService.
  * list / preview (with placeholder render) / create / update over the OutreachTemplateStore,
  * plus the V007 demo-template seed. Backs Admin → Outreach Templates.
+ *
+ * On the patient profile (`DEPLOYMENT_PROFILE.subjectTerm === "patient"`) the templates are code
+ * (`PATIENT_TEMPLATES`): list and preview read them from there, and create/update are refused
+ * with `PATIENT_TEMPLATES_READ_ONLY` because there is nothing an update could persist.
  */
 import type { CaseEventStore } from "../stores/case-event-store.ts";
 import type {
   OutreachTemplateRecord,
   OutreachTemplateStore,
 } from "../stores/outreach-template-store.ts";
+import { PATIENT_TEMPLATES } from "../case/case-outreach.ts";
+import { DEPLOYMENT_PROFILE } from "../config/deployment-profile.ts";
 
 export class OutreachTemplateError extends Error {}
+
+/** Why a patient-profile template cannot be created or edited through the admin API (see updateTemplate). */
+export const PATIENT_TEMPLATES_READ_ONLY =
+  "Outreach templates are fixed on this deployment profile and cannot be created or edited here.";
 
 /** Audit sink for template writes (CLAUDE.md/AGENTS.md: every state change writes audit_event). */
 type TemplateAudit = Pick<CaseEventStore, "appendAudit">;
@@ -93,18 +103,37 @@ export interface TemplatePreview {
 
 /** OutreachTemplateService.render — sample placeholder values for the Admin preview. */
 function render(raw: string): string {
+  const measureName = DEPLOYMENT_PROFILE.subjectTerm === "patient" ? "Breast Cancer Screening" : "Annual Audiogram";
   return raw
-    .replace(/\{employee_name\}/g, "Jane Smith")
-    .replace(/\{measure_name\}/g, "Annual Audiogram")
-    .replace(/\{due_date\}/g, "2026-05-30")
-    .replace(/\{assignee_name\}/g, "Sarah Mitchell");
+    .replace(/\{employee_name\}|\{\{employeeName\}\}/g, "Jane Smith")
+    .replace(/\{measure_name\}|\{\{measureName\}\}/g, measureName)
+    .replace(/\{due_date\}|\{\{dueDate\}\}/g, "2026-05-30")
+    .replace(/\{assignee_name\}|\{\{assigneeName\}\}/g, "Sarah Mitchell");
 }
 
 export async function listTemplates(store: OutreachTemplateStore): Promise<OutreachTemplateRecord[]> {
+  if (DEPLOYMENT_PROFILE.subjectTerm === "patient") {
+    return Object.values(PATIENT_TEMPLATES).map((template) => ({
+      id: template.id!,
+      name: template.name,
+      subject: template.subject,
+      bodyText: template.bodyText,
+      type: "OUTREACH",
+      createdBy: "system",
+      createdAt: "",
+      updatedAt: "",
+      active: true,
+    }));
+  }
   return store.listActive();
 }
 
 export async function previewTemplate(store: OutreachTemplateStore, id: string): Promise<TemplatePreview> {
+  if (DEPLOYMENT_PROFILE.subjectTerm === "patient") {
+    const t = Object.values(PATIENT_TEMPLATES).find((tmpl) => tmpl.id === id);
+    if (!t) throw new OutreachTemplateError(`Outreach template not found: ${id}`);
+    return { id: t.id!, name: t.name, subject: render(t.subject), bodyText: render(t.bodyText) };
+  }
   const t = await store.getById(id);
   if (!t) throw new OutreachTemplateError(`Outreach template not found: ${id}`);
   return { id: t.id, name: t.name, subject: render(t.subject), bodyText: render(t.bodyText) };
@@ -126,6 +155,7 @@ export async function createTemplate(
   if (!req.name?.trim() || !req.subject?.trim() || !req.bodyText?.trim()) {
     throw new OutreachTemplateError("name, subject, and bodyText are required");
   }
+  if (DEPLOYMENT_PROFILE.subjectTerm === "patient") throw new OutreachTemplateError(PATIENT_TEMPLATES_READ_ONLY);
   const created = await store.create({
     id: crypto.randomUUID(),
     name: req.name.trim(),
@@ -155,6 +185,14 @@ export async function updateTemplate(
 ): Promise<OutreachTemplateRecord | null> {
   if (!req.name?.trim() || !req.subject?.trim() || !req.bodyText?.trim()) {
     throw new OutreachTemplateError("name, subject, and bodyText are required");
+  }
+  if (DEPLOYMENT_PROFILE.subjectTerm === "patient") {
+    // The patient-profile templates are code (`PATIENT_TEMPLATES`) and every list/preview/send reads
+    // them from there, so there is nothing an update could persist. Say so, rather than acknowledging
+    // (and auditing) a change that the next request would not show.
+    const t = Object.values(PATIENT_TEMPLATES).find((tmpl) => tmpl.id === id);
+    if (!t) return null;
+    throw new OutreachTemplateError(PATIENT_TEMPLATES_READ_ONLY);
   }
   const updated = await store.update(id, {
     name: req.name.trim(),

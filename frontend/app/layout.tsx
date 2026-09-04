@@ -3,9 +3,16 @@ import "./globals.css";
 import { geistSans, geistMono } from "./fonts";
 import { ClientProviders } from "@/components/client-providers";
 import { ThemeScript } from "@/components/theme-script";
+import { SUBJECT } from "@/lib/terminology";
+
+const COMPLIANCE_TERMS: Record<string, string> = {
+  "OSHA safety and clinical wellness measures": "occupational-health",
+  "Primary care clinical quality measures": "primary-care",
+};
+const complianceTerm = COMPLIANCE_TERMS[SUBJECT.domain] ?? SUBJECT.domain.toLowerCase();
 
 const APP_NAME = process.env.NEXT_PUBLIC_APP_NAME ?? "WorkWell Measure Studio";
-const APP_TAGLINE = process.env.NEXT_PUBLIC_APP_TAGLINE ?? "occupational-health compliance.";
+const APP_TAGLINE = process.env.NEXT_PUBLIC_APP_TAGLINE || `${complianceTerm} compliance.`;
 
 export const metadata: Metadata = {
   title: APP_NAME,

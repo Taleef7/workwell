@@ -34,6 +34,18 @@ carries two Studio *authoring* aids — `DRAFT_CQL_SYSTEM_PROMPT` (draft CQL fro
 `FIXTURE_SYSTEM_PROMPT` (test-fixture generation) — both drafts-for-human-review under the same §1
 rule; their templates live in the source rather than being duplicated here.
 
+> **Subject term.** The word "employee(s)" in the prompts below is the deployment's subject term
+> (`DEPLOYMENT_PROFILE.subjectTerm`, `backend-ts/src/config/deployment-profile.ts`): "employee" on the
+> default profile, "patient" on `WORKWELL_INSTANCE=maui`. All four system prompts are built from it —
+> `buildDraftSpecSystemPrompt`, `buildDraftCqlSystemPrompt`, `buildFixtureSystemPrompt` and
+> `buildExplainSystemPrompt` — and the default-profile strings are byte-identical to the text shown here.
+> On a patient deployment the prose says "clinical quality measures", "eligible population", "documented
+> exclusion" and "result" where the employee prose says "occupational health", "program", "exemption" and
+> "exam"; the JSON schema keys (`roleFilter`, `siteFilter`, `examDate`, `hasExemption`, `role`, `site`)
+> are contract on both profiles and do not change. The deterministic fallback explanation (§2.2) and the
+> fallback fixtures follow the same rule ("result date" / "exclusion status"; clinical role and site
+> values).
+
 ### 2.1 Draft Spec (`POST /api/measures/{id}/ai/draft-spec`)
 System prompt:
 ```text

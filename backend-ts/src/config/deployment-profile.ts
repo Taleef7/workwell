@@ -14,12 +14,23 @@ import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
 
 export type DeploymentProfileId = "default" | "maui";
+export type SubjectTerm = "employee" | "patient";
 type VisibleTenantSelection = "all" | readonly ["maui"];
 
 export interface DeploymentProfile {
   readonly id: DeploymentProfileId;
+  readonly subjectTerm: SubjectTerm;
   readonly visibleTenantIds: VisibleTenantSelection;
   readonly runnableMeasureIds: readonly string[];
+}
+
+export function subjectNoun(profile: Pick<DeploymentProfile, "subjectTerm">): {
+  singular: SubjectTerm;
+  plural: "employees" | "patients";
+} {
+  return profile.subjectTerm === "employee"
+    ? { singular: "employee", plural: "employees" }
+    : { singular: "patient", plural: "patients" };
 }
 
 export interface DeploymentDirectory extends SyntheticDirectoryView {
@@ -49,9 +60,9 @@ validateRunnableMeasureIds(DEFAULT_MEASURE_IDS);
 export function resolveDeploymentProfile(name: string | undefined): DeploymentProfile {
   const normalized = (name ?? "").trim().toLowerCase();
   if (normalized === "maui") {
-    return { id: "maui", visibleTenantIds: ["maui"], runnableMeasureIds: MAUI_MEASURE_IDS };
+    return { id: "maui", subjectTerm: "patient", visibleTenantIds: ["maui"], runnableMeasureIds: MAUI_MEASURE_IDS };
   }
-  return { id: "default", visibleTenantIds: "all", runnableMeasureIds: DEFAULT_MEASURE_IDS };
+  return { id: "default", subjectTerm: "employee", visibleTenantIds: "all", runnableMeasureIds: DEFAULT_MEASURE_IDS };
 }
 
 /** Pure composition over the fully attributed synthetic directory. */

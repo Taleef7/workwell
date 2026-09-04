@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { deriveCell } from "./roster-vocabulary.ts";
+import { runProfileChild } from "../test-support/run-profile-child.ts";
 
 // Evidence is the engine's `{ expressionResults: [{define, result}] }` shape.
 const ev = (results: Array<[string, unknown]>) => ({ expressionResults: results.map(([define, result]) => ({ define, result })) });
@@ -106,4 +107,22 @@ test("RECURRING measure with a documented refusal → DECLINED (class-agnostic r
     PERIOD,
   );
   assert.equal(cell.status, "DECLINED");
+});
+
+test("EXCLUDED method - default profile reads Contraindication / exemption on file", () => {
+  const output = runProfileChild(undefined, `
+    import { deriveCell } from "./src/compliance/roster-vocabulary.ts";
+    const cell = deriveCell("EXCLUDED", { expressionResults: [] }, "mmr", "2026-06-12");
+    console.log(JSON.stringify({ method: cell.method }));
+  `);
+  assert.equal(output.method, "Contraindication / exemption on file");
+});
+
+test("EXCLUDED method - Maui profile reads Documented exclusion on file", () => {
+  const output = runProfileChild("maui", `
+    import { deriveCell } from "./src/compliance/roster-vocabulary.ts";
+    const cell = deriveCell("EXCLUDED", { expressionResults: [] }, "mmr", "2026-06-12");
+    console.log(JSON.stringify({ method: cell.method }));
+  `);
+  assert.equal(output.method, "Documented exclusion on file");
 });

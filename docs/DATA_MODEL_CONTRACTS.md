@@ -151,5 +151,14 @@ Columns:
 
 Supports filters: `status`, `measureId`, `priority`, `assignee`, `site`, `caseIds`.
 
+> **Subject headers follow the deployment profile.** On a patient deployment
+> (`WORKWELL_INSTANCE=maui`, `DEPLOYMENT_PROFILE.subjectTerm === "patient"`) the two subject columns in
+> §6.2 and §6.3 are named `patientExternalId` and `patientName`, and in §6.2 `lastExamDate` and
+> `waiverStatus` are named `lastResultDate` and `exclusionStatus`; column order and every other header
+> are unchanged, and the default profile keeps the names above byte-for-byte
+> (`backend-ts/src/export/export-csv.ts`, `subjectHeaders`). The remaining occupational columns
+> (`role`, `roleEligible`, `siteEligible`) are still emitted on a patient deployment; dropping them is a
+> contract change deferred until the pilot's export needs are known.
+
 ### 6.4 `GET /api/audit-events/export?format=csv`
 Audit event export is append-only and includes event metadata + payload snapshot for timeline reconstruction.

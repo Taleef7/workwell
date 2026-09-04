@@ -6,6 +6,7 @@
  * Active-first list ordering until real authoring timestamps accrue.
  */
 import { MEASURE_CATALOG, type MeasureStatus } from "./measure-catalog.ts";
+import { HYPERTENSION_PRE_CHANGE_CQL } from "./hypertension-pre-change-cql.ts";
 import type { MeasureStore } from "../stores/measure-store.ts";
 import type { AppendAuditInput, CaseEventStore } from "../stores/case-event-store.ts";
 
@@ -22,6 +23,18 @@ const LEGACY_OFFICIAL_IDS = [
   { legacyId: "cms130v14", catalogId: "cms130" },
   { legacyId: "cms165v14", catalogId: "cms165" },
 ] as const;
+
+const HYPERTENSION_PRE_CHANGE = {
+  policyRef: "HEDIS BPC / JPMC Wellness Rewards",
+  spec: {
+    description: "Annual blood pressure screening for employees enrolled in the wellness program.",
+    eligibilityCriteria: { roleFilter: "All", siteFilter: "All Sites", programEnrollmentText: "Wellness Program" },
+    exclusions: [{ label: "Medical Exemption", criteriaText: "Documented medical exemption on file" }],
+    complianceWindow: "Annual",
+    requiredDataElements: ["Last BP screening date", "Program enrollment", "Exemption status"],
+    testFixtures: [],
+  },
+};
 
 const deepEqual = (left: unknown, right: unknown): boolean => {
   if (left === right) return true;
@@ -95,6 +108,50 @@ async function deprecateLegacyOfficialRows(store: MeasureStore, events: CaseEven
   }
 }
 
+async function repairHypertensionSeedRow(
+  store: MeasureStore,
+  cqlOf: (measureId: string) => string,
+  events: CaseEventStore,
+): Promise<void> {
+  const measureId = "hypertension";
+  const row = await store.getLatest(measureId);
+  if (!row) return;
+  const catalog = MEASURE_CATALOG.find((m) => m.id === measureId)!;
+  const fieldState = (value: unknown, oldValue: unknown, newValue: unknown): "old" | "new" | "edited" =>
+    deepEqual(value, oldValue) ? "old" : deepEqual(value, newValue) ? "new" : "edited";
+  const policyState = fieldState(row.policyRef, HYPERTENSION_PRE_CHANGE.policyRef, catalog.policyRef);
+  const specState = fieldState(row.spec, HYPERTENSION_PRE_CHANGE.spec, catalog.spec);
+  // The CQL is fingerprinted too (by normalized text rather than deepEqual): only the text the seed
+  // itself wrote (the pre-change or the current reconstruction) is ever replaced. Anything else was authored in Studio and is kept — a
+  // CQL-only edit is as much someone's work as a spec edit. Line endings and trailing whitespace are
+  // normalized because the stored text may have crossed a CRLF boundary or been re-saved from an
+  // editor that terminates the buffer with a newline; neither can turn authored text into the seed's.
+  const norm = (s: string) => s.replace(/\r\n/g, "\n").trimEnd();
+  const currentCql = cqlOf(measureId);
+  const cqlState = fieldState(norm(row.cqlText), norm(HYPERTENSION_PRE_CHANGE_CQL), norm(currentCql));
+  if (policyState === "edited" || specState === "edited" || cqlState === "edited") {
+    console.warn(
+      `[measure-seed] hypertension row does not match the pre-change seed fingerprint ` +
+        `(policyRef=${policyState}, spec=${specState}, cqlText=${cqlState}); not updated`,
+    );
+    return;
+  }
+  if (policyState === "new" && specState === "new" && cqlState === "new") return;
+  const audit: AppendAuditInput = {
+    eventType: "MEASURE_SEED_UPDATED",
+    entityType: "measure_version",
+    entityId: row.versionId,
+    actor: "system",
+    refRunId: null,
+    refCaseId: null,
+    refMeasureVersionId: row.versionId,
+    payload: { measureId, fields: ["policyRef", "spec", "cqlText"] },
+  };
+  if (!(await events.hasAuditEvent(audit))) await events.appendAudit(audit);
+  await store.updateSpec(measureId, catalog.spec, catalog.policyRef);
+  await store.updateCql(measureId, currentCql);
+}
+
 /**
  * Seeds the measure store from MEASURE_CATALOG. On a fresh (empty) store every catalog entry
  * is inserted. On an already-seeded store (e.g. the live stack) only catalog measures that are
@@ -103,6 +160,7 @@ async function deprecateLegacyOfficialRows(store: MeasureStore, events: CaseEven
  * `cqlOf` reconstructs CQL text for runnable measures.
  */
 export async function seedMeasureStore(store: MeasureStore, cqlOf: (measureId: string) => string, events: CaseEventStore): Promise<void> {
+  await repairHypertensionSeedRow(store, cqlOf, events);
   const empty = await store.isEmpty();
   for (const m of MEASURE_CATALOG) {
     // Fast path on a fresh store: seed everything. On an already-seeded store, back-fill ONLY

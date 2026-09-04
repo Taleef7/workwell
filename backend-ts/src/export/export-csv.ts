@@ -7,7 +7,7 @@ import type { OutcomeStore, OutcomeWithRun } from "../stores/outcome-store.ts";
 import type { CaseStore, CaseQuery } from "../stores/case-store.ts";
 import type { CaseEventStore } from "../stores/case-event-store.ts";
 import { toRunSummaryFromCounts } from "../run/read-models.ts";
-import { DEPLOYMENT_PROFILE, DIRECTORY, employeeById, profileSubjectMatcher } from "../config/deployment-profile.ts";
+import { DEPLOYMENT_PROFILE, DIRECTORY, employeeById, profileSubjectMatcher, subjectNoun } from "../config/deployment-profile.ts";
 import { directoryForRows } from "../engine/ingress/webchart/live-directory.ts";
 import { isWebChartConfigured, type DataSourceEnv } from "../engine/ingress/data-source.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
@@ -63,11 +63,15 @@ export async function runsCsv(runStore: RunStore, outcomeStore: OutcomeStore, li
   return toCsv(RUN_HEADERS, rows);
 }
 
+const subjectHeaders = (term: "employee" | "patient") => [`${term}ExternalId`, `${term}Name`] as const;
+const outcomeDateHeader = DEPLOYMENT_PROFILE.subjectTerm === "patient" ? "lastResultDate" : "lastExamDate";
+const outcomeExclusionHeader = DEPLOYMENT_PROFILE.subjectTerm === "patient" ? "exclusionStatus" : "waiverStatus";
+
 // ---- outcomes (DATA_MODEL §6.2) ----------------------------------------------
 const OUTCOME_HEADERS = [
-  "outcomeId", "runId", "employeeExternalId", "employeeName", "role", "site", "measureName", "measureVersion",
-  "evaluationPeriod", "status", "lastExamDate", "complianceWindowDays", "daysOverdue", "roleEligible", "siteEligible",
-  "waiverStatus", "evaluatedAt",
+  "outcomeId", "runId", ...subjectHeaders(DEPLOYMENT_PROFILE.subjectTerm), "role", "site", "measureName", "measureVersion",
+  "evaluationPeriod", "status", outcomeDateHeader, "complianceWindowDays", "daysOverdue", "roleEligible", "siteEligible",
+  outcomeExclusionHeader, "evaluatedAt",
 ] as const;
 
 interface ExprResult {
@@ -208,7 +212,7 @@ export function outcomesCsvStream(
 
 // ---- cases (DATA_MODEL §6.3) -------------------------------------------------
 const CASE_HEADERS = [
-  "caseId", "employeeExternalId", "employeeName", "role", "site", "measureName", "measureVersion", "evaluationPeriod",
+  "caseId", ...subjectHeaders(DEPLOYMENT_PROFILE.subjectTerm), "role", "site", "measureName", "measureVersion", "evaluationPeriod",
   "status", "priority", "assignee", "currentOutcomeStatus", "nextAction", "lastRunId", "createdAt", "updatedAt",
   "closedAt", "latestOutreachDeliveryStatus",
 ] as const;
@@ -257,7 +261,7 @@ export async function casesCsv(
 }
 
 // ---- audit (Java AuditExportService header) ---------------------------------
-const AUDIT_HEADERS = ["timestamp", "eventType", "caseId", "runId", "measureName", "employeeId", "actor", "detail"] as const;
+const AUDIT_HEADERS = ["timestamp", "eventType", "caseId", "runId", "measureName", `${subjectNoun(DEPLOYMENT_PROFILE).singular}Id`, "actor", "detail"] as const;
 
 type AuditEvent = Awaited<ReturnType<CaseEventStore["listAuditEvents"]>>[number];
 

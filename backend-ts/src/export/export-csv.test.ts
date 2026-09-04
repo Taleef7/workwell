@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { runProfileChild } from "../test-support/run-profile-child.ts";
 
 const testScript = `
-  import { outcomesCsv, outcomesCsvStream, casesCsv } from "./src/export/export-csv.ts";
+  import { outcomesCsv, outcomesCsvStream, casesCsv, auditCsv } from "./src/export/export-csv.ts";
 
   const fakeRun = { id: "run-1", scopeType: "MEASURE", startedAt: "2026-07-17T00:00:00.000Z" };
   const outcomes = [
@@ -148,10 +148,25 @@ const testScript = `
 
   const csvCases = await casesCsv(fakeCaseStore, fakeEventStore, {}, webChartEnv);
 
+  const fakeAuditEventStore = {
+    listAuditEvents: async () => [{
+      occurredAt: "2026-07-17T00:00:00.000Z",
+      eventType: "CASE_ASSIGNED",
+      refCaseId: "case-1",
+      refRunId: "run-1",
+      refMeasureVersionId: null,
+      actor: "tester",
+      payload: {},
+    }],
+  };
+  const fakeAuditCaseStore = { getCase: async () => cases[0] };
+  const csvAudit = await auditCsv(fakeAuditEventStore, fakeAuditCaseStore);
+
   console.log(JSON.stringify({
     csvOutcomes,
     streamedOutcomes,
     csvCases,
+    csvAudit,
   }));
 `;
 
@@ -177,11 +192,38 @@ test("scoped profile (Maui) — outcomes and cases CSV rows exclude foreign and 
   assert.ok(!casesText.includes("emp-001"), "foreign TWH subject emp-001 must be excluded from cases CSV on Maui");
 });
 
+test("scoped profile (Maui) — outcomes and cases CSV headers use patient subject terminology", () => {
+  const output = runProfileChild("maui", testScript);
+  const outcomesHeader = (output.csvOutcomes as string).split("\r\n")[0]!;
+  const casesHeader = (output.csvCases as string).split("\r\n")[0]!;
+
+  assert.ok(outcomesHeader.includes("patientExternalId,patientName"), "outcomes header must use patient terminology on Maui");
+  assert.ok(!outcomesHeader.includes("employeeExternalId"), "outcomes header must not carry employee terminology on Maui");
+  assert.ok(outcomesHeader.includes("lastResultDate"), "Maui outcomes header must use result terminology");
+  assert.ok(outcomesHeader.includes("exclusionStatus"), "Maui outcomes header must use exclusion terminology");
+  assert.ok(!outcomesHeader.includes("lastExamDate"), "Maui outcomes header must not carry exam terminology");
+  assert.ok(!outcomesHeader.includes("waiverStatus"), "Maui outcomes header must not carry waiver terminology");
+  assert.match(casesHeader, /^caseId,patientExternalId,patientName,role,site,/u, "cases header must use patient terminology on Maui");
+  assert.ok(!casesHeader.includes("employeeExternalId"), "cases header must not carry employee terminology on Maui");
+});
+
+test("scoped profile (Maui) — audit CSV header uses patient subject terminology", () => {
+  const output = runProfileChild("maui", testScript);
+  const auditHeader = (output.csvAudit as string).split("\r\n")[0]!;
+
+  assert.match(auditHeader, /,patientId,actor,/u, "audit header must use patient terminology on Maui");
+  assert.ok(!auditHeader.includes("employeeId"), "audit header must not carry employee terminology on Maui");
+});
+
 test("default profile — non-catalog and unresolvable subjects are preserved in outcomes and cases CSV", () => {
   const output = runProfileChild(undefined, testScript);
   const outcomesText = output.csvOutcomes as string;
   const streamedText = output.streamedOutcomes as string;
   const casesText = output.csvCases as string;
+  const outcomesHeader = outcomesText.split("\r\n")[0]!;
+  assert.ok(outcomesHeader.includes("employeeExternalId,employeeName"), "default outcomes header keeps employee terminology");
+  assert.ok(outcomesHeader.includes("lastExamDate"), "default outcomes header keeps exam terminology");
+  assert.ok(outcomesHeader.includes("waiverStatus"), "default outcomes header keeps waiver terminology");
 
   assert.ok(outcomesText.includes("pat-001"), "pat-001 present on default profile");
   assert.ok(outcomesText.includes("cypress-mrn-foreign"), "unresolvable subject cypress-mrn-foreign must be included on default profile");
@@ -194,6 +236,14 @@ test("default profile — non-catalog and unresolvable subjects are preserved in
   assert.ok(casesText.includes("pat-001"), "pat-001 present in cases on default profile");
   assert.ok(casesText.includes("cypress-mrn-foreign"), "unresolvable subject present in cases on default profile");
   assert.ok(casesText.includes("emp-001"), "emp-001 present in cases on default profile");
+});
+
+test("default profile — audit CSV header keeps employee subject terminology", () => {
+  const output = runProfileChild(undefined, testScript);
+  const auditHeader = (output.csvAudit as string).split("\r\n")[0]!;
+
+  assert.match(auditHeader, /,employeeId,actor,/u, "default audit header keeps employee terminology");
+  assert.ok(!auditHeader.includes("patientId"), "default audit header must not use patient terminology");
 });
 
 test("default profile — WebChart-configured output keeps the pre-change wc lookup", () => {

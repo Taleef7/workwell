@@ -22,25 +22,31 @@
  * is stated in the machine-readable contract rather than only in prose.
  */
 import type { CdsService } from "./types.ts";
+import { DEPLOYMENT_PROFILE, subjectNoun } from "../config/deployment-profile.ts";
 
 export const PATIENT_VIEW_SERVICE_ID = "workwell-compliance-patient-view";
 
-export const CDS_SERVICES: readonly CdsService[] = [
-  {
+function serviceCatalog(): readonly CdsService[] {
+  const patient = subjectNoun(DEPLOYMENT_PROFILE).singular === "patient";
+  return [{
     hook: "patient-view",
     id: PATIENT_VIEW_SERVICE_ID,
-    title: "WorkWell occupational-health compliance gaps",
-    description:
-      "Open measure gaps for this patient — occupational surveillance (OSHA), immunization and quality " +
-      "measures — computed by CQL and read from the most recent completed WorkWell run.",
+    title: patient ? "WorkWell clinical quality measure gaps" : "WorkWell occupational-health compliance gaps",
+    description: patient
+      ? "Open clinical quality measure gaps — computed by CQL and read from the most recent completed " +
+        "WorkWell run."
+      : "Open measure gaps for this patient — occupational surveillance (OSHA), immunization and quality " +
+        "measures — computed by CQL and read from the most recent completed WorkWell run.",
     usageRequirements:
       "Returns the most recent FINALIZED WorkWell evaluation for the patient; it does not evaluate data " +
       "supplied on the request, so `prefetch`, `fhirServer` and `fhirAuthorization` are accepted and " +
       "ignored. Requires a WorkWell bearer token (this service does not implement the CDS Hooks " +
       "signed-JWT profile). A patient with no completed evaluation returns an informational card saying " +
       "so, never an empty card list.",
-  },
-];
+  }];
+}
+
+export const CDS_SERVICES = serviceCatalog();
 
 export function serviceById(id: string): CdsService | undefined {
   return CDS_SERVICES.find((s) => s.id === id);
