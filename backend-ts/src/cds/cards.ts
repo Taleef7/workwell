@@ -25,12 +25,16 @@ import { proposeOrders } from "../order/order-proposal.ts";
 import { dedupeKeyFor, toServiceRequest, type ProposedOrder } from "../order/proposed-order.ts";
 import { orderForMeasure } from "../order/order-catalog.ts";
 import type { StandingOrderProvider } from "../order/standing-order-provider.ts";
+import { DEPLOYMENT_PROFILE, subjectNoun } from "../config/deployment-profile.ts";
 import type { CdsCard, CdsSuggestion } from "./types.ts";
 
 /** The spec caps `summary` at 140 characters; a long measure name must not silently break conformance. */
 const SUMMARY_MAX = 140;
 
 const SOURCE_LABEL = "WorkWell Measure Studio";
+
+/** Occupational deployments report a waiver; clinical-quality deployments report an exclusion. */
+const WAIVER_FACT_LABEL = subjectNoun(DEPLOYMENT_PROFILE).singular === "patient" ? "Exclusion" : "Waiver";
 
 /** One finalized outcome, newest for its measure. */
 export interface CardInput {
@@ -179,7 +183,7 @@ function detailFor(row: CardInput, method: string): string {
   if (wf.last_exam_date) facts.push(`Last completed: ${wf.last_exam_date}`);
   if (wf.days_overdue != null && wf.days_overdue > 0) facts.push(`Days overdue: ${wf.days_overdue}`);
   facts.push(`Compliance window: ${wf.compliance_window_days} days`);
-  if (wf.waiver_status !== "none") facts.push(`Waiver: ${wf.waiver_status}`);
+  if (wf.waiver_status !== "none") facts.push(`${WAIVER_FACT_LABEL}: ${wf.waiver_status}`);
   lines.push(facts.map((f) => `- ${f}`).join("\n"));
   lines.push(`_Computed by CQL and evaluated ${row.evaluatedAt} (WorkWell run ${row.runId})._`);
   return lines.join("\n\n");

@@ -480,6 +480,13 @@ evaluable, and which measures are runnable. Unset, `default`, and `twh` reproduc
 behavior; `maui` exposes the 48-patient Maui directory and currently allows `cms122`, `cms125`, and
 `hypertension` to run. The measure catalog and database seeding remain shared across profiles.
 
+The profile also carries the backend **subject term** (`subjectTerm`: `employee` on the default profile,
+`patient` on `maui`). It drives backend-rendered text — the AI prompts and deterministic fallback
+(`docs/AI_GUARDRAILS.md` §2), the outreach templates (`backend-ts/src/case/case-outreach.ts`, which use
+clinic wording and omit the due-date line on a patient deployment), and the two subject columns of the
+outcomes/cases CSV exports (`docs/DATA_MODEL_CONTRACTS.md` §6). It is the backend counterpart of the
+frontend's build-time `NEXT_PUBLIC_SUBJECT_TERM`; the two are set together by the Maui deploy workflow.
+
 Total catalog: **63 measures**, 14 runnable (see `docs/MEASURES.md` for the full breakdown).
 
 #### One-time segment repair after adding a tenant (E13 PR-1, owner-gated)

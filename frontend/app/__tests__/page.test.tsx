@@ -1,6 +1,15 @@
 import React from "react";
 import { render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { subject as helperSubject, setSubject as setHelperSubject } from "@/test/mocks/terminology";
+const terminologyMock = vi.hoisted(() => ({ subject: {} as Record<string, string> }));
+vi.mock("@/lib/terminology", () => ({ SUBJECT: terminologyMock.subject }));
+
+function applySubject(term: "employee" | "patient") {
+  setHelperSubject(term);
+  Object.assign(terminologyMock.subject, helperSubject);
+}
+applySubject("employee");
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -41,5 +50,44 @@ describe("HomePage", () => {
     const signIn = screen.getByRole("link", { name: /sign in/i });
     expect(signIn).toBeTruthy();
     expect(signIn.className).toContain("bg-primary-600");
+  });
+});
+
+describe("HomePage terminology fallbacks", () => {
+  it("keeps the employee tagline and description when env copy is unset", async () => {
+    vi.stubEnv("NEXT_PUBLIC_APP_TAGLINE", "");
+    vi.stubEnv("NEXT_PUBLIC_APP_DESCRIPTION", "");
+    vi.stubEnv("NEXT_PUBLIC_PUBLIC_DEMO", "off");
+    applySubject("employee");
+    vi.resetModules();
+    const { default: HomePage } = await import("../page");
+
+    render(<HomePage />);
+
+    expect(screen.getByText("A clean operating surface for occupational-health compliance.")).toBeTruthy();
+    expect(
+      screen.getByText((content, element) =>
+        (element?.tagName === "P" && content.includes("Occupational safety and clinical wellness measures") && content.includes("one reviewable dashboard")) ?? false,
+      ),
+    ).toBeTruthy();
+  });
+
+  it("derives patient fallback copy from SUBJECT.domain instead of occupational wording", async () => {
+    vi.stubEnv("NEXT_PUBLIC_APP_TAGLINE", "");
+    vi.stubEnv("NEXT_PUBLIC_APP_DESCRIPTION", "");
+    vi.stubEnv("NEXT_PUBLIC_PUBLIC_DEMO", "off");
+    applySubject("patient");
+    vi.resetModules();
+    const { default: HomePage } = await import("../page");
+
+    render(<HomePage />);
+
+    expect(screen.getByText("A clean operating surface for primary-care compliance.")).toBeTruthy();
+    expect(
+      screen.getByText(
+        "Primary care clinical quality measures, complete case management, and a full audit trail — one reviewable dashboard.",
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByText(/occupational/i)).toBeNull();
   });
 });

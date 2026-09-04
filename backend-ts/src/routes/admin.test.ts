@@ -13,6 +13,7 @@ import { RUN_STORE_FLOOR_DDL } from "../stores/sqlite/schema.ts";
 import { SqliteRunStore } from "../stores/sqlite/run-store-sqlite.ts";
 import { SqliteCaseStore } from "../stores/sqlite/case-store-sqlite.ts";
 import { SqliteCaseEventStore } from "../stores/sqlite/case-event-store-sqlite.ts";
+import { runProfileChild } from "../test-support/run-profile-child.ts";
 import { handleAdmin } from "./admin.ts";
 
 const dbPath = join(tmpdir(), `workwell-admin-${crypto.randomUUID()}.sqlite`);
@@ -91,6 +92,79 @@ test("static reads: terminology + data mappings + outreach templates + preview",
   const preview = (await body("/api/admin/outreach-templates/11111111-0000-0000-0000-000000000001/preview")) as { subject: string };
   assert.match(preview.subject, /Overdue Audiogram/);
   assert.equal((await get("/api/admin/outreach-templates/nope/preview"))?.status, 404);
+});
+
+test("Maui outreach-template admin list returns only patient templates", () => {
+  const templates = runProfileChild("maui", `
+    import { createSqliteD1 } from "@mieweb/cloud-local";
+    import { RUN_STORE_FLOOR_DDL } from "./src/stores/sqlite/schema.ts";
+    import { handleAdmin } from "./src/routes/admin.ts";
+    const db = await createSqliteD1(":memory:");
+    await db.exec(RUN_STORE_FLOOR_DDL.replace(/\\n/g, " "));
+    const response = await handleAdmin(new Request("http://x/api/admin/outreach-templates"), { DB: db }, "admin@pilot.test");
+    console.log(JSON.stringify({ list: await response.json() }));
+  `);
+  const list = templates.list as Array<{ id: string; name: string; subject: string; bodyText: string; type: string; active: boolean }>;
+  assert.deepEqual(list.map((template) => template.id).sort(), ["patient-general", "patient-missing"]);
+  assert.ok(list.every((template) => template.type === "OUTREACH" && template.active));
+  assert.doesNotMatch(JSON.stringify(list), /occupational|compliance|audiogram/i);
+});
+
+test("Maui outreach-template preview and update are profile-aware (patient preview works, employee id 404)", () => {
+  const output = runProfileChild("maui", `
+    import { createSqliteD1 } from "@mieweb/cloud-local";
+    import { RUN_STORE_FLOOR_DDL } from "./src/stores/sqlite/schema.ts";
+    import { handleAdmin } from "./src/routes/admin.ts";
+    const db = await createSqliteD1(":memory:");
+    await db.exec(RUN_STORE_FLOOR_DDL.replace(/\\n/g, " "));
+
+    const previewPatient = await handleAdmin(new Request("http://x/api/admin/outreach-templates/patient-general/preview"), { DB: db }, "admin@pilot.test");
+    const previewEmployee = await handleAdmin(new Request("http://x/api/admin/outreach-templates/11111111-0000-0000-0000-000000000001/preview"), { DB: db }, "admin@pilot.test");
+    const patientBody = previewPatient?.status === 200 ? await previewPatient.json() : null;
+
+    const updatePatient = await handleAdmin(
+      new Request("http://x/api/admin/outreach-templates/patient-general", {
+        method: "PUT",
+        body: JSON.stringify({ name: "Updated", subject: "Sub", bodyText: "Body", active: true }),
+      }),
+      { DB: db },
+      "admin@pilot.test",
+    );
+    const updateEmployee = await handleAdmin(
+      new Request("http://x/api/admin/outreach-templates/11111111-0000-0000-0000-000000000001", {
+        method: "PUT",
+        body: JSON.stringify({ name: "Updated", subject: "Sub", bodyText: "Body", active: true }),
+      }),
+      { DB: db },
+      "admin@pilot.test",
+    );
+
+    const updatePatientBody = updatePatient?.status === 400 ? await updatePatient.json() : null;
+    const listAfter = await (await handleAdmin(new Request("http://x/api/admin/outreach-templates"), { DB: db }, "admin@pilot.test")).json();
+
+    console.log(JSON.stringify({
+      patientPreviewStatus: previewPatient?.status,
+      employeePreviewStatus: previewEmployee?.status,
+      patientPreviewBody: patientBody,
+      updatePatientStatus: updatePatient?.status,
+      updatePatientBody,
+      updateEmployeeStatus: updateEmployee?.status,
+      listAfter,
+    }));
+  `);
+
+  assert.equal(output.patientPreviewStatus, 200);
+  assert.equal(output.employeePreviewStatus, 404);
+  const patientBody = output.patientPreviewBody as { id: string; subject: string; bodyText: string };
+  assert.equal(patientBody.id, "patient-general");
+  assert.match(patientBody.subject, /Breast Cancer Screening/);
+  // The patient templates are code: an update has nothing to persist, so it is refused (not
+  // acknowledged and then forgotten on the next list) and the list is unchanged.
+  assert.equal(output.updatePatientStatus, 400);
+  assert.match((output.updatePatientBody as { message: string }).message, /fixed on this deployment profile/);
+  assert.equal(output.updateEmployeeStatus, 404);
+  const listAfter = output.listAfter as Array<{ id: string; name: string }>;
+  assert.ok(listAfter.every((t) => t.name !== "Updated"), "the refused update did not change the list");
 });
 
 test("deferred subsystems return their empty shape (dashboard renders)", async () => {

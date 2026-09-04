@@ -160,7 +160,7 @@ export function openApiDocument(): OpenApiDocument {
               name: "subjectId",
               in: "path",
               required: true,
-              description: "The employee/patient external id. Percent-encode it — WebChart ids contain `|`.",
+              description: "The subject's external id. Percent-encode it — WebChart ids contain `|`.",
               schema: str("Subject external id", "emp-006"),
             },
             {

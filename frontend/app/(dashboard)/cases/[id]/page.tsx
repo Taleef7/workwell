@@ -17,10 +17,27 @@ import { CqlExpressionResults, CqlWhyFlagged } from "@/features/evidence/CqlEvid
 import { EvidenceDropzone } from "@/features/evidence/EvidenceDropzone";
 import { DeliveryChip } from "@/features/outreach/DeliveryChip";
 import { useMeasureIdentities } from "@/lib/measure-identity";
+import { formatEvaluationPeriod } from "@/lib/format";
 
 // Type-ahead suggestions for the assignee field — the operational accounts that can own a case.
 // The input still accepts any free-text handle; this only offers quick picks.
 const ASSIGNEE_SUGGESTIONS = ["cm@workwell.dev", "admin@workwell.dev"] as const;
+
+const EMPLOYEE_APPOINTMENT_TYPE_OPTIONS = [
+  { value: "Audiogram", label: "Audiogram" },
+  { value: "TB Test", label: "TB Test" },
+  { value: "Annual Physical", label: "Annual Physical" },
+  { value: "Flu Vaccine", label: "Flu Vaccine" },
+  { value: "Other", label: "Other" },
+];
+
+const PATIENT_APPOINTMENT_TYPE_OPTIONS = [
+  { value: "Office visit", label: "Office visit" },
+  { value: "Telehealth visit", label: "Telehealth visit" },
+  { value: "Lab draw", label: "Lab draw" },
+  { value: "Imaging", label: "Imaging" },
+  { value: "Other", label: "Other" },
+];
 
 type AuditEvent = {
   eventType: string;
@@ -103,7 +120,8 @@ type OutreachPreview = {
   bodyText: string;
   employeeName: string;
   measureName: string;
-  dueDate: string;
+  /** Absent on a patient deployment — the clinic message carries no due date (case-outreach.ts). */
+  dueDate?: string;
 };
 
 type ScheduledAppointment = {
@@ -167,7 +185,8 @@ export default function CaseDetailPage() {
   const [resolveModalOpen, setResolveModalOpen] = useState(false);
   const [appointments, setAppointments] = useState<ScheduledAppointment[]>([]);
   const [appointmentModalOpen, setAppointmentModalOpen] = useState(false);
-  const [appointmentType, setAppointmentType] = useState("Audiogram");
+  const isPatientTerm = SUBJECT.singular === "patient";
+  const [appointmentType, setAppointmentType] = useState(isPatientTerm ? "Office visit" : "Audiogram");
   const [appointmentDateTime, setAppointmentDateTime] = useState("");
   const [appointmentLocation, setAppointmentLocation] = useState("");
   const [appointmentNotes, setAppointmentNotes] = useState("");
@@ -198,14 +217,7 @@ export default function CaseDetailPage() {
     ],
     [],
   );
-  const appointmentTypeOptions = useMemo(
-    () =>
-      ["Audiogram", "TB Test", "Annual Physical", "Flu Vaccine", "Other"].map((t) => ({
-        value: t,
-        label: t,
-      })),
-    [],
-  );
+  const appointmentTypeOptions = isPatientTerm ? PATIENT_APPOINTMENT_TYPE_OPTIONS : EMPLOYEE_APPOINTMENT_TYPE_OPTIONS;
 
   const loadCase = useCallback(async () => {
     try {
@@ -470,7 +482,7 @@ export default function CaseDetailPage() {
             ← Back to cases
           </Link>
           <h2 className="mt-2 text-3xl font-semibold">Case detail</h2>
-          <p className="mt-2 text-neutral-600 dark:text-neutral-400">Structured Why Flagged evidence for the selected case and its waiver context.</p>
+          <p className="mt-2 text-neutral-600 dark:text-neutral-400">Structured Why Flagged evidence for the selected case and its {isPatientTerm ? "exclusion" : "waiver"} context.</p>
         </div>
         <div className="flex flex-col items-end gap-2">
           <p className="text-sm text-neutral-500 dark:text-neutral-400">
@@ -506,7 +518,9 @@ export default function CaseDetailPage() {
                   {labelFor(OUTCOME_LABELS, caseDetail.currentOutcomeStatus)}
                 </span>
               </div>
-              <p className="text-xs text-neutral-600 dark:text-neutral-400">Period: {caseDetail.evaluationPeriod}</p>
+              <p className="text-xs text-neutral-600 dark:text-neutral-400">
+                {isPatientTerm ? `Measurement year: ${formatEvaluationPeriod(caseDetail.evaluationPeriod)}` : `Period: ${caseDetail.evaluationPeriod}`}
+              </p>
               <p className="text-xs text-neutral-700 dark:text-neutral-300">{caseDetail.nextAction}</p>
               <Link href={`/employees/${caseDetail.employeeId}`} className="text-xs font-semibold text-primary-700 dark:text-primary-400 hover:underline">
                 {`Open ${SUBJECT.Singular} Profile`}
@@ -671,7 +685,10 @@ export default function CaseDetailPage() {
                     </span>
                   }
                 />
-                <Info label="Evaluation period" value={caseDetail.evaluationPeriod} />
+                <Info
+                  label={isPatientTerm ? "Measurement year" : "Evaluation period"}
+                  value={isPatientTerm ? formatEvaluationPeriod(caseDetail.evaluationPeriod) : caseDetail.evaluationPeriod}
+                />
                 <Info label="Outcome summary" value={caseDetail.outcomeSummary} />
                 <Info
                   label="Last run"
@@ -719,9 +736,9 @@ export default function CaseDetailPage() {
                 ) : null}
                 {caseStatus === "EXCLUDED" ? (
                   <div className={`mt-4 rounded-2xl border p-4 ${caseDetail.waiverExpired ? "border-rose-200 bg-rose-50 dark:border-rose-900 dark:bg-rose-950/30" : "border-indigo-200 bg-indigo-50 dark:border-indigo-900 dark:bg-indigo-950/30"}`}>
-                    <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-700 dark:text-indigo-300">Waiver status</p>
+                    <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-700 dark:text-indigo-300">{isPatientTerm ? "Exclusion status" : "Waiver status"}</p>
                     <p className="mt-2 text-sm font-semibold text-neutral-900 dark:text-neutral-100">
-                      {caseDetail.exclusionReason ?? "Excluded by documented waiver or exemption."}
+                      {caseDetail.exclusionReason ?? (isPatientTerm ? "Excluded by a documented exclusion." : "Excluded by documented waiver or exemption.")}
                     </p>
                     <p className="mt-1 text-sm text-neutral-700 dark:text-neutral-300">
                       {caseDetail.waiverExpiresAt
@@ -729,7 +746,9 @@ export default function CaseDetailPage() {
                         : "No expiry on file."}
                     </p>
                     <p className={`mt-2 text-sm font-semibold ${caseDetail.waiverExpired ? "text-rose-700 dark:text-rose-300" : "text-indigo-800 dark:text-indigo-300"}`}>
-                      {caseDetail.waiverExpired ? "Waiver Expired — Rerun Recommended" : "Active waiver on file"}
+                      {caseDetail.waiverExpired
+                        ? (isPatientTerm ? "Exclusion no longer applies — rerun recommended" : "Waiver Expired — Rerun Recommended")
+                        : (isPatientTerm ? "Documented exclusion on file" : "Active waiver on file")}
                     </p>
                   </div>
                 ) : null}
@@ -923,7 +942,9 @@ export default function CaseDetailPage() {
                     <p className="text-xs font-semibold uppercase tracking-[0.15em] text-primary-700 dark:text-primary-400">Outreach preview</p>
                     <p className="mt-2"><span className="font-semibold">Template:</span> {outreachPreview.templateName}</p>
                     <p className="mt-1"><span className="font-semibold">Subject:</span> {outreachPreview.subject}</p>
-                    <p className="mt-1"><span className="font-semibold">Due date:</span> {outreachPreview.dueDate}</p>
+                    {outreachPreview.dueDate ? (
+                      <p className="mt-1"><span className="font-semibold">Due date:</span> {outreachPreview.dueDate}</p>
+                    ) : null}
                     <p className="mt-2 whitespace-pre-wrap">{outreachPreview.bodyText}</p>
                   </div>
                 ) : (
@@ -978,9 +999,11 @@ export default function CaseDetailPage() {
               <div className="mt-6 rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800/50 p-4">
                 <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">why_flagged</p>
                 <CqlWhyFlagged whyFlagged={caseDetail.evidenceJson.why_flagged} />
-                <pre className="mt-3 overflow-x-auto whitespace-pre-wrap text-xs leading-5 text-neutral-700 dark:text-neutral-300">
-                  {JSON.stringify(caseDetail.evidenceJson.why_flagged ?? {}, null, 2)}
-                </pre>
+                {!isPatientTerm ? (
+                  <pre className="mt-3 overflow-x-auto whitespace-pre-wrap text-xs leading-5 text-neutral-700 dark:text-neutral-300">
+                    {JSON.stringify(caseDetail.evidenceJson.why_flagged ?? {}, null, 2)}
+                  </pre>
+                ) : null}
                 <div className="mt-4">
                   <Button
                     type="button"

@@ -389,7 +389,9 @@ export default function CompliancePage() {
                       <Link href={`/employees/${encodeURIComponent(r.subject.externalId)}`} className="font-medium text-blue-600 hover:underline dark:text-blue-400">
                         {r.subject.name}
                       </Link>
-                      <div className="text-[11px] text-neutral-500 dark:text-neutral-400">{r.subject.tenantName} · {r.subject.site} · {r.subject.role}</div>
+                      <div className="text-[11px] text-neutral-500 dark:text-neutral-400">
+                        {r.subject.tenantName} · {r.subject.site}{SUBJECT.singular === "patient" ? null : <> · {r.subject.role}</>}
+                      </div>
                     </th>
                     {columns.map((c) => {
                       const cell = r.cells[c.measureId] ?? { status: "NA" as const, method: "Not evaluated" };

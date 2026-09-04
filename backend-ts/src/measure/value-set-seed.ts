@@ -66,9 +66,10 @@ const VALUE_SETS: SeedVs[] = [
   { id: "a0000001-0000-0000-0000-000000000010", oid: "urn:workwell:vs:hazwoper-exemption", name: "HAZWOPER Medical Exemption", codes: [c("hazwoper-exemption", "HAZWOPER Medical Exemption", "urn:workwell:vs:hazwoper-exemption")] },
   { id: "a0000001-0000-0000-0000-000000000011", oid: "urn:workwell:vs:clinical-roles", name: "Clinical Facing Roles", codes: [c("clinical-role", "Clinical Facing Roles", "urn:workwell:vs:clinical-roles")] },
   { id: "a0000001-0000-0000-0000-000000000012", oid: "urn:workwell:vs:flu-exemption", name: "Flu Vaccine Exemption", codes: [c("flu-exemption", "Flu Vaccine Exemption", "urn:workwell:vs:flu-exemption")] },
-  // wellness sets
-  { id: "b0000001-0000-0000-0000-000000000001", oid: "urn:workwell:vs:wellness-enrollment", name: "Wellness Program Enrollment", codes: [c("wellness-enrolled", "Wellness Program Enrollment", "urn:workwell:vs:wellness-enrollment")] },
-  { id: "b0000001-0000-0000-0000-000000000002", oid: "urn:workwell:vs:wellness-exemption", name: "Wellness Exemption", codes: [c("wellness-exempt", "Wellness Exemption", "urn:workwell:vs:wellness-exemption")] },
+  // Shared authored-measure sets keep their technical names/OIDs for obesity_bmi compatibility;
+  // their seeded code displays are neutral so hypertension reads as a clinical placeholder.
+  { id: "b0000001-0000-0000-0000-000000000001", oid: "urn:workwell:vs:wellness-enrollment", name: "Wellness Program Enrollment", codes: [c("wellness-enrolled", "Eligible population", "urn:workwell:vs:wellness-enrollment")] },
+  { id: "b0000001-0000-0000-0000-000000000002", oid: "urn:workwell:vs:wellness-exemption", name: "Wellness Exemption", codes: [c("wellness-exempt", "Documented exclusion", "urn:workwell:vs:wellness-exemption")] },
   { id: "b0000001-0000-0000-0000-000000000003", oid: "urn:workwell:vs:bp-screening", name: "BP Screening Procedures", codes: [
     c("bp-screen", "Blood Pressure Screening", "urn:workwell:vs:bp-screening"),
     c("99213", "Office visit established patient", CPT),

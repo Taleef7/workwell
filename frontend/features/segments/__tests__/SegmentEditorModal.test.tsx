@@ -1,6 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { setSubject, subject } from "@/test/mocks/terminology";
+
+vi.mock("@/lib/terminology", () => ({ SUBJECT: subject }));
 import { SegmentEditorModal } from "../SegmentEditorModal";
 
 vi.mock("../hooks/usePreview", () => ({ usePreview: () => ({ preview: { count: 3, members: ["emp-006", "emp-010", "emp-012"] }, previewError: null }) }));
@@ -9,7 +12,10 @@ vi.mock("../hooks/useDirectorySearch", () => ({ useDirectorySearch: () => [{ ext
 const MEASURES = [{ id: "audiogram", name: "Audiogram" }, { id: "hazwoper", name: "HAZWOPER Surveillance" }];
 
 describe("SegmentEditorModal", () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    setSubject("employee");
+  });
 
   it("requires a name, ≥1 condition, and ≥1 measure before save is enabled, then posts the draft", async () => {
     const onSave = vi.fn().mockResolvedValue({ id: "s1" });
@@ -74,5 +80,20 @@ describe("SegmentEditorModal", () => {
     await userEvent.click(save);
     await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
     expect(onSave.mock.calls[0][0].rule.conditions[0]).toMatchObject({ attr: "role", op: "contains", value: "Welder" });
+  });
+
+  it("hides role conditions and role details from patient segment editing", async () => {
+    setSubject("patient");
+    render(<SegmentEditorModal open initial={null} activeMeasures={MEASURES} onClose={() => {}} onSaved={() => {}} onSave={vi.fn()} />);
+
+    await userEvent.click(screen.getByRole("button", { name: /add condition/i }));
+    const attribute = screen.getByLabelText("condition 1 attribute");
+    expect(within(attribute).queryByRole("option", { name: "role" })).not.toBeInTheDocument();
+    expect(within(attribute).getByRole("option", { name: "site" })).toBeInTheDocument();
+
+    const search = screen.getByLabelText("search patients");
+    await userEvent.type(search, "om");
+    expect(await screen.findByText("emp-006 · Plant A", { exact: true })).toBeInTheDocument();
+    expect(screen.queryByText("emp-006 · Welder · Plant A", { exact: true })).not.toBeInTheDocument();
   });
 });

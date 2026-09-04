@@ -1,3 +1,5 @@
+import { SUBJECT } from "@/lib/terminology";
+
 // TS mirror of the GET /api/compliance/roster contract (backend-ts/src/compliance/*). Kept in sync by
 // hand; the read model owns the vocabulary — the UI renders these strings verbatim (ADR-008).
 export type PanelId = "immunizations" | "osha" | "wellness";
@@ -49,5 +51,5 @@ export interface Roster {
 export const PANEL_OPTIONS: ReadonlyArray<{ id: PanelId; label: string }> = [
   { id: "immunizations", label: "Immunizations" },
   { id: "osha", label: "OSHA Surveillance" },
-  { id: "wellness", label: "Wellness & eCQM" }
+  { id: "wellness", label: SUBJECT.singular === "patient" ? "Quality measures" : "Wellness & eCQM" }
 ];

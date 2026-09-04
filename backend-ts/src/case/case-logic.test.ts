@@ -6,6 +6,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { dispositionFor, priorityFor, nextActionFor, NEXT_ACTION_LABELS, planCaseUpsert } from "./case-logic.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
+import { runProfileChild } from "../test-support/run-profile-child.ts";
 
 test("dispositionFor routes outcomes to OPEN / EXCLUDED / RESOLVE", () => {
   for (const s of ["OVERDUE", "DUE_SOON", "MISSING_DATA"]) assert.equal(dispositionFor(s), "OPEN");
@@ -24,6 +25,20 @@ test("nextActionFor uses the measure label + outcome", () => {
   assert.match(nextActionFor("OVERDUE", "tb_surveillance"), /Escalate TB screening/);
   assert.match(nextActionFor("MISSING_DATA", "audiogram"), /Collect the missing audiogram/);
   assert.match(nextActionFor("DUE_SOON", "flu_vaccine"), /Schedule the flu vaccine before the due date/);
+});
+
+test("nextActionFor EXCLUDED wording follows the deployment profile", () => {
+  const excludedChildScript = `
+    import { DEPLOYMENT_PROFILE } from "./src/config/deployment-profile.ts";
+    import { nextActionFor } from "./src/case/case-logic.ts";
+    console.log(JSON.stringify({ profileId: DEPLOYMENT_PROFILE.id, excludedAction: nextActionFor("EXCLUDED", "cms125") }));
+  `;
+  const maui = runProfileChild("maui", excludedChildScript);
+  assert.equal(maui.profileId, "maui");
+  assert.equal(maui.excludedAction, "Review the documented exclusion and rerun before it lapses.");
+  const def = runProfileChild(undefined, excludedChildScript);
+  assert.equal(def.profileId, "default");
+  assert.equal(def.excludedAction, "Review the active waiver and rerun before it expires.");
 });
 
 test("nextActionFor is measure-aware for non-OSHA measures (M1: no longer defaults to 'audiogram')", () => {

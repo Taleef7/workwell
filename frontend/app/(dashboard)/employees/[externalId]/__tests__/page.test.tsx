@@ -1,6 +1,8 @@
 import React from "react";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { setSubject, subject } from "@/test/mocks/terminology";
+vi.mock("@/lib/terminology", () => ({ SUBJECT: subject }));
 import EmployeeProfilePage from "../page";
 
 const get = vi.fn();
@@ -26,7 +28,7 @@ const mockProfile = {
   name: "Jane Doe",
   role: "Engineer",
   site: "Plant A",
-  supervisorName: null,
+  supervisorName: "Manager Smith",
   startDate: null,
   fhirPatientId: null,
   active: true,
@@ -72,6 +74,7 @@ const mockProfile = {
 
 describe("EmployeeProfilePage crosswalk identity rendering", () => {
   beforeEach(() => {
+    setSubject("employee");
     get.mockImplementation((url: string) => {
       if (url === "/api/measures") {
         return Promise.resolve([
@@ -121,5 +124,32 @@ describe("EmployeeProfilePage crosswalk identity rendering", () => {
     const oshaOutcomeRow = document.getElementById("measure-audiogram")!;
     expect(within(oshaOutcomeRow).getByText("Annual Audiogram Completed", { exact: true })).toBeInTheDocument();
     expect(within(oshaOutcomeRow).queryByText(/^MIPS/)).not.toBeInTheDocument();
+  });
+
+  it("hides role and supervisor for patients, while keeping employee profile details byte-identical", async () => {
+    setSubject("patient");
+    const { unmount } = render(<EmployeeProfilePage />);
+    await screen.findByText("Jane Doe", { exact: true });
+    expect(screen.queryByText(/Engineer/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Supervisor: Manager Smith/)).not.toBeInTheDocument();
+    expect(screen.getByText(/Plant A/)).toBeInTheDocument();
+
+    unmount();
+    setSubject("employee");
+    render(<EmployeeProfilePage />);
+    await screen.findByText("Jane Doe", { exact: true });
+    expect(screen.getByText("Engineer · Plant A · Supervisor: Manager Smith")).toBeInTheDocument();
+  });
+
+  it("uses result wording for patients and exam wording for employees", async () => {
+    setSubject("patient");
+    const { unmount } = render(<EmployeeProfilePage />);
+    await screen.findByText("Days since result: 100", { exact: true });
+    expect(screen.queryByText("Days since exam: 100", { exact: true })).not.toBeInTheDocument();
+
+    unmount();
+    setSubject("employee");
+    render(<EmployeeProfilePage />);
+    expect(await screen.findByText("Days since exam: 100", { exact: true })).toBeInTheDocument();
   });
 });

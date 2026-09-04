@@ -5,6 +5,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SLOW_LOAD_HINT } from "@/lib/useSlowLoadHint";
 import type { createNavMock } from "@/test/mocks/next-navigation-reactive";
 
+import { setSubject, subject } from "@/test/mocks/terminology";
+vi.mock("@/lib/terminology", () => ({ SUBJECT: subject }));
+
 const getWithHeaders = vi.fn();
 const get = vi.fn();
 const post = vi.fn();
@@ -50,7 +53,7 @@ const rosterImmun = {
     ],
     rows: [
       {
-        subject: { externalId: "emp-001", name: "Ada Lovelace", role: "Nurse", site: "HQ" },
+        subject: { externalId: "emp-001", name: "Ada Lovelace", role: "Nurse", site: "HQ", tenantName: "Acme Health" },
         cells: {
           mmr: { status: "COMPLIANT", method: "2 valid dose(s)" },
           varicella: { status: "IN_PROGRESS", method: "1 of 2 doses on file" }
@@ -62,6 +65,7 @@ const rosterImmun = {
 };
 
 beforeEach(() => {
+  setSubject("employee");
   navHolder.current.setUrl("/compliance");
   // Resolved on a MACROTASK, not immediately. An immediate resolve lets the fetch promise and the
   // React commit land in the same tick often enough that a test awaiting the CALL rather than the
@@ -109,6 +113,17 @@ describe("CompliancePage", () => {
     expect(within(row).getByText("Compliant")).toBeInTheDocument();
     expect(within(row).getByText("In Progress")).toBeInTheDocument();
     expect(within(row).getByText("1 of 2 doses on file")).toBeInTheDocument();
+    expect(row).toHaveTextContent("Acme Health · HQ · Nurse");
+  });
+
+  it("omits the role from the patient roster subtitle", async () => {
+    setSubject("patient");
+    render(<CompliancePage />);
+
+    const names = await within(screen.getByRole("table")).findAllByText("Ada Lovelace");
+    const row = names[0].closest("tr")!;
+    expect(row).toHaveTextContent("Acme Health · HQ");
+    expect(row).not.toHaveTextContent("Acme Health · HQ · Nurse");
   });
 
   it("renders crosswalk label in column header for CMS measures and plain name for OSHA measures", async () => {

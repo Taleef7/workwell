@@ -35,11 +35,14 @@ test("resolveDeploymentProfile is pure, normalized, and defaults safely", () => 
   assert.deepEqual(resolveDeploymentProfile(undefined), resolveDeploymentProfile(""));
   assert.equal(resolveDeploymentProfile(" TWH ").id, "default");
   assert.equal(resolveDeploymentProfile("unknown").id, "default");
-  assert.deepEqual(resolveDeploymentProfile(" Maui "), {
+  const maui = resolveDeploymentProfile(" Maui ");
+  assert.deepEqual(maui, {
     id: "maui",
     visibleTenantIds: ["maui"],
     runnableMeasureIds: ["cms122", "cms125", "hypertension"],
+    subjectTerm: "patient",
   });
+  assert.equal(resolveDeploymentProfile(undefined).subjectTerm, "employee");
 });
 
 test("pure directory composition scopes both profiles after full attribution", () => {
@@ -282,7 +285,8 @@ test("Maui run planning accepts patients and refuses hidden employees and occupa
   `);
   assert.deepEqual(output.patient, { ok: true, total: 3, measures: ["cms122", "cms125", "hypertension"] });
   assert.equal((output.employee as { ok: boolean }).ok, false);
-  assert.match((output.employee as { message: string }).message, /Unknown employee/);
+  // The run pipeline names the subject by the profile's term: "Unknown patient" on maui.
+  assert.match((output.employee as { message: string }).message, /Unknown patient/);
   assert.equal((output.occupational as { ok: boolean }).ok, false);
   assert.match((output.occupational as { message: string }).message, /maui/);
 });

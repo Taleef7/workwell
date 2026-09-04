@@ -3,13 +3,25 @@ import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 import { fraunces } from "./fonts";
 import { PUBLIC_DEMO } from "@/lib/public-demo";
+import { SUBJECT } from "@/lib/terminology";
 
 const repoUrl = "https://github.com/Taleef7/workwell";
 const videoUrl = "https://www.youtube.com/shorts/SgzDt4TBd9k?si=vHE9vppgxeGO6OM8";
+const DOMAIN_COPY: Record<string, { compliance: string; descriptionLead: string }> = {
+  "OSHA safety and clinical wellness measures": {
+    compliance: "occupational-health",
+    descriptionLead: "Occupational safety and clinical wellness measures",
+  },
+  "Primary care clinical quality measures": {
+    compliance: "primary-care",
+    descriptionLead: "Primary care clinical quality measures",
+  },
+};
+const domainCopy = DOMAIN_COPY[SUBJECT.domain] ?? { compliance: SUBJECT.domain.toLowerCase(), descriptionLead: SUBJECT.domain };
 
 const APP_NAME = process.env.NEXT_PUBLIC_APP_NAME ?? "WorkWell Measure Studio";
-const APP_TAGLINE = process.env.NEXT_PUBLIC_APP_TAGLINE ?? "A clean operating surface for occupational-health compliance.";
-const APP_DESCRIPTION = process.env.NEXT_PUBLIC_APP_DESCRIPTION ?? "Occupational safety and clinical wellness measures, complete case management, and a full audit trail — one reviewable dashboard.";
+const APP_TAGLINE = process.env.NEXT_PUBLIC_APP_TAGLINE || `A clean operating surface for ${domainCopy.compliance} compliance.`;
+const APP_DESCRIPTION = process.env.NEXT_PUBLIC_APP_DESCRIPTION || `${domainCopy.descriptionLead}, complete case management, and a full audit trail \u2014 one reviewable dashboard.`;
 const [APP_BADGE, ...appRest] = APP_NAME.split(" ");
 const APP_SUBTITLE = appRest.join(" ") || "Measure Studio";
 

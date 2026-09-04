@@ -9,11 +9,11 @@ valueset "Wellness Exemption": 'urn:workwell:vs:wellness-exemption'
 parameter "Measurement Period" Interval<DateTime>
 context Patient
 
-define "In Wellness Program":
+define "In Eligible Population":
   exists([Condition] C
     where exists(C.code.coding x where x.system = 'urn:workwell:vs:wellness-enrollment' and x.code = 'wellness-enrolled'))
 
-define "Has Medical Exemption":
+define "Has Documented Exclusion":
   exists([Condition] C
     where exists(C.code.coding x where x.system = 'urn:workwell:vs:wellness-exemption' and x.code = 'wellness-exempt'))
 
@@ -30,31 +30,31 @@ define "Days Since Last BP Screening":
     and Now()
 
 define "Compliant":
-  "In Wellness Program"
-    and not "Has Medical Exemption"
+  "In Eligible Population"
+    and not "Has Documented Exclusion"
     and "Days Since Last BP Screening" <= 335
 
 define "Due Soon":
-  "In Wellness Program"
-    and not "Has Medical Exemption"
+  "In Eligible Population"
+    and not "Has Documented Exclusion"
     and "Days Since Last BP Screening" > 335
     and "Days Since Last BP Screening" <= 365
 
 define "Overdue":
-  "In Wellness Program"
-    and not "Has Medical Exemption"
+  "In Eligible Population"
+    and not "Has Documented Exclusion"
     and "Days Since Last BP Screening" > 365
 
 define "Missing Data":
-  "In Wellness Program"
-    and not "Has Medical Exemption"
+  "In Eligible Population"
+    and not "Has Documented Exclusion"
     and "Most Recent BP Screening Date" is null
 
 define "Excluded":
-  "Has Medical Exemption"
+  "Has Documented Exclusion"
 
 define "Initial Population":
-  "In Wellness Program" or "Has Medical Exemption"
+  "In Eligible Population" or "Has Documented Exclusion"
 
 define "Outcome Status":
   if "Excluded" then 'EXCLUDED'

@@ -2,8 +2,8 @@ id: hypertension
 name: Hypertension BP Screening
 version: 1.0.0
 title: Hypertension BP Screening
-policyRef: HEDIS BPC / JPMC Wellness Rewards
-tags: [wellness, hypertension, cardiovascular]
+policyRef: "Placeholder: CMS165 Controlling High Blood Pressure pending"
+tags: [clinical, hypertension, cardiovascular]
 complianceClass: RECURRING
 cql: hypertension.cql
 bindings:

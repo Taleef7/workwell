@@ -101,6 +101,7 @@ export default function PersonDetailPage() {
   const router = useRouter();
   const { user } = useAuth();
   const mayReconcile = canReconcileIdentity(user?.role);
+  const isPatientTerm = SUBJECT.singular === "patient";
   const [detail, setDetail] = useState<PersonDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -234,7 +235,7 @@ export default function PersonDetailPage() {
                 // the merge-picker's key below and /people's source-badge list).
                 <li key={`${s.tenantId}|${s.externalId}`} className="flex flex-wrap items-center gap-2">
                   <span className="font-medium text-neutral-900 dark:text-neutral-100">{s.tenantName}</span>
-                  <span className="text-neutral-500 dark:text-neutral-400">{s.role} · {s.site} · {s.externalId}</span>
+                  <span className="text-neutral-500 dark:text-neutral-400">{isPatientTerm ? `${s.site} · ${s.externalId}` : `${s.role} · ${s.site} · ${s.externalId}`}</span>
                   <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${s.status === "ACTIVE" ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300" : "bg-neutral-200 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-400"}`}>
                     {s.status}{s.status === "PRIOR" && s.moveDate ? ` · moved ${fmtDay(s.moveDate)}` : ""}
                   </span>

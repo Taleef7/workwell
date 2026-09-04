@@ -9,6 +9,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { rmSync } from "node:fs";
@@ -19,8 +20,9 @@ import { SqliteMeasureStore } from "../stores/sqlite/measure-store-sqlite.ts";
 import { SqliteCaseEventStore } from "../stores/sqlite/case-event-store-sqlite.ts";
 import type { CaseEventStore } from "../stores/case-event-store.ts";
 import type { MeasureStore } from "../stores/measure-store.ts";
-import { MEASURE_CATALOG } from "./measure-catalog.ts";
+import { MEASURE_CATALOG, type MeasureSpec } from "./measure-catalog.ts";
 import { seedMeasureStore } from "./measure-seed.ts";
+import { HYPERTENSION_PRE_CHANGE_CQL } from "./hypertension-pre-change-cql.ts";
 
 const created: string[] = [];
 
@@ -579,4 +581,284 @@ test("seedMeasureStore — repairs a legacy row already Deprecated but missing i
 
   await seedMeasureStore(store, () => "", events);
   assert.equal(await countDeprecated(), 1, "a second seed does not duplicate it");
+});
+
+const HYPERTENSION_PRE_CHANGE: { policyRef: string; spec: MeasureSpec } = {
+  policyRef: "HEDIS BPC / JPMC Wellness Rewards",
+  spec: {
+    description: "Annual blood pressure screening for employees enrolled in the wellness program.",
+    eligibilityCriteria: { roleFilter: "All", siteFilter: "All Sites", programEnrollmentText: "Wellness Program" },
+    exclusions: [{ label: "Medical Exemption", criteriaText: "Documented medical exemption on file" }],
+    complianceWindow: "Annual",
+    requiredDataElements: ["Last BP screening date", "Program enrollment", "Exemption status"],
+    testFixtures: [],
+  },
+};
+
+async function seedOldHypertensionRow(
+  store: MeasureStore,
+  options: { edited?: boolean; halfApplied?: boolean; staleCqlOnly?: boolean; status?: string; cqlText?: string } = {},
+): Promise<void> {
+  const catalog = MEASURE_CATALOG.find((m) => m.id === "hypertension")!;
+  await store.seedMeasure({
+    measureId: "hypertension",
+    name: catalog.name,
+    policyRef: options.halfApplied || options.staleCqlOnly ? catalog.policyRef : HYPERTENSION_PRE_CHANGE.policyRef,
+    owner: catalog.owner,
+    tags: ["wellness", "hypertension", "cardiovascular"],
+    versionId: `hypertension-${catalog.version}`,
+    version: catalog.version,
+    status: options.status ?? catalog.status,
+    spec: options.edited
+      ? { ...HYPERTENSION_PRE_CHANGE.spec, eligibilityCriteria: { ...HYPERTENSION_PRE_CHANGE.spec.eligibilityCriteria, siteFilter: "Edited clinic" } }
+      : options.staleCqlOnly
+        ? catalog.spec
+        : HYPERTENSION_PRE_CHANGE.spec,
+    // The seed wrote the pre-change reconstruction into cql_text; that exact text is the fingerprint
+    // the repair recognises (a stale-CQL-only row carries it too — only its spec/policy were repaired).
+    cqlText: options.cqlText ?? HYPERTENSION_PRE_CHANGE_CQL,
+    compileStatus: catalog.compileStatus,
+    createdAt: "2026-02-01T00:00:00.000Z",
+    changeSummary: "Seeded measure version",
+  });
+}
+
+const countSeedUpdatedEvents = async (db: Awaited<ReturnType<typeof freshDb>>) => {
+  const rows = await db
+    .prepare("SELECT event_type FROM audit_events WHERE event_type = 'MEASURE_SEED_UPDATED' AND entity_id = 'hypertension-v1.0'")
+    .all<{ event_type: string }>();
+  return (rows.results ?? []).length;
+};
+
+test("seedMeasureStore — repairs the pre-change hypertension seed row exactly once, refreshes CQL, and stays quiet on the second seed", async () => {
+  const db = await freshDb();
+  const store = new SqliteMeasureStore(db);
+  const events = new SqliteCaseEventStore(db);
+  const catalog = MEASURE_CATALOG.find((m) => m.id === "hypertension")!;
+
+  await seedOldHypertensionRow(store, { status: "Approved" });
+  assert.equal(await countSeedUpdatedEvents(db), 0, "precondition: no repair event yet");
+
+  const warnings: unknown[][] = [];
+  const originalWarn = console.warn;
+  console.warn = (...args: unknown[]) => warnings.push(args);
+  try {
+    await seedMeasureStore(store, () => 'define "In Eligible Population": true', events);
+    await seedMeasureStore(store, () => 'define "In Eligible Population": true', events);
+  } finally {
+    console.warn = originalWarn;
+  }
+  const repaired = await store.getLatest("hypertension");
+  assert.ok(repaired !== null);
+  assert.equal(repaired!.policyRef, catalog.policyRef);
+  assert.deepEqual(repaired!.spec, catalog.spec);
+  assert.deepEqual(repaired!.tags, ["wellness", "hypertension", "cardiovascular"], "tags are not rewritten");
+  assert.equal(repaired!.status, "Approved", "lifecycle status is preserved");
+  assert.equal(repaired!.version, catalog.version, "version is preserved");
+  assert.match(repaired!.cqlText, /In Eligible Population/);
+  assert.equal(await countSeedUpdatedEvents(db), 1);
+  assert.equal(await countSeedUpdatedEvents(db), 1, "a second seed does not duplicate the repair");
+  assert.deepEqual(warnings, [], "a second seed does not warn");
+});
+
+test("seedMeasureStore — repairs a half-applied hypertension row without a second audit", async () => {
+  const db = await freshDb();
+  const store = new SqliteMeasureStore(db);
+  const events = new SqliteCaseEventStore(db);
+  const catalog = MEASURE_CATALOG.find((m) => m.id === "hypertension")!;
+  await seedOldHypertensionRow(store, { halfApplied: true });
+
+  assert.equal((await store.getLatest("hypertension"))!.policyRef, catalog.policyRef);
+  assert.deepEqual((await store.getLatest("hypertension"))!.spec, HYPERTENSION_PRE_CHANGE.spec);
+  await seedMeasureStore(store, () => 'define "In Eligible Population": true', events);
+  assert.deepEqual((await store.getLatest("hypertension"))!.spec, catalog.spec);
+  assert.equal(await countSeedUpdatedEvents(db), 1);
+});
+
+test("seedMeasureStore — repairs a CQL-only half-applied row and makes no updates on the second seed", async () => {
+  class CountingMeasureStore extends SqliteMeasureStore {
+    updateSpecCalls = 0;
+    updateCqlCalls = 0;
+
+    override async updateSpec(measureId: string, spec: MeasureSpec, policyRef?: string) {
+      this.updateSpecCalls++;
+      return super.updateSpec(measureId, spec, policyRef);
+    }
+
+    override async updateCql(measureId: string, cqlText: string, compileStatus?: string) {
+      this.updateCqlCalls++;
+      return super.updateCql(measureId, cqlText, compileStatus);
+    }
+  }
+
+  const db = await freshDb();
+  const store = new CountingMeasureStore(db);
+  const events = new SqliteCaseEventStore(db);
+  const catalog = MEASURE_CATALOG.find((m) => m.id === "hypertension")!;
+  await seedOldHypertensionRow(store, { staleCqlOnly: true });
+
+  const cqlOf = (measureId: string) => (measureId === "hypertension" ? 'define "Repaired CQL": true' : "");
+
+  await seedMeasureStore(store, cqlOf, events);
+  const repaired = await store.getLatest("hypertension");
+  assert.deepEqual(repaired!.spec, catalog.spec);
+  assert.equal(repaired!.policyRef, catalog.policyRef);
+  assert.equal(repaired!.cqlText, 'define "Repaired CQL": true', "stale CQL is refreshed");
+  assert.equal(await countSeedUpdatedEvents(db), 1, "the repair audit is deduplicated");
+
+  const specCallsAfterFirstSeed = store.updateSpecCalls;
+  const cqlCallsAfterFirstSeed = store.updateCqlCalls;
+
+  await seedMeasureStore(store, cqlOf, events);
+  assert.equal(store.updateSpecCalls, specCallsAfterFirstSeed, "the fully repaired row makes no updateSpec call on the second seed");
+  assert.equal(store.updateCqlCalls, cqlCallsAfterFirstSeed, "the fully repaired row makes no updateCql call on the second seed");
+  assert.equal(await countSeedUpdatedEvents(db), 1);
+});
+
+test("seedMeasureStore — leaves Studio-authored hypertension CQL untouched, whether the spec is pre-change or already repaired", async () => {
+  const catalog = MEASURE_CATALOG.find((m) => m.id === "hypertension")!;
+  const authored = 'define "In Eligible Population": exists([Observation])  // authored in Studio';
+  const cqlOf = () => 'define "In Eligible Population": true';
+
+  // pre-change row; policy already repaired (spec still old); policy AND spec already repaired.
+  const shapes = [
+    { halfApplied: false, expectPolicy: HYPERTENSION_PRE_CHANGE.policyRef },
+    { halfApplied: true, expectPolicy: catalog.policyRef },
+    { staleCqlOnly: true, expectPolicy: catalog.policyRef },
+  ] as const;
+  for (const shape of shapes) {
+    const halfApplied = "halfApplied" in shape ? shape.halfApplied : "staleCqlOnly";
+    const db = await freshDb();
+    const store = new SqliteMeasureStore(db);
+    const events = new SqliteCaseEventStore(db);
+    await seedOldHypertensionRow(store, { ...shape, cqlText: authored });
+
+    const warnings: unknown[][] = [];
+    const originalWarn = console.warn;
+    console.warn = (...args: unknown[]) => warnings.push(args);
+    try {
+      await seedMeasureStore(store, cqlOf, events);
+      await seedMeasureStore(store, cqlOf, events);
+    } finally {
+      console.warn = originalWarn;
+    }
+    const stored = (await store.getLatest("hypertension"))!;
+    assert.equal(stored.cqlText, authored, `authored CQL survives the seed (shape=${String(halfApplied)})`);
+    assert.equal(stored.policyRef, shape.expectPolicy, "the row is left whole, not half-repaired");
+    assert.equal(await countSeedUpdatedEvents(db), 0, "no repair event for a row someone edited");
+    assert.equal(warnings.length, 2, "each boot says why it left the row alone");
+  }
+});
+
+test("seedMeasureStore — a CRLF copy, or an editor re-save with a trailing newline, of the pre-change CQL is still recognised as the seed's own text", async () => {
+  for (const variant of [HYPERTENSION_PRE_CHANGE_CQL.replace(/\n/g, "\r\n"), `${HYPERTENSION_PRE_CHANGE_CQL}\n`]) {
+    const db = await freshDb();
+    const store = new SqliteMeasureStore(db);
+    const events = new SqliteCaseEventStore(db);
+    await seedOldHypertensionRow(store, { cqlText: variant });
+    await seedMeasureStore(store, () => 'define "In Eligible Population": true', events);
+    assert.match((await store.getLatest("hypertension"))!.cqlText, /In Eligible Population/);
+    assert.equal(await countSeedUpdatedEvents(db), 1);
+  }
+});
+
+test("HYPERTENSION_PRE_CHANGE_CQL is the exact text the pre-change seed stored (provenance digest, not self-referential)", () => {
+  // Pinned from `reconstructCql` of the pre-change ELM (`HypertensionBPScreeningCQL-1.0.0.elm.json` at
+  // beb8c72d, the last commit before the relabel), computed independently of the constant: 2057 chars.
+  // The other tests build the simulated live row FROM the constant, so a typo in it would be
+  // self-consistent there; this digest is what ties it to the real stored value.
+  const digest = createHash("sha256").update(HYPERTENSION_PRE_CHANGE_CQL, "utf8").digest("hex");
+  assert.equal(HYPERTENSION_PRE_CHANGE_CQL.length, 2057);
+  assert.equal(digest, "17e133992cf4b59ebe764bff4f34ae0741a22860828b160825e5eac824095d1d");
+});
+
+test("seedMeasureStore — the fingerprint warning names which field was edited", async () => {
+  const db = await freshDb();
+  const store = new SqliteMeasureStore(db);
+  const events = new SqliteCaseEventStore(db);
+  await seedOldHypertensionRow(store, { cqlText: 'define "Authored": true' });
+  const warnings: unknown[][] = [];
+  const originalWarn = console.warn;
+  console.warn = (...args: unknown[]) => warnings.push(args);
+  try {
+    await seedMeasureStore(store, () => "", events);
+  } finally {
+    console.warn = originalWarn;
+  }
+  assert.equal(warnings.length, 1);
+  assert.match(String(warnings[0]![0]), /policyRef=old, spec=old, cqlText=edited/);
+});
+
+test("seedMeasureStore — leaves an edited hypertension spec untouched with a warning and no audit", async () => {
+  const db = await freshDb();
+  const store = new SqliteMeasureStore(db);
+  const events = new SqliteCaseEventStore(db);
+  await seedOldHypertensionRow(store, { edited: true });
+
+  const warnings: unknown[][] = [];
+  const originalWarn = console.warn;
+  console.warn = (...args: unknown[]) => warnings.push(args);
+  try {
+    await seedMeasureStore(store, () => "", events);
+  } finally {
+    console.warn = originalWarn;
+  }
+  const stored = await store.getLatest("hypertension");
+  assert.ok(stored !== null);
+  assert.equal(stored!.policyRef, HYPERTENSION_PRE_CHANGE.policyRef);
+  assert.equal(stored!.spec.eligibilityCriteria.siteFilter, "Edited clinic");
+  assert.equal(await countSeedUpdatedEvents(db), 0);
+  assert.equal(warnings.length, 1);
+});
+
+test("seedMeasureStore — fresh database seeds current hypertension values without an event or warning", async () => {
+  const db = await freshDb();
+  const store = new SqliteMeasureStore(db);
+  const events = new SqliteCaseEventStore(db);
+  const catalog = MEASURE_CATALOG.find((m) => m.id === "hypertension")!;
+
+  const warnings: unknown[][] = [];
+  const originalWarn = console.warn;
+  console.warn = (...args: unknown[]) => warnings.push(args);
+  try {
+    await seedMeasureStore(store, () => "", events);
+  } finally {
+    console.warn = originalWarn;
+  }
+  const stored = await store.getLatest("hypertension");
+  assert.ok(stored !== null);
+  assert.equal(stored!.policyRef, catalog.policyRef);
+  assert.deepEqual(stored!.spec, catalog.spec);
+  assert.equal(await countSeedUpdatedEvents(db), 0);
+  assert.deepEqual(warnings, []);
+});
+
+test("seedMeasureStore — audit-before-state leaves one audit row when updateSpec throws, then retries without a duplicate", async () => {
+  class ThrowOnceMeasureStore extends SqliteMeasureStore {
+    shouldThrow = true;
+
+    override async updateSpec(measureId: string, spec: MeasureSpec, policyRef?: string) {
+      if (this.shouldThrow) {
+        this.shouldThrow = false;
+        throw new Error("updateSpec unavailable");
+      }
+      return super.updateSpec(measureId, spec, policyRef);
+    }
+  }
+
+  const db = await freshDb();
+  const store = new ThrowOnceMeasureStore(db);
+  const events = new SqliteCaseEventStore(db);
+  const cql = 'define "In Eligible Population": true';
+  await seedOldHypertensionRow(store);
+
+  await assert.rejects(() => seedMeasureStore(store, () => cql, events), /updateSpec unavailable/);
+  assert.equal(await countSeedUpdatedEvents(db), 1, "audit is durable before state mutation");
+  assert.equal((await store.getLatest("hypertension"))!.policyRef, HYPERTENSION_PRE_CHANGE.policyRef);
+
+  await seedMeasureStore(store, () => cql, events);
+  const repaired = await store.getLatest("hypertension");
+  assert.deepEqual(repaired!.spec, MEASURE_CATALOG.find((m) => m.id === "hypertension")!.spec);
+  assert.match(repaired!.cqlText, /In Eligible Population/);
+  assert.equal(await countSeedUpdatedEvents(db), 1, "retry does not duplicate the audit");
 });

@@ -1,4 +1,5 @@
 import React from "react";
+import { SUBJECT } from "@/lib/terminology";
 
 export interface EvidenceJson {
   expressionResults?: Array<Record<string, unknown>>;
@@ -65,8 +66,8 @@ function WhyFlaggedRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-/** The non-internal CQL define results as define→result chips. Single source for case-detail + the
- *  per-employee compliance card. Display-only; never affects compliance (ADR-008). */
+/** The non-internal CQL define results as define→result chips. Single source for case detail and
+ *  the profile compliance card. Display-only; never affects compliance (ADR-008). */
 export function CqlExpressionResults({ results }: { results?: Array<Record<string, unknown>> }) {
   const rows = (results ?? []).filter((row) => !isInternalDefine(String(row.define ?? "")));
   if (rows.length === 0) {
@@ -146,19 +147,20 @@ export function CqlExpressionResults({ results }: { results?: Array<Record<strin
 /** The why_flagged derived summary. Returns null when absent. */
 export function CqlWhyFlagged({ whyFlagged }: { whyFlagged?: EvidenceJson["why_flagged"] }) {
   if (!whyFlagged) return null;
+  const isPatient = SUBJECT.singular === "patient";
   return (
     <dl className="grid gap-2 text-xs text-neutral-700 dark:text-neutral-300 sm:grid-cols-2">
-      <WhyFlaggedRow label="Last exam date" value={whyFlagged.last_exam_date ?? "None"} />
+      <WhyFlaggedRow label={isPatient ? "Last result date" : "Last exam date"} value={whyFlagged.last_exam_date ?? "None"} />
       <WhyFlaggedRow label="Window (days)" value={String(whyFlagged.compliance_window_days)} />
       <WhyFlaggedRow label="Days overdue" value={String(whyFlagged.days_overdue ?? 0)} />
-      <WhyFlaggedRow label="Role eligible" value={whyFlagged.role_eligible ? "Yes" : "No"} />
-      <WhyFlaggedRow label="Site eligible" value={whyFlagged.site_eligible ? "Yes" : "No"} />
-      <WhyFlaggedRow label="Waiver status" value={whyFlagged.waiver_status} />
+      {!isPatient ? <WhyFlaggedRow label="Role eligible" value={whyFlagged.role_eligible ? "Yes" : "No"} /> : null}
+      {!isPatient ? <WhyFlaggedRow label="Site eligible" value={whyFlagged.site_eligible ? "Yes" : "No"} /> : null}
+      <WhyFlaggedRow label={isPatient ? "Exclusion status" : "Waiver status"} value={whyFlagged.waiver_status} />
     </dl>
   );
 }
 
-/** Both halves together (define chips + why_flagged) — used by the per-employee compliance card. */
+/** Both halves together (define chips + why_flagged) — used by the profile compliance card. */
 export function CqlEvidence({ evidence }: { evidence: EvidenceJson | null | undefined }) {
   return (
     <div className="space-y-3">

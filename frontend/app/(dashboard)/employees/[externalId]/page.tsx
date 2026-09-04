@@ -26,6 +26,7 @@ export default function EmployeeProfilePage() {
   const externalId = decodeURIComponent(rawExternalId ?? '');
   const { profile, loading, error, refetch } = useEmployeeProfile(externalId);
   const { labelFor: measureLabelFor } = useMeasureIdentities();
+  const isPatientTerm = SUBJECT.singular === 'patient';
 
   if (loading) {
     return (
@@ -58,9 +59,9 @@ export default function EmployeeProfilePage() {
         <div>
           <h1 className="text-2xl font-semibold text-neutral-900 dark:text-neutral-100">{profile.name}</h1>
           <p className="text-sm text-neutral-500 dark:text-neutral-400 mt-1">
-            {profile.role}
+            {!isPatientTerm ? profile.role : null}
             {profile.site ? ` · ${profile.site}` : ''}
-            {profile.supervisorName ? ` · Supervisor: ${profile.supervisorName}` : ''}
+            {!isPatientTerm && profile.supervisorName ? ` · Supervisor: ${profile.supervisorName}` : ''}
           </p>
           <p className="text-xs text-neutral-600 dark:text-neutral-400 mt-1">
             ID: {profile.externalId}
@@ -160,7 +161,7 @@ export default function EmployeeProfilePage() {
                   <span>Last evaluated: {new Date(o.lastRunDate).toLocaleDateString()}</span>
                 )}
                 {o.daysSinceLastExam != null && (
-                  <span>Days since exam: {o.daysSinceLastExam}</span>
+                  <span>{isPatientTerm ? "Days since result" : "Days since exam"}: {o.daysSinceLastExam}</span>
                 )}
                 {o.daysUntilDue != null && (
                   <span className={o.daysUntilDue >= 0 ? 'font-medium text-amber-700 dark:text-amber-400' : 'font-semibold text-rose-700 dark:text-rose-400'}>

@@ -124,6 +124,7 @@ export default function ProgramDetailPage() {
   const api = useApi();
   const { user } = useAuth();
   const mayRun = canRunMeasures(user?.role);
+  const isPatientTerm = SUBJECT.singular === "patient";
   const { startTracking } = useRunStatus();
   const { theme } = useTheme();
   const { labelFor: measureLabelFor } = useMeasureIdentities();
@@ -353,15 +354,17 @@ export default function ProgramDetailPage() {
             ) : null}
           </div>
 
-          <div className="grid gap-4 lg:grid-cols-3">
+          <div className={`grid gap-4 ${isPatientTerm ? "lg:grid-cols-2" : "lg:grid-cols-3"}`}>
             <div className="rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4">
               <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Top sites</p>
               {drivers.bySite.length === 0 ? <p className="mt-2 text-xs text-neutral-500 dark:text-neutral-400">No site concentration in the latest run.</p> : drivers.bySite.map((s) => <p key={s.site} className="mt-1 text-xs">{s.site}: {s.overdueCount}</p>)}
             </div>
-            <div className="rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4">
-              <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Top roles</p>
-              {drivers.byRole.length === 0 ? <p className="mt-2 text-xs text-neutral-500 dark:text-neutral-400">No role concentration in the latest run.</p> : drivers.byRole.map((r) => <p key={r.role} className="mt-1 text-xs">{labelFor(ROLE_LABELS, r.role)}: {r.overdueCount}</p>)}
-            </div>
+            {!isPatientTerm ? (
+              <div className="rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4">
+                <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Top roles</p>
+                {drivers.byRole.length === 0 ? <p className="mt-2 text-xs text-neutral-500 dark:text-neutral-400">No role concentration in the latest run.</p> : drivers.byRole.map((r) => <p key={r.role} className="mt-1 text-xs">{labelFor(ROLE_LABELS, r.role)}: {r.overdueCount}</p>)}
+              </div>
+            ) : null}
             <div className="rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4">
               <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Reason mix</p>
               {drivers.byOutcomeReason.length === 0 ? (

@@ -121,9 +121,11 @@ These two measures are seeded for catalog richness and demonstrate the full meas
 Five employer wellness / HEDIS-style measures with complete CQL and active evaluation. These represent the wellness side of TWH — chronic disease management, preventive health screening, and adult immunization programs run by occupational health departments.
 
 ### 3.1 Hypertension BP Screening
-- Policy reference: HEDIS BPC / JPMC Wellness Rewards
+- Policy reference: Placeholder: CMS165 Controlling High Blood Pressure pending (relabelled 2026-09-03;
+  it also runs on the Maui pilot profile as the blood-pressure placeholder until CMS165 is onboarded,
+  so its defines read "In Eligible Population" / "Has Documented Exclusion")
 - CQL file: `backend-ts/measures/hypertension.cql`
-- Tags: `wellness`, `hypertension`, `cardiovascular`
+- Tags: `clinical`, `hypertension`, `cardiovascular`
 - Compliance window: 365 days (DueSoon 336–365)
 
 ### 3.2 Diabetes HbA1c Monitoring

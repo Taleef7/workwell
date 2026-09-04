@@ -1,6 +1,8 @@
 import React from "react";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { setSubject, subject } from "@/test/mocks/terminology";
+vi.mock("@/lib/terminology", () => ({ SUBJECT: subject }));
 import CasesPage from "../page";
 
 const getWithHeaders = vi.fn();
@@ -32,7 +34,7 @@ const mockCases = [
     measureVersionId: "cms125",
     measureName: "Breast Cancer Screening",
     measureVersion: "1.0",
-    evaluationPeriod: "2026-Q1",
+    evaluationPeriod: "2026-01-01",
     status: "OPEN",
     priority: "HIGH",
     assignee: null,
@@ -67,6 +69,7 @@ const mockCases = [
 
 describe("CasesPage crosswalk identity rendering", () => {
   beforeEach(() => {
+    setSubject("employee");
     get.mockImplementation((url: string) => {
       if (url === "/api/measures") {
         return Promise.resolve([
@@ -136,5 +139,76 @@ describe("CasesPage crosswalk identity rendering", () => {
     expect(oshaCell.tagName).toBe("TD");
     expect(within(bobRow).queryByText(/^MIPS/)).not.toBeInTheDocument();
   });
-}
-);
+
+  it("labels evaluation periods as measurement years and preserves non-year values", async () => {
+    setSubject("patient");
+    render(<CasesPage />);
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Alice Walker" })).toBeInTheDocument();
+    });
+
+    const aliceCard = screen.getByRole("heading", { name: "Alice Walker" }).closest<HTMLElement>("div.rounded-2xl")!;
+    const bobCard = screen.getByRole("heading", { name: "Bob Builder" }).closest<HTMLElement>("div.rounded-2xl")!;
+    expect(within(aliceCard).getByText("Measurement year")).toBeInTheDocument();
+    expect(within(aliceCard).getByText("2026", { exact: true })).toBeInTheDocument();
+    expect(within(aliceCard).queryByText("2026-01-01", { exact: true })).not.toBeInTheDocument();
+    expect(within(bobCard).getByText("Measurement year")).toBeInTheDocument();
+    expect(within(bobCard).getByText("2026-Q1", { exact: true })).toBeInTheDocument();
+  });
+
+  it("keeps raw periods and the Period label for employees", async () => {
+    setSubject("employee");
+    render(<CasesPage />);
+    await screen.findByRole("heading", { name: "Alice Walker" });
+
+    const aliceCard = screen.getByRole("heading", { name: "Alice Walker" }).closest<HTMLElement>("div.rounded-2xl")!;
+    expect(within(aliceCard).getByText("Period")).toBeInTheDocument();
+    expect(within(aliceCard).getByText("2026-01-01", { exact: true })).toBeInTheDocument();
+    expect(within(aliceCard).queryByText("Measurement year")).not.toBeInTheDocument();
+  });
+
+  it("uses exclusion copy for patients and keeps waiver copy for employees", async () => {
+    setSubject("patient");
+    getWithHeaders.mockImplementation(() => Promise.resolve({
+      data: [{
+        ...mockCases[0],
+        status: "EXCLUDED",
+        currentOutcomeStatus: "EXCLUDED",
+        exclusionReason: null,
+      }],
+      headers: new Headers({ "X-Total-Count": "1" }),
+    }));
+
+    const { unmount } = render(<CasesPage />);
+    await screen.findByRole("heading", { name: "Alice Walker" });
+    expect(screen.getByText("Exclusion", { selector: "dt" })).toBeInTheDocument();
+    expect(screen.getByText("Excluded by a documented exclusion.", { exact: true })).toBeInTheDocument();
+    expect(screen.queryByText("Waiver", { selector: "dt" })).not.toBeInTheDocument();
+
+    unmount();
+    setSubject("employee");
+    getWithHeaders.mockImplementation(() => Promise.resolve({
+      data: [{
+        ...mockCases[0],
+        status: "EXCLUDED",
+        currentOutcomeStatus: "EXCLUDED",
+        exclusionReason: null,
+      }],
+      headers: new Headers({ "X-Total-Count": "1" }),
+    }));
+    render(<CasesPage />);
+    await screen.findByRole("heading", { name: "Alice Walker" });
+    expect(screen.getByText("Waiver", { selector: "dt" })).toBeInTheDocument();
+    expect(screen.getByText("Excluded by active waiver or exemption.", { exact: true })).toBeInTheDocument();
+  });
+
+  it.each([
+    ["patient", /including exclusion context when an exclusion applies/],
+    ["employee", /including waiver context when an exclusion applies/],
+  ] as const)("uses %s terminology in the cases hero", async (term, copy) => {
+    setSubject(term);
+    render(<CasesPage />);
+    await screen.findByRole("heading", { name: "Alice Walker" });
+    expect(screen.getByRole("heading", { name: "Why Flagged cases" }).parentElement).toHaveTextContent(copy);
+  });
+});

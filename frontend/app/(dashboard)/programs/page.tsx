@@ -54,6 +54,7 @@ export default function ProgramsPage() {
   const mayRun = canRunMeasures(user?.role);
   const { isActive: runActive, startTracking } = useRunStatus();
   const { siteId, from, to } = useGlobalFilters();
+  const isPatientTerm = SUBJECT.singular === "patient";
   const { labelFor: measureLabelFor } = useMeasureIdentities();
   const [programs, setPrograms] = useState<ProgramSummary[]>([]);
   const [tenant, setTenant] = useState("");
@@ -296,7 +297,7 @@ export default function ProgramsPage() {
               </div>
 
               <div className="mt-4 grid gap-2 text-xs text-neutral-700 sm:grid-cols-2 dark:text-neutral-300">
-                <div>
+                <div className={isPatientTerm ? "sm:col-span-2" : undefined}>
                   <p className="font-semibold text-neutral-800 dark:text-neutral-200">Top Sites</p>
                   {drivers.bySite.length === 0 ? (
                     <p className="text-neutral-400">—</p>
@@ -309,19 +310,21 @@ export default function ProgramsPage() {
                     ))
                   )}
                 </div>
-                <div>
-                  <p className="font-semibold text-neutral-800 dark:text-neutral-200">Top Roles</p>
-                  {drivers.byRole.length === 0 ? (
-                    <p className="text-neutral-400">—</p>
-                  ) : (
-                    drivers.byRole.map((r) => (
-                      <p key={r.role} className="flex justify-between">
-                        <span>{labelFor(ROLE_LABELS, r.role)}</span>
-                        <span className="text-neutral-500 dark:text-neutral-400">{r.overdueCount} overdue</span>
-                      </p>
-                    ))
-                  )}
-                </div>
+                {!isPatientTerm ? (
+                  <div>
+                    <p className="font-semibold text-neutral-800 dark:text-neutral-200">Top Roles</p>
+                    {drivers.byRole.length === 0 ? (
+                      <p className="text-neutral-400">—</p>
+                    ) : (
+                      drivers.byRole.map((r) => (
+                        <p key={r.role} className="flex justify-between">
+                          <span>{labelFor(ROLE_LABELS, r.role)}</span>
+                          <span className="text-neutral-500 dark:text-neutral-400">{r.overdueCount} overdue</span>
+                        </p>
+                      ))
+                    )}
+                  </div>
+                ) : null}
               </div>
 
               {/* Always render this block so card heights stay stable while driver detail

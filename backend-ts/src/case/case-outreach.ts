@@ -15,6 +15,7 @@ import type { CaseEventStore } from "../stores/case-event-store.ts";
 import type { OutcomeStore } from "../stores/outcome-store.ts";
 import { toCaseDetail, type CaseDetail } from "./case-detail-read-model.ts";
 import { resolveChannel, type ChannelType, type ChannelEnv, type OutreachChannel } from "./outreach-channel.ts";
+import { DEPLOYMENT_PROFILE, subjectNoun } from "../config/deployment-profile.ts";
 
 interface OutreachTemplateContent {
   id: string | null;
@@ -53,6 +54,21 @@ const TEMPLATES = {
   },
 } satisfies Record<string, OutreachTemplateContent>;
 
+export const PATIENT_TEMPLATES = {
+  general: {
+    id: "patient-general",
+    name: "General Clinic Reminder",
+    subject: "A screening you are due for: {{measureName}}",
+    bodyText: "Hello {{employeeName}}, our records show you are due for {{measureName}}. Please call the clinic to schedule, or reply to this message with a good time to reach you.",
+  },
+  missing: {
+    id: "patient-missing",
+    name: "Missing Clinic Record Follow-Up",
+    subject: "We need a record for your {{measureName}}",
+    bodyText: "Hello {{employeeName}}, we could not find a record of your {{measureName}}. If you had it done elsewhere, please send us the report or call the clinic.",
+  },
+} satisfies Record<string, OutreachTemplateContent>;
+
 const DEFAULT_TEMPLATE: OutreachTemplateContent = TEMPLATES.general;
 
 /**
@@ -62,6 +78,10 @@ const DEFAULT_TEMPLATE: OutreachTemplateContent = TEMPLATES.general;
  *   OVERDUE/other → the generic General Compliance Reminder (never a measure-specific body).
  */
 function templateForOutcome(outcomeStatus: string | null | undefined, measureName: string | null | undefined): OutreachTemplateContent {
+  if (DEPLOYMENT_PROFILE.subjectTerm === "patient") {
+    const outcome = (outcomeStatus ?? "").trim().toUpperCase();
+    return outcome === "MISSING_DATA" ? PATIENT_TEMPLATES.missing : PATIENT_TEMPLATES.general;
+  }
   const outcome = (outcomeStatus ?? "").trim().toUpperCase();
   const measure = (measureName ?? "").toLowerCase();
   if (outcome === "MISSING_DATA") return TEMPLATES.missing;
@@ -76,7 +96,8 @@ function templateForOutcome(outcomeStatus: string | null | undefined, measureNam
 /** Look up a built-in template by its seeded id (V007/V008), else null. */
 function templateById(templateId: string | null | undefined): OutreachTemplateContent | null {
   if (!templateId) return null;
-  return Object.values(TEMPLATES).find((t) => t.id === templateId) ?? null;
+  const templates = DEPLOYMENT_PROFILE.subjectTerm === "patient" ? PATIENT_TEMPLATES : TEMPLATES;
+  return Object.values(templates).find((t) => t.id === templateId) ?? null;
 }
 
 /**
@@ -99,7 +120,7 @@ export interface OutreachPreview {
   bodyText: string;
   employeeName: string;
   measureName: string;
-  dueDate: string;
+  dueDate?: string;
 }
 
 export interface OutreachDeps {
@@ -185,6 +206,7 @@ export async function previewOutreach(
   const c = await deps.cases.getCase(caseId);
   if (!c) return null;
   const { employeeName, measureName, dueDate } = await renderContext(deps, c);
+  const isPatient = DEPLOYMENT_PROFILE.subjectTerm === "patient";
   const t = resolveTemplate(templateId, c.currentOutcomeStatus, measureName);
   return {
     templateId: t.id,
@@ -193,7 +215,7 @@ export async function previewOutreach(
     bodyText: renderTemplate(t.bodyText, employeeName, measureName, dueDate, c.currentOutcomeStatus),
     employeeName,
     measureName,
-    dueDate,
+    ...(isPatient ? {} : { dueDate }),
   };
 }
 
@@ -245,7 +267,8 @@ export async function dispatchOutreach(
     body,
   });
 
-  const nextAction = "Wait for employee follow-up, then rerun to verify closure.";
+  const { singular } = subjectNoun(DEPLOYMENT_PROFILE);
+  const nextAction = `Wait for ${singular} follow-up, then rerun to verify closure.`;
   const actionPayload: Record<string, unknown> = {
     autoTriggered: false,
     channel: channelType,
@@ -327,7 +350,7 @@ export async function updateOutreachDelivery(
     normalized === "FAILED"
       ? "Retry outreach delivery or escalate if contact path remains blocked."
       : normalized === "SENT"
-        ? "Wait for employee response, then rerun to verify closure."
+        ? `Wait for ${subjectNoun(DEPLOYMENT_PROFILE).singular} response, then rerun to verify closure.`
         : "Outreach queued for delivery.";
 
   const updatedAt = new Date().toISOString();
