@@ -72,7 +72,31 @@ const OFFICIAL_MISSING_DATA =
   "Not in this measure's initial population for the measurement period, or the evaluation could not " +
   "complete. Check eligibility and the record before acting.";
 
+// The four refusal-capable immunizations fold "nothing recorded", "partial series" and "documented
+// refusal" into one bucket — MISSING_DATA for the three permanent series (their CQL never emits
+// OVERDUE) and OVERDUE or MISSING_DATA for Td/Tdap — but `nextActionFor` receives only
+// (status, measureId), so the wording may assert neither state: it names the gap and the record
+// review that distinguishes them. The series' OVERDUE entries are kept for symmetry, not reachability.
+const REFUSAL_REVIEW =
+  "Review the record for a documented refusal or contraindication; otherwise order or document a dose.";
+
 const NEXT_ACTION_OVERRIDES: Record<string, Partial<Record<string, string>>> = {
+  adult_immunization: {
+    OVERDUE: `Td/Tdap not current. ${REFUSAL_REVIEW}`,
+    MISSING_DATA: `Td/Tdap not documented as current. ${REFUSAL_REVIEW}`,
+  },
+  mmr: {
+    OVERDUE: `MMR 2-dose series not documented as complete. ${REFUSAL_REVIEW}`,
+    MISSING_DATA: `MMR 2-dose series not documented as complete. ${REFUSAL_REVIEW}`,
+  },
+  varicella: {
+    OVERDUE: `Varicella 2-dose series not documented as complete. ${REFUSAL_REVIEW}`,
+    MISSING_DATA: `Varicella 2-dose series not documented as complete. ${REFUSAL_REVIEW}`,
+  },
+  hepatitis_b_vaccination_series: {
+    OVERDUE: `Hepatitis B series not documented as complete. ${REFUSAL_REVIEW}`,
+    MISSING_DATA: `Hepatitis B series not documented as complete. ${REFUSAL_REVIEW}`,
+  },
   cms122: {
     OVERDUE:
       "Most recent glycemic status assessment (HbA1c or GMI) is above 9%, or none is on file for this " +
