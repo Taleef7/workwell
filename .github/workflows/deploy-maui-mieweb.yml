@@ -1,12 +1,14 @@
 name: Deploy Maui OS MIEWeb
 
-# Maui sandbox deployment. On manual dispatch this builds + deploys the TypeScript backend
+# Maui sandbox deployment. On every push to main (and on manual dispatch) this builds + deploys the TypeScript backend
 # (backend-ts/ → maui-api-ts.os.mieweb.org) and the Maui frontend (pointed at it). Backend images are
 # tagged maui-latest and maui-sha-<SHA> in GHCR to avoid tag collision with TWH.
 # Rollback = redeploy an earlier known-good maui-api-ts image (workflow_dispatch with replace_existing=true
 # at an earlier SHA; each build is tagged maui-sha-<SHA> in GHCR).
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
     inputs:
       replace_existing:
@@ -18,7 +20,8 @@ on:
           - "false"
           - "true"
 
-# A constant Maui group (NOT keyed on github.ref) keeps manual container operations serialized.
+# A constant Maui group (NOT keyed on github.ref), shared with reconcile-maui-mieweb.yml, keeps container
+# operations serialized: a self-heal can never run while a push deploy is mid delete+recreate.
 # cancel-in-progress: false → the later run queues behind the in-flight one rather than racing or being dropped.
 concurrency:
   group: maui-mieweb-container-ops
@@ -124,9 +127,12 @@ jobs:
           context: .
           file: ./backend-ts/Dockerfile
           push: true
-          tags: |
-            ${{ env.BACKEND_TS_IMAGE }}:maui-latest
-            ${{ env.BACKEND_TS_IMAGE }}:maui-sha-${{ github.sha }}
+          # Only the IMMUTABLE tag is pushed here. `maui-latest` is the tag the self-heal reconciler
+          # recreates from, so it must mean "the last image that DEPLOYED successfully", not "the last
+          # image that BUILT" — otherwise a build that deploys badly poisons the recovery path, and the
+          # next outage heals onto the broken version (Codex P2 #522). It is promoted by
+          # `deploy-backend-ts` after the deploy succeeds.
+          tags: ${{ env.BACKEND_TS_IMAGE }}:maui-sha-${{ github.sha }}
 
   build-frontend:
     name: Build maui frontend image
@@ -163,9 +169,9 @@ jobs:
             NEXT_PUBLIC_SUBJECT_TERM=patient
             NEXT_PUBLIC_PUBLIC_DEMO=off
             NEXT_PUBLIC_CODIFY_INDEX_URL=${{ vars.NEXT_PUBLIC_CODIFY_INDEX_URL }}
-          tags: |
-            ${{ env.FRONTEND_IMAGE }}:latest
-            ${{ env.FRONTEND_IMAGE }}:sha-${{ github.sha }}
+          # Immutable tag only; `latest` is promoted by `deploy-frontend` after a successful deploy.
+          # See the note on the backend build above (Codex P2 #522).
+          tags: ${{ env.FRONTEND_IMAGE }}:sha-${{ github.sha }}
 
   deploy-backend-ts:
     name: Deploy maui-api-ts backend container (TypeScript — primary)
@@ -176,6 +182,9 @@ jobs:
     # reconciler, which is the failure mode this whole change exists to stop depending on.
     timeout-minutes: 45
     needs: build-backend-ts
+    permissions:
+      contents: read
+      packages: write   # promotes maui-latest onto the image this job deploys
     env:
       MIEWEB_API_URL: ${{ secrets.LAUNCHPAD_API_URL }}
       MIEWEB_API_KEY: ${{ secrets.LAUNCHPAD_API_KEY }}
@@ -188,9 +197,16 @@ jobs:
       # treats a blank key as "not configured" (StoreValueSetResolver only). Set the
       # WORKWELL_VSAC_API_KEY_TWH secret to enable.
       WORKWELL_VSAC_API_KEY: ${{ secrets.WORKWELL_VSAC_API_KEY_TWH }}
-      REPLACE_EXISTING: ${{ inputs.replace_existing == 'true' }}
+      REPLACE_EXISTING: ${{ github.event_name == 'push' || inputs.replace_existing == 'true' }}
     steps:
       - uses: actions/checkout@v7
+
+      # Needed only by the tag-promotion step at the end of this job.
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Validate required secrets
         run: |
@@ -273,6 +289,14 @@ jobs:
           CONTAINER_ENV_VARS_JSON: ${{ steps.backend-ts-env.outputs.json }}
         run: bash .github/scripts/deploy-mieweb-container.sh
 
+      # The recovery tag is promoted ONLY here, after the container above came up. `maui-latest` is what
+      # reconcile-maui-mieweb.yml recreates from, so its whole value is that it names an image that was
+      # actually deployed and served traffic. `imagetools create` re-points the tag at the existing
+      # manifest by digest — no pull, no rebuild, so the promoted bytes are exactly the deployed bytes.
+      - name: Promote maui-latest to the image that just deployed
+        run: |
+          docker buildx imagetools create             --tag "${{ env.BACKEND_TS_IMAGE }}:maui-latest"             "${{ env.BACKEND_TS_IMAGE }}:maui-sha-${{ github.sha }}"
+
   deploy-frontend:
     name: Deploy maui frontend container
     runs-on: ubuntu-latest
@@ -288,12 +312,22 @@ jobs:
     # Rollback: redeploy an earlier known-good maui-api-ts image — workflow_dispatch with replace_existing=true
     # at an earlier maui-sha-<SHA>. See docs/DEPLOY.md → Rollback.
     needs: [build-frontend, deploy-backend-ts]
+    permissions:
+      contents: read
+      packages: write   # promotes :latest onto the image this job deploys
     env:
       MIEWEB_API_URL: ${{ secrets.LAUNCHPAD_API_URL }}
       MIEWEB_API_KEY: ${{ secrets.LAUNCHPAD_API_KEY }}
-      REPLACE_EXISTING: ${{ inputs.replace_existing == 'true' }}
+      REPLACE_EXISTING: ${{ github.event_name == 'push' || inputs.replace_existing == 'true' }}
     steps:
       - uses: actions/checkout@v7
+
+      # Needed only by the tag-promotion step at the end of this job.
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Validate required secrets
         run: |
@@ -327,3 +361,11 @@ jobs:
           INTERNAL_PORT: 3000
           CONTAINER_ENV_VARS_JSON: ${{ steps.frontend-env.outputs.json }}
         run: bash .github/scripts/deploy-mieweb-container.sh
+
+      # Promoted only after the frontend container came up — see the note on the backend promotion above.
+      # Each surface's recovery tag tracks its OWN last successful deployment, so a backend that deployed
+      # and a frontend that did not can never be healed to as if they were one good release.
+      - name: Promote latest to the frontend image that just deployed
+        run: |
+          docker buildx imagetools create             --tag "${{ env.FRONTEND_IMAGE }}:latest"             "${{ env.FRONTEND_IMAGE }}:sha-${{ github.sha }}"
+

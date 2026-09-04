@@ -1,5 +1,38 @@
 # Journal
 
+## 2026-09-04 — the Maui sandbox deploys on push and heals itself; the redeploy that showed why
+
+The pilot's quality lead has had sandbox access since the 2026-09-03 handover, and the sandbox was still
+running the handover build: three merges (#516, #517, #518) had landed on `main` with nothing carrying
+them to `maui.os.mieweb.org`, because the Maui workflow was `workflow_dispatch` only. The first manual
+dispatch at `668deab9` with `replace_existing=false` **failed by design** — the deploy script refuses to
+touch an existing container without the replace flag — which is the honest way to learn that on this
+platform every redeploy of a live container is a delete + recreate. The second dispatch with
+`replace_existing=true` is the one that shipped.
+
+Two workflow changes follow from that, both mirrored from TWH: **`deploy-maui-mieweb.yml` now triggers
+on push to `main`** (with `REPLACE_EXISTING` true on push, as TWH's is), and a new
+**`reconcile-maui-mieweb.yml`** self-heal watchdog recreates a down surface from `maui-latest` /
+the Maui frontend's `:latest`. It carries Maui's env array verbatim from the deploy workflow — no S3
+bucket keys, because Maui ships none — and `official-flip-config.test.ts` now lists it, pairs it with
+the Maui deploy in `MUST_AGREE`, and its two terminology predicates read every in-scope workflow's
+measure list rather than TWH's alone (the guard-scope gap ROADMAP MM-1b named). `DEPLOY.md`'s Maui
+section says all of this.
+
+Codex's review of the PR found two real defects in that reconciler, both of the same shape — an
+automatic path quietly weaker than the manual one it copies. First, the deploy workflow refuses to run
+Maui against the production database by comparing Neon endpoint hosts, and the reconciler carried
+neither the secret nor the comparison; a self-heal is precisely where a mispasted `DATABASE_URL_MAUI`
+would do the most damage, because it recreates a scheduler-enabled container with nobody watching. The
+guard is now byte-identical in both files. Second, the build job pushed `maui-latest` before the deploy
+job ran, so a build whose deploy then failed already owned the tag the reconciler heals from — the
+recovery path would have carried an outage forward instead of ending it. The build now pushes only the
+immutable `maui-sha-<SHA>`, and each deploy job promotes its own surface's recovery tag onto that digest
+after the container is up (`docker buildx imagetools create`, a re-point by digest, so the promoted
+bytes are the deployed bytes). Per-surface promotion also means a backend that deployed and a frontend
+that did not can never be healed to as if they were one release. A pleasant side effect: a fast rollback
+is itself a successful deploy, so it promotes the tag and a later heal no longer undoes it.
+
 ## 2026-09-03 — one compliance rate, computed the way CMS scores it; the inverse measure reads as inverse; next actions state the gap
 
 **Two numbers for one measure.** The Maui walkthrough found the measure detail page showing 79.2% as its

@@ -790,9 +790,11 @@ own Neon database and JWT secret, and uses the same backend image build and depl
 | Frontend | `maui.os.mieweb.org` | `ghcr.io/taleef7/workwell-maui-frontend` |
 | Backend API | `maui-api-ts.os.mieweb.org` | `ghcr.io/taleef7/workwell-api-ts` |
 
-Run `.github/workflows/deploy-maui-mieweb.yml` from **Actions → Deploy Maui OS MIEWeb → Run workflow**.
-It is **`workflow_dispatch` only** because the two Maui-only secrets are not present on every push;
-an automatic trigger would fail until those secrets were set.
+`.github/workflows/deploy-maui-mieweb.yml` deploys **on every push to `main`** (since 2026-09-04) and on
+manual dispatch from **Actions → Deploy Maui OS MIEWeb → Run workflow**. A push deploy replaces the
+existing containers the same way TWH's does (delete + recreate, roughly a minute of backend downtime);
+a manual dispatch only replaces them when `replace_existing=true`, which is the only way to redeploy an
+existing container by hand — `false` refuses with "already exists" and is for first creation only.
 
 Owner-set GitHub secrets:
 
@@ -815,8 +817,20 @@ retrieves a *Procedure* by the Mammography value set, VSAC's expansion of that s
 the bundled CPT fallback only fires when VSAC returns nothing — so the same roster scored 38 compliant
 one day and 0 the next. The official artifact reads the LOINC-coded Observation and is deterministic.
 Gate evidence: the official executors evaluate all 48 Maui patients to their designed distribution
-(38 compliant / 7 overdue / 3 excluded per measure, no mismatches). Maui has no self-heal reconciler,
-so dispatch the workflow again for a replacement or recovery.
+(38 compliant / 7 overdue / 3 excluded per measure, no mismatches). `reconcile-maui-mieweb.yml`
+(since 2026-09-04) is Maui's self-heal reconciler: the same watchdog as TWH's, healing the backend from
+`maui-latest` (never `:latest`, see the tag note below) and the frontend from its own repository's
+`:latest`, sharing the `maui-mieweb-container-ops` concurrency group with the deploy so a heal and a
+push deploy never touch the same container at once. The cadence caveat in the TWH reconciler's header
+applies unchanged: GitHub delivers the 15-minute schedule every few hours under load, so it is a slow
+backstop, not a recovery-time guarantee. `official-flip-config.test.ts` asserts the deploy and
+reconcile pair ship the same `WORKWELL_OFFICIAL_MEASURES`, exactly as it does for TWH. The reconciler
+also carries the deploy workflow's **production-database isolation guard** verbatim — it refuses to
+recreate the backend when `DATABASE_URL_MAUI` resolves to the same endpoint host as `DATABASE_URL_TWH`.
+It is the path that most needs the guard, not the one that can skip it: a heal recreates a
+scheduler-enabled container unattended, so a mispasted secret would write Maui runs, cases and audit
+events into TWH's `workwell_spike` schema, and because the Maui profile evaluates a different
+population the contamination would read as real churn rather than as a misconfiguration.
 
 
 The demo segment seed is profile-aware since 2026-09-02 (`fix/maui-segment-seed`): the maui profile seeds a
@@ -843,6 +857,21 @@ branch would leave the live TWH demo able to self-heal onto that code. `deploy-s
 namespaces its tags (`staging-*`) for the same reason. The frontend needs no namespacing — Maui
 builds a different image repository. **Maui rollback:** re-dispatch with `replace_existing: true` at
 an earlier commit, whose image is `maui-sha-<that SHA>`.
+
+**A recovery tag names the last SUCCESSFUL DEPLOY, not the last build (since 2026-09-04).** The build
+jobs push only the immutable tags (`maui-sha-<SHA>` for the backend, `sha-<SHA>` for the frontend).
+Each deploy job promotes its surface's mutable recovery tag — `maui-latest`, and the frontend's
+`:latest` — onto that digest **after** the container is up, with `docker buildx imagetools create`
+(a re-point by digest: no pull, no rebuild, so the promoted bytes are exactly the deployed bytes).
+This matters because `reconcile-maui-mieweb.yml` heals from those tags: if a build advanced them and
+its deploy then failed, the next outage would heal onto the version that never worked, carrying the
+outage forward instead of ending it. Promoting per surface also means a backend that deployed and a
+frontend that did not can never be healed to as though they were one good release. Two consequences
+worth knowing: a fast rollback (re-dispatching an earlier `maui-sha-<SHA>`) now promotes the recovery
+tag onto the rolled-back image, so a later heal restores the rollback rather than undoing it — but the
+next push to main still supersedes it, so a fast rollback remains a stopgap until the bad commit is
+reverted; and if a deploy fails, the recovery tag still names the previous good image, which is the
+point.
 
 Sandbox accounts (all use the documented demo password `Workwell123!`):
 
