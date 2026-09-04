@@ -32,7 +32,8 @@ export const DEMO_USERS: readonly DemoUser[] = [
   // trigger compute (authorize.ts blocks all non-GET for VIEWER). Frontend rbac already treats it read-only.
   { email: "viewer@workwell.dev", role: "ROLE_VIEWER", passwordHash: DEMO_PASSWORD_HASH },
   // Sandbox logins for the Maui pilot deployment (pseudonymous by policy). DEMO_USERS is shared
-  // across deployments, so these rows exist on every instance.
+  // across deployments, so these rows exist on every instance — but `isDemoAccountRefusedOnProfile`
+  // refuses them everywhere except the maui profile, and refuses every other account there (#520).
   { email: "quality-lead@maui.workwell.dev", role: "ROLE_CASE_MANAGER", passwordHash: DEMO_PASSWORD_HASH },
   { email: "quality-staff@maui.workwell.dev", role: "ROLE_CASE_MANAGER", passwordHash: DEMO_PASSWORD_HASH },
   { email: "clinician@maui.workwell.dev", role: "ROLE_VIEWER", passwordHash: DEMO_PASSWORD_HASH },
@@ -63,7 +64,8 @@ export function isDemoAccountRefusedOnProfile(
       ? DEMO_USERS.find((u) => u.email.toLowerCase() === userOrEmail.trim().toLowerCase()) ?? null
       : userOrEmail;
   if (!user) return false;
-  return profileId === "maui" && !user.email.toLowerCase().endsWith("@maui.workwell.dev");
+  const isMauiAccount = user.email.toLowerCase().endsWith("@maui.workwell.dev");
+  return profileId === "maui" ? !isMauiAccount : isMauiAccount;
 }
 
 /** Validate credentials; returns the user on success, else null. */
