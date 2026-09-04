@@ -9,6 +9,13 @@ name: Reconcile Maui stack (self-heal)
 #     repository and TWH's reconciler recreates from `:latest`, so the Maui deploy pushes namespaced
 #     tags (`maui-latest`, `maui-sha-<SHA>`). Healing from `:latest` here would put TWH's build on the
 #     pilot's instance.
+#   * `maui-latest` means LAST SUCCESSFULLY DEPLOYED, not last built. deploy-maui-mieweb.yml's build
+#     job pushes only the immutable `maui-sha-<SHA>`; the deploy job promotes `maui-latest` onto that
+#     digest after the container comes up. Without that ordering a build whose deploy then FAILED would
+#     already own the tag, and the next outage would heal onto the version that never worked — the
+#     recovery path would carry the outage forward (Codex P2 #522). The frontend's `:latest` is
+#     promoted the same way, by its own deploy job, so the two surfaces' recovery tags can never name
+#     halves of two different failed attempts.
 #   * Maui ships no S3 evidence bucket (evidence stays on the in-container fs, by decision), so the four
 #     WORKWELL_BUCKET_S3_* keys are absent from the env array on purpose. `official-flip-config.test.ts`
 #     asserts this file and deploy-maui-mieweb.yml ship the same WORKWELL_OFFICIAL_MEASURES.
@@ -31,10 +38,12 @@ name: Reconcile Maui stack (self-heal)
 # deploy-maui-mieweb.yml, so a heal can never run while a push-to-main deploy is mid delete+recreate of
 # the same container (and vice-versa) — the queued run waits, then re-checks a now-healthy surface.
 #
-# Rollback interaction: a heal recreates from GHCR `:latest`. If you have done a FAST rollback by
-# redeploying an older `sha-<SHA>` via workflow_dispatch, a later heal will re-pull `:latest` (the newer
-# build) and undo it — so follow a fast rollback with a DURABLE one (revert the bad commit on main so
-# `:latest` rebuilds to the good image), or disable this workflow, before relying on it. See docs/DEPLOY.md.
+# Rollback interaction: a heal recreates from the recovery tag, which now names the last image that
+# DEPLOYED successfully. A FAST rollback (redeploying an older `maui-sha-<SHA>` via workflow_dispatch)
+# is itself a successful deploy, so it promotes the recovery tag onto the rolled-back image and a later
+# heal restores THAT — the fast rollback is no longer silently undone. What still undoes it is the next
+# push to main, which deploys and promotes the newer build; so a fast rollback is still a stopgap until
+# the bad commit is reverted on main. See docs/DEPLOY.md.
 
 # CADENCE, MEASURED — do not read the cron below as a recovery-time guarantee. Over 2026-08-30..09-01
 # the twelve most recent scheduled runs came 2.5-7.5 HOURS apart, never 15 minutes: GitHub queues
@@ -120,6 +129,9 @@ jobs:
       MIEWEB_API_URL: ${{ secrets.LAUNCHPAD_API_URL }}
       MIEWEB_API_KEY: ${{ secrets.LAUNCHPAD_API_KEY }}
       DATABASE_URL: ${{ secrets.DATABASE_URL_MAUI }}
+      # SAFETY (Codex P1 #522): the isolation guard below needs the production URL to compare against.
+      # KEEP IN SYNC with deploy-maui-mieweb.yml.
+      PROD_DATABASE_URL: ${{ secrets.DATABASE_URL_TWH }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       WORKWELL_AUTH_JWT_SECRET: ${{ secrets.WORKWELL_AUTH_JWT_SECRET_MAUI }}
       # Optional (E14/ADR-023): inert when the WORKWELL_VSAC_API_KEY_TWH secret is unset. KEEP IN SYNC with deploy-maui-mieweb.yml.
@@ -138,6 +150,20 @@ jobs:
           [ -z "$WORKWELL_AUTH_JWT_SECRET" ] && missing+=("WORKWELL_AUTH_JWT_SECRET_MAUI")
           if [ ${#missing[@]} -gt 0 ]; then
             echo "::error::Missing required secret(s): ${missing[*]}"
+            exit 1
+          fi
+          # SAFETY: refuse to heal Maui onto the PRODUCTION database. Mirrors the identical guard in
+          # deploy-maui-mieweb.yml -> "Validate required secrets" and KEEPS IN SYNC with it. The
+          # reconciler recreates a scheduler-enabled container unattended, so it is the path where a
+          # mispasted DATABASE_URL_MAUI would do the most damage before anyone noticed: Maui runs,
+          # cases and audit events land in TWH's `workwell_spike` schema, and because the Maui profile
+          # evaluates a DIFFERENT population the contamination reads as real churn, not misconfiguration.
+          # A guard the normal path enforces and the automatic path skips is not a guard (Codex P1 #522).
+          host_of() { printf '%s' "$1" | sed -E 's#^(jdbc:)?[a-z]+://([^@]*@)?([^/:?]+).*#\3#'; }
+          maui_host="$(host_of "$DATABASE_URL")"
+          prod_host="$(host_of "$PROD_DATABASE_URL")"
+          if [ -n "$prod_host" ] && [ "$maui_host" = "$prod_host" ]; then
+            echo "::error::DATABASE_URL_MAUI resolves to the SAME host as the production DB ($maui_host) — refusing to contaminate the demo database. Provision a SEPARATE Neon project for Maui."
             exit 1
           fi
 

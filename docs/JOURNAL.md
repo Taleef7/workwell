@@ -19,6 +19,20 @@ the Maui deploy in `MUST_AGREE`, and its two terminology predicates read every i
 measure list rather than TWH's alone (the guard-scope gap ROADMAP MM-1b named). `DEPLOY.md`'s Maui
 section says all of this.
 
+Codex's review of the PR found two real defects in that reconciler, both of the same shape — an
+automatic path quietly weaker than the manual one it copies. First, the deploy workflow refuses to run
+Maui against the production database by comparing Neon endpoint hosts, and the reconciler carried
+neither the secret nor the comparison; a self-heal is precisely where a mispasted `DATABASE_URL_MAUI`
+would do the most damage, because it recreates a scheduler-enabled container with nobody watching. The
+guard is now byte-identical in both files. Second, the build job pushed `maui-latest` before the deploy
+job ran, so a build whose deploy then failed already owned the tag the reconciler heals from — the
+recovery path would have carried an outage forward instead of ending it. The build now pushes only the
+immutable `maui-sha-<SHA>`, and each deploy job promotes its own surface's recovery tag onto that digest
+after the container is up (`docker buildx imagetools create`, a re-point by digest, so the promoted
+bytes are the deployed bytes). Per-surface promotion also means a backend that deployed and a frontend
+that did not can never be healed to as if they were one release. A pleasant side effect: a fast rollback
+is itself a successful deploy, so it promotes the tag and a later heal no longer undoes it.
+
 ## 2026-09-03 — one compliance rate, computed the way CMS scores it; the inverse measure reads as inverse; next actions state the gap
 
 **Two numbers for one measure.** The Maui walkthrough found the measure detail page showing 79.2% as its

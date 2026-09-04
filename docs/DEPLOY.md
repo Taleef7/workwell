@@ -824,7 +824,13 @@ Gate evidence: the official executors evaluate all 48 Maui patients to their des
 push deploy never touch the same container at once. The cadence caveat in the TWH reconciler's header
 applies unchanged: GitHub delivers the 15-minute schedule every few hours under load, so it is a slow
 backstop, not a recovery-time guarantee. `official-flip-config.test.ts` asserts the deploy and
-reconcile pair ship the same `WORKWELL_OFFICIAL_MEASURES`, exactly as it does for TWH.
+reconcile pair ship the same `WORKWELL_OFFICIAL_MEASURES`, exactly as it does for TWH. The reconciler
+also carries the deploy workflow's **production-database isolation guard** verbatim — it refuses to
+recreate the backend when `DATABASE_URL_MAUI` resolves to the same endpoint host as `DATABASE_URL_TWH`.
+It is the path that most needs the guard, not the one that can skip it: a heal recreates a
+scheduler-enabled container unattended, so a mispasted secret would write Maui runs, cases and audit
+events into TWH's `workwell_spike` schema, and because the Maui profile evaluates a different
+population the contamination would read as real churn rather than as a misconfiguration.
 
 
 The demo segment seed is profile-aware since 2026-09-02 (`fix/maui-segment-seed`): the maui profile seeds a
@@ -851,6 +857,21 @@ branch would leave the live TWH demo able to self-heal onto that code. `deploy-s
 namespaces its tags (`staging-*`) for the same reason. The frontend needs no namespacing — Maui
 builds a different image repository. **Maui rollback:** re-dispatch with `replace_existing: true` at
 an earlier commit, whose image is `maui-sha-<that SHA>`.
+
+**A recovery tag names the last SUCCESSFUL DEPLOY, not the last build (since 2026-09-04).** The build
+jobs push only the immutable tags (`maui-sha-<SHA>` for the backend, `sha-<SHA>` for the frontend).
+Each deploy job promotes its surface's mutable recovery tag — `maui-latest`, and the frontend's
+`:latest` — onto that digest **after** the container is up, with `docker buildx imagetools create`
+(a re-point by digest: no pull, no rebuild, so the promoted bytes are exactly the deployed bytes).
+This matters because `reconcile-maui-mieweb.yml` heals from those tags: if a build advanced them and
+its deploy then failed, the next outage would heal onto the version that never worked, carrying the
+outage forward instead of ending it. Promoting per surface also means a backend that deployed and a
+frontend that did not can never be healed to as though they were one good release. Two consequences
+worth knowing: a fast rollback (re-dispatching an earlier `maui-sha-<SHA>`) now promotes the recovery
+tag onto the rolled-back image, so a later heal restores the rollback rather than undoing it — but the
+next push to main still supersedes it, so a fast rollback remains a stopgap until the bad commit is
+reverted; and if a deploy fails, the recovery tag still names the previous good image, which is the
+point.
 
 Sandbox accounts (all use the documented demo password `Workwell123!`):
 
