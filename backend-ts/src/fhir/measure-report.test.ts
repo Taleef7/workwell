@@ -184,6 +184,22 @@ test("ADR-046: the INDIVIDUAL report derives the trio from its own outcome", () 
   assert.equal(authored.measure, "urn:workwell:measure:cms122");
 });
 
+test("#521: cms122 notation source — binding for AUTHORED runs, official evidence for OFFICIAL runs", () => {
+  // One measure, two consumers, two correct sources. An authored run's outcome has no official
+  // evidence block, so the report's notation falls back to `MEASURE_BINDINGS` ("increase": the authored
+  // numerator IS the compliant bucket). An official-routed run's outcome carries that evidence, so the
+  // report reads the semantics of the artifact that actually ran (ADR-046) — "decrease": the official
+  // numerator counts poor control. Neither exporter may silently cross these sources.
+  const authored = buildSummaryMeasureReport(run, "cms122", [oc("COMPLIANT"), oc("OVERDUE")], GENERATED_AT);
+  assert.equal(authored.improvementNotation?.coding[0]?.code, "increase");
+  assert.equal(authored.measure, "urn:workwell:measure:cms122");
+
+  const official = buildSummaryMeasureReport(
+    run, "cms122", [routedOc("cms122", true), routedOc("cms122", false)], GENERATED_AT,
+  );
+  assert.equal(official.improvementNotation?.coding[0]?.code, "decrease");
+});
+
 test("base R4 metadata: UUID id, generation date, and contained WorkWell reporter", () => {
   const summary = buildSummaryMeasureReport(run, "audiogram", outcomes, GENERATED_AT);
   assert.match(summary.id, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
