@@ -46,7 +46,7 @@ test("nextActionFor is measure-aware for non-OSHA measures (M1: no longer defaul
   assert.match(nextActionFor("MISSING_DATA", "diabetes_hba1c"), /HbA1c test/);
   assert.match(nextActionFor("OVERDUE", "cms125"), /mammogram/);
   assert.match(nextActionFor("DUE_SOON", "adult_immunization"), /Td\/Tdap immunization/);
-  assert.match(nextActionFor("MISSING_DATA", "hepatitis_b_vaccination_series"), /hepatitis B vaccination/);
+  assert.match(nextActionFor("MISSING_DATA", "hepatitis_b_vaccination_series"), /Hepatitis B series not documented as complete/);
   // none of these non-audiogram measures may leak the word "audiogram"
   for (const m of ["diabetes_hba1c", "cms125", "adult_immunization", "mmr", "varicella", "obesity_bmi"]) {
     assert.doesNotMatch(nextActionFor("MISSING_DATA", m), /audiogram/);
@@ -73,6 +73,57 @@ test("nextActionFor: on the official-routed measures MISSING_DATA means 'not in 
   }
   // Authored measures keep the data-gap reading: their MISSING_DATA really is a missing result.
   assert.match(nextActionFor("MISSING_DATA", "audiogram"), /No audiogram result could be found/);
+});
+
+test("nextActionFor: refusal-capable immunization OVERDUE wording is true whether or not a refusal is documented", () => {
+  assert.equal(
+    nextActionFor("OVERDUE", "adult_immunization"),
+    "Td/Tdap not current. Review the record for a documented refusal or contraindication; otherwise order or document a dose.",
+  );
+  assert.equal(
+    nextActionFor("OVERDUE", "mmr"),
+    "MMR 2-dose series not documented as complete. Review the record for a documented refusal or contraindication; otherwise order or document a dose.",
+  );
+  assert.equal(
+    nextActionFor("OVERDUE", "varicella"),
+    "Varicella 2-dose series not documented as complete. Review the record for a documented refusal or contraindication; otherwise order or document a dose.",
+  );
+  assert.equal(
+    nextActionFor("OVERDUE", "hepatitis_b_vaccination_series"),
+    "Hepatitis B series not documented as complete. Review the record for a documented refusal or contraindication; otherwise order or document a dose.",
+  );
+});
+
+test("nextActionFor: refusal-capable immunization MISSING_DATA wording is true whether or not a refusal is documented", () => {
+  assert.equal(
+    nextActionFor("MISSING_DATA", "adult_immunization"),
+    "Td/Tdap not documented as current. Review the record for a documented refusal or contraindication; otherwise order or document a dose.",
+  );
+  assert.equal(
+    nextActionFor("MISSING_DATA", "mmr"),
+    "MMR 2-dose series not documented as complete. Review the record for a documented refusal or contraindication; otherwise order or document a dose.",
+  );
+  assert.equal(
+    nextActionFor("MISSING_DATA", "varicella"),
+    "Varicella 2-dose series not documented as complete. Review the record for a documented refusal or contraindication; otherwise order or document a dose.",
+  );
+  assert.equal(
+    nextActionFor("MISSING_DATA", "hepatitis_b_vaccination_series"),
+    "Hepatitis B series not documented as complete. Review the record for a documented refusal or contraindication; otherwise order or document a dose.",
+  );
+});
+
+test("nextActionFor: refusal-capable immunization overrides never assert a record's absence or a refusal", () => {
+  for (const measureId of ["adult_immunization", "mmr", "varicella", "hepatitis_b_vaccination_series"]) {
+    for (const outcomeStatus of ["OVERDUE", "MISSING_DATA"]) {
+      const action = nextActionFor(outcomeStatus, measureId);
+      assert.doesNotMatch(action, /No .+ on file/);
+      assert.doesNotMatch(action, /not on file/);
+      assert.doesNotMatch(action, /could be found/);
+      assert.doesNotMatch(action, /declined/i);
+      assert.doesNotMatch(action, /refused/i);
+    }
+  }
 });
 
 test("nextActionFor: an unknown measure falls back to a generic noun, never 'audiogram'", () => {
