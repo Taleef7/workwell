@@ -12,6 +12,9 @@ import type { DirectorySnapshot } from "../engine/ingress/webchart/live-director
 import type { DataSourceEnv } from "../engine/ingress/data-source.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
+import { officialMeasureIds } from "../wiring/official-routing.ts";
+import { officialMeasureSemantics } from "../wiring/official-measure-semantics.ts";
+import { isVendoredOfficialMeasure } from "./official-measure-ids.ts";
 
 export type DeploymentProfileId = "default" | "maui";
 export type SubjectTerm = "employee" | "patient";
@@ -38,20 +41,37 @@ export interface DeploymentDirectory extends SyntheticDirectoryView {
   readonly EVALUATION_EXCLUDED_TENANTS: ReadonlySet<string>;
 }
 
+export type RunnableKind =
+  | { kind: "authored" }
+  | { kind: "official" }
+  | { kind: "official-pending"; reason: string }
+  | { kind: "invalid"; reason: string };
+
+/**
+ * ADR-072 part 1. A measure id is runnable iff the profile lists it AND either
+ *  (a) authored: registry + synthetic binding both exist; or
+ *  (b) official-only: vendored + semantics recorded + named in WORKWELL_OFFICIAL_MEASURES.
+ * An id that is both authored and routed is "official" (routing wins, as the router already decides).
+ * Pure: `env` is passed in, never read from process.env here, so the routing flag is read at CALL time.
+ */
+export function classifyRunnable(id: string, env: Record<string, unknown>): RunnableKind {
+  const routed = officialMeasureIds(env).has(id);
+  const authored = Boolean(MEASURES[id] && MEASURE_BINDINGS[id]);
+  if (routed && isVendoredOfficialMeasure(id) && officialMeasureSemantics(id)) return { kind: "official" };
+  if (authored) return { kind: "authored" };
+  if (!isVendoredOfficialMeasure(id)) return { kind: "invalid", reason: `${id}: not authored and not vendored under measures/official/` };
+  if (!officialMeasureSemantics(id)) return { kind: "invalid", reason: `${id}: vendored but has no OFFICIAL_MEASURE_SEMANTICS entry` };
+  return { kind: "official-pending", reason: `${id}: official-only and not named in WORKWELL_OFFICIAL_MEASURES on this deployment` };
+}
+
+/** Module-load validation checks only the env-independent half: every listed id must be authored OR (vendored + semantics). */
 export function validateRunnableMeasureIds(ids: readonly string[]): readonly string[] {
-  const missingFromMeasures = ids.filter((id) => !MEASURES[id]);
-  const missingFromBindings = ids.filter((id) => !MEASURE_BINDINGS[id]);
-  if (missingFromMeasures.length > 0 || missingFromBindings.length > 0) {
-    const details = [
-      missingFromMeasures.length > 0 ? `missing from MEASURES: ${missingFromMeasures.join(", ")}` : null,
-      missingFromBindings.length > 0 ? `missing from MEASURE_BINDINGS: ${missingFromBindings.join(", ")}` : null,
-    ].filter((detail): detail is string => detail !== null);
-    throw new Error(`[workwell] Invalid runnable measure id(s): ${details.join("; ")}`);
-  }
+  const invalid = ids.map((id) => classifyRunnable(id, {})).filter((k): k is { kind: "invalid"; reason: string } => k.kind === "invalid");
+  if (invalid.length > 0) throw new Error(`[workwell] Invalid runnable measure id(s): ${invalid.map((k) => k.reason).join("; ")}`);
   return ids;
 }
 
-const MAUI_MEASURE_IDS = ["cms122", "cms125", "hypertension"] as const;
+const MAUI_MEASURE_IDS = ["cms122", "cms125", "cms2", "cms130", "cms165"] as const;
 const DEFAULT_MEASURE_IDS = Object.keys(MEASURES);
 validateRunnableMeasureIds(MAUI_MEASURE_IDS);
 validateRunnableMeasureIds(DEFAULT_MEASURE_IDS);
@@ -120,10 +140,20 @@ export const enterpriseForTenant = DEPLOYMENT_DIRECTORY.enterpriseForTenant;
 export const employeesForTenant = DEPLOYMENT_DIRECTORY.employeesForTenant;
 export const providersForLocation = DEPLOYMENT_DIRECTORY.providersForLocation;
 export const RUNNABLE_MEASURE_IDS = DEPLOYMENT_PROFILE.runnableMeasureIds;
-const RUNNABLE_MEASURE_ID_SET = new Set(RUNNABLE_MEASURE_IDS);
 
-/** True only when the loaded deployment profile permits this registry measure to run. */
-export const isRunnableMeasure = (measureId: string): boolean => RUNNABLE_MEASURE_ID_SET.has(measureId);
+/** Lazy + memoized per (id): the routing env is read at first call, matching official-routing.ts. */
+const runnableMemo = new Map<string, boolean>();
+export const isRunnableMeasure = (measureId: string): boolean => {
+  const memo = runnableMemo.get(measureId);
+  if (memo !== undefined) return memo;
+  const listed = (RUNNABLE_MEASURE_IDS as readonly string[]).includes(measureId);
+  const kind = classifyRunnable(measureId, process.env as Record<string, unknown>).kind;
+  const runnable = listed && (kind === "authored" || kind === "official");
+  runnableMemo.set(measureId, runnable);
+  return runnable;
+};
+/** Test seam only — clears the memo so a test can change WORKWELL_OFFICIAL_MEASURES in-process. */
+export const __resetRunnableMemo = (): void => runnableMemo.clear();
 
 /** True for every subject on the default profile; scoped profiles require a directory match. */
 export const profileSubjectMatcher = (employeeLookup: (externalId: string) => EmployeeProfile | null) =>

@@ -76,8 +76,8 @@ const profileCatalogScript = `
 test("scoped profile (Maui) — measures catalog exposes only runnable rows and hides draft detail", () => {
   const output = runProfileChild("maui", profileCatalogScript);
   assert.equal(output.listStatus, 200);
-  assert.deepEqual((output.ids as string[]).sort(), ["cms122", "cms125", "hypertension"]);
-  assert.equal(output.count, 3);
+  assert.deepEqual((output.ids as string[]).sort(), ["cms122", "cms125"]);
+  assert.equal(output.count, 2);
   assert.equal(output.draftStatus, null);
   assert.equal(output.detailStatus, 404);
   assert.deepEqual(output.detailBody, { error: "not_found", measureId: "cms2" });
