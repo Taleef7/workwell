@@ -592,6 +592,10 @@ quality_snapshots (
   internal trend model `numerator = compliant`, `denominator = total − excluded`: this is already the
   effective denominator, and it retains `MISSING_DATA` for every measure (including `cms122`/`cms125`).
   It therefore deliberately diverges from the FHIR/QRDA membership-label export model in ADR-031.
+  The persisted pair is what an *increase* measure displays; for a *decrease* measure (cms122, `improvementNotation`
+  in `MEASURE_IDENTITY`) the Programs pages derive the displayed "poor control" rate from the bucket counts on
+  read — `overdue / (compliant + due_soon + overdue)`, MISSING_DATA outside — via `frontend/lib/measure-rate.ts`;
+  the stored numerator/denominator are never rewritten.
 - **Read** via the `QualitySnapshotStore` port (`querySnapshots({measureId, scopeLevel, scopeId, tenantId, from, to})`),
   surfaced by `GET /api/quality/history` (E16 PR-2, authenticated read-only). Also **backfilled** for past
   months by `pnpm seed:quality-history` (`run/backfill-quality-history.ts`) — real evaluated snapshots

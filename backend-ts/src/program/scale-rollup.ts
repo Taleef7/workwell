@@ -6,7 +6,7 @@
 import type { HierarchyNode, HierarchyTotals } from "./hierarchy-rollup.ts";
 import type { ScaleGroupCount } from "../stores/outcome-store.ts";
 import { SCALE_TENANT, SCALE_LOCATIONS, scaleProvidersFor, enterpriseNameForScale } from "../engine/synthetic/scale-structure.ts";
-import { round1 } from "./rollup-shared.ts";
+import { complianceRateOf } from "./rollup-shared.ts";
 
 interface Mut { evaluated: number; compliant: number; dueSoon: number; overdue: number; missingData: number; excluded: number; openCases: number; }
 const zero = (): Mut => ({ evaluated: 0, compliant: 0, dueSoon: 0, overdue: 0, missingData: 0, excluded: 0, openCases: 0 });
@@ -22,7 +22,7 @@ const acc = (a: Mut, b: Mut): void => {
   a.evaluated += b.evaluated; a.compliant += b.compliant; a.dueSoon += b.dueSoon; a.overdue += b.overdue;
   a.missingData += b.missingData; a.excluded += b.excluded; a.openCases += b.openCases;
 };
-const seal = (t: Mut): HierarchyTotals => ({ ...t, complianceRate: round1(t.compliant, t.evaluated) });
+const seal = (t: Mut): HierarchyTotals => ({ ...t, complianceRate: complianceRateOf(t) });
 
 /** Build the mhn tenant subtree from grouped counts; null when there is no scale data. */
 export function buildScaleSubtree(groups: ScaleGroupCount[]): HierarchyNode | null {

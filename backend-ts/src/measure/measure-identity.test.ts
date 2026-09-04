@@ -10,14 +10,17 @@ test("measureIdentityFor returns identity for CMS measures and null for non-CMS 
   assert.deepEqual(measureIdentityFor("cms125"), {
     cmsId: "CMS125",
     mipsQualityId: "112",
+    improvementNotation: "increase",
   });
   assert.deepEqual(measureIdentityFor("cms122"), {
     cmsId: "CMS122",
     mipsQualityId: "001",
+    improvementNotation: "decrease",
   });
   assert.deepEqual(measureIdentityFor("cms2"), {
     cmsId: "CMS2",
     mipsQualityId: "134",
+    improvementNotation: "increase",
   });
   assert.equal(measureIdentityFor("audiogram"), null);
   assert.equal(measureIdentityFor("hazwoper"), null);
@@ -81,5 +84,20 @@ test("drift guard: catalog entries match MEASURE_IDENTITY, non-cms have none, an
         `CMS measure ${m.id} without MIPS description must have null mipsQualityId in MEASURE_IDENTITY`,
       );
     }
+  }
+});
+
+test("one source of inverse — improvementNotation 'decrease' iff numeratorMeansCompliant false", async () => {
+  const { OFFICIAL_MEASURE_SEMANTICS } = await import("../wiring/official-measure-semantics.ts");
+  const commonIds = Object.keys(MEASURE_IDENTITY).filter((id) => id in OFFICIAL_MEASURE_SEMANTICS);
+  assert.ok(commonIds.length > 0, "must test at least one common measure");
+  for (const id of commonIds) {
+    const identity = MEASURE_IDENTITY[id]!;
+    const semantics = OFFICIAL_MEASURE_SEMANTICS[id]!;
+    assert.equal(
+      identity.improvementNotation === "decrease",
+      semantics.numeratorMeansCompliant === false,
+      `Measure ${id} failed inverse consistency check: improvementNotation='${identity.improvementNotation}', numeratorMeansCompliant=${semantics.numeratorMeansCompliant}`,
+    );
   }
 });

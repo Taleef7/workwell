@@ -99,4 +99,21 @@ describe("ProgramsPage status chips", () => {
     // sitting above the card's stretched absolute-inset-0 overlay Link — is pinned by class.
     expect(overdue.className).toContain("z-10");
   });
+
+  it("renders complianceRate and small compliant / denominator text when denominator is present", async () => {
+    get.mockImplementation((url: string) => {
+      if (url.startsWith("/api/programs/overview")) {
+        return Promise.resolve([{
+          ...program,
+          denominator: 8,
+          complianceRate: 25.0,
+        }]);
+      }
+      if (url.includes("/top-drivers")) return Promise.resolve({ bySite: [], byRole: [], byOutcomeReason: [] });
+      return Promise.resolve([]);
+    });
+    render(<ProgramsPage />);
+    expect(await screen.findByText("Compliance 25.0%")).toBeInTheDocument();
+    expect(screen.getByText("2 / 8")).toBeInTheDocument();
+  });
 });

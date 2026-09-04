@@ -150,7 +150,7 @@ export function noEvaluationCard(patientId: string, studioBaseUrl?: string): Cds
  * `PARTIAL_FAILURE` is terminal, so its rows are served — and per `DATA_MODEL_CONTRACTS.md` §5 a subject
  * whose evaluation threw is persisted as `MISSING_DATA` with `evidence_json = { evaluationError, message }`.
  * That distinction is invisible to `deriveCell`, which falls through to "No record on file", and
- * `nextActionFor` then says "Collect the missing documentation" — asserting a fact about the PATIENT when
+ * `nextActionFor` then says "Check for outside records before ordering" — asserting a fact about the PATIENT when
  * the truth is that our engine threw (review). On a dashboard that is a tolerable approximation; in someone
  * else's chart it is the same confusion `noEvaluationCard` exists to prevent.
  */

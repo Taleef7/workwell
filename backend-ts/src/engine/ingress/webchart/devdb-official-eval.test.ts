@@ -340,8 +340,7 @@ test("cms122 over real WebChart data: nobody in the IPP — a DATA gap, not a fl
  *
  * The consequence is worse than an out-of-population read, which is why it is worth a test rather than a
  * doc line: official reports a **screened woman as OVERDUE**. That is a confident wrong answer on the
- * ordinary case, and via `case-logic.ts` it becomes a HIGH-priority case telling an operator to "escalate
- * mammogram follow-up immediately" for a mammogram she already had.
+ * ordinary case, and via `case-logic.ts` it becomes a HIGH-priority case for a mammogram she already had.
  *
  * ## CLOSED by ADR-044 — but these tests stay, and are worth reading as a set
  *

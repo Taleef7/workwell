@@ -292,6 +292,34 @@ test("programRiskOutlook — successful wc history rehydrates raw name and a new
   }
 });
 
+test("programRiskOutlook — routes per-site rates through complianceRateOf (38/7/3 -> 84.4)", async () => {
+  const measureRows: OutcomeRecord[] = [];
+  for (let i = 0; i < 38; i++) {
+    measureRows.push({
+      id: `out-c-${i}`, runId: "run-pin", subjectId: `wc|pin-c-${i}`, measureId: "audiogram",
+      evaluationPeriod: "2026-01-01", status: "COMPLIANT", evidence: {}, evaluatedAt: "2026-07-17T00:00:00.000Z",
+    });
+  }
+  for (let i = 0; i < 7; i++) {
+    measureRows.push({
+      id: `out-o-${i}`, runId: "run-pin", subjectId: `wc|pin-o-${i}`, measureId: "audiogram",
+      evaluationPeriod: "2026-01-01", status: "OVERDUE", evidence: {}, evaluatedAt: "2026-07-17T00:00:00.000Z",
+    });
+  }
+  for (let i = 0; i < 3; i++) {
+    measureRows.push({
+      id: `out-e-${i}`, runId: "run-pin", subjectId: `wc|pin-e-${i}`, measureId: "audiogram",
+      evaluationPeriod: "2026-01-01", status: "EXCLUDED", evidence: {}, evaluatedAt: "2026-07-17T00:00:00.000Z",
+    });
+  }
+  const outlook = await programRiskOutlook(deps([], { measureRows }), "audiogram", 30);
+  assert.ok(outlook);
+  assert.equal(outlook.siteComplianceRates.length, 1);
+  assert.equal(outlook.siteComplianceRates[0]!.total, 48);
+  assert.equal(outlook.siteComplianceRates[0]!.compliant, 38);
+  assert.equal(outlook.siteComplianceRates[0]!.currentComplianceRate, 84.4);
+});
+
 test("default profile — non-catalog subjects (e.g. QRDA Cypress imports) are included in read models", async () => {
   const nonCatalogSubjectId = "cypress-mrn-non-catalog-99";
   const row: OutcomeWithRun = {

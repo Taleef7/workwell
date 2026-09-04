@@ -18,7 +18,7 @@ import { DEPLOYMENT_PROFILE, DIRECTORY, isRunnableMeasure, profileSubjectMatcher
 import { isWebChartConfigured, type DataSourceEnv } from "../engine/ingress/data-source.ts";
 import { MEASURE_CATALOG } from "../measure/measure-catalog.ts";
 import { ACTIVE_CASE_STATUSES } from "../case/case-logic.ts";
-import { day, isCompletedRun, isPopulationRun, latestRunRows, round1 } from "./rollup-shared.ts";
+import { day, isCompletedRun, isPopulationRun, latestRunRows, complianceRateOf } from "./rollup-shared.ts";
 import { SCALE_TENANT } from "../engine/synthetic/scale-structure.ts";
 import { buildScaleSubtree } from "./scale-rollup.ts";
 import { SCALE_TRIGGER } from "../run/backfill-scale.ts";
@@ -76,7 +76,7 @@ const addStatus = (t: MutableTotals, status: string): void => {
   else if (status === "MISSING_DATA") t.missingData++;
   else if (status === "EXCLUDED") t.excluded++;
 };
-const seal = (t: MutableTotals): HierarchyTotals => ({ ...t, complianceRate: round1(t.compliant, t.evaluated) });
+const seal = (t: MutableTotals): HierarchyTotals => ({ ...t, complianceRate: complianceRateOf(t) });
 const accumulate = (acc: MutableTotals, t: MutableTotals): void => {
   acc.evaluated += t.evaluated; acc.compliant += t.compliant; acc.dueSoon += t.dueSoon;
   acc.overdue += t.overdue; acc.missingData += t.missingData; acc.excluded += t.excluded; acc.openCases += t.openCases;

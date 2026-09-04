@@ -51,7 +51,7 @@ interface CatalogRow {
   lastUpdated: string;
   statusUpdatedAt: string;
   statusUpdatedBy: string;
-  identity: { cmsId: string; mipsQualityId: string | null } | null;
+  identity: { cmsId: string; mipsQualityId: string | null; improvementNotation: "increase" | "decrease" } | null;
 }
 
 const profileCatalogScript = `
@@ -112,17 +112,17 @@ test("GET /api/measures returns the full 63-measure catalog (Measure shape), Act
 test("GET /api/measures and GET /api/measures/:id include identity field ({cmsId, mipsQualityId} or null)", async () => {
   const rows = (await get("/api/measures").then((r) => r!.json())) as CatalogRow[];
   const cms125Row = rows.find((m) => m.id === "cms125")!;
-  assert.deepEqual(cms125Row.identity, { cmsId: "CMS125", mipsQualityId: "112" });
+  assert.deepEqual(cms125Row.identity, { cmsId: "CMS125", mipsQualityId: "112", improvementNotation: "increase" });
   const cms122Row = rows.find((m) => m.id === "cms122")!;
-  assert.deepEqual(cms122Row.identity, { cmsId: "CMS122", mipsQualityId: "001" });
+  assert.deepEqual(cms122Row.identity, { cmsId: "CMS122", mipsQualityId: "001", improvementNotation: "decrease" });
   const audiogramRow = rows.find((m) => m.id === "audiogram")!;
   assert.equal(audiogramRow.identity, null);
 
-  const cms125Detail = (await get("/api/measures/cms125").then((r) => r!.json())) as { identity: { cmsId: string; mipsQualityId: string | null } | null };
-  assert.deepEqual(cms125Detail.identity, { cmsId: "CMS125", mipsQualityId: "112" });
+  const cms125Detail = (await get("/api/measures/cms125").then((r) => r!.json())) as { identity: { cmsId: string; mipsQualityId: string | null; improvementNotation: "increase" | "decrease" } | null };
+  assert.deepEqual(cms125Detail.identity, { cmsId: "CMS125", mipsQualityId: "112", improvementNotation: "increase" });
 
-  const cms122Detail = (await get("/api/measures/cms122").then((r) => r!.json())) as { identity: { cmsId: string; mipsQualityId: string | null } | null };
-  assert.deepEqual(cms122Detail.identity, { cmsId: "CMS122", mipsQualityId: "001" });
+  const cms122Detail = (await get("/api/measures/cms122").then((r) => r!.json())) as { identity: { cmsId: string; mipsQualityId: string | null; improvementNotation: "increase" | "decrease" } | null };
+  assert.deepEqual(cms122Detail.identity, { cmsId: "CMS122", mipsQualityId: "001", improvementNotation: "decrease" });
 
   const audiogramDetail = (await get("/api/measures/audiogram").then((r) => r!.json())) as { identity: { cmsId: string; mipsQualityId: string | null } | null };
   assert.equal(audiogramDetail.identity, null);
@@ -156,7 +156,7 @@ test("GET /api/measures/:id returns MeasureDetail with spec + reconstructed CQL 
     compileStatus: string;
     valueSets: unknown[];
     testFixtures: unknown[];
-    identity: { cmsId: string; mipsQualityId: string | null } | null;
+    identity: { cmsId: string; mipsQualityId: string | null; improvementNotation: "increase" | "decrease" } | null;
   };
   assert.equal(d.id, "audiogram");
   assert.equal(d.name, "Annual Audiogram Completed");
@@ -180,12 +180,12 @@ test("GET /api/measures/:id for a catalog-only draft: generic spec, empty CQL, N
     cqlText: string;
     compileStatus: string;
     description: string;
-    identity: { cmsId: string; mipsQualityId: string | null } | null;
+    identity: { cmsId: string; mipsQualityId: string | null; improvementNotation: "increase" | "decrease" } | null;
   };
   assert.equal(d.compileStatus, "NOT_COMPILED");
   assert.equal(d.cqlText, "", "no compiled CQL for a draft");
   assert.match(d.description, /CQL authoring pending/);
-  assert.deepEqual(d.identity, { cmsId: "CMS2", mipsQualityId: "134" });
+  assert.deepEqual(d.identity, { cmsId: "CMS2", mipsQualityId: "134", improvementNotation: "increase" });
 });
 
 test("GET /api/measures/:id/versions returns the version history; unknown measure → 404", async () => {

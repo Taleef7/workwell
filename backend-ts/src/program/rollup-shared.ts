@@ -4,8 +4,32 @@ export const RERUN_SCOPES = new Set(["CASE", "EMPLOYEE"]);
 /** Single-subject CASE/EMPLOYEE rerun-to-verify runs are excluded from population rollups
  *  (#150 C4). Compared case-insensitively: the Java backend persists these lowercase. */
 export const isPopulationRun = (scopeType: string): boolean => !RERUN_SCOPES.has(scopeType.toUpperCase());
-/** compliant/total × 100, 1 decimal; 0 when total is 0. */
+/** compliant / denominator × 100, 1 decimal; 0 when denominator is 0. */
 export const round1 = (compliant: number, total: number): number => (total === 0 ? 0 : Math.round((compliant / total) * 1000) / 10);
+
+export interface ComplianceRateCounts {
+  compliant: number;
+  dueSoon?: number;
+  overdue?: number;
+  missingData?: number;
+  excluded?: number;
+}
+
+/**
+ * Compute the compliance rate the way CMS scores it: compliant / (total - excluded),
+ * where denominator = compliant + dueSoon + overdue + missingData.
+ * Expressed as a percentage rounded to 1 decimal place (round1). 0 when denominator is 0.
+ */
+export function complianceRateOf(counts: ComplianceRateCounts): number {
+  const denominator =
+    (counts.compliant ?? 0) +
+    (counts.dueSoon ?? 0) +
+    (counts.overdue ?? 0) +
+    (counts.missingData ?? 0);
+  if (denominator <= 0) return 0;
+  return round1(counts.compliant, denominator);
+}
+
 /** Day-granular (YYYY-MM-DD) slice of an ISO timestamp. */
 export const day = (s: string): string => s.slice(0, 10);
 

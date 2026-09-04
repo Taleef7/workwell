@@ -123,4 +123,13 @@ describe("ProgramDetailPage crosswalk heading rendering", () => {
     expect(screen.getByText("Nurse: 1")).toBeInTheDocument();
     expect(screen.getByText("Top sites").closest("div.grid")).toHaveClass("lg:grid-cols-3");
   });
+
+  it("passes tz parameter when fetching trend", async () => {
+    currentMeasureId = "cms125";
+    render(<ProgramDetailPage />);
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    await waitFor(() => {
+      expect(get).toHaveBeenCalledWith(expect.stringContaining(`/api/programs/cms125/trend?tz=${encodeURIComponent(tz)}`));
+    });
+  });
 });

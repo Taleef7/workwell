@@ -22,6 +22,7 @@ import { toRunSummaryFromCounts, toRunListItemFromCounts } from "../run/read-mod
 import { toMeasureDetail } from "../measure/measure-read-models.ts";
 import { generateTraceability } from "../measure/measure-traceability.ts";
 import { computeDataReadiness } from "../measure/data-readiness.ts";
+import { complianceRateOf } from "../program/rollup-shared.ts";
 import type { JsonRecord } from "./tool-audit.ts";
 
 export interface McpToolDeps {
@@ -319,7 +320,13 @@ async function listRuns(args: JsonRecord, deps: McpToolDeps): Promise<unknown> {
       const item = toRunListItemFromCounts(run, statusCounts);
       const counts: Record<string, number> = Object.fromEntries(OUTCOME_KEYS.map((k) => [k, 0]));
       for (const c of statusCounts) if (c.status in counts) counts[c.status] = c.count;
-      const complianceRate = item.totalEvaluated === 0 ? 0 : Math.round((1000 * (counts.COMPLIANT ?? 0)) / item.totalEvaluated) / 10;
+      const complianceRate = complianceRateOf({
+        compliant: counts.COMPLIANT ?? 0,
+        dueSoon: counts.DUE_SOON ?? 0,
+        overdue: counts.OVERDUE ?? 0,
+        missingData: counts.MISSING_DATA ?? 0,
+        excluded: counts.EXCLUDED ?? 0,
+      });
       return {
         run_id: run.id,
         measure_name: item.measureName,

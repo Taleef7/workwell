@@ -21,6 +21,7 @@ import { niceDomain, chartTooltipStyle } from "@/lib/charts";
 import { useTheme } from "@/lib/useTheme";
 import { ChartDataTable } from "@/components/chart-data-table";
 import { useMeasureIdentities } from "@/lib/measure-identity";
+import { displayRate, type DisplayRate, type NotationSource, type TrendPoint } from "@/lib/measure-rate";
 
 type ProgramSummary = {
   measureId: string;
@@ -30,25 +31,16 @@ type ProgramSummary = {
   latestRunId: string | null;
   latestRunAt: string | null;
   totalEvaluated: number;
+  denominator?: number;
   compliant: number;
   dueSoon: number;
   overdue: number;
   missingData: number;
   excluded: number;
   complianceRate: number;
+  /** Which way the measure improves; sent by the programs API so the rate never waits on /api/measures. */
+  improvementNotation?: "increase" | "decrease";
   openCaseCount: number;
-};
-
-type TrendPoint = {
-  runId: string;
-  startedAt: string;
-  complianceRate: number;
-  totalEvaluated: number;
-  compliant: number;
-  dueSoon: number;
-  overdue: number;
-  missingData: number;
-  excluded: number;
 };
 
 type QualitySnapshot = {
@@ -127,7 +119,7 @@ export default function ProgramDetailPage() {
   const isPatientTerm = SUBJECT.singular === "patient";
   const { startTracking } = useRunStatus();
   const { theme } = useTheme();
-  const { labelFor: measureLabelFor } = useMeasureIdentities();
+  const { identities, labelFor: measureLabelFor } = useMeasureIdentities();
 
   const [program, setProgram] = useState<ProgramSummary | null>(null);
   const [trend, setTrend] = useState<TrendPoint[]>([]);
@@ -146,9 +138,11 @@ export default function ProgramDetailPage() {
     // cause). 90-day risk lookahead (#150 M8): a 30-day horizon is too narrow for annual
     // measures, so the predicted rate just echoed the current rate; a quarter-ahead horizon
     // surfaces real upcoming expirations.
+    const tz = typeof Intl !== "undefined" && Intl.DateTimeFormat ? Intl.DateTimeFormat().resolvedOptions()?.timeZone : undefined;
+    const trendQs = tz ? `?tz=${encodeURIComponent(tz)}` : "";
     const [programsRes, trendRes, driversRes, outlookRes] = await Promise.allSettled([
       api.get<ProgramSummary[]>("/api/programs"),
-      api.get<TrendPoint[]>(`/api/programs/${measureId}/trend`),
+      api.get<TrendPoint[]>(`/api/programs/${measureId}/trend${trendQs}`),
       api.get<TopDrivers>(`/api/programs/${measureId}/top-drivers`),
       api.get<RiskOutlook>(`/api/programs/${measureId}/risk-outlook?horizonDays=90`),
     ]);
@@ -177,8 +171,17 @@ export default function ProgramDetailPage() {
     return () => window.removeEventListener("ww:run-complete", onComplete);
   }, [load]);
 
-  const prevRate = trend.length > 1 ? trend[1].complianceRate : program?.complianceRate ?? 0;
-  const delta = (program?.complianceRate ?? 0) - prevRate;
+  // The program summary carries its own improvementNotation, so an inverse measure reads correctly
+  // before (or without) /api/measures. When the identity row is present it wins (both come from the
+  // backend's MEASURE_IDENTITY table, so they agree) and it also supplies the MIPS/CMS label.
+  const identity: NotationSource | null | undefined = identities[measureId] ?? program;
+  const isDecrease = identity?.improvementNotation === "decrease";
+  const rate: DisplayRate = program
+    ? displayRate(program, identity)
+    : { label: "Compliance", value: 0, lowerIsBetter: false, numerator: 0, denominator: 0 };
+  const prevCounts = trend.length > 1 ? trend[1] : program;
+  const prevRate = prevCounts ? displayRate(prevCounts, identity) : null;
+  const delta = program && prevRate ? rate.value - prevRate.value : 0;
 
   const outcomeBreakdown = program
     ? [
@@ -205,17 +208,26 @@ export default function ProgramDetailPage() {
             <h2 className="text-2xl font-semibold text-neutral-900 dark:text-neutral-100">{measureLabelFor(measureId, program.measureName)}</h2>
             <p className="text-sm text-neutral-600 dark:text-neutral-400">Version {program.version}</p>
             <div className="mt-3 flex items-end gap-3">
-              <p className="text-4xl font-semibold text-neutral-900 dark:text-neutral-100">{program.complianceRate.toFixed(1)}%</p>
-              <p className={`text-sm font-medium ${delta >= 0 ? "text-emerald-700 dark:text-emerald-400" : "text-rose-700 dark:text-rose-400"}`}>
+              <div>
+                <p className="text-4xl font-semibold text-neutral-900 dark:text-neutral-100">{rate.label} {rate.value.toFixed(1)}%</p>
+                {rate.lowerIsBetter ? (
+                  <p id="lower-is-better-note" className="text-xs text-neutral-500 dark:text-neutral-400">Lower is better</p>
+                ) : null}
+              </div>
+              <p
+                aria-describedby={rate.lowerIsBetter ? "lower-is-better-note" : undefined}
+                className={`text-sm font-medium ${(isDecrease ? delta <= 0 : delta >= 0) ? "text-emerald-700 dark:text-emerald-400" : "text-rose-700 dark:text-rose-400"}`}
+              >
                 {delta >= 0 ? "↑" : "↓"} {Math.abs(delta).toFixed(1)} from previous
+                <span className="sr-only"> ({rate.lowerIsBetter ? "lower is better" : "higher is better"})</span>
               </p>
             </div>
           </div>
 
           <div className="grid gap-4 lg:grid-cols-2">
             <div className="rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4">
-              <p className="mb-2 text-xs font-semibold uppercase tracking-[0.15em] text-neutral-500 dark:text-neutral-400">Compliance trend (last 10 runs)</p>
-              <ComplianceTrendChart points={[...trend].sort((a, b) => new Date(a.startedAt).getTime() - new Date(b.startedAt).getTime())} />
+              <p className="mb-2 text-xs font-semibold uppercase tracking-[0.15em] text-neutral-500 dark:text-neutral-400">{rate.label} trend (last 10 runs)</p>
+              <ComplianceTrendChart points={[...trend].sort((a, b) => new Date(a.startedAt).getTime() - new Date(b.startedAt).getTime())} identity={identity} />
             </div>
             <div className="rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4">
               <p className="mb-2 text-xs font-semibold uppercase tracking-[0.15em] text-neutral-500 dark:text-neutral-400">Outcome breakdown (latest run)</p>
@@ -268,7 +280,7 @@ export default function ProgramDetailPage() {
             </div>
           </div>
 
-          <QualityOverTime measureId={measureId} measureName={program.measureName} />
+          <QualityOverTime measureId={measureId} measureName={program.measureName} identity={identity} />
 
           <div className="rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4">
             <p className="text-xs font-semibold uppercase tracking-[0.15em] text-neutral-500 dark:text-neutral-400">Risk outlook (next 90 days)</p>
@@ -333,8 +345,11 @@ export default function ProgramDetailPage() {
                     <thead className="text-left text-neutral-600 dark:text-neutral-400">
                       <tr>
                         <th scope="col" className="py-1 pr-3">Site</th>
-                        <th scope="col" className="py-1 pr-3">Current rate</th>
-                        <th scope="col" className="py-1 pr-3">Predicted 90d</th>
+                        {/* The outlook rates are compliant ÷ denominator from the backend. For a decrease
+                            measure "compliant" is the in-control bucket, so say that rather than showing a
+                            compliance-looking number under a "Poor control" headline. */}
+                        <th scope="col" className="py-1 pr-3">{isDecrease ? "In control now" : "Current rate"}</th>
+                        <th scope="col" className="py-1 pr-3">{isDecrease ? "In control in 90d" : "Predicted 90d"}</th>
                         <th scope="col" className="py-1 pr-3">Expiring</th>
                       </tr>
                     </thead>
@@ -409,7 +424,7 @@ export default function ProgramDetailPage() {
                     <tr>
                       <th scope="col" className="py-1 pr-3">Run</th>
                       <th scope="col" className="py-1 pr-3">Started</th>
-                      <th scope="col" className="py-1 pr-3">Compliance</th>
+                      <th scope="col" className="py-1 pr-3">{rate.label}</th>
                       <th scope="col" className="py-1 pr-3">Evaluated</th>
                     </tr>
                   </thead>
@@ -426,7 +441,7 @@ export default function ProgramDetailPage() {
                           </Link>
                         </td>
                         <td className="py-1 pr-3 text-neutral-600 dark:text-neutral-400">{formatTimestamp(run.startedAt)}</td>
-                        <td className="py-1 pr-3">{run.complianceRate.toFixed(1)}%</td>
+                        <td className="py-1 pr-3">{displayRate(run, identity).value.toFixed(1)}%</td>
                         <td className="py-1 pr-3">{run.totalEvaluated}</td>
                       </tr>
                     ))}
@@ -521,7 +536,15 @@ const monthLabel = (period: string): string => {
  * compliant in December? October?" from the persisted aggregate, not a live re-scan. Descriptive
  * only — the numbers are counts of what CQL already decided (ADR-008/ADR-021).
  */
-function QualityOverTime({ measureId, measureName }: { measureId: string; measureName: string }) {
+function QualityOverTime({
+  measureId,
+  measureName,
+  identity,
+}: {
+  measureId: string;
+  measureName: string;
+  identity?: NotationSource | null;
+}) {
   const api = useApi();
   const { theme } = useTheme();
   const [tenants, setTenants] = useState<Tenant[]>([]);
@@ -568,8 +591,16 @@ function QualityOverTime({ measureId, measureName }: { measureId: string; measur
     return () => window.removeEventListener("ww:run-complete", onComplete);
   }, [load]);
 
+  const rateLabel = identity?.improvementNotation === "decrease" ? "Poor control" : "Compliance";
   const selected = snapshots.find((s) => s.period === asOf) ?? null;
-  const data = snapshots.map((s) => ({ label: monthLabel(s.period), rate: rateOf(s) }));
+  // One view per snapshot: the displayed percentage AND the numerator/denominator it was made of, so
+  // an inverse measure never pairs "Poor control 15.6%" with the compliant numerator.
+  const viewOf = (s: QualitySnapshot) => displayRate({ ...s, complianceRate: rateOf(s) }, identity);
+  const selectedView = selected ? viewOf(selected) : null;
+  const data = snapshots.map((s) => ({
+    label: monthLabel(s.period),
+    rate: viewOf(s).value,
+  }));
   const [lo, hi] = niceDomain(data.map((d) => d.rate));
 
   return (
@@ -609,15 +640,17 @@ function QualityOverTime({ measureId, measureName }: { measureId: string; measur
         </div>
       </div>
 
-      {selected ? (
+      {selected && selectedView ? (
         <div className="mt-3 grid gap-3 sm:grid-cols-3">
           <div className="rounded border border-emerald-200 bg-emerald-50 p-3 dark:border-emerald-900 dark:bg-emerald-950/40">
-            <p className="text-xs text-emerald-800 dark:text-emerald-300">Compliance on {monthLabel(selected.period)}</p>
-            <p className="text-2xl font-semibold text-emerald-900 dark:text-emerald-200">{rateOf(selected).toFixed(1)}%</p>
+            <p className="text-xs text-emerald-800 dark:text-emerald-300">{rateLabel} on {monthLabel(selected.period)}</p>
+            <p className="text-2xl font-semibold text-emerald-900 dark:text-emerald-200">
+              {selectedView.value.toFixed(1)}%
+            </p>
           </div>
           <div className="rounded border border-neutral-200 bg-neutral-50 p-3 dark:border-neutral-800 dark:bg-neutral-800/40">
             <p className="text-xs text-neutral-600 dark:text-neutral-400">Numerator / Denominator</p>
-            <p className="text-2xl font-semibold text-neutral-900 dark:text-neutral-100">{fmtCount(selected.numerator)} / {fmtCount(selected.denominator)}</p>
+            <p className="text-2xl font-semibold text-neutral-900 dark:text-neutral-100">{fmtCount(selectedView.numerator)} / {fmtCount(selectedView.denominator)}</p>
           </div>
           <div className="rounded border border-neutral-200 bg-neutral-50 p-3 dark:border-neutral-800 dark:bg-neutral-800/40">
             <p className="text-xs text-neutral-600 dark:text-neutral-400">Excluded (not in denominator)</p>
@@ -642,17 +675,20 @@ function QualityOverTime({ measureId, measureName }: { measureId: string; measur
                 <XAxis dataKey="label" tick={{ fontSize: 10, fill: "#94a3b8" }} axisLine={false} tickLine={false} />
                 <YAxis domain={[lo, hi]} allowDecimals={false} tickFormatter={(v: number) => `${v}%`} tick={{ fontSize: 10, fill: "#94a3b8" }} axisLine={false} tickLine={false} width={40} />
                 <Tooltip
-                  formatter={(value) => [`${Number(value).toFixed(1)}%`, "Compliance"]}
+                  formatter={(value) => [`${Number(value).toFixed(1)}%`, rateLabel]}
                   {...chartTooltipStyle(theme)}
                 />
-                <Area type="monotone" dataKey="rate" name="Compliance" stroke="#2563eb" strokeWidth={2.5} fill="url(#qualityGrad)" dot={{ r: 3, fill: "#2563eb", strokeWidth: 0 }} activeDot={{ r: 5 }} />
+                <Area type="monotone" dataKey="rate" name={rateLabel} stroke="#2563eb" strokeWidth={2.5} fill="url(#qualityGrad)" dot={{ r: 3, fill: "#2563eb", strokeWidth: 0 }} activeDot={{ r: 5 }} />
               </AreaChart>
             </ResponsiveContainer>
           </div>
           <ChartDataTable
-            caption={`Monthly compliance for ${measureName} (materialized snapshots)`}
-            columns={["Month", "Compliance", "Numerator", "Denominator"]}
-            rows={snapshots.map((s) => [monthLabel(s.period), `${rateOf(s).toFixed(1)}%`, fmtCount(s.numerator), fmtCount(s.denominator)])}
+            caption={`Monthly ${rateLabel.toLowerCase()} for ${measureName} (materialized snapshots)`}
+            columns={["Month", rateLabel, "Numerator", "Denominator"]}
+            rows={snapshots.map((s) => {
+              const v = viewOf(s);
+              return [monthLabel(s.period), `${v.value.toFixed(1)}%`, fmtCount(v.numerator), fmtCount(v.denominator)];
+            })}
           />
         </div>
       ) : (
@@ -668,7 +704,7 @@ function QualityOverTime({ measureId, measureName }: { measureId: string; measur
   );
 }
 
-function ComplianceTrendChart({ points }: { points: TrendPoint[] }) {
+function ComplianceTrendChart({ points, identity }: { points: TrendPoint[]; identity?: NotationSource | null }) {
   const { theme } = useTheme();
   if (!points.length) {
     return (
@@ -681,9 +717,10 @@ function ComplianceTrendChart({ points }: { points: TrendPoint[] }) {
   // Focus the compliance-rate line (the per-bucket dashed overlays forced a 0–100 domain
   // and read as noise — the pie + reason-mix below already break down the buckets). A
   // dynamic, padded domain makes real week-to-week variation visible.
+  const rateLabel = identity?.improvementNotation === "decrease" ? "Poor control" : "Compliance";
   const data = points.map((p) => ({
     label: new Date(p.startedAt).toLocaleDateString(undefined, { month: "short", day: "numeric" }),
-    rate: Math.round(p.complianceRate * 10) / 10,
+    rate: displayRate(p, identity).value,
   }));
   const [lo, hi] = niceDomain(data.map((d) => d.rate));
 
@@ -704,13 +741,13 @@ function ComplianceTrendChart({ points }: { points: TrendPoint[] }) {
             <XAxis dataKey="label" tick={{ fontSize: 10, fill: "#94a3b8" }} axisLine={false} tickLine={false} />
             <YAxis domain={[lo, hi]} allowDecimals={false} tickFormatter={(v: number) => `${v}%`} tick={{ fontSize: 10, fill: "#94a3b8" }} axisLine={false} tickLine={false} width={40} />
             <Tooltip
-              formatter={(value) => [`${Number(value).toFixed(1)}%`, "Compliance"]}
+              formatter={(value) => [`${Number(value).toFixed(1)}%`, rateLabel]}
               {...chartTooltipStyle(theme)}
             />
             <Area
               type="monotone"
               dataKey="rate"
-              name="Compliance"
+              name={rateLabel}
               stroke="#059669"
               strokeWidth={2.5}
               fill="url(#complianceGrad)"
@@ -721,8 +758,8 @@ function ComplianceTrendChart({ points }: { points: TrendPoint[] }) {
         </ResponsiveContainer>
       </div>
       <ChartDataTable
-        caption="Compliance trend by run (last 10 runs)"
-        columns={["Run date", "Compliance"]}
+        caption={`${rateLabel} trend by run (last 10 runs)`}
+        columns={["Run date", rateLabel]}
         rows={data.map((d) => [d.label, `${d.rate}%`])}
       />
     </>
