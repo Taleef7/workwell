@@ -181,3 +181,94 @@ test("logout clears the refresh cookie (Max-Age=0)", async () => {
   assert.equal(res?.status, 204);
   assert.match(res!.headers.get("set-cookie") ?? "", /refresh_token=;.*Max-Age=0/);
 });
+
+// ---- Deployment-profile rule (#520) --------------------------------------------------------------
+import { runProfileChild } from "../test-support/run-profile-child.ts";
+
+const loginScript = `
+  // runProfileChild parses the whole stdout, so swallow the worker boot log (not the JSON result).
+  const workerLog = console.log;
+  console.log = () => {};
+  import worker from "./src/worker.ts";
+  import { createSqliteD1 } from "@mieweb/cloud-local";
+  console.log = workerLog;
+
+  const secret = "x".repeat(40);
+  const db = await createSqliteD1(":memory:");
+  const env = { DB: db, WORKWELL_AUTH_JWT_SECRET: secret };
+  const login = async (email) => {
+    const originalLog = console.log;
+    console.log = () => {};
+    try {
+      return await worker.fetch(
+        new Request("http://x/api/auth/login", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ email, password: "Workwell123!" }),
+        }),
+        env,
+        {},
+      );
+    } finally {
+      console.log = originalLog;
+    }
+  };
+  const positive = await login("admin@workwell.dev");
+  const refused = await login("quality-lead@maui.workwell.dev");
+  console.log(JSON.stringify({
+    positiveStatus: positive.status,
+    positiveToken: positive.status === 200 ? (await positive.json()).token : null,
+    status: refused.status,
+    body: await refused.json(),
+  }));
+`;
+
+const tokenGateScript = `
+  const workerLog = console.log;
+  console.log = () => {};
+  import worker from "./src/worker.ts";
+  import { createJwt } from "./src/auth/jwt.ts";
+  import { createSqliteD1 } from "@mieweb/cloud-local";
+  console.log = workerLog;
+
+  const secret = "x".repeat(40);
+  const jwt = createJwt({ secret });
+  const db = await createSqliteD1(":memory:");
+  const env = { DB: db, WORKWELL_AUTH_JWT_SECRET: secret };
+  const get = async (email) => {
+    const originalLog = console.log;
+    console.log = () => {};
+    try {
+      const token = jwt.issueAccessToken(email, "ROLE_CASE_MANAGER");
+      return await worker.fetch(
+        new Request("http://x/api/runs", { headers: { authorization: "Bearer " + token } }),
+        env,
+        {},
+      );
+    } finally {
+      console.log = originalLog;
+    }
+  };
+  const maui = await get("quality-lead@maui.workwell.dev");
+  const accepted = await get("cm@workwell.dev");
+  console.log(JSON.stringify({
+    mauiStatus: maui.status,
+    mauiBody: maui.status === 401 ? await maui.json() : null,
+    acceptedStatus: accepted.status,
+  }));
+`;
+
+test("on default, a Maui account login is refused like a non-Maui account on maui", () => {
+  const output = runProfileChild(undefined, loginScript);
+  assert.equal(output.positiveStatus, 200, "admin@workwell.dev must still log in on default");
+  assert.ok(output.positiveToken, "positive control must return an access token");
+  assert.equal(output.status, 401, "quality-lead@maui.workwell.dev must be refused on default");
+  assert.deepEqual(output.body, { error: "invalid_credentials" }, "mirror the maui-profile refusal body");
+});
+
+test("on default, a token minted for a Maui account is refused per request", () => {
+  const output = runProfileChild(undefined, tokenGateScript);
+  assert.equal(output.mauiStatus, 401, "quality-lead@maui.workwell.dev token must be refused on default");
+  assert.deepEqual(output.mauiBody, { error: "unauthenticated" }, "mirror the per-request gate body");
+  assert.equal(output.acceptedStatus, 200, "cm@workwell.dev must still access /api/runs on default");
+});
