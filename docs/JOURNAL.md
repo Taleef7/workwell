@@ -1,5 +1,24 @@
 # Journal
 
+## 2026-09-04 — the Maui sandbox deploys on push and heals itself; the redeploy that showed why
+
+The pilot's quality lead has had sandbox access since the 2026-09-03 handover, and the sandbox was still
+running the handover build: three merges (#516, #517, #518) had landed on `main` with nothing carrying
+them to `maui.os.mieweb.org`, because the Maui workflow was `workflow_dispatch` only. The first manual
+dispatch at `668deab9` with `replace_existing=false` **failed by design** — the deploy script refuses to
+touch an existing container without the replace flag — which is the honest way to learn that on this
+platform every redeploy of a live container is a delete + recreate. The second dispatch with
+`replace_existing=true` is the one that shipped.
+
+Two workflow changes follow from that, both mirrored from TWH: **`deploy-maui-mieweb.yml` now triggers
+on push to `main`** (with `REPLACE_EXISTING` true on push, as TWH's is), and a new
+**`reconcile-maui-mieweb.yml`** self-heal watchdog recreates a down surface from `maui-latest` /
+the Maui frontend's `:latest`. It carries Maui's env array verbatim from the deploy workflow — no S3
+bucket keys, because Maui ships none — and `official-flip-config.test.ts` now lists it, pairs it with
+the Maui deploy in `MUST_AGREE`, and its two terminology predicates read every in-scope workflow's
+measure list rather than TWH's alone (the guard-scope gap ROADMAP MM-1b named). `DEPLOY.md`'s Maui
+section says all of this.
+
 ## 2026-09-03 — one compliance rate, computed the way CMS scores it; the inverse measure reads as inverse; next actions state the gap
 
 **Two numbers for one measure.** The Maui walkthrough found the measure detail page showing 79.2% as its

@@ -790,9 +790,11 @@ own Neon database and JWT secret, and uses the same backend image build and depl
 | Frontend | `maui.os.mieweb.org` | `ghcr.io/taleef7/workwell-maui-frontend` |
 | Backend API | `maui-api-ts.os.mieweb.org` | `ghcr.io/taleef7/workwell-api-ts` |
 
-Run `.github/workflows/deploy-maui-mieweb.yml` from **Actions → Deploy Maui OS MIEWeb → Run workflow**.
-It is **`workflow_dispatch` only** because the two Maui-only secrets are not present on every push;
-an automatic trigger would fail until those secrets were set.
+`.github/workflows/deploy-maui-mieweb.yml` deploys **on every push to `main`** (since 2026-09-04) and on
+manual dispatch from **Actions → Deploy Maui OS MIEWeb → Run workflow**. A push deploy replaces the
+existing containers the same way TWH's does (delete + recreate, roughly a minute of backend downtime);
+a manual dispatch only replaces them when `replace_existing=true`, which is the only way to redeploy an
+existing container by hand — `false` refuses with "already exists" and is for first creation only.
 
 Owner-set GitHub secrets:
 
@@ -815,8 +817,14 @@ retrieves a *Procedure* by the Mammography value set, VSAC's expansion of that s
 the bundled CPT fallback only fires when VSAC returns nothing — so the same roster scored 38 compliant
 one day and 0 the next. The official artifact reads the LOINC-coded Observation and is deterministic.
 Gate evidence: the official executors evaluate all 48 Maui patients to their designed distribution
-(38 compliant / 7 overdue / 3 excluded per measure, no mismatches). Maui has no self-heal reconciler,
-so dispatch the workflow again for a replacement or recovery.
+(38 compliant / 7 overdue / 3 excluded per measure, no mismatches). `reconcile-maui-mieweb.yml`
+(since 2026-09-04) is Maui's self-heal reconciler: the same watchdog as TWH's, healing the backend from
+`maui-latest` (never `:latest`, see the tag note below) and the frontend from its own repository's
+`:latest`, sharing the `maui-mieweb-container-ops` concurrency group with the deploy so a heal and a
+push deploy never touch the same container at once. The cadence caveat in the TWH reconciler's header
+applies unchanged: GitHub delivers the 15-minute schedule every few hours under load, so it is a slow
+backstop, not a recovery-time guarantee. `official-flip-config.test.ts` asserts the deploy and
+reconcile pair ship the same `WORKWELL_OFFICIAL_MEASURES`, exactly as it does for TWH.
 
 
 The demo segment seed is profile-aware since 2026-09-02 (`fix/maui-segment-seed`): the maui profile seeds a

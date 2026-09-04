@@ -1,12 +1,14 @@
 name: Deploy Maui OS MIEWeb
 
-# Maui sandbox deployment. On manual dispatch this builds + deploys the TypeScript backend
+# Maui sandbox deployment. On every push to main (and on manual dispatch) this builds + deploys the TypeScript backend
 # (backend-ts/ → maui-api-ts.os.mieweb.org) and the Maui frontend (pointed at it). Backend images are
 # tagged maui-latest and maui-sha-<SHA> in GHCR to avoid tag collision with TWH.
 # Rollback = redeploy an earlier known-good maui-api-ts image (workflow_dispatch with replace_existing=true
 # at an earlier SHA; each build is tagged maui-sha-<SHA> in GHCR).
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
     inputs:
       replace_existing:
@@ -18,7 +20,8 @@ on:
           - "false"
           - "true"
 
-# A constant Maui group (NOT keyed on github.ref) keeps manual container operations serialized.
+# A constant Maui group (NOT keyed on github.ref), shared with reconcile-maui-mieweb.yml, keeps container
+# operations serialized: a self-heal can never run while a push deploy is mid delete+recreate.
 # cancel-in-progress: false → the later run queues behind the in-flight one rather than racing or being dropped.
 concurrency:
   group: maui-mieweb-container-ops
@@ -188,7 +191,7 @@ jobs:
       # treats a blank key as "not configured" (StoreValueSetResolver only). Set the
       # WORKWELL_VSAC_API_KEY_TWH secret to enable.
       WORKWELL_VSAC_API_KEY: ${{ secrets.WORKWELL_VSAC_API_KEY_TWH }}
-      REPLACE_EXISTING: ${{ inputs.replace_existing == 'true' }}
+      REPLACE_EXISTING: ${{ github.event_name == 'push' || inputs.replace_existing == 'true' }}
     steps:
       - uses: actions/checkout@v7
 
@@ -291,7 +294,7 @@ jobs:
     env:
       MIEWEB_API_URL: ${{ secrets.LAUNCHPAD_API_URL }}
       MIEWEB_API_KEY: ${{ secrets.LAUNCHPAD_API_KEY }}
-      REPLACE_EXISTING: ${{ inputs.replace_existing == 'true' }}
+      REPLACE_EXISTING: ${{ github.event_name == 'push' || inputs.replace_existing == 'true' }}
     steps:
       - uses: actions/checkout@v7
 
