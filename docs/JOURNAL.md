@@ -33,6 +33,17 @@ bytes are the deployed bytes). Per-surface promotion also means a backend that d
 that did not can never be healed to as if they were one release. A pleasant side effect: a fast rollback
 is itself a successful deploy, so it promotes the tag and a later heal no longer undoes it.
 
+## 2026-09-04 — cms122's notation divergence is deliberate, and now pinned (#521)
+
+Two tables describe cms122's improvement notation and disagree: the authored binding says `increase`
+(its numerator is the compliant bucket) and the identity table says `decrease` (the official artifact's
+numerator is poor control, and the Programs UI reads only the identity table). Nothing rendered wrong,
+but nothing stopped either side changing silently. A test now states the divergence, why each value is
+right for its consumer, and that cms125 agrees on `increase`; a second test through the real
+MeasureReport builder proves an authored run's report carries the binding's notation and an
+official-routed run's the artifact's (ADR-046). The divergence ends with #377, which retires the
+authored cms122/cms125 rows.
+
 ## 2026-09-03 — one compliance rate, computed the way CMS scores it; the inverse measure reads as inverse; next actions state the gap
 
 **Two numbers for one measure.** The Maui walkthrough found the measure detail page showing 79.2% as its
