@@ -19,9 +19,9 @@
  *   - Idempotent + resumable at WEEK level: seeding is tracked per (measure, day), so an interrupted
  *     run — or a later run with a larger `--weeks` — seeds only the missing weeks without duplicating
  *     existing ones; it's a full no-op only when every measure already has all `weeks` days.
- *   - Efficiency: `deriveExamConfig(binding, target)` + `buildSyntheticBundle` depend only on
- *     (measure, target), NOT on employee identity, so the engine outcome for a given (measure,
- *     target) is identical across employees. We precompute the (measure, target) → outcome map with
+ *   - Efficiency: the bundle for a given (measure, target) depends only on that pair, NOT on
+ *     employee identity, so the engine outcome for a given (measure, target) is identical across
+ *     employees. We precompute the (measure, target) → outcome map with
  *     14 measures × 5 targets = 70 engine evaluations, then assign all ~13.2k historical outcomes
  *     from the seeded distribution — not one engine call per employee.
  *
@@ -38,9 +38,8 @@ import type { CaseEventStore } from "../stores/case-event-store.ts";
 import type { EvaluateMeasureBinding } from "@work-well/measure-engine";
 import { type EmployeeProfile, EVALUABLE_EMPLOYEES, isRunnableMeasure, RUNNABLE_MEASURE_IDS as PROFILE_RUNNABLE_MEASURE_IDS } from "../config/deployment-profile.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
-import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
-import { deriveExamConfig, type TargetOutcome } from "../engine/synthetic/exam-config.ts";
-import { buildSyntheticBundle } from "../engine/synthetic/fhir-bundle-builder.ts";
+import { compositeBundleSource, type SubjectBundleSource } from "../wiring/subject-bundle-source.ts";
+import type { TargetOutcome } from "../engine/synthetic/exam-config.ts";
 import { seededDistributionAtRate } from "./distribution.ts";
 import { historicalComplianceRate } from "./compliance-rates.ts";
 import { isPopulationRun } from "../program/rollup-shared.ts";
@@ -92,13 +91,12 @@ async function precomputeOutcomes(
   engine: EvaluateMeasureBinding,
   sample: EmployeeProfile,
   asOf: string,
+  bundleSource: SubjectBundleSource,
 ): Promise<Map<string, string>> {
   const map = new Map<string, string>();
   for (const measureId of RUNNABLE_MEASURE_IDS) {
-    const binding = MEASURE_BINDINGS[measureId]!;
     for (const target of TARGETS) {
-      const config = deriveExamConfig(binding, target);
-      const bundle = buildSyntheticBundle(sample, config, asOf);
+      const bundle = bundleSource.bundleFor(sample, measureId, target, asOf);
       const result = await engine.evaluate({ measureId, patientBundle: bundle, evaluationDate: asOf });
       map.set(`${measureId}|${target}`, result.outcome);
     }
@@ -179,7 +177,8 @@ export async function backfillTrendHistory(
   if (!anyWork || !sample) {
     return { skipped: !anyWork, weeks, measures: RUNNABLE_MEASURE_IDS.length, runsCreated: 0, outcomesCreated: 0 };
   }
-  const outcomeByPair = await precomputeOutcomes(deps.engine, sample, asOf);
+  const bundleSource = compositeBundleSource(process.env as Record<string, unknown>);
+  const outcomeByPair = await precomputeOutcomes(deps.engine, sample, asOf, bundleSource);
 
   let runsCreated = 0;
   let outcomesCreated = 0;
@@ -187,7 +186,9 @@ export async function backfillTrendHistory(
   for (const measureId of RUNNABLE_MEASURE_IDS) {
     const existingDays = seededDays.get(measureId)!;
     if (existingDays.size >= weeks) continue; // measure already fully seeded
-    const rateKey = MEASURE_BINDINGS[measureId]!.rateKey;
+    // Official-only ids have no binding; their measureId IS the rate key (COMPLIANCE_RATES defaults
+    // to 0.8 for unconfigured keys).
+    const rateKey = measureId;
     // Anchor the newest synthetic week strictly BEFORE this measure's latest real run (≥ 1 day),
     // capped at asOf, so seeded history never out-ranks the real current run on the overview. If the
     // measure has no real run yet, anchor at asOf (the seed legitimately populates an empty card).

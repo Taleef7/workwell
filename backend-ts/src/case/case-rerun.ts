@@ -22,10 +22,7 @@ import {
   isRunnableMeasure,
 } from "../config/deployment-profile.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
-import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
-import { deriveExamConfig } from "../engine/synthetic/exam-config.ts";
-import { buildSyntheticBundle } from "../engine/synthetic/fhir-bundle-builder.ts";
-import { seededTargetFor } from "../run/distribution.ts";
+import { compositeBundleSource } from "../wiring/subject-bundle-source.ts";
 import { priorityFor, nextActionFor } from "./case-logic.ts";
 import { toCaseDetail, type CaseDetail } from "./case-detail-read-model.ts";
 
@@ -70,9 +67,9 @@ export async function rerunToVerify(deps: RerunDeps, caseId: string, actor: stri
   if (existing.employeeId.startsWith("wc|")) throw new UnsupportedCaseRerunError();
   const employees = deps.employees ?? EVALUABLE_EMPLOYEES;
   const employee = employeeById(existing.employeeId);
-  const binding = MEASURE_BINDINGS[existing.measureId];
   // Unknown subject/measure can't be verified — leave the case untouched (no state change).
-  if (!employee || !binding || !isRunnableMeasure(existing.measureId)) return null;
+  // isRunnableMeasure alone (not a binding check): official-only ids are runnable without a binding.
+  if (!employee || !isRunnableMeasure(existing.measureId)) return null;
 
   // Re-evaluate AS-OF today so the day-math (days overdue, etc.) is CURRENT, while the outcome
   // stays keyed to the case's existing compliance-cycle period (`existing.evaluationPeriod`, the
@@ -97,9 +94,9 @@ export async function rerunToVerify(deps: RerunDeps, caseId: string, actor: stri
   await deps.runStore.appendLog(run.id, "INFO", "Scoped CQL verification started.");
 
   // Deterministic per-subject target (same seed the original run used) → idempotent rerun.
-  const target = seededTargetFor(employees, binding.rateKey, existing.employeeId) ?? "MISSING_DATA";
-  const config = deriveExamConfig(binding, target);
-  const bundle = buildSyntheticBundle(employee, config, evalDate);
+  const bundleSource = compositeBundleSource(process.env as Record<string, unknown>);
+  const target = bundleSource.targetFor(employees, existing.measureId, existing.employeeId) ?? "MISSING_DATA";
+  const bundle = bundleSource.bundleFor(employee, existing.measureId, target, evalDate);
 
   let verifiedStatus: string;
   let evidence: unknown;

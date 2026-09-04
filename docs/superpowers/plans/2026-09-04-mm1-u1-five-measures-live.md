@@ -223,10 +223,16 @@ git commit -m "feat(config): official-only measures are runnable when vendored, 
 
 ### Task 2: The subject-bundle-source seam (§4), behaviour-preserving
 
+> **The seam lives in `src/wiring/`, not `src/engine/synthetic/`.** An earlier draft of this plan put
+> it under the engine tree and `engine-boundary.test.ts` failed it correctly: the seam imports
+> `run/distribution.ts` and `config/deployment-profile.ts`, both outside the engine, because deciding
+> *which* source a measure uses is deployment wiring, not engine logic (ADR-025, ARCHITECTURE's engine
+> boundary). The boundary is enforced mechanically — do not move it back.
+
 **Files:**
-- Create: `backend-ts/src/engine/synthetic/subject-bundle-source.ts`
+- Create: `backend-ts/src/wiring/subject-bundle-source.ts`
 - Modify: `backend-ts/src/run/run-pipeline.ts:184-187` (`bundleFor`), `:215-290` (`resolveScope`), `backend-ts/src/case/case-rerun.ts:73-102`, and every RUNTIME caller listed in Step 4
-- Test: `backend-ts/src/engine/synthetic/subject-bundle-source.test.ts` (create)
+- Test: `backend-ts/src/wiring/subject-bundle-source.test.ts` (create)
 
 - [ ] **Step 1: Write the failing test**
 
@@ -259,7 +265,7 @@ test("compositeBundleSource refuses an id it cannot classify as authored or offi
 
 - [ ] **Step 3: Implement the seam**
 
-`backend-ts/src/engine/synthetic/subject-bundle-source.ts`:
+`backend-ts/src/wiring/subject-bundle-source.ts`:
 ```ts
 /**
  * The seam between "who is evaluated, at which seeded bucket" and "what FHIR bundle they carry" (spec §4).
@@ -327,7 +333,7 @@ Run: `cd backend-ts && corepack pnpm@10 typecheck && node --import tsx --test "s
 
 **Files:**
 - Create: `backend-ts/src/engine/synthetic/official-only-bundles.ts`
-- Modify: `backend-ts/src/engine/synthetic/subject-bundle-source.ts` (export `officialOnlyBundleSource`, wire into composite default), `backend-ts/src/engine/cql/bundled-ecqm-expansions.ts` (add the canonical codes the shapes stamp), `backend-ts/src/wiring/corpus-membership.test.ts:33-45` (add cms2/cms130/cms165 to the artifact list), `backend-ts/src/wiring/official-corpus-outcomes.test.ts` (three new cases)
+- Modify: `backend-ts/src/wiring/subject-bundle-source.ts` (export `officialOnlyBundleSource`, wire into composite default), `backend-ts/src/engine/cql/bundled-ecqm-expansions.ts` (add the canonical codes the shapes stamp), `backend-ts/src/wiring/corpus-membership.test.ts:33-45` (add cms2/cms130/cms165 to the artifact list), `backend-ts/src/wiring/official-corpus-outcomes.test.ts` (three new cases)
 - Test: `backend-ts/src/engine/synthetic/official-only-bundles.test.ts` (create)
 
 **Before writing any code, the lane MUST read each artifact's ELM for the exact value-set OIDs and codes** (`backend-ts/measures/official/{cms2,cms130,cms165}/bundle.json`, the `Library` resource's `relatedArtifact`/`dataRequirement` entries and the ValueSet resources) and the terminology sidecar (`terminology.json` in the same dirs, present after `pnpm vendor:official`; if absent, `bundled-ecqm-expansions.ts`'s existing pattern of pinning one known member per OID is the fallback and the lane reports which OIDs it pinned from the sidecar and which from the CMS value-set pages). The table in spec §4.1 is the contract; **the ELM wins on any disagreement, and the lane corrects the spec table in the same change.**

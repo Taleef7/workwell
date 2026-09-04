@@ -33,10 +33,9 @@ import {
   DIRECTORY,
 } from "../config/deployment-profile.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
-import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
 import { MEASURE_CATALOG } from "../measure/measure-catalog.ts";
-import { deriveExamConfig, type TargetOutcome } from "../engine/synthetic/exam-config.ts";
-import { buildSyntheticBundle } from "../engine/synthetic/fhir-bundle-builder.ts";
+import { compositeBundleSource, type SubjectBundleSource } from "../wiring/subject-bundle-source.ts";
+import type { TargetOutcome } from "../engine/synthetic/exam-config.ts";
 import type { FhirBundle } from "../engine/synthetic/fhir-bundle-builder.ts";
 import {
   ROSTER_ELIGIBLE_MEASURES,
@@ -52,7 +51,6 @@ import {
 } from "../engine/ingress/data-source.ts";
 import { httpWebChartClient, type WebChartClient } from "../engine/ingress/webchart/webchart-client.ts";
 import { profileForId, replaceLiveDirectory } from "../engine/ingress/webchart/live-directory.ts";
-import { seededDistribution, seededTargetFor } from "./distribution.ts";
 import { bucketPeriodForMeasure } from "./compliance-period.ts";
 import type { QualitySnapshotStore } from "../stores/quality-snapshot-store.ts";
 import type { EvalStateStore } from "../stores/eval-state-store.ts";
@@ -149,6 +147,8 @@ export interface RunPipelineDeps {
   expansionActive?: boolean;
   /** #263 — value-set store, read once to fold `expansion_hash` into `logic_version` (only when `expansionActive`). */
   valueSets?: Pick<ValueSetStore, "listAll">;
+  /** Subject-bundle seam (Task 2): injectable for tests; defaults to the env-composed composite. */
+  bundleSource?: SubjectBundleSource;
 }
 
 export interface WebChartRunEnv extends DataSourceEnv {
@@ -181,10 +181,10 @@ interface WorkItem {
  * per-item loop cannot build it two subtly different ways. Deterministic in its inputs, which is what
  * makes building it twice for a batched measure merely wasteful rather than a source of divergence.
  */
-function bundleFor(item: WorkItem, liveRoster: EnrollmentRoster | undefined, evalDate: string): unknown {
+function bundleFor(item: WorkItem, liveRoster: EnrollmentRoster | undefined, evalDate: string, bundleSource: SubjectBundleSource): unknown {
   return item.liveBundle !== undefined
     ? stampEnrollment(item.liveBundle as FhirBundle, item.measureId, liveRoster!, { evaluationDate: evalDate })
-    : buildSyntheticBundle(item.employee, deriveExamConfig(MEASURE_BINDINGS[item.measureId]!, item.target!), evalDate);
+    : bundleSource.bundleFor(item.employee, item.measureId, item.target!, evalDate);
 }
 
 export interface LivePopulationDescriptor {
@@ -212,7 +212,7 @@ const WEBCHART_PAGE_SIZE = 100;
 const RUN_SCOPE_TYPES: readonly RunScopeType[] = ["ALL_PROGRAMS", "MEASURE", "SITE", "EMPLOYEE", "CASE"];
 
 /** Resolve a scoped request into the (employee × measure) work items + run metadata. */
-function resolveScope(req: ManualRunRequest, employees: readonly EmployeeProfile[]) {
+function resolveScope(req: ManualRunRequest, employees: readonly EmployeeProfile[], bundleSource: SubjectBundleSource) {
   // The body is unvalidated JSON cast to ManualRunRequest, so scopeType can be anything at
   // runtime. A value that is not a scope at all is a CLIENT error (400) — only a real scope
   // this path declines to serve (CASE, below) is a 501.
@@ -240,8 +240,7 @@ function resolveScope(req: ManualRunRequest, employees: readonly EmployeeProfile
           `Measure '${measureId}' is not runnable for deployment profile '${DEPLOYMENT_PROFILE.id}'.`,
         );
       }
-      const rateKey = MEASURE_BINDINGS[measureId]!.rateKey;
-      const items = seededDistribution(employees, rateKey).map((a) => ({ employee: a.employee, measureId, target: a.target }));
+      const items = bundleSource.distribution(employees, measureId).map((a) => ({ employee: a.employee, measureId, target: a.target }));
       return { items, measureIds: [measureId], scopeId: measureId, scopeLabel: `Measure: ${MEASURES[measureId]!.name}` };
     }
     case "EMPLOYEE": {
@@ -257,14 +256,14 @@ function resolveScope(req: ManualRunRequest, employees: readonly EmployeeProfile
       const items: WorkItem[] = RUNNABLE_MEASURE_IDS.map((measureId) => ({
         employee,
         measureId,
-        target: seededTargetFor(employees, MEASURE_BINDINGS[measureId]!.rateKey, id) ?? "MISSING_DATA",
+        target: bundleSource.targetFor(employees, measureId, id) ?? "MISSING_DATA",
       }));
       return { items, measureIds: RUNNABLE_MEASURE_IDS, scopeId: null, scopeLabel: `${SUBJECT_LABEL}: ${id}` };
     }
     case "ALL_PROGRAMS": {
       // Every runnable measure × every employee, each at its measure's seeded target bucket.
       const items: WorkItem[] = RUNNABLE_MEASURE_IDS.flatMap((measureId) =>
-        seededDistribution(employees, MEASURE_BINDINGS[measureId]!.rateKey).map((a) => ({ employee: a.employee, measureId, target: a.target })),
+        bundleSource.distribution(employees, measureId).map((a) => ({ employee: a.employee, measureId, target: a.target })),
       );
       return { items, measureIds: RUNNABLE_MEASURE_IDS, scopeId: null, scopeLabel: "All Programs" };
     }
@@ -277,7 +276,7 @@ function resolveScope(req: ManualRunRequest, employees: readonly EmployeeProfile
       // MEASURE so an employee's target — and thus their case state — is identical across scope
       // types and the case upsert stays idempotent), then filtered to the site's employees.
       const items: WorkItem[] = RUNNABLE_MEASURE_IDS.flatMap((measureId) =>
-        seededDistribution(employees, MEASURE_BINDINGS[measureId]!.rateKey)
+        bundleSource.distribution(employees, measureId)
           .filter((a) => siteIds.has(a.employee.externalId))
           .map((a) => ({ employee: a.employee, measureId, target: a.target })),
       );
@@ -310,6 +309,7 @@ export interface PlannedRun {
 /** Create the run (RUNNING) + resolve work items, without evaluating — fast, safe to await inline. */
 export async function planManualRun(deps: RunPipelineDeps, req: ManualRunRequest): Promise<PlannedRun> {
   const employees = deps.employees ?? EVALUABLE_EMPLOYEES;
+  const bundleSource = deps.bundleSource ?? compositeBundleSource(process.env as Record<string, unknown>);
   const evalDate = req.evaluationDate ?? new Date().toISOString().slice(0, 10);
   const webChartEnv = deps.webChartEnv ?? {};
   const webChartConfigured = isWebChartConfigured(webChartEnv);
@@ -322,7 +322,7 @@ export async function planManualRun(deps: RunPipelineDeps, req: ManualRunRequest
       409,
     );
   }
-  const { items, measureIds, scopeId, scopeLabel } = resolveScope(req, employees);
+  const { items, measureIds, scopeId, scopeLabel } = resolveScope(req, employees, bundleSource);
   const cfg = webChartConfigured ? webChartConfigFromEnv(webChartEnv) : undefined;
   const livePopulation = cfg && (req.scopeType === "ALL_PROGRAMS" || req.scopeType === "MEASURE")
     ? {
@@ -488,6 +488,7 @@ async function prepareLivePopulation(
 /** Evaluate the planned work items, persist outcomes + cases, finalize the run — the slow half. */
 export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun): Promise<ManualRunResponse> {
   const { run, measureIds, scopeLabel, scopeType, evalDate } = planned;
+  const bundleSource = deps.bundleSource ?? compositeBundleSource(process.env as Record<string, unknown>);
   let items = planned.items;
   let liveRoster: EnrollmentRoster | undefined;
   let liveTenant: LiveTenantMetadata | undefined;
@@ -610,7 +611,7 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
           () =>
             forMeasure.map((item) => ({
               subjectId: item.employee.externalId,
-              patientBundle: bundleFor(item, liveRoster, evalDate),
+              patientBundle: bundleFor(item, liveRoster, evalDate, bundleSource),
             })),
           evalDate,
         );
@@ -647,7 +648,7 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
   }
 
   for (const item of items) {
-    const bundle = bundleFor(item, liveRoster, evalDate);
+    const bundle = bundleFor(item, liveRoster, evalDate, bundleSource);
     // The engine still evaluates compliance AS-OF `evalDate` (today / the run's date) so the
     // day-math is current, but the persisted evaluation_period is bucketed to the measure's
     // current compliance CYCLE (#150 H1). That decoupling is what keeps a nightly rerun
