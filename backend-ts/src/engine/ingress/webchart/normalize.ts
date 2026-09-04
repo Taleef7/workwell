@@ -240,7 +240,7 @@ function procedurePerformed(procedure: Json): string | undefined {
  * `isDiagnosticStudyPerformed([Observation: "Mammography"])` where the value set is 92 LOINC codes only
  * AND `Status` also requires `category ~ imaging`. A WebChart server records the procedure. So with only
  * what the server sends, official CMS125 reports a woman who WAS screened as OVERDUE — a false
- * non-compliance that `case-logic.ts` escalates to HIGH ("escalate mammogram follow-up immediately").
+ * non-compliance that `case-logic.ts` escalates to HIGH.
  *
  * Normalization, not fabrication, on the same three tested properties as ADR-044: derived strictly from a
  * real Procedure (never minted), an explicit two-code allowlist rather than a category sweep, and

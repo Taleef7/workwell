@@ -4,6 +4,7 @@ import { useApi } from "@/lib/api/hooks";
 export interface MeasureIdentity {
   cmsId: string;
   mipsQualityId: string | null;
+  improvementNotation?: "increase" | "decrease";
 }
 
 export interface MeasureListItem {

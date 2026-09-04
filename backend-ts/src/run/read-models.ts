@@ -138,6 +138,7 @@ function buildSummary(run: RunRecord, t: Tally, totalCases: number): RunSummary 
     measureName: name,
     measureVersion: version,
     totalCases,
+    // Deliberately compliant/totalEvaluated — an operational per-run statistic, not the CMS rate.
     passRate: t.total === 0 ? 0 : (t.compliant * 100) / t.total,
     outcomeCounts: [...t.byStatus.entries()].map(([status, count]) => ({ status, count })),
     dataFreshAsOf: t.freshAsOf,

@@ -40,3 +40,17 @@ test("buildScaleSubtree → tenant→enterprise→location→provider(leaf), rec
 test("empty groups → null (no scale data)", () => {
   assert.equal(buildScaleSubtree([]), null);
 });
+
+test("buildScaleSubtree removes excluded from compliance rate denominator (e.g. 38 compliant, 7 overdue, 3 excluded -> 84.4)", () => {
+  const groups: ScaleGroupCount[] = [
+    { locationId: "L00", providerId: "P00", status: "COMPLIANT", count: 38 },
+    { locationId: "L00", providerId: "P00", status: "OVERDUE", count: 7 },
+    { locationId: "L00", providerId: "P00", status: "EXCLUDED", count: 3 },
+  ];
+  const tenant = buildScaleSubtree(groups)!;
+  assert.equal(tenant.totals.evaluated, 48);
+  assert.equal(tenant.totals.compliant, 38);
+  assert.equal(tenant.totals.excluded, 3);
+  // CMS rate: 38 / (48 - 3) = 38 / 45 = 84.4%
+  assert.equal(tenant.totals.complianceRate, 84.4);
+});

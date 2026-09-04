@@ -40,7 +40,9 @@ function assertReconciles(node: HierarchyNode): void {
     }
   }
   const t = node.totals;
-  const expectedRate = t.evaluated === 0 ? 0 : Math.round((t.compliant / t.evaluated) * 1000) / 10;
+  // Updated to CMS rate: denominator excludes excluded count (compliant / (total - excluded))
+  const den = t.evaluated - t.excluded;
+  const expectedRate = den <= 0 ? 0 : Math.round((t.compliant / den) * 1000) / 10;
   assert.equal(t.complianceRate, expectedRate, `${node.level}:${node.id} rate recomputed`);
   node.children.forEach(assertReconciles);
 }
@@ -390,6 +392,38 @@ test("open-case-only subject (no outcome row in scope) is a leaf with evaluated:
     assert.equal(root.totals.openCases, 1);
     assert.equal(root.totals.evaluated, 1);
 
+    assertReconciles(root);
+  } finally {
+    try { rmSync(dbFile, { force: true }); } catch { /* best effort */ }
+  }
+});
+
+test("hierarchy rollup removes excluded from compliance rate denominator", async () => {
+  const dbFile = join(tmpdir(), `test-hierarchy-excluded-${Date.now()}.db`);
+  try {
+    const db = await createSqliteD1(dbFile);
+    await db.exec(RUN_STORE_FLOOR_DDL.replace(/\n/g, " "));
+    const rs = new SqliteRunStore(db);
+    const oc = new SqliteOutcomeStore(db);
+    const cs = new SqliteCaseStore(db);
+    const run = await rs.createRun({
+      scopeType: "MEASURE", scopeId: "audiogram", triggeredBy: "test", status: "COMPLETED",
+      requestedScope: { measureId: "audiogram" }, measurementPeriodStart: "2026-06-13T00:00:00.000Z",
+      measurementPeriodEnd: "2026-06-13T00:00:00.000Z",
+    });
+    // emp-001 (HQ, prov-001) COMPLIANT, emp-002 (HQ, prov-001) COMPLIANT, emp-006 (Plant A, prov-002) OVERDUE, emp-010 (Plant A, prov-002) EXCLUDED
+    await oc.recordOutcome({ runId: run.id, subjectId: "emp-001", measureId: "audiogram", status: "COMPLIANT", evidence: {} });
+    await oc.recordOutcome({ runId: run.id, subjectId: "emp-002", measureId: "audiogram", status: "COMPLIANT", evidence: {} });
+    await oc.recordOutcome({ runId: run.id, subjectId: "emp-006", measureId: "audiogram", status: "OVERDUE", evidence: {} });
+    await oc.recordOutcome({ runId: run.id, subjectId: "emp-010", measureId: "audiogram", status: "EXCLUDED", evidence: {} });
+
+    const root = await buildHierarchyRollup({ outcomeStore: oc, caseStore: cs }, { measureId: "audiogram" });
+    assert.equal(root.totals.evaluated, 4);
+    assert.equal(root.totals.compliant, 2);
+    assert.equal(root.totals.overdue, 1);
+    assert.equal(root.totals.excluded, 1);
+    // 2 compliant / (4 evaluated - 1 excluded) = 2 / 3 = 66.7% (NOT 2 / 4 = 50%)
+    assert.equal(root.totals.complianceRate, 66.7);
     assertReconciles(root);
   } finally {
     try { rmSync(dbFile, { force: true }); } catch { /* best effort */ }
