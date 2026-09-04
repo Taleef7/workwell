@@ -7,6 +7,8 @@ import { MEASURE_STATUS_LABELS, formatStatusLabel, labelFor, measureStatusClass,
 import { emitToast } from "@/lib/toast";
 import { useAuth } from "@/components/auth-provider";
 import { canApproveMeasures, canAuthorMeasures, isAdmin } from "@/lib/rbac";
+import { canSeeEngineering } from "@/lib/public-demo";
+import { AccessDenied } from "@/components/access-denied";
 import { useApi } from "@/lib/api/hooks";
 import { useMeasureDetail } from "@/features/studio/hooks/useMeasureDetail";
 import { useValueSets } from "@/features/studio/hooks/useValueSets";
@@ -42,12 +44,13 @@ export default function StudioMeasurePage() {
   const [changeSummary, setChangeSummary] = useState("");
 
   useEffect(() => {
+    if (!canSeeEngineering(user?.role)) return;
     if (measureId) {
       void load();
       void loadValueSets();
       void loadOshaReferences();
     }
-  }, [measureId, load, loadValueSets, loadOshaReferences]);
+  }, [measureId, load, loadValueSets, loadOshaReferences, user?.role]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -109,6 +112,15 @@ export default function StudioMeasurePage() {
     e.preventDefault();
     const nextTab = tabs[next];
     tablistRef.current?.querySelector<HTMLButtonElement>(`#studio-tab-${nextTab}`)?.focus();
+  }
+
+  if (!canSeeEngineering(user?.role)) {
+    return (
+      <AccessDenied
+        title="Studio"
+        message="Your current role does not have access to this section."
+      />
+    );
   }
 
   return (

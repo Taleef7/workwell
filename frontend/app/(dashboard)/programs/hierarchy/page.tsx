@@ -5,6 +5,8 @@ import { useCallback, useEffect, useState } from "react";
 import { useApi } from "@/lib/api/hooks";
 import { fmtCount } from "@/lib/format";
 import { useGlobalFilters } from "@/components/global-filter-context";
+import { useAuth } from "@/components/auth-provider";
+import { canSeeEngineering } from "@/lib/public-demo";
 import type { TenantOption } from "@/features/compliance/types";
 import { SkeletonRow } from "@/components/skeleton-loader";
 import { SLOW_LOAD_HINT, useSlowLoadHint } from "@/lib/useSlowLoadHint";
@@ -51,6 +53,7 @@ const LEVEL_LABELS: Record<HierarchyNode["level"], string> = {
 const nodeKey = (n: Pick<HierarchyNode, "level" | "id">): string => `${n.level}:${n.id}`;
 
 export default function HierarchyPage() {
+  const { user } = useAuth();
   const api = useApi();
   const { from, to } = useGlobalFilters();
 
@@ -171,22 +174,26 @@ export default function HierarchyPage() {
           ))}
         </select>
 
-        <label htmlFor="tenant-filter" className="text-xs uppercase tracking-[0.15em] text-neutral-500 dark:text-neutral-400">
-          System
-        </label>
-        <select
-          id="tenant-filter"
-          value={tenant}
-          onChange={(e) => setTenant(e.target.value)}
-          className="rounded-md border border-neutral-300 bg-white px-3 py-1.5 text-sm text-neutral-900 focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100"
-        >
-          <option value="">All systems</option>
-          {tenantOptions.map((t) => (
-            <option key={t.id} value={t.id}>
-              {t.name}
-            </option>
-          ))}
-        </select>
+        {canSeeEngineering(user?.role) && (
+          <>
+            <label htmlFor="tenant-filter" className="text-xs uppercase tracking-[0.15em] text-neutral-500 dark:text-neutral-400">
+              System
+            </label>
+            <select
+              id="tenant-filter"
+              value={tenant}
+              onChange={(e) => setTenant(e.target.value)}
+              className="rounded-md border border-neutral-300 bg-white px-3 py-1.5 text-sm text-neutral-900 focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100"
+            >
+              <option value="">All systems</option>
+              {tenantOptions.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name}
+                </option>
+              ))}
+            </select>
+          </>
+        )}
       </div>
 
       {error ? (

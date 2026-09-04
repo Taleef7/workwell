@@ -4,6 +4,7 @@
  *   POST /api/auth/login    { email, password } → { token, email, role } + Set-Cookie refresh_token
  *   POST /api/auth/refresh  reads refresh_token cookie → new access token + rotated cookie
  *   POST /api/auth/logout   clears the refresh_token cookie
+ *   GET  /api/users/assignable  { email, role } for demo users assignable on this profile
  *
  * Preserves the wire contract the unchanged frontend depends on: the access token in
  * the JSON body, and an HttpOnly refresh cookie scoped to /api/auth. SameSite=None
@@ -11,7 +12,7 @@
  */
 import { randomUUID } from "node:crypto";
 import { createJwt, type JwtService } from "../auth/jwt.ts";
-import { authenticate, findDemoUser } from "../auth/demo-users.ts";
+import { authenticate, DEMO_USERS, findDemoUser, isDemoAccountRefusedOnProfile } from "../auth/demo-users.ts";
 
 const REFRESH_COOKIE = "refresh_token";
 const COOKIE_PATH = "/api/auth";
@@ -114,6 +115,17 @@ export function createAuthHandler(config: AuthConfig): AuthHandler {
 
   return async function handleAuth(req: Request): Promise<Response | null> {
     const { pathname } = new URL(req.url);
+    if (pathname === "/api/users/assignable" && req.method === "GET") {
+      const assignable = DEMO_USERS
+        .filter((user) =>
+          (user.role === "ROLE_CASE_MANAGER" || user.role === "ROLE_ADMIN") &&
+          !isDemoAccountRefusedOnProfile(user),
+        )
+        .sort((a, b) => a.email.localeCompare(b.email))
+        .map((user) => ({ email: user.email, role: user.role }));
+      return json(assignable);
+    }
+
     if (!pathname.startsWith("/api/auth/") || req.method !== "POST") return null;
 
     if (pathname === "/api/auth/login") {

@@ -11,6 +11,9 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useApi } from "@/lib/api/hooks";
+import { useAuth } from "@/components/auth-provider";
+import { canSeeEngineering } from "@/lib/public-demo";
+import { AccessDenied } from "@/components/access-denied";
 import { ElmExplorer, type CompileResult, type ElmLibrary } from "@/features/studio/components/ElmExplorer";
 
 interface MeasureRow {
@@ -26,6 +29,7 @@ interface ElmResponse {
 }
 
 export default function ElmExplorerPage() {
+  const { user } = useAuth();
   const api = useApi();
   const [measures, setMeasures] = useState<MeasureRow[]>([]);
   const [selectedId, setSelectedId] = useState<string>("");
@@ -39,6 +43,7 @@ export default function ElmExplorerPage() {
   );
 
   useEffect(() => {
+    if (!canSeeEngineering(user?.role)) return;
     void (async () => {
       try {
         const rows = await api.get<MeasureRow[]>("/api/measures");
@@ -48,9 +53,10 @@ export default function ElmExplorerPage() {
         setError(err instanceof Error ? err.message : "Failed to load measures");
       }
     })();
-  }, [api]);
+  }, [api, user?.role]);
 
   useEffect(() => {
+    if (!canSeeEngineering(user?.role)) return;
     if (!selectedId) return;
     void (async () => {
       setLoading(true);
@@ -65,7 +71,16 @@ export default function ElmExplorerPage() {
         setLoading(false);
       }
     })();
-  }, [api, selectedId]);
+  }, [api, selectedId, user?.role]);
+
+  if (!canSeeEngineering(user?.role)) {
+    return (
+      <AccessDenied
+        title="ELM Explorer"
+        message="Your current role does not have access to this section."
+      />
+    );
+  }
 
   return (
     <section className="space-y-4">

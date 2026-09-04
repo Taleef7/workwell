@@ -36,6 +36,7 @@ export function GlobalSearch() {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setResults([]);
       setOpen(false);
+      setLoading(false);
       return;
     }
     // Stale-fetch guard (Fable M20): a slow response for an earlier query must not re-open the dropdown
@@ -54,6 +55,7 @@ export function GlobalSearch() {
       } catch {
         if (!active) return;
         setResults([]);
+        setOpen(true);
       } finally {
         if (active) setLoading(false);
       }
@@ -100,7 +102,14 @@ export function GlobalSearch() {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === 'Escape') setOpen(false);
+            if (e.key === 'Escape') {
+              setOpen(false);
+            } else if (e.key === 'Enter') {
+              if (open && results.length === 1 && !loading) {
+                e.preventDefault();
+                navigate(results[0].externalId);
+              }
+            }
           }}
           placeholder={`Search ${SUBJECT.plural}…`}
           className="h-8 w-56 rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 pl-7 pr-3 text-xs text-neutral-700 dark:text-neutral-300 placeholder:text-neutral-400 focus:border-neutral-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500"

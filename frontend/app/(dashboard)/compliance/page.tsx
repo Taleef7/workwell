@@ -9,6 +9,7 @@ import { useRunStatus } from "@/components/run-status-provider";
 import { useGlobalFilters } from "@/components/global-filter-context";
 import { useAuth } from "@/components/auth-provider";
 import { canRunMeasures } from "@/lib/rbac";
+import { canSeeEngineering } from "@/lib/public-demo";
 import { COMPLIANCE_STATUS_LABELS } from "@/lib/status";
 import { SUBJECT } from "@/lib/terminology";
 import { ComplianceChip } from "@/features/compliance/ComplianceChip";
@@ -42,13 +43,14 @@ export default function CompliancePage() {
   // Site scoping comes from the shared dashboard site selector (header) / `?site=` URL — same as the
   // cases & programs pages — not a page-local field, so the global filter actually applies here.
   const { siteId } = useGlobalFilters();
-  const canRecalc = canRunMeasures(user?.role);
+  const canRecalc = canRunMeasures(user?.role) && canSeeEngineering(user?.role);
   const { labelFor: measureLabelFor } = useMeasureIdentities();
 
   // Derived from the URL rather than useState-initialized, so browser back/forward between two
   // filtered /compliance URLs re-renders with the right filter.
   const panel: PanelId = normalizePanelFilter(searchParams.get("panel"));
   const status: string = normalizeStatusFilter(searchParams.get("status"));
+  const measureId: string = searchParams.get("measureId") ?? "";
   const [q, setQ] = useState<string>("");
   const [segment, setSegment] = useState<string>("");
   const [segmentOptions, setSegmentOptions] = useState<{ id: string; name: string }[]>([]);
@@ -107,6 +109,7 @@ export default function CompliancePage() {
     const params = new URLSearchParams();
     params.set("panel", panel);
     if (status) params.set("status", status);
+    if (measureId.trim()) params.set("measureId", measureId.trim());
     if (siteId.trim()) params.set("site", siteId.trim());
     if (debouncedQ.trim()) params.set("q", debouncedQ.trim());
     if (segment) params.set("segment", segment);
@@ -149,7 +152,7 @@ export default function CompliancePage() {
     } finally {
       if (reqId === reqIdRef.current) setLoading(false);
     }
-  }, [api, cache, panel, status, siteId, debouncedQ, segment, tenant, page, pageSize]);
+  }, [api, cache, panel, status, measureId, siteId, debouncedQ, segment, tenant, page, pageSize]);
 
   useEffect(() => {
     // Defer out of the synchronous effect body (matches cases/page.tsx) so the load's setState calls
@@ -208,9 +211,13 @@ export default function CompliancePage() {
     }
   }, [api, canRecalc, isActive, startTracking]);
 
-  const writePanelToUrl = useCallback((nextPanel: PanelId, replace = false) => {
+  // `keepMeasureId` distinguishes the server canonicalizing the panel (a chip deep link whose measure
+  // lives in another panel — the scope must survive) from a person choosing a panel (the measure
+  // scope no longer applies).
+  const writePanelToUrl = useCallback((nextPanel: PanelId, replace = false, keepMeasureId = false) => {
     const params = new URLSearchParams(searchParams.toString());
     params.set("panel", nextPanel);
+    if (!keepMeasureId) params.delete("measureId");
     const query = params.toString();
     const target = query ? `${pathname}?${query}` : pathname;
     if (replace) {
@@ -220,13 +227,20 @@ export default function CompliancePage() {
     }
   }, [pathname, router, searchParams]);
 
+  const clearMeasureId = useCallback(() => {
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete("measureId");
+    const query = params.toString();
+    router.push(query ? `${pathname}?${query}` : pathname);
+  }, [pathname, router, searchParams]);
+
   const setPanelAndUrl = useCallback((nextPanel: PanelId) => {
     writePanelToUrl(nextPanel, false);
   }, [writePanelToUrl]);
 
   useEffect(() => {
     if (roster && loadedPanel === panel && roster.panel !== panel) {
-      writePanelToUrl(roster.panel, true);
+      writePanelToUrl(roster.panel, true, true);
     }
   }, [roster, loadedPanel, panel, writePanelToUrl]);
 
@@ -289,18 +303,20 @@ export default function CompliancePage() {
               ).map((p) => (<option key={p.id} value={p.id}>{p.label}</option>))}
             </select>
           </label>
-          <label className="flex flex-col text-xs font-medium">
-            <span className="mb-1">System</span>
-            <select
-              aria-label="System"
-              value={tenant}
-              onChange={(e) => { setPage(1); setTenant(e.target.value); }}
-              className="rounded border border-neutral-300 bg-transparent px-2 py-1 text-sm dark:border-neutral-700"
-            >
-              <option value="">All systems</option>
-              {tenantOptions.map((o) => (<option key={o.id} value={o.id}>{o.name}</option>))}
-            </select>
-          </label>
+          {canSeeEngineering(user?.role) && (
+            <label className="flex flex-col text-xs font-medium">
+              <span className="mb-1">System</span>
+              <select
+                aria-label="System"
+                value={tenant}
+                onChange={(e) => { setPage(1); setTenant(e.target.value); }}
+                className="rounded border border-neutral-300 bg-transparent px-2 py-1 text-sm dark:border-neutral-700"
+              >
+                <option value="">All systems</option>
+                {tenantOptions.map((o) => (<option key={o.id} value={o.id}>{o.name}</option>))}
+              </select>
+            </label>
+          )}
           <label className="flex flex-col text-xs font-medium">
             <span className="mb-1">Segment</span>
             <select
@@ -344,6 +360,25 @@ export default function CompliancePage() {
             </select>
           </label>
         </div>
+
+        {measureId ? (
+          <div className="flex items-center gap-2 text-xs text-neutral-600 dark:text-neutral-400">
+            <span>
+              Scoped to{" "}
+              <span className="font-semibold text-neutral-900 dark:text-neutral-100">
+                {measureLabelFor(measureId, measureId)}
+              </span>
+            </span>
+            <span>—</span>
+            <button
+              type="button"
+              onClick={clearMeasureId}
+              className="font-medium text-primary-700 hover:underline dark:text-primary-400"
+            >
+              Clear
+            </button>
+          </div>
+        ) : null}
 
         {error ? (
           <p role="alert" className="rounded border border-rose-300 bg-rose-50 p-2 text-sm text-rose-700 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-300">

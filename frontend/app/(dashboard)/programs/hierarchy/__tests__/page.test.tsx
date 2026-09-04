@@ -8,6 +8,7 @@ const apiMock = { get };
 vi.mock("@/lib/api/hooks", () => ({ useApi: () => apiMock }));
 
 vi.mock("@/components/global-filter-context", () => ({ useGlobalFilters: () => ({ from: "", to: "" }) }));
+vi.mock("@/components/auth-provider", () => ({ useAuth: () => ({ user: { role: "ROLE_ADMIN" } }) }));
 
 import HierarchyPage from "../page";
 

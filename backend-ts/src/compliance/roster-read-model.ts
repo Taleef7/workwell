@@ -68,6 +68,8 @@ export interface RosterDeps {
 export interface RosterFilters {
   panel?: string | null;
   status?: string | null;
+  /** Drill-down scope (E12): restrict the status filter to one measure's column. */
+  measureId?: string | null;
   site?: string | null;
   role?: string | null;
   q?: string | null;
@@ -89,9 +91,16 @@ export async function buildRoster(deps: RosterDeps, filters: RosterFilters): Pro
   // one falls back to the panel view (otherwise its columns would all read NOT_APPLICABLE, since the
   // overlay below only counts enabled segments). Keeps the filter consistent with applicability.
   const activeSegment = filters.segment ? segments.find((s) => s.id === filters.segment && s.enabled) ?? null : null;
+  // E12 drill-down: a measureId that is not a column of the selected (or defaulted) panel resolves
+  // the roster to the panel containing it — with an omitted panel this otherwise silently serves the
+  // default panel's grid and zero rows for the requested status. Unresolvable ids keep the panel; an
+  // active segment keeps its own column scoping (the segment, not the panel, defines the grid there).
+  const resolvedPanel: PanelId = activeSegment
+    ? panel
+    : (Object.keys(RUNNABLE_PANELS) as PanelId[]).find((id) => RUNNABLE_PANELS[id].includes(filters.measureId ?? "")) ?? panel;
   const measureIds = activeSegment
     ? activeSegment.measureIds.filter((m) => ACTIVE_CATALOG_MEASURE_IDS.has(m) && isRunnableMeasure(m))
-    : RUNNABLE_PANELS[panel];
+    : RUNNABLE_PANELS[resolvedPanel];
   const columns: RosterColumn[] = measureIds.map((id) => ({
     measureId: id,
     name: MEASURES[id]?.name ?? id,
@@ -201,7 +210,9 @@ export async function buildRoster(deps: RosterDeps, filters: RosterFilters): Pro
   }
   if (filters.status) {
     const s = filters.status.toUpperCase();
-    rows = rows.filter((r) => Object.values(r.cells).some((c) => c.status === s));
+    rows = filters.measureId
+      ? rows.filter((r) => r.cells[filters.measureId!]?.status === s)
+      : rows.filter((r) => Object.values(r.cells).some((c) => c.status === s));
   }
 
   // Roster ordering (UX-1): the four demo-login personas (emp-001..004 — system roles, no occupational
@@ -226,5 +237,5 @@ export async function buildRoster(deps: RosterDeps, filters: RosterFilters): Pro
   const page = Math.max(1, Math.trunc(filters.page ?? 1));
   const pageSize = Math.max(1, Math.min(Math.trunc(filters.pageSize ?? 50), 200));
   const start = (page - 1) * pageSize;
-  return { panel, availablePanels: AVAILABLE_PANELS, columns, rows: rows.slice(start, start + pageSize), total };
+  return { panel: resolvedPanel, availablePanels: AVAILABLE_PANELS, columns, rows: rows.slice(start, start + pageSize), total };
 }

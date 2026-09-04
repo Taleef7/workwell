@@ -26,4 +26,26 @@ describe("public-demo", () => {
     const m = await loadWith("off");
     expect(m.PUBLIC_DEMO).toBe(false);
   });
+
+  describe("isPilotMode and canSeeEngineering", () => {
+    it("isPilotMode is false when PUBLIC_DEMO is true, and canSeeEngineering allows non-admin", async () => {
+      const m = await loadWith("on");
+      expect(m.isPilotMode()).toBe(false);
+      expect(m.canSeeEngineering("ROLE_CASE_MANAGER")).toBe(true);
+      expect(m.canSeeEngineering("ROLE_VIEWER")).toBe(true);
+      expect(m.canSeeEngineering(undefined)).toBe(true);
+      expect(m.canSeeEngineering("ROLE_ADMIN")).toBe(true);
+    });
+
+    it("isPilotMode is true when PUBLIC_DEMO is false, and canSeeEngineering allows only ADMIN", async () => {
+      const m = await loadWith("off");
+      expect(m.isPilotMode()).toBe(true);
+      expect(m.canSeeEngineering("ROLE_ADMIN")).toBe(true);
+      expect(m.canSeeEngineering("admin")).toBe(true);
+      expect(m.canSeeEngineering("ROLE_CASE_MANAGER")).toBe(false);
+      expect(m.canSeeEngineering("ROLE_VIEWER")).toBe(false);
+      expect(m.canSeeEngineering(undefined)).toBe(false);
+    });
+  });
 });
+

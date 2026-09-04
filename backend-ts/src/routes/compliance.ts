@@ -51,6 +51,7 @@ export async function handleCompliance(req: Request, env: ComplianceEnv): Promis
     {
       panel: q.get("panel"),
       status: q.get("status"),
+      measureId: q.get("measureId"),
       site: q.get("site"),
       role: q.get("role"),
       q: q.get("q"),
