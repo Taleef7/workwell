@@ -285,7 +285,7 @@ export function SegmentEditorModal({ open, initial, activeMeasures, onClose, onS
                     <input
                       aria-label={`condition value ${i + 1}`}
                       value={c.value}
-                      placeholder={isIn ? "Plant A, Plant B" : undefined}
+                      placeholder={isIn ? (isPatientTerm ? "Wailuku Clinic, Kihei Clinic" : "Plant A, Plant B") : undefined}
                       onChange={(e) => updateCondition(i, { value: e.target.value })}
                       className={inputClass}
                     />

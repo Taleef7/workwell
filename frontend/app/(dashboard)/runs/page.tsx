@@ -724,7 +724,7 @@ export default function RunsPage() {
                 size="sm"
                 value={runSite}
                 onChange={(e) => setRunSite(e.target.value)}
-                placeholder="Enter a site name, for example Plant A"
+                placeholder={`Enter a site name, for example ${isPatientTerm ? "Wailuku Clinic" : "Plant A"}`}
               />
             </div>
           ) : null}
