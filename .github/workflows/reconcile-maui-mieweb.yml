@@ -1,0 +1,273 @@
+name: Reconcile Maui stack (self-heal)
+
+# Self-healing watchdog for the MAUI SANDBOX, the pilot group's instance (docs/DEPLOY.md "Maui sandbox
+# deployment"). A copy of reconcile-twh-mieweb.yml with Maui's hostnames, secrets and image tags; the
+# mechanism, the measured cadence caveat, deploy-race safety and the rollback interaction are the same
+# as TWH's and are documented there. Two Maui-specific facts:
+#
+#   * The backend heals from `maui-latest`, never `:latest`. Maui and TWH share one GHCR backend
+#     repository and TWH's reconciler recreates from `:latest`, so the Maui deploy pushes namespaced
+#     tags (`maui-latest`, `maui-sha-<SHA>`). Healing from `:latest` here would put TWH's build on the
+#     pilot's instance.
+#   * `maui-latest` means LAST SUCCESSFULLY DEPLOYED, not last built. deploy-maui-mieweb.yml's build
+#     job pushes only the immutable `maui-sha-<SHA>`; the deploy job promotes `maui-latest` onto that
+#     digest after the container comes up. Without that ordering a build whose deploy then FAILED would
+#     already own the tag, and the next outage would heal onto the version that never worked — the
+#     recovery path would carry the outage forward (Codex P2 #522). The frontend's `:latest` is
+#     promoted the same way, by its own deploy job, so the two surfaces' recovery tags can never name
+#     halves of two different failed attempts.
+#   * Maui ships no S3 evidence bucket (evidence stays on the in-container fs, by decision), so the four
+#     WORKWELL_BUCKET_S3_* keys are absent from the env array on purpose. `official-flip-config.test.ts`
+#     asserts this file and deploy-maui-mieweb.yml ship the same WORKWELL_OFFICIAL_MEASURES.
+
+# Self-healing watchdog (#109). Periodically health-checks the LIVE surfaces and, if any is down,
+# recreates that container from its last-good GHCR `:latest` image (no rebuild). This is independent
+# of Proxmox `onboot` — it recovers the stack from a node reboot, a container crash/OOM, or an
+# accidental deletion, regardless of cause. It is the GitHub-side equivalent of the
+# `restart: unless-stopped` / systemd recovery documented for self-hosted stacks (docs/DEPLOY.md).
+#
+# Scope: the live path only — the frontend (`twh`) and the TypeScript backend (`twh-api-ts`). The
+# Java rollback container (`twh-api`) is intentionally NOT auto-healed (rollback is a full revert of
+# the flip, which redeploys it fresh).
+#
+# Heal cost: a recreate is delete+create (~30-120s of downtime for that container). The health probe
+# retries up to 6× over ~3min before declaring a surface down, so neither a transient blip nor a normal
+# cold start (a fresh container booting) ever trips a heal.
+#
+# Deploy-race safety: this workflow shares the `maui-mieweb-container-ops` concurrency group with
+# deploy-maui-mieweb.yml, so a heal can never run while a push-to-main deploy is mid delete+recreate of
+# the same container (and vice-versa) — the queued run waits, then re-checks a now-healthy surface.
+#
+# Rollback interaction: a heal recreates from the recovery tag, which now names the last image that
+# DEPLOYED successfully. A FAST rollback (redeploying an older `maui-sha-<SHA>` via workflow_dispatch)
+# is itself a successful deploy, so it promotes the recovery tag onto the rolled-back image and a later
+# heal restores THAT — the fast rollback is no longer silently undone. What still undoes it is the next
+# push to main, which deploys and promotes the newer build; so a fast rollback is still a stopgap until
+# the bad commit is reverted on main. See docs/DEPLOY.md.
+
+# CADENCE, MEASURED — do not read the cron below as a recovery-time guarantee. Over 2026-08-30..09-01
+# the twelve most recent scheduled runs came 2.5-7.5 HOURS apart, never 15 minutes: GitHub queues
+# `schedule` on a best-effort basis and drops runs under load. So this is a slow backstop, not a
+# watchdog. Anything that must not stay broken for hours has to fail safe on its own — which is why
+# the deploy path resolves an ambiguous DELETE itself (.github/scripts/mieweb-delete-confirmed.sh)
+# rather than relying on this workflow to clean up after it. To heal now, dispatch it by hand.
+on:
+  schedule:
+    - cron: "*/15 * * * *" # requested every 15 min; GitHub actually delivers every few hours
+  workflow_dispatch:
+
+# Shared with deploy-maui-mieweb.yml: a constant group (NOT keyed on github.ref) so heals and deploys
+# never touch the same container concurrently. cancel-in-progress: false → the later run queues.
+concurrency:
+  group: maui-mieweb-container-ops
+  cancel-in-progress: false
+
+# Least privilege: the jobs only checkout + call the MIE API (its own key, not GITHUB_TOKEN).
+permissions:
+  contents: read
+
+env:
+  BACKEND_TS_IMAGE: ghcr.io/taleef7/workwell-api-ts
+  BACKEND_TS_URL: https://maui-api-ts.os.mieweb.org
+  API_TS_HOSTNAME: maui-api-ts
+  FRONTEND_IMAGE: ghcr.io/taleef7/workwell-maui-frontend
+  FRONTEND_URL: https://maui.os.mieweb.org
+  FRONTEND_HOSTNAME: maui
+  SITE_ID: 1
+
+jobs:
+  check:
+    name: Health-check the live stack
+    runs-on: ubuntu-latest
+    # Bounded because this job holds the `maui-mieweb-container-ops` concurrency group while it runs,
+    # and the GitHub default is 360 min. A flaky manager can compound retries (request 6x, the
+    # delete read-back 6x, the create 3x) into hours of held group -- starving the self-heal
+    # reconciler, which is the failure mode this whole change exists to stop depending on.
+    timeout-minutes: 45
+    outputs:
+      backend_down: ${{ steps.probe.outputs.backend_down }}
+      frontend_down: ${{ steps.probe.outputs.frontend_down }}
+    steps:
+      - id: probe
+        run: |
+          # alive URL [expect-substring] — true if the URL is reachable (2xx) and, when given,
+          # the body contains the substring. Retries up to 6× over ~3min (worst case ~215s) so a
+          # transient blip OR a normal cold start (a booting container) never registers as down.
+          alive() {
+            local url="$1" expect="${2:-}" body attempt
+            for attempt in 1 2 3 4 5 6; do
+              if body=$(curl -fsS --max-time 15 "$url" 2>/dev/null); then
+                if [ -z "$expect" ] || printf '%s' "$body" | grep -q "$expect"; then return 0; fi
+              fi
+              [ "$attempt" -lt 6 ] && sleep 25
+            done
+            return 1
+          }
+          backend_down=false
+          frontend_down=false
+          alive "${BACKEND_TS_URL}/actuator/health" '"status":"UP"' || backend_down=true
+          alive "${FRONTEND_URL}/" || frontend_down=true
+          echo "backend_down=$backend_down" >> "$GITHUB_OUTPUT"
+          echo "frontend_down=$frontend_down" >> "$GITHUB_OUTPUT"
+          if [ "$backend_down" = false ] && [ "$frontend_down" = false ]; then
+            echo "✓ stack healthy — nothing to do"
+          else
+            echo "::warning::Unhealthy surface(s) — backend_down=$backend_down frontend_down=$frontend_down → recreating from :latest"
+          fi
+
+  heal-backend-ts:
+    name: Heal maui-api-ts (recreate from last-good image)
+    runs-on: ubuntu-latest
+    # Bounded because this job holds the `maui-mieweb-container-ops` concurrency group while it runs,
+    # and the GitHub default is 360 min. A flaky manager can compound retries (request 6x, the
+    # delete read-back 6x, the create 3x) into hours of held group -- starving the self-heal
+    # reconciler, which is the failure mode this whole change exists to stop depending on.
+    timeout-minutes: 45
+    needs: check
+    if: needs.check.outputs.backend_down == 'true'
+    env:
+      MIEWEB_API_URL: ${{ secrets.LAUNCHPAD_API_URL }}
+      MIEWEB_API_KEY: ${{ secrets.LAUNCHPAD_API_KEY }}
+      DATABASE_URL: ${{ secrets.DATABASE_URL_MAUI }}
+      # SAFETY (Codex P1 #522): the isolation guard below needs the production URL to compare against.
+      # KEEP IN SYNC with deploy-maui-mieweb.yml.
+      PROD_DATABASE_URL: ${{ secrets.DATABASE_URL_TWH }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      WORKWELL_AUTH_JWT_SECRET: ${{ secrets.WORKWELL_AUTH_JWT_SECRET_MAUI }}
+      # Optional (E14/ADR-023): inert when the WORKWELL_VSAC_API_KEY_TWH secret is unset. KEEP IN SYNC with deploy-maui-mieweb.yml.
+      WORKWELL_VSAC_API_KEY: ${{ secrets.WORKWELL_VSAC_API_KEY_TWH }}
+      REPLACE_EXISTING: "true"
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Validate required secrets
+        run: |
+          missing=()
+          [ -z "$MIEWEB_API_URL" ] && missing+=("LAUNCHPAD_API_URL")
+          [ -z "$MIEWEB_API_KEY" ] && missing+=("LAUNCHPAD_API_KEY")
+          [ -z "$DATABASE_URL" ] && missing+=("DATABASE_URL_MAUI")
+          [ -z "$OPENAI_API_KEY" ] && missing+=("OPENAI_API_KEY")
+          [ -z "$WORKWELL_AUTH_JWT_SECRET" ] && missing+=("WORKWELL_AUTH_JWT_SECRET_MAUI")
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::Missing required secret(s): ${missing[*]}"
+            exit 1
+          fi
+          # SAFETY: refuse to heal Maui onto the PRODUCTION database. Mirrors the identical guard in
+          # deploy-maui-mieweb.yml -> "Validate required secrets" and KEEPS IN SYNC with it. The
+          # reconciler recreates a scheduler-enabled container unattended, so it is the path where a
+          # mispasted DATABASE_URL_MAUI would do the most damage before anyone noticed: Maui runs,
+          # cases and audit events land in TWH's `workwell_spike` schema, and because the Maui profile
+          # evaluates a DIFFERENT population the contamination reads as real churn, not misconfiguration.
+          # A guard the normal path enforces and the automatic path skips is not a guard (Codex P1 #522).
+          host_of() { printf '%s' "$1" | sed -E 's#^(jdbc:)?[a-z]+://([^@]*@)?([^/:?]+).*#\3#'; }
+          maui_host="$(host_of "$DATABASE_URL")"
+          prod_host="$(host_of "$PROD_DATABASE_URL")"
+          if [ -n "$prod_host" ] && [ "$maui_host" = "$prod_host" ]; then
+            echo "::error::DATABASE_URL_MAUI resolves to the SAME host as the production DB ($maui_host) — refusing to contaminate the demo database. Provision a SEPARATE Neon project for Maui."
+            exit 1
+          fi
+
+      - name: Prepare backend-ts environment variables
+        id: backend-ts-env
+        # KEEP IN SYNC with deploy-maui-mieweb.yml → "Prepare backend-ts environment variables".
+        # A recreate must produce the exact same container env, so this mirrors the §7 TS env block.
+        run: |
+          db_url="${DATABASE_URL#jdbc:}" # node-postgres needs a postgres:// URI (strip jdbc:)
+          case "$db_url" in
+            postgres://*|postgresql://*) : ;;
+            *)
+              echo "::error::DATABASE_URL_MAUI must be a postgres:// or jdbc:postgresql:// URL." >&2
+              exit 1
+              ;;
+          esac
+          {
+            echo 'json<<EOF'
+            jq -nc \
+              --arg database_url "$db_url" \
+              --arg openai_api_key "$OPENAI_API_KEY" \
+              --arg jwt_secret "$WORKWELL_AUTH_JWT_SECRET" \
+              --arg frontend_url "$FRONTEND_URL" \
+              --arg vsac_api_key "$WORKWELL_VSAC_API_KEY" \
+              '[
+                {key: "MIEWEB_TARGET", value: "local"},
+                {key: "WORKWELL_ENVIRONMENT", value: "production"},
+                {key: "DATABASE_URL", value: $database_url},
+                {key: "OPENAI_API_KEY", value: $openai_api_key},
+                {key: "WORKWELL_CORS_ALLOWED_ORIGINS", value: $frontend_url},
+                {key: "CORS_ALLOWED_ORIGINS", value: $frontend_url},
+                {key: "WORKWELL_AUTH_COOKIE_SAME_SITE", value: "None"},
+                {key: "WORKWELL_AUTH_COOKIE_SECURE", value: "true"},
+                {key: "WORKWELL_AUTH_JWT_SECRET", value: $jwt_secret},
+                {key: "WORKWELL_AUTH_ACCESS_TTL_SECONDS", value: "2592000"},
+                {key: "WORKWELL_INSTANCE", value: "maui"},
+                {key: "WORKWELL_SCHEDULER_ENABLED", value: "true"},
+                # MUST mirror deploy-maui-mieweb.yml (PR-9c / ADR-045). This array recreates the container
+                # from :latest during a self-heal, so anything missing here is SILENTLY DROPPED the first
+                # time the reconciler fires — the container comes back healthy, the image is unchanged,
+                # and cms122/cms125 quietly revert to authored CQL with no signal anywhere. Caught by
+                # Codex on #356 before it could happen; `official-flip-config.test.ts` now asserts the two
+                # workflows agree, so this pair cannot drift again.
+                {key: "WORKWELL_OFFICIAL_MEASURES", value: "cms122,cms125"},
+                {key: "WORKWELL_VSAC_API_KEY", value: $vsac_api_key}
+              ]'
+            echo EOF
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Recreate maui-api-ts from :latest
+        env:
+          CONTAINER_HOSTNAME: ${{ env.API_TS_HOSTNAME }}
+          CONTAINER_IMAGE: ${{ env.BACKEND_TS_IMAGE }}:maui-latest
+          INTERNAL_PORT: 8080
+          CONTAINER_ENV_VARS_JSON: ${{ steps.backend-ts-env.outputs.json }}
+        run: bash .github/scripts/deploy-mieweb-container.sh
+
+  heal-frontend:
+    name: Heal maui frontend (recreate from last-good image)
+    runs-on: ubuntu-latest
+    # Bounded because this job holds the `maui-mieweb-container-ops` concurrency group while it runs,
+    # and the GitHub default is 360 min. A flaky manager can compound retries (request 6x, the
+    # delete read-back 6x, the create 3x) into hours of held group -- starving the self-heal
+    # reconciler, which is the failure mode this whole change exists to stop depending on.
+    timeout-minutes: 45
+    needs: check
+    if: needs.check.outputs.frontend_down == 'true'
+    env:
+      MIEWEB_API_URL: ${{ secrets.LAUNCHPAD_API_URL }}
+      MIEWEB_API_KEY: ${{ secrets.LAUNCHPAD_API_KEY }}
+      REPLACE_EXISTING: "true"
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Validate required secrets
+        run: |
+          missing=()
+          [ -z "$MIEWEB_API_URL" ] && missing+=("LAUNCHPAD_API_URL")
+          [ -z "$MIEWEB_API_KEY" ] && missing+=("LAUNCHPAD_API_KEY")
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::Missing required secret(s): ${missing[*]}"
+            exit 1
+          fi
+
+      - name: Prepare frontend environment variables
+        id: frontend-env
+        # KEEP IN SYNC with deploy-maui-mieweb.yml → "Prepare frontend environment variables".
+        run: |
+          {
+            echo 'json<<EOF'
+            jq -nc \
+              --arg backend_url "$BACKEND_TS_URL" \
+              '[
+                {key: "NODE_ENV", value: "production"},
+                {key: "NEXT_PUBLIC_API_URL", value: $backend_url},
+                {key: "NEXT_PUBLIC_API_BASE_URL", value: $backend_url}
+              ]'
+            echo EOF
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Recreate maui frontend from :latest
+        env:
+          CONTAINER_HOSTNAME: ${{ env.FRONTEND_HOSTNAME }}
+          CONTAINER_IMAGE: ${{ env.FRONTEND_IMAGE }}:latest
+          INTERNAL_PORT: 3000
+          CONTAINER_ENV_VARS_JSON: ${{ steps.frontend-env.outputs.json }}
+        run: bash .github/scripts/deploy-mieweb-container.sh

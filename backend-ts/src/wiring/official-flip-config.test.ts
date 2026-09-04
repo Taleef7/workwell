@@ -68,6 +68,7 @@ test("workflow discovery finds every WorkWell app deployment and excludes the re
     "deploy-maui-mieweb.yml",
     "deploy-staging-mieweb.yml",
     "deploy-twh-mieweb.yml",
+    "reconcile-maui-mieweb.yml",
     "reconcile-twh-mieweb.yml",
   ]);
 });
@@ -83,6 +84,7 @@ test("workflow discovery finds every WorkWell app deployment and excludes the re
  */
 const MUST_AGREE: ReadonlyArray<readonly [string, string]> = [
   ["deploy-twh-mieweb.yml", "reconcile-twh-mieweb.yml"],
+  ["deploy-maui-mieweb.yml", "reconcile-maui-mieweb.yml"],
 ];
 
 /**
@@ -216,7 +218,9 @@ test("PR-9c: a container recreated by SELF-HEAL routes exactly what the deploy r
  * `official-cases` job. **If you add a sidecar-reading test here, add it there too**, or it is
  * permanently skipped while reading as covered.
  */
-const sidecarPresent = (shippedMeasures("deploy-twh-mieweb.yml") ?? []).every((id) => {
+/** Every measure ANY in-scope workflow ships — TWH's list alone left a Maui-only measure unexamined. */
+const ALL_SHIPPED = [...new Set(WORKFLOWS.flatMap((workflow) => shippedMeasures(workflow) ?? []))];
+const sidecarPresent = ALL_SHIPPED.every((id) => {
   const artifact = loadOfficialArtifact(id);
   return artifact ? loadOfficialTerminology(artifact).ok : false;
 });
@@ -248,7 +252,7 @@ test("PR-9c: the shipped configuration constructs cleanly — no routing problem
   // never declared at all (ADR-053). No shipped measure has one today — all five vendored artifacts
   // ship every value set their ELM retrieves — so this changes no verdict now; it stops the predicate
   // silently meaning less than its name the first time one does.
-  const complete = (shippedMeasures("deploy-twh-mieweb.yml") ?? []).every((id) => {
+  const complete = ALL_SHIPPED.every((id) => {
     const artifact = loadOfficialArtifact(id);
     if (!artifact) return false;
     return (
