@@ -44,6 +44,18 @@ MeasureReport builder proves an authored run's report carries the binding's nota
 official-routed run's the artifact's (ADR-046). The divergence ends with #377, which retires the
 authored cms122/cms125 rows.
 
+## 2026-09-04 — a next action that is true whether or not the patient declined (#519)
+
+`nextActionFor` receives only `(status, measureId)`, and for the four refusal-capable immunizations the
+CQL folds "nothing recorded", "partial series" and "documented refusal" into the same bucket
+(`MISSING_DATA` for the three permanent series, which never emit `OVERDUE`; `OVERDUE` or
+`MISSING_DATA` for Td/Tdap). The persisted wording said "No … on file. Order or document one." to a
+patient who had declined, next to a roster cell that already read "Declination on file". The four
+measures now carry `NEXT_ACTION_OVERRIDES` for both statuses that name the gap and the record review
+that distinguishes the states, and a mechanical test rejects any wording that asserts absence or a
+refusal. A wording change is idempotent by construction: `planCaseUpsert` never reads `next_action`, and
+both stores rewrite it on the `UNCHANGED` path without an audit event.
+
 ## 2026-09-03 — one compliance rate, computed the way CMS scores it; the inverse measure reads as inverse; next actions state the gap
 
 **Two numbers for one measure.** The Maui walkthrough found the measure detail page showing 79.2% as its
