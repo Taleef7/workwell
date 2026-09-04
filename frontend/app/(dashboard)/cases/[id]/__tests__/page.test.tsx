@@ -1,5 +1,5 @@
 import React from "react";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { setSubject, subject } from "@/test/mocks/terminology";
@@ -17,8 +17,9 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn(), back: vi.fn() }),
 }));
 
+let currentRole = "ROLE_ADMIN";
 vi.mock("@/components/auth-provider", () => ({
-  useAuth: () => ({ user: { role: "ROLE_ADMIN" }, token: "test-token" }),
+  useAuth: () => ({ user: { role: currentRole }, token: "test-token", updateToken: () => {} }),
 }));
 
 function makeCaseDetail(overrides: Record<string, unknown> = {}) {
@@ -58,6 +59,8 @@ function makeCaseDetail(overrides: Record<string, unknown> = {}) {
 describe("CaseDetailPage crosswalk identity rendering", () => {
   beforeEach(() => {
     setSubject("employee");
+    currentRole = "ROLE_ADMIN";
+    get.mockClear();
     get.mockImplementation((url: string) => {
       if (url === "/api/measures") {
         return Promise.resolve([
@@ -104,6 +107,12 @@ describe("CaseDetailPage crosswalk identity rendering", () => {
           latestOutreachDeliveryStatus: null,
           timeline: [],
         });
+      }
+      if (url === "/api/users/assignable") {
+        return Promise.resolve([
+          { email: "admin@maui.workwell.dev", role: "ROLE_ADMIN" },
+          { email: "quality-lead@maui.workwell.dev", role: "ROLE_CASE_MANAGER" },
+        ]);
       }
       return Promise.resolve([]);
     });
@@ -361,5 +370,80 @@ describe("CaseDetailPage crosswalk identity rendering", () => {
     render(<CaseDetailPage />);
     expect(await screen.findByText("Period: 2026-01-01", { exact: true })).toBeInTheDocument();
     expect(screen.queryByText("2026", { exact: true })).not.toBeInTheDocument();
+  });
+
+  it("offers assignable emails from the profile in the datalist", async () => {
+    render(<CaseDetailPage />);
+    await waitFor(() => {
+      expect(screen.getByText("Actions")).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByText("Actions"));
+    await waitFor(() => {
+      const options = Array.from(
+        document.querySelectorAll('#case-assignees option'),
+      ).map((option) => option.getAttribute("value"));
+      expect(options).toEqual([
+        "admin@maui.workwell.dev",
+        "quality-lead@maui.workwell.dev",
+      ]);
+    });
+    expect(screen.getAllByPlaceholderText("Type or pick an email").length).toBeGreaterThan(0);
+  });
+
+  it("viewer role does not request /api/users/assignable", async () => {
+    currentRole = "ROLE_VIEWER";
+    render(<CaseDetailPage />);
+    await waitFor(() => {
+      expect(screen.getAllByText(/Breast Cancer Screening/i).length).toBeGreaterThan(0);
+    });
+    const assignableCalls = get.mock.calls.filter(([url]) => url === "/api/users/assignable");
+    expect(assignableCalls).toHaveLength(0);
+  });
+
+  it("datalist is present with a closed case", async () => {
+    get.mockImplementation((url: string) => {
+      if (url === "/api/measures") {
+        return Promise.resolve([]);
+      }
+      if (url === "/api/cases/case-001") {
+        return Promise.resolve({
+          caseId: "case-001",
+          employeeId: "emp-101",
+          employeeName: "Alice Walker",
+          measureId: "cms125",
+          measureVersionId: "cms125",
+          measureName: "Breast Cancer Screening",
+          measureVersion: "1.0",
+          evaluationPeriod: "2026-Q1",
+          status: "CLOSED",
+          priority: "HIGH",
+          assignee: "admin@maui.workwell.dev",
+          nextAction: "None",
+          currentOutcomeStatus: "COMPLIANT",
+          lastRunId: "run-001",
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+          closedAt: "2026-01-02T00:00:00.000Z",
+          closedReason: "Resolved",
+          closedBy: "admin@maui.workwell.dev",
+          exclusionReason: null,
+          waiverExpiresAt: null,
+          waiverExpired: false,
+          evidenceJson: { expressionResults: [] },
+          outcomeStatus: "COMPLIANT",
+          outcomeSummary: "Case is closed",
+          outcomeEvaluatedAt: "2026-01-01T00:00:00.000Z",
+          latestOutreachDeliveryStatus: null,
+          timeline: [],
+        });
+      }
+      return Promise.resolve([]);
+    });
+
+    render(<CaseDetailPage />);
+    await waitFor(() => {
+      expect(screen.getAllByText("Closed").length).toBeGreaterThan(0);
+    });
+    expect(document.querySelector("#case-assignees")).toBeInTheDocument();
   });
 });

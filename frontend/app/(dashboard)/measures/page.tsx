@@ -7,6 +7,8 @@ import { MEASURE_STATUS_LABELS, labelFor, measureStatusClass } from "@/lib/statu
 import { useApi } from "@/lib/api/hooks";
 import { useAuth } from "@/components/auth-provider";
 import { canAuthorMeasures } from "@/lib/rbac";
+import { AccessDenied } from "@/components/access-denied";
+import { canSeeEngineering } from "@/lib/public-demo";
 import NitroGrid, { type NitroGridColumn } from "@/features/datavis/NitroGridClient";
 import type { RowData, TableColumn, TableRow } from "datavis/src/components/table/types";
 import { formatMeasureIdentity, type MeasureIdentity } from "@/lib/measure-identity";
@@ -46,6 +48,7 @@ export default function MeasuresPage() {
   const [search, setSearch] = useState("");
 
   const loadMeasures = useCallback(async () => {
+    if (!canSeeEngineering(user?.role)) return;
     setLoading(true);
     setError(null);
     try {
@@ -63,7 +66,7 @@ export default function MeasuresPage() {
     } finally {
       setLoading(false);
     }
-  }, [api, search, statusFilter]);
+  }, [api, search, statusFilter, user?.role]);
 
   async function createMeasure() {
     if (!name.trim() || !policyRef.trim() || !owner.trim()) {
@@ -183,6 +186,15 @@ export default function MeasuresPage() {
     },
     [router],
   );
+
+  if (!canSeeEngineering(user?.role)) {
+    return (
+      <AccessDenied
+        title="Measures"
+        message="Your current role does not have access to this section."
+      />
+    );
+  }
 
   return (
     <section className="space-y-4">
