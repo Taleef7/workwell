@@ -5,7 +5,9 @@
  * the request path, worker entrypoint, engine ingress, or production run pipeline.
  */
 import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   calculationOptions as officialCalculationOptions,
   hasRetrieveSignal as officialHasRetrieveSignal,
@@ -338,12 +340,79 @@ function loadCase(caseDir: string, uuid: string, metadata?: OfficialCaseName): {
   }
 }
 
+/**
+ * Hash the vendored MADiE case deck exactly as `vendor-official-measure --with-tests` did: a sorted
+ * walk, `relativePath + "\n" + bytes` per file. Bytes without the manifest's own `tests.sha256` are
+ * not the deck this gate was proven against, and a silent upstream checkout change must read as a
+ * test failure rather than as a different number.
+ */
+export function verifyVendoredTestsHash(testsDir: string, manifestTests: { count: number; sha256: string }, measureName: string): void {
+  const hash = createHash("sha256");
+  let count = 0;
+  // Walks the WHOLE deck in the same order `vendor-official-measure.mjs` does — directories recursed,
+  // entries sorted by name, hashing the relative path, then a newline, then the file bytes. It must
+  // stay byte-identical to the writer: a reader that skipped the deck-root metadata (as this did until 2026-09-05) leaves the one
+  // file naming every case unverified while reporting the deck as intact.
+  const walk = (dir: string, prefix: string): void => {
+    for (const entry of readdirSync(dir, { withFileTypes: true }).sort((left, right) => left.name.localeCompare(right.name))) {
+      const relativePath = prefix ? `${prefix}/${entry.name}` : entry.name;
+      if (entry.isDirectory()) {
+        walk(join(dir, entry.name), relativePath);
+        continue;
+      }
+      if (!entry.isFile()) continue;
+      hash.update(`${relativePath}
+`);
+      hash.update(readFileSync(join(dir, entry.name)));
+      count += 1;
+    }
+  };
+  walk(testsDir, "");
+  const actual = `sha256:${hash.digest("hex")}`;
+  if (count !== manifestTests.count || actual !== manifestTests.sha256) {
+    throw new Error(
+      `${measureName}: vendored tests failed their manifest tests.sha256 integrity check — expected ` +
+      `${manifestTests.count} files / ${manifestTests.sha256}, found ${count} files / ${actual}. ` +
+      "Re-vendor the measure with --with-tests before running this gate.",
+    );
+  }
+}
+
 /** Load one official measure bundle and every loose-resource MADiE case beneath it. */
-export function loadOfficialMeasureCases(contentDir: string, measure: OfficialMeasureId): LoadedOfficialMeasure {
+export function loadOfficialMeasureCases(
+  contentDir: string,
+  measure: OfficialMeasureId,
+  /**
+   * Where the VENDORED decks live. Defaults to this repo's `measures/official/`, which is the only
+   * value production ever uses — it is a parameter so a test can point at a deck it controls without
+   * the loader having to resolve the path from the caller's cwd, which is the mistake that made the
+   * hash check dead code in the first place.
+   */
+  artifactRoot: string = fileURLToPath(new URL("../../measures/official/", import.meta.url)),
+): LoadedOfficialMeasure {
   const config = MEASURES[measure];
   const resolvedContentDir = resolve(contentDir);
   const measureBundle = readBundle(join(resolvedContentDir, "bundles", "measure", config.name, config.bundleFile));
-  const testsDir = join(resolvedContentDir, "input", "tests", "measure", config.name);
+  const upstreamTestsDir = join(resolvedContentDir, "input", "tests", "measure", config.name);
+  // The vendored deck lives in the REPO (`backend-ts/measures/official/<id>/tests`), which is where
+  // `vendor-official-measure.mjs --with-tests` writes it — NOT under the upstream content checkout.
+  // Resolving it against `contentDir` (as this did until 2026-09-05) points at
+  // `.official-content/measures/...`, a path that never exists, so `existsSync` was always false: the
+  // committed decks were never read, `verifyVendoredTestsHash` never ran, and `manifest.tests.sha256`
+  // protected nothing at runtime. Anchored to this module instead, exactly as `official-artifacts.ts`
+  // anchors ARTIFACT_ROOT, so it cannot drift with the caller's cwd or --content-dir.
+  const artifactDir = join(artifactRoot, measure);
+  const vendoredTestsDir = join(artifactDir, "tests");
+  let testsDir = upstreamTestsDir;
+  const artifactManifestPath = join(artifactDir, "manifest.json");
+  if (existsSync(vendoredTestsDir)) {
+    const artifactManifest = JSON.parse(readFileSync(artifactManifestPath, "utf8"));
+    if (!artifactManifest.tests?.sha256) {
+      throw new Error(`${config.name}: vendored tests exist but manifest.json has no tests.sha256 to verify against`);
+    }
+    verifyVendoredTestsHash(vendoredTestsDir, artifactManifest.tests, config.name);
+    testsDir = vendoredTestsDir;
+  }
   const manifestPath = join(testsDir, ".madie");
   const readmePath = join(testsDir, "README.txt");
   const metadata = existsSync(manifestPath)

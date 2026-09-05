@@ -286,3 +286,75 @@ test("parseArgs accepts --allow-missing-terminology and defaults it off", async 
   assert.equal(module.parseArgs([]).allowMissingTerminology, undefined, "off unless asked for");
   assert.equal(module.parseArgs(["--allow-missing-terminology"]).allowMissingTerminology, true);
 });
+
+/**
+ * The committed report is the project's evidence that the gate is green. These three cases pin WHEN it
+ * may be rewritten, and they exist because until 2026-09-05 nothing asserted the write at all — the
+ * suite only ever checked that a PARTIAL run does not write, so a guard that blocked every write would
+ * have passed it. Running the real gate locally then rewrote CMS138 from 47/47 to 0/47 and left it
+ * staged, which is the failure these three now prevent.
+ */
+async function fullRun(overrides: {
+  cache?: unknown[];
+  errorsFor?: string;
+}): Promise<{ writes: Array<{ path: string; markdown: string }>; errors: string[]; code: number }> {
+  const module = await import("./official-cases.ts");
+  const writes: Array<{ path: string; markdown: string }> = [];
+  const errors: string[] = [];
+  const code = await module.main(["--content-dir", "fixtures"], {
+    cwd: resolve("test-repo", "backend-ts"),
+    load: (_dir: string, measure: string) => ({ measure }) as never,
+    run: (loaded: { measure: string }) => {
+      const total = module.REQUIRED_OFFICIAL_CASE_COUNTS[loaded.measure] ?? 1;
+      const broken = overrides.errorsFor === loaded.measure;
+      return Promise.resolve({
+        measure: loaded.measure,
+        supplementedOids: [],
+        summary: {
+          total,
+          expectedAgreements: broken ? 0 : total,
+          referenceAgreements: 0,
+          unexpectedMismatches: 0,
+          errors: broken ? total : 0,
+        },
+      } as never);
+    },
+    render: () => "report",
+    sourceRevision: () => "rev",
+    loadDraftBundle: () => ({}) as never,
+    artifactIdentity: () => undefined,
+    runDraftDrift: () => Promise.resolve({ total: 1, changedCases: 0, errors: 0 } as never),
+    // `cache` present = this run read the RUNTIME's own terminology, which is what the deployed
+    // executor uses. Absent = it fell back to whatever the upstream bundle ships.
+    runtimeTerminology: () => Promise.resolve(overrides.cache ? { cache: overrides.cache } : { reason: "no sidecar" }),
+    unresolvableOids: () => [],
+    generatedDate: "2026-07-31",
+    writeReport: (path: string, markdown: string) => writes.push({ path, markdown }),
+    log: () => undefined,
+    error: (m: string) => errors.push(m),
+  });
+  return { writes, errors, code };
+}
+
+test("a clean full run on the runtime's own terminology DOES rewrite the committed report", async () => {
+  const { writes, errors, code } = await fullRun({ cache: [{ id: "vs" }] });
+  assert.equal(code, 0);
+  assert.equal(writes.length, 1, "the positive case — without this, a guard blocking every write passes silently");
+  assert.match(writes[0]!.path, /OFFICIAL_TESTCASE_REPORT/);
+  assert.doesNotMatch(errors.join(" | "), /NOT rewritten/);
+});
+
+test("a run DOWNGRADED to upstream value sets does not rewrite the report, and says which measures", async () => {
+  const { writes, errors, code } = await fullRun({});
+  assert.equal(code, 0, "downgrading is not itself a gate failure — the numbers are still useful locally");
+  assert.deepEqual(writes, [], "numbers from upstream terminology are not evidence about the runtime");
+  assert.match(errors.join(" | "), /NOT rewritten/);
+  assert.match(errors.join(" | "), /ran on UPSTREAM value sets/);
+  assert.match(errors.join(" | "), /cms122/);
+});
+
+test("a FAILING full run does not rewrite the committed report with its own red numbers", async () => {
+  const { writes, code } = await fullRun({ cache: [{ id: "vs" }], errorsFor: "cms138" });
+  assert.equal(code, 1, "errors must fail the gate");
+  assert.deepEqual(writes, [], "the file that records a green run must not be rewritten by a red one");
+});

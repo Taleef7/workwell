@@ -67,7 +67,7 @@ const profileCatalogScript = `
     listStatus: list.status,
     count: rows.length,
     ids: rows.map(r => r.id),
-    draftStatus: rows.find(r => r.id === "cms2")?.status ?? null,
+    cms2Status: rows.find(r => r.id === "cms2")?.status ?? null,
     detailStatus: detail.status,
     detailBody: await detail.json(),
   }));
@@ -76,19 +76,19 @@ const profileCatalogScript = `
 test("scoped profile (Maui) — measures catalog exposes only runnable rows and hides draft detail", () => {
   const output = runProfileChild("maui", profileCatalogScript);
   assert.equal(output.listStatus, 200);
-  assert.deepEqual((output.ids as string[]).sort(), ["cms122", "cms125", "hypertension"]);
-  assert.equal(output.count, 3);
-  assert.equal(output.draftStatus, null);
+  assert.deepEqual((output.ids as string[]).sort(), ["cms122", "cms125"]);
+  assert.equal(output.count, 2);
+  assert.equal(output.cms2Status, null);
   assert.equal(output.detailStatus, 404);
   assert.deepEqual(output.detailBody, { error: "not_found", measureId: "cms2" });
 });
 
-test("default profile — measures catalog preserves the full catalog and draft detail", () => {
+test("default profile — measures catalog preserves the full catalog and the cms2 detail", () => {
   const output = runProfileChild(undefined, profileCatalogScript);
   assert.equal(output.listStatus, 200);
   assert.equal(output.count, 63);
   assert.ok((output.ids as string[]).includes("cms2"));
-  assert.equal(output.draftStatus, "Draft");
+  assert.equal(output.cms2Status, "Active");
   assert.equal(output.detailStatus, 200);
   assert.equal((output.detailBody as { id: string }).id, "cms2");
 });
@@ -105,8 +105,8 @@ test("GET /api/measures returns the full 63-measure catalog (Measure shape), Act
   assert.equal(audiogram.policyRef, "OSHA 29 CFR 1910.95");
   assert.equal(audiogram.status, "Active");
   assert.ok(audiogram.tags.includes("hearing"));
-  // exactly the 14 runnable measures are Active
-  assert.equal(rows.filter((m) => m.status === "Active").length, 14);
+  // the 14 runnable measures plus the three official-only cms rows are Active
+  assert.equal(rows.filter((m) => m.status === "Active").length, 17);
 });
 
 test("GET /api/measures and GET /api/measures/:id include identity field ({cmsId, mipsQualityId} or null)", async () => {
@@ -130,7 +130,7 @@ test("GET /api/measures and GET /api/measures/:id include identity field ({cmsId
 
 test("GET /api/measures?status=Draft filters by lifecycle status", async () => {
   const rows = (await get("/api/measures?status=Draft").then((r) => r!.json())) as CatalogRow[];
-  assert.ok(rows.length >= 47, "the CMS eCQM drafts (+ Respirator Fit Test)");
+  assert.ok(rows.length >= 44, "the remaining CMS eCQM drafts (+ Respirator Fit Test)");
   assert.ok(rows.every((m) => m.status === "Draft"));
 });
 
@@ -175,16 +175,16 @@ test("GET /api/measures/:id returns MeasureDetail with spec + reconstructed CQL 
   assert.equal(d.identity, null);
 });
 
-test("GET /api/measures/:id for a catalog-only draft: generic spec, empty CQL, NOT_COMPILED", async () => {
+test("GET /api/measures/:id for an official-only Active measure: descriptive spec, empty CQL, COMPILED", async () => {
   const d = (await get("/api/measures/cms2").then((r) => r!.json())) as {
     cqlText: string;
     compileStatus: string;
     description: string;
     identity: { cmsId: string; mipsQualityId: string | null; improvementNotation: "increase" | "decrease" } | null;
   };
-  assert.equal(d.compileStatus, "NOT_COMPILED");
-  assert.equal(d.cqlText, "", "no compiled CQL for a draft");
-  assert.match(d.description, /CQL authoring pending/);
+  assert.equal(d.compileStatus, "COMPILED");
+  assert.equal(d.cqlText, "", "official-only measures run CMS's artifact; no CQL is stored");
+  assert.match(d.description, /Screening for Depression and Follow-Up Plan/);
   assert.deepEqual(d.identity, { cmsId: "CMS2", mipsQualityId: "134", improvementNotation: "increase" });
 });
 
@@ -237,12 +237,12 @@ test("GET /api/measures/:id/activation-readiness reflects the compile + fixture 
   assert.ok(h.activationBlockers.some((b) => /test fixture/i.test(b)));
   assert.ok(!h.activationBlockers.some((b) => /Compile status/i.test(b)), "COMPILED → no compile blocker");
 
-  // Draft (NOT_COMPILED, no fixtures) → both blockers.
+  // Official-only Active measure: COMPILED, no fixtures → only the fixture blocker.
   const d = (await get("/api/measures/cms2/activation-readiness").then((r) => r!.json())) as { ready: boolean; activationBlockers: string[]; compileStatus: string };
   assert.equal(d.ready, false);
-  assert.equal(d.compileStatus, "NOT_COMPILED");
-  assert.ok(d.activationBlockers.some((b) => /Compile status must be COMPILED or WARNINGS/.test(b)));
-
+  assert.equal(d.compileStatus, "COMPILED");
+  assert.ok(!d.activationBlockers.some((b) => /Compile status must be COMPILED or WARNINGS/.test(b)), "COMPILED → no compile blocker");
+  assert.ok(d.activationBlockers.some((b) => /test fixture/i.test(b)));
   assert.equal((await get("/api/measures/nope/activation-readiness"))?.status, 404);
 });
 
@@ -766,4 +766,18 @@ test("PUT /api/measures/:id/spec preserves Rule Builder params persisted in spec
   const detail = (await get("/api/measures/mmr").then((r) => r!.json())) as { rule?: { requiredDoses?: number }; description: string };
   assert.equal(detail.description, "edited via spec tab");
   assert.equal(detail.rule?.requiredDoses, 2, "rule params survive a spec-tab save");
+});
+test("GET /api/measures carries routing to the wire, including the official case", async () => {
+  const previous = process.env.WORKWELL_OFFICIAL_MEASURES;
+  try {
+    process.env.WORKWELL_OFFICIAL_MEASURES = "cms165";
+    const rows = (await get("/api/measures").then((r) => r!.json())) as (CatalogRow & { routing: string })[];
+    const byId = new Map(rows.map((row) => [row.id, row]));
+    assert.equal(byId.get("cms125")?.routing, "authored");
+    assert.equal(byId.get("audiogram")?.routing, "authored");
+    assert.equal(byId.get("cms165")?.routing, "official");
+  } finally {
+    if (previous === undefined) delete process.env.WORKWELL_OFFICIAL_MEASURES;
+    else process.env.WORKWELL_OFFICIAL_MEASURES = previous;
+  }
 });

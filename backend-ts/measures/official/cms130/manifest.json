@@ -57,5 +57,10 @@
     },
     "sha256": "sha256:8c32b213e18c1a9e42042b0d4a6e40dc2f40f68988409565457792ba72a81108"
   },
-  "sha256": "sha256:aab26d665b79bc91454640923472f294c77072e36be098f927a4301081d72629"
+  "sha256": "sha256:aab26d665b79bc91454640923472f294c77072e36be098f927a4301081d72629",
+  "tests": {
+    "count": 267,
+    "sourcePath": "input/tests/measure/CMS130FHIRColorectalCancerScrn",
+    "sha256": "sha256:dc5f690853993eaf727c487ed0d12dd9fa674228a4f19eb379127e8a6f55d292"
+  }
 }

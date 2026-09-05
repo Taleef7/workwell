@@ -1466,3 +1466,36 @@ test("PR-8: a failed run-log write cannot turn a SUCCESSFUL batch into a failed 
   );
   assert.equal(res.status, "COMPLETED", "and the run is clean, not PARTIAL_FAILURE");
 });
+test("a run whose every measure is official-routed records the calendar-year period on the run row", async () => {
+  process.env.WORKWELL_OFFICIAL_MEASURES = "cms122";
+  try {
+    const planned = await planManualRun(deps, { scopeType: "MEASURE", measureId: "cms122", evaluationDate: "2027-06-30" });
+    const row = (await deps.runStore.getRun(planned.run.id))!;
+    assert.equal(row?.measurementPeriodStart, "2027-01-01T00:00:00.000Z");
+    assert.equal(row?.measurementPeriodEnd, "2027-12-31T23:59:59.999Z");
+  } finally { delete process.env.WORKWELL_OFFICIAL_MEASURES; }
+});
+
+/**
+ * The official-only ids have no entry in the AUTHORED registry (`MEASURES`), because their logic is the
+ * vendored CMS artifact rather than CQL in this repo. Every `MEASURES[id]!.name` in the run path was
+ * therefore a crash that fires on the FIRST flip of cms2/cms130/cms165 — the exact thing ADR-072 exists
+ * to enable — and a `!MEASURES[id]` guard rejected a MEASURE-scoped run for them outright.
+ *
+ * Nothing caught it because nothing routes them yet, so this pins the name resolution directly.
+ */
+test("measureDisplayName resolves an official-only measure that has no authored-registry entry", async () => {
+  const { measureDisplayName } = await import("../measure/measure-name.ts");
+  const { MEASURES } = await import("../engine/cql/measure-registry.ts");
+
+  for (const id of ["cms2", "cms130", "cms165"] as const) {
+    assert.equal(MEASURES[id], undefined, `${id} must NOT be in the authored registry — the premise of this test`);
+    const name = measureDisplayName(id);
+    assert.ok(name && name !== id, `${id} resolves to a real name, not a crash and not the bare id`);
+    assert.doesNotMatch(name, /undefined/);
+  }
+  // Authored measures still come from the registry, unchanged.
+  assert.equal(measureDisplayName("cms122"), MEASURES["cms122"]!.name);
+  // A genuinely unknown id degrades to itself rather than throwing.
+  assert.equal(measureDisplayName("not-a-measure"), "not-a-measure");
+});

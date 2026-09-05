@@ -45,5 +45,10 @@
     "truncated": [],
     "sha256": "sha256:8879fee0b88622566994b5b80e81d275afa61911a32cd5765841c73aab55337d"
   },
-  "sha256": "sha256:a005f4527d70fdd7495b9d75ab03b5ab43f1146fcdad81cbfba7d81b7caf1dae"
+  "sha256": "sha256:a005f4527d70fdd7495b9d75ab03b5ab43f1146fcdad81cbfba7d81b7caf1dae",
+  "tests": {
+    "count": 299,
+    "sourcePath": "input/tests/measure/CMS951FHIRKidneyHealthEval",
+    "sha256": "sha256:2aa47248a7a60fba5c3b770d9132dd259df85a99fd9cf00bc3c314d95f6bc28c"
+  }
 }
