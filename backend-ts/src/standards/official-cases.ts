@@ -5,6 +5,7 @@
  * the request path, worker entrypoint, engine ingress, or production run pipeline.
  */
 import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { join, resolve } from "node:path";
 import {
   calculationOptions as officialCalculationOptions,
@@ -338,12 +339,53 @@ function loadCase(caseDir: string, uuid: string, metadata?: OfficialCaseName): {
   }
 }
 
+/**
+ * Hash the vendored MADiE case deck exactly as `vendor-official-measure --with-tests` did: a sorted
+ * walk, `relativePath + "\n" + bytes` per file. Bytes without the manifest's own `tests.sha256` are
+ * not the deck this gate was proven against, and a silent upstream checkout change must read as a
+ * test failure rather than as a different number.
+ */
+function verifyVendoredTestsHash(testsDir: string, manifestTests: { count: number; sha256: string }, measureName: string): void {
+  const hash = createHash("sha256");
+  let count = 0;
+  for (const entry of readdirSync(testsDir, { withFileTypes: true }).sort((left, right) => left.name.localeCompare(right.name))) {
+    if (!entry.isDirectory()) continue;
+    const caseDir = join(testsDir, entry.name);
+    for (const file of readdirSync(caseDir, { withFileTypes: true }).sort((left, right) => left.name.localeCompare(right.name))) {
+      if (!file.isFile()) continue;
+      const relativePath = `${entry.name}/${file.name}`;
+      hash.update(`${relativePath}\n`);
+      hash.update(readFileSync(join(caseDir, file.name)));
+      count += 1;
+    }
+  }
+  const actual = `sha256:${hash.digest("hex")}`;
+  if (count !== manifestTests.count || actual !== manifestTests.sha256) {
+    throw new Error(
+      `${measureName}: vendored tests failed their manifest tests.sha256 integrity check — expected ` +
+      `${manifestTests.count} files / ${manifestTests.sha256}, found ${count} files / ${actual}. ` +
+      "Re-vendor the measure with --with-tests before running this gate.",
+    );
+  }
+}
+
 /** Load one official measure bundle and every loose-resource MADiE case beneath it. */
 export function loadOfficialMeasureCases(contentDir: string, measure: OfficialMeasureId): LoadedOfficialMeasure {
   const config = MEASURES[measure];
   const resolvedContentDir = resolve(contentDir);
   const measureBundle = readBundle(join(resolvedContentDir, "bundles", "measure", config.name, config.bundleFile));
-  const testsDir = join(resolvedContentDir, "input", "tests", "measure", config.name);
+  const upstreamTestsDir = join(resolvedContentDir, "input", "tests", "measure", config.name);
+  const vendoredTestsDir = join(resolvedContentDir, "measures", "official", measure, "tests");
+  let testsDir = upstreamTestsDir;
+  const artifactManifestPath = join(resolvedContentDir, "measures", "official", measure, "manifest.json");
+  if (existsSync(vendoredTestsDir)) {
+    const artifactManifest = JSON.parse(readFileSync(artifactManifestPath, "utf8"));
+    if (!artifactManifest.tests?.sha256) {
+      throw new Error(`${config.name}: vendored tests exist but manifest.json has no tests.sha256 to verify against`);
+    }
+    verifyVendoredTestsHash(vendoredTestsDir, artifactManifest.tests, config.name);
+    testsDir = vendoredTestsDir;
+  }
   const manifestPath = join(testsDir, ".madie");
   const readmePath = join(testsDir, "README.txt");
   const metadata = existsSync(manifestPath)

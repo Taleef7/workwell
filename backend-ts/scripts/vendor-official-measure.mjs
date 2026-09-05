@@ -104,8 +104,8 @@
  * from a manifest field.
  */
 import { createHash } from "node:crypto";
-import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { mkdirSync, readdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
+import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   DEFAULT_VSAC_BASE,
@@ -129,6 +129,10 @@ const KEPT_LIBRARY_CONTENT_TYPE = "application/elm+json";
 function parseArgs(argv) {
   const args = {
     ref: DEFAULT_REF,
+    testsOnly: false,
+    withTests: false,
+    contentDir: join(BACKEND_ROOT, ".official-content"),
+    outputDir: join(BACKEND_ROOT, "measures", "official"),
     stripElmAnnotations: false,
     completeTerminology: false,
     vsacBase: DEFAULT_VSAC_BASE,
@@ -153,8 +157,13 @@ function parseArgs(argv) {
       args.completeTerminology = true;
     } else if (flag === "--vsac-base") args.vsacBase = argv[++i];
     else if (flag === "--vsac-manifest") args.vsacManifest = argv[++i];
+    else if (flag === "--tests-only") args.testsOnly = true;
+    else if (flag === "--with-tests") args.withTests = true;
+    else if (flag === "--content-dir") args.contentDir = resolve(argv[++i]);
+    else if (flag === "--output-dir") args.outputDir = resolve(argv[++i]);
     else throw new Error(`unknown argument: ${flag}`);
   }
+  if (args.testsOnly && args.withTests) throw new Error("--tests-only and --with-tests are mutually exclusive");
   if (!args.measure || !args.catalogId) {
     throw new Error(
       "usage: --measure <UpstreamMeasureDir> --catalog-id <cms122> [--ref <sha>]" +
@@ -173,6 +182,55 @@ function parseArgs(argv) {
 }
 
 const sha256 = (text) => `sha256:${createHash("sha256").update(text).digest("hex")}`;
+
+/**
+ * Copy the upstream MADiE case deck into the tree and hash it in a single sorted walk, so the manifest's
+ * `tests.sha256` is over the exact bytes a CI gate later verifies: `relativePath + "\n" + bytes` per file.
+ * JSON is validated before any copy rather than after, because a malformed upstream case file is a
+ * checkout problem that must fail with the file named — not a hash mismatch discovered much later.
+ */
+function vendorTests(args) {
+  const upstreamTestsDir = join(args.contentDir, "input", "tests", "measure", args.measure);
+  const outDir = args.outputDir;
+  const manifestPath = join(outDir, "manifest.json");
+  const sourcePath = relative(args.contentDir, upstreamTestsDir).split(/[\\/]/).join("/");
+
+  if (!existsSync(upstreamTestsDir)) throw new Error(`no upstream test deck at ${upstreamTestsDir}`);
+
+  const hash = createHash("sha256");
+  let count = 0;
+  for (const entry of readdirSync(upstreamTestsDir, { withFileTypes: true }).sort((left, right) => left.name.localeCompare(right.name))) {
+    if (!entry.isDirectory()) continue;
+    const caseSource = join(upstreamTestsDir, entry.name);
+    const caseDest = join(outDir, "tests", entry.name);
+    mkdirSync(caseDest, { recursive: true });
+    for (const file of readdirSync(caseSource, { withFileTypes: true }).sort((left, right) => left.name.localeCompare(right.name))) {
+      if (!file.isFile()) continue;
+      const sourcePath = join(caseSource, file.name);
+      const bytes = readFileSync(sourcePath);
+      if (file.name.toLowerCase().endsWith(".json")) {
+        try {
+          JSON.parse(bytes.toString("utf8"));
+        } catch (error) {
+          throw new Error(`malformed JSON in ${sourcePath}: ${error.message}`);
+        }
+      }
+      const relativePath = `${entry.name}/${file.name}`;
+      hash.update(`${relativePath}\n`);
+      hash.update(bytes);
+      writeFileSync(join(caseDest, file.name), bytes);
+      count += 1;
+    }
+  }
+
+  let manifest = {};
+  if (existsSync(manifestPath)) manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+  manifest.tests = { count, sourcePath, sha256: `sha256:${hash.digest("hex")}` };
+  mkdirSync(outDir, { recursive: true });
+  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+
+  return { count, sourcePath, sha256: manifest.tests.sha256 };
+}
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -427,6 +485,13 @@ function localUpstreamBundle(args) {
 
 const args = parseArgs(process.argv.slice(2));
 
+const outDir = join(args.outputDir, args.catalogId);
+if (args.testsOnly) {
+  const tests = vendorTests({ ...args, outputDir: outDir });
+  console.log(`  ${args.measure}: vendored ${tests.count} case files → ${outDir} (${tests.sha256})`);
+  process.exit(0);
+}
+
 const cached = localUpstreamBundle(args);
 let raw = cached;
 if (raw) {
@@ -470,11 +535,17 @@ const terminologyJson = `${JSON.stringify(
 const bundleJson = `${JSON.stringify(reduced, null, 0)}\n`;
 const manifest = buildManifest(reduced, args, raw, bundleJson, terminology, terminologyJson, completed);
 
-const outDir = join(BACKEND_ROOT, "measures", "official", args.catalogId);
 mkdirSync(outDir, { recursive: true });
 writeFileSync(join(outDir, "bundle.json"), bundleJson);
 writeFileSync(join(outDir, "terminology.json"), terminologyJson);
 writeFileSync(join(outDir, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
+// `--with-tests` writes the case deck after the artifact manifest, so a regenerated official tree
+// can be compared whole instead of patched piecemeal.
+if (args.withTests) {
+  const tests = vendorTests({ ...args, outputDir: outDir });
+  manifest.tests = tests;
+  writeFileSync(join(outDir, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
+}
 
 // Decimal MB, matching the evidence report's own formatting — the two printed the same file at
 // different sizes when this divided by 1048576 and the report divided by 1e6.

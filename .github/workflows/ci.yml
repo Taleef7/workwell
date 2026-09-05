@@ -271,14 +271,14 @@ jobs:
           fi
           # $COMPLETE is deliberately UNQUOTED: it is either one flag or nothing, and quoting it passes
           # an empty string that the script's parseArgs rejects as `unknown argument:`. Leave it bare.
-          pnpm vendor:official --measure CMS122FHIRDiabetesAssessGT9Pct --catalog-id cms122 --strip-elm-annotations $COMPLETE
-          pnpm vendor:official --measure CMS125FHIRBreastCancerScreen --catalog-id cms125 --strip-elm-annotations $COMPLETE
+          pnpm vendor:official --measure CMS122FHIRDiabetesAssessGT9Pct --catalog-id cms122 --strip-elm-annotations --with-tests $COMPLETE
+          pnpm vendor:official --measure CMS125FHIRBreastCancerScreen --catalog-id cms125 --strip-elm-annotations --with-tests $COMPLETE
           # Onboarded 2026-07-30. None of these three has a capped expansion, so $COMPLETE is a no-op for
           # them and their manifests are byte-identical credentialed or not — which is why they could be
           # vendored without the VSAC key that cms122/cms125 needed (ADR-047).
-          pnpm vendor:official --measure CMS2FHIRPCSDepScreenAndFollowUp --catalog-id cms2 --strip-elm-annotations $COMPLETE
-          pnpm vendor:official --measure CMS68FHIRDocumentationCurrentMeds --catalog-id cms68 --strip-elm-annotations $COMPLETE
-          pnpm vendor:official --measure CMS951FHIRKidneyHealthEval --catalog-id cms951 --strip-elm-annotations $COMPLETE
+          pnpm vendor:official --measure CMS2FHIRPCSDepScreenAndFollowUp --catalog-id cms2 --strip-elm-annotations --with-tests $COMPLETE
+          pnpm vendor:official --measure CMS68FHIRDocumentationCurrentMeds --catalog-id cms68 --strip-elm-annotations --with-tests $COMPLETE
+          pnpm vendor:official --measure CMS951FHIRKidneyHealthEval --catalog-id cms951 --strip-elm-annotations --with-tests $COMPLETE
           pnpm vendor:official --measure CMS138FHIRTobaccoScrnCessation --catalog-id cms138 --strip-elm-annotations $COMPLETE
           pnpm vendor:official --measure CMS130FHIRColorectalCancerScrn --catalog-id cms130 --strip-elm-annotations $COMPLETE
           pnpm vendor:official --measure CMS165FHIRControllingHighBP --catalog-id cms165 --strip-elm-annotations $COMPLETE
@@ -293,7 +293,13 @@ jobs:
       - name: The committed artifact is reproducible from its pin
         if: steps.vendor.outputs.credentialed == 'true'
         run: |
-          if ! git diff --exit-code measures/official; then
+          # `git status --porcelain`, not `git diff`: the vendored MADiE decks are whole FILES, and a
+          # regenerated-but-UNTRACKED case file is invisible to `git diff`. That would let a deck that
+          # no longer matches its pin pass this gate silently, which is the one thing it exists to stop.
+          UNCLEAN=$(git status --porcelain -- measures/official)
+          if [ -n "$UNCLEAN" ]; then
+            echo "$UNCLEAN"
+            git diff -- measures/official || true
             echo "::error::measures/official does not match what this pin produces. If WORKWELL_VSAC_API_KEY_VENDOR was just added, re-run 'pnpm vendor:official … --complete-terminology' locally with the key and commit the regenerated manifests in the same change."
             exit 1
           fi

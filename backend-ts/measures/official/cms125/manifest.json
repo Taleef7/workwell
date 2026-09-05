@@ -57,5 +57,10 @@
     },
     "sha256": "sha256:3cc553d302907592805c48d199742b69888f257ceca28c15ca7892e8373635b3"
   },
-  "sha256": "sha256:97f737fa5262fca1fbb4620e10ce286f612b87b7de4c3fc06fdfe38dfb666ac8"
+  "sha256": "sha256:97f737fa5262fca1fbb4620e10ce286f612b87b7de4c3fc06fdfe38dfb666ac8",
+  "tests": {
+    "count": 272,
+    "sourcePath": "input/tests/measure/CMS125FHIRBreastCancerScreen",
+    "sha256": "sha256:5aa5b0c220b38e7816cfc9b64473035a092d752ca101ac76494022eefadd5d17"
+  }
 }

@@ -35,6 +35,12 @@ export interface OfficialManifest {
    */
   improvementNotation: string | null;
   populations: string[];
+  /**
+   * Present only when the MADiE case deck was vendored into the tree (--tests-only or --with-tests).
+   * sourcePath is upstream-relative provenance; sha256 is the integrity pin the case loader
+   * verifies before reading any of the committed case bytes.
+   */
+  tests?: { count: number; sourcePath: string; sha256: string };
   source: { repo: string; ref: string; path: string; rawSha256: string };
   reduction: Record<string, unknown>;
   /**

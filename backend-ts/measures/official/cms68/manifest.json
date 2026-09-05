@@ -45,5 +45,10 @@
     "truncated": [],
     "sha256": "sha256:91f35409eeeeefb3355535dbd2e6dd6b9cd31be5f4463fc1efe7f4786b40148f"
   },
-  "sha256": "sha256:f114b6edf657db98b6a11b625aa3b5d43e55ab736b0067dda56eeb6f312fb970"
+  "sha256": "sha256:f114b6edf657db98b6a11b625aa3b5d43e55ab736b0067dda56eeb6f312fb970",
+  "tests": {
+    "count": 78,
+    "sourcePath": "input/tests/measure/CMS68FHIRDocumentationCurrentMeds",
+    "sha256": "sha256:dcdc575edd571069eec7418c3715e5795aef63b90c19227ec34935c0e9f62fe5"
+  }
 }
