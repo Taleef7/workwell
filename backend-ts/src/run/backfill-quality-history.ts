@@ -38,9 +38,7 @@ import { SCALE_TRIGGER } from "./backfill-scale.ts";
 import { isCompletedRun } from "../program/rollup-shared.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
-import { deriveExamConfig } from "../engine/synthetic/exam-config.ts";
-import { buildSyntheticBundle } from "../engine/synthetic/fhir-bundle-builder.ts";
-import { seededTargetFor } from "./distribution.ts";
+import { compositeBundleSource } from "../wiring/subject-bundle-source.ts";
 import type { SnapshotEngine } from "./employee-compliance-snapshot.ts";
 
 export const QUALITY_HISTORY_BACKFILLED_EVENT = "QUALITY_HISTORY_BACKFILLED";
@@ -135,6 +133,7 @@ export async function backfillQualityHistory(
   let monthsSkipped = 0;
   let rowsWritten = 0;
 
+  const bundleSource = compositeBundleSource(process.env as Record<string, unknown>);
   for (const period of periods) {
     if (resume) {
       // Skip only a COMPLETE month — one that already has an `all`-scope row for every expected
@@ -153,13 +152,11 @@ export async function backfillQualityHistory(
     const rows: QualitySnapshotInput[] = [];
 
     for (const measureId of measureIds) {
-      const binding = MEASURE_BINDINGS[measureId]!;
       const liveOutcomes: { subjectId: string; status: string }[] = [];
       for (const employee of employees) {
         try {
-          const target = seededTargetFor(employees, binding.rateKey, employee.externalId) ?? "MISSING_DATA";
-          const config = deriveExamConfig(binding, target);
-          const bundle = buildSyntheticBundle(employee, config, today); // anchor to today
+          const target = bundleSource.targetFor(employees, measureId, employee.externalId) ?? "MISSING_DATA";
+          const bundle = bundleSource.bundleFor(employee, measureId, target, today); // anchor to today
           const outcome = await deps.engine.evaluate({ measureId, patientBundle: bundle, evaluationDate: asOfDate });
           liveOutcomes.push({ subjectId: employee.externalId, status: outcome.outcome });
         } catch {

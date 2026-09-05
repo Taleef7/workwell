@@ -51,7 +51,11 @@ import { isDemoAccountRefusedOnProfile } from "./auth/demo-users.ts";
 import { assertSafeStartup, type StartupEnv } from "./config/startup-safety.ts";
 import { parseAllowedOrigins, preflightResponse, withCors } from "./config/cors.ts";
 import { formatSeamLogLine } from "./config/seam-inventory.ts";
+import { officialMeasureIds } from "./wiring/official-routing.ts";
 import { officialRoutingProblems } from "./wiring/executor-router.ts";
+import { loadOfficialArtifact } from "./wiring/official-artifacts.ts";
+import { effectivePeriodWarning, officialMeasurementPeriod } from "./wiring/official-executor-adapter.ts";
+import { RUNNABLE_MEASURE_IDS, classifyRunnable } from "./config/deployment-profile.ts";
 import { isWebChartConfigured, webChartConfigFromEnv } from "./engine/ingress/data-source.ts";
 
 /** Runtime bindings (wrangler.jsonc) + config. Injected per target; app code
@@ -401,6 +405,19 @@ function logSeamInventoryOnce(env: Env): void {
       `WORKWELL_ALERT ${JSON.stringify({ kind: "OFFICIAL_ROUTING_MISCONFIGURED", problems })}`,
     );
   }
+  // ADR-072: report the runnable classification and a stale vendored effectivePeriod at boot, so an
+  // operator sees the vintage gap before the first run reports it.
+  const today = new Date().toISOString().slice(0, 10);
+  for (const measureId of officialMeasureIds(env as unknown as Record<string, unknown>)) {
+    const artifact = loadOfficialArtifact(measureId);
+    const warning = artifact
+      ? effectivePeriodWarning(artifact, officialMeasurementPeriod(measureId, today))
+      : null;
+    if (warning) console.warn(`[workwell] ${warning}`);
+  }
+  console.log(
+    `[workwell] runnable=${RUNNABLE_MEASURE_IDS.map((id) => `${id}:${classifyRunnable(id, env as unknown as Record<string, unknown>).kind}`).join(",")}`,
+  );
 }
 
 export default {

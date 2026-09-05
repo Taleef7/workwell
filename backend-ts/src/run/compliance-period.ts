@@ -12,6 +12,7 @@
  * Java helper line-for-line so BOTH stacks bucket identically across the #109 cutover.
  */
 import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
+import { isVendoredOfficialMeasure } from "../config/official-measure-ids.ts";
 
 export type Cadence = "ANNUAL" | "BIANNUAL" | "SEASONAL";
 
@@ -54,6 +55,8 @@ export function cycleKey(complianceWindowDays: number, seasonal: boolean, asOf: 
  * then return the cycle anchor for `asOf`. Unknown measures fall back to a 365-day annual cycle.
  */
 export function bucketPeriodForMeasure(measureId: string, asOf: string): string {
+  // ADR-072: official-only measures bucket to the calendar year by rule, not by the 365-day fallback.
+  if (!MEASURE_BINDINGS[measureId] && isVendoredOfficialMeasure(measureId)) return cycleAnchor("ANNUAL", asOf);
   const window = MEASURE_BINDINGS[measureId]?.complianceWindowDays ?? 365;
   return cycleKey(window, SEASONAL_MEASURE_IDS.has(measureId), asOf);
 }

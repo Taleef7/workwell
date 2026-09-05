@@ -18,6 +18,121 @@
 >
 > **Sequence note:** ADR-033 does not exist — verified absent, and the number must not be reused.
 
+## ADR-072: a measure is runnable when it is authored OR official-only-and-routed — and an eCQM is scored over its calendar year, not a rolling window
+
+**Status:** Accepted (2026-09-05). Milestone MM-1b (`docs/ROADMAP_2026-08-30.md` §5).
+
+**Context.** ADR-047 established that a measure is onboarded when its MADiE gate is green. That turned
+out to be necessary and not sufficient, and the pilot found the gap: `cms2`, `cms130` and `cms165` were
+vendored, gated at 410/410 and (after ADR-071) carried semantics, yet none of them could actually run.
+The run pipeline derived its runnable set from the AUTHORED registry — a measure needed a
+`MEASURE_BINDINGS` row to get a subject bundle at all — so the three official-only measures were gated,
+routable and still not runnable. "Gated ≠ routable ≠ runnable" was the sequencing problem underneath
+MM-1, and it was invisible because each of the three states reads like the others from a distance.
+
+Separately, the official path inherited the authored path's rolling 365-day window. An eCQM is defined
+on a calendar measurement period, so a measure CMS defined on 2027 was being scored over a window CMS
+never defined it on, and the authored and official paths' population counts were not describing the
+same year.
+
+**Decision.**
+
+1. **The runnable rule is one pure function**, `classifyRunnable(id, env)`, returning `authored`,
+   `official`, `official-pending` or `invalid`. A measure is runnable when it is **authored** (registry
+   + synthetic binding) **or official-only** (vendored under `measures/official/` + an
+   `OFFICIAL_MEASURE_SEMANTICS` entry + named in `WORKWELL_OFFICIAL_MEASURES` on this deployment). An id
+   that is both authored and routed classifies as `official` — routing wins, which is what the router
+   already did. `env` is a parameter rather than a `process.env` read, so the flag is evaluated at call
+   time and a test can state the deployment it is describing.
+
+2. **`official-pending` is a first-class answer, not an error.** A measure that is vendored and has
+   semantics but is not routed *here* is correctly configured and simply not turned on for this
+   deployment. Collapsing it into `invalid` would make the default profile look broken for measures the
+   pilot has not flipped yet, and would have hidden the distinction the flip gate now reports on.
+
+3. **Subject bundles come from a `SubjectBundleSource` seam.** The pipeline no longer reaches into
+   `MEASURE_BINDINGS` for a bundle; it asks the seam, which dispatches on `classifyRunnable`. The
+   official-only measures get QI-Core shapes written directly against each artifact's own ELM
+   (`official-only-bundles.ts`) rather than a binding row that does not exist for them.
+
+4. **An officially-routed measure is scored over the calendar year containing the evaluation date.**
+   The period is derived through the existing `normalizePeriodEnd` and recorded on the run row, in
+   `evidence_json.official`, and in the compliance bucket. `planManualRun` switches only when EVERY
+   measure in the run is official-routed; a mixed run keeps today's behaviour rather than silently
+   re-scoping the authored half.
+
+5. **A stale artifact vintage is surfaced on the run, not just the console.** The vendored artifacts are
+   a 2026 vintage and the pilot's year is 2027, so `effectivePeriodWarning` names both periods and the
+   pipeline appends it as a run `WARN`. This is the mechanical detector for the MM-1d re-vendor.
+
+6. **A measure with no authored counterpart is gated by `official-flip-gate`, not `flip-snapshot`.**
+   `flip-snapshot` judges a flip by diffing the authored engine against the official artifact over the
+   same subjects; for cms2/cms130/cms165 that comparison has no BEFORE and cannot run. The gate replaces
+   it with three independent readings — the MADiE deck (through the same `runOfficialMeasure` CI calls),
+   the roster through `evaluateLikeTheRunPipeline`, and the artifact's `effectivePeriod` — each able to
+   fail the flip alone. It is descriptive: exit code 0 always, verdict in prose, and routing stays a
+   deliberate workflow edit (locked decision §4A.5).
+
+**Alternatives rejected.**
+
+- *Importing the gate module into the config layer* so `classifyRunnable` could ask the MADiE gate
+  directly. Rejected: it inverts the dependency (config would depend on the standards harness) and would
+  drag the content checkout into module load. The vendored-artifact check is a filesystem fact the config
+  layer can already see; the MADiE result is evidence a human reads before editing the workflow.
+- *Keeping the rolling 365-day window for official measures* to avoid two period rules. Rejected: it
+  scores a measure over a period its steward never defined, and no amount of consistency is worth a
+  number that answers a different question than the one asked.
+- *Promising CMS137 alongside the five.* Rejected per MM-1a: CMS-1848-P proposes removing Quality ID 305
+  from APP Plus for PY2027, so confirmation precedes the multi-rate spike, which precedes any promise.
+  ADR-047's MADiE-gate precondition applies to it unchanged.
+
+**Two terminology corrections this work surfaced (2026-09-05 pre-PR audit).** Neither is caused by
+ADR-072; both were pre-existing and would have shipped to the pilot with it.
+
+- `bipolarDisorder` was SNOMED **13746000**, which is not a valid SCTID at all — its Verhoeff check
+  digit fails and `tx.fhir.org $lookup` returns not-found in both the international and US editions.
+  A code that exists in no code system is a member of no expansion, so CMS2's bipolar DENOMINATOR
+  EXCLUSION never fired: every excluded patient sat in the denominator. Corrected to **13746004**.
+- `colonoscopy` was SNOMED **44441009**, which resolves to *Flexible fiberoptic sigmoidoscopy* — the
+  wrong procedure, registered under the Colonoscopy value set, carrying the display "Colonoscopy".
+  CMS130 gives colonoscopy a nine-year lookback and sigmoidoscopy four, so a real colonoscopy between
+  five and nine years old read as OVERDUE. Corrected to **73761001**. Two fabricated LOINC displays on
+  the depression-screening codes were replaced with the real ones at the same time.
+
+Both were caught by reading the artifacts' own ELM and checking every code against an external
+terminology server, not by any test — `corpus-membership.test.ts`, the guard that exists precisely for
+this, self-skips without the gitignored terminology sidecar and so had never run against them. Making
+that test unable to skip in a credentialed CI run is the follow-up this most needs.
+**Consequences.**
+
+- The **default profile is unchanged**: its runnable set is still the authored registry, and
+  `validateRunnableMeasureIds` proves both profiles' lists at module load.
+- **TWH's cms122/cms125 change measurement period** from a rolling window to the calendar year. Their
+  population counts move accordingly; this is a correction, not a regression.
+- A **re-vendor is now detectable rather than remembered** — every run of a 2026-vintage artifact over a
+  2027 period logs the warning until MM-1d lands.
+- **CMS165 has a HARD flip blocker that is not terminology and not a sweep** (found in the 2026-09-05
+  pre-PR audit). The official executor runs with `trustMetaProfile: false` — deliberately, because our
+  bundles stamp different QI-Core profiles than the artifacts name, and turning it on empties the
+  population for cms122/cms125 (see the rationale at the call site in `official-executor-adapter.ts`).
+  CMS165 is the only one of the five whose clinically decisive retrieve is `[Observation:
+  us-core-blood-pressure]` — identity by PROFILE ALONE, no code filter — and `Status.isObservationBP`
+  filters only on `status`. With the profile ignored, "a blood pressure" becomes "any final
+  Observation": `Most Recent Blood Pressure Day` resolves to the most recent Observation of ANY kind,
+  the systolic component is then null, and the numerator is silently false. Executed against the
+  vendored artifact, adding one later HbA1c to an otherwise-compliant patient flips NUMER true→false,
+  and a same-day non-BP Observation makes cql-execution throw (forcing MISSING_DATA). Every real
+  patient has other labs, so routing CMS165 as configured would report a BP-control rate near zero.
+  The synthetic fixture emits exactly one Observation per subject, which is the single shape that
+  hides this. **CMS165 must not be routed until this is resolved** — by stamping
+  `us-core-blood-pressure` on real BP Observations and trusting profiles for official routing, by a
+  WorkWell-side pre-filter, or by accepting the measure is not routable. Tracked as the first item of
+  MM-1c for cms165.
+- `cms130` and `cms165` are **gated but not yet routed**. Both pass their full MADiE deck against the
+  runtime — 64/64 and 68/68, zero unexpected mismatches, zero errors — so ADR-047's precondition is met.
+  What remains before a flip is the second-engine sweep (MM-1c) and a `flip-gate` run in a context that
+  resolves the terminology sidecar; on a machine without it every value set expands empty and the gate
+  correctly reports a zero initial population. That refusal is the rule working, not a defect.
 ## ADR-071: official-only measures take the vendored manifest's id — and a legacy catalog row is deprecated, never rewritten
 
 **Status:** Accepted (2026-09-01). Milestone MM-1b slice 1 (`docs/ROADMAP_2026-08-30.md` §5).

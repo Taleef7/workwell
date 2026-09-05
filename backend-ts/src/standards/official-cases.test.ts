@@ -101,7 +101,10 @@ test("loadOfficialMeasureCases assembles loose resources and expected population
     ],
   });
 
-  const loaded = module.loadOfficialMeasureCases(contentDir, "cms122");
+  // Point the VENDORED-deck root at a directory that has none, so this exercises the upstream path it
+  // is about. Left at the default it would read the repo's real 55-case cms122 deck — which is the
+  // loader now working correctly, not this test's subject.
+  const loaded = module.loadOfficialMeasureCases(contentDir, "cms122", join(contentDir, "no-vendored-decks"));
   assert.equal(loaded.cases.length, 1);
   assert.equal(loaded.cases[0]!.name, "IPPass PatientAge75");
   assert.equal(loaded.cases[0]!.patientId, caseId);

@@ -110,6 +110,8 @@ export async function computeExecutionDiff(
   const expansions: Expansions = new Map<string, CqlCode[]>();
   for (const oid of CMS122_OFFICIAL_META.valueSets ?? []) expansions.set(oid, await deps.resolver.expand(oid));
 
+  // Deliberately NOT routed through the SubjectBundleSource seam: diagnostic harness for the
+  // authored cms122 fixture; keeping the binding builder keeps its outputs byte-identical (Task 2).
   const binding = MEASURE_BINDINGS["cms122"]!;
   const subjects: SubjectDiff[] = [];
   const byGate: Record<string, number> = {};

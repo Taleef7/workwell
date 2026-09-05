@@ -330,6 +330,8 @@ export interface RoutedEngineOptions extends RoutingCheckDeps {
   authored?: EvaluateMeasureBinding;
   /** Injectable for tests; defaults to the real (lazily imported) fqm calculator. */
   calculate?: FqmCalculate;
+  /** Routed, not swallowed: the run pipeline appends each warning as a WARN run-log line. */
+  onWarning?: (message: string) => void;
 }
 
 export async function routedEngineForEnv(
@@ -355,6 +357,7 @@ export async function routedEngineForEnv(
   const executor = officialMeasureExecutor({
     expand,
     ...(options.calculate ? { calculate: options.calculate } : {}),
+    ...(options.onWarning ? { onWarning: options.onWarning } : {}),
   });
   // Terminology, up front. Serially rather than in parallel: these hit the same snapshot and the first
   // failure is the one worth reporting, unqualified by a race.

@@ -80,6 +80,13 @@ SQLite floor and the Pg ceiling read the current row and apply the shared pure `
 
 ## 5) `evidence_json` Contract (authoritative)
 
+> **The run-level period and the outcome-level period are different things (ADR-072).** An officially
+> routed measure is scored over the **calendar year** containing the evaluation date — recorded on the
+> run row (`measurementPeriodStart`/`End`) and inside `evidence_json.official` — while an authored
+> measure keeps its rolling registry window. A run mixing both keeps the authored behaviour rather than
+> re-scoping half of itself, so `evidence_json.official.measurementPeriod` is the only place that states
+> which year a given official outcome actually describes; do not infer it from the run row on a mixed run.
+
 ### Canonical shape
 ```json
 {

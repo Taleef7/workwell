@@ -285,6 +285,29 @@ Per measure, per stack:
    Note which corpus is representative for the stack you are flipping: `devdb-official-eval.test.ts` is the
    per-subject official-vs-authored divergence map over the committed 56-patient **WebChart** dev-DB
    fixture; `official-corpus-outcomes.test.ts` covers the **synthetic** roster a seamless stack evaluates.
+> **A measure with NO authored counterpart uses `flip-gate`, not `flip-snapshot` (ADR-072).**
+> `flip-snapshot` judges a flip by diffing the authored engine against the official artifact over the
+> same subjects. `cms2`, `cms130` and `cms165` have no authored measure to be the BEFORE, so that
+> comparison cannot run for them at all and a snapshot of one is not evidence. Use instead:
+>
+> ```bash
+> WORKWELL_INSTANCE=maui pnpm flip-gate --measure cms165 --evaluation-date <YYYY-MM-DD>
+> ```
+>
+> It prints three independent readings — the MADiE deck, the roster through the run pipeline's own
+> batch-then-single path, and the artifact's `effectivePeriod` against the measured year — and writes
+> `backend-ts/.flip-gate/<id>-<date>.json` to attach to the flip PR. Any one of the three can fail the
+> flip. It is DESCRIPTIVE: exit code is always 0, and routing is still the workflow edit in step 5.
+>
+> **cms165 has a blocker `flip-gate` does not detect.** The executor ignores `meta.profile`, and
+> cms165 identifies its BP reading by profile alone — so on any patient with other Observations the
+> numerator silently reads false. The synthetic roster emits one Observation per subject and therefore
+> cannot show it. Do not route cms165 on the strength of a green gate alone (ADR-072, consequences).
+>
+> **A reading that did not run is never a pass.** `cms130` and `cms165` have no MADiE deck in the pinned
+> content checkout and resolve no terminology locally, so both currently come back with an UNAVAILABLE
+> deck and a zero initial population. That is the gate working — do not read it as "no findings".
+
 2. **Take the before/after snapshot and confirm a NON-ZERO initial population** — steps 2 and 4 are one
    command (ADR-044):
 

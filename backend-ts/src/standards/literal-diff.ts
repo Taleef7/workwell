@@ -245,6 +245,7 @@ export async function computeLiteralDiff(
     deps.valueSetCache ??
     (await expandArtifactTerminology(artifact!, officialTerminologyExpander(loadOfficialArtifact)));
 
+  // Deliberately NOT routed through the SubjectBundleSource seam: diagnostic harness for the authored cms122 fixture; the binding builder keeps its output byte-identical (Task 2).
   const binding = MEASURE_BINDINGS[catalogId];
   if (!binding) throw new Error(`literal-diff: no synthetic binding for '${catalogId}'`);
 

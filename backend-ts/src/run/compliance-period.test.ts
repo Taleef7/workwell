@@ -5,7 +5,10 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
 import { cadenceFor, cycleAnchor, cycleKey, bucketPeriodForMeasure } from "./compliance-period.ts";
+import { VENDORED_OFFICIAL_MEASURE_IDS, isVendoredOfficialMeasure } from "../config/official-measure-ids.ts";
+const VENDORED_OFFICIAL_TEST_ID = [...VENDORED_OFFICIAL_MEASURE_IDS].find((id) => !MEASURE_BINDINGS[id])!;
 
 test("cadenceFor: ≤200-day window is biannual, larger is annual, seasonal overrides", () => {
   assert.equal(cadenceFor(180, false), "BIANNUAL");
@@ -60,4 +63,12 @@ test("bucketPeriodForMeasure resolves each runnable measure's cadence from its b
   assert.equal(bucketPeriodForMeasure("diabetes_hba1c", asOf), "2026-07-01"); // 180 → biannual H2
   assert.equal(bucketPeriodForMeasure("flu_vaccine", asOf), "2026-07-01"); // seasonal
   assert.equal(bucketPeriodForMeasure("unknown_measure", asOf), "2026-01-01"); // fallback 365 → annual
+});
+test("an official-only measure buckets to the calendar year explicitly, not by the 365-day fallback", () => {
+  // cms165/cms2 are also authored-bound, so they are covered by the cadence tests above. The official-only
+  // branch is exercised through an unbound vendored artifact id — the case that previously fell through to
+  // the 365-day default.
+  assert.ok(isVendoredOfficialMeasure(VENDORED_OFFICIAL_TEST_ID));
+  assert.ok(!MEASURE_BINDINGS[VENDORED_OFFICIAL_TEST_ID], "test id must stay unbound; adjust if the binding lands");
+  assert.equal(bucketPeriodForMeasure(VENDORED_OFFICIAL_TEST_ID, "2027-08-15"), "2027-01-01");
 });

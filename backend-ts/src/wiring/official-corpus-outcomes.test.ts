@@ -30,6 +30,8 @@ import { officialMeasureExecutor } from "./official-executor-adapter.ts";
 import { officialTerminologyExpander, loadOfficialTerminology } from "./official-terminology.ts";
 import { loadOfficialArtifact } from "./official-artifacts.ts";
 import { createWorkwellEngine } from "../engine/cql/workwell-engine.ts";
+import { EMPLOYEES } from "../config/deployment-profile.ts";
+import { buildOfficialOnlyBundle, OFFICIAL_ONLY_CONVERGENCE } from "../engine/synthetic/official-only-bundles.ts";
 
 const EVALUATION_DATE = "2026-07-27";
 
@@ -57,11 +59,19 @@ const EXPECTED: Record<string, Record<TargetOutcome, string>> = {
   },
 };
 
-const sidecarsPresent = ["cms122", "cms125"].every((id) => {
+/**
+ * The sidecar gate is PER MEASURE. It used to ask only whether cms122's and cms125's sidecars were
+ * present and then apply that answer to every test in the file — so a run with those two vendored but
+ * cms2's missing would have run the cms2 test against an empty expansion and failed for a reason that
+ * has nothing to do with the bundle shape. A guard that answers a question other than the one the test
+ * needs is not a guard.
+ */
+const skipWithout = (id: string) => {
   const artifact = loadOfficialArtifact(id);
-  return !!artifact && loadOfficialTerminology(artifact).ok;
-});
-const skip = sidecarsPresent ? false : "run 'pnpm vendor:official' to fetch the terminology sidecars";
+  return artifact && loadOfficialTerminology(artifact).ok
+    ? false
+    : `run 'pnpm vendor:official' to fetch ${id}'s terminology sidecar`;
+};
 
 /**
  * Both bundle sources, because covering only one is how this defect class comes back.
@@ -77,7 +87,7 @@ const SOURCES = [directSyntheticGenerator(), webChartRealisticGenerator()];
 
 for (const generator of SOURCES) {
   for (const [measureId, expected] of Object.entries(EXPECTED)) {
-    test(`official ${measureId} scores the ${generator.kind} corpus as authored`, { skip }, async () => {
+    test(`official ${measureId} scores the ${generator.kind} corpus as authored`, { skip: skipWithout(measureId) }, async () => {
       const executor = officialMeasureExecutor({ expand: officialTerminologyExpander(loadOfficialArtifact) });
       const authored = createWorkwellEngine({ valueSetResolver: bundledEcqmValueSetResolver });
       const actual: Record<string, string> = {};
@@ -107,3 +117,30 @@ for (const generator of SOURCES) {
     });
   }
 }
+
+// ── Task 3: the official-only measures (cms2 / cms130 / cms165) ─────────────────
+// Their shapes are written directly against the official artifacts' ELM (no authored counterpart),
+// so there is no authored/official cross-check here — the official executor IS the only scorer.
+// The in-IPP assertion is the real content: a profile-stamp or code mistake makes the artifact
+// silently report nobody in the population, which no syntax-level test can catch.
+
+const OFFICIAL_ONLY_EVAL = "2027-06-30";
+const MAUI = EMPLOYEES.filter((x) => x.tenantId === "maui");
+
+for (const [measureId, convergence] of Object.entries(OFFICIAL_ONLY_CONVERGENCE) as Array<[string, Record<string, string>]>)
+{
+  test(`official ${measureId} admits the official-only corpus to IPP and scores it as authored`, { skip: skipWithout(measureId) }, async () => {
+    const executor = officialMeasureExecutor({ expand: officialTerminologyExpander(loadOfficialArtifact) });
+    const outcomes: Record<string, string> = {};
+
+    for (const target of ["COMPLIANT", "OVERDUE", "EXCLUDED", "MISSING_DATA", "DUE_SOON"] as TargetOutcome[]) {
+      const bundle = buildOfficialOnlyBundle(MAUI[0]!, measureId as "cms2" | "cms130" | "cms165", target, OFFICIAL_ONLY_EVAL);
+      const result = await executor.evaluate({ measureId, patientBundle: bundle, evaluationDate: OFFICIAL_ONLY_EVAL });
+      assert.ok(result.inInitialPopulation, `${measureId}/${target}: not in IPP — profile or code mismatch`);
+      outcomes[target] = result.outcome;
+    }
+
+    assert.deepEqual(outcomes, convergence);
+  });
+}
+

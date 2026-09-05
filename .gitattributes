@@ -1,0 +1,6 @@
+# The vendored MADiE decks are HASHED, byte for byte, by `measures/official/<id>/manifest.json`'s
+# `tests.sha256`, and the gate recomputes that hash from the checked-out bytes. Any line-ending
+# translation — `core.autocrlf` on a Windows clone, a future `text=auto` here — would therefore make
+# the hash platform-dependent: green on the machine that vendored the deck, red on CI. Marking the
+# decks binary is what makes "the bytes CMS published" mean the same thing on every checkout.
+backend-ts/measures/official/*/tests/** -text

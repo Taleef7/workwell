@@ -22,6 +22,7 @@
     "cql-tests": "tsx scripts/cql-tests/bin.ts",
     "cql-tests:fetch": "pwsh -NoProfile -File scripts/fetch-cql-tests.ps1",
     "flip-snapshot": "tsx src/run/cli/official-flip-snapshot-bin.ts",
+    "flip-gate": "tsx src/run/cli/official-flip-gate-bin.ts",
     "webchart:export-devdb": "tsx scripts/webchart-devdb-export.ts",
     "evaluate:webchart-devdb": "tsx src/engine/ingress/webchart/devdb-cli-bin.ts",
     "evaluate:webchart-live": "tsx src/engine/ingress/webchart/live-cli-bin.ts",

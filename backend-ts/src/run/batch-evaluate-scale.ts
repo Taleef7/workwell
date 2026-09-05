@@ -233,6 +233,9 @@ export async function batchEvaluateScalePopulation(
       measurementPeriodEnd: periodEnd,
     });
     runIdByMeasure.set(measureId, run.id);
+    // Deliberately NOT routed through the SubjectBundleSource seam: authored-measure scale seeds are
+    // filtered on MEASURE_BINDINGS so never see an official-only id; keeping the binding rateKey keeps
+    // seeded distributions byte-identical (Task 2).
     rateByMeasure.set(measureId, complianceRate(MEASURE_BINDINGS[measureId]!.rateKey));
   }
 

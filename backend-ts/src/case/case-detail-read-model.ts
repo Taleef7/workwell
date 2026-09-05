@@ -15,6 +15,8 @@ import { DEPLOYMENT_PROFILE, employeeById } from "../config/deployment-profile.t
 import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
 import { type ImmunizationForecast } from "../engine/immunization/immunization-forecast.ts";
+import { isOfficialRouted } from "../wiring/official-routing.ts";
+import { officialDisplayFor } from "../compliance/official-display.ts";
 
 export interface CaseDetail {
   caseId: string;
@@ -97,6 +99,7 @@ export function deriveWhyFlagged(evidence: unknown, measureId: string, evaluatio
   const grace = binding?.gracePeriodDays ?? 0;
   const waiverDefine = ers.find((r) => /waiver|exemption|exclusion|contraindication/i.test(r.define));
   const waiverStatus = typeof waiverDefine?.result === "boolean" ? (waiverDefine.result ? "active" : "none") : "none";
+  const official = isOfficialRouted(measureId) ? officialDisplayFor(measureId, outcomeStatus) : null;
 
   // The authoritative "had a real exam" signal is the "Most Recent … Date" recency define.
   // The "Days Since …" define coalesces that date with an @1900-01-01 fallback, so it is NEVER
@@ -132,6 +135,7 @@ export function deriveWhyFlagged(evidence: unknown, measureId: string, evaluatio
     site_eligible: true,
     waiver_status: waiverStatus,
     outcome_status: outcomeStatus,
+    ...(official ? { official_summary: official.whyFlagged } : {}),
   };
 }
 

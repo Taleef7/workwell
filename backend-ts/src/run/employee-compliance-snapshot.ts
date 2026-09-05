@@ -17,9 +17,7 @@ import {
 } from "../config/deployment-profile.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
-import { deriveExamConfig } from "../engine/synthetic/exam-config.ts";
-import { buildSyntheticBundle } from "../engine/synthetic/fhir-bundle-builder.ts";
-import { seededTargetFor } from "./distribution.ts";
+import { compositeBundleSource } from "../wiring/subject-bundle-source.ts";
 import { deriveCell, type DisplayState } from "../compliance/roster-vocabulary.ts";
 
 export interface SnapshotEvaluation {
@@ -54,16 +52,16 @@ export async function simulateComplianceAsOf(
   if (!employee) return null;
 
   const evaluations: SnapshotEvaluation[] = [];
+  const bundleSource = compositeBundleSource(process.env as Record<string, unknown>);
   for (const measureId of RUNNABLE_MEASURE_IDS.filter(isRunnableMeasure)) {
-    // Every runnable measure is expected to have a binding; a gap is caught by the length-parity
-    // assertions in the snapshot/route tests (evaluations.length === the runnable measure count).
+    // Official-only ids are runnable but have no binding (so no complianceClass) until Task 3; the
+    // snapshot's class-parity shape keeps them out for now rather than inventing a class.
     const binding = MEASURE_BINDINGS[measureId];
     if (!binding) continue;
     const name = MEASURES[measureId]!.name;
     try {
-      const target = seededTargetFor(employees, binding.rateKey, externalId) ?? "MISSING_DATA";
-      const config = deriveExamConfig(binding, target);
-      const bundle = buildSyntheticBundle(employee, config, deps.today); // anchor to today
+      const target = bundleSource.targetFor(employees, measureId, externalId) ?? "MISSING_DATA";
+      const bundle = bundleSource.bundleFor(employee, measureId, target, deps.today); // anchor to today
       const outcome = await deps.engine.evaluate({ measureId, patientBundle: bundle, evaluationDate: asOf });
       const cell = deriveCell(outcome.outcome, outcome.evidence, measureId, asOf);
       evaluations.push({ measureId, name, complianceClass: binding.complianceClass, status: cell.status, method: cell.method });

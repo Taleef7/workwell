@@ -36,6 +36,30 @@ const QICORE_PROFILES = {
   Encounter: `${QICORE}qicore-encounter`,
 } as const;
 
+/**
+ * A date `daysAgo` before the evaluation date, CLAMPED forward into the calendar measurement period.
+ *
+ * ADR-072 made an officially-routed measure score over the CALENDAR YEAR containing the evaluation
+ * date. Synthetic qualifying encounters are dated relative to the evaluation date, so for any run in
+ * the first `daysAgo` days of a year the encounter fell into the PREVIOUS year — outside the period —
+ * and every subject dropped out of the initial population. The run still completed and every case read
+ * MISSING_DATA, so the roster showed "nobody eligible" rather than an error. With PY2027 beginning
+ * 2027-01-01 and Maui running nightly, that is a ~90-day annual window of silently empty numbers on
+ * measures a customer reports to their ACO.
+ *
+ * Clamping forward is safe for the authored path too: the rolling window is `evalDate − 365d …
+ * evalDate`, and 1 January of the evaluation year is always inside it.
+ *
+ * Use this for anything the measure must find INSIDE the period (qualifying encounters, screening
+ * results, BP readings). Do NOT use it for facts that legitimately predate the period — a condition
+ * onset or a colonoscopy inside a nine-year lookback — which is why `dateMinusDays` stays.
+ */
+export function dateInMeasurementPeriod(evaluationDate: string, daysAgo: number): string {
+  const periodStart = `${evaluationDate.slice(0, 4)}-01-01`;
+  const target = dateMinusDays(evaluationDate, daysAgo).slice(0, 10);
+  return `${target < periodStart ? periodStart : target}T00:00:00`;
+}
+
 /** evaluationDate is "YYYY-MM-DD"; returns the FHIR dateTime `daysAgo` before it. */
 function dateMinusDays(evaluationDate: string, daysAgo: number): string {
   const d = new Date(`${evaluationDate}T00:00:00Z`);
@@ -113,7 +137,8 @@ function condition(
 }
 
 function officeVisit(externalId: string, evaluationDate: string, daysAgo = 90): unknown {
-  const day = dateMinusDays(evaluationDate, daysAgo).slice(0, 10);
+  // Must land inside the measurement period, or the measure finds no qualifying encounter.
+  const day = dateInMeasurementPeriod(evaluationDate, daysAgo).slice(0, 10);
   return {
     resourceType: "Encounter",
     meta: { profile: [QICORE_PROFILES.Encounter] },

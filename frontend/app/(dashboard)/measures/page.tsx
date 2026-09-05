@@ -25,6 +25,7 @@ type Measure = {
   statusUpdatedAt: string;
   statusUpdatedBy: string;
   identity: MeasureIdentity | null;
+  routing: "authored" | "official" | "official-pending" | "not-runnable";
 };
 
 const statusFilters = ["All", "Draft", "Approved", "Active", "Deprecated"] as const;
@@ -101,6 +102,7 @@ export default function MeasuresPage() {
       { field: "name", header: "Name" },
       { field: "identity", header: "Identity" },
       { field: "policyRef", header: "Policy Ref" },
+      { field: "routing", header: "Routing" },
       { field: "version", header: "Version" },
       { field: "status", header: "Status" },
       { field: "statusUpdated", header: "Status Updated" },
@@ -119,6 +121,7 @@ export default function MeasuresPage() {
         name: item.name,
         identity: formatMeasureIdentity(item.identity) || "—",
         policyRef: item.policyRef,
+        routing: item.routing,
         version: item.version,
         status: labelFor(MEASURE_STATUS_LABELS, item.status),
         rawStatus: item.status,
@@ -139,6 +142,15 @@ export default function MeasuresPage() {
         const text = String(value ?? "");
         if (text === "—") return <span className="text-neutral-400">—</span>;
         return text;
+      }
+      if (column.field === "routing") {
+        const routing = String(row.routing ?? "");
+        if (routing !== "official" && routing !== "official-pending") return null;
+        return (
+          <span className="inline-flex items-center rounded bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700 ring-1 ring-inset ring-blue-200 dark:bg-blue-950/40 dark:text-blue-300 dark:ring-blue-900">
+            {routing === "official" ? "Official" : "Official · not yet routed here"}
+          </span>
+        );
       }
       if (column.field === "policyRef") {
         const ref = String(value ?? "");

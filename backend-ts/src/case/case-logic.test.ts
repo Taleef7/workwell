@@ -206,3 +206,19 @@ test("planCaseUpsert (Codex P2): a SYSTEM-EXCLUDED case reopens when the outcome
 test("planCaseUpsert (Codex P2): a HUMAN-excluded case (closed_by set) stays closed even when actionable again", () => {
   assert.deepEqual(planCaseUpsert(st("EXCLUDED", "EXCLUDED", "admin@workwell.dev"), "OVERDUE", NOW), { op: "noop" });
 });
+// Task 8: routed measures read the official display table before the persisted authored overrides.
+test("official-routed nextActionFor reads the official display table first", () => {
+  // Save and RESTORE rather than delete: this process runs the whole file, and deleting a variable
+  // that was set before the test leaves every later test reading a different deployment.
+  const prior = process.env.WORKWELL_OFFICIAL_MEASURES;
+  process.env.WORKWELL_OFFICIAL_MEASURES = "cms122";
+  try {
+    // The action is an ACTION. The reason the case is open is the method/why line's job; repeating it
+    // here renders the same sentence twice in the case view.
+    assert.equal(nextActionFor("OVERDUE", "cms122"), "Review glycemic control.");
+    assert.notEqual(nextActionFor("OVERDUE", "cms122"), nextActionFor("OVERDUE", "cms125"));
+  } finally {
+    if (prior === undefined) delete process.env.WORKWELL_OFFICIAL_MEASURES;
+    else process.env.WORKWELL_OFFICIAL_MEASURES = prior;
+  }
+});

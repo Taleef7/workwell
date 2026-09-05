@@ -33,10 +33,10 @@ import {
   DIRECTORY,
 } from "../config/deployment-profile.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
-import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
 import { MEASURE_CATALOG } from "../measure/measure-catalog.ts";
-import { deriveExamConfig, type TargetOutcome } from "../engine/synthetic/exam-config.ts";
-import { buildSyntheticBundle } from "../engine/synthetic/fhir-bundle-builder.ts";
+import { measureDisplayName } from "../measure/measure-name.ts";
+import { compositeBundleSource, type SubjectBundleSource } from "../wiring/subject-bundle-source.ts";
+import type { TargetOutcome } from "../engine/synthetic/exam-config.ts";
 import type { FhirBundle } from "../engine/synthetic/fhir-bundle-builder.ts";
 import {
   ROSTER_ELIGIBLE_MEASURES,
@@ -52,8 +52,11 @@ import {
 } from "../engine/ingress/data-source.ts";
 import { httpWebChartClient, type WebChartClient } from "../engine/ingress/webchart/webchart-client.ts";
 import { profileForId, replaceLiveDirectory } from "../engine/ingress/webchart/live-directory.ts";
-import { seededDistribution, seededTargetFor } from "./distribution.ts";
 import { bucketPeriodForMeasure } from "./compliance-period.ts";
+import { runMeasurementPeriod } from "./run-period.ts";
+import { loadOfficialArtifact } from "../wiring/official-artifacts.ts";
+import { isVendoredOfficialMeasure } from "../config/official-measure-ids.ts";
+import { effectivePeriodWarning } from "../wiring/official-executor-adapter.ts";
 import type { QualitySnapshotStore } from "../stores/quality-snapshot-store.ts";
 import type { EvalStateStore } from "../stores/eval-state-store.ts";
 import type { ValueSetStore } from "../stores/value-set-store.ts";
@@ -149,6 +152,8 @@ export interface RunPipelineDeps {
   expansionActive?: boolean;
   /** #263 — value-set store, read once to fold `expansion_hash` into `logic_version` (only when `expansionActive`). */
   valueSets?: Pick<ValueSetStore, "listAll">;
+  /** Subject-bundle seam (Task 2): injectable for tests; defaults to the env-composed composite. */
+  bundleSource?: SubjectBundleSource;
 }
 
 export interface WebChartRunEnv extends DataSourceEnv {
@@ -181,10 +186,10 @@ interface WorkItem {
  * per-item loop cannot build it two subtly different ways. Deterministic in its inputs, which is what
  * makes building it twice for a batched measure merely wasteful rather than a source of divergence.
  */
-function bundleFor(item: WorkItem, liveRoster: EnrollmentRoster | undefined, evalDate: string): unknown {
+function bundleFor(item: WorkItem, liveRoster: EnrollmentRoster | undefined, evalDate: string, bundleSource: SubjectBundleSource): unknown {
   return item.liveBundle !== undefined
     ? stampEnrollment(item.liveBundle as FhirBundle, item.measureId, liveRoster!, { evaluationDate: evalDate })
-    : buildSyntheticBundle(item.employee, deriveExamConfig(MEASURE_BINDINGS[item.measureId]!, item.target!), evalDate);
+    : bundleSource.bundleFor(item.employee, item.measureId, item.target!, evalDate);
 }
 
 export interface LivePopulationDescriptor {
@@ -211,8 +216,9 @@ const WEBCHART_PAGE_SIZE = 100;
 
 const RUN_SCOPE_TYPES: readonly RunScopeType[] = ["ALL_PROGRAMS", "MEASURE", "SITE", "EMPLOYEE", "CASE"];
 
-/** Resolve a scoped request into the (employee × measure) work items + run metadata. */
-function resolveScope(req: ManualRunRequest, employees: readonly EmployeeProfile[]) {
+/**
+ * Resolve a scoped request into the (employee × measure) work items + run metadata. */
+function resolveScope(req: ManualRunRequest, employees: readonly EmployeeProfile[], bundleSource: SubjectBundleSource) {
   // The body is unvalidated JSON cast to ManualRunRequest, so scopeType can be anything at
   // runtime. A value that is not a scope at all is a CLIENT error (400) — only a real scope
   // this path declines to serve (CASE, below) is a 501.
@@ -223,7 +229,7 @@ function resolveScope(req: ManualRunRequest, employees: readonly EmployeeProfile
   switch (req.scopeType) {
     case "MEASURE": {
       const measureId = req.measureId;
-      if (!measureId || !MEASURES[measureId]) {
+      if (!measureId || (!MEASURES[measureId] && !isRunnableMeasure(measureId))) {
         // The /measures catalog (and so the run picker, unchanged) lists all 60 measures;
         // only the Active ones are runnable (have compiled CQL) — same as Java, whose
         // MEASURE run resolves the measure's `status = 'Active'` version. Distinguish a
@@ -240,9 +246,8 @@ function resolveScope(req: ManualRunRequest, employees: readonly EmployeeProfile
           `Measure '${measureId}' is not runnable for deployment profile '${DEPLOYMENT_PROFILE.id}'.`,
         );
       }
-      const rateKey = MEASURE_BINDINGS[measureId]!.rateKey;
-      const items = seededDistribution(employees, rateKey).map((a) => ({ employee: a.employee, measureId, target: a.target }));
-      return { items, measureIds: [measureId], scopeId: measureId, scopeLabel: `Measure: ${MEASURES[measureId]!.name}` };
+      const items = bundleSource.distribution(employees, measureId).map((a) => ({ employee: a.employee, measureId, target: a.target }));
+      return { items, measureIds: [measureId], scopeId: measureId, scopeLabel: `Measure: ${measureDisplayName(measureId)}` };
     }
     case "EMPLOYEE": {
       const id = req.employeeExternalId;
@@ -257,14 +262,14 @@ function resolveScope(req: ManualRunRequest, employees: readonly EmployeeProfile
       const items: WorkItem[] = RUNNABLE_MEASURE_IDS.map((measureId) => ({
         employee,
         measureId,
-        target: seededTargetFor(employees, MEASURE_BINDINGS[measureId]!.rateKey, id) ?? "MISSING_DATA",
+        target: bundleSource.targetFor(employees, measureId, id) ?? "MISSING_DATA",
       }));
       return { items, measureIds: RUNNABLE_MEASURE_IDS, scopeId: null, scopeLabel: `${SUBJECT_LABEL}: ${id}` };
     }
     case "ALL_PROGRAMS": {
       // Every runnable measure × every employee, each at its measure's seeded target bucket.
       const items: WorkItem[] = RUNNABLE_MEASURE_IDS.flatMap((measureId) =>
-        seededDistribution(employees, MEASURE_BINDINGS[measureId]!.rateKey).map((a) => ({ employee: a.employee, measureId, target: a.target })),
+        bundleSource.distribution(employees, measureId).map((a) => ({ employee: a.employee, measureId, target: a.target })),
       );
       return { items, measureIds: RUNNABLE_MEASURE_IDS, scopeId: null, scopeLabel: "All Programs" };
     }
@@ -277,7 +282,7 @@ function resolveScope(req: ManualRunRequest, employees: readonly EmployeeProfile
       // MEASURE so an employee's target — and thus their case state — is identical across scope
       // types and the case upsert stays idempotent), then filtered to the site's employees.
       const items: WorkItem[] = RUNNABLE_MEASURE_IDS.flatMap((measureId) =>
-        seededDistribution(employees, MEASURE_BINDINGS[measureId]!.rateKey)
+        bundleSource.distribution(employees, measureId)
           .filter((a) => siteIds.has(a.employee.externalId))
           .map((a) => ({ employee: a.employee, measureId, target: a.target })),
       );
@@ -310,6 +315,7 @@ export interface PlannedRun {
 /** Create the run (RUNNING) + resolve work items, without evaluating — fast, safe to await inline. */
 export async function planManualRun(deps: RunPipelineDeps, req: ManualRunRequest): Promise<PlannedRun> {
   const employees = deps.employees ?? EVALUABLE_EMPLOYEES;
+  const bundleSource = deps.bundleSource ?? compositeBundleSource(process.env as Record<string, unknown>);
   const evalDate = req.evaluationDate ?? new Date().toISOString().slice(0, 10);
   const webChartEnv = deps.webChartEnv ?? {};
   const webChartConfigured = isWebChartConfigured(webChartEnv);
@@ -322,7 +328,12 @@ export async function planManualRun(deps: RunPipelineDeps, req: ManualRunRequest
       409,
     );
   }
-  const { items, measureIds, scopeId, scopeLabel } = resolveScope(req, employees);
+  const { items, measureIds, scopeId, scopeLabel } = resolveScope(req, employees, bundleSource);
+  // Resolve seeded buckets while the seam's requested evalDate is still valid, so finishManualRun
+  // always builds bundles from the same date the run persisted.
+  for (const item of items) {
+    if (item.target === undefined) item.target = bundleSource.targetFor(employees, item.measureId, item.employee.externalId) ?? "MISSING_DATA";
+  }
   const cfg = webChartConfigured ? webChartConfigFromEnv(webChartEnv) : undefined;
   const livePopulation = cfg && (req.scopeType === "ALL_PROGRAMS" || req.scopeType === "MEASURE")
     ? {
@@ -332,8 +343,7 @@ export async function planManualRun(deps: RunPipelineDeps, req: ManualRunRequest
       }
     : undefined;
 
-  const periodEnd = `${evalDate}T00:00:00.000Z`;
-  const periodStart = new Date(new Date(periodEnd).getTime() - 365 * 86400000).toISOString();
+  const period = runMeasurementPeriod(measureIds, evalDate);
   const run = await deps.runStore.createRun({
     scopeType: req.scopeType,
     scopeId: scopeId ?? undefined,
@@ -341,8 +351,8 @@ export async function planManualRun(deps: RunPipelineDeps, req: ManualRunRequest
     // Persist the resolved evaluationDate so a rerun reuses the same evaluation period
     // (and the case upsert stays idempotent rather than opening a fresh-period case).
     requestedScope: pruneUndefined({ measureId: req.measureId, employeeExternalId: req.employeeExternalId, site: req.site, evaluationDate: evalDate }),
-    measurementPeriodStart: periodStart,
-    measurementPeriodEnd: periodEnd,
+    measurementPeriodStart: period.start,
+    measurementPeriodEnd: period.end,
   });
   await deps.runStore.markRunning(run.id);
   await deps.runStore.appendLog(run.id, "INFO", `${scopeLabel} — evaluating ${items.length} subject(s)`);
@@ -372,7 +382,7 @@ export function runningResponse(planned: PlannedRun): ManualRunResponse {
     compliant: 0,
     nonCompliant: 0,
     message: `Running ${planned.items.length} evaluation(s) in the background — refresh for results.${livePending}`,
-    measuresExecuted: planned.measureIds.map((id) => MEASURES[id]!.name),
+    measuresExecuted: planned.measureIds.map(measureDisplayName),
   };
 }
 
@@ -487,7 +497,22 @@ async function prepareLivePopulation(
 
 /** Evaluate the planned work items, persist outcomes + cases, finalize the run — the slow half. */
 export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun): Promise<ManualRunResponse> {
-  const { run, measureIds, scopeLabel, scopeType, evalDate } = planned;
+  const runId = planned.run.id;
+  const { measureIds, scopeLabel, scopeType, evalDate } = planned;
+  const bundleSource = deps.bundleSource ?? compositeBundleSource(process.env as Record<string, unknown>);
+
+  // ADR-072: surface a stale vendored effectivePeriod ON THE RUN, not just in the console. Only
+  // officially-routed measures have an artifact to warn about; authored measures keep no such contract.
+  for (const measureId of new Set(measureIds)) {
+    if (!deps.engine.logicVersionFor?.(measureId)?.startsWith(OFFICIAL_LOGIC_VERSION_PREFIX)) continue;
+    if (!isVendoredOfficialMeasure(measureId)) continue;
+    const artifact = loadOfficialArtifact(measureId);
+    if (!artifact) continue;
+    const warning = effectivePeriodWarning(artifact, runMeasurementPeriod([measureId], evalDate));
+    if (warning) {
+      await deps.runStore.appendLog(runId, "WARN", warning).catch(() => {});
+    }
+  }
   let items = planned.items;
   let liveRoster: EnrollmentRoster | undefined;
   let liveTenant: LiveTenantMetadata | undefined;
@@ -497,7 +522,7 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
     liveRoster = prepared.roster;
     liveTenant = prepared.metadata;
     await deps.runStore.appendLog(
-      run.id,
+      runId,
       "INFO",
       `WebChart ${liveTenant.host}: fetched ${liveTenant.fetchedCount} subject(s), ${liveTenant.degradedCount} degraded, ${liveTenant.durationMs}ms`,
     );
@@ -610,7 +635,7 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
           () =>
             forMeasure.map((item) => ({
               subjectId: item.employee.externalId,
-              patientBundle: bundleFor(item, liveRoster, evalDate),
+              patientBundle: bundleFor(item, liveRoster, evalDate, bundleSource),
             })),
           evalDate,
         );
@@ -630,7 +655,7 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
         // then silently ignored, disabling the very refusal this exists for (review #4).
         batchFailure.set(measureId, err instanceof Error ? err : new Error(String(err)));
         await deps.runStore
-          .appendLog(run.id, "ERROR", `${measureId}: official batch evaluation failed — ${String((err as Error)?.message ?? err)}`)
+          .appendLog(runId, "ERROR", `${measureId}: official batch evaluation failed — ${String((err as Error)?.message ?? err)}`)
           .catch(() => {});
       }
       // OUTSIDE the try, and best-effort. Inside it, a transient `run_logs` write failure would be
@@ -640,14 +665,14 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
       // this file are best-effort.
       if (batched) {
         await deps.runStore
-          .appendLog(run.id, "INFO", `${measureId}: ${forMeasure.length} subject(s) evaluated in one official batch`)
+          .appendLog(runId, "INFO", `${measureId}: ${forMeasure.length} subject(s) evaluated in one official batch`)
           .catch(() => {});
       }
     }
   }
 
   for (const item of items) {
-    const bundle = bundleFor(item, liveRoster, evalDate);
+    const bundle = bundleFor(item, liveRoster, evalDate, bundleSource);
     // The engine still evaluates compliance AS-OF `evalDate` (today / the run's date) so the
     // day-math is current, but the persisted evaluation_period is bucketed to the measure's
     // current compliance CYCLE (#150 H1). That decoupling is what keeps a nightly rerun
@@ -667,7 +692,7 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
             // evaluation, but must not be silent — an under-performing incremental run would otherwise be
             // invisible (review #2). Best-effort WARN, mirroring the commit path below.
             void deps.runStore
-              .appendLog(run.id, "WARN", `eval_state plan failed (${item.employee.externalId}/${item.measureId}) — full re-eval: ${String((err as Error)?.message ?? err)}`)
+              .appendLog(runId, "WARN", `eval_state plan failed (${item.employee.externalId}/${item.measureId}) — full re-eval: ${String((err as Error)?.message ?? err)}`)
               .catch(() => {});
             return null;
           })
@@ -719,7 +744,7 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
       }
     }
     const recorded = await deps.outcomeStore.recordOutcome({
-      runId: run.id,
+      runId: runId,
       subjectId: item.employee.externalId,
       measureId: item.measureId,
       evaluationPeriod: period,
@@ -735,7 +760,7 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
         .commit(item.measureId, item.employee.externalId, period, status, recorded.id, evidence, plan)
         .catch((err) =>
           deps.runStore
-            .appendLog(run.id, "WARN", `eval_state commit failed (${item.employee.externalId}/${item.measureId}): ${String((err as Error)?.message ?? err)}`)
+            .appendLog(runId, "WARN", `eval_state commit failed (${item.employee.externalId}/${item.measureId}): ${String((err as Error)?.message ?? err)}`)
             .catch(() => {}),
         );
     }
@@ -763,7 +788,7 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
     const isLiveWebChartSubject = item.employee.externalId.startsWith("wc|");
     if (deps.caseStore && (closeOnly || (!isLiveWebChartSubject && isApplicable(item.employee, item.measureId, deps.segments ?? [])))) {
       const upserted = await deps.caseStore.upsertFromOutcome({
-        runId: run.id,
+        runId: runId,
         subjectId: item.employee.externalId,
         measureId: item.measureId,
         evaluationPeriod: period,
@@ -791,7 +816,7 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
               entityType: "case",
               entityId: upserted.id,
               actor: auditActor,
-              refRunId: run.id,
+              refRunId: runId,
               refCaseId: upserted.id,
               refMeasureVersionId: item.measureId,
               payload: {
@@ -801,13 +826,13 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
                 subjectId: item.employee.externalId,
                 measureId: item.measureId,
                 evaluationPeriod: period,
-                runId: run.id,
+                runId: runId,
               },
             })
             .catch((err) => {
               void deps.runStore
                 .appendLog(
-                  run.id,
+                  runId,
                   "WARN",
                   `Case audit (${eventType} ${upserted.id}) failed — ledger gap: ${String((err as Error)?.message ?? err)}`,
                 )
@@ -873,7 +898,7 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
     // author an outcome or abort an otherwise-complete run.
     await deps.runStore
       .appendLog(
-        run.id,
+        runId,
         "WARN",
         `${measureId}: not one of ${ippByMeasure.get(measureId)!.length} subjects entered the official ` +
           `initial population. Either this cohort genuinely has nobody eligible, or the data lacks a ` +
@@ -924,7 +949,7 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
             entityType: "case",
             entityId: c.id,
             actor: auditActor,
-            refRunId: run.id,
+            refRunId: runId,
             refCaseId: c.id,
             refMeasureVersionId: measureId,
             payload: {
@@ -933,12 +958,12 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
               currentPeriod,
               subjectId: c.employeeId,
               measureId,
-              runId: run.id,
+              runId: runId,
             },
           })
           .catch((err) => {
             void deps.runStore
-              .appendLog(run.id, "WARN", `Rollover close audit (CASE_RESOLVED ${c.id}) failed — ledger gap: ${String((err as Error)?.message ?? err)}`)
+              .appendLog(runId, "WARN", `Rollover close audit (CASE_RESOLVED ${c.id}) failed — ledger gap: ${String((err as Error)?.message ?? err)}`)
               .catch(() => {});
           });
       }
@@ -946,7 +971,7 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
   }
 
   const terminalStatus = failures > 0 ? "PARTIAL_FAILURE" : "COMPLETED";
-  await deps.runStore.finalizeRun(run.id, terminalStatus);
+  await deps.runStore.finalizeRun(runId, terminalStatus);
   // Audit the run's terminal state (Fable H1). The highest-volume state change in the system now
   // leaves a ledger record; run audit packets and the run timeline were previously near-empty.
   if (deps.events) {
@@ -954,9 +979,9 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
       .appendAudit({
         eventType: "RUN_COMPLETED",
         entityType: "run",
-        entityId: run.id,
+        entityId: runId,
         actor: auditActor,
-        refRunId: run.id,
+        refRunId: runId,
         refCaseId: null,
         refMeasureVersionId: null,
         payload: {
@@ -983,14 +1008,14 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
   // non-population scopes (EMPLOYEE/SITE/CASE) and seed:scale runs internally; the scale tenant folds
   // in via the bounded GROUP-BY, never the 120k per-subject rows.
   if (deps.qualitySnapshots && deps.events) {
-    await materializeRun(run.id, {
+    await materializeRun(runId, {
       runStore: deps.runStore,
       outcomeStore: deps.outcomeStore,
       qualitySnapshots: deps.qualitySnapshots,
       events: deps.events,
     }).catch((err) => {
       void deps.runStore
-        .appendLog(run.id, "WARN", `Quality snapshot materialization failed: ${String((err as Error)?.message ?? err)}`)
+        .appendLog(runId, "WARN", `Quality snapshot materialization failed: ${String((err as Error)?.message ?? err)}`)
         .catch(() => {});
     });
   }
@@ -1020,7 +1045,7 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
       : "");
   const alert = alertForTerminalRun({
     status: terminalStatus,
-    runId: run.id,
+    runId: runId,
     scopeType,
     scopeLabel,
     totalEvaluated: items.length,
@@ -1031,7 +1056,7 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
     await emitAlert(deps.alertChannels ?? resolveAlertChannels({}), alert);
   }
   return {
-    runId: run.id,
+    runId: runId,
     scopeType,
     scopeLabel,
     status: terminalStatus,
@@ -1040,7 +1065,7 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
     compliant,
     nonCompliant,
     message: runMessage,
-    measuresExecuted: measureIds.map((id) => MEASURES[id]!.name),
+    measuresExecuted: measureIds.map(measureDisplayName),
   };
 }
 

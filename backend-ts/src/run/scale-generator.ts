@@ -39,6 +39,9 @@ export interface ScaleSubjectGenerator {
  * `buildSyntheticBundle`) to emit a urn:workwell-coded bundle the engine's direct path evaluates.
  * The subjectId IS the FHIR Patient id. Throws on an unknown measure.
  */
+// Deliberately NOT routed through the SubjectBundleSource seam: authored-measure scale seeds are
+// filtered on MEASURE_BINDINGS so never see an official-only id; keeping the binding builder keeps
+// fixtures byte-identical (Task 2).
 export function directSyntheticGenerator(): ScaleSubjectGenerator {
   return {
     kind: "direct-synthetic",

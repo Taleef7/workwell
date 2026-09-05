@@ -30,14 +30,14 @@
  * MeasureReport and QRDA III exporters use (ADR-031/ADR-046). Two readers that can disagree is the defect
  * those ADRs exist to prevent.
  */
+import { measureDisplayName } from "../measure/measure-name.ts";
 import type { CloudDatabase } from "@mieweb/cloud";
 import { getStores } from "../stores/factory.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
-import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
 import { EVALUABLE_EMPLOYEES, isRunnableMeasure } from "../config/deployment-profile.ts";
-import { buildSyntheticBundle } from "../engine/synthetic/fhir-bundle-builder.ts";
-import { deriveExamConfig } from "../engine/synthetic/exam-config.ts";
-import { seededTargetFor } from "../run/distribution.ts";
+import { compositeBundleSource } from "../wiring/subject-bundle-source.ts";
+import type { TargetOutcome } from "../engine/synthetic/exam-config.ts";
+import type { FhirBundle } from "../engine/synthetic/fhir-bundle-builder.ts";
 import { isWebChartConfigured } from "../engine/ingress/data-source.ts";
 import { DEPLOYMENT_PROFILE, employeeById } from "../config/deployment-profile.ts";
 import { routedEngineForEnv } from "../wiring/executor-router.ts";
@@ -106,13 +106,15 @@ function body(
   /** The caller's own query bounds, echoed back so the two are never confusable. */
   filter: { start: string | null; end: string | null },
 ): unknown {
-  const meta = MEASURES[measureId]!;
+  // measureDisplayName, not MEASURES[id]!: an official-only measure (cms2/cms130/cms165) has no
+  // authored-registry entry, and this endpoint answers for whatever the deployment routes (ADR-072).
+  const name = measureDisplayName(measureId);
   const identity = officialReportIdentity(outcome.evidence);
   return {
     subject: { id: subjectId },
     measure: {
       id: measureId,
-      name: meta.name,
+      name,
       ...(identity?.ecqmId ? { ecqmId: identity.ecqmId } : {}),
       ...(identity?.version ? { version: identity.version } : {}),
     },
@@ -381,13 +383,6 @@ async function preview(
       404,
     );
   }
-  const binding = MEASURE_BINDINGS[measureId];
-  if (!binding) {
-    return json(
-      { error: "measure_not_runnable", message: `measure '${measureId}' has no binding and cannot be evaluated` },
-      400,
-    );
-  }
   if (!isRunnableMeasure(measureId)) {
     return json(
       { error: "measure_not_in_profile", message: `measure '${measureId}' is not runnable for deployment profile '${DEPLOYMENT_PROFILE.id}'` },
@@ -396,8 +391,23 @@ async function preview(
   }
 
   const evalDate = end ?? new Date().toISOString().slice(0, 10);
-  const target = seededTargetFor(EVALUABLE_EMPLOYEES, binding.rateKey, subjectId) ?? "MISSING_DATA";
-  const bundle = buildSyntheticBundle(employee, deriveExamConfig(binding, target), evalDate);
+  // The binding-existence guard that used to sit above is gone on purpose: since ADR-072 an
+  // official-only measure is runnable with no authored binding, and that guard would have refused
+  // exactly the measures the pilot onboards. What can still fail is a measure that is routed before
+  // its bundle shape exists — the seam throws for that, and an unhandled throw in a route is a 500
+  // with a stack instead of an answer, so it is converted back into the documented 400 here.
+  const bundleSource = compositeBundleSource(process.env as Record<string, unknown>);
+  let target: TargetOutcome;
+  let bundle: FhirBundle;
+  try {
+    target = bundleSource.targetFor(EVALUABLE_EMPLOYEES, measureId, subjectId) ?? "MISSING_DATA";
+    bundle = bundleSource.bundleFor(employee, measureId, target, evalDate);
+  } catch (error) {
+    return json(
+      { error: "measure_not_runnable", message: error instanceof Error ? error.message : `measure '${measureId}' cannot be evaluated here` },
+      400,
+    );
+  }
 
   const engine = await routedEngineForEnv(env);
   const outcome = await engine.evaluate({ measureId, patientBundle: bundle, evaluationDate: evalDate });

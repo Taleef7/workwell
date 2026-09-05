@@ -63,5 +63,10 @@
     },
     "sha256": "sha256:e8bf24a35340d1a88d352a161b3e574c6088d8c7b09180cf959f8956ca08e740"
   },
-  "sha256": "sha256:ae317d0db4136e322900ff139982621d547f411d5b0e14fa75ad8fea9a53645e"
+  "sha256": "sha256:ae317d0db4136e322900ff139982621d547f411d5b0e14fa75ad8fea9a53645e",
+  "tests": {
+    "count": 360,
+    "sourcePath": "input/tests/measure/CMS165FHIRControllingHighBP",
+    "sha256": "sha256:b24289673d76eba56b325d89370ddcf862bab51d3ede1925015098e0edcbcbba"
+  }
 }
