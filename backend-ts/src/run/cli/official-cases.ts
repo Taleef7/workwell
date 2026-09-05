@@ -297,7 +297,17 @@ export function defaultOfficialCasesDeps(): OfficialCasesCliDeps {
 
 /** What one gated measure produced: a completed run, or a skip this context could not avoid. */
 export type OfficialMeasureOutcome =
-  | { readonly kind: "run"; readonly run: OfficialMeasureRun }
+  | {
+      readonly kind: "run";
+      readonly run: OfficialMeasureRun;
+      /**
+       * True when this run could NOT load the runtime's own terminology and fell back to whatever the
+       * upstream bundle happens to ship. The numbers are still printed — they are useful locally — but
+       * they describe a different execution than the one the deployed runtime performs, so they must
+       * never become the committed evidence.
+       */
+      readonly downgraded: boolean;
+    }
   | { readonly kind: "skipped"; readonly measure: OfficialMeasureId; readonly oids: string[] };
 
 /**
@@ -362,7 +372,7 @@ export async function runOfficialMeasure(
     deps.artifactIdentity(artifactPath),
     terminology,
   );
-  return { kind: "run", run };
+  return { kind: "run", run, downgraded: !terminology.cache };
 }
 
 export async function main(argv: string[], overrides: Partial<OfficialCasesCliDeps> = {}): Promise<number> {
@@ -383,6 +393,7 @@ export async function main(argv: string[], overrides: Partial<OfficialCasesCliDe
   try {
     const runs: OfficialMeasureRun[] = [];
     const skipped: Array<{ measure: OfficialMeasureId; oids: string[] }> = [];
+    const downgraded: OfficialMeasureId[] = [];
     for (const measure of parsed.measures) {
       const outcome = await runOfficialMeasure(measure, contentDir, deps, {
         allowMissingTerminology: parsed.allowMissingTerminology ?? false,
@@ -391,6 +402,7 @@ export async function main(argv: string[], overrides: Partial<OfficialCasesCliDe
         skipped.push({ measure: outcome.measure, oids: outcome.oids });
         continue;
       }
+      if (outcome.downgraded) downgraded.push(measure);
       runs.push(outcome.run);
     }
     const markdown = deps.render(runs, {
@@ -405,9 +417,28 @@ export async function main(argv: string[], overrides: Partial<OfficialCasesCliDe
     // the full list (review of #366). Writing here would replace the committed evidence with a deck
     // that is missing a measure, and CI's staleness check would then read as "the report is current"
     // on the very run that could not produce it.
+    // ...and TWO more ways a full, unskipped run is still not evidence, both found by running this
+    // locally on 2026-09-05 (it rewrote CMS138 from 47/47 to 0/47 and left it staged):
+    //   - the run FAILED. `writeReport` used to happen before `exitCodeForRuns` was even computed, so a
+    //     red gate overwrote the committed evidence with its own red numbers — the file that exists to
+    //     record a green run was rewritten by the run that proved it was not green.
+    //   - the run was DOWNGRADED to upstream value sets. Then it did not execute the artifact the
+    //     deployed runtime executes, and its numbers describe a different thing entirely. A developer
+    //     without the gitignored terminology sidecar (ADR-036) hits this on the very first full run.
+    const exitCode = exitCodeForRuns(runs);
     const writesCommittedReport =
-      parsed.measures.length === OFFICIAL_GATED_MEASURES.length && skipped.length === 0;
+      parsed.measures.length === OFFICIAL_GATED_MEASURES.length &&
+      skipped.length === 0 &&
+      downgraded.length === 0 &&
+      exitCode === 0;
     if (writesCommittedReport) deps.writeReport(reportPath, markdown);
+    if (downgraded.length > 0) {
+      deps.error(
+        `official-cases: the committed report was NOT rewritten — ${downgraded.length} measure(s) ` +
+          `(${downgraded.join(", ")}) ran on UPSTREAM value sets rather than the runtime's own. Fetch the ` +
+          "terminology sidecar (see ADR-036 / DEPLOY.md) before treating this run as evidence.",
+      );
+    }
     if (skipped.length > 0) {
       deps.error(
         `official-cases: PARTIAL RUN — ${skipped.length} measure(s) skipped ` +
@@ -427,7 +458,7 @@ export async function main(argv: string[], overrides: Partial<OfficialCasesCliDe
         ? `official-cases: wrote ${reportPath}`
         : "official-cases: single-measure run; committed combined report not written",
     );
-    return exitCodeForRuns(runs);
+    return exitCode;
   } catch (error) {
     deps.error(`official-cases: ${error instanceof Error ? error.message : String(error)}`);
     return 2;
