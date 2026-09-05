@@ -145,11 +145,6 @@ async function promoteOfficialOnlyRows(store: MeasureStore, events: CaseEventSto
     // the deployment is telling them is live. The route tests missed it because they seed a FRESH
     // store, where the row is created from the current catalog and never goes through this path.
     const catalog = MEASURE_CATALOG.find((m) => m.id === id)!;
-    await store.updateSpec(id, catalog.spec, catalog.policyRef);
-    if (row.compileStatus !== catalog.compileStatus) {
-      await store.updateCql(id, row.cqlText ?? "", catalog.compileStatus);
-    }
-    await store.setVersionStatus(id, row.versionId, { status: "Active", activate: true });
     const audit: AppendAuditInput = {
       eventType: "MEASURE_ACTIVATED",
       entityType: "measure_version",
@@ -160,7 +155,29 @@ async function promoteOfficialOnlyRows(store: MeasureStore, events: CaseEventSto
       refMeasureVersionId: row.versionId,
       payload: { measureId: id, version: row.version, reason: "official-only measure activated (MM-1b, ADR-072)", activatedBy: "system" },
     };
+    // AUDIT BEFORE STATE, the same ordering `repairHypertensionSeedRow` uses and for the same reason.
+    // Written after the mutations, a failing append would leave the row Active with no
+    // MEASURE_ACTIVATED event — and the guard above (`status === "Active"` ⇒ continue) would skip it
+    // on every subsequent boot, so the event is never retried and the ledger is permanently short one
+    // activation. "Every state change writes audit_event — no exceptions" (CLAUDE.md) means the audit
+    // cannot be the step that is allowed to be lost.
+    //
+    // Ordered this way the failure is recoverable in the safe direction: an append that succeeds and a
+    // mutation that then fails leaves the row Draft, so the next boot retries the promotion, and
+    // `hasAuditEvent` keeps that retry from writing a second event.
     if (!(await events.hasAuditEvent(audit))) await events.appendAudit(audit);
+    // Bring the CONTENT forward too, not just the status. `seedMeasureStore` skips rows that already
+    // exist, so on any store seeded before this change (TWH, Maui — every live deployment) a
+    // status-only promotion leaves an ACTIVE measure still carrying the placeholder Draft spec
+    // ("CQL authoring pending", empty eligibility and exclusions) and compileStatus NOT_COMPILED. A
+    // pilot user opening /measures/cms2 would read that its logic had not been authored, on a measure
+    // the deployment is telling them is live. The route tests missed it because they seed a FRESH
+    // store, where the row is created from the current catalog and never goes through this path.
+    await store.updateSpec(id, catalog.spec, catalog.policyRef);
+    if (row.compileStatus !== catalog.compileStatus) {
+      await store.updateCql(id, row.cqlText ?? "", catalog.compileStatus);
+    }
+    await store.setVersionStatus(id, row.versionId, { status: "Active", activate: true });
   }
 }
 async function deprecateLegacyOfficialRows(store: MeasureStore, events: CaseEventStore): Promise<void> {

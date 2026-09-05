@@ -34,6 +34,7 @@ import {
 } from "../config/deployment-profile.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { MEASURE_CATALOG } from "../measure/measure-catalog.ts";
+import { measureDisplayName } from "../measure/measure-name.ts";
 import { compositeBundleSource, type SubjectBundleSource } from "../wiring/subject-bundle-source.ts";
 import type { TargetOutcome } from "../engine/synthetic/exam-config.ts";
 import type { FhirBundle } from "../engine/synthetic/fhir-bundle-builder.ts";
@@ -215,7 +216,8 @@ const WEBCHART_PAGE_SIZE = 100;
 
 const RUN_SCOPE_TYPES: readonly RunScopeType[] = ["ALL_PROGRAMS", "MEASURE", "SITE", "EMPLOYEE", "CASE"];
 
-/** Resolve a scoped request into the (employee × measure) work items + run metadata. */
+/**
+ * Resolve a scoped request into the (employee × measure) work items + run metadata. */
 function resolveScope(req: ManualRunRequest, employees: readonly EmployeeProfile[], bundleSource: SubjectBundleSource) {
   // The body is unvalidated JSON cast to ManualRunRequest, so scopeType can be anything at
   // runtime. A value that is not a scope at all is a CLIENT error (400) — only a real scope
@@ -227,7 +229,7 @@ function resolveScope(req: ManualRunRequest, employees: readonly EmployeeProfile
   switch (req.scopeType) {
     case "MEASURE": {
       const measureId = req.measureId;
-      if (!measureId || !MEASURES[measureId]) {
+      if (!measureId || (!MEASURES[measureId] && !isRunnableMeasure(measureId))) {
         // The /measures catalog (and so the run picker, unchanged) lists all 60 measures;
         // only the Active ones are runnable (have compiled CQL) — same as Java, whose
         // MEASURE run resolves the measure's `status = 'Active'` version. Distinguish a
@@ -245,7 +247,7 @@ function resolveScope(req: ManualRunRequest, employees: readonly EmployeeProfile
         );
       }
       const items = bundleSource.distribution(employees, measureId).map((a) => ({ employee: a.employee, measureId, target: a.target }));
-      return { items, measureIds: [measureId], scopeId: measureId, scopeLabel: `Measure: ${MEASURES[measureId]!.name}` };
+      return { items, measureIds: [measureId], scopeId: measureId, scopeLabel: `Measure: ${measureDisplayName(measureId)}` };
     }
     case "EMPLOYEE": {
       const id = req.employeeExternalId;
@@ -380,7 +382,7 @@ export function runningResponse(planned: PlannedRun): ManualRunResponse {
     compliant: 0,
     nonCompliant: 0,
     message: `Running ${planned.items.length} evaluation(s) in the background — refresh for results.${livePending}`,
-    measuresExecuted: planned.measureIds.map((id) => MEASURES[id]!.name),
+    measuresExecuted: planned.measureIds.map(measureDisplayName),
   };
 }
 
@@ -1063,7 +1065,7 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
     compliant,
     nonCompliant,
     message: runMessage,
-    measuresExecuted: measureIds.map((id) => MEASURES[id]!.name),
+    measuresExecuted: measureIds.map(measureDisplayName),
   };
 }
 

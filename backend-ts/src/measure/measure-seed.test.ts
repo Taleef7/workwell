@@ -946,3 +946,48 @@ test("seedMeasureStore does not promote an edited Draft row and warns naming it"
     .all<{ event_type: string }>();
   assert.equal(activations.results?.length ?? 0, 0);
 });
+
+test("promotion writes the activation audit BEFORE mutating, so a failing mutation leaves a retryable Draft row and no duplicate event", async () => {
+  class ThrowOnceOnSpec extends SqliteMeasureStore {
+    shouldThrow = true;
+    override async updateSpec(measureId: string, spec: MeasureSpec, policyRef?: string) {
+      if (this.shouldThrow && ["cms2", "cms130", "cms165"].includes(measureId)) {
+        this.shouldThrow = false;
+        throw new Error("updateSpec unavailable");
+      }
+      return super.updateSpec(measureId, spec, policyRef);
+    }
+  }
+
+  const db = await freshDb();
+  const store = new ThrowOnceOnSpec(db);
+  const events = new SqliteCaseEventStore(db);
+  for (const catalogId of ["cms2", "cms130", "cms165"] as const) await seedLegacyRow(store, catalogId, catalogId);
+
+  // First seed: the audit lands, then updateSpec throws for the first of the three.
+  await assert.rejects(seedMeasureStore(store, () => "", events), /updateSpec unavailable/);
+
+  const activations = await db
+    .prepare("SELECT entity_id FROM audit_events WHERE event_type = 'MEASURE_ACTIVATED'")
+    .all<{ entity_id: string }>();
+  const written = activations.results ?? [];
+  assert.ok(written.length >= 1, "the activation audit was written before the mutation that failed");
+
+  // The row it failed on is still Draft — which is what makes the retry possible. Had the audit come
+  // last, the row would be Active with no event and the `status === "Active"` guard would skip it
+  // forever, leaving the ledger permanently short one activation.
+  const stalled = await store.getLatest("cms2");
+  assert.equal(stalled!.status, "Draft", "a failed promotion leaves the row retryable, not half-applied");
+
+  // Second seed: completes, and hasAuditEvent keeps the retry from writing a second event.
+  await seedMeasureStore(store, () => "", events);
+  for (const id of ["cms2", "cms130", "cms165"] as const) {
+    const row = await store.getLatest(id);
+    assert.equal(row!.status, "Active", `${id} promoted on the retry`);
+    const rows = await db
+      .prepare("SELECT event_type FROM audit_events WHERE event_type = 'MEASURE_ACTIVATED' AND entity_id = ?")
+      .bind(row!.versionId)
+      .all<{ event_type: string }>();
+    assert.equal(rows.results?.length ?? 0, 1, `${id} has exactly one MEASURE_ACTIVATED, not a duplicate`);
+  }
+});

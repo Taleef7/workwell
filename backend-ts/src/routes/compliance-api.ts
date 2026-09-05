@@ -30,6 +30,7 @@
  * MeasureReport and QRDA III exporters use (ADR-031/ADR-046). Two readers that can disagree is the defect
  * those ADRs exist to prevent.
  */
+import { measureDisplayName } from "../measure/measure-name.ts";
 import type { CloudDatabase } from "@mieweb/cloud";
 import { getStores } from "../stores/factory.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
@@ -105,13 +106,15 @@ function body(
   /** The caller's own query bounds, echoed back so the two are never confusable. */
   filter: { start: string | null; end: string | null },
 ): unknown {
-  const meta = MEASURES[measureId]!;
+  // measureDisplayName, not MEASURES[id]!: an official-only measure (cms2/cms130/cms165) has no
+  // authored-registry entry, and this endpoint answers for whatever the deployment routes (ADR-072).
+  const name = measureDisplayName(measureId);
   const identity = officialReportIdentity(outcome.evidence);
   return {
     subject: { id: subjectId },
     measure: {
       id: measureId,
-      name: meta.name,
+      name,
       ...(identity?.ecqmId ? { ecqmId: identity.ecqmId } : {}),
       ...(identity?.version ? { version: identity.version } : {}),
     },
