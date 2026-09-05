@@ -94,6 +94,9 @@ export async function backfillScalePopulation(deps: ScaleBackfillDeps, args: Sca
       measurementPeriodStart: periodStart,
       measurementPeriodEnd: periodEnd,
     });
+    // Deliberately NOT routed through the SubjectBundleSource seam: this is an authored-measure
+    // scale seed filtered on MEASURE_BINDINGS so never sees an official-only id; keeping the binding
+    // rateKey keeps seeded distributions byte-identical (Task 2).
     const rate = complianceRate(MEASURE_BINDINGS[measureId]!.rateKey);
     const inputs: RecordOutcomeInput[] = Array.from({ length: args.subjects }, (_, i) => {
       const pair = PROVIDER_PAIRS[i % PROVIDER_PAIRS.length]!;

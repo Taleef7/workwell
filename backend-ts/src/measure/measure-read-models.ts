@@ -8,6 +8,7 @@ import type { MeasureRecord } from "../stores/measure-store.ts";
 import type { MeasureSpec, MeasureStatus } from "./measure-catalog.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { measureIdentityFor, type MeasureIdentity } from "./measure-identity.ts";
+import { classifyRunnable } from "../config/deployment-profile.ts";
 
 export interface Measure {
   id: string;
@@ -21,6 +22,7 @@ export interface Measure {
   statusUpdatedAt: string;
   statusUpdatedBy: string;
   identity: MeasureIdentity | null;
+  routing: "authored" | "official" | "official-pending" | "not-runnable";
 }
 
 /** Java's COALESCE(activated_at, created_at, updated_at) — the version's effective recency. */
@@ -40,8 +42,18 @@ export function toMeasure(r: MeasureRecord): Measure {
     statusUpdatedAt: ts,
     statusUpdatedBy: r.approvedBy ?? r.owner ?? "system",
     identity: measureIdentityFor(r.measureId),
+    routing: mapRoutingKind(classifyRunnable(r.measureId, process.env).kind),
   };
 }
+
+/**
+ * `invalid` means the measure is in neither the authored registry nor the vendored official set — a
+ * catalog row nothing can run. It maps to its own value rather than to `authored`: the whole point of
+ * this field is to say which engine scores a measure, so answering "authored" for one no engine
+ * scores is the single wrong answer available. The list renders no badge for it, exactly as before.
+ */
+const mapRoutingKind = (kind: ReturnType<typeof classifyRunnable>["kind"]): Measure["routing"] =>
+  kind === "invalid" ? "not-runnable" : kind;
 
 const STATUSES = new Set<MeasureStatus>(["Draft", "Approved", "Active", "Deprecated"]);
 export const isMeasureStatus = (s: string): s is MeasureStatus => STATUSES.has(s as MeasureStatus);

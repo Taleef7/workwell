@@ -301,6 +301,15 @@ export interface OfficialReportIdentity {
   ecqmId?: string;
   version?: string;
   artifactSha256?: string;
+  /**
+   * The period the artifact was ACTUALLY executed over (ADR-072). The run row records one period for
+   * the whole run, and `runMeasurementPeriod` only switches to the calendar year when EVERY measure in
+   * the run is official-routed — so on a mixed run the run row states the authored rolling window while
+   * the official counts were computed over the calendar year. This is the exported reporting period of
+   * a MeasureReport or QRDA document, so taking it from the run row on a mixed run declares a period the
+   * numbers were not counted over.
+   */
+  measurementPeriod?: { start: string; end: string };
 }
 
 export function officialReportIdentity(evidence: unknown): OfficialReportIdentity | null {
@@ -311,7 +320,26 @@ export function officialReportIdentity(evidence: unknown): OfficialReportIdentit
     ...(str(official.ecqmId) ? { ecqmId: str(official.ecqmId) } : {}),
     ...(str(official.version) ? { version: str(official.version) } : {}),
     ...(str(official.artifactSha256) ? { artifactSha256: str(official.artifactSha256) } : {}),
+    ...(officialPeriod(official.measurementPeriod) ? { measurementPeriod: officialPeriod(official.measurementPeriod)! } : {}),
   };
+}
+
+/** The persisted `official.measurementPeriod`, when it is a usable {start,end} pair. */
+function officialPeriod(value: unknown): { start: string; end: string } | null {
+  const p = value as { start?: unknown; end?: unknown } | null | undefined;
+  if (!p || typeof p.start !== "string" || typeof p.end !== "string") return null;
+  return { start: p.start, end: p.end };
+}
+
+/**
+ * The period a report DECLARES: the official artifact's own executed period when the outcome carries
+ * one, else the run row. See OfficialReportIdentity.measurementPeriod for why these can differ.
+ */
+export function reportingPeriod(
+  run: { measurementPeriodStart: string; measurementPeriodEnd: string },
+  official: OfficialReportIdentity | null,
+): { start: string; end: string } {
+  return official?.measurementPeriod ?? { start: run.measurementPeriodStart, end: run.measurementPeriodEnd };
 }
 
 /**
@@ -422,7 +450,7 @@ export function buildSummaryMeasureReportFromCounts(
     status: "complete",
     type: "summary",
     measure: measureCanonical(measureId, official),
-    period: { start: run.measurementPeriodStart, end: run.measurementPeriodEnd },
+    period: reportingPeriod(run, official),
     improvementNotation: { coding: [{ system: IMPROVEMENT_SYSTEM, code: improvementNotation(measureId, official) }] },
     group: [group],
   };
@@ -456,7 +484,7 @@ export function buildIndividualMeasureReport(
     measure: measureCanonical(measureId, official),
     // subjectId is the employee external id (used as the Patient ref); fhir_patient_id linkage is deferred (spec §7).
     subject: { reference: `Patient/${outcome.subjectId}` },
-    period: { start: run.measurementPeriodStart, end: run.measurementPeriodEnd },
+    period: reportingPeriod(run, official),
     improvementNotation: { coding: [{ system: IMPROVEMENT_SYSTEM, code: improvementNotation(measureId, official) }] },
     group: [{ population: populations(c) }],
   };

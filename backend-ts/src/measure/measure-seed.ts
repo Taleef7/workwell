@@ -5,7 +5,7 @@
  * keep their ids across the static→persisted move); per-status tier timestamps preserve the
  * Active-first list ordering until real authoring timestamps accrue.
  */
-import { MEASURE_CATALOG, type MeasureStatus } from "./measure-catalog.ts";
+import { MEASURE_CATALOG, type CatalogMeasure, type MeasureSpec, type MeasureStatus } from "./measure-catalog.ts";
 import { HYPERTENSION_PRE_CHANGE_CQL } from "./hypertension-pre-change-cql.ts";
 import type { MeasureStore } from "../stores/measure-store.ts";
 import type { AppendAuditInput, CaseEventStore } from "../stores/case-event-store.ts";
@@ -49,34 +49,137 @@ const deepEqual = (left: unknown, right: unknown): boolean => {
   return leftKeys.length === rightKeys.length && leftKeys.every((key) => Object.hasOwn(rightRecord, key) && deepEqual(leftRecord[key], rightRecord[key]));
 };
 
-function isUnmodifiedLegacySeed(
+// The exact Draft placeholder rows the pre-MM-1b catalog seeded for the three official-only
+// measures. Promotion and legacy deprecation fingerprint against these, not the current Active
+// rows, so an untouched pre-change store converges while an edited row is left alone.
+export const OFFICIAL_ONLY_PRE_CHANGE: Record<"cms2" | "cms130" | "cms165", MeasureSpec> = {
+  cms2: {
+    description: "CMS2v15 (MIPS Quality ID 134) — CMS eCQM 2026 performance period catalog entry. CQL authoring pending.",
+    eligibilityCriteria: { roleFilter: "", siteFilter: "", programEnrollmentText: "" },
+    exclusions: [],
+    complianceWindow: "Annual",
+    requiredDataElements: [],
+    testFixtures: [],
+  },
+  cms130: {
+    description: "CMS130v14 (MIPS Quality ID 113) — CMS eCQM 2026 performance period catalog entry. CQL authoring pending.",
+    eligibilityCriteria: { roleFilter: "", siteFilter: "", programEnrollmentText: "" },
+    exclusions: [],
+    complianceWindow: "Annual",
+    requiredDataElements: [],
+    testFixtures: [],
+  },
+  cms165: {
+    description: "CMS165v14 (MIPS Quality ID 236) — CMS eCQM 2026 performance period catalog entry. CQL authoring pending.",
+    eligibilityCriteria: { roleFilter: "", siteFilter: "", programEnrollmentText: "" },
+    exclusions: [],
+    complianceWindow: "Annual",
+    requiredDataElements: [],
+    testFixtures: [],
+  },
+};
+
+export function matchesSeedFingerprint(
   row: Awaited<ReturnType<MeasureStore["getLatest"]>>,
-  catalogId: string,
-  legacyId: string,
+  catalog: CatalogMeasure,
   expectedStatus?: string,
 ): boolean {
-  const catalog = MEASURE_CATALOG.find((m) => m.id === catalogId);
-  if (!row || !catalog) return false;
+  if (!row) return false;
   return (
-    row.measureId === legacyId &&
+    row.measureId === catalog.id &&
     row.name === catalog.name &&
     row.policyRef === catalog.policyRef &&
     row.owner === catalog.owner &&
     deepEqual(row.tags, catalog.tags) &&
-    row.versionId === `${legacyId}-${catalog.version}` &&
+    row.versionId === `${catalog.id}-${catalog.version}` &&
     row.version === catalog.version &&
     row.status === (expectedStatus ?? catalog.status) &&
     deepEqual(row.spec, catalog.spec) &&
     row.cqlText === "" &&
     row.compileStatus === catalog.compileStatus &&
     row.changeSummary === "Seeded measure version" &&
-    row.approvedBy === null &&
-    row.activatedAt === null &&
     row.createdAt === TIER[catalog.status] &&
+    // `updatedAt` was dropped when this generalised isUnmodifiedLegacySeed, and it is the one check
+    // `status` does not subsume: a spec that was edited and then restored to exactly the seeded bytes
+    // matches on every other field, so without this it fingerprints as untouched and is silently
+    // deprecated or promoted as though nobody had ever touched it.
+    //
+    // `approvedBy`/`activatedAt` are deliberately NOT restored: the original only ever ran against
+    // Draft/legacy rows, and a freshly seeded ACTIVE row legitimately carries an activatedAt, so
+    // reinstating them here would make every Active catalog row fail its own fingerprint. The `status`
+    // equality above covers what they were guarding — an approved row reads Approved, an activated one
+    // reads Active.
     (expectedStatus === "Deprecated" || row.updatedAt === TIER[catalog.status])
   );
 }
 
+// The catalog row as the pre-MM-1b seed wrote it: same identity fields, Draft placeholder
+// content. Legacy deprecation and official-only promotion both fingerprint against this so an
+// untouched pre-change store converges and an edited row is left alone.
+const preChangeCatalog = (catalogId: string, measureId?: string): CatalogMeasure => {
+  const catalog = MEASURE_CATALOG.find((m) => m.id === catalogId)!;
+  return {
+    ...catalog,
+    id: measureId ?? catalogId,
+    status: "Draft",
+    compileStatus: "NOT_COMPILED",
+    spec: OFFICIAL_ONLY_PRE_CHANGE[catalogId as keyof typeof OFFICIAL_ONLY_PRE_CHANGE],
+  };
+};
+
+const PROMOTED_OFFICIAL_ONLY = ["cms2", "cms130", "cms165"] as const;
+
+async function promoteOfficialOnlyRows(store: MeasureStore, events: CaseEventStore): Promise<void> {
+  for (const id of PROMOTED_OFFICIAL_ONLY) {
+    const row = await store.getLatest(id);
+    if (!row || row.status === "Active") continue;
+    if (!matchesSeedFingerprint(row, preChangeCatalog(id))) {
+      console.warn(`[measure-seed] ${id} row was edited; not promoted to Active`);
+      continue;
+    }
+    // Bring the CONTENT forward too, not just the status. `seedMeasureStore` skips rows that already
+    // exist, so on any store seeded before this change (TWH, Maui — every live deployment) a
+    // status-only promotion leaves an ACTIVE measure still carrying the placeholder Draft spec
+    // ("CQL authoring pending", empty eligibility and exclusions) and compileStatus NOT_COMPILED. A
+    // pilot user opening /measures/cms2 would read that its logic had not been authored, on a measure
+    // the deployment is telling them is live. The route tests missed it because they seed a FRESH
+    // store, where the row is created from the current catalog and never goes through this path.
+    const catalog = MEASURE_CATALOG.find((m) => m.id === id)!;
+    const audit: AppendAuditInput = {
+      eventType: "MEASURE_ACTIVATED",
+      entityType: "measure_version",
+      entityId: row.versionId,
+      actor: "system",
+      refRunId: null,
+      refCaseId: null,
+      refMeasureVersionId: row.versionId,
+      payload: { measureId: id, version: row.version, reason: "official-only measure activated (MM-1b, ADR-072)", activatedBy: "system" },
+    };
+    // AUDIT BEFORE STATE, the same ordering `repairHypertensionSeedRow` uses and for the same reason.
+    // Written after the mutations, a failing append would leave the row Active with no
+    // MEASURE_ACTIVATED event — and the guard above (`status === "Active"` ⇒ continue) would skip it
+    // on every subsequent boot, so the event is never retried and the ledger is permanently short one
+    // activation. "Every state change writes audit_event — no exceptions" (CLAUDE.md) means the audit
+    // cannot be the step that is allowed to be lost.
+    //
+    // Ordered this way the failure is recoverable in the safe direction: an append that succeeds and a
+    // mutation that then fails leaves the row Draft, so the next boot retries the promotion, and
+    // `hasAuditEvent` keeps that retry from writing a second event.
+    if (!(await events.hasAuditEvent(audit))) await events.appendAudit(audit);
+    // Bring the CONTENT forward too, not just the status. `seedMeasureStore` skips rows that already
+    // exist, so on any store seeded before this change (TWH, Maui — every live deployment) a
+    // status-only promotion leaves an ACTIVE measure still carrying the placeholder Draft spec
+    // ("CQL authoring pending", empty eligibility and exclusions) and compileStatus NOT_COMPILED. A
+    // pilot user opening /measures/cms2 would read that its logic had not been authored, on a measure
+    // the deployment is telling them is live. The route tests missed it because they seed a FRESH
+    // store, where the row is created from the current catalog and never goes through this path.
+    await store.updateSpec(id, catalog.spec, catalog.policyRef);
+    if (row.compileStatus !== catalog.compileStatus) {
+      await store.updateCql(id, row.cqlText ?? "", catalog.compileStatus);
+    }
+    await store.setVersionStatus(id, row.versionId, { status: "Active", activate: true });
+  }
+}
 async function deprecateLegacyOfficialRows(store: MeasureStore, events: CaseEventStore): Promise<void> {
   for (const { legacyId, catalogId } of LEGACY_OFFICIAL_IDS) {
     const row = await store.getLatest(legacyId);
@@ -93,12 +196,12 @@ async function deprecateLegacyOfficialRows(store: MeasureStore, events: CaseEven
       payload: { measureId: legacyId, version: row.version, reason, deprecatedBy: "system" },
     };
     if (row.status === "Deprecated") {
-      if (isUnmodifiedLegacySeed(row, catalogId, legacyId, "Deprecated") && !(await events.hasAuditEvent(audit))) {
+      if (matchesSeedFingerprint(row, preChangeCatalog(catalogId, legacyId), "Deprecated") && !(await events.hasAuditEvent(audit))) {
         await events.appendAudit(audit);
       }
       continue;
     }
-    if (!isUnmodifiedLegacySeed(row, catalogId, legacyId)) {
+    if (!matchesSeedFingerprint(row, preChangeCatalog(catalogId, legacyId))) {
       // Left alone on purpose (someone edited it), but say so: the bare row now coexists with it.
       console.warn(`[measure-seed] legacy row ${legacyId} does not match the seed fingerprint; not deprecated, ${catalogId} coexists with it`);
       continue;
@@ -200,6 +303,7 @@ export async function seedMeasureStore(store: MeasureStore, cqlOf: (measureId: s
   }
 
   await deprecateLegacyOfficialRows(store, events);
+  await promoteOfficialOnlyRows(store, events);
 
   // Idempotent promotion backfill (E10.6): `hepatitis_b_vaccination_series` existed as an Approved,
   // catalog-only row before it became a runnable Active measure. seedMeasure() above skips existing

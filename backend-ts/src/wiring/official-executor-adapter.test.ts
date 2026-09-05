@@ -8,12 +8,15 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  effectivePeriodWarning,
   expandArtifactTerminology,
+  officialMeasurementPeriod,
   officialMeasureExecutor,
   outcomeFromPopulations,
   populationExpressionResults,
   requiredOids,
 } from "./official-executor-adapter.ts";
+import { normalizePeriodEnd } from "@work-well/official-executor";
 import { deriveWhyFlagged } from "../case/case-detail-read-model.ts";
 import { OFFICIAL_MEASURE_SEMANTICS, officialMeasureSemantics } from "./official-measure-semantics.ts";
 import { loadOfficialArtifact, type OfficialArtifact } from "./official-artifacts.ts";
@@ -350,6 +353,10 @@ test("a full evaluation produces the workflow bucket AND the lossless official e
     version: "1.0.000",
     engine: "fqm-execution",
     artifactSha256: "sha256:abc",
+    measurementPeriod: {
+      start: "2026-01-01",
+      end: "2026-12-31T23:59:59.999Z",
+    },
     // fqm's array VERBATIM, including the false entries: this is what MeasureReport/QRDA read, and the
     // workflow bucket cannot express it. Deliberately not the reduced code→boolean map, which drops
     // duplicate population types (legal for ratio measures) and everything beyond type/result.
@@ -361,13 +368,12 @@ test("a full evaluation produces the workflow bucket AND the lossless official e
     ],
   });
 
-  // The measurement period matches the AUTHORED path (12 months back from the evaluation date), so the
-  // PR-8 shadow diff isolates the logic difference rather than confounding it with a period change.
+  // ADR-072: the official path evaluates over the calendar year containing the evaluation date.
   const options = calls[0]!.options;
-  assert.equal(options["measurementPeriodStart"], "2025-07-25");
+  assert.equal(options["measurementPeriodStart"], "2026-01-01");
   assert.equal(
     options["measurementPeriodEnd"],
-    "2026-07-25T23:59:59.999Z",
+    "2026-12-31T23:59:59.999Z",
     "date-only period ends must be normalized (fqm#371) or the last day silently drops out",
   );
   assert.equal(
@@ -452,10 +458,7 @@ test("the semantics lookup does not resolve inherited object keys", () => {
   }
 });
 
-test("the measurement period is the authored engine's, quirk for quirk", async () => {
-  // subtractMonths is duplicated from cql-execution-engine.ts deliberately, overflow included: the
-  // first cut "improved" it by clamping, which silently gave the two paths different periods on a leap
-  // day — a divergence PR-8 would then report as a logic difference.
+test("the measurement period is the calendar year (ADR-072), including edge dates", async () => {
   const seen: string[] = [];
   const executor = officialMeasureExecutor({
     expand: async () => [{ code: "a", system: "s" }],
@@ -468,8 +471,11 @@ test("the measurement period is the authored engine's, quirk for quirk", async (
       return { results: [] };
     },
   });
-  await assert.rejects(() => executor.evaluate({ measureId: "cms122", patientBundle: patientBundle("patient-1"), evaluationDate: "2024-02-29" }));
-  assert.equal(seen[0], "2023-03-01", "non-clamping overflow, exactly as the authored engine does it");
+  // Leap day (2024-02-29) and year boundaries both resolve to the same calendar year.
+  for (const date of ["2024-02-29", "2027-01-01", "2027-12-31"]) {
+    await assert.rejects(() => executor.evaluate({ measureId: "cms122", patientBundle: patientBundle("patient-1"), evaluationDate: date }));
+  }
+  assert.deepEqual(seen, ["2024-01-01", "2027-01-01", "2027-01-01"], "calendar year, not rolling window");
 });
 
 test("a malformed expander still produces the DIAGNOSTIC refusal, not a raw TypeError", async () => {
@@ -765,4 +771,16 @@ test("PR-8: a single evaluation still reports the bundle's own Patient.id as its
     evaluationDate: "2026-07-25",
   });
   assert.equal(outcome.subjectId, "patient-9");
+});
+test("officialMeasurementPeriod is the calendar year containing the evaluation date (ADR-072)", () => {
+  assert.deepEqual(officialMeasurementPeriod("cms165", "2027-06-30"), { start: "2027-01-01", end: normalizePeriodEnd("2027-12-31") });
+  assert.equal(officialMeasurementPeriod("cms122", "2027-01-01").start, "2027-01-01");
+  assert.equal(officialMeasurementPeriod("cms122", "2027-12-31").start, "2027-01-01");
+});
+
+test("effectivePeriodWarning names the measure, the artifact period and the run period when they do not overlap", () => {
+  const artifact = loadOfficialArtifact("cms165")!; // manifest.effectivePeriod 2026-01-01..2026-12-31
+  assert.match(effectivePeriodWarning(artifact, { start: "2027-01-01", end: "2027-12-31T23:59:59.999Z" })!, /cms165.*2026-01-01.*2027-01-01/s);
+  assert.equal(effectivePeriodWarning(artifact, { start: "2026-01-01", end: "2026-12-31T23:59:59.999Z" }), null);
+  assert.equal(effectivePeriodWarning({ ...artifact, manifest: { ...artifact.manifest, effectivePeriod: null } }, { start: "2027-01-01", end: "2027-12-31T23:59:59.999Z" }), null);
 });

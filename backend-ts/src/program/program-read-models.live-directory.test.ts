@@ -461,7 +461,7 @@ test("scoped profile (Maui) — isolates data by excluding foreign and unresolve
     }));
   `);
 
-  assert.deepEqual(output.overviewMeasures, ["cms125", "cms122", "hypertension"], "Maui profile overview only includes runnable measures");
+  assert.deepEqual(output.overviewMeasures, ["cms125", "cms122"], "Maui profile overview only includes runnable measures — the three official-only ACO ids are not routed in this env, so they are not runnable here");
   assert.equal(output.totalEvaluated, 2, "only Maui-resolvable subjects (pat-001 and wc|) contribute to totalEvaluated");
   assert.equal(output.compliant, 2, "both pat-001 and wc| are COMPLIANT");
   assert.equal(output.overdue, 0, "non-Maui overdue subjects emp-001 and cypress-mrn-foreign must be excluded");

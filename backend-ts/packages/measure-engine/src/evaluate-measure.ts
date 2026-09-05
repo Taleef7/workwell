@@ -56,6 +56,15 @@ export interface OfficialEvidence {
    * exists to prevent. A round-trip test pins the two halves together.
    */
   populationResults: Array<{ populationType: string; result: boolean; [key: string]: unknown }>;
+  /**
+   * The measurement period the artifact was actually executed over (ADR-072: the calendar year
+   * containing the evaluation date, not the authored path's rolling window). Recorded because a
+   * population count is meaningless without the window it was counted over, and because the vendored
+   * artifacts are a prior-year vintage — a reader needs to see which year the numbers describe.
+   * Optional: outcomes persisted before ADR-072 do not carry it, and back-filling stored evidence
+   * would be inventing a fact about a run that already happened.
+   */
+  measurementPeriod?: { start: string; end: string };
 }
 
 export interface MeasureOutcome {

@@ -11,10 +11,32 @@ WorkWell Measure Studio implements the **Total Worker Health (TWH)** model: OSHA
 | HEDIS wellness — fully evaluated | 5 | Active | Full CQL, runnable |
 | Permanent immunization panel — fully evaluated | 3 | Active | Full CQL, runnable (series-completion; MMR, Varicella, Hep B) |
 | CMS eCQM — fully evaluated | 2 | Active | Full CQL, runnable (CMS125v14, CMS122v14) |
-| CMS eCQM catalog (2026 performance period) | 47 | Draft | Catalog entry only — CQL authoring pending |
+| CMS eCQM — official-only (no authored CQL) | 3 | Active | CMS2, CMS130, CMS165 — the vendored artifact IS the logic (ADR-072) |
+| CMS eCQM catalog (2026 performance period) | 44 | Draft | Catalog entry only — CQL authoring pending |
 | **Total** | **63** | | |
 
 Runnable (full CQL): **14** — 4 OSHA + 5 HEDIS + 3 immunization panel + 2 CMS eCQM. Hepatitis B was promoted from an Approved catalog entry to Active (E10.6).
+
+**Active is not runnable, and runnable is per deployment (ADR-072).** The three official-only measures
+have no authored CQL and no synthetic binding: they are runnable only where the deployment names them in
+`WORKWELL_OFFICIAL_MEASURES`, and `classifyRunnable` reports them as `official-pending` everywhere else.
+Today that is **nowhere** — the Maui profile lists all five pilot measures, but only `cms122` and `cms125`
+are routed, so CMS2, CMS130 and CMS165 are Active, gated and still not executing. CMS130 and CMS165
+both pass their full MADiE deck against the runtime (64/64 and 68/68, zero errors), so what remains is the
+MM-1c second-engine sweep and a `flip-gate` run where the terminology sidecar resolves — without it every
+value set expands empty and the gate reports a zero initial population (locked decision §4A.5).
+
+> **CMS165 is blocked on more than verification.** The official executor ignores `meta.profile`
+> (`trustMetaProfile: false`, deliberate — trusting it empties the population for cms122/cms125), and
+> CMS165 is the only pilot measure whose decisive retrieve identifies blood pressure by PROFILE alone
+> with no code filter. With the profile ignored it matches any final Observation, so a patient with any
+> other lab reads as non-compliant, and a same-day non-BP Observation throws. Verified by execution
+> against the vendored artifact on 2026-09-05. Do not route cms165 until this is fixed; see ADR-072's
+> consequences.
+
+**An officially routed measure is scored over the calendar year** containing the evaluation date, not a
+rolling 365-day window (ADR-072). The vendored artifacts are a **2026 vintage** and the pilot year is 2027,
+so every such run logs an `effectivePeriod` warning naming both periods until the MM-1d re-vendor lands.
 
 Outcome buckets (all measures): `COMPLIANT`, `DUE_SOON`, `OVERDUE`, `MISSING_DATA`, `EXCLUDED`.
 

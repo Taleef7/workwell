@@ -171,5 +171,6 @@ test("default profile — MCP by-id tools preserve foreign subjects and list all
   assert.equal((output.getCaseUnresolved as Record<string, unknown>).caseId != null, true);
   assert.notEqual((output.checkForeign as Record<string, unknown>).code, "EMPLOYEE_NOT_FOUND");
   assert.ok((output.measures as string[]).includes("audiogram"), "audiogram must remain listed on default profile");
-  assert.ok((output.draftMeasures as string[]).includes("cms2"), "a Draft catalog row outside the authored registry must stay listed on the default profile");
-});
+  assert.ok((output.measures as string[]).includes("cms2"), "cms2 is Active and listed on the default profile");
+  assert.ok(!(output.draftMeasures as string[]).includes("cms2"), "cms2 is no longer a Draft row on the default profile");
+})

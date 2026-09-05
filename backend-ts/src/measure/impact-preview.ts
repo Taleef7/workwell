@@ -20,9 +20,7 @@ import {
   isRunnableMeasure,
 } from "../config/deployment-profile.ts";
 import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
-import { deriveExamConfig } from "../engine/synthetic/exam-config.ts";
-import { buildSyntheticBundle } from "../engine/synthetic/fhir-bundle-builder.ts";
-import { seededDistribution } from "../run/distribution.ts";
+import { compositeBundleSource } from "../wiring/subject-bundle-source.ts";
 import { bucketPeriodForMeasure } from "../run/compliance-period.ts";
 
 export interface ImpactPreviewScope {
@@ -146,15 +144,17 @@ export async function previewImpact(deps: ImpactPreviewDeps, measure: MeasureRec
     throw new ImpactPreviewError(`Invalid evaluationDate: '${rawDate}' — expected a real calendar date in YYYY-MM-DD form`);
   }
   const evaluationDate = rawDate || new Date().toISOString().slice(0, 10);
-  const binding = MEASURE_BINDINGS[measure.measureId];
   const warnings: string[] = [];
 
-  // Only runnable measures (compiled CQL + a synthetic binding) can be previewed.
-  if (!binding) {
+  // Guard: a measure with no authored binding has no synthetic bundle path (rateKey, exam config,
+  // waiver rules). Report as an early-empty preview instead of failing the request. This is
+  // unchanged from before the seam: the source only serves ids that are runnable at all.
+  if (!MEASURE_BINDINGS[measure.measureId]) {
     warnings.push("CQL evaluation unavailable: measure has no runnable CQL binding.");
     await writePreviewAudit(deps, measure, evaluationDate, 0, zeroCounts(), warnings, actor);
     return emptyResponse(measure, evaluationDate, warnings);
   }
+  // Guard: even with a binding, the deployment profile decides whether the measure is runnable.
   if (!isRunnableMeasure(measure.measureId)) {
     warnings.push(`CQL evaluation unavailable: measure is not runnable for deployment profile '${DEPLOYMENT_PROFILE.id}'.`);
     await writePreviewAudit(deps, measure, evaluationDate, 0, zeroCounts(), warnings, actor);
@@ -164,9 +164,10 @@ export async function previewImpact(deps: ImpactPreviewDeps, measure: MeasureRec
   const employees = deps.employees ?? EVALUABLE_EMPLOYEES;
   let outcomes: PreviewOutcome[];
   try {
+    const bundleSource = compositeBundleSource(process.env as Record<string, unknown>);
     outcomes = await Promise.all(
-      seededDistribution(employees, binding.rateKey).map(async (a) => {
-        const bundle = buildSyntheticBundle(a.employee, deriveExamConfig(binding, a.target), evaluationDate);
+      bundleSource.distribution(employees, measure.measureId).map(async (a) => {
+        const bundle = bundleSource.bundleFor(a.employee, measure.measureId, a.target, evaluationDate);
         const result = await deps.engine.evaluate({ measureId: measure.measureId, patientBundle: bundle, evaluationDate });
         return { subjectId: a.employee.externalId, outcome: result.outcome, site: a.employee.site, role: a.employee.role };
       }),

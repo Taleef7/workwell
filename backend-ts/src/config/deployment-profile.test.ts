@@ -29,6 +29,8 @@ import {
 } from "./deployment-profile.ts";
 import * as deploymentProfile from "./deployment-profile.ts";
 
+import { classifyRunnable } from "./deployment-profile.ts";
+
 const backendRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 
 test("resolveDeploymentProfile is pure, normalized, and defaults safely", () => {
@@ -39,7 +41,7 @@ test("resolveDeploymentProfile is pure, normalized, and defaults safely", () => 
   assert.deepEqual(maui, {
     id: "maui",
     visibleTenantIds: ["maui"],
-    runnableMeasureIds: ["cms122", "cms125", "hypertension"],
+    runnableMeasureIds: ["cms122", "cms125", "cms2", "cms130", "cms165"],
     subjectTerm: "patient",
   });
   assert.equal(resolveDeploymentProfile(undefined).subjectTerm, "employee");
@@ -136,7 +138,7 @@ test("runnable measure validation fails clearly when an id is absent from the re
   assert.equal(typeof validate, "function");
   assert.throws(
     () => validate!(["not-a-real-measure"]),
-    /missing from MEASURES: not-a-real-measure; missing from MEASURE_BINDINGS: not-a-real-measure/,
+    /not-a-real-measure: not authored and not vendored under measures\/official\//,
   );
 });
 
@@ -252,7 +254,7 @@ test("a fresh Maui process wires the profile into counts and /api/tenants", asyn
   assert.deepEqual(output.tenants, ["maui"]);
   assert.equal(output.evaluable, 48);
   assert.deepEqual(output.excluded, ["twh", "ihn", "mhn"]);
-  assert.deepEqual(output.runnable, ["cms122", "cms125", "hypertension"]);
+  assert.deepEqual(output.runnable, ["cms122", "cms125", "cms2", "cms130", "cms165"]);
   assert.equal(output.audiogramRunnable, false);
   assert.deepEqual(output.tenantRoute, [{ id: "maui", name: "Maui Pilot Clinic" }]);
 });
@@ -283,7 +285,7 @@ test("Maui run planning accepts patients and refuses hidden employees and occupa
       occupational: await attempt({ scopeType: "MEASURE", measureId: "audiogram" }),
     }));
   `);
-  assert.deepEqual(output.patient, { ok: true, total: 3, measures: ["cms122", "cms125", "hypertension"] });
+  assert.deepEqual(output.patient, { ok: true, total: 2, measures: ["cms122", "cms125"] });
   assert.equal((output.employee as { ok: boolean }).ok, false);
   // The run pipeline names the subject by the profile's term: "Unknown patient" on maui.
   assert.match((output.employee as { message: string }).message, /Unknown patient/);
@@ -308,4 +310,54 @@ test("default and unrecognized profiles refuse the Maui patient without throwing
   const fallbackResult = runProfileChild("not-a-profile", source);
   assert.equal(fallbackResult.ok, false);
   assert.match(fallbackResult.message as string, /directory-only/);
+});
+
+test("classifyRunnable: authored, official, official-pending, invalid — env read at call time", () => {
+  assert.deepEqual(classifyRunnable("audiogram", {}), { kind: "authored" });
+  assert.deepEqual(classifyRunnable("cms165", { WORKWELL_OFFICIAL_MEASURES: "cms122,cms165" }), { kind: "official" });
+  const pending = classifyRunnable("cms165", {});
+  assert.equal(pending.kind, "official-pending");
+  assert.match((pending as { reason: string }).reason, /WORKWELL_OFFICIAL_MEASURES/);
+  const invalid = classifyRunnable("cms137", {});
+  assert.equal(invalid.kind, "invalid");
+  assert.match((invalid as { reason: string }).reason, /not vendored/);
+  // cms122 is authored AND official: routed ⇒ official, unrouted ⇒ authored (the pre-flip state)
+  assert.deepEqual(classifyRunnable("cms122", {}), { kind: "authored" });
+  assert.deepEqual(classifyRunnable("cms122", { WORKWELL_OFFICIAL_MEASURES: "cms122" }), { kind: "official" });
+});
+
+test("the Maui profile lists exactly the five ACO measures, and hypertension is gone", () => {
+  assert.deepEqual([...resolveDeploymentProfile("maui").runnableMeasureIds], ["cms122", "cms125", "cms2", "cms130", "cms165"]);
+});
+
+test("on the maui profile an unrouted official-only id is NOT runnable; a routed one is", () => {
+  const script = `
+    import { isRunnableMeasure, RUNNABLE_MEASURE_IDS } from "./src/config/deployment-profile.ts";
+    console.log(JSON.stringify({ cms165: isRunnableMeasure("cms165"), cms122: isRunnableMeasure("cms122"), listed: RUNNABLE_MEASURE_IDS }));
+  `;
+  const unrouted = runProfileChild("maui", script) as { cms165: boolean; cms122: boolean; listed: string[] };
+  assert.equal(unrouted.cms165, false);
+  assert.equal(unrouted.cms122, true); // authored fallback exists for cms122
+  assert.deepEqual(unrouted.listed, ["cms122", "cms125", "cms2", "cms130", "cms165"]);
+  process.env.WORKWELL_OFFICIAL_MEASURES = "cms122,cms125,cms2,cms130,cms165";
+  try {
+    const routed = runProfileChild("maui", script) as { cms165: boolean };
+    assert.equal(routed.cms165, true);
+  } finally {
+    delete process.env.WORKWELL_OFFICIAL_MEASURES;
+  }
+});
+
+test("__resetRunnableMemo makes isRunnableMeasure re-read the env in-process", () => {
+  const script = `
+    import { isRunnableMeasure, __resetRunnableMemo } from "./src/config/deployment-profile.ts";
+    const before = isRunnableMeasure("cms165");
+    process.env.WORKWELL_OFFICIAL_MEASURES = "cms165";
+    const memoized = isRunnableMeasure("cms165");
+    __resetRunnableMemo();
+    const after = isRunnableMeasure("cms165");
+    console.log(JSON.stringify({ before, memoized, after }));
+  `;
+  const out = runProfileChild("maui", script) as { before: boolean; memoized: boolean; after: boolean; stderr?: unknown };
+  assert.deepEqual(out, { before: false, memoized: false, after: true, stderr: out.stderr });
 });

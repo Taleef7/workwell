@@ -7,6 +7,8 @@
 import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
 import { deriveWhyFlagged, expressionResults } from "../case/case-detail-read-model.ts";
 import { DEPLOYMENT_PROFILE } from "../config/deployment-profile.ts";
+import { isOfficialRouted } from "../wiring/official-routing.ts";
+import { officialDisplayFor } from "./official-display.ts";
 
 export type DisplayState =
   | "COMPLIANT" | "DUE_SOON" | "OVERDUE" | "MISSING_DATA" | "EXCLUDED" | "DECLINED" | "IN_PROGRESS" | "NA" | "NOT_APPLICABLE";
@@ -33,6 +35,11 @@ export function deriveCell(canonicalStatus: string, evidence: unknown, measureId
   // is genuinely COMPLIANT — showing DECLINED would misrepresent the authoritative bucket and drop them
   // from a `?status=COMPLIANT` filter. So apply DECLINED only when the canonical bucket is non-compliant.
   if (refused && canonicalStatus !== "COMPLIANT") return { status: "DECLINED", method: "Declination on file" };
+
+  if (isOfficialRouted(measureId)) {
+    const d = officialDisplayFor(measureId, canonicalStatus);
+    if (d) return { status: canonicalStatus as DisplayState, method: d.method };
+  }
 
   if (binding?.complianceClass === "PERMANENT") {
     const dc = get(/^dose count$/i);

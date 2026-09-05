@@ -126,3 +126,16 @@ test("EXCLUDED method - Maui profile reads Documented exclusion on file", () => 
   `);
   assert.equal(output.method, "Documented exclusion on file");
 });
+// Task 8: official-routed measures must read the official display table before any authored branch.
+test("official-routed deriveCell reads the official display table, not the authored wording", () => {
+  const prior = process.env.WORKWELL_OFFICIAL_MEASURES;
+  process.env.WORKWELL_OFFICIAL_MEASURES = "cms122";
+  try {
+    const cell = deriveCell("OVERDUE", { expressionResults: [] }, "cms122", PERIOD);
+    assert.deepEqual(cell, { status: "OVERDUE", method: "Most recent glycemic status assessment (HbA1c or GMI) above 9%." });
+  } finally {
+    // Restore, never delete — a deleted variable is not the same as the one this process started with.
+    if (prior === undefined) delete process.env.WORKWELL_OFFICIAL_MEASURES;
+    else process.env.WORKWELL_OFFICIAL_MEASURES = prior;
+  }
+});

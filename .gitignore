@@ -78,3 +78,6 @@ cvu-workdir/
 # and its generated reports/OperationOutcomes. Never vendored; the run records the jar's SHA-256.
 validator_cli.jar
 /backend-ts/.deqm-validate/
+
+# The flip gate writes evidence for a PR body, not repo history.
+/backend-ts/.flip-gate/

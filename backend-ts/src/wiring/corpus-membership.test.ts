@@ -32,7 +32,7 @@ const canonical = (key: CanonicalKey) => ECQM_CANONICAL_CODES[key];
 /** Union of both vendored artifacts' expansions: OID → member codes. */
 function officialExpansions(): Map<string, ReadonlyArray<{ system: string; code: string }>> {
   const byOid = new Map<string, ReadonlyArray<{ system: string; code: string }>>();
-  for (const catalogId of ["cms122", "cms125"]) {
+  for (const catalogId of ["cms122", "cms125", "cms2", "cms130", "cms165"]) {
     const artifact = loadOfficialArtifact(catalogId);
     if (!artifact) continue;
     const loaded = loadOfficialTerminology(artifact);
