@@ -767,3 +767,17 @@ test("PUT /api/measures/:id/spec preserves Rule Builder params persisted in spec
   assert.equal(detail.description, "edited via spec tab");
   assert.equal(detail.rule?.requiredDoses, 2, "rule params survive a spec-tab save");
 });
+test("GET /api/measures carries routing to the wire, including the official case", async () => {
+  const previous = process.env.WORKWELL_OFFICIAL_MEASURES;
+  try {
+    process.env.WORKWELL_OFFICIAL_MEASURES = "cms165";
+    const rows = (await get("/api/measures").then((r) => r!.json())) as (CatalogRow & { routing: string })[];
+    const byId = new Map(rows.map((row) => [row.id, row]));
+    assert.equal(byId.get("cms125")?.routing, "authored");
+    assert.equal(byId.get("audiogram")?.routing, "authored");
+    assert.equal(byId.get("cms165")?.routing, "official");
+  } finally {
+    if (previous === undefined) delete process.env.WORKWELL_OFFICIAL_MEASURES;
+    else process.env.WORKWELL_OFFICIAL_MEASURES = previous;
+  }
+});

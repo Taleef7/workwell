@@ -4,7 +4,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { toMeasureDetail } from "./measure-read-models.ts";
+import { toMeasure, toMeasureDetail } from "./measure-read-models.ts";
 import type { MeasureRecord } from "../stores/measure-store.ts";
 
 function record(measureId: string): MeasureRecord {
@@ -43,4 +43,23 @@ test("toMeasureDetail defaults jurisdiction to US (E14 / #186)", () => {
 test("toMeasureDetail defaults jurisdiction to US for a measure absent from the registry", () => {
   const d = toMeasureDetail(record("some-catalog-draft"));
   assert.equal(d.jurisdiction, "US");
+});
+test("toMeasure carries routing computed by classifyRunnable at call time", () => {
+  assert.equal(toMeasure(record("cms125")).routing, "authored");
+  assert.equal(toMeasure(record("cms165")).routing, "official-pending");
+
+  const previous = process.env.WORKWELL_OFFICIAL_MEASURES;
+  try {
+    process.env.WORKWELL_OFFICIAL_MEASURES = "cms165";
+    assert.equal(toMeasure(record("cms165")).routing, "official");
+  } finally {
+    if (previous === undefined) delete process.env.WORKWELL_OFFICIAL_MEASURES;
+    else process.env.WORKWELL_OFFICIAL_MEASURES = previous;
+  }
+});
+
+test("a measure no engine can run says so, rather than borrowing the authored label", () => {
+  assert.equal(toMeasure(record("not-in-any-registry")).routing, "not-runnable");
+  // The list must still render it — the field is descriptive, never a filter.
+  assert.equal(toMeasure(record("not-in-any-registry")).id, "not-in-any-registry");
 });
