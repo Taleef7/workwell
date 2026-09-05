@@ -11,8 +11,29 @@ test("every (measure, target) pair yields a collection bundle with a QI-Core Pat
     for (const target of ["COMPLIANT", "OVERDUE", "EXCLUDED", "MISSING_DATA", "DUE_SOON"] as const) {
       const b = buildOfficialOnlyBundle(e, id, target, EVAL);
       assert.equal(b.type, "collection");
-      const types = b.entry.map((x) => (x.resource as { resourceType: string }).resourceType);
+      const resources = b.entry.map((x) => x.resource as { resourceType: string; meta?: { profile?: string[] } });
+      const types = resources.map((r) => r.resourceType);
       assert.ok(types.includes("Patient") && types.includes("Encounter"), `${id}/${target}: ${types.join(",")}`);
+      // The PROFILE and the encounter CODE, not just the resource type. Both are load-bearing for
+      // retrieval: the official artifacts retrieve through QI-Core profiles and a coded qualifying
+      // encounter, so stripping either leaves a bundle that still has "a Patient and an Encounter"
+      // and puts nobody in the initial population. Asserting the type alone cannot see that.
+      const patient = resources.find((r) => r.resourceType === "Patient")!;
+      assert.ok(
+        patient.meta?.profile?.some((p) => p.endsWith("/qicore-patient")),
+        `${id}/${target}: Patient is not QI-Core stamped (${JSON.stringify(patient.meta)})`,
+      );
+      const encounter = b.entry
+        .map((x) => x.resource as { resourceType: string; meta?: { profile?: string[] }; type?: Array<{ coding: Array<{ code: string }> }> })
+        .find((r) => r.resourceType === "Encounter")!;
+      assert.ok(
+        encounter.meta?.profile?.some((p) => p.endsWith("/qicore-encounter")),
+        `${id}/${target}: Encounter is not QI-Core stamped`,
+      );
+      assert.ok(
+        encounter.type?.[0]?.coding?.some((c) => c.code === "99213"),
+        `${id}/${target}: the qualifying office visit carries no code`,
+      );
     }
   }
 });
@@ -37,6 +58,23 @@ test("cms2 COMPLIANT (adult) uses the adult screening instrument and a negative 
   const obs = b.entry.map((x) => x.resource as Record<string, unknown>).find((r) => r.resourceType === "Observation")!;
   const codes = (obs.code as { coding: Array<{ code: string }> }).coding.map((c) => c.code);
   assert.ok(codes.includes("73832-8"), codes.join(","));
+  // ...and the RESULT, which is what the test name claims and what decides the numerator. Asserting
+  // only the instrument code passes just as happily on a POSITIVE screen, which is the opposite
+  // measure outcome.
+  const value = obs.valueCodeableConcept as { coding: Array<{ code: string }> } | undefined;
+  const resultCodes = value?.coding?.map((c) => c.code) ?? [];
+  assert.ok(
+    resultCodes.includes("428171000124102"),
+    `expected the NEGATIVE depression-screen result, got ${resultCodes.join(",") || "no valueCodeableConcept"}`,
+  );
+  assert.ok(!resultCodes.includes("428181000124104"), "a COMPLIANT cms2 subject must not carry a positive screen");
+  // The screening Observation carries the screening-assessment profile, NOT the generic clinical-result
+  // one — the artifact retrieves on it (see this module's header).
+  const meta = obs.meta as { profile?: string[] } | undefined;
+  assert.ok(
+    meta?.profile?.some((p) => p.includes("screening-assessment")),
+    `cms2 screening Observation profile: ${JSON.stringify(meta)}`,
+  );
 });
 
 /**

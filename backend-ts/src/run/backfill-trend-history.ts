@@ -41,6 +41,7 @@ import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { compositeBundleSource, type SubjectBundleSource } from "../wiring/subject-bundle-source.ts";
 import type { TargetOutcome } from "../engine/synthetic/exam-config.ts";
 import { seededDistributionAtRate } from "./distribution.ts";
+import { runMeasurementPeriod } from "./run-period.ts";
 import { historicalComplianceRate } from "./compliance-rates.ts";
 import { isPopulationRun } from "../program/rollup-shared.ts";
 
@@ -206,9 +207,20 @@ export async function backfillTrendHistory(
       if (existingDays.has(day)) continue; // week already seeded — resume without duplicating
       // Completed a minute later — keeps the COMPLETED run's window self-consistent.
       const completedAt = new Date(startedMs + 60_000).toISOString();
-      // 365-day measurement window ending at the run's date (mirrors the live run pipeline).
-      const periodEnd = new Date(startedMs).toISOString();
-      const periodStart = new Date(startedMs - 365 * DAY_MS).toISOString();
+      // The period a REAL run at this date would record — `runMeasurementPeriod` is the one rule
+      // (ADR-072: calendar year for an officially-routed measure, the rolling registry window
+      // otherwise). Hardcoding the 365-day window here stopped mirroring the live pipeline the moment
+      // official routing existed, and the run row is what MeasureReport/QRDA declare as their period.
+      //
+      // HONEST LIMIT, inherent to seeding rather than re-evaluating: the outcomes are computed ONCE at
+      // `asOf` (`precomputeOutcomes` above) and replayed across the weeks at a seeded compliance rate.
+      // So for an officially-routed measure whose history crosses a year boundary, the recorded period
+      // is the one that date belongs to while the numbers came from `asOf`'s year. That is why every
+      // run this seeder writes is tagged TREND_HISTORY_TRIGGER and carries `seedTrendHistory: true` —
+      // it is demo history, never evidence, and must not be read as a re-evaluation.
+      const period = runMeasurementPeriod([measureId], day);
+      const periodStart = period.start;
+      const periodEnd = period.end;
 
       const run = await deps.runStore.createRun({
         scopeType: "MEASURE",

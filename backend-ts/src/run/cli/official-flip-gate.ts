@@ -27,7 +27,7 @@ import { officialTerminologyExpander } from "../../wiring/official-terminology.t
 import { loadOfficialArtifact } from "../../wiring/official-artifacts.ts";
 import { evaluateLikeTheRunPipeline, type BatchAndSingle, type SnapshotSubject } from "./official-flip-snapshot.ts";
 import { runOfficialMeasure, defaultOfficialCasesDeps } from "./official-cases.ts";
-import type { OfficialMeasureId } from "../../standards/official-cases.ts";
+import { OFFICIAL_GATED_MEASURES, type OfficialMeasureId } from "../../standards/official-cases.ts";
 
 /** Non-compliant statuses — the ones that put a subject on somebody's worklist. */
 const ACTIONABLE = new Set(["OVERDUE", "DUE_SOON"]);
@@ -291,7 +291,22 @@ export function parseArgs(argv: readonly string[], today: () => Date = () => new
     else throw new FlipGateUsageError(`unknown argument: ${arg}`);
   }
   if (!measure) throw new FlipGateUsageError("--measure is required");
+  // Validate the id rather than casting it. Unchecked, `--measure cms999` sails through parseArgs and
+  // dies much later inside buildOfficialOnlyBundle (whose switch has no default and returns undefined),
+  // so a typo surfaces as an opaque crash instead of the usage error and exit 2 this CLI defines.
+  if (!OFFICIAL_GATED_MEASURES.includes(measure as OfficialMeasureId)) {
+    throw new FlipGateUsageError(
+      `--measure must be one of ${OFFICIAL_GATED_MEASURES.join(", ")}, got ${measure}`,
+    );
+  }
   const date = evaluationDate ?? today().toISOString().slice(0, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new FlipGateUsageError(`--evaluation-date must be YYYY-MM-DD, got ${date}`);
+  // The regex only proves the SHAPE. `2027-99-99` matches it, then becomes an Invalid Date whose
+  // toISOString() throws a RangeError deep in the bundle builder. Round-tripping is what proves the
+  // date exists — it also rejects 2027-02-30, which no regex can.
+  const parsed = new Date(`${date}T00:00:00Z`);
+  if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== date) {
+    throw new FlipGateUsageError(`--evaluation-date is not a real date: ${date}`);
+  }
   return { measure: measure as OfficialMeasureId, evaluationDate: date, contentDir };
 }

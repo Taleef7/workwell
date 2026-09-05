@@ -156,6 +156,14 @@ test("parseArgs defaults the evaluation date to today in UTC", () => {
   assert.throws(() => parseArgs([]), FlipGateUsageError);
   assert.throws(() => parseArgs(["--measure", "cms2", "--evaluation-date", "June"]), FlipGateUsageError);
   assert.throws(() => parseArgs(["--nope"]), FlipGateUsageError);
+  // An unknown id must be a USAGE error here, not an opaque crash later inside the bundle builder
+  // (whose switch has no default branch and returns undefined for it).
+  assert.throws(() => parseArgs(["--measure", "cms999"]), /--measure must be one of/);
+  // And the date must be REAL, not merely YYYY-MM-DD shaped: 2027-99-99 and 2027-02-30 both match the
+  // regex and then become an Invalid Date whose toISOString() throws a RangeError.
+  assert.throws(() => parseArgs(["--measure", "cms2", "--evaluation-date", "2027-99-99"]), /not a real date/);
+  assert.throws(() => parseArgs(["--measure", "cms2", "--evaluation-date", "2027-02-30"]), /not a real date/);
+  assert.equal(parseArgs(["--measure", "cms2", "--evaluation-date", "2028-02-29"]).evaluationDate, "2028-02-29", "a real leap day is accepted");
 });
 
 test("writeGateJson writes the machine-readable summary under .flip-gate", async (t) => {
