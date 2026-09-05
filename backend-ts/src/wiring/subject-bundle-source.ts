@@ -7,6 +7,7 @@ import type { EmployeeProfile } from "../engine/synthetic/employee-catalog.ts";
 import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
 import { deriveExamConfig, type TargetOutcome } from "../engine/synthetic/exam-config.ts";
 import { buildSyntheticBundle, type FhirBundle } from "../engine/synthetic/fhir-bundle-builder.ts";
+import { buildOfficialOnlyBundle, type OfficialOnlyMeasureId } from "../engine/synthetic/official-only-bundles.ts";
 import { seededDistribution, seededTargetFor, type SeededAssignment } from "../run/distribution.ts";
 import { classifyRunnable } from "../config/deployment-profile.ts";
 
@@ -25,19 +26,28 @@ export function bindingBundleSource(): SubjectBundleSource {
   };
 }
 
+/** Task 3: the official-only measures (cms2/cms130/cms165) get QI-Core shapes written directly
+ *  against the official artifacts' ELM — see `engine/synthetic/official-only-bundles.ts`. */
+export function officialOnlyBundleSource(): SubjectBundleSource {
+  return {
+    targetFor: (employees, id, subjectId) => seededTargetFor(employees, id, subjectId),
+    distribution: (employees, id) => seededDistribution(employees, id),
+    bundleFor: (employee, id, target, evaluationDate) =>
+      buildOfficialOnlyBundle(employee, id as OfficialOnlyMeasureId, target, evaluationDate),
+  };
+}
+
 /** Dispatches on the runnable rule; throws for anything that is not runnable rather than guessing. */
 export function compositeBundleSource(env: Record<string, unknown>, sources: { authored?: SubjectBundleSource; official?: SubjectBundleSource } = {}): SubjectBundleSource {
   const authored = sources.authored ?? bindingBundleSource();
+  const official = sources.official ?? officialOnlyBundleSource();
   const pick = (id: string): SubjectBundleSource => {
     const kind = classifyRunnable(id, env);
     if (kind.kind === "official") {
       // cms122/cms125 are official-routed but keep their dual-stamped binding-built bundles today;
-      // Task 3 adds `sources.official` for the official-only ids, and it must not shadow those.
+      // the official-only ids (cms2/cms130/cms165) fall through to the official-only shapes.
       if (MEASURE_BINDINGS[id]) return authored;
-      if (!sources.official) {
-        throw new Error(`[workwell] ${id} is runnable as official-only but no official bundle source is supplied`);
-      }
-      return sources.official;
+      return official;
     }
     if (kind.kind === "authored") return authored;
     throw new Error(`[workwell] ${id} is not runnable here (${kind.kind}${"reason" in kind ? `: ${kind.reason}` : ""})`);

@@ -74,6 +74,22 @@ export const ECQM_CANONICAL_CODES = {
   statusPostRightMastectomy: { code: "429242008", system: SNOMED },
   unilateralMastectomyLeft: { code: "428571003", system: SNOMED },
   unilateralMastectomyRight: { code: "429400009", system: SNOMED },
+
+  // ── cms2 / cms130 / cms165 (Task 3) ─────────────────────────────────────────────
+  // Direct-reference codes from the ELM's codes.def — they have no value set.
+  depressionScreenAdult: { code: "73832-8", system: LOINC, display: "Depression screen [CDC]" },
+  depressionScreenAdolescent: { code: "73831-0", system: LOINC, display: "Depression screen [XLD]" },
+  depressionScreenNegative: { code: "428171000124102", system: SNOMED, display: "Depression screening negative" },
+  depressionScreenPositive: { code: "428181000124104", system: SNOMED, display: "Depression screening positive" },
+  bpPanel: { code: "85354-9", system: LOINC, display: "Blood pressure panel" },
+  bpSystolic: { code: "8480-6", system: LOINC, display: "Systolic blood pressure" },
+  bpDiastolic: { code: "8462-4", system: LOINC, display: "Diastolic blood pressure" },
+  // Value-set members from the ELM's valueSets.def.
+  bipolarDisorder: { code: "13746000", system: SNOMED, display: "Bipolar disorder" },
+  colonoscopy: { code: "44441009", system: SNOMED, display: "Colonoscopy" },
+  colorectalCancer: { code: "363406005", system: SNOMED, display: "Malignant tumor of colon" },
+  essentialHypertension: { code: "59621000", system: SNOMED, display: "Essential hypertension" },
+  esrd: { code: "46177005", system: SNOMED, display: "End stage renal disease" },
 } as const;
 
 /**
@@ -81,10 +97,28 @@ export const ECQM_CANONICAL_CODES = {
  * checks. Exported so the test reads the same table the expansion is built from; a test with its own copy
  * of this mapping would pass while the expansion below used a different one.
  *
- * `gmi` is absent deliberately: the official numerator retrieves LOINC 97506-0 as a direct code reference,
- * so there is no value set for it to be a member of.
+ * `gmi`, `depressionScreenAdult`, `depressionScreenAdolescent`, `depressionScreenNegative`,
+ * `depressionScreenPositive`, `bpPanel`, `bpSystolic`, and `bpDiastolic` are absent deliberately:
+ * the official artifacts retrieve these as direct code references, so there is no value set for
+ * them to be a member of.
  */
-export const CANONICAL_CODE_VALUE_SETS: Record<Exclude<keyof typeof ECQM_CANONICAL_CODES, "gmi">, string> = {
+export const CANONICAL_CODE_VALUE_SETS: Record<
+  Exclude<
+    keyof typeof ECQM_CANONICAL_CODES,
+    // The eight the comment above names: retrieved by direct code reference, so no value set
+    // exists for them to be a member of. The type must list them all, or it demands entries the
+    // table deliberately does not have.
+    | "gmi"
+    | "depressionScreenAdult"
+    | "depressionScreenAdolescent"
+    | "depressionScreenNegative"
+    | "depressionScreenPositive"
+    | "bpPanel"
+    | "bpSystolic"
+    | "bpDiastolic"
+  >,
+  string
+> = {
   diabetes: "2.16.840.1.113883.3.464.1003.103.12.1001",
   hba1c: "2.16.840.1.113883.3.464.1003.198.12.1013",
   officeVisit: "2.16.840.1.113883.3.464.1003.101.12.1001",
@@ -108,6 +142,11 @@ export const CANONICAL_CODE_VALUE_SETS: Record<Exclude<keyof typeof ECQM_CANONIC
   statusPostRightMastectomy: "2.16.840.1.113883.3.464.1003.198.12.1070",
   unilateralMastectomyLeft: "2.16.840.1.113883.3.464.1003.198.12.1133",
   unilateralMastectomyRight: "2.16.840.1.113883.3.464.1003.198.12.1134",
+  bipolarDisorder: "2.16.840.1.113883.3.67.1.101.1.128",
+  colonoscopy: "2.16.840.1.113883.3.464.1003.108.12.1020",
+  colorectalCancer: "2.16.840.1.113883.3.464.1003.108.12.1001",
+  essentialHypertension: "2.16.840.1.113883.3.464.1003.104.12.1011",
+  esrd: "2.16.840.1.113883.3.526.3.353",
 };
 
 /**
