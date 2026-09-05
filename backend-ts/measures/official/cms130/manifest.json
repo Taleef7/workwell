@@ -61,6 +61,6 @@
   "tests": {
     "count": 267,
     "sourcePath": "input/tests/measure/CMS130FHIRColorectalCancerScrn",
-    "sha256": "sha256:ea8c11755d3d54d167b60534cdf2ee9cbf1f00195138a30973e684b87b391454"
+    "sha256": "sha256:dc5f690853993eaf727c487ed0d12dd9fa674228a4f19eb379127e8a6f55d292"
   }
 }

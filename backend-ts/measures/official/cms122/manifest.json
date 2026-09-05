@@ -61,6 +61,6 @@
   "tests": {
     "count": 273,
     "sourcePath": "input/tests/measure/CMS122FHIRDiabetesAssessGT9Pct",
-    "sha256": "sha256:39ac0df2b37888e0584878d19ab8058d876e79f7c3a407d0d6a899245ef77d3d"
+    "sha256": "sha256:e543ae76cf570f909200462b2c015e0ff36a8a776a65f45f82b3d9ff38c8175f"
   }
 }

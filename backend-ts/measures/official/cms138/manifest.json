@@ -62,6 +62,6 @@
   "tests": {
     "count": 239,
     "sourcePath": "input/tests/measure/CMS138FHIRTobaccoScrnCessation",
-    "sha256": "sha256:e61f7f17713d3be7feee672110c721d8daf2a37d60c4c06e1898b621a5fdc030"
+    "sha256": "sha256:91bf9747c6f9dd62eebf6364755e47ff84ae34b8f3ce7a4a886a47affd8547e1"
   }
 }

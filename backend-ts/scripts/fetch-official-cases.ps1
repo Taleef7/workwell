@@ -51,10 +51,20 @@ if (Test-Path -LiteralPath (Join-Path $ContentDir ".git")) {
   if ($dirty) { throw "Official content checkout has local changes; refusing to update: $ContentDir" }
   git -C $ContentDir config core.longpaths true
 } else {
-  git clone -c core.longpaths=true --filter=blob:none --sparse --no-checkout $repo $ContentDir
+  # core.autocrlf=false is REQUIRED, not a preference. `vendor:official --with-tests` copies these
+  # files byte for byte into measures/official/<id>/tests and records a SHA-256 over them, and CI
+  # re-vendors on Linux and byte-compares. Upstream stores LF; a Windows clone with the global
+  # autocrlf=true rewrites them to CRLF, so a deck vendored on Windows hashes differently from the
+  # same deck vendored in CI and the reproducibility gate fails with a diff whose - and + lines look
+  # identical. Pin it here so the checkout is upstream bytes on every platform.
+  git clone -c core.longpaths=true -c core.autocrlf=false --filter=blob:none --sparse --no-checkout $repo $ContentDir
   if ($LASTEXITCODE -ne 0) { throw "Unable to clone official content" }
 }
 
+# Also pin it on an EXISTING clone: this script is re-run on checkouts made before the setting was
+# added, and the cone below can bring in new measures that would otherwise land CRLF-ified.
+git -C $ContentDir config core.autocrlf false
+if ($LASTEXITCODE -ne 0) { throw "Unable to pin core.autocrlf on the content checkout" }
 git -C $ContentDir sparse-checkout set @paths
 if ($LASTEXITCODE -ne 0) { throw "Unable to configure sparse checkout" }
 
