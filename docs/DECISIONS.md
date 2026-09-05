@@ -18,6 +18,85 @@
 >
 > **Sequence note:** ADR-033 does not exist — verified absent, and the number must not be reused.
 
+## ADR-072: a measure is runnable when it is authored OR official-only-and-routed — and an eCQM is scored over its calendar year, not a rolling window
+
+**Status:** Accepted (2026-09-05). Milestone MM-1b (`docs/ROADMAP_2026-08-30.md` §5).
+
+**Context.** ADR-047 established that a measure is onboarded when its MADiE gate is green. That turned
+out to be necessary and not sufficient, and the pilot found the gap: `cms2`, `cms130` and `cms165` were
+vendored, gated at 410/410 and (after ADR-071) carried semantics, yet none of them could actually run.
+The run pipeline derived its runnable set from the AUTHORED registry — a measure needed a
+`MEASURE_BINDINGS` row to get a subject bundle at all — so the three official-only measures were gated,
+routable and still not runnable. "Gated ≠ routable ≠ runnable" was the sequencing problem underneath
+MM-1, and it was invisible because each of the three states reads like the others from a distance.
+
+Separately, the official path inherited the authored path's rolling 365-day window. An eCQM is defined
+on a calendar measurement period, so a measure CMS defined on 2027 was being scored over a window CMS
+never defined it on, and the authored and official paths' population counts were not describing the
+same year.
+
+**Decision.**
+
+1. **The runnable rule is one pure function**, `classifyRunnable(id, env)`, returning `authored`,
+   `official`, `official-pending` or `invalid`. A measure is runnable when it is **authored** (registry
+   + synthetic binding) **or official-only** (vendored under `measures/official/` + an
+   `OFFICIAL_MEASURE_SEMANTICS` entry + named in `WORKWELL_OFFICIAL_MEASURES` on this deployment). An id
+   that is both authored and routed classifies as `official` — routing wins, which is what the router
+   already did. `env` is a parameter rather than a `process.env` read, so the flag is evaluated at call
+   time and a test can state the deployment it is describing.
+
+2. **`official-pending` is a first-class answer, not an error.** A measure that is vendored and has
+   semantics but is not routed *here* is correctly configured and simply not turned on for this
+   deployment. Collapsing it into `invalid` would make the default profile look broken for measures the
+   pilot has not flipped yet, and would have hidden the distinction the flip gate now reports on.
+
+3. **Subject bundles come from a `SubjectBundleSource` seam.** The pipeline no longer reaches into
+   `MEASURE_BINDINGS` for a bundle; it asks the seam, which dispatches on `classifyRunnable`. The
+   official-only measures get QI-Core shapes written directly against each artifact's own ELM
+   (`official-only-bundles.ts`) rather than a binding row that does not exist for them.
+
+4. **An officially-routed measure is scored over the calendar year containing the evaluation date.**
+   The period is derived through the existing `normalizePeriodEnd` and recorded on the run row, in
+   `evidence_json.official`, and in the compliance bucket. `planManualRun` switches only when EVERY
+   measure in the run is official-routed; a mixed run keeps today's behaviour rather than silently
+   re-scoping the authored half.
+
+5. **A stale artifact vintage is surfaced on the run, not just the console.** The vendored artifacts are
+   a 2026 vintage and the pilot's year is 2027, so `effectivePeriodWarning` names both periods and the
+   pipeline appends it as a run `WARN`. This is the mechanical detector for the MM-1d re-vendor.
+
+6. **A measure with no authored counterpart is gated by `official-flip-gate`, not `flip-snapshot`.**
+   `flip-snapshot` judges a flip by diffing the authored engine against the official artifact over the
+   same subjects; for cms2/cms130/cms165 that comparison has no BEFORE and cannot run. The gate replaces
+   it with three independent readings — the MADiE deck (through the same `runOfficialMeasure` CI calls),
+   the roster through `evaluateLikeTheRunPipeline`, and the artifact's `effectivePeriod` — each able to
+   fail the flip alone. It is descriptive: exit code 0 always, verdict in prose, and routing stays a
+   deliberate workflow edit (locked decision §4A.5).
+
+**Alternatives rejected.**
+
+- *Importing the gate module into the config layer* so `classifyRunnable` could ask the MADiE gate
+  directly. Rejected: it inverts the dependency (config would depend on the standards harness) and would
+  drag the content checkout into module load. The vendored-artifact check is a filesystem fact the config
+  layer can already see; the MADiE result is evidence a human reads before editing the workflow.
+- *Keeping the rolling 365-day window for official measures* to avoid two period rules. Rejected: it
+  scores a measure over a period its steward never defined, and no amount of consistency is worth a
+  number that answers a different question than the one asked.
+- *Promising CMS137 alongside the five.* Rejected per MM-1a: CMS-1848-P proposes removing Quality ID 305
+  from APP Plus for PY2027, so confirmation precedes the multi-rate spike, which precedes any promise.
+  ADR-047's MADiE-gate precondition applies to it unchanged.
+
+**Consequences.**
+
+- The **default profile is unchanged**: its runnable set is still the authored registry, and
+  `validateRunnableMeasureIds` proves both profiles' lists at module load.
+- **TWH's cms122/cms125 change measurement period** from a rolling window to the calendar year. Their
+  population counts move accordingly; this is a correction, not a regression.
+- A **re-vendor is now detectable rather than remembered** — every run of a 2026-vintage artifact over a
+  2027 period logs the warning until MM-1d lands.
+- `cms130` and `cms165` remain **not routable**: neither has a MADiE deck in the pinned content checkout
+  and no terminology sidecar resolves locally, so the flip gate refuses both. That refusal is the rule
+  working, not a defect.
 ## ADR-071: official-only measures take the vendored manifest's id — and a legacy catalog row is deprecated, never rewritten
 
 **Status:** Accepted (2026-09-01). Milestone MM-1b slice 1 (`docs/ROADMAP_2026-08-30.md` §5).

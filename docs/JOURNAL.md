@@ -1,5 +1,56 @@
 # Journal
 
+## 2026-09-05 — the five pilot measures become runnable, and the gate that says two of them are not
+
+MM-1 U1 is code-complete on `feat/mm1-official-only-runnable`: typecheck clean, 2,191 tests passing,
+0 failing, 43 Pg-ceiling self-skips. The unit is ADR-072 — the runnable rule, the subject-bundle seam,
+the three official-only QI-Core shapes, the calendar measurement period, the display wording, the
+routing badge, the catalog promotion, the vendored MADiE decks, and the flip gate.
+
+**What the pilot actually exposed.** ADR-047 said a measure is onboarded when its MADiE gate is green.
+That is necessary and not sufficient, and three measures proved it: cms2, cms130 and cms165 were
+vendored, gated at 410/410 and carried semantics after ADR-071, and none of them could run, because the
+pipeline derived its runnable set from the AUTHORED registry and they have no binding row. Gated,
+routable and runnable are three different states that look identical from a distance. `classifyRunnable`
+now names all four possibilities, and `official-pending` is a first-class answer rather than an error —
+a vendored measure a deployment has not turned on is correctly configured, not broken.
+
+**The period was answering a different question.** The official path had inherited the authored path's
+rolling 365-day window, so a measure CMS defined on a calendar year was being scored over a window CMS
+never defined it on. It is now the calendar year containing the evaluation date, on the run row and in
+`evidence_json.official`. A mixed run keeps the authored behaviour rather than silently re-scoping half
+of itself. TWH's cms122/cms125 counts move as a result; that is a correction.
+
+**Three findings worth keeping.**
+
+1. **cms130 and cms165 have no MADiE deck in the pinned content checkout at all**, and no terminology
+   sidecar resolves locally — the vendored bundles carry zero `ValueSet` resources (ADR-036). The
+   "410/410 across eight measures" figure is only reproducible in the credentialed CI job. Two written
+   plans assumed otherwise: MM-1c Task 13 would sweep "all 64 + 68 vendored cases" that are not in the
+   tree, and MM-1 U2 Task 4 would source codes from expansions that cannot be read here. The flip gate
+   reports both measures as UNAVAILABLE-deck plus zero-initial-population, which is the rule working.
+2. **The vendored-deck hash was platform-dependent.** `tests.sha256` is over raw bytes, and with
+   `core.autocrlf=true` and no `.gitattributes` the same deck could hash differently on Windows and on
+   CI. A `.gitattributes` now marks the decks `-text`. Git was not in fact normalising them today, but
+   that was inference, and the failure mode is a red CI nobody can reproduce locally.
+3. **CI's reproducibility check could not see a new deck file.** `git diff --exit-code` ignores
+   untracked files, so a regenerated-but-untracked case file would have passed the gate silently — the
+   one thing it exists to prevent. It is now `git status --porcelain`, and the five vendor commands pass
+   `--with-tests` so the regenerated manifests still carry their `tests` block.
+
+**The flip gate.** `flip-snapshot` cannot judge a measure with no authored BEFORE, so `flip-gate` is its
+successor for the official-only three: MADiE, the roster through `evaluateLikeTheRunPipeline`, and the
+artifact's `effectivePeriod`, each able to fail a flip alone, verdict in prose, exit code always 0.
+Smoked on cms165 it returns five findings — including the 2026-vintage artifact scoring a 2027 period,
+which is now the mechanical detector for the MM-1d re-vendor rather than something to remember. A deck
+that did not run is reported as unavailable and never as a pass; that distinction is the whole point.
+
+MM-1 U2 (the 20,000-patient corpus) is running alongside on `feat/maui-corpus`, Tasks 1-3 committed:
+the PRNG, the parameter table, the verbatim 48-row fixture move (`employee-catalog` still 66/66), and
+`patientAt`. Its distribution tolerances passed on the first run over the full 20,000 — every one of the
+40 panels inside 350-650 — which is what the plan's weight-scaled PCP counts were corrected for. Task 4
+turned out to need U1's code, not just Task 8 as the plan said, so that branch now sits on U1.
+
 ## 2026-09-04 — the Maui sandbox deploys on push and heals itself; the redeploy that showed why
 
 The pilot's quality lead has had sandbox access since the 2026-09-03 handover, and the sandbox was still
