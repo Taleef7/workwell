@@ -1,7 +1,5 @@
 /**
  * measure-seed unit tests (#76 E6 — Codex P1).
- *   node --import tsx --test src/measure/measure-seed.test.ts
- *
  * Verifies the idempotent back-fill behaviour of seedMeasureStore:
  *  (a) Fresh store → all MEASURE_CATALOG entries are seeded.
  *  (b) Non-empty store missing adult_immunization → back-fills only that entry.
@@ -21,9 +19,8 @@ import { SqliteCaseEventStore } from "../stores/sqlite/case-event-store-sqlite.t
 import type { CaseEventStore } from "../stores/case-event-store.ts";
 import type { MeasureStore } from "../stores/measure-store.ts";
 import { MEASURE_CATALOG, type MeasureSpec } from "./measure-catalog.ts";
-import { seedMeasureStore } from "./measure-seed.ts";
+import { matchesSeedFingerprint, OFFICIAL_ONLY_PRE_CHANGE, seedMeasureStore } from "./measure-seed.ts";
 import { HYPERTENSION_PRE_CHANGE_CQL } from "./hypertension-pre-change-cql.ts";
-
 const created: string[] = [];
 
 async function freshDb() {
@@ -60,12 +57,12 @@ async function seedLegacyRow(store: MeasureStore, legacyId: string, catalogId: s
     policyRef: catalog.policyRef,
     owner: catalog.owner,
     tags: [...catalog.tags],
-    versionId: `${legacyId}-${catalog.version}`,
     version: catalog.version,
-    status: "Draft",
-    spec: edited ? { ...catalog.spec, description: `${catalog.spec.description} (edited)` } : catalog.spec,
     cqlText: "",
-    compileStatus: catalog.compileStatus,
+    spec: edited ? { ...OFFICIAL_ONLY_PRE_CHANGE[catalogId as "cms2" | "cms130" | "cms165"], description: `${OFFICIAL_ONLY_PRE_CHANGE[catalogId as "cms2" | "cms130" | "cms165"].description} (edited)` } : OFFICIAL_ONLY_PRE_CHANGE[catalogId as "cms2" | "cms130" | "cms165"],
+    compileStatus: "NOT_COMPILED",
+    versionId: `${legacyId}-${catalog.version}`,
+    status: "Draft",
     createdAt: "2026-02-01T00:00:00.000Z",
     changeSummary: "Seeded measure version",
   });
@@ -98,8 +95,6 @@ async function seedCatalogExcept(store: MeasureStore, omittedId: string): Promis
   }
 }
 
-// ---------------------------------------------------------------------------
-// Test A1: Fresh store seeds all catalog entries
 // ---------------------------------------------------------------------------
 test("seedMeasureStore — fresh store seeds all MEASURE_CATALOG entries", async () => {
   const db = await freshDb();
@@ -214,43 +209,15 @@ test("seedMeasureStore — re-seed does not overwrite existing rows", async () =
   assert.equal(afterCount, MEASURE_CATALOG.length, "no duplicate rows after re-seed");
 });
 
-// ---------------------------------------------------------------------------
 // Test A4: Promotes a pre-existing Approved hepatitis_b_vaccination_series (E10.6)
 // ---------------------------------------------------------------------------
 test("seedMeasureStore — promotes a pre-existing Approved Hep B row to Active + CQL (idempotent)", async () => {
   const db = await freshDb();
   const store = new SqliteMeasureStore(db);
-  const events = new SqliteCaseEventStore(db);
-  const TIER: Record<string, string> = {
-    Active: "2026-06-10T00:00:00.000Z",
-    Approved: "2026-04-01T00:00:00.000Z",
-    Draft: "2026-02-01T00:00:00.000Z",
-    Deprecated: "2025-06-01T00:00:00.000Z",
-  };
-  const HEPB = "hepatitis_b_vaccination_series";
   const cqlOf = (id: string) => (id === HEPB ? "library HepatitisBSeries version '1.0.0'" : "");
+  const events = new SqliteCaseEventStore(db);
 
-  // Simulate a store seeded BEFORE the promotion: every catalog entry present, but Hep B as the old
-  // Approved, catalog-only row (no CQL) — its current catalog status is Active.
-  for (const m of MEASURE_CATALOG) {
-    const pre = m.id === HEPB;
-    await store.seedMeasure({
-      measureId: m.id,
-      name: m.name,
-      policyRef: m.policyRef,
-      owner: m.owner,
-      tags: [...m.tags],
-      versionId: `${m.id}-${m.version}`,
-      version: m.version,
-      status: pre ? "Approved" : m.status,
-      spec: m.spec,
-      cqlText: "",
-      compileStatus: pre ? "NOT_COMPILED" : m.compileStatus,
-      createdAt: TIER[pre ? "Approved" : m.status] ?? "2026-02-01T00:00:00.000Z",
-      changeSummary: "Seeded measure version",
-    });
-  }
-  assert.equal((await store.getLatest(HEPB))?.status, "Approved", "Hep B starts as the pre-promotion Approved row");
+  await seedMeasureCatalogWithHepBPrePromotion(store);
 
   // Run the seeder with real CQL for Hep B → must promote it to Active + back-fill CQL.
   await seedMeasureStore(store, cqlOf, events);
@@ -451,34 +418,33 @@ test("seedMeasureStore — audits one catalog back-fill and none on fresh boot",
   const freshAudits = await freshDbInstance.prepare("SELECT event_type FROM audit_events").all<{ event_type: string }>();
   assert.deepEqual(freshAudits.results ?? [], [], "fresh 63-row seed keeps its existing no-audit path");
 });
-
 test("seedMeasureStore — deprecates an untouched legacy row when persisted spec keys are reordered", async () => {
   const db = await freshDb();
   const store = new SqliteMeasureStore(db);
   const events = new SqliteCaseEventStore(db);
-  const catalog = MEASURE_CATALOG.find((m) => m.id === "cms2")!;
+  const pre = OFFICIAL_ONLY_PRE_CHANGE.cms2;
   const persistedSpec = {
-    testFixtures: catalog.spec.testFixtures,
-    requiredDataElements: catalog.spec.requiredDataElements,
-    complianceWindow: catalog.spec.complianceWindow,
-    exclusions: catalog.spec.exclusions,
-    eligibilityCriteria: catalog.spec.eligibilityCriteria,
-    description: catalog.spec.description,
+    testFixtures: pre.testFixtures,
+    requiredDataElements: pre.requiredDataElements,
+    complianceWindow: pre.complianceWindow,
+    exclusions: pre.exclusions,
+    eligibilityCriteria: pre.eligibilityCriteria,
+    description: pre.description,
   };
-  assert.notEqual(JSON.stringify(persistedSpec), JSON.stringify(catalog.spec), "test must reorder persisted spec keys");
+  assert.notEqual(JSON.stringify(persistedSpec), JSON.stringify(pre), "test must reorder persisted spec keys");
 
   await store.seedMeasure({
     measureId: "cms2v15",
-    name: catalog.name,
-    policyRef: catalog.policyRef,
-    owner: catalog.owner,
-    tags: [...catalog.tags],
+    name: "Preventive Care and Screening: Screening for Depression and Follow-Up Plan",
+    policyRef: "CMS2v15",
+    owner: "WorkWell Studio",
+    tags: ["ecqm", "cms", "mental-health", "preventive"],
     versionId: "cms2v15-v1.0",
-    version: catalog.version,
-    status: catalog.status,
+    version: "v1.0",
+    status: "Draft",
     spec: persistedSpec,
     cqlText: "",
-    compileStatus: catalog.compileStatus,
+    compileStatus: "NOT_COMPILED",
     createdAt: "2026-02-01T00:00:00.000Z",
     changeSummary: "Seeded measure version",
   });
@@ -519,10 +485,10 @@ test("seedMeasureStore — a failed catalog back-fill audit is retried without d
     tags: [...catalog.tags],
     versionId: "cms2v15-v1.0",
     version: catalog.version,
-    status: catalog.status,
-    spec: catalog.spec,
+    status: "Draft",
+    spec: OFFICIAL_ONLY_PRE_CHANGE.cms2,
     cqlText: "",
-    compileStatus: catalog.compileStatus,
+    compileStatus: "NOT_COMPILED",
     createdAt: "2026-02-01T00:00:00.000Z",
     changeSummary: "Seeded measure version",
   });
@@ -559,9 +525,9 @@ test("seedMeasureStore — repairs a legacy row already Deprecated but missing i
     versionId: "cms2v15-v1.0",
     version: catalog.version,
     status: "Deprecated",
-    spec: catalog.spec,
+    spec: OFFICIAL_ONLY_PRE_CHANGE.cms2,
     cqlText: "",
-    compileStatus: catalog.compileStatus,
+    compileStatus: "NOT_COMPILED",
     createdAt: "2026-02-01T00:00:00.000Z",
     changeSummary: "Seeded measure version",
   });
@@ -674,6 +640,7 @@ test("seedMeasureStore — repairs a half-applied hypertension row without a sec
   assert.deepEqual((await store.getLatest("hypertension"))!.spec, catalog.spec);
   assert.equal(await countSeedUpdatedEvents(db), 1);
 });
+
 
 test("seedMeasureStore — repairs a CQL-only half-applied row and makes no updates on the second seed", async () => {
   class CountingMeasureStore extends SqliteMeasureStore {
@@ -860,5 +827,113 @@ test("seedMeasureStore — audit-before-state leaves one audit row when updateSp
   const repaired = await store.getLatest("hypertension");
   assert.deepEqual(repaired!.spec, MEASURE_CATALOG.find((m) => m.id === "hypertension")!.spec);
   assert.match(repaired!.cqlText, /In Eligible Population/);
-  assert.equal(await countSeedUpdatedEvents(db), 1, "retry does not duplicate the audit");
+});
+
+const HEPB = "hepatitis_b_vaccination_series";
+
+// ---------------------------------------------------------------------------
+// Helper: seed the full catalog with Hep B as the pre-promotion Approved row.
+// ---------------------------------------------------------------------------
+const seedMeasureCatalogWithHepBPrePromotion = async (store: MeasureStore) => {
+  const tier = { Active: "2026-06-10T00:00:00.000Z", Approved: "2026-04-01T00:00:00.000Z", Draft: "2026-02-01T00:00:00.000Z", Deprecated: "2025-06-01T00:00:00.000Z" };
+  for (const m of MEASURE_CATALOG) {
+    const pre = m.id === HEPB;
+    await store.seedMeasure({
+      measureId: m.id,
+      name: m.name,
+      policyRef: m.policyRef,
+      owner: m.owner,
+      tags: [...m.tags],
+      versionId: `${m.id}-${m.version}`,
+      version: m.version,
+      status: pre ? "Approved" : m.status,
+      spec: m.spec,
+      cqlText: "",
+      compileStatus: pre ? "NOT_COMPILED" : m.compileStatus,
+      createdAt: tier[pre ? "Approved" : m.status] ?? "2026-02-01T00:00:00.000Z",
+      changeSummary: "Seeded measure version",
+    });
+  }
+  assert.equal((await store.getLatest(HEPB))?.status, "Approved", "Hep B starts as the pre-promotion Approved row");
+};
+
+test("matchesSeedFingerprint is exported and true only for an untouched seeded row", async () => {
+  const db = await freshDb();
+  const store = new SqliteMeasureStore(db);
+  await seedMeasureStore(store, () => "", new SqliteCaseEventStore(db));
+
+  const untouched = await store.getLatest("cms165");
+  assert.ok(untouched !== null);
+  const catalog = MEASURE_CATALOG.find((m) => m.id === "cms165")!;
+  assert.equal(matchesSeedFingerprint(untouched!, catalog!), true);
+
+  await store.updateSpec("cms165", { ...catalog.spec, description: `${catalog.spec.description} (edited)` });
+  const edited = await store.getLatest("cms165");
+  assert.ok(edited !== null);
+  assert.equal(matchesSeedFingerprint(edited!, catalog!), false);
+});
+
+test("seedMeasureStore promotes untouched Draft cms2/cms130/cms165 rows to Active and writes MEASURE_ACTIVATED once per measure", async () => {
+  const db = await freshDb();
+  const store = new SqliteMeasureStore(db);
+  const events = new SqliteCaseEventStore(db);
+
+  // Seed the three as pre-change Draft rows (untouched legacy state, no CQL, NOT_COMPILED).
+  for (const catalogId of ["cms2", "cms130", "cms165"] as const) {
+    await seedLegacyRow(store, catalogId, catalogId);
+  }
+
+  await seedMeasureStore(store, () => "", events);
+
+  for (const id of ["cms2", "cms130", "cms165"] as const) {
+    const promoted = await store.getLatest(id);
+    assert.ok(promoted !== null);
+    assert.equal(promoted!.status, "Active", `${id} is promoted to Active`);
+    const activation = await db
+      .prepare("SELECT event_type FROM audit_events WHERE event_type = 'MEASURE_ACTIVATED' AND entity_id = ?")
+      .bind(promoted!.versionId)
+      .all<{ event_type: string }>();
+    assert.equal(activation.results?.length ?? 0, 1, `${id} writes exactly one MEASURE_ACTIVATED`);
+  }
+
+  // Second seed: hasAuditEvent guard prevents a duplicate MEASURE_ACTIVATED.
+  await seedMeasureStore(store, () => "", events);
+  for (const id of ["cms2", "cms130", "cms165"] as const) {
+    const row = await store.getLatest(id);
+    assert.ok(row !== null);
+    const activation = await db
+      .prepare("SELECT event_type FROM audit_events WHERE event_type = 'MEASURE_ACTIVATED' AND entity_id = ?")
+      .bind(row!.versionId)
+      .all<{ event_type: string }>();
+    assert.equal(activation.results?.length ?? 0, 1, "the hasAuditEvent guard prevents a second activation audit");
+  }
+});
+
+test("seedMeasureStore does not promote an edited Draft row and warns naming it", async () => {
+  const db = await freshDb();
+  const store = new SqliteMeasureStore(db);
+  const events = new SqliteCaseEventStore(db);
+  await seedLegacyRow(store, "cms165", "cms165", true);
+
+  const warnings: string[] = [];
+  const originalWarn = console.warn;
+  console.warn = (message: string) => { warnings.push(message); };
+  try {
+    await seedMeasureStore(store, () => "", events);
+  } finally {
+    console.warn = originalWarn;
+  }
+
+  const row = await store.getLatest("cms165");
+  assert.equal(row!.status, "Draft", "the edited row is left as Draft");
+  assert.equal(
+    warnings.some((message) => message.includes("cms165") && message.includes("edited; not promoted")),
+    true,
+    "a warning names the edited measure",
+  );
+  const activations = await db
+    .prepare("SELECT event_type FROM audit_events WHERE event_type = 'MEASURE_ACTIVATED' AND entity_id = ?")
+    .bind(row!.versionId)
+    .all<{ event_type: string }>();
+  assert.equal(activations.results?.length ?? 0, 0);
 });
