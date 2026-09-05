@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { mkdtemp, mkdir, readFile, readdir, rm, writeFile, cp } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -175,7 +176,17 @@ test("verifyVendoredTestsHash accepts the bytes it hashed and rejects any change
     "a swapped .madie must fail too — it names every case");
 });
 
-test("loadOfficialMeasureCases reads the deck committed in this repo, hash-verified", async () => {
+// Needs the upstream content checkout for the measure BUNDLE (the deck itself is committed). The
+// default `pnpm test` job does not fetch `.official-content`, so this self-skips there and is listed
+// explicitly in ci.yml's official-cases job, which does — the rule that job's own comment states: a
+// test that needs the checkout must be added there or it is permanently skipped while reading as
+// covered.
+const CONTENT_DIR = fileURLToPath(new URL("../.official-content", import.meta.url));
+const noContentCheckout = existsSync(join(CONTENT_DIR, "bundles"))
+  ? false
+  : "no .official-content checkout — run scripts/fetch-official-cases.ps1 (CI: the official-cases job)";
+
+test("loadOfficialMeasureCases reads the deck committed in this repo, hash-verified", { skip: noContentCheckout }, async () => {
   const { loadOfficialMeasureCases } = await import("../src/standards/official-cases.ts");
   const contentDir = fileURLToPath(new URL("../.official-content", import.meta.url));
   const loaded = loadOfficialMeasureCases(contentDir, "cms68");

@@ -331,7 +331,8 @@ jobs:
             src/engine/ingress/webchart/live-official-parity.test.ts \
             src/wiring/official-flip-config.test.ts \
             src/fhir/qrda1-import-official.test.ts \
-            scripts/valueset-parity.test.mjs
+            scripts/valueset-parity.test.mjs \
+            scripts/vendor-official-measure.test.mjs
       # `--allow-missing-terminology` ONLY where the credential is genuinely absent (fork PRs,
       # Dependabot — GitHub withholds the secret there). Without it, the uncredentialed re-vendor above
       # produces a cms138 sidecar that omits the value set upstream does not ship, the deck cannot

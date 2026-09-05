@@ -34,6 +34,7 @@ import { PgPersonLinkStore } from "./person-link-store-postgres.ts";
 import { PgEvalStateStore } from "./eval-state-store-postgres.ts";
 import { MEASURE_CATALOG } from "../../measure/measure-catalog.ts";
 import { seedMeasureStore } from "../../measure/measure-seed.ts";
+import { OFFICIAL_ONLY_PRE_CHANGE } from "../../measure/measure-seed.ts";
 import {
   runStoreContract,
   outcomeStoreContract,
@@ -131,10 +132,16 @@ if (!reachable && process.env.WORKWELL_TEST_PG_URL) {
       tags: [...catalog.tags],
       versionId: "cms2v15-v1.0",
       version: catalog.version,
-      status: catalog.status,
-      spec: catalog.spec,
+      status: "Draft",
+      // The legacy row as it ACTUALLY existed before the rename: Draft, NOT_COMPILED, the placeholder
+      // spec. It used to be written as `catalog.spec` / `catalog.status` / `catalog.compileStatus`,
+      // which was the same thing only while cms2 was still a Draft catalog row. ADR-072 promotes it to
+      // Active with real content, so those fields now describe the POST-change row and the seeder
+      // correctly declines to deprecate it — `deprecateLegacyOfficialRows` fingerprints against
+      // `preChangeCatalog`, and a row that does not look pre-change is one somebody edited.
+      spec: OFFICIAL_ONLY_PRE_CHANGE.cms2,
       cqlText: "",
-      compileStatus: catalog.compileStatus,
+      compileStatus: "NOT_COMPILED",
       createdAt: "2026-02-01T00:00:00.000Z",
       changeSummary: "Seeded measure version",
     });
