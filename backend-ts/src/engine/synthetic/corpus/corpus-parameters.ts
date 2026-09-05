@@ -8,7 +8,7 @@
  */
 import { createHash } from "node:crypto";
 
-export const CORPUS_GENERATOR_VERSION = "1.0.0";
+export const CORPUS_GENERATOR_VERSION = "1.1.0";
 export const DEFAULT_CORPUS_SEED = "maui-py2027-v1";
 
 export interface CorpusClinic {
@@ -139,13 +139,31 @@ export const EVENT_RATES = {
   externalSourced: 0.20,
 } as const;
 
-/** Colorectal modality mix within the up-to-date share, with each modality's look-back in months (CMS130). */
+/**
+ * Colorectal modality mix within the up-to-date share, with each modality's look-back in months.
+ *
+ * CMS130's ELM retrieves FIVE modality value sets — read off `measures/official/cms130/bundle.json`:
+ * Colonoscopy (…108.12.1020), Fecal Occult Blood Test (…198.12.1011), sDNA FIT Test (…108.12.1039),
+ * Flexible Sigmoidoscopy (…198.12.1010) and CT Colonography (…108.12.1038).
+ *
+ * Only TWO are generated today, and the reason is deliberate rather than an oversight. A modality is
+ * only emittable if we know a real MEMBER CODE of its value set: an event stamped with a code outside
+ * the artifact's expansion is silently never retrieved, so the patient reads as unscreened and the
+ * measure reports a number that looks plausible and is wrong. Colonoscopy (SNOMED 44054006-adjacent,
+ * already in ECQM_CANONICAL_CODES) and FOBT (LOINC 2335-8, confirmed a member) are the two whose codes
+ * are established. sDNA FIT, flexible sigmoidoscopy and CT colonography are NOT included because their
+ * member codes could not be confirmed against VSAC — the vendored bundles carry zero ValueSet
+ * resources and the terminology sidecar is fetched at build (ADR-036), so nothing local can verify a
+ * guess. Add them when the sidecar is available and `corpus-membership.test.ts` can prove membership;
+ * that test is the gate, not this comment.
+ *
+ * The weights below preserve the two modalities' relative ratio (0.55 : 0.28) and re-normalise to 1,
+ * so the overall `colorectalUpToDate` rate is unchanged and no screened patient is left with an
+ * un-emittable modality — which would have been a silent ~17% under-count of the CMS130 numerator.
+ */
 export const COLORECTAL_MODALITIES: readonly (readonly [{ readonly key: string; readonly lookbackMonths: number }, number])[] = [
-  [{ key: "colonoscopy", lookbackMonths: 120 }, 0.55],
-  [{ key: "fit", lookbackMonths: 12 }, 0.28],
-  [{ key: "fitDna", lookbackMonths: 36 }, 0.09],
-  [{ key: "sigmoidoscopy", lookbackMonths: 60 }, 0.05],
-  [{ key: "ctColonography", lookbackMonths: 60 }, 0.03],
+  [{ key: "colonoscopy", lookbackMonths: 120 }, 0.66],
+  [{ key: "fobt", lookbackMonths: 12 }, 0.34],
 ];
 
 /** Office visits in the measurement year (spec §3, item 1). At least one falls before Nov 14. */
