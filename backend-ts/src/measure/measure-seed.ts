@@ -98,7 +98,18 @@ export function matchesSeedFingerprint(
     row.cqlText === "" &&
     row.compileStatus === catalog.compileStatus &&
     row.changeSummary === "Seeded measure version" &&
-    row.createdAt === TIER[catalog.status]
+    row.createdAt === TIER[catalog.status] &&
+    // `updatedAt` was dropped when this generalised isUnmodifiedLegacySeed, and it is the one check
+    // `status` does not subsume: a spec that was edited and then restored to exactly the seeded bytes
+    // matches on every other field, so without this it fingerprints as untouched and is silently
+    // deprecated or promoted as though nobody had ever touched it.
+    //
+    // `approvedBy`/`activatedAt` are deliberately NOT restored: the original only ever ran against
+    // Draft/legacy rows, and a freshly seeded ACTIVE row legitimately carries an activatedAt, so
+    // reinstating them here would make every Active catalog row fail its own fingerprint. The `status`
+    // equality above covers what they were guarding — an approved row reads Approved, an activated one
+    // reads Active.
+    (expectedStatus === "Deprecated" || row.updatedAt === TIER[catalog.status])
   );
 }
 
@@ -125,6 +136,18 @@ async function promoteOfficialOnlyRows(store: MeasureStore, events: CaseEventSto
     if (!matchesSeedFingerprint(row, preChangeCatalog(id))) {
       console.warn(`[measure-seed] ${id} row was edited; not promoted to Active`);
       continue;
+    }
+    // Bring the CONTENT forward too, not just the status. `seedMeasureStore` skips rows that already
+    // exist, so on any store seeded before this change (TWH, Maui — every live deployment) a
+    // status-only promotion leaves an ACTIVE measure still carrying the placeholder Draft spec
+    // ("CQL authoring pending", empty eligibility and exclusions) and compileStatus NOT_COMPILED. A
+    // pilot user opening /measures/cms2 would read that its logic had not been authored, on a measure
+    // the deployment is telling them is live. The route tests missed it because they seed a FRESH
+    // store, where the row is created from the current catalog and never goes through this path.
+    const catalog = MEASURE_CATALOG.find((m) => m.id === id)!;
+    await store.updateSpec(id, catalog.spec, catalog.policyRef);
+    if (row.compileStatus !== catalog.compileStatus) {
+      await store.updateCql(id, row.cqlText ?? "", catalog.compileStatus);
     }
     await store.setVersionStatus(id, row.versionId, { status: "Active", activate: true });
     const audit: AppendAuditInput = {

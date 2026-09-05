@@ -77,16 +77,28 @@ export const ECQM_CANONICAL_CODES = {
 
   // ── cms2 / cms130 / cms165 (Task 3) ─────────────────────────────────────────────
   // Direct-reference codes from the ELM's codes.def — they have no value set.
-  depressionScreenAdult: { code: "73832-8", system: LOINC, display: "Depression screen [CDC]" },
-  depressionScreenAdolescent: { code: "73831-0", system: LOINC, display: "Depression screen [XLD]" },
+  depressionScreenAdult: { code: "73832-8", system: LOINC, display: "Adult depression screening assessment" },
+  depressionScreenAdolescent: { code: "73831-0", system: LOINC, display: "Adolescent depression screening assessment" },
   depressionScreenNegative: { code: "428171000124102", system: SNOMED, display: "Depression screening negative" },
   depressionScreenPositive: { code: "428181000124104", system: SNOMED, display: "Depression screening positive" },
   bpPanel: { code: "85354-9", system: LOINC, display: "Blood pressure panel" },
   bpSystolic: { code: "8480-6", system: LOINC, display: "Systolic blood pressure" },
   bpDiastolic: { code: "8462-4", system: LOINC, display: "Diastolic blood pressure" },
   // Value-set members from the ELM's valueSets.def.
-  bipolarDisorder: { code: "13746000", system: SNOMED, display: "Bipolar disorder" },
-  colonoscopy: { code: "44441009", system: SNOMED, display: "Colonoscopy" },
+  // 13746004, NOT 13746000. The latter is not a valid SCTID at all (its Verhoeff check digit fails)
+  // and `tx.fhir.org $lookup` returns not-found for it in both the international and US editions, so
+  // it can be a member of no expansion: CMS2's bipolar DENOMINATOR EXCLUSION never fired and every
+  // excluded patient was counted in the denominator AND the numerator. Verified 2026-09-05:
+  // $lookup(13746004) returns "Bipolar disorder".
+  bipolarDisorder: { code: "13746004", system: SNOMED, display: "Bipolar disorder" },
+  // 73761001 "Colonoscopy", NOT 44441009 — which `tx.fhir.org $lookup` resolves to "Flexible
+  // fiberoptic sigmoidoscopy (procedure)". It was registered under the Colonoscopy value set with a
+  // display of "Colonoscopy", so it was both in the wrong value set and carrying a false clinical
+  // label (which the rule at the top of this file forbids). CMS130 gives colonoscopy a NINE-year
+  // lookback and flexible sigmoidoscopy four, so a real colonoscopy 5-9 years old read as OVERDUE.
+  // The synthetic COMPLIANT case passed only because 3 years is inside both windows.
+  // Verified 2026-09-05: $lookup(73761001) returns "Colonoscopy".
+  colonoscopy: { code: "73761001", system: SNOMED, display: "Colonoscopy" },
   colorectalCancer: { code: "363406005", system: SNOMED, display: "Malignant tumor of colon" },
   essentialHypertension: { code: "59621000", system: SNOMED, display: "Essential hypertension" },
   esrd: { code: "46177005", system: SNOMED, display: "End stage renal disease" },

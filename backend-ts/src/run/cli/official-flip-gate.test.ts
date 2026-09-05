@@ -17,13 +17,26 @@ import type { BatchAndSingle, SnapshotSubject } from "./official-flip-snapshot.t
 const subjectsOf = (n: number): SnapshotSubject[] =>
   Array.from({ length: n }, (_, i) => ({ subjectId: `pat-${String(i + 1).padStart(3, "0")}`, bundle: { resourceType: "Bundle" } }));
 
-/** An executor that reports every subject with the given populations, through the batch primitive. */
+/**
+ * An executor that reports every subject with the given populations, through the batch primitive.
+ *
+ * `populationResults` is built in fqm-execution's REAL shape — an array of {populationType, result},
+ * per OfficialEvidence in packages/measure-engine/src/evaluate-measure.ts. It previously used a keyed
+ * record here, which is a shape the engine never produces: the stub and the reader agreed with each
+ * other and both disagreed with reality, so the gate's central IPP reading was always 0 against the
+ * live executor and every measure got an unconditional ADR-043 "nobody is in the initial population"
+ * verdict. A stub that invents its own shape tests nothing.
+ */
 const executorReporting = (populations: Record<string, number>, outcome = "OVERDUE", omit: readonly string[] = []): BatchAndSingle => ({
   async evaluateBatch(_measureId, subjects) {
     const out = new Map<string, never>();
+    const populationResults = Object.entries(populations).map(([populationType, count]) => ({
+      populationType,
+      result: count > 0,
+    }));
     for (const s of subjects) {
       if (omit.includes(s.subjectId)) continue;
-      out.set(s.subjectId, { outcome, evidence: { official: { populationResults: populations } } } as never);
+      out.set(s.subjectId, { outcome, evidence: { official: { populationResults } } } as never);
     }
     return out as never;
   },

@@ -70,10 +70,12 @@ test("vendor script --tests-only copies cases and records the sorted hash in the
 
   const vendoredTests = join(outRoot, "cms68", "tests");
   const copied = await sortedCaseFiles(vendoredTests);
-  assert.deepEqual(copied.map((entry) => entry.relativePath), ["case-b/MeasureReport-expected.json"]);
+  // `.madie` is vendored too: it names every case (patientId/title/series), and a deck without it
+  // cannot be loaded at all. Copying case directories only produced a deck the reader could not open.
+  assert.deepEqual(copied.map((entry) => entry.relativePath), [".madie", "case-b/MeasureReport-expected.json"]);
 
   const manifest = JSON.parse(await readFile(join(outRoot, "cms68", "manifest.json"), "utf8"));
-  assert.equal(manifest.tests.count, 1);
+  assert.equal(manifest.tests.count, 2, "the count covers the whole deck, .madie included");
   assert.equal(manifest.tests.sourcePath, "input/tests/measure/CMS68FHIRDocumentationCurrentMeds");
   const expectedHash = createHash("sha256");
   for (const entry of copied) {
@@ -132,136 +134,54 @@ test("vendor script --tests-only fails and names a corrupted upstream case file"
   assert.ok(stderr.includes("Patient.json"), `error must name the file, got: ${stderr}`);
 });
 
-test("loadOfficialMeasureCases refuses a vendored tests dir whose bytes do not match the manifest hash", async (t) => {
-  const module = await import("../src/standards/official-cases.ts");
-  const contentDir = await mkdtemp(join(tmpdir(), "workwell-official-cases-"));
-  t.after(() => rm(contentDir, { recursive: true, force: true }));
-  const measureName = "CMS68FHIRDocumentationCurrentMeds";
-  const bundleDir = join(contentDir, "bundles", "measure", measureName);
-  const upstreamTests = join(contentDir, "input", "tests", "measure", measureName);
-  const artifactDir = join(contentDir, "measures", "official", "cms68");
-  const vendoredTests = join(artifactDir, "tests");
-  const caseId = "case-a";
-  await mkdir(bundleDir, { recursive: true });
-  await mkdir(upstreamTests, { recursive: true });
+/**
+ * The vendored deck is anchored to the MODULE (`backend-ts/measures/official/<id>/tests`), not to
+ * `--content-dir`, so these can no longer be driven by building a fake content directory — and that
+ * is the point. The previous versions of these two tests hand-built a `contentDir` containing
+ * `measures/official/cms68/`, a layout `vendor-official-measure.mjs` never produces, and passed while
+ * the real loader resolved the vendored path against the content checkout, found nothing, and silently
+ * fell back to the upstream deck for every real invocation. The guard was dead and its test agreed.
+ *
+ * So: the integrity check is exercised directly, and the wiring is exercised against the real deck.
+ */
+test("verifyVendoredTestsHash accepts the bytes it hashed and rejects any change to them", async (t) => {
+  const { verifyVendoredTestsHash } = await import("../src/standards/official-cases.ts");
+  const root = await mkdtemp(join(tmpdir(), "workwell-deck-hash-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
 
-  await writeFile(join(bundleDir, `${measureName}-bundle.json`), JSON.stringify({
-    resourceType: "Bundle",
-    type: "collection",
-    entry: [{ resource: { resourceType: "Measure", id: "measure" } }],
-  }), "utf8");
+  const caseDir = join(root, "case-a");
+  await mkdir(caseDir, { recursive: true });
+  await writeFile(join(root, ".madie"), '[{"patientId":"case-a","title":"T","series":"S"}]', "utf8");
+  await writeFile(join(caseDir, "Patient.json"), '{"resourceType":"Patient","id":"case-a"}', "utf8");
 
-  await writeFile(join(upstreamTests, "case-upstream"), "upstream", "utf8");
-  await mkdir(join(vendoredTests, caseId), { recursive: true });
-  await writeFile(join(vendoredTests, caseId, "Patient.json"), JSON.stringify({
-    resourceType: "Patient",
-    id: caseId,
-    meta: { profile: ["http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-patient"] },
-  }), "utf8");
-  await writeFile(join(vendoredTests, caseId, "MeasureReport-expected.json"), JSON.stringify({
-    resourceType: "MeasureReport",
-    id: "expected",
-    period: { start: "2026-01-01", end: "2026-12-31" },
-    group: [
-      {
-        population: [
-          { code: { coding: [{ code: "initial-population" }] }, count: 1 },
-          { code: { coding: [{ code: "denominator" }] }, count: 1 },
-          { code: { coding: [{ code: "denominator-exclusion" }] }, count: 0 },
-          { code: { coding: [{ code: "numerator" }] }, count: 1 },
-        ],
-        measureScore: { value: 1 },
-      },
-    ],
-  }), "utf8");
-
-  const manifest = { tests: { count: 1, sourcePath: "input/tests/measure/CMS68FHIRDocumentationCurrentMeds", sha256: "sha256:abc" } };
-  await writeFile(join(artifactDir, "manifest.json"), JSON.stringify(manifest), "utf8");
-
-  let error;
-  try {
-    module.loadOfficialMeasureCases(contentDir, "cms68");
-  } catch (caught) {
-    error = caught;
+  const files = await sortedCaseFiles(root);
+  const hash = createHash("sha256");
+  for (const entry of files) {
+    hash.update(`${entry.relativePath}\n`);
+    hash.update(entry.bytes);
   }
-  assert.ok(error instanceof Error);
-  assert.match(error.message, /tests\.sha256/);
+  const manifestTests = { count: files.length, sha256: `sha256:${hash.digest("hex")}` };
+  // The deck-root metadata is inside the hash: a swapped `.madie` renames every case while every
+  // population vector still matches, which is exactly the change nobody would notice.
+  assert.equal(files.length, 2);
+  assert.doesNotThrow(() => verifyVendoredTestsHash(root, manifestTests, "CMS68"));
+
+  await writeFile(join(caseDir, "Patient.json"), '{"resourceType":"Patient","id":"tampered"}', "utf8");
+  assert.throws(() => verifyVendoredTestsHash(root, manifestTests, "CMS68"), /integrity check/);
+
+  await writeFile(join(caseDir, "Patient.json"), '{"resourceType":"Patient","id":"case-a"}', "utf8");
+  await writeFile(join(root, ".madie"), '[{"patientId":"case-a","title":"OTHER","series":"S"}]', "utf8");
+  assert.throws(() => verifyVendoredTestsHash(root, manifestTests, "CMS68"), /integrity check/,
+    "a swapped .madie must fail too — it names every case");
 });
 
-test("loadOfficialMeasureCases prefers a vendored tests dir over the upstream one when its hash matches", async (t) => {
-  const module = await import("../src/standards/official-cases.ts");
-  const contentDir = await mkdtemp(join(tmpdir(), "workwell-official-cases-ok-"));
-  t.after(() => rm(contentDir, { recursive: true, force: true }));
-  const measureName = "CMS68FHIRDocumentationCurrentMeds";
-  const bundleDir = join(contentDir, "bundles", "measure", measureName);
-  const upstreamTests = join(contentDir, "input", "tests", "measure", measureName);
-  const artifactDir = join(contentDir, "measures", "official", "cms68");
-  const vendoredTests = join(artifactDir, "tests");
-  const vendoredCaseId = "case-vendored";
-  const upstreamCaseId = "case-upstream";
-
-  await mkdir(bundleDir, { recursive: true });
-  await writeFile(join(bundleDir, `${measureName}-bundle.json`), JSON.stringify({
-    resourceType: "Bundle",
-    type: "collection",
-    entry: [{ resource: { resourceType: "Measure", id: "measure" } }],
-  }), "utf8");
-
-  // An upstream deck that MUST be ignored: a different case id, so reading it is visible in the result.
-  const upstreamCaseDir = join(upstreamTests, upstreamCaseId);
-  await mkdir(upstreamCaseDir, { recursive: true });
-  await writeFile(join(upstreamTests, ".madie"), JSON.stringify([{ patientId: upstreamCaseId }]), "utf8");
-  await writeFile(join(upstreamCaseDir, "Patient.json"), JSON.stringify({ resourceType: "Patient", id: upstreamCaseId }), "utf8");
-
-  const caseFiles = {
-    "Patient.json": JSON.stringify({
-      resourceType: "Patient",
-      id: vendoredCaseId,
-      meta: { profile: ["http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-patient"] },
-    }),
-    "MeasureReport-expected.json": JSON.stringify({
-      resourceType: "MeasureReport",
-      id: "expected",
-      period: { start: "2026-01-01", end: "2026-12-31" },
-      group: [
-        {
-          population: [
-            { code: { coding: [{ code: "initial-population" }] }, count: 1 },
-            { code: { coding: [{ code: "denominator" }] }, count: 1 },
-            { code: { coding: [{ code: "denominator-exclusion" }] }, count: 0 },
-            { code: { coding: [{ code: "numerator" }] }, count: 1 },
-          ],
-          measureScore: { value: 1 },
-        },
-      ],
-    }),
-  };
-  await mkdir(join(vendoredTests, vendoredCaseId), { recursive: true });
-  for (const [name, body] of Object.entries(caseFiles)) {
-    await writeFile(join(vendoredTests, vendoredCaseId, name), body, "utf8");
-  }
-  await writeFile(join(vendoredTests, ".madie"), JSON.stringify([{ patientId: vendoredCaseId, title: "Vendored", series: "Deck" }]), "utf8");
-
-  // The hash the reader recomputes: case dirs sorted, files within sorted, `relativePath + "\n" + bytes`.
-  // `.madie` sits at the deck root rather than in a case dir, so it is outside the hash by construction.
-  const hash = createHash("sha256");
-  let count = 0;
-  for (const name of Object.keys(caseFiles).sort((a, b) => a.localeCompare(b))) {
-    hash.update(`${vendoredCaseId}/${name}\n`);
-    hash.update(Buffer.from(caseFiles[name], "utf8"));
-    count += 1;
-  }
-  await writeFile(join(artifactDir, "manifest.json"), JSON.stringify({
-    tests: {
-      count,
-      sourcePath: `input/tests/measure/${measureName}`,
-      sha256: `sha256:${hash.digest("hex")}`,
-    },
-  }), "utf8");
-
-  const loaded = module.loadOfficialMeasureCases(contentDir, "cms68");
-  assert.deepEqual(loaded.cases.map((entry) => entry.uuid), [vendoredCaseId]);
-  assert.equal(loaded.cases[0].loadError, undefined);
-  assert.equal(loaded.cases[0].patientId, vendoredCaseId);
-  assert.equal(loaded.cases[0].series, "Deck");
+test("loadOfficialMeasureCases reads the deck committed in this repo, hash-verified", async () => {
+  const { loadOfficialMeasureCases } = await import("../src/standards/official-cases.ts");
+  const contentDir = fileURLToPath(new URL("../.official-content", import.meta.url));
+  const loaded = loadOfficialMeasureCases(contentDir, "cms68");
+  // 19 is the committed deck size for cms68; it comes from measures/official/cms68/tests, and the
+  // manifest hash was verified on the way in or this call would have thrown.
+  assert.equal(loaded.cases.length, 19);
+  assert.ok(loaded.cases.every((c) => c.loadError === undefined), "every case loaded");
+  assert.ok(loaded.cases.every((c) => c.series && c.title), "metadata came from the vendored .madie");
 });

@@ -25,7 +25,7 @@ import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { compositeBundleSource } from "../wiring/subject-bundle-source.ts";
 import { priorityFor, nextActionFor } from "./case-logic.ts";
 import { toCaseDetail, type CaseDetail } from "./case-detail-read-model.ts";
-import { runMeasurementPeriod } from "../run/run-period.ts";
+import { caseRerunMeasurementPeriod } from "../run/run-period.ts";
 
 export interface RerunDeps {
   cases: CaseStore;
@@ -78,7 +78,7 @@ export async function rerunToVerify(deps: RerunDeps, caseId: string, actor: stri
   // buckets the cycle (so rerun upserts, never duplicates); the eval date drives the numbers.
   // Mirrors the Java rerunToVerify (`LocalDate evaluationDate = LocalDate.now()`).
   const evalDate = new Date().toISOString().slice(0, 10);
-  const period = runMeasurementPeriod([existing.measureId], evalDate);
+  const period = caseRerunMeasurementPeriod(existing.measureId, evalDate);
 
   const run = await deps.runStore.createRun({
     scopeType: "CASE",

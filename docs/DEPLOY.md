@@ -299,6 +299,11 @@ Per measure, per stack:
 > `backend-ts/.flip-gate/<id>-<date>.json` to attach to the flip PR. Any one of the three can fail the
 > flip. It is DESCRIPTIVE: exit code is always 0, and routing is still the workflow edit in step 5.
 >
+> **cms165 has a blocker `flip-gate` does not detect.** The executor ignores `meta.profile`, and
+> cms165 identifies its BP reading by profile alone — so on any patient with other Observations the
+> numerator silently reads false. The synthetic roster emits one Observation per subject and therefore
+> cannot show it. Do not route cms165 on the strength of a green gate alone (ADR-072, consequences).
+>
 > **A reading that did not run is never a pass.** `cms130` and `cms165` have no MADiE deck in the pinned
 > content checkout and resolve no terminology locally, so both currently come back with an UNAVAILABLE
 > deck and a zero initial population. That is the gate working — do not read it as "no findings".

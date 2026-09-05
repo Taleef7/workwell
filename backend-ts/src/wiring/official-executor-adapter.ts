@@ -167,7 +167,15 @@ export interface OfficialExecutorDeps {
   calculate?: FqmCalculate;
   /** Injectable for tests; defaults to the vendored-artifact loader. */
   loadArtifact?: (catalogId: string) => OfficialArtifact | null;
-  /** Routed, not swallowed: the run pipeline appends each warning as a WARN run-log line. */
+  /**
+   * Optional sink for the stale-vintage warning. NOT wired by the run pipeline today — the pipeline
+   * derives the same warning itself and appends it as a WARN run-log line once per run
+   * (`run-pipeline.ts`), which is the operator-visible path. This stays as a seam for callers that have
+   * no run to log against (the flip gate, a script). When it is absent the fallback goes to the
+   * console, DEDUPED per measure+period — `evaluate` is called once per subject, so an undeduped
+   * fallback prints one identical line per subject per measure (240 per Maui run today, ~100k on the
+   * 20k corpus) from 2027-01-01 until the MM-1d re-vendor.
+   */
   onWarning?: (message: string) => void;
 }
 
@@ -289,6 +297,23 @@ export function officialMeasurementPeriod(
  * Returns null when it does (or when the artifact declares no period — absent means unknown, not
  * overdue). The message names both periods so an operator can act on the gap without reading source.
  */
+/**
+ * The console fallback for the stale-vintage warning, at most once per (measure, period) per process.
+ * `evaluate` runs per subject, so the undeduped version printed the same paragraph once per subject.
+ */
+const WARNED_PERIODS = new Set<string>();
+function warnOncePerPeriod(measureId: string, period: { start: string; end: string }, warning: string): void {
+  const key = `${measureId}|${period.start}|${period.end}`;
+  if (WARNED_PERIODS.has(key)) return;
+  WARNED_PERIODS.add(key);
+  console.warn(`[workwell] ${warning}`);
+}
+
+/** Test-only: forget which warnings have been printed, so a test can observe the first one again. */
+export function __resetPeriodWarnings(): void {
+  WARNED_PERIODS.clear();
+}
+
 export function effectivePeriodWarning(
   artifact: OfficialArtifact,
   period: { start: string; end: string },
@@ -450,7 +475,7 @@ export function officialMeasureExecutor(deps: OfficialExecutorDeps): OfficialMea
     const warning = effectivePeriodWarning(artifact, period);
     if (warning) {
       if (deps.onWarning) deps.onWarning(warning);
-      else console.warn(`[workwell] ${warning}`);
+      else warnOncePerPeriod(measureId, period, warning);
     }
 
     const valueSetCache = await cacheFor(artifact);

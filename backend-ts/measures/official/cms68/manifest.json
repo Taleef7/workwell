@@ -47,8 +47,8 @@
   },
   "sha256": "sha256:f114b6edf657db98b6a11b625aa3b5d43e55ab736b0067dda56eeb6f312fb970",
   "tests": {
-    "count": 78,
+    "count": 81,
     "sourcePath": "input/tests/measure/CMS68FHIRDocumentationCurrentMeds",
-    "sha256": "sha256:dcdc575edd571069eec7418c3715e5795aef63b90c19227ec34935c0e9f62fe5"
+    "sha256": "sha256:693758d28ec2dd20e6aa0f607aae7c78b0c28b7e50d92e4cb925b5812cabc1e6"
   }
 }

@@ -83,11 +83,13 @@ export function calendarPeriodFor(evaluationDate: string): { start: string; end:
 /**
  * Run the measure's MADiE deck through the SAME function CI's gate uses.
  *
- * A deck this checkout does not have is an UNAVAILABLE reading, not a crash. cms130 and cms165 are
- * exactly that case today — the pinned content checkout ships no `input/tests/measure/` for either,
- * which is why neither could be vendored into the tree — and they are the two measures MM-1c most
- * needs this gate for. Dying here would make the tool useless precisely where it is needed, and worse,
- * it would report nothing about the other two readings, which do work.
+ * A deck this checkout does not have is an UNAVAILABLE reading, not a crash. `.official-content` is a
+ * SPARSE clone whose cone is fixed at first fetch, so a checkout that predates a measure's onboarding
+ * serves no deck for it while `git log` shows the same pinned commit — an absence indistinguishable
+ * from upstream not shipping one. (That is not hypothetical: it is what made cms130/cms165 look
+ * deck-less on 2026-09-05 until `fetch-official-cases.ps1` was re-run.) Dying here would make the tool
+ * useless precisely where it is needed, and would report nothing about the other two readings, which
+ * still work. Re-run the fetch script before believing a deck is genuinely absent.
  */
 async function defaultMadie(measureId: OfficialMeasureId, contentDir: string): Promise<FlipGateMadie> {
   const deps = defaultOfficialCasesDeps();
@@ -150,10 +152,18 @@ export async function gateMeasure(
   }
 
   const statuses = [...outcomes.values()].map((o) => o.outcome);
+  // `populationResults` is fqm-execution's ARRAY of {populationType, result}, verbatim — NOT a keyed
+  // record. Reading it as a record returns undefined for every key, which makes inIpp
+  // unconditionally 0 and fires the ADR-043 "nobody is in the initial population" blocker on every
+  // measure regardless of what the artifact did — the gate would always say DO NOT FLIP, for a reason
+  // indistinguishable from the real thing. Shape pinned by OfficialEvidence in
+  // packages/measure-engine/src/evaluate-measure.ts.
   const membership = (o: unknown, key: string): boolean => {
-    const populations = (o as { evidence?: { official?: { populationResults?: Record<string, unknown> } } })
-      ?.evidence?.official?.populationResults;
-    return Boolean(populations && Number(populations[key] ?? 0) > 0);
+    const populations = (o as {
+      evidence?: { official?: { populationResults?: ReadonlyArray<{ populationType?: string; result?: boolean }> } };
+    })?.evidence?.official?.populationResults;
+    if (!Array.isArray(populations)) return false;
+    return populations.some((p) => p?.populationType === key && p?.result === true);
   };
   const roster: FlipGateRoster = {
     subjects: subjects.length,

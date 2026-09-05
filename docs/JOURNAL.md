@@ -21,19 +21,82 @@ never defined it on. It is now the calendar year containing the evaluation date,
 `evidence_json.official`. A mixed run keeps the authored behaviour rather than silently re-scoping half
 of itself. TWH's cms122/cms125 counts move as a result; that is a correction.
 
-**Three findings worth keeping.**
+**The pre-PR review found three criticals and two wrong clinical codes. Two of the criticals were in
+code written today.** Worth recording because none of them would have failed a test.
 
-1. **cms130 and cms165 have no MADiE deck in the pinned content checkout at all**, and no terminology
-   sidecar resolves locally — the vendored bundles carry zero `ValueSet` resources (ADR-036). The
-   "410/410 across eight measures" figure is only reproducible in the credentialed CI job. Two written
-   plans assumed otherwise: MM-1c Task 13 would sweep "all 64 + 68 vendored cases" that are not in the
-   tree, and MM-1 U2 Task 4 would source codes from expansions that cannot be read here. The flip gate
-   reports both measures as UNAVAILABLE-deck plus zero-initial-population, which is the rule working.
-2. **The vendored-deck hash was platform-dependent.** `tests.sha256` is over raw bytes, and with
+1. **The calendar period silently emptied the roster for ~90 days every January.** Synthetic
+   qualifying encounters are dated relative to the EVALUATION date; the period is now the calendar
+   year. So a run on 2027-02-15 put its only encounter in 2026, outside the period, and every subject
+   left the initial population — a completed run, every case MISSING_DATA, a roster reading "nobody
+   eligible" rather than an error. PY2027 begins 2027-01-01 and Maui runs nightly. Every existing test
+   pins a mid-year date, which is exactly why it survived. Fixed by clamping in-period events forward
+   (`dateInMeasurementPeriod`); the regression test runs six dates and fails on four without the fix.
+2. **The flip gate could never produce evidence FOR a flip.** It read fqm-execution's
+   `populationResults` — an ARRAY of `{populationType, result}` — as a keyed record, so initial-
+   population membership was always 0 and every measure got an unconditional ADR-043 "nobody is in the
+   initial population" verdict, indistinguishable from the real thing. The test passed because its
+   stub invented the same wrong shape the reader assumed. A stub that agrees with the code and
+   disagrees with the engine tests nothing.
+3. **The vendored-deck hash check was dead.** The loader resolved
+   `measures/official/<id>/tests` against the CONTENT CHECKOUT while the vendor writes it into the
+   REPO, so the path never existed, `existsSync` was always false, and every run silently fell back to
+   the upstream deck. The 1169 committed files were read by nothing and `tests.sha256` protected
+   nothing — while the commit message said "the gate reads them from the tree". Anchored to the module
+   now, and proven by tampering a case file and watching the gate refuse. Fixing it immediately
+   exposed a second defect it had been hiding: the vendor copied only case DIRECTORIES, so the
+   `.madie` file naming every case was never vendored and the deck could not be opened at all.
+4. **Two clinical codes were simply wrong**, both pre-existing, both verified against
+   `tx.fhir.org`. `bipolarDisorder` was 13746000 — not a valid SCTID (the check digit fails), so CMS2's
+   bipolar exclusion never fired and excluded patients stayed in the denominator. `colonoscopy` was
+   44441009, which is *Flexible fiberoptic sigmoidoscopy*, filed under the Colonoscopy value set with a
+   "Colonoscopy" display: a real colonoscopy 5-9 years old read as OVERDUE, and the synthetic case
+   passed only because 3 years is inside both windows. The guard that should have caught both
+   (`corpus-membership.test.ts`) self-skips without the gitignored sidecar and had never run on them.
+5. **CMS165 has a flip blocker that no amount of verification would have surfaced.** The executor runs
+   `trustMetaProfile: false` — deliberately; trusting profiles empties the population for the two
+   measures actually routed. CMS165 is the only pilot measure whose decisive retrieve identifies blood
+   pressure by PROFILE ALONE, with no code filter, so with profiles ignored "a blood pressure" becomes
+   "any final Observation": add one later HbA1c to a compliant patient and the numerator flips to
+   false; add a same-day one and the engine throws. Every real patient has other labs. The synthetic
+   fixture emits exactly one Observation per subject — the single shape that hides it. Left UNFIXED
+   deliberately (the flag is load-bearing for cms122/cms125) and recorded as a hard blocker in ADR-072,
+   MEASURES.md and the DEPLOY flip runbook.
+
+**Four findings worth keeping, and one of them is a correction to the other three.****Four findings worth keeping, and one of them is a correction to the other three.**
+
+1. **A stale sparse-checkout cone invented a blocker that did not exist, and I believed it for most of
+   a day.** `.official-content` is a SPARSE clone whose checkout cone is set once, at first fetch. This
+   machine's cone predated cms130 and cms165 being added to `fetch-official-cases.ps1`, so both served
+   no bundle and no test deck — while `git log` showed the same pinned commit, because it was the same
+   pinned commit. That is indistinguishable from upstream not shipping them, and I wrote it up as
+   exactly that: into four documents, an ADR consequence, a commit message and a memory.
+
+   It was wrong, and the evidence contradicting it was already committed in this repo.
+   `docs/evidence/OFFICIAL_TESTCASE_REPORT_2026-07.md` records cms130 at 64/64 and cms165 at 68/68.
+   Re-running the fetch script returns **8 measures / 410 cases**. All eight decks are now vendored,
+   and a local full run reproduces every one against the runtime: CMS122 55/55, CMS125 66/66, CMS2
+   36/36, CMS68 19/19, CMS951 55/55, CMS130 64/64, CMS165 68/68 — zero unexpected mismatches, zero
+   errors. cms130 and cms165 are gated; what they still need is the MM-1c sweep, not a deck.
+
+   The lesson is narrower than "check your assumptions": a local absence that contradicts committed
+   evidence is a stale checkout until proven otherwise, and the committed evidence is the thing to
+   check FIRST. Two related traps came with it — `git sparse-checkout list` shows the real cone, and on
+   this host `ln -s` under Git Bash silently makes a real COPY rather than a symlink, so a worktree can
+   keep serving stale content after the main checkout is refreshed (use a PowerShell junction).
+
+2. **A run that could not be evidence was overwriting the evidence.** Found by running the full gate
+   locally: it rewrote CMS138's row from 47/47 to 0/47 and left it staged. `writeReport` ran BEFORE
+   `exitCodeForRuns` was computed and ignored terminology entirely, so both a FAILING run and a run
+   that had fallen back to upstream value sets would replace the committed report with numbers that
+   describe neither the runtime nor a green gate. Writing now also requires exit 0 and the runtime's
+   own terminology. The suite had never asserted the report is written at all — only that a partial run
+   does not write it — so a guard blocking every write would have passed; three tests now pin the
+   positive case and both negatives.
+3. **The vendored-deck hash was platform-dependent.** `tests.sha256` is over raw bytes, and with
    `core.autocrlf=true` and no `.gitattributes` the same deck could hash differently on Windows and on
    CI. A `.gitattributes` now marks the decks `-text`. Git was not in fact normalising them today, but
    that was inference, and the failure mode is a red CI nobody can reproduce locally.
-3. **CI's reproducibility check could not see a new deck file.** `git diff --exit-code` ignores
+4. **CI's reproducibility check could not see a new deck file.** `git diff --exit-code` ignores
    untracked files, so a regenerated-but-untracked case file would have passed the gate silently — the
    one thing it exists to prevent. It is now `git status --porcelain`, and the five vendor commands pass
    `--with-tests` so the regenerated manifests still carry their `tests` block.

@@ -28,7 +28,7 @@
  */
 import type { EmployeeProfile } from "./employee-catalog.ts";
 import type { TargetOutcome } from "./exam-config.ts";
-import type { FhirBundle } from "./fhir-bundle-builder.ts";
+import { dateInMeasurementPeriod, type FhirBundle } from "./fhir-bundle-builder.ts";
 import { ECQM_CANONICAL_CODES } from "../cql/bundled-ecqm-expansions.ts";
 
 const CPT = "http://www.ama-assn.org/go/cpt";
@@ -83,7 +83,10 @@ function patient(e: EmployeeProfile, birthDate: string): unknown {
 }
 
 function officeVisit(e: EmployeeProfile, evaluationDate: string, daysAgo: number): unknown {
-  const day = dateMinusDays(evaluationDate, daysAgo).slice(0, 10);
+  // Clamped into the measurement period: without an in-period qualifying encounter the artifact puts
+  // NOBODY in the initial population, and the run reports "nobody eligible" rather than an error
+  // (ADR-072 made the period the calendar year; see dateInMeasurementPeriod).
+  const day = dateInMeasurementPeriod(evaluationDate, daysAgo).slice(0, 10);
   return {
     resourceType: "Encounter",
     meta: { profile: [`${QICORE}qicore-encounter`] },
@@ -136,7 +139,7 @@ function condition(
 function cms2(e: EmployeeProfile, target: TargetOutcome, evaluationDate: string): FhirBundle {
   const birthDate = ecqmBirthDate(evaluationDate, 40);
   const visit = officeVisit(e, evaluationDate, 60);
-  const visitDay = dateMinusDays(evaluationDate, 60).slice(0, 10);
+  const visitDay = dateInMeasurementPeriod(evaluationDate, 60).slice(0, 10);
   const entries: Array<{ resource: unknown }> = [{ resource: patient(e, birthDate) }, { resource: visit }];
 
   if (target === "EXCLUDED") {
@@ -173,7 +176,7 @@ function cms2(e: EmployeeProfile, target: TargetOutcome, evaluationDate: string)
 
 /**
  * Birth date → age 60 at period end: inside the 46–75 band with margin on both sides. The COMPLIANT
- * shape uses colonoscopy, dated 3 y before the evaluation date — inside the artifact's 10-year
+ * shape uses colonoscopy, dated 3 y before the evaluation date — inside the artifact's NINE-year
  * colonoscopy window. The shape only uses one of the five screening modalities (the plan's
  * modality-boundary tests are out of scope for the base shape; see spec §4.1).
  */
@@ -250,7 +253,7 @@ function cms165(e: EmployeeProfile, target: TargetOutcome, evaluationDate: strin
         ],
         subject: { reference: `Patient/${e.externalId}` },
         code: { coding: [ECQM_CANONICAL_CODES.bpPanel] },
-        effectiveDateTime: dateMinusDays(evaluationDate, 60),
+        effectiveDateTime: dateInMeasurementPeriod(evaluationDate, 60),
         component: [
           {
             code: { coding: [ECQM_CANONICAL_CODES.bpSystolic] },

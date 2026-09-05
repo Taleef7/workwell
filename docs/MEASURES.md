@@ -21,9 +21,18 @@ Runnable (full CQL): **14** — 4 OSHA + 5 HEDIS + 3 immunization panel + 2 CMS 
 have no authored CQL and no synthetic binding: they are runnable only where the deployment names them in
 `WORKWELL_OFFICIAL_MEASURES`, and `classifyRunnable` reports them as `official-pending` everywhere else.
 Today that is **nowhere** — the Maui profile lists all five pilot measures, but only `cms122` and `cms125`
-are routed, so CMS2, CMS130 and CMS165 are Active, gated and still not executing. CMS130 and CMS165 are
-furthest away: neither has a MADiE deck in the pinned content checkout and neither resolves its terminology
-locally, so `pnpm flip-gate` refuses both (locked decision §4A.5).
+are routed, so CMS2, CMS130 and CMS165 are Active, gated and still not executing. CMS130 and CMS165
+both pass their full MADiE deck against the runtime (64/64 and 68/68, zero errors), so what remains is the
+MM-1c second-engine sweep and a `flip-gate` run where the terminology sidecar resolves — without it every
+value set expands empty and the gate reports a zero initial population (locked decision §4A.5).
+
+> **CMS165 is blocked on more than verification.** The official executor ignores `meta.profile`
+> (`trustMetaProfile: false`, deliberate — trusting it empties the population for cms122/cms125), and
+> CMS165 is the only pilot measure whose decisive retrieve identifies blood pressure by PROFILE alone
+> with no code filter. With the profile ignored it matches any final Observation, so a patient with any
+> other lab reads as non-compliant, and a same-day non-BP Observation throws. Verified by execution
+> against the vendored artifact on 2026-09-05. Do not route cms165 until this is fixed; see ADR-072's
+> consequences.
 
 **An officially routed measure is scored over the calendar year** containing the evaluation date, not a
 rolling 365-day window (ADR-072). The vendored artifacts are a **2026 vintage** and the pilot year is 2027,

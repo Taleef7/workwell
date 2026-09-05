@@ -65,8 +65,8 @@
   },
   "sha256": "sha256:ae317d0db4136e322900ff139982621d547f411d5b0e14fa75ad8fea9a53645e",
   "tests": {
-    "count": 357,
+    "count": 360,
     "sourcePath": "input/tests/measure/CMS165FHIRControllingHighBP",
-    "sha256": "sha256:2b9c10761b6591cfa60a2314a7aef18e94477c36b7a6671dd843bed0aa4471e2"
+    "sha256": "sha256:193aa0d0af720c5df51dd619de1aaab21b69ceecb555203c80a7def82bfc3cd1"
   }
 }

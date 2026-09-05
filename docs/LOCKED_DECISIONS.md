@@ -73,10 +73,11 @@ document's §4 verification set stays the bar per §4 decision 2 above).
    > **SINCE (2026-09-05, ADR-072):** the runnable rule now admits an official-only measure, so the
    > "official-only onboarding" half of this decision is BUILT — cms2, cms130 and cms165 are Active and
    > `classifyRunnable` will run any of them that a deployment routes. What is NOT built is the routing:
-   > all three remain `official-pending`, and cms130/cms165 additionally have **no MADiE deck in the
-   > pinned content checkout and no locally resolvable terminology**, so `pnpm flip-gate` refuses both.
-   > Decision 5 below (no known-unverified measure routed to the pilot) is therefore unchanged and
-   > currently binding on exactly those two.
+   > all three remain `official-pending`. cms2, cms130 and cms165 each pass their full MADiE deck against
+   > the runtime (36/36, 64/64, 68/68 — zero errors), so ADR-047's precondition is met for all three; what
+   > is still outstanding is the MM-1c second-engine sweep and a `flip-gate` run in a context that resolves
+   > the terminology sidecar. Decision 5 below (no known-unverified measure routed to the pilot) is
+   > unchanged and is what keeps them unrouted until that sweep is done.
 3. **Cards resolve, not alert** — order suggestions (gated on APPROVED terminology mappings; **an order
    is a proposal and never changes compliance** — the gap closes only when the qualifying result data
    arrives and CQL re-evaluates) and exception documentation (structured data the measure logic reads

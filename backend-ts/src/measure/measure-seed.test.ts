@@ -889,6 +889,15 @@ test("seedMeasureStore promotes untouched Draft cms2/cms130/cms165 rows to Activ
     const promoted = await store.getLatest(id);
     assert.ok(promoted !== null);
     assert.equal(promoted!.status, "Active", `${id} is promoted to Active`);
+    // The CONTENT must come forward with the status. A status-only promotion leaves a live measure
+    // still advertising "CQL authoring pending" and NOT_COMPILED on every already-seeded deployment,
+    // which is what a pilot user would read on /measures/cms2. The fresh-store route tests cannot see
+    // this — they never take the promotion path at all.
+    const catalog = MEASURE_CATALOG.find((m) => m.id === id)!;
+    assert.equal(promoted!.compileStatus, catalog.compileStatus, `${id} carries the catalog compileStatus`);
+    assert.equal(promoted!.spec.description, catalog.spec.description, `${id} carries the catalog description`);
+    assert.doesNotMatch(promoted!.spec.description, /CQL authoring pending/, `${id} still advertises the placeholder spec`);
+    assert.ok(catalog.spec.exclusions.length > 0 && promoted!.spec.exclusions.length > 0, `${id} carries exclusions`);
     const activation = await db
       .prepare("SELECT event_type FROM audit_events WHERE event_type = 'MEASURE_ACTIVATED' AND entity_id = ?")
       .bind(promoted!.versionId)

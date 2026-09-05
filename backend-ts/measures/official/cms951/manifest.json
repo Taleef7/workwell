@@ -47,8 +47,8 @@
   },
   "sha256": "sha256:a005f4527d70fdd7495b9d75ab03b5ab43f1146fcdad81cbfba7d81b7caf1dae",
   "tests": {
-    "count": 296,
+    "count": 299,
     "sourcePath": "input/tests/measure/CMS951FHIRKidneyHealthEval",
-    "sha256": "sha256:1f01d9bd76abbfce926b4f2e0c8a69262f0d94fe1262f5109d9ef963f9012c4e"
+    "sha256": "sha256:fff89ba547370825785bc203445e4e888c87c6932ae2782cf36a369387ee8a80"
   }
 }

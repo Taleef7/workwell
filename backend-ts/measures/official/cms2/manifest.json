@@ -48,8 +48,8 @@
   },
   "sha256": "sha256:4d69acfa4b5bc6d7010ad89279b9d61be77470cc5e37f38f2357bae176e2f1ec",
   "tests": {
-    "count": 253,
+    "count": 256,
     "sourcePath": "input/tests/measure/CMS2FHIRPCSDepScreenAndFollowUp",
-    "sha256": "sha256:c860f21de818563ef01b06e894aba4fed492978c87ad8b9d8afe731526f97fff"
+    "sha256": "sha256:24c234ab97389da615fc8b07ba1222879c26d9516336007ac092e993a152b1bf"
   }
 }

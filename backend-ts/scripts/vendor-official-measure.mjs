@@ -197,31 +197,39 @@ function vendorTests(args) {
 
   if (!existsSync(upstreamTestsDir)) throw new Error(`no upstream test deck at ${upstreamTestsDir}`);
 
+  // The WHOLE deck, not just the case directories. `.madie` (or README.txt) sits at the deck root and
+  // carries each case's patientId/title/series — `loadOfficialMeasureCases` cannot read a deck without
+  // it, and a deck whose metadata was swapped would name every case wrongly while every population
+  // vector still matched. Copying the case dirs alone produced a vendored deck the loader could not
+  // open at all, which surfaced only once the loader actually started reading the vendored path.
   const hash = createHash("sha256");
   let count = 0;
-  for (const entry of readdirSync(upstreamTestsDir, { withFileTypes: true }).sort((left, right) => left.name.localeCompare(right.name))) {
-    if (!entry.isDirectory()) continue;
-    const caseSource = join(upstreamTestsDir, entry.name);
-    const caseDest = join(outDir, "tests", entry.name);
-    mkdirSync(caseDest, { recursive: true });
-    for (const file of readdirSync(caseSource, { withFileTypes: true }).sort((left, right) => left.name.localeCompare(right.name))) {
-      if (!file.isFile()) continue;
-      const sourcePath = join(caseSource, file.name);
-      const bytes = readFileSync(sourcePath);
-      if (file.name.toLowerCase().endsWith(".json")) {
+  const walk = (sourceDir, destDir, prefix) => {
+    mkdirSync(destDir, { recursive: true });
+    for (const entry of readdirSync(sourceDir, { withFileTypes: true }).sort((left, right) => left.name.localeCompare(right.name))) {
+      const from = join(sourceDir, entry.name);
+      const relativePath = prefix ? `${prefix}/${entry.name}` : entry.name;
+      if (entry.isDirectory()) {
+        walk(from, join(destDir, entry.name), relativePath);
+        continue;
+      }
+      if (!entry.isFile()) continue;
+      const bytes = readFileSync(from);
+      if (entry.name.toLowerCase().endsWith(".json")) {
         try {
           JSON.parse(bytes.toString("utf8"));
         } catch (error) {
-          throw new Error(`malformed JSON in ${sourcePath}: ${error.message}`);
+          throw new Error(`malformed JSON in ${from}: ${error.message}`);
         }
       }
-      const relativePath = `${entry.name}/${file.name}`;
-      hash.update(`${relativePath}\n`);
+      hash.update(`${relativePath}
+`);
       hash.update(bytes);
-      writeFileSync(join(caseDest, file.name), bytes);
+      writeFileSync(join(destDir, entry.name), bytes);
       count += 1;
     }
-  }
+  };
+  walk(upstreamTestsDir, join(outDir, "tests"), "");
 
   let manifest = {};
   if (existsSync(manifestPath)) manifest = JSON.parse(readFileSync(manifestPath, "utf8"));

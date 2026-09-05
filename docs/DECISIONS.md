@@ -86,6 +86,23 @@ same year.
   from APP Plus for PY2027, so confirmation precedes the multi-rate spike, which precedes any promise.
   ADR-047's MADiE-gate precondition applies to it unchanged.
 
+**Two terminology corrections this work surfaced (2026-09-05 pre-PR audit).** Neither is caused by
+ADR-072; both were pre-existing and would have shipped to the pilot with it.
+
+- `bipolarDisorder` was SNOMED **13746000**, which is not a valid SCTID at all — its Verhoeff check
+  digit fails and `tx.fhir.org $lookup` returns not-found in both the international and US editions.
+  A code that exists in no code system is a member of no expansion, so CMS2's bipolar DENOMINATOR
+  EXCLUSION never fired: every excluded patient sat in the denominator. Corrected to **13746004**.
+- `colonoscopy` was SNOMED **44441009**, which resolves to *Flexible fiberoptic sigmoidoscopy* — the
+  wrong procedure, registered under the Colonoscopy value set, carrying the display "Colonoscopy".
+  CMS130 gives colonoscopy a nine-year lookback and sigmoidoscopy four, so a real colonoscopy between
+  five and nine years old read as OVERDUE. Corrected to **73761001**. Two fabricated LOINC displays on
+  the depression-screening codes were replaced with the real ones at the same time.
+
+Both were caught by reading the artifacts' own ELM and checking every code against an external
+terminology server, not by any test — `corpus-membership.test.ts`, the guard that exists precisely for
+this, self-skips without the gitignored terminology sidecar and so had never run against them. Making
+that test unable to skip in a credentialed CI run is the follow-up this most needs.
 **Consequences.**
 
 - The **default profile is unchanged**: its runnable set is still the authored registry, and
@@ -94,9 +111,28 @@ same year.
   population counts move accordingly; this is a correction, not a regression.
 - A **re-vendor is now detectable rather than remembered** — every run of a 2026-vintage artifact over a
   2027 period logs the warning until MM-1d lands.
-- `cms130` and `cms165` remain **not routable**: neither has a MADiE deck in the pinned content checkout
-  and no terminology sidecar resolves locally, so the flip gate refuses both. That refusal is the rule
-  working, not a defect.
+- **CMS165 has a HARD flip blocker that is not terminology and not a sweep** (found in the 2026-09-05
+  pre-PR audit). The official executor runs with `trustMetaProfile: false` — deliberately, because our
+  bundles stamp different QI-Core profiles than the artifacts name, and turning it on empties the
+  population for cms122/cms125 (see the rationale at the call site in `official-executor-adapter.ts`).
+  CMS165 is the only one of the five whose clinically decisive retrieve is `[Observation:
+  us-core-blood-pressure]` — identity by PROFILE ALONE, no code filter — and `Status.isObservationBP`
+  filters only on `status`. With the profile ignored, "a blood pressure" becomes "any final
+  Observation": `Most Recent Blood Pressure Day` resolves to the most recent Observation of ANY kind,
+  the systolic component is then null, and the numerator is silently false. Executed against the
+  vendored artifact, adding one later HbA1c to an otherwise-compliant patient flips NUMER true→false,
+  and a same-day non-BP Observation makes cql-execution throw (forcing MISSING_DATA). Every real
+  patient has other labs, so routing CMS165 as configured would report a BP-control rate near zero.
+  The synthetic fixture emits exactly one Observation per subject, which is the single shape that
+  hides this. **CMS165 must not be routed until this is resolved** — by stamping
+  `us-core-blood-pressure` on real BP Observations and trusting profiles for official routing, by a
+  WorkWell-side pre-filter, or by accepting the measure is not routable. Tracked as the first item of
+  MM-1c for cms165.
+- `cms130` and `cms165` are **gated but not yet routed**. Both pass their full MADiE deck against the
+  runtime — 64/64 and 68/68, zero unexpected mismatches, zero errors — so ADR-047's precondition is met.
+  What remains before a flip is the second-engine sweep (MM-1c) and a `flip-gate` run in a context that
+  resolves the terminology sidecar; on a machine without it every value set expands empty and the gate
+  correctly reports a zero initial population. That refusal is the rule working, not a defect.
 ## ADR-071: official-only measures take the vendored manifest's id — and a legacy catalog row is deprecated, never rewritten
 
 **Status:** Accepted (2026-09-01). Milestone MM-1b slice 1 (`docs/ROADMAP_2026-08-30.md` §5).
