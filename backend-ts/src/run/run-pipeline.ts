@@ -52,6 +52,10 @@ import {
 import { httpWebChartClient, type WebChartClient } from "../engine/ingress/webchart/webchart-client.ts";
 import { profileForId, replaceLiveDirectory } from "../engine/ingress/webchart/live-directory.ts";
 import { bucketPeriodForMeasure } from "./compliance-period.ts";
+import { runMeasurementPeriod } from "./run-period.ts";
+import { loadOfficialArtifact } from "../wiring/official-artifacts.ts";
+import { isVendoredOfficialMeasure } from "../config/official-measure-ids.ts";
+import { effectivePeriodWarning } from "../wiring/official-executor-adapter.ts";
 import type { QualitySnapshotStore } from "../stores/quality-snapshot-store.ts";
 import type { EvalStateStore } from "../stores/eval-state-store.ts";
 import type { ValueSetStore } from "../stores/value-set-store.ts";
@@ -323,6 +327,11 @@ export async function planManualRun(deps: RunPipelineDeps, req: ManualRunRequest
     );
   }
   const { items, measureIds, scopeId, scopeLabel } = resolveScope(req, employees, bundleSource);
+  // Resolve seeded buckets while the seam's requested evalDate is still valid, so finishManualRun
+  // always builds bundles from the same date the run persisted.
+  for (const item of items) {
+    if (item.target === undefined) item.target = bundleSource.targetFor(employees, item.measureId, item.employee.externalId) ?? "MISSING_DATA";
+  }
   const cfg = webChartConfigured ? webChartConfigFromEnv(webChartEnv) : undefined;
   const livePopulation = cfg && (req.scopeType === "ALL_PROGRAMS" || req.scopeType === "MEASURE")
     ? {
@@ -332,8 +341,7 @@ export async function planManualRun(deps: RunPipelineDeps, req: ManualRunRequest
       }
     : undefined;
 
-  const periodEnd = `${evalDate}T00:00:00.000Z`;
-  const periodStart = new Date(new Date(periodEnd).getTime() - 365 * 86400000).toISOString();
+  const period = runMeasurementPeriod(measureIds, evalDate);
   const run = await deps.runStore.createRun({
     scopeType: req.scopeType,
     scopeId: scopeId ?? undefined,
@@ -341,8 +349,8 @@ export async function planManualRun(deps: RunPipelineDeps, req: ManualRunRequest
     // Persist the resolved evaluationDate so a rerun reuses the same evaluation period
     // (and the case upsert stays idempotent rather than opening a fresh-period case).
     requestedScope: pruneUndefined({ measureId: req.measureId, employeeExternalId: req.employeeExternalId, site: req.site, evaluationDate: evalDate }),
-    measurementPeriodStart: periodStart,
-    measurementPeriodEnd: periodEnd,
+    measurementPeriodStart: period.start,
+    measurementPeriodEnd: period.end,
   });
   await deps.runStore.markRunning(run.id);
   await deps.runStore.appendLog(run.id, "INFO", `${scopeLabel} — evaluating ${items.length} subject(s)`);
@@ -487,8 +495,22 @@ async function prepareLivePopulation(
 
 /** Evaluate the planned work items, persist outcomes + cases, finalize the run — the slow half. */
 export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun): Promise<ManualRunResponse> {
-  const { run, measureIds, scopeLabel, scopeType, evalDate } = planned;
+  const runId = planned.run.id;
+  const { measureIds, scopeLabel, scopeType, evalDate } = planned;
   const bundleSource = deps.bundleSource ?? compositeBundleSource(process.env as Record<string, unknown>);
+
+  // ADR-072: surface a stale vendored effectivePeriod ON THE RUN, not just in the console. Only
+  // officially-routed measures have an artifact to warn about; authored measures keep no such contract.
+  for (const measureId of new Set(measureIds)) {
+    if (!deps.engine.logicVersionFor?.(measureId)?.startsWith(OFFICIAL_LOGIC_VERSION_PREFIX)) continue;
+    if (!isVendoredOfficialMeasure(measureId)) continue;
+    const artifact = loadOfficialArtifact(measureId);
+    if (!artifact) continue;
+    const warning = effectivePeriodWarning(artifact, runMeasurementPeriod([measureId], evalDate));
+    if (warning) {
+      await deps.runStore.appendLog(runId, "WARN", warning).catch(() => {});
+    }
+  }
   let items = planned.items;
   let liveRoster: EnrollmentRoster | undefined;
   let liveTenant: LiveTenantMetadata | undefined;
@@ -498,7 +520,7 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
     liveRoster = prepared.roster;
     liveTenant = prepared.metadata;
     await deps.runStore.appendLog(
-      run.id,
+      runId,
       "INFO",
       `WebChart ${liveTenant.host}: fetched ${liveTenant.fetchedCount} subject(s), ${liveTenant.degradedCount} degraded, ${liveTenant.durationMs}ms`,
     );
@@ -631,7 +653,7 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
         // then silently ignored, disabling the very refusal this exists for (review #4).
         batchFailure.set(measureId, err instanceof Error ? err : new Error(String(err)));
         await deps.runStore
-          .appendLog(run.id, "ERROR", `${measureId}: official batch evaluation failed — ${String((err as Error)?.message ?? err)}`)
+          .appendLog(runId, "ERROR", `${measureId}: official batch evaluation failed — ${String((err as Error)?.message ?? err)}`)
           .catch(() => {});
       }
       // OUTSIDE the try, and best-effort. Inside it, a transient `run_logs` write failure would be
@@ -641,7 +663,7 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
       // this file are best-effort.
       if (batched) {
         await deps.runStore
-          .appendLog(run.id, "INFO", `${measureId}: ${forMeasure.length} subject(s) evaluated in one official batch`)
+          .appendLog(runId, "INFO", `${measureId}: ${forMeasure.length} subject(s) evaluated in one official batch`)
           .catch(() => {});
       }
     }
@@ -668,7 +690,7 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
             // evaluation, but must not be silent — an under-performing incremental run would otherwise be
             // invisible (review #2). Best-effort WARN, mirroring the commit path below.
             void deps.runStore
-              .appendLog(run.id, "WARN", `eval_state plan failed (${item.employee.externalId}/${item.measureId}) — full re-eval: ${String((err as Error)?.message ?? err)}`)
+              .appendLog(runId, "WARN", `eval_state plan failed (${item.employee.externalId}/${item.measureId}) — full re-eval: ${String((err as Error)?.message ?? err)}`)
               .catch(() => {});
             return null;
           })
@@ -720,7 +742,7 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
       }
     }
     const recorded = await deps.outcomeStore.recordOutcome({
-      runId: run.id,
+      runId: runId,
       subjectId: item.employee.externalId,
       measureId: item.measureId,
       evaluationPeriod: period,
@@ -736,7 +758,7 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
         .commit(item.measureId, item.employee.externalId, period, status, recorded.id, evidence, plan)
         .catch((err) =>
           deps.runStore
-            .appendLog(run.id, "WARN", `eval_state commit failed (${item.employee.externalId}/${item.measureId}): ${String((err as Error)?.message ?? err)}`)
+            .appendLog(runId, "WARN", `eval_state commit failed (${item.employee.externalId}/${item.measureId}): ${String((err as Error)?.message ?? err)}`)
             .catch(() => {}),
         );
     }
@@ -764,7 +786,7 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
     const isLiveWebChartSubject = item.employee.externalId.startsWith("wc|");
     if (deps.caseStore && (closeOnly || (!isLiveWebChartSubject && isApplicable(item.employee, item.measureId, deps.segments ?? [])))) {
       const upserted = await deps.caseStore.upsertFromOutcome({
-        runId: run.id,
+        runId: runId,
         subjectId: item.employee.externalId,
         measureId: item.measureId,
         evaluationPeriod: period,
@@ -792,7 +814,7 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
               entityType: "case",
               entityId: upserted.id,
               actor: auditActor,
-              refRunId: run.id,
+              refRunId: runId,
               refCaseId: upserted.id,
               refMeasureVersionId: item.measureId,
               payload: {
@@ -802,13 +824,13 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
                 subjectId: item.employee.externalId,
                 measureId: item.measureId,
                 evaluationPeriod: period,
-                runId: run.id,
+                runId: runId,
               },
             })
             .catch((err) => {
               void deps.runStore
                 .appendLog(
-                  run.id,
+                  runId,
                   "WARN",
                   `Case audit (${eventType} ${upserted.id}) failed — ledger gap: ${String((err as Error)?.message ?? err)}`,
                 )
@@ -874,7 +896,7 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
     // author an outcome or abort an otherwise-complete run.
     await deps.runStore
       .appendLog(
-        run.id,
+        runId,
         "WARN",
         `${measureId}: not one of ${ippByMeasure.get(measureId)!.length} subjects entered the official ` +
           `initial population. Either this cohort genuinely has nobody eligible, or the data lacks a ` +
@@ -925,7 +947,7 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
             entityType: "case",
             entityId: c.id,
             actor: auditActor,
-            refRunId: run.id,
+            refRunId: runId,
             refCaseId: c.id,
             refMeasureVersionId: measureId,
             payload: {
@@ -934,12 +956,12 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
               currentPeriod,
               subjectId: c.employeeId,
               measureId,
-              runId: run.id,
+              runId: runId,
             },
           })
           .catch((err) => {
             void deps.runStore
-              .appendLog(run.id, "WARN", `Rollover close audit (CASE_RESOLVED ${c.id}) failed — ledger gap: ${String((err as Error)?.message ?? err)}`)
+              .appendLog(runId, "WARN", `Rollover close audit (CASE_RESOLVED ${c.id}) failed — ledger gap: ${String((err as Error)?.message ?? err)}`)
               .catch(() => {});
           });
       }
@@ -947,7 +969,7 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
   }
 
   const terminalStatus = failures > 0 ? "PARTIAL_FAILURE" : "COMPLETED";
-  await deps.runStore.finalizeRun(run.id, terminalStatus);
+  await deps.runStore.finalizeRun(runId, terminalStatus);
   // Audit the run's terminal state (Fable H1). The highest-volume state change in the system now
   // leaves a ledger record; run audit packets and the run timeline were previously near-empty.
   if (deps.events) {
@@ -955,9 +977,9 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
       .appendAudit({
         eventType: "RUN_COMPLETED",
         entityType: "run",
-        entityId: run.id,
+        entityId: runId,
         actor: auditActor,
-        refRunId: run.id,
+        refRunId: runId,
         refCaseId: null,
         refMeasureVersionId: null,
         payload: {
@@ -984,14 +1006,14 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
   // non-population scopes (EMPLOYEE/SITE/CASE) and seed:scale runs internally; the scale tenant folds
   // in via the bounded GROUP-BY, never the 120k per-subject rows.
   if (deps.qualitySnapshots && deps.events) {
-    await materializeRun(run.id, {
+    await materializeRun(runId, {
       runStore: deps.runStore,
       outcomeStore: deps.outcomeStore,
       qualitySnapshots: deps.qualitySnapshots,
       events: deps.events,
     }).catch((err) => {
       void deps.runStore
-        .appendLog(run.id, "WARN", `Quality snapshot materialization failed: ${String((err as Error)?.message ?? err)}`)
+        .appendLog(runId, "WARN", `Quality snapshot materialization failed: ${String((err as Error)?.message ?? err)}`)
         .catch(() => {});
     });
   }
@@ -1021,7 +1043,7 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
       : "");
   const alert = alertForTerminalRun({
     status: terminalStatus,
-    runId: run.id,
+    runId: runId,
     scopeType,
     scopeLabel,
     totalEvaluated: items.length,
@@ -1032,7 +1054,7 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
     await emitAlert(deps.alertChannels ?? resolveAlertChannels({}), alert);
   }
   return {
-    runId: run.id,
+    runId: runId,
     scopeType,
     scopeLabel,
     status: terminalStatus,

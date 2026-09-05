@@ -122,11 +122,12 @@ test("literal diff: fqm-execution options disable HTML/coverage/RAV output (Code
   assert.equal(capturedOptions!.calculateSDEs, false);
   // Derived from the SHARED helper the runtime executor uses, never a literal: the point of PR-8d is
   // that the diff and the runtime cannot disagree about the measurement period, and a hardcoded date
-  // here would let them drift apart while the test still passed. It used to read the calendar year.
+  // here would let them drift apart while the test still passed. ADR-072 moves the official helper
+  // from the rolling registry window to the calendar year containing the evaluation date.
   const period = officialMeasurementPeriod("cms122", "2026-06-30");
   assert.equal(capturedOptions!.measurementPeriodStart, period.start);
   assert.equal(capturedOptions!.measurementPeriodEnd, period.end);
-  assert.equal(period.start, "2025-06-30", "the registry window is rolling 12 months, not the calendar year");
+  assert.equal(period.start, "2026-01-01", "the official measurement period is the calendar year containing the evaluation date");
   assert.equal(capturedOptions!.disableHTMLGeneration, undefined, "disableHTMLGeneration is not a real fqm-execution option — must not be relied on");
 });
 

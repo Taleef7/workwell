@@ -167,6 +167,8 @@ export interface OfficialExecutorDeps {
   calculate?: FqmCalculate;
   /** Injectable for tests; defaults to the vendored-artifact loader. */
   loadArtifact?: (catalogId: string) => OfficialArtifact | null;
+  /** Routed, not swallowed: the run pipeline appends each warning as a WARN run-log line. */
+  onWarning?: (message: string) => void;
 }
 
 /**
@@ -248,25 +250,12 @@ export const OFFICIAL_DEFINE_PREFIX = "official:";
 export function populationExpressionResults(
   populationResults: readonly { populationType: string; result: boolean }[],
 ): ExpressionResult[] {
+
   return populationResults.map((p) => ({
     define: `${OFFICIAL_DEFINE_PREFIX}${p.populationType}`,
     result: p.result,
   }));
 }
-
-/**
- * `YYYY-MM-DD` minus n months. Character-for-character the authored engine's helper
- * (`cql-execution-engine.ts`), overflow behaviour included: 2024-02-29 minus 12 months is 2023-03-01,
- * not 2023-02-28. A "better" clamping version was the first cut, and it silently made the two paths
- * evaluate different measurement periods on one day a year — which PR-8's shadow diff would then report
- * as a logic divergence. Matching a quirk beats improving on it when the whole point is comparability.
- */
-function subtractMonths(isoDate: string, months: number): string {
-  const d = new Date(`${isoDate}T00:00:00Z`);
-  d.setUTCMonth(d.getUTCMonth() - months);
-  return d.toISOString().slice(0, 10);
-}
-
 /**
  * The measurement period an official artifact is executed over — **one definition, shared with the
  * shadow diff**, for the same reason `qicore-preparation.ts` is shared: a diff that runs a different
@@ -279,24 +268,37 @@ function subtractMonths(isoDate: string, months: number): string {
  * were being compared over periods sharing barely half their days, and every resulting difference would
  * have been read as a LOGIC divergence.
  *
- * The window itself is deliberately the registry's, matching the authored path, so the shadow isolates
- * logic rather than confounding it with a period change. Whether production should instead use the
- * calendar measurement period an eCQM is defined on is a real question, still open for PR-9 — and now
- * it is one edit rather than two that could drift apart.
+ * ADR-072 resolves that question: an eCQM is defined on a calendar measurement period, so the official
+ * path now uses the calendar year containing the evaluation date — not the authored path's rolling
+ * registry window, and not the artifact's own `effectivePeriod` (a re-vendor vintage, warned about
+ * separately by `effectivePeriodWarning` below).
  */
 export function officialMeasurementPeriod(
   measureId: string,
   evaluationDate: string,
 ): { start: string; end: string } {
-  // The 12 is a DEFAULT, not a decision, for a measure absent from the registry — which every measure
-  // onboarded by ADR-047 is (they have no authored counterpart). It is correct today: cms122/cms125 are
-  // registered at 12, and every vendored artifact declares a one-year effectivePeriod. But the next
-  // measure with a non-annual window would inherit 12 silently, so this is provenance worth stating
-  // rather than a value worth trusting (review, #358).
-  const periodMonths = MEASURES[measureId]?.periodMonths ?? 12;
-  return { start: subtractMonths(evaluationDate, periodMonths), end: normalizePeriodEnd(evaluationDate) };
+  // ADR-072: the calendar year containing the evaluation date. The measureId parameter is kept in the
+  // signature because the shadow diff and every caller already call it measure-aware — and a future
+  // per-measure period override should not require a breaking change.
+  const year = evaluationDate.slice(0, 4);
+  return { start: `${year}-01-01`, end: normalizePeriodEnd(`${year}-12-31`) };
 }
 
+/**
+ * Whether the vendored artifact's declared effectivePeriod covers the period being run.
+ * Returns null when it does (or when the artifact declares no period — absent means unknown, not
+ * overdue). The message names both periods so an operator can act on the gap without reading source.
+ */
+export function effectivePeriodWarning(
+  artifact: OfficialArtifact,
+  period: { start: string; end: string },
+): string | null {
+  const ep = artifact.manifest.effectivePeriod;
+  if (!ep?.start || !ep?.end) return null;
+  const covered = ep.start.slice(0, 10) <= period.start.slice(0, 10) && ep.end.slice(0, 10) >= period.end.slice(0, 10);
+  return covered ? null :
+    `${artifact.manifest.catalogId}: the vendored artifact declares effectivePeriod ${ep.start}..${ep.end} but this run's measurement period is ${period.start.slice(0, 10)}..${period.end.slice(0, 10)} — the logic is a prior-year vintage (ROADMAP MM-1d); re-vendor when CMS publishes the FHIR content for this year.`;
+}
 /**
  * Expand every value set the artifact's ELM retrieves, refusing if any comes back empty.
  *
@@ -445,6 +447,12 @@ export function officialMeasureExecutor(deps: OfficialExecutorDeps): OfficialMea
     // SAME helper the shadow diff calls — see `officialMeasurementPeriod`.
     const period = officialMeasurementPeriod(measureId, asOf);
 
+    const warning = effectivePeriodWarning(artifact, period);
+    if (warning) {
+      if (deps.onWarning) deps.onWarning(warning);
+      else console.warn(`[workwell] ${warning}`);
+    }
+
     const valueSetCache = await cacheFor(artifact);
     // Prepared, and on a COPY. Official artifacts retrieve against QI-Core profiles, which are
     // stricter than the plain FHIR this repo emits — measured, an unprepared synthetic roster scores
@@ -544,6 +552,7 @@ export function officialMeasureExecutor(deps: OfficialExecutorDeps): OfficialMea
             engine: "fqm-execution",
             artifactSha256: artifact.manifest.sha256,
             populationResults: result.populationResults,
+            measurementPeriod: period,
           },
         },
       });

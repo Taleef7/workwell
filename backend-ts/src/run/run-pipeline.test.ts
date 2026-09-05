@@ -1466,3 +1466,12 @@ test("PR-8: a failed run-log write cannot turn a SUCCESSFUL batch into a failed 
   );
   assert.equal(res.status, "COMPLETED", "and the run is clean, not PARTIAL_FAILURE");
 });
+test("a run whose every measure is official-routed records the calendar-year period on the run row", async () => {
+  process.env.WORKWELL_OFFICIAL_MEASURES = "cms122";
+  try {
+    const planned = await planManualRun(deps, { scopeType: "MEASURE", measureId: "cms122", evaluationDate: "2027-06-30" });
+    const row = (await deps.runStore.getRun(planned.run.id))!;
+    assert.equal(row?.measurementPeriodStart, "2027-01-01T00:00:00.000Z");
+    assert.equal(row?.measurementPeriodEnd, "2027-12-31T23:59:59.999Z");
+  } finally { delete process.env.WORKWELL_OFFICIAL_MEASURES; }
+});
