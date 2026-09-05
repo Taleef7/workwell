@@ -5,6 +5,8 @@
  */
 
 import { DEPLOYMENT_PROFILE } from "../config/deployment-profile.ts";
+import { isOfficialRouted } from "../wiring/official-routing.ts";
+import { officialDisplayFor } from "../compliance/official-display.ts";
 
 export type CaseDisposition = "OPEN" | "EXCLUDED" | "RESOLVE";
 
@@ -115,6 +117,12 @@ const NEXT_ACTION_OVERRIDES: Record<string, Partial<Record<string, string>>> = {
 };
 
 export function nextActionFor(outcomeStatus: string, measureId: string): string {
+  // Task 8: official-routed measures read the official display table first — the authored
+  // overrides below would otherwise describe a periodic exam the official artifact did not run.
+  if (isOfficialRouted(measureId)) {
+    const official = officialDisplayFor(measureId, outcomeStatus);
+    if (official) return official.nextAction;
+  }
   const override = NEXT_ACTION_OVERRIDES[measureId]?.[outcomeStatus];
   if (override) return override;
   const label = NEXT_ACTION_LABELS[measureId] ?? "required screening";
