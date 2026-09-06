@@ -94,7 +94,11 @@ for (const measureId of ["cms122", "cms125", "cms2", "cms130", "cms165", "cms137
  * context that claims to be credentialed, at least one measure must actually have run.
  */
 test("in a credentialed context, these tests actually RAN", () => {
-  if (!process.env.WORKWELL_VSAC_API_KEY_VENDOR && !process.env.WORKWELL_REQUIRE_OFFICIAL_TERMINOLOGY) {
+  // `"true"` exactly, from the vendor step's own `credentialed` output — not merely "the variable is
+  // set". The workflow passes it through unconditionally, so it is `"false"` on a fork PR where GitHub
+  // withholds the secret, and a truthiness check would then demand results from a context that
+  // correctly has none.
+  if (process.env.WORKWELL_REQUIRE_OFFICIAL_TERMINOLOGY !== "true") {
     console.log("[corpus] no VSAC credential in this context — the population tests are expected to skip");
     return;
   }

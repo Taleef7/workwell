@@ -9,10 +9,14 @@
  * quality-over-time snapshot — an aggregate the compaction never touches (#E16). What is deleted, and
  * what is not, is the whole substance of the decision:
  *
- * - **KEPT: the newest row per (subject, measure), at any age.** A subject's current answer is never
- *   deleted, so no roster cell can go blank because that measure was last run before the window.
- * - **KEPT: every row an open case's `lastRunId` points at.** A case must be able to show the evidence
- *   it was opened on, however long it has been open.
+ * - **KEPT: the newest row per (subject, measure, EVALUATION PERIOD), at any age.** Per period, not
+ *   merely per measure: a calendar-year eCQM's whole 2027 evidence is superseded by the first 2028 run,
+ *   so a per-measure rule would delete a closed year months before anyone could be asked to justify its
+ *   rate. This also keeps a subject's current answer, so no roster cell goes blank because a measure
+ *   was last run before the window.
+ * - **KEPT: every row a CASE cites**, matched on (run, subject, measure) — open or closed. A closed
+ *   case's detail page still resolves its evidence through `last_run_id`, and a resolved case is
+ *   exactly the record re-read when a number is challenged.
  * - **KEPT: every run row and its counts.** A compacted run still reports what it found.
  * - **DELETED: everything else older than the cutoff** — the intermediate history of subjects whose
  *   answer has since been superseded.
@@ -71,17 +75,18 @@ export async function compactOutcomes(
   const cutoff = new Date(options.now - retentionDays * DAY_MS).toISOString();
 
   /**
-   * No pin list is read here any more, and that is the point.
+   * No pin list is read here, and that is deliberate — the store expresses the exclusion in SQL, per
+   * row, over every case regardless of status.
    *
-   * It used to read every OPEN/IN_PROGRESS case with `limit: 100000` and pass their `lastRunId`s to
-   * the store. Two defects, both silent. The limit truncates — at 20,000 patients across six measures
-   * there can be 120,000 open cases, `listCases` orders by `updated_at DESC`, and the rows dropped are
-   * the LEAST recently updated: precisely the long-open cases whose run is old enough to be deleted on
-   * the next line. The read succeeds, `kept` reports a plausible number, and the evidence goes.
-   * Pinning by RUN was also far too coarse: one case open past the window protected all 100,000 rows
-   * of its run.
-   *
-   * The store now expresses the exclusion in SQL, per row, over every case regardless of status.
+   * HISTORICAL NOTE, because the reason is not obvious from what remains: this used to read
+   * OPEN/IN_PROGRESS cases with `limit: 100000` and pass their `lastRunId`s down. A limit truncates
+   * silently, and `listCases` orders by `updated_at DESC`, so the rows dropped would be the least
+   * recently updated — the long-open cases whose run is old enough to be deleted on the next line. The
+   * read succeeds either way, so nothing reports it. Whether the pilot would actually exceed 100,000
+   * open cases is a projection (20,000 patients x six measures bounds it at 120,000, but how many are
+   * open at once depends on compliance rates nobody has measured yet); the defect is that the failure
+   * is unbounded and silent, not that a particular number is reached. Pinning by RUN was separately
+   * too coarse: one long-open case protected all 100,000 rows of its run.
    */
   const deleted = await stores.outcomes.compactOlderThan(cutoff);
   const result: CompactionResult = { cutoff, deleted, durationMs: Date.now() - started };

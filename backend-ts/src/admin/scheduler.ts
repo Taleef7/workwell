@@ -126,7 +126,7 @@ export function isSchedulerEnabled(): boolean {
 
 export interface SchedulerStatus {
   enabled: boolean;
-  /** Display cron expression (human-readable; actual interval is SCHEDULER_RUN_INTERVAL_HOURS). */
+  /** Display cron expression, derived from the anchor hour — which IS the schedule (see `dueAtMs`). */
   cron: string;
   /** ISO-8601 estimated next fire time, or null when disabled or unknown. */
   nextFireAt: string | null;

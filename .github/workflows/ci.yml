@@ -336,6 +336,14 @@ jobs:
       # Any new test that loads a sidecar MUST be added here, or it is permanently skipped in CI while
       # reading as covered. That is not hypothetical: PR-8c shipped two such files and had to be told.
       - name: Official terminology + corpus tests (need the fetched sidecar)
+        env:
+          # `corpus-official-population.test.ts` asserts that at least one measure ACTUALLY RAN when the
+          # context is credentialed — otherwise a vendor step that quietly stopped producing sidecars
+          # would make all six tests skip and this job pass. That assertion needs to know whether this
+          # run was credentialed, and the vendor step above is the only thing that knows. Without this
+          # line the guard reads the variable, finds nothing, and returns early every time: a guard
+          # against silent skipping that silently skips.
+          WORKWELL_REQUIRE_OFFICIAL_TERMINOLOGY: ${{ steps.vendor.outputs.credentialed }}
         run: |
           pnpm exec node --import tsx --test \
             src/wiring/official-terminology.test.ts \
