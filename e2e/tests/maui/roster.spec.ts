@@ -19,24 +19,20 @@ test.describe("Maui compliance roster", () => {
     await expect(totalText).toBeVisible({ timeout: 20_000 });
   });
 
-  test("columns are exactly the three Maui measures with correct crosswalk labels", async ({ page }) => {
+  test("columns are exactly the ACO's five measures with correct crosswalk labels", async ({ page }) => {
+    // Updated for U1 (ADR-072): the Maui runnable set became the ACO's five official measures, and the
+    // authored `hypertension` column went with it. This spec still asserted the old three — it is
+    // manual-dispatch only, so nothing had run it since.
     await page.goto("/compliance");
-    await expect(page.getByRole("columnheader", { name: /MIPS 001 · CMS122/ })).toBeVisible({ timeout: 20_000 });
-    await expect(page.getByRole("columnheader", { name: /MIPS 112 · CMS125/ })).toBeVisible({ timeout: 20_000 });
-    await expect(page.getByRole("columnheader", { name: /Hypertension/ })).toBeVisible({ timeout: 20_000 });
+    for (const label of [/MIPS 001 · CMS122/, /MIPS 112 · CMS125/, /MIPS 134 · CMS2/, /MIPS 113 · CMS130/, /MIPS 236 · CMS165/]) {
+      await expect(page.getByRole("columnheader", { name: label })).toBeVisible({ timeout: 20_000 });
+    }
 
-    // No occupational measure columns
+    // No occupational measure columns, and no leftover authored one.
     const headers = await page.getByRole("columnheader").allTextContents();
     const headerText = headers.join(" ");
-    expect(headerText).not.toContain("HAZWOPER");
-    expect(headerText).not.toContain("Audiogram");
-    expect(headerText).not.toContain("TB Surveillance");
-
-    // Hypertension column carries no MIPS label
-    for (const header of headers) {
-      if (header.includes("Hypertension")) {
-        expect(header, "hypertension column must not carry a MIPS label").not.toContain("MIPS");
-      }
+    for (const absent of ["HAZWOPER", "Audiogram", "TB Surveillance", "Hypertension"]) {
+      expect(headerText, `${absent} must not appear on the pilot roster`).not.toContain(absent);
     }
   });
 
@@ -104,5 +100,46 @@ test.describe("Maui compliance roster", () => {
     const body = await page.locator("body").innerText();
     const hasMeasureMention = /CMS122|CMS125|Hypertension|Diabetes|Breast/i.test(body);
     expect(hasMeasureMention, "patient profile should reference at least one Maui measure").toBe(true);
+  });
+});
+
+test.describe("Maui roster panel filters", () => {
+  test.beforeEach(async ({ page }) => {
+    await loginAs(page, MAUI_ACCOUNTS.qualityLead.email);
+  });
+
+  test("selecting a PCP narrows the roster to that panel and carries providerId in the URL", async ({ page }) => {
+    await page.goto("/compliance");
+    await expect(page.getByRole("heading", { name: /Individual Compliance/i })).toBeVisible({ timeout: 20_000 });
+
+    const before = await page.getByRole("row").count();
+    expect(before, "the unfiltered roster must have rows for this to mean anything").toBeGreaterThan(1);
+
+    const pcpSelect = page.getByLabel(/^PCP$/);
+    await expect(pcpSelect).toBeVisible({ timeout: 10_000 });
+    // The second option: the first is "All panels". Selected by VALUE so the assertion below is about
+    // the id the backend filters on, not a display name.
+    const providerId = await pcpSelect.locator("option").nth(1).getAttribute("value");
+    expect(providerId).toBeTruthy();
+    await pcpSelect.selectOption(providerId!);
+
+    await expect(page).toHaveURL(new RegExp(`providerId=${providerId}`), { timeout: 20_000 });
+    // The chip row names the panel, and the roster is strictly smaller than the whole practice.
+    await expect(page.getByText(/^Filtered to$/)).toBeVisible({ timeout: 20_000 });
+    await expect.poll(async () => page.getByRole("row").count(), { timeout: 20_000 }).toBeLessThan(before);
+
+    await expectNoErrorPage(page);
+  });
+
+  test("a deep link with all three filters renders filtered, and Clear restores the whole roster", async ({ page }) => {
+    await page.goto("/compliance?ageBand=65%2B&sex=F");
+    await expect(page.getByText(/^Filtered to$/)).toBeVisible({ timeout: 20_000 });
+    const filtered = await page.getByRole("row").count();
+
+    await page.getByRole("button", { name: /^Clear$/ }).first().click();
+    await expect(page.getByText(/^Filtered to$/)).toBeHidden({ timeout: 20_000 });
+    await expect.poll(async () => page.getByRole("row").count(), { timeout: 20_000 }).toBeGreaterThanOrEqual(filtered);
+
+    await expectNoErrorPage(page);
   });
 });

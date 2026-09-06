@@ -6,7 +6,7 @@ test.beforeEach(() => {
 });
 
 test.describe("Maui runs", () => {
-  test("trigger a manual ALL_PROGRAMS run and verify 144 evaluated", async ({ page, request }) => {
+  test("trigger a manual ALL_PROGRAMS run and verify 240 evaluated", async ({ page, request }) => {
     test.setTimeout(240_000);
     await loginAs(page, MAUI_ACCOUNTS.qualityLead.email);
 
@@ -45,7 +45,9 @@ test.describe("Maui runs", () => {
     expect(created, "the Start run click must have created exactly one new run").toHaveLength(1);
     expect(created[0].scopeType).toBe("ALL_PROGRAMS");
     expect(created[0].status).toBe("COMPLETED");
-    expect(created[0].totalEvaluated).toBe(144);
+    // 48 patients x the ACO's FIVE measures. Was 144 (three measures) until U1 made cms2/cms130/cms165
+    // runnable — this spec is manual-dispatch only, so nothing had run it since.
+    expect(created[0].totalEvaluated).toBe(240);
     await expectNoErrorPage(page);
   });
 
