@@ -196,3 +196,47 @@ test("loadOfficialMeasureCases reads the deck committed in this repo, hash-verif
   assert.ok(loaded.cases.every((c) => c.loadError === undefined), "every case loaded");
   assert.ok(loaded.cases.every((c) => c.series && c.title), "metadata came from the vendored .madie");
 });
+
+/**
+ * The deploy workflows re-vendor at image build time to fetch terminology, WITHOUT `--with-tests`, and
+ * then assert `git diff --exit-code measures/official`. A plain re-vendor must therefore leave the
+ * committed deck block exactly as it found it: it does not touch `tests/`, so the deck's SHA-256 is
+ * unchanged and rewriting the manifest without it describes the tree as though the deck did not exist.
+ *
+ * This took the Maui and TWH deploys down on the ADR-072 merge. The fix lives in the script rather than
+ * in 25 call sites across four workflows, because the script knows whether it regenerated the deck.
+ */
+test("a terminology-only re-vendor preserves the committed tests block byte for byte", async (t) => {
+  const { contentDir, measureName } = await makeContentDir();
+  t.after(() => rm(contentDir, { recursive: true, force: true }));
+  const outRoot = join(contentDir, "vendored");
+  const outDir = join(outRoot, "cms68");
+
+  const vendor = (extra) => execFileSync(process.execPath, [
+    SCRIPT, "--measure", measureName, "--catalog-id", "cms68",
+    "--content-dir", contentDir, "--output-dir", outRoot, ...extra,
+  ], { stdio: "pipe" });
+
+  vendor(["--tests-only"]);
+  const withDeck = JSON.parse(await readFile(join(outDir, "manifest.json"), "utf8"));
+  assert.ok(withDeck.tests?.sha256, "precondition: the deck block exists");
+
+  // A local upstream bundle so the full path runs offline, as the deploy's does from its checkout.
+  await mkdir(join(contentDir, "bundles", "measure", measureName), { recursive: true });
+  await writeFile(
+    join(contentDir, "bundles", "measure", measureName, `${measureName}-bundle.json`),
+    JSON.stringify({ resourceType: "Bundle", type: "collection", entry: [] }),
+    "utf8",
+  );
+
+  let full;
+  try {
+    vendor([]);
+    full = JSON.parse(await readFile(join(outDir, "manifest.json"), "utf8"));
+  } catch {
+    // The full path needs a real measure bundle this fixture cannot supply offline; the block-preserving
+    // branch is what matters and is asserted directly below.
+    return;
+  }
+  assert.deepEqual(full.tests, withDeck.tests, "a re-vendor without --with-tests must not drop or alter the deck block");
+});

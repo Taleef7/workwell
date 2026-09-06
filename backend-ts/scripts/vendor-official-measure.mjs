@@ -543,6 +543,22 @@ const terminologyJson = `${JSON.stringify(
 const bundleJson = `${JSON.stringify(reduced, null, 0)}\n`;
 const manifest = buildManifest(reduced, args, raw, bundleJson, terminology, terminologyJson, completed);
 
+// CARRY THE COMMITTED DECK BLOCK FORWARD. A terminology-only re-vendor does not touch
+// `measures/official/<id>/tests/`, so the deck on disk — and therefore its SHA-256 — is unchanged, and
+// dropping `manifest.tests` here would describe the tree as though the deck did not exist.
+//
+// This is not hypothetical and it is not a CI-only concern: the deploy workflows re-vendor at image
+// build time to fetch terminology, then assert `git diff --exit-code measures/official`. Without this,
+// every one of those runs rewrote all eight manifests without their `tests` block and failed the diff
+// — which is exactly what took the Maui and TWH deploys down on the ADR-072 merge. Requiring 25
+// separate call sites across four workflows to remember `--with-tests` is the wrong shape of fix: the
+// script knows whether it regenerated the deck, and the callers do not.
+const existingManifestPath = join(outDir, "manifest.json");
+if (!args.withTests && existsSync(existingManifestPath)) {
+  const previous = JSON.parse(readFileSync(existingManifestPath, "utf8"));
+  if (previous.tests) manifest.tests = previous.tests;
+}
+
 mkdirSync(outDir, { recursive: true });
 writeFileSync(join(outDir, "bundle.json"), bundleJson);
 writeFileSync(join(outDir, "terminology.json"), terminologyJson);
