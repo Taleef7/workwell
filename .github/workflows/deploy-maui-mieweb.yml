@@ -276,7 +276,11 @@ jobs:
                 {key: "WORKWELL_INSTANCE", value: "maui"},
                 {key: "WORKWELL_SCHEDULER_ENABLED", value: "true"},
                 {key: "WORKWELL_VSAC_API_KEY", value: $vsac_api_key},
-                {key: "WORKWELL_OFFICIAL_MEASURES", value: "cms122,cms125"}
+                {key: "WORKWELL_OFFICIAL_MEASURES", value: "cms122,cms125"},
+                {key: "WORKWELL_MAUI_CORPUS_SIZE", value: "20000"},
+                {key: "WORKWELL_RUN_CHUNK_SIZE", value: "500"},
+                {key: "WORKWELL_SCHEDULER_ANCHOR_HOUR_UTC", value: "12"},
+                {key: "WORKWELL_OUTCOME_RETENTION_DAYS", value: "90"}
               ]'
             echo EOF
           } >> "$GITHUB_OUTPUT"
