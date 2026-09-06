@@ -63,6 +63,7 @@ import {
   officialReportIdentity,
   type OfficialReportIdentity,
   countPopulations,
+  countPopulationsByRate,
   populationCountsFromStatus,
 } from "../fhir/measure-report.ts";
 import { isOfficialRouted } from "../wiring/official-routing.ts";
@@ -257,7 +258,7 @@ async function aggregateCountsForRun(
   runId: string,
   measureId: string,
   env: RunsEnv,
-): Promise<{ counts: PopulationCounts; official: OfficialReportIdentity | null } | { error: Response }> {
+): Promise<{ counts: PopulationCounts[]; official: OfficialReportIdentity | null } | { error: Response }> {
   // Provenance comes from the RUN, not from the current deployment flag (Codex P1). A run's outcomes
   // were produced by whichever engine was configured *then*; consulting `WORKWELL_OFFICIAL_MEASURES`
   // now means that turning the flag off — the documented rollback — silently reinterprets every
@@ -271,7 +272,9 @@ async function aggregateCountsForRun(
   const routedNow = isOfficialRouted(measureId, env as unknown as Record<string, unknown>);
   const official = routedNow || (await runProducedOfficialEvidence(os, runId));
   if (!official) {
-    return { counts: populationCountsFromStatus(await os.countOutcomesByStatus(runId), measureId), official: null };
+    // The authored status histogram is single-rate by construction — it reduces workflow buckets, and
+    // a measure with no official evidence has one rate. Wrapped so the return type is uniform.
+    return { counts: [populationCountsFromStatus(await os.countOutcomesByStatus(runId), measureId)], official: null };
   }
   const total = (await os.countOutcomesByStatus(runId)).reduce((sum, c) => sum + c.count, 0);
   if (total > MAX_INDIVIDUAL_REPORT_SUBJECTS) {
@@ -292,7 +295,11 @@ async function aggregateCountsForRun(
   // the first row that carries it — a run evaluates one measure with one engine, so any row is decisive,
   // and a run where only some rows errored still names the artifact the rest were scored by (ADR-046).
   const identity = rows.map((r) => officialReportIdentity(r.evidence)).find((i) => i !== null) ?? null;
-  return { counts: countPopulations(rows, measureId), official: identity };
+  // Per RATE, not a single vector. `?type=summary` is the route that survives the individual-report
+  // cap, i.e. the one a real roster uses — and it was returning ONE group for cms137 while
+  // `?type=bundle` returned two. Two different answers for the same run, depending on export type,
+  // with nothing to say which was right (ADR-074).
+  return { counts: countPopulationsByRate(rows, measureId), official: identity };
 }
 
 
@@ -1121,7 +1128,21 @@ export async function handleRuns(
     const measureId = measureIds[0]!;
     const aggregate = await aggregateCountsForRun(os, qrdaId, measureId, env);
     if ("error" in aggregate) return aggregate.error;
-    return new Response(buildQrda3DocumentFromCounts(run, measureId, aggregate.counts, aggregate.official), {
+    // QRDA III is NOT multi-rate yet, and this document goes to CMS. Emitting rate 1 under a
+    // multi-rate measure's identity would be a wrong regulatory submission that looks entirely normal,
+    // so it refuses instead. (ADR-074; the multi-rate QRDA III is tracked as follow-up work.)
+    if (aggregate.counts.length > 1) {
+      return json(
+        {
+          error: "unsupported",
+          message:
+            `${measureId} declares ${aggregate.counts.length} rates. QRDA III export is single-rate ` +
+            "today and would report only the first, so it is refused rather than emitted incorrectly.",
+        },
+        501,
+      );
+    }
+    return new Response(buildQrda3DocumentFromCounts(run, measureId, aggregate.counts[0]!, aggregate.official), {
       status: 200,
       headers: {
         "content-type": "application/xml",

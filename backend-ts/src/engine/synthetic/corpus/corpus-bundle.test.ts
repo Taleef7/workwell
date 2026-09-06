@@ -158,13 +158,44 @@ test("CMS137's SUD events become the Condition and Procedures the measure retrie
   assert.equal(provenances.length, clinical.length);
 });
 
-test("no SUD resource carries an invented code — every one is in the artifact's own expansion", () => {
-  // The membership contract (`wiring/corpus-membership.test.ts`) proves this against the real
-  // expansion; here we pin that the corpus stamps the CONSTANTS rather than a literal, which is the
-  // half that test cannot see.
-  const patient = corpusPatients(DEFAULT_CORPUS_SEED, 600).find((p) => p.events.some((e) => e.kind.startsWith("sud")))!;
-  const sudCodes = resourcesOf(patient)
-    .map((r) => (r.code as { coding: Array<{ code: string }> } | undefined)?.coding[0]?.code)
-    .filter((c): c is string => c === "10327003" || c === "171047005");
-  assert.ok(sudCodes.length > 0, "precondition: this patient has SUD resources");
+/**
+ * The exact-count invariant, restored. The version this replaces filtered the bundle to the two known
+ * SUD constants and asserted the result was non-empty — which cannot detect an invented code, and had
+ * displaced a count check that proved nothing EXTRA was emitted. Counting every clinical resource
+ * against what the patient's own events imply catches both.
+ */
+test("the bundle emits exactly the resources the patient's events imply — nothing extra, nothing invented", () => {
+  const CODED_CONDITIONS = ["diabetes", "hypertension", "bipolar", "colorectalCancer", "esrd"];
+  for (const patient of corpusPatients(DEFAULT_CORPUS_SEED, 600)) {
+    const emitted = resourcesOf(patient).filter((r) => !["Patient", "Provenance"].includes(r.resourceType));
+    const expected =
+      patient.visits.length
+      + patient.conditions.filter((c) => CODED_CONDITIONS.includes(c)).length
+      + patient.events.filter((e) => e.kind !== "sudEpisode").length
+      + patient.events.filter((e) => e.kind === "sudEpisode").length     // episode → Condition
+      + patient.events.filter((e) => e.kind === "mammogram").length      // dual-stamped, ADR-044
+      + patient.exceptions.length;
+    assert.equal(emitted.length, expected, `${patient.externalId}: resource count does not match its events`);
+  }
+});
+
+/**
+ * CMS137 rate 2 requires TWO OR MORE further services within 34 days of initiating. A generator that
+ * emitted one engagement event could never put anybody in that numerator, so the Engagement rate would
+ * read 0% across the whole corpus — the rate multi-rate support exists to surface.
+ */
+test("an engaged patient carries at least two engagement services, so rate 2's numerator is reachable", () => {
+  const all = corpusPatients(DEFAULT_CORPUS_SEED, 5000);
+  const engaged = all.filter((p) => p.events.filter((e) => e.kind === "sudEngagement").length > 0);
+  assert.ok(engaged.length > 0, "the sample must contain engaged patients");
+  for (const patient of engaged) {
+    const services = patient.events.filter((e) => e.kind === "sudEngagement");
+    assert.ok(services.length >= 2, `${patient.externalId}: ${services.length} engagement service(s) — rate 2 needs 2+`);
+    // ...and both inside the 34-day window the measure counts.
+    const initiation = patient.events.find((e) => e.kind === "sudInitiation")!;
+    for (const service of services) {
+      const days = (Date.parse(`${service.date}T00:00:00Z`) - Date.parse(`${initiation.date}T00:00:00Z`)) / 86400000;
+      assert.ok(days > 0 && days <= 34, `${patient.externalId}: engagement ${days} days after initiation, outside the window`);
+    }
+  }
 });

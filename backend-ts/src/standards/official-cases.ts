@@ -247,29 +247,10 @@ export function loadFhirBundleFile(path: string): FhirBundle {
   return readBundle(path);
 }
 
+// Rate 1, derived from the per-rate walker rather than repeating its body — two copies of the same
+// population extraction is two things to keep in step on the next population-code change.
 function populationCounts(report: FhirResource): PopulationCounts {
-  const counts: PopulationCounts = {
-    "initial-population": 0,
-    denominator: 0,
-    "denominator-exclusion": 0,
-    numerator: 0,
-    "denominator-exception": 0,
-  };
-  const groups = Array.isArray(report.group) ? report.group as Array<Record<string, unknown>> : [];
-  const group = groups[0];
-  const populations = group && Array.isArray(group.population) ? group.population : [];
-  for (const population of populations as Array<Record<string, unknown>>) {
-    const code = population.code as { coding?: Array<{ code?: string }> } | undefined;
-    const populationCode = code?.coding?.map((coding) => coding.code).find(
-      (candidate): candidate is PopulationCode => POPULATION_CODES.includes(candidate as PopulationCode),
-    );
-    if (!populationCode) continue;
-    if (typeof population.count !== "number" || !Number.isInteger(population.count)) {
-      throw new Error(`expected MeasureReport population ${populationCode} has a non-integer count`);
-    }
-    counts[populationCode] = population.count;
-  }
-  return counts;
+  return populationCountsByRate(report)[0]!;
 }
 
 /**
@@ -510,6 +491,8 @@ export interface PopulationAgreement {
   pass: boolean;
   status: "expected-agreement" | "reference-agreement" | "mismatch";
   differences: PopulationCode[];
+  /** Per-rate detail for a multi-rate mismatch: which rate, which population, expected vs actual. */
+  rateDifferences?: string[];
 }
 
 /** Classify raw population agreement, with the source repo's six CMS122 expected-result defects isolated. */
@@ -535,15 +518,24 @@ export function classifyPopulationAgreement(
       };
     }
     const differing = new Set<PopulationCode>();
+    const byRate: string[] = [];
     for (const [i, expectedRate] of rates.expected.entries()) {
       const actualRate = rates.actual[i]!;
-      for (const code of POPULATION_CODES) if (expectedRate[code] !== actualRate[code]) differing.add(code);
+      for (const code of POPULATION_CODES) {
+        if (expectedRate[code] === actualRate[code]) continue;
+        differing.add(code);
+        // WHICH rate diverged, not just which population. A cms137 mismatch reported as
+        // `["numerator"]` leaves an investigator unable to tell Initiation from Engagement — the one
+        // thing they need first (ADR-074).
+        byRate.push(`rate ${i + 1} ${code}: expected ${expectedRate[code]}, got ${actualRate[code]}`);
+      }
     }
     const differences = [...differing];
     return {
       pass: differences.length === 0,
       status: differences.length === 0 ? "expected-agreement" : "mismatch",
       differences,
+      ...(byRate.length > 0 ? { rateDifferences: byRate } : {}),
     };
   }
   const differences = POPULATION_CODES.filter((code) => expected[code] !== actual[code]);

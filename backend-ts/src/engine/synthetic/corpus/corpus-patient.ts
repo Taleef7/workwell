@@ -216,8 +216,17 @@ function eventsFor(rng: SplitMix64, patient: { conditions: readonly string[]; ag
       const offset = rng.nextInt(15);
       const longActing = rng.chance(EVENT_RATES.sudLongActing);
       events.push({ kind: "sudInitiation", date: addDays(episode, offset), modality: longActing ? "longActingMedication" : "visit", external: false });
-      if (longActing || rng.chance(EVENT_RATES.sudEngagement)) {
-        events.push({ kind: "sudEngagement", date: addDays(episode, offset + 1 + rng.nextInt(33)), external: false });
+      // TWO engagement services, not one. CMS137 rate 2 requires "two or more" further services within
+      // 34 days of initiating, so a single event can never enter its numerator — the whole Engagement
+      // rate would read 0% across the corpus, which is precisely the rate multi-rate support exists to
+      // surface. The long-acting-medication shortcut is deliberately NOT taken here: that branch needs a
+      // medication resource from the artifact's long-acting value set, which this corpus does not emit
+      // yet, so claiming engagement through it would be a numerator we cannot actually evidence.
+      if (rng.chance(EVENT_RATES.sudEngagement)) {
+        const first = 1 + rng.nextInt(16);
+        const second = first + 1 + rng.nextInt(33 - first);
+        events.push({ kind: "sudEngagement", date: addDays(episode, offset + first), external: false });
+        events.push({ kind: "sudEngagement", date: addDays(episode, offset + second), external: false });
       }
     }
   }
