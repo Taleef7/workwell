@@ -45,6 +45,7 @@ export function corpusDirectory(seed: string, size: number): SyntheticDirectoryV
     providerId: p.providerId,
     tenantId: p.tenantId,
     dateOfBirth: p.dateOfBirth,
+    sex: p.sex,
     // No `nationalId`: the pilot has one system, so there is no cross-system person to resolve (spec §3).
   }));
   const PROVIDERS: readonly Provider[] = PCPS.map(providerOf);

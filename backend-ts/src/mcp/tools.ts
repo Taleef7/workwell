@@ -23,6 +23,7 @@ import { toMeasureDetail } from "../measure/measure-read-models.ts";
 import { generateTraceability } from "../measure/measure-traceability.ts";
 import { computeDataReadiness } from "../measure/data-readiness.ts";
 import { complianceRateOf } from "../program/rollup-shared.ts";
+import { matchesSubjectFilters } from "../compliance/subject-filters.ts";
 import type { JsonRecord } from "./tool-audit.ts";
 
 export interface McpToolDeps {
@@ -454,6 +455,7 @@ async function listNoncompliant(args: JsonRecord, deps: McpToolDeps): Promise<un
   }
   const measureNameFilter = args.measureName != null ? String(args.measureName).trim() : "";
   const siteFilter = args.site != null ? String(args.site).trim() : "";
+  const providerFilter = args.providerId != null ? String(args.providerId).trim() : "";
   const statusFilter = args.status != null ? String(args.status).trim() : "";
   if (statusFilter && !NON_COMPLIANT.includes(statusFilter)) {
     return safeError("INVALID_ARGUMENT", "status must be one of: DUE_SOON, OVERDUE, MISSING_DATA");
@@ -468,6 +470,9 @@ async function listNoncompliant(args: JsonRecord, deps: McpToolDeps): Promise<un
   rows = rows.filter((c) => NON_COMPLIANT.includes(c.currentOutcomeStatus));
   if (statusFilter) rows = rows.filter((c) => c.currentOutcomeStatus === statusFilter);
   if (siteFilter) rows = rows.filter((c) => (directory.employeeById(c.employeeId)?.site ?? "").toLowerCase() === siteFilter.toLowerCase());
+  // The PCP's external id, with the same semantics as every other surface: an unknown id returns an
+  // empty list rather than the whole worklist, which is the leak guard `measureName` above documents.
+  if (providerFilter) rows = rows.filter((c) => matchesSubjectFilters(directory.employeeById(c.employeeId), { providerId: providerFilter }));
   rows.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   rows = rows.slice(0, limit);
   const results = rows.map((c) => {
@@ -630,8 +635,8 @@ export const MCP_TOOLS: McpTool[] = [
   },
   {
     name: "list_noncompliant",
-    description: "List non-compliant open cases filtered by measureName, site, and outcome status. Default limit 25, max 100.",
-    inputSchema: { type: "object", properties: { measureName: { type: "string" }, site: { type: "string" }, status: { type: "string", enum: ["DUE_SOON", "OVERDUE", "MISSING_DATA"] }, limit: { type: "number" } } },
+    description: "List non-compliant open cases filtered by measureName, site, providerId (the PCP's external id, e.g. maui-prov-012), and outcome status. Default limit 25, max 100.",
+    inputSchema: { type: "object", properties: { measureName: { type: "string" }, site: { type: "string" }, providerId: { type: "string" }, status: { type: "string", enum: ["DUE_SOON", "OVERDUE", "MISSING_DATA"] }, limit: { type: "number" } } },
     roles: [CM, ADMIN],
     sensitivity: "restricted",
     handler: listNoncompliant,

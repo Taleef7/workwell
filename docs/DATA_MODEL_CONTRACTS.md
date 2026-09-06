@@ -149,6 +149,8 @@ Columns:
 `runId, measureName, measureVersion, scopeType, triggerType, status, startedAt, completedAt, durationMs, totalEvaluated, compliant, dueSoon, overdue, missingData, excluded, passRate, dataFreshAsOf`
 
 ### 6.2 `GET /api/exports/outcomes?format=csv&runId={optional}`
+Supports filters: `runId`, `site`, `providerId`, `ageBand`, `sex`.
+
 Columns:
 `outcomeId, runId, employeeExternalId, employeeName, role, site, measureName, measureVersion, evaluationPeriod, status, lastExamDate, complianceWindowDays, daysOverdue, roleEligible, siteEligible, waiverStatus, evaluatedAt`
 
@@ -156,7 +158,8 @@ Columns:
 Columns:
 `caseId, employeeExternalId, employeeName, role, site, measureName, measureVersion, evaluationPeriod, status, priority, assignee, currentOutcomeStatus, nextAction, lastRunId, createdAt, updatedAt, closedAt, latestOutreachDeliveryStatus`
 
-Supports filters: `status`, `measureId`, `priority`, `assignee`, `site`, `caseIds`.
+Supports filters: `status`, `measureId`, `priority`, `assignee`, `site`, `caseIds`, `providerId`,
+`ageBand`, `sex`.
 
 > **Subject headers follow the deployment profile.** On a patient deployment
 > (`WORKWELL_INSTANCE=maui`, `DEPLOYMENT_PROFILE.subjectTerm === "patient"`) the two subject columns in
@@ -166,6 +169,15 @@ Supports filters: `status`, `measureId`, `priority`, `assignee`, `site`, `caseId
 > (`backend-ts/src/export/export-csv.ts`, `subjectHeaders`). The remaining occupational columns
 > (`role`, `roleEligible`, `siteEligible`) are still emitted on a patient deployment; dropping them is a
 > contract change deferred until the pilot's export needs are known.
+
+> **The three panel filters are DIRECTORY joins, not stored columns** (spec §5, `compliance/subject-filters.ts`).
+> `providerId` matches `EmployeeProfile.providerId` — the PCP's external id (`maui-prov-012`), never a
+> display name. `ageBand` is one of `0-17 | 18-44 | 45-64 | 65+`, derived from `dateOfBirth` against
+> today's **UTC** date at query time, so a row's band can change between two exports taken either side
+> of a birthday. `sex` is `F | M` and matches nothing on a roster that records none (the occupational
+> directory), rather than matching everyone. An unrecognised token for `ageBand` or `sex` is DROPPED —
+> the export is unfiltered rather than empty. The same three apply to the roster, the cases route and
+> the MCP `list_noncompliant` tool, through one predicate; column names and order are unchanged.
 
 ### 6.4 `GET /api/audit-events/export?format=csv`
 Audit event export is append-only and includes event metadata + payload snapshot for timeline reconstruction.

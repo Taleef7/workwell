@@ -25,6 +25,12 @@ export interface EmployeeProfile {
   // Additive + optional — no existing row's identity changes, so E13 tenant counts are untouched.
   dateOfBirth?: string; // YYYY-MM-DD (synthetic)
   nationalId?: string;  // shared cross-system identifier (synthetic)
+  /**
+   * Administrative sex, where the roster records one. Present on the patient corpus (the pilot's
+   * quality staff filter panels by it) and absent on the occupational directory, which has never
+   * carried it. Optional and additive: no existing row's identity changes.
+   */
+  sex?: "F" | "M";
 }
 
 export interface Provider {

@@ -9,6 +9,7 @@
 import type { CloudDatabase } from "@mieweb/cloud";
 import { getStores } from "../stores/factory.ts";
 import { buildRoster, rosterCellCache } from "../compliance/roster-read-model.ts";
+import { subjectFiltersFromQuery } from "../compliance/subject-filters.ts";
 import { isPanelId, PANELS } from "../compliance/panels.ts";
 import { ensureSegmentSeed } from "../segment/segment-seed.ts";
 import type { DataSourceEnv } from "../engine/ingress/data-source.ts";
@@ -57,6 +58,7 @@ export async function handleCompliance(req: Request, env: ComplianceEnv): Promis
       q: q.get("q"),
       segment: q.get("segment"),
       tenant: q.get("tenant"),
+      ...subjectFiltersFromQuery(q),
       page: intOr(q.get("page"), 1),
       pageSize: intOr(q.get("pageSize"), 50),
     },

@@ -27,6 +27,7 @@ import { handleEmployees } from "./routes/employees.ts";
 import { handlePrograms } from "./routes/programs.ts";
 import { handleHierarchy } from "./routes/hierarchy.ts";
 import { handleTenants } from "./routes/tenants.ts";
+import { handleProviders } from "./routes/providers.ts";
 import { handleQuality } from "./routes/quality.ts";
 import { handleIdentity } from "./routes/identity.ts";
 import { handleCompliance } from "./routes/compliance.ts";
@@ -289,6 +290,9 @@ async function route(req: Request, env: Env, ctx: CloudExecutionContext): Promis
   // Tenants — WebChart system list for the multi-tenant selector (#185 E13 PR-1).
   const tenantsResponse = await handleTenants(req, env);
   if (tenantsResponse) return tenantsResponse;
+
+  const providersResponse = await handleProviders(req);
+  if (providersResponse) return providersResponse;
 
   // Quality-over-time history — materialized snapshot time-series read (#E16 PR-2).
   const qualityResponse = await handleQuality(req, env);

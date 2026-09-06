@@ -12,6 +12,7 @@
 import type { CloudDatabase } from "@mieweb/cloud";
 import { getStores } from "../stores/factory.ts";
 import { runsCsv, outcomesCsvStream, casesCsv, auditCsvStream } from "../export/export-csv.ts";
+import { subjectFiltersFromQuery } from "../compliance/subject-filters.ts";
 import type { DataSourceEnv } from "../engine/ingress/data-source.ts";
 
 interface ExportsEnv extends DataSourceEnv {
@@ -62,7 +63,10 @@ export async function handleExports(req: Request, env: ExportsEnv): Promise<Resp
     const s = await getStores(env);
     // Streamed + paged (Fable H4) — bounded memory so a seed:scale run's 120k outcomes never
     // materialize at once (parity with the audit-events streaming export below).
-    const stream = outcomesCsvStream(s.outcomes, s.runs, q.get("runId") ?? undefined, env);
+    const stream = outcomesCsvStream(s.outcomes, s.runs, q.get("runId") ?? undefined, env, {
+      site: q.get("site")?.trim() || undefined,
+      ...subjectFiltersFromQuery(q),
+    });
     return new Response(stream, {
       status: 200,
       headers: { "content-type": "text/csv", "content-disposition": `attachment; filename="outcomes.csv"` },
@@ -80,6 +84,7 @@ export async function handleExports(req: Request, env: ExportsEnv): Promise<Resp
       assignee: q.get("assignee") ?? undefined,
       site: q.get("site")?.trim() || undefined,
       caseIds: caseIds?.length ? caseIds : undefined,
+      ...subjectFiltersFromQuery(q),
     }, env);
     return csvResponse("cases.csv", csv);
   }
