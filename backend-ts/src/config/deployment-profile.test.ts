@@ -318,9 +318,15 @@ test("classifyRunnable: authored, official, official-pending, invalid — env re
   const pending = classifyRunnable("cms165", {});
   assert.equal(pending.kind, "official-pending");
   assert.match((pending as { reason: string }).reason, /WORKWELL_OFFICIAL_MEASURES/);
-  const invalid = classifyRunnable("cms137", {});
+  // cms137 was this example until it was vendored for the pilot (MIPS 305 is on the ACO's blue list).
+  // Using a still-unvendored id keeps the case honest; a measure that becomes vendored must not
+  // silently turn this assertion into a test of nothing.
+  const invalid = classifyRunnable("cms124", {});
   assert.equal(invalid.kind, "invalid");
   assert.match((invalid as { reason: string }).reason, /not vendored/);
+  // ...and cms137 now classifies like any other vendored, semantic, unrouted measure.
+  assert.equal(classifyRunnable("cms137", {}).kind, "official-pending");
+  assert.deepEqual(classifyRunnable("cms137", { WORKWELL_OFFICIAL_MEASURES: "cms137" }), { kind: "official" });
   // cms122 is authored AND official: routed ⇒ official, unrouted ⇒ authored (the pre-flip state)
   assert.deepEqual(classifyRunnable("cms122", {}), { kind: "authored" });
   assert.deepEqual(classifyRunnable("cms122", { WORKWELL_OFFICIAL_MEASURES: "cms122" }), { kind: "official" });

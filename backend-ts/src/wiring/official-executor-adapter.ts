@@ -82,6 +82,7 @@ import {
   type FqmCalculate,
   type FqmStatementResult,
   type PopulationMembership,
+  populationMembership,
 } from "@work-well/official-executor";
 import type {
   EvaluateMeasureBinding,
@@ -403,6 +404,36 @@ export function requiredValueSets(artifact: OfficialArtifact): Array<{ oid: stri
  * costs an ELM parse per subject, which is why PR-7b adds measure-major iteration and batches subjects
  * through one `calculateOfficialDetailed` call — the package's batch entry point already exists for it.
  */
+/**
+ * The worst outcome across a measure's rates, and whether the subject was in ANY rate's initial
+ * population.
+ *
+ * "Worst" is ordered by how much attention the subject needs: MISSING_DATA (we cannot tell) is worse
+ * than OVERDUE (a known gap), which is worse than DUE_SOON, which is worse than COMPLIANT. EXCLUDED
+ * only survives when EVERY rate excludes them — a subject excluded from one rate and overdue on
+ * another is overdue, because there is still something to do.
+ */
+const OUTCOME_SEVERITY: Record<OutcomeStatus, number> = {
+  MISSING_DATA: 4,
+  OVERDUE: 3,
+  DUE_SOON: 2,
+  COMPLIANT: 1,
+  EXCLUDED: 0,
+};
+
+export function worstOutcome(
+  perRate: ReadonlyArray<{ outcome: OutcomeStatus; inInitialPopulation: boolean }>,
+): { outcome: OutcomeStatus; inInitialPopulation: boolean } {
+  if (perRate.length === 0) return { outcome: "MISSING_DATA", inInitialPopulation: false };
+  let worst = perRate[0]!;
+  for (const candidate of perRate.slice(1)) {
+    if ((OUTCOME_SEVERITY[candidate.outcome] ?? 0) > (OUTCOME_SEVERITY[worst.outcome] ?? 0)) worst = candidate;
+  }
+  // In the initial population of ANY rate is in the initial population of the measure: a subject the
+  // engagement rate ignores is still measured by the initiation rate.
+  return { outcome: worst.outcome, inInitialPopulation: perRate.some((r) => r.inInitialPopulation) };
+}
+
 export function officialMeasureExecutor(deps: OfficialExecutorDeps): OfficialMeasureExecutor {
   /**
    * Terminology is expanded once per measure per EXECUTOR INSTANCE — and an instance lives as long as
@@ -555,10 +586,19 @@ export function officialMeasureExecutor(deps: OfficialExecutorDeps): OfficialMea
       // attributed and is dropped rather than guessed at.
       const subjectId = subjectIdByPatientId.get(patientId);
       if (subjectId === undefined) continue;
-      const { outcome, inInitialPopulation } = outcomeFromPopulations(
-        result.populations,
-        semantics.numeratorMeansCompliant,
+      // MULTI-RATE (ADR-074). A measure with more than one rate gets one outcome per rate, reduced to
+      // the WORST: a subject is COMPLIANT only where every rate they are in the denominator for is met.
+      //
+      // CMS137 is the case that forces this, and its own deck shows why — in 8 of 45 steward-published
+      // cases the two rates disagree, all of them patients who INITIATED treatment and then did not
+      // ENGAGE. Reducing to rate 1 would call every one of those patients compliant and drop them off
+      // the worklist, hiding precisely the follow-up gap the measure exists to surface. Reducing to the
+      // worst keeps them actionable. Regulatory truth is unaffected either way: every rate is persisted
+      // losslessly below, and MeasureReport/QRDA read that rather than this bucket.
+      const perRate = (result.rates?.length ? result.rates : [result.populationResults]).map((populations) =>
+        outcomeFromPopulations(populationMembership(populations), semantics.numeratorMeansCompliant),
       );
+      const { outcome, inInitialPopulation } = worstOutcome(perRate);
       outcomes.set(subjectId, {
         subjectId,
         // The catalog's display name, matching the authored path — not the artifact's machine name
@@ -577,6 +617,9 @@ export function officialMeasureExecutor(deps: OfficialExecutorDeps): OfficialMea
             engine: "fqm-execution",
             artifactSha256: artifact.manifest.sha256,
             populationResults: result.populationResults,
+            // Every rate, verbatim, when the measure declares more than one. Rate 1 stays in
+            // `populationResults` so nothing that reads it today changes.
+            ...((result.rates?.length ?? 0) > 1 ? { rates: result.rates } : {}),
             measurementPeriod: period,
           },
         },

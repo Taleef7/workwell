@@ -784,3 +784,43 @@ test("effectivePeriodWarning names the measure, the artifact period and the run 
   assert.equal(effectivePeriodWarning(artifact, { start: "2026-01-01", end: "2026-12-31T23:59:59.999Z" }), null);
   assert.equal(effectivePeriodWarning({ ...artifact, manifest: { ...artifact.manifest, effectivePeriod: null } }, { start: "2027-01-01", end: "2027-12-31T23:59:59.999Z" }), null);
 });
+
+/**
+ * Multi-rate reduction (ADR-074). CMS137 has two rates and 8 of its 45 steward cases disagree between
+ * them — patients who INITIATED treatment and then did not ENGAGE. Reducing to rate 1 calls all 8
+ * compliant and drops them off the worklist, hiding exactly the follow-up gap the measure exists to
+ * surface. So the bucket is the WORST rate, not the first.
+ */
+test("worstOutcome reduces a multi-rate measure to the rate that still needs attention", async () => {
+  const { worstOutcome } = await import("./official-executor-adapter.ts");
+  const rate = (outcome: string, inInitialPopulation = true) => ({ outcome, inInitialPopulation }) as never;
+
+  // The real CMS137 shape: initiated (compliant on rate 1), not engaged (overdue on rate 2).
+  assert.deepEqual(
+    worstOutcome([rate("COMPLIANT"), rate("OVERDUE")]),
+    { outcome: "OVERDUE", inInitialPopulation: true },
+    "initiated-but-not-engaged must stay actionable",
+  );
+  // Order must not matter — the reduction is over the set, not the sequence.
+  assert.equal(worstOutcome([rate("OVERDUE"), rate("COMPLIANT")]).outcome, "OVERDUE");
+
+  // Compliant on every rate is compliant.
+  assert.equal(worstOutcome([rate("COMPLIANT"), rate("COMPLIANT")]).outcome, "COMPLIANT");
+
+  // MISSING_DATA outranks a known gap: "we cannot tell" needs more attention than "we know it is open".
+  assert.equal(worstOutcome([rate("OVERDUE"), rate("MISSING_DATA")]).outcome, "MISSING_DATA");
+  assert.equal(worstOutcome([rate("COMPLIANT"), rate("DUE_SOON")]).outcome, "DUE_SOON");
+
+  // EXCLUDED only survives when EVERY rate excludes them. Excluded from one rate and overdue on another
+  // is OVERDUE — there is still something to do, and calling it excluded would silently close the case.
+  assert.equal(worstOutcome([rate("EXCLUDED"), rate("OVERDUE")]).outcome, "OVERDUE");
+  assert.equal(worstOutcome([rate("EXCLUDED"), rate("EXCLUDED")]).outcome, "EXCLUDED");
+
+  // In the initial population of ANY rate counts: a subject the engagement rate ignores is still
+  // measured by the initiation rate.
+  assert.equal(worstOutcome([rate("COMPLIANT", false), rate("OVERDUE", true)]).inInitialPopulation, true);
+  assert.equal(worstOutcome([rate("EXCLUDED", false), rate("EXCLUDED", false)]).inInitialPopulation, false);
+
+  // A single-rate measure is unchanged — the reduction is identity over one element.
+  assert.deepEqual(worstOutcome([rate("COMPLIANT")]), { outcome: "COMPLIANT", inInitialPopulation: true });
+});

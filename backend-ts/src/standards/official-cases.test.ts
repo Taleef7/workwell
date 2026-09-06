@@ -535,3 +535,51 @@ test("a bundle missing a value set gets it supplemented, recorded, and passed to
   assert.equal(run.valueSetMode, "measure-bundle+sourced-supplement");
   assert.deepEqual(run.supplementedOids, [missing.url]);
 });
+
+/**
+ * Multi-rate agreement (ADR-074). CMS137 declares two groups — Initiation and Engagement — and 8 of its
+ * 45 committed cases have DIFFERENT expected vectors for the two: patients who initiated treatment and
+ * then did not engage. Comparing only `group[0]`, as every consumer did before, passes all 8 while
+ * never checking the engagement answer at all.
+ */
+test("agreement over a multi-rate measure requires EVERY rate to match, not just the first", async () => {
+  const module = await import("./official-cases.ts");
+  const rate = (numerator: number) => ({
+    "initial-population": 1,
+    denominator: 1,
+    "denominator-exclusion": 0,
+    numerator,
+    "denominator-exception": 0,
+  });
+
+  // Initiated (rate 1 numerator 1) but not engaged (rate 2 numerator 0) — the real shape of those 8.
+  const expected = [rate(1), rate(0)];
+
+  const bothRight = module.classifyPopulationAgreement("cms137", "uuid", expected[0]!, expected[0]!, {
+    expected,
+    actual: [rate(1), rate(0)],
+  });
+  assert.equal(bothRight.pass, true, "matching both rates is agreement");
+
+  // Rate 1 still matches; rate 2 does not. This MUST fail — it is the case the old reader could not see.
+  const secondRateWrong = module.classifyPopulationAgreement("cms137", "uuid", expected[0]!, expected[0]!, {
+    expected,
+    actual: [rate(1), rate(1)],
+  });
+  assert.equal(secondRateWrong.pass, false, "a disagreement on rate 2 alone must fail the case");
+  assert.deepEqual(secondRateWrong.differences, ["numerator"]);
+  assert.equal(secondRateWrong.status, "mismatch");
+
+  // A rate count that does not match the steward's is a mismatch, never a pass: silently comparing
+  // fewer rates than the measure declares is the exact failure this guards.
+  const missingRate = module.classifyPopulationAgreement("cms137", "uuid", expected[0]!, expected[0]!, {
+    expected,
+    actual: [rate(1)],
+  });
+  assert.equal(missingRate.pass, false, "one rate returned for a two-rate measure is not agreement");
+
+  // Single-rate measures are untouched: no `rates` argument means the original comparison.
+  const single = module.classifyPopulationAgreement("cms125", "uuid", rate(1), rate(1));
+  assert.equal(single.pass, true);
+  assert.equal(module.classifyPopulationAgreement("cms125", "uuid", rate(1), rate(0)).pass, false);
+});

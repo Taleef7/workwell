@@ -339,6 +339,16 @@ export interface OfficialSubjectResult {
    * `populationType`/`result`. Callers persisting regulatory evidence should write this one.
    */
   populationResults: FqmPopulationResult[];
+  /**
+   * EVERY rate the measure declares, in the artifact's own `group` order. `populationResults` above is
+   * `rates[0]`, kept because most measures have exactly one and every existing caller reads it.
+   *
+   * A MULTI-RATE measure is not an edge case to reduce away: CMS137 (MIPS 305) has two — Initiation and
+   * Engagement — and in 8 of its 45 steward-published cases the two DISAGREE, because a patient can
+   * start treatment and then not continue it. Reporting only the first silently answers half the
+   * measure, and the half it drops is the one describing whether care actually continued (ADR-074).
+   */
+  rates: FqmPopulationResult[][];
   statements: FqmStatementResult[];
 }
 
@@ -386,11 +396,15 @@ export async function calculateOfficialWithSignal(
   );
   const bySubject = new Map<string, OfficialSubjectResult>();
   for (const subject of output.results ?? []) {
-    const detailed = subject.detailedResults?.[0];
+    const detailedResults = subject.detailedResults ?? [];
+    const detailed = detailedResults[0];
     if (subject.patientId && detailed?.populationResults) {
       bySubject.set(subject.patientId, {
         populations: populationMembership(detailed.populationResults),
         populationResults: detailed.populationResults,
+        rates: detailedResults
+          .map((entry) => entry?.populationResults)
+          .filter((results): results is FqmPopulationResult[] => Array.isArray(results)),
         statements: detailed.statementResults ?? [],
       });
     }
