@@ -21,10 +21,12 @@
  *
  * ## What is deliberately NOT emitted
  *
- * The generator produces `sudEpisode` / `sudInitiation` / `sudEngagement` events for CMS137. No FHIR is
- * emitted for them: CMS137 is not approved (measure 305 may be removed from APP Plus for PY2027) and
- * this repo has no verified codes for those events. Inventing codes would put resources in the bundle
- * that no artifact retrieves, which reads as data and is not.
+ * A condition with no verified code (pregnancy, hospice, frailty) is SKIPPED rather than stamped with
+ * an invented one — an omission is visible in the bundle and an invented code is not, and only one of
+ * the two can quietly move a measure's denominator.
+ *
+ * CMS137's SUD events ARE emitted now that the measure is vendored and gated: the episode as a
+ * Condition, initiation and engagement as Procedures, all coded from the artifact's own expansion.
  *
  * Nothing here decides an outcome. CQL alone does (AI_GUARDRAILS §1, ADR-008).
  */
@@ -318,11 +320,33 @@ function resourcesForEvent(patient: CorpusPatient, event: CorpusEvent, index: nu
         effectiveDateTime: `${event.date}T08:30:00Z`,
       }];
 
-    // CMS137's events, deliberately unrepresented — see the header.
+    // CMS137 (MIPS 305). The episode is the Condition the measure's denominator keys on; initiation
+    // and engagement are the treatment contacts its two rates count. Codes come from the artifact's
+    // own vendored expansion, so what the corpus stamps is what the measure retrieves.
     case "sudEpisode":
+      return [{
+        resourceType: "Condition",
+        meta: { profile: [PROFILE.condition] },
+        id,
+        subject,
+        clinicalStatus: { coding: [{ system: CONDITION_CLINICAL, code: "active" }] },
+        verificationStatus: { coding: [{ system: CONDITION_VER_STATUS, code: "confirmed" }] },
+        category: [{ coding: [{ system: CONDITION_CATEGORY, code: "problem-list-item" }] }],
+        code: codeable(ECQM_CANONICAL_CODES.sudCondition),
+        onsetDateTime: `${event.date}T00:00:00Z`,
+      }];
+
     case "sudInitiation":
     case "sudEngagement":
-      return [];
+      return [{
+        resourceType: "Procedure",
+        meta: { profile: [PROFILE.procedure] },
+        id,
+        status: "completed",
+        subject,
+        code: codeable(ECQM_CANONICAL_CODES.sudTreatment),
+        performedDateTime: `${event.date}T10:00:00Z`,
+      }];
 
     default:
       return [];

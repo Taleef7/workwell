@@ -105,6 +105,13 @@ export const ECQM_CANONICAL_CODES = {
   // "Hemoglobin [Presence] in Stool from gastrointestinal" — used verbatim rather than a friendlier
   // paraphrase, per the display rule at the top of this file.
   fobt: { code: "2335-8", system: LOINC, display: "Hemoglobin [Presence] in Stool from gastrointestinal" },
+
+  // ── cms137 (MIPS 305, SUD initiation and engagement) ────────────────────────────────────────────
+  // Members taken from the artifact's OWN vendored expansion, not chosen from a browser: the corpus
+  // only has to stamp something the measure retrieves, and the value set is the authority on what that
+  // is. Displays verified 2026-09-06 against tx.fhir.org $lookup.
+  sudCondition: { code: "10327003", system: SNOMED, display: "Cocaine-induced mood disorder" },
+  sudTreatment: { code: "171047005", system: SNOMED, display: "Drugs of addiction education" },
   colorectalCancer: { code: "363406005", system: SNOMED, display: "Malignant tumor of colon" },
   essentialHypertension: { code: "59621000", system: SNOMED, display: "Essential hypertension" },
   esrd: { code: "46177005", system: SNOMED, display: "End stage renal disease" },
@@ -164,6 +171,9 @@ export const CANONICAL_CODE_VALUE_SETS: Record<
   colonoscopy: "2.16.840.1.113883.3.464.1003.108.12.1020",
   // "Fecal Occult Blood Test (FOBT)", read off cms130/bundle.json's own ELM valueSets.def.
   fobt: "2.16.840.1.113883.3.464.1003.198.12.1011",
+  // Read off cms137/bundle.json's own ELM valueSets.def.
+  sudCondition: "2.16.840.1.113883.3.464.1003.106.12.1001",
+  sudTreatment: "2.16.840.1.113883.3.464.1003.106.12.1005",
   colorectalCancer: "2.16.840.1.113883.3.464.1003.108.12.1001",
   essentialHypertension: "2.16.840.1.113883.3.464.1003.104.12.1011",
   esrd: "2.16.840.1.113883.3.526.3.353",

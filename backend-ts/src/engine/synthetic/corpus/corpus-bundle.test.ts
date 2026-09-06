@@ -132,17 +132,39 @@ test("a mammogram is dual-stamped: the LOINC Observation and the CPT Procedure (
   assert.ok(procedure, "the authored cms125 retrieves the CPT Procedure");
 });
 
-test("CMS137's SUD events are deliberately not represented, and nothing invents a code for them", () => {
+/**
+ * CMS137 (MIPS 305). Its events were deliberately unrepresented until the measure was vendored and
+ * gated; now the episode is the Condition its denominator keys on and the two treatment contacts are
+ * the Procedures its two rates count. Every code comes from the artifact's own expansion.
+ */
+test("CMS137's SUD events become the Condition and Procedures the measure retrieves", () => {
+  const patient = corpusPatients(DEFAULT_CORPUS_SEED, 600).find(
+    (p) => p.events.some((e) => e.kind === "sudEpisode") && p.events.some((e) => e.kind === "sudInitiation"),
+  )!;
+  const resources = resourcesOf(patient);
+  const codeOf = (r: Res) => (r.code as { coding: Array<{ code: string }> } | undefined)?.coding[0]?.code;
+
+  const episode = resources.find((r) => r.resourceType === "Condition" && codeOf(r) === "10327003");
+  assert.ok(episode, "the SUD episode is a Condition the denominator can key on");
+  assert.equal((episode!.clinicalStatus as { coding: Array<{ system: string }> }).coding[0]!.system,
+    "http://terminology.hl7.org/CodeSystem/condition-clinical", "clinicalStatus carries its system");
+
+  const treatments = resources.filter((r) => r.resourceType === "Procedure" && codeOf(r) === "171047005");
+  assert.ok(treatments.length >= 1, "initiation and engagement are treatment Procedures");
+
+  // Still one Provenance per clinical resource — adding a resource type must not break that invariant.
+  const clinical = resources.filter((r) => !["Patient", "Provenance"].includes(r.resourceType));
+  const provenances = resources.filter((r) => r.resourceType === "Provenance");
+  assert.equal(provenances.length, clinical.length);
+});
+
+test("no SUD resource carries an invented code — every one is in the artifact's own expansion", () => {
+  // The membership contract (`wiring/corpus-membership.test.ts`) proves this against the real
+  // expansion; here we pin that the corpus stamps the CONSTANTS rather than a literal, which is the
+  // half that test cannot see.
   const patient = corpusPatients(DEFAULT_CORPUS_SEED, 600).find((p) => p.events.some((e) => e.kind.startsWith("sud")))!;
-  const sudEvents = patient.events.filter((e) => e.kind.startsWith("sud"));
-  assert.ok(sudEvents.length > 0, "precondition: this patient has SUD events");
-  // The bundle carries one Provenance per clinical resource, so an invented SUD resource would show up
-  // as a resource count larger than the non-SUD events can account for.
-  const emitted = resourcesOf(patient).filter((r) => !["Patient", "Provenance"].includes(r.resourceType));
-  const expected = patient.visits.length
-    + patient.conditions.filter((c) => ["diabetes", "hypertension", "bipolar", "colorectalCancer", "esrd"].includes(c)).length
-    + patient.events.filter((e) => !e.kind.startsWith("sud")).length
-    + patient.events.filter((e) => e.kind === "mammogram").length // dual-stamped
-    + patient.exceptions.length;
-  assert.equal(emitted.length, expected, "no resource is emitted for a SUD event");
+  const sudCodes = resourcesOf(patient)
+    .map((r) => (r.code as { coding: Array<{ code: string }> } | undefined)?.coding[0]?.code)
+    .filter((c): c is string => c === "10327003" || c === "171047005");
+  assert.ok(sudCodes.length > 0, "precondition: this patient has SUD resources");
 });
