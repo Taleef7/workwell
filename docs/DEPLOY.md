@@ -500,8 +500,31 @@ environment variable names (e.g. `DATABASE_URL_TWH` → `DATABASE_URL`,
 
 `WORKWELL_INSTANCE` selects the deployment profile: which tenants are visible, which tenants are
 evaluable, and which measures are runnable. Unset, `default`, and `twh` reproduce the pre-existing TWH
-behavior; `maui` exposes the 48-patient Maui directory and currently allows `cms122`, `cms125`, and
-`hypertension` to run. The measure catalog and database seeding remain shared across profiles.
+behavior; `maui` exposes the Maui patient roster and allows the ACO's five measures — `cms122`,
+`cms125`, `cms2`, `cms130`, `cms165` — to run (ADR-072; `cms2`/`cms130`/`cms165` are runnable but not
+yet ROUTED, see MM-1c). The measure catalog and database seeding remain shared across profiles.
+
+#### The Maui roster is a generated corpus (ADR-075)
+
+Since MM-1 U2 the Maui roster is the deterministic synthetic corpus, not a 48-row fixture. Four
+variables control it, and **the deploy and reconcile workflows must ship identical values** — the
+reconciler recreates the same container on a health event, so a mismatch silently changes the
+deployment on a self-heal. `official-flip-config.test.ts` fails the build if they drift.
+
+| Variable | Maui | TWH | What it does |
+|---|---|---|---|
+| `WORKWELL_MAUI_CORPUS_SIZE` | `20000` | unset | Patients generated. **Defaults to 48** — the original fixture rows, verbatim — so a deployment that has not opted in is unchanged. |
+| `WORKWELL_MAUI_CORPUS_SEED` | unset (`maui-py2027-v1`) | unset | The generator seed. Changing it regenerates *different people* under the same ids; the roster and the evaluated charts derive from one resolution so they cannot disagree. |
+| `WORKWELL_RUN_CHUNK_SIZE` | `500` | unset (500) | Subjects per evaluation chunk. A chunk's bundles are built, evaluated, persisted and dropped before the next exists, so **memory is bounded by one chunk**, not by the roster. A malformed value warns and falls back to 500. |
+| `WORKWELL_SCHEDULER_ANCHOR_HOUR_UTC` | `12` | unset (12) | The wall-clock hour the nightly run fires at. **12 UTC = 02:00 HST**, so the overnight recompute finishes before the clinic opens. The 23.5-hour debounce is a floor beneath the anchor, not the cadence. |
+
+Measured: 20,000 patients generate in ~0.3 s, and a full run over them completes well inside the
+`run-scale-maui` job's 15-minute ceiling. That job runs weekly and on demand — never on a push, because
+it measures a wall clock and a shared runner would make it a flake rather than a finding.
+
+Raising the size on a live instance is a container recreate, not a migration: the corpus is generated,
+never stored. Lowering it back to 48 is equally safe — the first 48 patients are the same people at
+every size.
 
 The profile also carries the backend **subject term** (`subjectTerm`: `employee` on the default profile,
 `patient` on `maui`). It drives backend-rendered text — the AI prompts and deterministic fallback
@@ -520,11 +543,25 @@ Total catalog: **63 measures**, 14 runnable (see `docs/MEASURES.md` for the full
 > `SEGMENT_UPDATED` audit event recorded; `updatedAt` → 2026-06-29T15:12:24Z.
 > If the stack is ever re-provisioned from a fresh DB, the seed auto-covers all sites — no repair needed.
 >
-> **maui (added 2026-08-30) needs NO repair yet**: the tenant is directory-only
-> (`EVALUATION_EXCLUDED_TENANTS` in `employee-catalog.ts`), so no outcomes or cases are produced for it and
-> segment applicability never fires. When MM-1 activates evaluation for the pilot cohort, the live
-> `All Employees` baseline must be widened to include `Wailuku Clinic` and `Kihei Clinic` via the same
-> audited `PUT /api/segments/:id` repair — that step belongs to the MM-1 activation checklist.
+> **maui NEEDS THE REPAIR once the corpus is switched on (MM-1 U2).** The note here used to say it did
+> not: the tenant was directory-only, so segment applicability never fired. That changed twice. On the
+> `maui` profile the pilot's patients are now evaluable, and the roster is the corpus — which spans
+> **five** clinics (`Wailuku`, `Kahului`, `Kihei`, `Lahaina`, `Pukalani`), where the 48-row fixture
+> spanned two.
+>
+> A **fresh** database needs nothing: `demoSegmentsFor`'s maui branch derives `All Patients`' site list
+> from the roster it is handed, so it covers whatever the configured size produces. An
+> **already-seeded** Maui instance is the problem — seeding is name-idempotent and deliberately never
+> mutates an existing segment, so the live `All Patients` still lists the two fixture clinics. Case
+> CREATION is gated by segment applicability, so on the first 20,000-patient run the 52 % of patients
+> at Kahului, Lahaina and Pukalani would get **outcomes but no cases**: their roster cells would read
+> NOT_APPLICABLE and no work list would ever surface them. The outcomes are still computed and stored
+> (CQL stays authoritative — ADR-008), so nothing is lost and nothing is wrong in the data; the gap is
+> in what the staff can act on, which is the entire product.
+>
+> **The repair, before or immediately after raising `WORKWELL_MAUI_CORPUS_SIZE`:** widen `All Patients`
+> to all five clinic names via the audited `PUT /api/segments/:id` (the Configure Groups editor), which
+> records a `SEGMENT_UPDATED` event. Owner-gated, like every data repair.
 
 The demo **risk-group segments** seed (`backend-ts/src/segment/segment-seed.ts`) is **name-idempotent**:
 a boot over an already-seeded DB adds no duplicates and **never mutates an existing segment** (so it
