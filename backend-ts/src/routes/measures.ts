@@ -49,7 +49,7 @@ import { computeLiteralDiff, literalDiffAvailable } from "../standards/literal-d
 import { CMS122_OFFICIAL_META } from "../standards/cms122-official.ts";
 import { StoreValueSetResolver, type ValueSetResolver } from "@work-well/measure-engine";
 
-import { DEPLOYMENT_PROFILE, EMPLOYEES, isRunnableMeasure } from "../config/deployment-profile.ts";
+import { DEPLOYMENT_PROFILE, employees, isRunnableMeasure } from "../config/deployment-profile.ts";
 import { createWorkwellEngine } from "../engine/cql/workwell-engine.ts";
 
 interface MeasuresEnv {
@@ -517,7 +517,7 @@ export async function handleMeasures(req: Request, env: MeasuresEnv, actor = "sy
         const runId = latestRows[0]?.runId;
         const run = runId ? await stores.runs.getRun(runId) : null;
         const asOf = run?.measurementPeriodEnd?.slice(0, 10) ?? latestRows[0]?.runStartedAt?.slice(0, 10) ?? today;
-        const deps = { engine: createWorkwellEngine({ valueSetResolver: resolver }), resolver, employees: EMPLOYEES, today: asOf, asOf };
+        const deps = { engine: createWorkwellEngine({ valueSetResolver: resolver }), resolver, employees: employees(), today: asOf, asOf };
         if (mode === "literal") {
           try {
             return json(await computeLiteralDiff(ref, latestRows, deps));

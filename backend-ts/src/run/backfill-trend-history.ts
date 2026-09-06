@@ -36,7 +36,7 @@ import type { RunStore } from "../stores/run-store.ts";
 import type { OutcomeStore, RecordOutcomeInput } from "../stores/outcome-store.ts";
 import type { CaseEventStore } from "../stores/case-event-store.ts";
 import type { EvaluateMeasureBinding } from "@work-well/measure-engine";
-import { type EmployeeProfile, EVALUABLE_EMPLOYEES, isRunnableMeasure, RUNNABLE_MEASURE_IDS as PROFILE_RUNNABLE_MEASURE_IDS } from "../config/deployment-profile.ts";
+import { type EmployeeProfile, evaluableEmployees, isRunnableMeasure, RUNNABLE_MEASURE_IDS as PROFILE_RUNNABLE_MEASURE_IDS } from "../config/deployment-profile.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { compositeBundleSource, type SubjectBundleSource } from "../wiring/subject-bundle-source.ts";
 import type { TargetOutcome } from "../engine/synthetic/exam-config.ts";
@@ -160,7 +160,7 @@ export async function backfillTrendHistory(
   deps: BackfillTrendHistoryDeps,
   opts: BackfillTrendHistoryOptions = {},
 ): Promise<BackfillTrendHistorySummary> {
-  const employees = deps.employees ?? EVALUABLE_EMPLOYEES;
+  const employees = deps.employees ?? evaluableEmployees();
   const weeks = Math.max(1, Math.trunc(opts.weeks ?? DEFAULT_WEEKS));
   const asOf = (opts.asOf ?? new Date().toISOString().slice(0, 10)).slice(0, 10);
   const asOfMs = Date.parse(`${asOf}T00:00:00.000Z`);

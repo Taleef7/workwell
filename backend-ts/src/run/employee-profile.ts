@@ -11,7 +11,7 @@
 import type { CaseStore } from "../stores/case-store.ts";
 import type { OutcomeStore } from "../stores/outcome-store.ts";
 import type { CaseEventStore } from "../stores/case-event-store.ts";
-import { employeeById, EMPLOYEES } from "../config/deployment-profile.ts";
+import { employeeById, employees } from "../config/deployment-profile.ts";
 import { DIRECTORY } from "../config/deployment-profile.ts";
 import { directoryForRows } from "../engine/ingress/webchart/live-directory.ts";
 import { isWebChartConfigured, type DataSourceEnv } from "../engine/ingress/data-source.ts";
@@ -225,7 +225,7 @@ export async function searchEmployees(deps: EmployeeProfileDeps, q: string, limi
   if (!q || q.trim().length < 2) return [];
   const needle = q.trim().toLowerCase();
   const safeLimit = Math.max(1, Math.min(limit, 50));
-  const matches = EMPLOYEES.filter(
+  const matches = employees().filter(
     (e) => e.name.toLowerCase().includes(needle) || e.externalId.toLowerCase().includes(needle) || e.role.toLowerCase().includes(needle),
   )
     .sort((a, b) => a.name.localeCompare(b.name))

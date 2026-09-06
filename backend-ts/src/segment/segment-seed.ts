@@ -11,7 +11,7 @@
  */
 import type { CreateSegmentInput, SegmentStore, SegmentRule } from "../stores/segment-store.ts";
 import { getStores, type StoresEnv } from "../stores/factory.ts";
-import { DEPLOYMENT_PROFILE, EMPLOYEES, RUNNABLE_MEASURE_IDS, type DeploymentProfileId, type EmployeeProfile } from "../config/deployment-profile.ts";
+import { DEPLOYMENT_PROFILE, employees, RUNNABLE_MEASURE_IDS, type DeploymentProfileId, type EmployeeProfile } from "../config/deployment-profile.ts";
 import { WEBCHART_LIVE_SITE } from "../engine/ingress/webchart/live-directory.ts";
 
 /**
@@ -70,7 +70,22 @@ export function demoSegmentsFor(
   ];
 }
 
-export const DEMO_SEGMENTS: CreateSegmentInput[] = demoSegmentsFor(DEPLOYMENT_PROFILE.id, EMPLOYEES, RUNNABLE_MEASURE_IDS);
+/**
+ * The demo segments, built on FIRST CALL and memoized.
+ *
+ * A module-scope constant here captured the roster at import — which on the Maui profile is the
+ * corpus, sized by `WORKWELL_MAUI_CORPUS_SIZE`. The baseline rule derives its site list from that
+ * roster, so an eager capture would have seeded a 48-patient site list onto a 20,000-patient
+ * deployment and quietly marked whole clinics NOT_APPLICABLE.
+ */
+let demoSegmentsMemo: CreateSegmentInput[] | null = null;
+export function demoSegments(): CreateSegmentInput[] {
+  return (demoSegmentsMemo ??= demoSegmentsFor(DEPLOYMENT_PROFILE.id, employees(), RUNNABLE_MEASURE_IDS));
+}
+/** Test seam only — pairs with `__resetDeploymentDirectory`. */
+export const __resetDemoSegments = (): void => {
+  demoSegmentsMemo = null;
+};
 
 /**
  * Idempotently seed the demo segments — skips any whose name already exists (a boot over an
@@ -87,7 +102,7 @@ export const DEMO_SEGMENTS: CreateSegmentInput[] = demoSegmentsFor(DEPLOYMENT_PR
  */
 export async function seedSegments(store: SegmentStore): Promise<void> {
   const existing = new Set((await store.listSegments()).map((s) => s.name));
-  for (const seg of DEMO_SEGMENTS) {
+  for (const seg of demoSegments()) {
     if (existing.has(seg.name)) continue;
     await store.createSegment(seg);
   }

@@ -18,7 +18,7 @@ import { ensureSegmentSeed } from "../segment/segment-seed.ts";
 // `externalId`s to the client, so on a scoped deployment the raw list would hand a user the OTHER
 // deployment's subject identifiers. Same class as the roster leak — a read that reaches the full
 // directory through a path a catalog-import sweep does not obviously cover.
-import { EMPLOYEES } from "../config/deployment-profile.ts";
+import { employees } from "../config/deployment-profile.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
 import type { SegmentRule, SegmentOverride, HydratedSegment } from "../stores/segment-store.ts";
 import type { CaseEventStore } from "../stores/case-event-store.ts";
@@ -36,7 +36,7 @@ const bad = (message: string): Response => json({ error: "invalid_request", mess
 /** Shared membership-preview projection used by BOTH preview surfaces (GET :id/preview + POST /preview)
  *  so they can't drift: filter the directory through the canonical matchesCohort, return { count, members }. */
 const previewResponse = (seg: HydratedSegment): Response => {
-  const members = EMPLOYEES.filter((e) => matchesCohort(e, seg)).map((e) => e.externalId);
+  const members = employees().filter((e) => matchesCohort(e, seg)).map((e) => e.externalId);
   return json({ count: members.length, members });
 };
 

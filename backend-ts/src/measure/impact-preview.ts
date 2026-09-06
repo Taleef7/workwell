@@ -15,7 +15,7 @@ import type { CaseEventStore } from "../stores/case-event-store.ts";
 import type { EvaluateMeasureBinding } from "@work-well/measure-engine";
 import {
   type EmployeeProfile,
-  EVALUABLE_EMPLOYEES,
+  evaluableEmployees,
   DEPLOYMENT_PROFILE,
   isRunnableMeasure,
 } from "../config/deployment-profile.ts";
@@ -161,7 +161,7 @@ export async function previewImpact(deps: ImpactPreviewDeps, measure: MeasureRec
     return emptyResponse(measure, evaluationDate, warnings);
   }
 
-  const employees = deps.employees ?? EVALUABLE_EMPLOYEES;
+  const employees = deps.employees ?? evaluableEmployees();
   let outcomes: PreviewOutcome[];
   try {
     const bundleSource = compositeBundleSource(process.env as Record<string, unknown>);

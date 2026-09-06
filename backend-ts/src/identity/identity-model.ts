@@ -14,7 +14,7 @@
  * probabilistic matcher drops in later, E15 PR-3). A record with no shared identifier is its own
  * singleton person — nothing is grouped by accident.
  */
-import { EMPLOYEES, tenantById, type EmployeeProfile } from "../config/deployment-profile.ts";
+import { employees, tenantById, type EmployeeProfile } from "../config/deployment-profile.ts";
 import { normalizePair, type PersonLink, type PersonLinkRef } from "../stores/person-link-store.ts";
 
 export type SourceStatus = "ACTIVE" | "PRIOR";
@@ -143,7 +143,7 @@ class UnionFind {
  * (Fable H8).
  */
 export function resolvePeople(
-  directory: readonly EmployeeProfile[] = EMPLOYEES,
+  directory: readonly EmployeeProfile[] = employees(),
   links: readonly PersonLink[] = [],
 ): Person[] {
   const byRef = new Map<string, EmployeeProfile>();
@@ -233,7 +233,7 @@ export function resolvePeople(
  * and stays excluded, so the two E15 stories remain distinct for consumers.
  */
 export function duplicateCandidates(
-  directory: readonly EmployeeProfile[] = EMPLOYEES,
+  directory: readonly EmployeeProfile[] = employees(),
   links: readonly PersonLink[] = [],
 ): Person[] {
   return resolvePeople(directory, links).filter(
@@ -244,7 +244,7 @@ export function duplicateCandidates(
 /** Resolve a single person by id (over the full or a provided directory + links). */
 export function personById(
   personId: string,
-  directory: readonly EmployeeProfile[] = EMPLOYEES,
+  directory: readonly EmployeeProfile[] = employees(),
   links: readonly PersonLink[] = [],
 ): Person | null {
   return resolvePeople(directory, links).find((p) => p.personId === personId) ?? null;

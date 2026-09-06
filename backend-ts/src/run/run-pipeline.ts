@@ -24,8 +24,8 @@ import type { HydratedSegment } from "../stores/segment-store.ts";
 import {
   employeeById,
   type EmployeeProfile,
-  EVALUABLE_EMPLOYEES,
-  EVALUATION_EXCLUDED_TENANTS,
+  evaluableEmployees,
+  evaluationExcludedTenants,
   isRunnableMeasure,
   RUNNABLE_MEASURE_IDS as PROFILE_RUNNABLE_MEASURE_IDS,
   DEPLOYMENT_PROFILE,
@@ -253,7 +253,7 @@ function resolveScope(req: ManualRunRequest, employees: readonly EmployeeProfile
       const id = req.employeeExternalId;
       if (!id || !employeeById(id)) throw new InvalidRunRequestError(`Unknown ${SUBJECT_SINGULAR}: ${id}`);
       const employee = employeeById(id)!;
-      if (EVALUATION_EXCLUDED_TENANTS.has(employee.tenantId)) {
+      if (evaluationExcludedTenants().has(employee.tenantId)) {
         // Directory-only tenant (see employee-catalog): the subject is visible but not evaluable yet.
         throw new InvalidRunRequestError(
           `${SUBJECT_LABEL} '${id}' belongs to tenant '${employee.tenantId}', which is directory-only until its measure set is wired (ROADMAP MM-1).`,
@@ -314,7 +314,7 @@ export interface PlannedRun {
 
 /** Create the run (RUNNING) + resolve work items, without evaluating — fast, safe to await inline. */
 export async function planManualRun(deps: RunPipelineDeps, req: ManualRunRequest): Promise<PlannedRun> {
-  const employees = deps.employees ?? EVALUABLE_EMPLOYEES;
+  const employees = deps.employees ?? evaluableEmployees();
   const bundleSource = deps.bundleSource ?? compositeBundleSource(process.env as Record<string, unknown>);
   const evalDate = req.evaluationDate ?? new Date().toISOString().slice(0, 10);
   const webChartEnv = deps.webChartEnv ?? {};

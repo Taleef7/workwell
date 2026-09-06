@@ -11,10 +11,16 @@ test("corpusDirectory yields `size` patients, the 40 providers and the maui tena
   assert.ok(dir.EMPLOYEES.every((e) => CLINICS.some((c) => c.name === e.site)));
   // Every patient's PCP resolves, and resolves to somebody at their own clinic.
   for (const e of dir.EMPLOYEES) {
-    const provider = dir.providerById.get(e.providerId);
+    const provider = dir.providerById(e.providerId);
     assert.ok(provider, `${e.externalId}: unknown provider ${e.providerId}`);
     assert.equal(provider!.location, e.site, `${e.externalId}: PCP is at a different clinic`);
+    assert.ok(dir.employeeById(e.externalId), `${e.externalId}: not resolvable by id`);
   }
+  assert.deepEqual(dir.TENANTS.map((t) => t.id), ["maui"]);
+  assert.equal(dir.employeesForTenant("maui").length, 500);
+  assert.deepEqual(dir.employeesForTenant("twh"), []);
+  assert.ok(dir.enterpriseForTenant("maui"), "the maui enterprise resolves");
+  assert.equal(dir.enterpriseForTenant("twh"), null);
 });
 
 test("the default size is the 48-patient fixture prefix", () => {
@@ -43,4 +49,13 @@ test("corpusSizeFromEnv reads a positive integer and refuses to throw on a bad o
   for (const bad of ["abc", "-1", "0", "12.5"]) {
     assert.equal(corpusSizeFromEnv({ WORKWELL_MAUI_CORPUS_SIZE: bad }), DEFAULT_CORPUS_DIRECTORY_SIZE, `bad value ${bad}`);
   }
+});
+
+test("the fixture prefix spreads across its clinics' panels, not onto one PCP each", () => {
+  // The default 48-patient deployment is what the pilot's staff see; collapsing each clinic onto its
+  // first PCP would leave the PCP filter with two panels and nothing to demonstrate.
+  const dir = corpusDirectory(DEFAULT_CORPUS_SEED, 48);
+  const panels = new Set(dir.EMPLOYEES.map((e) => e.providerId));
+  assert.ok(panels.size >= 8, `48 fixture patients sit on only ${panels.size} panels`);
+  for (const e of dir.EMPLOYEES) assert.equal(dir.providerById(e.providerId)!.location, e.site);
 });

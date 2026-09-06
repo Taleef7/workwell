@@ -6,7 +6,7 @@
  * goes into the manifest so a run's data is traceable to the exact table that produced it, and
  * CORPUS_GENERATOR_VERSION is bumped by hand whenever a row or the drawing logic changes.
  */
-export const CORPUS_GENERATOR_VERSION = "2.1.0";
+export const CORPUS_GENERATOR_VERSION = "2.2.0";
 export const DEFAULT_CORPUS_SEED = "maui-py2027-v1";
 
 export interface CorpusClinic {

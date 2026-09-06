@@ -234,6 +234,27 @@ function eventsFor(rng: SplitMix64, patient: { conditions: readonly string[]; ag
   return { events: events.sort((a, b) => a.date.localeCompare(b.date) || a.kind.localeCompare(b.kind)), exceptions };
 }
 
+/**
+ * The fixture prefix's PCPs, spread across each clinic's panel in `externalId` order.
+ *
+ * The fixture rows carry no `providerId` — the catalog used to derive one by round-robin, and the
+ * corpus keeps that rule rather than handing every patient at a clinic its FIRST PCP: on the default
+ * 48-patient deployment that would collapse forty providers into two panels, and the PCP filter the
+ * pilot's quality staff work by would have nothing to filter. This consumes NO draws from the
+ * patient's stream, so the fixture records are otherwise byte-identical to what the stream produces.
+ */
+const FIXTURE_PANEL: ReadonlyMap<string, string> = (() => {
+  const rank = new Map<string, number>();
+  const out = new Map<string, string>();
+  for (const fixture of [...CORPUS_FIXTURE_PREFIX].sort((a, b) => a.externalId.localeCompare(b.externalId))) {
+    const atSite = PCPS.filter((p) => p.location === fixture.site);
+    const seen = rank.get(fixture.site) ?? 0;
+    rank.set(fixture.site, seen + 1);
+    out.set(fixture.externalId, atSite[seen % atSite.length]!.id);
+  }
+  return out;
+})();
+
 /** The clinic and PCP a patient is attributed to. PCP is uniform within the clinic, giving 350-650 panels. */
 function panelFor(rng: SplitMix64): { site: string; providerId: string } {
   const site = rng.pick(CLINIC_WEIGHTS);
@@ -262,7 +283,7 @@ export function patientAt(seed: string, index: number, taken: Set<string> = new 
     ? { name: fixture.name, redraws: 0, fallback: false }
     : disambiguate(seed, index, baseName, dateOfBirth, taken);
   const panel = fixture
-    ? { site: fixture.site, providerId: PCPS.find((p) => p.location === fixture.site)!.id }
+    ? { site: fixture.site, providerId: FIXTURE_PANEL.get(fixture.externalId)! }
     : panelFor(rng);
 
   const conditions = conditionsFor(rng, band, sex, age);

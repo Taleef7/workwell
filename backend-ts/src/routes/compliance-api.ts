@@ -34,7 +34,7 @@ import { measureDisplayName } from "../measure/measure-name.ts";
 import type { CloudDatabase } from "@mieweb/cloud";
 import { getStores } from "../stores/factory.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
-import { EVALUABLE_EMPLOYEES, isRunnableMeasure } from "../config/deployment-profile.ts";
+import { evaluableEmployees, isRunnableMeasure } from "../config/deployment-profile.ts";
 import { compositeBundleSource } from "../wiring/subject-bundle-source.ts";
 import type { TargetOutcome } from "../engine/synthetic/exam-config.ts";
 import type { FhirBundle } from "../engine/synthetic/fhir-bundle-builder.ts";
@@ -400,7 +400,7 @@ async function preview(
   let target: TargetOutcome;
   let bundle: FhirBundle;
   try {
-    target = bundleSource.targetFor(EVALUABLE_EMPLOYEES, measureId, subjectId) ?? "MISSING_DATA";
+    target = bundleSource.targetFor(evaluableEmployees(), measureId, subjectId) ?? "MISSING_DATA";
     bundle = bundleSource.bundleFor(employee, measureId, target, evalDate);
   } catch (error) {
     return json(
