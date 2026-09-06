@@ -130,6 +130,22 @@ export interface OutcomeStore {
   listOutcomes(runId: string, opts?: { limit?: number; offset?: number }): Promise<OutcomeRecord[]>;
   getOutcomeById(id: string): Promise<OutcomeRecord | null>;
   /**
+   * Delete outcome rows older than `cutoff`, KEEPING three things (ADR-073):
+   *  - the newest row per `(subject_id, measure_id)`, whatever its age — a subject's current answer is
+   *    never deleted, so no roster cell can go blank because a run happened to be old;
+   *  - every row belonging to a run in `pinnedRunIds` — the runs open cases point at, so a case can
+   *    always show the evidence it was opened on;
+   *  - everything at or after `cutoff`.
+   *
+   * Returns the number of rows deleted. Idempotent: a second call with the same arguments deletes
+   * nothing. **No schema change** — a DELETE against the existing `(subject_id, evaluated_at DESC)`
+   * index.
+   *
+   * The run rows themselves are never touched. A run's summary counts live on the run and in the
+   * quality snapshots, so a compacted run still reports what it found (ADR-073).
+   */
+  compactOlderThan(cutoff: string, pinnedRunIds: readonly string[]): Promise<number>;
+  /**
    * The distinct measure ids present in a run, capped at `limit` (default 2) — a bounded
    * `SELECT DISTINCT measure_id … LIMIT` used by the QRDA / MeasureReport endpoints to enforce the
    * single-measure precondition WITHOUT loading the run's outcome rows (Fable H4). Two is enough to

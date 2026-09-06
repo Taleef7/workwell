@@ -14,6 +14,7 @@
  * hand to ctx.waitUntil.
  */
 import type { Stores, StoresEnv } from "../stores/factory.ts";
+import { compactOutcomes, retentionDaysFromEnv } from "../run/outcome-compaction.ts";
 import { getStores } from "../stores/factory.ts";
 import type { HydratedSegment } from "../stores/segment-store.ts";
 import type { EvaluateMeasureBinding } from "@work-well/measure-engine";
@@ -370,6 +371,22 @@ async function runTickLocked(deps: SchedulerTickDeps, nowMs: number): Promise<bo
   nextDueAtMs = dueAtMs({ lastRunAtMs: nowMs, nowMs, minGapMs });
 
   await finishOrFail(runDeps, planned);
+
+  /**
+   * Retention (ADR-073), AFTER the run and therefore after its quality snapshot — `finishManualRun`
+   * materializes the snapshot as part of finalizing, so compacting before this line would delete the
+   * per-subject rows the aggregate is computed from and the durable history would be built from a
+   * roster with holes in it. The ordering is pinned by `outcome-compaction.test.ts`.
+   *
+   * Inert unless `WORKWELL_OUTCOME_RETENTION_DAYS` is set, and best-effort: a compaction failure must
+   * not fail a run that has already completed and been reported.
+   */
+  await compactOutcomes(deps.stores, { retentionDays: retentionDaysFromEnv(process.env as Record<string, unknown>), now: nowMs })
+    .catch((err) => {
+      console.warn(`[workwell] outcome compaction failed: ${String((err as Error)?.message ?? err)}`);
+      return null;
+    });
+
   return true;
 }
 

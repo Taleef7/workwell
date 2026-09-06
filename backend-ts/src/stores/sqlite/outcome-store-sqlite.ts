@@ -157,6 +157,38 @@ export class SqliteOutcomeStore implements OutcomeStore {
     return row ? toRecord(row) : null;
   }
 
+  /**
+   * ADR-073 retention. One DELETE, and everything it must NOT remove is expressed inside it rather than
+   * as a pre-pass that reads ids into memory — at 20,000 patients across five measures the keep-set is
+   * 100,000 rows, and materialising it to delete around it defeats the point of compacting.
+   *
+   * The `NOT IN (SELECT MAX(...) GROUP BY ...)` shape is what keeps a subject's CURRENT answer: the
+   * newest row per (subject, measure) survives at any age, so no roster cell goes blank because the
+   * last run for that measure happens to predate the window.
+   */
+  async compactOlderThan(cutoff: string, pinnedRunIds: readonly string[]): Promise<number> {
+    // An empty pin list must still produce valid SQL — `IN ()` is a syntax error in SQLite, so the
+    // clause is omitted rather than emitted empty.
+    const pins = [...new Set(pinnedRunIds)];
+    const pinClause = pins.length > 0 ? ` AND run_id NOT IN (${pins.map(() => "?").join(", ")})` : "";
+    const { results } = await this.db
+      .prepare(
+        `DELETE FROM outcomes
+          WHERE evaluated_at < ?
+            AND id NOT IN (
+              SELECT id FROM outcomes o2
+               WHERE o2.evaluated_at = (
+                 SELECT MAX(o3.evaluated_at) FROM outcomes o3
+                  WHERE o3.subject_id = o2.subject_id AND o3.measure_id = o2.measure_id
+               )
+            )${pinClause}
+          RETURNING id`,
+      )
+      .bind(cutoff, ...pins)
+      .all<{ id: string }>();
+    return (results ?? []).length;
+  }
+
   async listOutcomesForEmployee(subjectId: string, limit: number): Promise<EmployeeOutcomeRow[]> {
     const { results } = await this.db
       .prepare(

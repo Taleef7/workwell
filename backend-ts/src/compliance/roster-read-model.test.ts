@@ -44,6 +44,7 @@ function fakeStore(withRun: OutcomeWithRun[], byRun: Record<string, OutcomeRecor
     listOutcomesWithRun: async () => withRun,
     listLatestPopulationOutcomes: async () => reduceLatest(withRun),
     listOutcomes: async (runId: string) => byRun[runId] ?? [],
+    compactOlderThan: async () => 0,
     listLatestFinalizedOutcomePerMeasure: async () => { throw new Error("unused"); },
     hasOutcomes: async () => { throw new Error("unused"); },
     recordOutcome: async () => { throw new Error("unused"); },

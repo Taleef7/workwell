@@ -161,6 +161,31 @@ export class PgOutcomeStore implements OutcomeStore {
     return row ? toRecord(row) : null;
   }
 
+  /**
+   * ADR-073 retention — see the SQLite floor for the shape and why the keep-set is expressed in SQL
+   * rather than read into memory. `DISTINCT ON` is the Postgres form of "the newest row per (subject,
+   * measure)"; the floor uses a correlated MAX because SQLite has no DISTINCT ON.
+   */
+  async compactOlderThan(cutoff: string, pinnedRunIds: readonly string[]): Promise<number> {
+    const pins = [...new Set(pinnedRunIds)].filter((id) => isUuid(id));
+    const binds: unknown[] = [cutoff];
+    let pinClause = "";
+    if (pins.length > 0) {
+      pinClause = ` AND run_id <> ALL($${binds.push(pins)}::uuid[])`;
+    }
+    const { rowCount } = await this.pool.query(
+      `DELETE FROM ${T}
+        WHERE evaluated_at < $1
+          AND id NOT IN (
+            SELECT DISTINCT ON (subject_id, measure_id) id
+              FROM ${T}
+             ORDER BY subject_id, measure_id, evaluated_at DESC, id DESC
+          )${pinClause}`,
+      binds,
+    );
+    return rowCount ?? 0;
+  }
+
   async listOutcomesForEmployee(subjectId: string, limit: number): Promise<EmployeeOutcomeRow[]> {
     const { rows } = await this.pool.query<{
       run_id: string;

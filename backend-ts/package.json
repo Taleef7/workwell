@@ -17,6 +17,7 @@
     "seed:trend-history": "tsx src/run/cli/seed-trend-history-bin.ts",
     "seed:scale": "tsx src/run/cli/seed-scale-bin.ts",
     "seed:quality-history": "tsx src/run/cli/seed-quality-history-bin.ts",
+    "outcomes:compact": "tsx src/run/cli/outcomes-compact-bin.ts",
     "resolve-valuesets": "tsx src/run/cli/resolve-valuesets-bin.ts",
     "test:official-cases": "tsx src/run/cli/official-cases-bin.ts",
     "cql-tests": "tsx scripts/cql-tests/bin.ts",
