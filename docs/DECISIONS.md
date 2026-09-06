@@ -18,6 +18,190 @@
 >
 > **Sequence note:** ADR-033 does not exist — verified absent, and the number must not be reused.
 
+## ADR-075: the pilot's roster is a generated corpus the deployment composes lazily, and evaluation runs in subject chunks
+
+**Status:** Accepted (2026-09-06). Milestone MM-1, unit U2 (`docs/ROADMAP_2026-08-30.md` §5).
+
+**Context.** ADR-072 made the ACO's five measures runnable. What they had to run against was a
+48-row fixture: `pat-001..pat-048`, two clinics, four providers, and a *seeded distribution* that
+assigned each subject a target bucket before any CQL ran. That fixture is why the pilot's numbers
+could not be believed. It is too small to show a rate, too uniform to show a panel, and — decisively —
+its clinical data is generated FROM the answer, so every measure it is asked scores exactly as it was
+built to score. A corpus like that cannot surface a defect in the measure logic, because it was
+constructed from the same assumption the logic is being tested for.
+
+The pilot also asked a question the fixture cannot answer at all. Its quality staff work by provider
+panel, never by measure, so a roster has to have panels in it; and an ACO's rates are only meaningful
+at population scale.
+
+Separately, the run pipeline was written for 150 people. At 20,000 subjects and five measures it is
+100,000 work items, and three of its properties stop being acceptable: the measure-major batch
+pre-pass materialises one measure's bundles for the whole roster at once, the per-item loop rebuilds
+each bundle a second time, and every outcome is a single-row `INSERT`.
+
+**Decision.**
+
+1. **The corpus is data-first, and generates no outcomes.** `patientAt(seed, index)` is pure and emits
+   clinical FACTS at published population rates — conditions by age band, visits, observations,
+   procedures, documented exceptions. It never computes, stores or implies a measure result. CQL alone
+   decides every outcome (ADR-008, `docs/AI_GUARDRAILS.md` §1). The `SubjectBundleSource` seam still
+   carries a seeded `target`, and the corpus's implementation returns `COMPLIANT` for everyone: that
+   value is inert, threaded through because the signature requires it, and it is not a claim about
+   anybody.
+
+2. **Determinism is per subject, not per generation.** Every draw for a patient comes from that
+   patient's own SplitMix64 stream keyed by `(seed, index)`, so `patientAt(seed, i)` and
+   `corpusPatients(seed, n)[i]` are the same record and batch boundaries never move anybody. Identity
+   disambiguation — the one thing that genuinely depends on who came before — draws from a SEPARATE
+   stream so it costs the patient's own stream nothing. `CORPUS_GENERATOR_VERSION` is bumped by hand
+   with any change to the draw order or the parameter table, and a pinned SHA-256 of the first 100
+   patients fails CI on a silent drift.
+
+3. **The first 48 records are the existing fixture rows, verbatim.** Ids, names, dates of birth and
+   clinics are unchanged, so every fixture, saved filter, screenshot and e2e expectation that names a
+   patient keeps naming the same person. What the prefix does NOT preserve is stated plainly: their
+   clinical data is generated data-first like everybody else's, so the designed 38/7/3 outcome buckets
+   are replaced by whatever the measures compute. Those pins are re-recorded, not defended.
+
+4. **The Maui directory IS the corpus, composed on first access.** `composeDeploymentDirectory` builds
+   the Maui roster from `corpusDirectory(seed, size)`; `WORKWELL_MAUI_CORPUS_SIZE` defaults to **48**,
+   so a deployment that has not opted in sees exactly what it saw before, and the Maui workflows set
+   20000 explicitly. The composition is memoized behind `getDeploymentDirectory()` rather than run at
+   module load, so a process configures its size before paying for it and no test generates 20,000
+   profiles by accident.
+
+5. **Evaluation runs in SUBJECT chunks** (`WORKWELL_RUN_CHUNK_SIZE`, default 500). A chunk builds its
+   bundles, evaluates every measure over them, persists in one `recordOutcomes` call, and drops the
+   cache before the next chunk exists. Membership is by subject so a subject's every measure shares one
+   bundle — which is what the optional `bundleForSubject(employee, evaluationDate)` on
+   `SubjectBundleSource` is for. A source whose bundle genuinely differs per measure simply omits it and
+   is built per item exactly as before.
+
+6. **Four things stay whole-roster, and that is the substance of the decision.** ADR-043's
+   empty-initial-population judgement, the active-case snapshot, the cycle rollover, and the single
+   terminal audit event. A chunk is an arbitrary sample of the roster; judging any of them per chunk
+   produces a statement about the chunking, not about the population.
+
+**Alternatives rejected.**
+
+- *Growing the seeded distribution to 20,000.* Rejected: it scales the fixture's central defect. A
+  roster whose outcomes are decided before CQL runs is exactly as uninformative at 20,000 as at 48, and
+  more convincing, which is worse.
+- *Sourcing a public synthetic corpus (Synthea and similar).* Rejected for the pilot's purpose: we would
+  not control the panel structure the quality staff work by, the terminology would not be pinned to the
+  artifacts' own expansions (ADR-036), and the corpus could not be regenerated byte-identically from a
+  seed recorded in a manifest.
+- *Keeping the array exports and making only `DIRECTORY` lazy.* Rejected: an exported `const` binding is
+  evaluated at import in ESM and cannot be made lazy, so the arrays became accessor calls. Eleven modules
+  read the roster through `DIRECTORY`, whose members are getters, so those call sites are unchanged.
+- *Chunking measure-major* (all subjects for one measure, then the next). Rejected: it holds the whole
+  roster's bundles for the measure being evaluated, which is the memory problem restated, and it rebuilds
+  every subject's bundle once per measure.
+- *Streaming outcomes per item and keeping single-row inserts.* Rejected on the Neon path: 100,000
+  round trips is the dominant cost of a full run, and batching per chunk also makes the failure boundary
+  a chunk rather than a row.
+
+**Consequences.**
+
+- **Maui reports 40 providers rather than 4**, across five clinics rather than two, and the fixture's 48
+  patients spread across their clinic's panel in `externalId` order — the rule the catalog itself used.
+  Handing every patient at a clinic its first PCP would collapse forty providers into two panels on the
+  DEFAULT deployment, which is the one the pilot's staff are using.
+- **A run's outcome ordering changes** for a roster larger than one chunk: chunks are persisted as they
+  finish. Within a chunk the items keep the order they had.
+- **`recordOutcomes` returns its records in input order** so the incremental cache can still fingerprint
+  the row it just wrote. Both store implementations mint the ids locally rather than reading them back.
+- **A hard FAILED run now writes a terminal audit event.** It previously wrote one only when the failure
+  was a live-WebChart preparation failure, so an ordinary failure finalized the run row and left
+  `audit_events` empty — against a hard rule that admits no exceptions. Chunking makes that path much
+  easier to reach, since a persist failure in any chunk lands there.
+- **The corpus's official population counts are a CREDENTIALED-CI fact, not a local one.** Every
+  assertion that consults an artifact's own terminology self-skips without the gitignored sidecar, so
+  `corpus-official-population.test.ts` is registered in the workflow step that has the VSAC credential.
+  A test that loads a sidecar and is not listed there is permanently skipped while reading as covered —
+  which has happened before.
+- **The 20,000-patient corpus is a SANDBOX artifact.** Nothing here authorizes the pilot's PHI phase,
+  which stays a separate `PRODUCTION_READINESS`-gated decision (locked decision §4A.1).
+
+## ADR-074: a multi-rate measure is read as every one of its rates — and a subject is compliant only where each rate they are in is met
+
+**Status:** Accepted (2026-09-06). Milestone MM-1, unit U3 (`docs/ROADMAP_2026-08-30.md` §5, MM-1e).
+
+**Context.** Every measure WorkWell had onboarded declares exactly one `Measure.group`, and the code
+grew around that: the executor adapter read `populationResults` (group 1), `MeasureReport` emitted one
+group, the summary route counted one set of populations, and the MADiE gate compared one. None of it
+was wrong, and none of it said it was assuming anything.
+
+CMS137 (SUD treatment initiation and engagement, MIPS Quality ID 305) is blue on the ACO's list and
+declares **two** groups over the same denominator expression: *Initiation* — treatment begun within 14
+days of a new SUD episode — and *Engagement* — two or more further services within 34 days of
+initiating. They are not two views of one answer. In **8 of the 45 steward-published test cases the
+two rates disagree**, and every one of those is the same clinical story: a patient who initiated
+treatment and then did not engage.
+
+That is the whole reason to be careful. Reading group 1 alone reports those eight patients as
+compliant and drops them off the worklist — hiding exactly the follow-up gap the measure exists to
+surface. The failure is silent at every layer: a run completes, every subject gets an outcome, the
+rate looks plausible, and nothing anywhere says a second rate was discarded.
+
+**Decision.**
+
+1. **Every rate is read.** `OfficialSubjectResult` carries `rates: FqmPopulationResult[][]`, and the
+   adapter maps each rate to its own outcome. The single-rate path is `rates` of length one, so there
+   is no separate code path to keep in step.
+
+2. **The workflow bucket is the WORST measuring rate.** A subject is COMPLIANT only where every rate
+   they are in the denominator for is met. The reduction considers only rates that actually measure the
+   subject: `outcomeFromPopulations` returns `MISSING_DATA` for out-of-population, and `MISSING_DATA` is
+   the most severe outcome, so a naive worst-of-all would take a subject the measure had fully answered
+   on rate 1 and, because they fall outside rate 2's population, open a case saying "we cannot tell".
+
+3. **Regulatory truth is not the bucket.** Every rate's populations are persisted losslessly in
+   `evidence_json.official`, and `MeasureReport` and the exports read that rather than the bucket. The
+   five-value workflow enum does not grow (roadmap §7.3): it answers "does this person need outreach",
+   which is a different question from "what does this measure report".
+
+4. **`MeasureReport` emits one group per rate**, with `Group_1`/`Group_2` ids on multi-rate reports only
+   — so a consumer can tell Initiation from Engagement by something other than array position — and
+   single-rate reports keep the id-less shape they have today.
+
+5. **A subject who cannot supply every rate is counted in NONE of them.** Rates whose denominators come
+   from the same expression must have aligned columns; letting an errored or unreadable subject
+   contribute to rate 1 only inflates one denominator against the other, and nothing in the output
+   would show it. An unreadable rate contributes zeros rather than a copy of rate 1.
+
+6. **QRDA III REFUSES a multi-rate measure (501) rather than emitting rate 1.** That document goes to
+   CMS. A single-rate QRDA III carrying a multi-rate measure's identity is a wrong submission that looks
+   entirely normal. Multi-rate QRDA is tracked as follow-up work.
+
+7. **The MADiE gate compares every rate**, and reports which rate diverged when they disagree.
+
+**Alternatives rejected.**
+
+- *Reduce to rate 1 and note the limitation in the docs.* Rejected: the limitation is invisible in the
+  output, and eight of forty-five cases is not an edge. A documented silent wrong answer is still a
+  silent wrong answer.
+- *Reduce to the BEST rate*, so a patient who met either is compliant. Rejected: it is the same defect
+  in the direction that empties the worklist, and the measure exists to populate one.
+- *Grow the outcome enum to carry per-rate state.* Rejected per roadmap §7.3 — the enum is the operator's
+  vocabulary for outreach, the per-rate detail is already persisted losslessly, and widening it would
+  reach every read surface for a distinction only the reporting artifacts need.
+- *Emit a multi-rate QRDA III now.* Rejected as out of scope for MM-1e and refused loudly instead. A
+  refusal an operator sees beats a document CMS accepts and misreads.
+
+**Consequences.**
+
+- **CMS137 gates at 45/45** against its steward deck, raw and reference-adjusted, with zero unexpected
+  mismatches and zero errors — the six blue ACO measures now have committed evidence across 455 cases.
+- `?type=summary` and `?type=bundle` **agree**. They did not: the summary route counted one group while
+  the bundle emitted two, for the same run, with nothing to say which was right — and the summary route
+  is the one that survives the individual-report cap, so it is the one a real roster uses.
+- **The synthetic corpus had to emit a second engagement service.** Rate 2 requires two or more further
+  services within 34 days; the generator emitted one, so Engagement would have read **0% across the
+  entire corpus** — the exact rate this decision exists to surface. 82 of 564 episodes now engage.
+- `official-flip-gate.ts` and `compliance-api.ts` **still read rate 1 only**, named here as known and
+  deferred rather than left to be discovered.
+
 ## ADR-072: a measure is runnable when it is authored OR official-only-and-routed — and an eCQM is scored over its calendar year, not a rolling window
 
 **Status:** Accepted (2026-09-05). Milestone MM-1b (`docs/ROADMAP_2026-08-30.md` §5).
