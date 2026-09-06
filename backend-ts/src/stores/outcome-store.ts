@@ -117,9 +117,11 @@ export interface OutcomeStore {
    * Batch insert (synthetic trend-history backfill): persist many outcomes for a run in one call.
    * Makes ~100 inserts/run × weeks × measures practical on Neon (the Postgres adapter chunks a
    * multi-row INSERT; the SQLite floor loops inside a single transaction). Equivalent to calling
-   * `recordOutcome` per input. A no-op for an empty array.
+   * `recordOutcome` per input, and returns the same records IN INPUT ORDER — the run pipeline persists
+   * a chunk in one call and still has to fingerprint each row it wrote for the incremental cache.
+   * Returns `[]` for an empty input (a no-op, which must not throw).
    */
-  recordOutcomes(inputs: RecordOutcomeInput[]): Promise<void>;
+  recordOutcomes(inputs: RecordOutcomeInput[]): Promise<OutcomeRecord[]>;
   /**
    * Outcomes for one run, oldest-first. Pass `opts.limit`/`opts.offset` to page the scan (Fable H4):
    * the run-detail grid + the outcomes CSV must never materialize a `seed:scale` run's 120k rows in the

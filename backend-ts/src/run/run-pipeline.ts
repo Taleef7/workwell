@@ -585,36 +585,59 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
       }
     }
   }
+  /**
+   * ADR-074 / spec §6 — evaluation runs in SUBJECT CHUNKS, and each chunk is evaluated, persisted and
+   * dropped before the next is built.
+   *
+   * The roster this pipeline was written for was 150 people. The pilot's is 20,000, and at five
+   * measures that is 100,000 work items: the measure-major pre-pass below built one measure's bundles
+   * for the WHOLE roster at once, and the per-item loop then rebuilt each one. Chunking is what bounds
+   * that — one chunk's bundles live at a time — and `bundleForSubject`, when the source offers a
+   * measure-independent whole record as the corpus does, makes it one bundle per subject rather than
+   * one per subject per measure.
+   *
+   * What must NOT become per-chunk, and does not:
+   *  - the active-case snapshot, preloaded once per measure above (invariant 5);
+   *  - `ippByMeasure`, so ADR-043's empty-initial-population judgement is made over the COMPLETE
+   *    roster — per chunk it would warn about a chunk that happened to contain nobody eligible
+   *    (invariant 1);
+   *  - the cycle rollover and the single terminal event, both after the last chunk (invariants 3, 4).
+   *
+   * Chunk membership is by SUBJECT, so a subject's every measure is evaluated together and their
+   * bundle is built once. Within a chunk the items keep the order they had in `items` (measure-major),
+   * so evaluation order inside a chunk is unchanged.
+   */
+  const CHUNK_SIZE = Math.max(1, Number(process.env.WORKWELL_RUN_CHUNK_SIZE ?? 500) || 500);
+  const subjectOrder: string[] = [];
+  const seenSubject = new Set<string>();
+  for (const item of items) {
+    const id = item.employee.externalId;
+    if (!seenSubject.has(id)) {
+      seenSubject.add(id);
+      subjectOrder.push(id);
+    }
+  }
+  const chunkOfSubject = new Map<string, number>();
+  subjectOrder.forEach((id, index) => chunkOfSubject.set(id, Math.floor(index / CHUNK_SIZE)));
+  const chunks: WorkItem[][] = Array.from(
+    { length: Math.max(1, Math.ceil(subjectOrder.length / CHUNK_SIZE)) },
+    () => [] as WorkItem[],
+  );
+  for (const item of items) chunks[chunkOfSubject.get(item.employee.externalId)!]!.push(item);
 
-  // Roadmap §7.4 PR-8 — measure-major batching, as a PRE-PASS rather than a rewrite of the loop below.
-  //
-  // fqm-execution parses an artifact's ELM per CALL, so an officially-routed measure was paying one parse
-  // of a 2.4 MB bundle PER SUBJECT. `engine.evaluateBatch` resolves `undefined` for anything it cannot
-  // batch — every measure today — in which case nothing here runs and the loop is the code that ships now.
-  //
-  // A pre-pass, because the loop carries outcome persistence, the incremental commit, the case upsert, its
-  // audit event and the counters, all order-dependent. Restructuring it measure-major would hold every
-  // measure's bundles in memory at once (150 subjects × 14 measures) to benefit the measures that are
-  // routed, of which there are currently none. This holds ONE measure's bundles and drops them.
-  //
-  // Bundles are therefore built twice for a batched measure — here and in the loop, where the incremental
-  // fingerprint needs one. Deterministic and cheap beside an ELM parse; noted rather than optimised.
-  //
-  // No interaction with the incremental cache today: ADR-040 §6 means an official-routed measure is never
-  // reused, so this cannot evaluate a subject the cache would have skipped. If that policy is lifted, the
-  // pre-pass would evaluate some subjects whose result then goes unused — wasteful, never wrong.
-  const prefetched = new Map<string, MeasureOutcome>();
-  const batchFailure = new Map<string, Error>();
+
   /**
    * Per-measure initial-population membership, as REPORTED by whichever path produced each outcome
-   * (ADR-043). Read after the evaluation loop, never during it.
+   * (ADR-043). Accumulated across every chunk and read only after the LAST one.
    *
-   * Read at the END of the roster, not in the batch pre-pass. The first version concluded inside the
-   * pre-pass off `prefetched` alone, and Codex (#354) showed that reads an INCOMPLETE roster: a subject
-   * the executor omits is re-evaluated individually LATER in the loop below, so a batch of two out-of-IPP
-   * outcomes plus one omission warned even when the omitted subject landed squarely in the population,
-   * and one out-of-IPP outcome plus two omissions stayed silent because the sample failed its own `> 1`
-   * guard. Membership is a property of the finished roster, so it is decided where the roster is finished.
+   * Read at the END of the roster — not in the batch pre-pass, and not per chunk. The first version
+   * concluded inside the pre-pass off `prefetched` alone, and Codex (#354) showed that reads an
+   * INCOMPLETE roster: a subject the executor omits is re-evaluated individually later in the loop, so
+   * a batch of two out-of-IPP outcomes plus one omission warned even when the omitted subject landed
+   * squarely in the population, and one out-of-IPP outcome plus two omissions stayed silent because the
+   * sample failed its own `> 1` guard. Chunking offers the same mistake a second way — a chunk is an
+   * even more arbitrary sample than a batch — so membership stays a property of the finished roster,
+   * and is decided where the roster is finished.
    *
    * Membership is recorded for EVERY measure but only ever READ for an officially-routed one — see
    * `emptyIppMeasures` below for why that gate is not optional. An absent `inInitialPopulation` still
@@ -622,227 +645,320 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
    * is absence of evidence.
    */
   const ippByMeasure = new Map<string, boolean[]>();
-  if (deps.engine.evaluateBatch) {
-    for (const measureId of new Set(items.map((i) => i.measureId))) {
-      const forMeasure = items.filter((i) => i.measureId === measureId);
-      let batched = false;
-      try {
-        // The subject list is a FACTORY, not an array, so a measure with no batch path costs nothing.
-        // Passed eagerly, this would build every measure's bundles — 14 measures × N subjects — and
-        // discard 13/14 of them the moment official routing is on for one measure (review #3).
-        const results = await deps.engine.evaluateBatch(
-          measureId,
-          () =>
-            forMeasure.map((item) => ({
-              subjectId: item.employee.externalId,
-              patientBundle: bundleFor(item, liveRoster, evalDate, bundleSource),
-            })),
-          evalDate,
-        );
-        if (!results) continue; // not batchable — the loop evaluates it per subject, unchanged
-        batched = true;
-        for (const item of forMeasure) {
-          const outcome = results.get(item.employee.externalId);
-          if (outcome) prefetched.set(`${item.employee.externalId}|${measureId}`, outcome);
-        }
-      } catch (err) {
-        // Never abort the run (runtime invariant). The failure is recorded against the MEASURE and
-        // re-thrown per subject in the loop, so it lands in the existing per-subject isolation —
-        // MISSING_DATA carrying this message, `failures++`, run PARTIAL_FAILURE, and therefore the #264
-        // alert. That is the loud outcome the batch retrieve check exists to produce, and it costs no new
-        // failure channel. Other measures are unaffected. Normalized to an Error so the loop can test
-        // PRESENCE rather than truthiness — a rejection with a falsy value would otherwise be stored and
-        // then silently ignored, disabling the very refusal this exists for (review #4).
-        batchFailure.set(measureId, err instanceof Error ? err : new Error(String(err)));
-        await deps.runStore
-          .appendLog(runId, "ERROR", `${measureId}: official batch evaluation failed — ${String((err as Error)?.message ?? err)}`)
-          .catch(() => {});
-      }
-      // OUTSIDE the try, and best-effort. Inside it, a transient `run_logs` write failure would be
-      // caught above and recorded as a batch failure — turning a successful evaluation, whose results are
-      // already in `prefetched`, into a whole measure's worth of MISSING_DATA. An observability write must
-      // never author an outcome (review #2); the same reason the case-audit and quality-snapshot writes in
-      // this file are best-effort.
-      if (batched) {
-        await deps.runStore
-          .appendLog(runId, "INFO", `${measureId}: ${forMeasure.length} subject(s) evaluated in one official batch`)
-          .catch(() => {});
-      }
-    }
-  }
 
-  for (const item of items) {
-    const bundle = bundleFor(item, liveRoster, evalDate, bundleSource);
-    // The engine still evaluates compliance AS-OF `evalDate` (today / the run's date) so the
-    // day-math is current, but the persisted evaluation_period is bucketed to the measure's
-    // current compliance CYCLE (#150 H1). That decoupling is what keeps a nightly rerun
-    // idempotent: same (employee, measure, cycle) key → case upsert, not a fresh cohort.
-    const period = bucketPeriodForMeasure(item.measureId, evalDate);
-    let status: string;
-    let evidence: unknown;
-    // #263: ask the incremental cache whether this subject can be reused (data + logic unchanged and the
-    // status can't have moved). A REUSE copies the prior CQL outcome forward with date-corrected evidence
-    // and skips the ~68 ms evaluation; anything else (or the cache disabled) is a full evaluation. The
-    // cache never authors a status — it only decides whether to re-ask the engine (ADR-008).
-    const plan = incremental
-      ? await incremental
-          .plan(item.measureId, item.employee.externalId, period, bundle)
-          .catch((err) => {
-            // A plan failure (eval_state / getOutcomeById read error) safely falls back to a full
-            // evaluation, but must not be silent — an under-performing incremental run would otherwise be
-            // invisible (review #2). Best-effort WARN, mirroring the commit path below.
-            void deps.runStore
-              .appendLog(runId, "WARN", `eval_state plan failed (${item.employee.externalId}/${item.measureId}) — full re-eval: ${String((err as Error)?.message ?? err)}`)
-              .catch(() => {});
-            return null;
-          })
-      : null;
-    let evaluatedNow = true; // false ⇒ copied forward; true ⇒ a real (or attempted) CQL evaluation
-    let evaluationFailed = false;
-    // A failed batch outranks a cache hit. Unreachable today — ADR-040 §6 means an official-routed
-    // measure is never reused, so a measure that could fail a batch never produces a `reuse` plan — but
-    // the ordering is the difference between "wasteful" and "wrong" if that policy is lifted: a reused
-    // subject would otherwise never see the refusal, and a profile/terminology misconfiguration would go
-    // partially silent, which is precisely what the refusal exists to prevent (review #5).
-    const batchFailed = batchFailure.has(item.measureId);
-    if (plan?.action === "reuse" && !batchFailed) {
-      status = plan.status;
-      evidence = plan.evidence;
-      evaluatedNow = false;
-      skipped++;
-    } else {
-      try {
-        // A measure whose whole roster was evaluated in one official batch above is read from there. A
-        // batch that FAILED re-throws here, once per subject, so a batch-level refusal (notably "nothing
-        // was retrieved for anybody") reaches exactly the isolation a single subject's failure does.
-        if (batchFailed) throw batchFailure.get(item.measureId)!;
-        const result =
-          prefetched.get(`${item.employee.externalId}|${item.measureId}`) ??
-          (await deps.engine.evaluate({ measureId: item.measureId, patientBundle: bundle, evaluationDate: evalDate }));
-        status = result.outcome;
-        evidence = result.evidence;
-        // ADR-043 — record membership from the FINAL outcome, whichever path produced it (batch prefetch
-        // or the individual fallback on this line). Reading it here rather than in the pre-pass is what
-        // makes the roster complete before it is judged. A failed evaluation lands in `catch` below and
-        // contributes nothing, which is right: an engine error is not evidence about the population. A
-        // copy-forward reuse also contributes nothing (unreachable today — ADR-040 §6 keeps an
-        // official-routed measure out of the cache — but if that policy is lifted it degrades to silence,
-        // not to a false alarm).
-        if (result.inInitialPopulation !== undefined) {
-          const seen = ippByMeasure.get(item.measureId);
-          if (seen) seen.push(result.inInitialPopulation);
-          else ippByMeasure.set(item.measureId, [result.inInitialPopulation]);
-        }
-      } catch (err) {
-        // One subject's failure must not abort the run (runtime invariant): persist it as
-        // MISSING_DATA with the error, but flag the run PARTIAL_FAILURE so it isn't reported
-        // as fully successful.
-        status = "MISSING_DATA";
-        evidence = { evaluationError: "engine failure", message: String((err as Error)?.message ?? err) };
-        failures++;
-        evaluationFailed = true;
-      }
-    }
-    const recorded = await deps.outcomeStore.recordOutcome({
-      runId: runId,
-      subjectId: item.employee.externalId,
-      measureId: item.measureId,
-      evaluationPeriod: period,
-      status,
-      evidence,
-    });
-    // #263: cache the fingerprint of a SUCCESSFUL real evaluation so a future run can reuse it. Never
-    // cache an engine-failure MISSING_DATA (we must not copy an error forward), and never re-cache a
-    // reuse (its fingerprint is already stored, pointing at the original evaluation). Best-effort — a
-    // cache-write failure must not fail an otherwise-complete run.
-    if (incremental && plan?.action === "evaluate" && evaluatedNow && !evaluationFailed) {
-      await incremental
-        .commit(item.measureId, item.employee.externalId, period, status, recorded.id, evidence, plan)
-        .catch((err) =>
-          deps.runStore
-            .appendLog(runId, "WARN", `eval_state commit failed (${item.employee.externalId}/${item.measureId}): ${String((err as Error)?.message ?? err)}`)
-            .catch(() => {}),
-        );
-    }
-    // Idempotent case upsert — segment applicability (#183 E11.3) gates case CREATION only: an
-    // out-of-cohort (subject, measure) does NOT open a case. Two bypasses that only ever CLOSE/UPDATE an
-    // existing case (never create) run even out-of-cohort, so a subject who leaves a cohort still has
-    // their open case resolved (Fable M11 / Codex P2): (1) COMPLIANT — a `planCaseUpsert` no-op when no
-    // case exists, so always safe; (2) EXCLUDED — but ONLY when an active case already exists for its
-    // (subject, measure, period) key (a fresh waiver excuses an existing open case), because EXCLUDED
-    // with NO existing case would INSERT a new EXCLUDED case and re-pollute the gate. The outcome above
-    // is ALWAYS persisted (CQL is the sole compliance authority — ADR-008). Empty/absent segments ⇒ all.
-    const closeOnly =
-      status === "COMPLIANT" ||
-      (status === "EXCLUDED" && activeCaseKeys.has(`${item.employee.externalId}|${item.measureId}|${period}`));
-    // Live WebChart subjects are display-applicable (their roster cells show real chips) but must NOT
-    // OPEN cases: rerun-to-verify returns a non-mutating 409 for `wc|` subjects until fetch-one-patient
-    // lands, so a newly-created wc case would be un-closeable. Case CREATION eligibility is therefore
-    // separated from display APPLICABILITY — the `!isLiveWebChartSubject` guard sits ONLY on the
-    // create-capable `isApplicable` branch, not on `closeOnly`. The close-only bypass (COMPLIANT — a
-    // no-op when no case exists; EXCLUDED — only when an active case already exists) still runs for a
-    // `wc|` subject, so an existing wc case (e.g. one an owner opened by adding WebChart to a group)
-    // can still be RESOLVED by a later COMPLIANT/EXCLUDED run rather than being stranded active forever
-    // (rerun-to-verify can't close it either). Neither close-only branch can create a wc case. The
-    // outcome is always persisted regardless (CQL stays authoritative, ADR-008). Codex P2 (#325).
-    const isLiveWebChartSubject = item.employee.externalId.startsWith("wc|");
-    if (deps.caseStore && (closeOnly || (!isLiveWebChartSubject && isApplicable(item.employee, item.measureId, deps.segments ?? [])))) {
-      const upserted = await deps.caseStore.upsertFromOutcome({
-        runId: runId,
-        subjectId: item.employee.externalId,
-        measureId: item.measureId,
-        evaluationPeriod: period,
-        outcomeStatus: status,
-      });
-      // Audit the case transition (Fable H1 — the population pipeline previously wrote NO case audit
-      // events, violating the "every state change writes audit_event" hard rule). Idempotent
-      // re-confirms (UNCHANGED) and no-ops (null — respected human closure / already-terminal) write
-      // nothing, so a nightly run records real transitions only, not one event per still-open case.
-      //
-      // Best-effort at the run boundary (Codex P1): the disposition is only known AFTER the upsert, so
-      // we cannot write the audit row first (the canonical recordCaseEvent audit-before-mutate order) —
-      // and a pre-read-and-plan in the pipeline would race the store's own re-plan under concurrent
-      // runs, auditing a disposition that didn't happen. So we audit after the mutation but never let a
-      // transient audit_events failure throw: an unhandled reject here would abort the loop, skip
-      // finalizeRun, and leave the run stuck RUNNING (sync path 500) or marked FAILED (async) AFTER the
-      // case was already mutated. Instead we log the ledger gap (mirrors the RUN_COMPLETED + quality
-      // snapshot best-effort writes below) so an otherwise-complete run still finalizes.
-      if (deps.events && upserted) {
-        const eventType = CASE_EVENT_FOR[upserted.disposition];
-        if (eventType) {
-          await deps.events
-            .appendAudit({
-              eventType,
-              entityType: "case",
-              entityId: upserted.id,
-              actor: auditActor,
-              refRunId: runId,
-              refCaseId: upserted.id,
-              refMeasureVersionId: item.measureId,
-              payload: {
-                disposition: upserted.disposition,
-                outcomeStatus: status,
-                status: upserted.status,
+  for (const chunkItems of chunks) {
+    // Per CHUNK, not per run. A measure whose batch failed in one chunk is retried in the next: right
+    // for a transient executor failure, and costing nothing for a systematic one, since the refusal
+    // still reaches every subject of every chunk through the same per-subject isolation below.
+    /**
+     * The bundle a work item is evaluated against, cached for the LIFE OF THE CHUNK — built by the
+     * pre-pass, read again by the loop, and dropped before the next chunk is built. That drop is what
+     * bounds memory (invariant 7): without it a 20,000-subject run holds every bundle it ever built.
+     *
+     * Cached by SUBJECT, and only where the source offers `bundleForSubject` — a measure-independent
+     * whole record. A source whose bundle differs per measure (the seeded binding source, the live
+     * WebChart path) is built per item exactly as before; caching one of those by subject would hand
+     * one measure's bundle to another.
+     */
+    const wholeRecordFor = bundleSource.bundleForSubject?.bind(bundleSource);
+    const bundleCache = new Map<string, unknown>();
+    const bundleOf = (item: WorkItem): unknown => {
+      if (item.liveBundle !== undefined || !wholeRecordFor) return bundleFor(item, liveRoster, evalDate, bundleSource);
+      const key = item.employee.externalId;
+      if (!bundleCache.has(key)) bundleCache.set(key, wholeRecordFor(item.employee, evalDate));
+      return bundleCache.get(key);
+    };
+
+    // Roadmap §7.4 PR-8 — measure-major batching, as a PRE-PASS rather than a rewrite of the loop below.
+    //
+    // fqm-execution parses an artifact's ELM per CALL, so an officially-routed measure was paying one parse
+    // of a 2.4 MB bundle PER SUBJECT. `engine.evaluateBatch` resolves `undefined` for anything it cannot
+    // batch — every measure today — in which case nothing here runs and the loop is the code that ships now.
+    //
+    // A pre-pass, because the loop carries outcome persistence, the incremental commit, the case upsert, its
+    // audit event and the counters, all order-dependent. It now runs per CHUNK, so it holds one chunk's
+    // bundles for one measure rather than the whole roster's.
+    //
+    // Bundles are no longer built twice for a batched measure: `bundleOf` caches them for the life of the
+    // chunk, so the pre-pass and the loop read the same object and the cache dies with the chunk.
+    //
+    // No interaction with the incremental cache today: ADR-040 §6 means an official-routed measure is never
+    // reused, so this cannot evaluate a subject the cache would have skipped. If that policy is lifted, the
+    // pre-pass would evaluate some subjects whose result then goes unused — wasteful, never wrong.
+    const prefetched = new Map<string, MeasureOutcome>();
+    const batchFailure = new Map<string, Error>();
+    /**
+     * Per-measure initial-population membership, as REPORTED by whichever path produced each outcome
+     * (ADR-043). Read after the evaluation loop, never during it.
+     *
+     * Read at the END of the roster, not in the batch pre-pass. The first version concluded inside the
+     * pre-pass off `prefetched` alone, and Codex (#354) showed that reads an INCOMPLETE roster: a subject
+     * the executor omits is re-evaluated individually LATER in the loop below, so a batch of two out-of-IPP
+     * outcomes plus one omission warned even when the omitted subject landed squarely in the population,
+     * and one out-of-IPP outcome plus two omissions stayed silent because the sample failed its own `> 1`
+     * guard. Membership is a property of the finished roster, so it is decided where the roster is finished.
+     *
+     * Membership is recorded for EVERY measure but only ever READ for an officially-routed one — see
+     * `emptyIppMeasures` below for why that gate is not optional. An absent `inInitialPopulation` still
+     * means UNKNOWN rather than "out of population": the field is optional on `MeasureOutcome`, so absence
+     * is absence of evidence.
+     */
+    if (deps.engine.evaluateBatch) {
+      for (const measureId of new Set(chunkItems.map((i) => i.measureId))) {
+        const forMeasure = chunkItems.filter((i) => i.measureId === measureId);
+        let batched = false;
+        try {
+          // The subject list is a FACTORY, not an array, so a measure with no batch path costs nothing.
+          // Passed eagerly, this would build every measure's bundles — 14 measures × N subjects — and
+          // discard 13/14 of them the moment official routing is on for one measure (review #3).
+          const results = await deps.engine.evaluateBatch(
+            measureId,
+            () =>
+              forMeasure.map((item) => ({
                 subjectId: item.employee.externalId,
-                measureId: item.measureId,
-                evaluationPeriod: period,
-                runId: runId,
-              },
-            })
-            .catch((err) => {
-              void deps.runStore
-                .appendLog(
-                  runId,
-                  "WARN",
-                  `Case audit (${eventType} ${upserted.id}) failed — ledger gap: ${String((err as Error)?.message ?? err)}`,
-                )
-                .catch(() => {});
-            });
+                patientBundle: bundleOf(item),
+              })),
+            evalDate,
+          );
+          if (!results) continue; // not batchable — the loop evaluates it per subject, unchanged
+          batched = true;
+          for (const item of forMeasure) {
+            const outcome = results.get(item.employee.externalId);
+            if (outcome) prefetched.set(`${item.employee.externalId}|${measureId}`, outcome);
+          }
+        } catch (err) {
+          // Never abort the run (runtime invariant). The failure is recorded against the MEASURE and
+          // re-thrown per subject in the loop, so it lands in the existing per-subject isolation —
+          // MISSING_DATA carrying this message, `failures++`, run PARTIAL_FAILURE, and therefore the #264
+          // alert. That is the loud outcome the batch retrieve check exists to produce, and it costs no new
+          // failure channel. Other measures are unaffected. Normalized to an Error so the loop can test
+          // PRESENCE rather than truthiness — a rejection with a falsy value would otherwise be stored and
+          // then silently ignored, disabling the very refusal this exists for (review #4).
+          batchFailure.set(measureId, err instanceof Error ? err : new Error(String(err)));
+          await deps.runStore
+            .appendLog(runId, "ERROR", `${measureId}: official batch evaluation failed — ${String((err as Error)?.message ?? err)}`)
+            .catch(() => {});
+        }
+        // OUTSIDE the try, and best-effort. Inside it, a transient `run_logs` write failure would be
+        // caught above and recorded as a batch failure — turning a successful evaluation, whose results are
+        // already in `prefetched`, into a whole measure's worth of MISSING_DATA. An observability write must
+        // never author an outcome (review #2); the same reason the case-audit and quality-snapshot writes in
+        // this file are best-effort.
+        if (batched) {
+          await deps.runStore
+            .appendLog(runId, "INFO", `${measureId}: ${forMeasure.length} subject(s) evaluated in one official batch`)
+            .catch(() => {});
         }
       }
     }
-    if (status === "COMPLIANT") compliant++;
-    else if (NON_COMPLIANT.has(status)) nonCompliant++;
+
+
+    /**
+     * Phase 1 of the chunk: evaluate. Nothing is persisted here — the outcomes are collected and
+     * written in ONE batch below, because 100,000 single-row inserts is 100,000 round trips to Neon.
+     */
+    interface PendingOutcome {
+      item: WorkItem;
+      period: string;
+      status: string;
+      evidence: unknown;
+      plan: Awaited<ReturnType<NonNullable<typeof incremental>["plan"]>> | null;
+      evaluatedNow: boolean;
+      evaluationFailed: boolean;
+    }
+    const pending: PendingOutcome[] = [];
+    for (const item of chunkItems) {
+      const bundle = bundleOf(item);
+      // The engine still evaluates compliance AS-OF `evalDate` (today / the run's date) so the
+      // day-math is current, but the persisted evaluation_period is bucketed to the measure's
+      // current compliance CYCLE (#150 H1). That decoupling is what keeps a nightly rerun
+      // idempotent: same (employee, measure, cycle) key → case upsert, not a fresh cohort.
+      const period = bucketPeriodForMeasure(item.measureId, evalDate);
+      let status: string;
+      let evidence: unknown;
+      // #263: ask the incremental cache whether this subject can be reused (data + logic unchanged and the
+      // status can't have moved). A REUSE copies the prior CQL outcome forward with date-corrected evidence
+      // and skips the ~68 ms evaluation; anything else (or the cache disabled) is a full evaluation. The
+      // cache never authors a status — it only decides whether to re-ask the engine (ADR-008).
+      const plan = incremental
+        ? await incremental
+            .plan(item.measureId, item.employee.externalId, period, bundle)
+            .catch((err) => {
+              // A plan failure (eval_state / getOutcomeById read error) safely falls back to a full
+              // evaluation, but must not be silent — an under-performing incremental run would otherwise be
+              // invisible (review #2). Best-effort WARN, mirroring the commit path below.
+              void deps.runStore
+                .appendLog(runId, "WARN", `eval_state plan failed (${item.employee.externalId}/${item.measureId}) — full re-eval: ${String((err as Error)?.message ?? err)}`)
+                .catch(() => {});
+              return null;
+            })
+        : null;
+      let evaluatedNow = true; // false ⇒ copied forward; true ⇒ a real (or attempted) CQL evaluation
+      let evaluationFailed = false;
+      // A failed batch outranks a cache hit. Unreachable today — ADR-040 §6 means an official-routed
+      // measure is never reused, so a measure that could fail a batch never produces a `reuse` plan — but
+      // the ordering is the difference between "wasteful" and "wrong" if that policy is lifted: a reused
+      // subject would otherwise never see the refusal, and a profile/terminology misconfiguration would go
+      // partially silent, which is precisely what the refusal exists to prevent (review #5).
+      const batchFailed = batchFailure.has(item.measureId);
+      if (plan?.action === "reuse" && !batchFailed) {
+        status = plan.status;
+        evidence = plan.evidence;
+        evaluatedNow = false;
+        skipped++;
+      } else {
+        try {
+          // A measure whose whole roster was evaluated in one official batch above is read from there. A
+          // batch that FAILED re-throws here, once per subject, so a batch-level refusal (notably "nothing
+          // was retrieved for anybody") reaches exactly the isolation a single subject's failure does.
+          if (batchFailed) throw batchFailure.get(item.measureId)!;
+          const result =
+            prefetched.get(`${item.employee.externalId}|${item.measureId}`) ??
+            (await deps.engine.evaluate({ measureId: item.measureId, patientBundle: bundle, evaluationDate: evalDate }));
+          status = result.outcome;
+          evidence = result.evidence;
+          // ADR-043 — record membership from the FINAL outcome, whichever path produced it (batch prefetch
+          // or the individual fallback on this line). Reading it here rather than in the pre-pass is what
+          // makes the roster complete before it is judged. A failed evaluation lands in `catch` below and
+          // contributes nothing, which is right: an engine error is not evidence about the population. A
+          // copy-forward reuse also contributes nothing (unreachable today — ADR-040 §6 keeps an
+          // official-routed measure out of the cache — but if that policy is lifted it degrades to silence,
+          // not to a false alarm).
+          if (result.inInitialPopulation !== undefined) {
+            const seen = ippByMeasure.get(item.measureId);
+            if (seen) seen.push(result.inInitialPopulation);
+            else ippByMeasure.set(item.measureId, [result.inInitialPopulation]);
+          }
+        } catch (err) {
+          // One subject's failure must not abort the run (runtime invariant): persist it as
+          // MISSING_DATA with the error, but flag the run PARTIAL_FAILURE so it isn't reported
+          // as fully successful.
+          status = "MISSING_DATA";
+          evidence = { evaluationError: "engine failure", message: String((err as Error)?.message ?? err) };
+          failures++;
+          evaluationFailed = true;
+        }
+      }
+      pending.push({ item, period, status, evidence, plan, evaluatedNow, evaluationFailed });
+    }
+    // Invariant 7 / memory: this chunk's bundles are released here, before anything else happens and
+    // certainly before the next chunk is built.
+    bundleCache.clear();
+
+    /**
+     * Phase 2: persist, then act on what was persisted. The outcome rows go first and together — a
+     * crash between the phases leaves outcomes with no cases, which is the recoverable direction (a
+     * rerun upserts the cases); the reverse would leave cases citing outcomes that do not exist.
+     * `recordOutcomes` returns its records IN INPUT ORDER, which is what still lets the incremental
+     * cache fingerprint the row it just wrote.
+     */
+    const records = await deps.outcomeStore.recordOutcomes(
+      pending.map((p) => ({
+        runId: runId,
+        subjectId: p.item.employee.externalId,
+        measureId: p.item.measureId,
+        evaluationPeriod: p.period,
+        status: p.status,
+        evidence: p.evidence,
+      })),
+    );
+
+    for (const [index, entry] of pending.entries()) {
+      const { item, period, status, evidence, plan, evaluatedNow, evaluationFailed } = entry;
+      const recorded = records[index]!;
+      // #263: cache the fingerprint of a SUCCESSFUL real evaluation so a future run can reuse it. Never
+      // cache an engine-failure MISSING_DATA (we must not copy an error forward), and never re-cache a
+      // reuse (its fingerprint is already stored, pointing at the original evaluation). Best-effort — a
+      // cache-write failure must not fail an otherwise-complete run.
+      if (incremental && plan?.action === "evaluate" && evaluatedNow && !evaluationFailed) {
+        await incremental
+          .commit(item.measureId, item.employee.externalId, period, status, recorded.id, evidence, plan)
+          .catch((err) =>
+            deps.runStore
+              .appendLog(runId, "WARN", `eval_state commit failed (${item.employee.externalId}/${item.measureId}): ${String((err as Error)?.message ?? err)}`)
+              .catch(() => {}),
+          );
+      }
+      // Idempotent case upsert — segment applicability (#183 E11.3) gates case CREATION only: an
+      // out-of-cohort (subject, measure) does NOT open a case. Two bypasses that only ever CLOSE/UPDATE an
+      // existing case (never create) run even out-of-cohort, so a subject who leaves a cohort still has
+      // their open case resolved (Fable M11 / Codex P2): (1) COMPLIANT — a `planCaseUpsert` no-op when no
+      // case exists, so always safe; (2) EXCLUDED — but ONLY when an active case already exists for its
+      // (subject, measure, period) key (a fresh waiver excuses an existing open case), because EXCLUDED
+      // with NO existing case would INSERT a new EXCLUDED case and re-pollute the gate. The outcome above
+      // is ALWAYS persisted (CQL is the sole compliance authority — ADR-008). Empty/absent segments ⇒ all.
+      const closeOnly =
+        status === "COMPLIANT" ||
+        (status === "EXCLUDED" && activeCaseKeys.has(`${item.employee.externalId}|${item.measureId}|${period}`));
+      // Live WebChart subjects are display-applicable (their roster cells show real chips) but must NOT
+      // OPEN cases: rerun-to-verify returns a non-mutating 409 for `wc|` subjects until fetch-one-patient
+      // lands, so a newly-created wc case would be un-closeable. Case CREATION eligibility is therefore
+      // separated from display APPLICABILITY — the `!isLiveWebChartSubject` guard sits ONLY on the
+      // create-capable `isApplicable` branch, not on `closeOnly`. The close-only bypass (COMPLIANT — a
+      // no-op when no case exists; EXCLUDED — only when an active case already exists) still runs for a
+      // `wc|` subject, so an existing wc case (e.g. one an owner opened by adding WebChart to a group)
+      // can still be RESOLVED by a later COMPLIANT/EXCLUDED run rather than being stranded active forever
+      // (rerun-to-verify can't close it either). Neither close-only branch can create a wc case. The
+      // outcome is always persisted regardless (CQL stays authoritative, ADR-008). Codex P2 (#325).
+      const isLiveWebChartSubject = item.employee.externalId.startsWith("wc|");
+      if (deps.caseStore && (closeOnly || (!isLiveWebChartSubject && isApplicable(item.employee, item.measureId, deps.segments ?? [])))) {
+        const upserted = await deps.caseStore.upsertFromOutcome({
+          runId: runId,
+          subjectId: item.employee.externalId,
+          measureId: item.measureId,
+          evaluationPeriod: period,
+          outcomeStatus: status,
+        });
+        // Audit the case transition (Fable H1 — the population pipeline previously wrote NO case audit
+        // events, violating the "every state change writes audit_event" hard rule). Idempotent
+        // re-confirms (UNCHANGED) and no-ops (null — respected human closure / already-terminal) write
+        // nothing, so a nightly run records real transitions only, not one event per still-open case.
+        //
+        // Best-effort at the run boundary (Codex P1): the disposition is only known AFTER the upsert, so
+        // we cannot write the audit row first (the canonical recordCaseEvent audit-before-mutate order) —
+        // and a pre-read-and-plan in the pipeline would race the store's own re-plan under concurrent
+        // runs, auditing a disposition that didn't happen. So we audit after the mutation but never let a
+        // transient audit_events failure throw: an unhandled reject here would abort the loop, skip
+        // finalizeRun, and leave the run stuck RUNNING (sync path 500) or marked FAILED (async) AFTER the
+        // case was already mutated. Instead we log the ledger gap (mirrors the RUN_COMPLETED + quality
+        // snapshot best-effort writes below) so an otherwise-complete run still finalizes.
+        if (deps.events && upserted) {
+          const eventType = CASE_EVENT_FOR[upserted.disposition];
+          if (eventType) {
+            await deps.events
+              .appendAudit({
+                eventType,
+                entityType: "case",
+                entityId: upserted.id,
+                actor: auditActor,
+                refRunId: runId,
+                refCaseId: upserted.id,
+                refMeasureVersionId: item.measureId,
+                payload: {
+                  disposition: upserted.disposition,
+                  outcomeStatus: status,
+                  status: upserted.status,
+                  subjectId: item.employee.externalId,
+                  measureId: item.measureId,
+                  evaluationPeriod: period,
+                  runId: runId,
+                },
+              })
+              .catch((err) => {
+                void deps.runStore
+                  .appendLog(
+                    runId,
+                    "WARN",
+                    `Case audit (${eventType} ${upserted.id}) failed — ledger gap: ${String((err as Error)?.message ?? err)}`,
+                  )
+                  .catch(() => {});
+              });
+          }
+        }
+      }
+      if (status === "COMPLIANT") compliant++;
+      else if (NON_COMPLIANT.has(status)) nonCompliant++;
+    }
   }
 
   // A whole roster out of the initial population, SURFACED (ADR-043) — now that the roster is complete.
@@ -1076,7 +1192,17 @@ async function failPlannedRun(deps: RunPipelineDeps, planned: PlannedRun, err: u
     ? ` [WebChart ${liveTenant.host}; fetched=${liveTenant.fetchedCount}; degraded=${liveTenant.degradedCount}; durationMs=${liveTenant.durationMs}]`
     : "";
   await deps.runStore.appendLog(planned.run.id, "ERROR", `Run failed: ${errMsg}${liveSuffix}`).catch(() => {});
-  if (liveTenant && deps.events) {
+  // The terminal audit row is written for EVERY hard failure, not only a live-WebChart one.
+  //
+  // It used to be gated on `liveTenant`, so an ordinary FAILED run — the store rejecting a write, the
+  // engine throwing outside per-subject isolation — finalized the run row, logged a line and fired the
+  // #264 alert while `audit_events` recorded nothing. A run reaching a terminal state IS a state change,
+  // and the hard rule admits no exceptions (CLAUDE.md; DATA_MODEL_CONTRACTS §4). Chunked evaluation
+  // makes the gap much easier to reach: a persist failure in any chunk lands here.
+  //
+  // Still emitted as RUN_COMPLETED carrying `status: "FAILED"`, which is the existing vocabulary the
+  // read surfaces already understand — renaming it would be a contract change, not a fix.
+  if (deps.events) {
     await deps.events
       .appendAudit({
         eventType: "RUN_COMPLETED",
@@ -1095,7 +1221,7 @@ async function failPlannedRun(deps: RunPipelineDeps, planned: PlannedRun, err: u
           nonCompliant: 0,
           failures: 0,
           measuresExecuted: planned.measureIds,
-          liveTenant,
+          ...(liveTenant ? { liveTenant } : {}),
           error: errMsg,
         },
       })

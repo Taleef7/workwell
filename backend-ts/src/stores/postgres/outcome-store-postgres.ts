@@ -77,27 +77,39 @@ export class PgOutcomeStore implements OutcomeStore {
     };
   }
 
-  async recordOutcomes(inputs: RecordOutcomeInput[]): Promise<void> {
-    if (inputs.length === 0) return;
+  async recordOutcomes(inputs: RecordOutcomeInput[]): Promise<OutcomeRecord[]> {
+    if (inputs.length === 0) return [];
     // Chunked multi-row INSERT so the trend-history backfill (~100 rows/run × weeks × measures)
     // is a handful of round-trips on Neon, not thousands. 8 columns/row × CHUNK must stay well
     // under Postgres' 65535 bind-parameter cap; 500 rows = 4000 params, comfortably safe.
     const CHUNK = 500;
     const defaultEvaluatedAt = new Date().toISOString();
-    for (let start = 0; start < inputs.length; start += CHUNK) {
-      const chunk = inputs.slice(start, start + CHUNK);
+    // Ids and timestamps are minted HERE so the returned records are exactly the rows written, in input
+    // order. A `RETURNING` clause would give the ids back but not the order guarantee for free.
+    const records: OutcomeRecord[] = inputs.map((input) => ({
+      id: crypto.randomUUID(),
+      runId: input.runId,
+      subjectId: input.subjectId,
+      measureId: input.measureId,
+      evaluationPeriod: input.evaluationPeriod ?? "",
+      status: input.status,
+      evidence: input.evidence ?? {},
+      evaluatedAt: input.evaluatedAt ?? defaultEvaluatedAt,
+    }));
+    for (let start = 0; start < records.length; start += CHUNK) {
+      const chunk = records.slice(start, start + CHUNK);
       const binds: unknown[] = [];
-      const tuples = chunk.map((input) => {
+      const tuples = chunk.map((record) => {
         const o = binds.length;
         binds.push(
-          crypto.randomUUID(),
-          input.runId,
-          input.subjectId,
-          input.measureId,
-          input.evaluationPeriod ?? "",
-          input.status,
-          JSON.stringify(input.evidence ?? {}),
-          input.evaluatedAt ?? defaultEvaluatedAt,
+          record.id,
+          record.runId,
+          record.subjectId,
+          record.measureId,
+          record.evaluationPeriod,
+          record.status,
+          JSON.stringify(record.evidence),
+          record.evaluatedAt,
         );
         return `($${o + 1}, $${o + 2}, $${o + 3}, $${o + 4}, $${o + 5}, $${o + 6}, $${o + 7}::jsonb, $${o + 8})`;
       });
@@ -107,6 +119,7 @@ export class PgOutcomeStore implements OutcomeStore {
         binds,
       );
     }
+    return records;
   }
 
   async listOutcomes(runId: string, opts?: { limit?: number; offset?: number }): Promise<OutcomeRecord[]> {

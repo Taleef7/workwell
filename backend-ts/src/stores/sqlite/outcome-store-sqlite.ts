@@ -75,29 +75,42 @@ export class SqliteOutcomeStore implements OutcomeStore {
     };
   }
 
-  async recordOutcomes(inputs: RecordOutcomeInput[]): Promise<void> {
-    if (inputs.length === 0) return;
+  async recordOutcomes(inputs: RecordOutcomeInput[]): Promise<OutcomeRecord[]> {
+    if (inputs.length === 0) return [];
     // D1 runs a batch atomically (single transaction). `RETURNING id` is required for the batch
     // path (cloud-local executes batched statements via `.all()`, which throws on a non-returning
     // statement — same reason the case-event store appends `RETURNING id`).
-    const stmts = inputs.map((input) =>
+    // Ids and timestamps are minted HERE so the returned records are exactly the rows written; reading
+    // them back would be a second query per chunk for values already in hand.
+    const records: OutcomeRecord[] = inputs.map((input) => ({
+      id: crypto.randomUUID(),
+      runId: input.runId,
+      subjectId: input.subjectId,
+      measureId: input.measureId,
+      evaluationPeriod: input.evaluationPeriod ?? "",
+      status: input.status,
+      evidence: input.evidence ?? {},
+      evaluatedAt: input.evaluatedAt ?? new Date().toISOString(),
+    }));
+    const stmts = records.map((record) =>
       this.db
         .prepare(
           `INSERT INTO outcomes (id, run_id, subject_id, measure_id, evaluation_period, status, evidence_json, evaluated_at)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
         )
         .bind(
-          crypto.randomUUID(),
-          input.runId,
-          input.subjectId,
-          input.measureId,
-          input.evaluationPeriod ?? "",
-          input.status,
-          JSON.stringify(input.evidence ?? {}),
-          input.evaluatedAt ?? new Date().toISOString(),
+          record.id,
+          record.runId,
+          record.subjectId,
+          record.measureId,
+          record.evaluationPeriod,
+          record.status,
+          JSON.stringify(record.evidence),
+          record.evaluatedAt,
         ),
     );
     await this.db.batch(stmts);
+    return records;
   }
 
   async listOutcomes(runId: string, opts?: { limit?: number; offset?: number }): Promise<OutcomeRecord[]> {
