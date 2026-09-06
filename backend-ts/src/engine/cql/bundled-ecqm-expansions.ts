@@ -99,6 +99,12 @@ export const ECQM_CANONICAL_CODES = {
   // The synthetic COMPLIANT case passed only because 3 years is inside both windows.
   // Verified 2026-09-05: $lookup(73761001) returns "Colonoscopy".
   colonoscopy: { code: "73761001", system: SNOMED, display: "Colonoscopy" },
+  // The corpus generates a colorectal screening mix, and FOBT is the second modality whose membership
+  // is established (the artifact retrieves five; see COLORECTAL_MODALITIES for why only two are
+  // emitted). Display verified 2026-09-05 against tx.fhir.org $lookup, which returns
+  // "Hemoglobin [Presence] in Stool from gastrointestinal" — used verbatim rather than a friendlier
+  // paraphrase, per the display rule at the top of this file.
+  fobt: { code: "2335-8", system: LOINC, display: "Hemoglobin [Presence] in Stool from gastrointestinal" },
   colorectalCancer: { code: "363406005", system: SNOMED, display: "Malignant tumor of colon" },
   essentialHypertension: { code: "59621000", system: SNOMED, display: "Essential hypertension" },
   esrd: { code: "46177005", system: SNOMED, display: "End stage renal disease" },
@@ -156,6 +162,8 @@ export const CANONICAL_CODE_VALUE_SETS: Record<
   unilateralMastectomyRight: "2.16.840.1.113883.3.464.1003.198.12.1134",
   bipolarDisorder: "2.16.840.1.113883.3.67.1.101.1.128",
   colonoscopy: "2.16.840.1.113883.3.464.1003.108.12.1020",
+  // "Fecal Occult Blood Test (FOBT)", read off cms130/bundle.json's own ELM valueSets.def.
+  fobt: "2.16.840.1.113883.3.464.1003.198.12.1011",
   colorectalCancer: "2.16.840.1.113883.3.464.1003.108.12.1001",
   essentialHypertension: "2.16.840.1.113883.3.464.1003.104.12.1011",
   esrd: "2.16.840.1.113883.3.526.3.353",
