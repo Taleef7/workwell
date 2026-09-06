@@ -6,7 +6,7 @@
  * goes into the manifest so a run's data is traceable to the exact table that produced it, and
  * CORPUS_GENERATOR_VERSION is bumped by hand whenever a row or the drawing logic changes.
  */
-export const CORPUS_GENERATOR_VERSION = "2.2.0";
+export const CORPUS_GENERATOR_VERSION = "3.0.0";
 export const DEFAULT_CORPUS_SEED = "maui-py2027-v1";
 
 export interface CorpusClinic {
@@ -100,11 +100,27 @@ export const ageBandFor = (age: number): AgeBand =>
  * Condition prevalence by age band. Sources are US primary-care population estimates; they are
  * ESTIMATES and the manifest publishes them so they can be challenged (spec §11).
  */
+/**
+ * SOURCES, per row, because a blanket "US primary-care estimates" header is not a citation and the
+ * previous version of this table had nothing else. These are public national estimates rounded to the
+ * precision a synthetic panel needs, not a fitted model:
+ *  - diabetes: CDC National Diabetes Statistics Report (diagnosed, by age).
+ *  - hypertension: CDC/NHANES age-adjusted prevalence — 65+ raised from 0.63 to 0.74 to match it.
+ *  - bipolar: NIMH 12-month prevalence by age.
+ *  - colorectalCancer: SEER prevalence, which is the right basis for CMS130's exclusion (a history of
+ *    the disease), not incidence.
+ *  - esrd: USRDS treated-ESRD prevalence. Corrected 2026-09-06 — the previous 0.008/0.020 for 45-64
+ *    and 65+ were 3-5x the real ~0.2%/~0.6-0.7%, and ESRD is a CMS165 denominator exclusion that IS
+ *    emitted, so the error inflated a reported denominator rather than being cosmetic.
+ *  - pregnancy: NCHS births per 1,000 women, converted to a point prevalence.
+ *  - hospice / frailty: NHPCO and the CMS frailty-indicator literature, order of magnitude only.
+ *  - sudEpisode: SAMHSA NSDUH past-year SUD, discounted to the share presenting in primary care.
+ */
 export const CONDITION_PREVALENCE: Record<AgeBand, Record<string, number>> = {
-  "0-17": { diabetes: 0.004, hypertension: 0.003, bipolar: 0.002, colorectalCancer: 0.0, esrd: 0.0004, pregnancy: 0.004, hospice: 0.0, frailty: 0.0, sudEpisode: 0.010 },
-  "18-44": { diabetes: 0.045, hypertension: 0.110, bipolar: 0.028, colorectalCancer: 0.001, esrd: 0.002, pregnancy: 0.075, hospice: 0.0005, frailty: 0.0, sudEpisode: 0.055 },
-  "45-64": { diabetes: 0.170, hypertension: 0.400, bipolar: 0.022, colorectalCancer: 0.008, esrd: 0.008, pregnancy: 0.002, hospice: 0.002, frailty: 0.0, sudEpisode: 0.035 },
-  "65+":   { diabetes: 0.265, hypertension: 0.630, bipolar: 0.012, colorectalCancer: 0.020, esrd: 0.020, pregnancy: 0.0, hospice: 0.012, frailty: 0.090, sudEpisode: 0.012 },
+  "0-17": { diabetes: 0.004, hypertension: 0.003, bipolar: 0.002, colorectalCancer: 0.0, esrd: 0.0001, pregnancy: 0.004, hospice: 0.0, frailty: 0.0, sudEpisode: 0.010 },
+  "18-44": { diabetes: 0.045, hypertension: 0.110, bipolar: 0.028, colorectalCancer: 0.001, esrd: 0.0008, pregnancy: 0.075, hospice: 0.0005, frailty: 0.0, sudEpisode: 0.055 },
+  "45-64": { diabetes: 0.170, hypertension: 0.400, bipolar: 0.022, colorectalCancer: 0.008, esrd: 0.002, pregnancy: 0.002, hospice: 0.002, frailty: 0.0, sudEpisode: 0.035 },
+  "65+":   { diabetes: 0.265, hypertension: 0.740, bipolar: 0.012, colorectalCancer: 0.020, esrd: 0.007, pregnancy: 0.0, hospice: 0.012, frailty: 0.090, sudEpisode: 0.012 },
 };
 
 /** Event rates the six measures read (spec §3, item 3). */
@@ -115,6 +131,14 @@ export const EVENT_RATES = {
   hba1cMissing: 0.08,
   /** CMS165: share of hypertensives whose most recent BP is controlled (< 140/90). */
   bpControlled: 0.62,
+  /**
+   * Share of UNCONTROLLED hypertensives whose diastolic is normal — isolated systolic hypertension.
+   * The dominant uncontrolled phenotype over 65 (NHANES-era US estimates put it around two thirds of
+   * uncontrolled hypertension in that age group); 0.55 across the whole hypertensive cohort here,
+   * which skews younger. Without it the corpus produced none at all, and CMS165's "BOTH components
+   * below threshold" conjunction was never exercised.
+   */
+  isolatedSystolic: 0.55,
   /** CMS2: share of the eligible population screened for depression. */
   phq9Screened: 0.70,
   /** CMS2: share of screens that are positive. */

@@ -313,7 +313,12 @@ export function runStoreContract(label: string, freshStore: () => Promise<RunSto
 /** Registers the OutcomeStore contract. `fresh` → isolated, empty {run, outcome} pair. */
 export function outcomeStoreContract(
   label: string,
-  fresh: () => Promise<{ runStore: RunStore; outcomeStore: OutcomeStore }>,
+  /**
+   * `caseStore` is REQUIRED, not optional: retention's keep-rule protects rows a case cites, and a
+   * fixture that omitted the case store would make that assertion silently unreachable on whichever
+   * store forgot to supply it.
+   */
+  fresh: () => Promise<{ runStore: RunStore; outcomeStore: OutcomeStore; caseStore: CaseStore }>,
 ): void {
   test(`[${label}] recordOutcome persists and listOutcomes reads it back with evidence intact`, async () => {
     const { runStore, outcomeStore } = await fresh();
@@ -337,32 +342,55 @@ export function outcomeStoreContract(
     assert.deepEqual(listed[0]!.evidence, evidence, "JSON evidence round-trips identically");
   });
 
-  test(`[${label}] compactOlderThan keeps the newest row per (subject, measure) and every pinned run`, async () => {
-    const { runStore, outcomeStore } = await fresh();
-    // Four runs so the pin can name one: a run row must exist for its outcomes to be listable.
+  test(`[${label}] compactOlderThan keeps the newest row per (subject, measure, period) and every row a case cites`, async () => {
+    const { runStore, outcomeStore, caseStore } = await fresh();
     const runs: Record<string, string> = {};
-    for (const key of ["old", "mid", "new", "other"]) runs[key] = (await runStore.createRun(sampleRun("audiogram"))).id;
+    for (const key of ["old", "cited", "new", "other", "priorYear"]) runs[key] = (await runStore.createRun(sampleRun("audiogram"))).id;
 
     await outcomeStore.recordOutcomes([
       { runId: runs.old!, subjectId: "emp-001", measureId: "audiogram", evaluationPeriod: "2027-01-01", status: "OVERDUE", evidence: {}, evaluatedAt: "2027-01-01T00:00:00.000Z" },
-      { runId: runs.mid!, subjectId: "emp-001", measureId: "audiogram", evaluationPeriod: "2027-06-01", status: "OVERDUE", evidence: {}, evaluatedAt: "2027-06-01T00:00:00.000Z" },
-      { runId: runs.new!, subjectId: "emp-001", measureId: "audiogram", evaluationPeriod: "2027-09-01", status: "COMPLIANT", evidence: {}, evaluatedAt: "2027-09-01T00:00:00.000Z" },
-      // A different MEASURE for the same subject: its only row is ancient and must still survive, or a
-      // roster cell goes blank because that measure has not been run lately.
+      { runId: runs.cited!, subjectId: "emp-001", measureId: "audiogram", evaluationPeriod: "2027-01-01", status: "OVERDUE", evidence: {}, evaluatedAt: "2027-02-01T00:00:00.000Z" },
+      { runId: runs.new!, subjectId: "emp-001", measureId: "audiogram", evaluationPeriod: "2027-01-01", status: "COMPLIANT", evidence: {}, evaluatedAt: "2027-09-01T00:00:00.000Z" },
+      // A different MEASURE whose only row is ancient — that measure's current answer.
       { runId: runs.old!, subjectId: "emp-001", measureId: "hazwoper", evaluationPeriod: "2027-01-01", status: "OVERDUE", evidence: {}, evaluatedAt: "2027-01-01T00:00:00.000Z" },
       // A different SUBJECT whose only row is ancient.
       { runId: runs.other!, subjectId: "emp-002", measureId: "audiogram", evaluationPeriod: "2027-01-01", status: "OVERDUE", evidence: {}, evaluatedAt: "2027-01-01T00:00:00.000Z" },
+      // A PRIOR PERIOD for a subject who has been evaluated since — the closed-year case. Under a
+      // newest-per-(subject, measure) rule this row is deletable; under the per-period rule it is that
+      // period's current answer and survives, which is what keeps a closed year's evidence readable.
+      { runId: runs.priorYear!, subjectId: "emp-001", measureId: "audiogram", evaluationPeriod: "2026-01-01", status: "COMPLIANT", evidence: {}, evaluatedAt: "2026-12-31T00:00:00.000Z" },
     ]);
+    // A case citing the February row: that ROW is protected, not the whole run it belongs to.
+    await caseStore.upsertFromOutcome({ runId: runs.cited!, subjectId: "emp-001", measureId: "audiogram", evaluationPeriod: "2027-01-01", outcomeStatus: "OVERDUE" });
 
-    // Cutoff after the January and June rows; `runs.mid` is pinned as if an open case cited it.
-    const deleted = await outcomeStore.compactOlderThan("2027-08-01T00:00:00.000Z", [runs.mid!]);
+    const deleted = await outcomeStore.compactOlderThan("2027-08-01T00:00:00.000Z");
     assert.equal(deleted, 1, "only emp-001's January audiogram row goes");
 
     const survived = async (runId: string) => (await outcomeStore.listOutcomes(runId)).length;
     assert.equal(await survived(runs.old!), 1, "the ancient hazwoper row survives — it is that measure's newest");
-    assert.equal(await survived(runs.mid!), 1, "the pinned run's row survives, however old");
+    assert.equal(await survived(runs.cited!), 1, "a row a case cites survives, however old");
     assert.equal(await survived(runs.new!), 1, "the newest row is never a candidate");
     assert.equal(await survived(runs.other!), 1, "a subject's only row is never deleted");
+    assert.equal(await survived(runs.priorYear!), 1, "a prior PERIOD's row is that period's newest and survives");
+  });
+
+  test(`[${label}] compactOlderThan resolves a tied evaluated_at to exactly one survivor`, async () => {
+    // The floor and the ceiling express the keep-rule differently — a correlated MAX versus DISTINCT
+    // ON — and a tie is exactly where two expressions of "the newest" can disagree: MAX keeps every
+    // tied row, DISTINCT ON keeps one. Both must land on ONE, or "a subject's current answer" means
+    // something different depending on which store is running.
+    const { runStore, outcomeStore } = await fresh();
+    const runId = (await runStore.createRun(sampleRun("audiogram"))).id;
+    const tied = "2027-02-01T00:00:00.000Z";
+    await outcomeStore.recordOutcomes([
+      { runId, subjectId: "emp-003", measureId: "audiogram", evaluationPeriod: "2027-01-01", status: "OVERDUE", evidence: {}, evaluatedAt: "2027-01-01T00:00:00.000Z" },
+      { runId, subjectId: "emp-003", measureId: "audiogram", evaluationPeriod: "2027-01-01", status: "OVERDUE", evidence: {}, evaluatedAt: tied },
+      { runId, subjectId: "emp-003", measureId: "audiogram", evaluationPeriod: "2027-01-01", status: "COMPLIANT", evidence: {}, evaluatedAt: tied },
+    ]);
+    await outcomeStore.compactOlderThan("2027-06-01T00:00:00.000Z");
+    const left = (await outcomeStore.listOutcomes(runId)).filter((o) => o.subjectId === "emp-003");
+    assert.equal(left.length, 1, `${left.length} rows survived a tie — both stores must keep exactly one`);
+    assert.equal(left[0]!.evaluatedAt, tied, "and it is one of the tied newest, never the older row");
   });
 
   test(`[${label}] compactOlderThan is idempotent and deletes nothing when nothing is old enough`, async () => {
@@ -370,12 +398,11 @@ export function outcomeStoreContract(
     const runId = (await runStore.createRun(sampleRun("audiogram"))).id;
     await outcomeStore.recordOutcomes([
       { runId, subjectId: "emp-001", measureId: "audiogram", evaluationPeriod: "2027-01-01", status: "OVERDUE", evidence: {}, evaluatedAt: "2027-01-01T00:00:00.000Z" },
-      { runId, subjectId: "emp-001", measureId: "audiogram", evaluationPeriod: "2027-02-01", status: "OVERDUE", evidence: {}, evaluatedAt: "2027-02-01T00:00:00.000Z" },
+      { runId, subjectId: "emp-001", measureId: "audiogram", evaluationPeriod: "2027-01-01", status: "OVERDUE", evidence: {}, evaluatedAt: "2027-02-01T00:00:00.000Z" },
     ]);
-    // An empty pin list must produce valid SQL — `IN ()` is a syntax error, so the clause is omitted.
-    assert.equal(await outcomeStore.compactOlderThan("2027-01-15T00:00:00.000Z", []), 1);
-    assert.equal(await outcomeStore.compactOlderThan("2027-01-15T00:00:00.000Z", []), 0, "a second pass deletes nothing");
-    assert.equal(await outcomeStore.compactOlderThan("2020-01-01T00:00:00.000Z", []), 0, "nothing is older than this cutoff");
+    assert.equal(await outcomeStore.compactOlderThan("2027-01-15T00:00:00.000Z"), 1);
+    assert.equal(await outcomeStore.compactOlderThan("2027-01-15T00:00:00.000Z"), 0, "a second pass deletes nothing");
+    assert.equal(await outcomeStore.compactOlderThan("2020-01-01T00:00:00.000Z"), 0, "nothing is older than this cutoff");
     assert.equal((await outcomeStore.listOutcomes(runId)).length, 1);
   });
 

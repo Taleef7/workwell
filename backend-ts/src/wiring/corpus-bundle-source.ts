@@ -69,6 +69,14 @@ export function corpusBundleSource(seed: string = DEFAULT_CORPUS_SEED): SubjectB
       generated.dateOfBirth !== employee.dateOfBirth ? `dateOfBirth ${generated.dateOfBirth} vs ${employee.dateOfBirth}`
       : generated.site !== employee.site ? `site ${generated.site} vs ${employee.site}`
       : generated.providerId !== employee.providerId ? `providerId ${generated.providerId} vs ${employee.providerId}`
+      // SEX is the field that makes this guard work over the FIXTURE PREFIX. The first three are taken
+      // verbatim from the prefix for index < 48 and are seed-INDEPENDENT by construction, so over the
+      // 48 the check could not fire at all — 0 of 48 refused under a mismatched seed, while 21 of the
+      // 48 genuinely had a different sex and a different chart. `sex` is drawn from the patient's own
+      // stream, so it moves with the seed AND with a generator-version change, which is the case that
+      // actually bites in production: a draw-order edit leaves DOB/site/PCP pinned and silently shifts
+      // every clinical fact underneath them.
+      : employee.sex !== undefined && generated.sex !== employee.sex ? `sex ${generated.sex} vs ${employee.sex}`
       : null;
     if (drift) {
       throw new Error(

@@ -81,6 +81,18 @@ export const ECQM_CANONICAL_CODES = {
   depressionScreenAdolescent: { code: "73831-0", system: LOINC, display: "Adolescent depression screening assessment" },
   depressionScreenNegative: { code: "428171000124102", system: SNOMED, display: "Depression screening negative" },
   depressionScreenPositive: { code: "428181000124104", system: SNOMED, display: "Depression screening positive" },
+  /**
+   * The follow-up ORDER for a positive screen — a member of `Referral for Adult Depression`
+   * (2.16.840.1.113883.3.526.3.1571), and confirmed against CMS's own CMS2 deck, which uses exactly
+   * this code on a ServiceRequest.
+   *
+   * The corpus used `depressionScreenPositive` here, which is a FINDING: it classifies the screening
+   * result and is a direct-reference code with no value set. A finding is not an orderable service, so
+   * CMS2's numerator — whose follow-up paths are the referral, follow-up and antidepressant value
+   * sets — retrieved nothing, and every screened-positive patient with a documented follow-up read as
+   * non-compliant. Measured at 20,000: 1,240 follow-up orders, none of them retrievable.
+   */
+  depressionFollowUpReferral: { code: "183524004", system: SNOMED, display: "Referral to psychiatry service" },
   bpPanel: { code: "85354-9", system: LOINC, display: "Blood pressure panel" },
   bpSystolic: { code: "8480-6", system: LOINC, display: "Systolic blood pressure" },
   bpDiastolic: { code: "8462-4", system: LOINC, display: "Diastolic blood pressure" },
@@ -110,7 +122,14 @@ export const ECQM_CANONICAL_CODES = {
   // Members taken from the artifact's OWN vendored expansion, not chosen from a browser: the corpus
   // only has to stamp something the measure retrieves, and the value set is the authority on what that
   // is. Displays verified 2026-09-06 against tx.fhir.org $lookup.
-  sudCondition: { code: "10327003", system: SNOMED, display: "Cocaine-induced mood disorder" },
+  /**
+   * The SUD episode diagnosis. ALCOHOL, not cocaine: CMS's own CMS137 deck is dominated by alcohol
+   * abuse, which matches US primary-care epidemiology, and the corpus previously gave all 564 of its
+   * SUD patients "Cocaine-induced mood disorder" — mechanically retrievable, and not a panel any
+   * physician recognises. The second diagnosis lives in `SUD_CONDITION_CODES` below, because the
+   * canonical table is one code per value set by construction.
+   */
+  sudCondition: { code: "7200002", system: SNOMED, display: "Alcohol abuse" },
   sudTreatment: { code: "171047005", system: SNOMED, display: "Drugs of addiction education" },
   colorectalCancer: { code: "363406005", system: SNOMED, display: "Malignant tumor of colon" },
   essentialHypertension: { code: "59621000", system: SNOMED, display: "Essential hypertension" },
@@ -144,6 +163,7 @@ export const CANONICAL_CODE_VALUE_SETS: Record<
   >,
   string
 > = {
+  depressionFollowUpReferral: "2.16.840.1.113883.3.526.3.1571",
   diabetes: "2.16.840.1.113883.3.464.1003.103.12.1001",
   hba1c: "2.16.840.1.113883.3.464.1003.198.12.1013",
   officeVisit: "2.16.840.1.113883.3.464.1003.101.12.1001",
@@ -191,6 +211,17 @@ export const MAMMOGRAPHY_PROCEDURE_CPT: CqlCode = { code: "77067", system: CPT }
 /** Deleted in 2018, replaced by CPT 77067. Matched on READ for legacy dev-DB rows; never stamped. */
 const MAMMOGRAPHY_PROCEDURE_LEGACY_HCPCS: CqlCode = { code: "G0202", system: HCPCS };
 
+/**
+ * The SUD diagnoses the corpus draws from, both members of the same Substance Use Disorder value set.
+ * A second entry in `ECQM_CANONICAL_CODES` would break that table's one-code-per-value-set invariant —
+ * which is a real guard, not a formality — so the variety lives here and is folded into the offline
+ * expansion the same way the mammography procedure codes are.
+ */
+export const SUD_CONDITION_CODES: CqlCode[] = [
+  { code: "7200002", system: SNOMED },
+  { code: "10327003", system: SNOMED },
+];
+
 /** Both procedure-side codes, for the offline expansion the authored `cms125` resolves. */
 export const MAMMOGRAPHY_PROCEDURE_CODES: CqlCode[] = [
   MAMMOGRAPHY_PROCEDURE_CPT,
@@ -208,6 +239,7 @@ const map: Record<string, CqlCode[]> = Object.fromEntries(
 // The authored cms125 resolves this same OID and retrieves a Procedure, so the offline expansion has to
 // admit the procedure codes as well as the canonical LOINC one.
 map[CANONICAL_CODE_VALUE_SETS.mammogram]!.push(...MAMMOGRAPHY_PROCEDURE_CODES);
+map[CANONICAL_CODE_VALUE_SETS.sudCondition]!.push(...SUD_CONDITION_CODES);
 
 /** Always-available resolver for committed eCQM OID expansions. */
 export const bundledEcqmValueSetResolver: ValueSetResolver = {

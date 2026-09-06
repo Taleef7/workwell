@@ -26,8 +26,6 @@ export interface CompactionResult {
   /** ISO-8601 instant before which non-exempt rows were deleted. */
   cutoff: string;
   deleted: number;
-  /** Run ids pinned by open cases — the count, not the ids, so the audit payload stays bounded. */
-  kept: number;
   durationMs: number;
 }
 
@@ -63,7 +61,7 @@ const DAY_MS = 86_400_000;
  * scheduler enforces the order; `outcome-compaction.test.ts` pins it.
  */
 export async function compactOutcomes(
-  stores: Pick<Stores, "outcomes" | "cases" | "events">,
+  stores: Pick<Stores, "outcomes" | "events">,
   options: CompactionOptions,
 ): Promise<CompactionResult | null> {
   const retentionDays = options.retentionDays;
@@ -73,20 +71,24 @@ export async function compactOutcomes(
   const cutoff = new Date(options.now - retentionDays * DAY_MS).toISOString();
 
   /**
-   * The runs open cases cite. Read BEFORE the delete, and treated as required rather than
-   * best-effort: if this read fails the compaction does not run at all. A pin list that silently came
-   * back empty would delete exactly the evidence the pins exist to protect, and the failure would look
-   * like a successful compaction that removed a few more rows than usual.
+   * No pin list is read here any more, and that is the point.
+   *
+   * It used to read every OPEN/IN_PROGRESS case with `limit: 100000` and pass their `lastRunId`s to
+   * the store. Two defects, both silent. The limit truncates — at 20,000 patients across six measures
+   * there can be 120,000 open cases, `listCases` orders by `updated_at DESC`, and the rows dropped are
+   * the LEAST recently updated: precisely the long-open cases whose run is old enough to be deleted on
+   * the next line. The read succeeds, `kept` reports a plausible number, and the evidence goes.
+   * Pinning by RUN was also far too coarse: one case open past the window protected all 100,000 rows
+   * of its run.
+   *
+   * The store now expresses the exclusion in SQL, per row, over every case regardless of status.
    */
-  const openCases = await stores.cases.listCases({ statuses: ["OPEN", "IN_PROGRESS"], limit: 100000 });
-  const pinnedRunIds = [...new Set(openCases.map((c) => c.lastRunId).filter((id): id is string => Boolean(id)))];
-
-  const deleted = await stores.outcomes.compactOlderThan(cutoff, pinnedRunIds);
-  const result: CompactionResult = { cutoff, deleted, kept: pinnedRunIds.length, durationMs: Date.now() - started };
+  const deleted = await stores.outcomes.compactOlderThan(cutoff);
+  const result: CompactionResult = { cutoff, deleted, durationMs: Date.now() - started };
 
   // A deletion is a state change, so it is audited — no exceptions (CLAUDE.md). One event per pass,
-  // not per row: the payload answers "what was removed and what was protected", which is the question
-  // an auditor asks, and 100,000 events answering it individually would answer nothing.
+  // not per row: the payload answers "what window was applied and how much went", which is the
+  // question an auditor asks, and 100,000 events answering it individually would answer nothing.
   await stores.events.appendAudit({
     eventType: "OUTCOMES_COMPACTED",
     entityType: "outcome",

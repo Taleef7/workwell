@@ -179,16 +179,16 @@ Supports filters: `status`, `measureId`, `priority`, `assignee`, `site`, `caseId
 > the export is unfiltered rather than empty. The same three apply to the roster, the cases route and
 > the MCP `list_noncompliant` tool, through one predicate; column names and order are unchanged.
 
-## 7) Outcome Retention Contract (ADR-073)
+### 6.5 Outcome Retention Contract (ADR-073)
 
 **Inert unless `WORKWELL_OUTCOME_RETENTION_DAYS` is set** (90 on the Maui deployment; unset on TWH, and
 unset means OFF). Where it is set, one pass runs after each nightly recompute — after that run's quality
 snapshot, never before — and one `OUTCOMES_COMPACTED` audit event records it.
 
 **Never deleted, at any age:**
-- the newest `outcomes` row per `(subject_id, measure_id)` — a subject's current answer, so no roster
-  cell goes blank because a measure was last run before the window;
-- every row belonging to a run an OPEN or IN_PROGRESS case cites via `cases.last_run_id`;
+- the newest `outcomes` row per `(subject_id, measure_id, evaluation_period)` — per PERIOD, so a closed
+  measurement year's evidence is not swept away by the first run of the next one;
+- every row any case cites, matched on `(run_id, subject_id, measure_id)` — open or closed;
 - every `runs` row and its counts — a compacted run still reports what it found.
 
 **Deleted:** every other `outcomes` row with `evaluated_at` before the cutoff — the superseded

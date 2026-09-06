@@ -69,7 +69,7 @@ runStoreContract("sqlite", async () => new SqliteRunStore(await freshDb()));
 
 outcomeStoreContract("sqlite", async () => {
   const db = await freshDb();
-  return { runStore: new SqliteRunStore(db), outcomeStore: new SqliteOutcomeStore(db) };
+  return { runStore: new SqliteRunStore(db), outcomeStore: new SqliteOutcomeStore(db), caseStore: new SqliteCaseStore(db) };
 });
 
 caseStoreContract("sqlite", async () => new SqliteCaseStore(await freshDb()));

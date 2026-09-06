@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { bundleForPatient, practitionerResources, organizationResources } from "./corpus-bundle.ts";
 import { patientAt, corpusPatients } from "./corpus-patient.ts";
+import { SUD_CONDITION_CODES } from "../../cql/bundled-ecqm-expansions.ts";
 import { DEFAULT_CORPUS_SEED, PCPS, CLINICS, CORPUS_GENERATOR_VERSION } from "./corpus-parameters.ts";
 
 const EVAL_DATE = "2027-12-31";
@@ -144,7 +145,9 @@ test("CMS137's SUD events become the Condition and Procedures the measure retrie
   const resources = resourcesOf(patient);
   const codeOf = (r: Res) => (r.code as { coding: Array<{ code: string }> } | undefined)?.coding[0]?.code;
 
-  const episode = resources.find((r) => r.resourceType === "Condition" && codeOf(r) === "10327003");
+  // Either SUD diagnosis: alcohol abuse for most patients, cocaine-induced mood disorder for the rest.
+  // Pinning one code made the test a check on the code rather than on the resource being emitted at all.
+  const episode = resources.find((r) => r.resourceType === "Condition" && SUD_CONDITION_CODES.some((c) => c.code === codeOf(r)));
   assert.ok(episode, "the SUD episode is a Condition the denominator can key on");
   assert.equal((episode!.clinicalStatus as { coding: Array<{ system: string }> }).coding[0]!.system,
     "http://terminology.hl7.org/CodeSystem/condition-clinical", "clinicalStatus carries its system");
@@ -165,7 +168,11 @@ test("CMS137's SUD events become the Condition and Procedures the measure retrie
  * against what the patient's own events imply catches both.
  */
 test("the bundle emits exactly the resources the patient's events imply — nothing extra, nothing invented", () => {
-  const CODED_CONDITIONS = ["diabetes", "hypertension", "bipolar", "colorectalCancer", "esrd"];
+  // `hospice` joined this list in the review pass: it was drawn and counted but never emitted, so the
+  // exclusion it exists for could never fire on any measure. `frailty` and `pregnancy` are still
+  // absent — the corpus has no verified code for either — which is why this list is explicit rather
+  // than derived from `patient.conditions`.
+  const CODED_CONDITIONS = ["diabetes", "hypertension", "bipolar", "colorectalCancer", "esrd", "hospice"];
   for (const patient of corpusPatients(DEFAULT_CORPUS_SEED, 600)) {
     const emitted = resourcesOf(patient).filter((r) => !["Patient", "Provenance"].includes(r.resourceType));
     const expected =

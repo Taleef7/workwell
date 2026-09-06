@@ -112,6 +112,20 @@ test("the chart and the roster row are the same person under a non-default seed"
 test("a source seeded differently from the roster REFUSES rather than serving another person's chart", () => {
   // The guard, not the wiring: even if the two are ever wired to disagree again, the mismatch is loud.
   const roster = corpusDirectory("some-other-seed", 60).EMPLOYEES;
+  // INCLUDING over the fixture prefix. DOB, site and PCP are verbatim from the prefix for index < 48
+  // and cannot differ by seed, so a guard built on those three alone refused 0 of the 48 — the whole
+  // roster on a default deployment. `sex` is drawn from the patient's stream and does move.
+  const prefix = roster.slice(0, 48);
+  const mismatchedPrefix = corpusBundleSource(DEFAULT_CORPUS_SEED);
+  const refusedInPrefix = prefix.filter((e) => {
+    try {
+      mismatchedPrefix.bundleForSubject!(e, "2027-12-31");
+      return false;
+    } catch {
+      return true;
+    }
+  });
+  assert.ok(refusedInPrefix.length > 0, "the guard cannot fire over the fixture prefix — the default deployment's entire roster");
   const mismatched = corpusBundleSource(DEFAULT_CORPUS_SEED);
   const wrong = roster.filter((e) => {
     try {

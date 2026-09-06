@@ -92,8 +92,10 @@ test("one OUTCOMES_COMPACTED audit event per pass, carrying the declared payload
   const { stores, audits, runs } = makeStores();
   const runId = (await runs.createRun(SAMPLE_RUN)).id;
   await (stores as never as { outcomes: SqliteOutcomeStore }).outcomes.recordOutcomes([
+    // SAME evaluation period: the December row supersedes the January one, which is what makes the
+    // January one deletable. Two different periods would both be kept — see the per-period test below.
     { runId, subjectId: "pat-90001", measureId: "cms122", evaluationPeriod: "2027-01-01", status: "OVERDUE", evidence: {}, evaluatedAt: "2027-01-01T00:00:00.000Z" },
-    { runId, subjectId: "pat-90001", measureId: "cms122", evaluationPeriod: "2027-12-01", status: "COMPLIANT", evidence: {}, evaluatedAt: "2027-12-01T00:00:00.000Z" },
+    { runId, subjectId: "pat-90001", measureId: "cms122", evaluationPeriod: "2027-01-01", status: "COMPLIANT", evidence: {}, evaluatedAt: "2027-12-01T00:00:00.000Z" },
   ]);
 
   const result = (await compactOutcomes(stores, { retentionDays: 90, now: NOW }))!;
@@ -102,37 +104,59 @@ test("one OUTCOMES_COMPACTED audit event per pass, carrying the declared payload
 
   const [event] = audits.filter((e) => e.eventType === "OUTCOMES_COMPACTED");
   assert.ok(event, "a deletion is a state change and is audited — no exceptions");
-  assert.deepEqual(Object.keys(event.payload).sort(), ["cutoff", "deleted", "durationMs", "kept", "retentionDays"]);
+  assert.deepEqual(Object.keys(event.payload).sort(), ["cutoff", "deleted", "durationMs", "retentionDays"]);
   assert.equal(event.payload.cutoff, "2027-10-02T00:00:00.000Z");
   assert.equal(event.payload.retentionDays, 90);
 });
 
-test("a run an OPEN case points at is pinned — its evidence survives however old", async () => {
+test("a row a case CITES survives — open or closed, and only that row, not its whole run", async () => {
   const { stores, runs } = makeStores();
   const s = stores as never as { outcomes: SqliteOutcomeStore; cases: SqliteCaseStore };
-  // THREE runs, and the two old ones are separate. The first version of this put both subjects' old
-  // rows in the run it then pinned, so nothing was deletable and the test could not tell a working pin
-  // from a compaction that deleted nothing at all.
-  const pinnedRun = (await runs.createRun(SAMPLE_RUN)).id;
-  const unpinnedOldRun = (await runs.createRun(SAMPLE_RUN)).id;
+  const oldRun = (await runs.createRun(SAMPLE_RUN)).id;
   const newRun = (await runs.createRun(SAMPLE_RUN)).id;
 
+  // Three subjects sharing ONE old run. One has an open case citing it, one a CLOSED case, one none.
+  // Pinning by run — which is what this did first — would protect all three; pinning per row protects
+  // exactly the two that are cited, which is what stops one long-open case preserving 100,000 rows.
+  const subjects = ["pat-91001", "pat-91002", "pat-91003"];
   await s.outcomes.recordOutcomes([
-    { runId: pinnedRun, subjectId: "pat-90002", measureId: "cms125", evaluationPeriod: "2027-01-01", status: "OVERDUE", evidence: {}, evaluatedAt: "2027-01-01T00:00:00.000Z" },
-    { runId: unpinnedOldRun, subjectId: "pat-90003", measureId: "cms125", evaluationPeriod: "2027-02-01", status: "OVERDUE", evidence: {}, evaluatedAt: "2027-02-01T00:00:00.000Z" },
-    { runId: newRun, subjectId: "pat-90002", measureId: "cms125", evaluationPeriod: "2027-12-01", status: "OVERDUE", evidence: {}, evaluatedAt: "2027-12-01T00:00:00.000Z" },
-    { runId: newRun, subjectId: "pat-90003", measureId: "cms125", evaluationPeriod: "2027-12-01", status: "OVERDUE", evidence: {}, evaluatedAt: "2027-12-01T00:00:00.000Z" },
+    ...subjects.map((subjectId) => ({ runId: oldRun, subjectId, measureId: "cms125", evaluationPeriod: "2027-01-01", status: "OVERDUE", evidence: {}, evaluatedAt: "2027-01-01T00:00:00.000Z" })),
+    ...subjects.map((subjectId) => ({ runId: newRun, subjectId, measureId: "cms125", evaluationPeriod: "2027-01-01", status: "OVERDUE", evidence: {}, evaluatedAt: "2027-12-01T00:00:00.000Z" })),
   ]);
-  // An open case whose lastRunId is the pinned run — a case opened months ago and still being worked.
-  await s.cases.upsertFromOutcome({ runId: pinnedRun, subjectId: "pat-90002", measureId: "cms125", evaluationPeriod: "2027-01-01", outcomeStatus: "OVERDUE" });
+  await s.cases.upsertFromOutcome({ runId: oldRun, subjectId: "pat-91001", measureId: "cms125", evaluationPeriod: "2027-01-01", outcomeStatus: "OVERDUE" });
+  const closed = (await s.cases.upsertFromOutcome({ runId: oldRun, subjectId: "pat-91002", measureId: "cms125", evaluationPeriod: "2027-01-01", outcomeStatus: "OVERDUE" }))!;
+  await s.cases.patchCase(closed.id, { status: "RESOLVED", closedAt: new Date().toISOString(), closedReason: "MANUAL", closedBy: "someone" });
 
   const result = (await compactOutcomes(stores, { retentionDays: 90, now: NOW }))!;
-  assert.equal(result.kept, 1, "one run is pinned by an open case");
-  // Both old rows are equally deletable on age and on not-being-newest. The ONLY thing separating them
-  // is the pin, which is what makes this test about the pin.
-  assert.equal(result.deleted, 1, "the unpinned old row goes and the pinned one does not");
-  assert.equal((await s.outcomes.listOutcomes(pinnedRun)).length, 1, "the case's own evidence must remain readable");
-  assert.equal((await s.outcomes.listOutcomes(unpinnedOldRun)).length, 0, "an unpinned superseded row is removed");
+  assert.equal(result.deleted, 1, "only the uncited subject's old row goes");
+
+  const survivors = (await s.outcomes.listOutcomes(oldRun)).map((o) => o.subjectId).sort();
+  // The CLOSED case matters as much as the open one: its detail page still resolves its evidence
+  // through `last_run_id`, and a resolved case is exactly the record re-read when a number is
+  // challenged. Pinning only OPEN cases — the first version — silently emptied that page.
+  assert.deepEqual(survivors, ["pat-91001", "pat-91002"]);
+});
+
+test("the keep-rule is per (subject, measure, PERIOD) — a closed year's evidence is not swept by the next year's run", async () => {
+  // The regulatory case, and the reason the rule is not merely per (subject, measure). A calendar-year
+  // eCQM's whole 2027 evidence is superseded the moment the first 2028 run lands; under a
+  // newest-per-measure rule every 2027 row becomes deletable months before anyone could be asked to
+  // justify a 2027 rate.
+  const { stores, runs } = makeStores();
+  const s = stores as never as { outcomes: SqliteOutcomeStore };
+  const py2027 = (await runs.createRun(SAMPLE_RUN)).id;
+  const py2028 = (await runs.createRun(SAMPLE_RUN)).id;
+  await s.outcomes.recordOutcomes([
+    { runId: py2027, subjectId: "pat-92001", measureId: "cms122", evaluationPeriod: "2027-01-01", status: "COMPLIANT", evidence: { official: { year: 2027 } }, evaluatedAt: "2027-12-31T00:00:00.000Z" },
+    { runId: py2028, subjectId: "pat-92001", measureId: "cms122", evaluationPeriod: "2028-01-01", status: "OVERDUE", evidence: {}, evaluatedAt: "2028-01-02T00:00:00.000Z" },
+  ]);
+
+  // Compact well into 2028, long after the 2027 row stopped being the subject's newest for cms122.
+  const result = (await compactOutcomes(stores, { retentionDays: 90, now: Date.parse("2028-06-01T00:00:00.000Z") }))!;
+  assert.equal(result.deleted, 0, "the 2027 row is that PERIOD's newest and must survive");
+  const kept = await s.outcomes.listOutcomes(py2027);
+  assert.equal(kept.length, 1);
+  assert.deepEqual(kept[0]!.evidence, { official: { year: 2027 } }, "the evidence a PY2027 rate rests on is still readable");
 });
 
 test("run rows and their counts survive compaction — a compacted run still reports what it found", async () => {

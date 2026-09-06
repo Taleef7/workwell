@@ -109,7 +109,15 @@ export class SqliteOutcomeStore implements OutcomeStore {
           record.evaluatedAt,
         ),
     );
-    await this.db.batch(stmts);
+    // Batched in slices. D1 caps a `batch()` at ~100 statements, and the run pipeline now persists a
+    // whole chunk in one call — 500 subjects x the measures in the run — so an unsliced batch fails on
+    // the very deployment this was built for. Each slice is still one round trip and still atomic
+    // within itself; the whole call is not, which is the same guarantee the Postgres adapter's chunked
+    // multi-row INSERT gives.
+    const BATCH = 90;
+    for (let start = 0; start < stmts.length; start += BATCH) {
+      await this.db.batch(stmts.slice(start, start + BATCH));
+    }
     return records;
   }
 
@@ -158,33 +166,43 @@ export class SqliteOutcomeStore implements OutcomeStore {
   }
 
   /**
-   * ADR-073 retention. One DELETE, and everything it must NOT remove is expressed inside it rather than
-   * as a pre-pass that reads ids into memory — at 20,000 patients across five measures the keep-set is
-   * 100,000 rows, and materialising it to delete around it defeats the point of compacting.
+   * ADR-073 retention. One DELETE, with everything it must NOT remove expressed inside it rather than
+   * read into memory first — at 20,000 patients across five measures the keep-set is 100,000 rows, and
+   * materialising it to delete around it defeats the point of compacting.
    *
-   * The `NOT IN (SELECT MAX(...) GROUP BY ...)` shape is what keeps a subject's CURRENT answer: the
-   * newest row per (subject, measure) survives at any age, so no roster cell goes blank because the
-   * last run for that measure happens to predate the window.
+   * Two exclusions. The correlated MAX keeps the newest row per `(subject, measure, PERIOD)`, so a
+   * calendar-year measure's whole 2027 evidence is not swept away by the first 2028 run. The NOT EXISTS
+   * keeps every row a case cites, matched per row rather than per run.
    */
-  async compactOlderThan(cutoff: string, pinnedRunIds: readonly string[]): Promise<number> {
-    // An empty pin list must still produce valid SQL — `IN ()` is a syntax error in SQLite, so the
-    // clause is omitted rather than emitted empty.
-    const pins = [...new Set(pinnedRunIds)];
-    const pinClause = pins.length > 0 ? ` AND run_id NOT IN (${pins.map(() => "?").join(", ")})` : "";
+  async compactOlderThan(cutoff: string): Promise<number> {
     const { results } = await this.db
       .prepare(
         `DELETE FROM outcomes
           WHERE evaluated_at < ?
             AND id NOT IN (
+              -- ONE row per (subject, measure, period), tie-broken by id DESC — the same rule the
+              -- ceiling's DISTINCT ON applies. A plain correlated MAX keeps EVERY row tied at the
+              -- newest instant while DISTINCT ON keeps one, so the two stores would disagree about
+              -- what "the subject's current answer" is whenever two rows share a timestamp.
               SELECT id FROM outcomes o2
-               WHERE o2.evaluated_at = (
-                 SELECT MAX(o3.evaluated_at) FROM outcomes o3
-                  WHERE o3.subject_id = o2.subject_id AND o3.measure_id = o2.measure_id
+               WHERE o2.id = (
+                 SELECT o3.id FROM outcomes o3
+                  WHERE o3.subject_id = o2.subject_id
+                    AND o3.measure_id = o2.measure_id
+                    AND o3.evaluation_period = o2.evaluation_period
+                  ORDER BY o3.evaluated_at DESC, o3.id DESC
+                  LIMIT 1
                )
-            )${pinClause}
+            )
+            AND NOT EXISTS (
+              SELECT 1 FROM cases c
+               WHERE c.last_run_id = outcomes.run_id
+                 AND c.employee_id = outcomes.subject_id
+                 AND c.measure_id = outcomes.measure_id
+            )
           RETURNING id`,
       )
-      .bind(cutoff, ...pins)
+      .bind(cutoff)
       .all<{ id: string }>();
     return (results ?? []).length;
   }

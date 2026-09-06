@@ -60,10 +60,16 @@ function dateInYear(rng: SplitMix64, year: number, lastMonth = 12): string {
 /** A date `monthsBack` months before the period end, jittered inside that window. */
 function dateWithinLookback(rng: SplitMix64, monthsBack: number): string {
   const back = rng.nextInt(monthsBack);
-  const end = new Date(Date.UTC(CORPUS_MEASUREMENT_YEAR, 11, 31));
-  end.setUTCMonth(end.getUTCMonth() - back);
-  end.setUTCDate(rng.nextInt(daysInMonth(end.getUTCFullYear(), end.getUTCMonth() + 1)) + 1);
-  return end.toISOString().slice(0, 10);
+  // Anchored on the FIRST of the month, not the 31st. `setUTCMonth` on a day-31 date overflows every
+  // 30-day month — Dec 31 minus one month is "Nov 31", which normalises to Dec 1 — so of 27 look-back
+  // months only 16 were reachable and February, April, June, September and November never occurred at
+  // all. No outcome changed (every date still landed inside its window), but the manifest published
+  // the seasonal distribution as a parameter-derived draw when it was an artifact of a date bug.
+  const anchor = new Date(Date.UTC(CORPUS_MEASUREMENT_YEAR, 11, 1));
+  anchor.setUTCMonth(anchor.getUTCMonth() - back);
+  const year = anchor.getUTCFullYear();
+  const month = anchor.getUTCMonth() + 1;
+  return iso(year, month, rng.nextInt(daysInMonth(year, month)) + 1);
 }
 
 function ageFor(rng: SplitMix64): number {
@@ -115,6 +121,21 @@ function disambiguate(seed: string, index: number, base: string, dob: string, ta
   return { name: `${given} ${String(index + 1).padStart(5, "0")}. ${rest.join(" ")}`, redraws: MAX_NAME_REDRAWS, fallback: true };
 }
 
+/**
+ * The youngest age at which each condition is drawn at all. Deliberately conservative — these are floors
+ * below which the diagnosis is implausible in a primary-care panel, not epidemiological onset curves.
+ * `sudEpisode` is 13 because CMS137's own initial population starts there.
+ */
+const CONDITION_MIN_AGE: Record<string, number> = {
+  diabetes: 12,
+  hypertension: 18,
+  bipolar: 13,
+  colorectalCancer: 20,
+  esrd: 18,
+  sudEpisode: 13,
+  hospice: 18,
+};
+
 function conditionsFor(rng: SplitMix64, band: AgeBand, sex: "F" | "M", age: number): string[] {
   const prevalence = CONDITION_PREVALENCE[band];
   const out: string[] = [];
@@ -123,6 +144,13 @@ function conditionsFor(rng: SplitMix64, band: AgeBand, sex: "F" | "M", age: numb
     // stream position after this loop does not depend on sex or age.
     if (key === "pregnancy" && (sex !== "F" || age < 15 || age > 49)) { rng.nextFloat(); continue; }
     if (key === "frailty" && age < 66) { rng.nextFloat(); continue; }
+    // A clinical floor per condition. Without these the prevalences were drawn uniformly across the
+    // whole age band, which produced 17 patients under 13 with a substance-use episode (7 under six),
+    // 6 type-2 diabetics under 12 and 3 with essential hypertension. None of them moved a measure —
+    // every ACO measure's initial population starts at 12 or later — but they are visible on the
+    // roster and in any chart view, and a physician shown a four-year-old with a cocaine-induced mood
+    // disorder stops trusting everything else in the sandbox.
+    if (key in CONDITION_MIN_AGE && age < CONDITION_MIN_AGE[key]!) { rng.nextFloat(); continue; }
     if (rng.chance(p)) out.push(key);
   }
   return out;
@@ -163,7 +191,14 @@ function eventsFor(rng: SplitMix64, patient: { conditions: readonly string[]; ag
   if (has("hypertension")) {
     const controlled = rng.chance(EVENT_RATES.bpControlled);
     const systolic = controlled ? 112 + rng.nextInt(26) : 140 + rng.nextInt(35);
-    const diastolic = controlled ? 66 + rng.nextInt(23) : 90 + rng.nextInt(20);
+    // ISOLATED SYSTOLIC HYPERTENSION — high systolic with a normal diastolic — is the dominant
+    // uncontrolled phenotype over 65, which is a third of this panel. Driving both components off one
+    // `controlled` flag produced ZERO such readings in 7,126, with two consequences: the panel is not
+    // one a clinician recognises, and CMS165's decisive conjunction ("BOTH components below
+    // threshold") is never exercised — a logic error dropping the diastolic clause would score
+    // identically on the whole corpus.
+    const isolatedSystolic = !controlled && rng.chance(EVENT_RATES.isolatedSystolic);
+    const diastolic = controlled || isolatedSystolic ? 66 + rng.nextInt(23) : 90 + rng.nextInt(20);
     events.push({ kind: "bp", date: dateInYear(rng, CORPUS_MEASUREMENT_YEAR), value: systolic, value2: diastolic, external: false });
   }
 
@@ -200,6 +235,10 @@ function eventsFor(rng: SplitMix64, patient: { conditions: readonly string[]; ag
   // 46-49. Generated 44-77 — two years below the IPP — for the same boundary reason as CMS125 above.
   // NOTE this is the 2026-vintage artifact: USPSTF lowered screening to 45, but the vendored measure
   // has not, and the ARTIFACT is what runs (spec §1's re-vendor caveat).
+  // 44-77 spans CMS130's initial population (46-75) with two years either side, deliberately: a
+  // patient who turns 46 during the year needs screening history from before it, and one who turned 76
+  // still has last year's. Records outside the IPP are never evaluated by the measure, which is
+  // correct — they are chart history, not measure input.
   if (patient.age >= 44 && patient.age <= 77) {
     if (rng.chance(EVENT_RATES.colorectalUpToDate)) {
       const modality = rng.pick(COLORECTAL_MODALITIES);

@@ -30,7 +30,7 @@
  *
  * Nothing here decides an outcome. CQL alone does (AI_GUARDRAILS §1, ADR-008).
  */
-import { ECQM_CANONICAL_CODES, MAMMOGRAPHY_PROCEDURE_CPT } from "../../cql/bundled-ecqm-expansions.ts";
+import { SUD_CONDITION_CODES, ECQM_CANONICAL_CODES, MAMMOGRAPHY_PROCEDURE_CPT } from "../../cql/bundled-ecqm-expansions.ts";
 import { CLINICS, CORPUS_GENERATOR_VERSION, DEFAULT_CORPUS_SEED, PCPS } from "./corpus-parameters.ts";
 import type { CorpusEvent, CorpusPatient } from "./corpus-patient.ts";
 
@@ -160,7 +160,12 @@ function encounterResource(patient: CorpusPatient, day: string, index: number): 
     class: { system: V3_ACT_CODE, code: "AMB" },
     subject: { reference: `Patient/${patient.externalId}` },
     type: [codeable(ECQM_CANONICAL_CODES.officeVisit)],
-    period: { start: `${day}T09:00:00`, end: `${day}T09:30:00` },
+    // `Z` is REQUIRED. FHIR R4's dateTime regex demands an offset whenever a time is present, and these
+    // two were the only invalid date-times the corpus emitted — in Encounter, the qualifying visit every
+    // one of the six measures' denominators reads. A validator rejects the bundle; an engine that
+    // tolerates it resolves the instant in an unspecified zone, which on a Jan-1 or Dec-31 visit can
+    // move a patient in or out of the measurement period.
+    period: { start: `${day}T09:00:00Z`, end: `${day}T09:30:00Z` },
   };
 }
 
@@ -182,8 +187,17 @@ function conditionResource(patient: CorpusPatient, key: string, coding: { code: 
       },
     ],
     code: codeable(coding),
-    onsetDateTime: `${Number(patient.dateOfBirth.slice(0, 4)) + Math.max(patient.age - 2, 0)}-01-15T00:00:00Z`,
+    // CLAMPED to the patient's birth date. `birthYear + max(age-2, 0)` on January 15 precedes the birth
+    // of anyone aged 0 or 1 born after mid-January — 9 patients at 20,000 carried an onset before they
+    // existed, which no validator here catches and any chart view shows.
+    onsetDateTime: onsetFor(patient),
   };
+}
+
+/** An onset two years before the measurement year, never earlier than the patient's own birth. */
+function onsetFor(patient: CorpusPatient): string {
+  const candidate = `${Number(patient.dateOfBirth.slice(0, 4)) + Math.max(patient.age - 2, 0)}-01-15`;
+  return `${candidate < patient.dateOfBirth ? patient.dateOfBirth : candidate}T00:00:00Z`;
 }
 
 /** The condition keys the corpus can express as coded FHIR, and the code each one carries. */
@@ -193,6 +207,20 @@ const CONDITION_CODES: Record<string, { code: string; system: string; display?: 
   bipolar: ECQM_CANONICAL_CODES.bipolarDisorder,
   colorectalCancer: ECQM_CANONICAL_CODES.colorectalCancer,
   esrd: ECQM_CANONICAL_CODES.esrd,
+  /**
+   * HOSPICE is emitted now. It was drawn (87 patients at 20,000), counted in the manifest, published in
+   * the JOURNAL — and never turned into a resource, because it had no entry here. The consequence was
+   * not cosmetic: hospice is a denominator EXCLUSION on every one of the ACO's measures, 47 of those 87
+   * patients had a routine mammogram or colorectal screening inside the period, and the corpus could
+   * therefore never exercise a hospice exclusion at all. A regression that broke exclusion handling
+   * would have been invisible. `hospiceDx` is SNOMED 170935008, already verified in the canonical table
+   * and present in CMS's own CMS137 deck.
+   *
+   * `frailty` and `pregnancy` are still absent: the corpus has no verified code for either that is a
+   * member of the value set the measures read them through, and inventing one is the failure mode this
+   * whole file is written against. They stay drawn-but-unemitted, and the JOURNAL now says so.
+   */
+  hospice: ECQM_CANONICAL_CODES.hospiceDx,
 };
 
 /**
@@ -263,7 +291,8 @@ function resourcesForEvent(patient: CorpusPatient, event: CorpusEvent, index: nu
         intent: "order",
         subject,
         authoredOn: `${event.date}T09:20:00Z`,
-        code: codeable(ECQM_CANONICAL_CODES.depressionScreenPositive),
+        // The follow-up ORDER, not the screening finding. See `depressionFollowUpReferral`.
+        code: codeable(ECQM_CANONICAL_CODES.depressionFollowUpReferral),
       }];
 
     case "mammogram":
@@ -332,7 +361,10 @@ function resourcesForEvent(patient: CorpusPatient, event: CorpusEvent, index: nu
         clinicalStatus: { coding: [{ system: CONDITION_CLINICAL, code: "active" }] },
         verificationStatus: { coding: [{ system: CONDITION_VER_STATUS, code: "confirmed" }] },
         category: [{ coding: [{ system: CONDITION_CATEGORY, code: "problem-list-item" }] }],
-        code: codeable(ECQM_CANONICAL_CODES.sudCondition),
+        // Which of the two SUD diagnoses is a property of the PATIENT, so it is derived from their
+        // index rather than drawn — this function has no stream, and adding one would make a bundle
+        // depend on the order it was built in. Roughly a quarter carry the second diagnosis.
+        code: codeable(SUD_CONDITION_CODES[patient.index % 4 === 0 ? 1 : 0]!),
         onsetDateTime: `${event.date}T00:00:00Z`,
       }];
 

@@ -46,12 +46,13 @@ test("a different seed produces a different corpus", () => {
 
 test("the first 100 patients hash to a pinned value — a silent generator drift fails here", () => {
   const digest = createHash("sha256").update(JSON.stringify(corpusPatients(DEFAULT_CORPUS_SEED, 100)), "utf8").digest("hex");
-  // Recorded 2026-09-06 against CORPUS_GENERATOR_VERSION 2.2.0 (the fixture prefix's PCPs now spread
-  // across each clinic's panel instead of collapsing onto its first PCP — a record change that consumes
-  // no draws, which is why every other test in this file was unaffected). If this fails, the draw order
-  // or the parameter table changed: bump the version and re-record here, in the same commit as the
-  // change that moved it — never re-record it on its own.
-  assert.equal(digest, "92b88ae6206721f5ee8fb82c50cb898044c4ac014a2588f4c0ce5049a277d8d4");
+  // Recorded 2026-09-06 against CORPUS_GENERATOR_VERSION 3.0.0. A MAJOR bump: the review pass changed
+  // what the generator draws, not just what it records — clinical age floors per condition, isolated
+  // systolic hypertension, and a look-back date fix that had made 11 of 27 months unreachable. Draw
+  // order moved, so every patient's clinical facts moved with it. If this fails, the draw order or the
+  // parameter table changed: bump the version and re-record here, in the same commit as the change
+  // that moved it — never re-record it on its own.
+  assert.equal(digest, "a16080e6e1311983cac7ca4649cfc52ca39eb9fde9340a8824b05229320ef272");
 });
 
 test("every patient lands in a real clinic with a PCP at that clinic", () => {

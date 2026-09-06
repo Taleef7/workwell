@@ -517,10 +517,13 @@ deployment on a self-heal. `official-flip-config.test.ts` fails the build if the
 | `WORKWELL_MAUI_CORPUS_SEED` | unset (`maui-py2027-v1`) | unset | The generator seed. Changing it regenerates *different people* under the same ids; the roster and the evaluated charts derive from one resolution so they cannot disagree. |
 | `WORKWELL_RUN_CHUNK_SIZE` | `500` | unset (500) | Subjects per evaluation chunk. A chunk's bundles are built, evaluated, persisted and dropped before the next exists, so **memory is bounded by one chunk**, not by the roster. A malformed value warns and falls back to 500. |
 | `WORKWELL_SCHEDULER_ANCHOR_HOUR_UTC` | `12` | unset (12) | The wall-clock hour the nightly run fires at. **12 UTC = 02:00 HST**, so the overnight recompute finishes before the clinic opens. The 23.5-hour debounce is a floor beneath the anchor, not the cadence. |
-| `WORKWELL_OUTCOME_RETENTION_DAYS` | `90` | unset | Outcome-history window (ADR-073). **Unset means OFF** — TWH keeps its history whole. Lowering it to 30 is the storage lever with no code change. Never deletes a subject's newest row per measure, a run row, or anything an open case cites. |
+| `WORKWELL_OUTCOME_RETENTION_DAYS` | `90` | unset | Outcome-history window (ADR-073). **Unset means OFF** — TWH keeps its history whole. Never deletes a subject's newest row per `(measure, period)`, a run row, or any row a case cites. **Leave it unset until the Postgres index question in ADR-073 is decided** — the keep-set's ordering has no supporting index, so on a large table the nightly DELETE sorts the whole thing. |
 
 Measured: 20,000 patients generate in ~0.3 s, and a full run over them completes well inside the
-`run-scale-maui` job's 15-minute ceiling. That job runs weekly and on demand — never on a push, because
+`run-scale-maui` job's 15-minute ceiling — **with a STUB engine**. That job measures the pipeline
+(generation, bundles, chunking, case upserts, persistence), not CQL: real evaluation time against the
+vendored artifacts is measured in the credentialed `official-cases` job. Do not read the 15-minute
+ceiling as a claim about a real five-measure run. That job runs weekly and on demand — never on a push, because
 it measures a wall clock and a shared runner would make it a flake rather than a finding.
 
 Enabling retention on an instance that has been accumulating rows deletes a lot at once. Run the first

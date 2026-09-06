@@ -36,8 +36,11 @@ import { emitAlert, resolveAlertChannels, type AlertChannel } from "../run/alert
 // Constants
 // ---------------------------------------------------------------------------
 
-/** Display-only cron expression — the actual interval is SCHEDULER_RUN_INTERVAL_HOURS. */
-export const SCHEDULER_CRON = "0 0 6 * * *";
+/**
+ * Display-only cron expression, DERIVED from the anchor hour so the admin surface cannot show one time
+ * beside a `nextFireAt` at another. It was the literal "0 0 6 * * *" while the anchor defaulted to 12.
+ */
+export const SCHEDULER_CRON = (): string => `0 0 ${SCHEDULER_ANCHOR_HOUR_UTC()} * * *`;
 
 /** How many hours must elapse between scheduler-triggered ALL_PROGRAMS runs. */
 const SCHEDULER_RUN_INTERVAL_HOURS = 24;
@@ -190,18 +193,32 @@ export function computeNextFireAt(input: NextFireInput): string {
 /**
  * The instant this deployment is next SCHEDULED to run, derived from the last run alone.
  *
+ * **The rule is: at most one scheduled run per UTC day, at the anchor hour.** If the last scheduler run
+ * happened before that day's anchor, the day still owes its run; otherwise the next is the following
+ * day's anchor.
+ *
+ * **Why this is not "last run + a debounce".** The first version floored on `lastRun + 23.5 h` and took
+ * the next anchor at or after that floor — which SKIPS A WHOLE NIGHT for any run starting more than
+ * thirty minutes past the anchor. Measured: a run at 12:30 UTC gave a next fire 47.5 hours later, and
+ * one at 15:00 gave 45 hours, with `shouldFireAt` false straight through the intervening night. The
+ * commonest trigger is the most ordinary one — the first run after a deploy, or after the scheduler is
+ * enabled, fires at whatever the wall clock is, so any working-hours deploy silently cost the pilot the
+ * next night's recompute. A 23.5-hour floor is a CADENCE calibrated to a daily interval; under an
+ * anchor the schedule IS the anchor, and the only thing worth preventing is firing twice for the same
+ * day, which "the last run was before this day's anchor" prevents with no duration to mis-calibrate.
+ *
  * Deliberately independent of `now`: the tick asks "is a run due?", and a function that floors on the
  * current time can never answer yes — the moment now passes the anchor it starts reporting tomorrow's.
  * Flooring on `now` is right for a display and wrong for a decision, and the two callers need both.
  */
 function dueAtMs(input: NextFireInput): number {
   const anchorHour = input.anchorHourUtc ?? SCHEDULER_ANCHOR_HOUR_UTC();
-  const minGapMs = input.minGapMs ?? DEFAULT_MIN_GAP_MS;
-  const floor = (input.lastRunAtMs ?? 0) + minGapMs;
-  const at = new Date(floor);
-  const candidate = Date.UTC(at.getUTCFullYear(), at.getUTCMonth(), at.getUTCDate(), anchorHour, 0, 0, 0);
-  // `>= floor` rather than `>`: an anchor landing exactly on the debounce boundary is this cycle's.
-  return candidate >= floor ? candidate : candidate + 86_400_000;
+  const lastRunAtMs = input.lastRunAtMs ?? 0;
+  const last = new Date(lastRunAtMs);
+  const anchorOn = (addDays: number) =>
+    Date.UTC(last.getUTCFullYear(), last.getUTCMonth(), last.getUTCDate() + addDays, anchorHour, 0, 0, 0);
+  const owedToday = anchorOn(0);
+  return lastRunAtMs < owedToday ? owedToday : anchorOn(1);
 }
 
 export function shouldFireAt(input: NextFireInput): boolean {
@@ -223,7 +240,7 @@ export async function getSchedulerStatusFromStores(stores: Stores): Promise<Sche
   const lastRunStatus = schedulerRun?.status ?? "unknown";
   return {
     enabled: schedulerEnabled,
-    cron: SCHEDULER_CRON,
+    cron: SCHEDULER_CRON(),
     nextFireAt: schedulerEnabled
       ? computeNextFireAt({ lastRunAtMs: lastRunAt ? Date.parse(lastRunAt) : null, nowMs: Date.now() })
       : null,
@@ -332,7 +349,7 @@ async function runTickLocked(deps: SchedulerTickDeps, nowMs: number): Promise<bo
     refRunId: null,
     refCaseId: null,
     refMeasureVersionId: null,
-    payload: { cron: SCHEDULER_CRON, triggeredAt: now.toISOString() },
+    payload: { cron: SCHEDULER_CRON(), triggeredAt: now.toISOString() },
   });
 
   // Build run deps from the injected stores + engine + segments.

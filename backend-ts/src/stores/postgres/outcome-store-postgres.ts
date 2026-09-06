@@ -42,6 +42,7 @@ const toRecord = (r: OutcomeRow): OutcomeRecord => ({
 });
 
 const T = `${SPIKE_SCHEMA}.outcomes`;
+const CASES_TABLE = `${SPIKE_SCHEMA}.cases`;
 
 export class PgOutcomeStore implements OutcomeStore {
   constructor(private readonly pool: PgPool) {}
@@ -162,26 +163,30 @@ export class PgOutcomeStore implements OutcomeStore {
   }
 
   /**
-   * ADR-073 retention — see the SQLite floor for the shape and why the keep-set is expressed in SQL
-   * rather than read into memory. `DISTINCT ON` is the Postgres form of "the newest row per (subject,
-   * measure)"; the floor uses a correlated MAX because SQLite has no DISTINCT ON.
+   * ADR-073 retention — see the SQLite floor for the shape and why both exclusions are expressed in
+   * SQL rather than read into memory.
+   *
+   * `DISTINCT ON` is the Postgres form of "the newest row per (subject, measure, period)"; the floor
+   * uses a correlated MAX because SQLite has no DISTINCT ON. The tie-break is `id DESC` on BOTH stores
+   * — see the store contract's tied-timestamp case — so two rows stamped the same instant resolve the
+   * same way on the ceiling and the floor.
    */
-  async compactOlderThan(cutoff: string, pinnedRunIds: readonly string[]): Promise<number> {
-    const pins = [...new Set(pinnedRunIds)].filter((id) => isUuid(id));
-    const binds: unknown[] = [cutoff];
-    let pinClause = "";
-    if (pins.length > 0) {
-      pinClause = ` AND run_id <> ALL($${binds.push(pins)}::uuid[])`;
-    }
+  async compactOlderThan(cutoff: string): Promise<number> {
     const { rowCount } = await this.pool.query(
-      `DELETE FROM ${T}
-        WHERE evaluated_at < $1
-          AND id NOT IN (
-            SELECT DISTINCT ON (subject_id, measure_id) id
+      `DELETE FROM ${T} o
+        WHERE o.evaluated_at < $1
+          AND o.id NOT IN (
+            SELECT DISTINCT ON (subject_id, measure_id, evaluation_period) id
               FROM ${T}
-             ORDER BY subject_id, measure_id, evaluated_at DESC, id DESC
-          )${pinClause}`,
-      binds,
+             ORDER BY subject_id, measure_id, evaluation_period, evaluated_at DESC, id DESC
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM ${CASES_TABLE} c
+             WHERE c.last_run_id = o.run_id
+               AND c.employee_id = o.subject_id
+               AND c.measure_id = o.measure_id
+          )`,
+      [cutoff],
     );
     return rowCount ?? 0;
   }

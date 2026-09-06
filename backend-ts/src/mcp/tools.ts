@@ -455,7 +455,15 @@ async function listNoncompliant(args: JsonRecord, deps: McpToolDeps): Promise<un
   }
   const measureNameFilter = args.measureName != null ? String(args.measureName).trim() : "";
   const siteFilter = args.site != null ? String(args.site).trim() : "";
-  const providerFilter = args.providerId != null ? String(args.providerId).trim() : "";
+  // All THREE panel filters, not just providerId. DATA_MODEL_CONTRACTS says the same three apply to
+  // the roster, the cases route and this tool "through one predicate"; shipping only one of them here
+  // made that sentence false, and an agent asking for 65+ women would have been handed the whole
+  // worklist with nothing indicating the filter was dropped.
+  const panelFilters = {
+    providerId: args.providerId != null ? String(args.providerId).trim() : null,
+    ageBand: args.ageBand != null ? String(args.ageBand).trim() : null,
+    sex: args.sex != null ? String(args.sex).trim().toUpperCase() : null,
+  };
   const statusFilter = args.status != null ? String(args.status).trim() : "";
   if (statusFilter && !NON_COMPLIANT.includes(statusFilter)) {
     return safeError("INVALID_ARGUMENT", "status must be one of: DUE_SOON, OVERDUE, MISSING_DATA");
@@ -472,7 +480,9 @@ async function listNoncompliant(args: JsonRecord, deps: McpToolDeps): Promise<un
   if (siteFilter) rows = rows.filter((c) => (directory.employeeById(c.employeeId)?.site ?? "").toLowerCase() === siteFilter.toLowerCase());
   // The PCP's external id, with the same semantics as every other surface: an unknown id returns an
   // empty list rather than the whole worklist, which is the leak guard `measureName` above documents.
-  if (providerFilter) rows = rows.filter((c) => matchesSubjectFilters(directory.employeeById(c.employeeId), { providerId: providerFilter }));
+  if (panelFilters.providerId || panelFilters.ageBand || panelFilters.sex) {
+    rows = rows.filter((c) => matchesSubjectFilters(directory.employeeById(c.employeeId), panelFilters));
+  }
   rows.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   rows = rows.slice(0, limit);
   const results = rows.map((c) => {
@@ -635,8 +645,8 @@ export const MCP_TOOLS: McpTool[] = [
   },
   {
     name: "list_noncompliant",
-    description: "List non-compliant open cases filtered by measureName, site, providerId (the PCP's external id, e.g. maui-prov-012), and outcome status. Default limit 25, max 100.",
-    inputSchema: { type: "object", properties: { measureName: { type: "string" }, site: { type: "string" }, providerId: { type: "string" }, status: { type: "string", enum: ["DUE_SOON", "OVERDUE", "MISSING_DATA"] }, limit: { type: "number" } } },
+    description: "List non-compliant open cases filtered by measureName, site, providerId (the PCP's external id, e.g. maui-prov-012), ageBand, sex, and outcome status. Default limit 25, max 100.",
+    inputSchema: { type: "object", properties: { measureName: { type: "string" }, site: { type: "string" }, providerId: { type: "string" }, ageBand: { type: "string", enum: ["0-17", "18-44", "45-64", "65+"] }, sex: { type: "string", enum: ["F", "M"] }, status: { type: "string", enum: ["DUE_SOON", "OVERDUE", "MISSING_DATA"] }, limit: { type: "number" } } },
     roles: [CM, ADMIN],
     sensitivity: "restricted",
     handler: listNoncompliant,

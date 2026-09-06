@@ -1298,10 +1298,17 @@ export async function executeManualRun(deps: RunPipelineDeps, req: ManualRunRequ
   try {
     return await finishManualRun(deps, planned);
   } catch (err) {
-    // Hosts without waitUntil use this synchronous path. A configured population preparation error
-    // happens before outcomes are written; finalize it exactly like the background path, then retain
-    // the synchronous caller's existing rejected-promise contract.
-    if (err instanceof LivePopulationPreparationError) await failPlannedRun(deps, planned, err);
+    // Hosts without waitUntil use this synchronous path, and EVERY failure on it is finalized —
+    // not only a live-population preparation error, which is what this used to gate on.
+    //
+    // That gate was written when the only failure reachable here happened before any outcome was
+    // written. Chunked evaluation changed that: `ASYNC_SCOPES` is ALL_PROGRAMS and SITE, so a MEASURE
+    // or EMPLOYEE run comes through here — and on the pilot a MEASURE run is 20,000 subjects across
+    // 40 chunks. A persist failure in chunk 4 previously threw straight past this line, leaving the
+    // run row RUNNING forever (the page polls indefinitely) and `audit_events` with NO terminal row
+    // for a state change that had already committed 1,500 outcomes. The hard rule admits no
+    // exceptions. The caller's rejected-promise contract is unchanged.
+    await failPlannedRun(deps, planned, err);
     throw err;
   }
 }

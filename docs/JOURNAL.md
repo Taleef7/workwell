@@ -16,7 +16,8 @@ first 48 patients byte-identical to the fixture rows every screenshot and saved 
 | Panels | 40 PCPs, 423–571 patients each |
 | Age | median 54; 65+ 6,732 · 45–64 6,064 · 18–44 4,401 · 0–17 2,803 |
 | Sex | 52.0 % female |
-| Conditions | hypertension 7,126 · diabetes 3,055 · SUD episode 564 · frailty 592 · bipolar 348 · ESRD 182 · colorectal cancer 184 · pregnancy 162 · hospice 87 |
+| Conditions | hypertension 7,853 · diabetes 3,049 · SUD episode 547 · bipolar 347 · colorectal cancer 183 · hospice 87 · ESRD 62 — all emitted as FHIR. `frailty` (592) and `pregnancy` (162) are drawn and counted but **not emitted**: the corpus has no verified code for either, so no measure can read them. |
+| Blood pressure | 1,673 of 7,853 readings (21 %) are isolated systolic — high systolic, normal diastolic. Previously zero, which meant CMS165's "both components below threshold" conjunction was never exercised. |
 
 **Measured performance.** A full run over the corpus — 20,000 patients × 14 measures = **280,000 work
 items in 43.9 s** on this machine, against the pinned 15-minute ceiling. Corpus generation is linear:
@@ -48,7 +49,48 @@ passed against the very bug it was written for.
 Four guards it found could not fire, including `invariant 6`, which asserted only `totalEvaluated` — a
 value that can never be per-chunk — while the counters actually at risk were asserted nowhere.
 
-**Left for the owner:** the segment repair above, and the review of Task 18's SQL in the PR.
+### The review pass (four lanes)
+
+Own correctness reviewer, a clinical/provenance reviewer, GLM 5.3 Flash and Gemini 3.8 Flash. Two
+findings would have produced wrong numbers for the pilot, and both were invisible to every test:
+
+- **CMS2's follow-up order carried a FINDING code.** `ServiceRequest.code` was SNOMED 428181000124104
+  "Depression screening positive" — which classifies a screening *result* and is a direct-reference code
+  with no value set. CMS2's numerator retrieves follow-up through the referral, follow-up and
+  antidepressant value sets, so **1,240 documented follow-ups at 20,000 were invisible** and every one
+  of those patients read non-compliant: a work list full of people the practice had already handled.
+  Corrected to 183524004 "Referral to psychiatry service", which is what CMS's own CMS2 deck uses.
+  A new guard — an orderable resource may never carry a direct-reference code — catches the class, and
+  fails when the old code is put back.
+- **Retention kept the newest row per (subject, measure), not per PERIOD.** A calendar-year eCQM's whole
+  2027 evidence is superseded by the first 2028 run, so every PY2027 row became deletable around April
+  2028 — months before anyone could be asked to justify a PY2027 rate. Now per period.
+
+Three more that were real:
+
+- **The scheduler skipped a whole night** whenever a run started more than 30 minutes past the anchor —
+  a run at 12:30 gave a next fire 47.5 hours later — and the commonest trigger is the most ordinary,
+  the first run after a working-hours deploy. My own test asserted a 44-hour gap under the name "a late
+  run does not drag the next one late". The rule is now one scheduled run per UTC day at the anchor.
+- **The retention pin list truncated at 100,000 open cases**, ordered `updated_at DESC`, so the rows
+  dropped were the long-open ones whose evidence was about to be deleted. Both exclusions now live in
+  SQL, per row, with no list to truncate.
+- **A mid-chunk failure on the SYNCHRONOUS run path** left the run RUNNING forever with no terminal
+  audit event. `ASYNC_SCOPES` covers only ALL_PROGRAMS and SITE, so a 20,000-subject MEASURE run went
+  through the uncovered path.
+
+And a set of clinical corrections: Encounter periods carried no timezone (invalid FHIR `dateTime`, on
+the resource every denominator reads); hospice was drawn, counted and never emitted, so a denominator
+exclusion could never fire; ESRD prevalence was 3–5× the real figure; SUD was one diagnosis for all 564
+patients; conditions had no age floors (17 substance-use episodes under 13); condition onsets could
+predate birth; and a `setUTCMonth` overflow made 11 of 27 look-back months unreachable.
+
+**Flagged, not fixed — owner-owned.** The Postgres keep-set orders by
+`(subject_id, measure_id, evaluation_period, evaluated_at DESC)` and no such index exists, so on a large
+table the nightly DELETE sorts the whole thing. An index is a migration. Retention stays unset
+everywhere until that is decided, and `DEPLOY.md` says so.
+
+**Left for the owner:** the segment repair above, the Postgres retention index, and the review of the retention SQL in the PR.
 
 ## 2026-09-05 — the five pilot measures become runnable, and the gate that says two of them are not
 

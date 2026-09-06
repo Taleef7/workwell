@@ -132,7 +132,7 @@ test("the corpus stamps only codes the canonical table has verified — never a 
   const { corpusPatients } = await import("../engine/synthetic/corpus/corpus-patient.ts");
   const { bundleForPatient } = await import("../engine/synthetic/corpus/corpus-bundle.ts");
   const { DEFAULT_CORPUS_SEED } = await import("../engine/synthetic/corpus/corpus-parameters.ts");
-  const { MAMMOGRAPHY_PROCEDURE_CPT } = await import("../engine/cql/bundled-ecqm-expansions.ts");
+  const { MAMMOGRAPHY_PROCEDURE_CPT, SUD_CONDITION_CODES } = await import("../engine/cql/bundled-ecqm-expansions.ts");
 
   // Every clinical code the corpus is allowed to stamp: the canonical table (each member verified
   // against its own OID by the test above), the mammography CPT (deliberately outside the value-set
@@ -141,6 +141,9 @@ test("the corpus stamps only codes the canonical table has verified — never a 
   for (const c of Object.values(ECQM_CANONICAL_CODES)) allowed.add(`${c.system}|${c.code}`);
   allowed.add(`${MAMMOGRAPHY_PROCEDURE_CPT.system}|${MAMMOGRAPHY_PROCEDURE_CPT.code}`);
   allowed.add("http://snomed.info/sct|720834000"); // declined depression screening (cms2 exception)
+  // The second SUD diagnosis: a member of the same value set as `sudCondition`, kept outside the
+  // canonical table because that table is one code per value set by construction.
+  for (const c of SUD_CONDITION_CODES) allowed.add(`${c.system}|${c.code}`);
 
   // Systems that carry structure, not clinical meaning: FHIR/HL7 terminology for statuses, categories
   // and agent roles, and UCUM for units. Excluded by SYSTEM so a new status or unit cannot silently
@@ -179,3 +182,56 @@ function codingsOf(resource: unknown): Array<{ system: string; code: string }> {
   walk(resource);
   return out;
 }
+
+
+/**
+ * The guard the CMS2 follow-up defect walked straight past.
+ *
+ * `ECQM_CANONICAL_CODES` holds two kinds of code: value-set MEMBERS, which a measure retrieves through
+ * a value set, and DIRECT REFERENCES, which classify a result and belong in a `valueCodeableConcept`.
+ * The test above checks only that a stamped code is one of the constants — it has nothing to say about
+ * whether the code is valid in the ROLE it was used in. So stamping the *finding* "Depression screening
+ * positive" as a `ServiceRequest.code` passed every check in this file while making CMS2's numerator
+ * unreachable for every screened-positive patient with a documented follow-up: 1,240 orders at 20,000,
+ * none of them retrievable, the whole cohort reading non-compliant.
+ *
+ * The rule: an ORDERABLE code — one that ends up as `ServiceRequest.code`, `Procedure.code` or
+ * `MedicationRequest.medicationCodeableConcept` — must be registered in `CANONICAL_CODE_VALUE_SETS`,
+ * because that is the only way a measure can retrieve it. A direct-reference code there is a defect.
+ */
+test("an orderable resource never carries a direct-reference code", async () => {
+  const { corpusPatients } = await import("../engine/synthetic/corpus/corpus-patient.ts");
+  const { bundleForPatient } = await import("../engine/synthetic/corpus/corpus-bundle.ts");
+  const { DEFAULT_CORPUS_SEED } = await import("../engine/synthetic/corpus/corpus-parameters.ts");
+  const { CANONICAL_CODE_VALUE_SETS, MAMMOGRAPHY_PROCEDURE_CODES, SUD_CONDITION_CODES } =
+    await import("../engine/cql/bundled-ecqm-expansions.ts");
+
+  const retrievable = new Set<string>();
+  for (const key of Object.keys(CANONICAL_CODE_VALUE_SETS)) {
+    const c = ECQM_CANONICAL_CODES[key as keyof typeof ECQM_CANONICAL_CODES];
+    retrievable.add(`${c.system}|${c.code}`);
+  }
+  for (const c of [...MAMMOGRAPHY_PROCEDURE_CODES, ...SUD_CONDITION_CODES]) retrievable.add(`${c.system}|${c.code}`);
+  // The cms2 exception is retrieved by direct reference on a Procedure, by the artifact's own design.
+  retrievable.add("http://snomed.info/sct|720834000");
+
+  const ORDERABLE = new Set(["ServiceRequest", "Procedure", "MedicationRequest"]);
+  const offenders = new Set<string>();
+  for (const patient of corpusPatients(DEFAULT_CORPUS_SEED, 500)) {
+    for (const { resource } of bundleForPatient(patient, "2027-12-31").entry) {
+      const r = resource as Record<string, unknown>;
+      if (!ORDERABLE.has(String(r.resourceType))) continue;
+      const concept = (r.code ?? r.medicationCodeableConcept) as { coding?: { system: string; code: string }[] } | undefined;
+      for (const coding of concept?.coding ?? []) {
+        if (!retrievable.has(`${coding.system}|${coding.code}`)) {
+          offenders.add(`${String(r.resourceType)} ${coding.system}|${coding.code}`);
+        }
+      }
+    }
+  }
+  assert.deepEqual(
+    [...offenders].sort(),
+    [],
+    "orderable resources carrying a code no measure can retrieve through a value set",
+  );
+});

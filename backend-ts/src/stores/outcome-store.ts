@@ -131,20 +131,28 @@ export interface OutcomeStore {
   getOutcomeById(id: string): Promise<OutcomeRecord | null>;
   /**
    * Delete outcome rows older than `cutoff`, KEEPING three things (ADR-073):
-   *  - the newest row per `(subject_id, measure_id)`, whatever its age — a subject's current answer is
-   *    never deleted, so no roster cell can go blank because a run happened to be old;
-   *  - every row belonging to a run in `pinnedRunIds` — the runs open cases point at, so a case can
-   *    always show the evidence it was opened on;
+   *  - the newest row per `(subject_id, measure_id, evaluation_period)`, whatever its age. **Per
+   *    PERIOD, not merely per measure**: a calendar-year eCQM's whole 2027 evidence is superseded by
+   *    the first 2028 run, and keeping only the newest-per-measure would delete every 2027 row months
+   *    before anyone could be asked to justify a 2027 rate.
+   *  - every row a CASE cites — matched on `(run_id, subject_id, measure_id)`, so it protects that
+   *    case's own evidence rather than the other 99,999 rows its run happens to contain. Every case,
+   *    not only open ones: a closed case's detail page still resolves its outcome through
+   *    `last_run_id`, and a case somebody resolved is exactly the record re-read when a number is
+   *    challenged.
    *  - everything at or after `cutoff`.
    *
-   * Returns the number of rows deleted. Idempotent: a second call with the same arguments deletes
-   * nothing. **No schema change** — a DELETE against the existing `(subject_id, evaluated_at DESC)`
-   * index.
+   * Returns the number of rows deleted. Idempotent: a second call with the same cutoff deletes
+   * nothing. **No schema change** — a DELETE against the existing indexes.
+   *
+   * The case exclusion is evaluated IN SQL rather than passed in as a list of ids. A list has to be
+   * read with a limit, and a limit that silently truncates deletes exactly the evidence the exclusion
+   * exists to protect — with no error, because the read succeeded.
    *
    * The run rows themselves are never touched. A run's summary counts live on the run and in the
    * quality snapshots, so a compacted run still reports what it found (ADR-073).
    */
-  compactOlderThan(cutoff: string, pinnedRunIds: readonly string[]): Promise<number>;
+  compactOlderThan(cutoff: string): Promise<number>;
   /**
    * The distinct measure ids present in a run, capped at `limit` (default 2) — a bounded
    * `SELECT DISTINCT measure_id … LIMIT` used by the QRDA / MeasureReport endpoints to enforce the

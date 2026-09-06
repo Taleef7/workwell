@@ -233,13 +233,23 @@ history twice, once in a form nobody reads.
    and a deployment that has not opted in can never lose a row.
 
 2. **Three things are never deleted, and they are the substance of this decision.**
-   - **The newest row per `(subject, measure)`, at any age.** A subject's current answer survives even
-     if the last run for that measure predates the window — so no roster cell can go blank because a
-     measure has not been run lately.
-   - **Every row belonging to a run an OPEN case points at** (`cases.last_run_id`). A case must be able
-     to show the evidence it was opened on, however long it has been open.
+   - **The newest row per `(subject, measure, EVALUATION PERIOD)`, at any age.** Per period, not merely
+     per measure: a calendar-year eCQM's whole 2027 evidence is superseded by the first 2028 run, so a
+     newest-per-measure rule would delete every PY2027 row in about April 2028 — months before anyone
+     could be asked to justify a PY2027 rate, and years inside the audit window. Per period the cost is
+     one row per subject per measure per year, and a closed year stays answerable.
+   - **Every row a CASE cites**, matched on `(run_id, subject_id, measure_id)` — that case's own row,
+     not the other 99,999 its run contains. **Every case, not only open ones:** a closed case's detail
+     page still resolves its outcome through `last_run_id`, and a case somebody resolved is exactly the
+     record re-read when a number is challenged.
    - **Every run row and its counts.** A compacted run still reports what it found; only its
      per-subject detail thins.
+
+   Both exclusions are evaluated IN SQL. The first version read the open cases into memory with
+   `limit: 100000` and passed their run ids down — which truncates silently at pilot scale (120,000
+   possible open cases, ordered `updated_at DESC`, so the rows dropped are the least recently updated:
+   precisely the long-open cases whose run is old enough to be deleted on the next line), and which
+   pinned by RUN, so one case open past the window protected 100,000 rows.
 
 3. **Compaction runs AFTER the quality snapshot, never before.** The snapshot is computed from the
    per-subject rows, so compacting first would build the durable aggregate from a roster with holes in
@@ -282,8 +292,23 @@ history twice, once in a form nobody reads.
   property to protect rather than an implementation detail.
 - **Per-subject outcome history on the pilot is a 90-day window.** A consumer of the outcomes CSV who
   asks for a run older than that gets the surviving rows, not an error — and the run detail says so.
+- **The Postgres keep-set wants an index this schema does not have.** The subquery orders by
+  `(subject_id, measure_id, evaluation_period, evaluated_at DESC)` and the nearest existing index is
+  `(subject_id, evaluated_at DESC)`, so the planner sorts the table. On a 36-million-row table inside an
+  unbatched `DELETE` run inline in the nightly tick, that is a long lock and a plausible stall. An index
+  is a migration and migrations are owner-owned (CLAUDE.md), so it is **flagged here, not added**, and
+  the retention window stays off everywhere until it is decided.
 - **Lowering the window is the storage lever, with no code change.** 90 → 30 is one environment
   variable on the two Maui workflows, which `official-flip-config.test.ts` requires to agree.
+- **This is calibrated for a SANDBOX, and would need revisiting before the pilot's real year.** MIPS and
+  MSSP data-validation policy expects supporting documentation to be retained for years after a
+  performance period, not ninety days. Two things make ninety defensible here and both must stay true:
+  the pilot phase this unit serves is a sandbox on synthetic data (locked decision §4A.1), and the
+  SOURCE clinical data lives in WebChart, which is the legal record under its own retention — so a
+  PY2027 rate is reconstructible by re-running the pinned artifact against it. The per-period keep-rule
+  above is what makes the WorkWell side answerable in the meantime. **The aggregate alone is not a
+  substitute**: a numerator/denominator per month cannot evidence one patient's membership, and this
+  ADR should not be read as claiming it can.
 - **Enabling retention on an instance that has been accumulating rows deletes a lot at once.** The
   `pnpm outcomes:compact` CLI exists for that first pass, so it happens deliberately and under the same
   audit event rather than inside a nightly run somebody is not watching.

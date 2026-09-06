@@ -91,34 +91,47 @@ after(() => {
   }
 });
 
-test("runTick remains skipped after restart when the persisted scheduler run is within the 23.5 h cooldown", async () => {
+test("a restart does not re-fire a day whose anchor has already been served", async () => {
+  // Rewritten for the anchor rule. The old version started the prior run at 00:00 and asserted that a
+  // tick 23 h later stayed skipped — a 23.5-hour cooldown. Under "one scheduled run per UTC day at the
+  // anchor" the meaningful question is different: a run that already served its day's anchor must not
+  // fire again that day, however many times the process restarts.
   const stores = await freshStores();
-  const startedAt = "2026-07-01T00:00:00.000Z";
+  const startedAt = "2026-07-01T12:00:00.000Z"; // the day's anchor, served
   await createPriorSchedulerRun(stores, startedAt);
 
   setSchedulerEnabled(true);
   setSchedulerEnabled(true); // simulated process restart: enabled state is re-initialized
-  const fired = await runTick(deps(stores), Date.parse(startedAt) + 23 * 3_600_000);
+  const fired = await runTick(deps(stores), Date.parse("2026-07-01T23:00:00.000Z"));
 
-  assert.equal(fired, false, "persisted prior run must retain its cooldown across restart");
+  assert.equal(fired, false, "this day's anchor was already served — a restart must not re-run it");
   assert.equal((await schedulerTriggerEvents(stores)).length, 0, "skipped tick must not write an audit event");
 });
 
-test("a normal cycle boundary waits for the ANCHOR, not for 24 hours to elapse", async () => {
-  // Changed by the anchor (Task 11), deliberately. This used to assert that 24 h + 1 ms after the last
-  // run fires immediately — a cadence, not a schedule. Under an anchor the nightly run happens at the
-  // same wall-clock time every day, so a run that started at midnight is next due at 12:00, not at
-  // midnight again. That is the whole point: without it one late run drags every later one with it.
+test("the tick fires at the ANCHOR, not when 24 hours have elapsed", async () => {
+  // A run that served the 2026-07-01 anchor is next due at the 2026-07-02 anchor — not 24 h after
+  // whenever it happened to start. The cadence version of this asserted that 24 h + 1 ms fires
+  // immediately, which is what let a late run drag every later one with it.
   const stores = await freshStores();
-  const startedAt = "2026-07-01T00:00:00.000Z";
-  await createPriorSchedulerRun(stores, startedAt);
+  await createPriorSchedulerRun(stores, "2026-07-01T12:00:00.000Z");
 
   setSchedulerEnabled(true);
-  assert.equal(await runTick(deps(stores), Date.parse(startedAt) + 24 * 3_600_000 + 1), false, "00:00 is not the anchor");
+  assert.equal(await runTick(deps(stores), Date.parse("2026-07-02T11:59:59.000Z")), false, "one second before the anchor");
   assert.equal((await schedulerTriggerEvents(stores)).length, 0);
 
-  assert.equal(await runTick(deps(stores), Date.parse("2026-07-02T12:00:00.000Z")), true, "12:00 UTC is");
+  assert.equal(await runTick(deps(stores), Date.parse("2026-07-02T12:00:00.000Z")), true, "at the anchor");
   assert.equal((await schedulerTriggerEvents(stores)).length, 1, "a fired run must write its scheduler audit event");
+});
+
+test("a run that fired BEFORE its day's anchor leaves that day's run owed", async () => {
+  // The first run after enabling the scheduler fires immediately at whatever the wall clock is. That
+  // day's anchor has still not been served, so it fires at the anchor too — one extra, idempotent run
+  // on day one, rather than a night of stale data. Under the old floor this case skipped instead.
+  const stores = await freshStores();
+  await createPriorSchedulerRun(stores, "2026-07-01T03:00:00.000Z");
+
+  setSchedulerEnabled(true);
+  assert.equal(await runTick(deps(stores), Date.parse("2026-07-01T12:00:00.000Z")), true);
 });
 
 test("runTick still backfills promptly after a GENUINELY missed cycle", async () => {
@@ -223,18 +236,16 @@ test("after a debounced tick, later ticks skip the DB until the run is actually 
 
   const base = Date.parse(startedAt);
   const fired = await runTick(deps(stores), base + 3 * 3_600_000);
-  assert.equal(fired, false, "3 h after the last run is well inside the 23.5 h cooldown");
+  assert.equal(fired, false, "09:00 is not the anchor, and this day's 12:00 is still owed");
 
   // The tick learned when the next run is due, so intervening ticks cost zero DB round trips. The
-  // cached instant is the ANCHOR (06:00 + 23.5 h floor lands at 05:30, so the next 12:00 is the day
-  // after), not `last + 23.5 h` — otherwise the cache and the tick would disagree about the schedule
-  // and every tick in between would pay a query to be told to wait.
+  // cached instant is the ANCHOR — the same rule the tick and the display use — so the cache and the
+  // decision cannot disagree about when the nightly run happens.
   assert.equal(shouldSkipTickWithoutDb(base + 4 * 3_600_000), true);
-  assert.equal(shouldSkipTickWithoutDb(base + 23.5 * 3_600_000), true, "the debounce lapsed but the anchor has not arrived");
-  assert.equal(shouldSkipTickWithoutDb(base + 29 * 3_600_000), true);
+  assert.equal(shouldSkipTickWithoutDb(base + 5.9 * 3_600_000), true);
 
   // ...and it stops skipping at the anchor, so the schedule is preserved.
-  assert.equal(shouldSkipTickWithoutDb(base + 30 * 3_600_000), false, "06:00 + 30 h = 12:00 the next day");
+  assert.equal(shouldSkipTickWithoutDb(base + 6 * 3_600_000), false, "06:00 + 6 h = this day's 12:00 anchor");
 });
 
 test("after a fired tick, later ticks skip the DB until the next cycle is due", async () => {
@@ -245,9 +256,8 @@ test("after a fired tick, later ticks skip the DB until the next cycle is due", 
   const fired = await runTick(deps(stores), now);
   assert.equal(fired, true, "no prior scheduler run — the first enabled tick fires");
 
-  assert.equal(shouldSkipTickWithoutDb(now + 3_600_000), true);
-  assert.equal(shouldSkipTickWithoutDb(now + 23.5 * 3_600_000), true, "the debounce lapsed; the anchor has not");
-  assert.equal(shouldSkipTickWithoutDb(now + 30 * 3_600_000), false, "06:00 + 30 h = the next 12:00 anchor");
+  assert.equal(shouldSkipTickWithoutDb(now + 3_600_000), true, "07:00 — this day's anchor has not arrived");
+  assert.equal(shouldSkipTickWithoutDb(now + 6 * 3_600_000), false, "06:00 + 6 h = this day's 12:00 anchor");
 });
 
 test("re-enabling the scheduler clears the due cache so the toggle takes effect promptly", async () => {
@@ -400,12 +410,34 @@ test("after today's anchor has passed, the next fire is tomorrow's", () => {
   );
 });
 
-test("the min-gap is a FLOOR: an anchor inside the debounce window is pushed past it", () => {
-  // Ran at 11:00, anchor at 12:00, six-hour floor. Firing at 12:00 would be twice in an hour.
+test("a run EARLIER on the anchor's own day still leaves that day's run owed", () => {
+  // Replaces "the min-gap is a FLOOR". The floor was the bug: flooring on lastRun + 23.5 h and then
+  // taking the next anchor skipped a whole night for any run starting past anchor+30min. The rule is
+  // now one scheduled run per UTC day, so a run at 11:00 leaves 12:00 owed and it fires an hour later.
+  // Firing twice in a day is cheap and idempotent; losing a night of freshness is not.
   assert.equal(
-    computeNextFireAt({ lastRunAtMs: Date.parse("2027-03-04T11:00:00Z"), nowMs: Date.parse("2027-03-04T11:05:00Z"), anchorHourUtc: 12, minGapMs: 6 * H }),
-    "2027-03-05T12:00:00.000Z",
+    computeNextFireAt({ lastRunAtMs: Date.parse("2027-03-04T11:00:00Z"), nowMs: Date.parse("2027-03-04T11:05:00Z"), anchorHourUtc: 12 }),
+    "2027-03-04T12:00:00.000Z",
   );
+});
+
+test("NO DAY IS EVER SKIPPED, whatever hour the last run started", () => {
+  // The regression this file exists for. Every one of these produced 44-47.5 hours under the floor,
+  // with the intervening night silently lost — and the commonest trigger is the most ordinary: the
+  // first run after a working-hours deploy fires at whatever the wall clock is.
+  for (const [last, expected] of [
+    ["2027-03-04T12:00:05Z", "2027-03-05T12:00:00.000Z"],
+    ["2027-03-04T12:30:01Z", "2027-03-05T12:00:00.000Z"],
+    ["2027-03-04T15:00:00Z", "2027-03-05T12:00:00.000Z"],
+    ["2027-03-04T23:59:59Z", "2027-03-05T12:00:00.000Z"],
+  ] as const) {
+    const next = computeNextFireAt({ lastRunAtMs: Date.parse(last), nowMs: Date.parse(last) + 60_000, anchorHourUtc: 12 });
+    assert.equal(next, expected, `last run ${last}`);
+    const gapHours = (Date.parse(next) - Date.parse(last)) / 3_600_000;
+    assert.ok(gapHours <= 24, `${last} -> ${next} is ${gapHours.toFixed(1)}h — a night was skipped`);
+    // And the tick agrees: it fires once that anchor arrives.
+    assert.equal(shouldFireAt({ lastRunAtMs: Date.parse(last), nowMs: Date.parse(expected), anchorHourUtc: 12 }), true, last);
+  }
 });
 
 test("a deployment that has never run fires on the next tick, not after a day of waiting", () => {
@@ -424,10 +456,12 @@ test("a clock exactly at the anchor fires now, not in 24 hours", () => {
 });
 
 test("a late run does not drag the next one late — the anchor holds across days", () => {
-  // The whole point. Ran four hours late at 16:00; the next fire is still 12:00, not 16:00.
+  // Ran four hours past the anchor; the next fire is the NEXT day's anchor, 20 hours later. The
+  // previous version of this test asserted 2027-03-06 — a 44-hour gap — and so pinned the day-skip as
+  // correct under a name that says the opposite. That is the shape this project calls a vacuous guard.
   assert.equal(
-    computeNextFireAt({ lastRunAtMs: Date.parse("2027-03-04T16:00:00Z"), nowMs: Date.parse("2027-03-04T16:01:00Z"), anchorHourUtc: 12, minGapMs: GAP }),
-    "2027-03-06T12:00:00.000Z",
+    computeNextFireAt({ lastRunAtMs: Date.parse("2027-03-04T16:00:00Z"), nowMs: Date.parse("2027-03-04T16:01:00Z"), anchorHourUtc: 12 }),
+    "2027-03-05T12:00:00.000Z",
   );
 });
 
@@ -450,4 +484,83 @@ test("THE TICK ITSELF honours the anchor — not just the status display", () =>
   assert.equal(at("2027-03-04T11:00:00Z"), false, "before the anchor: no run");
   assert.equal(at("2027-03-04T11:59:59Z"), false, "one second before the anchor: still no run");
   assert.equal(at("2027-03-04T12:00:01Z"), true, "at/after the anchor: run");
+});
+
+// ── Retention runs after the run, and only when configured (ADR-073) ─────────
+//
+// `outcome-compaction.ts` says "The scheduler enforces the order; outcome-compaction.test.ts pins it"
+// and that file's header claimed to prove it runs after the quality snapshot. Neither was true: no test
+// imported both, so deleting the `compactOutcomes` call from the tick — or moving it ABOVE the run,
+// which is the ordering that destroys the durable history the whole design rests on — left the suite
+// green. These are that enforcement.
+
+test("a scheduled run triggers a retention pass, AFTER the run has finished", async () => {
+  const stores = await freshStores();
+  setSchedulerEnabled(true);
+  process.env.WORKWELL_OUTCOME_RETENTION_DAYS = "90";
+  const order: string[] = [];
+  const base = deps(stores);
+  const instrumented = {
+    ...base,
+    stores: {
+      ...base.stores,
+      outcomes: new Proxy(base.stores.outcomes, {
+        get(target, prop, receiver) {
+          const value = Reflect.get(target, prop, receiver);
+          if (prop === "compactOlderThan" && typeof value === "function") {
+            return async (...args: unknown[]) => {
+              order.push("compact");
+              return (value as (...a: unknown[]) => unknown).apply(target, args);
+            };
+          }
+          if (prop === "recordOutcomes" && typeof value === "function") {
+            return async (...args: unknown[]) => {
+              order.push("persist");
+              return (value as (...a: unknown[]) => unknown).apply(target, args);
+            };
+          }
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      }),
+    },
+  };
+  try {
+    const fired = await runTick(instrumented as never, Date.UTC(2026, 6, 1, 12, 0, 0));
+    assert.equal(fired, true);
+    assert.ok(order.includes("compact"), "the tick must run a retention pass when retention is configured");
+    // Compaction after the last persist — i.e. after the run and its snapshot, never before. Compacting
+    // first would delete the per-subject rows the aggregate is computed from, and that loss is permanent.
+    assert.equal(order.at(-1), "compact", `order was ${order.join(" -> ")}`);
+    assert.ok(order.indexOf("persist") < order.indexOf("compact"), "a chunk was persisted before compaction ran");
+  } finally {
+    delete process.env.WORKWELL_OUTCOME_RETENTION_DAYS;
+  }
+});
+
+test("with retention unset the tick compacts NOTHING — the default deployment never loses a row", async () => {
+  const stores = await freshStores();
+  setSchedulerEnabled(true);
+  delete process.env.WORKWELL_OUTCOME_RETENTION_DAYS;
+  let compactions = 0;
+  const base = deps(stores);
+  const instrumented = {
+    ...base,
+    stores: {
+      ...base.stores,
+      outcomes: new Proxy(base.stores.outcomes, {
+        get(target, prop, receiver) {
+          const value = Reflect.get(target, prop, receiver);
+          if (prop === "compactOlderThan" && typeof value === "function") {
+            return async (...args: unknown[]) => {
+              compactions += 1;
+              return (value as (...a: unknown[]) => unknown).apply(target, args);
+            };
+          }
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      }),
+    },
+  };
+  assert.equal(await runTick(instrumented as never, Date.UTC(2026, 6, 1, 12, 0, 0)), true);
+  assert.equal(compactions, 0);
 });

@@ -23,5 +23,5 @@ const stores = await getStores(env as never);
 const result = await compactOutcomes(stores, { retentionDays, now: Date.now() });
 console.log(
   `[workwell] compacted outcomes older than ${result!.cutoff} (${retentionDays}-day window): ` +
-    `${result!.deleted} row(s) deleted, ${result!.kept} run(s) pinned by open cases, ${result!.durationMs}ms.`,
+    `${result!.deleted} row(s) deleted in ${result!.durationMs}ms.`,
 );
