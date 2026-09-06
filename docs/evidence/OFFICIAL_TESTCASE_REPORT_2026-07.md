@@ -1,6 +1,6 @@
 # Official MADiE eCQM Test-Case Report — July 2026
 
-**Generated:** 2026-08-01
+**Generated:** 2026-09-06
 **Content:** `cqframework/dqm-content-qicore-2025` master (2025 AU / 2026 performance period)
 **Content revision:** `ca4b49516de4cbed9f92bfb7c35d97b1bf1022ab`
 **Engine:** `fqm-execution` 1.8.5 over pre-compiled ELM; offline, no server, DB, VSAC key, or request path
@@ -32,6 +32,7 @@ The fetch script sparse-checks out only the gated measures' bundles and test-cas
 | CMS138 | 47 | 47 (100.0%) | 0 | 47 (100.0%) | 0 | 0 |
 | CMS130 | 64 | 64 (100.0%) | 0 | 64 (100.0%) | 0 | 0 |
 | CMS165 | 68 | 68 (100.0%) | 0 | 68 (100.0%) | 0 | 0 |
+| CMS137 | 45 | 45 (100.0%) | 0 | 45 (100.0%) | 0 | 0 |
 
 † CMS122 reference agreement means the actual vector differs from the committed MADiE expected only at numerator `0→1` for one of the six UUIDs already reported by the source repo. It is an adjusted pass, not an engine defect.
 
@@ -55,6 +56,7 @@ The fetch script sparse-checks out only the gated measures' bundles and test-cas
 - **CMS165:** trustMetaProfile=false (first pass; no retry); 33/33 Bundle ValueSets carry expansions; 2 expansion(s) report more total codes than are present; fqm warnings=0.
   - Cap candidate: `http://cts.nlm.nih.gov/fhir/ValueSet/2.16.840.1.113883.3.526.3.378` — 1000/1987 codes present. A mismatch involving a missing code from this set must be classified as a value-set-cap candidate, not automatically as an engine bug.
   - Cap candidate: `http://cts.nlm.nih.gov/fhir/ValueSet/2.16.840.1.113883.3.464.1003.110.12.1082` — 1000/1997 codes present. A mismatch involving a missing code from this set must be classified as a value-set-cap candidate, not automatically as an engine bug.
+- **CMS137:** trustMetaProfile=false (first pass; no retry); 28/28 Bundle ValueSets carry expansions; 0 expansion(s) report more total codes than are present; fqm warnings=0.
 
 ## Investigated findings
 
@@ -601,6 +603,68 @@ Measurement period: 2026-01-01 → 2026-12-31. Raw expected agreement 68/68; ref
 Executed with the RUNTIME configuration — our reduced artifact plus its own vendored terminology sidecar, expanded through the same code path production uses — against the upstream bundle and upstream ValueSets. 0/68 cases changed population vector; 0 drift errors.
 
 Artifact proven: `sha256:ae317d0db4136e322900ff139982621d547f411d5b0e14fa75ad8fea9a53645e` (2.5 MB, ELM annotations stripped). Compared on population membership (initial-population/denominator/denominator-exclusion/numerator/denominator-exception) only; the artifact also returned 426 named statement results for every subject.
+
+| Case | UUID | Changed populations | v1 IPP/DENOM/DENEX/NUMER/DENEXCEP | draft IPP/DENOM/DENEX/NUMER/DENEXCEP |
+|---|---|---|---|---|
+| None | — | — | — | — |
+
+## CMS137 — CMS137FHIRSUDTxInitEngagement
+
+Measurement period: 2026-01-01 → 2026-12-31. Raw expected agreement 45/45; reference-adjusted pass 45/45.
+
+| Case | UUID | IPP E/A | DENOM E/A | DENEX E/A | NUMER E/A | DENEXCEP E/A | Result |
+|---|---|---:|---:|---:|---:|---:|---|
+| IPPass DetoxVisit | `044ba9ba-7258-48c8-84d3-1af0397dacec` | 1/1 | 1/1 | 0/0 | 0/0 | 0/0 | PASS |
+| IPFail 12wSUDEpisodean1ofMP | `08a35041-dee3-4d16-ace3-20e5c65133ca` | 0/0 | 0/0 | 0/0 | 0/0 | 0/0 | PASS |
+| IPFail SUDShortActingMedicationHx | `1453ae98-00d0-4f21-9b5e-8e84270415a2` | 0/0 | 0/0 | 0/0 | 0/0 | 0/0 | PASS |
+| NUMER2PASS LASUDMedOrderWithin34DaysofIInitiation | `17470cc9-df3f-4e8e-9ab5-f860d38497d6` | 1/1 | 1/1 | 0/0 | 1/1 | 0/0 | PASS |
+| DENEXPass HospiceDischargeToHomeDuringMP | `19b5b244-6834-40f7-b8a2-ff2c6fb84fb0` | 1/1 | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| DENEXPass HospiceProcedureStartsDuringMP | `19e9d2c7-4030-46c9-80e5-8c71fcae5227` | 1/1 | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| DENEXFail HospiceEncB4MP | `1e266d29-be00-43a2-8ffe-0c8b09416594` | 1/1 | 1/1 | 0/0 | 0/0 | 0/0 | PASS |
+| IPPass DischargeServices | `35da2344-c03d-4830-bc23-9329f37736b7` | 1/1 | 1/1 | 0/0 | 0/0 | 0/0 | PASS |
+| DENEXPass HospiceDiagnosisOverlapsMP | `3698ad63-09e3-46e8-ba42-39c9cd235603` | 1/1 | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| IPPass InitialHosInpatientVisit | `3d941a8c-86c0-4ae5-b68c-dcd7dbb13f97` | 1/1 | 1/1 | 0/0 | 0/0 | 0/0 | PASS |
+| DENEXPass HospiceEncDuringMP | `404859c4-6f6e-4376-ae4d-d02a479e62aa` | 1/1 | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| DENEXPass HospiceDiagnosisOverlapsMP2 | `408f327a-94aa-4787-a1c6-e6fc7fde341d` | 1/1 | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| DENEXPass HospiceEncOverlapsMP | `46954fc1-3432-4e5d-b920-a2087f01abba` | 1/1 | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| IPFail SUDHx | `488f3b7f-c5a8-4491-8135-11a50bcf1ffe` | 0/0 | 0/0 | 0/0 | 0/0 | 0/0 | PASS |
+| NUMERPASS ShortActMed13DaysAfterEpisode | `48ff3299-b10a-4aa4-bfbb-dbb68e355b76` | 1/1 | 1/1 | 0/0 | 1/1 | 0/0 | PASS |
+| IPPass Strat2Age18 | `4c6356fd-ada9-40f7-b285-17786edb8d9e` | 1/1 | 1/1 | 0/0 | 0/0 | 0/0 | PASS |
+| SDEPass SDECoverageFemale | `569df0d6-c14d-4b3e-b0cb-67ca045e7ac8` | 1/1 | 1/1 | 0/0 | 0/0 | 0/0 | PASS |
+| NUMERPASS SUDDxWithTelephoneVisit | `5b0061aa-777e-4b38-bde2-a1c10152e555` | 1/1 | 1/1 | 0/0 | 1/1 | 0/0 | PASS |
+| NUMERPASS ShortActMedAdminStarts13DaysAfterEpisode | `5d472e4a-66dc-4246-a607-ccf0084f02eb` | 1/1 | 1/1 | 0/0 | 1/1 | 0/0 | PASS |
+| NUMERPASS LongActMed13DaysAfterEpisode | `645c11ae-4768-4711-9b46-0b6fd309699f` | 1/1 | 1/1 | 0/0 | 1/1 | 0/0 | PASS |
+| IPPass TelephoneVisit | `67a71781-6fbe-44c1-b29d-7d8e778b0578` | 1/1 | 1/1 | 0/0 | 0/0 | 0/0 | PASS |
+| NUMERPASS LongActMedAdminStarts13DaysAfterEpisode | `6d2606b6-f8f8-4c21-a069-ff0b32d0727a` | 1/1 | 1/1 | 0/0 | 1/1 | 0/0 | PASS |
+| DENEXPass HospiceServiceRequestDuringMP | `6fc30283-94af-4a06-8325-cbc65e9b4b7c` | 1/1 | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| IPPass Strat3Age65 | `703efc85-dd8b-401b-ab0f-92f98b2fdd25` | 1/1 | 1/1 | 0/0 | 0/0 | 0/0 | PASS |
+| IPPass 13wSUDEpisodeJan1ofMP | `75a7f4ca-c167-46fa-9e33-0e2299cc3ac7` | 1/1 | 1/1 | 0/0 | 0/0 | 0/0 | PASS |
+| IPPass EDVisit | `7c575e4b-3737-4082-b3b5-259a458d385e` | 1/1 | 1/1 | 0/0 | 0/0 | 0/0 | PASS |
+| SDEPass SDECoverage | `818ae5f1-774a-4d92-a4fa-56863bc3da63` | 1/1 | 1/1 | 0/0 | 0/0 | 0/0 | PASS |
+| DENEXPass HospiceDischargeDuringMP | `8715fad1-2969-418a-b3d3-45b2581f4fe3` | 1/1 | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+| NUMERPASS SUDDxWithVirtualEnc | `95e62e34-9b8a-4076-9d09-5eb5e35fdc6a` | 1/1 | 1/1 | 0/0 | 1/1 | 0/0 | PASS |
+| NUMERFAIL Medication15DaysAfterSUD | `abedeee4-b615-45f1-90b3-0ae38c533b2d` | 1/1 | 1/1 | 0/0 | 0/0 | 0/0 | PASS |
+| IPPass DischargeServicesSameDay | `acb7b1cc-90f7-4e41-90e3-22e72310748f` | 1/1 | 1/1 | 0/0 | 0/0 | 0/0 | PASS |
+| IPPass OfficeVisit | `ade0fa8f-e18b-469c-b1f3-7668807e25eb` | 1/1 | 1/1 | 0/0 | 0/0 | 0/0 | PASS |
+| NUMERPASS PsychVisitWithin14DaysofSUD | `af70d9d1-57ec-4bca-bafc-2361c4100995` | 1/1 | 1/1 | 0/0 | 1/1 | 0/0 | PASS |
+| IPPass Strat2Age64 | `b12424cd-3ae2-49a1-9b45-615bd0b03283` | 1/1 | 1/1 | 0/0 | 0/0 | 0/0 | PASS |
+| NUMER2PASS LASUDMedAdminPerformedWithin34DaysofIInitiation | `b4bf9e9c-9a29-43b7-acc4-deb339290832` | 1/1 | 1/1 | 0/0 | 1/1 | 0/0 | PASS |
+| NUMER2PASS TwoSASUDMedAdminWithin34DaysofIInitiation | `bba6dd6e-c6da-4684-bb74-b650dee77b64` | 1/1 | 1/1 | 0/0 | 1/1 | 0/0 | PASS |
+| NUMER2PASS TwoSASUDMedOrderWithin34DaysofIInitiation | `bdca6f16-1dd2-48c2-81ec-9ebe4d43a027` | 1/1 | 1/1 | 0/0 | 1/1 | 0/0 | PASS |
+| NUMER2FAIL SAMedOrder35DaysAfterInitiation | `dd4cdfbe-a188-40b5-b4df-fd791b27ba67` | 1/1 | 1/1 | 0/0 | 0/0 | 0/0 | PASS |
+| IPFail SUDTreatmentHx | `e4addda0-5b87-4f16-b29a-d72be98d6d0b` | 0/0 | 0/0 | 0/0 | 0/0 | 0/0 | PASS |
+| IPPass VirtualEncounter | `eaa42b04-c953-4880-9d62-ba8435a4f9d4` | 1/1 | 1/1 | 0/0 | 0/0 | 0/0 | PASS |
+| NUMERPASS SUDTreatmentWithin14DaysofSUD | `eff74fdb-fd4e-4d99-9097-7aed5585dfcc` | 1/1 | 1/1 | 0/0 | 1/1 | 0/0 | PASS |
+| NUMER2PASS TwoSASUDMedEncandProcWithin34DaysofIInitiation | `f1308c5a-8dcc-41ae-8e32-5cf33b54c8e6` | 1/1 | 1/1 | 0/0 | 1/1 | 0/0 | PASS |
+| IPFail SUDLongActingMedicationHx | `f1593c5f-f488-435b-96da-c7354edfd008` | 0/0 | 0/0 | 0/0 | 0/0 | 0/0 | PASS |
+| NUMER2PASS TwoSASUDMedAdminPerformedWithin34DaysofIInitiation | `fe1e8e8e-0d5a-40bb-93ca-28c808e5e2dd` | 1/1 | 1/1 | 0/0 | 1/1 | 0/0 | PASS |
+| DENEXPass HospiceObsValueIsYes | `feb97651-b478-467e-97c9-3bc514a0a26b` | 1/1 | 1/1 | 1/1 | 0/0 | 0/0 | PASS |
+
+### CMS137 reduction check — upstream bundle vs vendored artifact v1.0.000
+
+Executed with the RUNTIME configuration — our reduced artifact plus its own vendored terminology sidecar, expanded through the same code path production uses — against the upstream bundle and upstream ValueSets. 0/45 cases changed population vector; 0 drift errors.
+
+Artifact proven: `sha256:01e9499c10b252636ea58805a9f913685dc867eec23bd586429520cc966f0a24` (2.4 MB, ELM annotations stripped). Compared on population membership (initial-population/denominator/denominator-exclusion/numerator/denominator-exception) only; the artifact also returned 439 named statement results for every subject.
 
 | Case | UUID | Changed populations | v1 IPP/DENOM/DENEX/NUMER/DENEXCEP | draft IPP/DENOM/DENEX/NUMER/DENEXCEP |
 |---|---|---|---|---|
