@@ -5,8 +5,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { runCorpusExport, parseArgs } from "./corpus-export-cli.ts";
-import { corpusPatients } from "./corpus-patient.ts";
-import { DEFAULT_CORPUS_SEED, PCPS, CLINICS } from "./corpus-parameters.ts";
+import { corpusPatients } from "../../engine/synthetic/corpus/corpus-patient.ts";
+import { DEFAULT_CORPUS_SEED, PCPS, CLINICS } from "../../engine/synthetic/corpus/corpus-parameters.ts";
 
 test("the export writes one NDJSON per resource type plus practitioners, organizations and the manifest", async (t) => {
   const out = await mkdtemp(join(tmpdir(), "corpus-"));

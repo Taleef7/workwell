@@ -1,8 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildManifest, manifestSha256, CORPUS_MEASURE_IDS } from "./corpus-manifest.ts";
-import { corpusPatients } from "./corpus-patient.ts";
-import { DEFAULT_CORPUS_SEED, CLINICS, PCPS, parametersSha256, CORPUS_GENERATOR_VERSION } from "./corpus-parameters.ts";
+import { buildManifest, manifestSha256, parametersSha256, CORPUS_MEASURE_IDS } from "./corpus-manifest.ts";
+import { corpusPatients } from "../../engine/synthetic/corpus/corpus-patient.ts";
+import { DEFAULT_CORPUS_SEED, CLINICS, PCPS, CORPUS_GENERATOR_VERSION } from "../../engine/synthetic/corpus/corpus-parameters.ts";
 
 test("the manifest carries every key the spec names, with the declared types", () => {
   const m = buildManifest({

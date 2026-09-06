@@ -9,7 +9,6 @@ import {
   AGE_MIXTURE,
   CONDITION_PREVALENCE,
   EVENT_RATES,
-  parametersSha256,
 } from "./corpus-parameters.ts";
 
 test("the fixture prefix is exactly the 48 pat-001..pat-048 rows", () => {
@@ -48,10 +47,3 @@ test("every prevalence and rate is a probability", () => {
   assert.ok(Math.abs(AGE_MIXTURE.reduce((sum, c) => sum + c.weight, 0) - 1) < 1e-9);
 });
 
-// Named for what it actually checks. Whether the digest MOVES when a row changes is a property of
-// JSON.stringify over the table, not something this test can exercise against module-level consts —
-// asserting it here would be a claim the test never makes.
-test("parametersSha256 is a pure, stable hex digest", () => {
-  assert.match(parametersSha256(), /^[0-9a-f]{64}$/);
-  assert.equal(parametersSha256(), parametersSha256(), "pure");
-});

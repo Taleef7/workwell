@@ -6,9 +6,7 @@
  * goes into the manifest so a run's data is traceable to the exact table that produced it, and
  * CORPUS_GENERATOR_VERSION is bumped by hand whenever a row or the drawing logic changes.
  */
-import { createHash } from "node:crypto";
-
-export const CORPUS_GENERATOR_VERSION = "1.1.0";
+export const CORPUS_GENERATOR_VERSION = "2.0.0";
 export const DEFAULT_CORPUS_SEED = "maui-py2027-v1";
 
 export interface CorpusClinic {
@@ -209,12 +207,6 @@ export const SURNAMES: readonly string[] = [
 /** Collision handling (spec §3, "Identity and uniqueness"). */
 export const MAX_NAME_REDRAWS = 16;
 
-/** SHA-256 of the parameter table, for the manifest. Keys in declaration order; comments excluded. */
-export function parametersSha256(): string {
-  const rows = {
-    CORPUS_GENERATOR_VERSION, CLINICS, CLINIC_WEIGHTS, PCPS, AGE_MIXTURE, FEMALE_SHARE,
-    CONDITION_PREVALENCE, EVENT_RATES, COLORECTAL_MODALITIES, VISITS_PER_YEAR,
-    GIVEN_NAMES, SURNAMES, MAX_NAME_REDRAWS,
-  };
-  return createHash("sha256").update(JSON.stringify(rows), "utf8").digest("hex");
-}
+// The parameter table is HASHED for provenance, but not here: this module is on the worker request
+// path, which must stay portable (no `node:crypto`). `parametersSha256` lives in
+// `run/cli/corpus-manifest.ts`, on the wiring side of the engine boundary.

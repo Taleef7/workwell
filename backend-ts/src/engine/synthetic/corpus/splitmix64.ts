@@ -6,8 +6,6 @@
  * Every patient draws from their OWN stream, keyed by (seed, index), so generation order and batch
  * boundaries never change a record (spec §3, "Determinism").
  */
-import { createHash } from "node:crypto";
-
 const MASK = (1n << 64n) - 1n;
 const GOLDEN = 0x9e3779b97f4a7c15n;
 
@@ -61,14 +59,31 @@ export class SplitMix64 {
 }
 
 /**
- * The per-patient stream key: the first 8 bytes of sha256(seed) as a big-endian BigInt, XOR the index.
- * Hashing the seed means two human-chosen seeds that differ by one character produce unrelated streams.
+ * The per-patient stream key: a 64-bit FNV-1a digest of the seed, XOR the index.
+ *
+ * FNV-1a rather than SHA-256 because this module sits on the WORKER REQUEST PATH, which must stay
+ * portable — `node:crypto` is unavailable there and the engine-boundary test enforces it. It is also
+ * what finally makes this file dependency-free, as its own header always claimed.
+ *
+ * A cryptographic digest was never needed here: the requirement is that two human-chosen seeds
+ * differing by one character produce unrelated streams, which avalanche gives, and FNV-1a avalanches
+ * well enough for that. Nothing about corpus identity is a security boundary.
  */
-export function streamKeyFor(seed: string, index: number): bigint {
-  const digest = createHash("sha256").update(seed, "utf8").digest();
-  const base = digest.readBigUInt64BE(0);
-  return (base ^ BigInt(index)) & MASK;
+const FNV_OFFSET = 14695981039346656037n;
+const FNV_PRIME = 1099511628211n;
+
+export function hash64(text: string): bigint {
+  let h = FNV_OFFSET;
+  // Hash the UTF-8 BYTES, not the UTF-16 code units, so the digest does not depend on how JavaScript
+  // happens to represent the string.
+  for (const byte of new TextEncoder().encode(text)) {
+    h = ((h ^ BigInt(byte)) * FNV_PRIME) & MASK;
+  }
+  return h;
 }
 
+export function streamKeyFor(seed: string, index: number): bigint {
+  return (hash64(seed) ^ BigInt(index)) & MASK;
+}
 /** The stream a patient draws every one of their values from. */
 export const streamFor = (seed: string, index: number): SplitMix64 => new SplitMix64(streamKeyFor(seed, index));

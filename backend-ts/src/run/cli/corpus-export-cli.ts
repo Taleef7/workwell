@@ -20,10 +20,11 @@ import { createWriteStream, mkdirSync, type WriteStream } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { once } from "node:events";
-import { corpusPatients, patientAt } from "./corpus-patient.ts";
-import { bundleForPatient, organizationResources, practitionerResources } from "./corpus-bundle.ts";
+import { corpusPatients, patientAt } from "../../engine/synthetic/corpus/corpus-patient.ts";
+import { bundleForPatient, organizationResources, practitionerResources } from "../../engine/synthetic/corpus/corpus-bundle.ts";
 import { buildManifest } from "./corpus-manifest.ts";
-import { DEFAULT_CORPUS_SEED } from "./corpus-parameters.ts";
+import { loadOfficialArtifact } from "../../wiring/official-artifacts.ts";
+import { DEFAULT_CORPUS_SEED } from "../../engine/synthetic/corpus/corpus-parameters.ts";
 
 /** Generated in batches so memory stays flat; 500 is small enough to be cheap and large enough to amortise. */
 const BATCH = 500;
@@ -120,6 +121,9 @@ export async function runCorpusExport(options: CorpusExportOptions): Promise<Cor
     seed,
     patients: corpusPatients(seed, size),
     ndjsonSha256,
+    // The artifact loader is injected HERE rather than imported by the manifest: this CLI is app
+    // wiring and may reach into src/wiring/, while src/engine/ may not (engine-boundary test).
+    loadArtifact: loadOfficialArtifact,
     ...(options.generatedAt ? { generatedAt: options.generatedAt } : {}),
   });
   await writeFile(join(out, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`, "utf8");

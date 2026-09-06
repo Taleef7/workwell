@@ -18,17 +18,42 @@
  * Nothing here decides an outcome. It describes the input; CQL decides everything else.
  */
 import { createHash } from "node:crypto";
-import { loadOfficialArtifact } from "../../../wiring/official-artifacts.ts";
 import {
+  AGE_MIXTURE,
   CLINICS,
+  CLINIC_WEIGHTS,
+  COLORECTAL_MODALITIES,
+  CONDITION_PREVALENCE,
   CORPUS_GENERATOR_VERSION,
   EVENT_RATES,
+  FEMALE_SHARE,
+  GIVEN_NAMES,
+  MAX_NAME_REDRAWS,
   PCPS,
+  SURNAMES,
+  VISITS_PER_YEAR,
   ageBandFor,
-  parametersSha256,
   type AgeBand,
-} from "./corpus-parameters.ts";
-import type { CorpusPatient } from "./corpus-patient.ts";
+} from "../../engine/synthetic/corpus/corpus-parameters.ts";
+import type { CorpusPatient } from "../../engine/synthetic/corpus/corpus-patient.ts";
+
+/**
+ * The parameter table's digest — computed HERE, not in the table itself.
+ *
+ * `src/engine/` is the future `@work-well/measure-engine` package and sits on the worker request path,
+ * which must stay portable: `node:crypto` is unavailable there and the engine-boundary test enforces
+ * it. Hashing the table for provenance is a REPORTING concern rather than engine data, so it belongs on
+ * this side of the line — which also lets it stay a real SHA-256 instead of degrading to a portable
+ * 64-bit digest.
+ */
+export function parametersSha256(): string {
+  const rows = {
+    CORPUS_GENERATOR_VERSION, CLINICS, CLINIC_WEIGHTS, PCPS, AGE_MIXTURE, FEMALE_SHARE,
+    CONDITION_PREVALENCE, EVENT_RATES, COLORECTAL_MODALITIES, VISITS_PER_YEAR,
+    GIVEN_NAMES, SURNAMES, MAX_NAME_REDRAWS,
+  };
+  return createHash("sha256").update(JSON.stringify(rows), "utf8").digest("hex");
+}
 
 /** The measures the pilot's ACO set names, in catalog-id form. */
 export const CORPUS_MEASURE_IDS = ["cms122", "cms2", "cms165", "cms125", "cms130"] as const;
@@ -64,7 +89,14 @@ export interface BuildManifestInput {
   readonly ndjsonSha256: Record<string, string>;
   /** Injectable so a test is not coupled to a wall clock; omitted entirely when not supplied. */
   readonly generatedAt?: string;
-  readonly loadArtifact?: (catalogId: string) => ReturnType<typeof loadOfficialArtifact>;
+  /**
+   * Reads a vendored measure's committed manifest. INJECTED, not imported: `src/engine/` is the future
+   * `@work-well/measure-engine` package and may not reach into `src/wiring/` — a boundary the
+   * `engine-boundary` test enforces mechanically, and which caught this exact import. The caller
+   * (`run/cli/corpus-export-cli.ts`, app wiring) supplies the real loader; omitting it yields null
+   * hashes rather than a broken build, so the engine stays usable standalone.
+   */
+  readonly loadArtifact?: (catalogId: string) => { manifest?: unknown } | null;
 }
 
 const tally = <T extends string>(values: Iterable<T>, seedKeys: readonly T[] = []): Record<T, number> => {
@@ -127,14 +159,14 @@ function estimateCohorts(patients: readonly CorpusPatient[]): CorpusManifest["es
 
 export function buildManifest(input: BuildManifestInput): CorpusManifest {
   const { seed, patients, ndjsonSha256 } = input;
-  const loadArtifact = input.loadArtifact ?? loadOfficialArtifact;
+  const loadArtifact = input.loadArtifact;
 
   const artifactHashes: Record<string, string | null> = {};
   const terminologySha256s: Record<string, string | null> = {};
   for (const id of CORPUS_MEASURE_IDS) {
     // Read from the measure's own committed manifest rather than re-hashing the bundle: a second
     // implementation of the same hash is a second thing that can disagree with the executor.
-    const artifact = loadArtifact(id);
+    const artifact = loadArtifact?.(id) ?? null;
     const manifest = artifact?.manifest as { sha256?: string; terminology?: { sha256?: string } } | undefined;
     artifactHashes[id] = manifest?.sha256 ?? null;
     terminologySha256s[id] = manifest?.terminology?.sha256 ?? null;
