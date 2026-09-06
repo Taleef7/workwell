@@ -210,6 +210,84 @@ rate looks plausible, and nothing anywhere says a second rate was discarded.
 - `official-flip-gate.ts` and `compliance-api.ts` **still read rate 1 only**, named here as known and
   deferred rather than left to be discovered.
 
+## ADR-073: per-subject outcome history is a retention WINDOW, and the durable history is the aggregate
+
+**Status:** Accepted (2026-09-06). Milestone MM-1, unit U2 Stage D (`docs/ROADMAP_2026-08-30.md` §5).
+
+**Context.** A nightly ALL_PROGRAMS run over the pilot's 20,000 patients at five measures writes
+**100,000 outcome rows a night** — 36 million in a year, each carrying an `evidence_json` blob. The
+storage is a serverless Postgres and it is the pilot's actual bill. Almost every question anyone asks of
+those rows is about the CURRENT state of a panel: who is overdue today, whose result came back this
+month, which patients on this PCP's list need outreach. The historical rows answer a different
+question — how the practice's rate moved over time — and that question is already answered, better and
+in constant space, by the quality-over-time snapshot store (#E16, ADR-021), which materializes a
+numerator/denominator per measure per month per scope.
+
+Keeping 36 million rows to answer a question an aggregate already answers is paying for the same
+history twice, once in a form nobody reads.
+
+**Decision.**
+
+1. **`WORKWELL_OUTCOME_RETENTION_DAYS` defines a window; outside it, outcome rows are deleted.** 90 on
+   the Maui deployment. **Unset everywhere else, and unset means OFF** — TWH keeps its history whole,
+   and a deployment that has not opted in can never lose a row.
+
+2. **Three things are never deleted, and they are the substance of this decision.**
+   - **The newest row per `(subject, measure)`, at any age.** A subject's current answer survives even
+     if the last run for that measure predates the window — so no roster cell can go blank because a
+     measure has not been run lately.
+   - **Every row belonging to a run an OPEN case points at** (`cases.last_run_id`). A case must be able
+     to show the evidence it was opened on, however long it has been open.
+   - **Every run row and its counts.** A compacted run still reports what it found; only its
+     per-subject detail thins.
+
+3. **Compaction runs AFTER the quality snapshot, never before.** The snapshot is computed from the
+   per-subject rows, so compacting first would build the durable aggregate from a roster with holes in
+   it — and the error would be permanent, because the rows it needed are gone. The scheduler enforces
+   the order and a test pins it.
+
+4. **One `OUTCOMES_COMPACTED` audit event per pass**, carrying cutoff, rows deleted, runs pinned,
+   duration and the window. A deletion is a state change and is audited — no exceptions (CLAUDE.md).
+   One event per pass rather than per row: the payload answers "what was removed and what was
+   protected", and 100,000 events answering that individually would answer nothing.
+
+5. **`backfill-trend-history` REFUSES to run under a retention window.** It writes synthetic outcome
+   rows dated weeks in the past which are nobody's newest — exactly what the next compaction deletes. It
+   would report success, the chart would look right until the nightly run, and the operator would have
+   no reason to connect the disappearance to the tool.
+
+6. **The compacted-run notice states what it can prove and no more.** A run older than the window shows
+   that its per-subject results may have been compacted and that the counts on the page are survivors.
+   It does NOT state how many rows went: the true evaluated count is not on the run row, putting it
+   there is a schema change (owner-owned), and deriving it from the surviving rows is circular. The
+   notice exists to stop a lower number being misread as a smaller run.
+
+**Alternatives rejected.**
+
+- *Keep everything and pay for the storage.* Rejected on cost, and because the value is asymmetric: the
+  aggregate answers the historical question better than 36 million rows do.
+- *Delete by run — drop whole old runs.* Rejected: it takes a subject's current answer with it whenever
+  that answer happens to come from an old run, which is exactly the case for a measure with a long
+  compliance cycle. The keep-rule has to be per `(subject, measure)`, not per run.
+- *Archive to object storage instead of deleting.* Rejected for now as a bigger commitment than the
+  problem needs (an export format, a lifecycle policy, a restore path). ADR-030's S3 seam exists if the
+  pilot ever asks for it; nothing here forecloses it.
+- *A schema column holding the evaluated count* so the notice could report exactly what was lost.
+  Rejected as owner-gated: migrations are Taleef's, and the notice is honest without it.
+
+**Consequences.**
+
+- **The quality-over-time snapshots become load-bearing.** They were a convenience for a chart; under
+  retention they are the long-run record. Nothing in compaction touches them, and that is now a
+  property to protect rather than an implementation detail.
+- **Per-subject outcome history on the pilot is a 90-day window.** A consumer of the outcomes CSV who
+  asks for a run older than that gets the surviving rows, not an error — and the run detail says so.
+- **Lowering the window is the storage lever, with no code change.** 90 → 30 is one environment
+  variable on the two Maui workflows, which `official-flip-config.test.ts` requires to agree.
+- **Enabling retention on an instance that has been accumulating rows deletes a lot at once.** The
+  `pnpm outcomes:compact` CLI exists for that first pass, so it happens deliberately and under the same
+  audit event rather than inside a nightly run somebody is not watching.
+
 ## ADR-072: a measure is runnable when it is authored OR official-only-and-routed — and an eCQM is scored over its calendar year, not a rolling window
 
 **Status:** Accepted (2026-09-05). Milestone MM-1b (`docs/ROADMAP_2026-08-30.md` §5).

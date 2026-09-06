@@ -6,13 +6,9 @@
 > `grep -o '^#\+ ADR-[0-9]*.*' docs/DECISIONS.md`, newest first. If the highest number here is lower
 > than the highest there, this file is stale.
 >
-> **`·archived`** (14 of 73) means the BODY moved to `docs/archive/DECISIONS_ARCHIVE.md` — superseded,
+> **`·archived`** (14 of 74) means the BODY moved to `docs/archive/DECISIONS_ARCHIVE.md` — superseded,
 > or a historical *finding* rather than a decision that governs. `DECISIONS.md` keeps every heading plus
 > a pointer, so every cross-reference still resolves. The 57 unmarked titles are the record that governs.
->
-> **ADR-073 is RESERVED, not missing** — it is the outcome-retention decision, written with the unit
-> that builds it (MM-1 U2 Stage D). The gap between 072 and 074 is deliberate and temporary; unlike
-> ADR-033 below, this number WILL be used.
 >
 > **ADR-033 does not exist** — the sequence runs 031, 032, 034. Verified absent 2026-07-29. Do not reuse it.
 
@@ -20,6 +16,7 @@
 
 - ADR-075: the pilot's roster is a generated corpus the deployment composes lazily, and evaluation runs in subject chunks
 - ADR-074: a multi-rate measure is read as every one of its rates — and a subject is compliant only where each rate they are in is met
+- ADR-073: per-subject outcome history is a retention WINDOW, and the durable history is the aggregate
 - ADR-072: a measure is runnable when it is authored OR official-only-and-routed — and an eCQM is scored over its calendar year, not a rolling window
 - ADR-071: official-only measures take the vendored manifest's id — and a legacy catalog row is deprecated, never rewritten
 - ADR-070: the spearhead moves to a patient-driven pilot deployment — and the ACO's measure set finds the engine five-sixths already built

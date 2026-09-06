@@ -1,5 +1,55 @@
 # Journal
 
+## 2026-09-06 — the 20,000-patient corpus runs through the real pipeline (MM-1 U2)
+
+U2 is code-complete on `feat/maui-corpus`: **typecheck clean, 2,314 backend tests passing, 0 failing**;
+frontend lint and build clean with 368 tests passing. Three ADRs written — **ADR-075** (the corpus, lazy
+composition, chunked evaluation), **ADR-074** (multi-rate, which the CMS137 work had been citing in
+nineteen places without a body), and **ADR-073** (outcome retention).
+
+**The realized corpus, at 20,000.** Generated in **0.3 s**, deterministic from `maui-py2027-v1`, the
+first 48 patients byte-identical to the fixture rows every screenshot and saved filter already names.
+
+| | |
+|---|---|
+| Clinics | Wailuku 5,618 · Kahului 5,234 · Kihei 3,947 · Lahaina 3,185 · Pukalani 2,016 |
+| Panels | 40 PCPs, 423–571 patients each |
+| Age | median 54; 65+ 6,732 · 45–64 6,064 · 18–44 4,401 · 0–17 2,803 |
+| Sex | 52.0 % female |
+| Conditions | hypertension 7,126 · diabetes 3,055 · SUD episode 564 · frailty 592 · bipolar 348 · ESRD 182 · colorectal cancer 184 · pregnancy 162 · hospice 87 |
+
+**Measured performance.** A full run over the corpus — 20,000 patients × 14 measures = **280,000 work
+items in 43.9 s** on this machine, against the pinned 15-minute ceiling. Corpus generation is linear:
+11.1× the time for 10× the subjects. The engine in that measurement is a stub and the test says so; CQL
+time against the real artifacts is the credentialed job's business, and a new test there asserts the
+official artifacts actually find a population in a data-first corpus.
+
+**Two things found that were wrong on main.**
+
+The **Maui e2e was stale from U1** — it asserted three measure columns, `totalEvaluated` of 144, and a
+`hypertension` column that no longer exists on a patient roster. The project is workflow-dispatch only,
+so nothing had run it since the runnable set changed. Fixed to the ACO's five and 240.
+
+The **live Maui instance needs a segment repair before the corpus is switched on.** `All Patients` was
+seeded when the roster spanned two clinics; the corpus spans five, and case creation is gated by segment
+applicability — so **52 % of patients (10,435 of 20,000)** would get outcomes but no cases, roster cells
+reading NOT_APPLICABLE and no work list ever surfacing them. Nothing in the data would be wrong;
+everything the staff can act on would be missing. Documented in `DEPLOY.md` beside the corpus size,
+because it belongs with raising it rather than after somebody notices half the panel is empty.
+
+**Review.** The reviewer's one critical finding was real and would have corrupted every number:
+`WORKWELL_MAUI_CORPUS_SEED` reached the directory and not the bundles, so with it set the roster's
+`pat-00053` and the chart evaluated for `pat-00053` were different people under the same id. Fixed
+twice over — the composite takes the directory's own seed, and `bundleForSubject` cross-checks the
+regenerated patient against the roster row and refuses rather than serving somebody else's chart. My
+first test for it sampled the fixture prefix, whose fields are seed-independent by construction, and
+passed against the very bug it was written for.
+
+Four guards it found could not fire, including `invariant 6`, which asserted only `totalEvaluated` — a
+value that can never be per-chunk — while the counters actually at risk were asserted nowhere.
+
+**Left for the owner:** the segment repair above, and the review of Task 18's SQL in the PR.
+
 ## 2026-09-05 — the five pilot measures become runnable, and the gate that says two of them are not
 
 MM-1 U1 is code-complete on `feat/mm1-official-only-runnable`: typecheck clean, 2,191 tests passing,

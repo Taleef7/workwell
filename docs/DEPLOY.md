@@ -517,10 +517,16 @@ deployment on a self-heal. `official-flip-config.test.ts` fails the build if the
 | `WORKWELL_MAUI_CORPUS_SEED` | unset (`maui-py2027-v1`) | unset | The generator seed. Changing it regenerates *different people* under the same ids; the roster and the evaluated charts derive from one resolution so they cannot disagree. |
 | `WORKWELL_RUN_CHUNK_SIZE` | `500` | unset (500) | Subjects per evaluation chunk. A chunk's bundles are built, evaluated, persisted and dropped before the next exists, so **memory is bounded by one chunk**, not by the roster. A malformed value warns and falls back to 500. |
 | `WORKWELL_SCHEDULER_ANCHOR_HOUR_UTC` | `12` | unset (12) | The wall-clock hour the nightly run fires at. **12 UTC = 02:00 HST**, so the overnight recompute finishes before the clinic opens. The 23.5-hour debounce is a floor beneath the anchor, not the cadence. |
+| `WORKWELL_OUTCOME_RETENTION_DAYS` | `90` | unset | Outcome-history window (ADR-073). **Unset means OFF** — TWH keeps its history whole. Lowering it to 30 is the storage lever with no code change. Never deletes a subject's newest row per measure, a run row, or anything an open case cites. |
 
 Measured: 20,000 patients generate in ~0.3 s, and a full run over them completes well inside the
 `run-scale-maui` job's 15-minute ceiling. That job runs weekly and on demand — never on a push, because
 it measures a wall clock and a shared runner would make it a flake rather than a finding.
+
+Enabling retention on an instance that has been accumulating rows deletes a lot at once. Run the first
+pass deliberately with `pnpm outcomes:compact` — same function, same audit event as the nightly one —
+rather than letting it happen inside a run nobody is watching. `pnpm seed:trend-history` REFUSES under a
+retention window: the rows it writes are exactly what the next compaction deletes.
 
 Raising the size on a live instance is a container recreate, not a migration: the corpus is generated,
 never stored. Lowering it back to 48 is equally safe — the first 48 patients are the same people at
