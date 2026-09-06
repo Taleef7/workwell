@@ -23,7 +23,7 @@ import { toMeasureDetail } from "../measure/measure-read-models.ts";
 import { generateTraceability } from "../measure/measure-traceability.ts";
 import { computeDataReadiness } from "../measure/data-readiness.ts";
 import { complianceRateOf } from "../program/rollup-shared.ts";
-import { matchesSubjectFilters } from "../compliance/subject-filters.ts";
+import { AGE_BANDS, isAgeBand, isSex, matchesSubjectFilters } from "../compliance/subject-filters.ts";
 import type { JsonRecord } from "./tool-audit.ts";
 
 export interface McpToolDeps {
@@ -464,6 +464,13 @@ async function listNoncompliant(args: JsonRecord, deps: McpToolDeps): Promise<un
     ageBand: args.ageBand != null ? String(args.ageBand).trim() : null,
     sex: args.sex != null ? String(args.sex).trim().toUpperCase() : null,
   };
+  // Refused, not dropped — the same rule as the HTTP routes. The schema's enum already tells a
+  // well-behaved client, but a client that ignores it must get an error, not the whole worklist under
+  // a filter that was never applied.
+  if (panelFilters.ageBand && !isAgeBand(panelFilters.ageBand)) {
+    return safeError("INVALID_ARGUMENT", `ageBand must be one of: ${AGE_BANDS.join(", ")}`);
+  }
+  if (panelFilters.sex && !isSex(panelFilters.sex)) return safeError("INVALID_ARGUMENT", "sex must be F or M");
   const statusFilter = args.status != null ? String(args.status).trim() : "";
   if (statusFilter && !NON_COMPLIANT.includes(statusFilter)) {
     return safeError("INVALID_ARGUMENT", "status must be one of: DUE_SOON, OVERDUE, MISSING_DATA");

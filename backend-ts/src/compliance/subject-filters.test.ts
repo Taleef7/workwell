@@ -9,7 +9,9 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { ageAsOf, ageBandOf, matchesSubjectFilters, subjectFiltersFromQuery, AGE_BANDS } from "./subject-filters.ts";
+import {
+  ageAsOf, ageBandOf, matchesSubjectFilters, subjectFiltersFromQuery, subjectFilterErrorBody, AGE_BANDS, SubjectFilterError,
+} from "./subject-filters.ts";
 import { corpusDirectory } from "../engine/synthetic/corpus/corpus-directory.ts";
 import { DEFAULT_CORPUS_SEED } from "../engine/synthetic/corpus/corpus-parameters.ts";
 import type { EmployeeProfile } from "../engine/synthetic/employee-catalog.ts";
@@ -109,13 +111,31 @@ test("the filters COMPOSE — each one narrows further, and together they are th
   assert.ok(rows.length < byProviderOnly.length, "and here it does — otherwise this test proves nothing");
 });
 
-test("an unrecognised filter token is DROPPED, not applied as a filter nothing satisfies", () => {
-  // `?ageBand=old` should show the unfiltered roster. Passing the junk through would render an empty
-  // page that reads as "this practice has no patients".
-  const parsed = subjectFiltersFromQuery(new URLSearchParams("ageBand=old&sex=yes&providerId="));
-  assert.deepEqual(parsed, { providerId: null, ageBand: null, sex: null });
-  assert.equal(ROSTER.filter((e) => matchesSubjectFilters(e, parsed, NOW)).length, ROSTER.length);
+test("an unrecognised filter token is REFUSED — never dropped into the unfiltered roster", () => {
+  // The first version dropped `?ageBand=old` and served everybody, reasoning that an empty page was the
+  // worse failure. It is the other way round: a work list that silently ignored its filter looks exactly
+  // like one that applied it, and a staff member asking for the 65+ panel would have called the whole
+  // practice. A 400 naming the accepted values is a visible failure; the whole roster is an invisible
+  // wrong answer.
+  assert.throws(
+    () => subjectFiltersFromQuery(new URLSearchParams("ageBand=old")),
+    (error: unknown) => error instanceof SubjectFilterError && error.parameter === "ageBand" && /0-17, 18-44, 45-64, 65\+/.test(error.message) && /"old"/.test(error.message),
+  );
+  assert.throws(
+    () => subjectFiltersFromQuery(new URLSearchParams("sex=yes")),
+    (error: unknown) => error instanceof SubjectFilterError && error.parameter === "sex" && /F, M/.test(error.message),
+  );
+  // A blank token is an ABSENT filter, not a bad one — a cleared select sends `ageBand=`.
+  assert.deepEqual(subjectFiltersFromQuery(new URLSearchParams("ageBand=&sex=&providerId=")), { providerId: null, ageBand: null, sex: null });
 
   const good = subjectFiltersFromQuery(new URLSearchParams("ageBand=65%2B&sex=f&providerId=%20maui-prov-003%20"));
   assert.deepEqual(good, { providerId: "maui-prov-003", ageBand: "65+", sex: "F" }, "trimmed, and sex is case-insensitive");
+
+  // The predicate is the backstop for a caller that bypasses the parser: a junk token matches NOBODY
+  // (an empty list, visible) rather than everybody (the whole roster, invisible).
+  assert.equal(ROSTER.filter((e) => matchesSubjectFilters(e, { ageBand: "old" }, NOW)).length, 0);
+  assert.equal(ROSTER.filter((e) => matchesSubjectFilters(e, { sex: "yes" }, NOW)).length, 0);
+  const body = subjectFilterErrorBody(new SubjectFilterError("ageBand", "old"));
+  assert.equal(body.error, "invalid_request");
+  assert.equal(body.parameter, "ageBand");
 });

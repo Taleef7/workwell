@@ -92,6 +92,82 @@ everywhere until that is decided, and `DEPLOY.md` says so.
 
 **Left for the owner:** the segment repair above, the Postgres retention index, and the review of the retention SQL in the PR.
 
+### The second pass — what the sandbox was actually showing
+
+Before opening the PR, a second review round: own reviewer, a clinical reviewer, GLM 5.3 Flash, and
+Gemini 3.8 Flash — this time with shell access through Antigravity rather than a read-only diff, and it
+earned it. Its two CRITICAL findings were the same two I had reproduced an hour earlier by running the
+credentialed job's own test locally (the terminology sidecars can be vendored locally for cms2 and
+cms137, whose pins do not need VSAC): **the deployed sandbox had been putting the entire roster out of
+every initial population, every night, since the corpus landed.**
+
+- **The corpus described 2027; the run scored 2026.** Every clinical fact was pinned to
+  `CORPUS_MEASUREMENT_YEAR = 2027`, while a nightly run evaluates the calendar year of its evaluation
+  date (ADR-072) — 2026, today. Not one encounter fell inside the measurement period. The
+  `effectivePeriodWarning` was silent because the 2026 artifacts and the 2026 period agree exactly; the
+  run completed; the roster read MISSING_DATA for everyone. The population test that would have said so
+  was pinned to `2027-12-31` and passed. **Fixed by making identity fixed and clinical facts follow the
+  year the run scores** (generator 4.0.0, ADR-075 amendment): a patient is the same person in every year,
+  and `bundleForSubject` generates their facts for the year of the evaluation date. The population test
+  now asks about the current UTC year.
+- **CMS125 found nobody** — `inIPP=0` in the credentialed job's own log, which was red on this branch.
+  Its initial population compares the `us-core-sex` extension to SNOMED 248152002, not
+  `Patient.gender`, and the corpus Patient carried only `gender`. The Patient now carries `us-core-sex`,
+  `us-core-race` and `us-core-ethnicity` in the steward's own shape, plus a `Coverage` typed from the
+  Source of Payment Typology — the four supplemental data elements every artifact declares.
+- **CMS137 found nobody.** Its denominator is a qualifying ENCOUNTER during which an encounter-diagnosis
+  Condition starts; the corpus emitted a problem-list Condition at midnight on a day that need not have
+  had a visit. The episode is now an office-visit `Encounter` plus a `qicore-condition-encounter-diagnosis`
+  with onset inside its period. Measured over 184 SUD patients at 2026-12-31: 172 in the initial
+  population, 69 meet Initiation, 25 meet Engagement — both rates alive.
+- **CMS2's 170 documented refusals read OVERDUE.** The exception retrieves a CANCELLED observation of
+  the screening INSTRUMENT with the refusal in its `qicore-notDoneReason` extension; the corpus emitted a
+  final Observation coded with the refusal itself. Reshaped to the steward's own deck's form.
+
+Then the standards findings the first pass had deliberately left: the mammogram is now
+`qicore-observation-clinical-result` rather than a lab profile with an imaging category; the Provenance
+informant is a resolvable `Organization`; frailty is emitted with the dementia medication or
+advanced-illness diagnosis the 66+ exclusion needs, and palliative care, bilateral mastectomy and total
+colectomy are drawn and emitted so every shared denominator exclusion can fire; `pregnancy`, which no
+vendored measure reads, is gone.
+
+**The multi-rate half (ADR-074 amendment).** Stratifier results — which `fqm-execution` had been
+computing and the package discarding — are persisted as `evidence_json.official.strata` and reported: the
+summary and individual `MeasureReport`s carry a `stratifier` per group in the steward's true/false-stratum
+shape, and **the QRDA III now emits every group and every stratum** (a Reporting Stratum V2 per stratum
+per Measure Data observation) instead of refusing multi-rate with a 501. The stratum shape is derived from
+the IG and the `cqm-reports` reference exporter, not yet CVU+-validated, and `STANDARDS_CONFORMANCE.md`
+says so. The flip gate and the compliance API read every rate (`rates`, additive). The MADiE evidence
+report renders `r1 e/a · r2 e/a` per population instead of rate 1 alone, and the committed report's
+CMS137 section is regenerated. And the summary MeasureReport and QRDA III **no longer return 422 above
+5,000 subjects** — they were unreachable for every official measure on the 20,000-patient pilot, the
+exact roster they exist for — because the aggregate is now summed from paged reads.
+
+Smaller, all real: an unrecognised `ageBand`/`sex` token is a 400 naming the accepted values on the
+roster, cases, both CSV exports and the MCP tool — it used to be dropped, serving the whole practice under
+a heading that said "65+"; `planned.progress` is now exact at the point of failure rather than a per-chunk
+lower bound; cms137 has official display wording (it fell back to "no record on file" and "order a
+screening"); the retention notice says closed cases' rows survive too.
+
+**What U3 had not finished.** cms137 was vendored, gated and executable, and invisible: no Active
+`cms137` catalog row existed (only the Draft `cms137v14` placeholder), so the programs overview could
+never list it, and no roster panel contained ANY of the four official-only ACO measures — a flip would
+have made a measure runnable with no column to show it in. Now: an Active `cms137` row (ADR-071's seed
+deprecates `cms137v14` toward it, audited once), a `cms137 → CMS137 / MIPS 305` identity, and the quality
+panel holds all six ACO measures, each a column exactly where its deployment routes it. The Maui e2e
+specs asserted five columns and 240 evaluations on a stack that routes nothing; corrected to what the
+code does there (the two authored measures, 96), with the reason written in.
+
+**Realized at 20,000 (2027 facts):** SUD episodes 604 · frailty 573 · palliative care 47 · bilateral
+mastectomy 63 · total colectomy 21 · hospice 95 · payer Medicare 3,927 / Medicare Advantage 2,900 /
+Medicaid 3,277 / commercial 9,896 · race White 6,532 / Asian 5,810 / NHOPI 4,871 / Other 2,162 · Hispanic
+or Latino 2,303. Identity, clinics, panels and the 48-row prefix are unchanged.
+
+**Still owner-owned:** the segment repair, the Postgres retention index, and the cms137 flip itself —
+`pnpm flip-gate --measure cms137` now reports both rates; the workflow edit that routes it remains the
+gated human act MM-1c describes, after the cms165 profile question (do NOT route cms165 — its decisive
+retrieve is by profile alone under `trustMetaProfile: false`).
+
 ## 2026-09-05 — the five pilot measures become runnable, and the gate that says two of them are not
 
 MM-1 U1 is code-complete on `feat/mm1-official-only-runnable`: typecheck clean, 2,191 tests passing,

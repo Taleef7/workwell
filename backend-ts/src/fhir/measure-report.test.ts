@@ -524,3 +524,79 @@ test("a single-rate measure still emits exactly one group", async () => {
   const report = module.buildSummaryMeasureReport(run, "cms125", outcomes, "2027-12-31T00:00:00Z");
   assert.equal(report.group.length, 1, "nothing changes for the eight single-rate measures");
 });
+
+/**
+ * Strata (ADR-074): every stratifier a group declares is reported, in the steward's own shape — one
+ * `stratifier` per `Measure.group.stratifier.id` with a `true` and a `false` stratum, each carrying the
+ * population counts of the subjects in and out of it. Discarding them made every CMS137 (and CMS125)
+ * MeasureReport non-conformant with what the measure declares.
+ */
+test("a stratified measure's summary carries every stratum, counted from the same memberships as the groups", async () => {
+  const module = await import("./measure-report.ts");
+  const rate = (numerator: boolean) => [
+    { populationType: "initial-population", result: true },
+    { populationType: "denominator", result: true },
+    { populationType: "numerator", result: numerator },
+  ];
+  const strataFor = (group: number, band: number) =>
+    [1, 2, 3].map((s) => ({ id: `Stratification_${group}_${s}`, code: `Stratification_${group}_${s}`, result: s === band, appliesResult: s === band }));
+  const outcomes = [
+    { status: "COMPLIANT", evidence: { official: { populationResults: rate(true), rates: [rate(true), rate(true)], strata: [strataFor(1, 2), strataFor(2, 2)] } } },
+    { status: "OVERDUE", evidence: { official: { populationResults: rate(true), rates: [rate(true), rate(false)], strata: [strataFor(1, 2), strataFor(2, 2)] } } },
+    { status: "OVERDUE", evidence: { official: { populationResults: rate(false), rates: [rate(false), rate(false)], strata: [strataFor(1, 3), strataFor(2, 3)] } } },
+  ] as never[];
+  const run = { measurementPeriodStart: "2026-01-01T00:00:00.000Z", measurementPeriodEnd: "2026-12-31T23:59:59.999Z" } as never;
+  const report = module.buildSummaryMeasureReport(run, "cms137", outcomes, "2026-12-31T00:00:00Z");
+
+  assert.equal(report.group.length, 2);
+  const group1 = report.group[0]!;
+  assert.deepEqual(group1.stratifier!.map((s) => s.id), ["Stratification_1_1", "Stratification_1_2", "Stratification_1_3"]);
+  const stratum = (groupIndex: number, id: string, text: "true" | "false") =>
+    report.group[groupIndex]!.stratifier!.find((s) => s.id === id)!.stratum.find((st) => st.value.text === text)!;
+  const count = (populations: Array<{ code: { coding: Array<{ code: string }> }; count: number }>, code: string) =>
+    populations.find((p) => p.code.coding[0]!.code === code)!.count;
+  // Stratum 2 (18-64) holds the two adults; stratum 3 (65+) holds the one elder. In AND out add up.
+  assert.equal(count(stratum(0, "Stratification_1_2", "true").population, "initial-population"), 2);
+  assert.equal(count(stratum(0, "Stratification_1_2", "false").population, "initial-population"), 1);
+  assert.equal(count(stratum(0, "Stratification_1_3", "true").population, "initial-population"), 1);
+  // Rate 2's stratum 2: both adults in the denominator, one engaged — so the stratum's own score is 0.5.
+  assert.equal(count(stratum(1, "Stratification_2_2", "true").population, "numerator"), 1);
+  assert.equal(stratum(1, "Stratification_2_2", "true").measureScore?.value, 0.5);
+  // The group totals are unchanged by the strata: rate 1 = 2/3, rate 2 = 1/3.
+  assert.equal(report.group[0]!.measureScore?.value, 2 / 3);
+  assert.equal(report.group[1]!.measureScore?.value, 1 / 3);
+
+  // An individual report carries the SUBJECT's own membership: in exactly one stratum per stratifier.
+  const individual = module.buildIndividualMeasureReport(outcomes[2] as never, run, "cms137", "2026-12-31T00:00:00Z");
+  const own = individual.group[0]!.stratifier!.find((s) => s.id === "Stratification_1_3")!;
+  assert.equal(count(own.stratum.find((st) => st.value.text === "true")!.population, "initial-population"), 1);
+  assert.equal(count(own.stratum.find((st) => st.value.text === "false")!.population, "initial-population"), 0);
+
+  // An outcome persisted with no strata emits no `stratifier` element at all — byte-identical to before.
+  const unstratified = [{ status: "COMPLIANT", evidence: { official: { populationResults: rate(true) } } }] as never[];
+  const plain = module.buildSummaryMeasureReport(run, "cms125", unstratified, "2026-12-31T00:00:00Z");
+  assert.equal(plain.group[0]!.stratifier, undefined);
+});
+
+test("createRateAggregator sums page by page to the same answer as one pass, and counts the unmeasured", async () => {
+  const module = await import("./measure-report.ts");
+  const rate = (numerator: boolean) => [
+    { populationType: "initial-population", result: true },
+    { populationType: "denominator", result: true },
+    { populationType: "numerator", result: numerator },
+  ];
+  const outcomes = [
+    { status: "COMPLIANT", evidence: { official: { populationResults: rate(true), rates: [rate(true), rate(true)] } } },
+    { status: "OVERDUE", evidence: { official: { populationResults: rate(true), rates: [rate(true), rate(false)] } } },
+    // An errored subject: no official block at all. It cannot supply every rate, so it is counted in
+    // NONE of them (ADR-074 d5) — and reported, so the gap between roster and denominators has a number.
+    { status: "MISSING_DATA", evidence: { evaluationError: "engine failure", message: "boom" } },
+  ] as never[];
+  const whole = module.aggregateByRate(outcomes, "cms137");
+  const paged = module.createRateAggregator("cms137");
+  for (const page of [outcomes.slice(0, 2), outcomes.slice(2)]) for (const o of page) paged.add(o as never);
+  assert.deepEqual(paged.finish(), whole, "paging must not change the arithmetic");
+  assert.equal(whole.unmeasured, 1, "the errored subject is counted in no rate and reported");
+  assert.equal(whole.rates[0]!.denom, 2);
+  assert.equal(whole.rates[1]!.numer, 1);
+});

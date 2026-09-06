@@ -16,7 +16,7 @@ import type { SeededAssignment } from "../run/distribution.ts";
 import type { SubjectBundleSource } from "./subject-bundle-source.ts";
 import { DEFAULT_CORPUS_SEED } from "../engine/synthetic/corpus/corpus-parameters.ts";
 import { CORPUS_FIXTURE_PREFIX } from "../engine/synthetic/corpus/corpus-fixture-prefix.ts";
-import { patientAt } from "../engine/synthetic/corpus/corpus-patient.ts";
+import { measurementYearOf, patientAt } from "../engine/synthetic/corpus/corpus-patient.ts";
 import { bundleForPatient } from "../engine/synthetic/corpus/corpus-bundle.ts";
 
 /**
@@ -55,7 +55,12 @@ export function corpusBundleSource(seed: string = DEFAULT_CORPUS_SEED): SubjectB
     // The NAME is the one field a standalone `patientAt` may render differently from a full
     // generation, because disambiguation depends on who came before (see `patientAt`'s note). The
     // directory already resolved it, so take it from there rather than regenerating the whole prefix.
-    const generated = patientAt(seed, index);
+    //
+    // The YEAR is the run's. A patient's identity is the same in every year; their clinical facts are
+    // generated for the calendar year the evaluation date falls in — the year ADR-072 scores. Pinning
+    // the facts to one year (this did, to 2027) meant a sandbox evaluated in 2026 had no encounter
+    // inside its measurement period and put the whole roster out of every initial population.
+    const generated = patientAt(seed, index, new Set(), measurementYearOf(evaluationDate));
 
     // The roster and the chart must be the SAME PERSON, and only this check can say so.
     //

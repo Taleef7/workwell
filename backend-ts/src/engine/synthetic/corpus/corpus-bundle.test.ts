@@ -1,11 +1,18 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { bundleForPatient, practitionerResources, organizationResources } from "./corpus-bundle.ts";
+import { bundleForPatient, practitionerResources, organizationResources, payerAndSourceOrganizationResources } from "./corpus-bundle.ts";
 import { patientAt, corpusPatients } from "./corpus-patient.ts";
-import { SUD_CONDITION_CODES } from "../../cql/bundled-ecqm-expansions.ts";
+import { ETHNICITY_CODES, PAYER_TYPE_CODES, RACE_CODES, SUD_CONDITION_CODES } from "../../cql/bundled-ecqm-expansions.ts";
 import { DEFAULT_CORPUS_SEED, PCPS, CLINICS, CORPUS_GENERATOR_VERSION } from "./corpus-parameters.ts";
 
 const EVAL_DATE = "2027-12-31";
+
+/**
+ * The resources that are ABOUT the patient rather than facts somebody recorded: the Patient, its
+ * Coverage (administrative context, read by `SDE Payer`), and the Provenance records themselves. Every
+ * other resource is a clinical fact and carries exactly one Provenance.
+ */
+const ADMINISTRATIVE = new Set(["Patient", "Coverage", "Provenance"]);
 
 type Res = Record<string, unknown> & { resourceType: string; id: string };
 const resourcesOf = (patient: Parameters<typeof bundleForPatient>[0]): Res[] =>
@@ -16,7 +23,7 @@ test("every clinical resource has exactly one Provenance whose target resolves i
     const entries = resourcesOf(patient);
     const ids = new Set(entries.map((r) => `${r.resourceType}/${r.id}`));
     const provenances = entries.filter((r) => r.resourceType === "Provenance");
-    const clinical = entries.filter((r) => !["Patient", "Provenance"].includes(r.resourceType));
+    const clinical = entries.filter((r) => !ADMINISTRATIVE.has(r.resourceType));
     assert.equal(provenances.length, clinical.length, `${patient.externalId}: one Provenance per clinical resource`);
     for (const prov of provenances) {
       const target = (prov.target as Array<{ reference: string }>)[0]!.reference;
@@ -57,7 +64,7 @@ test("a patient with no conditions still gets a Patient and their encounters, an
   assert.ok(types.includes("Encounter"));
   assert.equal(
     types.filter((t) => t === "Provenance").length,
-    types.filter((t) => !["Patient", "Provenance"].includes(t)).length,
+    types.filter((t) => !ADMINISTRATIVE.has(t)).length,
   );
 });
 
@@ -92,6 +99,9 @@ test("each resource carries the profile its artifact retrieves on, not a generic
   let sawBp = false;
   let sawScreening = false;
   let sawLab = false;
+  let sawImaging = false;
+  let sawEncounterDiagnosis = false;
+  let sawCancelled = false;
 
   for (const patient of corpusPatients(DEFAULT_CORPUS_SEED, 400)) {
     for (const r of resourcesOf(patient)) {
@@ -100,8 +110,18 @@ test("each resource carries the profile its artifact retrieves on, not a generic
       if (r.resourceType === "Patient") assert.match(profile, /qicore-patient$/);
       if (r.resourceType === "Encounter") assert.match(profile, /qicore-encounter$/);
       if (r.resourceType === "Condition") {
-        assert.match(profile, /qicore-condition-problems-health-concerns$/,
-          "a Condition must carry the problems-health-concerns profile, not the generic qicore-condition");
+        const code = ((r.code as { coding: Array<{ code: string }> }).coding[0]!.code);
+        if (SUD_CONDITION_CODES.some((c) => c.code === code)) {
+          // CMS137 retrieves the SUD diagnosis through the ENCOUNTER-DIAGNOSIS profile only, and its
+          // denominator is an encounter the diagnosis starts during — so it is that profile, with the
+          // encounter it belongs to, or the measure never sees it.
+          sawEncounterDiagnosis = true;
+          assert.match(profile, /qicore-condition-encounter-diagnosis$/, "a SUD episode diagnosis is an encounter diagnosis");
+          assert.ok(typeof (r.encounter as { reference?: string } | undefined)?.reference === "string", "and it references the encounter it was made in");
+        } else {
+          assert.match(profile, /qicore-condition-problems-health-concerns$/,
+            "a problem-list Condition must carry the problems-health-concerns profile, not the generic qicore-condition");
+        }
       }
       if (r.resourceType === "Observation") {
         const code = ((r.code as { coding: Array<{ code: string }> }).coding[0]!.code);
@@ -110,18 +130,42 @@ test("each resource carries the profile its artifact retrieves on, not a generic
           // CMS165 identifies a blood pressure by PROFILE ALONE, with no code filter. This stamp is the
           // only thing that would make the reading retrievable once profiles are trusted.
           assert.match(profile, /us-core-blood-pressure$/, "a BP panel must carry the US Core BP profile");
-        } else if (code === "73832-8" || code === "73831-0" || code === "720834000") {
+        } else if ((code === "73832-8" || code === "73831-0") && r.status === "cancelled") {
+          // A documented REFUSAL is the screening instrument, cancelled, with the refusal as its
+          // notDoneReason — the only shape CMS2's denominator exception retrieves. A final Observation
+          // coded with the refusal itself (what the corpus emitted before) matched nothing and left every
+          // refusing patient OVERDUE.
+          sawCancelled = true;
+          assert.match(profile, /qicore-observationcancelled$/, "a refusal is a cancelled screening observation");
+          const reason = (r.extension as Array<{ url: string; valueCodeableConcept?: { coding: Array<{ code: string }> } }>)
+            .find((e) => e.url.endsWith("qicore-notDoneReason"))?.valueCodeableConcept?.coding[0]?.code;
+          assert.equal(reason, "720834000", "the refusal reason is the artifact's own direct-reference code, in the notDoneReason extension");
+          assert.ok(typeof r.issued === "string", "the exception join reads `issued`");
+        } else if (code === "73832-8" || code === "73831-0") {
           sawScreening = true;
           assert.match(profile, /qicore-observation-screening-assessment$/,
             "a depression screen must carry the screening-assessment profile, not clinical-result");
+        } else if (code === "24606-6") {
+          // A mammogram is an IMAGING result: `qicore-observation-clinical-result`, which is the profile
+          // CMS125's `[Observation: "Mammography"]` retrieve names. It carried the LAB profile with an
+          // `imaging` category until 2026-09-06 — a resource contradicting itself.
+          sawImaging = true;
+          assert.match(profile, /qicore-observation-clinical-result$/, "a mammogram is a clinical (imaging) result, not a lab");
+          const category = (r.category as Array<{ coding: Array<{ code: string }> }>)[0]!.coding[0]!.code;
+          assert.equal(category, "imaging");
         } else {
           sawLab = true;
           assert.match(profile, /qicore-observation-lab$/);
         }
       }
+      if (r.resourceType === "Coverage") assert.match(profile, /qicore-coverage$/);
+      if (r.resourceType === "MedicationRequest") assert.match(profile, /qicore-medicationrequest$/);
     }
   }
-  assert.ok(sawBp && sawScreening && sawLab, `the sample must exercise all three Observation shapes (bp=${sawBp} screening=${sawScreening} lab=${sawLab})`);
+  assert.ok(
+    sawBp && sawScreening && sawLab && sawImaging && sawEncounterDiagnosis && sawCancelled,
+    `the sample must exercise every shape (bp=${sawBp} screening=${sawScreening} lab=${sawLab} imaging=${sawImaging} encounterDx=${sawEncounterDiagnosis} cancelled=${sawCancelled})`,
+  );
 });
 
 test("a mammogram is dual-stamped: the LOINC Observation and the CPT Procedure (ADR-044)", () => {
@@ -152,11 +196,25 @@ test("CMS137's SUD events become the Condition and Procedures the measure retrie
   assert.equal((episode!.clinicalStatus as { coding: Array<{ system: string }> }).coding[0]!.system,
     "http://terminology.hl7.org/CodeSystem/condition-clinical", "clinicalStatus carries its system");
 
+  // THE JOIN the measure actually performs: `First SUD Episode During Measurement Period` is a qualifying
+  // ENCOUNTER with an encounter-diagnosis Condition whose prevalence interval STARTS INSIDE the encounter's
+  // period. A Condition on its own — which is what the corpus emitted until 2026-09-06, onset at midnight
+  // on a day with no visit — matches nothing, and the credentialed CI job measured inIPP=0 for cms137.
+  const encounterRef = (episode!.encounter as { reference: string }).reference;
+  const encounter = resources.find((r) => `${r.resourceType}/${r.id}` === encounterRef);
+  assert.ok(encounter, `the episode's encounter ${encounterRef} is in the bundle`);
+  const period = encounter!.period as { start: string; end: string };
+  const onset = episode!.onsetDateTime as string;
+  assert.ok(period.start <= onset && onset <= period.end, `onset ${onset} must fall inside the encounter ${period.start}..${period.end}`);
+  const encounterType = ((encounter!.type as Array<{ coding: Array<{ code: string }> }>)[0]!.coding[0]!.code);
+  assert.equal(encounterType, "99213", "the episode encounter is an office visit — a member of the artifact's qualifying set");
+  assert.equal(((episode!.category as Array<{ coding: Array<{ code: string }> }>)[0]!.coding[0]!.code), "encounter-diagnosis");
+
   const treatments = resources.filter((r) => r.resourceType === "Procedure" && codeOf(r) === "171047005");
   assert.ok(treatments.length >= 1, "initiation and engagement are treatment Procedures");
 
   // Still one Provenance per clinical resource — adding a resource type must not break that invariant.
-  const clinical = resources.filter((r) => !["Patient", "Provenance"].includes(r.resourceType));
+  const clinical = resources.filter((r) => !ADMINISTRATIVE.has(r.resourceType));
   const provenances = resources.filter((r) => r.resourceType === "Provenance");
   assert.equal(provenances.length, clinical.length);
 });
@@ -169,20 +227,142 @@ test("CMS137's SUD events become the Condition and Procedures the measure retrie
  */
 test("the bundle emits exactly the resources the patient's events imply — nothing extra, nothing invented", () => {
   // `hospice` joined this list in the review pass: it was drawn and counted but never emitted, so the
-  // exclusion it exists for could never fire on any measure. `frailty` and `pregnancy` are still
-  // absent — the corpus has no verified code for either — which is why this list is explicit rather
-  // than derived from `patient.conditions`.
-  const CODED_CONDITIONS = ["diabetes", "hypertension", "bipolar", "colorectalCancer", "esrd", "hospice"];
+  // exclusion it exists for could never fire on any measure. `frailty` joined in 4.0.0 for the same
+  // reason. `palliativeCare`, `bilateralMastectomy` and `totalColectomy` are drawn as conditions but
+  // emitted as PROCEDURES through their events, so they are counted there and not here — which is why
+  // this list is explicit rather than derived from `patient.conditions`.
+  const CODED_CONDITIONS = ["diabetes", "hypertension", "bipolar", "colorectalCancer", "esrd", "hospice", "frailty"];
   for (const patient of corpusPatients(DEFAULT_CORPUS_SEED, 600)) {
-    const emitted = resourcesOf(patient).filter((r) => !["Patient", "Provenance"].includes(r.resourceType));
+    const emitted = resourcesOf(patient).filter((r) => !ADMINISTRATIVE.has(r.resourceType));
     const expected =
       patient.visits.length
       + patient.conditions.filter((c) => CODED_CONDITIONS.includes(c)).length
-      + patient.events.filter((e) => e.kind !== "sudEpisode").length
-      + patient.events.filter((e) => e.kind === "sudEpisode").length     // episode → Condition
-      + patient.events.filter((e) => e.kind === "mammogram").length      // dual-stamped, ADR-044
+      + patient.events.length                                              // one resource per event...
+      + patient.events.filter((e) => e.kind === "sudEpisode").length     // ...plus the episode's Encounter
+      + patient.events.filter((e) => e.kind === "mammogram").length      // ...plus the dual-stamped Procedure, ADR-044
       + patient.exceptions.length;
     assert.equal(emitted.length, expected, `${patient.externalId}: resource count does not match its events`);
+  }
+});
+
+/**
+ * What the Patient carries is what the artifacts READ. CMS125's initial population compares the
+ * `us-core-sex` extension to SNOMED 248152002 — not `gender` — and the credentialed CI job measured
+ * inIPP=0 for cms125 over 200 subjects when the corpus Patient carried gender alone. Race and ethnicity
+ * are what `SDE Race` / `SDE Ethnicity` read; the Coverage is what `SDE Payer` reads.
+ */
+test("the Patient carries us-core-sex, us-core-race and us-core-ethnicity, and one active Coverage with a verified payer", () => {
+  const payerOrganizations = new Set(payerAndSourceOrganizationResources().map((r) => r.id as string));
+  const payerCodes = new Set(PAYER_TYPE_CODES.map((c) => c.code));
+  const raceCodes = new Set(RACE_CODES.map((c) => c.code));
+  const ethnicityCodes = new Set(ETHNICITY_CODES.map((c) => c.code));
+  for (const patient of corpusPatients(DEFAULT_CORPUS_SEED, 300)) {
+    const resources = resourcesOf(patient);
+    const person = resources.find((r) => r.resourceType === "Patient")!;
+    const extensions = person.extension as Array<{ url: string; valueCode?: string; extension?: Array<{ url: string; valueCoding?: { system: string; code: string } }> }>;
+    const byUrl = (suffix: string) => extensions.find((e) => e.url.endsWith(suffix));
+    const sex = byUrl("us-core-sex");
+    assert.equal(sex?.valueCode, patient.sex === "F" ? "248152002" : "248153007", `${patient.externalId}: us-core-sex`);
+    const race = byUrl("us-core-race")?.extension?.find((e) => e.url === "ombCategory")?.valueCoding;
+    assert.ok(race && raceCodes.has(race.code) && race.system === "urn:oid:2.16.840.1.113883.6.238", `${patient.externalId}: us-core-race ombCategory`);
+    const ethnicity = byUrl("us-core-ethnicity")?.extension?.find((e) => e.url === "ombCategory")?.valueCoding;
+    assert.ok(ethnicity && ethnicityCodes.has(ethnicity.code), `${patient.externalId}: us-core-ethnicity ombCategory`);
+
+    const coverages = resources.filter((r) => r.resourceType === "Coverage");
+    assert.equal(coverages.length, 1, `${patient.externalId}: exactly one Coverage`);
+    const coverage = coverages[0]!;
+    assert.equal(coverage.status, "active");
+    const type = (coverage.type as { coding: Array<{ system: string; code: string }> }).coding[0]!;
+    assert.equal(type.system, "https://nahdo.org/sopt", "Coverage.type is Source of Payment Typology — the system of every Payer Type member");
+    assert.ok(payerCodes.has(type.code), `${patient.externalId}: payer ${type.code} is not one of the verified codes`);
+    assert.equal((coverage.beneficiary as { reference: string }).reference, `Patient/${patient.externalId}`);
+    const payor = (coverage.payor as Array<{ reference: string }>)[0]!.reference.split("/")[1]!;
+    assert.ok(payerOrganizations.has(payor), `${patient.externalId}: Coverage.payor ${payor} does not resolve to an emitted Organization`);
+    const period = coverage.period as { start: string; end: string };
+    assert.equal(period.start, `${patient.measurementYear}-01-01`);
+    assert.equal(period.end, `${patient.measurementYear}-12-31`);
+  }
+});
+
+/**
+ * The denominator EXCLUSIONS the ACO's measures share must have data that can fire them. Before 4.0.0
+ * frailty was drawn and never emitted, and palliative care, a bilateral mastectomy and a total colectomy
+ * were not drawn at all — so on the whole corpus a regression in exclusion handling was undetectable.
+ */
+test("the exclusion cohorts are emitted: frailty with its dementia medication or advanced-illness diagnosis, palliative care, mastectomy, colectomy", () => {
+  const all = corpusPatients(DEFAULT_CORPUS_SEED, 20000);
+  const codeOf = (r: Res) => (r.code as { coding: Array<{ code: string }> } | undefined)?.coding[0]?.code
+    ?? (r.medicationCodeableConcept as { coding: Array<{ code: string }> } | undefined)?.coding[0]?.code;
+
+  const frail = all.filter((p) => p.conditions.includes("frailty"));
+  assert.ok(frail.length > 100, `${frail.length} frail patients — the 65+ prevalence should yield hundreds at 20,000`);
+  assert.ok(frail.every((p) => p.age >= 66), "frailty is drawn only from 66 — the exclusion's own floor");
+  let withDementiaMed = 0;
+  let withAdvancedIllness = 0;
+  for (const patient of frail.slice(0, 120)) {
+    const resources = resourcesOf(patient);
+    assert.ok(resources.some((r) => r.resourceType === "Condition" && codeOf(r) === "129588001"), `${patient.externalId}: the frailty diagnosis is emitted`);
+    if (resources.some((r) => r.resourceType === "MedicationRequest" && codeOf(r) === "1100184")) withDementiaMed += 1;
+    if (resources.some((r) => r.resourceType === "Condition" && codeOf(r) === "42343007")) withAdvancedIllness += 1;
+  }
+  assert.ok(withDementiaMed > 0 && withAdvancedIllness > 0, `frail sample: dementia med ${withDementiaMed}, advanced illness ${withAdvancedIllness} — both halves of the exclusion must be reachable`);
+  assert.ok(withDementiaMed < 120 || withAdvancedIllness < 120, "and not every frail patient carries both — some stay in the denominator, as the logic says");
+
+  const byEvent = (kind: string, code: string, type = "Procedure") => {
+    const carriers = all.filter((p) => p.events.some((e) => e.kind === kind));
+    assert.ok(carriers.length > 5, `${kind}: ${carriers.length} carriers at 20,000`);
+    for (const patient of carriers.slice(0, 20)) {
+      assert.ok(resourcesOf(patient).some((r) => r.resourceType === type && codeOf(r) === code), `${patient.externalId}: ${kind} emitted as ${type} ${code}`);
+    }
+    return carriers;
+  };
+  byEvent("palliativeCare", "103735009");
+  const mastectomy = byEvent("bilateralMastectomy", "1268980002");
+  assert.ok(mastectomy.every((p) => p.sex === "F"), "a bilateral mastectomy history is drawn for women only");
+  byEvent("totalColectomy", "26390003");
+  // Surgical HISTORY is dated before the period; palliative care is dated inside it.
+  for (const p of mastectomy.slice(0, 20)) {
+    for (const e of p.events.filter((e) => e.kind === "bilateralMastectomy")) assert.ok(e.date < `${p.measurementYear}-01-01`, `${p.externalId}: mastectomy ${e.date} is history`);
+  }
+});
+
+/**
+ * Identity is the same in every year; only the clinical facts move. This is what lets a deployment
+ * evaluated in 2026 and again in 2027 show the same roster with a year's worth of different data, and
+ * what keeps `corpusBundleSource`'s identity cross-check (DOB / site / PCP / sex) valid across years.
+ */
+test("a patient is the same PERSON in every measurement year, and their age follows the year", () => {
+  for (const index of [3, 47, 48, 1234, 19999]) {
+    const in2026 = patientAt(DEFAULT_CORPUS_SEED, index, new Set(), 2026);
+    const in2027 = patientAt(DEFAULT_CORPUS_SEED, index, new Set(), 2027);
+    for (const key of ["externalId", "name", "sex", "dateOfBirth", "site", "providerId", "payer", "race", "ethnicity"] as const) {
+      assert.equal(in2026[key], in2027[key], `${in2027.externalId}: ${key} must not depend on the year`);
+    }
+    assert.equal(in2027.age, in2026.age + 1, `${in2027.externalId}: one year older in 2027`);
+    assert.equal(in2026.measurementYear, 2026);
+    assert.equal(in2027.measurementYear, 2027);
+    for (const visit of in2026.visits) assert.ok(visit.startsWith("2026-"), `${in2026.externalId}: visit ${visit} is in 2026`);
+    for (const visit of in2027.visits) assert.ok(visit.startsWith("2027-"), `${in2027.externalId}: visit ${visit} is in 2027`);
+    // The bundle follows the record: a 2026 evaluation date builds 2026 encounters and a 2026 Coverage.
+    const bundle2026 = bundleForPatient(in2026, "2026-09-06").entry.map((e) => e.resource as Res);
+    for (const enc of bundle2026.filter((r) => r.resourceType === "Encounter")) {
+      assert.ok(((enc.period as { start: string }).start).startsWith("2026-"), `${in2026.externalId}: encounter in 2026`);
+    }
+    assert.equal(((bundle2026.find((r) => r.resourceType === "Coverage")!.period as { start: string }).start), "2026-01-01");
+  }
+});
+
+test("the informant Organization every external event's Provenance names is emitted and resolvable", () => {
+  const ids = new Set(payerAndSourceOrganizationResources().map((r) => r.id as string));
+  const patient = corpusPatients(DEFAULT_CORPUS_SEED, 400).find((p) => p.events.some((e) => e.external))!;
+  const informants = resourcesOf(patient)
+    .filter((r) => r.resourceType === "Provenance")
+    .flatMap((p) => (p.agent as Array<{ type: { coding: Array<{ code: string }> }; who: { reference?: string } }>).filter((a) => a.type.coding[0]!.code === "informant"));
+  assert.ok(informants.length > 0);
+  for (const agent of informants) {
+    const ref = agent.who.reference;
+    assert.ok(ref, "an informant is a RESOLVABLE reference, not a display-only string");
+    assert.ok(ids.has(ref!.split("/")[1]!), `${ref} does not resolve to an emitted Organization`);
   }
 });
 

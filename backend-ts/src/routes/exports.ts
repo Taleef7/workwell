@@ -12,7 +12,7 @@
 import type { CloudDatabase } from "@mieweb/cloud";
 import { getStores } from "../stores/factory.ts";
 import { runsCsv, outcomesCsvStream, casesCsv, auditCsvStream } from "../export/export-csv.ts";
-import { subjectFiltersFromQuery } from "../compliance/subject-filters.ts";
+import { subjectFiltersFromQuery, subjectFilterErrorBody, SubjectFilterError } from "../compliance/subject-filters.ts";
 import type { DataSourceEnv } from "../engine/ingress/data-source.ts";
 
 interface ExportsEnv extends DataSourceEnv {
@@ -27,6 +27,21 @@ const csvResponse = (filename: string, csv: string): Response =>
   });
 const badFormat = (): Response =>
   new Response("Unsupported format. Use format=csv.", { status: 400, headers: { "content-type": "text/plain" } });
+
+/**
+ * The panel filters, or the 400 an unrecognised token earns. A CSV under a filter that was silently
+ * dropped is the worst version of that failure — it leaves the application and gets forwarded.
+ */
+function subjectFiltersOr400(q: URLSearchParams): ReturnType<typeof subjectFiltersFromQuery> | Response {
+  try {
+    return subjectFiltersFromQuery(q);
+  } catch (error) {
+    if (error instanceof SubjectFilterError) {
+      return new Response(JSON.stringify(subjectFilterErrorBody(error)), { status: 400, headers: { "content-type": "application/json" } });
+    }
+    throw error;
+  }
+}
 
 /** Statuses mapping mirrors the cases worklist: blank/"open"→OPEN, "all"→all, else the literal. */
 function caseStatuses(raw: string | null): string[] | undefined {
@@ -60,12 +75,14 @@ export async function handleExports(req: Request, env: ExportsEnv): Promise<Resp
 
   if (pathname === "/api/exports/outcomes") {
     if (!isCsv) return badFormat();
+    const subjectFilters = subjectFiltersOr400(q);
+    if (subjectFilters instanceof Response) return subjectFilters;
     const s = await getStores(env);
     // Streamed + paged (Fable H4) — bounded memory so a seed:scale run's 120k outcomes never
     // materialize at once (parity with the audit-events streaming export below).
     const stream = outcomesCsvStream(s.outcomes, s.runs, q.get("runId") ?? undefined, env, {
       site: q.get("site")?.trim() || undefined,
-      ...subjectFiltersFromQuery(q),
+      ...subjectFilters,
     });
     return new Response(stream, {
       status: 200,
@@ -75,6 +92,8 @@ export async function handleExports(req: Request, env: ExportsEnv): Promise<Resp
 
   if (pathname === "/api/exports/cases") {
     if (!isCsv) return badFormat();
+    const subjectFilters = subjectFiltersOr400(q);
+    if (subjectFilters instanceof Response) return subjectFilters;
     const s = await getStores(env);
     const caseIds = q.get("caseIds")?.split(",").map((c) => c.trim()).filter(Boolean);
     const csv = await casesCsv(s.cases, s.events, {
@@ -84,7 +103,7 @@ export async function handleExports(req: Request, env: ExportsEnv): Promise<Resp
       assignee: q.get("assignee") ?? undefined,
       site: q.get("site")?.trim() || undefined,
       caseIds: caseIds?.length ? caseIds : undefined,
-      ...subjectFiltersFromQuery(q),
+      ...subjectFilters,
     }, env);
     return csvResponse("cases.csv", csv);
   }

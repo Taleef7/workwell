@@ -28,8 +28,16 @@ import { corpusBundleSource } from "./corpus-bundle-source.ts";
 import { corpusDirectory } from "../engine/synthetic/corpus/corpus-directory.ts";
 import { DEFAULT_CORPUS_SEED } from "../engine/synthetic/corpus/corpus-parameters.ts";
 
-/** Inside the corpus's measurement year (CORPUS_MEASUREMENT_YEAR), at its end. */
-const EVALUATION_DATE = "2027-12-31";
+/**
+ * The year the deployed sandbox is actually scoring — the current UTC year, at its end — unless a
+ * deliberate sweep pins another with `WORKWELL_CORPUS_POPULATION_YEAR`. The corpus generates its
+ * clinical facts for the calendar year of the evaluation date it is asked about (ADR-072), so the
+ * question this file asks has to be asked about the year a nightly run asks it. Pinned to 2027 until
+ * 2026-09-06, this passed for a year the sandbox was not running in while every real run scored 2026
+ * against data that did not exist.
+ */
+const EVALUATION_YEAR = Number(process.env.WORKWELL_CORPUS_POPULATION_YEAR ?? new Date().getUTCFullYear());
+const EVALUATION_DATE = `${EVALUATION_YEAR}-12-31`;
 
 /**
  * 200 by default. Big enough that a measure whose eligible band is ~10% of the roster still gets a
@@ -66,7 +74,7 @@ for (const measureId of ["cms122", "cms125", "cms2", "cms130", "cms165", "cms137
       counts[result.outcome] = (counts[result.outcome] ?? 0) + 1;
       if (result.inInitialPopulation) inIpp += 1;
     }
-    console.log(`[corpus] ${measureId}: n=${SIZE} returned=${results.size} inIPP=${inIpp} ${JSON.stringify(counts)}`);
+    console.log(`[corpus] ${measureId} @ ${EVALUATION_DATE}: n=${SIZE} returned=${results.size} inIPP=${inIpp} ${JSON.stringify(counts)}`);
 
     // Every subject is answered. An absent subject is not a zero — it is a subject fqm returned
     // nothing for, and averaging it into a rate would understate the denominator silently.

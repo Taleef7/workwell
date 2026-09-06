@@ -131,6 +131,49 @@ each bundle a second time, and every outcome is a single-row `INSERT`.
 - **The 20,000-patient corpus is a SANDBOX artifact.** Nothing here authorizes the pilot's PHI phase,
   which stays a separate `PRODUCTION_READINESS`-gated decision (locked decision §4A.1).
 
+**Amended 2026-09-06 — generator 4.0.0: identity is fixed, clinical facts follow the year the run
+scores.** The second review pass (own reviewer, a clinical reviewer, GLM 5.3 Flash and Gemini 3.8 Flash
+with shell access) found that the corpus as first shipped put the ENTIRE roster out of every initial
+population on the deployed sandbox, for a reason no test asked about: the clinical facts were pinned to
+calendar 2027 while a nightly run scores the calendar year of its evaluation date (ADR-072) — 2026,
+today. Every encounter fell outside the measurement period; the `effectivePeriodWarning` did not fire
+because the 2026 artifacts matched the 2026 period exactly; the run completed. Three more defects of the
+same class were found in the credentialed job's own log and by reading the artifacts' ELM against what
+the corpus emitted: CMS125 read `inIPP=0` because its initial population compares the `us-core-sex`
+extension, not `Patient.gender`; CMS137 read `inIPP=0` because its denominator is an encounter DURING
+which an encounter-diagnosis Condition starts, and the corpus emitted a problem-list Condition at
+midnight with no encounter; and CMS2's documented refusals were a final Observation coded with the
+refusal, where the exception retrieves a CANCELLED observation of the screening instrument with the
+refusal as its `notDoneReason` — 170 refusing patients read OVERDUE.
+
+8. **Identity is drawn against `CORPUS_IDENTITY_YEAR` (2027, fixed) and clinical facts against the
+   measurement year of the evaluation date.** A patient is the same person — id, name, date of birth,
+   sex, clinic, PCP, payer, race, ethnicity — in every year the corpus is ever asked about; their age,
+   conditions, visits and events are generated for the year the run scores. `bundleForSubject` takes
+   the year from the run's evaluation date, so a sandbox evaluated in 2026 shows 2026 encounters and the
+   same roster shows 2027's when PY2027 begins. The identity cross-check in `corpusBundleSource`
+   (DOB/site/PCP/sex) is valid across years by construction. `corpus-official-population.test.ts` asks
+   its question about the CURRENT UTC year, not a pinned one.
+9. **The Patient carries what the artifacts read.** `us-core-sex`, `us-core-race` and `us-core-ethnicity`
+   extensions in the steward's own shape, and one active `Coverage` typed from the Source of Payment
+   Typology with a resolvable payer `Organization` — the four supplemental data elements every vendored
+   artifact declares, and the element CMS125's initial population actually compares.
+10. **Every resource carries the profile its retrieve names.** A mammogram is
+    `qicore-observation-clinical-result` (it was the lab profile with an imaging category, a resource
+    contradicting itself); the SUD episode is an `Encounter` plus a `qicore-condition-encounter-diagnosis`
+    whose onset falls inside the encounter's period; a refusal is `qicore-observationcancelled`. The
+    Provenance informant is a resolvable `Organization`, not a display-only string.
+11. **Every denominator exclusion the ACO's measures share has data that can fire it.** Frailty is
+    emitted (with the dementia medication or advanced-illness diagnosis the 66+ exclusion also needs,
+    drawn among the frail at published shares), and palliative care, a bilateral mastectomy history and a
+    total colectomy history are drawn and emitted as the Procedures the artifacts retrieve. `pregnancy`,
+    which no vendored measure reads, was removed rather than kept as a count nothing could act on.
+12. **The pinned digest moved, and says why.** Draw order changed (payer, race, ethnicity and three
+    exclusion conditions are drawn; pregnancy is not), so every generated patient's clinical facts moved;
+    the fixture prefix's identity did not. Realized at 20,000 for 2027: SUD episodes 604, frailty 573,
+    palliative care 47, bilateral mastectomy 63, total colectomy 21; payer Medicare 3,927 / Medicare
+    Advantage 2,900 / Medicaid 3,277 / commercial 9,896.
+
 ## ADR-074: a multi-rate measure is read as every one of its rates — and a subject is compliant only where each rate they are in is met
 
 **Status:** Accepted (2026-09-06). Milestone MM-1, unit U3 (`docs/ROADMAP_2026-08-30.md` §5, MM-1e).
@@ -207,8 +250,37 @@ rate looks plausible, and nothing anywhere says a second rate was discarded.
 - **The synthetic corpus had to emit a second engagement service.** Rate 2 requires two or more further
   services within 34 days; the generator emitted one, so Engagement would have read **0% across the
   entire corpus** — the exact rate this decision exists to surface. 82 of 564 episodes now engage.
-- `official-flip-gate.ts` and `compliance-api.ts` **still read rate 1 only**, named here as known and
-  deferred rather than left to be discovered.
+- `official-flip-gate.ts` and `compliance-api.ts` **read every rate** (since 2026-09-06 — they read
+  rate 1 only when this ADR was first written). The flip gate reports each rate's initial population,
+  denominator and numerator and treats a rate whose denominator is populated and whose numerator is
+  empty as a finding; the compliance API adds an ADDITIVE `rates` block, one entry per `Group_N`, and
+  leaves `populations` as rate 1 so no existing consumer changes (ADR-061).
+
+**Amended 2026-09-06 — decision 6 is SUPERSEDED, and strata are read.** The second review pass found
+what decision 6's refusal was standing in for, and built it:
+
+8. **QRDA III emits every group and every stratum.** One Performance Rate observation per group, each
+   `reference`ing ITS numerator criterion (`Numerator_2`, never `Numerator_1` for Engagement); one
+   Measure Data observation per population per group under the group's own criterion ids; and, where the
+   group declares stratifiers, one Reporting Stratum (V2) observation (`…27.3.4`, extension
+   `2016-09-01`) per stratum nested in each Measure Data observation, with its own Aggregate Count and a
+   `reference` naming the stratum criterion (`Stratification_1_1`). The 501 is gone. The stratum shape is
+   derived from the QRDA III R2.1 IG and the `cqm-reports` reference exporter's template, NOT yet from a
+   CVU+ run — `STANDARDS_CONFORMANCE.md`'s 0-findings claim covers the single-rate, unstratified
+   document until a stratified one is re-validated.
+9. **Stratifier results are persisted and reported.** `@work-well/official-executor` surfaces fqm's
+   `stratifierResults` per group (it never had), the adapter persists them as `evidence_json.official.strata`
+   keyed by the artifact's `Measure.group.stratifier.id`, and the summary and individual `MeasureReport`s
+   carry a `stratifier` element per group in the steward's own true/false-stratum shape. CMS137 declares
+   three age strata per group and CMS125 two; a report without them declares less than the measure does.
+10. **The aggregate exports do not inherit the individual report's cap.** The summary MeasureReport and
+    the QRDA III are sums, and are summed from PAGED reads; until this amendment they returned 422
+    `run_too_large` for any official measure on a run over 5,000 subjects — every export on the
+    20,000-patient pilot — while this ADR's own consequences said the summary route "survives the cap".
+    The cap stays on the per-subject bundle, which really does build a document per subject.
+11. **A subject counted in no rate is counted.** `aggregateByRate` reports `unmeasured` — the subjects
+    decision 5 leaves out of every rate — so the gap between the roster and the denominators has a
+    number rather than being inferred.
 
 ## ADR-073: per-subject outcome history is a retention WINDOW, and the durable history is the aggregate
 

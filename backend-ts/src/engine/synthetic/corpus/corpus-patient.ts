@@ -11,13 +11,22 @@
 import { streamFor, type SplitMix64 } from "./splitmix64.ts";
 import { CORPUS_FIXTURE_PREFIX } from "./corpus-fixture-prefix.ts";
 import {
-  AGE_MIXTURE, CLINIC_WEIGHTS, COLORECTAL_MODALITIES, CONDITION_PREVALENCE, EVENT_RATES,
-  FEMALE_SHARE, GIVEN_NAMES, MAX_NAME_REDRAWS, PCPS, SURNAMES, VISITS_PER_YEAR, ageBandFor,
+  AGE_MIXTURE, CLINIC_WEIGHTS, COLORECTAL_MODALITIES, CONDITION_PREVALENCE, CORPUS_IDENTITY_YEAR,
+  DEFAULT_CORPUS_MEASUREMENT_YEAR, EVENT_RATES, FEMALE_SHARE, GIVEN_NAMES, HISPANIC_OR_LATINO_SHARE,
+  MAX_NAME_REDRAWS, PAYER_MIX, PCPS, RACE_MIX, SURNAMES, VISITS_PER_YEAR, ageBandFor,
   type AgeBand,
 } from "./corpus-parameters.ts";
 
-/** The measurement year the corpus is generated against (U1's calendar period). */
-export const CORPUS_MEASUREMENT_YEAR = 2027;
+export { CORPUS_IDENTITY_YEAR, DEFAULT_CORPUS_MEASUREMENT_YEAR };
+
+/** The measurement year a `YYYY-MM-DD` evaluation date falls in — the year the run scores (ADR-072). */
+export const measurementYearOf = (evaluationDate: string): number => {
+  const year = Number(evaluationDate.slice(0, 4));
+  if (!Number.isInteger(year) || year < 1900 || year > 2200) {
+    throw new Error(`[workwell] "${evaluationDate}" is not a YYYY-MM-DD evaluation date`);
+  }
+  return year;
+};
 
 export interface CorpusEvent {
   readonly kind: string;      // "hba1c" | "bp" | "phq9" | "mammogram" | "colorectal" | "sudInitiation" | ...
@@ -34,11 +43,23 @@ export interface CorpusPatient {
   readonly name: string;
   readonly sex: "F" | "M";
   readonly dateOfBirth: string;
-  readonly age: number;         // age at the END of the measurement period
+  /**
+   * The calendar year this record's CLINICAL FACTS describe — the year the run scores (ADR-072).
+   * Identity (id, name, dateOfBirth, sex, site, PCP, payer, race, ethnicity) is the same in every
+   * year; conditions, visits, events and exceptions are generated for this one.
+   */
+  readonly measurementYear: number;
+  readonly age: number;         // age at the END of `measurementYear`
   readonly ageBand: AgeBand;
   readonly site: string;
   readonly providerId: string;
   readonly tenantId: "maui";
+  /** Source of Payment Typology code — what `SDE Payer` reads off the patient's Coverage. */
+  readonly payer: string;
+  /** CDC race category code, carried as the `us-core-race` extension. */
+  readonly race: string;
+  /** CDC ethnicity code, carried as the `us-core-ethnicity` extension. */
+  readonly ethnicity: string;
   readonly conditions: readonly string[];
   readonly visits: readonly string[];
   readonly events: readonly CorpusEvent[];
@@ -58,17 +79,24 @@ function dateInYear(rng: SplitMix64, year: number, lastMonth = 12): string {
 }
 
 /** A date `monthsBack` months before the period end, jittered inside that window. */
-function dateWithinLookback(rng: SplitMix64, monthsBack: number): string {
+function dateWithinLookback(rng: SplitMix64, monthsBack: number, measurementYear: number): string {
   const back = rng.nextInt(monthsBack);
   // Anchored on the FIRST of the month, not the 31st. `setUTCMonth` on a day-31 date overflows every
   // 30-day month — Dec 31 minus one month is "Nov 31", which normalises to Dec 1 — so of 27 look-back
   // months only 16 were reachable and February, April, June, September and November never occurred at
   // all. No outcome changed (every date still landed inside its window), but the manifest published
   // the seasonal distribution as a parameter-derived draw when it was an artifact of a date bug.
-  const anchor = new Date(Date.UTC(CORPUS_MEASUREMENT_YEAR, 11, 1));
+  const anchor = new Date(Date.UTC(measurementYear, 11, 1));
   anchor.setUTCMonth(anchor.getUTCMonth() - back);
   const year = anchor.getUTCFullYear();
   const month = anchor.getUTCMonth() + 1;
+  return iso(year, month, rng.nextInt(daysInMonth(year, month)) + 1);
+}
+
+/** A date one to `maxYearsBack` years before the measurement year — surgical history, not period data. */
+function dateYearsBefore(rng: SplitMix64, maxYearsBack: number, measurementYear: number): string {
+  const year = measurementYear - 1 - rng.nextInt(maxYearsBack);
+  const month = rng.nextInt(12) + 1;
   return iso(year, month, rng.nextInt(daysInMonth(year, month)) + 1);
 }
 
@@ -77,10 +105,23 @@ function ageFor(rng: SplitMix64): number {
   return band.min + rng.nextInt(band.max - band.min + 1);
 }
 
-function dobFor(rng: SplitMix64, age: number): string {
-  const year = CORPUS_MEASUREMENT_YEAR - age;
+/**
+ * Date of birth from a drawn age, relative to CORPUS_IDENTITY_YEAR — never to the year being evaluated.
+ * That is what makes a patient the same person in 2026 and in 2027: the roster's DOB is fixed, and the
+ * age the measures see (`year - birth year`) is derived from it per evaluation year.
+ */
+function dobFor(rng: SplitMix64, ageInIdentityYear: number): string {
+  const year = CORPUS_IDENTITY_YEAR - ageInIdentityYear;
   const month = rng.nextInt(12) + 1;
   return iso(year, month, rng.nextInt(daysInMonth(year, month)) + 1);
+}
+
+/** Payer, race and ethnicity — identity facts, drawn once, the same in every evaluation year. */
+function demographicsFor(rng: SplitMix64, band: AgeBand): { payer: string; race: string; ethnicity: string } {
+  const payer = rng.pick(PAYER_MIX[band]);
+  const race = rng.pick(RACE_MIX);
+  const ethnicity = rng.chance(HISPANIC_OR_LATINO_SHARE) ? "2135-2" : "2186-5";
+  return { payer, race, ethnicity };
 }
 
 /** The decade key the given-name pools are indexed by. */
@@ -134,6 +175,9 @@ const CONDITION_MIN_AGE: Record<string, number> = {
   esrd: 18,
   sudEpisode: 13,
   hospice: 18,
+  palliativeCare: 18,
+  bilateralMastectomy: 25,
+  totalColectomy: 20,
 };
 
 function conditionsFor(rng: SplitMix64, band: AgeBand, sex: "F" | "M", age: number): string[] {
@@ -142,7 +186,8 @@ function conditionsFor(rng: SplitMix64, band: AgeBand, sex: "F" | "M", age: numb
   for (const [key, p] of Object.entries(prevalence)) {
     // The skipped draws are DELIBERATE: an ineligible condition still consumes its draw so that the
     // stream position after this loop does not depend on sex or age.
-    if (key === "pregnancy" && (sex !== "F" || age < 15 || age > 49)) { rng.nextFloat(); continue; }
+    if (key === "bilateralMastectomy" && sex !== "F") { rng.nextFloat(); continue; }
+    // The AIFrailLTCF exclusion starts at 66, so frailty below it would be data no measure reads.
     if (key === "frailty" && age < 66) { rng.nextFloat(); continue; }
     // A clinical floor per condition. Without these the prevalences were drawn uniformly across the
     // whole age band, which produced 17 patients under 13 with a substance-use episode (7 under six),
@@ -156,12 +201,12 @@ function conditionsFor(rng: SplitMix64, band: AgeBand, sex: "F" | "M", age: numb
   return out;
 }
 
-function visitsFor(rng: SplitMix64): string[] {
+function visitsFor(rng: SplitMix64, year: number): string[] {
   const count = rng.pick(VISITS_PER_YEAR);
   // The first visit is before Nov 14 so every measure with a "qualifying encounter before the
   // follow-up window" requirement (CMS2, CMS137) has one (spec §3, item 1).
-  const visits = [dateInYear(rng, CORPUS_MEASUREMENT_YEAR, 11)];
-  for (let i = 1; i < count; i += 1) visits.push(dateInYear(rng, CORPUS_MEASUREMENT_YEAR));
+  const visits = [dateInYear(rng, year, 11)];
+  for (let i = 1; i < count; i += 1) visits.push(dateInYear(rng, year));
   return visits.sort();
 }
 
@@ -171,7 +216,11 @@ function addDays(date: string, days: number): string {
   return d.toISOString().slice(0, 10);
 }
 
-function eventsFor(rng: SplitMix64, patient: { conditions: readonly string[]; age: number; sex: "F" | "M"; visits: readonly string[] }): { events: CorpusEvent[]; exceptions: string[] } {
+function eventsFor(
+  rng: SplitMix64,
+  patient: { conditions: readonly string[]; age: number; sex: "F" | "M"; visits: readonly string[] },
+  year: number,
+): { events: CorpusEvent[]; exceptions: string[] } {
   const events: CorpusEvent[] = [];
   const exceptions: string[] = [];
   const ext = () => rng.chance(EVENT_RATES.externalSourced);
@@ -183,7 +232,7 @@ function eventsFor(rng: SplitMix64, patient: { conditions: readonly string[]; ag
     if (!rng.chance(EVENT_RATES.hba1cMissing)) {
       const poor = rng.chance(EVENT_RATES.hba1cPoorControl);
       const value = poor ? 9.1 + rng.nextFloat() * 4 : 5.6 + rng.nextFloat() * 3.3;
-      events.push({ kind: "hba1c", date: dateInYear(rng, CORPUS_MEASUREMENT_YEAR), value: Math.round(value * 10) / 10, external: ext() });
+      events.push({ kind: "hba1c", date: dateInYear(rng, year), value: Math.round(value * 10) / 10, external: ext() });
     }
   }
 
@@ -199,7 +248,7 @@ function eventsFor(rng: SplitMix64, patient: { conditions: readonly string[]; ag
     // identically on the whole corpus.
     const isolatedSystolic = !controlled && rng.chance(EVENT_RATES.isolatedSystolic);
     const diastolic = controlled || isolatedSystolic ? 66 + rng.nextInt(23) : 90 + rng.nextInt(20);
-    events.push({ kind: "bp", date: dateInYear(rng, CORPUS_MEASUREMENT_YEAR), value: systolic, value2: diastolic, external: false });
+    events.push({ kind: "bp", date: dateInYear(rng, year), value: systolic, value2: diastolic, external: false });
   }
 
   // CMS2 — depression screening, its positive share, and follow-up on the same day.
@@ -225,7 +274,7 @@ function eventsFor(rng: SplitMix64, patient: { conditions: readonly string[]; ag
   // outside it and the boundary is exercised rather than assumed. Everything 40-41 must land OUT.
   if (patient.sex === "F" && patient.age >= 40 && patient.age <= 76) {
     if (rng.chance(EVENT_RATES.mammogramUpToDate)) {
-      events.push({ kind: "mammogram", date: dateWithinLookback(rng, 27), external: ext() });
+      events.push({ kind: "mammogram", date: dateWithinLookback(rng, 27, year), external: ext() });
     }
   }
 
@@ -242,14 +291,44 @@ function eventsFor(rng: SplitMix64, patient: { conditions: readonly string[]; ag
   if (patient.age >= 44 && patient.age <= 77) {
     if (rng.chance(EVENT_RATES.colorectalUpToDate)) {
       const modality = rng.pick(COLORECTAL_MODALITIES);
-      events.push({ kind: "colorectal", date: dateWithinLookback(rng, modality.lookbackMonths), modality: modality.key, external: ext() });
+      events.push({ kind: "colorectal", date: dateWithinLookback(rng, modality.lookbackMonths, year), modality: modality.key, external: ext() });
     }
   }
 
+  // The 66+ ADVANCED-ILLNESS-AND-FRAILTY exclusion (AIFrailLTCF, shared by cms122/125/130/165) needs
+  // frailty AND one of two further facts: a dementia medication, or an advanced-illness diagnosis with
+  // onset in the year before or during the period. Both are drawn among the frail at published shares;
+  // a frail patient with neither stays in the denominator, exactly as the measure logic says.
+  if (has("frailty")) {
+    if (rng.chance(EVENT_RATES.frailtyDementiaMedication)) {
+      events.push({ kind: "dementiaMedication", date: dateInYear(rng, year), external: false });
+    }
+    if (rng.chance(EVENT_RATES.frailtyAdvancedIllness)) {
+      events.push({ kind: "advancedIllness", date: dateInYear(rng, year), external: false });
+    }
+  }
+
+  // Palliative care IN the measurement period excludes on every one of the ACO's four screening and
+  // control measures. Emitted as the intervention Procedure the PalliativeCare library retrieves.
+  if (has("palliativeCare")) {
+    events.push({ kind: "palliativeCare", date: dateInYear(rng, year), external: false });
+  }
+
+  // Surgical HISTORY: a bilateral mastectomy excludes from cms125 and a total colectomy from cms130,
+  // whenever they were performed. Dated one to twenty years before the period, as chart history is.
+  if (has("bilateralMastectomy")) {
+    events.push({ kind: "bilateralMastectomy", date: dateYearsBefore(rng, 20, year), external: ext() });
+  }
+  if (has("totalColectomy")) {
+    events.push({ kind: "totalColectomy", date: dateYearsBefore(rng, 20, year), external: ext() });
+  }
+
   // CMS137 — a new SUD episode, then initiation, then engagement. The episode is before Nov 14 so the
-  // 34-day engagement window closes inside the measurement period (U3 §5).
+  // 34-day engagement window closes inside the measurement period (U3 §5). The episode becomes an
+  // ENCOUNTER with the diagnosis recorded during it (see `corpus-bundle.ts`): the measure's denominator
+  // is "a qualifying encounter during which a SUD diagnosis starts", not a diagnosis on its own.
   if (has("sudEpisode")) {
-    const episode = dateInYear(rng, CORPUS_MEASUREMENT_YEAR, 11);
+    const episode = dateInYear(rng, year, 11);
     events.push({ kind: "sudEpisode", date: episode, external: false });
     if (rng.chance(EVENT_RATES.sudInitiation)) {
       const offset = rng.nextInt(15);
@@ -306,15 +385,26 @@ function panelFor(rng: SplitMix64): { site: string; providerId: string } {
  * `corpusPatients` for a full generation and passed empty for a single-index call, which is safe
  * because a single record's identity does not depend on it unless it collides.
  */
-export function patientAt(seed: string, index: number, taken: Set<string> = new Set()): CorpusPatient {
+export function patientAt(
+  seed: string,
+  index: number,
+  taken: Set<string> = new Set(),
+  /**
+   * The calendar year the clinical facts are generated for — the year the run scores. Identity does not
+   * depend on it (see `dobFor`); everything from `conditions` on does, because the age the measures see
+   * is the age at the end of THIS year.
+   */
+  year: number = DEFAULT_CORPUS_MEASUREMENT_YEAR,
+): CorpusPatient {
   const rng = streamFor(seed, index);
   const fixture = CORPUS_FIXTURE_PREFIX[index];
 
+  // IDENTITY — every draw here is year-independent, so a patient is the same person whichever year the
+  // corpus is asked about. The age drawn from the mixture is the age in CORPUS_IDENTITY_YEAR and exists
+  // only to fix a date of birth; the age the record carries is derived from that DOB below.
   const sex: "F" | "M" = rng.chance(FEMALE_SHARE) ? "F" : "M";
-  const age = fixture
-    ? CORPUS_MEASUREMENT_YEAR - Number(fixture.dateOfBirth!.slice(0, 4))
-    : ageFor(rng);
-  const dateOfBirth = fixture ? fixture.dateOfBirth! : dobFor(rng, age);
+  const dateOfBirth = fixture ? fixture.dateOfBirth! : dobFor(rng, ageFor(rng));
+  const age = year - Number(dateOfBirth.slice(0, 4));
   const band = ageBandFor(age);
 
   const baseName = fixture ? fixture.name : baseNameFor(rng, sex, dateOfBirth);
@@ -324,10 +414,14 @@ export function patientAt(seed: string, index: number, taken: Set<string> = new 
   const panel = fixture
     ? { site: fixture.site, providerId: FIXTURE_PANEL.get(fixture.externalId)! }
     : panelFor(rng);
+  // Payer follows the age band of the IDENTITY year, not the evaluation year, so it never flips at a
+  // 65th birthday between two runs — a payer change is a real-world event this corpus does not model.
+  const demographics = demographicsFor(rng, ageBandFor(CORPUS_IDENTITY_YEAR - Number(dateOfBirth.slice(0, 4))));
 
+  // CLINICAL FACTS — everything below is generated for `year`.
   const conditions = conditionsFor(rng, band, sex, age);
-  const visits = visitsFor(rng);
-  const { events, exceptions } = eventsFor(rng, { conditions, age, sex, visits });
+  const visits = visitsFor(rng, year);
+  const { events, exceptions } = eventsFor(rng, { conditions, age, sex, visits }, year);
 
   return {
     index,
@@ -335,11 +429,15 @@ export function patientAt(seed: string, index: number, taken: Set<string> = new 
     name: identity.name,
     sex,
     dateOfBirth,
+    measurementYear: year,
     age,
     ageBand: band,
     site: panel.site,
     providerId: panel.providerId,
     tenantId: "maui",
+    payer: demographics.payer,
+    race: demographics.race,
+    ethnicity: demographics.ethnicity,
     conditions,
     visits,
     events,
@@ -348,11 +446,11 @@ export function patientAt(seed: string, index: number, taken: Set<string> = new 
 }
 
 /** The first `size` patients, with identity collisions resolved against the ones already generated. */
-export function corpusPatients(seed: string, size: number): CorpusPatient[] {
+export function corpusPatients(seed: string, size: number, year: number = DEFAULT_CORPUS_MEASUREMENT_YEAR): CorpusPatient[] {
   const taken = new Set<string>();
   const out: CorpusPatient[] = [];
   for (let i = 0; i < size; i += 1) {
-    const patient = patientAt(seed, i, taken);
+    const patient = patientAt(seed, i, taken, year);
     taken.add(`${patient.name}|${patient.dateOfBirth}`);
     out.push(patient);
   }

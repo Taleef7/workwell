@@ -41,7 +41,7 @@ test("resolveDeploymentProfile is pure, normalized, and defaults safely", () => 
   assert.deepEqual(maui, {
     id: "maui",
     visibleTenantIds: ["maui"],
-    runnableMeasureIds: ["cms122", "cms125", "cms2", "cms130", "cms165"],
+    runnableMeasureIds: ["cms122", "cms125", "cms2", "cms130", "cms165", "cms137"],
     subjectTerm: "patient",
   });
   assert.equal(resolveDeploymentProfile(undefined).subjectTerm, "employee");
@@ -259,7 +259,7 @@ test("a fresh Maui process wires the profile into counts and /api/tenants", asyn
   assert.deepEqual(output.tenants, ["maui"]);
   assert.equal(output.evaluable, 48);
   assert.deepEqual(output.excluded, ["twh", "ihn", "mhn"]);
-  assert.deepEqual(output.runnable, ["cms122", "cms125", "cms2", "cms130", "cms165"]);
+  assert.deepEqual(output.runnable, ["cms122", "cms125", "cms2", "cms130", "cms165", "cms137"]);
   assert.equal(output.audiogramRunnable, false);
   assert.deepEqual(output.tenantRoute, [{ id: "maui", name: "Maui Pilot Clinic" }]);
 });
@@ -338,7 +338,7 @@ test("classifyRunnable: authored, official, official-pending, invalid — env re
 });
 
 test("the Maui profile lists exactly the five ACO measures, and hypertension is gone", () => {
-  assert.deepEqual([...resolveDeploymentProfile("maui").runnableMeasureIds], ["cms122", "cms125", "cms2", "cms130", "cms165"]);
+  assert.deepEqual([...resolveDeploymentProfile("maui").runnableMeasureIds], ["cms122", "cms125", "cms2", "cms130", "cms165", "cms137"]);
 });
 
 test("on the maui profile an unrouted official-only id is NOT runnable; a routed one is", () => {
@@ -349,7 +349,7 @@ test("on the maui profile an unrouted official-only id is NOT runnable; a routed
   const unrouted = runProfileChild("maui", script) as { cms165: boolean; cms122: boolean; listed: string[] };
   assert.equal(unrouted.cms165, false);
   assert.equal(unrouted.cms122, true); // authored fallback exists for cms122
-  assert.deepEqual(unrouted.listed, ["cms122", "cms125", "cms2", "cms130", "cms165"]);
+  assert.deepEqual(unrouted.listed, ["cms122", "cms125", "cms2", "cms130", "cms165", "cms137"]);
   process.env.WORKWELL_OFFICIAL_MEASURES = "cms122,cms125,cms2,cms130,cms165";
   try {
     const routed = runProfileChild("maui", script) as { cms165: boolean };

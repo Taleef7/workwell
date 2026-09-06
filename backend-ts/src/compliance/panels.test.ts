@@ -16,8 +16,12 @@ test("isPanelId narrows known panel ids", () => {
 });
 
 test("profile-aware exports equal raw constants on default profile", () => {
-  // Pins identity on the default profile: all measures are Active and runnable, so runnable panels equal raw PANELS.
-  assert.deepEqual(RUNNABLE_PANELS, PANELS);
+  // Pins identity on the default profile: every AUTHORED measure is Active and runnable, so the runnable
+  // panels equal raw PANELS minus the four official-only ACO measures, which are columns only where a
+  // deployment routes them (ADR-072) — and TWH routes none.
+  const OFFICIAL_ONLY = new Set(["cms2", "cms130", "cms165", "cms137"]);
+  assert.deepEqual(RUNNABLE_PANELS, { ...PANELS, wellness: PANELS.wellness.filter((id) => !OFFICIAL_ONLY.has(id)) });
+  assert.ok(PANELS.wellness.includes("cms137"), "the quality panel must hold the ACO's sixth measure so a flip gives it a column");
   assert.deepEqual(AVAILABLE_PANELS, ["immunizations", "osha", "wellness"]);
   assert.equal(PROFILE_DEFAULT_PANEL, "immunizations");
 });

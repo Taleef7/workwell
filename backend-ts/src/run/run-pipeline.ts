@@ -900,6 +900,12 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
         evidence: p.evidence,
       })),
     );
+    // PERSISTED, so this much is true even if the case pass below throws mid-chunk: `evaluated` and
+    // `failures` count rows that are now in the store, and nothing else. `compliant`/`nonCompliant`
+    // are advanced per record below, as each one's case is acted on, so `failPlannedRun` reports
+    // exactly what the run completed rather than a per-chunk lower bound.
+    planned.progress.evaluated += records.length;
+    planned.progress.failures = failures;
 
     for (const [index, entry] of pending.entries()) {
       const { item, period, status, evidence, plan, evaluatedNow, evaluationFailed } = entry;
@@ -996,10 +1002,9 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
       }
       if (status === "COMPLIANT") compliant++;
       else if (NON_COMPLIANT.has(status)) nonCompliant++;
+      planned.progress.compliant = compliant;
+      planned.progress.nonCompliant = nonCompliant;
     }
-    // The chunk is done and persisted, so this much is TRUE even if the next chunk throws. Read by
-    // `failPlannedRun` so a mid-run failure records what actually happened rather than a zero.
-    planned.progress = { evaluated: (records.length + planned.progress.evaluated), compliant, nonCompliant, failures };
   }
 
   // A whole roster out of the initial population, SURFACED (ADR-043) — now that the roster is complete.
@@ -1257,8 +1262,10 @@ async function failPlannedRun(deps: RunPipelineDeps, planned: PlannedRun, err: u
           scopeType: planned.scopeType,
           scopeLabel: planned.scopeLabel,
           status: "FAILED",
-          // What the run ACTUALLY completed before it failed, not a zero. A failure before the first
-          // chunk finishes still reports zeros — correctly, because nothing was persisted.
+          // What the run ACTUALLY completed before it failed, not a zero: `evaluated`/`failures` are
+          // advanced when a chunk's rows are persisted and `compliant`/`nonCompliant` per record as
+          // its case is acted on, so these are exact at the point of failure. A failure before the
+          // first chunk persists still reports zeros — correctly, because nothing was.
           totalEvaluated: planned.progress.evaluated,
           compliant: planned.progress.compliant,
           nonCompliant: planned.progress.nonCompliant,

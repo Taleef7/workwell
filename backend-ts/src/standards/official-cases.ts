@@ -586,7 +586,10 @@ export type FqmCalculate = (
 ) => Promise<FqmOutput>;
 
 export interface OfficialCaseResult extends OfficialCase {
+  /** Rate 1. For a multi-rate measure see `actualRates`, which the report and the agreement read. */
   actual?: PopulationCounts;
+  /** Every rate fqm returned, in the artifact's group order (ADR-074). */
+  actualRates?: PopulationCounts[];
   agreement?: PopulationAgreement;
   error?: string;
 }
@@ -1025,6 +1028,16 @@ function escapeMarkdown(value: string): string {
 
 function populationCell(item: OfficialCaseResult, code: PopulationCode): string {
   if (!item.expected || !item.actual) return "—";
+  // EVERY rate, when the measure declares more than one: `r1 1/1 · r2 0/0`. A single `E/A` for a
+  // multi-rate case rendered Initiation and called it the measure, while the gate beneath it compared
+  // both — a report that hides the column it compares invites the opposite conclusion from the evidence
+  // (ADR-074).
+  const expectedRates = item.expectedRates ?? [item.expected];
+  const actualRates = item.actualRates ?? [item.actual];
+  if (expectedRates.length > 1 || actualRates.length > 1) {
+    const width = Math.max(expectedRates.length, actualRates.length);
+    return Array.from({ length: width }, (_, i) => `r${i + 1} ${expectedRates[i]?.[code] ?? "—"}/${actualRates[i]?.[code] ?? "—"}`).join(" · ");
+  }
   return `${item.expected[code]}/${item.actual[code]}`;
 }
 

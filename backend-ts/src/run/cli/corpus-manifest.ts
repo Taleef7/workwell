@@ -25,11 +25,16 @@ import {
   COLORECTAL_MODALITIES,
   CONDITION_PREVALENCE,
   CORPUS_GENERATOR_VERSION,
+  CORPUS_IDENTITY_YEAR,
+  DEFAULT_CORPUS_MEASUREMENT_YEAR,
   EVENT_RATES,
   FEMALE_SHARE,
   GIVEN_NAMES,
+  HISPANIC_OR_LATINO_SHARE,
   MAX_NAME_REDRAWS,
+  PAYER_MIX,
   PCPS,
+  RACE_MIX,
   SURNAMES,
   VISITS_PER_YEAR,
   ageBandFor,
@@ -48,20 +53,27 @@ import type { CorpusPatient } from "../../engine/synthetic/corpus/corpus-patient
  */
 export function parametersSha256(): string {
   const rows = {
-    CORPUS_GENERATOR_VERSION, CLINICS, CLINIC_WEIGHTS, PCPS, AGE_MIXTURE, FEMALE_SHARE,
+    CORPUS_GENERATOR_VERSION, CORPUS_IDENTITY_YEAR, CLINICS, CLINIC_WEIGHTS, PCPS, AGE_MIXTURE, FEMALE_SHARE,
     CONDITION_PREVALENCE, EVENT_RATES, COLORECTAL_MODALITIES, VISITS_PER_YEAR,
+    PAYER_MIX, RACE_MIX, HISPANIC_OR_LATINO_SHARE,
     GIVEN_NAMES, SURNAMES, MAX_NAME_REDRAWS,
   };
   return createHash("sha256").update(JSON.stringify(rows), "utf8").digest("hex");
 }
 
-/** The measures the pilot's ACO set names, in catalog-id form. */
-export const CORPUS_MEASURE_IDS = ["cms122", "cms2", "cms165", "cms125", "cms130"] as const;
+/** The measures the pilot's ACO set names, in catalog-id form — the six computable ones, cms137 included (ADR-074). */
+export const CORPUS_MEASURE_IDS = ["cms122", "cms2", "cms165", "cms125", "cms130", "cms137"] as const;
 
 export interface CorpusManifest {
   readonly generatorVersion: string;
   readonly seed: string;
   readonly size: number;
+  /**
+   * The calendar year the clinical facts describe. Identity is the same in every year; the realized
+   * counts and estimated cohorts below are for THIS one, because age — and therefore every age-gated
+   * cohort — is age at the end of it.
+   */
+  readonly measurementYear: number;
   readonly parametersSha256: string;
   readonly generatedAt?: string;
   /** Per measure: the vendored artifact's own SHA-256, read from its committed manifest. */
@@ -151,8 +163,16 @@ function estimateCohorts(patients: readonly CorpusPatient[]): CorpusManifest["es
     ),
     cms130: cohort(
       (p) => inAge(p, 46, 75),
-      (p) => inAge(p, 46, 75) && !has(p, "colorectalCancer"),
+      (p) => inAge(p, 46, 75) && !has(p, "colorectalCancer") && !has(p, "totalColectomy"),
       EVENT_RATES.colorectalUpToDate,
+    ),
+    // CMS137's initial population is 13+ with a new SUD episode in the period (its ELM: age >= 13 and a
+    // first episode encounter on or before Nov 14). The expected numerator rate is RATE 1's — initiation
+    // — because a single number is what this table carries; rate 2 is initiation × engagement.
+    cms137: cohort(
+      (p) => p.age >= 13 && has(p, "sudEpisode"),
+      (p) => p.age >= 13 && has(p, "sudEpisode") && !has(p, "hospice"),
+      EVENT_RATES.sudInitiation,
     ),
   };
 }
@@ -174,11 +194,16 @@ export function buildManifest(input: BuildManifestInput): CorpusManifest {
 
   const conditions = patients.flatMap((p) => p.conditions);
   const events = patients.flatMap((p) => p.events.map((e) => e.kind));
+  // One year per manifest: a patient list mixing years would describe two corpora as one.
+  const years = new Set(patients.map((p) => p.measurementYear));
+  if (years.size > 1) throw new Error(`[workwell] manifest over patients from ${years.size} measurement years: ${[...years].join(", ")}`);
+  const measurementYear = patients[0]?.measurementYear ?? DEFAULT_CORPUS_MEASUREMENT_YEAR;
 
   return {
     generatorVersion: CORPUS_GENERATOR_VERSION,
     seed,
     size: patients.length,
+    measurementYear,
     parametersSha256: parametersSha256(),
     ...(input.generatedAt ? { generatedAt: input.generatedAt } : {}),
     artifactHashes,

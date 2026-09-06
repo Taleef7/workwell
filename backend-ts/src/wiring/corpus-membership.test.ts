@@ -65,6 +65,28 @@ test("every canonical code is a member of the official value set it is registere
   assert.deepEqual(failures, []);
 });
 
+test("every member of the payer, race, ethnicity and SUD mixes is in the value set its canonical entry names", { skip }, async () => {
+  // The canonical table proves ONE code per set. The mixes the corpus actually draws from — four payer
+  // codes, six race codes, two ethnicity codes, two SUD diagnoses — would otherwise be checked by nobody:
+  // a mix member outside its set is stamped on every patient who draws it and retrieved by no SDE.
+  const { PAYER_TYPE_CODES, RACE_CODES, ETHNICITY_CODES, SUD_CONDITION_CODES } = await import("../engine/cql/bundled-ecqm-expansions.ts");
+  const mixes: Array<[string, ReadonlyArray<{ system: string; code: string }>]> = [
+    [CANONICAL_CODE_VALUE_SETS.payerMedicare, PAYER_TYPE_CODES],
+    [CANONICAL_CODE_VALUE_SETS.raceWhite, RACE_CODES],
+    [CANONICAL_CODE_VALUE_SETS.ethnicityNotHispanic, ETHNICITY_CODES],
+    [CANONICAL_CODE_VALUE_SETS.sudCondition, SUD_CONDITION_CODES],
+  ];
+  const failures: string[] = [];
+  for (const [oid, codes] of mixes) {
+    const official = expansions.get(oid);
+    if (!official) { failures.push(`${oid}: not in the fetched terminology`); continue; }
+    for (const c of codes) {
+      if (!official.some((o) => o.code === c.code && o.system === c.system)) failures.push(`${c.system}|${c.code} is not in ${oid}`);
+    }
+  }
+  assert.deepEqual(failures, []);
+});
+
 test("no two canonical codes are registered under the same value set", () => {
   // One constant serving two value sets is how the old table went wrong: SNOMED 385763009 was written
   // for both "Hospice Encounter" and "Hospice Care Ambulatory", is a member of only the second, and so
@@ -132,7 +154,8 @@ test("the corpus stamps only codes the canonical table has verified — never a 
   const { corpusPatients } = await import("../engine/synthetic/corpus/corpus-patient.ts");
   const { bundleForPatient } = await import("../engine/synthetic/corpus/corpus-bundle.ts");
   const { DEFAULT_CORPUS_SEED } = await import("../engine/synthetic/corpus/corpus-parameters.ts");
-  const { MAMMOGRAPHY_PROCEDURE_CPT, SUD_CONDITION_CODES } = await import("../engine/cql/bundled-ecqm-expansions.ts");
+  const { MAMMOGRAPHY_PROCEDURE_CPT, SUD_CONDITION_CODES, PAYER_TYPE_CODES, RACE_CODES, ETHNICITY_CODES } =
+    await import("../engine/cql/bundled-ecqm-expansions.ts");
 
   // Every clinical code the corpus is allowed to stamp: the canonical table (each member verified
   // against its own OID by the test above), the mammography CPT (deliberately outside the value-set
@@ -141,9 +164,10 @@ test("the corpus stamps only codes the canonical table has verified — never a 
   for (const c of Object.values(ECQM_CANONICAL_CODES)) allowed.add(`${c.system}|${c.code}`);
   allowed.add(`${MAMMOGRAPHY_PROCEDURE_CPT.system}|${MAMMOGRAPHY_PROCEDURE_CPT.code}`);
   allowed.add("http://snomed.info/sct|720834000"); // declined depression screening (cms2 exception)
-  // The second SUD diagnosis: a member of the same value set as `sudCondition`, kept outside the
-  // canonical table because that table is one code per value set by construction.
-  for (const c of SUD_CONDITION_CODES) allowed.add(`${c.system}|${c.code}`);
+  // The mixes: each array's members share ONE value set with the canonical entry for it, and are kept
+  // outside the canonical table because that table is one code per value set by construction. Their
+  // membership is proved below, per code, against the same expansions.
+  for (const c of [...SUD_CONDITION_CODES, ...PAYER_TYPE_CODES, ...RACE_CODES, ...ETHNICITY_CODES]) allowed.add(`${c.system}|${c.code}`);
 
   // Systems that carry structure, not clinical meaning: FHIR/HL7 terminology for statuses, categories
   // and agent roles, and UCUM for units. Excluded by SYSTEM so a new status or unit cannot silently

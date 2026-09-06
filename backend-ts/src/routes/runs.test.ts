@@ -1130,3 +1130,52 @@ test("the engine evaluates the date the row is LABELLED with", async () => {
   assert.equal(fromRun.days, explicit.days, "and the engine computed that date, not another one");
   assert.notEqual(fromRun.days, today.days, "which is a different answer from today's — so the check can fail");
 });
+
+/**
+ * The aggregate exports are SUMS and must not inherit the individual report's cap. On the 20,000-patient
+ * pilot every official measure's summary MeasureReport and QRDA III returned 422 `run_too_large` — the
+ * two regulatory documents unreachable for exactly the roster they exist for (Gemini review finding 4).
+ */
+test("the summary MeasureReport and the QRDA III page through a run larger than the individual-report cap", async () => {
+  await get("/api/runs");
+  const runStore = new SqliteRunStore(env.DB as never);
+  const outcomeStore = new SqliteOutcomeStore(env.DB as never);
+  const run = await runStore.createRun({
+    scopeType: "MEASURE", scopeId: "cms137", triggeredBy: "test", requestedScope: { measureId: "cms137" },
+    measurementPeriodStart: "2026-01-01T00:00:00.000Z", measurementPeriodEnd: "2026-12-31T23:59:59.999Z",
+    status: "COMPLETED", startedAt: "2026-09-06T00:00:00.000Z", completedAt: "2026-09-06T00:10:00.000Z",
+  });
+  const rate = (numerator: boolean) => [
+    { populationType: "initial-population", result: true },
+    { populationType: "denominator", result: true },
+    { populationType: "numerator", result: numerator },
+  ];
+  const strata = (group: number) => [1, 2, 3].map((s) => ({ id: `Stratification_${group}_${s}`, code: `Stratification_${group}_${s}`, result: s === 2, appliesResult: s === 2 }));
+  const N = 5001; // one past MAX_INDIVIDUAL_REPORT_SUBJECTS
+  const rows = Array.from({ length: N }, (_, i) => ({
+    runId: run.id, subjectId: `pat-${String(i + 1).padStart(5, "0")}`, measureId: "cms137", evaluationPeriod: "2026-01-01",
+    status: i % 3 === 0 ? "COMPLIANT" : "OVERDUE",
+    evidence: { official: { ecqmId: "137FHIR", version: "1.0.000", engine: "fqm-execution", populationResults: rate(true), rates: [rate(true), rate(i % 3 === 0)], strata: [strata(1), strata(2)] } },
+  }));
+  for (let i = 0; i < rows.length; i += 500) await outcomeStore.recordOutcomes(rows.slice(i, i + 500));
+
+  const summary = (await get(`/api/runs/${run.id}/measure-report?type=summary`))!;
+  assert.equal(summary.status, 200, `summary must not be 422 at ${N} subjects: ${await summary.clone().text()}`);
+  const mr = (await summary.json()) as { group: Array<{ id?: string; population: Array<{ code: { coding: Array<{ code: string }> }; count: number }>; stratifier?: Array<{ id: string }> }> };
+  assert.equal(mr.group.length, 2, "both rates");
+  const numerator = (g: number) => mr.group[g]!.population.find((p) => p.code.coding[0]!.code === "numerator")!.count;
+  assert.equal(numerator(0), N);
+  assert.equal(numerator(1), Math.ceil(N / 3));
+  assert.deepEqual(mr.group[1]!.stratifier!.map((s) => s.id), ["Stratification_2_1", "Stratification_2_2", "Stratification_2_3"]);
+
+  // The individual/bundle report keeps its cap — that one really does build a document per subject.
+  assert.equal((await get(`/api/runs/${run.id}/measure-report?type=bundle`))!.status, 422);
+
+  // QRDA III is no longer refused for a multi-rate measure (ADR-074 d6 superseded): two performance rates.
+  const qrda = (await get(`/api/runs/${run.id}/qrda`))!;
+  assert.equal(qrda.status, 200, await qrda.clone().text());
+  const xml = await qrda.text();
+  assert.equal((xml.match(/code="72510-1"/g) ?? []).length, 2);
+  assert.ok(xml.includes('extension="Numerator_2"'));
+  assert.ok(xml.includes('extension="Stratification_1_2"'), "strata are reported");
+});

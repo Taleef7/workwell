@@ -583,3 +583,33 @@ test("agreement over a multi-rate measure requires EVERY rate to match, not just
   assert.equal(single.pass, true);
   assert.equal(module.classifyPopulationAgreement("cms125", "uuid", rate(1), rate(0)).pass, false);
 });
+
+test("the evidence report renders EVERY rate's expected/actual, not rate 1 alone", async () => {
+  // A case whose engine returned two rates against a single-rate expectation: the table must show both
+  // (`r1 ../.. · r2 ../..`) so a reader can see which rate diverged. Rendering `1/1` and PASS for a case
+  // whose second rate failed is how a multi-rate measure's Engagement half went invisible in the committed
+  // report (ADR-074).
+  const module = await import("./official-cases.ts");
+  const loaded = loadedMeasureForRunner();
+  const patientId = loaded.cases[0]!.patientId!;
+  const rate = (numerator: boolean) => [
+    { populationType: "initial-population", result: true },
+    { populationType: "denominator", result: true },
+    { populationType: "denominator-exclusion", result: false },
+    { populationType: "numerator", result: numerator },
+  ];
+  const run = await module.runOfficialMeasureCases(loaded, {
+    calculate: () =>
+      Promise.resolve({
+        results: [{ patientId, detailedResults: [{ populationResults: rate(true) }, { populationResults: rate(false) }], evaluatedResource: [{ resourceType: "Observation", id: "r" }] }],
+      }),
+  });
+  const markdown = module.renderOfficialCaseReport([run], { generatedDate: "2026-09-06", sourceRevision: "ca4b49516de4cbed9f92bfb7c35d97b1bf1022ab" });
+  // IPP · DENOM · DENEX · NUMER · DENEXCEP, each as `r1 e/a · r2 e/a`; the steward declared one rate, so
+  // rate 2's expectation is `—`, and the disagreement on the rate count is a FAIL.
+  assert.match(
+    markdown,
+    /\| r1 1\/1 · r2 —\/1 \| r1 1\/1 · r2 —\/1 \| r1 0\/0 · r2 —\/0 \| r1 1\/1 · r2 —\/0 \| r1 0\/0 · r2 —\/0 \| FAIL \|/,
+    "rate 2's populations are rendered beside rate 1's, and the mismatch is visible",
+  );
+});

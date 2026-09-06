@@ -20,7 +20,7 @@ export const MEASURE_IDENTITY: Record<string, MeasureIdentity> = Object.fromEntr
       ["cms177v14", { cmsId: "CMS177", mipsQualityId: "382" }],
       ["cms149v14", { cmsId: "CMS149", mipsQualityId: "281" }],
       ["cms136v15", { cmsId: "CMS136", mipsQualityId: "366" }],
-      ["cms137v14", { cmsId: "CMS137", mipsQualityId: "305" }],
+      ["cms137", { cmsId: "CMS137", mipsQualityId: "305" }],
       ["cms22v14", { cmsId: "CMS22", mipsQualityId: "317" }],
       ["cms135v14", { cmsId: "CMS135", mipsQualityId: "005" }],
       ["cms144v14", { cmsId: "CMS144", mipsQualityId: "008" }],

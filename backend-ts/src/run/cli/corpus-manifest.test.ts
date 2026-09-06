@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { buildManifest, manifestSha256, parametersSha256, CORPUS_MEASURE_IDS } from "./corpus-manifest.ts";
 import { corpusPatients } from "../../engine/synthetic/corpus/corpus-patient.ts";
-import { DEFAULT_CORPUS_SEED, CLINICS, PCPS, CORPUS_GENERATOR_VERSION } from "../../engine/synthetic/corpus/corpus-parameters.ts";
+import { DEFAULT_CORPUS_SEED, DEFAULT_CORPUS_MEASUREMENT_YEAR, CLINICS, PCPS, CORPUS_GENERATOR_VERSION } from "../../engine/synthetic/corpus/corpus-parameters.ts";
 
 test("the manifest carries every key the spec names, with the declared types", () => {
   const m = buildManifest({
@@ -13,6 +13,11 @@ test("the manifest carries every key the spec names, with the declared types", (
   assert.equal(m.generatorVersion, CORPUS_GENERATOR_VERSION);
   assert.equal(m.seed, DEFAULT_CORPUS_SEED);
   assert.equal(m.size, 48);
+  assert.equal(m.measurementYear, DEFAULT_CORPUS_MEASUREMENT_YEAR, "the manifest says which year its facts describe");
+  assert.equal(
+    buildManifest({ seed: DEFAULT_CORPUS_SEED, patients: corpusPatients(DEFAULT_CORPUS_SEED, 10, 2026), ndjsonSha256: {} }).measurementYear,
+    2026,
+  );
   assert.equal(m.parametersSha256, parametersSha256());
   for (const key of ["artifactHashes", "terminologySha256s", "realized", "estimatedCohorts", "ndjsonSha256"]) {
     assert.ok(key in m, `manifest is missing ${key}`);

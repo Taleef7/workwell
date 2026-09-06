@@ -6,8 +6,26 @@
  * goes into the manifest so a run's data is traceable to the exact table that produced it, and
  * CORPUS_GENERATOR_VERSION is bumped by hand whenever a row or the drawing logic changes.
  */
-export const CORPUS_GENERATOR_VERSION = "3.0.0";
+export const CORPUS_GENERATOR_VERSION = "4.0.0";
 export const DEFAULT_CORPUS_SEED = "maui-py2027-v1";
+
+/**
+ * The year a patient's IDENTITY is drawn against, and the year the corpus describes when nobody says
+ * otherwise. These are two different things and were one constant until 4.0.0:
+ *
+ * - `CORPUS_IDENTITY_YEAR` fixes who a patient IS. An age is drawn from the mixture and turned into a
+ *   date of birth relative to this year, so the roster — ids, names, dates of birth, sex, clinic, PCP —
+ *   is the same in every year the corpus is ever evaluated for. It is the pilot's first performance
+ *   year and it does not move.
+ * - `DEFAULT_CORPUS_MEASUREMENT_YEAR` is the year a patient's CLINICAL FACTS are generated for when a
+ *   caller passes none. The run pipeline always passes one — the calendar year of the run's evaluation
+ *   date (ADR-072) — so a sandbox evaluated in 2026 gets 2026 encounters and a run in 2027 gets 2027's.
+ *   Until 4.0.0 the facts were pinned to 2027 whatever year the run scored, so every nightly run on the
+ *   deployed sandbox scored a year the corpus had no data in and put the whole roster out of every
+ *   initial population.
+ */
+export const CORPUS_IDENTITY_YEAR = 2027;
+export const DEFAULT_CORPUS_MEASUREMENT_YEAR = CORPUS_IDENTITY_YEAR;
 
 export interface CorpusClinic {
   readonly id: string;
@@ -112,16 +130,59 @@ export const ageBandFor = (age: number): AgeBand =>
  *  - esrd: USRDS treated-ESRD prevalence. Corrected 2026-09-06 — the previous 0.008/0.020 for 45-64
  *    and 65+ were 3-5x the real ~0.2%/~0.6-0.7%, and ESRD is a CMS165 denominator exclusion that IS
  *    emitted, so the error inflated a reported denominator rather than being cosmetic.
- *  - pregnancy: NCHS births per 1,000 women, converted to a point prevalence.
  *  - hospice / frailty: NHPCO and the CMS frailty-indicator literature, order of magnitude only.
+ *  - palliativeCare: CAPC/NPCRC estimates of palliative-care receipt outside hospice, order of magnitude.
+ *  - bilateralMastectomy: women only; SEER breast-cancer prevalence times the bilateral-surgery share.
+ *  - totalColectomy: order of magnitude from colectomy incidence over a lifetime; it is a CMS130
+ *    denominator EXCLUSION, so what matters is that some patients carry it, not the third decimal.
  *  - sudEpisode: SAMHSA NSDUH past-year SUD, discounted to the share presenting in primary care.
+ *
+ * `pregnancy` was removed in 4.0.0. No vendored measure retrieves a pregnancy value set, the corpus had
+ * no verified code to stamp, and a fact that is drawn, counted and published but never emitted is the
+ * exact shape of claim this table exists to avoid. The four rows added in its place are all
+ * denominator exclusions the ACO's measures actually read: `frailty` is now EMITTED (with the dementia
+ * medication or advanced-illness diagnosis the 66+ exclusion also needs, see EVENT_RATES),
+ * `palliativeCare` excludes on cms122/125/130/165, `bilateralMastectomy` on cms125 and
+ * `totalColectomy` on cms130. Before 4.0.0 none of those exclusions could fire on any patient, so a
+ * regression in exclusion handling would have been invisible on the whole corpus.
  */
 export const CONDITION_PREVALENCE: Record<AgeBand, Record<string, number>> = {
-  "0-17": { diabetes: 0.004, hypertension: 0.003, bipolar: 0.002, colorectalCancer: 0.0, esrd: 0.0001, pregnancy: 0.004, hospice: 0.0, frailty: 0.0, sudEpisode: 0.010 },
-  "18-44": { diabetes: 0.045, hypertension: 0.110, bipolar: 0.028, colorectalCancer: 0.001, esrd: 0.0008, pregnancy: 0.075, hospice: 0.0005, frailty: 0.0, sudEpisode: 0.055 },
-  "45-64": { diabetes: 0.170, hypertension: 0.400, bipolar: 0.022, colorectalCancer: 0.008, esrd: 0.002, pregnancy: 0.002, hospice: 0.002, frailty: 0.0, sudEpisode: 0.035 },
-  "65+":   { diabetes: 0.265, hypertension: 0.740, bipolar: 0.012, colorectalCancer: 0.020, esrd: 0.007, pregnancy: 0.0, hospice: 0.012, frailty: 0.090, sudEpisode: 0.012 },
+  "0-17": { diabetes: 0.004, hypertension: 0.003, bipolar: 0.002, colorectalCancer: 0.0, esrd: 0.0001, hospice: 0.0, frailty: 0.0, sudEpisode: 0.010, palliativeCare: 0.0, bilateralMastectomy: 0.0, totalColectomy: 0.0 },
+  "18-44": { diabetes: 0.045, hypertension: 0.110, bipolar: 0.028, colorectalCancer: 0.001, esrd: 0.0008, hospice: 0.0005, frailty: 0.0, sudEpisode: 0.055, palliativeCare: 0.0002, bilateralMastectomy: 0.0008, totalColectomy: 0.0003 },
+  "45-64": { diabetes: 0.170, hypertension: 0.400, bipolar: 0.022, colorectalCancer: 0.008, esrd: 0.002, hospice: 0.002, frailty: 0.0, sudEpisode: 0.035, palliativeCare: 0.001, bilateralMastectomy: 0.006, totalColectomy: 0.0012 },
+  "65+":   { diabetes: 0.265, hypertension: 0.740, bipolar: 0.012, colorectalCancer: 0.020, esrd: 0.007, hospice: 0.012, frailty: 0.090, sudEpisode: 0.012, palliativeCare: 0.006, bilateralMastectomy: 0.010, totalColectomy: 0.0025 },
 };
+
+/**
+ * Payer mix by age band, as Source of Payment Typology codes — the vocabulary the measures' `SDE Payer`
+ * reads through the "Payer Type" value set (2.16.840.1.114222.4.11.3591). Every code here is verified a
+ * member of that expansion by `corpus-membership.test.ts`. Medicare for the 65+ panel (with a Medicare
+ * Advantage share near the national figure), commercial and Medicaid below it; the pediatric band is
+ * where Medicaid/CHIP is largest. Order of magnitude, like everything else in this table.
+ */
+export const PAYER_MIX: Record<AgeBand, readonly (readonly [string, number])[]> = {
+  "0-17": [["5", 0.58], ["2", 0.42]],
+  "18-44": [["5", 0.74], ["2", 0.26]],
+  "45-64": [["5", 0.80], ["2", 0.16], ["1", 0.04]],
+  "65+": [["1", 0.55], ["11", 0.43], ["5", 0.02]],
+};
+
+/**
+ * Race (CDC/OMB categories) and ethnicity, as the `us-core-race` / `us-core-ethnicity` extensions the
+ * measures' `SDE Race` / `SDE Ethnicity` read. Maui County's mix from the decennial census, rounded:
+ * Asian and Native Hawaiian or Other Pacific Islander shares far above the US average, and a Hispanic
+ * or Latino share near 11%. Codes are members of the Race (…4.11.836) and Ethnicity (…4.11.837) value
+ * sets every vendored artifact declares.
+ */
+export const RACE_MIX: readonly (readonly [string, number])[] = [
+  ["2106-3", 0.33], // White
+  ["2028-9", 0.29], // Asian
+  ["2076-8", 0.24], // Native Hawaiian or Other Pacific Islander
+  ["2131-1", 0.11], // Other Race
+  ["2054-5", 0.02], // Black or African American
+  ["1002-5", 0.01], // American Indian or Alaska Native
+];
+export const HISPANIC_OR_LATINO_SHARE = 0.11;
 
 /** Event rates the six measures read (spec §3, item 3). */
 export const EVENT_RATES = {
@@ -157,6 +218,14 @@ export const EVENT_RATES = {
   sudEngagement: 0.35,
   /** CMS137: share of initiations that are a long-acting medication (the single-visit variant). */
   sudLongActing: 0.10,
+  /**
+   * The 66+ advanced-illness-and-frailty exclusion (AIFrailLTCF, shared by cms122/125/130/165) needs
+   * frailty AND either a dementia medication or an advanced-illness diagnosis in the year before or
+   * during the period. Among frail elders these are the shares carrying each; a frail patient with
+   * neither stays IN the denominator, which is what the measure logic says and what a real panel has.
+   */
+  frailtyDementiaMedication: 0.45,
+  frailtyAdvancedIllness: 0.60,
   /** D5: share of screening events sourced outside the practice (HIE / outside lab / referring specialist). */
   externalSourced: 0.20,
 } as const;

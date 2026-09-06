@@ -630,6 +630,22 @@ export function officialMeasureExecutor(deps: OfficialExecutorDeps): OfficialMea
             // Every rate, verbatim, when the measure declares more than one. Rate 1 stays in
             // `populationResults` so nothing that reads it today changes.
             ...((result.rates?.length ?? 0) > 1 ? { rates: result.rates } : {}),
+            // Every STRATUM, per rate, when the measure declares any. `id` is the artifact's own
+            // `Measure.group.stratifier.id` (CMS137: `Stratification_1_1`…), which is what a QRDA III
+            // Reporting Stratum and a MeasureReport stratifier are keyed by. Absent for the eight
+            // unstratified measures, so their persisted evidence is byte-identical.
+            ...(result.strata?.some((rate) => rate.length > 0)
+              ? {
+                  strata: result.strata.map((rate) =>
+                    rate.map((s) => ({
+                      id: s.strataId ?? s.strataCode,
+                      code: s.strataCode,
+                      result: s.result === true,
+                      appliesResult: s.appliesResult === true,
+                    })),
+                  ),
+                }
+              : {}),
             measurementPeriod: period,
           },
         },

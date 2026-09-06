@@ -7,6 +7,7 @@ import { createHash } from "node:crypto";
 import { runCorpusExport, parseArgs } from "./corpus-export-cli.ts";
 import { corpusPatients } from "../../engine/synthetic/corpus/corpus-patient.ts";
 import { DEFAULT_CORPUS_SEED, PCPS, CLINICS } from "../../engine/synthetic/corpus/corpus-parameters.ts";
+import { payerAndSourceOrganizationResources } from "../../engine/synthetic/corpus/corpus-bundle.ts";
 
 test("the export writes one NDJSON per resource type plus practitioners, organizations and the manifest", async (t) => {
   const out = await mkdtemp(join(tmpdir(), "corpus-"));
@@ -26,7 +27,11 @@ test("the export writes one NDJSON per resource type plus practitioners, organiz
 
   // The directory resources are written ONCE, not per patient.
   assert.equal((await readFile(join(out, "practitioners.ndjson"), "utf8")).trim().split("\n").length, PCPS.length);
-  assert.equal((await readFile(join(out, "organizations.ndjson"), "utf8")).trim().split("\n").length, CLINICS.length);
+  // The clinics, the payers every Coverage references, and the outside-source Organization every informant references.
+  assert.equal(
+    (await readFile(join(out, "organizations.ndjson"), "utf8")).trim().split("\n").length,
+    CLINICS.length + payerAndSourceOrganizationResources().length,
+  );
 
   const manifest = JSON.parse(await readFile(join(out, "manifest.json"), "utf8"));
   assert.equal(manifest.size, 60);

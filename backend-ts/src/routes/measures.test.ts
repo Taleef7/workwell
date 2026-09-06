@@ -105,8 +105,8 @@ test("GET /api/measures returns the full 63-measure catalog (Measure shape), Act
   assert.equal(audiogram.policyRef, "OSHA 29 CFR 1910.95");
   assert.equal(audiogram.status, "Active");
   assert.ok(audiogram.tags.includes("hearing"));
-  // the 14 runnable measures plus the three official-only cms rows are Active
-  assert.equal(rows.filter((m) => m.status === "Active").length, 17);
+  // the 14 runnable measures plus the four official-only cms rows (cms2, cms130, cms165, cms137) are Active
+  assert.equal(rows.filter((m) => m.status === "Active").length, 18);
 });
 
 test("GET /api/measures and GET /api/measures/:id include identity field ({cmsId, mipsQualityId} or null)", async () => {

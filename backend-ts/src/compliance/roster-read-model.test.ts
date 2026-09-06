@@ -364,9 +364,12 @@ test("buildRoster applies ageBand and sex, and an unfiltered call is unchanged",
 
   const banded = await buildRoster({ outcomeStore: store, segments: [] }, { ageBand: "65+", pageSize: 100000 });
   assert.ok(banded.total <= all.total);
+  // The HTTP route refuses an unrecognised token with a 400 before the read model sees it; a caller that
+  // bypasses the route gets a constraint NOBODY satisfies — an empty page is visible, the whole roster
+  // under a filter that was silently dropped is not.
   assert.equal(
     (await buildRoster({ outcomeStore: store, segments: [] }, { ageBand: "not-a-band", pageSize: 100000 })).total,
-    all.total,
-    "an unrecognised band is dropped, not applied as a filter nothing satisfies",
+    0,
+    "an unrecognised band matches nobody, never everybody",
   );
 });

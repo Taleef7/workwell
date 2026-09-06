@@ -43,11 +43,25 @@ export interface FqmStatementResult {
   final?: unknown;
 }
 
+/**
+ * One stratifier's result for one subject, as fqm reports it. `strataCode` is the stratifier's
+ * `code.text`, falling back to its `id` (CMS137's stratifiers declare no code, so it IS the id —
+ * `Stratification_1_1`); `strataId` is the `Measure.group.stratifier.id` when present.
+ */
+export interface FqmStratifierResult {
+  strataCode: string;
+  result: boolean;
+  /** In the stratum AND in the population it applies to; fqm computes it for patient-based measures. */
+  appliesResult?: boolean;
+  strataId?: string;
+}
+
 export interface FqmSubjectResult {
   patientId?: string;
   detailedResults?: Array<{
     populationResults?: FqmPopulationResult[];
     statementResults?: FqmStatementResult[];
+    stratifierResults?: FqmStratifierResult[];
   }>;
   /** Resources the engine actually retrieved — the signal that a retrieve matched anything at all. */
   evaluatedResource?: Array<{ resourceType?: string }>;
@@ -349,6 +363,14 @@ export interface OfficialSubjectResult {
    * measure, and the half it drops is the one describing whether care actually continued (ADR-074).
    */
   rates: FqmPopulationResult[][];
+  /**
+   * Each rate's STRATIFIER results, index-aligned with `rates`; an empty array for a rate whose group
+   * declares no stratifier. CMS137 declares three per group (age 13-17, 18-64, 65+), and a QRDA III for
+   * a stratified measure is required to report every stratum — a document without them is a wrong
+   * submission that looks complete. Read off fqm's `detailedResults[i].stratifierResults`, which the
+   * package had never surfaced.
+   */
+  strata: FqmStratifierResult[][];
   statements: FqmStatementResult[];
 }
 
@@ -405,6 +427,11 @@ export async function calculateOfficialWithSignal(
         rates: detailedResults
           .map((entry) => entry?.populationResults)
           .filter((results): results is FqmPopulationResult[] => Array.isArray(results)),
+        // Index-aligned with `rates`: only groups that carried a population array are rates at all,
+        // and each keeps whatever stratifier results fqm attached to that same group.
+        strata: detailedResults
+          .filter((entry) => Array.isArray(entry?.populationResults))
+          .map((entry) => (Array.isArray(entry?.stratifierResults) ? entry.stratifierResults : [])),
         statements: detailed.statementResults ?? [],
       });
     }

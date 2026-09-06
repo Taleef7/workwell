@@ -20,11 +20,16 @@ import { createWriteStream, mkdirSync, type WriteStream } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { once } from "node:events";
-import { corpusPatients, patientAt } from "../../engine/synthetic/corpus/corpus-patient.ts";
-import { bundleForPatient, organizationResources, practitionerResources } from "../../engine/synthetic/corpus/corpus-bundle.ts";
+import { corpusPatients, measurementYearOf, patientAt } from "../../engine/synthetic/corpus/corpus-patient.ts";
+import {
+  bundleForPatient,
+  organizationResources,
+  payerAndSourceOrganizationResources,
+  practitionerResources,
+} from "../../engine/synthetic/corpus/corpus-bundle.ts";
 import { buildManifest } from "./corpus-manifest.ts";
 import { loadOfficialArtifact } from "../../wiring/official-artifacts.ts";
-import { DEFAULT_CORPUS_SEED } from "../../engine/synthetic/corpus/corpus-parameters.ts";
+import { DEFAULT_CORPUS_MEASUREMENT_YEAR, DEFAULT_CORPUS_SEED } from "../../engine/synthetic/corpus/corpus-parameters.ts";
 
 /** Generated in batches so memory stays flat; 500 is small enough to be cheap and large enough to amortise. */
 const BATCH = 500;
@@ -79,16 +84,21 @@ export async function runCorpusExport(options: CorpusExportOptions): Promise<Cor
   if (!Number.isInteger(size) || size <= 0) throw new Error(`--size must be a positive integer, got ${size}`);
   const out = resolve(options.out);
   mkdirSync(out, { recursive: true });
-  const evaluationDate = options.evaluationDate ?? "2027-12-31";
+  // The clinical facts are generated for the calendar year of the evaluation date, exactly as the run
+  // pipeline generates them (ADR-072); the default is the corpus's own default year, at its end.
+  const evaluationDate = options.evaluationDate ?? `${DEFAULT_CORPUS_MEASUREMENT_YEAR}-12-31`;
+  const year = measurementYearOf(evaluationDate);
 
   const sinks = new Map<string, Sink>();
 
   // The directory resources are written once, not per patient: every bundle references them and
-  // repeating them 20,000 times would be the same fact restated rather than more data.
+  // repeating them 20,000 times would be the same fact restated rather than more data. Payers and the
+  // outside-source organization go in the same stream as the clinics — they are the other
+  // `Organization`s the bundles reference.
   const practitioners = sinkFor(sinks, out, "practitioners");
   for (const p of practitionerResources()) await writeLine(practitioners, p);
   const organizations = sinkFor(sinks, out, "organizations");
-  for (const o of organizationResources()) await writeLine(organizations, o);
+  for (const o of [...organizationResources(), ...payerAndSourceOrganizationResources()]) await writeLine(organizations, o);
 
   // `taken` threads identity across the whole run so name disambiguation matches a single
   // `corpusPatients(seed, size)` call exactly — batching must not change who anybody is.
@@ -96,7 +106,7 @@ export async function runCorpusExport(options: CorpusExportOptions): Promise<Cor
   for (let start = 0; start < size; start += BATCH) {
     const end = Math.min(start + BATCH, size);
     for (let index = start; index < end; index += 1) {
-      const patient = patientAt(seed, index, taken);
+      const patient = patientAt(seed, index, taken, year);
       taken.add(`${patient.name}|${patient.dateOfBirth}`);
       for (const { resource } of bundleForPatient(patient, evaluationDate, seed).entry) {
         const type = (resource as { resourceType: string }).resourceType;
@@ -119,7 +129,7 @@ export async function runCorpusExport(options: CorpusExportOptions): Promise<Cor
   // the same traversal that produced the bytes.
   const manifest = buildManifest({
     seed,
-    patients: corpusPatients(seed, size),
+    patients: corpusPatients(seed, size, year),
     ndjsonSha256,
     // The artifact loader is injected HERE rather than imported by the manifest: this CLI is app
     // wiring and may reach into src/wiring/, while src/engine/ may not (engine-boundary test).

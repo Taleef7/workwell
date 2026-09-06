@@ -19,12 +19,14 @@ test.describe("Maui compliance roster", () => {
     await expect(totalText).toBeVisible({ timeout: 20_000 });
   });
 
-  test("columns are exactly the ACO's five measures with correct crosswalk labels", async ({ page }) => {
-    // Updated for U1 (ADR-072): the Maui runnable set became the ACO's five official measures, and the
-    // authored `hypertension` column went with it. This spec still asserted the old three — it is
-    // manual-dispatch only, so nothing had run it since.
+  test("columns are the ACO measures this stack can run, with correct crosswalk labels", async ({ page }) => {
+    // A roster column is a measure that is Active in the catalog, in the quality panel, AND runnable
+    // (ADR-072). The Maui profile lists the ACO's six; the e2e stack routes no official-only measure
+    // (README-maui — the artifacts need their gitignored terminology sidecars), so the columns here are
+    // the two authored ones. On the deployed sandbox each of cms2/cms130/cms165/cms137 becomes a column
+    // the day its flip routes it — the panel now holds all six, which it did not until 2026-09-06.
     await page.goto("/compliance");
-    for (const label of [/MIPS 001 · CMS122/, /MIPS 112 · CMS125/, /MIPS 134 · CMS2/, /MIPS 113 · CMS130/, /MIPS 236 · CMS165/]) {
+    for (const label of [/MIPS 001 · CMS122/, /MIPS 112 · CMS125/]) {
       await expect(page.getByRole("columnheader", { name: label })).toBeVisible({ timeout: 20_000 });
     }
 

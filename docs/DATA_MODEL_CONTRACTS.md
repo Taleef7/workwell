@@ -125,7 +125,10 @@ SQLite floor and the Pg ceiling read the current row and apply the shared pure `
 > **`why_flagged` is DERIVED AT READ TIME, not persisted (#463).** In the TypeScript backend the
 > persisted `evidence_json` carries **`expressionResults`** — plus **`official`** when the measure is
 > official-routed (load-bearing: MeasureReport/QRDA read `evidence_json.official.populationResults`,
-> ADR-031/046) and **`qrda1Import`** when the outcome arrived through the QRDA-I import path
+> ADR-031/046; a MULTI-RATE measure also carries `official.rates`, one population array per group, and a
+> STRATIFIED one `official.strata`, one array per group of `{ id, code, result, appliesResult }` keyed by
+> the artifact's `Measure.group.stratifier.id` — ADR-074; both absent for every single-rate,
+> unstratified measure so their evidence is byte-identical) and **`qrda1Import`** when the outcome arrived through the QRDA-I import path
 > (ADR-051/056 — finalize refuses a run unless every outcome carries it). On an evaluation failure
 > the normal evidence is **replaced** by `{ evaluationError, message }` with status forced to
 > `MISSING_DATA` (`backend-ts/src/run/run-pipeline.ts`; the import path additionally retains its

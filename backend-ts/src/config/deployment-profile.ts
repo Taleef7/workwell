@@ -76,7 +76,13 @@ export function validateRunnableMeasureIds(ids: readonly string[]): readonly str
   return ids;
 }
 
-const MAUI_MEASURE_IDS = ["cms122", "cms125", "cms2", "cms130", "cms165"] as const;
+/**
+ * The ACO's six computable measures (locked decision §4A.2, ADR-072 D1 for cms137). Listing a measure
+ * here makes it RUNNABLE ONCE ROUTED; the routing is the per-measure flip in the Maui workflows'
+ * `WORKWELL_OFFICIAL_MEASURES`, and an official-only measure that is listed and not routed is
+ * `official-pending` — visible in the catalog, evaluated by nobody (ADR-072).
+ */
+const MAUI_MEASURE_IDS = ["cms122", "cms125", "cms2", "cms130", "cms165", "cms137"] as const;
 const DEFAULT_MEASURE_IDS = Object.keys(MEASURES);
 validateRunnableMeasureIds(MAUI_MEASURE_IDS);
 validateRunnableMeasureIds(DEFAULT_MEASURE_IDS);

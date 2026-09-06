@@ -225,3 +225,61 @@ test("QRDA III: a re-vendored artifact must not relabel a historical run's crite
   // And the measure identity falls back in the same document, for the same reason — they agree.
   assert.ok(xml.includes('root="urn:workwell:measure"'), "measure identity falls back too");
 });
+
+/**
+ * ADR-074, the QRDA III half. CMS137 declares two groups over one denominator and three age strata per
+ * group. This route refused a multi-rate measure with a 501 until 2026-09-06; the document now carries
+ * every group under its own criterion names and every stratum as a Reporting Stratum.
+ */
+test("ADR-074: a multi-rate, stratified measure exports every group and every stratum", () => {
+  const rate = (numerator: boolean) => [
+    { populationType: "initial-population", result: true },
+    { populationType: "denominator", result: true },
+    { populationType: "denominator-exclusion", result: false },
+    { populationType: "numerator", result: numerator },
+  ];
+  const strataFor = (group: number, band: 1 | 2 | 3) =>
+    [1, 2, 3].map((s) => ({ id: `Stratification_${group}_${s}`, code: `Stratification_${group}_${s}`, result: s === band, appliesResult: s === band }));
+  const subject = (id: string, initiated: boolean, engaged: boolean, band: 1 | 2 | 3): OutcomeRecord =>
+    ({
+      ...officialOutcome("cms137"),
+      id, subjectId: id,
+      evidence: {
+        official: {
+          ecqmId: "137FHIR", version: "1.0.000", engine: "fqm-execution",
+          populationResults: rate(initiated),
+          rates: [rate(initiated), rate(engaged)],
+          strata: [strataFor(1, band), strataFor(2, band)],
+        },
+      },
+    }) as OutcomeRecord;
+  // Three adults: initiated and engaged; initiated only; neither. Rate 1 = 2/3, rate 2 = 1/3.
+  const xml = buildQrda3Document(run, "cms137", [
+    subject("p1", true, true, 2),
+    subject("p2", true, false, 2),
+    subject("p3", false, false, 3),
+  ]);
+
+  // Two performance rates, each naming ITS numerator criterion — Engagement's cannot be read as Initiation's.
+  assert.equal((xml.match(/code="72510-1"/g) ?? []).length, 2, "one Performance Rate observation per group");
+  assert.ok(xml.includes('extension="Numerator_1"') && xml.includes('extension="Numerator_2"'), "each rate references its own numerator criterion");
+  assert.ok(xml.includes('value="0.6667"'), "rate 1: 2 of 3 initiated");
+  assert.ok(xml.includes('value="0.3333"'), "rate 2: 1 of 3 engaged");
+  // Every population, per group, under the GROUP's criterion ids.
+  assert.ok(xml.includes('extension="InitialPopulation_2"') && xml.includes('extension="Denominator_2"'), "group 2's populations name group 2's criteria");
+  // Every stratum: 4 populations x 3 strata x 2 groups Reporting Strata (V2).
+  assert.equal((xml.match(/root="2\.16\.840\.1\.113883\.10\.20\.27\.3\.4" extension="2016-09-01"/g) ?? []).length, 24);
+  assert.ok(xml.includes('extension="Stratification_2_3"'), "the strata name the artifact's own stratifier ids");
+  // The 65+ stratum of the first (IPOP) Measure Data observation counts exactly the one 65+ subject.
+  const ipopStratum3 = xml.match(
+    /<value xsi:type="INT" value="(\d+)"\/>\s*<methodCode[^>]*\/>\s*<\/observation>\s*<\/entryRelationship>\s*<reference typeCode="REFR">\s*<externalObservation[^>]*>\s*<id root="[^"]+" extension="Stratification_1_3"\/>/,
+  );
+  assert.ok(ipopStratum3, "a Reporting Stratum carries its own Aggregate Count and references the stratum");
+  assert.equal(ipopStratum3![1], "1");
+  assert.equal((xml.match(/</g) || []).length, (xml.match(/>/g) || []).length, "balanced");
+
+  // A single-rate, unstratified document is byte-shape identical to before: no Reporting Stratum at all.
+  const single = buildQrda3Document(run, "cms122", [officialOutcome("cms122")]);
+  assert.ok(!single.includes("2.16.840.1.113883.10.20.27.3.4"), "no stratum templates on an unstratified measure");
+  assert.equal((single.match(/code="72510-1"/g) ?? []).length, 1);
+});

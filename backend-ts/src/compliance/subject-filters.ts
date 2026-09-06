@@ -6,6 +6,17 @@
  * of "65+" that rounded differently would put a patient on one screen and not another, and nothing
  * would report the disagreement — so the predicate lives here and every surface calls it.
  *
+ * **An unrecognised token is REFUSED, never dropped.** The first version dropped `?ageBand=old` and
+ * served the unfiltered roster, reasoning that an empty page reading "no patients" was the worse
+ * failure. It is the other way round. A work list that silently ignores a filter looks exactly like a
+ * work list that applied it: a staff member asking for the 65+ panel and handed everybody would call
+ * every one of them, or trust a count that is the whole practice's. An empty page with a 400 saying
+ * which token was wrong is a visible failure; the whole roster under a filter that was not applied is
+ * an invisible wrong answer, which is the failure class this project names. So the HTTP parser throws
+ * a `SubjectFilterError` (the routes turn it into a 400 naming the accepted values), the MCP tool
+ * returns an INVALID_ARGUMENT error, and the predicate — which every surface reaches only through one
+ * of those two — treats a token it does not recognise as a constraint nobody satisfies.
+ *
  * **Placement is deliberate (spec §5):** these are read-time joins against the DIRECTORY, applied at
  * the same layer `site` is applied today. `CaseQuery` — the store interface — does not change. The
  * store knows about outcomes and cases; who a subject's PCP is, and how old they are, is directory
@@ -17,7 +28,8 @@ export const AGE_BANDS = ["0-17", "18-44", "45-64", "65+"] as const;
 export type AgeBandFilter = (typeof AGE_BANDS)[number];
 export const isAgeBand = (value: string): value is AgeBandFilter => (AGE_BANDS as readonly string[]).includes(value);
 
-export type SexFilter = "F" | "M";
+export const SEXES = ["F", "M"] as const;
+export type SexFilter = (typeof SEXES)[number];
 export const isSex = (value: string): value is SexFilter => value === "F" || value === "M";
 
 export interface SubjectFilters {
@@ -25,6 +37,18 @@ export interface SubjectFilters {
   providerId?: string | null;
   ageBand?: string | null;
   sex?: string | null;
+}
+
+/** A filter token the surface does not accept. Routes map it to a 400; the message names the accepted values. */
+export class SubjectFilterError extends Error {
+  constructor(readonly parameter: "ageBand" | "sex", readonly received: string) {
+    super(
+      parameter === "ageBand"
+        ? `ageBand must be one of ${AGE_BANDS.join(", ")}; received "${received}"`
+        : `sex must be one of ${SEXES.join(", ")}; received "${received}"`,
+    );
+    this.name = "SubjectFilterError";
+  }
 }
 
 /**
@@ -60,7 +84,9 @@ export function matchesSubjectFilters(
   filters: SubjectFilters,
   nowMs: number = Date.now(),
 ): boolean {
-  const active = filters.providerId || (filters.ageBand && isAgeBand(filters.ageBand)) || (filters.sex && isSex(filters.sex.toUpperCase()));
+  const ageBand = filters.ageBand?.trim() || null;
+  const sex = filters.sex?.trim().toUpperCase() || null;
+  const active = Boolean(filters.providerId || ageBand || sex);
   if (!active) return true;
   // A subject the directory cannot resolve fails every active filter. Admitting them would make an
   // unknown id read as "matches everything", which is the opposite of what a filter is for.
@@ -71,33 +97,43 @@ export function matchesSubjectFilters(
     // attribution is recorded against, and a name that happened to match would be a coincidence.
     if (employee.providerId !== filters.providerId) return false;
   }
-  // An unrecognised token is NOT a constraint, here as well as in `subjectFiltersFromQuery`. The rule
-  // lives in both places deliberately: the query parser sanitises what arrives over HTTP, and this
-  // guards every other caller — the read model, the exports, the MCP tool — so a junk band passed
-  // directly renders the unfiltered roster rather than an empty page reading "no patients".
-  if (filters.ageBand && isAgeBand(filters.ageBand)) {
+  if (ageBand) {
+    // A token that is not a band is a constraint NOBODY satisfies — never one everybody does. The
+    // parsers above refuse such a token before it gets here; this is the backstop for a caller that
+    // bypasses them, and its failure is an empty list, which is visible, rather than the whole roster,
+    // which is not.
+    if (!isAgeBand(ageBand)) return false;
     if (!employee.dateOfBirth) return false;
     const age = ageAsOf(employee.dateOfBirth, nowMs);
-    if (age === null || ageBandOf(age) !== filters.ageBand) return false;
+    if (age === null || ageBandOf(age) !== ageBand) return false;
   }
-  if (filters.sex && isSex(filters.sex.toUpperCase())) {
+  if (sex) {
+    if (!isSex(sex)) return false;
     // A roster that records no sex (the occupational directory) matches NOTHING rather than
     // everything. A filter that quietly returns the whole roster looks exactly like a working one.
-    if (!employee.sex || employee.sex.toUpperCase() !== filters.sex.toUpperCase()) return false;
+    if (!employee.sex || employee.sex.toUpperCase() !== sex) return false;
   }
   return true;
 }
 
-/** Reads the three filters off a URL, ignoring values that are not one of the accepted tokens. */
+/**
+ * Reads the three filters off a URL. An unrecognised `ageBand` or `sex` token THROWS a
+ * `SubjectFilterError`; the routes turn it into a 400 that names the accepted values.
+ */
 export function subjectFiltersFromQuery(params: URLSearchParams): SubjectFilters {
   const providerId = params.get("providerId")?.trim() || null;
   const rawBand = params.get("ageBand")?.trim() ?? "";
   const rawSex = params.get("sex")?.trim().toUpperCase() ?? "";
+  if (rawBand && !isAgeBand(rawBand)) throw new SubjectFilterError("ageBand", rawBand);
+  if (rawSex && !isSex(rawSex)) throw new SubjectFilterError("sex", rawSex);
   return {
     providerId,
-    // An unrecognised token is DROPPED rather than passed through as a filter nothing can satisfy:
-    // `?ageBand=old` should show the unfiltered roster, not an empty one that looks like no patients.
-    ageBand: isAgeBand(rawBand) ? rawBand : null,
-    sex: isSex(rawSex) ? rawSex : null,
+    ageBand: rawBand || null,
+    sex: rawSex || null,
   };
+}
+
+/** The 400 body a route returns for a `SubjectFilterError` — one shape, so every surface says it the same way. */
+export function subjectFilterErrorBody(error: SubjectFilterError): { error: "invalid_request"; parameter: string; message: string } {
+  return { error: "invalid_request", parameter: error.parameter, message: error.message };
 }

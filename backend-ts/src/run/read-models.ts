@@ -163,8 +163,8 @@ export function retentionNoticeFor(
   return (
     `This run is older than the ${retentionDays}-day outcome retention window, so its per-subject ` +
     `results may have been compacted. The counts shown are the rows that survive: each subject's most ` +
-    `recent result per measure, and everything an open case refers to. The run's own totals are ` +
-    `preserved in the quality history.`
+    `recent result per measure and measurement period, and every result a case refers to — open or ` +
+    `closed. The run's own totals are preserved in the quality history.`
   );
 }
 
