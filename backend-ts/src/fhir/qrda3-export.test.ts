@@ -4,6 +4,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { buildQrda3Document, buildQrda3DocumentFromCounts } from "./qrda3-export.ts";
 import type { RunRecord } from "../stores/run-store.ts";
 import type { OutcomeRecord } from "../stores/outcome-store.ts";
@@ -282,4 +283,28 @@ test("ADR-074: a multi-rate, stratified measure exports every group and every st
   const single = buildQrda3Document(run, "cms122", [officialOutcome("cms122")]);
   assert.ok(!single.includes("2.16.840.1.113883.10.20.27.3.4"), "no stratum templates on an unstratified measure");
   assert.equal((single.match(/code="72510-1"/g) ?? []).length, 1);
+});
+
+/**
+ * "Byte-shape identical to before" was, until 2026-09-06, asserted only structurally — the stratum
+ * template absent, one performance rate — which cannot see a reordered attribute, an added namespace
+ * or a whitespace change against the single-rate output CVU+ validated (GLM review, L1). These pins
+ * can. The document's only non-deterministic bytes are its generated UUIDs and its two clock stamps, so
+ * those are scrubbed and the rest is hashed. Recorded 2026-09-06 after diffing the scrubbed output
+ * against the pre-multi-rate builder (commit 21020162) and finding it identical for both documents. A
+ * deliberate change to the single-rate document re-records these in the same commit and says why —
+ * an accidental one fails here.
+ */
+test("the single-rate QRDA III's byte shape is PINNED, for an authored and for an official measure", () => {
+  const scrubbed = (xml: string) => xml
+    .replace(/root="[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"/g, 'root="UUID"')
+    .replace(/<effectiveTime value="\d{14}[^"]*"\/>/g, '<effectiveTime value="TS"/>')
+    .replace(/<time value="\d{14}[^"]*"\/>/g, '<time value="TS"/>');
+  const digest = (xml: string) => createHash("sha256").update(scrubbed(xml), "utf8").digest("hex");
+  assert.equal(digest(buildQrda3Document(run, "audiogram", outcomes)), "f022bf4bf2c63424fb46b96aa8b7ef0bc343cbfcf168b95184a08f71c49213a3", "authored single-rate document moved");
+  assert.equal(digest(buildQrda3Document(run, "cms122", [officialOutcome("cms122")])), "87a762d7ff0bcc41100d217b9592a69ff986dbbd8eab947c9a84f56f3a96db14", "official single-rate document moved");
+  // The scrub itself must not be vacuous — the pin would then be a pin on random bytes.
+  const twice = [buildQrda3Document(run, "cms122", [officialOutcome("cms122")]), buildQrda3Document(run, "cms122", [officialOutcome("cms122")])];
+  assert.notEqual(twice[0], twice[1], "two builds differ in their generated ids");
+  assert.equal(scrubbed(twice[0]!), scrubbed(twice[1]!), "and in nothing else");
 });

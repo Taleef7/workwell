@@ -337,7 +337,7 @@ test("classifyRunnable: authored, official, official-pending, invalid — env re
   assert.deepEqual(classifyRunnable("cms122", { WORKWELL_OFFICIAL_MEASURES: "cms122" }), { kind: "official" });
 });
 
-test("the Maui profile lists exactly the five ACO measures, and hypertension is gone", () => {
+test("the Maui profile lists exactly the six ACO measures, and hypertension is gone", () => {
   assert.deepEqual([...resolveDeploymentProfile("maui").runnableMeasureIds], ["cms122", "cms125", "cms2", "cms130", "cms165", "cms137"]);
 });
 

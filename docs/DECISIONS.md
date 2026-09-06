@@ -170,7 +170,12 @@ refusal as its `notDoneReason` — 170 refusing patients read OVERDUE.
     which no vendored measure reads, was removed rather than kept as a count nothing could act on.
 12. **The pinned digest moved, and says why.** Draw order changed (payer, race, ethnicity and three
     exclusion conditions are drawn; pregnancy is not), so every generated patient's clinical facts moved;
-    the fixture prefix's identity did not. Realized at 20,000 for 2027: SUD episodes 604, frailty 573,
+    the fixture prefix's identity did not.
+13. **Age gates follow the artifact's anchor, per measure.** CMS2 and CMS137 compute age at the START
+    of the period; the screening instrument is banded and the manifest's cohorts are estimated with
+    `ageAtPeriodStart`, not the record's end-of-year `age`. The SUD episode draw is capped at Nov 14,
+    CMS137's own last admissible day. Diabetes is stamped `qicore-condition-encounter-diagnosis`,
+    the only profile CMS122 retrieves it through. Realized at 20,000 for 2027: SUD episodes 604, frailty 573,
     palliative care 47, bilateral mastectomy 63, total colectomy 21; payer Medicare 3,927 / Medicare
     Advantage 2,900 / Medicaid 3,277 / commercial 9,896.
 
@@ -266,8 +271,9 @@ what decision 6's refusal was standing in for, and built it:
    `2016-09-01`) per stratum nested in each Measure Data observation, with its own Aggregate Count and a
    `reference` naming the stratum criterion (`Stratification_1_1`). The 501 is gone. The stratum shape is
    derived from the QRDA III R2.1 IG and the `cqm-reports` reference exporter's template, NOT yet from a
-   CVU+ run — `STANDARDS_CONFORMANCE.md`'s 0-findings claim covers the single-rate, unstratified
-   document until a stratified one is re-validated.
+   CVU+ run — and because cms125 (routed in production) declares two age strata, the production cms125
+   document is now stratified too. `STANDARDS_CONFORMANCE.md`'s 0-findings claim describes the
+   unstratified document of 2026-08-02; a stratified document must be re-validated before it is extended.
 9. **Stratifier results are persisted and reported.** `@work-well/official-executor` surfaces fqm's
    `stratifierResults` per group (it never had), the adapter persists them as `evidence_json.official.strata`
    keyed by the artifact's `Measure.group.stratifier.id`, and the summary and individual `MeasureReport`s
@@ -279,8 +285,21 @@ what decision 6's refusal was standing in for, and built it:
     20,000-patient pilot — while this ADR's own consequences said the summary route "survives the cap".
     The cap stays on the per-subject bundle, which really does build a document per subject.
 11. **A subject counted in no rate is counted.** `aggregateByRate` reports `unmeasured` — the subjects
-    decision 5 leaves out of every rate — so the gap between the roster and the denominators has a
-    number rather than being inferred.
+    decision 5 leaves out of every rate — and the summary MeasureReport and QRDA III responses carry it
+    as the `X-WorkWell-Unmeasured-Subjects` header, so the gap between the roster and the denominators
+    has a number rather than being inferred. A header rather than a document element, because neither
+    FHIR MeasureReport nor QRDA III has a standard place for it and an invented extension would be a
+    claim the profiles do not make.
+12. **A run's provenance is read off the first row an engine actually evaluated — never off an errored
+    one.** The gate that decides whether an export sums official memberships or the authored status
+    histogram read ONE row, whichever sorted first. A subject whose evaluation threw persists
+    `{ evaluationError }` with no `official` block, and a `PARTIAL_FAILURE` run is reportable — so one
+    errored subject in first position sent a whole official run down the status path: one group where
+    the measure has two, no strata, and an inverted numerator for a lower-is-better measure (GLM review).
+    Errored rows say nothing about the engine and are skipped; the scan pages on until an evaluated row
+    answers, and only a run in which every subject errored reads to its end. The single-rate QRDA III's
+    byte shape is now pinned (UUIDs and clock stamps scrubbed, the rest hashed) after a diff against the
+    pre-multi-rate builder found it unchanged, so "identical to before" is enforced rather than asserted.
 
 ## ADR-073: per-subject outcome history is a retention WINDOW, and the durable history is the aggregate
 

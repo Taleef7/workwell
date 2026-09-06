@@ -17,7 +17,9 @@
  * - a problem-list Condition is `qicore-condition-problems-health-concerns`; the SUD episode diagnosis
  *   is `qicore-condition-encounter-diagnosis`, recorded DURING its encounter, because that is the only
  *   profile CMS137 retrieves it through and its denominator is "an encounter during which the diagnosis
- *   starts" — a diagnosis on its own, however coded, puts nobody in the initial population
+ *   starts" — a diagnosis on its own, however coded, puts nobody in the initial population; and DIABETES
+ *   is an encounter diagnosis too, because CMS122's initial population retrieves `"Diabetes"` through
+ *   that profile alone (every other condition's measures retrieve both profiles)
  * - a Coverage is `qicore-coverage`, a MedicationRequest `qicore-medicationrequest`
  *
  * The executor runs with `trustMetaProfile: false` today, so these stamps do not change retrieval yet.
@@ -49,7 +51,7 @@
  */
 import { SUD_CONDITION_CODES, ECQM_CANONICAL_CODES, MAMMOGRAPHY_PROCEDURE_CPT, US_CORE_SEX_CODES } from "../../cql/bundled-ecqm-expansions.ts";
 import { CLINICS, CORPUS_GENERATOR_VERSION, DEFAULT_CORPUS_SEED, PCPS } from "./corpus-parameters.ts";
-import type { CorpusEvent, CorpusPatient } from "./corpus-patient.ts";
+import { ageAtPeriodStart, type CorpusEvent, type CorpusPatient } from "./corpus-patient.ts";
 
 const QICORE = "http://hl7.org/fhir/us/qicore/StructureDefinition/";
 const USCORE = "http://hl7.org/fhir/us/core/StructureDefinition/";
@@ -134,7 +136,7 @@ const EXCEPTION_REASONS: Record<string, { code: string; system: string; display:
 function exceptionResource(patient: CorpusPatient, key: string, index: number, day: string): Record<string, unknown> | null {
   const reason = EXCEPTION_REASONS[key];
   if (!reason) return null;
-  const instrument = patient.age >= 17 ? ECQM_CANONICAL_CODES.depressionScreenAdult : ECQM_CANONICAL_CODES.depressionScreenAdolescent;
+  const instrument = ageAtPeriodStart(patient) >= 17 ? ECQM_CANONICAL_CODES.depressionScreenAdult : ECQM_CANONICAL_CODES.depressionScreenAdolescent;
   return {
     resourceType: "Observation",
     meta: { profile: [PROFILE.observationCancelled] },
@@ -263,22 +265,25 @@ function encounterResource(patient: CorpusPatient, day: string, index: number): 
 }
 
 function conditionResource(patient: CorpusPatient, key: string, coding: { code: string; system: string; display?: string }): Record<string, unknown> {
+  // DIABETES is an ENCOUNTER DIAGNOSIS. CMS122's initial population retrieves `[Condition: "Diabetes"]`
+  // through `qicore-condition-encounter-diagnosis` ONLY — unlike every other condition here, whose
+  // measures retrieve both that profile and problems-health-concerns. Stamped the other way, the whole
+  // diabetic roster leaves cms122's population the day profiles are trusted (ADR-072's consequences),
+  // and the header of this file claims each resource carries the profile its retrieve names.
+  const encounterDiagnosis = key === "diabetes";
   return {
     resourceType: "Condition",
-    meta: { profile: [PROFILE.condition] },
+    meta: { profile: [encounterDiagnosis ? PROFILE.conditionEncounterDiagnosis : PROFILE.condition] },
     id: `${patient.externalId}-${key}`,
     subject: { reference: `Patient/${patient.externalId}` },
+    ...(encounterDiagnosis ? { encounter: { reference: `Encounter/${patient.externalId}-visit-1` } } : {}),
     // A system on clinicalStatus, not a bare code. Without it the binding is unresolvable and QI-Core's
     // `isActive` cannot evaluate, which puts the subject out of the initial population — the repair
     // `qicore-preparation.ts` exists for. Emitting it correctly at the source is cheaper than relying
     // on the repair, and keeps the bundle valid for consumers that never run it (exports, CDS).
     clinicalStatus: { coding: [{ system: CONDITION_CLINICAL, code: "active" }] },
     verificationStatus: { coding: [{ system: CONDITION_VER_STATUS, code: "confirmed" }] },
-    category: [
-      {
-        coding: [{ system: CONDITION_CATEGORY, code: "problem-list-item" }],
-      },
-    ],
+    category: [{ coding: [{ system: CONDITION_CATEGORY, code: encounterDiagnosis ? "encounter-diagnosis" : "problem-list-item" }] }],
     code: codeable(coding),
     // CLAMPED to the patient's birth date. `birthYear + max(age-2, 0)` on January 15 precedes the birth
     // of anyone aged 0 or 1 born after mid-January — 9 patients at 20,000 carried an onset before they
@@ -364,8 +369,9 @@ function resourcesForEvent(patient: CorpusPatient, event: CorpusEvent, index: nu
       }];
 
     case "phq9": {
-      // The instrument is age-banded, exactly as the artifact's own logic bands it.
-      const instrument = patient.age >= 17 ? ECQM_CANONICAL_CODES.depressionScreenAdult : ECQM_CANONICAL_CODES.depressionScreenAdolescent;
+      // The instrument is age-banded exactly as the artifact bands it: by age at the START of the period
+      // (`CalculateAgeAt(birthDate, start of MP)`), not at its end — see `ageAtPeriodStart`.
+      const instrument = ageAtPeriodStart(patient) >= 17 ? ECQM_CANONICAL_CODES.depressionScreenAdult : ECQM_CANONICAL_CODES.depressionScreenAdolescent;
       const positive = (event.value ?? 0) >= 10;
       return [{
         resourceType: "Observation",
@@ -507,6 +513,15 @@ function resourcesForEvent(patient: CorpusPatient, event: CorpusEvent, index: nu
         subject,
         medicationCodeableConcept: codeable(ECQM_CANONICAL_CODES.dementiaMedication),
         authoredOn: `${event.date}T10:00:00Z`,
+        // A REAL supply period. The AIFrailLTCF logic overlaps `CumulativeMedicationDuration.medicationRequestPeriod`
+        // with the look-back, and that period is derived from the dispense request (or the dosage's
+        // timing bounds) — a request with only `authoredOn` yields a null interval, which the engine
+        // happens to treat as overlapping everything. The exclusion must be reachable because of the
+        // data, not because of an engine leniency: a 90-day supply from the order date.
+        dispenseRequest: {
+          validityPeriod: { start: `${event.date}T10:00:00Z` },
+          expectedSupplyDuration: { value: 90, unit: "days", system: "http://unitsofmeasure.org", code: "d" },
+        },
       }];
 
     case "advancedIllness":

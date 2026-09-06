@@ -40,7 +40,7 @@ import {
   ageBandFor,
   type AgeBand,
 } from "../../engine/synthetic/corpus/corpus-parameters.ts";
-import type { CorpusPatient } from "../../engine/synthetic/corpus/corpus-patient.ts";
+import { ageAtPeriodStart, type CorpusPatient } from "../../engine/synthetic/corpus/corpus-patient.ts";
 
 /**
  * The parameter table's digest — computed HERE, not in the table itself.
@@ -126,7 +126,7 @@ const tally = <T extends string>(values: Iterable<T>, seedKeys: readonly T[] = [
  * number the engine actually produces is a run outcome and lives nowhere near here.
  *
  * Age gates are the artifacts' own Initial Population intervals, read off their ELM: cms122 [18,75],
- * cms125 [42,74] female, cms130 [46,75], cms165 [18,85], cms2 12+ at period start.
+ * cms125 [42,74] female, cms130 [46,75], cms165 [18,85] (all at period END), cms2 12+ and cms137 13+ at period START.
  */
 function estimateCohorts(patients: readonly CorpusPatient[]): CorpusManifest["estimatedCohorts"] {
   const has = (p: CorpusPatient, c: string) => p.conditions.includes(c);
@@ -150,7 +150,8 @@ function estimateCohorts(patients: readonly CorpusPatient[]): CorpusManifest["es
       (p) => inAge(p, 18, 75) && has(p, "diabetes"),
       EVENT_RATES.hba1cPoorControl + EVENT_RATES.hba1cMissing,
     ),
-    cms2: cohort((p) => p.age >= 12, (p) => p.age >= 12, EVENT_RATES.phq9Screened),
+    // 12+ at the START of the period, as the artifact computes it.
+    cms2: cohort((p) => ageAtPeriodStart(p) >= 12, (p) => ageAtPeriodStart(p) >= 12, EVENT_RATES.phq9Screened),
     cms165: cohort(
       (p) => inAge(p, 18, 85) && has(p, "hypertension"),
       (p) => inAge(p, 18, 85) && has(p, "hypertension") && !has(p, "esrd"),
@@ -166,12 +167,13 @@ function estimateCohorts(patients: readonly CorpusPatient[]): CorpusManifest["es
       (p) => inAge(p, 46, 75) && !has(p, "colorectalCancer") && !has(p, "totalColectomy"),
       EVENT_RATES.colorectalUpToDate,
     ),
-    // CMS137's initial population is 13+ with a new SUD episode in the period (its ELM: age >= 13 and a
-    // first episode encounter on or before Nov 14). The expected numerator rate is RATE 1's — initiation
-    // — because a single number is what this table carries; rate 2 is initiation × engagement.
+    // CMS137's initial population is 13+ AT THE START of the period with a new SUD episode on or before
+    // Nov 14 (its ELM: `CalculateAgeAt(birthDate, start of MP) >= 13`; the generator caps the episode
+    // draw at Nov 14). The expected numerator rate is RATE 1's — initiation — because a single number is
+    // what this table carries; rate 2 is initiation × engagement.
     cms137: cohort(
-      (p) => p.age >= 13 && has(p, "sudEpisode"),
-      (p) => p.age >= 13 && has(p, "sudEpisode") && !has(p, "hospice"),
+      (p) => ageAtPeriodStart(p) >= 13 && has(p, "sudEpisode"),
+      (p) => ageAtPeriodStart(p) >= 13 && has(p, "sudEpisode") && !has(p, "hospice"),
       EVENT_RATES.sudInitiation,
     ),
   };

@@ -130,6 +130,10 @@ test("an unrecognised filter token is REFUSED — never dropped into the unfilte
 
   const good = subjectFiltersFromQuery(new URLSearchParams("ageBand=65%2B&sex=f&providerId=%20maui-prov-003%20"));
   assert.deepEqual(good, { providerId: "maui-prov-003", ageBand: "65+", sex: "F" }, "trimmed, and sex is case-insensitive");
+  // `?ageBand=65+` typed literally decodes to `65 ` (a `+` is a space in a query string). That is a real
+  // band spelled the way every hand-built URL spells it, so it is accepted — the refusal is for tokens
+  // that name no band, not for the encoding footgun.
+  assert.equal(subjectFiltersFromQuery(new URL("http://x/api/compliance/roster?ageBand=65+").searchParams).ageBand, "65+");
 
   // The predicate is the backstop for a caller that bypasses the parser: a junk token matches NOBODY
   // (an empty list, visible) rather than everybody (the whole roster, invisible).

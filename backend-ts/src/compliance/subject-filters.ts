@@ -122,7 +122,12 @@ export function matchesSubjectFilters(
  */
 export function subjectFiltersFromQuery(params: URLSearchParams): SubjectFilters {
   const providerId = params.get("providerId")?.trim() || null;
-  const rawBand = params.get("ageBand")?.trim() ?? "";
+  // `65+` written literally in a query string decodes to `65 ` — `+` is a space in
+  // application/x-www-form-urlencoded — so a hand-typed or naively built URL arrives here as `65`.
+  // That is the ONE spelling of a real band the refusal below must not reject: the frontend encodes it
+  // as `65%2B`, but an integrator's curl will not, and a 400 telling them to send `65+` when they did is
+  // the wrong kind of strict. Nothing else is normalised; `old` stays a 400.
+  const rawBand = (params.get("ageBand") ?? "").trim().replace(/^65$/, "65+");
   const rawSex = params.get("sex")?.trim().toUpperCase() ?? "";
   if (rawBand && !isAgeBand(rawBand)) throw new SubjectFilterError("ageBand", rawBand);
   if (rawSex && !isSex(rawSex)) throw new SubjectFilterError("sex", rawSex);

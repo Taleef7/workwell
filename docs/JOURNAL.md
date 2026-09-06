@@ -164,6 +164,44 @@ mastectomy 63 · total colectomy 21 · hospice 95 · payer Medicare 3,927 / Medi
 Medicaid 3,277 / commercial 9,896 · race White 6,532 / Asian 5,810 / NHOPI 4,871 / Other 2,162 · Hispanic
 or Latino 2,303. Identity, clinics, panels and the 48-row prefix are unchanged.
 
+**The third review round, on the second pass itself.** Own reviewer (execution against the real ELM,
+five mutations), Gemini 3.8 through Antigravity, GLM 5.3 Flash. What survived verification and was fixed:
+
+- **CMS2 banded the screening instrument by the wrong age.** The artifact bands by age at the START of the
+  period; the corpus used age at the end, so a patient who is 17 on Dec 31 (16 on Jan 1) got the adult
+  instrument and the measure, reading them as an adolescent, put them in the denominator with no
+  numerator — 102 screened patients per 20,000, all OVERDUE with a screening on file. Verified by
+  execution before and after: 40 of 40 such patients now COMPLIANT, refusals still EXCLUDED.
+- **29 of 604 SUD episodes fell after Nov 14**, outside CMS137's initial population, while the comment
+  beside the draw and the manifest's estimate said otherwise. Capped at Nov 14 (same two draws, so the
+  pinned digest of the first 100 did not move); the estimate uses age at period start for cms2 and cms137.
+- **Diabetes is an encounter diagnosis.** CMS122's only Condition retrieve is through
+  `qicore-condition-encounter-diagnosis`; the corpus stamped problems-health-concerns. Harmless under
+  `trustMetaProfile: false`, and the whole diabetic roster the day profiles are trusted.
+- **The "same person in every year" guard sampled five indices**, none of which crossed an age band
+  between 2026 and 2027, so a mutation making payer follow the evaluation year passed it. It now checks
+  all 20,000 and requires that hundreds cross a band.
+- **The dementia MedicationRequest fired the exclusion through a null interval** — no supply period, and
+  the engine treats `Interval[null, null]` as overlapping everything. It now carries a 90-day
+  `expectedSupplyDuration`, so the exclusion is reachable because of the data.
+- **cms125 is routed in production and declares two age strata**, so its QRDA III and MeasureReport are
+  stratified as of this pass and outside the CVU+-validated shape — the conformance caveat named only
+  CMS137; it now names cms125.
+- **One errored subject could flip a whole official run's exports to the status histogram** (GLM, the
+  one HIGH). The provenance gate read a single row — whichever sorted first — and an errored subject
+  persists `{ evaluationError }` with no `official` block, while `PARTIAL_FAILURE` is reportable. cms137
+  with an errored first row exported one rate, no strata. The gate now skips rows no engine evaluated
+  and pages on to the first that was; a test seeds exactly that run and fails against the old gate
+  (ADR-074 d12). GLM's MEDIUM — `unmeasured` computed and dropped — was already closed by the header
+  Gemini asked for; GLM reviewed the committed range, which predates it.
+- **Three guards that read as present but could not fire** (GLM, LOW): the single-rate QRDA III's
+  "byte-shape identical" claim was asserted structurally and is now a pinned digest, recorded after
+  diffing the scrubbed output against the pre-multi-rate builder and finding it identical; the corpus
+  had a digest pin for one evaluation year only, so a draw-order bug that moved clinical facts between
+  years while keeping identity would have passed — a 2026 pin joins the 2027 one; the paged sum was
+  tested at 5,001 rows but never at an exact page multiple, where the last full page is followed by an
+  empty one — 4,000 rows now sum to 4,000.
+
 **Still owner-owned:** the segment repair, the Postgres retention index, and the cms137 flip itself —
 `pnpm flip-gate --measure cms137` now reports both rates; the workflow edit that routes it remains the
 gated human act MM-1c describes, after the cms165 profile question (do NOT route cms165 — its decisive

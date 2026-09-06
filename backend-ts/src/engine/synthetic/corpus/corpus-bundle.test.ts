@@ -111,7 +111,8 @@ test("each resource carries the profile its artifact retrieves on, not a generic
       if (r.resourceType === "Encounter") assert.match(profile, /qicore-encounter$/);
       if (r.resourceType === "Condition") {
         const code = ((r.code as { coding: Array<{ code: string }> }).coding[0]!.code);
-        if (SUD_CONDITION_CODES.some((c) => c.code === code)) {
+        if (SUD_CONDITION_CODES.some((c) => c.code === code) || code === "44054006") {
+          // ...and DIABETES: cms122's only Condition retrieve is through the encounter-diagnosis profile.
           // CMS137 retrieves the SUD diagnosis through the ENCOUNTER-DIAGNOSIS profile only, and its
           // denominator is an encounter the diagnosis starts during — so it is that profile, with the
           // encounter it belongs to, or the measure never sees it.
@@ -332,13 +333,24 @@ test("the exclusion cohorts are emitted: frailty with its dementia medication or
  * what keeps `corpusBundleSource`'s identity cross-check (DOB / site / PCP / sex) valid across years.
  */
 test("a patient is the same PERSON in every measurement year, and their age follows the year", () => {
+  // The WHOLE corpus, not a sample. A five-index version of this passed against a mutation that made
+  // payer follow the evaluation year's age band, because none of the five crossed a band boundary
+  // (17→18, 44→45, 64→65) between 2026 and 2027 — the exact leak ADR-075 d8 says cannot happen. Over
+  // 20,000 patients hundreds cross a boundary every year, so the guard now sees it.
+  const all2026 = corpusPatients(DEFAULT_CORPUS_SEED, 20000, 2026);
+  const all2027 = corpusPatients(DEFAULT_CORPUS_SEED, 20000, 2027);
+  const IDENTITY = ["externalId", "name", "sex", "dateOfBirth", "site", "providerId", "payer", "race", "ethnicity"] as const;
+  let crossedABand = 0;
+  for (const [i, in2027] of all2027.entries()) {
+    const in2026 = all2026[i]!;
+    for (const key of IDENTITY) assert.equal(in2026[key], in2027[key], `${in2027.externalId}: ${key} must not depend on the year`);
+    assert.equal(in2027.age, in2026.age + 1, `${in2027.externalId}: one year older in 2027`);
+    if (in2026.ageBand !== in2027.ageBand) crossedABand += 1;
+  }
+  assert.ok(crossedABand > 100, `${crossedABand} patients crossed an age band — the guard needs boundary-crossers to mean anything`);
   for (const index of [3, 47, 48, 1234, 19999]) {
     const in2026 = patientAt(DEFAULT_CORPUS_SEED, index, new Set(), 2026);
     const in2027 = patientAt(DEFAULT_CORPUS_SEED, index, new Set(), 2027);
-    for (const key of ["externalId", "name", "sex", "dateOfBirth", "site", "providerId", "payer", "race", "ethnicity"] as const) {
-      assert.equal(in2026[key], in2027[key], `${in2027.externalId}: ${key} must not depend on the year`);
-    }
-    assert.equal(in2027.age, in2026.age + 1, `${in2027.externalId}: one year older in 2027`);
     assert.equal(in2026.measurementYear, 2026);
     assert.equal(in2027.measurementYear, 2027);
     for (const visit of in2026.visits) assert.ok(visit.startsWith("2026-"), `${in2026.externalId}: visit ${visit} is in 2026`);

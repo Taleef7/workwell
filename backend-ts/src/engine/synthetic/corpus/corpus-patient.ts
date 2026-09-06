@@ -78,6 +78,31 @@ function dateInYear(rng: SplitMix64, year: number, lastMonth = 12): string {
   return iso(year, month, rng.nextInt(daysInMonth(year, month)) + 1);
 }
 
+/**
+ * A uniform date on or before November 14 — the last day a new SUD episode can start and still be in
+ * CMS137's initial population (its ELM: the diagnosis starts `SameOrBefore` the period end minus 47
+ * days, so the 14-day initiation and 34-day engagement windows close inside the period). The previous
+ * cap was "month 11", which put 29 of 604 episodes at 20,000 on Nov 15-30: outside the population, while
+ * the comment beside the draw and the manifest's cohort estimate both said otherwise. Same two draws as
+ * `dateInYear`, so only the November episodes moved.
+ */
+function dateOnOrBeforeNov14(rng: SplitMix64, year: number): string {
+  const month = rng.nextInt(11) + 1;
+  return iso(year, month, rng.nextInt(month === 11 ? 14 : daysInMonth(year, month)) + 1);
+}
+
+/**
+ * Age at the START of the measurement year — what CMS2's age bands and CMS137's initial population
+ * actually compute (`CalculateAgeAt(birthDate, start of "Measurement Period")`). `age` on the record is
+ * age at the END of the year; the two differ by one for everyone not born on January 1, and the corpus
+ * banded the depression-screening instrument by the wrong one: a patient who is 17 on Dec 31 was 16 on
+ * Jan 1, the measure reads them as an adolescent, and the adult instrument the corpus emitted put 102
+ * screened patients per 20,000 in the denominator with no numerator.
+ */
+export function ageAtPeriodStart(patient: Pick<CorpusPatient, "age" | "dateOfBirth">): number {
+  return patient.dateOfBirth.endsWith("-01-01") ? patient.age : patient.age - 1;
+}
+
 /** A date `monthsBack` months before the period end, jittered inside that window. */
 function dateWithinLookback(rng: SplitMix64, monthsBack: number, measurementYear: number): string {
   const back = rng.nextInt(monthsBack);
@@ -328,7 +353,7 @@ function eventsFor(
   // ENCOUNTER with the diagnosis recorded during it (see `corpus-bundle.ts`): the measure's denominator
   // is "a qualifying encounter during which a SUD diagnosis starts", not a diagnosis on its own.
   if (has("sudEpisode")) {
-    const episode = dateInYear(rng, year, 11);
+    const episode = dateOnOrBeforeNov14(rng, year);
     events.push({ kind: "sudEpisode", date: episode, external: false });
     if (rng.chance(EVENT_RATES.sudInitiation)) {
       const offset = rng.nextInt(15);

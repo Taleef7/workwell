@@ -385,6 +385,10 @@ export function createRateAggregator(measureId: string): { add(outcome: Pick<Out
         }
         for (const [index, m] of memberships.entries()) {
           addMembership((perRate[index] ??= zeroCounts()), m);
+          // A row persisted without `strata` (before 2026-09-06, or by an executor that returned rates
+          // without stratifier results) counts toward the group and toward NO stratum, so on a run that
+          // mixes such rows the true+false strata sum to less than the group. Known and accepted: the
+          // alternative — inventing a stratum for a subject whose evidence names none — is a fabrication.
           for (const stratum of strata?.[index] ?? []) {
             const byId = (perRateStrata[index] ??= new Map());
             const counts = byId.get(stratum.id) ?? { id: stratum.id, inStratum: zeroCounts(), notInStratum: zeroCounts() };

@@ -50,11 +50,23 @@ test("the first 100 patients hash to a pinned value — a silent generator drift
   // payer, race and ethnicity per patient (before the conditions, so every later draw moved), draws
   // three exclusion conditions it did not before (palliative care, bilateral mastectomy, total
   // colectomy) and no longer draws pregnancy, generates the frailty exclusion's medication and
-  // diagnosis among the frail, and derives age from a fixed-year date of birth so identity no longer
-  // depends on the evaluated year. Every patient's clinical facts moved. If this fails, the draw order
-  // or the parameter table changed: bump the version and re-record here, in the same commit as the
-  // change that moved it — never re-record it on its own.
+  // diagnosis among the frail, derives age from a fixed-year date of birth so identity no longer
+  // depends on the evaluated year, and caps the SUD episode draw at Nov 14 (same two draws, so only
+  // November episodes moved — none of them among the first 100, which is why this pin survived that
+  // change). Every patient's clinical facts moved. If this fails, the draw order or the parameter table
+  // changed: bump the version and re-record here, in the same commit as the change that moved it —
+  // never re-record it on its own.
   assert.equal(digest, "dece701b62a90eaf539429d0610660955e13d68f0dbc27f0da67e9d9244536fe");
+});
+
+test("the first 100 patients of a SECOND evaluation year hash to a pinned value too", () => {
+  // The default-year pin above constrains one year's draws; the identity-across-years test constrains
+  // only the identity fields. Neither would catch a future draw-order bug that moved CLINICAL facts
+  // between years while leaving identity intact (GLM review, L2) — this pin does. Same rule: recorded
+  // 2026-09-06 against 4.0.0; re-record only in the commit that deliberately moved it.
+  const digest = createHash("sha256").update(JSON.stringify(corpusPatients(DEFAULT_CORPUS_SEED, 100, 2026)), "utf8").digest("hex");
+  assert.equal(digest, "49e551da4c0a918f289d8953bb7d0d941ec8d210023225510623c592e6d75890");
+  assert.notEqual(digest, "dece701b62a90eaf539429d0610660955e13d68f0dbc27f0da67e9d9244536fe", "a different year must move the clinical facts, or the year is not being applied");
 });
 
 test("every patient lands in a real clinic with a PCP at that clinic", () => {
