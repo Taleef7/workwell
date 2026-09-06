@@ -138,8 +138,9 @@ shape, and **the QRDA III now emits every group and every stratum** (a Reporting
 per Measure Data observation) instead of refusing multi-rate with a 501. The stratum shape is derived from
 the IG and the `cqm-reports` reference exporter, not yet CVU+-validated, and `STANDARDS_CONFORMANCE.md`
 says so. The flip gate and the compliance API read every rate (`rates`, additive). The MADiE evidence
-report renders `r1 e/a · r2 e/a` per population instead of rate 1 alone, and the committed report's
-CMS137 section is regenerated. And the summary MeasureReport and QRDA III **no longer return 422 above
+report renders `r1 e/a · r2 e/a` per population instead of rate 1 alone, and the committed report is
+regenerated from the credentialed run — which also surfaced that CMS138 is a THREE-rate measure whose
+second and third rates the report had never shown either. And the summary MeasureReport and QRDA III **no longer return 422 above
 5,000 subjects** — they were unreachable for every official measure on the 20,000-patient pilot, the
 exact roster they exist for — because the aggregate is now summed from paged reads.
 
