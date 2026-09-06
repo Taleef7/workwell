@@ -40,6 +40,8 @@ export const SCHEDULER_CRON = "0 0 6 * * *";
 
 /** How many hours must elapse between scheduler-triggered ALL_PROGRAMS runs. */
 const SCHEDULER_RUN_INTERVAL_HOURS = 24;
+/** The debounce floor: half an hour under a day, as the tick has always used. */
+const DEFAULT_MIN_GAP_MS = (SCHEDULER_RUN_INTERVAL_HOURS - 0.5) * 3_600_000;
 
 // ---------------------------------------------------------------------------
 // In-memory toggle (demo; resets on restart)
@@ -134,15 +136,76 @@ export interface SchedulerStatus {
 // Private helper: compute next fire time
 // ---------------------------------------------------------------------------
 
-function computeNextFireAt(lastAt: string | null): string | null {
-  if (!schedulerEnabled) return null;
-  if (!lastAt) {
-    // No prior scheduler run: cadence is derived from persisted runs, so with no history the
-    // scheduler fires on the next tick — the next fire is imminent, not a fixed wall-clock window.
-    // (Report "now" rather than a 06:00 UTC estimate the tick no longer waits for.)
-    return new Date().toISOString();
+/**
+ * The wall-clock hour (UTC) the nightly run is anchored to. 12 UTC is 02:00 in Hawaii, which is what
+ * the pilot wants: the overnight recompute finishes before the clinic opens, every day, at the same
+ * time. Without an anchor the cadence is "24 h after whenever the last one happened", so a single
+ * late run drags every subsequent run later and the nightly job walks around the clock.
+ */
+const SCHEDULER_ANCHOR_HOUR_UTC = (): number => {
+  const raw = process.env.WORKWELL_SCHEDULER_ANCHOR_HOUR_UTC;
+  if (raw === undefined || raw === "") return 12;
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed < 0 || parsed > 23) {
+    console.warn(`[workwell] WORKWELL_SCHEDULER_ANCHOR_HOUR_UTC="${raw}" is not an hour 0-23; using 12.`);
+    return 12;
   }
-  return new Date(new Date(lastAt).getTime() + SCHEDULER_RUN_INTERVAL_HOURS * 3_600_000).toISOString();
+  return parsed;
+};
+
+export interface NextFireInput {
+  /** `startedAt` of the last scheduler run, in ms; null when the deployment has never run one. */
+  lastRunAtMs: number | null;
+  nowMs: number;
+  anchorHourUtc?: number;
+  /** The debounce, as a FLOOR under the anchor rather than the cadence itself. */
+  minGapMs?: number;
+}
+
+/**
+ * When the nightly run next fires.
+ *
+ * **One function, used by BOTH the status display and the tick** — that is the point of it. These
+ * were two independent calculations: this one produced the `nextFireAt` a human reads, while the
+ * decision to actually fire was an inline `elapsed < minGapMs` check inside the tick. Changing only
+ * this one would have moved the displayed time and nothing else, under a commit message claiming the
+ * nightly run had moved.
+ *
+ * The anchor is the schedule; the min-gap is a floor beneath it. An anchor that falls inside the
+ * debounce window is pushed to the next day rather than firing early — otherwise a run at 11:00
+ * followed by the 12:00 anchor would fire twice in an hour.
+ *
+ * `lastRunAtMs === null` keeps today's meaning: fire on the next tick. A freshly deployed instance
+ * must not sit idle until the anchor comes round.
+ */
+export function computeNextFireAt(input: NextFireInput): string {
+  if (input.lastRunAtMs === null) return new Date(input.nowMs).toISOString();
+  const due = dueAtMs(input);
+  // Already due (an overdue backfill) reports NOW, matching the never-run case: the answer to "when
+  // does it next fire" is "on the next tick", not the anchor after this one.
+  return new Date(Math.max(due, input.nowMs) === due ? due : input.nowMs).toISOString();
+}
+
+/**
+ * The instant this deployment is next SCHEDULED to run, derived from the last run alone.
+ *
+ * Deliberately independent of `now`: the tick asks "is a run due?", and a function that floors on the
+ * current time can never answer yes — the moment now passes the anchor it starts reporting tomorrow's.
+ * Flooring on `now` is right for a display and wrong for a decision, and the two callers need both.
+ */
+function dueAtMs(input: NextFireInput): number {
+  const anchorHour = input.anchorHourUtc ?? SCHEDULER_ANCHOR_HOUR_UTC();
+  const minGapMs = input.minGapMs ?? DEFAULT_MIN_GAP_MS;
+  const floor = (input.lastRunAtMs ?? 0) + minGapMs;
+  const at = new Date(floor);
+  const candidate = Date.UTC(at.getUTCFullYear(), at.getUTCMonth(), at.getUTCDate(), anchorHour, 0, 0, 0);
+  // `>= floor` rather than `>`: an anchor landing exactly on the debounce boundary is this cycle's.
+  return candidate >= floor ? candidate : candidate + 86_400_000;
+}
+
+export function shouldFireAt(input: NextFireInput): boolean {
+  if (input.lastRunAtMs === null) return true;
+  return input.nowMs >= dueAtMs(input);
 }
 
 // ---------------------------------------------------------------------------
@@ -160,7 +223,9 @@ export async function getSchedulerStatusFromStores(stores: Stores): Promise<Sche
   return {
     enabled: schedulerEnabled,
     cron: SCHEDULER_CRON,
-    nextFireAt: computeNextFireAt(lastRunAt),
+    nextFireAt: schedulerEnabled
+      ? computeNextFireAt({ lastRunAtMs: lastRunAt ? Date.parse(lastRunAt) : null, nowMs: Date.now() })
+      : null,
     lastRunAt,
     lastRunStatus,
   };
@@ -233,14 +298,17 @@ async function runTickLocked(deps: SchedulerTickDeps, nowMs: number): Promise<bo
   // double-fire risk is low; the worst case is one extra idempotent ALL_PROGRAMS recompute.
   // P2-2 fix: targeted single-row query avoids the listRuns page cap.
   const lastSchedulerRun = await deps.stores.runs.getLastRunByTriggeredBy("scheduler");
-  const minGapMs = (SCHEDULER_RUN_INTERVAL_HOURS - 0.5) * 3_600_000;
+  const minGapMs = DEFAULT_MIN_GAP_MS;
   if (lastSchedulerRun) {
-    // Skip if the last scheduler run is less than (interval - 0.5 h) old.
+    // The ANCHOR decides, through the same function the status display reads — not a bare elapsed-time
+    // check. This was an inline `elapsed < minGapMs`, which is a cadence rather than a schedule: one
+    // late run dragged every later run with it and the nightly job walked around the clock.
     const lastStartedMs = new Date(lastSchedulerRun.startedAt).getTime();
-    const elapsed = nowMs - lastStartedMs;
-    if (elapsed < minGapMs) {
-      // Remember when this becomes due so the intervening ticks need no DB round trip at all.
-      nextDueAtMs = lastStartedMs + minGapMs;
+    if (!shouldFireAt({ lastRunAtMs: lastStartedMs, nowMs, minGapMs })) {
+      // Remember when this becomes due so the intervening ticks need no DB round trip at all. The
+      // cached due time is the ANCHOR too, so a tick between the debounce lapsing and the anchor
+      // arriving still skips the query.
+      nextDueAtMs = dueAtMs({ lastRunAtMs: lastStartedMs, nowMs, minGapMs });
       return false;
     }
   }
@@ -297,7 +365,9 @@ async function runTickLocked(deps: SchedulerTickDeps, nowMs: number): Promise<bo
   // already debounce the next tick — booking the cache here just saves that DB round trip. Doing it
   // BEFORE the (long) finishOrFail also means an overlapping tick during a slow ALL_PROGRAMS run
   // cannot double-fire, without the cache ever running ahead of the durable state it summarises.
-  nextDueAtMs = nowMs + minGapMs;
+  // The ANCHOR, not `now + gap` — the same rule the tick and the display use, so a run that fired
+  // late does not drag the next one late with it.
+  nextDueAtMs = dueAtMs({ lastRunAtMs: nowMs, nowMs, minGapMs });
 
   await finishOrFail(runDeps, planned);
   return true;

@@ -24,6 +24,8 @@ import {
   runTick,
   shouldSkipTickWithoutDb,
   type SchedulerTickDeps,
+  computeNextFireAt,
+  shouldFireAt,
 } from "./scheduler.ts";
 
 const dbPaths: string[] = [];
@@ -102,16 +104,35 @@ test("runTick remains skipped after restart when the persisted scheduler run is 
   assert.equal((await schedulerTriggerEvents(stores)).length, 0, "skipped tick must not write an audit event");
 });
 
-test("runTick backfills promptly after a missed scheduler cycle", async () => {
+test("a normal cycle boundary waits for the ANCHOR, not for 24 hours to elapse", async () => {
+  // Changed by the anchor (Task 11), deliberately. This used to assert that 24 h + 1 ms after the last
+  // run fires immediately — a cadence, not a schedule. Under an anchor the nightly run happens at the
+  // same wall-clock time every day, so a run that started at midnight is next due at 12:00, not at
+  // midnight again. That is the whole point: without it one late run drags every later one with it.
   const stores = await freshStores();
   const startedAt = "2026-07-01T00:00:00.000Z";
   await createPriorSchedulerRun(stores, startedAt);
 
   setSchedulerEnabled(true);
-  const fired = await runTick(deps(stores), Date.parse(startedAt) + 24 * 3_600_000 + 1);
+  assert.equal(await runTick(deps(stores), Date.parse(startedAt) + 24 * 3_600_000 + 1), false, "00:00 is not the anchor");
+  assert.equal((await schedulerTriggerEvents(stores)).length, 0);
 
-  assert.equal(fired, true, "a missed 24-hour cycle must fire on the next tick");
+  assert.equal(await runTick(deps(stores), Date.parse("2026-07-02T12:00:00.000Z")), true, "12:00 UTC is");
   assert.equal((await schedulerTriggerEvents(stores)).length, 1, "a fired run must write its scheduler audit event");
+});
+
+test("runTick still backfills promptly after a GENUINELY missed cycle", async () => {
+  // The property the previous test was protecting, kept: an instance down for days must not wait for
+  // the next anchor on top of the outage. It fires on the first tick after it comes back, because the
+  // anchor it should have fired on is already in the past.
+  const stores = await freshStores();
+  await createPriorSchedulerRun(stores, "2026-07-01T12:00:00.000Z");
+
+  setSchedulerEnabled(true);
+  const fired = await runTick(deps(stores), Date.parse("2026-07-04T03:17:00.000Z"));
+
+  assert.equal(fired, true, "two missed anchors must not become a third day of waiting");
+  assert.equal((await schedulerTriggerEvents(stores)).length, 1);
 });
 
 test("runTick fires on the first enabled tick when no scheduler run has ever existed", async () => {
@@ -204,12 +225,16 @@ test("after a debounced tick, later ticks skip the DB until the run is actually 
   const fired = await runTick(deps(stores), base + 3 * 3_600_000);
   assert.equal(fired, false, "3 h after the last run is well inside the 23.5 h cooldown");
 
-  // The tick learned when the next run is due, so intervening ticks cost zero DB round trips.
+  // The tick learned when the next run is due, so intervening ticks cost zero DB round trips. The
+  // cached instant is the ANCHOR (06:00 + 23.5 h floor lands at 05:30, so the next 12:00 is the day
+  // after), not `last + 23.5 h` — otherwise the cache and the tick would disagree about the schedule
+  // and every tick in between would pay a query to be told to wait.
   assert.equal(shouldSkipTickWithoutDb(base + 4 * 3_600_000), true);
-  assert.equal(shouldSkipTickWithoutDb(base + 23 * 3_600_000), true);
+  assert.equal(shouldSkipTickWithoutDb(base + 23.5 * 3_600_000), true, "the debounce lapsed but the anchor has not arrived");
+  assert.equal(shouldSkipTickWithoutDb(base + 29 * 3_600_000), true);
 
-  // ...and it stops skipping once the cooldown has elapsed, so cadence is preserved.
-  assert.equal(shouldSkipTickWithoutDb(base + 23.5 * 3_600_000), false);
+  // ...and it stops skipping at the anchor, so the schedule is preserved.
+  assert.equal(shouldSkipTickWithoutDb(base + 30 * 3_600_000), false, "06:00 + 30 h = 12:00 the next day");
 });
 
 test("after a fired tick, later ticks skip the DB until the next cycle is due", async () => {
@@ -221,7 +246,8 @@ test("after a fired tick, later ticks skip the DB until the next cycle is due", 
   assert.equal(fired, true, "no prior scheduler run — the first enabled tick fires");
 
   assert.equal(shouldSkipTickWithoutDb(now + 3_600_000), true);
-  assert.equal(shouldSkipTickWithoutDb(now + 23.5 * 3_600_000), false);
+  assert.equal(shouldSkipTickWithoutDb(now + 23.5 * 3_600_000), true, "the debounce lapsed; the anchor has not");
+  assert.equal(shouldSkipTickWithoutDb(now + 30 * 3_600_000), false, "06:00 + 30 h = the next 12:00 anchor");
 });
 
 test("re-enabling the scheduler clears the due cache so the toggle takes effect promptly", async () => {
@@ -347,4 +373,81 @@ test("the single-flight guard is released so the next cycle can still fire", asy
 
   const fired = await runTick(deps(stores), now + 60_000);
   assert.equal(fired, true, "a thrown tick must not leave the scheduler permanently blocked");
+});
+
+// ── The nightly anchor hour (ADR-075 / MM-1 U2 Task 11) ──────────────────────
+//
+// The cadence used to be "24 hours after the last run", which is not a schedule: one late run drags
+// every later run with it and the nightly job walks around the clock. These pin the anchor, and — the
+// part that matters — that the TICK honours it, not only the status display. The two used to be
+// independent calculations, so changing the display alone would have moved the reported time and
+// nothing else.
+
+const H = 3_600_000;
+const GAP = 23.5 * H;
+
+test("computeNextFireAt returns the next occurrence of the anchor hour, not last-run + 24h", () => {
+  assert.equal(
+    computeNextFireAt({ lastRunAtMs: Date.parse("2027-03-04T03:00:00Z"), nowMs: Date.parse("2027-03-04T03:05:00Z"), anchorHourUtc: 12, minGapMs: 6 * H }),
+    "2027-03-04T12:00:00.000Z",
+  );
+});
+
+test("after today's anchor has passed, the next fire is tomorrow's", () => {
+  assert.equal(
+    computeNextFireAt({ lastRunAtMs: Date.parse("2027-03-04T12:00:00Z"), nowMs: Date.parse("2027-03-04T13:00:00Z"), anchorHourUtc: 12, minGapMs: 6 * H }),
+    "2027-03-05T12:00:00.000Z",
+  );
+});
+
+test("the min-gap is a FLOOR: an anchor inside the debounce window is pushed past it", () => {
+  // Ran at 11:00, anchor at 12:00, six-hour floor. Firing at 12:00 would be twice in an hour.
+  assert.equal(
+    computeNextFireAt({ lastRunAtMs: Date.parse("2027-03-04T11:00:00Z"), nowMs: Date.parse("2027-03-04T11:05:00Z"), anchorHourUtc: 12, minGapMs: 6 * H }),
+    "2027-03-05T12:00:00.000Z",
+  );
+});
+
+test("a deployment that has never run fires on the next tick, not after a day of waiting", () => {
+  const now = Date.parse("2027-03-04T03:00:00Z");
+  assert.equal(computeNextFireAt({ lastRunAtMs: null, nowMs: now, anchorHourUtc: 12, minGapMs: 6 * H }), new Date(now).toISOString());
+  assert.equal(shouldFireAt({ lastRunAtMs: null, nowMs: now, anchorHourUtc: 12, minGapMs: 6 * H }), true);
+});
+
+test("a clock exactly at the anchor fires now, not in 24 hours", () => {
+  const at = Date.parse("2027-03-04T12:00:00Z");
+  assert.equal(
+    computeNextFireAt({ lastRunAtMs: Date.parse("2027-03-03T12:00:00Z"), nowMs: at, anchorHourUtc: 12, minGapMs: 6 * H }),
+    new Date(at).toISOString(),
+  );
+  assert.equal(shouldFireAt({ lastRunAtMs: Date.parse("2027-03-03T12:00:00Z"), nowMs: at, anchorHourUtc: 12, minGapMs: 6 * H }), true);
+});
+
+test("a late run does not drag the next one late — the anchor holds across days", () => {
+  // The whole point. Ran four hours late at 16:00; the next fire is still 12:00, not 16:00.
+  assert.equal(
+    computeNextFireAt({ lastRunAtMs: Date.parse("2027-03-04T16:00:00Z"), nowMs: Date.parse("2027-03-04T16:01:00Z"), anchorHourUtc: 12, minGapMs: GAP }),
+    "2027-03-06T12:00:00.000Z",
+  );
+});
+
+test("the anchor hour is configurable, and a nonsense value degrades to 12 UTC", () => {
+  const base = { lastRunAtMs: Date.parse("2027-03-04T00:30:00Z"), nowMs: Date.parse("2027-03-04T00:31:00Z"), minGapMs: 1 * H };
+  assert.equal(computeNextFireAt({ ...base, anchorHourUtc: 0 }), "2027-03-05T00:00:00.000Z");
+  assert.equal(computeNextFireAt({ ...base, anchorHourUtc: 23 }), "2027-03-04T23:00:00.000Z");
+  for (const bad of ["25", "-1", "abc", "12.5"]) {
+    process.env.WORKWELL_SCHEDULER_ANCHOR_HOUR_UTC = bad;
+    assert.equal(computeNextFireAt(base), "2027-03-04T12:00:00.000Z", `bad value ${bad} must fall back to 12`);
+  }
+  delete process.env.WORKWELL_SCHEDULER_ANCHOR_HOUR_UTC;
+});
+
+test("THE TICK ITSELF honours the anchor — not just the status display", () => {
+  // Without this the change is cosmetic: the tick had its own inline `elapsed < minGapMs` check and
+  // never consulted computeNextFireAt at all.
+  const lastRunAtMs = Date.parse("2027-03-04T03:00:00Z");
+  const at = (iso: string) => shouldFireAt({ lastRunAtMs, nowMs: Date.parse(iso), anchorHourUtc: 12, minGapMs: 6 * H });
+  assert.equal(at("2027-03-04T11:00:00Z"), false, "before the anchor: no run");
+  assert.equal(at("2027-03-04T11:59:59Z"), false, "one second before the anchor: still no run");
+  assert.equal(at("2027-03-04T12:00:01Z"), true, "at/after the anchor: run");
 });
