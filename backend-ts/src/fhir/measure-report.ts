@@ -251,6 +251,48 @@ export function membershipFor(outcome: Pick<OutcomeRecord, "status" | "evidence"
 }
 
 /** Reduce outcome buckets to proportion-population membership-label counts (the reconciliation contract). */
+/**
+ * Membership PER RATE. A multi-rate measure persists every rate in `evidence.official.rates`; anything
+ * else has exactly one, so this returns a single-element array and behaves as before.
+ */
+export function membershipRatesFor(
+  outcome: Pick<OutcomeRecord, "status" | "evidence">,
+  measureId: string,
+): PopulationMembership[] {
+  const rates = (outcome.evidence as { official?: { rates?: unknown } } | null | undefined)?.official?.rates;
+  if (!Array.isArray(rates) || rates.length <= 1) return [membershipFor(outcome, measureId)];
+  return rates.map((populationResults) => {
+    const membership = officialMembership({ official: { populationResults } });
+    // A rate that cannot be read falls back to the outcome-level answer rather than being dropped:
+    // silently emitting fewer groups than the measure declares would understate the report.
+    return membership ?? membershipFor(outcome, measureId);
+  });
+}
+
+/**
+ * Proportion counts PER RATE, aggregated across subjects — one entry per group the measure declares.
+ *
+ * CMS137 has two (Initiation and Engagement) and they genuinely differ: a patient can start treatment
+ * and not continue it. A MeasureReport that emitted one group would report half the measure, and the
+ * half it dropped is the one the ACO is asking about (ADR-074).
+ */
+export function countPopulationsByRate(outcomes: OutcomeRecord[], measureId: string): PopulationCounts[] {
+  const perRate: PopulationCounts[] = [];
+  for (const outcome of outcomes) {
+    const memberships = membershipRatesFor(outcome, measureId);
+    for (const [index, m] of memberships.entries()) {
+      const counts = (perRate[index] ??= zeroCounts());
+      if (!m.ipp) continue;
+      counts.ipp += 1;
+      if (m.denom) counts.denom += 1;
+      if (m.denex) counts.denex += 1;
+      if (m.numer) counts.numer += 1;
+      if (m.denexcep) counts.denexcep += 1;
+    }
+  }
+  return perRate.length > 0 ? perRate : [zeroCounts()];
+}
+
 export function countPopulations(outcomes: OutcomeRecord[], measureId: string): PopulationCounts {
   return outcomes.reduce((counts, outcome) => {
     const m = membershipFor(outcome, measureId);
@@ -423,14 +465,20 @@ export function buildSummaryMeasureReport(
   // decisive: a run evaluates one measure with one engine, and a run where some subjects errored still
   // names the artifact the rest were scored by (ADR-046).
   const official = outcomes.map((o) => officialReportIdentity(o.evidence)).find((i) => i !== null) ?? null;
-  return buildSummaryMeasureReportFromCounts(run, measureId, countPopulations(outcomes, measureId), generatedAt, official);
+  const rates = countPopulationsByRate(outcomes, measureId);
+  return buildSummaryMeasureReportFromCounts(run, measureId, rates.length > 1 ? rates : rates[0]!, generatedAt, official);
 }
 
 /** Summary MeasureReport from pre-aggregated counts (the bounded Fable H4 path). */
 export function buildSummaryMeasureReportFromCounts(
   run: RunRecord,
   measureId: string,
-  c: PopulationCounts,
+  /**
+   * One rate's counts, or an ARRAY with one entry per rate for a multi-rate measure. CMS137 declares
+   * two (Initiation and Engagement) and each becomes its own `group`, which is what the FHIR shape is
+   * for — collapsing them would report half the measure (ADR-074).
+   */
+  c: PopulationCounts | PopulationCounts[],
   generatedAt: string,
   /**
    * The official artifact these counts came from, when they did. Explicit rather than inferred because
@@ -439,11 +487,15 @@ export function buildSummaryMeasureReportFromCounts(
    */
   official: OfficialReportIdentity | null = null,
 ): MeasureReport {
-  const group: MeasureReport["group"][number] = { population: populations(c) };
-  // eCQM proportion score: exceptions are removed from the denominator alongside exclusions.
-  // `denexcep` is 0 for every authored measure, so this is arithmetically unchanged for them.
-  const effectiveDenominator = c.denom - c.denex - c.denexcep;
-  if (effectiveDenominator > 0) group.measureScore = { value: c.numer / effectiveDenominator };
+  const rates = Array.isArray(c) ? c : [c];
+  const groups = rates.map((counts) => {
+    const group: MeasureReport["group"][number] = { population: populations(counts) };
+    // eCQM proportion score: exceptions are removed from the denominator alongside exclusions.
+    // `denexcep` is 0 for every authored measure, so this is arithmetically unchanged for them.
+    const effectiveDenominator = counts.denom - counts.denex - counts.denexcep;
+    if (effectiveDenominator > 0) group.measureScore = { value: counts.numer / effectiveDenominator };
+    return group;
+  });
   return {
     resourceType: "MeasureReport",
     ...reportMetadata(generatedAt),
@@ -452,7 +504,7 @@ export function buildSummaryMeasureReportFromCounts(
     measure: measureCanonical(measureId, official),
     period: reportingPeriod(run, official),
     improvementNotation: { coding: [{ system: IMPROVEMENT_SYSTEM, code: improvementNotation(measureId, official) }] },
-    group: [group],
+    group: groups,
   };
 }
 

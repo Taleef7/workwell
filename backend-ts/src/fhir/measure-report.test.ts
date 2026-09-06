@@ -476,3 +476,51 @@ test("measureScore is emitted at full float precision, unlike the QRDA III expor
   assert.equal(score.value, 2 / 103);
   assert.ok(String(score.value).length > 6, "score got rounded — reconcile with qrda3-export and re-measure");
 });
+
+/**
+ * Multi-rate MeasureReport (ADR-074). CMS137 declares two groups, Initiation and Engagement, and they
+ * genuinely differ — a patient can start treatment and not continue it. A report that emitted one group
+ * would state half the measure, and the half it dropped is the one the ACO is asking about.
+ */
+test("a multi-rate measure emits one group per rate, each with its own score", async () => {
+  const module = await import("./measure-report.ts");
+  const rate = (numerator: boolean) => [
+    { populationType: "initial-population", result: true },
+    { populationType: "denominator", result: true },
+    { populationType: "denominator-exclusion", result: false },
+    { populationType: "numerator", result: numerator },
+  ];
+  // Two subjects: both initiated; only one engaged. Rate 1 = 2/2, rate 2 = 1/2.
+  const outcomes = [
+    { status: "COMPLIANT", evidence: { official: { populationResults: rate(true), rates: [rate(true), rate(true)] } } },
+    { status: "OVERDUE", evidence: { official: { populationResults: rate(true), rates: [rate(true), rate(false)] } } },
+  ] as never[];
+
+  const run = { measurementPeriodStart: "2027-01-01T00:00:00.000Z", measurementPeriodEnd: "2027-12-31T23:59:59.999Z" } as never;
+  const report = module.buildSummaryMeasureReport(run, "cms137", outcomes, "2027-12-31T00:00:00Z");
+
+  assert.equal(report.group.length, 2, "one group per rate");
+  const scoreOf = (i: number) => report.group[i]!.measureScore?.value;
+  assert.equal(scoreOf(0), 1, "rate 1 (initiation): both subjects initiated");
+  assert.equal(scoreOf(1), 0.5, "rate 2 (engagement): only one engaged");
+  // The two groups must carry DIFFERENT numerators — a builder that copied group 1 twice would still
+  // produce two groups and pass a length check.
+  const numeratorOf = (i: number) =>
+    report.group[i]!.population.find((p) => p.code.coding[0]!.code === "numerator")?.count;
+  assert.equal(numeratorOf(0), 2);
+  assert.equal(numeratorOf(1), 1);
+});
+
+test("a single-rate measure still emits exactly one group", async () => {
+  const module = await import("./measure-report.ts");
+  const outcomes = [
+    { status: "COMPLIANT", evidence: { official: { populationResults: [
+      { populationType: "initial-population", result: true },
+      { populationType: "denominator", result: true },
+      { populationType: "numerator", result: true },
+    ] } } },
+  ] as never[];
+  const run = { measurementPeriodStart: "2027-01-01T00:00:00.000Z", measurementPeriodEnd: "2027-12-31T23:59:59.999Z" } as never;
+  const report = module.buildSummaryMeasureReport(run, "cms125", outcomes, "2027-12-31T00:00:00Z");
+  assert.equal(report.group.length, 1, "nothing changes for the eight single-rate measures");
+});

@@ -282,6 +282,11 @@ jobs:
           pnpm vendor:official --measure CMS138FHIRTobaccoScrnCessation --catalog-id cms138 --strip-elm-annotations --with-tests $COMPLETE
           pnpm vendor:official --measure CMS130FHIRColorectalCancerScrn --catalog-id cms130 --strip-elm-annotations --with-tests $COMPLETE
           pnpm vendor:official --measure CMS165FHIRControllingHighBP --catalog-id cms165 --strip-elm-annotations --with-tests $COMPLETE
+          # CMS137 (MIPS 305) — the pilot ACO's sixth BLUE measure and the only multi-rate one. Its
+          # value sets all ship in the upstream bundle, so $COMPLETE is a no-op for it, but it must be
+          # vendored here all the same: without a sidecar the gate runs it on UPSTREAM terminology,
+          # which the report-write guard correctly refuses to treat as evidence (ADR-074).
+          pnpm vendor:official --measure CMS137FHIRSUDTxInitEngagement --catalog-id cms137 --strip-elm-annotations --with-tests $COMPLETE
       # Re-vendoring must reproduce the COMMITTED artifact byte for byte. Nothing checked this before:
       # the manifest's SHA-256 is written by vendor:official about itself, so it could only ever prove
       # self-consistency. This proves the artifact in Git is what the pinned upstream actually produces.
