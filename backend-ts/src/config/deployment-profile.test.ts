@@ -55,7 +55,10 @@ test("pure directory composition scopes both profiles after full attribution", (
   assert.deepEqual(defaultDirectory.EVALUABLE_EMPLOYEES, RAW_EVALUABLE_EMPLOYEES);
   assert.deepEqual([...defaultDirectory.EVALUATION_EXCLUDED_TENANTS], ["maui"]);
 
-  const maui = composeDeploymentDirectory(resolveDeploymentProfile("maui"));
+  // Explicit `{}` env: the second parameter defaults to `process.env`, so without this the assertion
+  // below fails for anyone running the suite with WORKWELL_MAUI_CORPUS_SIZE set — which is exactly the
+  // variable the pilot deployment exports.
+  const maui = composeDeploymentDirectory(resolveDeploymentProfile("maui"), {});
   assert.equal(maui.EMPLOYEES.length, 48);
   assert.equal(maui.PROVIDERS.length, 40);
   assert.deepEqual(maui.TENANTS.map((tenant) => tenant.id), ["maui"]);
@@ -73,7 +76,7 @@ test("pure directory composition scopes both profiles after full attribution", (
  * receive identical targets; changing that would reshuffle the legacy `emp-*` distribution too.
  */
 test("Maui distribution counts stay pinned to the measured target buckets", () => {
-  const maui = composeDeploymentDirectory(resolveDeploymentProfile("maui"));
+  const maui = composeDeploymentDirectory(resolveDeploymentProfile("maui"), {});
   const expected = {
     cms122: { COMPLIANT: 38, EXCLUDED: 3, MISSING_DATA: 2, DUE_SOON: 2, OVERDUE: 3 },
     cms125: { COMPLIANT: 38, EXCLUDED: 3, MISSING_DATA: 2, DUE_SOON: 2, OVERDUE: 3 },

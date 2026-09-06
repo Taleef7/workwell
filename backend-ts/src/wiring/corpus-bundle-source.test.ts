@@ -90,3 +90,65 @@ test("a Maui process routes every measure through the corpus, and still refuses 
   assert.equal(out.subjectMatches, true);
   assert.match(String(out.refused), /audiogram is not runnable here \(not in the maui profile/);
 });
+
+test("the chart and the roster row are the same person under a non-default seed", () => {
+  // The defect this exists for: the directory honoured WORKWELL_MAUI_CORPUS_SEED and the bundle source
+  // took its own default, so with the variable set they generated DIFFERENT people under the same ids —
+  // different birth date, sex, clinic and conditions — and nothing raised, because a subject's id is
+  // derived from their index and matches under any seed. Every outcome, case, export and card for the
+  // whole roster would have been computed from the wrong chart.
+  const seed = "some-other-seed";
+  const roster = corpusDirectory(seed, 60).EMPLOYEES;
+  const src = corpusBundleSource(seed);
+  for (const employee of [roster[0]!, roster[47]!, roster[52]!]) {
+    const bundle = src.bundleForSubject!(employee, "2027-12-31") as { entry: { resource: Record<string, unknown> }[] };
+    const patient = bundle.entry.map((e) => e.resource).find((r) => r.resourceType === "Patient")!;
+    assert.equal(patient.id, employee.externalId);
+    assert.equal(patient.birthDate, employee.dateOfBirth, `${employee.externalId}: chart and roster disagree on DOB`);
+    assert.deepEqual(patient.generalPractitioner, [{ reference: `Practitioner/${employee.providerId}` }]);
+  }
+});
+
+test("a source seeded differently from the roster REFUSES rather than serving another person's chart", () => {
+  // The guard, not the wiring: even if the two are ever wired to disagree again, the mismatch is loud.
+  const roster = corpusDirectory("some-other-seed", 60).EMPLOYEES;
+  const mismatched = corpusBundleSource(DEFAULT_CORPUS_SEED);
+  const wrong = roster.filter((e) => {
+    try {
+      mismatched.bundleForSubject!(e, "2027-12-31");
+      return false;
+    } catch {
+      return true;
+    }
+  });
+  assert.ok(wrong.length > 0, "no subject was refused — the identity cross-check cannot fire");
+  assert.throws(() => mismatched.bundleForSubject!(wrong[0]!, "2027-12-31"), /different person from the roster row/);
+});
+
+test("a Maui process wires the DEPLOYMENT's seed into the composite, not the default", () => {
+  // End-to-end: the composite must take the seed the directory was composed from. In a child process
+  // because both the profile and the directory resolve at module load.
+  const out = runProfileChild("maui", `
+    const { compositeBundleSource } = await import("./src/wiring/subject-bundle-source.ts");
+    const { employees } = await import("./src/config/deployment-profile.ts");
+    const roster = employees();
+    const src = compositeBundleSource({ WORKWELL_OFFICIAL_MEASURES: "cms122" });
+    // PAST THE FIXTURE PREFIX. The first 48 records are the fixture verbatim — their DOB, site and PCP
+    // are seed-INDEPENDENT by construction, so they match under any seed and a sample taken from them
+    // cannot detect a seed mismatch at all. (Verified: sampling roster.slice(0, 20) passed against the
+    // very bug this test exists for.)
+    const results = roster.slice(48).map((e) => {
+      try {
+        const bundle = src.bundleForSubject(e, "2027-12-31");
+        const patient = bundle.entry.map((x) => x.resource).find((r) => r.resourceType === "Patient");
+        return patient.birthDate === e.dateOfBirth && patient.id === e.externalId;
+      } catch (error) {
+        return String(error.message);
+      }
+    });
+    console.log(JSON.stringify({ ok: results.every((r) => r === true), sample: results.find((r) => r !== true) ?? null, n: roster.length, sampled: results.length }));
+  `, { WORKWELL_MAUI_CORPUS_SEED: "some-other-seed", WORKWELL_MAUI_CORPUS_SIZE: "60" });
+  assert.equal(out.n, 60);
+  assert.ok(Number(out.sampled) >= 12, `only ${out.sampled} subjects past the fixture prefix were checked`);
+  assert.equal(out.ok, true, `the composite disagreed with the roster: ${String(out.sample)}`);
+});

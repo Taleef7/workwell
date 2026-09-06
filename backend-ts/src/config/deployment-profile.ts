@@ -158,6 +158,17 @@ export const __resetDeploymentDirectory = (): void => {
 };
 
 /**
+ * The seed the ACTIVE directory was composed from.
+ *
+ * Exists so the bundle source cannot disagree with the roster about who a subject is. Both used to
+ * resolve a seed independently — the directory from the env, the bundle source from its own default —
+ * and with `WORKWELL_MAUI_CORPUS_SEED` set they generated DIFFERENT people under the same ids: the
+ * roster's `pat-00053` and the chart evaluated for `pat-00053` had different birth dates, sexes,
+ * clinics and conditions, and nothing raised, because the id is derived from the index alone.
+ */
+export const deploymentCorpusSeed = (): string => corpusSeedFromEnv(process.env as Record<string, unknown>);
+
+/**
  * Lower-case directory snapshot for app-side consumers of the engine's live-directory seam.
  *
  * Every member is a GETTER: eleven modules import this object at load, and a captured array would

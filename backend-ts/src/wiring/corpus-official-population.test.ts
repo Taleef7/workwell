@@ -47,6 +47,9 @@ const skipWithout = (id: string) => {
 
 const EMPLOYEES = corpusDirectory(DEFAULT_CORPUS_SEED, SIZE).EMPLOYEES;
 
+/** Measures that actually evaluated — read by the credentialed-context guard at the end of the file. */
+const ran = new Set<string>();
+
 for (const measureId of ["cms122", "cms125", "cms2", "cms130", "cms165", "cms137"]) {
   test(`official ${measureId} finds a real population in the data-first corpus`, { skip: skipWithout(measureId) }, async () => {
     const source = corpusBundleSource();
@@ -69,11 +72,34 @@ for (const measureId of ["cms122", "cms125", "cms2", "cms130", "cms165", "cms137
     // nothing for, and averaging it into a rate would understate the denominator silently.
     assert.equal(results.size, SIZE, `${results.size} of ${SIZE} subjects came back`);
     assert.ok(inIpp > 0, `${measureId}: nobody is in the initial population — profile stamp, code or date mismatch`);
-    // Non-degeneracy, both directions. A single-valued outcome column is the shape every one of this
-    // corpus's real defects has taken, and it looks like a clean run at every other layer.
+    // Non-degeneracy. A single-valued outcome column is the shape every one of this corpus's real
+    // defects has taken, and it looks like a clean run at every other layer.
+    //
+    // One assertion, not two: the first version also checked that some count was non-zero, which is
+    // implied by `results.size === SIZE` two lines above and could never fail on its own.
     assert.ok(
-      new Set(Object.values(counts).filter((n) => n > 0)).size > 0 && Object.keys(counts).length > 1,
+      Object.keys(counts).length > 1,
       `${measureId}: every subject scored ${Object.keys(counts)[0]} — the corpus is degenerate for this measure`,
     );
+    ran.add(measureId);
   });
 }
+
+/**
+ * The guard on the guard.
+ *
+ * Every test above self-skips without its terminology sidecar, so if the credentialed job ever stops
+ * producing them — a vendor step that fails soft, a renamed secret — all six skip and the job goes
+ * GREEN. That is the same silent-skip failure this file's own header is about, one level up. In a
+ * context that claims to be credentialed, at least one measure must actually have run.
+ */
+test("in a credentialed context, these tests actually RAN", () => {
+  if (!process.env.WORKWELL_VSAC_API_KEY_VENDOR && !process.env.WORKWELL_REQUIRE_OFFICIAL_TERMINOLOGY) {
+    console.log("[corpus] no VSAC credential in this context — the population tests are expected to skip");
+    return;
+  }
+  assert.ok(
+    ran.size > 0,
+    "a credentialed context produced no sidecars: every corpus population test skipped and the job would have passed",
+  );
+});

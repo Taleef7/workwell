@@ -1,5 +1,5 @@
 /**
- * The seven invariants chunked evaluation must not break (ADR-074, spec §6).
+ * The invariants chunked evaluation must not break (ADR-075, spec §6).
  *
  * Every pre-existing run-pipeline test runs a roster smaller than one chunk, so all of them pass
  * against a chunked pipeline AND against an unchunked one — they cannot see this change at all. These
@@ -63,8 +63,12 @@ function seedSubjects(n: number): EmployeeProfile[] {
 }
 
 interface Counters {
-  listCasesPreload: number;
-  listCasesRollover: number;
+  /**
+   * EVERY `listCases` the pipeline makes. Not split into preload and rollover: both happen per measure
+   * and neither is distinguishable by its query, so a "preload only" counter would be a name over a
+   * number that also counts the other. The bound below is stated for what it actually counts.
+   */
+  listCasesCalls: number;
   recordOutcomesBatchSizes: number[];
   bundlesBuilt: number;
   batchCalls: Array<{ measureId: string; size: number }>;
@@ -111,8 +115,7 @@ function makeTestDeps(opts: {
   officialRouting?: boolean;
 }): ChunkTestDeps {
   const counters: Counters = {
-    listCasesPreload: 0,
-    listCasesRollover: 0,
+    listCasesCalls: 0,
     recordOutcomesBatchSizes: [],
     bundlesBuilt: 0,
     batchCalls: [],
@@ -140,12 +143,10 @@ function makeTestDeps(opts: {
     getOutcomeById: (id: string) => realOutcomes.getOutcomeById(id),
   } as RunPipelineDeps["outcomeStore"];
 
-  let rollingOver = false;
   const caseStore = {
     ...realCases,
     listCases: (q: CaseQuery) => {
-      if (rollingOver) counters.listCasesRollover += 1;
-      else counters.listCasesPreload += 1;
+      counters.listCasesCalls += 1;
       return realCases.listCases(q);
     },
     upsertFromOutcome: (input: Parameters<typeof realCases.upsertFromOutcome>[0]) => realCases.upsertFromOutcome(input),
@@ -184,13 +185,6 @@ function makeTestDeps(opts: {
     },
     counters,
     auditEvents,
-    // Marks the rollover phase for the listCases counter — see invariant 5.
-    get __rollover() {
-      return rollingOver;
-    },
-    set __rollover(v: boolean) {
-      rollingOver = v;
-    },
   } as unknown as ChunkTestDeps;
 }
 
@@ -249,27 +243,81 @@ test("invariant 3: a chunk failure finalizes the run ONCE, as FAILED", async () 
   assert.equal(bad.auditEvents.filter((e) => e.eventType === "RUN_COMPLETED" || e.eventType === "RUN_FAILED").length, 1);
   // And the chunks before the failure are not silently kept as a partial success.
   assert.deepEqual(bad.counters.recordOutcomesBatchSizes, [100, 100], "the run stopped at the failing chunk");
+  // The terminal row states what the run ACTUALLY did before it failed. It used to hardcode zeros —
+  // accurate when the only reachable failure was live-population prep, and a false statement in the
+  // ledger once a mid-run persist failure became ordinary: 100 outcomes were committed here.
+  const terminal = bad.auditEvents.find((e) => e.eventType === "RUN_COMPLETED")!;
+  assert.equal(terminal.payload.status, "FAILED");
+  assert.equal(terminal.payload.totalEvaluated, 100, "the ledger must not claim nothing was evaluated");
+  assert.equal(terminal.payload.plannedTotal, 250, "and it says how much the run had planned to do");
+});
+
+/**
+ * Opens a case for each of `subjects` at a STRICTLY OLDER evaluation period, which is what the cycle
+ * rollover closes at run finish. Seeded through the real store's own upsert rather than an INSERT, so
+ * the rows are shaped exactly as the pipeline would have left them last cycle.
+ */
+async function seedStaleCycleCases(deps: ChunkTestDeps, subjects: EmployeeProfile[], measureId: string): Promise<void> {
+  for (const subject of subjects) {
+    await deps.caseStore!.upsertFromOutcome({
+      runId: crypto.randomUUID(),
+      subjectId: subject.externalId,
+      measureId,
+      evaluationPeriod: "2020-01-01",
+      outcomeStatus: "OVERDUE",
+    });
+  }
+}
+
+test("invariant 4: cycle rollover runs ONCE, at run finish, not at a chunk boundary", async () => {
+  // Three stale cases and three chunks. A rollover inside the chunk loop would either close each case
+  // once per chunk (three CASE_RESOLVED events per case) or close the ones it saw early and re-close
+  // them; either way the ledger stops matching what happened. Rollover is a run-finish act because a
+  // chunk is an arbitrary slice of the roster and knows nothing about the rest of it.
+  const subjects = seedSubjects(250);
+  const deps = makeTestDeps({ chunkSize: 100, subjects, ippSubjectIds: [] });
+  await seedStaleCycleCases(deps, subjects.slice(0, 3), MEASURE);
+  deps.auditEvents.length = 0;
+
+  await runFully(deps, { scopeType: "MEASURE", measureId: MEASURE });
+  const rolled = deps.auditEvents.filter((e) => e.payload.reason === "CYCLE_ROLLED_OVER");
+  assert.equal(rolled.length, 3, "each stale case rolls over exactly once, not once per chunk");
+  assert.deepEqual(
+    [...new Set(rolled.map((e) => e.payload.subjectId))].sort(),
+    subjects.slice(0, 3).map((s) => s.externalId).sort(),
+    "the three rolled-over cases are the three stale ones",
+  );
 });
 
 test("invariant 5: the active-case snapshot is preloaded ONCE per measure, however many chunks", async () => {
-  // Counted separately from the rollover's own listCases calls: the rollover queries per measure too,
-  // and this change does not alter it, so a single combined counter would read 4 for two measures and
-  // the assertion would be wrong rather than discriminating.
+  // TWO per measure is the correct bound, and it is two rather than one because the pipeline queries
+  // cases twice per measure for different reasons: the run-start active-case snapshot, and the
+  // cycle-rollover sweep at run finish. Neither is per chunk. Five chunks × two measures would be 10
+  // preloads if the snapshot moved inside the chunk loop, which is what this discriminates against.
   const deps = makeTestDeps({ chunkSize: 100, subjects: seedSubjects(500) });
   await runFully(deps, { scopeType: "ALL_PROGRAMS" });
   const measures = new Set(deps.counters.batchCalls.map((c) => c.measureId)).size;
   assert.ok(measures >= 2, "the fixture must run more than one measure for this to discriminate");
-  assert.ok(deps.counters.listCasesPreload <= measures * 2, `${deps.counters.listCasesPreload} listCases for ${measures} measures over 5 chunks each`);
+  assert.equal(deps.counters.listCasesCalls, measures * 2, `${deps.counters.listCasesCalls} listCases for ${measures} measures over 5 chunks each`);
 });
 
-test("invariant 6: counters accumulate across chunks", async () => {
-  const deps = makeTestDeps({ chunkSize: 100, subjects: seedSubjects(250) });
+test("invariant 6: the run's counters accumulate across chunks", async () => {
+  // `totalEvaluated` alone does NOT test this: it is `items.length`, computed once, and can never be a
+  // per-chunk value. The counters genuinely at risk are `compliant`, `nonCompliant` and `failures` —
+  // they are incremented inside the loop, so resetting them per chunk would report only the LAST
+  // chunk's counts on a 20,000-patient run and every existing test would stay green, because they all
+  // fit in one chunk where the reset is a no-op. A mixed IPP is what makes the two numbers differ.
+  const subjects = seedSubjects(250);
+  const deps = makeTestDeps({
+    chunkSize: 100,
+    subjects,
+    ippSubjectIds: subjects.slice(0, 150).map((s) => s.externalId),
+  });
   const { run } = await runFully(deps, { scopeType: "MEASURE", measureId: MEASURE });
-  // `totalEvaluated` is not a column on the run row — it is carried on the terminal audit event, and
-  // the read model derives the rest from the outcomes. A per-chunk counter would report the last
-  // chunk's 50 here.
   const completed = deps.auditEvents.find((e) => e.eventType === "RUN_COMPLETED")!;
   assert.equal(completed.payload.totalEvaluated, 250);
+  assert.equal(completed.payload.compliant, 150, "compliant is the whole run's, not the last chunk's");
+  assert.equal(completed.payload.nonCompliant, 100, "nonCompliant is the whole run's, not the last chunk's");
   assert.equal((await deps.outcomeStore.listOutcomes(run.id)).length, 250, "every chunk's outcomes are persisted");
 });
 

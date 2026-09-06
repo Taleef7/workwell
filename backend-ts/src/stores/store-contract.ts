@@ -340,7 +340,7 @@ export function outcomeStoreContract(
   test(`[${label}] recordOutcomes batch-persists every input (synthetic trend history); [] is a no-op`, async () => {
     const { runStore, outcomeStore } = await fresh();
     const run = await runStore.createRun(sampleRun("audiogram"));
-    await outcomeStore.recordOutcomes([]); // no-op, must not throw
+    assert.deepEqual(await outcomeStore.recordOutcomes([]), [], "empty batch is a no-op that returns []");
     assert.deepEqual(await outcomeStore.listOutcomes(run.id), [], "empty batch writes nothing");
 
     const inputs = Array.from({ length: 25 }, (_, i) => ({
@@ -351,7 +351,27 @@ export function outcomeStoreContract(
       status: i % 2 === 0 ? "COMPLIANT" : "OVERDUE",
       evidence: { seedTrendHistory: true, idx: i },
     }));
-    await outcomeStore.recordOutcomes(inputs);
+    const returned = await outcomeStore.recordOutcomes(inputs);
+    /**
+     * The RETURN is contract, not a convenience. The run pipeline persists a chunk in one call and then
+     * hands `records[i].id` to the incremental cache as the fingerprint for `inputs[i]` — so an id in
+     * the wrong position points `eval_state` at another subject's outcome row, and every later run
+     * copies that subject's status forward onto the wrong person. Nothing else in the system would
+     * notice.
+     */
+    assert.equal(returned.length, inputs.length, "one record per input");
+    for (const [i, record] of returned.entries()) {
+      const input = inputs[i]!;
+      assert.equal(record.subjectId, input.subjectId, `record ${i} is out of input order`);
+      assert.equal(record.status, input.status);
+      assert.equal(record.evaluationPeriod, input.evaluationPeriod);
+      assert.deepEqual(record.evidence, input.evidence);
+      const fetched = await outcomeStore.getOutcomeById(record.id);
+      assert.ok(fetched, `record ${i}'s id does not resolve to a persisted row`);
+      assert.equal(fetched!.subjectId, input.subjectId, `record ${i}'s id resolves to the WRONG subject's row`);
+      assert.deepEqual(fetched!.evidence, input.evidence);
+    }
+    assert.equal(new Set(returned.map((r) => r.id)).size, inputs.length, "ids are unique");
     const listed = await outcomeStore.listOutcomes(run.id);
     assert.equal(listed.length, 25, "all batch rows persisted");
     assert.equal(listed.filter((o) => o.status === "COMPLIANT").length, 13);

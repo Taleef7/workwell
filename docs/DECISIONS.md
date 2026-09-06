@@ -77,7 +77,15 @@ each bundle a second time, and every outcome is a single-row `INSERT`.
    `SubjectBundleSource` is for. A source whose bundle genuinely differs per measure simply omits it and
    is built per item exactly as before.
 
-6. **Four things stay whole-roster, and that is the substance of the decision.** ADR-043's
+6. **A chunk's outcomes commit together; its case upserts do not join that transaction.** This is a
+   deliberate departure from the spec's §6, which asked for outcomes, case upserts and their audit
+   events to commit as one unit where the store supports it. Outcomes go first, in one batch, and the
+   case upserts follow per item. The reason is the direction of the failure: a crash between the two
+   leaves outcomes with no cases, which a rerun repairs by upserting them, whereas the reverse leaves
+   cases citing outcome rows that do not exist. The wider transaction is worth revisiting — it would
+   make a chunk genuinely atomic — but not at the cost of the recoverable direction.
+
+7. **Four things stay whole-roster, and that is the substance of the decision.** ADR-043's
    empty-initial-population judgement, the active-case snapshot, the cycle rollover, and the single
    terminal audit event. A chunk is an arbitrary sample of the roster; judging any of them per chunk
    produces a statement about the chunking, not about the population.

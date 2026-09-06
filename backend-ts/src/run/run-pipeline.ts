@@ -170,6 +170,30 @@ export class UnsupportedScopeError extends Error {
 export class InvalidRunRequestError extends Error {}
 
 const NON_COMPLIANT = new Set(["DUE_SOON", "OVERDUE", "MISSING_DATA"]);
+
+export const DEFAULT_RUN_CHUNK_SIZE = 500;
+
+/**
+ * Subjects per evaluation chunk (ADR-075).
+ *
+ * A malformed value degrades to the default LOUDLY rather than quietly becoming something else — the
+ * rule `corpusSizeFromEnv` already follows for the corpus size. `Math.max(1, Number(raw) || 500)` was
+ * the first version and it silently turned "-5" into a chunk size of 1, which is one database round
+ * trip per subject: a 40× slowdown on a 20,000-patient run, reported by nothing.
+ */
+export function runChunkSize(env: Record<string, unknown>): number {
+  const raw = env.WORKWELL_RUN_CHUNK_SIZE;
+  if (raw === undefined || raw === null || raw === "") return DEFAULT_RUN_CHUNK_SIZE;
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    console.warn(
+      `[workwell] WORKWELL_RUN_CHUNK_SIZE="${String(raw)}" is not a positive integer; ` +
+        `using the default ${DEFAULT_RUN_CHUNK_SIZE}.`,
+    );
+    return DEFAULT_RUN_CHUNK_SIZE;
+  }
+  return parsed;
+}
 const RUNNABLE_MEASURE_IDS = PROFILE_RUNNABLE_MEASURE_IDS.filter(isRunnableMeasure);
 const SUBJECT_SINGULAR = subjectNoun(DEPLOYMENT_PROFILE).singular;
 const SUBJECT_LABEL = SUBJECT_SINGULAR.charAt(0).toUpperCase() + SUBJECT_SINGULAR.slice(1);
@@ -310,6 +334,16 @@ export interface PlannedRun {
   scopeType: RunScopeType;
   evalDate: string;
   livePopulation?: LivePopulationDescriptor;
+  /**
+   * What the run has actually done so far, updated at each chunk boundary.
+   *
+   * Exists for the FAILED path. `failPlannedRun` used to report `totalEvaluated: 0` because the only
+   * failure it could see was live-population preparation, where nothing HAD been evaluated. Chunked
+   * evaluation makes a mid-run failure ordinary — a persist failure in chunk 4 of 40 lands there with
+   * 1,500 outcomes already committed — and an audit row asserting zero about that is a false statement
+   * in the ledger, which is worse than the missing row it replaced.
+   */
+  progress: { evaluated: number; compliant: number; nonCompliant: number; failures: number };
 }
 
 /** Create the run (RUNNING) + resolve work items, without evaluating — fast, safe to await inline. */
@@ -356,7 +390,11 @@ export async function planManualRun(deps: RunPipelineDeps, req: ManualRunRequest
   });
   await deps.runStore.markRunning(run.id);
   await deps.runStore.appendLog(run.id, "INFO", `${scopeLabel} — evaluating ${items.length} subject(s)`);
-  return { run, items, measureIds, scopeLabel, scopeType: req.scopeType, evalDate, ...(livePopulation ? { livePopulation } : {}) };
+  return {
+    run, items, measureIds, scopeLabel, scopeType: req.scopeType, evalDate,
+    progress: { evaluated: 0, compliant: 0, nonCompliant: 0, failures: 0 },
+    ...(livePopulation ? { livePopulation } : {}),
+  };
 }
 
 /** Map an upsert disposition to its case audit event type; UNCHANGED (idempotent re-confirm) → no event. */
@@ -586,7 +624,7 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
     }
   }
   /**
-   * ADR-074 / spec §6 — evaluation runs in SUBJECT CHUNKS, and each chunk is evaluated, persisted and
+   * ADR-075 / spec §6 — evaluation runs in SUBJECT CHUNKS, and each chunk is evaluated, persisted and
    * dropped before the next is built.
    *
    * The roster this pipeline was written for was 150 people. The pilot's is 20,000, and at five
@@ -607,7 +645,7 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
    * bundle is built once. Within a chunk the items keep the order they had in `items` (measure-major),
    * so evaluation order inside a chunk is unchanged.
    */
-  const CHUNK_SIZE = Math.max(1, Number(process.env.WORKWELL_RUN_CHUNK_SIZE ?? 500) || 500);
+  const CHUNK_SIZE = runChunkSize(process.env as Record<string, unknown>);
   const subjectOrder: string[] = [];
   const seenSubject = new Set<string>();
   for (const item of items) {
@@ -959,6 +997,9 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
       if (status === "COMPLIANT") compliant++;
       else if (NON_COMPLIANT.has(status)) nonCompliant++;
     }
+    // The chunk is done and persisted, so this much is TRUE even if the next chunk throws. Read by
+    // `failPlannedRun` so a mid-run failure records what actually happened rather than a zero.
+    planned.progress = { evaluated: (records.length + planned.progress.evaluated), compliant, nonCompliant, failures };
   }
 
   // A whole roster out of the initial population, SURFACED (ADR-043) — now that the roster is complete.
@@ -1216,10 +1257,13 @@ async function failPlannedRun(deps: RunPipelineDeps, planned: PlannedRun, err: u
           scopeType: planned.scopeType,
           scopeLabel: planned.scopeLabel,
           status: "FAILED",
-          totalEvaluated: 0,
-          compliant: 0,
-          nonCompliant: 0,
-          failures: 0,
+          // What the run ACTUALLY completed before it failed, not a zero. A failure before the first
+          // chunk finishes still reports zeros — correctly, because nothing was persisted.
+          totalEvaluated: planned.progress.evaluated,
+          compliant: planned.progress.compliant,
+          nonCompliant: planned.progress.nonCompliant,
+          failures: planned.progress.failures,
+          plannedTotal: planned.items.length,
           measuresExecuted: planned.measureIds,
           ...(liveTenant ? { liveTenant } : {}),
           error: errMsg,
@@ -1239,8 +1283,8 @@ async function failPlannedRun(deps: RunPipelineDeps, planned: PlannedRun, err: u
     runId: planned.run.id,
     scopeType: planned.scopeType,
     scopeLabel: planned.scopeLabel,
-    totalEvaluated: 0,
-    failures: 0,
+    totalEvaluated: planned.progress.evaluated,
+    failures: planned.progress.failures,
     message: `Run failed: ${errMsg}${liveTenant ? ` (WebChart ${liveTenant.host})` : ""}`,
   });
   if (alert) {

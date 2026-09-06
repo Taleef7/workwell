@@ -15,20 +15,35 @@ import type { TargetOutcome } from "../engine/synthetic/exam-config.ts";
 import type { SeededAssignment } from "../run/distribution.ts";
 import type { SubjectBundleSource } from "./subject-bundle-source.ts";
 import { DEFAULT_CORPUS_SEED } from "../engine/synthetic/corpus/corpus-parameters.ts";
+import { CORPUS_FIXTURE_PREFIX } from "../engine/synthetic/corpus/corpus-fixture-prefix.ts";
 import { patientAt } from "../engine/synthetic/corpus/corpus-patient.ts";
 import { bundleForPatient } from "../engine/synthetic/corpus/corpus-bundle.ts";
 
 /**
- * `pat-001..pat-048` (the fixture prefix) and `pat-00049..` (generated) both encode their own index.
- * The parsed index is VERIFIED by regenerating the record and comparing ids, so a three-digit id past
- * the prefix or a five-digit id inside it is rejected rather than silently resolving to a neighbour.
+ * `pat-001..pat-048` (the fixture prefix) and `pat-00049..` (generated) both encode their own index —
+ * the prefix zero-padded to THREE digits, the generated ids to five, and the two ranges do not overlap.
+ * A three-digit id past the prefix (`pat-049`) or a five-digit id inside it (`pat-00003`) parses to a
+ * real index arithmetically and would otherwise return a NEIGHBOUR's whole chart, so the padding is
+ * checked rather than assumed.
+ *
+ * This is a PADDING check, and says so rather than dressing itself up as a regeneration. An earlier
+ * version compared `patientAt(seed, index).externalId` to the input, which reads like it verifies the
+ * record — but `externalId` is derived from the index alone and ignores the seed and every drawn
+ * field, so the comparison could only ever fail on padding, while paying a full patient generation
+ * (conditions, visits, events) per call to do it.
+ *
+ * It is NOT bounded by the configured corpus size: nothing here knows it. `pat-20000` resolves on a
+ * 48-patient deployment. Unreachable through the pipeline, whose subjects come from the directory;
+ * `bundleForSubject` catches it anyway by cross-checking the identity it was handed.
  */
 export function corpusIndexOf(externalId: string): number | null {
   const match = /^pat-(\d{3,5})$/.exec(externalId);
   if (!match) return null;
   const index = Number(match[1]) - 1;
   if (index < 0) return null;
-  return patientAt(DEFAULT_CORPUS_SEED, index).externalId === externalId ? index : null;
+  const digits = match[1]!.length;
+  const expected = index < CORPUS_FIXTURE_PREFIX.length ? 3 : 5;
+  return digits === expected ? index : null;
 }
 
 export function corpusBundleSource(seed: string = DEFAULT_CORPUS_SEED): SubjectBundleSource {
@@ -40,7 +55,29 @@ export function corpusBundleSource(seed: string = DEFAULT_CORPUS_SEED): SubjectB
     // The NAME is the one field a standalone `patientAt` may render differently from a full
     // generation, because disambiguation depends on who came before (see `patientAt`'s note). The
     // directory already resolved it, so take it from there rather than regenerating the whole prefix.
-    const patient = { ...patientAt(seed, index), name: employee.name };
+    const generated = patientAt(seed, index);
+
+    // The roster and the chart must be the SAME PERSON, and only this check can say so.
+    //
+    // `externalId` is derived from the index alone — it ignores the seed and every drawn field — so it
+    // cannot detect a mismatch. Generate this subject from a different seed and you get a different
+    // birth date, sex, clinic and condition list under the same id, and the id still "resolves". Every
+    // outcome, case, export and card for the whole roster would then be computed from the wrong chart,
+    // and the roster page would look entirely normal. These three fields are the ones the directory
+    // carries, so these three are what can be compared.
+    const drift =
+      generated.dateOfBirth !== employee.dateOfBirth ? `dateOfBirth ${generated.dateOfBirth} vs ${employee.dateOfBirth}`
+      : generated.site !== employee.site ? `site ${generated.site} vs ${employee.site}`
+      : generated.providerId !== employee.providerId ? `providerId ${generated.providerId} vs ${employee.providerId}`
+      : null;
+    if (drift) {
+      throw new Error(
+        `[workwell] ${employee.externalId}: the corpus chart is a different person from the roster row (${drift}). ` +
+          `The bundle source and the directory are generating from different seeds or generator versions.`,
+      );
+    }
+
+    const patient = { ...generated, name: employee.name };
     return bundleForPatient(patient, evaluationDate, seed) as unknown as FhirBundle;
   };
 
