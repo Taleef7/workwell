@@ -64,6 +64,15 @@ if [[ -z "$NAME" ]]; then
   exit 2
 fi
 
+# Checked here, before anything is started: the bundle-load verification below is not optional. Guarded
+# on `command -v jq` it would simply VANISH on a host without jq — a safety check that disappears
+# exactly where nobody notices, which is the failure family this repo tracks (Codex P2). Refusing up
+# front costs a second; refusing after a container boot and a 15 MB upload does not.
+if ! command -v jq >/dev/null 2>&1; then
+  echo "cross-engine-sweep: jq is required — the bundle-load check reads the transaction's per-entry statuses, and skipping it would let a partial load pass as a clean one." >&2
+  exit 2
+fi
+
 BUNDLE="${BUNDLE_OVERRIDE:-${CONTENT}/bundles/measure/${NAME}/${NAME}-bundle.json}"
 if [[ ! -f "$BUNDLE" ]]; then
   echo "cross-engine-sweep: no bundle at ${BUNDLE} (run scripts/fetch-official-cases.ps1)" >&2
@@ -137,13 +146,18 @@ fi
 # the HTTP layer — and the sweep would then run against a server missing exactly the content the
 # comparison is about, producing numbers rather than an error. Same class as the degenerate-sweep
 # refusal: the failure is silent unless something looks (review finding).
-if command -v jq >/dev/null 2>&1; then
-  BAD="$(jq -r '[.entry[]?.response.status // "" | select(test("^[45]"))] | length' "$LOAD_LOG" 2>/dev/null || echo 0)"
-  if [[ "${BAD:-0}" != "0" ]]; then
-    echo "cross-engine-sweep: the transaction returned ${HTTP} but ${BAD} entr(y/ies) failed inside it — the server is missing content the sweep needs." >&2
-    jq -r '[.entry[]?.response.status // "" | select(test("^[45]"))] | unique | join(", ")' "$LOAD_LOG" >&2 2>/dev/null || true
-    exit 1
-  fi
+# `|| echo 0` would turn a jq PARSE failure into "nothing wrong", which is the same silent pass the
+# check exists to prevent, so a failure to parse is itself fatal (Codex P2).
+if ! BAD="$(jq -r '[.entry[]?.response.status // "" | select(test("^[45]"))] | length' "$LOAD_LOG" 2>&1)"; then
+  echo "cross-engine-sweep: could not parse the transaction response — refusing rather than assuming it loaded." >&2
+  echo "  jq said: ${BAD}" >&2
+  head -c 500 "$LOAD_LOG" >&2 || true
+  exit 1
+fi
+if [[ "$BAD" != "0" ]]; then
+  echo "cross-engine-sweep: the transaction returned ${HTTP} but ${BAD} entr(y/ies) failed inside it — the server is missing content the sweep needs." >&2
+  jq -r '[.entry[]?.response.status // "" | select(test("^[45]"))] | unique | join(", ")' "$LOAD_LOG" >&2 || true
+  exit 1
 fi
 sleep 20
 

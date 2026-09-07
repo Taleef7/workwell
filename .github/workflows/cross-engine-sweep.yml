@@ -127,13 +127,26 @@ jobs:
           bash scripts/cross-engine-sweep.sh "${{ inputs.measure }}" -- --json > "cross-engine-${{ inputs.measure }}.json"
           SWEEP_EXIT=$?
           set -e
-          if ! jq -e '.results | length > 0' "cross-engine-${{ inputs.measure }}.json" >/dev/null 2>&1; then
+          RESULT="cross-engine-${{ inputs.measure }}.json"
+          if ! jq -e '.results | length > 0' "$RESULT" >/dev/null 2>&1; then
             echo "::error::the sweep produced no result set (exit ${SWEEP_EXIT}) — this is a harness failure, not a disagreement"
             exit 1
           fi
-          TOTAL=$(jq '.results | length' "cross-engine-${{ inputs.measure }}.json")
-          AGREE=$(jq '[.results[] | select(.agrees)] | length' "cross-engine-${{ inputs.measure }}.json")
-          echo "::notice::${{ inputs.measure }}: ${AGREE}/${TOTAL} cases agree with the measure developer's expected reports (sweep exit ${SWEEP_EXIT})."
+          # A DISAGREEMENT is the point; a case that never EVALUATED is not one, and the two are
+          # indistinguishable downstream. `cross-engine-check.ts` exits 1 for both, and records a failed
+          # request as `java: null` with an `error`, still counted as a case that "does not agree". So a
+          # sweep where HAPI errored on nine subjects would upload a result set that reads as nine extra
+          # disagreements — the plausible-but-invalid evidence this whole workflow exists to refuse
+          # (Codex P1). Genuine population disagreements pass; unevaluated cases do not.
+          BROKEN=$(jq '[.results[] | select(.error != null or .java == null)] | length' "$RESULT")
+          if [ "$BROKEN" != "0" ]; then
+            echo "::error::${BROKEN} case(s) never evaluated (a request failed), so this sweep is PARTIAL and is not evidence. Disagreements are expected; unevaluated cases are a harness failure."
+            jq -r '.results[] | select(.error != null or .java == null) | "  \(.case): \(.error // "no report returned")"' "$RESULT"
+            exit 1
+          fi
+          TOTAL=$(jq '.results | length' "$RESULT")
+          AGREE=$(jq '[.results[] | select(.agrees)] | length' "$RESULT")
+          echo "::notice::${{ inputs.measure }}: ${AGREE}/${TOTAL} cases agree with the measure developer's expected reports, ${TOTAL} evaluated cleanly (sweep exit ${SWEEP_EXIT})."
 
       - name: Upload the result
         if: always()
