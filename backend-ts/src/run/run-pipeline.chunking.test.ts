@@ -111,6 +111,8 @@ function makeTestDeps(opts: {
   ippSubjectIds?: string[];
   /** Make the OUTCOME STORE throw while persisting this chunk (0-based). */
   failOnChunk?: number;
+  /** Persist the FIRST `partialRows` rows of the failing chunk before throwing — a store that batches in slices. */
+  partialRows?: number;
   /** Report an official logicVersion, which is what gates the ADR-043 empty-IPP check. */
   officialRouting?: boolean;
 }): ChunkTestDeps {
@@ -136,9 +138,13 @@ function makeTestDeps(opts: {
     recordOutcomes: async (inputs: RecordOutcomeInput[]): Promise<OutcomeRecord[]> => {
       chunkIndex += 1;
       counters.recordOutcomesBatchSizes.push(inputs.length);
-      if (opts.failOnChunk === chunkIndex) throw new Error("persist failed for this chunk");
+      if (opts.failOnChunk === chunkIndex) {
+        if (opts.partialRows) await realOutcomes.recordOutcomes(inputs.slice(0, opts.partialRows));
+        throw new Error("persist failed for this chunk");
+      }
       return realOutcomes.recordOutcomes(inputs);
     },
+    countOutcomesByStatus: (runId: string) => realOutcomes.countOutcomesByStatus(runId),
     listOutcomes: (runId: string, o?: { limit?: number; offset?: number }) => realOutcomes.listOutcomes(runId, o),
     getOutcomeById: (id: string) => realOutcomes.getOutcomeById(id),
   } as RunPipelineDeps["outcomeStore"];
@@ -250,6 +256,21 @@ test("invariant 3: a chunk failure finalizes the run ONCE, as FAILED", async () 
   assert.equal(terminal.payload.status, "FAILED");
   assert.equal(terminal.payload.totalEvaluated, 100, "the ledger must not claim nothing was evaluated");
   assert.equal(terminal.payload.plannedTotal, 250, "and it says how much the run had planned to do");
+});
+
+test("a chunk that was PARTLY persisted before its store rejected is counted by what is in the store", async () => {
+  // The SQLite floor batches in slices of 90 and any adapter may slice; when a later slice fails, the
+  // earlier ones are durable and the call still rejects. Advancing `progress.evaluated` only on a
+  // returned length put those rows outside the terminal audit — 100 reported here while 140 rows sat
+  // in the table (Codex review, #528). The pipeline now recounts from the store on a persist failure.
+  const bad = makeTestDeps({ chunkSize: 100, subjects: seedSubjects(250), failOnChunk: 1, partialRows: 40 });
+  const planned = await planManualRun(bad, { scopeType: "MEASURE", measureId: MEASURE });
+  await finishOrFail(bad, planned).catch(() => undefined);
+  const badRun = (await bad.runStore.listRuns(1))[0]!;
+  assert.equal(badRun.status, "FAILED");
+  assert.equal((await bad.outcomeStore.listOutcomes(badRun.id)).length, 140, "the fixture really did leave 140 durable rows");
+  const terminal = bad.auditEvents.find((e) => e.eventType === "RUN_COMPLETED")!;
+  assert.equal(terminal.payload.totalEvaluated, 140, "the ledger says what the store holds, not what the last successful call returned");
 });
 
 /**

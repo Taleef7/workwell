@@ -406,6 +406,25 @@ export function outcomeStoreContract(
     assert.equal((await outcomeStore.listOutcomes(runId)).length, 1);
   });
 
+  if (label === "postgres") {
+    test(`[${label}] recordOutcomes is ALL OR NOTHING across its INSERT chunks`, async () => {
+      // The adapter inserts in chunks of 500. Before it ran them in one transaction, a failure in chunk 2
+      // left chunk 1's rows durable while the call rejected — and the run pipeline, advancing its
+      // progress only on a returned length, reported those rows as never evaluated (Codex review,
+      // #528). Postgres-only: the failure is forced through the `::uuid` cast on `run_id`, which the
+      // SQLite floor (TEXT column, slices of 90) cannot reproduce; the pipeline's own recount covers it.
+      const { runStore, outcomeStore } = await fresh();
+      const runId = (await runStore.createRun(sampleRun("audiogram"))).id;
+      const rows = Array.from({ length: 600 }, (_, i) => ({
+        runId: i === 550 ? "not-a-uuid" : runId,
+        subjectId: `emp-${String(i).padStart(4, "0")}`, measureId: "audiogram", evaluationPeriod: "2027-01-01",
+        status: "COMPLIANT", evidence: {}, evaluatedAt: "2027-01-01T00:00:00.000Z",
+      }));
+      await assert.rejects(outcomeStore.recordOutcomes(rows), "row 551 cannot be inserted, so the call must reject");
+      assert.equal((await outcomeStore.listOutcomes(runId)).length, 0, "and the 500 rows of the first chunk were rolled back with it");
+    });
+  }
+
   test(`[${label}] recordOutcomes batch-persists every input (synthetic trend history); [] is a no-op`, async () => {
     const { runStore, outcomeStore } = await fresh();
     const run = await runStore.createRun(sampleRun("audiogram"));

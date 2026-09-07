@@ -202,6 +202,28 @@ five mutations), Gemini 3.8 through Antigravity, GLM 5.3 Flash. What survived ve
   tested at 5,001 rows but never at an exact page multiple, where the last full page is followed by an
   empty one — 4,000 rows now sum to 4,000.
 
+**Codex on the PR (#528), four findings, all real, all fixed.**
+
+- **The scheduler's debounce floor existed in the docstring, in DEPLOY.md and as the tick's argument —
+  and nothing read it.** Enabled at 11:59, the first run fired at once and the 12:00 anchor fired a
+  minute later: two 20,000-patient runs for the same data. One test pinned that as correct ("firing twice
+  in a day is cheap"). The floor now applies to TODAY's anchor only — a same-day run inside the window
+  has served the day, tomorrow's anchor is never pushed — so the night-skip the anchor rule was built to
+  prevent stays prevented; the three tests that pinned the double run now pin the floor.
+- **Both Maui workflows shipped retention at 90 days while DEPLOY.md said to leave it unset until the
+  Postgres index exists.** Removed from both; the drift guard now pins its ABSENCE on Maui so adding it
+  is a deliberate edit in the same commit as the index (ADR-073 d1).
+- **Compaction deleted first and audited second, across two stores with no shared transaction.** An
+  audit failure left rows irreversibly gone with a rejected promise as the only record. The intent
+  event is now written before the delete and the completion event after (ADR-073 d4); a test fails the
+  audit store on each write in turn and checks nothing is deleted without a ledger entry.
+- **A chunk whose persist rejected after part of it committed was reported as unevaluated.** Postgres
+  inserts in 500-row chunks, SQLite in slices of 90; the pipeline advanced its count only on a returned
+  length. The Postgres adapter is now one transaction (contract test forces a failure in chunk 2 and
+  asserts chunk 1 rolled back — runs in CI's postgres:16 service), and the pipeline recounts from the
+  store on a persist failure so the terminal audit says what the table holds: 140, not 100, in the
+  test that seeds exactly that.
+
 **Still owner-owned:** the segment repair, the Postgres retention index, and the cms137 flip itself —
 `pnpm flip-gate --measure cms137` now reports both rates; the workflow edit that routes it remains the
 gated human act MM-1c describes, after the cms165 profile question (do NOT route cms165 — its decisive

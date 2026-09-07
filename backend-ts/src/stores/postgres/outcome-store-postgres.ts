@@ -97,28 +97,44 @@ export class PgOutcomeStore implements OutcomeStore {
       evidence: input.evidence ?? {},
       evaluatedAt: input.evaluatedAt ?? defaultEvaluatedAt,
     }));
-    for (let start = 0; start < records.length; start += CHUNK) {
-      const chunk = records.slice(start, start + CHUNK);
-      const binds: unknown[] = [];
-      const tuples = chunk.map((record) => {
-        const o = binds.length;
-        binds.push(
-          record.id,
-          record.runId,
-          record.subjectId,
-          record.measureId,
-          record.evaluationPeriod,
-          record.status,
-          JSON.stringify(record.evidence),
-          record.evaluatedAt,
+    // ONE transaction across every chunk. The run pipeline persists a whole evaluation chunk (500
+    // subjects x the measures in the run) in one call and then advances its progress by the returned
+    // length — so when the third of six INSERTs failed, 1,000 rows were durably in the table while the
+    // pipeline's terminal audit reported the chunk as unevaluated (Codex review, #528). All or nothing
+    // is the guarantee the caller's accounting assumes; a single client with BEGIN/COMMIT is how the
+    // case-event store already gives it for action + audit.
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      for (let start = 0; start < records.length; start += CHUNK) {
+        const chunk = records.slice(start, start + CHUNK);
+        const binds: unknown[] = [];
+        const tuples = chunk.map((record) => {
+          const o = binds.length;
+          binds.push(
+            record.id,
+            record.runId,
+            record.subjectId,
+            record.measureId,
+            record.evaluationPeriod,
+            record.status,
+            JSON.stringify(record.evidence),
+            record.evaluatedAt,
+          );
+          return `($${o + 1}, $${o + 2}, $${o + 3}, $${o + 4}, $${o + 5}, $${o + 6}, $${o + 7}::jsonb, $${o + 8})`;
+        });
+        await client.query(
+          `INSERT INTO ${T} (id, run_id, subject_id, measure_id, evaluation_period, status, evidence_json, evaluated_at)
+           VALUES ${tuples.join(", ")}`,
+          binds,
         );
-        return `($${o + 1}, $${o + 2}, $${o + 3}, $${o + 4}, $${o + 5}, $${o + 6}, $${o + 7}::jsonb, $${o + 8})`;
-      });
-      await this.pool.query(
-        `INSERT INTO ${T} (id, run_id, subject_id, measure_id, evaluation_period, status, evidence_json, evaluated_at)
-         VALUES ${tuples.join(", ")}`,
-        binds,
-      );
+      }
+      await client.query("COMMIT");
+    } catch (err) {
+      await client.query("ROLLBACK").catch(() => {});
+      throw err;
+    } finally {
+      client.release();
     }
     return records;
   }

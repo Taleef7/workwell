@@ -242,7 +242,13 @@ test("the Maui deployment actually ships the corpus size, and it is the 20,000-p
   // Agreement alone is satisfied by BOTH workflows omitting the key, which is the vacuous reading of
   // the test above — and would leave the pilot on the 48-row fixture while every doc said 20,000.
   assert.equal(shippedValue("deploy-maui-mieweb.yml", "WORKWELL_MAUI_CORPUS_SIZE"), "20000");
-  assert.equal(shippedValue("deploy-maui-mieweb.yml", "WORKWELL_OUTCOME_RETENTION_DAYS"), "90");
+  // Retention is deliberately NOT shipped to Maui yet. DEPLOY.md says to leave it unset until the
+  // Postgres index ADR-073 names exists — the keep-set's DISTINCT ON ... ORDER BY has no supporting
+  // index, so on a table of nightly 20,000-patient runs the DELETE would sort the whole thing inline
+  // during the nightly tick. The first version of this test pinned "90" while the doc said "unset"
+  // (Codex review, #528). Pinning ABSENCE here means adding it later is a deliberate edit of this line
+  // in the same commit as the index, not a value that slipped in.
+  assert.equal(shippedValue("deploy-maui-mieweb.yml", "WORKWELL_OUTCOME_RETENTION_DAYS"), null, "retention stays OFF on Maui until the ADR-073 index exists");
   // TWH is unchanged: no corpus, and no retention window — its history stays whole.
   assert.equal(shippedValue("deploy-twh-mieweb.yml", "WORKWELL_MAUI_CORPUS_SIZE"), null);
   assert.equal(shippedValue("deploy-twh-mieweb.yml", "WORKWELL_OUTCOME_RETENTION_DAYS"), null);

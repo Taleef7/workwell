@@ -109,6 +109,53 @@ test("one OUTCOMES_COMPACTED audit event per pass, carrying the declared payload
   assert.equal(event.payload.retentionDays, 90);
 });
 
+test("the ledger entry precedes the delete: no audit write, no deletion — and a failed pass still names its cutoff", async () => {
+  // The two stores share no transaction. "Delete, then audit" meant an audit failure left rows
+  // irreversibly gone with no record of it — the scheduler logs the rejection and moves on, and a later
+  // pass cannot say how much the first one removed (Codex review, #528). So the intent is written first.
+  const { stores, runs } = makeStores();
+  const runId = (await runs.createRun(SAMPLE_RUN)).id;
+  const outcomes = (stores as never as { outcomes: SqliteOutcomeStore }).outcomes;
+  await outcomes.recordOutcomes([
+    { runId, subjectId: "pat-90002", measureId: "cms122", evaluationPeriod: "2027-01-01", status: "OVERDUE", evidence: {}, evaluatedAt: "2027-01-01T00:00:00.000Z" },
+    { runId, subjectId: "pat-90002", measureId: "cms122", evaluationPeriod: "2027-01-01", status: "COMPLIANT", evidence: {}, evaluatedAt: "2027-12-01T00:00:00.000Z" },
+  ]);
+  const rowsFor = async () => (await outcomes.listOutcomes(runId)).length;
+
+  // 1. The FIRST audit write fails: nothing may be deleted.
+  const audits: Audit[] = [];
+  let failNth = 1;
+  let calls = 0;
+  const events = {
+    appendAudit: async (e: { eventType: string; payload?: Record<string, unknown> }) => {
+      calls += 1;
+      if (calls === failNth) throw new Error("transient audit store failure");
+      audits.push({ eventType: e.eventType, payload: e.payload ?? {} });
+      return { id: crypto.randomUUID() } as never;
+    },
+  };
+  const flaky = { ...(stores as never as Record<string, unknown>), events } as never;
+  await assert.rejects(compactOutcomes(flaky, { retentionDays: 90, now: NOW }), /transient audit store failure/);
+  assert.equal(await rowsFor(), 2, "the audit write failed, so the delete must not have run");
+  assert.equal(audits.length, 0);
+
+  // 2. The SECOND (completion) write fails: the row is gone, and the ledger already says which window
+  //    was applied — the deletion is recorded even though the count is not.
+  calls = 0;
+  failNth = 2;
+  await assert.rejects(compactOutcomes(flaky, { retentionDays: 90, now: NOW }), /transient audit store failure/);
+  assert.equal(await rowsFor(), 1, "the delete ran");
+  assert.deepEqual(audits.map((e) => e.eventType), ["OUTCOMES_COMPACTION_STARTED"]);
+  assert.equal(audits[0]!.payload.cutoff, "2027-10-02T00:00:00.000Z", "the intent record names the cutoff the rows were deleted against");
+
+  // 3. A clean pass writes both, in that order.
+  calls = 0;
+  failNth = 0;
+  audits.length = 0;
+  await compactOutcomes(flaky, { retentionDays: 90, now: NOW });
+  assert.deepEqual(audits.map((e) => e.eventType), ["OUTCOMES_COMPACTION_STARTED", "OUTCOMES_COMPACTED"]);
+});
+
 test("a row a case CITES survives — open or closed, and only that row, not its whole run", async () => {
   const { stores, runs } = makeStores();
   const s = stores as never as { outcomes: SqliteOutcomeStore; cases: SqliteCaseStore };

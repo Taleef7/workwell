@@ -14,7 +14,7 @@
  * persisted as MISSING_DATA with the error in evidence (matches the Java runtime invariant).
  */
 import type { RunStore } from "../stores/run-store.ts";
-import type { OutcomeStore } from "../stores/outcome-store.ts";
+import type { OutcomeStore, OutcomeRecord } from "../stores/outcome-store.ts";
 import type { CaseStore, CaseRecord } from "../stores/case-store.ts";
 import { ACTIVE_CASE_STATUSES } from "../case/case-logic.ts";
 import type { EvaluateMeasureBinding, MeasureOutcome } from "@work-well/measure-engine";
@@ -890,16 +890,28 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
      * `recordOutcomes` returns its records IN INPUT ORDER, which is what still lets the incremental
      * cache fingerprint the row it just wrote.
      */
-    const records = await deps.outcomeStore.recordOutcomes(
-      pending.map((p) => ({
-        runId: runId,
-        subjectId: p.item.employee.externalId,
-        measureId: p.item.measureId,
-        evaluationPeriod: p.period,
-        status: p.status,
-        evidence: p.evidence,
-      })),
-    );
+    let records: OutcomeRecord[];
+    try {
+      records = await deps.outcomeStore.recordOutcomes(
+        pending.map((p) => ({
+          runId: runId,
+          subjectId: p.item.employee.externalId,
+          measureId: p.item.measureId,
+          evaluationPeriod: p.period,
+          status: p.status,
+          evidence: p.evidence,
+        })),
+      );
+    } catch (err) {
+      // The store may have persisted PART of this chunk before rejecting — the Postgres adapter is now
+      // one transaction, but the SQLite floor batches in slices of 90 and any adapter may be. Reporting
+      // `progress.evaluated` as it stood before this chunk would put hundreds of durable rows outside
+      // the terminal audit's `totalEvaluated` (Codex review, #528). So ask the store what is actually
+      // there for this run, and report that. Best-effort: if the recount itself fails the pre-chunk
+      // figure stands, which is a lower bound rather than a fabrication.
+      await reconcileEvaluatedFromStore(deps, planned, runId);
+      throw err;
+    }
     // PERSISTED, so this much is true even if the case pass below throws mid-chunk: `evaluated` and
     // `failures` count rows that are now in the store, and nothing else. `compliant`/`nonCompliant`
     // are advanced per record below, as each one's case is acted on, so `failPlannedRun` reports
@@ -1229,6 +1241,23 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
     message: runMessage,
     measuresExecuted: measureIds.map(measureDisplayName),
   };
+}
+
+/**
+ * Sets `progress.evaluated` to the number of outcome rows the store HOLDS for this run — used when a
+ * chunk's persist rejected, since the rows written before the rejection are durable whether or not the
+ * call returned. Never lowers the figure below what earlier chunks already accounted for.
+ */
+async function reconcileEvaluatedFromStore(deps: RunPipelineDeps, planned: PlannedRun, runId: string): Promise<void> {
+  try {
+    const counts = await deps.outcomeStore.countOutcomesByStatus(runId);
+    const persisted = counts.reduce((sum, row) => sum + Number(row.count ?? 0), 0);
+    if (persisted > planned.progress.evaluated) planned.progress.evaluated = persisted;
+  } catch (recountErr) {
+    await deps.runStore
+      .appendLog(runId, "WARN", `Could not recount persisted outcomes after a persist failure: ${String((recountErr as Error)?.message ?? recountErr)}`)
+      .catch(() => {});
+  }
 }
 
 async function failPlannedRun(deps: RunPipelineDeps, planned: PlannedRun, err: unknown): Promise<void> {

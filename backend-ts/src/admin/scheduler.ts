@@ -175,9 +175,10 @@ export interface NextFireInput {
  * this one would have moved the displayed time and nothing else, under a commit message claiming the
  * nightly run had moved.
  *
- * The anchor is the schedule; the min-gap is a floor beneath it. An anchor that falls inside the
- * debounce window is pushed to the next day rather than firing early — otherwise a run at 11:00
- * followed by the 12:00 anchor would fire twice in an hour.
+ * The anchor is the schedule; the min-gap is a floor beneath TODAY's anchor only. An anchor that falls
+ * inside the debounce window after a same-day run is treated as served and the next fire is tomorrow's
+ * — otherwise a run at 11:59 followed by the 12:00 anchor would fire twice in a minute. (This floor
+ * was documented here and in DEPLOY.md, passed in by the tick, and never read — Codex review, #528.)
  *
  * `lastRunAtMs === null` keeps today's meaning: fire on the next tick. A freshly deployed instance
  * must not sit idle until the anchor comes round.
@@ -213,12 +214,20 @@ export function computeNextFireAt(input: NextFireInput): string {
  */
 function dueAtMs(input: NextFireInput): number {
   const anchorHour = input.anchorHourUtc ?? SCHEDULER_ANCHOR_HOUR_UTC();
+  const minGapMs = input.minGapMs ?? DEFAULT_MIN_GAP_MS;
   const lastRunAtMs = input.lastRunAtMs ?? 0;
   const last = new Date(lastRunAtMs);
   const anchorOn = (addDays: number) =>
     Date.UTC(last.getUTCFullYear(), last.getUTCMonth(), last.getUTCDate() + addDays, anchorHour, 0, 0, 0);
   const owedToday = anchorOn(0);
-  return lastRunAtMs < owedToday ? owedToday : anchorOn(1);
+  // The floor applies to TODAY's anchor only. A scheduler run earlier the same day — the first run after
+  // enabling at 11:59, or an overdue backfill — has already given the day its recompute; letting the
+  // 12:00 anchor fire a minute later is a second 20,000-patient run for the same data, which is what
+  // the documented debounce exists to prevent (Codex review, #528). Tomorrow's anchor is never pushed:
+  // it is at most 24 h after any post-anchor run, and pushing it is the night-skipping defect this
+  // function's header describes.
+  const todayStillOwed = lastRunAtMs < owedToday && owedToday - lastRunAtMs >= minGapMs;
+  return todayStillOwed ? owedToday : anchorOn(1);
 }
 
 export function shouldFireAt(input: NextFireInput): boolean {

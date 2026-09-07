@@ -319,9 +319,13 @@ history twice, once in a form nobody reads.
 
 **Decision.**
 
-1. **`WORKWELL_OUTCOME_RETENTION_DAYS` defines a window; outside it, outcome rows are deleted.** 90 on
-   the Maui deployment. **Unset everywhere else, and unset means OFF** — TWH keeps its history whole,
-   and a deployment that has not opted in can never lose a row.
+1. **`WORKWELL_OUTCOME_RETENTION_DAYS` defines a window; outside it, outcome rows are deleted.** 90 is
+   the intended Maui value — **but it ships UNSET on Maui until the Postgres index below exists** (the
+   keep-set's `DISTINCT ON … ORDER BY` has no supporting index, so on a table of nightly 20,000-patient
+   runs the DELETE would sort the whole thing inline during the nightly tick; the first workflows set 90
+   while `DEPLOY.md` said to wait — Codex review, #528 — and `official-flip-config.test.ts` now pins the
+   absence). **Unset everywhere else, and unset means OFF** — TWH keeps its history whole, and a
+   deployment that has not opted in can never lose a row.
 
 2. **Three things are never deleted, and they are the substance of this decision.**
    - **The newest row per `(subject, measure, EVALUATION PERIOD)`, at any age.** Per period, not merely
@@ -347,10 +351,15 @@ history twice, once in a form nobody reads.
    it — and the error would be permanent, because the rows it needed are gone. The scheduler enforces
    the order and a test pins it.
 
-4. **One `OUTCOMES_COMPACTED` audit event per pass**, carrying cutoff, rows deleted, runs pinned,
-   duration and the window. A deletion is a state change and is audited — no exceptions (CLAUDE.md).
-   One event per pass rather than per row: the payload answers "what was removed and what was
-   protected", and 100,000 events answering that individually would answer nothing.
+4. **The ledger entry PRECEDES the delete.** `OUTCOMES_COMPACTION_STARTED` (cutoff, window) is written
+   before `compactOlderThan` runs, and `OUTCOMES_COMPACTED` (cutoff, rows deleted, duration, window)
+   after it. The two stores share no transaction, so "delete, then audit" left a window in which rows
+   were irreversibly gone and the only record was a rejected promise the scheduler logs and moves past
+   (Codex review, #528). Written first: no ledger entry, no deletion; and a pass whose completion write
+   fails still names the cutoff its rows were deleted against, from which the keep-set — a deterministic
+   function of the table — reconstructs what went. A deletion is a state change and is audited — no
+   exceptions (CLAUDE.md). One event per pass rather than per row: the payload answers "what was removed
+   and what was protected", and 100,000 events answering that individually would answer nothing.
 
 5. **`backfill-trend-history` REFUSES to run under a retention window.** It writes synthetic outcome
    rows dated weeks in the past which are nobody's newest — exactly what the next compaction deletes. It

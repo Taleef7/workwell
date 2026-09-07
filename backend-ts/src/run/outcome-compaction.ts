@@ -88,22 +88,31 @@ export async function compactOutcomes(
    * is unbounded and silent, not that a particular number is reached. Pinning by RUN was separately
    * too coarse: one long-open case protected all 100,000 rows of its run.
    */
-  const deleted = await stores.outcomes.compactOlderThan(cutoff);
-  const result: CompactionResult = { cutoff, deleted, durationMs: Date.now() - started };
-
-  // A deletion is a state change, so it is audited — no exceptions (CLAUDE.md). One event per pass,
-  // not per row: the payload answers "what window was applied and how much went", which is the
-  // question an auditor asks, and 100,000 events answering it individually would answer nothing.
-  await stores.events.appendAudit({
-    eventType: "OUTCOMES_COMPACTED",
-    entityType: "outcome",
+  // A deletion is a state change, so it is audited — no exceptions (CLAUDE.md). The ledger entry is
+  // written BEFORE the delete, not after it. The two stores share no transaction, so "delete, then
+  // audit" left a window in which the rows were irreversibly gone and the only record of it was a
+  // rejected promise the scheduler logs and moves past (Codex review, #528). Written first, the intent
+  // record names the window that is about to be applied; if this write fails, nothing is deleted, and
+  // if the delete then fails the ledger says a pass was attempted and against what cutoff. The count is
+  // reconstructible from the cutoff — the keep-set is a deterministic function of the table — so the
+  // completion record below is the convenience, and this one is the guarantee.
+  const base = {
+    entityType: "outcome" as const,
     entityId: null,
     actor: "system",
     refRunId: null,
     refCaseId: null,
     refMeasureVersionId: null,
-    payload: { ...result, retentionDays },
-  });
+  };
+  await stores.events.appendAudit({ ...base, eventType: "OUTCOMES_COMPACTION_STARTED", payload: { cutoff, retentionDays } });
+
+  const deleted = await stores.outcomes.compactOlderThan(cutoff);
+  const result: CompactionResult = { cutoff, deleted, durationMs: Date.now() - started };
+
+  // One completion event per pass, not per row: the payload answers "what window was applied and how
+  // much went", which is the question an auditor asks, and 100,000 events answering it individually
+  // would answer nothing.
+  await stores.events.appendAudit({ ...base, eventType: "OUTCOMES_COMPACTED", payload: { ...result, retentionDays } });
 
   return result;
 }
