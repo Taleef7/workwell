@@ -4,34 +4,23 @@
 > `@`-imported into every session — the Definition of Done makes idempotency + audit invariants
 > mandatory on every PR, so they are load-bearing on every change.
 >
-> The rest of `docs/DATA_MODEL.md` (§1 Scope, §2 Core Tables, §3 Full Table Schemas — 43k chars)
-> stays on demand: it is derivable from `backend-ts/src/stores/postgres/schema-pg.ts` and the
-> SQLite floor `schema.ts`. Read it when touching schema; do not duplicate it here.
+> The rest of `docs/DATA_MODEL.md` (§1 Scope, §2 Core Tables, §3 Full Table Schemas) stays on demand:
+> it is derivable from `backend-ts/src/stores/postgres/schema-pg.ts` and the SQLite floor `schema.ts`.
+> Read it when touching schema; do not duplicate it here.
 >
-> Edit this file, not a copy in `DATA_MODEL.md` — §4–6 there now point here.
+> Edit this file, not a copy in `DATA_MODEL.md` — §4–6 there point here. Section numbers are cited from
+> source comments (§4, §5, §6.2, §6.3) and stay fixed.
 
 ## 4) Idempotency Contract for Case Upsert
 Constraint: `UNIQUE(employee_id, measure_version_id, evaluation_period)`.
 
-### Worked Example
-Inputs:
-- employee: `emp-006`
-- measure version: Audiogram `v1.0`
-- evaluation period: `2026-05-06`
+- A non-compliant outcome with no existing row inserts a new `cases` row (`status=OPEN`, priority from the outcome).
+- The same key on a later run updates the same row (`updated_at`, `last_run_id`, `next_action`, …). No duplicate case is ever created.
+- A `COMPLIANT` outcome on the same key resolves the row (`status=RESOLVED`, `closed_at=NOW()`,
+  `closed_reason='AUTO_RESOLVED'`, `closed_by=NULL` — a **system** closure).
 
-Run A outcome: `OVERDUE`
-- No existing row -> insert new `cases` row (`status=OPEN`, `priority=HIGH`).
-
-Run B outcome (same key): `OVERDUE`
-- Conflict on unique key -> update same row (`updated_at`, `last_run_id`, `next_action`, etc.).
-- No duplicate case created.
-
-Run C outcome (same key): `COMPLIANT`
-- Existing row is resolved (`status=RESOLVED`, `closed_at=NOW()`, `closed_reason='AUTO_RESOLVED'`,
-  `closed_by=NULL` — a **system** closure).
-
-### State-aware upsert (Fable H1/H2, 2026-07-02)
-`upsertFromOutcome` is no longer a blanket `ON CONFLICT DO UPDATE SET status = excluded.status`. Both the
+### State-aware upsert
+`upsertFromOutcome` is not a blanket `ON CONFLICT DO UPDATE SET status = excluded.status`. Both the
 SQLite floor and the Pg ceiling read the current row and apply the shared pure `planCaseUpsert`
 (`backend-ts/src/case/case-logic.ts`):
 - **IN_PROGRESS is preserved** on a still-non-compliant run (an operator's "scheduling" state is never
@@ -39,44 +28,42 @@ SQLite floor and the Pg ceiling read the current row and apply the shared pure `
 - **Human closures are respected.** A case a person closed (`closed_by` set) is **not** reopened by a
   later non-compliant run; only a **system** closure (`closed_by IS NULL`) reopens — either a prior
   auto-resolve (status `RESOLVED`) or an auto-exclusion (status `EXCLUDED`) whose waiver has since
-  lapsed so CQL no longer returns EXCLUDED (Codex P2). Reopening a human-closed case is left an
-  explicit, audited operator action.
-- **Active-case counts include `IN_PROGRESS`.** Because the upsert now preserves `IN_PROGRESS` (rather
-  than flipping it to OPEN), every "active/open case" rollup (`ACTIVE_CASE_STATUSES` = `OPEN` +
+  lapsed so CQL no longer returns EXCLUDED. Reopening a human-closed case is left an explicit, audited
+  operator action.
+- **Active-case counts include `IN_PROGRESS`.** Because the upsert preserves `IN_PROGRESS` (rather than
+  flipping it to OPEN), every "active/open case" rollup (`ACTIVE_CASE_STATUSES` = `OPEN` +
   `IN_PROGRESS`) counts both — otherwise a reconfirmed IN_PROGRESS case would silently drop out of the
-  hierarchy/programs open-case count (Codex P2).
+  hierarchy/programs open-case count.
 - **No `closed_at` drift.** A COMPLIANT outcome on an already-terminal case is a no-op.
 - The upsert returns an `UpsertedCase` (a `CaseRecord` superset carrying a `disposition` of
   `CREATED | UPDATED | REOPENED | RESOLVED | EXCLUDED | UNCHANGED`). The run pipeline emits a matching
   `CASE_*` audit event for every disposition except `UNCHANGED` (an idempotent re-confirm of the same open
   outcome — refreshed silently, so a nightly run records one `RUN_COMPLETED`, not hundreds of noise
-  events). Population runs previously wrote **no** case/run audit events at all — the H1 hard-rule fix.
-  The per-case audit is **best-effort at the run boundary** (Codex P1): it is written after the upsert
+  events). The per-case audit is **best-effort at the run boundary**: it is written after the upsert
   (the disposition is only known post-mutation), and a transient `audit_events` failure is caught and
   logged as a run `WARN` rather than aborting the run — so an otherwise-complete run still finalizes
   instead of being left stuck RUNNING / marked FAILED after the case was already mutated (mirrors the
   `RUN_COMPLETED` best-effort write).
 
-### Resolution is not segment-gated; cycle rollover is closed out (Fable M10/M11, 2026-07-03)
-- **Resolution is never blocked by segment applicability (M11 / Codex P2).** The run pipeline gates case
-  *creation* by `isApplicable`, but two **close-only** bypasses run the upsert even out-of-cohort so a
-  subject who left a cohort still has their open case resolved: (1) **COMPLIANT** — a `planCaseUpsert` no-op
-  when no case exists, so always safe; (2) **EXCLUDED** — but only when an active case already exists for
-  that `(subject, measure, period)` (a run-start snapshot of active cases keys this check), so a fresh
-  waiver excuses an existing open case. EXCLUDED with *no* existing case stays applicability-gated (it would
+### Resolution is not segment-gated; cycle rollover is closed out
+- **Resolution is never blocked by segment applicability.** The run pipeline gates case *creation* by
+  `isApplicable`, but two **close-only** bypasses run the upsert even out-of-cohort so a subject who
+  left a cohort still has their open case resolved: (1) **COMPLIANT** — a `planCaseUpsert` no-op when no
+  case exists, so always safe; (2) **EXCLUDED** — but only when an active case already exists for that
+  `(subject, measure, period)` (a run-start snapshot of active cases keys this check), so a fresh waiver
+  excuses an existing open case. EXCLUDED with *no* existing case stays applicability-gated (it would
   otherwise *insert* a new EXCLUDED case, re-polluting the excluded lists the gate keeps clear). Every
   non-compliant (case-creating) outcome stays gated.
-- **Strictly-older-cycle cases are closed out at run finish (M10).** After a population run's evaluation
+- **Strictly-older-cycle cases are closed out at run finish.** After a population run's evaluation
   loop, any OPEN/`IN_PROGRESS` case for a `(subject, measure)` the run evaluated whose `evaluation_period`
   is **strictly older** than the run's own compliance cycle is closed with `status='RESOLVED'`,
   `closed_reason='CYCLE_ROLLED_OVER'`, `closed_by=NULL` (a **system** closure), and an audited
   `CASE_RESOLVED` event. Comparing cycle *order* (not mere inequality) means a backdated/historical rerun
-  never resolves today's actionable case (Codex P2). This prevents a cycle rollover from orphaning the prior
+  never resolves today's actionable case. This prevents a cycle rollover from orphaning the prior
   period's OPEN case (surfaced by `?status=open`, campaigns with no period filter, CSV exports, MCP
-  `list_noncompliant`) — the `backend-ts` equivalent of the Java V022 migration. Best-effort (a read/audit
-  failure logs a WARN, never aborts the run); scoped to the subjects the run actually evaluated (a
-  SITE/EMPLOYEE run never touches out-of-scope cases). Display/routing only — CQL `Outcome Status` stays
-  authoritative (ADR-008).
+  `list_noncompliant`). Best-effort (a read/audit failure logs a WARN, never aborts the run); scoped to
+  the subjects the run actually evaluated (a SITE/EMPLOYEE run never touches out-of-scope cases).
+  Display/routing only — CQL `Outcome Status` stays authoritative (ADR-008).
 
 ## 5) `evidence_json` Contract (authoritative)
 
@@ -87,7 +74,7 @@ SQLite floor and the Pg ceiling read the current row and apply the shared pure `
 > re-scoping half of itself, so `evidence_json.official.measurementPeriod` is the only place that states
 > which year a given official outcome actually describes; do not infer it from the run row on a mixed run.
 
-### Canonical shape
+### Canonical shape (what a consumer sees on read surfaces)
 ```json
 {
   "expressionResults": [
@@ -97,14 +84,6 @@ SQLite floor and the Pg ceiling read the current row and apply the shared pure `
     { "define": "Days Since Last Audiogram", "result": 420 },
     { "define": "Outcome Status", "result": "OVERDUE" }
   ],
-  "evaluatedResource": {
-    "patientId": "emp-006",
-    "measureId": "audiogram",
-    "measurementPeriod": {
-      "start": "2025-05-06T00:00:00Z",
-      "end": "2026-05-06T00:00:00Z"
-    }
-  },
   "why_flagged": {
     "last_exam_date": "2025-03-10",
     "compliance_window_days": 365,
@@ -117,29 +96,25 @@ SQLite floor and the Pg ceiling read the current row and apply the shared pure `
 }
 ```
 
-### Field-by-field meaning
 - `expressionResults`: raw define outputs from the CQL engine used for traceability.
-- `evaluatedResource`: resource-level context used during evaluation.
 - `why_flagged`: derived/explainer fields used by UI for readable case diagnostics.
 
-> **`why_flagged` is DERIVED AT READ TIME, not persisted (#463).** In the TypeScript backend the
-> persisted `evidence_json` carries **`expressionResults`** — plus **`official`** when the measure is
-> official-routed (load-bearing: MeasureReport/QRDA read `evidence_json.official.populationResults`,
-> ADR-031/046; a MULTI-RATE measure also carries `official.rates`, one population array per group, and a
-> STRATIFIED one `official.strata`, one array per group of `{ id, code, result, appliesResult }` keyed by
-> the artifact's `Measure.group.stratifier.id` — ADR-074; both absent for every single-rate,
-> unstratified measure so their evidence is byte-identical) and **`qrda1Import`** when the outcome arrived through the QRDA-I import path
-> (ADR-051/056 — finalize refuses a run unless every outcome carries it). On an evaluation failure
-> the normal evidence is **replaced** by `{ evaluationError, message }` with status forced to
+> **`why_flagged` is DERIVED AT READ TIME, not persisted (#463).** The persisted `evidence_json` carries
+> **`expressionResults`** — plus **`official`** when the measure is official-routed (load-bearing:
+> MeasureReport/QRDA read `evidence_json.official.populationResults`, ADR-031/046; a MULTI-RATE measure
+> also carries `official.rates`, one population array per group, and a STRATIFIED one `official.strata`,
+> one array per group of `{ id, code, result, appliesResult }` keyed by the artifact's
+> `Measure.group.stratifier.id` — ADR-074; both absent for every single-rate, unstratified measure so
+> their evidence is byte-identical) and **`qrda1Import`** when the outcome arrived through the QRDA-I
+> import path (ADR-051/056 — finalize refuses a run unless every outcome carries it). On an evaluation
+> failure the normal evidence is **replaced** by `{ evaluationError, message }` with status forced to
 > `MISSING_DATA` (`backend-ts/src/run/run-pipeline.ts`; the import path additionally retains its
 > `qrda1Import` provenance). `why_flagged` is computed on read by `deriveWhyFlagged`
 > (`backend-ts/src/case/case-detail-read-model.ts`) from the expression results and measure config.
-> The `evaluatedResource` block in the canonical example above is **Java-era**: it is neither
-> persisted nor derived on any TS surface today. The canonical shape shows the *logical* contract a
-> consumer sees on read surfaces (case detail, exports, MCP tools), not the stored bytes; the
-> section predates the re-platform (ADR-008).
+> The canonical shape above is the *logical* contract a consumer sees on read surfaces (case detail,
+> exports, MCP tools), not the stored bytes.
 
-If evaluation fails for one employee, `evidence_json` includes:
+If evaluation fails for one subject, `evidence_json` includes:
 ```json
 { "evaluationError": "CQL engine failure", "message": "<error text>" }
 ```
@@ -173,20 +148,26 @@ Supports filters: `status`, `measureId`, `priority`, `assignee`, `site`, `caseId
 > (`role`, `roleEligible`, `siteEligible`) are still emitted on a patient deployment; dropping them is a
 > contract change deferred until the pilot's export needs are known.
 
-> **The three panel filters are DIRECTORY joins, not stored columns** (spec §5, `compliance/subject-filters.ts`).
+> **The three panel filters are DIRECTORY joins, not stored columns** (`compliance/subject-filters.ts`).
 > `providerId` matches `EmployeeProfile.providerId` — the PCP's external id (`maui-prov-012`), never a
 > display name. `ageBand` is one of `0-17 | 18-44 | 45-64 | 65+`, derived from `dateOfBirth` against
 > today's **UTC** date at query time, so a row's band can change between two exports taken either side
 > of a birthday. `sex` is `F | M` and matches nothing on a roster that records none (the occupational
-> directory), rather than matching everyone. An unrecognised token for `ageBand` or `sex` is DROPPED —
-> the export is unfiltered rather than empty. The same three apply to the roster, the cases route and
-> the MCP `list_noncompliant` tool, through one predicate; column names and order are unchanged.
+> directory), rather than matching everyone. An unrecognised token for `ageBand` or `sex` is a **400**
+> naming the accepted values — never a silently unfiltered export served under a heading that says
+> "65+". The same three apply to the roster, the cases route and the MCP `list_noncompliant` tool,
+> through one predicate; column names and order are unchanged.
+
+### 6.4 `GET /api/audit-events/export?format=csv`
+Audit event export is append-only and includes event metadata + payload snapshot for timeline reconstruction.
 
 ### 6.5 Outcome Retention Contract (ADR-073)
 
-**Inert unless `WORKWELL_OUTCOME_RETENTION_DAYS` is set** (90 on the Maui deployment; unset on TWH, and
-unset means OFF). Where it is set, one pass runs after each nightly recompute — after that run's quality
-snapshot, never before — and one `OUTCOMES_COMPACTED` audit event records it.
+**Inert unless `WORKWELL_OUTCOME_RETENTION_DAYS` is set** (unset everywhere today, and unset means OFF;
+Maui turns it on only in the same commit as the Postgres keep-set index, ADR-073 d1). Where it is set,
+one pass runs after each nightly recompute — after that run's quality snapshot, never before — and the
+`OUTCOMES_COMPACTED` intent event is written BEFORE the delete and the completion event after it, so
+nothing is deleted without a ledger entry (ADR-073 d4).
 
 **Never deleted, at any age:**
 - the newest `outcomes` row per `(subject_id, measure_id, evaluation_period)` — per PERIOD, so a closed
@@ -202,6 +183,3 @@ the SURVIVING rows, not an error and not a padded set; the run-detail read model
 `retentionNotice` saying so, because a lower count would otherwise read as a smaller run. Long-run
 history is the quality-over-time snapshot store, which compaction never touches. `evidence_json` for a
 deleted row is gone with it — a case's own evidence is preserved by the `last_run_id` pin.
-
-### 6.4 `GET /api/audit-events/export?format=csv`
-Audit event export is append-only and includes event metadata + payload snapshot for timeline reconstruction.
