@@ -1,5 +1,53 @@
 # Journal
 
+## 2026-09-07 (later) — the last two measures go through the second engine, and a blood pressure gets its profile
+
+Two of the four issues left open after ADR-076 merged were not the owner's at all. I had written that
+the CMS130/CMS165 sweep "needs a human dispatch" when I had built the workflow and could dispatch it,
+and I had shipped half of CMS165's fix and called the other half somebody else's ingest work.
+
+**The sweep workflow's first real run failed, which is the argument for running it.** Not on the
+measure: on `corepack pnpm`, which ignores the version `pnpm/action-setup` pins and fetched 12.3.4
+against a lockfile written by 10, dying with `ERR_PNPM_LOCKFILE_CONFIG_MISMATCH` before a single case
+was evaluated. The script now prefers the pnpm already on PATH and falls back to `corepack pnpm@10`.
+Every guard that ran before it behaved: the credential check passed, and the truncation check printed
+`31 value sets, 3172 codes, 0 truncated` after completing AdvancedIllness from VSAC at 1000 → 2000
+codes.
+
+**CMS130 agrees with the second engine on 63 of 64** — the best first result of any measure swept, and
+the eighth measure to be cross-executed. Its single disagreement is `DENEX 1→0` on a case carrying a
+`MedicationRequest` with a dispense duration and no `dosageInstruction`: the same signature the CMS2
+investigation proved by mutation that morning. Recorded as consistent-with rather than proven, which is
+the August standard, because proving it needs a mutated bundle through the credentialed workflow and
+that input does not exist yet.
+
+**CMS165 returned 11 of 68, and it is not a number.** The Java engine puts 56 of 68 patients out of the
+initial population entirely — the shape of a harness or configuration difference, not a disagreement
+about the measure, and precisely the kind of result the check script's degenerate-sweep refusal exists
+to stop being quoted. The obvious explanation was CMS137's period boundary, since this deck starts most
+encounters at the period's first millisecond; the correlation does not hold, because nine cases whose
+every encounter sits at that instant were admitted by Java anyway. So it is written down as an open
+question with the next experiment named — `QICoreCommon.toInterval` over a hypertension `Condition`
+with no explicit onset — and excluded from the running total, which is now **362 of 387 across eight
+measures**. A number that is probably measuring the harness does not belong in a total cited as
+evidence about engines.
+
+**A blood pressure now carries its own profile (#533's other half).** Making `trustMetaProfile`
+per-measure was necessary and useless alone: under it an UNSTAMPED reading is not retrieved at all, and
+WebChart-derived bundles carry no `meta.profile`, so cms165 could never have been routed on real data.
+`prepareForQiCore` stamps `us-core-blood-pressure` on an Observation that already says it is one — the
+LOINC panel code, or both a systolic and a diastolic component. That is normalization by this file's own
+test: the profile is derived from codes the resource already carries and no clinical fact is added. The
+negative cases are the point of the tests — a hemoglobin is not promoted into a blood-pressure measure
+by sitting beside one, half a blood pressure is not one, and the right code in the wrong system is not
+one either. It is the seam every bundle source flows through, so the corpus, WebChart and the fixtures
+are all covered by one change.
+
+**Still genuinely the owner's, and only these:** the cms137 flip, which is a routing decision the locked
+decisions reserve and which turns on whether measure 305 survives the final rule; and the live segment
+repair, which needs an authenticated admin session against the running pilot. Everything else that was
+open is closed or has its next experiment written down.
+
 ## 2026-09-07 — the eight flags MM-1 left open, and CMS2's seven disagreements run to a cause
 
 Every open flag from the last three entries had one thing in common: it was recorded somewhere a person

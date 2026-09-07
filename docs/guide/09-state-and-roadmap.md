@@ -100,9 +100,10 @@ rather than reporting a pass it did not earn. The other six are byte-identical e
   Deferred deliberately: today it moves no external number.
 - **Four CLI entry points still use `node:` builtins** — the last unmoved piece of the package
   extraction.
-- **Measure discrepancies, mostly diagnosed now:** two Procedure-only cases in CMS125 remain open, and
-  CMS130/CMS165 have never been swept — their sidecars need the VSAC credential, so the sweep runs from
-  the manual `cross-engine-sweep` workflow rather than a laptop (issue #532). CMS2's seven numerator
+- **Measure discrepancies, mostly diagnosed now:** two Procedure-only cases in CMS125 remain open, CMS130 and CMS165 were swept on 2026-09-07 from that
+  credentialed workflow: CMS130 agrees on 63/64, and CMS165's 11/68 is recorded as an open question
+  rather than a result, because 56 of 68 patients fall out of the initial population on the Java side
+  (issue #532). CMS2's seven numerator
   flips are **no longer undiagnosed** (2026-09-07): the second engine takes a medication order's start
   from `dosageInstruction.timing.repeat.boundsPeriod` and not from `authoredOn`, proven by mutation on
   all seven. It is the same helper CMS122's and CMS125's disagreements were isolated to

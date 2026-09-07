@@ -53,8 +53,18 @@ helper CMS122's and CMS125's disagreements were isolated to, and it is now impli
 known cross-engine disagreements — 8 of them proven by mutation, 13 consistent-with by inventory. Two
 CMS125 `Procedure`-only cases are still unexplained; CMS137's one is a separately proven period
 boundary. That clears the MM-1c precondition
-§4A.5 put on CMS2's flip; the flip itself is still the owner's workflow edit, and CMS130's sweep still
-needs the credentialed context (the manual `cross-engine-sweep` workflow, issue #532).
+§4A.5 put on CMS2's flip; the flip itself is still the owner's workflow edit.
+
+**CMS130 and CMS165 were swept on 2026-09-07** from the credentialed `cross-engine-sweep` workflow —
+the last two measures never cross-executed, and the reason issue #532 existed
+(`docs/evidence/CROSS_ENGINE_2026-09-07_CMS130_CMS165.md`). **CMS130 agrees on 63 of 64**, its one
+disagreement a `DENEX 1→0` carrying the same no-`dosageInstruction` medication signature as CMS122's and
+CMS125's — attributed by signature, not yet by mutation. **CMS165 returned 11 of 68 and is NOT quoted as
+a cross-engine number:** the Java engine puts 56 of 68 patients out of the initial population entirely,
+which is the shape of a harness difference rather than a disagreement about the measure, and CMS137's
+period-boundary mechanism was ruled out (nine cases whose every encounter sits at the period's first
+millisecond were admitted anyway). Diagnosing it is what remains of #532; the running cross-engine total
+is **362 of 387 across eight measures**, CMS165 deliberately excluded.
 
 > **CMS165 is blocked on more than verification, and the block moved on 2026-09-07.** CMS165 is the only
 > pilot measure whose decisive retrieve identifies a blood pressure by PROFILE alone with no code filter
