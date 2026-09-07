@@ -7,10 +7,14 @@ test.beforeEach(() => {
 
 const OPEN_BUCKETS = ["DUE_SOON", "OVERDUE", "MISSING_DATA"] as const;
 
+// The ACO's five (ADR-072). `hypertension` was here until U1 replaced the pilot's runnable set; it is
+// an AUTHORED occupational measure and has no place on a patient roster.
 const MEASURES = [
   { id: "cms125", label: "Breast Cancer Screening" },
   { id: "cms122", label: "Diabetes" },
-  { id: "hypertension", label: "Hypertension" },
+  { id: "cms2", label: "Depression" },
+  { id: "cms130", label: "Colorectal" },
+  { id: "cms165", label: "Blood Pressure" },
 ] as const;
 
 interface ChipInfo {

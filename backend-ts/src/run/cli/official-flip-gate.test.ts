@@ -178,3 +178,32 @@ test("writeGateJson writes the machine-readable summary under .flip-gate", async
   assert.match(path, /cms165-2027-06-30\.json$/);
   assert.deepEqual(JSON.parse(readFileSync(path, "utf8")), JSON.parse(JSON.stringify(report)));
 });
+
+test("ADR-074: the roster reads EVERY rate, and a rate nobody reaches is a finding", async () => {
+  // Initiation reaches everyone; Engagement reaches nobody — the shape of a corpus whose second-service
+  // data is missing. Rate 1 alone reads as a healthy population; the gate must see rate 2's empty numerator.
+  const twoRates: BatchAndSingle = {
+    async evaluateBatch(_measureId, subjects) {
+      const out = new Map<string, never>();
+      const rate = (numer: boolean) => [
+        { populationType: "initial-population", result: true },
+        { populationType: "denominator", result: true },
+        { populationType: "numerator", result: numer },
+      ];
+      for (const s of subjects) out.set(s.subjectId, { outcome: "OVERDUE", evidence: { official: { populationResults: rate(true), rates: [rate(true), rate(false)] } } } as never);
+      return out as never;
+    },
+    async evaluate() { throw new Error("no single-subject fallback in this stub"); },
+  };
+  const report = await gateMeasure("cms137", subjectsOf(10), "2026-06-30", {
+    executor: twoRates,
+    madie: async () => ({ pass: 45, fail: 0, total: 45 }),
+    loadArtifact: () => ({ manifest: { catalogId: "cms137", effectivePeriod: { start: "2026-01-01", end: "2026-12-31" } } }) as never,
+  });
+  assert.equal(report.roster.rates.length, 2);
+  assert.deepEqual(report.roster.rates[0], { inIpp: 10, denominator: 10, numerator: 10 });
+  assert.deepEqual(report.roster.rates[1], { inIpp: 10, denominator: 10, numerator: 0 });
+  assert.match(report.verdictText, /DO NOT FLIP YET/);
+  assert.match(report.verdictText, /rate 2: 10 subjects in its denominator and NONE in its numerator/);
+  assert.match(renderGate(report), /rate 2: inInitialPopulation=10 denominator=10 numerator=0/);
+});

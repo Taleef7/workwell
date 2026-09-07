@@ -342,3 +342,19 @@ test("every answered request writes an audit event", async () => {
   await call("/api/v1/compliance/emp-nobody/cms125");
   assert.equal(await count(), before + 2);
 });
+
+test("ADR-074: a multi-rate outcome carries an ADDITIVE `rates` block, and a single-rate one does not", async () => {
+  const { rateBlock } = await import("./compliance-api.ts");
+  const rate = (numerator: boolean) => [
+    { populationType: "initial-population", result: true },
+    { populationType: "denominator", result: true },
+    { populationType: "numerator", result: numerator },
+  ];
+  // Initiated, not engaged: `populations` (rate 1) reads as met; `rates` is where the gap is visible.
+  const multi = rateBlock({ status: "OVERDUE", evidence: { official: { populationResults: rate(true), rates: [rate(true), rate(false)] } } } as never, "cms137");
+  assert.deepEqual(multi.rates?.map((r) => r.group), ["Group_1", "Group_2"]);
+  assert.equal(multi.rates![0]!.populations["numerator"], true);
+  assert.equal(multi.rates![1]!.populations["numerator"], false);
+  // ADR-061 stability: nothing is added to a response that has no second rate.
+  assert.deepEqual(rateBlock({ status: "COMPLIANT", evidence: { official: { populationResults: rate(true) } } } as never, "cms125"), {});
+});

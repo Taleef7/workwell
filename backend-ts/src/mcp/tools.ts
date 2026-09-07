@@ -23,6 +23,7 @@ import { toMeasureDetail } from "../measure/measure-read-models.ts";
 import { generateTraceability } from "../measure/measure-traceability.ts";
 import { computeDataReadiness } from "../measure/data-readiness.ts";
 import { complianceRateOf } from "../program/rollup-shared.ts";
+import { AGE_BANDS, isAgeBand, isSex, matchesSubjectFilters } from "../compliance/subject-filters.ts";
 import type { JsonRecord } from "./tool-audit.ts";
 
 export interface McpToolDeps {
@@ -454,6 +455,22 @@ async function listNoncompliant(args: JsonRecord, deps: McpToolDeps): Promise<un
   }
   const measureNameFilter = args.measureName != null ? String(args.measureName).trim() : "";
   const siteFilter = args.site != null ? String(args.site).trim() : "";
+  // All THREE panel filters, not just providerId. DATA_MODEL_CONTRACTS says the same three apply to
+  // the roster, the cases route and this tool "through one predicate"; shipping only one of them here
+  // made that sentence false, and an agent asking for 65+ women would have been handed the whole
+  // worklist with nothing indicating the filter was dropped.
+  const panelFilters = {
+    providerId: args.providerId != null ? String(args.providerId).trim() : null,
+    ageBand: args.ageBand != null ? String(args.ageBand).trim() : null,
+    sex: args.sex != null ? String(args.sex).trim().toUpperCase() : null,
+  };
+  // Refused, not dropped — the same rule as the HTTP routes. The schema's enum already tells a
+  // well-behaved client, but a client that ignores it must get an error, not the whole worklist under
+  // a filter that was never applied.
+  if (panelFilters.ageBand && !isAgeBand(panelFilters.ageBand)) {
+    return safeError("INVALID_ARGUMENT", `ageBand must be one of: ${AGE_BANDS.join(", ")}`);
+  }
+  if (panelFilters.sex && !isSex(panelFilters.sex)) return safeError("INVALID_ARGUMENT", "sex must be F or M");
   const statusFilter = args.status != null ? String(args.status).trim() : "";
   if (statusFilter && !NON_COMPLIANT.includes(statusFilter)) {
     return safeError("INVALID_ARGUMENT", "status must be one of: DUE_SOON, OVERDUE, MISSING_DATA");
@@ -468,6 +485,11 @@ async function listNoncompliant(args: JsonRecord, deps: McpToolDeps): Promise<un
   rows = rows.filter((c) => NON_COMPLIANT.includes(c.currentOutcomeStatus));
   if (statusFilter) rows = rows.filter((c) => c.currentOutcomeStatus === statusFilter);
   if (siteFilter) rows = rows.filter((c) => (directory.employeeById(c.employeeId)?.site ?? "").toLowerCase() === siteFilter.toLowerCase());
+  // The PCP's external id, with the same semantics as every other surface: an unknown id returns an
+  // empty list rather than the whole worklist, which is the leak guard `measureName` above documents.
+  if (panelFilters.providerId || panelFilters.ageBand || panelFilters.sex) {
+    rows = rows.filter((c) => matchesSubjectFilters(directory.employeeById(c.employeeId), panelFilters));
+  }
   rows.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   rows = rows.slice(0, limit);
   const results = rows.map((c) => {
@@ -630,8 +652,8 @@ export const MCP_TOOLS: McpTool[] = [
   },
   {
     name: "list_noncompliant",
-    description: "List non-compliant open cases filtered by measureName, site, and outcome status. Default limit 25, max 100.",
-    inputSchema: { type: "object", properties: { measureName: { type: "string" }, site: { type: "string" }, status: { type: "string", enum: ["DUE_SOON", "OVERDUE", "MISSING_DATA"] }, limit: { type: "number" } } },
+    description: "List non-compliant open cases filtered by measureName, site, providerId (the PCP's external id, e.g. maui-prov-012), ageBand, sex, and outcome status. Default limit 25, max 100.",
+    inputSchema: { type: "object", properties: { measureName: { type: "string" }, site: { type: "string" }, providerId: { type: "string" }, ageBand: { type: "string", enum: ["0-17", "18-44", "45-64", "65+"] }, sex: { type: "string", enum: ["F", "M"] }, status: { type: "string", enum: ["DUE_SOON", "OVERDUE", "MISSING_DATA"] }, limit: { type: "number" } } },
     roles: [CM, ADMIN],
     sensitivity: "restricted",
     handler: listNoncompliant,

@@ -65,6 +65,8 @@ type RunSummary = {
   outcomeCounts: Array<{ status: string; count: number }>;
   dataFreshAsOf: string | null;
   dataFreshnessMinutes: number;
+  /** ADR-073: set when the run predates the retention window, so the counts are survivors. */
+  retentionNotice?: string | null;
 };
 
 type RunLogEntry = {
@@ -932,6 +934,13 @@ export default function RunsPage() {
                   formatRunDuration(selectedRun.durationMs, selectedRun.status)
                 )}
               </p>
+              {selectedRun.retentionNotice ? (
+                // Placed ABOVE the counts rather than beside the timestamps: it changes how every
+                // number under it should be read, so a reader must meet it first.
+                <p className="rounded border border-amber-300 bg-amber-50 p-2 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
+                  {selectedRun.retentionNotice}
+                </p>
+              ) : null}
               <p className="text-xs text-neutral-600 dark:text-neutral-400">Evaluated: {selectedRun.totalEvaluated}</p>
               <p className="text-xs text-neutral-600 dark:text-neutral-400">Cases: {selectedRun.totalCases}</p>
               <p className="text-xs text-neutral-600 dark:text-neutral-400">Pass Rate: {selectedRun.passRate.toFixed(1)}%</p>

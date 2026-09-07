@@ -27,6 +27,9 @@ function normalizeStatusFilter(raw: string | null): string {
   return raw && STATUS_FILTER_VALUES.has(raw) ? raw : "";
 }
 
+/** The bands the backend accepts (compliance/subject-filters.ts). Kept in this order for the select. */
+const AGE_BAND_OPTIONS = ["0-17", "18-44", "45-64", "65+"] as const;
+
 function normalizePanelFilter(raw: string | null): PanelId {
   return raw && PANEL_OPTIONS.some((option) => option.id === raw)
     ? (raw as PanelId)
@@ -51,6 +54,12 @@ export default function CompliancePage() {
   const panel: PanelId = normalizePanelFilter(searchParams.get("panel"));
   const status: string = normalizeStatusFilter(searchParams.get("status"));
   const measureId: string = searchParams.get("measureId") ?? "";
+  // The pilot's panel filters (spec §5). URL-derived like panel/status/measureId, so a deep link into
+  // one PCP's panel — which is how a status chip drills down — renders filtered, and browser
+  // back/forward between two filtered rosters works without any page-local state to fall out of sync.
+  const providerId: string = searchParams.get("providerId") ?? "";
+  const ageBand: string = searchParams.get("ageBand") ?? "";
+  const sex: string = searchParams.get("sex") ?? "";
   const [q, setQ] = useState<string>("");
   const [segment, setSegment] = useState<string>("");
   const [segmentOptions, setSegmentOptions] = useState<{ id: string; name: string }[]>([]);
@@ -74,9 +83,12 @@ export default function CompliancePage() {
   // not only through their selects — the same render-adjust reset covers both paths.
   const [prevPanel, setPrevPanel] = useState(panel);
   const [prevStatus, setPrevStatus] = useState(status);
-  if (panel !== prevPanel || status !== prevStatus) {
+  const [prevSubjectFilters, setPrevSubjectFilters] = useState(`${providerId}|${ageBand}|${sex}`);
+  const subjectFilterKey = `${providerId}|${ageBand}|${sex}`;
+  if (panel !== prevPanel || status !== prevStatus || subjectFilterKey !== prevSubjectFilters) {
     setPrevPanel(panel);
     setPrevStatus(status);
+    setPrevSubjectFilters(subjectFilterKey);
     setPage(1);
   }
 
@@ -111,6 +123,9 @@ export default function CompliancePage() {
     if (status) params.set("status", status);
     if (measureId.trim()) params.set("measureId", measureId.trim());
     if (siteId.trim()) params.set("site", siteId.trim());
+    if (providerId) params.set("providerId", providerId);
+    if (ageBand) params.set("ageBand", ageBand);
+    if (sex) params.set("sex", sex);
     if (debouncedQ.trim()) params.set("q", debouncedQ.trim());
     if (segment) params.set("segment", segment);
     if (tenant) params.set("tenant", tenant);
@@ -152,7 +167,7 @@ export default function CompliancePage() {
     } finally {
       if (reqId === reqIdRef.current) setLoading(false);
     }
-  }, [api, cache, panel, status, measureId, siteId, debouncedQ, segment, tenant, page, pageSize]);
+  }, [api, cache, panel, status, measureId, siteId, providerId, ageBand, sex, debouncedQ, segment, tenant, page, pageSize]);
 
   useEffect(() => {
     // Defer out of the synchronous effect body (matches cases/page.tsx) so the load's setState calls
@@ -255,6 +270,38 @@ export default function CompliancePage() {
     router.push(query ? `${pathname}?${query}` : pathname);
   }, [pathname, router, searchParams]);
 
+  /** One writer for the three panel filters — the same shape `setStatusAndUrl` uses. */
+  const setSubjectFilter = useCallback((key: "providerId" | "ageBand" | "sex", value: string) => {
+    const params = new URLSearchParams(searchParams.toString());
+    if (value) {
+      params.set(key, value);
+    } else {
+      params.delete(key);
+    }
+    const query = params.toString();
+    router.push(query ? `${pathname}?${query}` : pathname);
+  }, [pathname, router, searchParams]);
+
+  const clearSubjectFilters = useCallback(() => {
+    const params = new URLSearchParams(searchParams.toString());
+    for (const key of ["providerId", "ageBand", "sex"]) params.delete(key);
+    const query = params.toString();
+    router.push(query ? `${pathname}?${query}` : pathname);
+  }, [pathname, router, searchParams]);
+
+  // Populated from /api/providers, which is profile-scoped — 40 PCPs on the pilot, the occupational
+  // clinicians on the default deployment.
+  const [providerOptions, setProviderOptions] = useState<{ id: string; name: string; location: string }[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    void api.get<{ id: string; name: string; location: string }[]>("/api/providers")
+      .then((rows) => { if (!cancelled) setProviderOptions(rows ?? []); })
+      // A provider list that fails to load leaves the select empty rather than breaking the roster —
+      // the roster is the page, the filter is an affordance on it.
+      .catch(() => { if (!cancelled) setProviderOptions([]); });
+    return () => { cancelled = true; };
+  }, [api]);
+
   const columns = roster?.columns ?? [];
   const rows = roster?.rows ?? [];
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
@@ -341,6 +388,42 @@ export default function CompliancePage() {
             </select>
           </label>
           <label className="flex flex-col text-xs font-medium">
+            <span className="mb-1">{SUBJECT.singular === "patient" ? "PCP" : "Provider"}</span>
+            <select
+              value={providerId}
+              onChange={(e) => setSubjectFilter("providerId", e.target.value)}
+              className="rounded border border-neutral-300 bg-transparent px-2 py-1 text-sm dark:border-neutral-700"
+            >
+              <option value="">All panels</option>
+              {providerOptions.map((o) => (
+                <option key={o.id} value={o.id}>{o.name} — {o.location}</option>
+              ))}
+            </select>
+          </label>
+          <label className="flex flex-col text-xs font-medium">
+            <span className="mb-1">Age</span>
+            <select
+              value={ageBand}
+              onChange={(e) => setSubjectFilter("ageBand", e.target.value)}
+              className="rounded border border-neutral-300 bg-transparent px-2 py-1 text-sm dark:border-neutral-700"
+            >
+              <option value="">All ages</option>
+              {AGE_BAND_OPTIONS.map((b) => (<option key={b} value={b}>{b}</option>))}
+            </select>
+          </label>
+          <label className="flex flex-col text-xs font-medium">
+            <span className="mb-1">Sex</span>
+            <select
+              value={sex}
+              onChange={(e) => setSubjectFilter("sex", e.target.value)}
+              className="rounded border border-neutral-300 bg-transparent px-2 py-1 text-sm dark:border-neutral-700"
+            >
+              <option value="">All</option>
+              <option value="F">Female</option>
+              <option value="M">Male</option>
+            </select>
+          </label>
+          <label className="flex flex-col text-xs font-medium">
             <span className="mb-1">Search</span>
             <input
               value={q}
@@ -360,6 +443,34 @@ export default function CompliancePage() {
             </select>
           </label>
         </div>
+
+        {providerId || ageBand || sex ? (
+          <div className="flex flex-wrap items-center gap-2 text-xs text-neutral-600 dark:text-neutral-400">
+            <span>Filtered to</span>
+            {providerId ? (
+              <span className="rounded-full bg-neutral-100 px-2 py-0.5 font-medium text-neutral-900 dark:bg-neutral-800 dark:text-neutral-100">
+                {providerOptions.find((o) => o.id === providerId)?.name ?? providerId}
+              </span>
+            ) : null}
+            {ageBand ? (
+              <span className="rounded-full bg-neutral-100 px-2 py-0.5 font-medium text-neutral-900 dark:bg-neutral-800 dark:text-neutral-100">
+                Age {ageBand}
+              </span>
+            ) : null}
+            {sex ? (
+              <span className="rounded-full bg-neutral-100 px-2 py-0.5 font-medium text-neutral-900 dark:bg-neutral-800 dark:text-neutral-100">
+                {sex === "F" ? "Female" : "Male"}
+              </span>
+            ) : null}
+            <button
+              type="button"
+              onClick={clearSubjectFilters}
+              className="font-medium text-primary-700 hover:underline dark:text-primary-400"
+            >
+              Clear
+            </button>
+          </div>
+        ) : null}
 
         {measureId ? (
           <div className="flex items-center gap-2 text-xs text-neutral-600 dark:text-neutral-400">

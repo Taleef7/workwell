@@ -42,6 +42,7 @@ const toRecord = (r: OutcomeRow): OutcomeRecord => ({
 });
 
 const T = `${SPIKE_SCHEMA}.outcomes`;
+const CASES_TABLE = `${SPIKE_SCHEMA}.cases`;
 
 export class PgOutcomeStore implements OutcomeStore {
   constructor(private readonly pool: PgPool) {}
@@ -77,36 +78,65 @@ export class PgOutcomeStore implements OutcomeStore {
     };
   }
 
-  async recordOutcomes(inputs: RecordOutcomeInput[]): Promise<void> {
-    if (inputs.length === 0) return;
+  async recordOutcomes(inputs: RecordOutcomeInput[]): Promise<OutcomeRecord[]> {
+    if (inputs.length === 0) return [];
     // Chunked multi-row INSERT so the trend-history backfill (~100 rows/run × weeks × measures)
     // is a handful of round-trips on Neon, not thousands. 8 columns/row × CHUNK must stay well
     // under Postgres' 65535 bind-parameter cap; 500 rows = 4000 params, comfortably safe.
     const CHUNK = 500;
     const defaultEvaluatedAt = new Date().toISOString();
-    for (let start = 0; start < inputs.length; start += CHUNK) {
-      const chunk = inputs.slice(start, start + CHUNK);
-      const binds: unknown[] = [];
-      const tuples = chunk.map((input) => {
-        const o = binds.length;
-        binds.push(
-          crypto.randomUUID(),
-          input.runId,
-          input.subjectId,
-          input.measureId,
-          input.evaluationPeriod ?? "",
-          input.status,
-          JSON.stringify(input.evidence ?? {}),
-          input.evaluatedAt ?? defaultEvaluatedAt,
+    // Ids and timestamps are minted HERE so the returned records are exactly the rows written, in input
+    // order. A `RETURNING` clause would give the ids back but not the order guarantee for free.
+    const records: OutcomeRecord[] = inputs.map((input) => ({
+      id: crypto.randomUUID(),
+      runId: input.runId,
+      subjectId: input.subjectId,
+      measureId: input.measureId,
+      evaluationPeriod: input.evaluationPeriod ?? "",
+      status: input.status,
+      evidence: input.evidence ?? {},
+      evaluatedAt: input.evaluatedAt ?? defaultEvaluatedAt,
+    }));
+    // ONE transaction across every chunk. The run pipeline persists a whole evaluation chunk (500
+    // subjects x the measures in the run) in one call and then advances its progress by the returned
+    // length — so when the third of six INSERTs failed, 1,000 rows were durably in the table while the
+    // pipeline's terminal audit reported the chunk as unevaluated (Codex review, #528). All or nothing
+    // is the guarantee the caller's accounting assumes; a single client with BEGIN/COMMIT is how the
+    // case-event store already gives it for action + audit.
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      for (let start = 0; start < records.length; start += CHUNK) {
+        const chunk = records.slice(start, start + CHUNK);
+        const binds: unknown[] = [];
+        const tuples = chunk.map((record) => {
+          const o = binds.length;
+          binds.push(
+            record.id,
+            record.runId,
+            record.subjectId,
+            record.measureId,
+            record.evaluationPeriod,
+            record.status,
+            JSON.stringify(record.evidence),
+            record.evaluatedAt,
+          );
+          return `($${o + 1}, $${o + 2}, $${o + 3}, $${o + 4}, $${o + 5}, $${o + 6}, $${o + 7}::jsonb, $${o + 8})`;
+        });
+        await client.query(
+          `INSERT INTO ${T} (id, run_id, subject_id, measure_id, evaluation_period, status, evidence_json, evaluated_at)
+           VALUES ${tuples.join(", ")}`,
+          binds,
         );
-        return `($${o + 1}, $${o + 2}, $${o + 3}, $${o + 4}, $${o + 5}, $${o + 6}, $${o + 7}::jsonb, $${o + 8})`;
-      });
-      await this.pool.query(
-        `INSERT INTO ${T} (id, run_id, subject_id, measure_id, evaluation_period, status, evidence_json, evaluated_at)
-         VALUES ${tuples.join(", ")}`,
-        binds,
-      );
+      }
+      await client.query("COMMIT");
+    } catch (err) {
+      await client.query("ROLLBACK").catch(() => {});
+      throw err;
+    } finally {
+      client.release();
     }
+    return records;
   }
 
   async listOutcomes(runId: string, opts?: { limit?: number; offset?: number }): Promise<OutcomeRecord[]> {
@@ -146,6 +176,35 @@ export class PgOutcomeStore implements OutcomeStore {
     );
     const row = rows[0];
     return row ? toRecord(row) : null;
+  }
+
+  /**
+   * ADR-073 retention — see the SQLite floor for the shape and why both exclusions are expressed in
+   * SQL rather than read into memory.
+   *
+   * `DISTINCT ON` is the Postgres form of "the newest row per (subject, measure, period)"; the floor
+   * uses a correlated MAX because SQLite has no DISTINCT ON. The tie-break is `id DESC` on BOTH stores
+   * — see the store contract's tied-timestamp case — so two rows stamped the same instant resolve the
+   * same way on the ceiling and the floor.
+   */
+  async compactOlderThan(cutoff: string): Promise<number> {
+    const { rowCount } = await this.pool.query(
+      `DELETE FROM ${T} o
+        WHERE o.evaluated_at < $1
+          AND o.id NOT IN (
+            SELECT DISTINCT ON (subject_id, measure_id, evaluation_period) id
+              FROM ${T}
+             ORDER BY subject_id, measure_id, evaluation_period, evaluated_at DESC, id DESC
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM ${CASES_TABLE} c
+             WHERE c.last_run_id = o.run_id
+               AND c.employee_id = o.subject_id
+               AND c.measure_id = o.measure_id
+          )`,
+      [cutoff],
+    );
+    return rowCount ?? 0;
   }
 
   async listOutcomesForEmployee(subjectId: string, limit: number): Promise<EmployeeOutcomeRow[]> {

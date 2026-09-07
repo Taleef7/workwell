@@ -137,6 +137,10 @@ export const REQUIRED_OFFICIAL_CASE_COUNTS: Record<string, number> = {
   cms2: 36,
   cms68: 19,
   cms951: 55,
+  // Counted from the sparse checkout: 45 case DIRECTORIES under
+  // `input/tests/measure/CMS137FHIRSUDTxInitEngagement`. CMS137 is MULTI-RATE, so each of those 45
+  // cases carries an expected vector per rate — the deck is 45 cases, not 90.
+  cms137: 45,
   // Counted from the sparse checkout, not copied from a note: 47 case DIRECTORIES under
   // `input/tests/measure/CMS138FHIRTobaccoScrnCessation` (the three non-directory entries — `.madie`,
   // the Group resource and README.txt — are not cases). Agrees with the figure ADR-047 recorded when

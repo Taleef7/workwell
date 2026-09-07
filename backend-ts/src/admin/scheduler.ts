@@ -14,6 +14,7 @@
  * hand to ctx.waitUntil.
  */
 import type { Stores, StoresEnv } from "../stores/factory.ts";
+import { compactOutcomes, retentionDaysFromEnv } from "../run/outcome-compaction.ts";
 import { getStores } from "../stores/factory.ts";
 import type { HydratedSegment } from "../stores/segment-store.ts";
 import type { EvaluateMeasureBinding } from "@work-well/measure-engine";
@@ -35,11 +36,16 @@ import { emitAlert, resolveAlertChannels, type AlertChannel } from "../run/alert
 // Constants
 // ---------------------------------------------------------------------------
 
-/** Display-only cron expression — the actual interval is SCHEDULER_RUN_INTERVAL_HOURS. */
-export const SCHEDULER_CRON = "0 0 6 * * *";
+/**
+ * Display-only cron expression, DERIVED from the anchor hour so the admin surface cannot show one time
+ * beside a `nextFireAt` at another. It was the literal "0 0 6 * * *" while the anchor defaulted to 12.
+ */
+export const SCHEDULER_CRON = (): string => `0 0 ${SCHEDULER_ANCHOR_HOUR_UTC()} * * *`;
 
 /** How many hours must elapse between scheduler-triggered ALL_PROGRAMS runs. */
 const SCHEDULER_RUN_INTERVAL_HOURS = 24;
+/** The debounce floor: half an hour under a day, as the tick has always used. */
+const DEFAULT_MIN_GAP_MS = (SCHEDULER_RUN_INTERVAL_HOURS - 0.5) * 3_600_000;
 
 // ---------------------------------------------------------------------------
 // In-memory toggle (demo; resets on restart)
@@ -120,7 +126,7 @@ export function isSchedulerEnabled(): boolean {
 
 export interface SchedulerStatus {
   enabled: boolean;
-  /** Display cron expression (human-readable; actual interval is SCHEDULER_RUN_INTERVAL_HOURS). */
+  /** Display cron expression, derived from the anchor hour — which IS the schedule (see `dueAtMs`). */
   cron: string;
   /** ISO-8601 estimated next fire time, or null when disabled or unknown. */
   nextFireAt: string | null;
@@ -134,15 +140,99 @@ export interface SchedulerStatus {
 // Private helper: compute next fire time
 // ---------------------------------------------------------------------------
 
-function computeNextFireAt(lastAt: string | null): string | null {
-  if (!schedulerEnabled) return null;
-  if (!lastAt) {
-    // No prior scheduler run: cadence is derived from persisted runs, so with no history the
-    // scheduler fires on the next tick — the next fire is imminent, not a fixed wall-clock window.
-    // (Report "now" rather than a 06:00 UTC estimate the tick no longer waits for.)
-    return new Date().toISOString();
+/**
+ * The wall-clock hour (UTC) the nightly run is anchored to. 12 UTC is 02:00 in Hawaii, which is what
+ * the pilot wants: the overnight recompute finishes before the clinic opens, every day, at the same
+ * time. Without an anchor the cadence is "24 h after whenever the last one happened", so a single
+ * late run drags every subsequent run later and the nightly job walks around the clock.
+ */
+const SCHEDULER_ANCHOR_HOUR_UTC = (): number => {
+  const raw = process.env.WORKWELL_SCHEDULER_ANCHOR_HOUR_UTC;
+  if (raw === undefined || raw === "") return 12;
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed < 0 || parsed > 23) {
+    console.warn(`[workwell] WORKWELL_SCHEDULER_ANCHOR_HOUR_UTC="${raw}" is not an hour 0-23; using 12.`);
+    return 12;
   }
-  return new Date(new Date(lastAt).getTime() + SCHEDULER_RUN_INTERVAL_HOURS * 3_600_000).toISOString();
+  return parsed;
+};
+
+export interface NextFireInput {
+  /** `startedAt` of the last scheduler run, in ms; null when the deployment has never run one. */
+  lastRunAtMs: number | null;
+  nowMs: number;
+  anchorHourUtc?: number;
+  /** The debounce, as a FLOOR under the anchor rather than the cadence itself. */
+  minGapMs?: number;
+}
+
+/**
+ * When the nightly run next fires.
+ *
+ * **One function, used by BOTH the status display and the tick** — that is the point of it. These
+ * were two independent calculations: this one produced the `nextFireAt` a human reads, while the
+ * decision to actually fire was an inline `elapsed < minGapMs` check inside the tick. Changing only
+ * this one would have moved the displayed time and nothing else, under a commit message claiming the
+ * nightly run had moved.
+ *
+ * The anchor is the schedule; the min-gap is a floor beneath TODAY's anchor only. An anchor that falls
+ * inside the debounce window after a same-day run is treated as served and the next fire is tomorrow's
+ * — otherwise a run at 11:59 followed by the 12:00 anchor would fire twice in a minute. (This floor
+ * was documented here and in DEPLOY.md, passed in by the tick, and never read — Codex review, #528.)
+ *
+ * `lastRunAtMs === null` keeps today's meaning: fire on the next tick. A freshly deployed instance
+ * must not sit idle until the anchor comes round.
+ */
+export function computeNextFireAt(input: NextFireInput): string {
+  if (input.lastRunAtMs === null) return new Date(input.nowMs).toISOString();
+  const due = dueAtMs(input);
+  // Already due (an overdue backfill) reports NOW, matching the never-run case: the answer to "when
+  // does it next fire" is "on the next tick", not the anchor after this one.
+  return new Date(Math.max(due, input.nowMs) === due ? due : input.nowMs).toISOString();
+}
+
+/**
+ * The instant this deployment is next SCHEDULED to run, derived from the last run alone.
+ *
+ * **The rule is: at most one scheduled run per UTC day, at the anchor hour.** If the last scheduler run
+ * happened before that day's anchor, the day still owes its run; otherwise the next is the following
+ * day's anchor.
+ *
+ * **Why this is not "last run + a debounce".** The first version floored on `lastRun + 23.5 h` and took
+ * the next anchor at or after that floor — which SKIPS A WHOLE NIGHT for any run starting more than
+ * thirty minutes past the anchor. Measured: a run at 12:30 UTC gave a next fire 47.5 hours later, and
+ * one at 15:00 gave 45 hours, with `shouldFireAt` false straight through the intervening night. The
+ * commonest trigger is the most ordinary one — the first run after a deploy, or after the scheduler is
+ * enabled, fires at whatever the wall clock is, so any working-hours deploy silently cost the pilot the
+ * next night's recompute. A 23.5-hour floor is a CADENCE calibrated to a daily interval; under an
+ * anchor the schedule IS the anchor, and the only thing worth preventing is firing twice for the same
+ * day, which "the last run was before this day's anchor" prevents with no duration to mis-calibrate.
+ *
+ * Deliberately independent of `now`: the tick asks "is a run due?", and a function that floors on the
+ * current time can never answer yes — the moment now passes the anchor it starts reporting tomorrow's.
+ * Flooring on `now` is right for a display and wrong for a decision, and the two callers need both.
+ */
+function dueAtMs(input: NextFireInput): number {
+  const anchorHour = input.anchorHourUtc ?? SCHEDULER_ANCHOR_HOUR_UTC();
+  const minGapMs = input.minGapMs ?? DEFAULT_MIN_GAP_MS;
+  const lastRunAtMs = input.lastRunAtMs ?? 0;
+  const last = new Date(lastRunAtMs);
+  const anchorOn = (addDays: number) =>
+    Date.UTC(last.getUTCFullYear(), last.getUTCMonth(), last.getUTCDate() + addDays, anchorHour, 0, 0, 0);
+  const owedToday = anchorOn(0);
+  // The floor applies to TODAY's anchor only. A scheduler run earlier the same day — the first run after
+  // enabling at 11:59, or an overdue backfill — has already given the day its recompute; letting the
+  // 12:00 anchor fire a minute later is a second 20,000-patient run for the same data, which is what
+  // the documented debounce exists to prevent (Codex review, #528). Tomorrow's anchor is never pushed:
+  // it is at most 24 h after any post-anchor run, and pushing it is the night-skipping defect this
+  // function's header describes.
+  const todayStillOwed = lastRunAtMs < owedToday && owedToday - lastRunAtMs >= minGapMs;
+  return todayStillOwed ? owedToday : anchorOn(1);
+}
+
+export function shouldFireAt(input: NextFireInput): boolean {
+  if (input.lastRunAtMs === null) return true;
+  return input.nowMs >= dueAtMs(input);
 }
 
 // ---------------------------------------------------------------------------
@@ -159,8 +249,10 @@ export async function getSchedulerStatusFromStores(stores: Stores): Promise<Sche
   const lastRunStatus = schedulerRun?.status ?? "unknown";
   return {
     enabled: schedulerEnabled,
-    cron: SCHEDULER_CRON,
-    nextFireAt: computeNextFireAt(lastRunAt),
+    cron: SCHEDULER_CRON(),
+    nextFireAt: schedulerEnabled
+      ? computeNextFireAt({ lastRunAtMs: lastRunAt ? Date.parse(lastRunAt) : null, nowMs: Date.now() })
+      : null,
     lastRunAt,
     lastRunStatus,
   };
@@ -233,14 +325,17 @@ async function runTickLocked(deps: SchedulerTickDeps, nowMs: number): Promise<bo
   // double-fire risk is low; the worst case is one extra idempotent ALL_PROGRAMS recompute.
   // P2-2 fix: targeted single-row query avoids the listRuns page cap.
   const lastSchedulerRun = await deps.stores.runs.getLastRunByTriggeredBy("scheduler");
-  const minGapMs = (SCHEDULER_RUN_INTERVAL_HOURS - 0.5) * 3_600_000;
+  const minGapMs = DEFAULT_MIN_GAP_MS;
   if (lastSchedulerRun) {
-    // Skip if the last scheduler run is less than (interval - 0.5 h) old.
+    // The ANCHOR decides, through the same function the status display reads — not a bare elapsed-time
+    // check. This was an inline `elapsed < minGapMs`, which is a cadence rather than a schedule: one
+    // late run dragged every later run with it and the nightly job walked around the clock.
     const lastStartedMs = new Date(lastSchedulerRun.startedAt).getTime();
-    const elapsed = nowMs - lastStartedMs;
-    if (elapsed < minGapMs) {
-      // Remember when this becomes due so the intervening ticks need no DB round trip at all.
-      nextDueAtMs = lastStartedMs + minGapMs;
+    if (!shouldFireAt({ lastRunAtMs: lastStartedMs, nowMs, minGapMs })) {
+      // Remember when this becomes due so the intervening ticks need no DB round trip at all. The
+      // cached due time is the ANCHOR too, so a tick between the debounce lapsing and the anchor
+      // arriving still skips the query.
+      nextDueAtMs = dueAtMs({ lastRunAtMs: lastStartedMs, nowMs, minGapMs });
       return false;
     }
   }
@@ -263,7 +358,7 @@ async function runTickLocked(deps: SchedulerTickDeps, nowMs: number): Promise<bo
     refRunId: null,
     refCaseId: null,
     refMeasureVersionId: null,
-    payload: { cron: SCHEDULER_CRON, triggeredAt: now.toISOString() },
+    payload: { cron: SCHEDULER_CRON(), triggeredAt: now.toISOString() },
   });
 
   // Build run deps from the injected stores + engine + segments.
@@ -297,9 +392,27 @@ async function runTickLocked(deps: SchedulerTickDeps, nowMs: number): Promise<bo
   // already debounce the next tick — booking the cache here just saves that DB round trip. Doing it
   // BEFORE the (long) finishOrFail also means an overlapping tick during a slow ALL_PROGRAMS run
   // cannot double-fire, without the cache ever running ahead of the durable state it summarises.
-  nextDueAtMs = nowMs + minGapMs;
+  // The ANCHOR, not `now + gap` — the same rule the tick and the display use, so a run that fired
+  // late does not drag the next one late with it.
+  nextDueAtMs = dueAtMs({ lastRunAtMs: nowMs, nowMs, minGapMs });
 
   await finishOrFail(runDeps, planned);
+
+  /**
+   * Retention (ADR-073), AFTER the run and therefore after its quality snapshot — `finishManualRun`
+   * materializes the snapshot as part of finalizing, so compacting before this line would delete the
+   * per-subject rows the aggregate is computed from and the durable history would be built from a
+   * roster with holes in it. The ordering is pinned by `outcome-compaction.test.ts`.
+   *
+   * Inert unless `WORKWELL_OUTCOME_RETENTION_DAYS` is set, and best-effort: a compaction failure must
+   * not fail a run that has already completed and been reported.
+   */
+  await compactOutcomes(deps.stores, { retentionDays: retentionDaysFromEnv(process.env as Record<string, unknown>), now: nowMs })
+    .catch((err) => {
+      console.warn(`[workwell] outcome compaction failed: ${String((err as Error)?.message ?? err)}`);
+      return null;
+    });
+
   return true;
 }
 

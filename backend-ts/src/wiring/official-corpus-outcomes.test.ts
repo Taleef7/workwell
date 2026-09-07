@@ -30,7 +30,7 @@ import { officialMeasureExecutor } from "./official-executor-adapter.ts";
 import { officialTerminologyExpander, loadOfficialTerminology } from "./official-terminology.ts";
 import { loadOfficialArtifact } from "./official-artifacts.ts";
 import { createWorkwellEngine } from "../engine/cql/workwell-engine.ts";
-import { EMPLOYEES } from "../config/deployment-profile.ts";
+import { employees } from "../config/deployment-profile.ts";
 import { buildOfficialOnlyBundle, OFFICIAL_ONLY_CONVERGENCE } from "../engine/synthetic/official-only-bundles.ts";
 
 const EVALUATION_DATE = "2026-07-27";
@@ -125,7 +125,7 @@ for (const generator of SOURCES) {
 // silently report nobody in the population, which no syntax-level test can catch.
 
 const OFFICIAL_ONLY_EVAL = "2027-06-30";
-const MAUI = EMPLOYEES.filter((x) => x.tenantId === "maui");
+const MAUI = employees().filter((x) => x.tenantId === "maui");
 
 for (const [measureId, convergence] of Object.entries(OFFICIAL_ONLY_CONVERGENCE) as Array<[string, Record<string, string>]>)
 {

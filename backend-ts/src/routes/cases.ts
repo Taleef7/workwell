@@ -23,6 +23,7 @@ import type { OutcomeStore } from "../stores/outcome-store.ts";
 import { routedEngineForEnv } from "../wiring/executor-router.ts";
 import { toCaseSummary, type CaseSummary } from "../case/case-read-models.ts";
 import { bucketPeriodForMeasure } from "../run/compliance-period.ts";
+import { matchesSubjectFilters, subjectFiltersFromQuery, subjectFilterErrorBody, SubjectFilterError } from "../compliance/subject-filters.ts";
 import { toCaseDetail } from "../case/case-detail-read-model.ts";
 import { assignCase, escalateCase, resolveCase, CaseActionError, type CaseActionDeps } from "../case/case-actions.ts";
 import { previewOutreach, sendOutreach, updateOutreachDelivery, OutreachError } from "../case/case-outreach.ts";
@@ -302,6 +303,16 @@ export async function handleCases(req: Request, env: CasesEnv, actor = "system")
   const limit = Math.min(500, Math.max(1, Number(q.get("limit") ?? "50") || 50));
   const offset = Math.max(0, Number(q.get("offset") ?? "0") || 0);
   const site = q.get("site")?.trim() || undefined;
+  // An unrecognised panel-filter token is a 400 that names the accepted values — never a filter that
+  // is quietly dropped, which would hand a staff member the whole practice under a heading that says
+  // "65+" (see `subject-filters.ts`).
+  let subjectFilters;
+  try {
+    subjectFilters = subjectFiltersFromQuery(q);
+  } catch (error) {
+    if (error instanceof SubjectFilterError) return json(subjectFilterErrorBody(error), 400);
+    throw error;
+  }
   const search = q.get("search")?.trim().toLowerCase() || undefined;
   const from = q.get("from")?.trim() || undefined;
   const to = q.get("to")?.trim() || undefined;
@@ -357,6 +368,12 @@ export async function handleCases(req: Request, env: CasesEnv, actor = "system")
     summaries = summaries.filter((c) => c.evaluationPeriod === bucketPeriodForMeasure(c.measureVersionId, today));
   }
   if (site) summaries = summaries.filter((c) => c.site === site);
+  // The pilot's panel filters, post-filtered against the directory exactly as `site` is — the store
+  // interface is unchanged (spec §5). `employeeLookup` is the same resolver the rest of this route
+  // uses, so a live WebChart subject resolves here too.
+  if (subjectFilters.providerId || subjectFilters.ageBand || subjectFilters.sex) {
+    summaries = summaries.filter((c) => matchesSubjectFilters(employeeLookup(c.employeeId), subjectFilters));
+  }
   if (outcome) summaries = summaries.filter((c) => (c.currentOutcomeStatus ?? "").toUpperCase() === outcome);
   if (search) {
     summaries = summaries.filter(

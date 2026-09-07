@@ -29,7 +29,7 @@ import {
   employeeById,
   providerById,
   type EmployeeProfile,
-  EVALUABLE_EMPLOYEES,
+  evaluableEmployees,
   isRunnableMeasure,
   RUNNABLE_MEASURE_IDS,
 } from "../config/deployment-profile.ts";
@@ -108,7 +108,7 @@ export async function backfillQualityHistory(
   const asOf = args.asOf ?? `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
   const resume = args.resume ?? true;
   const today = deps.today ?? now.toISOString().slice(0, 10);
-  const employees = deps.employees ?? EVALUABLE_EMPLOYEES;
+  const employees = deps.employees ?? evaluableEmployees();
   const computedAt = new Date().toISOString();
 
   // Latest COMPLETED seed:scale run per measure → the bounded mhn fold (same as materialize-run).

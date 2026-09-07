@@ -120,7 +120,11 @@ owner-locked decisions constraining it are in `docs/LOCKED_DECISIONS.md` §4 and
    **all landed by 2026-09-01** — the crosswalk last, in #505 — and the Maui sandbox is live)
    → MM-1 (official-only measure onboarding for CMS2/CMS130/CMS165 — gated ≠ routable ≠ runnable —
    per-measure gated flips, the PY2027 re-vendor, and CMS137 only if measure 305 survives the CY2027
-   final rule) → MM-2 (provider-panel work lists and assignment) → MM-3 (cards that resolve: order
+   final rule; **U1–U3 built by 2026-09-06**: the runnable rule and calendar period (ADR-072), the
+   20,000-patient data-first corpus whose clinical facts follow the year each run scores (ADR-075),
+   and CMS137 vendored, gated 45/45 and read as two rates with its strata carried into the
+   MeasureReport and QRDA III (ADR-074) — all six measures are runnable once routed, and the flips
+   themselves stay the gated workflow edits of MM-1c) → MM-2 (provider-panel work lists and assignment) → MM-3 (cards that resolve: order
    proposals + exception documentation, inside ADR-067's refusals) → MM-4 (encounter-time
    integration). Roadmap §7 tabulates the external dependencies.
 2. **More occupational content (M-E) — deferred behind M-M, not cancelled.** The first

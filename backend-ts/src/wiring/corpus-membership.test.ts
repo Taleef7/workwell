@@ -32,7 +32,7 @@ const canonical = (key: CanonicalKey) => ECQM_CANONICAL_CODES[key];
 /** Union of both vendored artifacts' expansions: OID → member codes. */
 function officialExpansions(): Map<string, ReadonlyArray<{ system: string; code: string }>> {
   const byOid = new Map<string, ReadonlyArray<{ system: string; code: string }>>();
-  for (const catalogId of ["cms122", "cms125", "cms2", "cms130", "cms165"]) {
+  for (const catalogId of ["cms122", "cms125", "cms2", "cms130", "cms165", "cms137"]) {
     const artifact = loadOfficialArtifact(catalogId);
     if (!artifact) continue;
     const loaded = loadOfficialTerminology(artifact);
@@ -61,6 +61,28 @@ test("every canonical code is a member of the official value set it is registere
       `${key}: ${ours.code} (${ours.system}) is not in ${oid} — ${official.length} members, e.g. ` +
         official.slice(0, 3).map((c) => c.code).join(", "),
     );
+  }
+  assert.deepEqual(failures, []);
+});
+
+test("every member of the payer, race, ethnicity and SUD mixes is in the value set its canonical entry names", { skip }, async () => {
+  // The canonical table proves ONE code per set. The mixes the corpus actually draws from — four payer
+  // codes, six race codes, two ethnicity codes, two SUD diagnoses — would otherwise be checked by nobody:
+  // a mix member outside its set is stamped on every patient who draws it and retrieved by no SDE.
+  const { PAYER_TYPE_CODES, RACE_CODES, ETHNICITY_CODES, SUD_CONDITION_CODES } = await import("../engine/cql/bundled-ecqm-expansions.ts");
+  const mixes: Array<[string, ReadonlyArray<{ system: string; code: string }>]> = [
+    [CANONICAL_CODE_VALUE_SETS.payerMedicare, PAYER_TYPE_CODES],
+    [CANONICAL_CODE_VALUE_SETS.raceWhite, RACE_CODES],
+    [CANONICAL_CODE_VALUE_SETS.ethnicityNotHispanic, ETHNICITY_CODES],
+    [CANONICAL_CODE_VALUE_SETS.sudCondition, SUD_CONDITION_CODES],
+  ];
+  const failures: string[] = [];
+  for (const [oid, codes] of mixes) {
+    const official = expansions.get(oid);
+    if (!official) { failures.push(`${oid}: not in the fetched terminology`); continue; }
+    for (const c of codes) {
+      if (!official.some((o) => o.code === c.code && o.system === c.system)) failures.push(`${c.system}|${c.code} is not in ${oid}`);
+    }
   }
   assert.deepEqual(failures, []);
 });
@@ -110,4 +132,130 @@ test("the mammography PROCEDURE codes stay outside the membership contract", { s
       `${procedureCode.code} dropped from the offline expansion — the authored cms125 retrieves it`,
     );
   }
+});
+
+/**
+ * The same contract, applied to what the CORPUS ACTUALLY EMITS.
+ *
+ * The table check above proves each registered constant sits in its own value set. It cannot prove the
+ * bundle builder USES those constants: a hand-typed code in `corpus-bundle.ts` passes the table check
+ * untouched, and the resource it lands on is then silently invisible to the measure — the patient reads
+ * as unscreened while the corpus believes it screened them.
+ *
+ * The assertion is deliberately "every emitted code IS one of the verified constants", not "every
+ * emitted code is in some expansion". The weaker version does not work, and the difference is the exact
+ * bug this project already shipped once: SNOMED 44441009 was registered as `colonoscopy` while actually
+ * being *Flexible fiberoptic sigmoidoscopy*. It IS a member of a vendored expansion — the Flexible
+ * Sigmoidoscopy one — so "in some expansion" passes it happily. Only "is a constant the table verified
+ * against its OWN OID" catches it, and that composes: table test says each constant is in its correct
+ * value set, this says the corpus stamps nothing else.
+ */
+test("the corpus stamps only codes the canonical table has verified — never a hand-typed one", async () => {
+  const { corpusPatients } = await import("../engine/synthetic/corpus/corpus-patient.ts");
+  const { bundleForPatient } = await import("../engine/synthetic/corpus/corpus-bundle.ts");
+  const { DEFAULT_CORPUS_SEED } = await import("../engine/synthetic/corpus/corpus-parameters.ts");
+  const { MAMMOGRAPHY_PROCEDURE_CPT, SUD_CONDITION_CODES, PAYER_TYPE_CODES, RACE_CODES, ETHNICITY_CODES } =
+    await import("../engine/cql/bundled-ecqm-expansions.ts");
+
+  // Every clinical code the corpus is allowed to stamp: the canonical table (each member verified
+  // against its own OID by the test above), the mammography CPT (deliberately outside the value-set
+  // contract, ADR-044), and the exception code the cms2 artifact retrieves by direct reference.
+  const allowed = new Set<string>();
+  for (const c of Object.values(ECQM_CANONICAL_CODES)) allowed.add(`${c.system}|${c.code}`);
+  allowed.add(`${MAMMOGRAPHY_PROCEDURE_CPT.system}|${MAMMOGRAPHY_PROCEDURE_CPT.code}`);
+  allowed.add("http://snomed.info/sct|720834000"); // declined depression screening (cms2 exception)
+  // The mixes: each array's members share ONE value set with the canonical entry for it, and are kept
+  // outside the canonical table because that table is one code per value set by construction. Their
+  // membership is proved below, per code, against the same expansions.
+  for (const c of [...SUD_CONDITION_CODES, ...PAYER_TYPE_CODES, ...RACE_CODES, ...ETHNICITY_CODES]) allowed.add(`${c.system}|${c.code}`);
+
+  // Systems that carry structure, not clinical meaning: FHIR/HL7 terminology for statuses, categories
+  // and agent roles, and UCUM for units. Excluded by SYSTEM so a new status or unit cannot silently
+  // become an offender — and so that a new CLINICAL system never gets excluded by accident.
+  const NON_CLINICAL = /^(http:\/\/terminology\.hl7\.org|http:\/\/hl7\.org\/fhir|http:\/\/unitsofmeasure\.org)/;
+
+  const offenders = new Set<string>();
+  for (const patient of corpusPatients(DEFAULT_CORPUS_SEED, 500)) {
+    for (const { resource } of bundleForPatient(patient, "2027-12-31").entry) {
+      for (const coding of codingsOf(resource)) {
+        if (NON_CLINICAL.test(coding.system)) continue;
+        if (allowed.has(`${coding.system}|${coding.code}`)) continue;
+        offenders.add(`${(resource as { resourceType: string }).resourceType} ${coding.system}|${coding.code}`);
+      }
+    }
+  }
+  assert.deepEqual(
+    [...offenders].sort(),
+    [],
+    `codes the corpus stamps that are not verified canonical constants:\n${[...offenders].sort().join("\n")}`,
+  );
+});
+
+/** Every `coding`-shaped `{system, code}` anywhere in a resource, however deeply nested. */
+function codingsOf(resource: unknown): Array<{ system: string; code: string }> {
+  const out: Array<{ system: string; code: string }> = [];
+  const walk = (node: unknown): void => {
+    if (Array.isArray(node)) return node.forEach(walk);
+    if (!node || typeof node !== "object") return;
+    const record = node as Record<string, unknown>;
+    if (typeof record.system === "string" && typeof record.code === "string") {
+      out.push({ system: record.system, code: record.code });
+    }
+    Object.values(record).forEach(walk);
+  };
+  walk(resource);
+  return out;
+}
+
+
+/**
+ * The guard the CMS2 follow-up defect walked straight past.
+ *
+ * `ECQM_CANONICAL_CODES` holds two kinds of code: value-set MEMBERS, which a measure retrieves through
+ * a value set, and DIRECT REFERENCES, which classify a result and belong in a `valueCodeableConcept`.
+ * The test above checks only that a stamped code is one of the constants — it has nothing to say about
+ * whether the code is valid in the ROLE it was used in. So stamping the *finding* "Depression screening
+ * positive" as a `ServiceRequest.code` passed every check in this file while making CMS2's numerator
+ * unreachable for every screened-positive patient with a documented follow-up: 1,240 orders at 20,000,
+ * none of them retrievable, the whole cohort reading non-compliant.
+ *
+ * The rule: an ORDERABLE code — one that ends up as `ServiceRequest.code`, `Procedure.code` or
+ * `MedicationRequest.medicationCodeableConcept` — must be registered in `CANONICAL_CODE_VALUE_SETS`,
+ * because that is the only way a measure can retrieve it. A direct-reference code there is a defect.
+ */
+test("an orderable resource never carries a direct-reference code", async () => {
+  const { corpusPatients } = await import("../engine/synthetic/corpus/corpus-patient.ts");
+  const { bundleForPatient } = await import("../engine/synthetic/corpus/corpus-bundle.ts");
+  const { DEFAULT_CORPUS_SEED } = await import("../engine/synthetic/corpus/corpus-parameters.ts");
+  const { CANONICAL_CODE_VALUE_SETS, MAMMOGRAPHY_PROCEDURE_CODES, SUD_CONDITION_CODES } =
+    await import("../engine/cql/bundled-ecqm-expansions.ts");
+
+  const retrievable = new Set<string>();
+  for (const key of Object.keys(CANONICAL_CODE_VALUE_SETS)) {
+    const c = ECQM_CANONICAL_CODES[key as keyof typeof ECQM_CANONICAL_CODES];
+    retrievable.add(`${c.system}|${c.code}`);
+  }
+  for (const c of [...MAMMOGRAPHY_PROCEDURE_CODES, ...SUD_CONDITION_CODES]) retrievable.add(`${c.system}|${c.code}`);
+  // The cms2 exception is retrieved by direct reference on a Procedure, by the artifact's own design.
+  retrievable.add("http://snomed.info/sct|720834000");
+
+  const ORDERABLE = new Set(["ServiceRequest", "Procedure", "MedicationRequest"]);
+  const offenders = new Set<string>();
+  for (const patient of corpusPatients(DEFAULT_CORPUS_SEED, 500)) {
+    for (const { resource } of bundleForPatient(patient, "2027-12-31").entry) {
+      const r = resource as Record<string, unknown>;
+      if (!ORDERABLE.has(String(r.resourceType))) continue;
+      const concept = (r.code ?? r.medicationCodeableConcept) as { coding?: { system: string; code: string }[] } | undefined;
+      for (const coding of concept?.coding ?? []) {
+        if (!retrievable.has(`${coding.system}|${coding.code}`)) {
+          offenders.add(`${String(r.resourceType)} ${coding.system}|${coding.code}`);
+        }
+      }
+    }
+  }
+  assert.deepEqual(
+    [...offenders].sort(),
+    [],
+    "orderable resources carrying a code no measure can retrieve through a value set",
+  );
 });

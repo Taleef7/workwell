@@ -15,6 +15,23 @@ import { officialMeasureSemantics } from "../wiring/official-measure-semantics.t
 const POP_SYSTEM = "http://terminology.hl7.org/CodeSystem/measure-population";
 const IMPROVEMENT_SYSTEM = "http://terminology.hl7.org/CodeSystem/measure-improvement-notation";
 
+/**
+ * One stratifier of one group, in the shape the steward's own MADiE MeasureReports use: keyed by the
+ * artifact's `Measure.group.stratifier.id` (`Stratification_1_1`), with a `true` and a `false` stratum
+ * each carrying the population counts of the subjects in and out of it.
+ */
+export interface Stratifier {
+  id: string;
+  stratum: Array<{ value: { text: "true" | "false" }; population: Population[]; measureScore?: { value: number } }>;
+}
+
+/** Per stratifier of one rate: the counts of the subjects IN the stratum and OUT of it. */
+export interface StratumCounts {
+  id: string;
+  inStratum: PopulationCounts;
+  notInStratum: PopulationCounts;
+}
+
 export interface Population {
   code: { coding: Array<{ system: string; code: string }> };
   count: number;
@@ -31,7 +48,8 @@ export interface MeasureReport {
   reporter: { reference: string };
   period: { start: string; end: string };
   improvementNotation?: { coding: Array<{ system: string; code: string }> };
-  group: Array<{ population: Population[]; measureScore?: { value: number } }>;
+  /** `id` is present only on a MULTI-RATE report, mirroring the artifact's own Group_1/Group_2. */
+  group: Array<{ id?: string; population: Population[]; measureScore?: { value: number }; stratifier?: Stratifier[] }>;
 }
 /** A `collection` Bundle: entry[0] is the summary report; the rest are per-subject individuals. */
 export interface MeasureReportBundle {
@@ -251,6 +269,157 @@ export function membershipFor(outcome: Pick<OutcomeRecord, "status" | "evidence"
 }
 
 /** Reduce outcome buckets to proportion-population membership-label counts (the reconciliation contract). */
+/**
+ * Membership PER RATE. A multi-rate measure persists every rate in `evidence.official.rates`; anything
+ * else has exactly one, so this returns a single-element array and behaves as before.
+ */
+export function membershipRatesFor(
+  outcome: Pick<OutcomeRecord, "status" | "evidence">,
+  measureId: string,
+): PopulationMembership[] {
+  const rates = (outcome.evidence as { official?: { rates?: unknown } } | null | undefined)?.official?.rates;
+  if (!Array.isArray(rates) || rates.length <= 1) return [membershipFor(outcome, measureId)];
+  return rates.map((populationResults) => {
+    const membership = officialMembership({ official: { populationResults } });
+    if (membership) return membership;
+    // An unreadable rate contributes NOTHING rather than rate 1's answer. Falling back to
+    // `membershipFor` here restated Initiation's numbers under Engagement's heading — a plausible
+    // duplicate is worse than a visible zero, because only one of the two is obviously wrong to a
+    // reader. `officialMembership` has already alerted on the unreadable evidence.
+    return { ipp: false, denom: false, denex: false, numer: false, denexcep: false };
+  });
+}
+
+/**
+ * Proportion counts PER RATE, aggregated across subjects — one entry per group the measure declares.
+ *
+ * CMS137 has two (Initiation and Engagement) and they genuinely differ: a patient can start treatment
+ * and not continue it. A MeasureReport that emitted one group would report half the measure, and the
+ * half it dropped is the one the ACO is asking about (ADR-074).
+ */
+export function countPopulationsByRate(outcomes: OutcomeRecord[], measureId: string): PopulationCounts[] {
+  return aggregateByRate(outcomes, measureId).rates;
+}
+
+const addMembership = (counts: PopulationCounts, m: PopulationMembership): void => {
+  if (!m.ipp) return;
+  counts.ipp += 1;
+  if (m.denom) counts.denom += 1;
+  if (m.denex) counts.denex += 1;
+  if (m.numer) counts.numer += 1;
+  if (m.denexcep) counts.denexcep += 1;
+};
+
+/**
+ * Per-subject stratum membership, per rate, off `evidence.official.strata` — `null` when the measure
+ * declares no stratifier (every measure but cms137 today) or the outcome predates their persistence.
+ */
+export function strataRatesFor(outcome: Pick<OutcomeRecord, "evidence">): Array<Array<{ id: string; result: boolean }>> | null {
+  const strata = (outcome.evidence as { official?: { strata?: unknown } } | null | undefined)?.official?.strata;
+  if (!Array.isArray(strata)) return null;
+  return strata.map((rate) =>
+    Array.isArray(rate)
+      ? rate
+          .filter((s): s is { id: string; result: boolean } => typeof (s as { id?: unknown })?.id === "string")
+          .map((s) => ({ id: s.id, result: s.result === true }))
+      : [],
+  );
+}
+
+/**
+ * Populations AND strata per rate, aggregated across subjects — one entry per group the measure
+ * declares, and for each group one entry per stratifier it declares.
+ *
+ * CMS137 has two groups (Initiation and Engagement) and they genuinely differ: a patient can start
+ * treatment and not continue it. A MeasureReport that emitted one group would report half the measure,
+ * and the half it dropped is the one the ACO is asking about (ADR-074). Each group also declares three
+ * age strata, and a QRDA III for a stratified measure has to report every one of them — so they are
+ * counted here, from the same memberships, rather than left to a second pass that could disagree.
+ *
+ * The RATE COUNT this run is reporting on is the widest any subject carries. A subject whose official
+ * evaluation errored has no `official.rates` and yields one membership, and adding it at index 0 only
+ * would inflate rate 1's denominator relative to rate 2 — for two rates whose denominator is the same
+ * CQL expression. That is a cross-rate arithmetic inconsistency no reader could detect, so a subject
+ * that cannot supply every rate is counted in NONE of them, surfaces as the gap between the denominators
+ * and the roster, and is reported in `unmeasured` so the gap has a number (ADR-074 d5).
+ */
+export function aggregateByRate(
+  outcomes: OutcomeRecord[],
+  measureId: string,
+): RateAggregate {
+  const aggregator = createRateAggregator(measureId);
+  for (const outcome of outcomes) aggregator.add(outcome);
+  return aggregator.finish();
+}
+
+export interface RateAggregate {
+  rates: PopulationCounts[];
+  strata: StratumCounts[][];
+  /** Subjects counted in NO rate because they could not supply every rate (ADR-074 d5). */
+  unmeasured: number;
+}
+
+/**
+ * The same aggregation, fed one outcome at a time — so a 20,000-subject run can be summed from PAGED
+ * reads instead of one `listOutcomes(runId)` that materialises 120,000 evidence blobs. Only the
+ * per-subject memberships and stratum flags are retained until `finish()`, because the "counted in no
+ * rate" rule needs the widest rate count any subject carries, which is not known until the last row.
+ */
+export function createRateAggregator(measureId: string): { add(outcome: Pick<OutcomeRecord, "status" | "evidence">): void; finish(): RateAggregate } {
+  const retained: Array<{ memberships: PopulationMembership[]; strata: Array<Array<{ id: string; result: boolean }>> | null }> = [];
+  let declaredRates = 0;
+  return {
+    add(outcome) {
+      const memberships = membershipRatesFor(outcome, measureId);
+      declaredRates = Math.max(declaredRates, memberships.length);
+      retained.push({ memberships, strata: strataRatesFor(outcome) });
+    },
+    finish() {
+      const perRate: PopulationCounts[] = [];
+      const perRateStrata: Array<Map<string, StratumCounts>> = [];
+      let unmeasured = 0;
+      for (const { memberships, strata } of retained) {
+        if (declaredRates > 1 && memberships.length !== declaredRates) {
+          unmeasured += 1;
+          continue;
+        }
+        for (const [index, m] of memberships.entries()) {
+          addMembership((perRate[index] ??= zeroCounts()), m);
+          // A row persisted without `strata` (before 2026-09-06, or by an executor that returned rates
+          // without stratifier results) counts toward the group and toward NO stratum, so on a run that
+          // mixes such rows the true+false strata sum to less than the group. Known and accepted: the
+          // alternative — inventing a stratum for a subject whose evidence names none — is a fabrication.
+          for (const stratum of strata?.[index] ?? []) {
+            const byId = (perRateStrata[index] ??= new Map());
+            const counts = byId.get(stratum.id) ?? { id: stratum.id, inStratum: zeroCounts(), notInStratum: zeroCounts() };
+            byId.set(stratum.id, counts);
+            addMembership(stratum.result ? counts.inStratum : counts.notInStratum, m);
+          }
+        }
+      }
+      const rates = perRate.length > 0 ? perRate : [zeroCounts()];
+      return {
+        rates,
+        strata: rates.map((_, index) => [...(perRateStrata[index]?.values() ?? [])]),
+        unmeasured,
+      };
+    },
+  };
+}
+
+/** The FHIR `stratifier` element for one group, in the steward's own true/false-stratum shape. */
+export function stratifierElements(strata: StratumCounts[]): Stratifier[] {
+  const stratum = (text: "true" | "false", counts: PopulationCounts) => {
+    const effective = counts.denom - counts.denex - counts.denexcep;
+    return {
+      value: { text },
+      population: populations(counts),
+      ...(effective > 0 ? { measureScore: { value: counts.numer / effective } } : {}),
+    };
+  };
+  return strata.map((s) => ({ id: s.id, stratum: [stratum("true", s.inStratum), stratum("false", s.notInStratum)] }));
+}
+
 export function countPopulations(outcomes: OutcomeRecord[], measureId: string): PopulationCounts {
   return outcomes.reduce((counts, outcome) => {
     const m = membershipFor(outcome, measureId);
@@ -423,14 +592,20 @@ export function buildSummaryMeasureReport(
   // decisive: a run evaluates one measure with one engine, and a run where some subjects errored still
   // names the artifact the rest were scored by (ADR-046).
   const official = outcomes.map((o) => officialReportIdentity(o.evidence)).find((i) => i !== null) ?? null;
-  return buildSummaryMeasureReportFromCounts(run, measureId, countPopulations(outcomes, measureId), generatedAt, official);
+  const { rates, strata } = aggregateByRate(outcomes, measureId);
+  return buildSummaryMeasureReportFromCounts(run, measureId, rates.length > 1 ? rates : rates[0]!, generatedAt, official, strata);
 }
 
 /** Summary MeasureReport from pre-aggregated counts (the bounded Fable H4 path). */
 export function buildSummaryMeasureReportFromCounts(
   run: RunRecord,
   measureId: string,
-  c: PopulationCounts,
+  /**
+   * One rate's counts, or an ARRAY with one entry per rate for a multi-rate measure. CMS137 declares
+   * two (Initiation and Engagement) and each becomes its own `group`, which is what the FHIR shape is
+   * for — collapsing them would report half the measure (ADR-074).
+   */
+  c: PopulationCounts | PopulationCounts[],
   generatedAt: string,
   /**
    * The official artifact these counts came from, when they did. Explicit rather than inferred because
@@ -438,12 +613,28 @@ export function buildSummaryMeasureReportFromCounts(
    * semantics by construction (`populationCountsFromStatus` says so), so its caller passes nothing.
    */
   official: OfficialReportIdentity | null = null,
+  /** Per rate, the strata the group declares (empty for an unstratified group). Index-aligned with `c`. */
+  strata: StratumCounts[][] = [],
 ): MeasureReport {
-  const group: MeasureReport["group"][number] = { population: populations(c) };
-  // eCQM proportion score: exceptions are removed from the denominator alongside exclusions.
-  // `denexcep` is 0 for every authored measure, so this is arithmetically unchanged for them.
-  const effectiveDenominator = c.denom - c.denex - c.denexcep;
-  if (effectiveDenominator > 0) group.measureScore = { value: c.numer / effectiveDenominator };
+  const rates = Array.isArray(c) ? c : [c];
+  const groups = rates.map((counts, index) => {
+    // A multi-rate report gets group IDS, matching the steward's own `Group_1`/`Group_2` convention
+    // (the artifact's Measure.group carries the same). Without them a consumer can only tell Initiation
+    // from Engagement by array order, and nothing in the document asserts that order. Single-rate
+    // reports keep no id, so the eight existing measures are byte-identical.
+    const group: MeasureReport["group"][number] = rates.length > 1
+      ? { id: `Group_${index + 1}`, population: populations(counts) }
+      : { population: populations(counts) };
+    // eCQM proportion score: exceptions are removed from the denominator alongside exclusions.
+    // `denexcep` is 0 for every authored measure, so this is arithmetically unchanged for them.
+    const effectiveDenominator = counts.denom - counts.denex - counts.denexcep;
+    if (effectiveDenominator > 0) group.measureScore = { value: counts.numer / effectiveDenominator };
+    // Strata, in the steward's own true/false-stratum shape, only where the group declares them — every
+    // unstratified report is byte-identical.
+    const groupStrata = strata[index] ?? [];
+    if (groupStrata.length > 0) group.stratifier = stratifierElements(groupStrata);
+    return group;
+  });
   return {
     resourceType: "MeasureReport",
     ...reportMetadata(generatedAt),
@@ -452,7 +643,7 @@ export function buildSummaryMeasureReportFromCounts(
     measure: measureCanonical(measureId, official),
     period: reportingPeriod(run, official),
     improvementNotation: { coding: [{ system: IMPROVEMENT_SYSTEM, code: improvementNotation(measureId, official) }] },
-    group: [group],
+    group: groups,
   };
 }
 
@@ -474,7 +665,12 @@ export function buildIndividualMeasureReport(
   measureId: string,
   generatedAt: string,
 ): MeasureReport {
-  const c = asCounts(membershipFor(outcome, measureId));
+  // Per RATE, like the summary. A single-rate measure yields one group and is unchanged; for cms137 an
+  // individual report with one group made the BUNDLE self-contradictory — a two-group summary over 45
+  // one-group individuals (ADR-074).
+  const memberships = membershipRatesFor(outcome, measureId);
+  const perRate = memberships.map(asCounts);
+  const strata = strataRatesFor(outcome);
   const official = officialReportIdentity(outcome.evidence);
   return {
     resourceType: "MeasureReport",
@@ -486,7 +682,20 @@ export function buildIndividualMeasureReport(
     subject: { reference: `Patient/${outcome.subjectId}` },
     period: reportingPeriod(run, official),
     improvementNotation: { coding: [{ system: IMPROVEMENT_SYSTEM, code: improvementNotation(measureId, official) }] },
-    group: [{ population: populations(c) }],
+    group: perRate.map((counts, index) => {
+      const group: MeasureReport["group"][number] = perRate.length > 1
+        ? { id: `Group_${index + 1}`, population: populations(counts) }
+        : { population: populations(counts) };
+      // The subject's OWN stratum membership, as the steward's individual reports carry it: the counts
+      // land in the `true` stratum when the subject is in it and in the `false` one when not.
+      const own = strata?.[index] ?? [];
+      if (own.length > 0) {
+        group.stratifier = stratifierElements(
+          own.map((s) => ({ id: s.id, inStratum: s.result ? counts : zeroCounts(), notInStratum: s.result ? zeroCounts() : counts })),
+        );
+      }
+      return group;
+    }),
   };
 }
 

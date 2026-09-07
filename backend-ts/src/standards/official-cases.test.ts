@@ -535,3 +535,81 @@ test("a bundle missing a value set gets it supplemented, recorded, and passed to
   assert.equal(run.valueSetMode, "measure-bundle+sourced-supplement");
   assert.deepEqual(run.supplementedOids, [missing.url]);
 });
+
+/**
+ * Multi-rate agreement (ADR-074). CMS137 declares two groups — Initiation and Engagement — and 8 of its
+ * 45 committed cases have DIFFERENT expected vectors for the two: patients who initiated treatment and
+ * then did not engage. Comparing only `group[0]`, as every consumer did before, passes all 8 while
+ * never checking the engagement answer at all.
+ */
+test("agreement over a multi-rate measure requires EVERY rate to match, not just the first", async () => {
+  const module = await import("./official-cases.ts");
+  const rate = (numerator: number) => ({
+    "initial-population": 1,
+    denominator: 1,
+    "denominator-exclusion": 0,
+    numerator,
+    "denominator-exception": 0,
+  });
+
+  // Initiated (rate 1 numerator 1) but not engaged (rate 2 numerator 0) — the real shape of those 8.
+  const expected = [rate(1), rate(0)];
+
+  const bothRight = module.classifyPopulationAgreement("cms137", "uuid", expected[0]!, expected[0]!, {
+    expected,
+    actual: [rate(1), rate(0)],
+  });
+  assert.equal(bothRight.pass, true, "matching both rates is agreement");
+
+  // Rate 1 still matches; rate 2 does not. This MUST fail — it is the case the old reader could not see.
+  const secondRateWrong = module.classifyPopulationAgreement("cms137", "uuid", expected[0]!, expected[0]!, {
+    expected,
+    actual: [rate(1), rate(1)],
+  });
+  assert.equal(secondRateWrong.pass, false, "a disagreement on rate 2 alone must fail the case");
+  assert.deepEqual(secondRateWrong.differences, ["numerator"]);
+  assert.equal(secondRateWrong.status, "mismatch");
+
+  // A rate count that does not match the steward's is a mismatch, never a pass: silently comparing
+  // fewer rates than the measure declares is the exact failure this guards.
+  const missingRate = module.classifyPopulationAgreement("cms137", "uuid", expected[0]!, expected[0]!, {
+    expected,
+    actual: [rate(1)],
+  });
+  assert.equal(missingRate.pass, false, "one rate returned for a two-rate measure is not agreement");
+
+  // Single-rate measures are untouched: no `rates` argument means the original comparison.
+  const single = module.classifyPopulationAgreement("cms125", "uuid", rate(1), rate(1));
+  assert.equal(single.pass, true);
+  assert.equal(module.classifyPopulationAgreement("cms125", "uuid", rate(1), rate(0)).pass, false);
+});
+
+test("the evidence report renders EVERY rate's expected/actual, not rate 1 alone", async () => {
+  // A case whose engine returned two rates against a single-rate expectation: the table must show both
+  // (`r1 ../.. · r2 ../..`) so a reader can see which rate diverged. Rendering `1/1` and PASS for a case
+  // whose second rate failed is how a multi-rate measure's Engagement half went invisible in the committed
+  // report (ADR-074).
+  const module = await import("./official-cases.ts");
+  const loaded = loadedMeasureForRunner();
+  const patientId = loaded.cases[0]!.patientId!;
+  const rate = (numerator: boolean) => [
+    { populationType: "initial-population", result: true },
+    { populationType: "denominator", result: true },
+    { populationType: "denominator-exclusion", result: false },
+    { populationType: "numerator", result: numerator },
+  ];
+  const run = await module.runOfficialMeasureCases(loaded, {
+    calculate: () =>
+      Promise.resolve({
+        results: [{ patientId, detailedResults: [{ populationResults: rate(true) }, { populationResults: rate(false) }], evaluatedResource: [{ resourceType: "Observation", id: "r" }] }],
+      }),
+  });
+  const markdown = module.renderOfficialCaseReport([run], { generatedDate: "2026-09-06", sourceRevision: "ca4b49516de4cbed9f92bfb7c35d97b1bf1022ab" });
+  // IPP · DENOM · DENEX · NUMER · DENEXCEP, each as `r1 e/a · r2 e/a`; the steward declared one rate, so
+  // rate 2's expectation is `—`, and the disagreement on the rate count is a FAIL.
+  assert.match(
+    markdown,
+    /\| r1 1\/1 · r2 —\/1 \| r1 1\/1 · r2 —\/1 \| r1 0\/0 · r2 —\/0 \| r1 1\/1 · r2 —\/0 \| r1 0\/0 · r2 —\/0 \| FAIL \|/,
+    "rate 2's populations are rendered beside rate 1's, and the mismatch is visible",
+  );
+});

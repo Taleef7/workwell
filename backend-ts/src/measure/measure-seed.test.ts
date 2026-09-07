@@ -47,6 +47,7 @@ const LEGACY_ROWS = [
   { legacyId: "cms2v15", catalogId: "cms2" },
   { legacyId: "cms130v14", catalogId: "cms130" },
   { legacyId: "cms165v14", catalogId: "cms165" },
+  { legacyId: "cms137v14", catalogId: "cms137" },
 ] as const;
 
 async function seedLegacyRow(store: MeasureStore, legacyId: string, catalogId: string, edited = false): Promise<void> {
@@ -59,7 +60,7 @@ async function seedLegacyRow(store: MeasureStore, legacyId: string, catalogId: s
     tags: [...catalog.tags],
     version: catalog.version,
     cqlText: "",
-    spec: edited ? { ...OFFICIAL_ONLY_PRE_CHANGE[catalogId as "cms2" | "cms130" | "cms165"], description: `${OFFICIAL_ONLY_PRE_CHANGE[catalogId as "cms2" | "cms130" | "cms165"].description} (edited)` } : OFFICIAL_ONLY_PRE_CHANGE[catalogId as "cms2" | "cms130" | "cms165"],
+    spec: edited ? { ...OFFICIAL_ONLY_PRE_CHANGE[catalogId as keyof typeof OFFICIAL_ONLY_PRE_CHANGE], description: `${OFFICIAL_ONLY_PRE_CHANGE[catalogId as keyof typeof OFFICIAL_ONLY_PRE_CHANGE].description} (edited)` } : OFFICIAL_ONLY_PRE_CHANGE[catalogId as keyof typeof OFFICIAL_ONLY_PRE_CHANGE],
     compileStatus: "NOT_COMPILED",
     versionId: `${legacyId}-${catalog.version}`,
     status: "Draft",

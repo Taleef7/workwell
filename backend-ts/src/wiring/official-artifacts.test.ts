@@ -26,7 +26,13 @@ test("the expected measures are vendored", () => {
   // CMS130 and CMS165 are now vendored through the credentialed workflow, both terminology-complete on
   // arrival: capped expansions were resolved and no value sets were absent. No candidates remain absent
   // from this list; `pnpm official:terminology-audit` records the same completeness check.
-  assert.deepEqual(vendored.sort(), ["cms122", "cms125", "cms130", "cms138", "cms165", "cms2", "cms68", "cms951"]);
+  //
+  // CMS137 (MIPS Quality ID 305, SUD treatment initiation and engagement) was added for the Maui pilot:
+  // it is BLUE on the ACO's own measure list, so it is the practice's responsibility rather than
+  // CMS-calculated, and the set is not complete without it. It is the first MULTI-RATE measure here —
+  // two groups, Initiation and Engagement — which is why the gate, the executor and the evidence shape
+  // all had to stop reading `group[0]` (ADR-074).
+  assert.deepEqual(vendored.sort(), ["cms122", "cms125", "cms130", "cms137", "cms138", "cms165", "cms2", "cms68", "cms951"]);
 });
 
 for (const catalogId of vendored) {

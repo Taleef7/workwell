@@ -5,7 +5,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { runProfileChild } from "../test-support/run-profile-child.ts";
-import { toRunListItem, toRunSummary, toRunListItemFromCounts, toRunSummaryFromCounts, toRunLogEntries, matchesRunFilters, toRunOutcomeRows } from "./read-models.ts";
+import { toRunListItem, toRunSummary, toRunListItemFromCounts, toRunSummaryFromCounts, toRunLogEntries, matchesRunFilters, toRunOutcomeRows, retentionNoticeFor } from "./read-models.ts";
 import type { RunRecord } from "../stores/run-store.ts";
 import type { OutcomeRecord, OutcomeStatusCount } from "../stores/outcome-store.ts";
 
@@ -279,4 +279,34 @@ test("default profile — toRunOutcomeRows preserves unresolvable and foreign su
   assert.ok(subjectIds.includes("pat-001"), "pat-001 present on default profile");
   assert.ok(subjectIds.includes("emp-001"), "emp-001 present on default profile");
   assert.ok(subjectIds.includes("cypress-mrn-foreign"), "cypress-mrn-foreign present on default profile");
+});
+
+// ── The compacted-run notice (ADR-073) ───────────────────────────────────────
+
+test("retentionNoticeFor is null with retention off, whatever the run's age", () => {
+  const ancient = { completedAt: "2020-01-01T00:00:00.000Z", startedAt: "2020-01-01T00:00:00.000Z" };
+  assert.equal(retentionNoticeFor(ancient, {}), null);
+  assert.equal(retentionNoticeFor(ancient, { retentionDays: undefined }), null);
+  // A nonsense window is OFF, not a window of zero days — otherwise a typo silently marks every run
+  // on the page as compacted.
+  for (const bad of [0, -1, 1.5]) assert.equal(retentionNoticeFor(ancient, { retentionDays: bad }), null, `retentionDays ${bad}`);
+});
+
+test("a run inside the window carries no notice; one outside it does", () => {
+  const now = Date.parse("2027-12-31T00:00:00.000Z");
+  const inside = { completedAt: "2027-12-01T00:00:00.000Z", startedAt: "2027-12-01T00:00:00.000Z" };
+  const outside = { completedAt: "2027-01-01T00:00:00.000Z", startedAt: "2027-01-01T00:00:00.000Z" };
+  assert.equal(retentionNoticeFor(inside, { retentionDays: 90, now }), null);
+  const notice = retentionNoticeFor(outside, { retentionDays: 90, now });
+  assert.match(String(notice), /90-day/);
+  // The notice must say the counts are SURVIVORS. That is the thing an operator would otherwise
+  // misread — a lower number looking like a smaller run rather than a compacted one.
+  assert.match(String(notice), /survive/i);
+});
+
+test("a run with no usable timestamp gets no notice rather than a guess", () => {
+  assert.equal(retentionNoticeFor({ completedAt: null, startedAt: null as unknown as string }, { retentionDays: 90 }), null);
+  assert.equal(retentionNoticeFor({ completedAt: null, startedAt: "not-a-date" }, { retentionDays: 90 }), null);
+  // Falls back to startedAt when a run never completed.
+  assert.ok(retentionNoticeFor({ completedAt: null, startedAt: "2020-01-01T00:00:00.000Z" }, { retentionDays: 90 }));
 });

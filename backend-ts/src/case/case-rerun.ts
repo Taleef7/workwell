@@ -18,7 +18,7 @@ import type { EvaluateMeasureBinding } from "@work-well/measure-engine";
 import {
   employeeById,
   type EmployeeProfile,
-  EVALUABLE_EMPLOYEES,
+  evaluableEmployees,
   isRunnableMeasure,
 } from "../config/deployment-profile.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
@@ -66,7 +66,7 @@ export async function rerunToVerify(deps: RerunDeps, caseId: string, actor: stri
   // Reject before creating a run or writing outcomes/case/audit state: stale population bundles are
   // never reused and a fabricated MISSING_DATA verification is never persisted.
   if (existing.employeeId.startsWith("wc|")) throw new UnsupportedCaseRerunError();
-  const employees = deps.employees ?? EVALUABLE_EMPLOYEES;
+  const employees = deps.employees ?? evaluableEmployees();
   const employee = employeeById(existing.employeeId);
   // Unknown subject/measure can't be verified — leave the case untouched (no state change).
   // isRunnableMeasure alone (not a binding check): official-only ids are runnable without a binding.

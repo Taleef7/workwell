@@ -1,10 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { buildOfficialOnlyBundle, OFFICIAL_ONLY_CONVERGENCE } from "./official-only-bundles.ts";
-import { EMPLOYEES } from "../../config/deployment-profile.ts";
+import { employees } from "../../config/deployment-profile.ts";
 
 const EVAL = "2027-06-30";
-const e = EMPLOYEES.find((x) => x.tenantId === "maui")!;
+const e = employees().find((x) => x.tenantId === "maui")!;
 
 test("every (measure, target) pair yields a collection bundle with a QI-Core Patient and an office visit", () => {
   for (const id of ["cms2", "cms130", "cms165"] as const) {
@@ -90,7 +90,7 @@ test("cms2 COMPLIANT (adult) uses the adult screening instrument and a negative 
  */
 for (const evaluationDate of ["2027-01-01", "2027-01-15", "2027-02-15", "2027-03-01", "2027-06-30", "2027-12-31"]) {
   test(`every qualifying encounter falls inside the calendar measurement period at ${evaluationDate}`, () => {
-    const employee = EMPLOYEES.find((e) => e.tenantId === "maui")!;
+    const employee = employees().find((e) => e.tenantId === "maui")!;
     const periodStart = `${evaluationDate.slice(0, 4)}-01-01`;
     const periodEnd = `${evaluationDate.slice(0, 4)}-12-31`;
 

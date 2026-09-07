@@ -43,11 +43,25 @@ export interface FqmStatementResult {
   final?: unknown;
 }
 
+/**
+ * One stratifier's result for one subject, as fqm reports it. `strataCode` is the stratifier's
+ * `code.text`, falling back to its `id` (CMS137's stratifiers declare no code, so it IS the id —
+ * `Stratification_1_1`); `strataId` is the `Measure.group.stratifier.id` when present.
+ */
+export interface FqmStratifierResult {
+  strataCode: string;
+  result: boolean;
+  /** In the stratum AND in the population it applies to; fqm computes it for patient-based measures. */
+  appliesResult?: boolean;
+  strataId?: string;
+}
+
 export interface FqmSubjectResult {
   patientId?: string;
   detailedResults?: Array<{
     populationResults?: FqmPopulationResult[];
     statementResults?: FqmStatementResult[];
+    stratifierResults?: FqmStratifierResult[];
   }>;
   /** Resources the engine actually retrieved — the signal that a retrieve matched anything at all. */
   evaluatedResource?: Array<{ resourceType?: string }>;
@@ -339,6 +353,24 @@ export interface OfficialSubjectResult {
    * `populationType`/`result`. Callers persisting regulatory evidence should write this one.
    */
   populationResults: FqmPopulationResult[];
+  /**
+   * EVERY rate the measure declares, in the artifact's own `group` order. `populationResults` above is
+   * `rates[0]`, kept because most measures have exactly one and every existing caller reads it.
+   *
+   * A MULTI-RATE measure is not an edge case to reduce away: CMS137 (MIPS 305) has two — Initiation and
+   * Engagement — and in 8 of its 45 steward-published cases the two DISAGREE, because a patient can
+   * start treatment and then not continue it. Reporting only the first silently answers half the
+   * measure, and the half it drops is the one describing whether care actually continued (ADR-074).
+   */
+  rates: FqmPopulationResult[][];
+  /**
+   * Each rate's STRATIFIER results, index-aligned with `rates`; an empty array for a rate whose group
+   * declares no stratifier. CMS137 declares three per group (age 13-17, 18-64, 65+), and a QRDA III for
+   * a stratified measure is required to report every stratum — a document without them is a wrong
+   * submission that looks complete. Read off fqm's `detailedResults[i].stratifierResults`, which the
+   * package had never surfaced.
+   */
+  strata: FqmStratifierResult[][];
   statements: FqmStatementResult[];
 }
 
@@ -386,11 +418,20 @@ export async function calculateOfficialWithSignal(
   );
   const bySubject = new Map<string, OfficialSubjectResult>();
   for (const subject of output.results ?? []) {
-    const detailed = subject.detailedResults?.[0];
+    const detailedResults = subject.detailedResults ?? [];
+    const detailed = detailedResults[0];
     if (subject.patientId && detailed?.populationResults) {
       bySubject.set(subject.patientId, {
         populations: populationMembership(detailed.populationResults),
         populationResults: detailed.populationResults,
+        rates: detailedResults
+          .map((entry) => entry?.populationResults)
+          .filter((results): results is FqmPopulationResult[] => Array.isArray(results)),
+        // Index-aligned with `rates`: only groups that carried a population array are rates at all,
+        // and each keeps whatever stratifier results fqm attached to that same group.
+        strata: detailedResults
+          .filter((entry) => Array.isArray(entry?.populationResults))
+          .map((entry) => (Array.isArray(entry?.stratifierResults) ? entry.stratifierResults : [])),
         statements: detailed.statementResults ?? [],
       });
     }

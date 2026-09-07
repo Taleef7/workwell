@@ -15,12 +15,13 @@ import type { CaseEventStore } from "../stores/case-event-store.ts";
 import type { EvaluateMeasureBinding } from "@work-well/measure-engine";
 import {
   type EmployeeProfile,
-  EVALUABLE_EMPLOYEES,
+  evaluableEmployees,
   DEPLOYMENT_PROFILE,
   isRunnableMeasure,
 } from "../config/deployment-profile.ts";
 import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
 import { compositeBundleSource } from "../wiring/subject-bundle-source.ts";
+import { runChunkSize } from "../run/run-pipeline.ts";
 import { bucketPeriodForMeasure } from "../run/compliance-period.ts";
 
 export interface ImpactPreviewScope {
@@ -161,17 +162,32 @@ export async function previewImpact(deps: ImpactPreviewDeps, measure: MeasureRec
     return emptyResponse(measure, evaluationDate, warnings);
   }
 
-  const employees = deps.employees ?? EVALUABLE_EMPLOYEES;
+  const employees = deps.employees ?? evaluableEmployees();
   let outcomes: PreviewOutcome[];
   try {
     const bundleSource = compositeBundleSource(process.env as Record<string, unknown>);
-    outcomes = await Promise.all(
-      bundleSource.distribution(employees, measure.measureId).map(async (a) => {
-        const bundle = bundleSource.bundleFor(a.employee, measure.measureId, a.target, evaluationDate);
-        const result = await deps.engine.evaluate({ measureId: measure.measureId, patientBundle: bundle, evaluationDate });
-        return { subjectId: a.employee.externalId, outcome: result.outcome, site: a.employee.site, role: a.employee.role };
-      }),
-    );
+    const assignments = bundleSource.distribution(employees, measure.measureId);
+    /**
+     * CHUNKED, for the reason the run pipeline is (ADR-075). This was a single `Promise.all` over the
+     * whole roster: every subject's bundle built up front and every `engine.evaluate` in flight at
+     * once. At 150 subjects that is fine and at the pilot's 20,000 it is an out-of-memory on the first
+     * preview after the corpus size is raised — a REQUEST path, not an offline job.
+     *
+     * The same `WORKWELL_RUN_CHUNK_SIZE` the pipeline uses, so one knob describes the deployment's
+     * evaluation width rather than two that can disagree.
+     */
+    const CHUNK_SIZE = runChunkSize(process.env as Record<string, unknown>);
+    outcomes = [];
+    for (let start = 0; start < assignments.length; start += CHUNK_SIZE) {
+      const chunk = await Promise.all(
+        assignments.slice(start, start + CHUNK_SIZE).map(async (a) => {
+          const bundle = bundleSource.bundleFor(a.employee, measure.measureId, a.target, evaluationDate);
+          const result = await deps.engine.evaluate({ measureId: measure.measureId, patientBundle: bundle, evaluationDate });
+          return { subjectId: a.employee.externalId, outcome: result.outcome, site: a.employee.site, role: a.employee.role };
+        }),
+      );
+      outcomes.push(...chunk);
+    }
   } catch (err) {
     warnings.push(`CQL evaluation failed: ${String((err as Error)?.message ?? err)}`);
     await writePreviewAudit(deps, measure, evaluationDate, 0, zeroCounts(), warnings, actor);

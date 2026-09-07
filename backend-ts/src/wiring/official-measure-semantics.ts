@@ -34,6 +34,16 @@ export interface OfficialMeasureSemantics {
 }
 
 export const OFFICIAL_MEASURE_SEMANTICS: Readonly<Record<string, OfficialMeasureSemantics>> = {
+  cms137: {
+    numeratorMeansCompliant: true,
+    rationale:
+      "MIPS 305. Rate 1 numerator = treatment initiated within 14 days of a new SUD episode; rate 2 = " +
+      "two or more further services within 34 days of initiating. Both are things that SHOULD happen, " +
+      "and the artifact declares improvementNotation=increase, so being in a numerator is compliance. " +
+      "MULTI-RATE: a subject is COMPLIANT only when every rate they are in the denominator for is met " +
+      "- an initiated-but-not-engaged patient still has an open care gap, and a worklist calling them " +
+      "compliant would hide exactly the follow-up this measure exists to prompt (ADR-074).",
+  },
   cms122: {
     numeratorMeansCompliant: false,
     rationale:

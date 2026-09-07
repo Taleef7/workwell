@@ -31,6 +31,16 @@ on:
         options: [twh, maui]
         default: twh
         required: false
+      run_scale_maui:
+        description: "Run the 20,000-patient scale job (measures the pipeline's wall clock; ~5 min, no VSAC needed)."
+        type: boolean
+        default: false
+        required: false
+  # Weekly rather than nightly: the scale job measures a wall clock, and a number that only ever moves
+  # when somebody happens to look is worth less than one on a fixed cadence. Sunday 03:00 UTC keeps it
+  # clear of the deploy windows.
+  schedule:
+    - cron: "0 3 * * 0"
 
 # The event name is part of the group so a manual dispatch (the e2e jobs) is not cancelled by the push
 # or pull_request run that a `git push` of the same branch starts a second later — measured 2026-09-02:
@@ -282,6 +292,11 @@ jobs:
           pnpm vendor:official --measure CMS138FHIRTobaccoScrnCessation --catalog-id cms138 --strip-elm-annotations --with-tests $COMPLETE
           pnpm vendor:official --measure CMS130FHIRColorectalCancerScrn --catalog-id cms130 --strip-elm-annotations --with-tests $COMPLETE
           pnpm vendor:official --measure CMS165FHIRControllingHighBP --catalog-id cms165 --strip-elm-annotations --with-tests $COMPLETE
+          # CMS137 (MIPS 305) — the pilot ACO's sixth BLUE measure and the only multi-rate one. Its
+          # value sets all ship in the upstream bundle, so $COMPLETE is a no-op for it, but it must be
+          # vendored here all the same: without a sidecar the gate runs it on UPSTREAM terminology,
+          # which the report-write guard correctly refuses to treat as evidence (ADR-074).
+          pnpm vendor:official --measure CMS137FHIRSUDTxInitEngagement --catalog-id cms137 --strip-elm-annotations --with-tests $COMPLETE
       # Re-vendoring must reproduce the COMMITTED artifact byte for byte. Nothing checked this before:
       # the manifest's SHA-256 is written by vendor:official about itself, so it could only ever prove
       # self-consistency. This proves the artifact in Git is what the pinned upstream actually produces.
@@ -321,11 +336,20 @@ jobs:
       # Any new test that loads a sidecar MUST be added here, or it is permanently skipped in CI while
       # reading as covered. That is not hypothetical: PR-8c shipped two such files and had to be told.
       - name: Official terminology + corpus tests (need the fetched sidecar)
+        env:
+          # `corpus-official-population.test.ts` asserts that at least one measure ACTUALLY RAN when the
+          # context is credentialed — otherwise a vendor step that quietly stopped producing sidecars
+          # would make all six tests skip and this job pass. That assertion needs to know whether this
+          # run was credentialed, and the vendor step above is the only thing that knows. Without this
+          # line the guard reads the variable, finds nothing, and returns early every time: a guard
+          # against silent skipping that silently skips.
+          WORKWELL_REQUIRE_OFFICIAL_TERMINOLOGY: ${{ steps.vendor.outputs.credentialed }}
         run: |
           pnpm exec node --import tsx --test \
             src/wiring/official-terminology.test.ts \
             src/wiring/corpus-membership.test.ts \
             src/wiring/official-corpus-outcomes.test.ts \
+            src/wiring/corpus-official-population.test.ts \
             src/standards/literal-diff.test.ts \
             src/engine/ingress/webchart/devdb-official-eval.test.ts \
             src/engine/ingress/webchart/live-official-parity.test.ts \
@@ -547,6 +571,41 @@ jobs:
         with:
           name: playwright-report
           path: e2e/playwright-report/
+
+  run-scale-maui:
+    name: Scale — 20,000-patient run (weekly / manual)
+    runs-on: ubuntu-latest
+    # Never on a push or a PR. It takes minutes and measures a wall clock, which on a shared runner is
+    # noisy enough that gating merges on it would produce flakes rather than findings. The number is
+    # tracked on a cadence and read by a human.
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.run_scale_maui)
+    timeout-minutes: 30
+    # No VSAC secret and no `.official-content` checkout: this job measures the PIPELINE — corpus
+    # generation, bundle construction, chunking, the case upserts, batched persistence — with a stub
+    # engine, and says so in the test's own header. CQL time against the real artifacts is measured in
+    # `official-cases`, which has the credential.
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10.17.1
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Install backend dependencies
+        working-directory: backend-ts
+        run: pnpm install --frozen-lockfile
+      - name: 20,000-patient run
+        working-directory: backend-ts
+        env:
+          WORKWELL_RUN_SCALE_MAUI: "1"
+          WORKWELL_MAUI_CORPUS_SIZE: "20000"
+          # The same chunk size the Maui deploy ships, so the measurement describes the deployment
+          # rather than a default nobody runs.
+          WORKWELL_RUN_CHUNK_SIZE: "500"
+        run: pnpm exec node --import tsx --test src/run/run-scale-maui.test.ts
 
   e2e-maui:
     name: Playwright E2E — Maui pilot (manual)

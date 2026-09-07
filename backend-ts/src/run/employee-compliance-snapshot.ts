@@ -11,7 +11,7 @@
  */
 import {
   type EmployeeProfile,
-  EVALUABLE_EMPLOYEES,
+  evaluableEmployees,
   isRunnableMeasure,
   RUNNABLE_MEASURE_IDS,
 } from "../config/deployment-profile.ts";
@@ -47,7 +47,7 @@ export async function simulateComplianceAsOf(
   asOf: string,
   deps: SnapshotDeps,
 ): Promise<EmployeeComplianceSnapshot | null> {
-  const employees = deps.employees ?? EVALUABLE_EMPLOYEES;
+  const employees = deps.employees ?? evaluableEmployees();
   const employee = employees.find((e) => e.externalId === externalId);
   if (!employee) return null;
 

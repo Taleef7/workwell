@@ -1,5 +1,5 @@
 import React from "react";
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { createNavMock } from "@/test/mocks/next-navigation-reactive";
@@ -200,5 +200,82 @@ describe("CompliancePage URL filters", () => {
       expect(navHolder.current.params.get("status")).toBe("OVERDUE");
       expect(navHolder.current.params.get("measureId")).toBe("cms125");
     });
+  });
+});
+
+describe("CompliancePage panel filters (PCP / age band / sex)", () => {
+  const PROVIDERS = [
+    { id: "maui-prov-012", name: "Dr. Aven Stone", location: "Kahului Clinic" },
+    { id: "maui-prov-003", name: "NP Kira Venn", location: "Kihei Clinic" },
+  ];
+
+  beforeEach(() => {
+    get.mockReset().mockImplementation((url: string) =>
+      String(url) === "/api/providers" ? Promise.resolve(PROVIDERS) : Promise.resolve([]),
+    );
+  });
+
+  it("reads all three from the URL and sends them to the roster request", async () => {
+    navHolder.current.setUrl("/compliance?providerId=maui-prov-012&ageBand=65%2B&sex=F");
+    render(<CompliancePage />);
+    await waitFor(() => {
+      const call = rosterCalls().at(-1)!;
+      expect(call).toContain("providerId=maui-prov-012");
+      expect(call).toContain("ageBand=65%2B");
+      expect(call).toContain("sex=F");
+    });
+  });
+
+  it("sends none of them when the URL carries none — an unfiltered roster stays unfiltered", async () => {
+    navHolder.current.setUrl("/compliance");
+    render(<CompliancePage />);
+    await waitFor(() => expect(rosterCalls().length).toBeGreaterThan(0));
+    const call = rosterCalls().at(-1)!;
+    expect(call).not.toContain("providerId=");
+    expect(call).not.toContain("ageBand=");
+    expect(call).not.toContain("sex=");
+  });
+
+  it("selecting a PCP writes it to the URL, and the options come from /api/providers", async () => {
+    render(<CompliancePage />);
+    await waitFor(() => expect(get).toHaveBeenCalledWith("/api/providers"));
+    const select = await screen.findByLabelText(/PCP|Provider/i);
+    await waitFor(() => expect(screen.getByRole("option", { name: /Dr. Aven Stone/ })).toBeTruthy());
+    await act(async () => {
+      await userEvent.selectOptions(select, "maui-prov-012");
+    });
+    await waitFor(() => expect(navHolder.current.params.get("providerId")).toBe("maui-prov-012"));
+  });
+
+  it("the active filters render as chips, and Clear removes all three at once", async () => {
+    navHolder.current.setUrl("/compliance?providerId=maui-prov-012&ageBand=65%2B&sex=F");
+    render(<CompliancePage />);
+    // The chip shows the provider's NAME, resolved from /api/providers — an id is not a thing a human
+    // recognises as a colleague's panel.
+    // Scoped to the chip row: "Female" is also an <option> in the sex select, so an unscoped query
+    // matches two elements and would pass on the select alone — proving nothing about the chips.
+    const chips = (await screen.findByText(/^Filtered to$/)).parentElement!;
+    await waitFor(() => expect(within(chips).getByText("Dr. Aven Stone")).toBeTruthy());
+    expect(within(chips).getByText("Age 65+")).toBeTruthy();
+    expect(within(chips).getByText("Female")).toBeTruthy();
+
+    await act(async () => {
+      await userEvent.click(within(chips).getByRole("button", { name: /^Clear$/ }));
+    });
+    await waitFor(() => {
+      expect(navHolder.current.params.get("providerId")).toBeNull();
+      expect(navHolder.current.params.get("ageBand")).toBeNull();
+      expect(navHolder.current.params.get("sex")).toBeNull();
+    });
+  });
+
+  it("a failing /api/providers leaves the roster working with an empty select", async () => {
+    // The roster is the page; the filter is an affordance on it. A directory outage must not blank it.
+    get.mockReset().mockImplementation((url: string) =>
+      String(url) === "/api/providers" ? Promise.reject(new Error("boom")) : Promise.resolve([]),
+    );
+    render(<CompliancePage />);
+    await waitFor(() => expect(rosterCalls().length).toBeGreaterThan(0));
+    expect(await screen.findByLabelText(/PCP|Provider/i)).toBeTruthy();
   });
 });

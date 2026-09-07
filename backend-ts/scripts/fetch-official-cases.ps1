@@ -27,6 +27,7 @@ $paths = @(
   "bundles/measure/CMS130FHIRColorectalCancerScrn",
   "bundles/measure/CMS138FHIRTobaccoScrnCessation",
   "bundles/measure/CMS165FHIRControllingHighBP",
+  "bundles/measure/CMS137FHIRSUDTxInitEngagement",
   "input/tests/measure/CMS122FHIRDiabetesAssessGT9Pct",
   "input/tests/measure/CMS125FHIRBreastCancerScreen",
   "input/tests/measure/CMS2FHIRPCSDepScreenAndFollowUp",
@@ -34,6 +35,7 @@ $paths = @(
   "input/tests/measure/CMS951FHIRKidneyHealthEval",
   "input/tests/measure/CMS130FHIRColorectalCancerScrn",
   "input/tests/measure/CMS138FHIRTobaccoScrnCessation",
+  "input/tests/measure/CMS137FHIRSUDTxInitEngagement",
   "input/tests/measure/CMS165FHIRControllingHighBP"
 )
 $ContentDir = [System.IO.Path]::GetFullPath($ContentDir)

@@ -125,7 +125,10 @@ SQLite floor and the Pg ceiling read the current row and apply the shared pure `
 > **`why_flagged` is DERIVED AT READ TIME, not persisted (#463).** In the TypeScript backend the
 > persisted `evidence_json` carries **`expressionResults`** — plus **`official`** when the measure is
 > official-routed (load-bearing: MeasureReport/QRDA read `evidence_json.official.populationResults`,
-> ADR-031/046) and **`qrda1Import`** when the outcome arrived through the QRDA-I import path
+> ADR-031/046; a MULTI-RATE measure also carries `official.rates`, one population array per group, and a
+> STRATIFIED one `official.strata`, one array per group of `{ id, code, result, appliesResult }` keyed by
+> the artifact's `Measure.group.stratifier.id` — ADR-074; both absent for every single-rate,
+> unstratified measure so their evidence is byte-identical) and **`qrda1Import`** when the outcome arrived through the QRDA-I import path
 > (ADR-051/056 — finalize refuses a run unless every outcome carries it). On an evaluation failure
 > the normal evidence is **replaced** by `{ evaluationError, message }` with status forced to
 > `MISSING_DATA` (`backend-ts/src/run/run-pipeline.ts`; the import path additionally retains its
@@ -149,6 +152,8 @@ Columns:
 `runId, measureName, measureVersion, scopeType, triggerType, status, startedAt, completedAt, durationMs, totalEvaluated, compliant, dueSoon, overdue, missingData, excluded, passRate, dataFreshAsOf`
 
 ### 6.2 `GET /api/exports/outcomes?format=csv&runId={optional}`
+Supports filters: `runId`, `site`, `providerId`, `ageBand`, `sex`.
+
 Columns:
 `outcomeId, runId, employeeExternalId, employeeName, role, site, measureName, measureVersion, evaluationPeriod, status, lastExamDate, complianceWindowDays, daysOverdue, roleEligible, siteEligible, waiverStatus, evaluatedAt`
 
@@ -156,7 +161,8 @@ Columns:
 Columns:
 `caseId, employeeExternalId, employeeName, role, site, measureName, measureVersion, evaluationPeriod, status, priority, assignee, currentOutcomeStatus, nextAction, lastRunId, createdAt, updatedAt, closedAt, latestOutreachDeliveryStatus`
 
-Supports filters: `status`, `measureId`, `priority`, `assignee`, `site`, `caseIds`.
+Supports filters: `status`, `measureId`, `priority`, `assignee`, `site`, `caseIds`, `providerId`,
+`ageBand`, `sex`.
 
 > **Subject headers follow the deployment profile.** On a patient deployment
 > (`WORKWELL_INSTANCE=maui`, `DEPLOYMENT_PROFILE.subjectTerm === "patient"`) the two subject columns in
@@ -166,6 +172,36 @@ Supports filters: `status`, `measureId`, `priority`, `assignee`, `site`, `caseId
 > (`backend-ts/src/export/export-csv.ts`, `subjectHeaders`). The remaining occupational columns
 > (`role`, `roleEligible`, `siteEligible`) are still emitted on a patient deployment; dropping them is a
 > contract change deferred until the pilot's export needs are known.
+
+> **The three panel filters are DIRECTORY joins, not stored columns** (spec §5, `compliance/subject-filters.ts`).
+> `providerId` matches `EmployeeProfile.providerId` — the PCP's external id (`maui-prov-012`), never a
+> display name. `ageBand` is one of `0-17 | 18-44 | 45-64 | 65+`, derived from `dateOfBirth` against
+> today's **UTC** date at query time, so a row's band can change between two exports taken either side
+> of a birthday. `sex` is `F | M` and matches nothing on a roster that records none (the occupational
+> directory), rather than matching everyone. An unrecognised token for `ageBand` or `sex` is DROPPED —
+> the export is unfiltered rather than empty. The same three apply to the roster, the cases route and
+> the MCP `list_noncompliant` tool, through one predicate; column names and order are unchanged.
+
+### 6.5 Outcome Retention Contract (ADR-073)
+
+**Inert unless `WORKWELL_OUTCOME_RETENTION_DAYS` is set** (90 on the Maui deployment; unset on TWH, and
+unset means OFF). Where it is set, one pass runs after each nightly recompute — after that run's quality
+snapshot, never before — and one `OUTCOMES_COMPACTED` audit event records it.
+
+**Never deleted, at any age:**
+- the newest `outcomes` row per `(subject_id, measure_id, evaluation_period)` — per PERIOD, so a closed
+  measurement year's evidence is not swept away by the first run of the next one;
+- every row any case cites, matched on `(run_id, subject_id, measure_id)` — open or closed;
+- every `runs` row and its counts — a compacted run still reports what it found.
+
+**Deleted:** every other `outcomes` row with `evaluated_at` before the cutoff — the superseded
+intermediate history.
+
+**What a consumer sees after the window.** §6.2's outcomes CSV for a run older than the window returns
+the SURVIVING rows, not an error and not a padded set; the run-detail read model carries a
+`retentionNotice` saying so, because a lower count would otherwise read as a smaller run. Long-run
+history is the quality-over-time snapshot store, which compaction never touches. `evidence_json` for a
+deleted row is gone with it — a case's own evidence is preserved by the `last_run_id` pin.
 
 ### 6.4 `GET /api/audit-events/export?format=csv`
 Audit event export is append-only and includes event metadata + payload snapshot for timeline reconstruction.

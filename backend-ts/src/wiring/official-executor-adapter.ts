@@ -67,9 +67,11 @@
  *   Worse, it renders OVERDUE as "no record on file", which for cms122 is the factual opposite: OVERDUE
  *   means a *recorded* HbA1c above 9%. Both strings are written for authored recency measures and need
  *   an official-aware branch before anything renders an official outcome to an operator.
- * - **Only group 1 is read.** `detailedResults[0]`, like every existing consumer. Both vendored measures
- *   have exactly one group; several of the roadmap's remaining six do not, and a multi-group artifact
- *   deserves a refusal alongside the scoring guard rather than silently reporting its first group.
+ * - **EVERY rate is read** (ADR-074, superseding this file's original "only group 1" note). A measure
+ *   with more than one group gets one outcome per rate, reduced to the worst among the rates that
+ *   actually measure the subject, and every rate is persisted in `evidence_json.official.rates`.
+ *   CMS137 (MIPS 305) is the first: Initiation and Engagement, and in 8 of its 45 steward cases the two
+ *   disagree. Reading only the first would call those subjects compliant and drop them off the worklist.
  */
 import {
   buildValueSetCache,
@@ -82,6 +84,7 @@ import {
   type FqmCalculate,
   type FqmStatementResult,
   type PopulationMembership,
+  populationMembership,
 } from "@work-well/official-executor";
 import type {
   EvaluateMeasureBinding,
@@ -403,6 +406,44 @@ export function requiredValueSets(artifact: OfficialArtifact): Array<{ oid: stri
  * costs an ELM parse per subject, which is why PR-7b adds measure-major iteration and batches subjects
  * through one `calculateOfficialDetailed` call — the package's batch entry point already exists for it.
  */
+/**
+ * The worst outcome across a measure's rates, and whether the subject was in ANY rate's initial
+ * population.
+ *
+ * "Worst" is ordered by how much attention the subject needs: MISSING_DATA (we cannot tell) is worse
+ * than OVERDUE (a known gap), which is worse than DUE_SOON, which is worse than COMPLIANT. EXCLUDED
+ * only survives when EVERY rate excludes them — a subject excluded from one rate and overdue on
+ * another is overdue, because there is still something to do.
+ */
+const OUTCOME_SEVERITY: Record<OutcomeStatus, number> = {
+  MISSING_DATA: 4,
+  OVERDUE: 3,
+  DUE_SOON: 2,
+  COMPLIANT: 1,
+  EXCLUDED: 0,
+};
+
+export function worstOutcome(
+  perRate: ReadonlyArray<{ outcome: OutcomeStatus; inInitialPopulation: boolean }>,
+): { outcome: OutcomeStatus; inInitialPopulation: boolean } {
+  if (perRate.length === 0) return { outcome: "MISSING_DATA", inInitialPopulation: false };
+  // A rate that does not MEASURE this subject cannot decide their status. `outcomeFromPopulations`
+  // returns MISSING_DATA for out-of-initial-population, and MISSING_DATA is the most severe outcome, so
+  // reducing over every rate would let a rate that ignores the subject outrank one that answered them
+  // fully: COMPLIANT on Initiation + outside Engagement's population would read MISSING_DATA, open a
+  // case, and tell the operator "we cannot tell" about a subject the measure did answer. That directly
+  // contradicted the rule below, which this now actually implements rather than merely asserting.
+  const measured = perRate.filter((r) => r.inInitialPopulation);
+  const considered = measured.length > 0 ? measured : perRate;
+  let worst = considered[0]!;
+  for (const candidate of considered.slice(1)) {
+    if ((OUTCOME_SEVERITY[candidate.outcome] ?? 0) > (OUTCOME_SEVERITY[worst.outcome] ?? 0)) worst = candidate;
+  }
+  // In the initial population of ANY rate is in the initial population of the measure: a subject the
+  // engagement rate ignores is still measured by the initiation rate.
+  return { outcome: worst.outcome, inInitialPopulation: measured.length > 0 };
+}
+
 export function officialMeasureExecutor(deps: OfficialExecutorDeps): OfficialMeasureExecutor {
   /**
    * Terminology is expanded once per measure per EXECUTOR INSTANCE — and an instance lives as long as
@@ -555,10 +596,19 @@ export function officialMeasureExecutor(deps: OfficialExecutorDeps): OfficialMea
       // attributed and is dropped rather than guessed at.
       const subjectId = subjectIdByPatientId.get(patientId);
       if (subjectId === undefined) continue;
-      const { outcome, inInitialPopulation } = outcomeFromPopulations(
-        result.populations,
-        semantics.numeratorMeansCompliant,
+      // MULTI-RATE (ADR-074). A measure with more than one rate gets one outcome per rate, reduced to
+      // the WORST: a subject is COMPLIANT only where every rate they are in the denominator for is met.
+      //
+      // CMS137 is the case that forces this, and its own deck shows why — in 8 of 45 steward-published
+      // cases the two rates disagree, all of them patients who INITIATED treatment and then did not
+      // ENGAGE. Reducing to rate 1 would call every one of those patients compliant and drop them off
+      // the worklist, hiding precisely the follow-up gap the measure exists to surface. Reducing to the
+      // worst keeps them actionable. Regulatory truth is unaffected either way: every rate is persisted
+      // losslessly below, and MeasureReport/QRDA read that rather than this bucket.
+      const perRate = (result.rates?.length ? result.rates : [result.populationResults]).map((populations) =>
+        outcomeFromPopulations(populationMembership(populations), semantics.numeratorMeansCompliant),
       );
+      const { outcome, inInitialPopulation } = worstOutcome(perRate);
       outcomes.set(subjectId, {
         subjectId,
         // The catalog's display name, matching the authored path — not the artifact's machine name
@@ -577,6 +627,25 @@ export function officialMeasureExecutor(deps: OfficialExecutorDeps): OfficialMea
             engine: "fqm-execution",
             artifactSha256: artifact.manifest.sha256,
             populationResults: result.populationResults,
+            // Every rate, verbatim, when the measure declares more than one. Rate 1 stays in
+            // `populationResults` so nothing that reads it today changes.
+            ...((result.rates?.length ?? 0) > 1 ? { rates: result.rates } : {}),
+            // Every STRATUM, per rate, when the measure declares any. `id` is the artifact's own
+            // `Measure.group.stratifier.id` (CMS137: `Stratification_1_1`…), which is what a QRDA III
+            // Reporting Stratum and a MeasureReport stratifier are keyed by. Absent for the eight
+            // unstratified measures, so their persisted evidence is byte-identical.
+            ...(result.strata?.some((rate) => rate.length > 0)
+              ? {
+                  strata: result.strata.map((rate) =>
+                    rate.map((s) => ({
+                      id: s.strataId ?? s.strataCode,
+                      code: s.strataCode,
+                      result: s.result === true,
+                      appliesResult: s.appliesResult === true,
+                    })),
+                  ),
+                }
+              : {}),
             measurementPeriod: period,
           },
         },

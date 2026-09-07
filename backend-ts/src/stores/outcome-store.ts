@@ -117,9 +117,11 @@ export interface OutcomeStore {
    * Batch insert (synthetic trend-history backfill): persist many outcomes for a run in one call.
    * Makes ~100 inserts/run × weeks × measures practical on Neon (the Postgres adapter chunks a
    * multi-row INSERT; the SQLite floor loops inside a single transaction). Equivalent to calling
-   * `recordOutcome` per input. A no-op for an empty array.
+   * `recordOutcome` per input, and returns the same records IN INPUT ORDER — the run pipeline persists
+   * a chunk in one call and still has to fingerprint each row it wrote for the incremental cache.
+   * Returns `[]` for an empty input (a no-op, which must not throw).
    */
-  recordOutcomes(inputs: RecordOutcomeInput[]): Promise<void>;
+  recordOutcomes(inputs: RecordOutcomeInput[]): Promise<OutcomeRecord[]>;
   /**
    * Outcomes for one run, oldest-first. Pass `opts.limit`/`opts.offset` to page the scan (Fable H4):
    * the run-detail grid + the outcomes CSV must never materialize a `seed:scale` run's 120k rows in the
@@ -127,6 +129,30 @@ export interface OutcomeStore {
    */
   listOutcomes(runId: string, opts?: { limit?: number; offset?: number }): Promise<OutcomeRecord[]>;
   getOutcomeById(id: string): Promise<OutcomeRecord | null>;
+  /**
+   * Delete outcome rows older than `cutoff`, KEEPING three things (ADR-073):
+   *  - the newest row per `(subject_id, measure_id, evaluation_period)`, whatever its age. **Per
+   *    PERIOD, not merely per measure**: a calendar-year eCQM's whole 2027 evidence is superseded by
+   *    the first 2028 run, and keeping only the newest-per-measure would delete every 2027 row months
+   *    before anyone could be asked to justify a 2027 rate.
+   *  - every row a CASE cites — matched on `(run_id, subject_id, measure_id)`, so it protects that
+   *    case's own evidence rather than the other 99,999 rows its run happens to contain. Every case,
+   *    not only open ones: a closed case's detail page still resolves its outcome through
+   *    `last_run_id`, and a case somebody resolved is exactly the record re-read when a number is
+   *    challenged.
+   *  - everything at or after `cutoff`.
+   *
+   * Returns the number of rows deleted. Idempotent: a second call with the same cutoff deletes
+   * nothing. **No schema change** — a DELETE against the existing indexes.
+   *
+   * The case exclusion is evaluated IN SQL rather than passed in as a list of ids. A list has to be
+   * read with a limit, and a limit that silently truncates deletes exactly the evidence the exclusion
+   * exists to protect — with no error, because the read succeeded.
+   *
+   * The run rows themselves are never touched. A run's summary counts live on the run and in the
+   * quality snapshots, so a compacted run still reports what it found (ADR-073).
+   */
+  compactOlderThan(cutoff: string): Promise<number>;
   /**
    * The distinct measure ids present in a run, capped at `limit` (default 2) — a bounded
    * `SELECT DISTINCT measure_id … LIMIT` used by the QRDA / MeasureReport endpoints to enforce the

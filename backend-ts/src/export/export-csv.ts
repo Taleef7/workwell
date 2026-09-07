@@ -10,6 +10,8 @@ import { toRunSummaryFromCounts } from "../run/read-models.ts";
 import { DEPLOYMENT_PROFILE, DIRECTORY, employeeById, profileSubjectMatcher, subjectNoun } from "../config/deployment-profile.ts";
 import { directoryForRows } from "../engine/ingress/webchart/live-directory.ts";
 import { isWebChartConfigured, type DataSourceEnv } from "../engine/ingress/data-source.ts";
+import { matchesSubjectFilters, type SubjectFilters } from "../compliance/subject-filters.ts";
+import type { EmployeeProfile } from "../engine/synthetic/employee-catalog.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
 import { toCsv, csvCell } from "./csv.ts";
@@ -100,6 +102,25 @@ function whyFlagged(evidence: unknown, measureId: string) {
   };
 }
 
+/**
+ * Row filters for the outcomes export (DATA_MODEL_CONTRACTS §6.2). `site` and the three panel filters
+ * are directory joins, applied in-app for the reason the cases export applies `site` in-app: the
+ * directory is not in the database.
+ */
+export interface OutcomeExportFilter extends SubjectFilters {
+  site?: string;
+}
+
+function matchesOutcomeFilters(
+  subjectId: string,
+  filters: OutcomeExportFilter,
+  lookup: (externalId: string) => EmployeeProfile | null,
+): boolean {
+  const employee = lookup(subjectId);
+  if (filters.site && (employee?.site ?? "").toLowerCase() !== filters.site.toLowerCase()) return false;
+  return matchesSubjectFilters(employee, filters);
+}
+
 /** One outcome CSV row (shared by the string + streamed builders). */
 function outcomeRowCells(
   o: { id: string; runId: string; subjectId: string; measureId: string; evaluationPeriod: string; status: string; evidence: unknown; evaluatedAt: string },
@@ -148,6 +169,7 @@ export async function outcomesCsv(
   runStore: RunStore,
   runId?: string,
   webChartEnv?: DataSourceEnv,
+  filters: OutcomeExportFilter = {},
 ): Promise<string> {
   // Java exportOutcomeCsv: an explicit runId, otherwise the LATEST run (not every run's
   // outcomes — that would mix historical duplicate employee rows). Export exactly one run.
@@ -157,6 +179,7 @@ export async function outcomesCsv(
   const profileMatch = profileSubjectMatcher(directory.employeeById);
   const out = records
     .filter((r) => profileMatch(r.subjectId))
+    .filter((r) => matchesOutcomeFilters(r.subjectId, filters, directory.employeeById))
     .slice()
     .sort((a, b) => a.subjectId.localeCompare(b.subjectId)) // Java ORDER BY e.external_id ASC
     .map((r) => outcomeRowCells(r, directory.employeeById));
@@ -178,6 +201,7 @@ export function outcomesCsvStream(
   runStore: RunStore,
   runId?: string,
   webChartEnv?: DataSourceEnv,
+  filters: OutcomeExportFilter = {},
 ): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
   let resolvedRunId: string | null | undefined;
@@ -202,7 +226,13 @@ export function outcomesCsvStream(
       offset += records.length;
       const directory = directoryForProfileRows(records, webChartEnv);
       const profileMatch = profileSubjectMatcher(directory.employeeById);
-      const matching = records.filter((o) => profileMatch(o.subjectId));
+      // The SAME filter the un-streamed builder applies. These two produce the same document by
+      // different routes, so a filter added to one and not the other means `?format=csv` and the
+      // streamed export of the same run disagree — and only the large one is streamed, so the
+      // disagreement would only ever appear on the exports that matter.
+      const matching = records
+        .filter((o) => profileMatch(o.subjectId))
+        .filter((o) => matchesOutcomeFilters(o.subjectId, filters, directory.employeeById));
       const chunk = matching.map((o) => "\r\n" + outcomeRowCells(o, directory.employeeById).map(csvCell).join(",")).join("");
       if (chunk) controller.enqueue(encoder.encode(chunk));
       if (records.length < OUTCOME_STREAM_PAGE) controller.close();
@@ -217,7 +247,7 @@ const CASE_HEADERS = [
   "closedAt", "latestOutreachDeliveryStatus",
 ] as const;
 
-export interface CaseExportFilter extends CaseQuery {
+export interface CaseExportFilter extends CaseQuery, SubjectFilters {
   /** Explicit case ids (the worklist's bulk-export of a selected set) — comma list in the route. */
   caseIds?: string[];
   /** Employee site (resolved from the directory, not stored on the case). */
@@ -242,6 +272,9 @@ export async function casesCsv(
   if (filter.site) {
     const site = filter.site.toLowerCase();
     cases = cases.filter((c) => (directory.employeeById(c.employeeId)?.site ?? "").toLowerCase() === site);
+  }
+  if (filter.providerId || filter.ageBand || filter.sex) {
+    cases = cases.filter((c) => matchesSubjectFilters(directory.employeeById(c.employeeId), filter));
   }
   const rows = await Promise.all(
     cases.map(async (c) => {
