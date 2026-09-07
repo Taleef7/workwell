@@ -84,6 +84,82 @@ function unbindable(concept: unknown): boolean {
   return !codings.some((coding) => typeof coding?.system === "string" && coding.system.length > 0);
 }
 
+const US_CORE_BLOOD_PRESSURE = "http://hl7.org/fhir/us/core/StructureDefinition/us-core-blood-pressure";
+/** The two LOINC panel codes a blood pressure is recorded under. Same set `normalize.ts` verified
+ *  against the live WebChart export; kept local because these layers must be able to move apart. */
+const LOINC_BP_PANEL = new Set(["85354-9", "55284-4"]);
+const LOINC_SYSTOLIC = "8480-6";
+const LOINC_DIASTOLIC = "8462-4";
+
+/** LOINC by any of the spellings real bundles use — the canonical URL, a trailing slash, the OID, or
+ *  (as `normalize.ts` also allows) an absent system on a code that is unambiguously LOINC. */
+function isLoinc(system: unknown): boolean {
+  if (typeof system !== "string") return system === undefined || system === null;
+  return /loinc/i.test(system) || system === "urn:oid:2.16.840.1.113883.6.1";
+}
+
+/** The LOINC codes on one CodeableConcept — NOT flattened across a resource and its components. */
+function codesOf(concept: unknown): string[] {
+  const coding = (concept as { coding?: Array<{ system?: unknown; code?: unknown }> } | undefined)?.coding;
+  const out: string[] = [];
+  for (const c of coding ?? []) if (isLoinc(c?.system) && typeof c?.code === "string") out.push(c.code);
+  return out;
+}
+
+/**
+ * Whether this Observation IS a blood pressure, in the shape US Core defines one: a panel code ON THE
+ * RESOURCE, and BOTH a systolic and a diastolic COMPONENT. Both halves are load-bearing, and each closes
+ * a false positive review found in the first version, which flattened the resource's codes and its
+ * components' codes into one list and asked whether any of them was a panel code:
+ *
+ * - **A vitals panel is not a blood pressure.** `[Observation 8716-3 "Vital signs"]` carrying a BP panel
+ *   among its components matched, and would have been stamped — handing cms165 a resource whose other
+ *   components are pulse and temperature.
+ * - **Two codes on one `code` are not two components.** An Observation whose `code.coding` listed both
+ *   `8480-6` and `8462-4` and had no `component` at all matched. cms165 reads systolic and diastolic
+ *   OUT of `component`, so such a resource resolves to null — and being the newest, it would displace a
+ *   real controlled reading and flip a compliant patient.
+ * - **An empty panel is not a reading.** A panel header with no components — a cancelled order, a
+ *   `dataAbsentReason` — matched on its code alone, with the same displacing effect.
+ *
+ * Requiring both halves means this UNDER-stamps rather than over-stamps, which is the right direction:
+ * a missed stamp leaves a measure unable to see a reading, and a wrong one puts a resource that is not a
+ * blood pressure into a compliance population.
+ *
+ * **The stamp never leaves the copy.** Both production callers use `preparedForQiCore`, which clones
+ * first (`official-executor-adapter.ts`, `standards/literal-diff.ts`), and nothing persists or exports
+ * the prepared bundle — `evidence_json` stores population results, not resources. So this cannot put a
+ * profile claim into a QRDA document, a MeasureReport, or anything a third party reads, and the
+ * authored engine sees the same bytes it always did (ADR-008). Two reviewers asked; it is written down
+ * so the third does not have to.
+ */
+function isBloodPressure(resource: Record<string, unknown>): boolean {
+  if (!codesOf(resource.code).some((c) => LOINC_BP_PANEL.has(c))) return false;
+  const components = (resource.component as Array<{ code?: unknown; valueQuantity?: unknown }> | undefined) ?? [];
+  const measured = (loinc: string) =>
+    components.filter((c) => codesOf(c?.code).includes(loinc) && c?.valueQuantity != null);
+  // EXACTLY one of each, each carrying a value. Not "at least one": cms165 reads the systolic out with
+  // `singleton from`, which THROWS on two — a bilateral reading or a duplicated flowsheet row — and a
+  // throw mid-run is the failure the per-measure profile work exists to prevent. And a component with
+  // no `valueQuantity` is not a measurement, so stamping it would assert a US Core conformance the
+  // resource does not have, which is this file's fabrication line (review finding).
+  return measured(LOINC_SYSTOLIC).length === 1 && measured(LOINC_DIASTOLIC).length === 1;
+}
+
+/** Add a profile to `meta.profile` without disturbing any already there. */
+function stampProfile(resource: Record<string, unknown>, profile: string): void {
+  const meta = (resource.meta ??= {}) as { profile?: unknown };
+  // A malformed scalar `meta.profile` is KEPT and appended to, never dropped: this function's job is to
+  // add a profile, and silently discarding whatever a source already asserted is a different act
+  // (review finding).
+  const existing = Array.isArray(meta.profile)
+    ? (meta.profile as string[])
+    : typeof meta.profile === "string"
+      ? [meta.profile]
+      : [];
+  if (!existing.includes(profile)) meta.profile = [...existing, profile];
+}
+
 /**
  * Normalize a bundle IN PLACE so an official QICore artifact's retrieves can see it.
  *
@@ -108,42 +184,6 @@ function unbindable(concept: unknown): boolean {
  * retrieve without an onset, the answer is a corpus that records one, not a value minted here.
  */
 
-const US_CORE_BLOOD_PRESSURE = "http://hl7.org/fhir/us/core/StructureDefinition/us-core-blood-pressure";
-const LOINC_BP_PANEL = new Set(["85354-9", "55284-4"]);
-const LOINC_BP_COMPONENT = new Set(["8480-6", "8462-4"]);
-
-/** Every LOINC code on a resource's `code.coding`, plus its components' codes. */
-function loincCodes(resource: Record<string, unknown>): string[] {
-  const out: string[] = [];
-  const push = (concept: unknown) => {
-    const coding = (concept as { coding?: Array<{ system?: string; code?: string }> } | undefined)?.coding;
-    for (const c of coding ?? []) if (c?.system === "http://loinc.org" && typeof c.code === "string") out.push(c.code);
-  };
-  push(resource.code);
-  for (const component of (resource.component as Array<{ code?: unknown }> | undefined) ?? []) push(component?.code);
-  return out;
-}
-
-/**
- * Whether this Observation IS a blood pressure, judged only by codes it already carries: the LOINC BP
- * panel on the observation itself, or both a systolic and a diastolic component. Nothing is inferred
- * from a name, a category or a value — a resource that does not say it is a blood pressure is not
- * turned into one.
- */
-function isBloodPressure(resource: Record<string, unknown>): boolean {
-  const codes = loincCodes(resource);
-  if (codes.some((c) => LOINC_BP_PANEL.has(c))) return true;
-  const components = codes.filter((c) => LOINC_BP_COMPONENT.has(c));
-  return components.includes("8480-6") && components.includes("8462-4");
-}
-
-/** Add a profile to `meta.profile` without disturbing any already there. */
-function stampProfile(resource: Record<string, unknown>, profile: string): void {
-  const meta = (resource.meta ??= {}) as { profile?: unknown };
-  const existing = Array.isArray(meta.profile) ? (meta.profile as string[]) : [];
-  if (!existing.includes(profile)) meta.profile = [...existing, profile];
-}
-
 export function prepareForQiCore(bundle: PreparableBundle): void {
   for (const entry of bundle.entry ?? []) {
     const resource = entry?.resource;
@@ -160,9 +200,25 @@ export function prepareForQiCore(bundle: PreparableBundle): void {
       // CMS165 identifies a blood pressure by PROFILE ALONE — it is the only Observation retrieve in
       // that artifact with no code filter — so it is the one measure the executor runs with
       // `trustMetaProfile: true` (ADR-076 d1). Under that setting an unstamped reading is not
-      // retrieved at all, which is why the ADR-075 corpus stamps its own. A WebChart-derived bundle
-      // carries no `meta.profile`, so without this the measure could never be routed on real data
-      // (issue #533).
+      // retrieved at all, which is why the ADR-075 corpus stamps its own and why any bundle source
+      // that does not needs this (issue #533).
+      //
+      // **This is one necessary piece and nowhere near sufficient**, which the first version of this
+      // comment got wrong in kind rather than in degree (review finding, verified in the library).
+      // `trustMetaProfile: true` reaches `cql-exec-fhir`'s `requireProfileTagging`, and that filters
+      // EVERY profile-typed retrieve on `meta.profile` — not only the blood-pressure one — while the
+      // Patient retrieve additionally THROWS when nothing matches
+      // (`cql-exec-fhir/lib/fhir.js:428,442`). cms165 is authored on QI-Core 6, so it wants
+      // `qicore-patient`, `qicore-encounter`, both Condition profiles and more; the ADR-075 corpus
+      // stamps fourteen, which is why cms165 runs there and only there.
+      //
+      // So on a bundle that carries no profiles, this stamp does not make cms165 work — the Patient
+      // retrieve throws first, loudly, before any blood pressure is examined. What it does is make a
+      // blood pressure IDENTIFIABLE, which is the piece no other layer can supply, since only the codes
+      // say what the resource is. The rest of #533's ingest half is still open, and a second blocker
+      // sits behind it: teatea exports the BP panel with `status: "unknown"` (verified 2026-07-23, see
+      // `engine/ingress/webchart/normalize.ts`) while `Status.isObservationBP` admits only
+      // `final | amended | corrected`.
       //
       // This is NORMALIZATION and not fabrication, by this file's own test: the profile is DERIVED
       // from codes the resource already carries — the LOINC BP panel, or both a systolic and a

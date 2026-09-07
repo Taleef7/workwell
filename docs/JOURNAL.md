@@ -32,7 +32,7 @@ with no explicit onset — and excluded from the running total, which is now **3
 measures**. A number that is probably measuring the harness does not belong in a total cited as
 evidence about engines.
 
-**A blood pressure now carries its own profile (#533's other half).** Making `trustMetaProfile`
+**A blood pressure now carries its own profile — one necessary piece of #533, not its other half.** Making `trustMetaProfile`
 per-measure was necessary and useless alone: under it an UNSTAMPED reading is not retrieved at all, and
 WebChart-derived bundles carry no `meta.profile`, so cms165 could never have been routed on real data.
 `prepareForQiCore` stamps `us-core-blood-pressure` on an Observation that already says it is one — the
@@ -40,8 +40,22 @@ LOINC panel code, or both a systolic and a diastolic component. That is normaliz
 test: the profile is derived from codes the resource already carries and no clinical fact is added. The
 negative cases are the point of the tests — a hemoglobin is not promoted into a blood-pressure measure
 by sitting beside one, half a blood pressure is not one, and the right code in the wrong system is not
-one either. It is the seam every bundle source flows through, so the corpus, WebChart and the fixtures
-are all covered by one change.
+one either. It is the seam every bundle source flows through, so the corpus, the fixtures and WebChart all get the
+stamp from one change — and **it does not make cms165 routable**, which two drafts of this entry claimed
+before a reviewer read the library and I checked it. `trustMetaProfile: true` reaches
+`cql-exec-fhir`'s `requireProfileTagging`, which filters EVERY profile-typed retrieve on `meta.profile`
+and THROWS outright when a Patient retrieve matches nothing (`lib/fhir.js:428,442`). cms165 is authored
+on QI-Core 6 and wants `qicore-patient`, `qicore-encounter`, both Condition profiles and more; the
+corpus stamps fourteen, which is why the measure runs there and only there. On an unstamped bundle this
+change does not help — the Patient retrieve throws first, loudly, before a blood pressure is looked at.
+What it does supply is the one piece no other layer can: only the codes say a resource IS a blood
+pressure. #533's ingest half stays open, with a second blocker behind it — WebChart's BP panel carries
+`status: "unknown"` and the measure admits only `final | amended | corrected`.
+
+The test I wrote to prove the opposite — score an unstamped bundle and assert the answer is unchanged —
+was deleted rather than adjusted, because it asserted something false. It self-skips locally without the
+terminology sidecar, so it would have failed for the first time in CI, on the claim rather than on the
+code.
 
 **Still genuinely the owner's, and only these:** the cms137 flip, which is a routing decision the locked
 decisions reserve and which turns on whether measure 305 survives the final rule; and the live segment
@@ -67,11 +81,11 @@ dose changes nothing; `dispenseRequest.validityPeriod` changes nothing; moving t
 takes the sweep to 36/36. So `cqf-fhir-cr` will take a medication's start from `boundsPeriod` and not
 from `authoredOn`, and `fqm-execution` and MADiE's own expected reports take it from `authoredOn`. The
 implicated helper is `CumulativeMedicationDuration.medicationRequestPeriod` — the same one CMS122's and
-CMS125's `DENEX` disagreements were isolated to in August. It is now implicated in **21 of the 24**
-known cross-engine disagreements: CMS122's 6, CMS125's 8, CMS2's 7 — 8 of them proven by a
+CMS125's `DENEX` disagreements were isolated to in August. It is now implicated in **22 of the 25**
+known cross-engine disagreements: CMS122's 6, CMS125's 8, CMS2's 7 and CMS130's 1 — 8 of them proven by a
 single-variable mutation and 13 consistent-with by inventory, which is the distinction the August
 evidence drew and the derived docs had lost. August counted **9 of 23 unattributed**; it is now **2 of
-24**, the two CMS125 cases whose follow-up is a `Procedure` only. CMS137's single one is separate and
+25**, the two CMS125 cases whose follow-up is a `Procedure` only. CMS137's single one is separate and
 separately proved. One difference wearing three costumes is a materially better
 position than three unexplained ones. Written up in `docs/evidence/CROSS_ENGINE_2026-09-07_CMS2.md`, limits included.
 

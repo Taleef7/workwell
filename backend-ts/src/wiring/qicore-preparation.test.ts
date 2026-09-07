@@ -150,62 +150,145 @@ test("WITHOUT preparation the official artifact reads the whole roster out-of-po
 });
 
 /**
- * A blood pressure is stamped with its US Core profile, so cms165 can be routed on data that carries
- * no `meta.profile` of its own (issue #533, ADR-076 d1).
+ * A blood pressure is stamped with its US Core profile, so cms165 can see a reading in a bundle that
+ * carries no `meta.profile` of its own (issue #533, ADR-076 d1).
  *
- * CMS165 is the one measure the executor runs with `trustMetaProfile: true`, because its decisive
- * retrieve identifies a reading by profile ALONE. Under that setting an unstamped blood pressure is
- * not retrieved at all — so a WebChart-derived bundle, which carries no profiles, would score every
- * patient out of population. The corpus stamps its own; this is how everything else gets there.
+ * cms165 is the one measure the executor runs with `trustMetaProfile: true`, because its decisive
+ * retrieve identifies a reading by profile ALONE. Under that setting an unstamped blood pressure is not
+ * retrieved at all.
  *
- * The line this must not cross is fabrication. The profile is derived from codes the resource ALREADY
- * carries, so the negative cases matter as much as the positive one: a hemoglobin is not promoted into
- * a blood-pressure measure because it sits next to one.
+ * The line this must not cross is fabrication, and the danger is asymmetric: a missed stamp leaves a
+ * measure unable to see a reading, while a wrong one puts a resource that is NOT a blood pressure into
+ * a compliance population. So the predicate demands the US Core shape — a panel code on the resource AND
+ * both a systolic and a diastolic component — and the negative cases below are the ones review found in
+ * a looser first version that flattened the resource's and its components' codes into one list.
+ *
+ * Positive and negative live in ONE test on purpose. Split, the negative half passed with the stamping
+ * code deleted, since an untouched Observation has no `meta.profile` either — a test that asserted
+ * nothing (review finding).
  */
-test("a LOINC blood-pressure panel is stamped us-core-blood-pressure", () => {
-  const bundle = {
-    entry: [
-      { resource: { resourceType: "Observation", status: "final", code: { coding: [{ system: "http://loinc.org", code: "85354-9" }] } } },
-    ],
+const BP_PROFILE = "http://hl7.org/fhir/us/core/StructureDefinition/us-core-blood-pressure";
+const loinc = (code: string) => ({ coding: [{ system: "http://loinc.org", code }] });
+const qty = (value: number) => ({ value, unit: "mm[Hg]", system: "http://unitsofmeasure.org", code: "mm[Hg]" });
+const bpComponents = [
+  { code: loinc("8480-6"), valueQuantity: qty(118) },
+  { code: loinc("8462-4"), valueQuantity: qty(76) },
+];
+const stamped = (resource: Record<string, unknown>): boolean => {
+  const out = preparedForQiCore({ entry: [{ resource }] } as never) as {
+    entry: Array<{ resource: { meta?: { profile?: string[] } } }>;
   };
-  const out = preparedForQiCore(bundle as never) as { entry: Array<{ resource: { meta?: { profile?: string[] } } }> };
-  assert.deepEqual(out.entry[0]!.resource.meta?.profile, ["http://hl7.org/fhir/us/core/StructureDefinition/us-core-blood-pressure"]);
+  return out.entry[0]!.resource.meta?.profile?.includes(BP_PROFILE) ?? false;
+};
+
+test("a blood pressure is stamped, and everything that only resembles one is not", () => {
+  // THE POSITIVE, first: without it the negatives below would pass against deleted code.
+  assert.equal(
+    stamped({ resourceType: "Observation", status: "final", code: loinc("85354-9"), component: bpComponents }),
+    true,
+    "a panel code with systolic and diastolic components IS a blood pressure",
+  );
+  assert.equal(
+    stamped({ resourceType: "Observation", status: "final", code: loinc("55284-4"), component: bpComponents }),
+    true,
+    "the other panel code counts too",
+  );
+
+  // A VITALS panel carrying a blood pressure among its components is not a blood pressure. Flattening
+  // the resource's codes with its components' matched this, and would have handed cms165 a resource
+  // whose other components are pulse and temperature.
+  assert.equal(
+    stamped({
+      resourceType: "Observation",
+      status: "final",
+      code: loinc("8716-3"),
+      component: [{ code: loinc("85354-9"), valueQuantity: qty(1) }, ...bpComponents],
+    }),
+    false,
+    "the panel code must be on the resource, not among its components",
+  );
+
+  // Two codes on one `code` are not two components. cms165 reads systolic and diastolic OUT of
+  // `component`, so this resolves to null — and being newest it would displace a real reading.
+  assert.equal(
+    stamped({
+      resourceType: "Observation",
+      status: "final",
+      code: { coding: [{ system: "http://loinc.org", code: "8480-6" }, { system: "http://loinc.org", code: "8462-4" }] },
+    }),
+    false,
+    "systolic and diastolic on `code` with no components is not a reading",
+  );
+
+  // An empty panel — a cancelled order, a dataAbsentReason header — has a panel code and no reading.
+  assert.equal(
+    stamped({ resourceType: "Observation", status: "final", code: loinc("85354-9") }),
+    false,
+    "a panel code alone is not a reading",
+  );
+  assert.equal(
+    stamped({ resourceType: "Observation", status: "final", code: loinc("85354-9"), component: [bpComponents[0]!] }),
+    false,
+    "half a blood pressure is not one",
+  );
+
+  // A component with no measurement is not a reading, and stamping it would assert a US Core
+  // conformance the resource does not have.
+  assert.equal(
+    stamped({
+      resourceType: "Observation",
+      status: "final",
+      code: loinc("85354-9"),
+      component: [{ code: loinc("8480-6") }, { code: loinc("8462-4") }],
+    }),
+    false,
+    "components without values are not measurements",
+  );
+
+  // TWO systolic components — a bilateral reading, or a duplicated flowsheet row. cms165 reads the
+  // systolic out with `singleton from`, which throws on two, so this must never be stamped.
+  assert.equal(
+    stamped({
+      resourceType: "Observation",
+      status: "final",
+      code: loinc("85354-9"),
+      component: [bpComponents[0]!, { code: loinc("8480-6"), valueQuantity: qty(122) }, bpComponents[1]!],
+    }),
+    false,
+    "two systolic components would make the measure throw, so they are not stamped",
+  );
+
+  // Not a blood pressure at all, and the exact resource that — unstamped and profile-ignored — was being
+  // read as a patient's latest blood pressure.
+  assert.equal(stamped({ resourceType: "Observation", status: "final", code: loinc("4548-4") }), false, "a hemoglobin is not one");
+  assert.equal(
+    stamped({
+      resourceType: "Observation",
+      status: "final",
+      code: { coding: [{ system: "http://snomed.info/sct", code: "85354-9" }] },
+      component: bpComponents,
+    }),
+    false,
+    "the right code in the wrong system is not one",
+  );
 });
 
-test("systolic AND diastolic components are a blood pressure even without the panel code", () => {
-  const bundle = {
-    entry: [
-      {
-        resource: {
-          resourceType: "Observation",
-          status: "final",
-          code: { coding: [{ system: "http://loinc.org", code: "35094-2" }] },
-          component: [
-            { code: { coding: [{ system: "http://loinc.org", code: "8480-6" }] } },
-            { code: { coding: [{ system: "http://loinc.org", code: "8462-4" }] } },
-          ],
-        },
-      },
-    ],
-  };
-  const out = preparedForQiCore(bundle as never) as { entry: Array<{ resource: { meta?: { profile?: string[] } } }> };
-  assert.ok(out.entry[0]!.resource.meta?.profile?.includes("http://hl7.org/fhir/us/core/StructureDefinition/us-core-blood-pressure"));
-});
-
-test("nothing that is not a blood pressure is stamped as one", () => {
-  const bundle = {
-    entry: [
-      // A hemoglobin: the exact resource that, unstamped and profile-ignored, was being read as a
-      // patient's latest blood pressure.
-      { resource: { resourceType: "Observation", status: "final", code: { coding: [{ system: "http://loinc.org", code: "4548-4" }] } } },
-      // A systolic reading with no diastolic beside it — half a blood pressure is not one.
-      { resource: { resourceType: "Observation", status: "final", component: [{ code: { coding: [{ system: "http://loinc.org", code: "8480-6" }] } }] } },
-      // The right code in the wrong system.
-      { resource: { resourceType: "Observation", status: "final", code: { coding: [{ system: "http://snomed.info/sct", code: "85354-9" }] } } },
-    ],
-  };
-  const out = preparedForQiCore(bundle as never) as { entry: Array<{ resource: { meta?: { profile?: string[] } } }> };
-  for (const e of out.entry) assert.equal(e.resource.meta?.profile, undefined);
+test("LOINC is recognised however the source spells it", () => {
+  for (const system of ["http://loinc.org", "http://loinc.org/", "urn:oid:2.16.840.1.113883.6.1", "HTTP://LOINC.ORG"]) {
+    assert.equal(
+      stamped({
+        resourceType: "Observation",
+        status: "final",
+        code: { coding: [{ system, code: "85354-9" }] },
+        component: [
+          { code: { coding: [{ system, code: "8480-6" }] }, valueQuantity: qty(118) },
+          { code: { coding: [{ system, code: "8462-4" }] }, valueQuantity: qty(76) },
+        ],
+      }),
+      true,
+      `${system} should be recognised as LOINC`,
+    );
+  }
 });
 
 test("an existing meta.profile is preserved, not replaced", () => {
@@ -216,11 +299,21 @@ test("an existing meta.profile is preserved, not replaced", () => {
           resourceType: "Observation",
           status: "final",
           meta: { profile: ["http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-observation-lab"] },
-          code: { coding: [{ system: "http://loinc.org", code: "85354-9" }] },
+          code: loinc("85354-9"),
+          component: bpComponents,
         },
       },
     ],
   };
   const out = preparedForQiCore(bundle as never) as { entry: Array<{ resource: { meta?: { profile?: string[] } } }> };
   assert.equal(out.entry[0]!.resource.meta?.profile?.length, 2, "the artifact's own profile stays; ours is added");
+});
+
+test("stamping does not leak into the caller's bundle (ADR-008: the authored outcome is unchanged)", () => {
+  // `preparedForQiCore` clones; the official executor uses it precisely so the authored engine sees the
+  // same bytes whether or not official routing is on.
+  const resource = { resourceType: "Observation", status: "final", code: loinc("85354-9"), component: bpComponents };
+  const bundle = { entry: [{ resource }] };
+  preparedForQiCore(bundle as never);
+  assert.equal((resource as { meta?: unknown }).meta, undefined, "the caller's own bundle is untouched");
 });

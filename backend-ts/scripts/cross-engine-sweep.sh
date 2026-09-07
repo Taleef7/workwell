@@ -58,9 +58,14 @@ CONTENT="${CROSS_ENGINE_CONTENT:-.official-content}"
 # Deliberately unquoted where it is used: the fallback is TWO words, and quoting it would look for a
 # program of that name. Override with PNPM_CMD for a different launcher.
 # shellcheck disable=SC2086
+# The PATH pnpm is used only if it is the MAJOR the lockfile was written by. Preferring it unchecked
+# just moves the bug: a workstation with a global pnpm 12 would fail with the same
+# ERR_PNPM_LOCKFILE_CONFIG_MISMATCH this exists to fix, and would never reach the fallback that works
+# (review finding). PNPM_CMD overrides everything, and must not contain a path with spaces — it is
+# expanded unquoted, because the fallback is two words.
 if [[ -n "${PNPM_CMD:-}" ]]; then
   PNPM="$PNPM_CMD"
-elif command -v pnpm >/dev/null 2>&1; then
+elif command -v pnpm >/dev/null 2>&1 && [[ "$(pnpm --version 2>/dev/null)" == 10.* ]]; then
   PNPM="pnpm"
 else
   PNPM="corepack pnpm@10"

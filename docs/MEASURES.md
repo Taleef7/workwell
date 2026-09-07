@@ -49,8 +49,8 @@ unexplained since 2026-08-04, are proven to one cause: the Java engine takes a m
 from `dosageInstruction.timing.repeat.boundsPeriod` and not from `authoredOn`, so the seven cases whose
 only depression follow-up is an antidepressant order are not credited there — adding that one field
 moves the sweep from 29/36 to 36/36 (`docs/evidence/CROSS_ENGINE_2026-09-07_CMS2.md`). It is the same
-helper CMS122's and CMS125's disagreements were isolated to, and it is now implicated in 21 of the 24
-known cross-engine disagreements — 8 of them proven by mutation, 13 consistent-with by inventory. Two
+helper CMS122's and CMS125's disagreements were isolated to, and it is now implicated in 22 of the 25
+known cross-engine disagreements — 8 of them proven by mutation, 14 consistent-with by inventory. Two
 CMS125 `Procedure`-only cases are still unexplained; CMS137's one is a separately proven period
 boundary. That clears the MM-1c precondition
 §4A.5 put on CMS2's flip; the flip itself is still the owner's workflow edit.
@@ -75,9 +75,16 @@ is **362 of 387 across eight measures**, CMS165 deliberately excluded.
 > `trustMetaProfile` is now decided PER MEASURE and cms165 is the only measure that sets it (ADR-076 d1);
 > the default stays false because trusting profiles globally empties cms122's and cms125's populations,
 > and those are routed. That is possible because the ADR-075 corpus stamps the profile each retrieve
-> names. **It does not make cms165 routable.** A bundle whose resources are NOT stamped retrieves nothing
-> under it, so real WebChart blood pressures need stamping at ingest first — the remaining half of issue
-> #533. The failure mode is louder now, though not unconditionally: the batch-level retrieve refusal fires
+> names. **It does not make cms165 routable, and #533's ingest half is still open.** On 2026-09-07
+> `prepareForQiCore` began deriving `us-core-blood-pressure` from codes a resource already carries —
+> one necessary piece, and the one no other layer can supply, since only the codes say what a resource
+> IS. It is nowhere near sufficient: `trustMetaProfile: true` filters EVERY profile-typed retrieve on
+> `meta.profile` and the Patient retrieve THROWS when nothing matches
+> (`cql-exec-fhir/lib/fhir.js:428,442`), and cms165 is authored on QI-Core 6, so it wants
+> `qicore-patient`, `qicore-encounter`, both Condition profiles and more. The corpus stamps fourteen,
+> which is why cms165 runs there and only there. A second blocker sits behind that one: WebChart exports
+> its BP panel with `status: "unknown"` while the measure admits only `final | amended | corrected`.
+> And CMS165's own cross-engine sweep is unexplained (#532). The failure mode is louder now, though not unconditionally: the batch-level retrieve refusal fires
 > only for a roster of more than one subject, so a nightly run would refuse while `/simulate` and
 > rerun-to-verify would quietly return MISSING_DATA. Better than a plausible wrong number, and not a
 > guarantee. **Do not route cms165.**
