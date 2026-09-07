@@ -90,4 +90,4 @@ evaluation, because `$evaluate-measure` caches per subject for the server's life
 4. CMS2's seven `NUMER 1→0` disagreements (2026-08-04) are unchanged and still without a cause.
 
 Running total across the measures cross-executed to date: **299 of 323 cases agree across seven measures**
-(255/278 on 2026-08-04, 44/45 today); 44 of the 323 are multi-rate cases compared on every rate.
+(255/278 on 2026-08-04, 44/45 today); 45 of the 323 are multi-rate cases compared on every rate.

@@ -93,6 +93,9 @@ pinned, with the CMS122 reference-agreement exemption pinned through `compareRep
 down: Gemini asked that a NULL or operator-set `next_action` not count as a change — but the persisted row
 does change, once, and an audited UPDATED is the honest record of it (`DATA_MODEL_CONTRACTS.md` §4 says
 so); a nightly run overwriting an operator-set action is a pre-existing behaviour worth its own issue.
+GLM 5.3 Flash (xhigh, the last of the three to finish) verified every one of the same paths and found
+nothing above LOW: one miscount in the evidence document's running total (44 multi-rate cases for 45),
+fixed.
 
 **Not done, and why.** The flip itself stays the owner's workflow edit, sequenced after cms2/cms130 per
 ADR-072 D1 — nothing here routes cms137 — and CMS2's seven cross-engine mismatches, MM-1c's precondition
