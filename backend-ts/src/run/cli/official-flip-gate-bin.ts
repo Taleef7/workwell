@@ -1,15 +1,20 @@
 #!/usr/bin/env -S node --import tsx
 /**
- * `pnpm flip-gate --measure cms165 [--evaluation-date 2027-06-30] [--content-dir .official-content]`
+ * `WORKWELL_INSTANCE=maui pnpm flip-gate --measure cms137 [--evaluation-date 2026-06-30] [--subjects 2000|all] [--content-dir .official-content]`
  *
  * Prints the three readings a flip is judged on and writes `.flip-gate/<id>-<date>.json` for the PR
  * body. Exit code is ALWAYS 0: this is evidence, not a decision (see official-flip-gate.ts).
+ *
+ * The roster reading is the DEPLOYMENT's own roster — the profile named by `WORKWELL_INSTANCE`, its
+ * directory (the 20,000-patient corpus on Maui, sized by `WORKWELL_MAUI_CORPUS_SIZE`) and its bundle
+ * source, composed exactly as the run pipeline composes them, with the measure routed as the flip would
+ * route it. `--subjects` caps how many are evaluated; the default keeps a corpus-sized roster inside one
+ * batch's memory, and `all` lifts it for a deliberate full sweep.
  */
-import { EMPLOYEES } from "../../engine/synthetic/employee-catalog.ts";
-import { officialOnlyBundleSource } from "../../wiring/subject-bundle-source.ts";
-import { gateMeasure, renderGate, writeGateJson, parseArgs, FlipGateUsageError } from "./official-flip-gate.ts";
-import type { OfficialOnlyMeasureId } from "../../engine/synthetic/official-only-bundles.ts";
-import type { SnapshotSubject } from "./official-flip-snapshot.ts";
+import { resolveDeploymentProfile } from "../../config/deployment-profile.ts";
+import { gateMeasure, renderGate, writeGateJson, parseArgs, rosterSubjectsFor, FlipGateUsageError } from "./official-flip-gate.ts";
+
+const DEFAULT_SUBJECT_CAP = 2000;
 
 async function main(argv: string[]): Promise<number> {
   let args;
@@ -18,25 +23,42 @@ async function main(argv: string[]): Promise<number> {
   } catch (error) {
     if (error instanceof FlipGateUsageError) {
       console.error(`flip-gate: ${error.message}`);
-      console.error("usage: pnpm flip-gate --measure <id> [--evaluation-date YYYY-MM-DD] [--content-dir <path>]");
+      console.error("usage: pnpm flip-gate --measure <id> [--evaluation-date YYYY-MM-DD] [--subjects N|all] [--content-dir <path>]");
       return 2;
     }
     throw error;
   }
 
-  // The deployment's own subjects, built through the SAME seam the run pipeline uses (U1 T2), so the
-  // roster reading is a shadow of the real path rather than a bundle shape invented for this report.
-  const source = officialOnlyBundleSource();
-  const tenant = EMPLOYEES.filter((e) => e.tenantId === "maui");
-  const subjects: SnapshotSubject[] = tenant.map((employee) => {
-    const target = source.targetFor(tenant, args.measure, employee.externalId);
-    return {
-      subjectId: employee.externalId,
-      bundle: source.bundleFor(employee, args.measure as OfficialOnlyMeasureId, target ?? "COMPLIANT", args.evaluationDate),
-    };
-  });
+  const env = process.env as Record<string, unknown>;
+  const profile = resolveDeploymentProfile(typeof env.WORKWELL_INSTANCE === "string" ? env.WORKWELL_INSTANCE : undefined);
+  const limit = args.subjects === "all" ? undefined : (args.subjects ?? DEFAULT_SUBJECT_CAP);
+  if (typeof env.WORKWELL_OFFICIAL_MEASURES !== "string" || env.WORKWELL_OFFICIAL_MEASURES.trim() === "") {
+    // The roster is composed under "the deployment's routing plus this measure". With nothing set the
+    // report would say `routed as WORKWELL_OFFICIAL_MEASURES=<measure>` — a configuration no flip creates.
+    console.warn(
+      `flip-gate: WORKWELL_OFFICIAL_MEASURES is not set — the roster is composed as if ${args.measure} were the ` +
+        "only routed measure. Pass the deployment's current list (see docs/DEPLOY.md) for a report that matches the flip.",
+    );
+  }
+  let roster;
+  try {
+    roster = rosterSubjectsFor(args.measure, args.evaluationDate, env, profile, { limit });
+  } catch (error) {
+    if (error instanceof FlipGateUsageError) {
+      console.error(`flip-gate: ${error.message}`);
+      return 2;
+    }
+    throw error;
+  }
+  const { subjects, source } = roster;
+  if (source.evaluated < source.directorySize) {
+    console.log(
+      `flip-gate: evaluating the first ${source.evaluated} of ${source.directorySize} ${profile.id} subjects` +
+        ` (pass --subjects all for the whole directory)`,
+    );
+  }
 
-  const report = await gateMeasure(args.measure, subjects, args.evaluationDate, { contentDir: args.contentDir });
+  const report = await gateMeasure(args.measure, subjects, args.evaluationDate, { contentDir: args.contentDir, rosterSource: source });
   console.log(renderGate(report));
   const path = writeGateJson(process.cwd(), report);
   console.log(`flip-gate: wrote ${path}`);

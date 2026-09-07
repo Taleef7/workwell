@@ -27,6 +27,11 @@ export interface UpsertCaseInput {
   measureId: string;
   evaluationPeriod: string;
   outcomeStatus: string;
+  /**
+   * The outcome's `evidence_json`, when the caller has it. Read only to word `next_action` for a
+   * multi-rate measure (ADR-074: the rate the subject missed); never persisted by the case store.
+   */
+  evidence?: unknown;
 }
 
 /**

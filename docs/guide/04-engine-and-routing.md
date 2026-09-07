@@ -253,15 +253,21 @@ log that official measures are on, keep the health endpoint green, and 500 every
 
 ### Vendored, gated and routed are three different things
 
-| State | Count | Detail |
+| State (2026-09-06) | Count | Detail |
 |---|---|---|
-| Vendored — artifact in the tree | 8 of 8 | Each with complete code lists and nothing truncated |
-| MADiE-gated — authors' own deck passes | 8 of 8 | 410 of 410 |
-| Routed — evaluating real people | 2 | cms122 and cms125, demo/production stack only |
+| Vendored — artifact in the tree | 9 of 9 | Each with complete code lists and nothing truncated; CMS137 is the first multi-rate one |
+| MADiE-gated — authors' own deck passes | 9 of 9 | 455 of 455, every rate compared |
+| Runnable — a deployment may route it | 9 | authored (cms122/cms125) or official-only and listed by the profile (ADR-072) |
+| Routed — evaluating real people | 2 | cms122 and cms125, on the TWH and Maui stacks |
 
-The other six pass their decks but stay unrouted because they have no authored counterpart to
-compare against, and that comparison — `pnpm flip-snapshot`, step 11 — is what every flip so far
-was judged on.
+A measure with an authored counterpart is judged by `pnpm flip-snapshot`, step 11 — both engines over
+the same people. The official-only four (cms2, cms130, cms165, cms137) have no BEFORE for that diff, so
+they are judged by `pnpm flip-gate` instead: the steward's MADiE deck, the artifact's `effectivePeriod`
+against the measured year, and the artifact over **the deployment's own roster** — the profile's
+directory and bundle source composed exactly as a run composes them, with the measure routed as the
+flip would route it, so a corpus shape the artifact cannot read fails the gate rather than passing a
+fixture it never runs on (ADR-072 d6, ADR-074 d14). Each reading can fail the flip alone; the verdict
+is prose and the flip stays a reviewed workflow edit.
 
 > **The eighth measure is the one worth retelling.** CMS138 (tobacco screening) would not run at
 > all: all 47 of its test cases errored, and the original note said its code lists "would not
@@ -278,6 +284,9 @@ was judged on.
 - `/runs` — the run list, each run's log timeline, and the export downloads.
 - `/cases/{id}` — one person's per-define evidence, the derived `why_flagged` block, and a raw
   evidence JSON toggle. This is "why is this person flagged", traced to the define that decided it.
+  For an official-routed measure the "defines" are population membership (`official:numerator`, or
+  `official:Initiation:numerator` / `official:Engagement:numerator` on a multi-rate measure), and the
+  block leads with a plain-English "Why flagged" line that names the rate the patient missed (ADR-074).
 - The routing state is configuration: `WORKWELL_OFFICIAL_MEASURES` in `deploy-twh-mieweb.yml`.
 
 ## Reproduce it yourself

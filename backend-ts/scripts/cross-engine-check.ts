@@ -65,49 +65,34 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import {
-  POPULATION_CODES,
-  classifyPopulationAgreement,
   officialMeasureName,
+  populationCountsByRate,
   type OfficialMeasureId,
   type PopulationAgreement,
-  type PopulationCode,
   type PopulationCounts,
 } from "../src/standards/official-cases.ts";
+import { allZeroAcrossRates, compareReports } from "../src/standards/cross-engine.ts";
 
 const CONTENT = ".official-content";
 
 interface CaseResult {
   case: string;
   patientId: string;
+  /** Rate 1, for the one-line printout; `rates` carries every rate. */
   expected: PopulationCounts;
   java: PopulationCounts | null;
+  /** EVERY rate of both reports (ADR-074): a multi-rate measure agrees only when all of them do. */
+  rates?: { expected: PopulationCounts[]; actual: PopulationCounts[] };
   error?: string;
   agreement?: PopulationAgreement;
   agrees: boolean;
 }
 
-/**
- * Read a MeasureReport's populations as a FULL vector, every gated population zero-initialized.
- *
- * The zeroes are load-bearing. Reading only the populations a report happens to declare means an engine
- * reporting `DENEXCEP = 1` for a measure whose expected report omits DENEXCEP compares as agreement — a
- * false green. `POPULATION_CODES` carries a comment about this exact omission being caught on #358; the
- * first version of this script reintroduced it in a new file (Codex, #393).
- */
-const countsOf = (report: {
-  group?: Array<{ population?: Array<{ code?: { coding?: Array<{ code?: string }> }; count?: number }> }>;
-}): PopulationCounts => {
-  const out = Object.fromEntries(POPULATION_CODES.map((c) => [c, 0])) as PopulationCounts;
-  for (const p of report.group?.[0]?.population ?? []) {
-    const code = p.code?.coding?.map((c) => c.code).find((c): c is PopulationCode =>
-      POPULATION_CODES.includes(c as PopulationCode),
-    );
-    if (code) out[code] = p.count ?? 0;
-  }
-  return out;
-};
-
-const allZero = (c: PopulationCounts): boolean => Object.values(c).every((v) => v === 0);
+// Populations are read as FULL vectors, every gated population zero-initialised, by
+// `populationCountsByRate` — the zeroes are load-bearing (a report that omits DENEXCEP must compare as
+// 0, not as agreement with whatever the other engine said; Codex, #393) — and compared with the SAME
+// classifier the MADiE gate uses (`compareReports`), over every group. This script used to read
+// `group[0]` of each report, which for CMS137 is Initiation alone.
 
 async function main(): Promise<void> {
   const argv = process.argv.slice(2);
@@ -203,6 +188,12 @@ async function main(): Promise<void> {
 
   const results: CaseResult[] = [];
   let period: { start: string; end: string } | undefined;
+  // The period AS THE SECOND ENGINE REPRESENTS IT — its own MeasureReport.period, timezone and
+  // precision included. A `periodStart=2026-01-01` parameter is a date; what the engine makes of it
+  // (which offset, which precision) is exactly what decides a boundary case, and it is invisible in
+  // the counts (MM-1 U3: CMS137's one cross-engine disagreement is an encounter at 00:00:00.000Z on
+  // 1 January).
+  let javaPeriod: unknown;
 
   for (const dir of caseDirs) {
     const files = readdirSync(join(testsDir, dir)).filter((f) => f.endsWith(".json"));
@@ -210,9 +201,10 @@ async function main(): Promise<void> {
     const ptFile = files.find((f) => f.startsWith("Patient-"));
     if (!mrFile || !ptFile) continue;
     const mr = JSON.parse(readFileSync(join(testsDir, dir, mrFile), "utf8")) as {
-      group?: never; period?: { start: string; end: string };
+      period?: { start: string; end: string };
     };
-    const expected = countsOf(mr as never);
+    const expectedRates = populationCountsByRate(mr as never);
+    const expected = expectedRates[0]!;
     period ??= mr.period;
     const patientId = (JSON.parse(readFileSync(join(testsDir, dir, ptFile), "utf8")) as { id: string }).id;
 
@@ -221,18 +213,26 @@ async function main(): Promise<void> {
       `?subject=Patient/${patientId}&periodStart=${period?.start}&periodEnd=${period?.end}&reportType=subject`;
     try {
       const res = await fetch(url);
-      const body = (await res.json()) as { resourceType?: string };
+      const body = (await res.json()) as { resourceType?: string; period?: unknown };
+      javaPeriod ??= body.period;
       if (body.resourceType !== "MeasureReport") {
         results.push({ case: dir, patientId, expected, java: null, error: `${res.status} ${body.resourceType}`, agrees: false });
         continue;
       }
-      const java = countsOf(body as never);
-      // The SHARED classifier, not a local rule. It compares every gated population and isolates the
-      // six CMS122 defects NARROWLY — one difference, on numerator, expected 0 vs actual 1. Exempting
-      // those whole cases (the first version of this script) would let an IPP/DENOM/DENEX divergence or
-      // an HTTP error inside them pass unseen (Codex, #393).
-      const agreement = classifyPopulationAgreement(measure as OfficialMeasureId, dir, expected, java);
-      results.push({ case: dir, patientId, expected, java, agreement, agrees: agreement.pass });
+      // The SHARED classifier, not a local rule, over EVERY rate. It compares every gated population and
+      // isolates the six CMS122 defects NARROWLY — one difference, on numerator, expected 0 vs actual 1.
+      // Exempting those whole cases (the first version of this script) would let an IPP/DENOM/DENEX
+      // divergence or an HTTP error inside them pass unseen (Codex, #393).
+      const comparison = compareReports(measure as OfficialMeasureId, dir, mr, body);
+      results.push({
+        case: dir,
+        patientId,
+        expected,
+        java: comparison.actual[0]!,
+        rates: { expected: comparison.expected, actual: comparison.actual },
+        agreement: comparison.agreement,
+        agrees: comparison.agreement.pass,
+      });
     } catch (e) {
       results.push({ case: dir, patientId, expected, java: null, error: String(e), agrees: false });
     }
@@ -264,7 +264,7 @@ async function main(): Promise<void> {
 
   // The degenerate-sweep refusal — see the header. An all-zero sweep is a resolution failure wearing
   // agreement's clothes.
-  if (evaluated.length > 0 && evaluated.every((r) => allZero(r.java!))) {
+  if (evaluated.length > 0 && evaluated.every((r) => allZeroAcrossRates(r.rates?.actual ?? [r.java!]))) {
     console.error(
       `\nFAIL: every one of ${evaluated.length} evaluated cases returned an all-zero population vector.\n` +
         `That is the signature of terminology or libraries failing to resolve, NOT agreement. Confirm the\n` +
@@ -275,7 +275,8 @@ async function main(): Promise<void> {
   }
 
   if (argv.includes("--json")) {
-    console.log(JSON.stringify({ measure, name, server, period, results }, null, 2));
+    const rateCount = Math.max(1, ...results.map((r) => r.rates?.expected.length ?? 1));
+    console.log(JSON.stringify({ measure, name, server, period, javaPeriod, rateCount, results }, null, 2));
     process.exitCode = unexpected.length === 0 ? 0 : 1;
     return;
   }
@@ -283,7 +284,10 @@ async function main(): Promise<void> {
   console.log(`\nmeasure       : ${measure} (${name})`);
   console.log(`engine        : cqf-fhir-cr via ${server}`);
   console.log(`period        : ${period?.start} .. ${period?.end}`);
+  console.log(`java period   : ${JSON.stringify(javaPeriod)}`);
   console.log(`cases         : ${results.length}  (evaluated ${evaluated.length})`);
+  const rateCount = Math.max(1, ...results.map((r) => r.rates?.expected.length ?? 1));
+  if (rateCount > 1) console.log(`rates         : ${rateCount} — every rate compared (ADR-074)`);
   console.log(`agreeing      : ${agreed.length}/${results.length}`);
   if (referenceAgreements.length) {
     console.log(
@@ -297,6 +301,8 @@ async function main(): Promise<void> {
     if (r.java) {
       console.log(`      expected ${JSON.stringify(r.expected)}`);
       console.log(`      java     ${JSON.stringify(r.java)}`);
+      // WHICH rate diverged, for a multi-rate measure — Initiation and Engagement are different questions.
+      for (const line of r.agreement?.rateDifferences ?? []) console.log(`      ${line}`);
     }
   }
   console.log(

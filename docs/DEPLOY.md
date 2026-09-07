@@ -291,7 +291,8 @@ Per measure, per stack:
 > comparison cannot run for them at all and a snapshot of one is not evidence. Use instead:
 >
 > ```bash
-> WORKWELL_INSTANCE=maui pnpm flip-gate --measure cms165 --evaluation-date <YYYY-MM-DD>
+> WORKWELL_INSTANCE=maui WORKWELL_MAUI_CORPUS_SIZE=20000 WORKWELL_OFFICIAL_MEASURES=cms122,cms125 \
+>   pnpm flip-gate --measure cms137 --evaluation-date <YYYY-MM-DD> [--subjects 2000|all]
 > ```
 >
 > It prints three independent readings — the MADiE deck, the roster through the run pipeline's own
@@ -299,14 +300,30 @@ Per measure, per stack:
 > `backend-ts/.flip-gate/<id>-<date>.json` to attach to the flip PR. Any one of the three can fail the
 > flip. It is DESCRIPTIVE: exit code is always 0, and routing is still the workflow edit in step 5.
 >
+> **The roster reading is the deployment's OWN roster** (ADR-074 d14, since 2026-09-06): the profile
+> `WORKWELL_INSTANCE` names, its directory (the corpus on Maui, sized by `WORKWELL_MAUI_CORPUS_SIZE`) and
+> its bundle source, composed as the run pipeline composes them, with the measure routed as the flip
+> would route it — pass the deployment's current `WORKWELL_OFFICIAL_MEASURES` and the gate appends the
+> measure under test. The report's `roster.source` line says what was evaluated. Evaluation runs in the
+> pipeline's own chunks (`WORKWELL_RUN_CHUNK_SIZE`, 500), but every bundle is built up front, so
+> `--subjects` is the memory and time control: it defaults to the first 2,000 of the directory, and
+> `--subjects all` sweeps the whole corpus for a flip PR's evidence. Do not read a small sample's rate findings as the
+> roster's: at 200 subjects CMS137 has 8 in its denominator and 0 engaged, which trips the "a rate nobody
+> reaches" finding; at 2,000 it is 60 and 8, and the gate passes.
+>
 > **cms165 has a blocker `flip-gate` does not detect.** The executor ignores `meta.profile`, and
 > cms165 identifies its BP reading by profile alone — so on any patient with other Observations the
 > numerator silently reads false. The synthetic roster emits one Observation per subject and therefore
 > cannot show it. Do not route cms165 on the strength of a green gate alone (ADR-072, consequences).
 >
-> **A reading that did not run is never a pass.** `cms130` and `cms165` have no MADiE deck in the pinned
-> content checkout and resolve no terminology locally, so both currently come back with an UNAVAILABLE
-> deck and a zero initial population. That is the gate working — do not read it as "no findings".
+> **A reading that did not run is never a pass.** Every pilot measure's MADiE deck is vendored into the
+> tree (2026-09-05), but the deck and the roster both need the measure's terminology sidecar, which is
+> gitignored: run `pnpm vendor:official --measure <Name> --catalog-id <id> --strip-elm-annotations` first.
+> For `cms2` and `cms137` the manifest pin matches the uncredentialed vendor, so the gate runs locally;
+> for `cms122`/`cms125`/`cms130`/`cms165` the pinned sidecar is VSAC-completed and the loader refuses the
+> local one, so the gate comes back with an UNAVAILABLE deck and a zero initial population until it is
+> run where the credentialed workflow's sidecar resolves. That is the gate working — do not read it as
+> "no findings".
 
 2. **Take the before/after snapshot and confirm a NON-ZERO initial population** — steps 2 and 4 are one
    command (ADR-044):

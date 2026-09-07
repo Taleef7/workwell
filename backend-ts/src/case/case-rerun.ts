@@ -53,8 +53,10 @@ const verificationCaseStatus = (current: string, verified: string): string =>
         ? current
         : "OPEN";
 
-const verificationNextAction = (verified: string, measureId: string): string =>
-  verified === "COMPLIANT" ? "No follow-up needed after compliant verification rerun." : nextActionFor(verified, measureId);
+// `evidence` is the FRESH outcome's evidence_json: a multi-rate measure's action names the rate the
+// subject missed (ADR-074 d13), and a rerun that dropped it reverted the case to the combined wording.
+const verificationNextAction = (verified: string, measureId: string, evidence: unknown): string =>
+  verified === "COMPLIANT" ? "No follow-up needed after compliant verification rerun." : nextActionFor(verified, measureId, evidence);
 
 const isClosing = (verified: string): boolean => verified === "COMPLIANT" || verified === "EXCLUDED";
 
@@ -120,7 +122,7 @@ export async function rerunToVerify(deps: RerunDeps, caseId: string, actor: stri
   });
 
   const updatedCaseStatus = verificationCaseStatus(existing.status, verifiedStatus);
-  const nextAction = verificationNextAction(verifiedStatus, existing.measureId);
+  const nextAction = verificationNextAction(verifiedStatus, existing.measureId, evidence);
   const closing = isClosing(verifiedStatus);
   const closedAt = closing ? new Date().toISOString() : null;
   const closedReason = verifiedStatus === "COMPLIANT" ? "RERUN_VERIFIED" : verifiedStatus === "EXCLUDED" ? "RERUN_EXCLUDED" : null;

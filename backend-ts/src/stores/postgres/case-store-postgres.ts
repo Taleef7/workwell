@@ -69,11 +69,12 @@ export class PgCaseStore implements CaseStore {
     // of raising a unique violation that would fail one whole run mid-write.
     const now = new Date().toISOString();
     const priority = priorityFor(input.outcomeStatus);
-    const nextAction = nextActionFor(input.outcomeStatus, input.measureId);
+    const nextAction = nextActionFor(input.outcomeStatus, input.measureId, input.evidence);
     const planFrom = (row: CaseRow | null) =>
       planCaseUpsert(row ? { status: row.status, currentOutcomeStatus: row.current_outcome_status, closedBy: row.closed_by } : null, input.outcomeStatus, now);
 
-    let plan = planFrom(await this.findByKey(input.subjectId, input.measureId, input.evaluationPeriod));
+    let existing = await this.findByKey(input.subjectId, input.measureId, input.evaluationPeriod);
+    let plan = planFrom(existing);
     if (plan.op === "noop") return null;
 
     if (plan.op === "insert") {
@@ -102,7 +103,8 @@ export class PgCaseStore implements CaseStore {
       );
       if (rows[0]) return { ...toRecord(rows[0]), disposition: plan.disposition! };
       // Lost the insert race — re-plan against the now-existing row as an update.
-      plan = planFrom(await this.findByKey(input.subjectId, input.measureId, input.evaluationPeriod));
+      existing = await this.findByKey(input.subjectId, input.measureId, input.evaluationPeriod);
+      plan = planFrom(existing);
       if (plan.op !== "update") return null;
     }
 
@@ -127,7 +129,11 @@ export class PgCaseStore implements CaseStore {
         input.evaluationPeriod,
       ],
     );
-    return rows[0] ? { ...toRecord(rows[0]), disposition: plan.disposition! } : null;
+    // Mirrors the SQLite floor: a re-confirmed status whose rate-aware `next_action` moved is UPDATED,
+    // never a silent refresh (ADR-074 d13).
+    const disposition =
+      plan.disposition === "UNCHANGED" && existing && existing.next_action !== nextAction ? "UPDATED" : plan.disposition!;
+    return rows[0] ? { ...toRecord(rows[0]), disposition } : null;
   }
 
   async getCase(id: string): Promise<CaseRecord | null> {

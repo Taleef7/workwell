@@ -137,6 +137,12 @@ test("an executor that refuses the batch outright is reported, not thrown", asyn
   });
   assert.match(report.verdictText, /refused the batch outright: nothing retrieved for anybody/);
   assert.equal(report.roster.evaluationErrors, 4);
+  // A refused batch is ONE finding. The subjects it never reached are not "out of the initial
+  // population" and were never offered the per-subject fallback, so the ADR-043 sentence and the
+  // fallback sentence would send an operator to check bundle shapes for an executor crash (review).
+  assert.doesNotMatch(report.verdictText, /NOBODY in this deployment/);
+  assert.doesNotMatch(report.verdictText, /even after the per-subject fallback/);
+  assert.match(report.verdictText, /4 subject\(s\) were never evaluated/);
 });
 
 test("the measurement period is the calendar year the evaluation date falls in", () => {

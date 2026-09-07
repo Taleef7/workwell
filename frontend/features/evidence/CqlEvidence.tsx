@@ -12,6 +12,8 @@ export interface EvidenceJson {
     site_eligible: boolean;
     waiver_status: string;
     outcome_status?: string;
+    /** The backend's plain-English reading of an official-routed outcome (the CQL result, worded; never AI). */
+    official_summary?: string;
   };
 }
 
@@ -52,8 +54,21 @@ const POPULATION_LABEL: Record<string, string> = {
   "numerator-exclusion": "Numerator exclusion",
 };
 
+/**
+ * `official:<population>` for a single-rate measure; `official:<Rate label>:<population>` for a
+ * multi-rate one (ADR-074 — CMS137 persists Initiation and Engagement separately, and a numerator
+ * shown without its rate is a true statement presented as the whole story). Split on the LAST colon:
+ * the population never contains one, and the rate labels are reviewed constants
+ * (`OFFICIAL_MEASURE_SEMANTICS[id].rateLabels`) that must not either.
+ */
 const populationLabel = (define: string): string => {
   const key = define.trim().slice(OFFICIAL_DEFINE_PREFIX.length);
+  const separator = key.lastIndexOf(":");
+  if (separator > 0) {
+    const rate = key.slice(0, separator);
+    const population = key.slice(separator + 1);
+    return `${rate} · ${POPULATION_LABEL[population] ?? population}`;
+  }
   return POPULATION_LABEL[key] ?? key;
 };
 
@@ -150,6 +165,12 @@ export function CqlWhyFlagged({ whyFlagged }: { whyFlagged?: EvidenceJson["why_f
   const isPatient = SUBJECT.singular === "patient";
   return (
     <dl className="grid gap-2 text-xs text-neutral-700 dark:text-neutral-300 sm:grid-cols-2">
+      {whyFlagged.official_summary ? (
+        <div className="sm:col-span-2 rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-900/40 px-4 py-2">
+          <dt className="text-neutral-500 dark:text-neutral-400">Why flagged</dt>
+          <dd className="mt-1 text-sm font-medium text-neutral-900 dark:text-neutral-100">{whyFlagged.official_summary}</dd>
+        </div>
+      ) : null}
       <WhyFlaggedRow label={isPatient ? "Last result date" : "Last exam date"} value={whyFlagged.last_exam_date ?? "None"} />
       <WhyFlaggedRow label="Window (days)" value={String(whyFlagged.compliance_window_days)} />
       <WhyFlaggedRow label="Days overdue" value={String(whyFlagged.days_overdue ?? 0)} />

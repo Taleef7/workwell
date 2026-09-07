@@ -265,7 +265,12 @@ function populationCounts(report: FhirResource): PopulationCounts {
  */
 export function populationCountsByRate(report: FhirResource): PopulationCounts[] {
   const groups = Array.isArray(report.group) ? report.group as Array<Record<string, unknown>> : [];
-  if (groups.length === 0) return [populationCounts(report)];
+  // A report with no group has no populations: one rate, every population zero. (This used to fall
+  // back to `populationCounts`, which is defined as rate 1 of THIS function — an infinite recursion the
+  // cross-engine sweep could reach from an expected report read outside its try.)
+  if (groups.length === 0) {
+    return [{ "initial-population": 0, denominator: 0, "denominator-exclusion": 0, numerator: 0, "denominator-exception": 0 }];
+  }
   return groups.map((group) => {
     const counts: PopulationCounts = {
       "initial-population": 0,
