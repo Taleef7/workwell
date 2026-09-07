@@ -37,6 +37,30 @@ export interface OfficialMeasureSemantics {
    * wording; absent for a single-rate measure. Reviewed with the measure, like the field above.
    */
   rateLabels?: readonly string[];
+  /**
+   * Retrieve by QI-Core PROFILE as well as resource type, for this measure only. Default false, which
+   * is what every other measure gets and what the executor's docstring explains at length: trusting
+   * profiles globally empties the population for cms122 and cms125, which are routed today.
+   *
+   * cms165 is the one pilot measure that cannot be scored correctly without it.
+   * `[Observation: us-core-blood-pressure]` is its only Observation retrieve with NO code filter — the
+   * other four (hospice, palliative care, frailty, advanced illness) each name a code or a value set —
+   * so it identifies a blood pressure by profile ALONE, and `Status.isObservationBP` narrows only by
+   * `status`. With profiles ignored, every final Observation is a candidate blood pressure: whichever
+   * of a patient's results is most recent is read as their latest reading, and a hemoglobin has no
+   * systolic component. The old synthetic fixture emitted one Observation per subject, the only shape
+   * that hides it.
+   *
+   * Turning it on is available because the ADR-075 corpus stamps the profile each retrieve names —
+   * `corpus-bundle.ts` says it does so precisely to make this possible. It is a per-measure switch and
+   * not a global one for the same reason it defaults false.
+   *
+   * **This does not by itself make cms165 routable.** A bundle whose resources are NOT profile-stamped
+   * retrieves nothing under it, so a WebChart-derived roster needs its blood pressures stamped at
+   * ingest first. That failure is at least LOUD — the executor's batch-level refusal fires when nothing
+   * retrieves across a roster — where the current one is silent and wrong.
+   */
+  trustMetaProfile?: boolean;
 }
 
 export const OFFICIAL_MEASURE_SEMANTICS: Readonly<Record<string, OfficialMeasureSemantics>> = {
@@ -79,6 +103,8 @@ export const OFFICIAL_MEASURE_SEMANTICS: Readonly<Record<string, OfficialMeasure
       "Numerator = the most recent blood pressure is adequately controlled (systolic < 140 mmHg and " +
       "diastolic < 90 mmHg) during the measurement period. Being in it is the blood pressure being " +
       "controlled, and the artifact's improvementNotation ('increase') agrees.",
+    // The only measure that retrieves a blood pressure by profile alone — see the field's own note.
+    trustMetaProfile: true,
   },
   cms68: {
     numeratorMeansCompliant: true,

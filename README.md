@@ -182,7 +182,7 @@ This project is deliberately careful about what it claims. [`docs/STANDARDS_CONF
 | Known-answer gate | Official **MADiE** test cases (9 measures) | **455/455 exact**, every rate of the multi-rate CMS137 compared — a permanent CI gate |
 | Terminology | **VSAC** value sets | The artifact's *own* expansions, fetched at build and pinned by SHA-256 |
 | Reporting | FHIR **MeasureReport**, **QRDA-I**, **QRDA-III** | MeasureReport **validator-verified at 0 base-R4 errors**; both QRDA-I and QRDA-III at **0 findings** against the HL7 base IG |
-| Second opinion | **`cqf-fhir-cr`** (HAPI, Java) over the same artifacts | **299/323 agree across seven measures**, three of them 100% and the multi-rate CMS137 at 44/45 on both rates — the first execution of our artifacts by an engine that is not ours |
+| Second opinion | **`cqf-fhir-cr`** (HAPI, Java) over the same artifacts | **299/323 agree across seven measures**, three of them 100% and the multi-rate CMS137 at 44/45 on both rates — the first execution of our artifacts by an engine that is not ours. **one function is implicated in 21 of the 24 disagreements** across three measures — the two engines read a medication order's period differently (`CumulativeMedicationDuration.medicationRequestPeriod`). 8 of those are proven by single-variable mutation and 13 are consistent-with by inventory; 2 remain unexplained, and CMS137's one is a separate, diagnosed period boundary |
 | EHR integration | **SMART Backend Services** (`private_key_jwt`) | Executed against a live tenant |
 
 **No measure may be routed to its official artifact without a green MADiE gate.** That is a construction-time refusal, not a review convention.

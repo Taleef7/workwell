@@ -1,0 +1,157 @@
+# Cross-execute one measure's MADiE deck through a SECOND engine, in a context that HAS the VSAC
+# credential (issue #532).
+#
+# ## Why this exists as a workflow rather than a runbook line
+#
+# The sweep runs locally for six of the nine vendored measures. It CANNOT run locally for cms130 and
+# cms165: their terminology sidecars are VSAC-completed (ADR-041), the uncredentialed vendor cannot
+# reproduce them, and sweeping on the upstream bundle's capped expansions compares two engines over
+# different terminology — which the 2026-08-04 run showed is not a comparison of engines at all. The
+# credential lives here, so the sweep has to be able to run here.
+#
+# Manual only, and deliberately so. It pulls a ~34MB content checkout, boots a HAPI container per
+# input, and evaluates every test case one subject at a time — tens of minutes. It is evidence-gathering
+# for a flip decision (ROADMAP MM-1c), not a gate on a pull request, and MM-1c's gate is the MADiE job
+# in `ci.yml` that already runs on every push.
+#
+# The result is uploaded as an artifact. Turning it into a dated document under `docs/evidence/` is a
+# human act, because the writing-down is where the LIMITS get stated — see
+# `CROSS_ENGINE_2026-09-07_CMS2.md` for the shape, and its "Limits" section for why that matters more
+# than the number.
+name: Cross-engine sweep (manual, needs the VSAC credential)
+
+on:
+  workflow_dispatch:
+    inputs:
+      measure:
+        description: "Catalog id to sweep (cms130 and cms165 are the two that cannot be swept locally)."
+        required: true
+        type: choice
+        default: cms130
+        options: [cms130, cms165, cms2, cms122, cms125, cms137, cms68, cms138, cms951]
+
+concurrency:
+  # One at a time: each run boots a container on a fixed port and the sweeps are long. Never cancel a
+  # run in progress to start another — an abandoned sweep is a wasted half hour and no evidence.
+  group: cross-engine-sweep
+  cancel-in-progress: false
+
+jobs:
+  sweep:
+    name: ${{ inputs.measure }} through cqf-fhir-cr
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    defaults:
+      run:
+        working-directory: backend-ts
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10.17.1
+          run_install: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: backend-ts/pnpm-lock.yaml
+      - name: Install deps
+        run: pnpm install --frozen-lockfile
+      - name: Cache official content
+        uses: actions/cache@v6
+        with:
+          path: backend-ts/.official-content
+          key: official-content-${{ hashFiles('backend-ts/scripts/fetch-official-cases.ps1') }}
+      - name: Fetch official content (pinned commit)
+        run: pwsh -NoProfile -File scripts/fetch-official-cases.ps1
+
+      # The whole point of running here. Without the credential the sidecar is capped and the sweep
+      # would compare our engine on one expansion against Java on another — so this REFUSES rather than
+      # producing a number that reads like evidence and is not. Same reasoning as the degenerate-sweep
+      # refusal inside the check script.
+      - name: Vendor the measure's terminology, completed from VSAC
+        env:
+          WORKWELL_VSAC_API_KEY: ${{ secrets.WORKWELL_VSAC_API_KEY_VENDOR }}
+        run: |
+          if [ -z "$WORKWELL_VSAC_API_KEY" ]; then
+            echo "::error::No VSAC credential in this context. A sweep on capped expansions compares terminology, not engines (docs/evidence/CROSS_ENGINE_2026-08-04.md) — refusing rather than reporting it as a result."
+            exit 1
+          fi
+          # The artifact name comes from the module that owns the mapping, not from a nine-entry
+          # table copied into YAML that would drift on the tenth measure — the same reason
+          # cross-engine-sweep.sh asks for it rather than hardcoding it.
+          NAME="$(pnpm exec tsx -e "import {officialMeasureName} from './src/standards/official-cases.ts'; process.stdout.write(officialMeasureName('${{ inputs.measure }}') ?? '')")"
+          if [ -z "$NAME" ]; then
+            echo "::error::${{ inputs.measure }} is not an official measure id"
+            exit 1
+          fi
+          pnpm vendor:official --measure "$NAME" --catalog-id "${{ inputs.measure }}" --strip-elm-annotations --with-tests --complete-terminology
+          # Having the credential is not the same as having a COMPLETE sidecar: a rate limit, or one OID
+          # VSAC 404s, leaves a truncated expansion behind and the vendor step still succeeds. Sweeping
+          # that produces exactly the number this job refuses to produce — a comparison of terminology
+          # wearing the clothes of a comparison of engines. So the manifest is asked directly.
+          MANIFEST="measures/official/${{ inputs.measure }}/manifest.json"
+          if [ ! -f "$MANIFEST" ]; then
+            echo "::error::${MANIFEST} was not written — vendoring did not produce a sidecar to sweep against."
+            exit 1
+          fi
+          # `terminology.truncated` is the LIST of value sets whose expansion is still capped — empty
+          # when completion did its job. Asked as a length, because `[]` is truthy in jq and a
+          # boolean-shaped test would pass for every measure, always.
+          TRUNCATED=$(jq -r '.terminology.truncated | length' "$MANIFEST")
+          if [ "$TRUNCATED" != "0" ]; then
+            echo "::error::${{ inputs.measure }}'s vendored terminology still reports ${TRUNCATED} TRUNCATED expansion(s) after --complete-terminology. A sweep on capped expansions compares terminology, not engines — refusing."
+            jq -r '.terminology.truncated[]' "$MANIFEST" || true
+            exit 1
+          fi
+          echo "terminology complete: $(jq -r '.terminology.valueSets' "$MANIFEST") value sets, $(jq -r '.terminology.codes' "$MANIFEST") codes, 0 truncated"
+
+      # `cross-engine-sweep.sh` owns the container lifecycle, including the three silent traps: reusing a
+      # warm container ($evaluate-measure caches per subject for the server's life), racing /metadata
+      # before the Clinical Reasoning module registers, and pushing terminology after the first
+      # evaluation instead of before it.
+      # A DISAGREEMENT IS THE POINT, NOT A FAILURE. `cross-engine-check.ts` exits 1 when any case
+      # disagrees, which is right for a gate and wrong here: CMS2's baseline is 29/36 and CMS137's is
+      # 44/45, so every historically interesting sweep would report this job red while producing exactly
+      # the evidence it was dispatched for. So the exit code is captured, and the step fails only when
+      # the sweep produced no parseable result at all — a container that never came up, a bundle that
+      # would not load, a degenerate all-zero refusal. The disagreement count is surfaced as a notice.
+      #
+      # The script writes its progress to stderr, so stdout is the JSON alone and the artifact is
+      # parseable.
+      - name: Sweep
+        run: |
+          set +e
+          bash scripts/cross-engine-sweep.sh "${{ inputs.measure }}" -- --json > "cross-engine-${{ inputs.measure }}.json"
+          SWEEP_EXIT=$?
+          set -e
+          RESULT="cross-engine-${{ inputs.measure }}.json"
+          if ! jq -e '.results | length > 0' "$RESULT" >/dev/null 2>&1; then
+            echo "::error::the sweep produced no result set (exit ${SWEEP_EXIT}) — this is a harness failure, not a disagreement"
+            exit 1
+          fi
+          # A DISAGREEMENT is the point; a case that never EVALUATED is not one, and the two are
+          # indistinguishable downstream. `cross-engine-check.ts` exits 1 for both, and records a failed
+          # request as `java: null` with an `error`, still counted as a case that "does not agree". So a
+          # sweep where HAPI errored on nine subjects would upload a result set that reads as nine extra
+          # disagreements — the plausible-but-invalid evidence this whole workflow exists to refuse
+          # (Codex P1). Genuine population disagreements pass; unevaluated cases do not.
+          BROKEN=$(jq '[.results[] | select(.error != null or .java == null)] | length' "$RESULT")
+          if [ "$BROKEN" != "0" ]; then
+            echo "::error::${BROKEN} case(s) never evaluated (a request failed), so this sweep is PARTIAL and is not evidence. Disagreements are expected; unevaluated cases are a harness failure."
+            jq -r '.results[] | select(.error != null or .java == null) | "  \(.case): \(.error // "no report returned")"' "$RESULT"
+            exit 1
+          fi
+          TOTAL=$(jq '.results | length' "$RESULT")
+          AGREE=$(jq '[.results[] | select(.agrees)] | length' "$RESULT")
+          echo "::notice::${{ inputs.measure }}: ${AGREE}/${TOTAL} cases agree with the measure developer's expected reports, ${TOTAL} evaluated cleanly (sweep exit ${SWEEP_EXIT})."
+
+      - name: Upload the result
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: cross-engine-${{ inputs.measure }}
+          path: backend-ts/cross-engine-${{ inputs.measure }}.json
+          if-no-files-found: warn

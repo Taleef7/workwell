@@ -211,6 +211,51 @@ export function missedRateIndex(evidence: unknown, numeratorMeansCompliant: bool
 }
 
 /**
+ * Whether an exclusion applies to the rate the CASE is about, on a multi-rate outcome.
+ *
+ * `deriveWhyFlagged` used to read `waiver_status` off the first `expressionResults` define whose name
+ * matched /waiver|exemption|exclusion|contraindication/, which on a multi-rate outcome is always rate
+ * 1's — the labels are `official:<Rate>:<population>` in rate order (ADR-074 d13). That is exact for
+ * CMS137, whose two rates share one denominator and one exclusion expression, and wrong for the first
+ * multi-rate measure vendored with per-rate exclusions: a case about the rate the subject missed would
+ * report the OTHER rate's exclusion.
+ *
+ * Read from `official.rates` rather than from the define names: the populations are the same data the
+ * bucket was computed from, and matching on a reviewed label is a second place for the wording table to
+ * drift. Returns `null` when the outcome is not multi-rate, which is the caller's signal to keep the
+ * single-rate derivation rather than assume "no exclusion".
+ *
+ * Which rate: **a missed rate is by construction not an excluded one** — `missedRateIndex` only returns
+ * a rate the subject is in the denominator of and NOT excluded or excepted from, because being excused
+ * is not a miss. So where the case is about a missed rate the honest answer is "no exclusion applies to
+ * the rate this case is about", and asking the rate would be a check that cannot fire (review finding).
+ * Where there is NO missed rate — an EXCLUDED or COMPLIANT outcome — any rate carrying one answers,
+ * since ADR-074's bucket is worst-of-rates and an exclusion anywhere is what put the subject there.
+ *
+ * "Excluded" here means `denominator-exclusion` OR `denominator-exception`, matching
+ * `outcomeFromPopulations`, which is the reader that decides the EXCLUDED bucket in the first place.
+ * The single-rate derivation this falls back to matches on define NAMES against
+ * /waiver|exemption|exclusion|contraindication/, which does NOT match `denominator-exception` — so an
+ * exception-only single-rate outcome still reads "none". That predates this function and is left
+ * alone rather than changed underneath every authored measure; recorded here so the divergence is
+ * known rather than discovered.
+ */
+export function multiRateExclusionActive(evidence: unknown, numeratorMeansCompliant: boolean): boolean | null {
+  const rates = (evidence as { official?: { rates?: unknown } } | null)?.official?.rates;
+  if (!Array.isArray(rates) || rates.length < 2) return null;
+  const excused = (rate: unknown): boolean =>
+    Array.isArray(rate) &&
+    (rate as Population[]).some(
+      (p) =>
+        (p?.populationType === "denominator-exclusion" || p?.populationType === "denominator-exception") &&
+        p?.result === true,
+    );
+  // A missed rate exists ⇒ the case is about a rate nothing excused the subject from.
+  if (missedRateIndex(evidence, numeratorMeansCompliant) >= 0) return false;
+  return rates.some(excused);
+}
+
+/**
  * Wording for one (measure, status). Pass the outcome's `evidence_json` where the caller has it: for a
  * multi-rate measure's OVERDUE it selects the missed rate's wording; for everything else it is ignored.
  */

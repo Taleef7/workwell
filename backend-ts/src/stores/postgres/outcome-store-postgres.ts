@@ -186,6 +186,23 @@ export class PgOutcomeStore implements OutcomeStore {
    * uses a correlated MAX because SQLite has no DISTINCT ON. The tie-break is `id DESC` on BOTH stores
    * — see the store contract's tied-timestamp case — so two rows stamped the same instant resolve the
    * same way on the ceiling and the floor.
+   *
+   * **The query is unchanged; `spike_outcomes_keepset_idx` is what ADR-073 d1 was waiting for.** The
+   * index was added in the same commit as Maui's retention window, and it is worth recording what it
+   * actually does, because the obvious-looking rewrite makes things worse. Measured on postgres:16
+   * over 300,000 outcome rows (20,000 subjects × 5 measures × 3 runs — the pilot's shape), each
+   * deleting the same 200,000 rows, EXPLAIN ANALYZE inside a rolled-back transaction:
+   *
+   * | form | plan | time |
+   * |---|---|---|
+   * | this query, no index | external merge `Sort`, 19 MB **to disk** | 523 ms |
+   * | this query, with the index | `Index Only Scan using spike_outcomes_keepset_idx` | **274 ms** |
+   * | `EXISTS (a newer row for this key)` instead, with the index | `Hash Semi Join`, two seq scans, index unused | 516 ms |
+   *
+   * So the whole-table sort ADR-073 d1 named is real, the index removes it, and rewriting the
+   * predicate as a correlated existence check — which reads like the more index-friendly form — is a
+   * pessimization the planner does not use the index for at all. The rewrite was written, measured,
+   * and reverted; this comment is here so it does not get written again.
    */
   async compactOlderThan(cutoff: string): Promise<number> {
     const { rowCount } = await this.pool.query(

@@ -12,6 +12,8 @@ export interface CaseRecord {
   priority: string; // HIGH | MEDIUM | LOW
   assignee: string | null;
   nextAction: string | null;
+  /** Who wrote `nextAction`: 'SYSTEM' (the wording table) or 'OPERATOR' (a person's instruction). */
+  nextActionSource: string;
   currentOutcomeStatus: string;
   lastRunId: string;
   createdAt: string;
@@ -70,7 +72,14 @@ export interface CasePatch {
   status?: string;
   priority?: string;
   assignee?: string | null;
+  /**
+   * Setting this through `patchCase` marks the action OPERATOR-owned, so the nightly upsert stops
+   * overwriting it while the outcome it was written about holds (`planNextAction`). That is the whole
+   * boundary: the system writes `next_action` through `upsertFromOutcome`, people write it through
+   * here. A caller that computes an action the way a run would should say so with `nextActionSource`.
+   */
   nextAction?: string;
+  nextActionSource?: "SYSTEM" | "OPERATOR";
   currentOutcomeStatus?: string;
   lastRunId?: string;
   closedAt?: string | null;

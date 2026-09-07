@@ -350,6 +350,7 @@ jobs:
             src/wiring/corpus-membership.test.ts \
             src/wiring/official-corpus-outcomes.test.ts \
             src/wiring/corpus-official-population.test.ts \
+            src/wiring/official-cms165-blood-pressure-identity.test.ts \
             src/standards/literal-diff.test.ts \
             src/engine/ingress/webchart/devdb-official-eval.test.ts \
             src/engine/ingress/webchart/live-official-parity.test.ts \

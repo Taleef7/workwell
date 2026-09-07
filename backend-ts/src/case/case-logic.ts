@@ -187,6 +187,47 @@ export interface CaseUpsertPlan {
   closedBy?: string | null;
 }
 
+/**
+ * Who wrote a case's `next_action`. `SYSTEM` is the wording table's line for the outcome; `OPERATOR` is
+ * an instruction a person put there — an escalation, a manual resolution, an outreach send's "wait for
+ * follow-up", a rerun-to-verify result.
+ */
+export type NextActionSource = "SYSTEM" | "OPERATOR";
+
+/**
+ * Which `next_action` survives a run, and who owns it afterwards.
+ *
+ * The upsert used to recompute the action from (status, measure, evidence) and write it unconditionally,
+ * so the nightly run silently replaced an operator's instruction with the wording table's line: a case
+ * escalated at 4pm read "Review breast imaging history…" the next morning, and the outreach path's
+ * "Wait for the patient's follow-up, then rerun to verify closure." never survived a night. Making the
+ * overwrite AUDITED (#529 — a re-confirm whose action moved is UPDATED) made it visible without making
+ * it right; the write itself is the defect.
+ *
+ * The rule mirrors the one `IN_PROGRESS` already has, and for the same reason: **an operator's state is
+ * not clobbered by a run that learned nothing new.** An operator-owned action stands for as long as the
+ * outcome it was written about stands. The moment CQL says something different — DUE_SOON became
+ * OVERDUE, an OVERDUE case resolved, a closed case reopened — the instruction was written about a
+ * situation that no longer holds, so the computed action takes over and ownership reverts to SYSTEM.
+ *
+ * What this deliberately does NOT do: keep an operator's action fresh against a wording-table edit, or
+ * against a multi-rate measure's missed rate moving under a stable status (ADR-074 d13). Both still
+ * reach every SYSTEM-owned case on the next run. An OPERATOR-owned case shows the rate it missed on the
+ * case page and the roster cell regardless — those read the outcome's evidence live, not `next_action`
+ * — so nothing is hidden, and the operator's own words are not overwritten to say it twice.
+ */
+export function planNextAction(
+  existing: { nextAction: string | null; nextActionSource: string | null; currentOutcomeStatus: string } | null,
+  computed: string,
+  outcomeStatus: string,
+): { nextAction: string; source: NextActionSource } {
+  if (!existing || existing.nextActionSource !== "OPERATOR" || existing.nextAction == null) {
+    return { nextAction: computed, source: "SYSTEM" };
+  }
+  if (existing.currentOutcomeStatus !== outcomeStatus) return { nextAction: computed, source: "SYSTEM" };
+  return { nextAction: existing.nextAction, source: "OPERATOR" };
+}
+
 /** Decide how a case should be upserted from one outcome, given the existing row (or null). Pure. */
 export function planCaseUpsert(existing: ExistingCaseState | null, outcomeStatus: string, now: string): CaseUpsertPlan {
   const disposition = dispositionFor(outcomeStatus);

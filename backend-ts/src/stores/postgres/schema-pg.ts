@@ -69,6 +69,17 @@ CREATE INDEX IF NOT EXISTS spike_outcomes_subject_idx
 CREATE INDEX IF NOT EXISTS spike_outcomes_measure_idx
   ON ${SPIKE_SCHEMA}.outcomes (measure_id, evaluated_at);
 
+-- OWNER-APPROVED DDL (ADR-073 d1, 2026-09-07): the index the retention keep-set needs, and the reason
+-- WORKWELL_OUTCOME_RETENTION_DAYS stayed unset everywhere until it existed. Compaction asks, for each
+-- candidate row, "is there a newer row for this (subject, measure, period)?" — with no index on that
+-- key the nightly DELETE sorted the whole outcomes table (~1.68M rows on Neon today, and the pilot's
+-- corpus multiplies it) before it could answer. The column order IS the question's shape: equality on
+-- the three key columns, then the ordering the tie-break uses, so the lookup is a bounded index scan.
+-- The evaluated_at DESC, id DESC tail matches compactOlderThan's ordering exactly; a mismatch would
+-- still be correct and would silently sort again. Additive, reversible (DROP INDEX), no data migration.
+CREATE INDEX IF NOT EXISTS spike_outcomes_keepset_idx
+  ON ${SPIKE_SCHEMA}.outcomes (subject_id, measure_id, evaluation_period, evaluated_at DESC, id DESC);
+
 CREATE TABLE IF NOT EXISTS ${SPIKE_SCHEMA}.cases (
   id                     UUID PRIMARY KEY,
   employee_id            TEXT NOT NULL,
@@ -78,6 +89,10 @@ CREATE TABLE IF NOT EXISTS ${SPIKE_SCHEMA}.cases (
   priority               TEXT NOT NULL,
   assignee               TEXT,
   next_action            TEXT,
+  -- Who owns next_action: 'SYSTEM' (the wording table's line) or 'OPERATOR' (an instruction a person
+  -- wrote). The nightly upsert preserves an OPERATOR action while the outcome it was written about
+  -- still holds — planNextAction in case/case-logic.ts.
+  next_action_source     TEXT NOT NULL DEFAULT 'SYSTEM',
   current_outcome_status TEXT NOT NULL,
   last_run_id            UUID NOT NULL,
   created_at             TIMESTAMPTZ NOT NULL,
@@ -89,6 +104,11 @@ CREATE TABLE IF NOT EXISTS ${SPIKE_SCHEMA}.cases (
 );
 
 CREATE INDEX IF NOT EXISTS spike_cases_status_idx ON ${SPIKE_SCHEMA}.cases (status);
+
+-- Compaction's second exclusion — "no case cites this row" — joins cases on exactly these three
+-- columns. Without it the anti-join seq-scans cases once per candidate outcome (ADR-073 d1).
+CREATE INDEX IF NOT EXISTS spike_cases_cited_outcome_idx
+  ON ${SPIKE_SCHEMA}.cases (last_run_id, employee_id, measure_id);
 
 CREATE TABLE IF NOT EXISTS ${SPIKE_SCHEMA}.case_actions (
   id            BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -130,6 +150,10 @@ CREATE INDEX IF NOT EXISTS spike_audit_events_ref_run_id_idx ON ${SPIKE_SCHEMA}.
 -- (the ceiling persists across test runs; CREATE TABLE IF NOT EXISTS would not alter it).
 ALTER TABLE ${SPIKE_SCHEMA}.cases ADD COLUMN IF NOT EXISTS closed_reason TEXT;
 ALTER TABLE ${SPIKE_SCHEMA}.cases ADD COLUMN IF NOT EXISTS closed_by TEXT;
+-- Every pre-existing case row's action was written by a run, so SYSTEM is the true value for it, not a
+-- placeholder: the backfill states what already happened rather than assuming it.
+ALTER TABLE ${SPIKE_SCHEMA}.cases
+  ADD COLUMN IF NOT EXISTS next_action_source TEXT NOT NULL DEFAULT 'SYSTEM';
 ALTER TABLE ${SPIKE_SCHEMA}.outcomes ADD COLUMN IF NOT EXISTS evaluation_period TEXT NOT NULL DEFAULT '';
 
 CREATE TABLE IF NOT EXISTS ${SPIKE_SCHEMA}.measures (

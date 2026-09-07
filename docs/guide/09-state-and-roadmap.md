@@ -100,8 +100,13 @@ rather than reporting a pass it did not earn. The other six are byte-identical e
   Deferred deliberately: today it moves no external number.
 - **Four CLI entry points still use `node:` builtins** — the last unmoved piece of the package
   extraction.
-- **Undiagnosed measure discrepancies:** two Procedure-only cases in CMS125, seven numerator flips
-  in CMS2, and CMS130/CMS165 never swept.
+- **Measure discrepancies, mostly diagnosed now:** two Procedure-only cases in CMS125 remain open, and
+  CMS130/CMS165 have never been swept — their sidecars need the VSAC credential, so the sweep runs from
+  the manual `cross-engine-sweep` workflow rather than a laptop (issue #532). CMS2's seven numerator
+  flips are **no longer undiagnosed** (2026-09-07): the second engine takes a medication order's start
+  from `dosageInstruction.timing.repeat.boundsPeriod` and not from `authoredOn`, proven by mutation on
+  all seven. It is the same helper CMS122's and CMS125's disagreements were isolated to
+  (`docs/evidence/CROSS_ENGINE_2026-09-07_CMS2.md`).
 - **The Studio's SQL preview panel shows illustrative SQL**, not the parity-proven generated
   artifacts ([chapter 7](07-sql-and-the-bridge.md)). Either point it at the real files or relabel
   it.

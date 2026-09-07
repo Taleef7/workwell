@@ -6,7 +6,7 @@
  */
 import type { CloudDatabase } from "@mieweb/cloud";
 import type { CaseRecord, CaseQuery, CaseStore, CasePatch, UpsertCaseInput, UpsertedCase } from "../case-store.ts";
-import { planCaseUpsert, priorityFor, nextActionFor } from "../../case/case-logic.ts";
+import { planCaseUpsert, planNextAction, priorityFor, nextActionFor } from "../../case/case-logic.ts";
 
 interface CaseRow {
   id: string;
@@ -17,6 +17,7 @@ interface CaseRow {
   priority: string;
   assignee: string | null;
   next_action: string | null;
+  next_action_source: string | null;
   current_outcome_status: string;
   last_run_id: string;
   created_at: string;
@@ -27,7 +28,7 @@ interface CaseRow {
 }
 
 const COLS =
-  "id, employee_id, measure_id, evaluation_period, status, priority, assignee, next_action, current_outcome_status, last_run_id, created_at, updated_at, closed_at, closed_reason, closed_by";
+  "id, employee_id, measure_id, evaluation_period, status, priority, assignee, next_action, next_action_source, current_outcome_status, last_run_id, created_at, updated_at, closed_at, closed_reason, closed_by";
 
 const toRecord = (r: CaseRow): CaseRecord => ({
   id: r.id,
@@ -38,6 +39,7 @@ const toRecord = (r: CaseRow): CaseRecord => ({
   priority: r.priority,
   assignee: r.assignee,
   nextAction: r.next_action,
+  nextActionSource: r.next_action_source ?? "SYSTEM",
   currentOutcomeStatus: r.current_outcome_status,
   lastRunId: r.last_run_id,
   createdAt: r.created_at,
@@ -69,8 +71,19 @@ export class SqliteCaseStore implements CaseStore {
     // violation (which would fail one whole run mid-write, as the old atomic ON CONFLICT never did).
     const now = new Date().toISOString();
     const priority = priorityFor(input.outcomeStatus);
-    const nextAction = nextActionFor(input.outcomeStatus, input.measureId, input.evidence);
+    const computedAction = nextActionFor(input.outcomeStatus, input.measureId, input.evidence);
     let existing = await this.findByKey(input.subjectId, input.measureId, input.evaluationPeriod);
+    let action = planNextAction(
+      existing
+        ? {
+            nextAction: existing.next_action,
+            nextActionSource: existing.next_action_source,
+            currentOutcomeStatus: existing.current_outcome_status,
+          }
+        : null,
+      computedAction,
+      input.outcomeStatus,
+    );
     let plan = planCaseUpsert(
       existing ? { status: existing.status, currentOutcomeStatus: existing.current_outcome_status, closedBy: existing.closed_by } : null,
       input.outcomeStatus,
@@ -83,8 +96,8 @@ export class SqliteCaseStore implements CaseStore {
         .prepare(
           `INSERT INTO cases
              (id, employee_id, measure_id, evaluation_period, status, priority, assignee,
-              next_action, current_outcome_status, last_run_id, created_at, updated_at, closed_at, closed_reason, closed_by)
-           VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?)
+              next_action, next_action_source, current_outcome_status, last_run_id, created_at, updated_at, closed_at, closed_reason, closed_by)
+           VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT (employee_id, measure_id, evaluation_period) DO NOTHING
            RETURNING ${COLS}`,
         )
@@ -95,7 +108,8 @@ export class SqliteCaseStore implements CaseStore {
           input.evaluationPeriod,
           plan.status!,
           priority,
-          nextAction,
+          action.nextAction,
+          action.source,
           input.outcomeStatus,
           input.runId,
           now,
@@ -113,21 +127,99 @@ export class SqliteCaseStore implements CaseStore {
         input.outcomeStatus,
         now,
       );
+      // The winner of the race may have written an operator-owned action between our read and theirs.
+      action = planNextAction(
+        existing
+          ? {
+              nextAction: existing.next_action,
+              nextActionSource: existing.next_action_source,
+              currentOutcomeStatus: existing.current_outcome_status,
+            }
+          : null,
+        computedAction,
+        input.outcomeStatus,
+      );
       if (plan.op !== "update") return null;
     }
 
-    // update
-    const row = await this.db
+    // update — a COMPARE-AND-SET on the two columns an operator can move under us, mirroring the Pg
+    // ceiling. `planNextAction` decides from a row read microseconds earlier, and an operator can
+    // escalate in that window; an unconditional write would put the run's already-stale action over
+    // their instruction and reset ownership to SYSTEM, and where the status and computed action matched
+    // the snapshot the disposition would still say UNCHANGED, so the clobber would not be audited
+    // either. `IS ?` is SQLite's null-safe comparison, the counterpart of the ceiling's
+    // `IS NOT DISTINCT FROM` (Codex P2, #538).
+    const attemptUpdate = async (from: CaseRow, p: typeof plan, a: typeof action) =>
+      await this.db
+        .prepare(
+          `UPDATE cases SET status = ?, priority = ?, next_action = ?, next_action_source = ?, current_outcome_status = ?,
+             last_run_id = ?, updated_at = ?, closed_at = ?, closed_reason = ?, closed_by = ?
+            WHERE employee_id = ? AND measure_id = ? AND evaluation_period = ?
+              AND next_action IS ? AND next_action_source IS ?
+          RETURNING ${COLS}`,
+        )
+        .bind(
+          p.status!,
+          priority,
+          a.nextAction,
+          a.source,
+          input.outcomeStatus,
+          input.runId,
+          now,
+          p.closedAt ?? null,
+          p.closedReason ?? null,
+          p.closedBy ?? null,
+          input.subjectId,
+          input.measureId,
+          input.evaluationPeriod,
+          from.next_action,
+          from.next_action_source,
+        )
+        .first<CaseRow>();
+
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (!existing) return null;
+      const row = await attemptUpdate(existing, plan, action);
+      if (row) {
+        // UNCHANGED means "nothing an operator would act on moved". `next_action` used to be a function
+        // of (status, measure), so a re-confirmed status implied a re-confirmed action; a multi-rate
+        // measure's action follows the rate the subject missed (ADR-074 d13), so the same OVERDUE can
+        // carry a new action — a state change the pipeline must audit as UPDATED, not refresh silently.
+        const disposition =
+          plan.disposition === "UNCHANGED" && existing.next_action !== row.next_action ? "UPDATED" : plan.disposition!;
+        return { ...toRecord(row), disposition };
+      }
+      existing = await this.findByKey(input.subjectId, input.measureId, input.evaluationPeriod);
+      if (!existing) return null;
+      plan = planCaseUpsert(
+        { status: existing.status, currentOutcomeStatus: existing.current_outcome_status, closedBy: existing.closed_by },
+        input.outcomeStatus,
+        now,
+      );
+      if (plan.op !== "update") return null;
+      action = planNextAction(
+        {
+          nextAction: existing.next_action,
+          nextActionSource: existing.next_action_source,
+          currentOutcomeStatus: existing.current_outcome_status,
+        },
+        computedAction,
+        input.outcomeStatus,
+      );
+    }
+
+    // Contended past three attempts. Write what the run owns and leave the action alone: the run's
+    // wording is recoverable on the next tick, an operator's instruction is not.
+    const fallback = await this.db
       .prepare(
-        `UPDATE cases SET status = ?, priority = ?, next_action = ?, current_outcome_status = ?,
-           last_run_id = ?, updated_at = ?, closed_at = ?, closed_reason = ?, closed_by = ?
+        `UPDATE cases SET status = ?, priority = ?, current_outcome_status = ?, last_run_id = ?,
+           updated_at = ?, closed_at = ?, closed_reason = ?, closed_by = ?
           WHERE employee_id = ? AND measure_id = ? AND evaluation_period = ?
         RETURNING ${COLS}`,
       )
       .bind(
         plan.status!,
         priority,
-        nextAction,
         input.outcomeStatus,
         input.runId,
         now,
@@ -139,13 +231,7 @@ export class SqliteCaseStore implements CaseStore {
         input.evaluationPeriod,
       )
       .first<CaseRow>();
-    // UNCHANGED means "nothing an operator would act on moved". `next_action` used to be a function of
-    // (status, measure), so a re-confirmed status implied a re-confirmed action; a multi-rate measure's
-    // action follows the rate the subject missed (ADR-074 d13), so the same OVERDUE can now carry a new
-    // action — a state change the pipeline must audit as UPDATED, not refresh silently.
-    const disposition =
-      plan.disposition === "UNCHANGED" && existing && existing.next_action !== nextAction ? "UPDATED" : plan.disposition!;
-    return row ? { ...toRecord(row), disposition } : null;
+    return fallback ? { ...toRecord(fallback), disposition: plan.disposition! } : null;
   }
 
   async getCase(id: string): Promise<CaseRecord | null> {
@@ -159,7 +245,18 @@ export class SqliteCaseStore implements CaseStore {
     if (patch.status !== undefined) (sets.push("status = ?"), binds.push(patch.status));
     if (patch.priority !== undefined) (sets.push("priority = ?"), binds.push(patch.priority));
     if (patch.assignee !== undefined) (sets.push("assignee = ?"), binds.push(patch.assignee));
-    if (patch.nextAction !== undefined) (sets.push("next_action = ?"), binds.push(patch.nextAction));
+    // `patchCase` is the operator surface (escalate, manual resolve, outreach, rerun-to-verify); the
+    // system writes actions through `upsertFromOutcome`. So writing an action here transfers ownership
+    // to OPERATOR unless the caller explicitly says the action is system-computed.
+    if (patch.nextAction !== undefined) {
+      sets.push("next_action = ?");
+      binds.push(patch.nextAction);
+      sets.push("next_action_source = ?");
+      binds.push(patch.nextActionSource ?? "OPERATOR");
+    } else if (patch.nextActionSource !== undefined) {
+      sets.push("next_action_source = ?");
+      binds.push(patch.nextActionSource);
+    }
     if (patch.currentOutcomeStatus !== undefined) (sets.push("current_outcome_status = ?"), binds.push(patch.currentOutcomeStatus));
     if (patch.lastRunId !== undefined) (sets.push("last_run_id = ?"), binds.push(patch.lastRunId));
     if (patch.closedAt !== undefined) (sets.push("closed_at = ?"), binds.push(patch.closedAt));

@@ -158,6 +158,15 @@ export async function rerunToVerify(deps: RerunDeps, caseId: string, actor: stri
     status: updatedCaseStatus,
     priority: priorityFor(verifiedStatus),
     nextAction,
+    // SYSTEM, explicitly. `patchCase` is the operator surface and marks an action OPERATOR-owned by
+    // default (ADR-076 d2) — right for escalate, manual resolve and outreach, where a person wrote the
+    // words. This action is not that: `verificationNextAction` returns `nextActionFor(...)`, the very
+    // string a run would compute. Marking it OPERATOR would freeze it: `planNextAction` preserves an
+    // operator action while the status is re-confirmed, so a rerun-to-verify on a still-OVERDUE
+    // multi-rate case would pin the rate it missed THAT day and never follow the rate moving
+    // afterwards — breaking exactly the ADR-074 d13 behaviour ADR-076 d2 promises is untouched. Every
+    // case that had ever been reverified would also stop receiving wording-table edits.
+    nextActionSource: "SYSTEM",
     currentOutcomeStatus: verifiedStatus,
     lastRunId: run.id,
     closedAt,

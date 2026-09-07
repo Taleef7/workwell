@@ -269,6 +269,21 @@ flip would route it, so a corpus shape the artifact cannot read fails the gate r
 fixture it never runs on (ADR-072 d6, ADR-074 d14). Each reading can fail the flip alone; the verdict
 is prose and the flip stays a reviewed workflow edit.
 
+**One measure reads its data by profile, and that is now a per-measure setting.** The executor ignores
+`meta.profile` when it retrieves, because trusting profiles empties cms122's and cms125's populations
+and those are the two that run on real people. CMS165 is the exception, and the exception is forced:
+its decisive retrieve is `[Observation: us-core-blood-pressure]` with no code filter, so with profiles
+ignored *any* final observation is a candidate blood pressure and whichever is newest is read as the
+patient's latest reading — a hemoglobin standing in for a systolic. Since 2026-09-07 the setting is
+per measure and cms165 is the only one that turns it on (ADR-076 d1). That works because the corpus
+stamps the profile each retrieve names, which it has done since the corpus was built, for this. It does
+**not** make cms165 routable: data that carries no profiles retrieves nothing under it, so real blood
+pressures from WebChart must be stamped at ingest first. The difference is that failing that way is
+loud where it counts: a nightly run over a roster refuses outright when nothing retrieves. A one-subject
+evaluation still cannot refuse — for one person, retrieving nothing is a legitimate answer — so the
+simulator would say MISSING_DATA rather than complain. Better than a plausible wrong number, and not a
+guarantee.
+
 > **The eighth measure is the one worth retelling.** CMS138 (tobacco screening) would not run at
 > all: all 47 of its test cases errored, and the original note said its code lists "would not
 > expand" — a symptom, pointing at the wrong system. What was actually wrong: the measure's logic

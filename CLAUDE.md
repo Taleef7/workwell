@@ -113,7 +113,7 @@ context without changing what you should do. Consult `docs/JOURNAL.md` for what 
 - `docs/archive/DECISIONS_ARCHIVE.md` — read a single ADR when a pointer in `DECISIONS.md` sends you there; never the file
 - the rest of `docs/archive/` — everything dated, superseded or finished lives there (ADR-066)
 
-## Current focus (as of 2026-09-06)
+## Current focus (as of 2026-09-07)
 **The Maui pilot (milestone M-M) is the spearhead.** `docs/ROADMAP_2026-08-30.md` is the APPROVED active
 plan, ADR-070 drives it, and the owner decisions are `LOCKED_DECISIONS.md` §4A — read those, not a
 retelling. Naming policy: repo documents say "Maui" and "the pilot group" only.
@@ -122,8 +122,10 @@ retelling. Naming policy: repo documents say "Maui" and "the pilot group" only.
   corpus, multi-rate execution, outcome retention) merged 2026-09-05/06. Maui routes cms122 + cms125;
   cms2, cms130, cms165 and cms137 are `official-pending` until MM-1c's second-engine sweep and a
   `flip-gate` run clear each one. **No known-unverified measure is routed to the pilot**, the flip is a
-  reviewed workflow edit (ADR-045), and **cms165 must not be routed** until its `trustMetaProfile`
-  blocker is resolved (ADR-072, `MEASURES.md`).
+  reviewed workflow edit (ADR-045), and **cms165 must not be routed** until real blood pressures are
+  profile-stamped at ingest (ADR-076 d1 made profile trust per-measure, which is half the fix;
+  `MEASURES.md` and issue #533 carry the other half). U3 (#529) and the MM-1 open-flag work of
+  2026-09-07 (ADR-076, issues #530–#537) are the newest entries — read `docs/JOURNAL.md`, not this line.
 - MM-2/3/4 are blocked on externals (ROADMAP §7). The milestones deliver a **sandbox**; the pilot's
   production/PHI phase is a separate `PRODUCTION_READINESS`-gated decision nothing in M-M authorizes.
 - M-C (packaging) is complete and published; M-E1 (occupational content) is deferred behind M-M, not

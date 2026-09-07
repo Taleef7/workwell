@@ -235,7 +235,8 @@ function visitsFor(rng: SplitMix64, year: number): string[] {
   return visits.sort();
 }
 
-function addDays(date: string, days: number): string {
+/** A calendar date `days` after `date`, UTC, `YYYY-MM-DD`. Shared with the bundle builder. */
+export function addDays(date: string, days: number): string {
   const d = new Date(`${date}T00:00:00Z`);
   d.setUTCDate(d.getUTCDate() + days);
   return d.toISOString().slice(0, 10);

@@ -1,5 +1,118 @@
 # Journal
 
+## 2026-09-07 — the eight flags MM-1 left open, and CMS2's seven disagreements run to a cause
+
+Every open flag from the last three entries had one thing in common: it was recorded somewhere a person
+would have to remember to look. None had a GitHub issue, so the first act of the day was filing eight
+(#530–#537) with the evidence each would need. This entry is what came of working them.
+
+**CMS2's seven cross-engine disagreements have a cause, and it is the cause CMS122 and CMS125 already
+had.** Open and unexplained since the 2026-08-04 sweep, and the MM-1c precondition on CMS2's flip. The
+baseline reproduced exactly — 29 of 36, all seven `NUMER 1→0` — and the seven turned out to be precisely
+the cases whose only depression follow-up is an antidepressant `MedicationRequest`; every case followed
+up by a `Procedure` or `ServiceRequest` agrees, including the one patient who has both. Two suspects
+were eliminated by direct observation rather than by argument: the order IS retrieved (it appears in
+Java's own `evaluatedResource`) and the drug IS in the pushed expansion (200 of a declared 200, not
+capped). Then four single-variable mutations, each on a fresh container: `dosageInstruction` timing and
+dose changes nothing; `dispenseRequest.validityPeriod` changes nothing; moving the drug to a contained
+`Medication` changes nothing; adding `dosageInstruction.timing.repeat.boundsPeriod` **and nothing else**
+takes the sweep to 36/36. So `cqf-fhir-cr` will take a medication's start from `boundsPeriod` and not
+from `authoredOn`, and `fqm-execution` and MADiE's own expected reports take it from `authoredOn`. The
+implicated helper is `CumulativeMedicationDuration.medicationRequestPeriod` — the same one CMS122's and
+CMS125's `DENEX` disagreements were isolated to in August. It is now implicated in **21 of the 24**
+known cross-engine disagreements: CMS122's 6, CMS125's 8, CMS2's 7 — 8 of them proven by a
+single-variable mutation and 13 consistent-with by inventory, which is the distinction the August
+evidence drew and the derived docs had lost. August counted **9 of 23 unattributed**; it is now **2 of
+24**, the two CMS125 cases whose follow-up is a `Procedure` only. CMS137's single one is separate and
+separately proved. One difference wearing three costumes is a materially better
+position than three unexplained ones. Written up in `docs/evidence/CROSS_ENGINE_2026-09-07_CMS2.md`, limits included.
+
+That finding turned around and indicted our own corpus. `corpus-bundle.ts` gives the dementia-medication
+order a real 90-day supply *through the dispense request*, with a comment saying the frailty exclusion
+must be reachable "because of the data, not because of an engine leniency" — and mutation 2a is the
+proof that a dispense request alone does not satisfy the second engine. The order now states the same
+window in `timing.repeat.boundsPeriod` as well. Same clinical fact, said in both fields the helper
+reads; generator 4.1.0, no patient changed.
+
+**`trustMetaProfile` became a per-measure fact (ADR-076 d1).** CMS165's decisive retrieve identifies a
+blood pressure by profile ALONE — it is the only Observation retrieve in that artifact with no code
+filter; the other four each name a code or a value set, which is what makes a targeted switch safe. With
+profiles ignored every final Observation was a candidate blood pressure, so whichever result was newest
+was read as the patient's latest reading. It is on for cms165 and off everywhere else, because trusting
+profiles globally empties cms122's and cms125's populations and those are routed. This is possible only
+because ADR-075's corpus stamps the profile each retrieve names, which it was already doing for exactly
+this eventuality. **It does not make cms165 routable** and the measure stays out of the routing list:
+an unstamped bundle retrieves nothing under it, so real WebChart blood pressures need stamping at
+ingest first. The new failure mode is louder where it counts — a nightly run over a roster refuses outright when
+nothing retrieves — though a one-subject evaluation still cannot refuse, since for one person
+retrieving nothing is a legitimate answer.
+The test that pins it asserts an invariant rather than a bucket — adding a hemoglobin result must not
+change a blood-pressure measure's answer — and it needs the credentialed sidecar, so it is registered
+in the CI job's explicit file list. A file that job does not name is a test that reads as covered and
+never runs, which that job's own comment warns about.
+
+**An operator's next action stopped being overwritten every night (ADR-076 d2).** Escalate, manual
+resolve, an outreach send's "wait for the follow-up", rerun-to-verify — each wrote `next_action`, and
+the nightly run replaced it with the wording table's line. U3 made that overwrite audited, which made
+it visible without making it right. A `next_action_source` column now records who wrote it: `patchCase`
+is the operator surface, `upsertFromOutcome` is the system's, and an OPERATOR action stands while the
+outcome it was written about stands. When the status moves, ownership reverts — an instruction about
+being OVERDUE is stale advice once CQL says something else. This is the rule `IN_PROGRESS` already had.
+Wording-table edits still reach every system-owned case, and the missed rate is on the case page and the
+roster cell regardless, because those read the evidence rather than the action.
+
+**Retention turned on for Maui, with the index it was waiting for (ADR-076 d4).** ADR-073 d1 said the
+window lands in the same commit as the Postgres keep-set index, and the workflow comment said the same
+thing in the imperative. Both indexes exist now. Maui ships 400 days, which deletes nothing today on a
+two-month-old instance and starts protecting the table later: the safest possible moment to switch such
+a thing on. The coupling is a test rather than a memory — a shipped window implies both indexes, so
+dropping one while the window stays set goes red.
+
+The query itself did not change, and that took a measurement to establish rather than an opinion. The
+obvious companion edit was to rewrite the keep-set as a correlated `EXISTS (a newer row for this key)`,
+which reads like the more index-friendly form; it was written, and then the reviewer asked for claims
+wider than what was measured, so it was measured. On postgres:16 over 300,000 outcome rows — the
+pilot's shape — each variant deleting the same 200,000 under `EXPLAIN ANALYZE` in a rolled-back
+transaction: the original query with no index does an external merge sort spilling 19 MB to disk at
+523 ms; with the index it is an index-only scan at 274 ms; the `EXISTS` rewrite with the index is a
+hash semi join over two sequential scans at 516 ms, and the planner does not touch the index at all.
+So the INDEX was the fix and the rewrite was a pessimization. Reverted, with the numbers in the store's
+docstring so nobody writes it again — including me, next year.
+
+**A run now says how many subjects the segment gate dropped (ADR-076 d3).** The pilot's `All Patients`
+lists two clinics and the corpus spans five, so the first 20,000-patient run would have evaluated 52 %
+of patients and opened no case for any of them: NOT_APPLICABLE on the roster, absent from every
+worklist, nothing wrong in the data. Seeding still creates and never mutates — widening a segment stays
+a human act with an audit row — so the run's job is to make the need impossible to miss, not to repair
+it. One WARN per run with the count, the share, the measures and the sites; nothing at all when nothing
+is gated, because a warning on every run is a warning nobody reads. Same remedy as ADR-043's, and the
+same reasoning.
+
+**`waiver_status` on a multi-rate outcome now answers from the rate the case is about**, read from
+`official.rates` rather than from whichever define sorted first. A no-op for CMS137, whose rates share
+one exclusion expression, and correct for the first multi-rate measure vendored without that property.
+
+**The sweep is a script now** (`scripts/cross-engine-sweep.sh`), because three of the four ways to get a
+cross-engine run wrong are silent and each has cost an afternoon: a warm container answering from cache,
+a load that races the Clinical Reasoning module's registration, terminology pushed after the first
+evaluation. It found a fourth on its first run: the readiness probe was `curl | grep -q`, and `grep -q`
+exiting at the first match kills curl with SIGPIPE, which under `pipefail` reads as failure — so the
+probe never fired against a server that had been ready for minutes. Fetch, then match. A manual
+`cross-engine-sweep` workflow runs the same script where the VSAC credential lives, which is the only
+place CMS130's and CMS165's sweeps can happen (#532); it refuses outright without the credential rather
+than sweeping capped expansions and reporting the number as evidence.
+
+**Still owner-owned.** The cms137 flip (#534) is NOT done and should not be: ADR-072 D1 sequences it
+after cms2 and cms130, cms130's sweep needs a manual dispatch of the new workflow, and the CY2027 final
+rule that decides whether measure 305 survives APP Plus is expected around November. **Its `--subjects
+all` gate evidence is banked**: over all 20,000 corpus patients the gate reads 45/45 MADiE, 599 in the
+initial population and denominator, 518 actionable, 0 evaluation errors, both rates alive (numerators
+231 and 81), effectivePeriod covering the year — evidence FOR the flip on the whole roster rather than
+the 2,000-subject sample U3 ran, written up in `docs/evidence/FLIP_GATE_2026-09-07_CMS137.md` so the
+numbers have a source and not just a sentence. cms165's ingest-side stamping (#533) is the open half of
+that issue. The live Maui segment repair (#536) is still a person's audited `PUT`; what changed is that
+the run now tells you it is owed.
+
 ## 2026-09-06 — CMS137's gate runs on the roster Maui actually runs, and a case says which rate was missed (MM-1 U3)
 
 U3 as specified on 2026-09-04 was mostly absorbed by U2 (#528): cms137 vendored, gated 45/45, executable,

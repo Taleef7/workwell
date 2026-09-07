@@ -45,7 +45,19 @@ SQLite floor and the Pg ceiling read the current row and apply the shared pure `
   carries the new `nextAction`. The rule compares strings, so a change to a wording table
   (`OFFICIAL_DISPLAY`, the next-action overrides, the subject-term prose) re-audits every open case ONCE
   on the next run, and a legacy row whose `next_action` is NULL does so on first contact. Deliberate:
-  the persisted row changed. The per-case audit is **best-effort at the run boundary**: it is written after the upsert
+  the persisted row changed.
+- **An OPERATOR's `next_action` is not overwritten by a run that learned nothing new** (ADR-076 d2).
+  `cases.next_action_source` records who wrote it: `patchCase` is the operator surface (escalate,
+  manual resolve, outreach) and marks `OPERATOR`; `upsertFromOutcome` marks `SYSTEM`. **Rerun-to-verify
+  passes `SYSTEM` explicitly**, because the action it writes is `nextActionFor(...)` — the string a run
+  would compute — and freezing that would pin a multi-rate case to the rate it missed the day it was
+  reverified. Any caller computing an action the way a run does must say so the same way.
+  While the outcome status is re-confirmed unchanged, an OPERATOR action stands and the disposition is
+  `UNCHANGED` — the persisted row did not change, so there is no state change to audit. The moment the
+  status moves, the computed action takes over and ownership reverts to `SYSTEM`, because an
+  instruction written about being OVERDUE is stale once CQL says something else. Wording-table edits
+  and a moved missed rate still reach every SYSTEM-owned case; the case page and roster cell show the
+  missed rate either way, since they read the outcome's evidence rather than `next_action`. The per-case audit is **best-effort at the run boundary**: it is written after the upsert
   (the disposition is only known post-mutation), and a transient `audit_events` failure is caught and
   logged as a run `WARN` rather than aborting the run — so an otherwise-complete run still finalizes
   instead of being left stuck RUNNING / marked FAILED after the case was already mutated (mirrors the
@@ -172,8 +184,10 @@ Audit event export is append-only and includes event metadata + payload snapshot
 
 ### 6.5 Outcome Retention Contract (ADR-073)
 
-**Inert unless `WORKWELL_OUTCOME_RETENTION_DAYS` is set** (unset everywhere today, and unset means OFF;
-Maui turns it on only in the same commit as the Postgres keep-set index, ADR-073 d1). Where it is set,
+**Inert unless `WORKWELL_OUTCOME_RETENTION_DAYS` is set**, and unset means OFF. **Maui ships 400 days
+since 2026-09-07** (ADR-076 d4), in the same commit as the Postgres keep-set index ADR-073 d1 required;
+TWH and every other deployment leave it unset, so their history stays whole. 400 days keeps a full
+measurement year plus a margin, and removes nothing on an instance younger than that. Where it is set,
 one pass runs after each nightly recompute — after that run's quality snapshot, never before — and the
 `OUTCOMES_COMPACTED` intent event is written BEFORE the delete and the completion event after it, so
 nothing is deleted without a ledger entry (ADR-073 d4).

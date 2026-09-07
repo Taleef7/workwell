@@ -56,6 +56,8 @@ type CaseDetail = {
   priority: string;
   assignee: string | null;
   nextAction: string;
+  /** 'SYSTEM' (the measure's own wording) or 'OPERATOR' (someone wrote this instruction). ADR-076 d2. */
+  nextActionSource?: string;
   currentOutcomeStatus: string;
   lastRunId: string;
   createdAt: string;
@@ -717,6 +719,16 @@ export default function CaseDetailPage() {
               <div className="mt-6 rounded-2xl border border-amber-200 bg-amber-50 p-4 dark:border-amber-900 dark:bg-amber-950/30">
                 <p className="text-xs font-semibold uppercase tracking-[0.2em] text-amber-700 dark:text-amber-300">Next action</p>
                 <p className="mt-2 text-sm text-amber-950 dark:text-amber-100">{caseDetail.nextAction}</p>
+                {/* Who wrote this line, shown only when the answer is "a person" (ADR-076 d2). Without it
+                    the rule is invisible: an operator who escalates cannot tell that their words now
+                    outrank the nightly wording, nor that the measure changing its mind hands the line
+                    back. A badge on every case would just be furniture, so the system-owned default —
+                    which is nearly every case — says nothing at all. */}
+                {caseDetail.nextActionSource === "OPERATOR" ? (
+                  <p className="mt-1 text-xs text-amber-800 dark:text-amber-300">
+                    Written by a person. Nightly runs leave it alone until the outcome changes.
+                  </p>
+                ) : null}
                 <div className="mt-2 flex items-center gap-2 text-xs text-amber-800 dark:text-amber-300">
                   <span>Outreach delivery:</span>
                   <DeliveryChip status={caseDetail.latestOutreachDeliveryStatus} />

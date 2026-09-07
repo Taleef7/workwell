@@ -33,19 +33,44 @@ patient actually missed ("without treatment initiation within 14 days" or "initi
 within 34 days"), read from the persisted rates (ADR-074 d13). All four sit in the roster's quality
 panel, so each becomes a column the day its flip routes it. **CMS137's MM-1c verification is done on the sample the
 unit ran (2026-09-06):** the flip gate over the first 2,000 of the corpus roster reads evidence FOR the flip
-(45/45 MADiE, 60 in the initial population, both rates alive — the flip PR carries the `--subjects all`
-sweep), and the second-engine sweep agrees on 44/45 cases on both rates, the one disagreement characterised
-as a period-boundary difference (`docs/evidence/CROSS_ENGINE_2026-09-06_CMS137.md`).
+(45/45 MADiE, 60 in the initial population, both rates alive), and the second-engine sweep agrees on 44/45
+cases on both rates, the one disagreement characterised as a period-boundary difference
+(`docs/evidence/CROSS_ENGINE_2026-09-06_CMS137.md`). **The whole-roster run the flip PR needs is now
+banked (2026-09-07):** `flip-gate --measure cms137 --subjects all` over all 20,000 corpus patients reads
+45/45 MADiE, **599 in the initial population and denominator, 518 actionable, 0 evaluation errors**, with
+both rates alive (numerators 231 and 81) and the effectivePeriod covering the measured year — evidence
+FOR the flip on the full roster, not a 2,000-subject sample
+(`docs/evidence/FLIP_GATE_2026-09-07_CMS137.md`).
 Its flip remains the owner's workflow edit, sequenced after cms2 and cms130 (ADR-072 D1), and the 2027
 pilot year still needs the MM-1d re-vendor.
 
-> **CMS165 is blocked on more than verification.** The official executor ignores `meta.profile`
-> (`trustMetaProfile: false`, deliberate — trusting it empties the population for cms122/cms125), and
-> CMS165 is the only pilot measure whose decisive retrieve identifies blood pressure by PROFILE alone
-> with no code filter. With the profile ignored it matches any final Observation, so a patient with any
-> other lab reads as non-compliant, and a same-day non-BP Observation throws. Verified by execution
-> against the vendored artifact on 2026-09-05. Do not route cms165 until this is fixed; see ADR-072's
-> consequences.
+**CMS2's verification debt is paid (2026-09-07).** Its seven cross-engine disagreements, open and
+unexplained since 2026-08-04, are proven to one cause: the Java engine takes a medication order's start
+from `dosageInstruction.timing.repeat.boundsPeriod` and not from `authoredOn`, so the seven cases whose
+only depression follow-up is an antidepressant order are not credited there — adding that one field
+moves the sweep from 29/36 to 36/36 (`docs/evidence/CROSS_ENGINE_2026-09-07_CMS2.md`). It is the same
+helper CMS122's and CMS125's disagreements were isolated to, and it is now implicated in 21 of the 24
+known cross-engine disagreements — 8 of them proven by mutation, 13 consistent-with by inventory. Two
+CMS125 `Procedure`-only cases are still unexplained; CMS137's one is a separately proven period
+boundary. That clears the MM-1c precondition
+§4A.5 put on CMS2's flip; the flip itself is still the owner's workflow edit, and CMS130's sweep still
+needs the credentialed context (the manual `cross-engine-sweep` workflow, issue #532).
+
+> **CMS165 is blocked on more than verification, and the block moved on 2026-09-07.** CMS165 is the only
+> pilot measure whose decisive retrieve identifies a blood pressure by PROFILE alone with no code filter
+> — the artifact's other four Observation retrieves each name a code or a value set. With profiles
+> ignored it matched any final Observation, so a patient with any other lab read as non-compliant and a
+> same-day non-BP Observation threw (verified by execution 2026-09-05).
+>
+> `trustMetaProfile` is now decided PER MEASURE and cms165 is the only measure that sets it (ADR-076 d1);
+> the default stays false because trusting profiles globally empties cms122's and cms125's populations,
+> and those are routed. That is possible because the ADR-075 corpus stamps the profile each retrieve
+> names. **It does not make cms165 routable.** A bundle whose resources are NOT stamped retrieves nothing
+> under it, so real WebChart blood pressures need stamping at ingest first — the remaining half of issue
+> #533. The failure mode is louder now, though not unconditionally: the batch-level retrieve refusal fires
+> only for a roster of more than one subject, so a nightly run would refuse while `/simulate` and
+> rerun-to-verify would quietly return MISSING_DATA. Better than a plausible wrong number, and not a
+> guarantee. **Do not route cms165.**
 
 **An officially routed measure is scored over the calendar year** containing the evaluation date, not a
 rolling 365-day window (ADR-072). The vendored artifacts are a **2026 vintage** and the pilot year is 2027,

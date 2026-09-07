@@ -266,6 +266,7 @@ status TEXT NOT NULL
 priority TEXT NOT NULL
 assignee TEXT
 next_action TEXT
+next_action_source TEXT NOT NULL DEFAULT 'SYSTEM'   -- who wrote next_action (ADR-076 d2)
 current_outcome_status TEXT NOT NULL
 last_run_id UUID NOT NULL REFERENCES runs(id)
 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()

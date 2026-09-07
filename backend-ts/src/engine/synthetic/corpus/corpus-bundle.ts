@@ -22,11 +22,14 @@
  *   that profile alone (every other condition's measures retrieve both profiles)
  * - a Coverage is `qicore-coverage`, a MedicationRequest `qicore-medicationrequest`
  *
- * The executor runs with `trustMetaProfile: false` today, so these stamps do not change retrieval yet.
- * They are still worth getting right, and not only for tidiness: CMS165's decisive retrieve identifies
- * a blood pressure by PROFILE ALONE with no code filter, so stamping `us-core-blood-pressure` correctly
- * is the precondition for ever trusting profiles for official routing (ADR-072's consequences).
- * Emitting a plausible-but-wrong profile now would quietly foreclose that.
+ * The executor trusts profiles PER MEASURE, and since 2026-09-07 cms165 is the one that does
+ * (`OfficialMeasureSemantics.trustMetaProfile`, issue #533) — so for that measure these stamps now
+ * decide retrieval, and this file's correctness is load-bearing rather than tidy. CMS165's decisive
+ * retrieve identifies a blood pressure by PROFILE ALONE with no code filter, which is exactly why it
+ * needed them; with profiles ignored, any final Observation was a candidate blood pressure. For every
+ * other measure `trustMetaProfile` stays false — trusting them globally empties cms122's and cms125's
+ * populations, and those are routed. A plausible-but-wrong profile here is now a wrong number, not a
+ * foreclosed option.
  *
  * ## The Patient carries what the artifacts actually read
  *
@@ -51,7 +54,7 @@
  */
 import { SUD_CONDITION_CODES, ECQM_CANONICAL_CODES, MAMMOGRAPHY_PROCEDURE_CPT, US_CORE_SEX_CODES } from "../../cql/bundled-ecqm-expansions.ts";
 import { CLINICS, CORPUS_GENERATOR_VERSION, DEFAULT_CORPUS_SEED, PCPS } from "./corpus-parameters.ts";
-import { ageAtPeriodStart, type CorpusEvent, type CorpusPatient } from "./corpus-patient.ts";
+import { addDays, ageAtPeriodStart, type CorpusEvent, type CorpusPatient } from "./corpus-patient.ts";
 
 const QICORE = "http://hl7.org/fhir/us/qicore/StructureDefinition/";
 const USCORE = "http://hl7.org/fhir/us/core/StructureDefinition/";
@@ -518,6 +521,29 @@ function resourcesForEvent(patient: CorpusPatient, event: CorpusEvent, index: nu
         // timing bounds) — a request with only `authoredOn` yields a null interval, which the engine
         // happens to treat as overlapping everything. The exclusion must be reachable because of the
         // data, not because of an engine leniency: a 90-day supply from the order date.
+        //
+        // Stated TWICE, in both fields the helper reads, because the two engines read different ones.
+        // Measured 2026-09-07 (`docs/evidence/CROSS_ENGINE_2026-09-07_CMS2.md`): `cqf-fhir-cr` derives
+        // the start from `dosageInstruction.timing.repeat.boundsPeriod` and does NOT accept
+        // `dispenseRequest.validityPeriod` or `authoredOn` in its place — a mutation adding
+        // `boundsPeriod` and nothing else moved CMS2's sweep from 29/36 to 36/36. With the dispense
+        // request alone this order is credited by our runtime and silently ignored by the second
+        // engine, which is the same "reachable because of an engine leniency" this comment already
+        // refused. Same 90-day window, same clinical fact, said in both places.
+        // The SHAPE the mutation proved, not a subset of it: bounds, frequency and a dose. The sweep
+        // that moved CMS2 from 29/36 to 36/36 carried all three, and shipping bounds-without-a-dose
+        // would be a configuration no run has ever measured (review finding).
+        dosageInstruction: [{
+          timing: {
+            repeat: {
+              boundsPeriod: { start: `${event.date}T10:00:00Z`, end: `${addDays(event.date, 90)}T10:00:00Z` },
+              frequency: 1,
+              period: 1,
+              periodUnit: "d",
+            },
+          },
+          doseAndRate: [{ doseQuantity: { value: 1, unit: "tablet", system: "http://unitsofmeasure.org", code: "{tbl}" } }],
+        }],
         dispenseRequest: {
           validityPeriod: { start: `${event.date}T10:00:00Z` },
           expectedSupplyDuration: { value: 90, unit: "days", system: "http://unitsofmeasure.org", code: "d" },
