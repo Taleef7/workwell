@@ -148,3 +148,79 @@ test("WITHOUT preparation the official artifact reads the whole roster out-of-po
   });
   assert.equal(inPopulation(prepared as never), subjects.length, "prepared: the whole cohort is");
 });
+
+/**
+ * A blood pressure is stamped with its US Core profile, so cms165 can be routed on data that carries
+ * no `meta.profile` of its own (issue #533, ADR-076 d1).
+ *
+ * CMS165 is the one measure the executor runs with `trustMetaProfile: true`, because its decisive
+ * retrieve identifies a reading by profile ALONE. Under that setting an unstamped blood pressure is
+ * not retrieved at all — so a WebChart-derived bundle, which carries no profiles, would score every
+ * patient out of population. The corpus stamps its own; this is how everything else gets there.
+ *
+ * The line this must not cross is fabrication. The profile is derived from codes the resource ALREADY
+ * carries, so the negative cases matter as much as the positive one: a hemoglobin is not promoted into
+ * a blood-pressure measure because it sits next to one.
+ */
+test("a LOINC blood-pressure panel is stamped us-core-blood-pressure", () => {
+  const bundle = {
+    entry: [
+      { resource: { resourceType: "Observation", status: "final", code: { coding: [{ system: "http://loinc.org", code: "85354-9" }] } } },
+    ],
+  };
+  const out = preparedForQiCore(bundle as never) as { entry: Array<{ resource: { meta?: { profile?: string[] } } }> };
+  assert.deepEqual(out.entry[0]!.resource.meta?.profile, ["http://hl7.org/fhir/us/core/StructureDefinition/us-core-blood-pressure"]);
+});
+
+test("systolic AND diastolic components are a blood pressure even without the panel code", () => {
+  const bundle = {
+    entry: [
+      {
+        resource: {
+          resourceType: "Observation",
+          status: "final",
+          code: { coding: [{ system: "http://loinc.org", code: "35094-2" }] },
+          component: [
+            { code: { coding: [{ system: "http://loinc.org", code: "8480-6" }] } },
+            { code: { coding: [{ system: "http://loinc.org", code: "8462-4" }] } },
+          ],
+        },
+      },
+    ],
+  };
+  const out = preparedForQiCore(bundle as never) as { entry: Array<{ resource: { meta?: { profile?: string[] } } }> };
+  assert.ok(out.entry[0]!.resource.meta?.profile?.includes("http://hl7.org/fhir/us/core/StructureDefinition/us-core-blood-pressure"));
+});
+
+test("nothing that is not a blood pressure is stamped as one", () => {
+  const bundle = {
+    entry: [
+      // A hemoglobin: the exact resource that, unstamped and profile-ignored, was being read as a
+      // patient's latest blood pressure.
+      { resource: { resourceType: "Observation", status: "final", code: { coding: [{ system: "http://loinc.org", code: "4548-4" }] } } },
+      // A systolic reading with no diastolic beside it — half a blood pressure is not one.
+      { resource: { resourceType: "Observation", status: "final", component: [{ code: { coding: [{ system: "http://loinc.org", code: "8480-6" }] } }] } },
+      // The right code in the wrong system.
+      { resource: { resourceType: "Observation", status: "final", code: { coding: [{ system: "http://snomed.info/sct", code: "85354-9" }] } } },
+    ],
+  };
+  const out = preparedForQiCore(bundle as never) as { entry: Array<{ resource: { meta?: { profile?: string[] } } }> };
+  for (const e of out.entry) assert.equal(e.resource.meta?.profile, undefined);
+});
+
+test("an existing meta.profile is preserved, not replaced", () => {
+  const bundle = {
+    entry: [
+      {
+        resource: {
+          resourceType: "Observation",
+          status: "final",
+          meta: { profile: ["http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-observation-lab"] },
+          code: { coding: [{ system: "http://loinc.org", code: "85354-9" }] },
+        },
+      },
+    ],
+  };
+  const out = preparedForQiCore(bundle as never) as { entry: Array<{ resource: { meta?: { profile?: string[] } } }> };
+  assert.equal(out.entry[0]!.resource.meta?.profile?.length, 2, "the artifact's own profile stays; ours is added");
+});

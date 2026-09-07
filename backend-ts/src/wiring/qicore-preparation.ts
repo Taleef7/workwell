@@ -107,6 +107,43 @@ function unbindable(concept: unknown): boolean {
  * while onset alone yields 0/25. Both reasons point the same way. If a future measure genuinely cannot
  * retrieve without an onset, the answer is a corpus that records one, not a value minted here.
  */
+
+const US_CORE_BLOOD_PRESSURE = "http://hl7.org/fhir/us/core/StructureDefinition/us-core-blood-pressure";
+const LOINC_BP_PANEL = new Set(["85354-9", "55284-4"]);
+const LOINC_BP_COMPONENT = new Set(["8480-6", "8462-4"]);
+
+/** Every LOINC code on a resource's `code.coding`, plus its components' codes. */
+function loincCodes(resource: Record<string, unknown>): string[] {
+  const out: string[] = [];
+  const push = (concept: unknown) => {
+    const coding = (concept as { coding?: Array<{ system?: string; code?: string }> } | undefined)?.coding;
+    for (const c of coding ?? []) if (c?.system === "http://loinc.org" && typeof c.code === "string") out.push(c.code);
+  };
+  push(resource.code);
+  for (const component of (resource.component as Array<{ code?: unknown }> | undefined) ?? []) push(component?.code);
+  return out;
+}
+
+/**
+ * Whether this Observation IS a blood pressure, judged only by codes it already carries: the LOINC BP
+ * panel on the observation itself, or both a systolic and a diastolic component. Nothing is inferred
+ * from a name, a category or a value — a resource that does not say it is a blood pressure is not
+ * turned into one.
+ */
+function isBloodPressure(resource: Record<string, unknown>): boolean {
+  const codes = loincCodes(resource);
+  if (codes.some((c) => LOINC_BP_PANEL.has(c))) return true;
+  const components = codes.filter((c) => LOINC_BP_COMPONENT.has(c));
+  return components.includes("8480-6") && components.includes("8462-4");
+}
+
+/** Add a profile to `meta.profile` without disturbing any already there. */
+function stampProfile(resource: Record<string, unknown>, profile: string): void {
+  const meta = (resource.meta ??= {}) as { profile?: unknown };
+  const existing = Array.isArray(meta.profile) ? (meta.profile as string[]) : [];
+  if (!existing.includes(profile)) meta.profile = [...existing, profile];
+}
+
 export function prepareForQiCore(bundle: PreparableBundle): void {
   for (const entry of bundle.entry ?? []) {
     const resource = entry?.resource;
@@ -119,6 +156,21 @@ export function prepareForQiCore(bundle: PreparableBundle): void {
       if (!resource.category) resource.category = problemCategory();
     } else if (resource.resourceType === "Encounter") {
       if (!resource.class) resource.class = ambulatoryClass();
+    } else if (resource.resourceType === "Observation" && isBloodPressure(resource)) {
+      // CMS165 identifies a blood pressure by PROFILE ALONE — it is the only Observation retrieve in
+      // that artifact with no code filter — so it is the one measure the executor runs with
+      // `trustMetaProfile: true` (ADR-076 d1). Under that setting an unstamped reading is not
+      // retrieved at all, which is why the ADR-075 corpus stamps its own. A WebChart-derived bundle
+      // carries no `meta.profile`, so without this the measure could never be routed on real data
+      // (issue #533).
+      //
+      // This is NORMALIZATION and not fabrication, by this file's own test: the profile is DERIVED
+      // from codes the resource already carries — the LOINC BP panel, or both a systolic and a
+      // diastolic component — and no clinical fact is added. A resource that does not already say it
+      // is a blood pressure is left alone, so nothing can be promoted INTO the measure by this. It is
+      // the same move as the Condition status above: filling in the structural metadata the official
+      // profiles require, from what the data already asserts.
+      stampProfile(resource, US_CORE_BLOOD_PRESSURE);
     }
   }
 }
