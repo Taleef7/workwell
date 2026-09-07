@@ -279,8 +279,10 @@ per measure and cms165 is the only one that turns it on (ADR-076 d1). That works
 stamps the profile each retrieve names, which it has done since the corpus was built, for this. It does
 **not** make cms165 routable: data that carries no profiles retrieves nothing under it, so real blood
 pressures from WebChart must be stamped at ingest first. The difference is that failing that way is
-loud — the run refuses when nothing retrieves across a roster — where the old way was a plausible
-number.
+loud where it counts: a nightly run over a roster refuses outright when nothing retrieves. A one-subject
+evaluation still cannot refuse — for one person, retrieving nothing is a legitimate answer — so the
+simulator would say MISSING_DATA rather than complain. Better than a plausible wrong number, and not a
+guarantee.
 
 > **The eighth measure is the one worth retelling.** CMS138 (tobacco screening) would not run at
 > all: all 47 of its test cases errored, and the original note said its code lists "would not

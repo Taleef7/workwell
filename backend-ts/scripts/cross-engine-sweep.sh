@@ -49,11 +49,16 @@ IMAGE="${HAPI_IMAGE:-hapiproject/hapi:latest}"
 BASE="http://localhost:${PORT}/fhir"
 CONTENT="${CROSS_ENGINE_CONTENT:-.official-content}"
 
+# Deliberately unquoted where it is used: the default is TWO words ("corepack pnpm") and quoting it
+# would look for a program named "corepack pnpm". Override with PNPM_CMD to run a different launcher.
+# shellcheck disable=SC2086
 PNPM="${PNPM_CMD:-corepack pnpm}"
 
 # The bundle directory name is the artifact's own name; ask the module that owns the mapping rather than
 # duplicating a nine-entry table that would drift on the tenth measure.
-NAME="$($PNPM exec tsx -e "import {officialMeasureName} from './src/standards/official-cases.ts'; process.stdout.write(officialMeasureName('${MEASURE}') ?? '')")"
+# The id is passed through the ENVIRONMENT, never interpolated into the snippet: a measure id with a
+# quote in it would otherwise be spliced into the source text rather than read as a value.
+NAME="$(SWEEP_MEASURE="$MEASURE" $PNPM exec tsx -e "import {officialMeasureName} from './src/standards/official-cases.ts'; process.stdout.write(officialMeasureName(process.env.SWEEP_MEASURE ?? '') ?? '')")"
 if [[ -z "$NAME" ]]; then
   echo "cross-engine-sweep: '${MEASURE}' is not an official measure id" >&2
   exit 2
@@ -65,15 +70,21 @@ if [[ ! -f "$BUNDLE" ]]; then
   exit 2
 fi
 
-echo "cross-engine-sweep: ${MEASURE} (${NAME})"
-echo "  bundle    ${BUNDLE}$([[ -n "$BUNDLE_OVERRIDE" ]] && echo '  [MUTATED]')"
-echo "  container ${CONTAINER} on :${PORT} from ${IMAGE}"
+# EVERY progress line goes to stderr. stdout belongs to the check script, whose `--json` output the
+# caller pipes or redirects — the workflow does `... | tee cross-engine-<measure>.json`, and a single
+# "  sweeping" line on stdout makes that artifact unparseable for every consumer.
+echo "cross-engine-sweep: ${MEASURE} (${NAME})" >&2
+echo "  bundle    ${BUNDLE}$([[ -n "$BUNDLE_OVERRIDE" ]] && echo '  [MUTATED]')" >&2
+echo "  container ${CONTAINER} on :${PORT} from ${IMAGE}" >&2
 
+META=""
+LOAD_LOG=""
 cleanup() {
+  rm -f "$META" "$LOAD_LOG" 2>/dev/null || true
   if [[ "$KEEP" -eq 0 ]]; then
     docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
   else
-    echo "cross-engine-sweep: leaving ${CONTAINER} up (--keep). It is WARM — do not sweep against it again."
+    echo "cross-engine-sweep: leaving ${CONTAINER} up (--keep). It is WARM — do not sweep against it again." >&2
   fi
 }
 trap cleanup EXIT
@@ -89,18 +100,18 @@ docker run -d --name "$CONTAINER" -p "${PORT}:8080" \
   "$IMAGE" >/dev/null
 
 # 2. Ready means the CapabilityStatement NAMES the operation, not that /metadata answers.
-echo -n "  waiting for evaluate-measure "
+echo -n "  waiting for evaluate-measure " >&2
 READY=0
-META="$(mktemp)"
+META="$(mktemp)"   # removed by the EXIT trap, so a Ctrl-C mid-poll leaks nothing
 for _ in $(seq 1 120); do
   # Deliberately NOT `curl … | grep -q`: `grep -q` exits at the first match and closes the pipe, curl
   # dies of SIGPIPE, and under `pipefail` the pipeline reports failure — so the readiness probe would
   # never fire even against a server that has been ready for minutes. Fetch, then match.
   if curl -sf "${BASE}/metadata" -o "$META" 2>/dev/null && grep -q '"evaluate-measure"' "$META"; then READY=1; break; fi
-  echo -n "."
+  echo -n "." >&2
   sleep 5
 done
-echo
+echo >&2
 rm -f "$META"
 if [[ "$READY" -ne 1 ]]; then
   echo "cross-engine-sweep: ${BASE} never declared evaluate-measure (check hapi.fhir.cr.enabled)" >&2
@@ -109,16 +120,22 @@ if [[ "$READY" -ne 1 ]]; then
 fi
 sleep 30
 
-echo "  loading bundle"
-HTTP="$(curl -s -o /tmp/cross-engine-load.json -w '%{http_code}' -X POST "$BASE" \
+echo "  loading bundle" >&2
+# A per-run temp file rather than a fixed path: two sweeps of different measures can overlap on one
+# machine (different container names, different ports), and a shared path would let one overwrite the
+# other's diagnostics — which are the only thing that explains a failed load.
+LOAD_LOG="$(mktemp)"   # per run, and removed by the EXIT trap
+HTTP="$(curl -s -o "$LOAD_LOG" -w '%{http_code}' -X POST "$BASE" \
   -H 'Content-Type: application/fhir+json' --data-binary "@${BUNDLE}")"
 if [[ "$HTTP" != "200" && "$HTTP" != "201" ]]; then
   echo "cross-engine-sweep: bundle load returned ${HTTP}" >&2
-  head -c 2000 /tmp/cross-engine-load.json >&2 || true
+  head -c 2000 "$LOAD_LOG" >&2 || true
+  rm -f "$LOAD_LOG"
   exit 1
 fi
+rm -f "$LOAD_LOG"
 sleep 20
 
-echo "  sweeping"
+echo "  sweeping" >&2
 $PNPM exec tsx scripts/cross-engine-check.ts \
   --measure "$MEASURE" --server "$BASE" --load-terminology "${CHECK_ARGS[@]+"${CHECK_ARGS[@]}"}"

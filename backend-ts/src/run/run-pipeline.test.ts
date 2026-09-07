@@ -911,7 +911,8 @@ test("a run SAYS how many subjects the segment gate dropped, and names the sites
   const warnings = (await deps.runStore.listLogs(res.runId, 500)).filter((l) => l.level === "WARN");
   const gate = warnings.find((l) => /no segment makes them applicable/.test(l.message));
   assert.ok(gate, `expected a segment-gate WARN; got: ${warnings.map((w) => w.message).join(" | ")}`);
-  assert.match(gate!.message, /1 subject\(s\) \(100% of this run\)/);
+  assert.match(gate!.message, /1 subject\(s\) \(100% of the 1 this run evaluated\)/);
+  assert.match(gate!.message, /across 1 evaluation\(s\)/, "subjects and evaluations are different counts");
   assert.match(gate!.message, /audiogram/, "names the measure");
   assert.match(gate!.message, /segment repair/i, "points at the runbook rather than just complaining");
 });

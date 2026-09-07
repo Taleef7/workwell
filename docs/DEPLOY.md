@@ -591,8 +591,9 @@ Total catalog: **63 measures**, 14 runnable (see `docs/MEASURES.md` for the full
 > records a `SEGMENT_UPDATED` event. Owner-gated, like every data repair.
 >
 > **Since 2026-09-07 the run tells you if this is still owed** (ADR-076 d3, issue #536). Every run that
-> evaluates subjects who need follow-up and whom no segment covers writes one `WARN` on the run:
-> how many, what share of the run, which measures and which sites. So the check is
+> evaluates subjects who need follow-up and whom no segment covers writes one `WARN` on the run: how
+> many distinct patients, what share of the patients the run evaluated, how many evaluations that was,
+> and which measures and sites. So the check is
 > "open the newest run's log and look for `no segment makes them applicable`" rather than "remember
 > that this page exists". A run with nothing gated writes nothing — a warning on every run is a warning
 > nobody reads. Seeding still creates and never mutates: widening a segment stays a human act with an

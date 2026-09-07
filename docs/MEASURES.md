@@ -65,8 +65,10 @@ needs the credentialed context (the manual `cross-engine-sweep` workflow, issue 
 > and those are routed. That is possible because the ADR-075 corpus stamps the profile each retrieve
 > names. **It does not make cms165 routable.** A bundle whose resources are NOT stamped retrieves nothing
 > under it, so real WebChart blood pressures need stamping at ingest first — the remaining half of issue
-> #533. The failure mode is at least loud now (the executor's batch-level refusal fires when nothing
-> retrieves across a roster) where it used to be silent and wrong. **Do not route cms165.**
+> #533. The failure mode is louder now, though not unconditionally: the batch-level retrieve refusal fires
+> only for a roster of more than one subject, so a nightly run would refuse while `/simulate` and
+> rerun-to-verify would quietly return MISSING_DATA. Better than a plausible wrong number, and not a
+> guarantee. **Do not route cms165.**
 
 **An officially routed measure is scored over the calendar year** containing the evaluation date, not a
 rolling 365-day window (ADR-072). The vendored artifacts are a **2026 vintage** and the pilot year is 2027,

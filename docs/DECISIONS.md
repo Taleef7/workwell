@@ -49,8 +49,7 @@ only measure that sets it.** The default stays false and the reasoning for that 
 This is available only because ADR-075's corpus stamps the profile each artifact retrieve names — a
 thing it was already doing deliberately, for this. It does NOT make cms165 routable: a bundle whose
 resources are not stamped retrieves nothing under it, so a WebChart-derived roster needs its blood
-pressures stamped at ingest first. That failure is at least loud (the executor's batch-level refusal
-fires) where the current one is silent and wrong.
+pressures stamped at ingest first. That failure is louder than the current one, though not unconditionally: the executor's batch-level retrieve refusal fires only for a roster of MORE than one subject, since a single subject retrieving nothing is a legitimate answer. A nightly Maui run is a roster and would refuse; `/simulate`, the CLI and rerun-to-verify evaluate one subject and would quietly return MISSING_DATA.
 
 **d2. An operator-written `next_action` outranks the computed one while the outcome it was written
 about still holds.** A new `cases.next_action_source` column records who wrote it: `patchCase` is the
@@ -66,16 +65,33 @@ rate regardless, because they read the outcome's evidence live rather than `next
 **d3. A run reports how many subjects the segment gate dropped, and never mutates a segment to fix
 it.** Seeding still creates and never mutates, so widening a segment stays a human act with an audit
 row. What the run adds is the size of the drop, the measures and the sites, in a WARN — the same
-remedy ADR-043 applies to a whole roster leaving the initial population, for the same reason.
+remedy ADR-043 applies to a whole roster leaving the initial population, for the same reason. The
+count is of distinct SUBJECTS and, separately, of evaluations: the loop is over (subject, measure)
+pairs, so one patient gated on three measures is one person to chase, and reporting three would
+overstate the drop against the runbook's own "52 % of patients".
 
 **d4. Retention turns on with its index, as ADR-073 d1 required, and the coupling is now a test.**
 `spike_outcomes_keepset_idx` covers the keep-set's `(subject, measure, period, evaluated_at DESC,
-id DESC)`, `spike_cases_cited_outcome_idx` covers the "no case cites this row" anti-join, and the
-Postgres compaction asks "does a newer row exist for this key" rather than materialising the keep-set
-with `DISTINCT ON` — the same predicate, as an indexed existence check instead of a whole-table sort.
-Maui ships a 400-day window in the same commit. `official-flip-config.test.ts` asserts a shipped
-window implies the index, so the dangerous direction — dropping the index while the window stays set —
-fails a test rather than being remembered.
+id DESC)` and `spike_cases_cited_outcome_idx` covers the "no case cites this row" anti-join. Maui ships
+a 400-day window in the same commit. `official-flip-config.test.ts` asserts a shipped window implies
+the index, so the dangerous direction — dropping the index while the window stays set — fails a test
+rather than being remembered.
+
+**The query is unchanged, and that is a measured decision rather than an omission.** The obvious
+companion change was to rewrite the keep-set as a correlated `EXISTS (a newer row for this key)`,
+which reads like the more index-friendly form. It was written and then measured on postgres:16 over
+300,000 outcome rows (the pilot's shape: 20,000 subjects x 5 measures x 3 runs), each variant deleting
+the same 200,000 rows under `EXPLAIN ANALYZE` in a rolled-back transaction:
+
+| form | plan | time |
+|---|---|---|
+| `DISTINCT ON`, no index | external merge `Sort`, 19 MB to disk | 523 ms |
+| `DISTINCT ON`, with the index | `Index Only Scan using spike_outcomes_keepset_idx` | **274 ms** |
+| `EXISTS`, with the index | `Hash Semi Join`, two sequential scans, index unused | 516 ms |
+
+So the whole-table sort ADR-073 d1 named is real, the INDEX is what removes it, and the rewrite is a
+pessimization the planner declines to use the index for. It was reverted. The measurement is recorded
+in the store's own docstring so it is not attempted again.
 
 ### Consequences
 

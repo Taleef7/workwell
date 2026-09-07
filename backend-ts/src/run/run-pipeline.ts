@@ -611,8 +611,13 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
   // the excluded lists the segment gate keeps clear). So EXCLUDED bypasses applicability only when its
   // (subject, measure, current-period) key is already active here. COMPLIANT needs no such check (it is a
   // `planCaseUpsert` no-op with no existing case). A read failure just leaves EXCLUDED gated (safe).
-  /** Subjects who needed work but whom no segment made applicable — see the gate below. */
-  const gatedBySegment = { count: 0, sites: new Set<string>(), measures: new Set<string>() };
+  /**
+   * Who needed work but whom no segment made applicable — see the gate below. `subjects` is a SET, not
+   * a counter: the loop is over (subject, measure) pairs, so one patient gated on three measures is one
+   * person to chase and three evaluations. The WARN says both, because "52 % of patients" and "52 % of
+   * evaluations" are different claims and the runbook makes the first one (review finding).
+   */
+  const gatedBySegment = { evaluations: 0, subjects: new Set<string>(), sites: new Set<string>(), measures: new Set<string>() };
   const activeCaseKeys = new Set<string>();
   if (deps.caseStore) {
     for (const measureId of new Set(measureIds)) {
@@ -971,7 +976,8 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
       // it impossible to miss. Summarised after the loop rather than logged per subject.
       const segmentApplicable = isApplicable(item.employee, item.measureId, deps.segments ?? []);
       if (!closeOnly && !isLiveWebChartSubject && !segmentApplicable && NON_COMPLIANT.has(status)) {
-        gatedBySegment.count++;
+        gatedBySegment.evaluations++;
+        gatedBySegment.subjects.add(item.employee.externalId);
         if (gatedBySegment.sites.size < 12) gatedBySegment.sites.add(item.employee.site ?? "(no site)");
         gatedBySegment.measures.add(item.measureId);
       }
@@ -1046,13 +1052,15 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
   // and the same remedy: say it out loud rather than fail. Nothing here is wrong; a segment that says
   // "not my cohort" is doing its job. What the run can see and an operator cannot is the SIZE of it, and
   // a segment left behind by a roster that grew is indistinguishable from a segment that meant it.
-  if (gatedBySegment.count > 0) {
-    const share = Math.round((gatedBySegment.count / Math.max(items.length, 1)) * 100);
+  if (gatedBySegment.evaluations > 0) {
+    const evaluatedSubjects = new Set(items.map((i) => i.employee.externalId)).size;
+    const share = Math.round((gatedBySegment.subjects.size / Math.max(evaluatedSubjects, 1)) * 100);
     await deps.runStore
       .appendLog(
         runId,
         "WARN",
-        `${gatedBySegment.count} subject(s) (${share}% of this run) needed follow-up but no segment makes them ` +
+        `${gatedBySegment.subjects.size} subject(s) (${share}% of the ${evaluatedSubjects} this run evaluated), ` +
+          `across ${gatedBySegment.evaluations} evaluation(s), needed follow-up but no segment makes them ` +
           `applicable, so they have an outcome and NO case — they appear NOT_APPLICABLE on the roster and on ` +
           `no worklist. Measures: ${[...gatedBySegment.measures].sort().join(", ")}. ` +
           `Sites: ${[...gatedBySegment.sites].sort().join(", ")}. ` +

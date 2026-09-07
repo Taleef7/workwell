@@ -225,19 +225,34 @@ export function missedRateIndex(evidence: unknown, numeratorMeansCompliant: bool
  * drift. Returns `null` when the outcome is not multi-rate, which is the caller's signal to keep the
  * single-rate derivation rather than assume "no exclusion".
  *
- * Which rate: the MISSED one where there is one (the rate the case exists for). Where there is none —
- * an EXCLUDED or COMPLIANT outcome — any rate carrying an exclusion answers, because ADR-074's bucket
- * is worst-of-rates and an exclusion anywhere is what put the subject there.
+ * Which rate: **a missed rate is by construction not an excluded one** — `missedRateIndex` only returns
+ * a rate the subject is in the denominator of and NOT excluded or excepted from, because being excused
+ * is not a miss. So where the case is about a missed rate the honest answer is "no exclusion applies to
+ * the rate this case is about", and asking the rate would be a check that cannot fire (review finding).
+ * Where there is NO missed rate — an EXCLUDED or COMPLIANT outcome — any rate carrying one answers,
+ * since ADR-074's bucket is worst-of-rates and an exclusion anywhere is what put the subject there.
+ *
+ * "Excluded" here means `denominator-exclusion` OR `denominator-exception`, matching
+ * `outcomeFromPopulations`, which is the reader that decides the EXCLUDED bucket in the first place.
+ * The single-rate derivation this falls back to matches on define NAMES against
+ * /waiver|exemption|exclusion|contraindication/, which does NOT match `denominator-exception` — so an
+ * exception-only single-rate outcome still reads "none". That predates this function and is left
+ * alone rather than changed underneath every authored measure; recorded here so the divergence is
+ * known rather than discovered.
  */
 export function multiRateExclusionActive(evidence: unknown, numeratorMeansCompliant: boolean): boolean | null {
   const rates = (evidence as { official?: { rates?: unknown } } | null)?.official?.rates;
   if (!Array.isArray(rates) || rates.length < 2) return null;
-  const excluded = (rate: unknown): boolean =>
+  const excused = (rate: unknown): boolean =>
     Array.isArray(rate) &&
-    (rate as Population[]).some((p) => p?.populationType === "denominator-exclusion" && p?.result === true);
-  const missed = missedRateIndex(evidence, numeratorMeansCompliant);
-  if (missed >= 0) return excluded(rates[missed]);
-  return rates.some(excluded);
+    (rate as Population[]).some(
+      (p) =>
+        (p?.populationType === "denominator-exclusion" || p?.populationType === "denominator-exception") &&
+        p?.result === true,
+    );
+  // A missed rate exists ⇒ the case is about a rate nothing excused the subject from.
+  if (missedRateIndex(evidence, numeratorMeansCompliant) >= 0) return false;
+  return rates.some(excused);
 }
 
 /**

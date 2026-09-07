@@ -182,32 +182,36 @@ export class PgOutcomeStore implements OutcomeStore {
    * ADR-073 retention — see the SQLite floor for the shape and why both exclusions are expressed in
    * SQL rather than read into memory.
    *
-   * **"Not the newest" is asked as an existence question, not by building the keep-set** (ADR-073 d1).
-   * The first form was `id NOT IN (SELECT DISTINCT ON (subject, measure, period) id FROM outcomes)`,
-   * which is correct and reads well, and which no index can help: it materialises one row per key —
-   * 100,000 at the pilot's 20,000 patients across five measures, and growing with every measurement
-   * year — and it sorts the whole table to do it, on every nightly pass, before deleting anything.
+   * `DISTINCT ON` is the Postgres form of "the newest row per (subject, measure, period)"; the floor
+   * uses a correlated MAX because SQLite has no DISTINCT ON. The tie-break is `id DESC` on BOTH stores
+   * — see the store contract's tied-timestamp case — so two rows stamped the same instant resolve the
+   * same way on the ceiling and the floor.
    *
-   * `EXISTS (a row with the same key that sorts ahead of this one)` is the same predicate row by row:
-   * a row is deletable exactly when something newer for its key exists. It is a bounded lookup on
-   * `spike_outcomes_keepset_idx`, whose column order was chosen for this query.
+   * **The query is unchanged; `spike_outcomes_keepset_idx` is what ADR-073 d1 was waiting for.** The
+   * index was added in the same commit as Maui's retention window, and it is worth recording what it
+   * actually does, because the obvious-looking rewrite makes things worse. Measured on postgres:16
+   * over 300,000 outcome rows (20,000 subjects × 5 measures × 3 runs — the pilot's shape), each
+   * deleting the same 200,000 rows, EXPLAIN ANALYZE inside a rolled-back transaction:
    *
-   * The row-value comparison `(evaluated_at, id) > (evaluated_at, id)` carries the tie-break rather
-   * than leaving it implied — two rows stamped the same instant resolve by `id`, the same way, on the
-   * ceiling and on the floor (the floor keeps its correlated `ORDER BY … LIMIT 1`, since SQLite has no
-   * DISTINCT ON and its data volumes are test-sized). The store contract's tied-timestamp case is what
-   * holds the two together.
+   * | form | plan | time |
+   * |---|---|---|
+   * | this query, no index | external merge `Sort`, 19 MB **to disk** | 523 ms |
+   * | this query, with the index | `Index Only Scan using spike_outcomes_keepset_idx` | **274 ms** |
+   * | `EXISTS (a newer row for this key)` instead, with the index | `Hash Semi Join`, two seq scans, index unused | 516 ms |
+   *
+   * So the whole-table sort ADR-073 d1 named is real, the index removes it, and rewriting the
+   * predicate as a correlated existence check — which reads like the more index-friendly form — is a
+   * pessimization the planner does not use the index for at all. The rewrite was written, measured,
+   * and reverted; this comment is here so it does not get written again.
    */
   async compactOlderThan(cutoff: string): Promise<number> {
     const { rowCount } = await this.pool.query(
       `DELETE FROM ${T} o
         WHERE o.evaluated_at < $1
-          AND EXISTS (
-            SELECT 1 FROM ${T} newer
-             WHERE newer.subject_id = o.subject_id
-               AND newer.measure_id = o.measure_id
-               AND newer.evaluation_period = o.evaluation_period
-               AND (newer.evaluated_at, newer.id) > (o.evaluated_at, o.id)
+          AND o.id NOT IN (
+            SELECT DISTINCT ON (subject_id, measure_id, evaluation_period) id
+              FROM ${T}
+             ORDER BY subject_id, measure_id, evaluation_period, evaluated_at DESC, id DESC
           )
           AND NOT EXISTS (
             SELECT 1 FROM ${CASES_TABLE} c

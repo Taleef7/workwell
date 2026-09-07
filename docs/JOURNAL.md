@@ -41,7 +41,9 @@ profiles globally empties cms122's and cms125's populations and those are routed
 because ADR-075's corpus stamps the profile each retrieve names, which it was already doing for exactly
 this eventuality. **It does not make cms165 routable** and the measure stays out of the routing list:
 an unstamped bundle retrieves nothing under it, so real WebChart blood pressures need stamping at
-ingest first. The new failure mode is loud (the batch-level refusal fires) where the old one was silent.
+ingest first. The new failure mode is louder where it counts — a nightly run over a roster refuses outright when
+nothing retrieves — though a one-subject evaluation still cannot refuse, since for one person
+retrieving nothing is a legitimate answer.
 The test that pins it asserts an invariant rather than a bucket — adding a hemoglobin result must not
 change a blood-pressure measure's answer — and it needs the credentialed sidecar, so it is registered
 in the CI job's explicit file list. A file that job does not name is a test that reads as covered and

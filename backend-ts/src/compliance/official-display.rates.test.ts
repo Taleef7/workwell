@@ -138,24 +138,31 @@ test("the roster cell, the case detail and the next action all read the missed r
  * with per-rate exclusions: a case about the rate the subject missed would report the other rate's
  * exclusion. Reading from `official.rates` also removes a second place for a reviewed label to drift.
  */
-test("multiRateExclusionActive answers from the MISSED rate, not from rate 1", () => {
+test("multiRateExclusionActive: a missed rate means nothing excused the subject from it", () => {
   const pop = (over: Record<string, boolean>) => [
     { populationType: "initial-population", result: true },
     { populationType: "denominator", result: true },
     { populationType: "denominator-exclusion", result: over.excluded ?? false },
+    { populationType: "denominator-exception", result: over.excepted ?? false },
     { populationType: "numerator", result: over.numerator ?? false },
   ];
-  // Rate 1 is excluded (so not the missed one); rate 2 is in the denominator and missed, not excluded.
+  // Rate 1 is excluded (so cannot be the missed one); rate 2 is in the denominator and missed. The case
+  // is about rate 2, and by construction nothing excused the subject from it.
   const rate1Excluded = { official: { rates: [pop({ excluded: true }), pop({ numerator: false })] } };
-  assert.equal(multiRateExclusionActive(rate1Excluded, true), false, "the missed rate carries no exclusion");
+  assert.equal(multiRateExclusionActive(rate1Excluded, true), false);
 
-  // The mirror: rate 1 is missed and IS excluded... which cannot happen, because an excluded rate is
-  // not a miss. So with rate 1 excluded and rate 2 met, no rate is missed and the fallback applies:
-  // an exclusion anywhere is what put the subject in the bucket.
+  // No rate is missed (rate 1 excluded, rate 2 met), so the exclusion that put the subject in the
+  // bucket is the answer.
   const noneMissed = { official: { rates: [pop({ excluded: true }), pop({ numerator: true })] } };
   assert.equal(multiRateExclusionActive(noneMissed, true), true, "no missed rate ⇒ an exclusion anywhere answers");
 
-  // Neither excluded, rate 2 missed.
+  // A denominator EXCEPTION counts, matching `outcomeFromPopulations` — the reader that decides the
+  // EXCLUDED bucket. Checking only `denominator-exclusion` would report "none" for a subject the
+  // measure excused for a documented medical or patient reason.
+  const excepted = { official: { rates: [pop({ excepted: true }), pop({ numerator: true })] } };
+  assert.equal(multiRateExclusionActive(excepted, true), true, "an exception is an excuse too");
+
+  // Nothing excused, rate 2 missed.
   const plainMiss = { official: { rates: [pop({ numerator: true }), pop({ numerator: false })] } };
   assert.equal(multiRateExclusionActive(plainMiss, true), false);
 });
