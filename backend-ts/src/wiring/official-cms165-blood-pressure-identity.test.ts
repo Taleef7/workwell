@@ -68,30 +68,52 @@ function bloodPressuresOnly(bundle: { entry?: Entry[] }): unknown {
  * rather than hardcoded: the corpus is generated, and pinning `pat-007` would make this test a hostage
  * to an unrelated change in the draw order. The search states the shape it needs.
  */
-function subjectWithALaterNonBpResult() {
+function candidatesWithALaterNonBpResult() {
+  const out: Array<{ patient: ReturnType<typeof corpusPatients>[number]; laterOther: { kind: string }[] }> = [];
   for (const patient of corpusPatients(DEFAULT_CORPUS_SEED, 400, 2026)) {
     const bp = patient.events.filter((e) => e.kind === "bp");
     if (bp.length === 0) continue;
+    // cms165 reads the patient's HYPERTENSION diagnosis for its denominator, so a patient without one
+    // is scored out of population and cannot demonstrate anything about how a BP is identified.
+    if (!patient.conditions?.includes("hypertension")) continue;
     const newestBp = bp.map((e) => e.date).sort().at(-1)!;
     const laterOther = patient.events.filter((e) => e.kind !== "bp" && e.date > newestBp);
-    if (laterOther.length > 0) return { patient, newestBp, laterOther };
+    if (laterOther.length > 0) out.push({ patient, laterOther });
   }
-  throw new Error("no corpus patient has a blood pressure followed by another kind of result");
+  if (out.length === 0) throw new Error("no hypertensive corpus patient has a blood pressure followed by another kind of result");
+  return out;
 }
 
 test("cms165 reads a blood pressure, not whichever Observation happens to be newest", { skip: skipWithout("cms165") }, async () => {
-  const { patient, laterOther } = subjectWithALaterNonBpResult();
-  assert.ok(laterOther.length > 0, "the fixture must actually carry a later non-BP result");
-
-  const full = bundleForPatient(patient, EVALUATION_DATE);
-  const bpOnly = bloodPressuresOnly(full as unknown as { entry?: Entry[] });
+  // Several candidates, because "has hypertension and a later non-BP result" is necessary and not
+  // sufficient: the artifact also wants a qualifying encounter and an age band. Take the first the
+  // measure actually scores, and fail loudly if none of them is scored at all.
+  const candidates = candidatesWithALaterNonBpResult();
 
   const executor = officialMeasureExecutor({ expand: officialTerminologyExpander(loadOfficialArtifact) });
   const score = async (bundle: unknown) =>
     (await executor.evaluate({ measureId: "cms165", patientBundle: bundle, evaluationDate: EVALUATION_DATE })).outcome;
 
-  const withOtherResults = await score(full);
-  const withBloodPressureAlone = await score(bpOnly);
+  let scored: { patient: (typeof candidates)[number]["patient"]; laterOther: { kind: string }[]; alone: string; full: string } | null = null;
+  for (const c of candidates) {
+    const fullBundle = bundleForPatient(c.patient, EVALUATION_DATE);
+    const alone = await score(bloodPressuresOnly(fullBundle as unknown as { entry?: Entry[] }));
+    // MISSING_DATA is cms165's out-of-population bucket. A subject it does not score returns the same
+    // answer from both bundles whatever profiles do, so the comparison below would pass with the fix
+    // reverted (review finding). Keep looking until the measure actually scores someone.
+    if (alone === "MISSING_DATA") continue;
+    scored = { patient: c.patient, laterOther: c.laterOther, alone, full: await score(fullBundle) };
+    break;
+  }
+  assert.ok(
+    scored,
+    `cms165 scored none of the ${candidates.length} hypertensive corpus patients who have a blood ` +
+      `pressure followed by another result — the comparison would prove nothing, so this fails rather ` +
+      `than passing vacuously`,
+  );
+  const { patient, laterOther } = scored!;
+  const withBloodPressureAlone = scored!.alone;
+  const withOtherResults = scored!.full;
 
   assert.equal(
     withOtherResults,

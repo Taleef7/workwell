@@ -87,11 +87,20 @@ The 2026-08-04 run proved those two measures' `DENEX 1→0` disagreements by iso
 `"Has Dementia Medications in Year Before or During Measurement Period"`, whose period likewise comes
 from `medicationRequestPeriod` deriving from `dosageInstruction`, which the MADiE cases omit.
 
-With CMS2 diagnosed, that helper accounts for **21 of the 24** known cross-engine disagreements —
-CMS122's 6, CMS125's 8, and CMS2's 7. The August evidence counted **9 of 23 unattributed**; it is now
-**2 of 24**: the two CMS125 cases whose follow-up is a `Procedure` only, which share the failure SHAPE
-but not this mechanism and remain open. CMS137's single disagreement is a separate matter with its own
-proof (a period-boundary precision difference, 2026-09-06).
+With CMS2 diagnosed, that helper is implicated in **21 of the 24** known cross-engine disagreements —
+CMS122's 6, CMS125's 8, CMS2's 7 — but the 21 are not all attributed to the same standard, and the
+difference matters:
+
+| | cases | standard |
+|---|---|---|
+| **Proven by construction** | **8** | one CMS125 case in August, and all 7 CMS2 cases here — a single-variable mutation flipped each |
+| Consistent-with, by inventory | 13 | the other CMS122/CMS125 disagreements: every one carries a `MedicationRequest` and no agreeing case does, which is strong and is not a proof |
+| Unattributed | 2 | the CMS125 cases whose follow-up is a `Procedure` only — same shape, different cause |
+| Separate, and separately proven | 1 | CMS137's period-boundary precision difference (2026-09-06) |
+
+The August evidence counted **9 of 23 unattributed**; it is now **2 of 24**. Anywhere this is
+summarised, "implicated in 21" is the honest verb and "proven for 8" is the stronger claim that can
+also be made.
 
 That is worth more than three separate findings. It says the second engine agrees with ours about
 depression screening, breast cancer screening and diabetes control, and disagrees about how to read a

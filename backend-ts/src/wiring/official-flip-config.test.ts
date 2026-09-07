@@ -248,14 +248,21 @@ test("the Maui deployment actually ships the corpus size, and it is the 20,000-p
   // which is what this now is.
   assert.equal(shippedValue("deploy-maui-mieweb.yml", "WORKWELL_OUTCOME_RETENTION_DAYS"), "400");
   // ADR-073 d1's condition, enforced instead of remembered: Maui turns retention on ONLY alongside the
-  // index the keep-set needs. Without it the nightly DELETE sorts the whole outcomes table inline
-  // during the tick. Asserting the pair here means neither half can be reverted on its own — deleting
-  // the index while the window stays set is the dangerous direction, and it now fails a test.
-  assert.ok(
-    shippedValue("deploy-maui-mieweb.yml", "WORKWELL_OUTCOME_RETENTION_DAYS") === null ||
-      /spike_outcomes_keepset_idx/.test(RUN_STORE_PG_DDL),
-    "a retention window on Maui requires the keep-set index (ADR-073 d1)",
-  );
+  // indexes compaction needs. Without the keep-set one the nightly DELETE sorts the whole outcomes
+  // table inline during the tick (measured: an external merge sort, 19 MB to disk, at 300,000 rows).
+  // Deleting an index while the window stays set is the dangerous direction, and it now fails here.
+  //
+  // Stated as an implication with the window READ, not with the literal `null` disjunct the first
+  // version had — that disjunct was statically false given the assertion above, so the test reduced to
+  // its right-hand side and would not have failed if the window were removed (review finding).
+  // BOTH indexes are named, because d4 names both and checking one lets the other be deleted freely.
+  const retentionOn = shippedValue("deploy-maui-mieweb.yml", "WORKWELL_OUTCOME_RETENTION_DAYS") !== null;
+  for (const index of ["spike_outcomes_keepset_idx", "spike_cases_cited_outcome_idx"]) {
+    assert.ok(
+      !retentionOn || RUN_STORE_PG_DDL.includes(index),
+      `a retention window on Maui requires ${index} (ADR-073 d1 / ADR-076 d4)`,
+    );
+  }
   // TWH is unchanged: no corpus, and no retention window — its history stays whole.
   assert.equal(shippedValue("deploy-twh-mieweb.yml", "WORKWELL_MAUI_CORPUS_SIZE"), null);
   assert.equal(shippedValue("deploy-twh-mieweb.yml", "WORKWELL_OUTCOME_RETENTION_DAYS"), null);

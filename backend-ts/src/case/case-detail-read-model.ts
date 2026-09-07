@@ -32,6 +32,13 @@ export interface CaseDetail {
   priority: string;
   assignee: string | null;
   nextAction: string;
+  /**
+   * Who owns `nextAction` — 'SYSTEM' (the wording table's line for the outcome) or 'OPERATOR' (an
+   * instruction a person wrote). Surfaced because the rule is otherwise invisible: an operator whose
+   * case stopped tracking the nightly wording has no way to see that it is theirs, and no way to know
+   * that changing the outcome hands it back (ADR-076 d2).
+   */
+  nextActionSource: string;
   currentOutcomeStatus: string;
   lastRunId: string;
   createdAt: string;
@@ -185,6 +192,7 @@ export function toCaseDetail(
     priority: c.priority,
     assignee: c.assignee,
     nextAction: c.nextAction ?? "",
+    nextActionSource: c.nextActionSource ?? "SYSTEM",
     currentOutcomeStatus: c.currentOutcomeStatus,
     lastRunId: c.lastRunId,
     createdAt: c.createdAt,

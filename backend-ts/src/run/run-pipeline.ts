@@ -974,14 +974,21 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
       // never actionable. `ensureSegmentSeed` creates and never mutates — deliberately, so nobody's
       // edits are clobbered — so the repair is a human act, and the run's job is to make the need for
       // it impossible to miss. Summarised after the loop rather than logged per subject.
-      const segmentApplicable = isApplicable(item.employee, item.measureId, deps.segments ?? []);
-      if (!closeOnly && !isLiveWebChartSubject && !segmentApplicable && NON_COMPLIANT.has(status)) {
+      // Memoised, not eager: the original expression short-circuited on `deps.caseStore &&` and
+      // `closeOnly ||`, and computing it up front would add a call for every close-only item at
+      // 20,000-patient scale. One evaluation at most, and only where something asks (review finding).
+      let applicableMemo: boolean | undefined;
+      const segmentApplicable = (): boolean =>
+        (applicableMemo ??= isApplicable(item.employee, item.measureId, deps.segments ?? []));
+      // `wc|` subjects are excluded deliberately, not by oversight: they never open cases at all (the
+      // rerun-to-verify 409 above), so counting them here would report a gap no segment edit can close.
+      if (!closeOnly && !isLiveWebChartSubject && NON_COMPLIANT.has(status) && !segmentApplicable()) {
         gatedBySegment.evaluations++;
         gatedBySegment.subjects.add(item.employee.externalId);
         if (gatedBySegment.sites.size < 12) gatedBySegment.sites.add(item.employee.site ?? "(no site)");
         gatedBySegment.measures.add(item.measureId);
       }
-      if (deps.caseStore && (closeOnly || (!isLiveWebChartSubject && segmentApplicable))) {
+      if (deps.caseStore && (closeOnly || (!isLiveWebChartSubject && segmentApplicable()))) {
         const upserted = await deps.caseStore.upsertFromOutcome({
           runId: runId,
           subjectId: item.employee.externalId,
@@ -1052,8 +1059,12 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
   // and the same remedy: say it out loud rather than fail. Nothing here is wrong; a segment that says
   // "not my cohort" is doing its job. What the run can see and an operator cannot is the SIZE of it, and
   // a segment left behind by a roster that grew is indistinguishable from a segment that meant it.
-  if (gatedBySegment.evaluations > 0) {
-    const evaluatedSubjects = new Set(items.map((i) => i.employee.externalId)).size;
+  const evaluatedSubjectsForGate = new Set(items.map((i) => i.employee.externalId)).size;
+  // Only where "a cohort" is a meaningful thing to say. `/simulate` and a single-employee scope run
+  // through here too, and "1 subject (100% of this run) … the segment needs the audited repair"
+  // is alarming, wrong-scoped advice for a deliberate one-off (review finding).
+  if (gatedBySegment.evaluations > 0 && evaluatedSubjectsForGate > 1) {
+    const evaluatedSubjects = evaluatedSubjectsForGate;
     const share = Math.round((gatedBySegment.subjects.size / Math.max(evaluatedSubjects, 1)) * 100);
     await deps.runStore
       .appendLog(

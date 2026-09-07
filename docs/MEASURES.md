@@ -39,7 +39,8 @@ cases on both rates, the one disagreement characterised as a period-boundary dif
 banked (2026-09-07):** `flip-gate --measure cms137 --subjects all` over all 20,000 corpus patients reads
 45/45 MADiE, **599 in the initial population and denominator, 518 actionable, 0 evaluation errors**, with
 both rates alive (numerators 231 and 81) and the effectivePeriod covering the measured year — evidence
-FOR the flip on the full roster, not a 2,000-subject sample.
+FOR the flip on the full roster, not a 2,000-subject sample
+(`docs/evidence/FLIP_GATE_2026-09-07_CMS137.md`).
 Its flip remains the owner's workflow edit, sequenced after cms2 and cms130 (ADR-072 D1), and the 2027
 pilot year still needs the MM-1d re-vendor.
 
@@ -48,9 +49,10 @@ unexplained since 2026-08-04, are proven to one cause: the Java engine takes a m
 from `dosageInstruction.timing.repeat.boundsPeriod` and not from `authoredOn`, so the seven cases whose
 only depression follow-up is an antidepressant order are not credited there — adding that one field
 moves the sweep from 29/36 to 36/36 (`docs/evidence/CROSS_ENGINE_2026-09-07_CMS2.md`). It is the same
-helper CMS122's and CMS125's disagreements were isolated to, which now accounts for 21 of the 24 known
-cross-engine disagreements (two CMS125 `Procedure`-only cases are still unexplained; CMS137's one is a
-separately diagnosed period boundary). That clears the MM-1c precondition
+helper CMS122's and CMS125's disagreements were isolated to, and it is now implicated in 21 of the 24
+known cross-engine disagreements — 8 of them proven by mutation, 13 consistent-with by inventory. Two
+CMS125 `Procedure`-only cases are still unexplained; CMS137's one is a separately proven period
+boundary. That clears the MM-1c precondition
 §4A.5 put on CMS2's flip; the flip itself is still the owner's workflow edit, and CMS130's sweep still
 needs the credentialed context (the manual `cross-engine-sweep` workflow, issue #532).
 

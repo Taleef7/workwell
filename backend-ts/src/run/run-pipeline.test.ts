@@ -899,11 +899,12 @@ test("a run SAYS how many subjects the segment gate dropped, and names the sites
   // listed two clinics while the ADR-075 corpus spans five, so 52% of 20,000 patients would have been
   // evaluated and never actionable — every one of them reading NOT_APPLICABLE, which is exactly what a
   // segment that MEANT it looks like. The run is the only place that can see the size of it.
-  const office = employeeById("emp-007")!;
+  // TWO subjects, because the WARN is about a cohort: a one-subject run is `/simulate` or a deliberate
+  // single-employee scope, and telling that operator their segment needs repairing is wrong-scoped.
   const gatedDeps: RunPipelineDeps = {
     ...deps,
     engine: overdueEngine,
-    employees: [office],
+    employees: [employeeById("emp-007")!, employeeById("emp-008")!],
     segments: [welderSegment()],
   };
   const res = await executeManualRun(gatedDeps, { scopeType: "MEASURE", measureId: "audiogram", evaluationDate: "2095-05-05" });
@@ -911,10 +912,24 @@ test("a run SAYS how many subjects the segment gate dropped, and names the sites
   const warnings = (await deps.runStore.listLogs(res.runId, 500)).filter((l) => l.level === "WARN");
   const gate = warnings.find((l) => /no segment makes them applicable/.test(l.message));
   assert.ok(gate, `expected a segment-gate WARN; got: ${warnings.map((w) => w.message).join(" | ")}`);
-  assert.match(gate!.message, /1 subject\(s\) \(100% of the 1 this run evaluated\)/);
-  assert.match(gate!.message, /across 1 evaluation\(s\)/, "subjects and evaluations are different counts");
+  assert.match(gate!.message, /2 subject\(s\) \(100% of the 2 this run evaluated\)/);
+  assert.match(gate!.message, /across 2 evaluation\(s\)/, "subjects and evaluations are different counts");
   assert.match(gate!.message, /audiogram/, "names the measure");
   assert.match(gate!.message, /segment repair/i, "points at the runbook rather than just complaining");
+});
+
+test("the segment-gate WARN stays silent on a single-subject run (#536, review finding)", async () => {
+  // A one-subject run is /simulate or a single-employee scope. Its subject being out of cohort is a
+  // fact about that request, not evidence the deployment's segments are stale.
+  const oneDeps: RunPipelineDeps = {
+    ...deps,
+    engine: overdueEngine,
+    employees: [employeeById("emp-007")!],
+    segments: [welderSegment()],
+  };
+  const res = await executeManualRun(oneDeps, { scopeType: "MEASURE", measureId: "audiogram", evaluationDate: "2095-07-07" });
+  const gate = (await deps.runStore.listLogs(res.runId, 500)).find((l) => /no segment makes them applicable/.test(l.message));
+  assert.equal(gate, undefined, "one subject is not a cohort");
 });
 
 test("a run with nothing gated says NOTHING — the warning is not a fixture of every run", async () => {

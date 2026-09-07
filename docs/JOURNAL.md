@@ -19,10 +19,12 @@ dose changes nothing; `dispenseRequest.validityPeriod` changes nothing; moving t
 takes the sweep to 36/36. So `cqf-fhir-cr` will take a medication's start from `boundsPeriod` and not
 from `authoredOn`, and `fqm-execution` and MADiE's own expected reports take it from `authoredOn`. The
 implicated helper is `CumulativeMedicationDuration.medicationRequestPeriod` — the same one CMS122's and
-CMS125's `DENEX` disagreements were isolated to in August. It now accounts for **21 of the 24** known
-cross-engine disagreements: CMS122's 6, CMS125's 8, CMS2's 7. August counted **9 of 23 unattributed**;
-it is now **2 of 24**, the two CMS125 cases whose follow-up is a `Procedure` only. CMS137's single one
-is separate and separately proved. One difference wearing three costumes is a materially better
+CMS125's `DENEX` disagreements were isolated to in August. It is now implicated in **21 of the 24**
+known cross-engine disagreements: CMS122's 6, CMS125's 8, CMS2's 7 — 8 of them proven by a
+single-variable mutation and 13 consistent-with by inventory, which is the distinction the August
+evidence drew and the derived docs had lost. August counted **9 of 23 unattributed**; it is now **2 of
+24**, the two CMS125 cases whose follow-up is a `Procedure` only. CMS137's single one is separate and
+separately proved. One difference wearing three costumes is a materially better
 position than three unexplained ones. Written up in `docs/evidence/CROSS_ENGINE_2026-09-07_CMS2.md`, limits included.
 
 That finding turned around and indicted our own corpus. `corpus-bundle.ts` gives the dementia-medication
@@ -61,13 +63,21 @@ roster cell regardless, because those read the evidence rather than the action.
 
 **Retention turned on for Maui, with the index it was waiting for (ADR-076 d4).** ADR-073 d1 said the
 window lands in the same commit as the Postgres keep-set index, and the workflow comment said the same
-thing in the imperative. Both indexes exist now, and the compaction asks "does a newer row exist for
-this key" instead of materialising a keep-set with `DISTINCT ON` — the same predicate as an indexed
-existence check rather than a whole-table sort, with the tie-break carried in a row-value comparison so
-the ceiling and the floor still resolve two rows stamped the same instant identically. Maui ships 400
-days, which deletes nothing today on a two-month-old instance and starts protecting the table later:
-the safest possible moment to switch such a thing on. The coupling is now a test rather than a memory —
-a shipped window implies the index, so dropping the index while the window stays set goes red.
+thing in the imperative. Both indexes exist now. Maui ships 400 days, which deletes nothing today on a
+two-month-old instance and starts protecting the table later: the safest possible moment to switch such
+a thing on. The coupling is a test rather than a memory — a shipped window implies both indexes, so
+dropping one while the window stays set goes red.
+
+The query itself did not change, and that took a measurement to establish rather than an opinion. The
+obvious companion edit was to rewrite the keep-set as a correlated `EXISTS (a newer row for this key)`,
+which reads like the more index-friendly form; it was written, and then the reviewer asked for claims
+wider than what was measured, so it was measured. On postgres:16 over 300,000 outcome rows — the
+pilot's shape — each variant deleting the same 200,000 under `EXPLAIN ANALYZE` in a rolled-back
+transaction: the original query with no index does an external merge sort spilling 19 MB to disk at
+523 ms; with the index it is an index-only scan at 274 ms; the `EXISTS` rewrite with the index is a
+hash semi join over two sequential scans at 516 ms, and the planner does not touch the index at all.
+So the INDEX was the fix and the rewrite was a pessimization. Reverted, with the numbers in the store's
+docstring so nobody writes it again — including me, next year.
 
 **A run now says how many subjects the segment gate dropped (ADR-076 d3).** The pilot's `All Patients`
 lists two clinics and the corpus spans five, so the first 20,000-patient run would have evaluated 52 %
@@ -98,7 +108,8 @@ rule that decides whether measure 305 survives APP Plus is expected around Novem
 all` gate evidence is banked**: over all 20,000 corpus patients the gate reads 45/45 MADiE, 599 in the
 initial population and denominator, 518 actionable, 0 evaluation errors, both rates alive (numerators
 231 and 81), effectivePeriod covering the year — evidence FOR the flip on the whole roster rather than
-the 2,000-subject sample U3 ran. cms165's ingest-side stamping (#533) is the open half of
+the 2,000-subject sample U3 ran, written up in `docs/evidence/FLIP_GATE_2026-09-07_CMS137.md` so the
+numbers have a source and not just a sentence. cms165's ingest-side stamping (#533) is the open half of
 that issue. The live Maui segment repair (#536) is still a person's audited `PUT`; what changed is that
 the run now tells you it is owed.
 

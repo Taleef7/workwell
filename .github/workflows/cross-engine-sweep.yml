@@ -88,17 +88,56 @@ jobs:
             exit 1
           fi
           pnpm vendor:official --measure "$NAME" --catalog-id "${{ inputs.measure }}" --strip-elm-annotations --with-tests --complete-terminology
+          # Having the credential is not the same as having a COMPLETE sidecar: a rate limit, or one OID
+          # VSAC 404s, leaves a truncated expansion behind and the vendor step still succeeds. Sweeping
+          # that produces exactly the number this job refuses to produce — a comparison of terminology
+          # wearing the clothes of a comparison of engines. So the manifest is asked directly.
+          MANIFEST="measures/official/${{ inputs.measure }}/manifest.json"
+          if [ ! -f "$MANIFEST" ]; then
+            echo "::error::${MANIFEST} was not written — vendoring did not produce a sidecar to sweep against."
+            exit 1
+          fi
+          # `terminology.truncated` is the LIST of value sets whose expansion is still capped — empty
+          # when completion did its job. Asked as a length, because `[]` is truthy in jq and a
+          # boolean-shaped test would pass for every measure, always.
+          TRUNCATED=$(jq -r '.terminology.truncated | length' "$MANIFEST")
+          if [ "$TRUNCATED" != "0" ]; then
+            echo "::error::${{ inputs.measure }}'s vendored terminology still reports ${TRUNCATED} TRUNCATED expansion(s) after --complete-terminology. A sweep on capped expansions compares terminology, not engines — refusing."
+            jq -r '.terminology.truncated[]' "$MANIFEST" || true
+            exit 1
+          fi
+          echo "terminology complete: $(jq -r '.terminology.valueSets' "$MANIFEST") value sets, $(jq -r '.terminology.codes' "$MANIFEST") codes, 0 truncated"
 
       # `cross-engine-sweep.sh` owns the container lifecycle, including the three silent traps: reusing a
       # warm container ($evaluate-measure caches per subject for the server's life), racing /metadata
       # before the Clinical Reasoning module registers, and pushing terminology after the first
       # evaluation instead of before it.
+      # A DISAGREEMENT IS THE POINT, NOT A FAILURE. `cross-engine-check.ts` exits 1 when any case
+      # disagrees, which is right for a gate and wrong here: CMS2's baseline is 29/36 and CMS137's is
+      # 44/45, so every historically interesting sweep would report this job red while producing exactly
+      # the evidence it was dispatched for. So the exit code is captured, and the step fails only when
+      # the sweep produced no parseable result at all — a container that never came up, a bundle that
+      # would not load, a degenerate all-zero refusal. The disagreement count is surfaced as a notice.
+      #
+      # The script writes its progress to stderr, so stdout is the JSON alone and the artifact is
+      # parseable.
       - name: Sweep
-        run: bash scripts/cross-engine-sweep.sh "${{ inputs.measure }}" -- --json | tee "cross-engine-${{ inputs.measure }}.json"
+        run: |
+          set +e
+          bash scripts/cross-engine-sweep.sh "${{ inputs.measure }}" -- --json > "cross-engine-${{ inputs.measure }}.json"
+          SWEEP_EXIT=$?
+          set -e
+          if ! jq -e '.results | length > 0' "cross-engine-${{ inputs.measure }}.json" >/dev/null 2>&1; then
+            echo "::error::the sweep produced no result set (exit ${SWEEP_EXIT}) — this is a harness failure, not a disagreement"
+            exit 1
+          fi
+          TOTAL=$(jq '.results | length' "cross-engine-${{ inputs.measure }}.json")
+          AGREE=$(jq '[.results[] | select(.agrees)] | length' "cross-engine-${{ inputs.measure }}.json")
+          echo "::notice::${{ inputs.measure }}: ${AGREE}/${TOTAL} cases agree with the measure developer's expected reports (sweep exit ${SWEEP_EXIT})."
 
       - name: Upload the result
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: cross-engine-${{ inputs.measure }}
           path: backend-ts/cross-engine-${{ inputs.measure }}.json

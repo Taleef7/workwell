@@ -530,6 +530,9 @@ function resourcesForEvent(patient: CorpusPatient, event: CorpusEvent, index: nu
         // request alone this order is credited by our runtime and silently ignored by the second
         // engine, which is the same "reachable because of an engine leniency" this comment already
         // refused. Same 90-day window, same clinical fact, said in both places.
+        // The SHAPE the mutation proved, not a subset of it: bounds, frequency and a dose. The sweep
+        // that moved CMS2 from 29/36 to 36/36 carried all three, and shipping bounds-without-a-dose
+        // would be a configuration no run has ever measured (review finding).
         dosageInstruction: [{
           timing: {
             repeat: {
@@ -539,6 +542,7 @@ function resourcesForEvent(patient: CorpusPatient, event: CorpusEvent, index: nu
               periodUnit: "d",
             },
           },
+          doseAndRate: [{ doseQuantity: { value: 1, unit: "tablet", system: "http://unitsofmeasure.org", code: "{tbl}" } }],
         }],
         dispenseRequest: {
           validityPeriod: { start: `${event.date}T10:00:00Z` },
