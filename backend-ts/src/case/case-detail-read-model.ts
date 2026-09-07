@@ -16,7 +16,8 @@ import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
 import { type ImmunizationForecast } from "../engine/immunization/immunization-forecast.ts";
 import { isOfficialRouted } from "../wiring/official-routing.ts";
-import { officialDisplayFor } from "../compliance/official-display.ts";
+import { multiRateExclusionActive, officialDisplayFor } from "../compliance/official-display.ts";
+import { officialMeasureSemantics } from "../wiring/official-measure-semantics.ts";
 
 export interface CaseDetail {
   caseId: string;
@@ -31,6 +32,13 @@ export interface CaseDetail {
   priority: string;
   assignee: string | null;
   nextAction: string;
+  /**
+   * Who owns `nextAction` — 'SYSTEM' (the wording table's line for the outcome) or 'OPERATOR' (an
+   * instruction a person wrote). Surfaced because the rule is otherwise invisible: an operator whose
+   * case stopped tracking the nightly wording has no way to see that it is theirs, and no way to know
+   * that changing the outcome hands it back (ADR-076 d2).
+   */
+  nextActionSource: string;
   currentOutcomeStatus: string;
   lastRunId: string;
   createdAt: string;
@@ -97,11 +105,24 @@ export function deriveWhyFlagged(evidence: unknown, measureId: string, evaluatio
   const binding = MEASURE_BINDINGS[measureId];
   const window = binding?.complianceWindowDays ?? 365;
   const grace = binding?.gracePeriodDays ?? 0;
-  // On a multi-rate official outcome this is rate 1's `denominator-exclusion` (the first define that
-  // matches). Exact for CMS137, whose rates share one denominator expression; a future multi-rate
-  // measure with per-rate exclusions would need the missed rate's (ADR-074 d13).
+  // A multi-rate outcome answers from the rate the case is ABOUT (ADR-074 d13), not from whichever
+  // define happened to sort first — which was always rate 1's. `null` means "not multi-rate", so the
+  // single-rate derivation below still runs for every authored and single-rate official measure.
+  const perRateExclusion = multiRateExclusionActive(
+    evidence,
+    officialMeasureSemantics(measureId)?.numeratorMeansCompliant ?? true,
+  );
   const waiverDefine = ers.find((r) => /waiver|exemption|exclusion|contraindication/i.test(r.define));
-  const waiverStatus = typeof waiverDefine?.result === "boolean" ? (waiverDefine.result ? "active" : "none") : "none";
+  const waiverStatus =
+    perRateExclusion !== null
+      ? perRateExclusion
+        ? "active"
+        : "none"
+      : typeof waiverDefine?.result === "boolean"
+        ? waiverDefine.result
+          ? "active"
+          : "none"
+        : "none";
   const official = isOfficialRouted(measureId) ? officialDisplayFor(measureId, outcomeStatus, evidence) : null;
 
   // The authoritative "had a real exam" signal is the "Most Recent … Date" recency define.
@@ -171,6 +192,7 @@ export function toCaseDetail(
     priority: c.priority,
     assignee: c.assignee,
     nextAction: c.nextAction ?? "",
+    nextActionSource: c.nextActionSource ?? "SYSTEM",
     currentOutcomeStatus: c.currentOutcomeStatus,
     lastRunId: c.lastRunId,
     createdAt: c.createdAt,

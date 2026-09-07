@@ -611,6 +611,13 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
   // the excluded lists the segment gate keeps clear). So EXCLUDED bypasses applicability only when its
   // (subject, measure, current-period) key is already active here. COMPLIANT needs no such check (it is a
   // `planCaseUpsert` no-op with no existing case). A read failure just leaves EXCLUDED gated (safe).
+  /**
+   * Who needed work but whom no segment made applicable — see the gate below. `subjects` is a SET, not
+   * a counter: the loop is over (subject, measure) pairs, so one patient gated on three measures is one
+   * person to chase and three evaluations. The WARN says both, because "52 % of patients" and "52 % of
+   * evaluations" are different claims and the runbook makes the first one (review finding).
+   */
+  const gatedBySegment = { evaluations: 0, subjects: new Set<string>(), sites: new Set<string>(), measures: new Set<string>() };
   const activeCaseKeys = new Set<string>();
   if (deps.caseStore) {
     for (const measureId of new Set(measureIds)) {
@@ -957,7 +964,31 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
       // (rerun-to-verify can't close it either). Neither close-only branch can create a wc case. The
       // outcome is always persisted regardless (CQL stays authoritative, ADR-008). Codex P2 (#325).
       const isLiveWebChartSubject = item.employee.externalId.startsWith("wc|");
-      if (deps.caseStore && (closeOnly || (!isLiveWebChartSubject && isApplicable(item.employee, item.measureId, deps.segments ?? [])))) {
+      // Counted, not just branched on. A subject the run evaluated, who needs work, and whom no segment
+      // makes applicable, gets an outcome and NO case: their roster cell reads NOT_APPLICABLE and no
+      // worklist ever surfaces them. Nothing about that is wrong data — it is the segment saying "not
+      // my cohort" — and that is exactly why it is invisible when the segment is simply out of date.
+      //
+      // Measured on the pilot (issue #536): `All Patients` was seeded when the roster spanned two
+      // clinics and the ADR-075 corpus spans five, so 52 % of 20,000 patients would be evaluated and
+      // never actionable. `ensureSegmentSeed` creates and never mutates — deliberately, so nobody's
+      // edits are clobbered — so the repair is a human act, and the run's job is to make the need for
+      // it impossible to miss. Summarised after the loop rather than logged per subject.
+      // Memoised, not eager: the original expression short-circuited on `deps.caseStore &&` and
+      // `closeOnly ||`, and computing it up front would add a call for every close-only item at
+      // 20,000-patient scale. One evaluation at most, and only where something asks (review finding).
+      let applicableMemo: boolean | undefined;
+      const segmentApplicable = (): boolean =>
+        (applicableMemo ??= isApplicable(item.employee, item.measureId, deps.segments ?? []));
+      // `wc|` subjects are excluded deliberately, not by oversight: they never open cases at all (the
+      // rerun-to-verify 409 above), so counting them here would report a gap no segment edit can close.
+      if (!closeOnly && !isLiveWebChartSubject && NON_COMPLIANT.has(status) && !segmentApplicable()) {
+        gatedBySegment.evaluations++;
+        gatedBySegment.subjects.add(item.employee.externalId);
+        if (gatedBySegment.sites.size < 12) gatedBySegment.sites.add(item.employee.site ?? "(no site)");
+        gatedBySegment.measures.add(item.measureId);
+      }
+      if (deps.caseStore && (closeOnly || (!isLiveWebChartSubject && segmentApplicable()))) {
         const upserted = await deps.caseStore.upsertFromOutcome({
           runId: runId,
           subjectId: item.employee.externalId,
@@ -1022,6 +1053,33 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
       planned.progress.compliant = compliant;
       planned.progress.nonCompliant = nonCompliant;
     }
+  }
+
+  // A cohort that the segment gate silently drops, SURFACED — the same shape of hazard as ADR-043's
+  // and the same remedy: say it out loud rather than fail. Nothing here is wrong; a segment that says
+  // "not my cohort" is doing its job. What the run can see and an operator cannot is the SIZE of it, and
+  // a segment left behind by a roster that grew is indistinguishable from a segment that meant it.
+  const evaluatedSubjectsForGate = new Set(items.map((i) => i.employee.externalId)).size;
+  // Only where "a cohort" is a meaningful thing to say. `/simulate` and a single-employee scope run
+  // through here too, and "1 subject (100% of this run) … the segment needs the audited repair"
+  // is alarming, wrong-scoped advice for a deliberate one-off (review finding).
+  if (gatedBySegment.evaluations > 0 && evaluatedSubjectsForGate > 1) {
+    const evaluatedSubjects = evaluatedSubjectsForGate;
+    const share = Math.round((gatedBySegment.subjects.size / Math.max(evaluatedSubjects, 1)) * 100);
+    await deps.runStore
+      .appendLog(
+        runId,
+        "WARN",
+        `${gatedBySegment.subjects.size} subject(s) (${share}% of the ${evaluatedSubjects} this run evaluated), ` +
+          `across ${gatedBySegment.evaluations} evaluation(s), needed follow-up but no segment makes them ` +
+          `applicable, so they have an outcome and NO case — they appear NOT_APPLICABLE on the roster and on ` +
+          `no worklist. Measures: ${[...gatedBySegment.measures].sort().join(", ")}. ` +
+          `Sites: ${[...gatedBySegment.sites].sort().join(", ")}. ` +
+          `If a site here should be in scope, the segment needs the audited repair in DEPLOY.md ` +
+          `("One-time segment repair") — segment seeding creates but never mutates, so a roster that grew ` +
+          `past its segment stays gated until a person widens it.`,
+      )
+      .catch(() => {});
   }
 
   // A whole roster out of the initial population, SURFACED (ADR-043) — now that the roster is complete.

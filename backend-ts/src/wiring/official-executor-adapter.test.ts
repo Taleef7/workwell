@@ -838,3 +838,52 @@ test("worstOutcome reduces to the rate that still needs attention, over states p
   // A single-rate measure is unchanged — the reduction is identity over one element.
   assert.deepEqual(worstOutcome([compliant]), compliant);
 });
+
+/**
+ * `trustMetaProfile` is decided PER MEASURE and reaches fqm (issue #533).
+ *
+ * cms165 is the only measure that sets it. Its `[Observation: us-core-blood-pressure]` retrieve carries
+ * no code filter, so with profiles ignored every final Observation is a candidate blood pressure and
+ * whichever is newest is read as the patient's latest reading. The corpus stamps the profile each
+ * retrieve names, which is what makes trusting them an option for this one measure.
+ *
+ * Both directions are asserted. The false half is not padding: it is the guard on cms122 and cms125,
+ * which are ROUTED and whose populations empty out under a global true — a regression that would
+ * report a real roster as entirely out-of-population.
+ */
+test("trustMetaProfile is per measure: on for cms165, off for the routed measures", async () => {
+  const seen: Array<{ measure: string; trust: unknown }> = [];
+  const executorFor = (catalogId: string) =>
+    officialMeasureExecutor({
+      expand: async () => [{ code: "a", system: "s" }],
+      loadArtifact: () => ({
+        ...fakeArtifact(catalogId, ["2.16.1"]),
+        manifest: { ...fakeArtifact(catalogId, ["2.16.1"]).manifest, catalogId },
+      }),
+      calculate: async (_b, _p, options) => {
+        seen.push({ measure: catalogId, trust: (options as Record<string, unknown>)["trustMetaProfile"] });
+        return { results: [] };
+      },
+    });
+
+  for (const id of ["cms165", "cms122", "cms125", "cms2", "cms137"]) {
+    await assert.rejects(() =>
+      executorFor(id).evaluate({ measureId: id, patientBundle: patientBundle("patient-1"), evaluationDate: "2026-06-30" }),
+    );
+  }
+
+  assert.deepEqual(seen, [
+    { measure: "cms165", trust: true },
+    { measure: "cms122", trust: false },
+    { measure: "cms125", trust: false },
+    { measure: "cms2", trust: false },
+    { measure: "cms137", trust: false },
+  ]);
+});
+
+test("cms165 is the ONLY measure whose semantics trust profiles", () => {
+  const trusting = Object.entries(OFFICIAL_MEASURE_SEMANTICS)
+    .filter(([, s]) => s.trustMetaProfile)
+    .map(([id]) => id);
+  assert.deepEqual(trusting, ["cms165"], "adding another needs the same evidence cms165 has");
+});

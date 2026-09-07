@@ -6,7 +6,11 @@
  * goes into the manifest so a run's data is traceable to the exact table that produced it, and
  * CORPUS_GENERATOR_VERSION is bumped by hand whenever a row or the drawing logic changes.
  */
-export const CORPUS_GENERATOR_VERSION = "4.0.0";
+// 4.1.0 (2026-09-07): the dementia-medication order now states its supply window in
+// `dosageInstruction.timing.repeat.boundsPeriod` as well as the dispense request, because the second
+// engine reads only the former (`docs/evidence/CROSS_ENGINE_2026-09-07_CMS2.md`). No row moved and no
+// patient changed, so it is a MINOR bump: the same people, one order described more completely.
+export const CORPUS_GENERATOR_VERSION = "4.1.0";
 export const DEFAULT_CORPUS_SEED = "maui-py2027-v1";
 
 /**

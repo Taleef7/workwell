@@ -67,6 +67,11 @@ CREATE TABLE IF NOT EXISTS cases (
   priority               TEXT NOT NULL,
   assignee               TEXT,
   next_action            TEXT,
+  /* Who owns next_action: 'SYSTEM' (the wording table's line for the outcome) or 'OPERATOR' (an
+     instruction a person wrote — escalation, manual resolve, outreach, rerun-to-verify). The nightly
+     upsert preserves an OPERATOR action while the outcome it was written about still holds; see
+     planNextAction in case/case-logic.ts. Defaulted so a legacy row reads SYSTEM and behaves as before. */
+  next_action_source     TEXT NOT NULL DEFAULT 'SYSTEM',
   current_outcome_status TEXT NOT NULL,
   last_run_id            TEXT NOT NULL,
   created_at             TEXT NOT NULL,
@@ -395,6 +400,9 @@ CREATE INDEX IF NOT EXISTS eval_state_measure_period_idx ON eval_state (measure_
 const FLOOR_COLUMN_BACKFILL: ReadonlyArray<{ table: string; column: string; ddl: string }> = [
   { table: "cases", column: "closed_reason", ddl: "closed_reason TEXT" },
   { table: "cases", column: "closed_by", ddl: "closed_by TEXT" },
+  // ADR-076 d2. NOT NULL needs a DEFAULT for SQLite's ALTER TABLE, and 'SYSTEM' is the true value for
+  // every pre-existing row rather than a placeholder: each of their actions was written by a run.
+  { table: "cases", column: "next_action_source", ddl: "next_action_source TEXT NOT NULL DEFAULT 'SYSTEM'" },
   { table: "outcomes", column: "evaluation_period", ddl: "evaluation_period TEXT NOT NULL DEFAULT ''" },
 ];
 

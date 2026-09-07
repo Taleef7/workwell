@@ -35,7 +35,7 @@ const NOT_ENGAGED = {
 
 const existing: CaseRecord = {
   id: "case-137", employeeId: "pat-001", measureId: "cms137", evaluationPeriod: "2026-01-01",
-  status: "OPEN", priority: "HIGH", assignee: null, nextAction: "stale", currentOutcomeStatus: "OVERDUE",
+  status: "OPEN", priority: "HIGH", assignee: null, nextAction: "stale", nextActionSource: "SYSTEM", currentOutcomeStatus: "OVERDUE",
   lastRunId: "run-existing", createdAt: "2026-09-01T00:00:00.000Z", updatedAt: "2026-09-01T00:00:00.000Z",
   closedAt: null, closedReason: null, closedBy: null,
 };
@@ -71,4 +71,42 @@ test("rerun-to-verify words next_action from the fresh outcome's rates, in the c
   assert.match(nextAction, /engagement|follow-up/i, "the Engagement rate is the one missed");
   assert.doesNotMatch(nextAction, /confirm initiation/i, "the combined wording would tell staff to confirm an initiation that happened");
   assert.equal((auditPayload as Record<string, unknown> | null)?.nextAction, nextAction, "the audit payload records the same wording");
+});
+
+/**
+ * The action a rerun writes is SYSTEM-owned, not the operator's (ADR-076 d2 — review finding).
+ *
+ * `patchCase` marks an action OPERATOR by default, which is right for escalate, manual resolve and an
+ * outreach send: a person wrote those words. Rerun-to-verify is different — `verificationNextAction`
+ * returns `nextActionFor(...)`, the exact string the nightly run computes — and marking it OPERATOR
+ * would FREEZE it: `planNextAction` preserves an operator action while the status is re-confirmed, so
+ * this very case (still OVERDUE, missed rate moving from Engagement back to Initiation next month)
+ * would keep saying Engagement forever. That is the ADR-074 d13 behaviour ADR-076 d2 promises it does
+ * not touch, and every case ever reverified would also stop receiving wording-table edits.
+ */
+test("rerun-to-verify hands the action back to the SYSTEM, so the rate can keep moving", async () => {
+  const { rerunToVerify } = await import("./case-rerun.ts");
+  let patched: Record<string, unknown> | null = null;
+  const noop = async () => undefined;
+  const deps = {
+    cases: {
+      getCase: async () => existing,
+      patchCase: async (_id: string, patch: Record<string, unknown>) => { patched = patch; return { ...existing, ...patch }; },
+      listCases: async () => [existing],
+      upsertFromOutcome: noop,
+      countByLastRun: async () => 1,
+    },
+    events: { recordCaseEvent: noop, appendAudit: noop, caseTimeline: async () => [], latestOutreachDeliveryStatus: async () => null },
+    outcomes: { recordOutcome: noop, listOutcomes: async () => [] },
+    runStore: { createRun: async () => ({ id: "run-rerun" }), markRunning: noop, appendLog: noop, finalizeRun: noop, listRuns: async () => [] },
+    engine: { evaluate: async () => ({ outcome: "OVERDUE", evidence: NOT_ENGAGED }) },
+  } as unknown as RerunDeps;
+
+  await rerunToVerify(deps, existing.id, "tester");
+
+  assert.equal(
+    (patched as Record<string, unknown> | null)?.nextActionSource,
+    "SYSTEM",
+    "a computed action must say so, or patchCase's OPERATOR default freezes it",
+  );
 });

@@ -5,7 +5,7 @@ import type { CaseRecord } from "../stores/case-store.ts";
 
 const existing: CaseRecord = {
   id: "case-wc", employeeId: "wc|rerun-patient", measureId: "audiogram", evaluationPeriod: "2026-01-01",
-  status: "OPEN", priority: "HIGH", assignee: null, nextAction: "Verify", currentOutcomeStatus: "OVERDUE",
+  status: "OPEN", priority: "HIGH", assignee: null, nextAction: "Verify", nextActionSource: "SYSTEM", currentOutcomeStatus: "OVERDUE",
   lastRunId: "run-existing", createdAt: "2026-07-17T00:00:00.000Z", updatedAt: "2026-07-17T00:00:00.000Z",
   closedAt: null, closedReason: null, closedBy: null,
 };

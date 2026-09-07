@@ -535,7 +535,7 @@ deployment on a self-heal. `official-flip-config.test.ts` fails the build if the
 | *(no variable)* — the corpus YEAR | follows the run | — | **The clinical facts are generated for the calendar year of each run's evaluation date** (ADR-075 amendment, generator 4.0.0). A nightly run today scores calendar 2026 (ADR-072) and sees 2026 encounters; the first run of 2027 sees 2027's, for the same 20,000 people. Identity (id, name, DOB, sex, clinic, PCP, payer) never moves with the year. Until 4.0.0 the facts were pinned to 2027 and every nightly run on this instance put the whole roster out of every initial population. The vendored artifacts are 2026-vintage, so today's numbers are 2026 artifacts over 2026 data — internally consistent, and NOT a PY2027 rate; PY2027 needs the MM-1d re-vendor. |
 | `WORKWELL_RUN_CHUNK_SIZE` | `500` | unset (500) | Subjects per evaluation chunk. A chunk's bundles are built, evaluated, persisted and dropped before the next exists, so **memory is bounded by one chunk**, not by the roster. A malformed value warns and falls back to 500. |
 | `WORKWELL_SCHEDULER_ANCHOR_HOUR_UTC` | `12` | unset (12) | The wall-clock hour the nightly run fires at. **12 UTC = 02:00 HST**, so the overnight recompute finishes before the clinic opens. The 23.5-hour debounce is a floor beneath the anchor, not the cadence. |
-| `WORKWELL_OUTCOME_RETENTION_DAYS` | unset (OFF) | unset | Outcome-history window (ADR-073). **Unset means OFF** — TWH keeps its history whole. Never deletes a subject's newest row per `(measure, period)`, a run row, or any row a case cites. **Leave it unset until the Postgres index question in ADR-073 is decided** — the keep-set's ordering has no supporting index, so on a large table the nightly DELETE sorts the whole thing. |
+| `WORKWELL_OUTCOME_RETENTION_DAYS` | unset (OFF) | **400** | Outcome-history window (ADR-073). **Unset means OFF** — TWH keeps its history whole. Never deletes a subject's newest row per `(measure, period)`, a run row, or any row a case cites. **Maui ships 400 days since 2026-09-07** (ADR-076 d4), in the same commit as the index ADR-073 d1 required: `spike_outcomes_keepset_idx` covers the keep-set and `spike_cases_cited_outcome_idx` the cited-row anti-join. The query itself is unchanged — measured at 300,000 rows, the index turns its plan from an external merge sort spilling 19 MB to disk (523 ms) into an index-only scan (274 ms), while rewriting the predicate as a correlated `EXISTS` was tried and is a pessimization the planner does not use the index for at all (516 ms). 400 days keeps a full measurement year plus a margin and deletes nothing on an instance younger than that. **Do not set it on a deployment whose Postgres lacks those indexes** — `official-flip-config.test.ts` asserts the pair for Maui. |
 
 Measured: 20,000 patients generate in ~0.3 s, and a full run over them completes well inside the
 `run-scale-maui` job's 15-minute ceiling — **with a STUB engine**. That job measures the pipeline
@@ -589,6 +589,15 @@ Total catalog: **63 measures**, 14 runnable (see `docs/MEASURES.md` for the full
 > **The repair, before or immediately after raising `WORKWELL_MAUI_CORPUS_SIZE`:** widen `All Patients`
 > to all five clinic names via the audited `PUT /api/segments/:id` (the Configure Groups editor), which
 > records a `SEGMENT_UPDATED` event. Owner-gated, like every data repair.
+>
+> **Since 2026-09-07 the run tells you if this is still owed** (ADR-076 d3, issue #536). Every run that
+> evaluates subjects who need follow-up and whom no segment covers writes one `WARN` on the run: how
+> many distinct patients, what share of the patients the run evaluated, how many evaluations that was,
+> and which measures and sites. So the check is
+> "open the newest run's log and look for `no segment makes them applicable`" rather than "remember
+> that this page exists". A run with nothing gated writes nothing — a warning on every run is a warning
+> nobody reads. Seeding still creates and never mutates: widening a segment stays a human act with an
+> audit row, which is why the run reports the need instead of silently repairing it.
 
 The demo **risk-group segments** seed (`backend-ts/src/segment/segment-seed.ts`) is **name-idempotent**:
 a boot over an already-seeded DB adds no duplicates and **never mutates an existing segment** (so it
