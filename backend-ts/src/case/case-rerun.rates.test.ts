@@ -35,7 +35,7 @@ const NOT_ENGAGED = {
 
 const existing: CaseRecord = {
   id: "case-137", employeeId: "pat-001", measureId: "cms137", evaluationPeriod: "2026-01-01",
-  status: "OPEN", priority: "HIGH", assignee: null, nextAction: "stale", currentOutcomeStatus: "OVERDUE",
+  status: "OPEN", priority: "HIGH", assignee: null, nextAction: "stale", nextActionSource: "SYSTEM", currentOutcomeStatus: "OVERDUE",
   lastRunId: "run-existing", createdAt: "2026-09-01T00:00:00.000Z", updatedAt: "2026-09-01T00:00:00.000Z",
   closedAt: null, closedReason: null, closedBy: null,
 };

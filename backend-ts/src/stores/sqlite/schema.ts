@@ -67,6 +67,11 @@ CREATE TABLE IF NOT EXISTS cases (
   priority               TEXT NOT NULL,
   assignee               TEXT,
   next_action            TEXT,
+  /* Who owns next_action: 'SYSTEM' (the wording table's line for the outcome) or 'OPERATOR' (an
+     instruction a person wrote — escalation, manual resolve, outreach, rerun-to-verify). The nightly
+     upsert preserves an OPERATOR action while the outcome it was written about still holds; see
+     planNextAction in case/case-logic.ts. Defaulted so a legacy row reads SYSTEM and behaves as before. */
+  next_action_source     TEXT NOT NULL DEFAULT 'SYSTEM',
   current_outcome_status TEXT NOT NULL,
   last_run_id            TEXT NOT NULL,
   created_at             TEXT NOT NULL,

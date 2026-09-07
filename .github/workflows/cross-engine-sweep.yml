@@ -1,0 +1,105 @@
+# Cross-execute one measure's MADiE deck through a SECOND engine, in a context that HAS the VSAC
+# credential (issue #532).
+#
+# ## Why this exists as a workflow rather than a runbook line
+#
+# The sweep runs locally for six of the nine vendored measures. It CANNOT run locally for cms130 and
+# cms165: their terminology sidecars are VSAC-completed (ADR-041), the uncredentialed vendor cannot
+# reproduce them, and sweeping on the upstream bundle's capped expansions compares two engines over
+# different terminology — which the 2026-08-04 run showed is not a comparison of engines at all. The
+# credential lives here, so the sweep has to be able to run here.
+#
+# Manual only, and deliberately so. It pulls a ~34MB content checkout, boots a HAPI container per
+# input, and evaluates every test case one subject at a time — tens of minutes. It is evidence-gathering
+# for a flip decision (ROADMAP MM-1c), not a gate on a pull request, and MM-1c's gate is the MADiE job
+# in `ci.yml` that already runs on every push.
+#
+# The result is uploaded as an artifact. Turning it into a dated document under `docs/evidence/` is a
+# human act, because the writing-down is where the LIMITS get stated — see
+# `CROSS_ENGINE_2026-09-07_CMS2.md` for the shape, and its "Limits" section for why that matters more
+# than the number.
+name: Cross-engine sweep (manual, needs the VSAC credential)
+
+on:
+  workflow_dispatch:
+    inputs:
+      measure:
+        description: "Catalog id to sweep (cms130 and cms165 are the two that cannot be swept locally)."
+        required: true
+        type: choice
+        default: cms130
+        options: [cms130, cms165, cms2, cms122, cms125, cms137, cms68, cms138, cms951]
+
+concurrency:
+  # One at a time: each run boots a container on a fixed port and the sweeps are long. Never cancel a
+  # run in progress to start another — an abandoned sweep is a wasted half hour and no evidence.
+  group: cross-engine-sweep
+  cancel-in-progress: false
+
+jobs:
+  sweep:
+    name: ${{ inputs.measure }} through cqf-fhir-cr
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    defaults:
+      run:
+        working-directory: backend-ts
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10.17.1
+          run_install: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: backend-ts/pnpm-lock.yaml
+      - name: Install deps
+        run: pnpm install --frozen-lockfile
+      - name: Cache official content
+        uses: actions/cache@v6
+        with:
+          path: backend-ts/.official-content
+          key: official-content-${{ hashFiles('backend-ts/scripts/fetch-official-cases.ps1') }}
+      - name: Fetch official content (pinned commit)
+        run: pwsh -NoProfile -File scripts/fetch-official-cases.ps1
+
+      # The whole point of running here. Without the credential the sidecar is capped and the sweep
+      # would compare our engine on one expansion against Java on another — so this REFUSES rather than
+      # producing a number that reads like evidence and is not. Same reasoning as the degenerate-sweep
+      # refusal inside the check script.
+      - name: Vendor the measure's terminology, completed from VSAC
+        env:
+          WORKWELL_VSAC_API_KEY: ${{ secrets.WORKWELL_VSAC_API_KEY_VENDOR }}
+        run: |
+          if [ -z "$WORKWELL_VSAC_API_KEY" ]; then
+            echo "::error::No VSAC credential in this context. A sweep on capped expansions compares terminology, not engines (docs/evidence/CROSS_ENGINE_2026-08-04.md) — refusing rather than reporting it as a result."
+            exit 1
+          fi
+          # The artifact name comes from the module that owns the mapping, not from a nine-entry
+          # table copied into YAML that would drift on the tenth measure — the same reason
+          # cross-engine-sweep.sh asks for it rather than hardcoding it.
+          NAME="$(pnpm exec tsx -e "import {officialMeasureName} from './src/standards/official-cases.ts'; process.stdout.write(officialMeasureName('${{ inputs.measure }}') ?? '')")"
+          if [ -z "$NAME" ]; then
+            echo "::error::${{ inputs.measure }} is not an official measure id"
+            exit 1
+          fi
+          pnpm vendor:official --measure "$NAME" --catalog-id "${{ inputs.measure }}" --strip-elm-annotations --with-tests --complete-terminology
+
+      # `cross-engine-sweep.sh` owns the container lifecycle, including the three silent traps: reusing a
+      # warm container ($evaluate-measure caches per subject for the server's life), racing /metadata
+      # before the Clinical Reasoning module registers, and pushing terminology after the first
+      # evaluation instead of before it.
+      - name: Sweep
+        run: bash scripts/cross-engine-sweep.sh "${{ inputs.measure }}" -- --json | tee "cross-engine-${{ inputs.measure }}.json"
+
+      - name: Upload the result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cross-engine-${{ inputs.measure }}
+          path: backend-ts/cross-engine-${{ inputs.measure }}.json
+          if-no-files-found: warn

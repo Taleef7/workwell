@@ -211,6 +211,36 @@ export function missedRateIndex(evidence: unknown, numeratorMeansCompliant: bool
 }
 
 /**
+ * Whether an exclusion applies to the rate the CASE is about, on a multi-rate outcome.
+ *
+ * `deriveWhyFlagged` used to read `waiver_status` off the first `expressionResults` define whose name
+ * matched /waiver|exemption|exclusion|contraindication/, which on a multi-rate outcome is always rate
+ * 1's — the labels are `official:<Rate>:<population>` in rate order (ADR-074 d13). That is exact for
+ * CMS137, whose two rates share one denominator and one exclusion expression, and wrong for the first
+ * multi-rate measure vendored with per-rate exclusions: a case about the rate the subject missed would
+ * report the OTHER rate's exclusion.
+ *
+ * Read from `official.rates` rather than from the define names: the populations are the same data the
+ * bucket was computed from, and matching on a reviewed label is a second place for the wording table to
+ * drift. Returns `null` when the outcome is not multi-rate, which is the caller's signal to keep the
+ * single-rate derivation rather than assume "no exclusion".
+ *
+ * Which rate: the MISSED one where there is one (the rate the case exists for). Where there is none —
+ * an EXCLUDED or COMPLIANT outcome — any rate carrying an exclusion answers, because ADR-074's bucket
+ * is worst-of-rates and an exclusion anywhere is what put the subject there.
+ */
+export function multiRateExclusionActive(evidence: unknown, numeratorMeansCompliant: boolean): boolean | null {
+  const rates = (evidence as { official?: { rates?: unknown } } | null)?.official?.rates;
+  if (!Array.isArray(rates) || rates.length < 2) return null;
+  const excluded = (rate: unknown): boolean =>
+    Array.isArray(rate) &&
+    (rate as Population[]).some((p) => p?.populationType === "denominator-exclusion" && p?.result === true);
+  const missed = missedRateIndex(evidence, numeratorMeansCompliant);
+  if (missed >= 0) return excluded(rates[missed]);
+  return rates.some(excluded);
+}
+
+/**
  * Wording for one (measure, status). Pass the outcome's `evidence_json` where the caller has it: for a
  * multi-rate measure's OVERDUE it selects the missed rate's wording; for everything else it is ignored.
  */

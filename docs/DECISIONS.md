@@ -18,6 +18,84 @@
 >
 > **Sequence note:** ADR-033 does not exist — verified absent, and the number must not be reused.
 
+## ADR-076: profile trust is a per-measure fact, and an operator's next action outranks the wording table
+
+**Status:** Accepted (2026-09-07). Closing the flags MM-1 left open (issues #530–#537).
+
+### Context
+
+Three things the pilot could not do correctly shared a shape: a global setting was carrying a
+per-case fact, and the failure was silent in every one.
+
+1. **`trustMetaProfile` was one switch for every measure.** It is false, deliberately — trusting
+   QI-Core profiles empties the population for cms122 and cms125, which are routed. But cms165's
+   decisive retrieve is `[Observation: us-core-blood-pressure]`, the only Observation retrieve in that
+   artifact with no code filter; the other four each name a code or a value set. With profiles ignored,
+   every final Observation is a candidate blood pressure, and whichever is newest is read as the
+   patient's latest reading. The old synthetic fixture emitted one Observation per subject, which is
+   the only shape that hides it.
+2. **`next_action` was recomputed and rewritten on every run.** An escalation, a manual resolution, an
+   outreach send's "wait for the follow-up" — each replaced by the wording table's line the next
+   morning. ADR-074 d13 made that overwrite AUDITED, which made it visible without making it right.
+3. **The segment gate dropped subjects silently.** Case creation is gated by segment applicability, and
+   a subject nobody's segment covers gets an outcome and no case. Correct when the segment means it;
+   indistinguishable from a segment left behind by a roster that grew, which is what the pilot had —
+   `All Patients` listed two clinics while the corpus spans five.
+
+### Decision
+
+**d1. `trustMetaProfile` is decided per measure, in `OFFICIAL_MEASURE_SEMANTICS`, and cms165 is the
+only measure that sets it.** The default stays false and the reasoning for that default is unchanged.
+This is available only because ADR-075's corpus stamps the profile each artifact retrieve names — a
+thing it was already doing deliberately, for this. It does NOT make cms165 routable: a bundle whose
+resources are not stamped retrieves nothing under it, so a WebChart-derived roster needs its blood
+pressures stamped at ingest first. That failure is at least loud (the executor's batch-level refusal
+fires) where the current one is silent and wrong.
+
+**d2. An operator-written `next_action` outranks the computed one while the outcome it was written
+about still holds.** A new `cases.next_action_source` column records who wrote it: `patchCase` is the
+operator surface and marks OPERATOR, `upsertFromOutcome` is the system's and marks SYSTEM. When the
+outcome status changes, ownership reverts and the computed action takes over — an instruction written
+about being OVERDUE is stale advice once CQL says something else. This is the rule `IN_PROGRESS`
+already had, applied to the other column an operator writes.
+
+Deliberately NOT done: keeping an operator-owned action fresh against a wording-table edit or a moved
+missed rate. Both still reach every SYSTEM-owned case. The case page and roster cell show the missed
+rate regardless, because they read the outcome's evidence live rather than `next_action`.
+
+**d3. A run reports how many subjects the segment gate dropped, and never mutates a segment to fix
+it.** Seeding still creates and never mutates, so widening a segment stays a human act with an audit
+row. What the run adds is the size of the drop, the measures and the sites, in a WARN — the same
+remedy ADR-043 applies to a whole roster leaving the initial population, for the same reason.
+
+**d4. Retention turns on with its index, as ADR-073 d1 required, and the coupling is now a test.**
+`spike_outcomes_keepset_idx` covers the keep-set's `(subject, measure, period, evaluated_at DESC,
+id DESC)`, `spike_cases_cited_outcome_idx` covers the "no case cites this row" anti-join, and the
+Postgres compaction asks "does a newer row exist for this key" rather than materialising the keep-set
+with `DISTINCT ON` — the same predicate, as an indexed existence check instead of a whole-table sort.
+Maui ships a 400-day window in the same commit. `official-flip-config.test.ts` asserts a shipped
+window implies the index, so the dangerous direction — dropping the index while the window stays set —
+fails a test rather than being remembered.
+
+### Consequences
+
+- cms165 still must NOT be routed (issue #533 stays open for the ingest-side stamping), and this is
+  now the reason rather than a blanket one: the measure is scoreable, our corpus can score it, real
+  WebChart data cannot yet.
+- CMS2's seven cross-engine disagreements have a cause (`docs/evidence/CROSS_ENGINE_2026-09-07_CMS2.md`),
+  which is the MM-1c precondition on its flip. The cause is one helper,
+  `CumulativeMedicationDuration.medicationRequestPeriod` — the same one CMS122's and CMS125's
+  disagreements were isolated to. That helper now accounts for **21 of the 24** known cross-engine
+  disagreements (CMS122 6, CMS125 8, CMS2 7). Two CMS125 cases are `Procedure`-only and stay
+  unexplained; CMS137's single one is a separate and separately diagnosed period boundary. The August
+  evidence put 9 of 23 unattributed; it is now 2 of 24.
+- A case's audit trail gains a `next_action_source`-shaped distinction it did not have: a run that
+  changes an action is still `UPDATED` and audited; a run that declines to overwrite one is
+  `UNCHANGED`, because the persisted row did not change. The hard rule is unmoved — every state change
+  writes an audit event, and this is the absence of a state change.
+- 400 days deletes nothing on Maui today; the instance is two months old. The window starts protecting
+  the table later, which is the safest moment to turn such a thing on.
+
 ## ADR-075: the pilot's roster is a generated corpus the deployment composes lazily, and evaluation runs in subject chunks
 
 **Status:** Accepted (2026-09-06). Milestone MM-1, unit U2 (`docs/ROADMAP_2026-08-30.md` §5).

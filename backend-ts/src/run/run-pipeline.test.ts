@@ -894,6 +894,36 @@ test("gated: an out-of-cohort (subject, measure) creates NO case, but the outcom
   assert.equal(mine.length, 0, "out-of-cohort outcome creates no case");
 });
 
+test("a run SAYS how many subjects the segment gate dropped, and names the sites (#536)", async () => {
+  // The pilot's failure mode, in miniature: a segment that covers nobody in this run. `All Patients`
+  // listed two clinics while the ADR-075 corpus spans five, so 52% of 20,000 patients would have been
+  // evaluated and never actionable — every one of them reading NOT_APPLICABLE, which is exactly what a
+  // segment that MEANT it looks like. The run is the only place that can see the size of it.
+  const office = employeeById("emp-007")!;
+  const gatedDeps: RunPipelineDeps = {
+    ...deps,
+    engine: overdueEngine,
+    employees: [office],
+    segments: [welderSegment()],
+  };
+  const res = await executeManualRun(gatedDeps, { scopeType: "MEASURE", measureId: "audiogram", evaluationDate: "2095-05-05" });
+
+  const warnings = (await deps.runStore.listLogs(res.runId, 500)).filter((l) => l.level === "WARN");
+  const gate = warnings.find((l) => /no segment makes them applicable/.test(l.message));
+  assert.ok(gate, `expected a segment-gate WARN; got: ${warnings.map((w) => w.message).join(" | ")}`);
+  assert.match(gate!.message, /1 subject\(s\) \(100% of this run\)/);
+  assert.match(gate!.message, /audiogram/, "names the measure");
+  assert.match(gate!.message, /segment repair/i, "points at the runbook rather than just complaining");
+});
+
+test("a run with nothing gated says NOTHING — the warning is not a fixture of every run", async () => {
+  const office = employeeById("emp-007")!;
+  const openDeps: RunPipelineDeps = { ...deps, engine: overdueEngine, employees: [office], segments: [] };
+  const res = await executeManualRun(openDeps, { scopeType: "MEASURE", measureId: "audiogram", evaluationDate: "2095-06-06" });
+  const gate = (await deps.runStore.listLogs(res.runId, 500)).find((l) => /no segment makes them applicable/.test(l.message));
+  assert.equal(gate, undefined, "a warning every run is a warning nobody reads");
+});
+
 test("reversibility: with zero enabled segments, the same scenario DOES create a case", async () => {
   const office = employeeById("emp-007")!;
   const openDeps: RunPipelineDeps = {

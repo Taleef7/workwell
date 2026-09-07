@@ -30,6 +30,7 @@
  * matters is that whatever is shipped is ROUTABLE.
  */
 import { test } from "node:test";
+import { RUN_STORE_PG_DDL } from "../stores/postgres/schema-pg.ts";
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -242,13 +243,19 @@ test("the Maui deployment actually ships the corpus size, and it is the 20,000-p
   // Agreement alone is satisfied by BOTH workflows omitting the key, which is the vacuous reading of
   // the test above — and would leave the pilot on the 48-row fixture while every doc said 20,000.
   assert.equal(shippedValue("deploy-maui-mieweb.yml", "WORKWELL_MAUI_CORPUS_SIZE"), "20000");
-  // Retention is deliberately NOT shipped to Maui yet. DEPLOY.md says to leave it unset until the
-  // Postgres index ADR-073 names exists — the keep-set's DISTINCT ON ... ORDER BY has no supporting
-  // index, so on a table of nightly 20,000-patient runs the DELETE would sort the whole thing inline
-  // during the nightly tick. The first version of this test pinned "90" while the doc said "unset"
-  // (Codex review, #528). Pinning ABSENCE here means adding it later is a deliberate edit of this line
-  // in the same commit as the index, not a value that slipped in.
-  assert.equal(shippedValue("deploy-maui-mieweb.yml", "WORKWELL_OUTCOME_RETENTION_DAYS"), null, "retention stays OFF on Maui until the ADR-073 index exists");
+  // Retention is ON since 2026-09-07 (issue #535). It was pinned ABSENT here until then, precisely so
+  // that turning it on had to be a deliberate edit of this line rather than a value that slipped in —
+  // which is what this now is.
+  assert.equal(shippedValue("deploy-maui-mieweb.yml", "WORKWELL_OUTCOME_RETENTION_DAYS"), "400");
+  // ADR-073 d1's condition, enforced instead of remembered: Maui turns retention on ONLY alongside the
+  // index the keep-set needs. Without it the nightly DELETE sorts the whole outcomes table inline
+  // during the tick. Asserting the pair here means neither half can be reverted on its own — deleting
+  // the index while the window stays set is the dangerous direction, and it now fails a test.
+  assert.ok(
+    shippedValue("deploy-maui-mieweb.yml", "WORKWELL_OUTCOME_RETENTION_DAYS") === null ||
+      /spike_outcomes_keepset_idx/.test(RUN_STORE_PG_DDL),
+    "a retention window on Maui requires the keep-set index (ADR-073 d1)",
+  );
   // TWH is unchanged: no corpus, and no retention window — its history stays whole.
   assert.equal(shippedValue("deploy-twh-mieweb.yml", "WORKWELL_MAUI_CORPUS_SIZE"), null);
   assert.equal(shippedValue("deploy-twh-mieweb.yml", "WORKWELL_OUTCOME_RETENTION_DAYS"), null);

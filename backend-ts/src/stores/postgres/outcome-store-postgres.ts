@@ -182,19 +182,32 @@ export class PgOutcomeStore implements OutcomeStore {
    * ADR-073 retention — see the SQLite floor for the shape and why both exclusions are expressed in
    * SQL rather than read into memory.
    *
-   * `DISTINCT ON` is the Postgres form of "the newest row per (subject, measure, period)"; the floor
-   * uses a correlated MAX because SQLite has no DISTINCT ON. The tie-break is `id DESC` on BOTH stores
-   * — see the store contract's tied-timestamp case — so two rows stamped the same instant resolve the
-   * same way on the ceiling and the floor.
+   * **"Not the newest" is asked as an existence question, not by building the keep-set** (ADR-073 d1).
+   * The first form was `id NOT IN (SELECT DISTINCT ON (subject, measure, period) id FROM outcomes)`,
+   * which is correct and reads well, and which no index can help: it materialises one row per key —
+   * 100,000 at the pilot's 20,000 patients across five measures, and growing with every measurement
+   * year — and it sorts the whole table to do it, on every nightly pass, before deleting anything.
+   *
+   * `EXISTS (a row with the same key that sorts ahead of this one)` is the same predicate row by row:
+   * a row is deletable exactly when something newer for its key exists. It is a bounded lookup on
+   * `spike_outcomes_keepset_idx`, whose column order was chosen for this query.
+   *
+   * The row-value comparison `(evaluated_at, id) > (evaluated_at, id)` carries the tie-break rather
+   * than leaving it implied — two rows stamped the same instant resolve by `id`, the same way, on the
+   * ceiling and on the floor (the floor keeps its correlated `ORDER BY … LIMIT 1`, since SQLite has no
+   * DISTINCT ON and its data volumes are test-sized). The store contract's tied-timestamp case is what
+   * holds the two together.
    */
   async compactOlderThan(cutoff: string): Promise<number> {
     const { rowCount } = await this.pool.query(
       `DELETE FROM ${T} o
         WHERE o.evaluated_at < $1
-          AND o.id NOT IN (
-            SELECT DISTINCT ON (subject_id, measure_id, evaluation_period) id
-              FROM ${T}
-             ORDER BY subject_id, measure_id, evaluation_period, evaluated_at DESC, id DESC
+          AND EXISTS (
+            SELECT 1 FROM ${T} newer
+             WHERE newer.subject_id = o.subject_id
+               AND newer.measure_id = o.measure_id
+               AND newer.evaluation_period = o.evaluation_period
+               AND (newer.evaluated_at, newer.id) > (o.evaluated_at, o.id)
           )
           AND NOT EXISTS (
             SELECT 1 FROM ${CASES_TABLE} c

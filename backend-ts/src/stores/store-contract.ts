@@ -806,6 +806,32 @@ export function caseStoreContract(label: string, freshStore: () => Promise<CaseS
     }
   });
 
+  test(`[${label}] an operator's next_action survives a re-confirm, and a changed outcome takes it back (#530)`, async () => {
+    // The end-to-end half of `case-next-action-ownership.test.ts`: that the column is written, read
+    // back, and honoured by the upsert on BOTH floors. `patchCase` is the operator surface, so writing
+    // an action through it transfers ownership without the caller naming a source.
+    const store = await freshStore();
+    const created = (await upsert(store, "OVERDUE"))!;
+    const systemAction = created.nextAction;
+    assert.equal(created.nextActionSource, "SYSTEM", "a run's own action is system-owned");
+
+    const OPERATOR = "Call the patient; they asked for an evening appointment.";
+    const patched = await store.patchCase(created.id, { nextAction: OPERATOR });
+    assert.equal(patched?.nextActionSource, "OPERATOR");
+
+    const reconfirmed = await upsert(store, "OVERDUE");
+    assert.equal(reconfirmed?.nextAction, OPERATOR, "the nightly run must not overwrite an instruction");
+    assert.equal(reconfirmed?.nextActionSource, "OPERATOR");
+    assert.equal(reconfirmed?.disposition, "UNCHANGED", "nothing moved, so nothing to audit");
+
+    // A different outcome is new information: the computed action takes over and ownership reverts.
+    const changed = await upsert(store, "DUE_SOON");
+    assert.equal(changed?.disposition, "UPDATED");
+    assert.equal(changed?.nextActionSource, "SYSTEM");
+    assert.notEqual(changed?.nextAction, OPERATOR);
+    assert.notEqual(changed?.nextAction, systemAction, "DUE_SOON and OVERDUE do not share wording");
+  });
+
   test(`[${label}] a human-closed case is NOT reopened by a non-compliant run (H2 respect-manual-closure)`, async () => {
     const store = await freshStore();
     const c = (await upsert(store, "OVERDUE"))!;

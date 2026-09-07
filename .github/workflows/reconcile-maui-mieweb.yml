@@ -211,12 +211,19 @@ jobs:
                 {key: "WORKWELL_MAUI_CORPUS_SIZE", value: "20000"},
                 {key: "WORKWELL_RUN_CHUNK_SIZE", value: "500"},
                 {key: "WORKWELL_SCHEDULER_ANCHOR_HOUR_UTC", value: "12"},
-                # WORKWELL_OUTCOME_RETENTION_DAYS is deliberately ABSENT (retention OFF) until the Postgres
-                # index ADR-073 names exists. The keep-set query (DISTINCT ON ... ORDER BY) has no supporting
-                # index, so on a table of nightly 20,000-patient runs the DELETE would sort the whole thing
-                # inline during the nightly tick (Codex review, #528). Add it here AND in
-                # deploy-maui-mieweb.yml in the same commit as the index. No apostrophes in this comment:
-                # it lives inside a single-quoted shell string.
+                # Retention is ON since 2026-09-07, in the same commit as the index ADR-073 d1 required
+                # (spike_outcomes_keepset_idx, plus spike_cases_cited_outcome_idx for the second
+                # exclusion). The keep-set is now an indexed existence check rather than a whole-table
+                # sort, which is what made this safe to set on a table of nightly 20,000-patient runs.
+                #
+                # 400 days keeps a full measurement year plus a margin, so a closed years evidence is
+                # never swept by the first run of the next one, and nothing a case cites or any subjects
+                # newest row per period is ever deleted at any age. It removes NOTHING today: the
+                # instance is about two months old, so the window starts protecting the table later
+                # rather than deleting history now. Both workflows carry it; official-flip-config.test.ts
+                # asserts they agree. No apostrophes in this comment: it lives inside a single-quoted
+                # shell string.
+                {key: "WORKWELL_OUTCOME_RETENTION_DAYS", value: "400"},
                 {key: "WORKWELL_VSAC_API_KEY", value: $vsac_api_key}
               ]'
             echo EOF

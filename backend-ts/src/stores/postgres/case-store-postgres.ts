@@ -7,7 +7,7 @@
 import { isUuid, type PgPool } from "./pg-database.ts";
 import { SPIKE_SCHEMA } from "./schema-pg.ts";
 import type { CaseRecord, CaseQuery, CaseStore, CasePatch, UpsertCaseInput, UpsertedCase } from "../case-store.ts";
-import { planCaseUpsert, priorityFor, nextActionFor } from "../../case/case-logic.ts";
+import { planCaseUpsert, planNextAction, priorityFor, nextActionFor } from "../../case/case-logic.ts";
 
 interface CaseRow {
   id: string;
@@ -18,6 +18,7 @@ interface CaseRow {
   priority: string;
   assignee: string | null;
   next_action: string | null;
+  next_action_source: string | null;
   current_outcome_status: string;
   last_run_id: string;
   created_at: Date | string;
@@ -29,7 +30,7 @@ interface CaseRow {
 
 const iso = (v: Date | string | null): string | null => (v == null ? null : v instanceof Date ? v.toISOString() : v);
 const COLS =
-  "id, employee_id, measure_id, evaluation_period, status, priority, assignee, next_action, current_outcome_status, last_run_id, created_at, updated_at, closed_at, closed_reason, closed_by";
+  "id, employee_id, measure_id, evaluation_period, status, priority, assignee, next_action, next_action_source, current_outcome_status, last_run_id, created_at, updated_at, closed_at, closed_reason, closed_by";
 const T = `${SPIKE_SCHEMA}.cases`;
 
 const toRecord = (r: CaseRow): CaseRecord => ({
@@ -41,6 +42,7 @@ const toRecord = (r: CaseRow): CaseRecord => ({
   priority: r.priority,
   assignee: r.assignee,
   nextAction: r.next_action,
+  nextActionSource: r.next_action_source ?? "SYSTEM",
   currentOutcomeStatus: r.current_outcome_status,
   lastRunId: r.last_run_id,
   createdAt: iso(r.created_at)!,
@@ -69,20 +71,34 @@ export class PgCaseStore implements CaseStore {
     // of raising a unique violation that would fail one whole run mid-write.
     const now = new Date().toISOString();
     const priority = priorityFor(input.outcomeStatus);
-    const nextAction = nextActionFor(input.outcomeStatus, input.measureId, input.evidence);
+    const computedAction = nextActionFor(input.outcomeStatus, input.measureId, input.evidence);
     const planFrom = (row: CaseRow | null) =>
       planCaseUpsert(row ? { status: row.status, currentOutcomeStatus: row.current_outcome_status, closedBy: row.closed_by } : null, input.outcomeStatus, now);
+    // An operator's instruction outlives a run that learned nothing new (`planNextAction`).
+    const actionFrom = (row: CaseRow | null) =>
+      planNextAction(
+        row
+          ? {
+              nextAction: row.next_action,
+              nextActionSource: row.next_action_source,
+              currentOutcomeStatus: row.current_outcome_status,
+            }
+          : null,
+        computedAction,
+        input.outcomeStatus,
+      );
 
     let existing = await this.findByKey(input.subjectId, input.measureId, input.evaluationPeriod);
     let plan = planFrom(existing);
+    let action = actionFrom(existing);
     if (plan.op === "noop") return null;
 
     if (plan.op === "insert") {
       const { rows } = await this.pool.query<CaseRow>(
         `INSERT INTO ${T}
            (id, employee_id, measure_id, evaluation_period, status, priority, assignee,
-            next_action, current_outcome_status, last_run_id, created_at, updated_at, closed_at, closed_reason, closed_by)
-         VALUES ($1, $2, $3, $4, $5, $6, NULL, $7, $8, $9, $10, $10, $11, $12, $13)
+            next_action, next_action_source, current_outcome_status, last_run_id, created_at, updated_at, closed_at, closed_reason, closed_by)
+         VALUES ($1, $2, $3, $4, $5, $6, NULL, $7, $8, $9, $10, $11, $11, $12, $13, $14)
          ON CONFLICT (employee_id, measure_id, evaluation_period) DO NOTHING
          RETURNING ${COLS}`,
         [
@@ -92,7 +108,8 @@ export class PgCaseStore implements CaseStore {
           input.evaluationPeriod,
           plan.status!,
           priority,
-          nextAction,
+          action.nextAction,
+          action.source,
           input.outcomeStatus,
           input.runId,
           now,
@@ -105,19 +122,22 @@ export class PgCaseStore implements CaseStore {
       // Lost the insert race — re-plan against the now-existing row as an update.
       existing = await this.findByKey(input.subjectId, input.measureId, input.evaluationPeriod);
       plan = planFrom(existing);
+      action = actionFrom(existing);
       if (plan.op !== "update") return null;
     }
 
     // update
     const { rows } = await this.pool.query<CaseRow>(
-      `UPDATE ${T} SET status = $1, priority = $2, next_action = $3, current_outcome_status = $4,
-         last_run_id = $5, updated_at = $6, closed_at = $7, closed_reason = $8, closed_by = $9
-        WHERE employee_id = $10 AND measure_id = $11 AND evaluation_period = $12
+      `UPDATE ${T} SET status = $1, priority = $2, next_action = $3, next_action_source = $4,
+         current_outcome_status = $5, last_run_id = $6, updated_at = $7, closed_at = $8,
+         closed_reason = $9, closed_by = $10
+        WHERE employee_id = $11 AND measure_id = $12 AND evaluation_period = $13
       RETURNING ${COLS}`,
       [
         plan.status!,
         priority,
-        nextAction,
+        action.nextAction,
+        action.source,
         input.outcomeStatus,
         input.runId,
         now,
@@ -132,7 +152,9 @@ export class PgCaseStore implements CaseStore {
     // Mirrors the SQLite floor: a re-confirmed status whose rate-aware `next_action` moved is UPDATED,
     // never a silent refresh (ADR-074 d13).
     const disposition =
-      plan.disposition === "UNCHANGED" && existing && existing.next_action !== nextAction ? "UPDATED" : plan.disposition!;
+      plan.disposition === "UNCHANGED" && existing && existing.next_action !== action.nextAction
+        ? "UPDATED"
+        : plan.disposition!;
     return rows[0] ? { ...toRecord(rows[0]), disposition } : null;
   }
 
@@ -149,7 +171,13 @@ export class PgCaseStore implements CaseStore {
     if (patch.status !== undefined) sets.push(`status = $${binds.push(patch.status)}`);
     if (patch.priority !== undefined) sets.push(`priority = $${binds.push(patch.priority)}`);
     if (patch.assignee !== undefined) sets.push(`assignee = $${binds.push(patch.assignee)}`);
-    if (patch.nextAction !== undefined) sets.push(`next_action = $${binds.push(patch.nextAction)}`);
+    // The operator surface: writing an action here transfers ownership (see the SQLite floor).
+    if (patch.nextAction !== undefined) {
+      sets.push(`next_action = $${binds.push(patch.nextAction)}`);
+      sets.push(`next_action_source = $${binds.push(patch.nextActionSource ?? "OPERATOR")}`);
+    } else if (patch.nextActionSource !== undefined) {
+      sets.push(`next_action_source = $${binds.push(patch.nextActionSource)}`);
+    }
     if (patch.currentOutcomeStatus !== undefined) sets.push(`current_outcome_status = $${binds.push(patch.currentOutcomeStatus)}`);
     if (patch.lastRunId !== undefined) sets.push(`last_run_id = $${binds.push(patch.lastRunId)}::uuid`);
     if (patch.closedAt !== undefined) sets.push(`closed_at = $${binds.push(patch.closedAt)}`);

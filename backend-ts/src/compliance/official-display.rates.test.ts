@@ -13,7 +13,7 @@
  */
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { officialDisplayFor, missedRateIndex, OVERDUE_BY_RATE } from "./official-display.ts";
+import { officialDisplayFor, missedRateIndex, multiRateExclusionActive, OVERDUE_BY_RATE } from "./official-display.ts";
 import { officialMeasureSemantics } from "../wiring/official-measure-semantics.ts";
 import { deriveCell } from "./roster-vocabulary.ts";
 import { deriveWhyFlagged } from "../case/case-detail-read-model.ts";
@@ -126,4 +126,44 @@ test("the roster cell, the case detail and the next action all read the missed r
   assert.match(nextActionFor("OVERDUE", "cms137", NOT_INITIATED), /initiat/i);
   // The two-argument form every existing caller uses still returns the combined wording.
   assert.equal(nextActionFor("OVERDUE", "cms137"), officialDisplayFor("cms137", "OVERDUE")!.nextAction);
+});
+
+/**
+ * `waiver_status` answers from the rate the CASE is about (issue #537, ADR-074 d13).
+ *
+ * `deriveWhyFlagged` read it off the first `expressionResults` define whose name matched
+ * /waiver|exemption|exclusion|contraindication/, which on a multi-rate outcome is always rate 1's —
+ * the labels are `official:<Rate>:<population>` in rate order. Exact for CMS137, whose two rates share
+ * one denominator and one exclusion expression, and wrong for the first multi-rate measure vendored
+ * with per-rate exclusions: a case about the rate the subject missed would report the other rate's
+ * exclusion. Reading from `official.rates` also removes a second place for a reviewed label to drift.
+ */
+test("multiRateExclusionActive answers from the MISSED rate, not from rate 1", () => {
+  const pop = (over: Record<string, boolean>) => [
+    { populationType: "initial-population", result: true },
+    { populationType: "denominator", result: true },
+    { populationType: "denominator-exclusion", result: over.excluded ?? false },
+    { populationType: "numerator", result: over.numerator ?? false },
+  ];
+  // Rate 1 is excluded (so not the missed one); rate 2 is in the denominator and missed, not excluded.
+  const rate1Excluded = { official: { rates: [pop({ excluded: true }), pop({ numerator: false })] } };
+  assert.equal(multiRateExclusionActive(rate1Excluded, true), false, "the missed rate carries no exclusion");
+
+  // The mirror: rate 1 is missed and IS excluded... which cannot happen, because an excluded rate is
+  // not a miss. So with rate 1 excluded and rate 2 met, no rate is missed and the fallback applies:
+  // an exclusion anywhere is what put the subject in the bucket.
+  const noneMissed = { official: { rates: [pop({ excluded: true }), pop({ numerator: true })] } };
+  assert.equal(multiRateExclusionActive(noneMissed, true), true, "no missed rate ⇒ an exclusion anywhere answers");
+
+  // Neither excluded, rate 2 missed.
+  const plainMiss = { official: { rates: [pop({ numerator: true }), pop({ numerator: false })] } };
+  assert.equal(multiRateExclusionActive(plainMiss, true), false);
+});
+
+test("multiRateExclusionActive returns null for anything that is not multi-rate", () => {
+  // null is the caller's signal to keep the single-rate derivation — NOT a "no exclusion" answer, which
+  // would silently blank `waiver_status` for every authored and single-rate official measure.
+  assert.equal(multiRateExclusionActive(undefined, true), null);
+  assert.equal(multiRateExclusionActive({}, true), null);
+  assert.equal(multiRateExclusionActive({ official: { rates: [[]] } }, true), null, "one rate is not multi-rate");
 });
