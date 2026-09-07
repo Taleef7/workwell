@@ -34,14 +34,14 @@ import { measureDisplayName } from "../measure/measure-name.ts";
 import type { CloudDatabase } from "@mieweb/cloud";
 import { getStores } from "../stores/factory.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
-import { EVALUABLE_EMPLOYEES, isRunnableMeasure } from "../config/deployment-profile.ts";
+import { evaluableEmployees, isRunnableMeasure } from "../config/deployment-profile.ts";
 import { compositeBundleSource } from "../wiring/subject-bundle-source.ts";
 import type { TargetOutcome } from "../engine/synthetic/exam-config.ts";
 import type { FhirBundle } from "../engine/synthetic/fhir-bundle-builder.ts";
 import { isWebChartConfigured } from "../engine/ingress/data-source.ts";
 import { DEPLOYMENT_PROFILE, employeeById } from "../config/deployment-profile.ts";
 import { routedEngineForEnv } from "../wiring/executor-router.ts";
-import { membershipFor, officialMembership, officialReportIdentity, type PopulationMembership } from "../fhir/measure-report.ts";
+import { membershipFor, membershipRatesFor, officialMembership, officialReportIdentity, type PopulationMembership } from "../fhir/measure-report.ts";
 import type { OutcomeRecord } from "../stores/outcome-store.ts";
 import type { DataSourceEnv } from "../engine/ingress/data-source.ts";
 
@@ -78,6 +78,19 @@ export function renderPopulations(m: PopulationMembership): Record<string, boole
     denominatorException: m.denexcep,
     numerator: m.numer,
   };
+}
+
+/**
+ * The `rates` block for a multi-rate measure — one entry per group, keyed by the steward's own
+ * `Group_N` id — and NOTHING for a single-rate one, so every existing response is byte-identical.
+ */
+export function rateBlock(
+  outcome: Pick<OutcomeRecord, "status" | "evidence">,
+  measureId: string,
+): { rates?: Array<{ group: string; populations: Record<string, boolean> }> } {
+  const rates = membershipRatesFor(outcome, measureId);
+  if (rates.length <= 1) return {};
+  return { rates: rates.map((m, index) => ({ group: `Group_${index + 1}`, populations: renderPopulations(m) })) };
 }
 
 /**
@@ -127,6 +140,11 @@ function body(
     // four booleans.
     status: outcome.status,
     populations: renderPopulations(membershipFor(outcome, measureId)),
+    // ADDITIVE (ADR-061 stability): every rate, when the measure declares more than one. `populations`
+    // above stays rate 1 so no existing consumer changes; `rates` is where an integrator reads that a
+    // CMS137 subject initiated treatment (rate 1) and did not engage (rate 2), which `populations`
+    // alone would call a met measure (ADR-074).
+    ...rateBlock(outcome, measureId),
     populationsSource: populationsSource(outcome.evidence),
     provenance: {
       ...provenance,
@@ -400,7 +418,7 @@ async function preview(
   let target: TargetOutcome;
   let bundle: FhirBundle;
   try {
-    target = bundleSource.targetFor(EVALUABLE_EMPLOYEES, measureId, subjectId) ?? "MISSING_DATA";
+    target = bundleSource.targetFor(evaluableEmployees(), measureId, subjectId) ?? "MISSING_DATA";
     bundle = bundleSource.bundleFor(employee, measureId, target, evalDate);
   } catch (error) {
     return json(

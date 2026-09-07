@@ -208,6 +208,15 @@ jobs:
                 # Codex on #356 before it could happen; `official-flip-config.test.ts` now asserts the two
                 # workflows agree, so this pair cannot drift again.
                 {key: "WORKWELL_OFFICIAL_MEASURES", value: "cms122,cms125"},
+                {key: "WORKWELL_MAUI_CORPUS_SIZE", value: "20000"},
+                {key: "WORKWELL_RUN_CHUNK_SIZE", value: "500"},
+                {key: "WORKWELL_SCHEDULER_ANCHOR_HOUR_UTC", value: "12"},
+                # WORKWELL_OUTCOME_RETENTION_DAYS is deliberately ABSENT (retention OFF) until the Postgres
+                # index ADR-073 names exists. The keep-set query (DISTINCT ON ... ORDER BY) has no supporting
+                # index, so on a table of nightly 20,000-patient runs the DELETE would sort the whole thing
+                # inline during the nightly tick (Codex review, #528). Add it here AND in
+                # deploy-maui-mieweb.yml in the same commit as the index. No apostrophes in this comment:
+                # it lives inside a single-quoted shell string.
                 {key: "WORKWELL_VSAC_API_KEY", value: $vsac_api_key}
               ]'
             echo EOF

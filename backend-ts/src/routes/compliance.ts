@@ -9,6 +9,7 @@
 import type { CloudDatabase } from "@mieweb/cloud";
 import { getStores } from "../stores/factory.ts";
 import { buildRoster, rosterCellCache } from "../compliance/roster-read-model.ts";
+import { subjectFiltersFromQuery, subjectFilterErrorBody, SubjectFilterError } from "../compliance/subject-filters.ts";
 import { isPanelId, PANELS } from "../compliance/panels.ts";
 import { ensureSegmentSeed } from "../segment/segment-seed.ts";
 import type { DataSourceEnv } from "../engine/ingress/data-source.ts";
@@ -38,6 +39,15 @@ export async function handleCompliance(req: Request, env: ComplianceEnv): Promis
   if (panelParam !== null && !isPanelId(panelParam)) {
     return json({ error: "invalid_request", message: `unknown panel '${panelParam}' (known panels: ${Object.keys(PANELS).join(" | ")})` }, 400);
   }
+  // An unrecognised panel-filter token is a 400 naming the accepted values — never a filter that is
+  // quietly dropped, which would render the whole roster under a heading that says "65+".
+  let subjectFilters;
+  try {
+    subjectFilters = subjectFiltersFromQuery(q);
+  } catch (error) {
+    if (error instanceof SubjectFilterError) return json(subjectFilterErrorBody(error), 400);
+    throw error;
+  }
   await ensureSegmentSeed(env);
   const stores = await getStores(env);
   const segments = await stores.segments.listSegments();
@@ -57,6 +67,7 @@ export async function handleCompliance(req: Request, env: ComplianceEnv): Promis
       q: q.get("q"),
       segment: q.get("segment"),
       tenant: q.get("tenant"),
+      ...subjectFilters,
       page: intOr(q.get("page"), 1),
       pageSize: intOr(q.get("pageSize"), 50),
     },

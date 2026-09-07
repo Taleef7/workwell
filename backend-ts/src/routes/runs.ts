@@ -55,7 +55,7 @@ import {
 import { isIncrementalEnabled } from "../run/incremental/incremental-eval.ts";
 import { isVsacConfigured } from "@work-well/measure-engine";
 import { rerunToVerify, UnsupportedCaseRerunError } from "../case/case-rerun.ts";
-import type { PopulationCounts } from "../fhir/measure-report.ts";
+import type { PopulationCounts, StratumCounts } from "../fhir/measure-report.ts";
 import {
   officialMembership,
   buildMeasureReportBundle,
@@ -63,6 +63,7 @@ import {
   officialReportIdentity,
   type OfficialReportIdentity,
   countPopulations,
+  createRateAggregator,
   populationCountsFromStatus,
 } from "../fhir/measure-report.ts";
 import { isOfficialRouted } from "../wiring/official-routing.ts";
@@ -240,16 +241,41 @@ function measureIdentityFor(measureId: string): Set<string> {
  * over the cap we refuse rather than emit a status-derived (wrong) regulatory artifact.
  */
 /**
- * Did THIS run's outcomes come from the official executor? One row settles it: `evidence.official` is
- * written only by that executor, and a run evaluates one measure with one engine. Bounded on purpose —
- * this sits in front of a path that must stay O(1) for a 120k `seed:scale` run.
+ * Did THIS run's outcomes come from the official executor? The first row that was actually EVALUATED
+ * settles it: `evidence.official` is written only by that executor, and a run evaluates one measure
+ * with one engine. Bounded on purpose — this sits in front of a path that must stay O(1) for a 120k
+ * `seed:scale` run, and in the common case it reads one row.
+ *
+ * "Actually evaluated" is the part the first version missed. A subject whose evaluation threw persists
+ * `{ evaluationError }` and NO `official` block, and a `PARTIAL_FAILURE` run is reportable — so when
+ * such a row happened to sort first, one errored subject silently sent a whole official run down the
+ * status-histogram path: one rate instead of two, no strata, and cms122's numerator inverted (GLM
+ * review, H1). An errored row says nothing about which engine the run used, so it is skipped, and the
+ * scan continues page by page until a row that was evaluated answers; only a run in which EVERY
+ * subject errored reads to the end, and that run has nothing to export either way.
  */
 async function runProducedOfficialEvidence(
   os: Awaited<ReturnType<typeof outcomes>>,
   runId: string,
 ): Promise<boolean> {
-  const [first] = await os.listOutcomes(runId, { limit: 1 });
-  return officialMembership(first?.evidence) !== null;
+  // First page of one: the overwhelmingly common case (first row evaluated fine) costs a single row.
+  let limit = 1;
+  let offset = 0;
+  for (;;) {
+    const page = await os.listOutcomes(runId, { limit, offset });
+    for (const row of page) {
+      if (isEvaluationErrorEvidence(row.evidence)) continue;
+      return officialMembership(row.evidence) !== null;
+    }
+    if (page.length < limit) return false;
+    offset += page.length;
+    limit = AGGREGATE_PAGE;
+  }
+}
+
+/** The evidence the run pipeline persists for a subject whose evaluation threw — no engine spoke for it. */
+function isEvaluationErrorEvidence(evidence: unknown): boolean {
+  return typeof evidence === "object" && evidence !== null && "evaluationError" in evidence;
 }
 
 async function aggregateCountsForRun(
@@ -257,7 +283,7 @@ async function aggregateCountsForRun(
   runId: string,
   measureId: string,
   env: RunsEnv,
-): Promise<{ counts: PopulationCounts; official: OfficialReportIdentity | null } | { error: Response }> {
+): Promise<{ counts: PopulationCounts[]; strata: StratumCounts[][]; unmeasured: number; official: OfficialReportIdentity | null } | { error: Response }> {
   // Provenance comes from the RUN, not from the current deployment flag (Codex P1). A run's outcomes
   // were produced by whichever engine was configured *then*; consulting `WORKWELL_OFFICIAL_MEASURES`
   // now means that turning the flag off — the documented rollback — silently reinterprets every
@@ -266,34 +292,52 @@ async function aggregateCountsForRun(
   // change meaning because of a config change made after it.
   //
   // The env flag is still consulted first, as a cheap way to skip a read for the overwhelmingly common
-  // case; when it is off, one bounded row settles it. `evidence.official` is written only by the
-  // official executor, and a run evaluates one measure with one engine, so a single row is decisive.
+  // case; when it is off, the first EVALUATED row settles it (`runProducedOfficialEvidence` — an errored
+  // row carries no engine's evidence and is skipped, never read as "not official").
   const routedNow = isOfficialRouted(measureId, env as unknown as Record<string, unknown>);
   const official = routedNow || (await runProducedOfficialEvidence(os, runId));
   if (!official) {
-    return { counts: populationCountsFromStatus(await os.countOutcomesByStatus(runId), measureId), official: null };
+    // The authored status histogram is single-rate by construction — it reduces workflow buckets, and
+    // a measure with no official evidence has one rate. Wrapped so the return type is uniform.
+    return { counts: [populationCountsFromStatus(await os.countOutcomesByStatus(runId), measureId)], strata: [], unmeasured: 0, official: null };
   }
-  const total = (await os.countOutcomesByStatus(runId)).reduce((sum, c) => sum + c.count, 0);
-  if (total > MAX_INDIVIDUAL_REPORT_SUBJECTS) {
-    return {
-      error: json(
-        {
-          error: "run_too_large",
-          message:
-            `Official-routed measure "${measureId}" reports populations from per-subject evidence, ` +
-            `which is limited to ${MAX_INDIVIDUAL_REPORT_SUBJECTS} subjects; this run has ${total}.`,
-        },
-        422,
-      ),
-    };
-  }
-  const rows = await os.listOutcomes(runId);
+  // PAGED, never one `listOutcomes(runId)`. The aggregate counts are what the summary MeasureReport and
+  // the QRDA III are built from, and until 2026-09-06 this path refused any run over
+  // MAX_INDIVIDUAL_REPORT_SUBJECTS with a 422 — so on the 20,000-patient pilot the two regulatory
+  // exports were unreachable for every official measure, while ADR-074 stated the summary route was
+  // "the one that survives the cap". The cap protects the INDIVIDUAL report, which builds one document
+  // per subject; a sum needs only each row's memberships, which the aggregator retains at a few dozen
+  // bytes each, so it is read in pages and the 422 is gone.
+  const aggregator = createRateAggregator(measureId);
   // The artifact identity travels with the counts so BOTH exporters describe the same measure. Read off
   // the first row that carries it — a run evaluates one measure with one engine, so any row is decisive,
   // and a run where only some rows errored still names the artifact the rest were scored by (ADR-046).
-  const identity = rows.map((r) => officialReportIdentity(r.evidence)).find((i) => i !== null) ?? null;
-  return { counts: countPopulations(rows, measureId), official: identity };
+  let identity: OfficialReportIdentity | null = null;
+  for (let offset = 0; ; offset += AGGREGATE_PAGE) {
+    const page = await os.listOutcomes(runId, { limit: AGGREGATE_PAGE, offset });
+    for (const row of page) {
+      aggregator.add(row);
+      identity ??= officialReportIdentity(row.evidence);
+    }
+    if (page.length < AGGREGATE_PAGE) break;
+  }
+  // Per RATE, not a single vector. `?type=summary` is the route that survives the individual-report
+  // cap, i.e. the one a real roster uses — and it was returning ONE group for cms137 while
+  // `?type=bundle` returned two. Two different answers for the same run, depending on export type,
+  // with nothing to say which was right (ADR-074). Strata ride along from the same memberships so the
+  // MeasureReport and the QRDA III report the same stratum counts.
+  // `unmeasured` — the subjects ADR-074 d5 counts in NO rate — travels with the counts so the two
+  // exports can SAY how many rows the denominators leave out, rather than leaving the gap to be inferred
+  // from the roster (ADR-074 d11). A MeasureReport has no standard element for it and QRDA III none
+  // either, so both routes carry it as a response header instead of inventing an extension.
+  const { rates, strata, unmeasured } = aggregator.finish();
+  return { counts: rates, strata, unmeasured, official: identity };
 }
+
+/** Rows per page when summing a run's official evidence; bounded memory at any roster size. */
+const AGGREGATE_PAGE = 2000;
+/** Subjects counted in no rate (ADR-074 d5/d11), on the summary MeasureReport and QRDA III responses. */
+const UNMEASURED_HEADER = "x-workwell-unmeasured-subjects";
 
 
 /**
@@ -1121,10 +1165,15 @@ export async function handleRuns(
     const measureId = measureIds[0]!;
     const aggregate = await aggregateCountsForRun(os, qrdaId, measureId, env);
     if ("error" in aggregate) return aggregate.error;
-    return new Response(buildQrda3DocumentFromCounts(run, measureId, aggregate.counts, aggregate.official), {
+    // Every rate and every stratum (ADR-074). This route refused a multi-rate measure with a 501 until
+    // 2026-09-06 rather than emit rate 1 under the measure's identity; the exporter now reports each
+    // group under its own criterion names, with its own performance rate and Reporting Strata.
+    const counts = aggregate.counts.length > 1 ? aggregate.counts : aggregate.counts[0]!;
+    return new Response(buildQrda3DocumentFromCounts(run, measureId, counts, aggregate.official, aggregate.strata), {
       status: 200,
       headers: {
         "content-type": "application/xml",
+        [UNMEASURED_HEADER]: String(aggregate.unmeasured),
         "content-disposition": `attachment; filename="qrda3-${qrdaId}.xml"`,
       },
     });
@@ -1145,19 +1194,22 @@ export async function handleRuns(
     }
     const measureId = measureIds[0]!;
     const type = url.searchParams.get("type") ?? "summary";
-    const fhir = (data: unknown) =>
+    const fhir = (data: unknown, extraHeaders: Record<string, string> = {}) =>
       new Response(JSON.stringify(data), {
         status: 200,
         headers: {
           "content-type": "application/fhir+json",
           "content-disposition": `attachment; filename="measure-report-${mrId}-${type}.json"`,
+          ...extraHeaders,
         },
       });
     // summary = aggregate counts only → bounded status histogram, never the per-subject rows (Fable H4).
     if (type === "summary") {
       const aggregate = await aggregateCountsForRun(os, mrId, measureId, env);
       if ("error" in aggregate) return aggregate.error;
-      return fhir(buildSummaryMeasureReportFromCounts(run, measureId, aggregate.counts, generatedAt, aggregate.official));
+      return fhir(buildSummaryMeasureReportFromCounts(run, measureId, aggregate.counts, generatedAt, aggregate.official, aggregate.strata), {
+        [UNMEASURED_HEADER]: String(aggregate.unmeasured),
+      });
     }
     // individual/bundle emits one MeasureReport per subject; a 120k seed:scale run would build a
     // 120k-entry document. Cap it (Fable H4) — the summary is the aggregate for oversized runs.

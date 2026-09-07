@@ -14,6 +14,7 @@
  * "MANUAL" — the floor only holds manually-created runs so far.
  */
 import type { RunRecord, RunLogRow } from "../stores/run-store.ts";
+import { retentionDaysFromEnv } from "./outcome-compaction.ts";
 import type { OutcomeRecord, OutcomeStatusCount } from "../stores/outcome-store.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { employeeById, profileSubjectMatcher } from "../config/deployment-profile.ts";
@@ -39,6 +40,12 @@ export interface RunSummary extends RunListItem {
   outcomeCounts: Array<{ status: string; count: number }>;
   dataFreshAsOf: string | null;
   dataFreshnessMinutes: number;
+  /**
+   * Set when this run predates the outcome-retention window (ADR-073), so its per-subject rows may
+   * have been compacted and the counts below describe what SURVIVES rather than what the run found.
+   * `null` on every deployment with retention off, which is every deployment but the pilot.
+   */
+  retentionNotice: string | null;
 }
 
 export interface RunLogEntry {
@@ -131,7 +138,37 @@ function buildListItem(run: RunRecord, t: Tally): RunListItem {
   };
 }
 
-function buildSummary(run: RunRecord, t: Tally, totalCases: number): RunSummary {
+/**
+ * Whether a run is old enough for compaction to have touched it.
+ *
+ * **What this can and cannot say.** It reports that the run PREDATES the window, not how many rows
+ * went — and it deliberately does not guess. The true evaluated count is not on the run row, and
+ * putting it there is a schema change (owner-owned); deriving it from the surviving rows is circular,
+ * since those are exactly what compaction removed. So the notice tells the operator that the numbers
+ * on this page are a survivor count, which is the thing they would otherwise misread, and does not
+ * invent a total it cannot know.
+ *
+ * A run inside the window, or any run at all on a deployment with retention off, gets `null`.
+ */
+export function retentionNoticeFor(
+  run: Pick<RunRecord, "completedAt" | "startedAt">,
+  opts: { retentionDays?: number | undefined; now?: number } = {},
+): string | null {
+  const { retentionDays } = opts;
+  if (retentionDays === undefined || !Number.isInteger(retentionDays) || retentionDays <= 0) return null;
+  const finished = Date.parse(run.completedAt ?? run.startedAt ?? "");
+  if (!Number.isFinite(finished)) return null;
+  const cutoff = (opts.now ?? Date.now()) - retentionDays * 86_400_000;
+  if (finished >= cutoff) return null;
+  return (
+    `This run is older than the ${retentionDays}-day outcome retention window, so its per-subject ` +
+    `results may have been compacted. The counts shown are the rows that survive: each subject's most ` +
+    `recent result per measure and measurement period, and every result a case refers to — open or ` +
+    `closed. The run's own totals are preserved in the quality history.`
+  );
+}
+
+function buildSummary(run: RunRecord, t: Tally, totalCases: number, retentionDays?: number): RunSummary {
   const { name, version } = measureLabel(run.scopeId);
   return {
     ...buildListItem(run, t),
@@ -143,6 +180,7 @@ function buildSummary(run: RunRecord, t: Tally, totalCases: number): RunSummary 
     outcomeCounts: [...t.byStatus.entries()].map(([status, count]) => ({ status, count })),
     dataFreshAsOf: t.freshAsOf,
     dataFreshnessMinutes: t.freshAsOf === null ? -1 : Math.floor((Date.now() - new Date(t.freshAsOf).getTime()) / 60000),
+    retentionNotice: retentionNoticeFor(run, { retentionDays }),
   };
 }
 
@@ -156,13 +194,13 @@ export function toRunListItemFromCounts(run: RunRecord, counts: OutcomeStatusCou
   return buildListItem(run, tallyFromCounts(counts));
 }
 
-export function toRunSummary(run: RunRecord, outcomes: OutcomeRecord[], totalCases = 0): RunSummary {
-  return buildSummary(run, tally(outcomes), totalCases);
+export function toRunSummary(run: RunRecord, outcomes: OutcomeRecord[], totalCases = 0, retentionDays?: number): RunSummary {
+  return buildSummary(run, tally(outcomes), totalCases, retentionDays ?? retentionDaysFromEnv(process.env as Record<string, unknown>));
 }
 
 /** Counts-based run summary — same bounded-aggregation path as `toRunListItemFromCounts`. */
-export function toRunSummaryFromCounts(run: RunRecord, counts: OutcomeStatusCount[], totalCases = 0): RunSummary {
-  return buildSummary(run, tallyFromCounts(counts), totalCases);
+export function toRunSummaryFromCounts(run: RunRecord, counts: OutcomeStatusCount[], totalCases = 0, retentionDays?: number): RunSummary {
+  return buildSummary(run, tallyFromCounts(counts), totalCases, retentionDays ?? retentionDaysFromEnv(process.env as Record<string, unknown>));
 }
 
 export function toRunLogEntries(logs: RunLogRow[]): RunLogEntry[] {

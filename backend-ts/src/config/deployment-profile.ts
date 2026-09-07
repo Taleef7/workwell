@@ -15,6 +15,11 @@ import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
 import { officialMeasureIds } from "../wiring/official-routing.ts";
 import { officialMeasureSemantics } from "../wiring/official-measure-semantics.ts";
 import { isVendoredOfficialMeasure } from "./official-measure-ids.ts";
+import {
+  corpusDirectory,
+  corpusSeedFromEnv,
+  corpusSizeFromEnv,
+} from "../engine/synthetic/corpus/corpus-directory.ts";
 
 export type DeploymentProfileId = "default" | "maui";
 export type SubjectTerm = "employee" | "patient";
@@ -71,7 +76,13 @@ export function validateRunnableMeasureIds(ids: readonly string[]): readonly str
   return ids;
 }
 
-const MAUI_MEASURE_IDS = ["cms122", "cms125", "cms2", "cms130", "cms165"] as const;
+/**
+ * The ACO's six computable measures (locked decision §4A.2, ADR-072 D1 for cms137). Listing a measure
+ * here makes it RUNNABLE ONCE ROUTED; the routing is the per-measure flip in the Maui workflows'
+ * `WORKWELL_OFFICIAL_MEASURES`, and an official-only measure that is listed and not routed is
+ * `official-pending` — visible in the catalog, evaluated by nobody (ADR-072).
+ */
+const MAUI_MEASURE_IDS = ["cms122", "cms125", "cms2", "cms130", "cms165", "cms137"] as const;
 const DEFAULT_MEASURE_IDS = Object.keys(MEASURES);
 validateRunnableMeasureIds(MAUI_MEASURE_IDS);
 validateRunnableMeasureIds(DEFAULT_MEASURE_IDS);
@@ -85,8 +96,27 @@ export function resolveDeploymentProfile(name: string | undefined): DeploymentPr
   return { id: "default", subjectTerm: "employee", visibleTenantIds: "all", runnableMeasureIds: DEFAULT_MEASURE_IDS };
 }
 
-/** Pure composition over the fully attributed synthetic directory. */
-export function composeDeploymentDirectory(profile: DeploymentProfile): DeploymentDirectory {
+/**
+ * Pure composition over the fully attributed synthetic directory.
+ *
+ * On the Maui profile the roster is the generated corpus, not the static catalog: `env` is passed in
+ * rather than read here so the size is resolved at CALL time, which is what lets the memo below be
+ * genuinely lazy (a module-load read would pin 48 before any test could set the variable).
+ */
+export function composeDeploymentDirectory(
+  profile: DeploymentProfile,
+  env: Record<string, unknown> = process.env as Record<string, unknown>,
+): DeploymentDirectory {
+  if (profile.id === "maui") {
+    const directory = corpusDirectory(corpusSeedFromEnv(env), corpusSizeFromEnv(env));
+    return {
+      ...directory,
+      // Every tenant the profile cannot see is excluded from evaluation; on Maui that is everyone but
+      // maui, and the corpus holds nothing else, so the whole roster is evaluable.
+      EVALUATION_EXCLUDED_TENANTS: new Set(ALL_TENANTS.filter((t) => t.id !== "maui").map((t) => t.id)),
+      EVALUABLE_EMPLOYEES: directory.EMPLOYEES,
+    };
+  }
   const tenantIds = profile.visibleTenantIds === "all"
     ? new Set(ALL_TENANTS.map((tenant) => tenant.id))
     : new Set(profile.visibleTenantIds);
@@ -117,28 +147,61 @@ export const DEPLOYMENT_PROFILE = resolveDeploymentProfile(requestedInstance);
 console.warn(
   `[workwell] WORKWELL_INSTANCE=${JSON.stringify(requestedInstance ?? "")} resolved deployment profile=${DEPLOYMENT_PROFILE.id}`,
 );
-const DEPLOYMENT_DIRECTORY = composeDeploymentDirectory(DEPLOYMENT_PROFILE);
-
-/** Lower-case directory snapshot for app-side consumers of the engine's live-directory seam. */
-export const DIRECTORY: DirectorySnapshot = {
-  employees: DEPLOYMENT_DIRECTORY.EMPLOYEES,
-  employeeById: DEPLOYMENT_DIRECTORY.employeeById,
-  providerById: DEPLOYMENT_DIRECTORY.providerById,
-  tenantById: DEPLOYMENT_DIRECTORY.tenantById,
-  enterpriseForTenant: DEPLOYMENT_DIRECTORY.enterpriseForTenant,
+/**
+ * The directory, composed on FIRST ACCESS and memoized — not at import.
+ *
+ * `WORKWELL_MAUI_CORPUS_SIZE` decides how many patients exist, and a module-load composition read it
+ * before a child-process test (or a worker that configures its env late) could set it. The memo is
+ * what keeps the cost at one composition per process; `__resetDeploymentDirectory` is the test seam.
+ */
+let directoryMemo: DeploymentDirectory | null = null;
+export function getDeploymentDirectory(): DeploymentDirectory {
+  return (directoryMemo ??= composeDeploymentDirectory(DEPLOYMENT_PROFILE, process.env as Record<string, unknown>));
+}
+/** Test seam only — drops the memo so a test can change the corpus size in-process. */
+export const __resetDeploymentDirectory = (): void => {
+  directoryMemo = null;
 };
 
-export const EMPLOYEES = DEPLOYMENT_DIRECTORY.EMPLOYEES;
-export const PROVIDERS = DEPLOYMENT_DIRECTORY.PROVIDERS;
-export const TENANTS = DEPLOYMENT_DIRECTORY.TENANTS;
-export const EVALUABLE_EMPLOYEES = DEPLOYMENT_DIRECTORY.EVALUABLE_EMPLOYEES;
-export const EVALUATION_EXCLUDED_TENANTS = DEPLOYMENT_DIRECTORY.EVALUATION_EXCLUDED_TENANTS;
-export const employeeById = DEPLOYMENT_DIRECTORY.employeeById;
-export const providerById = DEPLOYMENT_DIRECTORY.providerById;
-export const tenantById = DEPLOYMENT_DIRECTORY.tenantById;
-export const enterpriseForTenant = DEPLOYMENT_DIRECTORY.enterpriseForTenant;
-export const employeesForTenant = DEPLOYMENT_DIRECTORY.employeesForTenant;
-export const providersForLocation = DEPLOYMENT_DIRECTORY.providersForLocation;
+/**
+ * The seed the ACTIVE directory was composed from.
+ *
+ * Exists so the bundle source cannot disagree with the roster about who a subject is. Both used to
+ * resolve a seed independently — the directory from the env, the bundle source from its own default —
+ * and with `WORKWELL_MAUI_CORPUS_SEED` set they generated DIFFERENT people under the same ids: the
+ * roster's `pat-00053` and the chart evaluated for `pat-00053` had different birth dates, sexes,
+ * clinics and conditions, and nothing raised, because the id is derived from the index alone.
+ */
+export const deploymentCorpusSeed = (): string => corpusSeedFromEnv(process.env as Record<string, unknown>);
+
+/**
+ * Lower-case directory snapshot for app-side consumers of the engine's live-directory seam.
+ *
+ * Every member is a GETTER: eleven modules import this object at load, and a captured array would
+ * have frozen the 48-patient default into all of them while the named accessors below read 20,000.
+ */
+export const DIRECTORY: DirectorySnapshot = {
+  get employees() { return getDeploymentDirectory().EMPLOYEES; },
+  get employeeById() { return getDeploymentDirectory().employeeById; },
+  get providerById() { return getDeploymentDirectory().providerById; },
+  get tenantById() { return getDeploymentDirectory().tenantById; },
+  get enterpriseForTenant() { return getDeploymentDirectory().enterpriseForTenant; },
+};
+
+// Accessors, not constants. An exported `const EMPLOYEES` cannot be made lazy in ESM — the binding is
+// evaluated at import — so the arrays are reached through calls and the lookups delegate per call.
+export const employees = (): readonly EmployeeProfile[] => getDeploymentDirectory().EMPLOYEES;
+export const providers = (): readonly Provider[] => getDeploymentDirectory().PROVIDERS;
+export const tenants = (): readonly Tenant[] => getDeploymentDirectory().TENANTS;
+export const evaluableEmployees = (): readonly EmployeeProfile[] => getDeploymentDirectory().EVALUABLE_EMPLOYEES;
+export const evaluationExcludedTenants = (): ReadonlySet<string> => getDeploymentDirectory().EVALUATION_EXCLUDED_TENANTS;
+export const employeeById = (externalId: string): EmployeeProfile | null => getDeploymentDirectory().employeeById(externalId);
+export const providerById = (id: string, env?: DataSourceEnv): Provider | null => getDeploymentDirectory().providerById(id, env);
+export const tenantById = (id: string, env?: DataSourceEnv): Tenant | null => getDeploymentDirectory().tenantById(id, env);
+export const enterpriseForTenant = (tenantId: string, env?: DataSourceEnv): Enterprise | null =>
+  getDeploymentDirectory().enterpriseForTenant(tenantId, env);
+export const employeesForTenant = (tenantId: string): EmployeeProfile[] => getDeploymentDirectory().employeesForTenant(tenantId);
+export const providersForLocation = (location: string): Provider[] => getDeploymentDirectory().providersForLocation(location);
 export const RUNNABLE_MEASURE_IDS = DEPLOYMENT_PROFILE.runnableMeasureIds;
 
 /** Lazy + memoized per (id): the routing env is read at first call, matching official-routing.ts. */

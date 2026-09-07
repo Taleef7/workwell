@@ -148,3 +148,17 @@ test("persisted wc rows are reversible: hidden seam-off and rehydrated only when
     replaceLiveDirectory([]);
   }
 });
+
+test("an unrecognised panel-filter token is a 400 naming the accepted values, never a silently unfiltered roster", async () => {
+  // `?ageBand=old` used to be DROPPED and the whole roster served under it — a work list that looks
+  // filtered and is not. The same rule the route already applies to an unknown panel (Fable L24).
+  const res = (await get("?ageBand=old"))!;
+  assert.equal(res.status, 400);
+  const body = (await res.json()) as { error: string; parameter: string; message: string };
+  assert.equal(body.error, "invalid_request");
+  assert.equal(body.parameter, "ageBand");
+  assert.match(body.message, /0-17, 18-44, 45-64, 65\+/);
+  assert.equal((await get("?sex=yes"))!.status, 400);
+  // A cleared select sends an empty token, which is an ABSENT filter — still 200.
+  assert.equal((await get("?ageBand=&sex="))!.status, 200);
+});

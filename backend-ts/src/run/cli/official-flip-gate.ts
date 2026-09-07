@@ -43,9 +43,15 @@ export interface FlipGateMadie {
 
 export interface FlipGateRoster {
   readonly subjects: number;
-  /** Subjects the official artifact admitted to its initial population (ADR-043's signal). */
+  /** Subjects the official artifact admitted to its initial population (ADR-043's signal) — rate 1's. */
   readonly inIpp: number;
   readonly denominator: number;
+  /**
+   * EVERY rate's initial population, denominator and numerator, in the artifact's group order. A
+   * multi-rate measure (CMS137) has rates that genuinely differ, and a gate that read rate 1 alone
+   * would pass an Engagement rate nobody reaches (ADR-074). One entry for a single-rate measure.
+   */
+  readonly rates: ReadonlyArray<{ readonly inIpp: number; readonly denominator: number; readonly numerator: number }>;
   readonly distribution: Record<string, number>;
   /** Subjects the executor returned nothing for, even after the per-subject fallback. */
   readonly evaluationErrors: number;
@@ -158,17 +164,28 @@ export async function gateMeasure(
   // measure regardless of what the artifact did — the gate would always say DO NOT FLIP, for a reason
   // indistinguishable from the real thing. Shape pinned by OfficialEvidence in
   // packages/measure-engine/src/evaluate-measure.ts.
-  const membership = (o: unknown, key: string): boolean => {
-    const populations = (o as {
-      evidence?: { official?: { populationResults?: ReadonlyArray<{ populationType?: string; result?: boolean }> } };
-    })?.evidence?.official?.populationResults;
-    if (!Array.isArray(populations)) return false;
-    return populations.some((p) => p?.populationType === key && p?.result === true);
+  type Populations = ReadonlyArray<{ populationType?: string; result?: boolean }>;
+  // EVERY rate: `official.rates` where the measure declares more than one, else the single
+  // `populationResults` (ADR-074). Reading rate 1 alone would let CMS137's Engagement rate be empty
+  // across a whole deployment while the gate reported a healthy population.
+  const ratesOf = (o: unknown): Populations[] => {
+    const official = (o as { evidence?: { official?: { populationResults?: Populations; rates?: Populations[] } } })?.evidence?.official;
+    if (Array.isArray(official?.rates) && official.rates.length > 1) return official.rates;
+    return Array.isArray(official?.populationResults) ? [official.populationResults] : [];
   };
+  const inPopulation = (populations: Populations, key: string): boolean =>
+    populations.some((p) => p?.populationType === key && p?.result === true);
+  const rateCount = Math.max(1, ...[...outcomes.values()].map((o) => ratesOf(o).length));
+  const rates = Array.from({ length: rateCount }, (_, index) => ({
+    inIpp: [...outcomes.values()].filter((o) => inPopulation(ratesOf(o)[index] ?? [], "initial-population")).length,
+    denominator: [...outcomes.values()].filter((o) => inPopulation(ratesOf(o)[index] ?? [], "denominator")).length,
+    numerator: [...outcomes.values()].filter((o) => inPopulation(ratesOf(o)[index] ?? [], "numerator")).length,
+  }));
   const roster: FlipGateRoster = {
     subjects: subjects.length,
-    inIpp: [...outcomes.values()].filter((o) => membership(o, "initial-population")).length,
-    denominator: [...outcomes.values()].filter((o) => membership(o, "denominator")).length,
+    inIpp: rates[0]!.inIpp,
+    denominator: rates[0]!.denominator,
+    rates,
     distribution: tally(statuses),
     evaluationErrors: subjects.length - outcomes.size,
     actionable: statuses.filter((s) => ACTIONABLE.has(s)).length,
@@ -216,6 +233,17 @@ function verdictFor(input: {
         "as non-compliant — check the bundle shape against the artifact's own retrieves before flipping",
     );
   }
+  // A rate nobody reaches is the multi-rate form of the same signal: a deployment where every subject is
+  // in Engagement's denominator and none in its numerator would flip with a plausible Initiation rate
+  // and a silent 0% beside it.
+  for (const [index, rate] of input.roster.rates.entries()) {
+    if (input.roster.rates.length > 1 && rate.denominator > 0 && rate.numerator === 0) {
+      blockers.push(
+        `rate ${index + 1}: ${rate.denominator} subjects in its denominator and NONE in its numerator — ` +
+          "the data shape may not reach this rate at all; check the corresponding retrieves before flipping",
+      );
+    }
+  }
   if (input.roster.evaluationErrors > 0) {
     blockers.push(`${input.roster.evaluationErrors} subject(s) produced no outcome even after the per-subject fallback`);
   }
@@ -247,6 +275,9 @@ export function renderGate(report: FlipGateReport): string {
     "",
     "## 2. The roster — the official artifact over this deployment's subjects",
     `  subjects=${report.roster.subjects} inInitialPopulation=${report.roster.inIpp} denominator=${report.roster.denominator}`,
+    ...(report.roster.rates.length > 1
+      ? report.roster.rates.map((r, i) => `  rate ${i + 1}: inInitialPopulation=${r.inIpp} denominator=${r.denominator} numerator=${r.numerator}`)
+      : []),
     `  actionable=${report.roster.actionable} evaluationErrors=${report.roster.evaluationErrors}`,
     `  distribution: ${JSON.stringify(report.roster.distribution)}`,
     "",

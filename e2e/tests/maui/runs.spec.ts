@@ -6,7 +6,7 @@ test.beforeEach(() => {
 });
 
 test.describe("Maui runs", () => {
-  test("trigger a manual ALL_PROGRAMS run and verify 144 evaluated", async ({ page, request }) => {
+  test("trigger a manual ALL_PROGRAMS run and verify every runnable measure evaluated for all 48", async ({ page, request }) => {
     test.setTimeout(240_000);
     await loginAs(page, MAUI_ACCOUNTS.qualityLead.email);
 
@@ -45,7 +45,14 @@ test.describe("Maui runs", () => {
     expect(created, "the Start run click must have created exactly one new run").toHaveLength(1);
     expect(created[0].scopeType).toBe("ALL_PROGRAMS");
     expect(created[0].status).toBe("COMPLETED");
-    expect(created[0].totalEvaluated).toBe(144);
+    // 48 patients x the measures this stack can RUN. The Maui profile lists the ACO's six, but an
+    // official-only measure is runnable only where WORKWELL_OFFICIAL_MEASURES routes it (ADR-072), and
+    // the e2e stack routes nothing (README-maui: the official artifacts need their gitignored
+    // terminology sidecars) — so cms2/cms130/cms165/cms137 are `official-pending` here and the run
+    // evaluates the two authored measures, cms122 and cms125. A previous revision asserted 240 (six
+    // times 48 minus one) on the belief that U1 had made the five runnable regardless of routing; it
+    // had not, and this spec is manual-dispatch only, so nothing contradicted it.
+    expect(created[0].totalEvaluated).toBe(96);
     await expectNoErrorPage(page);
   });
 

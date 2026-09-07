@@ -16,14 +16,14 @@ import { seededDistribution } from "../run/distribution.ts";
 import {
   composeDeploymentDirectory,
   DEPLOYMENT_PROFILE,
-  EVALUABLE_EMPLOYEES,
-  EMPLOYEES,
-  EVALUATION_EXCLUDED_TENANTS,
+  evaluableEmployees,
+  employees,
+  evaluationExcludedTenants,
   isRunnableMeasure,
-  PROVIDERS,
+  providers,
   resolveDeploymentProfile,
   RUNNABLE_MEASURE_IDS,
-  TENANTS,
+  tenants,
   employeeById,
   providerById,
 } from "./deployment-profile.ts";
@@ -41,7 +41,7 @@ test("resolveDeploymentProfile is pure, normalized, and defaults safely", () => 
   assert.deepEqual(maui, {
     id: "maui",
     visibleTenantIds: ["maui"],
-    runnableMeasureIds: ["cms122", "cms125", "cms2", "cms130", "cms165"],
+    runnableMeasureIds: ["cms122", "cms125", "cms2", "cms130", "cms165", "cms137"],
     subjectTerm: "patient",
   });
   assert.equal(resolveDeploymentProfile(undefined).subjectTerm, "employee");
@@ -55,9 +55,12 @@ test("pure directory composition scopes both profiles after full attribution", (
   assert.deepEqual(defaultDirectory.EVALUABLE_EMPLOYEES, RAW_EVALUABLE_EMPLOYEES);
   assert.deepEqual([...defaultDirectory.EVALUATION_EXCLUDED_TENANTS], ["maui"]);
 
-  const maui = composeDeploymentDirectory(resolveDeploymentProfile("maui"));
+  // Explicit `{}` env: the second parameter defaults to `process.env`, so without this the assertion
+  // below fails for anyone running the suite with WORKWELL_MAUI_CORPUS_SIZE set — which is exactly the
+  // variable the pilot deployment exports.
+  const maui = composeDeploymentDirectory(resolveDeploymentProfile("maui"), {});
   assert.equal(maui.EMPLOYEES.length, 48);
-  assert.equal(maui.PROVIDERS.length, 4);
+  assert.equal(maui.PROVIDERS.length, 40);
   assert.deepEqual(maui.TENANTS.map((tenant) => tenant.id), ["maui"]);
   assert.deepEqual([...maui.EVALUATION_EXCLUDED_TENANTS], RAW_TENANTS.filter((t) => t.id !== "maui").map((t) => t.id));
   assert.equal(maui.EVALUABLE_EMPLOYEES.length, 48);
@@ -73,7 +76,7 @@ test("pure directory composition scopes both profiles after full attribution", (
  * receive identical targets; changing that would reshuffle the legacy `emp-*` distribution too.
  */
 test("Maui distribution counts stay pinned to the measured target buckets", () => {
-  const maui = composeDeploymentDirectory(resolveDeploymentProfile("maui"));
+  const maui = composeDeploymentDirectory(resolveDeploymentProfile("maui"), {});
   const expected = {
     cms122: { COMPLIANT: 38, EXCLUDED: 3, MISSING_DATA: 2, DUE_SOON: 2, OVERDUE: 3 },
     cms125: { COMPLIANT: 38, EXCLUDED: 3, MISSING_DATA: 2, DUE_SOON: 2, OVERDUE: 3 },
@@ -93,11 +96,11 @@ test("Maui distribution counts stay pinned to the measured target buckets", () =
 
 test("the loaded default module exports the default scoped directory and measure set", () => {
   assert.equal(DEPLOYMENT_PROFILE.id, "default");
-  assert.deepEqual(EMPLOYEES, RAW_EMPLOYEES);
-  assert.deepEqual(PROVIDERS, RAW_PROVIDERS);
-  assert.deepEqual(TENANTS, RAW_TENANTS);
-  assert.equal(EVALUABLE_EMPLOYEES.length, 150);
-  assert.deepEqual([...EVALUATION_EXCLUDED_TENANTS], ["maui"]);
+  assert.deepEqual(employees(), RAW_EMPLOYEES);
+  assert.deepEqual(providers(), RAW_PROVIDERS);
+  assert.deepEqual(tenants(), RAW_TENANTS);
+  assert.equal(evaluableEmployees().length, 150);
+  assert.deepEqual([...evaluationExcludedTenants()], ["maui"]);
   assert.deepEqual(RUNNABLE_MEASURE_IDS, Object.keys(MEASURES));
   assert.equal(isRunnableMeasure("audiogram"), true);
   assert.equal(isRunnableMeasure("hazwoper"), true);
@@ -182,7 +185,7 @@ test("the Maui roster uses only the profile-scoped static directory", () => {
  */
 test("segment membership preview returns only the active profile's subjects", () => {
   const output = runProfileChild("maui", `
-    // Drives the REAL route handler, not the profile export — importing the scoped EMPLOYEES here
+    // Drives the REAL route handler, not the profile export — importing the scoped employees() here
     // and filtering it would only re-prove that the profile is scoped, and would still pass if
     // segments.ts went back to reading the raw catalog. Mutation-checked against that exact revert.
     import { handleSegments } from "./src/routes/segments.ts";
@@ -235,26 +238,28 @@ test("the default roster keeps the pre-Maui row count and tenant mix", () => {
 
 test("a fresh Maui process wires the profile into counts and /api/tenants", async () => {
   const output = runProfileChild("maui", `
-    import { EMPLOYEES, PROVIDERS, TENANTS, EVALUABLE_EMPLOYEES, EVALUATION_EXCLUDED_TENANTS, RUNNABLE_MEASURE_IDS, isRunnableMeasure } from "./src/config/deployment-profile.ts";
+    import { employees, providers, tenants, evaluableEmployees, evaluationExcludedTenants, RUNNABLE_MEASURE_IDS, isRunnableMeasure } from "./src/config/deployment-profile.ts";
     import { handleTenants } from "./src/routes/tenants.ts";
     const response = await handleTenants(new Request("http://localhost/api/tenants"), {});
     console.log(JSON.stringify({
-      employees: EMPLOYEES.length,
-      providers: PROVIDERS.length,
-      tenants: TENANTS.map((t) => t.id),
-      evaluable: EVALUABLE_EMPLOYEES.length,
-      excluded: [...EVALUATION_EXCLUDED_TENANTS],
+      employees: employees().length,
+      providers: providers().length,
+      tenants: tenants().map((t) => t.id),
+      evaluable: evaluableEmployees().length,
+      excluded: [...evaluationExcludedTenants()],
       runnable: RUNNABLE_MEASURE_IDS,
       audiogramRunnable: isRunnableMeasure("audiogram"),
       tenantRoute: await response.json(),
     }));
   `);
   assert.equal(output.employees, 48);
-  assert.equal(output.providers, 4);
+  // Forty PCPs, not the four the static catalog carried: the Maui roster is the corpus now, and the
+  // pilot's staff work by provider panel, so the whole panel exists whatever the roster size.
+  assert.equal(output.providers, 40);
   assert.deepEqual(output.tenants, ["maui"]);
   assert.equal(output.evaluable, 48);
   assert.deepEqual(output.excluded, ["twh", "ihn", "mhn"]);
-  assert.deepEqual(output.runnable, ["cms122", "cms125", "cms2", "cms130", "cms165"]);
+  assert.deepEqual(output.runnable, ["cms122", "cms125", "cms2", "cms130", "cms165", "cms137"]);
   assert.equal(output.audiogramRunnable, false);
   assert.deepEqual(output.tenantRoute, [{ id: "maui", name: "Maui Pilot Clinic" }]);
 });
@@ -318,16 +323,22 @@ test("classifyRunnable: authored, official, official-pending, invalid — env re
   const pending = classifyRunnable("cms165", {});
   assert.equal(pending.kind, "official-pending");
   assert.match((pending as { reason: string }).reason, /WORKWELL_OFFICIAL_MEASURES/);
-  const invalid = classifyRunnable("cms137", {});
+  // cms137 was this example until it was vendored for the pilot (MIPS 305 is on the ACO's blue list).
+  // Using a still-unvendored id keeps the case honest; a measure that becomes vendored must not
+  // silently turn this assertion into a test of nothing.
+  const invalid = classifyRunnable("cms124", {});
   assert.equal(invalid.kind, "invalid");
   assert.match((invalid as { reason: string }).reason, /not vendored/);
+  // ...and cms137 now classifies like any other vendored, semantic, unrouted measure.
+  assert.equal(classifyRunnable("cms137", {}).kind, "official-pending");
+  assert.deepEqual(classifyRunnable("cms137", { WORKWELL_OFFICIAL_MEASURES: "cms137" }), { kind: "official" });
   // cms122 is authored AND official: routed ⇒ official, unrouted ⇒ authored (the pre-flip state)
   assert.deepEqual(classifyRunnable("cms122", {}), { kind: "authored" });
   assert.deepEqual(classifyRunnable("cms122", { WORKWELL_OFFICIAL_MEASURES: "cms122" }), { kind: "official" });
 });
 
-test("the Maui profile lists exactly the five ACO measures, and hypertension is gone", () => {
-  assert.deepEqual([...resolveDeploymentProfile("maui").runnableMeasureIds], ["cms122", "cms125", "cms2", "cms130", "cms165"]);
+test("the Maui profile lists exactly the six ACO measures, and hypertension is gone", () => {
+  assert.deepEqual([...resolveDeploymentProfile("maui").runnableMeasureIds], ["cms122", "cms125", "cms2", "cms130", "cms165", "cms137"]);
 });
 
 test("on the maui profile an unrouted official-only id is NOT runnable; a routed one is", () => {
@@ -338,7 +349,7 @@ test("on the maui profile an unrouted official-only id is NOT runnable; a routed
   const unrouted = runProfileChild("maui", script) as { cms165: boolean; cms122: boolean; listed: string[] };
   assert.equal(unrouted.cms165, false);
   assert.equal(unrouted.cms122, true); // authored fallback exists for cms122
-  assert.deepEqual(unrouted.listed, ["cms122", "cms125", "cms2", "cms130", "cms165"]);
+  assert.deepEqual(unrouted.listed, ["cms122", "cms125", "cms2", "cms130", "cms165", "cms137"]);
   process.env.WORKWELL_OFFICIAL_MEASURES = "cms122,cms125,cms2,cms130,cms165";
   try {
     const routed = runProfileChild("maui", script) as { cms165: boolean };

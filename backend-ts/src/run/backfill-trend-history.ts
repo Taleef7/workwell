@@ -33,10 +33,11 @@
  * the overview selects max(runStartedAt) per measure, so a seeded point can never become "current".
  */
 import type { RunStore } from "../stores/run-store.ts";
+import { retentionDaysFromEnv } from "./outcome-compaction.ts";
 import type { OutcomeStore, RecordOutcomeInput } from "../stores/outcome-store.ts";
 import type { CaseEventStore } from "../stores/case-event-store.ts";
 import type { EvaluateMeasureBinding } from "@work-well/measure-engine";
-import { type EmployeeProfile, EVALUABLE_EMPLOYEES, isRunnableMeasure, RUNNABLE_MEASURE_IDS as PROFILE_RUNNABLE_MEASURE_IDS } from "../config/deployment-profile.ts";
+import { type EmployeeProfile, evaluableEmployees, isRunnableMeasure, RUNNABLE_MEASURE_IDS as PROFILE_RUNNABLE_MEASURE_IDS } from "../config/deployment-profile.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { compositeBundleSource, type SubjectBundleSource } from "../wiring/subject-bundle-source.ts";
 import type { TargetOutcome } from "../engine/synthetic/exam-config.ts";
@@ -75,6 +76,8 @@ export interface BackfillTrendHistoryOptions {
   weeks?: number;
   /** The newest historical week's anchor date `YYYY-MM-DD` (default today). */
   asOf?: string;
+  /** Injectable for tests; defaults to WORKWELL_OUTCOME_RETENTION_DAYS. Any value ⇒ the tool refuses. */
+  retentionDays?: number;
 }
 
 export interface BackfillTrendHistorySummary {
@@ -160,7 +163,30 @@ export async function backfillTrendHistory(
   deps: BackfillTrendHistoryDeps,
   opts: BackfillTrendHistoryOptions = {},
 ): Promise<BackfillTrendHistorySummary> {
-  const employees = deps.employees ?? EVALUABLE_EMPLOYEES;
+  /**
+   * REFUSES under a retention window (ADR-073).
+   *
+   * This tool writes synthetic outcome rows dated weeks into the past so the trend chart has a shape.
+   * With retention on, the next compaction deletes exactly those rows — they are old, and they are not
+   * any subject's newest — so the tool would report success, the chart would look right until the
+   * nightly run, and then the history would silently disappear. Worse, the operator would have no
+   * reason to connect the two.
+   *
+   * It refuses rather than warning, because the alternative is writing a series it knows will not
+   * survive. The retention window is the deployment's decision; the durable long-run history under it
+   * is the quality-over-time snapshot, which this tool does not produce.
+   */
+  const retentionDays = opts.retentionDays ?? retentionDaysFromEnv(process.env as Record<string, unknown>);
+  if (retentionDays !== undefined) {
+    throw new Error(
+      `[workwell] backfill-trend-history refuses to run under a ${retentionDays}-day outcome retention window ` +
+        `(WORKWELL_OUTCOME_RETENTION_DAYS): the rows it writes are older than the window and are not any ` +
+        `subject's newest, so the next compaction would delete them. Long-run history under retention is the ` +
+        `quality-over-time snapshot (ADR-073).`,
+    );
+  }
+
+  const employees = deps.employees ?? evaluableEmployees();
   const weeks = Math.max(1, Math.trunc(opts.weeks ?? DEFAULT_WEEKS));
   const asOf = (opts.asOf ?? new Date().toISOString().slice(0, 10)).slice(0, 10);
   const asOfMs = Date.parse(`${asOf}T00:00:00.000Z`);

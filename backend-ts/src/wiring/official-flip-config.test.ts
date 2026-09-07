@@ -198,6 +198,62 @@ test("PR-9c/ADR-046: a routed measure's REPORT declares the notation its officia
   }
 });
 
+/**
+ * Any workflow env key, by the same "the workflow IS the source of truth" rule `shippedMeasures` uses.
+ * `null` means the key is absent, which is legal and is what a profile that has not opted in looks like.
+ */
+function shippedValue(workflow: string, key: string): string | null {
+  const path = fileURLToPath(new URL(`../../../.github/workflows/${workflow}`, import.meta.url));
+  const yaml = readFileSync(path, "utf8");
+  const match = yaml.match(new RegExp(String.raw`\{\s*key:\s*"` + key + String.raw`"\s*,\s*value:\s*"([^"]*)"\s*\}`));
+  return match ? match[1]! : null;
+}
+
+/**
+ * Keys whose value decides how much work a deployment does or how much history it keeps. Each is
+ * checked for AGREEMENT between a deploy workflow and its reconciler, for the same reason the routed
+ * measure list is: the reconciler recreates the same container on a health event, so a mismatch
+ * silently changes the deployment nobody asked to change — a self-heal that quietly drops the roster
+ * from 20,000 patients back to the 48-row fixture, or turns retention off, would look like a
+ * successful recovery.
+ */
+const MUST_AGREE_KEYS = [
+  "WORKWELL_MAUI_CORPUS_SIZE",
+  "WORKWELL_MAUI_CORPUS_SEED",
+  "WORKWELL_RUN_CHUNK_SIZE",
+  "WORKWELL_SCHEDULER_ANCHOR_HOUR_UTC",
+  "WORKWELL_OUTCOME_RETENTION_DAYS",
+] as const;
+
+test("PR-9c: a self-healed container carries the same corpus size, chunking, anchor and retention", () => {
+  for (const [a, b] of MUST_AGREE) {
+    for (const key of MUST_AGREE_KEYS) {
+      assert.equal(
+        shippedValue(b, key),
+        shippedValue(a, key),
+        `${b} must ship the same ${key} as ${a} — it recreates the same container, so a mismatch ` +
+          `silently changes the deployment on a self-heal`,
+      );
+    }
+  }
+});
+
+test("the Maui deployment actually ships the corpus size, and it is the 20,000-patient one", () => {
+  // Agreement alone is satisfied by BOTH workflows omitting the key, which is the vacuous reading of
+  // the test above — and would leave the pilot on the 48-row fixture while every doc said 20,000.
+  assert.equal(shippedValue("deploy-maui-mieweb.yml", "WORKWELL_MAUI_CORPUS_SIZE"), "20000");
+  // Retention is deliberately NOT shipped to Maui yet. DEPLOY.md says to leave it unset until the
+  // Postgres index ADR-073 names exists — the keep-set's DISTINCT ON ... ORDER BY has no supporting
+  // index, so on a table of nightly 20,000-patient runs the DELETE would sort the whole thing inline
+  // during the nightly tick. The first version of this test pinned "90" while the doc said "unset"
+  // (Codex review, #528). Pinning ABSENCE here means adding it later is a deliberate edit of this line
+  // in the same commit as the index, not a value that slipped in.
+  assert.equal(shippedValue("deploy-maui-mieweb.yml", "WORKWELL_OUTCOME_RETENTION_DAYS"), null, "retention stays OFF on Maui until the ADR-073 index exists");
+  // TWH is unchanged: no corpus, and no retention window — its history stays whole.
+  assert.equal(shippedValue("deploy-twh-mieweb.yml", "WORKWELL_MAUI_CORPUS_SIZE"), null);
+  assert.equal(shippedValue("deploy-twh-mieweb.yml", "WORKWELL_OUTCOME_RETENTION_DAYS"), null);
+});
+
 test("PR-9c: a container recreated by SELF-HEAL routes exactly what the deploy routes", () => {
   // The silent-revert case. Not "both files mention the flag" — the same VALUE, because a reconciler
   // shipping a different subset would flip measures on or off on a health event nobody initiated.

@@ -22,6 +22,8 @@ const LEGACY_OFFICIAL_IDS = [
   { legacyId: "cms2v15", catalogId: "cms2" },
   { legacyId: "cms130v14", catalogId: "cms130" },
   { legacyId: "cms165v14", catalogId: "cms165" },
+  // ADR-071 applied to the sixth ACO measure (ADR-074): the vendored manifest's id is `cms137`.
+  { legacyId: "cms137v14", catalogId: "cms137" },
 ] as const;
 
 const HYPERTENSION_PRE_CHANGE = {
@@ -52,7 +54,15 @@ const deepEqual = (left: unknown, right: unknown): boolean => {
 // The exact Draft placeholder rows the pre-MM-1b catalog seeded for the three official-only
 // measures. Promotion and legacy deprecation fingerprint against these, not the current Active
 // rows, so an untouched pre-change store converges while an edited row is left alone.
-export const OFFICIAL_ONLY_PRE_CHANGE: Record<"cms2" | "cms130" | "cms165", MeasureSpec> = {
+export const OFFICIAL_ONLY_PRE_CHANGE: Record<"cms2" | "cms130" | "cms165" | "cms137", MeasureSpec> = {
+  cms137: {
+    description: "CMS137v14 (MIPS Quality ID 305) — CMS eCQM 2026 performance period catalog entry. CQL authoring pending.",
+    eligibilityCriteria: { roleFilter: "", siteFilter: "", programEnrollmentText: "" },
+    exclusions: [],
+    complianceWindow: "Annual",
+    requiredDataElements: [],
+    testFixtures: [],
+  },
   cms2: {
     description: "CMS2v15 (MIPS Quality ID 134) — CMS eCQM 2026 performance period catalog entry. CQL authoring pending.",
     eligibilityCriteria: { roleFilter: "", siteFilter: "", programEnrollmentText: "" },

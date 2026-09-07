@@ -75,29 +75,50 @@ export class SqliteOutcomeStore implements OutcomeStore {
     };
   }
 
-  async recordOutcomes(inputs: RecordOutcomeInput[]): Promise<void> {
-    if (inputs.length === 0) return;
+  async recordOutcomes(inputs: RecordOutcomeInput[]): Promise<OutcomeRecord[]> {
+    if (inputs.length === 0) return [];
     // D1 runs a batch atomically (single transaction). `RETURNING id` is required for the batch
     // path (cloud-local executes batched statements via `.all()`, which throws on a non-returning
     // statement — same reason the case-event store appends `RETURNING id`).
-    const stmts = inputs.map((input) =>
+    // Ids and timestamps are minted HERE so the returned records are exactly the rows written; reading
+    // them back would be a second query per chunk for values already in hand.
+    const records: OutcomeRecord[] = inputs.map((input) => ({
+      id: crypto.randomUUID(),
+      runId: input.runId,
+      subjectId: input.subjectId,
+      measureId: input.measureId,
+      evaluationPeriod: input.evaluationPeriod ?? "",
+      status: input.status,
+      evidence: input.evidence ?? {},
+      evaluatedAt: input.evaluatedAt ?? new Date().toISOString(),
+    }));
+    const stmts = records.map((record) =>
       this.db
         .prepare(
           `INSERT INTO outcomes (id, run_id, subject_id, measure_id, evaluation_period, status, evidence_json, evaluated_at)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
         )
         .bind(
-          crypto.randomUUID(),
-          input.runId,
-          input.subjectId,
-          input.measureId,
-          input.evaluationPeriod ?? "",
-          input.status,
-          JSON.stringify(input.evidence ?? {}),
-          input.evaluatedAt ?? new Date().toISOString(),
+          record.id,
+          record.runId,
+          record.subjectId,
+          record.measureId,
+          record.evaluationPeriod,
+          record.status,
+          JSON.stringify(record.evidence),
+          record.evaluatedAt,
         ),
     );
-    await this.db.batch(stmts);
+    // Batched in slices. D1 caps a `batch()` at ~100 statements, and the run pipeline now persists a
+    // whole chunk in one call — 500 subjects x the measures in the run — so an unsliced batch fails on
+    // the very deployment this was built for. Each slice is still one round trip and still atomic
+    // within itself; the whole call is not, which is the same guarantee the Postgres adapter's chunked
+    // multi-row INSERT gives.
+    const BATCH = 90;
+    for (let start = 0; start < stmts.length; start += BATCH) {
+      await this.db.batch(stmts.slice(start, start + BATCH));
+    }
+    return records;
   }
 
   async listOutcomes(runId: string, opts?: { limit?: number; offset?: number }): Promise<OutcomeRecord[]> {
@@ -142,6 +163,48 @@ export class SqliteOutcomeStore implements OutcomeStore {
       .all<OutcomeRow>();
     const row = (results ?? [])[0];
     return row ? toRecord(row) : null;
+  }
+
+  /**
+   * ADR-073 retention. One DELETE, with everything it must NOT remove expressed inside it rather than
+   * read into memory first — at 20,000 patients across five measures the keep-set is 100,000 rows, and
+   * materialising it to delete around it defeats the point of compacting.
+   *
+   * Two exclusions. The correlated MAX keeps the newest row per `(subject, measure, PERIOD)`, so a
+   * calendar-year measure's whole 2027 evidence is not swept away by the first 2028 run. The NOT EXISTS
+   * keeps every row a case cites, matched per row rather than per run.
+   */
+  async compactOlderThan(cutoff: string): Promise<number> {
+    const { results } = await this.db
+      .prepare(
+        `DELETE FROM outcomes
+          WHERE evaluated_at < ?
+            AND id NOT IN (
+              -- ONE row per (subject, measure, period), tie-broken by id DESC — the same rule the
+              -- ceiling's DISTINCT ON applies. A plain correlated MAX keeps EVERY row tied at the
+              -- newest instant while DISTINCT ON keeps one, so the two stores would disagree about
+              -- what "the subject's current answer" is whenever two rows share a timestamp.
+              SELECT id FROM outcomes o2
+               WHERE o2.id = (
+                 SELECT o3.id FROM outcomes o3
+                  WHERE o3.subject_id = o2.subject_id
+                    AND o3.measure_id = o2.measure_id
+                    AND o3.evaluation_period = o2.evaluation_period
+                  ORDER BY o3.evaluated_at DESC, o3.id DESC
+                  LIMIT 1
+               )
+            )
+            AND NOT EXISTS (
+              SELECT 1 FROM cases c
+               WHERE c.last_run_id = outcomes.run_id
+                 AND c.employee_id = outcomes.subject_id
+                 AND c.measure_id = outcomes.measure_id
+            )
+          RETURNING id`,
+      )
+      .bind(cutoff)
+      .all<{ id: string }>();
+    return (results ?? []).length;
   }
 
   async listOutcomesForEmployee(subjectId: string, limit: number): Promise<EmployeeOutcomeRow[]> {

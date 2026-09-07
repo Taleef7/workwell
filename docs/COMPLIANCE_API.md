@@ -74,6 +74,23 @@ GET /api/v1/compliance/{subjectId}/{measureId}?start=YYYY-MM-DD&end=YYYY-MM-DD&m
 
 `populations` is the *evidence* for that answer, not a second answer. Do not recompute `status` from it.
 
+### `rates` — present only for a multi-rate measure (ADR-074)
+
+A measure that declares more than one `Measure.group` (CMS137: Initiation and Engagement) carries an
+**additive** `rates` array, one entry per group in the artifact's own order:
+
+```jsonc
+"rates": [
+  { "group": "Group_1", "populations": { "initialPopulation": true, "denominator": true, "denominatorExclusion": false, "denominatorException": false, "numerator": true } },
+  { "group": "Group_2", "populations": { "initialPopulation": true, "denominator": true, "denominatorExclusion": false, "denominatorException": false, "numerator": false } }
+]
+```
+
+`populations` stays **rate 1** so nothing an existing consumer reads changes; `status` is the WORST
+measuring rate (a subject who initiated treatment and did not engage is `OVERDUE`, and `rates` is where
+that is visible — `populations` alone would read as met). The field is absent, not empty, for every
+single-rate measure.
+
 ### `period` vs `filter`
 
 `period` is the **measurement window the answer covers** — the run's own measurement period for `latest`,

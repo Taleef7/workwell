@@ -1130,3 +1130,140 @@ test("the engine evaluates the date the row is LABELLED with", async () => {
   assert.equal(fromRun.days, explicit.days, "and the engine computed that date, not another one");
   assert.notEqual(fromRun.days, today.days, "which is a different answer from today's — so the check can fail");
 });
+
+/**
+ * The aggregate exports are SUMS and must not inherit the individual report's cap. On the 20,000-patient
+ * pilot every official measure's summary MeasureReport and QRDA III returned 422 `run_too_large` — the
+ * two regulatory documents unreachable for exactly the roster they exist for (Gemini review finding 4).
+ */
+test("the summary MeasureReport and the QRDA III page through a run larger than the individual-report cap", async () => {
+  await get("/api/runs");
+  const runStore = new SqliteRunStore(env.DB as never);
+  const outcomeStore = new SqliteOutcomeStore(env.DB as never);
+  const run = await runStore.createRun({
+    scopeType: "MEASURE", scopeId: "cms137", triggeredBy: "test", requestedScope: { measureId: "cms137" },
+    measurementPeriodStart: "2026-01-01T00:00:00.000Z", measurementPeriodEnd: "2026-12-31T23:59:59.999Z",
+    status: "COMPLETED", startedAt: "2026-09-06T00:00:00.000Z", completedAt: "2026-09-06T00:10:00.000Z",
+  });
+  const rate = (numerator: boolean) => [
+    { populationType: "initial-population", result: true },
+    { populationType: "denominator", result: true },
+    { populationType: "numerator", result: numerator },
+  ];
+  const strata = (group: number) => [1, 2, 3].map((s) => ({ id: `Stratification_${group}_${s}`, code: `Stratification_${group}_${s}`, result: s === 2, appliesResult: s === 2 }));
+  const N = 5001; // one past MAX_INDIVIDUAL_REPORT_SUBJECTS
+  const rows = Array.from({ length: N }, (_, i) => ({
+    runId: run.id, subjectId: `pat-${String(i + 1).padStart(5, "0")}`, measureId: "cms137", evaluationPeriod: "2026-01-01",
+    status: i % 3 === 0 ? "COMPLIANT" : "OVERDUE",
+    evidence: { official: { ecqmId: "137FHIR", version: "1.0.000", engine: "fqm-execution", populationResults: rate(true), rates: [rate(true), rate(i % 3 === 0)], strata: [strata(1), strata(2)] } },
+  }));
+  for (let i = 0; i < rows.length; i += 500) await outcomeStore.recordOutcomes(rows.slice(i, i + 500));
+
+  const summary = (await get(`/api/runs/${run.id}/measure-report?type=summary`))!;
+  assert.equal(summary.status, 200, `summary must not be 422 at ${N} subjects: ${await summary.clone().text()}`);
+  assert.equal(summary.headers.get("x-workwell-unmeasured-subjects"), "0", "every row supplied both rates, so nobody is counted in no rate (ADR-074 d11)");
+  const mr = (await summary.json()) as { group: Array<{ id?: string; population: Array<{ code: { coding: Array<{ code: string }> }; count: number }>; stratifier?: Array<{ id: string }> }> };
+  assert.equal(mr.group.length, 2, "both rates");
+  const numerator = (g: number) => mr.group[g]!.population.find((p) => p.code.coding[0]!.code === "numerator")!.count;
+  assert.equal(numerator(0), N);
+  assert.equal(numerator(1), Math.ceil(N / 3));
+  assert.deepEqual(mr.group[1]!.stratifier!.map((s) => s.id), ["Stratification_2_1", "Stratification_2_2", "Stratification_2_3"]);
+
+  // The individual/bundle report keeps its cap — that one really does build a document per subject.
+  assert.equal((await get(`/api/runs/${run.id}/measure-report?type=bundle`))!.status, 422);
+
+  // QRDA III is no longer refused for a multi-rate measure (ADR-074 d6 superseded): two performance rates.
+  const qrda = (await get(`/api/runs/${run.id}/qrda`))!;
+  assert.equal(qrda.status, 200, await qrda.clone().text());
+  assert.equal(qrda.headers.get("x-workwell-unmeasured-subjects"), "0");
+  const xml = await qrda.text();
+  assert.equal((xml.match(/code="72510-1"/g) ?? []).length, 2);
+  assert.ok(xml.includes('extension="Numerator_2"'));
+  assert.ok(xml.includes('extension="Stratification_1_2"'), "strata are reported");
+});
+
+/**
+ * The paged sum's exit condition is `page.length < AGGREGATE_PAGE`. A run of EXACTLY a page multiple
+ * exercises the other way that can go wrong — the final full page is followed by an empty one, and a
+ * loop that stopped one page early or read the last page twice would be off by a whole page's worth of
+ * subjects, invisibly, since every row is well-formed (GLM review, L3). 4,000 = 2 x AGGREGATE_PAGE.
+ */
+test("a run of exactly two aggregation pages sums every subject once", async () => {
+  await get("/api/runs");
+  const runStore = new SqliteRunStore(env.DB as never);
+  const outcomeStore = new SqliteOutcomeStore(env.DB as never);
+  const run = await runStore.createRun({
+    scopeType: "MEASURE", scopeId: "cms122", triggeredBy: "test", requestedScope: { measureId: "cms122" },
+    measurementPeriodStart: "2026-01-01T00:00:00.000Z", measurementPeriodEnd: "2026-12-31T23:59:59.999Z",
+    status: "COMPLETED", startedAt: "2026-09-06T00:00:00.000Z", completedAt: "2026-09-06T00:10:00.000Z",
+  });
+  const N = 4000; // exactly 2 x AGGREGATE_PAGE (runs.ts) — if that constant changes, change this multiple with it
+  const rows = Array.from({ length: N }, (_, i) => ({
+    runId: run.id, subjectId: `pat-${String(i + 1).padStart(5, "0")}`, measureId: "cms122", evaluationPeriod: "2026-01-01",
+    status: i % 4 === 0 ? "OVERDUE" : "COMPLIANT",
+    evidence: { official: { ecqmId: "122FHIR", version: "1.0.000", engine: "fqm-execution", populationResults: [
+      { populationType: "initial-population", result: true },
+      { populationType: "denominator", result: true },
+      { populationType: "numerator", result: i % 4 === 0 },
+    ] } },
+  }));
+  for (let i = 0; i < rows.length; i += 500) await outcomeStore.recordOutcomes(rows.slice(i, i + 500));
+
+  const summary = (await get(`/api/runs/${run.id}/measure-report?type=summary`))!;
+  assert.equal(summary.status, 200, await summary.clone().text());
+  const mr = (await summary.json()) as { group: Array<{ population: Array<{ code: { coding: Array<{ code: string }> }; count: number }> }> };
+  assert.equal(mr.group.length, 1);
+  const count = (code: string) => mr.group[0]!.population.find((p) => p.code.coding[0]!.code === code)!.count;
+  assert.equal(count("initial-population"), N, "every subject counted exactly once across the page boundary");
+  assert.equal(count("denominator"), N);
+  assert.equal(count("numerator"), N / 4);
+  assert.equal(summary.headers.get("x-workwell-unmeasured-subjects"), "0");
+});
+
+/**
+ * A PARTIAL_FAILURE run is reportable, and its errored subjects persist `{ evaluationError }` with no
+ * `official` block. The provenance gate used to read ONE row — whichever sorted first — so an errored
+ * subject in that position sent an official multi-rate run down the status-histogram path: one group,
+ * no strata, and for a lower-is-better measure an inverted numerator (GLM review, H1). The errored row
+ * says nothing about the engine and must be skipped, not read as "not official".
+ */
+test("an official run whose FIRST row errored still exports per rate — the gate skips rows no engine evaluated", async () => {
+  await get("/api/runs");
+  const runStore = new SqliteRunStore(env.DB as never);
+  const outcomeStore = new SqliteOutcomeStore(env.DB as never);
+  const run = await runStore.createRun({
+    scopeType: "MEASURE", scopeId: "cms137", triggeredBy: "test", requestedScope: { measureId: "cms137" },
+    measurementPeriodStart: "2026-01-01T00:00:00.000Z", measurementPeriodEnd: "2026-12-31T23:59:59.999Z",
+    status: "PARTIAL_FAILURE", startedAt: "2026-09-06T00:00:00.000Z", completedAt: "2026-09-06T00:10:00.000Z",
+  });
+  const rate = (numerator: boolean) => [
+    { populationType: "initial-population", result: true },
+    { populationType: "denominator", result: true },
+    { populationType: "numerator", result: numerator },
+  ];
+  // The errored row sorts FIRST (`evaluated_at ASC, id ASC`): an earlier timestamp than every evaluated row.
+  await outcomeStore.recordOutcomes([{
+    runId: run.id, subjectId: "pat-errored", measureId: "cms137", evaluationPeriod: "2026-01-01", status: "MISSING_DATA",
+    evaluatedAt: "2026-09-06T00:01:00.000Z", evidence: { evaluationError: "engine failure", message: "boom" },
+  }]);
+  await outcomeStore.recordOutcomes([1, 2, 3].map((i) => ({
+    runId: run.id, subjectId: `pat-${i}`, measureId: "cms137", evaluationPeriod: "2026-01-01", status: i === 1 ? "COMPLIANT" : "OVERDUE",
+    evaluatedAt: `2026-09-06T00:0${i + 1}:00.000Z`,
+    evidence: { official: { ecqmId: "137FHIR", version: "1.0.000", engine: "fqm-execution", populationResults: rate(true), rates: [rate(true), rate(i === 1)] } },
+  })));
+  assert.equal((env as Record<string, unknown>).WORKWELL_OFFICIAL_MEASURES, undefined, "the deployment flag is OFF, so provenance must come from the run's own rows");
+
+  const summary = (await get(`/api/runs/${run.id}/measure-report?type=summary`))!;
+  assert.equal(summary.status, 200, await summary.clone().text());
+  const mr = (await summary.json()) as { group: Array<{ population: Array<{ code: { coding: Array<{ code: string }> }; count: number }> }> };
+  assert.equal(mr.group.length, 2, "both of cms137's rates — not the single status-derived group");
+  const count = (g: number, code: string) => mr.group[g]!.population.find((p) => p.code.coding[0]!.code === code)!.count;
+  assert.equal(count(0, "denominator"), 3, "the three evaluated subjects; the errored one is in no rate");
+  assert.equal(count(0, "numerator"), 3);
+  assert.equal(count(1, "numerator"), 1);
+  assert.equal(summary.headers.get("x-workwell-unmeasured-subjects"), "1", "the errored subject is the one counted in no rate (ADR-074 d11)");
+
+  const qrda = (await get(`/api/runs/${run.id}/qrda`))!;
+  assert.equal(qrda.status, 200, await qrda.clone().text());
+  assert.equal(((await qrda.text()).match(/code="72510-1"/g) ?? []).length, 2, "two performance rates in the QRDA III as well");
+});

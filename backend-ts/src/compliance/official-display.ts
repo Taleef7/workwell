@@ -40,6 +40,11 @@ const COMPLIANT = {
     whyFlagged: "Compliant: most recent blood pressure this measurement period is below 140/90.",
     nextAction: "No action required.",
   },
+  cms137: {
+    method: "Treatment initiated within 14 days of the new substance use disorder episode and engaged within 34 days of initiation.",
+    whyFlagged: "Compliant: substance use disorder treatment was initiated within 14 days of the new episode and engaged (two further services, or a long-acting medication) within 34 days of initiation.",
+    nextAction: "No action required.",
+  },
 };
 
 const OVERDUE = {
@@ -68,6 +73,15 @@ const OVERDUE = {
     whyFlagged: "Flagged: most recent blood pressure this measurement period is at or above 140/90.",
     nextAction: "Review blood pressure management.",
   },
+  // Multi-rate (ADR-074): the bucket is the WORST of Initiation and Engagement, so OVERDUE means the
+  // episode had no treatment within 14 days OR treatment began and was not engaged within 34 days.
+  // The wording names both, because the roster cannot tell them apart and the case detail's evidence
+  // (both rates, persisted) is where the operator sees which.
+  cms137: {
+    method: "New substance use disorder episode without treatment initiation within 14 days, or treatment initiated but not engaged within 34 days of initiation.",
+    whyFlagged: "Flagged: a new substance use disorder episode this measurement period either had no treatment initiated within 14 days, or treatment was initiated but not engaged (two further services, or a long-acting medication) within 34 days of initiation. The evidence shows which rate was missed.",
+    nextAction: "Review the substance use disorder treatment plan: confirm initiation within 14 days of the episode and follow-up engagement within 34 days of initiation.",
+  },
 };
 
 const EXCLUDED = {
@@ -94,6 +108,11 @@ const EXCLUDED = {
   cms165: {
     method: "Excluded by measure logic (denominator exclusion or exception).",
     whyFlagged: "Excluded: denominator exclusion or exception applied by official measure logic.",
+    nextAction: "No action required.",
+  },
+  cms137: {
+    method: "Excluded by measure logic (denominator exclusion or exception).",
+    whyFlagged: "Excluded: denominator exclusion (hospice services) applied by official measure logic.",
     nextAction: "No action required.",
   },
 };
@@ -124,6 +143,11 @@ const MISSING_DATA = {
     whyFlagged: "Missing data: not in the measure's initial population for this period, or no qualifying encounter.",
     nextAction: "Check eligibility and encounter data; rerun when complete.",
   },
+  cms137: {
+    method: "Not in the measure's initial population: no new substance use disorder episode between January 1 and November 14 of this period, or a prior episode or treatment within 60 days before it.",
+    whyFlagged: "Missing data: not in the measure's initial population — no new substance use disorder episode between January 1 and November 14 of this measurement period, or a prior diagnosis or treatment within the 60 days before it.",
+    nextAction: "No action required unless a new substance use disorder episode is expected on the record; rerun when complete.",
+  },
 };
 
 export const OFFICIAL_DISPLAY: Record<string, Record<string, OfficialDisplay>> = {
@@ -132,6 +156,7 @@ export const OFFICIAL_DISPLAY: Record<string, Record<string, OfficialDisplay>> =
   cms2: { COMPLIANT: COMPLIANT.cms2, OVERDUE: OVERDUE.cms2, EXCLUDED: EXCLUDED.cms2, MISSING_DATA: MISSING_DATA.cms2 },
   cms130: { COMPLIANT: COMPLIANT.cms130, OVERDUE: OVERDUE.cms130, EXCLUDED: EXCLUDED.cms130, MISSING_DATA: MISSING_DATA.cms130 },
   cms165: { COMPLIANT: COMPLIANT.cms165, OVERDUE: OVERDUE.cms165, EXCLUDED: EXCLUDED.cms165, MISSING_DATA: MISSING_DATA.cms165 },
+  cms137: { COMPLIANT: COMPLIANT.cms137, OVERDUE: OVERDUE.cms137, EXCLUDED: EXCLUDED.cms137, MISSING_DATA: MISSING_DATA.cms137 },
 };
 
 export function officialDisplayFor(measureId: string, status: string): OfficialDisplay | null {

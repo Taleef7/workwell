@@ -101,7 +101,7 @@ if (!reachable && process.env.WORKWELL_TEST_PG_URL) {
 
   outcomeStoreContract("postgres", async () => {
     await truncate();
-    return { runStore: new PgRunStore(pool), outcomeStore: new PgOutcomeStore(pool) };
+    return { runStore: new PgRunStore(pool), outcomeStore: new PgOutcomeStore(pool), caseStore: new PgCaseStore(pool) };
   });
 
   caseStoreContract("postgres", async () => {

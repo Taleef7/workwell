@@ -784,3 +784,57 @@ test("effectivePeriodWarning names the measure, the artifact period and the run 
   assert.equal(effectivePeriodWarning(artifact, { start: "2026-01-01", end: "2026-12-31T23:59:59.999Z" }), null);
   assert.equal(effectivePeriodWarning({ ...artifact, manifest: { ...artifact.manifest, effectivePeriod: null } }, { start: "2027-01-01", end: "2027-12-31T23:59:59.999Z" }), null);
 });
+
+/**
+ * Multi-rate reduction (ADR-074).
+ *
+ * Every case is built through `outcomeFromPopulations` rather than by hand, because the first version of
+ * this test asserted on shapes production never returns — `{COMPLIANT, inInitialPopulation:false}` and
+ * `{EXCLUDED, inInitialPopulation:false}` are both unreachable, so two of its assertions proved nothing
+ * and it missed the one divergence that IS reachable.
+ */
+test("worstOutcome reduces to the rate that still needs attention, over states production can produce", async () => {
+  const { worstOutcome, outcomeFromPopulations } = await import("./official-executor-adapter.ts");
+  const membership = (over: Record<string, boolean>) => ({
+    "initial-population": true,
+    denominator: true,
+    "denominator-exclusion": false,
+    "denominator-exception": false,
+    numerator: false,
+    ...over,
+  }) as never;
+  // numeratorMeansCompliant = true, as CMS137 declares.
+  const rate = (over: Record<string, boolean>) => outcomeFromPopulations(membership(over), true);
+
+  const compliant = rate({ numerator: true });
+  const overdue = rate({ numerator: false });
+  const excluded = rate({ "denominator-exclusion": true });
+  const notMeasured = rate({ "initial-population": false });
+
+  // Sanity: these ARE the shapes production returns.
+  assert.deepEqual(compliant, { outcome: "COMPLIANT", inInitialPopulation: true });
+  assert.deepEqual(notMeasured, { outcome: "MISSING_DATA", inInitialPopulation: false });
+
+  // The real CMS137 shape: initiated (compliant on rate 1), not engaged (overdue on rate 2).
+  assert.equal(worstOutcome([compliant, overdue]).outcome, "OVERDUE", "initiated-but-not-engaged stays actionable");
+  assert.equal(worstOutcome([overdue, compliant]).outcome, "OVERDUE", "order must not matter");
+  assert.equal(worstOutcome([compliant, compliant]).outcome, "COMPLIANT");
+
+  // THE REACHABLE DIVERGENCE the first version missed: a rate that does not measure this subject must
+  // not decide their status. MISSING_DATA is the most severe outcome AND the only not-in-IPP answer, so
+  // reducing over every rate would report "we cannot tell" about a subject the measure fully answered —
+  // and open a case for them.
+  const mixed = worstOutcome([compliant, notMeasured]);
+  assert.equal(mixed.outcome, "COMPLIANT", "a rate that ignores the subject cannot outrank one that answered them");
+  assert.equal(mixed.inInitialPopulation, true, "in ANY rate's initial population is in the measure's");
+
+  // When NO rate measures them, the answer is still MISSING_DATA and they are out of the population.
+  assert.deepEqual(worstOutcome([notMeasured, notMeasured]), { outcome: "MISSING_DATA", inInitialPopulation: false });
+
+  // EXCLUDED survives only when every measuring rate excludes them.
+  assert.equal(worstOutcome([excluded, overdue]).outcome, "OVERDUE");
+  assert.equal(worstOutcome([excluded, excluded]).outcome, "EXCLUDED");
+
+  // A single-rate measure is unchanged — the reduction is identity over one element.
+  assert.deepEqual(worstOutcome([compliant]), compliant);
+});

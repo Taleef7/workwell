@@ -1,5 +1,234 @@
 # Journal
 
+## 2026-09-06 — the 20,000-patient corpus runs through the real pipeline (MM-1 U2)
+
+U2 is code-complete on `feat/maui-corpus`: **typecheck clean, 2,314 backend tests passing, 0 failing**;
+frontend lint and build clean with 368 tests passing. Three ADRs written — **ADR-075** (the corpus, lazy
+composition, chunked evaluation), **ADR-074** (multi-rate, which the CMS137 work had been citing in
+nineteen places without a body), and **ADR-073** (outcome retention).
+
+**The realized corpus, at 20,000.** Generated in **0.3 s**, deterministic from `maui-py2027-v1`, the
+first 48 patients byte-identical to the fixture rows every screenshot and saved filter already names.
+
+| | |
+|---|---|
+| Clinics | Wailuku 5,618 · Kahului 5,234 · Kihei 3,947 · Lahaina 3,185 · Pukalani 2,016 |
+| Panels | 40 PCPs, 423–571 patients each |
+| Age | median 54; 65+ 6,732 · 45–64 6,064 · 18–44 4,401 · 0–17 2,803 |
+| Sex | 52.0 % female |
+| Conditions | hypertension 7,853 · diabetes 3,049 · SUD episode 547 · bipolar 347 · colorectal cancer 183 · hospice 87 · ESRD 62 — all emitted as FHIR. `frailty` (592) and `pregnancy` (162) are drawn and counted but **not emitted**: the corpus has no verified code for either, so no measure can read them. |
+| Blood pressure | 1,673 of 7,853 readings (21 %) are isolated systolic — high systolic, normal diastolic. Previously zero, which meant CMS165's "both components below threshold" conjunction was never exercised. |
+
+**Measured performance.** A full run over the corpus — 20,000 patients × 14 measures = **280,000 work
+items in 43.9 s** on this machine, against the pinned 15-minute ceiling. Corpus generation is linear:
+11.1× the time for 10× the subjects. The engine in that measurement is a stub and the test says so; CQL
+time against the real artifacts is the credentialed job's business, and a new test there asserts the
+official artifacts actually find a population in a data-first corpus.
+
+**Two things found that were wrong on main.**
+
+The **Maui e2e was stale from U1** — it asserted three measure columns, `totalEvaluated` of 144, and a
+`hypertension` column that no longer exists on a patient roster. The project is workflow-dispatch only,
+so nothing had run it since the runnable set changed. Fixed to the ACO's five and 240.
+
+The **live Maui instance needs a segment repair before the corpus is switched on.** `All Patients` was
+seeded when the roster spanned two clinics; the corpus spans five, and case creation is gated by segment
+applicability — so **52 % of patients (10,435 of 20,000)** would get outcomes but no cases, roster cells
+reading NOT_APPLICABLE and no work list ever surfacing them. Nothing in the data would be wrong;
+everything the staff can act on would be missing. Documented in `DEPLOY.md` beside the corpus size,
+because it belongs with raising it rather than after somebody notices half the panel is empty.
+
+**Review.** The reviewer's one critical finding was real and would have corrupted every number:
+`WORKWELL_MAUI_CORPUS_SEED` reached the directory and not the bundles, so with it set the roster's
+`pat-00053` and the chart evaluated for `pat-00053` were different people under the same id. Fixed
+twice over — the composite takes the directory's own seed, and `bundleForSubject` cross-checks the
+regenerated patient against the roster row and refuses rather than serving somebody else's chart. My
+first test for it sampled the fixture prefix, whose fields are seed-independent by construction, and
+passed against the very bug it was written for.
+
+Four guards it found could not fire, including `invariant 6`, which asserted only `totalEvaluated` — a
+value that can never be per-chunk — while the counters actually at risk were asserted nowhere.
+
+### The review pass (four lanes)
+
+Own correctness reviewer, a clinical/provenance reviewer, GLM 5.3 Flash and Gemini 3.8 Flash. Two
+findings would have produced wrong numbers for the pilot, and both were invisible to every test:
+
+- **CMS2's follow-up order carried a FINDING code.** `ServiceRequest.code` was SNOMED 428181000124104
+  "Depression screening positive" — which classifies a screening *result* and is a direct-reference code
+  with no value set. CMS2's numerator retrieves follow-up through the referral, follow-up and
+  antidepressant value sets, so **1,240 documented follow-ups at 20,000 were invisible** and every one
+  of those patients read non-compliant: a work list full of people the practice had already handled.
+  Corrected to 183524004 "Referral to psychiatry service", which is what CMS's own CMS2 deck uses.
+  A new guard — an orderable resource may never carry a direct-reference code — catches the class, and
+  fails when the old code is put back.
+- **Retention kept the newest row per (subject, measure), not per PERIOD.** A calendar-year eCQM's whole
+  2027 evidence is superseded by the first 2028 run, so every PY2027 row became deletable around April
+  2028 — months before anyone could be asked to justify a PY2027 rate. Now per period.
+
+Three more that were real:
+
+- **The scheduler skipped a whole night** whenever a run started more than 30 minutes past the anchor —
+  a run at 12:30 gave a next fire 47.5 hours later — and the commonest trigger is the most ordinary,
+  the first run after a working-hours deploy. My own test asserted a 44-hour gap under the name "a late
+  run does not drag the next one late". The rule is now one scheduled run per UTC day at the anchor.
+- **The retention pin list truncated at 100,000 open cases**, ordered `updated_at DESC`, so the rows
+  dropped were the long-open ones whose evidence was about to be deleted. Both exclusions now live in
+  SQL, per row, with no list to truncate.
+- **A mid-chunk failure on the SYNCHRONOUS run path** left the run RUNNING forever with no terminal
+  audit event. `ASYNC_SCOPES` covers only ALL_PROGRAMS and SITE, so a 20,000-subject MEASURE run went
+  through the uncovered path.
+
+And a set of clinical corrections: Encounter periods carried no timezone (invalid FHIR `dateTime`, on
+the resource every denominator reads); hospice was drawn, counted and never emitted, so a denominator
+exclusion could never fire; ESRD prevalence was 3–5× the real figure; SUD was one diagnosis for all 564
+patients; conditions had no age floors (17 substance-use episodes under 13); condition onsets could
+predate birth; and a `setUTCMonth` overflow made 11 of 27 look-back months unreachable.
+
+**Flagged, not fixed — owner-owned.** The Postgres keep-set orders by
+`(subject_id, measure_id, evaluation_period, evaluated_at DESC)` and no such index exists, so on a large
+table the nightly DELETE sorts the whole thing. An index is a migration. Retention stays unset
+everywhere until that is decided, and `DEPLOY.md` says so.
+
+**Left for the owner:** the segment repair above, the Postgres retention index, and the review of the retention SQL in the PR.
+
+### The second pass — what the sandbox was actually showing
+
+Before opening the PR, a second review round: own reviewer, a clinical reviewer, GLM 5.3 Flash, and
+Gemini 3.8 Flash — this time with shell access through Antigravity rather than a read-only diff, and it
+earned it. Its two CRITICAL findings were the same two I had reproduced an hour earlier by running the
+credentialed job's own test locally (the terminology sidecars can be vendored locally for cms2 and
+cms137, whose pins do not need VSAC): **the deployed sandbox had been putting the entire roster out of
+every initial population, every night, since the corpus landed.**
+
+- **The corpus described 2027; the run scored 2026.** Every clinical fact was pinned to
+  `CORPUS_MEASUREMENT_YEAR = 2027`, while a nightly run evaluates the calendar year of its evaluation
+  date (ADR-072) — 2026, today. Not one encounter fell inside the measurement period. The
+  `effectivePeriodWarning` was silent because the 2026 artifacts and the 2026 period agree exactly; the
+  run completed; the roster read MISSING_DATA for everyone. The population test that would have said so
+  was pinned to `2027-12-31` and passed. **Fixed by making identity fixed and clinical facts follow the
+  year the run scores** (generator 4.0.0, ADR-075 amendment): a patient is the same person in every year,
+  and `bundleForSubject` generates their facts for the year of the evaluation date. The population test
+  now asks about the current UTC year.
+- **CMS125 found nobody** — `inIPP=0` in the credentialed job's own log, which was red on this branch.
+  Its initial population compares the `us-core-sex` extension to SNOMED 248152002, not
+  `Patient.gender`, and the corpus Patient carried only `gender`. The Patient now carries `us-core-sex`,
+  `us-core-race` and `us-core-ethnicity` in the steward's own shape, plus a `Coverage` typed from the
+  Source of Payment Typology — the four supplemental data elements every artifact declares.
+- **CMS137 found nobody.** Its denominator is a qualifying ENCOUNTER during which an encounter-diagnosis
+  Condition starts; the corpus emitted a problem-list Condition at midnight on a day that need not have
+  had a visit. The episode is now an office-visit `Encounter` plus a `qicore-condition-encounter-diagnosis`
+  with onset inside its period. Measured over 184 SUD patients at 2026-12-31: 172 in the initial
+  population, 69 meet Initiation, 25 meet Engagement — both rates alive.
+- **CMS2's 170 documented refusals read OVERDUE.** The exception retrieves a CANCELLED observation of
+  the screening INSTRUMENT with the refusal in its `qicore-notDoneReason` extension; the corpus emitted a
+  final Observation coded with the refusal itself. Reshaped to the steward's own deck's form.
+
+Then the standards findings the first pass had deliberately left: the mammogram is now
+`qicore-observation-clinical-result` rather than a lab profile with an imaging category; the Provenance
+informant is a resolvable `Organization`; frailty is emitted with the dementia medication or
+advanced-illness diagnosis the 66+ exclusion needs, and palliative care, bilateral mastectomy and total
+colectomy are drawn and emitted so every shared denominator exclusion can fire; `pregnancy`, which no
+vendored measure reads, is gone.
+
+**The multi-rate half (ADR-074 amendment).** Stratifier results — which `fqm-execution` had been
+computing and the package discarding — are persisted as `evidence_json.official.strata` and reported: the
+summary and individual `MeasureReport`s carry a `stratifier` per group in the steward's true/false-stratum
+shape, and **the QRDA III now emits every group and every stratum** (a Reporting Stratum V2 per stratum
+per Measure Data observation) instead of refusing multi-rate with a 501. The stratum shape is derived from
+the IG and the `cqm-reports` reference exporter, not yet CVU+-validated, and `STANDARDS_CONFORMANCE.md`
+says so. The flip gate and the compliance API read every rate (`rates`, additive). The MADiE evidence
+report renders `r1 e/a · r2 e/a` per population instead of rate 1 alone, and the committed report is
+regenerated from the credentialed run — which also surfaced that CMS138 is a THREE-rate measure whose
+second and third rates the report had never shown either. And the summary MeasureReport and QRDA III **no longer return 422 above
+5,000 subjects** — they were unreachable for every official measure on the 20,000-patient pilot, the
+exact roster they exist for — because the aggregate is now summed from paged reads.
+
+Smaller, all real: an unrecognised `ageBand`/`sex` token is a 400 naming the accepted values on the
+roster, cases, both CSV exports and the MCP tool — it used to be dropped, serving the whole practice under
+a heading that said "65+"; `planned.progress` is now exact at the point of failure rather than a per-chunk
+lower bound; cms137 has official display wording (it fell back to "no record on file" and "order a
+screening"); the retention notice says closed cases' rows survive too.
+
+**What U3 had not finished.** cms137 was vendored, gated and executable, and invisible: no Active
+`cms137` catalog row existed (only the Draft `cms137v14` placeholder), so the programs overview could
+never list it, and no roster panel contained ANY of the four official-only ACO measures — a flip would
+have made a measure runnable with no column to show it in. Now: an Active `cms137` row (ADR-071's seed
+deprecates `cms137v14` toward it, audited once), a `cms137 → CMS137 / MIPS 305` identity, and the quality
+panel holds all six ACO measures, each a column exactly where its deployment routes it. The Maui e2e
+specs asserted five columns and 240 evaluations on a stack that routes nothing; corrected to what the
+code does there (the two authored measures, 96), with the reason written in.
+
+**Realized at 20,000 (2027 facts):** SUD episodes 604 · frailty 573 · palliative care 47 · bilateral
+mastectomy 63 · total colectomy 21 · hospice 95 · payer Medicare 3,927 / Medicare Advantage 2,900 /
+Medicaid 3,277 / commercial 9,896 · race White 6,532 / Asian 5,810 / NHOPI 4,871 / Other 2,162 · Hispanic
+or Latino 2,303. Identity, clinics, panels and the 48-row prefix are unchanged.
+
+**The third review round, on the second pass itself.** Own reviewer (execution against the real ELM,
+five mutations), Gemini 3.8 through Antigravity, GLM 5.3 Flash. What survived verification and was fixed:
+
+- **CMS2 banded the screening instrument by the wrong age.** The artifact bands by age at the START of the
+  period; the corpus used age at the end, so a patient who is 17 on Dec 31 (16 on Jan 1) got the adult
+  instrument and the measure, reading them as an adolescent, put them in the denominator with no
+  numerator — 102 screened patients per 20,000, all OVERDUE with a screening on file. Verified by
+  execution before and after: 40 of 40 such patients now COMPLIANT, refusals still EXCLUDED.
+- **29 of 604 SUD episodes fell after Nov 14**, outside CMS137's initial population, while the comment
+  beside the draw and the manifest's estimate said otherwise. Capped at Nov 14 (same two draws, so the
+  pinned digest of the first 100 did not move); the estimate uses age at period start for cms2 and cms137.
+- **Diabetes is an encounter diagnosis.** CMS122's only Condition retrieve is through
+  `qicore-condition-encounter-diagnosis`; the corpus stamped problems-health-concerns. Harmless under
+  `trustMetaProfile: false`, and the whole diabetic roster the day profiles are trusted.
+- **The "same person in every year" guard sampled five indices**, none of which crossed an age band
+  between 2026 and 2027, so a mutation making payer follow the evaluation year passed it. It now checks
+  all 20,000 and requires that hundreds cross a band.
+- **The dementia MedicationRequest fired the exclusion through a null interval** — no supply period, and
+  the engine treats `Interval[null, null]` as overlapping everything. It now carries a 90-day
+  `expectedSupplyDuration`, so the exclusion is reachable because of the data.
+- **cms125 is routed in production and declares two age strata**, so its QRDA III and MeasureReport are
+  stratified as of this pass and outside the CVU+-validated shape — the conformance caveat named only
+  CMS137; it now names cms125.
+- **One errored subject could flip a whole official run's exports to the status histogram** (GLM, the
+  one HIGH). The provenance gate read a single row — whichever sorted first — and an errored subject
+  persists `{ evaluationError }` with no `official` block, while `PARTIAL_FAILURE` is reportable. cms137
+  with an errored first row exported one rate, no strata. The gate now skips rows no engine evaluated
+  and pages on to the first that was; a test seeds exactly that run and fails against the old gate
+  (ADR-074 d12). GLM's MEDIUM — `unmeasured` computed and dropped — was already closed by the header
+  Gemini asked for; GLM reviewed the committed range, which predates it.
+- **Three guards that read as present but could not fire** (GLM, LOW): the single-rate QRDA III's
+  "byte-shape identical" claim was asserted structurally and is now a pinned digest, recorded after
+  diffing the scrubbed output against the pre-multi-rate builder and finding it identical; the corpus
+  had a digest pin for one evaluation year only, so a draw-order bug that moved clinical facts between
+  years while keeping identity would have passed — a 2026 pin joins the 2027 one; the paged sum was
+  tested at 5,001 rows but never at an exact page multiple, where the last full page is followed by an
+  empty one — 4,000 rows now sum to 4,000.
+
+**Codex on the PR (#528), four findings, all real, all fixed.**
+
+- **The scheduler's debounce floor existed in the docstring, in DEPLOY.md and as the tick's argument —
+  and nothing read it.** Enabled at 11:59, the first run fired at once and the 12:00 anchor fired a
+  minute later: two 20,000-patient runs for the same data. One test pinned that as correct ("firing twice
+  in a day is cheap"). The floor now applies to TODAY's anchor only — a same-day run inside the window
+  has served the day, tomorrow's anchor is never pushed — so the night-skip the anchor rule was built to
+  prevent stays prevented; the three tests that pinned the double run now pin the floor.
+- **Both Maui workflows shipped retention at 90 days while DEPLOY.md said to leave it unset until the
+  Postgres index exists.** Removed from both; the drift guard now pins its ABSENCE on Maui so adding it
+  is a deliberate edit in the same commit as the index (ADR-073 d1).
+- **Compaction deleted first and audited second, across two stores with no shared transaction.** An
+  audit failure left rows irreversibly gone with a rejected promise as the only record. The intent
+  event is now written before the delete and the completion event after (ADR-073 d4); a test fails the
+  audit store on each write in turn and checks nothing is deleted without a ledger entry.
+- **A chunk whose persist rejected after part of it committed was reported as unevaluated.** Postgres
+  inserts in 500-row chunks, SQLite in slices of 90; the pipeline advanced its count only on a returned
+  length. The Postgres adapter is now one transaction (contract test forces a failure in chunk 2 and
+  asserts chunk 1 rolled back — runs in CI's postgres:16 service), and the pipeline recounts from the
+  store on a persist failure so the terminal audit says what the table holds: 140, not 100, in the
+  test that seeds exactly that.
+
+**Still owner-owned:** the segment repair, the Postgres retention index, and the cms137 flip itself —
+`pnpm flip-gate --measure cms137` now reports both rates; the workflow edit that routes it remains the
+gated human act MM-1c describes, after the cms165 profile question (do NOT route cms165 — its decisive
+retrieve is by profile alone under `trustMetaProfile: false`).
+
 ## 2026-09-05 — the five pilot measures become runnable, and the gate that says two of them are not
 
 MM-1 U1 is code-complete on `feat/mm1-official-only-runnable`: typecheck clean, 2,191 tests passing,

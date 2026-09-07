@@ -86,6 +86,13 @@ const MEASURES = {
     name: "CMS165FHIRControllingHighBP",
     bundleFile: "CMS165FHIRControllingHighBP-bundle.json",
   },
+  // MIPS Quality ID 305, and the ONLY multi-rate measure in the pilot set: two groups, Initiation and
+  // Engagement. The gate compares BOTH — see `populationCountsByRate` and ADR-074. Blue on the ACO's
+  // own measure list, so it is Maui's responsibility rather than CMS-calculated.
+  cms137: {
+    name: "CMS137FHIRSUDTxInitEngagement",
+    bundleFile: "CMS137FHIRSUDTxInitEngagement-bundle.json",
+  },
 };
 
 /**
@@ -143,7 +150,10 @@ export interface OfficialCase {
   description: string;
   patientId?: string;
   patientBundle?: FhirBundle;
+  /** Rate 1. Kept for every existing consumer; for a multi-rate measure see `expectedRates`. */
   expected?: PopulationCounts;
+  /** EVERY rate the steward declares, in group order. Length 1 for a single-rate measure. */
+  expectedRates?: PopulationCounts[];
   expectedScore?: number;
   loadError?: string;
 }
@@ -237,28 +247,47 @@ export function loadFhirBundleFile(path: string): FhirBundle {
   return readBundle(path);
 }
 
+// Rate 1, derived from the per-rate walker rather than repeating its body — two copies of the same
+// population extraction is two things to keep in step on the next population-code change.
 function populationCounts(report: FhirResource): PopulationCounts {
-  const counts: PopulationCounts = {
-    "initial-population": 0,
-    denominator: 0,
-    "denominator-exclusion": 0,
-    numerator: 0,
-    "denominator-exception": 0,
-  };
-  const group = Array.isArray(report.group) ? report.group[0] as Record<string, unknown> | undefined : undefined;
-  const populations = group && Array.isArray(group.population) ? group.population : [];
-  for (const population of populations as Array<Record<string, unknown>>) {
-    const code = population.code as { coding?: Array<{ code?: string }> } | undefined;
-    const populationCode = code?.coding?.map((coding) => coding.code).find(
-      (candidate): candidate is PopulationCode => POPULATION_CODES.includes(candidate as PopulationCode),
-    );
-    if (!populationCode) continue;
-    if (typeof population.count !== "number" || !Number.isInteger(population.count)) {
-      throw new Error(`expected MeasureReport population ${populationCode} has a non-integer count`);
+  return populationCountsByRate(report)[0]!;
+}
+
+/**
+ * EVERY rate the expected MeasureReport declares, in `group` order.
+ *
+ * A multi-rate measure has one `group` per rate — CMS137 has two, Initiation and Engagement — and
+ * reading only `group[0]` verifies the first while silently ignoring the rest. That is a green that
+ * means half of what it looks like, so the gate compares all of them (ADR-074).
+ *
+ * Single-rate measures return an array of one, which is what every other gated measure is today, so
+ * their behaviour is unchanged.
+ */
+export function populationCountsByRate(report: FhirResource): PopulationCounts[] {
+  const groups = Array.isArray(report.group) ? report.group as Array<Record<string, unknown>> : [];
+  if (groups.length === 0) return [populationCounts(report)];
+  return groups.map((group) => {
+    const counts: PopulationCounts = {
+      "initial-population": 0,
+      denominator: 0,
+      "denominator-exclusion": 0,
+      numerator: 0,
+      "denominator-exception": 0,
+    };
+    const populations = Array.isArray(group.population) ? group.population : [];
+    for (const population of populations as Array<Record<string, unknown>>) {
+      const code = population.code as { coding?: Array<{ code?: string }> } | undefined;
+      const populationCode = code?.coding?.map((coding) => coding.code).find(
+        (candidate): candidate is PopulationCode => POPULATION_CODES.includes(candidate as PopulationCode),
+      );
+      if (!populationCode) continue;
+      if (typeof population.count !== "number" || !Number.isInteger(population.count)) {
+        throw new Error(`expected MeasureReport population ${populationCode} has a non-integer count`);
+      }
+      counts[populationCode] = population.count;
     }
-    counts[populationCode] = population.count;
-  }
-  return counts;
+    return counts;
+  });
 }
 
 function reportPeriod(report: FhirResource): MeasurementPeriod {
@@ -331,6 +360,7 @@ function loadCase(caseDir: string, uuid: string, metadata?: OfficialCaseName): {
           entry: patientResources.map((resource) => ({ resource })),
         },
         expected: populationCounts(report),
+        expectedRates: populationCountsByRate(report),
         expectedScore: reportScore(report),
       },
       period: reportPeriod(report),
@@ -461,6 +491,8 @@ export interface PopulationAgreement {
   pass: boolean;
   status: "expected-agreement" | "reference-agreement" | "mismatch";
   differences: PopulationCode[];
+  /** Per-rate detail for a multi-rate mismatch: which rate, which population, expected vs actual. */
+  rateDifferences?: string[];
 }
 
 /** Classify raw population agreement, with the source repo's six CMS122 expected-result defects isolated. */
@@ -469,7 +501,43 @@ export function classifyPopulationAgreement(
   uuid: string,
   expected: PopulationCounts,
   actual: PopulationCounts,
+  /**
+   * Every rate, when the measure has more than one. Agreement requires ALL of them to match: CMS137
+   * declares Initiation and Engagement, and a case that matches Initiation while disagreeing on
+   * Engagement is a MISMATCH, not a pass. Omitted for single-rate measures, where `expected`/`actual`
+   * already are the whole answer (ADR-074).
+   */
+  rates?: { expected: PopulationCounts[]; actual: PopulationCounts[] },
 ): PopulationAgreement {
+  if (rates && (rates.expected.length > 1 || rates.actual.length > 1)) {
+    if (rates.expected.length !== rates.actual.length) {
+      return {
+        pass: false,
+        status: "mismatch",
+        differences: [...POPULATION_CODES],
+      };
+    }
+    const differing = new Set<PopulationCode>();
+    const byRate: string[] = [];
+    for (const [i, expectedRate] of rates.expected.entries()) {
+      const actualRate = rates.actual[i]!;
+      for (const code of POPULATION_CODES) {
+        if (expectedRate[code] === actualRate[code]) continue;
+        differing.add(code);
+        // WHICH rate diverged, not just which population. A cms137 mismatch reported as
+        // `["numerator"]` leaves an investigator unable to tell Initiation from Engagement — the one
+        // thing they need first (ADR-074).
+        byRate.push(`rate ${i + 1} ${code}: expected ${expectedRate[code]}, got ${actualRate[code]}`);
+      }
+    }
+    const differences = [...differing];
+    return {
+      pass: differences.length === 0,
+      status: differences.length === 0 ? "expected-agreement" : "mismatch",
+      differences,
+      ...(byRate.length > 0 ? { rateDifferences: byRate } : {}),
+    };
+  }
   const differences = POPULATION_CODES.filter((code) => expected[code] !== actual[code]);
   if (differences.length === 0) return { pass: true, status: "expected-agreement", differences };
   const isKnownReferenceAgreement =
@@ -518,7 +586,10 @@ export type FqmCalculate = (
 ) => Promise<FqmOutput>;
 
 export interface OfficialCaseResult extends OfficialCase {
+  /** Rate 1. For a multi-rate measure see `actualRates`, which the report and the agreement read. */
   actual?: PopulationCounts;
+  /** Every rate fqm returned, in the artifact's group order (ADR-074). */
+  actualRates?: PopulationCounts[];
   agreement?: PopulationAgreement;
   error?: string;
 }
@@ -720,10 +791,20 @@ export async function runOfficialMeasureCases(
     const populations = result?.detailedResults?.[0]?.populationResults;
     if (!result || !populations) return { ...item, error: "fqm-execution returned no population result for patientId" };
     const actual = actualPopulationCounts(populations);
+    // Every rate fqm returned, in the same order the artifact declares its groups.
+    const actualRates = (result.detailedResults ?? [])
+      .map((detail) => detail?.populationResults)
+      .filter((p): p is FqmPopulationResult[] => Array.isArray(p))
+      .map(actualPopulationCounts);
+    const expectedRates = item.expectedRates ?? [item.expected];
     return {
       ...item,
       actual,
-      agreement: classifyPopulationAgreement(loaded.measure, item.uuid, item.expected, actual),
+      actualRates,
+      agreement: classifyPopulationAgreement(loaded.measure, item.uuid, item.expected, actual, {
+        expected: expectedRates,
+        actual: actualRates,
+      }),
     };
   });
 
@@ -947,6 +1028,16 @@ function escapeMarkdown(value: string): string {
 
 function populationCell(item: OfficialCaseResult, code: PopulationCode): string {
   if (!item.expected || !item.actual) return "—";
+  // EVERY rate, when the measure declares more than one: `r1 1/1 · r2 0/0`. A single `E/A` for a
+  // multi-rate case rendered Initiation and called it the measure, while the gate beneath it compared
+  // both — a report that hides the column it compares invites the opposite conclusion from the evidence
+  // (ADR-074).
+  const expectedRates = item.expectedRates ?? [item.expected];
+  const actualRates = item.actualRates ?? [item.actual];
+  if (expectedRates.length > 1 || actualRates.length > 1) {
+    const width = Math.max(expectedRates.length, actualRates.length);
+    return Array.from({ length: width }, (_, i) => `r${i + 1} ${expectedRates[i]?.[code] ?? "—"}/${actualRates[i]?.[code] ?? "—"}`).join(" · ");
+  }
   return `${item.expected[code]}/${item.actual[code]}`;
 }
 

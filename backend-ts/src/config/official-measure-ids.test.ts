@@ -15,5 +15,7 @@ test("the vendored id list is exactly the directory listing under measures/offic
 test("isVendoredOfficialMeasure is a plain membership test, immune to inherited keys", () => {
   assert.equal(isVendoredOfficialMeasure("cms122"), true);
   assert.equal(isVendoredOfficialMeasure("constructor"), false);
-  assert.equal(isVendoredOfficialMeasure("cms137"), false);
+  // cms137 IS vendored since the pilot took on MIPS 305; cms124 stands in as the unvendored example.
+  assert.equal(isVendoredOfficialMeasure("cms137"), true);
+  assert.equal(isVendoredOfficialMeasure("cms124"), false);
 });

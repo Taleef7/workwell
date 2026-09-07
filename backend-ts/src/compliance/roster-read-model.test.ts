@@ -44,6 +44,7 @@ function fakeStore(withRun: OutcomeWithRun[], byRun: Record<string, OutcomeRecor
     listOutcomesWithRun: async () => withRun,
     listLatestPopulationOutcomes: async () => reduceLatest(withRun),
     listOutcomes: async (runId: string) => byRun[runId] ?? [],
+    compactOlderThan: async () => 0,
     listLatestFinalizedOutcomePerMeasure: async () => { throw new Error("unused"); },
     hasOutcomes: async () => { throw new Error("unused"); },
     recordOutcome: async () => { throw new Error("unused"); },
@@ -330,4 +331,45 @@ test("buildRoster — filtering by a DISABLED segment falls back to the panel (s
   // With no ENABLED segment the overlay is inert — EMP's mmr keeps its real COMPLIANT status.
   const row = roster.rows.find((r) => r.subject.externalId === EMP)!;
   assert.equal(row.cells["mmr"]!.status, "COMPLIANT");
+});
+
+// ── The panel filters reach the roster (spec §5) ──────────────────────────────
+//
+// `subject-filters.test.ts` proves the predicate. This proves the roster CALLS it — the half that goes
+// missing silently, because a roster that ignores an unknown filter renders perfectly and simply shows
+// everybody.
+
+test("buildRoster applies providerId, and an unknown PCP returns no rows rather than all of them", async () => {
+  const store = fakeStore([], {});
+  const all = await buildRoster({ outcomeStore: store, segments: [] }, { pageSize: 100000 });
+  assert.ok(all.total > 1, "the fixture roster must have rows for this to discriminate");
+
+  const someone = EMPLOYEES.find((e) => e.providerId)!;
+  const filtered = await buildRoster({ outcomeStore: store, segments: [] }, { providerId: someone.providerId, pageSize: 100000 });
+  assert.ok(filtered.total > 0, "the PCP has a panel");
+  assert.ok(filtered.total < all.total, "and it is not the whole roster");
+  assert.ok(filtered.rows.every((r) => EMPLOYEES.find((e) => e.externalId === r.subject.externalId)?.providerId === someone.providerId));
+
+  const unknown = await buildRoster({ outcomeStore: store, segments: [] }, { providerId: "prov-does-not-exist", pageSize: 100000 });
+  assert.equal(unknown.total, 0, "an unknown PCP must not fall back to the unfiltered roster");
+});
+
+test("buildRoster applies ageBand and sex, and an unfiltered call is unchanged", async () => {
+  const store = fakeStore([], {});
+  const all = await buildRoster({ outcomeStore: store, segments: [] }, { pageSize: 100000 });
+  // The default directory records no sex, so a sex filter there correctly matches nobody — which is
+  // also the check that the filter is applied at all rather than ignored.
+  const bySex = await buildRoster({ outcomeStore: store, segments: [] }, { sex: "F", pageSize: 100000 });
+  assert.equal(bySex.total, 0, "the occupational directory records no sex — the filter must not match everyone");
+
+  const banded = await buildRoster({ outcomeStore: store, segments: [] }, { ageBand: "65+", pageSize: 100000 });
+  assert.ok(banded.total <= all.total);
+  // The HTTP route refuses an unrecognised token with a 400 before the read model sees it; a caller that
+  // bypasses the route gets a constraint NOBODY satisfies — an empty page is visible, the whole roster
+  // under a filter that was silently dropped is not.
+  assert.equal(
+    (await buildRoster({ outcomeStore: store, segments: [] }, { ageBand: "not-a-band", pageSize: 100000 })).total,
+    0,
+    "an unrecognised band matches nobody, never everybody",
+  );
 });

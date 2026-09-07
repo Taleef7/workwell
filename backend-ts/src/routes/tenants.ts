@@ -4,7 +4,7 @@
  *
  *   GET /api/tenants → { id, name }[]
  */
-import { TENANTS, webChartTenant } from "../config/deployment-profile.ts";
+import { tenants, webChartTenant } from "../config/deployment-profile.ts";
 import type { DataSourceEnv } from "../engine/ingress/data-source.ts";
 
 const json = (data: unknown): Response =>
@@ -14,6 +14,6 @@ export async function handleTenants(req: Request, env?: DataSourceEnv): Promise<
   if (req.method !== "GET") return null;
   if (new URL(req.url).pathname !== "/api/tenants") return null;
   const live = env ? webChartTenant(env) : null;
-  const tenants = live ? [...TENANTS, live] : TENANTS;
-  return json(tenants.map((t) => ({ id: t.id, name: t.name })));
+  const visible = live ? [...tenants(), live] : tenants();
+  return json(visible.map((t) => ({ id: t.id, name: t.name })));
 }

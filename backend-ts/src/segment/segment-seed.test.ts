@@ -7,7 +7,7 @@ import { rmSync } from "node:fs";
 import { createSqliteD1 } from "@mieweb/cloud-local";
 import { RUN_STORE_FLOOR_DDL } from "../stores/sqlite/schema.ts";
 import { SqliteSegmentStore } from "../stores/sqlite/segment-store-sqlite.ts";
-import { seedSegments, DEMO_SEGMENTS, demoSegmentsFor } from "./segment-seed.ts";
+import { seedSegments, demoSegments, demoSegmentsFor } from "./segment-seed.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { EMPLOYEES, employeesForTenant } from "../engine/synthetic/employee-catalog.ts";
 import { isApplicable } from "./segment-applicability.ts";
@@ -15,7 +15,7 @@ import { WEBCHART_LIVE_SITE } from "../engine/ingress/webchart/live-directory.ts
 import type { CreateSegmentInput, HydratedSegment } from "../stores/segment-store.ts";
 import { composeDeploymentDirectory, resolveDeploymentProfile, type DeploymentProfileId } from "../config/deployment-profile.ts";
 
-const baselineRule = () => DEMO_SEGMENTS.find((s) => s.name === "All Employees")!.rule;
+const baselineRule = () => demoSegments().find((s) => s.name === "All Employees")!.rule;
 
 // Snapshot pinning the pre-change default seed byte-for-byte (default profile is unchanged).
 const DEFAULT_SNAPSHOT: CreateSegmentInput[] = [
@@ -79,7 +79,7 @@ test("seedSegments creates the demo segments and is idempotent by name", async (
   await seedSegments(store);
   await seedSegments(store); // second run must not duplicate
   const all = await store.listSegments();
-  assert.equal(all.length, DEMO_SEGMENTS.length);
+  assert.equal(all.length, demoSegments().length);
   assert.ok(all.find((s) => s.name === "OSHA Safety-Sensitive"));
   assert.ok(all.find((s) => s.name === "All Employees"));
 });
@@ -121,7 +121,7 @@ test("seeding is name-idempotent — an already-seeded baseline is left untouche
 // ---- per-profile seed invariants (2026-09-02) ----
 
 test("demo seed covers every runnable measure on the default profile (no measure orphaned)", () => {
-  const covered = new Set(DEMO_SEGMENTS.flatMap((s) => s.measureIds));
+  const covered = new Set(demoSegments().flatMap((s) => s.measureIds));
   const orphaned = Object.keys(MEASURES).filter((id) => !covered.has(id));
   assert.deepEqual(orphaned, [], `every runnable measure must be in ≥1 demo cohort; orphaned: ${orphaned.join(", ")}`);
   const unknown = [...covered].filter((id) => !(id in MEASURES));
@@ -154,7 +154,7 @@ test("maui seed has one All Patients segment scoped to the maui directory sites 
 });
 
 test("default seed is deep-equal to the pinned pre-change constant (byte-identical default profile)", () => {
-  assert.deepEqual(DEMO_SEGMENTS, DEFAULT_SNAPSHOT, "DEMO_SEGMENTS must remain byte-identical on the default profile");
+  assert.deepEqual(demoSegments(), DEFAULT_SNAPSHOT, "demoSegments() must remain byte-identical on the default profile");
   const defaultDir = composeDeploymentDirectory(resolveDeploymentProfile("default"));
   const mauiFromDefault = demoSegmentsFor("maui" as DeploymentProfileId, defaultDir.EMPLOYEES, ["hypertension"]);
   assert.equal(mauiFromDefault.length, 1, "demoSegmentsFor must select the maui set regardless of the loaded process profile");
@@ -182,7 +182,7 @@ test("the All Employees baseline covers the live WebChart site (roster shows rea
 
   // A live WebChart subject must be applicable to a baseline wellness measure (i.e. NOT overlaid N-A).
   const wcSubject = { externalId: "wc|wc-5", name: "Jane Doe", role: "employee", tenantId: "wc", site: WEBCHART_LIVE_SITE, providerId: "wc-provider-1" };
-  const baseline = DEMO_SEGMENTS.find((s) => s.name === "All Employees")!;
+  const baseline = demoSegments().find((s) => s.name === "All Employees")!;
   const seg: HydratedSegment = {
     id: "seg-baseline", name: baseline.name, description: baseline.description ?? "",
     enabled: true, rule: baseline.rule, measureIds: baseline.measureIds, overrides: [],

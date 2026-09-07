@@ -10,7 +10,12 @@ export type PanelId = "immunizations" | "osha" | "wellness";
 export const PANELS: Record<PanelId, string[]> = {
   immunizations: ["mmr", "varicella", "hepatitis_b_vaccination_series", "adult_immunization", "flu_vaccine"],
   osha: ["audiogram", "hazwoper", "tb_surveillance"],
-  wellness: ["hypertension", "diabetes_hba1c", "obesity_bmi", "cholesterol_ldl", "cms122", "cms125"],
+  // The quality-measure panel (labelled "Quality measures" on a patient deployment). The ACO's six
+  // computable measures all live here: an official-only one is a COLUMN exactly when the deployment
+  // routes it (`isCatalogActiveRunnable`), so cms2/cms130/cms165/cms137 appear on Maui as each flips
+  // and never on TWH, which routes none of them. Until 2026-09-06 they belonged to no panel at all, so
+  // a flip would have made a measure runnable and still given the roster no column to show it in.
+  wellness: ["hypertension", "diabetes_hba1c", "obesity_bmi", "cholesterol_ldl", "cms122", "cms125", "cms2", "cms130", "cms165", "cms137"],
 };
 
 export const DEFAULT_PANEL: PanelId = "immunizations";
