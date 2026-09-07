@@ -790,7 +790,7 @@ test("nightly idempotency (#150 H1): same-cycle reruns bucket to one cycle perio
 test("Fable H1: a population run emits RUN_COMPLETED + case audit events (the hard-rule fix)", async () => {
   const db = await createSqliteD1(join(tmpdir(), `workwell-pipeline-audit-${crypto.randomUUID()}.sqlite`));
   await db.exec(RUN_STORE_FLOOR_DDL.replace(/\n/g, " "));
-  const captured: { eventType: string; entityType: string; refRunId: string | null; actor: string }[] = [];
+  const captured: { eventType: string; entityType: string; refRunId: string | null; actor: string; payload?: unknown }[] = [];
   const auditDeps: RunPipelineDeps = {
     runStore: new SqliteRunStore(db),
     outcomeStore: new SqliteOutcomeStore(db),
@@ -800,7 +800,7 @@ test("Fable H1: a population run emits RUN_COMPLETED + case audit events (the ha
     actor: "cm@workwell.dev", // authenticated actor — audit rows must use THIS, not triggeredBy (Codex P1)
     events: {
       async appendAudit(input) {
-        captured.push({ eventType: input.eventType, entityType: input.entityType, refRunId: input.refRunId, actor: input.actor });
+        captured.push({ eventType: input.eventType, entityType: input.entityType, refRunId: input.refRunId, actor: input.actor, payload: input.payload });
       },
     },
   };
@@ -819,6 +819,15 @@ test("Fable H1: a population run emits RUN_COMPLETED + case audit events (the ha
   assert.ok(
     caseEvents.every((e) => ["CASE_CREATED", "CASE_UPDATED", "CASE_RESOLVED", "CASE_EXCLUDED"].includes(e.eventType)),
     "case events use the mapped vocabulary",
+  );
+  // The event carries the action the case now shows. Since ADR-074 d13 a CASE_UPDATED can be a
+  // next_action change under an unchanged status; without the action in the payload that event is
+  // indistinguishable from the silent refresh it replaced (review finding).
+  // One payload shape for every disposition, so this holds for all of them and is not vacuous:
+  // `caseEvents.length >= 1` is asserted above.
+  assert.ok(
+    caseEvents.every((e) => typeof (e.payload as { nextAction?: unknown } | undefined)?.nextAction === "string"),
+    "every CASE_* payload carries the case's nextAction",
   );
 
   // Idempotent re-confirm: a second run re-confirms the same OPEN cases → NO new CASE_UPDATED noise,

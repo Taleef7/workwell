@@ -116,11 +116,15 @@ const NEXT_ACTION_OVERRIDES: Record<string, Partial<Record<string, string>>> = {
   // "nothing on file".
 };
 
-export function nextActionFor(outcomeStatus: string, measureId: string): string {
+/**
+ * `evidence` is the outcome's `evidence_json` where the caller has it. A multi-rate measure's OVERDUE
+ * action names the rate the subject missed (ADR-074); without evidence the combined wording stands.
+ */
+export function nextActionFor(outcomeStatus: string, measureId: string, evidence?: unknown): string {
   // Task 8: official-routed measures read the official display table first — the authored
   // overrides below would otherwise describe a periodic exam the official artifact did not run.
   if (isOfficialRouted(measureId)) {
-    const official = officialDisplayFor(measureId, outcomeStatus);
+    const official = officialDisplayFor(measureId, outcomeStatus, evidence);
     if (official) return official.nextAction;
   }
   const override = NEXT_ACTION_OVERRIDES[measureId]?.[outcomeStatus];

@@ -183,6 +183,32 @@ test("explainCase deterministic fallback names employee + status", async () => {
   assert.match(res.explanation, /2025-04-19/);
 });
 
+test("explainCase deterministic fallback shows EVERY rate of a multi-rate official outcome, not the first three defines", async () => {
+  // A cms137 patient who initiated and did not engage carries six population rows. A fallback that
+  // printed the first three showed Initiation (all true) and dropped the Engagement gap — the one
+  // thing the OVERDUE status is about — from the sentence a reader gets when the model is down.
+  const r = recorder();
+  const evidence = {
+    why_flagged: { last_exam_date: null, days_overdue: null, compliance_window_days: 365, waiver_status: "none" },
+    expressionResults: [
+      { define: "official:Initiation:initial-population", result: true },
+      { define: "official:Initiation:denominator", result: true },
+      { define: "official:Initiation:numerator", result: true },
+      { define: "official:Engagement:initial-population", result: true },
+      { define: "official:Engagement:denominator", result: true },
+      { define: "official:Engagement:numerator", result: false },
+    ],
+  };
+  const res = await explainCase(
+    r.deps(async () => { throw new Error("no key"); }),
+    { caseId: "c137", measureName: "SUD Treatment", measureVersion: "v1", currentOutcomeStatus: "OVERDUE", lastRunId: "run1", employeeName: "Pat One", evidenceJson: evidence },
+    "cm@x",
+  );
+  assert.equal(res.provider, "fallback-rules");
+  assert.match(res.explanation, /official:Engagement:numerator=false/);
+  assert.match(res.explanation, /official:Initiation:numerator=true/);
+});
+
 const profileAiSurfaceScript = `
   import { draftSpec, draftCql, generateTestFixtures, explainCase, runInsight } from "./src/ai/ai-assist.ts";
   const systems = [];

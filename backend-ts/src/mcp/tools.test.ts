@@ -297,6 +297,18 @@ test("ADR-046: explain_outcome does NOT assert a recency finding for a value-bas
   assert.match(official, /was flagged as OVERDUE/);
 });
 
+test("ADR-074: explain_outcome names each rate of a multi-rate measure readably, and single-rate text is unchanged", async () => {
+  const { buildOutcomeExplanation } = await import("./tools.ts");
+  const text = buildOutcomeExplanation("Pat One", "OVERDUE", "SUD Treatment", {
+    why_flagged: { role_eligible: true, site_eligible: true, waiver_status: "NONE" },
+    expressionResults: [
+      { define: "official:Initiation:numerator", result: true },
+      { define: "official:Engagement:numerator", result: false },
+    ],
+  });
+  assert.match(text, /Official population membership: Initiation · numerator=true, Engagement · numerator=false/);
+});
+
 test("ADR-046: a recency measure still gets its recency sentence", async () => {
   const { buildOutcomeExplanation } = await import("./tools.ts");
   const authored = buildOutcomeExplanation("Al Smith", "OVERDUE", "Audiogram", {

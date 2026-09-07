@@ -260,8 +260,21 @@ export const OFFICIAL_DEFINE_PREFIX = "official:";
  */
 export function populationExpressionResults(
   populationResults: readonly { populationType: string; result: boolean }[],
+  rates?: ReadonlyArray<readonly { populationType: string; result: boolean }[]>,
+  rateLabels?: readonly string[],
 ): ExpressionResult[] {
-
+  // MULTI-RATE (ADR-074): every rate, each population under its rate's label —
+  // `official:Initiation:numerator`, `official:Engagement:numerator`. Rate 1 alone would show an
+  // initiated-but-not-engaged patient as `official:numerator = true` under an OVERDUE heading. A
+  // single-rate measure keeps the unlabelled shape byte-for-byte.
+  if (rates && rates.length > 1) {
+    return rates.flatMap((rate, index) =>
+      rate.map((p) => ({
+        define: `${OFFICIAL_DEFINE_PREFIX}${rateLabels?.[index] ?? `rate ${index + 1}`}:${p.populationType}`,
+        result: p.result,
+      })),
+    );
+  }
   return populationResults.map((p) => ({
     define: `${OFFICIAL_DEFINE_PREFIX}${p.populationType}`,
     result: p.result,
@@ -617,7 +630,7 @@ export function officialMeasureExecutor(deps: OfficialExecutorDeps): OfficialMea
         outcome,
         inInitialPopulation,
         evidence: {
-          expressionResults: populationExpressionResults(result.populationResults),
+          expressionResults: populationExpressionResults(result.populationResults, result.rates, semantics.rateLabels),
           // The regulatory truth, verbatim and lossless. MeasureReport/QRDA read THIS (ADR-031/PR-3),
           // never the workflow bucket above — the bucket cannot express DENEXCEP and inverts for an
           // inverse measure.

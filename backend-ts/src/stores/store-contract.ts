@@ -777,6 +777,35 @@ export function caseStoreContract(label: string, freshStore: () => Promise<CaseS
     assert.equal((await upsert(store, "OVERDUE"))?.disposition, "REOPENED");
   });
 
+  test(`[${label}] a re-confirmed status whose rate-aware next_action moved is UPDATED, a true re-confirm UNCHANGED (ADR-074 d13)`, async () => {
+    // Both floors, not SQLite alone: the rule is mirrored line-for-line in the two stores and CI's
+    // postgres:16 job is the only place the ceiling runs it (review finding).
+    const previousRouting = process.env.WORKWELL_OFFICIAL_MEASURES;
+    process.env.WORKWELL_OFFICIAL_MEASURES = "cms122,cms125,cms137";
+    try {
+      const rate = (numer: boolean) => [
+        { populationType: "initial-population", result: true },
+        { populationType: "denominator", result: true },
+        { populationType: "numerator", result: numer },
+      ];
+      const evidence = (r1: boolean, r2: boolean) => ({ official: { populationResults: rate(r1), rates: [rate(r1), rate(r2)] } });
+      const store = await freshStore();
+      const cms137 = (ev: unknown) =>
+        store.upsertFromOutcome({ runId: crypto.randomUUID(), subjectId: "pat-001", measureId: "cms137", evaluationPeriod: "2026-01-01", outcomeStatus: "OVERDUE", evidence: ev });
+      const created = await cms137(evidence(false, false));
+      assert.equal(created?.disposition, "CREATED");
+      assert.match(String(created?.nextAction), /not initiated within 14 days/i);
+      assert.equal((await cms137(evidence(false, false)))?.disposition, "UNCHANGED", "same status, same wording");
+      const moved = await cms137(evidence(true, false));
+      assert.equal(moved?.disposition, "UPDATED", "same status, different next_action: audited");
+      assert.match(String(moved?.nextAction), /engagement/i);
+      assert.equal((await cms137(evidence(true, false)))?.disposition, "UNCHANGED");
+    } finally {
+      if (previousRouting === undefined) delete process.env.WORKWELL_OFFICIAL_MEASURES;
+      else process.env.WORKWELL_OFFICIAL_MEASURES = previousRouting;
+    }
+  });
+
   test(`[${label}] a human-closed case is NOT reopened by a non-compliant run (H2 respect-manual-closure)`, async () => {
     const store = await freshStore();
     const c = (await upsert(store, "OVERDUE"))!;

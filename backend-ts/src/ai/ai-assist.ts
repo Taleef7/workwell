@@ -555,9 +555,14 @@ function buildDeterministicExplanation(input: CaseExplanationInput, subjectTerm:
   const daysOverdue = asString(whyFlagged.days_overdue, "unknown");
   const window = asString(whyFlagged.compliance_window_days, "unknown");
   const waiver = asString(whyFlagged.waiver_status, "unknown");
+  // An official outcome's rows are population membership, and a multi-rate measure has one set per
+  // rate (ADR-074): the first three would be rate 1 alone, which for an initiated-but-not-engaged
+  // cms137 patient reads all-true under an OVERDUE heading. Every official row is shown; authored
+  // defines keep the three-row snippet.
+  const isOfficialRow = (row: ExprResult): boolean => String(row.define ?? "").startsWith("official:");
+  const shown = expressionResults.length > 0 && expressionResults.every(isOfficialRow) ? expressionResults : expressionResults.slice(0, 3);
   const defineSnippet =
-    expressionResults
-      .slice(0, 3)
+    shown
       .map((row) => `${asString(row.define, "define")}=${asString(row.result, "unknown")}`)
       .join(", ") || "no define-level results available";
   // The employee wording is the original, byte-identical text; the patient wording drops the

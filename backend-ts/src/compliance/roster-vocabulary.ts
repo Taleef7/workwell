@@ -37,7 +37,7 @@ export function deriveCell(canonicalStatus: string, evidence: unknown, measureId
   if (refused && canonicalStatus !== "COMPLIANT") return { status: "DECLINED", method: "Declination on file" };
 
   if (isOfficialRouted(measureId)) {
-    const d = officialDisplayFor(measureId, canonicalStatus);
+    const d = officialDisplayFor(measureId, canonicalStatus, evidence);
     if (d) return { status: canonicalStatus as DisplayState, method: d.method };
   }
 

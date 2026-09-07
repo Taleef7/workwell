@@ -28,6 +28,11 @@ import { loadOfficialArtifact } from "../../wiring/official-artifacts.ts";
 import { evaluateLikeTheRunPipeline, type BatchAndSingle, type SnapshotSubject } from "./official-flip-snapshot.ts";
 import { runOfficialMeasure, defaultOfficialCasesDeps } from "./official-cases.ts";
 import { OFFICIAL_GATED_MEASURES, type OfficialMeasureId } from "../../standards/official-cases.ts";
+import { composeDeploymentDirectory, type DeploymentProfile } from "../../config/deployment-profile.ts";
+import { compositeBundleSource } from "../../wiring/subject-bundle-source.ts";
+import { corpusBundleSource } from "../../wiring/corpus-bundle-source.ts";
+import { corpusSeedFromEnv } from "../../engine/synthetic/corpus/corpus-directory.ts";
+import { runChunkSize } from "../run-pipeline.ts";
 
 /** Non-compliant statuses — the ones that put a subject on somebody's worklist. */
 const ACTIONABLE = new Set(["OVERDUE", "DUE_SOON"]);
@@ -41,8 +46,24 @@ export interface FlipGateMadie {
   readonly unavailable?: string;
 }
 
+/**
+ * Whose roster the reading describes. Attached to the JSON a flip PR carries, so "48 subjects in the
+ * initial population" can be read as the fixture or as a slice of the 20,000-patient corpus rather
+ * than guessed at.
+ */
+export interface RosterSource {
+  readonly profile: string;
+  /** Every evaluable subject the deployment's directory holds. */
+  readonly directorySize: number;
+  /** How many of them this gate actually evaluated (`--subjects` caps it). */
+  readonly evaluated: number;
+  /** The `WORKWELL_OFFICIAL_MEASURES` the roster was composed under — the deployment's list plus the measure under test. */
+  readonly routedAs: string;
+}
+
 export interface FlipGateRoster {
   readonly subjects: number;
+  readonly source?: RosterSource;
   /** Subjects the official artifact admitted to its initial population (ADR-043's signal) — rate 1's. */
   readonly inIpp: number;
   readonly denominator: number;
@@ -72,6 +93,78 @@ export interface GateDeps {
   readonly madie?: (measureId: OfficialMeasureId) => Promise<FlipGateMadie>;
   readonly loadArtifact?: (catalogId: string) => ReturnType<typeof loadOfficialArtifact>;
   readonly contentDir?: string;
+  /** Recorded on the report verbatim; `rosterSubjectsFor` produces it beside the subjects. */
+  readonly rosterSource?: RosterSource;
+  /** Subjects per executor batch; defaults to the run pipeline's own `WORKWELL_RUN_CHUNK_SIZE` (500). */
+  readonly chunkSize?: number;
+}
+
+/**
+ * The deployment's OWN roster, composed the way the run pipeline composes it — `composeDeploymentDirectory`
+ * for the subjects and `compositeBundleSource` for their records — with the measure under test routed
+ * HYPOTHETICALLY: the composite refuses a measure the env does not route, and the whole point of the gate
+ * is that the measure is not routed yet. So the env it is composed under is the deployment's list plus
+ * this measure, which is exactly the configuration the flip would create.
+ *
+ * Until MM-1 U3 the CLI built its subjects from the 48-row occupational fixture filtered to the maui
+ * tenant through the official-only fixture bundles. U2 made Maui's roster the generated corpus, so the
+ * gate was measuring a roster the deployment no longer ran — a corpus shape the artifact could not read
+ * would have passed it (the class of failure `corpus-official-population.test.ts` exists for).
+ *
+ * `limit` caps how many subjects are materialised: every bundle is built up front (evaluation then
+ * runs in the pipeline's chunks inside `gateMeasure`), so the cap is the memory and time control on a
+ * 20,000-patient directory.
+ */
+export function rosterSubjectsFor(
+  measureId: string,
+  evaluationDate: string,
+  env: Record<string, unknown>,
+  profile: DeploymentProfile,
+  opts: { readonly limit?: number } = {},
+): { subjects: SnapshotSubject[]; source: RosterSource } {
+  // Refused HERE, not left to the bundle source: Maui's corpus source deliberately does not gate
+  // `bundleForSubject` (it has no measure id to gate on), so the gate would otherwise build a whole
+  // corpus for a measure the profile cannot run and print a report about it; and on a profile with no
+  // fixture shape for the measure the old path handed the executor `bundle: undefined` for every
+  // subject and died inside it. A usage error names the measure and the profile instead.
+  if (!(profile.runnableMeasureIds as readonly string[]).includes(measureId)) {
+    throw new FlipGateUsageError(
+      `${measureId} is not in the ${profile.id} profile's measure set (${profile.runnableMeasureIds.join(", ")}); ` +
+        `set WORKWELL_INSTANCE to the deployment that runs it`,
+    );
+  }
+  const routed = String(env.WORKWELL_OFFICIAL_MEASURES ?? "")
+    .split(",")
+    .map((id) => id.trim())
+    .filter((id) => id.length > 0);
+  if (!routed.includes(measureId)) routed.push(measureId);
+  const routedAs = routed.join(",");
+  const hypothetical: Record<string, unknown> = { ...env, WORKWELL_OFFICIAL_MEASURES: routedAs };
+
+  // The directory and the corpus source are built from the SAME env, so they agree on who a subject
+  // is whatever process.env says — the composite's own default reads the deployment's seed, which is
+  // the right answer for a runtime caller and not for a gate that composed its own directory.
+  const directory = composeDeploymentDirectory(profile, hypothetical);
+  const source = compositeBundleSource(hypothetical, { corpus: corpusBundleSource(corpusSeedFromEnv(hypothetical)) }, profile);
+  const employees = directory.EVALUABLE_EMPLOYEES;
+  const taken = opts.limit === undefined ? employees : employees.slice(0, opts.limit);
+  // The pipeline prefers the subject's whole record where the source provides one (spec §4) and
+  // otherwise builds the measure's own bundle around the seeded target — mirrored here in that order.
+  const subjects: SnapshotSubject[] = taken.map((employee) => ({
+    subjectId: employee.externalId,
+    bundle: source.bundleForSubject
+      ? source.bundleForSubject(employee, evaluationDate)
+      : source.bundleFor(
+          employee,
+          measureId,
+          source.targetFor(employees, measureId, employee.externalId) ?? "COMPLIANT",
+          evaluationDate,
+        ),
+  }));
+  return {
+    subjects,
+    source: { profile: profile.id, directorySize: employees.length, evaluated: subjects.length, routedAs },
+  };
 }
 
 const tally = (values: Iterable<string>): Record<string, number> => {
@@ -142,19 +235,26 @@ export async function gateMeasure(
   const executor =
     deps.executor ?? officialMeasureExecutor({ expand: officialTerminologyExpander(loadOfficialArtifact) });
 
-  const batch = subjects.map(({ subjectId, bundle }) => ({ subjectId, patientBundle: bundle }));
-  let outcomes = new Map<string, { outcome: string; evidence?: unknown }>();
+  // In the run pipeline's OWN chunks (ADR-075): one 20,000-subject batch is a different working set
+  // and a different failure surface from twenty 500s, and the whole point of the roster reading is to
+  // be a shadow of the run rather than a study of its own. A chunk the executor refuses outright ends
+  // the reading and is reported; a subject it drops is an evaluation error, whichever chunk it was in.
+  const chunkSize = Math.max(1, deps.chunkSize ?? runChunkSize(process.env as Record<string, unknown>));
+  const outcomes = new Map<string, { outcome: string; evidence?: unknown }>();
   let batchError: string | undefined;
-  try {
-    outcomes = (await evaluateLikeTheRunPipeline(
-      executor,
-      measureId,
-      subjects,
-      batch as never,
-      evaluationDate,
-    )) as never;
-  } catch (error) {
-    batchError = error instanceof Error ? error.message : String(error);
+  for (let start = 0; start < subjects.length; start += chunkSize) {
+    const chunk = subjects.slice(start, start + chunkSize);
+    const batch = chunk.map(({ subjectId, bundle }) => ({ subjectId, patientBundle: bundle }));
+    try {
+      const part = (await evaluateLikeTheRunPipeline(executor, measureId, chunk, batch as never, evaluationDate)) as Map<
+        string,
+        { outcome: string; evidence?: unknown }
+      >;
+      for (const [subjectId, outcome] of part) outcomes.set(subjectId, outcome);
+    } catch (error) {
+      batchError = error instanceof Error ? error.message : String(error);
+      break;
+    }
   }
 
   const statuses = [...outcomes.values()].map((o) => o.outcome);
@@ -183,6 +283,7 @@ export async function gateMeasure(
   }));
   const roster: FlipGateRoster = {
     subjects: subjects.length,
+    ...(deps.rosterSource ? { source: deps.rosterSource } : {}),
     inIpp: rates[0]!.inIpp,
     denominator: rates[0]!.denominator,
     rates,
@@ -221,12 +322,19 @@ function verdictFor(input: {
   warning: string | null;
 }): string {
   const blockers: string[] = [];
-  if (input.batchError) blockers.push(`the executor refused the batch outright: ${input.batchError}`);
+  // A refused batch is ONE finding, and it ends the roster reading. The subjects it never reached are
+  // not "out of the initial population" and were never offered the per-subject fallback, so the ADR-043
+  // sentence and the fallback sentence below would send an operator to check bundle shapes for what
+  // was an executor crash (review finding). They are reported as never evaluated instead.
+  if (input.batchError) {
+    blockers.push(`the executor refused the batch outright: ${input.batchError}`);
+    if (input.roster.evaluationErrors > 0) blockers.push(`${input.roster.evaluationErrors} subject(s) were never evaluated because of it`);
+  }
   if (input.madie.unavailable) blockers.push(`the MADiE deck did not run — ${input.madie.unavailable}`);
   else if (input.madie.fail > 0) blockers.push(`${input.madie.fail} of ${input.madie.total} MADiE cases disagree with the steward's expected vector`);
   // ADR-043: a whole roster out of the initial population is SURFACED, never refused mid-run — but it
   // is exactly the signal that a flip would silently empty somebody's worklist.
-  if (input.roster.subjects > 0 && input.roster.inIpp === 0) {
+  if (!input.batchError && input.roster.subjects > 0 && input.roster.inIpp === 0) {
     blockers.push(
       `NOBODY in this deployment's ${input.roster.subjects} subjects is in the official initial ` +
         "population (ADR-043). Flipping would report every subject as out-of-population rather than " +
@@ -244,7 +352,7 @@ function verdictFor(input: {
       );
     }
   }
-  if (input.roster.evaluationErrors > 0) {
+  if (!input.batchError && input.roster.evaluationErrors > 0) {
     blockers.push(`${input.roster.evaluationErrors} subject(s) produced no outcome even after the per-subject fallback`);
   }
   if (input.warning) blockers.push(input.warning);
@@ -274,6 +382,12 @@ export function renderGate(report: FlipGateReport): string {
       : `  ${report.madie.pass}/${report.madie.total} agree; ${report.madie.fail} disagree.`,
     "",
     "## 2. The roster — the official artifact over this deployment's subjects",
+    ...(report.roster.source
+      ? [
+          `  roster: profile=${report.roster.source.profile} directory=${report.roster.source.directorySize} ` +
+            `evaluated=${report.roster.source.evaluated} (routed as WORKWELL_OFFICIAL_MEASURES=${report.roster.source.routedAs})`,
+        ]
+      : []),
     `  subjects=${report.roster.subjects} inInitialPopulation=${report.roster.inIpp} denominator=${report.roster.denominator}`,
     ...(report.roster.rates.length > 1
       ? report.roster.rates.map((r, i) => `  rate ${i + 1}: inInitialPopulation=${r.inIpp} denominator=${r.denominator} numerator=${r.numerator}`)
@@ -305,6 +419,8 @@ export interface FlipGateArgs {
   readonly measure: OfficialMeasureId;
   readonly evaluationDate: string;
   readonly contentDir?: string;
+  /** `--subjects N` caps the roster reading; `--subjects all` lifts the CLI's default cap. Absent = not given. */
+  readonly subjects?: number | "all";
 }
 
 export class FlipGateUsageError extends Error {}
@@ -314,12 +430,23 @@ export function parseArgs(argv: readonly string[], today: () => Date = () => new
   let measure: string | undefined;
   let evaluationDate: string | undefined;
   let contentDir: string | undefined;
+  let subjects: number | "all" | undefined;
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === "--measure") measure = argv[++i];
     else if (arg === "--evaluation-date") evaluationDate = argv[++i];
     else if (arg === "--content-dir") contentDir = argv[++i];
-    else throw new FlipGateUsageError(`unknown argument: ${arg}`);
+    else if (arg === "--subjects") {
+      const raw = argv[++i];
+      if (raw === "all") subjects = "all";
+      else {
+        const parsed = Number(raw);
+        if (!Number.isInteger(parsed) || parsed <= 0) {
+          throw new FlipGateUsageError(`--subjects must be a positive integer or "all", got ${raw}`);
+        }
+        subjects = parsed;
+      }
+    } else throw new FlipGateUsageError(`unknown argument: ${arg}`);
   }
   if (!measure) throw new FlipGateUsageError("--measure is required");
   // Validate the id rather than casting it. Unchecked, `--measure cms999` sails through parseArgs and
@@ -339,5 +466,5 @@ export function parseArgs(argv: readonly string[], today: () => Date = () => new
   if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== date) {
     throw new FlipGateUsageError(`--evaluation-date is not a real date: ${date}`);
   }
-  return { measure: measure as OfficialMeasureId, evaluationDate: date, contentDir };
+  return { measure: measure as OfficialMeasureId, evaluationDate: date, contentDir, ...(subjects !== undefined ? { subjects } : {}) };
 }

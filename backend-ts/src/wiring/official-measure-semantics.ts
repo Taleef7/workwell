@@ -31,6 +31,12 @@ export interface OfficialMeasureSemantics {
   numeratorMeansCompliant: boolean;
   /** Why, in the measure's own terms. Reviewed by a human; cite the numerator's clinical meaning. */
   rationale: string;
+  /**
+   * A MULTI-RATE measure's rate names, in the artifact's `Measure.group` order (ADR-074). They label
+   * each rate's populations in the persisted `expressionResults` and index the per-rate display
+   * wording; absent for a single-rate measure. Reviewed with the measure, like the field above.
+   */
+  rateLabels?: readonly string[];
 }
 
 export const OFFICIAL_MEASURE_SEMANTICS: Readonly<Record<string, OfficialMeasureSemantics>> = {
@@ -43,6 +49,7 @@ export const OFFICIAL_MEASURE_SEMANTICS: Readonly<Record<string, OfficialMeasure
       "MULTI-RATE: a subject is COMPLIANT only when every rate they are in the denominator for is met " +
       "- an initiated-but-not-engaged patient still has an open care gap, and a worklist calling them " +
       "compliant would hide exactly the follow-up this measure exists to prompt (ADR-074).",
+    rateLabels: ["Initiation", "Engagement"],
   },
   cms122: {
     numeratorMeansCompliant: false,

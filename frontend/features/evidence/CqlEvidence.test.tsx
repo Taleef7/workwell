@@ -50,4 +50,27 @@ describe("CqlEvidence", () => {
     render(<CqlEvidence evidence={null} />);
     expect(screen.getByText("No evidence recorded.")).toBeInTheDocument();
   });
+
+  it("renders a multi-rate measure's populations under their rate label", () => {
+    setSubject("patient");
+    render(<CqlEvidence evidence={{ expressionResults: [
+      { define: "official:Initiation:numerator", result: true },
+      { define: "official:Engagement:numerator", result: false },
+    ] }} />);
+    expect(screen.getByText("Initiation · Numerator")).toBeInTheDocument();
+    expect(screen.getByText("Engagement · Numerator")).toBeInTheDocument();
+    expect(screen.getByText("in")).toBeInTheDocument();
+    expect(screen.getByText("not in")).toBeInTheDocument();
+  });
+
+  it("renders the official why-flagged summary when the backend derived one", () => {
+    setSubject("patient");
+    render(<CqlEvidence evidence={{ why_flagged: {
+      last_exam_date: null, compliance_window_days: 365, days_overdue: null,
+      role_eligible: true, site_eligible: true, waiver_status: "none",
+      official_summary: "Flagged: treatment was initiated within 14 days but not engaged within 34 days of initiation.",
+    } }} />);
+    expect(screen.getByText("Why flagged")).toBeInTheDocument();
+    expect(screen.getByText(/treatment was initiated within 14 days but not engaged/)).toBeInTheDocument();
+  });
 });

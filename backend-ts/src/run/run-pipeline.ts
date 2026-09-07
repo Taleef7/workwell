@@ -964,6 +964,7 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
           measureId: item.measureId,
           evaluationPeriod: period,
           outcomeStatus: status,
+          evidence,
         });
         // Audit the case transition (Fable H1 — the population pipeline previously wrote NO case audit
         // events, violating the "every state change writes audit_event" hard rule). Idempotent
@@ -994,6 +995,10 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
                   disposition: upserted.disposition,
                   outcomeStatus: status,
                   status: upserted.status,
+                  // The action the case now shows. Since ADR-074 d13 an UPDATED can be a next_action
+                  // change under an unchanged status; without it here the event would be
+                  // indistinguishable from the silent refresh it replaced.
+                  nextAction: upserted.nextAction,
                   subjectId: item.employee.externalId,
                   measureId: item.measureId,
                   evaluationPeriod: period,

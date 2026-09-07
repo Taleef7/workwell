@@ -178,7 +178,7 @@ function evaluationFailedCard(row: CardInput, studioBaseUrl?: string): CdsCard {
 
 function detailFor(row: CardInput, method: string): string {
   const wf = deriveWhyFlagged(row.evidence, row.measureId, row.evaluationPeriod, row.status);
-  const lines = [`**${method}.** ${nextActionFor(row.status, row.measureId)}`];
+  const lines = [`**${method}.** ${nextActionFor(row.status, row.measureId, row.evidence)}`];
   const facts: string[] = [];
   if (wf.last_exam_date) facts.push(`Last completed: ${wf.last_exam_date}`);
   if (wf.days_overdue != null && wf.days_overdue > 0) facts.push(`Days overdue: ${wf.days_overdue}`);

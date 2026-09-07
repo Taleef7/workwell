@@ -52,7 +52,7 @@ to diff against, and that comparison is what every flip so far was judged on
 | QRDA Category I vs the HL7 ruler | 0 findings, XSD and Schematron (2026-08-02) | Cypress 7.5.1, 22 submissions |
 | QRDA Category III vs the HL7 ruler | 0 findings (2026-08-02) | same |
 | MeasureReport vs base FHIR R4 | 0 errors; the DEQM profile gap is exactly 3 findings per report | `measure-report.test.ts` |
-| Independent Java engine running our artifacts | 255 of 278 (2026-08-04) | 14 of the 23 exceptions trace to one conjunct whose required field the test cases omit |
+| Independent Java engine running our artifacts | 299 of 323 across seven measures (255 of 278 on 2026-08-04; CMS137 44 of 45 on both rates on 2026-09-06) | 14 of the 23 August exceptions trace to one conjunct whose required field the test cases omit; CMS137's one is a millisecond-versus-second precision difference at the period's first instant, isolated by two mutations (one second later admitted; the same instant without milliseconds admitted) |
 | Subject-level agreement vs Cypress's expected results | 64 of 64 and 150 of 150, every population (2026-08-03) | reproduced against a second independently generated archive |
 | Routed in production | 2 measures | `WORKWELL_OFFICIAL_MEASURES` in `deploy-twh-mieweb.yml` |
 

@@ -69,7 +69,7 @@ export class SqliteCaseStore implements CaseStore {
     // violation (which would fail one whole run mid-write, as the old atomic ON CONFLICT never did).
     const now = new Date().toISOString();
     const priority = priorityFor(input.outcomeStatus);
-    const nextAction = nextActionFor(input.outcomeStatus, input.measureId);
+    const nextAction = nextActionFor(input.outcomeStatus, input.measureId, input.evidence);
     let existing = await this.findByKey(input.subjectId, input.measureId, input.evaluationPeriod);
     let plan = planCaseUpsert(
       existing ? { status: existing.status, currentOutcomeStatus: existing.current_outcome_status, closedBy: existing.closed_by } : null,
@@ -139,7 +139,13 @@ export class SqliteCaseStore implements CaseStore {
         input.evaluationPeriod,
       )
       .first<CaseRow>();
-    return row ? { ...toRecord(row), disposition: plan.disposition! } : null;
+    // UNCHANGED means "nothing an operator would act on moved". `next_action` used to be a function of
+    // (status, measure), so a re-confirmed status implied a re-confirmed action; a multi-rate measure's
+    // action follows the rate the subject missed (ADR-074 d13), so the same OVERDUE can now carry a new
+    // action — a state change the pipeline must audit as UPDATED, not refresh silently.
+    const disposition =
+      plan.disposition === "UNCHANGED" && existing && existing.next_action !== nextAction ? "UPDATED" : plan.disposition!;
+    return row ? { ...toRecord(row), disposition } : null;
   }
 
   async getCase(id: string): Promise<CaseRecord | null> {
