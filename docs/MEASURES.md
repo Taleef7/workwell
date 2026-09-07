@@ -31,10 +31,11 @@ ADR-074): one catalog row, one outcome per patient reduced to the worst rate, an
 exported — and the roster cell, the case detail, the case's next action and the CDS card name the rate the
 patient actually missed ("without treatment initiation within 14 days" or "initiated but not engaged
 within 34 days"), read from the persisted rates (ADR-074 d13). All four sit in the roster's quality
-panel, so each becomes a column the day its flip routes it. **CMS137's MM-1c verification is complete
-(2026-09-06):** the flip gate over the corpus roster reads evidence FOR the flip (45/45 MADiE, 60 of 2,000 in
-the initial population, both rates alive), and the second-engine sweep agrees on 44/45 cases on both rates
-with the one disagreement run to a boundary-precision cause (`docs/evidence/CROSS_ENGINE_2026-09-06_CMS137.md`).
+panel, so each becomes a column the day its flip routes it. **CMS137's MM-1c verification is done on the sample the
+unit ran (2026-09-06):** the flip gate over the first 2,000 of the corpus roster reads evidence FOR the flip
+(45/45 MADiE, 60 in the initial population, both rates alive — the flip PR carries the `--subjects all`
+sweep), and the second-engine sweep agrees on 44/45 cases on both rates, the one disagreement characterised
+as a period-boundary difference (`docs/evidence/CROSS_ENGINE_2026-09-06_CMS137.md`).
 Its flip remains the owner's workflow edit, sequenced after cms2 and cms130 (ADR-072 D1), and the 2027
 pilot year still needs the MM-1d re-vendor.
 

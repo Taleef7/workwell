@@ -97,6 +97,9 @@ export function deriveWhyFlagged(evidence: unknown, measureId: string, evaluatio
   const binding = MEASURE_BINDINGS[measureId];
   const window = binding?.complianceWindowDays ?? 365;
   const grace = binding?.gracePeriodDays ?? 0;
+  // On a multi-rate official outcome this is rate 1's `denominator-exclusion` (the first define that
+  // matches). Exact for CMS137, whose rates share one denominator expression; a future multi-rate
+  // measure with per-rate exclusions would need the missed rate's (ADR-074 d13).
   const waiverDefine = ers.find((r) => /waiver|exemption|exclusion|contraindication/i.test(r.define));
   const waiverStatus = typeof waiverDefine?.result === "boolean" ? (waiverDefine.result ? "active" : "none") : "none";
   const official = isOfficialRouted(measureId) ? officialDisplayFor(measureId, outcomeStatus, evidence) : null;

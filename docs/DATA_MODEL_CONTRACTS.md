@@ -41,7 +41,11 @@ SQLite floor and the Pg ceiling read the current row and apply the shared pure `
   outcome — refreshed silently, so a nightly run records one `RUN_COMPLETED`, not hundreds of noise
   events). A re-confirm whose persisted `next_action` MOVED is `UPDATED`, not `UNCHANGED`: on a
   multi-rate measure the action names the rate the subject missed (ADR-074 d13), so the same OVERDUE
-  can carry a new action, and that is a state change the pipeline audits. The per-case audit is **best-effort at the run boundary**: it is written after the upsert
+  can carry a new action, and that is a state change the pipeline audits — the `CASE_UPDATED` payload
+  carries the new `nextAction`. The rule compares strings, so a change to a wording table
+  (`OFFICIAL_DISPLAY`, the next-action overrides, the subject-term prose) re-audits every open case ONCE
+  on the next run, and a legacy row whose `next_action` is NULL does so on first contact. Deliberate:
+  the persisted row changed. The per-case audit is **best-effort at the run boundary**: it is written after the upsert
   (the disposition is only known post-mutation), and a transient `audit_events` failure is caught and
   logged as a run `WARN` rather than aborting the run — so an otherwise-complete run still finalizes
   instead of being left stuck RUNNING / marked FAILED after the case was already mutated (mirrors the

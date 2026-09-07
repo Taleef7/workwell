@@ -334,8 +334,10 @@ populations and the raw JSON. Two consequences:
     corpus source built from the same seed its own directory was composed from, and the two cannot
     disagree about who a subject is (the seed-mismatch class ADR-075 closed in the directory). The gate
     refuses a measure outside the profile's set up front, with the profile named, rather than building a
-    corpus for it. `--subjects` caps the reading (2,000 by default in the CLI; `all` lifts it), because
-    every bundle is materialised for one batch call.
+    corpus for it. Evaluation runs in the run pipeline's own chunks (`WORKWELL_RUN_CHUNK_SIZE`), so the
+    reading is a shadow of the run rather than one 20,000-subject batch; every bundle is still
+    materialised up front, which is why `--subjects` caps the reading (2,000 by default in the CLI;
+    `all` lifts it).
 
 ## ADR-073: per-subject outcome history is a retention WINDOW, and the durable history is the aggregate
 

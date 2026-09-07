@@ -33,20 +33,41 @@ The case is a 14-year-old whose only encounter is a detoxification visit with
 an encounter diagnosis of alcohol abuse with onset an hour later. The initial population requires
 `ValidEncounters.period during "Measurement Period"`.
 
-Two hypotheses fit: the Java engine builds the period in a non-UTC zone (so `00:00Z` is 31 December
-local), or it compares the encounter's millisecond-precision start against a second-precision period
-start and, per CQL's uncertainty rules for DateTimes of differing precision, gets `null` where the JS
-engine gets `true`. Java's own report answers the first — the period is `+00:00`, at **second**
-precision — and one mutation answers the second: on a **fresh** container (`$evaluate-measure` caches
-per subject for the server's life), the same encounter with `period.start = 2026-01-01T00:00:01.000+00:00`
-— one second later, everything else identical — puts the patient in the initial population of both
-rates, and the sweep reads **45/45**.
+Two hypotheses fit at first: the Java engine builds the period in a non-UTC zone (so `00:00Z` is
+31 December local), or it compares the encounter's millisecond-precision start against a
+second-precision period start and, per CQL's uncertainty rules for DateTimes of differing precision,
+gets `null` where the JS engine gets `true`. Java's own report answers the first — the period is
+`+00:00`, at **second** precision — and the first mutation answers the second: on a **fresh** container
+(`$evaluate-measure` caches per subject for the server's life), the same encounter with
+`period.start = 2026-01-01T00:00:01.000+00:00` — one second later, everything else identical — puts
+the patient in the initial population of both rates, and the sweep reads **45/45**.
 
-So: **on this artifact, in this configuration, the two engines differ on a `during` whose left boundary
-coincides with the period start at mismatched precision.** That is a characterisation, not a verdict on
-which engine is right. The CQL specification's comparison semantics make a DateTime equal at the finest
-shared precision but more precise on one side an *uncertain* comparison, which is what the Java engine
-reports; the JS engine treats the boundary as included. MADiE's expected vector agrees with the JS reading.
+So: **on this artifact, in this configuration, the Java engine excludes an encounter that starts at the
+period's first instant and admits one that starts a second later.** That is a characterisation, not a
+verdict on which engine is right. The likeliest mechanism is CQL's comparison semantics for DateTimes
+of differing precision — equal at the finest shared precision but more precise on one side is an
+*uncertain* comparison — on the Java side alone: `fqm-execution` builds the period at millisecond
+precision (`DateTime.fromJSDate(start, 0)`), so the JS comparison is at equal precision and exact, and
+there is no uncertainty for it to resolve. MADiE's expected vector agrees with the JS reading.
+
+**The second mutation isolates the mechanism.** The one-second shift is consistent with a
+millisecond-versus-second precision null, but equally with a coarser Java period (day precision from
+`periodStart=2026-01-01`) or a strict lower bound. So, on another fresh container, the encounter start
+was rewritten as `2026-01-01T00:00:00+00:00` — **the same instant, at second precision, no
+milliseconds** — with nothing else changed. Java admits the patient to both rates and the sweep reads
+**45/45**. A coarser period or a strict bound would have excluded that too; only a precision mismatch
+between `.000` and the period's second-precision start explains the pair of results. The Java side
+compares an encounter starting at `00:00:00.000` against a period starting at `00:00:00` as
+uncertain, and the same encounter at `00:00:00` as included.
+
+| Encounter `period.start` | Java IPP / DENOM (both rates) | Sweep |
+|---|---|---|
+| `2026-01-01T00:00:00.000+00:00` (the steward's case) | 0 / 0 | 44/45 |
+| `2026-01-01T00:00:01.000+00:00` (one second later) | 1 / 1 | 45/45 |
+| `2026-01-01T00:00:00+00:00` (same instant, second precision) | 1 / 1 | 45/45 |
+
+Each row is a fresh container with the bundle reloaded and the terminology pushed before the first
+evaluation, because `$evaluate-measure` caches per subject for the server's life.
 
 ## What it means for the pilot
 

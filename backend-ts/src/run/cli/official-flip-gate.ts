@@ -111,8 +111,9 @@ export interface GateDeps {
  * gate was measuring a roster the deployment no longer ran — a corpus shape the artifact could not read
  * would have passed it (the class of failure `corpus-official-population.test.ts` exists for).
  *
- * `limit` caps how many subjects are materialised: every bundle is built up front and handed to one
- * batch call, so the cap is the memory and time control on a 20,000-patient directory.
+ * `limit` caps how many subjects are materialised: every bundle is built up front (evaluation then
+ * runs in the pipeline's chunks inside `gateMeasure`), so the cap is the memory and time control on a
+ * 20,000-patient directory.
  */
 export function rosterSubjectsFor(
   measureId: string,
@@ -321,12 +322,19 @@ function verdictFor(input: {
   warning: string | null;
 }): string {
   const blockers: string[] = [];
-  if (input.batchError) blockers.push(`the executor refused the batch outright: ${input.batchError}`);
+  // A refused batch is ONE finding, and it ends the roster reading. The subjects it never reached are
+  // not "out of the initial population" and were never offered the per-subject fallback, so the ADR-043
+  // sentence and the fallback sentence below would send an operator to check bundle shapes for what
+  // was an executor crash (review finding). They are reported as never evaluated instead.
+  if (input.batchError) {
+    blockers.push(`the executor refused the batch outright: ${input.batchError}`);
+    if (input.roster.evaluationErrors > 0) blockers.push(`${input.roster.evaluationErrors} subject(s) were never evaluated because of it`);
+  }
   if (input.madie.unavailable) blockers.push(`the MADiE deck did not run — ${input.madie.unavailable}`);
   else if (input.madie.fail > 0) blockers.push(`${input.madie.fail} of ${input.madie.total} MADiE cases disagree with the steward's expected vector`);
   // ADR-043: a whole roster out of the initial population is SURFACED, never refused mid-run — but it
   // is exactly the signal that a flip would silently empty somebody's worklist.
-  if (input.roster.subjects > 0 && input.roster.inIpp === 0) {
+  if (!input.batchError && input.roster.subjects > 0 && input.roster.inIpp === 0) {
     blockers.push(
       `NOBODY in this deployment's ${input.roster.subjects} subjects is in the official initial ` +
         "population (ADR-043). Flipping would report every subject as out-of-population rather than " +
@@ -344,7 +352,7 @@ function verdictFor(input: {
       );
     }
   }
-  if (input.roster.evaluationErrors > 0) {
+  if (!input.batchError && input.roster.evaluationErrors > 0) {
     blockers.push(`${input.roster.evaluationErrors} subject(s) produced no outcome even after the per-subject fallback`);
   }
   if (input.warning) blockers.push(input.warning);

@@ -995,6 +995,10 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
                   disposition: upserted.disposition,
                   outcomeStatus: status,
                   status: upserted.status,
+                  // The action the case now shows. Since ADR-074 d13 an UPDATED can be a next_action
+                  // change under an unchanged status; without it here the event would be
+                  // indistinguishable from the silent refresh it replaced.
+                  nextAction: upserted.nextAction,
                   subjectId: item.employee.externalId,
                   measureId: item.measureId,
                   evaluationPeriod: period,

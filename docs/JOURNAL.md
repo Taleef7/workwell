@@ -64,12 +64,35 @@ Fresh HAPI 8.10.0 container, upstream bundle loaded, our 28 value-set expansions
 evaluation: **44 of 45 cases agree on both rates**, including all eight initiated-but-not-engaged cases.
 The one disagreement is "IPPass DetoxVisit": a detox encounter whose `period.start` is
 `2026-01-01T00:00:00.000+00:00`, the first millisecond of the year, which Java (period at second
-precision, UTC — its own report says so) reads as not `during` the period and the JS engine reads as
-included. Proven by construction: on a fresh container the same encounter one second later is in both
-rates and the sweep is 45/45. A boundary-precision characterisation, not a verdict; our runtime and the
-steward agree on all 45 (`docs/evidence/CROSS_ENGINE_2026-09-06_CMS137.md`). cms130/cms165 stay
-unmeasured cross-engine — their sidecars are VSAC-completed and not producible here — and CMS2's seven
-`NUMER 1→0` are unchanged. Running cross-engine total: 299 of 323 across seven measures.
+precision, UTC — its own report says so) reads as not `during` the period and the JS engine — whose
+period is at millisecond precision, so its comparison is exact — reads as included. Isolated by two
+mutations on fresh containers: one second later the case is admitted (45/45), and the SAME instant
+written without milliseconds is admitted too (45/45), which rules out a coarser Java period or a strict
+bound — it is millisecond-versus-second precision, on the Java side alone. A characterisation of a
+boundary, not a verdict; our runtime and the steward agree on all 45
+(`docs/evidence/CROSS_ENGINE_2026-09-06_CMS137.md`). cms130/cms165 stay unmeasured cross-engine — their
+sidecars are VSAC-completed and not producible here — and CMS2's seven `NUMER 1→0` are unchanged.
+Running cross-engine total: 299 of 323 across seven measures.
+
+**Pre-PR review, three reviewers (Gemini 3.8 Flash through Antigravity, own reviewer, GLM 5.3 Flash).**
+What survived and was fixed: the README's known-answer row still said 8 measures / 410 cases beside a
+cross-engine row that counted nine (455/455 since U2); the conformance row's "IPP and DENOM agree on all
+278" sat beside a 323 total whose one new disagreement IS on IPP/DENOM; the gate's verdict for a refused
+batch also printed the ADR-043 "nobody is in the initial population" sentence and "even after the
+per-subject fallback" for subjects it never reached — one finding now, "N subjects were never evaluated
+because of it"; the causal claim in two summaries was stronger than one mutation supported, and the
+JS-side sentence was wrong (fqm builds the period at millisecond precision — there is no uncertainty on
+that side) — hence the second mutation above, and the summaries now say what the pair of mutations
+shows; the disposition rule ran on the SQLite floor only, so the CREATED → UNCHANGED → UPDATED → UNCHANGED
+sequence is now in `store-contract.ts` and CI's postgres:16 job runs it on the ceiling; the new
+`CASE_UPDATED` carried no `nextAction`, so it was indistinguishable from the silent refresh it replaced
+(the payload carries it now, every disposition); `populationCountsByRate` on a group-less report
+recursed forever, reachable from the sweep's expected-report read outside its try (a zero vector now,
+pinned, with the CMS122 reference-agreement exemption pinned through `compareReports` beside it); and
+"one batch call" outlived the chunking in ADR-074 d14 and a docblock. Declined, with the reason written
+down: Gemini asked that a NULL or operator-set `next_action` not count as a change — but the persisted row
+does change, once, and an audited UPDATED is the honest record of it (`DATA_MODEL_CONTRACTS.md` §4 says
+so); a nightly run overwriting an operator-set action is a pre-existing behaviour worth its own issue.
 
 **Not done, and why.** The flip itself stays the owner's workflow edit, sequenced after cms2/cms130 per
 ADR-072 D1 — nothing here routes cms137 — and CMS2's seven cross-engine mismatches, MM-1c's precondition
