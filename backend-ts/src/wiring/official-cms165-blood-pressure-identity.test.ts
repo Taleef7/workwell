@@ -78,7 +78,7 @@ function candidatesWithALaterNonBpResult() {
     if (!patient.conditions?.includes("hypertension")) continue;
     const newestBp = bp.map((e) => e.date).sort().at(-1)!;
     const laterOther = patient.events.filter((e) => e.kind !== "bp" && e.date > newestBp);
-    if (laterOther.length > 0) out.push({ patient, laterOther });
+    if (laterOther.length > 0) out.push({ patient, laterOther });   // the postcondition the caller relies on
   }
   if (out.length === 0) throw new Error("no hypertensive corpus patient has a blood pressure followed by another kind of result");
   return out;

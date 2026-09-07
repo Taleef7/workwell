@@ -130,10 +130,21 @@ HTTP="$(curl -s -o "$LOAD_LOG" -w '%{http_code}' -X POST "$BASE" \
 if [[ "$HTTP" != "200" && "$HTTP" != "201" ]]; then
   echo "cross-engine-sweep: bundle load returned ${HTTP}" >&2
   head -c 2000 "$LOAD_LOG" >&2 || true
-  rm -f "$LOAD_LOG"
   exit 1
 fi
-rm -f "$LOAD_LOG"
+# 200 is NOT "it loaded". A FHIR transaction answers 200 and reports each entry's own status inside the
+# response bundle, so a load that failed for a Library or half the ValueSets still looks like success at
+# the HTTP layer — and the sweep would then run against a server missing exactly the content the
+# comparison is about, producing numbers rather than an error. Same class as the degenerate-sweep
+# refusal: the failure is silent unless something looks (review finding).
+if command -v jq >/dev/null 2>&1; then
+  BAD="$(jq -r '[.entry[]?.response.status // "" | select(test("^[45]"))] | length' "$LOAD_LOG" 2>/dev/null || echo 0)"
+  if [[ "${BAD:-0}" != "0" ]]; then
+    echo "cross-engine-sweep: the transaction returned ${HTTP} but ${BAD} entr(y/ies) failed inside it — the server is missing content the sweep needs." >&2
+    jq -r '[.entry[]?.response.status // "" | select(test("^[45]"))] | unique | join(", ")' "$LOAD_LOG" >&2 2>/dev/null || true
+    exit 1
+  fi
+fi
 sleep 20
 
 echo "  sweeping" >&2
