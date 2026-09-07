@@ -400,6 +400,9 @@ CREATE INDEX IF NOT EXISTS eval_state_measure_period_idx ON eval_state (measure_
 const FLOOR_COLUMN_BACKFILL: ReadonlyArray<{ table: string; column: string; ddl: string }> = [
   { table: "cases", column: "closed_reason", ddl: "closed_reason TEXT" },
   { table: "cases", column: "closed_by", ddl: "closed_by TEXT" },
+  // ADR-076 d2. NOT NULL needs a DEFAULT for SQLite's ALTER TABLE, and 'SYSTEM' is the true value for
+  // every pre-existing row rather than a placeholder: each of their actions was written by a run.
+  { table: "cases", column: "next_action_source", ddl: "next_action_source TEXT NOT NULL DEFAULT 'SYSTEM'" },
   { table: "outcomes", column: "evaluation_period", ddl: "evaluation_period TEXT NOT NULL DEFAULT ''" },
 ];
 
