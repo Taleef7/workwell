@@ -126,18 +126,79 @@ export class PgCaseStore implements CaseStore {
       if (plan.op !== "update") return null;
     }
 
-    // update
-    const { rows } = await this.pool.query<CaseRow>(
-      `UPDATE ${T} SET status = $1, priority = $2, next_action = $3, next_action_source = $4,
-         current_outcome_status = $5, last_run_id = $6, updated_at = $7, closed_at = $8,
-         closed_reason = $9, closed_by = $10
-        WHERE employee_id = $11 AND measure_id = $12 AND evaluation_period = $13
+    // update — a COMPARE-AND-SET on the two columns an operator can move under us.
+    //
+    // `planNextAction` decides from a row we read microseconds earlier, and an operator can escalate a
+    // case in that window. An unconditional UPDATE would then write the run's already-stale action over
+    // their instruction and reset ownership to SYSTEM — and if the status and computed action matched
+    // the snapshot the disposition would still be UNCHANGED, so the clobber would not even be audited.
+    // A silent loss of an operator's words is the exact thing ADR-076 d2 exists to prevent, so it must
+    // not survive as a race (Codex P2, #538).
+    //
+    // The guard is in the WHERE clause rather than a transaction because this store talks to a pooled
+    // `pool.query` with no session to hold a lock in, and because a CAS keeps `planNextAction` the ONE
+    // definition of the rule — expressing it as a SQL `CASE` instead would make the pure function dead
+    // on the path that matters and its unit tests vacuous.
+    const attemptUpdate = async (from: CaseRow, p: typeof plan, a: typeof action) =>
+      (
+        await this.pool.query<CaseRow>(
+          `UPDATE ${T} SET status = $1, priority = $2, next_action = $3, next_action_source = $4,
+             current_outcome_status = $5, last_run_id = $6, updated_at = $7, closed_at = $8,
+             closed_reason = $9, closed_by = $10
+            WHERE employee_id = $11 AND measure_id = $12 AND evaluation_period = $13
+              AND next_action IS NOT DISTINCT FROM $14
+              AND next_action_source IS NOT DISTINCT FROM $15
+          RETURNING ${COLS}`,
+          [
+            p.status!,
+            priority,
+            a.nextAction,
+            a.source,
+            input.outcomeStatus,
+            input.runId,
+            now,
+            p.closedAt ?? null,
+            p.closedReason ?? null,
+            p.closedBy ?? null,
+            input.subjectId,
+            input.measureId,
+            input.evaluationPeriod,
+            from.next_action,
+            from.next_action_source,
+          ],
+        )
+      ).rows[0];
+
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (!existing) return null;
+      const row = await attemptUpdate(existing, plan, action);
+      if (row) {
+        // Mirrors the SQLite floor: a re-confirmed status whose rate-aware `next_action` moved is
+        // UPDATED, never a silent refresh (ADR-074 d13). Compared against what was WRITTEN.
+        const disposition =
+          plan.disposition === "UNCHANGED" && existing.next_action !== row.next_action ? "UPDATED" : plan.disposition!;
+        return { ...toRecord(row), disposition };
+      }
+      // Nothing matched: the action moved between our read and our write. Re-read and re-plan — the
+      // same shape as the lost-insert-race path above.
+      existing = await this.findByKey(input.subjectId, input.measureId, input.evaluationPeriod);
+      if (!existing) return null;
+      plan = planFrom(existing);
+      if (plan.op !== "update") return null;
+      action = actionFrom(existing);
+    }
+
+    // Contended past three attempts — somebody is actively working this case. Write everything the run
+    // owns and leave the action alone: the run's outcome is recorded, and the operator keeps their
+    // words. Losing the run's wording is recoverable on the next tick; losing theirs is not.
+    const { rows: fallback } = await this.pool.query<CaseRow>(
+      `UPDATE ${T} SET status = $1, priority = $2, current_outcome_status = $3, last_run_id = $4,
+         updated_at = $5, closed_at = $6, closed_reason = $7, closed_by = $8
+        WHERE employee_id = $9 AND measure_id = $10 AND evaluation_period = $11
       RETURNING ${COLS}`,
       [
         plan.status!,
         priority,
-        action.nextAction,
-        action.source,
         input.outcomeStatus,
         input.runId,
         now,
@@ -149,13 +210,7 @@ export class PgCaseStore implements CaseStore {
         input.evaluationPeriod,
       ],
     );
-    // Mirrors the SQLite floor: a re-confirmed status whose rate-aware `next_action` moved is UPDATED,
-    // never a silent refresh (ADR-074 d13).
-    const disposition =
-      plan.disposition === "UNCHANGED" && existing && existing.next_action !== action.nextAction
-        ? "UPDATED"
-        : plan.disposition!;
-    return rows[0] ? { ...toRecord(rows[0]), disposition } : null;
+    return fallback[0] ? { ...toRecord(fallback[0]), disposition: plan.disposition! } : null;
   }
 
   async getCase(id: string): Promise<CaseRecord | null> {

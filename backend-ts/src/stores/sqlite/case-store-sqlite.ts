@@ -142,19 +142,84 @@ export class SqliteCaseStore implements CaseStore {
       if (plan.op !== "update") return null;
     }
 
-    // update
-    const row = await this.db
+    // update — a COMPARE-AND-SET on the two columns an operator can move under us, mirroring the Pg
+    // ceiling. `planNextAction` decides from a row read microseconds earlier, and an operator can
+    // escalate in that window; an unconditional write would put the run's already-stale action over
+    // their instruction and reset ownership to SYSTEM, and where the status and computed action matched
+    // the snapshot the disposition would still say UNCHANGED, so the clobber would not be audited
+    // either. `IS ?` is SQLite's null-safe comparison, the counterpart of the ceiling's
+    // `IS NOT DISTINCT FROM` (Codex P2, #538).
+    const attemptUpdate = async (from: CaseRow, p: typeof plan, a: typeof action) =>
+      await this.db
+        .prepare(
+          `UPDATE cases SET status = ?, priority = ?, next_action = ?, next_action_source = ?, current_outcome_status = ?,
+             last_run_id = ?, updated_at = ?, closed_at = ?, closed_reason = ?, closed_by = ?
+            WHERE employee_id = ? AND measure_id = ? AND evaluation_period = ?
+              AND next_action IS ? AND next_action_source IS ?
+          RETURNING ${COLS}`,
+        )
+        .bind(
+          p.status!,
+          priority,
+          a.nextAction,
+          a.source,
+          input.outcomeStatus,
+          input.runId,
+          now,
+          p.closedAt ?? null,
+          p.closedReason ?? null,
+          p.closedBy ?? null,
+          input.subjectId,
+          input.measureId,
+          input.evaluationPeriod,
+          from.next_action,
+          from.next_action_source,
+        )
+        .first<CaseRow>();
+
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (!existing) return null;
+      const row = await attemptUpdate(existing, plan, action);
+      if (row) {
+        // UNCHANGED means "nothing an operator would act on moved". `next_action` used to be a function
+        // of (status, measure), so a re-confirmed status implied a re-confirmed action; a multi-rate
+        // measure's action follows the rate the subject missed (ADR-074 d13), so the same OVERDUE can
+        // carry a new action — a state change the pipeline must audit as UPDATED, not refresh silently.
+        const disposition =
+          plan.disposition === "UNCHANGED" && existing.next_action !== row.next_action ? "UPDATED" : plan.disposition!;
+        return { ...toRecord(row), disposition };
+      }
+      existing = await this.findByKey(input.subjectId, input.measureId, input.evaluationPeriod);
+      if (!existing) return null;
+      plan = planCaseUpsert(
+        { status: existing.status, currentOutcomeStatus: existing.current_outcome_status, closedBy: existing.closed_by },
+        input.outcomeStatus,
+        now,
+      );
+      if (plan.op !== "update") return null;
+      action = planNextAction(
+        {
+          nextAction: existing.next_action,
+          nextActionSource: existing.next_action_source,
+          currentOutcomeStatus: existing.current_outcome_status,
+        },
+        computedAction,
+        input.outcomeStatus,
+      );
+    }
+
+    // Contended past three attempts. Write what the run owns and leave the action alone: the run's
+    // wording is recoverable on the next tick, an operator's instruction is not.
+    const fallback = await this.db
       .prepare(
-        `UPDATE cases SET status = ?, priority = ?, next_action = ?, next_action_source = ?, current_outcome_status = ?,
-           last_run_id = ?, updated_at = ?, closed_at = ?, closed_reason = ?, closed_by = ?
+        `UPDATE cases SET status = ?, priority = ?, current_outcome_status = ?, last_run_id = ?,
+           updated_at = ?, closed_at = ?, closed_reason = ?, closed_by = ?
           WHERE employee_id = ? AND measure_id = ? AND evaluation_period = ?
         RETURNING ${COLS}`,
       )
       .bind(
         plan.status!,
         priority,
-        action.nextAction,
-        action.source,
         input.outcomeStatus,
         input.runId,
         now,
@@ -166,15 +231,7 @@ export class SqliteCaseStore implements CaseStore {
         input.evaluationPeriod,
       )
       .first<CaseRow>();
-    // UNCHANGED means "nothing an operator would act on moved". `next_action` used to be a function of
-    // (status, measure), so a re-confirmed status implied a re-confirmed action; a multi-rate measure's
-    // action follows the rate the subject missed (ADR-074 d13), so the same OVERDUE can now carry a new
-    // action — a state change the pipeline must audit as UPDATED, not refresh silently.
-    const disposition =
-      plan.disposition === "UNCHANGED" && existing && existing.next_action !== action.nextAction
-        ? "UPDATED"
-        : plan.disposition!;
-    return row ? { ...toRecord(row), disposition } : null;
+    return fallback ? { ...toRecord(fallback), disposition: plan.disposition! } : null;
   }
 
   async getCase(id: string): Promise<CaseRecord | null> {

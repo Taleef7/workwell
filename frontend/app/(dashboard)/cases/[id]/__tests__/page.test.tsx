@@ -446,4 +446,42 @@ describe("CaseDetailPage crosswalk identity rendering", () => {
     });
     expect(document.querySelector("#case-assignees")).toBeInTheDocument();
   });
+
+  /**
+   * ADR-076 d2 made an operator's next action outrank the nightly wording. That rule is invisible on
+   * the case page unless the page says so: after escalating, an operator cannot otherwise tell that
+   * their instruction will survive the next run, nor that the outcome changing hands it back. The
+   * system-owned default stays silent — a badge on every case is furniture, not information.
+   *
+   * Both tests DELEGATE to the suite's default mock and patch only the case payload, so the page still
+   * receives the measures and timeline it needs to render at all. Replacing the whole implementation
+   * rendered an empty page and made the negative test pass for the wrong reason.
+   */
+  function withCaseOverrides(overrides: Record<string, unknown>) {
+    const base = get.getMockImplementation()!;
+    get.mockImplementation(async (url: string) => {
+      const result = await base(url);
+      return url.startsWith("/api/cases/case-001") && result && typeof result === "object" && !Array.isArray(result)
+        ? { ...(result as Record<string, unknown>), ...overrides }
+        : result;
+    });
+  }
+
+  it("says when the next action was written by a person", async () => {
+    withCaseOverrides({ nextAction: "Call the patient; evenings only.", nextActionSource: "OPERATOR" });
+    render(<CaseDetailPage />);
+    await waitFor(() => {
+      expect(screen.getAllByText("Call the patient; evenings only.").length).toBeGreaterThan(0);
+    });
+    expect(screen.getByText(/Written by a person/i)).toBeInTheDocument();
+  });
+
+  it("shows no owner note for a system-written next action", async () => {
+    withCaseOverrides({ nextActionSource: "SYSTEM" });
+    render(<CaseDetailPage />);
+    await waitFor(() => {
+      expect(screen.getAllByText("Schedule screening appointment").length).toBeGreaterThan(0);
+    });
+    expect(screen.queryByText(/Written by a person/i)).not.toBeInTheDocument();
+  });
 });

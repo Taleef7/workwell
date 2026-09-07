@@ -832,6 +832,52 @@ export function caseStoreContract(label: string, freshStore: () => Promise<CaseS
     assert.notEqual(changed?.nextAction, systemAction, "DUE_SOON and OVERDUE do not share wording");
   });
 
+  test(`[${label}] an operator writing between the run's read and its write is not clobbered (#538 P2)`, async () => {
+    // The race the compare-and-set exists for. `upsertFromOutcome` reads the row, plans from it, then
+    // writes. An operator escalating in that window would, with an unconditional UPDATE, have their
+    // instruction replaced by the run's already-stale wording and ownership reset to SYSTEM — and since
+    // the status had not moved, the disposition would say UNCHANGED, so nothing would audit the loss.
+    //
+    // This reaches into the store's own private `findByKey`, which a contract test would normally not
+    // do. The window is INSIDE one public call, so there is no other place to put the operator's write:
+    // driving both concurrently and hoping for the interleaving would be flaky, and testing them in
+    // sequence would not exercise the race at all. The interposition serves the pre-escalation row once
+    // — exactly what the run would have read — and lets the escalation land immediately after.
+    const store = await freshStore();
+    const created = (await upsert(store, "OVERDUE"))!;
+    const OPERATOR = "Call the patient; they asked for an evening appointment.";
+
+    const internals = store as unknown as {
+      findByKey: (subjectId: string, measureId: string, evaluationPeriod: string) => Promise<unknown>;
+    };
+    const realFind = internals.findByKey.bind(internals);
+    const stale = await realFind(created.employeeId, created.measureId, created.evaluationPeriod);
+    let served = false;
+    internals.findByKey = async (...args) => {
+      if (!served) {
+        served = true;
+        await store.patchCase(created.id, { nextAction: OPERATOR });
+        return stale; // the run plans from a row that is now one write out of date
+      }
+      return realFind(...args);
+    };
+    let reconfirmed;
+    try {
+      reconfirmed = await upsert(store, "OVERDUE");
+    } finally {
+      internals.findByKey = realFind;
+    }
+
+    assert.ok(reconfirmed, "the run still records its outcome");
+    assert.equal(reconfirmed!.nextAction, OPERATOR, "the operator's instruction survived the race");
+    assert.equal(reconfirmed!.nextActionSource, "OPERATOR", "and it is still theirs");
+
+    const after = await store.getCase(created.id);
+    assert.equal(after?.nextAction, OPERATOR, "and that is what is persisted, not only what was returned");
+    assert.equal(after?.nextActionSource, "OPERATOR");
+    assert.notEqual(after?.lastRunId, created.lastRunId, "while the run's own fields still landed");
+  });
+
   test(`[${label}] a human-closed case is NOT reopened by a non-compliant run (H2 respect-manual-closure)`, async () => {
     const store = await freshStore();
     const c = (await upsert(store, "OVERDUE"))!;
