@@ -56,11 +56,24 @@ the run taught: the gate's MADiE half reported NOT RUN twice before it ran, beca
 Procedure.period" throughout because the artifact's `FirstSUDEpisode`/`ValidEncounters` read `.period`
 across a union of Encounters and Procedures — artifact noise, not a corpus defect.
 
-**Not done, and why.** The MM-1c second-engine sweep needs a HAPI `cqf-fhir-cr` container; Docker
-Desktop was stopped and this host had 1.7 GB free, so it was not started. `cross-engine-check.ts` also
-reads `group[0]` of the expected MeasureReport, so it needs a per-group comparison before it can say
-anything about Engagement (`STANDARDS_CONFORMANCE.md` limit 4 now names CMS137). The flip itself stays
-the owner's workflow edit, sequenced after cms2/cms130 per ADR-072 D1 — nothing here routes cms137.
+**The second-engine sweep, once Docker was up.** `cross-engine-check.ts` compared `group[0]` of each
+MeasureReport — for CMS137, Initiation alone, so an Engagement disagreement would have read as agreement.
+The comparison is now a tested pure function over every group (`src/standards/cross-engine.ts`, the same
+classifier the MADiE gate uses), and the script records the period as the Java engine represents it.
+Fresh HAPI 8.10.0 container, upstream bundle loaded, our 28 value-set expansions pushed before the first
+evaluation: **44 of 45 cases agree on both rates**, including all eight initiated-but-not-engaged cases.
+The one disagreement is "IPPass DetoxVisit": a detox encounter whose `period.start` is
+`2026-01-01T00:00:00.000+00:00`, the first millisecond of the year, which Java (period at second
+precision, UTC — its own report says so) reads as not `during` the period and the JS engine reads as
+included. Proven by construction: on a fresh container the same encounter one second later is in both
+rates and the sweep is 45/45. A boundary-precision characterisation, not a verdict; our runtime and the
+steward agree on all 45 (`docs/evidence/CROSS_ENGINE_2026-09-06_CMS137.md`). cms130/cms165 stay
+unmeasured cross-engine — their sidecars are VSAC-completed and not producible here — and CMS2's seven
+`NUMER 1→0` are unchanged. Running cross-engine total: 299 of 323 across seven measures.
+
+**Not done, and why.** The flip itself stays the owner's workflow edit, sequenced after cms2/cms130 per
+ADR-072 D1 — nothing here routes cms137 — and CMS2's seven cross-engine mismatches, MM-1c's precondition
+for ITS flip, are still without a cause.
 
 **Review (own reviewer + Gemini 3.8 Flash with shell access, one round).** Two HIGHs, both real, both
 the same shape as the unit itself — a path that looked like it read the evidence and did not:
