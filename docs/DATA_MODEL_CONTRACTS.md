@@ -48,7 +48,10 @@ SQLite floor and the Pg ceiling read the current row and apply the shared pure `
   the persisted row changed.
 - **An OPERATOR's `next_action` is not overwritten by a run that learned nothing new** (ADR-076 d2).
   `cases.next_action_source` records who wrote it: `patchCase` is the operator surface (escalate,
-  manual resolve, outreach, rerun-to-verify) and marks `OPERATOR`; `upsertFromOutcome` marks `SYSTEM`.
+  manual resolve, outreach) and marks `OPERATOR`; `upsertFromOutcome` marks `SYSTEM`. **Rerun-to-verify
+  passes `SYSTEM` explicitly**, because the action it writes is `nextActionFor(...)` — the string a run
+  would compute — and freezing that would pin a multi-rate case to the rate it missed the day it was
+  reverified. Any caller computing an action the way a run does must say so the same way.
   While the outcome status is re-confirmed unchanged, an OPERATOR action stands and the disposition is
   `UNCHANGED` — the persisted row did not change, so there is no state change to audit. The moment the
   status moves, the computed action takes over and ownership reverts to `SYSTEM`, because an

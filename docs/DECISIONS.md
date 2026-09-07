@@ -58,6 +58,13 @@ outcome status changes, ownership reverts and the computed action takes over —
 about being OVERDUE is stale advice once CQL says something else. This is the rule `IN_PROGRESS`
 already had, applied to the other column an operator writes.
 
+The boundary is the surface, with one stated exception: `patchCase` marks OPERATOR because it is the
+surface people write through, and **rerun-to-verify passes `SYSTEM` explicitly** because the action it
+writes is `nextActionFor(...)` — the very string a run computes. Marking that OPERATOR would freeze it,
+pinning the rate a multi-rate case missed on the day it was reverified and never following the rate
+afterwards, which is the ADR-074 d13 behaviour this decision promises to leave alone. A caller that
+computes an action the way a run would says so; the type carries the field for exactly that.
+
 Deliberately NOT done: keeping an operator-owned action fresh against a wording-table edit or a moved
 missed rate. Both still reach every SYSTEM-owned case. The case page and roster cell show the missed
 rate regardless, because they read the outcome's evidence live rather than `next_action`.
@@ -74,7 +81,7 @@ overstate the drop against the runbook's own "52 % of patients".
 `spike_outcomes_keepset_idx` covers the keep-set's `(subject, measure, period, evaluated_at DESC,
 id DESC)` and `spike_cases_cited_outcome_idx` covers the "no case cites this row" anti-join. Maui ships
 a 400-day window in the same commit. `official-flip-config.test.ts` asserts a shipped window implies
-the index, so the dangerous direction — dropping the index while the window stays set — fails a test
+BOTH indexes, so the dangerous direction — dropping one while the window stays set — fails a test
 rather than being remembered.
 
 **The query is unchanged, and that is a measured decision rather than an omission.** The obvious
