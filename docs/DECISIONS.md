@@ -301,6 +301,42 @@ what decision 6's refusal was standing in for, and built it:
     byte shape is now pinned (UUIDs and clock stamps scrubbed, the rest hashed) after a diff against the
     pre-multi-rate builder found it unchanged, so "identical to before" is enforced rather than asserted.
 
+**Amended 2026-09-06 (MM-1 U3) — the staff member sees WHICH rate was missed, and the gate reads the
+deployment's own roster.** Decision 2's bucket is the worst rate, so OVERDUE alone covered two clinically
+different patients — a new episode nobody treated, and a patient who initiated and never came back — and
+the display table's comment promised "the evidence shows which", while the case page rendered rate 1's
+populations and the raw JSON. Two consequences:
+
+13. **A multi-rate measure's OVERDUE wording names the missed rate.** `officialDisplayFor` takes the
+    outcome's `evidence_json` and, where `official.rates` is present, selects the wording of the first
+    rate the subject is in the denominator of, not excluded or excepted from, and whose numerator reads
+    as the miss under the measure's own `numeratorMeansCompliant` — out of it on a higher-is-better
+    measure, in it on an inverse one, the same reading `outcomeFromPopulations` applies.
+    Every reader passes it — the roster cell, the case detail's `official_summary`, the case row's
+    `next_action` (the case store now receives the evidence; it persists nothing from it) and, through
+    `nextActionFor`, the CDS card. Without rates the combined wording stands byte-for-byte, and a
+    single-rate measure ignores the argument. The persisted `expressionResults` carry EVERY rate, each
+    population under its rate's label (`official:Initiation:numerator`, `official:Engagement:numerator`),
+    the labels being `OFFICIAL_MEASURE_SEMANTICS[id].rateLabels` in `Measure.group` order — reviewed
+    with the measure like `numeratorMeansCompliant` is. Single-rate measures keep the unlabelled shape.
+    Prose about a persisted CQL result, never a rule (AI_GUARDRAILS §1).
+14. **The flip gate's roster reading is the deployment's own roster** (amends ADR-072 decision 6's "the
+    roster"). The CLI built its subjects from the 48-row occupational fixture filtered to the maui tenant
+    through the official-only fixture bundles — a roster Maui stopped running when ADR-075 made the corpus
+    its directory — so a corpus shape the artifact could not read would have passed the gate. It now
+    composes `composeDeploymentDirectory` and `compositeBundleSource` exactly as the run pipeline does,
+    under an env that routes the measure under test the way the flip would (the composite refuses an
+    unrouted measure, and the gate exists precisely because the measure is not routed yet), and the
+    report records `roster.source` — profile, directory size, subjects evaluated, and the hypothetical
+    `WORKWELL_OFFICIAL_MEASURES` — so the JSON on a flip PR says whose roster it describes.
+    `compositeBundleSource` takes the profile explicitly for this; its corpus seed stays the DEPLOYMENT's
+    (the `env` argument carries routing and is often partial — a test pins that), so the gate hands it a
+    corpus source built from the same seed its own directory was composed from, and the two cannot
+    disagree about who a subject is (the seed-mismatch class ADR-075 closed in the directory). The gate
+    refuses a measure outside the profile's set up front, with the profile named, rather than building a
+    corpus for it. `--subjects` caps the reading (2,000 by default in the CLI; `all` lifts it), because
+    every bundle is materialised for one batch call.
+
 ## ADR-073: per-subject outcome history is a retention WINDOW, and the durable history is the aggregate
 
 **Status:** Accepted (2026-09-06). Milestone MM-1, unit U2 Stage D (`docs/ROADMAP_2026-08-30.md` §5).

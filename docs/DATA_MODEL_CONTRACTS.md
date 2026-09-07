@@ -39,7 +39,9 @@ SQLite floor and the Pg ceiling read the current row and apply the shared pure `
   `CREATED | UPDATED | REOPENED | RESOLVED | EXCLUDED | UNCHANGED`). The run pipeline emits a matching
   `CASE_*` audit event for every disposition except `UNCHANGED` (an idempotent re-confirm of the same open
   outcome — refreshed silently, so a nightly run records one `RUN_COMPLETED`, not hundreds of noise
-  events). The per-case audit is **best-effort at the run boundary**: it is written after the upsert
+  events). A re-confirm whose persisted `next_action` MOVED is `UPDATED`, not `UNCHANGED`: on a
+  multi-rate measure the action names the rate the subject missed (ADR-074 d13), so the same OVERDUE
+  can carry a new action, and that is a state change the pipeline audits. The per-case audit is **best-effort at the run boundary**: it is written after the upsert
   (the disposition is only known post-mutation), and a transient `audit_events` failure is caught and
   logged as a run `WARN` rather than aborting the run — so an otherwise-complete run still finalizes
   instead of being left stuck RUNNING / marked FAILED after the case was already mutated (mirrors the
@@ -105,7 +107,10 @@ SQLite floor and the Pg ceiling read the current row and apply the shared pure `
 > also carries `official.rates`, one population array per group, and a STRATIFIED one `official.strata`,
 > one array per group of `{ id, code, result, appliesResult }` keyed by the artifact's
 > `Measure.group.stratifier.id` — ADR-074; both absent for every single-rate, unstratified measure so
-> their evidence is byte-identical) and **`qrda1Import`** when the outcome arrived through the QRDA-I
+> their evidence is byte-identical. On an official outcome `expressionResults` is the POPULATION
+> membership, named `official:<population>` for a single-rate measure and `official:<Rate label>:<population>`
+> for a multi-rate one — every rate, under the reviewed `rateLabels` of its semantics entry (ADR-074 d13))
+> and **`qrda1Import`** when the outcome arrived through the QRDA-I
 > import path (ADR-051/056 — finalize refuses a run unless every outcome carries it). On an evaluation
 > failure the normal evidence is **replaced** by `{ evaluationError, message }` with status forced to
 > `MISSING_DATA` (`backend-ts/src/run/run-pipeline.ts`; the import path additionally retains its

@@ -1,5 +1,123 @@
 # Journal
 
+## 2026-09-06 — CMS137's gate runs on the roster Maui actually runs, and a case says which rate was missed (MM-1 U3)
+
+U3 as specified on 2026-09-04 was mostly absorbed by U2 (#528): cms137 vendored, gated 45/45, executable,
+an Active catalog row and identity, per-rate and per-stratum exports, a flip gate reading every rate. The
+spec's two-row shape (`cms137` + `cms137_engagement`) was rejected in favour of ADR-074's one row with a
+worst-of bucket, so what remained of U3 was the part the single-row design still owed and the verification
+pass. Branch `feat/mm1-u3-cms137-gate`. Two findings, both the same shape: something that read as a
+shadow of the real thing and was not.
+
+**The flip gate was measuring a roster Maui no longer runs.** `flip-gate`'s roster reading built its
+subjects from the 48-row occupational fixture filtered to the maui tenant, through the official-only
+fixture bundles. U2 made Maui's roster the generated corpus, composed through `compositeBundleSource` —
+so a corpus shape the artifact could not read would have passed the gate on a roster the deployment
+had stopped evaluating, which is the exact class of silent failure `corpus-official-population.test.ts`
+exists for. The gate now composes `composeDeploymentDirectory` and `compositeBundleSource` the way the
+run pipeline does, under an env that routes the measure under test the way the flip would (the composite
+refuses an unrouted measure, and the gate exists because the measure is not routed yet), and records
+`roster.source` — profile, directory size, subjects evaluated, the hypothetical
+`WORKWELL_OFFICIAL_MEASURES` — so the JSON attached to a flip PR says whose roster it describes.
+`compositeBundleSource` takes the profile explicitly; the gate hands it a corpus source built from the
+same seed its own directory was composed from — the composite's default seed is the deployment's, which
+a test pins, and my first cut read it from the partial routing env instead and broke that test. A
+measure outside the profile's set is refused up front with the profile named. `--subjects` caps the
+reading (the CLI defaults to 2,000, `all` lifts it) because every bundle is materialised for one batch
+call (ADR-074 d14).
+
+**The case page could not say which rate the patient missed.** The bucket is the worst of Initiation and
+Engagement, so OVERDUE covers a new episode nobody treated AND a patient who initiated and never came
+back. The display table's comment promised "the evidence shows which"; the case page rendered rate 1's
+populations (`official:numerator = true` under an OVERDUE heading for an initiated-but-not-engaged
+patient) and the raw JSON, and the frontend never rendered `official_summary` at all. Now
+`officialDisplayFor` takes the outcome's evidence and, where `official.rates` is present, selects the
+wording of the first rate the subject is in the denominator of, not excluded or excepted from, and not in
+the numerator of; the roster cell, the case detail, the case row's `next_action` (the case store receives
+the evidence and persists nothing from it) and the CDS card all read it. `expressionResults` carries every
+rate under its reviewed label (`official:Initiation:numerator`, `official:Engagement:numerator`;
+`OFFICIAL_MEASURE_SEMANTICS.cms137.rateLabels`), single-rate measures byte-identical; the frontend
+renders the label and the summary (ADR-074 d13). Prose about a persisted CQL result — never a rule.
+
+**The gate, run on the corpus with the local sidecar** (`WORKWELL_INSTANCE=maui`, 20,000-patient
+directory, first 2,000 subjects, evaluation date 2026-12-31):
+
+| | |
+|---|---|
+| MADiE | 45/45 agree |
+| Roster | 60 of 2,000 in the initial population and denominator; rate 1 numerator 23, rate 2 numerator 8; 52 actionable, 8 compliant; 0 evaluation errors |
+| effectivePeriod | covers 2026 (the 2027 pilot year still trips the MM-1d warning) |
+| Verdict | evidence FOR the flip |
+
+The 15 patients who initiated and did not engage are the ones whose wording changed today. Two things
+the run taught: the gate's MADiE half reported NOT RUN twice before it ran, because this machine's
+`.official-content` sparse cone predated cms137 (eight measures, not nine — the 2026-09-05 trap again;
+`fetch-official-cases.ps1` fixed it), and `cql-exec-fhir` prints "Failed to locate element for
+Procedure.period" throughout because the artifact's `FirstSUDEpisode`/`ValidEncounters` read `.period`
+across a union of Encounters and Procedures — artifact noise, not a corpus defect.
+
+**Not done, and why.** The MM-1c second-engine sweep needs a HAPI `cqf-fhir-cr` container; Docker
+Desktop was stopped and this host had 1.7 GB free, so it was not started. `cross-engine-check.ts` also
+reads `group[0]` of the expected MeasureReport, so it needs a per-group comparison before it can say
+anything about Engagement (`STANDARDS_CONFORMANCE.md` limit 4 now names CMS137). The flip itself stays
+the owner's workflow edit, sequenced after cms2/cms130 per ADR-072 D1 — nothing here routes cms137.
+
+**Review (own reviewer + Gemini 3.8 Flash with shell access, one round).** Two HIGHs, both real, both
+the same shape as the unit itself — a path that looked like it read the evidence and did not:
+
+- **Rerun-to-verify dropped the evidence.** `verificationNextAction` called `nextActionFor` without the
+  fresh outcome, so pressing "Rerun to verify" on an initiated-but-not-engaged patient rewrote the case's
+  `next_action` to the combined wording — "confirm initiation within 14 days" for a patient who had — and
+  recorded it in the audit payload. Staff rerun exactly the patients they are working. Fixed; pinned by a
+  test that runs as the Maui profile, because cms137 is runnable only where a profile lists it.
+- **The gate built a roster for a measure the profile cannot run.** Maui's corpus source deliberately
+  does not gate `bundleForSubject`, so `--measure cms68` would have generated 20,000 bundles and printed a
+  report; on the default profile cms137 has no fixture shape, so every subject arrived as `bundle:
+  undefined` and the executor threw. Refused up front now, naming the measure and the profile (exit 2).
+- MEDIUM: `missedRateIndex` hard-coded "missed = not in numerator"; it now takes the measure's
+  `numeratorMeansCompliant`, the same reading `outcomeFromPopulations` applies, so an inverse multi-rate
+  measure cannot name the rate a patient PASSED as the gap. LOW: the AI explain fallback printed the first
+  three defines — rate 1, all true — for a six-row multi-rate outcome (every official row now); the MCP
+  explanation rendered `Initiation:numerator` (now `Initiation · numerator`); a stray parenthesis in the
+  contracts doc.
+
+The own reviewer's pass added four that the first had not seen, all fixed:
+
+- **A `next_action` rewrite under an unchanged status was unaudited.** `next_action` used to be a
+  function of (status, measure), so a re-confirmed OVERDUE was UNCHANGED and the pipeline rightly wrote
+  nothing. With rate-aware wording the same OVERDUE can carry a new action — the patient initiated since
+  last night — and both stores would have refreshed the column silently. A re-confirm whose `next_action`
+  moved is now `UPDATED` in the SQLite floor and the Pg ceiling (one store test pins CREATED →
+  UNCHANGED → UPDATED → UNCHANGED), so the pipeline's `CASE_UPDATED` records it; the idempotency contract
+  says so.
+- **The gate evaluated the roster as ONE batch.** The pipeline hands the executor 500 subjects at a time
+  (ADR-075); twenty chunks and one 20,000-bundle batch are different working sets and different failure
+  surfaces, and the roster reading exists to be a shadow of the run. It now evaluates in
+  `WORKWELL_RUN_CHUNK_SIZE` chunks, counts unchanged, a dropped subject in chunk 2 still an evaluation
+  error. Bundles are still built up front, so `--subjects` stays the memory control and the runbook says
+  which.
+- **`routed as WORKWELL_OFFICIAL_MEASURES=cms137` when the operator sets nothing** reads as "cms122 and
+  cms125 unrouted", a configuration no flip creates; the CLI now warns and the runbook says to pass the
+  deployment's list.
+- **One new test was vacuous against the fallback**: the combined OVERDUE wording also matches "initiated
+  but not engaged within 34 days", so the exclusion test passed when no rate was selected at all. It now
+  excludes the other rate's phrase and asserts identity with the Engagement entry; a sibling pins that
+  every per-rate table has exactly one entry per reviewed rate label.
+
+**Verification.** Backend typecheck clean; full backend suite **2,393 pass, 21 self-skip** (clean run
+after the second review round) with, on the first run, one real failure — my first cut had the composite read the corpus seed from the routing env, and
+`corpus-bundle-source.test.ts` (which pins the deployment's seed against a partial env) caught it; fixed
+as above — and one environmental: `corpus-membership.test.ts` runs locally once any sidecar exists and
+reports the cms130/cms165 codes it cannot check without theirs (the credentialed job has all four).
+Frontend lint, build and the evidence component's tests green. Two host detours worth the sentence:
+every SQLite-backed test failed with "the local D1 adapter needs better-sqlite3" on this branch AND on a
+clean `main` worktree — the vendored package's link pointed into a U1 worktree deleted on 09-05, and the
+pinned 11.x has no Node 24 prebuilt, so it is now a junction to backend-ts's built 12.x; and piping
+`pnpm test` through `head` had been hiding the exit code. Docs: ADR-074 amendment, `DEPLOY.md` flip-gate
+block (command, roster provenance, and the stale "cms130/cms165 have no deck" paragraph corrected),
+`DATA_MODEL_CONTRACTS.md` §5, `MEASURES.md`, `STANDARDS_CONFORMANCE.md`, `guide/04` (the
+vendored/gated/runnable/routed table at nine measures).
+
 ## 2026-09-06 — the 20,000-patient corpus runs through the real pipeline (MM-1 U2)
 
 U2 is code-complete on `feat/maui-corpus`: **typecheck clean, 2,314 backend tests passing, 0 failing**;

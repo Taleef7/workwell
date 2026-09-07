@@ -964,6 +964,7 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
           measureId: item.measureId,
           evaluationPeriod: period,
           outcomeStatus: status,
+          evidence,
         });
         // Audit the case transition (Fable H1 — the population pipeline previously wrote NO case audit
         // events, violating the "every state change writes audit_event" hard rule). Idempotent

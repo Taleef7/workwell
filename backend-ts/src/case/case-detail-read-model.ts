@@ -99,7 +99,7 @@ export function deriveWhyFlagged(evidence: unknown, measureId: string, evaluatio
   const grace = binding?.gracePeriodDays ?? 0;
   const waiverDefine = ers.find((r) => /waiver|exemption|exclusion|contraindication/i.test(r.define));
   const waiverStatus = typeof waiverDefine?.result === "boolean" ? (waiverDefine.result ? "active" : "none") : "none";
-  const official = isOfficialRouted(measureId) ? officialDisplayFor(measureId, outcomeStatus) : null;
+  const official = isOfficialRouted(measureId) ? officialDisplayFor(measureId, outcomeStatus, evidence) : null;
 
   // The authoritative "had a real exam" signal is the "Most Recent … Date" recency define.
   // The "Days Since …" define coalesces that date with an @1900-01-01 fallback, so it is NEVER

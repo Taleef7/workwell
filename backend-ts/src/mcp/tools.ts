@@ -169,7 +169,9 @@ export function buildOutcomeExplanation(
     ) ?? [];
   const membership = populations.length
     ? `Official population membership: ${populations
-        .map((r) => `${String(r.define).slice("official:".length)}=${String(r.result)}`)
+        // `official:<population>` stays as is; a multi-rate `official:<Rate>:<population>` (ADR-074)
+        // reads as "Rate · population" rather than a colon-joined token.
+        .map((r) => `${String(r.define).slice("official:".length).replace(/^([^:]+):([^:]+)$/, "$1 · $2")}=${String(r.result)}`)
         .join(", ")}. `
     : "";
   return (

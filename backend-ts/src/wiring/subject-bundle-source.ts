@@ -9,7 +9,7 @@ import { deriveExamConfig, type TargetOutcome } from "../engine/synthetic/exam-c
 import { buildSyntheticBundle, type FhirBundle } from "../engine/synthetic/fhir-bundle-builder.ts";
 import { buildOfficialOnlyBundle, type OfficialOnlyMeasureId } from "../engine/synthetic/official-only-bundles.ts";
 import { seededDistribution, seededTargetFor, type SeededAssignment } from "../run/distribution.ts";
-import { classifyRunnable, deploymentCorpusSeed, DEPLOYMENT_PROFILE } from "../config/deployment-profile.ts";
+import { classifyRunnable, deploymentCorpusSeed, DEPLOYMENT_PROFILE, type DeploymentProfile } from "../config/deployment-profile.ts";
 import { corpusBundleSource } from "./corpus-bundle-source.ts";
 
 export interface SubjectBundleSource {
@@ -44,10 +44,18 @@ export function officialOnlyBundleSource(): SubjectBundleSource {
   };
 }
 
-/** Dispatches on the runnable rule; throws for anything that is not runnable rather than guessing. */
+/**
+ * Dispatches on the runnable rule; throws for anything that is not runnable rather than guessing.
+ *
+ * `profile` defaults to the process's own deployment profile, which is what every runtime caller wants.
+ * The flip gate passes it explicitly so it can compose the deployment's roster from an `env` it built
+ * (the measure under test routed as a flip would route it) without depending on what this process was
+ * started as — a shadow of the run pipeline rather than a second roster.
+ */
 export function compositeBundleSource(
   env: Record<string, unknown>,
   sources: { authored?: SubjectBundleSource; official?: SubjectBundleSource; corpus?: SubjectBundleSource } = {},
+  profile: DeploymentProfile = DEPLOYMENT_PROFILE,
 ): SubjectBundleSource {
   const authored = sources.authored ?? bindingBundleSource();
   const official = sources.official ?? officialOnlyBundleSource();
@@ -66,12 +74,14 @@ export function compositeBundleSource(
   // — so the corpus source serves all of them rather than being one branch of the dispatch. The
   // runnable check still runs first: a measure the profile cannot run must fail the same way here as
   // anywhere else, and returning a bundle for it would hide that.
-  if (DEPLOYMENT_PROFILE.id === "maui") {
-    // The SEED comes from the same place the directory's did. Defaulting it here (which this did) makes
-    // the bundle source and the roster disagree about who a subject is the moment
+  if (profile.id === "maui") {
+    // The SEED comes from the same place the directory's did — the DEPLOYMENT's (process.env), not the
+    // `env` argument, which carries the ROUTING and is often partial. Defaulting it (which this did)
+    // makes the bundle source and the roster disagree about who a subject is the moment
     // WORKWELL_MAUI_CORPUS_SEED is set — silently, because a subject's id is derived from their index
     // and matches under any seed. `corpusBundleSource` cross-checks the identity as well, so the two
-    // have to agree and are told to when they do not.
+    // have to agree and are told to when they do not. A caller that composed its OWN directory from
+    // another env (the flip gate) passes `sources.corpus` built from that same seed.
     const corpus = sources.corpus ?? corpusBundleSource(deploymentCorpusSeed());
     // Both checks, in this order. `pick` classifies the measure against the routing env as it does on
     // every profile; the LIST check is the one this profile adds — a scoped deployment must not hand
@@ -80,8 +90,8 @@ export function compositeBundleSource(
     // disagree with the `env` this composite was handed.
     const gate = (id: string): void => {
       pick(id);
-      if (!(DEPLOYMENT_PROFILE.runnableMeasureIds as readonly string[]).includes(id)) {
-        throw new Error(`[workwell] ${id} is not runnable here (not in the ${DEPLOYMENT_PROFILE.id} profile's measure set)`);
+      if (!(profile.runnableMeasureIds as readonly string[]).includes(id)) {
+        throw new Error(`[workwell] ${id} is not runnable here (not in the ${profile.id} profile's measure set)`);
       }
     };
     return {

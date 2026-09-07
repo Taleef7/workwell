@@ -8,6 +8,8 @@
  * Wording is consumed at READ time (`deriveCell`, `nextActionFor`, `deriveWhyFlagged`) and never
  * persisted as a rule (DATA_MODEL_CONTRACTS §5) — evidence_json is unchanged by this module.
  */
+import { officialMeasureSemantics } from "../wiring/official-measure-semantics.ts";
+
 export type OfficialDisplay = {
   method: string;
   whyFlagged: string;
@@ -75,8 +77,9 @@ const OVERDUE = {
   },
   // Multi-rate (ADR-074): the bucket is the WORST of Initiation and Engagement, so OVERDUE means the
   // episode had no treatment within 14 days OR treatment began and was not engaged within 34 days.
-  // The wording names both, because the roster cannot tell them apart and the case detail's evidence
-  // (both rates, persisted) is where the operator sees which.
+  // The wording names both: it is what a reader gets when it has no evidence to hand (or evidence with
+  // no `rates`). A reader that passes the outcome's evidence gets the missed rate's own wording from
+  // OVERDUE_BY_RATE below.
   cms137: {
     method: "New substance use disorder episode without treatment initiation within 14 days, or treatment initiated but not engaged within 34 days of initiation.",
     whyFlagged: "Flagged: a new substance use disorder episode this measurement period either had no treatment initiated within 14 days, or treatment was initiated but not engaged (two further services, or a long-acting medication) within 34 days of initiation. The evidence shows which rate was missed.",
@@ -159,6 +162,65 @@ export const OFFICIAL_DISPLAY: Record<string, Record<string, OfficialDisplay>> =
   cms137: { COMPLIANT: COMPLIANT.cms137, OVERDUE: OVERDUE.cms137, EXCLUDED: EXCLUDED.cms137, MISSING_DATA: MISSING_DATA.cms137 },
 };
 
-export function officialDisplayFor(measureId: string, status: string): OfficialDisplay | null {
+/**
+ * A MULTI-RATE measure's OVERDUE wording, per rate the patient missed (ADR-074, MM-1 U3). The bucket is
+ * the worst of the rates, so OVERDUE alone covers clinically different situations; the persisted
+ * `evidence_json.official.rates` says which one applies, and the reader passes it in. Indexed in the
+ * artifact's group order — the same order `OFFICIAL_MEASURE_SEMANTICS[id].rateLabels` names.
+ */
+export const OVERDUE_BY_RATE: Record<string, readonly OfficialDisplay[]> = {
+  cms137: [
+    {
+      method: "New substance use disorder episode without treatment initiation within 14 days.",
+      whyFlagged: "Flagged: a new substance use disorder episode this measurement period had no treatment initiated within 14 days of the episode.",
+      nextAction: "Review the substance use disorder treatment plan: treatment was not initiated within 14 days of the new episode.",
+    },
+    {
+      method: "Treatment initiated but not engaged within 34 days of initiation.",
+      whyFlagged: "Flagged: substance use disorder treatment was initiated within 14 days of the new episode but not engaged (two further services, or a long-acting medication) within 34 days of initiation.",
+      nextAction: "Review follow-up engagement: treatment was initiated, and the measure requires two further services (or a long-acting medication) within 34 days of initiation.",
+    },
+  ],
+};
+
+type Population = { populationType?: string; result?: boolean };
+
+/**
+ * The first rate the subject is in the denominator of, not excluded or excepted from, and whose
+ * numerator reads as the MISS — the rate that put them in the OVERDUE bucket. `numeratorMeansCompliant`
+ * is the measure's own reading (`OFFICIAL_MEASURE_SEMANTICS`), the same one `outcomeFromPopulations`
+ * applies: on a higher-is-better measure the miss is being OUT of the numerator; on an inverse measure
+ * it is being IN it. -1 when the evidence carries no rates (a single-rate measure, or evidence written
+ * before ADR-074) or no rate reads as missed.
+ */
+export function missedRateIndex(evidence: unknown, numeratorMeansCompliant: boolean): number {
+  const rates = (evidence as { official?: { rates?: unknown } } | null)?.official?.rates;
+  if (!Array.isArray(rates) || rates.length < 2) return -1;
+  const inPopulation = (rate: Population[], key: string): boolean =>
+    rate.some((p) => p?.populationType === key && p?.result === true);
+  return rates.findIndex((rate) => {
+    if (!Array.isArray(rate)) return false;
+    const inNumerator = inPopulation(rate, "numerator");
+    return (
+      inPopulation(rate, "denominator") &&
+      !inPopulation(rate, "denominator-exclusion") &&
+      !inPopulation(rate, "denominator-exception") &&
+      (numeratorMeansCompliant ? !inNumerator : inNumerator)
+    );
+  });
+}
+
+/**
+ * Wording for one (measure, status). Pass the outcome's `evidence_json` where the caller has it: for a
+ * multi-rate measure's OVERDUE it selects the missed rate's wording; for everything else it is ignored.
+ */
+export function officialDisplayFor(measureId: string, status: string, evidence?: unknown): OfficialDisplay | null {
+  if (status === "OVERDUE" && evidence !== undefined) {
+    const byRate = OVERDUE_BY_RATE[measureId];
+    if (byRate) {
+      const missed = missedRateIndex(evidence, officialMeasureSemantics(measureId)?.numeratorMeansCompliant ?? true);
+      if (missed >= 0 && byRate[missed]) return byRate[missed];
+    }
+  }
   return OFFICIAL_DISPLAY[measureId]?.[status] ?? null;
 }

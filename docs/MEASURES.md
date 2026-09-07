@@ -28,7 +28,10 @@ Active, gated and still not executing. All four pass their full MADiE deck again
 run where the terminology sidecar resolves — without it every value set expands empty and the gate reports
 a zero initial population (locked decision §4A.5). **CMS137 is multi-rate** (Initiation and Engagement,
 ADR-074): one catalog row, one outcome per patient reduced to the worst rate, and every rate persisted and
-exported. All four sit in the roster's quality panel, so each becomes a column the day its flip routes it.
+exported — and the roster cell, the case detail, the case's next action and the CDS card name the rate the
+patient actually missed ("without treatment initiation within 14 days" or "initiated but not engaged
+within 34 days"), read from the persisted rates (ADR-074 d13). All four sit in the roster's quality
+panel, so each becomes a column the day its flip routes it.
 
 > **CMS165 is blocked on more than verification.** The official executor ignores `meta.profile`
 > (`trustMetaProfile: false`, deliberate — trusting it empties the population for cms122/cms125), and
