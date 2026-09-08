@@ -1,0 +1,116 @@
+# The flip gate, run where the credentialed terminology sidecar resolves (docs/DEPLOY.md, "Flipping a
+# measure"). cms122/cms125/cms130/cms165 pin a VSAC-completed sidecar the uncredentialed local vendor
+# cannot reproduce, so `pnpm flip-gate` on a laptop reads an UNAVAILABLE deck and a zero initial
+# population for them — the gate working, not evidence. This workflow vendors with the VSAC secret and
+# sweeps the deployment's own roster, and uploads the JSON the flip PR attaches. DESCRIPTIVE: the gate's
+# exit code is always 0 (ADR-072); routing is still the workflow edit in deploy-maui-mieweb.yml.
+name: Flip gate (manual, needs the VSAC credential)
+
+on:
+  workflow_dispatch:
+    inputs:
+      measure:
+        description: "Catalog id to gate."
+        required: true
+        type: choice
+        default: cms130
+        options: [cms2, cms130, cms165, cms137, cms122, cms125]
+      subjects:
+        description: "How many corpus subjects to evaluate: a number, or `all` for the whole roster."
+        required: true
+        type: string
+        default: "all"
+      evaluation_date:
+        description: "Evaluation date (YYYY-MM-DD); the measured year is its calendar year (ADR-072)."
+        required: true
+        type: string
+        default: "2026-12-31"
+      routed:
+        description: "The deployment's CURRENT WORKWELL_OFFICIAL_MEASURES (the gate appends the measure under test)."
+        required: true
+        type: string
+        default: "cms122,cms125"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: flip-gate
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    name: ${{ inputs.measure }} over ${{ inputs.subjects }} subjects
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    defaults:
+      run:
+        working-directory: backend-ts
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10.17.1
+          run_install: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: backend-ts/pnpm-lock.yaml
+      - name: Install deps
+        run: pnpm install --frozen-lockfile
+      - name: Cache official content
+        uses: actions/cache@v6
+        with:
+          path: backend-ts/.official-content
+          key: official-content-${{ hashFiles('backend-ts/scripts/fetch-official-cases.ps1') }}
+      - name: Fetch official content (pinned commit)
+        run: pwsh -NoProfile -File scripts/fetch-official-cases.ps1
+
+      - name: Vendor the measure's terminology, completed from VSAC
+        env:
+          WORKWELL_VSAC_API_KEY: ${{ secrets.WORKWELL_VSAC_API_KEY_VENDOR }}
+        run: |
+          if [ -z "$WORKWELL_VSAC_API_KEY" ]; then
+            echo "::error::No VSAC credential in this context. A gate over capped expansions reads a zero initial population and calls it a finding — refusing rather than reporting it."
+            exit 1
+          fi
+          NAME="$(pnpm exec tsx -e "import {officialMeasureName} from './src/standards/official-cases.ts'; process.stdout.write(officialMeasureName('${{ inputs.measure }}') ?? '')")"
+          if [ -z "$NAME" ]; then
+            echo "::error::${{ inputs.measure }} is not an official measure id"
+            exit 1
+          fi
+          pnpm vendor:official --measure "$NAME" --catalog-id "${{ inputs.measure }}" --strip-elm-annotations --with-tests --complete-terminology
+          MANIFEST="measures/official/${{ inputs.measure }}/manifest.json"
+          TRUNCATED=$(jq -r '.terminology.truncated | length' "$MANIFEST")
+          if [ "$TRUNCATED" != "0" ]; then
+            echo "::error::${{ inputs.measure }}'s vendored terminology still reports ${TRUNCATED} TRUNCATED expansion(s) after --complete-terminology — refusing."
+            exit 1
+          fi
+      # The vendored artifact must not have changed — only the gitignored sidecar is new.
+      - name: The committed artifact is reproducible from its pin
+        working-directory: .
+        run: git diff --exit-code backend-ts/measures/official
+
+      - name: Gate
+        env:
+          WORKWELL_INSTANCE: maui
+          WORKWELL_MAUI_CORPUS_SIZE: "20000"
+          WORKWELL_RUN_CHUNK_SIZE: "500"
+          WORKWELL_OFFICIAL_MEASURES: ${{ inputs.routed }}
+        run: |
+          pnpm flip-gate --measure "${{ inputs.measure }}" --evaluation-date "${{ inputs.evaluation_date }}" --subjects "${{ inputs.subjects }}" 2> gate-stderr.log | tee gate-report.txt
+          echo "::group::stderr (engine warnings, deduplicated)"
+          sort gate-stderr.log | uniq -c | sort -rn | head -40
+          echo "::endgroup::"
+          ls -la .flip-gate/
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: flip-gate-${{ inputs.measure }}-${{ inputs.evaluation_date }}
+          path: |
+            backend-ts/.flip-gate/*.json
+            backend-ts/gate-report.txt
+          if-no-files-found: error
