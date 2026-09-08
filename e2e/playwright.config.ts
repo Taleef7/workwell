@@ -26,10 +26,25 @@ export default defineConfig({
       use: { ...devices["Desktop Chrome"] },
       testIgnore: "tests/maui/**",
     },
+    // The Maui project is split by whether a spec DISTURBS the stack it reads.
+    //
+    // `runs.spec` triggers an ALL_PROGRAMS run from the UI. With four workers that run was in flight
+    // while other specs read the roster, and the first parallel CI run came back "4 flaky, 22 passed" —
+    // green only because retries hid it, including a roster that read "0 patients" for a full 20s.
+    // Green-by-retry is how a suite starts rotting, so the ordering is a constraint here rather than a
+    // hope: `dependencies` makes Playwright finish every read-only spec before the mutating one starts.
     {
       name: "maui",
       testDir: "./tests/maui",
       testMatch: "tests/maui/**/*.spec.ts",
+      testIgnore: "tests/maui/runs.spec.ts",
+      use: { ...devices["Desktop Chrome"] },
+    },
+    {
+      name: "maui-writes",
+      testDir: "./tests/maui",
+      testMatch: "tests/maui/runs.spec.ts",
+      dependencies: ["maui"],
       use: { ...devices["Desktop Chrome"] },
     },
   ],
