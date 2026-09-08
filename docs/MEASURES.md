@@ -26,8 +26,10 @@ six** (ADR-078, owner decision): cms122, cms125, cms2, cms130, cms165 and cms137
 CMS165 and CMS137 are Active, gated AND executing there; TWH still routes cms122 and cms125 only. All
 four pass their full MADiE deck against the runtime (36/36, 64/64, 68/68 and 45/45, zero errors); cms2's
 whole-roster gate reads 17,795 of 20,000 in the initial population and 5,413 actionable
-(`docs/evidence/FLIP_GATE_2026-09-08_CMS2.md`), and the credentialed gates for cms130 and cms165 run
-through `.github/workflows/flip-gate.yml`. **CMS137 is multi-rate** (Initiation and Engagement,
+(`docs/evidence/FLIP_GATE_2026-09-08_CMS2.md`); cms130's, run through the credentialed
+`.github/workflows/flip-gate.yml`, reads 64/64 and 9,257 in the initial population with 4,997 actionable
+(`FLIP_GATE_2026-09-08_CMS130.md`), and cms165's 68/68 and 6,837 with 2,431 actionable
+(`FLIP_GATE_2026-09-08_CMS165.md`) — on the sandbox corpus, which is all it claims. **CMS137 is multi-rate** (Initiation and Engagement,
 ADR-074): one catalog row, one outcome per patient reduced to the worst rate, and every rate persisted and
 exported — and the roster cell, the case detail, the case's next action and the CDS card name the rate the
 patient actually missed ("without treatment initiation within 14 days" or "initiated but not engaged

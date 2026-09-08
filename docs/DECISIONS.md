@@ -46,8 +46,9 @@ been the whole worklist.
    and `reconcile-maui-mieweb.yml`, which must agree). Evidence attached to the flip: cms2's whole-roster
    gate (36/36, 17,795/20,000 in the initial population, 5,413 actionable, 0 errors), cms137's
    (`docs/evidence/FLIP_GATE_2026-09-07_CMS137.md`), the cross-engine sweeps, and the credentialed
-   gates for cms130 and cms165 run through the new `flip-gate.yml` workflow, because their pinned
-   sidecars are VSAC-completed and do not resolve locally.
+   gates for cms130 (64/64, 9,257 in the initial population, 4,997 actionable) and cms165 (68/68,
+   6,837 and 2,431), run through the `flip-gate.yml` workflow because their pinned sidecars are
+   VSAC-completed and do not resolve locally (`FLIP_GATE_2026-09-08_CMS130.md`, `_CMS165.md`).
 2. **A subject the executor finds outside the initial population never opens a case.** The pipeline
    reads the executor's own `inInitialPopulation: false` — never re-derived from evidence, so an
    authored MISSING_DATA ("no record") keeps opening cases — and treats it as a close-only outcome:

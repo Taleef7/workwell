@@ -110,15 +110,18 @@ jobs:
           echo "::endgroup::"
           ls -la .flip-gate/
           # The JSON is the evidence a flip PR attaches; the text report alone would let the upload
-          # below succeed with the evidence missing.
+          # below succeed with the evidence missing. Copied out of the dot-directory first: the first
+          # two runs of this workflow uploaded only gate-report.txt, because the artifact glob does not
+          # descend into `.flip-gate/`.
           test -n "$(ls .flip-gate/*.json 2>/dev/null)" || { echo "::error::the gate wrote no .flip-gate/*.json"; exit 1; }
+          mkdir -p flip-gate-out && cp .flip-gate/*.json flip-gate-out/
 
       - uses: actions/upload-artifact@v6
         if: always()
         with:
           name: flip-gate-${{ inputs.measure }}-${{ inputs.evaluation_date }}
           path: |
-            backend-ts/.flip-gate/*.json
+            backend-ts/flip-gate-out/*.json
             backend-ts/gate-report.txt
           if-no-files-found: error
 
