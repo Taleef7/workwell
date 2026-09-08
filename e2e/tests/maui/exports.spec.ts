@@ -5,8 +5,13 @@ test.beforeEach(() => {
   test.skip(process.env.PLAYWRIGHT_PROFILE !== "maui", "maui profile only");
 });
 
+// The PATIENT spelling of the §6.3 case-export contract (`docs/DATA_MODEL_CONTRACTS.md`): on a
+// deployment whose `DEPLOYMENT_PROFILE.subjectTerm` is "patient", the two subject columns are named
+// `patientExternalId`/`patientName` and every other header and the column order are unchanged. This
+// list said `employeeExternalId` — the DEFAULT profile's spelling — so the assertion contradicted the
+// contract the export is written to, and the Maui stack was right and the test was wrong.
 const EXPECTED_HEADERS = [
-  "caseId", "employeeExternalId", "employeeName", "role", "site",
+  "caseId", "patientExternalId", "patientName", "role", "site",
   "measureName", "measureVersion", "evaluationPeriod", "status", "priority",
   "assignee", "currentOutcomeStatus", "nextAction", "lastRunId",
   "createdAt", "updatedAt", "closedAt", "latestOutreachDeliveryStatus",
@@ -45,9 +50,9 @@ test.describe("Maui case CSV export", () => {
       expect(headers, `CSV header should include '${expected}'`).toContain(expected);
     }
 
-    // All employeeName values should be Maui roster names (no emp-/twh identifiers)
-    const nameIdx = headers.indexOf("employeeName");
-    const extIdx = headers.indexOf("employeeExternalId");
+    // All patient names should be Maui roster names (no emp-/twh identifiers)
+    const nameIdx = headers.indexOf("patientName");
+    const extIdx = headers.indexOf("patientExternalId");
     expect(nameIdx).toBeGreaterThan(-1);
     expect(extIdx).toBeGreaterThan(-1);
 

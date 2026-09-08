@@ -140,19 +140,21 @@ export class PgOutcomeStore implements OutcomeStore {
     return records;
   }
 
-  async listOutcomes(runId: string, opts?: { limit?: number; offset?: number }): Promise<OutcomeRecord[]> {
+  async listOutcomes(runId: string, opts?: { limit?: number; offset?: number; measureId?: string }): Promise<OutcomeRecord[]> {
     // Native UUID column: a malformed run id yields no rows on the floor, so don't
     // let Postgres throw `invalid input syntax for type uuid` — match the contract.
     if (!isUuid(runId)) return [];
     // Optional LIMIT/OFFSET paging (Fable H4) — the id tiebreak makes paging deterministic when many
     // rows share an evaluated_at (all of a run's outcomes are stamped within the same run).
     const binds: unknown[] = [runId];
+    // Narrowed BEFORE the page window, so offsets walk the measure's rows and not the run's.
+    const where = opts?.measureId != null ? ` AND measure_id = $${binds.push(opts.measureId)}` : "";
     let page = "";
     if (opts?.limit != null) page += ` LIMIT $${binds.push(Math.max(0, opts.limit))}`;
     if (opts?.offset != null) page += ` OFFSET $${binds.push(Math.max(0, opts.offset))}`;
     const { rows } = await this.pool.query<OutcomeRow>(
       `SELECT id, run_id, subject_id, measure_id, evaluation_period, status, evidence_json, evaluated_at
-         FROM ${T} WHERE run_id = $1 ORDER BY evaluated_at ASC, id ASC${page}`,
+         FROM ${T} WHERE run_id = $1${where} ORDER BY evaluated_at ASC, id ASC${page}`,
       binds,
     );
     return rows.map(toRecord);

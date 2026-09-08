@@ -63,3 +63,32 @@ test("a multi-rate measure carries its reviewed rate labels", async () => {
   const rate = await officialMeasureRate(os, "run-3", "cms137");
   assert.deepEqual(rate?.rates.map((r) => [r.label, r.numer, r.effectiveDenominator]), [["Initiation", 1, 1], ["Engagement", 0, 1]]);
 });
+
+test("an ALL_PROGRAMS run is read PER MEASURE — each measure's rate is its own rows, not the run's sum", async () => {
+  resetMeasureRateMemo();
+  // One nightly run, two measures, one row per (subject, measure) pair — the pilot's shape since the
+  // 2026-09-08 flip. Before the scan was measure-scoped, both cards showed the summed aggregate and
+  // whichever `ecqmId` sorted first, so CMS125's 59.2% was served under CMS122's name.
+  const rows = [
+    rec("OVERDUE", { official: { ecqmId: "122FHIR", populationResults: { ipp: true, denom: true, numer: true, denex: false, denexcep: false } } }, "cms122"),
+    rec("COMPLIANT", { official: { ecqmId: "122FHIR", populationResults: { ipp: true, denom: true, numer: false, denex: false, denexcep: false } } }, "cms122"),
+    rec("COMPLIANT", { official: { ecqmId: "125FHIR", populationResults: { ipp: true, denom: true, numer: true, denex: false, denexcep: false } } }, "cms125"),
+    rec("COMPLIANT", { official: { ecqmId: "125FHIR", populationResults: { ipp: true, denom: true, numer: true, denex: false, denexcep: false } } }, "cms125"),
+    rec("COMPLIANT", { official: { ecqmId: "125FHIR", populationResults: { ipp: true, denom: true, numer: true, denex: false, denexcep: false } } }, "cms125"),
+  ];
+  // The fake honours `measureId` because the real stores push it into SQL; a fake that ignored it would
+  // pass while the shipped query narrowed, which is the harness being gentler than the caller.
+  const os = {
+    listOutcomes: async (_runId: string, opts?: { limit?: number; offset?: number; measureId?: string }) => {
+      const scoped = opts?.measureId ? rows.filter((r) => r.measureId === opts.measureId) : rows;
+      const offset = opts?.offset ?? 0;
+      return scoped.slice(offset, offset + (opts?.limit ?? scoped.length));
+    },
+  };
+  const a = await officialMeasureRate(os, "run-mixed", "cms122");
+  const b = await officialMeasureRate(os, "run-mixed", "cms125");
+  assert.deepEqual(a?.rates.map((r) => [r.ipp, r.numer]), [[2, 1]], "cms122 sees only its own two rows");
+  assert.deepEqual(b?.rates.map((r) => [r.ipp, r.numer]), [[3, 3]], "cms125 sees only its own three rows");
+  assert.equal(a?.official?.ecqmId, "122FHIR");
+  assert.equal(b?.official?.ecqmId, "125FHIR", "the artifact identity is the measure's, not the first row of the run");
+});

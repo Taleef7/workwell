@@ -4,3 +4,6 @@
 /blob-report/
 /playwright/.cache/
 node_modules/
+
+# Signed-in browser state written by global-setup.ts (holds a live demo token)
+/.auth/

@@ -126,8 +126,14 @@ export interface OutcomeStore {
    * Outcomes for one run, oldest-first. Pass `opts.limit`/`opts.offset` to page the scan (Fable H4):
    * the run-detail grid + the outcomes CSV must never materialize a `seed:scale` run's 120k rows in the
    * single-replica worker. Omitting `opts` returns every row (back-compat, small runs only).
+   *
+   * `opts.measureId` narrows the scan to ONE measure of the run. An ALL_PROGRAMS run holds a row per
+   * (subject, measure) pair, so a caller that sums a run's evidence without saying which measure it
+   * means sums every measure into one number and serves it under each measure's name — which is what
+   * the programs overview did until 2026-09-08. Pushed into SQL rather than filtered after the read:
+   * on the pilot's six-measure nightly the app-side filter would page 120,000 rows once per measure.
    */
-  listOutcomes(runId: string, opts?: { limit?: number; offset?: number }): Promise<OutcomeRecord[]>;
+  listOutcomes(runId: string, opts?: { limit?: number; offset?: number; measureId?: string }): Promise<OutcomeRecord[]>;
   getOutcomeById(id: string): Promise<OutcomeRecord | null>;
   /**
    * Delete outcome rows older than `cutoff`, KEEPING four things (ADR-073, amended by ADR-077 d3):

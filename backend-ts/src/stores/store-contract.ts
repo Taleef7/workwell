@@ -693,6 +693,33 @@ export function outcomeStoreContract(
     assert.deepEqual(paged, all.map((o) => o.id), "paged order matches the full (evaluated_at, id) order");
   });
 
+  test(`[${label}] listOutcomes narrows to one measure of a multi-measure run, and pages within it`, async () => {
+    const { runStore, outcomeStore } = await fresh();
+    // An ALL_PROGRAMS run holds a row per (subject, measure) pair. A caller summing a run's evidence
+    // per measure must get that measure's rows only — unscoped, the programs overview served one
+    // measure's initial population and score under every measure's name (2026-09-08).
+    const run = await runStore.createRun(sampleRun("multi"));
+    for (let i = 0; i < 3; i++) {
+      await outcomeStore.recordOutcome({ runId: run.id, subjectId: `emp-${i}`, measureId: "audiogram", status: "OVERDUE", evidence: {} });
+    }
+    for (let i = 0; i < 2; i++) {
+      await outcomeStore.recordOutcome({ runId: run.id, subjectId: `emp-${i}`, measureId: "hazwoper", status: "COMPLIANT", evidence: {} });
+    }
+    assert.equal((await outcomeStore.listOutcomes(run.id)).length, 5, "unscoped still returns the whole run");
+    const audiogram = await outcomeStore.listOutcomes(run.id, { measureId: "audiogram" });
+    assert.equal(audiogram.length, 3);
+    assert.ok(audiogram.every((o) => o.measureId === "audiogram"));
+    assert.equal((await outcomeStore.listOutcomes(run.id, { measureId: "hazwoper" })).length, 2);
+    assert.deepEqual(await outcomeStore.listOutcomes(run.id, { measureId: "nobody" }), [], "a measure the run never evaluated");
+    // The narrowing must apply BEFORE the page window, or an offset walks the run's rows and pages of
+    // the measure's own rows come back short or empty. This also pins the Pg bind numbering.
+    const p1 = await outcomeStore.listOutcomes(run.id, { measureId: "audiogram", limit: 2, offset: 0 });
+    const p2 = await outcomeStore.listOutcomes(run.id, { measureId: "audiogram", limit: 2, offset: 2 });
+    assert.equal(p1.length, 2);
+    assert.equal(p2.length, 1, "paging partitions the MEASURE's rows, not the run's");
+    assert.deepEqual([...p1, ...p2].map((o) => o.id), audiogram.map((o) => o.id));
+  });
+
   test(`[${label}] distinctMeasuresForRun returns the run's distinct measures, capped (Fable H4)`, async () => {
     const { runStore, outcomeStore } = await fresh();
     const run = await runStore.createRun(sampleRun("audiogram"));
