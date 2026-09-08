@@ -11,18 +11,61 @@ export const MAUI_PASSWORD = "Workwell123!";
  * live token for a demo account.
  */
 const STATE_DIR = path.join(__dirname, "..", "..", ".auth");
-export function storageStatePath(email: string): string {
+export function storageStatePath(email: string, tag: string): string {
   mkdirSync(STATE_DIR, { recursive: true });
-  return path.join(STATE_DIR, `${email.replace(/[^a-z0-9]+/gi, "-")}.json`);
+  return path.join(STATE_DIR, `${email.replace(/[^a-z0-9]+/gi, "-")}.${tag}.json`);
 }
 
 /**
  * The pilot profile hides the engineering surfaces from every role but ADMIN
  * (`frontend/lib/public-demo.ts`), so `/runs` and `/measures` render AccessDenied for the quality lead.
  * A spec about those pages adopts this state; one about the quality lead's own workflow must not.
+ *
+ * EMPTY off the maui profile, and that is load-bearing. The twh job runs `npx playwright test` with no
+ * `--project`, which loads BOTH projects — and Playwright resolves the `page` fixture (and therefore
+ * `storageState`) BEFORE the `beforeEach` that calls `test.skip`. Naming a file that global setup only
+ * writes on the maui profile would fail these specs with `ENOENT` on the twh run instead of skipping
+ * them, which is what they did before this existed.
  */
-export const AS_QUALITY_LEAD = { storageState: storageStatePath("quality-lead@maui.workwell.dev") };
-export const AS_ADMIN = { storageState: storageStatePath("admin@maui.workwell.dev") };
+// Declared above the session table that reads them. MAUI_ACCOUNTS below carries the same addresses
+// with their roles, but it is defined further down the file and a const cannot be read before its
+// initializer has run (the first version of this table did exactly that and failed to load).
+const QUALITY_LEAD_EMAIL = "quality-lead@maui.workwell.dev";
+const ADMIN_EMAIL = "admin@maui.workwell.dev";
+
+const MAUI = process.env.PLAYWRIGHT_PROFILE === "maui";
+function session(email: string, tag: string) {
+  return MAUI ? { storageState: storageStatePath(email, tag) } : {};
+}
+
+/**
+ * One sign-in PER SPEC FILE, not one per role. Every context built from the same storage state shares
+ * one refresh-token family, and `routes/auth.ts` revokes the whole family when an already-rotated
+ * token is presented — so two parallel workers refreshing in the same window would sign each other
+ * out, and the resulting AccessDenied failures would point nowhere near the cause. Distinct logins
+ * mean distinct families. Still six sign-ins rather than the ~40 the per-test `loginAs` cost.
+ */
+export const AUTH_SESSIONS = [
+  { email: QUALITY_LEAD_EMAIL, tag: "roster" },
+  { email: QUALITY_LEAD_EMAIL, tag: "jelly-beans" },
+  { email: QUALITY_LEAD_EMAIL, tag: "terminology" },
+  { email: QUALITY_LEAD_EMAIL, tag: "readiness" },
+  { email: QUALITY_LEAD_EMAIL, tag: "measure-detail" },
+  { email: ADMIN_EMAIL, tag: "runs" },
+  { email: ADMIN_EMAIL, tag: "measures" },
+  { email: ADMIN_EMAIL, tag: "terminology-admin" },
+  { email: ADMIN_EMAIL, tag: "readiness-catalog" },
+] as const;
+
+export const AS_QUALITY_LEAD_ROSTER = session(QUALITY_LEAD_EMAIL, "roster");
+export const AS_QUALITY_LEAD_CHIPS = session(QUALITY_LEAD_EMAIL, "jelly-beans");
+export const AS_QUALITY_LEAD_TERMS = session(QUALITY_LEAD_EMAIL, "terminology");
+export const AS_QUALITY_LEAD_READINESS = session(QUALITY_LEAD_EMAIL, "readiness");
+export const AS_QUALITY_LEAD_MEASURE = session(QUALITY_LEAD_EMAIL, "measure-detail");
+export const AS_ADMIN_RUNS = session(ADMIN_EMAIL, "runs");
+export const AS_ADMIN_MEASURES = session(ADMIN_EMAIL, "measures");
+export const AS_ADMIN_TERMS = session(ADMIN_EMAIL, "terminology-admin");
+export const AS_ADMIN_READINESS = session(ADMIN_EMAIL, "readiness-catalog");
 
 /**
  * The ACO's whole computable set, which the Maui stack has ROUTED since ADR-078 — in CI too, since the

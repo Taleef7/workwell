@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { API_BASE, AS_ADMIN, AS_QUALITY_LEAD, MAUI_PASSWORD } from "./helpers";
+import { API_BASE, AS_ADMIN_READINESS, AS_QUALITY_LEAD_READINESS, MAUI_PASSWORD } from "./helpers";
 
 test.beforeEach(() => {
   test.skip(process.env.PLAYWRIGHT_PROFILE !== "maui", "maui profile only");
@@ -9,7 +9,7 @@ test.beforeEach(() => {
 const OCCUPATIONAL = ["HAZWOPER", "Audiogram", "TB Surveillance"];
 
 test.describe("Maui readiness — signed in", () => {
-  test.use(AS_QUALITY_LEAD);
+  test.use(AS_QUALITY_LEAD_READINESS);
 
   test("the programs page carries no occupational measures", async ({ page }) => {
     await page.goto("/programs");
@@ -21,7 +21,7 @@ test.describe("Maui readiness — signed in", () => {
 test.describe("Maui readiness — the catalog", () => {
   // As the quality lead this page is an AccessDenied panel, so asserting that HAZWOPER is absent from
   // it passed without ever loading a catalog. ADMIN is the role that can see the list this is about.
-  test.use(AS_ADMIN);
+  test.use(AS_ADMIN_READINESS);
 
   test("the measures catalog carries no occupational measures", async ({ page }) => {
     await page.goto("/measures");

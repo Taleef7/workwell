@@ -6,8 +6,10 @@ test.beforeEach(() => {
 });
 
 test.describe("Maui case workflow", () => {
-  // This file MUTATES cases (an outreach POST, an assignment), so its tests run in order rather than
-  // racing each other for the same open case.
+  // This file CAN mutate cases (an outreach POST, an assignment), so its tests run in order rather
+  // than racing each other for the same open case. "Can": the three UI mutations below are each
+  // behind an `if (await …count())`, so a missing control skips silently rather than failing —
+  // pre-existing, and worth knowing when reading this as a mutation guarantee.
   test.describe.configure({ mode: "serial" });
 
   test("open an OVERDUE cms125 case and exercise the case-manager actions", async ({ page }) => {

@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { AS_QUALITY_LEAD, ROUTED_MEASURES, expectNoErrorPage } from "./helpers";
+import { AS_QUALITY_LEAD_ROSTER, ROUTED_MEASURES, expectNoErrorPage } from "./helpers";
 
 test.beforeEach(() => {
   test.skip(process.env.PLAYWRIGHT_PROFILE !== "maui", "maui profile only");
@@ -7,7 +7,7 @@ test.beforeEach(() => {
 
 // The roster is the quality lead's page; the session comes from global setup rather than a sign-in
 // per test.
-test.use(AS_QUALITY_LEAD);
+test.use(AS_QUALITY_LEAD_ROSTER);
 
 /** Land on the roster and wait for the page, not for an arbitrary timeout. */
 async function openRoster(page: import("@playwright/test").Page, query = "") {
@@ -73,6 +73,9 @@ test.describe("Maui compliance roster", () => {
     await searchInput.fill("Ari Wren");
     const rows = page.locator("tbody tr");
     await expect.poll(() => rows.count(), { timeout: 10_000 }).toBeLessThanOrEqual(2);
+    // The FLOOR matters as much as the ceiling: `0 <= 2` would pass for a search that returned nothing
+    // at all, and report a broken query as a working filter.
+    expect(await rows.count(), "the search must MATCH, not just narrow").toBeGreaterThan(0);
 
     await searchInput.fill("");
     const patientLink = page.locator("a[href^='/employees/']").filter({ visible: true }).first();

@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { AS_ADMIN, MAUI_ACCOUNTS, MAUI_PASSWORD, API_BASE, ROUTED_MEASURES, expectNoErrorPage } from "./helpers";
+import { AS_ADMIN_RUNS, MAUI_ACCOUNTS, MAUI_PASSWORD, API_BASE, ROUTED_MEASURES, expectNoErrorPage } from "./helpers";
 
 test.beforeEach(() => {
   test.skip(process.env.PLAYWRIGHT_PROFILE !== "maui", "maui profile only");
@@ -10,7 +10,7 @@ const CORPUS_SUBJECTS = 48;
 
 test.describe("Maui runs", () => {
   // /runs is engineering-gated to ADMIN on the pilot profile, and so is the Run Now control.
-  test.use(AS_ADMIN);
+  test.use(AS_ADMIN_RUNS);
   // This file WRITES (it triggers a run); its two tests must not interleave with each other.
   test.describe.configure({ mode: "serial" });
 

@@ -36,9 +36,16 @@ the site filter's option lookup matched one of those inside a closed select.
 
 The job now runs the ROUTED configuration — it vendors the six sidecars with the VSAC credential and
 sets `WORKWELL_OFFICIAL_MEASURES` — because a suite that boots a stack nobody deploys is not a pilot
-test. A degraded sidecar surfaces as `official-pending` rather than a crash, so the boot line is now
-asserted: without that check the job would quietly run two measures and report green, which is what it
-had been doing. On a public repo the credential is scoped to one step, that step runs before the
+test. The backend's boot line is asserted POSITIVELY: every routed id must read `<id>:official`. The
+first version of that guard asserted the ABSENCE of `official-pending` and was close to useless —
+`classifyRunnable` returns that kind for one reason only, the id being missing from
+WORKWELL_OFFICIAL_MEASURES, and never returns it for cms122/cms125 at all because both are authored and
+the `authored` branch is reached first. Dropping those two from the routing list would have printed
+`cms122:authored`, passed the guard, and run the pilot's two flagship measures on the wrong engine
+while `runs.spec`'s 48 x 6 held either way. Terminology is not part of the classification, so a capped
+sidecar still reads `official`; the control for THAT is the `truncated` refusal in the vendor step,
+before the backend starts. Caught in review — the first version of this entry credited the wrong
+control, and the guard it described could not have fired. On a public repo the credential is scoped to one step, that step runs before the
 frontend and e2e trees are installed, and the completed expansions are deliberately NOT cached — an
 Actions cache is restorable by a fork pull request, and licensed value-set content should not be
 reachable from code we do not control.

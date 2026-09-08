@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { AS_ADMIN, AS_QUALITY_LEAD, expectNoErrorPage, expectNoEmployeeWording } from "./helpers";
+import { AS_ADMIN_TERMS, AS_QUALITY_LEAD_TERMS, expectNoErrorPage, expectNoEmployeeWording } from "./helpers";
 
 test.beforeEach(() => {
   test.skip(process.env.PLAYWRIGHT_PROFILE !== "maui", "maui profile only");
@@ -22,7 +22,7 @@ async function expectPatientWording(page: Page, path: string) {
 }
 
 test.describe("Maui terminology — the quality lead's pages", () => {
-  test.use(AS_QUALITY_LEAD);
+  test.use(AS_QUALITY_LEAD_TERMS);
 
   // One test walking the pages, not one test per page: each `test` costs a fresh browser context, and
   // the assertion is the same three lines every time.
@@ -50,7 +50,7 @@ test.describe("Maui terminology — the quality lead's pages", () => {
 });
 
 test.describe("Maui terminology — the engineering surfaces", () => {
-  test.use(AS_ADMIN);
+  test.use(AS_ADMIN_TERMS);
 
   test("no employee wording on the admin-only pages either", async ({ page }) => {
     for (const path of ADMIN_PAGES) await expectPatientWording(page, path);

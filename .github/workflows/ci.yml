@@ -720,10 +720,21 @@ jobs:
             sleep 2
           done
           echo "::error::backend did not answer /api/version within 120s"; tail -50 ../backend-maui.log; exit 1
-      # The boot line names each measure's state. A measure whose sidecar failed to resolve degrades to
-      # `official-pending` — it does not crash — so without this check the suite would run against two
-      # measures, pass, and report the pilot's configuration as green. That is exactly what happened
-      # between 2026-09-06 and 2026-09-08.
+      # The boot line names each measure's state, and this asserts the POSITIVE one: every routed
+      # measure must read `<id>:official`.
+      #
+      # Asserting the absence of `official-pending` instead does almost nothing, which is what the
+      # first version of this step did. `classifyRunnable` (config/deployment-profile.ts) returns
+      # `official-pending` for exactly one reason — the id is not named in WORKWELL_OFFICIAL_MEASURES —
+      # and for cms122/cms125 it cannot return it at all, because both are authored and the `authored`
+      # branch is reached first. So dropping those two ids from the routing list would print
+      # `cms122:authored,cms125:authored`, the negative grep would find nothing, and the suite would run
+      # the pilot's two flagship measures on the AUTHORED engine while the sandbox runs them officially.
+      # `runs.spec`'s 48 x 6 = 288 holds either way, so the job would be green on the wrong stack.
+      #
+      # Note what this can and cannot see: terminology is not part of the classification, so a capped or
+      # missing sidecar still reads `official` here. The control for THAT is the `truncated` check in the
+      # vendor step above, which refuses before the backend ever starts.
       - name: Every routed measure actually routed
         run: |
           # The health check above returns as soon as the host listens, and the runnable= line is
@@ -737,12 +748,17 @@ jobs:
           done
           echo "$LINE"
           [ -n "$LINE" ] || { echo "::error::the backend logged no runnable= line"; tail -50 backend-maui.log; exit 1; }
+          # The line is `[workwell] runnable=cms122:official,cms125:official,...`; drop everything up to
+          # and including `runnable=` so the FIRST token is a bare `<id>:<kind>` like the rest.
+          STATES="${LINE##*runnable=}"
           IFS=',' read -ra MEASURES <<< "$ROUTED_MEASURES"
           for id in "${MEASURES[@]}"; do
-            if printf '%s' "$LINE" | grep -q "${id}:official-pending"; then
-              echo "::error::${id} booted official-pending — its terminology sidecar did not resolve, so the suite would be testing a stack the pilot does not run"
+            # -x on one token per line: an exact match, so `cms2` can never be satisfied by `cms2...`
+            # and `official` can never be satisfied by `official-pending`.
+            printf '%s' "$STATES" | tr ',' '\n' | grep -qx "${id}:official" || {
+              echo "::error::${id} did not boot 'official' — the suite would be testing a stack the pilot does not run"
               exit 1
-            fi
+            }
           done
       - name: Build and start the frontend in patient mode
         working-directory: frontend

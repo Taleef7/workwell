@@ -1,11 +1,11 @@
 import { test, expect, type Page } from "@playwright/test";
-import { AS_QUALITY_LEAD, ROUTED_MEASURES, expectNoErrorPage } from "./helpers";
+import { AS_QUALITY_LEAD_CHIPS, ROUTED_MEASURES, expectNoErrorPage } from "./helpers";
 
 test.beforeEach(() => {
   test.skip(process.env.PLAYWRIGHT_PROFILE !== "maui", "maui profile only");
 });
 
-test.use(AS_QUALITY_LEAD);
+test.use(AS_QUALITY_LEAD_CHIPS);
 
 const OPEN_BUCKETS = ["DUE_SOON", "OVERDUE", "MISSING_DATA"] as const;
 
@@ -56,6 +56,9 @@ test.describe("Maui status chips (jelly beans)", () => {
       const worklistLink = page.locator(`a[href*="measureId=${measure.id}"]`).filter({ hasText: /Open Worklist/i });
       await expect(worklistLink.first()).toBeVisible({ timeout: 10_000 });
       const worklistTotal = Number(((await worklistLink.first().textContent()) ?? "").match(/(\d+)/)?.[1]);
+      // Without this, `chipSum >= worklistTotal` is satisfied by any chip sum whenever the worklist
+      // renders 0 — including a sum computed from nothing.
+      expect(worklistTotal, `${measure.cms} should have open cases to compare against`).toBeGreaterThan(0);
 
       // NOT equality. A chip counts OUTCOMES in a bucket; the worklist counts CASES. Since ADR-078 a
       // subject the official executor puts outside the initial population is persisted MISSING_DATA
@@ -93,12 +96,19 @@ test.describe("Maui status chips (jelly beans)", () => {
         els.map((el) => (el as HTMLAnchorElement).getAttribute("href") ?? ""),
       );
       const rowCount = new Set(hrefs.filter((h) => /^\/cases\/[^?]+$/.test(h))).size;
-      // Again a bound, not equality, and for the same ADR-078 reason: the bucket's outcomes include
-      // subjects outside the population, who have no case to list.
+      // A bound rather than equality, for the ADR-078 reason: the bucket's outcomes include subjects
+      // outside the population, who have no case to list.
       expect(
         rowCount,
         `cases listed (${rowCount}) must not exceed the ${chip.bucket} chip (${chip.count})`,
       ).toBeLessThanOrEqual(chip.count);
+      // ...but the ceiling ALONE passes at zero, which is what a chip href that stopped applying its
+      // filter would produce — the settle-wait above deliberately accepts the empty state, so nothing
+      // else would catch it. The out-of-population relaxation only explains MISSING_DATA: every
+      // IN-population OVERDUE or DUE_SOON outcome opens a case, so a non-empty chip must list some.
+      if (chip.bucket !== "MISSING_DATA" && chip.count > 0) {
+        expect(rowCount, `a non-empty ${chip.bucket} chip must list cases`).toBeGreaterThan(0);
+      }
     }
   });
 });

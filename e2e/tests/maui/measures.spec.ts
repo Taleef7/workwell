@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { AS_ADMIN, AS_QUALITY_LEAD, ROUTED_MEASURES, expectNoErrorPage } from "./helpers";
+import { AS_ADMIN_MEASURES, AS_QUALITY_LEAD_MEASURE, ROUTED_MEASURES, expectNoErrorPage } from "./helpers";
 
 test.beforeEach(() => {
   test.skip(process.env.PLAYWRIGHT_PROFILE !== "maui", "maui profile only");
@@ -9,7 +9,7 @@ test.describe("Maui measures catalog", () => {
   // /measures is an ENGINEERING surface: on the pilot profile `canSeeEngineering` admits ADMIN only,
   // so the quality lead gets an AccessDenied panel and no catalog. The spec used to sign in as the
   // quality lead and wait 20s for a crosswalk label that was never going to render.
-  test.use(AS_ADMIN);
+  test.use(AS_ADMIN_MEASURES);
 
   test("the identity column carries the MIPS crosswalk for every routed measure", async ({ page }) => {
     await page.goto("/measures");
@@ -22,7 +22,7 @@ test.describe("Maui measures catalog", () => {
 
 test.describe("Maui measure detail", () => {
   // The per-measure page is NOT engineering-gated — it is where the quality lead reads a measure.
-  test.use(AS_QUALITY_LEAD);
+  test.use(AS_QUALITY_LEAD_MEASURE);
 
   test("measure detail for cms125 opens without error", async ({ page }) => {
     await page.goto("/programs/cms125");

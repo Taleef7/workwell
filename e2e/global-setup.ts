@@ -1,5 +1,5 @@
 import { chromium, request } from "@playwright/test";
-import { ensureCompletedRun, MAUI_ACCOUNTS, MAUI_PASSWORD, storageStatePath } from "./tests/maui/helpers";
+import { AUTH_SESSIONS, ensureCompletedRun, MAUI_PASSWORD, storageStatePath } from "./tests/maui/helpers";
 
 /**
  * Two jobs, both done ONCE for the whole suite rather than per test.
@@ -23,16 +23,18 @@ export default async function globalSetup() {
   const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3000";
   const browser = await chromium.launch();
   try {
-    // Only the roles the specs actually adopt. The clinician (viewer) and quality-staff sign-ins are
-    // themselves under test in auth.spec.ts, so they stay explicit there.
-    for (const account of [MAUI_ACCOUNTS.qualityLead, MAUI_ACCOUNTS.admin]) {
+    // One sign-in per (role, spec file). Sharing ONE state across parallel workers would share one
+    // refresh-token family, and presenting an already-rotated token revokes the family — so a refresh
+    // on one worker would sign the others out. The clinician and quality-staff sign-ins are themselves
+    // under test in auth.spec.ts, so they stay explicit there.
+    for (const s of AUTH_SESSIONS) {
       const page = await browser.newPage({ baseURL });
       await page.goto("/login");
-      await page.locator("#email").fill(account.email);
+      await page.locator("#email").fill(s.email);
       await page.locator("#password").fill(MAUI_PASSWORD);
       await page.getByRole("button", { name: /sign in/i }).click();
       await page.waitForURL(/\/programs/, { timeout: 30_000 });
-      await page.context().storageState({ path: storageStatePath(account.email) });
+      await page.context().storageState({ path: storageStatePath(s.email, s.tag) });
       await page.close();
     }
   } finally {
