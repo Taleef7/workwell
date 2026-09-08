@@ -95,12 +95,16 @@ jobs:
         run: git diff --exit-code backend-ts/measures/official
 
       - name: Gate
+        shell: bash
         env:
           WORKWELL_INSTANCE: maui
           WORKWELL_MAUI_CORPUS_SIZE: "20000"
           WORKWELL_RUN_CHUNK_SIZE: "500"
           WORKWELL_OFFICIAL_MEASURES: ${{ inputs.routed }}
         run: |
+          # pipefail, or `tee` would mask the CLI's own exit code (2 on a usage error) and the failure
+          # would surface later as "ls: cannot access .flip-gate" with the real message buried in stderr.
+          set -o pipefail
           pnpm flip-gate --measure "${{ inputs.measure }}" --evaluation-date "${{ inputs.evaluation_date }}" --subjects "${{ inputs.subjects }}" 2> gate-stderr.log | tee gate-report.txt
           echo "::group::stderr (engine warnings, deduplicated)"
           sort gate-stderr.log | uniq -c | sort -rn | head -40

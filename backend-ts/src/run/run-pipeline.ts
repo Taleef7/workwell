@@ -626,7 +626,8 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
           activeCaseKeys.add(`${c.employeeId}|${c.measureId}|${c.evaluationPeriod}`);
         }
       } catch {
-        /* a read failure only means EXCLUDED stays applicability-gated — never abort the run */
+        /* a read failure only means EXCLUDED stays applicability-gated and an out-of-population
+           closure (ADR-078) waits for the next run — never abort the run */
       }
     }
   }
@@ -854,6 +855,10 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
         evidence = plan.evidence;
         evaluatedNow = false;
         skipped++;
+        // `outOfPopulation` stays false on a reuse: the cache carries no executor flag. Unreachable
+        // today (ADR-040 §6 keeps every official-routed measure out of the cache), and if that policy is
+        // lifted the flag must be derived from the cached `evidence.official`, or a reused
+        // out-of-population MISSING_DATA would open the case ADR-078 removed.
       } else {
         try {
           // A measure whose whole roster was evaluated in one official batch above is read from there. A
@@ -1042,6 +1047,10 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
                   disposition: upserted.disposition,
                   outcomeStatus: status,
                   status: upserted.status,
+                  // WHY a closure closed — AUTO_RESOLVED, EXCLUDED or OUT_OF_POPULATION (ADR-078). Without
+                  // it ~15,000 out-of-population closures read like auto-resolves in the ledger, and an
+                  // auditor would have to join `cases` to tell them apart (own review).
+                  ...(upserted.closedReason ? { closedReason: upserted.closedReason } : {}),
                   // The action the case now shows. Since ADR-074 d13 an UPDATED can be a next_action
                   // change under an unchanged status; without it here the event would be
                   // indistinguishable from the silent refresh it replaced.

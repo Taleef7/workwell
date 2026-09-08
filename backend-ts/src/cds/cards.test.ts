@@ -325,3 +325,14 @@ test("a subject the official logic found OUTSIDE the initial population gets no 
   });
   assert.equal((await buildComplianceCards([inside], opts())).length, 1);
 });
+
+test("multi-rate: a subject in ANY rate's initial population is still carded — only outside every rate is a result (ADR-078)", async () => {
+  const rateIn = { ipp: true, denom: true, denex: false, numer: false, denexcep: false };
+  const rateOut = { ipp: false, denom: false, denex: false, numer: false, denexcep: false };
+  // Rate 1 says outside, rate 2 says inside: the pipeline's `inInitialPopulation` is true for this
+  // subject, so the card surface must agree and card them.
+  const partly = row("cms137", "MISSING_DATA", { evidence: { expressionResults: [], official: { populationResults: rateOut, rates: [rateOut, rateIn] } } });
+  assert.equal((await buildComplianceCards([partly], opts())).length, 1, "in rate 2's population → carded");
+  const wholly = row("cms137", "MISSING_DATA", { evidence: { expressionResults: [], official: { populationResults: rateOut, rates: [rateOut, rateOut] } } });
+  assert.deepEqual(await buildComplianceCards([wholly], opts()), [], "outside every rate → no card");
+});
