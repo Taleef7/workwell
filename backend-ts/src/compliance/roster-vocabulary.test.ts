@@ -139,3 +139,33 @@ test("official-routed deriveCell reads the official display table, not the autho
     else process.env.WORKWELL_OFFICIAL_MEASURES = prior;
   }
 });
+
+test("official: out of the initial population → OUT_OF_POPULATION; an evaluation error → MISSING_DATA with a failure method (ADR-077 d7)", () => {
+  const prior = process.env.WORKWELL_OFFICIAL_MEASURES;
+  process.env.WORKWELL_OFFICIAL_MEASURES = "cms122";
+  try {
+    const out = deriveCell("MISSING_DATA", { expressionResults: [], official: { populationResults: { ipp: false, denom: false, denex: false, numer: false, denexcep: false } } }, "cms122", PERIOD);
+    assert.equal(out.status, "OUT_OF_POPULATION");
+    assert.match(out.method, /initial population/);
+    const err = deriveCell("MISSING_DATA", { evaluationError: "engine failure", message: "boom" }, "cms122", PERIOD);
+    assert.deepEqual(err, { status: "MISSING_DATA", method: "Evaluation failed; no engine result for this subject" });
+    const inPop = deriveCell("MISSING_DATA", { expressionResults: [], official: { populationResults: { ipp: true, denom: true, denex: false, numer: false, denexcep: false } } }, "cms122", PERIOD);
+    assert.equal(inPop.status, "MISSING_DATA", "in the population and missing data stays MISSING_DATA");
+  } finally {
+    if (prior === undefined) delete process.env.WORKWELL_OFFICIAL_MEASURES;
+    else process.env.WORKWELL_OFFICIAL_MEASURES = prior;
+  }
+});
+
+test("OUT_OF_POPULATION is decided by the persisted evidence, not by today's routing flag (Codex #540)", () => {
+  const prior = process.env.WORKWELL_OFFICIAL_MEASURES;
+  delete process.env.WORKWELL_OFFICIAL_MEASURES;
+  try {
+    // cms122 is NOT routed here, as after a rollback — but this row was produced by the official
+    // executor, and its evidence says the subject was evaluated and found outside the population.
+    const out = deriveCell("MISSING_DATA", { expressionResults: [], official: { populationResults: { ipp: false, denom: false, denex: false, numer: false, denexcep: false } } }, "cms122", PERIOD);
+    assert.equal(out.status, "OUT_OF_POPULATION");
+  } finally {
+    if (prior !== undefined) process.env.WORKWELL_OFFICIAL_MEASURES = prior;
+  }
+});

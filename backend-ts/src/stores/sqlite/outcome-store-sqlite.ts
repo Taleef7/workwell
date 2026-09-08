@@ -179,11 +179,34 @@ export class SqliteOutcomeStore implements OutcomeStore {
       .prepare(
         `DELETE FROM outcomes
           WHERE evaluated_at < ?
+            -- An in-flight run (QUEUED/RUNNING/REQUESTED) is still writing; its rows are never candidates.
+            AND run_id IN (SELECT id FROM runs WHERE UPPER(status) IN ('COMPLETED','PARTIAL_FAILURE','FAILED','CANCELLED'))
+            -- KEEP 1: the newest USABLE row per (subject, measure, period) — from a reportable run, and
+            -- not an evaluation error. A FAILED rerun or an engine failure must not evict the last
+            -- finalized clinical answer (review finding 13, ADR-077 d3).
             AND id NOT IN (
-              -- ONE row per (subject, measure, period), tie-broken by id DESC — the same rule the
-              -- ceiling's DISTINCT ON applies. A plain correlated MAX keeps EVERY row tied at the
-              -- newest instant while DISTINCT ON keeps one, so the two stores would disagree about
-              -- what "the subject's current answer" is whenever two rows share a timestamp.
+              SELECT id FROM outcomes o2
+               WHERE o2.id = (
+                 SELECT o3.id FROM outcomes o3
+                   JOIN runs r3 ON r3.id = o3.run_id
+                  WHERE o3.subject_id = o2.subject_id
+                    AND o3.measure_id = o2.measure_id
+                    AND o3.evaluation_period = o2.evaluation_period
+                    AND UPPER(r3.status) IN ('COMPLETED','PARTIAL_FAILURE')
+                    -- json_type, not json_extract: a key present with a JSON null is still the error
+                    -- marker (the ceiling's jsonb \`?\` and the app's \`in\` both test key presence).
+                    AND json_type(o3.evidence_json, '$.evaluationError') IS NULL
+                  ORDER BY o3.evaluated_at DESC, o3.id DESC
+                  LIMIT 1
+               )
+            )
+            -- KEEP 2: the newest row per key regardless (ADR-073's original rule). ONE row, tie-broken by
+            -- id DESC — the same rule the ceiling's DISTINCT ON applies. A plain correlated MAX keeps
+            -- EVERY row tied at the newest instant while DISTINCT ON keeps one, so the two stores would
+            -- disagree about "the subject's current answer" whenever two rows share a timestamp. A key
+            -- with no usable row keeps its newest so no roster cell goes blank, and a newer failure
+            -- stays visible beside the last good answer.
+            AND id NOT IN (
               SELECT id FROM outcomes o2
                WHERE o2.id = (
                  SELECT o3.id FROM outcomes o3
@@ -194,6 +217,7 @@ export class SqliteOutcomeStore implements OutcomeStore {
                   LIMIT 1
                )
             )
+            -- KEEP 3: every row a case cites, matched per row rather than per run.
             AND NOT EXISTS (
               SELECT 1 FROM cases c
                WHERE c.last_run_id = outcomes.run_id
@@ -268,7 +292,7 @@ export class SqliteOutcomeStore implements OutcomeStore {
            JOIN runs r ON r.id = o.run_id
           WHERE o.measure_id = ?
             AND UPPER(r.status) IN ('COMPLETED', 'PARTIAL_FAILURE')
-            AND UPPER(r.scope_type) NOT IN ('CASE', 'EMPLOYEE')`
+            AND UPPER(r.scope_type) IN ('MEASURE', 'ALL_PROGRAMS')`
       : `outcomes WHERE measure_id = ?`;
     const { results } = await this.db
       .prepare(
@@ -335,7 +359,9 @@ export class SqliteOutcomeStore implements OutcomeStore {
     // (case-insensitive) + measure/date/exclude predicates as the ceiling, so the two stores return
     // the same result set (asserted by the store contract).
     const inner: string[] = [
-      "UPPER(r2.scope_type) NOT IN ('CASE','EMPLOYEE')",
+      // Mirrors `POPULATION_SCOPES` (rollup-shared.ts): an allowlist of whole-roster scopes, so a newer
+      // COMPLETED SITE run never becomes "the roster" (ADR-077 d4).
+      "UPPER(r2.scope_type) IN ('MEASURE','ALL_PROGRAMS')",
       "UPPER(r2.status) IN ('COMPLETED','PARTIAL_FAILURE')",
     ];
     const binds: unknown[] = [];

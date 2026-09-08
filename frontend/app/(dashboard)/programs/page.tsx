@@ -45,6 +45,16 @@ type ProgramSummary = {
   /** Which way the measure improves; sent by the overview API so the rate never waits on /api/measures. */
   improvementNotation?: "increase" | "decrease";
   openCaseCount: number;
+  /** The evidence's rate for the latest run (the MeasureReport's own reduction), or null when the run
+   *  carries no official evidence. A separate metric from `complianceRate`, the workflow-status rate. */
+  measureRate?: {
+    source: "official-evidence";
+    runId: string;
+    official: { ecqmId: string | null; version: string | null } | null;
+    rates: Array<{ label: string | null; ipp: number; denom: number; denex: number; denexcep: number; numer: number; effectiveDenominator: number; score: number | null }>;
+    unmeasured: number;
+    evaluationErrors: number;
+  } | null;
 };
 
 type TopDrivers = {
@@ -226,7 +236,7 @@ export default function ProgramsPage() {
 
       <div className="grid gap-3 md:grid-cols-4">
         <KpiCard label="Evaluations (latest runs)" value={initialLoad ? "—" : fmtCount(totalEvaluations)} />
-        <KpiCard label="Overall compliance" value={initialLoad ? "—" : `${overallComplianceRate.toFixed(1)}%`} />
+        <KpiCard label="Overall workflow compliance" value={initialLoad ? "—" : `${overallComplianceRate.toFixed(1)}%`} />
         <KpiCard label="Open cases" value={initialLoad ? "—" : fmtCount(openCases)} />
         <KpiCard label="Last run" value={initialLoad ? "—" : lastRunTimestamp ? new Date(lastRunTimestamp).toLocaleString() : "-"} />
       </div>
@@ -292,6 +302,9 @@ export default function ProgramsPage() {
                   >
                     {programRate.label} {programRate.value.toFixed(1)}%
                   </p>
+                  {/* The five workflow buckets reduced to a percentage — an operational figure. The
+                      measure's own rate, when the run carries official evidence, is the tile below. */}
+                  <p className="text-xs text-neutral-500 dark:text-neutral-400">Workflow status</p>
                   {programRate.lowerIsBetter ? (
                     <p id={noteId} className="text-xs text-neutral-500 dark:text-neutral-400">Lower is better</p>
                   ) : null}
@@ -324,12 +337,35 @@ export default function ProgramsPage() {
                 })}
               </div>
 
+              {/* The measure's OWN rate: the run's official evidence reduced by the same aggregator the
+                  MeasureReport uses, so this tile and the export cannot disagree. Shown apart from the
+                  workflow-status headline above and never drawn on its trend line (ADR-077 d5). */}
+              {program.measureRate && Array.isArray(program.measureRate.rates) ? (
+                <div className="mt-3 rounded border border-neutral-200 p-2 dark:border-neutral-800" data-testid={`measure-rate-${program.measureId}`}>
+                  <p className="text-xs font-semibold uppercase tracking-[0.15em] text-neutral-500 dark:text-neutral-400">Measure rate (official evidence)</p>
+                  {program.measureRate.rates.map((rate, index) => (
+                    <p key={rate.label ?? index} className="text-sm text-neutral-900 dark:text-neutral-100">
+                      {rate.label ?? "Rate"}: {rate.score === null ? "n/a" : `${(rate.score * 100).toFixed(1)}%`}
+                      <span className="ml-1 text-xs text-neutral-500 dark:text-neutral-400">
+                        {fmtCount(rate.numer)} / {fmtCount(rate.effectiveDenominator)} (initial population {fmtCount(rate.ipp)}, removed {fmtCount(rate.denex + rate.denexcep)})
+                      </span>
+                    </p>
+                  ))}
+                  {program.measureRate.evaluationErrors > 0 ? (
+                    <p className="text-xs text-rose-700 dark:text-rose-300">{program.measureRate.evaluationErrors} evaluation errors not counted</p>
+                  ) : null}
+                  {program.measureRate.unmeasured > program.measureRate.evaluationErrors ? (
+                    <p className="text-xs text-amber-700 dark:text-amber-300">{program.measureRate.unmeasured - program.measureRate.evaluationErrors} counted in no rate</p>
+                  ) : null}
+                </div>
+              ) : null}
+
               <div className="relative z-10 mt-4">
-                <p className="mb-1 text-xs font-semibold uppercase tracking-[0.15em] text-neutral-500 dark:text-neutral-400">Trend</p>
+                <p className="mb-1 text-xs font-semibold uppercase tracking-[0.15em] text-neutral-500 dark:text-neutral-400">Workflow status trend</p>
                 <TrendChart
                   data={trend}
                   loading={detailsLoading}
-                  caption={`${program.measureName} ${programRate.label.toLowerCase()} trend`}
+                  caption={`${program.measureName} workflow status history (${programRate.label.toLowerCase()})`}
                   identity={notation}
                 />
               </div>

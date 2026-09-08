@@ -37,6 +37,10 @@ import { ensureSegmentSeed } from "../segment/segment-seed.ts";
 import { routedEngineForEnv } from "../wiring/executor-router.ts";
 import { toRunListItemFromCounts, toRunSummaryFromCounts, toRunLogEntries, toRunOutcomeRows, matchesRunFilters, type RunFilters } from "../run/read-models.ts";
 import { recoverStuckRuns } from "../run/recover-stuck-runs.ts";
+import { isReportableRunStatus } from "../run/reportable.ts";
+import { compactionExposure } from "../run/compaction-evidence.ts";
+import { aggregateOfficialRun, runProducedOfficialEvidence } from "../fhir/run-aggregate.ts";
+import { officialMeasureRate } from "../program/measure-rate.ts";
 import { resolveAlertChannels } from "../run/alert-channel.ts";
 import {
   executeManualRun,
@@ -57,13 +61,11 @@ import { isVsacConfigured } from "@work-well/measure-engine";
 import { rerunToVerify, UnsupportedCaseRerunError } from "../case/case-rerun.ts";
 import type { PopulationCounts, StratumCounts } from "../fhir/measure-report.ts";
 import {
-  officialMembership,
   buildMeasureReportBundle,
   buildSummaryMeasureReportFromCounts,
-  officialReportIdentity,
   type OfficialReportIdentity,
   countPopulations,
-  createRateAggregator,
+  isEvaluationErrorEvidence,
   populationCountsFromStatus,
 } from "../fhir/measure-report.ts";
 import { isOfficialRouted } from "../wiring/official-routing.ts";
@@ -241,49 +243,21 @@ function measureIdentityFor(measureId: string): Set<string> {
  * over the cap we refuse rather than emit a status-derived (wrong) regulatory artifact.
  */
 /**
- * Did THIS run's outcomes come from the official executor? The first row that was actually EVALUATED
- * settles it: `evidence.official` is written only by that executor, and a run evaluates one measure
- * with one engine. Bounded on purpose — this sits in front of a path that must stay O(1) for a 120k
- * `seed:scale` run, and in the common case it reads one row.
- *
- * "Actually evaluated" is the part the first version missed. A subject whose evaluation threw persists
- * `{ evaluationError }` and NO `official` block, and a `PARTIAL_FAILURE` run is reportable — so when
- * such a row happened to sort first, one errored subject silently sent a whole official run down the
- * status-histogram path: one rate instead of two, no strata, and cms122's numerator inverted (GLM
- * review, H1). An errored row says nothing about which engine the run used, so it is skipped, and the
- * scan continues page by page until a row that was evaluated answers; only a run in which EVERY
- * subject errored reads to the end, and that run has nothing to export either way.
+ * "Did THIS run's outcomes come from the official executor?" is answered by `runProducedOfficialEvidence`
+ * (`fhir/run-aggregate.ts`, shared with the programs overview since ADR-077): the first row that was
+ * actually EVALUATED settles it, and an errored row — which carries no engine's evidence — is skipped
+ * rather than read as "not official" (GLM review, H1: one errored subject sorting first once sent a
+ * whole official run down the status-histogram path, inverting cms122's numerator).
  */
-async function runProducedOfficialEvidence(
-  os: Awaited<ReturnType<typeof outcomes>>,
-  runId: string,
-): Promise<boolean> {
-  // First page of one: the overwhelmingly common case (first row evaluated fine) costs a single row.
-  let limit = 1;
-  let offset = 0;
-  for (;;) {
-    const page = await os.listOutcomes(runId, { limit, offset });
-    for (const row of page) {
-      if (isEvaluationErrorEvidence(row.evidence)) continue;
-      return officialMembership(row.evidence) !== null;
-    }
-    if (page.length < limit) return false;
-    offset += page.length;
-    limit = AGGREGATE_PAGE;
-  }
-}
-
-/** The evidence the run pipeline persists for a subject whose evaluation threw — no engine spoke for it. */
-function isEvaluationErrorEvidence(evidence: unknown): boolean {
-  return typeof evidence === "object" && evidence !== null && "evaluationError" in evidence;
-}
-
 async function aggregateCountsForRun(
   os: Awaited<ReturnType<typeof outcomes>>,
   runId: string,
   measureId: string,
   env: RunsEnv,
-): Promise<{ counts: PopulationCounts[]; strata: StratumCounts[][]; unmeasured: number; official: OfficialReportIdentity | null } | { error: Response }> {
+): Promise<
+  | { counts: PopulationCounts[]; strata: StratumCounts[][]; unmeasured: number; evaluationErrors: number; official: OfficialReportIdentity | null }
+  | { error: Response }
+> {
   // Provenance comes from the RUN, not from the current deployment flag (Codex P1). A run's outcomes
   // were produced by whichever engine was configured *then*; consulting `WORKWELL_OFFICIAL_MEASURES`
   // now means that turning the flag off — the documented rollback — silently reinterprets every
@@ -298,46 +272,24 @@ async function aggregateCountsForRun(
   const official = routedNow || (await runProducedOfficialEvidence(os, runId));
   if (!official) {
     // The authored status histogram is single-rate by construction — it reduces workflow buckets, and
-    // a measure with no official evidence has one rate. Wrapped so the return type is uniform.
-    return { counts: [populationCountsFromStatus(await os.countOutcomesByStatus(runId), measureId)], strata: [], unmeasured: 0, official: null };
+    // a measure with no official evidence has one rate. Wrapped so the return type is uniform. A status
+    // histogram cannot see evidence, so it cannot count evaluation errors; this branch serves authored
+    // runs (including `seed:scale`), whose exports never carried that count either.
+    return { counts: [populationCountsFromStatus(await os.countOutcomesByStatus(runId), measureId)], strata: [], unmeasured: 0, evaluationErrors: 0, official: null };
   }
-  // PAGED, never one `listOutcomes(runId)`. The aggregate counts are what the summary MeasureReport and
-  // the QRDA III are built from, and until 2026-09-06 this path refused any run over
-  // MAX_INDIVIDUAL_REPORT_SUBJECTS with a 422 — so on the 20,000-patient pilot the two regulatory
-  // exports were unreachable for every official measure, while ADR-074 stated the summary route was
-  // "the one that survives the cap". The cap protects the INDIVIDUAL report, which builds one document
-  // per subject; a sum needs only each row's memberships, which the aggregator retains at a few dozen
-  // bytes each, so it is read in pages and the 422 is gone.
-  const aggregator = createRateAggregator(measureId);
-  // The artifact identity travels with the counts so BOTH exporters describe the same measure. Read off
-  // the first row that carries it — a run evaluates one measure with one engine, so any row is decisive,
-  // and a run where only some rows errored still names the artifact the rest were scored by (ADR-046).
-  let identity: OfficialReportIdentity | null = null;
-  for (let offset = 0; ; offset += AGGREGATE_PAGE) {
-    const page = await os.listOutcomes(runId, { limit: AGGREGATE_PAGE, offset });
-    for (const row of page) {
-      aggregator.add(row);
-      identity ??= officialReportIdentity(row.evidence);
-    }
-    if (page.length < AGGREGATE_PAGE) break;
-  }
-  // Per RATE, not a single vector. `?type=summary` is the route that survives the individual-report
-  // cap, i.e. the one a real roster uses — and it was returning ONE group for cms137 while
-  // `?type=bundle` returned two. Two different answers for the same run, depending on export type,
-  // with nothing to say which was right (ADR-074). Strata ride along from the same memberships so the
-  // MeasureReport and the QRDA III report the same stratum counts.
-  // `unmeasured` — the subjects ADR-074 d5 counts in NO rate — travels with the counts so the two
-  // exports can SAY how many rows the denominators leave out, rather than leaving the gap to be inferred
-  // from the roster (ADR-074 d11). A MeasureReport has no standard element for it and QRDA III none
-  // either, so both routes carry it as a response header instead of inventing an extension.
-  const { rates, strata, unmeasured } = aggregator.finish();
-  return { counts: rates, strata, unmeasured, official: identity };
+  // PAGED and per RATE (`fhir/run-aggregate.ts`), shared with the programs overview so the dashboard's
+  // measure rate and this export are the same reduction of the same rows (ADR-077 d5). `unmeasured`
+  // (ADR-074 d5/d11) and `evaluationErrors` (ADR-077 d6) travel with the counts so the two exports can
+  // SAY how many rows the denominators leave out; a MeasureReport has no standard element for either
+  // and QRDA III none, so both routes carry them as response headers instead of inventing an extension.
+  const { rates, strata, unmeasured, evaluationErrors, official: identity } = await aggregateOfficialRun(os, runId, measureId);
+  return { counts: rates, strata, unmeasured, evaluationErrors, official: identity };
 }
 
-/** Rows per page when summing a run's official evidence; bounded memory at any roster size. */
-const AGGREGATE_PAGE = 2000;
 /** Subjects counted in no rate (ADR-074 d5/d11), on the summary MeasureReport and QRDA III responses. */
 const UNMEASURED_HEADER = "x-workwell-unmeasured-subjects";
+/** Subjects whose evaluation threw (ADR-077 d6): in no population, on the same two responses. */
+const EVALUATION_ERRORS_HEADER = "x-workwell-evaluation-errors";
 
 
 /**
@@ -350,12 +302,11 @@ const UNMEASURED_HEADER = "x-workwell-unmeasured-subjects";
  * the subject bound, since the count read and the row read can straddle further writes (Codex, #360).
  *
  * `PARTIAL_FAILURE` IS reportable: those runs finished, and their failed subjects persist MISSING_DATA
- * with an `evaluationError`, which is a real outcome rather than an absent one. `FAILED` is not.
+ * with an `evaluationError`, which is a real outcome rather than an absent one. `FAILED` is not. The
+ * set itself lives in `src/run/reportable.ts` so the UI's export buttons can mirror it (ADR-077 d1).
  */
-const REPORTABLE_RUN_STATUSES = new Set(["COMPLETED", "PARTIAL_FAILURE"]);
-
 const notReportable = (status: string): Response | null =>
-  REPORTABLE_RUN_STATUSES.has(status)
+  isReportableRunStatus(status)
     ? null
     : json(
         {
@@ -367,6 +318,37 @@ const notReportable = (status: string): Response | null =>
         },
         409,
       );
+
+/**
+ * A population export from a run a compaction pass could have reached is REFUSED, not rendered from the
+ * survivors: the survivors are a keep set (newest per subject, plus what cases cite), and a score
+ * computed over them is a different number wearing the original run's identity (review finding 13).
+ * The evidence is the ledger, never the surviving rows — see `compaction-evidence.ts` for why
+ * (ADR-077 d2).
+ *
+ * Applied TWICE on every population export: before any row is read, and again after the last read and
+ * before the artifact is returned. The stores share no transaction, so a pass that writes its intent
+ * between the first check and the reads can delete rows under them (and shift a paged read's offsets);
+ * because the intent always precedes the delete, the second check sees any pass that could have
+ * touched what was read (Codex review, #540).
+ */
+const compacted = async (run: { startedAt: string }, env: RunsEnv): Promise<Response | null> => {
+  const exposure = await compactionExposure(run, (await getStores(env)).events);
+  if (!exposure.exposed) return null;
+  return json(
+    {
+      error: "run_compacted",
+      message:
+        `This run started ${run.startedAt}, before the outcome-retention cutoff ${exposure.cutoff ?? "(unreadable)"} ` +
+        `that a compaction pass has since applied, so its per-subject rows may be incomplete. A report built from ` +
+        `the surviving rows would carry a different score under this run's identity, so none is built. ` +
+        `The run's own counts and the quality history are unaffected; the outcomes CSV still returns the surviving rows.`,
+      startedAt: run.startedAt,
+      compactionCutoff: exposure.cutoff,
+    },
+    409,
+  );
+};
 
 /** The run-detail outcomes grid returns a whole run up to this size (a live ALL_PROGRAMS run is ~2,100
  *  rows); a larger run (a 120k seed:scale run) is capped to the first page so the worker never
@@ -1104,6 +1086,8 @@ export async function handleRuns(
     if (!run) return json({ error: "not_found", id: qrda1Id }, 404);
     const unfinished = notReportable(run.status);
     if (unfinished) return unfinished;
+    const goneI = await compacted(run, env);
+    if (goneI) return goneI;
     const os = await outcomes(env);
     const measureIds = await os.distinctMeasuresForRun(qrda1Id, 2);
     if (measureIds.length !== 1) {
@@ -1126,6 +1110,11 @@ export async function handleRuns(
       );
     }
     const rows = await os.listOutcomes(qrda1Id);
+    // Second exposure check AFTER the rows are read (Codex review, #540): a pass that wrote its intent
+    // between the first check and this read may have deleted rows under it. The intent precedes every
+    // delete, so the pass is visible here if it could have touched anything read above.
+    const goneIAfter = await compacted(run, env);
+    if (goneIAfter) return goneIAfter;
     const documents = buildQrda1Documents(run, measureId, rows, await qrda1BundleLookup(env, rows.map((r) => r.subjectId)));
     const nonConformant = documents.filter((d) => !d.conformant).length;
     return json({
@@ -1152,6 +1141,8 @@ export async function handleRuns(
     // histogram of a possibly-RUNNING run and reported its counts as final.
     const unfinishedIii = notReportable(run.status);
     if (unfinishedIii) return unfinishedIii;
+    const goneIii = await compacted(run, env);
+    if (goneIii) return goneIii;
     const os = await outcomes(env);
     const measureIds = await os.distinctMeasuresForRun(qrdaId, 2);
     if (measureIds.length !== 1) {
@@ -1165,6 +1156,10 @@ export async function handleRuns(
     const measureId = measureIds[0]!;
     const aggregate = await aggregateCountsForRun(os, qrdaId, measureId, env);
     if ("error" in aggregate) return aggregate.error;
+    // Second exposure check AFTER the paged read: a pass starting mid-read deletes rows between pages
+    // and shifts the offsets, so the sum above could be short. Its intent event is visible here.
+    const goneIiiAfter = await compacted(run, env);
+    if (goneIiiAfter) return goneIiiAfter;
     // Every rate and every stratum (ADR-074). This route refused a multi-rate measure with a 501 until
     // 2026-09-06 rather than emit rate 1 under the measure's identity; the exporter now reports each
     // group under its own criterion names, with its own performance rate and Reporting Strata.
@@ -1174,6 +1169,7 @@ export async function handleRuns(
       headers: {
         "content-type": "application/xml",
         [UNMEASURED_HEADER]: String(aggregate.unmeasured),
+        [EVALUATION_ERRORS_HEADER]: String(aggregate.evaluationErrors),
         "content-disposition": `attachment; filename="qrda3-${qrdaId}.xml"`,
       },
     });
@@ -1184,6 +1180,13 @@ export async function handleRuns(
   if (mrId && req.method === "GET") {
     const run = await (await store(env)).getRun(mrId);
     if (!run) return json({ error: "not_found", id: mrId }, 404);
+    // Same refusal QRDA I/III already apply, BEFORE any outcome row is read: a RUNNING run's partial
+    // roster and a FAILED run's fragment were both exported as `status: "complete"` until 2026-09-08
+    // (review finding 12), and the UI's export buttons showed for every TERMINAL run, FAILED included.
+    const unfinishedMr = notReportable(run.status);
+    if (unfinishedMr) return unfinishedMr;
+    const goneMr = await compacted(run, env);
+    if (goneMr) return goneMr;
     const os = await outcomes(env);
     const measureIds = await os.distinctMeasuresForRun(mrId, 2);
     if (measureIds.length !== 1) {
@@ -1207,8 +1210,12 @@ export async function handleRuns(
     if (type === "summary") {
       const aggregate = await aggregateCountsForRun(os, mrId, measureId, env);
       if ("error" in aggregate) return aggregate.error;
+      // Second exposure check AFTER the paged read — see the QRDA III route for why.
+      const goneMrAfter = await compacted(run, env);
+      if (goneMrAfter) return goneMrAfter;
       return fhir(buildSummaryMeasureReportFromCounts(run, measureId, aggregate.counts, generatedAt, aggregate.official, aggregate.strata), {
         [UNMEASURED_HEADER]: String(aggregate.unmeasured),
+        [EVALUATION_ERRORS_HEADER]: String(aggregate.evaluationErrors),
       });
     }
     // individual/bundle emits one MeasureReport per subject; a 120k seed:scale run would build a
@@ -1227,9 +1234,91 @@ export async function handleRuns(
         );
       }
       const rows = await os.listOutcomes(mrId, { limit: MAX_INDIVIDUAL_REPORT_SUBJECTS });
-      return fhir(buildMeasureReportBundle(run, measureId, rows, generatedAt));
+      // Second exposure check AFTER the rows are read — see the QRDA I route for why.
+      const goneBundleAfter = await compacted(run, env);
+      if (goneBundleAfter) return goneBundleAfter;
+      // Errored subjects get no individual report (ADR-077 d6); the header says how many were left out.
+      const errored = rows.filter((r) => isEvaluationErrorEvidence(r.evidence)).length;
+      return fhir(buildMeasureReportBundle(run, measureId, rows, generatedAt), { [EVALUATION_ERRORS_HEADER]: String(errored) });
     }
     return json({ error: "invalid_type", message: "type must be summary|individual|bundle" }, 400);
+  }
+
+  /**
+   * The reconciliation ladder (review finding 5, ADR-077 d7): every count on this run, in ONE stated
+   * unit, so a reader can see why the roster, the summary and the export do not show the same number.
+   * Units matter: the directory counts people, this run counts subject-measure PAIRS, a rate counts
+   * subjects in a population, and a case is one (subject, measure, period). Terminal runs only — a moving
+   * run has nothing to reconcile yet.
+   */
+  const reconId = pathname.match(/^\/api\/runs\/([^/]+)\/reconciliation$/)?.[1];
+  if (reconId && req.method === "GET") {
+    const run = await (await store(env)).getRun(reconId);
+    if (!run) return json({ error: "not_found", id: reconId }, 404);
+    // Case-insensitive, like every other status predicate: the Java era persisted some statuses
+    // lowercase, and a `completed` run is as reconcilable as a `COMPLETED` one (Codex review, #540).
+    if (!TERMINAL_RUN_STATUSES.has(run.status.toUpperCase())) return json({ error: "run_not_terminal", status: run.status }, 409);
+    const stores = await getStores(env);
+    const byStatus = await stores.outcomes.countOutcomesByStatus(reconId);
+    const rowsPersisted = byStatus.reduce((sum, c) => sum + c.count, 0);
+    // The ledger's count of pairs the run SET OUT to evaluate — best-effort at the run boundary, so it can
+    // be absent, and it is never derived from the rows (that would be the circular count ADR-077 d2 names).
+    // Read through the bounded type-scoped query, not `auditEventsByRun`, which would load every CASE_*
+    // event of a 20,000-patient run to find one row; a run older than the newest 2,000 completions reads
+    // as "not recorded", which is what the field already means.
+    const completedEvent = (await stores.events.recentAuditEventsByType("RUN_COMPLETED", 2000)).find((e) => e.refRunId === reconId);
+    const workItems = typeof completedEvent?.payload?.totalEvaluated === "number" ? completedEvent.payload.totalEvaluated : null;
+    const measureIds = await stores.outcomes.distinctMeasuresForRun(reconId, 2);
+    let official: Record<string, unknown> | null = null;
+    // A FAILED or CANCELLED run is terminal, so its rows and status counts are worth reconciling — but
+    // its rows are a FRAGMENT, which is exactly why `notReportable` refuses to export them. A measure
+    // rate over a fragment is not the measure's rate, so `official` stays null and the reader is told
+    // why (Codex review, #540). The same rule keeps a fragment's rate out of the measure-rate memo.
+    const reportable = isReportableRunStatus(run.status);
+    // Authored runs carry no population evidence, and paging a whole run to count error rows would
+    // re-materialize exactly what the bounded reads exist to avoid (a 120k seed:scale run). The
+    // RUN_COMPLETED payload carries the pipeline's own `failures` count; absent, the answer is "not
+    // recorded" rather than a scan. An official run's count comes from the memoized aggregate.
+    let evaluationErrors: number | null =
+      typeof completedEvent?.payload?.failures === "number" ? completedEvent.payload.failures : null;
+    if (reportable && measureIds.length === 1) {
+      const measureId = measureIds[0]!;
+      const rate = await officialMeasureRate(stores.outcomes, reconId, measureId);
+      if (rate) {
+        // Rows persisted, minus rows in rate 1's initial population, minus rows in NO rate (errors and
+        // ADR-074 d5's rate-count mismatches, which contribute no membership at all) = evaluated and
+        // found outside the population. Rate 1's IPP is the measure's IPP for every measure shipped today.
+        const inIpp = rate.rates[0]?.ipp ?? 0;
+        official = {
+          measureId,
+          rates: rate.rates,
+          outOfPopulation: Math.max(0, rowsPersisted - inIpp - rate.unmeasured),
+          unmeasured: rate.unmeasured,
+          evaluationErrors: rate.evaluationErrors,
+        };
+        evaluationErrors = rate.evaluationErrors;
+      }
+    }
+    return json({
+      runId: reconId,
+      status: run.status,
+      unit: "subject-measure pairs",
+      workItems,
+      rowsPersisted,
+      byStatus: byStatus.map((c) => ({ status: c.status, count: c.count })),
+      evaluationErrors,
+      official,
+      casesCiting: await stores.cases.countByLastRun(reconId),
+      compaction: await compactionExposure(run, stores.events),
+      notes: [
+        "workItems is the ledger's count of pairs the run set out to evaluate (null when the RUN_COMPLETED event is absent); rowsPersisted is what survives in the outcomes table; evaluationErrors is null when neither the ledger nor official evidence recorded it.",
+        "A rate counts subjects in that rate's population; outOfPopulation subjects were evaluated and found outside it; evaluationErrors are in no population.",
+        "casesCiting counts cases whose last run is this one — one per (subject, measure, period), not per outreach.",
+        ...(reportable
+          ? []
+          : [`This run is ${run.status}: its rows are a fragment, so no measure rate is computed over them (official is null) and no report can be exported.`]),
+      ],
+    });
   }
 
   // Run detail/summary — the RunSummary contract (superset of RunListItem).

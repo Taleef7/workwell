@@ -18,13 +18,13 @@ import { directoryForRows } from "../engine/ingress/webchart/live-directory.ts";
 import { DIRECTORY } from "../config/deployment-profile.ts";
 import { SCALE_TENANT } from "../engine/synthetic/scale-structure.ts";
 import { SCALE_TRIGGER } from "../run/backfill-scale.ts";
-import { isCompletedRun } from "../program/rollup-shared.ts";
+import { isCompletedRun, isPopulationRun } from "../program/rollup-shared.ts";
 
 export const QUALITY_SNAPSHOT_MATERIALIZED_EVENT = "QUALITY_SNAPSHOT_MATERIALIZED";
 
-/** Scopes whose runs represent the FULL population (so an aggregate snapshot is meaningful). SITE is a
- *  partial slice; EMPLOYEE/CASE are single-subject reruns — none materialize a population snapshot. */
-const SNAPSHOT_SCOPES = new Set(["ALL_PROGRAMS", "MEASURE"]);
+// Scopes whose runs represent the FULL population (so an aggregate snapshot is meaningful) are the same
+// allowlist the roster and the programs overview use (`POPULATION_SCOPES`, ADR-077 d4): SITE is a
+// partial slice; EMPLOYEE/CASE are single-subject reruns — none materialize a population snapshot.
 
 export interface MaterializeDeps {
   runStore: RunStore;
@@ -54,7 +54,7 @@ export async function materializeRun(runId: string, deps: MaterializeDeps): Prom
   const run = await deps.runStore.getRun(runId);
   if (!run) return skip("run not found");
   if (run.triggeredBy === SCALE_TRIGGER) return skip("scale seed run (never listed per-subject)");
-  if (!SNAPSHOT_SCOPES.has(run.scopeType)) return skip(`scope ${run.scopeType} is not a population run`);
+  if (!isPopulationRun(run.scopeType)) return skip(`scope ${run.scopeType} is not a population run`);
   if (!isCompletedRun(run.status)) return skip(`run not terminal (${run.status})`);
 
   const period = run.startedAt.slice(0, 7);

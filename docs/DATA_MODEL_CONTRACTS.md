@@ -189,20 +189,31 @@ since 2026-09-07** (ADR-076 d4), in the same commit as the Postgres keep-set ind
 TWH and every other deployment leave it unset, so their history stays whole. 400 days keeps a full
 measurement year plus a margin, and removes nothing on an instance younger than that. Where it is set,
 one pass runs after each nightly recompute — after that run's quality snapshot, never before — and the
-`OUTCOMES_COMPACTED` intent event is written BEFORE the delete and the completion event after it, so
-nothing is deleted without a ledger entry (ADR-073 d4).
+`OUTCOMES_COMPACTION_STARTED` intent event is written BEFORE the delete and the `OUTCOMES_COMPACTED`
+completion event after it, so nothing is deleted without a ledger entry (ADR-073 d4).
 
-**Never deleted, at any age:**
-- the newest `outcomes` row per `(subject_id, measure_id, evaluation_period)` — per PERIOD, so a closed
-  measurement year's evidence is not swept away by the first run of the next one;
+**Never deleted, at any age (ADR-073, amended by ADR-077 d3):**
+- the newest USABLE `outcomes` row per `(subject_id, measure_id, evaluation_period)` — from a
+  COMPLETED or PARTIAL_FAILURE run and not an evaluation error — AND the newest row regardless. Two keep
+  sets: a FAILED rerun or an engine failure never evicts the last finalized answer, and a key with no
+  usable row still keeps its newest so no roster cell goes blank. Per PERIOD, so a closed measurement
+  year's evidence is not swept away by the first run of the next one;
+- every row of a run that is still QUEUED/RUNNING/REQUESTED — an in-flight run is never compacted;
 - every row any case cites, matched on `(run_id, subject_id, measure_id)` — open or closed;
 - every `runs` row and its counts — a compacted run still reports what it found.
 
 **Deleted:** every other `outcomes` row with `evaluated_at` before the cutoff — the superseded
-intermediate history.
+intermediate history. **The only deletion path is `compactOutcomes`**, which awaits the
+`OUTCOMES_COMPACTION_STARTED` intent event before deleting; that event is the completeness evidence
+below.
 
 **What a consumer sees after the window.** §6.2's outcomes CSV for a run older than the window returns
 the SURVIVING rows, not an error and not a padded set; the run-detail read model carries a
-`retentionNotice` saying so, because a lower count would otherwise read as a smaller run. Long-run
-history is the quality-over-time snapshot store, which compaction never touches. `evidence_json` for a
-deleted row is gone with it — a case's own evidence is preserved by the `last_run_id` pin.
+`retentionNotice` saying so, because a lower count would otherwise read as a smaller run.
+**MeasureReport (every variant), QRDA I and QRDA III answer 409 `run_compacted`** for a run that
+started before the furthest cutoff any compaction pass has applied (ADR-077 d2): a score computed over a keep set is a
+different number wearing the run's identity, so none is built. The evidence for that refusal is the
+intent event, never the run's own counts — `totalEvaluated` is a count of the surviving rows, so
+comparing it with the surviving rows is circular. Long-run history is the quality-over-time snapshot
+store, which compaction never touches. `evidence_json` for a deleted row is gone with it — a case's own
+evidence is preserved by the `last_run_id` pin.

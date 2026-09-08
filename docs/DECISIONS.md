@@ -18,6 +18,103 @@
 >
 > **Sequence note:** ADR-033 does not exist — verified absent, and the number must not be reused.
 
+## ADR-077: a report is refused rather than rendered from rows that may be incomplete — and a dashboard rate is the evidence's rate, shown apart from the workflow's
+
+**Status:** Accepted (2026-09-08). Amends ADR-031, ADR-073 and ADR-074 d12.
+
+### Context
+
+An external review of the pilot sandbox (2026-09-07) found four ways a number could be shown with a
+meaning it did not have, all reproduced against `564d5d93` before anything changed:
+
+- every MeasureReport variant returned `status: "complete"` for REQUESTED, QUEUED, RUNNING, FAILED and
+  CANCELLED runs while QRDA I/III refused them, and the UI offered the export for every *terminal*
+  run, FAILED included;
+- a COMPLETED SITE recheck of one clinic became the whole practice's population snapshot — on the
+  roster, the programs overview and the hierarchy rollup;
+- outcome compaction (ADR-073) changed a historical run's score from 1/2 to 0/1 while the run's own
+  "total" fell in step, because `RunSummary.totalEvaluated` is a count of the surviving rows;
+- a FAILED rerun's row evicted the last finalized answer from the keep set, which selected by age alone.
+
+Separately, the programs dashboard's headline was the five workflow buckets reduced to a percentage
+and labelled as if it were the CMS rate (its own comment said "the way CMS scores it"); and an
+evaluation error fell through to the authored status rule and was counted as a subject in the
+denominator who failed — for a lower-is-better measure, the opposite of its numerator.
+
+The first fix proposed for compaction — compare the run's total with its surviving rows — was circular
+and would have detected nothing; the aggregator was about to have the proportion formula applied on
+top of an output that already folds numerator exclusions. Both were caught in review before tests
+encoded them.
+
+### Decision
+
+1. **One reportability predicate.** `src/run/reportable.ts` (COMPLETED, PARTIAL_FAILURE) governs
+   MeasureReport (all three variants), QRDA I and QRDA III, applied before any outcome row is read; the
+   UI's export buttons mirror the same set. A FAILED or CANCELLED run is terminal and not reportable.
+   (Extends ADR-074 d12 to every MeasureReport variant.)
+2. **Completeness evidence is the ledger, never the surviving rows.** `compactOutcomes` awaits an
+   `OUTCOMES_COMPACTION_STARTED` intent event before deleting (ADR-073 d4), and each event carries the
+   cutoff its pass applied, so the FURTHEST cutoff any pass has ever applied bounds what any pass
+   could have reached — the maximum over the ledger, not the newest event, because widening the
+   retention window moves the next cutoff backwards. A population export from a run that started
+   before that cutoff is refused with 409 `run_compacted` — checked before any row is read AND again
+   after the last read, because the stores share no transaction and a pass that starts mid-read
+   deletes under it; the intent precedes every delete, so the second check sees it. Conservative
+   by design: a run whose rows all survived is still refused, because the alternative is a score wearing
+   an identity it no longer earns. `compactOutcomes` is the only deletion path, and that is what makes
+   the evidence sufficient. Comparing `totalEvaluated` with surviving rows was rejected as circular, and
+   `RUN_COMPLETED`'s payload count is best-effort and counts work items including out-of-population
+   subjects, so equality there proves nothing either.
+3. **The keep set protects the newest USABLE row** — from a COMPLETED or PARTIAL_FAILURE run, not an
+   evaluation error — AND the newest row regardless, per (subject, measure, period), plus every row a
+   case cites. Two keep sets, because a FAILED rerun or an engine failure must not evict the last
+   finalized answer, while a key with no usable row still keeps its newest so no roster cell goes blank
+   and a newer failure stays visible beside the last good answer. Rows of an in-flight run are never
+   candidates. (Amends ADR-073 d2.)
+4. **A population winner is a whole-roster run.** `POPULATION_SCOPES` = MEASURE, ALL_PROGRAMS — an
+   allowlist, replacing "everything but CASE and EMPLOYEE". SITE, CASE and EMPLOYEE runs are visible in
+   case detail and never replace the snapshot; the quality snapshot and the per-measure scan behind
+   the risk outlook (`listOutcomesForMeasure` with `successfulPopulationOnly`) use the same set.
+5. **The dashboard's measure rate is the evidence's rate**, reduced by `createRateAggregator` — the same
+   reducer the MeasureReport uses, whose `normalizeMembership` already applies the CQM IG folds, so
+   nothing is subtracted twice — and shown as a SEPARATE metric from the workflow-status rate, which
+   keeps its history under its own name. No improvement is computed between the two, and an inverse
+   measure's workflow history is never read as a trend in its official rate.
+6. **An evaluation error is in no population.** `membershipFor` returns no membership for
+   `evaluationError` evidence on every measure; the aggregate counts it (`evaluationErrors`, and also
+   `unmeasured`, since it is in no rate), both exports carry it as `x-workwell-evaluation-errors`, and
+   the dashboard tile and reconciliation endpoint show it. An errored subject gets NO individual
+   MeasureReport in the bundle (a per-subject document asserting any membership would be a claim
+   about a record the engine never read; the bundle response carries the same header), and the
+   compliance API labels the row `populationsSource: "evaluation-error"` — an additive third value
+   (ADR-061). (Amends ADR-031's status-rule fallback.)
+7. **The roster distinguishes** OUT_OF_POPULATION (evaluated by the official logic, outside the
+   initial population) from MISSING_DATA (in the population, data missing) and from an evaluation
+   failure (MISSING_DATA with a failure method); and `GET /api/runs/:id/reconciliation` states every
+   count on a terminal run in one unit — subject-measure pairs — with the population figures beside
+   them.
+
+### Consequences
+
+- A run older than the retention window can no longer export a MeasureReport or QRDA; its counts, its
+  quality-history snapshot and the surviving outcomes CSV remain. A durable per-run report archive is
+  what would keep old reports exportable, and it is an owner decision (schema).
+- The Postgres keep set now joins `runs`. Its cost at pilot scale is recorded as UNMEASURED in the
+  store's comment, and an EXPLAIN ANALYZE before the pilot's table grows is a follow-up, not a claim.
+- A SITE run's fresher result is not reflected on the roster until the next whole-roster run; a
+  "newer check available" overlay is deferred to the panel-worklist slice. The same allowlist now
+  governs the order-proposal route and the measure-detail latest-run read, which also stop seeing
+  SITE runs — deliberately: neither describes one clinic as the practice either.
+- The measure-rate memo is dropped after every compaction pass, so a warm and a cold process cannot
+  show different rates for the same run; and `/reconciliation` never pages a run's rows — its error
+  count comes from the ledger's `RUN_COMPLETED` payload or the official aggregate, or reads as "not
+  recorded".
+- An out-of-population subject still opens a MISSING_DATA case (ADR-043 recorded the fan-out) and the
+  CDS card mirrors the case. Closing that is a case-model contract for the worklist slice, not a
+  display change, and is deliberately not smuggled in here.
+- The review's reproduction script bypasses `compactOutcomes`, so its compaction check cannot observe
+  decision 2; the store contract and the route test carry the equivalent through the policy layer.
+
 ## ADR-076: profile trust is a per-measure fact, and an operator's next action outranks the wording table
 
 **Status:** Accepted (2026-09-07). Closing the flags MM-1 left open (issues #530–#537).
@@ -393,8 +490,10 @@ what decision 6's refusal was standing in for, and built it:
     FHIR MeasureReport nor QRDA III has a standard place for it and an invented extension would be a
     claim the profiles do not make.
 12. **A run's provenance is read off the first row an engine actually evaluated — never off an errored
-    one.** The gate that decides whether an export sums official memberships or the authored status
-    histogram read ONE row, whichever sorted first. A subject whose evaluation threw persists
+    one.** *(SINCE 2026-09-08, ADR-077 d1: the reportable set this decision names — COMPLETED and
+    PARTIAL_FAILURE — now guards every MeasureReport variant as well as QRDA I/III, from
+    `src/run/reportable.ts`, and the UI mirrors it.)* The gate that decides whether an export sums
+    official memberships or the authored status histogram read ONE row, whichever sorted first. A subject whose evaluation threw persists
     `{ evaluationError }` with no `official` block, and a `PARTIAL_FAILURE` run is reportable — so one
     errored subject in first position sent a whole official run down the status path: one group where
     the measure has two, no strata, and an inverted numerator for a lower-is-better measure (GLM review).
@@ -479,6 +578,13 @@ history twice, once in a form nobody reads.
      record re-read when a number is challenged.
    - **Every run row and its counts.** A compacted run still reports what it found; only its
      per-subject detail thins.
+
+   > **SINCE 2026-09-08 (ADR-077 d2/d3):** the first keep set is now the newest USABLE row (from a
+   > COMPLETED/PARTIAL_FAILURE run, not an evaluation error) AS WELL AS the newest row regardless; rows of
+   > an in-flight run are never candidates; and the `OUTCOMES_COMPACTION_STARTED` intent event of
+   > decision 4 is the completeness evidence a population export checks before it renders — a run that
+   > started before the furthest cutoff any pass has applied is refused with 409 `run_compacted` rather
+   > than reported from its survivors.
 
    Both exclusions are evaluated IN SQL. The first version read the open cases into memory with
    `limit: 100000` and passed their run ids down — which truncates silently at pilot scale (120,000

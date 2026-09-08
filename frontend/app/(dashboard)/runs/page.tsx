@@ -25,7 +25,7 @@ import { useGlobalFilters } from "@/components/global-filter-context";
 import { useApi } from "@/lib/api/hooks";
 import { useAuth } from "@/components/auth-provider";
 import { useRunStatus } from "@/components/run-status-provider";
-import { TERMINAL_RUN_STATUSES } from "@/lib/run-status";
+import { TERMINAL_RUN_STATUSES, isReportableRunStatus } from "@/lib/run-status";
 import { canManageCases, canRunMeasures } from "@/lib/rbac";
 import { SkeletonRow } from "@/components/skeleton-loader";
 import { AuditPacketExportButton } from "@/components/audit-packet-export-button";
@@ -74,6 +74,41 @@ type RunLogEntry = {
   level: string;
   message: string;
 };
+
+/** `GET /api/runs/:id/reconciliation` — a terminal run's counts in ONE stated unit (ADR-077 d7). */
+type Reconciliation = {
+  runId: string;
+  status: string;
+  unit: string;
+  workItems: number | null;
+  rowsPersisted: number;
+  byStatus: Array<{ status: string; count: number }>;
+  /** null when neither the ledger nor official evidence recorded a count. */
+  evaluationErrors: number | null;
+  official: {
+    measureId: string;
+    rates: Array<{ label: string | null; ipp: number; denom: number; denex: number; denexcep: number; numer: number; effectiveDenominator: number; score: number | null }>;
+    outOfPopulation: number;
+    unmeasured: number;
+    evaluationErrors: number;
+  } | null;
+  casesCiting: number;
+  compaction: { exposed: boolean; cutoff: string | null };
+  notes: string[];
+};
+
+/** The ladder is optional on the page; anything that is not the documented shape renders as absent. */
+function asReconciliation(value: unknown): Reconciliation | null {
+  if (!value || typeof value !== "object") return null;
+  const r = value as Partial<Reconciliation>;
+  const officialOk =
+    r.official === null ||
+    (typeof r.official === "object" &&
+      r.official !== null &&
+      Array.isArray(r.official.rates) &&
+      r.official.rates.every((rate) => rate && (rate.score === null || typeof rate.score === "number")));
+  return typeof r.rowsPersisted === "number" && typeof r.unit === "string" && r.compaction && officialOk ? (r as Reconciliation) : null;
+}
 
 type RunOutcomeRow = {
   employeeName: string;
@@ -179,6 +214,7 @@ export default function RunsPage() {
   const [runs, setRuns] = useState<RunListItem[]>([]);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(urlRunId);
   const [selectedRun, setSelectedRun] = useState<RunSummary | null>(null);
+  const [reconciliation, setReconciliation] = useState<Reconciliation | null>(null);
   const [runLogs, setRunLogs] = useState<RunLogEntry[]>([]);
   const [runOutcomes, setRunOutcomes] = useState<RunOutcomeRow[]>([]);
   const [measures, setMeasures] = useState<MeasureOption[]>([]);
@@ -261,11 +297,14 @@ export default function RunsPage() {
     // and set them atomically.
     setRunOutcomes([]);
     setRunLogs([]);
+    setReconciliation(null);
     try {
-      const [summary, logs, outcomes] = await Promise.all([
+      const [summary, logs, outcomes, ladder] = await Promise.all([
         api.get<RunSummary>(`/api/runs/${selectedRunId}`),
         api.get<RunLogEntry[]>(`/api/runs/${selectedRunId}/logs?limit=200`),
-        api.get<RunOutcomeRow[]>(`/api/runs/${selectedRunId}/outcomes`).catch(() => [] as RunOutcomeRow[])
+        api.get<RunOutcomeRow[]>(`/api/runs/${selectedRunId}/outcomes`).catch(() => [] as RunOutcomeRow[]),
+        // 409 for a run that is still moving (nothing to reconcile yet) — shown as absent, not as an error.
+        api.get<unknown>(`/api/runs/${selectedRunId}/reconciliation`).then(asReconciliation).catch(() => null),
       ]);
       // If the user switched runs while this was in flight, drop the stale result — otherwise a slow
       // response could overwrite the newer run's data (last-writer-wins across rapid switches).
@@ -273,6 +312,7 @@ export default function RunsPage() {
       setSelectedRun(summary);
       setRunLogs(logs);
       setRunOutcomes(outcomes);
+      setReconciliation(ladder);
       setInsightDismissed(false);
     } catch (err) {
       // A deep-linked runId (?runId=...) that no longer exists or is invalid
@@ -341,6 +381,11 @@ export default function RunsPage() {
                   .get<RunOutcomeRow[]>(`/api/runs/${activeRunId}/outcomes`)
                   .then(setRunOutcomes)
                   .catch(() => setRunOutcomes([]));
+                // The run just became terminal, so the ladder exists now; the initial fetch got a 409.
+                api
+                  .get<unknown>(`/api/runs/${activeRunId}/reconciliation`)
+                  .then((ladder) => setReconciliation(asReconciliation(ladder)))
+                  .catch(() => setReconciliation(null));
               } catch {
                 // ignore transient error on completion reload
               }
@@ -960,6 +1005,38 @@ export default function RunsPage() {
                   ))}
                 </ul>
               </div>
+              {reconciliation ? (
+                // Every count in ONE stated unit, so the summary, the roster and the export can be read
+                // against each other rather than assumed to agree (ADR-077 d7).
+                <div data-testid="run-reconciliation">
+                  <p className="text-xs font-semibold text-neutral-700 dark:text-neutral-300">Reconciliation ({reconciliation.unit})</p>
+                  <ul className="text-xs text-neutral-600 dark:text-neutral-400">
+                    <li>Set out to evaluate: {reconciliation.workItems ?? "not recorded"}</li>
+                    <li>Rows persisted: {reconciliation.rowsPersisted}</li>
+                    <li>Evaluation errors (in no population): {reconciliation.evaluationErrors ?? "not recorded"}</li>
+                    {reconciliation.official ? (
+                      <>
+                        <li>Evaluated, not in population: {reconciliation.official.outOfPopulation}</li>
+                        {reconciliation.official.unmeasured > reconciliation.official.evaluationErrors ? (
+                          <li>Counted in no rate (could not supply every rate): {reconciliation.official.unmeasured - reconciliation.official.evaluationErrors}</li>
+                        ) : null}
+                        {reconciliation.official.rates.map((rate, index) => (
+                          <li key={rate.label ?? index}>
+                            {rate.label ?? "Rate"}: initial population {rate.ipp}, denominator {rate.denom}, removed {rate.denex + rate.denexcep}, numerator {rate.numer}
+                            {rate.score === null ? "" : `, score ${(rate.score * 100).toFixed(1)}%`}
+                          </li>
+                        ))}
+                      </>
+                    ) : null}
+                    <li>Cases citing this run: {reconciliation.casesCiting}</li>
+                    {reconciliation.compaction.exposed ? (
+                      <li className="text-amber-700 dark:text-amber-300">
+                        A retention pass (cutoff {reconciliation.compaction.cutoff ?? "unknown"}) may have removed rows; population exports are refused.
+                      </li>
+                    ) : null}
+                  </ul>
+                </div>
+              ) : null}
               {mayManageCases ? (
                 <div className="mt-1">
                   <AuditPacketExportButton
@@ -971,9 +1048,11 @@ export default function RunsPage() {
                   />
                 </div>
               ) : null}
-              {/* Standards exports — single-measure runs only (the endpoints 422 on ALL_PROGRAMS) */}
+              {/* Standards exports — single-measure runs only (the endpoints 422 on ALL_PROGRAMS), and only
+                  REPORTABLE runs: FAILED/CANCELLED are terminal but the backend refuses them with 409 (ADR-077). */}
               {normalizeEnumValue(selectedRun.scopeType) === "MEASURE" &&
-              TERMINAL_RUN_STATUSES.has(normalizeEnumValue(selectedRun.status)) ? (
+              isReportableRunStatus(selectedRun.status) &&
+              !reconciliation?.compaction.exposed ? (
                 <div className="mt-2 flex flex-wrap gap-2">
                   <Button
                     variant="outline"
