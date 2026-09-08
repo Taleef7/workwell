@@ -968,16 +968,16 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
       // with NO existing case would INSERT a new EXCLUDED case and re-pollute the gate. The outcome above
       // is ALWAYS persisted (CQL is the sole compliance authority — ADR-008). Empty/absent segments ⇒ all.
       const caseKey = `${item.employee.externalId}|${item.measureId}|${period}`;
-      // (3) OUT OF THE INITIAL POPULATION (ADR-078) — the same close-only shape as EXCLUDED: a subject the
-      // official logic found outside the measure's population never opens a case, and an active one (they
-      // were in the population last period, or were carded before this rule) is closed by the system
-      // under `OUT_OF_POPULATION`. Until 2026-09-08 this was ADR-043's recorded fan-out: every
+      // (3) OUT OF THE INITIAL POPULATION (ADR-078) — close-only like COMPLIANT, and like COMPLIANT it is
+      // NOT gated on the active-case snapshot: `planCaseUpsert` returns a no-op where no row exists, so
+      // the upsert is always safe, and gating it on `activeCaseKeys` would mean a transient failure of
+      // that preload (caught above, leaving the set empty) silently left every out-of-population case
+      // open for another night (Codex review, #542). EXCLUDED stays gated because its no-case branch
+      // INSERTS. A subject the official logic found outside the measure's population never opens a case,
+      // and an active one (in the population last period, or carded before this rule) is closed by the
+      // system under `OUT_OF_POPULATION`. Until 2026-09-08 this was ADR-043's recorded fan-out: every
       // non-diabetic opened a MEDIUM CMS122 case, and six routed measures made that the worklist.
-      const closeOnly =
-        status === "COMPLIANT" ||
-        (status === "EXCLUDED" && activeCaseKeys.has(caseKey)) ||
-        (outOfPopulation && activeCaseKeys.has(caseKey));
-      const outOfPopulationWithNoCase = outOfPopulation && !activeCaseKeys.has(caseKey);
+      const closeOnly = status === "COMPLIANT" || (status === "EXCLUDED" && activeCaseKeys.has(caseKey)) || outOfPopulation;
       // Live WebChart subjects are display-applicable (their roster cells show real chips) but must NOT
       // OPEN cases: rerun-to-verify returns a non-mutating 409 for `wc|` subjects until fetch-one-patient
       // lands, so a newly-created wc case would be un-closeable. Case CREATION eligibility is therefore
@@ -1013,7 +1013,7 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
         if (gatedBySegment.sites.size < 12) gatedBySegment.sites.add(item.employee.site ?? "(no site)");
         gatedBySegment.measures.add(item.measureId);
       }
-      if (deps.caseStore && !outOfPopulationWithNoCase && (closeOnly || (!isLiveWebChartSubject && segmentApplicable()))) {
+      if (deps.caseStore && (closeOnly || (!isLiveWebChartSubject && segmentApplicable()))) {
         const upserted = await deps.caseStore.upsertFromOutcome({
           runId: runId,
           subjectId: item.employee.externalId,
