@@ -135,14 +135,17 @@ function codesOf(concept: unknown): string[] {
  */
 function isBloodPressure(resource: Record<string, unknown>): boolean {
   if (!codesOf(resource.code).some((c) => LOINC_BP_PANEL.has(c))) return false;
-  const components = (resource.component as Array<{ code?: unknown; valueQuantity?: unknown }> | undefined) ?? [];
+  const components = (resource.component as Array<{ code?: unknown; valueQuantity?: { value?: unknown } }> | undefined) ?? [];
   const measured = (loinc: string) =>
-    components.filter((c) => codesOf(c?.code).includes(loinc) && c?.valueQuantity != null);
-  // EXACTLY one of each, each carrying a value. Not "at least one": cms165 reads the systolic out with
-  // `singleton from`, which THROWS on two — a bilateral reading or a duplicated flowsheet row — and a
-  // throw mid-run is the failure the per-measure profile work exists to prevent. And a component with
-  // no `valueQuantity` is not a measurement, so stamping it would assert a US Core conformance the
-  // resource does not have, which is this file's fabrication line (review finding).
+    components.filter((c) => codesOf(c?.code).includes(loinc) && typeof c?.valueQuantity?.value === "number");
+  // EXACTLY one of each, each carrying a NUMERIC value. Not "at least one": cms165 reads the systolic
+  // out with `singleton from`, which THROWS on two — a bilateral reading or a duplicated flowsheet row —
+  // and a throw mid-run is the failure the per-measure profile work exists to prevent. And a component
+  // with no `valueQuantity.value` is not a measurement: a `valueQuantity` carrying only a unit beside a
+  // `dataAbsentReason` is a valid way to say "not measured", and stamping it would hand cms165 a newest
+  // reading with null systolic/diastolic that displaces a real controlled one (Codex review, #539).
+  // Stamping it would also assert a US Core conformance the resource does not have, which is this
+  // file's fabrication line.
   return measured(LOINC_SYSTOLIC).length === 1 && measured(LOINC_DIASTOLIC).length === 1;
 }
 

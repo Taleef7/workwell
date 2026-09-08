@@ -98,9 +98,10 @@ are not all attributed to the same standard, and the difference matters:
 | Unattributed | 2 | the CMS125 cases whose follow-up is a `Procedure` only — same shape, different cause |
 | Separate, and separately proven | 1 | CMS137's period-boundary precision difference (2026-09-06) |
 
-The August evidence counted **9 of 23 unattributed**; it is now **2 of 24**. Anywhere this is
-summarised, "implicated in 21" is the honest verb and "proven for 8" is the stronger claim that can
-also be made.
+The August evidence counted **9 of 23 unattributed**; it is now **2 of 25**. Anywhere this is
+summarised, "implicated in 22" is the honest verb and "proven for 8" is the stronger claim that can
+also be made. (This paragraph said 21 until the CMS130 disagreement was added to the table above; a
+reader citing it repeated the stale count — Codex review, #539.)
 
 That is worth more than three separate findings. It says the second engine agrees with ours about
 depression screening, breast cancer screening and diabetes control, and disagrees about how to read a
@@ -131,8 +132,11 @@ medication order — one difference wearing three costumes, rather than three un
    the specification correctly. Establishing that needs the CQL specification's own answer for
    `medicationRequestPeriod` over a request with `authoredOn` and a dispense request, which is a
    question for the measure steward and the engine authors, not for a mutation.
-4. cms130 and cms165 remain unmeasured cross-engine — their sidecars are VSAC-completed and cannot be
-   produced without the credential (issue #532).
+4. At the time of this sweep cms130 and cms165 were unmeasured cross-engine — their sidecars are
+   VSAC-completed and could not be produced without the credential (issue #532). Later the same day
+   cms130 WAS swept (63 of 64, one disagreement with this helper's signature — see the running total
+   below and `CROSS_ENGINE_2026-09-07_CMS130_CMS165.md`); cms165 still has no cross-engine number, its
+   11 of 68 being a harness question rather than a comparison, and none is quoted.
 
 Running total at the time of this sweep: **299 of 323 cases agree across seven
 measures**, unchanged — this is a diagnosis of a known disagreement, not a new measurement. CMS130 was

@@ -178,7 +178,9 @@ const stamped = (resource: Record<string, unknown>): boolean => {
   const out = preparedForQiCore({ entry: [{ resource }] } as never) as {
     entry: Array<{ resource: { meta?: { profile?: string[] } } }>;
   };
-  return out.entry[0]!.resource.meta?.profile?.includes(BP_PROFILE) ?? false;
+  // Exact element equality, not `includes`: CodeQL reads `.includes(<url>)` on a string-ish value as a
+  // substring check and flags it (alert #31); `some` with `===` says what is meant and is equivalent.
+  return out.entry[0]!.resource.meta?.profile?.some((p) => p === BP_PROFILE) ?? false;
 };
 
 test("a blood pressure is stamped, and everything that only resembles one is not", () => {
@@ -243,6 +245,23 @@ test("a blood pressure is stamped, and everything that only resembles one is not
     }),
     false,
     "components without values are not measurements",
+  );
+  // A `valueQuantity` with a unit and no `value`, beside a `dataAbsentReason`, is a VALID way to record
+  // "not measured" — and the first predicate stamped it, because it only asked whether the container
+  // existed. cms165 would then read the newest reading with null systolic/diastolic and displace a real
+  // controlled one (Codex review, #539).
+  assert.equal(
+    stamped({
+      resourceType: "Observation",
+      status: "final",
+      code: loinc("85354-9"),
+      component: [
+        { code: loinc("8480-6"), valueQuantity: { unit: "mm[Hg]", system: "http://unitsofmeasure.org", code: "mm[Hg]" }, dataAbsentReason: { coding: [{ code: "not-performed" }] } },
+        bpComponents[1]!,
+      ],
+    }),
+    false,
+    "a component whose quantity carries no numeric value is not a measurement, even with a unit",
   );
 
   // TWO systolic components — a bilateral reading, or a duplicated flowsheet row. cms165 reads the
