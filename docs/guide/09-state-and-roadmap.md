@@ -52,7 +52,7 @@ to diff against, and that comparison is what every flip so far was judged on
 | QRDA Category I vs the HL7 ruler | 0 findings, XSD and Schematron (2026-08-02) | Cypress 7.5.1, 22 submissions |
 | QRDA Category III vs the HL7 ruler | 0 findings (2026-08-02) | same |
 | MeasureReport vs base FHIR R4 | 0 errors; the DEQM profile gap is exactly 3 findings per report | `measure-report.test.ts` |
-| Independent Java engine running our artifacts | 299 of 323 across seven measures (255 of 278 on 2026-08-04; CMS137 44 of 45 on both rates on 2026-09-06) | 14 of the 23 August exceptions trace to one conjunct whose required field the test cases omit; CMS137's one is a millisecond-versus-second precision difference at the period's first instant, isolated by two mutations (one second later admitted; the same instant without milliseconds admitted) |
+| Independent Java engine running our artifacts | 362 of 387 across eight measures (255 of 278 on 2026-08-04; CMS137 44 of 45 on both rates on 2026-09-06; CMS130 63 of 64 on 2026-09-07) | 22 of the 25 exceptions trace to one helper reading a medication order's period — 8 proven by single-variable mutation, 14 consistent-with by inventory. CMS137's one is a millisecond-versus-second precision difference at the period's first instant, isolated by two mutations. CMS165 was swept the same day and is deliberately NOT in this total: 56 of its 68 patients fall out of the initial population on the Java side, which needs diagnosing before it says anything about either engine |
 | Subject-level agreement vs Cypress's expected results | 64 of 64 and 150 of 150, every population (2026-08-03) | reproduced against a second independently generated archive |
 | Routed in production | 2 measures | `WORKWELL_OFFICIAL_MEASURES` in `deploy-twh-mieweb.yml` |
 
@@ -100,9 +100,10 @@ rather than reporting a pass it did not earn. The other six are byte-identical e
   Deferred deliberately: today it moves no external number.
 - **Four CLI entry points still use `node:` builtins** — the last unmoved piece of the package
   extraction.
-- **Measure discrepancies, mostly diagnosed now:** two Procedure-only cases in CMS125 remain open, and
-  CMS130/CMS165 have never been swept — their sidecars need the VSAC credential, so the sweep runs from
-  the manual `cross-engine-sweep` workflow rather than a laptop (issue #532). CMS2's seven numerator
+- **Measure discrepancies, mostly diagnosed now:** two Procedure-only cases in CMS125 remain open, CMS130 and CMS165 were swept on 2026-09-07 from that
+  credentialed workflow: CMS130 agrees on 63/64, and CMS165's 11/68 is recorded as an open question
+  rather than a result, because 56 of 68 patients fall out of the initial population on the Java side
+  (issue #532). CMS2's seven numerator
   flips are **no longer undiagnosed** (2026-09-07): the second engine takes a medication order's start
   from `dosageInstruction.timing.repeat.boundsPeriod` and not from `authoredOn`, proven by mutation on
   all seven. It is the same helper CMS122's and CMS125's disagreements were isolated to

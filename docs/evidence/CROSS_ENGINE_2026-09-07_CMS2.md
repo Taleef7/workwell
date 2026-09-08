@@ -87,20 +87,21 @@ The 2026-08-04 run proved those two measures' `DENEX 1→0` disagreements by iso
 `"Has Dementia Medications in Year Before or During Measurement Period"`, whose period likewise comes
 from `medicationRequestPeriod` deriving from `dosageInstruction`, which the MADiE cases omit.
 
-With CMS2 diagnosed, that helper is implicated in **21 of the 24** known cross-engine disagreements —
-CMS122's 6, CMS125's 8, CMS2's 7 — but the 21 are not all attributed to the same standard, and the
-difference matters:
+With CMS2 diagnosed, that helper is implicated in **22 of the 25** known cross-engine disagreements —
+CMS122's 6, CMS125's 8, CMS2's 7, and CMS130's 1 (swept later the same day, same signature) — but they
+are not all attributed to the same standard, and the difference matters:
 
 | | cases | standard |
 |---|---|---|
 | **Proven by construction** | **8** | one CMS125 case in August, and all 7 CMS2 cases here — a single-variable mutation flipped each |
-| Consistent-with, by inventory | 13 | the other CMS122/CMS125 disagreements: every one carries a `MedicationRequest` and no agreeing case does, which is strong and is not a proof |
+| Consistent-with, by inventory | 14 | the other CMS122/CMS125 disagreements, plus CMS130's one: every one carries a `MedicationRequest` and no agreeing case does, which is strong and is not a proof |
 | Unattributed | 2 | the CMS125 cases whose follow-up is a `Procedure` only — same shape, different cause |
 | Separate, and separately proven | 1 | CMS137's period-boundary precision difference (2026-09-06) |
 
-The August evidence counted **9 of 23 unattributed**; it is now **2 of 24**. Anywhere this is
-summarised, "implicated in 21" is the honest verb and "proven for 8" is the stronger claim that can
-also be made.
+The August evidence counted **9 of 23 unattributed**; it is now **2 of 25**. Anywhere this is
+summarised, "implicated in 22" is the honest verb and "proven for 8" is the stronger claim that can
+also be made. (This paragraph said 21 until the CMS130 disagreement was added to the table above; a
+reader citing it repeated the stale count — Codex review, #539.)
 
 That is worth more than three separate findings. It says the second engine agrees with ours about
 depression screening, breast cancer screening and diabetes control, and disagrees about how to read a
@@ -131,8 +132,13 @@ medication order — one difference wearing three costumes, rather than three un
    the specification correctly. Establishing that needs the CQL specification's own answer for
    `medicationRequestPeriod` over a request with `authoredOn` and a dispense request, which is a
    question for the measure steward and the engine authors, not for a mutation.
-4. cms130 and cms165 remain unmeasured cross-engine — their sidecars are VSAC-completed and cannot be
-   produced without the credential (issue #532).
+4. At the time of this sweep cms130 and cms165 were unmeasured cross-engine — their sidecars are
+   VSAC-completed and could not be produced without the credential (issue #532). Later the same day
+   cms130 WAS swept (63 of 64, one disagreement with this helper's signature — see the running total
+   below and `CROSS_ENGINE_2026-09-07_CMS130_CMS165.md`); cms165 still has no cross-engine number, its
+   11 of 68 being a harness question rather than a comparison, and none is quoted.
 
-Running total across the measures cross-executed to date: **299 of 323 cases agree across seven
-measures**, unchanged — this is a diagnosis of a known disagreement, not a new measurement.
+Running total at the time of this sweep: **299 of 323 cases agree across seven
+measures**, unchanged — this is a diagnosis of a known disagreement, not a new measurement. CMS130 was
+swept later the same day and took it to 362 of 387 across eight
+(`CROSS_ENGINE_2026-09-07_CMS130_CMS165.md`).

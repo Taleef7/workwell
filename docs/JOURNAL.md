@@ -1,5 +1,67 @@
 # Journal
 
+## 2026-09-07 (later) — the last two measures go through the second engine, and a blood pressure gets its profile
+
+Two of the four issues left open after ADR-076 merged were not the owner's at all. I had written that
+the CMS130/CMS165 sweep "needs a human dispatch" when I had built the workflow and could dispatch it,
+and I had shipped half of CMS165's fix and called the other half somebody else's ingest work.
+
+**The sweep workflow's first real run failed, which is the argument for running it.** Not on the
+measure: on `corepack pnpm`, which ignores the version `pnpm/action-setup` pins and fetched 12.3.4
+against a lockfile written by 10, dying with `ERR_PNPM_LOCKFILE_CONFIG_MISMATCH` before a single case
+was evaluated. The script now prefers the pnpm already on PATH and falls back to `corepack pnpm@10`.
+Every guard that ran before it behaved: the credential check passed, and the truncation check printed
+`31 value sets, 3172 codes, 0 truncated` after completing AdvancedIllness from VSAC at 1000 → 2000
+codes.
+
+**CMS130 agrees with the second engine on 63 of 64** — the best first result of any measure swept, and
+the eighth measure to be cross-executed. Its single disagreement is `DENEX 1→0` on a case carrying a
+`MedicationRequest` with a dispense duration and no `dosageInstruction`: the same signature the CMS2
+investigation proved by mutation that morning. Recorded as consistent-with rather than proven, which is
+the August standard, because proving it needs a mutated bundle through the credentialed workflow and
+that input does not exist yet.
+
+**CMS165 returned 11 of 68, and it is not a number.** The Java engine puts 56 of 68 patients out of the
+initial population entirely — the shape of a harness or configuration difference, not a disagreement
+about the measure, and precisely the kind of result the check script's degenerate-sweep refusal exists
+to stop being quoted. The obvious explanation was CMS137's period boundary, since this deck starts most
+encounters at the period's first millisecond; the correlation does not hold, because nine cases whose
+every encounter sits at that instant were admitted by Java anyway. So it is written down as an open
+question with the next experiment named — `QICoreCommon.toInterval` over a hypertension `Condition`
+with no explicit onset — and excluded from the running total, which is now **362 of 387 across eight
+measures**. A number that is probably measuring the harness does not belong in a total cited as
+evidence about engines.
+
+**A blood pressure now carries its own profile — one necessary piece of #533, not its other half.** Making `trustMetaProfile`
+per-measure was necessary and useless alone: under it an UNSTAMPED reading is not retrieved at all, and
+WebChart-derived bundles carry no `meta.profile`, so cms165 could never have been routed on real data.
+`prepareForQiCore` stamps `us-core-blood-pressure` on an Observation that already says it is one — the
+LOINC panel code, or both a systolic and a diastolic component. That is normalization by this file's own
+test: the profile is derived from codes the resource already carries and no clinical fact is added. The
+negative cases are the point of the tests — a hemoglobin is not promoted into a blood-pressure measure
+by sitting beside one, half a blood pressure is not one, and the right code in the wrong system is not
+one either. It is the seam every bundle source flows through, so the corpus, the fixtures and WebChart all get the
+stamp from one change — and **it does not make cms165 routable**, which two drafts of this entry claimed
+before a reviewer read the library and I checked it. `trustMetaProfile: true` reaches
+`cql-exec-fhir`'s `requireProfileTagging`, which filters EVERY profile-typed retrieve on `meta.profile`
+and THROWS outright when a Patient retrieve matches nothing (`lib/fhir.js:428,442`). cms165 is authored
+on QI-Core 6 and wants `qicore-patient`, `qicore-encounter`, both Condition profiles and more; the
+corpus stamps fourteen, which is why the measure runs there and only there. On an unstamped bundle this
+change does not help — the Patient retrieve throws first, loudly, before a blood pressure is looked at.
+What it does supply is the one piece no other layer can: only the codes say a resource IS a blood
+pressure. #533's ingest half stays open, with a second blocker behind it — WebChart's BP panel carries
+`status: "unknown"` and the measure admits only `final | amended | corrected`.
+
+The test I wrote to prove the opposite — score an unstamped bundle and assert the answer is unchanged —
+was deleted rather than adjusted, because it asserted something false. It self-skips locally without the
+terminology sidecar, so it would have failed for the first time in CI, on the claim rather than on the
+code.
+
+**Still genuinely the owner's, and only these:** the cms137 flip, which is a routing decision the locked
+decisions reserve and which turns on whether measure 305 survives the final rule; and the live segment
+repair, which needs an authenticated admin session against the running pilot. Everything else that was
+open is closed or has its next experiment written down.
+
 ## 2026-09-07 — the eight flags MM-1 left open, and CMS2's seven disagreements run to a cause
 
 Every open flag from the last three entries had one thing in common: it was recorded somewhere a person
@@ -19,11 +81,11 @@ dose changes nothing; `dispenseRequest.validityPeriod` changes nothing; moving t
 takes the sweep to 36/36. So `cqf-fhir-cr` will take a medication's start from `boundsPeriod` and not
 from `authoredOn`, and `fqm-execution` and MADiE's own expected reports take it from `authoredOn`. The
 implicated helper is `CumulativeMedicationDuration.medicationRequestPeriod` — the same one CMS122's and
-CMS125's `DENEX` disagreements were isolated to in August. It is now implicated in **21 of the 24**
-known cross-engine disagreements: CMS122's 6, CMS125's 8, CMS2's 7 — 8 of them proven by a
-single-variable mutation and 13 consistent-with by inventory, which is the distinction the August
+CMS125's `DENEX` disagreements were isolated to in August. It is now implicated in **22 of the 25**
+known cross-engine disagreements: CMS122's 6, CMS125's 8, CMS2's 7 and CMS130's 1 — 8 of them proven by a
+single-variable mutation and 14 consistent-with by inventory, which is the distinction the August
 evidence drew and the derived docs had lost. August counted **9 of 23 unattributed**; it is now **2 of
-24**, the two CMS125 cases whose follow-up is a `Procedure` only. CMS137's single one is separate and
+25**, the two CMS125 cases whose follow-up is a `Procedure` only. CMS137's single one is separate and
 separately proved. One difference wearing three costumes is a materially better
 position than three unexplained ones. Written up in `docs/evidence/CROSS_ENGINE_2026-09-07_CMS2.md`, limits included.
 
