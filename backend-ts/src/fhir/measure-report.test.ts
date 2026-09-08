@@ -600,3 +600,36 @@ test("createRateAggregator sums page by page to the same answer as one pass, and
   assert.equal(whole.rates[0]!.denom, 2);
   assert.equal(whole.rates[1]!.numer, 1);
 });
+
+test("an evaluation-error row is in NO population and is counted as an error, on every measure (ADR-077 d6)", async () => {
+  const module = await import("./measure-report.ts");
+  const error = { status: "MISSING_DATA", evidence: { evaluationError: "engine threw", message: "boom" } };
+  // Authored measure: until 2026-09-08 this counted as ipp+denom (a denominator failure) — an engine
+  // crash deflated the rate. A measure that flags MISSING_DATA as out-of-population happened to hide it.
+  for (const measureId of ["audiogram", "cms122", "cms137"]) {
+    assert.deepEqual(module.membershipFor(error, measureId), { ipp: false, denom: false, denex: false, numer: false, denexcep: false }, measureId);
+  }
+  const agg = module.createRateAggregator("cms122");
+  agg.add({ status: "OVERDUE", evidence: { official: { populationResults: { ipp: true, denom: true, numer: true, denex: false, denexcep: false } } } });
+  agg.add(error);
+  const out = agg.finish();
+  assert.deepEqual(out.rates, [{ ipp: 1, denom: 1, denex: 0, numer: 1, denexcep: 0 }]);
+  assert.equal(out.evaluationErrors, 1, "the error is visible in the aggregate, not lost");
+  assert.equal(out.unmeasured, 1, "and it is in no rate, so ADR-074 d11's 'counted in no rate' figure includes it");
+  assert.equal(module.isEvaluationErrorEvidence(error.evidence), true);
+  assert.equal(module.isEvaluationErrorEvidence({ expressionResults: [] }), false);
+});
+
+test("an errored subject gets NO individual MeasureReport in the bundle — the summary still counts everyone it can (ADR-077 d6)", () => {
+  const rows: OutcomeRecord[] = [
+    oc("COMPLIANT"),
+    { ...oc("MISSING_DATA"), evidence: { evaluationError: "engine threw", message: "boom" } },
+  ];
+  const bundle = buildMeasureReportBundle(run, "audiogram", rows, GENERATED_AT);
+  const individuals = bundle.entry.filter((e) => e.resource.type === "individual");
+  assert.equal(individuals.length, 1, "one individual report for the one evaluated subject");
+  const summary = bundle.entry[0]!.resource;
+  assert.equal(summary.type, "summary");
+  const count = (code: string) => summary.group[0]!.population.find((p) => p.code.coding[0]!.code === code)?.count ?? 0;
+  assert.equal(count("initial-population"), 1, "the errored subject is in no population of the summary either");
+});

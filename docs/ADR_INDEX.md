@@ -6,14 +6,15 @@
 > `grep -o '^#\+ ADR-[0-9]*.*' docs/DECISIONS.md`, newest first. If the highest number here is lower
 > than the highest there, this file is stale.
 >
-> **`·archived`** (14 of 75) means the BODY moved to `docs/archive/DECISIONS_ARCHIVE.md` — superseded,
+> **`·archived`** (14 of 76) means the BODY moved to `docs/archive/DECISIONS_ARCHIVE.md` — superseded,
 > or a historical *finding* rather than a decision that governs. `DECISIONS.md` keeps every heading plus
-> a pointer, so every cross-reference still resolves. The 61 unmarked titles are the record that governs.
+> a pointer, so every cross-reference still resolves. The 62 unmarked titles are the record that governs.
 >
 > **ADR-033 does not exist** — the sequence runs 031, 032, 034. Verified absent 2026-07-29. Do not reuse it.
 
 ## Titles (newest first)
 
+- ADR-077: a report is refused rather than rendered from rows that may be incomplete — and a dashboard rate is the evidence's rate, shown apart from the workflow's
 - ADR-076: profile trust is a per-measure fact, and an operator's next action outranks the wording table
 - ADR-075: the pilot's roster is a generated corpus the deployment composes lazily, and evaluation runs in subject chunks
 - ADR-074: a multi-rate measure is read as every one of its rates — and a subject is compliant only where each rate they are in is met

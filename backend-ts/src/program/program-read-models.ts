@@ -18,6 +18,7 @@ import { measureIdentityFor } from "../measure/measure-identity.ts";
 import { ACTIVE_CASE_STATUSES } from "../case/case-logic.ts";
 import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
 import { day, isCompletedRun, isPopulationRun, round1, complianceRateOf, type ComplianceRateCounts } from "./rollup-shared.ts";
+import { officialMeasureRate, type MeasureRate } from "./measure-rate.ts";
 import { directoryForRows, type DirectorySnapshot } from "../engine/ingress/webchart/live-directory.ts";
 import { DEPLOYMENT_PROFILE, DIRECTORY, isRunnableMeasure, profileSubjectMatcher, tenantById } from "../config/deployment-profile.ts";
 import { isWebChartConfigured, type DataSourceEnv } from "../engine/ingress/data-source.ts";
@@ -46,6 +47,12 @@ export interface ProgramSummary {
    */
   improvementNotation: "increase" | "decrease";
   openCaseCount: number;
+  /**
+   * The EVIDENCE's rate for `latestRunId` — the measure's own populations reduced by the same
+   * aggregator the MeasureReport uses — or null when the run carries no official evidence. Shown as a
+   * separate metric from `complianceRate`, which is the workflow-status rate (ADR-077 d5).
+   */
+  measureRate: MeasureRate | null;
 }
 
 export interface ProgramFilters {
@@ -313,6 +320,7 @@ export async function programOverview(deps: ProgramDeps, filters: ProgramFilters
       complianceRate: complianceRateOf({ compliant, dueSoon, overdue, missingData, excluded }),
       improvementNotation: measureIdentityFor(m.id)?.improvementNotation ?? "increase",
       openCaseCount,
+      measureRate: null,
     };
   });
 
@@ -320,6 +328,14 @@ export async function programOverview(deps: ProgramDeps, filters: ProgramFilters
   // (the in-memory scan above excluded seed:scale runs). When ?tenant=mhn, REPLACE the live counts
   // with the scale ones; otherwise ADD them. Skipped when scoped to a non-mhn tenant.
   await foldScaleCounts(deps, summaries, filters);
+
+  // The evidence's rate, per measure, off the winning run (ADR-077 d5). Sequential and memoized: one
+  // paged read per (run, measure) for the life of the process, and an authored run costs one row
+  // (`runProducedOfficialEvidence`). Deliberately NOT site/tenant-filtered: it is the run's whole
+  // population, which is what the export reports; a filtered view keeps the status buckets only.
+  for (const s of summaries) {
+    if (s.latestRunId) s.measureRate = await officialMeasureRate(deps.outcomeStore, s.latestRunId, s.measureId);
+  }
 
   return summaries.sort((a, b) => a.measureName.localeCompare(b.measureName));
 }

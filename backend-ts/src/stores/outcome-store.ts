@@ -130,11 +130,15 @@ export interface OutcomeStore {
   listOutcomes(runId: string, opts?: { limit?: number; offset?: number }): Promise<OutcomeRecord[]>;
   getOutcomeById(id: string): Promise<OutcomeRecord | null>;
   /**
-   * Delete outcome rows older than `cutoff`, KEEPING three things (ADR-073):
-   *  - the newest row per `(subject_id, measure_id, evaluation_period)`, whatever its age. **Per
-   *    PERIOD, not merely per measure**: a calendar-year eCQM's whole 2027 evidence is superseded by
-   *    the first 2028 run, and keeping only the newest-per-measure would delete every 2027 row months
-   *    before anyone could be asked to justify a 2027 rate.
+   * Delete outcome rows older than `cutoff`, KEEPING four things (ADR-073, amended by ADR-077 d3):
+   *  - the newest USABLE row per `(subject_id, measure_id, evaluation_period)` — from a COMPLETED or
+   *    PARTIAL_FAILURE run and not an evaluation error — AND the newest row regardless, whatever their
+   *    age. Two keep sets, because a FAILED rerun or an engine failure must not evict the last finalized
+   *    clinical answer, while a key with no usable row still keeps its newest so no roster cell goes
+   *    blank. **Per PERIOD, not merely per measure**: a calendar-year eCQM's whole 2027 evidence is
+   *    superseded by the first 2028 run, and keeping only the newest-per-measure would delete every
+   *    2027 row months before anyone could be asked to justify a 2027 rate.
+   *  - every row of a run that is still QUEUED/RUNNING/REQUESTED — an in-flight run is never compacted.
    *  - every row a CASE cites — matched on `(run_id, subject_id, measure_id)`, so it protects that
    *    case's own evidence rather than the other 99,999 rows its run happens to contain. Every case,
    *    not only open ones: a closed case's detail page still resolves its outcome through

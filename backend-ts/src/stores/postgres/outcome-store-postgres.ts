@@ -43,6 +43,7 @@ const toRecord = (r: OutcomeRow): OutcomeRecord => ({
 
 const T = `${SPIKE_SCHEMA}.outcomes`;
 const CASES_TABLE = `${SPIKE_SCHEMA}.cases`;
+const RUNS_TABLE = `${SPIKE_SCHEMA}.runs`;
 
 export class PgOutcomeStore implements OutcomeStore {
   constructor(private readonly pool: PgPool) {}
@@ -203,11 +204,25 @@ export class PgOutcomeStore implements OutcomeStore {
    * predicate as a correlated existence check — which reads like the more index-friendly form — is a
    * pessimization the planner does not use the index for at all. The rewrite was written, measured,
    * and reverted; this comment is here so it does not get written again.
+   *
+   * 2026-09-08 (ADR-077 d3): a second keep set joined to `runs` protects the newest USABLE row (from a
+   * COMPLETED/PARTIAL_FAILURE run, not an evaluation error), and rows of an in-flight run are never
+   * candidates. The run-status join is a NEW cost on the pilot's table and has NOT been re-measured with
+   * EXPLAIN ANALYZE at scale — recorded here as unmeasured, not as index-friendly, until it is.
    */
   async compactOlderThan(cutoff: string): Promise<number> {
     const { rowCount } = await this.pool.query(
       `DELETE FROM ${T} o
         WHERE o.evaluated_at < $1
+          AND o.run_id IN (SELECT id FROM ${RUNS_TABLE} WHERE UPPER(status) IN ('COMPLETED','PARTIAL_FAILURE','FAILED','CANCELLED'))
+          AND o.id NOT IN (
+            SELECT DISTINCT ON (o3.subject_id, o3.measure_id, o3.evaluation_period) o3.id
+              FROM ${T} o3
+              JOIN ${RUNS_TABLE} r3 ON r3.id = o3.run_id
+             WHERE UPPER(r3.status) IN ('COMPLETED','PARTIAL_FAILURE')
+               AND NOT (o3.evidence_json ? 'evaluationError')
+             ORDER BY o3.subject_id, o3.measure_id, o3.evaluation_period, o3.evaluated_at DESC, o3.id DESC
+          )
           AND o.id NOT IN (
             SELECT DISTINCT ON (subject_id, measure_id, evaluation_period) id
               FROM ${T}
@@ -378,7 +393,9 @@ export class PgOutcomeStore implements OutcomeStore {
     // predicates mirror the JS `isCompletedRun`/`isPopulationRun` (both case-insensitive — the Java
     // era persisted some scope/status values lowercase).
     const inner: string[] = [
-      "UPPER(r2.scope_type) NOT IN ('CASE','EMPLOYEE')",
+      // Mirrors `POPULATION_SCOPES` (rollup-shared.ts): an allowlist of whole-roster scopes, so a newer
+      // COMPLETED SITE run never becomes "the roster" (ADR-077 d4).
+      "UPPER(r2.scope_type) IN ('MEASURE','ALL_PROGRAMS')",
       "UPPER(r2.status) IN ('COMPLETED','PARTIAL_FAILURE')",
     ];
     const binds: unknown[] = [];

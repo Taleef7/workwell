@@ -437,6 +437,7 @@ test("scoped profile (Maui) — isolates data by excluding foreign and unresolve
       outcomeStore: {
         listOutcomesWithRun: async () => rows,
         listOutcomesForMeasure: async () => riskRows,
+        listOutcomes: async () => [], // the overview's measure rate reads one row to learn there is no official evidence (ADR-077)
         aggregateScaleRun: async () => [],
       },
       runStore: { listRuns: async () => [] },
@@ -499,6 +500,7 @@ test("foldScaleCounts — completed seed:scale run skipped on Maui profile and f
     const fakeDeps = {
       outcomeStore: {
         listOutcomesWithRun: async () => [mauiRow],
+        listOutcomes: async () => [],
         aggregateScaleRun: async () => [
           { status: "COMPLIANT", count: 50 },
           { status: "OVERDUE", count: 10 },

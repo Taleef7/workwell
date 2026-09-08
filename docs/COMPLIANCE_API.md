@@ -103,6 +103,7 @@ They are separate fields precisely so neither can be mistaken for the other.
 |---|---|
 | `official-evidence` | The measure ran CMS's published artifact and these are **the CQM IG membership derivation (ADR-069) of the executor's persisted population vector**. Measured — the persisted `evidence_json` stays the executor's verbatim output, but the served booleans apply the IG's per-subject interaction formulas (a DENEX'd subject's `numerator` reads `false`; an exception co-true with the numerator reads `false`), so they may differ from the raw vector on flag combinations the formulas fold. |
 | `status-derived` | The measure ran WorkWell-authored logic. **None of the five is measured population membership** — `initialPopulation` and `denominator` are constants, and the rest are inferred from `status`. For an *inverse* authored measure, `numerator` is inverted relative to eCQM convention. Treat the whole block as advisory. |
+| `evaluation-error` | No engine spoke for this subject: the evaluation threw and the persisted evidence is `{ evaluationError, message }`. **Every boolean is `false` — the subject is in no population** — and this label is why; it is not a measured "not in the initial population". Added 2026-09-08 (ADR-077 d6), additively: the other two values are unchanged. |
 
 This field exists because the two cases are indistinguishable from the numbers alone, and treating the
 second as measured eCQM membership would be wrong. If your integration depends on true population

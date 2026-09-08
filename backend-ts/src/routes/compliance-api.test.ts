@@ -143,6 +143,8 @@ test("populationsSource distinguishes measured membership from inferred", () => 
   assert.equal(populationsSource(OFFICIAL_EVIDENCE), "official-evidence");
   assert.equal(populationsSource({ expressionResults: [] }), "status-derived");
   assert.equal(populationsSource(null), "status-derived");
+  // ADR-077 d6: an errored subject is in no population, and the label says so rather than "status-derived".
+  assert.equal(populationsSource({ evaluationError: "engine failure", message: "boom" }), "evaluation-error");
   // The label must track the FIELD the membership reader branches on, not the measure id — an authored
   // measure could in principle carry official evidence and vice versa.
   assert.equal(populationsSource({ official: {} }), "status-derived");
