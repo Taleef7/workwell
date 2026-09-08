@@ -58,7 +58,9 @@ function bloodPressuresOnly(bundle: { entry?: Entry[] }): unknown {
   const copy = structuredClone(bundle) as { entry?: Entry[] };
   copy.entry = (copy.entry ?? []).filter((e) => {
     if (e.resource?.resourceType !== "Observation") return true;
-    return (e.resource.meta?.profile ?? []).includes(BP_PROFILE);
+    // Exact element equality, not `includes`: CodeQL reads `.includes(<url>)` as a substring check and
+    // flags it (alert #30); `some` with `===` says what is meant and is equivalent on a string[].
+    return (e.resource.meta?.profile ?? []).some((p) => p === BP_PROFILE);
   });
   return copy;
 }

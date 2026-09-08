@@ -49,10 +49,27 @@ IMAGE="${HAPI_IMAGE:-hapiproject/hapi:latest}"
 BASE="http://localhost:${PORT}/fhir"
 CONTENT="${CROSS_ENGINE_CONTENT:-.official-content}"
 
-# Deliberately unquoted where it is used: the default is TWO words ("corepack pnpm") and quoting it
-# would look for a program named "corepack pnpm". Override with PNPM_CMD to run a different launcher.
+# Prefer the pnpm already on PATH. In CI that is the version `pnpm/action-setup` pinned (10.17.1), and
+# bare `corepack pnpm` IGNORES that pin: it fetches the latest pnpm, which on the first real run of this
+# workflow downloaded 12.3.4 and died with ERR_PNPM_LOCKFILE_CONFIG_MISMATCH before the sweep started.
+# `corepack pnpm@10` is the fallback for a developer machine where pnpm is not on PATH — pinned to the
+# major the lockfile was written by, for the same reason.
+#
+# Deliberately unquoted where it is used: the fallback is TWO words, and quoting it would look for a
+# program of that name. Override with PNPM_CMD for a different launcher.
 # shellcheck disable=SC2086
-PNPM="${PNPM_CMD:-corepack pnpm}"
+# The PATH pnpm is used only if it is the MAJOR the lockfile was written by. Preferring it unchecked
+# just moves the bug: a workstation with a global pnpm 12 would fail with the same
+# ERR_PNPM_LOCKFILE_CONFIG_MISMATCH this exists to fix, and would never reach the fallback that works
+# (review finding). PNPM_CMD overrides everything, and must not contain a path with spaces — it is
+# expanded unquoted, because the fallback is two words.
+if [[ -n "${PNPM_CMD:-}" ]]; then
+  PNPM="$PNPM_CMD"
+elif command -v pnpm >/dev/null 2>&1 && [[ "$(pnpm --version 2>/dev/null)" == 10.* ]]; then
+  PNPM="pnpm"
+else
+  PNPM="corepack pnpm@10"
+fi
 
 # The bundle directory name is the artifact's own name; ask the module that owns the mapping rather than
 # duplicating a nine-entry table that would drift on the tenth measure.
