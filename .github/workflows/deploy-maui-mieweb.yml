@@ -277,10 +277,11 @@ jobs:
                 {key: "WORKWELL_INSTANCE", value: "maui"},
                 {key: "WORKWELL_SCHEDULER_ENABLED", value: "true"},
                 {key: "WORKWELL_VSAC_API_KEY", value: $vsac_api_key},
-                # THE FLIP (ADR-045; ADR-078, owner decision 2026-09-08): the sandbox routes the ACO's whole
+                # THE FLIP (ADR-045; ADR-078, owner decision 2026-09-08): the sandbox routes the whole ACO
                 # computable set. cms2/cms130/cms137 have their second-engine evidence; cms165 runs on the
-                # corpus's stamped profiles (trustMetaProfile per measure, ADR-076 d1) and its WebChart
+                # profiles the corpus stamps (trustMetaProfile per measure, ADR-076 d1) and its WebChart
                 # ingest caveat governs the PHI phase, not the sandbox. reconcile-maui-mieweb.yml MUST match.
+                # No apostrophes in this block: it sits inside a single-quoted jq program.
                 {key: "WORKWELL_OFFICIAL_MEASURES", value: "cms122,cms125,cms2,cms130,cms165,cms137"},
                 {key: "WORKWELL_MAUI_CORPUS_SIZE", value: "20000"},
                 {key: "WORKWELL_RUN_CHUNK_SIZE", value: "500"},
