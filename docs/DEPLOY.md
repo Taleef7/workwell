@@ -311,10 +311,15 @@ Per measure, per stack:
 > roster's: at 200 subjects CMS137 has 8 in its denominator and 0 engaged, which trips the "a rate nobody
 > reaches" finding; at 2,000 it is 60 and 8, and the gate passes.
 >
-> **cms165 has a blocker `flip-gate` does not detect.** The executor ignores `meta.profile`, and
-> cms165 identifies its BP reading by profile alone — so on any patient with other Observations the
-> numerator silently reads false. The synthetic roster emits one Observation per subject and therefore
-> cannot show it. Do not route cms165 on the strength of a green gate alone (ADR-072, consequences).
+> **cms165 has a blocker `flip-gate` does not detect on REAL data.** cms165 identifies its BP reading
+> by profile alone; since ADR-076 d1 it runs with `trustMetaProfile` and the corpus stamps every profile
+> its retrieves name, and since #539 `prepareForQiCore` stamps `us-core-blood-pressure` from a
+> resource's own codes. That is what lets the sandbox route it (ADR-078). It is NOT sufficient for
+> WebChart data: the other QI-Core profiles must arrive stamped at ingest, and WebChart exports BP panels
+> with `status: "unknown"` (issue #533's open half). A green gate over the corpus says nothing about that.
+>
+> **The credentialed gate runs in CI:** `.github/workflows/flip-gate.yml` (manual) vendors the measure's
+> sidecar with the VSAC secret, sweeps the Maui roster, and uploads `.flip-gate/<id>-<date>.json`.
 >
 > **A reading that did not run is never a pass.** Every pilot measure's MADiE deck is vendored into the
 > tree (2026-09-05), but the deck and the roster both need the measure's terminology sidecar, which is

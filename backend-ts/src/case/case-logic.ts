@@ -229,7 +229,26 @@ export function planNextAction(
 }
 
 /** Decide how a case should be upserted from one outcome, given the existing row (or null). Pure. */
-export function planCaseUpsert(existing: ExistingCaseState | null, outcomeStatus: string, now: string): CaseUpsertPlan {
+export function planCaseUpsert(
+  existing: ExistingCaseState | null,
+  outcomeStatus: string,
+  now: string,
+  opts: { outOfPopulation?: boolean } = {},
+): CaseUpsertPlan {
+  // A subject the official logic evaluated and found OUTSIDE the measure's initial population has
+  // nothing to chase: MISSING_DATA there is a result, not a gap (ADR-078). Never opens a case; a case
+  // that exists (the subject was in the population last period, or was carded before this rule) is
+  // closed by the system under its own reason, so the worklist stops carrying a non-diabetic on a
+  // diabetes measure. Until 2026-09-08 this fan-out opened one MEDIUM case per out-of-population
+  // subject per measure — ADR-043 recorded it as operational noise; six routed measures over 20,000
+  // patients made it the worklist.
+  if (opts.outOfPopulation) {
+    if (!existing) return { op: "noop" };
+    if (existing.status === "OPEN" || existing.status === "IN_PROGRESS")
+      return { op: "update", disposition: "RESOLVED", status: "RESOLVED", closedAt: now, closedReason: "OUT_OF_POPULATION", closedBy: null };
+    return { op: "noop" };
+  }
+
   const disposition = dispositionFor(outcomeStatus);
 
   if (!existing) {

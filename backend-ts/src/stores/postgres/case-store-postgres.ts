@@ -73,7 +73,9 @@ export class PgCaseStore implements CaseStore {
     const priority = priorityFor(input.outcomeStatus);
     const computedAction = nextActionFor(input.outcomeStatus, input.measureId, input.evidence);
     const planFrom = (row: CaseRow | null) =>
-      planCaseUpsert(row ? { status: row.status, currentOutcomeStatus: row.current_outcome_status, closedBy: row.closed_by } : null, input.outcomeStatus, now);
+      planCaseUpsert(row ? { status: row.status, currentOutcomeStatus: row.current_outcome_status, closedBy: row.closed_by } : null, input.outcomeStatus, now, {
+        outOfPopulation: input.outOfPopulation,
+      });
     // An operator's instruction outlives a run that learned nothing new (`planNextAction`).
     const actionFrom = (row: CaseRow | null) =>
       planNextAction(

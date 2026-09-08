@@ -313,3 +313,26 @@ test("an absence of data is a CARD, and it does not claim compliance", async () 
   assert.doesNotMatch(card.detail!, /\bcompliant\b(?!\.)/i);
   assert.equal(card.suggestions, undefined);
 });
+
+test("a subject the official logic found OUTSIDE the initial population gets no card (ADR-078)", async () => {
+  const outside = row("cms122", "MISSING_DATA", {
+    evidence: { expressionResults: [], official: { populationResults: { ipp: false, denom: false, denex: false, numer: false, denexcep: false } } },
+  });
+  assert.deepEqual(await buildComplianceCards([outside], opts()), [], "MISSING_DATA outside the population is a result, not a gap");
+  // In the population and missing data is still a gap, and still carded.
+  const inside = row("cms122", "MISSING_DATA", {
+    evidence: { expressionResults: [], official: { populationResults: { ipp: true, denom: true, denex: false, numer: false, denexcep: false } } },
+  });
+  assert.equal((await buildComplianceCards([inside], opts())).length, 1);
+});
+
+test("multi-rate: a subject in ANY rate's initial population is still carded — only outside every rate is a result (ADR-078)", async () => {
+  const rateIn = { ipp: true, denom: true, denex: false, numer: false, denexcep: false };
+  const rateOut = { ipp: false, denom: false, denex: false, numer: false, denexcep: false };
+  // Rate 1 says outside, rate 2 says inside: the pipeline's `inInitialPopulation` is true for this
+  // subject, so the card surface must agree and card them.
+  const partly = row("cms137", "MISSING_DATA", { evidence: { expressionResults: [], official: { populationResults: rateOut, rates: [rateOut, rateIn] } } });
+  assert.equal((await buildComplianceCards([partly], opts())).length, 1, "in rate 2's population → carded");
+  const wholly = row("cms137", "MISSING_DATA", { evidence: { expressionResults: [], official: { populationResults: rateOut, rates: [rateOut, rateOut] } } });
+  assert.deepEqual(await buildComplianceCards([wholly], opts()), [], "outside every rate → no card");
+});

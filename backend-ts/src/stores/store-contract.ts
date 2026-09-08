@@ -797,6 +797,34 @@ export function caseStoreContract(label: string, freshStore: () => Promise<CaseS
       outcomeStatus,
     });
 
+  test(`[${label}] an out-of-population outcome opens no case, closes an active one under OUT_OF_POPULATION once, and a later gap reopens it (ADR-078)`, async () => {
+    const store = await freshStore();
+    const outside = (over: Partial<{ subjectId: string }> = {}) =>
+      store.upsertFromOutcome({
+        runId: crypto.randomUUID(),
+        subjectId: over.subjectId ?? "emp-006",
+        measureId: "audiogram",
+        evaluationPeriod: "2026-06-13",
+        outcomeStatus: "MISSING_DATA",
+        outOfPopulation: true,
+      });
+    assert.equal(await outside({ subjectId: "emp-009" }), null, "no case exists → nothing is opened");
+    assert.equal((await store.listCases({})).length, 0);
+
+    const opened = await upsert(store, "OVERDUE");
+    assert.equal(opened?.status, "OPEN");
+    const closed = await outside();
+    assert.equal(closed?.disposition, "RESOLVED");
+    assert.equal(closed?.status, "RESOLVED");
+    assert.equal(closed?.closedReason, "OUT_OF_POPULATION");
+    assert.equal(closed?.closedBy, null, "a SYSTEM closure");
+    assert.equal(closed?.id, opened?.id, "the same row, closed — never a second case");
+    assert.equal(await outside(), null, "the next nightly run is a no-op on the closed row: no CASE_UPDATED noise");
+    const reopened = await upsert(store, "OVERDUE");
+    assert.equal(reopened?.disposition, "REOPENED", "back in the population with a gap → the system closure reopens");
+    assert.equal(reopened?.id, opened?.id);
+  });
+
   test(`[${label}] a rerun upserts the SAME case — never a duplicate (idempotency invariant)`, async () => {
     const store = await freshStore();
     const first = await upsert(store, "OVERDUE");

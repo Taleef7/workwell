@@ -26,10 +26,10 @@ on:
         type: string
         default: "2026-12-31"
       routed:
-        description: "The deployment's CURRENT WORKWELL_OFFICIAL_MEASURES (the gate appends the measure under test)."
+        description: "The deployment's CURRENT WORKWELL_OFFICIAL_MEASURES (the gate appends the measure under test). Paste the value deploy-maui-mieweb.yml ships."
         required: true
         type: string
-        default: "cms122,cms125"
+        default: "cms122,cms125,cms2,cms130,cms165,cms137"
 
 permissions:
   contents: read
@@ -91,26 +91,45 @@ jobs:
           fi
       # The vendored artifact must not have changed — only the gitignored sidecar is new.
       - name: The committed artifact is reproducible from its pin
-        working-directory: .
-        run: git diff --exit-code backend-ts/measures/official
+        run: git diff --exit-code measures/official
 
       - name: Gate
+        shell: bash
         env:
           WORKWELL_INSTANCE: maui
           WORKWELL_MAUI_CORPUS_SIZE: "20000"
           WORKWELL_RUN_CHUNK_SIZE: "500"
           WORKWELL_OFFICIAL_MEASURES: ${{ inputs.routed }}
         run: |
+          # pipefail, or `tee` would mask the CLI's own exit code (2 on a usage error) and the failure
+          # would surface later as "ls: cannot access .flip-gate" with the real message buried in stderr.
+          set -o pipefail
           pnpm flip-gate --measure "${{ inputs.measure }}" --evaluation-date "${{ inputs.evaluation_date }}" --subjects "${{ inputs.subjects }}" 2> gate-stderr.log | tee gate-report.txt
           echo "::group::stderr (engine warnings, deduplicated)"
           sort gate-stderr.log | uniq -c | sort -rn | head -40
           echo "::endgroup::"
           ls -la .flip-gate/
+          # The JSON is the evidence a flip PR attaches; the text report alone would let the upload
+          # below succeed with the evidence missing. Copied out of the dot-directory first: the first
+          # two runs of this workflow uploaded only gate-report.txt, because the artifact glob does not
+          # descend into `.flip-gate/`.
+          test -n "$(ls .flip-gate/*.json 2>/dev/null)" || { echo "::error::the gate wrote no .flip-gate/*.json"; exit 1; }
+          mkdir -p flip-gate-out && cp .flip-gate/*.json flip-gate-out/
 
       - uses: actions/upload-artifact@v6
+        if: always()
         with:
           name: flip-gate-${{ inputs.measure }}-${{ inputs.evaluation_date }}
           path: |
-            backend-ts/.flip-gate/*.json
+            backend-ts/flip-gate-out/*.json
             backend-ts/gate-report.txt
           if-no-files-found: error
+
+      # The CLI is DESCRIPTIVE and exits 0 on every verdict (ADR-072); in CI a green run over a "DO NOT
+      # FLIP" verdict would be read as evidence FOR. The report is uploaded either way; the job is red.
+      - name: The verdict is evidence FOR the flip
+        run: |
+          if grep -q "DO NOT FLIP" gate-report.txt; then
+            echo "::error::the gate's verdict is DO NOT FLIP — read gate-report.txt in the artifact"
+            exit 1
+          fi
