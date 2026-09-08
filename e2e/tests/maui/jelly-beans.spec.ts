@@ -18,6 +18,11 @@ interface ChipInfo {
 async function readChips(page: Page, measureId: string): Promise<ChipInfo[]> {
   const chips: ChipInfo[] = [];
   const chipLinks = page.locator(`a[href*="measureId=${measureId}"][href*="outcome="]`);
+  // Wait for the cards BEFORE counting. `locator.count()` is a snapshot, and the describe's beforeEach
+  // only waits for a heading — which renders before the measure cards have their data. Reading here
+  // without this returned zero chips on a slow load, and the caller's `chips.length > 0` then failed as
+  // "flaky" while the page was simply not ready yet.
+  await expect(chipLinks.first(), `${measureId} should render status chips`).toBeVisible({ timeout: 30_000 });
   const count = await chipLinks.count();
   for (let i = 0; i < count; i++) {
     const chip = chipLinks.nth(i);
@@ -47,9 +52,8 @@ test.describe("Maui status chips (jelly beans)", () => {
   // once per chip — six measures × three buckets × two page loads was most of the project's runtime.
   test("every routed measure renders status chips consistent with its worklist", async ({ page }) => {
     for (const measure of ROUTED_MEASURES) {
-      const firstChip = page.locator(`a[href*="measureId=${measure.id}"][href*="outcome="]`).first();
-      await expect(firstChip, `${measure.cms} is routed, so its card must render chips`).toBeVisible({ timeout: 30_000 });
-
+      // `readChips` waits for the measure's card itself, which is also the assertion that a routed
+      // measure renders one at all.
       const chips = await readChips(page, measure.id);
       expect(chips.length, `${measure.cms} should have at least one open-bucket chip`).toBeGreaterThan(0);
 
