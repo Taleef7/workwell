@@ -310,7 +310,7 @@ export class PgOutcomeStore implements OutcomeStore {
            JOIN ${SPIKE_SCHEMA}.runs r ON r.id = o.run_id
           WHERE o.measure_id = $1
             AND UPPER(r.status) IN ('COMPLETED', 'PARTIAL_FAILURE')
-            AND UPPER(r.scope_type) NOT IN ('CASE', 'EMPLOYEE')`
+            AND UPPER(r.scope_type) IN ('MEASURE', 'ALL_PROGRAMS')`
       : `${T} WHERE measure_id = $1`;
     const { rows } = await this.pool.query<{
       subject_id: string;

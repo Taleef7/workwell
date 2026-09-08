@@ -46,14 +46,19 @@ export function deriveCell(canonicalStatus: string, evidence: unknown, measureId
   // from a `?status=COMPLIANT` filter. So apply DECLINED only when the canonical bucket is non-compliant.
   if (refused && canonicalStatus !== "COMPLIANT") return { status: "DECLINED", method: "Declination on file" };
 
+  // Out of the initial population is a RESULT: the logic ran and this subject is not the measure's
+  // concern this period. It shared MISSING_DATA's chip with "in the population, data missing", so a
+  // panel could not tell a diabetic with no HbA1c from a non-diabetic (review finding 7). Decided by the
+  // PERSISTED evidence, not by today's routing flag: a historical official run stays what it was after
+  // `WORKWELL_OFFICIAL_MEASURES` is rolled back, and would otherwise render as "no record on file"
+  // (Codex review, #540).
+  if (canonicalStatus === "MISSING_DATA" && officialMembership(evidence)?.ipp === false) {
+    const d = officialDisplayFor(measureId, canonicalStatus, evidence);
+    return { status: "OUT_OF_POPULATION", method: d?.method ?? "Not in the measure's initial population for this period" };
+  }
+
   if (isOfficialRouted(measureId)) {
     const d = officialDisplayFor(measureId, canonicalStatus, evidence);
-    // Out of the initial population is a RESULT: the logic ran and this subject is not the measure's
-    // concern this period. It shared MISSING_DATA's chip with "in the population, data missing", so a
-    // panel could not tell a diabetic with no HbA1c from a non-diabetic (review finding 7).
-    if (canonicalStatus === "MISSING_DATA" && officialMembership(evidence)?.ipp === false) {
-      return { status: "OUT_OF_POPULATION", method: d?.method ?? "Not in the measure's initial population for this period" };
-    }
     if (d) return { status: canonicalStatus as DisplayState, method: d.method };
   }
 

@@ -156,3 +156,16 @@ test("official: out of the initial population → OUT_OF_POPULATION; an evaluati
     else process.env.WORKWELL_OFFICIAL_MEASURES = prior;
   }
 });
+
+test("OUT_OF_POPULATION is decided by the persisted evidence, not by today's routing flag (Codex #540)", () => {
+  const prior = process.env.WORKWELL_OFFICIAL_MEASURES;
+  delete process.env.WORKWELL_OFFICIAL_MEASURES;
+  try {
+    // cms122 is NOT routed here, as after a rollback — but this row was produced by the official
+    // executor, and its evidence says the subject was evaluated and found outside the population.
+    const out = deriveCell("MISSING_DATA", { expressionResults: [], official: { populationResults: { ipp: false, denom: false, denex: false, numer: false, denexcep: false } } }, "cms122", PERIOD);
+    assert.equal(out.status, "OUT_OF_POPULATION");
+  } finally {
+    if (prior !== undefined) process.env.WORKWELL_OFFICIAL_MEASURES = prior;
+  }
+});

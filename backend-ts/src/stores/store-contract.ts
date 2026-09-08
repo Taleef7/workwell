@@ -582,6 +582,10 @@ export function outcomeStoreContract(
     const failed = await runStore.createRun({ ...sampleRun("audiogram"), status: "FAILED" });
     const running = await runStore.createRun({ ...sampleRun("audiogram"), status: "RUNNING" });
     const caseRun = await runStore.createRun({ ...sampleRun("audiogram"), scopeType: "CASE", status: "COMPLETED" });
+    // A COMPLETED SITE recheck is one clinic, not the population: `successfulPopulationOnly` mirrors
+    // `POPULATION_SCOPES` (ADR-077 d4), so the risk outlook never mixes a site's fresh rows with
+    // everyone else's older whole-roster rows (Codex review, #540).
+    const siteRun = await runStore.createRun({ ...sampleRun("audiogram"), scopeType: "SITE", status: "COMPLETED" });
     const completedEvidence = { source: "completed-population" };
     const partialEvidence = { source: "partial-population" };
 
@@ -591,6 +595,7 @@ export function outcomeStoreContract(
       { runId: failed.id, subjectId: "emp-failed", measureId: "audiogram", status: "COMPLIANT", evidence: { source: "failed" } },
       { runId: running.id, subjectId: "emp-running", measureId: "audiogram", status: "MISSING_DATA", evidence: { source: "running" } },
       { runId: caseRun.id, subjectId: "emp-case", measureId: "audiogram", status: "COMPLIANT", evidence: { source: "case" } },
+      { runId: siteRun.id, subjectId: "emp-site", measureId: "audiogram", status: "COMPLIANT", evidence: { source: "site" } },
       { runId: completed.id, subjectId: "mhn|L00|P00|1", measureId: "audiogram", status: "COMPLIANT", evidence: { source: "scale" } },
       { runId: completed.id, subjectId: "emp-other-measure", measureId: "hazwoper", status: "COMPLIANT", evidence: { source: "other" } },
     ]);
@@ -599,7 +604,7 @@ export function outcomeStoreContract(
       excludeScale: true,
       successfulPopulationOnly: true,
     });
-    assert.deepEqual(rows.map((row) => row.subjectId).sort(), ["emp-completed", "emp-partial"]);
+    assert.deepEqual(rows.map((row) => row.subjectId).sort(), ["emp-completed", "emp-partial"], "FAILED, RUNNING, CASE and SITE runs are all out");
     assert.deepEqual(rows.find((row) => row.subjectId === "emp-completed")!.evidence, completedEvidence);
     assert.deepEqual(rows.find((row) => row.subjectId === "emp-partial")!.evidence, partialEvidence);
   });

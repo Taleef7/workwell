@@ -292,7 +292,7 @@ export class SqliteOutcomeStore implements OutcomeStore {
            JOIN runs r ON r.id = o.run_id
           WHERE o.measure_id = ?
             AND UPPER(r.status) IN ('COMPLETED', 'PARTIAL_FAILURE')
-            AND UPPER(r.scope_type) NOT IN ('CASE', 'EMPLOYEE')`
+            AND UPPER(r.scope_type) IN ('MEASURE', 'ALL_PROGRAMS')`
       : `outcomes WHERE measure_id = ?`;
     const { results } = await this.db
       .prepare(

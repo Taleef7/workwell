@@ -73,7 +73,8 @@ encoded them.
    candidates. (Amends ADR-073 d2.)
 4. **A population winner is a whole-roster run.** `POPULATION_SCOPES` = MEASURE, ALL_PROGRAMS — an
    allowlist, replacing "everything but CASE and EMPLOYEE". SITE, CASE and EMPLOYEE runs are visible in
-   case detail and never replace the snapshot; the quality snapshot uses the same set.
+   case detail and never replace the snapshot; the quality snapshot and the per-measure scan behind
+   the risk outlook (`listOutcomesForMeasure` with `successfulPopulationOnly`) use the same set.
 5. **The dashboard's measure rate is the evidence's rate**, reduced by `createRateAggregator` — the same
    reducer the MeasureReport uses, whose `normalizeMembership` already applies the CQM IG folds, so
    nothing is subtracted twice — and shown as a SEPARATE metric from the workflow-status rate, which

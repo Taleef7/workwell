@@ -370,8 +370,8 @@ export function openApiDocument(): OpenApiDocument {
             },
             populationsSource: {
               type: "string",
-              description: "`official-evidence` = the executor's own measured vector. `status-derived` = only the initial population is real; the rest are inferred from `status`. Read this before trusting `populations`.",
-              enum: ["official-evidence", "status-derived"],
+              description: "`official-evidence` = the executor's own measured vector. `status-derived` = only the initial population is real; the rest are inferred from `status`. `evaluation-error` = no engine spoke for this subject (the evaluation threw): every boolean is false and the subject is in NO population — not a measured absence (additive, ADR-077 d6). Read this before trusting `populations`.",
+              enum: ["official-evidence", "status-derived", "evaluation-error"],
             },
             provenance: {
               type: "object",
