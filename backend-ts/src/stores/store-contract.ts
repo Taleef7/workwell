@@ -345,7 +345,9 @@ export function outcomeStoreContract(
   test(`[${label}] compactOlderThan keeps the newest row per (subject, measure, period) and every row a case cites`, async () => {
     const { runStore, outcomeStore, caseStore } = await fresh();
     const runs: Record<string, string> = {};
-    for (const key of ["old", "cited", "new", "other", "priorYear"]) runs[key] = (await runStore.createRun(sampleRun("audiogram"))).id;
+    // COMPLETED: an in-flight run's rows are never compaction candidates (ADR-077 d3), so a run that is
+    // "old enough" in these fixtures must also be one that finished.
+    for (const key of ["old", "cited", "new", "other", "priorYear"]) runs[key] = (await runStore.createRun({ ...sampleRun("audiogram"), status: "COMPLETED" })).id;
 
     await outcomeStore.recordOutcomes([
       { runId: runs.old!, subjectId: "emp-001", measureId: "audiogram", evaluationPeriod: "2027-01-01", status: "OVERDUE", evidence: {}, evaluatedAt: "2027-01-01T00:00:00.000Z" },
@@ -380,7 +382,7 @@ export function outcomeStoreContract(
     // tied row, DISTINCT ON keeps one. Both must land on ONE, or "a subject's current answer" means
     // something different depending on which store is running.
     const { runStore, outcomeStore } = await fresh();
-    const runId = (await runStore.createRun(sampleRun("audiogram"))).id;
+    const runId = (await runStore.createRun({ ...sampleRun("audiogram"), status: "COMPLETED" })).id;
     const tied = "2027-02-01T00:00:00.000Z";
     await outcomeStore.recordOutcomes([
       { runId, subjectId: "emp-003", measureId: "audiogram", evaluationPeriod: "2027-01-01", status: "OVERDUE", evidence: {}, evaluatedAt: "2027-01-01T00:00:00.000Z" },
@@ -393,9 +395,41 @@ export function outcomeStoreContract(
     assert.equal(left[0]!.evaluatedAt, tied, "and it is one of the tied newest, never the older row");
   });
 
+  test(`[${label}] compactOlderThan keeps the newest USABLE row: a FAILED run or an evaluation error never evicts a finalized answer, and an in-flight run is never a candidate (ADR-077)`, async () => {
+    const { runStore, outcomeStore } = await fresh();
+    const mk = (status: "COMPLETED" | "FAILED" | "PARTIAL_FAILURE" | "RUNNING") => runStore.createRun({ ...sampleRun("audiogram"), status });
+    const completed = await mk("COMPLETED");
+    const failed = await mk("FAILED");
+    const errored = await mk("PARTIAL_FAILURE");
+    const running = await mk("RUNNING");
+    const row = (runId: string, subjectId: string, status: string, evaluatedAt: string, evidence: Record<string, unknown> = {}) =>
+      ({ runId, subjectId, measureId: "audiogram", evaluationPeriod: "2027-01-01", status, evidence, evaluatedAt });
+    await outcomeStore.recordOutcomes([
+      // emp-001: a usable January answer, a FAILED February row, an evaluation-error March row (the newest).
+      row(completed.id, "emp-001", "COMPLIANT", "2027-01-01T00:00:00.000Z"),
+      row(failed.id, "emp-001", "OVERDUE", "2027-02-01T00:00:00.000Z"),
+      row(errored.id, "emp-001", "MISSING_DATA", "2027-03-01T00:00:00.000Z", { evaluationError: "engine threw", message: "boom" }),
+      // emp-002: ONLY unusable rows — the newest still survives so no roster cell goes blank.
+      row(failed.id, "emp-002", "OVERDUE", "2027-01-01T00:00:00.000Z"),
+      row(failed.id, "emp-002", "OVERDUE", "2027-02-01T00:00:00.000Z"),
+      // emp-003: an in-flight run's row, however old, is never deleted; the finalized June row is the answer.
+      row(running.id, "emp-003", "OVERDUE", "2026-01-01T00:00:00.000Z"),
+      row(completed.id, "emp-003", "COMPLIANT", "2027-06-01T00:00:00.000Z"),
+    ]);
+
+    const deleted = await outcomeStore.compactOlderThan("2027-09-01T00:00:00.000Z");
+    assert.equal(deleted, 2, "emp-001's FAILED row and emp-002's older FAILED row — nothing else");
+
+    const rows = async (runId: string) => (await outcomeStore.listOutcomes(runId)).map((o) => `${o.subjectId}@${o.evaluatedAt}`).sort();
+    assert.deepEqual(await rows(completed.id), ["emp-001@2027-01-01T00:00:00.000Z", "emp-003@2027-06-01T00:00:00.000Z"], "the last USABLE answer survives even though newer unusable rows exist");
+    assert.deepEqual(await rows(errored.id), ["emp-001@2027-03-01T00:00:00.000Z"], "the newest row (an error) is kept too, so its age stays visible beside the last good answer");
+    assert.deepEqual(await rows(failed.id), ["emp-002@2027-02-01T00:00:00.000Z"], "a subject with no usable row keeps their newest");
+    assert.deepEqual(await rows(running.id), ["emp-003@2026-01-01T00:00:00.000Z"], "an in-flight run is never compacted");
+  });
+
   test(`[${label}] compactOlderThan is idempotent and deletes nothing when nothing is old enough`, async () => {
     const { runStore, outcomeStore } = await fresh();
-    const runId = (await runStore.createRun(sampleRun("audiogram"))).id;
+    const runId = (await runStore.createRun({ ...sampleRun("audiogram"), status: "COMPLETED" })).id;
     await outcomeStore.recordOutcomes([
       { runId, subjectId: "emp-001", measureId: "audiogram", evaluationPeriod: "2027-01-01", status: "OVERDUE", evidence: {}, evaluatedAt: "2027-01-01T00:00:00.000Z" },
       { runId, subjectId: "emp-001", measureId: "audiogram", evaluationPeriod: "2027-01-01", status: "OVERDUE", evidence: {}, evaluatedAt: "2027-02-01T00:00:00.000Z" },
@@ -414,7 +448,7 @@ export function outcomeStoreContract(
       // #528). Postgres-only: the failure is forced through the `::uuid` cast on `run_id`, which the
       // SQLite floor (TEXT column, slices of 90) cannot reproduce; the pipeline's own recount covers it.
       const { runStore, outcomeStore } = await fresh();
-      const runId = (await runStore.createRun(sampleRun("audiogram"))).id;
+      const runId = (await runStore.createRun({ ...sampleRun("audiogram"), status: "COMPLETED" })).id;
       const rows = Array.from({ length: 600 }, (_, i) => ({
         runId: i === 550 ? "not-a-uuid" : runId,
         subjectId: `emp-${String(i).padStart(4, "0")}`, measureId: "audiogram", evaluationPeriod: "2027-01-01",
@@ -548,6 +582,10 @@ export function outcomeStoreContract(
     const failed = await runStore.createRun({ ...sampleRun("audiogram"), status: "FAILED" });
     const running = await runStore.createRun({ ...sampleRun("audiogram"), status: "RUNNING" });
     const caseRun = await runStore.createRun({ ...sampleRun("audiogram"), scopeType: "CASE", status: "COMPLETED" });
+    // A COMPLETED SITE recheck is one clinic, not the population: `successfulPopulationOnly` mirrors
+    // `POPULATION_SCOPES` (ADR-077 d4), so the risk outlook never mixes a site's fresh rows with
+    // everyone else's older whole-roster rows (Codex review, #540).
+    const siteRun = await runStore.createRun({ ...sampleRun("audiogram"), scopeType: "SITE", status: "COMPLETED" });
     const completedEvidence = { source: "completed-population" };
     const partialEvidence = { source: "partial-population" };
 
@@ -557,6 +595,7 @@ export function outcomeStoreContract(
       { runId: failed.id, subjectId: "emp-failed", measureId: "audiogram", status: "COMPLIANT", evidence: { source: "failed" } },
       { runId: running.id, subjectId: "emp-running", measureId: "audiogram", status: "MISSING_DATA", evidence: { source: "running" } },
       { runId: caseRun.id, subjectId: "emp-case", measureId: "audiogram", status: "COMPLIANT", evidence: { source: "case" } },
+      { runId: siteRun.id, subjectId: "emp-site", measureId: "audiogram", status: "COMPLIANT", evidence: { source: "site" } },
       { runId: completed.id, subjectId: "mhn|L00|P00|1", measureId: "audiogram", status: "COMPLIANT", evidence: { source: "scale" } },
       { runId: completed.id, subjectId: "emp-other-measure", measureId: "hazwoper", status: "COMPLIANT", evidence: { source: "other" } },
     ]);
@@ -565,7 +604,7 @@ export function outcomeStoreContract(
       excludeScale: true,
       successfulPopulationOnly: true,
     });
-    assert.deepEqual(rows.map((row) => row.subjectId).sort(), ["emp-completed", "emp-partial"]);
+    assert.deepEqual(rows.map((row) => row.subjectId).sort(), ["emp-completed", "emp-partial"], "FAILED, RUNNING, CASE and SITE runs are all out");
     assert.deepEqual(rows.find((row) => row.subjectId === "emp-completed")!.evidence, completedEvidence);
     assert.deepEqual(rows.find((row) => row.subjectId === "emp-partial")!.evidence, partialEvidence);
   });
@@ -707,6 +746,8 @@ export function outcomeStoreContract(
     const aNew = await mkRun("audiogram", "2026-04-01T00:00:00.000Z"); // latest COMPLETED population run
     const aRunning = await mkRun("audiogram", "2026-05-01T00:00:00.000Z", { status: "RUNNING" });
     const aCase = await mkRun("audiogram", "2026-06-01T00:00:00.000Z", { scopeType: "CASE" });
+    // A SITE recheck is COMPLETED and NEWER, and it is one clinic: it must not become "the roster".
+    const aSite = await mkRun("audiogram", "2026-06-15T00:00:00.000Z", { scopeType: "SITE" });
     const haz = await mkRun("hazwoper", "2026-03-15T00:00:00.000Z");
     const scale = await mkRun("audiogram", "2026-07-01T00:00:00.000Z", { triggeredBy: "seed:scale" });
     const trend = await mkRun("audiogram", "2026-07-02T00:00:00.000Z", { triggeredBy: "seed:trend-history" });
@@ -718,6 +759,7 @@ export function outcomeStoreContract(
       { runId: aNew.id, subjectId: "emp-001", measureId: "audiogram", status: "COMPLIANT", evidence: {} },
       { runId: aRunning.id, subjectId: "emp-006", measureId: "audiogram", status: "MISSING_DATA", evidence: {} },
       { runId: aCase.id, subjectId: "emp-006", measureId: "audiogram", status: "COMPLIANT", evidence: {} },
+      { runId: aSite.id, subjectId: "emp-006", measureId: "audiogram", status: "COMPLIANT", evidence: {} },
       { runId: haz.id, subjectId: "emp-001", measureId: "hazwoper", status: "COMPLIANT", evidence: {} },
       { runId: scale.id, subjectId: "emp-006", measureId: "audiogram", status: "OVERDUE", evidence: {} },
       { runId: trend.id, subjectId: "emp-006", measureId: "audiogram", status: "OVERDUE", evidence: {} },
@@ -738,8 +780,9 @@ export function outcomeStoreContract(
     assert.deepEqual(
       new Set(rosterLike.map((r) => r.runId)),
       new Set([aNew.id, haz.id]),
-      "latest terminal population run per measure (RUNNING/CASE/scale/trend rejected)",
+      "latest terminal population run per measure (RUNNING/CASE/SITE/scale/trend rejected)",
     );
+    assert.ok(!rosterLike.some((r) => r.runId === aSite.id), "a newer COMPLETED SITE run never replaces the whole-roster snapshot (review finding 11, ADR-077 d4)");
   });
 }
 

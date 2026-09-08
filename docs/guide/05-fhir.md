@@ -131,6 +131,19 @@ inverts for a measure whose numerator counts failures. It validates at zero base
 to the stricter DEQM reporting profile is exactly three findings per report, so we deliberately do
 not claim that profile yet.
 
+Two refusals sit in front of every population export — MeasureReport in all three variants, QRDA I
+and QRDA III — and both are 409s rather than documents (ADR-077). `run_not_reportable`: only a
+COMPLETED or PARTIAL_FAILURE run has final outcomes; a RUNNING run is a partial roster and a FAILED
+one is a fragment, and the UI's export buttons follow the same set. `run_compacted`: outcome
+retention (ADR-073) may have thinned a run that started before the furthest cutoff any compaction pass has applied,
+and a score computed over the survivors would be a different number under the run's identity, so
+none is built; the evidence is the pass's own intent event in the audit ledger, never the run's
+counts. Both aggregate exports also carry two headers the FHIR and QRDA shapes have no element for:
+`x-workwell-unmeasured-subjects` (subjects in no rate, ADR-074) and `x-workwell-evaluation-errors`
+(subjects no engine spoke for, who are in no population). The programs overview's "measure rate"
+tile is the same aggregate as the summary MeasureReport, reduced by the same code, and is shown
+apart from the workflow-status percentage.
+
 **QRDA Category I and III** are HL7's XML document formats for quality reporting — patient-level
 and aggregate. Both export types validate at zero findings against the HL7 base rulers (XSD and
 Schematron), measured by 22 submissions to a local instance of Cypress, the official ONC test

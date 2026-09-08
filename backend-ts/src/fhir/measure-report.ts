@@ -72,6 +72,11 @@ const zeroCounts = (): PopulationCounts => ({ ipp: 0, denom: 0, denex: 0, numer:
 const missingDataMeansOutOfPopulation = (measureId: string): boolean =>
   MEASURE_BINDINGS[measureId]?.missingDataMeansOutOfPopulation === true;
 
+/** The evidence the run pipeline persists for a subject whose evaluation threw — no engine spoke for it. */
+export function isEvaluationErrorEvidence(evidence: unknown): boolean {
+  return typeof evidence === "object" && evidence !== null && "evaluationError" in evidence;
+}
+
 /**
  * Per-subject population membership as the measure's own logic reported it (roadmap §7.3).
  * Official-routed outcomes persist `evidence_json.official.populationResults`; that IS the regulatory
@@ -245,15 +250,16 @@ export function officialMembership(evidence: unknown): PopulationMembership | nu
  * Membership for one outcome: official evidence first, else the authored status rule (ADR-031) —
  * unchanged for every measure that has no official evidence, which today is all of them.
  *
- * MIXED PROVENANCE (accepted, documented): within one official-routed run, a subject whose official
- * evaluation errored persists `{evaluationError}` evidence and no `official` block, so it is counted by
- * the authored status rule while its peers are counted by official membership. For a lower-is-better
- * measure those are opposite numerator semantics inside one denominator. This is the same per-subject
- * error-isolation trade-off the run pipeline already makes (a failed subject becomes MISSING_DATA rather
- * than failing the run); PR-8's shadow period is where a run with any errored subject must be surfaced,
- * since only there can it be compared against a clean official run.
+ * AN EVALUATION ERROR IS IN NO POPULATION (ADR-077 d6). A subject whose evaluation threw persists
+ * `{evaluationError}` evidence and no `official` block. Until 2026-09-08 that row fell through to the
+ * authored status rule and was counted as ipp+denom and not numer — an engine crash became a
+ * denominator failure, and for a lower-is-better measure the opposite of its numerator, inside one
+ * denominator with its correctly-scored peers ("mixed provenance"). Now no engine spoke, so the subject
+ * is in nothing; the aggregate reports them in `evaluationErrors` instead, so the gap is visible rather
+ * than folded into a rate.
  */
 export function membershipFor(outcome: Pick<OutcomeRecord, "status" | "evidence">, measureId: string): PopulationMembership {
+  if (isEvaluationErrorEvidence(outcome.evidence)) return { ipp: false, denom: false, denex: false, numer: false, denexcep: false };
   const official = officialMembership(outcome.evidence);
   if (official) return official;
   if (missingDataMeansOutOfPopulation(measureId) && outcome.status === "MISSING_DATA") {
@@ -355,8 +361,13 @@ export function aggregateByRate(
 export interface RateAggregate {
   rates: PopulationCounts[];
   strata: StratumCounts[][];
-  /** Subjects counted in NO rate because they could not supply every rate (ADR-074 d5). */
+  /**
+   * Subjects counted in NO rate (ADR-074 d5/d11): they could not supply every rate the measure
+   * declares, or no engine spoke for them at all. Always ≥ `evaluationErrors`.
+   */
   unmeasured: number;
+  /** The subset of `unmeasured` whose evidence is an evaluation error: in no population, reported so the gap is visible (ADR-077 d6). */
+  evaluationErrors: number;
 }
 
 /**
@@ -368,8 +379,14 @@ export interface RateAggregate {
 export function createRateAggregator(measureId: string): { add(outcome: Pick<OutcomeRecord, "status" | "evidence">): void; finish(): RateAggregate } {
   const retained: Array<{ memberships: PopulationMembership[]; strata: Array<Array<{ id: string; result: boolean }>> | null }> = [];
   let declaredRates = 0;
+  let evaluationErrors = 0;
   return {
     add(outcome) {
+      // No engine spoke for this subject: counted, never folded into a rate (ADR-077 d6).
+      if (isEvaluationErrorEvidence(outcome.evidence)) {
+        evaluationErrors += 1;
+        return;
+      }
       const memberships = membershipRatesFor(outcome, measureId);
       declaredRates = Math.max(declaredRates, memberships.length);
       retained.push({ memberships, strata: strataRatesFor(outcome) });
@@ -377,7 +394,9 @@ export function createRateAggregator(measureId: string): { add(outcome: Pick<Out
     finish() {
       const perRate: PopulationCounts[] = [];
       const perRateStrata: Array<Map<string, StratumCounts>> = [];
-      let unmeasured = 0;
+      // An errored subject is in no rate for the most basic reason, so it is unmeasured too (ADR-074
+      // d11's header keeps meaning "rows the denominators leave out"); `evaluationErrors` says why.
+      let unmeasured = evaluationErrors;
       for (const { memberships, strata } of retained) {
         if (declaredRates > 1 && memberships.length !== declaredRates) {
           unmeasured += 1;
@@ -402,6 +421,7 @@ export function createRateAggregator(measureId: string): { add(outcome: Pick<Out
         rates,
         strata: rates.map((_, index) => [...(perRateStrata[index]?.values() ?? [])]),
         unmeasured,
+        evaluationErrors,
       };
     },
   };
@@ -705,9 +725,14 @@ export function buildMeasureReportBundle(
   outcomes: OutcomeRecord[],
   generatedAt: string,
 ): MeasureReportBundle {
+  // A subject no engine spoke for gets NO individual report: a per-subject FHIR document asserting
+  // "not in the initial population" (or, before ADR-077, "in the denominator, not the numerator") is a
+  // clinical claim about a record the engine never read. The summary still counts them in
+  // `evaluationErrors`, and the route carries that count in `x-workwell-evaluation-errors`.
+  const evaluated = outcomes.filter((outcome) => !isEvaluationErrorEvidence(outcome.evidence));
   const reports = [
     buildSummaryMeasureReport(run, measureId, outcomes, generatedAt),
-    ...outcomes.map((outcome) => buildIndividualMeasureReport(outcome, run, measureId, generatedAt)),
+    ...evaluated.map((outcome) => buildIndividualMeasureReport(outcome, run, measureId, generatedAt)),
   ];
   return {
     resourceType: "Bundle",

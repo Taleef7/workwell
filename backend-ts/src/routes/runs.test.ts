@@ -14,6 +14,7 @@ import { fileURLToPath } from "node:url";
 // @ts-expect-error — @mieweb/cloud-local ships .mjs without types
 import { createSqliteD1 } from "@mieweb/cloud-local";
 import { handleRuns } from "./runs.ts";
+import { getStores } from "../stores/factory.ts";
 import { EVALUABLE_EMPLOYEES } from "../engine/synthetic/employee-catalog.ts";
 import { buildQrda1Document, qrda1NonConformance } from "../fhir/qrda1-export.ts";
 import { SqliteCaseStore } from "../stores/sqlite/case-store-sqlite.ts";
@@ -1266,4 +1267,154 @@ test("an official run whose FIRST row errored still exports per rate — the gat
   const qrda = (await get(`/api/runs/${run.id}/qrda`))!;
   assert.equal(qrda.status, 200, await qrda.clone().text());
   assert.equal(((await qrda.text()).match(/code="72510-1"/g) ?? []).length, 2, "two performance rates in the QRDA III as well");
+});
+
+test("GET /api/runs/:id/measure-report refuses every non-reportable status on all three variants (review finding 12)", async () => {
+  await get("/api/runs"); // initialize the floor schema when this test is selected in isolation
+  const runStore = new SqliteRunStore(env.DB as never);
+  const outcomeStore = new SqliteOutcomeStore(env.DB as never);
+  for (const status of ["REQUESTED", "QUEUED", "RUNNING", "FAILED", "CANCELLED", "COMPLETED", "PARTIAL_FAILURE"] as const) {
+    const run = await runStore.createRun({
+      status, scopeType: "MEASURE", scopeId: "audiogram", triggeredBy: "test", requestedScope: { measureId: "audiogram" },
+      measurementPeriodStart: "2026-01-01T00:00:00.000Z", measurementPeriodEnd: "2026-12-31T23:59:59.999Z",
+    });
+    await outcomeStore.recordOutcome({ runId: run.id, subjectId: "emp-001", measureId: "audiogram", evaluationPeriod: "2026", status: "COMPLIANT", evidence: {} });
+    const reportable = status === "COMPLETED" || status === "PARTIAL_FAILURE";
+    for (const type of ["summary", "individual", "bundle"]) {
+      const res = (await get(`/api/runs/${run.id}/measure-report?type=${type}`))!;
+      assert.equal(res.status, reportable ? 200 : 409, `${status} ${type}`);
+      if (!reportable) assert.equal(((await res.json()) as { error: string }).error, "run_not_reportable");
+      else assert.equal(res.headers.get("content-type"), "application/fhir+json");
+    }
+  }
+});
+
+test("GET /api/runs/:id/reconciliation names its units and ties rows, errors, populations and cases together (ADR-077 d7)", async () => {
+  await get("/api/runs");
+  const runStore = new SqliteRunStore(env.DB as never);
+  const outcomeStore = new SqliteOutcomeStore(env.DB as never);
+  const run = await runStore.createRun({
+    status: "PARTIAL_FAILURE", scopeType: "MEASURE", scopeId: "cms122", triggeredBy: "test", requestedScope: { measureId: "cms122" },
+    measurementPeriodStart: "2026-01-01T00:00:00.000Z", measurementPeriodEnd: "2026-12-31T23:59:59.999Z",
+  });
+  const official = (populationResults: Record<string, boolean>) => ({ official: { populationResults } });
+  await outcomeStore.recordOutcomes([
+    { runId: run.id, subjectId: "p-1", measureId: "cms122", evaluationPeriod: "2026", status: "OVERDUE", evidence: official({ ipp: true, denom: true, numer: true, denex: false, denexcep: false }) },
+    { runId: run.id, subjectId: "p-2", measureId: "cms122", evaluationPeriod: "2026", status: "COMPLIANT", evidence: official({ ipp: true, denom: true, numer: false, denex: false, denexcep: false }) },
+    { runId: run.id, subjectId: "p-3", measureId: "cms122", evaluationPeriod: "2026", status: "MISSING_DATA", evidence: official({ ipp: false, denom: false, numer: false, denex: false, denexcep: false }) },
+    { runId: run.id, subjectId: "p-4", measureId: "cms122", evaluationPeriod: "2026", status: "MISSING_DATA", evidence: { evaluationError: "engine threw", message: "boom" } },
+  ]);
+  const res = (await get(`/api/runs/${run.id}/reconciliation`))!;
+  assert.equal(res.status, 200);
+  const body = (await res.json()) as Record<string, unknown>;
+  assert.equal(body.unit, "subject-measure pairs");
+  assert.equal(body.rowsPersisted, 4);
+  assert.equal(body.evaluationErrors, 1);
+  assert.deepEqual(body.official, {
+    measureId: "cms122",
+    rates: [{ label: null, ipp: 2, denom: 2, denex: 0, denexcep: 0, numer: 1, effectiveDenominator: 2, score: 0.5 }],
+    outOfPopulation: 1,
+    unmeasured: 1,
+    evaluationErrors: 1,
+  });
+  assert.equal(body.casesCiting, 0);
+  assert.deepEqual(body.compaction, { exposed: false, cutoff: null });
+  assert.equal(body.workItems, null, "no RUN_COMPLETED ledger event was written for a store-created run");
+
+  const running = await runStore.createRun({
+    status: "RUNNING", scopeType: "MEASURE", scopeId: "cms122", triggeredBy: "test", requestedScope: {},
+    measurementPeriodStart: "2026-01-01T00:00:00.000Z", measurementPeriodEnd: "2026-12-31T23:59:59.999Z",
+  });
+  assert.equal((await get(`/api/runs/${running.id}/reconciliation`))!.status, 409, "a moving run has nothing to reconcile yet");
+});
+
+test("reconciliation: a FAILED run reconciles its rows but computes NO measure rate over the fragment, and a legacy lowercase status is terminal (Codex #540)", async () => {
+  await get("/api/runs");
+  const runStore = new SqliteRunStore(env.DB as never);
+  const outcomeStore = new SqliteOutcomeStore(env.DB as never);
+  const official = (populationResults: Record<string, boolean>) => ({ official: { populationResults } });
+  const mk = (status: string) => runStore.createRun({
+    status: status as never, scopeType: "MEASURE", scopeId: "cms122", triggeredBy: "test", requestedScope: { measureId: "cms122" },
+    measurementPeriodStart: "2026-01-01T00:00:00.000Z", measurementPeriodEnd: "2026-12-31T23:59:59.999Z",
+  });
+  const failed = await mk("FAILED");
+  await outcomeStore.recordOutcome({ runId: failed.id, subjectId: "p-1", measureId: "cms122", evaluationPeriod: "2026", status: "OVERDUE", evidence: official({ ipp: true, denom: true, numer: true, denex: false, denexcep: false }) });
+  const res = (await get(`/api/runs/${failed.id}/reconciliation`))!;
+  assert.equal(res.status, 200, "a terminal run reconciles");
+  const body = (await res.json()) as { rowsPersisted: number; official: unknown; notes: string[] };
+  assert.equal(body.rowsPersisted, 1);
+  assert.equal(body.official, null, "no measure rate over a fragment");
+  assert.ok(body.notes.some((n) => n.includes("FAILED")), "and the reader is told why");
+
+  const legacy = await mk("completed");
+  await outcomeStore.recordOutcome({ runId: legacy.id, subjectId: "p-2", measureId: "cms122", evaluationPeriod: "2026", status: "COMPLIANT", evidence: official({ ipp: true, denom: true, numer: false, denex: false, denexcep: false }) });
+  const legacyRes = (await get(`/api/runs/${legacy.id}/reconciliation`))!;
+  assert.equal(legacyRes.status, 200, "a Java-era lowercase status is still terminal");
+  assert.ok(((await legacyRes.json()) as { official: unknown }).official, "and reportable, so its rate is computed");
+});
+
+test("a compaction pass that starts between the pre-read check and the read is caught by the post-read check (Codex #540)", async () => {
+  await get("/api/runs");
+  const runStore = new SqliteRunStore(env.DB as never);
+  const outcomeStore = new SqliteOutcomeStore(env.DB as never);
+  const stores = await getStores(env as never);
+  const run = await runStore.createRun({
+    status: "COMPLETED", scopeType: "MEASURE", scopeId: "audiogram", triggeredBy: "test", requestedScope: { measureId: "audiogram" },
+    measurementPeriodStart: "2019-01-01T00:00:00.000Z", measurementPeriodEnd: "2019-12-31T23:59:59.999Z",
+    startedAt: "2019-06-01T00:00:00.000Z", completedAt: "2019-06-01T00:00:00.000Z",
+  });
+  await outcomeStore.recordOutcome({ runId: run.id, subjectId: "emp-001", measureId: "audiogram", evaluationPeriod: "2019", status: "COMPLIANT", evidence: {}, evaluatedAt: run.startedAt });
+  // Nothing has compacted yet, so the pre-read check passes; the FIRST row read then behaves as if the
+  // nightly pass wrote its intent at that instant. The cutoff predates every other test's runs.
+  const original = stores.outcomes.listOutcomes.bind(stores.outcomes);
+  let armed = true;
+  stores.outcomes.listOutcomes = async (runId: string, opts?: { limit?: number; offset?: number }) => {
+    if (armed) {
+      armed = false;
+      await stores.events.appendAudit({
+        eventType: "OUTCOMES_COMPACTION_STARTED", entityType: "outcome", entityId: null, actor: "system",
+        refRunId: null, refCaseId: null, refMeasureVersionId: null, payload: { cutoff: "2020-01-01T00:00:00.000Z", retentionDays: 1 },
+      });
+    }
+    return original(runId, opts);
+  };
+  try {
+    const res = (await get(`/api/runs/${run.id}/measure-report?type=summary`))!;
+    assert.equal(res.status, 409, "the post-read check refuses what the pre-read check let through");
+    assert.equal(((await res.json()) as { error: string }).error, "run_compacted");
+  } finally {
+    stores.outcomes.listOutcomes = original;
+  }
+});
+
+// Keep this test LAST: it writes a compaction intent event into the shared ledger, and every run a later
+// test created before that cutoff would read as exposed.
+test("population exports refuse a run a compaction pass could have reached (409 run_compacted), and serve one it could not", async () => {
+  await get("/api/runs");
+  const runStore = new SqliteRunStore(env.DB as never);
+  const outcomeStore = new SqliteOutcomeStore(env.DB as never);
+  const events = new SqliteCaseEventStore(env.DB as never);
+  const mk = (startedAt: string) => runStore.createRun({
+    status: "COMPLETED", scopeType: "MEASURE", scopeId: "audiogram", triggeredBy: "test", requestedScope: { measureId: "audiogram" },
+    measurementPeriodStart: "2020-01-01T00:00:00.000Z", measurementPeriodEnd: "2020-12-31T23:59:59.999Z", startedAt, completedAt: startedAt,
+  });
+  const before = await mk("2020-06-01T00:00:00.000Z");
+  const after = await mk("2021-06-01T00:00:00.000Z");
+  for (const run of [before, after]) {
+    await outcomeStore.recordOutcome({ runId: run.id, subjectId: "emp-001", measureId: "audiogram", evaluationPeriod: "2020", status: "COMPLIANT", evidence: {}, evaluatedAt: run.startedAt });
+  }
+  // The intent event the compaction pass writes before deleting. Its cutoff sits between the two runs.
+  await events.appendAudit({
+    eventType: "OUTCOMES_COMPACTION_STARTED", entityType: "outcome", entityId: null, actor: "system",
+    refRunId: null, refCaseId: null, refMeasureVersionId: null, payload: { cutoff: "2021-01-01T00:00:00.000Z", retentionDays: 1 },
+  });
+
+  for (const path of ["/measure-report?type=summary", "/measure-report?type=individual", "/measure-report?type=bundle", "/qrda1", "/qrda?format=xml"]) {
+    const refused = (await get(`/api/runs/${before.id}${path}`))!;
+    assert.equal(refused.status, 409, `before ${path}`);
+    const body = (await refused.json()) as { error: string; compactionCutoff: string };
+    assert.equal(body.error, "run_compacted");
+    assert.equal(body.compactionCutoff, "2021-01-01T00:00:00.000Z");
+    assert.equal((await get(`/api/runs/${after.id}${path}`))!.status, 200, `after ${path}`);
+  }
 });

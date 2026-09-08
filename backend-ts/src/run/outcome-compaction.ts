@@ -25,6 +25,7 @@
  * deployment that has not opted in. TWH sets nothing and keeps its history whole.
  */
 import type { Stores } from "../stores/factory.ts";
+import { resetMeasureRateMemo } from "../program/measure-rate.ts";
 
 export interface CompactionResult {
   /** ISO-8601 instant before which non-exempt rows were deleted. */
@@ -108,6 +109,10 @@ export async function compactOutcomes(
 
   const deleted = await stores.outcomes.compactOlderThan(cutoff);
   const result: CompactionResult = { cutoff, deleted, durationMs: Date.now() - started };
+  // A terminal run is immutable EXCEPT for this pass, so the per-run measure-rate memo is dropped here:
+  // otherwise a warm process would serve a pre-compaction rate on the dashboard while the export of the
+  // same run is refused, and a cold one the post-compaction rate (own review, ADR-077 d5).
+  resetMeasureRateMemo();
 
   // One completion event per pass, not per row: the payload answers "what window was applied and how
   // much went", which is the question an auditor asks, and 100,000 events answering it individually

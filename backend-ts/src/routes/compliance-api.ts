@@ -41,7 +41,7 @@ import type { FhirBundle } from "../engine/synthetic/fhir-bundle-builder.ts";
 import { isWebChartConfigured } from "../engine/ingress/data-source.ts";
 import { DEPLOYMENT_PROFILE, employeeById } from "../config/deployment-profile.ts";
 import { routedEngineForEnv } from "../wiring/executor-router.ts";
-import { membershipFor, membershipRatesFor, officialMembership, officialReportIdentity, type PopulationMembership } from "../fhir/measure-report.ts";
+import { isEvaluationErrorEvidence, membershipFor, membershipRatesFor, officialMembership, officialReportIdentity, type PopulationMembership } from "../fhir/measure-report.ts";
 import type { OutcomeRecord } from "../stores/outcome-store.ts";
 import type { DataSourceEnv } from "../engine/ingress/data-source.ts";
 
@@ -105,7 +105,11 @@ export function rateBlock(
  * field exists to prevent — the honesty field, lying. Deriving both from one call makes them incapable
  * of disagreeing.
  */
-export function populationsSource(evidence: unknown): "official-evidence" | "status-derived" {
+export function populationsSource(evidence: unknown): "official-evidence" | "status-derived" | "evaluation-error" {
+  // ADDITIVE (ADR-061 stability; ADR-077 d6): a subject no engine spoke for. The booleans beside it are
+  // all false — in NO population — and this label says why, so an integrator never reads "not in the
+  // initial population" as a measured fact about a record the engine did not evaluate.
+  if (isEvaluationErrorEvidence(evidence)) return "evaluation-error";
   return officialMembership(evidence) !== null ? "official-evidence" : "status-derived";
 }
 

@@ -1,5 +1,56 @@
 # Journal
 
+## 2026-09-08 — the numbers a quality lead can see are true or refused (ADR-077)
+
+An external review of the Maui sandbox, taken against `564d5d93`, found four ways a number could be
+shown with a meaning it did not have, and I reproduced every one before changing anything. Every
+MeasureReport variant returned `status: "complete"` for REQUESTED, QUEUED, RUNNING, FAILED and
+CANCELLED runs while QRDA refused them, and the UI offered the export for every *terminal* run, FAILED
+included. A COMPLETED SITE recheck of one clinic became the whole practice's roster and dashboard. A
+retention pass changed a historical run's score from 1/2 to 0/1 while the run's own "total" fell in
+step, because that total is a count of the surviving rows. And a FAILED rerun's row evicted the last
+finalized answer from the keep set.
+
+**The fix I first proposed for the third one was wrong, and it is worth recording why.** Comparing the
+run's evaluated total with its surviving rows can never detect compaction, because the total *is* the
+surviving rows. The non-circular evidence already existed: the compaction pass awaits an
+`OUTCOMES_COMPACTION_STARTED` intent event before it deletes, and each event carries its cutoff, so
+the furthest cutoff any pass has applied bounds what any pass could have reached. A population export
+from a run that started before that cutoff is now refused with 409 `run_compacted`. Conservative on
+purpose — a run whose rows all survived is refused too — because the alternative is a score wearing an
+identity it no longer earns. The first version read only the newest event; a reviewer pointed out that
+widening the retention window moves the next cutoff backwards, so it now takes the maximum. Two more of my own contracts were corrected before they shipped: the rate aggregator
+already folds numerator exclusions, so applying the proportion formula on top of it would have
+subtracted them twice, and an evaluation error on a multi-rate run was already counted "in no rate"
+under ADR-074 d11, so it now counts there *and* under its own name.
+
+**What changed** (ADR-077). One reportability predicate, `src/run/reportable.ts`, governs MeasureReport,
+QRDA I/III and the export buttons. The keep set protects the newest USABLE row (reportable run, not an
+error) as well as the newest row, and never touches an in-flight run. Population winners are an
+allowlist — MEASURE and ALL_PROGRAMS — so a SITE run is visible in case detail and never replaces the
+snapshot. The programs overview shows the measure's own rate, reduced by the same aggregator the
+MeasureReport uses, as a tile *beside* the workflow-status percentage, which now says what it is; the
+trend keeps its old data under the name "workflow status history". An evaluation error is in no
+population and is counted (`x-workwell-evaluation-errors` on both exports, the dashboard tile, and a
+new `GET /api/runs/:id/reconciliation` that states every count in one unit). The roster distinguishes
+"evaluated, not in population" from "missing data" and from "evaluation failed".
+
+**Deliberately not in this change.** An out-of-population subject still opens a MISSING_DATA case —
+ADR-043 recorded that fan-out as operational noise, and closing it is a case-model contract that
+belongs with the worklist slice, not a late addition here; the CDS card mirrors the case for the same
+reason. A "newer check available" overlay for SITE rechecks on the roster is also deferred to that
+slice. The Postgres keep set now joins `runs` and has not been EXPLAIN-ANALYZEd at pilot scale; the
+store's comment says so. Source interpretation (the preparation layer's rewriting of a system-less
+`resolved` to `active`, the QRDA-I importer's invented statuses) and the corpus's missing as-of cutoff
+are the next two slices. A durable per-run report archive is what would let an old run export again;
+that is schema, so it is the owner's.
+
+**Still owner-owned, and worth starting now:** the nightly backup has failed since 2026-08-25 on a dead
+S3 access key and the pilot instance has no backup workflow at all; the PY2027 collection-type and
+lineage question to MIE, since the 2027 specifications are QDM-only and there may be nothing to
+re-vendor; and an hour of the pilot's quality lead's time to adjudicate a small set of sandbox patients,
+which is the only ground truth we do not manufacture ourselves.
+
 ## 2026-09-07 (later) — the last two measures go through the second engine, and a blood pressure gets its profile
 
 Two of the four issues left open after ADR-076 merged were not the owner's at all. I had written that
@@ -61,6 +112,7 @@ code.
 decisions reserve and which turns on whether measure 305 survives the final rule; and the live segment
 repair, which needs an authenticated admin session against the running pilot. Everything else that was
 open is closed or has its next experiment written down.
+
 
 ## 2026-09-07 — the eight flags MM-1 left open, and CMS2's seven disagreements run to a cause
 

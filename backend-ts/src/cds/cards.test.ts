@@ -275,7 +275,7 @@ test("the carded statuses and the order-proposal statuses are the SAME set — t
   // card and the ServiceRequest's `reasonCode` would name DIFFERENT measures, and the genuinely at-risk
   // measure would silently lose its suggestion to a non-at-risk one (review flagged this as load-bearing and
   // unpinned). This test is the pin; it has no other purpose.
-  const ALL = ["COMPLIANT", "DUE_SOON", "OVERDUE", "MISSING_DATA", "EXCLUDED", "DECLINED", "IN_PROGRESS"];
+  const ALL = ["COMPLIANT", "DUE_SOON", "OVERDUE", "MISSING_DATA", "EXCLUDED", "DECLINED", "IN_PROGRESS", "OUT_OF_POPULATION"];
   const carded = ALL.filter((s) => dispositionFor(s) === "OPEN").sort();
   // Mirrors AT_RISK's keys. Kept as a literal so a change to either side shows up as a diff here.
   const atRisk = ["OVERDUE", "DUE_SOON", "MISSING_DATA"].sort();

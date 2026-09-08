@@ -21,6 +21,9 @@ import { backfillTrendHistory } from "./backfill-trend-history.ts";
 
 const NOW = Date.parse("2027-12-31T00:00:00.000Z");
 const SAMPLE_RUN = {
+  // COMPLETED, not the default QUEUED: since ADR-077 d3 an in-flight run's rows are never candidates,
+  // so a fixture run that is "old enough to compact" must also be one that finished.
+  status: "COMPLETED" as const,
   scopeType: "ALL_PROGRAMS" as const,
   triggeredBy: "scheduler",
   requestedScope: {},
