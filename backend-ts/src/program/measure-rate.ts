@@ -57,8 +57,10 @@ export async function officialMeasureRate(
   const key = `${runId}|${measureId}`;
   const hit = memo.get(key);
   if (hit) return hit;
-  // One row decides whether there is official evidence to reduce; an authored run is never paged.
-  if (!(await runProducedOfficialEvidence(os, runId))) return null;
+  // One row decides whether there is official evidence to reduce; an authored measure is never paged.
+  // Scoped to the measure: on an ALL_PROGRAMS run every measure's rows share the run id, so an
+  // unscoped question is answered by whichever measure happened to sort first.
+  if (!(await runProducedOfficialEvidence(os, runId, measureId))) return null;
   const aggregate = await aggregateOfficialRun(os, runId, measureId);
   const labels = officialMeasureSemantics(measureId)?.rateLabels;
   const rate: MeasureRate = {

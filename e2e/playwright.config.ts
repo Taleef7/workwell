@@ -5,7 +5,12 @@ export default defineConfig({
   globalSetup: "./global-setup.ts",
   timeout: 60_000,
   retries: 1,
-  workers: 1,
+  // The Maui stack this suite boots is a single backend process on the SQLite floor, so the ceiling is
+  // its event loop rather than the runner's 4 vCPUs. Four workers on a read-mostly suite measured well
+  // inside that; the two specs that WRITE (a manual run, an outreach POST) are serialized by their own
+  // `test.describe.configure({ mode: "serial" })` rather than by pinning the whole project to one
+  // worker, which is what made the project take 8 minutes of wall clock to do 20 seconds of work.
+  workers: process.env.CI ? 4 : undefined,
   reporter: [["html", { open: "never" }], ["list"]],
   use: {
     // STAGING by default, never production: this suite mutates (it triggers runs and POSTs outreach),

@@ -1,19 +1,26 @@
 import { test, expect } from "@playwright/test";
-import { MAUI_ACCOUNTS, MAUI_PASSWORD, API_BASE, loginAs, expectNoErrorPage } from "./helpers";
+import { AS_ADMIN, MAUI_ACCOUNTS, MAUI_PASSWORD, API_BASE, ROUTED_MEASURES, expectNoErrorPage } from "./helpers";
 
 test.beforeEach(() => {
   test.skip(process.env.PLAYWRIGHT_PROFILE !== "maui", "maui profile only");
 });
 
+/** The roster the Maui e2e stack composes; `WORKWELL_MAUI_CORPUS_SIZE` is unset, so it is the default. */
+const CORPUS_SUBJECTS = 48;
+
 test.describe("Maui runs", () => {
-  test("trigger a manual ALL_PROGRAMS run and verify every runnable measure evaluated for all 48", async ({ page, request }) => {
+  // /runs is engineering-gated to ADMIN on the pilot profile, and so is the Run Now control.
+  test.use(AS_ADMIN);
+  // This file WRITES (it triggers a run); its two tests must not interleave with each other.
+  test.describe.configure({ mode: "serial" });
+
+  test("a manual ALL_PROGRAMS run evaluates every routed measure for every corpus patient", async ({ page, request }) => {
     test.setTimeout(240_000);
-    await loginAs(page, MAUI_ACCOUNTS.qualityLead.email);
 
     // Snapshot the run ids that exist BEFORE the click, so the assertion below is about the run this
     // test triggers and not the completed run the global setup seeded.
     const login = await request.post(`${API_BASE}/api/auth/login`, {
-      data: { email: MAUI_ACCOUNTS.qualityLead.email, password: MAUI_PASSWORD },
+      data: { email: MAUI_ACCOUNTS.admin.email, password: MAUI_PASSWORD },
     });
     expect(login.ok()).toBe(true);
     const { token } = (await login.json()) as { token: string };
@@ -40,25 +47,23 @@ test.describe("Maui runs", () => {
     // setup run must not be allowed to stand in for it.
     const runsRes = await request.get(`${API_BASE}/api/runs`, { headers });
     expect(runsRes.ok()).toBe(true);
-    const runs = (await runsRes.json()) as RunRow[];
-    const created = runs.filter((r) => !knownIds.has(r.runId));
+    const created = ((await runsRes.json()) as RunRow[]).filter((r) => !knownIds.has(r.runId));
     expect(created, "the Start run click must have created exactly one new run").toHaveLength(1);
     expect(created[0].scopeType).toBe("ALL_PROGRAMS");
     expect(created[0].status).toBe("COMPLETED");
-    // 48 patients x the measures this stack can RUN. The Maui profile lists the ACO's six, but an
-    // official-only measure is runnable only where WORKWELL_OFFICIAL_MEASURES routes it (ADR-072), and
-    // the e2e stack routes nothing (README-maui: the official artifacts need their gitignored
-    // terminology sidecars) — so cms2/cms130/cms165/cms137 are `official-pending` here and the run
-    // evaluates the two authored measures, cms122 and cms125. A previous revision asserted 240 (six
-    // times 48 minus one) on the belief that U1 had made the five runnable regardless of routing; it
-    // had not, and this spec is manual-dispatch only, so nothing contradicted it.
-    expect(created[0].totalEvaluated).toBe(96);
+    // One outcome per (patient, measure) pair over the ACO's whole computable set. This is the
+    // assertion that would have caught the e2e stack silently running two measures while the pilot ran
+    // six: since 2026-09-08 the job vendors the terminology sidecars with the VSAC credential and sets
+    // WORKWELL_OFFICIAL_MEASURES, so `official-pending` is no longer an accepted state here. Derived
+    // from the routed list rather than hardcoded, so adding a measure updates one place.
+    expect(
+      created[0].totalEvaluated,
+      `expected ${CORPUS_SUBJECTS} patients x ${ROUTED_MEASURES.length} routed measures`,
+    ).toBe(CORPUS_SUBJECTS * ROUTED_MEASURES.length);
     await expectNoErrorPage(page);
   });
 
-  test("runs list filter by scopeType works", async ({ page }) => {
-    test.setTimeout(60_000);
-    await loginAs(page, MAUI_ACCOUNTS.qualityLead.email);
+  test("runs list renders and filters by scope type", async ({ page }) => {
     await page.goto("/runs");
     await expect(page.getByRole("heading", { name: /Run History/i })).toBeVisible({ timeout: 20_000 });
     await expectNoErrorPage(page);

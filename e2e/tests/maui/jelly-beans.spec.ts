@@ -1,21 +1,13 @@
-import { test, expect } from "@playwright/test";
-import { MAUI_ACCOUNTS, loginAs, expectNoErrorPage } from "./helpers";
+import { test, expect, type Page } from "@playwright/test";
+import { AS_QUALITY_LEAD, ROUTED_MEASURES, expectNoErrorPage } from "./helpers";
 
 test.beforeEach(() => {
   test.skip(process.env.PLAYWRIGHT_PROFILE !== "maui", "maui profile only");
 });
 
-const OPEN_BUCKETS = ["DUE_SOON", "OVERDUE", "MISSING_DATA"] as const;
+test.use(AS_QUALITY_LEAD);
 
-// The ACO's five (ADR-072). `hypertension` was here until U1 replaced the pilot's runnable set; it is
-// an AUTHORED occupational measure and has no place on a patient roster.
-const MEASURES = [
-  { id: "cms125", label: "Breast Cancer Screening" },
-  { id: "cms122", label: "Diabetes" },
-  { id: "cms2", label: "Depression" },
-  { id: "cms130", label: "Colorectal" },
-  { id: "cms165", label: "Blood Pressure" },
-] as const;
+const OPEN_BUCKETS = ["DUE_SOON", "OVERDUE", "MISSING_DATA"] as const;
 
 interface ChipInfo {
   bucket: string;
@@ -23,7 +15,7 @@ interface ChipInfo {
   href: string;
 }
 
-async function readChips(page: import("@playwright/test").Page, measureId: string): Promise<ChipInfo[]> {
+async function readChips(page: Page, measureId: string): Promise<ChipInfo[]> {
   const chips: ChipInfo[] = [];
   const chipLinks = page.locator(`a[href*="measureId=${measureId}"][href*="outcome="]`);
   const count = await chipLinks.count();
@@ -46,61 +38,67 @@ async function readChips(page: import("@playwright/test").Page, measureId: strin
 
 test.describe("Maui status chips (jelly beans)", () => {
   test.beforeEach(async ({ page }) => {
-    await loginAs(page, MAUI_ACCOUNTS.qualityLead.email);
     await page.goto("/programs");
     await expect(page.getByRole("heading").first()).toBeVisible({ timeout: 20_000 });
   });
 
-  for (const measure of MEASURES) {
-    test(`${measure.id}: chip counts match case list and Open Worklist`, async ({ page }) => {
-      await expect(page.locator(`a[href*="measureId=${measure.id}"][href*="outcome="]`).first()).toBeVisible({ timeout: 30_000 });
-      const chips = await readChips(page, measure.id);
-      test.expect(chips.length).toBeGreaterThan(0);
+  // CHEAP pass over every routed measure: each one renders chips, and the chips are consistent with
+  // the worklist link beside them. This replaces a per-measure drill-down that navigated and reloaded
+  // once per chip — six measures × three buckets × two page loads was most of the project's runtime.
+  test("every routed measure renders status chips consistent with its worklist", async ({ page }) => {
+    for (const measure of ROUTED_MEASURES) {
+      const firstChip = page.locator(`a[href*="measureId=${measure.id}"][href*="outcome="]`).first();
+      await expect(firstChip, `${measure.cms} is routed, so its card must render chips`).toBeVisible({ timeout: 30_000 });
 
-      // Open Worklist total for this measure
+      const chips = await readChips(page, measure.id);
+      expect(chips.length, `${measure.cms} should have at least one open-bucket chip`).toBeGreaterThan(0);
+
       const worklistLink = page.locator(`a[href*="measureId=${measure.id}"]`).filter({ hasText: /Open Worklist/i });
       await expect(worklistLink.first()).toBeVisible({ timeout: 10_000 });
-      const wlText = await worklistLink.first().textContent();
-      const wlMatch = wlText?.match(/(\d+)/);
-      expect(wlMatch, "Open Worklist should include its case count").not.toBeNull();
-      const worklistTotal = Number(wlMatch?.[1]);
+      const worklistTotal = Number(((await worklistLink.first().textContent()) ?? "").match(/(\d+)/)?.[1]);
 
+      // NOT equality. A chip counts OUTCOMES in a bucket; the worklist counts CASES. Since ADR-078 a
+      // subject the official executor puts outside the initial population is persisted MISSING_DATA
+      // but opens no case, so on every officially routed measure the chip sum is the larger number.
+      // Asserting equality here is asserting the fan-out ADR-078 removed.
       const chipSum = chips.reduce((sum, c) => sum + c.count, 0);
-      expect(chipSum, `chip sum (${chipSum}) should equal Open Worklist (${worklistTotal})`).toBe(worklistTotal);
+      expect(
+        chipSum,
+        `${measure.cms}: chip sum (${chipSum}) must cover the open worklist (${worklistTotal}); the gap is out-of-population subjects`,
+      ).toBeGreaterThanOrEqual(worklistTotal);
+    }
+  });
 
-      for (const chip of chips) {
-        await page.goto(chip.href);
-        await expect(page).toHaveURL(new RegExp(`measureId=${measure.id}&outcome=${chip.bucket}`));
-        await expectNoErrorPage(page);
-
-        // Reload to confirm filters are URL-backed and survive refresh
-        await page.reload();
-        await expect(page).toHaveURL(new RegExp(`measureId=${measure.id}&outcome=${chip.bucket}`));
-        // Wait for the list to settle: either a visible case link or one of the page's empty states.
-        const firstCase = page.locator("a[href^='/cases/']").filter({ visible: true }).first();
-        const emptyState = page.getByText(/^No (open |excluded |closed )?cases|^No results match/);
-        await expect(firstCase.or(emptyState)).toBeVisible({ timeout: 30_000 });
-
-        // Count DISTINCT cases: a row renders more than one link to the same case (name + "View"),
-        // and the mobile card layout duplicates rows in the DOM.
-        const hrefs = await page.locator("a[href^='/cases/']").evaluateAll((els) =>
-          els.map((el) => (el as HTMLAnchorElement).getAttribute("href") ?? ""),
-        );
-        const rowCount = new Set(hrefs.filter((h) => /^\/cases\/[^?]+$/.test(h))).size;
-        expect(rowCount, `distinct cases (${rowCount}) should match chip count (${chip.count}) for ${chip.bucket}`).toBe(chip.count);
-      }
-    });
-  }
-
-  test("filters survive reload (URL-backed)", async ({ page }) => {
-    await expect(page.locator('a[href*="measureId=cms125"][href*="outcome="]').first()).toBeVisible({ timeout: 30_000 });
+  // The EXPENSIVE structural check — that a chip's href really filters the case list — is worth doing
+  // properly, but once. cms125 is the measure whose corpus distribution the pilot was designed around.
+  test("a cms125 chip drills into a case list filtered to that bucket, and the filter is URL-backed", async ({ page }) => {
     const chips = await readChips(page, "cms125");
-    test.expect(chips.length).toBeGreaterThan(0);
-    const chip = chips[0];
-    await page.goto(chip.href);
-    await expect(page).toHaveURL(new RegExp(`measureId=cms125&outcome=${chip.bucket}`));
-    await page.reload();
-    await expect(page).toHaveURL(new RegExp(`measureId=cms125&outcome=${chip.bucket}`));
-    await expectNoErrorPage(page);
+    expect(chips.length).toBeGreaterThan(0);
+
+    for (const chip of chips) {
+      await page.goto(chip.href);
+      await expect(page).toHaveURL(new RegExp(`measureId=cms125&outcome=${chip.bucket}`));
+      await page.reload();
+      await expect(page).toHaveURL(new RegExp(`measureId=cms125&outcome=${chip.bucket}`));
+      await expectNoErrorPage(page);
+
+      // Wait for the list to settle: either a visible case link or one of the page's empty states.
+      const firstCase = page.locator("a[href^='/cases/']").filter({ visible: true }).first();
+      const emptyState = page.getByText(/^No (open |excluded |closed )?cases|^No results match/);
+      await expect(firstCase.or(emptyState)).toBeVisible({ timeout: 30_000 });
+
+      // Count DISTINCT cases: a row renders more than one link to the same case (name + "View"),
+      // and the mobile card layout duplicates rows in the DOM.
+      const hrefs = await page.locator("a[href^='/cases/']").evaluateAll((els) =>
+        els.map((el) => (el as HTMLAnchorElement).getAttribute("href") ?? ""),
+      );
+      const rowCount = new Set(hrefs.filter((h) => /^\/cases\/[^?]+$/.test(h))).size;
+      // Again a bound, not equality, and for the same ADR-078 reason: the bucket's outcomes include
+      // subjects outside the population, who have no case to list.
+      expect(
+        rowCount,
+        `cases listed (${rowCount}) must not exceed the ${chip.bucket} chip (${chip.count})`,
+      ).toBeLessThanOrEqual(chip.count);
+    }
   });
 });

@@ -6,6 +6,10 @@ test.beforeEach(() => {
 });
 
 test.describe("Maui case workflow", () => {
+  // This file MUTATES cases (an outreach POST, an assignment), so its tests run in order rather than
+  // racing each other for the same open case.
+  test.describe.configure({ mode: "serial" });
+
   test("open an OVERDUE cms125 case and exercise the case-manager actions", async ({ page }) => {
     test.setTimeout(120_000);
     await loginAs(page, MAUI_ACCOUNTS.qualityLead.email);

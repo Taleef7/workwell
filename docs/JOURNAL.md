@@ -1,5 +1,59 @@
 # Journal
 
+## 2026-09-08 (evening) — the first six-measure run, a rate that was the wrong measure's, and an e2e suite that had stopped testing the pilot
+
+The flip deployed, and the programs page still read 0.0% on the four new measures. That part was
+benign: the nightly runs at 12:00 UTC and had already gone before the merge, so nothing had evaluated
+them. A manual ALL_PROGRAMS run confirms the routing is live — `activeMeasuresExecuted: 6`, 120,000
+evaluations — and ADR-078 with it: cases are closing under `closed_reason=OUT_OF_POPULATION` with
+`closed_by` null, while the outcome itself stays MISSING_DATA. Open cases fell from 16,581 as it ran.
+
+**A measure rate on the overview was the whole run's, not the measure's.** `aggregateOfficialRun`
+paged `listOutcomes(runId)` with no measure filter, under a comment asserting that "a run evaluates one
+measure with one engine" — true of a MEASURE-scoped run, false of the ALL_PROGRAMS run the pilot
+actually runs, which holds a row per (subject, measure) pair. So it summed every measure and served
+that one number under whichever measure was asked about: CMS122's card carried `ecqmId: 125FHIR`,
+CMS125's initial population and CMS125's 59.2%. The MeasureReport and reconciliation routes were safe —
+both refuse a multi-measure run with a 422 — and the programs overview was the one caller with no
+guard. The filter is now pushed into SQL in both stores rather than applied after the read; on a
+six-measure nightly the app-side alternative would page 120,000 rows once per measure. Guarded by a
+store-contract test that pins the narrowing BEFORE the page window (an offset must walk the measure's
+rows, not the run's) and by a mixed-run unit test whose fake honours the filter — a fake that ignored
+it would pass while the shipped query narrowed.
+
+**The Maui Playwright suite had been green-by-absence since 2026-09-03.** It is dispatch-only, so
+nothing ran it across seven merges; a manual dispatch returned 32 passed, 11 failed. None was a backend
+regression. Three were the stack: the job ran with `official-measures=off`, so cms2, cms130 and cms165
+booted `official-pending` and the specs #528 added for them waited 30s for chips that could not exist.
+Two were ADR-078 working as designed — "chip count equals case count" is exactly the fan-out the ADR
+removed, so the assertion is now a bound with the gap named. Three were role: `/runs` and `/measures`
+are engineering-gated to ADMIN on the pilot profile and the specs signed in as the quality lead, so two
+of them had been asserting against an AccessDenied panel and would have passed whatever the catalog
+held. One was the export contract — the test wanted `employeeExternalId` where DATA_MODEL_CONTRACTS
+§6.3 names `patientExternalId` on a patient deployment, so the stack was right and the test was wrong.
+One was a selector collision: the panel filters gave the PCP options names containing clinic names, and
+the site filter's option lookup matched one of those inside a closed select.
+
+The job now runs the ROUTED configuration — it vendors the six sidecars with the VSAC credential and
+sets `WORKWELL_OFFICIAL_MEASURES` — because a suite that boots a stack nobody deploys is not a pilot
+test. A degraded sidecar surfaces as `official-pending` rather than a crash, so the boot line is now
+asserted: without that check the job would quietly run two measures and report green, which is what it
+had been doing. On a public repo the credential is scoped to one step, that step runs before the
+frontend and e2e trees are installed, and the completed expansions are deliberately NOT cached — an
+Actions cache is restorable by a fork pull request, and licensed value-set content should not be
+reachable from code we do not control.
+
+The suite went from 43 tests to 26 with more covered: six measures rather than two, and two vacuous
+assertions made real. It was never slow — of an 8m24s run the passing tests were about 20 seconds and
+the rest was failures burning their timeouts and retrying, so fixing them was the speedup. `workers: 1`
+to 4 and one shared sign-in per role instead of about forty were the rest. The roster filter selects
+also had no accessible name at all (Chrome computed none from the wrapping label), so Status, PCP, Age,
+Sex and Page size now carry `aria-label`s like the three beside them already did.
+
+**Still open:** the live six-measure run is slow — roughly 17 (subject, measure) pairs a second against
+Neon, where the in-memory flip gate does 50 subjects a second. The cost looks like per-pair writes
+(outcome, case, audit event) rather than CQL, and every nightly now pays it for hours. Not investigated.
+
 ## 2026-09-08 (later) — all six measures on the sandbox, and a patient outside a measure is not a case (ADR-078)
 
 The owner looked at the programs page with two measure cards on it and asked why, when the pilot
