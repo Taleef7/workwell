@@ -112,7 +112,7 @@ in the store's own docstring so it is not attempted again.
   disagreements (CMS122 6, CMS125 8, CMS2 7, CMS130 1) — of which **8 are proven by construction** (one
   CMS125 case in August, all 7 CMS2 cases here) and **14 are consistent-with by inventory**. Two CMS125 cases
   are `Procedure`-only and stay unexplained; CMS137's single one is a separate and separately proven
-  period boundary. The August evidence put 9 of 23 unattributed; it is now 2 of 24.
+  period boundary. The August evidence put 9 of 23 unattributed; it is now 2 of 25.
 - A case's audit trail gains a `next_action_source`-shaped distinction it did not have: a run that
   changes an action is still `UPDATED` and audited; a run that declines to overwrite one is
   `UNCHANGED`, because the persisted row did not change. The hard rule is unmoved — every state change

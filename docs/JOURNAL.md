@@ -83,7 +83,7 @@ from `authoredOn`, and `fqm-execution` and MADiE's own expected reports take it 
 implicated helper is `CumulativeMedicationDuration.medicationRequestPeriod` — the same one CMS122's and
 CMS125's `DENEX` disagreements were isolated to in August. It is now implicated in **22 of the 25**
 known cross-engine disagreements: CMS122's 6, CMS125's 8, CMS2's 7 and CMS130's 1 — 8 of them proven by a
-single-variable mutation and 13 consistent-with by inventory, which is the distinction the August
+single-variable mutation and 14 consistent-with by inventory, which is the distinction the August
 evidence drew and the derived docs had lost. August counted **9 of 23 unattributed**; it is now **2 of
 25**, the two CMS125 cases whose follow-up is a `Procedure` only. CMS137's single one is separate and
 separately proved. One difference wearing three costumes is a materially better
