@@ -325,6 +325,12 @@ const notReportable = (status: string): Response | null =>
  * computed over them is a different number wearing the original run's identity (review finding 13).
  * The evidence is the ledger, never the surviving rows — see `compaction-evidence.ts` for why
  * (ADR-077 d2).
+ *
+ * Applied TWICE on every population export: before any row is read, and again after the last read and
+ * before the artifact is returned. The stores share no transaction, so a pass that writes its intent
+ * between the first check and the reads can delete rows under them (and shift a paged read's offsets);
+ * because the intent always precedes the delete, the second check sees any pass that could have
+ * touched what was read (Codex review, #540).
  */
 const compacted = async (run: { startedAt: string }, env: RunsEnv): Promise<Response | null> => {
   const exposure = await compactionExposure(run, (await getStores(env)).events);
@@ -1104,6 +1110,11 @@ export async function handleRuns(
       );
     }
     const rows = await os.listOutcomes(qrda1Id);
+    // Second exposure check AFTER the rows are read (Codex review, #540): a pass that wrote its intent
+    // between the first check and this read may have deleted rows under it. The intent precedes every
+    // delete, so the pass is visible here if it could have touched anything read above.
+    const goneIAfter = await compacted(run, env);
+    if (goneIAfter) return goneIAfter;
     const documents = buildQrda1Documents(run, measureId, rows, await qrda1BundleLookup(env, rows.map((r) => r.subjectId)));
     const nonConformant = documents.filter((d) => !d.conformant).length;
     return json({
@@ -1145,6 +1156,10 @@ export async function handleRuns(
     const measureId = measureIds[0]!;
     const aggregate = await aggregateCountsForRun(os, qrdaId, measureId, env);
     if ("error" in aggregate) return aggregate.error;
+    // Second exposure check AFTER the paged read: a pass starting mid-read deletes rows between pages
+    // and shifts the offsets, so the sum above could be short. Its intent event is visible here.
+    const goneIiiAfter = await compacted(run, env);
+    if (goneIiiAfter) return goneIiiAfter;
     // Every rate and every stratum (ADR-074). This route refused a multi-rate measure with a 501 until
     // 2026-09-06 rather than emit rate 1 under the measure's identity; the exporter now reports each
     // group under its own criterion names, with its own performance rate and Reporting Strata.
@@ -1195,6 +1210,9 @@ export async function handleRuns(
     if (type === "summary") {
       const aggregate = await aggregateCountsForRun(os, mrId, measureId, env);
       if ("error" in aggregate) return aggregate.error;
+      // Second exposure check AFTER the paged read — see the QRDA III route for why.
+      const goneMrAfter = await compacted(run, env);
+      if (goneMrAfter) return goneMrAfter;
       return fhir(buildSummaryMeasureReportFromCounts(run, measureId, aggregate.counts, generatedAt, aggregate.official, aggregate.strata), {
         [UNMEASURED_HEADER]: String(aggregate.unmeasured),
         [EVALUATION_ERRORS_HEADER]: String(aggregate.evaluationErrors),
@@ -1216,6 +1234,9 @@ export async function handleRuns(
         );
       }
       const rows = await os.listOutcomes(mrId, { limit: MAX_INDIVIDUAL_REPORT_SUBJECTS });
+      // Second exposure check AFTER the rows are read — see the QRDA I route for why.
+      const goneBundleAfter = await compacted(run, env);
+      if (goneBundleAfter) return goneBundleAfter;
       // Errored subjects get no individual report (ADR-077 d6); the header says how many were left out.
       const errored = rows.filter((r) => isEvaluationErrorEvidence(r.evidence)).length;
       return fhir(buildMeasureReportBundle(run, measureId, rows, generatedAt), { [EVALUATION_ERRORS_HEADER]: String(errored) });
@@ -1234,7 +1255,9 @@ export async function handleRuns(
   if (reconId && req.method === "GET") {
     const run = await (await store(env)).getRun(reconId);
     if (!run) return json({ error: "not_found", id: reconId }, 404);
-    if (!TERMINAL_RUN_STATUSES.has(run.status)) return json({ error: "run_not_terminal", status: run.status }, 409);
+    // Case-insensitive, like every other status predicate: the Java era persisted some statuses
+    // lowercase, and a `completed` run is as reconcilable as a `COMPLETED` one (Codex review, #540).
+    if (!TERMINAL_RUN_STATUSES.has(run.status.toUpperCase())) return json({ error: "run_not_terminal", status: run.status }, 409);
     const stores = await getStores(env);
     const byStatus = await stores.outcomes.countOutcomesByStatus(reconId);
     const rowsPersisted = byStatus.reduce((sum, c) => sum + c.count, 0);
@@ -1247,13 +1270,18 @@ export async function handleRuns(
     const workItems = typeof completedEvent?.payload?.totalEvaluated === "number" ? completedEvent.payload.totalEvaluated : null;
     const measureIds = await stores.outcomes.distinctMeasuresForRun(reconId, 2);
     let official: Record<string, unknown> | null = null;
+    // A FAILED or CANCELLED run is terminal, so its rows and status counts are worth reconciling — but
+    // its rows are a FRAGMENT, which is exactly why `notReportable` refuses to export them. A measure
+    // rate over a fragment is not the measure's rate, so `official` stays null and the reader is told
+    // why (Codex review, #540). The same rule keeps a fragment's rate out of the measure-rate memo.
+    const reportable = isReportableRunStatus(run.status);
     // Authored runs carry no population evidence, and paging a whole run to count error rows would
     // re-materialize exactly what the bounded reads exist to avoid (a 120k seed:scale run). The
     // RUN_COMPLETED payload carries the pipeline's own `failures` count; absent, the answer is "not
     // recorded" rather than a scan. An official run's count comes from the memoized aggregate.
     let evaluationErrors: number | null =
       typeof completedEvent?.payload?.failures === "number" ? completedEvent.payload.failures : null;
-    if (measureIds.length === 1) {
+    if (reportable && measureIds.length === 1) {
       const measureId = measureIds[0]!;
       const rate = await officialMeasureRate(stores.outcomes, reconId, measureId);
       if (rate) {
@@ -1286,6 +1314,9 @@ export async function handleRuns(
         "workItems is the ledger's count of pairs the run set out to evaluate (null when the RUN_COMPLETED event is absent); rowsPersisted is what survives in the outcomes table; evaluationErrors is null when neither the ledger nor official evidence recorded it.",
         "A rate counts subjects in that rate's population; outOfPopulation subjects were evaluated and found outside it; evaluationErrors are in no population.",
         "casesCiting counts cases whose last run is this one — one per (subject, measure, period), not per outreach.",
+        ...(reportable
+          ? []
+          : [`This run is ${run.status}: its rows are a fragment, so no measure rate is computed over them (official is null) and no report can be exported.`]),
       ],
     });
   }

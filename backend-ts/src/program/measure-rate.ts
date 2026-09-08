@@ -38,9 +38,10 @@ export interface MeasureRate {
 
 /**
  * Terminal runs are immutable, so a run's rate never changes; bounded FIFO over (runId, measureId).
- * PRECONDITION on every caller: pass a TERMINAL run. A moving run memoized here would be served stale
- * for the life of the process. The programs overview only ever selects a terminal run
- * (`isCompletedRun`), and the reconciliation route refuses a non-terminal one before calling.
+ * PRECONDITION on every caller: pass a REPORTABLE run (COMPLETED or PARTIAL_FAILURE). A moving run
+ * memoized here would be served stale for the life of the process, and a FAILED/CANCELLED run's rows
+ * are a fragment whose "rate" is not the measure's. The programs overview only ever selects a
+ * reportable run (`isCompletedRun`), and the reconciliation route gates on `isReportableRunStatus`.
  */
 const memo = new Map<string, MeasureRate>();
 const MEMO_LIMIT = 32;

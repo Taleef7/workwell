@@ -57,7 +57,9 @@ encoded them.
    cutoff its pass applied, so the FURTHEST cutoff any pass has ever applied bounds what any pass
    could have reached — the maximum over the ledger, not the newest event, because widening the
    retention window moves the next cutoff backwards. A population export from a run that started
-   before that cutoff is refused with 409 `run_compacted`. Conservative
+   before that cutoff is refused with 409 `run_compacted` — checked before any row is read AND again
+   after the last read, because the stores share no transaction and a pass that starts mid-read
+   deletes under it; the intent precedes every delete, so the second check sees it. Conservative
    by design: a run whose rows all survived is still refused, because the alternative is a score wearing
    an identity it no longer earns. `compactOutcomes` is the only deletion path, and that is what makes
    the evidence sufficient. Comparing `totalEvaluated` with surviving rows was rejected as circular, and

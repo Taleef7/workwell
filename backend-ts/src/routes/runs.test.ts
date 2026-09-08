@@ -14,6 +14,7 @@ import { fileURLToPath } from "node:url";
 // @ts-expect-error — @mieweb/cloud-local ships .mjs without types
 import { createSqliteD1 } from "@mieweb/cloud-local";
 import { handleRuns } from "./runs.ts";
+import { getStores } from "../stores/factory.ts";
 import { EVALUABLE_EMPLOYEES } from "../engine/synthetic/employee-catalog.ts";
 import { buildQrda1Document, qrda1NonConformance } from "../fhir/qrda1-export.ts";
 import { SqliteCaseStore } from "../stores/sqlite/case-store-sqlite.ts";
@@ -1325,6 +1326,65 @@ test("GET /api/runs/:id/reconciliation names its units and ties rows, errors, po
     measurementPeriodStart: "2026-01-01T00:00:00.000Z", measurementPeriodEnd: "2026-12-31T23:59:59.999Z",
   });
   assert.equal((await get(`/api/runs/${running.id}/reconciliation`))!.status, 409, "a moving run has nothing to reconcile yet");
+});
+
+test("reconciliation: a FAILED run reconciles its rows but computes NO measure rate over the fragment, and a legacy lowercase status is terminal (Codex #540)", async () => {
+  await get("/api/runs");
+  const runStore = new SqliteRunStore(env.DB as never);
+  const outcomeStore = new SqliteOutcomeStore(env.DB as never);
+  const official = (populationResults: Record<string, boolean>) => ({ official: { populationResults } });
+  const mk = (status: string) => runStore.createRun({
+    status: status as never, scopeType: "MEASURE", scopeId: "cms122", triggeredBy: "test", requestedScope: { measureId: "cms122" },
+    measurementPeriodStart: "2026-01-01T00:00:00.000Z", measurementPeriodEnd: "2026-12-31T23:59:59.999Z",
+  });
+  const failed = await mk("FAILED");
+  await outcomeStore.recordOutcome({ runId: failed.id, subjectId: "p-1", measureId: "cms122", evaluationPeriod: "2026", status: "OVERDUE", evidence: official({ ipp: true, denom: true, numer: true, denex: false, denexcep: false }) });
+  const res = (await get(`/api/runs/${failed.id}/reconciliation`))!;
+  assert.equal(res.status, 200, "a terminal run reconciles");
+  const body = (await res.json()) as { rowsPersisted: number; official: unknown; notes: string[] };
+  assert.equal(body.rowsPersisted, 1);
+  assert.equal(body.official, null, "no measure rate over a fragment");
+  assert.ok(body.notes.some((n) => n.includes("FAILED")), "and the reader is told why");
+
+  const legacy = await mk("completed");
+  await outcomeStore.recordOutcome({ runId: legacy.id, subjectId: "p-2", measureId: "cms122", evaluationPeriod: "2026", status: "COMPLIANT", evidence: official({ ipp: true, denom: true, numer: false, denex: false, denexcep: false }) });
+  const legacyRes = (await get(`/api/runs/${legacy.id}/reconciliation`))!;
+  assert.equal(legacyRes.status, 200, "a Java-era lowercase status is still terminal");
+  assert.ok(((await legacyRes.json()) as { official: unknown }).official, "and reportable, so its rate is computed");
+});
+
+test("a compaction pass that starts between the pre-read check and the read is caught by the post-read check (Codex #540)", async () => {
+  await get("/api/runs");
+  const runStore = new SqliteRunStore(env.DB as never);
+  const outcomeStore = new SqliteOutcomeStore(env.DB as never);
+  const stores = await getStores(env as never);
+  const run = await runStore.createRun({
+    status: "COMPLETED", scopeType: "MEASURE", scopeId: "audiogram", triggeredBy: "test", requestedScope: { measureId: "audiogram" },
+    measurementPeriodStart: "2019-01-01T00:00:00.000Z", measurementPeriodEnd: "2019-12-31T23:59:59.999Z",
+    startedAt: "2019-06-01T00:00:00.000Z", completedAt: "2019-06-01T00:00:00.000Z",
+  });
+  await outcomeStore.recordOutcome({ runId: run.id, subjectId: "emp-001", measureId: "audiogram", evaluationPeriod: "2019", status: "COMPLIANT", evidence: {}, evaluatedAt: run.startedAt });
+  // Nothing has compacted yet, so the pre-read check passes; the FIRST row read then behaves as if the
+  // nightly pass wrote its intent at that instant. The cutoff predates every other test's runs.
+  const original = stores.outcomes.listOutcomes.bind(stores.outcomes);
+  let armed = true;
+  stores.outcomes.listOutcomes = async (runId: string, opts?: { limit?: number; offset?: number }) => {
+    if (armed) {
+      armed = false;
+      await stores.events.appendAudit({
+        eventType: "OUTCOMES_COMPACTION_STARTED", entityType: "outcome", entityId: null, actor: "system",
+        refRunId: null, refCaseId: null, refMeasureVersionId: null, payload: { cutoff: "2020-01-01T00:00:00.000Z", retentionDays: 1 },
+      });
+    }
+    return original(runId, opts);
+  };
+  try {
+    const res = (await get(`/api/runs/${run.id}/measure-report?type=summary`))!;
+    assert.equal(res.status, 409, "the post-read check refuses what the pre-read check let through");
+    assert.equal(((await res.json()) as { error: string }).error, "run_compacted");
+  } finally {
+    stores.outcomes.listOutcomes = original;
+  }
 });
 
 // Keep this test LAST: it writes a compaction intent event into the shared ledger, and every run a later
