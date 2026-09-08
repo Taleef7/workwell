@@ -1,62 +1,52 @@
 import { test, expect } from "@playwright/test";
-import { MAUI_ACCOUNTS, loginAs, expectNoErrorPage } from "./helpers";
+import { AS_QUALITY_LEAD_ROSTER, ROUTED_MEASURES, expectNoErrorPage } from "./helpers";
 
 test.beforeEach(() => {
   test.skip(process.env.PLAYWRIGHT_PROFILE !== "maui", "maui profile only");
 });
 
+// The roster is the quality lead's page; the session comes from global setup rather than a sign-in
+// per test.
+test.use(AS_QUALITY_LEAD_ROSTER);
+
+/** Land on the roster and wait for the page, not for an arbitrary timeout. */
+async function openRoster(page: import("@playwright/test").Page, query = "") {
+  await page.goto(`/compliance${query}`);
+  await expect(page.getByRole("heading", { name: /Individual Compliance/i })).toBeVisible({ timeout: 20_000 });
+}
+
 test.describe("Maui compliance roster", () => {
-  test.beforeEach(async ({ page }) => {
-    await loginAs(page, MAUI_ACCOUNTS.qualityLead.email);
-  });
+  test("shows the whole roster, the ACO's routed measure columns, and no occupational ones", async ({ page }) => {
+    await openRoster(page);
 
-  test("roster shows 48 total rows across pages", async ({ page }) => {
-    await page.goto("/compliance");
-    await expect(page.getByRole("heading", { name: /Individual Compliance/i })).toBeVisible({ timeout: 20_000 });
+    // Three assertions that used to be three page loads. The roster is 48 corpus patients, one column
+    // per RUNNABLE measure in the panel (ADR-072), and nothing from the occupational catalog.
+    await expect(page.getByText(/of\s*48|48\s*(patients|rows|total)/i).first()).toBeVisible({ timeout: 20_000 });
 
-    // The total count is rendered near the pagination controls.
-    const totalText = page.getByText(/of\s*48|48\s*(patients|rows|total)/i).first();
-    await expect(totalText).toBeVisible({ timeout: 20_000 });
-  });
-
-  test("columns are the ACO measures this stack can run, with correct crosswalk labels", async ({ page }) => {
-    // A roster column is a measure that is Active in the catalog, in the quality panel, AND runnable
-    // (ADR-072). The Maui profile lists the ACO's six; the e2e stack routes no official-only measure
-    // (README-maui — the artifacts need their gitignored terminology sidecars), so the columns here are
-    // the two authored ones. On the deployed sandbox each of cms2/cms130/cms165/cms137 becomes a column
-    // the day its flip routes it — the panel now holds all six, which it did not until 2026-09-06.
-    await page.goto("/compliance");
-    for (const label of [/MIPS 001 · CMS122/, /MIPS 112 · CMS125/]) {
-      await expect(page.getByRole("columnheader", { name: label })).toBeVisible({ timeout: 20_000 });
+    for (const m of ROUTED_MEASURES) {
+      await expect(
+        page.getByRole("columnheader", { name: new RegExp(`MIPS ${m.mips} · ${m.cms}`) }),
+        `${m.cms} is routed on this stack, so it is a roster column`,
+      ).toBeVisible({ timeout: 20_000 });
     }
 
-    // No occupational measure columns, and no leftover authored one.
-    const headers = await page.getByRole("columnheader").allTextContents();
-    const headerText = headers.join(" ");
+    const headerText = (await page.getByRole("columnheader").allTextContents()).join(" ");
     for (const absent of ["HAZWOPER", "Audiogram", "TB Surveillance", "Hypertension"]) {
       expect(headerText, `${absent} must not appear on the pilot roster`).not.toContain(absent);
     }
   });
 
   test("status filter narrows rows", async ({ page }) => {
-    await page.goto("/compliance");
-    await expect(page.getByRole("heading", { name: /Individual Compliance/i })).toBeVisible({ timeout: 20_000 });
+    await openRoster(page);
+    await page.getByLabel("Status", { exact: true }).selectOption({ label: "Overdue" });
 
-    const statusSelect = page.getByLabel("Status");
-    await expect(statusSelect).toBeVisible({ timeout: 10_000 });
-    await statusSelect.selectOption({ label: "Overdue" });
-
-    // Wait for the filtered state
     const rows = page.locator("tbody tr");
     await expect.poll(() => rows.count(), { timeout: 10_000 }).toBeLessThan(48);
-    const rowCount = await rows.count();
-    expect(rowCount).toBeGreaterThan(0);
-    expect(rowCount).toBeLessThan(48);
+    expect(await rows.count()).toBeGreaterThan(0);
   });
 
   test("site filter narrows to Kihei Clinic", async ({ page }) => {
-    await page.goto("/compliance");
-    await expect(page.getByRole("heading", { name: /Individual Compliance/i })).toBeVisible({ timeout: 20_000 });
+    await openRoster(page);
 
     // The site filter is the GLOBAL header filter (a custom combobox, rendered twice for the
     // responsive layouts), not a roster control. The roster footer reads "<total> patients".
@@ -65,58 +55,52 @@ test.describe("Maui compliance roster", () => {
 
     const siteFilter = page.getByRole("combobox", { name: "Filter by site" }).filter({ visible: true }).first();
     await siteFilter.click();
-    await page.getByRole("option", { name: "Kihei Clinic" }).first().click();
+    // EXACT, or this matches an <option> of the PCP select — "Dr. Ines Souza — Kihei Clinic" also has
+    // role=option, sorts earlier in the DOM, and is inside a closed native select, so the click waited
+    // out its full timeout on an element that can never be visible.
+    await page.getByRole("option", { name: "Kihei Clinic", exact: true }).first().click();
 
     await expect(total).not.toHaveText(/^48 patients$/, { timeout: 20_000 });
-    const totalText = (await total.textContent()) ?? "";
-    const filteredTotal = Number(totalText.match(/^(\d+)/)?.[1]);
+    const filteredTotal = Number(((await total.textContent()) ?? "").match(/^(\d+)/)?.[1]);
     expect(filteredTotal).toBeGreaterThan(0);
     expect(filteredTotal).toBeLessThan(48);
   });
 
-  test("search by patient name narrows rows", async ({ page }) => {
-    await page.goto("/compliance");
-    await expect(page.getByRole("heading", { name: /Individual Compliance/i })).toBeVisible({ timeout: 20_000 });
+  test("search narrows rows, and a patient name opens their profile", async ({ page }) => {
+    await openRoster(page);
 
     const searchInput = page.getByPlaceholder("Name or ID");
-    await expect(searchInput).toBeVisible({ timeout: 10_000 });
     await searchInput.fill("Ari Wren");
-
     const rows = page.locator("tbody tr");
     await expect.poll(() => rows.count(), { timeout: 10_000 }).toBeLessThanOrEqual(2);
-    await expect(rows.first()).toBeVisible({ timeout: 10_000 });
-    expect(await rows.count()).toBeLessThanOrEqual(2);
-  });
+    // The FLOOR matters as much as the ceiling: `0 <= 2` would pass for a search that returned nothing
+    // at all, and report a broken query as a working filter.
+    expect(await rows.count(), "the search must MATCH, not just narrow").toBeGreaterThan(0);
 
-  test("clicking a patient name opens profile listing their measures", async ({ page }) => {
-    await page.goto("/compliance");
-    await expect(page.getByRole("heading", { name: /Individual Compliance/i })).toBeVisible({ timeout: 20_000 });
-
+    await searchInput.fill("");
     const patientLink = page.locator("a[href^='/employees/']").filter({ visible: true }).first();
     await expect(patientLink).toBeVisible({ timeout: 20_000 });
     await patientLink.click();
     await expect(page).toHaveURL(/\/employees\//);
     await expectNoErrorPage(page);
 
-    // The profile should reference the Maui measures the patient is due for.
     const body = await page.locator("body").innerText();
-    const hasMeasureMention = /CMS122|CMS125|Hypertension|Diabetes|Breast/i.test(body);
-    expect(hasMeasureMention, "patient profile should reference at least one Maui measure").toBe(true);
+    expect(
+      /CMS122|CMS125|CMS2|CMS130|CMS165|CMS137|Diabetes|Breast|Colorectal|Blood Pressure/i.test(body),
+      "patient profile should reference at least one pilot measure",
+    ).toBe(true);
   });
 });
 
 test.describe("Maui roster panel filters", () => {
-  test.beforeEach(async ({ page }) => {
-    await loginAs(page, MAUI_ACCOUNTS.qualityLead.email);
-  });
-
   test("selecting a PCP narrows the roster to that panel and carries providerId in the URL", async ({ page }) => {
-    await page.goto("/compliance");
-    await expect(page.getByRole("heading", { name: /Individual Compliance/i })).toBeVisible({ timeout: 20_000 });
+    await openRoster(page);
 
     const before = await page.getByRole("row").count();
     expect(before, "the unfiltered roster must have rows for this to mean anything").toBeGreaterThan(1);
 
+    // Resolved by the select's own aria-label. Until 2026-09-08 these filters carried only a wrapping
+    // <label>, and Chrome computed no accessible name for them, so the lookup found nothing.
     const pcpSelect = page.getByLabel(/^PCP$/);
     await expect(pcpSelect).toBeVisible({ timeout: 10_000 });
     // The second option: the first is "All panels". Selected by VALUE so the assertion below is about
@@ -126,7 +110,6 @@ test.describe("Maui roster panel filters", () => {
     await pcpSelect.selectOption(providerId!);
 
     await expect(page).toHaveURL(new RegExp(`providerId=${providerId}`), { timeout: 20_000 });
-    // The chip row names the panel, and the roster is strictly smaller than the whole practice.
     await expect(page.getByText(/^Filtered to$/)).toBeVisible({ timeout: 20_000 });
     await expect.poll(async () => page.getByRole("row").count(), { timeout: 20_000 }).toBeLessThan(before);
 

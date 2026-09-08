@@ -379,6 +379,7 @@ export default function CompliancePage() {
           <label className="flex flex-col text-xs font-medium">
             <span className="mb-1">Status</span>
             <select
+              aria-label="Status"
               value={status}
               onChange={(e) => setStatusAndUrl(e.target.value)}
               className="rounded border border-neutral-300 bg-transparent px-2 py-1 text-sm dark:border-neutral-700"
@@ -390,6 +391,7 @@ export default function CompliancePage() {
           <label className="flex flex-col text-xs font-medium">
             <span className="mb-1">{SUBJECT.singular === "patient" ? "PCP" : "Provider"}</span>
             <select
+              aria-label={SUBJECT.singular === "patient" ? "PCP" : "Provider"}
               value={providerId}
               onChange={(e) => setSubjectFilter("providerId", e.target.value)}
               className="rounded border border-neutral-300 bg-transparent px-2 py-1 text-sm dark:border-neutral-700"
@@ -403,6 +405,7 @@ export default function CompliancePage() {
           <label className="flex flex-col text-xs font-medium">
             <span className="mb-1">Age</span>
             <select
+              aria-label="Age"
               value={ageBand}
               onChange={(e) => setSubjectFilter("ageBand", e.target.value)}
               className="rounded border border-neutral-300 bg-transparent px-2 py-1 text-sm dark:border-neutral-700"
@@ -414,6 +417,7 @@ export default function CompliancePage() {
           <label className="flex flex-col text-xs font-medium">
             <span className="mb-1">Sex</span>
             <select
+              aria-label="Sex"
               value={sex}
               onChange={(e) => setSubjectFilter("sex", e.target.value)}
               className="rounded border border-neutral-300 bg-transparent px-2 py-1 text-sm dark:border-neutral-700"
@@ -435,6 +439,7 @@ export default function CompliancePage() {
           <label className="flex flex-col text-xs font-medium">
             <span className="mb-1">Page size</span>
             <select
+              aria-label="Page size"
               value={pageSize}
               onChange={(e) => { setPage(1); setPageSize(Number(e.target.value)); }}
               className="rounded border border-neutral-300 bg-transparent px-2 py-1 text-sm dark:border-neutral-700"

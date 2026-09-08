@@ -269,7 +269,7 @@ async function aggregateCountsForRun(
   // case; when it is off, the first EVALUATED row settles it (`runProducedOfficialEvidence` — an errored
   // row carries no engine's evidence and is skipped, never read as "not official").
   const routedNow = isOfficialRouted(measureId, env as unknown as Record<string, unknown>);
-  const official = routedNow || (await runProducedOfficialEvidence(os, runId));
+  const official = routedNow || (await runProducedOfficialEvidence(os, runId, measureId));
   if (!official) {
     // The authored status histogram is single-rate by construction — it reduces workflow buckets, and
     // a measure with no official evidence has one rate. Wrapped so the return type is uniform. A status

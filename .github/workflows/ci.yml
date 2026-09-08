@@ -615,13 +615,19 @@ jobs:
     timeout-minutes: 45
     # The Maui project runs against a stack THIS RUNNER boots — backend on the SQLite floor with
     # WORKWELL_INSTANCE=maui, frontend built in patient terminology with the public-demo affordances
-    # off — so nothing shared is mutated and the allowlist never comes into play. It deliberately
-    # runs the authored cms122/cms125 (no WORKWELL_OFFICIAL_MEASURES): the official artifacts need
-    # the vendored terminology sidecars, which are fetched at build with a VSAC key this job does not
-    # have, and with no VSAC key at runtime the authored path resolves the bundled expansions and
-    # yields the same designed 38/7/3 distribution the tests assert. Browser e2e lives here rather
-    # than on a developer box because Chromium + two dev servers + a test worker exhaust a Windows
-    # desktop heap long before they exhaust RAM (measured 2026-09-02).
+    # off — so nothing shared is mutated and the allowlist never comes into play. Browser e2e lives
+    # here rather than on a developer box because Chromium + two dev servers + a test worker exhaust a
+    # Windows desktop heap long before they exhaust RAM (measured 2026-09-02).
+    #
+    # SINCE 2026-09-08 this job runs the ROUTED configuration — all six of the ACO's measures, the same
+    # WORKWELL_OFFICIAL_MEASURES the deployed sandbox ships (ADR-078) — by vendoring each measure's
+    # terminology sidecar with the VSAC credential, exactly as flip-gate.yml does. It previously ran
+    # authored cms122/cms125 with no VSAC key, which meant the suite's green was about a configuration
+    # nobody deploys: the four official-only measures sat `official-pending`, and the specs that
+    # enumerate them failed silently from 2026-09-06 (when #528 added them) until the next manual
+    # dispatch five days later. A stack that is not the one the pilot runs is not a pilot test.
+    env:
+      ROUTED_MEASURES: cms122,cms125,cms2,cms130,cms165,cms137
     steps:
       # backend-ts consumes @mieweb/cloud + @mieweb/cli from the external/mieweb-cloud submodule.
       - uses: actions/checkout@v7
@@ -636,19 +642,76 @@ jobs:
       - name: Install backend dependencies
         working-directory: backend-ts
         run: pnpm install --frozen-lockfile
+      # ---- The credentialed steps run HERE, before the frontend and e2e dependency trees are on disk.
+      # This job is public-repo CI, and the one exposure that is not covered by "workflow_dispatch needs
+      # write access" is supply chain: anything in an installed node_modules can read the environment of
+      # a step it runs in. The VSAC key is therefore scoped to a single step (never job-level `env`),
+      # and that step executes with the BACKEND tree only — not Chromium, not Next.js, not the e2e tree.
+      #
+      # The official artifacts retrieve through their OWN terminology (ADR-036), completed from a
+      # pinned VSAC release at vendor time. Without it the four official-only measures resolve capped
+      # expansions, read a zero initial population, and the stack reports them `official-pending`.
+      - name: Cache official content
+        uses: actions/cache@v6
+        with:
+          path: backend-ts/.official-content
+          key: official-content-${{ hashFiles('backend-ts/scripts/fetch-official-cases.ps1') }}
+      - name: Fetch official content (pinned commit)
+        working-directory: backend-ts
+        run: pwsh -NoProfile -File scripts/fetch-official-cases.ps1
+      # The completed sidecars are deliberately NOT cached. They are VSAC value-set expansions —
+      # licensed content, gitignored for that reason — and an Actions cache is restorable by other
+      # workflow runs in this PUBLIC repo, including a fork pull request whose code we do not control.
+      # Re-vendoring costs about a minute; putting licensed expansions somewhere fork-authored code can
+      # read them is not worth a minute.
+      - name: Vendor each routed measure's terminology, completed from VSAC
+        working-directory: backend-ts
+        env:
+          WORKWELL_VSAC_API_KEY: ${{ secrets.WORKWELL_VSAC_API_KEY_VENDOR }}
+        run: |
+          set -o pipefail
+          if [ -z "$WORKWELL_VSAC_API_KEY" ]; then
+            echo "::error::No VSAC credential in this context. This job asserts the ROUTED configuration; over capped expansions every official-only measure would read a zero initial population and the suite would call that a pass."
+            exit 1
+          fi
+          IFS=',' read -ra MEASURES <<< "$ROUTED_MEASURES"
+          for id in "${MEASURES[@]}"; do
+            NAME="$(pnpm exec tsx -e "import {officialMeasureName} from './src/standards/official-cases.ts'; process.stdout.write(officialMeasureName('${id}') ?? '')")"
+            if [ -z "$NAME" ]; then echo "::error::${id} is not an official measure id"; exit 1; fi
+            pnpm vendor:official --measure "$NAME" --catalog-id "$id" --strip-elm-annotations --complete-terminology
+            TRUNCATED=$(jq -r '.terminology.truncated | length' "measures/official/${id}/manifest.json")
+            if [ "$TRUNCATED" != "0" ]; then
+              echo "::error::${id}'s vendored terminology still reports ${TRUNCATED} TRUNCATED expansion(s) — refusing to run the suite against capped expansions."
+              exit 1
+            fi
+          done
+      # Only the gitignored sidecar may be new; the committed artifact must still match its pin.
+      - name: The committed artifacts are reproducible from their pins
+        working-directory: backend-ts
+        run: git diff --exit-code measures/official
+      # ---- End of the credentialed steps. Everything below runs with no VSAC key in scope.
+
       - name: Install frontend dependencies
         working-directory: frontend
         run: pnpm install --frozen-lockfile
+      - name: Cache Chromium
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ hashFiles('e2e/pnpm-lock.yaml') }}
       - name: Install e2e dependencies + Chromium
         working-directory: e2e
         run: |
           pnpm install --frozen-lockfile
           npx playwright install chromium --with-deps
+
       - name: Start the backend as Maui
         working-directory: backend-ts
         env:
           WORKWELL_INSTANCE: maui
           WORKWELL_AUTH_JWT_SECRET: maui-e2e-ci-secret-key-32-characters-minimum
+          # The configuration the sandbox deploys (deploy-maui-mieweb.yml), not a reduced stand-in.
+          WORKWELL_OFFICIAL_MEASURES: ${{ env.ROUTED_MEASURES }}
         run: |
           nohup pnpm dev > ../backend-maui.log 2>&1 &
           for i in $(seq 1 60); do
@@ -657,6 +720,46 @@ jobs:
             sleep 2
           done
           echo "::error::backend did not answer /api/version within 120s"; tail -50 ../backend-maui.log; exit 1
+      # The boot line names each measure's state, and this asserts the POSITIVE one: every routed
+      # measure must read `<id>:official`.
+      #
+      # Asserting the absence of `official-pending` instead does almost nothing, which is what the
+      # first version of this step did. `classifyRunnable` (config/deployment-profile.ts) returns
+      # `official-pending` for exactly one reason — the id is not named in WORKWELL_OFFICIAL_MEASURES —
+      # and for cms122/cms125 it cannot return it at all, because both are authored and the `authored`
+      # branch is reached first. So dropping those two ids from the routing list would print
+      # `cms122:authored,cms125:authored`, the negative grep would find nothing, and the suite would run
+      # the pilot's two flagship measures on the AUTHORED engine while the sandbox runs them officially.
+      # `runs.spec`'s 48 x 6 = 288 holds either way, so the job would be green on the wrong stack.
+      #
+      # Note what this can and cannot see: terminology is not part of the classification, so a capped or
+      # missing sidecar still reads `official` here. The control for THAT is the `truncated` check in the
+      # vendor step above, which refuses before the backend ever starts.
+      - name: Every routed measure actually routed
+        run: |
+          # The health check above returns as soon as the host listens, and the runnable= line is
+          # written just after that — so poll for it rather than reading a log that may still be a
+          # line short.
+          LINE=""
+          for _ in $(seq 1 15); do
+            LINE="$(grep -m1 'runnable=' backend-maui.log || true)"
+            [ -n "$LINE" ] && break
+            sleep 2
+          done
+          echo "$LINE"
+          [ -n "$LINE" ] || { echo "::error::the backend logged no runnable= line"; tail -50 backend-maui.log; exit 1; }
+          # The line is `[workwell] runnable=cms122:official,cms125:official,...`; drop everything up to
+          # and including `runnable=` so the FIRST token is a bare `<id>:<kind>` like the rest.
+          STATES="${LINE##*runnable=}"
+          IFS=',' read -ra MEASURES <<< "$ROUTED_MEASURES"
+          for id in "${MEASURES[@]}"; do
+            # -x on one token per line: an exact match, so `cms2` can never be satisfied by `cms2...`
+            # and `official` can never be satisfied by `official-pending`.
+            printf '%s' "$STATES" | tr ',' '\n' | grep -qx "${id}:official" || {
+              echo "::error::${id} did not boot 'official' — the suite would be testing a stack the pilot does not run"
+              exit 1
+            }
+          done
       - name: Build and start the frontend in patient mode
         working-directory: frontend
         env:
@@ -682,7 +785,9 @@ jobs:
           PLAYWRIGHT_PROFILE: maui
           PLAYWRIGHT_BASE_URL: http://localhost:3000
           PLAYWRIGHT_API_BASE_URL: http://localhost:8080
-        run: npx playwright test --project=maui --reporter=list,html
+        # Both Maui projects. `maui-writes` declares `dependencies: ["maui"]`, so the read-only specs
+        # all finish before the run-triggering one starts, whatever order these are named in.
+        run: npx playwright test --project=maui --project=maui-writes --reporter=list,html
       - name: Upload Playwright report and server logs
         uses: actions/upload-artifact@v7
         if: always()
