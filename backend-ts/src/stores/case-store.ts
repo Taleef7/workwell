@@ -37,7 +37,8 @@ export interface UpsertCaseInput {
   /**
    * The official logic evaluated this subject and found them OUTSIDE the initial population (ADR-078).
    * Never creates a case; resolves an active one with `closed_reason='OUT_OF_POPULATION'` (a system
-   * closure). The run pipeline sets it from the persisted official evidence; the status stays MISSING_DATA.
+   * closure). The run pipeline sets it from the executor's own `inInitialPopulation: false`, and only
+   * for an OFFICIALLY routed measure; the persisted status stays MISSING_DATA.
    */
   outOfPopulation?: boolean;
 }

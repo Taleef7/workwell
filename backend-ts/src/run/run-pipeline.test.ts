@@ -1599,3 +1599,28 @@ test("ADR-078: a subject the official logic finds OUTSIDE the initial population
   assert.equal(captured.filter((e) => e.eventType === "CASE_RESOLVED").length, 1, "the closure is audited");
   assert.equal(captured.filter((e) => e.eventType === "CASE_CREATED").length, 0);
 });
+
+test("ADR-078 is gated on official routing: an AUTHORED measure's out-of-population subject still opens a case", async () => {
+  // `deriveInInitialPopulation` emits the flag for authored measures too (their CQL has a boolean
+  // `Initial Population` define). Not enrolled in a hearing conservation program is a workflow fact whose
+  // case handling ADR-078 leaves alone — the closure is for the PUBLISHED logic's population only.
+  const db = await createSqliteD1(join(tmpdir(), `workwell-pipeline-oop-authored-${crypto.randomUUID()}.sqlite`));
+  await db.exec(RUN_STORE_FLOOR_DDL.replace(/\n/g, " "));
+  const caseStore = new SqliteCaseStore(db);
+  const deps: RunPipelineDeps = {
+    runStore: new SqliteRunStore(db),
+    outcomeStore: new SqliteOutcomeStore(db),
+    caseStore,
+    engine: {
+      evaluate: async () => ({ outcome: "MISSING_DATA", evidence: { expressionResults: [{ define: "Initial Population", result: false }] }, inInitialPopulation: false }),
+      logicVersionFor: () => "sha256:authored",
+    } as unknown as RunPipelineDeps["engine"],
+    employees: EMPLOYEES.slice(0, 1),
+    actor: "cm@workwell.dev",
+    events: { async appendAudit() {} },
+  };
+  await executeManualRun(deps, { scopeType: "MEASURE", measureId: "audiogram", triggeredBy: "test" });
+  const cases = await caseStore.listCases({ limit: 10 });
+  assert.equal(cases.length, 1, "the authored engine's flag does not suppress the case");
+  assert.equal(cases[0]!.status, "OPEN");
+});

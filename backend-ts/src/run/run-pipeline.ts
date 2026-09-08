@@ -870,10 +870,15 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
             (await deps.engine.evaluate({ measureId: item.measureId, patientBundle: bundle, evaluationDate: evalDate }));
           status = result.outcome;
           evidence = result.evidence;
-          // Read off the executor's own flag, not re-derived from evidence: the authored engine never
-          // sets it, so an authored MISSING_DATA keeps opening a case (it means "no record"), while an
-          // official `false` means the logic ran and the subject is not the measure's concern (ADR-078).
-          outOfPopulation = result.inInitialPopulation === false;
+          // Read off the executor's own flag, and ONLY for an officially routed measure (ADR-078). The
+          // authored engine sets the flag too — `deriveInInitialPopulation` emits it for every measure
+          // with a boolean `Initial Population` define, which is all of them (see the ADR-043 gate below
+          // for the same lesson) — but an authored "not in the initial population" is a workflow fact
+          // (not enrolled in the hearing conservation program) whose case handling is unchanged. An
+          // official `false` means the published logic ran and the subject is not the measure's concern.
+          outOfPopulation =
+            result.inInitialPopulation === false &&
+            (deps.engine.logicVersionFor?.(item.measureId)?.startsWith(OFFICIAL_LOGIC_VERSION_PREFIX) ?? false);
           // ADR-043 — record membership from the FINAL outcome, whichever path produced it (batch prefetch
           // or the individual fallback on this line). Reading it here rather than in the pre-pass is what
           // makes the roster complete before it is judged. A failed evaluation lands in `catch` below and
