@@ -34,6 +34,12 @@ export interface UpsertCaseInput {
    * multi-rate measure (ADR-074: the rate the subject missed); never persisted by the case store.
    */
   evidence?: unknown;
+  /**
+   * The official logic evaluated this subject and found them OUTSIDE the initial population (ADR-078).
+   * Never creates a case; resolves an active one with `closed_reason='OUT_OF_POPULATION'` (a system
+   * closure). The run pipeline sets it from the persisted official evidence; the status stays MISSING_DATA.
+   */
+  outOfPopulation?: boolean;
 }
 
 /**

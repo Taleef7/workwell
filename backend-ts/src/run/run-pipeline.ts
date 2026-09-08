@@ -810,6 +810,8 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
       plan: Awaited<ReturnType<NonNullable<typeof incremental>["plan"]>> | null;
       evaluatedNow: boolean;
       evaluationFailed: boolean;
+      /** The executor said this subject is OUTSIDE the initial population (ADR-078): a result, never a case. */
+      outOfPopulation: boolean;
     }
     const pending: PendingOutcome[] = [];
     for (const item of chunkItems) {
@@ -840,6 +842,7 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
         : null;
       let evaluatedNow = true; // false ⇒ copied forward; true ⇒ a real (or attempted) CQL evaluation
       let evaluationFailed = false;
+      let outOfPopulation = false;
       // A failed batch outranks a cache hit. Unreachable today — ADR-040 §6 means an official-routed
       // measure is never reused, so a measure that could fail a batch never produces a `reuse` plan — but
       // the ordering is the difference between "wasteful" and "wrong" if that policy is lifted: a reused
@@ -862,6 +865,10 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
             (await deps.engine.evaluate({ measureId: item.measureId, patientBundle: bundle, evaluationDate: evalDate }));
           status = result.outcome;
           evidence = result.evidence;
+          // Read off the executor's own flag, not re-derived from evidence: the authored engine never
+          // sets it, so an authored MISSING_DATA keeps opening a case (it means "no record"), while an
+          // official `false` means the logic ran and the subject is not the measure's concern (ADR-078).
+          outOfPopulation = result.inInitialPopulation === false;
           // ADR-043 — record membership from the FINAL outcome, whichever path produced it (batch prefetch
           // or the individual fallback on this line). Reading it here rather than in the pre-pass is what
           // makes the roster complete before it is judged. A failed evaluation lands in `catch` below and
@@ -884,7 +891,7 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
           evaluationFailed = true;
         }
       }
-      pending.push({ item, period, status, evidence, plan, evaluatedNow, evaluationFailed });
+      pending.push({ item, period, status, evidence, plan, evaluatedNow, evaluationFailed, outOfPopulation });
     }
     // Invariant 7 / memory: this chunk's bundles are released here, before anything else happens and
     // certainly before the next chunk is built.
@@ -927,7 +934,7 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
     planned.progress.failures = failures;
 
     for (const [index, entry] of pending.entries()) {
-      const { item, period, status, evidence, plan, evaluatedNow, evaluationFailed } = entry;
+      const { item, period, status, evidence, plan, evaluatedNow, evaluationFailed, outOfPopulation } = entry;
       const recorded = records[index]!;
       // #263: cache the fingerprint of a SUCCESSFUL real evaluation so a future run can reuse it. Never
       // cache an engine-failure MISSING_DATA (we must not copy an error forward), and never re-cache a
@@ -950,9 +957,17 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
       // (subject, measure, period) key (a fresh waiver excuses an existing open case), because EXCLUDED
       // with NO existing case would INSERT a new EXCLUDED case and re-pollute the gate. The outcome above
       // is ALWAYS persisted (CQL is the sole compliance authority — ADR-008). Empty/absent segments ⇒ all.
+      const caseKey = `${item.employee.externalId}|${item.measureId}|${period}`;
+      // (3) OUT OF THE INITIAL POPULATION (ADR-078) — the same close-only shape as EXCLUDED: a subject the
+      // official logic found outside the measure's population never opens a case, and an active one (they
+      // were in the population last period, or were carded before this rule) is closed by the system
+      // under `OUT_OF_POPULATION`. Until 2026-09-08 this was ADR-043's recorded fan-out: every
+      // non-diabetic opened a MEDIUM CMS122 case, and six routed measures made that the worklist.
       const closeOnly =
         status === "COMPLIANT" ||
-        (status === "EXCLUDED" && activeCaseKeys.has(`${item.employee.externalId}|${item.measureId}|${period}`));
+        (status === "EXCLUDED" && activeCaseKeys.has(caseKey)) ||
+        (outOfPopulation && activeCaseKeys.has(caseKey));
+      const outOfPopulationWithNoCase = outOfPopulation && !activeCaseKeys.has(caseKey);
       // Live WebChart subjects are display-applicable (their roster cells show real chips) but must NOT
       // OPEN cases: rerun-to-verify returns a non-mutating 409 for `wc|` subjects until fetch-one-patient
       // lands, so a newly-created wc case would be un-closeable. Case CREATION eligibility is therefore
@@ -982,13 +997,13 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
         (applicableMemo ??= isApplicable(item.employee, item.measureId, deps.segments ?? []));
       // `wc|` subjects are excluded deliberately, not by oversight: they never open cases at all (the
       // rerun-to-verify 409 above), so counting them here would report a gap no segment edit can close.
-      if (!closeOnly && !isLiveWebChartSubject && NON_COMPLIANT.has(status) && !segmentApplicable()) {
+      if (!closeOnly && !outOfPopulation && !isLiveWebChartSubject && NON_COMPLIANT.has(status) && !segmentApplicable()) {
         gatedBySegment.evaluations++;
         gatedBySegment.subjects.add(item.employee.externalId);
         if (gatedBySegment.sites.size < 12) gatedBySegment.sites.add(item.employee.site ?? "(no site)");
         gatedBySegment.measures.add(item.measureId);
       }
-      if (deps.caseStore && (closeOnly || (!isLiveWebChartSubject && segmentApplicable()))) {
+      if (deps.caseStore && !outOfPopulationWithNoCase && (closeOnly || (!isLiveWebChartSubject && segmentApplicable()))) {
         const upserted = await deps.caseStore.upsertFromOutcome({
           runId: runId,
           subjectId: item.employee.externalId,
@@ -996,6 +1011,7 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
           evaluationPeriod: period,
           outcomeStatus: status,
           evidence,
+          outOfPopulation,
         });
         // Audit the case transition (Fable H1 — the population pipeline previously wrote NO case audit
         // events, violating the "every state change writes audit_event" hard rule). Idempotent

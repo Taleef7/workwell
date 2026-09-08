@@ -313,3 +313,15 @@ test("an absence of data is a CARD, and it does not claim compliance", async () 
   assert.doesNotMatch(card.detail!, /\bcompliant\b(?!\.)/i);
   assert.equal(card.suggestions, undefined);
 });
+
+test("a subject the official logic found OUTSIDE the initial population gets no card (ADR-078)", async () => {
+  const outside = row("cms122", "MISSING_DATA", {
+    evidence: { expressionResults: [], official: { populationResults: { ipp: false, denom: false, denex: false, numer: false, denexcep: false } } },
+  });
+  assert.deepEqual(await buildComplianceCards([outside], opts()), [], "MISSING_DATA outside the population is a result, not a gap");
+  // In the population and missing data is still a gap, and still carded.
+  const inside = row("cms122", "MISSING_DATA", {
+    evidence: { expressionResults: [], official: { populationResults: { ipp: true, denom: true, denex: false, numer: false, denexcep: false } } },
+  });
+  assert.equal((await buildComplianceCards([inside], opts())).length, 1);
+});

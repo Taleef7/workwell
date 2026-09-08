@@ -119,13 +119,13 @@ plan, ADR-070 drives it, and the owner decisions are `LOCKED_DECISIONS.md` §4A 
 retelling. Naming policy: repo documents say "Maui" and "the pilot group" only.
 - **MM-0 shipped** (#496–#500). **MM-1 is in progress:** U1 (#526, ADR-072 — the runnable rule, the
   calendar measurement period, the flip gate) and U2 (#528, ADR-073/074/075 — the 20,000-patient
-  corpus, multi-rate execution, outcome retention) merged 2026-09-05/06. Maui routes cms122 + cms125;
-  cms2, cms130, cms165 and cms137 are `official-pending` until MM-1c's second-engine sweep and a
-  `flip-gate` run clear each one. **No known-unverified measure is routed to the pilot**, the flip is a
-  reviewed workflow edit (ADR-045), and **cms165 must not be routed** until real blood pressures are
-  profile-stamped at ingest (ADR-076 d1 made profile trust per-measure, which is half the fix;
-  `MEASURES.md` and issue #533 carry the other half). U3 (#529) and the MM-1 open-flag work of
-  2026-09-07 (ADR-076, issues #530–#537) are the newest entries — read `docs/JOURNAL.md`, not this line.
+  corpus, multi-rate execution, outcome retention) merged 2026-09-05/06. **Since 2026-09-08 (ADR-078,
+  owner decision) the Maui sandbox routes the ACO's whole computable set — cms122, cms125, cms2,
+  cms130, cms165 and cms137.** The flip is a reviewed workflow edit (ADR-045). Two caveats travel with
+  it and govern the PHI phase, not the sandbox: cms165 runs on the corpus's stamped profiles and needs
+  real blood pressures profile-stamped at ingest before real data (issue #533's ingest half); cms137
+  stays routed unless the final rule removes Quality ID 305. An out-of-population official outcome no
+  longer opens a case (ADR-078 d2). Read `docs/JOURNAL.md` for the newest entries, not this line.
 - MM-2/3/4 are blocked on externals (ROADMAP §7). The milestones deliver a **sandbox**; the pilot's
   production/PHI phase is a separate `PRODUCTION_READINESS`-gated decision nothing in M-M authorizes.
 - M-C (packaging) is complete and published; M-E1 (occupational content) is deferred behind M-M, not

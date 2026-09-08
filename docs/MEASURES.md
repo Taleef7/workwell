@@ -21,12 +21,13 @@ Runnable (full CQL): **14** — 4 OSHA + 5 HEDIS + 3 immunization panel + 2 CMS 
 (`cms2`, `cms130`, `cms165`, and since 2026-09-06 `cms137` — the Draft `cms137v14` placeholder was retired
 into it by the ADR-071 seed, the way `cms2v15` was) have no authored CQL and no synthetic binding: they are
 runnable only where the deployment names them in `WORKWELL_OFFICIAL_MEASURES`, and `classifyRunnable`
-reports them as `official-pending` everywhere else. Today that is **nowhere** — the Maui profile lists all
-six pilot measures, but only `cms122` and `cms125` are routed, so CMS2, CMS130, CMS165 and CMS137 are
-Active, gated and still not executing. All four pass their full MADiE deck against the runtime (36/36,
-64/64, 68/68 and 45/45, zero errors), so what remains is the MM-1c second-engine sweep and a `flip-gate`
-run where the terminology sidecar resolves — without it every value set expands empty and the gate reports
-a zero initial population (locked decision §4A.5). **CMS137 is multi-rate** (Initiation and Engagement,
+reports them as `official-pending` everywhere else. **Since 2026-09-08 the Maui sandbox routes all
+six** (ADR-078, owner decision): cms122, cms125, cms2, cms130, cms165 and cms137, so CMS2, CMS130,
+CMS165 and CMS137 are Active, gated AND executing there; TWH still routes cms122 and cms125 only. All
+four pass their full MADiE deck against the runtime (36/36, 64/64, 68/68 and 45/45, zero errors); cms2's
+whole-roster gate reads 17,795 of 20,000 in the initial population and 5,413 actionable
+(`docs/evidence/FLIP_GATE_2026-09-08_CMS2.md`), and the credentialed gates for cms130 and cms165 run
+through `.github/workflows/flip-gate.yml`. **CMS137 is multi-rate** (Initiation and Engagement,
 ADR-074): one catalog row, one outcome per patient reduced to the worst rate, and every rate persisted and
 exported — and the roster cell, the case detail, the case's next action and the CDS card name the rate the
 patient actually missed ("without treatment initiation within 14 days" or "initiated but not engaged
@@ -41,8 +42,8 @@ banked (2026-09-07):** `flip-gate --measure cms137 --subjects all` over all 20,0
 both rates alive (numerators 231 and 81) and the effectivePeriod covering the measured year — evidence
 FOR the flip on the full roster, not a 2,000-subject sample
 (`docs/evidence/FLIP_GATE_2026-09-07_CMS137.md`).
-Its flip remains the owner's workflow edit, sequenced after cms2 and cms130 (ADR-072 D1), and the 2027
-pilot year still needs the MM-1d re-vendor.
+Its flip landed with the others on 2026-09-08 (ADR-078); it is un-routed by the same workflow edit if the
+final rule removes Quality ID 305, and the 2027 pilot year still needs the MM-1d re-vendor.
 
 **CMS2's verification debt is paid (2026-09-07).** Its seven cross-engine disagreements, open and
 unexplained since 2026-08-04, are proven to one cause: the Java engine takes a medication order's start
@@ -87,7 +88,10 @@ is **362 of 387 across eight measures**, CMS165 deliberately excluded.
 > And CMS165's own cross-engine sweep is unexplained (#532). The failure mode is louder now, though not unconditionally: the batch-level retrieve refusal fires
 > only for a roster of more than one subject, so a nightly run would refuse while `/simulate` and
 > rerun-to-verify would quietly return MISSING_DATA. Better than a plausible wrong number, and not a
-> guarantee. **Do not route cms165.**
+> guarantee. **cms165 is routed on the SANDBOX since 2026-09-08 (ADR-078)** — it runs there because the
+> corpus stamps every profile it retrieves and #539 stamps a blood pressure from its own codes — and
+> **must not be routed over WebChart data** until the ingest half of #533 (every QI-Core profile stamped
+> at ingest, BP status arriving final) is closed. That condition now sits in the PHI readiness gate.
 
 **An officially routed measure is scored over the calendar year** containing the evaluation date, not a
 rolling 365-day window (ADR-072). The vendored artifacts are a **2026 vintage** and the pilot year is 2027,

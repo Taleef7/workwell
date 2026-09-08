@@ -88,6 +88,7 @@ export class SqliteCaseStore implements CaseStore {
       existing ? { status: existing.status, currentOutcomeStatus: existing.current_outcome_status, closedBy: existing.closed_by } : null,
       input.outcomeStatus,
       now,
+      { outOfPopulation: input.outOfPopulation },
     );
     if (plan.op === "noop") return null;
 
@@ -126,6 +127,7 @@ export class SqliteCaseStore implements CaseStore {
         existing ? { status: existing.status, currentOutcomeStatus: existing.current_outcome_status, closedBy: existing.closed_by } : null,
         input.outcomeStatus,
         now,
+        { outOfPopulation: input.outOfPopulation },
       );
       // The winner of the race may have written an operator-owned action between our read and theirs.
       action = planNextAction(
@@ -195,6 +197,7 @@ export class SqliteCaseStore implements CaseStore {
         { status: existing.status, currentOutcomeStatus: existing.current_outcome_status, closedBy: existing.closed_by },
         input.outcomeStatus,
         now,
+        { outOfPopulation: input.outOfPopulation },
       );
       if (plan.op !== "update") return null;
       action = planNextAction(

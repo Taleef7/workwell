@@ -18,6 +18,60 @@
 >
 > **Sequence note:** ADR-033 does not exist — verified absent, and the number must not be reused.
 
+## ADR-078: the sandbox routes the ACO's whole computable set — and a subject outside a measure's population is a result, not a case
+
+**Date:** 2026-09-08. **Status:** accepted — an OWNER decision, recorded in `LOCKED_DECISIONS.md` §4A.2
+as a SINCE note. Amends ADR-043 (the case fan-out it recorded) and reads ADR-072's cms165 consequence
+and §4A.5's "known-unverified" bar as governing the PHI phase.
+
+### Context
+
+Eight days before the pilot group's quality lead was told the sandbox held her ACO's measure set, it
+showed two. cms2, cms130, cms165 and cms137 were vendored, MADiE-gated (36/36, 64/64, 68/68, 45/45),
+runnable under ADR-072, and unrouted, each waiting on a sequenced precondition: cms2's seven
+cross-engine disagreements (diagnosed 2026-09-07, #538), cms130's sweep (63/64, #539), cms137's flip
+after those two and after the final rule on Quality ID 305, and cms165's WebChart ingest half (#533).
+The owner's priority is every measure the pilot group sent us working and visible in the sandbox, and
+the sandbox evaluates a generated corpus, not WebChart data.
+
+Routing all six exposed the second problem at scale. An official outcome outside the initial
+population persists as MISSING_DATA and, through `dispositionFor`, opened a MEDIUM "collect the
+documentation" case — ADR-043 recorded this as "real operational noise" and left it. With two measures
+it was 16,581 open cases, 91–97 % of them patients the measure does not concern; with six it would have
+been the whole worklist.
+
+### Decision
+
+1. **The Maui sandbox routes cms122, cms125, cms2, cms130, cms165 and cms137** (`deploy-maui-mieweb.yml`
+   and `reconcile-maui-mieweb.yml`, which must agree). Evidence attached to the flip: cms2's whole-roster
+   gate (36/36, 17,795/20,000 in the initial population, 5,413 actionable, 0 errors), cms137's
+   (`docs/evidence/FLIP_GATE_2026-09-07_CMS137.md`), the cross-engine sweeps, and the credentialed
+   gates for cms130 and cms165 run through the new `flip-gate.yml` workflow, because their pinned
+   sidecars are VSAC-completed and do not resolve locally.
+2. **A subject the executor finds outside the initial population never opens a case.** The pipeline
+   reads the executor's own `inInitialPopulation: false` — never re-derived from evidence, so an
+   authored MISSING_DATA ("no record") keeps opening cases — and treats it as a close-only outcome:
+   no case where none exists; an active case is closed by the system with
+   `closed_reason='OUT_OF_POPULATION'`, audited `CASE_RESOLVED`, reopenable by a later in-population
+   outcome. The CDS card surface applies the same rule off the persisted evidence. The outcome row is
+   unchanged: CQL stays the authority (ADR-008), and the roster shows OUT_OF_POPULATION (ADR-077 d7).
+3. **The two conditions the locked decision named move to the PHI phase.** cms137 stays routed on
+   the sandbox unless the final rule removes 305, at which point it is un-routed by the same workflow
+   edit. cms165 runs on the corpus's stamped profiles (ADR-076 d1, #539); before real data it needs
+   every QI-Core profile it retrieves stamped at ingest and WebChart's BP status to arrive final
+   (#533). Neither is a sandbox blocker, and both are written into the PHI readiness gate.
+
+### Consequences
+
+- The nightly run evaluates 120,000 subject-measure pairs instead of 40,000. The first such run is the
+  measurement; if it does not fit the anchor window the chunk size and the anchor hour are the knobs.
+- Existing out-of-population cases on the sandbox — roughly 15,000 — are closed by the first run after
+  deploy under `OUT_OF_POPULATION`, each with an audit event. That is one large ledger write, once.
+- cms165's cross-engine number is still open (#532). Routing it on the sandbox does not settle that
+  question and does not claim to; the measure's own MADiE deck is the verification it carries.
+- The flip gate is now runnable where its sidecars resolve (`flip-gate.yml`), which removes the
+  "run it somewhere credentialed" instruction from the runbook's list of things a person has to know.
+
 ## ADR-077: a report is refused rather than rendered from rows that may be incomplete — and a dashboard rate is the evidence's rate, shown apart from the workflow's
 
 **Status:** Accepted (2026-09-08). Amends ADR-031, ADR-073 and ADR-074 d12.

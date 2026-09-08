@@ -111,6 +111,7 @@ jobs:
           node scripts/vendor-official-measure.mjs --measure CMS138FHIRTobaccoScrnCessation --catalog-id cms138 --strip-elm-annotations --complete-terminology
           node scripts/vendor-official-measure.mjs --measure CMS130FHIRColorectalCancerScrn --catalog-id cms130 --strip-elm-annotations --complete-terminology
           node scripts/vendor-official-measure.mjs --measure CMS165FHIRControllingHighBP --catalog-id cms165 --strip-elm-annotations --complete-terminology
+          node scripts/vendor-official-measure.mjs --measure CMS137FHIRSUDTxInitEngagement --catalog-id cms137 --strip-elm-annotations --complete-terminology
       # The vendored artifact must not have changed — only the gitignored sidecar is new. A non-empty
       # diff means the committed bundle does not match its pin, which must never reach a deploy image.
       - name: The committed artifact is reproducible from its pin
@@ -276,7 +277,11 @@ jobs:
                 {key: "WORKWELL_INSTANCE", value: "maui"},
                 {key: "WORKWELL_SCHEDULER_ENABLED", value: "true"},
                 {key: "WORKWELL_VSAC_API_KEY", value: $vsac_api_key},
-                {key: "WORKWELL_OFFICIAL_MEASURES", value: "cms122,cms125"},
+                # THE FLIP (ADR-045; ADR-078, owner decision 2026-09-08): the sandbox routes the ACO's whole
+                # computable set. cms2/cms130/cms137 have their second-engine evidence; cms165 runs on the
+                # corpus's stamped profiles (trustMetaProfile per measure, ADR-076 d1) and its WebChart
+                # ingest caveat governs the PHI phase, not the sandbox. reconcile-maui-mieweb.yml MUST match.
+                {key: "WORKWELL_OFFICIAL_MEASURES", value: "cms122,cms125,cms2,cms130,cms165,cms137"},
                 {key: "WORKWELL_MAUI_CORPUS_SIZE", value: "20000"},
                 {key: "WORKWELL_RUN_CHUNK_SIZE", value: "500"},
                 {key: "WORKWELL_SCHEDULER_ANCHOR_HOUR_UTC", value: "12"},

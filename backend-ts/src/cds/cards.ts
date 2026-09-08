@@ -20,6 +20,7 @@
 import { deriveCell } from "../compliance/roster-vocabulary.ts";
 import { deriveWhyFlagged } from "../case/case-detail-read-model.ts";
 import { dispositionFor, nextActionFor, priorityFor } from "../case/case-logic.ts";
+import { officialMembership } from "../fhir/measure-report.ts";
 import { MEASURE_CATALOG } from "../measure/measure-catalog.ts";
 import { proposeOrders } from "../order/order-proposal.ts";
 import { dedupeKeyFor, toServiceRequest, type ProposedOrder } from "../order/proposed-order.ts";
@@ -250,7 +251,12 @@ export async function buildComplianceCards(
   rows: readonly CardInput[],
   opts: CardOptions,
 ): Promise<CdsCard[]> {
-  const open = rows.filter((r) => dispositionFor(r.status) === "OPEN" && !isDeprecated(r.measureId));
+  // A subject the official logic found OUTSIDE the initial population gets no card (ADR-078): their
+  // MISSING_DATA is a result, and a card telling a clinician to "check eligibility" for a patient the
+  // measure does not concern is the noise ADR-067's card surface exists to avoid.
+  const open = rows.filter(
+    (r) => dispositionFor(r.status) === "OPEN" && !isDeprecated(r.measureId) && officialMembership(r.evidence)?.ipp !== false,
+  );
   if (open.length === 0) return [];
 
   // ONE `proposeOrders` call for the whole subject, so its in-batch dedupe applies: two measures mapping
