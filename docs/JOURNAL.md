@@ -1,5 +1,38 @@
 # Journal
 
+## 2026-09-08 (later) — all six measures on the sandbox, and a patient outside a measure is not a case (ADR-078)
+
+The owner looked at the programs page with two measure cards on it and asked why, when the pilot
+group sent us six. The honest answer was sequencing: cms2, cms130, cms165 and cms137 were vendored,
+gated against MADiE, runnable since ADR-072, and each parked behind a precondition I had set — cms2's
+disagreements (diagnosed yesterday), cms130's sweep (done yesterday), cms137's order in the queue and
+the final rule on 305, and cms165's WebChart ingest half. The owner's decision is that a sandbox on a
+generated corpus should show the pilot group its whole set now, and that the conditions I was holding
+the flips on are conditions on real data. Recorded as ADR-078 and a SINCE note in the locked decisions.
+
+**The flip is the workflow edit ADR-045 says it is**, in both Maui workflows, plus CMS137 added to the
+deploy's vendor step (it was the one pilot measure the build did not vendor). cms2's gate over all
+20,000 corpus patients reads 36/36 MADiE, 17,795 in the initial population, 5,413 actionable, zero
+errors (`docs/evidence/FLIP_GATE_2026-09-08_CMS2.md`); cms137's was banked yesterday. cms130 and cms165
+pin VSAC-completed sidecars that do not resolve on a laptop, so the gate for them now runs where the
+credential is: a manual `flip-gate.yml` workflow that vendors with the secret, sweeps the roster and
+uploads the report. That removes a "run it somewhere credentialed" instruction that only existed in
+prose.
+
+**Routing six measures made ADR-043's noise the worklist.** An official outcome outside the initial
+population persists as MISSING_DATA and opened a MEDIUM case, so 91–97 % of the sandbox's 16,581 open
+cases were patients the measure does not concern — every non-diabetic on CMS122, every man on CMS125.
+The pipeline now reads the executor's own `inInitialPopulation: false` and treats it as close-only:
+no case where none exists, and an active one closed by the system under `OUT_OF_POPULATION`, audited,
+reopenable. The CDS card surface applies the same rule. The authored engine never sets the flag, so an
+authored MISSING_DATA still means "no record" and still opens a case. The first run after deploy will
+close roughly fifteen thousand cases in one pass; that is the ledger doing its job once.
+
+**What the flip does not settle.** cms165's cross-engine number is still an open question (#532), and
+its ingest half (#533) now gates the PHI phase rather than the sandbox. cms137 comes off again by the
+same edit if the final rule removes 305. The nightly run is now 120,000 pairs; the first one is the
+measurement.
+
 ## 2026-09-08 — the numbers a quality lead can see are true or refused (ADR-077)
 
 An external review of the Maui sandbox, taken against `564d5d93`, found four ways a number could be

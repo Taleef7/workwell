@@ -207,7 +207,7 @@ jobs:
                 # and cms122/cms125 quietly revert to authored CQL with no signal anywhere. Caught by
                 # Codex on #356 before it could happen; `official-flip-config.test.ts` now asserts the two
                 # workflows agree, so this pair cannot drift again.
-                {key: "WORKWELL_OFFICIAL_MEASURES", value: "cms122,cms125"},
+                {key: "WORKWELL_OFFICIAL_MEASURES", value: "cms122,cms125,cms2,cms130,cms165,cms137"},
                 {key: "WORKWELL_MAUI_CORPUS_SIZE", value: "20000"},
                 {key: "WORKWELL_RUN_CHUNK_SIZE", value: "500"},
                 {key: "WORKWELL_SCHEDULER_ANCHOR_HOUR_UTC", value: "12"},

@@ -222,3 +222,26 @@ test("official-routed nextActionFor reads the official display table first", () 
     else process.env.WORKWELL_OFFICIAL_MEASURES = prior;
   }
 });
+
+test("planCaseUpsert: a subject OUTSIDE the initial population never opens a case, and closes an active one under its own reason (ADR-078)", () => {
+  const NOW = "2026-09-08T12:00:00.000Z";
+  const out = { outOfPopulation: true };
+  assert.deepEqual(planCaseUpsert(null, "MISSING_DATA", NOW, out), { op: "noop" }, "no case exists → nothing to open");
+  assert.deepEqual(
+    planCaseUpsert({ status: "OPEN", currentOutcomeStatus: "MISSING_DATA", closedBy: null }, "MISSING_DATA", NOW, out),
+    { op: "update", disposition: "RESOLVED", status: "RESOLVED", closedAt: NOW, closedReason: "OUT_OF_POPULATION", closedBy: null },
+    "an active case is closed by the system, with the reason that says why",
+  );
+  assert.deepEqual(
+    planCaseUpsert({ status: "IN_PROGRESS", currentOutcomeStatus: "OVERDUE", closedBy: null }, "MISSING_DATA", NOW, out),
+    { op: "update", disposition: "RESOLVED", status: "RESOLVED", closedAt: NOW, closedReason: "OUT_OF_POPULATION", closedBy: null },
+    "IN_PROGRESS too: an operator was working a patient the measure does not concern",
+  );
+  assert.deepEqual(
+    planCaseUpsert({ status: "RESOLVED", currentOutcomeStatus: "COMPLIANT", closedBy: "someone" }, "MISSING_DATA", NOW, out),
+    { op: "noop" },
+    "a closed case stays closed — no closed_at drift",
+  );
+  // Without the flag the same status keeps opening cases: in-population MISSING_DATA is still a gap.
+  assert.equal(planCaseUpsert(null, "MISSING_DATA", NOW).op, "insert");
+});

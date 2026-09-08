@@ -1554,3 +1554,73 @@ test("measureDisplayName resolves an official-only measure that has no authored-
   // A genuinely unknown id degrades to itself rather than throwing.
   assert.equal(measureDisplayName("not-a-measure"), "not-a-measure");
 });
+
+test("ADR-078: a subject the official logic finds OUTSIDE the initial population opens no case, and an existing one is closed under OUT_OF_POPULATION", async () => {
+  const db = await createSqliteD1(join(tmpdir(), `workwell-pipeline-oop-${crypto.randomUUID()}.sqlite`));
+  await db.exec(RUN_STORE_FLOOR_DDL.replace(/\n/g, " "));
+  const caseStore = new SqliteCaseStore(db);
+  const captured: { eventType: string; payload?: unknown }[] = [];
+  // Two subjects on one measure. The first is a gap in the population; the second the logic evaluated
+  // and found outside it (a non-diabetic on a diabetes measure): same MISSING_DATA bucket, opposite meaning.
+  let outsideIds = new Set<string>();
+  const deps: RunPipelineDeps = {
+    runStore: new SqliteRunStore(db),
+    outcomeStore: new SqliteOutcomeStore(db),
+    caseStore,
+    engine: {
+      evaluate: async (input: { measureId: string; patientBundle: unknown }) => {
+        const id = (input.patientBundle as { entry: Array<{ resource: { id: string } }> }).entry[0]!.resource.id;
+        return outsideIds.has(id)
+          ? { outcome: "MISSING_DATA", evidence: { official: { populationResults: { ipp: false, denom: false, numer: false, denex: false, denexcep: false } } }, inInitialPopulation: false }
+          : { outcome: "OVERDUE", evidence: { official: { populationResults: { ipp: true, denom: true, numer: false, denex: false, denexcep: false } } }, inInitialPopulation: true };
+      },
+      logicVersionFor: () => "official-fqm:1.0.000:artifact:terminology",
+    } as unknown as RunPipelineDeps["engine"],
+    employees: EMPLOYEES.slice(0, 2),
+    actor: "cm@workwell.dev",
+    events: { async appendAudit(input) { captured.push({ eventType: input.eventType, payload: input.payload }); } },
+  };
+  const [first, second] = EMPLOYEES.slice(0, 2).map((e) => e.externalId) as [string, string];
+  outsideIds = new Set([second]);
+  await executeManualRun(deps, { scopeType: "MEASURE", measureId: "audiogram", triggeredBy: "test" });
+  const after1 = await caseStore.listCases({ limit: 100 });
+  assert.deepEqual(after1.map((c) => c.employeeId).sort(), [first], "only the in-population gap opened a case");
+  assert.equal(captured.filter((e) => e.eventType === "CASE_CREATED").length, 1);
+
+  // Next run the first subject has left the population too: their case is closed by the system, audited.
+  outsideIds = new Set([first, second]);
+  captured.length = 0;
+  await executeManualRun(deps, { scopeType: "MEASURE", measureId: "audiogram", triggeredBy: "test" });
+  const after2 = await caseStore.listCases({ limit: 100 });
+  assert.equal(after2.length, 1, "no new case for either subject");
+  assert.equal(after2[0]!.status, "RESOLVED");
+  assert.equal(after2[0]!.closedReason, "OUT_OF_POPULATION");
+  assert.equal(after2[0]!.closedBy, null, "a system closure, so a later in-population outcome may reopen it");
+  assert.equal(captured.filter((e) => e.eventType === "CASE_RESOLVED").length, 1, "the closure is audited");
+  assert.equal(captured.filter((e) => e.eventType === "CASE_CREATED").length, 0);
+});
+
+test("ADR-078 is gated on official routing: an AUTHORED measure's out-of-population subject still opens a case", async () => {
+  // `deriveInInitialPopulation` emits the flag for authored measures too (their CQL has a boolean
+  // `Initial Population` define). Not enrolled in a hearing conservation program is a workflow fact whose
+  // case handling ADR-078 leaves alone — the closure is for the PUBLISHED logic's population only.
+  const db = await createSqliteD1(join(tmpdir(), `workwell-pipeline-oop-authored-${crypto.randomUUID()}.sqlite`));
+  await db.exec(RUN_STORE_FLOOR_DDL.replace(/\n/g, " "));
+  const caseStore = new SqliteCaseStore(db);
+  const deps: RunPipelineDeps = {
+    runStore: new SqliteRunStore(db),
+    outcomeStore: new SqliteOutcomeStore(db),
+    caseStore,
+    engine: {
+      evaluate: async () => ({ outcome: "MISSING_DATA", evidence: { expressionResults: [{ define: "Initial Population", result: false }] }, inInitialPopulation: false }),
+      logicVersionFor: () => "sha256:authored",
+    } as unknown as RunPipelineDeps["engine"],
+    employees: EMPLOYEES.slice(0, 1),
+    actor: "cm@workwell.dev",
+    events: { async appendAudit() {} },
+  };
+  await executeManualRun(deps, { scopeType: "MEASURE", measureId: "audiogram", triggeredBy: "test" });
+  const cases = await caseStore.listCases({ limit: 10 });
+  assert.equal(cases.length, 1, "the authored engine's flag does not suppress the case");
+  assert.equal(cases[0]!.status, "OPEN");
+});

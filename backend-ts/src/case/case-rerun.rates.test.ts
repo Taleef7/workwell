@@ -110,3 +110,51 @@ test("rerun-to-verify hands the action back to the SYSTEM, so the rate can keep 
     "a computed action must say so, or patchCase's OPERATOR default freezes it",
   );
 });
+
+test("rerun-to-verify closes a case whose subject the OFFICIAL logic finds outside the initial population, as a system closure (ADR-078)", async () => {
+  const { rerunToVerify } = await import("./case-rerun.ts");
+  const OUTSIDE = {
+    expressionResults: [],
+    official: { ecqmId: "CMS137", populationResults: rate(false).map((p) => ({ ...p, result: false })), measurementPeriod: { start: "2026-01-01", end: "2026-12-31" } },
+  };
+  let patched: Record<string, unknown> | null = null;
+  const audits: Array<{ eventType: string; payload: Record<string, unknown> }> = [];
+  const noop = async () => undefined;
+  const deps = {
+    cases: {
+      getCase: async () => existing,
+      patchCase: async (_id: string, patch: Record<string, unknown>) => { patched = patch; return { ...existing, ...patch }; },
+      listCases: async () => [existing],
+      upsertFromOutcome: noop,
+      countByLastRun: async () => 1,
+    },
+    events: {
+      recordCaseEvent: noop,
+      appendAudit: async (input: { eventType: string; payload: Record<string, unknown> }) => { audits.push({ eventType: input.eventType, payload: input.payload }); },
+      caseTimeline: async () => [],
+      latestOutreachDeliveryStatus: async () => null,
+    },
+    outcomes: { recordOutcome: noop, listOutcomes: async () => [] },
+    runStore: { createRun: async () => ({ id: "run-rerun-oop" }), markRunning: noop, appendLog: noop, finalizeRun: noop, listRuns: async () => [] },
+    engine: {
+      evaluate: async () => ({ outcome: "MISSING_DATA", evidence: OUTSIDE, inInitialPopulation: false }),
+      logicVersionFor: () => "official-fqm:1.0.000:artifact:terminology",
+    },
+  } as unknown as RerunDeps;
+
+  await rerunToVerify(deps, existing.id, "tester");
+  const p = patched as Record<string, unknown> | null;
+  assert.ok(p, "the case was patched");
+  assert.equal(p!.status, "RESOLVED");
+  assert.equal(p!.closedReason, "OUT_OF_POPULATION");
+  assert.equal(p!.closedBy, null, "the system's determination, not the operator's closure — a later in-population outcome may reopen it");
+  assert.ok(String(p!.nextAction).includes("not in the measure's initial population"));
+  assert.ok(audits.some((a) => a.eventType === "CASE_RESOLVED" && a.payload.closedReason === "OUT_OF_POPULATION"), "the closure is audited with its reason");
+
+  // The AUTHORED engine's flag does not close anything through this path either.
+  patched = null;
+  audits.length = 0;
+  const authored = { ...deps, engine: { evaluate: async () => ({ outcome: "MISSING_DATA", evidence: { expressionResults: [] }, inInitialPopulation: false }), logicVersionFor: () => "sha256:authored" } } as unknown as RerunDeps;
+  await rerunToVerify(authored, existing.id, "tester");
+  assert.equal((patched as Record<string, unknown> | null)?.status, "OPEN", "an authored out-of-population subject keeps the case open, unchanged");
+});

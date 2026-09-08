@@ -35,6 +35,12 @@ SQLite floor and the Pg ceiling read the current row and apply the shared pure `
   `IN_PROGRESS`) counts both — otherwise a reconfirmed IN_PROGRESS case would silently drop out of the
   hierarchy/programs open-case count.
 - **No `closed_at` drift.** A COMPLIANT outcome on an already-terminal case is a no-op.
+- **A subject OUTSIDE the initial population never opens a case (ADR-078).** The run pipeline sets
+  `outOfPopulation` on the upsert from the executor's own `inInitialPopulation: false`; the outcome is
+  still persisted as MISSING_DATA (CQL is authoritative), but `planCaseUpsert` returns a no-op where
+  no case exists and closes an active one with `status=RESOLVED`, `closed_reason='OUT_OF_POPULATION'`,
+  `closed_by=NULL` (a system closure, audited `CASE_RESOLVED`). In-population MISSING_DATA still opens
+  a case. Before this, every non-diabetic opened a CMS122 case (ADR-043's recorded fan-out).
 - The upsert returns an `UpsertedCase` (a `CaseRecord` superset carrying a `disposition` of
   `CREATED | UPDATED | REOPENED | RESOLVED | EXCLUDED | UNCHANGED`). The run pipeline emits a matching
   `CASE_*` audit event for every disposition except `UNCHANGED` (an idempotent re-confirm of the same open

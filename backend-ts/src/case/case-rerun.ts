@@ -26,6 +26,7 @@ import { compositeBundleSource } from "../wiring/subject-bundle-source.ts";
 import { priorityFor, nextActionFor } from "./case-logic.ts";
 import { toCaseDetail, type CaseDetail } from "./case-detail-read-model.ts";
 import { caseRerunMeasurementPeriod } from "../run/run-period.ts";
+import { OFFICIAL_LOGIC_VERSION_PREFIX } from "../wiring/executor-router.ts";
 
 export interface RerunDeps {
   cases: CaseStore;
@@ -102,10 +103,19 @@ export async function rerunToVerify(deps: RerunDeps, caseId: string, actor: stri
 
   let verifiedStatus: string;
   let evidence: unknown;
+  // ADR-078: the OFFICIAL logic found the subject outside the initial population. The nightly run closes
+  // such a case under OUT_OF_POPULATION; a rerun-to-verify must reach the same answer, or the operator's
+  // own click leaves the case open until the next night (Gemini review). Authored measures set the flag
+  // too and are deliberately not read here — same gate as the pipeline.
+  let outOfPopulation = false;
   try {
     const result = await deps.engine.evaluate({ measureId: existing.measureId, patientBundle: bundle, evaluationDate: evalDate });
     verifiedStatus = result.outcome;
     evidence = result.evidence;
+    const logicVersionFor = (deps.engine as { logicVersionFor?: (measureId: string) => string | undefined }).logicVersionFor;
+    outOfPopulation =
+      result.inInitialPopulation === false &&
+      (logicVersionFor?.(existing.measureId)?.startsWith(OFFICIAL_LOGIC_VERSION_PREFIX) ?? false);
   } catch (err) {
     verifiedStatus = "MISSING_DATA";
     evidence = { evaluationError: "engine failure", message: String((err as Error)?.message ?? err) };
@@ -121,12 +131,18 @@ export async function rerunToVerify(deps: RerunDeps, caseId: string, actor: stri
     evidence,
   });
 
-  const updatedCaseStatus = verificationCaseStatus(existing.status, verifiedStatus);
-  const nextAction = verificationNextAction(verifiedStatus, existing.measureId, evidence);
-  const closing = isClosing(verifiedStatus);
+  const updatedCaseStatus = outOfPopulation ? "RESOLVED" : verificationCaseStatus(existing.status, verifiedStatus);
+  const nextAction = outOfPopulation
+    ? "No follow-up needed: not in the measure's initial population on verification rerun."
+    : verificationNextAction(verifiedStatus, existing.measureId, evidence);
+  const closing = isClosing(verifiedStatus) || outOfPopulation;
   const closedAt = closing ? new Date().toISOString() : null;
-  const closedReason = verifiedStatus === "COMPLIANT" ? "RERUN_VERIFIED" : verifiedStatus === "EXCLUDED" ? "RERUN_EXCLUDED" : null;
-  const closedBy = closing ? actor : null;
+  const closedReason =
+    verifiedStatus === "COMPLIANT" ? "RERUN_VERIFIED" : verifiedStatus === "EXCLUDED" ? "RERUN_EXCLUDED" : outOfPopulation ? "OUT_OF_POPULATION" : null;
+  // An out-of-population closure is the SYSTEM's determination even when a person clicked rerun: it
+  // stays `closed_by = NULL` so a later in-population outcome reopens it, exactly as the nightly path
+  // closes it. A verified COMPLIANT/EXCLUDED is the operator's closure and keeps their name.
+  const closedBy = closing && !outOfPopulation ? actor : null;
 
   const actionPayload = {
     priorOutcomeStatus: existing.currentOutcomeStatus,
@@ -196,6 +212,17 @@ export async function rerunToVerify(deps: RerunDeps, caseId: string, actor: stri
       refCaseId: caseId,
       refMeasureVersionId: existing.measureId,
       payload: { ...verificationPayload, exclusionReason: "Excluded on verification rerun." },
+    });
+  } else if (outOfPopulation) {
+    await deps.events.appendAudit({
+      eventType: "CASE_RESOLVED",
+      entityType: "case",
+      entityId: caseId,
+      actor,
+      refRunId: run.id,
+      refCaseId: caseId,
+      refMeasureVersionId: existing.measureId,
+      payload: { ...verificationPayload, closedReason: "OUT_OF_POPULATION", summary: "Case closed by rerun-to-verify: the subject is outside the measure's initial population (ADR-078).", runId: run.id },
     });
   }
 

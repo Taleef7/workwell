@@ -20,6 +20,7 @@
 import { deriveCell } from "../compliance/roster-vocabulary.ts";
 import { deriveWhyFlagged } from "../case/case-detail-read-model.ts";
 import { dispositionFor, nextActionFor, priorityFor } from "../case/case-logic.ts";
+import { membershipRatesFor, officialMembership } from "../fhir/measure-report.ts";
 import { MEASURE_CATALOG } from "../measure/measure-catalog.ts";
 import { proposeOrders } from "../order/order-proposal.ts";
 import { dedupeKeyFor, toServiceRequest, type ProposedOrder } from "../order/proposed-order.ts";
@@ -250,7 +251,14 @@ export async function buildComplianceCards(
   rows: readonly CardInput[],
   opts: CardOptions,
 ): Promise<CdsCard[]> {
-  const open = rows.filter((r) => dispositionFor(r.status) === "OPEN" && !isDeprecated(r.measureId));
+  // A subject the official logic found OUTSIDE the initial population gets no card (ADR-078): their
+  // MISSING_DATA is a result, and a card telling a clinician to "check eligibility" for a patient the
+  // measure does not concern is the noise ADR-067's card surface exists to avoid. "Outside" is EVERY
+  // rate's initial population, the same reading the pipeline's `inInitialPopulation` takes on a
+  // multi-rate measure (own review): official evidence present, and no rate admits the subject.
+  const outsidePopulation = (r: CardInput): boolean =>
+    officialMembership(r.evidence) !== null && membershipRatesFor(r, r.measureId).every((m) => !m.ipp);
+  const open = rows.filter((r) => dispositionFor(r.status) === "OPEN" && !isDeprecated(r.measureId) && !outsidePopulation(r));
   if (open.length === 0) return [];
 
   // ONE `proposeOrders` call for the whole subject, so its in-batch dedupe applies: two measures mapping

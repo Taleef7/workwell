@@ -78,6 +78,14 @@ document's §4 verification set stays the bar per §4 decision 2 above).
    > is still outstanding is the MM-1c second-engine sweep and a `flip-gate` run in a context that resolves
    > the terminology sidecar. Decision 5 below (no known-unverified measure routed to the pilot) is
    > unchanged and is what keeps them unrouted until that sweep is done.
+
+   > **SINCE (2026-09-08, ADR-078 — owner decision):** the sandbox routes ALL six — cms122, cms125,
+   > cms2, cms130, cms165, cms137. The owner's priority is every measure the pilot group sent us working
+   > and visible in the sandbox; cms2's disagreements are diagnosed, cms130 is swept, cms137 is gated
+   > over the whole roster, and cms165 runs on the corpus's stamped profiles. The two conditions this
+   > decision named — 305 surviving the final rule for cms137, and profile-stamped real blood pressures
+   > for cms165 — now gate the PHI phase rather than the sandbox flip. Decision 5's "known-unverified"
+   > bar is read the same way: it applies to what the pilot runs over real data.
 3. **Cards resolve, not alert** — order suggestions (gated on APPROVED terminology mappings; **an order
    is a proposal and never changes compliance** — the gap closes only when the qualifying result data
    arrives and CQL re-evaluates) and exception documentation (structured data the measure logic reads

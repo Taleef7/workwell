@@ -319,8 +319,8 @@ test("PR-9c: the shipped configuration constructs cleanly — no routing problem
   //
   // `complete` must read BOTH conditions. Reading `truncated` alone was true-but-narrow: it means "the
   // sidecar holds every code the bundle DECLARED", which says nothing about a value set the bundle
-  // never declared at all (ADR-053). No shipped measure has one today — all five vendored artifacts
-  // ship every value set their ELM retrieves — so this changes no verdict now; it stops the predicate
+  // never declared at all (ADR-053). No shipped measure has one today — every vendored artifact
+  // ships every value set its ELM retrieves — so this changes no verdict now; it stops the predicate
   // silently meaning less than its name the first time one does.
   const complete = ALL_SHIPPED.every((id) => {
     const artifact = loadOfficialArtifact(id);
