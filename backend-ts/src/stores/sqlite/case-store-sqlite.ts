@@ -289,6 +289,10 @@ export class SqliteCaseStore implements CaseStore {
       where.push(`status IN (${query.statuses.map(() => "?").join(", ")})`);
       binds.push(...query.statuses);
     }
+    if (query.employeeId) {
+      where.push("employee_id = ?");
+      binds.push(query.employeeId);
+    }
     if (query.measureId) {
       where.push("measure_id = ?");
       binds.push(query.measureId);

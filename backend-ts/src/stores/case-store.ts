@@ -55,6 +55,12 @@ export interface UpsertedCase extends CaseRecord {
 export interface CaseQuery {
   /** Concrete statuses to include (e.g. ["OPEN"]); omit for all. */
   statuses?: string[];
+  /**
+   * One subject's cases. The patient profile page wanted exactly this and had no way to ask for it, so
+   * it read `listCases({ limit: 100000 })` — every case in the tenant — and filtered in JavaScript,
+   * scaling with the tenant's case count rather than with the one patient being looked at.
+   */
+  employeeId?: string;
   measureId?: string;
   priority?: string;
   assignee?: string;

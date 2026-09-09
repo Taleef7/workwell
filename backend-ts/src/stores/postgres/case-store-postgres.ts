@@ -264,6 +264,10 @@ export class PgCaseStore implements CaseStore {
       where.push(`status = ANY($${binds.length + 1})`);
       binds.push(query.statuses);
     }
+    if (query.employeeId) {
+      where.push(`employee_id = $${binds.length + 1}`);
+      binds.push(query.employeeId);
+    }
     if (query.measureId) {
       where.push(`measure_id = $${binds.length + 1}`);
       binds.push(query.measureId);

@@ -867,6 +867,26 @@ export function caseStoreContract(label: string, freshStore: () => Promise<CaseS
     assert.equal(reopened?.id, opened?.id);
   });
 
+  test(`[${label}] listCases filters by employeeId in SQL, and composes with the other filters`, async () => {
+    const caseStore = await freshStore();
+    const runId = crypto.randomUUID();
+    const mk = (subjectId: string, measureId: string, outcomeStatus: string) =>
+      caseStore.upsertFromOutcome({ runId, subjectId, measureId, evaluationPeriod: "2026-01-01", outcomeStatus });
+    await mk("emp-1", "audiogram", "OVERDUE");
+    await mk("emp-1", "hazwoper", "MISSING_DATA");
+    await mk("emp-2", "audiogram", "OVERDUE");
+
+    const mine = await caseStore.listCases({ employeeId: "emp-1", limit: 100 });
+    assert.equal(mine.length, 2, "one subject's cases, not the tenant's");
+    assert.ok(mine.every((c: { employeeId: string }) => c.employeeId === "emp-1"));
+    // Composes with measureId rather than replacing it — the profile page relies on both being able
+    // to narrow, and a filter that silently won the other would go unnoticed at demo scale.
+    assert.equal((await caseStore.listCases({ employeeId: "emp-1", measureId: "audiogram", limit: 100 })).length, 1);
+    assert.deepEqual(await caseStore.listCases({ employeeId: "nobody", limit: 100 }), []);
+    // Absent, it must not filter at all.
+    assert.equal((await caseStore.listCases({ limit: 100 })).length, 3);
+  });
+
   test(`[${label}] a rerun upserts the SAME case — never a duplicate (idempotency invariant)`, async () => {
     const store = await freshStore();
     const first = await upsert(store, "OVERDUE");
