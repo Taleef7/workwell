@@ -71,9 +71,16 @@ export interface RunLogRow {
 }
 
 /**
- * Runs left RUNNING longer than this are treated as orphaned by a restart (see
- * {@link RunStore.failStuckRuns}). Far beyond the longest real run (~5-6 min for ALL_PROGRAMS on
- * the Postgres ceiling), so the boot-time sweep can never fail a legitimately in-flight run.
+ * The store-level DEFAULT age for treating a RUNNING run as orphaned (see
+ * {@link RunStore.failStuckRuns}), used only when a caller passes no threshold.
+ *
+ * **The recovery sweep does not use it.** `recoverStuckRuns` always passes `orphanThresholdMs`
+ * (`run/recover-stuck-runs.ts`), which is this process's own age: a run that started before this
+ * process booted cannot be advanced by it and is orphaned at any age, and a run that started after is
+ * live however long it runs. This constant was once justified as "far beyond the longest real run
+ * (~5-6 min for ALL_PROGRAMS)", which stopped being true — the pilot's six-measure nightly runs for
+ * over an hour, and a flat cutoff failed a healthy one at 98.7% complete. Any NEW caller relying on
+ * this default inherits that hazard; pass an explicit threshold instead.
  */
 export const STUCK_RUN_THRESHOLD_MS = 30 * 60 * 1000;
 
@@ -121,8 +128,10 @@ export interface RunStore {
    * by a `ctx.waitUntil` task that does NOT survive a container restart, leaving the run RUNNING
    * forever. Furthermore, without a claiming worker, bare QUEUED runs sit indefinitely. Scoped to
    * **unclaimed** runs (`claimed_by IS NULL`): `claimNextQueuedRun` stamps claimed_by, so a
-   * legitimately CLAIMED worker job is never recovered. `seed:%` runs are excluded. Run once per
-   * process on the first runs access; thresholds guard against failing a live run. Returns the
+   * legitimately CLAIMED worker job is never recovered. `seed:%` runs are excluded. Swept once per
+   * process, from two triggers (`server.ts` at boot on a Postgres stack, and the first runs access);
+   * both pass `orphanThresholdMs`, which is what guards a live run — this interface's own
+   * `olderThanMs` default does NOT, and once failed a healthy nightly at 98.7%. Returns the
    * recovered runs with their previous status so the caller can write an `audit_event` per run
    * distinguishing the two cases.
    */

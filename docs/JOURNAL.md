@@ -73,6 +73,67 @@ and still runs the case upsert, so it would have bought little while the writes 
 next lever now that they do not, and it should be turned on as a measured step rather than folded in
 here.
 
+### The stuck-run sweep, and two rewrites before it was right
+
+Both of the day's nightly failures had already been diagnosed, and neither was the worker restarting on
+its own: 2026-09-08 was a merge redeploying mid-run, and 2026-09-09 was the recovery sweep marking a
+HEALTHY run FAILED at 118,430 of 120,000 — 98.7% — at the same instant as an unrelated eighteen-hour-old
+orphan. One sweep marked both; the two rows carry the identical `completedAt` of `14:29:19.919Z`.
+
+The cutoff was a flat 30 minutes, justified in a comment as "far beyond the longest real run (~5-6 min
+for ALL_PROGRAMS)". That justification expired when the six-measure nightly started taking 88 minutes,
+and nothing in the query distinguished a live run from an orphaned one. The sweep also only fired on the
+first `/api/runs` access in a process, which is why a genuine orphan had earlier stayed visible as
+RUNNING for about sixteen hours — nobody opened the runs page — and why the healthy run died the moment
+somebody did.
+
+**The first fix was a net regression, and two reviewers independently refused it.** It kept the 30
+minutes as a floor under a process-age term. But a floor can only push the cutoff EARLIER than boot, and
+earlier than boot protects nothing — everything after boot is already covered by the age term — so all
+it does is suppress legitimate recoveries. Adding a guaranteed boot sweep made it worse by moving the
+one sweep to process age ≈ 0, where the floor is entirely in control: a run started 02:00 with a
+redeploy at 02:20 gets a cutoff of 01:50, and the orphan is missed. Both triggers are one-shot per
+process, so nothing catches it afterwards. For the commonest orphan — a deploy mid-run, the 2026-09-08
+incident exactly — the "fix" made a recoverable case permanently unrecoverable.
+
+The rule is now just "created before this process booted", with no floor at all, measured from
+`process.uptime()` so a lazily loaded module cannot stamp it at first request instead of at boot.
+
+**The second version was rejected too, by all three reviewers on the same line.** `Math.max(0, …)`
+looks like a bounds check and is actually a fail-open: it binds only when the wall clock has moved
+BACKWARDS since boot was stamped — an NTP step, a hypervisor correction, a suspend — and in that state
+the process cannot tell its own runs from a previous process's. A threshold of 0 makes the store's
+cutoff `Date.now()`, and `started_at < now` matches every unclaimed RUNNING row. The clamp reproduced
+the very incident it sits inside, triggered by a clock instead of by a stale constant. An untrustworthy
+clock now sweeps nothing: missing a sweep costs a stale row until the next restart, while taking the
+wrong one kills the nightly.
+
+**Two properties are worth recording because they are traded away deliberately.** The cutoff does not
+advance — `now` cancels, leaving `boot - 1s` for the life of the process — so that one second is also
+the entire tolerance for clock skew between hosts; a container rescheduled onto a host running more
+than a second behind will not sweep the previous container's orphan until the next restart. And a run
+whose task dies inside a still-live process is not covered at all, because no timestamp can separate it
+from a healthy long run. A progress signal can, and one exists without any schema change:
+`outcomes.evaluated_at` is written continuously and `outcomes` is indexed on `run_id`. That is the cheap
+follow-up. `run_logs` is not that signal — it is event-driven, and a healthy chunk loop writes almost
+nothing to it.
+
+**The test was vacuous three times, which is the fourth instance of that shape this week.** The first
+version never called the code under test. The second drove the real store but passed the threshold in
+explicitly, so the default path stayed unexercised — it passed with the wiring removed. The third looked
+right and still could not fail for either constant it existed to protect: `BOOTED_AT = 0` left it green
+while production would sweep nothing ever, and a margin anywhere in `[-5min, +10min)` left it green
+while a negative one places the cutoff after boot. Its own comment also described its fixture wrongly —
+the "young orphan" was 55 minutes old, so the flat threshold would have swept it too.
+
+The two halves of the incident need opposite fixtures — showing that a flat 30 minutes misses a young
+orphan needs a recent boot, showing that it kills a healthy long run needs an old one — so they cannot
+share a test. There are now five, and each was verified to FAIL under the specific mutation it exists to
+catch: the wiring reverted, `BOOTED_AT` zeroed, the margin inverted, and the fail-open clamp restored.
+Worth noting that the first mutation run reported the clamp as caught when it was not: the `perl`
+pattern had silently failed to match, so the harness checking for vacuous tests was itself vacuous. A
+mutation script needs to assert that its pattern matched before it reports anything.
+
 ## 2026-09-08 (evening) — the first six-measure run, a rate that was the wrong measure's, and an e2e suite that had stopped testing the pilot
 
 The flip deployed, and the programs page still read 0.0% on the four new measures. That part was

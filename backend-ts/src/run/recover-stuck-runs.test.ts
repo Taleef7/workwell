@@ -15,7 +15,7 @@ import { SqliteRunStore } from "../stores/sqlite/run-store-sqlite.ts";
 import { SqliteCaseEventStore } from "../stores/sqlite/case-event-store-sqlite.ts";
 import type { CreateRunInput } from "../stores/run-store.ts";
 import type { AlertChannel, RunAlert } from "./alert-channel.ts";
-import { recoverStuckRuns } from "./recover-stuck-runs.ts";
+import { recoverStuckRuns, orphanThresholdMs } from "./recover-stuck-runs.ts";
 
 const sampleRun = (): CreateRunInput => ({
   scopeType: "ALL_PROGRAMS",
@@ -233,4 +233,107 @@ test("Fable M15: finalizeRun does not resurrect a run already FAILED by the swee
       /* best effort */
     }
   }
+});
+
+/**
+ * Drive `recoverStuckRuns` against the real SQLite store with NO explicit threshold, so the wiring's
+ * default (`orphanThresholdMs`) is what decides. Returns the ids it recovered plus each run's status.
+ */
+async function sweepWith(
+  bootedAt: number,
+  runsToCreate: readonly { label: string; startedAt: number }[],
+): Promise<{ recovered: string[]; statusOf: Record<string, string | undefined> }> {
+  const dbPath = join(tmpdir(), `workwell-recover-${crypto.randomUUID()}.sqlite`);
+  const db = await createSqliteD1(dbPath);
+  await db.exec(RUN_STORE_FLOOR_DDL.replace(/\n/g, " "));
+  const runs = new SqliteRunStore(db);
+  const events = new SqliteCaseEventStore(db);
+  try {
+    const ids = new Map<string, string>();
+    for (const r of runsToCreate) {
+      const created = await runs.createRun({ ...sampleRun(), startedAt: new Date(r.startedAt).toISOString() });
+      await runs.markRunning(created.id); // QUEUED → RUNNING, leaving claimed_by NULL as the real path does
+      ids.set(r.label, created.id);
+    }
+    const recovered = await recoverStuckRuns({ runs, events, bootedAt });
+    const statusOf: Record<string, string | undefined> = {};
+    for (const [label, id] of ids) statusOf[label] = (await runs.getRun(id))?.status;
+    const labelOf = new Map([...ids].map(([label, id]) => [id, label]));
+    return { recovered: recovered.map((r) => labelOf.get(r.id) ?? r.id), statusOf };
+  } finally {
+    try {
+      rmSync(dbPath, { force: true });
+    } catch {
+      /* best effort */
+    }
+  }
+}
+
+// The two halves of the 2026-09-09 incident need OPPOSITE fixtures — demonstrating that the flat
+// 30-minute default misses a young orphan requires a recent boot, and that it kills a healthy long
+// run requires an old one — so they cannot share a test. The previous single test used a 45-minute-old
+// boot with a 55-minute-old orphan, which the flat default would ALSO have swept: it failed on revert
+// only because the live run died too, and its comment claimed a mechanism it did not test.
+
+test("a run created BEFORE boot is swept even when it is far younger than the old flat threshold", async () => {
+  // The deploy-mid-run case, and the one the flat 30-minute default provably missed: the orphan is
+  // 25 minutes old, so `failStuckRuns`'s own default would leave it RUNNING for ever (both triggers
+  // are one-shot per process). Reverting the wiring to `failStuckRuns(olderThanMs, …)` fails here.
+  const bootedAt = Date.now() - 20 * 60 * 1000;
+  const { recovered, statusOf } = await sweepWith(bootedAt, [
+    { label: "orphan", startedAt: bootedAt - 5 * 60 * 1000 }, // 25 min old — under the flat 30 min
+  ]);
+  assert.deepEqual(recovered, ["orphan"], "a pre-boot run is orphaned at ANY age, not only past 30 minutes");
+  assert.equal(statusOf.orphan, "FAILED");
+});
+
+test("a run created AFTER boot survives however long it has been running", async () => {
+  // The half that broke the pilot: an 88-minute nightly is healthy, and the flat 30-minute default
+  // failed it at 98.7% complete. Setting CUTOFF_MARGIN_MS or the age term so the cutoff lands after
+  // boot fails here.
+  const bootedAt = Date.now() - 90 * 60 * 1000;
+  const { recovered, statusOf } = await sweepWith(bootedAt, [
+    { label: "live", startedAt: bootedAt + 2 * 60 * 1000 }, // 88 min old, started after boot
+  ]);
+  assert.deepEqual(recovered, [], "a long-running LIVE run is never swept");
+  assert.equal(statusOf.live, "RUNNING");
+});
+
+test("the cutoff sits BEFORE boot, not after: a run started moments after boot survives", async () => {
+  // Pins the SIGN of CUTOFF_MARGIN_MS, which nothing else does. With the margin inverted the cutoff
+  // lands a second AFTER boot and this run — started 200ms into the process — is swept.
+  const bootedAt = Date.now() - 10 * 60 * 1000;
+  const { recovered, statusOf } = await sweepWith(bootedAt, [
+    { label: "justAfterBoot", startedAt: bootedAt + 200 },
+    { label: "justBeforeBoot", startedAt: bootedAt - 60 * 1000 },
+  ]);
+  assert.deepEqual(recovered, ["justBeforeBoot"], "the boundary falls between the two, on the pre-boot side");
+  assert.equal(statusOf.justAfterBoot, "RUNNING");
+});
+
+test("a clock that moved BACKWARDS sweeps nothing, rather than sweeping everything", async () => {
+  // The critical guard, and the only one whose failure is unbounded. `Math.max(0, …)` — the previous
+  // clamp — turned a negative age into a threshold of 0, which makes the store's cutoff `Date.now()`
+  // and matches EVERY unclaimed RUNNING row: the 2026-09-09 incident reproduced by an NTP step. The
+  // fixture puts boot an hour in the future of `now`, which is what a backward step looks like.
+  const bootedAt = Date.now() + 60 * 60 * 1000;
+  const { recovered, statusOf } = await sweepWith(bootedAt, [
+    { label: "live", startedAt: Date.now() - 5 * 60 * 1000 },
+    { label: "old", startedAt: Date.now() - 10 * 60 * 60 * 1000 },
+  ]);
+  assert.deepEqual(recovered, [], "an untrustworthy clock must sweep NOTHING");
+  assert.equal(statusOf.live, "RUNNING");
+  assert.equal(statusOf.old, "RUNNING");
+});
+
+test("orphanThresholdMs with no arguments measures THIS process's real boot", async () => {
+  // The production default `BOOTED_AT` is otherwise never evaluated under assertion: every test above
+  // injects `bootedAt`, so `const BOOTED_AT = 0` (or a sign slip, or seconds-for-milliseconds) ships
+  // green while production sweeps nothing at all — or everything.
+  const uptimeMs = process.uptime() * 1000;
+  const threshold = orphanThresholdMs();
+  assert.ok(
+    threshold >= uptimeMs - 50 && threshold <= uptimeMs + 5_000,
+    `expected a threshold within a few seconds of this process's uptime (${Math.round(uptimeMs)}ms), got ${threshold}ms`,
+  );
 });

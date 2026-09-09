@@ -943,8 +943,26 @@ events `SEGMENT_UPDATED`/`SEGMENT_DELETED`) from the Configure Groups editor or 
 Evidence bytes deliberately remain on the in-container `fs` binding for now; the Maui workflow omits the
 four `WORKWELL_BUCKET_S3_*` variables, so evidence is lost whenever the container is recreated.
 
-**Unclaimed QUEUED run recovery:** In addition to recovering in-process `RUNNING` runs orphaned by a container
-restart (30-minute threshold), boot recovery (`failStuckRuns`) sweeps unclaimed `QUEUED` runs whose
+**Stuck-run recovery runs ONCE PER PROCESS, and its cutoff is that process's boot.** A `RUNNING` run
+created before the current process started cannot be advanced by it (the in-process job died with the
+previous container), so it is failed and audited at any age; a run created after boot is live and is
+never swept, however long it runs. It fires at startup (`server.ts`, Postgres stacks) and on the first
+`/api/runs` access. Until 2026-09-09 the cutoff was a flat 30 minutes, which both missed orphans
+younger than that and failed a healthy 88-minute nightly at 98.7% complete.
+
+Two operational consequences worth knowing before changing the deployment shape:
+
+- **One container at a time is assumed.** With two replicas, a newly booted one would sweep runs the
+  older one is still advancing — `claimed_by` is no defence, because the async run path leaves it
+  NULL. Rolling deploys that overlap replicas need a liveness signal first (see
+  `run/recover-stuck-runs.ts`).
+- **The cutoff does not advance during a process's life**, so the one-second margin is also the whole
+  tolerance for clock skew between hosts. If a restart lands the container on a host whose clock is
+  more than a second behind the previous one, an orphan from the previous container is not swept until
+  the next restart. Deliberate: the alternative direction kills live runs.
+
+**Unclaimed QUEUED run recovery:** In addition to the `RUNNING` sweep above, boot recovery
+(`failStuckRuns`) sweeps unclaimed `QUEUED` runs whose
 `claimed_by` worker ID is null and whose timestamp is older than 6 hours (`UNCLAIMED_QUEUED_THRESHOLD_MS`).
 Because live deployments do not run a separate claiming worker daemon, any run left queued without a worker
 is recovered to `FAILED` with an audited `RUN_RECOVERED` event and alert. An audit failure restores the run so the next boot retries.
