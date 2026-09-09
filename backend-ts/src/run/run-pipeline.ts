@@ -696,8 +696,12 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
     /**
      * The chunk's case upserts, collected during the evaluation loop and applied in ONE store call at
      * the end of it. Per CHUNK, like everything else here: memory stays bounded at any roster size,
-     * and a chunk's cases are durable before the next chunk starts, so a mid-run failure leaves the
-     * same partial state it did when each row was written on its own.
+     * and a chunk's cases are durable before the next chunk starts.
+     *
+     * A mid-run failure is now coarser than it was, and in the recoverable direction: previously rows
+     * 1..k of a chunk had cases when row k+1 failed, and now the chunk's cases are all-or-nothing
+     * against outcomes that are already persisted. Outcomes without cases is the state the next run
+     * repairs by re-upserting them; cases without outcomes would not be.
      *
      * The extra fields travel alongside the store input because the audit payload needs them and the
      * item they came from is out of scope by the time the batch returns.
@@ -953,9 +957,13 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
       throw err;
     }
     // PERSISTED, so this much is true even if the case pass below throws mid-chunk: `evaluated` and
-    // `failures` count rows that are now in the store, and nothing else. `compliant`/`nonCompliant`
-    // are advanced per record below, as each one's case is acted on, so `failPlannedRun` reports
-    // exactly what the run completed rather than a per-chunk lower bound.
+    // `failures` count rows that are now in the store, and nothing else.
+    //
+    // `compliant`/`nonCompliant` are advanced in the loop below as each OUTCOME is read — which, since
+    // the case pass moved to one batched call at the end of the chunk, is now BEFORE any of the
+    // chunk's cases are written rather than as each case is acted on. They still describe outcomes
+    // that are durably in the store (the `recordOutcomes` above committed them), so `failPlannedRun`
+    // still reports what the run persisted; what they no longer imply is that a case exists for each.
     planned.progress.evaluated += records.length;
     planned.progress.failures = failures;
 
@@ -1063,6 +1071,33 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
     // at a time. The ORDER is preserved too: `upsertFromOutcomes` returns one result per input in
     // input order, so the audit loop below is a zip over the same list the gate above built.
     if (deps.caseStore && pendingCaseUpserts.length > 0) {
+      // LAST-WINS on a repeated key, which is what the per-row loop did: it applied both in order and
+      // the second overwrote the first. The store REFUSES a duplicate inside one batch — a set-based
+      // UPDATE would otherwise apply one of the two arbitrarily — so without this collapse a repeat
+      // would abort the chunk and fail a three-hour run outright, where before it was absorbed.
+      //
+      // A repeat is not hypothetical: the live WebChart path builds items per fetched bundle
+      // (`for (const bundle of bundles)`), so two bundles resolving to the same `wc|<id>` — a
+      // duplicated Patient on the tenant — produce two items for one key, and both land in the same
+      // chunk because chunking is keyed on the subject. Collapsed rather than refused, and logged,
+      // because the run finishing is worth more than the surprise, and the duplication upstream is
+      // worth someone knowing about.
+      const byKey = new Map<string, (typeof pendingCaseUpserts)[number]>();
+      for (const p of pendingCaseUpserts) byKey.set(`${p.subjectId}\u0000${p.measureId}\u0000${p.period}`, p);
+      const deduped = [...byKey.values()];
+      if (deduped.length !== pendingCaseUpserts.length) {
+        void deps.runStore
+          .appendLog(
+            runId,
+            "WARN",
+            `${pendingCaseUpserts.length - deduped.length} duplicate (subject, measure, period) case upsert(s) in one chunk — ` +
+              `collapsed last-wins. The roster produced the same key more than once; check for a duplicated subject upstream.`,
+          )
+          .catch(() => {});
+      }
+      pendingCaseUpserts.length = 0;
+      pendingCaseUpserts.push(...deduped);
+
       const upserts = await deps.caseStore.upsertFromOutcomes(pendingCaseUpserts.map((p) => p.input));
 
       // Audit the case transitions (Fable H1 — the population pipeline previously wrote NO case audit

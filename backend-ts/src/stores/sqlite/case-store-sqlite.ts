@@ -256,7 +256,10 @@ export class SqliteCaseStore implements CaseStore {
   async upsertFromOutcomes(inputs: UpsertCaseInput[]): Promise<(UpsertedCase | null)[]> {
     const seen = new Set<string>();
     for (const i of inputs) {
-      const k = `${i.subjectId} ${i.measureId} ${i.evaluationPeriod}`;
+      // NUL-joined, matching the ceiling. A space separator would make the floor throw on a batch the
+      // ceiling accepts, whenever a subject id contains a space — the two stores must agree on what a
+      // duplicate IS, or a caller can develop against one and be refused by the other.
+      const k = `${i.subjectId}\u0000${i.measureId}\u0000${i.evaluationPeriod}`;
       if (seen.has(k)) {
         throw new Error(
           `upsertFromOutcomes: duplicate key in one batch (${i.subjectId}, ${i.measureId}, ${i.evaluationPeriod}) — a set-based update would apply one of them arbitrarily`,

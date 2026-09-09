@@ -967,10 +967,10 @@ export function caseStoreContract(label: string, freshStore: () => Promise<CaseS
     );
   });
 
-  test(`[${label}] an operator's next_action written mid-batch survives, and the rest of the batch still lands`, async () => {
-    // The batch analogue of the #538 P2 race. The batch plans from rows it read at the start; an
-    // operator escalating in that window must not be clobbered (ADR-076 d2), AND their row losing the
-    // compare-and-set must not take the rest of the chunk down with it.
+  test(`[${label}] an operator's next_action already on the row is honoured by the batch`, async () => {
+    // NOT the race — the patch below happens BEFORE the batch runs, so the pre-read sees OPERATOR and
+    // `planNextAction` plans the operator's own text. This proves the pure rule is applied inside the
+    // batch; the race itself is the separate test below, which is the one that reaches the fallback.
     const caseStore = await freshStore();
     const seed = crypto.randomUUID();
     const keys = ["emp-1", "emp-2", "emp-3"];
@@ -994,6 +994,64 @@ export function caseStoreContract(label: string, freshStore: () => Promise<CaseS
       const c = (await caseStore.listCases({ employeeId: subjectId, limit: 10 }))[0]!;
       assert.equal(c.lastRunId, runId, `${subjectId} still landed — one contended row does not fail the chunk`);
     }
+  });
+
+  test(`[${label}] a batch spans more than one internal sub-chunk without shifting a slot`, async () => {
+    // The Postgres path sub-chunks at 500 rows. Every earlier batch test used a handful of inputs, so
+    // the sub-chunk loop — the part most likely to misplace a result — was never executed. Every third
+    // input is a COMPLIANT no-op, so a shifted index shows up as a null in the wrong slot.
+    const caseStore = await freshStore();
+    const runId = crypto.randomUUID();
+    const inputs = Array.from({ length: 1200 }, (_, i) => ({
+      runId,
+      subjectId: `emp-${String(i).padStart(5, "0")}`,
+      measureId: "audiogram",
+      evaluationPeriod: "2026-01-01",
+      outcomeStatus: i % 3 === 0 ? "COMPLIANT" : "OVERDUE",
+    }));
+    const out = await caseStore.upsertFromOutcomes(inputs);
+    assert.equal(out.length, 1200);
+    for (const [i, r] of out.entries()) {
+      if (i % 3 === 0) assert.equal(r, null, `slot ${i} is the COMPLIANT no-op`);
+      else assert.equal(r?.employeeId, inputs[i]!.subjectId, `slot ${i} carries its own subject`);
+    }
+  });
+
+  test(`[${label}] one batch mixes inserts, updates and no-ops, and each lands as its own kind`, async () => {
+    // The equivalence test runs against a fresh store, so every input there takes the INSERT path and
+    // the set-based UPDATE is never reached. This seeds first so one batch exercises both, plus the
+    // two §4 guarantees most worth pinning for the batch: IN_PROGRESS survives, and a human closure
+    // is not reopened.
+    const caseStore = await freshStore();
+    const seedRun = crypto.randomUUID();
+    const at = (runId: string, subjectId: string, outcomeStatus: string) => ({
+      runId,
+      subjectId,
+      measureId: "audiogram",
+      evaluationPeriod: "2026-01-01",
+      outcomeStatus,
+    });
+    for (const s of ["in-progress", "human-closed", "reconfirm"]) await caseStore.upsertFromOutcome(at(seedRun, s, "OVERDUE"));
+    const inProgress = (await caseStore.listCases({ employeeId: "in-progress", limit: 10 }))[0]!;
+    await caseStore.patchCase(inProgress.id, { status: "IN_PROGRESS" });
+    const humanClosed = (await caseStore.listCases({ employeeId: "human-closed", limit: 10 }))[0]!;
+    await caseStore.patchCase(humanClosed.id, { status: "RESOLVED", closedAt: new Date().toISOString(), closedBy: "nurse@example.org" });
+
+    const runId = crypto.randomUUID();
+    const out = await caseStore.upsertFromOutcomes([
+      at(runId, "in-progress", "OVERDUE"), // update: must NOT be clobbered back to OPEN
+      at(runId, "human-closed", "OVERDUE"), // noop: a person closed it
+      at(runId, "brand-new", "OVERDUE"), // insert
+      at(runId, "reconfirm", "OVERDUE"), // update, unchanged
+    ]);
+
+    assert.equal(out[0]?.status, "IN_PROGRESS", "§4: an operator's IN_PROGRESS survives a batched re-confirm");
+    assert.equal(out[1], null, "§4: a human closure is not reopened by a batch");
+    assert.equal(out[2]?.disposition, "CREATED");
+    assert.equal(out[3]?.status, "OPEN");
+    // The seeded rows were updated, not duplicated.
+    assert.equal((await caseStore.listCases({ limit: 100 })).length, 4);
+    assert.equal((await caseStore.listCases({ employeeId: "human-closed", limit: 10 }))[0]!.closedBy, "nurse@example.org");
   });
 
   test(`[${label}] listCases filters by employeeId in SQL, and composes with the other filters`, async () => {

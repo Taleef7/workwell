@@ -243,7 +243,7 @@ export class PgCaseStore implements CaseStore {
     if (inputs.length === 0) return [];
     const now = new Date().toISOString();
     const keyOf = (i: Pick<UpsertCaseInput, "subjectId" | "measureId" | "evaluationPeriod">) =>
-      `${i.subjectId} ${i.measureId} ${i.evaluationPeriod}`;
+      `${i.subjectId}\u0000${i.measureId}\u0000${i.evaluationPeriod}`;
 
     // A duplicate key would be applied once, from an arbitrary tuple, by the set-based UPDATE — where
     // the sequential path applied both in order. Refuse rather than silently pick.
@@ -259,8 +259,10 @@ export class PgCaseStore implements CaseStore {
     }
 
     const results: (UpsertedCase | null)[] = new Array(inputs.length).fill(null);
-    // Sub-chunked so the bind count stays far below Postgres' 65535 cap (12 params/row on the insert,
-    // 11 on the update) and each statement stays a reasonable size.
+    // Sub-chunked so the bind count stays far below Postgres' 65535 cap — 13 params/row on the insert
+    // plus one hoisted `now`, and 14 on the update plus one hoisted `now`, so 500 rows is about 7,000
+    // either way — and so each statement stays a reasonable size. 500 also matches `recordOutcomes`
+    // and the pipeline's own subject chunk.
     const CHUNK = 500;
     for (let start = 0; start < inputs.length; start += CHUNK) {
       const batch = inputs.slice(start, start + CHUNK).map((input, offset) => ({ input, index: start + offset }));
@@ -366,25 +368,34 @@ export class PgCaseStore implements CaseStore {
           p.plan.status!, p.priority, p.action.nextAction, p.action.source, p.input.outcomeStatus,
           p.plan.closedAt ?? null, p.plan.closedReason ?? null, p.plan.closedBy ?? null,
           p.existing!.next_action, p.existing!.next_action_source,
+          // PER ROW, never hoisted. `last_run_id` is the evidence pin §6.5 relies on to survive
+          // outcome compaction, and `countByLastRun` is a run's own case count — stamping the batch's
+          // first runId on every row silently pins cases to a run that did not produce them. The
+          // pipeline happens to pass one runId per chunk today, so this was latent; it is also
+          // invisible to the SQLite floor, which loops and is therefore correct by construction.
+          p.input.runId,
         );
         // Casts on the FIRST tuple only: Postgres infers `unknown` for bare parameters in a VALUES
         // list used as a FROM item, and `IS NOT DISTINCT FROM` against `unknown` does not resolve.
-        const c = i === 0 ? ["::text", "::text", "::text", "::text", "::text", "::text", "::text", "::text", "::timestamptz", "::text", "::text", "::text", "::text"] : new Array(13).fill("");
+        const c =
+          i === 0
+            ? ["::text", "::text", "::text", "::text", "::text", "::text", "::text", "::text", "::timestamptz", "::text", "::text", "::text", "::text", "::uuid"]
+            : new Array(14).fill("");
         return `(${c.map((cast, j) => `$${b + j + 1}${cast}`).join(", ")})`;
       });
-      const runIdParam = binds.push(toUpdate[0]!.input.runId);
       const nowParam = binds.push(now);
       const { rows } = await this.pool.query<CaseRow>(
         `UPDATE ${T} c SET
             status = v.status, priority = v.priority,
             next_action = v.next_action, next_action_source = v.next_action_source,
             current_outcome_status = v.current_outcome_status,
-            last_run_id = $${runIdParam}::uuid, updated_at = $${nowParam},
+            last_run_id = v.last_run_id, updated_at = $${nowParam},
             closed_at = v.closed_at, closed_reason = v.closed_reason, closed_by = v.closed_by
           FROM (VALUES ${tuples.join(", ")}) AS v(
             employee_id, measure_id, evaluation_period,
             status, priority, next_action, next_action_source, current_outcome_status,
-            closed_at, closed_reason, closed_by, expected_next_action, expected_next_action_source)
+            closed_at, closed_reason, closed_by, expected_next_action, expected_next_action_source,
+            last_run_id)
           WHERE c.employee_id = v.employee_id AND c.measure_id = v.measure_id AND c.evaluation_period = v.evaluation_period
             AND c.next_action IS NOT DISTINCT FROM v.expected_next_action
             AND c.next_action_source IS NOT DISTINCT FROM v.expected_next_action_source
