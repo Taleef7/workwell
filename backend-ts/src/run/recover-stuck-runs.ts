@@ -46,14 +46,29 @@ export interface RecoverStuckRunsDeps {
  * sweeping this process's own live runs — the exact bug this file exists to fix, reintroduced
  * silently. `process.uptime()` closes that specific hole.
  *
- * It is NOT a general guarantee, and the previous wording here claimed one. `process.uptime()` is
- * monotonic while `Date.now()` is not, so the two disagree after anything that moves the wall clock:
- * an NTP step, a hypervisor clock correction, or a host suspend (Linux `CLOCK_MONOTONIC` does not
- * advance while suspended, so after a 2h suspend this lands 2h AFTER the real boot). Every such case
- * makes the computed age wrong, which is why `orphanThresholdMs` refuses to sweep rather than
- * trusting it.
+ * It is NOT a general guarantee, and two earlier versions of this comment claimed one. `process.uptime()`
+ * is monotonic while `Date.now()` is not, so the two disagree after anything that moves the wall clock,
+ * and the negative-age guard below catches only SOME of that:
+ *
+ * - A host suspend. Linux `CLOCK_MONOTONIC` does not advance while suspended, so after a 2h suspend
+ *   this lands 2h AFTER the real boot. The computed age stays POSITIVE, the guard does not fire, and
+ *   the cutoff sits 2h past boot — sweeping live runs started in that window. Not defended against
+ *   here; a container host that suspends is outside the deployment model, and detecting it needs a
+ *   second clock source.
+ * - A backward wall-clock step (NTP, hypervisor correction). The guard fires only while the clock is
+ *   still behind this stamp. Once real time advances past it the age is positive again, so a run
+ *   CREATED during the stepped-back interval keeps a `started_at` before the cutoff and can be swept
+ *   while live. The exposure is bounded by the size of the step and by the sweep being once-per-process,
+ *   but it is real and it is not covered.
+ *
+ * Both are honest residual risk rather than handled cases. What the guard does cover is the
+ * catastrophic one: an age so wrong it would sweep EVERYTHING.
  */
-const BOOTED_AT = Date.now() - Math.round(process.uptime() * 1000);
+export function bootInstant(nowMs: number, uptimeSeconds: number): number {
+  return nowMs - Math.round(uptimeSeconds * 1000);
+}
+
+const BOOTED_AT = bootInstant(Date.now(), process.uptime());
 
 /**
  * The threshold returned when the clock cannot be trusted: 100 years, so `now - threshold` lands in

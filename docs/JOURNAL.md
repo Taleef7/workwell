@@ -128,11 +128,41 @@ the "young orphan" was 55 minutes old, so the flat threshold would have swept it
 
 The two halves of the incident need opposite fixtures — showing that a flat 30 minutes misses a young
 orphan needs a recent boot, showing that it kills a healthy long run needs an old one — so they cannot
-share a test. There are now five, and each was verified to FAIL under the specific mutation it exists to
-catch: the wiring reverted, `BOOTED_AT` zeroed, the margin inverted, and the fail-open clamp restored.
-Worth noting that the first mutation run reported the clamp as caught when it was not: the `perl`
-pattern had silently failed to match, so the harness checking for vacuous tests was itself vacuous. A
-mutation script needs to assert that its pattern matched before it reports anything.
+share a test. Worth noting that the first mutation run reported the fail-open clamp as caught when it
+was not: the `perl` pattern had silently failed to match, so the harness checking for vacuous tests was
+itself vacuous. A mutation script must assert that its pattern matched before it reports anything.
+
+**A fourth review, after the PR was open, found three more mutations that were still green** — and the
+fix for each is the same shape. `CUTOFF_MARGIN_MS = 0` passed, because the only run placed near the
+boundary sat 200ms *after* boot, so nothing required the margin to be non-zero; a run 500ms *before*
+boot, which must survive, now pins it. `BOOTED_AT = Date.now()` at module load passed — the exact
+regression the source comment warns about — because a band drawn around `process.uptime()` is loose
+enough to contain a module-load stamp; what separates them is that this process necessarily spent time
+starting before the module loaded, so the test now asserts the derived boot instant precedes the test
+file's own load. And `deps.bootedAt ?? Date.now()` passed, because a run created at `now` is spared by
+any cutoff at or before now: the live run is now placed just after the REAL boot instant, which only a
+cutoff genuinely anchored to boot spares, and the test waits until the process has more uptime than the
+margin so that discrimination is deterministic rather than luck. The `BOOTED_AT` arithmetic itself moved
+into an exported `bootInstant(nowMs, uptimeSeconds)` so a sign flip or a seconds-for-milliseconds slip
+can be caught exactly, which no runtime tolerance loose enough to be stable ever could.
+
+Six mutations, six failures, verified individually.
+
+The same review found the retry loop had three defects of its own, all in code written to satisfy an
+earlier review finding: a third backoff that could never be reached (three attempts need two gaps, so
+the loop ran 45 seconds while its comment claimed 90), exhaustion that returned silently so a process
+could serve traffic with no sweep and nothing anywhere saying so, and no check for shutdown — a retry
+waking during the drain window could flip rows to FAILED and be force-exited before their
+`RUN_RECOVERED` events were written, a state change with no audit entry. Exhaustion now alerts, the
+loop refuses to start a sweep once shutdown has begun, and `stopping` moved above the block rather than
+being reachable only by TDZ timing.
+
+Two clock hazards are now stated as residual rather than handled, because the previous comment claimed
+the negative-age guard covered them and it does not. After a host suspend the computed age stays
+positive and the cutoff lands past boot; and after a backward clock step, a run created during the
+stepped-back interval keeps a `started_at` before the cutoff and can be swept while live once real time
+advances again. Both are bounded and neither is defended against. What the guard does cover is the
+catastrophic case — an age so wrong it would sweep everything.
 
 ## 2026-09-08 (evening) — the first six-measure run, a rate that was the wrong measure's, and an e2e suite that had stopped testing the pilot
 

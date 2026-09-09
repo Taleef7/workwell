@@ -15,7 +15,12 @@ import { SqliteRunStore } from "../stores/sqlite/run-store-sqlite.ts";
 import { SqliteCaseEventStore } from "../stores/sqlite/case-event-store-sqlite.ts";
 import type { CreateRunInput } from "../stores/run-store.ts";
 import type { AlertChannel, RunAlert } from "./alert-channel.ts";
-import { recoverStuckRuns, orphanThresholdMs } from "./recover-stuck-runs.ts";
+import { recoverStuckRuns, orphanThresholdMs, bootInstant } from "./recover-stuck-runs.ts";
+
+/** Captured at module load, to prove the production boot instant precedes it (see the last test). */
+const TEST_MODULE_LOADED_AT = Date.now();
+/** Mirrors CUTOFF_MARGIN_MS; kept local so the test states the value it expects rather than importing it. */
+const CUTOFF_MARGIN_MS_FOR_TEST = 1000;
 
 const sampleRun = (): CreateRunInput => ({
   scopeType: "ALL_PROGRAMS",
@@ -299,16 +304,73 @@ test("a run created AFTER boot survives however long it has been running", async
   assert.equal(statusOf.live, "RUNNING");
 });
 
-test("the cutoff sits BEFORE boot, not after: a run started moments after boot survives", async () => {
-  // Pins the SIGN of CUTOFF_MARGIN_MS, which nothing else does. With the margin inverted the cutoff
-  // lands a second AFTER boot and this run — started 200ms into the process — is swept.
+test("the cutoff sits BEFORE boot by the full margin, not at boot and not after it", async () => {
+  // Pins the margin's SIGN and its MAGNITUDE. An earlier version only placed a run 200ms after boot,
+  // which left `CUTOFF_MARGIN_MS = 0` (and anything up to 199) green — the cutoff exactly at boot,
+  // with no absorption at all for the gap between computing the threshold and the store applying it
+  // against its own clock. `withinMargin` sits 500ms BEFORE boot and must survive, which is only true
+  // while the margin actually pushes the cutoff back past it.
   const bootedAt = Date.now() - 10 * 60 * 1000;
   const { recovered, statusOf } = await sweepWith(bootedAt, [
     { label: "justAfterBoot", startedAt: bootedAt + 200 },
-    { label: "justBeforeBoot", startedAt: bootedAt - 60 * 1000 },
+    { label: "withinMargin", startedAt: bootedAt - 500 },
+    { label: "beforeMargin", startedAt: bootedAt - 60 * 1000 },
   ]);
-  assert.deepEqual(recovered, ["justBeforeBoot"], "the boundary falls between the two, on the pre-boot side");
+  assert.deepEqual(recovered, ["beforeMargin"], "only the run older than boot MINUS the margin is swept");
   assert.equal(statusOf.justAfterBoot, "RUNNING");
+  assert.equal(statusOf.withinMargin, "RUNNING", "the margin must place the cutoff strictly before boot");
+});
+
+test("recoverStuckRuns with NO injected bootedAt uses this process's real boot", async () => {
+  // The production signature. Every other store-driven test passes `bootedAt` in, so the wiring's
+  // `deps.bootedAt` default — and with it the real `BOOTED_AT` — was never exercised end to end.
+  const dbPath = join(tmpdir(), `workwell-recover-${crypto.randomUUID()}.sqlite`);
+  const db = await createSqliteD1(dbPath);
+  await db.exec(RUN_STORE_FLOOR_DDL.replace(/\n/g, " "));
+  const runs = new SqliteRunStore(db);
+  const events = new SqliteCaseEventStore(db);
+  try {
+    // The live run is placed just after the REAL boot instant rather than at `now`, and that is the
+    // whole point of the test. A run created at `now` survives under any cutoff at or before now, so
+    // it cannot tell the real boot from a substitute — `deps.bootedAt ?? Date.now()` (a cutoff one
+    // second back) spares it too, and passed an earlier version of this test. A run sitting just
+    // after boot is spared ONLY by a cutoff actually anchored to boot.
+    //
+    // That requires this process to have more uptime than the margin, or "just after boot" and "just
+    // before now" are the same instant. Waited for explicitly so the discrimination is deterministic
+    // rather than dependent on how long the suite happened to take to get here.
+    while (process.uptime() * 1000 < 2 * CUTOFF_MARGIN_MS_FOR_TEST) {
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    const realBoot = bootInstant(Date.now(), process.uptime());
+
+    // Created an hour before this process existed: orphaned under the real boot instant.
+    const orphan = await runs.createRun({ ...sampleRun(), startedAt: new Date(Date.now() - 60 * 60 * 1000).toISOString() });
+    await runs.markRunning(orphan.id);
+    // Created 100ms after this process booted — after boot, but further back than the margin.
+    const live = await runs.createRun({ ...sampleRun(), startedAt: new Date(realBoot + 100).toISOString() });
+    await runs.markRunning(live.id);
+
+    const recovered = await recoverStuckRuns({ runs, events }); // no bootedAt, no threshold
+
+    assert.deepEqual(recovered.map((r) => r.id), [orphan.id]);
+    assert.equal((await runs.getRun(live.id))?.status, "RUNNING");
+  } finally {
+    try {
+      rmSync(dbPath, { force: true });
+    } catch {
+      /* best effort */
+    }
+  }
+});
+
+test("bootInstant subtracts uptime in SECONDS from a millisecond clock", async () => {
+  // The arithmetic of `BOOTED_AT` itself, which no runtime assertion can pin precisely (a test's own
+  // process has only a second or two of uptime, so a wrong sign or a seconds/milliseconds mix-up
+  // lands within any tolerance loose enough not to be flaky). Extracted so it can be checked exactly.
+  assert.equal(bootInstant(1_000_000, 30), 970_000, "30s of uptime is 30,000ms BEFORE now");
+  assert.equal(bootInstant(1_000_000, 0), 1_000_000, "a just-started process booted now");
+  assert.ok(bootInstant(1_000_000, 30) < 1_000_000, "boot is in the past, never the future");
 });
 
 test("a clock that moved BACKWARDS sweeps nothing, rather than sweeping everything", async () => {
@@ -326,14 +388,25 @@ test("a clock that moved BACKWARDS sweeps nothing, rather than sweeping everythi
   assert.equal(statusOf.old, "RUNNING");
 });
 
-test("orphanThresholdMs with no arguments measures THIS process's real boot", async () => {
-  // The production default `BOOTED_AT` is otherwise never evaluated under assertion: every test above
-  // injects `bootedAt`, so `const BOOTED_AT = 0` (or a sign slip, or seconds-for-milliseconds) ships
-  // green while production sweeps nothing at all — or everything.
+test("orphanThresholdMs with no arguments measures PROCESS start, not module load", async () => {
+  // The production default `BOOTED_AT` is otherwise never evaluated under assertion, and a loose band
+  // here is not enough: `const BOOTED_AT = Date.now()` at module load — the exact regression the
+  // source comment warns about — lands within a few seconds of uptime and passes it.
+  //
+  // What separates the two is that this process necessarily spent time starting (node boot, tsx,
+  // imports) BEFORE this module was loaded. So a correct boot instant is measurably earlier than the
+  // moment this test file was evaluated; a module-load stamp is not.
   const uptimeMs = process.uptime() * 1000;
   const threshold = orphanThresholdMs();
+  const derivedBoot = Date.now() - threshold + CUTOFF_MARGIN_MS_FOR_TEST;
+
   assert.ok(
     threshold >= uptimeMs - 50 && threshold <= uptimeMs + 5_000,
-    `expected a threshold within a few seconds of this process's uptime (${Math.round(uptimeMs)}ms), got ${threshold}ms`,
+    `expected a threshold near this process's uptime (${Math.round(uptimeMs)}ms), got ${threshold}ms`,
+  );
+  assert.ok(
+    derivedBoot <= TEST_MODULE_LOADED_AT - 50,
+    `boot (${derivedBoot}) must precede this module's load (${TEST_MODULE_LOADED_AT}) by more than the ` +
+      `50ms of startup that certainly elapsed; a module-load stamp would make them equal`,
   );
 });

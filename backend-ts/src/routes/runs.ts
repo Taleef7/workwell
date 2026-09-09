@@ -135,9 +135,9 @@ function externalTriggeredBy(raw: unknown): string {
 // RUNNING until somebody happened to open the runs page — sixteen hours, once. And because the cutoff
 // was a flat 30 minutes sized for a "~5-6 min" run, the sweep failed a HEALTHY six-measure nightly at
 // 98.7% complete the moment the page was opened. `orphanThresholdMs` now ANCHORS the cutoff to this
-// process's boot, so neither trigger can reach past the moment the process booted. ("Anchors", not
-// "widens": on a fresh boot the window is about a second wide, and it only exceeds the old 30 minutes
-// once the process has been up that long.)
+// process's boot, so neither trigger can reach past the moment the process booted. "Anchors", not
+// "widens": the swept set is everything created before boot, back to the epoch — an eighteen-hour-old
+// orphan goes on the first sweep — while everything created after boot is spared however old it gets.
 //
 // Fire-and-forget: never blocks or fails the request.
 const sweptForOrphans = new WeakSet<object>();
