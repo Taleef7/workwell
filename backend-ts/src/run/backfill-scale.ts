@@ -63,8 +63,10 @@ export async function backfillScalePopulation(deps: ScaleBackfillDeps, args: Sca
   // double-writes. To re-seed with a different --subjects, roll back first (see header).
   // Only treat COMPLETED runs as fully seeded. A run in RUNNING or FAILED status means a prior
   // invocation crashed between createRun and finalizeRun — we must not skip that measure, or the
-  // dashboard will aggregate a partial population. The orphaned partial run will be marked FAILED
-  // by failStuckRuns after 30 min; the new COMPLETED run then becomes the rollup source.
+  // dashboard will aggregate a partial population. The orphaned partial run is marked FAILED by the
+  // recovery sweep on the NEXT process start (the cutoff is that process's boot — not a 30-minute
+  // age, which is what this said before 2026-09-09); the new COMPLETED run then becomes the rollup
+  // source either way, since this filter only counts COMPLETED.
   const seededMeasures = new Set(
     (await deps.runStore.listRuns(100_000))
       .filter((r) => r.triggeredBy === SCALE_TRIGGER && r.status === "COMPLETED" && r.scopeId)

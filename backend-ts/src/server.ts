@@ -86,6 +86,106 @@ async function main(): Promise<void> {
     // `official-measures=on` on the boot line the whole time.
     WORKWELL_OFFICIAL_MEASURES: process.env.WORKWELL_OFFICIAL_MEASURES,
   };
+
+  // Declared HERE rather than beside `shutdown()` below, because the boot-recovery retry loop reads
+  // it. It only works by TDZ timing otherwise — the loop's first read happens after an `await`, so
+  // `main()` has already run the declaration — and a later edit that removes an await ahead of it
+  // would turn that into a ReferenceError at boot.
+  let stopping = false;
+
+  // Boot recovery, HERE, once, because this is the only place that actually knows the process just
+  // started. A run is advanced by an in-process task that does not survive a restart, so a run left
+  // RUNNING by the previous process is orphaned and must be failed and audited.
+  //
+  // It also runs lazily on the first `/api/runs` access (`routes/runs.ts`), which is what covers a host
+  // that does not boot through this file — `mieweb dev`, the tests. That lazy trigger was the ONLY
+  // trigger until 2026-09-09, and the incident had two halves: an orphan stayed visible as RUNNING for
+  // sixteen hours because nobody opened the runs page, and when somebody did, the flat 30-minute
+  // cutoff failed a HEALTHY nightly at 98.7%. Both paths now share `orphanThresholdMs`, which is
+  // anchored to this process's boot.
+  //
+  // Deliberately NOT on the scheduler tick: that function opens with a compute-cost guardrail
+  // (`shouldSkipTickWithoutDb`) precisely to keep a serverless Postgres asleep, and a sweep on every
+  // 15-minute tick would undo it. Once per process is the right cadence — a run can only be orphaned
+  // by a restart, and a restart is what gets us here.
+  //
+  // Gated on DATABASE_URL for ONE reason: `schedulerEnv` is built from `process.env` and carries no
+  // `DB` binding, so on a stack without DATABASE_URL (`MIEWEB_TARGET=local`, the PR1 smoke test)
+  // `getStores` throws "StoresEnv.DB is required for the SQLite floor" — a permanent red line in the
+  // boot log of a supported configuration, and a false lead during triage. Those hosts are covered by
+  // the lazy trigger in `routes/runs.ts` instead.
+  //
+  // The gate passes on exactly the stacks that have a serverless Postgres, so this is now the first
+  // thing to touch the database: it opens the pool and runs the DDL at boot, waking Neon earlier than
+  // the scheduler's cost guardrail otherwise would. That is an accepted cost of having a boot sweep at
+  // all, not something the gate avoids — an earlier version of this comment claimed the opposite.
+  if ((process.env.DATABASE_URL ?? "").trim()) {
+    void (async () => {
+      const { getStores } = await import("./stores/factory.ts");
+      const { recoverStuckRuns } = await import("./run/recover-stuck-runs.ts");
+      const { resolveAlertChannels, emitAlert } = await import("./run/alert-channel.ts");
+
+      // Retried, because the most likely failure here is the most likely state of a serverless
+      // Postgres at boot: a cold start refusing the first connection. Without a retry that single
+      // rejection loses the sweep for the ENTIRE process — the scheduler tick deliberately does not
+      // sweep, so the only remaining trigger is somebody opening the runs page, which is exactly the
+      // sixteen-hour failure this boot sweep was added to remove. THREE attempts, at t=0s, t=15s and
+      // t=45s (the backoffs BETWEEN them are 15s and 30s — one delay fewer than there are attempts,
+      // which an earlier version got wrong, leaving a third delay that could never be reached and a
+      // comment claiming ~90s for what is 45s). The cutoff is anchored to boot, so a later attempt is
+      // no less correct than the first.
+      const backoffsMs = [15_000, 30_000];
+      const attempts = backoffsMs.length + 1;
+      const channels = resolveAlertChannels(schedulerEnv);
+      for (let attempt = 0; attempt < attempts; attempt++) {
+        // Never START a sweep once shutdown has begun. `shutdown()` force-exits after the grace
+        // window without awaiting this, so a sweep begun here can flip rows to FAILED and be killed
+        // before `recoverStuckRuns` writes their RUN_RECOVERED events — a state change with no audit
+        // entry, which the hard rule does not allow. Abandoning the sweep is free: the cutoff belongs
+        // to this process, and the next process sweeps from its own boot.
+        if (stopping) {
+          console.warn("[workwell] boot recovery abandoned — shutdown in progress; the next boot sweeps");
+          return;
+        }
+        try {
+          const stores = await getStores(schedulerEnv);
+          const recovered = await recoverStuckRuns({
+            runs: stores.runs,
+            events: stores.events,
+            alertChannels: channels,
+          });
+          if (recovered.length > 0) {
+            console.warn(`[workwell] boot recovery: ${recovered.length} orphaned run(s) failed and audited`);
+          }
+          return;
+        } catch (e: unknown) {
+          const msg = e instanceof Error ? e.message : String(e);
+          const last = attempt === attempts - 1;
+          console.error(
+            `[workwell] boot recovery attempt ${attempt + 1}/${attempts} failed${last ? "" : ", retrying"}: ${msg}`,
+          );
+          if (last) {
+            // Exhaustion is ALERTED, not just logged. Returning quietly here would leave the process
+            // serving traffic with no sweep having run and nothing anywhere saying so — the failure
+            // is invisible precisely when an orphan is most likely to exist.
+            await emitAlert(channels, {
+              kind: "RUN_RECOVERED",
+              at: new Date().toISOString(),
+              status: "FAILED",
+              message:
+                `Boot recovery failed after ${attempts} attempts (${msg}). No stuck-run sweep ran in this ` +
+                `process; an orphaned run stays RUNNING until the next restart.`,
+            }).catch(() => {});
+            return;
+          }
+          await new Promise((r) => setTimeout(r, backoffsMs[attempt]).unref());
+        }
+      }
+    })().catch((e: unknown) =>
+      console.error("[workwell] boot recovery failed", e instanceof Error ? e.message : e),
+    );
+  }
+
   const schedulerInterval = setInterval(() => {
     void schedulerTick(schedulerEnv).catch((e: unknown) =>
       console.error("[workwell] scheduler tick error", e instanceof Error ? e.message : e),
@@ -97,7 +197,6 @@ async function main(): Promise<void> {
     // can actually reach the suspended state instead of being re-woken on every period.
   }, 15 * 60 * 1000);
 
-  let stopping = false;
   const shutdown = (signal: string): void => {
     if (stopping) return;
     stopping = true;
