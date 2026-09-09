@@ -12,6 +12,7 @@ import type { CaseEventStore } from "../stores/case-event-store.ts";
 import type { OutcomeStore } from "../stores/outcome-store.ts";
 import type { AppointmentStore } from "../stores/appointment-store.ts";
 import { toCaseDetail, type CaseDetail } from "./case-detail-read-model.ts";
+import { outcomeForCase } from "./case-outcome.ts";
 
 /** 400 — missing/invalid appointment fields. */
 export class AppointmentError extends Error {}
@@ -33,8 +34,7 @@ export interface ScheduleInput {
 async function buildDetail(deps: AppointmentDeps, caseId: string): Promise<CaseDetail | null> {
   const c = await deps.cases.getCase(caseId);
   if (!c) return null;
-  const outcomes = await deps.outcomes.listOutcomes(c.lastRunId);
-  const outcome = outcomes.find((o) => o.subjectId === c.employeeId && o.measureId === c.measureId) ?? null;
+  const outcome = await outcomeForCase(deps.outcomes, c.lastRunId, c.employeeId, c.measureId);
   const timeline = await deps.events.caseTimeline(caseId);
   const latest = await deps.events.latestOutreachDeliveryStatus(caseId);
   return toCaseDetail(c, outcome, timeline, latest);

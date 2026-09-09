@@ -25,6 +25,7 @@ import { computeDataReadiness } from "../measure/data-readiness.ts";
 import { complianceRateOf } from "../program/rollup-shared.ts";
 import { AGE_BANDS, isAgeBand, isSex, matchesSubjectFilters } from "../compliance/subject-filters.ts";
 import type { JsonRecord } from "./tool-audit.ts";
+import { outcomeForCase } from "../case/case-outcome.ts";
 
 export interface McpToolDeps {
   caseStore: CaseStore;
@@ -190,8 +191,7 @@ async function getCase(args: JsonRecord, deps: McpToolDeps): Promise<unknown> {
   if (!c) return safeError("CASE_NOT_FOUND", "Case not found");
   const directory = directoryForSubjects(deps, [c.employeeId]);
   if (!profileSubjectMatcher(directory.employeeById)(c.employeeId)) return safeError("CASE_NOT_FOUND", "Case not found");
-  const outcomes = await deps.outcomeStore.listOutcomes(c.lastRunId);
-  const outcome = outcomes.find((o) => o.subjectId === c.employeeId && o.measureId === c.measureId) ?? null;
+  const outcome = await outcomeForCase(deps.outcomeStore, c.lastRunId, c.employeeId, c.measureId);
   const detail = toCaseDetail(c, outcome, [], null, undefined, directory.employeeById);
   const evidence = detail.evidenceJson ?? {};
   const whyFlagged = (evidence as JsonRecord).why_flagged ?? {};
@@ -356,8 +356,7 @@ async function explainOutcome(args: JsonRecord, deps: McpToolDeps): Promise<unkn
   if (!c) return safeError("CASE_NOT_FOUND", "Case not found");
   const directory = directoryForSubjects(deps, [c.employeeId]);
   if (!profileSubjectMatcher(directory.employeeById)(c.employeeId)) return safeError("CASE_NOT_FOUND", "Case not found");
-  const outcomes = await deps.outcomeStore.listOutcomes(c.lastRunId);
-  const outcome = outcomes.find((o) => o.subjectId === c.employeeId && o.measureId === c.measureId) ?? null;
+  const outcome = await outcomeForCase(deps.outcomeStore, c.lastRunId, c.employeeId, c.measureId);
   const detail = toCaseDetail(c, outcome, [], null, undefined, directory.employeeById);
   const wf = ((detail.evidenceJson ?? {}) as JsonRecord).why_flagged as JsonRecord | undefined;
   const val = (k: string, fb: string): string => (wf && wf[k] != null ? String(wf[k]) : fb);
