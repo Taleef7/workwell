@@ -86,6 +86,11 @@ export class SqliteCaseEventStore implements CaseEventStore {
     await this.auditStmt(input).run();
   }
 
+  /** A loop on the floor: the batching exists to save network round trips, and SQLite has none. */
+  async appendAudits(inputs: AppendAuditInput[]): Promise<void> {
+    for (const input of inputs) await this.auditStmt(input).run();
+  }
+
   async hasAuditEvent(input: Pick<AppendAuditInput, "eventType" | "entityId" | "refMeasureVersionId">): Promise<boolean> {
     const row = await this.db
       .prepare(

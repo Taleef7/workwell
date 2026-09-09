@@ -77,6 +77,45 @@ export class PgCaseEventStore implements CaseEventStore {
     await this.pool.query(PgCaseEventStore.AUDIT_SQL, PgCaseEventStore.auditParams(input));
   }
 
+  async appendAudits(inputs: AppendAuditInput[]): Promise<void> {
+    if (inputs.length === 0) return;
+    // Sub-chunked: 9 bind parameters per row against Postgres' 65535 cap, so 500 rows is 4,500 —
+    // the same shape and the same headroom as `recordOutcomes`.
+    const CHUNK = 500;
+    for (let start = 0; start < inputs.length; start += CHUNK) {
+      const slice = inputs.slice(start, start + CHUNK);
+      const binds: unknown[] = [];
+      const tuples = slice.map((input) => {
+        const b = binds.length;
+        binds.push(...PgCaseEventStore.auditParams(input));
+        return `($${b + 1}, $${b + 2}, $${b + 3}, $${b + 4}, $${b + 5}, $${b + 6}, $${b + 7}, $${b + 8}::jsonb, $${b + 9})`;
+      });
+      try {
+        await this.pool.query(
+          `INSERT INTO ${SPIKE_SCHEMA}.audit_events
+            (event_type, entity_type, entity_id, actor, ref_run_id, ref_case_id, ref_measure_version_id, payload_json, occurred_at)
+            VALUES ${tuples.join(", ")}`,
+          binds,
+        );
+      } catch {
+        // One multi-row INSERT is all-or-nothing, so a single malformed payload would otherwise cost
+        // this whole sub-chunk — up to 500 ledger entries — against a hard rule that every state
+        // change is audited. Fall back to a row at a time so the blast radius is the bad row, exactly
+        // the "losers go through the proven path" shape the case store uses. The last row to fail
+        // propagates, so the caller still hears that the ledger is incomplete.
+        let lastError: unknown = null;
+        for (const input of slice) {
+          try {
+            await this.appendAudit(input);
+          } catch (err) {
+            lastError = err;
+          }
+        }
+        if (lastError) throw lastError;
+      }
+    }
+  }
+
   async hasAuditEvent(input: Pick<AppendAuditInput, "eventType" | "entityId" | "refMeasureVersionId">): Promise<boolean> {
     const { rows } = await this.pool.query(
       `SELECT 1 FROM ${SPIKE_SCHEMA}.audit_events

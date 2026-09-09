@@ -64,6 +64,16 @@ export interface PacketExportInput {
 export interface CaseEventStore {
   insertAction(input: InsertActionInput): Promise<void>;
   appendAudit(input: AppendAuditInput): Promise<void>;
+  /**
+   * Many audit events in one statement. Same rows as N `appendAudit` calls; the ledger cannot tell the
+   * difference. The run pipeline writes one of these per evaluation chunk instead of one insert per
+   * case transition — on a nightly where ~15,000 cases close out-of-population that was 15,000
+   * sequential round trips on top of the upserts themselves.
+   *
+   * `[]` is a no-op, never a statement. Ordering within the batch follows the input, so a reader
+   * paging the ledger oldest-first sees the chunk in the order the run produced it.
+   */
+  appendAudits(inputs: AppendAuditInput[]): Promise<void>;
   /** True when an event with the same event type, entity id and measure version already exists. */
   hasAuditEvent(input: Pick<AppendAuditInput, "eventType" | "entityId" | "refMeasureVersionId">): Promise<boolean>;
   /**

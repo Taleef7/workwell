@@ -15,7 +15,7 @@
  */
 import type { RunStore } from "../stores/run-store.ts";
 import type { OutcomeStore, OutcomeRecord } from "../stores/outcome-store.ts";
-import type { CaseStore, CaseRecord } from "../stores/case-store.ts";
+import type { CaseStore, CaseRecord, UpsertCaseInput } from "../stores/case-store.ts";
 import { ACTIVE_CASE_STATUSES } from "../case/case-logic.ts";
 import type { EvaluateMeasureBinding, MeasureOutcome } from "@work-well/measure-engine";
 import { OFFICIAL_LOGIC_VERSION_PREFIX, type RoutedEngine } from "../wiring/executor-router.ts";
@@ -60,7 +60,7 @@ import { effectivePeriodWarning } from "../wiring/official-executor-adapter.ts";
 import type { QualitySnapshotStore } from "../stores/quality-snapshot-store.ts";
 import type { EvalStateStore } from "../stores/eval-state-store.ts";
 import type { ValueSetStore } from "../stores/value-set-store.ts";
-import type { CaseEventStore } from "../stores/case-event-store.ts";
+import type { AppendAuditInput, CaseEventStore } from "../stores/case-event-store.ts";
 import { materializeRun } from "../quality/materialize-run.ts";
 import { IncrementalCache } from "./incremental/incremental-eval.ts";
 import {
@@ -117,7 +117,7 @@ export interface RunPipelineDeps {
    *  snapshots (#E16), best-effort — a snapshot failure never fails the run. Absent ⇒ no materialization
    *  (non-run paths like impact-preview/case-rerun simply don't pass them). */
   qualitySnapshots?: QualitySnapshotStore;
-  events?: Pick<CaseEventStore, "appendAudit">;
+  events?: Pick<CaseEventStore, "appendAudit" | "appendAudits">;
   /**
    * The AUTHENTICATED actor for audit attribution (from the auth middleware), kept SEPARATE from the
    * run's `triggeredBy` trigger-label. `triggeredBy` is caller-influenced (and a trigger *type*, not a
@@ -693,6 +693,26 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
   const ippByMeasure = new Map<string, boolean[]>();
 
   for (const chunkItems of chunks) {
+    /**
+     * The chunk's case upserts, collected during the evaluation loop and applied in ONE store call at
+     * the end of it. Per CHUNK, like everything else here: memory stays bounded at any roster size,
+     * and a chunk's cases are durable before the next chunk starts.
+     *
+     * A mid-run failure is now coarser than it was, and in the recoverable direction: previously rows
+     * 1..k of a chunk had cases when row k+1 failed, and now the chunk's cases are all-or-nothing
+     * against outcomes that are already persisted. Outcomes without cases is the state the next run
+     * repairs by re-upserting them; cases without outcomes would not be.
+     *
+     * The extra fields travel alongside the store input because the audit payload needs them and the
+     * item they came from is out of scope by the time the batch returns.
+     */
+    const pendingCaseUpserts: {
+      input: UpsertCaseInput;
+      outcomeStatus: string;
+      measureId: string;
+      subjectId: string;
+      period: string;
+    }[] = [];
     // Per CHUNK, not per run. A measure whose batch failed in one chunk is retried in the next: right
     // for a transient executor failure, and costing nothing for a systematic one, since the refusal
     // still reaches every subject of every chunk through the same per-subject isolation below.
@@ -937,9 +957,13 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
       throw err;
     }
     // PERSISTED, so this much is true even if the case pass below throws mid-chunk: `evaluated` and
-    // `failures` count rows that are now in the store, and nothing else. `compliant`/`nonCompliant`
-    // are advanced per record below, as each one's case is acted on, so `failPlannedRun` reports
-    // exactly what the run completed rather than a per-chunk lower bound.
+    // `failures` count rows that are now in the store, and nothing else.
+    //
+    // `compliant`/`nonCompliant` are advanced in the loop below as each OUTCOME is read — which, since
+    // the case pass moved to one batched call at the end of the chunk, is now BEFORE any of the
+    // chunk's cases are written rather than as each case is acted on. They still describe outcomes
+    // that are durably in the store (the `recordOutcomes` above committed them), so `failPlannedRun`
+    // still reports what the run persisted; what they no longer imply is that a case exists for each.
     planned.progress.evaluated += records.length;
     planned.progress.failures = failures;
 
@@ -1013,75 +1037,137 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
         if (gatedBySegment.sites.size < 12) gatedBySegment.sites.add(item.employee.site ?? "(no site)");
         gatedBySegment.measures.add(item.measureId);
       }
+      // COLLECTED, not written here. The gate below is unchanged and still decides membership per item
+      // — it is the close-only bypass and the segment applicability rule (ADR-043), and neither moves
+      // into the store. What changed is WHEN the write happens: the chunk's upserts go to the store in
+      // one batched call after this loop, because a per-pair `await` was ~240,000 sequential round
+      // trips to Neon on the pilot's six-measure nightly.
       if (deps.caseStore && (closeOnly || (!isLiveWebChartSubject && segmentApplicable()))) {
-        const upserted = await deps.caseStore.upsertFromOutcome({
-          runId: runId,
-          subjectId: item.employee.externalId,
-          measureId: item.measureId,
-          evaluationPeriod: period,
+        pendingCaseUpserts.push({
+          input: {
+            runId: runId,
+            subjectId: item.employee.externalId,
+            measureId: item.measureId,
+            evaluationPeriod: period,
+            outcomeStatus: status,
+            evidence,
+            outOfPopulation,
+          },
           outcomeStatus: status,
-          evidence,
-          outOfPopulation,
+          measureId: item.measureId,
+          subjectId: item.employee.externalId,
+          period,
         });
-        // Audit the case transition (Fable H1 — the population pipeline previously wrote NO case audit
-        // events, violating the "every state change writes audit_event" hard rule). Idempotent
-        // re-confirms (UNCHANGED) and no-ops (null — respected human closure / already-terminal) write
-        // nothing, so a nightly run records real transitions only, not one event per still-open case.
-        //
-        // Best-effort at the run boundary (Codex P1): the disposition is only known AFTER the upsert, so
-        // we cannot write the audit row first (the canonical recordCaseEvent audit-before-mutate order) —
-        // and a pre-read-and-plan in the pipeline would race the store's own re-plan under concurrent
-        // runs, auditing a disposition that didn't happen. So we audit after the mutation but never let a
-        // transient audit_events failure throw: an unhandled reject here would abort the loop, skip
-        // finalizeRun, and leave the run stuck RUNNING (sync path 500) or marked FAILED (async) AFTER the
-        // case was already mutated. Instead we log the ledger gap (mirrors the RUN_COMPLETED + quality
-        // snapshot best-effort writes below) so an otherwise-complete run still finalizes.
-        if (deps.events && upserted) {
-          const eventType = CASE_EVENT_FOR[upserted.disposition];
-          if (eventType) {
-            await deps.events
-              .appendAudit({
-                eventType,
-                entityType: "case",
-                entityId: upserted.id,
-                actor: auditActor,
-                refRunId: runId,
-                refCaseId: upserted.id,
-                refMeasureVersionId: item.measureId,
-                payload: {
-                  disposition: upserted.disposition,
-                  outcomeStatus: status,
-                  status: upserted.status,
-                  // WHY a closure closed — AUTO_RESOLVED, EXCLUDED or OUT_OF_POPULATION (ADR-078). Without
-                  // it ~15,000 out-of-population closures read like auto-resolves in the ledger, and an
-                  // auditor would have to join `cases` to tell them apart (own review).
-                  ...(upserted.closedReason ? { closedReason: upserted.closedReason } : {}),
-                  // The action the case now shows. Since ADR-074 d13 an UPDATED can be a next_action
-                  // change under an unchanged status; without it here the event would be
-                  // indistinguishable from the silent refresh it replaced.
-                  nextAction: upserted.nextAction,
-                  subjectId: item.employee.externalId,
-                  measureId: item.measureId,
-                  evaluationPeriod: period,
-                  runId: runId,
-                },
-              })
-              .catch((err) => {
-                void deps.runStore
-                  .appendLog(
-                    runId,
-                    "WARN",
-                    `Case audit (${eventType} ${upserted.id}) failed — ledger gap: ${String((err as Error)?.message ?? err)}`,
-                  )
-                  .catch(() => {});
-              });
-          }
-        }
       }
       if (status === "COMPLIANT") compliant++;
       else if (NON_COMPLIANT.has(status)) nonCompliant++;
       planned.progress.compliant = compliant;
       planned.progress.nonCompliant = nonCompliant;
+    }
+
+    // Phase 3 of the chunk: the case pass, in one call, then its audit events in one more.
+    //
+    // Every §4 guarantee is the store's and is unchanged — this only stopped asking for them one row
+    // at a time. The ORDER is preserved too: `upsertFromOutcomes` returns one result per input in
+    // input order, so the audit loop below is a zip over the same list the gate above built.
+    if (deps.caseStore && pendingCaseUpserts.length > 0) {
+      // LAST-WINS on a repeated key, which is what the per-row loop did: it applied both in order and
+      // the second overwrote the first. The store REFUSES a duplicate inside one batch — a set-based
+      // UPDATE would otherwise apply one of the two arbitrarily — so without this collapse a repeat
+      // would abort the chunk and fail a three-hour run outright, where before it was absorbed.
+      //
+      // A repeat is not hypothetical: the live WebChart path builds items per fetched bundle
+      // (`for (const bundle of bundles)`), so two bundles resolving to the same `wc|<id>` — a
+      // duplicated Patient on the tenant — produce two items for one key, and both land in the same
+      // chunk because chunking is keyed on the subject. Collapsed rather than refused, and logged,
+      // because the run finishing is worth more than the surprise, and the duplication upstream is
+      // worth someone knowing about.
+      const byKey = new Map<string, (typeof pendingCaseUpserts)[number]>();
+      for (const p of pendingCaseUpserts) byKey.set(`${p.subjectId}\u0000${p.measureId}\u0000${p.period}`, p);
+      const deduped = [...byKey.values()];
+      if (deduped.length !== pendingCaseUpserts.length) {
+        void deps.runStore
+          .appendLog(
+            runId,
+            "WARN",
+            `${pendingCaseUpserts.length - deduped.length} duplicate (subject, measure, period) case upsert(s) in one chunk — ` +
+              `collapsed last-wins. The roster produced the same key more than once; check for a duplicated subject upstream.`,
+          )
+          .catch(() => {});
+      }
+      pendingCaseUpserts.length = 0;
+      pendingCaseUpserts.push(...deduped);
+
+      const upserts = await deps.caseStore.upsertFromOutcomes(pendingCaseUpserts.map((p) => p.input));
+
+      // Audit the case transitions (Fable H1 — the population pipeline previously wrote NO case audit
+      // events, violating the "every state change writes audit_event" hard rule). Idempotent
+      // re-confirms (UNCHANGED) and no-ops (null — respected human closure / already-terminal) write
+      // nothing, so a nightly run records real transitions only, not one event per still-open case.
+      //
+      // Still audited AFTER the mutation (Codex P1): the disposition is only known once the upsert has
+      // happened, so the canonical audit-before-mutate order is not available here, and a
+      // pre-read-and-plan in the pipeline would race the store's own re-plan under concurrent runs and
+      // audit a disposition that did not happen.
+      //
+      // Still best-effort: an unhandled reject here would abort the loop, skip finalizeRun, and leave
+      // the run stuck RUNNING (sync path 500) or marked FAILED (async) AFTER the cases were already
+      // mutated. One catch now covers the chunk's whole ledger write rather than each row's, and names
+      // the count so the size of a gap is legible (mirrors the RUN_COMPLETED + quality snapshot
+      // best-effort writes below).
+      if (deps.events) {
+        const audits: AppendAuditInput[] = [];
+        for (const [index, upserted] of upserts.entries()) {
+          if (!upserted) continue;
+          const eventType = CASE_EVENT_FOR[upserted.disposition];
+          if (!eventType) continue;
+          const p = pendingCaseUpserts[index]!;
+          audits.push({
+            eventType,
+            entityType: "case",
+            entityId: upserted.id,
+            actor: auditActor,
+            refRunId: runId,
+            refCaseId: upserted.id,
+            refMeasureVersionId: p.measureId,
+            payload: {
+              disposition: upserted.disposition,
+              outcomeStatus: p.outcomeStatus,
+              status: upserted.status,
+              // WHY a closure closed — AUTO_RESOLVED, EXCLUDED or OUT_OF_POPULATION (ADR-078). Without
+              // it ~15,000 out-of-population closures read like auto-resolves in the ledger, and an
+              // auditor would have to join `cases` to tell them apart (own review).
+              ...(upserted.closedReason ? { closedReason: upserted.closedReason } : {}),
+              // The action the case now shows. Since ADR-074 d13 an UPDATED can be a next_action
+              // change under an unchanged status; without it here the event would be
+              // indistinguishable from the silent refresh it replaced.
+              nextAction: upserted.nextAction,
+              subjectId: p.subjectId,
+              measureId: p.measureId,
+              evaluationPeriod: p.period,
+              runId: runId,
+            },
+          });
+        }
+        // `try`, not a bare `.catch()` on the returned promise. A `.catch()` only handles a REJECTION;
+        // if `appendAudits` is missing or throws synchronously the TypeError never reaches it and
+        // escapes the chunk loop, taking the rest of the run — the cycle rollover, the terminal event —
+        // with it. The old per-row call had the same shape and the same latent hole; a ledger write is
+        // best-effort at this boundary either way.
+        if (audits.length > 0) {
+          await Promise.resolve()
+            .then(() => deps.events!.appendAudits(audits))
+            .catch((err: unknown) => {
+              void deps.runStore
+                .appendLog(
+                  runId,
+                  "WARN",
+                  `Case audit batch (${audits.length} event(s)) failed — ledger gap: ${String((err as Error)?.message ?? err)}`,
+                )
+                .catch(() => {});
+            });
+        }
+      }
     }
   }
 

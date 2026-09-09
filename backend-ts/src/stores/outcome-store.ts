@@ -132,8 +132,17 @@ export interface OutcomeStore {
    * means sums every measure into one number and serves it under each measure's name — which is what
    * the programs overview did until 2026-09-08. Pushed into SQL rather than filtered after the read:
    * on the pilot's six-measure nightly the app-side filter would page 120,000 rows once per measure.
+   *
+   * `opts.subjectId` narrows it to ONE subject, which with `measureId` and `limit: 1` is the single row
+   * a case detail needs. That page used to read the run unpaged and `.find()` the row in JavaScript:
+   * against a run holding 87,000 rows it measured 43s on a cold read and ~4s warm, for one row. Both
+   * filters are index-friendly — `outcomes` carries `(subject_id, measure_id, evaluation_period)` and
+   * `(run_id)`.
    */
-  listOutcomes(runId: string, opts?: { limit?: number; offset?: number; measureId?: string }): Promise<OutcomeRecord[]>;
+  listOutcomes(
+    runId: string,
+    opts?: { limit?: number; offset?: number; measureId?: string; subjectId?: string },
+  ): Promise<OutcomeRecord[]>;
   getOutcomeById(id: string): Promise<OutcomeRecord | null>;
   /**
    * Delete outcome rows older than `cutoff`, KEEPING four things (ADR-073, amended by ADR-077 d3):

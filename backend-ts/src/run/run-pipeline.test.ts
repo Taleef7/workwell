@@ -403,7 +403,7 @@ test("a degraded Patient-only WebChart bundle evaluates MISSING_DATA and reports
       employees: [],
       webChartEnv: WEBCHART_ENV,
       webChartClient: fixtureWebChartClient([patientOnly("degraded-patient", true)]),
-      events: { async appendAudit(input) { audits.push(input); } },
+      events: { async appendAudit(input) { audits.push(input); }, async appendAudits(inputs) { for (const i of inputs) await this.appendAudit(i); } },
     }, {
       scopeType: "MEASURE",
       measureId: "audiogram",
@@ -479,7 +479,7 @@ test("live preparation failure finalizes FAILED before outcomes and preserves th
       employees: [],
       webChartEnv: WEBCHART_ENV,
       webChartClient: fixtureWebChartClient([patientOnly("last-good")]),
-      events: { async appendAudit(input) { audits.push({ eventType: input.eventType, payload: input.payload }); } },
+      events: { async appendAudit(input) { audits.push({ eventType: input.eventType, payload: input.payload }); }, async appendAudits(inputs) { for (const i of inputs) await this.appendAudit(i); } },
     };
     const success = await executeManualRun(base, { scopeType: "MEASURE", measureId: "audiogram" });
     const failingClient: WebChartClient = {
@@ -638,7 +638,7 @@ test("a live preparation failure still finalizes FAILED when its terminal audit 
         kind: "failure-test",
         async fetchPatientPayloads() { throw new Error("population unavailable"); },
       },
-      events: { async appendAudit() { throw new Error("audit unavailable"); } },
+      events: { async appendAudit() { throw new Error("audit unavailable"); }, async appendAudits() { throw new Error("audit unavailable"); } },
     };
     const planned = await planManualRun(failing, { scopeType: "MEASURE", measureId: "audiogram" });
     await finishOrFail(failing, planned);
@@ -717,6 +717,7 @@ test("Codex P1: a failing case-audit write never fails an otherwise-complete run
         if (input.entityType === "case") throw new Error("audit_events insert failed");
         // RUN_COMPLETED (entityType "run") succeeds — it is independently best-effort.
       },
+      async appendAudits(inputs) { for (const i of inputs) await this.appendAudit(i); },
     },
   };
   // The default-date ALL_PROGRAMS run produces non-compliant subjects → case upserts → CASE_* audit
@@ -802,6 +803,7 @@ test("Fable H1: a population run emits RUN_COMPLETED + case audit events (the ha
       async appendAudit(input) {
         captured.push({ eventType: input.eventType, entityType: input.entityType, refRunId: input.refRunId, actor: input.actor, payload: input.payload });
       },
+      async appendAudits(inputs) { for (const i of inputs) await this.appendAudit(i); },
     },
   };
   // triggeredBy is a spoofable body field / trigger label; the audit actor must ignore it.
@@ -1578,7 +1580,7 @@ test("ADR-078: a subject the official logic finds OUTSIDE the initial population
     } as unknown as RunPipelineDeps["engine"],
     employees: EMPLOYEES.slice(0, 2),
     actor: "cm@workwell.dev",
-    events: { async appendAudit(input) { captured.push({ eventType: input.eventType, payload: input.payload }); } },
+    events: { async appendAudit(input) { captured.push({ eventType: input.eventType, payload: input.payload }); }, async appendAudits(inputs) { for (const i of inputs) await this.appendAudit(i); } },
   };
   const [first, second] = EMPLOYEES.slice(0, 2).map((e) => e.externalId) as [string, string];
   outsideIds = new Set([second]);
@@ -1617,7 +1619,7 @@ test("ADR-078 is gated on official routing: an AUTHORED measure's out-of-populat
     } as unknown as RunPipelineDeps["engine"],
     employees: EMPLOYEES.slice(0, 1),
     actor: "cm@workwell.dev",
-    events: { async appendAudit() {} },
+    events: { async appendAudit() {}, async appendAudits() {} },
   };
   await executeManualRun(deps, { scopeType: "MEASURE", measureId: "audiogram", triggeredBy: "test" });
   const cases = await caseStore.listCases({ limit: 10 });

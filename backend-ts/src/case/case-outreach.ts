@@ -16,6 +16,7 @@ import type { OutcomeStore } from "../stores/outcome-store.ts";
 import { toCaseDetail, type CaseDetail } from "./case-detail-read-model.ts";
 import { resolveChannel, type ChannelType, type ChannelEnv, type OutreachChannel } from "./outreach-channel.ts";
 import { DEPLOYMENT_PROFILE, subjectNoun } from "../config/deployment-profile.ts";
+import { outcomeForCase } from "./case-outcome.ts";
 
 interface OutreachTemplateContent {
   id: string | null;
@@ -169,8 +170,7 @@ function computeDueDate(evidence: Record<string, unknown>, evaluationPeriod: str
 }
 
 async function loadOutcomeEvidence(deps: OutreachDeps, lastRunId: string, employeeId: string, measureId: string) {
-  const outcomes = await deps.outcomes.listOutcomes(lastRunId);
-  return outcomes.find((o) => o.subjectId === employeeId && o.measureId === measureId) ?? null;
+  return outcomeForCase(deps.outcomes, lastRunId, employeeId, measureId);
 }
 
 async function buildDetail(deps: OutreachDeps, caseId: string): Promise<CaseDetail | null> {
