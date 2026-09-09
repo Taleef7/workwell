@@ -237,6 +237,41 @@ export class SqliteCaseStore implements CaseStore {
     return fallback ? { ...toRecord(fallback), disposition: plan.disposition! } : null;
   }
 
+  /**
+   * The floor's `upsertFromOutcomes` is a LOOP over the single-row upsert, and deliberately so.
+   *
+   * The batching exists to collapse network round trips to Neon; SQLite is a local file with none, so
+   * a set-based rewrite here would buy nothing and would be a second implementation of the subtlest
+   * rule in the store (ADR-076 d2's compare-and-set) to keep in step with the first.
+   *
+   * State it plainly because it has a cost: every batch-shaped contract test passes on this floor
+   * without exercising any set-based SQL. The Postgres ceiling is where that path is really tested —
+   * `docker compose -f infra/docker-compose.yml up -d postgres`, then
+   * `node --import tsx --test src/stores/postgres/store-postgres.test.ts`. A green floor is not
+   * evidence for the ceiling here.
+   *
+   * The duplicate-key refusal is NOT skipped: it is part of the contract rather than an artifact of
+   * the set-based write, so a caller cannot develop against the floor and discover it in production.
+   */
+  async upsertFromOutcomes(inputs: UpsertCaseInput[]): Promise<(UpsertedCase | null)[]> {
+    const seen = new Set<string>();
+    for (const i of inputs) {
+      // NUL-joined, matching the ceiling. A space separator would make the floor throw on a batch the
+      // ceiling accepts, whenever a subject id contains a space — the two stores must agree on what a
+      // duplicate IS, or a caller can develop against one and be refused by the other.
+      const k = `${i.subjectId}\u0000${i.measureId}\u0000${i.evaluationPeriod}`;
+      if (seen.has(k)) {
+        throw new Error(
+          `upsertFromOutcomes: duplicate key in one batch (${i.subjectId}, ${i.measureId}, ${i.evaluationPeriod}) — a set-based update would apply one of them arbitrarily`,
+        );
+      }
+      seen.add(k);
+    }
+    const out: (UpsertedCase | null)[] = [];
+    for (const input of inputs) out.push(await this.upsertFromOutcome(input));
+    return out;
+  }
+
   async getCase(id: string): Promise<CaseRecord | null> {
     const row = await this.db.prepare(`SELECT ${COLS} FROM cases WHERE id = ?`).bind(id).first<CaseRow>();
     return row ? toRecord(row) : null;
@@ -288,6 +323,10 @@ export class SqliteCaseStore implements CaseStore {
     if (query.statuses?.length) {
       where.push(`status IN (${query.statuses.map(() => "?").join(", ")})`);
       binds.push(...query.statuses);
+    }
+    if (query.employeeId) {
+      where.push("employee_id = ?");
+      binds.push(query.employeeId);
     }
     if (query.measureId) {
       where.push("measure_id = ?");

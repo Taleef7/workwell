@@ -31,6 +31,14 @@ interface CaseRow {
 const iso = (v: Date | string | null): string | null => (v == null ? null : v instanceof Date ? v.toISOString() : v);
 const COLS =
   "id, employee_id, measure_id, evaluation_period, status, priority, assignee, next_action, next_action_source, current_outcome_status, last_run_id, created_at, updated_at, closed_at, closed_reason, closed_by";
+/**
+ * The same list qualified to the `c` alias. The batched UPDATE joins a `VALUES` alias that carries
+ * `employee_id`/`measure_id`/`evaluation_period` too, so an unqualified RETURNING is ambiguous and
+ * Postgres refuses the statement.
+ */
+const COLS_C = COLS.split(", ")
+  .map((col) => `c.${col}`)
+  .join(", ");
 const T = `${SPIKE_SCHEMA}.cases`;
 
 const toRecord = (r: CaseRow): CaseRecord => ({
@@ -215,6 +223,228 @@ export class PgCaseStore implements CaseStore {
     return fallback[0] ? { ...toRecord(fallback[0]), disposition: plan.disposition! } : null;
   }
 
+  /**
+   * The chunk-at-a-time upsert (see `CaseStore.upsertFromOutcomes`). Four statements per sub-chunk
+   * instead of two round trips per row.
+   *
+   * The shape is: read every existing row for the batch's keys in ONE query, plan in memory with the
+   * same pure `planCaseUpsert`/`planNextAction` the per-row path uses, then one multi-row INSERT and
+   * one set-based UPDATE. `planNextAction` stays the single definition of the ownership rule — SQL
+   * only compares the values we read and writes the values we already decided, exactly as the
+   * single-row CAS does. Expressing the rule as a SQL `CASE` would make the pure function dead on the
+   * path that matters and its unit tests vacuous.
+   *
+   * Anything that does not go cleanly through the batch — a key another writer inserted first, a row
+   * whose `next_action` moved under us — falls back to `upsertFromOutcome` for that row alone. That
+   * path already re-reads, re-plans, retries three times and then writes the action-preserving
+   * fallback; re-implementing it here would be a second copy of the subtlest rule in the store.
+   */
+  async upsertFromOutcomes(inputs: UpsertCaseInput[]): Promise<(UpsertedCase | null)[]> {
+    if (inputs.length === 0) return [];
+    const now = new Date().toISOString();
+    const keyOf = (i: Pick<UpsertCaseInput, "subjectId" | "measureId" | "evaluationPeriod">) =>
+      `${i.subjectId}\u0000${i.measureId}\u0000${i.evaluationPeriod}`;
+
+    // A duplicate key would be applied once, from an arbitrary tuple, by the set-based UPDATE — where
+    // the sequential path applied both in order. Refuse rather than silently pick.
+    const seen = new Set<string>();
+    for (const i of inputs) {
+      const k = keyOf(i);
+      if (seen.has(k)) {
+        throw new Error(
+          `upsertFromOutcomes: duplicate key in one batch (${i.subjectId}, ${i.measureId}, ${i.evaluationPeriod}) — a set-based update would apply one of them arbitrarily`,
+        );
+      }
+      seen.add(k);
+    }
+
+    const results: (UpsertedCase | null)[] = new Array(inputs.length).fill(null);
+    // Sub-chunked so the bind count stays far below Postgres' 65535 cap — 13 params/row on the insert
+    // plus one hoisted `now`, and 14 on the update plus one hoisted `now`, so 500 rows is about 7,000
+    // either way — and so each statement stays a reasonable size. 500 also matches `recordOutcomes`
+    // and the pipeline's own subject chunk.
+    const CHUNK = 500;
+    for (let start = 0; start < inputs.length; start += CHUNK) {
+      const batch = inputs.slice(start, start + CHUNK).map((input, offset) => ({ input, index: start + offset }));
+      await this.upsertBatchChunk(batch, now, results, keyOf);
+    }
+    return results;
+  }
+
+  private async upsertBatchChunk(
+    batch: { input: UpsertCaseInput; index: number }[],
+    now: string,
+    results: (UpsertedCase | null)[],
+    keyOf: (i: Pick<UpsertCaseInput, "subjectId" | "measureId" | "evaluationPeriod">) => string,
+  ): Promise<void> {
+    // 1. One pre-read for every key in the chunk. `unnest` keeps this to three bind parameters
+    //    whatever the chunk size, and the UNIQUE (employee_id, measure_id, evaluation_period) index
+    //    is what it joins on.
+    const { rows: existingRows } = await this.pool.query<CaseRow>(
+      `SELECT ${COLS} FROM ${T} c
+         JOIN unnest($1::text[], $2::text[], $3::text[]) AS k(e, m, p)
+           ON c.employee_id = k.e AND c.measure_id = k.m AND c.evaluation_period = k.p`,
+      [batch.map((b) => b.input.subjectId), batch.map((b) => b.input.measureId), batch.map((b) => b.input.evaluationPeriod)],
+    );
+    const existingByKey = new Map(existingRows.map((r) => [keyOf({ subjectId: r.employee_id, measureId: r.measure_id, evaluationPeriod: r.evaluation_period }), r]));
+
+    // 2. Plan every row in memory — the pure functions, unchanged.
+    interface Planned {
+      index: number;
+      input: UpsertCaseInput;
+      existing: CaseRow | null;
+      plan: ReturnType<typeof planCaseUpsert>;
+      action: ReturnType<typeof planNextAction>;
+      priority: string;
+    }
+    const toInsert: Planned[] = [];
+    const toUpdate: Planned[] = [];
+    for (const { input, index } of batch) {
+      const existing = existingByKey.get(keyOf(input)) ?? null;
+      const plan = planCaseUpsert(
+        existing ? { status: existing.status, currentOutcomeStatus: existing.current_outcome_status, closedBy: existing.closed_by } : null,
+        input.outcomeStatus,
+        now,
+        { outOfPopulation: input.outOfPopulation },
+      );
+      if (plan.op === "noop") continue; // stays null in `results`, exactly as the per-row call returns
+      const action = planNextAction(
+        existing
+          ? { nextAction: existing.next_action, nextActionSource: existing.next_action_source, currentOutcomeStatus: existing.current_outcome_status }
+          : null,
+        nextActionFor(input.outcomeStatus, input.measureId, input.evidence),
+        input.outcomeStatus,
+      );
+      const planned: Planned = { index, input, existing, plan, action, priority: priorityFor(input.outcomeStatus) };
+      (plan.op === "insert" ? toInsert : toUpdate).push(planned);
+    }
+
+    // 3. One multi-row INSERT. `DO NOTHING` rather than `DO UPDATE`: a key a concurrent writer already
+    //    created must be re-planned as an update against the row THEY wrote, not overwritten blind.
+    const inserted = new Set<string>();
+    if (toInsert.length > 0) {
+      // `now` is $1, pushed BEFORE the rows: `created_at` and `updated_at` share it on every tuple, and
+      // a placeholder computed from a moving `binds.length` inside the loop would point at a different
+      // (later) row's parameter for every row after the first.
+      const binds: unknown[] = [now];
+      const tuples = toInsert.map((p) => {
+        const b = binds.length;
+        binds.push(
+          crypto.randomUUID(), p.input.subjectId, p.input.measureId, p.input.evaluationPeriod,
+          p.plan.status!, p.priority, p.action.nextAction, p.action.source,
+          p.input.outcomeStatus, p.input.runId, p.plan.closedAt ?? null, p.plan.closedReason ?? null, p.plan.closedBy ?? null,
+        );
+        return `($${b + 1}::uuid, $${b + 2}, $${b + 3}, $${b + 4}, $${b + 5}, $${b + 6}, NULL, $${b + 7}, $${b + 8}, $${b + 9}, $${b + 10}::uuid, $1::timestamptz, $1::timestamptz, $${b + 11}::timestamptz, $${b + 12}, $${b + 13})`;
+      });
+      const { rows } = await this.pool.query<CaseRow>(
+        `INSERT INTO ${T}
+           (id, employee_id, measure_id, evaluation_period, status, priority, assignee,
+            next_action, next_action_source, current_outcome_status, last_run_id, created_at, updated_at, closed_at, closed_reason, closed_by)
+         VALUES ${tuples.join(", ")}
+         ON CONFLICT (employee_id, measure_id, evaluation_period) DO NOTHING
+         RETURNING ${COLS}`,
+        binds,
+      );
+      const byKey = new Map(rows.map((r) => [keyOf({ subjectId: r.employee_id, measureId: r.measure_id, evaluationPeriod: r.evaluation_period }), r]));
+      for (const p of toInsert) {
+        const row = byKey.get(keyOf(p.input));
+        if (row) {
+          inserted.add(keyOf(p.input));
+          results[p.index] = { ...toRecord(row), disposition: p.plan.disposition! };
+        }
+      }
+    }
+
+    // 4. One set-based UPDATE carrying the compare-and-set. The predicate compares the `next_action`
+    //    and `next_action_source` we READ in step 1; a row an operator moved in between matches
+    //    nothing and is left for the per-row path, which is precisely ADR-076 d2.
+    const updateWinners = new Set<string>();
+    if (toUpdate.length > 0) {
+      const binds: unknown[] = [];
+      const tuples = toUpdate.map((p, i) => {
+        const b = binds.length;
+        binds.push(
+          p.input.subjectId, p.input.measureId, p.input.evaluationPeriod,
+          p.plan.status!, p.priority, p.action.nextAction, p.action.source, p.input.outcomeStatus,
+          p.plan.closedAt ?? null, p.plan.closedReason ?? null, p.plan.closedBy ?? null,
+          // THE WHOLE PLAN INPUT, not just the action. `planCaseUpsert` reads `status`,
+          // `current_outcome_status` and `closed_by`; `planNextAction` reads `next_action`,
+          // `next_action_source` and `current_outcome_status`. Guarding only the two action columns
+          // let a concurrent write that touched neither through: `scheduleAppointment` patches
+          // `{ status: "IN_PROGRESS" }` and nothing else, so the batch's planned `status: "OPEN"`
+          // would land on top of it and silently undo the scheduling — against §4's most-cited
+          // guarantee. The single-row path guards the same two columns, but its read-to-write window
+          // is microseconds; a batch plans a whole chunk and writes an INSERT first, so the same hole
+          // is orders of magnitude wider and worth closing here (Codex review, #544).
+          p.existing!.next_action, p.existing!.next_action_source,
+          p.existing!.status, p.existing!.current_outcome_status, p.existing!.closed_by,
+          // PER ROW, never hoisted. `last_run_id` is the evidence pin §6.5 relies on to survive
+          // outcome compaction, and `countByLastRun` is a run's own case count — stamping the batch's
+          // first runId on every row silently pins cases to a run that did not produce them. The
+          // pipeline happens to pass one runId per chunk today, so this was latent; it is also
+          // invisible to the SQLite floor, which loops and is therefore correct by construction.
+          p.input.runId,
+        );
+        // Casts on the FIRST tuple only: Postgres infers `unknown` for bare parameters in a VALUES
+        // list used as a FROM item, and `IS NOT DISTINCT FROM` against `unknown` does not resolve.
+        // One cast per pushed value, IN PUSH ORDER — the column list below must read the same way.
+        //  1 employee_id      2 measure_id       3 evaluation_period  4 status        5 priority
+        //  6 next_action      7 next_action_src  8 current_outcome    9 closed_at    10 closed_reason
+        // 11 closed_by       12 expected_action 13 expected_src      14 expected_status
+        // 15 expected_current_outcome          16 expected_closed_by 17 last_run_id
+        const c =
+          i === 0
+            ? [
+                "::text", "::text", "::text", "::text", "::text", "::text", "::text", "::text",
+                "::timestamptz", "::text", "::text", "::text", "::text", "::text", "::text", "::text",
+                "::uuid",
+              ]
+            : new Array(17).fill("");
+        return `(${c.map((cast, j) => `$${b + j + 1}${cast}`).join(", ")})`;
+      });
+      const nowParam = binds.push(now);
+      const { rows } = await this.pool.query<CaseRow>(
+        `UPDATE ${T} c SET
+            status = v.status, priority = v.priority,
+            next_action = v.next_action, next_action_source = v.next_action_source,
+            current_outcome_status = v.current_outcome_status,
+            last_run_id = v.last_run_id, updated_at = $${nowParam},
+            closed_at = v.closed_at, closed_reason = v.closed_reason, closed_by = v.closed_by
+          FROM (VALUES ${tuples.join(", ")}) AS v(
+            employee_id, measure_id, evaluation_period,
+            status, priority, next_action, next_action_source, current_outcome_status,
+            closed_at, closed_reason, closed_by, expected_next_action, expected_next_action_source,
+            expected_status, expected_current_outcome_status, expected_closed_by, last_run_id)
+          WHERE c.employee_id = v.employee_id AND c.measure_id = v.measure_id AND c.evaluation_period = v.evaluation_period
+            AND c.next_action IS NOT DISTINCT FROM v.expected_next_action
+            AND c.next_action_source IS NOT DISTINCT FROM v.expected_next_action_source
+            AND c.status IS NOT DISTINCT FROM v.expected_status
+            AND c.current_outcome_status IS NOT DISTINCT FROM v.expected_current_outcome_status
+            AND c.closed_by IS NOT DISTINCT FROM v.expected_closed_by
+          RETURNING ${COLS_C}`,
+        binds,
+      );
+      const byKey = new Map(rows.map((r) => [keyOf({ subjectId: r.employee_id, measureId: r.measure_id, evaluationPeriod: r.evaluation_period }), r]));
+      for (const p of toUpdate) {
+        const row = byKey.get(keyOf(p.input));
+        if (!row) continue; // lost the CAS, or the row vanished — per-row path below
+        updateWinners.add(keyOf(p.input));
+        // ADR-074 d13, compared against what was WRITTEN, exactly as the per-row path does.
+        const disposition =
+          p.plan.disposition === "UNCHANGED" && p.existing!.next_action !== row.next_action ? "UPDATED" : p.plan.disposition!;
+        results[p.index] = { ...toRecord(row), disposition };
+      }
+    }
+
+    // 5. The stragglers, one at a time, through the proven path: lost an insert race, or lost the CAS.
+    //    On a nightly this is the handful of cases an operator touched while the run was going.
+    const losers = [
+      ...toInsert.filter((p) => !inserted.has(keyOf(p.input))),
+      ...toUpdate.filter((p) => !updateWinners.has(keyOf(p.input))),
+    ];
+    for (const p of losers) results[p.index] = await this.upsertFromOutcome(p.input);
+  }
+
   async getCase(id: string): Promise<CaseRecord | null> {
     if (!isUuid(id)) return null;
     const { rows } = await this.pool.query<CaseRow>(`SELECT ${COLS} FROM ${T} WHERE id = $1`, [id]);
@@ -263,6 +493,10 @@ export class PgCaseStore implements CaseStore {
     if (query.statuses?.length) {
       where.push(`status = ANY($${binds.length + 1})`);
       binds.push(query.statuses);
+    }
+    if (query.employeeId) {
+      where.push(`employee_id = $${binds.length + 1}`);
+      binds.push(query.employeeId);
     }
     if (query.measureId) {
       where.push(`measure_id = $${binds.length + 1}`);

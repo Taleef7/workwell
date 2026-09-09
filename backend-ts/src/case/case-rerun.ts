@@ -27,6 +27,7 @@ import { priorityFor, nextActionFor } from "./case-logic.ts";
 import { toCaseDetail, type CaseDetail } from "./case-detail-read-model.ts";
 import { caseRerunMeasurementPeriod } from "../run/run-period.ts";
 import { OFFICIAL_LOGIC_VERSION_PREFIX } from "../wiring/executor-router.ts";
+import { outcomeForCase } from "./case-outcome.ts";
 
 export interface RerunDeps {
   cases: CaseStore;
@@ -233,8 +234,7 @@ export async function rerunToVerify(deps: RerunDeps, caseId: string, actor: stri
 async function buildDetail(deps: RerunDeps, caseId: string): Promise<CaseDetail | null> {
   const c = await deps.cases.getCase(caseId);
   if (!c) return null;
-  const outcomes = await deps.outcomes.listOutcomes(c.lastRunId);
-  const outcome = outcomes.find((o) => o.subjectId === c.employeeId && o.measureId === c.measureId) ?? null;
+  const outcome = await outcomeForCase(deps.outcomes, c.lastRunId, c.employeeId, c.measureId);
   const timeline = await deps.events.caseTimeline(caseId);
   const latest = await deps.events.latestOutreachDeliveryStatus(caseId);
   return toCaseDetail(c, outcome, timeline, latest);

@@ -156,6 +156,9 @@ function makeTestDeps(opts: {
       return realCases.listCases(q);
     },
     upsertFromOutcome: (input: Parameters<typeof realCases.upsertFromOutcome>[0]) => realCases.upsertFromOutcome(input),
+    // Re-bound like the rest: `...realCases` spreads an INSTANCE, and its methods live on the
+    // prototype, so nothing here is inherited by the spread.
+    upsertFromOutcomes: (inputs: Parameters<typeof realCases.upsertFromOutcomes>[0]) => realCases.upsertFromOutcomes(inputs),
     patchCase: (id: string, patch: Parameters<typeof realCases.patchCase>[1]) => realCases.patchCase(id, patch),
   } as unknown as RunPipelineDeps["caseStore"];
 
@@ -187,6 +190,11 @@ function makeTestDeps(opts: {
         auditEvents.push({ eventType: event.eventType, payload: event.payload ?? {} });
         // The pipeline ignores the return; the real store returns a record.
         return { id: crypto.randomUUID() } as never;
+      },
+      // Delegates to this fake's own `appendAudit`, so the batch can never record less than the
+      // single-row path this fixture asserts on.
+      appendAudits: async (events: { eventType: string; payload?: Record<string, unknown> }[]) => {
+        for (const event of events) auditEvents.push({ eventType: event.eventType, payload: event.payload ?? {} });
       },
     },
     counters,

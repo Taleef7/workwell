@@ -20,6 +20,7 @@ import { ensureMeasureStore } from "./measures.ts";
 import { toCaseDetail } from "../case/case-detail-read-model.ts";
 import { toRunSummaryFromCounts } from "../run/read-models.ts";
 import { createChat, type ChatFn } from "../ai/openai-chat.ts";
+import { outcomeForCase } from "../case/case-outcome.ts";
 import {
   draftSpec,
   draftCql,
@@ -126,8 +127,7 @@ export async function handleAi(req: Request, env: AiEnv, actor = "system"): Prom
     const s = await getStores(env);
     const c = await s.cases.getCase(explainId);
     if (!c) return json({ error: "not_found", id: explainId }, 404);
-    const outcomes = await s.outcomes.listOutcomes(c.lastRunId);
-    const outcome = outcomes.find((o) => o.subjectId === c.employeeId && o.measureId === c.measureId) ?? null;
+    const outcome = await outcomeForCase(s.outcomes, c.lastRunId, c.employeeId, c.measureId);
     const detail = toCaseDetail(c, outcome);
 
     const cacheKey = `${detail.caseId}:${detail.measureVersion}`;

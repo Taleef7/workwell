@@ -18,6 +18,7 @@ import type { CaseEventStore } from "../stores/case-event-store.ts";
 import type { OutcomeStore } from "../stores/outcome-store.ts";
 import { DEPLOYMENT_PROFILE } from "../config/deployment-profile.ts";
 import { toCaseDetail, type CaseDetail } from "./case-detail-read-model.ts";
+import { outcomeForCase } from "./case-outcome.ts";
 
 const ESCALATION_NEXT_ACTION = DEPLOYMENT_PROFILE.subjectTerm === "patient"
   ? "Escalated for immediate handling."
@@ -35,8 +36,7 @@ export interface CaseActionDeps {
 async function buildDetail(deps: CaseActionDeps, caseId: string): Promise<CaseDetail | null> {
   const c = await deps.cases.getCase(caseId);
   if (!c) return null;
-  const outcomes = await deps.outcomes.listOutcomes(c.lastRunId);
-  const outcome = outcomes.find((o) => o.subjectId === c.employeeId && o.measureId === c.measureId) ?? null;
+  const outcome = await outcomeForCase(deps.outcomes, c.lastRunId, c.employeeId, c.measureId);
   const timeline = await deps.events.caseTimeline(caseId);
   const latest = await deps.events.latestOutreachDeliveryStatus(caseId);
   return toCaseDetail(c, outcome, timeline, latest);

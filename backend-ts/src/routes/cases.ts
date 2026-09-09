@@ -45,6 +45,7 @@ import { resolveBucket } from "../case/resolve-bucket.ts";
 import { isWebChartConfigured } from "../engine/ingress/data-source.ts";
 import { profileForId } from "../engine/ingress/webchart/live-directory.ts";
 import { DIRECTORY, employeeById, profileSubjectMatcher } from "../config/deployment-profile.ts";
+import { outcomeForCase } from "../case/case-outcome.ts";
 
 interface CasesEnv {
   DB: CloudDatabase;
@@ -286,8 +287,7 @@ export async function handleCases(req: Request, env: CasesEnv, actor = "system")
     const c = await (await caseStore(env)).getCase(detailId);
     if (!c) return json({ error: "not_found", id: detailId }, 404);
     if (!profileSubjectMatcher(employeeLookup)(c.employeeId)) return json({ error: "not_found", id: detailId }, 404);
-    const outcomes = await (await outcomeStore(env)).listOutcomes(c.lastRunId);
-    const outcome = outcomes.find((o) => o.subjectId === c.employeeId && o.measureId === c.measureId) ?? null;
+    const outcome = await outcomeForCase(await outcomeStore(env), c.lastRunId, c.employeeId, c.measureId);
     const events = (await getStores(env)).events;
     const timeline = await events.caseTimeline(detailId);
     const latest = await events.latestOutreachDeliveryStatus(detailId);

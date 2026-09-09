@@ -138,9 +138,11 @@ export async function getEmployeeProfile(deps: EmployeeProfileDeps, externalId: 
 
   // One cases fetch for this employee: derive the open subset AND the full case-id set used by the
   // recent-activity timeline below (this previously called listCases twice — open, then all).
-  const employeeCases = (await deps.cases.listCases({ limit: 100000, offset: 0 })).filter(
-    (c) => c.employeeId === externalId,
-  );
+  // Filtered in SQL. This used to read every case in the tenant at `limit: 100000` and keep the ones
+  // whose `employeeId` matched, so a page about ONE patient scaled with the whole practice's case
+  // count. The limit stays high because a subject legitimately has one case per (measure, cycle) and
+  // the timeline below wants all of them — but it now bounds this subject's history, not the tenant's.
+  const employeeCases = await deps.cases.listCases({ employeeId: externalId, limit: 100000, offset: 0 });
   const openCases = employeeCases.filter((c) =>
     (ACTIVE_CASE_STATUSES as readonly string[]).includes((c.status ?? "").toUpperCase()),
   );

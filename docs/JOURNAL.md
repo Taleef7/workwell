@@ -1,5 +1,78 @@
 # Journal
 
+## 2026-09-09 — reads proportionate to what they show, and the case pass batched
+
+Two measurements started this, both on the live pilot stack rather than a guess.
+
+**Opening a case took 43 seconds on a cold read and about 4 seconds warm, with no run in flight.** The
+route fetched every outcome row of the whole run — `evidence_json` blobs included — and then `.find()`d
+the single row the page renders. Roughly 87,000 rows over the wire into a single-replica worker to use
+one of them, growing with the roster rather than with anything the page shows. A read-path audit found
+the same two lines written out eight times, and several of the copies were worse than the original:
+`case-actions` is the detail returned by EVERY case mutation, so assigning a case paid it too;
+`case-outreach` paid it twice per send and again on every "Preview message"; `appointment-service` meant
+the case page paid it twice per view; and `routes/ai` paid it BEFORE consulting the explanation cache,
+so even a cache hit cost four seconds. All eight now call one `outcomeForCase` helper — one row, chosen
+in SQL — because the ninth copy needed somewhere to go instead of a ninth edit. `audit-packet.ts` was
+invisible to the grep that found the others: it carries two literal NUL bytes as a composite-key joiner,
+which makes grep classify it as binary and skip it.
+
+The patient profile had the same shape one level up: `listCases({ limit: 100000 })`, every case in the
+tenant, filtered in JavaScript by `employeeId`. `CaseQuery` gained the filter it needed.
+
+**The nightly ran at 9.5 (subject, measure) pairs a second — about three and a half hours.** Outcomes
+were already batched properly; the case pass was not. Per pair it awaited a SELECT, then an INSERT or
+UPDATE, then an audit insert: roughly 300,000 sequential round trips to Neon. `upsertFromOutcomes` now
+takes an evaluation chunk and returns one result per input in input order, null exactly where the
+single-row call returns null. Postgres reads the chunk's existing rows in one `unnest` join, plans in
+memory with the same pure `planCaseUpsert`/`planNextAction`, then writes one multi-row INSERT and one
+set-based UPDATE; `appendAudits` does the same for the ledger.
+
+Measured against a real postgres:16 over 3,000 pairs, with the results asserted identical to the
+sequential path: **5,250 round trips to 12**, and 4,151 ms to 553 ms locally — where a local socket pays
+none of the ~40 ms Neon charges per trip. At that latency the case pass alone was about 140 minutes of
+the nightly, which is most of it.
+
+ADR-076 d2 survives as a compare-and-set in the WHERE of the set-based UPDATE, comparing the
+`next_action` the batch READ. A row an operator moved in the meantime matches nothing and falls back to
+`upsertFromOutcome` for that row alone — the proven path, with its re-read, its three attempts and its
+action-preserving fallback. `planNextAction` stays the single definition of the rule; expressing it as a
+SQL `CASE` would have made the pure function dead exactly where it matters. A duplicate key inside one
+batch throws rather than resolving arbitrarily, because a set-based UPDATE would apply one of the two
+silently where the sequential path applied both in order.
+
+**A local Postgres is what made this safe, and it should have been running months ago.** Every store
+change in this repo has carried a "verified only by CI" caveat; `docker compose -f infra/docker-compose.yml
+up -d postgres` retires it, and the ceiling now runs 95/95 with nothing skipped. It paid for itself
+immediately: both bugs in the new SQL were Postgres-only and passed on the SQLite floor — an INSERT
+placeholder computed from a moving `binds.length` inside the row loop, and an ambiguous `RETURNING` once
+the UPDATE joined a VALUES alias carrying the same column names. The floor is a loop by design, so it
+can catch neither. Every batch-shaped contract test passes there without executing any set-based SQL,
+and the store says so in a comment rather than leaving a green floor to be read as evidence.
+
+A third defect was subtler and is worth naming as a shape. The audit flush was written as
+`deps.events.appendAudits(audits).catch(...)`. A `.catch()` handles a REJECTION; a synchronous throw —
+here, a test double that had not been given the new method — sails straight past it. It escaped the
+chunk loop and took the rest of the run with it: the cycle rollover never ran, the last chunk never
+persisted, and six invariants failed with no error surfacing anywhere. The old per-row call had the same
+latent hole. It is now awaited through `Promise.resolve().then(...)` so the synchronous path lands in
+the same handler.
+
+**The 2026-09-08 six-measure run failed, and it was our own deploy.** Its `completedAt` reads 14:29 the
+next day, but the log stops at 87,000 pairs — exactly 20:07 to 22:40 at the measured rate, which is when
+merging #543 restarted the worker. Two things follow that are not fixed here: a three-and-a-half-hour run
+cannot survive a deploy and has no resume, and the orphaned row showed RUNNING for about sixteen hours
+before a sweep marked it FAILED, so the UI advertised a run in progress the whole time and hid the Run
+button behind it. The batching makes the window much smaller; it does not close it.
+
+**Left alone deliberately.** `GET /api/runs/:id/outcomes` is unbounded on the pilot profile — it fetches
+every row to build a directory from them and to report a VISIBLE count, so bounding it means changing
+what `X-Total-Count` promises. That is a contract change on an admin surface and belongs in its own
+decision. `WORKWELL_INCREMENTAL_EVAL` stays off: a cache hit still persists the copied-forward outcome
+and still runs the case upsert, so it would have bought little while the writes dominated. It is the
+next lever now that they do not, and it should be turned on as a measured step rather than folded in
+here.
+
 ## 2026-09-08 (evening) — the first six-measure run, a rate that was the wrong measure's, and an e2e suite that had stopped testing the pilot
 
 The flip deployed, and the programs page still read 0.0% on the four new measures. That part was

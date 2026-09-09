@@ -11,7 +11,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { CreateRunInput, RunStore } from "./run-store.ts";
 import type { OutcomeStore } from "./outcome-store.ts";
-import type { CaseStore } from "./case-store.ts";
+import type { CaseStore, UpsertedCase } from "./case-store.ts";
 import type { CaseEventStore } from "./case-event-store.ts";
 import type { MeasureStore, SeedMeasureInput } from "./measure-store.ts";
 import type { EvidenceStore } from "./evidence-store.ts";
@@ -718,6 +718,21 @@ export function outcomeStoreContract(
     assert.equal(p1.length, 2);
     assert.equal(p2.length, 1, "paging partitions the MEASURE's rows, not the run's");
     assert.deepEqual([...p1, ...p2].map((o) => o.id), audiogram.map((o) => o.id));
+
+    // The case-detail read: one subject, one measure, one row. Both filters must compose, and the
+    // result must be the row an unfiltered `.find()` over the run would have picked — the old code
+    // read the whole run to get here.
+    const one = await outcomeStore.listOutcomes(run.id, { subjectId: "emp-1", measureId: "audiogram", limit: 1 });
+    assert.equal(one.length, 1, "subject + measure + limit 1 is a single row");
+    assert.equal(one[0]!.subjectId, "emp-1");
+    assert.equal(one[0]!.measureId, "audiogram");
+    const findEquivalent = (await outcomeStore.listOutcomes(run.id)).find(
+      (o) => o.subjectId === "emp-1" && o.measureId === "audiogram",
+    );
+    assert.equal(one[0]!.id, findEquivalent!.id, "same row the unfiltered .find() returned");
+    // subjectId alone narrows across measures: emp-1 has an audiogram row and a hazwoper row.
+    assert.equal((await outcomeStore.listOutcomes(run.id, { subjectId: "emp-1" })).length, 2);
+    assert.deepEqual(await outcomeStore.listOutcomes(run.id, { subjectId: "nobody" }), []);
   });
 
   test(`[${label}] distinctMeasuresForRun returns the run's distinct measures, capped (Fable H4)`, async () => {
@@ -850,6 +865,213 @@ export function caseStoreContract(label: string, freshStore: () => Promise<CaseS
     const reopened = await upsert(store, "OVERDUE");
     assert.equal(reopened?.disposition, "REOPENED", "back in the population with a gap → the system closure reopens");
     assert.equal(reopened?.id, opened?.id);
+  });
+
+  // ---- upsertFromOutcomes (the batched case pass) -----------------------------------------------
+  // On the SQLite floor these run against a LOOP over the single-row upsert, so they prove the
+  // CONTRACT there and nothing about set-based SQL. The Postgres ceiling is where the batch is really
+  // exercised; run it locally with `docker compose -f infra/docker-compose.yml up -d postgres`.
+
+  test(`[${label}] a batch returns one result per input, in input order, with null where the single call returns null`, async () => {
+    const caseStore = await freshStore();
+    const runId = crypto.randomUUID();
+    const mk = (subjectId: string, outcomeStatus: string) => ({
+      runId,
+      subjectId,
+      measureId: "audiogram",
+      evaluationPeriod: "2026-01-01",
+      outcomeStatus,
+    });
+    // A COMPLIANT outcome with no existing case is the canonical no-op → null, and it sits in the
+    // MIDDLE so a store that compacted its results would misalign every later index.
+    const out = await caseStore.upsertFromOutcomes([mk("emp-1", "OVERDUE"), mk("emp-2", "COMPLIANT"), mk("emp-3", "MISSING_DATA")]);
+    assert.equal(out.length, 3, "one result per input");
+    assert.equal(out[0]?.employeeId, "emp-1");
+    assert.equal(out[0]?.disposition, "CREATED");
+    assert.equal(out[1], null, "COMPLIANT with no case is a no-op, and holds its slot");
+    assert.equal(out[2]?.employeeId, "emp-3");
+    assert.equal(out[2]?.disposition, "CREATED");
+    assert.deepEqual(await caseStore.upsertFromOutcomes([]), [], "an empty batch is a no-op, not a throw");
+  });
+
+  test(`[${label}] a batch is equivalent to the same upserts applied one at a time`, async () => {
+    // The strongest guard available: run the identical sequence through both paths against two fresh
+    // stores and compare what they produced. Anything the batch decides differently shows up here.
+    const scenario = (runId: string) => {
+      const at = (subjectId: string, measureId: string, outcomeStatus: string, outOfPopulation = false) => ({
+        runId,
+        subjectId,
+        measureId,
+        evaluationPeriod: "2026-01-01",
+        outcomeStatus,
+        outOfPopulation,
+      });
+      return [
+        at("emp-1", "audiogram", "OVERDUE"),
+        at("emp-2", "audiogram", "COMPLIANT"),
+        at("emp-3", "audiogram", "MISSING_DATA"),
+        at("emp-4", "audiogram", "EXCLUDED"),
+        at("emp-5", "audiogram", "MISSING_DATA", true), // ADR-078: out of population, opens nothing
+        at("emp-1", "hazwoper", "DUE_SOON"), // same subject, different measure — a distinct key
+      ];
+    };
+
+    const seqStore = await freshStore();
+    const seqRun = crypto.randomUUID();
+    const sequential: (UpsertedCase | null)[] = [];
+    for (const input of scenario(seqRun)) sequential.push(await seqStore.upsertFromOutcome(input));
+
+    const batchStore = await freshStore();
+    const batchRun = crypto.randomUUID();
+    const batched = await batchStore.upsertFromOutcomes(scenario(batchRun));
+
+    const shape = (r: UpsertedCase | null) =>
+      r && {
+        employeeId: r.employeeId,
+        measureId: r.measureId,
+        status: r.status,
+        priority: r.priority,
+        disposition: r.disposition,
+        closedReason: r.closedReason,
+        closedBy: r.closedBy,
+        nextAction: r.nextAction,
+        nextActionSource: r.nextActionSource,
+        currentOutcomeStatus: r.currentOutcomeStatus,
+      };
+    assert.deepEqual(batched.map(shape), sequential.map(shape), "batched and sequential agree row for row");
+
+    // And the persisted rows agree, not just the returned ones.
+    const norm = (cs: Awaited<ReturnType<typeof seqStore.listCases>>) =>
+      cs.map((c) => `${c.employeeId}|${c.measureId}|${c.status}|${c.closedReason ?? "-"}`).sort();
+    assert.deepEqual(
+      norm(await batchStore.listCases({ limit: 100 })),
+      norm(await seqStore.listCases({ limit: 100 })),
+      "the tables agree too",
+    );
+  });
+
+  test(`[${label}] a batch refuses a duplicate key rather than applying one of them arbitrarily`, async () => {
+    const caseStore = await freshStore();
+    const runId = crypto.randomUUID();
+    const dup = (outcomeStatus: string) => ({
+      runId,
+      subjectId: "emp-1",
+      measureId: "audiogram",
+      evaluationPeriod: "2026-01-01",
+      outcomeStatus,
+    });
+    await assert.rejects(
+      () => caseStore.upsertFromOutcomes([dup("OVERDUE"), dup("COMPLIANT")]),
+      /duplicate key in one batch/,
+      "a set-based UPDATE would pick one of the two silently; the store must not",
+    );
+  });
+
+  test(`[${label}] an operator's next_action already on the row is honoured by the batch`, async () => {
+    // NOT the race — the patch below happens BEFORE the batch runs, so the pre-read sees OPERATOR and
+    // `planNextAction` plans the operator's own text. This proves the pure rule is applied inside the
+    // batch; the race itself is the separate test below, which is the one that reaches the fallback.
+    const caseStore = await freshStore();
+    const seed = crypto.randomUUID();
+    const keys = ["emp-1", "emp-2", "emp-3"];
+    for (const subjectId of keys) {
+      await caseStore.upsertFromOutcome({ runId: seed, subjectId, measureId: "audiogram", evaluationPeriod: "2026-01-01", outcomeStatus: "OVERDUE" });
+    }
+    const opened = await caseStore.listCases({ employeeId: "emp-2", limit: 10 });
+    await caseStore.patchCase(opened[0]!.id, { nextAction: "Called, waiting on the clinic", nextActionSource: "OPERATOR" });
+
+    // Re-confirm the SAME status for all three: the run learned nothing new, so emp-2's operator text
+    // must stand while emp-1 and emp-3 are refreshed by the run.
+    const runId = crypto.randomUUID();
+    const out = await caseStore.upsertFromOutcomes(
+      keys.map((subjectId) => ({ runId, subjectId, measureId: "audiogram", evaluationPeriod: "2026-01-01", outcomeStatus: "OVERDUE" })),
+    );
+    assert.equal(out.length, 3);
+    const emp2 = (await caseStore.listCases({ employeeId: "emp-2", limit: 10 }))[0]!;
+    assert.equal(emp2.nextAction, "Called, waiting on the clinic", "the operator's words survived the batch");
+    assert.equal(emp2.nextActionSource, "OPERATOR", "and so did their ownership");
+    for (const subjectId of ["emp-1", "emp-3"]) {
+      const c = (await caseStore.listCases({ employeeId: subjectId, limit: 10 }))[0]!;
+      assert.equal(c.lastRunId, runId, `${subjectId} still landed — one contended row does not fail the chunk`);
+    }
+  });
+
+  test(`[${label}] a batch spans more than one internal sub-chunk without shifting a slot`, async () => {
+    // The Postgres path sub-chunks at 500 rows. Every earlier batch test used a handful of inputs, so
+    // the sub-chunk loop — the part most likely to misplace a result — was never executed. Every third
+    // input is a COMPLIANT no-op, so a shifted index shows up as a null in the wrong slot.
+    const caseStore = await freshStore();
+    const runId = crypto.randomUUID();
+    const inputs = Array.from({ length: 1200 }, (_, i) => ({
+      runId,
+      subjectId: `emp-${String(i).padStart(5, "0")}`,
+      measureId: "audiogram",
+      evaluationPeriod: "2026-01-01",
+      outcomeStatus: i % 3 === 0 ? "COMPLIANT" : "OVERDUE",
+    }));
+    const out = await caseStore.upsertFromOutcomes(inputs);
+    assert.equal(out.length, 1200);
+    for (const [i, r] of out.entries()) {
+      if (i % 3 === 0) assert.equal(r, null, `slot ${i} is the COMPLIANT no-op`);
+      else assert.equal(r?.employeeId, inputs[i]!.subjectId, `slot ${i} carries its own subject`);
+    }
+  });
+
+  test(`[${label}] one batch mixes inserts, updates and no-ops, and each lands as its own kind`, async () => {
+    // The equivalence test runs against a fresh store, so every input there takes the INSERT path and
+    // the set-based UPDATE is never reached. This seeds first so one batch exercises both, plus the
+    // two §4 guarantees most worth pinning for the batch: IN_PROGRESS survives, and a human closure
+    // is not reopened.
+    const caseStore = await freshStore();
+    const seedRun = crypto.randomUUID();
+    const at = (runId: string, subjectId: string, outcomeStatus: string) => ({
+      runId,
+      subjectId,
+      measureId: "audiogram",
+      evaluationPeriod: "2026-01-01",
+      outcomeStatus,
+    });
+    for (const s of ["in-progress", "human-closed", "reconfirm"]) await caseStore.upsertFromOutcome(at(seedRun, s, "OVERDUE"));
+    const inProgress = (await caseStore.listCases({ employeeId: "in-progress", limit: 10 }))[0]!;
+    await caseStore.patchCase(inProgress.id, { status: "IN_PROGRESS" });
+    const humanClosed = (await caseStore.listCases({ employeeId: "human-closed", limit: 10 }))[0]!;
+    await caseStore.patchCase(humanClosed.id, { status: "RESOLVED", closedAt: new Date().toISOString(), closedBy: "nurse@example.org" });
+
+    const runId = crypto.randomUUID();
+    const out = await caseStore.upsertFromOutcomes([
+      at(runId, "in-progress", "OVERDUE"), // update: must NOT be clobbered back to OPEN
+      at(runId, "human-closed", "OVERDUE"), // noop: a person closed it
+      at(runId, "brand-new", "OVERDUE"), // insert
+      at(runId, "reconfirm", "OVERDUE"), // update, unchanged
+    ]);
+
+    assert.equal(out[0]?.status, "IN_PROGRESS", "§4: an operator's IN_PROGRESS survives a batched re-confirm");
+    assert.equal(out[1], null, "§4: a human closure is not reopened by a batch");
+    assert.equal(out[2]?.disposition, "CREATED");
+    assert.equal(out[3]?.status, "OPEN");
+    // The seeded rows were updated, not duplicated.
+    assert.equal((await caseStore.listCases({ limit: 100 })).length, 4);
+    assert.equal((await caseStore.listCases({ employeeId: "human-closed", limit: 10 }))[0]!.closedBy, "nurse@example.org");
+  });
+
+  test(`[${label}] listCases filters by employeeId in SQL, and composes with the other filters`, async () => {
+    const caseStore = await freshStore();
+    const runId = crypto.randomUUID();
+    const mk = (subjectId: string, measureId: string, outcomeStatus: string) =>
+      caseStore.upsertFromOutcome({ runId, subjectId, measureId, evaluationPeriod: "2026-01-01", outcomeStatus });
+    await mk("emp-1", "audiogram", "OVERDUE");
+    await mk("emp-1", "hazwoper", "MISSING_DATA");
+    await mk("emp-2", "audiogram", "OVERDUE");
+
+    const mine = await caseStore.listCases({ employeeId: "emp-1", limit: 100 });
+    assert.equal(mine.length, 2, "one subject's cases, not the tenant's");
+    assert.ok(mine.every((c: { employeeId: string }) => c.employeeId === "emp-1"));
+    // Composes with measureId rather than replacing it — the profile page relies on both being able
+    // to narrow, and a filter that silently won the other would go unnoticed at demo scale.
+    assert.equal((await caseStore.listCases({ employeeId: "emp-1", measureId: "audiogram", limit: 100 })).length, 1);
+    assert.deepEqual(await caseStore.listCases({ employeeId: "nobody", limit: 100 }), []);
+    // Absent, it must not filter at all.
+    assert.equal((await caseStore.listCases({ limit: 100 })).length, 3);
   });
 
   test(`[${label}] a rerun upserts the SAME case — never a duplicate (idempotency invariant)`, async () => {
