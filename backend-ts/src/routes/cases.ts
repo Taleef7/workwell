@@ -286,8 +286,18 @@ export async function handleCases(req: Request, env: CasesEnv, actor = "system")
     const c = await (await caseStore(env)).getCase(detailId);
     if (!c) return json({ error: "not_found", id: detailId }, 404);
     if (!profileSubjectMatcher(employeeLookup)(c.employeeId)) return json({ error: "not_found", id: detailId }, 404);
-    const outcomes = await (await outcomeStore(env)).listOutcomes(c.lastRunId);
-    const outcome = outcomes.find((o) => o.subjectId === c.employeeId && o.measureId === c.measureId) ?? null;
+    // ONE row, chosen in SQL. This read used to be `listOutcomes(c.lastRunId)` — every outcome of the
+    // whole run, `evidence_json` blobs included — followed by a `.find()` in JavaScript for the single
+    // row this page renders. On the pilot's six-measure nightly (120,000 pairs) that measured 43s on a
+    // cold read and ~4s warm, and it grew with the roster rather than with anything the page shows.
+    // `limit: 1` is exactly equivalent to the old `.find()`: the store orders by `evaluated_at ASC,
+    // id ASC`, so the first row under the same filter is the row `.find()` would have returned.
+    const outcomes = await (await outcomeStore(env)).listOutcomes(c.lastRunId, {
+      subjectId: c.employeeId,
+      measureId: c.measureId,
+      limit: 1,
+    });
+    const outcome = outcomes[0] ?? null;
     const events = (await getStores(env)).events;
     const timeline = await events.caseTimeline(detailId);
     const latest = await events.latestOutreachDeliveryStatus(detailId);

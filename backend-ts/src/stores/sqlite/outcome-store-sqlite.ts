@@ -121,7 +121,10 @@ export class SqliteOutcomeStore implements OutcomeStore {
     return records;
   }
 
-  async listOutcomes(runId: string, opts?: { limit?: number; offset?: number; measureId?: string }): Promise<OutcomeRecord[]> {
+  async listOutcomes(
+    runId: string,
+    opts?: { limit?: number; offset?: number; measureId?: string; subjectId?: string },
+  ): Promise<OutcomeRecord[]> {
     // Optional LIMIT/OFFSET paging (Fable H4); the id tiebreak keeps paging deterministic when many
     // rows share an evaluated_at. SQLite requires a LIMIT before OFFSET, so emit -1 (all) when only an
     // offset is given.
@@ -129,8 +132,12 @@ export class SqliteOutcomeStore implements OutcomeStore {
     // Narrowed BEFORE the page window, so offsets walk the measure's rows and not the run's.
     let where = "";
     if (opts?.measureId != null) {
-      where = ` AND measure_id = ?`;
+      where += ` AND measure_id = ?`;
       binds.push(opts.measureId);
+    }
+    if (opts?.subjectId != null) {
+      where += ` AND subject_id = ?`;
+      binds.push(opts.subjectId);
     }
     let page = "";
     if (opts?.limit != null || opts?.offset != null) {

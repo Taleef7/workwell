@@ -718,6 +718,21 @@ export function outcomeStoreContract(
     assert.equal(p1.length, 2);
     assert.equal(p2.length, 1, "paging partitions the MEASURE's rows, not the run's");
     assert.deepEqual([...p1, ...p2].map((o) => o.id), audiogram.map((o) => o.id));
+
+    // The case-detail read: one subject, one measure, one row. Both filters must compose, and the
+    // result must be the row an unfiltered `.find()` over the run would have picked — the old code
+    // read the whole run to get here.
+    const one = await outcomeStore.listOutcomes(run.id, { subjectId: "emp-1", measureId: "audiogram", limit: 1 });
+    assert.equal(one.length, 1, "subject + measure + limit 1 is a single row");
+    assert.equal(one[0]!.subjectId, "emp-1");
+    assert.equal(one[0]!.measureId, "audiogram");
+    const findEquivalent = (await outcomeStore.listOutcomes(run.id)).find(
+      (o) => o.subjectId === "emp-1" && o.measureId === "audiogram",
+    );
+    assert.equal(one[0]!.id, findEquivalent!.id, "same row the unfiltered .find() returned");
+    // subjectId alone narrows across measures: emp-1 has an audiogram row and a hazwoper row.
+    assert.equal((await outcomeStore.listOutcomes(run.id, { subjectId: "emp-1" })).length, 2);
+    assert.deepEqual(await outcomeStore.listOutcomes(run.id, { subjectId: "nobody" }), []);
   });
 
   test(`[${label}] distinctMeasuresForRun returns the run's distinct measures, capped (Fable H4)`, async () => {

@@ -140,7 +140,10 @@ export class PgOutcomeStore implements OutcomeStore {
     return records;
   }
 
-  async listOutcomes(runId: string, opts?: { limit?: number; offset?: number; measureId?: string }): Promise<OutcomeRecord[]> {
+  async listOutcomes(
+    runId: string,
+    opts?: { limit?: number; offset?: number; measureId?: string; subjectId?: string },
+  ): Promise<OutcomeRecord[]> {
     // Native UUID column: a malformed run id yields no rows on the floor, so don't
     // let Postgres throw `invalid input syntax for type uuid` — match the contract.
     if (!isUuid(runId)) return [];
@@ -148,7 +151,8 @@ export class PgOutcomeStore implements OutcomeStore {
     // rows share an evaluated_at (all of a run's outcomes are stamped within the same run).
     const binds: unknown[] = [runId];
     // Narrowed BEFORE the page window, so offsets walk the measure's rows and not the run's.
-    const where = opts?.measureId != null ? ` AND measure_id = $${binds.push(opts.measureId)}` : "";
+    let where = opts?.measureId != null ? ` AND measure_id = $${binds.push(opts.measureId)}` : "";
+    if (opts?.subjectId != null) where += ` AND subject_id = $${binds.push(opts.subjectId)}`;
     let page = "";
     if (opts?.limit != null) page += ` LIMIT $${binds.push(Math.max(0, opts.limit))}`;
     if (opts?.offset != null) page += ` OFFSET $${binds.push(Math.max(0, opts.offset))}`;
