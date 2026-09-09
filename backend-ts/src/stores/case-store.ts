@@ -109,6 +109,30 @@ export interface CaseStore {
    * (COMPLIANT with no case, an idempotent already-terminal row, or a respected human closure).
    */
   upsertFromOutcome(input: UpsertCaseInput): Promise<UpsertedCase | null>;
+  /**
+   * The same upsert for a whole evaluation chunk, returning one result PER INPUT, IN INPUT ORDER, with
+   * `null` exactly where the single-row call returns null — so the run pipeline's audit pass is a zip
+   * rather than a second decision.
+   *
+   * Why it exists: the case pass awaited `upsertFromOutcome` per (subject, measure) pair, and each call
+   * is a SELECT then an INSERT/UPDATE. On the pilot's six-measure nightly — 120,000 pairs — that is
+   * ~240,000 sequential round trips to Neon before the audit writes, and the run measured 9.5 pairs a
+   * second, about three and a half hours, which a deploy then killed at 87,000.
+   *
+   * Every §4 guarantee is per-input and unchanged: IN_PROGRESS preserved, human closures respected,
+   * ADR-078 out-of-population, no `closed_at` drift, the UNCHANGED-vs-UPDATED rule (ADR-074 d13), and
+   * ADR-076 d2's operator ownership of `next_action`. A row whose compare-and-set loses inside the
+   * batch falls back to the per-row path, which is the proven one.
+   *
+   * THROWS on a duplicate `(subjectId, measureId, evaluationPeriod)` within one batch. A set-based
+   * UPDATE would apply one of the two arbitrarily and silently, where the sequential path applied both
+   * in order; a run should not produce a duplicate, and if one appears the caller should hear about it
+   * rather than get a coin flip.
+   *
+   * `now` is computed ONCE per batch, so a chunk's `created_at`/`updated_at`/`closed_at` share a
+   * timestamp instead of drifting across it.
+   */
+  upsertFromOutcomes(inputs: UpsertCaseInput[]): Promise<(UpsertedCase | null)[]>;
   getCase(id: string): Promise<CaseRecord | null>;
   listCases(query: CaseQuery): Promise<CaseRecord[]>;
   /** Patch mutable fields (always bumps updated_at); returns the updated row or null. */
