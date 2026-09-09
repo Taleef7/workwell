@@ -1158,14 +1158,14 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
           await Promise.resolve()
             .then(() => deps.events!.appendAudits(audits))
             .catch((err: unknown) => {
-            void deps.runStore
-              .appendLog(
-                runId,
-                "WARN",
-                `Case audit batch (${audits.length} event(s)) failed — ledger gap: ${String((err as Error)?.message ?? err)}`,
-              )
-              .catch(() => {});
-          });
+              void deps.runStore
+                .appendLog(
+                  runId,
+                  "WARN",
+                  `Case audit batch (${audits.length} event(s)) failed — ledger gap: ${String((err as Error)?.message ?? err)}`,
+                )
+                .catch(() => {});
+            });
         }
       }
     }
