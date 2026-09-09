@@ -367,7 +367,17 @@ export class PgCaseStore implements CaseStore {
           p.input.subjectId, p.input.measureId, p.input.evaluationPeriod,
           p.plan.status!, p.priority, p.action.nextAction, p.action.source, p.input.outcomeStatus,
           p.plan.closedAt ?? null, p.plan.closedReason ?? null, p.plan.closedBy ?? null,
+          // THE WHOLE PLAN INPUT, not just the action. `planCaseUpsert` reads `status`,
+          // `current_outcome_status` and `closed_by`; `planNextAction` reads `next_action`,
+          // `next_action_source` and `current_outcome_status`. Guarding only the two action columns
+          // let a concurrent write that touched neither through: `scheduleAppointment` patches
+          // `{ status: "IN_PROGRESS" }` and nothing else, so the batch's planned `status: "OPEN"`
+          // would land on top of it and silently undo the scheduling — against §4's most-cited
+          // guarantee. The single-row path guards the same two columns, but its read-to-write window
+          // is microseconds; a batch plans a whole chunk and writes an INSERT first, so the same hole
+          // is orders of magnitude wider and worth closing here (Codex review, #544).
           p.existing!.next_action, p.existing!.next_action_source,
+          p.existing!.status, p.existing!.current_outcome_status, p.existing!.closed_by,
           // PER ROW, never hoisted. `last_run_id` is the evidence pin §6.5 relies on to survive
           // outcome compaction, and `countByLastRun` is a run's own case count — stamping the batch's
           // first runId on every row silently pins cases to a run that did not produce them. The
@@ -377,10 +387,19 @@ export class PgCaseStore implements CaseStore {
         );
         // Casts on the FIRST tuple only: Postgres infers `unknown` for bare parameters in a VALUES
         // list used as a FROM item, and `IS NOT DISTINCT FROM` against `unknown` does not resolve.
+        // One cast per pushed value, IN PUSH ORDER — the column list below must read the same way.
+        //  1 employee_id      2 measure_id       3 evaluation_period  4 status        5 priority
+        //  6 next_action      7 next_action_src  8 current_outcome    9 closed_at    10 closed_reason
+        // 11 closed_by       12 expected_action 13 expected_src      14 expected_status
+        // 15 expected_current_outcome          16 expected_closed_by 17 last_run_id
         const c =
           i === 0
-            ? ["::text", "::text", "::text", "::text", "::text", "::text", "::text", "::text", "::timestamptz", "::text", "::text", "::text", "::text", "::uuid"]
-            : new Array(14).fill("");
+            ? [
+                "::text", "::text", "::text", "::text", "::text", "::text", "::text", "::text",
+                "::timestamptz", "::text", "::text", "::text", "::text", "::text", "::text", "::text",
+                "::uuid",
+              ]
+            : new Array(17).fill("");
         return `(${c.map((cast, j) => `$${b + j + 1}${cast}`).join(", ")})`;
       });
       const nowParam = binds.push(now);
@@ -395,10 +414,13 @@ export class PgCaseStore implements CaseStore {
             employee_id, measure_id, evaluation_period,
             status, priority, next_action, next_action_source, current_outcome_status,
             closed_at, closed_reason, closed_by, expected_next_action, expected_next_action_source,
-            last_run_id)
+            expected_status, expected_current_outcome_status, expected_closed_by, last_run_id)
           WHERE c.employee_id = v.employee_id AND c.measure_id = v.measure_id AND c.evaluation_period = v.evaluation_period
             AND c.next_action IS NOT DISTINCT FROM v.expected_next_action
             AND c.next_action_source IS NOT DISTINCT FROM v.expected_next_action_source
+            AND c.status IS NOT DISTINCT FROM v.expected_status
+            AND c.current_outcome_status IS NOT DISTINCT FROM v.expected_current_outcome_status
+            AND c.closed_by IS NOT DISTINCT FROM v.expected_closed_by
           RETURNING ${COLS_C}`,
         binds,
       );

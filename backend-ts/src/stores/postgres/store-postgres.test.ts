@@ -261,4 +261,57 @@ if (!reachable && process.env.WORKWELL_TEST_PG_URL) {
       assert.equal((await after(subjectId)).lastRunId, runId, `${subjectId} landed — one contended row does not fail the chunk`);
     }
   });
+
+  /**
+   * The same window, but the concurrent write touches NEITHER action column — which is what
+   * `scheduleAppointment` does: `patchCase(caseId, { status: "IN_PROGRESS" })` and nothing else
+   * (`case/appointment-service.ts`). A compare-and-set guarding only `next_action` and
+   * `next_action_source` still matches, so the batch's planned `status: "OPEN"` lands on top and
+   * silently undoes the scheduling — against §4's IN_PROGRESS guarantee, the most-cited one.
+   *
+   * The guard therefore covers every field the plan was made from: `planCaseUpsert` reads `status`,
+   * `current_outcome_status` and `closed_by`, and `planNextAction` reads the two action columns plus
+   * `current_outcome_status`. Found by Codex on #544.
+   */
+  test("[postgres] a status changed between the batch's pre-read and its write is not clobbered by the planned status", async () => {
+    await truncate();
+    const store = new PgCaseStore(pool);
+    const seedRun = crypto.randomUUID();
+    const at = (runId: string, subjectId: string, outcomeStatus: string) => ({
+      runId,
+      subjectId,
+      measureId: "audiogram",
+      evaluationPeriod: "2026-01-01",
+      outcomeStatus,
+    });
+    for (const subjectId of ["y1", "y2"]) await store.upsertFromOutcome(at(seedRun, subjectId, "OVERDUE"));
+    const y2 = (await store.listCases({ employeeId: "y2", limit: 10 }))[0]!;
+    assert.equal(y2.status, "OPEN");
+
+    type AnyQuery = (...args: unknown[]) => Promise<unknown>;
+    const patchable = pool as unknown as { query: AnyQuery };
+    const realQuery = patchable.query.bind(pool) as AnyQuery;
+    let armed = true;
+    patchable.query = async (...args: unknown[]) => {
+      const result = await realQuery(...args);
+      if (armed && typeof args[0] === "string" && args[0].includes("unnest(")) {
+        armed = false;
+        patchable.query = realQuery;
+        // Exactly what scheduling an appointment does: status only.
+        await store.patchCase(y2.id, { status: "IN_PROGRESS" });
+      }
+      return result;
+    };
+
+    const runId = crypto.randomUUID();
+    try {
+      await store.upsertFromOutcomes(["y1", "y2"].map((subjectId) => at(runId, subjectId, "OVERDUE")));
+    } finally {
+      patchable.query = realQuery;
+    }
+
+    const reread = (await store.listCases({ employeeId: "y2", limit: 10 }))[0]!;
+    assert.equal(reread.status, "IN_PROGRESS", "§4: the operator's IN_PROGRESS survived the batch's stale plan");
+    assert.equal((await store.listCases({ employeeId: "y1", limit: 10 }))[0]!.lastRunId, runId, "y1 still landed");
+  });
 }
