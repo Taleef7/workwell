@@ -122,10 +122,24 @@ function externalTriggeredBy(raw: unknown): string {
 // The store factory selects the SQLite floor or the Postgres ceiling (when DATABASE_URL is set) and
 // runs schema init once per env. CANONICAL schema/migrations stay Taleef-owned (CLAUDE.md).
 //
-// Boot recovery: an ALL_PROGRAMS/SITE run is advanced by an in-process `ctx.waitUntil` task that does
-// NOT survive a container restart, so a run interrupted by a restart is stuck RUNNING forever. The
-// first runs access in a process fires a best-effort sweep that fails such stuck runs. It is
-// fire-and-forget (never blocks or fails the request) and time-thresholded (never touches a live run).
+// Boot recovery, SECOND trigger. An ALL_PROGRAMS/SITE run is advanced by an in-process
+// `ctx.waitUntil` task that does NOT survive a container restart, so a run interrupted by a restart is
+// stuck RUNNING forever. `server.ts` sweeps once at startup on a Postgres stack; this fires on the
+// first runs access in a process, and is the ONLY trigger on a stack without DATABASE_URL.
+//
+// Both run on a Postgres boot, because they hold different `env` objects and the `WeakSet` below is
+// keyed on identity. That is harmless: `failStuckRuns` re-checks `status = 'RUNNING'` under the row
+// lock, so the loser returns no rows and writes no duplicate RUN_RECOVERED.
+//
+// It was the ONLY trigger until 2026-09-09, and that had two consequences. An orphan stayed visible as
+// RUNNING until somebody happened to open the runs page — sixteen hours, once. And because the cutoff
+// was a flat 30 minutes sized for a "~5-6 min" run, the sweep failed a HEALTHY six-measure nightly at
+// 98.7% complete the moment the page was opened. `orphanThresholdMs` now ANCHORS the cutoff to this
+// process's boot, so neither trigger can reach past the moment the process booted. "Anchors", not
+// "widens": the swept set is everything created before boot, back to the epoch — an eighteen-hour-old
+// orphan goes on the first sweep — while everything created after boot is spared however old it gets.
+//
+// Fire-and-forget: never blocks or fails the request.
 const sweptForOrphans = new WeakSet<object>();
 async function store(env: RunsEnv): Promise<RunStore> {
   const stores = await getStores(env);
