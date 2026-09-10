@@ -69,6 +69,15 @@ test("PUT updates enabled + measureIds and re-reads them", async () => {
   assert.deepEqual([...updated.measureIds].sort(), ["audiogram", "flu_vaccine"]);
 });
 
+test("PUT accepts an official-only catalog measure (no authored entry) — the pilot's routed set (issue #536)", async () => {
+  const created = (await post({ name: "Pilot", rule: welderRule, measureIds: ["cms122"] }).then((r) => r!.json())) as { id: string };
+  const res = await put(created.id, { measureIds: ["cms122", "cms2", "cms130", "cms165", "cms137"] });
+  assert.equal(res!.status, 200, "cms2/cms130/cms165/cms137 are catalog measures with no authored CQL; the segment may name them");
+  const updated = (await res!.json()) as { measureIds: string[] };
+  assert.deepEqual([...updated.measureIds].sort(), ["cms122", "cms130", "cms137", "cms165", "cms2"]);
+  assert.equal((await put(created.id, { measureIds: ["cms2", "not_a_real_measure"] }))?.status, 400, "an id in neither registry nor catalog is still refused");
+});
+
 test("PUT → 404 for an unknown segment", async () => {
   assert.equal((await put("nope", { name: "x" }))?.status, 404);
 });

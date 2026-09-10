@@ -7,6 +7,7 @@ import type { CaseRecord, CaseStore } from "../stores/case-store.ts";
 import type { QualitySnapshotRow, QualitySnapshotStore } from "../stores/quality-snapshot-store.ts";
 import { programOverview, programRiskOutlook, programTopDrivers, programTrend } from "./program-read-models.ts";
 import { replaceLiveDirectory } from "../engine/ingress/webchart/live-directory.ts";
+import { latestRunsFromRows } from "../test-support/latest-runs.ts";
 
 const wcRow: OutcomeWithRun = {
   runId: "run-wc-program", runStartedAt: "2026-07-17T00:00:00.000Z", runScopeType: "MEASURE",
@@ -29,6 +30,7 @@ function deps(
       if (options.calls) options.calls.joined++;
       return rows;
     },
+    listLatestPopulationRuns: latestRunsFromRows(rows),
     listOutcomes: async (runId: string) => {
       if (options.calls) options.calls.byRun++;
       return options.byRun?.[runId] ?? [];
@@ -383,6 +385,7 @@ test("default profile — non-catalog subjects (e.g. QRDA Cypress imports) are i
 test("scoped profile (Maui) — isolates data by excluding foreign and unresolved subjects from read models", () => {
   const output = runProfileChild("maui", `
     import { programOverview, programRiskOutlook, programTrend } from "./src/program/program-read-models.ts";
+    import { latestRunsFromRows } from "./src/test-support/latest-runs.ts";
 
     const recentExam = new Date(Date.now() - 320 * 86400000).toISOString().slice(0, 10);
 
@@ -436,6 +439,7 @@ test("scoped profile (Maui) — isolates data by excluding foreign and unresolve
     const fakeDeps = {
       outcomeStore: {
         listOutcomesWithRun: async () => rows,
+        listLatestPopulationRuns: latestRunsFromRows(rows),
         listOutcomesForMeasure: async () => riskRows,
         listOutcomes: async () => [], // the overview's measure rate reads one row to learn there is no official evidence (ADR-077)
         aggregateScaleRun: async () => [],
@@ -488,6 +492,7 @@ test("scoped profile (Maui) — isolates data by excluding foreign and unresolve
 test("foldScaleCounts — completed seed:scale run skipped on Maui profile and folded on default profile", () => {
   const source = `
     import { programOverview } from "./src/program/program-read-models.ts";
+    import { latestRunsFromRows } from "./src/test-support/latest-runs.ts";
 
     const mauiRow = {
       runId: "run-maui-1", runStartedAt: "2026-07-17T00:00:00.000Z", runScopeType: "MEASURE",
@@ -500,6 +505,7 @@ test("foldScaleCounts — completed seed:scale run skipped on Maui profile and f
     const fakeDeps = {
       outcomeStore: {
         listOutcomesWithRun: async () => [mauiRow],
+        listLatestPopulationRuns: latestRunsFromRows([mauiRow]),
         listOutcomes: async () => [],
         aggregateScaleRun: async () => [
           { status: "COMPLIANT", count: 50 },
@@ -537,6 +543,7 @@ test("foldScaleCounts — completed seed:scale run skipped on Maui profile and f
 test("programTrend — monthly snapshot scope fallback on Maui profile and snapshot series on default profile", () => {
   const source = `
     import { programTrend } from "./src/program/program-read-models.ts";
+    import { latestRunsFromRows } from "./src/test-support/latest-runs.ts";
 
     const mauiRow = {
       runId: "run-maui-per-run-1", runStartedAt: "2026-07-17T00:00:00.000Z", runScopeType: "MEASURE",
@@ -562,6 +569,7 @@ test("programTrend — monthly snapshot scope fallback on Maui profile and snaps
     const fakeDeps = {
       outcomeStore: {
         listOutcomesWithRun: async () => [mauiRow],
+        listLatestPopulationRuns: latestRunsFromRows([mauiRow]),
       },
       runStore: { listRuns: async () => [] },
       caseStore: { listCases: async () => [] },
@@ -603,6 +611,7 @@ test("programSites — returns distinct site options only from visible rows", ()
   const source = `
     import { DIRECTORY } from "./src/config/deployment-profile.ts";
     import { listSites, programSites } from "./src/program/program-read-models.ts";
+    import { latestRunsFromRows } from "./src/test-support/latest-runs.ts";
 
     const rows = [
       {
@@ -640,6 +649,7 @@ test("programSites — returns distinct site options only from visible rows", ()
     const fakeDeps = {
       outcomeStore: {
         listLatestPopulationOutcomes: async () => rows,
+        listLatestPopulationRuns: latestRunsFromRows(rows),
         listOutcomesWithRun: async () => rows,
       },
       webChartEnv: {},
@@ -664,6 +674,7 @@ test("programSites — returns distinct site options only from visible rows", ()
 test("programSites — scoped profile selects the latest run from visible rows", () => {
   const source = `
     import { programSites } from "./src/program/program-read-models.ts";
+    import { latestRunsFromRows } from "./src/test-support/latest-runs.ts";
 
     const olderVisible = {
       runId: "run-old", runStartedAt: "2026-07-17T00:00:00.000Z", runScopeType: "MEASURE",
@@ -676,6 +687,7 @@ test("programSites — scoped profile selects the latest run from visible rows",
     const fakeDeps = {
       outcomeStore: {
         listLatestPopulationOutcomes: async () => [newerForeign],
+        listLatestPopulationRuns: latestRunsFromRows([olderVisible, newerForeign]),
         listOutcomesWithRun: async () => [olderVisible, newerForeign],
       },
       webChartEnv: {},

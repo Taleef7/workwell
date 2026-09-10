@@ -11,6 +11,7 @@ import type { RunStore } from "../stores/run-store.ts";
 import type { CaseStore } from "../stores/case-store.ts";
 import { programOverview } from "./program-read-models.ts";
 import { isPopulationRun, POPULATION_SCOPES } from "./rollup-shared.ts";
+import { latestRunsFromRows } from "../test-support/latest-runs.ts";
 
 const row = (runId: string, runStartedAt: string, runScopeType: string, subjectId: string, status: string): OutcomeWithRun =>
   ({ runId, runStartedAt, runScopeType, runStatus: "COMPLETED", runTriggeredBy: "manual", subjectId, measureId: "audiogram", status });
@@ -22,7 +23,12 @@ const rows = [
 ];
 
 const deps = {
-  outcomeStore: { listOutcomesWithRun: async () => rows, listOutcomes: async () => [], aggregateScaleRun: async () => [] } as unknown as OutcomeStore,
+  outcomeStore: {
+    listOutcomesWithRun: async () => rows,
+    listLatestPopulationRuns: latestRunsFromRows(rows),
+    listOutcomes: async () => [],
+    aggregateScaleRun: async () => [],
+  } as unknown as OutcomeStore,
   runStore: { listRuns: async () => [] } as unknown as RunStore,
   caseStore: { listCases: async () => [] } as unknown as CaseStore,
 };

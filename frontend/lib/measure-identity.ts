@@ -10,6 +10,8 @@ export interface MeasureIdentity {
 export interface MeasureListItem {
   id: string;
   name: string;
+  /** Catalog status (`Draft | Approved | Active | Deprecated`); optional so older fixtures still type. */
+  status?: string;
   identity: MeasureIdentity | null;
 }
 
@@ -35,6 +37,9 @@ export function formatMeasureLabel(
 export function useMeasureIdentities() {
   const api = useApi();
   const [identities, setIdentities] = useState<Record<string, MeasureIdentity | null>>({});
+  // The catalog rows the identities came from, for pages that need names/status for a measure
+  // filter without a second (heavier) read — one `/api/measures` fetch serves both.
+  const [measures, setMeasures] = useState<MeasureListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const reqIdRef = useRef(0);
@@ -48,12 +53,12 @@ export function useMeasureIdentities() {
       const measures = await api.get<MeasureListItem[]>("/api/measures");
       if (!mountedRef.current || reqId !== reqIdRef.current) return;
       const map: Record<string, MeasureIdentity | null> = {};
-      if (Array.isArray(measures)) {
-        for (const m of measures) {
-          map[m.id] = m.identity ?? null;
-        }
+      const rows = Array.isArray(measures) ? measures : [];
+      for (const m of rows) {
+        map[m.id] = m.identity ?? null;
       }
       setIdentities(map);
+      setMeasures(rows);
     } catch (err) {
       if (!mountedRef.current || reqId !== reqIdRef.current) return;
       setError(err instanceof Error ? err.message : "Failed to load measure identities");
@@ -81,5 +86,5 @@ export function useMeasureIdentities() {
     [identities],
   );
 
-  return { identities, labelFor, loading, error, refetch: fetchIdentities };
+  return { identities, measures, labelFor, loading, error, refetch: fetchIdentities };
 }

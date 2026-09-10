@@ -162,6 +162,7 @@ test("the Maui roster uses only the profile-scoped static directory", () => {
     const roster = await buildRoster({
       outcomeStore: {
         async listLatestPopulationOutcomes() { return []; },
+        async listLatestPopulationRuns() { return []; },
         async listOutcomes() { return []; },
       },
       segments: [],
@@ -220,6 +221,7 @@ test("the default roster keeps the pre-Maui row count and tenant mix", () => {
     const roster = await buildRoster({
       outcomeStore: {
         async listLatestPopulationOutcomes() { return []; },
+        async listLatestPopulationRuns() { return []; },
         async listOutcomes() { return []; },
       },
       segments: [],

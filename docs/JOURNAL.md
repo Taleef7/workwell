@@ -1,5 +1,150 @@
 # Journal
 
+## 2026-09-10 — every page read the whole history to show one run, and the segment could not name four of the six measures
+
+The owner sent four screenshots of the sandbox: the programs page a skeleton, the roster "crunching
+~1.68M outcomes", the orders page "loading proposals", the cases page a skeleton. Measured before
+anything was touched, as the sandbox admin against the live API, warm second pass:
+
+| Read | Time | Bytes |
+|---|---|---|
+| `GET /api/programs/overview` | 6.3 s | 4.5 KB |
+| `GET /api/programs/sites` — the dashboard shell requests this on EVERY page load | 5.8 s | 85 B |
+| `GET /api/orders/proposals` | 11.4 s | 10.7 MB (33,963 proposals + 746 suppressed) |
+| `GET /api/hierarchy/rollup` | 8.7 s | 4.6 MB |
+| `GET /api/compliance/roster?limit=50` | 2.8 s | 1.5 KB |
+| `GET /api/programs/cms122/trend`, `/top-drivers`, `/risk-outlook` | 1.8 s, 1.3 s, 3.1 s each, six measures in parallel | — |
+| `GET /api/cases?status=open&limit=25` | 0.5 s | 15 KB |
+
+Server time, not transport: the 85-byte site list had a 4.5 s time-to-first-byte on a 70 ms connect.
+The frontend HTML served in 0.3 s. A cheap request issued while the site list was in flight was not
+starved (`/api/version` stayed at 0.22 s), so this was not the event loop; each endpoint's own cost was
+the cost, and every page paid the site list's on top of its own.
+
+**One cause under most of it.** `listLatestPopulationOutcomes` — the "latest terminal population run
+per measure" reduction pushed into SQL by perf #233 — was bypassed on every non-default profile:
+PR #506 (2026-09-01) gave `programSites`, `programOverview`, the hierarchy rollup and the order
+proposals a branch reading `DEPLOYMENT_PROFILE.id === "default" ? listLatestPopulationOutcomes :
+listOutcomesWithRun`, and the overview and the orders route used the unbounded read on every profile.
+`listOutcomesWithRun` with no run bound is every retained outcome row joined to its run — roughly a
+million rows on the pilot, plus 120,000 a night — shipped to the worker, mapped into objects, and
+reduced in JavaScript to the six winning runs. The site list did that to produce five clinic names, on
+every page. The orders route did it without even `excludeTrendHistory`, then serialized 34,000
+proposals for the browser to render as one list. The roster used the SQL reduction, but that reduction
+is itself a `DISTINCT ON` over every qualifying outcome row, and it read the whole winning run
+(120,000 rows with `evidence_json`) once per column on a cold cache.
+
+The reason for #506's branch is in its tests, not its comments: on a scoped profile, a newer run made
+entirely of foreign subjects must not blank an older run made of visible ones. That is a property of a
+SHARED database, which the pilot's is not; it cost the pilot the full history on every read.
+
+**What changed.** The question is split in two. `OutcomeStore.listLatestPopulationRuns(measureIds,
+filter, perMeasure)` answers WHICH runs win from the runs table: the newest 25 qualifying runs,
+walked newest first, each probed once for the still-unsatisfied measures with one `EXISTS` query —
+so the common case (the newest ALL_PROGRAMS run holds every routed measure) is two small queries —
+and whatever the budget cannot settle (a measure routed today and not yet run; one last evaluated
+further back) is resolved by one bounded query over that measure's own index entries, never a probe
+per run across the history. `listOutcomesWithRun` gained `runIds` and reads only those runs' rows,
+narrowed to the measure where one measure is asked for. One helper, `program/latest-population.ts`,
+does both for every roster-wide read model, keeps the rule every caller had implicitly — the winner
+is the newest run with a row the CALLER can see, so a newer run with no row at the requested site
+falls through to the older run that has one, and #506's foreign-subject case is the profile half of
+that — at the cost it deserves (the fallback reads that ONE measure's history, only when it fires; on
+the pilot's own database without a site filter it never does), and hands back a `runKey` — every
+`measure:runId` pair — under which the programs read models memoize what the winners' immutable
+rows determine (`RunKeyedMemo`). A terminal population run's outcomes never change, which is the fact
+the roster cell cache already rested on; a nightly that completes changes the key and the next read
+recomputes, with no timer. Nothing that reads a mutable table is memoized — the open-case count, the
+scale fold and the measure-rate memo run per request as before — and the WebChart seam state is part
+of every key, because the first version served a seam-off entry to a seam-on request and a route
+test caught it.
+
+Per surface: the site list makes no read at all where the static directory is the answer (the default
+profile with the seam off — byte-identical, since `directoryForRows` ignored the rows there), and is
+memoized elsewhere. The overview reads the winners' rows once per nightly and lists ACTIVE cases only
+(it kept `ACTIVE_CASE_STATUSES` after fetching every case, including the ~15,000 ADR-078 closed in one
+pass). The trend reads its newest 10 runs — the cap it already displayed — not the measure's history,
+and top-drivers reads one; both were reading the full history twice per programs page. The roster asks
+for the winners only and reads each column's run narrowed to that measure in SQL. The hierarchy rollup,
+the order proposals and the MCP directory go through the helper. The proposals route takes
+`?limit=1..1000&offset=` over both lists with `totals` alongside (the FHIR bundle is never windowed),
+and the page reads 100 at a time and no longer fetches the whole programs overview to label a select.
+
+The edges are stated rather than hidden, and the four reviews found more of them than I had. The
+trend starts from its newest 10 RUNS and widens the window (20, 40, 80) while fewer than ten
+displayable points exist and older runs remain — two runs on one day collapse to one point, and a
+run holding the measure but no row at a filtered site forms no group, so the first version's fixed
+window showed fewer days than the all-history read; after Codex's PR review it does not, short of
+eighty runs of nothing displayable. The site list, the hierarchy
+rollup's directory and the MCP directory rehydrate live WebChart subjects from the ACTIVE, RUNNABLE
+measures' winning runs, and the roster's from the columns it shows, rather than from every measure
+that ever had rows; neither live stack has the seam on. The overview lists active cases before the
+100,000-row cap rather than the first 100,000 of any status — different only above the cap, and the
+cap was the bug. A run that ties another to the millisecond is broken by run id here, where the old
+JavaScript kept whichever arrived first; the oracle's own docstring already accepted that. The order
+proposals keep their old filter (no trend-history exclusion — under a date window a seeded run can be
+the newest inside the window, and a review caught the first version changing that), and are now in
+(subject, measure) order, because a page over an unordered read is not a page.
+
+**Found on the way, fixed here.** The Worklist badge read "50" whatever the true count: the shell
+fetched `/api/cases?status=open` with no limit, the server returned the first 50, and the badge
+counted gaps over those. `?outreach=none|any` is now a server filter (a bad token is a 400 naming
+both) and the badge reads `X-Total-Count` off a one-row request. The roster's four official-only
+columns were titled `cms2`, `cms130`, `cms165`, `cms137` — `MEASURES[id]?.name ?? id`, and an
+official-only measure has no authored entry; the catalog name is the fallback now. And the slow-load
+hint said "Crunching ~1.68M outcomes across the enterprise…" — a hardcoded literal describing a
+different deployment's table, shown to the pilot's quality lead; it is number-free now.
+
+**Issue #536 could not be closed by its runbook.** The PUT widening `All Patients` to the five clinics
+and the six measures answered `400 unknown measure id(s): cms2, cms130, cms165, cms137`:
+`validateMeasureIds` checked the authored registry only, so no segment could ever name the four
+official-only measures the sandbox routes — which is why four of six evaluated and opened no case.
+The route accepts any catalog id now (tested with the pilot's set); the repair is sent once this is
+deployed, and the runbook says so. The seed for a FRESH Maui database already derived its measure set
+from the runnable ids, so only the live, already-seeded instance is affected.
+
+**Reviewed before the PR opened, four ways** (the in-house reviewer, Gemini 3.8 Flash high, Codex
+Sol xhigh, GLM 5.3 xhigh), and the first version did not survive them. Two majors only one lane
+saw: the single-measure callers still read every measure's rows of the winning runs — the trend
+would have read 1.2M rows to keep 200,000, MORE than the history it replaced until sixty nightlies
+existed — and the winner was chosen before the site and tenant filters where the old code chose it
+after. Three lanes found the unbounded runs walk independently; one found the unordered page; one
+found the seam-state memo key I had already fixed. Every finding above is in the journal because the
+first draft of this entry claimed byte-identity it did not have. **Codex's review of the opened PR
+found two more, both real.** A fallback result was memoized under the winners' key, and a visible
+run that STARTED before the winner and COMPLETED after it changes the fallback's answer without
+changing the winner — so the older run would have been served indefinitely. A fallback result is
+now never memoized (`fellBack`); the filtered-view path costs what it did before. And the trend's
+fixed ten-run window could show fewer days than the all-history read under a site filter or same-day
+reruns; it widens now, as above.
+
+**Verified.** Backend typecheck clean; the store contract now pins, on both stores, that the first
+winner `listLatestPopulationRuns` names per measure is the run `listLatestPopulationOutcomes` returns
+rows for — under `from` alone, `to` alone, a PARTIAL_FAILURE run and a lowercase-persisted run — that
+`perMeasure` walks past a newer run holding no row for the measure, that the past-budget fallback
+still equals the oracle (the test seeds more qualifying runs than the budget), and that `runIds` is
+exactly the plain filter over the full read (an empty set matches nothing). New tests cover the memo's
+key discipline (a new winner invalidates; a seam flip is not served the other state's entry), the
+pair filter (a store that ignores `runIds` still yields one run per measure), the narrowed
+single-measure read, the visibility fallback, the outreach filter (self-contained), the windowed
+proposals in stable order and their 400s, the segment PUT with the pilot's four ids, and the column
+titles. Frontend: the touched pages' tests plus the shared hook's other consumers, lint and
+`tsc --noEmit` clean. **The Postgres ceiling ran in CI only:** this host had 0–1 GB free the whole
+afternoon (a browser held 6 GB), and Docker Desktop was not started into that — the 2026-09-09 entry
+says why the floor cannot stand in for it. The full backend suite passes but for one pre-existing
+local failure (`corpus-membership.test.ts`: six value sets "referenced by neither vendored artifact"
+on this machine — the local vendored artifacts are stale; CI vendors them). The live before/after
+timings are recorded below once the deploy is measured, not predicted.
+
+**Left open, named.** 33,963 proposals for 20,000 patients: the proposals engine treats every
+MISSING_DATA outcome as at-risk, and under ADR-078 an out-of-population subject's outcome persists as
+MISSING_DATA — so the orders page proposes an HbA1c for every non-diabetic. The route reads statuses
+without evidence, and the case-model decision ADR-078 made (a subject outside the population is a
+result, not a case) has not been made for proposals; that is an owner decision, filed as #546,
+not a filter slipped into a performance change. `GET /api/runs/:id/outcomes` stays unbounded on the
+pilot profile for the reason the 2026-09-09 entry gave. Issue #534 (the cms137 flip) closed as done by
+#542.
+
 ## 2026-09-09 — reads proportionate to what they show, and the case pass batched
 
 Two measurements started this, both on the live pilot stack rather than a guess.

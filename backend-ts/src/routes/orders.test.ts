@@ -39,6 +39,10 @@ before(async () => {
   });
   await outcomes.recordOutcome({ runId: run.id, subjectId: "emp-006", measureId: "audiogram", status: "OVERDUE", evidence: {} });
   await outcomes.recordOutcome({ runId: run.id, subjectId: "emp-007", measureId: "audiogram", status: "COMPLIANT", evidence: {} });
+  // Two more at-risk subjects, so the windowing test has a set to page and the simulated standing-order
+  // provider (which suppresses by hash) is unlikely to leave `proposed` empty — and it asserts that.
+  await outcomes.recordOutcome({ runId: run.id, subjectId: "emp-008", measureId: "audiogram", status: "OVERDUE", evidence: {} });
+  await outcomes.recordOutcome({ runId: run.id, subjectId: "emp-013", measureId: "audiogram", status: "DUE_SOON", evidence: {} });
   await runStore.finalizeRun(run.id, "COMPLETED");
 });
 
@@ -58,6 +62,31 @@ test("returns domain proposals for at-risk outcomes (default format)", async () 
   assert.ok(!body.suppressed.some((p) => p.subjectId === "emp-007"), "COMPLIANT subject must not be suppressed");
   // emp-006 must appear in proposed OR suppressed (simulated may suppress ~1 in 5)
   assert.ok(allSubjects.includes("emp-006"), "at-risk subject must appear in proposed or suppressed");
+});
+
+test("the domain view carries totals, and ?limit/?offset window both lists without changing the totals", async () => {
+  const whole = (await get("").then((r) => r!.json())) as { proposed: unknown[]; suppressed: unknown[]; totals: { proposed: number; suppressed: number } };
+  assert.deepEqual(whole.totals, { proposed: whole.proposed.length, suppressed: whole.suppressed.length }, "no window → whole arrays, totals alongside");
+  assert.equal(whole.totals.proposed + whole.totals.suppressed, 3, "emp-006, emp-008 and emp-013 are the at-risk subjects");
+  assert.ok(whole.totals.proposed >= 1, "fixture: at least one proposal survives suppression (else the FHIR assertion below is vacuous)");
+  const ids = (xs: Array<{ subjectId: string }>) => xs.map((x) => x.subjectId);
+  assert.deepEqual(ids(whole.proposed as Array<{ subjectId: string }>), [...ids(whole.proposed as Array<{ subjectId: string }>)].sort(), "proposals are in subject order, so a page is a page");
+
+  const page = (await get("?limit=1&offset=0").then((r) => r!.json())) as typeof whole;
+  assert.deepEqual(page.totals, whole.totals, "the window never changes the totals");
+  assert.deepEqual(page.proposed, whole.proposed.slice(0, 1), "page 1 is the first of the whole, in the same order");
+  assert.deepEqual(page.suppressed, whole.suppressed.slice(0, 1));
+  const second = (await get("?limit=1&offset=1").then((r) => r!.json())) as typeof whole;
+  assert.deepEqual(second.proposed, whole.proposed.slice(1, 2), "page 2 is the second — no duplicate, no omission");
+  const past = (await get("?limit=1&offset=5").then((r) => r!.json())) as typeof whole;
+  assert.deepEqual([past.proposed, past.suppressed], [[], []], "past the end → empty pages, same totals");
+  assert.deepEqual(past.totals, whole.totals);
+
+  for (const qs of ["?limit=0", "?limit=1001", "?limit=x", "?limit=10&offset=-1", "?offset=1.5", "?limit=0x10", "?limit=1e1"]) {
+    assert.equal((await get(qs))!.status, 400, `${qs} is refused rather than served as a silently different page`);
+  }
+  const fhir = (await get("?format=fhir&limit=1&offset=5").then((r) => r!.json())) as { entry?: unknown[] };
+  assert.equal((fhir.entry ?? []).length, whole.totals.proposed, "the FHIR bundle is never windowed");
 });
 
 test("format=fhir returns a ServiceRequest Bundle", async () => {

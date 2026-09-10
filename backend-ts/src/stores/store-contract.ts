@@ -23,7 +23,7 @@ import type { SegmentStore } from "./segment-store.ts";
 import type { QualitySnapshotStore, QualitySnapshotInput } from "./quality-snapshot-store.ts";
 import type { PersonLinkStore } from "./person-link-store.ts";
 import type { EvalStateStore, UpsertEvalStateInput } from "./eval-state-store.ts";
-import type { OutcomeMeasureFilter, OutcomeWithRun } from "./outcome-store.ts";
+import { LATEST_RUN_PROBE_BUDGET, type OutcomeMeasureFilter, type OutcomeWithRun } from "./outcome-store.ts";
 import { isCompletedRun, isPopulationRun, latestRunRows } from "../program/rollup-shared.ts";
 
 export const sampleRun = (scopeId?: string): CreateRunInput => ({
@@ -825,6 +825,120 @@ export function outcomeStoreContract(
       "latest terminal population run per measure (RUNNING/CASE/SITE/scale/trend rejected)",
     );
     assert.ok(!rosterLike.some((r) => r.runId === aSite.id), "a newer COMPLETED SITE run never replaces the whole-roster snapshot (review finding 11, ADR-077 d4)");
+  });
+
+  test(`[${label}] listLatestPopulationRuns names the run listLatestPopulationOutcomes returns rows for, and runIds fetches only those runs`, async () => {
+    const { runStore, outcomeStore } = await fresh();
+    const mkRun = (scopeId: string, startedAt: string, over: Partial<CreateRunInput> = {}) =>
+      runStore.createRun({ ...sampleRun(scopeId), status: "COMPLETED", startedAt, ...over });
+    // Three terminal population runs for audiogram (so perMeasure=2 has a third to leave out), an
+    // ALL_PROGRAMS run holding both measures, and every kind of run the reduction must skip.
+    const aOld = await mkRun("audiogram", "2026-03-01T00:00:00.000Z");
+    const aMid = await mkRun("audiogram", "2026-03-10T00:00:00.000Z");
+    const both = await mkRun("all", "2026-04-01T00:00:00.000Z", { scopeType: "ALL_PROGRAMS" }); // newest for BOTH measures
+    const aRunning = await mkRun("audiogram", "2026-05-01T00:00:00.000Z", { status: "RUNNING" });
+    const aCase = await mkRun("audiogram", "2026-06-01T00:00:00.000Z", { scopeType: "CASE" });
+    const aSite = await mkRun("audiogram", "2026-06-15T00:00:00.000Z", { scopeType: "SITE" });
+    const scale = await mkRun("audiogram", "2026-07-01T00:00:00.000Z", { triggeredBy: "seed:scale" });
+    const trend = await mkRun("audiogram", "2026-07-02T00:00:00.000Z", { triggeredBy: "seed:trend-history" });
+    // A newer terminal population run that holds NO audiogram row: it must not become audiogram's
+    // winner just because it is newest — that is the whole difference between walking runs and
+    // walking outcomes, and the probe is what keeps the two answers equal.
+    const hazOnly = await mkRun("hazwoper", "2026-04-15T00:00:00.000Z");
+    await outcomeStore.recordOutcomes([
+      { runId: aOld.id, subjectId: "emp-006", measureId: "audiogram", status: "OVERDUE", evidence: {} },
+      { runId: aMid.id, subjectId: "emp-006", measureId: "audiogram", status: "DUE_SOON", evidence: {} },
+      { runId: both.id, subjectId: "emp-006", measureId: "audiogram", status: "COMPLIANT", evidence: {} },
+      { runId: both.id, subjectId: "emp-001", measureId: "hazwoper", status: "OVERDUE", evidence: {} },
+      { runId: hazOnly.id, subjectId: "emp-001", measureId: "hazwoper", status: "COMPLIANT", evidence: {} },
+      { runId: aRunning.id, subjectId: "emp-006", measureId: "audiogram", status: "MISSING_DATA", evidence: {} },
+      { runId: aCase.id, subjectId: "emp-006", measureId: "audiogram", status: "COMPLIANT", evidence: {} },
+      { runId: aSite.id, subjectId: "emp-006", measureId: "audiogram", status: "COMPLIANT", evidence: {} },
+      { runId: scale.id, subjectId: "emp-006", measureId: "audiogram", status: "OVERDUE", evidence: {} },
+      { runId: trend.id, subjectId: "emp-006", measureId: "audiogram", status: "OVERDUE", evidence: {} },
+    ]);
+    // A PARTIAL_FAILURE run counts as terminal, and the Java era persisted some scope/status values
+    // in lowercase — both must qualify, and the walk must agree with the oracle on them.
+    const aPartial = await mkRun("audiogram", "2026-02-01T00:00:00.000Z", { status: "PARTIAL_FAILURE" });
+    const aLower = await mkRun("audiogram", "2026-02-10T00:00:00.000Z", {
+      status: "completed" as unknown as CreateRunInput["status"],
+      scopeType: "all_programs" as unknown as CreateRunInput["scopeType"],
+    });
+    await outcomeStore.recordOutcomes([
+      { runId: aPartial.id, subjectId: "emp-006", measureId: "audiogram", status: "OVERDUE", evidence: {} },
+      { runId: aLower.id, subjectId: "emp-006", measureId: "audiogram", status: "OVERDUE", evidence: {} },
+    ]);
+    const filters: OutcomeMeasureFilter[] = [
+      { excludeScale: true, excludeTrendHistory: true },
+      {}, // scale + trend admitted → they are the newest audiogram runs, for BOTH methods
+      { from: "2026-03-05", to: "2026-04-10", excludeScale: true, excludeTrendHistory: true }, // window drops aOld + hazOnly
+      { from: "2026-04-10", excludeScale: true, excludeTrendHistory: true }, // `from` alone: hazwoper → hazOnly, audiogram → nothing qualifies
+      { to: "2026-02-15", excludeScale: true, excludeTrendHistory: true }, // only the lowercase + PARTIAL_FAILURE runs qualify → aLower wins
+    ];
+    for (const filter of filters) {
+      const winners = await outcomeStore.listLatestPopulationRuns(["audiogram", "hazwoper", "never-run"], filter);
+      for (const m of ["audiogram", "hazwoper"]) {
+        const expected = new Set((await outcomeStore.listLatestPopulationOutcomes({ ...filter, measureId: m })).map((r) => r.runId));
+        const got = winners.filter((w) => w.measureId === m).map((w) => w.runId);
+        assert.deepEqual(new Set(got), expected, `${m} winner under ${JSON.stringify(filter)}`);
+        assert.ok(got.length <= 1, "perMeasure defaults to one winner per measure");
+      }
+      assert.ok(!winners.some((w) => w.measureId === "never-run"), "a measure with no qualifying run has no entry");
+    }
+    // The roster/hierarchy filter, spelled out: audiogram wins the ALL_PROGRAMS run; hazwoper wins
+    // hazOnly, which is newer and holds a hazwoper row; the winner carries the run's own projection.
+    const roster = await outcomeStore.listLatestPopulationRuns(["audiogram", "hazwoper"], { excludeScale: true, excludeTrendHistory: true });
+    assert.deepEqual(
+      roster.map((w) => [w.measureId, w.runId]).sort(),
+      [["audiogram", both.id], ["hazwoper", hazOnly.id]].sort(),
+    );
+    const win = roster.find((w) => w.measureId === "audiogram")!;
+    assert.equal(win.runScopeType, "ALL_PROGRAMS");
+    assert.equal(win.runStatus, "COMPLETED");
+    assert.equal(win.runStartedAt.slice(0, 10), "2026-04-01");
+
+    // perMeasure = 2: the newest two runs holding audiogram rows, newest first — the trend's window.
+    const two = await outcomeStore.listLatestPopulationRuns(["audiogram"], { excludeScale: true, excludeTrendHistory: true }, 2);
+    assert.deepEqual(two.map((w) => w.runId), [both.id, aMid.id], "newest first, aOld left out, hazOnly skipped (no audiogram row)");
+    assert.deepEqual(
+      (await outcomeStore.listLatestPopulationRuns(["audiogram"], { excludeScale: true, excludeTrendHistory: true }, Number.NaN)).map((w) => w.runId),
+      [both.id],
+      "a non-finite window is one winner, never every run",
+    );
+
+    // Past the probe budget: more qualifying runs holding NO audiogram row than the walk probes, newer
+    // than audiogram's winners. The walk must give up on audiogram and resolve it by the bounded
+    // per-measure query — and still agree with the oracle, for a single winner and for a window.
+    for (let i = 0; i < LATEST_RUN_PROBE_BUDGET + 3; i++) {
+      const hazNewer = await mkRun("hazwoper", `2026-08-${String(1 + Math.floor(i / 24)).padStart(2, "0")}T${String(i % 24).padStart(2, "0")}:00:00.000Z`);
+      await outcomeStore.recordOutcome({ runId: hazNewer.id, subjectId: "emp-001", measureId: "hazwoper", status: "COMPLIANT", evidence: {} });
+    }
+    const pastBudget = await outcomeStore.listLatestPopulationRuns(["audiogram", "hazwoper", "never-run"], { excludeScale: true, excludeTrendHistory: true });
+    assert.deepEqual(
+      new Set(pastBudget.filter((w) => w.measureId === "audiogram").map((w) => w.runId)),
+      new Set((await outcomeStore.listLatestPopulationOutcomes({ measureId: "audiogram", excludeScale: true, excludeTrendHistory: true })).map((r) => r.runId)),
+      "audiogram is settled by the fallback query and still equals the oracle",
+    );
+    assert.equal(pastBudget.filter((w) => w.measureId === "hazwoper").length, 1, "hazwoper was settled by the walk's first probe");
+    assert.ok(!pastBudget.some((w) => w.measureId === "never-run"), "a measure with no rows anywhere still has no entry after the fallback");
+    const windowPastBudget = await outcomeStore.listLatestPopulationRuns(["audiogram"], { excludeScale: true, excludeTrendHistory: true }, 3);
+    assert.deepEqual(windowPastBudget.map((w) => w.runId), [both.id, aMid.id, aOld.id], "a window resolved by the fallback is newest-first and exact");
+
+    // runIds fetches exactly those runs' rows — the JS reference is the plain filter over the full read.
+    const key = (r: OutcomeWithRun) => `${r.measureId}|${r.runId}|${r.subjectId}|${r.status}`;
+    const all = await outcomeStore.listOutcomesWithRun({});
+    const ids = [both.id, aMid.id];
+    assert.deepEqual(
+      (await outcomeStore.listOutcomesWithRun({ runIds: ids })).map(key).sort(),
+      all.filter((r) => ids.includes(r.runId)).map(key).sort(),
+    );
+    assert.deepEqual(await outcomeStore.listOutcomesWithRun({ runIds: [] }), [], "an empty run set matches nothing, never everything");
+    assert.deepEqual(await outcomeStore.listOutcomesWithRun({ runIds: ["not-a-run"] }), [], "an unknown id matches nothing on either store");
+    // Composable with the measure filter: the ALL_PROGRAMS run's rows, one measure of them.
+    assert.deepEqual(
+      (await outcomeStore.listOutcomesWithRun({ runIds: [both.id], measureId: "hazwoper" })).map(key),
+      [`hazwoper|${both.id}|emp-001|OVERDUE`],
+    );
   });
 }
 

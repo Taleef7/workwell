@@ -1,5 +1,6 @@
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { SUBJECT } from "@/lib/terminology";
 import { SLOW_LOAD_HINT, useSlowLoadHint } from "../useSlowLoadHint";
 
 describe("useSlowLoadHint", () => {
@@ -42,7 +43,10 @@ describe("useSlowLoadHint", () => {
     expect(result.current).toBe(false);
   });
 
-  it("exposes an honest, config-light hint constant", () => {
-    expect(SLOW_LOAD_HINT).toMatch(/1\.68M/);
+  it("exposes an honest hint constant: no row count, no deployment name, the profile's subject noun", () => {
+    expect(SLOW_LOAD_HINT).toBe(`Still working — reading the latest results for every ${SUBJECT.singular} on the roster…`);
+    expect(SLOW_LOAD_HINT).not.toMatch(/\d/);
+    expect(SLOW_LOAD_HINT).not.toMatch(/enterprise/i);
+    expect(SLOW_LOAD_HINT.endsWith("…")).toBe(true);
   });
 });

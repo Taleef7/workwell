@@ -1,14 +1,16 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { SUBJECT } from "@/lib/terminology";
 
 /**
- * UX-3 — the honest "this is working, not broken" copy shown when a load runs long. At 120k scale the
- * hierarchy rollup (~5–7s) and the roster's first cold hit (~12s) are genuinely crunching the whole
- * enterprise's outcomes, so we say exactly that rather than leave a bare skeleton reading as "hung".
- * Config-light constant on purpose (no i18n plumbing for a demo).
+ * UX-3 — the honest "this is working, not broken" copy shown once an in-flight load has run for 3s
+ * (the hierarchy rollup and the roster's cold hit both can). It names no row count and no deployment,
+ * because the same copy is shown on every instance and a number that is true for one is false for the
+ * next; the subject noun follows the deployment profile ("employee" on TWH, "patient" on the pilot).
+ * Config-light constant (no i18n plumbing).
  */
-export const SLOW_LOAD_HINT = "Crunching ~1.68M outcomes across the enterprise…";
+export const SLOW_LOAD_HINT = `Still working — reading the latest results for every ${SUBJECT.singular} on the roster…`;
 
 /**
  * Returns true once an in-flight load has been running longer than `delayMs` (default 3s), and false

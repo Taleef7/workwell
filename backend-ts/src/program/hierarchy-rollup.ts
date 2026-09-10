@@ -13,9 +13,9 @@
 import type { OutcomeStore, OutcomeWithRun, ScaleGroupCount } from "../stores/outcome-store.ts";
 import type { CaseStore } from "../stores/case-store.ts";
 import type { RunStore } from "../stores/run-store.ts";
-import { directoryForRows } from "../engine/ingress/webchart/live-directory.ts";
-import { DEPLOYMENT_PROFILE, DIRECTORY, isRunnableMeasure, profileSubjectMatcher, type EmployeeProfile } from "../config/deployment-profile.ts";
-import { isWebChartConfigured, type DataSourceEnv } from "../engine/ingress/data-source.ts";
+import { DEPLOYMENT_PROFILE, isRunnableMeasure, type EmployeeProfile } from "../config/deployment-profile.ts";
+import type { DataSourceEnv } from "../engine/ingress/data-source.ts";
+import { latestPopulationSnapshot } from "./latest-population.ts";
 import { MEASURE_CATALOG } from "../measure/measure-catalog.ts";
 import { ACTIVE_CASE_STATUSES } from "../case/case-logic.ts";
 import { day, isCompletedRun, isPopulationRun, latestRunRows, complianceRateOf } from "./rollup-shared.ts";
@@ -93,16 +93,17 @@ export async function buildHierarchyRollup(deps: HierarchyDeps, filters: Hierarc
   // Build exactly one request-local directory view from the persisted latest population rows.
   // This rehydrates unknown wc subjects after a worker restart while keeping the static seam-off
   // lookup functions byte-identical.
-  const allRows = scopeMeasures.length > 0
-    ? (DEPLOYMENT_PROFILE.id === "default"
-      ? await deps.outcomeStore.listLatestPopulationOutcomes({ from, to, excludeScale: true, excludeTrendHistory: true })
-      : await deps.outcomeStore.listOutcomesWithRun({ from, to, excludeScale: true, excludeTrendHistory: true })).filter(
-        (r) => isPopulationRun(r.runScopeType) && isCompletedRun(r.runStatus) && r.runTriggeredBy !== SCALE_TRIGGER,
-      )
-    : [];
-  const webChartConfigured = isWebChartConfigured(deps.webChartEnv ?? {});
-  const directory = directoryForRows(allRows, webChartConfigured, deps.webChartEnv, DIRECTORY);
-  const profileMatch = profileSubjectMatcher(directory.employeeById);
+  // The winners' rows only (`latestPopulationSnapshot`): the runs table names each scoped measure's
+  // latest terminal population run and just those runs are read — not every retained run's rows
+  // reduced in JS, which is what every non-default profile did here until 2026-09-10 (PR #506's
+  // branch; its foreign-winner rule lives on inside the helper).
+  const snap = await latestPopulationSnapshot(deps.outcomeStore, scopeMeasures, { from, to, excludeScale: true, excludeTrendHistory: true }, deps.webChartEnv);
+  const allRows = snap.rows.filter(
+    (r) => isPopulationRun(r.runScopeType) && isCompletedRun(r.runStatus) && r.runTriggeredBy !== SCALE_TRIGGER,
+  );
+  const webChartConfigured = snap.webChartConfigured;
+  const directory = snap.directory;
+  const profileMatch = snap.profileMatch;
   const subjectVisible = (subjectId: string): boolean => webChartConfigured || !subjectId.startsWith("wc|");
 
   const byPatient = new Map<string, MutableTotals>();
@@ -116,11 +117,9 @@ export async function buildHierarchyRollup(deps: HierarchyDeps, filters: Hierarc
   if (scopeMeasures.length > 0) {
     // The scale tenant (~120k rows) is excluded IN SQL (excludeScale) — never fetched into memory; it
     // is read only via aggregateScaleRun below. The JS guard stays as defense-in-depth.
-    // perf #233 residual: reduce to the latest terminal population run per measure IN SQL (the store
-    // applies the same isPopulationRun/isCompletedRun/excludeScale/excludeTrendHistory predicates the
-    // JS filter below does), so the ~1s over-fetch of every population run's rows across history is
-    // gone. The JS filter + per-measure `latestRunRows` stay as defense-in-depth and a passthrough —
-    // the store-contract asserts this returns exactly the pre-reduction path's result set.
+    // The snapshot above already holds one run per measure (the helper resolved the winners from the
+    // runs table and read only their rows, with the profile fallback the old path had), so the JS
+    // filter + per-measure `latestRunRows` below are a passthrough kept as defense-in-depth.
     const byMeasure = new Map<string, OutcomeWithRun[]>();
     for (const r of allRows) {
       if (!profileMatch(r.subjectId)) continue;

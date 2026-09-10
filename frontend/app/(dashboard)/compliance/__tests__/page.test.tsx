@@ -2,11 +2,13 @@ import React from "react";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { SLOW_LOAD_HINT } from "@/lib/useSlowLoadHint";
 import type { createNavMock } from "@/test/mocks/next-navigation-reactive";
 
 import { setSubject, subject } from "@/test/mocks/terminology";
 vi.mock("@/lib/terminology", () => ({ SUBJECT: subject }));
+// After the terminology mock: the hint reads SUBJECT at import, and the hoisted factory above needs
+// `subject` initialised before anything pulls `@/lib/terminology` in.
+import { SLOW_LOAD_HINT } from "@/lib/useSlowLoadHint";
 
 const getWithHeaders = vi.fn();
 const get = vi.fn();
@@ -294,7 +296,7 @@ describe("CompliancePage", () => {
     expect(immFetches()).toBe(1); // still one — the return trip was served from the session cache
   });
 
-  it("UX-3: shows the >3s 'Crunching…' hint while a slow load is in flight, then clears it", async () => {
+  it("UX-3: shows the >3s slow-load hint while a slow load is in flight, then clears it", async () => {
     vi.useFakeTimers();
     try {
       // A load that never resolves keeps `loading` true so the >3s timer can fire.
@@ -312,7 +314,7 @@ describe("CompliancePage", () => {
       });
       expect(screen.getByText(SLOW_LOAD_HINT)).toBeInTheDocument();
       const status = screen.getByRole("status");
-      expect(status).toHaveTextContent(/Crunching/);
+      expect(status).toHaveTextContent(SLOW_LOAD_HINT);
 
       // Resolve the load → the hint clears.
       await act(async () => {

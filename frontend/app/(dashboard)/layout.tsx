@@ -143,14 +143,20 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
     let mounted = true;
     async function loadWorklistGapCount() {
       try {
+        // The badge is a COUNT, so ask the server for one: `outreach=none` narrows to open cases with
+        // no OUTREACH_SENT record and `X-Total-Count` carries the full filtered match, while `limit=1`
+        // keeps the body to a single row. Counting rows client-side capped the badge at the server's
+        // default page (50) and made the backend load every open case on every navigation.
         const params = new URLSearchParams();
         params.set("status", "open");
+        params.set("outreach", "none");
+        params.set("limit", "1");
         if (siteId) params.set("site", siteId);
         if (from) params.set("from", from);
         if (to) params.set("to", to);
-        const data = await api.get<Array<{ outreachRecordCount?: number }>>(`/api/cases?${params.toString()}`);
-        const count = data.filter((item) => (item.outreachRecordCount ?? 0) === 0).length;
-        if (mounted) setWorklistGapCount(count);
+        const { headers } = await api.getWithHeaders<unknown[]>(`/api/cases?${params.toString()}`);
+        const count = Number(headers.get("X-Total-Count") ?? 0);
+        if (mounted) setWorklistGapCount(Number.isFinite(count) ? count : 0);
       } catch {
         if (mounted) setWorklistGapCount(0);
       }
