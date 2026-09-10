@@ -352,6 +352,33 @@ test("worklist exposes outreachRecordCount; a sent case is no longer a gap (badg
   if (missing) assert.equal(missing.outreachRecordCount, 0, "un-contacted case is a gap (0)");
 });
 
+test("?outreach=none is the badge's read: X-Total-Count is the gap count over the WHOLE open list, one row of body", async () => {
+  // Self-contained: make sure one open case has outreach and one has none, whatever ran before.
+  let open = (await get("?status=open&limit=500").then((r) => r!.json())) as Array<{ id: string; employeeName: string; outreachRecordCount: number }>;
+  assert.ok(open.length >= 2, "fixture: at least two open cases");
+  if (!open.some((r) => r.outreachRecordCount > 0)) {
+    assert.equal((await post(`/api/cases/${open[0]!.id}/actions/outreach`))?.status, 200);
+    open = (await get("?status=open&limit=500").then((r) => r!.json())) as typeof open;
+  }
+  const gaps = open.filter((r) => r.outreachRecordCount === 0).length;
+  assert.ok(gaps >= 1 && gaps < open.length, "fixture: at least one gap and at least one contacted case");
+
+  const res = await get("?status=open&outreach=none&limit=1");
+  assert.equal(res!.status, 200);
+  assert.equal(res!.headers.get("X-Total-Count"), String(gaps), "the count is the filtered total, not the page");
+  const body = (await res!.json()) as Array<{ outreachRecordCount: number }>;
+  assert.equal(body.length, 1, "limit=1 → one row over the wire");
+  assert.equal(body[0]!.outreachRecordCount, 0);
+
+  const any = (await get("?status=open&outreach=any&limit=500").then((r) => r!.json())) as Array<{ outreachRecordCount: number }>;
+  assert.ok(any.every((r) => r.outreachRecordCount > 0), "outreach=any keeps only the contacted cases");
+  assert.equal(any.length, open.length - gaps);
+
+  const bad = await get("?status=open&outreach=maybe");
+  assert.equal(bad!.status, 400, "an unrecognised token is refused, never a dropped filter");
+  assert.match(((await bad!.json()) as { message: string }).message, /none \| any/);
+});
+
 // Runs last: rerun-to-verify may transition Omar's case to a closing status, which would
 // remove it from the open worklist asserted above.
 test("POST /api/cases/:id/rerun-to-verify re-evaluates and records the verification on the timeline", async () => {

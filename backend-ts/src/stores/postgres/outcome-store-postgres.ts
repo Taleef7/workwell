@@ -5,12 +5,14 @@
  */
 import { isUuid, type PgPool } from "./pg-database.ts";
 import { SPIKE_SCHEMA } from "./schema-pg.ts";
+import { LATEST_RUN_PROBE_BUDGET } from "../outcome-store.ts";
 import type {
   OutcomeRecord,
   OutcomeStore,
   RecordOutcomeInput,
   OutcomeWithRun,
   OutcomeMeasureFilter,
+  LatestPopulationRun,
   MeasureOutcomeRow,
   EmployeeOutcomeRow,
   ScaleGroupCount,
@@ -362,6 +364,14 @@ export class PgOutcomeStore implements OutcomeStore {
       const ph = excludedTriggers.map((v) => `$${binds.push(v)}`).join(", ");
       where.push(`o.run_id = ANY (ARRAY(SELECT id FROM ${SPIKE_SCHEMA}.runs WHERE triggered_by NOT IN (${ph})))`);
     }
+    if (filter.runIds) {
+      // The explicit run set (the winners `listLatestPopulationRuns` resolved). A native UUID column:
+      // a malformed id can never match, so drop it here rather than let Postgres throw on the cast;
+      // an empty set matches nothing, which the `= ANY('{}')` form already guarantees.
+      const ids = filter.runIds.filter(isUuid);
+      if (ids.length === 0) return [];
+      where.push(`o.run_id = ANY($${binds.push(ids)}::uuid[])`);
+    }
     const clause = where.length ? ` WHERE ${where.join(" AND ")}` : "";
     const { rows } = await this.pool.query<{
       run_id: string;
@@ -447,6 +457,94 @@ export class PgOutcomeStore implements OutcomeStore {
       measureId: r.measure_id,
       status: r.status,
     }));
+  }
+
+  async listLatestPopulationRuns(measureIds: readonly string[], filter: OutcomeMeasureFilter, perMeasure = 1): Promise<LatestPopulationRun[]> {
+    const wanted = [...new Set(measureIds)];
+    const per = Number.isFinite(perMeasure) ? Math.max(1, Math.trunc(perMeasure)) : 1;
+    if (wanted.length === 0) return [];
+    // The run predicates are listLatestPopulationOutcomes' inner query verbatim (scope allowlist,
+    // terminal status, the UTC started-day window, the trigger exclusions), so the two methods can only
+    // disagree on which run wins if a run holds no row for the measure — which is what the probe checks.
+    // `triggered_by NOT IN (...)` is what the sibling reads apply; a NULL triggered_by is excluded there
+    // too (NULL NOT IN (...) is not true), so the same run set qualifies here.
+    const runWhere: string[] = ["UPPER(r.scope_type) IN ('MEASURE','ALL_PROGRAMS')", "UPPER(r.status) IN ('COMPLETED','PARTIAL_FAILURE')"];
+    const binds: unknown[] = [];
+    if (filter.from) runWhere.push(`(r.started_at AT TIME ZONE 'UTC')::date >= $${binds.push(filter.from)}::date`);
+    if (filter.to) runWhere.push(`(r.started_at AT TIME ZONE 'UTC')::date <= $${binds.push(filter.to)}::date`);
+    const excludedTriggers: string[] = [];
+    if (filter.excludeScale) excludedTriggers.push("seed:scale");
+    if (filter.excludeTrendHistory) excludedTriggers.push("seed:trend-history");
+    if (excludedTriggers.length) {
+      const ph = excludedTriggers.map((v) => `$${binds.push(v)}`).join(", ");
+      runWhere.push(`r.triggered_by NOT IN (${ph})`);
+    }
+    type RunRow = { id: string; started_at: Date | string; scope_type: string; status: string; triggered_by: string | null };
+    const toWinner = (measureId: string, run: RunRow): LatestPopulationRun => ({
+      measureId,
+      runId: run.id,
+      runStartedAt: run.started_at instanceof Date ? run.started_at.toISOString() : run.started_at,
+      runScopeType: run.scope_type,
+      runStatus: run.status,
+      runTriggeredBy: run.triggered_by ?? "manual",
+    });
+
+    // 1) The newest PROBE_BUDGET qualifying runs — the runs table, not the outcomes table. Walk them
+    //    newest-first and ask each which of the still-unsatisfied measures it holds a row for: one
+    //    EXISTS probe per (run, measure) inside ONE query per run, stopping as soon as every measure has
+    //    its `per` winners. The common case (the newest ALL_PROGRAMS run holds every routed measure) is
+    //    one probe. A negative probe walks the run's index entries (no (run_id, measure_id) index), so
+    //    the walk is bounded: a measure the budget cannot settle — routed today and not yet run, or
+    //    last evaluated further back than the budget — is resolved by step 2 instead.
+    const { rows: runs } = await this.pool.query<RunRow>(
+      `SELECT r.id, r.started_at, r.scope_type, r.status, r.triggered_by
+         FROM ${SPIKE_SCHEMA}.runs r WHERE ${runWhere.join(" AND ")}
+        ORDER BY r.started_at DESC, r.id DESC LIMIT ${LATEST_RUN_PROBE_BUDGET}`,
+      binds,
+    );
+    const remaining = new Map<string, number>(wanted.map((m) => [m, per]));
+    const out: LatestPopulationRun[] = [];
+    for (const run of runs) {
+      if (remaining.size === 0) break;
+      const { rows: hits } = await this.pool.query<{ measure_id: string }>(
+        `SELECT m.measure_id FROM unnest($2::text[]) AS m(measure_id)
+          WHERE EXISTS (SELECT 1 FROM ${SPIKE_SCHEMA}.outcomes o WHERE o.run_id = $1 AND o.measure_id = m.measure_id)`,
+        [run.id, [...remaining.keys()]],
+      );
+      for (const hit of hits) {
+        const left = remaining.get(hit.measure_id);
+        if (left === undefined) continue;
+        out.push(toWinner(hit.measure_id, run));
+        if (left <= 1) remaining.delete(hit.measure_id);
+        else remaining.set(hit.measure_id, left - 1);
+      }
+    }
+    if (remaining.size === 0 || runs.length < LATEST_RUN_PROBE_BUDGET) return out;
+
+    // 2) The leftovers, each by ONE bounded query over its own index entries: the distinct (measure,
+    //    run) pairs of that measure, ranked newest-first under the same run predicates — the
+    //    reduction listLatestPopulationOutcomes performs, restricted to the measures the walk could not
+    //    settle. `rn` continues past what the walk already found so the window stays exact.
+    const leftover = [...remaining.keys()];
+    const lbinds: unknown[] = [...binds, leftover, per];
+    const { rows: ranked } = await this.pool.query<RunRow & { measure_id: string; rn: string }>(
+      `SELECT * FROM (
+         SELECT d.measure_id, r.id, r.started_at, r.scope_type, r.status, r.triggered_by,
+                ROW_NUMBER() OVER (PARTITION BY d.measure_id ORDER BY r.started_at DESC, r.id DESC) AS rn
+           FROM (SELECT DISTINCT o.measure_id, o.run_id FROM ${SPIKE_SCHEMA}.outcomes o WHERE o.measure_id = ANY($${binds.length + 1}::text[])) d
+           JOIN ${SPIKE_SCHEMA}.runs r ON r.id = d.run_id
+          WHERE ${runWhere.join(" AND ")}
+       ) x WHERE rn <= $${binds.length + 2}::int ORDER BY measure_id, rn`,
+      lbinds,
+    );
+    for (const row of ranked) {
+      const left = remaining.get(row.measure_id);
+      if (left === undefined) continue;
+      // The walk already banked (per - left) newest winners for this measure; skip those ranks.
+      if (Number(row.rn) <= per - left) continue;
+      out.push(toWinner(row.measure_id, row));
+    }
+    return out;
   }
 
   async aggregateScaleRun(runId: string): Promise<ScaleGroupCount[]> {

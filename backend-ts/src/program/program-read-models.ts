@@ -9,7 +9,7 @@
  * Employee site is resolved from the synthetic directory (outcomes carry only subjectId).
  */
 import type { RunStore } from "../stores/run-store.ts";
-import type { OutcomeStore, OutcomeWithRun, MeasureOutcomeRow } from "../stores/outcome-store.ts";
+import type { OutcomeStore, OutcomeWithRun, MeasureOutcomeRow, OutcomeMeasureFilter } from "../stores/outcome-store.ts";
 import type { CaseStore } from "../stores/case-store.ts";
 import { EMPLOYEES, employeeById, type EmployeeProfile } from "../engine/synthetic/employee-catalog.ts";
 import type { QualitySnapshotStore, QualitySnapshotRow, QualityScopeLevel } from "../stores/quality-snapshot-store.ts";
@@ -17,11 +17,13 @@ import { MEASURE_CATALOG } from "../measure/measure-catalog.ts";
 import { measureIdentityFor } from "../measure/measure-identity.ts";
 import { ACTIVE_CASE_STATUSES } from "../case/case-logic.ts";
 import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
-import { day, isCompletedRun, isPopulationRun, round1, complianceRateOf, type ComplianceRateCounts } from "./rollup-shared.ts";
+import { day, isCompletedRun, round1, complianceRateOf, type ComplianceRateCounts } from "./rollup-shared.ts";
 import { officialMeasureRate, type MeasureRate } from "./measure-rate.ts";
 import { directoryForRows, type DirectorySnapshot } from "../engine/ingress/webchart/live-directory.ts";
 import { DEPLOYMENT_PROFILE, DIRECTORY, isRunnableMeasure, profileSubjectMatcher, tenantById } from "../config/deployment-profile.ts";
 import { isWebChartConfigured, type DataSourceEnv } from "../engine/ingress/data-source.ts";
+import { latestPopulationSnapshot, latestPopulationWinners, RunKeyedMemo, type VisibilityContext } from "./latest-population.ts";
+import type { LatestPopulationRun } from "../stores/outcome-store.ts";
 
 export { complianceRateOf, type ComplianceRateCounts };
 
@@ -187,21 +189,43 @@ export function listSites(employees: readonly EmployeeProfile[] = EMPLOYEES): st
   return [...new Set(employees.map((e) => e.site).filter((s): s is string => !!s))].sort((a, b) => a.localeCompare(b));
 }
 
+/** The measures a roster-wide read model shows: catalog-Active AND runnable on this deployment. */
+const activeRunnableIds = (): string[] =>
+  MEASURE_CATALOG.filter((m) => m.status === "Active" && isRunnableMeasure(m.id)).map((m) => m.id);
+
+const LATEST_FILTER = { excludeScale: true, excludeTrendHistory: true } as const;
+
+/**
+ * The dashboard shell asks for the site list on EVERY page load, so this is the read every page paid:
+ * on the pilot it was every retained outcome row (~1M) to produce five clinic names. Now: no read at
+ * all where the static directory is the answer, and otherwise the winners' rows once per nightly.
+ */
+const sitesMemo = new RunKeyedMemo<string[]>(4);
+export const __sitesMemo = sitesMemo;
+
 /** Distinct sites from one restart-safe snapshot of the latest successful population rows. */
 export async function programSites(deps: Pick<ProgramDeps, "outcomeStore" | "webChartEnv">): Promise<string[]> {
-  const sourceRows = DEPLOYMENT_PROFILE.id === "default"
-    ? await deps.outcomeStore.listLatestPopulationOutcomes({ excludeScale: true, excludeTrendHistory: true })
-    : await deps.outcomeStore.listOutcomesWithRun({ excludeScale: true, excludeTrendHistory: true });
-  const rows = sourceRows.filter(
-    (row) => isPopulationRun(row.runScopeType) && isCompletedRun(row.runStatus) && row.runTriggeredBy !== "seed:scale",
-  );
   const webChartConfigured = isWebChartConfigured(deps.webChartEnv ?? {});
-  const directory = directoryForRows(rows, webChartConfigured, deps.webChartEnv, DIRECTORY);
-  if (DEPLOYMENT_PROFILE.id === "default") return listSites(directory.employees);
-  const profileMatch = profileSubjectMatcher(directory.employeeById);
-  const visibleRows = rows.filter((row) => subjectVisible(row.subjectId, webChartConfigured) && profileMatch(row.subjectId));
-  const employees = visibleRows.map((r) => directory.employeeById(r.subjectId)).filter((e): e is EmployeeProfile => e !== null);
-  return listSites(employees);
+  // With the WebChart seam off, `directoryForRows` returns the static directory whatever rows it is
+  // handed, and the default profile lists that directory's sites — so the rows were never consulted.
+  // Byte-identical to the read this replaces; the read is simply not made.
+  if (DEPLOYMENT_PROFILE.id === "default" && !webChartConfigured) return listSites(DIRECTORY.employees);
+  const active = activeRunnableIds();
+  const { winners, runKey } = await latestPopulationWinners(deps.outcomeStore, active, LATEST_FILTER);
+  const memoKey = `sites:${webChartConfigured}`; // the seam state decides visibility, so it keys the memo
+  const hit = sitesMemo.get(memoKey, runKey);
+  if (hit) return hit;
+  // The scoped-profile site list's own visibility rule (seam + profile), so a winner none of whose
+  // subjects are visible falls back exactly as the filter-then-reduce it replaces did.
+  const snap = await latestPopulationSnapshot(deps.outcomeStore, active, LATEST_FILTER, deps.webChartEnv, 1, {
+    precomputed: winners,
+    visible: DEPLOYMENT_PROFILE.id === "default" ? undefined : (id, ctx) => subjectVisible(id, ctx.webChartConfigured) && ctx.profileMatch(id),
+  });
+  const rows = snap.rows.filter((row) => row.runTriggeredBy !== "seed:scale");
+  if (DEPLOYMENT_PROFILE.id === "default") return sitesMemo.set(memoKey, runKey, listSites(snap.directory.employees));
+  const visibleRows = rows.filter((row) => subjectVisible(row.subjectId, snap.webChartConfigured) && snap.profileMatch(row.subjectId));
+  const employees = visibleRows.map((r) => snap.directory.employeeById(r.subjectId)).filter((e): e is EmployeeProfile => e !== null);
+  return sitesMemo.set(memoKey, runKey, listSites(employees));
 }
 
 /** One run's site-filtered outcome rows (the unit overview/trend/top-drivers aggregate). */
@@ -244,54 +268,94 @@ const tenantMatcher = (filters: ProgramFilters, employeeLookup = employeeById) =
 const subjectVisible = (subjectId: string, webChartConfigured: boolean): boolean =>
   webChartConfigured || !subjectId.startsWith("wc|");
 
+/** The outcome-derived half of a ProgramSummary — what the winners' immutable rows determine. */
+interface OverviewBuckets {
+  latestRunId: string | null;
+  latestRunAt: string | null;
+  total: number;
+  compliant: number;
+  dueSoon: number;
+  overdue: number;
+  missingData: number;
+  excluded: number;
+}
+const EMPTY_BUCKETS: OverviewBuckets = { latestRunId: null, latestRunAt: null, total: 0, compliant: 0, dueSoon: 0, overdue: 0, missingData: 0, excluded: 0 };
+const overviewMemo = new RunKeyedMemo<{ buckets: Map<string, OverviewBuckets>; directory: DirectorySnapshot; webChartConfigured: boolean }>(16);
+export const __overviewMemo = overviewMemo;
+
 export async function programOverview(deps: ProgramDeps, filters: ProgramFilters): Promise<ProgramSummary[]> {
   const from = filters.from?.trim() || null;
   const to = filters.to?.trim() || null;
   const inPeriod = (iso: string): boolean => (!from || day(iso) >= day(from)) && (!to || day(iso) <= day(to));
 
-  // ONE bounded query (measure/date filtering pushed into SQL) instead of fanning out a
-  // listOutcomes per run across all history. Site filtering stays in the app (directory).
-  // Only terminal (COMPLETED/PARTIAL_FAILURE) population runs are eligible as a measure's "latest
-  // run". An in-flight ALL_PROGRAMS run writes outcomes incrementally, so without this filter the
-  // newest-by-startedAt group is the RUNNING run with PARTIAL counts — the headline Evaluations
-  // number visibly bounced (e.g. 1100 → 200 → 1100) until the run finished.
-  // excludeScale drops the scale tenant's ~120k rows IN SQL (the scale KPIs are folded in separately
-  // via aggregateScaleRun below). The JS guard stays as defense-in-depth.
-  // excludeTrendHistory (Fable M16): the synthetic trend rows are always older than each measure's
-  // latest real run, so this overview (latest-run-per-measure) never selects them — dropping them in
-  // SQL avoids the fetch-then-discard. The /programs TREND read model below intentionally keeps them.
-  const persistedRows = await deps.outcomeStore.listOutcomesWithRun({ from: from ?? undefined, to: to ?? undefined, excludeScale: true, excludeTrendHistory: true });
-  const successfulRows = persistedRows.filter(
-    (row) => isPopulationRun(row.runScopeType) && isCompletedRun(row.runStatus) && row.runTriggeredBy !== "seed:scale",
-  );
-  const webChartConfigured = isWebChartConfigured(deps.webChartEnv ?? {});
-  const directory = directoryForRows(successfulRows, webChartConfigured, deps.webChartEnv, DIRECTORY);
+  const active = MEASURE_CATALOG.filter((m) => m.status === "Active" && isRunnableMeasure(m.id));
+  // The winners first (O(measures) rows), then their rows ONCE per nightly: the status buckets below
+  // are a pure function of the winning runs' immutable outcomes and the request's filters, so they
+  // are memoized under the winners' key. Everything that reads a mutable table — the open-case
+  // count, the scale fold, the measure's rate memo — is computed below, per request, as before.
+  // Only terminal (COMPLETED/PARTIAL_FAILURE) population runs can be a measure's "latest run": an
+  // in-flight ALL_PROGRAMS run writes outcomes incrementally, and without that rule the newest group
+  // was the RUNNING run with PARTIAL counts — the headline Evaluations number visibly bounced.
+  // excludeScale keeps the scale tenant's rows in SQL (folded in via aggregateScaleRun below);
+  // excludeTrendHistory keeps the backdated synthetic trend rows out (they are never a winner). The
+  // /programs TREND read model below intentionally keeps them.
+  const latestFilter = { from: from ?? undefined, to: to ?? undefined, ...LATEST_FILTER };
+  const { winners, runKey } = await latestPopulationWinners(deps.outcomeStore, active.map((m) => m.id), latestFilter);
+  // The seam state is part of the key: it decides which subjects are visible and which directory
+  // resolves them, so a request after the seam flips must not be served the other state's buckets.
+  const memoKey = JSON.stringify([from, to, filters.site?.trim() || null, filters.tenant?.trim() || null, isWebChartConfigured(deps.webChartEnv ?? {})]);
+  let derived = overviewMemo.get(memoKey, runKey);
+  if (!derived) {
+    // The overview's own row filter, handed to the snapshot as its visibility rule: the old code
+    // filtered history by seam/profile/site/tenant and THEN took the newest run, so a newer run with
+    // no row at the requested site fell through to the newest that had one. Same here, per measure.
+    const snap = await latestPopulationSnapshot(deps.outcomeStore, active.map((m) => m.id), latestFilter, deps.webChartEnv, 1, {
+      precomputed: winners,
+      visible: rowVisibleUnder(filters),
+    });
+    const successfulRows = snap.rows.filter((row) => row.runTriggeredBy !== "seed:scale");
+    const siteMatch = siteMatcher(filters, snap.directory.employeeById);
+    const tenantMatch = tenantMatcher(filters, snap.directory.employeeById);
+    const rows = successfulRows.filter(
+      (row) =>
+        subjectVisible(row.subjectId, snap.webChartConfigured) &&
+        snap.profileMatch(row.subjectId) &&
+        siteMatch(row.subjectId) &&
+        tenantMatch(row.subjectId),
+    );
+    const byMeasure = new Map<string, OutcomeWithRun[]>();
+    for (const r of rows) (byMeasure.get(r.measureId) ?? byMeasure.set(r.measureId, []).get(r.measureId)!).push(r);
+    const buckets = new Map<string, OverviewBuckets>();
+    for (const m of active) {
+      const groups = groupByRun(byMeasure.get(m.id) ?? []);
+      const best = groups.length ? groups.reduce((a, b) => (b.runStartedAt > a.runStartedAt ? b : a)) : null;
+      const os = best?.rows ?? [];
+      const n = (status: string) => os.filter((o) => o.status === status).length;
+      buckets.set(m.id, {
+        latestRunId: best?.runId ?? null,
+        latestRunAt: best?.runStartedAt ?? null,
+        total: os.length,
+        compliant: n("COMPLIANT"),
+        dueSoon: n("DUE_SOON"),
+        overdue: n("OVERDUE"),
+        missingData: n("MISSING_DATA"),
+        excluded: n("EXCLUDED"),
+      });
+    }
+    derived = overviewMemo.set(memoKey, runKey, { buckets, directory: snap.directory, webChartConfigured: snap.webChartConfigured });
+  }
+  const { directory, webChartConfigured } = derived;
   const siteMatch = siteMatcher(filters, directory.employeeById);
   const tenantMatch = tenantMatcher(filters, directory.employeeById);
   const profileMatch = profileSubjectMatcher(directory.employeeById);
-  const rows = successfulRows.filter(
-    (row) =>
-      subjectVisible(row.subjectId, webChartConfigured) &&
-      profileMatch(row.subjectId) &&
-      siteMatch(row.subjectId) &&
-      tenantMatch(row.subjectId),
-  );
-  const byMeasure = new Map<string, OutcomeWithRun[]>();
-  for (const r of rows) (byMeasure.get(r.measureId) ?? byMeasure.set(r.measureId, []).get(r.measureId)!).push(r);
-  const cases = await deps.caseStore.listCases({ limit: 100000 });
+  // Active cases only: the count below keeps ACTIVE_CASE_STATUSES, so the closed majority (the pilot
+  // closes ~15,000 under OUT_OF_POPULATION in one pass) was fetched to be discarded.
+  const cases = await deps.caseStore.listCases({ statuses: [...ACTIVE_CASE_STATUSES], limit: 100000 });
 
-  const active = MEASURE_CATALOG.filter((m) => m.status === "Active" && isRunnableMeasure(m.id));
   const summaries = active.map((m): ProgramSummary => {
-    const groups = groupByRun(byMeasure.get(m.id) ?? []);
-    const best = groups.length ? groups.reduce((a, b) => (b.runStartedAt > a.runStartedAt ? b : a)) : null;
-    const os = best?.rows ?? [];
-    const n = (status: string) => os.filter((o) => o.status === status).length;
-    const total = os.length;
-    const compliant = n("COMPLIANT");
-    const dueSoon = n("DUE_SOON");
-    const overdue = n("OVERDUE");
-    const missingData = n("MISSING_DATA");
-    const excluded = n("EXCLUDED");
+    const b = derived!.buckets.get(m.id) ?? EMPTY_BUCKETS;
+    const best = b.latestRunId ? { runId: b.latestRunId, runStartedAt: b.latestRunAt! } : null;
+    const { total, compliant, dueSoon, overdue, missingData, excluded } = b;
     const denominator = total - excluded;
     const openCaseCount = cases.filter(
       (c) =>
@@ -393,36 +457,72 @@ function zeroSummary(s: ProgramSummary): void {
   s.excluded = 0; s.complianceRate = 0; s.latestRunId = null; s.latestRunAt = null; s.openCaseCount = 0;
 }
 
-/** Run groups carrying site-filtered outcomes for one measure (bounded query, no per-run fan-out). */
+/**
+ * The trend shows at most 10 points (Java parity, `.slice(0, 10)` below), so it reads the newest 10
+ * completed population runs holding the measure — not the measure's whole history, which on the
+ * pilot is every nightly since the flip, twice (the trend and top-drivers each read it). Two edges,
+ * stated: the day-collapse below can leave fewer than 10 points when two runs share a day (each
+ * took a slot), and a run that holds the measure but no row at the filtered site is a slot spent on
+ * a group that never forms. The pilot's ALL_PROGRAMS nightly holds every measure at every clinic.
+ */
+const TREND_RUN_WINDOW = 10;
+
+/** The per-measure filter trend + top-drivers share: the request window, scale kept out in SQL.
+ *  Trend history is deliberately NOT excluded — those backdated runs are the trend's early points. */
+const measureFilter = (filters: ProgramFilters): OutcomeMeasureFilter => ({
+  from: filters.from?.trim() || undefined,
+  to: filters.to?.trim() || undefined,
+  // E13 PR-2: trend + top-drivers are NOT extended to the scale tenant; exclude it in SQL so a
+  // seeded measure's 120k rows never enter this scan (bounded) and never skew the live charts.
+  excludeScale: true,
+});
+
+/** The row filter the overview, trend and top-drivers apply after the read (seam, profile, site,
+ *  tenant), in the form the snapshot helper takes so a winner with no visible row falls back. */
+const rowVisibleUnder = (filters: ProgramFilters) => (subjectId: string, ctx: VisibilityContext): boolean =>
+  subjectVisible(subjectId, ctx.webChartConfigured) &&
+  ctx.profileMatch(subjectId) &&
+  siteMatcher(filters, ctx.directory.employeeById)(subjectId) &&
+  tenantMatcher(filters, ctx.directory.employeeById)(subjectId);
+
+/** Run groups carrying site-filtered outcomes for one measure — its newest `runWindow` completed
+ *  population runs, resolved from the runs table first and read by run id, narrowed to the measure
+ *  (never the history, never the run's other measures). */
 async function runsWithOutcomes(
   deps: ProgramDeps,
   measureId: string,
   filters: ProgramFilters,
+  runWindow: number,
+  precomputed?: readonly LatestPopulationRun[],
 ): Promise<{ groups: RunGroup[]; directory: DirectorySnapshot; hasWebChartRows: boolean }> {
-  const persistedRows = await deps.outcomeStore.listOutcomesWithRun({
-      measureId,
-      from: filters.from?.trim() || undefined,
-      to: filters.to?.trim() || undefined,
-      // E13 PR-2: trend + top-drivers are NOT extended to the scale tenant; exclude it in SQL so a
-      // seeded measure's 120k rows never enter this scan (bounded) and never skew the live charts.
-      excludeScale: true,
-    });
-  const successfulRows = persistedRows.filter((row) => isPopulationRun(row.runScopeType) && isCompletedRun(row.runStatus));
+  const snap = await latestPopulationSnapshot(deps.outcomeStore, [measureId], measureFilter(filters), deps.webChartEnv, runWindow, {
+    precomputed,
+    visible: rowVisibleUnder(filters),
+  });
+  const successfulRows = snap.rows;
   const hasWebChartRows = successfulRows.some((row) => row.subjectId.startsWith("wc|"));
-  const webChartConfigured = isWebChartConfigured(deps.webChartEnv ?? {});
-  const directory = directoryForRows(successfulRows, webChartConfigured, deps.webChartEnv, DIRECTORY);
-  const siteMatch = siteMatcher(filters, directory.employeeById);
-  const tenantMatch = tenantMatcher(filters, directory.employeeById);
-  const profileMatch = profileSubjectMatcher(directory.employeeById);
+  const siteMatch = siteMatcher(filters, snap.directory.employeeById);
+  const tenantMatch = tenantMatcher(filters, snap.directory.employeeById);
   const rows = successfulRows.filter(
     (row) =>
-      subjectVisible(row.subjectId, webChartConfigured) &&
-      profileMatch(row.subjectId) &&
+      subjectVisible(row.subjectId, snap.webChartConfigured) &&
+      snap.profileMatch(row.subjectId) &&
       siteMatch(row.subjectId) &&
       tenantMatch(row.subjectId),
   );
-  return { groups: groupByRun(rows), directory, hasWebChartRows };
+  return { groups: groupByRun(rows), directory: snap.directory, hasWebChartRows };
 }
+
+/** Memo key for the per-measure charts: the measure, every request filter that shapes them, and the
+ *  seam state (it decides which subjects are visible, so a seam flip must not serve the other's points). */
+const chartMemoKey = (deps: ProgramDeps, measureId: string, filters: ProgramFilters, extra: unknown = null): string =>
+  JSON.stringify([
+    measureId, filters.from?.trim() || null, filters.to?.trim() || null, filters.site?.trim() || null, filters.tenant?.trim() || null,
+    isWebChartConfigured(deps.webChartEnv ?? {}), extra,
+  ]);
+const trendMemo = new RunKeyedMemo<ProgramTrendPoint[]>(64);
+const driversMemo = new RunKeyedMemo<TopDrivers>(64);
+export const __chartMemos = { trendMemo, driversMemo };
 
 /** Last day of the (1-indexed) month in `YYYY-MM-DD`? `Date.UTC(y, m, 0)` = day 0 of month m's successor = last day of month m. */
 function isLastDayOfMonth(ymd: string): boolean {
@@ -493,9 +593,18 @@ export async function programTrend(
   // per-run trend below (which honors day-granular from/to).
   const from = filters.from?.trim() || undefined;
   const to = filters.to?.trim() || undefined;
+  // The per-run points are a pure function of the window's immutable runs, so they are memoized under
+  // the window's key. The monthly branch reads the quality-snapshot store (mutable, and only ever
+  // taken on the default profile — `monthlySnapshotScopeIsSafe`), so a request that could take it
+  // bypasses the memo entirely rather than serve per-run points where monthly ones were due.
+  const monthlyPossible = Boolean(opts?.monthly && deps.qualitySnapshots && DEPLOYMENT_PROFILE.id === "default");
+  const { winners, runKey } = await latestPopulationWinners(deps.outcomeStore, [measureId], measureFilter(filters), TREND_RUN_WINDOW);
+  const memoKey = chartMemoKey(deps, measureId, filters, opts?.tz ?? null);
+  const cached = monthlyPossible ? undefined : trendMemo.get(memoKey, runKey);
+  if (cached) return cached;
   // Load once before the optional monthly early return: the same successful rows both rehydrate the
   // site-only scope after restart and feed the per-run fallback without a second store read.
-  const { groups, directory, hasWebChartRows } = await runsWithOutcomes(deps, measureId, filters);
+  const { groups, directory, hasWebChartRows } = await runsWithOutcomes(deps, measureId, filters, TREND_RUN_WINDOW, winners);
   const scope = opts?.monthly && deps.qualitySnapshots && isWholeMonthRange(from, to)
     ? snapshotScopeFor(filters, directory.employees)
     : null;
@@ -538,7 +647,7 @@ export async function programTrend(
     }
   }
 
-  return [...latestByDay.values()]
+  const points = [...latestByDay.values()]
     .map(({ group: { runId, runStartedAt, rows } }): ProgramTrendPoint => {
       const total = rows.length;
       const compliant = n(rows, "COMPLIANT");
@@ -562,6 +671,7 @@ export async function programTrend(
     })
     .sort((a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt))
     .slice(0, 10);
+  return monthlyPossible ? points : trendMemo.set(memoKey, runKey, points);
 }
 
 /** Overdue concentration (site/role) + flagged-reason mix for a measure's latest filtered run. */
@@ -571,8 +681,12 @@ export async function programTopDrivers(
   filters: ProgramFilters,
 ): Promise<TopDrivers> {
   const empty: TopDrivers = { bySite: [], byRole: [], byOutcomeReason: [] };
-  const { groups, directory } = await runsWithOutcomes(deps, measureId, filters);
-  if (groups.length === 0) return empty;
+  const { winners, runKey } = await latestPopulationWinners(deps.outcomeStore, [measureId], measureFilter(filters));
+  const memoKey = chartMemoKey(deps, measureId, filters);
+  const cached = driversMemo.get(memoKey, runKey);
+  if (cached) return cached;
+  const { groups, directory } = await runsWithOutcomes(deps, measureId, filters, 1, winners);
+  if (groups.length === 0) return driversMemo.set(memoKey, runKey, empty);
   // Latest filtered run with outcomes for this measure.
   const latest = groups.reduce((a, b) => (b.runStartedAt > a.runStartedAt ? b : a));
   const outcomes = latest.rows;
@@ -607,7 +721,7 @@ export async function programTopDrivers(
     .map(([reason, count]) => ({ reason, count, pct: totalFlagged === 0 ? 0 : Math.round((count / totalFlagged) * 1000) / 10 }))
     .sort((a, b) => b.count - a.count);
 
-  return { bySite, byRole, byOutcomeReason };
+  return driversMemo.set(memoKey, runKey, { bySite, byRole, byOutcomeReason });
 }
 
 // ---- risk outlook (#107) ----------------------------------------------------

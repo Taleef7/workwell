@@ -320,6 +320,16 @@ export async function handleCases(req: Request, env: CasesEnv, actor = "system")
   // "why flagged" axis, distinct from case *status* (OPEN/CLOSED/…). Post-filtered in JS like
   // site/search so X-Total-Count stays exact for paging.
   const outcome = q.get("outcome")?.trim().toUpperCase().replace(/[\s-]+/g, "_") || undefined;
+  // Outreach filter — `none` keeps the cases with no OUTREACH_SENT record (the worklist-gap badge's
+  // definition), `any` the rest. The dashboard shell used to pull the whole open list to count the
+  // gaps client-side over the first page it was handed, so the badge read "50" on the pilot whatever
+  // the true count; it now asks for `outreach=none&limit=1` and reads X-Total-Count. An unrecognised
+  // token is a 400 naming the accepted values, like the panel filters — never a silently dropped filter.
+  const outreachRaw = q.get("outreach")?.trim().toLowerCase() || undefined;
+  if (outreachRaw !== undefined && outreachRaw !== "none" && outreachRaw !== "any") {
+    return json({ error: "invalid_request", message: `outreach must be one of: none | any (got '${outreachRaw}')` }, 400);
+  }
+  const outreach = outreachRaw as "none" | "any" | undefined;
   // The OPEN worklist defaults to each measure's CURRENT compliance cycle — derived from TODAY + the
   // measure's cadence (`bucketPeriodForMeasure`), so it's exact and cadence-correct (filtered in JS
   // below). A blank `?period=` (empty string, not just absent) is treated as the default — `??` alone
@@ -375,6 +385,7 @@ export async function handleCases(req: Request, env: CasesEnv, actor = "system")
     summaries = summaries.filter((c) => matchesSubjectFilters(employeeLookup(c.employeeId), subjectFilters));
   }
   if (outcome) summaries = summaries.filter((c) => (c.currentOutcomeStatus ?? "").toUpperCase() === outcome);
+  if (outreach) summaries = summaries.filter((c) => (outreach === "none") === ((c.outreachRecordCount ?? 0) === 0));
   if (search) {
     summaries = summaries.filter(
       (c) =>

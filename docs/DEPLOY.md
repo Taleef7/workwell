@@ -595,6 +595,13 @@ Total catalog: **63 measures**, 14 runnable (see `docs/MEASURES.md` for the full
 > to all five clinic names via the audited `PUT /api/segments/:id` (the Configure Groups editor), which
 > records a `SEGMENT_UPDATED` event. Owner-gated, like every data repair.
 >
+> **The same PUT must widen `measureIds` to the routed set** (`cms122, cms125, cms2, cms130, cms165,
+> cms137`, keeping `hypertension`): the segment restricts measures as well as sites, and the live one
+> was seeded before ADR-078 with the first two only — so cms2/cms130/cms165/cms137 evaluated and opened
+> no case (issue #536, 2026-09-09 comment). Until 2026-09-10 the route refused those four ids
+> (`validateMeasureIds` checked the authored registry only); the deploy carrying that fix must be live
+> before the PUT is sent, or it answers `400 unknown measure id(s)`.
+>
 > **Since 2026-09-07 the run tells you if this is still owed** (ADR-076 d3, issue #536). Every run that
 > evaluates subjects who need follow-up and whom no segment covers writes one `WARN` on the run: how
 > many distinct patients, what share of the patients the run evaluated, how many evaluations that was,

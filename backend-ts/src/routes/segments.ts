@@ -20,6 +20,7 @@ import { ensureSegmentSeed } from "../segment/segment-seed.ts";
 // directory through a path a catalog-import sweep does not obviously cover.
 import { employees } from "../config/deployment-profile.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
+import { MEASURE_CATALOG } from "../measure/measure-catalog.ts";
 import type { SegmentRule, SegmentOverride, HydratedSegment } from "../stores/segment-store.ts";
 import type { CaseEventStore } from "../stores/case-event-store.ts";
 
@@ -46,7 +47,13 @@ const isStringArray = (v: unknown): v is string[] => Array.isArray(v) && v.every
 /** Validate measureIds: a string[] of known runnable measure ids. Returns an error message, or null. */
 function validateMeasureIds(v: unknown): string | null {
   if (!isStringArray(v)) return "measureIds must be an array of strings";
-  const unknown = v.filter((id) => !(id in MEASURES));
+  // A segment may name an ACTIVE catalog measure, not only an AUTHORED one: cms2, cms130, cms165 and
+  // cms137 are official-only (no entry in `MEASURES`, the authored registry) and are the pilot's routed
+  // set. Until 2026-09-10 this check refused them, so the live `All Patients` segment could not be
+  // widened to the measures the sandbox runs (issue #536) — four of six measures evaluated and opened
+  // no case. Draft and Deprecated catalog rows stay refused (a legacy row, ADR-071, is not a cohort's
+  // measure); an authored id is accepted as it always was.
+  const unknown = v.filter((id) => !(id in MEASURES) && !MEASURE_CATALOG.some((m) => m.id === id && m.status === "Active"));
   if (unknown.length) return `unknown measure id(s): ${unknown.join(", ")}`;
   return null;
 }
