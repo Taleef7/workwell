@@ -1,21 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { OutcomeStore, OutcomeWithRun, OutcomeRecord } from "../stores/outcome-store.ts";
+import { latestRunsFromRows } from "../test-support/latest-runs.ts";
 import { EMPLOYEES, isDemoPersona } from "../engine/synthetic/employee-catalog.ts";
 import type { HydratedSegment } from "../stores/segment-store.ts";
 import { PANELS } from "./panels.ts";
 import { buildRoster, type RosterCellCache } from "./roster-read-model.ts";
-import { isCompletedRun, isPopulationRun, latestRunRows } from "../program/rollup-shared.ts";
 import { replaceLiveDirectory } from "../engine/ingress/webchart/live-directory.ts";
-
-/** The store's latest-terminal-population-run-per-measure reduction, applied to fixture rows so the
- *  fake mirrors production semantics (perf #233). */
-function reduceLatest(withRun: OutcomeWithRun[]): OutcomeWithRun[] {
-  const pop = withRun.filter((r) => isPopulationRun(r.runScopeType) && isCompletedRun(r.runStatus));
-  const byMeasure = new Map<string, OutcomeWithRun[]>();
-  for (const r of pop) (byMeasure.get(r.measureId) ?? byMeasure.set(r.measureId, []).get(r.measureId)!).push(r);
-  return [...byMeasure.values()].flatMap((rows) => latestRunRows(rows));
-}
 
 // The first REAL (non-demo) directory subject. emp-001..004 are demo-login personas that now sink to the
 // bottom of the roster regardless of data (UX-1), so they'd fall off page 1 — use a real employee here.
@@ -42,7 +33,8 @@ function segmentFor(measureIds: string[], opts: { enabled?: boolean } = {}): Hyd
 function fakeStore(withRun: OutcomeWithRun[], byRun: Record<string, OutcomeRecord[]>): OutcomeStore {
   return {
     listOutcomesWithRun: async () => withRun,
-    listLatestPopulationOutcomes: async () => reduceLatest(withRun),
+    listLatestPopulationOutcomes: async () => { throw new Error("unused: the roster resolves winners via listLatestPopulationRuns"); },
+    listLatestPopulationRuns: latestRunsFromRows(withRun),
     listOutcomes: async (runId: string) => byRun[runId] ?? [],
     compactOlderThan: async () => 0,
     listLatestFinalizedOutcomePerMeasure: async () => { throw new Error("unused"); },
@@ -221,7 +213,7 @@ test("buildRoster — a newer in-flight RUNNING run is ignored; the last COMPLET
   assert.equal(row.cells["mmr"]!.evidenceRef?.runId, "run-1");
 });
 
-test("buildRoster — two panel measures sharing one run load it once (no N+1); unevaluated measure → NA method", async () => {
+test("buildRoster — two panel measures sharing one run each read only their own rows of it (narrowed in SQL, one read per evaluated column); unevaluated measure → NA method", async () => {
   const withRun: OutcomeWithRun[] = [
     { runId: "run-1", runStartedAt: "2026-06-12T00:00:00Z", runScopeType: "ALL_PROGRAMS", runStatus: "COMPLETED", runTriggeredBy: "manual", subjectId: EMP, measureId: "mmr", status: "COMPLIANT" },
     { runId: "run-1", runStartedAt: "2026-06-12T00:00:00Z", runScopeType: "ALL_PROGRAMS", runStatus: "COMPLETED", runTriggeredBy: "manual", subjectId: EMP, measureId: "varicella", status: "COMPLIANT" },
@@ -233,12 +225,15 @@ test("buildRoster — two panel measures sharing one run load it once (no N+1); 
     ],
   };
   const store = fakeStore(withRun, byRun);
-  let calls = 0;
+  const calls: Array<[string, string | undefined]> = [];
   const orig = store.listOutcomes.bind(store);
-  store.listOutcomes = async (id: string) => { calls++; return orig(id); };
+  store.listOutcomes = async (id: string, opts?: { measureId?: string }) => { calls.push([id, opts?.measureId]); return orig(id, opts); };
 
   const roster = await buildRoster({ outcomeStore: store, segments: [] }, { panel: "immunizations" });
-  assert.equal(calls, 1, "one shared run → listOutcomes called exactly once (run-cache)");
+  // One narrowed read per EVALUATED column — the run is ALL_PROGRAMS, so reading it whole once would
+  // ship every measure's evidence to serve two columns (the pilot's cold roster cost until 2026-09-10).
+  // The unevaluated column has no winner and costs no read at all.
+  assert.deepEqual(calls.sort(), [["run-1", "mmr"], ["run-1", "varicella"]], "listOutcomes(runId, { measureId }) once per evaluated column");
   const row = roster.rows.find((r) => r.subject.externalId === EMP)!;
   assert.equal(row.cells["mmr"]!.status, "COMPLIANT");
   assert.equal(row.cells["varicella"]!.status, "COMPLIANT");

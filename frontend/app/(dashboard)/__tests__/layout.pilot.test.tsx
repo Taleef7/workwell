@@ -1,5 +1,5 @@
 import React from "react";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import DashboardLayout from "../layout";
 
@@ -8,12 +8,18 @@ import { setPublicDemo } from "@/test/mocks/public-demo";
 vi.mock("@/lib/public-demo", () => import("@/test/mocks/public-demo"));
 
 let currentRole = "ROLE_CASE_MANAGER";
+// One user object per role, as the real provider yields: a fresh object per render would re-fire
+// every `[user]` effect in the layout.
+const usersByRole = new Map<string, { email: string; role: string }>();
 vi.mock("@/components/auth-provider", () => ({
-  useAuth: () => ({
-    user: { email: "test@example.com", role: currentRole },
-    token: "mock-token",
-    logout: vi.fn(),
-  }),
+  useAuth: () => {
+    let user = usersByRole.get(currentRole);
+    if (!user) {
+      user = { email: "test@example.com", role: currentRole };
+      usersByRole.set(currentRole, user);
+    }
+    return { user, token: "mock-token", logout: vi.fn() };
+  },
 }));
 
 vi.mock("next/navigation", () => ({
@@ -22,8 +28,11 @@ vi.mock("next/navigation", () => ({
   useSearchParams: () => new URLSearchParams(),
 }));
 
+const getWithHeaders = vi.fn();
+// A stable object, as the real hook returns: a fresh one per render would re-fire every `[api]` effect.
+const apiMock = { get: vi.fn().mockResolvedValue([]), getWithHeaders };
 vi.mock("@/lib/api/hooks", () => ({
-  useApi: () => ({ get: vi.fn().mockResolvedValue([]) }),
+  useApi: () => apiMock,
 }));
 
 vi.mock("@/components/GlobalSearch", () => ({
@@ -41,6 +50,39 @@ beforeEach(() => {
     removeEventListener: vi.fn(),
     dispatchEvent: vi.fn(),
   }));
+});
+
+beforeEach(() => {
+  getWithHeaders.mockReset().mockResolvedValue({ data: [], headers: new Headers({ "X-Total-Count": "0" }) });
+});
+
+describe("DashboardLayout Worklist badge", () => {
+  it("reads the gap count from X-Total-Count via outreach=none&limit=1, not from the rows it received", async () => {
+    setPublicDemo(false);
+    currentRole = "ROLE_CASE_MANAGER";
+    // One row in the body, 137 in the header: the badge must say 137.
+    getWithHeaders.mockResolvedValue({
+      data: [{ caseId: "case-1", outreachRecordCount: 0 }],
+      headers: new Headers({ "X-Total-Count": "137" }),
+    });
+
+    render(
+      <DashboardLayout>
+        <div>Content</div>
+      </DashboardLayout>,
+    );
+
+    await waitFor(() => expect(screen.getByText("137")).toBeInTheDocument());
+    expect(screen.queryByText("1", { exact: true })).toBeNull();
+
+    expect(getWithHeaders).toHaveBeenCalledTimes(1);
+    const url = String(getWithHeaders.mock.calls[0][0]);
+    expect(url.startsWith("/api/cases?")).toBe(true);
+    const params = new URLSearchParams(url.slice(url.indexOf("?") + 1));
+    expect(params.get("status")).toBe("open");
+    expect(params.get("outreach")).toBe("none");
+    expect(params.get("limit")).toBe("1");
+  });
 });
 
 describe("DashboardLayout pilot mode", () => {

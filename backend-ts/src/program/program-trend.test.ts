@@ -11,6 +11,7 @@ import { snapshotScopeFor, monthlyTrendPoints, programTrend, isWholeMonthRange, 
 import type { ProgramDeps } from "./program-read-models.ts";
 import type { QualitySnapshotRow } from "../stores/quality-snapshot-store.ts";
 import type { OutcomeWithRun } from "../stores/outcome-store.ts";
+import { latestRunsFromRows } from "../test-support/latest-runs.ts";
 
 test("snapshotScopeFor — no tenant/site → all/ALL", () => {
   assert.deepEqual(snapshotScopeFor({}), { scopeLevel: "all", scopeId: "ALL" });
@@ -101,7 +102,10 @@ function fakeDeps(opts: { snaps?: QualitySnapshotRow[]; perRun?: OutcomeWithRun[
   const deps = {
     runStore: {} as ProgramDeps["runStore"],
     caseStore: {} as ProgramDeps["caseStore"],
-    outcomeStore: { listOutcomesWithRun: async () => opts.perRun ?? [] } as unknown as ProgramDeps["outcomeStore"],
+    outcomeStore: {
+      listOutcomesWithRun: async () => opts.perRun ?? [],
+      listLatestPopulationRuns: latestRunsFromRows(() => opts.perRun ?? []),
+    } as unknown as ProgramDeps["outcomeStore"],
   } as ProgramDeps;
   deps.webChartEnv = { WORKWELL_WEBCHART_BASE_URL: "http://webchart.test", WORKWELL_WEBCHART_API_KEY: "fixture-key" };
   if (opts.withSnapshots !== false) {

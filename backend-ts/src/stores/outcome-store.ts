@@ -97,6 +97,34 @@ export interface OutcomeMeasureFilter {
    * roster/hierarchy/programs-overview reads pass this so those rows never leave the DB.
    */
   excludeTrendHistory?: boolean;
+  /**
+   * Restrict to these runs IN SQL (`run_id = ANY(...)`). The read models that reduce to "the newest
+   * run(s) per measure" resolve those run ids first with {@link OutcomeStore.listLatestPopulationRuns}
+   * — a handful of rows — and then fetch ONLY those runs' outcomes through this, so a page reads the
+   * rows it shows and not every retained run's. An empty array matches nothing (never "everything").
+   */
+  runIds?: string[];
+}
+
+/**
+ * How many of the newest qualifying runs {@link OutcomeStore.listLatestPopulationRuns} probes before
+ * resolving what is left by one bounded per-measure query. Both stores honour it; the store contract
+ * seeds more runs than this so the second path is exercised, not merely present.
+ */
+export const LATEST_RUN_PROBE_BUDGET = 25;
+
+/**
+ * One (measure, run) winner from {@link OutcomeStore.listLatestPopulationRuns}: the run carries the same
+ * projection `OutcomeWithRun` does, so a caller can apply `isPopulationRun`/`isCompletedRun` as
+ * defense-in-depth without a second read.
+ */
+export interface LatestPopulationRun {
+  measureId: string;
+  runId: string;
+  runStartedAt: string;
+  runScopeType: string;
+  runStatus: string;
+  runTriggeredBy: string;
 }
 
 /** Options for the per-measure evidence-rich outcome scan. */
@@ -202,8 +230,38 @@ export interface OutcomeStore {
    * (On a true `started_at` tie the JS reference's insertion-order tiebreak and this method's
    * `run_id DESC` tiebreak could pick different runs; sequential run creation makes exact ties
    * unreachable in practice.)
+   *
+   * Since 2026-09-10 no read model calls this: the reduction it performs scans every qualifying
+   * outcome row to name a run, and {@link listLatestPopulationRuns} names it from the runs table. It
+   * stays as the store contract's ORACLE — the reference the walk is asserted equal to on both stores.
    */
   listLatestPopulationOutcomes(filter: OutcomeMeasureFilter): Promise<OutcomeWithRun[]>;
+  /**
+   * For each requested measure, its newest `perMeasure` (default 1) terminal population runs that hold
+   * at least one outcome row for it — the (measure, run) WINNERS, without any outcome rows.
+   *
+   * This answers the question every roster-wide read model asks first ("which run is the latest for
+   * this measure?") without reading outcome rows. {@link listLatestPopulationOutcomes} answers it by
+   * reducing over every qualifying outcome row — on the pilot that is every retained run's 120,000
+   * rows scanned to pick one run id — and `listOutcomesWithRun` + `latestRunRows` answered it by
+   * shipping those rows to the worker. Here the newest {@link LATEST_RUN_PROBE_BUDGET} qualifying runs
+   * are read from the runs table and walked newest-first, each probed once (one EXISTS query) for the
+   * requested measures it holds, so the common case — the newest ALL_PROGRAMS run holds every routed
+   * measure — is two small queries. A measure the budget cannot settle (routed and not yet run; last
+   * evaluated further back than the budget) is resolved by one bounded query over that measure's own
+   * index entries, so the worst case is a handful of round trips plus one index scan — never a probe
+   * per run across the history.
+   *
+   * Same predicates as `listLatestPopulationOutcomes`: population scope allowlist (MEASURE, ALL_PROGRAMS),
+   * terminal status (COMPLETED, PARTIAL_FAILURE), the day-granular `from`/`to` window on the run's
+   * started day, and the `excludeScale`/`excludeTrendHistory` trigger exclusions (a NULL triggered_by is
+   * excluded under either, exactly as the sibling reads exclude it); `filter.measureId` and
+   * `filter.runIds` are ignored (the measure list is the argument). Ordering: newest first per measure
+   * by `started_at DESC, run_id DESC`, the tie-break `listLatestPopulationOutcomes` uses. A measure
+   * with no qualifying run simply has no entry. The store contract asserts that, per measure, the first
+   * winner here is the run `listLatestPopulationOutcomes` returns rows for — on both paths.
+   */
+  listLatestPopulationRuns(measureIds: readonly string[], filter: OutcomeMeasureFilter, perMeasure?: number): Promise<LatestPopulationRun[]>;
   /**
    * All outcomes for a measure (bounded scan), with status + evaluation_period + evidence. Pass
    * `successfulPopulationOnly` for the risk-outlook history: filtering happens in the same query.

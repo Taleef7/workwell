@@ -10,12 +10,14 @@ import type {
   RecordOutcomeInput,
   OutcomeWithRun,
   OutcomeMeasureFilter,
+  LatestPopulationRun,
   MeasureOutcomeRow,
   EmployeeOutcomeRow,
   ScaleGroupCount,
   OutcomeStatusCount,
   MeasureScanOptions,
 } from "../outcome-store.ts";
+import { LATEST_RUN_PROBE_BUDGET } from "../outcome-store.ts";
 
 interface OutcomeRow {
   id: string;
@@ -344,6 +346,12 @@ export class SqliteOutcomeStore implements OutcomeStore {
       where.push(`o.run_id IN (SELECT id FROM runs WHERE triggered_by NOT IN (${excludedTriggers.map(() => "?").join(", ")}))`);
       binds.push(...excludedTriggers);
     }
+    if (filter.runIds) {
+      // The explicit run set (the winners `listLatestPopulationRuns` resolved); an empty set matches nothing.
+      if (filter.runIds.length === 0) return [];
+      where.push(`o.run_id IN (${filter.runIds.map(() => "?").join(", ")})`);
+      binds.push(...filter.runIds);
+    }
     const clause = where.length ? ` WHERE ${where.join(" AND ")}` : "";
     const { results } = await this.db
       .prepare(
@@ -415,6 +423,78 @@ export class SqliteOutcomeStore implements OutcomeStore {
       measureId: r.measure_id,
       status: r.status,
     }));
+  }
+
+  async listLatestPopulationRuns(measureIds: readonly string[], filter: OutcomeMeasureFilter, perMeasure = 1): Promise<LatestPopulationRun[]> {
+    // Floor mirror of the Pg ceiling: the newest LATEST_RUN_PROBE_BUDGET qualifying runs from the runs
+    // table, one probe per run for the measures still unsatisfied (json_each over the id list, EXISTS
+    // per id), then one ranked query over the leftover measures' own rows.
+    const wanted = [...new Set(measureIds)];
+    const per = Number.isFinite(perMeasure) ? Math.max(1, Math.trunc(perMeasure)) : 1;
+    if (wanted.length === 0) return [];
+    const runWhere: string[] = ["UPPER(r.scope_type) IN ('MEASURE','ALL_PROGRAMS')", "UPPER(r.status) IN ('COMPLETED','PARTIAL_FAILURE')"];
+    const binds: unknown[] = [];
+    if (filter.from) (runWhere.push("substr(r.started_at, 1, 10) >= ?"), binds.push(filter.from));
+    if (filter.to) (runWhere.push("substr(r.started_at, 1, 10) <= ?"), binds.push(filter.to));
+    const excludedTriggers: string[] = [];
+    if (filter.excludeScale) excludedTriggers.push("seed:scale");
+    if (filter.excludeTrendHistory) excludedTriggers.push("seed:trend-history");
+    if (excludedTriggers.length) {
+      runWhere.push(`r.triggered_by NOT IN (${excludedTriggers.map(() => "?").join(", ")})`);
+      binds.push(...excludedTriggers);
+    }
+    type RunRow = { id: string; started_at: string; scope_type: string; status: string; triggered_by: string | null };
+    const toWinner = (measureId: string, run: RunRow): LatestPopulationRun => ({
+      measureId, runId: run.id, runStartedAt: run.started_at, runScopeType: run.scope_type, runStatus: run.status, runTriggeredBy: run.triggered_by ?? "manual",
+    });
+    const { results: runs } = await this.db
+      .prepare(
+        `SELECT r.id, r.started_at, r.scope_type, r.status, r.triggered_by FROM runs r WHERE ${runWhere.join(" AND ")}
+          ORDER BY r.started_at DESC, r.id DESC LIMIT ${LATEST_RUN_PROBE_BUDGET}`,
+      )
+      .bind(...binds)
+      .all<RunRow>();
+    const remaining = new Map<string, number>(wanted.map((m) => [m, per]));
+    const out: LatestPopulationRun[] = [];
+    for (const run of runs ?? []) {
+      if (remaining.size === 0) break;
+      const { results: hits } = await this.db
+        .prepare(
+          `SELECT value AS measure_id FROM json_each(?)
+            WHERE EXISTS (SELECT 1 FROM outcomes o WHERE o.run_id = ? AND o.measure_id = json_each.value)`,
+        )
+        .bind(JSON.stringify([...remaining.keys()]), run.id)
+        .all<{ measure_id: string }>();
+      for (const hit of hits ?? []) {
+        const left = remaining.get(hit.measure_id);
+        if (left === undefined) continue;
+        out.push(toWinner(hit.measure_id, run));
+        if (left <= 1) remaining.delete(hit.measure_id);
+        else remaining.set(hit.measure_id, left - 1);
+      }
+    }
+    if (remaining.size === 0 || (runs ?? []).length < LATEST_RUN_PROBE_BUDGET) return out;
+
+    const leftover = [...remaining.keys()];
+    const { results: ranked } = await this.db
+      .prepare(
+        `SELECT * FROM (
+           SELECT d.measure_id, r.id, r.started_at, r.scope_type, r.status, r.triggered_by,
+                  ROW_NUMBER() OVER (PARTITION BY d.measure_id ORDER BY r.started_at DESC, r.id DESC) AS rn
+             FROM (SELECT DISTINCT o.measure_id, o.run_id FROM outcomes o WHERE o.measure_id IN (SELECT value FROM json_each(?))) d
+             JOIN runs r ON r.id = d.run_id
+            WHERE ${runWhere.join(" AND ")}
+         ) x WHERE rn <= ? ORDER BY measure_id, rn`,
+      )
+      .bind(JSON.stringify(leftover), ...binds, per)
+      .all<RunRow & { measure_id: string; rn: number }>();
+    for (const row of ranked ?? []) {
+      const left = remaining.get(row.measure_id);
+      if (left === undefined) continue;
+      if (Number(row.rn) <= per - left) continue; // ranks the walk already banked
+      out.push(toWinner(row.measure_id, row));
+    }
+    return out;
   }
 
   async aggregateScaleRun(runId: string): Promise<ScaleGroupCount[]> {

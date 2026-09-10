@@ -82,6 +82,7 @@ test("scoped profile (Maui) — hierarchy scale rollup obeys the deployment prof
     const deps = {
       outcomeStore: {
         listLatestPopulationOutcomes: async () => [],
+        listLatestPopulationRuns: async () => [],
         listOutcomesWithRun: async () => [],
         aggregateScaleRun: async () => [{ status: "COMPLIANT", count: 5 }],
       },
@@ -113,6 +114,7 @@ test("hierarchy scale rollup uses the profile guard rather than a measure-runnab
     const deps = {
       outcomeStore: {
         listLatestPopulationOutcomes: async () => [],
+        listLatestPopulationRuns: async () => [],
         listOutcomesWithRun: async () => [],
         aggregateScaleRun: async () => [{ status: "COMPLIANT", count: 5 }],
       },

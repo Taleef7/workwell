@@ -26,6 +26,33 @@ test("profile-aware exports equal raw constants on default profile", () => {
   assert.equal(PROFILE_DEFAULT_PANEL, "immunizations");
 });
 
+const OFFICIAL_ONLY_IDS = new Set(["cms2", "cms130", "cms165", "cms137"]);
+
+test("a routed official-only column is titled by the catalog, not by its raw id (the pilot's four)", () => {
+  const output = runProfileChild(
+    "maui",
+    `
+    import { buildRoster } from "./src/compliance/roster-read-model.ts";
+    const roster = await buildRoster({
+      outcomeStore: {
+        async listLatestPopulationOutcomes() { return []; },
+        async listLatestPopulationRuns() { return []; },
+        async listOutcomes() { return []; },
+      },
+      segments: [],
+    }, { panel: "wellness" });
+    console.log(JSON.stringify({ columnNames: Object.fromEntries(roster.columns.map((c) => [c.measureId, c.name])) }));
+  `,
+    { WORKWELL_OFFICIAL_MEASURES: "cms122,cms125,cms2,cms130,cms165,cms137" },
+  );
+  const columnNames = output.columnNames as Record<string, string>;
+  for (const id of OFFICIAL_ONLY_IDS) {
+    assert.ok(id in columnNames, `${id} is a column once routed`);
+    assert.notEqual(columnNames[id], id, `${id}'s header is a name, not the id (it read "${id}" on the pilot until 2026-09-10)`);
+  }
+  assert.equal(columnNames["cms130"], "Colorectal Cancer Screening");
+});
+
 test("Maui profile scopes panels and roster columns to runnable measures", () => {
   const output = runProfileChild("maui", `
     import { AVAILABLE_PANELS, PROFILE_DEFAULT_PANEL, RUNNABLE_PANELS } from "./src/compliance/panels.ts";
@@ -34,6 +61,7 @@ test("Maui profile scopes panels and roster columns to runnable measures", () =>
     const roster = await buildRoster({
       outcomeStore: {
         async listLatestPopulationOutcomes() { return []; },
+        async listLatestPopulationRuns() { return []; },
         async listOutcomes() { return []; },
       },
       segments: [],
@@ -42,6 +70,7 @@ test("Maui profile scopes panels and roster columns to runnable measures", () =>
     const wellnessRoster = await buildRoster({
       outcomeStore: {
         async listLatestPopulationOutcomes() { return []; },
+        async listLatestPopulationRuns() { return []; },
         async listOutcomes() { return []; },
       },
       segments: [],
@@ -61,11 +90,13 @@ test("Maui profile scopes panels and roster columns to runnable measures", () =>
       servedPanel: roster.panel,
       columnCount: roster.columns.length,
       columns: roster.columns.map((c) => c.measureId),
+      columnNames: Object.fromEntries(wellnessRoster.columns.map((c) => [c.measureId, c.name])),
       allColumns: [...new Set(allColumns)],
     }));
   `);
 
   assert.deepEqual(output.availablePanels, ["wellness"]);
+  assert.deepEqual(Object.keys(output.columnNames as Record<string, string>).filter((id) => OFFICIAL_ONLY_IDS.has(id)), [], "unrouted → no official-only column");
   assert.equal(output.defaultPanel, "wellness");
   assert.equal(output.servedPanel, "wellness");
   assert.ok((output.columnCount as number) > 0);
@@ -88,6 +119,7 @@ test("measures in MEASURES but not Active in MEASURE_CATALOG do not keep a panel
     const roster = await buildRoster({
       outcomeStore: {
         async listLatestPopulationOutcomes() { return []; },
+        async listLatestPopulationRuns() { return []; },
         async listOutcomes() { return []; },
       },
       segments: [],
@@ -126,6 +158,7 @@ test("MM-1 shape: a profile whose runnable measures belong to no panel serves ze
     const roster = await buildRoster({
       outcomeStore: {
         async listLatestPopulationOutcomes() { return []; },
+        async listLatestPopulationRuns() { return []; },
         async listOutcomes() { return []; },
       },
       segments: [],

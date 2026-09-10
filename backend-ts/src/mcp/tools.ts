@@ -26,6 +26,8 @@ import { complianceRateOf } from "../program/rollup-shared.ts";
 import { AGE_BANDS, isAgeBand, isSex, matchesSubjectFilters } from "../compliance/subject-filters.ts";
 import type { JsonRecord } from "./tool-audit.ts";
 import { outcomeForCase } from "../case/case-outcome.ts";
+import { MEASURE_CATALOG } from "../measure/measure-catalog.ts";
+import { latestPopulationSnapshot } from "../program/latest-population.ts";
 
 export interface McpToolDeps {
   caseStore: CaseStore;
@@ -58,10 +60,16 @@ function directoryForSubjects(deps: McpToolDeps, subjectIds: readonly string[]) 
 async function persistedDirectory(deps: McpToolDeps) {
   if (DEPLOYMENT_PROFILE.id === "default") return DIRECTORY;
   const webChartConfigured = isWebChartConfigured(deps.webChartEnv ?? {});
-  const rows = !webChartConfigured
-    ? []
-    : await deps.outcomeStore.listOutcomesWithRun({ excludeScale: true, excludeTrendHistory: true });
-  const directory = directoryForRows(rows, webChartConfigured, deps.webChartEnv, DIRECTORY);
+  // With the seam on, the live subjects to rehydrate are the ones in each runnable measure's latest
+  // population run — read by run id, not every retained run's rows (which this did until 2026-09-10).
+  const directory = !webChartConfigured
+    ? directoryForRows([], webChartConfigured, deps.webChartEnv, DIRECTORY)
+    : (await latestPopulationSnapshot(
+        deps.outcomeStore,
+        MEASURE_CATALOG.filter((m) => m.status === "Active" && isRunnableMeasure(m.id)).map((m) => m.id),
+        { excludeScale: true, excludeTrendHistory: true },
+        deps.webChartEnv,
+      )).directory;
   return {
     ...directory,
     employeeById: (externalId: string) => directory.employees.find((employee) => employee.externalId === externalId) ?? null,

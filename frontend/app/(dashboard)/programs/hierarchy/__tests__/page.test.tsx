@@ -23,7 +23,7 @@ beforeEach(() => {
 afterEach(() => vi.clearAllMocks());
 
 describe("HierarchyPage — UX-3 slow-load hint", () => {
-  it("surfaces the 'Crunching…' hint once the rollup load passes ~3s", async () => {
+  it("surfaces the slow-load hint once the rollup load passes ~3s", async () => {
     vi.useFakeTimers();
     try {
       render(<HierarchyPage />);
@@ -36,7 +36,7 @@ describe("HierarchyPage — UX-3 slow-load hint", () => {
         await vi.advanceTimersByTimeAsync(3100);
       });
       expect(screen.getByText(SLOW_LOAD_HINT)).toBeInTheDocument();
-      expect(screen.getByRole("status")).toHaveTextContent(/Crunching/);
+      expect(screen.getByRole("status")).toHaveTextContent(SLOW_LOAD_HINT);
     } finally {
       vi.useRealTimers();
     }
