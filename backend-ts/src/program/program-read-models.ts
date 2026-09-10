@@ -222,10 +222,12 @@ export async function programSites(deps: Pick<ProgramDeps, "outcomeStore" | "web
     visible: DEPLOYMENT_PROFILE.id === "default" ? undefined : (id, ctx) => subjectVisible(id, ctx.webChartConfigured) && ctx.profileMatch(id),
   });
   const rows = snap.rows.filter((row) => row.runTriggeredBy !== "seed:scale");
-  if (DEPLOYMENT_PROFILE.id === "default") return sitesMemo.set(memoKey, runKey, listSites(snap.directory.employees));
+  // A fallback result is never memoized (see `fellBack`): its answer can move while the winners stay.
+  const remember = (sites: string[]): string[] => (snap.fellBack ? sites : sitesMemo.set(memoKey, runKey, sites));
+  if (DEPLOYMENT_PROFILE.id === "default") return remember(listSites(snap.directory.employees));
   const visibleRows = rows.filter((row) => subjectVisible(row.subjectId, snap.webChartConfigured) && snap.profileMatch(row.subjectId));
   const employees = visibleRows.map((r) => snap.directory.employeeById(r.subjectId)).filter((e): e is EmployeeProfile => e !== null);
-  return sitesMemo.set(memoKey, runKey, listSites(employees));
+  return remember(listSites(employees));
 }
 
 /** One run's site-filtered outcome rows (the unit overview/trend/top-drivers aggregate). */
@@ -342,7 +344,9 @@ export async function programOverview(deps: ProgramDeps, filters: ProgramFilters
         excluded: n("EXCLUDED"),
       });
     }
-    derived = overviewMemo.set(memoKey, runKey, { buckets, directory: snap.directory, webChartConfigured: snap.webChartConfigured });
+    derived = { buckets, directory: snap.directory, webChartConfigured: snap.webChartConfigured };
+    // A fallback result is never memoized (see `fellBack`): its answer can move while the winners stay.
+    if (!snap.fellBack) overviewMemo.set(memoKey, runKey, derived);
   }
   const { directory, webChartConfigured } = derived;
   const siteMatch = siteMatcher(filters, directory.employeeById);
@@ -458,12 +462,12 @@ function zeroSummary(s: ProgramSummary): void {
 }
 
 /**
- * The trend shows at most 10 points (Java parity, `.slice(0, 10)` below), so it reads the newest 10
- * completed population runs holding the measure — not the measure's whole history, which on the
- * pilot is every nightly since the flip, twice (the trend and top-drivers each read it). Two edges,
- * stated: the day-collapse below can leave fewer than 10 points when two runs share a day (each
- * took a slot), and a run that holds the measure but no row at the filtered site is a slot spent on
- * a group that never forms. The pilot's ALL_PROGRAMS nightly holds every measure at every clinic.
+ * The trend shows at most 10 points (Java parity), so it starts from the newest 10 completed
+ * population runs holding the measure — not the measure's whole history, which on the pilot is
+ * every nightly since the flip, twice (the trend and top-drivers each read it) — and widens the
+ * window (see `programTrend`) when the same-day collapse or the site/tenant filter leaves fewer
+ * than ten displayable points. The pilot's ALL_PROGRAMS nightly holds every measure at every clinic,
+ * so there the first window is the last.
  */
 const TREND_RUN_WINDOW = 10;
 
@@ -494,7 +498,7 @@ async function runsWithOutcomes(
   filters: ProgramFilters,
   runWindow: number,
   precomputed?: readonly LatestPopulationRun[],
-): Promise<{ groups: RunGroup[]; directory: DirectorySnapshot; hasWebChartRows: boolean }> {
+): Promise<{ groups: RunGroup[]; directory: DirectorySnapshot; hasWebChartRows: boolean; runsFound: number; fellBack: boolean }> {
   const snap = await latestPopulationSnapshot(deps.outcomeStore, [measureId], measureFilter(filters), deps.webChartEnv, runWindow, {
     precomputed,
     visible: rowVisibleUnder(filters),
@@ -510,7 +514,7 @@ async function runsWithOutcomes(
       siteMatch(row.subjectId) &&
       tenantMatch(row.subjectId),
   );
-  return { groups: groupByRun(rows), directory: snap.directory, hasWebChartRows };
+  return { groups: groupByRun(rows), directory: snap.directory, hasWebChartRows, runsFound: snap.winners.length, fellBack: snap.fellBack };
 }
 
 /** Memo key for the per-measure charts: the measure, every request filter that shapes them, and the
@@ -604,7 +608,8 @@ export async function programTrend(
   if (cached) return cached;
   // Load once before the optional monthly early return: the same successful rows both rehydrate the
   // site-only scope after restart and feed the per-run fallback without a second store read.
-  const { groups, directory, hasWebChartRows } = await runsWithOutcomes(deps, measureId, filters, TREND_RUN_WINDOW, winners);
+  const first = await runsWithOutcomes(deps, measureId, filters, TREND_RUN_WINDOW, winners);
+  const { directory, hasWebChartRows } = first;
   const scope = opts?.monthly && deps.qualitySnapshots && isWholeMonthRange(from, to)
     ? snapshotScopeFor(filters, directory.employees)
     : null;
@@ -629,6 +634,30 @@ export async function programTrend(
   // NOTE: Java unions a `run_based` branch for aggregate-only seeded runs; the TS floor `runs`
   // table has no compliant/total columns, so every TS run with data has outcomes — the
   // outcome-based branch is complete here.
+  //
+  // The window is widened until ten DISPLAYABLE points exist or the history is exhausted: the
+  // site/tenant filter and the same-day collapse below can each spend a run of the window on a
+  // point that never shows, and the old all-history read always found the older days beyond them.
+  // Doubling stops at TREND_RUN_WINDOW_MAX, and at a read that returned fewer runs than it asked
+  // for (nothing older exists). The memo key stays the newest ten's — a wider window changes only
+  // when they do, or when an older run completes, which the next nightly's new winner refreshes.
+  let read = first;
+  let window = TREND_RUN_WINDOW;
+  let points = trendPointsOf(read.groups, opts?.tz);
+  while (points.length < 10 && read.runsFound >= window && window < TREND_RUN_WINDOW_MAX) {
+    window = Math.min(window * 2, TREND_RUN_WINDOW_MAX);
+    read = await runsWithOutcomes(deps, measureId, filters, window);
+    points = trendPointsOf(read.groups, opts?.tz);
+  }
+  return monthlyPossible ? points : trendMemo.set(memoKey, runKey, points);
+}
+
+/** How far the trend widens its run window looking for ten displayable points. */
+const TREND_RUN_WINDOW_MAX = 80;
+
+/** The per-run points of a measure's trend: completed runs only, one point per calendar day
+ *  (the day's latest run), newest first, capped at 10 (Java parity). */
+function trendPointsOf(groups: RunGroup[], tz?: string): ProgramTrendPoint[] {
   const n = (os: OutcomeWithRun[], s: string) => os.filter((o) => o.status === s).length;
   // Completed runs (COMPLETED or PARTIAL_FAILURE per isCompletedRun) are included as trend points
   // so the headline rate and "from previous" compare like with like; FAILED/QUEUED runs are not.
@@ -636,7 +665,7 @@ export async function programTrend(
 
   // Collapse to at most one point per calendar day in the requested timezone (default UTC),
   // keeping the last (latest runStartedAt by epoch ms) completed run of that day.
-  const dtf = createDayFormatter(opts?.tz);
+  const dtf = createDayFormatter(tz);
   const latestByDay = new Map<string, { group: RunGroup; epochMs: number }>();
   for (const g of completed) {
     const epochMs = Date.parse(g.runStartedAt);
@@ -647,7 +676,7 @@ export async function programTrend(
     }
   }
 
-  const points = [...latestByDay.values()]
+  return [...latestByDay.values()]
     .map(({ group: { runId, runStartedAt, rows } }): ProgramTrendPoint => {
       const total = rows.length;
       const compliant = n(rows, "COMPLIANT");
@@ -671,7 +700,6 @@ export async function programTrend(
     })
     .sort((a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt))
     .slice(0, 10);
-  return monthlyPossible ? points : trendMemo.set(memoKey, runKey, points);
 }
 
 /** Overdue concentration (site/role) + flagged-reason mix for a measure's latest filtered run. */
@@ -685,8 +713,10 @@ export async function programTopDrivers(
   const memoKey = chartMemoKey(deps, measureId, filters);
   const cached = driversMemo.get(memoKey, runKey);
   if (cached) return cached;
-  const { groups, directory } = await runsWithOutcomes(deps, measureId, filters, 1, winners);
-  if (groups.length === 0) return driversMemo.set(memoKey, runKey, empty);
+  const { groups, directory, fellBack } = await runsWithOutcomes(deps, measureId, filters, 1, winners);
+  // A fallback result is never memoized (see `fellBack`): its answer can move while the winners stay.
+  const remember = (value: TopDrivers): TopDrivers => (fellBack ? value : driversMemo.set(memoKey, runKey, value));
+  if (groups.length === 0) return remember(empty);
   // Latest filtered run with outcomes for this measure.
   const latest = groups.reduce((a, b) => (b.runStartedAt > a.runStartedAt ? b : a));
   const outcomes = latest.rows;
@@ -721,7 +751,7 @@ export async function programTopDrivers(
     .map(([reason, count]) => ({ reason, count, pct: totalFlagged === 0 ? 0 : Math.round((count / totalFlagged) * 1000) / 10 }))
     .sort((a, b) => b.count - a.count);
 
-  return driversMemo.set(memoKey, runKey, { bySite, byRole, byOutcomeReason });
+  return remember({ bySite, byRole, byOutcomeReason });
 }
 
 // ---- risk outlook (#107) ----------------------------------------------------

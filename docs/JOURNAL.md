@@ -71,10 +71,11 @@ the order proposals and the MCP directory go through the helper. The proposals r
 and the page reads 100 at a time and no longer fetches the whole programs overview to label a select.
 
 The edges are stated rather than hidden, and the four reviews found more of them than I had. The
-trend's window is 10 RUNS: two runs on one day take two slots and collapse to one point, a run
-holding the measure but no row at a filtered site is a slot spent on a group that never forms, and
-the window never falls back the way a single winner does (the old code widened it over the whole
-history) — the pilot's nightly holds every measure at every clinic. The site list, the hierarchy
+trend starts from its newest 10 RUNS and widens the window (20, 40, 80) while fewer than ten
+displayable points exist and older runs remain — two runs on one day collapse to one point, and a
+run holding the measure but no row at a filtered site forms no group, so the first version's fixed
+window showed fewer days than the all-history read; after Codex's PR review it does not, short of
+eighty runs of nothing displayable. The site list, the hierarchy
 rollup's directory and the MCP directory rehydrate live WebChart subjects from the ACTIVE, RUNNABLE
 measures' winning runs, and the roster's from the columns it shows, rather than from every measure
 that ever had rows; neither live stack has the seam on. The overview lists active cases before the
@@ -109,7 +110,13 @@ would have read 1.2M rows to keep 200,000, MORE than the history it replaced unt
 existed — and the winner was chosen before the site and tenant filters where the old code chose it
 after. Three lanes found the unbounded runs walk independently; one found the unordered page; one
 found the seam-state memo key I had already fixed. Every finding above is in the journal because the
-first draft of this entry claimed byte-identity it did not have.
+first draft of this entry claimed byte-identity it did not have. **Codex's review of the opened PR
+found two more, both real.** A fallback result was memoized under the winners' key, and a visible
+run that STARTED before the winner and COMPLETED after it changes the fallback's answer without
+changing the winner — so the older run would have been served indefinitely. A fallback result is
+now never memoized (`fellBack`); the filtered-view path costs what it did before. And the trend's
+fixed ten-run window could show fewer days than the all-history read under a site filter or same-day
+reruns; it widens now, as above.
 
 **Verified.** Backend typecheck clean; the store contract now pins, on both stores, that the first
 winner `listLatestPopulationRuns` names per measure is the run `listLatestPopulationOutcomes` returns

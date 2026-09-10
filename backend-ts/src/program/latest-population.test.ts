@@ -176,6 +176,51 @@ test("programSites, programTrend and programTopDrivers memoize under the winners
   assert.equal(counters.rowReads, 5, "each chart re-read once for the new winner");
 });
 
+test("a fallback result is not memoized: a visible run that completes later is seen without the winner changing (Codex on #547)", async () => {
+  __overviewMemo.clear();
+  // Seam off, default profile: a wc| subject is invisible. The winner (run-new) holds only one, so
+  // the overview falls back to run-old. Then run-mid — started BEFORE run-new — completes: the winner
+  // is unchanged, the right answer is now run-mid.
+  const rows = [
+    row("run-old", "2026-06-01T00:00:00.000Z", "emp-006", "audiogram", "OVERDUE"),
+    row("run-new", "2026-06-03T00:00:00.000Z", "wc|live-1", "audiogram", "COMPLIANT"),
+  ];
+  const counters = { rowReads: 0 };
+  const deps = programDeps(rows, counters);
+  const first = (await programOverview(deps, { site: null, tenant: null })).find((s) => s.measureId === "audiogram")!;
+  assert.equal(first.latestRunId, "run-old", "fell back to the older visible run");
+  rows.push(row("run-mid", "2026-06-02T00:00:00.000Z", "emp-006", "audiogram", "COMPLIANT"));
+  const second = (await programOverview(deps, { site: null, tenant: null })).find((s) => s.measureId === "audiogram")!;
+  assert.equal(second.latestRunId, "run-mid", "the later-completed visible run is served, not the memoized fallback");
+  assert.equal(second.compliant, 1);
+});
+
+test("the trend widens its window until ten displayable points exist, so a filter that empties the newest runs still shows the older days", async () => {
+  __chartMemos.trendMemo.clear();
+  // Fourteen daily runs; the newest three hold only an invisible (seam-off wc|) subject. The old
+  // all-history read showed the ten older days; a fixed ten-run window would show seven.
+  const rows: OutcomeWithRun[] = [];
+  for (let d = 1; d <= 14; d++) {
+    const subject = d > 11 ? "wc|live-1" : "emp-006";
+    rows.push(row(`run-${d}`, `2026-06-${String(d).padStart(2, "0")}T00:00:00.000Z`, subject, "audiogram", "COMPLIANT"));
+  }
+  const reads: number[] = [];
+  const store = {
+    listLatestPopulationRuns: latestRunsFromRows(rows),
+    listOutcomesWithRun: async (filter: { runIds?: string[]; measureId?: string }) => {
+      reads.push(filter.runIds?.length ?? -1);
+      return rows.filter((r) => (!filter.runIds || filter.runIds.includes(r.runId)) && (!filter.measureId || r.measureId === filter.measureId));
+    },
+    listOutcomes: async () => [],
+    aggregateScaleRun: async () => [],
+  } as unknown as OutcomeStore;
+  const deps = { outcomeStore: store, runStore: { listRuns: async () => [] } as unknown as RunStore, caseStore: { listCases: async () => [] } as unknown as CaseStore, webChartEnv: {} };
+  const trend = await programTrend(deps, "audiogram", { site: null, tenant: null });
+  assert.equal(trend.length, 10, "ten points, as the all-history read gave");
+  assert.equal(trend[0]!.runId, "run-11", "the newest VISIBLE day leads");
+  assert.deepEqual(reads, [10, 14], "the first window, then one widened read that found every run there is");
+});
+
 test("a seam flip is not served the other seam state's memo entry", async () => {
   __overviewMemo.clear();
   const rows = [row("run-1", "2026-06-01T00:00:00.000Z", "wc|live-1", "audiogram", "OVERDUE")];

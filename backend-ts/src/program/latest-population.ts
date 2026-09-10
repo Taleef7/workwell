@@ -37,9 +37,8 @@ export interface LatestPopulationWinners {
    * outcomes are immutable (the roster cell cache rests on the same fact), so anything derived from
    * the winners' rows alone is stable while this key is — it is what {@link RunKeyedMemo} checks.
    * A caller memoizes under the key it got from {@link latestPopulationWinners}, i.e. the winners
-   * BEFORE any visibility fallback: the fallback is a deterministic function of those winners, the
-   * filter and the store's history, and the fallback run's rows are the newest for their subjects
-   * (that is why the winner had none of them), which retention never deletes (ADR-073).
+   * BEFORE any visibility fallback — and only when no fallback fired (`fellBack`), because a
+   * fallback's answer can change without the winners changing.
    */
   runKey: string;
 }
@@ -76,6 +75,15 @@ export interface LatestPopulationSnapshot extends LatestPopulationWinners {
   directory: DirectorySnapshot;
   webChartConfigured: boolean;
   profileMatch: (subjectId: string) => boolean;
+  /**
+   * True when at least one measure's rows came from the visibility fallback rather than its winner.
+   * A caller must NOT memoize such a result under the winners' key: a visible run that started
+   * before the winner and completes after it changes the fallback's answer without changing the
+   * winner — so the key would never move and the older run would be served indefinitely (Codex on
+   * #547). The fallback path is the filtered-view path and costs what it did before; it is simply
+   * not cached.
+   */
+  fellBack: boolean;
 }
 
 const pairKey = (measureId: string, runId: string): string => `${measureId}:${runId}`;
@@ -175,6 +183,7 @@ export async function latestPopulationSnapshot(
 
   let rows = await readWinnersRows(store, measureIds, filter, winners);
   let ctx = contextFor(rows);
+  let fellBack = false;
 
   if (perMeasure === 1) {
     // The filter-then-reduce rule: a winner whose rows the caller cannot see does not blank the
@@ -193,6 +202,7 @@ export async function latestPopulationSnapshot(
       }
       rows = [...kept, ...fallback];
       ctx = contextFor(rows);
+      fellBack = true;
     }
   }
 
@@ -208,7 +218,7 @@ export async function latestPopulationSnapshot(
     }
   }
   const finalWinners = [...finalPairs.values()];
-  return { winners: finalWinners, runKey: runKeyOf(finalWinners), rows, directory: ctx.directory, webChartConfigured, profileMatch: ctx.profileMatch };
+  return { winners: finalWinners, runKey: runKeyOf(finalWinners), rows, directory: ctx.directory, webChartConfigured, profileMatch: ctx.profileMatch, fellBack };
 }
 
 /**
