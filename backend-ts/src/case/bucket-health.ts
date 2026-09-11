@@ -108,6 +108,33 @@ export function redactEndpoint(endpoint: string): string {
 }
 
 /**
+ * The account label of an endpoint host — the first DNS label, which for R2 is the account id.
+ * `null` when there is no such label to hide (a two-label host, or an unparseable endpoint).
+ */
+function accountLabel(endpoint: string): string | null {
+  try {
+    const parts = new URL(endpoint).host.split(".");
+    return parts.length > 2 && parts[0] ? parts[0] : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Removes the account id from text that came from somewhere we do not control.
+ *
+ * Redacting `detail.endpoint` is not enough on its own: an adapter's own error message frequently
+ * quotes the host it failed to reach — `getaddrinfo ENOTFOUND <account>.r2.cloudflarestorage.com`,
+ * TLS hostname mismatches, signature errors — so the value we took care to keep out of one field
+ * arrives in the next one along, into the same log and the same webhook. Anything derived from an
+ * SDK error is untrusted text for this purpose.
+ */
+export function redactAccountIn(text: string, endpoint?: string): string {
+  const label = endpoint ? accountLabel(endpoint) : null;
+  return label ? text.split(label).join("<account>") : text;
+}
+
+/**
  * The alert for an unreachable bucket, in the shared `RunAlert` shape so it travels the SAME
  * channels every other alert does — console AND the optional `WORKWELL_ALERT_WEBHOOK_URL`.
  *
@@ -122,7 +149,10 @@ export function bucketAlert(result: BucketProbeResult, now: () => Date = () => n
     at: now().toISOString(),
     status: "EVIDENCE_BUCKET_UNREACHABLE",
     message:
-      `evidence bucket "${result.bucket}" is configured but unreachable: ${result.message}. ` +
+      `evidence bucket "${result.bucket}" is configured but unreachable: ` +
+      // The adapter's message is untrusted text: a DNS or TLS failure quotes the host it could not
+      // reach, which is the account id we redact from `endpoint` two lines down.
+      `${redactAccountIn(result.message, result.endpoint)}. ` +
       "Every evidence upload and download is failing, and the seam is configured so there is no fallback.",
     detail: {
       bucket: result.bucket,

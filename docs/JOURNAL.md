@@ -73,6 +73,16 @@ region reverted to `us-east-1`, and a key bound but never put in the container e
 non-vacuity test earns its place for the usual reason — agreement alone is satisfied by both files
 omitting a key.
 
+**The lost-evidence question turned out to be three files.** Both reviewers and I had treated the
+dangling window — attachments written during the six weeks the AWS bucket worked — as an open
+liability needing an owner decision. Counted against both live databases it is **one dangling file,
+and 87 bytes across all three rows**, all on the demo stack; the pilot holds **zero**. So the window is
+written off rather than recovered, nothing needed migrating into R2 (both buckets start empty), and
+turning the pilot's bucket on orphaned nothing. The rows stay: deleting them would be a state change
+with no audit event, which is forbidden without exception, to tidy three rows whose read path already
+fails legibly. Worth recording mainly as a reminder that an unmeasured unknown recruits opinions —
+two reviews and my own docs all reasoned about a risk that a single query dissolved.
+
 The lesson worth keeping is not about S3. **A dated deadline in a runbook is not a control.** The
 warning was correct, specific, and sat in two documents, and nothing failed loudly on the day it
 lapsed. What replaces it is a probe that speaks when the thing is actually broken.

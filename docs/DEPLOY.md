@@ -1381,11 +1381,11 @@ workwell-backups`. Measured 2026-09-11, both stacks' first real dumps: **9.7 MiB
 (maui) = 41.5 MiB a night, so a 30-day window is 1.22 GiB against a 10 GB free tier — 8.2x headroom.**
 Recheck when the pilot's roster grows; its dump is already three times TWH's.
 
-**The pilot's evidence bucket is inert until its secrets exist.** `WORKWELL_BUCKET_S3_ACCESS_KEY_ID_MAUI`
-/ `WORKWELL_BUCKET_S3_SECRET_ACCESS_KEY_MAUI` are read by both Maui workflows; until they are set the
-seam needs all three values and therefore stays off, so the pilot keeps the in-container `fs` bucket
-it has always had — evidence lost on every deploy and self-heal (#167). Setting them is what turns it
-on; nothing else changes.
+**The pilot's evidence bucket went live 2026-09-11.** `WORKWELL_BUCKET_S3_ACCESS_KEY_ID_MAUI` /
+`WORKWELL_BUCKET_S3_SECRET_ACCESS_KEY_MAUI` are set and read by both Maui workflows, so the pilot's
+evidence is durable from its next deploy — it had been on the in-container `fs` bucket since the
+instance was created, losing every attachment on each deploy and self-heal (#167). Nothing needed
+migrating: it held zero attachments at the switch.
 
 **Two buckets rather than one with prefix policies, deliberately.** R2 scopes an API token per
 BUCKET, not per prefix, so the separation that AWS expressed as "the app user carries an explicit
@@ -1410,13 +1410,25 @@ predicted.
 Evidence uploaded **before** 2026-07-14 lived on in-container disk and was lost on the next recreate
 (known demo-era limitation); everything uploaded after that persists across deploys/heals.
 
-> **Evidence written 2026-07-14 → 2026-08-24 is DANGLING, and that is a wider window than the silent
-> outage.** `evidence_attachments` rows persist a `storage_key` and `evidence-service.ts` reads the
-> bucket by it, so every attachment uploaded during the six weeks the AWS bucket actually *worked* now
-> points into a bucket this deployment can no longer reach. The read path is at least legible —
-> `EvidenceMissingError`, not a silent empty 200 — but a reader meets it with no explanation unless
-> they find this note. There is no `aws s3 sync` available to fix it: the source account is suspended.
-> Count the rows before deciding anything:
+> **The dangling-evidence window was WRITTEN OFF on 2026-09-11, after counting it.** Rows in
+> `evidence_attachments` persist a `storage_key` that `evidence-service.ts` reads the bucket by, so
+> attachments uploaded during the six weeks the AWS bucket worked point into a bucket nothing can now
+> reach, and the source account is suspended so no `aws s3 sync` can rescue them. The reason this is a
+> footnote rather than an incident is the actual count, measured against both live databases:
+>
+> | Stack | Total | Pre-bucket (fs era, already lost) | Dangling in the dead AWS bucket | Written during the silent outage | Total bytes |
+> |---|---|---|---|---|---|
+> | maui | **0** | 0 | 0 | 0 | 0 |
+> | twh | **3** | 2 | **1** | 0 | **87** |
+>
+> **One file, and 87 bytes across all three** — demo-era test uploads on the demo stack. Settling a
+> suspended AWS account to recover that would cost more than it returns, so the window is recorded
+> unrecoverable and nothing is migrated.
+>
+> **The rows are deliberately NOT deleted.** A `DELETE` straight against the database would be a state
+> change with no `audit_event`, which the project forbids without exception, to tidy three rows whose
+> read path already fails legibly (`EvidenceMissingError`, never a silent empty 200). Reproduce the
+> count any time with:
 > ```sql
 > SELECT
 >   count(*) FILTER (WHERE uploaded_at <  '2026-07-14') AS lost_before_the_bucket_existed,
@@ -1425,8 +1437,10 @@ Evidence uploaded **before** 2026-07-14 lived on in-container disk and was lost 
 >   count(*) FILTER (WHERE uploaded_at >= '2026-08-25') AS written_during_the_silent_outage
 > FROM workwell_spike.evidence_attachments;
 > ```
-> **Owner decision, not yet made:** settle the AWS account to recover the middle column, or write it
-> off and record the window as unrecoverable.
+>
+> **And nothing needed migrating into R2.** The pilot holds zero attachments, so turning its bucket on
+> orphans nothing; TWH's three are unreachable whichever bucket it points at. Both R2 buckets start
+> empty and fill from the next upload.
 
 > **The AWS bucket is GONE, and this is what that cost.** The previous home was
 > `workwell-twh-evidence` on a Free Plan AWS account that **expired 2026-08-24**, exactly as the

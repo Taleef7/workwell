@@ -16,6 +16,7 @@ import {
   bucketAlert,
   partialBucketConfigAlert,
   redactEndpoint,
+  redactAccountIn,
   BUCKET_PROBE_PREFIX,
   PROBE_TIMEOUT_MS,
   type BucketEnvForProbe,
@@ -256,4 +257,47 @@ test("a deployment that names NO bucket is not nagged — it never asked for one
 
 test("a fully configured bucket produces no partial-config alert", () => {
   assert.equal(partialBucketConfigAlert(env()), null);
+});
+
+// ---------------------------------------------------------------------------
+// The account id must not survive in text we did not write (Codex review, PR #549).
+// ---------------------------------------------------------------------------
+
+test("redactAccountIn: a DNS failure quoting the host does not leak the account id", () => {
+  const endpoint = "https://26ade3362911ce551e52ea5c61178cbc.r2.cloudflarestorage.com";
+  const message = "getaddrinfo ENOTFOUND 26ade3362911ce551e52ea5c61178cbc.r2.cloudflarestorage.com";
+  assert.equal(
+    redactAccountIn(message, endpoint),
+    "getaddrinfo ENOTFOUND <account>.r2.cloudflarestorage.com",
+  );
+});
+
+test("redactAccountIn: every occurrence, not just the first", () => {
+  const endpoint = "https://acct123.r2.cloudflarestorage.com";
+  assert.equal(
+    redactAccountIn("host acct123 mismatched cert for acct123", endpoint),
+    "host <account> mismatched cert for <account>",
+  );
+});
+
+test("redactAccountIn: nothing to redact leaves the text alone", () => {
+  assert.equal(redactAccountIn("AllAccessDisabled"), "AllAccessDisabled");
+  assert.equal(redactAccountIn("AllAccessDisabled", "https://minio.local"), "AllAccessDisabled");
+  assert.equal(redactAccountIn("AllAccessDisabled", "not a url"), "AllAccessDisabled");
+});
+
+test("bucketAlert: the account id is absent from the MESSAGE too, not only from detail.endpoint", () => {
+  const endpoint = "https://26ade3362911ce551e52ea5c61178cbc.r2.cloudflarestorage.com";
+  const alert = bucketAlert({
+    kind: "unreachable",
+    bucket: "workwell-evidence-maui",
+    endpoint,
+    message: "getaddrinfo ENOTFOUND 26ade3362911ce551e52ea5c61178cbc.r2.cloudflarestorage.com",
+  })!;
+  const serialized = JSON.stringify(alert);
+  assert.ok(
+    !serialized.includes("26ade3362911ce551e52ea5c61178cbc"),
+    "redacting one field while interpolating the raw message into another leaks it just the same",
+  );
+  assert.match(alert.message, /<account>\.r2\.cloudflarestorage\.com/);
 });

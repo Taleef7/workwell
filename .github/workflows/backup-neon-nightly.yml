@@ -62,7 +62,12 @@ jobs:
       group: backup-neon-nightly-${{ matrix.stack }}
       cancel-in-progress: false
     env:
-      DATABASE_URL: ${{ secrets[matrix.db_secret] }}
+      # A STATIC secret reference per leg, chosen by a conditional — not `secrets[matrix.db_secret]`.
+      # Dynamic indexing of the secrets context reads, to CodeQL and to a human, as "this job may
+      # touch any secret in the repository", because nothing in the expression says which one it
+      # resolves to (alert: Excessive Secrets Exposure). The ternary names both, so the set a leg can
+      # reach is visible here rather than inferred from the matrix twenty lines above.
+      DATABASE_URL: ${{ matrix.stack == 'twh' && secrets.DATABASE_URL_TWH || secrets.DATABASE_URL_MAUI }}
       # A DEDICATED backup principal: an R2 API token scoped to the `workwell-backups` bucket alone.
       AWS_ACCESS_KEY_ID: ${{ secrets.WORKWELL_BACKUP_S3_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.WORKWELL_BACKUP_S3_SECRET_ACCESS_KEY }}
@@ -78,6 +83,9 @@ jobs:
       # A secret rather than a literal: this repository is PUBLIC and the endpoint embeds the
       # Cloudflare account id.
       BACKUP_ENDPOINT: ${{ secrets.WORKWELL_R2_S3_ENDPOINT }}
+      # The secret's NAME, as a plain label for error messages — "DATABASE_URL_MAUI is empty" is
+      # actionable where "the database url is empty" is not. It no longer looks the secret up; see the
+      # static ternary above.
       DB_SECRET_NAME: ${{ matrix.db_secret }}
       STACK: ${{ matrix.stack }}
       DUMP_PREFIX: ${{ matrix.prefix }}
