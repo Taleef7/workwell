@@ -88,7 +88,9 @@ test("GET /api/exports/runs?format=csv → run summary CSV", async () => {
   assert.equal(res!.headers.get("content-type"), "text/csv");
   assert.match(res!.headers.get("content-disposition") ?? "", /attachment; filename="runs\.csv"/);
   const lines = (await res!.text()).split("\r\n");
-  assert.match(lines[0]!, /^runId,measureName,measureVersion,.*passRate,dataFreshAsOf$/);
+  // `notInPopulation` is APPENDED (ADR-079), so the documented prefix through `dataFreshAsOf` is
+  // byte-identical and a consumer reading by position keeps every column it had.
+  assert.match(lines[0]!, /^runId,measureName,measureVersion,.*passRate,dataFreshAsOf,notInPopulation$/);
   assert.ok(lines.some((l) => l.startsWith(runId)), "the run is a row");
   assert.ok(lines.some((l) => l.includes("Audiogram")));
 });

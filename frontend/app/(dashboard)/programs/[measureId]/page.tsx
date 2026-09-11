@@ -36,6 +36,8 @@ type ProgramSummary = {
   dueSoon: number;
   overdue: number;
   missingData: number;
+  /** Patients the measure's logic put outside its initial population — not missing data, not work. */
+  notInPopulation?: number;
   excluded: number;
   complianceRate: number;
   /** Which way the measure improves; sent by the programs API so the rate never waits on /api/measures. */
@@ -189,6 +191,7 @@ export default function ProgramDetailPage() {
         { key: "DUE_SOON", value: program.dueSoon },
         { key: "OVERDUE", value: program.overdue },
         { key: "MISSING_DATA", value: program.missingData },
+        { key: "OUT_OF_POPULATION", value: program.notInPopulation ?? 0 },
         { key: "EXCLUDED", value: program.excluded }
       ].filter((slice) => slice.value > 0)
     : [];
@@ -461,6 +464,7 @@ export default function ProgramDetailPage() {
                   <th scope="col" className="py-1">Due Soon</th>
                   <th scope="col" className="py-1">Overdue</th>
                   <th scope="col" className="py-1">Missing</th>
+                  <th scope="col" className="py-1">Not in population</th>
                   <th scope="col" className="py-1">Excluded</th>
                 </tr>
               </thead>
@@ -471,6 +475,7 @@ export default function ProgramDetailPage() {
                   <td className="py-1">{program.dueSoon}</td>
                   <td className="py-1">{program.overdue}</td>
                   <td className="py-1">{program.missingData}</td>
+                  <td className="py-1">{program.notInPopulation ?? 0}</td>
                   <td className="py-1">{program.excluded}</td>
                 </tr>
               </tbody>

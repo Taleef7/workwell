@@ -373,3 +373,28 @@ test("C4: a single-subject CASE rerun does not become a measure's latest run or 
   assert.equal(trend.length, 1, "only the population run appears in the trend");
   assert.equal(trend[0]!.runId, measureRun.id);
 });
+
+test("?include=detail carries the trend and top-drivers the dashboard would otherwise fan out for", async () => {
+  const plain = (await get("/overview").then((r) => r!.json())) as Summary[];
+  const detailed = (await get("/overview?include=detail&granularity=month").then((r) => r!.json())) as Array<
+    Summary & { trend?: unknown[]; topDrivers?: { bySite: unknown[]; byRole: unknown[]; byOutcomeReason: unknown[] } }
+  >;
+
+  assert.equal(detailed.length, plain.length, "the same summaries in the same order");
+  assert.deepEqual(detailed.map((p) => p.measureId), plain.map((p) => p.measureId));
+  for (const summary of detailed) {
+    assert.ok(Array.isArray(summary.trend), `${summary.measureId} carries a trend`);
+    assert.ok(Array.isArray(summary.topDrivers?.byOutcomeReason), `${summary.measureId} carries top-drivers`);
+  }
+
+  // Additive: without the flag the response is byte-identical to what every existing client reads.
+  assert.ok(plain.every((p) => !("trend" in p) && !("topDrivers" in p)), "no detail leaks into the default response");
+
+  // And each attached panel equals what its own route serves, so the drill-down and the dashboard
+  // cannot disagree — the fan-out routes stay, they just stop being the dashboard's only way in.
+  const one = detailed[0]!;
+  const ownTrend = await get(`/${one.measureId}/trend?granularity=month`).then((r) => r!.json());
+  const ownDrivers = await get(`/${one.measureId}/top-drivers`).then((r) => r!.json());
+  assert.deepEqual(one.trend, ownTrend);
+  assert.deepEqual(one.topDrivers, ownDrivers);
+});

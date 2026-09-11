@@ -151,7 +151,15 @@ with status forced to `MISSING_DATA`.
 
 ### 6.1 `GET /api/exports/runs?format=csv`
 Columns:
-`runId, measureName, measureVersion, scopeType, triggerType, status, startedAt, completedAt, durationMs, totalEvaluated, compliant, dueSoon, overdue, missingData, excluded, passRate, dataFreshAsOf`
+`runId, measureName, measureVersion, scopeType, triggerType, status, startedAt, completedAt, durationMs, totalEvaluated, compliant, dueSoon, overdue, missingData, excluded, passRate, dataFreshAsOf, notInPopulation`
+
+> **`notInPopulation` was APPENDED (ADR-079, 2026-09-10)**, never inserted, so a consumer reading by
+> position keeps every column it had. It is the subset of `missingData` whose subjects the measure's
+> own logic put OUTSIDE its initial population — 0 for an authored measure and for any run written
+> before the `outcomes.out_of_population` column existed. `missingData` still counts every persisted
+> MISSING_DATA row, and `passRate` is still `compliant / totalEvaluated`: both state what the RUN
+> wrote. The rate that describes a POPULATION is the programs overview's, and that one drops these
+> subjects from its denominator — which is what `notInPopulation` lets a reader reconcile.
 
 ### 6.2 `GET /api/exports/outcomes?format=csv&runId={optional}`
 Supports filters: `runId`, `site`, `providerId`, `ageBand`, `sex`.

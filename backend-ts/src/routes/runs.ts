@@ -29,12 +29,14 @@
  */
 import type { CloudDatabase } from "@mieweb/cloud";
 import { getStores } from "../stores/factory.ts";
+import { warmReadModels } from "../program/warm-read-models.ts";
+import { isCompletedRun, isPopulationRun } from "../program/rollup-shared.ts";
 import type { CreateRunInput, RunStore } from "../stores/run-store.ts";
 import type { OutcomeStore } from "../stores/outcome-store.ts";
 import type { CaseStore } from "../stores/case-store.ts";
 import type { HydratedSegment } from "../stores/segment-store.ts";
 import { ensureSegmentSeed } from "../segment/segment-seed.ts";
-import { routedEngineForEnv } from "../wiring/executor-router.ts";
+import { OFFICIAL_LOGIC_VERSION_PREFIX, routedEngineForEnv } from "../wiring/executor-router.ts";
 import { toRunListItemFromCounts, toRunSummaryFromCounts, toRunLogEntries, toRunOutcomeRows, matchesRunFilters, type RunFilters } from "../run/read-models.ts";
 import { recoverStuckRuns } from "../run/recover-stuck-runs.ts";
 import { isReportableRunStatus } from "../run/reportable.ts";
@@ -412,9 +414,44 @@ async function scheduleAsyncRun(
   const configuredMeasure = body.scopeType === "MEASURE" && isWebChartConfigured(deps.webChartEnv ?? {});
   if (!waitUntil || (!ASYNC_SCOPES.has(body.scopeType) && !configuredMeasure)) return null;
   const planned = await planManualRun(deps, body);
-  waitUntil(finishOrFail(deps, planned)); // finishOrFail finalizes FAILED on a post-response error
+  // finishOrFail finalizes FAILED on a post-response error. The warm follows it inside the SAME
+  // background task so it cannot run against a half-written run — a Recalculate invalidates every
+  // run-keyed memo the dashboard holds, and the operator who pressed it is the next person to look.
+  const { runStore, outcomeStore, caseStore, qualitySnapshots, employees, webChartEnv } = deps;
+  // Warm inside the SAME background task so it cannot run against a half-written run, and only for a
+  // scope that can actually change what the dashboard shows: the read models memoize under the
+  // WINNING population runs' key, and `isPopulationRun` excludes SITE/CASE/EMPLOYEE — a run of one of
+  // those invalidates nothing, so warming after it is a full pass to confirm every memo is still
+  // valid. `finishOrFail` resolves whether the run succeeded or failed, so the status is read back
+  // rather than assumed. The overview counts open cases, so there is nothing to warm without a case
+  // store; the run itself does not require one, which is why this is a guard and not a widened dep.
+  waitUntil(
+    finishOrFail(deps, planned).then(async () => {
+      if (!caseStore || !isPopulationRun(planned.scopeType)) return;
+      const finished = await runStore.getRun(planned.run.id).catch(() => null);
+      if (!finished || !isCompletedRun(finished.status)) return;
+      await warmReadModels({ runStore, outcomeStore, caseStore, qualitySnapshots, employees, webChartEnv });
+    }),
+  );
   return runningResponse(planned);
 }
+
+
+/**
+ * The ADR-079 flag, from the same two facts the run pipeline reads: the executor said the subject is
+ * in NO rate's initial population, and the measure is officially routed. Written by every path that
+ * persists an outcome — an import-driven MEASURE run finalizes COMPLETED, which makes it a population
+ * run `listLatestPopulationRuns` can elect, and an unset flag there would quietly put its
+ * out-of-population subjects back in the dashboard's denominator.
+ */
+const outOfPopulationFlag = (
+  engine: { logicVersionFor?: (measureId: string) => string | undefined },
+  measureId: string,
+  inInitialPopulation: boolean | undefined,
+): boolean | undefined =>
+  engine.logicVersionFor?.(measureId)?.startsWith(OFFICIAL_LOGIC_VERSION_PREFIX)
+    ? inInitialPopulation === false
+    : undefined;
 
 /** Parse a query int, falling back to `def`, clamped to [min, max] (bounds payloads). */
 const clampInt = (raw: string | null, def: number, min: number, max: number): number => {
@@ -703,6 +740,7 @@ export async function handleRuns(
         runId: evalId,
         subjectId: result.subjectId,
         measureId: body.measureId,
+        outOfPopulation: outOfPopulationFlag(engine, body.measureId, result.inInitialPopulation),
         evaluationPeriod,
         status: result.outcome,
         evidence,
@@ -889,6 +927,7 @@ export async function handleRuns(
             evaluationPeriod,
             status: result.outcome,
             evidence,
+            outOfPopulation: outOfPopulationFlag(engine, body.measureId, result.inInitialPopulation),
           }),
         );
       } catch (err) {
@@ -1319,7 +1358,16 @@ export async function handleRuns(
       unit: "subject-measure pairs",
       workItems,
       rowsPersisted,
-      byStatus: byStatus.map((c) => ({ status: c.status, count: c.count })),
+      // FOLDED by status. Since ADR-079 `countOutcomesByStatus` groups by (status, out_of_population),
+      // so one status can arrive as up to three rows — mapping them straight through turned a
+      // histogram into indistinguishable duplicate buckets ("MISSING_DATA: 3000", "MISSING_DATA: 120")
+      // for a reader whose whole purpose is reconciling counts. `outOfPopulation` rides alongside as
+      // its own field rather than splitting the histogram (Codex review, #548).
+      byStatus: [...byStatus.reduce((m, c) => m.set(c.status, (m.get(c.status) ?? 0) + c.count), new Map<string, number>())]
+        .map(([status, count]) => ({ status, count })),
+      notInPopulation: byStatus
+        .filter((c) => c.status === "MISSING_DATA" && c.outOfPopulation === true)
+        .reduce((sum, c) => sum + c.count, 0),
       evaluationErrors,
       official,
       casesCiting: await stores.cases.countByLastRun(reconId),

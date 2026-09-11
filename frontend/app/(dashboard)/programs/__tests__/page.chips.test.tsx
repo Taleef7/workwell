@@ -1,5 +1,5 @@
 import React from "react";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const get = vi.fn();
@@ -31,6 +31,7 @@ const program = {
   dueSoon: 2,
   overdue: 2,
   missingData: 2,
+  notInPopulation: 3,
   excluded: 2,
   complianceRate: 20,
   openCaseCount: 6,
@@ -40,20 +41,50 @@ beforeEach(() => {
   filtersHolder.value = { siteId: "", from: "", to: "" };
   get.mockReset().mockImplementation((url: string) => {
     if (url.startsWith("/api/programs/overview")) return Promise.resolve([program]);
-    if (url.includes("/top-drivers")) return Promise.resolve({ bySite: [], byRole: [], byOutcomeReason: [] });
     return Promise.resolve([]);
   });
 });
 
 describe("ProgramsPage status chips", () => {
-  it("renders each actionable chip as a deep link into the pre-filtered cases list", async () => {
+  // Every chip lands on the patient roster, scoped to that measure's column. The count already
+  // knows the cohort, so the click must not hand back a screen that has to be re-filtered — and the
+  // destination has to NAME each patient. Overdue/Due Soon/Missing Data used to go to the cases
+  // worklist, which is a different surface organised around case state.
+  it("renders each chip as a deep link into the measure-scoped patient roster", async () => {
     render(<ProgramsPage />);
     const overdue = await screen.findByRole("link", { name: /overdue/i });
-    expect(overdue).toHaveAttribute("href", "/cases?measureId=cms125&outcome=OVERDUE");
+    expect(overdue).toHaveAttribute("href", "/compliance?measureId=cms125&status=OVERDUE");
     expect(screen.getByRole("link", { name: /due soon/i })).toHaveAttribute(
-      "href", "/cases?measureId=cms125&outcome=DUE_SOON");
+      "href", "/compliance?measureId=cms125&status=DUE_SOON");
     expect(screen.getByRole("link", { name: /missing data/i })).toHaveAttribute(
-      "href", "/cases?measureId=cms125&outcome=MISSING_DATA");
+      "href", "/compliance?measureId=cms125&status=MISSING_DATA");
+    expect(screen.getByRole("link", { name: /not in population/i })).toHaveAttribute(
+      "href", "/compliance?measureId=cms125&status=OUT_OF_POPULATION");
+  });
+
+  it("loads the page in TWO requests, not 1 + 2N — and paints on the first", async () => {
+    // The page used to fire the overview, then a trend and a top-drivers call per measure — 13
+    // requests on the pilot, each re-resolving the same winning runs before hitting the same memo.
+    // Two rather than one: the overview is the cheap half, and painting it is what makes the page
+    // feel loaded. A single include=detail call held the KPIs behind the slowest panel.
+    render(<ProgramsPage />);
+    await screen.findByRole("link", { name: /overdue/i });
+    const programCalls = () => get.mock.calls.map(([url]) => url as string).filter((url) => url.startsWith("/api/programs"));
+
+    // The card is on screen after the plain overview — the detail call has not been awaited for it.
+    expect(programCalls()[0]).not.toContain("include=detail");
+    await waitFor(() => expect(programCalls()).toHaveLength(2));
+    expect(programCalls()[1]).toContain("include=detail");
+    expect(programCalls().some((url) => url.includes("/top-drivers") || url.includes("/trend"))).toBe(false);
+  });
+
+  it("renders a zero chip, and still links it", async () => {
+    // A count of zero is an answer, and an absent badge reads as broken rather than as "none".
+    get.mockImplementation((url: string) =>
+      url.startsWith("/api/programs/overview") ? Promise.resolve([{ ...program, overdue: 0 }]) : Promise.resolve([]));
+    render(<ProgramsPage />);
+    const overdue = await screen.findByRole("link", { name: /overdue 0/i });
+    expect(overdue).toHaveAttribute("href", "/compliance?measureId=cms125&status=OVERDUE");
   });
 
   it("links compliant and excluded chips to the measure-scoped compliance roster", async () => {
@@ -78,10 +109,10 @@ describe("ProgramsPage status chips", () => {
     filtersHolder.value = { siteId: "clinic-1", from: "2026-01-01", to: "2026-06-30" };
     render(<ProgramsPage />);
     const overdue = await screen.findByRole("link", { name: /overdue/i });
-    expect(overdue).toHaveAttribute(
-      "href",
-      "/cases?measureId=cms125&outcome=OVERDUE&site=clinic-1&from=2026-01-01&to=2026-06-30",
-    );
+    // The roster honours site; it has no date filter, so from/to are deliberately NOT forwarded —
+    // implying a scope the destination cannot apply would break the "matches the clicked count" rule
+    // in the other direction.
+    expect(overdue).toHaveAttribute("href", "/compliance?measureId=cms125&status=OVERDUE&site=clinic-1");
     expect(screen.getByRole("link", { name: /: compliant/i })).toHaveAttribute(
       "href",
       "/compliance?measureId=cms125&status=COMPLIANT&site=clinic-1",
@@ -109,7 +140,6 @@ describe("ProgramsPage status chips", () => {
           complianceRate: 25.0,
         }]);
       }
-      if (url.includes("/top-drivers")) return Promise.resolve({ bySite: [], byRole: [], byOutcomeReason: [] });
       return Promise.resolve([]);
     });
     render(<ProgramsPage />);

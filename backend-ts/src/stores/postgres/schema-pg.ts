@@ -52,7 +52,8 @@ CREATE TABLE IF NOT EXISTS ${SPIKE_SCHEMA}.outcomes (
   evaluation_period TEXT NOT NULL DEFAULT '',
   status            TEXT NOT NULL,
   evidence_json     JSONB NOT NULL,
-  evaluated_at      TIMESTAMPTZ NOT NULL
+  evaluated_at      TIMESTAMPTZ NOT NULL,
+  out_of_population BOOLEAN
 );
 
 CREATE INDEX IF NOT EXISTS spike_outcomes_run_id_idx
@@ -155,6 +156,24 @@ ALTER TABLE ${SPIKE_SCHEMA}.cases ADD COLUMN IF NOT EXISTS closed_by TEXT;
 ALTER TABLE ${SPIKE_SCHEMA}.cases
   ADD COLUMN IF NOT EXISTS next_action_source TEXT NOT NULL DEFAULT 'SYSTEM';
 ALTER TABLE ${SPIKE_SCHEMA}.outcomes ADD COLUMN IF NOT EXISTS evaluation_period TEXT NOT NULL DEFAULT '';
+
+-- OWNER-APPROVED DDL (ADR-079, 2026-09-10): the population membership the run already knew, written
+-- down instead of re-derived. Since ADR-078 a subject outside a measure's initial population persists
+-- as MISSING_DATA, and the only record of WHICH kind of missing it is lives inside evidence_json.
+-- Every read model that counts (the programs overview, top-drivers, both trends, the hierarchy
+-- rollup, the risk outlook, the MCP tools, the exports, the order proposals) therefore had to either
+-- read every row's evidence — the cost this quarter's read-path work exists to remove — or count
+-- those subjects as unmet gaps, which put them in the compliance rate's denominator and reported the
+-- pilot's rates 3-18x low. The run pipeline computes this per subject at evaluation time
+-- (inInitialPopulation, official-routed measures only) and discarded it after deciding the case.
+--
+-- NULLABLE ON PURPOSE. NULL means "this run did not record it", which is the truth for every row
+-- written before this column existed; a NOT NULL DEFAULT FALSE would assert that ~90,000 pilot rows
+-- are in-population when they are not. Readers treat NULL as not-out-of-population, so an
+-- un-backfilled deployment reports exactly what it reported before rather than something new and
+-- wrong. docs/DEPLOY.md carries the one-time backfill that resolves the NULLs from the evidence.
+-- Additive, reversible (DROP COLUMN), no data migration required to deploy.
+ALTER TABLE ${SPIKE_SCHEMA}.outcomes ADD COLUMN IF NOT EXISTS out_of_population BOOLEAN;
 
 CREATE TABLE IF NOT EXISTS ${SPIKE_SCHEMA}.measures (
   id          TEXT PRIMARY KEY,

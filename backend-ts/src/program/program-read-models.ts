@@ -22,6 +22,7 @@ import { officialMeasureRate, type MeasureRate } from "./measure-rate.ts";
 import { directoryForRows, type DirectorySnapshot } from "../engine/ingress/webchart/live-directory.ts";
 import { DEPLOYMENT_PROFILE, DIRECTORY, isRunnableMeasure, profileSubjectMatcher, tenantById } from "../config/deployment-profile.ts";
 import { isWebChartConfigured, type DataSourceEnv } from "../engine/ingress/data-source.ts";
+import { isOfficialRouted } from "../wiring/official-routing.ts";
 import { latestPopulationSnapshot, latestPopulationWinners, RunKeyedMemo, type VisibilityContext } from "./latest-population.ts";
 import type { LatestPopulationRun } from "../stores/outcome-store.ts";
 
@@ -40,6 +41,14 @@ export interface ProgramSummary {
   dueSoon: number;
   overdue: number;
   missingData: number;
+  /**
+   * Subjects the measure's own logic put OUTSIDE its initial population (ADR-078) — persisted
+   * MISSING_DATA, separated here by the same evidence the roster cell reads. NOT part of
+   * `missingData`, and NOT in `complianceRate`'s denominator: on the pilot this was the whole
+   * Missing Data column, and counting it as unmet work reported CMS125 at 18.0% for a population
+   * that scores 72.1%. Always 0 for an authored measure, which has no population membership.
+   */
+  notInPopulation: number;
   excluded: number;
   complianceRate: number;
   /**
@@ -120,6 +129,13 @@ export function monthlyTrendPoints(rows: QualitySnapshotRow[]): ProgramTrendPoin
         dueSoon: r.dueSoon,
         overdue: r.overdue,
         missingData: r.missingData,
+        // A quality snapshot records five status counts and has no column for the split (ADR-079
+        // put the flag on `outcomes`, not here). That is sound only because this series is never
+        // served for a measure whose runs can PRODUCE out-of-population rows — `programTrend`
+        // refuses the monthly branch for an official-routed measure and falls through to the
+        // per-run points, which read the flag. Zero here is therefore the true count, not a
+        // placeholder; if the monthly branch is ever widened, this becomes a real gap.
+        notInPopulation: 0,
         excluded: r.excluded,
       };
     });
@@ -149,6 +165,12 @@ export interface ProgramTrendPoint {
   dueSoon: number;
   overdue: number;
   missingData: number;
+  /**
+   * Subjects outside the measure's population (ADR-079) — out of `missingData` and out of
+   * `denominator`, so this point is on the same basis as the overview's headline. A monthly point
+   * carries the snapshot's own recorded figure; see `monthlyTrendPoints`.
+   */
+  notInPopulation: number;
   excluded: number;
 }
 
@@ -279,9 +301,10 @@ interface OverviewBuckets {
   dueSoon: number;
   overdue: number;
   missingData: number;
+  notInPopulation: number;
   excluded: number;
 }
-const EMPTY_BUCKETS: OverviewBuckets = { latestRunId: null, latestRunAt: null, total: 0, compliant: 0, dueSoon: 0, overdue: 0, missingData: 0, excluded: 0 };
+const EMPTY_BUCKETS: OverviewBuckets = { latestRunId: null, latestRunAt: null, total: 0, compliant: 0, dueSoon: 0, overdue: 0, missingData: 0, notInPopulation: 0, excluded: 0 };
 const overviewMemo = new RunKeyedMemo<{ buckets: Map<string, OverviewBuckets>; directory: DirectorySnapshot; webChartConfigured: boolean }>(16);
 export const __overviewMemo = overviewMemo;
 
@@ -333,6 +356,16 @@ export async function programOverview(deps: ProgramDeps, filters: ProgramFilters
       const best = groups.length ? groups.reduce((a, b) => (b.runStartedAt > a.runStartedAt ? b : a)) : null;
       const os = best?.rows ?? [];
       const n = (status: string) => os.filter((o) => o.status === status).length;
+      // Out-of-population is a REFINEMENT of MISSING_DATA (ADR-078) that the status alone cannot
+      // carry, so the run writes it down and this counts the column (ADR-079). A row whose run
+      // predates the column reads `undefined` and counts as in-population — the pre-ADR-079 answer,
+      // which is what keeps an un-backfilled deployment reporting what it reported before rather
+      // than something new and wrong. `docs/DEPLOY.md` carries the backfill.
+      //
+      // `o.status === "MISSING_DATA"` is not redundant defence: the subtraction below is from the
+      // MISSING_DATA count, and there is no UNIQUE on (run_id, subject_id, measure_id), so a run that
+      // persisted a subject twice under different statuses could otherwise drive it negative.
+      const notInPopulation = os.reduce((acc, o) => acc + (o.outOfPopulation === true && o.status === "MISSING_DATA" ? 1 : 0), 0);
       buckets.set(m.id, {
         latestRunId: best?.runId ?? null,
         latestRunAt: best?.runStartedAt ?? null,
@@ -340,7 +373,11 @@ export async function programOverview(deps: ProgramDeps, filters: ProgramFilters
         compliant: n("COMPLIANT"),
         dueSoon: n("DUE_SOON"),
         overdue: n("OVERDUE"),
-        missingData: n("MISSING_DATA"),
+        // The remainder: subjects who ARE in the population and whose data is missing — the ones a
+        // panel can act on. Non-negative because `notInPopulation` is counted over the same rows with
+        // the same status conjunct, four lines above.
+        missingData: n("MISSING_DATA") - notInPopulation,
+        notInPopulation,
         excluded: n("EXCLUDED"),
       });
     }
@@ -359,8 +396,10 @@ export async function programOverview(deps: ProgramDeps, filters: ProgramFilters
   const summaries = active.map((m): ProgramSummary => {
     const b = derived!.buckets.get(m.id) ?? EMPTY_BUCKETS;
     const best = b.latestRunId ? { runId: b.latestRunId, runStartedAt: b.latestRunAt! } : null;
-    const { total, compliant, dueSoon, overdue, missingData, excluded } = b;
-    const denominator = total - excluded;
+    const { total, compliant, dueSoon, overdue, missingData, notInPopulation, excluded } = b;
+    // The proportion denominator drops the subjects the measure does not describe as well as the
+    // excluded ones — `totalEvaluated` still reports every row the run wrote.
+    const denominator = total - excluded - notInPopulation;
     const openCaseCount = cases.filter(
       (c) =>
         c.measureId === m.id &&
@@ -384,6 +423,7 @@ export async function programOverview(deps: ProgramDeps, filters: ProgramFilters
       dueSoon,
       overdue,
       missingData,
+      notInPopulation,
       excluded,
       complianceRate: complianceRateOf({ compliant, dueSoon, overdue, missingData, excluded }),
       improvementNotation: measureIdentityFor(m.id)?.improvementNotation ?? "increase",
@@ -448,9 +488,13 @@ async function foldScaleCounts(deps: ProgramDeps, summaries: ProgramSummary[], f
     s.dueSoon = base(s.dueSoon) + n("DUE_SOON");
     s.overdue = base(s.overdue) + n("OVERDUE");
     s.missingData = base(s.missingData) + n("MISSING_DATA");
+    // The generated scale tenant runs the AUTHORED engine, so none of its rows carries population
+    // membership and none can be out of population. The live half's count is kept as it is (or
+    // dropped with the rest of the live counts when the view is scoped to the scale tenant).
+    s.notInPopulation = base(s.notInPopulation);
     s.excluded = base(s.excluded) + n("EXCLUDED");
     s.totalEvaluated = baseTotal + groups.reduce((a, g) => a + g.count, 0);
-    s.denominator = s.totalEvaluated - s.excluded;
+    s.denominator = s.totalEvaluated - s.excluded - s.notInPopulation;
     s.complianceRate = complianceRateOf(s);
     if (tenant === SCALE_TENANT_ID) s.latestRunId = runId;
   }
@@ -458,7 +502,7 @@ async function foldScaleCounts(deps: ProgramDeps, summaries: ProgramSummary[], f
 
 function zeroSummary(s: ProgramSummary): void {
   s.totalEvaluated = 0; s.denominator = 0; s.compliant = 0; s.dueSoon = 0; s.overdue = 0; s.missingData = 0;
-  s.excluded = 0; s.complianceRate = 0; s.latestRunId = null; s.latestRunAt = null; s.openCaseCount = 0;
+  s.notInPopulation = 0; s.excluded = 0; s.complianceRate = 0; s.latestRunId = null; s.latestRunAt = null; s.openCaseCount = 0;
 }
 
 /**
@@ -601,7 +645,12 @@ export async function programTrend(
   // the window's key. The monthly branch reads the quality-snapshot store (mutable, and only ever
   // taken on the default profile — `monthlySnapshotScopeIsSafe`), so a request that could take it
   // bypasses the memo entirely rather than serve per-run points where monthly ones were due.
-  const monthlyPossible = Boolean(opts?.monthly && deps.qualitySnapshots && DEPLOYMENT_PROFILE.id === "default");
+  // `!isOfficialRouted` belongs here as well as on the branch below: without it, an official-routed
+  // measure on the default profile is neither served monthly NOR memoized — `monthlyPossible` would
+  // suppress the memo read AND the memo write for a request that then falls through to the per-run
+  // points, throwing the computed result away on every request and leaving `warmReadModels`' monthly
+  // pass warming nothing.
+  const monthlyPossible = Boolean(opts?.monthly && deps.qualitySnapshots && DEPLOYMENT_PROFILE.id === "default" && !isOfficialRouted(measureId));
   const { winners, runKey } = await latestPopulationWinners(deps.outcomeStore, [measureId], measureFilter(filters), TREND_RUN_WINDOW);
   const memoKey = chartMemoKey(deps, measureId, filters, opts?.tz ?? null);
   const cached = monthlyPossible ? undefined : trendMemo.get(memoKey, runKey);
@@ -614,10 +663,30 @@ export async function programTrend(
     ? snapshotScopeFor(filters, directory.employees)
     : null;
   const webChartConfigured = isWebChartConfigured(deps.webChartEnv ?? {});
+  // NOT for a measure whose rows can be out of population. The monthly series is the aggregate
+  // snapshot store, whose rows carry five status counts and no record of which of them were outside
+  // the measure's population — so for such a measure it would report the pre-ADR-079 rate directly
+  // beneath a headline computed on the corrected one, and the card's own delta would be the
+  // difference between the two bases rather than a change over time. The per-run points below read
+  // the persisted flag and are correct, so falling through is a right answer rather than a missing one.
+  //
+  // The condition is what the ROWS say, not what today's env says. `isOfficialRouted` reads
+  // `WORKWELL_OFFICIAL_MEASURES`, and a rollback after official runs were written is a case the
+  // roster cell already documents as real — under exactly that sequence an env-only guard reopens the
+  // monthly branch for a measure whose snapshots DO fold out-of-population into `missingData`.
+  //
+  // Bounded by the trend window, and knowingly so: if routing were rolled back AND every flagged run
+  // aged out of that window AND pre-ADR-079 snapshots survived, the monthly branch reopens. Widening
+  // it means a second unbounded read on a path whose entire purpose is to avoid one, and the
+  // alternative heuristics (inferring from a snapshot's own counts) are guesses about data rather
+  // than statements about it. Recorded rather than papered over.
+  const producedOutOfPopulation = first.groups.some((g) => g.rows.some((r) => r.outOfPopulation === true));
   if (
     opts?.monthly &&
     deps.qualitySnapshots &&
     scope &&
+    !isOfficialRouted(measureId) &&
+    !producedOutOfPopulation &&
     monthlySnapshotScopeIsSafe(scope, webChartConfigured, hasWebChartRows)
   ) {
     const snaps = await deps.qualitySnapshots.querySnapshots({
@@ -682,9 +751,15 @@ function trendPointsOf(groups: RunGroup[], tz?: string): ProgramTrendPoint[] {
       const compliant = n(rows, "COMPLIANT");
       const dueSoon = n(rows, "DUE_SOON");
       const overdue = n(rows, "OVERDUE");
-      const missingData = n(rows, "MISSING_DATA");
+      // The SAME basis as the headline the trend sits under (ADR-079). Until the flag was a column
+      // this point could not be corrected at all — the membership lived in evidence, and reading ten
+      // runs' evidence per measure is the cost the read-path work exists to avoid — so a corrected
+      // headline beside an uncorrected trend produced a fabricated delta: CMS125 at 72.1% above a
+      // sparkline ending 18.0% for the SAME run, rendered as a +54-point improvement.
+      const notInPopulation = rows.reduce((acc, o) => acc + (o.outOfPopulation === true && o.status === "MISSING_DATA" ? 1 : 0), 0);
+      const missingData = n(rows, "MISSING_DATA") - notInPopulation;
       const excluded = n(rows, "EXCLUDED");
-      const denominator = total - excluded;
+      const denominator = total - excluded - notInPopulation;
       return {
         runId,
         startedAt: runStartedAt,
@@ -695,6 +770,7 @@ function trendPointsOf(groups: RunGroup[], tz?: string): ProgramTrendPoint[] {
         dueSoon,
         overdue,
         missingData,
+        notInPopulation,
         excluded,
       };
     })
@@ -742,8 +818,12 @@ export async function programTopDrivers(
     .sort((a, b) => b.overdueCount - a.overdueCount || a.role.localeCompare(b.role))
     .slice(0, 5);
 
+  // Out-of-population subjects are not flagged work: the logic ran and they are not the measure's
+  // concern this period (ADR-078). Left in, they WERE the mix — 14,872 of CMS125's 16,254 "flagged"
+  // rows — and the panel read as one giant Missing Data slice no one could act on. Same column the
+  // overview's bucket counts, so the card and this panel cannot disagree (ADR-079).
   const FLAGGED = new Set(["OVERDUE", "MISSING_DATA", "DUE_SOON"]);
-  const flagged = outcomes.filter((o) => FLAGGED.has(o.status));
+  const flagged = outcomes.filter((o) => FLAGGED.has(o.status) && !(o.outOfPopulation === true && o.status === "MISSING_DATA"));
   const totalFlagged = flagged.length;
   const reasonCounts = new Map<string, number>();
   for (const o of flagged) reasonCounts.set(o.status, (reasonCounts.get(o.status) ?? 0) + 1);
@@ -809,6 +889,7 @@ export async function programRiskOutlook(
       dueSoon: number;
       overdue: number;
       missingData: number;
+      notInPopulation: number;
       excluded: number;
       upcoming: number;
     }
@@ -826,6 +907,7 @@ export async function programRiskOutlook(
           dueSoon: 0,
           overdue: 0,
           missingData: 0,
+          notInPopulation: 0,
           excluded: 0,
           upcoming: 0,
         })
@@ -834,7 +916,9 @@ export async function programRiskOutlook(
     if (snap.status === "COMPLIANT") acc.compliant++;
     else if (snap.status === "DUE_SOON") acc.dueSoon++;
     else if (snap.status === "OVERDUE") acc.overdue++;
-    else if (snap.status === "MISSING_DATA") acc.missingData++;
+    // ADR-079: not a gap and not in the rate, on the same basis as every other surface. Unrecorded
+    // (an un-backfilled row) counts as missing data, which is what this table reported before.
+    else if (snap.status === "MISSING_DATA") (snap.outOfPopulation === true ? acc.notInPopulation++ : acc.missingData++);
     else if (snap.status === "EXCLUDED") acc.excluded++;
 
     const lastExam = lastExamDateOf(snap.evidence);
@@ -862,6 +946,8 @@ export async function programRiskOutlook(
   const siteComplianceRates = [...siteAcc.entries()]
     .map(([site, a]) => ({
       site,
+      // Every row the run evaluated at this site, unchanged — the rates beside it are the ones that
+      // drop the subjects the measure does not describe.
       total: a.total,
       compliant: a.compliant,
       upcomingExpirations: a.upcoming,
@@ -891,7 +977,11 @@ export async function programRiskOutlook(
       const ordered = [...latestPerPeriod.values()].sort((a, b) => b.evaluatedAt.localeCompare(a.evaluatedAt));
       let streak = 0;
       for (const r of ordered) {
-        if (!FLAGGED.has(r.status)) break;
+        // An out-of-population period is not a non-compliant one (ADR-079). Without this, every
+        // non-diabetic evaluated for cms122 across three periods earned a streak of 3 and appeared
+        // in a named "repeat non-compliers" top-10 — a list of people nothing can be done about, on
+        // the panel this change exists to clean up.
+        if (!FLAGGED.has(r.status) || (r.outOfPopulation === true && r.status === "MISSING_DATA")) break;
         streak++;
       }
       const emp = directory.employeeById(subjectId);

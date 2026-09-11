@@ -61,8 +61,10 @@ beforeEach(() => {
         { id: "cms125", name: "Breast Cancer Screening", identity: { cmsId: "CMS125", mipsQualityId: "112", improvementNotation: "increase" } },
       ]);
     }
-    if (url.startsWith("/api/programs/overview")) return Promise.resolve([cms122Program, cms125Program]);
-    if (url.includes("/top-drivers")) return Promise.resolve({ bySite: [], byRole: [], byOutcomeReason: [] });
+    if (url.startsWith("/api/programs/overview")) {
+      const detail = { trend: [], topDrivers: { bySite: [], byRole: [], byOutcomeReason: [] } };
+      return Promise.resolve([{ ...cms122Program, ...detail }, { ...cms125Program, ...detail }]);
+    }
     return Promise.resolve([]);
   });
 });
@@ -146,9 +148,7 @@ describe("ProgramsPage inverse measure rendering", () => {
           { id: "cms122", name: "Diabetes: Glycemic Status Assessment", identity: { cmsId: "CMS122", mipsQualityId: "001", improvementNotation: "decrease" } },
         ]);
       }
-      if (url.startsWith("/api/programs/overview")) return Promise.resolve([cms122Program]);
-      if (url.includes("/trend")) return Promise.resolve(fellTrend);
-      if (url.includes("/top-drivers")) return Promise.resolve({ bySite: [], byRole: [], byOutcomeReason: [] });
+      if (url.startsWith("/api/programs/overview")) return Promise.resolve([{ ...cms122Program, trend: fellTrend, topDrivers: { bySite: [], byRole: [], byOutcomeReason: [] } }]);
       return Promise.resolve([]);
     });
 
@@ -170,9 +170,7 @@ describe("ProgramsPage inverse measure rendering", () => {
           { id: "cms122", name: "Diabetes: Glycemic Status Assessment", identity: { cmsId: "CMS122", mipsQualityId: "001", improvementNotation: "decrease" } },
         ]);
       }
-      if (url.startsWith("/api/programs/overview")) return Promise.resolve([cms122Program]);
-      if (url.includes("/trend")) return Promise.resolve(roseTrend);
-      if (url.includes("/top-drivers")) return Promise.resolve({ bySite: [], byRole: [], byOutcomeReason: [] });
+      if (url.startsWith("/api/programs/overview")) return Promise.resolve([{ ...cms122Program, trend: roseTrend, topDrivers: { bySite: [], byRole: [], byOutcomeReason: [] } }]);
       return Promise.resolve([]);
     });
 

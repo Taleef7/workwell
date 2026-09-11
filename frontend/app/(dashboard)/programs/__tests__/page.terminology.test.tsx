@@ -39,9 +39,10 @@ const program = {
 beforeEach(() => {
   setSubject("patient");
   get.mockReset().mockImplementation((url: string) => {
-    if (url.startsWith("/api/programs/overview")) return Promise.resolve([program]);
-    if (url.includes("/top-drivers")) {
-      return Promise.resolve({ bySite: [], byRole: [{ role: "Nurse", overdueCount: 1 }], byOutcomeReason: [] });
+    // ONE request: the page asks for ?include=detail, so the per-measure panels arrive attached
+    // to each summary rather than through 2N follow-up calls.
+    if (url.startsWith("/api/programs/overview")) {
+      return Promise.resolve([{ ...program, trend: [], topDrivers: { bySite: [], byRole: [{ role: "Nurse", overdueCount: 1 }], byOutcomeReason: [] } }]);
     }
     return Promise.resolve([]);
   });
@@ -51,7 +52,7 @@ describe("ProgramsPage terminology", () => {
   it("hides Top Roles for the patient term", async () => {
     render(<ProgramsPage />);
     const topSites = await screen.findByText("Top Sites");
-    await waitFor(() => expect(get).toHaveBeenCalledWith(expect.stringContaining("/top-drivers")));
+    await waitFor(() => expect(get).toHaveBeenCalledWith(expect.stringContaining("include=detail")));
 
     expect(screen.queryByText("Top Roles")).not.toBeInTheDocument();
     expect(topSites.parentElement).toHaveClass("sm:col-span-2");
