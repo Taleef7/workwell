@@ -16,8 +16,22 @@
 
 /** Stable payload shape shared by every channel (console JSON + webhook body). */
 export interface RunAlert {
-  /** Discriminator for log greps / webhook routing. */
-  kind: "RUN_FAILED" | "RUN_PARTIAL_FAILURE" | "SCHEDULER_TICK_ERROR" | "RUN_RECOVERED";
+  /**
+   * Discriminator for log greps / webhook routing.
+   *
+   * `EVIDENCE_BUCKET_UNREACHABLE` (#473) is not a run event at all — it is the boot-time evidence
+   * bucket probe. It is a member of this union rather than a reused neighbour because the alternative
+   * was borrowing `SCHEDULER_TICK_ERROR`, which would route an object-storage outage to whoever owns
+   * the scheduler and make `grep '"kind":"EVIDENCE_BUCKET_UNREACHABLE"'` — the command the runbook
+   * gives an operator — return nothing. A discriminator a consumer cannot discriminate on is worth
+   * less than the contract change it was avoiding.
+   */
+  kind:
+    | "RUN_FAILED"
+    | "RUN_PARTIAL_FAILURE"
+    | "SCHEDULER_TICK_ERROR"
+    | "RUN_RECOVERED"
+    | "EVIDENCE_BUCKET_UNREACHABLE";
   /** ISO-8601 emission time. */
   at: string;
   status: string;

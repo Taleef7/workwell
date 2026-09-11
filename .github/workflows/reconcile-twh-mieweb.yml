@@ -114,8 +114,13 @@ jobs:
       # Optional (#167/ADR-030): durable S3 evidence bucket. Inert when unset. KEEP IN SYNC with deploy-twh-mieweb.yml.
       WORKWELL_BUCKET_S3_ACCESS_KEY_ID: ${{ secrets.WORKWELL_BUCKET_S3_ACCESS_KEY_ID_TWH }}
       WORKWELL_BUCKET_S3_SECRET_ACCESS_KEY: ${{ secrets.WORKWELL_BUCKET_S3_SECRET_ACCESS_KEY_TWH }}
-      WORKWELL_BUCKET_S3_BUCKET: workwell-twh-evidence
-      WORKWELL_BUCKET_S3_REGION: us-east-1
+      WORKWELL_BUCKET_S3_BUCKET: workwell-evidence-twh
+      # `auto` is R2's region. The bucket moved off AWS on 2026-09-11 (#473) — the old account was a
+      # Free Plan that expired 2026-08-24 and took every evidence write down with it for 18 days.
+      WORKWELL_BUCKET_S3_REGION: auto
+      # Non-empty endpoint ⇒ the seam also switches to path-style addressing (resolve-bucket.ts).
+      # A secret, not a literal: this repository is PUBLIC and the endpoint embeds the account id.
+      WORKWELL_BUCKET_S3_ENDPOINT: ${{ secrets.WORKWELL_R2_S3_ENDPOINT }}
       REPLACE_EXISTING: "true"
     steps:
       - uses: actions/checkout@v7
@@ -158,6 +163,7 @@ jobs:
               --arg bucket_secret "$WORKWELL_BUCKET_S3_SECRET_ACCESS_KEY" \
               --arg bucket_name "$WORKWELL_BUCKET_S3_BUCKET" \
               --arg bucket_region "$WORKWELL_BUCKET_S3_REGION" \
+              --arg bucket_endpoint "$WORKWELL_BUCKET_S3_ENDPOINT" \
               '[
                 {key: "MIEWEB_TARGET", value: "local"},
                 {key: "WORKWELL_ENVIRONMENT", value: "production"},
@@ -182,7 +188,8 @@ jobs:
                 {key: "WORKWELL_BUCKET_S3_ACCESS_KEY_ID", value: $bucket_key_id},
                 {key: "WORKWELL_BUCKET_S3_SECRET_ACCESS_KEY", value: $bucket_secret},
                 {key: "WORKWELL_BUCKET_S3_BUCKET", value: $bucket_name},
-                {key: "WORKWELL_BUCKET_S3_REGION", value: $bucket_region}
+                {key: "WORKWELL_BUCKET_S3_REGION", value: $bucket_region},
+                {key: "WORKWELL_BUCKET_S3_ENDPOINT", value: $bucket_endpoint}
               ]'
             echo EOF
           } >> "$GITHUB_OUTPUT"

@@ -52,6 +52,8 @@ import { isDemoAccountRefusedOnProfile } from "./auth/demo-users.ts";
 import { assertSafeStartup, type StartupEnv } from "./config/startup-safety.ts";
 import { parseAllowedOrigins, preflightResponse, withCors } from "./config/cors.ts";
 import { formatSeamLogLine } from "./config/seam-inventory.ts";
+import { emitAlert, resolveAlertChannels } from "./run/alert-channel.ts";
+import { probeEvidenceBucket, bucketAlert, partialBucketConfigAlert } from "./case/bucket-health.ts";
 import { officialMeasureIds } from "./wiring/official-routing.ts";
 import { officialRoutingProblems } from "./wiring/executor-router.ts";
 import { loadOfficialArtifact } from "./wiring/official-artifacts.ts";
@@ -409,6 +411,35 @@ function logSeamInventoryOnce(env: Env): void {
       `WORKWELL_ALERT ${JSON.stringify({ kind: "OFFICIAL_ROUTING_MISCONFIGURED", problems })}`,
     );
   }
+  // #473: the evidence bucket is CONFIGURED but only exercised on the first evidence operation, so a
+  // dead one is silent. On 2026-08-24 the hosting AWS account lapsed and this stack went on booting
+  // clean, logging `bucket-s3=on` and serving /actuator/health 200 for eighteen days while every
+  // evidence write failed — the nightly backup job noticed on night one only because it opens a real
+  // connection. This is the app's equivalent: one read of a key that need not exist.
+  //
+  // Fire-and-forget, and alerted rather than thrown, for the same reason as the routing check above —
+  // the fetch handler is not a startup hook, so throwing would fail one arbitrary request instead of
+  // the process. `void` rather than `await` because no request should wait on a storage round trip.
+  // A half-configured bucket is reported BEFORE the probe, because the probe cannot see it: the seam
+  // needs all three vars, so a named bucket with an empty key reads as "off" and returns
+  // `not-configured`. Silence there is the same failure mode with a different cause.
+  const partial = partialBucketConfigAlert(env);
+  if (partial) {
+    void emitAlert(resolveAlertChannels(env), partial).catch((err) => {
+      console.error(`[workwell] evidence-bucket config alert failed: ${String((err as Error)?.message ?? err)}`);
+    });
+  }
+  void probeEvidenceBucket(env)
+    .then(async (result) => {
+      const alert = bucketAlert(result);
+      if (alert) await emitAlert(resolveAlertChannels(env), alert);
+      else if (result.kind === "reachable") console.log("[workwell] evidence bucket: reachable");
+    })
+    .catch((err) => {
+      // probeEvidenceBucket never rejects, so reaching here means emitAlert did. Swallowing that
+      // silently would make the alerting path itself the next thing to fail unnoticed.
+      console.error(`[workwell] evidence-bucket probe alert failed: ${String((err as Error)?.message ?? err)}`);
+    });
   // ADR-072: report the runnable classification and a stale vendored effectivePeriod at boot, so an
   // operator sees the vintage gap before the first run reports it.
   const today = new Date().toISOString().slice(0, 10);

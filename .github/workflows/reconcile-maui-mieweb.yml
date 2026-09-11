@@ -16,9 +16,11 @@ name: Reconcile Maui stack (self-heal)
 #     recovery path would carry the outage forward (Codex P2 #522). The frontend's `:latest` is
 #     promoted the same way, by its own deploy job, so the two surfaces' recovery tags can never name
 #     halves of two different failed attempts.
-#   * Maui ships no S3 evidence bucket (evidence stays on the in-container fs, by decision), so the four
-#     WORKWELL_BUCKET_S3_* keys are absent from the env array on purpose. `official-flip-config.test.ts`
-#     asserts this file and deploy-maui-mieweb.yml ship the same WORKWELL_OFFICIAL_MEASURES.
+#   * Maui ships its OWN R2 evidence bucket since 2026-09-11 (#473) — `workwell-evidence-maui`, with a
+#     token scoped to it alone, so the pilot and the TWH demo stack cannot read each other. Until then
+#     evidence sat on the in-container fs and was lost on every deploy and self-heal. All five
+#     WORKWELL_BUCKET_S3_* keys must match deploy-maui-mieweb.yml, including which jq --arg each comes
+#     from; `official-flip-config.test.ts` asserts that, and the same for WORKWELL_OFFICIAL_MEASURES.
 
 # Self-healing watchdog (#109). Periodically health-checks the LIVE surfaces and, if any is down,
 # recreates that container from its last-good GHCR `:latest` image (no rebuild). This is independent
@@ -136,6 +138,15 @@ jobs:
       WORKWELL_AUTH_JWT_SECRET: ${{ secrets.WORKWELL_AUTH_JWT_SECRET_MAUI }}
       # Optional (E14/ADR-023): inert when the WORKWELL_VSAC_API_KEY_TWH secret is unset. KEEP IN SYNC with deploy-maui-mieweb.yml.
       WORKWELL_VSAC_API_KEY: ${{ secrets.WORKWELL_VSAC_API_KEY_TWH }}
+      # Durable evidence (#167/ADR-030, R2 since #473). KEEP IN SYNC with deploy-maui-mieweb.yml —
+      # this file recreates the same container on a health event, so a divergence here silently
+      # repoints or unsets the pilot's evidence storage on a self-heal. `official-flip-config.test.ts`
+      # asserts the two agree, including which jq --arg each value comes from.
+      WORKWELL_BUCKET_S3_BUCKET: workwell-evidence-maui
+      WORKWELL_BUCKET_S3_ACCESS_KEY_ID: ${{ secrets.WORKWELL_BUCKET_S3_ACCESS_KEY_ID_MAUI }}
+      WORKWELL_BUCKET_S3_SECRET_ACCESS_KEY: ${{ secrets.WORKWELL_BUCKET_S3_SECRET_ACCESS_KEY_MAUI }}
+      WORKWELL_BUCKET_S3_REGION: auto
+      WORKWELL_BUCKET_S3_ENDPOINT: ${{ secrets.WORKWELL_R2_S3_ENDPOINT }}
       REPLACE_EXISTING: "true"
     steps:
       - uses: actions/checkout@v7
@@ -188,6 +199,11 @@ jobs:
               --arg jwt_secret "$WORKWELL_AUTH_JWT_SECRET" \
               --arg frontend_url "$FRONTEND_URL" \
               --arg vsac_api_key "$WORKWELL_VSAC_API_KEY" \
+              --arg bucket_name "$WORKWELL_BUCKET_S3_BUCKET" \
+              --arg bucket_key_id "$WORKWELL_BUCKET_S3_ACCESS_KEY_ID" \
+              --arg bucket_secret "$WORKWELL_BUCKET_S3_SECRET_ACCESS_KEY" \
+              --arg bucket_region "$WORKWELL_BUCKET_S3_REGION" \
+              --arg bucket_endpoint "$WORKWELL_BUCKET_S3_ENDPOINT" \
               '[
                 {key: "MIEWEB_TARGET", value: "local"},
                 {key: "WORKWELL_ENVIRONMENT", value: "production"},
@@ -224,7 +240,12 @@ jobs:
                 # asserts they agree. No apostrophes in this comment: it lives inside a single-quoted
                 # shell string.
                 {key: "WORKWELL_OUTCOME_RETENTION_DAYS", value: "400"},
-                {key: "WORKWELL_VSAC_API_KEY", value: $vsac_api_key}
+                {key: "WORKWELL_VSAC_API_KEY", value: $vsac_api_key},
+                {key: "WORKWELL_BUCKET_S3_BUCKET", value: $bucket_name},
+                {key: "WORKWELL_BUCKET_S3_ACCESS_KEY_ID", value: $bucket_key_id},
+                {key: "WORKWELL_BUCKET_S3_SECRET_ACCESS_KEY", value: $bucket_secret},
+                {key: "WORKWELL_BUCKET_S3_REGION", value: $bucket_region},
+                {key: "WORKWELL_BUCKET_S3_ENDPOINT", value: $bucket_endpoint}
               ]'
             echo EOF
           } >> "$GITHUB_OUTPUT"

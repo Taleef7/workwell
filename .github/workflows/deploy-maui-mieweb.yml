@@ -198,6 +198,17 @@ jobs:
       # treats a blank key as "not configured" (StoreValueSetResolver only). Set the
       # WORKWELL_VSAC_API_KEY_TWH secret to enable.
       WORKWELL_VSAC_API_KEY: ${{ secrets.WORKWELL_VSAC_API_KEY_TWH }}
+      # Durable evidence (#167/ADR-030, R2 since #473). The pilot kept the in-container `fs` bucket
+      # until 2026-09-11, which meant every uploaded attachment was lost on the next deploy or
+      # self-heal — on the deployment carrying 20,000 patients. Its OWN bucket, not TWH's: a token
+      # scoped per bucket is what keeps the demo stack and the pilot from reading each other.
+      # Inert unless all three are set (resolve-bucket.ts), so a missing secret degrades to the old
+      # fs behaviour rather than breaking the deploy.
+      WORKWELL_BUCKET_S3_BUCKET: workwell-evidence-maui
+      WORKWELL_BUCKET_S3_ACCESS_KEY_ID: ${{ secrets.WORKWELL_BUCKET_S3_ACCESS_KEY_ID_MAUI }}
+      WORKWELL_BUCKET_S3_SECRET_ACCESS_KEY: ${{ secrets.WORKWELL_BUCKET_S3_SECRET_ACCESS_KEY_MAUI }}
+      WORKWELL_BUCKET_S3_REGION: auto
+      WORKWELL_BUCKET_S3_ENDPOINT: ${{ secrets.WORKWELL_R2_S3_ENDPOINT }}
       REPLACE_EXISTING: ${{ github.event_name == 'push' || inputs.replace_existing == 'true' }}
     steps:
       - uses: actions/checkout@v7
@@ -263,6 +274,11 @@ jobs:
               --arg jwt_secret "$WORKWELL_AUTH_JWT_SECRET" \
               --arg frontend_url "$FRONTEND_URL" \
               --arg vsac_api_key "$WORKWELL_VSAC_API_KEY" \
+              --arg bucket_name "$WORKWELL_BUCKET_S3_BUCKET" \
+              --arg bucket_key_id "$WORKWELL_BUCKET_S3_ACCESS_KEY_ID" \
+              --arg bucket_secret "$WORKWELL_BUCKET_S3_SECRET_ACCESS_KEY" \
+              --arg bucket_region "$WORKWELL_BUCKET_S3_REGION" \
+              --arg bucket_endpoint "$WORKWELL_BUCKET_S3_ENDPOINT" \
               '[
                 {key: "MIEWEB_TARGET", value: "local"},
                 {key: "WORKWELL_ENVIRONMENT", value: "production"},
@@ -286,7 +302,12 @@ jobs:
                 {key: "WORKWELL_MAUI_CORPUS_SIZE", value: "20000"},
                 {key: "WORKWELL_RUN_CHUNK_SIZE", value: "500"},
                 {key: "WORKWELL_SCHEDULER_ANCHOR_HOUR_UTC", value: "12"},
-                {key: "WORKWELL_OUTCOME_RETENTION_DAYS", value: "400"}
+                {key: "WORKWELL_OUTCOME_RETENTION_DAYS", value: "400"},
+                {key: "WORKWELL_BUCKET_S3_BUCKET", value: $bucket_name},
+                {key: "WORKWELL_BUCKET_S3_ACCESS_KEY_ID", value: $bucket_key_id},
+                {key: "WORKWELL_BUCKET_S3_SECRET_ACCESS_KEY", value: $bucket_secret},
+                {key: "WORKWELL_BUCKET_S3_REGION", value: $bucket_region},
+                {key: "WORKWELL_BUCKET_S3_ENDPOINT", value: $bucket_endpoint}
               ]'
             echo EOF
           } >> "$GITHUB_OUTPUT"
