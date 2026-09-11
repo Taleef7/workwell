@@ -29,7 +29,8 @@ The deployment runs on MIE's internal container platform (`os.mieweb.org`).
 > tables are untouched). The `DATABASE_URL_TWH` secret is a **JDBC** URL (`jdbc:postgresql://…`); the
 > workflow strips the `jdbc:` prefix for node-postgres. **Evidence upload is durable since 2026-07-14**
 > (#167/ADR-030): the `WORKWELL_BUCKET_S3_*` env vars route evidence bytes to the managed
-> `workwell-twh-evidence` S3 bucket via the `resolveBucket` seam. See **Rollback** below.
+> `workwell-evidence-twh` bucket via the `resolveBucket` seam — on **Cloudflare R2 since 2026-09-11**
+> (#473), after the previous AWS account was suspended. See **Rollback** below.
 
 ### Deployment workflow
 
@@ -1369,8 +1370,22 @@ neither has one):
 
 | Bucket | Holds | Token | Lifecycle |
 |---|---|---|---|
-| `workwell-evidence-twh` | app evidence (ADR-030) | `workwell-app`, Object Read & Write, scoped to this bucket | none — evidence is durable |
+| `workwell-evidence-twh` | TWH app evidence (ADR-030) | `workwell-app`, Object Read & Write, scoped to this bucket | none — evidence is durable |
+| `workwell-evidence-maui` | **pilot** app evidence | its own token, scoped to this bucket | none |
 | `workwell-backups` | nightly `pg_dump`s, `db-dumps/twh/` + `db-dumps/maui/` | `workwell-backup`, Object Read & Write, scoped to this bucket | `db-dumps/` expires after 30 days |
+
+**The lifecycle rule is real, not aspirational**: `expire-dumps-30d` on prefix `db-dumps/`, created
+2026-09-11 with `wrangler r2 bucket lifecycle add workwell-backups expire-dumps-30d "db-dumps/"
+--expire-days 30 --abort-multipart-days 1`. Read it back with `wrangler r2 bucket lifecycle list
+workwell-backups`. Measured 2026-09-11, both stacks' first real dumps: **9.7 MiB (twh) + 31.8 MiB
+(maui) = 41.5 MiB a night, so a 30-day window is 1.22 GiB against a 10 GB free tier — 8.2x headroom.**
+Recheck when the pilot's roster grows; its dump is already three times TWH's.
+
+**The pilot's evidence bucket is inert until its secrets exist.** `WORKWELL_BUCKET_S3_ACCESS_KEY_ID_MAUI`
+/ `WORKWELL_BUCKET_S3_SECRET_ACCESS_KEY_MAUI` are read by both Maui workflows; until they are set the
+seam needs all three values and therefore stays off, so the pilot keeps the in-container `fs` bucket
+it has always had — evidence lost on every deploy and self-heal (#167). Setting them is what turns it
+on; nothing else changes.
 
 **Two buckets rather than one with prefix policies, deliberately.** R2 scopes an API token per
 BUCKET, not per prefix, so the separation that AWS expressed as "the app user carries an explicit
@@ -1395,6 +1410,24 @@ predicted.
 Evidence uploaded **before** 2026-07-14 lived on in-container disk and was lost on the next recreate
 (known demo-era limitation); everything uploaded after that persists across deploys/heals.
 
+> **Evidence written 2026-07-14 → 2026-08-24 is DANGLING, and that is a wider window than the silent
+> outage.** `evidence_attachments` rows persist a `storage_key` and `evidence-service.ts` reads the
+> bucket by it, so every attachment uploaded during the six weeks the AWS bucket actually *worked* now
+> points into a bucket this deployment can no longer reach. The read path is at least legible —
+> `EvidenceMissingError`, not a silent empty 200 — but a reader meets it with no explanation unless
+> they find this note. There is no `aws s3 sync` available to fix it: the source account is suspended.
+> Count the rows before deciding anything:
+> ```sql
+> SELECT
+>   count(*) FILTER (WHERE uploaded_at <  '2026-07-14') AS lost_before_the_bucket_existed,
+>   count(*) FILTER (WHERE uploaded_at >= '2026-07-14'
+>                      AND uploaded_at <  '2026-08-25') AS dangling_in_the_dead_aws_bucket,
+>   count(*) FILTER (WHERE uploaded_at >= '2026-08-25') AS written_during_the_silent_outage
+> FROM workwell_spike.evidence_attachments;
+> ```
+> **Owner decision, not yet made:** settle the AWS account to recover the middle column, or write it
+> off and record the window as unrecoverable.
+
 > **The AWS bucket is GONE, and this is what that cost.** The previous home was
 > `workwell-twh-evidence` on a Free Plan AWS account that **expired 2026-08-24**, exactly as the
 > warning that used to sit here said it would. AWS suspended the account rather than charging it:
@@ -1410,17 +1443,34 @@ Evidence uploaded **before** 2026-07-14 lived on in-container disk and was lost 
 ### The evidence bucket is probed at boot (#473)
 
 `probeEvidenceBucket` (`backend-ts/src/case/bucket-health.ts`) runs once per worker process, from the
-same boot hook as the seam-inventory line, and only when the seam is configured. It reads a key that
-is not expected to exist: **a missing object is a successful round trip**, proving credentials,
-network, endpoint and bucket name all resolve, so the probe needs no write permission and creates
-nothing. Only a throw counts as unreachable, and then it logs
+same boot hook as the seam-inventory line, and only when the seam is configured. It **lists** under a
+prefix chosen to match nothing — read-only, no write permission, creates nothing — and an empty
+listing is a successful round trip, proving credentials, endpoint **and bucket name** all resolve.
+Only a throw (or an 8-second timeout, since the SDK has no default one) counts as unreachable.
+
+> **It lists rather than gets, and that is the correctness of it.** The obvious probe is to `get` a
+> key that should not exist and treat the miss as success. That is wrong here: the adapter swallows
+> *any* 404 into `null` (`cloud-os/adapters/r2-s3.mjs` → `isNotFound`, `httpStatusCode === 404`), and
+> **`NoSuchBucket` is a 404**. A `get`-based probe therefore reports "reachable" for a bucket that does
+> not exist — a control that is present, reads green, and cannot fire on the likeliest
+> misconfiguration there is. Caught in review of the very change that renamed this bucket.
+
+Two alerts come out of it, both `RunAlert`s on the shared channel, so each reaches the console **and**
+`WORKWELL_ALERT_WEBHOOK_URL` when that is set:
 
 ```
-WORKWELL_ALERT {"kind":"EVIDENCE_BUCKET_UNREACHABLE","bucket":"…","endpoint":"…","message":"…"}
+WORKWELL_ALERT {"kind":"EVIDENCE_BUCKET_UNREACHABLE","status":"EVIDENCE_BUCKET_UNREACHABLE",…}
+WORKWELL_ALERT {"kind":"EVIDENCE_BUCKET_UNREACHABLE","status":"EVIDENCE_BUCKET_NOT_CONFIGURED",…}
 ```
 
-the same greppable token the official-routing check uses. It is fire-and-forget: no request waits on
-a storage round trip, and the probe cannot fail a request or a boot. Grep the container logs for
+The second is the half-configured case: a deployment that **names** a bucket but leaves a credential
+empty. The seam needs all three values, so that reads as "off" and silently falls back to
+container-local storage — the same silence, different cause. Naming a bucket is treated as intent,
+and intent that did not take effect is said out loud.
+
+The endpoint is **redacted** to `https://<account>.r2.cloudflarestorage.com` in both: the account id
+is a repo secret, and a log line is not the place to undo that. Both are fire-and-forget — no request
+waits on a storage round trip, and neither can fail a request or a boot. Grep the container logs for
 `WORKWELL_ALERT` after any storage change.
 
 ## One-time backfill — `outcomes.out_of_population` (ADR-079, 2026-09-10)

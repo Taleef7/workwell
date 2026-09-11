@@ -43,11 +43,25 @@ beside it.
 
 **What the code learned.** A configured-but-unreachable bucket now announces itself:
 `probeEvidenceBucket` runs once per process from the same boot hook as the seam-inventory line and
-reads a key that is not expected to exist, because **a missing object is a successful round trip** —
-it proves credentials, network, endpoint and bucket name all resolve, needs no write permission, and
-creates nothing. Only a throw is unreachable, and that logs `WORKWELL_ALERT
-{"kind":"EVIDENCE_BUCKET_UNREACHABLE",...}`, the token the official-routing check already uses. Fire
-and forget: no request waits on a storage round trip, and the probe cannot fail a request or a boot.
+**lists** under a prefix that matches nothing — read-only, no write permission, creates nothing — so
+an empty listing proves credentials, endpoint and bucket name all resolve. Only a throw, or an
+8-second timeout, is unreachable.
+
+**The first version of it `get` a key that should not exist and called the miss a success, and that
+was wrong in the exact way this module exists to prevent.** The adapter swallows *any* 404 into
+`null` (`isNotFound`: `httpStatusCode === 404`) and **`NoSuchBucket` is a 404** — so a `get`-based
+probe reports "reachable" for a bucket that does not exist, in a change whose single likeliest defect
+is the rename `workwell-twh-evidence` → `workwell-evidence-twh`. A control present, green, and unable
+to fire. `list` has no such catch. Found by review, not by me, and it is the third entry in the
+vacuous-guard collection.
+
+A second alert covers the half-configured case that the probe structurally cannot see: a deployment
+that NAMES a bucket but leaves a credential empty reads as "seam off" and falls back silently to
+container-local storage. Naming a bucket is intent; intent that did not take effect is now said out
+loud. Both travel the shared alert channel rather than a hand-rolled `console.error`, so they reach
+the webhook too — shipping "nobody reads logs" as a log line was the first draft's other mistake —
+and the endpoint is redacted to `https://<account>.…`, because the account id is a repo secret and a
+log line is not the place to undo that. Fire and forget: no request waits on a storage round trip.
 
 **And the guard that was missing.** `official-flip-config.test.ts` pins deploy-versus-reconciler parity
 for corpus size, chunking, anchor and retention — but not for the bucket block, because `shippedValue`
@@ -65,8 +79,24 @@ lapsed. What replaces it is a probe that speaks when the thing is actually broke
 
 Verified: backend 2,504 pass, 1 fail, 23 skipped — the failure is `corpus-membership.test.ts`, the
 known stale local sparse-checkout of vendored artifacts, green in CI and unrelated. Typecheck clean.
-All three workflows parse. **The upload path itself is unproven until a dispatch runs** — the R2 token
-has never signed a request, and that is the one thing no local test can stand in for.
+All three workflows parse.
+
+**And the upload path is proven, not assumed** — dispatched on the branch as run 34620942416, both
+legs green:
+
+| Leg | Object | Size |
+|---|---|---|
+| twh | `db-dumps/twh/workwell_spike-2026-09-11T161547Z.dump` | 9.7 MiB |
+| maui | `db-dumps/maui/workwell_spike-2026-09-11T161626Z.dump` | 31.8 MiB |
+
+Issue #473 closed itself on the success step, which is the byte-identical-title decision working as
+intended; no second issue was opened for the Maui leg, which is the exact-title `select` protecting
+against `gh issue list --search` being a substring match.
+
+**The retention window is now a measurement rather than a guess.** 41.5 MiB a night across both
+stacks is **1.22 GiB over a 30-day window against a 10 GB free tier — 8.2x headroom**, so 30 days
+stands and needs no shortening. Worth rechecking when the pilot's roster or retention window grows,
+since the pilot's dump is already three times TWH's.
 
 ## 2026-09-11 — the state of things before MM-2, and four documents that still said two measures were routed
 

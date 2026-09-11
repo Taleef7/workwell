@@ -358,19 +358,50 @@ test("PR-9c: the shipped configuration constructs cleanly — no routing problem
 // control this PR exists because it failed.
 // ---------------------------------------------------------------------------
 
-/** The job-level `env:` binding for a key, e.g. `WORKWELL_BUCKET_S3_REGION: auto`. */
+/**
+ * The job-level `env:` binding for a key, e.g. `WORKWELL_BUCKET_S3_REGION: auto`.
+ *
+ * An inline `# comment` is stripped, so `auto # R2 ignores this` compares equal to `auto`. Otherwise
+ * a clarifying comment added to one file of a pair reads as a configuration divergence and fails a
+ * parity test for no reason — which is how a guard earns a reputation for crying wolf.
+ */
 function jobEnvValue(workflow: string, key: string): string | null {
   const path = fileURLToPath(new URL(`../../../.github/workflows/${workflow}`, import.meta.url));
   const yaml = readFileSync(path, "utf8");
   const match = yaml.match(new RegExp(String.raw`^\s+` + key + String.raw`:[ \t]*(\S.*?)[ \t]*$`, "m"));
+  if (!match) return null;
+  return match[1]!.replace(/\s+#.*$/, "").trim();
+}
+
+/**
+ * The ENV VAR a `jq --arg <name> "$VAR"` declaration reads, or null when that --arg is absent.
+ *
+ * `shippedFromArg` below proves only that the jq PROGRAM names a variable. It cannot see whether the
+ * variable was ever declared — jq would fail at deploy time on an undeclared one — nor whether the
+ * declaration reads the right env var: `--arg bucket_name "$SOMETHING_ELSE"` ships the wrong value
+ * and fails nothing. Review demonstrated exactly that hole in the first version of these tests.
+ */
+function argDeclaration(workflow: string, argName: string): string | null {
+  const path = fileURLToPath(new URL(`../../../.github/workflows/${workflow}`, import.meta.url));
+  const yaml = readFileSync(path, "utf8");
+  const match = yaml.match(new RegExp(String.raw`--arg\s+` + argName + String.raw`\s+"\$\{?(\w+)\}?"`));
   return match ? match[1]! : null;
 }
 
-/** Whether the workflow passes the key into the container's env array at all. */
-function shipsEnvKey(workflow: string, key: string): boolean {
+/**
+ * The jq variable the container env array carries this key's value FROM, e.g. `$bucket_endpoint`,
+ * or null where the key never reaches the array.
+ *
+ * Returning the VARIABLE rather than a boolean is the point: the first version of this helper only
+ * asserted the key appeared, and review demonstrated the hole by cross-wiring
+ * `{key: "WORKWELL_BUCKET_S3_ENDPOINT", value: $bucket_region}` in the reconciler — all three tests
+ * passed. A key present but wired to the wrong value is exactly the silent repoint these guard.
+ */
+function shippedFromArg(workflow: string, key: string): string | null {
   const path = fileURLToPath(new URL(`../../../.github/workflows/${workflow}`, import.meta.url));
   const yaml = readFileSync(path, "utf8");
-  return new RegExp(String.raw`\{\s*key:\s*"` + key + String.raw`"`).test(yaml);
+  const match = yaml.match(new RegExp(String.raw`\{\s*key:\s*"` + key + String.raw`",\s*value:\s*(\$\w+)`));
+  return match ? match[1]! : null;
 }
 
 const BUCKET_KEYS = [
@@ -383,13 +414,22 @@ const BUCKET_KEYS = [
 
 test("#473: a self-healed container reaches the SAME evidence bucket as a deployed one", () => {
   for (const key of BUCKET_KEYS) {
-    assert.equal(
-      jobEnvValue("reconcile-twh-mieweb.yml", key),
-      jobEnvValue("deploy-twh-mieweb.yml", key),
-      `reconcile-twh-mieweb.yml must bind the same ${key} as deploy-twh-mieweb.yml — it recreates ` +
-        `the same container on a health event, so a mismatch silently repoints (or unsets) evidence ` +
-        `storage on a self-heal, and the seam only fails on the first evidence op`,
-    );
+    for (const [deploy, reconcile] of MUST_AGREE) {
+      assert.equal(
+        jobEnvValue(reconcile, key),
+        jobEnvValue(deploy, key),
+        `${reconcile} must bind the same ${key} as ${deploy} — it recreates the same container on a ` +
+          `health event, so a mismatch silently repoints (or unsets) evidence storage on a self-heal, ` +
+          `and the seam only fails on the first evidence op`,
+      );
+      // ...and carry it from the same jq --arg. Equal env bindings wired to different variables ship
+      // different values, which the assertion above cannot see.
+      assert.equal(
+        shippedFromArg(reconcile, key),
+        shippedFromArg(deploy, key),
+        `${reconcile} wires ${key} from a different jq --arg than ${deploy}`,
+      );
+    }
   }
 });
 
@@ -397,15 +437,21 @@ test("#473: and every one of them actually reaches the container", () => {
   // Agreement alone is satisfied by BOTH files omitting a key — the vacuous reading that the corpus
   // -size test above exists to close. An unset endpoint is not inert here: it silently reverts the
   // seam to virtual-hosted AWS addressing against an R2 bucket, which fails on the first evidence op.
-  for (const workflow of ["deploy-twh-mieweb.yml", "reconcile-twh-mieweb.yml"]) {
+  for (const workflow of MUST_AGREE.flat()) {
     for (const key of BUCKET_KEYS) {
       assert.ok(
         jobEnvValue(workflow, key),
         `${workflow} binds no ${key}; the parity test above would pass vacuously`,
       );
-      assert.ok(
-        shipsEnvKey(workflow, key),
-        `${workflow} binds ${key} but never puts it in the container env array`,
+      const argName = shippedFromArg(workflow, key);
+      assert.ok(argName, `${workflow} binds ${key} but never puts it in the container env array`);
+      // ...and the jq --arg it comes from must be DECLARED, and declared from this very key.
+      // Without this, the assertion above proves only that the program mentions a variable name.
+      assert.equal(
+        argDeclaration(workflow, argName!.slice(1)),
+        key,
+        `${workflow} ships ${key} from jq ${argName}, which is not declared from $${key} — jq fails ` +
+          `on an undeclared arg, and a cross-wired declaration ships the wrong value silently`,
       );
     }
   }
@@ -424,5 +470,22 @@ test("#473: the TWH evidence bucket is the R2 one, addressed path-style", () => 
   assert.match(
     jobEnvValue("deploy-twh-mieweb.yml", "WORKWELL_BUCKET_S3_ENDPOINT") ?? "",
     /secrets\.WORKWELL_R2_S3_ENDPOINT/,
+  );
+});
+
+test("#473: the pilot has its OWN evidence bucket, and it is not the demo stack's", () => {
+  // Until 2026-09-11 Maui shipped no bucket at all, so evidence on the deployment carrying 20,000
+  // patients was lost on every deploy and self-heal. Its own bucket rather than a shared one because
+  // an R2 token is scoped per bucket: one bucket would mean one token both stacks hold.
+  assert.equal(jobEnvValue("deploy-maui-mieweb.yml", "WORKWELL_BUCKET_S3_BUCKET"), "workwell-evidence-maui");
+  assert.notEqual(
+    jobEnvValue("deploy-maui-mieweb.yml", "WORKWELL_BUCKET_S3_BUCKET"),
+    jobEnvValue("deploy-twh-mieweb.yml", "WORKWELL_BUCKET_S3_BUCKET"),
+    "the pilot and the demo stack must not share an evidence bucket",
+  );
+  // Separate credentials too — a shared token would defeat the separate buckets entirely.
+  assert.match(
+    jobEnvValue("deploy-maui-mieweb.yml", "WORKWELL_BUCKET_S3_ACCESS_KEY_ID") ?? "",
+    /secrets\.WORKWELL_BUCKET_S3_ACCESS_KEY_ID_MAUI/,
   );
 });

@@ -133,15 +133,51 @@ earlier good SHA with `replace_existing: true` (every build is tagged `sha-<SHA>
 
 ### 3.3 Total loss of the Neon project
 
-Today: the schema self-creates on boot, and the demo data is **regenerable** (§5) — so a fresh Neon
-project + the `DATABASE_URL_TWH` secret + a redeploy reconstitutes a working demo stack. Real
-operational history (cases, the audit ledger, run history) would be **permanently lost**. That is
-acceptable for synthetic demo data and unacceptable for anything else — see §2.2.
+The schema self-creates on boot and the demo data is **regenerable** (§5), so a fresh Neon project +
+the stack's `DATABASE_URL_*` secret + a redeploy reconstitutes a working stack. Operational history
+(cases, the audit ledger, run history) comes from the **nightly dump — restore it per §3.5**; without
+one it is permanently lost, which is what §2 item 2 exists to prevent and why the seventeen-night
+outage (#473) mattered as much as it did.
 
 ### 3.4 Container / node loss
 
 Covered: the reconciler recreates a down container from `:latest` within ~15 min, independent of
-Proxmox `onboot` (DEPLOY.md). No action needed. Evidence file bytes are lost (#167).
+Proxmox `onboot` (DEPLOY.md). No action needed. Evidence file bytes survive on any stack whose
+`WORKWELL_BUCKET_S3_*` vars are set (TWH since 2026-07-14, the pilot since 2026-09-11) and are lost
+on any stack still using the in-container `fs` bucket (#167).
+
+### 3.5 Restoring a nightly dump from R2
+
+The dumps are `pg_dump --format=custom` of the `workwell_spike` schema, at
+`s3://workwell-backups/db-dumps/<stack>/workwell_spike-<ISO8601>.dump`, retained 30 days.
+
+```bash
+# Credentials: the WORKWELL_BACKUP_S3_* repo secrets (the backup token is read+write on this bucket).
+export AWS_ACCESS_KEY_ID=…  AWS_SECRET_ACCESS_KEY=…  AWS_DEFAULT_REGION=auto
+export R2=https://<account-id>.r2.cloudflarestorage.com     # = the WORKWELL_R2_S3_ENDPOINT secret
+
+# 1. Find the dump you want (newest last).
+aws s3 ls s3://workwell-backups/db-dumps/maui/ --endpoint-url "$R2"
+
+# 2. Pull it.
+aws s3 cp s3://workwell-backups/db-dumps/maui/workwell_spike-2026-09-11T161626Z.dump . \
+  --endpoint-url "$R2"
+
+# 3. Restore into a FRESH Neon project or branch — never over a live one while you are still
+#    diagnosing. Use the DIRECT (non-pooler) host, as the dump job does.
+pg_restore -d "$TARGET_DIRECT_URL" --no-owner --schema=workwell_spike \
+  workwell_spike-2026-09-11T161626Z.dump
+
+# 4. Verify BEFORE repointing anything (the §3.1 invariants).
+psql "$TARGET_DIRECT_URL" -c "SELECT count(*) FROM workwell_spike.outcomes;" \
+                          -c "SELECT max(occurred_at) FROM workwell_spike.audit_events;"
+
+# 5. Repoint the stack: set DATABASE_URL_MAUI (or _TWH) to the new connection string and redeploy.
+```
+
+**`pg_restore` needs a client at least as new as the server (PG 16).** And note what a dump does not
+carry: evidence file BYTES live in the evidence bucket, not the database, so a restored database
+references attachments that only exist if that bucket still does.
 
 ---
 
@@ -152,10 +188,14 @@ Proxmox `onboot` (DEPLOY.md). No action needed. Evidence file bytes are lost (#1
 | Container crash / node reboot | **0** | ≤ 15 min (automatic) |
 | Bad deploy | **0** | ~10 min (redeploy a prior SHA) |
 | Data corruption **noticed within 6 h** | ≈ 0 (restore to just before) | ~15 min + verification |
-| Data corruption **noticed after 6 h** | **TOTAL — unrecoverable** | n/a |
-| Neon project loss | **TOTAL** for operational history; demo data regenerable | ~1 h (new project + secret + redeploy + re-seed) |
+| Data corruption **noticed after 6 h** | ≤ 24 h (the nightly dump, §3.5) | ~1 h (pull + `pg_restore` + verify + repoint) |
+| Neon project loss | ≤ 24 h for operational history; demo data regenerable | ~1 h (new project + restore §3.5 + secret + redeploy) |
 
-Rows 4 and 5 are the ones §2 exists to fix.
+Rows 4 and 5 are the ones §2 exists to fix, and **since 2026-07-14 for TWH and 2026-09-11 for the
+pilot they are fixed** — both read "≤ 24 h" rather than "TOTAL" only because a nightly dump exists to
+restore. That claim is worth exactly as much as the last successful run of `backup-neon-nightly.yml`:
+it silently became false for seventeen nights in 2026-08/09 (#473), and the workflow now raises an
+issue per stack on the first failure.
 
 ---
 

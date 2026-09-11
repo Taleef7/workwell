@@ -68,6 +68,12 @@ jobs:
       AWS_SECRET_ACCESS_KEY: ${{ secrets.WORKWELL_BACKUP_S3_SECRET_ACCESS_KEY }}
       # R2 ignores the region, but SigV4 refuses to sign without one; `auto` is R2's documented value.
       AWS_DEFAULT_REGION: auto
+      # aws-cli >= 2.23 sends `x-amz-checksum-crc32` by default, which has historically broken
+      # MULTIPART uploads to R2 — and the pilot's dump is already 31.8 MiB, well past the 8 MiB
+      # multipart threshold. The runner image's aws-cli bumps silently, so pin Cloudflare's
+      # documented workaround rather than wait to be surprised by it at 03:17 UTC.
+      AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+      AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
       BACKUP_BUCKET: workwell-backups
       # A secret rather than a literal: this repository is PUBLIC and the endpoint embeds the
       # Cloudflare account id.
@@ -153,6 +159,10 @@ jobs:
       # ---------------------------------------------------------------------
       - name: Open or update the backup-failure issue
         if: failure()
+        # NO continue-on-error here, deliberately. This step only runs when the dump has ALREADY
+        # failed, so it cannot turn a good run red — and suppressing its failure would hide the
+        # alerting path breaking, which is the same shape as the outage this workflow exists to
+        # report. If raising the issue fails, that must be visible in the step status.
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # This job never checks out the repo, so gh has no local git remote to infer the
@@ -163,7 +173,13 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
-          existing="$(gh issue list --state open --search "$TITLE in:title" \
+          # The search term is QUOTED into an exact phrase. Unquoted, GitHub treats each word as a
+          # separate keyword — so "Nightly Neon backup is failing (Maui pilot)" becomes a bag of
+          # common words that can rank the issue we want outside the page we asked for. --limit 100
+          # because gh defaults to 30, for the same reason: the exact-title `select` is what keeps the
+          # two stacks off each other's issues (the TWH title is a PREFIX of the Maui one), and a
+          # select cannot match a row the search never returned.
+          existing="$(gh issue list --state open --search "\"$TITLE\" in:title" --limit 100 \
             --json number,title --jq "[.[] | select(.title == env.TITLE)] | .[0].number // empty")"
 
           if [ -n "$existing" ]; then
@@ -204,6 +220,12 @@ jobs:
 
       - name: Close the backup-failure issue on recovery
         if: success()
+        # continue-on-error HERE only: this step runs after a dump that SUCCEEDED, and it runs under
+        # `set -euo pipefail`, so a transient `gh` 502 would otherwise mark the job failed and — since
+        # `if: failure()` on the step above was already evaluated and skipped — produce a red run with
+        # no issue activity, which reads as "the backup broke" when the dump is safely in the bucket.
+        # Tidying the issue tracker must not be able to lie about whether the backup happened.
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # See the failure step above: no checkout, so gh needs the repository given to it.
@@ -212,11 +234,26 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
-          existing="$(gh issue list --state open --search "$TITLE in:title" \
-            --json number,title --jq "[.[] | select(.title == env.TITLE)] | .[0].number // empty")"
+          # The search term is QUOTED into an exact phrase. Unquoted, GitHub treats each word as a
+          # separate keyword — so "Nightly Neon backup is failing (Maui pilot)" becomes a bag of
+          # common words that can rank the issue we want outside the page we asked for. --limit 100
+          # because gh defaults to 30, for the same reason: the exact-title `select` is what keeps the
+          # two stacks off each other's issues (the TWH title is a PREFIX of the Maui one), and a
+          # select cannot match a row the search never returned.
+          #
+          # ALL matching numbers here (the failure step takes only the first, because it needs one
+          # thread to comment on).
+          existing="$(gh issue list --state open --search "\"$TITLE\" in:title" --limit 100 \
+            --json number,title --jq "[.[] | select(.title == env.TITLE)] | .[].number")"
           if [ -n "$existing" ]; then
-            gh issue close "$existing" --comment "Recovered — backup succeeded in [run ${GITHUB_RUN_ID}](${RUN_URL})."
-            echo "Closed issue #${existing}"
+            # EVERY matching issue, not just the first. Duplicates can exist — opened by hand, or by
+            # an earlier run whose search missed the original — and closing one of them on recovery
+            # leaves the rest open forever, which is a standing false alarm that trains people to
+            # ignore the real one.
+            for number in $existing; do
+              gh issue close "$number" --comment "Recovered — backup succeeded in [run ${GITHUB_RUN_ID}](${RUN_URL})."
+              echo "Closed issue #${number}"
+            done
           else
             echo "No open backup-failure issue; nothing to close."
           fi

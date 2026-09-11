@@ -81,3 +81,11 @@ validator_cli.jar
 
 # The flip gate writes evidence for a PR body, not repo history.
 /backend-ts/.flip-gate/
+
+# Local object-storage scratch (#473). `db-dumps/` is where a hand-run `aws s3 cp` of a nightly dump
+# lands, and a dump is the entire `workwell_spike` schema of a live database — this repository is
+# PUBLIC, so it must never be committable. `.wrangler/` is wrangler's local state and cache
+# (`cf.json` carries account-adjacent network metadata). Neither is ever an input to a build.
+db-dumps/
+*.dump
+.wrangler/
