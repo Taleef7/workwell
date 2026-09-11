@@ -28,8 +28,13 @@ export interface RecordOutcomeInput {
    * measure only, and "outside" means no rate admits them (`worstOutcome`). Persisted because the
    * status cannot carry it: ADR-078 records such a subject as MISSING_DATA, so a reader counting
    * statuses cannot tell "not this measure's concern" from "in the population, result missing" —
-   * and the second is work while the first is not. Undefined means the run did not record it (every
-   * row written before the column existed), which readers treat as not-out-of-population.
+   * and the second is work while the first is not.
+   *
+   * `false` is a CLAIM — the official logic ran and placed this subject inside the population.
+   * Undefined means no such answer exists: a row written before the column, an authored measure, a
+   * copy-forward reuse, or an evaluation that threw. Readers treat undefined as
+   * not-out-of-population, and the `docs/DEPLOY.md` backfill only touches `IS NULL` rows — so
+   * writing `false` where nothing was evaluated would put the row beyond that correction's reach.
    */
   outOfPopulation?: boolean;
 }

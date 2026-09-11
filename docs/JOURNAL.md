@@ -131,7 +131,15 @@ And one that matters for the release: removing the frontend `displayRate` workar
 "answers exactly what it answered before" guarantee the rest of the change keeps. `docs/DEPLOY.md` now
 says the backfill belongs in the same release window rather than being an optional follow-up.
 
-**Verified.** Backend 2,588 pass. The Postgres ceiling ran **locally** for once (Docker up,
+**And a fifth, from Codex's re-review of the fix commit**: the pipeline initialised
+`outOfPopulation` to `false` and persisted that on an evaluation failure, a copy-forward reuse and
+every authored measure. `false` is a claim — the official logic ran and placed this subject INSIDE
+the population — and none of those three established it. The sharp end is that the backfill only
+touches `IS NULL` rows, so a `false` written where nothing was evaluated is permanently beyond its
+reach. Both earlier reviews read the same code and called it accurate; Codex was right and they were
+wrong. All three now persist NULL, and the run-pipeline failure test pins it.
+
+**Verified.** Backend 2,589 pass. The Postgres ceiling ran **locally** for once (Docker up,
 `postgres:16`, 101 pass / 0 skipped) rather than in CI alone — which matters, because this is a schema
 change and the SQLite floor cannot catch Pg-only SQL. The new store-contract test earned its place
 immediately: it caught `listLatestPopulationOutcomes` not projecting the new column, on both adapters,

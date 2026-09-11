@@ -49,7 +49,12 @@ for every man.
    evidence, and could not correct a TREND at all: ten runs' evidence per measure, for a sparkline.
    **NULLABLE on purpose.** NULL means "this run did not record it", which is the truth for every row
    written before the column existed; `NOT NULL DEFAULT FALSE` would assert that ~90,000 pilot rows
-   are in-population when they are not. Readers treat NULL as not-out-of-population, so an
+   are in-population when they are not. `false` is a CLAIM — the official logic ran and placed this
+   subject inside the population — so it is written ONLY when that happened: an authored measure, a
+   copy-forward reuse and an evaluation that threw all persist NULL. That is not fastidiousness about
+   vocabulary: the backfill below only touches `IS NULL` rows, so a `false` written where nothing was
+   evaluated would be permanently beyond its reach (found by Codex on #548, after two earlier reviews
+   read the same code and called it accurate). Readers treat NULL as not-out-of-population, so an
    un-backfilled deployment reports exactly what it reported before rather than something new and
    wrong, and `docs/DEPLOY.md` carries the one-time backfill that resolves the NULLs from evidence.
 2. **Out of population is its own count, and it is not in the rate's denominator.** `ProgramSummary`

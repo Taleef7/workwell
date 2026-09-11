@@ -832,7 +832,7 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
       evaluatedNow: boolean;
       evaluationFailed: boolean;
       /** The executor said this subject is OUTSIDE the initial population (ADR-078): a result, never a case. */
-      outOfPopulation: boolean;
+      outOfPopulation: boolean | undefined;
     }
     const pending: PendingOutcome[] = [];
     for (const item of chunkItems) {
@@ -863,7 +863,13 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
         : null;
       let evaluatedNow = true; // false ⇒ copied forward; true ⇒ a real (or attempted) CQL evaluation
       let evaluationFailed = false;
-      let outOfPopulation = false;
+      // UNDEFINED until the official logic actually answers (ADR-079). `false` is a claim — "membership
+      // was evaluated and this subject is inside the population" — and an evaluation failure, a
+      // copy-forward reuse, or an authored measure supplies no such answer. Initialising to `false`
+      // persisted that claim for every one of them, put the row in the `false` histogram group, and
+      // (worst) made it invisible to the documented `IS NULL` backfill, which could never come back
+      // and correct it. Codex review, #548.
+      let outOfPopulation: boolean | undefined;
       // A failed batch outranks a cache hit. Unreachable today — ADR-040 §6 means an official-routed
       // measure is never reused, so a measure that could fail a batch never produces a `reuse` plan — but
       // the ordering is the difference between "wasteful" and "wrong" if that policy is lifted: a reused
@@ -896,9 +902,9 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
           // for the same lesson) — but an authored "not in the initial population" is a workflow fact
           // (not enrolled in the hearing conservation program) whose case handling is unchanged. An
           // official `false` means the published logic ran and the subject is not the measure's concern.
-          outOfPopulation =
-            result.inInitialPopulation === false &&
-            (deps.engine.logicVersionFor?.(item.measureId)?.startsWith(OFFICIAL_LOGIC_VERSION_PREFIX) ?? false);
+          outOfPopulation = (deps.engine.logicVersionFor?.(item.measureId)?.startsWith(OFFICIAL_LOGIC_VERSION_PREFIX) ?? false)
+            ? result.inInitialPopulation === false
+            : undefined;
           // ADR-043 — record membership from the FINAL outcome, whichever path produced it (batch prefetch
           // or the individual fallback on this line). Reading it here rather than in the pre-pass is what
           // makes the roster complete before it is judged. A failed evaluation lands in `catch` below and
