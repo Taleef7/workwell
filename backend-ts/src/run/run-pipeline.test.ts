@@ -147,6 +147,13 @@ test("a subject evaluation failure is non-fatal but flags the run PARTIAL_FAILUR
   assert.equal(outcomes.length, 4, "every subject is still persisted (run not aborted)");
   assert.ok(outcomes.every((o) => o.status === "MISSING_DATA"));
   assert.ok(outcomes.every((o) => (o.evidence as { evaluationError?: string }).evaluationError));
+  // ADR-079: membership is UNRECORDED, not false. `false` would assert "evaluated, and inside the
+  // population", which a thrown engine never established — and it would put these rows in the
+  // `false` histogram group and hide them from the `IS NULL` backfill forever (Codex review, #548).
+  assert.ok(
+    outcomes.every((o) => o.outOfPopulation === undefined),
+    "an evaluation failure records no population membership either way",
+  );
 });
 
 // ---- #264 observability: failed-run alerts --------------------------------------------------------

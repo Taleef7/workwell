@@ -28,7 +28,14 @@ interface OutcomeRow {
   status: string;
   evidence_json: string;
   evaluated_at: string;
+  out_of_population: number | null;
 }
+
+/** Undefined stays NULL — "this run did not record it" is not the same statement as "false" (ADR-079). */
+const flagBind = (v: boolean | undefined): number | null => (v === undefined ? null : v ? 1 : 0);
+
+/** SQLite has no boolean: 1/0 on the way back, and NULL for a row whose run did not record it. */
+const boolOrUndefined = (v: number | null | undefined): boolean | undefined => (v === null || v === undefined ? undefined : v !== 0);
 
 const toRecord = (r: OutcomeRow): OutcomeRecord => ({
   id: r.id,
@@ -39,6 +46,7 @@ const toRecord = (r: OutcomeRow): OutcomeRecord => ({
   status: r.status,
   evidence: JSON.parse(r.evidence_json),
   evaluatedAt: r.evaluated_at,
+  outOfPopulation: boolOrUndefined(r.out_of_population),
 });
 
 export class SqliteOutcomeStore implements OutcomeStore {
@@ -60,10 +68,10 @@ export class SqliteOutcomeStore implements OutcomeStore {
     const evaluationPeriod = input.evaluationPeriod ?? "";
     await this.db
       .prepare(
-        `INSERT INTO outcomes (id, run_id, subject_id, measure_id, evaluation_period, status, evidence_json, evaluated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO outcomes (id, run_id, subject_id, measure_id, evaluation_period, status, evidence_json, evaluated_at, out_of_population)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
-      .bind(id, input.runId, input.subjectId, input.measureId, evaluationPeriod, input.status, JSON.stringify(input.evidence ?? {}), evaluatedAt)
+      .bind(id, input.runId, input.subjectId, input.measureId, evaluationPeriod, input.status, JSON.stringify(input.evidence ?? {}), evaluatedAt, flagBind(input.outOfPopulation))
       .run();
     return {
       id,
@@ -74,6 +82,7 @@ export class SqliteOutcomeStore implements OutcomeStore {
       status: input.status,
       evidence: input.evidence ?? {},
       evaluatedAt,
+      outOfPopulation: input.outOfPopulation,
     };
   }
 
@@ -93,12 +102,13 @@ export class SqliteOutcomeStore implements OutcomeStore {
       status: input.status,
       evidence: input.evidence ?? {},
       evaluatedAt: input.evaluatedAt ?? new Date().toISOString(),
+      outOfPopulation: input.outOfPopulation,
     }));
     const stmts = records.map((record) =>
       this.db
         .prepare(
-          `INSERT INTO outcomes (id, run_id, subject_id, measure_id, evaluation_period, status, evidence_json, evaluated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+          `INSERT INTO outcomes (id, run_id, subject_id, measure_id, evaluation_period, status, evidence_json, evaluated_at, out_of_population)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
         )
         .bind(
           record.id,
@@ -109,6 +119,7 @@ export class SqliteOutcomeStore implements OutcomeStore {
           record.status,
           JSON.stringify(record.evidence),
           record.evaluatedAt,
+          flagBind(record.outOfPopulation),
         ),
     );
     // Batched in slices. D1 caps a `batch()` at ~100 statements, and the run pipeline now persists a
@@ -152,7 +163,7 @@ export class SqliteOutcomeStore implements OutcomeStore {
     }
     const { results } = await this.db
       .prepare(
-        `SELECT id, run_id, subject_id, measure_id, evaluation_period, status, evidence_json, evaluated_at
+        `SELECT id, run_id, subject_id, measure_id, evaluation_period, status, evidence_json, evaluated_at, out_of_population
            FROM outcomes WHERE run_id = ?${where} ORDER BY evaluated_at ASC, id ASC${page}`,
       )
       .bind(...binds)
@@ -171,7 +182,7 @@ export class SqliteOutcomeStore implements OutcomeStore {
   async getOutcomeById(id: string): Promise<OutcomeRecord | null> {
     const { results } = await this.db
       .prepare(
-        `SELECT id, run_id, subject_id, measure_id, evaluation_period, status, evidence_json, evaluated_at
+        `SELECT id, run_id, subject_id, measure_id, evaluation_period, status, evidence_json, evaluated_at, out_of_population
            FROM outcomes WHERE id = ?`,
       )
       .bind(id)
@@ -311,17 +322,18 @@ export class SqliteOutcomeStore implements OutcomeStore {
       : `outcomes WHERE measure_id = ?`;
     const { results } = await this.db
       .prepare(
-        `SELECT ${alias}subject_id, ${alias}status, ${alias}evaluation_period, ${alias}evaluated_at, ${alias}evidence_json
+        `SELECT ${alias}subject_id, ${alias}status, ${alias}evaluation_period, ${alias}evaluated_at, ${alias}evidence_json, ${alias}out_of_population
            FROM ${source}${scaleClause} ORDER BY ${alias}evaluated_at ASC${alias ? ", o.id ASC" : ""}`,
       )
       .bind(measureId)
-      .all<{ subject_id: string; status: string; evaluation_period: string; evaluated_at: string; evidence_json: string }>();
+      .all<{ subject_id: string; status: string; evaluation_period: string; evaluated_at: string; evidence_json: string; out_of_population: number | null }>();
     return (results ?? []).map((r) => ({
       subjectId: r.subject_id,
       status: r.status,
       evaluationPeriod: r.evaluation_period,
       evaluatedAt: r.evaluated_at,
       evidence: JSON.parse(r.evidence_json),
+      outOfPopulation: boolOrUndefined(r.out_of_population),
     }));
   }
 
@@ -355,11 +367,11 @@ export class SqliteOutcomeStore implements OutcomeStore {
     const clause = where.length ? ` WHERE ${where.join(" AND ")}` : "";
     const { results } = await this.db
       .prepare(
-        `SELECT o.run_id, r.started_at AS run_started_at, r.scope_type AS run_scope_type, r.status AS run_status, r.triggered_by AS run_triggered_by, o.subject_id, o.measure_id, o.status
+        `SELECT o.run_id, r.started_at AS run_started_at, r.scope_type AS run_scope_type, r.status AS run_status, r.triggered_by AS run_triggered_by, o.subject_id, o.measure_id, o.status, o.out_of_population
            FROM outcomes o JOIN runs r ON r.id = o.run_id${clause}`,
       )
       .bind(...binds)
-      .all<{ run_id: string; run_started_at: string; run_scope_type: string; run_status: string; run_triggered_by: string | null; subject_id: string; measure_id: string; status: string }>();
+      .all<{ run_id: string; run_started_at: string; run_scope_type: string; run_status: string; run_triggered_by: string | null; subject_id: string; measure_id: string; status: string; out_of_population: number | null }>();
     return (results ?? []).map((r) => ({
       runId: r.run_id,
       runStartedAt: r.run_started_at,
@@ -369,6 +381,7 @@ export class SqliteOutcomeStore implements OutcomeStore {
       subjectId: r.subject_id,
       measureId: r.measure_id,
       status: r.status,
+      outOfPopulation: boolOrUndefined(r.out_of_population),
     }));
   }
 
@@ -398,7 +411,7 @@ export class SqliteOutcomeStore implements OutcomeStore {
     }
     const { results } = await this.db
       .prepare(
-        `SELECT o.run_id, r.started_at AS run_started_at, r.scope_type AS run_scope_type, r.status AS run_status, r.triggered_by AS run_triggered_by, o.subject_id, o.measure_id, o.status
+        `SELECT o.run_id, r.started_at AS run_started_at, r.scope_type AS run_scope_type, r.status AS run_status, r.triggered_by AS run_triggered_by, o.subject_id, o.measure_id, o.status, o.out_of_population
            FROM outcomes o
            JOIN runs r ON r.id = o.run_id
            JOIN (
@@ -412,7 +425,7 @@ export class SqliteOutcomeStore implements OutcomeStore {
            ) latest ON latest.measure_id = o.measure_id AND latest.run_id = o.run_id`,
       )
       .bind(...binds)
-      .all<{ run_id: string; run_started_at: string; run_scope_type: string; run_status: string; run_triggered_by: string | null; subject_id: string; measure_id: string; status: string }>();
+      .all<{ run_id: string; run_started_at: string; run_scope_type: string; run_status: string; run_triggered_by: string | null; subject_id: string; measure_id: string; status: string; out_of_population: number | null }>();
     return (results ?? []).map((r) => ({
       runId: r.run_id,
       runStartedAt: r.run_started_at,
@@ -422,6 +435,7 @@ export class SqliteOutcomeStore implements OutcomeStore {
       subjectId: r.subject_id,
       measureId: r.measure_id,
       status: r.status,
+      outOfPopulation: boolOrUndefined(r.out_of_population),
     }));
   }
 
@@ -523,11 +537,16 @@ export class SqliteOutcomeStore implements OutcomeStore {
     // instead of materializing every outcome row per run (O(120k) for seed:scale runs).
     const { results } = await this.db
       .prepare(
-        `SELECT status, COUNT(*) AS count, MAX(evaluated_at) AS latest
-           FROM outcomes WHERE run_id = ? GROUP BY status`,
+        `SELECT status, out_of_population, COUNT(*) AS count, MAX(evaluated_at) AS latest
+           FROM outcomes WHERE run_id = ? GROUP BY status, out_of_population`,
       )
       .bind(runId)
-      .all<{ status: string; count: number; latest: string | null }>();
-    return (results ?? []).map((r) => ({ status: r.status, count: Number(r.count), latestEvaluatedAt: r.latest ?? null }));
+      .all<{ status: string; out_of_population: number | null; count: number; latest: string | null }>();
+    return (results ?? []).map((r) => ({
+      status: r.status,
+      count: Number(r.count),
+      latestEvaluatedAt: r.latest ?? null,
+      outOfPopulation: boolOrUndefined(r.out_of_population),
+    }));
   }
 }

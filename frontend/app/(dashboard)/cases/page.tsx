@@ -76,7 +76,14 @@ function normalizeCaseStatusFilter(value: string | null): CaseStatusFilter {
   }
 }
 
-const OUTCOME_FILTER_VALUES = new Set(Object.keys(OUTCOME_LABELS));
+/**
+ * The five buckets a CASE can carry, enumerated rather than taken from `OUTCOME_LABELS`. That label
+ * table is shared with the programs card, and when `OUT_OF_POPULATION` was added to it for the card's
+ * new chip this filter silently started accepting `?outcome=OUT_OF_POPULATION` — which matches no
+ * case (an out-of-population subject opens none, ADR-078), leaving the worklist empty under a select
+ * showing no selection. A filter's vocabulary is its own.
+ */
+const OUTCOME_FILTER_VALUES = new Set(["COMPLIANT", "DUE_SOON", "OVERDUE", "MISSING_DATA", "EXCLUDED"]);
 
 function normalizeOutcomeFilter(raw: string | null): string {
   return raw && OUTCOME_FILTER_VALUES.has(raw) ? raw : "";

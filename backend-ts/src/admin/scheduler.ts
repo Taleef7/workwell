@@ -15,6 +15,7 @@
  */
 import type { Stores, StoresEnv } from "../stores/factory.ts";
 import { compactOutcomes, retentionDaysFromEnv } from "../run/outcome-compaction.ts";
+import { warmReadModels } from "../program/warm-read-models.ts";
 import { getStores } from "../stores/factory.ts";
 import type { HydratedSegment } from "../stores/segment-store.ts";
 import type { EvaluateMeasureBinding } from "@work-well/measure-engine";
@@ -412,6 +413,25 @@ async function runTickLocked(deps: SchedulerTickDeps, nowMs: number): Promise<bo
       console.warn(`[workwell] outcome compaction failed: ${String((err as Error)?.message ?? err)}`);
       return null;
     });
+
+  /**
+   * Warm the dashboard's run-keyed memos LAST — after compaction, so nothing is cached from rows
+   * that are about to be deleted. The nightly invalidates every one of them; without this the first
+   * person in each morning pays the whole roster's derive.
+   *
+   * Unconditional, unlike the manual-run path in `routes/runs.ts` which re-reads the run and gates on
+   * a COMPLETED population run: this tick only ever fires ALL_PROGRAMS, and if it FAILED the winners
+   * are unchanged, so the warm refills the still-valid previous key rather than caching a partial
+   * run. `finishOrFail` has already finalized either way.
+   */
+  await warmReadModels({
+    runStore: deps.stores.runs,
+    outcomeStore: deps.stores.outcomes,
+    caseStore: deps.stores.cases,
+    qualitySnapshots: deps.stores.qualitySnapshots,
+    employees: deps.employees,
+    webChartEnv: deps.webChartEnv,
+  });
 
   return true;
 }

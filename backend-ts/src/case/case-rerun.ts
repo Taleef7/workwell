@@ -108,15 +108,18 @@ export async function rerunToVerify(deps: RerunDeps, caseId: string, actor: stri
   // such a case under OUT_OF_POPULATION; a rerun-to-verify must reach the same answer, or the operator's
   // own click leaves the case open until the next night (Gemini review). Authored measures set the flag
   // too and are deliberately not read here — same gate as the pipeline.
-  let outOfPopulation = false;
+  // UNDEFINED until the official logic answers — the same rule as the pipeline (ADR-079): `false`
+  // asserts "evaluated, and inside the population", which an engine failure has not established.
+  // The case decision below reads it as falsy either way, so only the PERSISTED row changes.
+  let outOfPopulation: boolean | undefined;
   try {
     const result = await deps.engine.evaluate({ measureId: existing.measureId, patientBundle: bundle, evaluationDate: evalDate });
     verifiedStatus = result.outcome;
     evidence = result.evidence;
     const logicVersionFor = (deps.engine as { logicVersionFor?: (measureId: string) => string | undefined }).logicVersionFor;
-    outOfPopulation =
-      result.inInitialPopulation === false &&
-      (logicVersionFor?.(existing.measureId)?.startsWith(OFFICIAL_LOGIC_VERSION_PREFIX) ?? false);
+    outOfPopulation = (logicVersionFor?.(existing.measureId)?.startsWith(OFFICIAL_LOGIC_VERSION_PREFIX) ?? false)
+      ? result.inInitialPopulation === false
+      : undefined;
   } catch (err) {
     verifiedStatus = "MISSING_DATA";
     evidence = { evaluationError: "engine failure", message: String((err as Error)?.message ?? err) };
@@ -130,6 +133,10 @@ export async function rerunToVerify(deps: RerunDeps, caseId: string, actor: stri
     evaluationPeriod: existing.evaluationPeriod,
     status: verifiedStatus,
     evidence,
+    // The same flag this rerun already read to decide the case, recorded on the row too (ADR-079) —
+    // a CASE-scope run is never a read model's winner, but its row outlives the run and is read
+    // back by the per-subject history surfaces.
+    outOfPopulation,
   });
 
   const updatedCaseStatus = outOfPopulation ? "RESOLVED" : verificationCaseStatus(existing.status, verifiedStatus);

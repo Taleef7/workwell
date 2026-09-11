@@ -1382,6 +1382,108 @@ Evidence uploaded **before** 2026-07-14 lived on in-container disk and was lost 
 > then — MIE-provided storage (C14), a paid-plan upgrade, or Cloudflare R2 free tier. Env-var-only
 > migration (see `docs/BACKUP_DR_RUNBOOK.md` §2 note).
 
+## One-time backfill — `outcomes.out_of_population` (ADR-079, 2026-09-10)
+
+**Owner-run, once per deployment. Part of the SAME release window as the code, not a follow-up** —
+see "Why it cannot wait" below. The schema change itself is additive and applies automatically
+(`schema-pg.ts` `ADD COLUMN IF NOT EXISTS`, and the floor's `migrateFloorSchema`); nothing here is
+required for the app to start.
+
+**What it is for.** The column records what the run already knew: that a subject was outside a
+measure's initial population. Rows written before it existed carry NULL, which every backend read
+model treats as *not* out of population — so the backend alone would report exactly the rates it
+reported before. Running this makes the history agree with what the roster has been showing all along.
+
+**Why it cannot wait** (review finding). The frontend's `displayRate` dropped `missingData` from an
+inverse measure's denominator as a workaround for the very defect this fixes, and that workaround is
+removed in the same release. Until the backfill runs, `missingData` still contains every
+out-of-population subject, so an inverse measure (cms122) renders a **lower** Poor-control figure than
+it did the day before — a visible wrong move caused by the deploy alone. Backfill in the same window,
+or ship the backend first.
+
+**Skip it entirely** on a deployment whose measures are all authored (TWH today): the flag is only ever
+set for an officially routed measure, so every existing row's true value is already NULL.
+
+### The shape this reads
+
+`evidence_json.official.populationResults` is **fqm-execution's array of `{populationType, result}`,
+verbatim** — NOT a keyed `{ipp: …}` record. (The keyed form exists only in unit-test fixtures.) On a
+multi-rate measure `official.rates` holds one such array per rate and `populationResults` holds rate 1.
+A subject is outside the measure when **no rate** admits them (ADR-074 / `worstOutcome` / the app's
+`outsideEveryRate`). Reading the array as a record silently yields NULL for every key, which would mark
+**every** official MISSING_DATA row out-of-population and permanently delete the real missing-data
+worklist — the same misreading `official-flip-gate.ts` carries a scar comment about.
+
+```sql
+BEGIN;
+
+-- 1) Outside EVERY rate → TRUE. Only a MISSING_DATA row can be (ADR-078 persists them that way), and
+--    an evaluation error is in no population but is OUR failure, so it stays unrecorded.
+UPDATE workwell_spike.outcomes o
+   SET out_of_population = TRUE
+ WHERE o.out_of_population IS NULL
+   AND o.status = 'MISSING_DATA'
+   AND o.evidence_json ? 'official'
+   AND NOT (o.evidence_json ? 'evaluationError')
+   AND NOT EXISTS (
+         SELECT 1
+           FROM jsonb_array_elements(
+                  CASE
+                    WHEN jsonb_typeof(o.evidence_json #> '{official,rates}') = 'array'
+                     AND jsonb_array_length(o.evidence_json #> '{official,rates}') > 0
+                    THEN o.evidence_json #> '{official,rates}'
+                    ELSE jsonb_build_array(o.evidence_json #> '{official,populationResults}')
+                  END) AS rate
+           CROSS JOIN LATERAL jsonb_array_elements(
+                  CASE WHEN jsonb_typeof(rate) = 'array' THEN rate ELSE '[]'::jsonb END) AS pop
+          WHERE pop ->> 'populationType' = 'initial-population'
+            AND COALESCE((pop ->> 'result')::boolean, FALSE)
+       );
+
+-- 2) Everything else official and evaluated IS in the population; say so, rather than leaving it
+--    unrecorded, so a later reader cannot mistake "we never asked" for "we asked and the answer was no".
+UPDATE workwell_spike.outcomes o
+   SET out_of_population = FALSE
+ WHERE o.out_of_population IS NULL
+   AND o.evidence_json ? 'official'
+   AND NOT (o.evidence_json ? 'evaluationError');
+
+-- 3) VERIFY BEFORE COMMITTING. In-population missing data falling to zero across the board is the
+--    signature of the misreading above — on the pilot it is genuinely near zero for the routed
+--    measures, so compare against the measure's own initial population rather than trusting the shape.
+SELECT measure_id,
+       COUNT(*) FILTER (WHERE out_of_population)                              AS not_in_population,
+       COUNT(*) FILTER (WHERE out_of_population IS FALSE)                     AS in_population,
+       COUNT(*) FILTER (WHERE out_of_population IS NULL)                      AS still_unrecorded,
+       COUNT(*) FILTER (WHERE status = 'MISSING_DATA' AND out_of_population IS FALSE)
+                                                                              AS in_population_missing
+  FROM workwell_spike.outcomes
+ GROUP BY measure_id
+ ORDER BY measure_id;
+
+COMMIT;  -- or ROLLBACK
+```
+
+**What the numbers should say.** For each measure, `not_in_population + in_population` should equal that
+measure's evaluated rows minus any evaluation errors, and `in_population` should equal the measure's own
+initial population as the MeasureReport reports it — the subjects in ANY rate's IPP, **including the
+excluded ones** (an EXCLUDED subject is in the population; that is what makes them excludable). Do not
+expect `notInPopulation = totalEvaluated − ipp − excluded`; that double-subtracts.
+
+**Then verify from the app, because the point is that the two agree:**
+
+```bash
+curl -s "$API/api/programs/overview" -H "authorization: Bearer $TOKEN" \
+  | python -c "import sys,json;[print(f\"{p['measureId']:8} notInPop={p['notInPopulation']:6} missing={p['missingData']:5} rate={p['complianceRate']}\") for p in json.load(sys.stdin)]"
+```
+
+**The rates will move, sharply and upward.** That is the correction, not a data change: the same runs,
+counted against the population the measure actually describes. Anyone holding earlier figures should be
+told before they see it.
+
+**Rolling back** is `UPDATE workwell_spike.outcomes SET out_of_population = NULL;` — the backend returns
+to reporting what it reported before. The column itself can stay; it is inert when NULL.
+
 ## Database compute cost (read before changing any polling interval)
 
 Neon compute is billed by **CU-hours**, and a compute that is merely *awake* bills whether or not it

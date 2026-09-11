@@ -330,12 +330,21 @@ async function listRuns(args: JsonRecord, deps: McpToolDeps): Promise<unknown> {
       const statusCounts = await deps.outcomeStore.countOutcomesByStatus(run.id);
       const item = toRunListItemFromCounts(run, statusCounts);
       const counts: Record<string, number> = Object.fromEntries(OUTCOME_KEYS.map((k) => [k, 0]));
-      for (const c of statusCounts) if (c.status in counts) counts[c.status] = c.count;
+      // SUM, never assign: since ADR-079 `countOutcomesByStatus` groups by (status, out_of_population),
+      // so one status can arrive as up to three rows and an assignment kept whichever sorted last —
+      // a run with 3,000 out-of-population and 120 in-population MISSING_DATA rows would report 120.
+      for (const c of statusCounts) if (c.status in counts) counts[c.status] = (counts[c.status] ?? 0) + c.count;
+      // Out-of-population subjects are not a gap and not in this rate's denominator (ADR-079) — the
+      // same basis the programs overview reports, so an MCP client and the dashboard cannot give two
+      // different answers for the same run.
+      const notInPopulation = statusCounts
+        .filter((c) => c.status === "MISSING_DATA" && c.outOfPopulation === true)
+        .reduce((sum, c) => sum + c.count, 0);
       const complianceRate = complianceRateOf({
         compliant: counts.COMPLIANT ?? 0,
         dueSoon: counts.DUE_SOON ?? 0,
         overdue: counts.OVERDUE ?? 0,
-        missingData: counts.MISSING_DATA ?? 0,
+        missingData: (counts.MISSING_DATA ?? 0) - notInPopulation,
         excluded: counts.EXCLUDED ?? 0,
       });
       return {

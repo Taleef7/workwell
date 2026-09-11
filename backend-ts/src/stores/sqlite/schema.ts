@@ -44,7 +44,8 @@ CREATE TABLE IF NOT EXISTS outcomes (
   evaluation_period TEXT NOT NULL DEFAULT '',
   status            TEXT NOT NULL,
   evidence_json     TEXT NOT NULL,
-  evaluated_at      TEXT NOT NULL
+  evaluated_at      TEXT NOT NULL,
+  out_of_population INTEGER
 );
 
 CREATE INDEX IF NOT EXISTS outcomes_run_id_idx ON outcomes (run_id);
@@ -404,6 +405,11 @@ const FLOOR_COLUMN_BACKFILL: ReadonlyArray<{ table: string; column: string; ddl:
   // every pre-existing row rather than a placeholder: each of their actions was written by a run.
   { table: "cases", column: "next_action_source", ddl: "next_action_source TEXT NOT NULL DEFAULT 'SYSTEM'" },
   { table: "outcomes", column: "evaluation_period", ddl: "evaluation_period TEXT NOT NULL DEFAULT ''" },
+  // ADR-079. NULLABLE, unlike its NOT NULL siblings above: NULL means "this run did not record it",
+  // which is true of every row written before the column existed. Defaulting to 0 would assert those
+  // subjects are in-population, which for the pilot's out-of-population rows is false. Readers treat
+  // NULL as not-out-of-population, so an un-backfilled floor answers exactly as it did before.
+  { table: "outcomes", column: "out_of_population", ddl: "out_of_population INTEGER" },
 ];
 
 interface MinimalDb {

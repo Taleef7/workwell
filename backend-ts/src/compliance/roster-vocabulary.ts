@@ -9,7 +9,7 @@ import { deriveWhyFlagged, expressionResults } from "../case/case-detail-read-mo
 import { DEPLOYMENT_PROFILE } from "../config/deployment-profile.ts";
 import { isOfficialRouted } from "../wiring/official-routing.ts";
 import { officialDisplayFor } from "./official-display.ts";
-import { isEvaluationErrorEvidence, officialMembership } from "../fhir/measure-report.ts";
+import { isEvaluationErrorEvidence, outsideEveryRate } from "../fhir/measure-report.ts";
 
 /**
  * `OUT_OF_POPULATION` (ADR-077 d7): evaluated by the official logic and found outside the measure's
@@ -52,7 +52,13 @@ export function deriveCell(canonicalStatus: string, evidence: unknown, measureId
   // PERSISTED evidence, not by today's routing flag: a historical official run stays what it was after
   // `WORKWELL_OFFICIAL_MEASURES` is rolled back, and would otherwise render as "no record on file"
   // (Codex review, #540).
-  if (canonicalStatus === "MISSING_DATA" && officialMembership(evidence)?.ipp === false) {
+  //
+  // "Outside" is EVERY rate's initial population, not rate 1's. `official.populationResults` holds
+  // rate 1 verbatim (ADR-074), so reading it alone would call a CMS137 patient out of population on
+  // Initiation while Engagement still admits them — and the CDS card, which already reads every rate,
+  // would card a patient the roster showed as nobody's concern. One reading now, shared by the cell,
+  // the programs bucket, the card and the order proposal.
+  if (canonicalStatus === "MISSING_DATA" && outsideEveryRate({ status: canonicalStatus, evidence }, measureId)) {
     const d = officialDisplayFor(measureId, canonicalStatus, evidence);
     return { status: "OUT_OF_POPULATION", method: d?.method ?? "Not in the measure's initial population for this period" };
   }

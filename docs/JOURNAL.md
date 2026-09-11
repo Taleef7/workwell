@@ -1,5 +1,160 @@
 # Journal
 
+## 2026-09-10 (later) — the dashboard was reporting the wrong rate, because a patient the measure does not describe was being counted as a gap
+
+The read-path work earlier today made the pages load. It did not make them right. With the segment
+repair landed and all six measures opening cases, the overview still showed a "Missing Data" chip of
+14,872 for CMS125 on a 20,000-patient roster, and a compliance rate of 18.0%.
+
+Both numbers were the same defect. Since ADR-078 an official evaluation persists `MISSING_DATA` for a
+subject the measure's logic puts OUTSIDE its initial population — CQL is authoritative, and it is
+saying "not this measure's concern", not "we could not find the result". The distinction survived only
+in `evidence_json.official`, and only the roster read it. `complianceRateOf` puts `missingData` in its
+denominator, so every non-diabetic was dragging CMS122's rate down and every man was dragging
+CMS125's.
+
+Measured against the live sandbox before the change, and the arithmetic checks exactly — for all six
+measures `missingData` equals `total − initialPopulation` to the row, so in-population missing data
+was **zero** and the whole column was out-of-population:
+
+| Measure | Initial population | Rate shown | Rate the population scores |
+|---|---|---|---|
+| CMS2 | 17,795 | 60.9% | 68.7% |
+| CMS130 | 9,257 | 19.5% | 43.3% |
+| CMS165 | 6,837 | 20.5% | 62.3% |
+| CMS125 | 5,128 | 18.0% | 72.1% |
+| CMS122 | 2,103 | 7.4% | 72.4% (inverse — poor control) |
+| CMS137 | 599 | 0.4% | 13.5% |
+
+CMS125 checks out by hand: 3,577 compliant + 1,382 overdue + 169 excluded = 5,128, the initial
+population exactly. The rate was `3577/18831`; it is `3577/4959`.
+
+**The first cut re-derived the answer from evidence. Two reviewers killed it.** A shared
+"latest cells per measure" read, cached per (measure, run), let the overview and the proposals ask the
+same question the roster's cell already answered — and issue #546 had suggested exactly that shape.
+It worked, and it was wrong in a way neither the tests nor I saw: it could not correct the TREND.
+Correcting a trend point needs the membership for every run in the window, which is ten runs'
+evidence per measure — the cost this quarter's read-path work exists to remove — and ADR-073
+compaction deletes superseded rows, so it would have gone quietly wrong later anyway. What would have
+shipped is a corrected headline above an uncorrected sparkline, which the measure detail page renders
+as a **+54-point improvement that never happened**. The Gemini lane and my own reviewer found it
+independently.
+
+**So the run writes the answer down instead.** `outcomes.out_of_population` (ADR-079, owner-approved),
+nullable, set by the pipeline from the `inInitialPopulation` it already computes at
+`run-pipeline.ts:899` and previously discarded after deciding the case. Every read model now answers
+from the projection it already fetches, at a byte instead of a JSON blob, at any filter granularity,
+and it survives compaction because the flag travels with its row. The shared-cell module and its cache
+were deleted; the roster keeps the cache it always had.
+
+NULL means "this run did not record it" — the truth for every row written before the column. A
+`NOT NULL DEFAULT FALSE` would have asserted that ~90,000 pilot rows are in-population when they are
+not. Readers treat NULL as not-out-of-population, so **an un-backfilled deployment reports exactly what
+it reported before**, and the one-time backfill in `docs/DEPLOY.md` is what makes history agree.
+
+**Everything that reports a population rate moved together**: overview, both trend paths,
+top-drivers, the hierarchy rollup, the risk outlook's site table, and the order proposals (#546 —
+proposals read population membership, the owner's choice over deriving them from active cases, which
+would have let a human closing a case silently withdraw a clinical order). A half-migrated basis is
+worse than the defect: two screens disagree and neither says so. The monthly quality-snapshot trend
+has no column for the split, so it is simply **not served for an official-routed measure** any more —
+`programTrend` falls through to the per-run points, which read the flag.
+
+Run-level surfaces deliberately did NOT move. The runs list, the runs CSV and the MCP run summary
+report what a RUN wrote, and `passRate = compliant / totalEvaluated` is documented as an operational
+per-run statistic rather than a population rate. The CSV gains an **appended** `notInPopulation`
+column so the two can be reconciled; the documented prefix is byte-identical.
+
+**A divergence found while unifying the predicate.** `deriveCell` read
+`official.populationResults`, which on a multi-rate measure holds **rate 1 verbatim** (ADR-074) — so a
+CMS137 patient outside Initiation's population read as out-of-population even where Engagement still
+admitted them, while the CDS card, which already read every rate, would have carded the same patient.
+Both now call one `outsideEveryRate`.
+
+**Two things shipped alongside, because they touch the same screens.**
+
+*The status chips are the navigation.* All six chips on `/programs` deep-link to the patient roster
+scoped to that measure's column, carrying site AND tenant — the roster's tenant filter is now
+URL-derived, which it had to be for a tenant-scoped chip to reproduce its own count. Three chips used
+to land on the cases worklist, a different surface organised around case state. A zero count still
+renders and still links; an absent badge reads as broken rather than as "none". Date filters are
+deliberately not forwarded: the roster has no date filter, and implying a scope it cannot apply breaks
+"the destination reproduces the clicked count" in the other direction.
+
+*The dashboard makes two requests, not thirteen.* It was making 1 + 2N — the overview, then a trend
+and a top-drivers call per measure. Concurrent from the client, but a single-process worker serialises
+them anyway, so the fan-out bought concurrency it could not spend and paid for it in repeated work.
+`GET /api/programs/overview?include=detail` now attaches `trend` and `topDrivers` to each summary,
+per-measure failure-isolated so one measure's throw degrades to an empty panel instead of 500-ing the
+dashboard. Two rather than one because the overview alone is the cheap half and painting it is what
+makes the page feel loaded — collapsing to a single call held the KPIs behind the slowest panel, which
+all three reviewers flagged.
+
+And `warmReadModels` fills the run-keyed memos after the nightly (after compaction, so nothing is
+cached from rows about to be deleted) and after a manual run — gated on a population run that actually
+COMPLETED, since a SITE or CASE run invalidates nothing.
+
+**What review caught, and it was a lot.** Three lanes ran against the reworked change. Four P1s:
+
+- The **backfill SQL was catastrophically wrong.** It read `official.populationResults` as a keyed
+  `{ipp: …}` record; the app persists fqm-execution's **array of `{populationType, result}`**. Every
+  `rate ->> 'ipp'` would have been SQL NULL, so `NOT EXISTS` would have been true for every row and the
+  UPDATE would have marked **100% of official MISSING_DATA outcomes out-of-population** — permanently
+  deleting the real missing-data worklist. `official-flip-gate.ts` already carries a scar comment about
+  exactly this misreading, written the last time someone made it. Rewritten to unnest twice and match
+  `populationType = 'initial-population'`, then **executed against a local Postgres** over seeded rows
+  in both shapes, including the multi-rate case where rate 1 excludes and rate 2 admits (that subject
+  must stay in-population, and does).
+- `listOutcomesForMeasure` — the risk outlook's read — **never projected the new column**, so that
+  surface was silently left on the old basis while the card beside it moved. The store-contract test
+  said "round-trips on every read" and covered three of the four; the missing assertion is what let it
+  through. Now four.
+- The widened `GROUP BY (status, out_of_population)` **broke the MCP run histogram**, which did
+  `counts[c.status] = c.count` — an assignment where a status can now arrive as up to three rows, so
+  the last group won. A run with 3,000 out-of-population and 120 in-population MISSING_DATA rows would
+  have reported 120. Every other consumer sums; this one didn't.
+- `repeatNonCompliers` counted out-of-population periods as a non-compliance streak, so every
+  non-diabetic evaluated for cms122 across three periods appeared in a named "repeat non-compliers"
+  list of people nothing can be done about — on the very panel this change exists to clean up.
+
+Also fixed: the `/evaluate` and QRDA-I import writers left the flag unset on runs that CAN be elected
+a measure's winner; `monthlyPossible` was not updated alongside the monthly guard, so an
+official-routed measure on the default profile was neither served monthly nor memoized (the result
+thrown away on every request); the monthly guard now tests what the ROWS say rather than only today's
+`WORKWELL_OFFICIAL_MEASURES`, because a rollback after official runs were written is a case the roster
+cell already documents as real; the programs page gained a stale-response guard and clears its panels
+on a scope change; the scale tenant's chips no longer link (it has counts but no roster, so every chip
+would land on an empty grid under a badge reading thousands).
+
+And one that matters for the release: removing the frontend `displayRate` workaround makes an
+**un-backfilled** deployment temporarily *worse* for an inverse measure, which contradicts the
+"answers exactly what it answered before" guarantee the rest of the change keeps. `docs/DEPLOY.md` now
+says the backfill belongs in the same release window rather than being an optional follow-up.
+
+**And a fifth, from Codex's re-review of the fix commit**: the pipeline initialised
+`outOfPopulation` to `false` and persisted that on an evaluation failure, a copy-forward reuse and
+every authored measure. `false` is a claim — the official logic ran and placed this subject INSIDE
+the population — and none of those three established it. The sharp end is that the backfill only
+touches `IS NULL` rows, so a `false` written where nothing was evaluated is permanently beyond its
+reach. Both earlier reviews read the same code and called it accurate; Codex was right and they were
+wrong. All three now persist NULL, and the run-pipeline failure test pins it.
+
+**Verified.** Backend 2,589 pass. The Postgres ceiling ran **locally** for once (Docker up,
+`postgres:16`, 101 pass / 0 skipped) rather than in CI alone — which matters, because this is a schema
+change and the SQLite floor cannot catch Pg-only SQL. The new store-contract test earned its place
+immediately: it caught `listLatestPopulationOutcomes` not projecting the new column, on both adapters,
+and then caught `listOutcomesForMeasure` doing the same once review pointed at it.
+The one remaining local failure is `corpus-membership.test.ts`, the known stale local sparse-checkout
+of the vendored artifacts, green in CI.
+
+**Left open.** Item 4 of the shortlist — informational tiles for the ACO's CMS-calculated/vendor
+measures — was **dropped rather than built**: going back to the source material, that category was
+named, classified and dropped in the same breath, and nobody asked for anything to be shown for it.
+Building tiles would have been inventing a requirement. What is genuinely unbuilt and was genuinely
+asked for is health-plan-driven measures outside the ACO set, which is MM-2-sized. Also still open:
+`risk-outlook` at ~4 s on the measure detail page, and `GET /api/runs/:id/outcomes` unbounded on the
+pilot profile.
+
 ## 2026-09-10 — every page read the whole history to show one run, and the segment could not name four of the six measures
 
 The owner sent four screenshots of the sandbox: the programs page a skeleton, the roster "crunching

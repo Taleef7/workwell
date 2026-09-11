@@ -169,3 +169,30 @@ test("OUT_OF_POPULATION is decided by the persisted evidence, not by today's rou
     if (prior !== undefined) process.env.WORKWELL_OFFICIAL_MEASURES = prior;
   }
 });
+
+test("multi-rate: out of population means EVERY rate's initial population, not rate 1's", () => {
+  // `official.populationResults` holds rate 1 verbatim (ADR-074), so reading it alone called a
+  // CMS137 patient out of population on Initiation while Engagement still admitted them — and the
+  // CDS card, which already read every rate, would card a patient the roster showed as nobody's
+  // concern. One reading, shared by the cell, the programs bucket, the card and the order proposal.
+  const rate = (ipp: boolean) => ({ ipp, denom: ipp, denex: false, numer: false, denexcep: false });
+  const evidence = (r1: boolean, r2: boolean) => ({
+    expressionResults: [],
+    official: { populationResults: rate(r1), rates: [rate(r1), rate(r2)] },
+  });
+
+  assert.equal(deriveCell("MISSING_DATA", evidence(false, true), "cms137", PERIOD).status, "MISSING_DATA",
+    "rate 1 excludes them but Engagement does not — this patient is still the measure's concern");
+  assert.equal(deriveCell("MISSING_DATA", evidence(false, false), "cms137", PERIOD).status, "OUT_OF_POPULATION",
+    "no rate admits them");
+  assert.equal(deriveCell("MISSING_DATA", evidence(true, false), "cms137", PERIOD).status, "MISSING_DATA");
+});
+
+test("an authored outcome is never out of population — membership is absent, not false", () => {
+  // `membershipRatesFor` falls back to a status-derived membership when there are no official rates,
+  // and a MISSING_DATA outcome derives `ipp: false` from its status. Without the "official evidence
+  // present at all" gate that would call every authored missing-data row out of population and empty
+  // the worklist. The gate is what makes the fallback safe to reuse here.
+  const cell = deriveCell("MISSING_DATA", { expressionResults: [] }, "audiogram", PERIOD);
+  assert.notEqual(cell.status, "OUT_OF_POPULATION");
+});

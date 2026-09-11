@@ -4,6 +4,14 @@
  * (orders are clinical). format=domain (default) → {proposed, suppressed, totals}, optionally windowed
  * by ?limit=1..1000&offset= (both lists, same window; totals are the pre-window counts; proposals are
  * in (subject, measure) order); format=fhir → ServiceRequest Bundle of every proposed order, never windowed.
+ *
+ * A subject the measure's own logic put OUTSIDE its initial population is not at risk and gets no
+ * proposal (#546, owner decision). ADR-078 settled that such a subject is a result and not a CASE;
+ * it did not say what they are for an ORDER, and the answer chosen is to read the population
+ * membership the run persisted (`out_of_population`, ADR-079) and skip them. The alternative —
+ * deriving proposals from active cases — would have let a human closing a case silently withdraw a
+ * clinical order. Until this, `MISSING_DATA` alone made every non-diabetic eligible for an HbA1c and
+ * every man for a mammogram: 33,963 proposals for a 20,000-patient roster.
  */
 import type { CloudDatabase } from "@mieweb/cloud";
 import { getStores } from "../stores/factory.ts";
@@ -76,6 +84,11 @@ export async function handleOrders(req: Request, env: OrdersEnv): Promise<Respon
     for (const m of scope) {
       for (const r of latestRunRows(byMeasure.get(m) ?? [])) {
         if (subjectId && r.subjectId !== subjectId) continue;
+        // A subject the measure's own logic put OUTSIDE its initial population is not at risk of
+        // anything (#546). Read from the persisted flag (ADR-079) rather than the status, which
+        // since ADR-078 records them as MISSING_DATA and so made every non-diabetic eligible for an
+        // HbA1c and every man for a mammogram: 33,963 proposals for a 20,000-patient roster.
+        if (r.outOfPopulation === true && r.status === "MISSING_DATA") continue;
         atRisk.push({ subjectId: r.subjectId, measureId: r.measureId, status: r.status });
       }
     }

@@ -45,9 +45,14 @@ describe("displayRate", () => {
     expect(r).toMatchObject({ label: "Poor control", value: 0, numerator: 0, denominator: 0 });
   });
 
-  it("excludes missingData from numerator and denominator for decrease notation", () => {
+  it("counts missingData in the denominator for decrease notation — it is in-population work", () => {
+    // This used to DROP missingData, as a frontend workaround for a backend defect: an
+    // out-of-population subject was persisted MISSING_DATA and so inflated every denominator.
+    // Since ADR-079 the backend reports the split itself and `missingData` holds only subjects who
+    // ARE in the population with no result — real work, which must not be dropped from the rate.
     const r = displayRate({ ...baseCounts, missingData: 5 }, decrease);
-    expect(r).toMatchObject({ value: 15.6, numerator: 7, denominator: 45 });
+    // 7 / (38 + 7 + 5) = 14.0
+    expect(r).toMatchObject({ value: 14, numerator: 7, denominator: 50 });
   });
 
   it("includes dueSoon in the denominator for decrease notation", () => {

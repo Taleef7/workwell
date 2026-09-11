@@ -12,6 +12,10 @@ export const OUTCOME_LABELS: Record<string, string> = {
   DUE_SOON: "Due Soon",
   OVERDUE: "Overdue",
   MISSING_DATA: "Missing Data",
+  // ADR-078: the logic ran and this patient is not the measure's concern this period. Kept out of
+  // Missing Data, which means the patient IS in the population and the result needed to score them
+  // is absent — the difference between a report and a piece of work.
+  OUT_OF_POPULATION: "Not in population",
   EXCLUDED: "Excluded"
 };
 

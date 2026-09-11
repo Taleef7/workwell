@@ -22,7 +22,10 @@ const acc = (a: Mut, b: Mut): void => {
   a.evaluated += b.evaluated; a.compliant += b.compliant; a.dueSoon += b.dueSoon; a.overdue += b.overdue;
   a.missingData += b.missingData; a.excluded += b.excluded; a.openCases += b.openCases;
 };
-const seal = (t: Mut): HierarchyTotals => ({ ...t, complianceRate: complianceRateOf(t) });
+// The generated scale tenant runs the AUTHORED engine, and `outOfPopulation` is set only for an
+// officially routed measure (ADR-079) — so none of its rows can carry it, and `aggregateScaleRun`'s
+// bounded GROUP BY has no column for it either. Zero here is the true count, not a placeholder.
+const seal = (t: Mut): HierarchyTotals => ({ ...t, notInPopulation: 0, complianceRate: complianceRateOf(t) });
 
 /** Build the mhn tenant subtree from grouped counts; null when there is no scale data. */
 export function buildScaleSubtree(groups: ScaleGroupCount[]): HierarchyNode | null {

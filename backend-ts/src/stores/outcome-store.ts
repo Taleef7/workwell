@@ -21,6 +21,22 @@ export interface RecordOutcomeInput {
    * `listLatestFinalizedOutcomePerMeasure` — the compliance-api / MCP / CDS latest-answer reads).
    */
   evaluatedAt?: string;
+  /**
+   * The subject was outside this measure's initial population when the run evaluated them (ADR-079).
+   *
+   * The pipeline reads it off the executor's own `inInitialPopulation` for an OFFICIALLY ROUTED
+   * measure only, and "outside" means no rate admits them (`worstOutcome`). Persisted because the
+   * status cannot carry it: ADR-078 records such a subject as MISSING_DATA, so a reader counting
+   * statuses cannot tell "not this measure's concern" from "in the population, result missing" —
+   * and the second is work while the first is not.
+   *
+   * `false` is a CLAIM — the official logic ran and placed this subject inside the population.
+   * Undefined means no such answer exists: a row written before the column, an authored measure, a
+   * copy-forward reuse, or an evaluation that threw. Readers treat undefined as
+   * not-out-of-population, and the `docs/DEPLOY.md` backfill only touches `IS NULL` rows — so
+   * writing `false` where nothing was evaluated would put the row beyond that correction's reach.
+   */
+  outOfPopulation?: boolean;
 }
 
 export interface OutcomeRecord {
@@ -32,6 +48,8 @@ export interface OutcomeRecord {
   status: string;
   evidence: unknown;
   evaluatedAt: string;
+  /** See {@link RecordOutcomeInput.outOfPopulation}. Undefined ⇒ the run did not record it. */
+  outOfPopulation?: boolean;
 }
 
 /** Per-subject outcome history row for a measure (risk-outlook): status + period + evidence. */
@@ -41,6 +59,8 @@ export interface MeasureOutcomeRow {
   evaluationPeriod: string;
   evaluatedAt: string;
   evidence: unknown;
+  /** See {@link RecordOutcomeInput.outOfPopulation}. Undefined ⇒ the run did not record it. */
+  outOfPopulation?: boolean;
 }
 
 /** Per-measure outcome history row for one employee (MCP get_employee / check_compliance). */
@@ -62,7 +82,9 @@ export interface EmployeeOutcomeRow {
 /**
  * Minimal outcome+run projection for the programs analytics (overview/trend/top-drivers):
  * the run's `startedAt` joined per outcome, so aggregation groups by run without an
- * N+1 `listOutcomes` per run. `evidence` is intentionally omitted (not needed for KPIs).
+ * N+1 `listOutcomes` per run. `evidence` is intentionally omitted (not needed for KPIs) — which is
+ * exactly why `outOfPopulation` is a COLUMN here and not something the reader derives: the one fact
+ * these aggregates need out of the evidence, carried at a byte instead of a blob (ADR-079).
  */
 export interface OutcomeWithRun {
   runId: string;
@@ -76,6 +98,8 @@ export interface OutcomeWithRun {
   subjectId: string;
   measureId: string;
   status: string;
+  /** See {@link RecordOutcomeInput.outOfPopulation}. Undefined ⇒ the run did not record it. */
+  outOfPopulation?: boolean;
 }
 
 /** Optional measure + day-granular run-period filter pushed into the store query. */
@@ -298,7 +322,7 @@ export interface OutcomeStore {
    */
   aggregateScaleRun(runId: string): Promise<ScaleGroupCount[]>;
   /**
-   * Status histogram for one run — a single bounded `GROUP BY status` (+ MAX(evaluated_at)), returning
+   * Status histogram for one run — a single bounded `GROUP BY (status, out_of_population)` (+ MAX(evaluated_at)), returning
    * O(statuses) rows, never the per-subject rows. The run-list/summary read models use this instead of
    * `listOutcomes(runId)`: the `/api/runs` list previously loaded every outcome row per run just to
    * count them, which is O(120k) for each `seed:scale` run and pushed `?limit=20` past the 60s gateway
@@ -313,6 +337,13 @@ export interface OutcomeStatusCount {
   status: string;
   count: number;
   latestEvaluatedAt: string | null;
+  /**
+   * Part of the GROUP BY key since ADR-079, so a caller can tell a run's MISSING_DATA rows apart
+   * without reading any of them: `true` are subjects the measure's logic put outside its population,
+   * `undefined` a run that predates the column. A caller that only sums counts is unaffected — the
+   * totals are identical; a caller computing a RATE must not put the `true` rows in its denominator.
+   */
+  outOfPopulation?: boolean;
 }
 
 /** A grouped count from a scale run: outcomes per (location, provider, status). The SQL aggregation

@@ -43,7 +43,13 @@ const measureVersionFor = (measureId: string, evidence: unknown): string => {
 // ---- runs (DATA_MODEL §6.1) --------------------------------------------------
 const RUN_HEADERS = [
   "runId", "measureName", "measureVersion", "scopeType", "triggerType", "status", "startedAt", "completedAt",
+  // `notInPopulation` is APPENDED, never inserted: a consumer reading by position keeps every column
+  // it had. It reports how many of `missingData` were subjects the measure's logic put outside its
+  // population (ADR-079) — the number that explains why a dashboard denominator is smaller than
+  // `totalEvaluated`. `missingData` itself still counts every persisted MISSING_DATA row, because the
+  // export states what the run wrote.
   "durationMs", "totalEvaluated", "compliant", "dueSoon", "overdue", "missingData", "excluded", "passRate", "dataFreshAsOf",
+  "notInPopulation",
 ] as const;
 
 export async function runsCsv(runStore: RunStore, outcomeStore: OutcomeStore, limit = 200): Promise<string> {
@@ -58,7 +64,7 @@ export async function runsCsv(runStore: RunStore, outcomeStore: OutcomeStore, li
       return [
         s.runId, s.measureName, s.measureVersion, s.scopeType, s.triggerType, s.status, s.startedAt, s.completedAt,
         s.durationMs, s.totalEvaluated, s.compliantCount, count("DUE_SOON"), count("OVERDUE"), count("MISSING_DATA"),
-        count("EXCLUDED"), s.passRate, s.dataFreshAsOf,
+        count("EXCLUDED"), s.passRate, s.dataFreshAsOf, s.notInPopulation,
       ];
     }),
   );
