@@ -63,7 +63,16 @@ export default function CompliancePage() {
   const [q, setQ] = useState<string>("");
   const [segment, setSegment] = useState<string>("");
   const [segmentOptions, setSegmentOptions] = useState<{ id: string; name: string }[]>([]);
-  const [tenant, setTenant] = useState<string>("");
+  // URL-derived, like panel/status/measureId — a programs chip is tenant-scoped when the System
+  // selector is set, so its deep link has to be able to SAY so or the destination list cannot
+  // reproduce the count that was clicked.
+  const tenant: string = searchParams.get("tenant") ?? "";
+  const setTenant = useCallback((next: string) => {
+    const params = new URLSearchParams(searchParams.toString());
+    if (next) params.set("tenant", next);
+    else params.delete("tenant");
+    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+  }, [pathname, router, searchParams]);
   const [tenantOptions, setTenantOptions] = useState<TenantOption[]>([]);
   const [page, setPage] = useState<number>(1);
   const [pageSize, setPageSize] = useState<number>(50);

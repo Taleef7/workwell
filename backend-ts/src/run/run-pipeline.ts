@@ -944,6 +944,11 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
           evaluationPeriod: p.period,
           status: p.status,
           evidence: p.evidence,
+          // ADR-079: the same flag the case decision below reads, written DOWN. Without it the
+          // distinction between "outside this measure's population" and "in it, result missing"
+          // survives only inside evidence_json, and every aggregate that counts statuses either
+          // re-derives it per row or reports an out-of-population subject as an unmet gap.
+          outOfPopulation: p.outOfPopulation,
         })),
       );
     } catch (err) {

@@ -32,18 +32,23 @@ export interface DisplayRate {
   /** The count the displayed percentage is made of: compliant for increase, overdue for decrease. */
   numerator: number;
   /**
-   * The denominator the displayed percentage was divided by. For increase measures this is
-   * total − excluded (compliant + dueSoon + overdue + missingData — the same four-bucket sum the
-   * backend's `complianceRateOf` divides by, so `value` and this pair always agree). For decrease
-   * measures MISSING_DATA is outside the initial population on the official path, so it is
-   * compliant + dueSoon + overdue.
+   * The denominator the displayed percentage was divided by: compliant + dueSoon + overdue +
+   * missingData — the same four-bucket sum the backend's `complianceRateOf` divides by, so `value`
+   * and this pair always agree.
+   *
+   * The decrease branch used to drop `missingData` here, on the grounds that on the official path
+   * those subjects were outside the initial population. That was a workaround for a BACKEND defect,
+   * and since ADR-079 the backend reports the split itself: `missingData` now holds only subjects who
+   * ARE in the population and whose result is missing. Keeping the workaround would drop real work
+   * from the denominator — 20 compliant / 20 overdue / 20 in-population missing would render Poor
+   * control at 50.0% where the honest figure is 33.3%.
    */
   denominator: number;
 }
 
 export function displayRate(counts: RateCounts, notation: NotationSource | null | undefined): DisplayRate {
   if (notation?.improvementNotation === "decrease") {
-    const denominator = counts.compliant + counts.dueSoon + counts.overdue;
+    const denominator = counts.compliant + counts.dueSoon + counts.overdue + counts.missingData;
     const value = denominator === 0 ? 0 : Math.round((counts.overdue / denominator) * 1000) / 10;
     return { label: "Poor control", value, lowerIsBetter: true, numerator: counts.overdue, denominator };
   }

@@ -130,6 +130,10 @@ export async function rerunToVerify(deps: RerunDeps, caseId: string, actor: stri
     evaluationPeriod: existing.evaluationPeriod,
     status: verifiedStatus,
     evidence,
+    // The same flag this rerun already read to decide the case, recorded on the row too (ADR-079) —
+    // a CASE-scope run is never a read model's winner, but its row outlives the run and is read
+    // back by the per-subject history surfaces.
+    outOfPopulation,
   });
 
   const updatedCaseStatus = outOfPopulation ? "RESOLVED" : verificationCaseStatus(existing.status, verifiedStatus);

@@ -29,7 +29,11 @@ interface OutcomeRow {
   status: string;
   evidence_json: unknown;
   evaluated_at: Date | string;
+  out_of_population: boolean | null;
 }
+
+/** NULL means the run did not record it (ADR-079) — not the same statement as false. */
+const flagOf = (v: boolean | null | undefined): boolean | undefined => (v === null || v === undefined ? undefined : v);
 
 const toRecord = (r: OutcomeRow): OutcomeRecord => ({
   id: r.id,
@@ -41,6 +45,7 @@ const toRecord = (r: OutcomeRow): OutcomeRecord => ({
   // pg returns JSONB already parsed.
   evidence: r.evidence_json,
   evaluatedAt: r.evaluated_at instanceof Date ? r.evaluated_at.toISOString() : r.evaluated_at,
+  outOfPopulation: flagOf(r.out_of_population),
 });
 
 const T = `${SPIKE_SCHEMA}.outcomes`;
@@ -65,9 +70,9 @@ export class PgOutcomeStore implements OutcomeStore {
     const evaluatedAt = input.evaluatedAt ?? new Date().toISOString();
     const evaluationPeriod = input.evaluationPeriod ?? "";
     await this.pool.query(
-      `INSERT INTO ${T} (id, run_id, subject_id, measure_id, evaluation_period, status, evidence_json, evaluated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8)`,
-      [id, input.runId, input.subjectId, input.measureId, evaluationPeriod, input.status, JSON.stringify(input.evidence ?? {}), evaluatedAt],
+      `INSERT INTO ${T} (id, run_id, subject_id, measure_id, evaluation_period, status, evidence_json, evaluated_at, out_of_population)
+       VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9)`,
+      [id, input.runId, input.subjectId, input.measureId, evaluationPeriod, input.status, JSON.stringify(input.evidence ?? {}), evaluatedAt, input.outOfPopulation ?? null],
     );
     return {
       id,
@@ -78,14 +83,15 @@ export class PgOutcomeStore implements OutcomeStore {
       status: input.status,
       evidence: input.evidence ?? {},
       evaluatedAt,
+      outOfPopulation: input.outOfPopulation,
     };
   }
 
   async recordOutcomes(inputs: RecordOutcomeInput[]): Promise<OutcomeRecord[]> {
     if (inputs.length === 0) return [];
     // Chunked multi-row INSERT so the trend-history backfill (~100 rows/run × weeks × measures)
-    // is a handful of round-trips on Neon, not thousands. 8 columns/row × CHUNK must stay well
-    // under Postgres' 65535 bind-parameter cap; 500 rows = 4000 params, comfortably safe.
+    // is a handful of round-trips on Neon, not thousands. 9 columns/row × CHUNK must stay well
+    // under Postgres' 65535 bind-parameter cap; 500 rows = 4500 params, comfortably safe.
     const CHUNK = 500;
     const defaultEvaluatedAt = new Date().toISOString();
     // Ids and timestamps are minted HERE so the returned records are exactly the rows written, in input
@@ -99,6 +105,7 @@ export class PgOutcomeStore implements OutcomeStore {
       status: input.status,
       evidence: input.evidence ?? {},
       evaluatedAt: input.evaluatedAt ?? defaultEvaluatedAt,
+      outOfPopulation: input.outOfPopulation,
     }));
     // ONE transaction across every chunk. The run pipeline persists a whole evaluation chunk (500
     // subjects x the measures in the run) in one call and then advances its progress by the returned
@@ -123,11 +130,12 @@ export class PgOutcomeStore implements OutcomeStore {
             record.status,
             JSON.stringify(record.evidence),
             record.evaluatedAt,
+            record.outOfPopulation ?? null,
           );
-          return `($${o + 1}, $${o + 2}, $${o + 3}, $${o + 4}, $${o + 5}, $${o + 6}, $${o + 7}::jsonb, $${o + 8})`;
+          return `($${o + 1}, $${o + 2}, $${o + 3}, $${o + 4}, $${o + 5}, $${o + 6}, $${o + 7}::jsonb, $${o + 8}, $${o + 9})`;
         });
         await client.query(
-          `INSERT INTO ${T} (id, run_id, subject_id, measure_id, evaluation_period, status, evidence_json, evaluated_at)
+          `INSERT INTO ${T} (id, run_id, subject_id, measure_id, evaluation_period, status, evidence_json, evaluated_at, out_of_population)
            VALUES ${tuples.join(", ")}`,
           binds,
         );
@@ -159,7 +167,7 @@ export class PgOutcomeStore implements OutcomeStore {
     if (opts?.limit != null) page += ` LIMIT $${binds.push(Math.max(0, opts.limit))}`;
     if (opts?.offset != null) page += ` OFFSET $${binds.push(Math.max(0, opts.offset))}`;
     const { rows } = await this.pool.query<OutcomeRow>(
-      `SELECT id, run_id, subject_id, measure_id, evaluation_period, status, evidence_json, evaluated_at
+      `SELECT id, run_id, subject_id, measure_id, evaluation_period, status, evidence_json, evaluated_at, out_of_population
          FROM ${T} WHERE run_id = $1${where} ORDER BY evaluated_at ASC, id ASC${page}`,
       binds,
     );
@@ -179,7 +187,7 @@ export class PgOutcomeStore implements OutcomeStore {
     // Native UUID column — a malformed id yields no rows on the floor; don't let Postgres throw.
     if (!isUuid(id)) return null;
     const { rows } = await this.pool.query<OutcomeRow>(
-      `SELECT id, run_id, subject_id, measure_id, evaluation_period, status, evidence_json, evaluated_at
+      `SELECT id, run_id, subject_id, measure_id, evaluation_period, status, evidence_json, evaluated_at, out_of_population
          FROM ${T} WHERE id = $1`,
       [id],
     );
@@ -326,8 +334,9 @@ export class PgOutcomeStore implements OutcomeStore {
       evaluation_period: string;
       evaluated_at: Date | string;
       evidence_json: unknown;
+      out_of_population: boolean | null;
     }>(
-      `SELECT ${alias}subject_id, ${alias}status, ${alias}evaluation_period, ${alias}evaluated_at, ${alias}evidence_json
+      `SELECT ${alias}subject_id, ${alias}status, ${alias}evaluation_period, ${alias}evaluated_at, ${alias}evidence_json, ${alias}out_of_population
          FROM ${source}${scaleClause} ORDER BY ${alias}evaluated_at ASC${alias ? ", o.id ASC" : ""}`,
       [measureId],
     );
@@ -337,6 +346,7 @@ export class PgOutcomeStore implements OutcomeStore {
       evaluationPeriod: r.evaluation_period,
       evaluatedAt: r.evaluated_at instanceof Date ? r.evaluated_at.toISOString() : r.evaluated_at,
       evidence: r.evidence_json,
+      outOfPopulation: flagOf(r.out_of_population),
     }));
   }
 
@@ -382,8 +392,9 @@ export class PgOutcomeStore implements OutcomeStore {
       subject_id: string;
       measure_id: string;
       status: string;
+      out_of_population: boolean | null;
     }>(
-      `SELECT o.run_id, r.started_at AS run_started_at, r.scope_type AS run_scope_type, r.status AS run_status, r.triggered_by AS run_triggered_by, o.subject_id, o.measure_id, o.status
+      `SELECT o.run_id, r.started_at AS run_started_at, r.scope_type AS run_scope_type, r.status AS run_status, r.triggered_by AS run_triggered_by, o.subject_id, o.measure_id, o.status, o.out_of_population
          FROM ${SPIKE_SCHEMA}.outcomes o JOIN ${SPIKE_SCHEMA}.runs r ON r.id = o.run_id${clause}`,
       binds,
     );
@@ -396,6 +407,7 @@ export class PgOutcomeStore implements OutcomeStore {
       subjectId: r.subject_id,
       measureId: r.measure_id,
       status: r.status,
+      outOfPopulation: flagOf(r.out_of_population),
     }));
   }
 
@@ -434,8 +446,9 @@ export class PgOutcomeStore implements OutcomeStore {
       subject_id: string;
       measure_id: string;
       status: string;
+      out_of_population: boolean | null;
     }>(
-      `SELECT o.run_id, r.started_at AS run_started_at, r.scope_type AS run_scope_type, r.status AS run_status, r.triggered_by AS run_triggered_by, o.subject_id, o.measure_id, o.status
+      `SELECT o.run_id, r.started_at AS run_started_at, r.scope_type AS run_scope_type, r.status AS run_status, r.triggered_by AS run_triggered_by, o.subject_id, o.measure_id, o.status, o.out_of_population
          FROM ${SPIKE_SCHEMA}.outcomes o
          JOIN ${SPIKE_SCHEMA}.runs r ON r.id = o.run_id
          JOIN (
@@ -456,6 +469,7 @@ export class PgOutcomeStore implements OutcomeStore {
       subjectId: r.subject_id,
       measureId: r.measure_id,
       status: r.status,
+      outOfPopulation: flagOf(r.out_of_population),
     }));
   }
 
@@ -574,15 +588,16 @@ export class PgOutcomeStore implements OutcomeStore {
     // Bounded GROUP BY status (+ MAX evaluated_at) — the run list/summary read models use this instead
     // of materializing every outcome row per run (O(120k) for seed:scale runs; pushed ?limit=20 past
     // the 60s gateway timeout). Same discipline as aggregateScaleRun.
-    const { rows } = await this.pool.query<{ status: string; count: string; latest: Date | string | null }>(
-      `SELECT status, COUNT(*)::text AS count, MAX(evaluated_at) AS latest
-         FROM ${T} WHERE run_id = $1 GROUP BY status`,
+    const { rows } = await this.pool.query<{ status: string; out_of_population: boolean | null; count: string; latest: Date | string | null }>(
+      `SELECT status, out_of_population, COUNT(*)::text AS count, MAX(evaluated_at) AS latest
+         FROM ${T} WHERE run_id = $1 GROUP BY status, out_of_population`,
       [runId],
     );
     return rows.map((r) => ({
       status: r.status,
       count: Number(r.count),
       latestEvaluatedAt: r.latest == null ? null : r.latest instanceof Date ? r.latest.toISOString() : r.latest,
+      outOfPopulation: flagOf(r.out_of_population),
     }));
   }
 }

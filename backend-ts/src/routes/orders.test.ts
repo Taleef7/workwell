@@ -43,6 +43,11 @@ before(async () => {
   // provider (which suppresses by hash) is unlikely to leave `proposed` empty — and it asserts that.
   await outcomes.recordOutcome({ runId: run.id, subjectId: "emp-008", measureId: "audiogram", status: "OVERDUE", evidence: {} });
   await outcomes.recordOutcome({ runId: run.id, subjectId: "emp-013", measureId: "audiogram", status: "DUE_SOON", evidence: {} });
+  // #546: two patients whose official evaluation persisted MISSING_DATA (ADR-078) — one INSIDE
+  // cms122's initial population and one outside, as the run recorded it (ADR-079). Only the first is
+  // at risk of anything.
+  await outcomes.recordOutcome({ runId: run.id, subjectId: "emp-020", measureId: "cms122", status: "MISSING_DATA", evidence: {}, outOfPopulation: false });
+  await outcomes.recordOutcome({ runId: run.id, subjectId: "emp-021", measureId: "cms122", status: "MISSING_DATA", evidence: {}, outOfPopulation: true });
   await runStore.finalizeRun(run.id, "COMPLETED");
 });
 
@@ -67,7 +72,9 @@ test("returns domain proposals for at-risk outcomes (default format)", async () 
 test("the domain view carries totals, and ?limit/?offset window both lists without changing the totals", async () => {
   const whole = (await get("").then((r) => r!.json())) as { proposed: unknown[]; suppressed: unknown[]; totals: { proposed: number; suppressed: number } };
   assert.deepEqual(whole.totals, { proposed: whole.proposed.length, suppressed: whole.suppressed.length }, "no window → whole arrays, totals alongside");
-  assert.equal(whole.totals.proposed + whole.totals.suppressed, 3, "emp-006, emp-008 and emp-013 are the at-risk subjects");
+  // emp-006/008/013 on audiogram, plus emp-020 — the cms122 patient who IS in the population.
+  // emp-021 is the same status on the same measure and is absent, which is the #546 rule.
+  assert.equal(whole.totals.proposed + whole.totals.suppressed, 4, "the four at-risk subjects, and not the out-of-population one");
   assert.ok(whole.totals.proposed >= 1, "fixture: at least one proposal survives suppression (else the FHIR assertion below is vacuous)");
   const ids = (xs: Array<{ subjectId: string }>) => xs.map((x) => x.subjectId);
   assert.deepEqual(ids(whole.proposed as Array<{ subjectId: string }>), [...ids(whole.proposed as Array<{ subjectId: string }>)].sort(), "proposals are in subject order, so a page is a page");
@@ -162,4 +169,17 @@ test("RUNNING run is excluded from proposals (only terminal runs contribute)", a
   );
   // emp-006 from the COMPLETED run must still appear
   assert.ok(allSubjects.includes("emp-006"), "subject from COMPLETED run still appears");
+});
+
+test("#546: a patient outside the measure's initial population gets no proposal, one inside still does", async () => {
+  const res = await get("?measureId=cms122");
+  assert.equal(res!.status, 200);
+  const body = await res!.json() as { proposed: Array<{ subjectId: string }>; suppressed: Array<{ subjectId: string }>; totals: { proposed: number; suppressed: number } };
+  const subjects = [...body.proposed, ...body.suppressed].map((p) => p.subjectId);
+
+  assert.ok(subjects.includes("emp-020"), "in-population MISSING_DATA is still a gap to close");
+  assert.ok(!subjects.includes("emp-021"), "out-of-population MISSING_DATA proposes nothing — not even a suppressed row");
+  // Suppression is a DIFFERENT statement ("a standing order already covers this"), so the skipped
+  // patient must not show up there either: totals count exactly one patient for this measure.
+  assert.equal(body.totals.proposed + body.totals.suppressed, 1);
 });

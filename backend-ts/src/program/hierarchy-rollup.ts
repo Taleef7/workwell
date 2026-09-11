@@ -31,6 +31,12 @@ export interface HierarchyTotals {
   dueSoon: number;
   overdue: number;
   missingData: number;
+  /**
+   * Subjects outside the measure's population (ADR-079) — out of `missingData` and out of the rate,
+   * so a tenant/location/provider node reports the same basis as the programs overview. `evaluated`
+   * still counts every row, because it is a count of work done rather than a denominator.
+   */
+  notInPopulation: number;
   excluded: number;
   complianceRate: number;
   openCases: number;
@@ -65,21 +71,25 @@ export interface HierarchyFilters {
 
 interface MutableTotals {
   evaluated: number; compliant: number; dueSoon: number; overdue: number;
-  missingData: number; excluded: number; openCases: number;
+  missingData: number; notInPopulation: number; excluded: number; openCases: number;
 }
-const zero = (): MutableTotals => ({ evaluated: 0, compliant: 0, dueSoon: 0, overdue: 0, missingData: 0, excluded: 0, openCases: 0 });
-const addStatus = (t: MutableTotals, status: string): void => {
+const zero = (): MutableTotals => ({ evaluated: 0, compliant: 0, dueSoon: 0, overdue: 0, missingData: 0, notInPopulation: 0, excluded: 0, openCases: 0 });
+const addStatus = (t: MutableTotals, status: string, outOfPopulation?: boolean): void => {
   t.evaluated++;
   if (status === "COMPLIANT") t.compliant++;
   else if (status === "DUE_SOON") t.dueSoon++;
   else if (status === "OVERDUE") t.overdue++;
-  else if (status === "MISSING_DATA") t.missingData++;
+  // ADR-079: the run said this subject is not the measure's concern, so they are neither a gap nor
+  // in the rate's denominator. Unrecorded (an un-backfilled row) counts as missing data, which is
+  // what this rollup reported before the column existed.
+  else if (status === "MISSING_DATA") (outOfPopulation === true ? t.notInPopulation++ : t.missingData++);
   else if (status === "EXCLUDED") t.excluded++;
 };
 const seal = (t: MutableTotals): HierarchyTotals => ({ ...t, complianceRate: complianceRateOf(t) });
 const accumulate = (acc: MutableTotals, t: MutableTotals): void => {
   acc.evaluated += t.evaluated; acc.compliant += t.compliant; acc.dueSoon += t.dueSoon;
-  acc.overdue += t.overdue; acc.missingData += t.missingData; acc.excluded += t.excluded; acc.openCases += t.openCases;
+  acc.overdue += t.overdue; acc.missingData += t.missingData; acc.notInPopulation += t.notInPopulation;
+  acc.excluded += t.excluded; acc.openCases += t.openCases;
 };
 
 export async function buildHierarchyRollup(deps: HierarchyDeps, filters: HierarchyFilters): Promise<HierarchyNode> {
@@ -128,7 +138,7 @@ export async function buildHierarchyRollup(deps: HierarchyDeps, filters: Hierarc
     for (const m of scopeMeasures) {
       for (const r of latestRunRows(byMeasure.get(m) ?? [])) {
         const acc = ensure(r.subjectId);
-        if (acc) addStatus(acc, r.status);
+        if (acc) addStatus(acc, r.status, r.outOfPopulation);
       }
     }
     const openCases = await deps.caseStore.listCases({ statuses: [...ACTIVE_CASE_STATUSES], measureId: measureId ?? undefined, limit: 100000 });
@@ -265,6 +275,6 @@ export async function buildHierarchyRollup(deps: HierarchyDeps, filters: Hierarc
 function toMut(t: HierarchyTotals): MutableTotals {
   return {
     evaluated: t.evaluated, compliant: t.compliant, dueSoon: t.dueSoon, overdue: t.overdue,
-    missingData: t.missingData, excluded: t.excluded, openCases: t.openCases,
+    missingData: t.missingData, notInPopulation: t.notInPopulation, excluded: t.excluded, openCases: t.openCases,
   };
 }

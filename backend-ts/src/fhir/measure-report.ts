@@ -274,6 +274,24 @@ export function membershipFor(outcome: Pick<OutcomeRecord, "status" | "evidence"
   };
 }
 
+/**
+ * Did the measure's own logic put this subject OUTSIDE its initial population entirely?
+ *
+ * "Entirely" is EVERY rate, not rate 1: `official.populationResults` holds rate 1 verbatim on a
+ * multi-rate measure (ADR-074), so reading it alone calls a CMS137 patient out of population on
+ * Initiation while Engagement still admits them. The `officialMembership(...) !== null` gate is what
+ * keeps an AUTHORED outcome out: `membershipRatesFor` falls back to a status-derived membership when
+ * there are no official rates, and a MISSING_DATA status derives `ipp: false` — without the gate
+ * every authored missing-data row would read as out of population and empty the worklist.
+ *
+ * Shared so the roster cell, the CDS card, and anything else asking the question cannot drift apart;
+ * they held byte-identical copies of this expression before ADR-079.
+ */
+export function outsideEveryRate(outcome: Pick<OutcomeRecord, "status" | "evidence">, measureId: string): boolean {
+  if (officialMembership(outcome.evidence) === null) return false;
+  return membershipRatesFor(outcome, measureId).every((m) => !m.ipp);
+}
+
 /** Reduce outcome buckets to proportion-population membership-label counts (the reconciliation contract). */
 /**
  * Membership PER RATE. A multi-rate measure persists every rate in `evidence.official.rates`; anything

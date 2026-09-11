@@ -827,6 +827,49 @@ export function outcomeStoreContract(
     assert.ok(!rosterLike.some((r) => r.runId === aSite.id), "a newer COMPLETED SITE run never replaces the whole-roster snapshot (review finding 11, ADR-077 d4)");
   });
 
+  test(`[${label}] out_of_population round-trips on every read, and UNRECORDED is not the same as false (ADR-079)`, async () => {
+    const { runStore, outcomeStore } = await fresh();
+    const run = await runStore.createRun({ ...sampleRun("all"), status: "COMPLETED", scopeType: "ALL_PROGRAMS", startedAt: "2026-09-01T00:00:00.000Z" });
+    await outcomeStore.recordOutcomes([
+      { runId: run.id, subjectId: "emp-006", measureId: "cms122", status: "MISSING_DATA", evidence: {}, outOfPopulation: true },
+      { runId: run.id, subjectId: "emp-007", measureId: "cms122", status: "MISSING_DATA", evidence: {}, outOfPopulation: false },
+      // No flag at all — a run that predates the column, or a writer that does not compute it.
+      { runId: run.id, subjectId: "emp-008", measureId: "cms122", status: "MISSING_DATA", evidence: {} },
+    ]);
+    // The single-row writer takes the same path as the batch one.
+    await outcomeStore.recordOutcome({ runId: run.id, subjectId: "emp-009", measureId: "cms122", status: "OVERDUE", evidence: {}, outOfPopulation: true });
+
+    const flagBySubject = (rows: ReadonlyArray<{ subjectId: string; outOfPopulation?: boolean }>) =>
+      Object.fromEntries(rows.map((r) => [r.subjectId, r.outOfPopulation]));
+
+    // EVERY read, not a sample: the read models each pick a different projection, and the whole point
+    // is that they cannot disagree about a rate. The first cut of this test covered three of the four
+    // and `listOutcomesForMeasure` — the risk outlook's read — silently returned undefined for every
+    // row, so that surface stayed on the old basis while the card beside it moved. Review caught it;
+    // the missing assertion is what let it through.
+    const expected = { "emp-006": true, "emp-007": false, "emp-008": undefined, "emp-009": true };
+    assert.deepEqual(flagBySubject(await outcomeStore.listOutcomes(run.id, { measureId: "cms122" })), expected, "listOutcomes");
+    assert.deepEqual(flagBySubject(await outcomeStore.listOutcomesWithRun({ measureId: "cms122" })), expected, "listOutcomesWithRun (the projection every rollup reads)");
+    assert.deepEqual(flagBySubject(await outcomeStore.listLatestPopulationOutcomes({ measureId: "cms122" })), expected, "listLatestPopulationOutcomes");
+    assert.deepEqual(flagBySubject(await outcomeStore.listOutcomesForMeasure("cms122")), expected, "listOutcomesForMeasure (the risk outlook's read)");
+
+    // UNDEFINED, not false: "this run did not record it" is a different statement from "this subject
+    // is in the population", and an un-backfilled deployment must not be made to assert the second.
+    const unrecorded = (await outcomeStore.listOutcomes(run.id, { subjectId: "emp-008" }))[0]!;
+    assert.equal(unrecorded.outOfPopulation, undefined);
+    assert.notEqual(unrecorded.outOfPopulation, false);
+
+    // The bounded histogram carries it in the GROUP BY key, so a caller can split a run's
+    // MISSING_DATA rows without reading any of them — and summing the groups is unchanged.
+    const counts = await outcomeStore.countOutcomesByStatus(run.id);
+    assert.equal(counts.reduce((sum, c) => sum + c.count, 0), 4, "the histogram still totals every row");
+    const missing = counts.filter((c) => c.status === "MISSING_DATA");
+    assert.equal(missing.reduce((sum, c) => sum + c.count, 0), 3, "and still totals every MISSING_DATA row");
+    assert.equal(missing.find((c) => c.outOfPopulation === true)?.count, 1);
+    assert.equal(missing.find((c) => c.outOfPopulation === false)?.count, 1);
+    assert.equal(missing.find((c) => c.outOfPopulation === undefined)?.count, 1);
+  });
+
   test(`[${label}] listLatestPopulationRuns names the run listLatestPopulationOutcomes returns rows for, and runIds fetches only those runs`, async () => {
     const { runStore, outcomeStore } = await fresh();
     const mkRun = (scopeId: string, startedAt: string, over: Partial<CreateRunInput> = {}) =>

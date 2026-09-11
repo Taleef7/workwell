@@ -37,6 +37,14 @@ export interface RunSummary extends RunListItem {
   measureVersion: string;
   totalCases: number;
   passRate: number;
+  /**
+   * Of this run's MISSING_DATA rows, how many were subjects the measure's logic put OUTSIDE its
+   * population (ADR-079). `outcomeCounts` still folds them into MISSING_DATA — that is the persisted
+   * status and the histogram is a statement about persisted rows — so this is the number that
+   * explains why the dashboard's denominator is smaller than `totalEvaluated`. 0 on a run that
+   * predates the column, and on every authored measure.
+   */
+  notInPopulation: number;
   outcomeCounts: Array<{ status: string; count: number }>;
   dataFreshAsOf: string | null;
   dataFreshnessMinutes: number;
@@ -78,18 +86,20 @@ function measureLabel(scopeId: string | null): { name: string; version: string }
 function tally(outcomes: OutcomeRecord[]) {
   let compliant = 0;
   let nonCompliant = 0;
+  let notInPopulation = 0;
   const byStatus = new Map<string, number>();
   let freshAsOf: string | null = null;
   for (const o of outcomes) {
+    if (o.outOfPopulation === true && o.status === "MISSING_DATA") notInPopulation++;
     byStatus.set(o.status, (byStatus.get(o.status) ?? 0) + 1);
     if (o.status === "COMPLIANT") compliant++;
     else if (NON_COMPLIANT.has(o.status)) nonCompliant++;
     if (freshAsOf === null || o.evaluatedAt > freshAsOf) freshAsOf = o.evaluatedAt;
   }
-  return { total: outcomes.length, compliant, nonCompliant, byStatus, freshAsOf };
+  return { total: outcomes.length, compliant, nonCompliant, notInPopulation, byStatus, freshAsOf };
 }
 
-type Tally = { total: number; compliant: number; nonCompliant: number; byStatus: Map<string, number>; freshAsOf: string | null };
+type Tally = { total: number; compliant: number; nonCompliant: number; notInPopulation: number; byStatus: Map<string, number>; freshAsOf: string | null };
 
 /** Same tally as `tally(outcomes)`, but from a bounded `GROUP BY status` (+ MAX evaluated_at) instead
  *  of the per-subject rows — so the run list/summary never load the 120k rows of a seed:scale run. */
@@ -97,16 +107,20 @@ function tallyFromCounts(counts: OutcomeStatusCount[]): Tally {
   let total = 0;
   let compliant = 0;
   let nonCompliant = 0;
+  let notInPopulation = 0;
   const byStatus = new Map<string, number>();
   let freshAsOf: string | null = null;
   for (const c of counts) {
     total += c.count;
+    // The group key carries the flag since ADR-079; `byStatus` still folds both halves together, so
+    // every existing consumer of the histogram sees exactly the counts it saw before.
+    if (c.outOfPopulation === true && c.status === "MISSING_DATA") notInPopulation += c.count;
     byStatus.set(c.status, (byStatus.get(c.status) ?? 0) + c.count);
     if (c.status === "COMPLIANT") compliant += c.count;
     else if (NON_COMPLIANT.has(c.status)) nonCompliant += c.count;
     if (c.latestEvaluatedAt && (freshAsOf === null || c.latestEvaluatedAt > freshAsOf)) freshAsOf = c.latestEvaluatedAt;
   }
-  return { total, compliant, nonCompliant, byStatus, freshAsOf };
+  return { total, compliant, nonCompliant, notInPopulation, byStatus, freshAsOf };
 }
 
 function durationMs(run: RunRecord): number {
@@ -175,8 +189,13 @@ function buildSummary(run: RunRecord, t: Tally, totalCases: number, retentionDay
     measureName: name,
     measureVersion: version,
     totalCases,
-    // Deliberately compliant/totalEvaluated — an operational per-run statistic, not the CMS rate.
+    // Deliberately compliant/totalEvaluated — an operational per-run statistic, not the CMS rate,
+    // and so deliberately NOT narrowed by `notInPopulation` below: it answers "of the rows this run
+    // wrote, how many came back compliant", which is a fact about the run. The rate that describes a
+    // POPULATION is the programs overview's, and that one drops these subjects (ADR-079).
     passRate: t.total === 0 ? 0 : (t.compliant * 100) / t.total,
+    // Reported so the gap between this run's rows and the dashboard's denominator has a number.
+    notInPopulation: t.notInPopulation,
     outcomeCounts: [...t.byStatus.entries()].map(([status, count]) => ({ status, count })),
     dataFreshAsOf: t.freshAsOf,
     dataFreshnessMinutes: t.freshAsOf === null ? -1 : Math.floor((Date.now() - new Date(t.freshAsOf).getTime()) / 60000),

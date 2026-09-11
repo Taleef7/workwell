@@ -221,9 +221,21 @@ evaluation_period TEXT NOT NULL
 status TEXT NOT NULL
 evidence_json JSONB NOT NULL
 evaluated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+out_of_population BOOLEAN                       -- NULLABLE; see the ADR-079 note below
 INDEX outcomes_employee_measure_period_idx(employee_id, measure_version_id, evaluation_period)
 INDEX outcomes_run_id_idx(run_id)
 ```
+
+> **`out_of_population` (ADR-079, 2026-09-10):** the measure's own logic put this subject outside its
+> initial population — written by the run from the executor's `inInitialPopulation`, for an OFFICIALLY
+> ROUTED measure only, and "outside" means NO rate admits them (ADR-074). It exists because ADR-078
+> persists such a subject as `MISSING_DATA`, so the status alone cannot tell "not this measure's
+> concern" from "in the population, result missing" — and the second is work while the first is not.
+> **NULLABLE on purpose:** NULL means the run did not record it (every row written before the column,
+> and every authored-only deployment), and readers treat NULL as not-out-of-population, so an
+> un-backfilled deployment reports what it reported before. `docs/DEPLOY.md` carries the one-time
+> backfill. Every read model that reports a POPULATION rate subtracts it; the run-level surfaces
+> (runs list/CSV, MCP run summary) keep reporting persisted statuses.
 
 > **Spike-store indexes (Fable H5 hardening, 2026-07-03):** the `backend-ts` `workwell_spike.outcomes`
 > table (floor + ceiling) additionally carries `spike_outcomes_subject_idx (subject_id, evaluated_at

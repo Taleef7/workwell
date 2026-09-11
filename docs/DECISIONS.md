@@ -18,6 +18,78 @@
 >
 > **Sequence note:** ADR-033 does not exist — verified absent, and the number must not be reused.
 
+## ADR-079: the population membership a run already knew is WRITTEN DOWN — and a subject outside the population is subtracted from the rate, not counted as a gap
+
+**Date:** 2026-09-10. **Status:** accepted. The ORDER-PROPOSAL half is an OWNER decision (issue #546,
+which recorded both readings and decided neither); the SCHEMA is an owner decision (CLAUDE.md).
+Completes ADR-078, which settled what an out-of-population outcome means for a CASE and left open what
+it means for a RATE and for an ORDER.
+
+**Context.** ADR-078 persists an out-of-population subject's outcome as `MISSING_DATA` — CQL is
+authoritative, and the engine's answer is "not this measure's concern this period" rather than a
+bucket of its own. The distinction survived only inside `evidence_json.official`, and only the roster
+read it (`deriveCell` → `OUT_OF_POPULATION`, ADR-077 d7). Everything that counted statuses therefore
+counted those subjects as unmet gaps. On the pilot, measured 2026-09-10, that was not a rounding
+error: for all six routed measures `missingData` equalled `total − initialPopulation` exactly, so the
+*entire* Missing Data column was out-of-population and in-population missing data was zero. Because
+`complianceRateOf` puts `missingData` in its denominator, the dashboard reported CMS125 at 18.0% for a
+population that scores 72.1%, and CMS137 at 0.4% against 13.5%. Order proposals read the same bucket
+and offered 33,963 orders to a 20,000-patient roster — an HbA1c for every non-diabetic, a mammogram
+for every man.
+
+**Decision.**
+
+1. **The flag is a COLUMN — `outcomes.out_of_population`, nullable.** The run pipeline already
+   computes it per subject (`inInitialPopulation`, official-routed measures only) and threw it away
+   after deciding the case. Writing it down is what makes every other decision here affordable: a
+   reader answers "is this a gap?" from the projection it already fetches, at a byte instead of a JSON
+   blob, at any filter granularity, and it keeps working after ADR-073 compaction because the flag
+   travels with its row. The rejected alternative — deriving it from evidence per read — cost a full
+   evidence pass per (measure, run) on surfaces whose whole purpose this quarter was to stop reading
+   evidence, and could not correct a TREND at all: ten runs' evidence per measure, for a sparkline.
+   **NULLABLE on purpose.** NULL means "this run did not record it", which is the truth for every row
+   written before the column existed; `NOT NULL DEFAULT FALSE` would assert that ~90,000 pilot rows
+   are in-population when they are not. Readers treat NULL as not-out-of-population, so an
+   un-backfilled deployment reports exactly what it reported before rather than something new and
+   wrong, and `docs/DEPLOY.md` carries the one-time backfill that resolves the NULLs from evidence.
+2. **Out of population is its own count, and it is not in the rate's denominator.** `ProgramSummary`
+   and `ProgramTrendPoint` carry `notInPopulation`; `missingData` is the remainder, which is the
+   number a panel can act on; `denominator` is `total − excluded − notInPopulation`. `totalEvaluated`
+   still reports every row the run wrote, because it is a count of work done, not a denominator.
+   Top-drivers drops those rows from the flagged-reason mix for the same reason: a driver panel is a
+   list of things to do. The subtraction is applied only to rows whose persisted status is
+   `MISSING_DATA` — there is no UNIQUE on `(run_id, subject_id, measure_id)`, and an argued invariant
+   that a count cannot go negative is worth less than a structural one.
+3. **Every surface that reports a population rate moves together**: the programs overview, both trend
+   paths, top-drivers, the hierarchy rollup, the risk outlook's site table, and order proposals. A
+   half-migrated basis is worse than the defect, because two screens then disagree and neither says
+   so. The monthly (quality-snapshot) trend has no column for the split and is therefore NOT served
+   for an official-routed measure: `programTrend` falls through to the per-run points, which read the
+   flag. The RUN-level surfaces — the runs list, the runs CSV, the MCP run summary — keep reporting
+   persisted statuses and `passRate = compliant / totalEvaluated`, because those state what a RUN
+   wrote rather than describing a population; the CSV gains an APPENDED `notInPopulation` column so a
+   reader can reconcile the two.
+4. **An order proposal reads population membership** (#546 reading (b), owner-chosen). The rejected
+   alternative — deriving proposals from active cases — would have made a human closing a case
+   silently withdraw a clinical order, and would have coupled an advisory clinical surface to workflow
+   state it does not describe.
+5. **"Outside the population" means every rate's initial population**, shared as
+   `outsideEveryRate` (`fhir/measure-report.ts`). `official.populationResults` holds rate 1 verbatim on
+   a multi-rate measure (ADR-074), so reading it alone called a CMS137 patient out of population on
+   Initiation while Engagement still admitted them — while the CDS card, which already read every
+   rate, would have carded that same patient. The card and the cell held byte-identical copies of the
+   expression; they now hold one.
+
+**Consequences.** Every headline rate on the pilot moves up, sharply and correctly, once the backfill
+runs — CMS125 18.0% → 72.1%, CMS130 19.5% → 43.3%, CMS165 20.5% → 62.3%, CMS122 7.4% → 72.4%
+(inverse: poor control), CMS137 0.4% → 13.5%, CMS2 60.9% → 68.7%. Anyone who recorded an earlier
+figure will see a discontinuity, and it is not a data change: the same runs, counted against the
+population the measure actually describes. The stored outcomes are otherwise untouched, and the
+regulatory rate (`officialMeasureRate`, ADR-077 d5) never had this defect — it always reduced the
+evidence's own populations, which is why the two numbers disagreed so visibly on the same card. The
+frontend's `displayRate` workaround, which dropped `missingData` from an inverse measure's denominator
+*because* of this defect, is removed with it; keeping it would now drop real work.
+
 ## ADR-078: the sandbox routes the ACO's whole computable set — and a subject outside a measure's population is a result, not a case
 
 **Date:** 2026-09-08. **Status:** accepted — an OWNER decision, recorded in `LOCKED_DECISIONS.md` §4A.2

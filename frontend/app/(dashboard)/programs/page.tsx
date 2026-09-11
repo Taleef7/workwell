@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@mieweb/ui";
 import { emitToast } from "@/lib/toast";
 import { useGlobalFilters } from "@/components/global-filter-context";
@@ -40,6 +40,8 @@ type ProgramSummary = {
   dueSoon: number;
   overdue: number;
   missingData: number;
+  /** Patients the measure's logic put outside its initial population — not missing data, not work. */
+  notInPopulation?: number;
   excluded: number;
   complianceRate: number;
   /** Which way the measure improves; sent by the overview API so the rate never waits on /api/measures. */
@@ -57,11 +59,16 @@ type ProgramSummary = {
   } | null;
 };
 
+const EMPTY_DRIVERS: TopDrivers = { bySite: [], byRole: [], byOutcomeReason: [] };
+
 type TopDrivers = {
   bySite: Array<{ site: string; overdueCount: number; note: string }>;
   byRole: Array<{ role: string; overdueCount: number }>;
   byOutcomeReason: Array<{ reason: string; count: number; pct: number }>;
 };
+
+/** `?include=detail` attaches both per-measure panels to each summary. */
+type DetailedSummary = ProgramSummary & { trend?: TrendPoint[]; topDrivers?: TopDrivers };
 
 export default function ProgramsPage() {
   const api = useApi();
@@ -80,11 +87,20 @@ export default function ProgramsPage() {
   const [runError, setRunError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [detailsLoading, setDetailsLoading] = useState(false);
+  const reqIdRef = useRef(0);
   const [showRunConfirm, setShowRunConfirm] = useState(false);
 
   const loadAll = useCallback(async () => {
+    // Stale-response guard: the two calls below are not cancellable, and a user switching site or
+    // tenant quickly can have a slow response for the OLD scope land after the new one's. Without
+    // this the page shows Site B's headline over Site A's sparkline, with nothing saying so.
+    const reqId = ++reqIdRef.current;
     setLoading(true);
     setError(null);
+    // The panels belong to the scope that is being replaced; keep showing them and they read as this
+    // scope's answer for as long as the detail call takes.
+    setTrendByMeasure({});
+    setDriversByMeasure({});
 
     const params = new URLSearchParams();
     if (siteId) params.set("site", siteId);
@@ -93,47 +109,44 @@ export default function ProgramsPage() {
     if (to) params.set("to", to);
     const suffix = params.toString() ? `?${params.toString()}` : "";
 
+    // TWO requests, not the 1 + 2N (13 on the pilot) this used to make: the overview, then a trend
+    // AND a top-drivers call per measure. Those were fired concurrently, but the backend is a
+    // single-process worker so they queued anyway — and each one re-resolved the same winning runs
+    // and re-read the same directory before hitting the same memo.
+    //
+    // Still two rather than one, because the overview alone is the cheap half and painting it is
+    // what makes the page feel loaded. Collapsing to a single `include=detail` call held the KPIs
+    // and every measure card behind the slowest panel on the page, which on a cold process is the
+    // whole roster's derive. The second request fills the panels in place.
     let data: ProgramSummary[];
     try {
       data = await api.get<ProgramSummary[]>(`/api/programs/overview${suffix}`);
     } catch (err) {
+      if (reqId !== reqIdRef.current) return;
       setError(err instanceof Error ? err.message : "Unknown error");
       setLoading(false);
       return;
     }
-    // Render KPIs + measure cards as soon as the overview lands; the per-measure trend
-    // and driver detail then streams in below (previously the page blocked on ~23 serial
-    // requests — overview, then ALL trends, then ALL drivers — before showing anything).
+    if (reqId !== reqIdRef.current) return;
     setPrograms(data);
     setLoading(false);
 
     setDetailsLoading(true);
-    const loadTrends = Promise.all(
-      data.map(async (program) => {
-        try {
-          const trend = await api.get<TrendPoint[]>(`/api/programs/${program.measureId}/trend${suffix}${suffix ? "&" : "?"}granularity=month`);
-          return [program.measureId, trend] as const;
-        } catch {
-          return [program.measureId, [] as TrendPoint[]] as const;
-        }
-      }),
-    ).then((pairs) => setTrendByMeasure(Object.fromEntries(pairs)));
-
-    const emptyDrivers: TopDrivers = { bySite: [], byRole: [], byOutcomeReason: [] };
-    const loadDrivers = Promise.all(
-      data.map(async (program) => {
-        try {
-          const drivers = await api.get<TopDrivers>(`/api/programs/${program.measureId}/top-drivers${suffix}`);
-          return [program.measureId, drivers] as const;
-        } catch {
-          return [program.measureId, emptyDrivers] as const;
-        }
-      }),
-    ).then((pairs) => setDriversByMeasure(Object.fromEntries(pairs)));
-
-    // Trend and driver fleets are independent — load them concurrently, not in series.
-    await Promise.allSettled([loadTrends, loadDrivers]);
-    setDetailsLoading(false);
+    try {
+      const detailed = await api.get<DetailedSummary[]>(
+        `/api/programs/overview${suffix}${suffix ? "&" : "?"}include=detail&granularity=month`,
+      );
+      if (reqId !== reqIdRef.current) return;
+      setTrendByMeasure(Object.fromEntries(detailed.map((p) => [p.measureId, p.trend ?? []])));
+      setDriversByMeasure(Object.fromEntries(detailed.map((p) => [p.measureId, p.topDrivers ?? EMPTY_DRIVERS])));
+    } catch {
+      if (reqId !== reqIdRef.current) return;
+      // The panels are supporting detail; the page is already usable without them. This used to be a
+      // per-measure catch that degraded to an empty panel, and it must not become a whole-page error.
+      setTrendByMeasure({});
+      setDriversByMeasure({});
+    }
+    if (reqId === reqIdRef.current) setDetailsLoading(false);
   }, [api, siteId, tenant, from, to]);
 
   // Tenants/systems for the optional System filter (E13 PR-1). Best-effort; never blocks the overview.
@@ -322,6 +335,7 @@ export default function ProgramsPage() {
                   ["DUE_SOON", "amber", program.dueSoon],
                   ["OVERDUE", "red", program.overdue],
                   ["MISSING_DATA", "violet", program.missingData],
+                  ["OUT_OF_POPULATION", "neutral", program.notInPopulation ?? 0],
                   ["EXCLUDED", "slate", program.excluded],
                 ] as const).map(([bucket, tone, count]) => {
                   const text = `${labelFor(OUTCOME_LABELS, bucket)} ${fmtCount(count)}`;
@@ -330,7 +344,7 @@ export default function ProgramsPage() {
                       key={bucket}
                       label={text}
                       tone={tone}
-                      href={chipHref(program.measureId, bucket, { siteId, from, to })}
+                      href={chipHref(program.measureId, bucket, { siteId, tenant, from, to })}
                       ariaLabel={`${measureLabelFor(program.measureId, program.measureName)}: ${text}`}
                     />
                   );
@@ -470,33 +484,33 @@ function KpiCard({ label, value }: { label: string; value: string }) {
 
 function chipHref(
   measureId: string,
-  bucket: "COMPLIANT" | "DUE_SOON" | "OVERDUE" | "MISSING_DATA" | "EXCLUDED",
-  scope: { siteId: string; from: string; to: string },
+  bucket: "COMPLIANT" | "DUE_SOON" | "OVERDUE" | "MISSING_DATA" | "OUT_OF_POPULATION" | "EXCLUDED",
+  scope: { siteId: string; tenant: string; from: string; to: string },
 ): string | undefined {
-  // COMPLIANT/EXCLUDED drill into the compliance roster scoped to that measure's column (the
-  // measureId param restricts the roster's status filter per column); the other three land on the
-  // pre-filtered cases list. Both destinations must reproduce the chip's count.
+  // The generated scale tenant has counts but NO roster: `buildRoster` excludes scale runs and
+  // subjects entirely, so every chip would land on an empty grid under a badge reading thousands.
+  // A plain badge says "this number has no list behind it"; a link that lies does not. The page
+  // already explains why, just above the cards.
+  if (scope.tenant === "mhn") return undefined;
+  // EVERY chip drills into the compliance roster, scoped to that measure's column — the destination
+  // names each patient, which is what the tile is being asked for: the count already knows the
+  // cohort, so clicking it must not hand back a screen the user has to re-filter. Overdue/Due
+  // Soon/Missing Data used to land on the cases worklist instead, which is a different surface
+  // organised around case state rather than a patient list.
   const params = new URLSearchParams();
-  if (bucket === "COMPLIANT" || bucket === "EXCLUDED") {
-    params.set("measureId", measureId);
-    params.set("status", bucket);
-    // The roster has no date filter; forwarding from/to implies a scope it cannot honour.
-    // Site filter is honoured by the roster so forward it.
-    if (scope.siteId) params.set("site", scope.siteId);
-    return `/compliance?${params.toString()}`;
-  }
   params.set("measureId", measureId);
-  params.set("outcome", bucket);
-  // Carry the active global scope; otherwise the click silently resets the site/date filter and the
-  // destination list no longer matches the clicked count (same rule as the /worklist redirect).
-  // The local System (tenant) selector cannot transfer: /api/cases has no tenant filter.
+  params.set("status", bucket);
+  // The roster honours site; it has no date filter, so forwarding from/to would imply a scope it
+  // cannot apply and the destination would not reproduce the clicked count.
   if (scope.siteId) params.set("site", scope.siteId);
-  if (scope.from) params.set("from", scope.from);
-  if (scope.to) params.set("to", scope.to);
-  return `/cases?${params.toString()}`;
+  // The card's counts are tenant-scoped when the System selector is set, so the destination has to
+  // be too — otherwise the roster answers across every system and the list contradicts the number
+  // that was clicked. (The roster reads `tenant` from the URL for exactly this.)
+  if (scope.tenant) params.set("tenant", scope.tenant);
+  return `/compliance?${params.toString()}`;
 }
 
-function Badge({ label, tone, href, ariaLabel }: { label: string; tone: "green" | "amber" | "red" | "slate" | "violet"; href?: string; ariaLabel?: string }) {
+function Badge({ label, tone, href, ariaLabel }: { label: string; tone: "green" | "amber" | "red" | "slate" | "violet" | "neutral"; href?: string; ariaLabel?: string }) {
   const style = tone === "green"
     ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300"
     : tone === "amber"
@@ -505,6 +519,11 @@ function Badge({ label, tone, href, ariaLabel }: { label: string; tone: "green" 
     ? "bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300"
     : tone === "violet"
     ? "bg-violet-100 text-violet-800 dark:bg-violet-900/30 dark:text-violet-300"
+    // Excluded is indigo and Not-in-population is plain neutral, the SAME pairing the roster cell
+    // uses (lib/status.ts). Both were slate here, so the card's two quietest chips were
+    // indistinguishable from each other while disagreeing with the grid they link to.
+    : tone === "slate"
+    ? "bg-indigo-100 text-indigo-900 dark:bg-indigo-900/30 dark:text-indigo-200"
     : "bg-neutral-100 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300";
   // A linked chip must stack above the card's stretched overlay Link (absolute inset-0 z-0), or the
   // overlay swallows the click; hover/focus styles signal that these chips, unlike static ones, navigate.
