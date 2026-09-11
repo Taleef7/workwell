@@ -96,7 +96,7 @@ That is deliberate: when a number comes out of this system, somebody else can ch
 | `cql-execution` + `cql-exec-fhir` | MITRE | The reference JS engine for ELM, plus the FHIR data adapter | Our engine's core: one compiled measure against one patient bundle |
 | `fqm-execution` | Project Tacoma (MITRE) | The reference implementation for calculating a whole published FHIR measure | Runs CMS's artifacts unmodified |
 | `dqm-content-qicore-2025` | CQFramework | The published home of CMS's FHIR measures, with test cases | Where we vendor a CMS measure from, at a pinned commit |
-| MADiE test cases | CMS measure authors | The expected answers the measure's own authors publish | Our gate: 410 of 410 across 8 measures; nothing routes without it |
+| MADiE test cases | CMS measure authors | The expected answers the measure's own authors publish | Our gate: 455 of 455 across 9 measures; nothing routes without it |
 | VSAC | National Library of Medicine | The national authority for clinical code lists | Completing code lists upstream ships capped |
 | Cypress | MITRE, open source | The official ONC certification test harness | Validated both QRDA document types to zero findings |
 | HAPI FHIR / `cqf-fhir-cr` | Smile CDR + CQFramework (Java) | An independent engine sharing no code with ours | Cross-executed our artifacts as a second opinion: 255 of 278 |

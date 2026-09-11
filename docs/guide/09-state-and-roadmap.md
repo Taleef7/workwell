@@ -32,13 +32,15 @@ supplements it.
 
 ```mermaid
 flowchart LR
-  V["8 CMS measures vendored, code lists complete"] --> G["8 pass their authors' own test decks - 410 of 410"]
-  G --> R["2 routed to real evaluation in production - cms122, cms125"]
+  V["9 CMS measures vendored, code lists complete"] --> G["9 pass their authors' own test decks - 455 of 455"]
+  G --> R["6 routed on the Maui pilot sandbox - cms122, cms125, cms2, cms130, cms165, cms137; 2 on TWH"]
   A["14 runnable authored measures"] --> P["12 evaluate on our own engine in every run"]
 ```
 
-The six gated-but-unrouted measures are not blocked by quality — they have no authored counterpart
-to diff against, and that comparison is what every flip so far was judged on
+The three gated-but-unrouted measures (cms68, cms951, cms138) are not blocked by quality — cms68's
+`populationBasis` is `Encounter` and our model answers once per person (construction check 5), and
+none of the three is in the pilot's set. The six the pilot routes were judged by `pnpm flip-gate`
+rather than a two-engine diff, because an official-only measure has no authored BEFORE
 ([chapter 4](04-engine-and-routing.md)).
 
 ## The numbers, dated
@@ -46,7 +48,7 @@ to diff against, and that comparison is what every flip so far was judged on
 | Claim | Number | Reproduce / evidence |
 |---|---|---|
 | Test suite | 1,940 total · 1,925 pass · 0 fail · 15 skip (2026-08-08, 279 s) | `cd backend-ts && pnpm test`. The 15 skips need the gitignored terminology sidecar or a local Postgres, and self-skip rather than passing vacuously. |
-| CMS measures vs their own test decks | 410 of 410, 8 measures | `pnpm test:official-cases`, after the two-step setup below |
+| CMS measures vs their own test decks | 455 of 455, 9 measures (2026-09-06, CMS137's 45 added by #529) | `pnpm test:official-cases`, after the two-step setup below |
 | CQL language conformance | 1,612 pass of 1,823 cases (2026-08-05; corrected 2026-08-26 — the harness had graded 12 commented-out tests, `docs/evidence/CQL_RUNNER_HARNESS_DIFF_2026-08-26.md`) | `pnpm cql-tests:fetch` then `pnpm cql-tests`, against `cqframework/cql-tests`. Failures cluster in the shared translator and engine, not our measures; five of the sixteen files are perfect, and they are the constructs our measures use. |
 | SQL vs the CQL engine | zero divergence — 4 measures × 56 patients × 2 dates (2026-07-20) | the shim parity suite, [chapter 7](07-sql-and-the-bridge.md) |
 | QRDA Category I vs the HL7 ruler | 0 findings, XSD and Schematron (2026-08-02) | Cypress 7.5.1, 22 submissions |
@@ -54,7 +56,7 @@ to diff against, and that comparison is what every flip so far was judged on
 | MeasureReport vs base FHIR R4 | 0 errors; the DEQM profile gap is exactly 3 findings per report | `measure-report.test.ts` |
 | Independent Java engine running our artifacts | 362 of 387 across eight measures (255 of 278 on 2026-08-04; CMS137 44 of 45 on both rates on 2026-09-06; CMS130 63 of 64 on 2026-09-07) | 22 of the 25 exceptions trace to one helper reading a medication order's period — 8 proven by single-variable mutation, 14 consistent-with by inventory. CMS137's one is a millisecond-versus-second precision difference at the period's first instant, isolated by two mutations. CMS165 was swept the same day and is deliberately NOT in this total: 56 of its 68 patients fall out of the initial population on the Java side, which needs diagnosing before it says anything about either engine |
 | Subject-level agreement vs Cypress's expected results | 64 of 64 and 150 of 150, every population (2026-08-03) | reproduced against a second independently generated archive |
-| Routed in production | 2 measures | `WORKWELL_OFFICIAL_MEASURES` in `deploy-twh-mieweb.yml` |
+| Routed in production | 6 on the Maui pilot sandbox, 2 on TWH (2026-09-08, ADR-078) | `WORKWELL_OFFICIAL_MEASURES` in `deploy-maui-mieweb.yml` (cms122, cms125, cms2, cms130, cms165, cms137) and in `deploy-twh-mieweb.yml` (cms122, cms125) |
 | Pilot page loads, BEFORE the 2026-09-10 read-path change (live Maui, 20,000 patients, ~1M retained outcome rows, warm second pass) | programs overview 6.3 s · site list 5.8 s (every page pays it) · order proposals 11.4 s for 10.7 MB · hierarchy rollup 8.7 s for 4.6 MB · roster page 2.8 s · cases page 0.5 s | `curl -w '%{time_total}'` against `maui-api-ts.os.mieweb.org` as the sandbox admin; the AFTER numbers are measured on the first deploy and recorded in `docs/JOURNAL.md` (2026-09-10), never predicted here |
 | Pilot page loads, AFTER the 2026-09-10 read-path change (same stack, same method, warm second pass) | programs overview 1.0–1.1 s · site list 0.7–1.3 s · order proposals 2.6 s for 65 KB (100-row page) · roster 1.4 s warm · trend 1.0 s · top-drivers 0.4–0.5 s · whole programs page 3.6 s warm | Measured post-deploy on 2026-09-10 and recorded in `docs/JOURNAL.md`. `risk-outlook` was untouched and stays ~4.0 s on the measure detail page. The 3.6 s whole-page figure is what the same-day `?include=detail` change (13 requests → 1) then targets; its AFTER number is measured on the next deploy, never predicted here |
 | Pilot compliance rates, corrected 2026-09-10 (ADR-079) | CMS2 60.9→68.7% · CMS130 19.5→43.3% · CMS165 20.5→62.4% · CMS125 18.0→72.1% · CMS122 7.4→72.4% (inverse) · CMS137 0.4→13.5% | Not a data change: out-of-population patients were in the rate's denominator. `missingData` equalled `total − initialPopulation` exactly for all six measures, so the whole Missing Data column was out-of-population |
@@ -80,7 +82,7 @@ pnpm cql-tests:fetch    # without this, `pnpm cql-tests` exits 2 and tells you t
 pnpm cql-tests
 ```
 
-**The full 410 of 410 needs a VSAC credential.** Two measures (CMS122 and CMS125) depend on a value
+**The full 455 of 455 needs a VSAC credential.** Two measures (CMS122 and CMS125) depend on a value
 set upstream ships capped at 1,000 codes; completing it means re-expanding from VSAC, which needs
 `WORKWELL_VSAC_API_KEY_VENDOR` and the `--complete-terminology` flag. Without the key those two
 measures vendor with the capped expansion — CI does exactly this on fork pull requests and says so

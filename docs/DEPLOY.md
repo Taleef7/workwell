@@ -1470,6 +1470,16 @@ initial population as the MeasureReport reports it — the subjects in ANY rate'
 excluded ones** (an EXCLUDED subject is in the population; that is what makes them excludable). Do not
 expect `notInPopulation = totalEvaluated − ipp − excluded`; that double-subtracts.
 
+**RESTART THE BACKEND BEFORE VERIFYING.** The dashboard's read models memoize under the WINNING RUNS'
+key, on the premise that a terminal run's outcomes are immutable — and this backfill is the one thing
+that mutates them without creating a run. A worker that answered a single request between the deploy
+and the backfill holds the pre-backfill buckets and will keep serving them until its process ends: the
+run key has not moved, so nothing invalidates. Re-run `deploy-maui-mieweb.yml`
+(`workflow_dispatch`, `replace_existing=true`) — the same delete-and-recreate every push performs — or
+wait for the next nightly, which mints a new run and invalidates the memos on its own. Verified live
+2026-09-10: without the restart the API kept reporting `notInPopulation: 0` and the old rates with the
+database already corrected.
+
 **Then verify from the app, because the point is that the two agree:**
 
 ```bash

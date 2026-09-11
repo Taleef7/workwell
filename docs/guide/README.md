@@ -80,7 +80,7 @@ flowchart TB
    never `HEAD`: the ~16 MB bundle is trimmed to the Measure, Libraries and compiled ELM, its
    licensed code lists split into a gitignored sidecar whose SHA-256 is committed instead of the
    codes themselves, capped or absent value sets completed from VSAC at a pinned release, and the
-   result graded against CMS's own test patients — **410 of 410 exact**, across all 8 vendored
+   result graded against CMS's own test patients — **455 of 455 exact**, across all 9 vendored
    measures, before anything runs against a real person.
 2. **② Data in** ([ch. 6](06-data-and-databases.md)) — four ways in, all producing the same
    shape. The synthetic roster: 150 employees generated from a fixed seed, carrying real LOINC/CPT
