@@ -133,7 +133,7 @@ export default function CasesPage() {
   const outcomeFilter = urlOutcome;
   const [viewMode, setViewMode] = useState<"cards" | "table">("cards");
   const { options: providerOptions } = usePanelProviders();
-  const { options: assignableOptions, isAssignable } = useAssignableUsers(canManage);
+  const { options: assignableOptions, canonicalFor } = useAssignableUsers(canManage);
 
   // Track the most recent search value we ourselves wrote to the URL so we can
   // distinguish state-driven URL writes from external URL changes (browser
@@ -404,7 +404,7 @@ export default function CasesPage() {
     // address that assigns nobody is no longer reachable. The guard stays because the value also
     // arrives from state that a future caller could set.
     const unassign = bulkAssignee === UNASSIGN_VALUE;
-    if (!unassign && !isAssignable(bulkAssignee)) {
+    if (!unassign && !canonicalFor(bulkAssignee)) {
       setError(`${bulkAssignee} is not an account cases can be assigned to.`);
       return;
     }

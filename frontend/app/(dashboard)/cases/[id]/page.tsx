@@ -198,7 +198,7 @@ export default function CaseDetailPage() {
   const [evidenceDescription, setEvidenceDescription] = useState("");
   const [uploadingEvidence, setUploadingEvidence] = useState(false);
   const [escalationConfirmOpen, setEscalationConfirmOpen] = useState(false);
-  const { options: assignableBaseOptions, isAssignable } = useAssignableUsers(canManage);
+  const { options: assignableBaseOptions, canonicalFor } = useAssignableUsers(canManage);
   // A case assigned to an account that is no longer assignable (a staff change, a legacy row) still
   // has to render as itself: the option is added rather than the current value silently disappearing.
   const assigneeOptions = useMemo(() => {
@@ -206,9 +206,24 @@ export default function CaseDetailPage() {
     // Case-insensitively, because the account's stored spelling need not match its own: rows written
     // before the route canonicalized the value can carry any casing, and labelling a live account
     // "no longer assignable" over a capital letter would be a lie the operator cannot check.
-    if (!current || isAssignable(current)) return assignableBaseOptions;
+    if (!current || canonicalFor(current)) return assignableBaseOptions;
     return [...assignableBaseOptions, { value: current, label: `${current} (no longer assignable)`, disabled: true }];
-  }, [assignableBaseOptions, caseDetail?.assignee, isAssignable]);
+  }, [assignableBaseOptions, caseDetail?.assignee, canonicalFor]);
+
+  // The control matches option values EXACTLY, so the stored spelling has to be resolved to the
+  // account's own before it is handed over: a legacy `Quality-Lead@Maui.WorkWell.dev` equals no
+  // option built from `quality-lead@maui.workwell.dev`, and the Select would quietly show its
+  // placeholder over a case that is assigned. A value that names no account is passed through — that
+  // is the departed-account option above, and it should render as itself.
+  const assigneeValue = canonicalFor(assigneeInput) ?? assigneeInput;
+  const storedAssignee = caseDetail?.assignee?.trim() ?? "";
+  // A choice that would write what is already stored is not a choice: one click of audit noise, and a
+  // guaranteed 400 when the stored value names an account that no longer exists.
+  const assigneeUnchanged =
+    assigneeInput === "" ||
+    (assigneeInput === UNASSIGN_VALUE
+      ? storedAssignee === ""
+      : assigneeValue.toLowerCase() === storedAssignee.toLowerCase());
   const caseStatus = caseDetail ? normalizeEnumValue(caseDetail.status) : "";
 
   // Option lists for @mieweb/ui Select controls.
@@ -340,7 +355,7 @@ export default function CaseDetailPage() {
     // "Unassign" is its own option, so clearing an assignment is a choice rather than the absence of
     // one — an empty control no longer silently means "unassign this case".
     const unassign = assigneeInput === UNASSIGN_VALUE;
-    if (!unassign && !isAssignable(assigneeInput) && assigneeInput !== caseDetail?.assignee) {
+    if (!unassign && !canonicalFor(assigneeInput) && assigneeInput !== caseDetail?.assignee) {
       setError(`${assigneeInput} is not an account cases can be assigned to.`);
       return;
     }
@@ -620,7 +635,7 @@ export default function CaseDetailPage() {
                 <Select
                   label="Assignee"
                   hideLabel
-                  value={assigneeInput}
+                  value={assigneeValue}
                   onValueChange={setAssigneeInput}
                   options={assigneeOptions}
                 />
@@ -629,7 +644,7 @@ export default function CaseDetailPage() {
                   variant="outline"
                   size="sm"
                   onClick={() => void assignCase()}
-                  disabled={assigning || assigneeInput === "" || assigneeInput === (caseDetail.assignee ?? "")}
+                  disabled={assigning || assigneeUnchanged}
                   isLoading={assigning}
                   loadingText="Assigning..."
                 >
@@ -812,7 +827,7 @@ export default function CaseDetailPage() {
                       label="Assignee"
                       hideLabel
                       className="w-full"
-                      value={assigneeInput}
+                      value={assigneeValue}
                       onValueChange={setAssigneeInput}
                       options={assigneeOptions}
                     />
@@ -820,7 +835,7 @@ export default function CaseDetailPage() {
                       type="button"
                       variant="outline"
                       onClick={() => void assignCase()}
-                      disabled={assigning || assigneeInput === "" || assigneeInput === (caseDetail.assignee ?? "")}
+                      disabled={assigning || assigneeUnchanged}
                       isLoading={assigning}
                       loadingText="Assigning..."
                     >

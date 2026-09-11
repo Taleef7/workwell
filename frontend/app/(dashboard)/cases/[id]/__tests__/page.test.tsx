@@ -397,6 +397,33 @@ describe("CaseDetailPage crosswalk identity rendering", () => {
     expect(document.querySelector("#case-assignees")).not.toBeInTheDocument();
   });
 
+  /**
+   * The route only began canonicalizing the assignee's spelling in this change; every row written
+   * before it carries whatever the free-text box sent. The control matches option values exactly, so
+   * a stored `Quality-Lead@Maui.WorkWell.dev` matches no option built from the account's own
+   * spelling — and the Select falls back to its placeholder over a case that IS assigned. Reported by
+   * the PR bot after two reviews had looked at this line.
+   */
+  it("shows a legacy mixed-case assignee as the account it is, not as an empty control", async () => {
+    const base = get.getMockImplementation()!;
+    get.mockImplementation(async (url: string) => {
+      const result = await base(url);
+      return url.startsWith("/api/cases/case-001") && result && typeof result === "object" && !Array.isArray(result)
+        ? { ...(result as Record<string, unknown>), assignee: "Quality-Lead@Maui.WorkWell.dev" }
+        : result;
+    });
+
+    render(<CaseDetailPage />);
+    await waitFor(() => expect(screen.getByText("Actions")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("Actions"));
+
+    const control = (await screen.findAllByRole("combobox", { name: /assignee/i }))[0]!;
+    await waitFor(() => expect(control).toHaveTextContent("quality-lead@maui.workwell.dev"));
+    expect(control).not.toHaveTextContent("Choose an assignee");
+    // And it is the live account, not a second entry shadowing it.
+    expect(screen.queryByText(/no longer assignable/i)).not.toBeInTheDocument();
+  });
+
   it("viewer role does not request /api/users/assignable", async () => {
     currentRole = "ROLE_VIEWER";
     render(<CaseDetailPage />);

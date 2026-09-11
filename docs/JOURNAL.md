@@ -59,9 +59,20 @@ restoring `WORKWELL_OFFICIAL_MEASURES` in the new roster test was decoration: th
 branch reads persisted evidence, never today's routing flag (ADR-079, #540), so the variable was inert.
 Removed, because a test that sets state it does not depend on teaches the next reader the wrong thing.
 
+**The PR bot found the inverse of a fix two reviews had just approved.** One review said the "no
+longer assignable" label must be decided case-insensitively, or a live account stored with a capital
+letter is labelled dead — true, and adopted. But the control matches option values EXACTLY, so once
+that row stops being added as its own option, a stored `Quality-Lead@Maui.WorkWell.dev` matches no
+option built from the account's own spelling and the Select falls back to its placeholder over a case
+that is assigned. Two reviewers read the line; the bot read what the line implies for the value beside
+it. The hook now answers one question — the account's own spelling for an email that names it — and
+both the truth test and the displayed value come from that, because they were always the same question
+asked twice. The button is disabled when the choice would write what is already stored, which also
+closes the no-op audit event.
+
 Verified after the review round: backend 2,544 tests, 2,520 pass, 1 fail, 23 skipped — the failure is `corpus-membership.test.ts`,
 the known stale local sparse-checkout of vendored artifacts, reproduced on a stashed clean tree and green
-in CI. Backend typecheck clean. Frontend 396 pass across 76 files, lint clean, build clean. The roster
+in CI. Backend typecheck clean. Frontend 397 pass across 76 files, lint clean, build clean. The roster
 test was mutation-checked: disabling the new filter fails it, which the first RED did not prove on its own
 (the fixture keyed outcomes by `employeeId` where the read model reads `subjectId`, so those rows were
 undecided rather than out of population — a test that passes once the fixture is right but would also

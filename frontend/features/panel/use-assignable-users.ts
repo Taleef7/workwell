@@ -24,8 +24,14 @@ export const UNASSIGN_VALUE = "__unassigned__";
 export function useAssignableUsers(enabled = true): {
   /** `{value,label}` options: a placeholder, every assignable account, then "Unassign". */
   options: { value: string; label: string }[];
-  /** True when the email is one the server will accept — the UI never offers an assignment that 400s. */
-  isAssignable: (email: string) => boolean;
+  /**
+   * The account's OWN spelling for an email that names it, case-insensitively; `undefined` when no
+   * account does. Both the truth test and the display value come from here, because they are the same
+   * question asked twice: the server matches case-insensitively, and a `<select>` matches exactly, so
+   * a stored `CM@WorkWell.dev` is a valid assignee that no option's value equals. Answering only the
+   * first half leaves the control blank over a case that is in fact assigned.
+   */
+  canonicalFor: (email: string) => string | undefined;
 } {
   const api = useApi();
   const [users, setUsers] = useState<AssignableUser[]>([]);
@@ -55,10 +61,10 @@ export function useAssignableUsers(enabled = true): {
     [users],
   );
 
-  const isAssignable = useMemo(() => {
-    const emails = new Set(users.map((u) => u.email.toLowerCase()));
-    return (email: string) => emails.has(email.trim().toLowerCase());
+  const canonicalFor = useMemo(() => {
+    const byLower = new Map(users.map((u) => [u.email.toLowerCase(), u.email]));
+    return (email: string) => byLower.get(email.trim().toLowerCase());
   }, [users]);
 
-  return { options, isAssignable };
+  return { options, canonicalFor };
 }
