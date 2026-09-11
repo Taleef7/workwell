@@ -91,6 +91,16 @@ Verified: backend 2,504 pass, 1 fail, 23 skipped — the failure is `corpus-memb
 known stale local sparse-checkout of vendored artifacts, green in CI and unrelated. Typecheck clean.
 All three workflows parse.
 
+**Merged as `ae88c724`, deployed to both stacks, and the EVIDENCE half proven too.** Review had
+flagged that the green dispatch exercised `workwell-backups` with the backup token while the evidence
+path uses a different bucket and different credentials — proven for backups, asserted for evidence.
+So it was exercised against live TWH after the deploy: upload `201`, download `200` returning the
+bytes verbatim, and the object then pulled straight out of R2 by `wrangler r2 object get --remote`,
+30 bytes, matching. (`--remote` matters: without it wrangler answers from a local simulator and
+returns an empty file, which is how `.wrangler/` appeared in the working tree in the first place.)
+The pilot's bucket is configured identically and deployed, but deliberately not exercised — it is a
+customer-facing sandbox and a stray test attachment is not worth the proof.
+
 **And the upload path is proven, not assumed** — dispatched on the branch as run 34620942416, both
 legs green:
 
