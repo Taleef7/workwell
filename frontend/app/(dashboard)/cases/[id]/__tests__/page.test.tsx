@@ -372,22 +372,29 @@ describe("CaseDetailPage crosswalk identity rendering", () => {
     expect(screen.queryByText("2026", { exact: true })).not.toBeInTheDocument();
   });
 
-  it("offers assignable emails from the profile in the datalist", async () => {
+  it("offers the assignable accounts from the profile as options", async () => {
     render(<CaseDetailPage />);
     await waitFor(() => {
       expect(screen.getByText("Actions")).toBeInTheDocument();
     });
     fireEvent.click(screen.getByText("Actions"));
+    const control = (await screen.findAllByRole("combobox", { name: /assignee/i }))[0]!;
+    fireEvent.click(control);
     await waitFor(() => {
-      const options = Array.from(
-        document.querySelectorAll('#case-assignees option'),
-      ).map((option) => option.getAttribute("value"));
-      expect(options).toEqual([
+      const offered = screen.getAllByRole("option").map((option) => option.textContent?.trim());
+      // EXACT and ordered, not "contains": this is the only frontend test pinning #520's profile
+      // isolation, and the same list is now what the server accepts — a leaked `@workwell.dev`
+      // account would be both offered and assignable.
+      expect(offered).toEqual([
+        "Choose an assignee…",
         "admin@maui.workwell.dev",
         "quality-lead@maui.workwell.dev",
+        "Unassign",
       ]);
     });
-    expect(screen.getAllByPlaceholderText("Type or pick an email").length).toBeGreaterThan(0);
+    // The free-text box it replaced is gone: nothing on the page invites an email nobody can verify.
+    expect(screen.queryByPlaceholderText("Type or pick an email")).not.toBeInTheDocument();
+    expect(document.querySelector("#case-assignees")).not.toBeInTheDocument();
   });
 
   it("viewer role does not request /api/users/assignable", async () => {
@@ -400,7 +407,7 @@ describe("CaseDetailPage crosswalk identity rendering", () => {
     expect(assignableCalls).toHaveLength(0);
   });
 
-  it("datalist is present with a closed case", async () => {
+  it("still offers the assignee control on a closed case", async () => {
     get.mockImplementation((url: string) => {
       if (url === "/api/measures") {
         return Promise.resolve([]);
@@ -444,7 +451,7 @@ describe("CaseDetailPage crosswalk identity rendering", () => {
     await waitFor(() => {
       expect(screen.getAllByText("Closed").length).toBeGreaterThan(0);
     });
-    expect(document.querySelector("#case-assignees")).toBeInTheDocument();
+    expect((await screen.findAllByRole("combobox", { name: /assignee/i })).length).toBeGreaterThan(0);
   });
 
   /**

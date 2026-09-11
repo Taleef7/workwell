@@ -45,6 +45,12 @@ export interface Roster {
   availablePanels?: PanelId[];
   columns: RosterColumn[];
   rows: RosterRow[];
+  /**
+   * Rows the server withheld because the measure in scope does not describe those patients
+   * (ADR-078/079). Only ever non-zero when one measure is in scope. Rendered beside the count, so a
+   * shorter list is explained rather than merely shorter.
+   */
+  notInPopulation?: number;
 }
 
 // Panel selector options (labels mirror the UW "Vaccine Compliance" panels + our OSHA/wellness split).

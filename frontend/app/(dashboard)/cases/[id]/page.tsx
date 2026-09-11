@@ -18,6 +18,7 @@ import { CqlExpressionResults, CqlWhyFlagged } from "@/features/evidence/CqlEvid
 import { EvidenceDropzone } from "@/features/evidence/EvidenceDropzone";
 import { DeliveryChip } from "@/features/outreach/DeliveryChip";
 import { useMeasureIdentities } from "@/lib/measure-identity";
+import { UNASSIGN_VALUE, useAssignableUsers } from "@/features/panel/use-assignable-users";
 import { formatEvaluationPeriod } from "@/lib/format";
 
 const EMPLOYEE_APPOINTMENT_TYPE_OPTIONS = [
@@ -197,7 +198,17 @@ export default function CaseDetailPage() {
   const [evidenceDescription, setEvidenceDescription] = useState("");
   const [uploadingEvidence, setUploadingEvidence] = useState(false);
   const [escalationConfirmOpen, setEscalationConfirmOpen] = useState(false);
-  const [assignableEmails, setAssignableEmails] = useState<string[]>([]);
+  const { options: assignableBaseOptions, isAssignable } = useAssignableUsers(canManage);
+  // A case assigned to an account that is no longer assignable (a staff change, a legacy row) still
+  // has to render as itself: the option is added rather than the current value silently disappearing.
+  const assigneeOptions = useMemo(() => {
+    const current = caseDetail?.assignee?.trim();
+    // Case-insensitively, because the account's stored spelling need not match its own: rows written
+    // before the route canonicalized the value can carry any casing, and labelling a live account
+    // "no longer assignable" over a capital letter would be a lie the operator cannot check.
+    if (!current || isAssignable(current)) return assignableBaseOptions;
+    return [...assignableBaseOptions, { value: current, label: `${current} (no longer assignable)`, disabled: true }];
+  }, [assignableBaseOptions, caseDetail?.assignee, isAssignable]);
   const caseStatus = caseDetail ? normalizeEnumValue(caseDetail.status) : "";
 
   // Option lists for @mieweb/ui Select controls.
@@ -267,15 +278,6 @@ export default function CaseDetailPage() {
     }
   }, [api, caseId]);
 
-  const loadAssignableUsers = useCallback(async () => {
-    try {
-      const users = await api.get<Array<{ email: string; role: string }>>("/api/users/assignable");
-      setAssignableEmails(users.map((user) => user.email));
-    } catch {
-      setAssignableEmails([]);
-    }
-  }, [api]);
-
   useEffect(() => {
     if (caseId) {
       const timer = setTimeout(() => {
@@ -283,11 +285,10 @@ export default function CaseDetailPage() {
         void loadTemplates();
         void loadAppointments();
         void loadEvidence();
-        if (canManage) void loadAssignableUsers();
       }, 0);
       return () => clearTimeout(timer);
     }
-  }, [caseId, canManage, loadAppointments, loadEvidence, loadCase, loadAssignableUsers]);
+  }, [caseId, loadAppointments, loadEvidence, loadCase]);
 
   async function runAction(action: "outreach" | "rerun") {
     if (!caseId) return;
@@ -335,14 +336,24 @@ export default function CaseDetailPage() {
   }
 
   async function assignCase() {
-    if (!caseId) return;
+    if (!caseId || assigneeInput === "") return;
+    // "Unassign" is its own option, so clearing an assignment is a choice rather than the absence of
+    // one — an empty control no longer silently means "unassign this case".
+    const unassign = assigneeInput === UNASSIGN_VALUE;
+    if (!unassign && !isAssignable(assigneeInput) && assigneeInput !== caseDetail?.assignee) {
+      setError(`${assigneeInput} is not an account cases can be assigned to.`);
+      return;
+    }
     setAssigning(true);
     setError(null);
     try {
-      const assigneeParam = assigneeInput.trim() ? `?assignee=${encodeURIComponent(assigneeInput.trim())}` : "";
+      const assigneeParam = unassign ? "" : `?assignee=${encodeURIComponent(assigneeInput.trim())}`;
       const updated = await api.post<undefined, CaseDetail>(`/api/cases/${caseId}/assign${assigneeParam}`);
       setCaseDetail(updated);
-      emitToast(`Case assigned to ${assigneeInput.trim() || "unassigned"}`);
+      // Follow the row: after unassigning, the control must fall back to the placeholder rather than
+      // keep showing "Unassign" over a case that is already unassigned, with the button still live.
+      setAssigneeInput(updated.assignee ?? "");
+      emitToast(unassign ? "Case unassigned" : `Case assigned to ${assigneeInput.trim()}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
@@ -514,11 +525,6 @@ export default function CaseDetailPage() {
 
       {caseDetail ? (
         <>
-        <datalist id="case-assignees">
-          {assignableEmails.map((a) => (
-            <option key={a} value={a} />
-          ))}
-        </datalist>
         <div className="space-y-3 md:hidden">
           <details open className="rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3">
             <summary className="cursor-pointer text-sm font-semibold text-neutral-900 dark:text-neutral-100">Case Summary</summary>
@@ -611,20 +617,19 @@ export default function CaseDetailPage() {
                 )}
               </div>
               <div className="grid gap-2">
-                <Input
+                <Select
                   label="Assignee"
                   hideLabel
-                  list="case-assignees"
                   value={assigneeInput}
-                  onChange={(e) => setAssigneeInput(e.target.value)}
-                  placeholder="Type or pick an email"
+                  onValueChange={setAssigneeInput}
+                  options={assigneeOptions}
                 />
                 <Button
                   type="button"
                   variant="outline"
                   size="sm"
                   onClick={() => void assignCase()}
-                  disabled={assigning}
+                  disabled={assigning || assigneeInput === "" || assigneeInput === (caseDetail.assignee ?? "")}
                   isLoading={assigning}
                   loadingText="Assigning..."
                 >
@@ -803,20 +808,19 @@ export default function CaseDetailPage() {
                 <div className="mt-4 grid gap-2">
                   <span className="text-xs font-semibold uppercase tracking-[0.15em] text-amber-700 dark:text-amber-300">Assignee</span>
                   <div className="flex items-end gap-2">
-                    <Input
+                    <Select
                       label="Assignee"
                       hideLabel
-                      list="case-assignees"
                       className="w-full"
                       value={assigneeInput}
-                      onChange={(e) => setAssigneeInput(e.target.value)}
-                      placeholder="Type or pick an email"
+                      onValueChange={setAssigneeInput}
+                      options={assigneeOptions}
                     />
                     <Button
                       type="button"
                       variant="outline"
                       onClick={() => void assignCase()}
-                      disabled={assigning}
+                      disabled={assigning || assigneeInput === "" || assigneeInput === (caseDetail.assignee ?? "")}
                       isLoading={assigning}
                       loadingText="Assigning..."
                     >

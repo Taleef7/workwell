@@ -12,6 +12,7 @@ import { canRunMeasures } from "@/lib/rbac";
 import { canSeeEngineering } from "@/lib/public-demo";
 import { COMPLIANCE_STATUS_LABELS } from "@/lib/status";
 import { SUBJECT } from "@/lib/terminology";
+import { providerFilterLabel, usePanelProviders } from "@/features/panel/use-panel-providers";
 import { ComplianceChip } from "@/features/compliance/ComplianceChip";
 import { RosterMobileCards } from "@/features/compliance/RosterMobileCards";
 import { usePanelCache } from "@/features/compliance/usePanelCache";
@@ -298,22 +299,18 @@ export default function CompliancePage() {
     router.push(query ? `${pathname}?${query}` : pathname);
   }, [pathname, router, searchParams]);
 
-  // Populated from /api/providers, which is profile-scoped — 40 PCPs on the pilot, the occupational
-  // clinicians on the default deployment.
-  const [providerOptions, setProviderOptions] = useState<{ id: string; name: string; location: string }[]>([]);
-  useEffect(() => {
-    let cancelled = false;
-    void api.get<{ id: string; name: string; location: string }[]>("/api/providers")
-      .then((rows) => { if (!cancelled) setProviderOptions(rows ?? []); })
-      // A provider list that fails to load leaves the select empty rather than breaking the roster —
-      // the roster is the page, the filter is an affordance on it.
-      .catch(() => { if (!cancelled) setProviderOptions([]); });
-    return () => { cancelled = true; };
-  }, [api]);
+  // The PCP list, the option order and the PCP-versus-Provider wording are shared with the case list
+  // (`features/panel/use-panel-providers`) — three things that would drift silently if each surface
+  // fetched its own. The markup is not shared: this page renders native selects, that one renders the
+  // design system's.
+  const { providers: providerOptions, nameFor: providerNameFor } = usePanelProviders();
 
   const columns = roster?.columns ?? [];
   const rows = roster?.rows ?? [];
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  // Server-side, and only when ONE measure is in scope: a patient that measure does not describe is
+  // not work (ADR-078). Reported rather than dropped in silence.
+  const notInPopulation = roster?.notInPopulation ?? 0;
   const emptyPanels = roster?.availablePanels !== undefined && roster.availablePanels.length === 0;
 
   return (
@@ -398,9 +395,9 @@ export default function CompliancePage() {
             </select>
           </label>
           <label className="flex flex-col text-xs font-medium">
-            <span className="mb-1">{SUBJECT.singular === "patient" ? "PCP" : "Provider"}</span>
+            <span className="mb-1">{providerFilterLabel()}</span>
             <select
-              aria-label={SUBJECT.singular === "patient" ? "PCP" : "Provider"}
+              aria-label={providerFilterLabel()}
               value={providerId}
               onChange={(e) => setSubjectFilter("providerId", e.target.value)}
               className="rounded border border-neutral-300 bg-transparent px-2 py-1 text-sm dark:border-neutral-700"
@@ -463,7 +460,7 @@ export default function CompliancePage() {
             <span>Filtered to</span>
             {providerId ? (
               <span className="rounded-full bg-neutral-100 px-2 py-0.5 font-medium text-neutral-900 dark:bg-neutral-800 dark:text-neutral-100">
-                {providerOptions.find((o) => o.id === providerId)?.name ?? providerId}
+                {providerNameFor(providerId) ?? providerId}
               </span>
             ) : null}
             {ageBand ? (
@@ -571,7 +568,14 @@ export default function CompliancePage() {
         <RosterMobileCards columns={columns} rows={rows} loading={loading} labelFor={measureLabelFor} />
 
         <div className="flex items-center justify-between text-sm text-neutral-500 dark:text-neutral-400">
-          <span>{fmtCount(total)} {total === 1 ? SUBJECT.singular : SUBJECT.plural}</span>
+          <span>
+            {fmtCount(total)} {total === 1 ? SUBJECT.singular : SUBJECT.plural}
+            {notInPopulation > 0 ? (
+              <span className="ml-2 text-neutral-400 dark:text-neutral-500">
+                ({fmtCount(notInPopulation)} not in this measure&apos;s population)
+              </span>
+            ) : null}
+          </span>
           <div className="flex items-center gap-2">
             <button
               type="button"

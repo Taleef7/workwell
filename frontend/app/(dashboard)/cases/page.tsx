@@ -24,6 +24,8 @@ import { SlaChip } from "@/components/SlaChip";
 import { ChevronRight } from "lucide-react";
 import { useMeasureIdentities } from "@/lib/measure-identity";
 import { formatEvaluationPeriod } from "@/lib/format";
+import { providerFilterLabel, usePanelProviders } from "@/features/panel/use-panel-providers";
+import { UNASSIGN_VALUE, useAssignableUsers } from "@/features/panel/use-assignable-users";
 
 type CaseSummary = {
   caseId: string;
@@ -96,6 +98,10 @@ export default function CasesPage() {
   const urlStatus = searchParams.get("status");
   const urlMeasure = searchParams.get("measureId") ?? "";
   const urlOutcome = normalizeOutcomeFilter(searchParams.get("outcome"));
+  // The PCP panel filter lives in the URL like measure/outcome, so a filtered work list is a link a
+  // staff member can keep or send. The roster's provider filter is the same query key on the same
+  // shared predicate (`subject-filters.ts`), so the two surfaces agree on what a panel is.
+  const urlProviderId = searchParams.get("providerId")?.trim() ?? "";
   const urlSearch = searchParams.get("search") ?? "";
   const view = searchParams.get("view") ?? "all";
   const { user } = useAuth();
@@ -110,6 +116,7 @@ export default function CasesPage() {
   // Derived from the URL (like statusFilter) rather than useState-initialized, so browser
   // back/forward between two filtered /cases URLs re-renders with the right filter.
   const measureFilter = urlMeasure;
+  const providerFilter = urlProviderId;
   const [priorityFilter, setPriorityFilter] = useState<string>("");
   const [assigneeFilter, setAssigneeFilter] = useState<string>("");
   const [siteFilter, setSiteFilter] = useState<string>("");
@@ -125,6 +132,8 @@ export default function CasesPage() {
   const [pageSize, setPageSize] = useState(25);
   const outcomeFilter = urlOutcome;
   const [viewMode, setViewMode] = useState<"cards" | "table">("cards");
+  const { options: providerOptions } = usePanelProviders();
+  const { options: assignableOptions, isAssignable } = useAssignableUsers(canManage);
 
   // Track the most recent search value we ourselves wrote to the URL so we can
   // distinguish state-driven URL writes from external URL changes (browser
@@ -182,6 +191,7 @@ export default function CasesPage() {
       const params = new URLSearchParams();
       params.set("status", statusFilter);
       if (measureFilter) params.set("measureId", measureFilter);
+      if (providerFilter) params.set("providerId", providerFilter);
       if (priorityFilter) params.set("priority", priorityFilter);
       const effectiveAssignee = view === "mine" ? (user?.email ?? "") : assigneeFilter;
       if (effectiveAssignee) params.set("assignee", effectiveAssignee);
@@ -211,7 +221,7 @@ export default function CasesPage() {
     } finally {
       if (reqId === casesReqIdRef.current) setLoading(false);
     }
-  }, [api, assigneeFilter, measureFilter, priorityFilter, siteFilter, outcomeFilter, pageSize, siteId, from, to, urlSearch, statusFilter, view, user, setLoading, setError, setCases, setSelectedCaseIds]);
+  }, [api, assigneeFilter, measureFilter, providerFilter, priorityFilter, siteFilter, outcomeFilter, pageSize, siteId, from, to, urlSearch, statusFilter, view, user, setLoading, setError, setCases, setSelectedCaseIds]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -301,6 +311,17 @@ export default function CasesPage() {
     router.push(query ? `${pathname}?${query}` : pathname);
   }, [pathname, router, searchParams]);
 
+  const setProviderAndUrl = useCallback((nextProvider: string) => {
+    const params = new URLSearchParams(searchParams.toString());
+    if (nextProvider) {
+      params.set("providerId", nextProvider);
+    } else {
+      params.delete("providerId");
+    }
+    const query = params.toString();
+    router.push(query ? `${pathname}?${query}` : pathname);
+  }, [pathname, router, searchParams]);
+
   const setOutcomeAndUrl = useCallback((nextOutcome: string) => {
     const params = new URLSearchParams(searchParams.toString());
     if (nextOutcome) {
@@ -334,6 +355,7 @@ export default function CasesPage() {
       const params = new URLSearchParams();
       params.set("status", statusFilter);
       if (measureFilter) params.set("measureId", measureFilter);
+      if (providerFilter) params.set("providerId", providerFilter);
       if (priorityFilter) params.set("priority", priorityFilter);
       const effectiveAssignee = view === "mine" ? (user?.email ?? "") : assigneeFilter;
       if (effectiveAssignee) params.set("assignee", effectiveAssignee);
@@ -377,16 +399,28 @@ export default function CasesPage() {
   }
 
   async function bulkAssign() {
-    if (selectedCaseIds.length === 0) return;
+    if (selectedCaseIds.length === 0 || bulkAssignee === "") return;
+    // The control offers only accounts the server accepts plus an explicit "Unassign", so a typed
+    // address that assigns nobody is no longer reachable. The guard stays because the value also
+    // arrives from state that a future caller could set.
+    const unassign = bulkAssignee === UNASSIGN_VALUE;
+    if (!unassign && !isAssignable(bulkAssignee)) {
+      setError(`${bulkAssignee} is not an account cases can be assigned to.`);
+      return;
+    }
     setBulkActing("assign");
     setError(null);
     try {
-      const assigneeQuery = bulkAssignee.trim() ? `?assignee=${encodeURIComponent(bulkAssignee.trim())}` : "";
+      const assigneeQuery = unassign ? "" : `?assignee=${encodeURIComponent(bulkAssignee)}`;
       for (const caseId of selectedCaseIds) {
         await api.post(`/api/cases/${caseId}/assign${assigneeQuery}`);
       }
       await loadCases();
-      emitToast(`Case assigned to ${bulkAssignee.trim() || "unassigned"}`);
+      emitToast(
+        unassign
+          ? `${selectedCaseIds.length} case${selectedCaseIds.length === 1 ? "" : "s"} unassigned`
+          : `${selectedCaseIds.length} case${selectedCaseIds.length === 1 ? "" : "s"} assigned to ${bulkAssignee}`,
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
@@ -454,7 +488,7 @@ export default function CasesPage() {
             size="sm"
             onClick={() =>
               void exportCsv(
-                `/api/exports/cases?format=csv&status=${encodeURIComponent(statusFilter)}${measureFilter ? `&measureId=${encodeURIComponent(measureFilter)}` : ""}`,
+                `/api/exports/cases?format=csv&status=${encodeURIComponent(statusFilter)}${measureFilter ? `&measureId=${encodeURIComponent(measureFilter)}` : ""}${providerFilter ? `&providerId=${encodeURIComponent(providerFilter)}` : ""}`,
                 "cases.csv"
               )
             }
@@ -518,6 +552,14 @@ export default function CasesPage() {
           value={measureFilter}
           onValueChange={setMeasureAndUrl}
           options={measureOptions}
+        />
+        <Select
+          label={providerFilterLabel()}
+          size="sm"
+          className="w-52"
+          value={providerFilter}
+          onValueChange={setProviderAndUrl}
+          options={providerOptions}
         />
         <Select
           label="Priority"
@@ -593,17 +635,23 @@ export default function CasesPage() {
         <div className="rounded-xl border border-primary-200 bg-primary-50 p-3 dark:border-primary-800 dark:bg-primary-900/20">
           <div className="flex flex-wrap items-center gap-3 text-sm">
             <span className="font-semibold text-primary-900 dark:text-primary-200">{selectedCaseIds.length} selected</span>
-            <Input
+            <Select
               label="Assignee for selected"
               hideLabel
               size="sm"
-              className="w-48"
-              placeholder="Assignee for selected"
+              className="w-64"
               value={bulkAssignee}
-              onChange={(e) => setBulkAssignee(e.target.value)}
+              onValueChange={setBulkAssignee}
+              options={assignableOptions}
+              disabled={bulkActing !== null}
             />
-            <Button size="sm" variant="primary" disabled={bulkActing !== null} onClick={() => void bulkAssign()}>
-              {bulkActing === "assign" ? "Assigning..." : "Assign to..."}
+            <Button
+              size="sm"
+              variant="primary"
+              disabled={bulkActing !== null || bulkAssignee === ""}
+              onClick={() => void bulkAssign()}
+            >
+              {bulkActing === "assign" ? "Assigning..." : "Assign selected"}
             </Button>
             <Button size="sm" variant="danger" disabled={bulkActing !== null} onClick={() => void bulkEscalate()}>
               {bulkActing === "escalate" ? "Escalating..." : "Escalate selected"}
@@ -685,6 +733,7 @@ export default function CasesPage() {
                   <label className="flex items-center gap-2 text-xs text-neutral-600 dark:text-neutral-400">
                     <input
                       type="checkbox"
+                      aria-label={`Select ${item.employeeName}`}
                       checked={selectedCaseIds.includes(item.caseId)}
                       onChange={() => toggleCase(item.caseId)}
                     />
