@@ -1,5 +1,73 @@
 # Journal
 
+## 2026-09-11 (later) — the backup had been failing for seventeen nights, and the reason was not the key
+
+Issue #473 lists "rotated/expired credentials" second among its own suspects, and that is what this
+looked like. It was not. The dump succeeded every night; the upload answered `InvalidAccessKeyId`, and
+the bucket itself answers something more specific:
+
+```
+$ curl https://workwell-twh-evidence.s3.us-east-1.amazonaws.com/
+<Error><Code>AllAccessDisabled</Code>
+       <Message>All access to this object has been disabled</Message>
+```
+
+`AllAccessDisabled` is a SUSPENDED ACCOUNT, not a missing bucket and not a bad key. The dates settle
+it: `DEPLOY.md` and `BACKUP_DR_RUNBOOK.md` both carried a dated warning that the hosting AWS Free Plan
+account **expired 2026-08-24**, that AWS restricts-then-deletes rather than charging, and that the
+bucket had to be re-homed before then. The first failure was **2026-08-25**. Rotating a key inside
+that account is impossible and would not have helped.
+
+**The second outage was the one nobody had noticed at all.** The same account holds the evidence
+bucket, and `deploy-twh-mieweb.yml` sets `WORKWELL_BUCKET_S3_*`, which *selects* the S3 seam. So every
+evidence write on TWH has been failing since 2026-08-24 — eighteen days — while the stack booted
+clean, logged `bucket-s3=on` and served `/actuator/health` 200. The backup job screamed on night one
+because it opens a real connection; the app had no equivalent, so it said nothing. Everything uploaded
+in that window is gone.
+
+**Re-homed to Cloudflare R2**, which the runbook had already named as an option and which the seam
+already supported: `resolve-bucket.ts` takes an `endpoint` and flips to path-style addressing when one
+is set, so the move is env vars and no code. Two buckets — `workwell-evidence-twh` and
+`workwell-backups`, one scoped API token each, `db-dumps/` expiring after 30 days. **Two buckets
+rather than one with prefix policies is not incidental:** R2 scopes a token per bucket, so what AWS
+expressed as "the app user carries an explicit deny on `db-dumps/*`" becomes "the app's token does not
+name the backups bucket at all" — strictly stronger, because there is no credential left to mis-police.
+
+**The pilot had never had a backup.** This workflow named `DATABASE_URL_TWH` and nothing else, so the
+deployment carrying 20,000 patients since 2026-09-06 had no dump, ever. It is a matrix leg now rather
+than a second workflow file, because a copied file drifts from its original and the drift stays
+invisible until the day you need the dump; `fail-fast: false`, so a dead TWH database cannot cancel
+the pilot's backup. TWH's failure-issue title is kept **byte-identical** on purpose — the success step
+closes by title, so a reworded one would leave #473 open forever and quietly open a second issue
+beside it.
+
+**What the code learned.** A configured-but-unreachable bucket now announces itself:
+`probeEvidenceBucket` runs once per process from the same boot hook as the seam-inventory line and
+reads a key that is not expected to exist, because **a missing object is a successful round trip** —
+it proves credentials, network, endpoint and bucket name all resolve, needs no write permission, and
+creates nothing. Only a throw is unreachable, and that logs `WORKWELL_ALERT
+{"kind":"EVIDENCE_BUCKET_UNREACHABLE",...}`, the token the official-routing check already uses. Fire
+and forget: no request waits on a storage round trip, and the probe cannot fail a request or a boot.
+
+**And the guard that was missing.** `official-flip-config.test.ts` pins deploy-versus-reconciler parity
+for corpus size, chunking, anchor and retention — but not for the bucket block, because `shippedValue`
+reads string literals out of the `jq` env array and the bucket entries arrive as `--arg` variables
+whose values live in the job-level `env:` block. So "keep the reconciler in sync" was prose in
+`DEPLOY.md` and nothing else, and a self-heal could silently repoint or unset evidence storage. It is
+three tests now, and all four mutations fail them: a diverging bucket name, a dropped endpoint line, a
+region reverted to `us-east-1`, and a key bound but never put in the container env array. The
+non-vacuity test earns its place for the usual reason — agreement alone is satisfied by both files
+omitting a key.
+
+The lesson worth keeping is not about S3. **A dated deadline in a runbook is not a control.** The
+warning was correct, specific, and sat in two documents, and nothing failed loudly on the day it
+lapsed. What replaces it is a probe that speaks when the thing is actually broken.
+
+Verified: backend 2,504 pass, 1 fail, 23 skipped — the failure is `corpus-membership.test.ts`, the
+known stale local sparse-checkout of vendored artifacts, green in CI and unrelated. Typecheck clean.
+All three workflows parse. **The upload path itself is unproven until a dispatch runs** — the R2 token
+has never signed a request, and that is the one thing no local test can stand in for.
+
 ## 2026-09-11 — the state of things before MM-2, and four documents that still said two measures were routed
 
 A planning session rather than a building one: with #548 deployed and backfilled, the question was

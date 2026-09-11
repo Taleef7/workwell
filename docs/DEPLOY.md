@@ -1209,10 +1209,10 @@ shows all services `Up`).
 | `WORKWELL_IMMZ_ICE_API_KEY` | Backend | Optional bearer token, only if ICE is fronted by an authenticating proxy. It **never selects** the seam by itself. |
 | `WORKWELL_ALERT_WEBHOOK_URL` | Backend | Optional failed-run alert webhook (#264). When set, PARTIAL_FAILURE/FAILED population runs (and scheduler tick errors / stuck-run recoveries) POST a JSON `RunAlert` body here. **Inert unless set.** Console always emits a greppable `WORKWELL_ALERT …` line regardless. Demo stack may leave unset. |
 | `WORKWELL_INCREMENTAL_EVAL` | Backend | Optional `"true"` to enable incremental/delta batch evaluation (#263/ADR-035): a population run reuses a subject's prior CQL outcome (copy-forward) when its data + logic are unchanged and its status can't have moved, instead of re-running the ~68 ms CQL. **Inert unless `"true"`** — the demo stack leaves it unset, so no `eval_state` row is written and the run loop is byte-identical. Descriptive only (ADR-008): reuse never authors a status. Reversible cache — `DELETE FROM eval_state`. The boot seam line reports `incremental-eval=on|off`. Safe alongside official routing since ADR-040, **when that becomes reachable** (cms122 and cms125 are ROUTED on demo/production since PR-9c / ADR-045; every other environment leaves `WORKWELL_OFFICIAL_MEASURES` unset): an official-routed measure is **not reused at all** while its adapter is still changing, so a flip needs no manual `DELETE` and cannot serve an outcome the previous adapter produced. Such a measure's rows are still written, carrying the ARTIFACT's identity (`official-fqm:<version>:<artifactSha>:<terminologySha>`) rather than the authored ELM hash, so flipping on, flipping off, or re-vendoring is self-invalidating whenever reuse is re-enabled. Most useful once the WebChart live tenant is on (real data, fixed exam dates), where across-day reuse pays off; the synthetic tenants regenerate bundles per date, so it saves only same-day reruns for them. |
-| `WORKWELL_BUCKET_S3_BUCKET` | Backend | Durable evidence bucket name (#167/ADR-030). Selects the S3-backed evidence bucket **only together with** the key id + secret below (all three required; inert otherwise — evidence falls back to the in-container `fs` BUCKET binding). **Set on the live TWH stack since 2026-07-14** (`workwell-twh-evidence`). |
+| `WORKWELL_BUCKET_S3_BUCKET` | Backend | Durable evidence bucket name (#167/ADR-030). Selects the S3-backed evidence bucket **only together with** the key id + secret below (all three required; inert otherwise — evidence falls back to the in-container `fs` BUCKET binding). **Set on the live TWH stack since 2026-07-14**; the bucket is `workwell-evidence-twh` on Cloudflare R2 since 2026-09-11 (#473). |
 | `WORKWELL_BUCKET_S3_ACCESS_KEY_ID` | Backend | Access key id for the evidence bucket (from the `WORKWELL_BUCKET_S3_ACCESS_KEY_ID_TWH` GitHub secret; least-privilege IAM user `workwell-twh-app`). |
 | `WORKWELL_BUCKET_S3_SECRET_ACCESS_KEY` | Backend | Secret access key for the evidence bucket (from the `WORKWELL_BUCKET_S3_SECRET_ACCESS_KEY_TWH` GitHub secret). |
-| `WORKWELL_BUCKET_S3_REGION` | Backend | Bucket region (default `us-east-1`). |
+| `WORKWELL_BUCKET_S3_REGION` | Backend | Bucket region (default `us-east-1`). **`auto` on R2**, which ignores the region — but SigV4 will not sign without one. |
 | `WORKWELL_BUCKET_S3_ENDPOINT` | Backend | Optional S3 endpoint for non-AWS S3 APIs (Cloudflare R2, MinIO) — also switches to path-style addressing. Leave unset for AWS S3. |
 
 `Where = Backend` vars are container environment on the MIE backend container (mapped from the
@@ -1363,24 +1363,65 @@ credentials; the seam mirrors the `DATABASE_URL` store override instead. When AL
 in-container `fs` BUCKET binding serves unchanged (inert-unless-configured — the `bucket-s3` seam on
 the boot inventory line).
 
-**Live TWH setup (provisioned 2026-07-14):** bucket `workwell-twh-evidence` (AWS us-east-1,
-public-access-blocked, versioning on, 30-day lifecycle on the `db-dumps/` prefix), least-privilege
-IAM user `workwell-twh-app` (List/Get/Put/DeleteObject on this bucket only), credentials in the
-`WORKWELL_BUCKET_S3_ACCESS_KEY_ID_TWH` / `WORKWELL_BUCKET_S3_SECRET_ACCESS_KEY_TWH` GitHub secrets,
-mapped onto the backend container env by `deploy-twh-mieweb.yml` (and the reconciler — keep-in-sync).
-The same bucket receives the **nightly `pg_dump`** written by `backup-neon-nightly.yml` (#270 —
-see `docs/BACKUP_DR_RUNBOOK.md`) under a **separate, dedicated IAM principal** (`workwell-twh-backup`,
-`PutObject` on `db-dumps/*` only; secrets `WORKWELL_BACKUP_S3_ACCESS_KEY_ID_TWH` /
-`WORKWELL_BACKUP_S3_SECRET_ACCESS_KEY_TWH`). The app user carries an **explicit deny on `db-dumps/*`**,
-so a compromised app container cannot read, overwrite, or delete the DB backups.
+**Live setup — Cloudflare R2 since 2026-09-11 (#473).** Two buckets in the Cloudflare account, both
+private (R2 buckets have no public access unless a custom domain or `r2.dev` subdomain is added, and
+neither has one):
+
+| Bucket | Holds | Token | Lifecycle |
+|---|---|---|---|
+| `workwell-evidence-twh` | app evidence (ADR-030) | `workwell-app`, Object Read & Write, scoped to this bucket | none — evidence is durable |
+| `workwell-backups` | nightly `pg_dump`s, `db-dumps/twh/` + `db-dumps/maui/` | `workwell-backup`, Object Read & Write, scoped to this bucket | `db-dumps/` expires after 30 days |
+
+**Two buckets rather than one with prefix policies, deliberately.** R2 scopes an API token per
+BUCKET, not per prefix, so the separation that AWS expressed as "the app user carries an explicit
+deny on `db-dumps/*`" is expressed here as "the app's token does not name the backups bucket at all".
+That is strictly stronger: a compromised app container has no credential that reaches the dumps,
+rather than a credential plus a policy that must keep denying it.
+
+Secrets: `WORKWELL_BUCKET_S3_ACCESS_KEY_ID_TWH` / `WORKWELL_BUCKET_S3_SECRET_ACCESS_KEY_TWH` (app),
+`WORKWELL_BACKUP_S3_ACCESS_KEY_ID` / `WORKWELL_BACKUP_S3_SECRET_ACCESS_KEY` (backup — unsuffixed
+because one principal now serves both stacks' dumps), and `WORKWELL_R2_S3_ENDPOINT`, which is a
+secret rather than a literal only because **this repository is public and the endpoint embeds the
+Cloudflare account id**. The app trio is mapped onto the backend container env by
+`deploy-twh-mieweb.yml` **and `reconcile-twh-mieweb.yml` — keep those two in sync, or the next
+self-heal recreates the container without the endpoint and silently drops it back to virtual-hosted
+AWS addressing.**
+
+**Region is `auto`** (R2 ignores it; SigV4 will not sign without one) and a non-empty
+`WORKWELL_BUCKET_S3_ENDPOINT` is what switches the seam to path-style addressing — see
+`resolve-bucket.ts`. No code changed in the move; it is env vars only, exactly as the runbook
+predicted.
 
 Evidence uploaded **before** 2026-07-14 lived on in-container disk and was lost on the next recreate
-(known demo-era limitation); everything uploaded after persists across deploys/heals.
+(known demo-era limitation); everything uploaded after that persists across deploys/heals.
 
-> **⚠ Bucket re-home deadline:** the hosting AWS account is a Free Plan account that **expires
-> 2026-08-24** (it cannot be charged; AWS restricts-then-deletes instead). Move the bucket before
-> then — MIE-provided storage (C14), a paid-plan upgrade, or Cloudflare R2 free tier. Env-var-only
-> migration (see `docs/BACKUP_DR_RUNBOOK.md` §2 note).
+> **The AWS bucket is GONE, and this is what that cost.** The previous home was
+> `workwell-twh-evidence` on a Free Plan AWS account that **expired 2026-08-24**, exactly as the
+> warning that used to sit here said it would. AWS suspended the account rather than charging it:
+> S3 began answering `AllAccessDisabled`, every key stopped authenticating, and two things broke at
+> once. The nightly backup failed seventeen consecutive nights and said so every night (#473). The
+> **evidence seam failed silently for eighteen days** — it is selected by configuration and only
+> exercised on the first evidence operation, so the stack kept booting clean, logging `bucket-s3=on`
+> and serving `/actuator/health` 200. Nothing uploaded in that window survives, and the old dumps are
+> unrecoverable without settling that account. The lesson is written into the code as the boot-time
+> reachability probe below; the lesson for an operator is that **a dated deadline in a runbook is not
+> a control** — nothing failed loudly on the day it lapsed.
+
+### The evidence bucket is probed at boot (#473)
+
+`probeEvidenceBucket` (`backend-ts/src/case/bucket-health.ts`) runs once per worker process, from the
+same boot hook as the seam-inventory line, and only when the seam is configured. It reads a key that
+is not expected to exist: **a missing object is a successful round trip**, proving credentials,
+network, endpoint and bucket name all resolve, so the probe needs no write permission and creates
+nothing. Only a throw counts as unreachable, and then it logs
+
+```
+WORKWELL_ALERT {"kind":"EVIDENCE_BUCKET_UNREACHABLE","bucket":"…","endpoint":"…","message":"…"}
+```
+
+the same greppable token the official-routing check uses. It is fire-and-forget: no request waits on
+a storage round trip, and the probe cannot fail a request or a boot. Grep the container logs for
+`WORKWELL_ALERT` after any storage change.
 
 ## One-time backfill — `outcomes.out_of_population` (ADR-079, 2026-09-10)
 

@@ -1,15 +1,26 @@
-# Nightly logical backup of the live Neon DB (#270 / docs/BACKUP_DR_RUNBOOK.md §2 decision 2).
+# Nightly logical backup of the live Neon databases (#270 / docs/BACKUP_DR_RUNBOOK.md §2 decision 2).
 #
-# The live Neon project's PITR window is plan-capped at SIX HOURS (Free plan maximum — verified
+# Each live Neon project's PITR window is plan-capped at SIX HOURS (Free plan maximum — verified
 # 2026-07-14), and until this workflow existed retention was the ONLY recovery mechanism. This adds
-# the second line of defence: a nightly `pg_dump` of the `workwell_spike` schema to the managed S3
-# bucket (`workwell-twh-evidence`, prefix `db-dumps/`), giving a recovery path independent of Neon
-# retention AND independent of Neon itself. Bucket lifecycle expires dumps after 30 days.
+# the second line of defence: a nightly `pg_dump` of the `workwell_spike` schema to object storage,
+# giving a recovery path independent of Neon retention AND independent of Neon itself.
+#
+# TWO STACKS since 2026-09-11 (#473). The pilot deployment has carried 20,000 patients since
+# 2026-09-06 and had NO backup workflow at all — this job named DATABASE_URL_TWH and nothing else.
+# A matrix leg per stack is deliberately preferred over a second workflow file: a copy drifts from
+# its original, and the drift stays invisible until the day you need the dump.
+#
+# STORAGE IS CLOUDFLARE R2 since 2026-09-11 (#473). The former AWS bucket sat on a Free Plan account
+# that expired 2026-08-24 exactly as docs/DEPLOY.md warned; AWS suspended it, every key stopped
+# authenticating, and this job failed seventeen consecutive nights while S3 answered
+# `AllAccessDisabled`. R2 has no expiry clock, is S3-compatible (so `--endpoint-url` is the only
+# change to the upload), and its free tier covers this workload. TWO BUCKETS, not one bucket with
+# prefix policies: R2 scopes an API token per BUCKET, so `workwell-backups` and the app's
+# `workwell-evidence-twh` carry separate tokens and the app's credentials cannot reach the dumps at
+# all — strictly stronger than the IAM prefix deny it replaces.
 #
 # Restore (see BACKUP_DR_RUNBOOK.md §3): download a dump, `pg_restore -d <target> --no-owner
-# --schema=workwell_spike <file>` into a fresh Neon project/branch, repoint DATABASE_URL_TWH.
-#
-# On failure GitHub emails the repo owner (default notification for scheduled-workflow failures).
+# --schema=workwell_spike <file>` into a fresh Neon project/branch, repoint the stack's DATABASE_URL.
 name: backup-neon-nightly
 
 on:
@@ -25,31 +36,53 @@ permissions:
   # therefore cannot detect a database outage (see docs/DEPLOY.md → "Database compute cost").
   issues: write
 
-concurrency:
-  group: backup-neon-nightly
-  cancel-in-progress: false
-
 jobs:
   dump:
-    name: pg_dump workwell_spike → S3
+    name: pg_dump ${{ matrix.stack }} → R2
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # One stack's failure must not cancel the other's dump. A dead TWH database is not a reason to
+    # skip the pilot's backup — and before this matrix existed, the pilot had no backup to skip.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - stack: twh
+            db_secret: DATABASE_URL_TWH
+            prefix: db-dumps/twh
+            # The legacy title, kept EXACTLY. Issue #473 has been raised under it every night since
+            # 2026-08-25, and this job's success step closes by title — a reworded title would leave
+            # #473 open forever and silently open a second one beside it.
+            issue_title: "Nightly Neon backup is failing"
+          - stack: maui
+            db_secret: DATABASE_URL_MAUI
+            prefix: db-dumps/maui
+            issue_title: "Nightly Neon backup is failing (Maui pilot)"
+    concurrency:
+      group: backup-neon-nightly-${{ matrix.stack }}
+      cancel-in-progress: false
     env:
-      DATABASE_URL: ${{ secrets.DATABASE_URL_TWH }}
-      # A DEDICATED backup principal (workwell-twh-backup): PutObject on db-dumps/* only. The app's
-      # runtime credentials are a different IAM user that carries an explicit DENY on db-dumps/*,
-      # so a compromised app container cannot read/overwrite/delete the dumps (review P2-2).
-      AWS_ACCESS_KEY_ID: ${{ secrets.WORKWELL_BACKUP_S3_ACCESS_KEY_ID_TWH }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.WORKWELL_BACKUP_S3_SECRET_ACCESS_KEY_TWH }}
-      AWS_DEFAULT_REGION: us-east-1
-      BACKUP_BUCKET: workwell-twh-evidence
+      DATABASE_URL: ${{ secrets[matrix.db_secret] }}
+      # A DEDICATED backup principal: an R2 API token scoped to the `workwell-backups` bucket alone.
+      AWS_ACCESS_KEY_ID: ${{ secrets.WORKWELL_BACKUP_S3_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.WORKWELL_BACKUP_S3_SECRET_ACCESS_KEY }}
+      # R2 ignores the region, but SigV4 refuses to sign without one; `auto` is R2's documented value.
+      AWS_DEFAULT_REGION: auto
+      BACKUP_BUCKET: workwell-backups
+      # A secret rather than a literal: this repository is PUBLIC and the endpoint embeds the
+      # Cloudflare account id.
+      BACKUP_ENDPOINT: ${{ secrets.WORKWELL_R2_S3_ENDPOINT }}
+      DB_SECRET_NAME: ${{ matrix.db_secret }}
+      STACK: ${{ matrix.stack }}
+      DUMP_PREFIX: ${{ matrix.prefix }}
     steps:
       - name: Validate required secrets
         run: |
           missing=()
-          [ -z "$DATABASE_URL" ] && missing+=("DATABASE_URL_TWH")
-          [ -z "$AWS_ACCESS_KEY_ID" ] && missing+=("WORKWELL_BACKUP_S3_ACCESS_KEY_ID_TWH")
-          [ -z "$AWS_SECRET_ACCESS_KEY" ] && missing+=("WORKWELL_BACKUP_S3_SECRET_ACCESS_KEY_TWH")
+          [ -z "$DATABASE_URL" ] && missing+=("$DB_SECRET_NAME")
+          [ -z "$AWS_ACCESS_KEY_ID" ] && missing+=("WORKWELL_BACKUP_S3_ACCESS_KEY_ID")
+          [ -z "$AWS_SECRET_ACCESS_KEY" ] && missing+=("WORKWELL_BACKUP_S3_SECRET_ACCESS_KEY")
+          [ -z "$BACKUP_ENDPOINT" ] && missing+=("WORKWELL_R2_S3_ENDPOINT")
           if [ ${#missing[@]} -gt 0 ]; then
             echo "::error::Missing required secret(s): ${missing[*]}"
             exit 1
@@ -70,14 +103,14 @@ jobs:
 
       - name: Dump the workwell_spike schema
         run: |
-          # DATABASE_URL_TWH is the JDBC URL (jdbc:postgresql://...) — strip the prefix for libpq,
-          # exactly as deploy-twh-mieweb.yml does. pg_dump must NOT go through the transaction
+          # The DATABASE_URL secrets are JDBC URLs (jdbc:postgresql://...) — strip the prefix for
+          # libpq, exactly as the deploy workflows do. pg_dump must NOT go through the transaction
           # pooler, so also strip Neon's `-pooler` host infix for a direct connection.
           db_url="${DATABASE_URL#jdbc:}"
           case "$db_url" in
             postgres://*|postgresql://*) : ;;
             *)
-              echo "::error::DATABASE_URL_TWH must be a postgres:// or jdbc:postgresql:// URL." >&2
+              echo "::error::${DB_SECRET_NAME} must be a postgres:// or jdbc:postgresql:// URL." >&2
               exit 1
               ;;
           esac
@@ -91,12 +124,21 @@ jobs:
             --file=workwell_spike.dump
           ls -l workwell_spike.dump
 
-      - name: Upload to S3 (db-dumps/, 30-day lifecycle)
+      - name: Upload to R2 (30-day lifecycle on db-dumps/)
         run: |
           stamp="$(date -u +%Y-%m-%dT%H%M%SZ)"
-          key="db-dumps/workwell_spike-${stamp}.dump"
-          aws s3 cp workwell_spike.dump "s3://${BACKUP_BUCKET}/${key}"
-          echo "Uploaded s3://${BACKUP_BUCKET}/${key} ($(stat -c%s workwell_spike.dump) bytes)"
+          key="${DUMP_PREFIX}/workwell_spike-${stamp}.dump"
+          aws s3 cp workwell_spike.dump "s3://${BACKUP_BUCKET}/${key}" \
+            --endpoint-url "$BACKUP_ENDPOINT"
+          bytes="$(stat -c%s workwell_spike.dump)"
+          echo "Uploaded s3://${BACKUP_BUCKET}/${key} (${bytes} bytes)"
+          # On the run summary because the free tier is 10 GB and the window is 30 nightly dumps PER
+          # STACK: this size is the number that decides whether 30 days actually fits.
+          {
+            echo "### ${STACK}: $(numfmt --to=iec --suffix=B "$bytes")"
+            echo ""
+            echo "\`s3://${BACKUP_BUCKET}/${key}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       # ---------------------------------------------------------------------
       # Make a failure impossible to miss (2026-07-22 incident).
@@ -106,8 +148,8 @@ jobs:
       # correctly detected a total production outage on night one. Detection was never the gap —
       # notification was. So: surface it as an open issue, and close it automatically on recovery.
       #
-      # Deliberately ONE issue that gets commented on, not a new issue per night — a nightly pile of
-      # duplicates is just a different flavour of noise nobody reads.
+      # Deliberately ONE issue per stack that gets commented on, not a new issue per night — a nightly
+      # pile of duplicates is just a different flavour of noise nobody reads.
       # ---------------------------------------------------------------------
       - name: Open or update the backup-failure issue
         if: failure()
@@ -117,7 +159,7 @@ jobs:
           # repository from and would exit before it could raise anything — an alerting step that
           # silently fails is worse than none. GH_REPO supplies that context explicitly.
           GH_REPO: ${{ github.repository }}
-          TITLE: "Nightly Neon backup is failing"
+          TITLE: ${{ matrix.issue_title }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
@@ -129,7 +171,7 @@ jobs:
             echo "Commented on existing issue #${existing}"
           else
             gh issue create --title "$TITLE" --body "$(cat <<EOF
-          The nightly \`pg_dump\` of \`workwell_spike\` failed: [run ${GITHUB_RUN_ID}](${RUN_URL}).
+          The nightly \`pg_dump\` of \`workwell_spike\` on the **${STACK}** stack failed: [run ${GITHUB_RUN_ID}](${RUN_URL}).
 
           **Treat this as a production incident, not a backup problem.** This job is the only always-on
           process that opens a real connection to the real database, so it is our de-facto database
@@ -142,16 +184,19 @@ jobs:
 
           1. **Database unreachable** — check the Neon console. A \`402\` in the run log means the compute
              quota is exhausted and *every* DB-backed route is already returning \`internal_error\`.
-          2. Rotated/expired \`DATABASE_URL_TWH\` or the backup IAM credentials.
-          3. \`pg_dump\` version drift against the server.
+          2. A rotated or expired DATABASE_URL for this stack, or a revoked R2 backup token.
+          3. **Object storage refusing the credential.** \`AllAccessDisabled\` or \`InvalidAccessKeyId\`
+             in the upload step means the storage account or token is gone, not the database — that is
+             what took this job down for seventeen nights from 2026-08-25 (#473).
+          4. \`pg_dump\` version drift against the server.
 
           Quick check — if this returns 500s, the live site is down:
 
           \`\`\`bash
-          curl -s -o /dev/null -w '%{http_code}\n' https://twh-api-ts.os.mieweb.org/api/version
+          curl -s -o /dev/null -w '%{http_code}\n' https://${STACK}-api-ts.os.mieweb.org/api/version
           \`\`\`
 
-          This issue closes automatically on the next successful backup.
+          This issue closes automatically on the next successful backup of this stack.
           EOF
           )"
             echo "Opened a new backup-failure issue"
@@ -163,7 +208,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # See the failure step above: no checkout, so gh needs the repository given to it.
           GH_REPO: ${{ github.repository }}
-          TITLE: "Nightly Neon backup is failing"
+          TITLE: ${{ matrix.issue_title }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail

@@ -52,6 +52,7 @@ import { isDemoAccountRefusedOnProfile } from "./auth/demo-users.ts";
 import { assertSafeStartup, type StartupEnv } from "./config/startup-safety.ts";
 import { parseAllowedOrigins, preflightResponse, withCors } from "./config/cors.ts";
 import { formatSeamLogLine } from "./config/seam-inventory.ts";
+import { probeEvidenceBucket, bucketAlertLine } from "./case/bucket-health.ts";
 import { officialMeasureIds } from "./wiring/official-routing.ts";
 import { officialRoutingProblems } from "./wiring/executor-router.ts";
 import { loadOfficialArtifact } from "./wiring/official-artifacts.ts";
@@ -409,6 +410,24 @@ function logSeamInventoryOnce(env: Env): void {
       `WORKWELL_ALERT ${JSON.stringify({ kind: "OFFICIAL_ROUTING_MISCONFIGURED", problems })}`,
     );
   }
+  // #473: the evidence bucket is CONFIGURED but only exercised on the first evidence operation, so a
+  // dead one is silent. On 2026-08-24 the hosting AWS account lapsed and this stack went on booting
+  // clean, logging `bucket-s3=on` and serving /actuator/health 200 for eighteen days while every
+  // evidence write failed — the nightly backup job noticed on night one only because it opens a real
+  // connection. This is the app's equivalent: one read of a key that need not exist.
+  //
+  // Fire-and-forget, and alerted rather than thrown, for the same reason as the routing check above —
+  // the fetch handler is not a startup hook, so throwing would fail one arbitrary request instead of
+  // the process. `void` rather than `await` because no request should wait on a storage round trip.
+  void probeEvidenceBucket(env)
+    .then((result) => {
+      const line = bucketAlertLine(result);
+      if (line) console.error(line);
+      else if (result.kind === "reachable") console.log("[workwell] evidence bucket: reachable");
+    })
+    .catch(() => {
+      /* probeEvidenceBucket never rejects; this is belt-and-braces so boot can never be broken here. */
+    });
   // ADR-072: report the runnable classification and a stale vendored effectivePeriod at boot, so an
   // operator sees the vintage gap before the first run reports it.
   const today = new Date().toISOString().slice(0, 10);

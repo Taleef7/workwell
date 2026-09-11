@@ -347,3 +347,82 @@ test("PR-9c: the shipped configuration constructs cleanly — no routing problem
     );
   }
 });
+
+// ---------------------------------------------------------------------------
+// The evidence bucket's env block (#473).
+//
+// `shippedValue` above cannot see these: the bucket entries reach the container as jq `--arg`
+// variables (`value: $bucket_name`), not as string literals, so their values live in the job-level
+// `env:` block instead. That is why they escaped the parity guard until now — and DEPLOY.md's
+// "keep-in-sync" note was the only thing holding them together, which is precisely the kind of
+// control this PR exists because it failed.
+// ---------------------------------------------------------------------------
+
+/** The job-level `env:` binding for a key, e.g. `WORKWELL_BUCKET_S3_REGION: auto`. */
+function jobEnvValue(workflow: string, key: string): string | null {
+  const path = fileURLToPath(new URL(`../../../.github/workflows/${workflow}`, import.meta.url));
+  const yaml = readFileSync(path, "utf8");
+  const match = yaml.match(new RegExp(String.raw`^\s+` + key + String.raw`:[ \t]*(\S.*?)[ \t]*$`, "m"));
+  return match ? match[1]! : null;
+}
+
+/** Whether the workflow passes the key into the container's env array at all. */
+function shipsEnvKey(workflow: string, key: string): boolean {
+  const path = fileURLToPath(new URL(`../../../.github/workflows/${workflow}`, import.meta.url));
+  const yaml = readFileSync(path, "utf8");
+  return new RegExp(String.raw`\{\s*key:\s*"` + key + String.raw`"`).test(yaml);
+}
+
+const BUCKET_KEYS = [
+  "WORKWELL_BUCKET_S3_BUCKET",
+  "WORKWELL_BUCKET_S3_REGION",
+  "WORKWELL_BUCKET_S3_ENDPOINT",
+  "WORKWELL_BUCKET_S3_ACCESS_KEY_ID",
+  "WORKWELL_BUCKET_S3_SECRET_ACCESS_KEY",
+] as const;
+
+test("#473: a self-healed container reaches the SAME evidence bucket as a deployed one", () => {
+  for (const key of BUCKET_KEYS) {
+    assert.equal(
+      jobEnvValue("reconcile-twh-mieweb.yml", key),
+      jobEnvValue("deploy-twh-mieweb.yml", key),
+      `reconcile-twh-mieweb.yml must bind the same ${key} as deploy-twh-mieweb.yml — it recreates ` +
+        `the same container on a health event, so a mismatch silently repoints (or unsets) evidence ` +
+        `storage on a self-heal, and the seam only fails on the first evidence op`,
+    );
+  }
+});
+
+test("#473: and every one of them actually reaches the container", () => {
+  // Agreement alone is satisfied by BOTH files omitting a key — the vacuous reading that the corpus
+  // -size test above exists to close. An unset endpoint is not inert here: it silently reverts the
+  // seam to virtual-hosted AWS addressing against an R2 bucket, which fails on the first evidence op.
+  for (const workflow of ["deploy-twh-mieweb.yml", "reconcile-twh-mieweb.yml"]) {
+    for (const key of BUCKET_KEYS) {
+      assert.ok(
+        jobEnvValue(workflow, key),
+        `${workflow} binds no ${key}; the parity test above would pass vacuously`,
+      );
+      assert.ok(
+        shipsEnvKey(workflow, key),
+        `${workflow} binds ${key} but never puts it in the container env array`,
+      );
+    }
+  }
+});
+
+test("#473: the TWH evidence bucket is the R2 one, addressed path-style", () => {
+  // The AWS bucket these replaced was on an account that expired 2026-08-24; S3 answers
+  // `AllAccessDisabled` for it and every key it ever issued is dead. Naming the live values here
+  // means a revert to them fails a test rather than eighteen silent days of lost evidence.
+  assert.equal(jobEnvValue("deploy-twh-mieweb.yml", "WORKWELL_BUCKET_S3_BUCKET"), "workwell-evidence-twh");
+  // R2 ignores the region, but SigV4 will not sign without one.
+  assert.equal(jobEnvValue("deploy-twh-mieweb.yml", "WORKWELL_BUCKET_S3_REGION"), "auto");
+  // A NON-EMPTY endpoint is what switches resolve-bucket.ts to path-style addressing. Asserted as
+  // "reads the secret" rather than as a literal, because the endpoint embeds the Cloudflare account
+  // id and this repository is public.
+  assert.match(
+    jobEnvValue("deploy-twh-mieweb.yml", "WORKWELL_BUCKET_S3_ENDPOINT") ?? "",
+    /secrets\.WORKWELL_R2_S3_ENDPOINT/,
+  );
+});

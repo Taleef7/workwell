@@ -1,11 +1,13 @@
 # Backup & disaster-recovery runbook (#270)
 
-**Date:** 2026-07-13. **Scope:** the live TWH stack — Neon Postgres (`workwell-twh`), the MIE
-containers, and the evidence bucket.
-**Status (updated 2026-07-14):** Runbook **executed** (§6 drill ✓). The nightly-dump second line of
-defence is **live** (`backup-neon-nightly.yml` → `s3://workwell-twh-evidence/db-dumps/`, §2 item 2).
-Remaining owner decision: **the Neon plan upgrade** — the 6-hour PITR window and the unprotected
-`production` branch are both Free-plan caps (§2), not settings.
+**Date:** 2026-07-13. **Scope:** the live stacks — Neon Postgres (`workwell-twh` and the pilot's own
+project), the MIE containers, and the evidence bucket.
+**Status (updated 2026-09-11):** Runbook **executed** (§6 drill ✓). The nightly-dump second line of
+defence is **live for BOTH stacks** (`backup-neon-nightly.yml` → `r2://workwell-backups/db-dumps/twh/`
+and `…/db-dumps/maui/`, §2 item 2). Storage moved from AWS S3 to **Cloudflare R2 on 2026-09-11**
+after the AWS Free Plan account expired (#473 — see the §2 note). Remaining owner decision: **the Neon
+plan upgrade** — the 6-hour PITR window and the unprotected `production` branch are both Free-plan
+caps (§2), not settings.
 
 All facts below were read from the live Neon project on 2026-07-13, not assumed.
 
@@ -61,22 +63,35 @@ moment any real data lands it becomes a compliance-grade incident**, which is ex
 1. **Raise `history_retention_seconds`** on the Neon project — 7 days is the conventional floor for
    anything with a human in the loop. **Blocked by the Free plan (max 21600s, verified 2026-07-14);
    requires a plan upgrade.**
-> **⚠ Bucket-host expiry (found 2026-07-14):** `workwell-twh-evidence` lives on an AWS **Free Plan**
-> account (no card linked, cannot be charged — but the plan **expires 2026-08-24**, after which AWS
-> restricts the account and eventually deletes resources). The bucket, the nightly dumps, and the
-> live evidence seam must be **re-homed before ~2026-08-24**: MIE-provided S3/R2 (the C14 hosting
-> conversation — preferred), a paid-plan upgrade, or a Cloudflare R2 free bucket. Migration is env
-> vars only (`WORKWELL_BUCKET_S3_*` + optional `_ENDPOINT`) plus an `aws s3 sync`; no code change.
+> **⚠ The bucket-host expiry happened. Written up because the warning was right and useless.**
+> The note that stood here from 2026-07-14 said `workwell-twh-evidence` sat on an AWS **Free Plan**
+> account expiring **2026-08-24**, and that the bucket had to be re-homed before then. It was not.
+> On 2026-08-25 AWS suspended the account: S3 began answering `AllAccessDisabled`, every key stopped
+> authenticating, the nightly dump failed **seventeen consecutive nights** (#473), and the evidence
+> seam failed **silently for eighteen days** because it is only exercised on the first evidence
+> operation. Everything uploaded in that window is gone, and the dumps that were in the bucket are
+> unrecoverable without settling the account.
+> **Re-homed to Cloudflare R2 on 2026-09-11** — buckets `workwell-evidence-twh` and
+> `workwell-backups`, one scoped API token each, `db-dumps/` expiring after 30 days. Migration was
+> env vars only (`WORKWELL_BUCKET_S3_*` + `_ENDPOINT`), exactly as predicted; no code changed.
+> R2's free tier has **no expiry clock**, which is the property that actually failed here.
+> Two durable lessons: **a dated deadline in a runbook is not a control** — nothing failed loudly on
+> the day it lapsed — and a configured-but-unreachable seam must announce itself, which is now the
+> boot-time probe (`bucket-health.ts`, `docs/DEPLOY.md`).
 
-2. ~~**Add a second line of defence: a scheduled logical dump.**~~ **DONE 2026-07-14 (#167 + #270):**
-   the managed bucket `workwell-twh-evidence` is provisioned (ADR-030) and
-   `.github/workflows/backup-neon-nightly.yml` dumps the `workwell_spike` schema to
-   `s3://workwell-twh-evidence/db-dumps/` nightly (03:17 UTC, custom format, direct — non-pooler —
-   connection, 30-day lifecycle expiry). The dump is written by a **dedicated IAM principal**
-   (`workwell-twh-backup`, PutObject on `db-dumps/*` only) and the app's own IAM user has an
-   **explicit deny on `db-dumps/*`** — a compromised app container cannot touch the backups.
-   Recovery is now independent of Neon retention *and* of Neon itself. Worst-case data-loss window:
-   ~24h (nightly dump) beyond the 6h PITR window.
+2. ~~**Add a second line of defence: a scheduled logical dump.**~~ **DONE 2026-07-14 (#167 + #270);
+   extended to both stacks and re-homed to R2 on 2026-09-11 (#473):**
+   `.github/workflows/backup-neon-nightly.yml` dumps the `workwell_spike` schema of **each** live
+   stack nightly (03:17 UTC, custom format, direct — non-pooler — connection) to
+   `r2://workwell-backups/db-dumps/twh/` and `r2://workwell-backups/db-dumps/maui/`, with a 30-day
+   lifecycle expiry on the `db-dumps/` prefix. A matrix leg per stack, `fail-fast: false`, so one
+   stack's outage never cancels the other's dump — **the pilot carried 20,000 patients from
+   2026-09-06 with no backup at all** until this leg existed. The dumps are written by a **dedicated
+   R2 token scoped to `workwell-backups` alone**; the app's evidence token names a different bucket
+   and therefore cannot reach them at all. Recovery is independent of Neon retention *and* of Neon
+   itself. Worst-case data-loss window: ~24h (nightly dump) beyond the 6h PITR window.
+   **Watch the dump size** on the run summary: the R2 free tier is 10 GB and the window is 30 dumps
+   per stack, so the pilot's size is what decides whether 30 days actually fits.
 3. **Protect the `production` branch** — **blocked by the Free plan (0 protected branches, verified
    2026-07-14); same plan-upgrade decision as item 1.**
 
