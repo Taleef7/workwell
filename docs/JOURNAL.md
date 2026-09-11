@@ -1,5 +1,56 @@
 # Journal
 
+## 2026-09-11 — the state of things before MM-2, and four documents that still said two measures were routed
+
+A planning session rather than a building one: with #548 deployed and backfilled, the question was
+what actually stands between here and MM-2, and the answer turned out to be shorter than expected.
+
+**Nothing in MM-1 blocks MM-2.** Its remaining items are externally blocked or belong to the PHI
+phase: MM-1a waits on the CY2027 final rule (~November) to say whether Quality ID 305 survives, and
+cms137 comes off by the same workflow edit if it does not; MM-1d's re-vendor waits on CMS publishing
+PY2027 artifacts, and its interim guard — the effectivePeriod-versus-measured-year warning — has been
+built since ADR-072 and fires on the run log; #533's ingest stamping gates real data, not the sandbox;
+and #532's cms165 cross-engine question needs a credentialed sweep, not a decision. MM-1c's
+informational tiles were dropped on 09-10 rather than built. What is left before MM-2 is hygiene, one
+production-incident-class gap, and a handful of owner-owned asks that do not wait on code.
+
+**Four documents still said two measures were routed**, three days after ADR-078 routed six. The
+guide's chapter 9 funnel, its numbers table, chapter 4's routing diagram and its vendored/gated/routed
+table, chapter 1's gate row, the guide README and the public README all carried some version of "410
+of 410 across 8 vendored measures, 2 routed" — the state of the world on 2026-09-06, before CMS137's
+deck joined the gate (455 of 455 across 9, which chapter 4's own table had already recorded) and
+before the flip. The public README's measure table had no CMS137 row at all and showed four routed
+measures as unrouted. All corrected here, with the sandbox-versus-submission distinction stated on the
+README table rather than left to be inferred from a tick.
+
+**The DEPLOY.md restart step was never committed.** `6ef5198f`'s message says the runbook now makes
+the post-backfill worker restart a step rather than leaving it to be discovered; the commit touched
+DECISIONS, JOURNAL and chapter 9, and the runbook paragraph itself stayed in the working tree. It is
+committed here. A runbook that is right in someone's working copy is a runbook that is wrong.
+
+**The nightly backup has been failing for seventeen days, and the pilot has never had one.** Run
+34577510354 is the seventeenth consecutive failure since 2026-08-25. The dump itself succeeds; the S3
+upload answers `InvalidAccessKeyId`, so the access key is dead rather than the database being
+unreachable — which is worth stating because #473's own triage text puts "database unreachable" first,
+and that is not this. The larger finding is next to it: `backup-neon-nightly.yml` names
+`DATABASE_URL_TWH` and nothing else, so the 20,000-patient pilot database has no backup workflow at
+all and never has. A rotated key and a second leg over `DATABASE_URL_MAUI` are the next commit.
+
+**And the Maui JWT rotation did not stick.** It was rotated on the MIE container manager on 09-03, but
+`WORKWELL_AUTH_JWT_SECRET_MAUI` is a GitHub repo secret that `deploy-maui-mieweb.yml` writes into the
+container environment on every deploy, and the deploy deletes and recreates the container on every push
+to main. Roughly a dozen pushes since have restored the old value. The same shape as ADR-045's reason
+for putting the routed measure list in the workflow file rather than on the container: anything set by
+hand on a container that is recreated on every push is temporary by construction. The rotation has to
+be `gh secret set` followed by a deploy, and it logs every live session out once.
+
+Also settled: the 09-03 handover's F2/F3/G1 recovery-alert follow-ups are superseded. Their brief lived
+in a worktree that no longer exists and nothing in the repo names them, but their subject — #509's run
+recovery claiming to alert where it could fail silently — was reworked in #545, which made exhaustion
+alert, refused a sweep once shutdown has begun, and stopped a retry from flipping rows to FAILED
+without writing `RUN_RECOVERED`. Ten remote branches, all squash-merged and therefore invisible to
+`git branch --merged`, are deleted.
+
 ## 2026-09-10 (later) — the dashboard was reporting the wrong rate, because a patient the measure does not describe was being counted as a gap
 
 The read-path work earlier today made the pages load. It did not make them right. With the segment

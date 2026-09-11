@@ -123,7 +123,7 @@ flowchart TB
     AUTH --> A2["cql-execution walks our committed ELM - about 68 ms per subject"]
     A2 --> A3["A value for every define. One is the verdict."]
   end
-  subgraph O["OFFICIAL - CMS's published artifact, 2 routed measures"]
+  subgraph O["OFFICIAL - CMS's published artifact, 6 routed measures on the pilot stack"]
     OFF --> O2["Prepare a QI-Core copy of the bundle - statuses, onset dates, encounter classes"]
     O2 --> O3["Value sets from the artifact's own pinned terminology, never our VSAC import"]
     O3 --> O4["fqm-execution calculates population membership: in scope, denominator, excluded, exception, numerator"]
@@ -226,9 +226,9 @@ The steps that need a sentence more than the diagram gives them:
   routing stays refused: a differently-incomplete list is the one outcome worse than staying
   capped.
 - **Step 9 is the gate.** Every measure ships with test patients and the answers its authors
-  expect. All of them run: **410 of 410 exact, across all 8 vendored measures** (CMS122 55,
-  CMS125 66, CMS2 36, CMS68 19, CMS951 55, CMS138 47, CMS130 64, CMS165 68). No measure is allowed
-  near a real person before this passes.
+  expect. All of them run: **455 of 455 exact, across all 9 vendored measures** (CMS122 55,
+  CMS125 66, CMS2 36, CMS68 19, CMS951 55, CMS138 47, CMS130 64, CMS165 68, CMS137 45 over both
+  rates). No measure is allowed near a real person before this passes.
 - **Step 12 is a reviewed change, not an operator action.** The measure is named in the deploy
   workflow file rather than set on the container, because the deploy deletes and recreates the
   container and would wipe a hand-set value. Switching a measure on therefore has a diff, and
@@ -253,12 +253,12 @@ log that official measures are on, keep the health endpoint green, and 500 every
 
 ### Vendored, gated and routed are three different things
 
-| State (2026-09-06) | Count | Detail |
+| State (2026-09-08) | Count | Detail |
 |---|---|---|
 | Vendored — artifact in the tree | 9 of 9 | Each with complete code lists and nothing truncated; CMS137 is the first multi-rate one |
 | MADiE-gated — authors' own deck passes | 9 of 9 | 455 of 455, every rate compared |
 | Runnable — a deployment may route it | 9 | authored (cms122/cms125) or official-only and listed by the profile (ADR-072) |
-| Routed — evaluating real people | 2 | cms122 and cms125, on the TWH and Maui stacks |
+| Routed — evaluating real people | 6 on Maui, 2 on TWH | The Maui pilot sandbox routes the ACO's whole computable set — cms122, cms125, cms2, cms130, cms165, cms137 (ADR-078, owner decision); TWH stays on cms122 and cms125 |
 
 A measure with an authored counterpart is judged by `pnpm flip-snapshot`, step 11 — both engines over
 the same people. The official-only four (cms2, cms130, cms165, cms137) have no BEFORE for that diff, so
@@ -308,6 +308,6 @@ guarantee.
 
 ```bash
 cd backend-ts
-pnpm test:official-cases        # the MADiE gate: 410/410 (needs the terminology sidecar)
+pnpm test:official-cases        # the MADiE gate: 455/455 (needs the terminology sidecar)
 pnpm flip-snapshot --measure cms125   # both engines over the same bundles, per-subject diff
 ```

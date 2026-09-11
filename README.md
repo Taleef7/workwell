@@ -156,16 +156,19 @@ Per priority measure, three different claims — **gated** (its official MADiE t
 
 | Measure | MADiE gate | Routable | Routed in production |
 |---|---|---|---|
-| CMS122 (Diabetes: HbA1c > 9%) | 55/55 | ✓ | **✓ demo/production** (2026-07-30) |
-| CMS125 (Breast Cancer Screening) | 66/66 | ✓ | **✓ demo/production** (2026-07-30) |
-| CMS2 (Depression Screening) | 36/36 | ✓ | — |
+| CMS122 (Diabetes: HbA1c > 9%) | 55/55 | ✓ | **✓ demo/production** (2026-07-30) · **✓ pilot** |
+| CMS125 (Breast Cancer Screening) | 66/66 | ✓ | **✓ demo/production** (2026-07-30) · **✓ pilot** |
+| CMS2 (Depression Screening) | 36/36 | ✓ | **✓ pilot sandbox** (2026-09-08) |
 | CMS68 (Documentation of Medications) | 19/19 | **✗ episode-of-care** | — |
-| CMS130 (Colorectal Cancer Screening) | 64/64 | ✓ | — |
+| CMS130 (Colorectal Cancer Screening) | 64/64 | ✓ | **✓ pilot sandbox** (2026-09-08) |
+| CMS137 (SUD Treatment Initiation & Engagement) | 45/45 | ✓ multi-rate | **✓ pilot sandbox** (2026-09-08) |
 | CMS138 (Tobacco Screening & Cessation) | 47/47 * | ✓ | — |
-| CMS165 (Controlling High Blood Pressure) | 68/68 | ✓ | — |
+| CMS165 (Controlling High Blood Pressure) | 68/68 | ✓ | **✓ pilot sandbox** (2026-09-08) |
 | CMS951 (Kidney Health Evaluation) | 55/55 | ✓ | — |
 
-CMS68 is refused at **construction time**, not by convention: it declares `populationBasis: Encounter`, and the executor maps one population vector per subject, which cannot represent episodes ([ADR-047](docs/DECISIONS.md)). \* CMS138's green is a weaker claim than the other seven — upstream ships its bundle one value set short, so four codes are sourced from VSAC by us rather than shipped by CMS ([ADR-053](docs/DECISIONS.md)). Unrouted measures still evaluate their authored implementations everywhere.
+CMS68 is refused at **construction time**, not by convention: it declares `populationBasis: Encounter`, and the executor maps one population vector per subject, which cannot represent episodes ([ADR-047](docs/DECISIONS.md)). \* CMS138's green is a weaker claim than the other eight — upstream ships its bundle one value set short, so four codes are sourced from VSAC by us rather than shipped by CMS ([ADR-053](docs/DECISIONS.md)). Unrouted measures still evaluate their authored implementations everywhere.
+
+**"Pilot sandbox" is a sandbox, not a submission.** The six measures run over a 20,000-patient generated corpus on a separate deployment ([ADR-078](docs/DECISIONS.md)); running a real measurement year against real data is a later, separately gated decision ([`docs/PRODUCTION_READINESS_2026-07.md`](docs/PRODUCTION_READINESS_2026-07.md)). CMS137 stays routed only while Quality ID 305 survives the CY2027 final rule, and CMS165 needs blood pressures profile-stamped at ingest before real data.
 
 **Alerting today is WorkWell-screens-only.** The CDS Hooks service is live and standards-conformant, but no client — WebChart included — invokes it yet; cards render the most recent finalized run when asked ([`docs/CDS_HOOKS.md`](docs/CDS_HOOKS.md), [guide ch. 10](docs/guide/10-scenarios.md)).
 
