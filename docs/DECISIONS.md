@@ -86,7 +86,7 @@ for every man.
    expression; they now hold one.
 
 **Consequences.** Every headline rate on the pilot moves up, sharply and correctly, once the backfill
-runs — CMS125 18.0% → 72.1%, CMS130 19.5% → 43.3%, CMS165 20.5% → 62.3%, CMS122 7.4% → 72.4%
+runs — CMS125 18.0% → 72.1%, CMS130 19.5% → 43.3%, CMS165 20.5% → 62.4%, CMS122 7.4% → 72.4%
 (inverse: poor control), CMS137 0.4% → 13.5%, CMS2 60.9% → 68.7%. Anyone who recorded an earlier
 figure will see a discontinuity, and it is not a data change: the same runs, counted against the
 population the measure actually describes. The stored outcomes are otherwise untouched, and the

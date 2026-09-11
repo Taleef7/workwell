@@ -21,7 +21,7 @@ was **zero** and the whole column was out-of-population:
 |---|---|---|---|
 | CMS2 | 17,795 | 60.9% | 68.7% |
 | CMS130 | 9,257 | 19.5% | 43.3% |
-| CMS165 | 6,837 | 20.5% | 62.3% |
+| CMS165 | 6,837 | 20.5% | 62.4% |
 | CMS125 | 5,128 | 18.0% | 72.1% |
 | CMS122 | 2,103 | 7.4% | 72.4% (inverse — poor control) |
 | CMS137 | 599 | 0.4% | 13.5% |
@@ -146,6 +146,24 @@ immediately: it caught `listLatestPopulationOutcomes` not projecting the new col
 and then caught `listOutcomesForMeasure` doing the same once review pointed at it.
 The one remaining local failure is `corpus-membership.test.ts`, the known stale local sparse-checkout
 of the vendored artifacts, green in CI.
+
+**Deployed and backfilled, 2026-09-11.** Merged as `0dde481b`; both stacks auto-deploy on push. The
+un-backfilled guarantee held in production exactly as designed — the API came up reporting
+`notInPopulation: 0` and the OLD rates, nothing moved on deploy alone. The backfill then ran against
+Neon (via `neonctl`, the SQL read out of `DEPLOY.md` itself so what executed is what is documented),
+gated on reproducing each measure's measured split inside the transaction before COMMIT. The gate
+earned itself on the first attempt: the statement parser dropped every UPDATE (each is introduced by a
+comment line), zero rows changed, and the verification rolled back rather than reporting success.
+Second attempt: `UPDATE 435556` out-of-population, `UPDATE 212020` in-population, every measure exact.
+144 evaluation-error rows and hypertension's 384 authored rows correctly stayed NULL.
+
+**And the memos did not notice.** The API kept serving the old numbers with the database already
+corrected, because the read models memoize under the WINNING RUNS' key on the premise that a terminal
+run's outcomes are immutable — and the backfill is the one operation that mutates them without minting
+a run. Nothing invalidated. A `replace_existing` redeploy (the same delete-and-recreate every push
+performs) cleared it, and `DEPLOY.md` now carries that as a required step rather than leaving the next
+person to discover it. Verified live afterwards: CMS2 68.7%, CMS130 43.3%, CMS165 62.4%, CMS125 72.1%,
+CMS122 72.4%, CMS137 13.5%, with in-population missing data at zero across all six.
 
 **Left open.** Item 4 of the shortlist — informational tiles for the ACO's CMS-calculated/vendor
 measures — was **dropped rather than built**: going back to the source material, that category was
