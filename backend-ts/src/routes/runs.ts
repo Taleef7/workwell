@@ -1358,7 +1358,16 @@ export async function handleRuns(
       unit: "subject-measure pairs",
       workItems,
       rowsPersisted,
-      byStatus: byStatus.map((c) => ({ status: c.status, count: c.count })),
+      // FOLDED by status. Since ADR-079 `countOutcomesByStatus` groups by (status, out_of_population),
+      // so one status can arrive as up to three rows — mapping them straight through turned a
+      // histogram into indistinguishable duplicate buckets ("MISSING_DATA: 3000", "MISSING_DATA: 120")
+      // for a reader whose whole purpose is reconciling counts. `outOfPopulation` rides alongside as
+      // its own field rather than splitting the histogram (Codex review, #548).
+      byStatus: [...byStatus.reduce((m, c) => m.set(c.status, (m.get(c.status) ?? 0) + c.count), new Map<string, number>())]
+        .map(([status, count]) => ({ status, count })),
+      notInPopulation: byStatus
+        .filter((c) => c.status === "MISSING_DATA" && c.outOfPopulation === true)
+        .reduce((sum, c) => sum + c.count, 0),
       evaluationErrors,
       official,
       casesCiting: await stores.cases.countByLastRun(reconId),

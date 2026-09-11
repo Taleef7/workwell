@@ -977,7 +977,11 @@ export async function programRiskOutlook(
       const ordered = [...latestPerPeriod.values()].sort((a, b) => b.evaluatedAt.localeCompare(a.evaluatedAt));
       let streak = 0;
       for (const r of ordered) {
-        if (!FLAGGED.has(r.status)) break;
+        // An out-of-population period is not a non-compliant one (ADR-079). Without this, every
+        // non-diabetic evaluated for cms122 across three periods earned a streak of 3 and appeared
+        // in a named "repeat non-compliers" top-10 — a list of people nothing can be done about, on
+        // the panel this change exists to clean up.
+        if (!FLAGGED.has(r.status) || (r.outOfPopulation === true && r.status === "MISSING_DATA")) break;
         streak++;
       }
       const emp = directory.employeeById(subjectId);

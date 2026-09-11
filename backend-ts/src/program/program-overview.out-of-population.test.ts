@@ -13,7 +13,7 @@ import assert from "node:assert/strict";
 import type { OutcomeStore, OutcomeWithRun } from "../stores/outcome-store.ts";
 import type { RunStore } from "../stores/run-store.ts";
 import type { CaseStore } from "../stores/case-store.ts";
-import { programOverview, programTopDrivers, programTrend, __overviewMemo, __chartMemos } from "./program-read-models.ts";
+import { programOverview, programRiskOutlook, programTopDrivers, programTrend, __overviewMemo, __chartMemos } from "./program-read-models.ts";
 import { latestRunsFromRows } from "../test-support/latest-runs.ts";
 
 const MEASURE = "cms122";
@@ -131,4 +131,39 @@ test("the trend point is on the SAME basis as the headline it sits under", async
   assert.equal(trend[0]!.denominator, 2);
   assert.equal(trend[0]!.complianceRate, summary.complianceRate, "one run, one rate — whichever surface reports it");
   assert.equal(trend[0]!.totalEvaluated, 5, "the point still reports every row the run wrote");
+});
+
+test("the risk outlook does not build a non-compliance streak out of out-of-population periods", async () => {
+  // Codex review, #548: the site table was migrated but `repeatNonCompliers` below it was not, so a
+  // non-diabetic evaluated for cms122 across three periods earned a streak of 3 and was named in a
+  // top-10 list of people nothing can be done about. The first fix for this silently no-opped (a
+  // scripted replace whose indentation did not match), which is why the behaviour is pinned here.
+  const period = (evaluationPeriod: string, outOfPopulation: boolean) => ({
+    subjectId: "emp-006",
+    status: "MISSING_DATA",
+    evaluationPeriod,
+    evaluatedAt: `2026-0${evaluationPeriod.slice(-1)}-01T00:00:00.000Z`,
+    evidence: {},
+    outOfPopulation,
+  });
+  const deps = (outOfPopulation: boolean) => ({
+    outcomeStore: {
+      listOutcomesWithRun: async () => [],
+      listLatestPopulationRuns: latestRunsFromRows([]),
+      listOutcomesForMeasure: async () => [period("2026-1", outOfPopulation), period("2026-2", outOfPopulation), period("2026-3", outOfPopulation)],
+      listOutcomes: async () => [],
+      aggregateScaleRun: async () => [],
+    } as unknown as OutcomeStore,
+    runStore: { listRuns: async () => [] } as unknown as RunStore,
+    caseStore: { listCases: async () => [] } as unknown as CaseStore,
+  });
+
+  const outside = await programRiskOutlook(deps(true), MEASURE, 30);
+  assert.deepEqual(outside!.repeatNonCompliers, [], "outside the population three periods running is not a streak");
+
+  // The control: the SAME three periods, in the population, are a real streak — so the assertion
+  // above is about the flag and not about the fixture failing to produce one at all.
+  const inside = await programRiskOutlook(deps(false), MEASURE, 30);
+  assert.equal(inside!.repeatNonCompliers.length, 1);
+  assert.equal(inside!.repeatNonCompliers[0]!.streakCount, 3);
 });

@@ -97,6 +97,11 @@ export default function ProgramsPage() {
     const reqId = ++reqIdRef.current;
     setLoading(true);
     setError(null);
+    // Reset here, not only in the detail phase's finally: a PREVIOUS scope's detail call may have left
+    // this true, and its own reset is guarded by `reqId === reqIdRef.current`, which no longer holds
+    // once this call bumped the ref. Without this, an overview failure on the new scope leaves the
+    // cards showing loading skeletons forever (Codex review, #548).
+    setDetailsLoading(false);
     // The panels belong to the scope that is being replaced; keep showing them and they read as this
     // scope's answer for as long as the detail call takes.
     setTrendByMeasure({});
