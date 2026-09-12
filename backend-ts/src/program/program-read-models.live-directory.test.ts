@@ -344,6 +344,7 @@ test("default profile — non-catalog subjects (e.g. QRDA Cypress imports) are i
     assignee: null,
     nextAction: null,
     nextActionSource: "SYSTEM",
+    assignmentSource: null,
     currentOutcomeStatus: "COMPLIANT",
     lastRunId: "run-cypress-1",
     createdAt: "2026-07-17T00:00:00.000Z",

@@ -94,6 +94,12 @@ CREATE TABLE IF NOT EXISTS ${SPIKE_SCHEMA}.cases (
   -- wrote). The nightly upsert preserves an OPERATOR action while the outcome it was written about
   -- still holds — planNextAction in case/case-logic.ts.
   next_action_source     TEXT NOT NULL DEFAULT 'SYSTEM',
+  -- Who chose the assignee: 'PANEL' (the provider-panel mapping, at case creation or by a panel
+  -- backfill) or 'OPERATOR' (a person, through assign / bulk-assign). NULL means unassigned, or a row
+  -- written before this column existed — and a NULL-sourced row that HAS an assignee is read as
+  -- operator-owned, so a panel backfill never moves work someone placed by hand. Mirrors
+  -- next_action_source (ADR-076 d2); the rule is planPanelBackfill in case/panel-assignment.ts.
+  assignment_source      TEXT,
   current_outcome_status TEXT NOT NULL,
   last_run_id            UUID NOT NULL,
   created_at             TIMESTAMPTZ NOT NULL,
@@ -174,6 +180,14 @@ ALTER TABLE ${SPIKE_SCHEMA}.outcomes ADD COLUMN IF NOT EXISTS evaluation_period 
 -- wrong. docs/DEPLOY.md carries the one-time backfill that resolves the NULLs from the evidence.
 -- Additive, reversible (DROP COLUMN), no data migration required to deploy.
 ALTER TABLE ${SPIKE_SCHEMA}.outcomes ADD COLUMN IF NOT EXISTS out_of_population BOOLEAN;
+
+-- OWNER-APPROVED DDL (ADR-080, 2026-09-12): who chose a case's assignee — see the column comment in
+-- the cases table above. NULLABLE ON PURPOSE, and for the same reason ADR-079's column is: NULL is the
+-- truth for every row written before this existed. Defaulting them to 'OPERATOR' would be a lie a
+-- backfill then acts on, and defaulting them to 'PANEL' would let the first panel edit move work a
+-- person placed by hand. Readers treat a NULL source with an assignee as operator-owned, which is the
+-- safe reading: it declines to move the row. Additive, reversible (DROP COLUMN), no data migration.
+ALTER TABLE ${SPIKE_SCHEMA}.cases ADD COLUMN IF NOT EXISTS assignment_source TEXT;
 
 CREATE TABLE IF NOT EXISTS ${SPIKE_SCHEMA}.measures (
   id          TEXT PRIMARY KEY,
@@ -421,4 +435,30 @@ CREATE TABLE IF NOT EXISTS ${SPIKE_SCHEMA}.eval_state (
   UNIQUE (subject_id, measure_id, period)
 );
 CREATE INDEX IF NOT EXISTS spike_eval_state_measure_period_idx ON ${SPIKE_SCHEMA}.eval_state (measure_id, period);
+
+-- Provider panels (MM-2 PR 2, ADR-080). One row per provider the practice has mapped to a staff
+-- account: the durable "our staff is assigned to specific providers" arrangement the pilot group
+-- described, which until now existed only in their heads and had to be re-applied by hand to every
+-- case a nightly run opened. A provider with NO row is an explicit unassigned queue, never an error —
+-- so an unmapped panel and a patient with no PCP both stay visible rather than stranding work.
+-- One assignee per provider; a staff member owns many providers, which is the direction the practice
+-- actually works in. The assignee is an assignable account email, validated by the route against the
+-- same list /api/users/assignable offers the UI, so the offer and the check cannot drift. Provider ids
+-- are globally unique strings across tenants and there is one database per deployment, so there is no
+-- profile/tenant column. Assignment only — a panel is never a denominator or an attribution claim.
+-- OWNER-APPROVED DDL: Taleef explicitly authorized this table in-session (2026-09-12) — the CLAUDE.md
+-- schema-owner rule is satisfied; additive (CREATE IF NOT EXISTS), reversible (DROP TABLE), no data
+-- migration required to deploy.
+CREATE TABLE IF NOT EXISTS ${SPIKE_SCHEMA}.panel_assignments (
+  provider_id  TEXT PRIMARY KEY,
+  assignee     TEXT NOT NULL,
+  created_by   TEXT,
+  created_at   TIMESTAMPTZ NOT NULL,
+  updated_at   TIMESTAMPTZ NOT NULL
+);
+
+-- "Which panels are mine?" is the work list's default-view question, asked on every page load by every
+-- staff account. It is a scan of a table with one row per provider (~40 at the pilot), so the index is
+-- about intent as much as cost: the column the read filters on is the one that is indexed.
+CREATE INDEX IF NOT EXISTS spike_panel_assignments_assignee_idx ON ${SPIKE_SCHEMA}.panel_assignments (assignee);
 `;

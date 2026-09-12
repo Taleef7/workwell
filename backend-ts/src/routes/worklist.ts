@@ -189,6 +189,9 @@ async function bulkAssign(req: Request, env: WorklistEnv, actor: string): Promis
   const assigned = await stores.cases.assignCases(
     changing.map((c) => ({ id: c.id, expectedAssignee: c.assignee ?? null })),
     assignee,
+    // A person ticked these boxes, so the rows become operator-owned and a later panel edit leaves
+    // them alone (ADR-080 d1/d3) — the same boundary patchCase draws on the single-case path.
+    "OPERATOR",
   );
   // The four numbers PARTITION the input: assigned + unchanged + closed.length + missing.length ===
   // the de-duplicated ids asked for. `unchanged` used to be `ids.length - assigned.length`, which

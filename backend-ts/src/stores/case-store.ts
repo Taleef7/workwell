@@ -14,6 +14,12 @@ export interface CaseRecord {
   nextAction: string | null;
   /** Who wrote `nextAction`: 'SYSTEM' (the wording table) or 'OPERATOR' (a person's instruction). */
   nextActionSource: string;
+  /**
+   * Who chose `assignee`: 'PANEL' (the provider-panel mapping) or 'OPERATOR' (a person). `null` when
+   * unassigned, and also on a row written before this column existed — a null source that HAS an
+   * assignee is read as operator-owned, the reading that declines to move the row (ADR-080 d1).
+   */
+  assignmentSource: string | null;
   currentOutcomeStatus: string;
   lastRunId: string;
   createdAt: string;
@@ -41,6 +47,21 @@ export interface UpsertCaseInput {
    * for an OFFICIALLY routed measure; the persisted status stays MISSING_DATA.
    */
   outOfPopulation?: boolean;
+  /**
+   * The provider-panel owner for this subject, applied ON THE INSERT BRANCH ONLY (ADR-080 d2): a case
+   * this run OPENS is created already assigned to whoever works that provider's panel, so the nightly
+   * run hands the practice work that is already on somebody rather than a pile to re-distribute by
+   * hand each morning. The row records `assignment_source = 'PANEL'`.
+   *
+   * An existing case is never touched by this — not on an update, not on a reopen. A reopen is within
+   * the same compliance cycle, so the case someone was already working keeps its owner; a NEW cycle is
+   * an insert and picks up whatever the map says then.
+   *
+   * Named `panelAssignee` rather than `assignee` deliberately: there is no way to route an operator's
+   * choice through the insert path and have it recorded as anything but a panel assignment, because
+   * the field itself names where the value came from.
+   */
+  panelAssignee?: string;
 }
 
 /**
@@ -113,6 +134,13 @@ export interface CasePatch {
    */
   nextAction?: string;
   nextActionSource?: "SYSTEM" | "OPERATOR";
+  /**
+   * Who chose `assignee`. Setting `assignee` through `patchCase` defaults this to OPERATOR, because
+   * this is the operator surface — the case page, the patient page, the single-case assign route. A
+   * panel backfill goes through `assignCases`, which takes its source explicitly. Clearing the
+   * assignee clears the source with it: nobody chose nobody.
+   */
+  assignmentSource?: "PANEL" | "OPERATOR" | null;
   currentOutcomeStatus?: string;
   lastRunId?: string;
   closedAt?: string | null;
@@ -186,11 +214,16 @@ export interface CaseStore {
    * The case must still be ACTIVE. The return value is the ids changed rather than a count, because
    * the caller audits exactly those.
    *
-   * There is deliberately NO provenance argument here yet. `cases.assignment_source` is PR 2's
-   * owner-written DDL; writing to a column that does not exist would fail, and accepting an argument
-   * this method cannot honour would be worse — a parameter that reads as recorded and is discarded.
+   * **`source` records WHO chose** (ADR-080 d1) — 'PANEL' for the provider-panel backfill, 'OPERATOR'
+   * for a person's bulk assign. It is what lets the next panel edit tell its own previous assignment
+   * from one a person made by hand, and move only the former. Clearing an assignee (`assignee` null)
+   * clears the source too, whatever is passed here.
    */
-  assignCases(expected: readonly CaseAssignExpectation[], assignee: string | null): Promise<string[]>;
+  assignCases(
+    expected: readonly CaseAssignExpectation[],
+    assignee: string | null,
+    source: "PANEL" | "OPERATOR",
+  ): Promise<string[]>;
   listCases(query: CaseQuery): Promise<CaseRecord[]>;
   /** Patch mutable fields (always bumps updated_at); returns the updated row or null. */
   patchCase(id: string, patch: CasePatch): Promise<CaseRecord | null>;

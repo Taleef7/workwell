@@ -18,6 +18,7 @@ interface CaseRow {
   assignee: string | null;
   next_action: string | null;
   next_action_source: string | null;
+  assignment_source: string | null;
   current_outcome_status: string;
   last_run_id: string;
   created_at: string;
@@ -28,7 +29,7 @@ interface CaseRow {
 }
 
 const COLS =
-  "id, employee_id, measure_id, evaluation_period, status, priority, assignee, next_action, next_action_source, current_outcome_status, last_run_id, created_at, updated_at, closed_at, closed_reason, closed_by";
+  "id, employee_id, measure_id, evaluation_period, status, priority, assignee, next_action, next_action_source, assignment_source, current_outcome_status, last_run_id, created_at, updated_at, closed_at, closed_reason, closed_by";
 
 const toRecord = (r: CaseRow): CaseRecord => ({
   id: r.id,
@@ -40,6 +41,9 @@ const toRecord = (r: CaseRow): CaseRecord => ({
   assignee: r.assignee,
   nextAction: r.next_action,
   nextActionSource: r.next_action_source ?? "SYSTEM",
+  // Null is a REAL state (unassigned, or a row from before the column existed), never defaulted here —
+  // the operator-owned reading of a null source lives in planPanelBackfill, where it is acted on.
+  assignmentSource: r.assignment_source,
   currentOutcomeStatus: r.current_outcome_status,
   lastRunId: r.last_run_id,
   createdAt: r.created_at,
@@ -72,6 +76,9 @@ export class SqliteCaseStore implements CaseStore {
     const now = new Date().toISOString();
     const priority = priorityFor(input.outcomeStatus);
     const computedAction = nextActionFor(input.outcomeStatus, input.measureId, input.evidence);
+    // Blank-tolerant: a mapping resolving to an empty string is no mapping, and would otherwise store
+    // an assignee nobody can be, on a row whose source claims a panel chose it.
+    const panelAssignee = input.panelAssignee?.trim() || null;
     let existing = await this.findByKey(input.subjectId, input.measureId, input.evaluationPeriod);
     let action = planNextAction(
       existing
@@ -95,10 +102,13 @@ export class SqliteCaseStore implements CaseStore {
     if (plan.op === "insert") {
       const row = await this.db
         .prepare(
+          // The panel owner is applied HERE and only here (ADR-080 d2) — a case this run opens arrives
+          // already assigned to whoever works that provider's panel. Null on a deployment with no
+          // mapping for the subject's provider, which is exactly the old behaviour.
           `INSERT INTO cases
              (id, employee_id, measure_id, evaluation_period, status, priority, assignee,
-              next_action, next_action_source, current_outcome_status, last_run_id, created_at, updated_at, closed_at, closed_reason, closed_by)
-           VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              next_action, next_action_source, assignment_source, current_outcome_status, last_run_id, created_at, updated_at, closed_at, closed_reason, closed_by)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT (employee_id, measure_id, evaluation_period) DO NOTHING
            RETURNING ${COLS}`,
         )
@@ -109,8 +119,10 @@ export class SqliteCaseStore implements CaseStore {
           input.evaluationPeriod,
           plan.status!,
           priority,
+          panelAssignee,
           action.nextAction,
           action.source,
+          panelAssignee == null ? null : "PANEL",
           input.outcomeStatus,
           input.runId,
           now,
@@ -286,7 +298,11 @@ export class SqliteCaseStore implements CaseStore {
     return (results ?? []).map(toRecord);
   }
 
-  async assignCases(expected: readonly CaseAssignExpectation[], assignee: string | null): Promise<string[]> {
+  async assignCases(
+    expected: readonly CaseAssignExpectation[],
+    assignee: string | null,
+    source: "PANEL" | "OPERATOR",
+  ): Promise<string[]> {
     if (expected.length === 0) return [];
     // Grouped by the assignee the caller READ, then one statement per distinct value. The floor has no
     // portable way to zip two arrays into a join the way Postgres's `unnest` does, and the number of
@@ -302,6 +318,9 @@ export class SqliteCaseStore implements CaseStore {
 
     const active = [...ACTIVE_CASE_STATUSES];
     const now = new Date().toISOString();
+    // Clearing an assignee clears the source with it: nobody chose nobody, and a row reading
+    // "unassigned, chosen by the panel" would make the next backfill's question unanswerable.
+    const nextSource = assignee === null ? null : source;
     const changed: string[] = [];
     for (const [expectedAssignee, ids] of byExpected) {
       // `IS` is SQLite's NULL-safe equality and `IS NOT` its NULL-safe inequality — the counterparts
@@ -309,14 +328,14 @@ export class SqliteCaseStore implements CaseStore {
       // unassigned row, and assigning an unassigned case is the commonest thing this is asked to do.
       const { results } = await this.db
         .prepare(
-          `UPDATE cases SET assignee = ?, updated_at = ?
+          `UPDATE cases SET assignee = ?, assignment_source = ?, updated_at = ?
             WHERE id IN (${ids.map(() => "?").join(", ")})
               AND status IN (${active.map(() => "?").join(", ")})
               AND assignee IS ?
               AND assignee IS NOT ?
           RETURNING id`,
         )
-        .bind(assignee, now, ...ids, ...active, expectedAssignee, assignee)
+        .bind(assignee, nextSource, now, ...ids, ...active, expectedAssignee, assignee)
         .all<{ id: string }>();
       for (const row of results ?? []) changed.push(row.id);
     }
@@ -328,7 +347,18 @@ export class SqliteCaseStore implements CaseStore {
     const binds: unknown[] = [];
     if (patch.status !== undefined) (sets.push("status = ?"), binds.push(patch.status));
     if (patch.priority !== undefined) (sets.push("priority = ?"), binds.push(patch.priority));
-    if (patch.assignee !== undefined) (sets.push("assignee = ?"), binds.push(patch.assignee));
+    // The same ownership transfer the action columns make below: this is the OPERATOR surface, so an
+    // assignment made through it is operator-owned unless the caller says otherwise — and a cleared
+    // assignee has no owner at all.
+    if (patch.assignee !== undefined) {
+      sets.push("assignee = ?");
+      binds.push(patch.assignee);
+      sets.push("assignment_source = ?");
+      binds.push(patch.assignee === null ? null : (patch.assignmentSource ?? "OPERATOR"));
+    } else if (patch.assignmentSource !== undefined) {
+      sets.push("assignment_source = ?");
+      binds.push(patch.assignmentSource);
+    }
     // `patchCase` is the operator surface (escalate, manual resolve, outreach, rerun-to-verify); the
     // system writes actions through `upsertFromOutcome`. So writing an action here transfers ownership
     // to OPERATOR unless the caller explicitly says the action is system-computed.

@@ -23,6 +23,7 @@ import type { SegmentStore } from "./segment-store.ts";
 import type { QualitySnapshotStore, QualitySnapshotInput } from "./quality-snapshot-store.ts";
 import type { PersonLinkStore } from "./person-link-store.ts";
 import type { EvalStateStore, UpsertEvalStateInput } from "./eval-state-store.ts";
+import type { PanelStore } from "./panel-store.ts";
 import { LATEST_RUN_PROBE_BUDGET, type OutcomeMeasureFilter, type OutcomeWithRun } from "./outcome-store.ts";
 import { isCompletedRun, isPopulationRun, latestRunRows } from "../program/rollup-shared.ts";
 
@@ -1011,7 +1012,7 @@ export function caseStoreContract(label: string, freshStore: () => Promise<CaseS
     // Assigning UNASSIGNED rows is the common case, and the one a plain `<>` comparison silently
     // breaks: `NULL <> 'x'` is NULL, so every unassigned row would be skipped and the caller would
     // report "0 assigned" over cases it had just been asked to assign.
-    const first = await store.assignCases(asRead(a.id, b.id), "cm@workwell.dev");
+    const first = await store.assignCases(asRead(a.id, b.id), "cm@workwell.dev", "OPERATOR");
     assert.deepEqual(first.sort(), [a.id, b.id].sort());
     assert.equal((await store.getCase(a.id))?.assignee, "cm@workwell.dev");
 
@@ -1022,20 +1023,20 @@ export function caseStoreContract(label: string, freshStore: () => Promise<CaseS
       { id: a.id, expectedAssignee: "cm@workwell.dev" },
       { id: b.id, expectedAssignee: "cm@workwell.dev" },
     ];
-    assert.deepEqual(await store.assignCases(held, "cm@workwell.dev"), []);
+    assert.deepEqual(await store.assignCases(held, "cm@workwell.dev", "OPERATOR"), []);
 
     // COMPARE-AND-SET. A caller that read a STALE owner must not win: the row moved under it, and
     // overwriting would both lose the other write and leave an audit entry naming a transition that
     // never happened. "Differs from the target" is not this test and would have updated the row.
     assert.deepEqual(
-      await store.assignCases([{ id: a.id, expectedAssignee: "someone.who.never.had.it@workwell.dev" }], "third@workwell.dev"),
+      await store.assignCases([{ id: a.id, expectedAssignee: "someone.who.never.had.it@workwell.dev" }], "third@workwell.dev", "OPERATOR"),
       [],
       "a stale pre-read owner must not overwrite the current one",
     );
     assert.equal((await store.getCase(a.id))?.assignee, "cm@workwell.dev", "and the row is untouched");
     // The same call with the CURRENT owner does apply, so the guard above is not just refusing everything.
     assert.deepEqual(
-      await store.assignCases([{ id: a.id, expectedAssignee: "cm@workwell.dev" }], "third@workwell.dev"),
+      await store.assignCases([{ id: a.id, expectedAssignee: "cm@workwell.dev" }], "third@workwell.dev", "OPERATOR"),
       [a.id],
     );
 
@@ -1048,24 +1049,140 @@ export function caseStoreContract(label: string, freshStore: () => Promise<CaseS
         { id: c.id, expectedAssignee: null },
       ],
       "cm@workwell.dev",
+      "OPERATOR",
     );
     assert.deepEqual(mixed.sort(), [a.id, c.id].sort(), "b was already on the target; a and c moved");
 
     // Clearing is a change too, and back to NULL must be reported once and then not again.
-    assert.deepEqual(await store.assignCases([{ id: a.id, expectedAssignee: "cm@workwell.dev" }], null), [a.id]);
+    assert.deepEqual(await store.assignCases([{ id: a.id, expectedAssignee: "cm@workwell.dev" }], null, "OPERATOR"), [a.id]);
     assert.equal((await store.getCase(a.id))?.assignee, null);
-    assert.deepEqual(await store.assignCases([{ id: a.id, expectedAssignee: null }], null), [], "NULL → NULL is not a change");
+    assert.deepEqual(await store.assignCases([{ id: a.id, expectedAssignee: null }], null, "OPERATOR"), [], "NULL → NULL is not a change");
 
     // Only ACTIVE cases are touched: a closed case is not silently reassigned.
     await store.patchCase(c.id, { status: "RESOLVED" });
     assert.deepEqual(
-      await store.assignCases([{ id: c.id, expectedAssignee: "cm@workwell.dev" }], "someone.else@workwell.dev"),
+      await store.assignCases([{ id: c.id, expectedAssignee: "cm@workwell.dev" }], "someone.else@workwell.dev", "OPERATOR"),
       [],
     );
     assert.equal((await store.getCase(c.id))?.assignee, "cm@workwell.dev", "the closed case kept its assignee");
 
-    assert.deepEqual(await store.assignCases([], "cm@workwell.dev"), []);
-    assert.deepEqual(await store.assignCases(asRead(crypto.randomUUID()), "cm@workwell.dev"), [], "an unknown id is not an error");
+    assert.deepEqual(await store.assignCases([], "cm@workwell.dev", "OPERATOR"), []);
+    assert.deepEqual(await store.assignCases(asRead(crypto.randomUUID()), "cm@workwell.dev", "OPERATOR"), [], "an unknown id is not an error");
+  });
+
+  test(`[${label}] assignment_source records WHO chose the assignee, and a cleared assignee has no owner`, async () => {
+    // ADR-080 d1. The column exists so a panel backfill can tell its OWN previous assignment from one
+    // a person made by hand, and move only the former. Without it the backfill's only test is
+    // "assignee == the previous panel owner", which is also true of a case someone deliberately handed
+    // to that same person — and moving that one silently overrides a human decision.
+    const store = await freshStore();
+    const a = (await upsert(store, "OVERDUE", { subjectId: "emp-001" }))!;
+    assert.equal(a.assignee, null);
+    assert.equal(a.assignmentSource, null, "a case opened with no panel mapping is unassigned and unowned");
+
+    await store.assignCases([{ id: a.id, expectedAssignee: null }], "cm@workwell.dev", "PANEL");
+    assert.equal((await store.getCase(a.id))?.assignmentSource, "PANEL");
+
+    await store.assignCases([{ id: a.id, expectedAssignee: "cm@workwell.dev" }], "third@workwell.dev", "OPERATOR");
+    assert.equal((await store.getCase(a.id))?.assignmentSource, "OPERATOR");
+
+    // Clearing takes the source with it: "unassigned, chosen by the panel" is not a state, and a
+    // backfill reading it would have to guess what the null assignee meant.
+    await store.assignCases([{ id: a.id, expectedAssignee: "third@workwell.dev" }], null, "PANEL");
+    const cleared = await store.getCase(a.id);
+    assert.equal(cleared?.assignee, null);
+    assert.equal(cleared?.assignmentSource, null);
+
+    // patchCase is the OPERATOR surface — the case page, the patient page, the single-case route — so
+    // an assignment made through it is operator-owned without the caller having to say so.
+    await store.patchCase(a.id, { assignee: "cm@workwell.dev" });
+    assert.equal((await store.getCase(a.id))?.assignmentSource, "OPERATOR");
+    await store.patchCase(a.id, { assignee: null });
+    assert.equal((await store.getCase(a.id))?.assignmentSource, null, "clearing through patchCase clears it too");
+  });
+
+  test(`[${label}] a panel assignee is applied when a case is CREATED, and never to one that exists`, async () => {
+    // ADR-080 d2. The whole point: a case the nightly run opens arrives already on the person who works
+    // that provider's panel, so the practice starts the day with work that is assigned rather than a
+    // pile to re-distribute. And a case that already exists is NOT re-owned by a later run — an
+    // operator's assignment, and an in-flight handover, outlive the run that learned nothing new.
+    const store = await freshStore();
+    const created = (await store.upsertFromOutcome({
+      runId: crypto.randomUUID(),
+      subjectId: "emp-010",
+      measureId: "audiogram",
+      evaluationPeriod: "2026-06-13",
+      outcomeStatus: "OVERDUE",
+      panelAssignee: "cm@workwell.dev",
+    }))!;
+    assert.equal(created.disposition, "CREATED");
+    assert.equal(created.assignee, "cm@workwell.dev");
+    assert.equal(created.assignmentSource, "PANEL");
+
+    // A person takes it over; the next run must leave that alone even though the map still says
+    // cm@workwell.dev — including when the outcome MOVES, which is what makes it an update rather
+    // than a no-op (a no-op would pass this test without the rule being true).
+    await store.patchCase(created.id, { assignee: "third@workwell.dev" });
+    const updated = (await store.upsertFromOutcome({
+      runId: crypto.randomUUID(),
+      subjectId: "emp-010",
+      measureId: "audiogram",
+      evaluationPeriod: "2026-06-13",
+      outcomeStatus: "DUE_SOON",
+      panelAssignee: "cm@workwell.dev",
+    }))!;
+    assert.equal(updated.disposition, "UPDATED", "the outcome moved, so this is a real update");
+    assert.equal(updated.assignee, "third@workwell.dev", "an existing case keeps its owner");
+    assert.equal(updated.assignmentSource, "OPERATOR");
+
+    // A REOPEN is within the same cycle, so it is still the same piece of work and keeps its owner.
+    await store.upsertFromOutcome({
+      runId: crypto.randomUUID(), subjectId: "emp-010", measureId: "audiogram",
+      evaluationPeriod: "2026-06-13", outcomeStatus: "COMPLIANT",
+    });
+    const reopened = (await store.upsertFromOutcome({
+      runId: crypto.randomUUID(), subjectId: "emp-010", measureId: "audiogram",
+      evaluationPeriod: "2026-06-13", outcomeStatus: "OVERDUE", panelAssignee: "cm@workwell.dev",
+    }))!;
+    assert.equal(reopened.disposition, "REOPENED");
+    assert.equal(reopened.assignee, "third@workwell.dev", "a reopen is the same case, not a new one");
+
+    // A NEW cycle is an insert, so it picks up whatever the map says now.
+    const nextCycle = (await store.upsertFromOutcome({
+      runId: crypto.randomUUID(), subjectId: "emp-010", measureId: "audiogram",
+      evaluationPeriod: "2027-06-13", outcomeStatus: "OVERDUE", panelAssignee: "cm@workwell.dev",
+    }))!;
+    assert.equal(nextCycle.disposition, "CREATED");
+    assert.equal(nextCycle.assignee, "cm@workwell.dev");
+    assert.equal(nextCycle.assignmentSource, "PANEL");
+
+    // No mapping ⇒ exactly the old behaviour, which is what keeps every deployment without panels
+    // byte-identical to before this column existed.
+    const unmapped = (await store.upsertFromOutcome({
+      runId: crypto.randomUUID(), subjectId: "emp-011", measureId: "audiogram",
+      evaluationPeriod: "2026-06-13", outcomeStatus: "OVERDUE",
+    }))!;
+    assert.equal(unmapped.assignee, null);
+    assert.equal(unmapped.assignmentSource, null);
+  });
+
+  test(`[${label}] the BATCHED upsert applies the panel owner per subject, not per chunk`, async () => {
+    // The batched path builds one multi-row INSERT, so a value hoisted out of the per-row loop would
+    // stamp the chunk's first patient's panel owner on everyone in it — the same defect class the
+    // last_run_id comment in the Pg adapter records. Two subjects, two different owners, one call.
+    const store = await freshStore();
+    const runId = crypto.randomUUID();
+    const results = await store.upsertFromOutcomes([
+      { runId, subjectId: "emp-020", measureId: "audiogram", evaluationPeriod: "2026-06-13", outcomeStatus: "OVERDUE", panelAssignee: "cm@workwell.dev" },
+      { runId, subjectId: "emp-021", measureId: "audiogram", evaluationPeriod: "2026-06-13", outcomeStatus: "OVERDUE", panelAssignee: "third@workwell.dev" },
+      { runId, subjectId: "emp-022", measureId: "audiogram", evaluationPeriod: "2026-06-13", outcomeStatus: "OVERDUE" },
+    ]);
+    assert.deepEqual(
+      results.map((r) => r?.assignee),
+      ["cm@workwell.dev", "third@workwell.dev", null],
+      "each subject gets THEIR provider's panel owner",
+    );
+    assert.deepEqual(results.map((r) => r?.assignmentSource), ["PANEL", "PANEL", null]);
   });
 
   test(`[${label}] listCases({ employeeIds }) is the panel pre-filter — and an EMPTY set matches NOBODY`, async () => {
@@ -2518,5 +2635,72 @@ export function evalStateStoreContract(label: string, freshStore: () => Promise<
   test(`[${label}] eval_state: getEvalState returns null for an unknown key`, async () => {
     const store = await freshStore();
     assert.equal(await store.getEvalState("nobody", "audiogram", "2026-01-01"), null);
+  });
+}
+
+/** Registers the PanelStore contract (MM-2 PR 2, ADR-080) for one backend. */
+export function panelStoreContract(label: string, freshStore: () => Promise<PanelStore>): void {
+  const at = (iso: string) => iso;
+
+  test(`[${label}] panels: an unmapped provider is null, not an error`, async () => {
+    // A provider nobody owns is an ordinary state — most of them, on the day the feature ships — and
+    // the panels tab lists every provider whether mapped or not. Throwing here would make "nobody
+    // works this panel" indistinguishable from a failure.
+    const store = await freshStore();
+    assert.equal(await store.getPanelAssignment("maui-prov-012"), null);
+    assert.deepEqual(await store.listAll(), []);
+    assert.equal(await store.removePanelAssignment("maui-prov-012"), null, "removing nothing is not an error");
+  });
+
+  test(`[${label}] panels: upsert maps a provider, and re-mapping keeps WHO FIRST mapped it`, async () => {
+    const store = await freshStore();
+    const created = await store.upsertPanelAssignment({
+      providerId: "maui-prov-012",
+      assignee: "cm@workwell.dev",
+      actor: "quality-lead@workwell.dev",
+      now: at("2026-09-12T10:00:00.000Z"),
+    });
+    assert.equal(created.providerId, "maui-prov-012");
+    assert.equal(created.assignee, "cm@workwell.dev");
+    assert.equal(created.createdBy, "quality-lead@workwell.dev");
+    assert.equal(created.createdAt, created.updatedAt);
+
+    // Re-assigning the panel is a change of OWNER, not of origin: created_by/created_at answer "who
+    // set this panel up", which stays true, and losing it would leave the ledger the only record.
+    const moved = await store.upsertPanelAssignment({
+      providerId: "maui-prov-012",
+      assignee: "third@workwell.dev",
+      actor: "someone.else@workwell.dev",
+      now: at("2026-09-13T10:00:00.000Z"),
+    });
+    assert.equal(moved.assignee, "third@workwell.dev");
+    assert.equal(moved.createdBy, "quality-lead@workwell.dev", "the original mapper survives a re-assignment");
+    assert.equal(moved.createdAt, created.createdAt);
+    assert.equal(moved.updatedAt, at("2026-09-13T10:00:00.000Z"));
+    assert.deepEqual(await store.getPanelAssignment("maui-prov-012"), moved, "the read agrees with the write");
+  });
+
+  test(`[${label}] panels: one assignee owns MANY providers; listAll is ordered by provider`, async () => {
+    // The direction the practice actually works in — nine staff, forty-odd providers — so the store
+    // must not treat a repeated assignee as a conflict. The order is stated so the panels tab and the
+    // run pipeline's map are built from a stable list rather than whatever the backend returns.
+    const store = await freshStore();
+    for (const providerId of ["maui-prov-003", "maui-prov-001", "maui-prov-002"]) {
+      await store.upsertPanelAssignment({ providerId, assignee: "cm@workwell.dev", actor: null, now: at("2026-09-12T10:00:00.000Z") });
+    }
+    const all = await store.listAll();
+    assert.deepEqual(all.map((p) => p.providerId), ["maui-prov-001", "maui-prov-002", "maui-prov-003"]);
+    assert.deepEqual([...new Set(all.map((p) => p.assignee))], ["cm@workwell.dev"]);
+  });
+
+  test(`[${label}] panels: remove returns the row it removed — the caller audits what it deleted`, async () => {
+    const store = await freshStore();
+    await store.upsertPanelAssignment({ providerId: "maui-prov-012", assignee: "cm@workwell.dev", actor: "a@workwell.dev", now: at("2026-09-12T10:00:00.000Z") });
+    const removed = await store.removePanelAssignment("maui-prov-012");
+    // The previous assignee is the fact worth recording, and after the DELETE there is nowhere left to
+    // read it from — so the store hands it back rather than making the caller re-read first.
+    assert.equal(removed?.assignee, "cm@workwell.dev");
+    assert.equal(await store.getPanelAssignment("maui-prov-012"), null);
+    assert.deepEqual(await store.listAll(), []);
   });
 }
