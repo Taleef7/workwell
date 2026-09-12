@@ -18,6 +18,7 @@ const CASE: CaseRecord = {
   assignee: null,
   nextAction: "Send outreach",
   nextActionSource: "SYSTEM",
+  assignmentSource: null,
   currentOutcomeStatus: "MISSING_DATA",
   lastRunId: "run-001",
   createdAt: "2026-06-19T00:00:00.000Z",

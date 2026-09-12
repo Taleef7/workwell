@@ -65,7 +65,7 @@ const listCalls = (): string[] =>
 
 beforeEach(() => {
   navHolder.current.setUrl("/worklist");
-  post.mockReset().mockResolvedValue({ assigned: 2, unchanged: 0, missing: [], closed: [] });
+  post.mockReset().mockResolvedValue({ assigned: 2, unchanged: 0, conflicted: 0, missing: [], closed: [] });
   emitToast.mockReset();
   get.mockReset().mockImplementation((url: string) => {
     if (url.startsWith("/api/users/assignable")) return Promise.resolve(ASSIGNABLE);
@@ -318,5 +318,31 @@ describe("WorklistPage", () => {
     getWithHeaders.mockRejectedValue(new Error("upstream unavailable"));
     render(<WorklistPage />);
     expect(await screen.findByRole("alert")).toHaveTextContent(/upstream unavailable/i);
+  });
+
+  it("says an assignment did NOT apply when somebody else moved the gap first", async () => {
+    // The compare-and-set skips a row another operator reassigned while this one was choosing. Folding
+    // that into "already assigned that way" tells them the opposite of what happened, and folding it
+    // into "skipped" suggests the gap was closed or gone, which it is not.
+    post.mockResolvedValueOnce({ assigned: 0, unchanged: 0, conflicted: 2, missing: [], closed: [] });
+    render(<WorklistPage />);
+    await waitFor(() => expect(listCalls().length).toBeGreaterThan(0));
+
+    await userEvent.click(await screen.findByRole("checkbox", { name: /select lisa carter/i }));
+    const button = await screen.findByRole("button", { name: /assign 2 open gaps/i });
+    await userEvent.click(await screen.findByRole("combobox", { name: /assignee for selected/i }));
+    await userEvent.click(await screen.findByRole("option", { name: /quality-staff@maui\.workwell\.dev/i }));
+    await userEvent.click(button);
+
+    await waitFor(() =>
+      expect(emitToast).toHaveBeenCalledWith(
+        expect.stringContaining("reassigned by someone else"),
+        "error",
+      ),
+    );
+    expect(emitToast).not.toHaveBeenCalledWith(
+      expect.stringContaining("already assigned that way"),
+      expect.anything(),
+    );
   });
 });

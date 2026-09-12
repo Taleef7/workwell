@@ -370,6 +370,9 @@ async function runTickLocked(deps: SchedulerTickDeps, nowMs: number): Promise<bo
     caseStore: deps.stores.cases,
     engine: deps.engine,
     segments: deps.segments,
+    // The nightly run is the one that matters most here: it opens the day's cases, and with the panel
+    // map they arrive on whoever works that provider (ADR-080 d2) instead of in an unassigned pile.
+    panels: deps.stores.panels,
     employees: deps.employees,
     webChartEnv: deps.webChartEnv,
     webChartClient: deps.webChartClient,

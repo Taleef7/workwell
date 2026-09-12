@@ -1,5 +1,136 @@
 # Journal
 
+## 2026-09-12 (later) — the panel is a thing the system knows, and a column that says who chose
+
+MM-2 PR 2. PR 1 made it fast to assign a page of patients; this makes it unnecessary most mornings.
+ADR-080.
+
+**The practice has described how they divide work more than once, and the system did not know.** Their
+staff are assigned to particular providers, and because a patient sits in one provider's panel, one
+person closes everything that patient is due for rather than five people touching five measures. That
+arrangement existed only in their own working knowledge. Every case a nightly run opened arrived
+unassigned, so somebody re-applied the same mapping by hand every morning, and PR 1's bulk assign made
+that re-application quicker without making it go away.
+
+`panel_assignments` is the mapping: one row per mapped provider, one assignee, many providers per
+assignee (nine staff to forty-odd providers is the pilot's shape). The run reads it once and opens each
+new case already assigned. **A provider with no row is an unassigned queue, not an error** — the Panels
+tab lists every provider in the directory and sorts the unmapped ones to the top, because the un-covered
+panel is the row that screen exists to reveal.
+
+**The risky half is what happens to cases that already exist, and that is what the new column is for.**
+Changing a panel's owner should bring that panel's open work along. But the only test available without
+provenance is "assignee equals the previous panel owner" — which is equally true of a case a supervisor
+deliberately handed to that same person, and of every case assigned before panels existed. Moving those
+would overrule a human decision a few hundred rows at a time, with the only evidence being a ledger
+nobody reads until something has already gone wrong. `cases.assignment_source` (PANEL | OPERATOR | NULL,
+mirroring ADR-076 d2's `next_action_source`) is the fix: `planPanelBackfill` moves unowned cases and
+PANEL-sourced cases still on the previous owner, and nothing else. A NULL source with an assignee reads
+as operator-owned, because between two readings of an unknown the safe one declines to move the row.
+
+**The panel owner is applied when a case is CREATED and never after.** Not on a re-confirm, and not on a
+REOPEN — a reopen is within the same cycle, so it is the same piece of work somebody may already be
+holding. A new cycle is an insert and picks up whatever the map says then. The run reads the map ONCE:
+re-reading per chunk would let a mid-run edit apply to some of a run's cases and not others, which is a
+run that assigned one provider's patients two different ways depending on scheduling. That read is
+best-effort — panels decide who work lands on, never whether it exists — so a store failure logs a WARN
+and the cases open unassigned exactly as before.
+
+**Two things the tests caught that I had wrong.** The chunk-boundary test failed at 100 of 1,200:
+`listCases` answers 50 rows unless told otherwise, so the backfill would have moved the first fifty
+cases of a panel and left the rest — indistinguishable, from outside, from a panel that only had fifty.
+It now pages to exhaustion rather than passing a large limit, because any limit big enough to
+"obviously" cover a panel is still a number somebody's panel can exceed. And the route test surfaced a
+gap my own best-effort read created: a run whose panel read failed opens unassigned cases on a MAPPED
+panel, and a no-op re-save would have left the only recovery as un-map-then-re-map. Re-saving the same
+assignee now leaves the mapping alone but still sweeps the panel's unassigned cases; `changed` describes
+the mapping and `backfilled` the cases, so both numbers stay true.
+
+**Un-mapping a panel leaves its open cases assigned** (d4). DELETE says who owns future work; silently
+unassigning a few hundred in-flight cases because a supervisor tidied a mapping would lose real work,
+and the operation that moves open cases already exists and is audited per case. The toast says so out
+loud, because it is the surprising half.
+
+**The work list's default view now depends on whether the viewer owns a panel** (d5). Mapped staff open
+on their own patients; a supervisor mapped to nothing opens on the whole practice — which is the split
+the practice described, line staff on their providers and the lead wanting to see everything. There are
+three states, not two: while the mappings are still loading the answer is "whole practice", because
+guessing "My panel" before we know would flash an empty list. `?panel=me` is resolved server-side from
+the mappings and the caller's own identity, never from a client-supplied list. A viewer who owns no
+panel gets an empty set: serving the whole practice under a heading that says "My panel" would tell
+someone that several thousand other people's patients are theirs. `SubjectFilters.providerIds` is
+therefore tested with `!= null` in `hasActiveSubjectFilters` — an empty panel is an ACTIVE filter, and
+reading it as inactive is the vacuous-guard shape this codebase keeps finding. The chip names the
+panels rather than saying "My panel", so four providers show as four.
+
+**Closes #553**: the patient page assigns per gap from the accounts that exist, so a patient with four
+gaps is handed to one person without a trip back to a list. Its existing test file now mocks the auth
+provider — the page reads the signed-in role to decide whether that control is editable, and the harness
+was missing what every real caller supplies.
+
+**A panel is not an attribution** (d6). Who works a patient and who is accountable for them under a
+contract are different questions with different sources; the ACO's list is PR 3, versioned and separate.
+
+**What three reviewers found, and what it changed.** The review round was worth more than the
+implementation. Three independent passes converged on the same hole: the backfill decides to move a
+case because of BOTH columns — the assignee and the fact that a panel put it there — while the
+compare-and-set guarded only the assignee. An operator re-asserting the same assignee (which makes the
+row theirs) was therefore overwritten by the very rule written to protect it. The expectation now
+carries the provenance, guarded null-safely on both stores; it is the same "guard the whole plan
+input" correction the batched upsert already carries a paragraph about, which is a sign the lesson had
+not generalised.
+
+Four more, each a real defect rather than a style note:
+- **A claim could not be recorded.** Assigning a case to the person the panel already chose was a
+  no-op, so an operator claiming their own panel's work had it recorded as the panel's — and the next
+  panel edit took back exactly what they had claimed. A change of source alone is now a change.
+- **A stranded case could not be recovered.** Moving only PANEL rows on the PREVIOUS owner meant a run
+  that snapshotted the old owner and inserted after the scan left a row no later save could reach, the
+  previous and current owner being the same person by then. Any PANEL-sourced row is the panel's.
+- **The paged read was not stable.** `updated_at DESC` is mutated by concurrent runs, so a row could be
+  read twice (two events for one move) or never. One unbounded read per chunk, deduplicated — what the
+  work list's own loader already does. The chunk dropped to 900: the floor expands each id into a bind
+  and older SQLite caps a statement at 999, so a thousand-patient provider would have failed on the
+  floor and succeeded on Postgres.
+- **Two counts described other sets.** Bulk assign reported a row lost to a concurrent write as
+  "unchanged", which says the opposite of what happened; `conflicted` is now its own number. And the
+  frontend's panel chip was drawn from a second copy of the hook, so mapping a panel to yourself left
+  it still saying none were yours.
+
+**Codex on the PR then found three more, and the P1 was the one I thought I had already fixed.** The
+convergence fix above makes a stranded case *reachable* by a later save; it does not make anything
+perform one. A supervisor re-mapping a provider during the nightly — hours long on the pilot — leaves
+the run inserting from its older snapshot, and those cases sit on the previous owner because a later
+run preserves assignees by design and nobody re-saves a panel they already set. The run now reconciles
+at FINISH: re-read the map, compare with its own snapshot, and move PANEL-sourced rows only for the
+providers whose owner actually changed, only over the subjects it evaluated. An unchanged map costs one
+small read and touches nothing. Codex's other two were a per-case round trip (`recordCaseEvents` wrote
+two queries per case, so a 1,200-case backfill was 2,400 serialized round trips inside a synchronous
+PUT — now two multi-row INSERTs per 500) and the work list swallowing the `conflicted` count I had just
+added, so a conflict-only response still read as "already assigned that way".
+
+`X-Panel-Providers` was deleted rather than fixed. Nothing read it, and `cors.ts` exposes only
+`X-Total-Count`, so a browser could not have read it if something had — a surface that reads as
+load-bearing and cannot fire, which is the shape this project keeps collecting.
+
+Verified: backend 2,741 tests, 2,718 pass, 1 fail, 22 skipped — the failure is `corpus-membership`, the
+known stale local sparse-checkout of vendored artifacts, and it reproduces on a clean tree. Typecheck
+clean. The store contract ran on BOTH backends against a real `postgres:16` (112/112 ceiling, 109/109
+floor), which is where the set-based assign SQL, the batched insert's per-row panel assignee and the
+set-based event batch are actually exercised. Frontend 428 pass across 79 files, lint clean, build clean. The provenance guard,
+the convergence rule and the first-load guard were each mutation-checked: reverting any one of them
+fails a test that names the behaviour, rather than passing quietly.
+
+**Decided, not left open.** The mapping stays WorkWell's (ADR-080 d7). WebChart's department construct
+was considered as its source and rejected: it changes on a different schedule and by different hands,
+its cardinality does not obviously match, and chasing it would substitute for the request that actually
+matters. If MIE holds staff-to-provider data, it seeds this table and stays editable rather than being
+read through live. The live WebChart directory still attributes every subject to one hardcoded
+provider, so panels are meaningful on the corpus roster until #556 lands — and that attribution,
+patient to provider, is the single ask to put to MIE. (Filed as #556 rather than folded into #533,
+which is closed and covered a different field.) #552 (should an IN_PROGRESS case still receive automated
+outreach) and #554 (the Maui worklist e2e) stay open.
+
 ## 2026-09-12 — the work list is a list of people, and the filter that would have hidden 2,900 of them
 
 MM-2 PR 1. The practice asked for three things on the 09-09/10 calls: work the list by PCP panel, filter

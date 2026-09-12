@@ -28,6 +28,7 @@ import { handlePrograms } from "./routes/programs.ts";
 import { handleHierarchy } from "./routes/hierarchy.ts";
 import { handleTenants } from "./routes/tenants.ts";
 import { handleProviders } from "./routes/providers.ts";
+import { handlePanels } from "./routes/panels.ts";
 import { handlePayers } from "./routes/payers.ts";
 import { handleWorklist } from "./routes/worklist.ts";
 import { handleQuality } from "./routes/quality.ts";
@@ -305,6 +306,11 @@ async function route(req: Request, env: Env, ctx: CloudExecutionContext): Promis
 
   const providersResponse = await handleProviders(req);
   if (providersResponse) return providersResponse;
+
+  // Panels — which staff account works which provider's patients (MM-2 PR 2, ADR-080). Reads are
+  // AUTHENTICATED like the rest of the directory; writes are CASE_MANAGER/ADMIN and audited.
+  const panelsResponse = await handlePanels(req, env, actor);
+  if (panelsResponse) return panelsResponse;
 
   // Payers — the insurance list the panel filters are populated from (MM-2). Profile-scoped and
   // empty on a deployment whose roster records no payer.

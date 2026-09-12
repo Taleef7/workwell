@@ -10,6 +10,13 @@ const post = vi.fn();
 const apiMock = { get, post };
 vi.mock("@/lib/api/hooks", () => ({ useApi: () => apiMock }));
 
+// The page reads the signed-in role to decide whether the per-gap assign control is editable (#553).
+// In the app it is always inside AuthProvider; here the provider is mocked rather than rendered,
+// because these tests are about what the page shows, not about how a session is established.
+vi.mock("@/components/auth-provider", () => ({
+  useAuth: () => ({ user: { role: "ROLE_CASE_MANAGER", email: "cm@workwell.dev" } }),
+}));
+
 vi.mock("next/navigation", () => ({
   useParams: () => ({ externalId: "emp-001" }),
   useRouter: () => ({ push: vi.fn() }),

@@ -19,6 +19,7 @@ interface CaseRow {
   assignee: string | null;
   next_action: string | null;
   next_action_source: string | null;
+  assignment_source: string | null;
   current_outcome_status: string;
   last_run_id: string;
   created_at: Date | string;
@@ -30,7 +31,7 @@ interface CaseRow {
 
 const iso = (v: Date | string | null): string | null => (v == null ? null : v instanceof Date ? v.toISOString() : v);
 const COLS =
-  "id, employee_id, measure_id, evaluation_period, status, priority, assignee, next_action, next_action_source, current_outcome_status, last_run_id, created_at, updated_at, closed_at, closed_reason, closed_by";
+  "id, employee_id, measure_id, evaluation_period, status, priority, assignee, next_action, next_action_source, assignment_source, current_outcome_status, last_run_id, created_at, updated_at, closed_at, closed_reason, closed_by";
 /**
  * The same list qualified to the `c` alias. The batched UPDATE joins a `VALUES` alias that carries
  * `employee_id`/`measure_id`/`evaluation_period` too, so an unqualified RETURNING is ambiguous and
@@ -51,6 +52,10 @@ const toRecord = (r: CaseRow): CaseRecord => ({
   assignee: r.assignee,
   nextAction: r.next_action,
   nextActionSource: r.next_action_source ?? "SYSTEM",
+  // No `?? "OPERATOR"` fallback: null is a REAL state (unassigned, or a legacy row) and readers must
+  // be able to tell it from a recorded choice. The operator-owned READING lives in planPanelBackfill,
+  // which is where the decision it protects is actually made.
+  assignmentSource: r.assignment_source,
   currentOutcomeStatus: r.current_outcome_status,
   lastRunId: r.last_run_id,
   createdAt: iso(r.created_at)!,
@@ -80,6 +85,9 @@ export class PgCaseStore implements CaseStore {
     const now = new Date().toISOString();
     const priority = priorityFor(input.outcomeStatus);
     const computedAction = nextActionFor(input.outcomeStatus, input.measureId, input.evidence);
+    // Blank-tolerant: a mapping resolving to an empty string is no mapping, and would otherwise store
+    // an assignee nobody can be, on a row whose source claims a panel chose it.
+    const panelAssignee = input.panelAssignee?.trim() || null;
     const planFrom = (row: CaseRow | null) =>
       planCaseUpsert(row ? { status: row.status, currentOutcomeStatus: row.current_outcome_status, closedBy: row.closed_by } : null, input.outcomeStatus, now, {
         outOfPopulation: input.outOfPopulation,
@@ -105,10 +113,13 @@ export class PgCaseStore implements CaseStore {
 
     if (plan.op === "insert") {
       const { rows } = await this.pool.query<CaseRow>(
+        // The panel owner is applied HERE and only here (ADR-080 d2) — a case this run opens arrives
+        // already assigned to whoever works that provider's panel. $15 is null on a deployment with no
+        // mapping for the subject's provider, which is exactly the old behaviour.
         `INSERT INTO ${T}
            (id, employee_id, measure_id, evaluation_period, status, priority, assignee,
-            next_action, next_action_source, current_outcome_status, last_run_id, created_at, updated_at, closed_at, closed_reason, closed_by)
-         VALUES ($1, $2, $3, $4, $5, $6, NULL, $7, $8, $9, $10, $11, $11, $12, $13, $14)
+            next_action, next_action_source, assignment_source, current_outcome_status, last_run_id, created_at, updated_at, closed_at, closed_reason, closed_by)
+         VALUES ($1, $2, $3, $4, $5, $6, $15, $7, $8, $16, $9, $10, $11, $11, $12, $13, $14)
          ON CONFLICT (employee_id, measure_id, evaluation_period) DO NOTHING
          RETURNING ${COLS}`,
         [
@@ -126,6 +137,8 @@ export class PgCaseStore implements CaseStore {
           plan.closedAt ?? null,
           plan.closedReason ?? null,
           plan.closedBy ?? null,
+          panelAssignee,
+          panelAssignee == null ? null : "PANEL",
         ],
       );
       if (rows[0]) return { ...toRecord(rows[0]), disposition: plan.disposition! };
@@ -259,7 +272,7 @@ export class PgCaseStore implements CaseStore {
     }
 
     const results: (UpsertedCase | null)[] = new Array(inputs.length).fill(null);
-    // Sub-chunked so the bind count stays far below Postgres' 65535 cap — 13 params/row on the insert
+    // Sub-chunked so the bind count stays far below Postgres' 65535 cap — 15 params/row on the insert since the panel assignee and its source joined it (ADR-080)
     // plus one hoisted `now`, and 14 on the update plus one hoisted `now`, so 500 rows is about 7,000
     // either way — and so each statement stays a reasonable size. 500 also matches `recordOutcomes`
     // and the pipeline's own subject chunk.
@@ -329,17 +342,21 @@ export class PgCaseStore implements CaseStore {
       const binds: unknown[] = [now];
       const tuples = toInsert.map((p) => {
         const b = binds.length;
+        // Per row, like `last_run_id`: the panel owner is the SUBJECT's provider's owner, so hoisting
+        // it would stamp the chunk's first patient's panel on everyone in the chunk.
+        const panelAssignee = p.input.panelAssignee?.trim() || null;
         binds.push(
           crypto.randomUUID(), p.input.subjectId, p.input.measureId, p.input.evaluationPeriod,
           p.plan.status!, p.priority, p.action.nextAction, p.action.source,
           p.input.outcomeStatus, p.input.runId, p.plan.closedAt ?? null, p.plan.closedReason ?? null, p.plan.closedBy ?? null,
+          panelAssignee, panelAssignee == null ? null : "PANEL",
         );
-        return `($${b + 1}::uuid, $${b + 2}, $${b + 3}, $${b + 4}, $${b + 5}, $${b + 6}, NULL, $${b + 7}, $${b + 8}, $${b + 9}, $${b + 10}::uuid, $1::timestamptz, $1::timestamptz, $${b + 11}::timestamptz, $${b + 12}, $${b + 13})`;
+        return `($${b + 1}::uuid, $${b + 2}, $${b + 3}, $${b + 4}, $${b + 5}, $${b + 6}, $${b + 14}, $${b + 7}, $${b + 8}, $${b + 15}, $${b + 9}, $${b + 10}::uuid, $1::timestamptz, $1::timestamptz, $${b + 11}::timestamptz, $${b + 12}, $${b + 13})`;
       });
       const { rows } = await this.pool.query<CaseRow>(
         `INSERT INTO ${T}
            (id, employee_id, measure_id, evaluation_period, status, priority, assignee,
-            next_action, next_action_source, current_outcome_status, last_run_id, created_at, updated_at, closed_at, closed_reason, closed_by)
+            next_action, next_action_source, assignment_source, current_outcome_status, last_run_id, created_at, updated_at, closed_at, closed_reason, closed_by)
          VALUES ${tuples.join(", ")}
          ON CONFLICT (employee_id, measure_id, evaluation_period) DO NOTHING
          RETURNING ${COLS}`,
@@ -458,7 +475,11 @@ export class PgCaseStore implements CaseStore {
     return rows.map(toRecord);
   }
 
-  async assignCases(expected: readonly CaseAssignExpectation[], assignee: string | null): Promise<string[]> {
+  async assignCases(
+    expected: readonly CaseAssignExpectation[],
+    assignee: string | null,
+    source: "PANEL" | "OPERATOR",
+  ): Promise<string[]> {
     // A non-uuid id cannot be a case here and would abort the whole statement with a cast error, so it
     // is dropped rather than allowed to fail the batch — the caller reports it as missing either way.
     const valid = expected.filter((e) => isUuid(e.id));
@@ -471,19 +492,33 @@ export class PgCaseStore implements CaseStore {
     // `NULL = NULL` is NULL), `IS DISTINCT FROM` for the target (skip a no-op). Both can fail, for
     // different reasons, so neither is decoration.
     const { rows } = await this.pool.query<{ id: string }>(
+      // Clearing an assignee clears the source with it: nobody chose nobody, and a row reading
+      // "unassigned, chosen by the panel" would make the next backfill's question unanswerable.
+      // `expected_source` guards the OTHER column the caller's decision read. `$6` is a per-entry flag
+      // for "the caller cared", because a NULL expected source is itself a meaningful value (an
+      // unassigned or legacy row) and cannot double as "unchecked".
+      //
+      // The target test is `assignee IS DISTINCT FROM $3 OR assignment_source IS DISTINCT FROM $5`:
+      // moving a PANEL-sourced case to the person who already holds it is not a no-op, it is the
+      // operator claiming it, and refusing that write is what left an operator's deliberate choice
+      // recorded as the panel's.
       `UPDATE ${T} AS c
-          SET assignee = $3, updated_at = NOW()
-         FROM unnest($1::uuid[], $2::text[]) AS e(id, expected_assignee)
+          SET assignee = $3, assignment_source = $5, updated_at = NOW()
+         FROM unnest($1::uuid[], $2::text[], $6::bool[], $7::text[]) AS e(id, expected_assignee, check_source, expected_source)
         WHERE c.id = e.id
           AND c.status = ANY($4::text[])
           AND c.assignee IS NOT DISTINCT FROM e.expected_assignee
-          AND c.assignee IS DISTINCT FROM $3
+          AND (NOT e.check_source OR c.assignment_source IS NOT DISTINCT FROM e.expected_source)
+          AND (c.assignee IS DISTINCT FROM $3 OR c.assignment_source IS DISTINCT FROM $5)
         RETURNING c.id`,
       [
         valid.map((e) => e.id),
         valid.map((e) => e.expectedAssignee),
         assignee,
         [...ACTIVE_CASE_STATUSES],
+        assignee === null ? null : source,
+        valid.map((e) => e.expectedSource !== undefined),
+        valid.map((e) => e.expectedSource ?? null),
       ],
     );
     return rows.map((r) => r.id);
@@ -495,7 +530,16 @@ export class PgCaseStore implements CaseStore {
     const binds: unknown[] = [];
     if (patch.status !== undefined) sets.push(`status = $${binds.push(patch.status)}`);
     if (patch.priority !== undefined) sets.push(`priority = $${binds.push(patch.priority)}`);
-    if (patch.assignee !== undefined) sets.push(`assignee = $${binds.push(patch.assignee)}`);
+    if (patch.assignee !== undefined) {
+      sets.push(`assignee = $${binds.push(patch.assignee)}`);
+      // The same ownership transfer `next_action_source` makes below: this is the OPERATOR surface, so
+      // an assignment made through it is operator-owned unless the caller says otherwise — and a
+      // cleared assignee has no owner at all.
+      const nextSource = patch.assignee === null ? null : (patch.assignmentSource ?? "OPERATOR");
+      sets.push(`assignment_source = $${binds.push(nextSource)}`);
+    } else if (patch.assignmentSource !== undefined) {
+      sets.push(`assignment_source = $${binds.push(patch.assignmentSource)}`);
+    }
     // The operator surface: writing an action here transfers ownership (see the SQLite floor).
     if (patch.nextAction !== undefined) {
       sets.push(`next_action = $${binds.push(patch.nextAction)}`);

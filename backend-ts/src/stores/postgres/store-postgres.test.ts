@@ -32,6 +32,7 @@ import { PgSegmentStore } from "./segment-store-postgres.ts";
 import { PgQualitySnapshotStore } from "./quality-snapshot-store-postgres.ts";
 import { PgPersonLinkStore } from "./person-link-store-postgres.ts";
 import { PgEvalStateStore } from "./eval-state-store-postgres.ts";
+import { PgPanelStore } from "./panel-store-postgres.ts";
 import { MEASURE_CATALOG } from "../../measure/measure-catalog.ts";
 import { seedMeasureStore } from "../../measure/measure-seed.ts";
 import { OFFICIAL_ONLY_PRE_CHANGE } from "../../measure/measure-seed.ts";
@@ -50,6 +51,7 @@ import {
   qualitySnapshotStoreContract,
   personLinkStoreContract,
   evalStateStoreContract,
+  panelStoreContract,
 } from "../store-contract.ts";
 
 const url = process.env.WORKWELL_TEST_PG_URL ?? "postgres://workwell:workwell@localhost:5432/workwell";
@@ -91,7 +93,7 @@ if (!reachable && process.env.WORKWELL_TEST_PG_URL) {
 
   const truncate = () =>
     pool.query(
-      `TRUNCATE ${SPIKE_SCHEMA}.audit_events, ${SPIKE_SCHEMA}.case_actions, ${SPIKE_SCHEMA}.cases, ${SPIKE_SCHEMA}.outcomes, ${SPIKE_SCHEMA}.run_logs, ${SPIKE_SCHEMA}.runs, ${SPIKE_SCHEMA}.measure_versions, ${SPIKE_SCHEMA}.measures, ${SPIKE_SCHEMA}.evidence_attachments, ${SPIKE_SCHEMA}.scheduled_appointments, ${SPIKE_SCHEMA}.measure_value_set_links, ${SPIKE_SCHEMA}.value_sets, ${SPIKE_SCHEMA}.terminology_mappings, ${SPIKE_SCHEMA}.outreach_templates, ${SPIKE_SCHEMA}.waivers, ${SPIKE_SCHEMA}.segment_overrides, ${SPIKE_SCHEMA}.segment_measures, ${SPIKE_SCHEMA}.segments, ${SPIKE_SCHEMA}.quality_snapshots, ${SPIKE_SCHEMA}.person_links, ${SPIKE_SCHEMA}.eval_state RESTART IDENTITY CASCADE`,
+      `TRUNCATE ${SPIKE_SCHEMA}.audit_events, ${SPIKE_SCHEMA}.case_actions, ${SPIKE_SCHEMA}.cases, ${SPIKE_SCHEMA}.outcomes, ${SPIKE_SCHEMA}.run_logs, ${SPIKE_SCHEMA}.runs, ${SPIKE_SCHEMA}.measure_versions, ${SPIKE_SCHEMA}.measures, ${SPIKE_SCHEMA}.evidence_attachments, ${SPIKE_SCHEMA}.scheduled_appointments, ${SPIKE_SCHEMA}.measure_value_set_links, ${SPIKE_SCHEMA}.value_sets, ${SPIKE_SCHEMA}.terminology_mappings, ${SPIKE_SCHEMA}.outreach_templates, ${SPIKE_SCHEMA}.waivers, ${SPIKE_SCHEMA}.segment_overrides, ${SPIKE_SCHEMA}.segment_measures, ${SPIKE_SCHEMA}.segments, ${SPIKE_SCHEMA}.quality_snapshots, ${SPIKE_SCHEMA}.person_links, ${SPIKE_SCHEMA}.eval_state, ${SPIKE_SCHEMA}.panel_assignments RESTART IDENTITY CASCADE`,
     );
 
   runStoreContract("postgres", async () => {
@@ -199,6 +201,11 @@ if (!reachable && process.env.WORKWELL_TEST_PG_URL) {
   evalStateStoreContract("postgres", async () => {
     await truncate();
     return new PgEvalStateStore(pool);
+  });
+
+  panelStoreContract("postgres", async () => {
+    await truncate();
+    return new PgPanelStore(pool);
   });
 
   /**

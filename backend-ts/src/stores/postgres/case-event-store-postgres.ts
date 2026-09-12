@@ -146,12 +146,47 @@ export class PgCaseEventStore implements CaseEventStore {
     if (inputs.length === 0) return;
     // One client, one BEGIN/COMMIT over the whole batch: a bulk action commits whole or not at all,
     // the same guarantee `recordCaseEvent` gives a single one.
+    //
+    // TWO multi-row INSERTs per sub-chunk, not two per CASE. The loop form was a round trip per row
+    // per arm, which a per-case bulk assign never noticed and a panel backfill does: moving a
+    // provider's 1,200 open cases meant 2,400 serialized round trips to Neon before the assignment
+    // updates had even started, inside a synchronous PUT. Same rows, same order, same transaction —
+    // `appendAudits` already writes the ledger this way and this is the shape it uses.
+    //
+    // 5 binds per action row and 9 per audit row, so 500 rows is 2,500 and 4,500 against Postgres'
+    // 65,535 cap — the headroom `appendAudits` and `recordOutcomes` already assume.
+    const CHUNK = 500;
     const client = await this.pool.connect();
     try {
       await client.query("BEGIN");
-      for (const input of inputs) {
-        await client.query(PgCaseEventStore.ACTION_SQL, PgCaseEventStore.actionParams(input.action));
-        await client.query(PgCaseEventStore.AUDIT_SQL, PgCaseEventStore.auditParams(input.audit));
+      for (let start = 0; start < inputs.length; start += CHUNK) {
+        const slice = inputs.slice(start, start + CHUNK);
+
+        const actionBinds: unknown[] = [];
+        const actionTuples = slice.map(({ action }) => {
+          const b = actionBinds.length;
+          actionBinds.push(...PgCaseEventStore.actionParams(action));
+          return `($${b + 1}, $${b + 2}, $${b + 3}::jsonb, $${b + 4}, $${b + 5})`;
+        });
+        await client.query(
+          `INSERT INTO ${SPIKE_SCHEMA}.case_actions
+            (case_id, action_type, payload_json, performed_by, performed_at)
+            VALUES ${actionTuples.join(", ")}`,
+          actionBinds,
+        );
+
+        const auditBinds: unknown[] = [];
+        const auditTuples = slice.map(({ audit }) => {
+          const b = auditBinds.length;
+          auditBinds.push(...PgCaseEventStore.auditParams(audit));
+          return `($${b + 1}, $${b + 2}, $${b + 3}, $${b + 4}, $${b + 5}, $${b + 6}, $${b + 7}, $${b + 8}::jsonb, $${b + 9})`;
+        });
+        await client.query(
+          `INSERT INTO ${SPIKE_SCHEMA}.audit_events
+            (event_type, entity_type, entity_id, actor, ref_run_id, ref_case_id, ref_measure_version_id, payload_json, occurred_at)
+            VALUES ${auditTuples.join(", ")}`,
+          auditBinds,
+        );
       }
       await client.query("COMMIT");
     } catch (err) {

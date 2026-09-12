@@ -135,7 +135,13 @@ owner-locked decisions constraining it are in `docs/LOCKED_DECISIONS.md` §4 and
    20,000-patient data-first corpus whose clinical facts follow the year each run scores (ADR-075),
    and CMS137 vendored, gated 45/45 and read as two rates with its strata carried into the
    MeasureReport and QRDA III (ADR-074) — all six measures are runnable once routed, and the flips
-   themselves stay the gated workflow edits of MM-1c) → MM-2 (provider-panel work lists and assignment) → MM-3 (cards that resolve: order
+   themselves stay the gated workflow edits of MM-1c) → MM-2 (provider-panel work lists and
+   assignment — **PR 1 merged 2026-09-12**: a patient-first work list, panel filters by provider and
+   primary insurance, set-based bulk assign; **PR 2 the same week**: `panel_assignments`, the durable
+   provider→staff mapping the practice already works by, applied to the cases a run OPENS and
+   backfilled onto the ones it owns, with `cases.assignment_source` recording who chose so a panel
+   edit never overrules a person (ADR-080); PR 3 is the ACO's attributed-list import and report)
+   → MM-3 (cards that resolve: order
    proposals + exception documentation, inside ADR-067's refusals) → MM-4 (encounter-time
    integration). Roadmap §7 tabulates the external dependencies.
 2. **More occupational content (M-E) — deferred behind M-M, not cancelled.** The first

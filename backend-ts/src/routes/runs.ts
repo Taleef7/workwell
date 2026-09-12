@@ -543,6 +543,7 @@ export async function handleRuns(
       caseStore: await cases(env),
       engine,
       segments: await enabledSegments(env),
+      panels: (await getStores(env)).panels, // ADR-080 d2 — a case this run OPENS lands on its panel
       qualitySnapshots: (await getStores(env)).qualitySnapshots,
       events: (await getStores(env)).events,
       actor, // audit attribution from the auth middleware, not the body's triggeredBy (Codex P1)
@@ -597,6 +598,7 @@ export async function handleRuns(
       caseStore: await cases(env),
       engine,
       segments: await enabledSegments(env),
+      panels: (await getStores(env)).panels, // ADR-080 d2 — a case this run OPENS lands on its panel
       qualitySnapshots: (await getStores(env)).qualitySnapshots,
       events: (await getStores(env)).events,
       actor, // audit attribution from the auth middleware (Codex P1)

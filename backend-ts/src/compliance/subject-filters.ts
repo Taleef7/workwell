@@ -36,6 +36,20 @@ export const isSex = (value: string): value is SexFilter => value === "F" || val
 export interface SubjectFilters {
   /** The PCP's EXTERNAL ID (`maui-prov-012`), never a display name — see `matchesSubjectFilters`. */
   providerId?: string | null;
+  /**
+   * A SET of provider ids — "my panel" (MM-2 PR 2, ADR-080 d5). A subject matches when their provider
+   * is ANY of them (OR within the filter; AND against the other filters, including `providerId`).
+   *
+   * A set rather than a single id because one staff member owns MANY providers: nine staff to
+   * forty-odd providers is the pilot's shape, so "the patients I am responsible for" is inherently a
+   * union. An EMPTY array is a real constraint meaning "no provider matches" — a viewer who owns no
+   * panel sees an empty list, not the whole practice — while `undefined` is the absent filter.
+   *
+   * Not parsed from the query string by `subjectFiltersFromQuery`: it is resolved server-side from
+   * the panel mappings and the caller's own identity, so a client cannot ask for somebody else's
+   * panel by spelling it in a URL.
+   */
+  providerIds?: readonly string[] | null;
   ageBand?: string | null;
   sex?: string | null;
   /**
@@ -89,6 +103,10 @@ export function payerCodesOf(payer: SubjectFilters["payer"]): string[] {
 export function hasActiveSubjectFilters(filters: SubjectFilters): boolean {
   return Boolean(
     filters.providerId?.trim() ||
+    // `!= null` rather than `.length`: an EMPTY panel set is an ACTIVE filter that matches nobody, and
+    // reading it as inactive would serve the whole practice to a viewer who owns no panel — under a
+    // heading that says "My panel". That is the exact shape of defect this function exists to prevent.
+    filters.providerIds != null ||
     filters.ageBand?.trim() ||
     filters.sex?.trim() ||
     payerCodesOf(filters.payer).length > 0,
@@ -152,6 +170,11 @@ export function matchesSubjectFilters(
     // The PCP's external id, never a display name: two clinicians can share a name, ids are what the
     // attribution is recorded against, and a name that happened to match would be a coincidence.
     if (employee.providerId !== filters.providerId) return false;
+  }
+  if (filters.providerIds != null) {
+    // An empty set matches NOBODY. Falling through to "no constraint" would answer "which of my
+    // panel's patients have gaps?" with the whole practice.
+    if (!filters.providerIds.includes(employee.providerId)) return false;
   }
   if (ageBand) {
     // A token that is not a band is a constraint NOBODY satisfies — never one everybody does. The

@@ -18,6 +18,7 @@ import {
   subjectFiltersFromQuery, subjectFilterErrorBody, SubjectFilterError,
 } from "../compliance/subject-filters.ts";
 import { resolveAssignable, assignableUsers } from "../auth/demo-users.ts";
+import { providerIdsOwnedBy } from "../case/panel-assignment.ts";
 import { ACTIVE_CASE_STATUSES } from "../case/case-logic.ts";
 
 export interface WorklistEnv extends DataSourceEnv {
@@ -55,6 +56,20 @@ export async function handleWorklist(req: Request, env: WorklistEnv, actor = "sy
     : employeeById;
 
   const stores = await getStores(env);
+
+  /**
+   * "My panel" (ADR-080 d5) — resolved from the MAPPINGS and the caller's own identity, never from a
+   * client-supplied list, so nobody can ask for somebody else's panel by spelling it in a URL.
+   *
+   * A viewer who owns no panel gets an EMPTY set, which matches nobody: the honest answer to "which of
+   * my patients have gaps?" when none are yours is none — not the whole practice under a heading that
+   * says "My panel". `panel=all` and an absent parameter are both "no panel constraint".
+   */
+  const panelParam = q.get("panel")?.trim().toLowerCase();
+  if (panelParam === "me") {
+    subjectFilters = { ...subjectFilters, providerIds: providerIdsOwnedBy(await stores.panels.listAll(), actor) };
+  }
+
   const summaries = await loadWorklistCases(
     {
       cases: stores.cases,
@@ -87,6 +102,11 @@ export async function handleWorklist(req: Request, env: WorklistEnv, actor = "sy
   const rows = groupIntoPatients(summaries, { assignee: q.get("assignee"), viewerEmail: actor });
   // X-Total-Count is the PATIENT count, which is what this list pages. Reporting the case count here
   // would tell a client to page past the end of a shorter list.
+  //
+  // The panels "me" resolved to are deliberately NOT returned in a header. That was tried, and it was
+  // a surface that could not fire: nothing read it, and `config/cors.ts` exposes only X-Total-Count,
+  // so on a split-origin deployment a browser could not have read it even if something did. The page
+  // names the panels from the mapping list it already loads.
   return json(rows.slice(offset, offset + limit), 200, { "X-Total-Count": String(rows.length) });
 }
 
@@ -152,8 +172,19 @@ async function bulkAssign(req: Request, env: WorklistEnv, actor: string): Promis
   const missing = ids.filter((id) => !byId.has(id));
   const active = new Set<string>(ACTIVE_CASE_STATUSES);
   const closed = existing.filter((c) => !active.has(c.status)).map((c) => c.id);
-  // Exactly the rows the UPDATE will move: active, and actually changing owner.
-  const changing = existing.filter((c) => active.has(c.status) && (c.assignee ?? null) !== assignee);
+  // Exactly the rows the UPDATE will move: active, and either changing owner OR changing who CHOSE.
+  //
+  // The provenance half is not bookkeeping. "Assign all of Garcia's patients to me" over a list where
+  // half are already mine is one deliberate act of claiming them; if the rows already on me stayed
+  // PANEL-sourced, the next panel edit would take back exactly the cases the operator just claimed —
+  // which is what ADR-080 d1's column exists to prevent. The single-case route never had this hole,
+  // because `patchCase` writes OPERATOR unconditionally.
+  const claiming = (c: (typeof existing)[number]) => assignee !== null && c.assignmentSource !== "OPERATOR";
+  const changing = existing.filter(
+    (c) => active.has(c.status) && ((c.assignee ?? null) !== assignee || claiming(c)),
+  );
+  /** Active, already on this assignee, and already operator-owned — a real no-op. */
+  const unchanged = existing.filter((c) => active.has(c.status)).length - changing.length;
 
   if (changing.length > 0) {
     // `recordCaseEvents`, not `appendAudits`: the same user action must leave the same rows whether it
@@ -189,15 +220,23 @@ async function bulkAssign(req: Request, env: WorklistEnv, actor: string): Promis
   const assigned = await stores.cases.assignCases(
     changing.map((c) => ({ id: c.id, expectedAssignee: c.assignee ?? null })),
     assignee,
+    // A person ticked these boxes, so the rows become operator-owned and a later panel edit leaves
+    // them alone (ADR-080 d1/d3) — the same boundary patchCase draws on the single-case path.
+    "OPERATOR",
   );
-  // The four numbers PARTITION the input: assigned + unchanged + closed.length + missing.length ===
-  // the de-duplicated ids asked for. `unchanged` used to be `ids.length - assigned.length`, which
-  // also counted the closed and the missing — so a caller adding them up got more than it sent, and
-  // "2 unchanged" over one closed and one unknown case named a state neither was in.
+  // The five numbers PARTITION the input: assigned + unchanged + conflicted + closed + missing ===
+  // the de-duplicated ids asked for.
+  //
+  // `conflicted` is its own number rather than being folded into `unchanged`, because the two mean
+  // opposite things. `unchanged` is "this was already so"; `conflicted` is "somebody moved this while
+  // you were deciding, so your change did not apply" — and reporting the second as the first told a
+  // caller that a case they did not get was already theirs. (`unchanged` was also once computed as
+  // `ids.length - assigned.length`, which additionally counted the closed and the missing.)
   return json({
     assigned: assigned.length,
-    /** Existed, was active, and was already on this assignee — a real no-op. */
-    unchanged: ids.length - assigned.length - closed.length - missing.length,
+    unchanged,
+    /** Read as changing, then lost the compare-and-set to a concurrent write. Nothing was applied. */
+    conflicted: changing.length - assigned.length,
     missing,
     closed,
   });

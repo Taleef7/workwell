@@ -17,6 +17,7 @@ import { SqliteCaseStore } from "../stores/sqlite/case-store-sqlite.ts";
 import { SqliteQualitySnapshotStore } from "../stores/sqlite/quality-snapshot-store-sqlite.ts";
 import { SqliteCaseEventStore } from "../stores/sqlite/case-event-store-sqlite.ts";
 import { SqliteEvalStateStore } from "../stores/sqlite/eval-state-store-sqlite.ts";
+import { SqlitePanelStore } from "../stores/sqlite/panel-store-sqlite.ts";
 import { EMPLOYEES, employeeById } from "../engine/synthetic/employee-catalog.ts";
 import { executeManualRun, executeRerun, planManualRun, finishOrFail, runningResponse, UnsupportedScopeError, InvalidRunRequestError, type RunPipelineDeps } from "./run-pipeline.ts";
 import { bucketPeriodForMeasure } from "./compliance-period.ts";
@@ -410,7 +411,7 @@ test("a degraded Patient-only WebChart bundle evaluates MISSING_DATA and reports
       employees: [],
       webChartEnv: WEBCHART_ENV,
       webChartClient: fixtureWebChartClient([patientOnly("degraded-patient", true)]),
-      events: { async appendAudit(input) { audits.push(input); }, async appendAudits(inputs) { for (const i of inputs) await this.appendAudit(i); } },
+      events: { async appendAudit(input) { audits.push(input); }, async appendAudits(inputs) { for (const i of inputs) await this.appendAudit(i); }, async recordCaseEvents() {} },
     }, {
       scopeType: "MEASURE",
       measureId: "audiogram",
@@ -486,7 +487,7 @@ test("live preparation failure finalizes FAILED before outcomes and preserves th
       employees: [],
       webChartEnv: WEBCHART_ENV,
       webChartClient: fixtureWebChartClient([patientOnly("last-good")]),
-      events: { async appendAudit(input) { audits.push({ eventType: input.eventType, payload: input.payload }); }, async appendAudits(inputs) { for (const i of inputs) await this.appendAudit(i); } },
+      events: { async appendAudit(input) { audits.push({ eventType: input.eventType, payload: input.payload }); }, async appendAudits(inputs) { for (const i of inputs) await this.appendAudit(i); }, async recordCaseEvents() {} },
     };
     const success = await executeManualRun(base, { scopeType: "MEASURE", measureId: "audiogram" });
     const failingClient: WebChartClient = {
@@ -645,7 +646,7 @@ test("a live preparation failure still finalizes FAILED when its terminal audit 
         kind: "failure-test",
         async fetchPatientPayloads() { throw new Error("population unavailable"); },
       },
-      events: { async appendAudit() { throw new Error("audit unavailable"); }, async appendAudits() { throw new Error("audit unavailable"); } },
+      events: { async appendAudit() { throw new Error("audit unavailable"); }, async appendAudits() { throw new Error("audit unavailable"); }, async recordCaseEvents() { throw new Error("audit unavailable"); } },
     };
     const planned = await planManualRun(failing, { scopeType: "MEASURE", measureId: "audiogram" });
     await finishOrFail(failing, planned);
@@ -720,6 +721,7 @@ test("Codex P1: a failing case-audit write never fails an otherwise-complete run
     employees: EMPLOYEES.slice(0, 4),
     actor: "cm@workwell.dev",
     events: {
+      async recordCaseEvents() {},
       async appendAudit(input) {
         if (input.entityType === "case") throw new Error("audit_events insert failed");
         // RUN_COMPLETED (entityType "run") succeeds — it is independently best-effort.
@@ -807,6 +809,7 @@ test("Fable H1: a population run emits RUN_COMPLETED + case audit events (the ha
     employees: EMPLOYEES.slice(0, 4),
     actor: "cm@workwell.dev", // authenticated actor — audit rows must use THIS, not triggeredBy (Codex P1)
     events: {
+      async recordCaseEvents() {},
       async appendAudit(input) {
         captured.push({ eventType: input.eventType, entityType: input.entityType, refRunId: input.refRunId, actor: input.actor, payload: input.payload });
       },
@@ -1587,7 +1590,7 @@ test("ADR-078: a subject the official logic finds OUTSIDE the initial population
     } as unknown as RunPipelineDeps["engine"],
     employees: EMPLOYEES.slice(0, 2),
     actor: "cm@workwell.dev",
-    events: { async appendAudit(input) { captured.push({ eventType: input.eventType, payload: input.payload }); }, async appendAudits(inputs) { for (const i of inputs) await this.appendAudit(i); } },
+    events: { async appendAudit(input) { captured.push({ eventType: input.eventType, payload: input.payload }); }, async appendAudits(inputs) { for (const i of inputs) await this.appendAudit(i); }, async recordCaseEvents() {} },
   };
   const [first, second] = EMPLOYEES.slice(0, 2).map((e) => e.externalId) as [string, string];
   outsideIds = new Set([second]);
@@ -1626,10 +1629,174 @@ test("ADR-078 is gated on official routing: an AUTHORED measure's out-of-populat
     } as unknown as RunPipelineDeps["engine"],
     employees: EMPLOYEES.slice(0, 1),
     actor: "cm@workwell.dev",
-    events: { async appendAudit() {}, async appendAudits() {} },
+    events: { async appendAudit() {}, async appendAudits() {}, async recordCaseEvents() {} },
   };
   await executeManualRun(deps, { scopeType: "MEASURE", measureId: "audiogram", triggeredBy: "test" });
   const cases = await caseStore.listCases({ limit: 10 });
   assert.equal(cases.length, 1, "the authored engine's flag does not suppress the case");
   assert.equal(cases[0]!.status, "OPEN");
+});
+
+test("a run opens its cases already assigned to the provider's panel, and audits that it did", async () => {
+  // ADR-080 d2. The point of the whole feature: the practice's staff are assigned to specific
+  // providers, so the cases a nightly run opens should arrive on whoever works that provider rather
+  // than in an unassigned pile somebody re-distributes by hand every morning.
+  const db = await createSqliteD1(join(tmpdir(), `workwell-panelrun-${crypto.randomUUID()}.sqlite`));
+  await db.exec(RUN_STORE_FLOOR_DDL.replace(/\n/g, " "));
+  const caseStore = new SqliteCaseStore(db);
+  const events = new SqliteCaseEventStore(db);
+  const panels = new SqlitePanelStore(db);
+  // Two employees of DIFFERENT providers, one of which is mapped — so the same run exercises both the
+  // mapped panel and the unmapped queue, and neither result can be an accident of the roster.
+  const mapped = employeeById("emp-005")!; // prov-001
+  const unmapped = employeeById("emp-006")!; // prov-002
+  await panels.upsertPanelAssignment({
+    providerId: mapped.providerId,
+    assignee: "cm@workwell.dev",
+    actor: "lead@workwell.dev",
+    now: new Date().toISOString(),
+  });
+
+  const panelDeps: RunPipelineDeps = {
+    runStore: new SqliteRunStore(db),
+    outcomeStore: new SqliteOutcomeStore(db),
+    caseStore,
+    events,
+    engine: overdueEngine, // deterministic OVERDUE, so the run actually OPENS a case to assign
+    employees: [mapped, unmapped],
+    panels,
+  };
+  const res = await executeManualRun(panelDeps, { scopeType: "MEASURE", measureId: "audiogram" });
+  assert.equal(res.status, "COMPLETED");
+
+  const opened = await caseStore.listCases({ limit: 100 });
+  assert.equal(opened.length, 2, "one open case per employee");
+  const mine = opened.find((c) => c.employeeId === mapped.externalId)!;
+  const theirs = opened.find((c) => c.employeeId === unmapped.externalId)!;
+  assert.equal(mine.assignee, "cm@workwell.dev", "a case on a mapped panel arrives assigned");
+  assert.equal(mine.assignmentSource, "PANEL");
+  // A provider nobody owns is an unassigned queue, not an error and not somebody else's work.
+  assert.equal(theirs.assignee, null);
+  assert.equal(theirs.assignmentSource, null);
+
+  const created = (await events.listAuditEvents(500, 0)).filter((e) => e.eventType === "CASE_CREATED");
+  assert.equal(created.length, 2);
+  const assignedEvent = created.find((e) => (e.payload as Record<string, unknown>).assignee);
+  assert.ok(assignedEvent, "the ledger says the case arrived on a panel — 'why is this mine?' has an answer");
+  assert.equal((assignedEvent!.payload as Record<string, unknown>).assignmentSource, "PANEL");
+  const unassignedEvent = created.find((e) => !(e.payload as Record<string, unknown>).assignee);
+  assert.ok(unassignedEvent, "and an unassigned case's payload is the one it always was");
+  assert.equal((unassignedEvent!.payload as Record<string, unknown>).assignmentSource, undefined);
+});
+
+test("a run with NO panel store opens cases exactly as it did before panels existed", async () => {
+  // The dep is optional so every non-pipeline caller — impact preview, offline tools, these tests —
+  // is unchanged by construction rather than by remembering to pass something.
+  const office = employeeById("emp-007")!;
+  const plainDeps: RunPipelineDeps = { ...deps, engine: overdueEngine, employees: [office], segments: [] };
+  const res = await executeManualRun(plainDeps, { scopeType: "MEASURE", measureId: "audiogram" });
+  assert.equal(res.status, "COMPLETED");
+  const mine = (await deps.caseStore!.listCases({ limit: 200 })).filter((c) => c.employeeId === "emp-007");
+  assert.ok(mine.length > 0);
+  assert.ok(mine.every((c) => c.assignee === null && c.assignmentSource === null));
+});
+
+test("a panel re-mapped WHILE a run is going converges at run finish, with no second save", async () => {
+  // The P1 from the PR review. A run applies one snapshot of the panel map to everything it opens. If
+  // a supervisor re-maps that provider mid-run, their own backfill moves what exists at that moment
+  // and the run keeps inserting from the older snapshot — so those late cases sat on the previous
+  // owner indefinitely, because a later run's update branch preserves assignees and nobody re-saves a
+  // panel they already set. The nightly runs for hours on the pilot, so the window is wide.
+  const db = await createSqliteD1(join(tmpdir(), `workwell-panelrace-${crypto.randomUUID()}.sqlite`));
+  await db.exec(RUN_STORE_FLOOR_DDL.replace(/\n/g, " "));
+  const caseStore = new SqliteCaseStore(db);
+  const events = new SqliteCaseEventStore(db);
+  const panels = new SqlitePanelStore(db);
+  const subject = employeeById("emp-005")!;
+  const now = new Date().toISOString();
+  await panels.upsertPanelAssignment({ providerId: subject.providerId, assignee: "cm@workwell.dev", actor: "lead@x", now });
+
+  // The edit lands DURING the run: the map is re-pointed after the pipeline has taken its snapshot,
+  // which is exactly the ordering that strands a case.
+  const racingPanels = {
+    listAll: (() => {
+      let call = 0;
+      return async () => {
+        call += 1;
+        if (call === 1) return panels.listAll(); // the run's snapshot: cm@
+        await panels.upsertPanelAssignment({
+          providerId: subject.providerId,
+          assignee: "third@workwell.dev",
+          actor: "lead@x",
+          now: new Date().toISOString(),
+        });
+        return panels.listAll(); // the finish read: third@
+      };
+    })(),
+  };
+
+  const raceDeps: RunPipelineDeps = {
+    runStore: new SqliteRunStore(db),
+    outcomeStore: new SqliteOutcomeStore(db),
+    caseStore,
+    events,
+    engine: overdueEngine,
+    employees: [subject],
+    panels: racingPanels,
+    actor: "scheduler",
+  };
+  const res = await executeManualRun(raceDeps, { scopeType: "MEASURE", measureId: "audiogram" });
+  assert.equal(res.status, "COMPLETED");
+
+  const opened = await caseStore.listCases({ limit: 10 });
+  assert.equal(opened.length, 1);
+  // Opened under the snapshot, reconciled at finish onto the owner the mapping actually names.
+  assert.equal(opened[0]!.assignee, "third@workwell.dev", "the late case converged without a second save");
+  assert.equal(opened[0]!.assignmentSource, "PANEL");
+
+  // And the move is in the ledger, on both arms, like every other assignment.
+  const timeline = await events.caseTimeline(opened[0]!.id);
+  const assigned = timeline.filter((t) => t.eventType === "CASE_ASSIGNED");
+  assert.equal(assigned.length, 1);
+  assert.equal((assigned[0]!.payload as Record<string, unknown>).reason, "PANEL_RECONCILED");
+  assert.equal((assigned[0]!.payload as Record<string, unknown>).previousAssignee, "cm@workwell.dev");
+});
+
+test("an UNCHANGED panel map costs a run nothing at finish", async () => {
+  // The reconcile must be free on the overwhelmingly common path: re-read the map, see it has not
+  // moved, touch no case. A pass that scanned every run's subjects would add a large read to every
+  // nightly for a situation that almost never happens.
+  const db = await createSqliteD1(join(tmpdir(), `workwell-panelnoop-${crypto.randomUUID()}.sqlite`));
+  await db.exec(RUN_STORE_FLOOR_DDL.replace(/\n/g, " "));
+  const caseStore = new SqliteCaseStore(db);
+  const subject = employeeById("emp-005")!;
+  const panels = new SqlitePanelStore(db);
+  await panels.upsertPanelAssignment({
+    providerId: subject.providerId, assignee: "cm@workwell.dev", actor: "lead@x", now: new Date().toISOString(),
+  });
+  let listed = 0;
+  const counting = { listAll: async () => { listed += 1; return panels.listAll(); } };
+
+  const events = new SqliteCaseEventStore(db);
+  let recorded = 0;
+  const countingEvents = {
+    appendAudit: events.appendAudit.bind(events),
+    appendAudits: events.appendAudits.bind(events),
+    recordCaseEvents: async (inputs: Parameters<typeof events.recordCaseEvents>[0]) => {
+      recorded += inputs.length;
+      return events.recordCaseEvents(inputs);
+    },
+  };
+
+  await executeManualRun(
+    {
+      runStore: new SqliteRunStore(db), outcomeStore: new SqliteOutcomeStore(db), caseStore,
+      events: countingEvents, engine: overdueEngine, employees: [subject], panels: counting, actor: "scheduler",
+    },
+    { scopeType: "MEASURE", measureId: "audiogram" },
+  );
+
+  assert.equal(listed, 2, "read once for the snapshot and once to compare — and no more");
+  assert.equal(recorded, 0, "an unchanged map moves no case and writes no event");
+  assert.equal((await caseStore.listCases({ limit: 10 }))[0]?.assignee, "cm@workwell.dev");
 });

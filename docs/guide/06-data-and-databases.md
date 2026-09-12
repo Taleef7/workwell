@@ -118,6 +118,7 @@ HTTP.
 | `quality_snapshots` | Monthly numerator/denominator per measure and scope | end of each run |
 | `eval_state` | Incremental-evaluation fingerprints (off by default) | when enabled |
 | `person_links` | Cross-system identity: confirmed and broken links | identity review |
+| `panel_assignments` | Which staff account works which provider's patients | the Panels tab |
 | `outreach_templates` | Campaign message templates | admin |
 | `scheduled_appointments` | Follow-up scheduling on a case | case actions |
 | `evidence_attachments` | Operator-uploaded documents on a case | case detail |

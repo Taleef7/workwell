@@ -1,6 +1,13 @@
 'use client';
 
 import { useParams } from 'next/navigation';
+import { useState } from 'react';
+import { Select } from '@mieweb/ui';
+import { useApi } from '@/lib/api/hooks';
+import { useAuth } from '@/components/auth-provider';
+import { canManageCases } from '@/lib/rbac';
+import { emitToast } from '@/lib/toast';
+import { UNASSIGN_VALUE, useAssignableUsers } from '@/features/panel/use-assignable-users';
 import { SUBJECT } from "@/lib/terminology";
 import Link from 'next/link';
 import { useEmployeeProfile } from '@/features/employee/hooks/useEmployeeProfile';
@@ -19,12 +26,82 @@ const PRIORITY_COLORS: Record<string, string> = {
   LOW: 'bg-neutral-100 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300',
 };
 
+/**
+ * One open gap's assignee, editable in place (#553).
+ *
+ * The practice's staff asked for the same assign control here that the work list has: they open a
+ * patient, see everything that patient is due for, and hand the lot to one person. Sending them back
+ * to a list to do it is the round trip the patient-first view exists to remove.
+ *
+ * Options rather than a text box, for the reason the work list learned: the pilot's quality staffer
+ * typed her own name into a free-text field, got nothing, and could not assign at all.
+ */
+function AssigneeCell({
+  caseId,
+  assignee,
+  canManage,
+  options,
+  canonicalFor,
+  onAssigned,
+}: {
+  caseId: string;
+  assignee: string | null;
+  canManage: boolean;
+  /** Fetched ONCE by the page: a patient with six gaps is six of these rows, not six requests. */
+  options: { value: string; label: string }[];
+  canonicalFor: (email: string) => string | undefined;
+  onAssigned: () => void;
+}) {
+  const api = useApi();
+  const [busy, setBusy] = useState(false);
+
+  if (!canManage) {
+    return <span className="text-neutral-500 dark:text-neutral-400">{assignee ?? '—'}</span>;
+  }
+
+  async function assign(value: string) {
+    if (!value || busy) return;
+    setBusy(true);
+    try {
+      const unassign = value === UNASSIGN_VALUE;
+      // The same route the case page uses — the assignee is a QUERY parameter and a blank one clears
+      // the assignment — so both surfaces write the same row and leave the same audit entry.
+      const query = unassign ? '' : `?assignee=${encodeURIComponent(value)}`;
+      await api.post<undefined, unknown>(`/api/cases/${caseId}/assign${query}`);
+      emitToast(unassign ? 'Gap unassigned' : `Gap assigned to ${value}`, 'success');
+      onAssigned();
+    } catch (err) {
+      emitToast(err instanceof Error ? err.message : 'Could not assign the gap', 'error');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Select
+      size="sm"
+      className="w-56"
+      aria-label="Assignee"
+      disabled={busy}
+      // The account's OWN spelling, so a stored `CM@WorkWell.dev` renders as the option it matches
+      // rather than leaving the control blank over a case that is in fact assigned.
+      value={assignee ? (canonicalFor(assignee) ?? assignee) : ''}
+      onValueChange={(value) => void assign(value)}
+      options={options}
+    />
+  );
+}
+
 export default function EmployeeProfilePage() {
   const { externalId: rawExternalId } = useParams<{ externalId: string }>();
   // useParams returns the segment still percent-encoded; live WebChart ids contain "|" (wc%7Cwc-6),
   // so decode once here and let each fetch re-encode for transport.
   const externalId = decodeURIComponent(rawExternalId ?? '');
   const { profile, loading, error, refetch } = useEmployeeProfile(externalId);
+  const { user } = useAuth();
+  const canManageThisCase = canManageCases(user?.role);
+  // One fetch for the page, not one per open gap.
+  const { options: assignableOptions, canonicalFor } = useAssignableUsers(canManageThisCase);
   const { labelFor: measureLabelFor } = useMeasureIdentities();
   const isPatientTerm = SUBJECT.singular === 'patient';
 
@@ -121,7 +198,16 @@ export default function EmployeeProfilePage() {
                       {c.priority}
                     </span>
                   </td>
-                  <td className="py-2 text-neutral-500 dark:text-neutral-400">{c.assignee ?? '—'}</td>
+                  <td className="py-2">
+                    <AssigneeCell
+                      caseId={c.caseId}
+                      assignee={c.assignee}
+                      canManage={canManageThisCase}
+                      options={assignableOptions}
+                      canonicalFor={canonicalFor}
+                      onAssigned={refetch}
+                    />
+                  </td>
                   {hasSla ? (
                     <td className="py-2">
                       <SlaChip slaRemainingDays={c.slaRemainingDays} slaBreached={c.slaBreached} />

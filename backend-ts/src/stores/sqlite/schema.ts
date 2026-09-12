@@ -73,6 +73,12 @@ CREATE TABLE IF NOT EXISTS cases (
      upsert preserves an OPERATOR action while the outcome it was written about still holds; see
      planNextAction in case/case-logic.ts. Defaulted so a legacy row reads SYSTEM and behaves as before. */
   next_action_source     TEXT NOT NULL DEFAULT 'SYSTEM',
+  /* Who chose the assignee: 'PANEL' (the provider-panel mapping, at case creation or by a panel
+     backfill) or 'OPERATOR' (a person, through assign / bulk-assign). NULL means unassigned, or a row
+     written before this column existed — and a NULL-sourced row that HAS an assignee is read as
+     operator-owned, so a panel backfill never moves work someone placed by hand. Mirrors
+     next_action_source (ADR-076 d2); the rule is planPanelBackfill in case/panel-assignment.ts. */
+  assignment_source      TEXT,
   current_outcome_status TEXT NOT NULL,
   last_run_id            TEXT NOT NULL,
   created_at             TEXT NOT NULL,
@@ -389,6 +395,23 @@ CREATE TABLE IF NOT EXISTS eval_state (
   UNIQUE (subject_id, measure_id, period)
 );
 CREATE INDEX IF NOT EXISTS eval_state_measure_period_idx ON eval_state (measure_id, period);
+
+/* Provider panels (MM-2 PR 2, ADR-080). Floor analogue of panel_assignments: one row per provider the
+   practice has mapped to a staff account — the durable "our staff is assigned to specific providers"
+   arrangement, which until now had to be re-applied by hand to every case a nightly run opened. A
+   provider with NO row is an explicit unassigned queue, never an error. One assignee per provider; a
+   staff member owns many providers. The assignee is an assignable account email, validated by the route
+   against the same list /api/users/assignable offers. Assignment only — a panel is never a denominator
+   or an attribution claim. OWNER-APPROVED DDL: Taleef explicitly authorized this table in-session
+   (2026-09-12); additive (CREATE IF NOT EXISTS), reversible (DROP TABLE). */
+CREATE TABLE IF NOT EXISTS panel_assignments (
+  provider_id  TEXT PRIMARY KEY,
+  assignee     TEXT NOT NULL,
+  created_by   TEXT,
+  created_at   TEXT NOT NULL,
+  updated_at   TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS panel_assignments_assignee_idx ON panel_assignments (assignee);
 `;
 
 /**
@@ -410,6 +433,10 @@ const FLOOR_COLUMN_BACKFILL: ReadonlyArray<{ table: string; column: string; ddl:
   // subjects are in-population, which for the pilot's out-of-population rows is false. Readers treat
   // NULL as not-out-of-population, so an un-backfilled floor answers exactly as it did before.
   { table: "outcomes", column: "out_of_population", ddl: "out_of_population INTEGER" },
+  // ADR-080. NULLABLE for the same reason out_of_population is: NULL is the truth for a row written
+  // before the column existed, and a NULL source with an assignee is read as operator-owned — the
+  // reading that declines to move the row, so a panel edit never reassigns work a person placed.
+  { table: "cases", column: "assignment_source", ddl: "assignment_source TEXT" },
 ];
 
 interface MinimalDb {

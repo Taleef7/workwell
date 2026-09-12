@@ -164,6 +164,14 @@ const RULES: Rule[] = [
   // open /api/cases and be refused the same rows on /worklist, which is a difference nobody chose.
   // (The bulk assign it drives is a POST under /api/cases/** and is already CM/ADMIN by that rule —
   // a second rule for it here would sit after that one and never fire.)
+  // Provider panels (MM-2 PR 2, ADR-080). READING who works which panel is AUTHENTICATED — the same
+  // gate the provider list and the work list carry, and a clinician who can see the work list should
+  // be able to see who owns it. WRITING re-routes a whole provider's patients and moves their open
+  // cases, which is case-management authority, so PUT/DELETE are CM/ADMIN. Two rules because the
+  // VIEWER guard blocks non-GET globally but a single [CM, A] rule would also block VIEWER's READ.
+  // Both must precede the /api/** catch-alls below, which would otherwise answer first.
+  { method: "GET", pattern: rx("/api/panels/**"), access: "AUTHENTICATED" },
+  { pattern: rx("/api/panels/**"), access: [CM, A] },
   { method: "GET", pattern: rx("/api/worklist/**"), access: "AUTHENTICATED" },
   { method: "GET", pattern: rx("/api/**"), access: "AUTHENTICATED" },
   { pattern: rx("/api/**"), access: "AUTHENTICATED" },
