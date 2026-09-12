@@ -5,8 +5,8 @@
  * case invariant). COMPLIANT resolves an existing case without inserting a new one.
  */
 import type { CloudDatabase } from "@mieweb/cloud";
-import type { CaseRecord, CaseQuery, CaseStore, CasePatch, UpsertCaseInput, UpsertedCase } from "../case-store.ts";
-import { planCaseUpsert, planNextAction, priorityFor, nextActionFor } from "../../case/case-logic.ts";
+import type { CaseAssignExpectation, CaseRecord, CaseQuery, CaseStore, CasePatch, UpsertCaseInput, UpsertedCase } from "../case-store.ts";
+import { ACTIVE_CASE_STATUSES, planCaseUpsert, planNextAction, priorityFor, nextActionFor } from "../../case/case-logic.ts";
 
 interface CaseRow {
   id: string;
@@ -277,6 +277,52 @@ export class SqliteCaseStore implements CaseStore {
     return row ? toRecord(row) : null;
   }
 
+  async getCases(ids: readonly string[]): Promise<CaseRecord[]> {
+    if (ids.length === 0) return [];
+    const { results } = await this.db
+      .prepare(`SELECT ${COLS} FROM cases WHERE id IN (${ids.map(() => "?").join(", ")})`)
+      .bind(...ids)
+      .all<CaseRow>();
+    return (results ?? []).map(toRecord);
+  }
+
+  async assignCases(expected: readonly CaseAssignExpectation[], assignee: string | null): Promise<string[]> {
+    if (expected.length === 0) return [];
+    // Grouped by the assignee the caller READ, then one statement per distinct value. The floor has no
+    // portable way to zip two arrays into a join the way Postgres's `unnest` does, and the number of
+    // distinct prior owners in one batch is tiny (the assignable accounts, plus unassigned) — so this
+    // is a handful of statements rather than one per case, and it asks the SAME question the ceiling
+    // asks: update only while the row still holds the value the caller read.
+    const byExpected = new Map<string | null, string[]>();
+    for (const entry of expected) {
+      const ids = byExpected.get(entry.expectedAssignee);
+      if (ids) ids.push(entry.id);
+      else byExpected.set(entry.expectedAssignee, [entry.id]);
+    }
+
+    const active = [...ACTIVE_CASE_STATUSES];
+    const now = new Date().toISOString();
+    const changed: string[] = [];
+    for (const [expectedAssignee, ids] of byExpected) {
+      // `IS` is SQLite's NULL-safe equality and `IS NOT` its NULL-safe inequality — the counterparts
+      // of Postgres's `IS NOT DISTINCT FROM` / `IS DISTINCT FROM`. Plain `=` / `<>` are NULL for an
+      // unassigned row, and assigning an unassigned case is the commonest thing this is asked to do.
+      const { results } = await this.db
+        .prepare(
+          `UPDATE cases SET assignee = ?, updated_at = ?
+            WHERE id IN (${ids.map(() => "?").join(", ")})
+              AND status IN (${active.map(() => "?").join(", ")})
+              AND assignee IS ?
+              AND assignee IS NOT ?
+          RETURNING id`,
+        )
+        .bind(assignee, now, ...ids, ...active, expectedAssignee, assignee)
+        .all<{ id: string }>();
+      for (const row of results ?? []) changed.push(row.id);
+    }
+    return changed;
+  }
+
   async patchCase(id: string, patch: CasePatch): Promise<CaseRecord | null> {
     const sets: string[] = [];
     const binds: unknown[] = [];
@@ -327,6 +373,17 @@ export class SqliteCaseStore implements CaseStore {
     if (query.employeeId) {
       where.push("employee_id = ?");
       binds.push(query.employeeId);
+    }
+    if (query.employeeIds !== undefined) {
+      // An EMPTY set is "nobody matches", not "no filter" — `IN ()` is a syntax error, so it becomes a
+      // predicate that is false for every row. A panel with no patients must return no cases; falling
+      // through to unfiltered would serve the whole practice under that panel's heading.
+      if (query.employeeIds.length === 0) {
+        where.push("1 = 0");
+      } else {
+        where.push(`employee_id IN (${query.employeeIds.map(() => "?").join(", ")})`);
+        binds.push(...query.employeeIds);
+      }
     }
     if (query.measureId) {
       where.push("measure_id = ?");

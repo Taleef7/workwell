@@ -1,5 +1,159 @@
 # Journal
 
+## 2026-09-12 — the work list is a list of people, and the filter that would have hidden 2,900 of them
+
+MM-2 PR 1. The practice asked for three things on the 09-09/10 calls: work the list by PCP panel, filter
+by primary insurance, and stop being handed a list they cannot act on. This is the first two, plus the
+rebuild the third turned out to require.
+
+**A work list of GAPS is not a work list of PEOPLE.** `/cases` is one row per patient-measure, so a
+patient with four open measures is four rows in four places in the list, and the staffer calling them
+works one and leaves three. `/worklist` — until now a redirect to `/cases`, on the reasoning that the
+work list IS the open-case queue — is a row per patient carrying every open gap, with the selection
+acting on all of them. `/cases` is unchanged and still linked: it is the right view when the question
+is about a measure rather than a person.
+
+**Medicare is two codes, and a single-select filter would have hidden one of them.** The Source of
+Payment Typology is hierarchical: `1` is Medicare and `11` is its managed-care child, which the practice
+calls Medicare Advantage. Measured on the pilot's live seed (`maui-py2027-v1`, 20,000 patients) that is
+3,927 and 2,900. MSSP attribution is Medicare, so the population the ACO actually asks about is both —
+and a filter offering one choice lets someone pick "Medicare", receive 3,927, and never learn that 2,900
+more were withheld under a heading claiming to contain them. That is ADR-079's defect inverted, so the
+filter is a multi-select, `?payer=` takes a repeated or comma-joined value, `GET /api/payers` reports
+each code's own count, and an "All Medicare" control selects every code in the category the roster
+ACTUALLY has (never the typology in the abstract — expanding to codes nobody is on would offer a filter
+that returns nothing). The PREDICATE still compares exact codes; grouping is something a caller opts
+into, never something done behind their back.
+
+**A vacuous guard that was already live.** Four surfaces — roster, cases route, CSV exports, MCP tool —
+each carried its own copy of `providerId || ageBand || sex` to decide whether to apply the panel
+predicate at all. Adding `payer` to the type and to the predicate would have left all four silently
+skipping it: an unfiltered list under a filtered heading, on every one of them. One
+`hasActiveSubjectFilters` now answers that question, which is the fourth entry in the vacuous-guard
+collection and the first found before it shipped rather than after.
+
+**The default work list was hiding the case someone had already picked up.** `statusesFor("open")`
+returned `["OPEN"]` while `ACTIVE_CASE_STATUSES` — the contract's own definition, which every open-case
+rollup uses — is OPEN + IN_PROGRESS. So moving a case to IN_PROGRESS removed it from the list it was
+started from, which reads as "it got done". `DATA_MODEL_CONTRACTS` §4 names this hazard for the counts;
+the list had it too, and the shared read model fixes it for both surfaces at once.
+
+**The panel pre-filter is gated, and the gate is the interesting part.** Panel filters are DIRECTORY
+joins — there is no patients table in Postgres — so working a 150-case panel meant loading every case in
+the practice and discarding ~99% in JavaScript. The matching subject ids are now resolved first and
+passed as `CaseQuery.employeeIds`. But on a WebChart-configured deployment the route's lookup resolves
+live subjects the directory does not hold, so building that set from the directory would omit their
+cases entirely — a work list short by exactly the people the live integration exists to serve, and a
+missing row reads as "no gaps". The roster is passed only where it is the complete set; elsewhere the
+pre-filter is withheld and the post-filter alone decides, which is slower and correct. An EMPTY id set
+is a real constraint meaning "nobody matches", not an absent filter — a PCP with no patients must return
+no cases rather than the practice's.
+
+**Bulk assign is one statement, and it is audited before it mutates.** The `/cases` bulk control issued
+one request per case in a browser loop, so a failure at case 40 of 200 left 39 assigned, 161 untouched
+and a toast that mentioned neither. `POST /api/cases/bulk-assign` reads the rows that WOULD change under
+exactly the conditions the UPDATE applies, writes their `CASE_ASSIGNED` events, then applies it — so a
+failure can only leave a recorded-but-unapplied action, never an unaudited state change (the ordering
+`case-actions.ts` established). An unchanged row writes no event, and the response reports what MOVED
+rather than what was asked for: `{ assigned, unchanged, missing, closed }`, which the toast now says.
+**No `assignment_source` here** — that column is PR 2's owner-written DDL, and a parameter this method
+could not honour would be worse than none.
+
+**Three claims I wrote and the tests disproved.** A comment said the `::text[]` cast prevented "cannot
+determine type of empty array" — removing it against a real postgres:16 shows it does not, because the
+parameter's type infers from `employee_id`; the cast stays as explicitness and the comment now says so.
+A registration comment said the worklist route must precede `handleCases` or the bulk POST would be
+captured — it falls through today; it is registered first anyway, for the reason that is actually true.
+And an authorization rule gated `/api/worklist/**` to CASE_MANAGER/ADMIN, which would have let the
+read-only VIEWER role open `/cases` and be refused the same rows on `/worklist`; it matches `/api/cases`
+now, and the second rule I added for the bulk POST was deleted because `POST /api/cases/**` already
+matches it and a rule that can never fire is the thing this entry's third paragraph is about.
+
+Two defects the tests found in my own code: `owner` reported a patient as owned when one of two gaps was
+assigned and the other was not (it counted only the gaps that HAD an owner, so a half-owned patient read
+as handled), and the page said "1 patients with open gaps". Both fixed with the tests that caught them.
+
+The audit timeline on the case page now opens collapsed to its newest entry behind "Show history (N
+more)" — the staff ask. Nothing is removed: every state change is still audited and still one click
+away, which is why the control counts what it is hiding.
+
+**What the two reviews found, and the one that mattered most was mine to own.** The roster's filter
+guard was upgraded to the shared `hasActiveSubjectFilters` — which sees `payer` — while the call
+beside it still rebuilt an object from three named fields and dropped it. `GET
+/api/compliance/roster?payer=1` therefore reported a filter as active, applied none, and returned all
+20,000 patients under a heading that said Medicare. Both reviewers found it independently. It is the
+same defect class as the four copied guards this PR removed, one layer up, and the contract paragraph
+this PR added ("the same filters apply to the roster ... through one predicate") was false as written.
+The fix is structural rather than another field: `RosterFilters extends SubjectFilters`, and the call
+passes `filters` whole. The new test asserts the GENERAL property — for every key the predicate
+understands, a value nobody satisfies must return nothing — so the next filter added cannot be
+dropped the same way. Mutation-checked: restoring the three-field object fails it on `payer`.
+
+**And the second review caught the collapse showing the wrong end of the list.** `caseTimeline` is
+`ORDER BY occurred_at ASC` and its own interface says "oldest-first", so `slice(0, 1)` renders
+CASE_CREATED — a months-old entry under a control promising the newest one. The test missed it because
+the fixture was newest-first, an order the real store never produces: the harness was gentler than the
+caller, which is the trap this project has now hit twice. Fixture corrected to match the store, then
+mutation-checked.
+
+Six more, all real, all this PR's: the `/worklist` toast said "already assigned that way" over gaps a
+run had closed; the dashboard date range was read into the component, triggered a refetch, and was
+never sent; changing page size kept the old offset; select-all at 100 patients × six routed measures
+builds 600 ids against a 500 cap, so the button offered an action the server refuses; `Mixed (1)`
+counted only the gaps that HAD an owner, contradicting its own label and hiding the unowned one; and
+`unchanged` in the bulk response double-counted the closed and the missing, so the four numbers summed
+past the input. The panel pre-filter also gained a size cap: the SQLite floor spends one bind per id
+against a per-statement variable limit while Postgres binds the set as one array, so a ~6,800-id payer
+selection was a cliff only one store could fall off.
+
+**One fix ships deliberately untested.** Two payer checkboxes clicked before a re-render made the
+second clobber the first, because the handler read the render-scope snapshot; it now builds from the
+last-written query string held in a ref. The jsdom harness cannot reproduce the race — its
+`next/navigation` mock updates params synchronously inside `replace` and the event helpers flush React
+between clicks — so both spellings passed the test written for it. The test was deleted and the reason
+is in the code, because a green assertion over a race the harness defines away is worse than none.
+
+**A third review, on the PR itself, found the half of the status change I had not propagated.** Widening
+the work list's default to `ACTIVE_CASE_STATUSES` fixed the two lists and left `?status=open` on the
+cases CSV export and the MCP `list_cases` / `list_noncompliant` tools still mapping to `["OPEN"]`. So an
+appointment moved a case to IN_PROGRESS and it stayed on the screen while disappearing from the CSV
+taken off that screen, and from the tool serving the same list to a client. A row missing from an export
+is missing without anyone being told, which is the worse half of the two failures this project names.
+All four readers now share the constant. Two more scope to OPEN only and are deliberately untouched —
+outreach-campaign targeting and the case attached to an MCP compliance answer — because neither is the
+work list and whether a case somebody has already picked up should also receive automated outreach is an
+owner's question, not a silent widening. Recorded in `DATA_MODEL_CONTRACTS` §4 rather than left implicit.
+
+**And it sharpened the bulk-assign race past where the first two reviews left it.** `assignCases`
+checked that the current assignee DIFFERED FROM THE TARGET — not that it still equalled the value the
+caller had read. Those are not the same test: A reads a case owned by Alice and audits
+`previousAssignee: Alice`, B assigns it to Bob, and A's update still matches (Bob differs from A's
+target), so A overwrites B and the ledger names a transition that never happened. It is now a
+compare-and-set — each entry carries the assignee the caller read, and the row moves only while it still
+holds it — so a row another operator touched is skipped and its already-written audit becomes a
+recorded-but-unapplied action, which is the side of the trade `case-actions.ts` chose. Postgres does it
+in one statement by zipping the pairs through `unnest`; the floor groups by prior owner, which is a
+handful of statements because the distinct set is the assignable accounts plus unassigned. Both
+mutation-checked: removing the compare fails the contract on each dialect.
+
+**The same review restored the other half of the ledger.** Bulk assign wrote only `audit_events`, which
+satisfies the hard rule but left `case_actions` — canonical operational state — shaped by how many rows
+the operator happened to tick: the same assignment made one at a time wrote both rows and made in bulk
+wrote one. `recordCaseEvents` is the batch form of the existing atomic dual-write, and the test asserts
+the row is there with the same payload the single-case path writes, and that a no-op writes neither.
+
+Verified after three review rounds: backend 2,686 tests, 2,663 pass, 1 fail, 22 skipped — the failure is
+`corpus-membership.test.ts`, the known stale local sparse-checkout of vendored artifacts, green in CI.
+Backend typecheck clean. The store contract's two new cases ran on BOTH stores against a real
+`postgres:16` (103/103 ceiling, 100/100 floor), and the null-safe assignee comparison was
+mutation-checked on each dialect — `<>` instead of `IS DISTINCT FROM` / `IS NOT` fails both, which is
+the bug that would have made assigning an unassigned case a silent no-op. The roster-filter, the
+timeline-collapse, the compare-and-set, the `case_actions` dual-write and the widened export status
+were each mutation-checked the same way. Frontend 415 pass across 77 files, lint clean, build clean.
+
+**Not in this PR, and named rather than dropped:** the patient page's inline per-gap assign select and
+the Maui `worklist.spec.ts` e2e. Both are additive to what is here and neither gates PR 2.
+
 ## 2026-09-11 (evening) — the work list could not assign a case, and a measure's roster was mostly people it does not describe
 
 Three defects a case manager meets in the first ten minutes of the pilot sandbox. They are small on

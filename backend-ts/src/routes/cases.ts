@@ -21,9 +21,9 @@ import { getStores } from "../stores/factory.ts";
 import type { CaseStore } from "../stores/case-store.ts";
 import type { OutcomeStore } from "../stores/outcome-store.ts";
 import { routedEngineForEnv } from "../wiring/executor-router.ts";
-import { toCaseSummary, type CaseSummary } from "../case/case-read-models.ts";
-import { bucketPeriodForMeasure } from "../run/compliance-period.ts";
-import { matchesSubjectFilters, subjectFiltersFromQuery, subjectFilterErrorBody, SubjectFilterError } from "../compliance/subject-filters.ts";
+import type { CaseSummary } from "../case/case-read-models.ts";
+import { subjectFiltersFromQuery, subjectFilterErrorBody, SubjectFilterError } from "../compliance/subject-filters.ts";
+import { loadWorklistCases } from "../case/worklist-read-model.ts";
 import { toCaseDetail } from "../case/case-detail-read-model.ts";
 import { assignCase, escalateCase, resolveCase, CaseActionError, type CaseActionDeps } from "../case/case-actions.ts";
 import { previewOutreach, sendOutreach, updateOutreachDelivery, OutreachError } from "../case/case-outreach.ts";
@@ -44,7 +44,7 @@ import { resolveForecaster } from "../engine/immunization/resolve-forecaster.ts"
 import { resolveBucket } from "../case/resolve-bucket.ts";
 import { isWebChartConfigured } from "../engine/ingress/data-source.ts";
 import { profileForId } from "../engine/ingress/webchart/live-directory.ts";
-import { DIRECTORY, employeeById, profileSubjectMatcher } from "../config/deployment-profile.ts";
+import { DIRECTORY, employeeById, employees, providerById, profileSubjectMatcher } from "../config/deployment-profile.ts";
 import { assignableUsers, resolveAssignable } from "../auth/demo-users.ts";
 import { outcomeForCase } from "../case/case-outcome.ts";
 
@@ -106,28 +106,6 @@ async function appointmentDeps(env: CasesEnv): Promise<AppointmentDeps> {
 const json = (data: unknown, status = 200, extraHeaders: Record<string, string> = {}): Response =>
   new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json", ...extraHeaders } });
 
-/**
- * Map the page's status filter to concrete case statuses. Blank/missing defaults to
- * OPEN (matching the Java controller); `all` is the explicit unfiltered view.
- */
-function statusesFor(raw: string | null): string[] | undefined {
-  switch ((raw ?? "").toLowerCase()) {
-    case "all":
-      return undefined; // explicit: include every status
-    case "closed":
-      return ["RESOLVED", "CLOSED"];
-    case "excluded":
-      return ["EXCLUDED"];
-    case "":
-    case "open":
-      return ["OPEN"]; // default
-    default:
-      return [(raw as string).toUpperCase()];
-  }
-}
-
-/** Day portion (YYYY-MM-DD) for day-granular, inclusive from/to comparison. */
-const day = (s: string): string => s.slice(0, 10);
 
 export async function handleCases(req: Request, env: CasesEnv, actor = "system"): Promise<Response | null> {
   const url = new URL(req.url);
@@ -356,71 +334,33 @@ export async function handleCases(req: Request, env: CasesEnv, actor = "system")
     return json({ error: "invalid_request", message: `outreach must be one of: none | any (got '${outreachRaw}')` }, 400);
   }
   const outreach = outreachRaw as "none" | "any" | undefined;
-  // The OPEN worklist defaults to each measure's CURRENT compliance cycle — derived from TODAY + the
-  // measure's cadence (`bucketPeriodForMeasure`), so it's exact and cadence-correct (filtered in JS
-  // below). A blank `?period=` (empty string, not just absent) is treated as the default — `??` alone
-  // would leak it through and reintroduce the flood (Codex P2). The closed/excluded/all tabs (also
-  // called without a period) show full history, not a single cycle (Codex P2).
-  const statusParam = (q.get("status") ?? "").toLowerCase();
-  const isOpenWorklist = statusParam === "" || statusParam === "open";
-  const explicitPeriod = q.get("period")?.trim() || undefined;
-  const wantCurrentCycle = isOpenWorklist && (!explicitPeriod || explicitPeriod.toLowerCase() === "current");
+  // Everything from here is the shared work-list pipeline (`case/worklist-read-model.ts`) — the same
+  // one `/api/worklist/patients` groups by patient. Two copies would disagree the first time either
+  // was touched, and nothing would report the disagreement.
+  const summaries = await loadWorklistCases(
+    {
+      cases: await caseStore(env),
+      events: (await getStores(env)).events,
+      employeeLookup,
+      providerLookup: providerById,
+      // The roster is authoritative only when nothing outside it can appear on a case. With WebChart
+      // configured the lookup above resolves live subjects the directory does not hold, so the
+      // pre-filter is withheld rather than silently shortening the list by exactly those people.
+      roster: isWebChartConfigured(env) ? undefined : employees,
+      // The frontend's worklist-gap badge counts open cases with no outreach, so this list pays for it.
+      withOutreachCounts: true,
+      profileMatch: profileSubjectMatcher(employeeLookup),
+    },
+    {
+      status: q.get("status"),
+      measureId: q.get("measureId") ?? undefined,
+      priority: q.get("priority") ?? undefined,
+      assignee: q.get("assignee") ?? undefined,
+      period: q.get("period")?.trim() || undefined,
+      from, to, site, outcome, outreach, search,
+      subjects: subjectFilters,
+    },
+  );
 
-  const store = await caseStore(env);
-  // Fetch ALL rows matching the SQL-filterable predicates, then post-filter the record-derived ones
-  // (current-cycle, created_at range, employee site/search) and page in the read model — correct paging
-  // at floor scale. The fetch is uncapped on purpose: the default worklist always post-filters in JS
-  // (per-measure current cycle), so the loaded set must be complete or X-Total-Count would under-report
-  // and the frontend would stop paging early (#150 M10 — no silent truncation). For the current cycle we
-  // fetch every period ("all") and filter to today's cadence anchor per measure in JS below.
-  // (Ceiling-scale note: pushing these record-derived filters + LIMIT/OFFSET + COUNT into SQL — as the
-  // Java path does — is the future optimization if a single worklist ever holds very large result sets.)
-  let rows = await store.listCases({
-    statuses: statusesFor(q.get("status")),
-    measureId: q.get("measureId") ?? undefined,
-    priority: q.get("priority") ?? undefined,
-    assignee: q.get("assignee") ?? undefined,
-    period: wantCurrentCycle ? "all" : (explicitPeriod ?? "all"),
-    limit: Number.MAX_SAFE_INTEGER,
-    offset: 0,
-  });
-
-  // from/to filter case creation time (day-granular, inclusive) — matches the Java route.
-  if (from) rows = rows.filter((c) => day(c.createdAt) >= day(from));
-  if (to) rows = rows.filter((c) => day(c.createdAt) <= day(to));
-
-  const profileMatch = profileSubjectMatcher(employeeLookup);
-  rows = rows.filter((c) => profileMatch(c.employeeId));
-
-  // outreachRecordCount per case (derived from OUTREACH_SENT actions) — drives the
-  // frontend worklist-gap badge (open cases with count 0). One grouped query for the set.
-  const counts = await (await getStores(env)).events.outreachSentCounts(rows.map((c) => c.id));
-  let summaries: CaseSummary[] = rows.map((c) => toCaseSummary(c, counts[c.id] ?? 0, employeeLookup));
-  if (wantCurrentCycle) {
-    // Keep only each measure's CURRENT cycle, by today + the measure's cadence (Codex P2): exact and
-    // cadence-correct, so a stale row at another cadence's anchor can't appear and a rolled-over cycle
-    // with no open cases doesn't fall back to a prior cycle's stale opens.
-    const today = new Date().toISOString().slice(0, 10);
-    summaries = summaries.filter((c) => c.evaluationPeriod === bucketPeriodForMeasure(c.measureVersionId, today));
-  }
-  if (site) summaries = summaries.filter((c) => c.site === site);
-  // The pilot's panel filters, post-filtered against the directory exactly as `site` is — the store
-  // interface is unchanged (spec §5). `employeeLookup` is the same resolver the rest of this route
-  // uses, so a live WebChart subject resolves here too.
-  if (subjectFilters.providerId || subjectFilters.ageBand || subjectFilters.sex) {
-    summaries = summaries.filter((c) => matchesSubjectFilters(employeeLookup(c.employeeId), subjectFilters));
-  }
-  if (outcome) summaries = summaries.filter((c) => (c.currentOutcomeStatus ?? "").toUpperCase() === outcome);
-  if (outreach) summaries = summaries.filter((c) => (outreach === "none") === ((c.outreachRecordCount ?? 0) === 0));
-  if (search) {
-    summaries = summaries.filter(
-      (c) =>
-        c.employeeName.toLowerCase().includes(search) ||
-        c.measureName.toLowerCase().includes(search) ||
-        c.employeeId.toLowerCase().includes(search),
-    );
-  }
-  // #150 M10: expose the full filtered match count so clients can page past the limit instead of
-  // silently capping. The body stays a plain array (non-breaking); X-Total-Count carries the total.
   return json(summaries.slice(offset, offset + limit), 200, { "X-Total-Count": String(summaries.length) });
 }

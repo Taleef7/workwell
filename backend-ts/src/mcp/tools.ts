@@ -23,7 +23,8 @@ import { toMeasureDetail } from "../measure/measure-read-models.ts";
 import { generateTraceability } from "../measure/measure-traceability.ts";
 import { computeDataReadiness } from "../measure/data-readiness.ts";
 import { complianceRateOf } from "../program/rollup-shared.ts";
-import { AGE_BANDS, isAgeBand, isSex, matchesSubjectFilters } from "../compliance/subject-filters.ts";
+import { AGE_BANDS, hasActiveSubjectFilters, isAgeBand, isSex, matchesSubjectFilters, payerCodesOf } from "../compliance/subject-filters.ts";
+import { ACTIVE_CASE_STATUSES } from "../case/case-logic.ts";
 import type { JsonRecord } from "./tool-audit.ts";
 import { outcomeForCase } from "../case/case-outcome.ts";
 import { MEASURE_CATALOG } from "../measure/measure-catalog.ts";
@@ -133,7 +134,10 @@ function caseStatusesFor(raw: string): string[] | undefined {
       return ["RESOLVED", "CLOSED"];
     case "open":
     case "":
-      return ["OPEN"];
+      // The ACTIVE set, matching the work list and the CSV export: a case an operator has started is
+      // still work, and a client asking for the open list must not be handed a shorter one than the
+      // screen shows.
+      return [...ACTIVE_CASE_STATUSES];
     default:
       return [raw.toUpperCase()];
   }
@@ -481,6 +485,13 @@ async function listNoncompliant(args: JsonRecord, deps: McpToolDeps): Promise<un
     providerId: args.providerId != null ? String(args.providerId).trim() : null,
     ageBand: args.ageBand != null ? String(args.ageBand).trim() : null,
     sex: args.sex != null ? String(args.sex).trim().toUpperCase() : null,
+    // Accepts a comma list or a JSON array, and unlike the two above there is no refusal: payer
+    // terminology is OPEN (a live Coverage carries typology members we have not enumerated), so an
+    // unknown code matches nobody rather than erroring on a real one. `1` is Medicare and `11` its
+    // managed-care child, so a client asking for "Medicare" sends both.
+    payer: payerCodesOf(
+      Array.isArray(args.payer) ? args.payer.map((v) => String(v)) : args.payer != null ? String(args.payer) : null,
+    ),
   };
   // Refused, not dropped — the same rule as the HTTP routes. The schema's enum already tells a
   // well-behaved client, but a client that ignores it must get an error, not the whole worklist under
@@ -496,7 +507,9 @@ async function listNoncompliant(args: JsonRecord, deps: McpToolDeps): Promise<un
   const measure = measureNameFilter ? await resolveMeasure(deps, { measureName: measureNameFilter }) : null;
   // Same leak guard as list_cases: an unresolved measure filter must error, not return all cases.
   if (measureNameFilter && !measure) return safeError("MEASURE_NOT_FOUND", `Measure not found: ${measureNameFilter}`);
-  let rows = await deps.caseStore.listCases({ statuses: ["OPEN"], measureId: measure?.measureId, limit: 100000, offset: 0 });
+  // ACTIVE, not OPEN-only: an IN_PROGRESS case is still a non-compliant subject someone is working,
+  // and excluding it here made this tool disagree with the work list rendering the same cases.
+  let rows = await deps.caseStore.listCases({ statuses: [...ACTIVE_CASE_STATUSES], measureId: measure?.measureId, limit: 100000, offset: 0 });
   const directory = directoryForSubjects(deps, rows.map((c) => c.employeeId));
   const profileMatch = profileSubjectMatcher(directory.employeeById);
   rows = rows.filter((c) => profileMatch(c.employeeId));
@@ -505,7 +518,7 @@ async function listNoncompliant(args: JsonRecord, deps: McpToolDeps): Promise<un
   if (siteFilter) rows = rows.filter((c) => (directory.employeeById(c.employeeId)?.site ?? "").toLowerCase() === siteFilter.toLowerCase());
   // The PCP's external id, with the same semantics as every other surface: an unknown id returns an
   // empty list rather than the whole worklist, which is the leak guard `measureName` above documents.
-  if (panelFilters.providerId || panelFilters.ageBand || panelFilters.sex) {
+  if (hasActiveSubjectFilters(panelFilters)) {
     rows = rows.filter((c) => matchesSubjectFilters(directory.employeeById(c.employeeId), panelFilters));
   }
   rows.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
@@ -525,6 +538,8 @@ async function listNoncompliant(args: JsonRecord, deps: McpToolDeps): Promise<un
       nextAction: c.nextAction ?? null,
       assignee: c.assignee,
       updatedAt: c.updatedAt,
+      providerId: emp?.providerId ?? null,
+      payer: emp?.payer ?? null,
     };
   });
   return {
@@ -670,8 +685,8 @@ export const MCP_TOOLS: McpTool[] = [
   },
   {
     name: "list_noncompliant",
-    description: "List non-compliant open cases filtered by measureName, site, providerId (the PCP's external id, e.g. maui-prov-012), ageBand, sex, and outcome status. Default limit 25, max 100.",
-    inputSchema: { type: "object", properties: { measureName: { type: "string" }, site: { type: "string" }, providerId: { type: "string" }, ageBand: { type: "string", enum: ["0-17", "18-44", "45-64", "65+"] }, sex: { type: "string", enum: ["F", "M"] }, status: { type: "string", enum: ["DUE_SOON", "OVERDUE", "MISSING_DATA"] }, limit: { type: "number" } } },
+    description: "List non-compliant open cases filtered by measureName, site, providerId (the PCP's external id, e.g. maui-prov-012), ageBand, sex, payer, and outcome status. Payer is one or more Source of Payment Typology codes (comma list or array); the typology is hierarchical, so Medicare is BOTH \"1\" and \"11\" (managed care) and asking for only one of them silently omits the other. Default limit 25, max 100.",
+    inputSchema: { type: "object", properties: { measureName: { type: "string" }, site: { type: "string" }, providerId: { type: "string" }, ageBand: { type: "string", enum: ["0-17", "18-44", "45-64", "65+"] }, sex: { type: "string", enum: ["F", "M"] }, payer: { type: ["string", "array"], items: { type: "string" }, description: "Source of Payment Typology code(s) — a comma list or an array. Open terminology: an unknown code matches nobody rather than erroring. Medicare is \"1\" + \"11\"." }, status: { type: "string", enum: ["DUE_SOON", "OVERDUE", "MISSING_DATA"] }, limit: { type: "number" } } },
     roles: [CM, ADMIN],
     sensitivity: "restricted",
     handler: listNoncompliant,

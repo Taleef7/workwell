@@ -1,5 +1,6 @@
 /**
- * The panel filters the pilot's quality staff actually work by — PCP, age band and sex (spec §5).
+ * The panel filters the pilot's quality staff actually work by — PCP, age band, sex and primary payer
+ * (spec §5; payer added for MM-2 after the practice asked to work a panel by insurance).
  *
  * **One definition, four surfaces.** The roster, the cases route, the CSV exports and the MCP tool all
  * apply these, and each of them previously grew its own copy of the `site` filter. A second definition
@@ -37,6 +38,61 @@ export interface SubjectFilters {
   providerId?: string | null;
   ageBand?: string | null;
   sex?: string | null;
+  /**
+   * Primary payer, as one or more Source of Payment Typology codes. A subject matches when their
+   * `payer` equals ANY of them (OR within the filter; AND against the other filters).
+   *
+   * **A SET rather than a single code, because Medicare is two codes.** The typology is hierarchical:
+   * `1` is Medicare and `11` is its managed-care child, which a practice calls Medicare Advantage. On
+   * the pilot corpus that is 3,927 patients under `1` and 2,900 under `11`, so a single-valued filter
+   * lets someone ask for Medicare, receive 3,927, and never learn that 2,900 more were withheld under
+   * a heading that claims to contain them — the ADR-079 failure shape exactly. The caller selects the
+   * codes; `payerCodesInGroup` (`engine/synthetic/payer-display.ts`) is what turns "Medicare" into the
+   * set that is actually present in the directory.
+   *
+   * **Open terminology, unlike `ageBand` and `sex`.** Those two have a closed, short list this
+   * codebase owns, so a token outside it is a typo and gets a 400. A payer code comes from a live
+   * Coverage and the typology has members we have not enumerated, so any non-empty token is ACCEPTED
+   * and an unknown one simply matches nobody. Refusing it would mean refusing a real code because our
+   * display table is incomplete.
+   */
+  payer?: readonly string[] | string | null;
+}
+
+/** The payer filter as a normalised code set: trimmed, de-duplicated, empties dropped. */
+export function payerCodesOf(payer: SubjectFilters["payer"]): string[] {
+  if (payer === null || payer === undefined) return [];
+  const raw = typeof payer === "string" ? [payer] : payer;
+  const codes = new Set<string>();
+  for (const value of raw) {
+    // A comma-joined value is accepted alongside a repeated parameter so `?payer=1,11` and
+    // `?payer=1&payer=11` mean the same thing — an integrator will write one and the UI the other.
+    for (const part of String(value).split(",")) {
+      const trimmed = part.trim();
+      if (trimmed) codes.add(trimmed);
+    }
+  }
+  return [...codes];
+}
+
+/**
+ * Whether ANY panel filter is active — the one question four surfaces were each answering with their
+ * own copy of `providerId || ageBand || sex`.
+ *
+ * That copy is a **vacuous guard** the moment a filter is added: `payer` went into `SubjectFilters`
+ * and into the predicate, and the roster, the cases route, the CSV exports and the MCP tool would each
+ * have kept skipping the predicate entirely — serving an unfiltered list under a filtered heading,
+ * which is the exact failure this module's header calls the invisible wrong answer. A guard that reads
+ * as present and cannot fire is the defect class this project collects, so the question is asked once
+ * here and every surface calls it.
+ */
+export function hasActiveSubjectFilters(filters: SubjectFilters): boolean {
+  return Boolean(
+    filters.providerId?.trim() ||
+    filters.ageBand?.trim() ||
+    filters.sex?.trim() ||
+    payerCodesOf(filters.payer).length > 0,
+  );
 }
 
 /** A filter token the surface does not accept. Routes map it to a 400; the message names the accepted values. */
@@ -86,8 +142,8 @@ export function matchesSubjectFilters(
 ): boolean {
   const ageBand = filters.ageBand?.trim() || null;
   const sex = filters.sex?.trim().toUpperCase() || null;
-  const active = Boolean(filters.providerId || ageBand || sex);
-  if (!active) return true;
+  const payers = payerCodesOf(filters.payer);
+  if (!hasActiveSubjectFilters(filters)) return true;
   // A subject the directory cannot resolve fails every active filter. Admitting them would make an
   // unknown id read as "matches everything", which is the opposite of what a filter is for.
   if (!employee) return false;
@@ -113,6 +169,13 @@ export function matchesSubjectFilters(
     // everything. A filter that quietly returns the whole roster looks exactly like a working one.
     if (!employee.sex || employee.sex.toUpperCase() !== sex) return false;
   }
+  if (payers.length > 0) {
+    // A roster that records no payer (the occupational directory, and the live WebChart directory
+    // until Coverage extraction lands) matches NOTHING rather than everything — same rule as `sex`,
+    // for the same reason: a filter that quietly returns the whole roster looks exactly like a
+    // working one. Exact code comparison: `1` does not match `11`, and grouping is the caller's job.
+    if (!employee.payer || !payers.includes(employee.payer)) return false;
+  }
   return true;
 }
 
@@ -131,10 +194,15 @@ export function subjectFiltersFromQuery(params: URLSearchParams): SubjectFilters
   const rawSex = params.get("sex")?.trim().toUpperCase() ?? "";
   if (rawBand && !isAgeBand(rawBand)) throw new SubjectFilterError("ageBand", rawBand);
   if (rawSex && !isSex(rawSex)) throw new SubjectFilterError("sex", rawSex);
+  // Repeated `?payer=` parameters and a comma-joined one both arrive here; `payerCodesOf` folds them
+  // into one set. No refusal: payer terminology is open (see `SubjectFilters.payer`), so an unknown
+  // code matches nobody instead of 400-ing a real code our display table has not been taught yet.
+  const payer = payerCodesOf(params.getAll("payer"));
   return {
     providerId,
     ageBand: rawBand || null,
     sex: rawSex || null,
+    payer: payer.length > 0 ? payer : null,
   };
 }
 
