@@ -126,8 +126,9 @@ was considered as its source and rejected: it changes on a different schedule an
 its cardinality does not obviously match, and chasing it would substitute for the request that actually
 matters. If MIE holds staff-to-provider data, it seeds this table and stays editable rather than being
 read through live. The live WebChart directory still attributes every subject to one hardcoded
-provider, so panels are meaningful on the corpus roster until #533's ingest work lands — and that
-attribution, patient to provider, is the single ask to put to MIE. #552 (should an IN_PROGRESS case still receive automated
+provider, so panels are meaningful on the corpus roster until #556 lands — and that attribution,
+patient to provider, is the single ask to put to MIE. (Filed as #556 rather than folded into #533,
+which is closed and covered a different field.) #552 (should an IN_PROGRESS case still receive automated
 outreach) and #554 (the Maui worklist e2e) stay open.
 
 ## 2026-09-12 — the work list is a list of people, and the filter that would have hidden 2,900 of them

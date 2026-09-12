@@ -1621,7 +1621,7 @@ and not a deployment defect — the tab sorts unmapped providers first so the ga
 **What to check after the first deploy.** Map one provider and confirm the toast reports open gaps
 moved, then confirm the next nightly opens that provider's new cases already assigned
 (`assignment_source = 'PANEL'` on the case, and an `assignee` in the `CASE_CREATED` audit payload). On
-the live WebChart directory every subject is still attributed to one hardcoded provider (#533), so
+the live WebChart directory every subject is still attributed to one hardcoded provider (#556), so
 panels are only meaningful against the corpus roster.
 
 ## Database compute cost (read before changing any polling interval)

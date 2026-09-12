@@ -135,8 +135,10 @@ cardinality does not obviously line up — this table is one provider to one ass
 department may hold several providers or a staff member several departments — so it is not a clean
 import. And it is the wrong dependency to pursue: a panel only means anything once the system knows
 which patients belong to which provider, which on the live directory it does not, because every
-subject is attributed to a single hardcoded provider. That is the real ask of MIE, tracked as #533,
-and it is about patient-to-provider attribution rather than staff assignment.
+subject is attributed to a single hardcoded provider. That is the real ask of MIE, tracked as #556,
+and it is about patient-to-provider attribution rather than staff assignment. (It is NOT #533, which
+covered the cms165 blood-pressure stamping half of WebChart ingest and is closed — a different field
+with a different consumer.)
 
 If MIE does hold staff-to-provider data, the compliant shape is an IMPORT that SEEDS this table and
 leaves it editable, never a live read-through. Externally supplied data lands in a workflow a person
@@ -161,8 +163,8 @@ discrepancy is visible rather than inferred.
 nullable column on both schema files. `GET /api/panels` is AUTHENTICATED (the same gate the provider
 list carries), `PUT`/`DELETE` are CASE_MANAGER/ADMIN. The live WebChart directory still attributes
 every subject to one hardcoded provider, so panels are meaningful on the corpus roster only until
-#533's ingest work lands; that is a data gap, not a design one, and d7 records why closing it is the
-request that matters rather than moving this mapping into WebChart.
+#556's attribution work lands; that is a data gap, not a design one, and d7 records why closing it is
+the request that matters rather than moving this mapping into WebChart.
 
 ## ADR-079: the population membership a run already knew is WRITTEN DOWN — and a subject outside the population is subtracted from the rate, not counted as a gap
 
