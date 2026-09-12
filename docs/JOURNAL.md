@@ -151,8 +151,11 @@ the bug that would have made assigning an unassigned case a silent no-op. The ro
 timeline-collapse, the compare-and-set, the `case_actions` dual-write and the widened export status
 were each mutation-checked the same way. Frontend 415 pass across 77 files, lint clean, build clean.
 
-**Not in this PR, and named rather than dropped:** the patient page's inline per-gap assign select and
-the Maui `worklist.spec.ts` e2e. Both are additive to what is here and neither gates PR 2.
+**Not in this PR, and filed rather than dropped:** the patient page's inline per-gap assign select
+(#553) and the Maui `worklist.spec.ts` e2e (#554). Both are additive and neither gates PR 2. The
+owner decision the status widening surfaced — whether a case someone has already picked up should
+still receive automated outreach, which is why outreach-campaign targeting and the MCP
+compliance-answer case were left on OPEN-only — is #552.
 
 ## 2026-09-11 (evening) — the work list could not assign a case, and a measure's roster was mostly people it does not describe
 
