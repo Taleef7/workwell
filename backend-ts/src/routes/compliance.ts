@@ -4,7 +4,7 @@
  * /api/hierarchy/rollup.
  *
  *   GET /api/compliance/roster?panel=&status=&site=&role=&q=&segment=&tenant=&page=&pageSize=
- *     → { panel, availablePanels, columns, rows }  + X-Total-Count header (full filtered match count)
+ *     → { panel, availablePanels, columns, rows, notInPopulation }  + X-Total-Count header (full filtered match count)
  */
 import type { CloudDatabase } from "@mieweb/cloud";
 import { getStores } from "../stores/factory.ts";
@@ -73,7 +73,15 @@ export async function handleCompliance(req: Request, env: ComplianceEnv): Promis
     },
   );
   return json(
-    { panel: roster.panel, availablePanels: roster.availablePanels, columns: roster.columns, rows: roster.rows },
+    {
+      panel: roster.panel,
+      availablePanels: roster.availablePanels,
+      columns: roster.columns,
+      rows: roster.rows,
+      // Only non-zero on a single-measure roster (ADR-078/079): the patients that measure does not
+      // describe, withheld from the work list and counted so the shorter list is accounted for.
+      notInPopulation: roster.notInPopulation,
+    },
     200,
     { "X-Total-Count": String(roster.total) },
   );

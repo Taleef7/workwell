@@ -200,6 +200,33 @@ test("POST /api/cases/:id/assign sets the assignee and records ASSIGNED on the t
   assert.equal(cleared.assignee, null);
 });
 
+/**
+ * The assignee a case is given must be an account that exists on this deployment. The UI offers the
+ * `/api/users/assignable` list, but the route accepted any string, so a typo — or a stale client, or
+ * a hand-made request — silently parked a case on an address nobody logs in as. That case is then
+ * invisible in every "assigned to me" view and in the assignee filter's own option list, which is
+ * built from the assignees present in the data. Refusing it is a 400 naming the accepted set, the
+ * same shape as the panel filters (`subject-filters.ts`).
+ */
+test("POST /api/cases/:id/assign refuses an account that is not assignable on this deployment", async () => {
+  const res = await post(`/api/cases/${omarCaseId}/assign?assignee=nobody@example.com`);
+  assert.equal(res?.status, 400);
+  const body = (await res!.json()) as { error: string; message: string };
+  assert.equal(body.error, "invalid_request");
+  assert.match(body.message, /assignable/i);
+  // The case is untouched: a refused assignment is not a partial one.
+  const after = (await getPath(`/api/cases/${omarCaseId}`).then((r) => r!.json())) as { assignee: string | null };
+  assert.notEqual(after.assignee, "nobody@example.com");
+});
+
+test("POST /api/cases/:id/assign accepts an assignable account case-insensitively", async () => {
+  const res = await post(`/api/cases/${omarCaseId}/assign?assignee=CM@WorkWell.dev`);
+  assert.equal(res?.status, 200);
+  const d = (await res!.json()) as { assignee: string };
+  assert.equal(d.assignee, "cm@workwell.dev", "stored as the account's own spelling, not the caller's");
+  await post(`/api/cases/${omarCaseId}/assign`);
+});
+
 test("POST /api/cases/:id/escalate forces HIGH/OPEN and records ESCALATED", async () => {
   const res = await post(`/api/cases/${omarCaseId}/escalate`);
   assert.equal(res?.status, 200);

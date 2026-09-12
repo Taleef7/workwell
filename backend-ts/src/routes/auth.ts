@@ -12,7 +12,7 @@
  */
 import { randomUUID } from "node:crypto";
 import { createJwt, type JwtService } from "../auth/jwt.ts";
-import { authenticate, DEMO_USERS, findDemoUser, isDemoAccountRefusedOnProfile } from "../auth/demo-users.ts";
+import { assignableUsers, authenticate, findDemoUser } from "../auth/demo-users.ts";
 
 const REFRESH_COOKIE = "refresh_token";
 const COOKIE_PATH = "/api/auth";
@@ -116,13 +116,7 @@ export function createAuthHandler(config: AuthConfig): AuthHandler {
   return async function handleAuth(req: Request): Promise<Response | null> {
     const { pathname } = new URL(req.url);
     if (pathname === "/api/users/assignable" && req.method === "GET") {
-      const assignable = DEMO_USERS
-        .filter((user) =>
-          (user.role === "ROLE_CASE_MANAGER" || user.role === "ROLE_ADMIN") &&
-          !isDemoAccountRefusedOnProfile(user),
-        )
-        .sort((a, b) => a.email.localeCompare(b.email))
-        .map((user) => ({ email: user.email, role: user.role }));
+      const assignable = assignableUsers().map((user) => ({ email: user.email, role: user.role }));
       return json(assignable);
     }
 

@@ -101,6 +101,39 @@ beforeEach(() => {
 });
 afterEach(() => vi.clearAllMocks());
 
+describe("CompliancePage out-of-population count", () => {
+  // A roster scoped to one measure withholds the patients that measure does not describe (ADR-078),
+  // and says how many. The saying is the point: a list that is quietly shorter is the failure this
+  // is meant to avoid, so the count must render, and must NOT render when nothing was withheld.
+  function rosterWith(notInPopulation: number | undefined) {
+    getWithHeaders.mockReset().mockResolvedValue({
+      data: { ...rosterImmun.data, notInPopulation },
+      headers: new Headers({ "X-Total-Count": "1" }),
+    });
+  }
+
+  it("reports what a measure-scoped roster withheld", async () => {
+    rosterWith(8143);
+    navHolder.current.setUrl("/compliance?measureId=mmr");
+    render(<CompliancePage />);
+    expect(await screen.findByText(/8,143 not in this measure's population/i)).toBeInTheDocument();
+  });
+
+  it("says nothing when nothing was withheld", async () => {
+    rosterWith(0);
+    render(<CompliancePage />);
+    await screen.findAllByText("Ada Lovelace");
+    expect(screen.queryByText(/not in this measure's population/i)).not.toBeInTheDocument();
+  });
+
+  it("says nothing when the server does not report the field at all", async () => {
+    rosterWith(undefined);
+    render(<CompliancePage />);
+    await screen.findAllByText("Ada Lovelace");
+    expect(screen.queryByText(/not in this measure's population/i)).not.toBeInTheDocument();
+  });
+});
+
 describe("CompliancePage", () => {
   it("renders the panel's columns and a chip per cell", async () => {
     render(<CompliancePage />);

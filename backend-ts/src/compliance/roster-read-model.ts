@@ -39,6 +39,12 @@ export interface Roster {
   columns: RosterColumn[];
   rows: RosterRow[];
   total: number;
+  /**
+   * Rows withheld because the measure in scope does not describe them (ADR-078/079). Non-zero only
+   * on a SINGLE-measure roster, where such a patient is not work; `total` already excludes them.
+   * Returned so the surface can say how many rather than serve a shorter list with no account of it.
+   */
+  notInPopulation: number;
 }
 
 /**
@@ -223,6 +229,27 @@ export async function buildRoster(deps: RosterDeps, filters: RosterFilters): Pro
     const q = filters.q.toLowerCase();
     rows = rows.filter((r) => r.subject.name.toLowerCase().includes(q) || r.subject.externalId.toLowerCase().includes(q));
   }
+  // A patient the measure in scope does not describe is not a gap and is not work (ADR-078), so a
+  // roster scoped to ONE measure and no particular status drops them rather than greying them: a
+  // greyed row still occupies a work list.
+  //
+  // Bounded three ways, and the third is the one that took a review to see. It needs a single measure
+  // in scope — on the whole panel the row stays, because a patient outside CMS125's population may be
+  // OVERDUE on CMS122 and hiding the row would hide the gap. It reports what it withheld, rather than
+  // serving a quietly shorter list. And it does NOT apply when a status is asked for: every
+  // drill-down carries one (`status=OVERDUE`, `MISSING_DATA`, …), the status filter below already
+  // excludes an OUT_OF_POPULATION cell from every one of those buckets, so the drop would be a no-op
+  // whose COUNT still described the pre-status set — "14 patients (8,143 not in this measure's
+  // population)" over an OVERDUE list, which reads as 8,143 more overdue patients withheld. A number
+  // that does not describe the list beside it is the defect this exists to prevent, inverted.
+  // `status=OUT_OF_POPULATION` is therefore answered by the status filter alone.
+  let notInPopulation = 0;
+  if (filters.measureId && !filters.status) {
+    const before = rows.length;
+    rows = rows.filter((r) => r.cells[filters.measureId!]?.status !== "OUT_OF_POPULATION");
+    notInPopulation = before - rows.length;
+  }
+
   if (filters.status) {
     const s = filters.status.toUpperCase();
     rows = filters.measureId
@@ -252,5 +279,5 @@ export async function buildRoster(deps: RosterDeps, filters: RosterFilters): Pro
   const page = Math.max(1, Math.trunc(filters.page ?? 1));
   const pageSize = Math.max(1, Math.min(Math.trunc(filters.pageSize ?? 50), 200));
   const start = (page - 1) * pageSize;
-  return { panel: resolvedPanel, availablePanels: AVAILABLE_PANELS, columns, rows: rows.slice(start, start + pageSize), total };
+  return { panel: resolvedPanel, availablePanels: AVAILABLE_PANELS, columns, rows: rows.slice(start, start + pageSize), total, notInPopulation };
 }

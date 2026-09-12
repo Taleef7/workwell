@@ -7,9 +7,10 @@ test.beforeEach(() => {
 
 test.describe("Maui case workflow", () => {
   // This file CAN mutate cases (an outreach POST, an assignment), so its tests run in order rather
-  // than racing each other for the same open case. "Can": the three UI mutations below are each
-  // behind an `if (await …count())`, so a missing control skips silently rather than failing —
-  // pre-existing, and worth knowing when reading this as a mutation guarantee.
+  // than racing each other for the same open case. The assignment step below is unconditional; the
+  // status and outreach steps are still each behind an `if (await …count())`, so a missing control
+  // there skips silently rather than failing — pre-existing, and worth knowing when reading this as
+  // a mutation guarantee.
   test.describe.configure({ mode: "serial" });
 
   test("open an OVERDUE cms125 case and exercise the case-manager actions", async ({ page }) => {
@@ -46,16 +47,17 @@ test.describe("Maui case workflow", () => {
     const timeline = page.getByText(/Audit timeline/i).filter({ visible: true }).first();
     await expect(timeline).toBeVisible({ timeout: 10_000 });
 
-    // Assign to quality-staff
-    const assigneeInput = page.getByRole("textbox", { name: /assignee/i }).or(page.locator("input[name='assignee']"));
-    if (await assigneeInput.count()) {
-      await assigneeInput.first().fill(MAUI_ACCOUNTS.qualityStaff.email);
-      const assignBtn = page.getByRole("button", { name: /assign/i }).first();
-      await expect(assignBtn).toBeEnabled({ timeout: 10_000 });
-      await assignBtn.click();
-      // Audit timeline should gain a Case Assigned entry
-      await expect(page.getByText(/Case Assigned/i).first()).toBeVisible({ timeout: 30_000 });
-    }
+    // Assign to quality-staff. The control offers the deployment's assignable accounts; typing an
+    // address is deliberately not possible, so the test picks the option a person would.
+    const assigneeSelect = page.getByRole("combobox", { name: /assignee/i }).filter({ visible: true }).first();
+    await expect(assigneeSelect).toBeVisible({ timeout: 10_000 });
+    await assigneeSelect.click();
+    await page.getByRole("option", { name: MAUI_ACCOUNTS.qualityStaff.email }).first().click();
+    const assignBtn = page.getByRole("button", { name: /^assign$/i }).first();
+    await expect(assignBtn).toBeEnabled({ timeout: 10_000 });
+    await assignBtn.click();
+    // Audit timeline should gain a Case Assigned entry
+    await expect(page.getByText(/Case Assigned/i).first()).toBeVisible({ timeout: 30_000 });
 
     // Change status to IN_PROGRESS if offered
     const statusButton = page.getByRole("button", { name: /start|in progress/i }).first();

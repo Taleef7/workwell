@@ -45,6 +45,7 @@ import { resolveBucket } from "../case/resolve-bucket.ts";
 import { isWebChartConfigured } from "../engine/ingress/data-source.ts";
 import { profileForId } from "../engine/ingress/webchart/live-directory.ts";
 import { DIRECTORY, employeeById, profileSubjectMatcher } from "../config/deployment-profile.ts";
+import { assignableUsers, resolveAssignable } from "../auth/demo-users.ts";
 import { outcomeForCase } from "../case/case-outcome.ts";
 
 interface CasesEnv {
@@ -138,7 +139,32 @@ export async function handleCases(req: Request, env: CasesEnv, actor = "system")
   if (req.method === "POST") {
     const assignId = url.pathname.match(/^\/api\/cases\/([^/]+)\/assign$/)?.[1];
     if (assignId) {
-      const detail = await assignCase(await actionDeps(env), assignId, url.searchParams.get("assignee"), actor);
+      // An absent/blank `assignee` clears the assignment (the unassign path). Anything else must be
+      // an account this deployment can actually assign to — the same list `/api/users/assignable`
+      // offers the UI — resolved to the account's own spelling so one person is one assignee.
+      // Without this the route stored whatever string arrived, and a mistyped address left the case
+      // assigned to nobody who could sign in and out of every "assigned to me" view.
+      const requested = url.searchParams.get("assignee");
+      const deps = await actionDeps(env);
+      // Resource first: an unknown case is a 404 whatever the payload says (the established contract
+      // for every case action), so the validation below cannot turn a 404 into a 400.
+      if (!(await deps.cases.getCase(assignId))) return json({ error: "not_found", id: assignId }, 404);
+      let assignee: string | null = null;
+      if (requested !== null && requested.trim() !== "") {
+        assignee = resolveAssignable(requested);
+        if (assignee === null) {
+          return json(
+            {
+              error: "invalid_request",
+              message: `'${requested}' is not an assignable account on this deployment (accepted: ${assignableUsers()
+                .map((u) => u.email)
+                .join(", ")})`,
+            },
+            400,
+          );
+        }
+      }
+      const detail = await assignCase(deps, assignId, assignee, actor);
       return detail ? json(detail) : json({ error: "not_found", id: assignId }, 404);
     }
     const escalateId = url.pathname.match(/^\/api\/cases\/([^/]+)\/escalate$/)?.[1];
