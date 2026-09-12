@@ -72,11 +72,43 @@ was missing what every real caller supplies.
 **A panel is not an attribution** (d6). Who works a patient and who is accountable for them under a
 contract are different questions with different sources; the ACO's list is PR 3, versioned and separate.
 
-Verified: backend 2,727 tests, 2,704 pass, 1 fail, 22 skipped — the failure is `corpus-membership`, the
+**What three reviewers found, and what it changed.** The review round was worth more than the
+implementation. Three independent passes converged on the same hole: the backfill decides to move a
+case because of BOTH columns — the assignee and the fact that a panel put it there — while the
+compare-and-set guarded only the assignee. An operator re-asserting the same assignee (which makes the
+row theirs) was therefore overwritten by the very rule written to protect it. The expectation now
+carries the provenance, guarded null-safely on both stores; it is the same "guard the whole plan
+input" correction the batched upsert already carries a paragraph about, which is a sign the lesson had
+not generalised.
+
+Four more, each a real defect rather than a style note:
+- **A claim could not be recorded.** Assigning a case to the person the panel already chose was a
+  no-op, so an operator claiming their own panel's work had it recorded as the panel's — and the next
+  panel edit took back exactly what they had claimed. A change of source alone is now a change.
+- **A stranded case could not be recovered.** Moving only PANEL rows on the PREVIOUS owner meant a run
+  that snapshotted the old owner and inserted after the scan left a row no later save could reach, the
+  previous and current owner being the same person by then. Any PANEL-sourced row is the panel's.
+- **The paged read was not stable.** `updated_at DESC` is mutated by concurrent runs, so a row could be
+  read twice (two events for one move) or never. One unbounded read per chunk, deduplicated — what the
+  work list's own loader already does. The chunk dropped to 900: the floor expands each id into a bind
+  and older SQLite caps a statement at 999, so a thousand-patient provider would have failed on the
+  floor and succeeded on Postgres.
+- **Two counts described other sets.** Bulk assign reported a row lost to a concurrent write as
+  "unchanged", which says the opposite of what happened; `conflicted` is now its own number. And the
+  frontend's panel chip was drawn from a second copy of the hook, so mapping a panel to yourself left
+  it still saying none were yours.
+
+`X-Panel-Providers` was deleted rather than fixed. Nothing read it, and `cors.ts` exposes only
+`X-Total-Count`, so a browser could not have read it if something had — a surface that reads as
+load-bearing and cannot fire, which is the shape this project keeps collecting.
+
+Verified: backend 2,737 tests, 2,714 pass, 1 fail, 22 skipped — the failure is `corpus-membership`, the
 known stale local sparse-checkout of vendored artifacts, and it reproduces on a clean tree. Typecheck
-clean. The store contract ran on BOTH backends against a real `postgres:16` (110/110 ceiling, 107/107
+clean. The store contract ran on BOTH backends against a real `postgres:16` (112/112 ceiling, 109/109
 floor), which is where the set-based assign SQL and the batched insert's per-row panel assignee are
-actually exercised. Frontend 425 pass across 79 files, lint clean, build clean.
+actually exercised. Frontend 427 pass across 79 files, lint clean, build clean. The provenance guard,
+the convergence rule and the first-load guard were each mutation-checked: reverting any one of them
+fails a test that names the behaviour, rather than passing quietly.
 
 **Still owner-owned.** Whether the staff→provider mapping should instead be fed from WebChart's own
 department-to-provider construct is a question for MIE, not a decision taken here. The live WebChart
