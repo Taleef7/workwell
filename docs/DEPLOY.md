@@ -1599,6 +1599,31 @@ told before they see it.
 **Rolling back** is `UPDATE workwell_spike.outcomes SET out_of_population = NULL;` — the backend returns
 to reporting what it reported before. The column itself can stay; it is inert when NULL.
 
+## Provider panels — `panel_assignments` and `cases.assignment_source` (ADR-080, 2026-09-12)
+
+**Nothing to run.** Both are additive and apply automatically on boot — the ceiling's
+`CREATE TABLE IF NOT EXISTS` / `ADD COLUMN IF NOT EXISTS` in `schema-pg.ts`, and the floor's
+`migrateFloorSchema`. Every deploy recreates the container, so the DDL lands with the code.
+
+**There is deliberately NO backfill, and the contrast with the section above is the point.** ADR-079's
+`out_of_population` had NULLs that were *recoverable*: the run had known the answer and discarded it,
+so the evidence could be re-read and the history made to agree with what the roster was already
+showing. `assignment_source` has no such source. A case assigned before this column existed has no
+record of who chose, and NULL is the true value rather than a placeholder — readers treat a NULL source
+on an assigned row as operator-owned, which is the reading that declines to move it. Guessing `PANEL`
+would let the first panel edit reassign work a person placed by hand; guessing `OPERATOR` would assert
+something nobody verified. Leave them NULL.
+
+**Seeding panels is an app action, not an ops one.** A supervisor maps providers on `/worklist?tab=panels`
+(CASE_MANAGER or ADMIN). Until a provider is mapped it is an unassigned queue, which is a working state
+and not a deployment defect — the tab sorts unmapped providers first so the gap is visible.
+
+**What to check after the first deploy.** Map one provider and confirm the toast reports open gaps
+moved, then confirm the next nightly opens that provider's new cases already assigned
+(`assignment_source = 'PANEL'` on the case, and an `assignee` in the `CASE_CREATED` audit payload). On
+the live WebChart directory every subject is still attributed to one hardcoded provider (#533), so
+panels are only meaningful against the corpus roster.
+
 ## Database compute cost (read before changing any polling interval)
 
 Neon compute is billed by **CU-hours**, and a compute that is merely *awake* bills whether or not it
