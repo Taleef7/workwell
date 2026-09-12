@@ -166,6 +166,8 @@ export default function CaseDetailPage() {
   const canEngineering = canSeeEngineering(user?.role);
   const { labelFor: measureLabelFor } = useMeasureIdentities();
   const [caseDetail, setCaseDetail] = useState<CaseDetail | null>(null);
+  // The audit timeline opens collapsed to the newest entry — see the note at the timeline itself.
+  const [showHistory, setShowHistory] = useState(false);
   const [loading, setLoading] = useState(true);
   const [acting, setActing] = useState<"outreach" | "rerun" | "delivery" | null>(null);
   const [assigning, setAssigning] = useState(false);
@@ -1219,10 +1221,35 @@ export default function CaseDetailPage() {
             </div>
             )}
 
+            {/*
+              Collapsed by default (the pilot staff's ask): on a case with a long history the timeline
+              pushed the next action and the outreach controls below the fold, so the page opened on a
+              ledger rather than on the work. NOTHING is removed — every state change is still audited
+              and still here, one click away, and the newest entry stays visible so the page still says
+              when something last happened.
+
+              `slice(-1)`, not `slice(0, 1)`: `caseTimeline` is ordered `occurred_at ASC` (the store
+              interface says "oldest-first"), so index 0 is CASE_CREATED. The first version took the
+              front of the list and showed a months-old creation entry under a control promising the
+              latest one — and the test missed it by feeding descending fixture data the real store
+              never produces.
+            */}
             <div className="rounded-3xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-6 shadow-sm">
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500 dark:text-neutral-400">Audit timeline</p>
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500 dark:text-neutral-400">Audit timeline</p>
+                {caseDetail.timeline.length > 1 ? (
+                  <button
+                    type="button"
+                    aria-expanded={showHistory}
+                    className="text-xs font-medium text-primary-700 hover:underline dark:text-primary-300"
+                    onClick={() => setShowHistory((open) => !open)}
+                  >
+                    {showHistory ? "Hide history" : `Show history (${caseDetail.timeline.length - 1} more)`}
+                  </button>
+                ) : null}
+              </div>
               <div className="mt-4 space-y-3">
-                {caseDetail.timeline.map((event, index) => (
+                {(showHistory ? caseDetail.timeline : caseDetail.timeline.slice(-1)).map((event, index) => (
                   (() => {
                     const notificationBadge = timelineNotificationBadge(event);
                     return (

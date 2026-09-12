@@ -101,11 +101,32 @@ describe("CasesPage assignment control", () => {
     await userEvent.click(await screen.findByRole("option", { name: /quality-staff@maui\.workwell\.dev/i }));
     await userEvent.click(screen.getByRole("button", { name: /^assign/i }));
 
+    // ONE request for the whole selection, not one per case. The loop this replaced had no
+    // transaction around it, so a failure partway left some cases assigned and a toast that said
+    // nothing about it.
     await waitFor(() => {
-      const assignCall = post.mock.calls.map((c) => String(c[0])).find((u) => u.includes("/assign"));
-      expect(assignCall).toBeDefined();
-      expect(assignCall).toContain("/api/cases/case-1/assign");
-      expect(assignCall).toContain(encodeURIComponent("quality-staff@maui.workwell.dev"));
+      const bulk = post.mock.calls.find((c) => String(c[0]).includes("/api/cases/bulk-assign"));
+      expect(bulk).toBeDefined();
+      expect(bulk![1]).toEqual({ assignee: "quality-staff@maui.workwell.dev", caseIds: ["case-1"] });
+    });
+    // And no per-case assign survives alongside it — otherwise both paths would be live and only one
+    // of them audited the way the bulk endpoint does.
+    expect(post.mock.calls.map((c) => String(c[0])).filter((u) => /\/api\/cases\/[^/]+\/assign$/.test(u))).toEqual([]);
+  });
+
+  it("clearing the assignee sends an explicit null rather than an empty string", async () => {
+    render(<CasesPage />);
+    await waitFor(() => expect(caseCalls().length).toBeGreaterThan(0));
+
+    await userEvent.click(await screen.findByRole("checkbox", { name: /select lisa carter/i }));
+    await userEvent.click(await screen.findByRole("combobox", { name: /assignee for selected/i }));
+    await userEvent.click(await screen.findByRole("option", { name: /unassign/i }));
+    await userEvent.click(screen.getByRole("button", { name: /^assign/i }));
+
+    // `null` is "clear the assignment"; `""` would be a value the server has to guess about.
+    await waitFor(() => {
+      const bulk = post.mock.calls.find((c) => String(c[0]).includes("/api/cases/bulk-assign"));
+      expect(bulk![1]).toEqual({ assignee: null, caseIds: ["case-1"] });
     });
   });
 });

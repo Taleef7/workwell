@@ -25,6 +25,20 @@ export function dispositionFor(outcomeStatus: string): CaseDisposition {
   return "RESOLVE"; // COMPLIANT (and anything else) closes an existing case
 }
 
+/**
+ * Work order for the three priorities. Defined once because a list that sorts by priority and a list
+ * that sorts by "urgency" with its own table will disagree, and the disagreement is invisible: both
+ * render, both look ordered, and the top of one is not the top of the other.
+ *
+ * An unrecognised priority sorts LAST rather than first — a row we cannot rank must not claim the top
+ * of a work list.
+ */
+export const PRIORITY_RANK: Readonly<Record<string, number>> = { HIGH: 0, MEDIUM: 1, LOW: 2 };
+
+/** A priority's sort key; anything unrecognised sorts after every known priority. */
+export const priorityRankOf = (priority: string | null | undefined): number =>
+  PRIORITY_RANK[(priority ?? "").toUpperCase()] ?? Number.MAX_SAFE_INTEGER;
+
 export function priorityFor(outcomeStatus: string): "HIGH" | "MEDIUM" | "LOW" {
   switch (outcomeStatus) {
     case "OVERDUE":

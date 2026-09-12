@@ -11,7 +11,8 @@
 import type { CaseStore } from "../stores/case-store.ts";
 import type { OutcomeStore } from "../stores/outcome-store.ts";
 import type { CaseEventStore } from "../stores/case-event-store.ts";
-import { employeeById, employees } from "../config/deployment-profile.ts";
+import { employeeById, employees, providerById } from "../config/deployment-profile.ts";
+import { payerNameOf } from "../engine/synthetic/payer-display.ts";
 import { DIRECTORY } from "../config/deployment-profile.ts";
 import { directoryForRows } from "../engine/ingress/webchart/live-directory.ts";
 import { isWebChartConfigured, type DataSourceEnv } from "../engine/ingress/data-source.ts";
@@ -55,6 +56,15 @@ export interface EmployeeProfileResponse {
   role: string;
   site: string;
   supervisorName: string | null;
+  /**
+   * The panel facts (MM-2): attributed PCP and primary payer, ids for matching and names for display.
+   * Null where the directory records none — the occupational roster has no payer, and a live WebChart
+   * directory has neither until Coverage extraction lands (#533).
+   */
+  providerId: string | null;
+  providerName: string | null;
+  payer: string | null;
+  payerName: string | null;
   startDate: string | null;
   fhirPatientId: string | null;
   active: boolean;
@@ -213,6 +223,10 @@ export async function getEmployeeProfile(deps: EmployeeProfileDeps, externalId: 
     role: emp.role,
     site: emp.site,
     supervisorName: null,
+    providerId: emp.providerId ?? null,
+    providerName: emp.providerId ? (providerById(emp.providerId)?.name ?? emp.providerId) : null,
+    payer: emp.payer ?? null,
+    payerName: emp.payer ? payerNameOf(emp.payer) : null,
     startDate: null,
     fhirPatientId: null,
     active: true,

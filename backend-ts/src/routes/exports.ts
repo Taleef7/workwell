@@ -14,6 +14,7 @@ import { getStores } from "../stores/factory.ts";
 import { runsCsv, outcomesCsvStream, casesCsv, auditCsvStream } from "../export/export-csv.ts";
 import { subjectFiltersFromQuery, subjectFilterErrorBody, SubjectFilterError } from "../compliance/subject-filters.ts";
 import type { DataSourceEnv } from "../engine/ingress/data-source.ts";
+import { ACTIVE_CASE_STATUSES } from "../case/case-logic.ts";
 
 interface ExportsEnv extends DataSourceEnv {
   DB: CloudDatabase;
@@ -43,14 +44,24 @@ function subjectFiltersOr400(q: URLSearchParams): ReturnType<typeof subjectFilte
   }
 }
 
-/** Statuses mapping mirrors the cases worklist: blank/"open"→OPEN, "all"→all, else the literal. */
+/**
+ * Statuses mapping, mirroring the cases worklist: blank/"all"→all, "open"→the ACTIVE set, else the
+ * literal.
+ *
+ * **"open" is `ACTIVE_CASE_STATUSES`, not `["OPEN"]`.** This export is reached from the work list's
+ * own "Export" button with the status it is currently showing, so the two must agree about what is
+ * open. While this said `["OPEN"]` and the list said OPEN + IN_PROGRESS, scheduling an appointment
+ * moved a case to IN_PROGRESS and it stayed on screen but vanished from the CSV taken off that
+ * screen — a row missing from an export nobody can see is missing, which is the worse half of the
+ * two failures this codebase names.
+ */
 function caseStatuses(raw: string | null): string[] | undefined {
   switch ((raw ?? "").toLowerCase()) {
     case "":
     case "all":
       return undefined;
     case "open":
-      return ["OPEN"];
+      return [...ACTIVE_CASE_STATUSES];
     case "closed":
       return ["RESOLVED", "CLOSED"];
     case "excluded":

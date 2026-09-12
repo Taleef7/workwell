@@ -80,7 +80,9 @@ What happens, in order:
    never duplicates) a case in a worklist, and a now-compliant result resolves it. Every state
    change writes an audit event, no exceptions.
 5. **Results surface through WorkWell's interface today.** A quality manager reads dashboards,
-   pass rates and trends; a coordinator works the case list; CSV exports feed anything
+   pass rates and trends; a coordinator works the case list — either **by gap** (`/cases`, one row
+   per patient-measure) or **by patient** (`/worklist`, one row per person with every open gap on
+   it, so one phone call can close what one call can close); CSV exports feed anything
    spreadsheet-shaped; and other MIE systems read the same answer machine-readably from the
    versioned compliance API — which answers **404 when no run has covered a patient**, never an
    empty success, because "not yet evaluated" and "compliant" must not be confusable.

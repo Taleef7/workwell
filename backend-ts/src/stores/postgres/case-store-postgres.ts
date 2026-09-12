@@ -6,8 +6,8 @@
  */
 import { isUuid, type PgPool } from "./pg-database.ts";
 import { SPIKE_SCHEMA } from "./schema-pg.ts";
-import type { CaseRecord, CaseQuery, CaseStore, CasePatch, UpsertCaseInput, UpsertedCase } from "../case-store.ts";
-import { planCaseUpsert, planNextAction, priorityFor, nextActionFor } from "../../case/case-logic.ts";
+import type { CaseAssignExpectation, CaseRecord, CaseQuery, CaseStore, CasePatch, UpsertCaseInput, UpsertedCase } from "../case-store.ts";
+import { ACTIVE_CASE_STATUSES, planCaseUpsert, planNextAction, priorityFor, nextActionFor } from "../../case/case-logic.ts";
 
 interface CaseRow {
   id: string;
@@ -451,6 +451,44 @@ export class PgCaseStore implements CaseStore {
     return rows[0] ? toRecord(rows[0]) : null;
   }
 
+  async getCases(ids: readonly string[]): Promise<CaseRecord[]> {
+    const valid = ids.filter(isUuid);
+    if (valid.length === 0) return [];
+    const { rows } = await this.pool.query<CaseRow>(`SELECT ${COLS} FROM ${T} WHERE id = ANY($1::uuid[])`, [valid]);
+    return rows.map(toRecord);
+  }
+
+  async assignCases(expected: readonly CaseAssignExpectation[], assignee: string | null): Promise<string[]> {
+    // A non-uuid id cannot be a case here and would abort the whole statement with a cast error, so it
+    // is dropped rather than allowed to fail the batch — the caller reports it as missing either way.
+    const valid = expected.filter((e) => isUuid(e.id));
+    if (valid.length === 0) return [];
+    // ONE statement. `unnest` zips the ids with the assignee the caller READ on each, so the row is
+    // updated only while it still holds that value — see `CaseStore.assignCases` for why "differs from
+    // the target" is not the same test and silently overwrites a concurrent write.
+    //
+    // `IS NOT DISTINCT FROM` for the compare (an unassigned row's expected value is NULL, and
+    // `NULL = NULL` is NULL), `IS DISTINCT FROM` for the target (skip a no-op). Both can fail, for
+    // different reasons, so neither is decoration.
+    const { rows } = await this.pool.query<{ id: string }>(
+      `UPDATE ${T} AS c
+          SET assignee = $3, updated_at = NOW()
+         FROM unnest($1::uuid[], $2::text[]) AS e(id, expected_assignee)
+        WHERE c.id = e.id
+          AND c.status = ANY($4::text[])
+          AND c.assignee IS NOT DISTINCT FROM e.expected_assignee
+          AND c.assignee IS DISTINCT FROM $3
+        RETURNING c.id`,
+      [
+        valid.map((e) => e.id),
+        valid.map((e) => e.expectedAssignee),
+        assignee,
+        [...ACTIVE_CASE_STATUSES],
+      ],
+    );
+    return rows.map((r) => r.id);
+  }
+
   async patchCase(id: string, patch: CasePatch): Promise<CaseRecord | null> {
     if (!isUuid(id)) return null;
     const sets: string[] = [];
@@ -497,6 +535,22 @@ export class PgCaseStore implements CaseStore {
     if (query.employeeId) {
       where.push(`employee_id = $${binds.length + 1}`);
       binds.push(query.employeeId);
+    }
+    if (query.employeeIds !== undefined) {
+      // `= ANY($n)` takes the set as ONE bind — a generated `IN ($1,...,$n)` would blow past
+      // Postgres's 65,535-parameter limit on a large panel, and re-plans per distinct list length.
+      // An EMPTY set is "nobody matches", not "no filter": `= ANY('{}')` is false for every row,
+      // which is exactly right — and the alternative, falling through to unfiltered, would serve the
+      // whole practice under a panel's heading.
+      //
+      // The `::text[]` cast is explicitness, not a fix: it was added expecting an empty array to fail
+      // with "cannot determine type of empty array", and removing it against a real postgres:16 shows
+      // it does NOT — `employee_id` has a known type, so the parameter infers as `text[]` even when
+      // the array is empty (that error is for bare `ARRAY[]` literals, which this is not). The cast
+      // stays because it pins the bind's type where a reader would otherwise have to derive it, and
+      // the empty-set behaviour is pinned by the store contract on BOTH stores rather than by this.
+      where.push(`employee_id = ANY($${binds.length + 1}::text[])`);
+      binds.push([...query.employeeIds]);
     }
     if (query.measureId) {
       where.push(`measure_id = $${binds.length + 1}`);

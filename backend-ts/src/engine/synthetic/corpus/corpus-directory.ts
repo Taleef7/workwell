@@ -46,6 +46,9 @@ export function corpusDirectory(seed: string, size: number): SyntheticDirectoryV
     tenantId: p.tenantId,
     dateOfBirth: p.dateOfBirth,
     sex: p.sex,
+    // The same Source of Payment Typology code the patient's Coverage carries into the bundle, so the
+    // panel filter and the measure's own `SDE Payer` are reading one fact rather than two.
+    payer: p.payer,
     // No `nationalId`: the pilot has one system, so there is no cross-system person to resolve (spec §3).
   }));
   const PROVIDERS: readonly Provider[] = PCPS.map(providerOf);

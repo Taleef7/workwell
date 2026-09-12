@@ -157,6 +157,14 @@ const RULES: Rule[] = [
   // suggestions it replaces, minus the accounts the Maui profile refuses). Must precede the
   // generic AUTHENTICATED /api/** rule so the CM/ADMIN gate actually fires.
   { method: "GET", pattern: rx("/api/users/assignable"), access: [CM, A] },
+  // The patient work list reads the SAME cases `GET /api/cases` serves, so it carries the same gate:
+  // AUTHENTICATED. Stated explicitly rather than left to the catch-all below, because the next reader
+  // asking "who can see a whole practice's gaps?" should find an answer here and not have to derive
+  // it. Gating it to CM/ADMIN instead was tried and reverted: it would let the read-only VIEWER role
+  // open /api/cases and be refused the same rows on /worklist, which is a difference nobody chose.
+  // (The bulk assign it drives is a POST under /api/cases/** and is already CM/ADMIN by that rule —
+  // a second rule for it here would sit after that one and never fire.)
+  { method: "GET", pattern: rx("/api/worklist/**"), access: "AUTHENTICATED" },
   { method: "GET", pattern: rx("/api/**"), access: "AUTHENTICATED" },
   { pattern: rx("/api/**"), access: "AUTHENTICATED" },
 ];

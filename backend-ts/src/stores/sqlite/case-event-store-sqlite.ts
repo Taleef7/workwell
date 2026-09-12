@@ -106,6 +106,12 @@ export class SqliteCaseEventStore implements CaseEventStore {
     await this.db.batch([this.actionStmt(input.action), this.auditStmt(input.audit)]);
   }
 
+  async recordCaseEvents(inputs: readonly { action: InsertActionInput; audit: AppendAuditInput }[]): Promise<void> {
+    if (inputs.length === 0) return;
+    // ONE batch over every statement, so a bulk action commits whole exactly as a single one does.
+    await this.db.batch(inputs.flatMap((input) => [this.actionStmt(input.action), this.auditStmt(input.audit)]));
+  }
+
   async hasOutreachSent(caseId: string): Promise<boolean> {
     const row = await this.db
       .prepare("SELECT COUNT(*) AS n FROM case_actions WHERE case_id = ? AND action_type = 'OUTREACH_SENT'")

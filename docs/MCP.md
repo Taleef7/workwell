@@ -110,10 +110,29 @@ Returns: `employeeExternalId`, `name`, `role`, `site`, `active`, `latestOutcomes
   "measureName": "Annual Audiogram",
   "site": "Plant A",
   "status": "OVERDUE",
+  "providerId": "maui-prov-012",
+  "ageBand": "65+",
+  "sex": "F",
+  "payer": ["1", "11"],
   "limit": 25
 }
 ```
-Valid `status` values: `DUE_SOON`, `OVERDUE`, `MISSING_DATA`. Default limit 25, max 100.
+Valid `status` values: `DUE_SOON`, `OVERDUE`, `MISSING_DATA`. Default limit 25, max 100. Each result
+row carries `providerId` and `payer` alongside the case fields.
+
+The panel filters are the same ones the roster and the CSV exports apply, through one predicate
+(`compliance/subject-filters.ts`), so a client and a screen cannot disagree about what a panel is.
+`providerId` is the PCP's **external id**, never a display name. An unrecognised `ageBand` or `sex`
+returns `INVALID_ARGUMENT` rather than the unfiltered worklist — a tool that silently ignores a filter
+looks exactly like one that applied it.
+
+**`payer` is a SET, and asking for one Medicare code is the trap.** It takes one or more Source of
+Payment Typology codes, as a comma list or an array, and matches a subject whose code equals ANY of
+them. The typology is hierarchical: `1` is Medicare and `11` is its managed-care child (Medicare
+Advantage) — on the pilot corpus 3,927 and 2,900 patients — so a client asking for `"1"` alone gets
+the smaller set under a heading that says Medicare. Send both. Unlike `ageBand` and `sex`, payer
+terminology is OPEN: an unknown code is accepted and matches nobody, rather than erroring on a real
+Coverage code the display table has not been taught.
 
 ### `explain_rule`
 ```json
