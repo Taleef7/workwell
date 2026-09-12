@@ -18,6 +18,109 @@
 >
 > **Sequence note:** ADR-033 does not exist — verified absent, and the number must not be reused.
 
+## ADR-080: a provider panel is a durable mapping the system applies, and who chose an assignee is written down
+
+**Date:** 2026-09-12. **Status:** accepted. The SCHEMA is an owner decision (CLAUDE.md), authorized
+in-session. Milestone M-M, MM-2 PR 2. Builds on ADR-076 d2, whose `next_action_source` is the
+provenance pattern this reuses.
+
+**Context.** The pilot group already divides its work by provider panel and said so twice. In August:
+"provider right now, provider panels", and — asked why not by measure — "the same patient usually
+lives in the same provider panel… that person could be in five measures and I don't want all five of
+them touching it". In September, the same thing from the staffer working the sandbox: "our staff is
+assigned to specific providers right now". WorkWell knew nothing about that arrangement. Every case a
+nightly run opened arrived unassigned, so the mapping that lived in the practice's heads had to be
+re-applied by hand every morning, and MM-2 PR 1's bulk assign made that re-application faster without
+making it unnecessary.
+
+The obvious implementation — a table mapping provider to staff account, applied when a case is created
+— is most of the answer. The part that needed deciding is what happens to cases that ALREADY exist
+when a mapping changes, because that is where an automatic rule can silently overrule a person.
+
+**d1. `cases.assignment_source` records WHO chose the assignee: `PANEL`, `OPERATOR`, or NULL.**
+
+Without it, a panel change's only available test for "is this case mine to move?" is *assignee equals
+the previous panel owner*. That is also true of a case a supervisor deliberately handed to that same
+person, and of every case assigned before panels existed. Moving those would overrule a human decision
+at panel scale — a few hundred cases at a time — with the only evidence being a ledger nobody reads
+until something has already gone wrong.
+
+NULL is the truth for a row written before the column existed, and for an unassigned row. A NULL
+source that HAS an assignee is read as operator-owned, because between two readings of an unknown the
+safe one is the one that declines to move the row. Clearing an assignee clears the source with it:
+"unassigned, chosen by the panel" is not a state, and a backfill reading it could not say what the
+null assignee meant.
+
+**d2. The panel owner is applied when a case is CREATED, and never to one that exists.**
+
+`UpsertCaseInput.panelAssignee` is honoured on the insert branch only. The field is named for where
+the value came from rather than for the column it lands in, so no caller can route an operator's
+choice through the insert path and have it recorded as a panel's. An update does not touch the
+assignee; nor does a REOPEN, because a reopen is within the same compliance cycle and is therefore the
+same piece of work, which somebody may already be holding. A NEW cycle is an insert and picks up
+whatever the map says then.
+
+The run reads the map ONCE, at the start of the evaluation loop. Re-reading per chunk would let a
+mapping edited mid-run apply to some of the run's cases and not others — a run that assigned one
+provider's patients two different ways depending on when the chunk happened to execute. A mid-run edit
+is instead reconciled by that edit's own backfill, which moves exactly the PANEL-sourced rows it
+previously owned. Reading the panels is best-effort: panels decide who work lands on, never whether it
+exists, so a store failure logs a WARN and the cases open unassigned exactly as they did before.
+
+**d3. Mapping a panel moves the open cases it owns — unowned work, and the panel's own earlier
+assignment. Nothing else.**
+
+`planPanelBackfill` is pure, so the rule can be argued with rather than inferred from a mutation. It
+selects active cases whose assignee is NULL, and active cases whose source is `PANEL` and whose
+assignee is the previous owner. Operator-sourced rows and unknown-sourced rows stay where they are.
+Each selection carries the owner that was read, so the store's compare-and-set skips a row somebody
+moved in between rather than overwriting it.
+
+**Re-saving the same assignee leaves the mapping alone but still sweeps the panel's unassigned cases.**
+Because the panel read during a run is best-effort, a run CAN open unassigned cases on a mapped panel;
+without the sweep the only recovery would be to un-map the panel and map it again. The response
+reports `changed` for the mapping and `backfilled` for the cases, so both numbers stay true and a
+re-save that moves twelve cases says twelve.
+
+**d4. Un-mapping a panel leaves its open cases assigned.**
+
+`DELETE` says who owns FUTURE work. Silently unassigning a few hundred cases because a supervisor
+tidied a mapping would lose work somebody is in the middle of, and the operation that moves open cases
+already exists and is audited per case. The consequence is stated rather than hidden: after a DELETE
+then a PUT, the previous owner is null, so only unassigned cases move.
+
+**d5. The work list's default view depends on whether the viewer owns a panel.**
+
+A viewer mapped to at least one provider opens on "My panel"; everyone else opens on the whole
+practice. The practice described exactly this split — line staff work their own providers, while a
+supervisor wants to see everything — and defaulting an unmapped supervisor to an empty panel would
+read as "no work". The mappings are read before the decision is made, so a third state ("not yet
+known") falls back to the whole practice rather than flashing an empty list. An explicit choice in the
+URL always wins, or a mapped staffer could never look at the practice.
+
+`?panel=me` is resolved server-side from the mappings and the caller's own identity, never from a
+client-supplied list, so nobody can ask for somebody else's panel by spelling it in a URL. A viewer
+who owns no panel gets an EMPTY set, which matches nobody: serving the whole practice under a heading
+that says "My panel" would tell someone that several thousand other people's patients are their
+responsibility. `SubjectFilters.providerIds` is therefore tested with `!= null` in
+`hasActiveSubjectFilters` — an empty panel is an ACTIVE filter, and reading it as inactive is the
+vacuous-guard shape this codebase keeps finding.
+
+**d6. A panel is an assignment mechanism. It is not an attributed population.**
+
+Who works a patient and who is accountable for them under a contract are different questions with
+different sources. The ACO's attributed list is supplied by the ACO, is versioned, and is a separate
+relationship (MM-2 PR 3); a panel is the practice's own internal division of labour, edited by a
+supervisor. Nothing here may be read as a denominator, and no report derives one from it.
+
+**Consequences.** `panel_assignments` is a new owner-approved table; `cases.assignment_source` is a new
+nullable column on both schema files. `GET /api/panels` is AUTHENTICATED (the same gate the provider
+list carries), `PUT`/`DELETE` are CASE_MANAGER/ADMIN. The live WebChart directory still attributes
+every subject to one hardcoded provider, so panels are meaningful on the corpus roster only until
+#533's ingest work lands; that is a data gap, not a design one. Whether the mapping should instead be
+fed from WebChart's own department-to-provider construct is an open question for MIE, recorded in the
+journal rather than decided here.
+
 ## ADR-079: the population membership a run already knew is WRITTEN DOWN — and a subject outside the population is subtracted from the rate, not counted as a gap
 
 **Date:** 2026-09-10. **Status:** accepted. The ORDER-PROPOSAL half is an OWNER decision (issue #546,

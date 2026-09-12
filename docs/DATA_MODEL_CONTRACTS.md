@@ -61,6 +61,19 @@ SQLite floor and the Pg ceiling read the current row and apply the shared pure `
   (`OFFICIAL_DISPLAY`, the next-action overrides, the subject-term prose) re-audits every open case ONCE
   on the next run, and a legacy row whose `next_action` is NULL does so on first contact. Deliberate:
   the persisted row changed.
+- **A case is CREATED on its provider's panel, and never re-owned afterwards (ADR-080 d2).**
+  `UpsertCaseInput.panelAssignee` is applied on the **insert branch only**: the row is written with
+  `assignee` set and `assignment_source='PANEL'`. The UPDATE branch never touches `assignee` or
+  `assignment_source` — not on a re-confirm, and not on a REOPEN, because a reopen is within the same
+  cycle and is therefore the same piece of work somebody may already be holding. A NEW cycle is an
+  insert and picks up whatever the map says then. Absent ⇒ `NULL/NULL`, which is exactly the behaviour
+  of every deployment with no panel mappings.
+  **`cases.assignment_source` records WHO chose** — `PANEL`, `OPERATOR`, or NULL. `patchCase({assignee})`
+  is the operator surface and writes `OPERATOR`; `assignCases(…, source)` takes it explicitly, and
+  clearing an assignee clears the source with it. A NULL source on a row that HAS an assignee is read
+  as operator-owned, so a panel backfill never moves work a person placed by hand. The rule that
+  decides what a panel change may move is the pure `planPanelBackfill` (`case/panel-assignment.ts`):
+  unowned cases, and PANEL-sourced cases still on the previous owner. Nothing else.
 - **An OPERATOR's `next_action` is not overwritten by a run that learned nothing new** (ADR-076 d2).
   `cases.next_action_source` records who wrote it: `patchCase` is the operator surface (escalate,
   manual resolve, outreach) and marks `OPERATOR`; `upsertFromOutcome` marks `SYSTEM`. **Rerun-to-verify

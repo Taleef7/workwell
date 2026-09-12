@@ -279,6 +279,7 @@ priority TEXT NOT NULL
 assignee TEXT
 next_action TEXT
 next_action_source TEXT NOT NULL DEFAULT 'SYSTEM'   -- who wrote next_action (ADR-076 d2)
+assignment_source TEXT                              -- who chose assignee: PANEL | OPERATOR; NULL = unknown (ADR-080 d1)
 current_outcome_status TEXT NOT NULL
 last_run_id UUID NOT NULL REFERENCES runs(id)
 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -750,6 +751,33 @@ OWNER-APPROVED DDL: Taleef explicitly authorized this table in-session (#263 Pha
 (`CREATE … IF NOT EXISTS`), reversible, no data migration.
 
 ## 4) – 6) Contracts → moved
+
+### 3.28 Provider panels — `panel_assignments` (MM-2 PR 2 / ADR-080) — NEW owner-approved table
+
+Which staff account works which provider's patients — the practice's own division of labour, written
+down so the system can apply it. One row per MAPPED provider on the floor
+(`stores/sqlite/schema.ts`) + ceiling (`stores/postgres/schema-pg.ts`, `workwell_spike`).
+
+```sql
+panel_assignments (
+  provider_id  TEXT PRIMARY KEY,   -- the directory's provider external id (maui-prov-012), never a name
+  assignee     TEXT NOT NULL,      -- an assignable account email, validated by the route
+  created_by   TEXT,               -- who FIRST mapped this panel; survives later re-assignments
+  created_at   <ts> NOT NULL,
+  updated_at   <ts> NOT NULL
+)
+-- index: (assignee)  [floor panel_assignments_assignee_idx / ceiling spike_panel_assignments_assignee_idx]
+```
+
+- **A provider with NO row is an unassigned queue, not an error.** `GET /api/panels` lists every
+  provider in the directory and puts the unmapped ones first; nothing here can make work invisible.
+- **One assignee per provider, many providers per assignee** — nine staff to forty-odd providers is the
+  pilot's shape. Coverage (someone else working a panel for a week) is the per-case override and bulk
+  assign, not a second owner column: a case has exactly one assignee.
+- No profile/tenant column: provider ids are globally unique strings and there is one database per
+  deployment.
+- **Assignment only.** A panel is never a denominator and never an attribution claim (ADR-080 d6); the
+  ACO's attributed population is a separate, versioned relationship.
 
 The **Idempotency Contract for Case Upsert** (§4), the **`evidence_json` Contract** (§5), and the
 **CSV Export Contracts** (§6) now live in `docs/DATA_MODEL_CONTRACTS.md`, which is `@`-imported into
