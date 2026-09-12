@@ -12,9 +12,11 @@
  * `/cases` is unchanged and still linked — it is the gap-centric view a supervisor wants when the
  * question is about a measure rather than about a person.
  *
- * **Default is WHOLE PRACTICE, not "my panel".** Panel→staff mappings do not exist yet (they are the
- * next change); defaulting to a panel nobody is mapped to would open this page on an empty list and
- * read as "no work".
+ * **The default view depends on whether the viewer owns a panel** (ADR-080 d5). Someone mapped to at
+ * least one provider opens on "My panel" — the patients they are actually responsible for, which is
+ * how the practice divides the work. Someone mapped to none (a supervisor, or anyone before the
+ * mappings are made) opens on the whole practice, because defaulting them to an empty panel would
+ * read as "no work". The URL always wins once it says which view is wanted.
  */
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -32,6 +34,8 @@ import { canManageCases } from "@/lib/rbac";
 import { providerFilterLabel, usePanelProviders } from "@/features/panel/use-panel-providers";
 import { UNASSIGN_VALUE, useAssignableUsers } from "@/features/panel/use-assignable-users";
 import { payerFilterLabel, usePanelPayers } from "@/features/panel/use-panel-payers";
+import { usePanelAssignments } from "@/features/panel/use-panel-assignments";
+import { PanelsTab } from "@/features/panel/PanelsTab";
 
 type WorklistGap = {
   caseId: string;
@@ -92,6 +96,8 @@ export default function WorklistPage() {
   const { options: providerOptions, nameFor: providerNameFor } = usePanelProviders();
   const { options: payerOptions, groups: payerGroups, available: payersAvailable, nameFor: payerNameFor } = usePanelPayers();
   const { options: assignableOptions, canonicalFor } = useAssignableUsers(canManage);
+  // Read on every visit because it answers the default-view question, not only the Panels tab's rows.
+  const { ownsPanel, mine: myPanels } = usePanelAssignments(user?.email, true);
 
   const [rows, setRows] = useState<WorklistPatientRow[]>([]);
   const [total, setTotal] = useState(0);
@@ -116,6 +122,17 @@ export default function WorklistPage() {
     () => searchParams.getAll("payer").flatMap((v) => v.split(",")).map((v) => v.trim()).filter(Boolean),
     [searchParams],
   );
+  /** "patients" (default) or "panels" — the tab strip, kept in the URL so a link opens the same view. */
+  const tab = searchParams.get("tab")?.trim() === "panels" ? "panels" : "patients";
+  /**
+   * Which view the URL asks for: "me", "all", or nothing said yet.
+   *
+   * The third state is the one that matters. Absent means "nobody has chosen", which is what lets the
+   * default below depend on whether this viewer owns a panel; an explicit `panel=all` is a choice and
+   * must survive, or a mapped staff member could never look at the whole practice.
+   */
+  const panelParam = searchParams.get("panel")?.trim().toLowerCase();
+  const panelFilter = panelParam === "me" ? "me" : panelParam === "all" ? "all" : null;
   const [searchTerm, setSearchTerm] = useState(searchFilter);
 
   /**
@@ -150,6 +167,36 @@ export default function WorklistPage() {
     },
     [pathname, router],
   );
+
+  /**
+   * The view actually being shown.
+   *
+   * The URL wins whenever it says anything. When it does not, a viewer who owns a panel gets theirs
+   * and everyone else gets the whole practice — and while `ownsPanel` is still `undefined` (the
+   * mappings have not loaded) the answer is "whole practice", because guessing "My panel" before we
+   * know would flash an empty list at a supervisor who owns none.
+   */
+  const effectivePanel: "me" | "all" = panelFilter ?? (ownsPanel ? "me" : "all");
+
+  /**
+   * Write the default into the URL ONCE, after the mappings resolve, so the page's address describes
+   * what it is showing — a link someone sends a colleague opens the same list.
+   *
+   * Only when the URL says nothing: an explicit choice, in either direction, is never overwritten.
+   *
+   * **The redirect itself is deliberately not unit-tested**, for the reason the params ref above
+   * records: the jsdom `next/navigation` mock updates synchronously, so a test here would pass over
+   * either spelling. The two RENDERED states — mapped viewer sees "My panel", unmapped sees "Whole
+   * practice" — are tested, which is the behaviour that matters.
+   */
+  useEffect(() => {
+    if (panelParam !== undefined && panelParam !== null) return;
+    if (ownsPanel !== true) return;
+    // Deferred a tick for the same reason `load` is: a synchronous setState inside an effect cascades
+    // renders, and `setParams` sets the page back to zero as well as writing the URL.
+    const timer = setTimeout(() => setParams((params) => params.set("panel", "me")), 0);
+    return () => clearTimeout(timer);
+  }, [ownsPanel, panelParam, setParams]);
 
   /**
    * Add or remove payer codes.
@@ -199,6 +246,9 @@ export default function WorklistPage() {
       if (from) params.set("from", from);
       if (to) params.set("to", to);
       for (const code of payerFilter) params.append("payer", code);
+      // Only "me" is sent: "all" is the ABSENCE of a panel constraint, and spelling it out would make
+      // the server resolve a filter it is about to ignore.
+      if (effectivePanel === "me") params.set("panel", "me");
       const { data, headers } = await api.getWithHeaders<WorklistPatientRow[]>(`/api/worklist/patients?${params.toString()}`);
       if (ticket !== requestSeq.current) return;
       setRows(data ?? []);
@@ -214,7 +264,7 @@ export default function WorklistPage() {
     } finally {
       if (ticket === requestSeq.current) setLoading(false);
     }
-  }, [api, providerFilter, assigneeFilter, outcomeFilter, measureFilter, searchFilter, payerFilter, siteId, from, to, pageSize, page]);
+  }, [api, providerFilter, assigneeFilter, outcomeFilter, measureFilter, searchFilter, payerFilter, effectivePanel, siteId, from, to, pageSize, page]);
 
   // Deferred a tick, matching `/cases`: the lint rule forbids a synchronous setState inside an effect
   // (it cascades renders), and `load` sets loading/rows/total on entry.
@@ -284,13 +334,22 @@ export default function WorklistPage() {
 
   const activeChips = useMemo(() => {
     const chips: string[] = [];
+    // Named, not just "My panel": a staffer who owns four providers should see which four, and someone
+    // who owns none should see that the heading is describing an empty set rather than a quiet failure.
+    if (effectivePanel === "me") {
+      chips.push(
+        myPanels.length === 0
+          ? "My panel: none assigned to me"
+          : `My panel: ${myPanels.map((id) => providerNameFor(id) ?? id).join(", ")}`,
+      );
+    }
     if (providerFilter) chips.push(`${providerFilterLabel()}: ${providerNameFor(providerFilter) ?? providerFilter}`);
     // A chip never shows a bare typology code — "1" tells a reader nothing.
     for (const code of payerFilter) chips.push(`${payerFilterLabel}: ${payerNameFor(code) ?? code}`);
     if (assigneeFilter) chips.push(`Assignee: ${assigneeFilter}`);
     if (outcomeFilter) chips.push(`Status: ${labelFor(OUTCOME_LABELS, outcomeFilter)}`);
     return chips;
-  }, [providerFilter, providerNameFor, payerFilter, payerNameFor, assigneeFilter, outcomeFilter]);
+  }, [effectivePanel, myPanels, providerFilter, providerNameFor, payerFilter, payerNameFor, assigneeFilter, outcomeFilter]);
 
   return (
     <div className="flex flex-col gap-4">
@@ -307,7 +366,42 @@ export default function WorklistPage() {
         </Link>
       </header>
 
+      {/* Two questions, two tabs: whose gaps are open, and who works whose patients. */}
+      <div className="flex gap-1 border-b border-neutral-200 dark:border-neutral-800" role="tablist" aria-label="Work list views">
+        {([["patients", SUBJECT.Plural], ["panels", "Panels"]] as const).map(([key, label]) => (
+          <button
+            key={key}
+            type="button"
+            role="tab"
+            aria-selected={tab === key}
+            onClick={() => setParams((params) => (key === "patients" ? params.delete("tab") : params.set("tab", key)))}
+            className={`-mb-px border-b-2 px-3 py-2 text-sm font-medium ${
+              tab === key
+                ? "border-primary-600 text-primary-700 dark:border-primary-400 dark:text-primary-300"
+                : "border-transparent text-neutral-600 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100"
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {tab === "panels" ? (
+        <PanelsTab viewerEmail={user?.email} canManage={canManage} onChanged={() => void load()} />
+      ) : (
+      <>
       <div className="flex flex-wrap items-end gap-3 rounded-xl border border-neutral-200 bg-white p-3 dark:border-neutral-800 dark:bg-neutral-900">
+        <Select
+          label="View"
+          size="sm"
+          className="w-44"
+          value={effectivePanel}
+          onValueChange={(v) => setParams((params) => params.set("panel", v))}
+          options={[
+            { value: "me", label: "My panel" },
+            { value: "all", label: "Whole practice" },
+          ]}
+        />
         <Select
           label={providerFilterLabel()}
           size="sm"
@@ -625,6 +719,8 @@ export default function WorklistPage() {
           </Button>
         </div>
       </div>
+      </>
+      )}
     </div>
   );
 }
