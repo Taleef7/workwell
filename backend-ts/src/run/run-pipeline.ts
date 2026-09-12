@@ -21,7 +21,7 @@ import type { EvaluateMeasureBinding, MeasureOutcome } from "@work-well/measure-
 import { OFFICIAL_LOGIC_VERSION_PREFIX, type RoutedEngine } from "../wiring/executor-router.ts";
 import { isApplicable } from "../segment/segment-applicability.ts";
 import type { PanelStore } from "../stores/panel-store.ts";
-import { panelMapFor } from "../case/panel-assignment.ts";
+import { panelMapFor, reconcilePanelAssignments } from "../case/panel-assignment.ts";
 import type { HydratedSegment } from "../stores/segment-store.ts";
 import {
   employeeById,
@@ -129,7 +129,12 @@ export interface RunPipelineDeps {
    *  snapshots (#E16), best-effort — a snapshot failure never fails the run. Absent ⇒ no materialization
    *  (non-run paths like impact-preview/case-rerun simply don't pass them). */
   qualitySnapshots?: QualitySnapshotStore;
-  events?: Pick<CaseEventStore, "appendAudit" | "appendAudits">;
+  /**
+   * `recordCaseEvents` is in the set because the panel reconcile at run finish writes BOTH arms — a
+   * case moved by a run must leave the same `case_actions` row it leaves when a person moves it, or
+   * the ledger's shape depends on which path touched the row (DATA_MODEL_CONTRACTS §6).
+   */
+  events?: Pick<CaseEventStore, "appendAudit" | "appendAudits" | "recordCaseEvents">;
   /**
    * The AUTHENTICATED actor for audit attribution (from the auth middleware), kept SEPARATE from the
    * run's `triggeredBy` trigger-label. `triggeredBy` is caller-influenced (and a trigger *type*, not a
@@ -1317,6 +1322,55 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
           `reported as computed.`,
       )
       .catch(() => {});
+  }
+
+  // Bring PANEL-sourced cases back in line with a mapping that CHANGED while this run was going
+  // (ADR-080 d2). The run applied one snapshot of the map to everything it opened; a supervisor
+  // re-mapping a provider mid-run moves what exists at that moment, and the run then keeps inserting
+  // from its older snapshot. Those late cases would sit on the previous owner indefinitely — a later
+  // run's update branch deliberately preserves assignees, and nobody re-saves a panel they already set.
+  //
+  // Costs NOTHING on the overwhelmingly common path: the map is re-read (a few dozen rows) and, if
+  // nothing moved, the pass ends without touching a case. Only providers whose owner actually changed
+  // are reconciled, and only over the subjects this run evaluated.
+  //
+  // Best-effort and audited, exactly like the rollover below: panels decide who work lands on, never
+  // whether it exists, so nothing here may fail a run that has real results in it.
+  if (deps.caseStore && deps.events && deps.panels) {
+    try {
+      const after = panelMapFor(await deps.panels.listAll());
+      const changed = new Map<string, string>();
+      for (const [providerId, owner] of after) {
+        if (panelMap.get(providerId) !== owner) changed.set(providerId, owner);
+      }
+      if (changed.size > 0) {
+        const subjectsByProvider = new Map<string, string[]>();
+        for (const item of items) {
+          const providerId = item.employee.providerId;
+          if (!changed.has(providerId)) continue;
+          const list = subjectsByProvider.get(providerId);
+          if (list) list.push(item.employee.externalId);
+          else subjectsByProvider.set(providerId, [item.employee.externalId]);
+        }
+        const movedIds = await reconcilePanelAssignments(
+          { cases: deps.caseStore, events: deps.events },
+          { owners: changed, subjectsByProvider, actor: auditActor },
+        );
+        if (movedIds.length > 0) {
+          await deps.runStore
+            .appendLog(
+              runId,
+              "INFO",
+              `Panel mapping changed during this run; ${movedIds.length} case(s) reconciled onto the current owner.`,
+            )
+            .catch(() => {});
+        }
+      }
+    } catch (err) {
+      await deps.runStore
+        .appendLog(runId, "WARN", `Panel reconcile skipped: ${String((err as Error)?.message ?? err)}`)
+        .catch(() => {});
+    }
   }
 
   // Close prior-cycle OPEN/IN_PROGRESS cases (Fable M10). At a compliance-cycle rollover a

@@ -97,15 +97,27 @@ Four more, each a real defect rather than a style note:
   frontend's panel chip was drawn from a second copy of the hook, so mapping a panel to yourself left
   it still saying none were yours.
 
+**Codex on the PR then found three more, and the P1 was the one I thought I had already fixed.** The
+convergence fix above makes a stranded case *reachable* by a later save; it does not make anything
+perform one. A supervisor re-mapping a provider during the nightly — hours long on the pilot — leaves
+the run inserting from its older snapshot, and those cases sit on the previous owner because a later
+run preserves assignees by design and nobody re-saves a panel they already set. The run now reconciles
+at FINISH: re-read the map, compare with its own snapshot, and move PANEL-sourced rows only for the
+providers whose owner actually changed, only over the subjects it evaluated. An unchanged map costs one
+small read and touches nothing. Codex's other two were a per-case round trip (`recordCaseEvents` wrote
+two queries per case, so a 1,200-case backfill was 2,400 serialized round trips inside a synchronous
+PUT — now two multi-row INSERTs per 500) and the work list swallowing the `conflicted` count I had just
+added, so a conflict-only response still read as "already assigned that way".
+
 `X-Panel-Providers` was deleted rather than fixed. Nothing read it, and `cors.ts` exposes only
 `X-Total-Count`, so a browser could not have read it if something had — a surface that reads as
 load-bearing and cannot fire, which is the shape this project keeps collecting.
 
-Verified: backend 2,737 tests, 2,714 pass, 1 fail, 22 skipped — the failure is `corpus-membership`, the
+Verified: backend 2,741 tests, 2,718 pass, 1 fail, 22 skipped — the failure is `corpus-membership`, the
 known stale local sparse-checkout of vendored artifacts, and it reproduces on a clean tree. Typecheck
 clean. The store contract ran on BOTH backends against a real `postgres:16` (112/112 ceiling, 109/109
-floor), which is where the set-based assign SQL and the batched insert's per-row panel assignee are
-actually exercised. Frontend 427 pass across 79 files, lint clean, build clean. The provenance guard,
+floor), which is where the set-based assign SQL, the batched insert's per-row panel assignee and the
+set-based event batch are actually exercised. Frontend 428 pass across 79 files, lint clean, build clean. The provenance guard,
 the convergence rule and the first-load guard were each mutation-checked: reverting any one of them
 fails a test that names the behaviour, rather than passing quietly.
 

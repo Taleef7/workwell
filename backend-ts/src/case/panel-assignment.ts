@@ -301,6 +301,77 @@ export async function unassignPanel(
 }
 
 /**
+ * Bring PANEL-sourced cases back in line with the mapping, for a set of subjects.
+ *
+ * **Why a run needs this at all.** A run reads the panel map ONCE, so every case it opens carries the
+ * owner the map named at the start. If a supervisor re-maps that provider mid-run, their PUT's backfill
+ * moves what exists AT THAT MOMENT — and the run then keeps inserting cases from its own older
+ * snapshot. Those land PANEL-sourced on somebody who no longer owns the panel, and nothing brings them
+ * back: a later run's update branch deliberately preserves assignees, and the supervisor has no reason
+ * to re-save a panel they already set. The nightly is hours long on the pilot, so this window is wide,
+ * not theoretical.
+ *
+ * Only PANEL-sourced rows move, so an operator's assignment is as safe here as it is in the backfill,
+ * and each move carries the state it read so a concurrent write wins over this pass rather than losing.
+ *
+ * Returns the ids that actually moved; the caller audits exactly those.
+ */
+export async function reconcilePanelAssignments(
+  // Exactly what it uses, so the run pipeline need not hold a whole event store to call it.
+  deps: { cases: CaseStore; events: Pick<CaseEventStore, "recordCaseEvents"> },
+  input: {
+    /** provider → the owner the mapping names NOW. */
+    owners: ReadonlyMap<string, string>;
+    /** The subjects to consider, grouped by their provider, as the caller already knows them. */
+    subjectsByProvider: ReadonlyMap<string, readonly string[]>;
+    actor: string;
+  },
+): Promise<string[]> {
+  const moved: string[] = [];
+  for (const [providerId, owner] of input.owners) {
+    const subjectIds = input.subjectsByProvider.get(providerId);
+    if (!subjectIds || subjectIds.length === 0) continue;
+    const open = await activeCasesForSubjects(deps.cases, subjectIds);
+    const plan = open
+      .filter((c) => c.assignmentSource === "PANEL" && !sameAccount(c.assignee, owner))
+      .map((c) => ({ id: c.id, expectedAssignee: c.assignee ?? null, expectedSource: c.assignmentSource }));
+    if (plan.length === 0) continue;
+
+    const byId = new Map(open.map((c) => [c.id, c]));
+    for (let i = 0; i < plan.length; i += ASSIGN_CHUNK) {
+      const chunk = plan.slice(i, i + ASSIGN_CHUNK);
+      await deps.events.recordCaseEvents(
+        chunk.map((entry) => {
+          const c = byId.get(entry.id)!;
+          const payload = {
+            assignee: owner,
+            previousAssignee: c.assignee ?? "unassigned",
+            bulk: true,
+            panel: providerId,
+            reason: "PANEL_RECONCILED",
+          };
+          return {
+            action: { caseId: c.id, actionType: "ASSIGNED", actor: input.actor, payload },
+            audit: {
+              eventType: "CASE_ASSIGNED",
+              entityType: "case",
+              entityId: c.id,
+              actor: input.actor,
+              refRunId: c.lastRunId,
+              refCaseId: c.id,
+              refMeasureVersionId: c.measureId,
+              payload,
+            },
+          };
+        }),
+      );
+      moved.push(...(await deps.cases.assignCases(chunk, owner, "PANEL")));
+    }
+  }
+  return moved;
+}
+
+/**
  * The provider ids one account's panels cover.
  *
  * Case-insensitive because an account's stored spelling and the JWT's may differ in case, and "my

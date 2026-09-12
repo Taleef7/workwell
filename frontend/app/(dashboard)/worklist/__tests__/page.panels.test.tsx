@@ -98,7 +98,7 @@ beforeEach(() => {
   navHolder.current.setUrl("/worklist");
   VIEWER.current = "quality-staff@maui.workwell.dev";
   PANELS.current = MAPPED_PANELS();
-  post.mockReset().mockResolvedValue({ assigned: 1, unchanged: 0, missing: [], closed: [] });
+  post.mockReset().mockResolvedValue({ assigned: 1, unchanged: 0, conflicted: 0, missing: [], closed: [] });
   put.mockReset().mockResolvedValue({
     providerId: "maui-prov-013",
     providerName: "Dr Oren Tide",

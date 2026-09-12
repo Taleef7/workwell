@@ -1742,6 +1742,47 @@ export function caseEventStoreContract(
       outcomeStatus: "OVERDUE",
     });
 
+  test(`[${label}] recordCaseEvents writes BOTH arms for every input, across the sub-chunk boundary`, async () => {
+    // The Pg form writes two multi-row INSERTs per 500-row sub-chunk rather than two queries per case:
+    // a panel backfill hands it a provider's whole open list, and the per-row form was 2,400 serialized
+    // round trips for 1,200 cases inside a synchronous PUT. A batch that silently dropped its tail —
+    // or wrote one arm and not the other — would look exactly like a smaller backfill.
+    const { caseStore, eventStore } = await fresh();
+    const c = (await newCase(caseStore))!;
+    const COUNT = 501; // one past the sub-chunk, so a tail that is never written fails here
+    // The OUTREACH pair, because `outreachSentCounts` is the one reader of the case_actions arm — and
+    // both arms must be checked. Batching is action-type agnostic; a panel backfill sends the ASSIGNED
+    // pair through the identical path.
+    await eventStore.recordCaseEvents(
+      Array.from({ length: COUNT }, (_, i) => {
+        const payload = { channel: "EMAIL", seq: i };
+        return {
+          action: { caseId: c.id, actionType: "OUTREACH_SENT", actor: "lead@workwell.dev", payload },
+          audit: {
+            eventType: "CASE_OUTREACH_SENT",
+            entityType: "case",
+            entityId: c.id,
+            actor: "lead@workwell.dev",
+            refRunId: c.lastRunId,
+            refCaseId: c.id,
+            refMeasureVersionId: c.measureId,
+            payload,
+          },
+        };
+      }),
+    );
+
+    const sent = (await eventStore.caseTimeline(c.id)).filter((t) => t.eventType === "CASE_OUTREACH_SENT");
+    assert.equal(sent.length, COUNT, "every audit row landed, including the one past the chunk");
+    // Order follows the input, which is what lets a reader page the ledger and see the batch as it was
+    // produced rather than in whatever order the database happened to insert.
+    assert.equal((sent[0]!.payload as Record<string, unknown>).seq, 0);
+    assert.equal((sent[COUNT - 1]!.payload as Record<string, unknown>).seq, COUNT - 1);
+    // The case_actions arm is canonical operational state (DATA_MODEL_CONTRACTS §6) and must not be the
+    // arm that silently got fewer rows.
+    assert.equal((await eventStore.outreachSentCounts([c.id]))[c.id], COUNT);
+  });
+
   test(`[${label}] timeline is audit-sourced (single-source); case_action twin not double-listed; CASE_VIEWED excluded`, async () => {
     const { caseStore, eventStore } = await fresh();
     const c = (await newCase(caseStore))!;

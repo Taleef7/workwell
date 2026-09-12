@@ -70,7 +70,14 @@ type WorklistPatientRow = {
 /** The bulk-assign contract (`POST /api/cases/bulk-assign`). */
 type BulkAssignRequest = { assignee: string | null; caseIds: string[] };
 /** What actually MOVED, which is not the same as what was asked for. */
-type BulkAssignResult = { assigned: number; unchanged: number; missing: string[]; closed: string[] };
+type BulkAssignResult = {
+  assigned: number;
+  unchanged: number;
+  /** Read as changing, then lost to a concurrent write. NOT applied — the opposite of `unchanged`. */
+  conflicted: number;
+  missing: string[];
+  closed: string[];
+};
 
 const PAGE_SIZES = [25, 50, 100].map((n) => ({ value: String(n), label: String(n) }));
 
@@ -330,15 +337,29 @@ export default function WorklistPage() {
       // between the page load and the click is the one explanation that is definitely wrong, and the
       // one that stops someone looking further.
       const skipped = (result?.closed?.length ?? 0) + (result?.missing?.length ?? 0);
-      const tail = skipped > 0 ? ` (${skipped} skipped — already closed or no longer present)` : "";
+      // A CONFLICT is not a skip and not a no-op: somebody else moved the row while this operator was
+      // deciding, so the assignment they asked for was NOT applied and the gap now belongs to a third
+      // person. Folding it into "already assigned that way" told them the opposite of what happened,
+      // and folding it into "skipped" would suggest the row was closed or gone, which it is not.
+      const conflicted = result?.conflicted ?? 0;
+      const parts: string[] = [];
+      if (skipped > 0) parts.push(`${skipped} skipped — already closed or no longer present`);
+      if (conflicted > 0) {
+        parts.push(
+          `${conflicted} not applied — reassigned by someone else while you were choosing`,
+        );
+      }
+      const tail = parts.length > 0 ? ` (${parts.join("; ")})` : "";
       emitToast(
         moved === 0
-          ? skipped > 0
+          ? parts.length > 0
             ? `No gaps changed${tail}`
             : "No gaps changed — they were already assigned that way"
           : unassign
             ? `${moved} gap${moved === 1 ? "" : "s"} unassigned${tail}`
             : `${moved} gap${moved === 1 ? "" : "s"} assigned to ${bulkAssignee}${tail}`,
+        // A conflict is something the operator has to look at, not a success they can ignore.
+        conflicted > 0 ? "error" : "success",
       );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");

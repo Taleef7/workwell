@@ -61,9 +61,18 @@ whatever the map says then.
 
 The run reads the map ONCE, at the start of the evaluation loop. Re-reading per chunk would let a
 mapping edited mid-run apply to some of the run's cases and not others — a run that assigned one
-provider's patients two different ways depending on when the chunk happened to execute. A mid-run edit
-is instead reconciled by that edit's own backfill, which moves exactly the PANEL-sourced rows it
-previously owned. Reading the panels is best-effort: panels decide who work lands on, never whether it
+provider's patients two different ways depending on when the chunk happened to execute.
+
+**A mid-run edit is reconciled at run FINISH, not left to the edit's own backfill.** That was the first
+answer and it does not work: the supervisor's PUT moves what exists at that moment, and the run then
+keeps inserting from its older snapshot, so those late cases sit on the previous owner indefinitely —
+a later run's update branch preserves assignees by design, and nobody re-saves a panel they already
+set. The nightly runs for hours on the pilot, so the window is wide rather than theoretical. At finish
+the run re-reads the map, compares it with its own snapshot, and reconciles only the providers whose
+owner actually changed, over only the subjects it evaluated. An unchanged map costs one small read and
+touches nothing, which is the path almost every run takes.
+
+Reading the panels is best-effort in both places: panels decide who work lands on, never whether it
 exists, so a store failure logs a WARN and the cases open unassigned exactly as they did before.
 
 **d3. Mapping a panel moves the open cases it owns — unowned work, and the panel's own earlier
