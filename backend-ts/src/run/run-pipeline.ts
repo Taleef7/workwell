@@ -20,6 +20,8 @@ import { ACTIVE_CASE_STATUSES } from "../case/case-logic.ts";
 import type { EvaluateMeasureBinding, MeasureOutcome } from "@work-well/measure-engine";
 import { OFFICIAL_LOGIC_VERSION_PREFIX, type RoutedEngine } from "../wiring/executor-router.ts";
 import { isApplicable } from "../segment/segment-applicability.ts";
+import type { PanelStore } from "../stores/panel-store.ts";
+import { panelMapFor, reconcilePanelAssignments } from "../case/panel-assignment.ts";
 import type { HydratedSegment } from "../stores/segment-store.ts";
 import {
   employeeById,
@@ -111,13 +113,28 @@ export interface RunPipelineDeps {
   caseStore?: CaseStore;
   /** Enabled segments for case-creation applicability gating; empty/absent ⇒ all applicable (reversibility). */
   segments?: HydratedSegment[];
+  /**
+   * Provider panels (ADR-080 d2) — read ONCE per run, and applied only to the cases this run OPENS, so
+   * the practice starts the day with work that is already on whoever owns that provider's panel.
+   *
+   * A dep rather than a store call per case: the map is a few dozen rows and the alternative is one
+   * lookup per (subject, measure) pair, which on the pilot's six-measure nightly is 120,000 of them.
+   * Absent ⇒ no assignee is applied, which is exactly the behaviour before panels existed — so every
+   * non-pipeline caller (impact preview, offline tools, tests) is unchanged by construction.
+   */
+  panels?: Pick<PanelStore, "listAll">;
   /** Injectable for tests (defaults to the full synthetic directory). */
   employees?: readonly EmployeeProfile[];
   /** When BOTH present, a completed population run (ALL_PROGRAMS/MEASURE) materializes quality-over-time
    *  snapshots (#E16), best-effort — a snapshot failure never fails the run. Absent ⇒ no materialization
    *  (non-run paths like impact-preview/case-rerun simply don't pass them). */
   qualitySnapshots?: QualitySnapshotStore;
-  events?: Pick<CaseEventStore, "appendAudit" | "appendAudits">;
+  /**
+   * `recordCaseEvents` is in the set because the panel reconcile at run finish writes BOTH arms — a
+   * case moved by a run must leave the same `case_actions` row it leaves when a person moves it, or
+   * the ledger's shape depends on which path touched the row (DATA_MODEL_CONTRACTS §6).
+   */
+  events?: Pick<CaseEventStore, "appendAudit" | "appendAudits" | "recordCaseEvents">;
   /**
    * The AUTHENTICATED actor for audit attribution (from the auth middleware), kept SEPARATE from the
    * run's `triggeredBy` trigger-label. `triggeredBy` is caller-influenced (and a trigger *type*, not a
@@ -692,6 +709,28 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
    */
   const ippByMeasure = new Map<string, boolean[]>();
 
+  /**
+   * The provider → assignee map, read ONCE for the whole run (ADR-080 d2).
+   *
+   * Not per chunk and not per case: it is a few dozen rows, and re-reading it would make a mapping
+   * edited mid-run apply to some of the run's cases and not others — a run that assigned the same
+   * provider's patients two different ways depending on when the chunk happened to execute. Reading it
+   * once means the run is internally consistent; a mid-run edit is reconciled by that edit's own
+   * backfill, which moves exactly the PANEL-sourced rows it previously owned.
+   *
+   * Best-effort: panels decide who work lands on, never whether it exists, so a failure to read them
+   * must not fail a run. The cases are opened unassigned, as they were before panels existed, and the
+   * next panel edit picks them up.
+   */
+  let panelMap = new Map<string, string>();
+  if (deps.panels) {
+    try {
+      panelMap = panelMapFor(await deps.panels.listAll());
+    } catch (error) {
+      await deps.runStore.appendLog(runId, "WARN", `panel assignments unavailable; cases open unassigned: ${String(error)}`);
+    }
+  }
+
   for (const chunkItems of chunks) {
     /**
      * The chunk's case upserts, collected during the evaluation loop and applied in ONE store call at
@@ -1063,6 +1102,9 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
             outcomeStatus: status,
             evidence,
             outOfPopulation,
+            // Applied by the store on the INSERT branch only, so this names the owner of a case this
+            // run OPENS and never re-owns one that already exists (ADR-080 d2).
+            panelAssignee: panelMap.get(item.employee.providerId),
           },
           outcomeStatus: status,
           measureId: item.measureId,
@@ -1153,6 +1195,13 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
               // change under an unchanged status; without it here the event would be
               // indistinguishable from the silent refresh it replaced.
               nextAction: upserted.nextAction,
+              // Read off the WRITTEN row, like nextAction: a case opened onto a provider's panel says
+              // so in the ledger, so "why is this already assigned to me?" has an answer on the
+              // timeline. Omitted when there is no assignee, so a deployment without panels writes
+              // the payload it always did.
+              ...(upserted.assignee
+                ? { assignee: upserted.assignee, assignmentSource: upserted.assignmentSource }
+                : {}),
               subjectId: p.subjectId,
               measureId: p.measureId,
               evaluationPeriod: p.period,
@@ -1273,6 +1322,55 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
           `reported as computed.`,
       )
       .catch(() => {});
+  }
+
+  // Bring PANEL-sourced cases back in line with a mapping that CHANGED while this run was going
+  // (ADR-080 d2). The run applied one snapshot of the map to everything it opened; a supervisor
+  // re-mapping a provider mid-run moves what exists at that moment, and the run then keeps inserting
+  // from its older snapshot. Those late cases would sit on the previous owner indefinitely — a later
+  // run's update branch deliberately preserves assignees, and nobody re-saves a panel they already set.
+  //
+  // Costs NOTHING on the overwhelmingly common path: the map is re-read (a few dozen rows) and, if
+  // nothing moved, the pass ends without touching a case. Only providers whose owner actually changed
+  // are reconciled, and only over the subjects this run evaluated.
+  //
+  // Best-effort and audited, exactly like the rollover below: panels decide who work lands on, never
+  // whether it exists, so nothing here may fail a run that has real results in it.
+  if (deps.caseStore && deps.events && deps.panels) {
+    try {
+      const after = panelMapFor(await deps.panels.listAll());
+      const changed = new Map<string, string>();
+      for (const [providerId, owner] of after) {
+        if (panelMap.get(providerId) !== owner) changed.set(providerId, owner);
+      }
+      if (changed.size > 0) {
+        const subjectsByProvider = new Map<string, string[]>();
+        for (const item of items) {
+          const providerId = item.employee.providerId;
+          if (!changed.has(providerId)) continue;
+          const list = subjectsByProvider.get(providerId);
+          if (list) list.push(item.employee.externalId);
+          else subjectsByProvider.set(providerId, [item.employee.externalId]);
+        }
+        const movedIds = await reconcilePanelAssignments(
+          { cases: deps.caseStore, events: deps.events },
+          { owners: changed, subjectsByProvider, actor: auditActor },
+        );
+        if (movedIds.length > 0) {
+          await deps.runStore
+            .appendLog(
+              runId,
+              "INFO",
+              `Panel mapping changed during this run; ${movedIds.length} case(s) reconciled onto the current owner.`,
+            )
+            .catch(() => {});
+        }
+      }
+    } catch (err) {
+      await deps.runStore
+        .appendLog(runId, "WARN", `Panel reconcile skipped: ${String((err as Error)?.message ?? err)}`)
+        .catch(() => {});
+    }
   }
 
   // Close prior-cycle OPEN/IN_PROGRESS cases (Fable M10). At a compliance-cycle rollover a

@@ -188,3 +188,24 @@ test("extractPrincipal reads a Bearer access token and ignores refresh/garbage",
   assert.equal(extractPrincipal(refreshReq, jwt), null);
   assert.equal(extractPrincipal(new Request("http://x/api/runs"), jwt), null);
 });
+
+test("panels: anyone signed in may READ who works a panel; only CM/ADMIN may change it (ADR-080)", () => {
+  // Reading is AUTHENTICATED — the same gate the provider list and the work list carry. A clinician
+  // who can see the work list should be able to see who owns it, and gating the read to CM/ADMIN would
+  // let a VIEWER open /api/providers and be refused the answer to "and who works them".
+  for (const principal of [viewer, cm, admin, author]) {
+    assert.equal(authorize("GET", "/api/panels", principal).ok, true);
+    assert.equal(authorize("GET", "/api/panels/prov-001", principal).ok, true);
+  }
+  assert.deepEqual(authorize("GET", "/api/panels", null), { ok: false, status: 401 });
+
+  // Writing re-routes a whole provider's patients and moves their open cases — case-management
+  // authority, matching every other surface that assigns.
+  for (const method of ["PUT", "DELETE"] as const) {
+    assert.equal(authorize(method, "/api/panels/prov-001", cm).ok, true, method);
+    assert.equal(authorize(method, "/api/panels/prov-001", admin).ok, true, method);
+    assert.deepEqual(authorize(method, "/api/panels/prov-001", author), { ok: false, status: 403 }, method);
+    assert.deepEqual(authorize(method, "/api/panels/prov-001", viewer), { ok: false, status: 403 }, method);
+    assert.deepEqual(authorize(method, "/api/panels/prov-001", null), { ok: false, status: 401 }, method);
+  }
+});

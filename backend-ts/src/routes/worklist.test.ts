@@ -17,6 +17,8 @@ import { SqliteCaseStore } from "../stores/sqlite/case-store-sqlite.ts";
 import { SqliteRunStore } from "../stores/sqlite/run-store-sqlite.ts";
 import { SqliteCaseEventStore } from "../stores/sqlite/case-event-store-sqlite.ts";
 import { handleWorklist, BULK_ASSIGN_MAX } from "./worklist.ts";
+import { SqlitePanelStore } from "../stores/sqlite/panel-store-sqlite.ts";
+import type { CloudDatabase } from "@mieweb/cloud";
 import { bucketPeriodForMeasure } from "../run/compliance-period.ts";
 import type { WorklistPatientRow } from "../case/worklist-patients.ts";
 
@@ -155,14 +157,14 @@ test("bulk assign reports exactly what MOVED, and writes one audit event per mov
   const before = (await events.caseTimeline(omarAudiogram)).filter((e) => e.eventType === "CASE_ASSIGNED").length;
   const res = (await bulk({ assignee: CM, caseIds: [omarAudiogram, omarHazwoper] }))!;
   assert.equal(res.status, 200);
-  assert.deepEqual(await res.json(), { assigned: 2, unchanged: 0, missing: [], closed: [] });
+  assert.deepEqual(await res.json(), { assigned: 2, unchanged: 0, conflicted: 0, missing: [], closed: [] });
   assert.equal((await cases.getCase(omarAudiogram))?.assignee, CM);
   assert.equal((await events.caseTimeline(omarAudiogram)).filter((e) => e.eventType === "CASE_ASSIGNED").length, before + 1);
 
   // Re-assigning to the SAME person moves nothing and writes NOTHING. A ledger full of no-ops makes
   // the entries that matter harder to find, and the count would claim work that did not happen.
   const again = (await bulk({ assignee: CM, caseIds: [omarAudiogram, omarHazwoper] }))!;
-  assert.deepEqual(await again.json(), { assigned: 0, unchanged: 2, missing: [], closed: [] });
+  assert.deepEqual(await again.json(), { assigned: 0, unchanged: 2, conflicted: 0, missing: [], closed: [] });
   assert.equal((await events.caseTimeline(omarAudiogram)).filter((e) => e.eventType === "CASE_ASSIGNED").length, before + 1);
 
   await bulk({ assignee: null, caseIds: [omarAudiogram, omarHazwoper] });
@@ -216,15 +218,17 @@ test("bulk assign separates MISSING from CLOSED from unchanged, so the caller kn
   await cases.patchCase(closedCase.id, { status: "RESOLVED" });
 
   const res = (await bulk({ assignee: CM, caseIds: [omarAudiogram, closedCase.id, ghost] }))!;
-  const body = (await res.json()) as { assigned: number; unchanged: number; missing: string[]; closed: string[] };
+  const body = (await res.json()) as { assigned: number; unchanged: number; conflicted: number; missing: string[]; closed: string[] };
   assert.equal(body.assigned, 1);
   assert.deepEqual(body.missing, [ghost]);
   assert.deepEqual(body.closed, [closedCase.id]);
-  // The four numbers PARTITION the input rather than overlapping: one assigned, one closed, one
-  // missing, and nothing genuinely unchanged. The old arithmetic reported 2 unchanged and summed to 5
-  // from an input of 3.
+  // The numbers PARTITION the input rather than overlapping: one assigned, one closed, one missing,
+  // and nothing genuinely unchanged. The old arithmetic reported 2 unchanged and summed to 5 from an
+  // input of 3; it also reported a row LOST to a concurrent write as "already yours", which is the
+  // opposite of what happened — hence `conflicted` as its own number.
   assert.equal(body.unchanged, 0, "neither the closed nor the missing case is ALSO 'unchanged'");
-  assert.equal(body.assigned + body.unchanged + body.closed.length + body.missing.length, 3);
+  assert.equal(body.conflicted, 0);
+  assert.equal(body.assigned + body.unchanged + body.conflicted + body.closed.length + body.missing.length, 3);
   assert.equal((await cases.getCase(closedCase.id))?.assignee, null, "a closed case is not silently reassigned");
   await bulk({ assignee: null, caseIds: [omarAudiogram] });
 });
@@ -253,6 +257,79 @@ test("bulk assign refuses a bad request rather than half-applying it", async () 
 
 test("duplicate ids collapse — one case is never counted as two assignments", async () => {
   const res = (await bulk({ assignee: CM, caseIds: [omarAudiogram, omarAudiogram, omarAudiogram] }))!;
-  assert.deepEqual(await res.json(), { assigned: 1, unchanged: 0, missing: [], closed: [] });
+  assert.deepEqual(await res.json(), { assigned: 1, unchanged: 0, conflicted: 0, missing: [], closed: [] });
   await bulk({ assignee: null, caseIds: [omarAudiogram] });
+});
+
+test("bulk assign CLAIMS a case the panel put on the same person, so a later panel edit leaves it", async () => {
+  // ADR-080 d1 through the bulk surface. "Assign all of Garcia's patients to me" over a list where
+  // half already are is one deliberate act; without this those rows stay PANEL-sourced and the next
+  // panel edit takes back exactly the cases the operator just claimed.
+  await cases.assignCases([{ id: omarAudiogram, expectedAssignee: null }], CM, "PANEL");
+  assert.equal((await cases.getCase(omarAudiogram))?.assignmentSource, "PANEL");
+
+  const res = (await bulk({ assignee: CM, caseIds: [omarAudiogram] }))!;
+  const body = (await res.json()) as { assigned: number; unchanged: number };
+  assert.equal(body.assigned, 1, "same assignee, different chooser — that IS a change");
+  assert.equal((await cases.getCase(omarAudiogram))?.assignmentSource, "OPERATOR");
+
+  // Now it is genuinely a no-op and is reported as one.
+  const again = (await bulk({ assignee: CM, caseIds: [omarAudiogram] }))!;
+  assert.equal(((await again.json()) as { unchanged: number }).unchanged, 1);
+  await bulk({ assignee: null, caseIds: [omarAudiogram] });
+});
+
+test("?panel=me is resolved from the MAPPINGS and the caller's own identity", async () => {
+  // ADR-080 d5. emp-006 is prov-002's patient and emp-001 is prov-005's, so mapping one provider
+  // splits the list — and proves the filter is the panel rather than "everything".
+  const panels = new SqlitePanelStore((env as { DB: CloudDatabase }).DB);
+  await panels.upsertPanelAssignment({
+    providerId: "prov-002",
+    assignee: CM,
+    actor: "lead@workwell.dev",
+    now: new Date().toISOString(),
+  });
+  try {
+    const res = (await get("?panel=me", CM))!;
+    const rows = await rowsOf(res);
+    assert.deepEqual(rows.map((r) => r.employeeId), ["emp-006"], "only the caller's panel");
+    assert.equal(res.headers.get("X-Total-Count"), "1", "the count describes the filtered list");
+
+    // A viewer who owns NO panel sees an empty list. Serving the whole practice here — under a heading
+    // that says "My panel" — is the count-not-describing-the-list defect in its worst form: it tells
+    // someone that several thousand other people's patients are their responsibility.
+    const none = (await get("?panel=me", "quality-lead@workwell.dev"))!;
+    assert.deepEqual(await rowsOf(none), []);
+    assert.equal(none.headers.get("X-Total-Count"), "0", "and the count says so rather than reporting the practice");
+
+    // The mapping is read case-insensitively, so an account whose stored spelling differs from the
+    // JWT's does not silently lose their panel.
+    assert.equal((await rowsOf((await get("?panel=me", "CM@WorkWell.dev"))!)).length, 1);
+
+    // `panel=all` and an absent parameter are both "no panel constraint", and neither claims one.
+    assert.equal((await rowsOf((await get("?panel=all", CM))!)).length, 2);
+    assert.equal((await rowsOf((await get("", CM))!)).length, 2);
+  } finally {
+    await panels.removePanelAssignment("prov-002");
+  }
+});
+
+test("?panel=me composes with the other filters rather than replacing them", async () => {
+  const panels = new SqlitePanelStore((env as { DB: CloudDatabase }).DB);
+  await panels.upsertPanelAssignment({
+    providerId: "prov-002",
+    assignee: CM,
+    actor: "lead@workwell.dev",
+    now: new Date().toISOString(),
+  });
+  try {
+    // The practice's sentence is "filter for Garcia, for a specific measure, for specific insurance,
+    // then assign that" — so the panel is one constraint among several, ANDed with the rest.
+    assert.equal((await rowsOf((await get("?panel=me&measureId=audiogram", CM))!)).length, 1);
+    assert.equal((await rowsOf((await get("?panel=me&measureId=does-not-exist", CM))!)).length, 0);
+    // An explicit providerId for a DIFFERENT provider intersects to nothing rather than widening.
+    assert.equal((await rowsOf((await get("?panel=me&providerId=prov-005", CM))!)).length, 0);
+  } finally {
+    await panels.removePanelAssignment("prov-002");
+  }
 });
