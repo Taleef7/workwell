@@ -140,7 +140,8 @@ owner-locked decisions constraining it are in `docs/LOCKED_DECISIONS.md` §4 and
    primary insurance, set-based bulk assign; **PR 2 the same week**: `panel_assignments`, the durable
    provider→staff mapping the practice already works by, applied to the cases a run OPENS and
    backfilled onto the ones it owns, with `cases.assignment_source` recording who chose so a panel
-   edit never overrules a person (ADR-080); PR 3 is the ACO's attributed-list import and report)
+   edit never overrules a person (ADR-080), merged 2026-09-12; PR 3 is the ACO's attributed-list
+   import and report, #557, blocked on owner DDL and on three inputs the ACO has not yet supplied)
    → MM-3 (cards that resolve: order
    proposals + exception documentation, inside ADR-067's refusals) → MM-4 (encounter-time
    integration). Roadmap §7 tabulates the external dependencies.
