@@ -121,6 +121,23 @@ set-based event batch are actually exercised. Frontend 428 pass across 79 files,
 the convergence rule and the first-load guard were each mutation-checked: reverting any one of them
 fails a test that names the behaviour, rather than passing quietly.
 
+**Merged as #555 (squash `71db0644`), CI green.** #553 closed with it.
+
+**Where MM-2 stands, and what is next.** PR 0 (#550), PR 1 (#551) and PR 2 (#555) are in. **PR 3 is
+the ACO's attributed list and its report package — #557**, and it is the slice the ACO actually asked
+for: their Medicare list, the routed measures over that subset, and num/den/exclusions per measure
+plus patient-level evidence carrying the result and the date, because CMS can audit it for ten years.
+It is blocked on owner-written DDL for two tables, and it has three inputs nobody has supplied: the
+identifier format, the cadence, and what to do with the members that do not match. Worth asking before
+the importer is written, because each of the three changes it. A fourth is unsettled and nobody raised
+it: MSSP attribution is traditional Medicare, so Medicare Advantage should presumably be out, but the
+two are separate typology codes and no one has said.
+
+**Not deployed yet — #558.** The sandbox still runs the pre-panel build. Nothing needs running by
+hand (both schema objects are self-creating and there is deliberately no backfill), but the container
+has to be recreated, and the first thing to see afterwards is that `/worklist` still opens on the
+whole practice because nobody owns a panel. That is the correct first state, not a defect.
+
 **Decided, not left open.** The mapping stays WorkWell's (ADR-080 d7). WebChart's department construct
 was considered as its source and rejected: it changes on a different schedule and by different hands,
 its cardinality does not obviously match, and chasing it would substitute for the request that actually
