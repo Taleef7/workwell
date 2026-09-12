@@ -272,7 +272,7 @@ export class PgCaseStore implements CaseStore {
     }
 
     const results: (UpsertedCase | null)[] = new Array(inputs.length).fill(null);
-    // Sub-chunked so the bind count stays far below Postgres' 65535 cap — 13 params/row on the insert
+    // Sub-chunked so the bind count stays far below Postgres' 65535 cap — 15 params/row on the insert since the panel assignee and its source joined it (ADR-080)
     // plus one hoisted `now`, and 14 on the update plus one hoisted `now`, so 500 rows is about 7,000
     // either way — and so each statement stays a reasonable size. 500 also matches `recordOutcomes`
     // and the pipeline's own subject chunk.
@@ -494,13 +494,22 @@ export class PgCaseStore implements CaseStore {
     const { rows } = await this.pool.query<{ id: string }>(
       // Clearing an assignee clears the source with it: nobody chose nobody, and a row reading
       // "unassigned, chosen by the panel" would make the next backfill's question unanswerable.
+      // `expected_source` guards the OTHER column the caller's decision read. `$6` is a per-entry flag
+      // for "the caller cared", because a NULL expected source is itself a meaningful value (an
+      // unassigned or legacy row) and cannot double as "unchecked".
+      //
+      // The target test is `assignee IS DISTINCT FROM $3 OR assignment_source IS DISTINCT FROM $5`:
+      // moving a PANEL-sourced case to the person who already holds it is not a no-op, it is the
+      // operator claiming it, and refusing that write is what left an operator's deliberate choice
+      // recorded as the panel's.
       `UPDATE ${T} AS c
           SET assignee = $3, assignment_source = $5, updated_at = NOW()
-         FROM unnest($1::uuid[], $2::text[]) AS e(id, expected_assignee)
+         FROM unnest($1::uuid[], $2::text[], $6::bool[], $7::text[]) AS e(id, expected_assignee, check_source, expected_source)
         WHERE c.id = e.id
           AND c.status = ANY($4::text[])
           AND c.assignee IS NOT DISTINCT FROM e.expected_assignee
-          AND c.assignee IS DISTINCT FROM $3
+          AND (NOT e.check_source OR c.assignment_source IS NOT DISTINCT FROM e.expected_source)
+          AND (c.assignee IS DISTINCT FROM $3 OR c.assignment_source IS DISTINCT FROM $5)
         RETURNING c.id`,
       [
         valid.map((e) => e.id),
@@ -508,6 +517,8 @@ export class PgCaseStore implements CaseStore {
         assignee,
         [...ACTIVE_CASE_STATUSES],
         assignee === null ? null : source,
+        valid.map((e) => e.expectedSource !== undefined),
+        valid.map((e) => e.expectedSource ?? null),
       ],
     );
     return rows.map((r) => r.id);

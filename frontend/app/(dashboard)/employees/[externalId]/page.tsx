@@ -39,16 +39,20 @@ const PRIORITY_COLORS: Record<string, string> = {
 function AssigneeCell({
   caseId,
   assignee,
+  canManage,
+  options,
+  canonicalFor,
   onAssigned,
 }: {
   caseId: string;
   assignee: string | null;
+  canManage: boolean;
+  /** Fetched ONCE by the page: a patient with six gaps is six of these rows, not six requests. */
+  options: { value: string; label: string }[];
+  canonicalFor: (email: string) => string | undefined;
   onAssigned: () => void;
 }) {
   const api = useApi();
-  const { user } = useAuth();
-  const canManage = canManageCases(user?.role);
-  const { options, canonicalFor } = useAssignableUsers(canManage);
   const [busy, setBusy] = useState(false);
 
   if (!canManage) {
@@ -94,6 +98,10 @@ export default function EmployeeProfilePage() {
   // so decode once here and let each fetch re-encode for transport.
   const externalId = decodeURIComponent(rawExternalId ?? '');
   const { profile, loading, error, refetch } = useEmployeeProfile(externalId);
+  const { user } = useAuth();
+  const canManageThisCase = canManageCases(user?.role);
+  // One fetch for the page, not one per open gap.
+  const { options: assignableOptions, canonicalFor } = useAssignableUsers(canManageThisCase);
   const { labelFor: measureLabelFor } = useMeasureIdentities();
   const isPatientTerm = SUBJECT.singular === 'patient';
 
@@ -191,7 +199,14 @@ export default function EmployeeProfilePage() {
                     </span>
                   </td>
                   <td className="py-2">
-                    <AssigneeCell caseId={c.caseId} assignee={c.assignee} onAssigned={refetch} />
+                    <AssigneeCell
+                      caseId={c.caseId}
+                      assignee={c.assignee}
+                      canManage={canManageThisCase}
+                      options={assignableOptions}
+                      canonicalFor={canonicalFor}
+                      onAssigned={refetch}
+                    />
                   </td>
                   {hasSla ? (
                     <td className="py-2">

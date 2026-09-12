@@ -136,7 +136,7 @@ owner-locked decisions constraining it are in `docs/LOCKED_DECISIONS.md` §4 and
    and CMS137 vendored, gated 45/45 and read as two rates with its strata carried into the
    MeasureReport and QRDA III (ADR-074) — all six measures are runnable once routed, and the flips
    themselves stay the gated workflow edits of MM-1c) → MM-2 (provider-panel work lists and
-   assignment — **PR 1 landed 2026-09-12**: a patient-first work list, panel filters by provider and
+   assignment — **PR 1 merged 2026-09-12**: a patient-first work list, panel filters by provider and
    primary insurance, set-based bulk assign; **PR 2 the same week**: `panel_assignments`, the durable
    provider→staff mapping the practice already works by, applied to the cases a run OPENS and
    backfilled onto the ones it owns, with `cases.assignment_source` recording who chose so a panel

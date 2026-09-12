@@ -50,7 +50,7 @@ const caseRow = (over: Partial<CaseRecord>): CaseRecord => ({
   ...over,
 });
 
-test("planPanelBackfill moves unowned work and the panel's own earlier assignment — nothing else", () => {
+test("planPanelBackfill moves unowned work and every PANEL-sourced case — and nothing a person owns", () => {
   const unowned = caseRow({ assignee: null, assignmentSource: null });
   const panelOwned = caseRow({ assignee: PANEL_OWNER, assignmentSource: "PANEL" });
   // A supervisor handed this one to the same person by hand. Identical assignee, different meaning:
@@ -60,35 +60,69 @@ test("planPanelBackfill moves unowned work and the panel's own earlier assignmen
   // Written before the column existed. Unknown provenance reads as operator-owned: the safe answer is
   // the one that declines to move the row.
   const legacyAssigned = caseRow({ assignee: PANEL_OWNER, assignmentSource: null });
-  // Someone else entirely — not this panel's to move, whatever wrote it.
-  const otherOwner = caseRow({ assignee: "third@workwell.dev", assignmentSource: "PANEL" });
+  // A PANEL-sourced row on somebody who is not the new owner: the panel put it there, and the panel
+  // now belongs to someone else, so it moves. (The first cut restricted this to the PREVIOUS owner,
+  // which stranded any case a run inserted from a stale snapshot — see the convergence test below.)
+  const otherPanelOwner = caseRow({ assignee: "third@workwell.dev", assignmentSource: "PANEL" });
   // Already where it is going: not a change, so not reported and not audited.
   const alreadyThere = caseRow({ assignee: NEW_OWNER, assignmentSource: "PANEL" });
   // A closed case is not work; reassigning it would put a resolved row in somebody's queue.
   const closed = caseRow({ status: "RESOLVED", assignee: null, assignmentSource: null });
 
   const plan = planPanelBackfill(
-    [unowned, panelOwned, operatorOwned, legacyAssigned, otherOwner, alreadyThere, closed],
+    [unowned, panelOwned, operatorOwned, legacyAssigned, otherPanelOwner, alreadyThere, closed],
     PANEL_OWNER,
     NEW_OWNER,
   );
 
-  assert.deepEqual(plan.map((p) => p.id).sort(), [unowned.id, panelOwned.id].sort());
-  // The expectations carry the owner that was READ, so a row someone moves in between is skipped by
+  assert.deepEqual(plan.map((p) => p.id).sort(), [unowned.id, panelOwned.id, otherPanelOwner.id].sort());
+  // The expectations carry the state that was READ, so a row someone moves in between is skipped by
   // the store's compare-and-set rather than overwritten.
   assert.deepEqual(
     plan.map((p) => p.expectedAssignee).sort(),
-    [null, PANEL_OWNER].sort(),
+    [null, PANEL_OWNER, "third@workwell.dev"].sort(),
   );
 });
 
-test("planPanelBackfill on a FIRST mapping moves only unassigned work", () => {
-  // No previous owner, so there is no earlier panel decision to bring up to date — and a case already
-  // assigned to somebody was assigned by a person, whoever they are.
+test("planPanelBackfill on a FIRST mapping moves unassigned work and any stale panel assignment", () => {
   const unowned = caseRow({ assignee: null });
   const someoneElses = caseRow({ assignee: "third@workwell.dev", assignmentSource: "OPERATOR" });
-  const plan = planPanelBackfill([unowned, someoneElses], null, NEW_OWNER);
-  assert.deepEqual(plan.map((p) => p.id), [unowned.id]);
+  // A PANEL-sourced row with no previous mapping is a case a run opened from a map that has since
+  // been removed. It belongs to whoever owns the panel now, which is what its source means.
+  const stalePanel = caseRow({ assignee: "third@workwell.dev", assignmentSource: "PANEL" });
+  const plan = planPanelBackfill([unowned, someoneElses, stalePanel], null, NEW_OWNER);
+  assert.deepEqual(plan.map((p) => p.id).sort(), [unowned.id, stalePanel.id].sort());
+});
+
+test("a case a run opened from a STALE map is still reachable by a later save", async () => {
+  // The convergence hole the review found. The first cut moved only PANEL rows on the PREVIOUS owner,
+  // so a run that snapshotted the old owner and inserted its case AFTER the backfill had scanned left
+  // that case stranded — and no later save could reach it, because by then the previous owner and the
+  // current owner were the same person.
+  const deps = await freshDeps(ROSTER);
+  await assignPanel(deps, { providerId: "maui-prov-012", assignee: PANEL_OWNER, actor: "lead@workwell.dev" });
+  await assignPanel(deps, { providerId: "maui-prov-012", assignee: NEW_OWNER, actor: "lead@workwell.dev" });
+
+  // The run's late insert: PANEL-sourced, on the owner the run snapshotted before the change.
+  const stranded = (await deps.cases.upsertFromOutcome({
+    runId: crypto.randomUUID(), subjectId: "pat-001", measureId: "cms122",
+    evaluationPeriod: "2027-01-01", outcomeStatus: "OVERDUE", panelAssignee: PANEL_OWNER,
+  }))!;
+  assert.equal(stranded.assignee, PANEL_OWNER);
+
+  const again = await assignPanel(deps, { providerId: "maui-prov-012", assignee: NEW_OWNER, actor: "lead@workwell.dev" });
+  assert.equal(again.changed, false, "the mapping is unchanged");
+  assert.equal(again.backfilled, 1, "but the stranded case converges on the owner the mapping names");
+  assert.equal((await deps.cases.getCase(stranded.id))?.assignee, NEW_OWNER);
+});
+
+test("planPanelBackfill carries BOTH columns it read, so a provenance change invalidates the plan", () => {
+  // The plan is a set of compare-and-set expectations, and it must guard everything the decision
+  // used. Guarding only the assignee let an operator's re-assertion of the same person be overwritten.
+  const panelOwned = caseRow({ assignee: PANEL_OWNER, assignmentSource: "PANEL" });
+  const [entry] = planPanelBackfill([panelOwned], PANEL_OWNER, NEW_OWNER);
+  assert.equal(entry?.expectedAssignee, PANEL_OWNER);
+  assert.equal(entry?.expectedSource, "PANEL");
 });
 
 test("planPanelBackfill compares accounts case-insensitively", () => {

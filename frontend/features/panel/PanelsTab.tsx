@@ -16,28 +16,43 @@ import { Badge, Button, Select } from "@mieweb/ui";
 import { emitToast } from "@/lib/toast";
 import { SUBJECT } from "@/lib/terminology";
 import { providerFilterLabel } from "./use-panel-providers";
-import { useAssignableUsers } from "./use-assignable-users";
-import { usePanelAssignments, type PanelRow } from "./use-panel-assignments";
+import { UNASSIGN_VALUE } from "./use-assignable-users";
+import type { PanelRow, PanelSaveResult } from "./use-panel-assignments";
 
+/**
+ * The panel state is OWNED BY THE PAGE and passed in, rather than mounted again here.
+ *
+ * Two copies of the hook meant two `GET /api/panels` on every visit, and — the part that mattered —
+ * a save inside this tab refreshed only this copy. The page's own `myPanels` stayed stale, so after
+ * mapping a panel to yourself the "My panel" chip still said none were yours: a label describing a
+ * different set than the list beside it.
+ */
 export function PanelsTab({
-  viewerEmail,
+  rows,
+  loading,
+  error,
   canManage,
-  onChanged,
+  assignableOptions,
+  canonicalFor,
+  onSave,
+  onRemove,
 }: {
-  viewerEmail: string | null | undefined;
+  rows: PanelRow[];
+  loading: boolean;
+  error: string | null;
   canManage: boolean;
-  /** Called after a mapping changes, so the patient list behind this tab can refresh. */
-  onChanged?: () => void;
+  assignableOptions: { value: string; label: string }[];
+  canonicalFor: (email: string) => string | undefined;
+  onSave: (providerId: string, assignee: string) => Promise<PanelSaveResult>;
+  onRemove: (providerId: string) => Promise<void>;
 }) {
-  const { rows, loading, error, save, remove } = usePanelAssignments(viewerEmail, true);
-  const { options: assignableOptions, canonicalFor } = useAssignableUsers(canManage);
   const [busy, setBusy] = useState<string | null>(null);
 
   async function assign(row: PanelRow, value: string) {
     if (!value || busy) return;
     setBusy(row.providerId);
     try {
-      const result = await save(row.providerId, value);
+      const result = await onSave(row.providerId, value);
       // The toast reports what MOVED, not what was asked for — the same rule the bulk assign follows.
       // "Saved" over a mapping that quietly reassigned 212 open cases tells the operator nothing about
       // the part that matters.
@@ -47,7 +62,6 @@ export function PanelsTab({
           : "no open gaps to move";
       const mapping = result.changed ? `${row.providerName} → ${result.assignee}` : `${row.providerName} unchanged`;
       emitToast(`${mapping}; ${moved}.`, "success");
-      onChanged?.();
     } catch (err) {
       emitToast(err instanceof Error ? err.message : "Could not save the panel", "error");
     } finally {
@@ -58,11 +72,10 @@ export function PanelsTab({
   async function unmap(row: PanelRow) {
     setBusy(row.providerId);
     try {
-      await remove(row.providerId);
+      await onRemove(row.providerId);
       // Said explicitly, because it is the surprising half: un-mapping decides who owns FUTURE work
       // and deliberately leaves cases somebody is already working where they are (ADR-080 d4).
       emitToast(`${row.providerName} is unassigned. Open gaps keep their current owner.`, "success");
-      onChanged?.();
     } catch (err) {
       emitToast(err instanceof Error ? err.message : "Could not unassign the panel", "error");
     } finally {
@@ -124,11 +137,20 @@ export function PanelsTab({
                       value={row.assignee ? (canonicalFor(row.assignee) ?? row.assignee) : ""}
                       onValueChange={(value) => void assign(row, value)}
                       options={[
-                        { value: "", label: "Nobody — unassigned" },
-                        // The "Unassign" entry is dropped: DELETE is the un-map verb, and the row's own
-                        // button is where it lives. Two spellings of one action is how a screen ends up
-                        // with a control nobody is sure about.
-                        ...assignableOptions.filter((o) => o.value !== "" && o.value !== "__unassigned__"),
+                        // A placeholder, never a verb. An earlier version offered "Nobody —
+                        // unassigned" here, which `assign` then discarded as an empty value: a control
+                        // that looked like it did something and did nothing. Un-mapping is the button
+                        // beside it, and one action gets one spelling.
+                        { value: "", label: "Choose who works this panel…" },
+                        // `UNASSIGN_VALUE` by name, not by literal: it happens to be "__unassigned__"
+                        // today, and a filter that silently stops matching if the constant moves is
+                        // the guard-that-cannot-fire shape this project collects.
+                        ...assignableOptions.filter((o) => o.value !== "" && o.value !== UNASSIGN_VALUE),
+                        // A stored owner the deployment no longer offers still renders as itself,
+                        // rather than leaving the control blank over a panel that HAS an owner.
+                        ...(row.assignee && !canonicalFor(row.assignee)
+                          ? [{ value: row.assignee, label: `${row.assignee} — no longer assignable` }]
+                          : []),
                       ]}
                     />
                   ) : row.assignee ? (

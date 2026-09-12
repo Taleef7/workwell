@@ -96,8 +96,18 @@ export default function WorklistPage() {
   const { options: providerOptions, nameFor: providerNameFor } = usePanelProviders();
   const { options: payerOptions, groups: payerGroups, available: payersAvailable, nameFor: payerNameFor } = usePanelPayers();
   const { options: assignableOptions, canonicalFor } = useAssignableUsers(canManage);
-  // Read on every visit because it answers the default-view question, not only the Panels tab's rows.
-  const { ownsPanel, mine: myPanels } = usePanelAssignments(user?.email, true);
+  // Read on every visit because it answers the default-view question, not only the Panels tab's rows —
+  // and owned HERE, once, so a save inside the tab updates the chip the page draws. Two instances meant
+  // two requests and a chip that still said "none assigned to me" straight after you assigned one.
+  const {
+    rows: panelRows,
+    loading: panelsLoading,
+    error: panelsError,
+    ownsPanel,
+    mine: myPanels,
+    save: savePanel,
+    remove: removePanel,
+  } = usePanelAssignments(user?.email, true);
 
   const [rows, setRows] = useState<WorklistPatientRow[]>([]);
   const [total, setTotal] = useState(0);
@@ -228,6 +238,11 @@ export default function WorklistPage() {
   const togglePayerGroup = togglePayerCodes;
 
   const load = useCallback(async () => {
+    // Nothing is fetched until the view is DECIDED. When the URL says nothing, `effectivePanel` reads
+    // "all" while the mappings are in flight, so loading immediately meant a mapped staffer's first
+    // paint was a whole-practice query — several thousand other people's patients, flashed on screen
+    // and then replaced by their own panel, plus a second heavy query to do it.
+    if (panelFilter === null && ownsPanel === undefined) return;
     // A request sequence, like /cases has: typing in the search box fires several of these, and without
     // it a slower earlier response resolves last and overwrites the current rows with stale ones.
     const ticket = (requestSeq.current += 1);
@@ -264,7 +279,7 @@ export default function WorklistPage() {
     } finally {
       if (ticket === requestSeq.current) setLoading(false);
     }
-  }, [api, providerFilter, assigneeFilter, outcomeFilter, measureFilter, searchFilter, payerFilter, effectivePanel, siteId, from, to, pageSize, page]);
+  }, [api, providerFilter, assigneeFilter, outcomeFilter, measureFilter, searchFilter, payerFilter, effectivePanel, panelFilter, ownsPanel, siteId, from, to, pageSize, page]);
 
   // Deferred a tick, matching `/cases`: the lint rule forbids a synchronous setState inside an effect
   // (it cascades renders), and `load` sets loading/rows/total on entry.
@@ -387,7 +402,24 @@ export default function WorklistPage() {
       </div>
 
       {tab === "panels" ? (
-        <PanelsTab viewerEmail={user?.email} canManage={canManage} onChanged={() => void load()} />
+        <PanelsTab
+          rows={panelRows}
+          loading={panelsLoading}
+          error={panelsError}
+          canManage={canManage}
+          assignableOptions={assignableOptions}
+          canonicalFor={canonicalFor}
+          onSave={async (providerId, assignee) => {
+            const result = await savePanel(providerId, assignee);
+            // The patient list behind this tab is now describing a different set of owners.
+            void load();
+            return result;
+          }}
+          onRemove={async (providerId) => {
+            await removePanel(providerId);
+            void load();
+          }}
+        />
       ) : (
       <>
       <div className="flex flex-wrap items-end gap-3 rounded-xl border border-neutral-200 bg-white p-3 dark:border-neutral-800 dark:bg-neutral-900">

@@ -73,10 +73,25 @@ export interface UpsertedCase extends CaseRecord {
   disposition: import("../case/case-logic.ts").CaseUpsertDisposition;
 }
 
-/** One case to assign, paired with the assignee the caller read on it (`null` = unassigned). */
+/** One case to assign, paired with the state the caller read on it (`null` = unassigned/unknown). */
 export interface CaseAssignExpectation {
   id: string;
   expectedAssignee: string | null;
+  /**
+   * The `assignmentSource` the caller read, when its DECISION depended on it.
+   *
+   * The panel backfill's rule reads BOTH columns — it moves a case because the assignee is X *and*
+   * because a panel put it there (ADR-080 d3) — so guarding only the assignee lets a write that
+   * changed only the provenance through. Concretely: the backfill reads `Alice/PANEL` and plans to
+   * move it; an operator then re-asserts Alice deliberately, making it `Alice/OPERATOR`; the assignee
+   * still matches, so the row is moved and the person's decision is overwritten by the very rule
+   * that exists to protect it.
+   *
+   * `undefined` means the caller did not read it and does not care — the operator-facing bulk assign,
+   * whose decision is about the assignee alone. This is the same "guard the whole plan input"
+   * correction the batched upsert already carries.
+   */
+  expectedSource?: string | null;
 }
 
 export interface CaseQuery {

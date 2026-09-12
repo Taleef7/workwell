@@ -1101,6 +1101,58 @@ export function caseStoreContract(label: string, freshStore: () => Promise<CaseS
     assert.equal((await store.getCase(a.id))?.assignmentSource, null, "clearing through patchCase clears it too");
   });
 
+  test(`[${label}] the compare-and-set guards the PROVENANCE too, and a source-only change is a change`, async () => {
+    // ADR-080 d1, and the hole two reviewers found in the first cut: the backfill decides to move a
+    // case because of BOTH columns, so guarding only the assignee lets a write that changed only the
+    // provenance through — and the write it lets through is the exact one the rule protects.
+    const store = await freshStore();
+    const a = (await upsert(store, "OVERDUE", { subjectId: "emp-030" }))!;
+    await store.assignCases([{ id: a.id, expectedAssignee: null }], "cm@workwell.dev", "PANEL");
+
+    // The backfill reads Alice/PANEL and plans to move it. An operator then re-asserts the SAME
+    // assignee deliberately, which makes the row theirs.
+    const plan = [{ id: a.id, expectedAssignee: "cm@workwell.dev", expectedSource: "PANEL" }];
+    await store.patchCase(a.id, { assignee: "cm@workwell.dev" });
+    assert.equal((await store.getCase(a.id))?.assignmentSource, "OPERATOR");
+
+    assert.deepEqual(
+      await store.assignCases(plan, "third@workwell.dev", "PANEL"),
+      [],
+      "the provenance moved under the plan, so the plan does not apply",
+    );
+    assert.equal((await store.getCase(a.id))?.assignee, "cm@workwell.dev", "the person's choice stands");
+
+    // A caller that did NOT read the provenance is unaffected — the operator bulk path, whose
+    // decision is about the assignee alone.
+    assert.deepEqual(
+      await store.assignCases([{ id: a.id, expectedAssignee: "cm@workwell.dev" }], "third@workwell.dev", "OPERATOR"),
+      [a.id],
+    );
+  });
+
+  test(`[${label}] an operator can CLAIM a case the panel already put on them`, async () => {
+    // "Assign all of Garcia's patients to me", over a list where half already are, is one deliberate
+    // act. If the rows already on them stayed PANEL-sourced, the next panel edit would take back
+    // exactly the cases the operator just claimed.
+    const store = await freshStore();
+    const a = (await upsert(store, "OVERDUE", { subjectId: "emp-031" }))!;
+    await store.assignCases([{ id: a.id, expectedAssignee: null }], "cm@workwell.dev", "PANEL");
+
+    const claimed = await store.assignCases(
+      [{ id: a.id, expectedAssignee: "cm@workwell.dev" }],
+      "cm@workwell.dev",
+      "OPERATOR",
+    );
+    assert.deepEqual(claimed, [a.id], "same assignee, different chooser — that IS a change");
+    assert.equal((await store.getCase(a.id))?.assignmentSource, "OPERATOR");
+
+    // And now it really is a no-op, so the caller writes no event for it.
+    assert.deepEqual(
+      await store.assignCases([{ id: a.id, expectedAssignee: "cm@workwell.dev" }], "cm@workwell.dev", "OPERATOR"),
+      [],
+    );
+  });
+
   test(`[${label}] a panel assignee is applied when a case is CREATED, and never to one that exists`, async () => {
     // ADR-080 d2. The whole point: a case the nightly run opens arrives already on the person who works
     // that provider's panel, so the practice starts the day with work that is assigned rather than a

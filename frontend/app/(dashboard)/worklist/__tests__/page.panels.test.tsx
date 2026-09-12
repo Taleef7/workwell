@@ -138,9 +138,23 @@ describe("the work list's default view", () => {
     // Defaulting an unmapped supervisor to an empty panel would read as "no work".
     VIEWER.current = "quality-lead@maui.workwell.dev";
     render(<WorklistPage />);
+    // Wait for the MAPPINGS, not merely for a first request. An earlier version asserted as soon as
+    // any list call existed, which the page always makes without `panel=me` while ownership is still
+    // unknown — so the assertion passed before the decision it claims to test had been made, and
+    // would have passed with the rule inverted.
+    await waitFor(() => expect(get).toHaveBeenCalledWith("/api/panels"));
     await waitFor(() => expect(listCalls().length).toBeGreaterThan(0));
     expect(listCalls().every((u) => !u.includes("panel=me"))).toBe(true);
     expect(screen.queryByText(/My panel:/)).not.toBeInTheDocument();
+  });
+
+  it("asks for nothing until it knows whose list to ask for", async () => {
+    // Without this the first paint of a mapped staffer was a whole-practice query — several thousand
+    // other people's patients, shown and then replaced — followed by a second heavy query for the
+    // panel. Every list request this page makes describes the view it has already decided on.
+    render(<WorklistPage />);
+    await waitFor(() => expect(listCalls().length).toBeGreaterThan(0));
+    expect(listCalls().every((u) => u.includes("panel=me"))).toBe(true);
   });
 
   it("honours an explicit whole-practice choice even for someone who owns a panel", async () => {
@@ -167,6 +181,14 @@ describe("the Panels tab", () => {
     render(<WorklistPage />);
     await userEvent.click(await screen.findByRole("tab", { name: "Panels" }));
   };
+
+  it("loads the panel list ONCE for the page and the tab together", async () => {
+    // Two copies of the hook meant two requests and, worse, a save in the tab that left the page's
+    // own "My panel" chip describing the mappings as they were before the save.
+    await openPanels();
+    await waitFor(() => expect(screen.getByText("Dr Oren Tide")).toBeInTheDocument());
+    expect(get.mock.calls.filter((c) => String(c[0]).startsWith("/api/panels"))).toHaveLength(1);
+  });
 
   it("lists every provider, unmapped ones included, with the panel size", async () => {
     await openPanels();

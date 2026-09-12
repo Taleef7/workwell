@@ -71,10 +71,21 @@ exists, so a store failure logs a WARN and the cases open unassigned exactly as 
 assignment. Nothing else.**
 
 `planPanelBackfill` is pure, so the rule can be argued with rather than inferred from a mutation. It
-selects active cases whose assignee is NULL, and active cases whose source is `PANEL` and whose
-assignee is the previous owner. Operator-sourced rows and unknown-sourced rows stay where they are.
-Each selection carries the owner that was read, so the store's compare-and-set skips a row somebody
-moved in between rather than overwriting it.
+selects active cases whose assignee is NULL, and active cases whose source is `PANEL` — **any of
+them, not only those on the previous owner.** The narrower rule was tried first and stranded work:
+a run that snapshotted the old owner can insert its case AFTER the backfill has scanned, leaving a
+PANEL-sourced row on somebody who no longer owns the panel, which no later save could reach because
+by then the previous owner and the current owner were the same person. A PANEL-sourced row belongs to
+whoever owns the panel now; that is what the source means. Operator-sourced and unknown-sourced rows
+stay where they are, so the protection d1 exists for is unchanged.
+
+Each selection carries **both columns that were read** — the assignee and the source — and the
+store's compare-and-set guards both. Guarding only the assignee was a hole two reviewers found
+independently: the backfill reads `Alice/PANEL` and plans to move it, an operator then re-asserts
+Alice deliberately making it `Alice/OPERATOR`, the assignee still matches, and the row is moved —
+the write the rule exists to prevent, let through by the rule's own guard. For the same reason a
+change of source alone IS a change: an operator assigning a case to the person the panel already
+chose is claiming it, and refusing that write left their choice recorded as the panel's.
 
 **Re-saving the same assignee leaves the mapping alone but still sweeps the panel's unassigned cases.**
 Because the panel read during a run is best-effort, a run CAN open unassigned cases on a mapped panel;
@@ -112,6 +123,14 @@ Who works a patient and who is accountable for them under a contract are differe
 different sources. The ACO's attributed list is supplied by the ACO, is versioned, and is a separate
 relationship (MM-2 PR 3); a panel is the practice's own internal division of labour, edited by a
 supervisor. Nothing here may be read as a denominator, and no report derives one from it.
+
+**The audit window is wider here than on the operator path, and is accepted.** Events for a chunk are
+written before that chunk's update, and chunks are sequential, so a case an operator grabs mid-backfill
+loses the compare-and-set and stays put while a `CASE_ASSIGNED` naming a transition that did not happen
+is already in the ledger. That is the same recorded-but-unapplied trade `case-actions.ts` chose, spread
+over a panel rather than a request; the alternative — mutating first — risks an unaudited state change,
+which the hard rule forbids. `backfilled` is reported separately from `backfillPlanned` so the
+discrepancy is visible rather than inferred.
 
 **Consequences.** `panel_assignments` is a new owner-approved table; `cases.assignment_source` is a new
 nullable column on both schema files. `GET /api/panels` is AUTHENTICATED (the same gate the provider

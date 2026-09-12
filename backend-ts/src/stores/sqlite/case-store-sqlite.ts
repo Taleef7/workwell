@@ -309,11 +309,14 @@ export class SqliteCaseStore implements CaseStore {
     // distinct prior owners in one batch is tiny (the assignable accounts, plus unassigned) — so this
     // is a handful of statements rather than one per case, and it asks the SAME question the ceiling
     // asks: update only while the row still holds the value the caller read.
-    const byExpected = new Map<string | null, string[]>();
+    // Grouped by the WHOLE expectation — the assignee AND, where the caller read it, the provenance —
+    // because both are predicates and a group may only share one statement if it shares every bind.
+    const byExpected = new Map<string, { expectedAssignee: string | null; expectedSource?: string | null; ids: string[] }>();
     for (const entry of expected) {
-      const ids = byExpected.get(entry.expectedAssignee);
-      if (ids) ids.push(entry.id);
-      else byExpected.set(entry.expectedAssignee, [entry.id]);
+      const key = `${entry.expectedAssignee ?? " "}|${entry.expectedSource === undefined ? "*" : (entry.expectedSource ?? " ")}`;
+      const group = byExpected.get(key);
+      if (group) group.ids.push(entry.id);
+      else byExpected.set(key, { expectedAssignee: entry.expectedAssignee, expectedSource: entry.expectedSource, ids: [entry.id] });
     }
 
     const active = [...ACTIVE_CASE_STATUSES];
@@ -322,20 +325,25 @@ export class SqliteCaseStore implements CaseStore {
     // "unassigned, chosen by the panel" would make the next backfill's question unanswerable.
     const nextSource = assignee === null ? null : source;
     const changed: string[] = [];
-    for (const [expectedAssignee, ids] of byExpected) {
+    for (const { expectedAssignee, expectedSource, ids } of byExpected.values()) {
       // `IS` is SQLite's NULL-safe equality and `IS NOT` its NULL-safe inequality — the counterparts
       // of Postgres's `IS NOT DISTINCT FROM` / `IS DISTINCT FROM`. Plain `=` / `<>` are NULL for an
       // unassigned row, and assigning an unassigned case is the commonest thing this is asked to do.
+      //
+      // The provenance clause is present only when the caller READ it; the target test accepts a
+      // source-only change, so an operator can claim a case the panel already put on them.
+      const sourceClause = expectedSource === undefined ? "" : " AND assignment_source IS ?";
+      const sourceBind = expectedSource === undefined ? [] : [expectedSource ?? null];
       const { results } = await this.db
         .prepare(
           `UPDATE cases SET assignee = ?, assignment_source = ?, updated_at = ?
             WHERE id IN (${ids.map(() => "?").join(", ")})
               AND status IN (${active.map(() => "?").join(", ")})
-              AND assignee IS ?
-              AND assignee IS NOT ?
+              AND assignee IS ?${sourceClause}
+              AND (assignee IS NOT ? OR assignment_source IS NOT ?)
           RETURNING id`,
         )
-        .bind(assignee, nextSource, now, ...ids, ...active, expectedAssignee, assignee)
+        .bind(assignee, nextSource, now, ...ids, ...active, expectedAssignee, ...sourceBind, assignee, nextSource)
         .all<{ id: string }>();
       for (const row of results ?? []) changed.push(row.id);
     }

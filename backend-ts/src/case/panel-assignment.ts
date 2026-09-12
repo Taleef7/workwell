@@ -24,17 +24,16 @@ import type { PanelAssignment, PanelStore } from "../stores/panel-store.ts";
 import type { EmployeeProfile } from "../engine/synthetic/employee-catalog.ts";
 import { ACTIVE_CASE_STATUSES } from "./case-logic.ts";
 
-/** Subjects named per `listCases` call when collecting a panel's open cases. */
-const SUBJECT_CHUNK = 1_000;
 /**
- * Rows per page of that read.
+ * Subjects named per `listCases` call when collecting a panel's open cases.
  *
- * `listCases` DEFAULTS to 50 rows, and a backfill that took one page would move the first fifty cases
- * of a panel and silently leave the rest — indistinguishable, from the outside, from a panel that only
- * had fifty. So the read pages to exhaustion rather than passing a large limit, because any limit
- * large enough to "obviously" cover a panel is still a number somebody's panel can exceed.
+ * 900, not 1,000, and the difference is a crash: the SQLite floor expands each id into its own `IN
+ * (?, …)` bind, and older builds cap a statement at 999 variables (the same ceiling
+ * `worklist-read-model.ts` documents). A thousand ids plus the status binds is 1,004, so a provider
+ * with a thousand patients would fail on the floor and succeed on Postgres — after the intent event
+ * had already been written.
  */
-const CASE_PAGE = 500;
+const SUBJECT_CHUNK = 900;
 /** Cases assigned (and audited) per batch — the same cap the operator-facing bulk assign uses. */
 const ASSIGN_CHUNK = 500;
 
@@ -45,8 +44,15 @@ const sameAccount = (a: string | null | undefined, b: string | null | undefined)
  * Which of a provider's open cases a panel change should move.
  *
  * **Two kinds move, and only two.** A case nobody has taken (`assignee` null) — nothing is being
- * overridden. And a case the PANEL itself put on the previous owner, which is this mapping's own
- * earlier decision being brought up to date.
+ * overridden. And a case the PANEL itself put somewhere, which is this mapping's own earlier decision
+ * being brought up to date.
+ *
+ * **Any PANEL-sourced case, not only one on the PREVIOUS owner.** Restricting it to the previous
+ * owner left a case permanently stranded: a run that snapshotted the old owner can insert a case
+ * AFTER the backfill has already scanned, so the row ends up PANEL-sourced on somebody who no longer
+ * owns the panel — and a later re-save could not reach it, because by then the previous owner IS the
+ * current owner. A PANEL-sourced row belongs to whoever owns the panel now; that is what the source
+ * means. Operator-owned rows are excluded exactly as before, so the protection is unchanged.
  *
  * **Everything else stays put**, and that is the entire reason `assignment_source` exists (ADR-080
  * d1). Without it the only available test is "assignee == the previous panel owner" — which is also
@@ -73,10 +79,12 @@ export function planPanelBackfill(
     if (!active.has(c.status)) continue;
     if (sameAccount(c.assignee, newOwner)) continue;
     const unowned = c.assignee == null;
-    const panelOwned =
-      c.assignmentSource === "PANEL" && previousOwner != null && sameAccount(c.assignee, previousOwner);
+    const panelOwned = c.assignmentSource === "PANEL";
     if (!unowned && !panelOwned) continue;
-    plan.push({ id: c.id, expectedAssignee: c.assignee ?? null });
+    // BOTH columns the decision read, so a write that changed only the provenance cannot slip
+    // through: an operator re-asserting the same assignee makes the row theirs, and this row must
+    // then not move (ADR-080 d1).
+    plan.push({ id: c.id, expectedAssignee: c.assignee ?? null, expectedSource: c.assignmentSource });
   }
   return plan;
 }
@@ -125,28 +133,37 @@ export interface PanelChangeResult {
 }
 
 /**
- * Every ACTIVE case belonging to a set of subjects, read to exhaustion.
+ * Every ACTIVE case belonging to a set of subjects.
  *
- * Two loops, for two different limits: the subject ids are chunked so one statement never carries a
- * whole practice's worth of bind parameters, and each chunk is then PAGED because `listCases` answers
- * 50 rows unless told otherwise. Nothing writes during this pass, so offset paging is stable.
+ * **One UNBOUNDED read per chunk, deliberately — not offset paging.** `listCases` answers 50 rows
+ * unless told otherwise, so a naive read would move the first fifty cases of a panel and leave the
+ * rest, which from outside is indistinguishable from a panel that only had fifty. Paging looks like
+ * the fix and is not: the ordering is `updated_at DESC`, which a concurrent run or operator MUTATES,
+ * so a row can move ahead of the offset and be read twice (two `CASE_ASSIGNED` events for one change)
+ * or fall behind it and never be read at all. The work list's own loader passes
+ * `Number.MAX_SAFE_INTEGER` for the same reason (`worklist-read-model.ts`): a set that is post-filtered
+ * in JavaScript must be loaded whole.
+ *
+ * The set is bounded by construction — a chunk is at most 900 subjects and a subject has at most one
+ * active case per routed measure — so "unbounded" here is a few thousand rows, not a practice.
+ *
+ * Ids are de-duplicated across chunks as a second line of defence: a case counted twice would be
+ * audited twice for one move, and would make `backfillPlanned` describe a different set than
+ * `backfilled`.
  */
 async function activeCasesForSubjects(cases: CaseStore, subjectIds: readonly string[]): Promise<CaseRecord[]> {
-  const found: CaseRecord[] = [];
+  const byId = new Map<string, CaseRecord>();
   for (let i = 0; i < subjectIds.length; i += SUBJECT_CHUNK) {
     const chunk = subjectIds.slice(i, i + SUBJECT_CHUNK);
-    for (let offset = 0; ; offset += CASE_PAGE) {
-      const page = await cases.listCases({
-        employeeIds: chunk,
-        statuses: [...ACTIVE_CASE_STATUSES],
-        limit: CASE_PAGE,
-        offset,
-      });
-      found.push(...page);
-      if (page.length < CASE_PAGE) break;
-    }
+    const rows = await cases.listCases({
+      employeeIds: chunk,
+      statuses: [...ACTIVE_CASE_STATUSES],
+      limit: Number.MAX_SAFE_INTEGER,
+      offset: 0,
+    });
+    for (const row of rows) byId.set(row.id, row);
   }
-  return found;
+  return [...byId.values()];
 }
 
 /**

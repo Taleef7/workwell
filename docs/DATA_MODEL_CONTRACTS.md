@@ -73,7 +73,12 @@ SQLite floor and the Pg ceiling read the current row and apply the shared pure `
   clearing an assignee clears the source with it. A NULL source on a row that HAS an assignee is read
   as operator-owned, so a panel backfill never moves work a person placed by hand. The rule that
   decides what a panel change may move is the pure `planPanelBackfill` (`case/panel-assignment.ts`):
-  unowned cases, and PANEL-sourced cases still on the previous owner. Nothing else.
+  unowned cases, and every PANEL-sourced case — whoever it currently names, since a PANEL-sourced row
+  belongs to whoever owns the panel now. Nothing else moves.
+  **The compare-and-set guards BOTH columns the rule read.** `CaseAssignExpectation.expectedSource`
+  carries the provenance the caller saw; without it an operator re-asserting the same assignee (which
+  makes the row theirs) would be overwritten by a backfill that still matched on the assignee alone.
+  A change of source alone is a real change, so an operator can claim a case the panel already placed.
 - **An OPERATOR's `next_action` is not overwritten by a run that learned nothing new** (ADR-076 d2).
   `cases.next_action_source` records who wrote it: `patchCase` is the operator surface (escalate,
   manual resolve, outreach) and marks `OPERATOR`; `upsertFromOutcome` marks `SYSTEM`. **Rerun-to-verify
