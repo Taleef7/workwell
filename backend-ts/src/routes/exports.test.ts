@@ -97,7 +97,15 @@ test("GET /api/exports/runs?format=csv → run summary CSV", async () => {
 
 test("GET /api/exports/outcomes?runId carries derived why_flagged columns", async () => {
   const lines = await text(`/api/exports/outcomes?format=csv&runId=${runId}`);
-  assert.match(lines[0]!, /^outcomeId,runId,employeeExternalId,employeeName,.*waiverStatus,evaluatedAt$/);
+  // The WHOLE header, exactly, rather than a regex with `.*` in the middle: DATA_MODEL_CONTRACTS §6.2
+  // is a positional contract, so a column INSERTED mid-row would have satisfied the old pattern while
+  // silently shifting every consumer reading by index. `providerId,payer` are APPENDED (MM-2).
+  assert.equal(
+    lines[0],
+    "outcomeId,runId,employeeExternalId,employeeName,role,site,measureName,measureVersion,evaluationPeriod," +
+      "status,lastExamDate,complianceWindowDays,daysOverdue,roleEligible,siteEligible,waiverStatus,evaluatedAt," +
+      "providerId,payer",
+  );
   const row = lines.find((l) => l.includes("emp-006"))!;
   assert.ok(row, "the outcome row is present");
   // OVERDUE audiogram: lastExamDate 2025-04-19, window 365, daysOverdue 420-365=55, waiver none
@@ -108,7 +116,13 @@ test("GET /api/exports/outcomes?runId carries derived why_flagged columns", asyn
 
 test("GET /api/exports/cases carries the case + latestOutreachDeliveryStatus column", async () => {
   const lines = await text("/api/exports/cases?format=csv&status=open");
-  assert.match(lines[0]!, /^caseId,employeeExternalId,.*closedAt,latestOutreachDeliveryStatus$/);
+  // Exact, for the same reason as §6.2 above.
+  assert.equal(
+    lines[0],
+    "caseId,employeeExternalId,employeeName,role,site,measureName,measureVersion,evaluationPeriod,status," +
+      "priority,assignee,currentOutcomeStatus,nextAction,lastRunId,createdAt,updatedAt,closedAt," +
+      "latestOutreachDeliveryStatus,providerId,payer",
+  );
   assert.ok(lines.some((l) => l.includes("Omar Siddiq") && l.includes("OVERDUE")));
 });
 

@@ -6,7 +6,7 @@
  */
 import type { CloudDatabase } from "@mieweb/cloud";
 import type { CaseRecord, CaseQuery, CaseStore, CasePatch, UpsertCaseInput, UpsertedCase } from "../case-store.ts";
-import { planCaseUpsert, planNextAction, priorityFor, nextActionFor } from "../../case/case-logic.ts";
+import { ACTIVE_CASE_STATUSES, planCaseUpsert, planNextAction, priorityFor, nextActionFor } from "../../case/case-logic.ts";
 
 interface CaseRow {
   id: string;
@@ -277,6 +277,38 @@ export class SqliteCaseStore implements CaseStore {
     return row ? toRecord(row) : null;
   }
 
+  async getCases(ids: readonly string[]): Promise<CaseRecord[]> {
+    if (ids.length === 0) return [];
+    const { results } = await this.db
+      .prepare(`SELECT ${COLS} FROM cases WHERE id IN (${ids.map(() => "?").join(", ")})`)
+      .bind(...ids)
+      .all<CaseRow>();
+    return (results ?? []).map(toRecord);
+  }
+
+  async assignCases(ids: readonly string[], assignee: string | null): Promise<string[]> {
+    if (ids.length === 0) return [];
+    // ONE statement with RETURNING, mirroring the Postgres ceiling: the UPDATE selects its own rows
+    // and reports which it changed. A predict-then-update pair would let a row change in between and
+    // be reported as assigned when it was skipped — the two stores must answer identically.
+    //
+    // `assignee IS NOT ?` is SQLite's NULL-SAFE inequality (the counterpart of Postgres's
+    // `IS DISTINCT FROM`). Plain `<>` would be NULL for an unassigned row, which never matches — and
+    // assigning a case that is currently unassigned is the most common thing this is asked to do.
+    const active = [...ACTIVE_CASE_STATUSES];
+    const { results } = await this.db
+      .prepare(
+        `UPDATE cases SET assignee = ?, updated_at = ?
+          WHERE id IN (${ids.map(() => "?").join(", ")})
+            AND status IN (${active.map(() => "?").join(", ")})
+            AND assignee IS NOT ?
+        RETURNING id`,
+      )
+      .bind(assignee, new Date().toISOString(), ...ids, ...active, assignee)
+      .all<{ id: string }>();
+    return (results ?? []).map((r) => r.id);
+  }
+
   async patchCase(id: string, patch: CasePatch): Promise<CaseRecord | null> {
     const sets: string[] = [];
     const binds: unknown[] = [];
@@ -327,6 +359,17 @@ export class SqliteCaseStore implements CaseStore {
     if (query.employeeId) {
       where.push("employee_id = ?");
       binds.push(query.employeeId);
+    }
+    if (query.employeeIds !== undefined) {
+      // An EMPTY set is "nobody matches", not "no filter" — `IN ()` is a syntax error, so it becomes a
+      // predicate that is false for every row. A panel with no patients must return no cases; falling
+      // through to unfiltered would serve the whole practice under that panel's heading.
+      if (query.employeeIds.length === 0) {
+        where.push("1 = 0");
+      } else {
+        where.push(`employee_id IN (${query.employeeIds.map(() => "?").join(", ")})`);
+        binds.push(...query.employeeIds);
+      }
     }
     if (query.measureId) {
       where.push("measure_id = ?");

@@ -31,6 +31,18 @@ export interface EmployeeProfile {
    * carried it. Optional and additive: no existing row's identity changes.
    */
   sex?: "F" | "M";
+  /**
+   * Primary payer as a Source of Payment Typology code (`"1"`, `"11"`, `"2"`, `"5"` …) — the
+   * vocabulary `SDE Payer` already reads, so the filter and the measure's own supplemental data agree
+   * about what a payer is. Names come from `payer-display.ts`; the code is what is stored and matched.
+   *
+   * Present on the patient corpus and absent everywhere else: the occupational directory has never
+   * recorded one, and the LIVE WebChart directory still discards Coverage (extracting a primary
+   * coverage is a named follow-up with #533's ingest work). Optional and additive, so no existing
+   * row's identity changes and a deployment without payers filters to nothing rather than to
+   * everything — the same rule `sex` follows.
+   */
+  payer?: string;
 }
 
 export interface Provider {

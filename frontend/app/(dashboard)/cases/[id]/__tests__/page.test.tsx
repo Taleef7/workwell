@@ -518,4 +518,44 @@ describe("CaseDetailPage crosswalk identity rendering", () => {
     });
     expect(screen.queryByText(/Written by a person/i)).not.toBeInTheDocument();
   });
+
+  /** The audit-timeline panel, so "Created" here cannot match the case's own Created date elsewhere. */
+  function timelinePanel(): HTMLElement {
+    return screen.getByText("Audit timeline").closest("div")!.parentElement as HTMLElement;
+  }
+
+  it("opens with the audit timeline collapsed to the newest entry, and nothing is removed", async () => {
+    // The staff ask: on a case with a long history the ledger pushed the next action and the outreach
+    // controls below the fold. Collapsed is a RENDERING choice — every state change is still audited
+    // and still reachable, which is why the control counts what it is hiding.
+    withCaseOverrides({
+      timeline: [
+        { eventType: "CASE_ASSIGNED", occurredAt: "2026-03-03T00:00:00.000Z", actor: "cm@workwell.dev", payload: {} },
+        { eventType: "OUTREACH_SENT", occurredAt: "2026-02-02T00:00:00.000Z", actor: "cm@workwell.dev", payload: {} },
+        { eventType: "CASE_CREATED", occurredAt: "2026-01-01T00:00:00.000Z", actor: "system", payload: {} },
+      ],
+    });
+    render(<CaseDetailPage />);
+
+    const toggle = await screen.findByRole("button", { name: /show history \(2 more\)/i });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    // The newest entry stays visible, so the page still says when something last happened.
+    expect(within(timelinePanel()).getByText("Assigned")).toBeInTheDocument();
+    expect(within(timelinePanel()).queryByText("Created")).not.toBeInTheDocument();
+    expect(within(timelinePanel()).queryByText("Outreach Sent")).not.toBeInTheDocument();
+
+    await userEvent.click(toggle);
+    expect(await within(timelinePanel()).findByText("Created")).toBeInTheDocument();
+    expect(within(timelinePanel()).getByText("Outreach Sent")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /hide history/i })).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("offers no history control when there is nothing to hide", async () => {
+    withCaseOverrides({
+      timeline: [{ eventType: "CASE_CREATED", occurredAt: "2026-01-01T00:00:00.000Z", actor: "system", payload: {} }],
+    });
+    render(<CaseDetailPage />);
+    await waitFor(() => expect(within(timelinePanel()).getByText("Created")).toBeInTheDocument());
+    expect(screen.queryByRole("button", { name: /show history/i })).not.toBeInTheDocument();
+  });
 });

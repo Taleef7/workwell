@@ -28,6 +28,8 @@ import { handlePrograms } from "./routes/programs.ts";
 import { handleHierarchy } from "./routes/hierarchy.ts";
 import { handleTenants } from "./routes/tenants.ts";
 import { handleProviders } from "./routes/providers.ts";
+import { handlePayers } from "./routes/payers.ts";
+import { handleWorklist } from "./routes/worklist.ts";
 import { handleQuality } from "./routes/quality.ts";
 import { handleIdentity } from "./routes/identity.ts";
 import { handleCompliance } from "./routes/compliance.ts";
@@ -270,6 +272,14 @@ async function route(req: Request, env: Env, ctx: CloudExecutionContext): Promis
   if (runsResponse) return runsResponse;
 
   // Cases — worklist + detail + actions over the cases upserted from run outcomes (#107).
+  // Patient-first work list + bulk assign (MM-2). Registered BEFORE the cases route because
+  // `/api/cases/bulk-assign` sits under a path that route owns: it falls through today (none of its
+  // case-action patterns match a single trailing segment), but that is a property of the patterns
+  // rather than a guarantee, and the next `/api/cases/*` action added there would capture this path
+  // silently. Ownership is declared here instead of depending on that.
+  const worklistResponse = await handleWorklist(req, env as never, actor);
+  if (worklistResponse) return worklistResponse;
+
   const casesResponse = await handleCases(req, env, actor);
   if (casesResponse) return casesResponse;
 
@@ -295,6 +305,11 @@ async function route(req: Request, env: Env, ctx: CloudExecutionContext): Promis
 
   const providersResponse = await handleProviders(req);
   if (providersResponse) return providersResponse;
+
+  // Payers — the insurance list the panel filters are populated from (MM-2). Profile-scoped and
+  // empty on a deployment whose roster records no payer.
+  const payersResponse = await handlePayers(req);
+  if (payersResponse) return payersResponse;
 
   // Quality-over-time history — materialized snapshot time-series read (#E16 PR-2).
   const qualityResponse = await handleQuality(req, env);

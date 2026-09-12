@@ -126,10 +126,10 @@ test("an unrecognised filter token is REFUSED — never dropped into the unfilte
     (error: unknown) => error instanceof SubjectFilterError && error.parameter === "sex" && /F, M/.test(error.message),
   );
   // A blank token is an ABSENT filter, not a bad one — a cleared select sends `ageBand=`.
-  assert.deepEqual(subjectFiltersFromQuery(new URLSearchParams("ageBand=&sex=&providerId=")), { providerId: null, ageBand: null, sex: null });
+  assert.deepEqual(subjectFiltersFromQuery(new URLSearchParams("ageBand=&sex=&providerId=&payer=")), { providerId: null, ageBand: null, sex: null, payer: null });
 
   const good = subjectFiltersFromQuery(new URLSearchParams("ageBand=65%2B&sex=f&providerId=%20maui-prov-003%20"));
-  assert.deepEqual(good, { providerId: "maui-prov-003", ageBand: "65+", sex: "F" }, "trimmed, and sex is case-insensitive");
+  assert.deepEqual(good, { providerId: "maui-prov-003", ageBand: "65+", sex: "F", payer: null }, "trimmed, and sex is case-insensitive");
   // `?ageBand=65+` typed literally decodes to `65 ` (a `+` is a space in a query string). That is a real
   // band spelled the way every hand-built URL spells it, so it is accepted — the refusal is for tokens
   // that name no band, not for the encoding footgun.
@@ -142,4 +142,58 @@ test("an unrecognised filter token is REFUSED — never dropped into the unfilte
   const body = subjectFilterErrorBody(new SubjectFilterError("ageBand", "old"));
   assert.equal(body.error, "invalid_request");
   assert.equal(body.parameter, "ageBand");
+});
+
+test("the payer filter matches an exact code, and a subject who records no payer matches nothing", () => {
+  const withPayer = ROSTER.filter((e) => e.payer);
+  assert.ok(withPayer.length > 0, "the corpus directory carries payers — otherwise the rest proves nothing");
+
+  const rows = ROSTER.filter((e) => matchesSubjectFilters(e, { payer: "5" }, NOW));
+  assert.ok(rows.length > 0);
+  for (const e of rows) assert.equal(e.payer, "5");
+  assert.ok(rows.length < ROSTER.length, "and it excludes — a filter matching everyone is the failure this suite exists for");
+
+  // `1` is Medicare and `11` is its managed-care child. Exact comparison, never a prefix: a filter that
+  // treated `1` as a prefix would sweep Medicare Advantage into a list headed "Medicare FFS".
+  for (const e of ROSTER.filter((e) => matchesSubjectFilters(e, { payer: "1" }, NOW))) assert.equal(e.payer, "1");
+
+  // No payer recorded ⇒ matches NOTHING, the same rule `sex` follows on the occupational roster. The
+  // opposite (an unfiltered list under a filtered heading) is the invisible wrong answer.
+  const noPayer: EmployeeProfile = { externalId: "x", name: "X", role: "Patient", site: "Kahului", providerId: "maui-prov-001", tenantId: "maui" };
+  assert.equal(matchesSubjectFilters(noPayer, { payer: "5" }, NOW), false);
+  assert.equal(matchesSubjectFilters(noPayer, {}, NOW), true, "but an absent filter is not a constraint");
+
+  // An unknown code is ACCEPTED and matches nobody — payer terminology is open, so refusing it would
+  // mean refusing a real Coverage code our display table has not been taught.
+  assert.equal(ROSTER.filter((e) => matchesSubjectFilters(e, { payer: "9999" }, NOW)).length, 0);
+});
+
+test("the payer filter is a SET, because Medicare is two codes and one of them is 2,900 patients", () => {
+  // The finding that motivated the set: on the pilot corpus Medicare is `1` (FFS) plus `11` (Advantage).
+  // A single-valued filter lets a staff member ask for Medicare, receive only the `1` rows, and never
+  // learn the rest were withheld under a heading that claims to contain them — ADR-079's shape.
+  const ffs = ROSTER.filter((e) => matchesSubjectFilters(e, { payer: ["1"] }, NOW));
+  const advantage = ROSTER.filter((e) => matchesSubjectFilters(e, { payer: ["11"] }, NOW));
+  const both = ROSTER.filter((e) => matchesSubjectFilters(e, { payer: ["1", "11"] }, NOW));
+  assert.ok(ffs.length > 0 && advantage.length > 0, "both codes are present in the corpus");
+  assert.equal(both.length, ffs.length + advantage.length, "the set is the union, and the two are disjoint");
+  assert.ok(both.length > ffs.length, "so asking for Medicare as a set returns strictly more than asking for `1`");
+
+  // The OR is within the payer filter only; it still ANDs against the others.
+  const provider = ffs[0]!.providerId;
+  const narrowed = ROSTER.filter((e) => matchesSubjectFilters(e, { payer: ["1", "11"], providerId: provider }, NOW));
+  assert.ok(narrowed.length < both.length);
+  for (const e of narrowed) {
+    assert.equal(e.providerId, provider);
+    assert.ok(e.payer === "1" || e.payer === "11");
+  }
+});
+
+test("payer arrives as a repeated parameter or a comma-joined one, and both mean the same set", () => {
+  assert.deepEqual(subjectFiltersFromQuery(new URLSearchParams("payer=1&payer=11")).payer, ["1", "11"]);
+  assert.deepEqual(subjectFiltersFromQuery(new URLSearchParams("payer=1,11")).payer, ["1", "11"]);
+  assert.deepEqual(subjectFiltersFromQuery(new URLSearchParams("payer=%201%20,,11&payer=1")).payer, ["1", "11"], "trimmed, de-duplicated, empties dropped");
+  assert.equal(subjectFiltersFromQuery(new URLSearchParams("payer=")).payer, null, "a cleared multi-select is an absent filter, not a bad one");
+  // Open terminology: unlike ageBand and sex, an unrecognised payer code is NOT a 400.
+  assert.deepEqual(subjectFiltersFromQuery(new URLSearchParams("payer=zzz")).payer, ["zzz"]);
 });

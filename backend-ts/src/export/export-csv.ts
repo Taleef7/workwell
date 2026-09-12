@@ -10,7 +10,7 @@ import { toRunSummaryFromCounts } from "../run/read-models.ts";
 import { DEPLOYMENT_PROFILE, DIRECTORY, employeeById, profileSubjectMatcher, subjectNoun } from "../config/deployment-profile.ts";
 import { directoryForRows } from "../engine/ingress/webchart/live-directory.ts";
 import { isWebChartConfigured, type DataSourceEnv } from "../engine/ingress/data-source.ts";
-import { matchesSubjectFilters, type SubjectFilters } from "../compliance/subject-filters.ts";
+import { hasActiveSubjectFilters, matchesSubjectFilters, type SubjectFilters } from "../compliance/subject-filters.ts";
 import type { EmployeeProfile } from "../engine/synthetic/employee-catalog.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
@@ -80,6 +80,9 @@ const OUTCOME_HEADERS = [
   "outcomeId", "runId", ...subjectHeaders(DEPLOYMENT_PROFILE.subjectTerm), "role", "site", "measureName", "measureVersion",
   "evaluationPeriod", "status", outcomeDateHeader, "complianceWindowDays", "daysOverdue", "roleEligible", "siteEligible",
   outcomeExclusionHeader, "evaluatedAt",
+  // APPENDED (MM-2), never inserted, so a consumer reading by position keeps every column it had.
+  // The two panel facts the practice filters by; empty where the directory records none.
+  "providerId", "payer",
 ] as const;
 
 interface ExprResult {
@@ -138,6 +141,7 @@ function outcomeRowCells(
     o.id, o.runId, o.subjectId, emp?.name ?? o.subjectId, emp?.role ?? "—", emp?.site ?? "—",
     measureName(o.measureId), measureVersionFor(o.measureId, o.evidence), o.evaluationPeriod, o.status,
     wf.lastExamDate, wf.complianceWindowDays, wf.daysOverdue, true, true, wf.waiverStatus, o.evaluatedAt,
+    emp?.providerId ?? "", emp?.payer ?? "",
   ];
 }
 
@@ -251,6 +255,8 @@ const CASE_HEADERS = [
   "caseId", ...subjectHeaders(DEPLOYMENT_PROFILE.subjectTerm), "role", "site", "measureName", "measureVersion", "evaluationPeriod",
   "status", "priority", "assignee", "currentOutcomeStatus", "nextAction", "lastRunId", "createdAt", "updatedAt",
   "closedAt", "latestOutreachDeliveryStatus",
+  // APPENDED (MM-2), same rule as §6.2 above.
+  "providerId", "payer",
 ] as const;
 
 export interface CaseExportFilter extends CaseQuery, SubjectFilters {
@@ -279,7 +285,7 @@ export async function casesCsv(
     const site = filter.site.toLowerCase();
     cases = cases.filter((c) => (directory.employeeById(c.employeeId)?.site ?? "").toLowerCase() === site);
   }
-  if (filter.providerId || filter.ageBand || filter.sex) {
+  if (hasActiveSubjectFilters(filter)) {
     cases = cases.filter((c) => matchesSubjectFilters(directory.employeeById(c.employeeId), filter));
   }
   const rows = await Promise.all(
@@ -293,6 +299,7 @@ export async function casesCsv(
         // `lastRunId`, and the outcomes CSV is the one that answers "what computed this" per row.
         measureName(c.measureId), authoredVersion(c.measureId), c.evaluationPeriod, c.status, c.priority, c.assignee,
         c.currentOutcomeStatus, c.nextAction, c.lastRunId, c.createdAt, c.updatedAt, c.closedAt, latest,
+        emp?.providerId ?? "", emp?.payer ?? "",
       ];
     }),
   );

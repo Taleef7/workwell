@@ -996,6 +996,79 @@ export function caseStoreContract(label: string, freshStore: () => Promise<CaseS
       outcomeStatus,
     });
 
+  test(`[${label}] getCases reads many by id; assignCases is set-based and reports only what CHANGED`, async () => {
+    const store = await freshStore();
+    const a = (await upsert(store, "OVERDUE", { subjectId: "emp-001" }))!;
+    const b = (await upsert(store, "OVERDUE", { subjectId: "emp-002" }))!;
+    const c = (await upsert(store, "OVERDUE", { subjectId: "emp-003" }))!;
+
+    const read = await store.getCases([a.id, c.id, crypto.randomUUID()]);
+    assert.deepEqual(read.map((r) => r.id).sort(), [a.id, c.id].sort(), "unknown ids are absent, not an error");
+    assert.deepEqual(await store.getCases([]), []);
+
+    // Assigning UNASSIGNED rows is the common case, and the one a plain `<>` comparison silently
+    // breaks: `NULL <> 'x'` is NULL, so every unassigned row would be skipped and the caller would
+    // report "0 assigned" over cases it had just been asked to assign.
+    const first = await store.assignCases([a.id, b.id], "cm@workwell.dev");
+    assert.deepEqual(first.sort(), [a.id, b.id].sort());
+    assert.equal((await store.getCase(a.id))?.assignee, "cm@workwell.dev");
+
+    // Re-assigning the SAME value changes nothing and reports nothing — so the caller writes no
+    // audit event for a no-op, which is what keeps the ledger free of "assigned to the person it was
+    // already assigned to".
+    assert.deepEqual(await store.assignCases([a.id, b.id], "cm@workwell.dev"), []);
+
+    // A mixed batch reports exactly the subset that moved.
+    assert.deepEqual(await store.assignCases([a.id, c.id], "cm@workwell.dev"), [c.id]);
+
+    // Clearing is a change too, and back to NULL must be reported once and then not again.
+    assert.deepEqual((await store.assignCases([a.id], null)), [a.id]);
+    assert.equal((await store.getCase(a.id))?.assignee, null);
+    assert.deepEqual(await store.assignCases([a.id], null), [], "NULL → NULL is not a change");
+
+    // Only ACTIVE cases are touched: a closed case is not silently reassigned.
+    await store.patchCase(c.id, { status: "RESOLVED" });
+    assert.deepEqual(await store.assignCases([c.id], "someone.else@workwell.dev"), []);
+    assert.equal((await store.getCase(c.id))?.assignee, "cm@workwell.dev", "the closed case kept its assignee");
+
+    assert.deepEqual(await store.assignCases([], "cm@workwell.dev"), []);
+    assert.deepEqual(await store.assignCases([crypto.randomUUID()], "cm@workwell.dev"), [], "an unknown id is not an error");
+  });
+
+  test(`[${label}] listCases({ employeeIds }) is the panel pre-filter — and an EMPTY set matches NOBODY`, async () => {
+    // The panel filters are DIRECTORY joins (there is no patients table in Postgres), so the caller
+    // resolves the panel to subject ids and passes them here rather than loading the whole practice.
+    const store = await freshStore();
+    for (const subjectId of ["emp-001", "emp-002", "emp-003"]) await upsert(store, "OVERDUE", { subjectId });
+    assert.equal((await store.listCases({ limit: 100 })).length, 3);
+
+    const two = await store.listCases({ employeeIds: ["emp-001", "emp-003"], limit: 100 });
+    assert.deepEqual(two.map((c) => c.employeeId).sort(), ["emp-001", "emp-003"]);
+    assert.deepEqual((await store.listCases({ employeeIds: ["emp-002"], limit: 100 })).map((c) => c.employeeId), ["emp-002"]);
+    assert.deepEqual(await store.listCases({ employeeIds: ["emp-404"], limit: 100 }), [], "an id nobody has matches nothing");
+
+    // THE case this exists for: an empty set is the constraint "no subject matches", not an absent
+    // filter. A PCP with no patients must return no cases; falling through to unfiltered would serve
+    // the whole practice under that panel's heading. The two stores reach it by different SQL —
+    // Postgres `= ANY($n)`, SQLite a `1 = 0` predicate because `IN ()` is a syntax error — so this
+    // assertion is the only thing that holds them to the same answer.
+    assert.deepEqual(await store.listCases({ employeeIds: [], limit: 100 }), []);
+
+    // It COMPOSES with the other predicates rather than replacing them.
+    assert.deepEqual(
+      (await store.listCases({ employeeIds: ["emp-001", "emp-002"], statuses: ["OPEN"], limit: 100 })).map((c) => c.employeeId).sort(),
+      ["emp-001", "emp-002"],
+    );
+    assert.deepEqual(await store.listCases({ employeeIds: ["emp-001"], statuses: ["RESOLVED"], limit: 100 }), []);
+    assert.deepEqual(
+      (await store.listCases({ employeeIds: ["emp-001", "emp-002"], employeeId: "emp-002", limit: 100 })).map((c) => c.employeeId),
+      ["emp-002"],
+      "employeeId and employeeIds both apply",
+    );
+    // Absent is still absent: omitting it is not the same as passing [].
+    assert.equal((await store.listCases({ limit: 100 })).length, 3);
+  });
+
   test(`[${label}] an out-of-population outcome opens no case, closes an active one under OUT_OF_POPULATION once, and a later gap reopens it (ADR-078)`, async () => {
     const store = await freshStore();
     const outside = (over: Partial<{ subjectId: string }> = {}) =>

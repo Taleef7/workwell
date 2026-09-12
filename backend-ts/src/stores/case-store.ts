@@ -61,6 +61,20 @@ export interface CaseQuery {
    * scaling with the tenant's case count rather than with the one patient being looked at.
    */
   employeeId?: string;
+  /**
+   * A SET of subjects — the panel pre-filter (MM-2).
+   *
+   * The panel filters (PCP, payer, site) are DIRECTORY joins: there is no patients table in Postgres,
+   * so they cannot become SQL predicates. Without this, working a 150-case panel meant loading every
+   * case in the practice and discarding ~99% of them in JavaScript. The caller resolves the matching
+   * subject ids from the in-memory directory FIRST and passes them here, so the database returns the
+   * panel instead of the practice.
+   *
+   * An EMPTY array is a real constraint meaning "no subject matches", not an absent filter — a panel
+   * whose PCP has nobody must return nothing rather than everybody. `undefined` is the absent filter.
+   * Composes with `employeeId` (both apply) rather than replacing it.
+   */
+  employeeIds?: readonly string[];
   measureId?: string;
   priority?: string;
   assignee?: string;
@@ -134,6 +148,32 @@ export interface CaseStore {
    */
   upsertFromOutcomes(inputs: UpsertCaseInput[]): Promise<(UpsertedCase | null)[]>;
   getCase(id: string): Promise<CaseRecord | null>;
+  /**
+   * Many cases by id, in ONE query. Order is not guaranteed; ids that do not exist are simply absent,
+   * so the caller can report which of the ids it asked for were missing.
+   *
+   * Bulk assign needs this to keep the event-before-patch rule (`case-actions.ts`): it must know which
+   * rows WOULD change before it changes them, and doing that with N `getCase` calls is N round trips
+   * on a set the UI caps at 500.
+   */
+  getCases(ids: readonly string[]): Promise<CaseRecord[]>;
+  /**
+   * Assign many cases in one statement, returning the ids that actually CHANGED.
+   *
+   * Set-based on purpose. The per-case `patchCase` path is a round trip each, and the panel backfill
+   * and the work list's "assign these 200 patients' gaps" both hand it hundreds at once — enough to
+   * exceed a worker deadline on Neon.
+   *
+   * The store applies the same conditions the caller used to predict the change, so a row someone else
+   * touched in between is silently skipped rather than overwritten: the assignee must actually differ,
+   * and the case must still be ACTIVE. That is why the return value is the ids changed rather than a
+   * count — the caller audits exactly those.
+   *
+   * There is deliberately NO provenance argument here yet. `cases.assignment_source` is PR 2's
+   * owner-written DDL; writing to a column that does not exist would fail, and accepting an argument
+   * this method cannot honour would be worse — a parameter that reads as recorded and is discarded.
+   */
+  assignCases(ids: readonly string[], assignee: string | null): Promise<string[]>;
   listCases(query: CaseQuery): Promise<CaseRecord[]>;
   /** Patch mutable fields (always bumps updated_at); returns the updated row or null. */
   patchCase(id: string, patch: CasePatch): Promise<CaseRecord | null>;

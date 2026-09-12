@@ -58,6 +58,11 @@ type MeasureOption = {
 
 type CaseStatusFilter = "open" | "closed" | "excluded" | "all";
 
+/** The bulk-assign contract (`POST /api/cases/bulk-assign`). */
+type BulkAssignRequest = { assignee: string | null; caseIds: string[] };
+/** What actually MOVED, which is not the same as what was asked for. */
+type BulkAssignResult = { assigned: number; unchanged: number; missing: string[]; closed: string[] };
+
 const PRIORITY_BADGE_VARIANT: Record<string, "danger" | "warning" | "secondary"> = {
   HIGH: "danger",
   MEDIUM: "warning",
@@ -411,15 +416,26 @@ export default function CasesPage() {
     setBulkActing("assign");
     setError(null);
     try {
-      const assigneeQuery = unassign ? "" : `?assignee=${encodeURIComponent(bulkAssignee)}`;
-      for (const caseId of selectedCaseIds) {
-        await api.post(`/api/cases/${caseId}/assign${assigneeQuery}`);
-      }
+      // ONE request, not one per case. The loop this replaces issued N sequential round trips and had
+      // no transaction around them, so a failure at case 40 of 200 left 39 assigned, 161 untouched and
+      // a toast that said nothing about either. The endpoint reports exactly what moved.
+      const result = await api.post<BulkAssignRequest, BulkAssignResult>(
+        "/api/cases/bulk-assign",
+        { assignee: unassign ? null : bulkAssignee, caseIds: selectedCaseIds },
+      );
       await loadCases();
+      const moved = result?.assigned ?? 0;
+      const noun = `case${moved === 1 ? "" : "s"}`;
+      // The toast reports what HAPPENED rather than what was asked for. "200 assigned" over 40 moved
+      // rows is the count-not-describing-the-list defect in its smallest form.
+      const skipped = (result?.closed?.length ?? 0) + (result?.missing?.length ?? 0);
+      const tail = skipped > 0 ? ` (${skipped} skipped — already closed or no longer present)` : "";
       emitToast(
-        unassign
-          ? `${selectedCaseIds.length} case${selectedCaseIds.length === 1 ? "" : "s"} unassigned`
-          : `${selectedCaseIds.length} case${selectedCaseIds.length === 1 ? "" : "s"} assigned to ${bulkAssignee}`,
+        moved === 0
+          ? `No cases changed${tail || " — they were already assigned that way"}`
+          : unassign
+            ? `${moved} ${noun} unassigned${tail}`
+            : `${moved} ${noun} assigned to ${bulkAssignee}${tail}`,
       );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");

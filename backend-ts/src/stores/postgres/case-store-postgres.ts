@@ -7,7 +7,7 @@
 import { isUuid, type PgPool } from "./pg-database.ts";
 import { SPIKE_SCHEMA } from "./schema-pg.ts";
 import type { CaseRecord, CaseQuery, CaseStore, CasePatch, UpsertCaseInput, UpsertedCase } from "../case-store.ts";
-import { planCaseUpsert, planNextAction, priorityFor, nextActionFor } from "../../case/case-logic.ts";
+import { ACTIVE_CASE_STATUSES, planCaseUpsert, planNextAction, priorityFor, nextActionFor } from "../../case/case-logic.ts";
 
 interface CaseRow {
   id: string;
@@ -451,6 +451,35 @@ export class PgCaseStore implements CaseStore {
     return rows[0] ? toRecord(rows[0]) : null;
   }
 
+  async getCases(ids: readonly string[]): Promise<CaseRecord[]> {
+    const valid = ids.filter(isUuid);
+    if (valid.length === 0) return [];
+    const { rows } = await this.pool.query<CaseRow>(`SELECT ${COLS} FROM ${T} WHERE id = ANY($1::uuid[])`, [valid]);
+    return rows.map(toRecord);
+  }
+
+  async assignCases(ids: readonly string[], assignee: string | null): Promise<string[]> {
+    // A non-uuid id cannot be a case here and would abort the whole statement with a cast error, so it
+    // is dropped rather than allowed to fail the batch — the caller reports it as missing either way.
+    const valid = ids.filter(isUuid);
+    if (valid.length === 0) return [];
+    // ONE statement: the UPDATE selects its own rows and reports which it changed. The conditions are
+    // the same ones the caller used to predict the change, so a row someone else reassigned in between
+    // stops matching and is skipped rather than overwritten. `IS DISTINCT FROM` rather than `<>`
+    // because `assignee` is nullable and `NULL <> 'x'` is NULL — an unassigned row would never match,
+    // and assigning an unassigned case is the single most common thing this is asked to do.
+    const { rows } = await this.pool.query<{ id: string }>(
+      `UPDATE ${T}
+          SET assignee = $2, updated_at = NOW()
+        WHERE id = ANY($1::uuid[])
+          AND status = ANY($3::text[])
+          AND assignee IS DISTINCT FROM $2
+        RETURNING id`,
+      [valid, assignee, [...ACTIVE_CASE_STATUSES]],
+    );
+    return rows.map((r) => r.id);
+  }
+
   async patchCase(id: string, patch: CasePatch): Promise<CaseRecord | null> {
     if (!isUuid(id)) return null;
     const sets: string[] = [];
@@ -497,6 +526,22 @@ export class PgCaseStore implements CaseStore {
     if (query.employeeId) {
       where.push(`employee_id = $${binds.length + 1}`);
       binds.push(query.employeeId);
+    }
+    if (query.employeeIds !== undefined) {
+      // `= ANY($n)` takes the set as ONE bind — a generated `IN ($1,...,$n)` would blow past
+      // Postgres's 65,535-parameter limit on a large panel, and re-plans per distinct list length.
+      // An EMPTY set is "nobody matches", not "no filter": `= ANY('{}')` is false for every row,
+      // which is exactly right — and the alternative, falling through to unfiltered, would serve the
+      // whole practice under a panel's heading.
+      //
+      // The `::text[]` cast is explicitness, not a fix: it was added expecting an empty array to fail
+      // with "cannot determine type of empty array", and removing it against a real postgres:16 shows
+      // it does NOT — `employee_id` has a known type, so the parameter infers as `text[]` even when
+      // the array is empty (that error is for bare `ARRAY[]` literals, which this is not). The cast
+      // stays because it pins the bind's type where a reader would otherwise have to derive it, and
+      // the empty-set behaviour is pinned by the store contract on BOTH stores rather than by this.
+      where.push(`employee_id = ANY($${binds.length + 1}::text[])`);
+      binds.push([...query.employeeIds]);
     }
     if (query.measureId) {
       where.push(`measure_id = $${binds.length + 1}`);

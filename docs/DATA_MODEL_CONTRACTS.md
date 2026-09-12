@@ -162,17 +162,17 @@ Columns:
 > subjects from its denominator — which is what `notInPopulation` lets a reader reconcile.
 
 ### 6.2 `GET /api/exports/outcomes?format=csv&runId={optional}`
-Supports filters: `runId`, `site`, `providerId`, `ageBand`, `sex`.
+Supports filters: `runId`, `site`, `providerId`, `ageBand`, `sex`, `payer`.
 
 Columns:
-`outcomeId, runId, employeeExternalId, employeeName, role, site, measureName, measureVersion, evaluationPeriod, status, lastExamDate, complianceWindowDays, daysOverdue, roleEligible, siteEligible, waiverStatus, evaluatedAt`
+`outcomeId, runId, employeeExternalId, employeeName, role, site, measureName, measureVersion, evaluationPeriod, status, lastExamDate, complianceWindowDays, daysOverdue, roleEligible, siteEligible, waiverStatus, evaluatedAt, providerId, payer`
 
 ### 6.3 `GET /api/exports/cases?format=csv`
 Columns:
-`caseId, employeeExternalId, employeeName, role, site, measureName, measureVersion, evaluationPeriod, status, priority, assignee, currentOutcomeStatus, nextAction, lastRunId, createdAt, updatedAt, closedAt, latestOutreachDeliveryStatus`
+`caseId, employeeExternalId, employeeName, role, site, measureName, measureVersion, evaluationPeriod, status, priority, assignee, currentOutcomeStatus, nextAction, lastRunId, createdAt, updatedAt, closedAt, latestOutreachDeliveryStatus, providerId, payer`
 
 Supports filters: `status`, `measureId`, `priority`, `assignee`, `site`, `caseIds`, `providerId`,
-`ageBand`, `sex`.
+`ageBand`, `sex`, `payer`.
 
 > **Subject headers follow the deployment profile.** On a patient deployment
 > (`WORKWELL_INSTANCE=maui`, `DEPLOYMENT_PROFILE.subjectTerm === "patient"`) the two subject columns in
@@ -183,15 +183,38 @@ Supports filters: `status`, `measureId`, `priority`, `assignee`, `site`, `caseId
 > (`role`, `roleEligible`, `siteEligible`) are still emitted on a patient deployment; dropping them is a
 > contract change deferred until the pilot's export needs are known.
 
-> **The three panel filters are DIRECTORY joins, not stored columns** (`compliance/subject-filters.ts`).
+> **`providerId` and `payer` were APPENDED to both CSVs (MM-2)**, never inserted, so a consumer
+> reading by position keeps every column it had — the same rule ADR-079's `notInPopulation` followed.
+> Both are DIRECTORY facts resolved at export time, so both are EMPTY on a deployment whose roster
+> records none: the occupational directory has never carried a payer, and the live WebChart directory
+> discards Coverage until #533's ingest work lands. `payer` is a Source of Payment Typology code, the
+> same vocabulary the measures' `SDE Payer` reads.
+
+> **The payer filter is a SET, and that is not cosmetic.** `?payer=` accepts a repeated parameter or a
+> comma list (`?payer=1&payer=11` and `?payer=1,11` are the same query), matching a subject whose code
+> equals ANY of them — OR within the filter, AND against the others. The typology is HIERARCHICAL:
+> `1` is Medicare and `11` is its managed-care child (Medicare Advantage), which on the pilot corpus is
+> 3,927 and 2,900 patients. A single-valued filter would let someone ask for Medicare, receive the
+> smaller set, and never learn the rest were withheld under a heading claiming to contain them. The
+> PREDICATE still compares exact codes — `1` never matches `11` — and grouping is something a caller
+> opts into by selecting several; `payerCodesInGroup`
+> (`backend-ts/src/engine/synthetic/payer-display.ts`) is what turns "Medicare" into the codes actually
+> present in the directory. Unlike `ageBand` and `sex`, payer terminology is OPEN: any non-empty token
+> is accepted and an unknown one matches nobody, because refusing it would mean refusing a real
+> Coverage code our display table has not been taught.
+
+> **The panel filters are DIRECTORY joins, not stored columns** (`compliance/subject-filters.ts`).
 > `providerId` matches `EmployeeProfile.providerId` — the PCP's external id (`maui-prov-012`), never a
 > display name. `ageBand` is one of `0-17 | 18-44 | 45-64 | 65+`, derived from `dateOfBirth` against
 > today's **UTC** date at query time, so a row's band can change between two exports taken either side
 > of a birthday. `sex` is `F | M` and matches nothing on a roster that records none (the occupational
 > directory), rather than matching everyone. An unrecognised token for `ageBand` or `sex` is a **400**
 > naming the accepted values — never a silently unfiltered export served under a heading that says
-> "65+". The same three apply to the roster, the cases route and the MCP `list_noncompliant` tool,
-> through one predicate; column names and order are unchanged.
+> "65+". The same filters apply to the roster, the cases route and the MCP `list_noncompliant` tool,
+> through one predicate; column names and order are unchanged. **Whether ANY of them is active is
+> also one question** (`hasActiveSubjectFilters`): each of those four surfaces used to carry its own
+> copy of `providerId || ageBand || sex`, which silently skips the predicate for every filter added
+> afterwards — a guard that reads as present and cannot fire.
 
 ### 6.4 `GET /api/audit-events/export?format=csv`
 Audit event export is append-only and includes event metadata + payload snapshot for timeline reconstruction.
