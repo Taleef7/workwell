@@ -68,6 +68,36 @@ export function isDemoAccountRefusedOnProfile(
   return profileId === "maui" ? !isMauiAccount : isMauiAccount;
 }
 
+/**
+ * The accounts a case may be assigned to on THIS deployment: the roles that can work cases
+ * (CASE_MANAGER, ADMIN), minus the accounts the profile refuses (#520), ordered by email.
+ *
+ * One definition, two surfaces: `GET /api/users/assignable` offers this list to the UI and the
+ * assign route validates against it. When those were separate, the endpoint's list was a suggestion
+ * and the route accepted anything — so a case could be parked on an address that cannot sign in and
+ * appears in no "assigned to me" view.
+ */
+export function assignableUsers(profileId = DEPLOYMENT_PROFILE.id): DemoUser[] {
+  return DEMO_USERS
+    .filter(
+      (user) =>
+        (user.role === "ROLE_CASE_MANAGER" || user.role === "ROLE_ADMIN") &&
+        !isDemoAccountRefusedOnProfile(user, profileId),
+    )
+    .sort((a, b) => a.email.localeCompare(b.email));
+}
+
+/**
+ * Resolve an assignee the caller supplied to the account's OWN spelling, or null when no account
+ * matches. Case-insensitive like `findDemoUser`, so `CM@WorkWell.dev` and `cm@workwell.dev` are one
+ * assignee rather than two rows that never match each other in a filter.
+ */
+export function resolveAssignable(email: string, profileId = DEPLOYMENT_PROFILE.id): string | null {
+  const needle = email.trim().toLowerCase();
+  if (!needle) return null;
+  return assignableUsers(profileId).find((user) => user.email.toLowerCase() === needle)?.email ?? null;
+}
+
 /** Validate credentials; returns the user on success, else null. */
 export async function authenticate(email: string, password: string): Promise<DemoUser | null> {
   const user = findDemoUser(email);

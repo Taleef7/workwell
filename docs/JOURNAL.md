@@ -1,5 +1,83 @@
 # Journal
 
+## 2026-09-11 (evening) — the work list could not assign a case, and a measure's roster was mostly people it does not describe
+
+Three defects a case manager meets in the first ten minutes of the pilot sandbox. They are small on
+purpose: none of them waits on the provider-panel work (MM-2) they belong to.
+
+**A case could not be assigned from the work list, and the control was the reason.** The case list's
+bulk assignee was a free-text `Input` with no suggestions at all; the case page offered a `<datalist>`,
+which a browser reveals only once the typed text already prefixes an entry. Both assume the operator
+knows an account's email address, and neither tells them when they are wrong — an unmatched name simply
+does nothing, which reads as a missing feature rather than an unaddressable one. Every assign surface
+now renders a `Select` over `GET /api/users/assignable`, with "Unassign" as its own option rather than
+an empty box that silently means "clear this". The case page keeps showing an assignee who is no longer
+in the assignable set, labelled as such, instead of rendering blank over a case that is in fact assigned.
+
+**The server took any string as an assignee, and now takes only an account.** `POST /api/cases/:id/assign`
+stored whatever arrived, so a typo parked a case on an address nobody signs in as — invisible in every
+"assigned to me" view and in the assignee filter's own option list, which is built from the assignees
+present in the data. It now resolves the value against the same list the endpoint offers the UI
+(`assignableUsers` / `resolveAssignable`, extracted so the offer and the check cannot drift) and answers
+400 naming the accepted set otherwise. Case-insensitively, storing the account's own spelling, so
+`CM@WorkWell.dev` and `cm@workwell.dev` are one assignee rather than two that never match each other in
+a filter. Resource before payload: an unknown case is still a 404, which is what the existing contract
+says and what its test pins.
+
+**A measure's roster was mostly patients that measure does not describe.** ADR-079 stopped counting them
+in the rate; they were still rows, and on the pilot's corpus they are most of the list. A patient outside
+a measure's initial population is not a gap (ADR-078), so on a roster scoped to that measure they are not
+a row either — dropped rather than greyed, since a greyed row still occupies a work list.
+
+**Three bounds keep that from being a silent filter, and the third took a review to see.** It needs ONE
+measure in scope — on the whole panel the row stays, because a patient outside CMS125's population may be
+OVERDUE on CMS122, and hiding the row there would hide the gap. It reports what it withheld, as
+`notInPopulation` on the roster response, rendered beside the total. And it does **not** apply when a
+status is asked for. That last one is the interesting bound: every drill-down carries a status — the
+programs chips build `?measureId=…&status=OVERDUE|MISSING_DATA|…` — and the status filter already
+excludes an out-of-population cell from every one of those buckets, so the drop was a no-op whose COUNT
+still described the pre-status set. It would have rendered "14 patients (8,143 not in this measure's
+population)" over an OVERDUE list: a number that does not describe the list beside it, which is the exact
+defect this feature exists to prevent, inverted. So the drop is confined to the one URL where it does
+anything — a measure in scope with no status — and `status=OUT_OF_POPULATION` is answered by the status
+filter alone.
+
+The PCP filter also lands on `/cases`, sharing the roster's query key and the one predicate in
+`subject-filters.ts`, so the two surfaces cannot disagree about what a panel is. The reference data
+(providers, assignable accounts) moved into `frontend/features/panel/` hooks — the endpoint, the option
+order and the PCP-versus-Provider wording are what must not drift across four surfaces; the markup is
+deliberately not shared, since the roster renders native selects and the case list renders the design
+system's. **The roster was migrated onto that hook in the same change**, because a shared module whose
+first consumer is the only consumer is not a shared module — it is a second implementation with a
+docstring claiming otherwise, and review said so.
+
+Two review findings worth keeping beyond this change. A rewritten test lost its exactness: the
+case-detail options assertion became `arrayContaining`, which would pass with a `@workwell.dev` account
+leaking into a Maui deployment's list — and since that list is now also what the SERVER accepts, it was
+the only frontend guard on #520's profile isolation. It is exact and ordered again. And a `finally` block
+restoring `WORKWELL_OFFICIAL_MEASURES` in the new roster test was decoration: the out-of-population
+branch reads persisted evidence, never today's routing flag (ADR-079, #540), so the variable was inert.
+Removed, because a test that sets state it does not depend on teaches the next reader the wrong thing.
+
+**The PR bot found the inverse of a fix two reviews had just approved.** One review said the "no
+longer assignable" label must be decided case-insensitively, or a live account stored with a capital
+letter is labelled dead — true, and adopted. But the control matches option values EXACTLY, so once
+that row stops being added as its own option, a stored `Quality-Lead@Maui.WorkWell.dev` matches no
+option built from the account's own spelling and the Select falls back to its placeholder over a case
+that is assigned. Two reviewers read the line; the bot read what the line implies for the value beside
+it. The hook now answers one question — the account's own spelling for an email that names it — and
+both the truth test and the displayed value come from that, because they were always the same question
+asked twice. The button is disabled when the choice would write what is already stored, which also
+closes the no-op audit event.
+
+Verified after the review round: backend 2,544 tests, 2,520 pass, 1 fail, 23 skipped — the failure is `corpus-membership.test.ts`,
+the known stale local sparse-checkout of vendored artifacts, reproduced on a stashed clean tree and green
+in CI. Backend typecheck clean. Frontend 397 pass across 76 files, lint clean, build clean. The roster
+test was mutation-checked: disabling the new filter fails it, which the first RED did not prove on its own
+(the fixture keyed outcomes by `employeeId` where the read model reads `subjectId`, so those rows were
+undecided rather than out of population — a test that passes once the fixture is right but would also
+have passed with no feature at all).
+
 ## 2026-09-11 (later) — the backup had been failing for seventeen nights, and the reason was not the key
 
 Issue #473 lists "rotated/expired credentials" second among its own suspects, and that is what this

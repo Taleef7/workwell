@@ -368,3 +368,67 @@ test("buildRoster applies ageBand and sex, and an unfiltered call is unchanged",
     "an unrecognised band matches nobody, never everybody",
   );
 });
+
+/**
+ * The pilot's quality staff opened a measure's roster and were handed thousands of patients the
+ * measure does not describe. ADR-079 made those rows say OUT_OF_POPULATION instead of MISSING_DATA,
+ * which is honest but still puts them in a work list: "if they don't fall in the measure, we don't
+ * need to see them."
+ *
+ * So when ONE measure is in scope, a patient outside its population is not a row. The count is
+ * returned rather than discarded (`notInPopulation`), because a shorter list with no explanation is
+ * the failure mode this project keeps finding: absence that looks like data.
+ *
+ * Scope matters. On the multi-measure roster the row stays, because a patient outside CMS125's
+ * population may be overdue on CMS122 — hiding the row there would hide the gap.
+ */
+test("buildRoster — a single-measure roster drops out-of-population rows and says how many", async () => {
+  {
+    const [inPop, outPop] = EMPLOYEES.filter((e) => !isDemoPersona(e.externalId)).slice(0, 2);
+    const pop = (ipp: boolean) => ({
+      expressionResults: [],
+      official: { populationResults: { ipp, denom: ipp, denex: false, numer: false, denexcep: false } },
+    });
+    const withRun: OutcomeWithRun[] = [inPop!, outPop!].map((e) => ({
+      runId: "run-1", runStartedAt: "2026-06-12T00:00:00Z", runScopeType: "ALL_PROGRAMS",
+      runStatus: "COMPLETED", runTriggeredBy: "manual",
+      subjectId: e.externalId, measureId: "cms125", status: "MISSING_DATA",
+    }));
+    const byRun: Record<string, OutcomeRecord[]> = {
+      "run-1": [
+        { id: "o1", runId: "run-1", subjectId: inPop!.externalId, measureId: "cms125", evaluationPeriod: "2026-01-01", status: "MISSING_DATA", evidence: pop(true), evaluatedAt: "2026-06-12T00:00:00Z" },
+        { id: "o2", runId: "run-1", subjectId: outPop!.externalId, measureId: "cms125", evaluationPeriod: "2026-01-01", status: "MISSING_DATA", evidence: pop(false), evaluatedAt: "2026-06-12T00:00:00Z" },
+      ],
+    };
+    const store = fakeStore(withRun, byRun);
+
+    const scoped = await buildRoster({ outcomeStore: store, segments: [] }, { measureId: "cms125", pageSize: 100000 });
+    const ids = scoped.rows.map((r) => r.subject.externalId);
+    assert.ok(ids.includes(inPop!.externalId), "a patient the measure describes is still work");
+    assert.ok(!ids.includes(outPop!.externalId), "a patient outside the population is not in the work list");
+    assert.equal(scoped.notInPopulation, 1, "and the roster says how many it left out");
+    assert.ok(!scoped.rows.some((r) => r.cells["cms125"]?.status === "OUT_OF_POPULATION"));
+
+    // Asking FOR them is a different question, and it gets an answer.
+    const asked = await buildRoster(
+      { outcomeStore: store, segments: [] },
+      { measureId: "cms125", status: "OUT_OF_POPULATION", pageSize: 100000 },
+    );
+    assert.deepEqual(asked.rows.map((r) => r.subject.externalId), [outPop!.externalId]);
+
+    // A drill-down always carries a status, and the status filter already excludes an
+    // out-of-population cell from every other bucket. The drop must NOT also run there, or the count
+    // beside the list would describe the rows the status filter removed rather than the ones it kept.
+    const drilled = await buildRoster(
+      { outcomeStore: store, segments: [] },
+      { measureId: "cms125", status: "MISSING_DATA", pageSize: 100000 },
+    );
+    assert.deepEqual(drilled.rows.map((r) => r.subject.externalId), [inPop!.externalId], "the in-population gap");
+    assert.equal(drilled.notInPopulation, 0, "nothing was withheld from a status-filtered list");
+
+    // The whole-panel roster is unchanged: the row stays, carrying its own cell.
+    const panel = await buildRoster({ outcomeStore: store, segments: [] }, { pageSize: 100000 });
+    assert.ok(panel.rows.map((r) => r.subject.externalId).includes(outPop!.externalId));
+    assert.equal(panel.notInPopulation, 0, "nothing is hidden when no single measure is in scope");
+  }
+});
