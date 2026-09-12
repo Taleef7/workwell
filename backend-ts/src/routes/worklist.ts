@@ -18,6 +18,7 @@ import {
   subjectFiltersFromQuery, subjectFilterErrorBody, SubjectFilterError,
 } from "../compliance/subject-filters.ts";
 import { resolveAssignable, assignableUsers } from "../auth/demo-users.ts";
+import { providerIdsOwnedBy } from "../case/panel-assignment.ts";
 import { ACTIVE_CASE_STATUSES } from "../case/case-logic.ts";
 
 export interface WorklistEnv extends DataSourceEnv {
@@ -55,6 +56,22 @@ export async function handleWorklist(req: Request, env: WorklistEnv, actor = "sy
     : employeeById;
 
   const stores = await getStores(env);
+
+  /**
+   * "My panel" (ADR-080 d5) — resolved from the MAPPINGS and the caller's own identity, never from a
+   * client-supplied list, so nobody can ask for somebody else's panel by spelling it in a URL.
+   *
+   * A viewer who owns no panel gets an EMPTY set, which matches nobody: the honest answer to "which of
+   * my patients have gaps?" when none are yours is none — not the whole practice under a heading that
+   * says "My panel". `panel=all` and an absent parameter are both "no panel constraint".
+   */
+  const panelParam = q.get("panel")?.trim().toLowerCase();
+  let panelProviderIds: string[] | undefined;
+  if (panelParam === "me") {
+    panelProviderIds = providerIdsOwnedBy(await stores.panels.listAll(), actor);
+    subjectFilters = { ...subjectFilters, providerIds: panelProviderIds };
+  }
+
   const summaries = await loadWorklistCases(
     {
       cases: stores.cases,
@@ -87,7 +104,14 @@ export async function handleWorklist(req: Request, env: WorklistEnv, actor = "sy
   const rows = groupIntoPatients(summaries, { assignee: q.get("assignee"), viewerEmail: actor });
   // X-Total-Count is the PATIENT count, which is what this list pages. Reporting the case count here
   // would tell a client to page past the end of a shorter list.
-  return json(rows.slice(offset, offset + limit), 200, { "X-Total-Count": String(rows.length) });
+  //
+  // X-Panel-Providers names the panels "me" resolved to, so the page can label its own filter without
+  // a second round trip — and so an EMPTY panel is visibly empty rather than looking like a page that
+  // simply found no work.
+  return json(rows.slice(offset, offset + limit), 200, {
+    "X-Total-Count": String(rows.length),
+    ...(panelProviderIds ? { "X-Panel-Providers": panelProviderIds.join(",") } : {}),
+  });
 }
 
 /**

@@ -17,6 +17,8 @@ import { SqliteCaseStore } from "../stores/sqlite/case-store-sqlite.ts";
 import { SqliteRunStore } from "../stores/sqlite/run-store-sqlite.ts";
 import { SqliteCaseEventStore } from "../stores/sqlite/case-event-store-sqlite.ts";
 import { handleWorklist, BULK_ASSIGN_MAX } from "./worklist.ts";
+import { SqlitePanelStore } from "../stores/sqlite/panel-store-sqlite.ts";
+import type { CloudDatabase } from "@mieweb/cloud";
 import { bucketPeriodForMeasure } from "../run/compliance-period.ts";
 import type { WorklistPatientRow } from "../case/worklist-patients.ts";
 
@@ -255,4 +257,62 @@ test("duplicate ids collapse — one case is never counted as two assignments", 
   const res = (await bulk({ assignee: CM, caseIds: [omarAudiogram, omarAudiogram, omarAudiogram] }))!;
   assert.deepEqual(await res.json(), { assigned: 1, unchanged: 0, missing: [], closed: [] });
   await bulk({ assignee: null, caseIds: [omarAudiogram] });
+});
+
+test("?panel=me is resolved from the MAPPINGS and the caller's own identity", async () => {
+  // ADR-080 d5. emp-006 is prov-002's patient and emp-001 is prov-005's, so mapping one provider
+  // splits the list — and proves the filter is the panel rather than "everything".
+  const panels = new SqlitePanelStore((env as { DB: CloudDatabase }).DB);
+  await panels.upsertPanelAssignment({
+    providerId: "prov-002",
+    assignee: CM,
+    actor: "lead@workwell.dev",
+    now: new Date().toISOString(),
+  });
+  try {
+    const res = (await get("?panel=me", CM))!;
+    const rows = await rowsOf(res);
+    assert.deepEqual(rows.map((r) => r.employeeId), ["emp-006"], "only the caller's panel");
+    // The header names the panels, so the page can label its filter without a second round trip.
+    assert.equal(res.headers.get("X-Panel-Providers"), "prov-002");
+    assert.equal(res.headers.get("X-Total-Count"), "1", "the count describes the filtered list");
+
+    // A viewer who owns NO panel sees an empty list. Serving the whole practice here — under a heading
+    // that says "My panel" — is the count-not-describing-the-list defect in its worst form: it tells
+    // someone that several thousand other people's patients are their responsibility.
+    const none = (await get("?panel=me", "quality-lead@workwell.dev"))!;
+    assert.deepEqual(await rowsOf(none), []);
+    assert.equal(none.headers.get("X-Panel-Providers"), "", "an empty panel is visibly empty");
+
+    // The mapping is read case-insensitively, so an account whose stored spelling differs from the
+    // JWT's does not silently lose their panel.
+    assert.equal((await rowsOf((await get("?panel=me", "CM@WorkWell.dev"))!)).length, 1);
+
+    // `panel=all` and an absent parameter are both "no panel constraint", and neither claims one.
+    assert.equal((await rowsOf((await get("?panel=all", CM))!)).length, 2);
+    assert.equal((await get("?panel=all", CM))!.headers.get("X-Panel-Providers"), null);
+    assert.equal((await rowsOf((await get("", CM))!)).length, 2);
+  } finally {
+    await panels.removePanelAssignment("prov-002");
+  }
+});
+
+test("?panel=me composes with the other filters rather than replacing them", async () => {
+  const panels = new SqlitePanelStore((env as { DB: CloudDatabase }).DB);
+  await panels.upsertPanelAssignment({
+    providerId: "prov-002",
+    assignee: CM,
+    actor: "lead@workwell.dev",
+    now: new Date().toISOString(),
+  });
+  try {
+    // The practice's sentence is "filter for Garcia, for a specific measure, for specific insurance,
+    // then assign that" — so the panel is one constraint among several, ANDed with the rest.
+    assert.equal((await rowsOf((await get("?panel=me&measureId=audiogram", CM))!)).length, 1);
+    assert.equal((await rowsOf((await get("?panel=me&measureId=does-not-exist", CM))!)).length, 0);
+    // An explicit providerId for a DIFFERENT provider intersects to nothing rather than widening.
+    assert.equal((await rowsOf((await get("?panel=me&providerId=prov-005", CM))!)).length, 0);
+  } finally {
+    await panels.removePanelAssignment("prov-002");
+  }
 });

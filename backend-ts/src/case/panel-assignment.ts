@@ -112,7 +112,11 @@ export interface PanelChangeResult {
   providerId: string;
   assignee: string;
   previousAssignee: string | null;
-  /** False when the provider was already mapped to this account: nothing written, nothing audited. */
+  /**
+   * Whether the MAPPING moved. False when the provider was already mapped to this account — in which
+   * case nothing is written to `panel_assignments`, though `backfilled` may still be non-zero: a
+   * re-save sweeps the panel's unassigned cases onto their owner.
+   */
   changed: boolean;
   /** Open cases the plan selected. */
   backfillPlanned: number;
@@ -160,19 +164,13 @@ export async function assignPanel(
   const existing = await deps.panels.getPanelAssignment(input.providerId);
   const previousAssignee = existing?.assignee ?? null;
 
-  // Already this account's panel. Writing anyway would bump updated_at and emit an event describing a
-  // change that did not happen — and, worse, would re-run a backfill whose "previous owner" is the
-  // new owner, which selects nothing but reads the whole panel to find that out.
-  if (existing && sameAccount(previousAssignee, input.assignee)) {
-    return {
-      providerId: input.providerId,
-      assignee: existing.assignee,
-      previousAssignee,
-      changed: false,
-      backfillPlanned: 0,
-      backfilled: 0,
-    };
-  }
+  // Is the MAPPING itself changing? Re-saving the same assignee must not bump updated_at or emit an
+  // event describing a change that did not happen. But it must still sweep the panel's UNASSIGNED
+  // work: a run whose panel read failed (that read is best-effort, because panels must never fail a
+  // run) opens cases unassigned on a mapped panel, and if re-saving did nothing at all the only
+  // recovery would be to un-map and re-map. `changed` describes the mapping and `backfilled` the
+  // cases, so both numbers stay true and a re-save that moves twelve cases says twelve.
+  const mappingChanged = !existing || !sameAccount(previousAssignee, input.assignee);
 
   const subjectIds = subjectIdsForProvider(deps.roster, input.providerId);
   const openCases = await activeCasesForSubjects(deps.cases, subjectIds);
@@ -182,8 +180,12 @@ export async function assignPanel(
   const now = new Date().toISOString();
   // The panel event first, then the mapping, then the per-case moves — the mapping is the decision and
   // the case moves are its consequence, so a failure part-way leaves a mapping whose backfill can be
-  // re-run (re-mapping the same panel replays it) rather than moved cases with no mapping to explain them.
-  await deps.events.appendAudit({
+  // re-run (re-saving the same panel replays it) rather than moved cases with no mapping to explain them.
+  //
+  // Emitted when the mapping moves OR when work does. A re-save that changes neither writes nothing:
+  // a ledger entry for a decision nobody made is worse than none, because a reader cannot tell it
+  // from one that mattered.
+  if (mappingChanged || plan.length > 0) await deps.events.appendAudit({
     eventType: "PANEL_ASSIGNED",
     entityType: "panel",
     entityId: input.providerId,
@@ -200,12 +202,14 @@ export async function assignPanel(
     },
   });
 
-  const stored = await deps.panels.upsertPanelAssignment({
-    providerId: input.providerId,
-    assignee: input.assignee,
-    actor: input.actor,
-    now,
-  });
+  const stored = mappingChanged
+    ? await deps.panels.upsertPanelAssignment({
+        providerId: input.providerId,
+        assignee: input.assignee,
+        actor: input.actor,
+        now,
+      })
+    : existing!;
 
   let backfilled = 0;
   for (let i = 0; i < plan.length; i += ASSIGN_CHUNK) {
@@ -246,7 +250,7 @@ export async function assignPanel(
     providerId: input.providerId,
     assignee: stored.assignee,
     previousAssignee,
-    changed: true,
+    changed: mappingChanged,
     backfillPlanned: plan.length,
     backfilled,
   };

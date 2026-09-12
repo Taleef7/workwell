@@ -220,7 +220,7 @@ test("assignPanel writes the panel event BEFORE the mapping, and a CASE_ASSIGNED
   assert.ok(timeline.some((t) => t.eventType === "CASE_ASSIGNED"));
 });
 
-test("assignPanel is a no-op when the provider is already mapped to that account", async () => {
+test("re-saving the same assignee writes nothing when there is nothing to do", async () => {
   const deps = await freshDeps(ROSTER);
   await openCaseFor(deps, "pat-001");
   await assignPanel(deps, { providerId: "maui-prov-012", assignee: NEW_OWNER, actor: "lead@workwell.dev" });
@@ -228,11 +228,28 @@ test("assignPanel is a no-op when the provider is already mapped to that account
 
   const again = await assignPanel(deps, { providerId: "maui-prov-012", assignee: NEW_OWNER, actor: "lead@workwell.dev" });
 
-  assert.equal(again.changed, false);
+  assert.equal(again.changed, false, "the mapping did not move");
   assert.equal(again.backfilled, 0);
-  // Nothing written means nothing to explain: a ledger entry describing a change that did not happen
-  // is worse than no entry, because a reader cannot tell it from one that did.
-  assert.deepEqual((await deps.events.listAuditEvents(100, 0)).length, before.length);
+  // A ledger entry describing a decision nobody made is worse than no entry, because a reader cannot
+  // tell it from one that mattered.
+  assert.equal((await deps.events.listAuditEvents(100, 0)).length, before.length);
+});
+
+test("re-saving the same assignee DOES sweep the panel's unassigned work", async () => {
+  // The recovery path for a run that opened cases unassigned on a mapped panel — which can happen,
+  // because reading the panels during a run is best-effort (they must never fail a run). Without this
+  // the only way to pick those cases up would be to un-map the panel and map it again.
+  const deps = await freshDeps(ROSTER);
+  await assignPanel(deps, { providerId: "maui-prov-012", assignee: NEW_OWNER, actor: "lead@workwell.dev" });
+  const stranded = (await openCaseFor(deps, "pat-001"))!; // opened afterwards, with no assignee
+  assert.equal(stranded.assignee, null);
+
+  const again = await assignPanel(deps, { providerId: "maui-prov-012", assignee: NEW_OWNER, actor: "lead@workwell.dev" });
+
+  assert.equal(again.changed, false, "the mapping is unchanged, and says so");
+  assert.equal(again.backfilled, 1, "but the work moved, and says that too");
+  assert.equal((await deps.cases.getCase(stranded.id))?.assignee, NEW_OWNER);
+  assert.equal((await deps.cases.getCase(stranded.id))?.assignmentSource, "PANEL");
 });
 
 test("re-mapping a panel moves its own assignments and leaves an operator's alone", async () => {
