@@ -1227,6 +1227,12 @@ export default function CaseDetailPage() {
               ledger rather than on the work. NOTHING is removed — every state change is still audited
               and still here, one click away, and the newest entry stays visible so the page still says
               when something last happened.
+
+              `slice(-1)`, not `slice(0, 1)`: `caseTimeline` is ordered `occurred_at ASC` (the store
+              interface says "oldest-first"), so index 0 is CASE_CREATED. The first version took the
+              front of the list and showed a months-old creation entry under a control promising the
+              latest one — and the test missed it by feeding descending fixture data the real store
+              never produces.
             */}
             <div className="rounded-3xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-6 shadow-sm">
               <div className="flex items-center justify-between gap-3">
@@ -1243,7 +1249,7 @@ export default function CaseDetailPage() {
                 ) : null}
               </div>
               <div className="mt-4 space-y-3">
-                {(showHistory ? caseDetail.timeline : caseDetail.timeline.slice(0, 1)).map((event, index) => (
+                {(showHistory ? caseDetail.timeline : caseDetail.timeline.slice(-1)).map((event, index) => (
                   (() => {
                     const notificationBadge = timelineNotificationBadge(event);
                     return (

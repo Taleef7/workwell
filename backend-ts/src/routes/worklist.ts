@@ -72,6 +72,10 @@ export async function handleWorklist(req: Request, env: WorklistEnv, actor = "sy
       status: q.get("status"),
       measureId: q.get("measureId") ?? undefined,
       site: q.get("site")?.trim() || undefined,
+      // The dashboard's global date range, over case CREATION time — the same window `/api/cases`
+      // applies, so switching between the two views does not silently change the period.
+      from: q.get("from")?.trim() || undefined,
+      to: q.get("to")?.trim() || undefined,
       outcome: q.get("outcome")?.trim().toUpperCase().replace(/[\s-]+/g, "_") || undefined,
       search: q.get("search")?.trim().toLowerCase() || undefined,
       subjects: subjectFilters,
@@ -168,10 +172,14 @@ async function bulkAssign(req: Request, env: WorklistEnv, actor: string): Promis
   }
 
   const assigned = await stores.cases.assignCases(changing.map((c) => c.id), assignee);
+  // The four numbers PARTITION the input: assigned + unchanged + closed.length + missing.length ===
+  // the de-duplicated ids asked for. `unchanged` used to be `ids.length - assigned.length`, which
+  // also counted the closed and the missing — so a caller adding them up got more than it sent, and
+  // "2 unchanged" over one closed and one unknown case named a state neither was in.
   return json({
     assigned: assigned.length,
-    // Everything asked for that did not move: already on this assignee, closed, or unknown.
-    unchanged: ids.length - assigned.length,
+    /** Existed, was active, and was already on this assignee — a real no-op. */
+    unchanged: ids.length - assigned.length - closed.length - missing.length,
     missing,
     closed,
   });

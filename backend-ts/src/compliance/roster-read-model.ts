@@ -20,7 +20,7 @@ import { isApplicable, matchesCohort } from "../segment/segment-applicability.ts
 import type { HydratedSegment } from "../stores/segment-store.ts";
 import { isPanelId, ACTIVE_CATALOG_MEASURE_IDS, AVAILABLE_PANELS, PROFILE_DEFAULT_PANEL, RUNNABLE_PANELS, type PanelId } from "./panels.ts";
 import { deriveCell, type Cell } from "./roster-vocabulary.ts";
-import { hasActiveSubjectFilters, matchesSubjectFilters } from "./subject-filters.ts";
+import { hasActiveSubjectFilters, matchesSubjectFilters, type SubjectFilters } from "./subject-filters.ts";
 
 export interface RosterColumn {
   measureId: string;
@@ -84,7 +84,15 @@ export interface RosterDeps {
   /** Optional persistent derived-cell cache (perf #233). Omit in tests for per-call isolation. */
   cellCache?: RosterCellCache;
 }
-export interface RosterFilters {
+/**
+ * The roster's filters. **Extends `SubjectFilters` rather than restating it** — the panel filters used
+ * to be re-declared here as three fields and re-assembled field-by-field at the call site, so adding
+ * `payer` to the shared predicate left the roster silently passing `{providerId, ageBand, sex}` and
+ * dropping it: the guard said a filter was active, the predicate found none, and every row passed. An
+ * unfiltered 20,000-patient roster came back under a heading that said Medicare. Inheriting the type
+ * means the next filter added to `SubjectFilters` is on this surface the moment it exists.
+ */
+export interface RosterFilters extends SubjectFilters {
   panel?: string | null;
   status?: string | null;
   /** Drill-down scope (E12): restrict the status filter to one measure's column. */
@@ -96,13 +104,8 @@ export interface RosterFilters {
   segment?: string | null;
   /** Scope rows to one tenant/system (E13 PR-1). */
   tenant?: string | null;
-  /**
-   * The pilot's panel filters (spec §5): PCP external id, age band, administrative sex. Applied at the
-   * same layer `site` is, as a read-time join against the directory — the store never sees them.
-   */
-  providerId?: string | null;
-  ageBand?: string | null;
-  sex?: string | null;
+  // The panel filters (PCP, age band, sex, payer) come from `SubjectFilters` above. They are applied at
+  // the same layer `site` is, as a read-time join against the directory — the store never sees them.
   page?: number;
   pageSize?: number;
 }
@@ -231,14 +234,11 @@ export async function buildRoster(deps: RosterDeps, filters: RosterFilters): Pro
   // 4) filters (tenant/site/role/search/status), then page.
   if (filters.tenant) rows = rows.filter((r) => r.subject.tenantId === filters.tenant);
   if (filters.site) rows = rows.filter((r) => r.subject.site === filters.site);
-  // PCP / age band / sex, through the shared predicate so the roster, the cases route, the exports and
-  // the MCP tool cannot disagree about what "65+" means.
+  // The panel filters, through the shared predicate so the roster, the cases route, the exports and the
+  // MCP tool cannot disagree about what "65+" — or "Medicare" — means. `filters` is passed WHOLE: the
+  // version that rebuilt an object from three named fields dropped every filter added afterwards.
   if (hasActiveSubjectFilters(filters)) {
-    rows = rows.filter((r) =>
-      matchesSubjectFilters(directory.employeeById(r.subject.externalId), {
-        providerId: filters.providerId, ageBand: filters.ageBand, sex: filters.sex,
-      }),
-    );
+    rows = rows.filter((r) => matchesSubjectFilters(directory.employeeById(r.subject.externalId), filters));
   }
   if (filters.role) rows = rows.filter((r) => r.subject.role === filters.role);
   if (filters.q) {

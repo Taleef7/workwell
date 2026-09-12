@@ -77,12 +77,50 @@ The audit timeline on the case page now opens collapsed to its newest entry behi
 more)" — the staff ask. Nothing is removed: every state change is still audited and still one click
 away, which is why the control counts what it is hiding.
 
-Verified: backend 2,682 tests, 2,659 pass, 1 fail, 22 skipped — the failure is `corpus-membership.test.ts`,
-the known stale local sparse-checkout of vendored artifacts, green in CI. Backend typecheck clean. The
-store contract's two new cases ran on BOTH stores against a real `postgres:16` (103/103 ceiling, 100/100
-floor), and the null-safe assignee comparison was mutation-checked on each dialect — `<>` instead of
-`IS DISTINCT FROM` / `IS NOT` fails both, which is the bug that would have made assigning an unassigned
-case a silent no-op. Frontend 409 pass across 77 files, lint clean, build clean.
+**What the two reviews found, and the one that mattered most was mine to own.** The roster's filter
+guard was upgraded to the shared `hasActiveSubjectFilters` — which sees `payer` — while the call
+beside it still rebuilt an object from three named fields and dropped it. `GET
+/api/compliance/roster?payer=1` therefore reported a filter as active, applied none, and returned all
+20,000 patients under a heading that said Medicare. Both reviewers found it independently. It is the
+same defect class as the four copied guards this PR removed, one layer up, and the contract paragraph
+this PR added ("the same filters apply to the roster ... through one predicate") was false as written.
+The fix is structural rather than another field: `RosterFilters extends SubjectFilters`, and the call
+passes `filters` whole. The new test asserts the GENERAL property — for every key the predicate
+understands, a value nobody satisfies must return nothing — so the next filter added cannot be
+dropped the same way. Mutation-checked: restoring the three-field object fails it on `payer`.
+
+**And the second review caught the collapse showing the wrong end of the list.** `caseTimeline` is
+`ORDER BY occurred_at ASC` and its own interface says "oldest-first", so `slice(0, 1)` renders
+CASE_CREATED — a months-old entry under a control promising the newest one. The test missed it because
+the fixture was newest-first, an order the real store never produces: the harness was gentler than the
+caller, which is the trap this project has now hit twice. Fixture corrected to match the store, then
+mutation-checked.
+
+Six more, all real, all this PR's: the `/worklist` toast said "already assigned that way" over gaps a
+run had closed; the dashboard date range was read into the component, triggered a refetch, and was
+never sent; changing page size kept the old offset; select-all at 100 patients × six routed measures
+builds 600 ids against a 500 cap, so the button offered an action the server refuses; `Mixed (1)`
+counted only the gaps that HAD an owner, contradicting its own label and hiding the unowned one; and
+`unchanged` in the bulk response double-counted the closed and the missing, so the four numbers summed
+past the input. The panel pre-filter also gained a size cap: the SQLite floor spends one bind per id
+against a per-statement variable limit while Postgres binds the set as one array, so a ~6,800-id payer
+selection was a cliff only one store could fall off.
+
+**One fix ships deliberately untested.** Two payer checkboxes clicked before a re-render made the
+second clobber the first, because the handler read the render-scope snapshot; it now builds from the
+last-written query string held in a ref. The jsdom harness cannot reproduce the race — its
+`next/navigation` mock updates params synchronously inside `replace` and the event helpers flush React
+between clicks — so both spellings passed the test written for it. The test was deleted and the reason
+is in the code, because a green assertion over a race the harness defines away is worse than none.
+
+Verified after the review round: backend 2,684 tests, 2,661 pass, 1 fail, 22 skipped — the failure is
+`corpus-membership.test.ts`, the known stale local sparse-checkout of vendored artifacts, green in CI.
+Backend typecheck clean. The store contract's two new cases ran on BOTH stores against a real
+`postgres:16` (103/103 ceiling, 100/100 floor), and the null-safe assignee comparison was
+mutation-checked on each dialect — `<>` instead of `IS DISTINCT FROM` / `IS NOT` fails both, which is
+the bug that would have made assigning an unassigned case a silent no-op. The roster-filter and
+timeline-collapse fixes were mutation-checked the same way. Frontend 415 pass across 77 files, lint
+clean, build clean.
 
 **Not in this PR, and named rather than dropped:** the patient page's inline per-gap assign select and
 the Maui `worklist.spec.ts` e2e. Both are additive to what is here and neither gates PR 2.

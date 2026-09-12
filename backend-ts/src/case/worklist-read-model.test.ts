@@ -18,7 +18,7 @@ import { SqliteCaseStore } from "../stores/sqlite/case-store-sqlite.ts";
 import { SqliteCaseEventStore } from "../stores/sqlite/case-event-store-sqlite.ts";
 import { SqliteRunStore } from "../stores/sqlite/run-store-sqlite.ts";
 import { bucketPeriodForMeasure } from "../run/compliance-period.ts";
-import { loadWorklistCases, panelSubjectIds, statusesForWorklist, type WorklistDeps } from "./worklist-read-model.ts";
+import { loadWorklistCases, panelSubjectIds, statusesForWorklist, PANEL_PREFILTER_MAX_IDS, type WorklistDeps } from "./worklist-read-model.ts";
 import { ACTIVE_CASE_STATUSES } from "./case-logic.ts";
 import type { EmployeeProfile } from "../engine/synthetic/employee-catalog.ts";
 import type { CaseQuery, CaseRecord, CaseStore } from "../stores/case-store.ts";
@@ -117,6 +117,28 @@ test("the pre-filter narrows the FETCH without changing the ANSWER", async () =>
   const spy: CaseStore = { ...cases, listCases: async (q: CaseQuery) => { seen.push(q); return cases.listCases(q); } } as CaseStore;
   await loadWorklistCases(deps({ cases: spy }), filters);
   assert.deepEqual(seen[0]?.employeeIds, ["p-1", "p-2"]);
+});
+
+test("a matched set too large to send skips the pre-filter — and the ROWS are identical either way", async () => {
+  // The SQLite floor spends one bind per id (`IN (?, ?, …)`) against a per-statement variable cap;
+  // Postgres binds the same set as ONE array and never notices. A payer-group selection on the pilot's
+  // roster is ~6,800 ids, so without a cap the two stores answer the same question differently — one
+  // of them fatally. Skipping is always correct because the post-filter applies the same predicate.
+  const big: EmployeeProfile[] = Array.from({ length: PANEL_PREFILTER_MAX_IDS + 50 }, (_, i) => ({
+    externalId: `big-${i}`, name: `Big ${i}`, role: "Patient", site: "Kahului",
+    providerId: "prov-big", tenantId: "maui", payer: "5",
+  }));
+  assert.equal(panelSubjectIds(big, { providerId: "prov-big" }, undefined), undefined, "too large ⇒ no pre-filter");
+  // Just under the cap it still pre-filters — otherwise this would pass with the feature removed.
+  const small = big.slice(0, PANEL_PREFILTER_MAX_IDS);
+  assert.equal(panelSubjectIds(small, { providerId: "prov-big" }, undefined)?.length, PANEL_PREFILTER_MAX_IDS);
+
+  // `undefined` here means "no pre-filter", NOT "nobody matches" — the rows must be unchanged.
+  const roster = [...ROSTER, ...big];
+  const overCap = await loadWorklistCases(deps({ roster: () => roster }), { subjects: { payer: ["1", "11"] } });
+  const noPreFilter = await loadWorklistCases(deps({ roster: undefined }), { subjects: { payer: ["1", "11"] } });
+  assert.deepEqual(overCap.map((r) => r.caseId).sort(), noPreFilter.map((r) => r.caseId).sort());
+  assert.deepEqual(overCap.map((r) => r.employeeId).sort(), ["p-1", "p-2"], "and they are still the right rows");
 });
 
 test("a panel with nobody in it returns NO cases — never the whole practice", async () => {

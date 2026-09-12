@@ -17,7 +17,7 @@
  * read as "no work".
  */
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Badge, Button, Input, Select } from "@mieweb/ui";
 import { ChevronRight } from "lucide-react";
@@ -70,6 +70,16 @@ type BulkAssignResult = { assigned: number; unchanged: number; missing: string[]
 
 const PAGE_SIZES = [25, 50, 100].map((n) => ({ value: String(n), label: String(n) }));
 
+/**
+ * What one bulk-assign request may carry. The SERVER enforces the real limit and answers 400 naming
+ * it (`BULK_ASSIGN_MAX` in `backend-ts/src/routes/worklist.ts`); this copy exists only so the button
+ * can say why it is disabled instead of letting someone click it and read a raw API error.
+ *
+ * It is reachable, not theoretical: a page of 100 patients on a deployment routing six measures is up
+ * to 600 gaps, and the header select-all takes the page.
+ */
+const BULK_ASSIGN_MAX = 500;
+
 export default function WorklistPage() {
   const api = useApi();
   const router = useRouter();
@@ -93,6 +103,7 @@ export default function WorklistPage() {
   const [expanded, setExpanded] = useState<string[]>([]);
   const [pageSize, setPageSize] = useState(25);
   const [page, setPage] = useState(0);
+  const requestSeq = useRef(0);
 
   // URL is the state, so a filtered list is a link someone can send a colleague — which is what the
   // "saved filters" ask turned out to mean in practice.
@@ -107,34 +118,54 @@ export default function WorklistPage() {
   );
   const [searchTerm, setSearchTerm] = useState(searchFilter);
 
+  /**
+   * The query string as last written, which is not the same as this render's `searchParams`.
+   *
+   * Two filter interactions can land before the router re-renders, and the second must build on the
+   * first rather than replace it — ticking Medicare then Medicare Advantage left only Advantage.
+   * `window.location.search` is not the fix either: `router.replace` updates it asynchronously, so it
+   * is as stale as the snapshot and empty under test. A ref updated at the moment we write is the one
+   * thing that is current in both.
+   *
+   * **Deliberately untested, and said out loud rather than covered by a test that proves nothing.**
+   * The jsdom harness cannot reproduce this: its `next/navigation` mock updates the params
+   * synchronously inside `replace`, and `fireEvent`/`userEvent` flush React between clicks, so the
+   * second handler always sees fresh state whether or not this ref exists. A test was written, both
+   * spellings passed it, and it was removed — a green assertion over a race the harness defines away
+   * is worse than none.
+   */
+  const paramsRef = useRef(searchParams.toString());
+  useEffect(() => {
+    // Re-sync when the URL changes from outside this component (back/forward, a nav link).
+    paramsRef.current = searchParams.toString();
+  }, [searchParams]);
+
   const setParams = useCallback(
     (mutate: (params: URLSearchParams) => void) => {
-      const params = new URLSearchParams(searchParams.toString());
+      const params = new URLSearchParams(paramsRef.current);
       mutate(params);
+      paramsRef.current = params.toString();
       setPage(0);
-      router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+      router.replace(`${pathname}?${paramsRef.current}`, { scroll: false });
     },
-    [pathname, router, searchParams],
+    [pathname, router],
   );
 
-  const togglePayer = useCallback(
-    (code: string, on: boolean) => {
+  /**
+   * Add or remove payer codes.
+   *
+   * The set is rebuilt from the params object `setParams` hands us — the URL as it stands right now —
+   * rather than from `payerFilter`, which is this render's snapshot. Two checkbox clicks land faster
+   * than `searchParams` updates, so reading the snapshot made the second click clobber the first:
+   * ticking Medicare then Medicare Advantage left only Advantage, which is the omission this whole
+   * multi-select exists to prevent.
+   */
+  const togglePayerCodes = useCallback(
+    (codes: readonly string[], on: boolean) => {
       setParams((params) => {
-        const next = new Set(payerFilter);
-        if (on) next.add(code);
-        else next.delete(code);
-        params.delete("payer");
-        for (const value of [...next].sort()) params.append("payer", value);
-      });
-    },
-    [payerFilter, setParams],
-  );
-
-  /** "Medicare (all)" — selects every code the roster actually has in that category. */
-  const togglePayerGroup = useCallback(
-    (codes: string[], on: boolean) => {
-      setParams((params) => {
-        const next = new Set(payerFilter);
+        // From the params object `setParams` hands us — the last-written URL — not from `payerFilter`,
+        // which is this render's snapshot and does not yet include a click that just happened.
+        const next = new Set(params.getAll("payer").flatMap((v) => v.split(",")).map((v) => v.trim()).filter(Boolean));
         for (const code of codes) {
           if (on) next.add(code);
           else next.delete(code);
@@ -143,10 +174,16 @@ export default function WorklistPage() {
         for (const value of [...next].sort()) params.append("payer", value);
       });
     },
-    [payerFilter, setParams],
+    [setParams],
   );
+  const togglePayer = useCallback((code: string, on: boolean) => togglePayerCodes([code], on), [togglePayerCodes]);
+  /** "Medicare (all)" — every code the roster actually has in that category. */
+  const togglePayerGroup = togglePayerCodes;
 
   const load = useCallback(async () => {
+    // A request sequence, like /cases has: typing in the search box fires several of these, and without
+    // it a slower earlier response resolves last and overwrites the current rows with stale ones.
+    const ticket = (requestSeq.current += 1);
     setLoading(true);
     setError(null);
     try {
@@ -157,21 +194,27 @@ export default function WorklistPage() {
       if (measureFilter) params.set("measureId", measureFilter);
       if (searchFilter) params.set("search", searchFilter);
       if (siteId) params.set("site", siteId);
+      // The dashboard's date range is rendered on every page, so it must either apply here or not be
+      // read at all — a refetch that visibly runs and returns the same list looks like it worked.
+      if (from) params.set("from", from);
+      if (to) params.set("to", to);
       for (const code of payerFilter) params.append("payer", code);
       const { data, headers } = await api.getWithHeaders<WorklistPatientRow[]>(`/api/worklist/patients?${params.toString()}`);
+      if (ticket !== requestSeq.current) return;
       setRows(data ?? []);
       setTotal(Number(headers.get("X-Total-Count") ?? data?.length ?? 0));
       // Drop selections whose patient is no longer on the list, so an assign cannot act on a row the
       // operator can no longer see.
       setSelected((existing) => existing.filter((id) => (data ?? []).some((r) => r.employeeId === id)));
     } catch (err) {
+      if (ticket !== requestSeq.current) return;
       setError(err instanceof Error ? err.message : "Unknown error");
       setRows([]);
       setTotal(0);
     } finally {
-      setLoading(false);
+      if (ticket === requestSeq.current) setLoading(false);
     }
-  }, [api, providerFilter, assigneeFilter, outcomeFilter, measureFilter, searchFilter, payerFilter, siteId, pageSize, page]);
+  }, [api, providerFilter, assigneeFilter, outcomeFilter, measureFilter, searchFilter, payerFilter, siteId, from, to, pageSize, page]);
 
   // Deferred a tick, matching `/cases`: the lint rule forbids a synchronous setState inside an effect
   // (it cascades renders), and `load` sets loading/rows/total on entry.
@@ -180,15 +223,25 @@ export default function WorklistPage() {
       void load();
     }, 0);
     return () => clearTimeout(timer);
-  }, [load, from, to]);
+  }, [load]);
 
   const selectedRows = useMemo(() => rows.filter((r) => selected.includes(r.employeeId)), [rows, selected]);
   // The button says exactly what it will do: every ACTIVE gap of every selected patient, counted.
   const selectedGapIds = useMemo(() => selectedRows.flatMap((r) => r.openGaps.map((g) => g.caseId)), [selectedRows]);
   const allSelected = rows.length > 0 && rows.every((r) => selected.includes(r.employeeId));
+  const overBulkCap = selectedGapIds.length > BULK_ASSIGN_MAX;
+  // How many of the selected gaps currently belong to someone OTHER than the target. The grouping goes
+  // to trouble to mark those in the list (dimmed, with a tooltip); taking them without a word would
+  // undo that — a filtered "assigned to me" view plus select-all silently reassigns colleagues' work.
+  const takingFromOthers = useMemo(() => {
+    const target = bulkAssignee === UNASSIGN_VALUE ? null : bulkAssignee || null;
+    return selectedRows
+      .flatMap((r) => r.openGaps)
+      .filter((g) => g.assignee && g.assignee !== target).length;
+  }, [selectedRows, bulkAssignee]);
 
   async function assignSelected() {
-    if (selectedGapIds.length === 0 || bulkAssignee === "") return;
+    if (selectedGapIds.length === 0 || bulkAssignee === "" || selectedGapIds.length > BULK_ASSIGN_MAX) return;
     const unassign = bulkAssignee === UNASSIGN_VALUE;
     if (!unassign && !canonicalFor(bulkAssignee)) {
       setError(`${bulkAssignee} is not an account cases can be assigned to.`);
@@ -202,13 +255,25 @@ export default function WorklistPage() {
         { assignee: unassign ? null : bulkAssignee, caseIds: selectedGapIds },
       );
       await load();
+      // Clear the selection: the patients still have open gaps, so `load` keeps them on the list and
+      // the action bar would stay live over work that is already done — inviting a second click whose
+      // only outcome is "no gaps changed".
+      setSelected([]);
+      setBulkAssignee("");
       const moved = result?.assigned ?? 0;
+      // The toast reports what HAPPENED. Saying "already assigned that way" over gaps a run closed
+      // between the page load and the click is the one explanation that is definitely wrong, and the
+      // one that stops someone looking further.
+      const skipped = (result?.closed?.length ?? 0) + (result?.missing?.length ?? 0);
+      const tail = skipped > 0 ? ` (${skipped} skipped — already closed or no longer present)` : "";
       emitToast(
         moved === 0
-          ? "No gaps changed — they were already assigned that way"
+          ? skipped > 0
+            ? `No gaps changed${tail}`
+            : "No gaps changed — they were already assigned that way"
           : unassign
-            ? `${moved} gap${moved === 1 ? "" : "s"} unassigned`
-            : `${moved} gap${moved === 1 ? "" : "s"} assigned to ${bulkAssignee}`,
+            ? `${moved} gap${moved === 1 ? "" : "s"} unassigned${tail}`
+            : `${moved} gap${moved === 1 ? "" : "s"} assigned to ${bulkAssignee}${tail}`,
       );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
@@ -291,7 +356,12 @@ export default function WorklistPage() {
           size="sm"
           className="w-28"
           value={String(pageSize)}
-          onValueChange={(v) => setPageSize(Number(v))}
+          onValueChange={(v) => {
+            // Back to the first page: keeping the offset across a size change asks for rows past the
+            // end — an empty list under a footer reading "301–200 of 200".
+            setPage(0);
+            setPageSize(Number(v));
+          }}
           options={PAGE_SIZES}
         />
       </div>
@@ -304,7 +374,15 @@ export default function WorklistPage() {
       */}
       {payersAvailable ? (
         <fieldset className="rounded-xl border border-neutral-200 bg-white p-3 dark:border-neutral-800 dark:bg-neutral-900">
-          <legend className="px-1 text-xs font-medium text-neutral-600 dark:text-neutral-400">{payerFilterLabel}</legend>
+          {/*
+            The counts are the ROSTER's, not this list's — `/api/payers` counts every subject in the
+            deployment with that payer, deliberately, so an option does not vanish because nobody on
+            it has an open gap today. Said on the label, because "All Medicare (6,827)" sitting above
+            "240 patients with open gaps" otherwise reads as a promise about the list below it.
+          */}
+          <legend className="px-1 text-xs font-medium text-neutral-600 dark:text-neutral-400">
+            {payerFilterLabel} <span className="font-normal">— counts are {SUBJECT.plural} on the roster, not open gaps</span>
+          </legend>
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
             {payerOptions.map((option) => (
               <label key={option.value} className="inline-flex items-center gap-2 text-sm text-neutral-800 dark:text-neutral-200">
@@ -342,7 +420,10 @@ export default function WorklistPage() {
           <button
             type="button"
             className="text-primary-700 hover:underline dark:text-primary-300"
-            onClick={() => router.replace(pathname, { scroll: false })}
+            onClick={() => {
+              setPage(0);
+              router.replace(pathname, { scroll: false });
+            }}
           >
             Clear filters
           </button>
@@ -377,11 +458,32 @@ export default function WorklistPage() {
               ambiguous — it is the patients' GAPS that get an assignee, and there are more of them
               than there are rows ticked.
             */}
-            <Button size="sm" variant="primary" disabled={assigning || bulkAssignee === ""} onClick={() => void assignSelected()}>
+            <Button
+              size="sm"
+              variant="primary"
+              disabled={assigning || bulkAssignee === "" || overBulkCap}
+              onClick={() => void assignSelected()}
+            >
               {assigning
                 ? "Assigning…"
                 : `Assign ${selectedGapIds.length} open gap${selectedGapIds.length === 1 ? "" : "s"}`}
             </Button>
+            {/*
+              Stated rather than enforced silently: a disabled button with no reason is the same
+              puzzle as a control that does nothing. One request keeps the assign atomic, so the fix
+              is to select fewer rather than to split it into calls that can half-fail.
+            */}
+            {overBulkCap ? (
+              <span className="text-xs text-danger-700 dark:text-danger-300">
+                Too many for one assignment ({selectedGapIds.length} gaps, limit {BULK_ASSIGN_MAX}) — select fewer
+                {SUBJECT.plural} or reduce the page size.
+              </span>
+            ) : null}
+            {takingFromOthers > 0 && !overBulkCap ? (
+              <span className="text-xs text-warning-800 dark:text-warning-300">
+                {takingFromOthers} of {selectedGapIds.length} currently belong to someone else.
+              </span>
+            ) : null}
             <button type="button" className="text-primary-800 hover:underline dark:text-primary-200" onClick={() => setSelected([])}>
               Clear selection
             </button>
@@ -483,7 +585,16 @@ export default function WorklistPage() {
                         no owner, and naming one of them would say the rest are handled.
                       */}
                       {row.owner === "mixed" ? (
-                        <span title={row.assignees.join(", ")}>Mixed ({row.assignees.length})</span>
+                        // NOT `assignees.length` — that excludes the unassigned gaps, so a patient with
+                        // one assigned gap and one without rendered "Mixed (1)", a count that
+                        // contradicts its own label and hides the gap nobody owns. Say what is mixed.
+                        <span title={row.assignees.join(", ") || undefined}>
+                          {row.assignees.length === 0
+                            ? "Mixed"
+                            : row.gapCount > row.assignees.length && row.openGaps.some((g) => !g.assignee)
+                              ? `Mixed (${row.assignees.length} + unassigned)`
+                              : `Mixed (${row.assignees.length})`}
+                        </span>
                       ) : (
                         (row.owner ?? "Unassigned")
                       )}

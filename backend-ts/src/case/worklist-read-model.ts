@@ -108,8 +108,26 @@ export function statusesForWorklist(raw: string | null | undefined): string[] | 
 const day = (s: string): string => s.slice(0, 10);
 
 /**
+ * The largest id set worth sending to the store as a pre-filter.
+ *
+ * Two reasons, and the first is a hard limit rather than a preference. The SQLite floor expands the
+ * set into `employee_id IN (?, ?, …)` — one bind per id — against a per-statement variable cap
+ * (999 on older builds, 32,766 on newer). A payer-group selection on the pilot's roster is ~6,800
+ * ids, which is fine on one build and a fatal `too many SQL variables` on another, and the Postgres
+ * ceiling binds the same set as ONE array parameter and never notices. Two stores must answer the
+ * same question the same way; a cliff only one of them can fall off is not that.
+ *
+ * The second is that above this size the pre-filter has stopped earning its keep: a "panel" of
+ * several thousand subjects is most of the practice, so the fetch it narrows was never the problem.
+ * Skipping it is always CORRECT — the post-filter is authoritative and applies the same predicate —
+ * so this trades a bounded amount of work for a bound nobody can trip over.
+ */
+export const PANEL_PREFILTER_MAX_IDS = 900;
+
+/**
  * The subject ids a panel-filtered query can possibly match, or `undefined` when the pre-filter does
- * not apply (no panel filter active, or no authoritative roster to resolve against).
+ * not apply (no panel filter active, no authoritative roster to resolve against, or a matched set too
+ * large to send — see `PANEL_PREFILTER_MAX_IDS`).
  *
  * `site` joins the pre-filter only when it names a real site. A case whose subject the directory
  * cannot resolve renders its site as `—`, and that row survives a `?site=—` post-filter — so
@@ -130,6 +148,10 @@ export function panelSubjectIds(
     if (siteActive && employee.site !== site) continue;
     if (panelActive && !matchesSubjectFilters(employee, subjects!, nowMs)) continue;
     ids.push(employee.externalId);
+    // Stop the moment the set is too large to be worth sending, rather than building a list of
+    // thousands and discarding it. `undefined` here is "no pre-filter", NOT "nobody matches" — the
+    // post-filter still applies the identical predicate, so the rows are the same either way.
+    if (ids.length > PANEL_PREFILTER_MAX_IDS) return undefined;
   }
   return ids;
 }

@@ -181,7 +181,11 @@ test("bulk assign separates MISSING from CLOSED from unchanged, so the caller kn
   assert.equal(body.assigned, 1);
   assert.deepEqual(body.missing, [ghost]);
   assert.deepEqual(body.closed, [closedCase.id]);
-  assert.equal(body.unchanged, 2, "everything asked for that did not move");
+  // The four numbers PARTITION the input rather than overlapping: one assigned, one closed, one
+  // missing, and nothing genuinely unchanged. The old arithmetic reported 2 unchanged and summed to 5
+  // from an input of 3.
+  assert.equal(body.unchanged, 0, "neither the closed nor the missing case is ALSO 'unchanged'");
+  assert.equal(body.assigned + body.unchanged + body.closed.length + body.missing.length, 3);
   assert.equal((await cases.getCase(closedCase.id))?.assignee, null, "a closed case is not silently reassigned");
   await bulk({ assignee: null, caseIds: [omarAudiogram] });
 });

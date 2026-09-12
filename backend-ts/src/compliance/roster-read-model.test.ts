@@ -5,7 +5,7 @@ import { latestRunsFromRows } from "../test-support/latest-runs.ts";
 import { EMPLOYEES, isDemoPersona } from "../engine/synthetic/employee-catalog.ts";
 import type { HydratedSegment } from "../stores/segment-store.ts";
 import { PANELS } from "./panels.ts";
-import { buildRoster, type RosterCellCache } from "./roster-read-model.ts";
+import { buildRoster, type RosterCellCache, type RosterFilters } from "./roster-read-model.ts";
 import { replaceLiveDirectory } from "../engine/ingress/webchart/live-directory.ts";
 
 // The first REAL (non-demo) directory subject. emp-001..004 are demo-login personas that now sink to the
@@ -347,6 +347,32 @@ test("buildRoster applies providerId, and an unknown PCP returns no rows rather 
 
   const unknown = await buildRoster({ outcomeStore: store, segments: [] }, { providerId: "prov-does-not-exist", pageSize: 100000 });
   assert.equal(unknown.total, 0, "an unknown PCP must not fall back to the unfiltered roster");
+});
+
+test("buildRoster applies EVERY filter the shared predicate knows — not a hand-copied subset", async () => {
+  // How this broke once: `RosterFilters` re-declared the panel filters as three named fields, and the
+  // call site rebuilt an object from those three. Adding `payer` to `SubjectFilters` and to the
+  // predicate therefore left the roster passing `{providerId, ageBand, sex}` and dropping it — the
+  // guard reported a filter was active, the predicate found none active, and every row passed. A
+  // 20,000-patient roster came back under a heading that said Medicare.
+  //
+  // So this asserts the GENERAL property rather than one filter: for each key the predicate
+  // understands, a value nobody satisfies must return nothing. A filter dropped on the way in reads
+  // as "no filter", which returns everything, which is what this catches.
+  const store = fakeStore([], {});
+  const all = await buildRoster({ outcomeStore: store, segments: [] }, { pageSize: 100000 });
+  assert.ok(all.total > 1, "the fixture roster must have rows for this to discriminate");
+
+  const nobodyMatches: { key: string; filters: RosterFilters }[] = [
+    { key: "providerId", filters: { providerId: "prov-does-not-exist" } },
+    { key: "ageBand", filters: { ageBand: "0-17" } },
+    { key: "sex", filters: { sex: "F" } },
+    { key: "payer", filters: { payer: ["no-such-payer-code"] } },
+  ];
+  for (const { key, filters } of nobodyMatches) {
+    const result = await buildRoster({ outcomeStore: store, segments: [] }, { ...filters, pageSize: 100000 });
+    assert.equal(result.total, 0, `${key} was DROPPED on the way in — the unfiltered roster came back`);
+  }
 });
 
 test("buildRoster applies ageBand and sex, and an unfiltered call is unchanged", async () => {

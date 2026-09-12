@@ -529,10 +529,13 @@ describe("CaseDetailPage crosswalk identity rendering", () => {
     // controls below the fold. Collapsed is a RENDERING choice — every state change is still audited
     // and still reachable, which is why the control counts what it is hiding.
     withCaseOverrides({
+      // OLDEST FIRST — `caseTimeline` is `ORDER BY occurred_at ASC` and its interface says so. The
+      // first version of this fixture was newest-first, which the real store never returns, and it
+      // hid the collapse taking the front of the list instead of the back.
       timeline: [
-        { eventType: "CASE_ASSIGNED", occurredAt: "2026-03-03T00:00:00.000Z", actor: "cm@workwell.dev", payload: {} },
-        { eventType: "OUTREACH_SENT", occurredAt: "2026-02-02T00:00:00.000Z", actor: "cm@workwell.dev", payload: {} },
         { eventType: "CASE_CREATED", occurredAt: "2026-01-01T00:00:00.000Z", actor: "system", payload: {} },
+        { eventType: "OUTREACH_SENT", occurredAt: "2026-02-02T00:00:00.000Z", actor: "cm@workwell.dev", payload: {} },
+        { eventType: "CASE_ASSIGNED", occurredAt: "2026-03-03T00:00:00.000Z", actor: "cm@workwell.dev", payload: {} },
       ],
     });
     render(<CaseDetailPage />);

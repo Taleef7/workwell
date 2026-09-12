@@ -18,8 +18,10 @@ vi.mock("next/navigation", async () => {
 });
 
 vi.mock("@/components/global-filter-context", () => ({
-  useGlobalFilters: () => ({ siteId: "", from: "", to: "" }),
+  useGlobalFilters: () => ({ siteId: "", from: "2026-01-01", to: "2026-12-31" }),
 }));
+const emitToast = vi.fn();
+vi.mock("@/lib/toast", () => ({ emitToast: (...args: unknown[]) => emitToast(...args) }));
 vi.mock("@/components/auth-provider", () => ({
   useAuth: () => ({ user: { role: "ROLE_CASE_MANAGER", email: "quality-lead@maui.workwell.dev" } }),
 }));
@@ -64,6 +66,7 @@ const listCalls = (): string[] =>
 beforeEach(() => {
   navHolder.current.setUrl("/worklist");
   post.mockReset().mockResolvedValue({ assigned: 2, unchanged: 0, missing: [], closed: [] });
+  emitToast.mockReset();
   get.mockReset().mockImplementation((url: string) => {
     if (url.startsWith("/api/users/assignable")) return Promise.resolve(ASSIGNABLE);
     if (url.startsWith("/api/providers")) return Promise.resolve(PROVIDERS);
@@ -203,6 +206,112 @@ describe("WorklistPage", () => {
     // The patient is on the list because of the FIRST gap; the second is shown (one call can close
     // both) but marked as not the filtered assignee's.
     expect(other.getAttribute("title")).toMatch(/not the filtered assignee/i);
+  });
+
+  it("says gaps were SKIPPED rather than 'already assigned that way'", async () => {
+    // A run can close a gap between the page load and the click. Reporting that as "already assigned
+    // that way" is the one explanation that is definitely wrong, and the one that stops someone
+    // looking further.
+    post.mockResolvedValue({ assigned: 0, unchanged: 2, missing: ["gone"], closed: ["case-1"] });
+    render(<WorklistPage />);
+    await waitFor(() => expect(listCalls().length).toBeGreaterThan(0));
+
+    await userEvent.click(await screen.findByRole("checkbox", { name: /select lisa carter/i }));
+    await userEvent.click(await screen.findByRole("combobox", { name: /assignee for selected/i }));
+    await userEvent.click(await screen.findByRole("option", { name: /quality-staff@maui\.workwell\.dev/i }));
+    await userEvent.click(await screen.findByRole("button", { name: /assign 2 open gaps/i }));
+
+    await waitFor(() => expect(emitToast).toHaveBeenCalled());
+    const message = String(emitToast.mock.calls.at(-1)![0]);
+    expect(message).toMatch(/2 skipped/i);
+    expect(message).not.toMatch(/already assigned that way/i);
+  });
+
+  it("refuses a selection too large for one request, and says why", async () => {
+    // 100 patients per page on a deployment routing six measures is up to 600 gaps, over the server's
+    // 500 cap. Without this the button reads "Assign 600 open gaps" and the click returns a raw 400.
+    const many = Array.from({ length: 120 }, (_, i) => ({
+      ...TWO_GAP_PATIENT,
+      employeeId: `p-${i}`,
+      employeeName: `Patient ${i}`,
+      gapCount: 5,
+      openGaps: Array.from({ length: 5 }, (_, g) => ({ ...TWO_GAP_PATIENT.openGaps[0], caseId: `c-${i}-${g}` })),
+    }));
+    getWithHeaders.mockResolvedValue({ data: many, headers: new Headers({ "X-Total-Count": "120" }) });
+    render(<WorklistPage />);
+    await waitFor(() => expect(listCalls().length).toBeGreaterThan(0));
+
+    await userEvent.click(await screen.findByRole("checkbox", { name: /select all/i }));
+    await userEvent.click(await screen.findByRole("combobox", { name: /assignee for selected/i }));
+    await userEvent.click(await screen.findByRole("option", { name: /quality-staff@maui\.workwell\.dev/i }));
+
+    expect(await screen.findByText(/too many for one assignment \(600 gaps, limit 500\)/i)).toBeInTheDocument();
+    const button = screen.getByRole("button", { name: /assign 600 open gaps/i });
+    expect(button).toBeDisabled();
+    await userEvent.click(button);
+    expect(post.mock.calls.filter((c) => String(c[0]).includes("bulk-assign"))).toHaveLength(0);
+  });
+
+  it("says how many of the selected gaps belong to someone else", async () => {
+    getWithHeaders.mockResolvedValue({
+      data: [{
+        ...TWO_GAP_PATIENT,
+        openGaps: [
+          { ...TWO_GAP_PATIENT.openGaps[0], assignee: "someone.else@maui.workwell.dev" },
+          TWO_GAP_PATIENT.openGaps[1],
+        ],
+      }],
+      headers: new Headers({ "X-Total-Count": "1" }),
+    });
+    render(<WorklistPage />);
+    await waitFor(() => expect(listCalls().length).toBeGreaterThan(0));
+
+    await userEvent.click(await screen.findByRole("checkbox", { name: /select lisa carter/i }));
+    await userEvent.click(await screen.findByRole("combobox", { name: /assignee for selected/i }));
+    await userEvent.click(await screen.findByRole("option", { name: /quality-staff@maui\.workwell\.dev/i }));
+    // The list dims and labels those gaps; taking them without a word would undo that.
+    expect(await screen.findByText(/1 of 2 currently belong to someone else/i)).toBeInTheDocument();
+  });
+
+  it("forwards the dashboard date range, so changing it is not a refetch that changes nothing", async () => {
+    // The control renders on every dashboard page. It must apply here or not be read at all.
+    render(<WorklistPage />);
+    await waitFor(() => expect(listCalls().length).toBeGreaterThan(0));
+    expect(listCalls().at(-1)).toContain("from=2026-01-01");
+    expect(listCalls().at(-1)).toContain("to=2026-12-31");
+  });
+
+  it("clears the selection after a successful assign", async () => {
+    // The patients keep their gaps, so they stay on the list. Leaving them selected keeps the action
+    // bar live over work already done, and the only outcome of a second click is "no gaps changed".
+    render(<WorklistPage />);
+    await waitFor(() => expect(listCalls().length).toBeGreaterThan(0));
+
+    await userEvent.click(await screen.findByRole("checkbox", { name: /select lisa carter/i }));
+    await userEvent.click(await screen.findByRole("combobox", { name: /assignee for selected/i }));
+    await userEvent.click(await screen.findByRole("option", { name: /quality-staff@maui\.workwell\.dev/i }));
+    await userEvent.click(await screen.findByRole("button", { name: /assign 2 open gaps/i }));
+
+    await waitFor(() => expect(screen.queryByText(/selected/i)).not.toBeInTheDocument());
+  });
+
+  it("says 'Mixed (1 + unassigned)' rather than a count that contradicts the label", async () => {
+    // `assignees` excludes the unassigned gaps, so "Mixed (1)" read as one owner for a patient whose
+    // other gap belongs to nobody — hiding the gap that most needs picking up.
+    getWithHeaders.mockResolvedValue({
+      data: [{
+        ...TWO_GAP_PATIENT,
+        owner: "mixed",
+        assignees: ["quality-lead@maui.workwell.dev"],
+        openGaps: [
+          { ...TWO_GAP_PATIENT.openGaps[0], assignee: "quality-lead@maui.workwell.dev" },
+          TWO_GAP_PATIENT.openGaps[1],
+        ],
+      }],
+      headers: new Headers({ "X-Total-Count": "1" }),
+    });
+    render(<WorklistPage />);
+    expect(await screen.findByText(/mixed \(1 \+ unassigned\)/i)).toBeInTheDocument();
   });
 
   it("surfaces a load failure instead of rendering an empty list that reads as 'no work'", async () => {
