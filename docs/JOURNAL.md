@@ -5,13 +5,12 @@
 MM-2 PR 2. PR 1 made it fast to assign a page of patients; this makes it unnecessary most mornings.
 ADR-080.
 
-**The practice told us how they divide work twice, and the system did not know.** In August: "provider
-right now, provider panels", and — asked why not split by measure — "the same patient usually lives in
-the same provider panel… that person could be in five measures and I don't want all five of them
-touching it". In September the staffer working the sandbox said it again: "our staff is assigned to
-specific providers right now". That arrangement lived entirely in their heads. Every case a nightly run
-opened arrived unassigned, so somebody re-applied the same mapping by hand every morning, and PR 1's
-bulk assign made that re-application quicker without making it go away.
+**The practice has described how they divide work more than once, and the system did not know.** Their
+staff are assigned to particular providers, and because a patient sits in one provider's panel, one
+person closes everything that patient is due for rather than five people touching five measures. That
+arrangement existed only in their own working knowledge. Every case a nightly run opened arrived
+unassigned, so somebody re-applied the same mapping by hand every morning, and PR 1's bulk assign made
+that re-application quicker without making it go away.
 
 `panel_assignments` is the mapping: one row per mapped provider, one assignee, many providers per
 assignee (nine staff to forty-odd providers is the pilot's shape). The run reads it once and opens each
@@ -110,10 +109,13 @@ actually exercised. Frontend 427 pass across 79 files, lint clean, build clean. 
 the convergence rule and the first-load guard were each mutation-checked: reverting any one of them
 fails a test that names the behaviour, rather than passing quietly.
 
-**Still owner-owned.** Whether the staff→provider mapping should instead be fed from WebChart's own
-department-to-provider construct is a question for MIE, not a decision taken here. The live WebChart
-directory still attributes every subject to one hardcoded provider, so panels are meaningful on the
-corpus roster until #533's ingest work lands. #552 (should an IN_PROGRESS case still receive automated
+**Decided, not left open.** The mapping stays WorkWell's (ADR-080 d7). WebChart's department construct
+was considered as its source and rejected: it changes on a different schedule and by different hands,
+its cardinality does not obviously match, and chasing it would substitute for the request that actually
+matters. If MIE holds staff-to-provider data, it seeds this table and stays editable rather than being
+read through live. The live WebChart directory still attributes every subject to one hardcoded
+provider, so panels are meaningful on the corpus roster until #533's ingest work lands — and that
+attribution, patient to provider, is the single ask to put to MIE. #552 (should an IN_PROGRESS case still receive automated
 outreach) and #554 (the Maui worklist e2e) stay open.
 
 ## 2026-09-12 — the work list is a list of people, and the filter that would have hidden 2,900 of them

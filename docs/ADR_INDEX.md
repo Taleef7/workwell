@@ -14,7 +14,7 @@
 
 ## Titles (newest first)
 
-- ADR-080: a provider panel is a durable mapping the system applies, and who chose an assignee is written down
+- ADR-080: a provider panel is a durable mapping WorkWell owns and applies, and who chose an assignee is written down
 - ADR-079: the population membership a run already knew is WRITTEN DOWN — and a subject outside the population is subtracted from the rate, not counted as a gap
 - ADR-078: the sandbox routes the ACO's whole computable set — and a subject outside a measure's population is a result, not a case
 - ADR-077: a report is refused rather than rendered from rows that may be incomplete — and a dashboard rate is the evidence's rate, shown apart from the workflow's

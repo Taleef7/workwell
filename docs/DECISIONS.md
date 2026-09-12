@@ -18,18 +18,17 @@
 >
 > **Sequence note:** ADR-033 does not exist — verified absent, and the number must not be reused.
 
-## ADR-080: a provider panel is a durable mapping the system applies, and who chose an assignee is written down
+## ADR-080: a provider panel is a durable mapping WorkWell owns and applies, and who chose an assignee is written down
 
 **Date:** 2026-09-12. **Status:** accepted. The SCHEMA is an owner decision (CLAUDE.md), authorized
 in-session. Milestone M-M, MM-2 PR 2. Builds on ADR-076 d2, whose `next_action_source` is the
 provenance pattern this reuses.
 
-**Context.** The pilot group already divides its work by provider panel and said so twice. In August:
-"provider right now, provider panels", and — asked why not by measure — "the same patient usually
-lives in the same provider panel… that person could be in five measures and I don't want all five of
-them touching it". In September, the same thing from the staffer working the sandbox: "our staff is
-assigned to specific providers right now". WorkWell knew nothing about that arrangement. Every case a
-nightly run opened arrived unassigned, so the mapping that lived in the practice's heads had to be
+**Context.** The pilot group already divides its work by provider panel, and has described that
+arrangement consistently: their staff are assigned to particular providers, and because a patient sits
+in one provider's panel, one person closes everything that patient is due for rather than five people
+touching five measures. WorkWell knew nothing about it. Every case a nightly run opened arrived
+unassigned, so a mapping that existed only in the practice's own working knowledge had to be
 re-applied by hand every morning, and MM-2 PR 1's bulk assign made that re-application faster without
 making it unnecessary.
 
@@ -117,6 +116,23 @@ responsibility. `SubjectFilters.providerIds` is therefore tested with `!= null` 
 `hasActiveSubjectFilters` — an empty panel is an ACTIVE filter, and reading it as inactive is the
 vacuous-guard shape this codebase keeps finding.
 
+**d7. The mapping is WorkWell's, and stays WorkWell's** (owner decision, 2026-09-12).
+
+WebChart has a department construct keyed to a provider, and it was considered as the source of this
+mapping instead of a table here. It is not adopted, for three reasons. The two things change on
+different schedules and by different hands: a panel moves when someone takes leave or covers a
+colleague, and a quality supervisor must be able to change that without an administrator. The
+cardinality does not obviously line up — this table is one provider to one assignee, where a
+department may hold several providers or a staff member several departments — so it is not a clean
+import. And it is the wrong dependency to pursue: a panel only means anything once the system knows
+which patients belong to which provider, which on the live directory it does not, because every
+subject is attributed to a single hardcoded provider. That is the real ask of MIE, tracked as #533,
+and it is about patient-to-provider attribution rather than staff assignment.
+
+If MIE does hold staff-to-provider data, the compliant shape is an IMPORT that SEEDS this table and
+leaves it editable, never a live read-through. Externally supplied data lands in a workflow a person
+reviews rather than applying itself, which is the same rule ADR-022 set for identity links.
+
 **d6. A panel is an assignment mechanism. It is not an attributed population.**
 
 Who works a patient and who is accountable for them under a contract are different questions with
@@ -136,9 +152,8 @@ discrepancy is visible rather than inferred.
 nullable column on both schema files. `GET /api/panels` is AUTHENTICATED (the same gate the provider
 list carries), `PUT`/`DELETE` are CASE_MANAGER/ADMIN. The live WebChart directory still attributes
 every subject to one hardcoded provider, so panels are meaningful on the corpus roster only until
-#533's ingest work lands; that is a data gap, not a design one. Whether the mapping should instead be
-fed from WebChart's own department-to-provider construct is an open question for MIE, recorded in the
-journal rather than decided here.
+#533's ingest work lands; that is a data gap, not a design one, and d7 records why closing it is the
+request that matters rather than moving this mapping into WebChart.
 
 ## ADR-079: the population membership a run already knew is WRITTEN DOWN — and a subject outside the population is subtracted from the rate, not counted as a gap
 
