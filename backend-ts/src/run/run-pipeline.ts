@@ -20,6 +20,8 @@ import { ACTIVE_CASE_STATUSES } from "../case/case-logic.ts";
 import type { EvaluateMeasureBinding, MeasureOutcome } from "@work-well/measure-engine";
 import { OFFICIAL_LOGIC_VERSION_PREFIX, type RoutedEngine } from "../wiring/executor-router.ts";
 import { isApplicable } from "../segment/segment-applicability.ts";
+import type { PanelStore } from "../stores/panel-store.ts";
+import { panelMapFor } from "../case/panel-assignment.ts";
 import type { HydratedSegment } from "../stores/segment-store.ts";
 import {
   employeeById,
@@ -111,6 +113,16 @@ export interface RunPipelineDeps {
   caseStore?: CaseStore;
   /** Enabled segments for case-creation applicability gating; empty/absent ⇒ all applicable (reversibility). */
   segments?: HydratedSegment[];
+  /**
+   * Provider panels (ADR-080 d2) — read ONCE per run, and applied only to the cases this run OPENS, so
+   * the practice starts the day with work that is already on whoever owns that provider's panel.
+   *
+   * A dep rather than a store call per case: the map is a few dozen rows and the alternative is one
+   * lookup per (subject, measure) pair, which on the pilot's six-measure nightly is 120,000 of them.
+   * Absent ⇒ no assignee is applied, which is exactly the behaviour before panels existed — so every
+   * non-pipeline caller (impact preview, offline tools, tests) is unchanged by construction.
+   */
+  panels?: Pick<PanelStore, "listAll">;
   /** Injectable for tests (defaults to the full synthetic directory). */
   employees?: readonly EmployeeProfile[];
   /** When BOTH present, a completed population run (ALL_PROGRAMS/MEASURE) materializes quality-over-time
@@ -692,6 +704,28 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
    */
   const ippByMeasure = new Map<string, boolean[]>();
 
+  /**
+   * The provider → assignee map, read ONCE for the whole run (ADR-080 d2).
+   *
+   * Not per chunk and not per case: it is a few dozen rows, and re-reading it would make a mapping
+   * edited mid-run apply to some of the run's cases and not others — a run that assigned the same
+   * provider's patients two different ways depending on when the chunk happened to execute. Reading it
+   * once means the run is internally consistent; a mid-run edit is reconciled by that edit's own
+   * backfill, which moves exactly the PANEL-sourced rows it previously owned.
+   *
+   * Best-effort: panels decide who work lands on, never whether it exists, so a failure to read them
+   * must not fail a run. The cases are opened unassigned, as they were before panels existed, and the
+   * next panel edit picks them up.
+   */
+  let panelMap = new Map<string, string>();
+  if (deps.panels) {
+    try {
+      panelMap = panelMapFor(await deps.panels.listAll());
+    } catch (error) {
+      await deps.runStore.appendLog(runId, "WARN", `panel assignments unavailable; cases open unassigned: ${String(error)}`);
+    }
+  }
+
   for (const chunkItems of chunks) {
     /**
      * The chunk's case upserts, collected during the evaluation loop and applied in ONE store call at
@@ -1063,6 +1097,9 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
             outcomeStatus: status,
             evidence,
             outOfPopulation,
+            // Applied by the store on the INSERT branch only, so this names the owner of a case this
+            // run OPENS and never re-owns one that already exists (ADR-080 d2).
+            panelAssignee: panelMap.get(item.employee.providerId),
           },
           outcomeStatus: status,
           measureId: item.measureId,
@@ -1153,6 +1190,13 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
               // change under an unchanged status; without it here the event would be
               // indistinguishable from the silent refresh it replaced.
               nextAction: upserted.nextAction,
+              // Read off the WRITTEN row, like nextAction: a case opened onto a provider's panel says
+              // so in the ledger, so "why is this already assigned to me?" has an answer on the
+              // timeline. Omitted when there is no assignee, so a deployment without panels writes
+              // the payload it always did.
+              ...(upserted.assignee
+                ? { assignee: upserted.assignee, assignmentSource: upserted.assignmentSource }
+                : {}),
               subjectId: p.subjectId,
               measureId: p.measureId,
               evaluationPeriod: p.period,

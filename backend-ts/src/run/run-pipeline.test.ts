@@ -17,6 +17,7 @@ import { SqliteCaseStore } from "../stores/sqlite/case-store-sqlite.ts";
 import { SqliteQualitySnapshotStore } from "../stores/sqlite/quality-snapshot-store-sqlite.ts";
 import { SqliteCaseEventStore } from "../stores/sqlite/case-event-store-sqlite.ts";
 import { SqliteEvalStateStore } from "../stores/sqlite/eval-state-store-sqlite.ts";
+import { SqlitePanelStore } from "../stores/sqlite/panel-store-sqlite.ts";
 import { EMPLOYEES, employeeById } from "../engine/synthetic/employee-catalog.ts";
 import { executeManualRun, executeRerun, planManualRun, finishOrFail, runningResponse, UnsupportedScopeError, InvalidRunRequestError, type RunPipelineDeps } from "./run-pipeline.ts";
 import { bucketPeriodForMeasure } from "./compliance-period.ts";
@@ -1632,4 +1633,68 @@ test("ADR-078 is gated on official routing: an AUTHORED measure's out-of-populat
   const cases = await caseStore.listCases({ limit: 10 });
   assert.equal(cases.length, 1, "the authored engine's flag does not suppress the case");
   assert.equal(cases[0]!.status, "OPEN");
+});
+
+test("a run opens its cases already assigned to the provider's panel, and audits that it did", async () => {
+  // ADR-080 d2. The point of the whole feature: the practice's staff are assigned to specific
+  // providers, so the cases a nightly run opens should arrive on whoever works that provider rather
+  // than in an unassigned pile somebody re-distributes by hand every morning.
+  const db = await createSqliteD1(join(tmpdir(), `workwell-panelrun-${crypto.randomUUID()}.sqlite`));
+  await db.exec(RUN_STORE_FLOOR_DDL.replace(/\n/g, " "));
+  const caseStore = new SqliteCaseStore(db);
+  const events = new SqliteCaseEventStore(db);
+  const panels = new SqlitePanelStore(db);
+  // Two employees of DIFFERENT providers, one of which is mapped — so the same run exercises both the
+  // mapped panel and the unmapped queue, and neither result can be an accident of the roster.
+  const mapped = employeeById("emp-005")!; // prov-001
+  const unmapped = employeeById("emp-006")!; // prov-002
+  await panels.upsertPanelAssignment({
+    providerId: mapped.providerId,
+    assignee: "cm@workwell.dev",
+    actor: "lead@workwell.dev",
+    now: new Date().toISOString(),
+  });
+
+  const panelDeps: RunPipelineDeps = {
+    runStore: new SqliteRunStore(db),
+    outcomeStore: new SqliteOutcomeStore(db),
+    caseStore,
+    events,
+    engine: overdueEngine, // deterministic OVERDUE, so the run actually OPENS a case to assign
+    employees: [mapped, unmapped],
+    panels,
+  };
+  const res = await executeManualRun(panelDeps, { scopeType: "MEASURE", measureId: "audiogram" });
+  assert.equal(res.status, "COMPLETED");
+
+  const opened = await caseStore.listCases({ limit: 100 });
+  assert.equal(opened.length, 2, "one open case per employee");
+  const mine = opened.find((c) => c.employeeId === mapped.externalId)!;
+  const theirs = opened.find((c) => c.employeeId === unmapped.externalId)!;
+  assert.equal(mine.assignee, "cm@workwell.dev", "a case on a mapped panel arrives assigned");
+  assert.equal(mine.assignmentSource, "PANEL");
+  // A provider nobody owns is an unassigned queue, not an error and not somebody else's work.
+  assert.equal(theirs.assignee, null);
+  assert.equal(theirs.assignmentSource, null);
+
+  const created = (await events.listAuditEvents(500, 0)).filter((e) => e.eventType === "CASE_CREATED");
+  assert.equal(created.length, 2);
+  const assignedEvent = created.find((e) => (e.payload as Record<string, unknown>).assignee);
+  assert.ok(assignedEvent, "the ledger says the case arrived on a panel — 'why is this mine?' has an answer");
+  assert.equal((assignedEvent!.payload as Record<string, unknown>).assignmentSource, "PANEL");
+  const unassignedEvent = created.find((e) => !(e.payload as Record<string, unknown>).assignee);
+  assert.ok(unassignedEvent, "and an unassigned case's payload is the one it always was");
+  assert.equal((unassignedEvent!.payload as Record<string, unknown>).assignmentSource, undefined);
+});
+
+test("a run with NO panel store opens cases exactly as it did before panels existed", async () => {
+  // The dep is optional so every non-pipeline caller — impact preview, offline tools, these tests —
+  // is unchanged by construction rather than by remembering to pass something.
+  const office = employeeById("emp-007")!;
+  const plainDeps: RunPipelineDeps = { ...deps, engine: overdueEngine, employees: [office], segments: [] };
+  const res = await executeManualRun(plainDeps, { scopeType: "MEASURE", measureId: "audiogram" });
+  assert.equal(res.status, "COMPLETED");
+  const mine = (await deps.caseStore!.listCases({ limit: 200 })).filter((c) => c.employeeId === "emp-007");
+  assert.ok(mine.length > 0);
+  assert.ok(mine.every((c) => c.assignee === null && c.assignmentSource === null));
 });
