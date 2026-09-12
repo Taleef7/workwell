@@ -142,6 +142,26 @@ export class PgCaseEventStore implements CaseEventStore {
     }
   }
 
+  async recordCaseEvents(inputs: readonly { action: InsertActionInput; audit: AppendAuditInput }[]): Promise<void> {
+    if (inputs.length === 0) return;
+    // One client, one BEGIN/COMMIT over the whole batch: a bulk action commits whole or not at all,
+    // the same guarantee `recordCaseEvent` gives a single one.
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      for (const input of inputs) {
+        await client.query(PgCaseEventStore.ACTION_SQL, PgCaseEventStore.actionParams(input.action));
+        await client.query(PgCaseEventStore.AUDIT_SQL, PgCaseEventStore.auditParams(input.audit));
+      }
+      await client.query("COMMIT");
+    } catch (err) {
+      await client.query("ROLLBACK").catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
   async hasOutreachSent(caseId: string): Promise<boolean> {
     if (!isUuid(caseId)) return false; // a non-uuid path param must be a clean miss, not a ::uuid 500 (Fable M14)
     const { rows } = await this.pool.query<{ n: string }>(

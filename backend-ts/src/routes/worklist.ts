@@ -156,22 +156,40 @@ async function bulkAssign(req: Request, env: WorklistEnv, actor: string): Promis
   const changing = existing.filter((c) => active.has(c.status) && (c.assignee ?? null) !== assignee);
 
   if (changing.length > 0) {
-    await stores.events.appendAudits(
+    // `recordCaseEvents`, not `appendAudits`: the same user action must leave the same rows whether it
+    // was made one case at a time or two hundred at once. The audit event alone satisfies the hard
+    // rule, but `case_actions` is canonical operational state (DATA_MODEL_CONTRACTS §6) and a bulk
+    // path that skipped it produced a ledger shaped by how many rows the operator happened to tick.
+    const payloadFor = (c: { assignee: string | null }) => ({
+      assignee: assignee ?? "unassigned",
+      previousAssignee: c.assignee ?? "unassigned",
+      bulk: true,
+    });
+    await stores.events.recordCaseEvents(
       changing.map((c) => ({
-        eventType: "CASE_ASSIGNED",
-        entityType: "case",
-        entityId: c.id,
-        actor,
-        refRunId: c.lastRunId,
-        refCaseId: c.id,
-        refMeasureVersionId: c.measureId,
-        // The same payload shape the single-case path writes, so one timeline renders both.
-        payload: { assignee: assignee ?? "unassigned", previousAssignee: c.assignee ?? "unassigned", bulk: true },
+        action: { caseId: c.id, actionType: "ASSIGNED", actor, payload: payloadFor(c) },
+        audit: {
+          eventType: "CASE_ASSIGNED",
+          entityType: "case",
+          entityId: c.id,
+          actor,
+          refRunId: c.lastRunId,
+          refCaseId: c.id,
+          refMeasureVersionId: c.measureId,
+          // The same payload shape the single-case path writes, so one timeline renders both.
+          payload: payloadFor(c),
+        },
       })),
     );
   }
 
-  const assigned = await stores.cases.assignCases(changing.map((c) => c.id), assignee);
+  // Compare-and-set against the owner we just read, so a row another operator moved in between is
+  // skipped rather than overwritten — its audit (already written) becomes a recorded-but-unapplied
+  // action, never a state change the ledger describes wrongly.
+  const assigned = await stores.cases.assignCases(
+    changing.map((c) => ({ id: c.id, expectedAssignee: c.assignee ?? null })),
+    assignee,
+  );
   // The four numbers PARTITION the input: assigned + unchanged + closed.length + missing.length ===
   // the de-duplicated ids asked for. `unchanged` used to be `ids.length - assigned.length`, which
   // also counted the closed and the missing — so a caller adding them up got more than it sent, and

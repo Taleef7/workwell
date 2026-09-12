@@ -30,6 +30,15 @@ SQLite floor and the Pg ceiling read the current row and apply the shared pure `
   auto-resolve (status `RESOLVED`) or an auto-exclusion (status `EXCLUDED`) whose waiver has since
   lapsed so CQL no longer returns EXCLUDED. Reopening a human-closed case is left an explicit, audited
   operator action.
+- **So do the open-case READERS, and that had to be propagated (MM-2).** The work list, its CSV export
+  (`?status=open`) and the MCP `list_cases`/`list_noncompliant` tools each mapped "open" to `["OPEN"]`
+  alone. A case an operator had started was therefore visible on the screen and absent from the CSV
+  taken off that screen, and absent from the tool serving the same list to a client — a row missing
+  from an export is missing without anyone being told. All four now use `ACTIVE_CASE_STATUSES`.
+  **Two readers still scope to `OPEN` only and are left alone deliberately**: outreach-campaign
+  targeting (`case/outreach-campaign.ts`) and the case attached to an MCP compliance answer
+  (`mcp/tools.ts`). Both predate this and neither is the work list; whether a case someone has already
+  picked up should also receive automated outreach is a question for the owner, not a silent widening.
 - **Active-case counts include `IN_PROGRESS`.** Because the upsert preserves `IN_PROGRESS` (rather than
   flipping it to OPEN), every "active/open case" rollup (`ACTIVE_CASE_STATUSES` = `OPEN` +
   `IN_PROGRESS`) counts both — otherwise a reconfirmed IN_PROGRESS case would silently drop out of the

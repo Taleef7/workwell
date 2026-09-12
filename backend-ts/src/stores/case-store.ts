@@ -52,6 +52,12 @@ export interface UpsertedCase extends CaseRecord {
   disposition: import("../case/case-logic.ts").CaseUpsertDisposition;
 }
 
+/** One case to assign, paired with the assignee the caller read on it (`null` = unassigned). */
+export interface CaseAssignExpectation {
+  id: string;
+  expectedAssignee: string | null;
+}
+
 export interface CaseQuery {
   /** Concrete statuses to include (e.g. ["OPEN"]); omit for all. */
   statuses?: string[];
@@ -158,22 +164,33 @@ export interface CaseStore {
    */
   getCases(ids: readonly string[]): Promise<CaseRecord[]>;
   /**
-   * Assign many cases in one statement, returning the ids that actually CHANGED.
+   * Assign many cases, returning the ids that actually CHANGED.
    *
    * Set-based on purpose. The per-case `patchCase` path is a round trip each, and the panel backfill
    * and the work list's "assign these 200 patients' gaps" both hand it hundreds at once — enough to
    * exceed a worker deadline on Neon.
    *
-   * The store applies the same conditions the caller used to predict the change, so a row someone else
-   * touched in between is silently skipped rather than overwritten: the assignee must actually differ,
-   * and the case must still be ACTIVE. That is why the return value is the ids changed rather than a
-   * count — the caller audits exactly those.
+   * **Compare-and-set: each entry carries the assignee the CALLER READ**, and the row is updated only
+   * while it still holds that value. The first version checked only that the current assignee differed
+   * from the target, which is not the same thing and loses a concurrent write: A reads a case owned by
+   * Alice and audits `previousAssignee: Alice`; B assigns it to Bob; A's update still matches (Bob
+   * differs from A's target) and overwrites Bob, leaving a ledger entry naming a transition that never
+   * happened. With the pre-read owner in the predicate, A's row simply does not match and is skipped —
+   * its already-written audit becomes a recorded-but-unapplied action, which is the side of the trade
+   * `case-actions.ts` chose.
+   *
+   * The two conditions are distinct and both can fire: the compare-and-set fails on a concurrent
+   * change, and `assignee <> target` fails on a request that asks for what is already there (a no-op,
+   * which must not be reported as changed and must not be audited).
+   *
+   * The case must still be ACTIVE. The return value is the ids changed rather than a count, because
+   * the caller audits exactly those.
    *
    * There is deliberately NO provenance argument here yet. `cases.assignment_source` is PR 2's
    * owner-written DDL; writing to a column that does not exist would fail, and accepting an argument
    * this method cannot honour would be worse — a parameter that reads as recorded and is discarded.
    */
-  assignCases(ids: readonly string[], assignee: string | null): Promise<string[]>;
+  assignCases(expected: readonly CaseAssignExpectation[], assignee: string | null): Promise<string[]>;
   listCases(query: CaseQuery): Promise<CaseRecord[]>;
   /** Patch mutable fields (always bumps updated_at); returns the updated row or null. */
   patchCase(id: string, patch: CasePatch): Promise<CaseRecord | null>;

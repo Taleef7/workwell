@@ -83,6 +83,20 @@ export interface CaseEventStore {
    * partial failure can never leave a state change without its ledger entry.
    */
   recordCaseEvent(input: { action: InsertActionInput; audit: AppendAuditInput }): Promise<void>;
+  /**
+   * Many case actions and their audit events, atomically — the batch form of `recordCaseEvent`.
+   *
+   * Exists so a BULK action leaves the same rows a per-case one does. Bulk assign first wrote only
+   * `audit_events` through `appendAudits`, which satisfies the hard rule (every state change writes an
+   * audit event) but produced a DIFFERENT ledger depending on how many cases the operator happened to
+   * select: the same assignment made one at a time left `case_actions` rows and made in bulk did not.
+   * `DATA_MODEL_CONTRACTS` §6 names `case_actions` as canonical operational state, and two paths for
+   * one user action that disagree about what they record is the kind of divergence that is invisible
+   * until something reads the half that is missing.
+   *
+   * `[]` is a no-op, never a statement. Ordering follows the input.
+   */
+  recordCaseEvents(inputs: readonly { action: InsertActionInput; audit: AppendAuditInput }[]): Promise<void>;
   /** Oldest-first case timeline, sourced solely from audit_events (CASE_VIEWED excluded). The
    *  twin case_action of each action is intentionally not listed — audit_events is the canonical
    *  ledger and UNION-ing both arms double-counted every action on the case-detail timeline. */

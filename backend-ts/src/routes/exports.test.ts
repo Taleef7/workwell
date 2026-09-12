@@ -126,6 +126,28 @@ test("GET /api/exports/cases carries the case + latestOutreachDeliveryStatus col
   assert.ok(lines.some((l) => l.includes("Omar Siddiq") && l.includes("OVERDUE")));
 });
 
+test("?status=open exports the ACTIVE set, so a case someone started is not missing from the CSV", async () => {
+  // The export is reached from the work list's own button with the status that list is showing. While
+  // this mapped "open" to ["OPEN"] and the list showed OPEN + IN_PROGRESS, scheduling an appointment
+  // moved a case to IN_PROGRESS and it stayed on screen but vanished from the CSV taken off that
+  // screen — and a row missing from an export is missing without anyone being told.
+  const store = new SqliteCaseStore((env as { DB: never }).DB);
+  const before = await text("/api/exports/cases?format=csv&status=open");
+  assert.ok(before.some((l) => l.includes(caseId)), "the case is on the open export to begin with");
+
+  await store.patchCase(caseId, { status: "IN_PROGRESS" });
+  try {
+    const after = await text("/api/exports/cases?format=csv&status=open");
+    assert.ok(after.some((l) => l.includes(caseId)), "an IN_PROGRESS case dropped out of the open export");
+    assert.ok(after.some((l) => l.includes(caseId) && l.includes("IN_PROGRESS")), "and it says so");
+    // `closed` is unaffected — this widened "open", it did not blur the tabs.
+    const closed = await text("/api/exports/cases?format=csv&status=closed");
+    assert.ok(!closed.some((l) => l.includes(caseId)));
+  } finally {
+    await store.patchCase(caseId, { status: "OPEN" });
+  }
+});
+
 test("GET /api/audit-events/export lists the ledger; employeeId derived from the referenced case", async () => {
   const lines = await text("/api/audit-events/export?format=csv");
   assert.equal(lines[0], "timestamp,eventType,caseId,runId,measureName,employeeId,actor,detail");

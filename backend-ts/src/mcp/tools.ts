@@ -24,6 +24,7 @@ import { generateTraceability } from "../measure/measure-traceability.ts";
 import { computeDataReadiness } from "../measure/data-readiness.ts";
 import { complianceRateOf } from "../program/rollup-shared.ts";
 import { AGE_BANDS, hasActiveSubjectFilters, isAgeBand, isSex, matchesSubjectFilters, payerCodesOf } from "../compliance/subject-filters.ts";
+import { ACTIVE_CASE_STATUSES } from "../case/case-logic.ts";
 import type { JsonRecord } from "./tool-audit.ts";
 import { outcomeForCase } from "../case/case-outcome.ts";
 import { MEASURE_CATALOG } from "../measure/measure-catalog.ts";
@@ -133,7 +134,10 @@ function caseStatusesFor(raw: string): string[] | undefined {
       return ["RESOLVED", "CLOSED"];
     case "open":
     case "":
-      return ["OPEN"];
+      // The ACTIVE set, matching the work list and the CSV export: a case an operator has started is
+      // still work, and a client asking for the open list must not be handed a shorter one than the
+      // screen shows.
+      return [...ACTIVE_CASE_STATUSES];
     default:
       return [raw.toUpperCase()];
   }
@@ -503,7 +507,9 @@ async function listNoncompliant(args: JsonRecord, deps: McpToolDeps): Promise<un
   const measure = measureNameFilter ? await resolveMeasure(deps, { measureName: measureNameFilter }) : null;
   // Same leak guard as list_cases: an unresolved measure filter must error, not return all cases.
   if (measureNameFilter && !measure) return safeError("MEASURE_NOT_FOUND", `Measure not found: ${measureNameFilter}`);
-  let rows = await deps.caseStore.listCases({ statuses: ["OPEN"], measureId: measure?.measureId, limit: 100000, offset: 0 });
+  // ACTIVE, not OPEN-only: an IN_PROGRESS case is still a non-compliant subject someone is working,
+  // and excluding it here made this tool disagree with the work list rendering the same cases.
+  let rows = await deps.caseStore.listCases({ statuses: [...ACTIVE_CASE_STATUSES], measureId: measure?.measureId, limit: 100000, offset: 0 });
   const directory = directoryForSubjects(deps, rows.map((c) => c.employeeId));
   const profileMatch = profileSubjectMatcher(directory.employeeById);
   rows = rows.filter((c) => profileMatch(c.employeeId));

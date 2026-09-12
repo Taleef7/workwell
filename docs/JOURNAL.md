@@ -113,14 +113,43 @@ last-written query string held in a ref. The jsdom harness cannot reproduce the 
 between clicks — so both spellings passed the test written for it. The test was deleted and the reason
 is in the code, because a green assertion over a race the harness defines away is worse than none.
 
-Verified after the review round: backend 2,684 tests, 2,661 pass, 1 fail, 22 skipped — the failure is
+**A third review, on the PR itself, found the half of the status change I had not propagated.** Widening
+the work list's default to `ACTIVE_CASE_STATUSES` fixed the two lists and left `?status=open` on the
+cases CSV export and the MCP `list_cases` / `list_noncompliant` tools still mapping to `["OPEN"]`. So an
+appointment moved a case to IN_PROGRESS and it stayed on the screen while disappearing from the CSV
+taken off that screen, and from the tool serving the same list to a client. A row missing from an export
+is missing without anyone being told, which is the worse half of the two failures this project names.
+All four readers now share the constant. Two more scope to OPEN only and are deliberately untouched —
+outreach-campaign targeting and the case attached to an MCP compliance answer — because neither is the
+work list and whether a case somebody has already picked up should also receive automated outreach is an
+owner's question, not a silent widening. Recorded in `DATA_MODEL_CONTRACTS` §4 rather than left implicit.
+
+**And it sharpened the bulk-assign race past where the first two reviews left it.** `assignCases`
+checked that the current assignee DIFFERED FROM THE TARGET — not that it still equalled the value the
+caller had read. Those are not the same test: A reads a case owned by Alice and audits
+`previousAssignee: Alice`, B assigns it to Bob, and A's update still matches (Bob differs from A's
+target), so A overwrites B and the ledger names a transition that never happened. It is now a
+compare-and-set — each entry carries the assignee the caller read, and the row moves only while it still
+holds it — so a row another operator touched is skipped and its already-written audit becomes a
+recorded-but-unapplied action, which is the side of the trade `case-actions.ts` chose. Postgres does it
+in one statement by zipping the pairs through `unnest`; the floor groups by prior owner, which is a
+handful of statements because the distinct set is the assignable accounts plus unassigned. Both
+mutation-checked: removing the compare fails the contract on each dialect.
+
+**The same review restored the other half of the ledger.** Bulk assign wrote only `audit_events`, which
+satisfies the hard rule but left `case_actions` — canonical operational state — shaped by how many rows
+the operator happened to tick: the same assignment made one at a time wrote both rows and made in bulk
+wrote one. `recordCaseEvents` is the batch form of the existing atomic dual-write, and the test asserts
+the row is there with the same payload the single-case path writes, and that a no-op writes neither.
+
+Verified after three review rounds: backend 2,686 tests, 2,663 pass, 1 fail, 22 skipped — the failure is
 `corpus-membership.test.ts`, the known stale local sparse-checkout of vendored artifacts, green in CI.
 Backend typecheck clean. The store contract's two new cases ran on BOTH stores against a real
 `postgres:16` (103/103 ceiling, 100/100 floor), and the null-safe assignee comparison was
 mutation-checked on each dialect — `<>` instead of `IS DISTINCT FROM` / `IS NOT` fails both, which is
-the bug that would have made assigning an unassigned case a silent no-op. The roster-filter and
-timeline-collapse fixes were mutation-checked the same way. Frontend 415 pass across 77 files, lint
-clean, build clean.
+the bug that would have made assigning an unassigned case a silent no-op. The roster-filter, the
+timeline-collapse, the compare-and-set, the `case_actions` dual-write and the widened export status
+were each mutation-checked the same way. Frontend 415 pass across 77 files, lint clean, build clean.
 
 **Not in this PR, and named rather than dropped:** the patient page's inline per-gap assign select and
 the Maui `worklist.spec.ts` e2e. Both are additive to what is here and neither gates PR 2.

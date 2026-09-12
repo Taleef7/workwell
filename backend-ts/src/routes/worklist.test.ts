@@ -169,6 +169,45 @@ test("bulk assign reports exactly what MOVED, and writes one audit event per mov
   assert.equal((await cases.getCase(omarAudiogram))?.assignee, null);
 });
 
+/** ASSIGNED rows in `case_actions` for a case. No store reader exposes them, so this asks the table. */
+async function assignedActions(caseId: string): Promise<{ performed_by: string; payload_json: string }[]> {
+  const db = (env as { DB: { prepare: (sql: string) => { bind: (...a: unknown[]) => { all: <T>() => Promise<{ results?: T[] }> } } } }).DB;
+  const { results } = await db
+    .prepare("SELECT performed_by, payload_json FROM case_actions WHERE case_id = ? AND action_type = 'ASSIGNED' ORDER BY id")
+    .bind(caseId)
+    .all<{ performed_by: string; payload_json: string }>();
+  return results ?? [];
+}
+
+test("a bulk assignment leaves the SAME rows a one-at-a-time assignment does", async () => {
+  // The divergence this closes: bulk wrote only `audit_events`, so the same user action left a
+  // different ledger depending on how many rows the operator ticked — and `case_actions` is canonical
+  // operational state (DATA_MODEL_CONTRACTS §6), not a duplicate of the audit table.
+  const before = (await assignedActions(omarAudiogram)).length;
+  const auditsBefore = (await events.caseTimeline(omarAudiogram)).filter((e) => e.eventType === "CASE_ASSIGNED").length;
+
+  await bulk({ assignee: CM, caseIds: [omarAudiogram] });
+
+  const actions = await assignedActions(omarAudiogram);
+  assert.equal(actions.length, before + 1, "the bulk path writes a case_action, not only an audit event");
+  assert.equal(actions.at(-1)!.performed_by, CM);
+  const payload = JSON.parse(actions.at(-1)!.payload_json) as Record<string, unknown>;
+  // The same payload shape the single-case path writes, so one timeline renders both.
+  assert.equal(payload.assignee, CM);
+  assert.equal(payload.previousAssignee, "unassigned");
+
+  // Its audit twin is written too — the two halves go together or not at all.
+  const auditsAfter = (await events.caseTimeline(omarAudiogram)).filter((e) => e.eventType === "CASE_ASSIGNED").length;
+  assert.equal(auditsAfter, auditsBefore + 1);
+
+  // And a no-op writes NEITHER, so the ledger does not fill with "assigned to whoever already had it".
+  await bulk({ assignee: CM, caseIds: [omarAudiogram] });
+  assert.equal((await assignedActions(omarAudiogram)).length, before + 1);
+  assert.equal((await events.caseTimeline(omarAudiogram)).filter((e) => e.eventType === "CASE_ASSIGNED").length, auditsBefore + 1);
+
+  await bulk({ assignee: null, caseIds: [omarAudiogram] });
+});
+
 test("bulk assign separates MISSING from CLOSED from unchanged, so the caller knows which is which", async () => {
   const ghost = crypto.randomUUID();
   const closedCase = (await cases.upsertFromOutcome({

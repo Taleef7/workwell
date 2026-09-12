@@ -6,7 +6,7 @@
  */
 import { isUuid, type PgPool } from "./pg-database.ts";
 import { SPIKE_SCHEMA } from "./schema-pg.ts";
-import type { CaseRecord, CaseQuery, CaseStore, CasePatch, UpsertCaseInput, UpsertedCase } from "../case-store.ts";
+import type { CaseAssignExpectation, CaseRecord, CaseQuery, CaseStore, CasePatch, UpsertCaseInput, UpsertedCase } from "../case-store.ts";
 import { ACTIVE_CASE_STATUSES, planCaseUpsert, planNextAction, priorityFor, nextActionFor } from "../../case/case-logic.ts";
 
 interface CaseRow {
@@ -458,24 +458,33 @@ export class PgCaseStore implements CaseStore {
     return rows.map(toRecord);
   }
 
-  async assignCases(ids: readonly string[], assignee: string | null): Promise<string[]> {
+  async assignCases(expected: readonly CaseAssignExpectation[], assignee: string | null): Promise<string[]> {
     // A non-uuid id cannot be a case here and would abort the whole statement with a cast error, so it
     // is dropped rather than allowed to fail the batch — the caller reports it as missing either way.
-    const valid = ids.filter(isUuid);
+    const valid = expected.filter((e) => isUuid(e.id));
     if (valid.length === 0) return [];
-    // ONE statement: the UPDATE selects its own rows and reports which it changed. The conditions are
-    // the same ones the caller used to predict the change, so a row someone else reassigned in between
-    // stops matching and is skipped rather than overwritten. `IS DISTINCT FROM` rather than `<>`
-    // because `assignee` is nullable and `NULL <> 'x'` is NULL — an unassigned row would never match,
-    // and assigning an unassigned case is the single most common thing this is asked to do.
+    // ONE statement. `unnest` zips the ids with the assignee the caller READ on each, so the row is
+    // updated only while it still holds that value — see `CaseStore.assignCases` for why "differs from
+    // the target" is not the same test and silently overwrites a concurrent write.
+    //
+    // `IS NOT DISTINCT FROM` for the compare (an unassigned row's expected value is NULL, and
+    // `NULL = NULL` is NULL), `IS DISTINCT FROM` for the target (skip a no-op). Both can fail, for
+    // different reasons, so neither is decoration.
     const { rows } = await this.pool.query<{ id: string }>(
-      `UPDATE ${T}
-          SET assignee = $2, updated_at = NOW()
-        WHERE id = ANY($1::uuid[])
-          AND status = ANY($3::text[])
-          AND assignee IS DISTINCT FROM $2
-        RETURNING id`,
-      [valid, assignee, [...ACTIVE_CASE_STATUSES]],
+      `UPDATE ${T} AS c
+          SET assignee = $3, updated_at = NOW()
+         FROM unnest($1::uuid[], $2::text[]) AS e(id, expected_assignee)
+        WHERE c.id = e.id
+          AND c.status = ANY($4::text[])
+          AND c.assignee IS NOT DISTINCT FROM e.expected_assignee
+          AND c.assignee IS DISTINCT FROM $3
+        RETURNING c.id`,
+      [
+        valid.map((e) => e.id),
+        valid.map((e) => e.expectedAssignee),
+        assignee,
+        [...ACTIVE_CASE_STATUSES],
+      ],
     );
     return rows.map((r) => r.id);
   }

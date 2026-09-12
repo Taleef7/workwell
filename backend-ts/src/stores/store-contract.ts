@@ -996,11 +996,13 @@ export function caseStoreContract(label: string, freshStore: () => Promise<CaseS
       outcomeStatus,
     });
 
-  test(`[${label}] getCases reads many by id; assignCases is set-based and reports only what CHANGED`, async () => {
+  test(`[${label}] getCases reads many by id; assignCases is compare-and-set and reports only what CHANGED`, async () => {
     const store = await freshStore();
     const a = (await upsert(store, "OVERDUE", { subjectId: "emp-001" }))!;
     const b = (await upsert(store, "OVERDUE", { subjectId: "emp-002" }))!;
     const c = (await upsert(store, "OVERDUE", { subjectId: "emp-003" }))!;
+    /** Every case currently unassigned, which is what a caller reads before a first assignment. */
+    const asRead = (...ids: string[]) => ids.map((id) => ({ id, expectedAssignee: null }));
 
     const read = await store.getCases([a.id, c.id, crypto.randomUUID()]);
     assert.deepEqual(read.map((r) => r.id).sort(), [a.id, c.id].sort(), "unknown ids are absent, not an error");
@@ -1009,30 +1011,61 @@ export function caseStoreContract(label: string, freshStore: () => Promise<CaseS
     // Assigning UNASSIGNED rows is the common case, and the one a plain `<>` comparison silently
     // breaks: `NULL <> 'x'` is NULL, so every unassigned row would be skipped and the caller would
     // report "0 assigned" over cases it had just been asked to assign.
-    const first = await store.assignCases([a.id, b.id], "cm@workwell.dev");
+    const first = await store.assignCases(asRead(a.id, b.id), "cm@workwell.dev");
     assert.deepEqual(first.sort(), [a.id, b.id].sort());
     assert.equal((await store.getCase(a.id))?.assignee, "cm@workwell.dev");
 
     // Re-assigning the SAME value changes nothing and reports nothing — so the caller writes no
     // audit event for a no-op, which is what keeps the ledger free of "assigned to the person it was
     // already assigned to".
-    assert.deepEqual(await store.assignCases([a.id, b.id], "cm@workwell.dev"), []);
+    const held = [
+      { id: a.id, expectedAssignee: "cm@workwell.dev" },
+      { id: b.id, expectedAssignee: "cm@workwell.dev" },
+    ];
+    assert.deepEqual(await store.assignCases(held, "cm@workwell.dev"), []);
 
-    // A mixed batch reports exactly the subset that moved.
-    assert.deepEqual(await store.assignCases([a.id, c.id], "cm@workwell.dev"), [c.id]);
+    // COMPARE-AND-SET. A caller that read a STALE owner must not win: the row moved under it, and
+    // overwriting would both lose the other write and leave an audit entry naming a transition that
+    // never happened. "Differs from the target" is not this test and would have updated the row.
+    assert.deepEqual(
+      await store.assignCases([{ id: a.id, expectedAssignee: "someone.who.never.had.it@workwell.dev" }], "third@workwell.dev"),
+      [],
+      "a stale pre-read owner must not overwrite the current one",
+    );
+    assert.equal((await store.getCase(a.id))?.assignee, "cm@workwell.dev", "and the row is untouched");
+    // The same call with the CURRENT owner does apply, so the guard above is not just refusing everything.
+    assert.deepEqual(
+      await store.assignCases([{ id: a.id, expectedAssignee: "cm@workwell.dev" }], "third@workwell.dev"),
+      [a.id],
+    );
+
+    // A mixed batch reports exactly the subset that moved, and entries may carry DIFFERENT expected
+    // owners in one call — which is the real shape when a work list assigns a page of rows.
+    const mixed = await store.assignCases(
+      [
+        { id: a.id, expectedAssignee: "third@workwell.dev" },
+        { id: b.id, expectedAssignee: "cm@workwell.dev" },
+        { id: c.id, expectedAssignee: null },
+      ],
+      "cm@workwell.dev",
+    );
+    assert.deepEqual(mixed.sort(), [a.id, c.id].sort(), "b was already on the target; a and c moved");
 
     // Clearing is a change too, and back to NULL must be reported once and then not again.
-    assert.deepEqual((await store.assignCases([a.id], null)), [a.id]);
+    assert.deepEqual(await store.assignCases([{ id: a.id, expectedAssignee: "cm@workwell.dev" }], null), [a.id]);
     assert.equal((await store.getCase(a.id))?.assignee, null);
-    assert.deepEqual(await store.assignCases([a.id], null), [], "NULL → NULL is not a change");
+    assert.deepEqual(await store.assignCases([{ id: a.id, expectedAssignee: null }], null), [], "NULL → NULL is not a change");
 
     // Only ACTIVE cases are touched: a closed case is not silently reassigned.
     await store.patchCase(c.id, { status: "RESOLVED" });
-    assert.deepEqual(await store.assignCases([c.id], "someone.else@workwell.dev"), []);
+    assert.deepEqual(
+      await store.assignCases([{ id: c.id, expectedAssignee: "cm@workwell.dev" }], "someone.else@workwell.dev"),
+      [],
+    );
     assert.equal((await store.getCase(c.id))?.assignee, "cm@workwell.dev", "the closed case kept its assignee");
 
     assert.deepEqual(await store.assignCases([], "cm@workwell.dev"), []);
-    assert.deepEqual(await store.assignCases([crypto.randomUUID()], "cm@workwell.dev"), [], "an unknown id is not an error");
+    assert.deepEqual(await store.assignCases(asRead(crypto.randomUUID()), "cm@workwell.dev"), [], "an unknown id is not an error");
   });
 
   test(`[${label}] listCases({ employeeIds }) is the panel pre-filter — and an EMPTY set matches NOBODY`, async () => {

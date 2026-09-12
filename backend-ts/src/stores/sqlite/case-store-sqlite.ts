@@ -5,7 +5,7 @@
  * case invariant). COMPLIANT resolves an existing case without inserting a new one.
  */
 import type { CloudDatabase } from "@mieweb/cloud";
-import type { CaseRecord, CaseQuery, CaseStore, CasePatch, UpsertCaseInput, UpsertedCase } from "../case-store.ts";
+import type { CaseAssignExpectation, CaseRecord, CaseQuery, CaseStore, CasePatch, UpsertCaseInput, UpsertedCase } from "../case-store.ts";
 import { ACTIVE_CASE_STATUSES, planCaseUpsert, planNextAction, priorityFor, nextActionFor } from "../../case/case-logic.ts";
 
 interface CaseRow {
@@ -286,27 +286,41 @@ export class SqliteCaseStore implements CaseStore {
     return (results ?? []).map(toRecord);
   }
 
-  async assignCases(ids: readonly string[], assignee: string | null): Promise<string[]> {
-    if (ids.length === 0) return [];
-    // ONE statement with RETURNING, mirroring the Postgres ceiling: the UPDATE selects its own rows
-    // and reports which it changed. A predict-then-update pair would let a row change in between and
-    // be reported as assigned when it was skipped — the two stores must answer identically.
-    //
-    // `assignee IS NOT ?` is SQLite's NULL-SAFE inequality (the counterpart of Postgres's
-    // `IS DISTINCT FROM`). Plain `<>` would be NULL for an unassigned row, which never matches — and
-    // assigning a case that is currently unassigned is the most common thing this is asked to do.
+  async assignCases(expected: readonly CaseAssignExpectation[], assignee: string | null): Promise<string[]> {
+    if (expected.length === 0) return [];
+    // Grouped by the assignee the caller READ, then one statement per distinct value. The floor has no
+    // portable way to zip two arrays into a join the way Postgres's `unnest` does, and the number of
+    // distinct prior owners in one batch is tiny (the assignable accounts, plus unassigned) — so this
+    // is a handful of statements rather than one per case, and it asks the SAME question the ceiling
+    // asks: update only while the row still holds the value the caller read.
+    const byExpected = new Map<string | null, string[]>();
+    for (const entry of expected) {
+      const ids = byExpected.get(entry.expectedAssignee);
+      if (ids) ids.push(entry.id);
+      else byExpected.set(entry.expectedAssignee, [entry.id]);
+    }
+
     const active = [...ACTIVE_CASE_STATUSES];
-    const { results } = await this.db
-      .prepare(
-        `UPDATE cases SET assignee = ?, updated_at = ?
-          WHERE id IN (${ids.map(() => "?").join(", ")})
-            AND status IN (${active.map(() => "?").join(", ")})
-            AND assignee IS NOT ?
-        RETURNING id`,
-      )
-      .bind(assignee, new Date().toISOString(), ...ids, ...active, assignee)
-      .all<{ id: string }>();
-    return (results ?? []).map((r) => r.id);
+    const now = new Date().toISOString();
+    const changed: string[] = [];
+    for (const [expectedAssignee, ids] of byExpected) {
+      // `IS` is SQLite's NULL-safe equality and `IS NOT` its NULL-safe inequality — the counterparts
+      // of Postgres's `IS NOT DISTINCT FROM` / `IS DISTINCT FROM`. Plain `=` / `<>` are NULL for an
+      // unassigned row, and assigning an unassigned case is the commonest thing this is asked to do.
+      const { results } = await this.db
+        .prepare(
+          `UPDATE cases SET assignee = ?, updated_at = ?
+            WHERE id IN (${ids.map(() => "?").join(", ")})
+              AND status IN (${active.map(() => "?").join(", ")})
+              AND assignee IS ?
+              AND assignee IS NOT ?
+          RETURNING id`,
+        )
+        .bind(assignee, now, ...ids, ...active, expectedAssignee, assignee)
+        .all<{ id: string }>();
+      for (const row of results ?? []) changed.push(row.id);
+    }
+    return changed;
   }
 
   async patchCase(id: string, patch: CasePatch): Promise<CaseRecord | null> {
