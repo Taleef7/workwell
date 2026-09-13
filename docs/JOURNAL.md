@@ -145,10 +145,18 @@ Against the sandbox the write project skips **nine of its ten** — the tenth is
 project because its file also writes, and it passes. The guard itself was executed rather than
 reasoned about: `writesAllowed()` returns denied for the sandbox, denied for a local browser pointed at
 the sandbox API, denied for `evil-localhost.example.com`, denied with nothing set, and allowed for
-`localhost` and `127.0.0.1` and for the explicit flag. The write tests themselves have not run since
-these changes — they need a stack this machine cannot boot beside the tools running on it (0.9 GB
-free), so they are verified by the CI dispatch on the branch, where localhost allows writes over the
-48-patient corpus.
+`localhost` and `127.0.0.1` and for the explicit flag. This machine cannot boot a stack beside the
+tools running on it (0.9 GB free), so **the write tests ran on CI: 39 of 39 green, all ten of them**,
+including the restores and the hook that asks the server whether the account is back where it started.
+
+**CI found one more, and it was the interesting kind.** The roster's PCP test took the second option in
+the dropdown — the first real provider. The practice has forty providers and CI's corpus has
+forty-eight patients, so most panels there hold nobody: the test selected an empty panel, and "the
+filter narrowed the roster" was satisfied by a filter that returned nothing. On the sandbox the first
+provider happens to have patients, which is why three runs against 20,000 patients called it sound. The
+provider now comes from the directory, chosen for having any. That is the same lesson as the hard-coded
+48, arriving from the other direction: a spec that has only ever run against one stack is a spec whose
+assumptions nobody has tested.
 
 ## 2026-09-12 (later) — the panel is a thing the system knows, and a column that says who chose
 
