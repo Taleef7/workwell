@@ -313,14 +313,26 @@ test.describe("Maui panels — mapping a panel moves its open gaps", () => {
   test("a supervisor maps an un-owned panel and is told what moved", async ({ page, request }) => {
     token = await getAuthToken(request);
     const panels = await fetchPanels(request, token);
-    const candidates = panels.filter((p) => !p.assignee).sort((a, b) => a.patients - b.patients);
-    test.skip(candidates.length === 0, "every panel already has an owner on this stack");
-    provider = candidates[0]!;
-
-    moved = await openCasesFor(request, token, provider.providerId);
+    // The SMALLEST un-owned panel that actually has open gaps. Smallest, so a run against a large
+    // stack moves as few cases as possible; with gaps, because the backfill is the behaviour this
+    // describe is named for and an empty panel takes the "nothing to move" branch through every
+    // assertion in it. On CI's 48-patient corpus most of the forty providers have no patients at all,
+    // so sorting by size alone chose an empty one — and the only routinely write-enabled environment
+    // was the one never exercising the backfill.
+    const candidates = panels.filter((p) => !p.assignee && p.patients > 0).sort((a, b) => a.patients - b.patients);
+    for (const candidate of candidates) {
+      const cases = await openCasesFor(request, token, candidate.providerId);
+      if (cases.length > 0) {
+        provider = candidate;
+        moved = cases;
+        break;
+      }
+    }
+    test.skip(provider === undefined, "no un-owned panel on this stack has open gaps to move");
+    const target = provider!;
 
     await openWorklist(page, "?tab=panels");
-    const label = `Worked by, ${provider.providerName}`;
+    const label = `Worked by, ${target.providerName}`;
     await expect(selectTrigger(page, label)).toBeVisible({ timeout: 30_000 });
     await chooseFrom(page, label, QUALITY_STAFF);
 
@@ -328,7 +340,7 @@ test.describe("Maui panels — mapping a panel moves its open gaps", () => {
     // reassigned a few hundred open cases tells the operator nothing about the part that matters.
     // Captured in ONE poll, not asserted-then-re-read: a success toast dismisses itself after five
     // seconds, so finding it and then asking for its text again can land after it has detached.
-    const toastText = new RegExp(`${provider.providerName} → ${QUALITY_STAFF}`);
+    const toastText = new RegExp(`${target.providerName} → ${QUALITY_STAFF}`);
     let toast = "";
     await expect
       .poll(

@@ -180,10 +180,19 @@ test.describe("Maui case workflow", () => {
    */
   test.afterAll(async ({ playwright }) => {
     if (assigned.length === 0) return;
+    // FIRST snapshot per case wins. Both tests pick a case off `GET /api/cases?status=open`, which is
+    // ordered `updated_at DESC` — so assigning one in the first test makes it the newest, and the
+    // second test picks the SAME case and records its "prior" owner as the account the first test just
+    // put there. Replaying in insertion order then restores the true owner and immediately overwrites
+    // it with quality-staff, leaving the case assigned after a run that reported success. That is the
+    // leak this whole file exists to prevent, arriving through the cleanup instead of the test.
+    const earliest = new Map<string, (typeof assigned)[number]>();
+    for (const entry of assigned) if (!earliest.has(entry.caseId)) earliest.set(entry.caseId, entry);
+
     const ctx = await playwright.request.newContext();
     const failures: string[] = [];
     try {
-      for (const { token, caseId, assignee } of assigned) {
+      for (const { token, caseId, assignee } of earliest.values()) {
         const res = await ctx.post(
           `${API_BASE}/api/cases/${caseId}/assign?assignee=${encodeURIComponent(assignee ?? "")}`,
           { headers: { Authorization: `Bearer ${token}` } },
