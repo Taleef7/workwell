@@ -309,26 +309,38 @@ test.describe("Maui panels — mapping a panel moves its open gaps", () => {
   let moved: PriorOwner[] = [];
   /** What the API said it actually moved — the panel's open cases minus any an operator owns. */
   let backfilled = 0;
+  /** How many of the panel's open cases were UNASSIGNED, and so certain to move (ADR-080 d3). */
+  let movable = 0;
 
   test("a supervisor maps an un-owned panel and is told what moved", async ({ page, request }) => {
     token = await getAuthToken(request);
     const panels = await fetchPanels(request, token);
-    // The SMALLEST un-owned panel that actually has open gaps. Smallest, so a run against a large
-    // stack moves as few cases as possible; with gaps, because the backfill is the behaviour this
-    // describe is named for and an empty panel takes the "nothing to move" branch through every
-    // assertion in it. On CI's 48-patient corpus most of the forty providers have no patients at all,
-    // so sorting by size alone chose an empty one — and the only routinely write-enabled environment
-    // was the one never exercising the backfill.
+    // The SMALLEST un-owned panel holding a gap the backfill will actually MOVE. Smallest, so a run
+    // against a large stack moves as few cases as possible.
+    //
+    // Two conditions, each learned from a run that passed while proving nothing. "Has patients" is not
+    // enough: on CI's 48-patient corpus most of the forty providers have none, so sorting by size alone
+    // chose an empty panel and every assertion took the "nothing to move" branch — the one routinely
+    // write-enabled environment never exercising the backfill. And "has open cases" is not enough
+    // either: `planPanelBackfill` moves an unowned case or a PANEL-sourced one and skips everything an
+    // operator placed, so a panel whose cases are all operator-owned reports zero and the
+    // `reported > 0` assertion below would fail against a perfectly healthy mapping.
+    //
+    // `/api/cases` does not expose `assignment_source`, so eligibility cannot be computed in full here.
+    // An UNASSIGNED case is unconditionally eligible, which is the sufficient condition this can see —
+    // and it gives the lower bound asserted after the mapping.
     const candidates = panels.filter((p) => !p.assignee && p.patients > 0).sort((a, b) => a.patients - b.patients);
     for (const candidate of candidates) {
       const cases = await openCasesFor(request, token, candidate.providerId);
-      if (cases.length > 0) {
+      const unassigned = cases.filter((c) => c.assignee === null).length;
+      if (unassigned > 0) {
         provider = candidate;
         moved = cases;
+        movable = unassigned;
         break;
       }
     }
-    test.skip(provider === undefined, "no un-owned panel on this stack has open gaps to move");
+    test.skip(provider === undefined, "no un-owned panel on this stack has an unassigned open gap to move");
     const target = provider!;
 
     await openWorklist(page, "?tab=panels");
@@ -361,7 +373,9 @@ test.describe("Maui panels — mapping a panel moves its open gaps", () => {
       const reported = Number((toast.match(/(\d[\d,]*) open gap/) ?? [])[1]?.replace(/,/g, "") ?? NaN);
       expect(Number.isFinite(reported), `the toast names what moved: "${toast}"`).toBe(true);
       expect(reported, "the backfill cannot move more cases than the panel has").toBeLessThanOrEqual(moved.length);
-      expect(reported, "a panel with open gaps moves some of them").toBeGreaterThan(0);
+      // Bounded BELOW by the panel's unassigned cases, which the backfill always takes, rather than by
+      // "more than nothing" — the tighter bound this can state without reading `assignment_source`.
+      expect(reported, "every unassigned gap on the panel moves").toBeGreaterThanOrEqual(movable);
       backfilled = reported;
     } else {
       expect(toast).toContain("no open gaps to move");
