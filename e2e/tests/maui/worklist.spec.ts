@@ -6,6 +6,7 @@ import {
   MAUI_PASSWORD,
   expectNoErrorPage,
   expectNoEmployeeWording,
+  fetchPanels,
   getAuthToken,
   waitForDataRows,
 } from "./helpers";
@@ -48,13 +49,6 @@ const WORKLIST_ROW_FIELDS = [
   "updatedAt",
 ] as const;
 
-interface PanelRow {
-  providerId: string;
-  providerName: string;
-  patients: number;
-  assignee: string | null;
-}
-
 interface PayerOption {
   code: string;
   name: string;
@@ -74,12 +68,6 @@ interface WorklistRow {
   employeeName: string;
   gapCount: number;
   openGaps: WorklistGap[];
-}
-
-async function fetchPanels(request: APIRequestContext, token: string): Promise<PanelRow[]> {
-  const res = await request.get(`${API_BASE}/api/panels`, { headers: { Authorization: `Bearer ${token}` } });
-  expect(res.status(), "GET /api/panels").toBe(200);
-  return (await res.json()) as PanelRow[];
 }
 
 async function fetchPayers(request: APIRequestContext, token: string): Promise<PayerOption[]> {

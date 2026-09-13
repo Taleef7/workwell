@@ -166,6 +166,29 @@ export async function getAuthToken(request: APIRequestContext): Promise<string> 
   return body.token;
 }
 
+/** A row of `GET /api/panels`: every provider in the directory, mapped or not (ADR-080). */
+export interface PanelRow {
+  providerId: string;
+  providerName: string;
+  location: string;
+  patients: number;
+  assignee: string | null;
+  updatedAt: string | null;
+}
+
+/**
+ * Every provider and who works their panel — the directory three specs need, in one place.
+ *
+ * `patients` is the count on the roster, and reading it is how a spec picks a provider who HAS any:
+ * the practice has forty providers and CI's corpus has forty-eight patients, so most panels there are
+ * empty, and "the first option in the dropdown" chose one of them.
+ */
+export async function fetchPanels(request: APIRequestContext, token: string): Promise<PanelRow[]> {
+  const res = await request.get(`${API_BASE}/api/panels`, { headers: { Authorization: `Bearer ${token}` } });
+  expect(res.status(), "GET /api/panels").toBe(200);
+  return (await res.json()) as PanelRow[];
+}
+
 /**
  * Wait for a list to hold DATA, not its loading skeleton.
  *

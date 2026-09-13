@@ -3,6 +3,7 @@ import {
   AS_QUALITY_LEAD_ROSTER,
   ROUTED_MEASURES,
   expectNoErrorPage,
+  fetchPanels,
   getAuthToken,
   grouped,
   rosterTotal,
@@ -146,15 +147,22 @@ test.describe("Maui roster panel filters", () => {
     await openRoster(page);
     expect(before, "the unfiltered roster must have patients for this to mean anything").toBeGreaterThan(1);
 
+    // A provider who actually HAS patients, asked of the directory rather than taken as the first
+    // option in the list. The select offers every provider in the practice, and on the 48-patient CI
+    // corpus most of them have nobody — so picking option two chose an empty panel, and "the filter
+    // narrowed the list" was then satisfied by a filter that returned nothing. CI found this; on the
+    // 20,000-patient sandbox that provider happened to have patients and the test looked sound.
+    const panels = await fetchPanels(request, token);
+    const target = panels.find((p) => p.patients > 0);
+    expect(target, "some provider must have patients for a panel filter to mean anything").toBeTruthy();
+    const providerId = target!.providerId;
+
     // Resolved by the select's own aria-label. Until 2026-09-08 these filters carried only a wrapping
     // <label>, and Chrome computed no accessible name for them, so the lookup found nothing.
     const pcpSelect = page.getByLabel(/^PCP$/);
     await expect(pcpSelect).toBeVisible({ timeout: 10_000 });
-    // The second option: the first is "All panels". Selected by VALUE so the assertion below is about
-    // the id the backend filters on, not a display name.
-    const providerId = await pcpSelect.locator("option").nth(1).getAttribute("value");
-    expect(providerId).toBeTruthy();
-    await pcpSelect.selectOption(providerId!);
+    // By VALUE, so the assertion below is about the id the backend filters on, not a display name.
+    await pcpSelect.selectOption(providerId);
 
     await expect(page).toHaveURL(new RegExp(`providerId=${providerId}`), { timeout: 20_000 });
     await expect(page.getByText(/^Filtered to$/)).toBeVisible({ timeout: 20_000 });
@@ -162,8 +170,8 @@ test.describe("Maui roster panel filters", () => {
     // patients on the pilot corpus, so both lists render a full page of 50 and comparing them compares
     // the page size with itself. And the server's number for this panel rather than "smaller than the
     // practice", which a mid-refetch zero also satisfies.
-    const panelTotal = await rosterTotal(request, token, `providerId=${encodeURIComponent(providerId!)}`);
-    expect(panelTotal, "the chosen panel must hold patients").toBeGreaterThan(0);
+    const panelTotal = await rosterTotal(request, token, `providerId=${encodeURIComponent(providerId)}`);
+    expect(panelTotal, "the chosen panel holds patients").toBeGreaterThan(0);
     expect(panelTotal).toBeLessThan(before);
     await expect.poll(() => statedRosterTotal(page), { timeout: 20_000 }).toBe(panelTotal);
 

@@ -1,10 +1,12 @@
 import { test, expect, type APIRequestContext, type Page } from "@playwright/test";
 import {
   API_BASE,
+  type PanelRow,
   AS_QUALITY_LEAD_PANELS,
   MAUI_ACCOUNTS,
   WRITES_SKIP_REASON,
   expectNoErrorPage,
+  fetchPanels,
   getAuthToken,
   loginAs,
   waitForDataRows,
@@ -54,23 +56,10 @@ const GAP_BADGE = /^\d+ (High|Medium|Low)$/;
  */
 const CASE_PAGE = 25;
 
-interface PanelRow {
-  providerId: string;
-  providerName: string;
-  patients: number;
-  assignee: string | null;
-}
-
 /** A case and the assignee it held before this suite touched it. */
 interface PriorOwner {
   caseId: string;
   assignee: string | null;
-}
-
-async function fetchPanels(request: APIRequestContext, token: string): Promise<PanelRow[]> {
-  const res = await request.get(`${API_BASE}/api/panels`, { headers: { Authorization: `Bearer ${token}` } });
-  expect(res.status(), "GET /api/panels").toBe(200);
-  return (await res.json()) as PanelRow[];
 }
 
 /**
