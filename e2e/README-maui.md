@@ -24,10 +24,57 @@ All Maui accounts use the password `Workwell123!`:
 | `clinician@maui.workwell.dev` | viewer (read-only) |
 | `admin@maui.workwell.dev` | admin |
 
-## Boot the local Maui stack
+## Reads, writes, and the stack you are pointed at
 
-The suite mutates data (triggers runs, sends outreach, assigns cases) — only
-run it against a local stack.
+The suite is split by whether a spec DISTURBS the stack it reads.
+
+Everything in the `maui` project is read-only, so it changes nothing on any
+stack it is pointed at. Three specs mutate and live in the `maui-writes`
+project, which Playwright schedules after every read has finished and runs on
+one worker: `runs.spec.ts` (starts a population run), `worklist-writes.spec.ts`
+(maps a provider panel, which reassigns every open case on it, and assigns a
+patient's gaps), and `case-workflow.spec.ts` (assigns a case, moves it to
+IN_PROGRESS, sends outreach).
+
+**Read-only is not the same as harmless at pilot scale.** One test in the
+`maui` project — the case CSV export in `exports.spec.ts` — currently holds the
+whole database connection pool for a minute against the 20,000-patient sandbox,
+and every database-backed endpoint queues behind it (measured 2026-09-13:
+`/api/panels` 0.3 s idle, three consecutive 45 s timeouts during an export).
+That test is red against the sandbox on purpose until the batched lookup lands,
+and the specs that happen to run after it can fail in its shadow. Against CI's
+48-patient corpus it is fast and green.
+
+**A write happens only against a local stack, or when you ask for one by name.**
+`writesAllowed()` (`tests/maui/helpers.ts`) is true when the base URL's host is
+`localhost` or `127.0.0.1`, or when `PLAYWRIGHT_ALLOW_WRITES=1` is set;
+otherwise every mutating test skips with the reason, and global setup refuses to
+start a population run. This is enforcement rather than advice because the
+advice was already here and did not hold: on 2026-09-12 the panel test ran
+against the deployed sandbox, moved 339 open cases onto a staff account, and its
+restore — reading one page of 50 — put back 50, leaving 289 cases assigned for
+about ten minutes on a stack the pilot group signs into.
+
+Where a write can be undone it is: each block restores every case to the
+assignee it actually had and then re-reads those cases to compare, and
+`worklist-writes.spec.ts` finally asks the SERVER whether the account is back
+where it started rather than trusting its own restore loop.
+
+Three things cannot be undone, and the guard rather than a cleverer cleanup is
+the answer to all three. The outreach record and the status change in
+`case-workflow.spec.ts` are a ledger of something having happened. And
+**`assignment_source` does not come back**: every assignment this suite makes or
+restores goes through the operator path, so a case that a nightly run had placed
+via a provider panel comes out marked as an operator's choice, and a later panel
+edit will leave it where it is (ADR-080 d1/d3). Harmless on CI's fresh corpus,
+permanent on any stack you run with `PLAYWRIGHT_ALLOW_WRITES=1`.
+
+```powershell
+# only when you mean it, and never against a stack somebody else is using
+$env:PLAYWRIGHT_ALLOW_WRITES = "1"
+```
+
+## Boot the local Maui stack
 
 ### 1. Backend (SQLite floor, no database needed)
 
@@ -72,20 +119,22 @@ before running the suite.
 cd e2e
 npx playwright install chromium   # first time only
 $env:PLAYWRIGHT_PROFILE = "maui"
-npx playwright test --project=maui
-```
-
-`PLAYWRIGHT_PROFILE=maui` is REQUIRED: every Maui spec skips itself when it
-is unset, and the global setup seeds no run, so Playwright exits green with
-every test skipped. The URLs default to the local ports above
-(`PLAYWRIGHT_BASE_URL`, `PLAYWRIGHT_API_BASE_URL`). The full PowerShell form:
-
-```powershell
-$env:PLAYWRIGHT_PROFILE = "maui"
 $env:PLAYWRIGHT_BASE_URL = "http://localhost:3000"
 $env:PLAYWRIGHT_API_BASE_URL = "http://localhost:8080"
-npx playwright test --project=maui
+npx playwright test --project=maui --project=maui-writes
 ```
+
+**Set both URLs.** `PLAYWRIGHT_PROFILE=maui` is REQUIRED — every Maui spec skips
+itself when it is unset, and the global setup seeds no run, so Playwright exits
+green with every test skipped. The two URLs are required in practice as well:
+`PLAYWRIGHT_BASE_URL` falls back to the **staging host**, not to localhost
+(`base-url.ts`), so omitting it drives a browser against staging while the API
+calls go to your local backend, and every failure then looks like a product
+defect. Omitting them also means writes are denied, since the guard above needs
+both to be local.
+
+Name both projects, or the write specs never run: `--project=maui` alone is the
+read-only half.
 
 When you are done, stop the backend and frontend dev servers.
 
