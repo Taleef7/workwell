@@ -1,5 +1,155 @@
 # Journal
 
+## 2026-09-13 — the suite reads the stack it runs against, and cannot quietly write to it
+
+The Maui e2e suite, closing #554 and finishing #558's verification half. It is a test-only change, and
+it is here because the last session pointed this suite at the deployed pilot sandbox and learned two
+different things: what the panels build does end to end, and that several of these specs could only
+ever have been run against one of the two stacks they are meant to cover.
+
+**#558's deploy half was already done, and nobody had noticed.** The issue assumed the sandbox still
+ran the pre-panel build. Maui auto-deploys on every push to `main` with `replace_existing`, so
+`71db0644` was live within four minutes of merging and the journal commit redeployed it again. What
+was outstanding was the verification, and this is it: the Panels tab lists all 40 providers with the
+un-owned ones first, an unmapped viewer opens on the whole practice, mapping a panel moved 339 open
+gaps and the toast said so, the staffer who owns it opens on that panel by name with no parameter in
+the URL (the page decides from the mappings — ADR-080 d5), and un-mapping left those gaps with their
+owner (ADR-080 d4). **One item cannot be checked yet and is not being claimed:**
+the panel owner is applied when a case is CREATED, and every case for this cycle already exists, so
+tonight's run takes the UPDATE branch. The unit tests cover it; the sandbox will show it at the next
+cycle rollover.
+
+**A test suite that mutates a shared stack should not be able to do so by accident.** On 09-12 the
+panel test ran against the sandbox, moved 339 cases onto a staff account, and its restore — reading
+one page of 50 — put back 50, leaving 289 assigned for about ten minutes on a stack the pilot group
+signs into. `README-maui.md` had said "only run this against a local stack" since the file was
+written. Advice that has already been ignored is not a control. `writesAllowed()` is now the control:
+a write happens when **both** the browser's base URL and the API's base URL name a local host, or when
+`PLAYWRIGHT_ALLOW_WRITES=1` says so, and never otherwise. Host equality rather than a substring,
+because `evil-localhost.example.com` contains the word. Global setup is guarded the same way — it
+would have started a 20,000-patient population run to satisfy itself, which is the write nobody
+thinks of.
+
+**Both URLs, because the first version of the guard read the wrong one.** It checked the browser's
+`PLAYWRIGHT_BASE_URL` while every write in the suite is addressed to `PLAYWRIGHT_API_BASE_URL`, which
+is a separate variable — so a local frontend pointed at the sandbox API, a pairing somebody would set
+up on purpose, read as a local run and would have sent every one of those writes to the pilot. A
+control that is wrong about which machine it is protecting is the defect class this project keeps
+collecting, and it was sitting inside the control written to prevent the incident. Caught by review,
+not by me.
+
+**Three specs write, not one.** `runs.spec.ts` was already isolated. The panel and bulk-assign work
+moved into a new `worklist-writes.spec.ts`. And `case-workflow.spec.ts` — which assigns a case, moves
+it to IN_PROGRESS and SENDS OUTREACH — was sitting in the parallel read-only project the whole time,
+restoring nothing. It is now in the write project behind the same guard, and it puts BOTH its
+assignments back; the status change and the outreach record cannot go back, which is the argument for
+the guard rather than for a cleverer cleanup. The write specs are named in ONE list in
+`playwright.config.ts`, because a file the two projects disagree about runs twice, once of them in
+parallel with the reads it disturbs — and that project runs on ONE worker, because `dependencies`
+orders projects and not the files inside one, so a fresh population run was free to create and close
+cases while the panel test was snapshotting their owners to restore them.
+
+**And the read-only project contained three writes waiting for a bad day.** The negative-authorization
+tests send the request they expect to be refused: a viewer's PUT against a real provider's panel, a
+viewer's POST for an ALL_PROGRAMS run. They are correct as long as authorization works — and the day
+it regresses, which is the day they exist for, the write lands and the assertion fails afterwards. On
+the sandbox that is a provider's whole panel reassigned, or a 20,000-patient run started from a laptop.
+Two of them now name a resource that does not exist (authorization is decided before the handler, so
+the refusal is unchanged), and the one that must name a real provider re-reads it afterwards and
+asserts the mapping did not move. A test in the read-only project has to be harmless when the thing it
+tests is broken, not only when it works.
+
+**Every count is now asked of the stack.** `roster.spec.ts` asserted "48 patients" four times — the CI
+corpus — so it could not be run against the pilot's 20,000 without failing on a correct page. The
+searched-for patient was hard-coded too ("Ari Wren"), who exists on one stack and nowhere on the
+other, so the search returned nothing and the floor assertion reported a working filter as broken. And
+row counts were compared where the roster pages at 50: on the pilot corpus the filtered and unfiltered
+lists both render a full page, so the comparison compared the page size with itself. The totals come
+from `X-Total-Count` now, and the assertions are about totals.
+
+**The one that would have passed while being wrong.** `jelly-beans.spec.ts` read a chip's count with
+`/(\d+)\s*$/`. Chips group with `fmtCount`, so "Overdue 1,382" read as **382**, and the test then
+asserted that 382 covered a worklist of 1,382. Two digits short of a green suite. The same file was
+looking for `?outcome=` hrefs pointing at `/cases`, which the "every chip drills into the roster"
+change re-pointed at `/compliance?…&status=` some time ago; nothing failed because the Maui e2e job is
+dispatch-only and nobody had dispatched it since 09-09. The drill-down now asserts EQUALITY between
+the chip and the roster's stated total rather than a bound, because both count the same run's outcomes
+in the same status and the out-of-population subjects that used to make it inexact have been their own
+bucket since ADR-079. Verified against the sandbox before being asserted: 1,382 overdue, 3,577
+compliant, 169 excluded, 14,872 out of population, 0 due soon, 0 missing, on both sides.
+
+**`exports.spec.ts` built its allow-list from one 100-row page.** On 48 patients that page IS the
+roster, so every exported name was in it and the assertion looked exact; on 20,000 it is the first
+half of one percent, so nearly every row failed against a stack that was behaving correctly. The
+roster pages at 200 rows maximum, so the honest version of that assertion is a hundred requests, and
+the question "does this name belong to this deployment?" needs one — `?q=` per sampled name. The
+occupational-identifier check still runs over every row, because that one is the profile-isolation
+guard and costs nothing at any size.
+
+**Two defects the new tests found in themselves, which is the argument for running them somewhere
+real.** `SkeletonRow` renders an actual `<tr>`, so every spec that waited for `tbody tr` was waiting
+for the loading skeleton and not for data. Two of the new tests read the page's total while it still
+said 0 and reported the server's 10,716 as a contract violation. And `base-url.ts` now resolves the
+target once for the config, the global setup and the write guard: they each had their own fallback,
+the config's being the staging host and the guard's being `http://localhost:3000`, so a run with no
+environment set would have driven a browser against staging while the guard concluded it was talking
+to a local stack.
+
+**And one the review found in the test that names it.** "One row per patient, and the total counts
+patients not gaps" asserted that the page's number equalled the work list's own number — one server
+value against itself, rendered. Nothing anywhere would have failed if the total became a count of
+gaps, which is the thing the work list was built to stop being. It now compares against
+`/api/cases`, which IS one row per gap: wherever anybody is due for two things, the work list's total
+must be the smaller of the two. Three other assertions were the same shape and are now equalities
+against the server's number for that exact filter, because "fewer than everyone" is also satisfied by
+the zero a list shows while it is still loading.
+
+### What the sandbox run found, and what it costs
+
+Read-only, one worker, against `maui.os.mieweb.org` on 2026-09-13: **27 passed, 2 failed.** Both
+failures are one defect and its shadow, and the shadow was measured rather than assumed — the chip
+spec, which fails in the whole-suite run, passes on its own against the same stack (2/2, 1.3 min).
+
+**The case CSV export does not complete at 20,000 patients — it answers 504.** Not slowly: at all.
+`curl` measures 504 after 60.2 s, the proxy cutting the request, twice. `casesCsv` issues one
+`latestOutreachDeliveryStatus` query PER CASE — about 15,300 of them, through a pool of ten
+connections, against a database that charges roughly 40 ms a trip.
+
+**And while it runs, every database-backed endpoint queues behind it.** Measured deliberately, because
+"the export is slow" and "the export takes the sandbox down" are different claims: with an export in
+flight, `/api/panels` timed out at 45 s on three consecutive probes and then answered in 22.7 s, while
+`/api/version`, which touches no database, stayed at 0.2 s throughout. Idle, `/api/panels` answers in
+0.3 s. That is pool exhaustion rather than a busy event loop, and it means one operator clicking
+Export CSV makes the pilot's pages unavailable for about a minute. The other failure — the chip test,
+which runs next — is that minute, arriving in the spec that happened to follow.
+
+**The measure detail page is the second finding, and it stands on its own** — it passed this run at
+10.0 s and failed the one before at 20.9 s, which is the finding rather than an inconsistency: the page
+is fast enough only while the read behind it is warm.
+`/api/programs/cms125/risk-outlook` answers **504 when cold** and **8.2 s warm**; `top-drivers` is
+34.9 s cold and 0.57 s warm; the programs overview 7.1 s cold and 3.6 s warm. `programRiskOutlook` is
+the one read model that never moved onto #547's latest-run winners and `RunKeyedMemo`: it reads every
+outcome row the measure has ever written, evidence JSON included, and makes three passes over them,
+per request. Under the pilot's 400-day retention that set grows by 20,000 rows a night. The page then
+gates its first paint on `Promise.allSettled` over all four of its reads, so the headline rate waits
+for the slowest. `/api/runs` also measured 32.5 s cold against 2.2 s warm, which is what global setup's
+default 30-second client timeout was hitting; that one is a client's patience with a first request and
+is now 120 s.
+
+None of that is fixed here. It is the next PR, and it is written down with numbers rather than
+adjectives so the fix can be measured against them.
+
+**Verified:** e2e typecheck clean; 39 tests across 11 files resolve to the two projects with no file in
+both (29 read-only, 10 write). Sandbox read-only run 27/2 as above, and the chip spec 2/2 on its own.
+Against the sandbox the write project skips **nine of its ten** — the tenth is a read that sits in that
+project because its file also writes, and it passes. The guard itself was executed rather than
+reasoned about: `writesAllowed()` returns denied for the sandbox, denied for a local browser pointed at
+the sandbox API, denied for `evil-localhost.example.com`, denied with nothing set, and allowed for
+`localhost` and `127.0.0.1` and for the explicit flag. The write tests themselves have not run since
+these changes — they need a stack this machine cannot boot beside the tools running on it (0.9 GB
+free), so they are verified by the CI dispatch on the branch, where localhost allows writes over the
+48-patient corpus.
+
 ## 2026-09-12 (later) — the panel is a thing the system knows, and a column that says who chose
 
 MM-2 PR 2. PR 1 made it fast to assign a page of patients; this makes it unnecessary most mornings.

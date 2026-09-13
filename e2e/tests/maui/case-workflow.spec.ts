@@ -1,8 +1,23 @@
-import { test, expect } from "@playwright/test";
-import { MAUI_ACCOUNTS, MAUI_PASSWORD, API_BASE, loginAs, expectNoErrorPage } from "./helpers";
+import { test, expect, type APIRequestContext } from "@playwright/test";
+import {
+  MAUI_ACCOUNTS,
+  MAUI_PASSWORD,
+  API_BASE,
+  WRITES_SKIP_REASON,
+  getAuthToken,
+  loginAs,
+  expectNoErrorPage,
+  writesAllowed,
+} from "./helpers";
 
 test.beforeEach(() => {
   test.skip(process.env.PLAYWRIGHT_PROFILE !== "maui", "maui profile only");
+  // This file assigns a case, moves it to IN_PROGRESS and SENDS OUTREACH, and the last two cannot be
+  // undone: an outreach record and its audit entry are the ledger saying somebody contacted a patient.
+  // So it runs against a local stack, or when the operator asks for writes by name — never as a side
+  // effect of pointing the suite at a URL. It was in the parallel read-only project until 2026-09-13,
+  // which is the same footing as the panel mapping that left 289 cases assigned on the pilot sandbox.
+  test.skip(!writesAllowed(), WRITES_SKIP_REASON);
 });
 
 test.describe("Maui case workflow", () => {
@@ -13,7 +28,26 @@ test.describe("Maui case workflow", () => {
   // a mutation guarantee.
   test.describe.configure({ mode: "serial" });
 
-  test("open an OVERDUE cms125 case and exercise the case-manager actions", async ({ page }) => {
+  /**
+   * Every assignment this file makes, with the owner it took the case from. BOTH tests assign — one
+   * through the UI and one through the API — and an earlier version recorded only the second, so a
+   * write-enabled run leaked the first case permanently and then broke the sibling write spec's
+   * "is the account back where it started" check. Caught in review.
+   */
+  const assigned: Array<{ token: string; caseId: string; assignee: string | null }> = [];
+
+  /** The case's owner right now, so the restore returns it rather than clearing it. */
+  async function priorAssignee(request: APIRequestContext, token: string, caseId: string): Promise<string | null> {
+    const res = await request.get(`${API_BASE}/api/cases/${caseId}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(res.status(), `GET /api/cases/${caseId}`).toBe(200);
+    const detail = (await res.json()) as { assignee?: string | null };
+    expect(Object.keys(detail), "the case reports its assignee").toContain("assignee");
+    return detail.assignee ?? null;
+  }
+
+  test("open an OVERDUE cms125 case and exercise the case-manager actions", async ({ page, request }) => {
     test.setTimeout(120_000);
     await loginAs(page, MAUI_ACCOUNTS.qualityLead.email);
 
@@ -24,7 +58,6 @@ test.describe("Maui case workflow", () => {
     // Open the first case detail
     const caseLink = page.locator("a[href^='/cases/']").filter({ visible: true }).first();
     await expect(caseLink).toBeVisible({ timeout: 20_000 });
-    const caseId = await caseLink.getAttribute("href");
     await caseLink.click();
     await expect(page).toHaveURL(/\/cases\//);
     await expectNoErrorPage(page);
@@ -47,6 +80,12 @@ test.describe("Maui case workflow", () => {
     const timeline = page.getByText(/Audit timeline/i).filter({ visible: true }).first();
     await expect(timeline).toBeVisible({ timeout: 10_000 });
 
+    // Remember who owns it BEFORE the click, so `afterAll` can put it back.
+    const openedId = decodeURIComponent((page.url().match(/\/cases\/([^/?#]+)/) ?? [])[1] ?? "");
+    expect(openedId, "the case detail URL names the case").not.toBe("");
+    const token = await getAuthToken(request);
+    assigned.push({ token, caseId: openedId, assignee: await priorAssignee(request, token, openedId) });
+
     // Assign to quality-staff. The control offers the deployment's assignable accounts; typing an
     // address is deliberately not possible, so the test picks the option a person would.
     const assigneeSelect = page.getByRole("combobox", { name: /assignee/i }).filter({ visible: true }).first();
@@ -58,6 +97,13 @@ test.describe("Maui case workflow", () => {
     await assignBtn.click();
     // Audit timeline should gain a Case Assigned entry
     await expect(page.getByText(/Case Assigned/i).first()).toBeVisible({ timeout: 30_000 });
+    // ...and the case must actually BE assigned. The timeline entry alone is satisfied by history: the
+    // restore puts the assignee back but leaves the audit trail, so on the second run against the same
+    // stack "Case Assigned" is already on the page before the click and the assertion above passes
+    // whether or not the control did anything.
+    await expect
+      .poll(() => priorAssignee(request, token, openedId), { timeout: 30_000 })
+      .toBe(MAUI_ACCOUNTS.qualityStaff.email);
 
     // Change status to IN_PROGRESS if offered
     const statusButton = page.getByRole("button", { name: /start|in progress/i }).first();
@@ -97,9 +143,15 @@ test.describe("Maui case workflow", () => {
       headers: { Authorization: `Bearer ${leadToken.token}` },
     });
     expect(casesRes.ok()).toBe(true);
-    const cases = (await casesRes.json()) as Array<{ caseId: string }>;
+    const cases = (await casesRes.json()) as Array<{ caseId: string; assignee?: string | null }>;
     expect(cases.length, "Maui should have open cases after its completed run").toBeGreaterThan(0);
     const caseId = cases[0].caseId;
+    // Remember who had it, so the restore below puts it back rather than blanket-unassigning a case
+    // an operator had already placed with somebody. The key's PRESENCE is asserted rather than
+    // defaulted: `?? null` on an absent field would read "we don't know" as "nobody", and the restore
+    // would then clear an assignment this test never made.
+    expect(Object.keys(cases[0]), "the case reports its assignee").toContain("assignee");
+    assigned.push({ token: leadToken.token, caseId, assignee: cases[0].assignee ?? null });
 
     // Assign it to quality-staff — the assignee travels as a query parameter (what the cases page sends).
     const assignRes = await request.post(
@@ -107,8 +159,8 @@ test.describe("Maui case workflow", () => {
       { headers: { Authorization: `Bearer ${leadToken.token}` } },
     );
     expect(assignRes.ok()).toBe(true);
-    const assigned = (await assignRes.json()) as { assignee?: string | null };
-    expect(assigned.assignee, "the API must record the assignee we sent").toBe(MAUI_ACCOUNTS.qualityStaff.email);
+    const assignBody = (await assignRes.json()) as { assignee?: string | null };
+    expect(assignBody.assignee, "the API must record the assignee we sent").toBe(MAUI_ACCOUNTS.qualityStaff.email);
 
     // Log in as quality-staff and check "My Cases" (the cases page's assignee-scoped view; the
     // /worklist page is the gap list, which does not link cases by id).
@@ -116,5 +168,32 @@ test.describe("Maui case workflow", () => {
     await page.goto("/cases?view=mine");
     await expect(page.getByRole("heading").first()).toBeVisible({ timeout: 20_000 });
     await expect(page.locator(`a[href*="${caseId}"]`).filter({ visible: true }).first()).toBeVisible({ timeout: 20_000 });
+  });
+
+  /**
+   * Put every assignment back — both of them. They are the only writes in this file that CAN go back;
+   * the status change and the outreach record are a ledger of something having happened, which is the
+   * argument for the guard at the top rather than for a cleverer cleanup.
+   *
+   * An empty `assignee` is the unassign path, not a validation error (`routes/cases.ts` treats an
+   * absent or blank value as "clear this" and only validates a non-empty one).
+   */
+  test.afterAll(async ({ playwright }) => {
+    if (assigned.length === 0) return;
+    const ctx = await playwright.request.newContext();
+    const failures: string[] = [];
+    try {
+      for (const { token, caseId, assignee } of assigned) {
+        const res = await ctx.post(
+          `${API_BASE}/api/cases/${caseId}/assign?assignee=${encodeURIComponent(assignee ?? "")}`,
+          { headers: { Authorization: `Bearer ${token}` } },
+        );
+        // Collect rather than throw on the first, or one failure hides the cases still to restore.
+        if (!res.ok()) failures.push(`${caseId}: ${res.status()} ${await res.text()}`);
+      }
+    } finally {
+      await ctx.dispose();
+    }
+    if (failures.length > 0) throw new Error(`restoring assignments failed — ${failures.join("; ")}`);
   });
 });
