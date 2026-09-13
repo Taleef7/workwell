@@ -54,9 +54,15 @@ test.describe("Maui authentication", () => {
     expect(login.ok()).toBe(true);
     const { token } = (await login.json()) as { token: string };
 
+    // The scope names a subject that does not exist, deliberately. This test asserts a REFUSAL, so
+    // the request it sends is one that must not mutate anything even if the refusal stops happening:
+    // the day the authorization table regresses — which is the day this test earns its place — a
+    // request for ALL_PROGRAMS would start a population run over 20,000 patients before the assertion
+    // below could fail. A spec in the read-only project has to be harmless when the thing it tests is
+    // broken, not only when it works.
     const res = await request.post(`${API_BASE}/api/runs/manual`, {
       headers: { Authorization: `Bearer ${token}` },
-      data: { scopeType: "ALL_PROGRAMS" },
+      data: { scopeType: "EMPLOYEE", employeeId: "no-such-subject-e2e" },
     });
     expect(res.status()).toBe(403);
   });

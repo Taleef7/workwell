@@ -1,12 +1,19 @@
 import { test, expect } from "@playwright/test";
-import { AS_ADMIN_RUNS, MAUI_ACCOUNTS, MAUI_PASSWORD, API_BASE, ROUTED_MEASURES, expectNoErrorPage } from "./helpers";
+import {
+  AS_ADMIN_RUNS,
+  MAUI_ACCOUNTS,
+  MAUI_PASSWORD,
+  API_BASE,
+  ROUTED_MEASURES,
+  WRITES_SKIP_REASON,
+  expectNoErrorPage,
+  rosterTotal,
+  writesAllowed,
+} from "./helpers";
 
 test.beforeEach(() => {
   test.skip(process.env.PLAYWRIGHT_PROFILE !== "maui", "maui profile only");
 });
-
-/** The roster the Maui e2e stack composes; `WORKWELL_MAUI_CORPUS_SIZE` is unset, so it is the default. */
-const CORPUS_SUBJECTS = 48;
 
 test.describe("Maui runs", () => {
   // /runs is engineering-gated to ADMIN on the pilot profile, and so is the Run Now control.
@@ -15,6 +22,11 @@ test.describe("Maui runs", () => {
   test.describe.configure({ mode: "serial" });
 
   test("a manual ALL_PROGRAMS run evaluates every routed measure for every corpus patient", async ({ page, request }) => {
+    // The one mutating test in this file, and the guard is on it rather than on the file: the run-list
+    // test below is a read and stays useful against a stack this may not write to. On the pilot
+    // sandbox a population run is 20,000 patients across six measures and hours of work on a stack the
+    // pilot group signs into, so it happens on a local stack or when the operator asks for it by name.
+    test.skip(!writesAllowed(), WRITES_SKIP_REASON);
     test.setTimeout(240_000);
 
     // Snapshot the run ids that exist BEFORE the click, so the assertion below is about the run this
@@ -29,6 +41,11 @@ test.describe("Maui runs", () => {
     const before = await request.get(`${API_BASE}/api/runs`, { headers });
     expect(before.ok()).toBe(true);
     const knownIds = new Set(((await before.json()) as RunRow[]).map((r) => r.runId));
+    // The roster's own size, asked of the server. CI composes 48 corpus patients and the sandbox
+    // composes 20,000, so the expected outcome count is derived rather than written down — a literal
+    // here is how `roster.spec.ts` came to assert "48 patients" against a stack with 20,000.
+    const corpusSubjects = await rosterTotal(request, token);
+    expect(corpusSubjects, "the roster must have patients for a run to evaluate").toBeGreaterThan(0);
 
     await page.goto("/runs");
     await expect(page.getByRole("heading", { name: /Run History/i })).toBeVisible({ timeout: 20_000 });
@@ -58,8 +75,8 @@ test.describe("Maui runs", () => {
     // from the routed list rather than hardcoded, so adding a measure updates one place.
     expect(
       created[0].totalEvaluated,
-      `expected ${CORPUS_SUBJECTS} patients x ${ROUTED_MEASURES.length} routed measures`,
-    ).toBe(CORPUS_SUBJECTS * ROUTED_MEASURES.length);
+      `expected ${corpusSubjects} patients x ${ROUTED_MEASURES.length} routed measures`,
+    ).toBe(corpusSubjects * ROUTED_MEASURES.length);
     await expectNoErrorPage(page);
   });
 

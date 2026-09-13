@@ -9,5 +9,5 @@
     "noEmit": true,
     "types": ["node"]
   },
-  "include": ["tests/**/*.ts", "playwright.config.ts", "global-setup.ts"]
+  "include": ["tests/**/*.ts", "playwright.config.ts", "global-setup.ts", "base-url.ts"]
 }

@@ -1,4 +1,5 @@
 import { chromium, request } from "@playwright/test";
+import { BASE_URL } from "./base-url";
 import { AUTH_SESSIONS, ensureCompletedRun, MAUI_PASSWORD, storageStatePath } from "./tests/maui/helpers";
 
 /**
@@ -20,7 +21,9 @@ export default async function globalSetup() {
     await api.dispose();
   }
 
-  const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3000";
+  // The one resolution, shared with the config and the write guard — a third copy here is how the
+  // sign-ins could have gone to a different host than the tests they set up.
+  const baseURL = BASE_URL;
   const browser = await chromium.launch();
   try {
     // One sign-in per (role, spec file). Sharing ONE state across parallel workers would share one
