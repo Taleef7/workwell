@@ -54,20 +54,24 @@ const RUN_HEADERS = [
 
 export async function runsCsv(runStore: RunStore, outcomeStore: OutcomeStore, limit = 200): Promise<string> {
   const runs = await runStore.listRuns(limit);
-  const rows = await Promise.all(
-    runs.map(async (run) => {
-      // Counts-based (bounded GROUP BY) so the runs CSV never loads the 120k-row seed:scale outcomes
-      // per run — same scale regression the /api/runs list fix addresses (this endpoint is on the
-      // deploy smoke checklist).
-      const s = toRunSummaryFromCounts(run, await outcomeStore.countOutcomesByStatus(run.id));
-      const count = (status: string) => s.outcomeCounts.find((c) => c.status === status)?.count ?? 0;
-      return [
-        s.runId, s.measureName, s.measureVersion, s.scopeType, s.triggerType, s.status, s.startedAt, s.completedAt,
-        s.durationMs, s.totalEvaluated, s.compliantCount, count("DUE_SOON"), count("OVERDUE"), count("MISSING_DATA"),
-        count("EXCLUDED"), s.passRate, s.dataFreshAsOf, s.notInPopulation,
-      ];
-    }),
-  );
+  const rows: unknown[][] = [];
+  // ONE query in flight at a time, for the same reason the cases CSV batches (2026-09-13). This was
+  // `Promise.all` over the runs: up to 200 concurrent `countOutcomesByStatus` queries against a
+  // ten-connection pool. Each is a bounded GROUP BY, so it never 504'd the way the cases export did —
+  // but it held every connection while it ran, and a report nobody is waiting on must not be able to
+  // make the pages somebody IS waiting on time out. Serially, 200 bounded aggregates are nothing.
+  for (const run of runs) {
+    // Counts-based (bounded GROUP BY) so the runs CSV never loads the 120k-row seed:scale outcomes
+    // per run — same scale regression the /api/runs list fix addresses (this endpoint is on the
+    // deploy smoke checklist).
+    const s = toRunSummaryFromCounts(run, await outcomeStore.countOutcomesByStatus(run.id));
+    const count = (status: string) => s.outcomeCounts.find((c) => c.status === status)?.count ?? 0;
+    rows.push([
+      s.runId, s.measureName, s.measureVersion, s.scopeType, s.triggerType, s.status, s.startedAt, s.completedAt,
+      s.durationMs, s.totalEvaluated, s.compliantCount, count("DUE_SOON"), count("OVERDUE"), count("MISSING_DATA"),
+      count("EXCLUDED"), s.passRate, s.dataFreshAsOf, s.notInPopulation,
+    ]);
+  }
   return toCsv(RUN_HEADERS, rows);
 }
 
@@ -288,21 +292,25 @@ export async function casesCsv(
   if (hasActiveSubjectFilters(filter)) {
     cases = cases.filter((c) => matchesSubjectFilters(directory.employeeById(c.employeeId), filter));
   }
-  const rows = await Promise.all(
-    cases.map(async (c) => {
-      const emp = directory.employeeById(c.employeeId);
-      const latest = await eventStore.latestOutreachDeliveryStatus(c.id);
-      return [
-        c.id, c.employeeId, emp?.name ?? c.employeeId, emp?.role ?? "—", emp?.site ?? "—",
-        // A case row carries no evidence, so this is the AUTHORED version even for a routed measure.
-        // Stated rather than silently wrong: the case CSV is an operational worklist keyed on
-        // `lastRunId`, and the outcomes CSV is the one that answers "what computed this" per row.
-        measureName(c.measureId), authoredVersion(c.measureId), c.evaluationPeriod, c.status, c.priority, c.assignee,
-        c.currentOutcomeStatus, c.nextAction, c.lastRunId, c.createdAt, c.updatedAt, c.closedAt, latest,
-        emp?.providerId ?? "", emp?.payer ?? "",
-      ];
-    }),
-  );
+  // ONE lookup for the whole export, not one per case. The per-case form fired a query per row
+  // through `Promise.all` — ~15,300 of them on the pilot, against a ten-connection pool — which
+  // answered 504 at 60 s and held every connection while it did, so the deployment's other pages
+  // timed out for the minute it ran (measured 2026-09-13).
+  const deliveryStatuses = await eventStore.latestOutreachDeliveryStatuses(cases.map((c) => c.id));
+  const rows = cases.map((c) => {
+    const emp = directory.employeeById(c.employeeId);
+    // Absent key ⇒ no outreach action ⇒ null, the same cell the per-case call wrote.
+    const latest = deliveryStatuses[c.id] ?? null;
+    return [
+      c.id, c.employeeId, emp?.name ?? c.employeeId, emp?.role ?? "—", emp?.site ?? "—",
+      // A case row carries no evidence, so this is the AUTHORED version even for a routed measure.
+      // Stated rather than silently wrong: the case CSV is an operational worklist keyed on
+      // `lastRunId`, and the outcomes CSV is the one that answers "what computed this" per row.
+      measureName(c.measureId), authoredVersion(c.measureId), c.evaluationPeriod, c.status, c.priority, c.assignee,
+      c.currentOutcomeStatus, c.nextAction, c.lastRunId, c.createdAt, c.updatedAt, c.closedAt, latest,
+      emp?.providerId ?? "", emp?.payer ?? "",
+    ];
+  });
   return toCsv(CASE_HEADERS, rows);
 }
 
