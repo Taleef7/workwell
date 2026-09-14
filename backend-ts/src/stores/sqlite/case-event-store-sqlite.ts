@@ -16,6 +16,20 @@ import type {
   TimelineEntry,
 } from "../case-event-store.ts";
 
+/**
+ * Ids per statement on the floor. Here the bound IS the bind count — SQLite's compiled default
+ * `SQLITE_MAX_VARIABLE_NUMBER` is 999 on older builds — so this is deliberately half of it and is not
+ * the ceiling's number: that one is a statement-duration choice against a one-array bind, and pinning
+ * the two together would mean a measurement about Neon silently deciding what the floor may bind.
+ */
+export const SQLITE_ID_CHUNK = 500;
+
+const chunked = (ids: readonly string[]): string[][] => {
+  const out: string[][] = [];
+  for (let start = 0; start < ids.length; start += SQLITE_ID_CHUNK) out.push(ids.slice(start, start + SQLITE_ID_CHUNK));
+  return out;
+};
+
 interface AuditRow {
   occurred_at: string;
   event_type: string;
@@ -120,19 +134,24 @@ export class SqliteCaseEventStore implements CaseEventStore {
     return (row?.n ?? 0) > 0;
   }
 
-  async outreachSentCounts(caseIds: string[]): Promise<Record<string, number>> {
+  async outreachSentCounts(caseIds: readonly string[]): Promise<Record<string, number>> {
     if (caseIds.length === 0) return {};
-    const placeholders = caseIds.map(() => "?").join(", ");
-    const { results } = await this.db
-      .prepare(
-        `SELECT case_id, COUNT(*) AS n FROM case_actions
-          WHERE action_type = 'OUTREACH_SENT' AND case_id IN (${placeholders})
-          GROUP BY case_id`,
-      )
-      .bind(...caseIds)
-      .all<{ case_id: string; n: number }>();
     const out: Record<string, number> = {};
-    for (const r of results ?? []) out[r.case_id] = Number(r.n);
+    // Chunked (2026-09-13): this bound one placeholder per id, so a work list wide enough — the panel
+    // pre-filter hands it every open case — would have hit SQLite's parameter cap and failed the whole
+    // read. The ceiling never notices, because it binds the set as one array.
+    for (const slice of chunked(caseIds)) {
+      const placeholders = slice.map(() => "?").join(", ");
+      const { results } = await this.db
+        .prepare(
+          `SELECT case_id, COUNT(*) AS n FROM case_actions
+            WHERE action_type = 'OUTREACH_SENT' AND case_id IN (${placeholders})
+            GROUP BY case_id`,
+        )
+        .bind(...slice)
+        .all<{ case_id: string; n: number }>();
+      for (const r of results ?? []) out[r.case_id] = Number(r.n);
+    }
     return out;
   }
 
@@ -147,6 +166,34 @@ export class SqliteCaseEventStore implements CaseEventStore {
       .bind(caseId)
       .first<{ delivery_status: string | null }>();
     return row?.delivery_status ?? null;
+  }
+
+  async latestOutreachDeliveryStatuses(caseIds: readonly string[]): Promise<Record<string, string | null>> {
+    if (caseIds.length === 0) return {};
+    const out: Record<string, string | null> = {};
+    // One chunk at a time, like the ceiling: the floor has no pool to exhaust, but the two stores
+    // answering the same question by different shapes is how they come to disagree.
+    for (const slice of chunked(caseIds)) {
+      const placeholders = slice.map(() => "?").join(", ");
+      // `rn = 1` picks the same row the single-id method's `LIMIT 1` picks, under the same ordering —
+      // including when that row's payload has no `deliveryStatus`, which must read as null rather than
+      // falling through to an older, superseded status.
+      const { results } = await this.db
+        .prepare(
+          `SELECT case_id, delivery_status FROM (
+             SELECT case_id,
+                    json_extract(payload_json, '$.deliveryStatus') AS delivery_status,
+                    ROW_NUMBER() OVER (PARTITION BY case_id ORDER BY performed_at DESC, id DESC) AS rn
+               FROM case_actions
+              WHERE case_id IN (${placeholders})
+                AND action_type IN ('OUTREACH_DELIVERY_UPDATED', 'OUTREACH_SENT')
+           ) WHERE rn = 1`,
+        )
+        .bind(...slice)
+        .all<{ case_id: string; delivery_status: string | null }>();
+      for (const r of results ?? []) out[r.case_id] = r.delivery_status;
+    }
+    return out;
   }
 
   async listAuditEvents(limit = 100000, offset = 0): Promise<AuditEventRow[]> {
@@ -182,6 +229,13 @@ export class SqliteCaseEventStore implements CaseEventStore {
     return (results ?? []).map(toAuditEventRow);
   }
 
+  /**
+   * NOT chunked, unlike its neighbours, and deliberately: the `LIMIT` is over the whole result, so
+   * splitting the ids would apply it per chunk and return up to `limit x chunks` rows in the wrong
+   * order. Its only caller (`run/employee-profile.ts`) passes ONE subject's case ids, so the bind
+   * count is bounded by how many measures a person is due for. A caller that hands it a panel would
+   * need this reworked — a keyset merge across chunks — rather than wrapped in the helper above.
+   */
   async auditEventsForCases(caseIds: string[], limit: number): Promise<AuditEventRow[]> {
     if (caseIds.length === 0) return [];
     const placeholders = caseIds.map(() => "?").join(", ");

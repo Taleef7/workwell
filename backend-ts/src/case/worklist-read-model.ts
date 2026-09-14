@@ -186,8 +186,13 @@ export async function loadWorklistCases(deps: WorklistDeps, filters: WorklistFil
   if (filters.to) rows = rows.filter((c) => day(c.createdAt) <= day(filters.to!));
   if (deps.profileMatch) rows = rows.filter((c) => deps.profileMatch!(c.employeeId));
 
-  const counts = deps.withOutreachCounts ? await deps.events.outreachSentCounts(rows.map((c) => c.id)) : {};
-  let summaries = rows.map((c) => toCaseSummary(c, counts[c.id] ?? 0, deps.employeeLookup, deps.providerLookup));
+  // Resolved WITHOUT the outreach count, so every filter that does not need one runs first and the
+  // count query is asked about the survivors instead of the whole fetched set. On the pilot the
+  // dashboard's gap badge (`?status=open&outreach=none&limit=1`, fired on every page) discarded most
+  // of what it had just counted: the current-cycle filter alone drops every prior period's rows.
+  // Exact, not an approximation — `X-Total-Count` is computed after all the filters either way, and
+  // the outreach filter still sees a real count for every row that reaches it.
+  let summaries = rows.map((c) => toCaseSummary(c, 0, deps.employeeLookup, deps.providerLookup));
 
   if (wantCurrentCycle) {
     // Each measure's CURRENT cycle by today + its cadence: exact and cadence-correct, so a stale row
@@ -203,9 +208,6 @@ export async function loadWorklistCases(deps: WorklistDeps, filters: WorklistFil
     summaries = summaries.filter((c) => matchesSubjectFilters(deps.employeeLookup(c.employeeId), filters.subjects!, nowMs));
   }
   if (filters.outcome) summaries = summaries.filter((c) => (c.currentOutcomeStatus ?? "").toUpperCase() === filters.outcome);
-  if (filters.outreach) {
-    summaries = summaries.filter((c) => (filters.outreach === "none") === ((c.outreachRecordCount ?? 0) === 0));
-  }
   if (filters.search) {
     const needle = filters.search.toLowerCase();
     summaries = summaries.filter(
@@ -214,6 +216,20 @@ export async function loadWorklistCases(deps: WorklistDeps, filters: WorklistFil
         c.measureName.toLowerCase().includes(needle) ||
         c.employeeId.toLowerCase().includes(needle),
     );
+  }
+
+  // The count, for the rows that survived — and the filter that reads it, last.
+  //
+  // Asked whenever the caller displays the badge OR filters on it. A caller that filtered on outreach
+  // without asking for counts would otherwise see every row at 0: `outreach=none` would return
+  // everything and `outreach=any` nothing, both under a heading claiming the opposite. No caller does
+  // that today; a filter that cannot fail is how one starts.
+  if (deps.withOutreachCounts || filters.outreach) {
+    const counts = await deps.events.outreachSentCounts(summaries.map((c) => c.caseId));
+    summaries = summaries.map((c) => ({ ...c, outreachRecordCount: counts[c.caseId] ?? 0 }));
+  }
+  if (filters.outreach) {
+    summaries = summaries.filter((c) => (filters.outreach === "none") === ((c.outreachRecordCount ?? 0) === 0));
   }
   return summaries;
 }

@@ -201,6 +201,16 @@ Columns:
 Supports filters: `status`, `measureId`, `priority`, `assignee`, `site`, `caseIds`, `providerId`,
 `ageBand`, `sex`, `payer`.
 
+> **`latestOutreachDeliveryStatus` is resolved for the whole export in one pass, and the column is
+> unchanged (2026-09-13).** It is still the `deliveryStatus` of the newest `OUTREACH_DELIVERY_UPDATED`
+> / `OUTREACH_SENT` action, still empty where a case has none, and still in the same position. Only the
+> READ changed: `CaseEventStore.latestOutreachDeliveryStatuses(caseIds)` answers for a set, because the
+> per-case form issued one query per row — ~15,300 on the pilot through a ten-connection pool — which
+> answered 504 at 60 s and held every connection while it ran, so every other database-backed endpoint
+> timed out for the minute the export took. A store contract test compares the batched answer with the
+> per-case one case by case, including the case where the newest action carries no `deliveryStatus`
+> (both return null, rather than an older status the case has moved on from).
+
 > **Subject headers follow the deployment profile.** On a patient deployment
 > (`WORKWELL_INSTANCE=maui`, `DEPLOYMENT_PROFILE.subjectTerm === "patient"`) the two subject columns in
 > §6.2 and §6.3 are named `patientExternalId` and `patientName`, and in §6.2 `lastExamDate` and

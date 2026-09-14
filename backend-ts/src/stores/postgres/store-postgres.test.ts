@@ -21,7 +21,7 @@ import { RUN_STORE_PG_DDL, SPIKE_SCHEMA } from "./schema-pg.ts";
 import { PgRunStore } from "./run-store-postgres.ts";
 import { PgOutcomeStore } from "./outcome-store-postgres.ts";
 import { PgCaseStore } from "./case-store-postgres.ts";
-import { PgCaseEventStore } from "./case-event-store-postgres.ts";
+import { OUTREACH_STATUS_CHUNK, PgCaseEventStore } from "./case-event-store-postgres.ts";
 import { PgMeasureStore } from "./measure-store-postgres.ts";
 import { PgEvidenceStore } from "./evidence-store-postgres.ts";
 import { PgAppointmentStore } from "./appointment-store-postgres.ts";
@@ -111,10 +111,14 @@ if (!reachable && process.env.WORKWELL_TEST_PG_URL) {
     return new PgCaseStore(pool);
   });
 
-  caseEventStoreContract("postgres", async () => {
-    await truncate();
-    return { caseStore: new PgCaseStore(pool), eventStore: new PgCaseEventStore(pool) };
-  });
+  caseEventStoreContract(
+    "postgres",
+    async () => {
+      await truncate();
+      return { caseStore: new PgCaseStore(pool), eventStore: new PgCaseEventStore(pool) };
+    },
+    OUTREACH_STATUS_CHUNK,
+  );
 
   measureStoreContract("postgres", async () => {
     await truncate();

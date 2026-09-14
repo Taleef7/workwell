@@ -17,7 +17,7 @@ import { RUN_STORE_FLOOR_DDL } from "./schema.ts";
 import { SqliteRunStore } from "./run-store-sqlite.ts";
 import { SqliteOutcomeStore } from "./outcome-store-sqlite.ts";
 import { SqliteCaseStore } from "./case-store-sqlite.ts";
-import { SqliteCaseEventStore } from "./case-event-store-sqlite.ts";
+import { SQLITE_ID_CHUNK, SqliteCaseEventStore } from "./case-event-store-sqlite.ts";
 import { SqliteMeasureStore } from "./measure-store-sqlite.ts";
 import { SqliteEvidenceStore } from "./evidence-store-sqlite.ts";
 import { SqliteAppointmentStore } from "./appointment-store-sqlite.ts";
@@ -76,10 +76,14 @@ outcomeStoreContract("sqlite", async () => {
 
 caseStoreContract("sqlite", async () => new SqliteCaseStore(await freshDb()));
 
-caseEventStoreContract("sqlite", async () => {
-  const db = await freshDb();
-  return { caseStore: new SqliteCaseStore(db), eventStore: new SqliteCaseEventStore(db) };
-});
+caseEventStoreContract(
+  "sqlite",
+  async () => {
+    const db = await freshDb();
+    return { caseStore: new SqliteCaseStore(db), eventStore: new SqliteCaseEventStore(db) };
+  },
+  SQLITE_ID_CHUNK,
+);
 
 measureStoreContract("sqlite", async () => new SqliteMeasureStore(await freshDb()));
 
