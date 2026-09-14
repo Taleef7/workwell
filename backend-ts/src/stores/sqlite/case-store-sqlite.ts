@@ -313,7 +313,7 @@ export class SqliteCaseStore implements CaseStore {
     // because both are predicates and a group may only share one statement if it shares every bind.
     const byExpected = new Map<string, { expectedAssignee: string | null; expectedSource?: string | null; ids: string[] }>();
     for (const entry of expected) {
-      const key = `${entry.expectedAssignee ?? " "}|${entry.expectedSource === undefined ? "*" : (entry.expectedSource ?? " ")}`;
+      const key = `${entry.expectedAssignee ?? "\0"}|${entry.expectedSource === undefined ? "*" : (entry.expectedSource ?? "\0")}`;
       const group = byExpected.get(key);
       if (group) group.ids.push(entry.id);
       else byExpected.set(key, { expectedAssignee: entry.expectedAssignee, expectedSource: entry.expectedSource, ids: [entry.id] });
