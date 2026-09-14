@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { runProfileChild } from "../test-support/run-profile-child.ts";
 
 const testScript = `
-  import { outcomesCsv, outcomesCsvStream, casesCsv, auditCsv } from "./src/export/export-csv.ts";
+  import { outcomesCsv, outcomesCsvStream, casesCsv, auditCsv, runsCsv } from "./src/export/export-csv.ts";
 
   const fakeRun = { id: "run-1", scopeType: "MEASURE", startedAt: "2026-07-17T00:00:00.000Z" };
   const outcomes = [
@@ -126,8 +126,23 @@ const testScript = `
   const fakeCaseStore = {
     listCases: async () => cases,
   };
+  // The export asks ONCE for the whole set. The counters are the assertion: a reintroduced per-case
+  // call is the defect that answered 504 and held the connection pool on the pilot, and it would be
+  // invisible in the CSV text — every cell would still be right.
+  const eventCalls = { batched: 0, perCase: 0, idsAsked: [] };
   const fakeEventStore = {
-    latestOutreachDeliveryStatus: async () => null,
+    latestOutreachDeliveryStatus: async () => {
+      eventCalls.perCase++;
+      return null;
+    },
+    latestOutreachDeliveryStatuses: async (ids) => {
+      eventCalls.batched++;
+      eventCalls.idsAsked = [...ids];
+      // Three shapes, because the export must tell them apart: a status, a case whose newest action
+      // carries NO deliveryStatus (an explicit null — nullish-coalescing and logical-or differ here),
+      // and a case the batch never names at all.
+      return { "case-1": "SENT", "case-2": null };
+    },
   };
   const webChartEnv = {
     WORKWELL_WEBCHART_BASE_URL: "http://webchart.test",
@@ -148,6 +163,21 @@ const testScript = `
 
   const csvCases = await casesCsv(fakeCaseStore, fakeEventStore, {}, webChartEnv);
 
+  // The runs CSV asks one bounded aggregate per run. Its OUTPUT is identical whether those go out
+  // together or one at a time, so the concurrency is what has to be asserted.
+  const runsFanOut = { inFlight: 0, peak: 0, calls: 0 };
+  const manyRuns = ["r1", "r2", "r3", "r4"].map((id) => ({ ...fakeRun, id }));
+  const countingOutcomeStore = {
+    countOutcomesByStatus: async () => {
+      runsFanOut.calls++;
+      runsFanOut.peak = Math.max(runsFanOut.peak, ++runsFanOut.inFlight);
+      await new Promise((r) => setImmediate(r));
+      runsFanOut.inFlight--;
+      return [];
+    },
+  };
+  const csvRuns = await runsCsv({ listRuns: async () => manyRuns }, countingOutcomeStore);
+
   const fakeAuditEventStore = {
     listAuditEvents: async () => [{
       occurredAt: "2026-07-17T00:00:00.000Z",
@@ -167,6 +197,9 @@ const testScript = `
     streamedOutcomes,
     csvCases,
     csvAudit,
+    eventCalls,
+    runsFanOut,
+    csvRuns,
   }));
 `;
 
@@ -190,6 +223,69 @@ test("scoped profile (Maui) — outcomes and cases CSV rows exclude foreign and 
   assert.ok(casesText.includes("wc|live-export-subject"), "live wc subject must be present in cases CSV via the injected directory");
   assert.ok(!casesText.includes("cypress-mrn-foreign"), "foreign Cypress subject must be excluded from cases CSV on Maui");
   assert.ok(!casesText.includes("emp-001"), "foreign TWH subject emp-001 must be excluded from cases CSV on Maui");
+});
+
+test("the cases CSV asks for every delivery status in ONE call, and an absent one is an empty cell", () => {
+  // The pilot's export fired one query per case — ~15,300 through a ten-connection pool — and answered
+  // 504 while making every other database-backed page time out. Batching is invisible in the output,
+  // so the call counts are what pins it: the CSV text below is identical either way.
+  const output = runProfileChild(undefined, testScript);
+  const calls = output.eventCalls as { batched: number; perCase: number; idsAsked: string[] };
+
+  assert.equal(calls.batched, 1, "one batched lookup for the whole export");
+  assert.equal(calls.perCase, 0, "the per-case query must not be reachable from the export");
+  assert.deepEqual(calls.idsAsked, ["case-1", "case-2", "case-3", "case-live"], "every exported case, on the default profile");
+
+  // On MAUI two of those four are filtered out before the lookup — which is the assertion that the
+  // lookup happens AFTER the filters. On the default profile the filtered and unfiltered sets are
+  // identical, so the check above holds just as well with the call moved above the filter block.
+  const maui = runProfileChild("maui", testScript);
+  assert.deepEqual(
+    (maui.eventCalls as { idsAsked: string[] }).idsAsked,
+    ["case-1", "case-live"],
+    "asked about the two cases the profile kept, not the two it dropped",
+  );
+
+  const rows = (output.csvCases as string).split("\r\n").filter(Boolean);
+  // Quote-aware, because a naive `split(",")` shifts every column the moment one field contains a
+  // comma — and then this reads a DIFFERENT cell than the one it names, while still passing.
+  const fields = (line: string): string[] => {
+    const out: string[] = [];
+    let cur = "";
+    let quoted = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i]!;
+      if (quoted) {
+        if (ch === '"' && line[i + 1] === '"') { cur += '"'; i++; }
+        else if (ch === '"') quoted = false;
+        else cur += ch;
+      } else if (ch === '"') quoted = true;
+      else if (ch === ",") { out.push(cur); cur = ""; }
+      else cur += ch;
+    }
+    out.push(cur);
+    return out;
+  };
+  const header = fields(rows[0]!);
+  const statusColumn = header.indexOf("latestOutreachDeliveryStatus");
+  assert.ok(statusColumn > 0, "the column is still in the header (DATA_MODEL_CONTRACTS §6.3)");
+  const cellFor = (caseId: string) => fields(rows.find((r) => r.startsWith(`${caseId},`))!)[statusColumn];
+
+  assert.equal(cellFor("case-1"), "SENT", "the one case with a record carries its status");
+  assert.equal(cellFor("case-2"), "", "an explicit null — newest action with no deliveryStatus — is an empty cell");
+  assert.equal(cellFor("case-3"), "", "and so is a case the batch never named");
+});
+
+test("the runs CSV asks its per-run aggregate one at a time, not all at once", () => {
+  // 200 bounded GROUP BYs fired together still take every connection in a ten-connection pool, so a
+  // report nobody is waiting on makes the pages somebody IS waiting on time out. The CSV text is
+  // identical either way, which is why this is asserted on the fan-out rather than on the output.
+  const output = runProfileChild(undefined, testScript);
+  const fanOut = output.runsFanOut as { peak: number; calls: number };
+
+  assert.equal(fanOut.calls, 4, "one aggregate per run");
+  assert.equal(fanOut.peak, 1, "and never more than one in flight");
+  assert.equal((output.csvRuns as string).split("\r\n").filter(Boolean).length, 5, "header plus a row per run");
 });
 
 test("scoped profile (Maui) — outcomes and cases CSV headers use patient subject terminology", () => {

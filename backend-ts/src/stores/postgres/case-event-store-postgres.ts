@@ -43,6 +43,37 @@ interface TimelineRow {
   timeline_source: string;
 }
 
+/**
+ * How many case ids one `latestOutreachDeliveryStatuses` statement asks about.
+ *
+ * NOT the 500 the batched INSERTs use. That number is Postgres' 65,535-parameter cap divided by the
+ * binds per row; this statement passes the whole set as ONE array parameter, so the cap does not apply
+ * and copying 500 across would have been a bound borrowed from a different problem. What bounds this
+ * instead is how long one statement may hold its connection, because the export runs beside the
+ * pilot's pages.
+ *
+ * Measured 2026-09-13 on `postgres:16` with a 460,000-row `case_actions` and a 40,000-case export,
+ * `EXPLAIN (ANALYZE, BUFFERS)` plus wall clock, in a rolled-back transaction (numbers in the journal):
+ *
+ * | ids/statement | plan | per statement | statements | wall |
+ * |---|---|---|---|---|
+ * | 5,000 | Unique > Gather Merge > Sort | 32.8 ms | 8 | 417 ms |
+ * | 10,000 | same | 35.8 ms | 4 | 214 ms |
+ * | 20,000 | same | 52.0 ms | 2 | 136 ms |
+ *
+ * Smaller chunks are strictly WORSE, which is the opposite of the intuition that sent me to 500: the
+ * per-statement cost dominates, and every chunk re-plans and re-scans, so 30 chunks of 500 measured
+ * 1,335 ms against 49 ms for one statement of 15,000. The plan is `Unique > Gather Merge > Sort` at
+ * every size — a sort of the matched set — so the per-statement cost tracks how big `case_actions`
+ * is rather than how many ids are asked for, which is why splitting the ids buys nothing and costs a
+ * re-scan. Worth re-measuring if that table grows well past the 460,000 rows used here.
+ * 10,000 keeps any single statement under ~40 ms
+ * — a scale the pilot's pages do not notice — while the pilot's ~15,300 open cases take TWO round
+ * trips instead of 15,300. At the ~40 ms round trip Neon charges, that is the difference between
+ * 0.1 s and 10 minutes.
+ */
+export const OUTREACH_STATUS_CHUNK = 10_000;
+
 export class PgCaseEventStore implements CaseEventStore {
   constructor(private readonly pool: PgPool) {}
 
@@ -206,17 +237,21 @@ export class PgCaseEventStore implements CaseEventStore {
     return Number(rows[0]?.n ?? 0) > 0;
   }
 
-  async outreachSentCounts(caseIds: string[]): Promise<Record<string, number>> {
+  async outreachSentCounts(caseIds: readonly string[]): Promise<Record<string, number>> {
     const ids = caseIds.filter(isUuid); // drop non-uuid ids so ANY($1::uuid[]) can't 500 (Fable M14)
     if (ids.length === 0) return {};
-    const { rows } = await this.pool.query<{ case_id: string; n: string }>(
-      `SELECT case_id, COUNT(*) AS n FROM ${SPIKE_SCHEMA}.case_actions
-        WHERE action_type = 'OUTREACH_SENT' AND case_id = ANY($1::uuid[])
-        GROUP BY case_id`,
-      [ids],
-    );
     const out: Record<string, number> = {};
-    for (const r of rows) out[r.case_id] = Number(r.n);
+    // Chunked on the same terms as `latestOutreachDeliveryStatuses`, and sequentially: this one is
+    // asked by the work list, whose caller can hand it every open case on the deployment.
+    for (let start = 0; start < ids.length; start += OUTREACH_STATUS_CHUNK) {
+      const { rows } = await this.pool.query<{ case_id: string; n: string }>(
+        `SELECT case_id, COUNT(*) AS n FROM ${SPIKE_SCHEMA}.case_actions
+          WHERE action_type = 'OUTREACH_SENT' AND case_id = ANY($1::uuid[])
+          GROUP BY case_id`,
+        [ids.slice(start, start + OUTREACH_STATUS_CHUNK)],
+      );
+      for (const r of rows) out[r.case_id] = Number(r.n);
+    }
     return out;
   }
 
@@ -230,6 +265,31 @@ export class PgCaseEventStore implements CaseEventStore {
       [caseId],
     );
     return rows[0]?.delivery_status ?? null;
+  }
+
+  async latestOutreachDeliveryStatuses(caseIds: readonly string[]): Promise<Record<string, string | null>> {
+    const ids = caseIds.filter(isUuid); // drop non-uuid ids so ANY($1::uuid[]) can't 500 (Fable M14)
+    if (ids.length === 0) return {};
+    const out: Record<string, string | null> = {};
+    // Chunks are read ONE AT A TIME. `Promise.all` over the chunks would be the same defect this
+    // method exists to remove, one size up: the export's problem was never the number of rows, it was
+    // holding every connection in the pool at once.
+    for (let start = 0; start < ids.length; start += OUTREACH_STATUS_CHUNK) {
+      const slice = ids.slice(start, start + OUTREACH_STATUS_CHUNK);
+      // DISTINCT ON takes the FIRST row of each case_id under the ORDER BY, which is the same
+      // `performed_at DESC, id DESC` the single-id method's LIMIT 1 takes — including when that row's
+      // payload has no `deliveryStatus` and the column is NULL. An aggregate over the status column
+      // (`max(...)`) would instead skip the NULL and report an older, superseded status.
+      const { rows } = await this.pool.query<{ case_id: string; delivery_status: string | null }>(
+        `SELECT DISTINCT ON (case_id) case_id, payload_json ->> 'deliveryStatus' AS delivery_status
+           FROM ${SPIKE_SCHEMA}.case_actions
+          WHERE case_id = ANY($1::uuid[]) AND action_type IN ('OUTREACH_DELIVERY_UPDATED', 'OUTREACH_SENT')
+          ORDER BY case_id, performed_at DESC, id DESC`,
+        [slice],
+      );
+      for (const r of rows) out[r.case_id] = r.delivery_status;
+    }
+    return out;
   }
 
   async listAuditEvents(limit = 100000, offset = 0): Promise<AuditEventRow[]> {

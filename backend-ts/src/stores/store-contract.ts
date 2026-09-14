@@ -1732,6 +1732,12 @@ export function caseStoreContract(label: string, freshStore: () => Promise<CaseS
 export function caseEventStoreContract(
   label: string,
   fresh: () => Promise<{ caseStore: CaseStore; eventStore: CaseEventStore }>,
+  /**
+   * How many ids this store puts in one statement — the floor's bind cap, the ceiling's measured
+   * statement duration. The boundary test pads its id list past it, so each store's real boundary is
+   * the one exercised rather than a shared literal that drifts out of reach of both.
+   */
+  idChunk: number,
 ): void {
   const newCase = (caseStore: CaseStore) =>
     caseStore.upsertFromOutcome({
@@ -2038,6 +2044,151 @@ export function caseEventStoreContract(
     assert.equal(counts[a.id], 2, "two OUTREACH_SENT for a");
     assert.equal(counts[b.id] ?? 0, 0, "no sends for b → absent/0");
     assert.deepEqual(await eventStore.outreachSentCounts([]), {}, "empty input → {}");
+  });
+
+  test(`[${label}] latestOutreachDeliveryStatuses answers for a SET exactly as the per-case read does`, async () => {
+    // The case CSV asked per case — ~15,300 queries on the pilot, through a ten-connection pool, which
+    // answered 504 and held the pool while it did. The batched form must agree with the per-case one
+    // case for case, because the column it fills is the same column (DATA_MODEL_CONTRACTS §6.3).
+    const { caseStore, eventStore } = await fresh();
+    const mkCase = async (subjectId: string) =>
+      (await caseStore.upsertFromOutcome({
+        runId: crypto.randomUUID(),
+        subjectId,
+        measureId: "audiogram",
+        evaluationPeriod: "2026-06-13",
+        outcomeStatus: "OVERDUE",
+      }))!;
+    const sent = (caseId: string, payload: Record<string, unknown>) =>
+      eventStore.insertAction({ caseId, actionType: "OUTREACH_SENT", actor: "cm@x", payload });
+    const updated = (caseId: string, payload: Record<string, unknown>) =>
+      eventStore.insertAction({ caseId, actionType: "OUTREACH_DELIVERY_UPDATED", actor: "cm@x", payload });
+
+    const withStatus = await mkCase("emp-006");
+    const withNullNewest = await mkCase("emp-007");
+    const withoutOutreach = await mkCase("emp-008");
+    const nonOutreachOnly = await mkCase("emp-009");
+
+    await sent(withStatus.id, { deliveryStatus: "SIMULATED" });
+    await new Promise((r) => setTimeout(r, 2));
+    await updated(withStatus.id, { deliveryStatus: "SENT" });
+
+    // The NEWEST row wins even when it carries no deliveryStatus. An aggregate over the column (a
+    // `max(...)`) would skip the NULL and report SIMULATED — a status the case has moved on from.
+    await sent(withNullNewest.id, { deliveryStatus: "SIMULATED" });
+    await new Promise((r) => setTimeout(r, 2));
+    await updated(withNullNewest.id, { channel: "EMAIL" });
+
+    // An action of another type is not an outreach record at all.
+    await eventStore.insertAction({ caseId: nonOutreachOnly.id, actionType: "CASE_ASSIGNED", actor: "cm@x", payload: { deliveryStatus: "NOPE" } });
+
+    const ids = [withStatus.id, withNullNewest.id, withoutOutreach.id, nonOutreachOnly.id];
+    const batched = await eventStore.latestOutreachDeliveryStatuses(ids);
+
+    assert.equal(batched[withStatus.id], "SENT", "newest status wins");
+    assert.equal(batched[withNullNewest.id], null, "newest row with no deliveryStatus reads null, not the older status");
+    assert.ok(!(withoutOutreach.id in batched), "a case with no outreach action has NO key");
+    assert.ok(!(nonOutreachOnly.id in batched), "a non-outreach action type is not an outreach record");
+    assert.deepEqual(await eventStore.latestOutreachDeliveryStatuses([]), {}, "empty input → {} (and no IN () syntax error)");
+
+    // The drift guard: the two readers of the same fact, compared directly. Without this the batched
+    // form can be wrong in exactly the way the per-case form is right, and the export is the only
+    // place anyone would see it.
+    for (const id of ids) {
+      assert.equal(
+        batched[id] ?? null,
+        await eventStore.latestOutreachDeliveryStatus(id),
+        `batched and per-case disagree for ${id}`,
+      );
+    }
+  });
+
+  test(`[${label}] latestOutreachDeliveryStatuses crosses this store's OWN id-chunk boundary`, async () => {
+    // Two real cases, one asked about in the FIRST chunk and one in the LAST. The id list between them
+    // is padded with ids that match nothing, because the boundary is a property of the id list and not
+    // of how many cases exist — seeding 10,001 cases to cross the ceiling's chunk would take a minute
+    // to prove what a padded array proves instantly.
+    //
+    // The size comes from the STORE, not from a literal: the floor chunks at 500 (its bind cap) and
+    // the ceiling at 10,000 (a measured statement duration, one array bind). A shared literal would
+    // have quietly stopped crossing the ceiling's boundary the moment that number was measured and
+    // changed — a boundary test that no longer reaches the boundary, passing.
+    const { caseStore, eventStore } = await fresh();
+    const first = (await caseStore.upsertFromOutcome({
+      runId: crypto.randomUUID(),
+      subjectId: "emp-chunk-first",
+      measureId: "audiogram",
+      evaluationPeriod: "2026-06-13",
+      outcomeStatus: "OVERDUE",
+    }))!;
+    const last = (await caseStore.upsertFromOutcome({
+      runId: crypto.randomUUID(),
+      subjectId: "emp-chunk-last",
+      measureId: "audiogram",
+      evaluationPeriod: "2026-06-13",
+      outcomeStatus: "OVERDUE",
+    }))!;
+    await eventStore.insertAction({ caseId: first.id, actionType: "OUTREACH_SENT", actor: "cm@x", payload: { deliveryStatus: "FIRST" } });
+    // Unambiguously ordered by time — the `performed_at` TIE is a separate test below, because a
+    // fixture that only sometimes produces one is a guard that only sometimes fires.
+    await eventStore.insertAction({ caseId: last.id, actionType: "OUTREACH_SENT", actor: "cm@x", payload: { deliveryStatus: "OLDER" } });
+    await new Promise((r) => setTimeout(r, 2));
+    await eventStore.insertAction({ caseId: last.id, actionType: "OUTREACH_DELIVERY_UPDATED", actor: "cm@x", payload: { deliveryStatus: "NEWER" } });
+
+    // first ... (idChunk - 1 ids that match nothing) ... last → the two land in different chunks.
+    const padded = [first.id, ...Array.from({ length: idChunk - 1 }, () => crypto.randomUUID()), last.id];
+    assert.ok(padded.length > idChunk, "the fixture must actually exceed this store's chunk size");
+
+    const batched = await eventStore.latestOutreachDeliveryStatuses(padded);
+    assert.equal(batched[first.id], "FIRST", "the first chunk's row survives the later chunks");
+    assert.equal(batched[last.id], "NEWER", "the row past the chunk boundary is read, and the newest of its two rows wins");
+    assert.equal(batched[last.id], await eventStore.latestOutreachDeliveryStatus(last.id), "both readers resolve the ordering the same way");
+    assert.equal(Object.keys(batched).length, 2, "the ids that match nothing contribute no keys");
+
+    // `outreachSentCounts` binds the same id set and is chunked too — each store at its own size.
+    const counts = await eventStore.outreachSentCounts(padded);
+    assert.equal(counts[first.id], 1, "first chunk counted");
+    assert.equal(counts[last.id], 1, "past the boundary counted");
+  });
+
+  test(`[${label}] two outreach actions written in ONE batch resolve by id, identically for both readers`, async () => {
+    // `ORDER BY performed_at DESC, id DESC` — the `id DESC` half only decides when two rows share a
+    // millisecond, and the store stamps `performed_at` itself, so a test cannot ask for a tie
+    // directly. `recordCaseEvents` is the closest thing: it builds every row's parameters in one
+    // synchronous pass, so the two share a stamp on all but the rare run where the clock ticks
+    // mid-loop. That makes this a HIGH-PROBABILITY detector of an `id ASC` regression rather than a
+    // guaranteed one — and it can never fail spuriously, because the row asserted below is both the
+    // later-stamped and the higher-id one, so it wins under either ordering.
+    //
+    // Said plainly rather than dressed up: a same-millisecond tie is not constructible through this
+    // store's public surface, and adding a `performedAt` seam to `insertAction` purely to construct
+    // one would put test-only surface into a production interface.
+    const { caseStore, eventStore } = await fresh();
+    const c = (await caseStore.upsertFromOutcome({
+      runId: crypto.randomUUID(),
+      subjectId: "emp-tie",
+      measureId: "audiogram",
+      evaluationPeriod: "2026-06-13",
+      outcomeStatus: "OVERDUE",
+    }))!;
+    const arm = (actionType: string, deliveryStatus: string) => ({
+      action: { caseId: c.id, actionType, actor: "cm@x", payload: { deliveryStatus } },
+      audit: {
+        eventType: actionType === "OUTREACH_SENT" ? "CASE_OUTREACH_SENT" : "CASE_OUTREACH_DELIVERY_UPDATED",
+        entityType: "case",
+        entityId: c.id,
+        actor: "cm@x",
+        refRunId: c.lastRunId,
+        refCaseId: c.id,
+        refMeasureVersionId: c.measureId,
+        payload: { deliveryStatus },
+      },
+    });
+    await eventStore.recordCaseEvents([arm("OUTREACH_SENT", "OLDER"), arm("OUTREACH_DELIVERY_UPDATED", "NEWER")]);
+
+    assert.equal(await eventStore.latestOutreachDeliveryStatus(c.id), "NEWER", "the later-inserted row wins");
+    const batched = await eventStore.latestOutreachDeliveryStatuses([c.id]);
+    assert.equal(batched[c.id], "NEWER", "and the batched reader resolves it identically");
   });
 }
 

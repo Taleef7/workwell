@@ -176,11 +176,61 @@ test("the pre-filter is WITHHELD when the roster is not authoritative, so a live
 
 test("outreach counts are computed only when the caller renders them", async () => {
   let calls = 0;
-  const spyEvents = { ...events, outreachSentCounts: async (ids: string[]) => { calls += 1; return events.outreachSentCounts(ids); } };
-  await loadWorklistCases(deps({ events: spyEvents as typeof events }), {});
+  // `Object.create`, not a spread: `events` is a class instance, and a spread copies own enumerable
+  // properties only — the prototype methods would be gone, and the `as typeof events` cast would hide
+  // it until the read model happened to call a second one.
+  const spyEvents: typeof events = Object.create(events, {
+    outreachSentCounts: { value: async (ids: readonly string[]) => { calls += 1; return events.outreachSentCounts(ids); } },
+  });
+  await loadWorklistCases(deps({ events: spyEvents }), {});
   assert.equal(calls, 0, "the patient work list does not show the badge, so it does not pay for the query");
-  await loadWorklistCases(deps({ events: spyEvents as typeof events, withOutreachCounts: true }), {});
+  await loadWorklistCases(deps({ events: spyEvents, withOutreachCounts: true }), {});
   assert.equal(calls, 1);
+});
+
+test("the outreach count is asked about the SURVIVORS, not everything the store returned", async () => {
+  // The dashboard's gap badge asks `?status=open&outreach=none&limit=1` on every page load, and this
+  // query used to run over every row the store handed back — before the site, panel, outcome and
+  // search filters threw most of them away. Counting rows nobody will see is the whole cost.
+  let askedAbout: string[] = [];
+  const spyEvents: typeof events = Object.create(events, {
+    outreachSentCounts: {
+      value: async (ids: readonly string[]) => {
+        askedAbout = [...ids];
+        return events.outreachSentCounts(ids);
+      },
+    },
+  });
+  // A POST-only filter, deliberately: `site` and the panel filters are pushed into the store as the
+  // `employeeIds` pre-filter, so under those the fetched set already IS the survivors and this test
+  // would pass against the very code it exists to reject. `search` has no pushdown.
+  const rows = await loadWorklistCases(
+    deps({ events: spyEvents, withOutreachCounts: true }),
+    { search: "chun" },
+  );
+  const everything = await loadWorklistCases(deps(), {});
+  assert.ok(everything.length > rows.length, "the filter must actually discard rows, or this proves nothing");
+  assert.deepEqual(rows.map((r) => r.employeeId), ["p-3"], "one of the four survives the search");
+  assert.equal(askedAbout.length, 1, "and the count query is asked about exactly that one");
+  assert.deepEqual(askedAbout, rows.map((r) => r.caseId), "by case id, the survivor's own");
+});
+
+test("an outreach FILTER gets real counts even when the caller does not render the badge", async () => {
+  // Otherwise every row reads 0: `outreach=none` returns the whole list and `outreach=any` returns
+  // nothing, each under a heading claiming the opposite. No caller does this today — which is exactly
+  // when a filter that cannot fail gets written.
+  // Chosen from the work list's OWN result: the store holds rows this list drops (other tests add a
+  // live-subject case), and seeding one of those would make the assertion below vacuous.
+  const baseline = await loadWorklistCases(deps({ withOutreachCounts: false }), {});
+  const withRecord = baseline[0]!;
+  await events.insertAction({ caseId: withRecord.caseId, actionType: "OUTREACH_SENT", actor: "cm@x", payload: {} });
+
+  const none = await loadWorklistCases(deps({ withOutreachCounts: false }), { outreach: "none" });
+  const any = await loadWorklistCases(deps({ withOutreachCounts: false }), { outreach: "any" });
+
+  assert.deepEqual(any.map((r) => r.caseId), [withRecord.caseId], "the one case with a send is the whole 'any' list");
+  assert.ok(!none.some((r) => r.caseId === withRecord.caseId), "and it is absent from 'none'");
+  assert.equal(none.length + any.length, baseline.length, "every case lands on exactly one side");
 });
 
 test("the panel summary carries the PCP and payer names the list renders", async () => {

@@ -1,5 +1,95 @@
 # Journal
 
+## 2026-09-13 (later) — the export asks once, and the work list counts only what it will show
+
+The first of the two read-path fixes the sweep earlier today measured. It is the one that leads
+because the case CSV export does not merely run slowly at 20,000 patients: while it runs, the
+deployment is down.
+
+**One click, and every database-backed page times out for a minute.** `casesCsv` issued one
+`latestOutreachDeliveryStatus` query per case — about 15,300 of them, fired through `Promise.all`
+against a `pg.Pool` sitting on node-postgres' default `max: 10`. The export itself answered 504 after
+60.2 s, cold and warm. That was the visible half. The measured half is that with an export in flight
+`/api/panels` timed out at 45 s on three consecutive probes and then answered at 22.7 s, while
+`/api/version`, which touches no database, stayed at 0.2 s throughout; idle, `/api/panels` is 0.3 s.
+Pool exhaustion, not a busy event loop. `latestOutreachDeliveryStatuses(caseIds)` answers for the
+whole set instead, chunked, and the chunks are read one at a time — firing them concurrently would be
+the same defect one size up, since the problem was never the number of rows but holding every
+connection at once.
+
+**The chunk size is measured, and the intuition that picked the first one was backwards.** I copied
+500 from `recordCaseEvents`, which is right there in the same file — and wrong here, because that
+number is Postgres' 65,535-parameter cap divided by the binds per row, while this statement passes
+the whole set as ONE array. What actually bounds it is how long a single statement should hold its
+connection. On `postgres:16` with a 460,000-row `case_actions` and a 40,000-case export, in a
+rolled-back transaction:
+
+| ids per statement | plan | per statement | statements | wall clock |
+|---|---|---|---|---|
+| 5,000 | Unique > Gather Merge > Sort | 32.8 ms | 8 | 417 ms |
+| 10,000 | same | 35.8 ms | 4 | 214 ms |
+| 20,000 | same | 52.0 ms | 2 | 136 ms |
+
+Smaller chunks are strictly worse: each one re-plans and re-scans, so thirty chunks of 500 measured
+1,335 ms against 49 ms for a single statement of 15,000. The shipped value is 10,000 — any one
+statement stays under about 40 ms, and the pilot's ~15,300 open cases take **two** round trips
+instead of 15,300. At the ~40 ms Neon charges per trip that is the difference between a tenth of a
+second and ten minutes. The floor keeps its own 500, because there the bound genuinely IS the bind
+count (`SQLITE_MAX_VARIABLE_NUMBER` is 999 on older builds) and a number measured against Neon has no
+business deciding what SQLite may bind. `outreachSentCounts` on the floor was unchunked and bound one
+placeholder per id; it is chunked now, in passing, in the same file.
+
+**The boundary test names each store's own boundary, after the second one moved.** It seeds two cases
+and pads the id list past the store's chunk with ids that match nothing, so the two real cases land in
+different chunks — 501 real cases would have proved this on the floor and stopped reaching the
+ceiling's boundary the moment the measurement moved it to 10,000, which is a boundary test that no
+longer reaches a boundary, passing. Both mutants were run: dropping the tail on either store fails
+exactly that test and nothing else.
+
+**And the work list counted rows it was about to throw away.** `loadWorklistCases` fetched outreach
+counts for every row the store returned, before the current-cycle, site, panel, outcome and search
+filters ran — and the dashboard's gap badge (`?status=open&outreach=none&limit=1`, fired on every page
+load) is exactly the caller that discards most of them. The counts are now fetched for the survivors.
+Exact rather than approximate: `X-Total-Count` is computed after every filter either way. The first
+version of that test was vacuous and the mutant said so — it filtered by `site`, which is pushed into
+the store as the `employeeIds` pre-filter, so the fetched set already WAS the survivors and the test
+passed against the code it existed to reject. It uses `search` now, which has no pushdown.
+**This half carries no number and is not claimed to**: it is a structural fix — fewer ids in a query
+that was already answering in about a second — and the honest measurement is the sandbox before/after
+on the next deploy, where `/api/cases?status=open&outreach=none&limit=1` is 1.0–1.1 s today. The
+export's numbers are in this entry because they were measured; this one's are not, so they are not.
+
+**The runs CSV was the same defect two orders of magnitude smaller, and it is fixed here too.**
+`runsCsv` fired `Promise.all` over up to 200 `countOutcomesByStatus` queries against the same
+ten-connection pool. Each is a bounded GROUP BY, so it never 504'd the way the cases export did — but
+it held every connection while it ran, and a report nobody is waiting on must not be able to time out
+the pages somebody is. Found by review, and it is the reason the architecture note now says both
+exports issue one statement at a time rather than claiming the class is closed.
+
+**And nothing tested the property all of this exists for.** Batching fixed the query COUNT; the
+`Promise.all` shape was what held the pool, and swapping the sequential loop back for one returns the
+identical map and the identical CSV. Every contract test, and the export's own call-count test, passed
+against that mutant. A control that reads as present and cannot fire is this repository's most common
+real defect and it was sitting inside the fix for one. There is now a fake-pool test asserting one
+statement in flight across three chunks, and the equivalent for the runs CSV; both were confirmed by
+running the mutant, and both fail on it.
+
+One more thing fixed on the way, of the class this repo keeps naming: the outreach filter is now
+computed whenever a caller **filters** on it, not only when a caller renders the badge. A caller that
+did the former without the latter would have seen every row at 0 — `outreach=none` returning the whole
+list and `outreach=any` returning nothing, each under a heading claiming the opposite. No caller does
+that today, which is when a filter that cannot fail gets written.
+
+**Verified:** typecheck clean; 2,748 backend tests, 2,725 pass, 22 skip, and the one failure is the
+known stale-sparse-checkout `corpus-membership` case, identical before and after. The store contract
+runs on the SQLite floor and the Postgres ceiling (both locally here and in CI), including the new
+set-vs-per-case drift guard and the padded boundary case. The export's own test pins the call counts —
+one batched lookup, zero per-case ones — because batching is invisible in the CSV text, which is
+byte-identical either way. **The after-numbers on the sandbox are not in this entry**: they are
+measured on the deploy, and the pool-exhaustion probe is repeated then, because "the export is slow"
+and "the export takes the deployment down" are different claims and the second one is the one that
+has to be shown gone.
+
 ## 2026-09-13 — the suite reads the stack it runs against, and cannot quietly write to it
 
 The Maui e2e suite, closing #554 and finishing #558's verification half. It is a test-only change, and

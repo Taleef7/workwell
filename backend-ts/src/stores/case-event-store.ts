@@ -128,10 +128,26 @@ export interface CaseEventStore {
    * outreachRecordCount). Returns a map keyed by case id; absent ids count as 0.
    * Empty input returns {} (no query).
    */
-  outreachSentCounts(caseIds: string[]): Promise<Record<string, number>>;
+  outreachSentCounts(caseIds: readonly string[]): Promise<Record<string, number>>;
   /**
    * The `deliveryStatus` from the most recent OUTREACH_DELIVERY_UPDATED / OUTREACH_SENT
    * case_action payload (CaseDetail.latestOutreachDeliveryStatus), or null if none.
    */
   latestOutreachDeliveryStatus(caseId: string): Promise<string | null>;
+  /**
+   * The same answer as {@link latestOutreachDeliveryStatus}, for a SET of cases in one pass —
+   * the case CSV export's column (DATA_MODEL_CONTRACTS §6.3).
+   *
+   * The export asked per case. On the pilot that is ~15,300 queries fired through `Promise.all`
+   * against a ten-connection pool, which does not merely run slow: measured on 2026-09-13 it answers
+   * 504 after 60 s AND holds every connection while it does, so a page that touches the database
+   * (`/api/panels`: 0.3 s idle) times out at 45 s for the minute the export runs. One operator's
+   * click took the deployment down.
+   *
+   * A case with NO outreach action has NO key (not a null value) — the caller distinguishes them if
+   * it wants to; `casesCsv` does not. A case whose newest action carries no `deliveryStatus` maps to
+   * **null**, because the newest row wins whatever it holds: that is what the single-id method
+   * returns, and the two must not disagree. Empty input returns {} without a query.
+   */
+  latestOutreachDeliveryStatuses(caseIds: readonly string[]): Promise<Record<string, string | null>>;
 }
