@@ -133,37 +133,44 @@ test("the trend point is on the SAME basis as the headline it sits under", async
   assert.equal(trend[0]!.totalEvaluated, 5, "the point still reports every row the run wrote");
 });
 
-test("the risk outlook does not build a non-compliance streak out of out-of-population periods", async () => {
-  // Codex review, #548: the site table was migrated but `repeatNonCompliers` below it was not, so a
-  // non-diabetic evaluated for cms122 across three periods earned a streak of 3 and was named in a
-  // top-10 list of people nothing can be done about. The first fix for this silently no-opped (a
-  // scripted replace whose indentation did not match), which is why the behaviour is pinned here.
-  const period = (evaluationPeriod: string, outOfPopulation: boolean) => ({
-    subjectId: "emp-006",
-    status: "MISSING_DATA",
-    evaluationPeriod,
-    evaluatedAt: `2026-0${evaluationPeriod.slice(-1)}-01T00:00:00.000Z`,
-    evidence: {},
-    outOfPopulation,
-  });
-  const deps = (outOfPopulation: boolean) => ({
+test("the risk outlook's site table is on the same basis, and the streak that mis-read the flag is gone", async () => {
+  reset();
+  // History. Codex review, #548: the site table was migrated to the `outOfPopulation` flag but the
+  // `repeatNonCompliers` list below it was not, so a non-diabetic evaluated for cms122 across three
+  // periods earned a streak of 3 and was named in a top-10 list of people nothing can be done about.
+  //
+  // Since 2026-09-15 that list is RETIRED (ADR-081) and the outlook reads the winning run instead of
+  // the measure's whole history — which removes the read the mis-reading needed. Both halves are
+  // pinned here: the site counts separate the flag exactly as the overview and the trend do, and the
+  // history scan is never made. `listOutcomesForMeasure` is deliberately a throwing fake: if the
+  // outlook ever reaches for the history again, this test says so instead of quietly getting slower.
+  let historyScans = 0;
+  const deps = {
     outcomeStore: {
-      listOutcomesWithRun: async () => [],
-      listLatestPopulationRuns: latestRunsFromRows([]),
-      listOutcomesForMeasure: async () => [period("2026-1", outOfPopulation), period("2026-2", outOfPopulation), period("2026-3", outOfPopulation)],
+      listOutcomesWithRun: async () => ROWS,
+      listLatestPopulationRuns: latestRunsFromRows(ROWS),
       listOutcomes: async () => [],
+      listOutcomesForMeasure: async () => {
+        historyScans++;
+        throw new Error("the risk outlook must not scan the measure's history (ADR-081 / #547)");
+      },
       aggregateScaleRun: async () => [],
     } as unknown as OutcomeStore,
     runStore: { listRuns: async () => [] } as unknown as RunStore,
     caseStore: { listCases: async () => [] } as unknown as CaseStore,
-  });
+  };
 
-  const outside = await programRiskOutlook(deps(true), MEASURE, 30);
-  assert.deepEqual(outside!.repeatNonCompliers, [], "outside the population three periods running is not a streak");
+  const outlook = await programRiskOutlook(deps, MEASURE, 30);
+  assert.ok(outlook);
+  assert.equal(historyScans, 0, "no history scan");
+  assert.deepEqual(outlook!.repeatNonCompliers, [], "the streak is retired and the key stays empty");
 
-  // The control: the SAME three periods, in the population, are a real streak — so the assertion
-  // above is about the flag and not about the fixture failing to produce one at all.
-  const inside = await programRiskOutlook(deps(false), MEASURE, 30);
-  assert.equal(inside!.repeatNonCompliers.length, 1);
-  assert.equal(inside!.repeatNonCompliers[0]!.streakCount, 3);
+  // The five ROWS are two the measure describes (one COMPLIANT, one OVERDUE) and three it does not.
+  const site = outlook!.siteComplianceRates.reduce((a, b) => (b.total > a.total ? b : a));
+  assert.equal(site.total, 5, "every row the run wrote is still reported");
+  assert.equal(site.compliant, 1);
+  // 1 compliant of (1 compliant + 1 overdue) — the three out-of-population rows are out of the
+  // denominator, exactly as ADR-079 puts them out of the headline's. Counted as missingData they
+  // would have made this 20.0.
+  assert.equal(site.currentComplianceRate, 50, "out-of-population rows are not in the rate");
 });

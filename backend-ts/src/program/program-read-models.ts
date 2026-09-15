@@ -9,7 +9,7 @@
  * Employee site is resolved from the synthetic directory (outcomes carry only subjectId).
  */
 import type { RunStore } from "../stores/run-store.ts";
-import type { OutcomeStore, OutcomeWithRun, MeasureOutcomeRow, OutcomeMeasureFilter } from "../stores/outcome-store.ts";
+import type { OutcomeStore, OutcomeWithRun, OutcomeMeasureFilter } from "../stores/outcome-store.ts";
 import type { CaseStore } from "../stores/case-store.ts";
 import { EMPLOYEES, employeeById, type EmployeeProfile } from "../engine/synthetic/employee-catalog.ts";
 import type { QualitySnapshotStore, QualitySnapshotRow, QualityScopeLevel } from "../stores/quality-snapshot-store.ts";
@@ -570,7 +570,19 @@ const chartMemoKey = (deps: ProgramDeps, measureId: string, filters: ProgramFilt
   ]);
 const trendMemo = new RunKeyedMemo<ProgramTrendPoint[]>(64);
 const driversMemo = new RunKeyedMemo<TopDrivers>(64);
-export const __chartMemos = { trendMemo, driversMemo };
+/**
+ * The risk outlook's memo lives here, with its siblings, rather than beside the function that uses
+ * it — so that a `reset()` helper iterating `Object.values(__chartMemos)` clears it without being
+ * told about it. A per-measure memo a test helper does not know about is cross-test pollution waiting
+ * to happen, and the type is hoisted so the declaration order costs nothing.
+ *
+ * Reviewed caveat: this only helps the helpers that ITERATE. `latest-population.test.ts` clears
+ * `trendMemo`/`driversMemo` by name, so it would not clear this one — it calls no outlook code today,
+ * and the clears there were converted to the iterating form so that the first test which does cannot
+ * silently inherit a warm entry.
+ */
+const outlookMemo = new RunKeyedMemo<OutlookBase>(32);
+export const __chartMemos = { trendMemo, driversMemo, outlookMemo };
 
 /** Last day of the (1-indexed) month in `YYYY-MM-DD`? `Date.UTC(y, m, 0)` = day 0 of month m's successor = last day of month m. */
 function isLastDayOfMonth(ymd: string): boolean {
@@ -848,9 +860,141 @@ function lastExamDateOf(evidence: unknown): string | null {
 }
 
 /**
- * Predictive risk outlook for a measure (TS port of RiskOutlookService): who becomes DUE_SOON
- * within the horizon, repeat non-compliers (OVERDUE/MISSING_DATA streak ≥ 3 across periods),
- * and per-site current vs predicted compliance. Returns null for an unknown measure (→ 404).
+ * The part of the outlook the WINNING RUN determines, and therefore the part worth remembering.
+ *
+ * A terminal population run's outcome rows are immutable, so everything derived from them is stable
+ * while the same run wins — which is what {@link RunKeyedMemo} checks. `today` and `horizonDays` are
+ * deliberately NOT part of it: they are applied per request by {@link renderOutlook}, so a warmed
+ * entry survives until the next run instead of expiring at UTC midnight, and two requests asking
+ * for different horizons share one read.
+ *
+ * **One thing here is NOT run-determined, and it is shared with the siblings rather than new.** The
+ * site names, and the subject names in the expirations, are resolved through the DIRECTORY when the
+ * base is built. On a live-WebChart deployment that directory is mutable process state
+ * (`replaceLiveDirectory`), so an ingest that names a previously-raw `wc|` subject — or makes one
+ * resolvable at all, since visibility is a directory fact too — is not reflected until a new run
+ * wins. Two reviewers raised it. It is left as it is, deliberately: `overviewMemo` memoizes the
+ * `DirectorySnapshot` itself, and `driversMemo` and `sitesMemo` hold directory-derived site and role
+ * strings, so resolving this one surface per request would make it disagree with the other three —
+ * and the site buckets are aggregated BY site name, so un-freezing them means memoizing per-subject
+ * rows and re-bucketing on every request, which is most of the work the memo exists to skip. It
+ * self-heals on the next run. ADR-081 states it rather than claiming purity.
+ */
+interface OutlookSiteCounts {
+  total: number;
+  compliant: number;
+  dueSoon: number;
+  overdue: number;
+  missingData: number;
+  notInPopulation: number;
+  excluded: number;
+}
+
+interface OutlookBase {
+  sites: Array<{ site: string; counts: OutlookSiteCounts }>;
+  /**
+   * Every visible COMPLIANT subject whose evidence carries a recency date — the only rows an
+   * upcoming expiration can be computed from. EMPTY for an officially routed winner, whose
+   * `expressionResults` are named `official:<population>` and carry no recency define at all.
+   */
+  compliantExams: Array<{ subjectId: string; name: string; site: string; lastExam: string }>;
+}
+
+const EMPTY_OUTLOOK_BASE: OutlookBase = { sites: [], compliantExams: [] };
+
+/** Whether an outcome's evidence is an officially routed measure's (the ADR-046 `official` block). */
+const hasOfficialEvidence = (evidence: unknown): boolean =>
+  (evidence as { official?: unknown } | null | undefined)?.official != null;
+
+/**
+ * `today` + `horizon` + the measure's window applied over a memoized {@link OutlookBase}. No I/O and
+ * O(compliant subjects), which is why those two request-dependent quantities stay out of the key.
+ */
+function renderOutlook(
+  measureName: string,
+  base: OutlookBase,
+  window: number,
+  horizon: number,
+  today: string,
+): RiskOutlook {
+  const threshold = Math.max(window - DUE_SOON_BUFFER_DAYS, 0);
+  const upcomingBySite = new Map<string, number>();
+  const upcomingExpirations: RiskOutlook["upcomingExpirations"] = [];
+  for (const exam of base.compliantExams) {
+    const daysSince = daysBetween(exam.lastExam, today);
+    if (daysSince >= threshold) continue;
+    const daysUntil = threshold - daysSince;
+    if (daysUntil > horizon) continue;
+    upcomingBySite.set(exam.site, (upcomingBySite.get(exam.site) ?? 0) + 1);
+    upcomingExpirations.push({
+      externalId: exam.subjectId,
+      name: exam.name,
+      site: exam.site,
+      measureName,
+      lastExamDate: exam.lastExam,
+      complianceWindowDays: window,
+      daysSinceLastExam: daysSince,
+      daysUntilDueSoon: daysUntil,
+      predictedDueSoonDate: addDays(exam.lastExam, threshold),
+    });
+  }
+  upcomingExpirations.sort((a, b) => a.daysUntilDueSoon - b.daysUntilDueSoon || a.name.localeCompare(b.name));
+
+  const siteComplianceRates = base.sites
+    .map(({ site, counts: a }) => {
+      const upcoming = upcomingBySite.get(site) ?? 0;
+      return {
+        site,
+        // Every row the winning run evaluated at this site, unchanged — the rates beside it are the
+        // ones that drop the subjects the measure does not describe.
+        total: a.total,
+        compliant: a.compliant,
+        upcomingExpirations: upcoming,
+        currentComplianceRate: complianceRateOf(a),
+        predictedComplianceRate: complianceRateOf({
+          compliant: Math.max(0, a.compliant - upcoming),
+          dueSoon: a.dueSoon + Math.min(a.compliant, upcoming),
+          overdue: a.overdue,
+          missingData: a.missingData,
+          excluded: a.excluded,
+        }),
+      };
+    })
+    .sort((a, b) => a.currentComplianceRate - b.currentComplianceRate);
+
+  return {
+    upcomingNonCompliantCount: upcomingExpirations.length,
+    upcomingExpirations,
+    // RETIRED (ADR-081), and the key is kept with an empty array so the page, the route contract and
+    // the e2e suite are unchanged. A streak of three PERIODS cannot be read from the winning run: a
+    // nightly deployment's newest N runs share one period for any N, so reaching three needs either
+    // the measure's whole retained history — which is the 504 this function existed to cause — or new
+    // per-period SQL the owner must approve and index. ADR-073 has meanwhile decided that per-subject
+    // history is a retention WINDOW, so under the pilot's 400 days an annual measure holds at most
+    // two periods and this list is empty there by construction. It returns when the aggregate
+    // snapshot store grows a per-subject dimension, or behind an indexed per-period query, as its own
+    // unit of work.
+    repeatNonCompliers: [],
+    siteComplianceRates,
+  };
+}
+
+/**
+ * Predictive risk outlook for a measure: who becomes DUE_SOON within the horizon, and per-site
+ * current vs predicted compliance. Returns null for an unknown measure (→ 404).
+ *
+ * **Read-path perf, part 3 (2026-09-15).** This was the last roster-wide read model still scanning a
+ * measure's whole retained history — `listOutcomesForMeasure`, with evidence, every run and every
+ * period, about a million rows on the pilot and growing by 120,000 a night, which answered 504 cold
+ * and 8.2 s warm. It now joins every other such read on the winning run (#547): the winner is
+ * resolved from the runs table, its rows are read once, and what those rows determine is memoized
+ * under their `runKey`.
+ *
+ * Three semantic changes travel with that, each of them shared with the surfaces that moved in #547:
+ * (a) the site table and its counts describe the subjects the WINNING RUN evaluated, so a subject
+ * present only in an older run drops out; (b) the winners walk excludes a run whose `triggered_by`
+ * is NULL under `excludeScale`, where the old subject-prefix exclusion kept it; (c) the
+ * repeat-non-complier streak is retired — see {@link renderOutlook}.
  */
 export async function programRiskOutlook(
   deps: ProgramDeps,
@@ -862,134 +1006,124 @@ export async function programRiskOutlook(
   const horizon = Math.max(1, Math.min(Number.isFinite(horizonDays) ? Math.trunc(horizonDays) : 30, 180));
   const window = MEASURE_BINDINGS[measureId]?.complianceWindowDays ?? 365;
   const today = new Date().toISOString().slice(0, 10);
-  // One evidence-rich query retains only terminal successful population runs. This keeps FAILED,
-  // RUNNING, CASE, and EMPLOYEE outcomes from affecting status/streaks/directory visibility without
-  // the unbounded listOutcomes-per-historical-run hydration pass. Scale rows are also dropped in SQL.
-  const rows = await deps.outcomeStore.listOutcomesForMeasure(measureId, {
-    excludeScale: true,
-    successfulPopulationOnly: true,
-  });
+  const render = (base: OutlookBase): RiskOutlook => renderOutlook(measure.name, base, window, horizon, today);
+
   const webChartConfigured = isWebChartConfigured(deps.webChartEnv ?? {});
-  const directory = directoryForRows(rows, webChartConfigured, deps.webChartEnv, DIRECTORY);
-  // Isolate data on scoped profiles (e.g. Maui) — missed in initial profileMatcher rollout.
-  const profileMatch = profileSubjectMatcher(directory.employeeById);
-  const visibleRows = rows.filter(
-    (row) => subjectVisible(row.subjectId, webChartConfigured) && profileMatch(row.subjectId),
+  const { winners, runKey } = await latestPopulationWinners(deps.outcomeStore, [measureId], LATEST_FILTER);
+  // A measure that has never run: answer without going through the snapshot, which for an empty
+  // winners list would build a directory over zero rows and then memoize an empty answer.
+  //
+  // Both of those are harmless, and this branch is therefore a cheap short-circuit rather than a
+  // correctness guard — said plainly because two plausible-sounding reasons for it are FALSE, and
+  // each was disproved by mutating it rather than by reasoning:
+  //   1. "An entry keyed by `runKeyOf([])` — the empty string — would never be evicted, so the first
+  //      visit to a fresh measure would pin 'no outlook' forever." No: `RunKeyedMemo.get` compares
+  //      the stored key with the `runKey` the CALLER presents from a fresh winners walk, so the entry
+  //      stops matching the moment a run exists. Memoizing here fails no test, correctly.
+  //   2. "It saves a row read." No: `readWinnersRows` already returns early on an empty winners list.
+  // What it actually saves is one `directoryForRows` call and one memo slot per unrun measure. Keep
+  // it or delete it; do not add a claim to it that a test cannot hold.
+  if (winners.length === 0) return render(EMPTY_OUTLOOK_BASE);
+
+  // The seam decides which subjects are visible at all, so it keys the memo beside the measure.
+  const memoKey = `${measureId}|${webChartConfigured}`;
+  const cached = outlookMemo.get(memoKey, runKey);
+  if (cached) return render(cached);
+
+  const snap = await latestPopulationSnapshot(deps.outcomeStore, [measureId], LATEST_FILTER, deps.webChartEnv, 1, {
+    precomputed: winners,
+    visible: (id, ctx) => subjectVisible(id, ctx.webChartConfigured) && ctx.profileMatch(id),
+  });
+  const visibleRows = snap.rows.filter(
+    (row) => subjectVisible(row.subjectId, snap.webChartConfigured) && snap.profileMatch(row.subjectId),
   );
 
-  // Latest outcome per subject (rows arrive oldest-first, so the last write wins).
-  const latestBySubject = new Map<string, MeasureOutcomeRow>();
-  for (const r of visibleRows) latestBySubject.set(r.subjectId, r);
+  // One run, so one row per subject — the run pipeline writes one outcome per
+  // (subject, measure, period) and `perMeasure = 1` means one run and one period.
+  //
+  // There is NO database constraint saying so (`outcomes` has no UNIQUE on
+  // `(run_id, subject_id, measure_id)`), and the lean `listOutcomesWithRun` projection carries
+  // neither `evaluated_at` nor `id` and has no ORDER BY — so if a run ever DID hold two rows for one
+  // subject, which of them lands here is whatever the store returned last. Reviewers split on this:
+  // one called it a P1 regression (the old evidence-rich read was ordered, so its last-write-wins was
+  // deterministic), the other noted it is what `programOverview` already does and that the two
+  // surfaces would disagree anyway, because the overview COUNTS ROWS (`total: os.length`) where this
+  // dedupes per subject. Both are right, and neither is fixable here: ordering this would mean
+  // widening `OutcomeWithRun` for every caller and seven test row factories, and the real remedy is a
+  // uniqueness constraint, which is owner schema. Recorded in ADR-081 as a stated assumption with an
+  // owner question rather than silently assumed.
+  const latestBySubject = new Map<string, OutcomeWithRun>();
+  for (const row of visibleRows) latestBySubject.set(row.subjectId, row);
 
-  const siteAcc = new Map<
-    string,
-    {
-      total: number;
-      compliant: number;
-      dueSoon: number;
-      overdue: number;
-      missingData: number;
-      notInPopulation: number;
-      excluded: number;
-      upcoming: number;
-    }
-  >();
-  const upcomingExpirations: RiskOutlook["upcomingExpirations"] = [];
-  for (const snap of latestBySubject.values()) {
-    const emp = directory.employeeById(snap.subjectId);
-    const site = emp?.site || "Unknown";
+  const siteAcc = new Map<string, OutlookSiteCounts>();
+  for (const row of latestBySubject.values()) {
+    const site = snap.directory.employeeById(row.subjectId)?.site || "Unknown";
     const acc =
       siteAcc.get(site) ??
       siteAcc
-        .set(site, {
-          total: 0,
-          compliant: 0,
-          dueSoon: 0,
-          overdue: 0,
-          missingData: 0,
-          notInPopulation: 0,
-          excluded: 0,
-          upcoming: 0,
-        })
+        .set(site, { total: 0, compliant: 0, dueSoon: 0, overdue: 0, missingData: 0, notInPopulation: 0, excluded: 0 })
         .get(site)!;
     acc.total++;
-    if (snap.status === "COMPLIANT") acc.compliant++;
-    else if (snap.status === "DUE_SOON") acc.dueSoon++;
-    else if (snap.status === "OVERDUE") acc.overdue++;
+    if (row.status === "COMPLIANT") acc.compliant++;
+    else if (row.status === "DUE_SOON") acc.dueSoon++;
+    else if (row.status === "OVERDUE") acc.overdue++;
     // ADR-079: not a gap and not in the rate, on the same basis as every other surface. Unrecorded
     // (an un-backfilled row) counts as missing data, which is what this table reported before.
-    else if (snap.status === "MISSING_DATA") (snap.outOfPopulation === true ? acc.notInPopulation++ : acc.missingData++);
-    else if (snap.status === "EXCLUDED") acc.excluded++;
-
-    const lastExam = lastExamDateOf(snap.evidence);
-    if (snap.status !== "COMPLIANT" || !lastExam) continue;
-    const threshold = Math.max(window - DUE_SOON_BUFFER_DAYS, 0);
-    const daysSince = daysBetween(lastExam, today);
-    if (daysSince >= threshold) continue;
-    const daysUntil = threshold - daysSince;
-    if (daysUntil > horizon) continue;
-    acc.upcoming++;
-    upcomingExpirations.push({
-      externalId: snap.subjectId,
-      name: emp?.name ?? snap.subjectId,
-      site,
-      measureName: measure.name,
-      lastExamDate: lastExam,
-      complianceWindowDays: window,
-      daysSinceLastExam: daysSince,
-      daysUntilDueSoon: daysUntil,
-      predictedDueSoonDate: addDays(lastExam, threshold),
-    });
+    else if (row.status === "MISSING_DATA") (row.outOfPopulation === true ? acc.notInPopulation++ : acc.missingData++);
+    else if (row.status === "EXCLUDED") acc.excluded++;
   }
-  upcomingExpirations.sort((a, b) => a.daysUntilDueSoon - b.daysUntilDueSoon || a.name.localeCompare(b.name));
 
-  const siteComplianceRates = [...siteAcc.entries()]
-    .map(([site, a]) => ({
-      site,
-      // Every row the run evaluated at this site, unchanged — the rates beside it are the ones that
-      // drop the subjects the measure does not describe.
-      total: a.total,
-      compliant: a.compliant,
-      upcomingExpirations: a.upcoming,
-      currentComplianceRate: complianceRateOf(a),
-      predictedComplianceRate: complianceRateOf({
-        compliant: Math.max(0, a.compliant - a.upcoming),
-        dueSoon: a.dueSoon + Math.min(a.compliant, a.upcoming),
-        overdue: a.overdue,
-        missingData: a.missingData,
-        excluded: a.excluded,
-      }),
-    }))
-    .sort((a, b) => a.currentComplianceRate - b.currentComplianceRate);
-
-  // Repeat non-compliers: per subject, dedupe to the latest outcome per evaluation_period, order
-  // newest-first, count the leading OVERDUE/MISSING_DATA streak; keep streak ≥ 3 (top 10).
-  const bySubject = new Map<string, MeasureOutcomeRow[]>();
-  for (const r of visibleRows) (bySubject.get(r.subjectId) ?? bySubject.set(r.subjectId, []).get(r.subjectId)!).push(r);
-  const FLAGGED = new Set(["OVERDUE", "MISSING_DATA"]);
-  const repeatNonCompliers = [...bySubject.entries()]
-    .map(([subjectId, subjectRows]) => {
-      const latestPerPeriod = new Map<string, MeasureOutcomeRow>();
-      for (const r of subjectRows) {
-        const prev = latestPerPeriod.get(r.evaluationPeriod);
-        if (!prev || r.evaluatedAt > prev.evaluatedAt) latestPerPeriod.set(r.evaluationPeriod, r);
+  const compliantSubjects = [...latestBySubject.values()].filter((row) => row.status === "COMPLIANT");
+  const compliantExams: OutlookBase["compliantExams"] = [];
+  // `snap.winners[0]`, never the precomputed winner: a visibility fallback REPLACES the winner and
+  // reports the replacement, so reading the precomputed run would pair an older visible snapshot with
+  // evidence from a newer invisible run. Empty when the winner held no row we can see.
+  const evidenceRunId = snap.winners[0]?.runId ?? null;
+  if (compliantSubjects.length > 0 && evidenceRunId) {
+    // Whether the winner's outcomes carry a recency define is a fact about THOSE ROWS, not about
+    // today's routing flag. Reading the flag instead would zero an authored winner's expirations in a
+    // process restarted after an authored→official flip, and would serve the authored answer from a
+    // warm process under an unchanged key. So peek ONE row of the run whose rows are being described:
+    // an official outcome's evidence carries `official`, and the expirations are then empty without a
+    // second read (the old code paged 20,000 blobs to find nothing).
+    //
+    // The peeked row is a COMPLIANT SUBJECT'S OWN row, not the run's first. Both reviewers caught the
+    // first-row form: `listOutcomes` orders by `(evaluated_at, id)` ASC, an evaluation failure
+    // REPLACES the evidence with `{ evaluationError, message }` (DATA_MODEL_CONTRACTS §5), and a
+    // PARTIAL_FAILURE run satisfies `isCompletedRun` and can win — so an error row sorting first made
+    // the peek learn nothing and fall through to the unpaged read of all 20,000 blobs, which is the
+    // cost this peek exists to avoid. A COMPLIANT row cannot be an evaluation error, because an error
+    // forces MISSING_DATA, so asking for one is exact rather than probabilistic. `subjectId` +
+    // `measureId` + `limit: 1` is the single-row lookup the store documents as index-friendly.
+    const peek = await deps.outcomeStore.listOutcomes(evidenceRunId, {
+      measureId,
+      subjectId: compliantSubjects[0]!.subjectId,
+      limit: 1,
+    });
+    if (peek.length > 0 && !hasOfficialEvidence(peek[0]!.evidence)) {
+      const evidenceBySubject = new Map<string, unknown>();
+      for (const outcome of await deps.outcomeStore.listOutcomes(evidenceRunId, { measureId })) {
+        evidenceBySubject.set(outcome.subjectId, outcome.evidence);
       }
-      const ordered = [...latestPerPeriod.values()].sort((a, b) => b.evaluatedAt.localeCompare(a.evaluatedAt));
-      let streak = 0;
-      for (const r of ordered) {
-        // An out-of-population period is not a non-compliant one (ADR-079). Without this, every
-        // non-diabetic evaluated for cms122 across three periods earned a streak of 3 and appeared
-        // in a named "repeat non-compliers" top-10 — a list of people nothing can be done about, on
-        // the panel this change exists to clean up.
-        if (!FLAGGED.has(r.status) || (r.outOfPopulation === true && r.status === "MISSING_DATA")) break;
-        streak++;
+      for (const row of compliantSubjects) {
+        const lastExam = lastExamDateOf(evidenceBySubject.get(row.subjectId));
+        if (!lastExam) continue;
+        const emp = snap.directory.employeeById(row.subjectId);
+        compliantExams.push({
+          subjectId: row.subjectId,
+          name: emp?.name ?? row.subjectId,
+          site: emp?.site || "Unknown",
+          lastExam,
+        });
       }
-      const emp = directory.employeeById(subjectId);
-      return { externalId: subjectId, name: emp?.name ?? subjectId, site: emp?.site || "Unknown", measureName: measure.name, streakCount: streak };
-    })
-    .filter((r) => r.streakCount >= 3)
-    .sort((a, b) => b.streakCount - a.streakCount || a.name.localeCompare(b.name))
-    .slice(0, 10);
+    }
+  }
 
-  return { upcomingNonCompliantCount: upcomingExpirations.length, upcomingExpirations, repeatNonCompliers, siteComplianceRates };
+  const base: OutlookBase = {
+    sites: [...siteAcc.entries()].map(([site, counts]) => ({ site, counts })),
+    compliantExams,
+  };
+  // A fallback result is never memoized (see `fellBack`): its answer can move while the winners stay.
+  if (!snap.fellBack) outlookMemo.set(memoKey, runKey, base);
+  return render(base);
 }

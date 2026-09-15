@@ -227,7 +227,7 @@ test("trend honors the date validation too (malformed from → 400)", async () =
   assert.equal((await get("/audiogram/trend?from=2026-13-01"))?.status, 400);
 });
 
-test("GET /api/programs/:id/risk-outlook predicts upcoming due-soon + repeat non-compliers", async () => {
+test("GET /api/programs/:id/risk-outlook predicts upcoming due-soon, one row per subject, and no streak", async () => {
   // Seed hazwoper outcomes (separate measure, doesn't disturb the audiogram assertions above).
   const runStore = new SqliteRunStore(env.DB as never);
   const oc = new SqliteOutcomeStore(env.DB as never);
@@ -252,7 +252,9 @@ test("GET /api/programs/:id/risk-outlook predicts upcoming due-soon + repeat non
     status: "COMPLIANT",
     evidence: { expressionResults: [{ define: "Most Recent Surveillance Exam Date", result: lastExam }] },
   });
-  // emp-001 OVERDUE across 3 distinct evaluation periods → repeat non-complier (streak 3).
+  // emp-001 OVERDUE across 3 distinct evaluation periods. Until 2026-09-15 this made a
+  // "repeat non-complier" with a streak of 3; the list is retired (ADR-081) and the outlook now reads
+  // the winning run, so the three rows are three periods of ONE subject and must be counted once.
   for (const period of ["2024-06-13", "2025-06-13", "2026-06-13"]) {
     await oc.recordOutcome({ runId: r1.id, subjectId: "emp-001", measureId: "hazwoper", evaluationPeriod: period, status: "OVERDUE", evidence: {} });
   }
@@ -263,14 +265,17 @@ test("GET /api/programs/:id/risk-outlook predicts upcoming due-soon + repeat non
     upcomingNonCompliantCount: number;
     upcomingExpirations: Array<{ externalId: string; daysUntilDueSoon: number; predictedDueSoonDate: string }>;
     repeatNonCompliers: Array<{ externalId: string; streakCount: number }>;
-    siteComplianceRates: Array<{ site: string }>;
+    siteComplianceRates: Array<{ site: string; total: number }>;
   };
   const omar = d.upcomingExpirations.find((e) => e.externalId === "emp-006")!;
   assert.ok(omar, "emp-006 is becoming due soon");
   assert.equal(omar.daysUntilDueSoon, 15, "335 threshold − 320 days since");
   assert.equal(d.upcomingNonCompliantCount, d.upcomingExpirations.length);
-  const repeat = d.repeatNonCompliers.find((r) => r.externalId === "emp-001")!;
-  assert.equal(repeat.streakCount, 3, "3 flagged periods in a row");
+  // Retired, and the key is kept so this response shape is unchanged for the page (ADR-081).
+  assert.deepEqual(d.repeatNonCompliers, []);
+  // Two subjects, four rows: emp-001's three periods collapse to one. Against the real SQLite store,
+  // so this is the store's own `listOutcomesWithRun` narrowing and not a fake's.
+  assert.equal(d.siteComplianceRates.reduce((n, s) => n + s.total, 0), 2, "one row per subject");
   assert.ok(d.siteComplianceRates.length >= 1);
 });
 
