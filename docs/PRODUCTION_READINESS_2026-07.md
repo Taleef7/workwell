@@ -216,12 +216,27 @@ flows) or **nice-to-have** (improves the production posture but does not block t
 | 5 | Scale performance (contract-timed once MIE answers volume) | Nice-to-have at launch, required before full-volume production — timing depends on Q C16 (realistic production population size) | #256, #263 (Option B transpiler + its trigger conditions now tracked on #292; #78 closed — decision shipped, ADR-025) |
 | 6 | Durable scheduler (missed-run detection across restarts) | Nice-to-have — the current in-process `setInterval` scheduler (E13 PR-3) loses its debounce state on container restart/redeploy, so a missed 24h cycle isn't detected or backfilled | #268 (new, this memo) |
 | 7 | Real tenancy (multi-employer isolation) | Nice-to-have for a single-employer first integration; required before onboarding a second real employer | #269 (new, this memo) |
-| 8 | Backup/DR runbook (Neon branch restore) | **Mostly done 2026-07-14** — runbook written + drill executed + nightly `pg_dump` to S3 live; residual = the Neon plan-upgrade decision (6h PITR + branch protection are Free-plan caps) | #270 |
+| 8 | Backup/DR runbook (Neon branch restore) | **Mostly done 2026-07-14** — runbook written + drill executed + nightly `pg_dump` to S3 live; residual = the Neon plan-upgrade decision (6h PITR + branch protection are Free-plan caps). **SINCE 2026-09-11**: storage moved to Cloudflare R2 (the AWS account was suspended) and the pilot database gained its own backup workflow, which it had never had | #270 |
+| 9 | **A durable per-run report archive (added 2026-09-15)** | **Required for the PHI phase** — the ACO stated a roughly ten-year audit expectation out loud, and the two mechanisms in place contradict it: Maui ships `WORKWELL_OUTCOME_RETENTION_DAYS=400`, and ADR-077 makes every report surface (MeasureReport, QRDA I, QRDA III, and #557's report package) answer **409 `run_compacted`** once a run predates a compaction cutoff. So a report filed in March is not re-renderable in December — not wrong, *refused*, which is the correct behaviour and the wrong capability. ADR-073's keep-set preserves the newest usable row per (subject, measure, period), so the LIVE numbers survive; what does not survive is **reproducibility of a specific filed report**, which is a function of (list revision, run ids). Design recorded in the 2026-09-14 plan §5.9: `subject_list_reports` + `subject_list_report_rows` holding the snapshotted summary and per-measure rows, served from the archive with no compaction gate. **Owner-written schema** per the standing rule. Interim stopgap, owner-ops and no code: every report actually handed to the ACO is retained as a dated file in the deployment's R2 evidence bucket, and its CSV rows carry the list revision and run ids | (to file with #557 PR 3B) |
+| 10 | **An authoritative subject resolver + PHI-enabled list import (added 2026-09-15)** | **Required before #557's import may run on real data** — the import is sandbox-bounded on purpose (it refuses any identifier outside the generated corpus namespace *before persistence*, and 403s on a live-directory deployment), because the live WebChart directory is a worker-local last-known registry that also **fabricates** a minimal profile for any persisted `wc\|`-prefixed id, so matching an attribution file against it would be silently incomplete. The PHI phase needs a resolver that can say "this identifier is not one of ours" and be believed. Also: above `PANEL_PREFILTER_MAX_IDS` a list-derived subject set must be pushed into SQL (`employee_id = ANY($1)`) rather than post-filtered in memory | (to file with #557 PR 3A) |
 
 Items 1–4 are the floor for touching any real WebChart data at all, PHI or not (an observability gap or
 a lossy evidence bucket is unacceptable the moment a real case manager depends on the system, before PHI
 enters the picture). Items 5–8 scale with how much real data and how many real employers are onboarded,
 and several are explicitly timed against answers MIE hasn't given yet (Q C15, C16).
+
+**Items 9–10 were added 2026-09-15 and are specific to the Maui pilot's PHI phase**, which nothing in
+milestone M-M authorizes (LOCKED §4A.1 — the milestones deliver a *sandbox*). Both come from the same
+place: a capability the customer assumes exists, which the current design deliberately refuses rather
+than fakes. Item 9 is a retention-versus-audit contradiction the ACO named out loud and nothing
+reconciles; item 10 is why #557's import is bounded to synthetic identifiers today.
+
+**A note on item 4.** Its tracking issue **#264 is closed** (failed-run alerting + run metrics
+shipped), so this row reads as required-and-untracked. What is genuinely still missing is narrower and
+different: nothing reports the *process's own state* — RSS, event-loop lag, pool saturation — which is
+why a 2026-09-15 measurement could not distinguish a blocked event loop from a host-paused container
+during the nightly recompute. That is **#563**, and this row should be read as pointing there for the
+remaining work.
 
 ---
 
