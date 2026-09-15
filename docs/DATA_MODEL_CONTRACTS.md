@@ -205,11 +205,18 @@ Supports filters: `status`, `measureId`, `priority`, `assignee`, `site`, `caseId
 > unchanged (2026-09-13).** It is still the `deliveryStatus` of the newest `OUTREACH_DELIVERY_UPDATED`
 > / `OUTREACH_SENT` action, still empty where a case has none, and still in the same position. Only the
 > READ changed: `CaseEventStore.latestOutreachDeliveryStatuses(caseIds)` answers for a set, because the
-> per-case form issued one query per row — ~15,300 on the pilot through a ten-connection pool — which
+> per-case form issued one query per row — **~32,600 on the pilot** through a ten-connection pool — which
 > answered 504 at 60 s and held every connection while it ran, so every other database-backed endpoint
 > timed out for the minute the export took. A store contract test compares the batched answer with the
 > per-case one case by case, including the case where the newest action carries no `deliveryStatus`
 > (both return null, rather than an older status the case has moved on from).
+>
+> **This export applies no status filter, and the row count is the whole `cases` table** (corrected
+> 2026-09-15). The pilot's 32,558 cases are 15,309 OPEN, 15,676 RESOLVED and 1,573 EXCLUDED; earlier
+> notes said "~15,300", which is the OPEN count and so the count of what `?status=open` would return,
+> not what this endpoint does. At the ceiling's `OUTREACH_STATUS_CHUNK = 10_000` the batched form is
+> therefore **four** statements on the pilot, not two. Measured after the deploy: 7.7 s cold, 6.5 s
+> warm for 10,654,867 bytes, and `/api/panels` stays at 0.26–0.68 s with three exports in flight.
 
 > **Subject headers follow the deployment profile.** On a patient deployment
 > (`WORKWELL_INSTANCE=maui`, `DEPLOYMENT_PROFILE.subjectTerm === "patient"`) the two subject columns in

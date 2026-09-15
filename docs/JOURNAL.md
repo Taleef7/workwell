@@ -1,5 +1,107 @@
 # Journal
 
+## 2026-09-15 — the export's after-numbers, and the 90 minutes nobody had measured
+
+#560 deployed with `6b893d0e` on 2026-09-14; both stack deploys and the main CI run were green, every
+real job included. These are the numbers it was merged on the promise of, measured rather than
+predicted: `curl -w '%{time_total}'` against `maui-api-ts.os.mieweb.org` as the sandbox admin, cold
+then warm, on a stack with no run in flight.
+
+**The export is fixed, and so is the outage it caused.**
+
+| read | BEFORE (2026-09-13) | AFTER (2026-09-15) |
+|---|---|---|
+| `GET /api/exports/cases?format=csv` | **504 at 60.2 s**, cold and warm | **200 in 7.7 s cold, 6.5 s warm** — 32,558 rows, 10,654,867 bytes |
+| `/api/panels` with an export in flight | 45 s timeout x3, then 22.7 s | **0.26–0.68 s with THREE exports in flight** (idle 0.25–0.64 s) |
+| `/api/version` (touches no database) with exports in flight | 0.2 s throughout | 0.19–0.46 s |
+| `/api/worklist/patients?status=open&limit=25` with three exports in flight | not probed | 0.86–2.49 s |
+| `GET /api/exports/runs?format=csv` | not measured | 3.45 s, 3.61 s |
+| `/api/cases?status=open&outreach=none&limit=1` | 1.0–1.1 s | 1.07–1.38 s |
+| `POST /api/auth/login` | not measured | 0.72 s, 0.55 s |
+
+The pool probe ran **three** exports at once on purpose, because **one** was what took the deployment
+down before. Nothing queued behind them. An export under that contention takes 17.4 s instead of
+6.5 s, which is the cost of sharing a stack and not an outage.
+
+**The defect was twice the size the record says, and the fix is twice the statements.** Every note on
+this — the 2026-09-13 entry, `DATA_MODEL_CONTRACTS` §6.3, `ARCHITECTURE` §3 and six source comments —
+says the per-case form fired "~15,300" queries and that the batched form takes "two" round trips.
+15,309 is the pilot's OPEN case count; `casesCsv` applies no status filter, so what it actually returns
+is every case — **32,558** today: 15,309 OPEN, 15,676 RESOLVED, 1,573 EXCLUDED, across 15,488 distinct
+patients. The old form therefore fired ~32,600 queries, and at `OUTREACH_STATUS_CHUNK = 10_000` the new
+one takes **four** statements, not two. The docs are corrected in this commit; the six source comments
+ride with the next PR that touches those files, alongside the other #560 P2s.
+
+**What this deploy does not prove.** No case on the sandbox has ever had an outreach action —
+`?outreach=none` returns the full 15,309 open cases and the audit ledger holds no outreach event — so
+`latestOutreachDeliveryStatus` is empty in all 32,558 rows. This deploy is evidence about speed only.
+That the batched answer EQUALS the per-case answer rests where it was built to rest: the store contract
+test that compares them case by case, including the case whose newest action carries no
+`deliveryStatus`.
+
+**`runsCsv`'s serial loop costs 3.5 s, so its P2 closes instead of being carried.** #560 made that loop
+sequential deliberately, and the review's open question was whether up to 200 serial round trips at
+Neon's ~40 ms would be felt, with a batched `countOutcomesByStatus` aggregate named as the remedy if
+they were. Measured, they are 3.45 s and 3.61 s. No aggregate is needed. The first reading of this
+endpoint was 504 twice — taken immediately after two 60-second exports, so it was measuring my own
+probe's shadow, which is the mistake the next section is about.
+
+**Because the first sweep measured the nightly recompute, not the fix.** The 2026-09-15 SCHEDULED
+ALL_PROGRAMS run started 12:09:53Z and completed 13:39:49Z: **90 minutes over 120,000 subject-measure
+pairs.** Every probe in the first pass fell inside that window, and inside it the stack is a different
+machine:
+
+| the same reads, DURING the nightly run | |
+|---|---|
+| `GET /api/exports/cases?format=csv` | 60.5 s and 83.2 s — and 504 at the 60 s gateway cut on two of four attempts |
+| a 15,303-row subset of it (`?priority=HIGH`, 4.57 MB) | 27.3 s and 33.7 s, and one 504 |
+| `POST /api/auth/login` | **39.7 s** (0.55–0.72 s quiet) |
+| `/api/version` — touches no database | **13.8 s and 22.0 s** (0.2 s quiet) |
+| `/api/panels` | one 50 s client timeout, one 48.4 s (0.3 s quiet) |
+| `GET /api/exports/runs?format=csv` | 504 at 60.2 s, twice (3.5 s quiet) |
+
+**A no-database endpoint stalling is a different failure from the one #560 fixed**, and that
+distinction is the whole reason `/api/version` was in the original probe: before the fix it stayed flat
+at 0.2 s while the pool was drained, which is what identified the pool rather than the event loop as
+the cause. Now it degrades. Two readings fit — a single worker whose event loop is held for seconds at
+a time by synchronous work, or the host pausing a memory-pressured container, which the gateway's own
+504 page names as a cause — and **neither can be distinguished from outside the container**. What would
+settle it is in-container evidence: process RSS and an event-loop-lag sample taken during a run, which
+the worker exposes nowhere — `process.memoryUsage()` appears nowhere in `backend-ts/src` and there is
+no health or metrics route. Filed as **#563**, with the smallest proposal that could answer it. Not
+#264, which is closed and was about a run's OUTCOME (failed-run alerting + run metrics); this is about
+the process's state while it runs, and `PRODUCTION_READINESS` item 4 still points at that closed issue.
+
+This is not a regression and it is not #560's: it is the nightly recompute's cost, measured for the
+first time because nothing had ever been probed during one. 12:09 UTC is 02:09 in Hawaii, so the window
+is off-hours for the pilot group, and the run has finished before 13:40 UTC every day this month. The
+operational rule it earns is narrow and now written down: **a sandbox measurement is worth nothing
+unless it records whether a run was in flight.** The BEFORE numbers this entry compares against were
+taken later in the day on 2026-09-13, after that day's run finished at 13:31:54Z, so the two sets are
+comparable.
+
+**What #560 leaves carried, so nothing is lost by being small.** The post-merge review found no P0 or
+P1 and four P2s, none of which earns a PR of its own; one of the four has now closed on measurement.
+(1) On Postgres, `latestOutreachDeliveryStatuses` keys its result by the canonical lowercase `case_id`
+while `isUuid` is `/i`, so a mixed-case uuid would be admitted by the filter and then miss — unreachable
+today because `casesCsv` only ever passes ids that came out of `listCases`, and the fix when a
+client-supplied list can reach it is to lowercase the input or join back through `unnest`
+(`stores/postgres/case-event-store-postgres.ts:271,290`). (2) **Closed**: the serial `runsCsv` measures
+3.5 s, so the batched `countOutcomesByStatus` aggregate is not needed. (3) The header comment at
+`worklist-read-model.ts:21-22` still says "only when someone renders them" where the rule is render OR
+filter. (4) `case-event-store.ts:146-147` does not say that a non-uuid id also has no key on Postgres.
+Plus the six source comments carrying the corrected ~32,600 / four-statement figures. All of it rides
+with the next PR that touches those files.
+
+**The Maui read-only e2e project is green against the sandbox: 28 passed, 1 flaky, 2.2 minutes.**
+`exports.spec.ts` was red on purpose until this landed and now passes — 1.8 minutes of the 2.2, because
+it downloads the whole 10.6 MB file and checks every name in it — and the chip spec that used to fail in
+its shadow passes. The one flake is `measures.spec.ts`'s "measure detail for cms125 opens without
+error": no heading rendered within 20 s on the first attempt, passing on the retry. That is not a test
+problem. `/programs/cms125` gates its first paint on all four of its reads, one of which is the
+`risk-outlook` that still answers 504 cold, so the page shows nothing at all until the slowest read
+returns. The suite now carries a canary on exactly the defect PR B2 is next to fix.
+
 ## 2026-09-13 (later) — the export asks once, and the work list counts only what it will show
 
 The first of the two read-path fixes the sweep earlier today measured. It is the one that leads
