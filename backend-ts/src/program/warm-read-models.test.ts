@@ -9,7 +9,7 @@ import type { OutcomeStore, OutcomeWithRun } from "../stores/outcome-store.ts";
 import type { RunStore } from "../stores/run-store.ts";
 import type { CaseStore } from "../stores/case-store.ts";
 import { warmReadModels } from "./warm-read-models.ts";
-import { programOverview, __overviewMemo, __chartMemos, __sitesMemo } from "./program-read-models.ts";
+import { programOverview, programRiskOutlook, __overviewMemo, __chartMemos, __sitesMemo } from "./program-read-models.ts";
 import { latestRunsFromRows } from "../test-support/latest-runs.ts";
 
 const rows: OutcomeWithRun[] = [
@@ -46,6 +46,10 @@ test("warming leaves the dashboard's memos filled, so the first request after a 
   // warm still calls it, because on a scoped profile (the pilot) that call is the expensive one.
   assert.equal(__sitesMemo.size, 0);
   assert.ok(__chartMemos.trendMemo.size > 0 && __chartMemos.driversMemo.size > 0, "and both per-measure panels");
+  // Added 2026-09-15, and two reviewers both named its absence: the warm pass gained a
+  // `programRiskOutlook` call and nothing asserted it, so deleting the call left this test green
+  // while the first request after every nightly paid the cold read the memo exists to prevent.
+  assert.ok(__chartMemos.outlookMemo.size > 0, "and the risk outlook, warmed since 2026-09-15");
 
   // The warmed answer is the one a request gets, not merely SOME cached value.
   let reads = 0;
@@ -53,6 +57,12 @@ test("warming leaves the dashboard's memos filled, so the first request after a 
   const audiogram = (await programOverview(counting, {})).find((p) => p.measureId === "audiogram")!;
   assert.equal(audiogram.overdue, 1);
   assert.equal(reads, 0, "served from the warm memo — no outcome read at all");
+
+  // Same for the outlook, and at a DIFFERENT horizon from the 90 the warm pass used — which is the
+  // point of keeping `horizonDays` out of the memo key.
+  const outlook = await programRiskOutlook(counting, "audiogram", 30);
+  assert.ok(outlook);
+  assert.equal(reads, 0, "the warmed outlook serves any horizon without re-reading");
 });
 
 test("a warm failure is swallowed: a completed run is never failed by cache maintenance", async () => {

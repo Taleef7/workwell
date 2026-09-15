@@ -62,12 +62,54 @@ beforeEach(() => {
 
 describe("ProgramDetailPage inverse measure rendering", () => {
   it("renders CMS122 as Poor control 15.6% with Lower is better note and accessible association", async () => {
+    // A TWO-POINT trend, because the delta now renders only when there is a previous run to compare
+    // with. This test used to pass with an empty trend, which is how it came to pin the false
+    // "↑ 0.0 from previous" the page invented by comparing the current summary against itself.
+    const previous = {
+      runId: "run-0",
+      startedAt: "2026-07-30T00:00:00Z",
+      complianceRate: 80.0,
+      totalEvaluated: 48,
+      denominator: 45,
+      compliant: 36,
+      dueSoon: 0,
+      overdue: 9,
+      missingData: 0,
+      excluded: 3,
+    };
+    const current = { ...previous, runId: "run-1", startedAt: "2026-08-30T00:00:00Z", compliant: 38, overdue: 7 };
+    get.mockImplementation((url: string) => {
+      if (url === "/api/measures") {
+        return Promise.resolve([
+          {
+            id: "cms122",
+            name: "Diabetes: Glycemic Status Assessment",
+            identity: { cmsId: "CMS122", mipsQualityId: "001", improvementNotation: "decrease" },
+          },
+        ]);
+      }
+      if (url === "/api/programs" || url.startsWith("/api/programs?")) return Promise.resolve([cms122Program]);
+      if (url.includes("/trend")) return Promise.resolve([current, previous]);
+      if (url.includes("/top-drivers")) return Promise.resolve({ bySite: [], byRole: [], byOutcomeReason: [] });
+      if (url.includes("/risk-outlook")) return Promise.resolve(null);
+      if (url.includes("/snapshots")) return Promise.resolve([]);
+      return Promise.resolve([]);
+    });
+
     render(<ProgramDetailPage />);
     expect(await screen.findByText("Poor control 15.6%")).toBeInTheDocument();
     const note = screen.getByText("Lower is better");
     expect(note).toBeInTheDocument();
-    const deltaEl = screen.getByText(/from previous/);
+    const deltaEl = await screen.findByText(/from previous/);
     expect(deltaEl).toHaveAttribute("aria-describedby", note.id);
+  });
+
+  it("renders NO delta when the measure's history holds one run", async () => {
+    // The default fixture's trend is empty. "↑ 0.0 from previous" about a previous run that does not
+    // exist is a claim the page used to make on every measure's first run.
+    render(<ProgramDetailPage />);
+    expect(await screen.findByText("Poor control 15.6%")).toBeInTheDocument();
+    expect(screen.queryByText(/from previous/)).toBeNull();
   });
 
   it("asserts no 'Compliance' label appears anywhere on the page for cms122 and run-history shows poor control", async () => {

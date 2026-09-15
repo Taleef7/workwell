@@ -1,5 +1,164 @@
 # Journal
 
+## 2026-09-15 (later) — the measure page reads the winning run, and paints before its slowest read
+
+The second of the two read-path fixes the 2026-09-13 sweep measured, and the last read model still
+scanning a measure's whole retained history. `programRiskOutlook` called `listOutcomesForMeasure` with
+evidence — every run, every period, about a million rows on the pilot growing by 120,000 a night — and
+answered **504 cold, 8.2 s warm**. It joins the winners of #547 now: the winner is resolved from the
+runs table, its rows are read once, and what those rows determine is memoized under their `runKey`.
+No store change, no SQL.
+
+**Two things about that memo are deliberate, and both are mutation-checked.** `today` and
+`horizonDays` are **not** in the key: the memoized value is what the run determines — the per-site
+counts, and the visible COMPLIANT subjects that carry a recency date — and the two request-dependent
+quantities are applied per request over it. So a warmed entry survives until the next run rather than
+expiring at UTC midnight, and two people asking for different horizons share one read. Putting the
+horizon in the key fails a test. And the evidence read names **`snap.winners[0].runId`, never the
+precomputed winner**, because the visibility fallback REPLACES the winner and reports the replacement;
+reading the precomputed run would pair an older visible snapshot with a newer invisible run's
+evidence. Reading `winners[0]` instead fails a test.
+
+**Evidence is read only where a recency date can exist, and that is a fact about the rows.** One row
+is peeked; if its evidence carries an `official` block the run is officially routed, its
+`expressionResults` are named `official:<population>` precisely so they cannot match the anchored
+`/^most recent .*date$/i` matcher, and the expirations are empty without a second read — the old code
+paged 20,000 blobs to find nothing. Deciding this from today's routing flag instead would zero an
+authored winner's expirations in a process restarted after a flip, and serve the authored answer from a
+warm process under an unchanged key. Both directions are pinned.
+
+**The streak is retired, and it is ADR-081 rather than a deletion.** `repeatNonCompliers` wanted the
+leading run of flagged outcomes across three distinct evaluation **periods**. A nightly deployment's
+newest N runs share one period for any N — an officially routed measure is scored over its calendar
+year (ADR-072) — so three periods are unreachable from the winning run, from the newest ten, or from
+any window defined in runs. Reaching them means the whole history, which is the 504, or new indexed
+per-period SQL the owner would have to approve for a panel nobody asked for. And ADR-073 already
+settled the shape: per-subject history is a retention WINDOW, the durable history is the aggregate. At
+Maui's 400 days an annual measure holds at most two periods, so on the pilot the list was **empty by
+construction** — a million rows read to compute something that cannot be non-empty. It had also been
+wrong twice; ADR-079's flag had to be threaded into it after Codex found a non-diabetic earning a
+streak of 3 on cms122 (#548). The key stays in the response as `[]` so nothing has to be migrated, the
+page's tile and table are gone, and the ADR records the two conditions under which it returns.
+
+**Two semantic changes travel with the move, and both are shared with every surface #547 touched:**
+the site table describes the subjects the WINNING RUN evaluated, so a subject present only in a
+superseded run drops out; and the winners walk excludes a run whose `triggered_by` is NULL under
+`excludeScale`, where the old subject-prefix exclusion kept it.
+
+**The page stops gating its first paint on its slowest read.** Four reads behind
+`Promise.allSettled` meant a 504 on `risk-outlook` rendered *nothing* for a minute — which is exactly
+the Maui e2e suite's one flake, `/programs/cms125` producing no heading within 20 s (measured against
+the sandbox this morning: 28 passed, 1 flaky). Each panel lands on its own now. That re-opens the race
+the `allSettled` was accidentally closing, so the guard is that every value carries the measure it
+describes: one tagged state object, a pure reducer (`measure-slices.ts`) that drops any update whose
+`measureId` is not the one the state describes, and a render that reads the panels only while the tag
+matches the route. A `reqId` ref was not enough, because the ref lives where the render never looks —
+the guard ran inside the loader while render still trusted whatever was in state.
+
+Status is kept apart from data, so no string literal is unioned into `RiskOutlook | null`: `loading`
+is a skeleton, `failed` is "Risk outlook unavailable" rather than three zeroes and a dash, and a
+`ww:run-complete` refresh keeps the current numbers on screen until new ones land. **The KPI delta now
+renders only when the trend is ready and has two points** — the old fallback compared the current rate
+against the current summary, which is a subtraction from itself and rendered "↑ 0.0 from previous" for
+every measure whose history holds one run. `page.inverse.test.tsx` had been pinning that false delta
+with an empty trend; it now gets a real two-point trend for the accessibility assertion, and a second
+test asserts no delta at all for a one-run history.
+
+**Two review findings I accepted into the plan turned out to be wrong, and mutation is what showed
+it.** The plan said an empty winners list must not be memoized because `runKeyOf([])` is `""` and such
+an entry "would never be evicted", pinning "no outlook" forever on a fresh measure. It cannot:
+`RunKeyedMemo.get` compares the stored key with the `runKey` the CALLER presents from a fresh winners
+walk, so the entry stops matching the moment a run exists — memoizing there fails no test, correctly.
+The second claim, that the early return saves a row read, is also false: `readWinnersRows` already
+returns early on an empty winners list. What the branch actually saves is one `directoryForRows` call
+and one memo slot. It is kept, with the false reasons written down as false, because the next person
+to read it will otherwise re-derive them. The four existing outlook tests were rewritten rather than
+deleted: three seeded `measureRows` against a call that no longer happens, and one seeded three
+periods inside a single run, which the pipeline never produces (ADR-072).
+
+**Verification.** Backend `typecheck` + `test`: 2,646 tests, 2 failures — the rewritten route test and
+the three rewritten read-model tests all pass; the two are `corpus-membership` (the standing stale
+sparse-checkout failure) and nothing else. Frontend `lint` + 446 tests + `build` green. Seven
+mutations run and each caught by the test named for it: memoize on `fellBack`, read the precomputed
+winner, drop the official peek, put the horizon in the memo key, count out-of-population rows as
+missing data, remove the reducer's tag check, and weaken the delta guard. One test was found VACUOUS
+by that process and rewritten — the A→B mount test had unmounted before B rendered, so A's late
+response had no live component to land in and the test passed with the tag check removed.
+
+**Four reviewers, and the two worst findings were in the half I thought was finished.**
+GPT 5.6 Sol at xhigh, GLM 5.3 Flash, Gemini 3.8 Flash high and the project's own whole-diff
+reviewer. Two P1s came out of it, neither reachable by any of the seven mutations:
+
+- **The trend chart claimed a measure had no run history while its history was loading.**
+  `ComplianceTrendChart` answers an empty `points` array with "No run history for this measure yet" —
+  a positive claim. While the page gated its first paint on all four reads that was unreachable; the
+  moment each panel lands on its own, `/api/programs` (memoized) answers before `/trend`, so the
+  LARGEST panel asserted the thing this change exists to stop asserting, and permanently when the
+  read failed. It was already self-contradicting inside this PR's own new test — the one that rejects
+  `/trend` and checks for "Run history unavailable" in the table below the chart. Found by the
+  project's own reviewer; both external lanes missed it.
+- **The page could sit on a skeleton forever.** The fallback was gated on `program` being truthy, so
+  an unknown or inactive `measureId` — where `/api/programs` answers and the measure simply is not in
+  it — announced "Loading measure detail…" to a screen reader indefinitely, as did a failed programs
+  read, under its own error banner. Pre-existing, and `status.program` is what made it a one-line fix.
+  Found by Gemini.
+
+**All three external lanes independently found the same P1 in the evidence peek**, which is the
+strongest signal the round produced. Peeking the run's FIRST row was wrong: `listOutcomes` orders by
+`(evaluated_at, id)` ASC, an evaluation failure REPLACES the evidence with
+`{ evaluationError, message }`, and a PARTIAL_FAILURE run satisfies `isCompletedRun` and can win — so
+one engine failure sorting first classified an official winner as authored and fell through to the
+unpaged read of all 20,000 blobs, which is the 8.2 s the peek exists to remove. The peek now names a
+COMPLIANT subject's own row, which cannot be an evaluation error because an error forces MISSING_DATA.
+Two of them proposed exactly that fix. **Finding it required a harness change**: the test fake ignored
+`subjectId`, so it would have served the first row regardless and passed the very test written to
+prove the fix — the "harness must not be gentler than the real caller" rule, again.
+
+**Two reviewers also caught a race I had removed.** The first cut tagged updates with the measure
+alone, which drops a navigation's stale response but not two loads of the SAME measure overlapping —
+which happens on every `ww:run-complete` refresh that starts while the first read is in flight, with
+the older response landing last and overwriting the newer run's numbers. The request-generation guard
+the old loader kept in a ref is back, as `loadId`, in the state the render actually reads; the
+page-level error banner is guarded by the same generation, since it is the one piece of state the
+reducer does not hold.
+
+**One stale comment is deliberately NOT in this PR.** `schema-pg.ts` still lists the risk outlook
+among the consumers justifying `outcomes_employee_measure_period_idx`. The file is owner-owned
+(CLAUDE.md), a comment fix is not worth putting it in a PR, and the staleness is harmless because the
+same comment already names the consumers that keep the index earned — `listOutcomesForEmployee` for
+the employee profile, the MCP tools and the E15 timeline, plus data readiness. Apply it whenever that
+file is next opened for a real reason.
+
+Also folded in: the warm-read test asserted nothing about the outlook memo, so deleting the new warm
+call left it green (two reviewers); a shared module-level empty `TopDrivers` that any `push` would
+have corrupted process-wide, now a fresh value per call rather than frozen; the `__chartMemos` comment
+claimed every `reset()` helper clears it, which was false for `latest-population.test.ts`, so those
+clears became the iterating form; and the comments in `outcome-store.ts`, `store-contract.ts`
+and `routes/runs.ts` that still named the risk outlook as the consumer of
+`listOutcomesForMeasure` and `successfulPopulationOnly` now name the real ones — the `runs.ts` one
+mattered most, because its only stated reason for resolving `evaluation_period` was the retired
+streak, and a behaviour whose sole justification is gone is a behaviour somebody deletes later.
+
+**One reviewer claim was rejected on the code.** GLM read the peek as able to lose expirations when
+one row is official and others authored. Provenance is fixed per `(run, measure)` at run time — the
+executor is chosen once — so a mixed set cannot occur; only error rows lack it, which is the
+direction actually fixed. It also reported that every `reset()` helper reaches the outlook memo, which
+is what the project's own reviewer had just disproved. Three more limits the round surfaced are
+recorded in ADR-081 as limits rather than fixed: which duplicate row wins is unspecified (there is no
+UNIQUE constraint, and an owner question is the honest remedy), directory-derived display values
+freeze with the memo exactly as `overviewMemo` freezes the whole snapshot, and an authored winner's
+evidence read is one unpaged query that the pilot never takes.
+
+**Verification after the round.** Backend 2,648 tests, one failure — `corpus-membership`, the standing
+stale sparse-checkout one. Frontend lint clean, 454 tests, build compiled. Ten mutations now, each
+caught by the test named for it: the original seven plus the first-row peek, the `loadId` half of the
+tag, the un-gated trend chart, and the skeleton gate.
+
+**The numbers for this one are not in this entry**, because they have not been measured: the before
+figures are the 2026-09-13 sweep's, and `risk-outlook` cold/warm plus the measure page's first render
+get measured on the sandbox after this deploys, outside the nightly recompute window — the rule the
+morning's entry earned.
+
 ## 2026-09-15 — the export's after-numbers, and the 90 minutes nobody had measured
 
 #560 deployed with `6b893d0e` on 2026-09-14; both stack deploys and the main CI run were green, every

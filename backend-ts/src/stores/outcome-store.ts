@@ -52,7 +52,13 @@ export interface OutcomeRecord {
   outOfPopulation?: boolean;
 }
 
-/** Per-subject outcome history row for a measure (risk-outlook): status + period + evidence. */
+/**
+ * Per-subject outcome history row for a measure: status + period + evidence.
+ *
+ * Consumers since 2026-09-15 are `measure/data-readiness.ts` and `run/backfill-trend-history.ts`.
+ * The risk outlook was the original caller and no longer reads history at all (ADR-081), so do not
+ * treat this shape as serving it.
+ */
 export interface MeasureOutcomeRow {
   subjectId: string;
   status: string;
@@ -157,8 +163,13 @@ export interface MeasureScanOptions {
   excludeScale?: boolean;
   /**
    * Join to runs and retain only terminal successful population runs in SQL. "Population" excludes
-   * CASE/EMPLOYEE scopes; "successful terminal" is COMPLETED/PARTIAL_FAILURE. Risk outlook uses this
-   * to keep evidence without an unbounded listOutcomes-per-run hydration pass.
+   * CASE/EMPLOYEE scopes; "successful terminal" is COMPLETED/PARTIAL_FAILURE.
+   *
+   * **No production caller since 2026-09-15.** It was built for the risk outlook, which now reads
+   * the winning run instead (ADR-081); the option and both stores' SQL branches are retained,
+   * exercised only by the store contract, because the next history-shaped read will want exactly
+   * this filter and re-deriving it is more expensive than keeping it. Retained deliberately, not
+   * forgotten.
    */
   successfulPopulationOnly?: boolean;
 }
@@ -288,7 +299,11 @@ export interface OutcomeStore {
   listLatestPopulationRuns(measureIds: readonly string[], filter: OutcomeMeasureFilter, perMeasure?: number): Promise<LatestPopulationRun[]>;
   /**
    * All outcomes for a measure (bounded scan), with status + evaluation_period + evidence. Pass
-   * `successfulPopulationOnly` for the risk-outlook history: filtering happens in the same query.
+   * `successfulPopulationOnly` to filter to terminal successful population runs in the same query.
+   *
+   * Callers: `measure/data-readiness.ts` and `run/backfill-trend-history.ts`. **Not** the risk
+   * outlook, which stopped scanning history on 2026-09-15 (ADR-081) — this is the read whose ~1M-row
+   * cost on the pilot that change removed, so think twice before adding a request-path caller.
    */
   listOutcomesForMeasure(measureId: string, opts?: MeasureScanOptions): Promise<MeasureOutcomeRow[]>;
   /**

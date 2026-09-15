@@ -584,7 +584,7 @@ export function outcomeStoreContract(
     const running = await runStore.createRun({ ...sampleRun("audiogram"), status: "RUNNING" });
     const caseRun = await runStore.createRun({ ...sampleRun("audiogram"), scopeType: "CASE", status: "COMPLETED" });
     // A COMPLETED SITE recheck is one clinic, not the population: `successfulPopulationOnly` mirrors
-    // `POPULATION_SCOPES` (ADR-077 d4), so the risk outlook never mixes a site's fresh rows with
+    // `POPULATION_SCOPES` (ADR-077 d4), so a population read never mixes a site's fresh rows with
     // everyone else's older whole-roster rows (Codex review, #540).
     const siteRun = await runStore.createRun({ ...sampleRun("audiogram"), scopeType: "SITE", status: "COMPLETED" });
     const completedEvidence = { source: "completed-population" };
@@ -845,14 +845,15 @@ export function outcomeStoreContract(
 
     // EVERY read, not a sample: the read models each pick a different projection, and the whole point
     // is that they cannot disagree about a rate. The first cut of this test covered three of the four
-    // and `listOutcomesForMeasure` — the risk outlook's read — silently returned undefined for every
+    // and `listOutcomesForMeasure` (data readiness and the trend-history backfill; the risk outlook
+    // until ADR-081) silently returned undefined for every
     // row, so that surface stayed on the old basis while the card beside it moved. Review caught it;
     // the missing assertion is what let it through.
     const expected = { "emp-006": true, "emp-007": false, "emp-008": undefined, "emp-009": true };
     assert.deepEqual(flagBySubject(await outcomeStore.listOutcomes(run.id, { measureId: "cms122" })), expected, "listOutcomes");
     assert.deepEqual(flagBySubject(await outcomeStore.listOutcomesWithRun({ measureId: "cms122" })), expected, "listOutcomesWithRun (the projection every rollup reads)");
     assert.deepEqual(flagBySubject(await outcomeStore.listLatestPopulationOutcomes({ measureId: "cms122" })), expected, "listLatestPopulationOutcomes");
-    assert.deepEqual(flagBySubject(await outcomeStore.listOutcomesForMeasure("cms122")), expected, "listOutcomesForMeasure (the risk outlook's read)");
+    assert.deepEqual(flagBySubject(await outcomeStore.listOutcomesForMeasure("cms122")), expected, "listOutcomesForMeasure");
 
     // UNDEFINED, not false: "this run did not record it" is a different statement from "this subject
     // is in the population", and an un-backfilled deployment must not be made to assert the second.
