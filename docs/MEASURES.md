@@ -97,7 +97,19 @@ is **362 of 387 across eight measures**, CMS165 deliberately excluded.
 
 **An officially routed measure is scored over the calendar year** containing the evaluation date, not a
 rolling 365-day window (ADR-072). The vendored artifacts are a **2026 vintage** and the pilot year is 2027,
-so every such run logs an `effectivePeriod` warning naming both periods until the MM-1d re-vendor lands.
+so every such run logs an `effectivePeriod` warning naming both periods until MM-1d lands.
+
+> **MM-1d is not a re-vendor, and the content it needs does not exist yet (verified 2026-09-14).**
+> Two different PY2027 publications get conflated, and only one has happened. The **QDM/HQMF**
+> specifications were published by CMS on **2026-05-14** — that is what a customer means when they say
+> the 2027 specifications are available. The **FHIR** content this engine executes has not landed:
+> `cqframework/dqm-content-qicore-2026` holds only draft examples, on **QI-Core 7.0.2**, with no release
+> tag, no `bundles/` directory, and none of the six pilot measures in `input/cql` or
+> `input/resources/measure`. Since our shipping content is authored on **QI-Core 6**, the arrival of
+> PY2027 FHIR content is a **profile migration plus a full MADiE re-gate per measure**, not a refresh —
+> re-sized in `ROADMAP_2026-08-30.md` MM-1d and §7.9. Until then the `effectivePeriod` warning fires
+> through all of 2027, which is the warning doing its job rather than a defect to silence. Check the
+> repository for a release tag before assuming this is still true.
 
 Outcome buckets (all measures): `COMPLIANT`, `DUE_SOON`, `OVERDUE`, `MISSING_DATA`, `EXCLUDED`.
 
