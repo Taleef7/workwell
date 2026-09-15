@@ -279,6 +279,53 @@ test("bulk assign CLAIMS a case the panel put on the same person, so a later pan
   await bulk({ assignee: null, caseIds: [omarAudiogram] });
 });
 
+test("bulk assign by SUBJECT resolves the measure's active case server-side (the roster's form)", async () => {
+  // #567: a roster cell is an OUTCOME reference, not a case, so the measure roster cannot send case
+  // ids. It sends the patients it has selected plus the ONE measure in scope, and the server
+  // resolves the active case for each.
+  await bulk({ assignee: null, caseIds: [omarAudiogram, omarHazwoper] });
+
+  const res = (await bulk({ assignee: CM, measureId: "hazwoper", subjectIds: ["emp-006", "emp-001"] }))!;
+  assert.equal(res.status, 200);
+  assert.deepEqual(await res.json(), { assigned: 2, unchanged: 0, conflicted: 0, missing: [], closed: [] });
+  // Both patients' HAZWOPER cases moved...
+  assert.equal((await cases.getCase(omarHazwoper))?.assignee, CM);
+  // ...and emp-006's AUDIOGRAM case did NOT. Naming one measure is the whole point: without it,
+  // "assign these patients" would have moved every gap they have.
+  assert.equal((await cases.getCase(omarAudiogram))?.assignee, null);
+
+  await bulk({ assignee: null, measureId: "hazwoper", subjectIds: ["emp-006", "emp-001"] });
+  assert.equal((await cases.getCase(omarHazwoper))?.assignee, null);
+});
+
+test("bulk assign by subject: a selection with no active case for that measure is 0, not an error", async () => {
+  // The operator ticked real patients and pressed a real button; they simply have nothing open for
+  // this measure. Answering in the success shape means a caller never parses two shapes to learn
+  // that nothing moved.
+  const res = (await bulk({ assignee: CM, measureId: "audiogram", subjectIds: ["emp-001"] }))!;
+  assert.equal(res.status, 200);
+  assert.deepEqual(await res.json(), { assigned: 0, unchanged: 0, conflicted: 0, missing: [], closed: [] });
+});
+
+test("bulk assign refuses an ambiguous or incomplete subject-form body", async () => {
+  // Both shapes at once: the server would have to guess which the operator meant.
+  const both = (await bulk({ assignee: CM, caseIds: [omarAudiogram], measureId: "audiogram", subjectIds: ["emp-006"] }))!;
+  assert.equal(both.status, 400);
+
+  // Subjects without a measure is the ambiguity the roster form exists to remove: a patient row
+  // spans every routed measure, so this would be six different pieces of work.
+  const noMeasure = (await bulk({ assignee: CM, subjectIds: ["emp-006"] }))!;
+  assert.equal(noMeasure.status, 400);
+  assert.equal(((await noMeasure.json()) as { parameter?: string }).parameter, "measureId");
+
+  const noSubjects = (await bulk({ assignee: CM, measureId: "audiogram", subjectIds: [] }))!;
+  assert.equal(noSubjects.status, 400);
+  assert.equal(((await noSubjects.json()) as { parameter?: string }).parameter, "subjectIds");
+
+  const notAnArray = (await bulk({ assignee: CM, measureId: "audiogram", subjectIds: "emp-006" }))!;
+  assert.equal(notAnArray.status, 400);
+});
+
 test("?panel=me is resolved from the MAPPINGS and the caller's own identity", async () => {
   // ADR-080 d5. emp-006 is prov-002's patient and emp-001 is prov-005's, so mapping one provider
   // splits the list — and proves the filter is the panel rather than "everything".

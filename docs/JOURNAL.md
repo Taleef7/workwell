@@ -1,5 +1,63 @@
 # Journal
 
+## 2026-09-15 (later still) — the roster gets the two controls the ask was framed around, and two hooks stop taking the page down
+
+#567. The practice described the job on the 2026-09-10 call as one sentence — filter for a provider, a
+measure and an insurance, then assign that report — and said it while looking at the measure roster.
+Two of those three were already there. The insurance filter and the assign control existed only on
+`/worklist`, which from the other side of the call is indistinguishable from their not existing.
+
+**Assigning from a roster needed a decision before it needed code.** A roster CELL is an outcome
+reference — `{ runId, outcomeId }`, `frontend/features/compliance/types.ts` — not a case, so the page
+has no case id to send, and a patient ROW spans every routed column, so "assign these patients" without
+a measure named would mean six different pieces of work. So `POST /api/cases/bulk-assign` gained a
+second body shape, `{ assignee, measureId, subjectIds[] }`, and the server resolves the ACTIVE case for
+each subject in that one measure in a single bounded read. Everything after the resolution is the
+`caseIds` path unchanged: the same 500 cap, the same assignable-account check, the same compare-and-set
+with ADR-080's `expectedSource`, the same `case_actions` and audit rows, the same response shape.
+Sending both shapes at once is a 400 rather than a guess. A selection where nobody has an active case
+answers `assigned: 0` **in the success shape** — the operator ticked real rows and pressed a real
+button, and a caller must not parse two shapes to learn that nothing moved.
+
+**The UI says what it can do and what it cannot.** The control appears only with one measure in scope.
+Rows whose cell is COMPLIANT, EXCLUDED, DECLINED, NA or NOT_APPLICABLE are rendered with a dead
+checkbox rather than omitted, so the row reads as deliberately unavailable instead of missing, and the
+bar states `N of M on this page have an open case for this measure`. That rule is an **affordance, not
+a guard**: an out-of-population patient persists as MISSING_DATA and opens no case at all (ADR-078), so
+the server stays the authority and answers 0 rather than inventing one.
+
+**The selection carries the measure it was made under.** Without that tag, switching from measure A to
+B keeps ticks the operator made about A live over B's column. Clearing it in an effect is a synchronous
+setState in an effect body, which the lint rule forbids for the reason it exists — so the tag is both
+the correct answer and the permitted one, and it is the same shape the measure page's slices use. Rows
+that leave under a filter change need no handling at all: the selectability filter drops them.
+
+**The insurance filter is a SET, and reads the last-written URL.** Same semantics as the work list,
+because the typology is hierarchical and a single-valued control would let someone ask for Medicare and
+silently receive only traditional Medicare while 2,900 Medicare Advantage patients were withheld under
+a heading claiming to contain them. The writer reads the last-written URL rather than the render's
+`searchParams`, because two checkbox clicks land faster than `searchParams` updates and the snapshot
+form makes the second clobber the first. That is deliberately **not** unit-tested: the jsdom
+`next/navigation` mock updates synchronously, so a test passes over either spelling and pins nothing.
+Mutation-checked by hand instead.
+
+**And the session's own finding: two hooks could white-screen the page, and one of them did.** An
+existing test's blanket mock answers every URL with segments, which fed `/api/payers` a payload of the
+wrong shape — and `usePanelPayers` guarded a FAILED fetch but not a SUCCESSFUL one carrying garbage, so
+`groups` built an entry whose `subjectCount` was undefined and the render died on `.toLocaleString()`.
+The whole roster, taken down by one optional filter's endpoint. `useAssignableUsers` had the identical
+hole on `u.email.toLowerCase()`, and it became reachable the moment the roster started calling it.
+Both now keep only rows that ARE what they claim to be. The rule both comments state: an optional
+control's endpoint returning an unexpected payload must cost that control, not the page behind it.
+
+**Verification.** Backend 2,651 tests, one failure — `corpus-membership`, the standing stale
+sparse-checkout one, green in CI. Frontend lint clean, 461 tests, build compiled. Seven mutations, each
+caught by the test named for it: drop the measure narrowing from the server-side resolution; accept
+both body shapes at once; make every row selectable; show assign with no measure in scope; post an
+empty subject list; drop each of the two hook shape-guards. One fixture bug found on the way — a panel
+id that does not normalize sent the page into an infinite render loop through an existing
+URL-reconciliation effect, which is a real trap for the next person writing a roster test.
+
 ## 2026-09-15 (evening) — the after-numbers for the measure page, and a second window that makes a number worthless
 
 #571 merged as `183105d9` and deployed to both stacks. Measured on the live sandbox at ~19:30Z —

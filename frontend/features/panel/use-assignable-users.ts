@@ -18,6 +18,12 @@ import { useApi } from "@/lib/api/hooks";
 
 export type AssignableUser = { email: string; role: string };
 
+/** A row is an assignable user only if the two fields every consumer reads are present strings. */
+function isAssignableUser(row: unknown): row is AssignableUser {
+  const u = row as Partial<AssignableUser> | null;
+  return !!u && typeof u.email === "string" && u.email.length > 0 && typeof u.role === "string";
+}
+
 /** The value that clears an assignment. Empty string is "no choice made", which is a different thing. */
 export const UNASSIGN_VALUE = "__unassigned__";
 
@@ -42,7 +48,12 @@ export function useAssignableUsers(enabled = true): {
     void api
       .get<AssignableUser[]>("/api/users/assignable")
       .then((rows) => {
-        if (!cancelled) setUsers(rows ?? []);
+        // Keep only rows that ARE users. The catch below handles a FAILED fetch; this handles a
+        // successful one carrying something else, which crashed the page on `u.email.toLowerCase()`.
+        // Same shape as the guard in `use-panel-payers`, and reachable from the moment the measure
+        // roster started calling this hook (#567): an optional control's endpoint returning an
+        // unexpected payload must cost that control, not the page behind it.
+        if (!cancelled) setUsers((Array.isArray(rows) ? rows : []).filter(isAssignableUser));
       })
       .catch(() => {
         if (!cancelled) setUsers([]);

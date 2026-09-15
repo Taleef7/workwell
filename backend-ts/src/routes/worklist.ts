@@ -128,22 +128,84 @@ async function bulkAssign(req: Request, env: WorklistEnv, actor: string): Promis
   } catch {
     return json({ error: "invalid_request", message: "a JSON body is required" }, 400);
   }
-  const input = (body ?? {}) as { assignee?: unknown; caseIds?: unknown };
+  const input = (body ?? {}) as { assignee?: unknown; caseIds?: unknown; measureId?: unknown; subjectIds?: unknown };
 
-  if (!Array.isArray(input.caseIds)) {
-    return json({ error: "invalid_request", parameter: "caseIds", message: "caseIds must be an array of case ids" }, 400);
-  }
-  // De-duplicated BEFORE the cap, so asking for the same case twice is not counted against the limit
-  // and cannot report one case as two assignments.
-  const ids = [...new Set(input.caseIds.map((id) => String(id).trim()).filter(Boolean))];
-  if (ids.length === 0) {
-    return json({ error: "invalid_request", parameter: "caseIds", message: "caseIds must contain at least one id" }, 400);
-  }
-  if (ids.length > BULK_ASSIGN_MAX) {
+  /**
+   * TWO body shapes, and the second exists because the measure roster has no case ids to send.
+   *
+   * `{ caseIds }` — the work list's form, where every row IS a case.
+   *
+   * `{ measureId, subjectIds }` — the roster's form (MM-2, #567). A roster cell is an OUTCOME
+   * reference (`{ runId, outcomeId }`, `frontend/features/compliance/types.ts`), not a case, so the
+   * page cannot name the thing to assign. The server resolves it: the ACTIVE case for each subject in
+   * that ONE measure. `measureId` is required and single on purpose — a patient row spans every
+   * routed measure, so "assign these patients" without naming one measure would mean six different
+   * pieces of work and the UI could not say which it had done.
+   *
+   * Resolution is ONE bounded read (`employeeIds` + `measureId` + active statuses), not a lookup per
+   * row, and everything after it is the caseIds path unchanged — the same cap, the same assignable
+   * check, the same compare-and-set, the same audit rows.
+   */
+  const wantsSubjectForm = input.subjectIds !== undefined || input.measureId !== undefined;
+  if (wantsSubjectForm && input.caseIds !== undefined) {
     return json(
-      { error: "invalid_request", parameter: "caseIds", message: `caseIds must contain at most ${BULK_ASSIGN_MAX} ids; received ${ids.length}` },
+      { error: "invalid_request", message: "send either caseIds, or measureId with subjectIds — not both" },
       400,
     );
+  }
+
+  let ids: string[];
+  if (wantsSubjectForm) {
+    const measureId = typeof input.measureId === "string" ? input.measureId.trim() : "";
+    if (!measureId) {
+      return json({ error: "invalid_request", parameter: "measureId", message: "measureId is required when assigning by subject" }, 400);
+    }
+    if (!Array.isArray(input.subjectIds)) {
+      return json({ error: "invalid_request", parameter: "subjectIds", message: "subjectIds must be an array of subject external ids" }, 400);
+    }
+    const subjectIds = [...new Set(input.subjectIds.map((id) => String(id).trim()).filter(Boolean))];
+    if (subjectIds.length === 0) {
+      return json({ error: "invalid_request", parameter: "subjectIds", message: "subjectIds must contain at least one id" }, 400);
+    }
+    if (subjectIds.length > BULK_ASSIGN_MAX) {
+      return json(
+        { error: "invalid_request", parameter: "subjectIds", message: `subjectIds must contain at most ${BULK_ASSIGN_MAX} ids; received ${subjectIds.length}` },
+        400,
+      );
+    }
+    const resolver = await getStores(env);
+    const matching = await resolver.cases.listCases({
+      measureId,
+      employeeIds: subjectIds,
+      statuses: [...ACTIVE_CASE_STATUSES],
+      limit: BULK_ASSIGN_MAX,
+      offset: 0,
+    });
+    ids = [...new Set(matching.map((c) => c.id))];
+    if (ids.length === 0) {
+      // Not an error: the selection was legitimate and none of those patients has an active case for
+      // this measure right now (all compliant, all outside the population, or already closed). Answer
+      // in the SAME shape a successful call uses — a caller must not have to parse two response
+      // shapes to learn that nothing moved — rather than failing a button the operator pressed
+      // correctly.
+      return json({ assigned: 0, unchanged: 0, conflicted: 0, missing: [], closed: [] });
+    }
+  } else {
+    if (!Array.isArray(input.caseIds)) {
+      return json({ error: "invalid_request", parameter: "caseIds", message: "caseIds must be an array of case ids" }, 400);
+    }
+    // De-duplicated BEFORE the cap, so asking for the same case twice is not counted against the limit
+    // and cannot report one case as two assignments.
+    ids = [...new Set(input.caseIds.map((id) => String(id).trim()).filter(Boolean))];
+    if (ids.length === 0) {
+      return json({ error: "invalid_request", parameter: "caseIds", message: "caseIds must contain at least one id" }, 400);
+    }
+    if (ids.length > BULK_ASSIGN_MAX) {
+      return json(
+        { error: "invalid_request", parameter: "caseIds", message: `caseIds must contain at most ${BULK_ASSIGN_MAX} ids; received ${ids.length}` },
+        400,
+      );
+    }
   }
 
   // The same validation the single-case assign uses, against the same list `/api/users/assignable`

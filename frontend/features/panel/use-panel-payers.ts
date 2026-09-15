@@ -25,6 +25,20 @@ export type PanelPayer = {
   subjectCount: number;
 };
 
+/** A row is a payer only if every field the UI reads is present and the right type. */
+function isPanelPayer(row: unknown): row is PanelPayer {
+  const p = row as Partial<PanelPayer> | null;
+  return (
+    !!p &&
+    typeof p.code === "string" &&
+    typeof p.name === "string" &&
+    typeof p.group === "string" &&
+    typeof p.groupName === "string" &&
+    typeof p.subjectCount === "number" &&
+    Number.isFinite(p.subjectCount)
+  );
+}
+
 export function usePanelPayers(): {
   payers: PanelPayer[];
   /** True once the server has answered with at least one payer — a UI hides the filter otherwise. */
@@ -46,7 +60,12 @@ export function usePanelPayers(): {
     void api
       .get<PanelPayer[]>("/api/payers")
       .then((rows) => {
-        if (!cancelled) setPayers(rows ?? []);
+        // Keep only rows that ARE payers. The catch below already handles a failed fetch; this handles
+        // a SUCCESSFUL one carrying something else, which is the case that used to take the whole page
+        // down: `groups` would build an entry whose `subjectCount` is undefined and the render died on
+        // `.toLocaleString()`. An optional filter's endpoint returning an unexpected shape must cost
+        // that filter, not the roster behind it.
+        if (!cancelled) setPayers((Array.isArray(rows) ? rows : []).filter(isPanelPayer));
       })
       // A payer list that fails to load leaves the filter empty rather than breaking the page — and an
       // empty list is also the honest answer on a deployment whose roster records no payer.

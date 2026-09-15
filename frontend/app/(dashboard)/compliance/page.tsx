@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useApi } from "@/lib/api/hooks";
@@ -8,11 +8,15 @@ import { fmtCount } from "@/lib/format";
 import { useRunStatus } from "@/components/run-status-provider";
 import { useGlobalFilters } from "@/components/global-filter-context";
 import { useAuth } from "@/components/auth-provider";
-import { canRunMeasures } from "@/lib/rbac";
+import { canManageCases, canRunMeasures } from "@/lib/rbac";
+import { emitToast } from "@/lib/toast";
 import { canSeeEngineering } from "@/lib/public-demo";
 import { COMPLIANCE_STATUS_LABELS } from "@/lib/status";
 import { SUBJECT } from "@/lib/terminology";
 import { providerFilterLabel, usePanelProviders } from "@/features/panel/use-panel-providers";
+import { payerFilterLabel, usePanelPayers } from "@/features/panel/use-panel-payers";
+import { Button } from "@mieweb/ui";
+import { UNASSIGN_VALUE, useAssignableUsers } from "@/features/panel/use-assignable-users";
 import { ComplianceChip } from "@/features/compliance/ComplianceChip";
 import { RosterMobileCards } from "@/features/compliance/RosterMobileCards";
 import { usePanelCache } from "@/features/compliance/usePanelCache";
@@ -61,6 +65,39 @@ export default function CompliancePage() {
   const providerId: string = searchParams.get("providerId") ?? "";
   const ageBand: string = searchParams.get("ageBand") ?? "";
   const sex: string = searchParams.get("sex") ?? "";
+  /**
+   * Primary payer, as a SET — the practice asked to work a panel by insurance, and the typology is
+   * hierarchical, so a single-valued control would let someone ask for Medicare and silently receive
+   * only traditional Medicare while 2,900 Medicare Advantage patients were withheld under a heading
+   * claiming to contain them (DATA_MODEL_CONTRACTS §6.3). Same semantics as the work list.
+   */
+  const payerFilter = useMemo(
+    () => searchParams.getAll("payer").flatMap((v) => v.split(",")).map((v) => v.trim()).filter(Boolean),
+    [searchParams],
+  );
+  /**
+   * Assigning from the roster (#567).
+   *
+   * A roster CELL is an outcome reference, not a case — so "assign these" has no meaning until a
+   * measure is named, and a patient ROW spans every routed column. The control therefore appears
+   * only while exactly one measure is in scope, and it means: that measure's ACTIVE case for each
+   * selected patient. The server resolves those case ids from `{ measureId, subjectIds }` and is the
+   * authority on which patients actually have one — the selectability rule below is an affordance so
+   * nobody ticks a row that cannot move, not a correctness guard.
+   */
+  const canAssignFromRoster = canManageCases(user?.role);
+  const { options: assignableOptions, canonicalFor } = useAssignableUsers(canAssignFromRoster);
+  /**
+   * The selection carries the measure it was made under, the same way the measure page's slices
+   * carry theirs. Without the tag, switching from measure A to B keeps ticks the operator made
+   * about A live over B's column — and clearing it in an effect is a synchronous setState in an
+   * effect body (`react-hooks/set-state-in-effect`), so the tag is both the correct answer and the
+   * one the linter allows. Rows that leave under a filter change need no handling at all: the
+   * selectability filter below drops them.
+   */
+  const [selection, setSelection] = useState<{ measureId: string; ids: string[] }>({ measureId: "", ids: [] });
+  const [bulkAssignee, setBulkAssignee] = useState("");
+  const [assigning, setAssigning] = useState(false);
   const [q, setQ] = useState<string>("");
   const [segment, setSegment] = useState<string>("");
   const [segmentOptions, setSegmentOptions] = useState<{ id: string; name: string }[]>([]);
@@ -136,6 +173,7 @@ export default function CompliancePage() {
     if (providerId) params.set("providerId", providerId);
     if (ageBand) params.set("ageBand", ageBand);
     if (sex) params.set("sex", sex);
+    for (const code of payerFilter) params.append("payer", code);
     if (debouncedQ.trim()) params.set("q", debouncedQ.trim());
     if (segment) params.set("segment", segment);
     if (tenant) params.set("tenant", tenant);
@@ -177,7 +215,7 @@ export default function CompliancePage() {
     } finally {
       if (reqId === reqIdRef.current) setLoading(false);
     }
-  }, [api, cache, panel, status, measureId, siteId, providerId, ageBand, sex, debouncedQ, segment, tenant, page, pageSize]);
+  }, [api, cache, panel, status, measureId, siteId, providerId, ageBand, sex, payerFilter, debouncedQ, segment, tenant, page, pageSize]);
 
   useEffect(() => {
     // Defer out of the synchronous effect body (matches cases/page.tsx) so the load's setState calls
@@ -292,9 +330,41 @@ export default function CompliancePage() {
     router.push(query ? `${pathname}?${query}` : pathname);
   }, [pathname, router, searchParams]);
 
+  /**
+   * Add or remove payer codes.
+   *
+   * Unlike the single-valued filters above, this one reads the LAST-WRITTEN url rather than this
+   * render's `searchParams`. Two checkbox clicks land faster than `searchParams` updates, so reading
+   * the snapshot makes the second click clobber the first — ticking Medicare then Medicare Advantage
+   * leaves only Advantage, which is the omission a multi-select exists to prevent. The work list hit
+   * exactly this and the fix is the same ref.
+   *
+   * Deliberately NOT unit-tested: the jsdom `next/navigation` mock updates `useParams`/
+   * `useSearchParams` synchronously, so a test passes over either spelling and would pin nothing
+   * (JOURNAL 2026-09-12). Mutation-checked by hand instead.
+   */
+  const payerParamsRef = useRef<string>(searchParams.toString());
+  useEffect(() => {
+    payerParamsRef.current = searchParams.toString();
+  }, [searchParams]);
+  const togglePayerCodes = useCallback((codes: readonly string[], on: boolean) => {
+    const params = new URLSearchParams(payerParamsRef.current);
+    const next = new Set(params.getAll("payer").flatMap((v) => v.split(",")).map((v) => v.trim()).filter(Boolean));
+    for (const code of codes) {
+      if (on) next.add(code);
+      else next.delete(code);
+    }
+    params.delete("payer");
+    for (const value of [...next].sort()) params.append("payer", value);
+    payerParamsRef.current = params.toString();
+    const query = payerParamsRef.current;
+    router.push(query ? `${pathname}?${query}` : pathname);
+  }, [pathname, router]);
+
   const clearSubjectFilters = useCallback(() => {
     const params = new URLSearchParams(searchParams.toString());
-    for (const key of ["providerId", "ageBand", "sex"]) params.delete(key);
+    for (const key of ["providerId", "ageBand", "sex", "payer"]) params.delete(key);
+    payerParamsRef.current = params.toString();
     const query = params.toString();
     router.push(query ? `${pathname}?${query}` : pathname);
   }, [pathname, router, searchParams]);
@@ -304,6 +374,7 @@ export default function CompliancePage() {
   // fetched its own. The markup is not shared: this page renders native selects, that one renders the
   // design system's.
   const { providers: providerOptions, nameFor: providerNameFor } = usePanelProviders();
+  const { options: payerOptions, groups: payerGroups, available: payersAvailable, nameFor: payerNameFor } = usePanelPayers();
 
   const columns = roster?.columns ?? [];
   const rows = roster?.rows ?? [];
@@ -312,6 +383,87 @@ export default function CompliancePage() {
   // not work (ADR-078). Reported rather than dropped in silence.
   const notInPopulation = roster?.notInPopulation ?? 0;
   const emptyPanels = roster?.availablePanels !== undefined && roster.availablePanels.length === 0;
+
+  /**
+   * Which statuses can have an ACTIVE case, and therefore which rows are worth ticking.
+   *
+   * COMPLIANT has nothing open. EXCLUDED and DECLINED are closed outcomes. NA is "not evaluated" and
+   * NOT_APPLICABLE is the segment overlay — neither describes work. An out-of-population patient
+   * persists as MISSING_DATA but opens NO case (ADR-078), which is precisely why the SERVER decides:
+   * it answers 0 for a selection with nothing active rather than inventing one.
+   */
+  const ASSIGNABLE_CELL_STATES: ReadonlySet<string> = new Set(["OVERDUE", "DUE_SOON", "MISSING_DATA", "IN_PROGRESS"]);
+  const assignMeasureId = measureId.trim();
+  /** One measure in scope, a seat that may assign, and a list of accounts to assign to. */
+  const assignEnabled = Boolean(assignMeasureId) && canAssignFromRoster && assignableOptions.length > 0;
+  const selectableIds = useMemo(
+    () => (
+      assignEnabled
+        ? rows
+            .filter((r) => ASSIGNABLE_CELL_STATES.has(String(r.cells[assignMeasureId]?.status ?? "NA")))
+            .map((r) => r.subject.externalId)
+        : []
+    ),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- ASSIGNABLE_CELL_STATES is a module-stable literal
+    [assignEnabled, rows, assignMeasureId],
+  );
+  const selectedHere = useMemo(
+    () => (selection.measureId === assignMeasureId ? selection.ids.filter((id) => selectableIds.includes(id)) : []),
+    [selection, assignMeasureId, selectableIds],
+  );
+  const allSelectableSelected = selectableIds.length > 0 && selectableIds.every((id) => selectedHere.includes(id));
+  const toggleOne = useCallback((externalId: string, on: boolean) => {
+    setSelection((current) => {
+      const ids = current.measureId === assignMeasureId ? current.ids : [];
+      const next = new Set(ids);
+      if (on) next.add(externalId);
+      else next.delete(externalId);
+      return { measureId: assignMeasureId, ids: [...next] };
+    });
+  }, [assignMeasureId]);
+  const toggleAll = useCallback((on: boolean) => {
+    setSelection({ measureId: assignMeasureId, ids: on ? [...selectableIds] : [] });
+  }, [assignMeasureId, selectableIds]);
+
+  const assignSelected = useCallback(async () => {
+    if (!assignEnabled || selectedHere.length === 0 || !bulkAssignee) return;
+    const unassign = bulkAssignee === UNASSIGN_VALUE;
+    if (!unassign && !canonicalFor(bulkAssignee)) {
+      setError(`${bulkAssignee} is not an account cases can be assigned to.`);
+      return;
+    }
+    setAssigning(true);
+    setError(null);
+    try {
+      const result = await api.post<
+        { assignee: string | null; measureId: string; subjectIds: string[] },
+        { assigned?: number; unchanged?: number; conflicted?: number; missing?: string[]; closed?: string[] }
+      >("/api/cases/bulk-assign", {
+        assignee: unassign ? null : bulkAssignee,
+        measureId: assignMeasureId,
+        subjectIds: selectedHere,
+      });
+      cache.clear();
+      await load();
+      setSelection({ measureId: assignMeasureId, ids: [] });
+      setBulkAssignee("");
+      const moved = result?.assigned ?? 0;
+      const conflicted = result?.conflicted ?? 0;
+      // Reports what HAPPENED. A selection where nobody had an active case for this measure is 0 and
+      // says so, rather than claiming success over work that did not exist.
+      const tail = conflicted > 0 ? ` (${conflicted} not applied — reassigned by someone else while you were choosing)` : "";
+      emitToast(
+        moved === 0
+          ? `No ${SUBJECT.plural} had an open case for this measure.`
+          : `${moved} ${moved === 1 ? "case" : "cases"} ${unassign ? "unassigned" : `assigned to ${bulkAssignee}`}${tail}`,
+        moved === 0 ? "info" : "success",
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Assignment failed");
+    } finally {
+      setAssigning(false);
+    }
+  }, [api, assignEnabled, assignMeasureId, bulkAssignee, cache, canonicalFor, load, selectedHere]);
 
   return (
     <div className="space-y-4">
@@ -455,7 +607,50 @@ export default function CompliancePage() {
           </label>
         </div>
 
-        {providerId || ageBand || sex ? (
+        {/*
+          The insurance control the practice asked for ON THIS SCREEN (#567). It existed only on the
+          work list, which from the other side of the call is indistinguishable from not existing:
+          the ask was "filter for a provider, a measure, an insurance, then assign that report", and
+          two of those three were already here.
+
+          Hidden when the deployment records no payer at all, rather than rendered empty — the
+          occupational directory has never carried one.
+        */}
+        {payersAvailable ? (
+          <fieldset className="rounded-xl border border-neutral-200 bg-white p-3 dark:border-neutral-800 dark:bg-neutral-900">
+            <legend className="px-1 text-xs font-medium text-neutral-600 dark:text-neutral-400">
+              {payerFilterLabel} <span className="font-normal">— counts are {SUBJECT.plural} on the roster</span>
+            </legend>
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+              {payerOptions.map((option) => (
+                <label key={option.value} className="inline-flex items-center gap-2 text-sm text-neutral-800 dark:text-neutral-200">
+                  <input
+                    type="checkbox"
+                    checked={payerFilter.includes(option.value)}
+                    onChange={(e) => { setPage(1); togglePayerCodes([option.value], e.target.checked); }}
+                  />
+                  {option.label}
+                </label>
+              ))}
+              {payerGroups.map((group) => {
+                const all = group.codes.every((code) => payerFilter.includes(code));
+                return (
+                  <Button
+                    key={group.group}
+                    size="sm"
+                    variant={all ? "primary" : "outline"}
+                    onClick={() => { setPage(1); togglePayerCodes(group.codes, !all); }}
+                    title={`${group.groupName} is ${group.codes.length} codes on this roster: ${group.codes.join(", ")}`}
+                  >
+                    {all ? `Clear ${group.groupName}` : `All ${group.groupName} (${group.subjectCount.toLocaleString()})`}
+                  </Button>
+                );
+              })}
+            </div>
+          </fieldset>
+        ) : null}
+
+        {providerId || ageBand || sex || payerFilter.length > 0 ? (
           <div className="flex flex-wrap items-center gap-2 text-xs text-neutral-600 dark:text-neutral-400">
             <span>Filtered to</span>
             {providerId ? (
@@ -473,6 +668,11 @@ export default function CompliancePage() {
                 {sex === "F" ? "Female" : "Male"}
               </span>
             ) : null}
+            {payerFilter.map((code) => (
+              <span key={code} className="rounded-full bg-neutral-100 px-2 py-0.5 font-medium text-neutral-900 dark:bg-neutral-800 dark:text-neutral-100">
+                {payerFilterLabel}: {payerNameFor(code) ?? code}
+              </span>
+            ))}
             <button
               type="button"
               onClick={clearSubjectFilters}
@@ -519,10 +719,65 @@ export default function CompliancePage() {
           </p>
         ) : null}
 
+        {/*
+          The assign affordance the 2026-09-10 call asked for ON THIS SCREEN — "filter for a provider,
+          a measure, an insurance, then assign that report". It appears only with ONE measure in scope,
+          because a roster cell is an outcome reference and a patient row spans every column, so
+          "assign these" is ambiguous until a measure is named.
+        */}
+        {assignEnabled ? (
+          <div className="flex flex-wrap items-center gap-3 rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-2 text-sm dark:border-neutral-800 dark:bg-neutral-900/60">
+            <span className="font-medium">
+              {selectedHere.length === 0
+                ? `Select ${SUBJECT.plural} to assign their ${measureLabelFor(assignMeasureId, assignMeasureId)} case`
+                : `${selectedHere.length} selected`}
+            </span>
+            <label className="flex items-center gap-2">
+              <span className="sr-only">Assign to</span>
+              <select
+                aria-label="Assign to"
+                value={bulkAssignee}
+                onChange={(e) => setBulkAssignee(e.target.value)}
+                disabled={selectedHere.length === 0 || assigning}
+                className="rounded border border-neutral-300 bg-transparent px-2 py-1 text-sm dark:border-neutral-700"
+              >
+                <option value="">Assign to…</option>
+                {assignableOptions.map((o) => (<option key={o.value} value={o.value}>{o.label}</option>))}
+              </select>
+            </label>
+            <Button
+              size="sm"
+              onClick={() => { void assignSelected(); }}
+              disabled={selectedHere.length === 0 || !bulkAssignee || assigning}
+            >
+              {assigning ? "Assigning…" : "Assign selected"}
+            </Button>
+            {/*
+              Says what "selected" can mean here, because the checkbox column is deliberately dead on
+              rows with nothing open — a compliant patient is not work, and an out-of-population one
+              has no case at all (ADR-078).
+            */}
+            <span className="text-xs text-neutral-500 dark:text-neutral-400">
+              {`${selectableIds.length} of ${rows.length} on this page have an open case for this measure`}
+            </span>
+          </div>
+        ) : null}
+
         <div className="hidden overflow-x-auto rounded-lg border border-neutral-200 md:block dark:border-neutral-800">
           <table className="min-w-full border-collapse text-sm">
             <thead className="bg-neutral-50 dark:bg-neutral-900/60">
               <tr>
+                {assignEnabled ? (
+                  <th scope="col" className="w-8 px-3 py-2">
+                    <input
+                      type="checkbox"
+                      aria-label={`Select all ${SUBJECT.plural} with an open case`}
+                      checked={allSelectableSelected}
+                      disabled={selectableIds.length === 0}
+                      onChange={(e) => toggleAll(e.target.checked)}
+                    />
+                  </th>
+                ) : null}
                 <th scope="col" className="sticky left-0 z-10 bg-neutral-50 px-3 py-2 text-left font-semibold dark:bg-neutral-900/60">
                   {SUBJECT.Singular}
                 </th>
@@ -536,12 +791,23 @@ export default function CompliancePage() {
             </thead>
             <tbody>
               {loading && rows.length === 0 ? (
-                <tr><td colSpan={columns.length + 1} className="px-3 py-6 text-center text-neutral-500">Loading…</td></tr>
+                <tr><td colSpan={columns.length + (assignEnabled ? 2 : 1)} className="px-3 py-6 text-center text-neutral-500">Loading…</td></tr>
               ) : rows.length === 0 ? (
-                <tr><td colSpan={columns.length + 1} className="px-3 py-6 text-center text-neutral-500">{`No ${SUBJECT.plural} match these filters.`}</td></tr>
+                <tr><td colSpan={columns.length + (assignEnabled ? 2 : 1)} className="px-3 py-6 text-center text-neutral-500">{`No ${SUBJECT.plural} match these filters.`}</td></tr>
               ) : (
                 rows.map((r) => (
                   <tr key={r.subject.externalId} className="border-t border-neutral-200 hover:bg-neutral-50 dark:border-neutral-800 dark:hover:bg-neutral-900/40">
+                    {assignEnabled ? (
+                      <td className="px-3 py-2 align-top">
+                        <input
+                          type="checkbox"
+                          aria-label={`Select ${r.subject.name}`}
+                          checked={selectedHere.includes(r.subject.externalId)}
+                          disabled={!selectableIds.includes(r.subject.externalId)}
+                          onChange={(e) => toggleOne(r.subject.externalId, e.target.checked)}
+                        />
+                      </td>
+                    ) : null}
                     <th scope="row" className="sticky left-0 z-10 bg-white px-3 py-2 text-left font-normal dark:bg-neutral-950">
                       <Link href={`/employees/${encodeURIComponent(r.subject.externalId)}`} className="font-medium text-blue-600 hover:underline dark:text-blue-400">
                         {r.subject.name}
