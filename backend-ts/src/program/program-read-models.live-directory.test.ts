@@ -236,7 +236,12 @@ test("program paths — a newer FAILED population run changes no overview, trend
   }
 });
 
-test("programRiskOutlook — successful wc history rehydrates raw name and a newer FAILED row is invisible", async () => {
+// Rewritten 2026-09-15: the outlook reads the WINNING RUN, not the measure's history, so the seeded
+// `measureRows` and the `measureScan === 1` assertion described a call that is no longer made. What is
+// still worth pinning is unchanged in substance — a newer FAILED run must not decide the site table,
+// and the wc subject must resolve through the rehydrated directory — plus the two new facts: no
+// history scan happens at all, and the retired streak comes back empty (ADR-081).
+test("programRiskOutlook — the winning run decides the site table, a newer FAILED run is invisible, and no history is scanned", async () => {
   replaceLiveDirectory([]);
   try {
     const subjectId = "wc|risk-restart-1";
@@ -280,41 +285,30 @@ test("programRiskOutlook — successful wc history rehydrates raw name and a new
     assert.deepEqual(outlook!.siteComplianceRates, [{
       site: "WebChart", total: 1, compliant: 0, upcomingExpirations: 0, currentComplianceRate: 0, predictedComplianceRate: 0,
     }]);
-    assert.deepEqual(outlook!.repeatNonCompliers, [{
-      externalId: subjectId, name: "risk-restart-1", site: "WebChart", measureName: "Annual Audiogram Completed", streakCount: 3,
-    }]);
-    assert.deepEqual(calls, {
-      joined: 0,
-      byRun: 0,
-      measureScan: 1,
-      measureScanOptions: { excludeScale: true, successfulPopulationOnly: true },
-    }, "risk performs one evidence-rich successful-population scan and no per-run hydration");
+    // ADR-081: retired, and the key stays so the page and the route contract are unchanged.
+    assert.deepEqual(outlook!.repeatNonCompliers, []);
+    // The winner's rows are read once through the joined read; the measure's history is never
+    // scanned, and the evidence peek is skipped entirely because no visible row is COMPLIANT, so no
+    // expiration can exist for it to inform.
+    assert.deepEqual(calls, { joined: 1, byRun: 0, measureScan: 0 },
+      "the outlook reads the winning run once and never scans the measure's history");
   } finally {
     replaceLiveDirectory([]);
   }
 });
 
+// Rewritten 2026-09-15 with the same arithmetic over the winning run's rows instead of a history
+// scan: 38 of 45 in the rate's denominator (EXCLUDED is in `total` and out of the denominator).
 test("programRiskOutlook — routes per-site rates through complianceRateOf (38/7/3 -> 84.4)", async () => {
-  const measureRows: OutcomeRecord[] = [];
-  for (let i = 0; i < 38; i++) {
-    measureRows.push({
-      id: `out-c-${i}`, runId: "run-pin", subjectId: `wc|pin-c-${i}`, measureId: "audiogram",
-      evaluationPeriod: "2026-01-01", status: "COMPLIANT", evidence: {}, evaluatedAt: "2026-07-17T00:00:00.000Z",
-    });
-  }
-  for (let i = 0; i < 7; i++) {
-    measureRows.push({
-      id: `out-o-${i}`, runId: "run-pin", subjectId: `wc|pin-o-${i}`, measureId: "audiogram",
-      evaluationPeriod: "2026-01-01", status: "OVERDUE", evidence: {}, evaluatedAt: "2026-07-17T00:00:00.000Z",
-    });
-  }
-  for (let i = 0; i < 3; i++) {
-    measureRows.push({
-      id: `out-e-${i}`, runId: "run-pin", subjectId: `wc|pin-e-${i}`, measureId: "audiogram",
-      evaluationPeriod: "2026-01-01", status: "EXCLUDED", evidence: {}, evaluatedAt: "2026-07-17T00:00:00.000Z",
-    });
-  }
-  const outlook = await programRiskOutlook(deps([], { measureRows }), "audiogram", 30);
+  const joined: OutcomeWithRun[] = [];
+  const winnerRow = (subjectId: string, status: string): OutcomeWithRun => ({
+    runId: "run-pin", runStartedAt: "2026-07-17T00:00:00.000Z", runScopeType: "MEASURE", runStatus: "COMPLETED",
+    runTriggeredBy: "manual", subjectId, measureId: "audiogram", status,
+  });
+  for (let i = 0; i < 38; i++) joined.push(winnerRow(`wc|pin-c-${i}`, "COMPLIANT"));
+  for (let i = 0; i < 7; i++) joined.push(winnerRow(`wc|pin-o-${i}`, "OVERDUE"));
+  for (let i = 0; i < 3; i++) joined.push(winnerRow(`wc|pin-e-${i}`, "EXCLUDED"));
+  const outlook = await programRiskOutlook(deps(joined), "audiogram", 30);
   assert.ok(outlook);
   assert.equal(outlook.siteComplianceRates.length, 1);
   assert.equal(outlook.siteComplianceRates[0]!.total, 48);
@@ -442,7 +436,16 @@ test("scoped profile (Maui) — isolates data by excluding foreign and unresolve
         listOutcomesWithRun: async () => rows,
         listLatestPopulationRuns: latestRunsFromRows(rows),
         listOutcomesForMeasure: async () => riskRows,
-        listOutcomes: async () => [], // the overview's measure rate reads one row to learn there is no official evidence (ADR-077)
+        // Two readers now: the overview's measure rate peeks one row to learn there is no official
+        // evidence (ADR-077), and since 2026-09-15 the risk outlook reads the WINNING RUN's evidence
+        // the same way instead of scanning the measure's history. Filtered by run and measure and
+        // honouring \`limit\`, so the outlook's one-row peek really is one row.
+        listOutcomes: async (runId, opts = {}) => {
+          const matched = riskRows.filter(
+            (r) => r.runId === runId && (!opts.measureId || r.measureId === opts.measureId),
+          );
+          return typeof opts.limit === "number" ? matched.slice(0, opts.limit) : matched;
+        },
         aggregateScaleRun: async () => [],
       },
       runStore: { listRuns: async () => [] },
@@ -482,8 +485,9 @@ test("scoped profile (Maui) — isolates data by excluding foreign and unresolve
   assert.equal(wailuku.total, 1, "Maui-resolvable subject is counted in its site");
   assert.equal(wailuku.compliant, 1);
 
-  const repeatNonCompliers = output.outlookRepeatNonCompliers as Array<{ externalId: string }>;
-  assert.equal(repeatNonCompliers.some((r) => r.externalId === "emp-001" || r.externalId === "cypress-mrn-foreign"), false, "foreign subjects must not appear in repeatNonCompliers");
+  // Retired (ADR-081) — asserted as empty rather than merely free of foreign subjects, so the day it
+  // returns this test says so instead of passing vacuously.
+  assert.deepEqual(output.outlookRepeatNonCompliers, [], "the repeat-non-complier streak is retired and the key stays empty");
   const upcomingExpirations = output.outlookUpcomingExpirations as Array<{ externalId: string }>;
   assert.equal(upcomingExpirations.length, 1, "Maui-resolvable subject must appear in upcomingExpirations");
   assert.equal(upcomingExpirations[0]?.externalId, "pat-001");

@@ -699,8 +699,12 @@ export async function handleRuns(
       }
     }
     const patientBundle = imported?.bundle ?? body.patientBundle;
-    // The outcome's evaluation_period must equal the date the engine actually evaluates with,
-    // so repeat-non-complier history (grouped by period) doesn't collapse into a blank period.
+    // The outcome's evaluation_period must equal the date the engine actually evaluates with.
+    // The original reason was the repeat-non-complier history, which is retired (ADR-081) — but the
+    // requirement outlived it: `evaluation_period` is the case-upsert key (DATA_MODEL_CONTRACTS §4),
+    // ADR-072 scores an official measure over the calendar year it names, and ADR-073's retention
+    // keeps the newest row PER PERIOD. A blank or wrong period would mis-key a case and mis-retain
+    // evidence, so do not simplify this away with the streak.
     // Engine default when omitted is today (cql-execution-engine) — prefer the run's persisted
     // period, then today, mirroring that default.
     const evaluationPeriod =

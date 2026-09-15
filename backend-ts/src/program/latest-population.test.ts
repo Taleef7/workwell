@@ -145,8 +145,9 @@ test("programOverview reads the winners' rows once per set of winners; a newer c
 
 test("programSites, programTrend and programTopDrivers memoize under the winners' key and refresh on a new winner", async () => {
   __sitesMemo.clear();
-  __chartMemos.trendMemo.clear();
-  __chartMemos.driversMemo.clear();
+  // Every chart memo, iterated rather than named: a memo added later (the risk outlook was, on
+  // 2026-09-15) must not need this line edited to be cleared.
+  for (const memo of Object.values(__chartMemos)) memo.clear();
   const rows = [row("run-1", "2026-06-01T00:00:00.000Z", "emp-006", "audiogram", "OVERDUE")];
   const counters = { rowReads: 0 };
   // The seam ON makes the site list read rows (seam off, the default profile answers from the directory).
@@ -196,7 +197,7 @@ test("a fallback result is not memoized: a visible run that completes later is s
 });
 
 test("the trend widens its window until ten displayable points exist, so a filter that empties the newest runs still shows the older days", async () => {
-  __chartMemos.trendMemo.clear();
+  for (const memo of Object.values(__chartMemos)) memo.clear();
   // Fourteen daily runs; the newest three hold only an invisible (seam-off wc|) subject. The old
   // all-history read showed the ten older days; a fixed ten-run window would show seven.
   const rows: OutcomeWithRun[] = [];

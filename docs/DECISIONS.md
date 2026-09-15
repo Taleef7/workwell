@@ -18,6 +18,107 @@
 >
 > **Sequence note:** ADR-033 does not exist — verified absent, and the number must not be reused.
 
+## ADR-081: the repeat-non-complier streak is retired, because a retention window cannot hold one
+
+**Date:** 2026-09-15. **Status:** accepted. Milestone M-M, the third read-path change. Follows
+ADR-073 (per-subject history is a retention window) and #547 (roster-wide reads resolve the winning
+run first).
+
+**Context.** `programRiskOutlook` was the last roster-wide read model still scanning a measure's whole
+retained history. It called `listOutcomesForMeasure` with evidence — every run, every period — which on
+the pilot is about a million rows growing by 120,000 a night, and it answered **504 cold and 8.2 s
+warm**. Every other surface had moved onto the winning run in #547; this one had not, because one of
+the three things it computed genuinely needed the history.
+
+That thing is `repeatNonCompliers`: per subject, the leading run of OVERDUE or MISSING_DATA outcomes
+across **distinct evaluation periods**, kept at three or more and shown as a named top-ten list.
+
+**The obstacle is structural, not an implementation gap.** Three designs were tried in a day and each
+had the same hole:
+
+- A nightly deployment's newest N runs **share one evaluation period** for any N. An officially routed
+  measure is scored over its calendar year (ADR-072), so every run in 2027 writes
+  `evaluation_period = 2027`. "Three periods" is therefore unreachable from the winning run, or from
+  the newest ten, or from any window defined in runs.
+- Reaching three periods means either scanning the measure's whole history — which is the 504 — or a
+  new per-period store query with an index to support it. New SQL is an owner decision, and it would be
+  built for a panel nobody asked for.
+- **ADR-073 has already decided the shape of per-subject history**: it is a retention WINDOW, and the
+  durable history is the aggregate snapshot store. Maui ships 400 days. An annual measure under a
+  400-day window holds **at most two** periods, so on the pilot the list is empty by construction — the
+  read was a million rows to compute a list that cannot be non-empty.
+- It was also wrong twice. ADR-079's out-of-population flag had to be threaded into it after Codex
+  found (#548) that a non-diabetic evaluated for cms122 across three periods earned a streak of 3 and
+  was named in a top-ten list of people nothing could be done about.
+
+**Decision.** `repeatNonCompliers` is **retired**. The key stays in the API response as `[]`, so the
+route contract, the page and the e2e suite are unchanged and no consumer has to be migrated. The
+measure page's "Repeat non-compliers" tile and its table are removed. `programRiskOutlook` reads the
+winning run like every other roster-wide model, and what the run determines is memoized under the
+winners' `runKey`.
+
+**Consequences.**
+
+- The outlook's remaining two answers — upcoming expirations and per-site current-vs-predicted
+  compliance — are computed from **one run's rows**, so the site table now describes the subjects the
+  winning run evaluated. A subject present only in a superseded run drops out. That is the same
+  semantic change #547 made everywhere else, and the outlook joins it rather than staying the one
+  surface with a different basis.
+- The winners walk excludes a run whose `triggered_by` is NULL under `excludeScale`, where the old
+  outlook's subject-prefix exclusion kept it. Also shared with every read model since #547.
+- `today` and `horizonDays` are **not** in the memo key. The memoized value is what the run
+  determines; the horizon and the date are applied per request over it. So a warmed entry survives
+  until the next run rather than expiring at UTC midnight, and two people asking for different
+  horizons share one read.
+- Evidence is read only where a recency date can exist. Whether the winner's outcomes carry one is a
+  fact about **those rows**, not about today's routing flag: one row is peeked, and an `official`
+  evidence block means there are no expirations to compute without a second read. A process restarted
+  after an authored→official flip would otherwise zero an authored winner's expirations, and a warm
+  process would serve the authored answer under an unchanged key.
+- **What is lost.** Nothing on the pilot, where the list was necessarily empty. On a deployment with
+  no retention window and a measure whose cadence produces several periods inside the window, a
+  genuinely repeated non-complier is no longer named. Nobody has asked for that, and the honest
+  replacement is below.
+
+**The condition under which it returns.** Either (a) the aggregate snapshot store (ADR-021) grows a
+per-subject dimension, which is where ADR-073 says durable per-subject history belongs, or (b) an
+indexed per-period query over `outcomes` that the owner approves as schema. Either is its own unit of
+work with its own measurement, and neither is justified by a panel the pilot has not asked for.
+
+**Stated limits, each raised in review and left as a limit rather than papered over.**
+
+- **Which duplicate wins is unspecified.** The per-subject reduction is last-write-wins over the
+  winning run's rows, and the lean projection carries neither `evaluated_at` nor `id` and has no
+  `ORDER BY` — so IF a run ever held two rows for one `(subject, measure)`, which one lands is
+  whatever the store returned last. There is no UNIQUE constraint on `(run_id, subject_id,
+  measure_id)` to forbid it, and `programOverview` differs again by COUNTING rows where this dedupes.
+  The run pipeline writes one row per key, so this is a stated assumption, not an observed bug.
+  Ordering it would widen `OutcomeWithRun` for every caller; the real remedy is a uniqueness
+  constraint, which is owner schema. **Owner question.**
+- **Directory-derived display values are frozen with the memo.** Site names, and the subject names in
+  the expirations, are resolved when the base is built. On a live-WebChart deployment the directory is
+  mutable, so an ingest that names a previously-raw `wc|` subject is not reflected until a new run
+  wins. This is the sibling behaviour rather than a deviation — `overviewMemo` memoizes the
+  `DirectorySnapshot` itself — and resolving this one surface per request would make it disagree with
+  the other three. It self-heals nightly.
+- **An AUTHORED winner's evidence read is one unpaged query**, bounded by that run's rows for that one
+  measure. It is never taken on the pilot, where all six routed measures are official and the peek
+  settles it in one row. It would need paging the day an authored measure runs on a roster of pilot
+  size; the trigger to watch is an authored measure appearing in a large deployment, not a number of
+  rows guessed in advance.
+- **The evidence peek names a COMPLIANT subject's row, not the run's first.** All three review lanes
+  found the first-row form independently: `listOutcomes` orders by `(evaluated_at, id)` ASC, an
+  evaluation failure REPLACES the evidence with `{ evaluationError, message }`, and a PARTIAL_FAILURE
+  run can win — so an error row sorting first classified an official winner as authored and triggered
+  the unpaged read the peek exists to avoid. A COMPLIANT row cannot be an evaluation error, because an
+  error forces MISSING_DATA.
+
+**Alternatives rejected.** Computing the streak from the newest ten runs (they share one period, so it
+is always empty — a control that reads as present and cannot fire, which is this repository's most
+common defect). Keeping the history scan behind a feature flag (the 504 is the default path, and a
+flag nobody sets is a slow default). Deriving a streak from `cases` instead (a case's lifecycle is the
+workflow's, not the measure's — a human closure would read as compliance).
+
 ## ADR-080: a provider panel is a durable mapping WorkWell owns and applies, and who chose an assignee is written down
 
 **Date:** 2026-09-12. **Status:** accepted. The SCHEMA is an owner decision (CLAUDE.md), authorized

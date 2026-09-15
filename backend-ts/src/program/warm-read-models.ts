@@ -13,6 +13,7 @@
  */
 import {
   programOverview,
+  programRiskOutlook,
   programSites,
   programTopDrivers,
   programTrend,
@@ -44,6 +45,13 @@ export async function warmReadModels(deps: ProgramDeps): Promise<void> {
       // left cold, because warming it would double this pass for a page one person opens at a time.
       await programTrend(deps, summary.measureId, { ...UNFILTERED }, { monthly: true });
       await programTopDrivers(deps, summary.measureId, { ...UNFILTERED });
+      // The measure page's third panel, warmed since 2026-09-15 because it now costs what the other
+      // two do: the winner's lean row read, plus ONE peeked row to learn whether the run's evidence
+      // carries a recency define. On the pilot every routed measure is official, so that peek is the
+      // whole evidence cost; on TWH the authored measures' rosters are small. `90` is the horizon the
+      // page opens with — and it is not in the memo key, so an entry warmed here serves every other
+      // horizon too.
+      await programRiskOutlook(deps, summary.measureId, 90);
     } catch (err) {
       console.warn(`[workwell] read-model warm failed for ${summary.measureId}: ${String((err as Error)?.message ?? err)}`);
     }

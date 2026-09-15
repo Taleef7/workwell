@@ -22,28 +22,18 @@ import { useTheme } from "@/lib/useTheme";
 import { ChartDataTable } from "@/components/chart-data-table";
 import { useMeasureIdentities } from "@/lib/measure-identity";
 import { displayRate, type DisplayRate, type NotationSource, type TrendPoint } from "@/lib/measure-rate";
-
-type ProgramSummary = {
-  measureId: string;
-  measureName: string;
-  policyRef: string;
-  version: string;
-  latestRunId: string | null;
-  latestRunAt: string | null;
-  totalEvaluated: number;
-  denominator?: number;
-  compliant: number;
-  dueSoon: number;
-  overdue: number;
-  missingData: number;
-  /** Patients the measure's logic put outside its initial population — not missing data, not work. */
-  notInPopulation?: number;
-  excluded: number;
-  complianceRate: number;
-  /** Which way the measure improves; sent by the programs API so the rate never waits on /api/measures. */
-  improvementNotation?: "increase" | "decrease";
-  openCaseCount: number;
-};
+import {
+  applySlice,
+  beginLoad,
+  freshSlices,
+  previousTrendPoint,
+  type MeasureSlices,
+  type ProgramSummary,
+  type RiskOutlook,
+  type SliceKey,
+  type SliceUpdate,
+  type TopDrivers,
+} from "./measure-slices";
 
 type QualitySnapshot = {
   measureId: string;
@@ -61,42 +51,6 @@ type QualitySnapshot = {
 };
 
 type Tenant = { id: string; name: string };
-
-type TopDrivers = {
-  bySite: Array<{ site: string; overdueCount: number; note: string }>;
-  byRole: Array<{ role: string; overdueCount: number }>;
-  byOutcomeReason: Array<{ reason: string; count: number; pct: number }>;
-};
-
-type RiskOutlook = {
-  upcomingNonCompliantCount: number;
-  upcomingExpirations: Array<{
-    externalId: string;
-    name: string;
-    site: string;
-    measureName: string;
-    lastExamDate: string;
-    complianceWindowDays: number;
-    daysSinceLastExam: number;
-    daysUntilDueSoon: number;
-    predictedDueSoonDate: string;
-  }>;
-  repeatNonCompliers: Array<{
-    externalId: string;
-    name: string;
-    site: string;
-    measureName: string;
-    streakCount: number;
-  }>;
-  siteComplianceRates: Array<{
-    site: string;
-    total: number;
-    compliant: number;
-    upcomingExpirations: number;
-    currentComplianceRate: number;
-    predictedComplianceRate: number;
-  }>;
-};
 
 const OUTCOME_COLORS: Record<string, string> = {
   COMPLIANT: "#059669",
@@ -123,41 +77,59 @@ export default function ProgramDetailPage() {
   const { theme } = useTheme();
   const { identities, labelFor: measureLabelFor } = useMeasureIdentities();
 
-  const [program, setProgram] = useState<ProgramSummary | null>(null);
-  const [trend, setTrend] = useState<TrendPoint[]>([]);
-  const [drivers, setDrivers] = useState<TopDrivers>({ bySite: [], byRole: [], byOutcomeReason: [] });
-  const [riskOutlook, setRiskOutlook] = useState<RiskOutlook | null>(null);
+  const [slices, setSlices] = useState<MeasureSlices<TrendPoint>>(() => freshSlices<TrendPoint>(measureId));
   const [error, setError] = useState<string | null>(null);
 
-  // Stale-fetch guard (Fable M20): navigating measure A → B must not let A's slow response paint under
-  // B. Only the latest load applies its result.
-  const reqIdRef = useRef(0);
+  // Every panel lands on its own, and every landing is tagged with the measure it describes. See
+  // `measure-slices.ts` for why the tag travels with the data rather than living in a ref: the page
+  // used to gate its FIRST PAINT on all four reads, so `risk-outlook` answering 504 after 60 s on the
+  // pilot meant the page rendered nothing for a minute.
+  const apply = useCallback((update: SliceUpdate<TrendPoint>) => {
+    setSlices((current) => applySlice(current, update));
+  }, []);
+
+  // The generation of the newest load. Read at RESOLUTION time by the page-level error handler, which
+  // is the one piece of state that cannot live in the reducer.
+  const loadIdRef = useRef(0);
   const load = useCallback(async () => {
     if (!measureId) return;
-    const reqId = ++reqIdRef.current;
-    // The four reads are independent of each other — fire them concurrently instead of
-    // as a 4-step waterfall (the previous serial chain was the main "view detail is slow"
-    // cause). 90-day risk lookahead (#150 M8): a 30-day horizon is too narrow for annual
-    // measures, so the predicted rate just echoed the current rate; a quarter-ahead horizon
-    // surfaces real upcoming expirations.
+    const loadId = ++loadIdRef.current;
+    // Rebase onto `(measureId, loadId)`, so the four `applySlice` calls below are accepted and every
+    // response from a superseded load is dropped. A NAVIGATION resets to the skeleton; a
+    // `ww:run-complete` refresh of the same measure keeps its values and only moves the generation.
+    // Done here rather than in the effect body because a synchronous setState in an effect is
+    // `react-hooks/set-state-in-effect`, the same reason the effect below defers this call by a tick.
+    setSlices((current) => beginLoad(current, measureId, loadId));
+    setError(null);
+    // 90-day risk lookahead (#150 M8): a 30-day horizon is too narrow for annual measures, so the
+    // predicted rate just echoed the current one; a quarter ahead surfaces real upcoming expirations.
     const tz = typeof Intl !== "undefined" && Intl.DateTimeFormat ? Intl.DateTimeFormat().resolvedOptions()?.timeZone : undefined;
     const trendQs = tz ? `?tz=${encodeURIComponent(tz)}` : "";
-    const [programsRes, trendRes, driversRes, outlookRes] = await Promise.allSettled([
-      api.get<ProgramSummary[]>("/api/programs"),
-      api.get<TrendPoint[]>(`/api/programs/${measureId}/trend${trendQs}`),
-      api.get<TopDrivers>(`/api/programs/${measureId}/top-drivers`),
-      api.get<RiskOutlook>(`/api/programs/${measureId}/risk-outlook?horizonDays=90`),
+    // The `programs` read keeps the page-level error banner, because without it there is no heading
+    // and no KPI — there is no page. The other three degrade to their own panel's `failed` state and
+    // are caught here rather than left to become unhandled rejections.
+    const programs = api
+      .get<ProgramSummary[]>("/api/programs")
+      .then((rows) => apply({ measureId, loadId, key: "program", value: rows.find((p) => p.measureId === measureId) ?? null }))
+      .catch((err: unknown) => {
+        // `error` is the one piece of state the reducer does not hold, so it is guarded here instead:
+        // without this check a late rejection for the PREVIOUS measure would raise its banner over
+        // the new one, even though the matching slice failure is correctly dropped.
+        if (loadIdRef.current === loadId) setError(err instanceof Error ? err.message : "Unknown error");
+        apply({ measureId, loadId, key: "program", failed: true });
+      });
+    const panel = <T,>(key: Exclude<SliceKey, "program">, promise: Promise<T>, onValue: (value: T) => SliceUpdate<TrendPoint>) =>
+      promise.then((value) => apply(onValue(value))).catch((err: unknown) => {
+        console.warn(`[workwell] ${key} read failed for ${measureId}: ${String((err as Error)?.message ?? err)}`);
+        apply({ measureId, loadId, key, failed: true });
+      });
+    await Promise.all([
+      programs,
+      panel("trend", api.get<TrendPoint[]>(`/api/programs/${measureId}/trend${trendQs}`), (value) => ({ measureId, loadId, key: "trend", value })),
+      panel("drivers", api.get<TopDrivers>(`/api/programs/${measureId}/top-drivers`), (value) => ({ measureId, loadId, key: "drivers", value })),
+      panel("outlook", api.get<RiskOutlook>(`/api/programs/${measureId}/risk-outlook?horizonDays=90`), (value) => ({ measureId, loadId, key: "outlook", value })),
     ]);
-    if (reqId !== reqIdRef.current) return;
-    if (programsRes.status === "fulfilled") {
-      setProgram(programsRes.value.find((p) => p.measureId === measureId) ?? null);
-    } else {
-      setError(programsRes.reason instanceof Error ? programsRes.reason.message : "Unknown error");
-    }
-    setTrend(trendRes.status === "fulfilled" ? trendRes.value : []);
-    setDrivers(driversRes.status === "fulfilled" ? driversRes.value : { bySite: [], byRole: [], byOutcomeReason: [] });
-    setRiskOutlook(outlookRes.status === "fulfilled" ? outlookRes.value : null);
-  }, [api, measureId]);
+  }, [api, apply, measureId]);
 
   useEffect(() => {
     // Defer a tick so the loader's setState doesn't run in the effect body (matches /cases, /programs).
@@ -165,13 +137,20 @@ export default function ProgramDetailPage() {
     return () => clearTimeout(timer);
   }, [load]);
 
-  // Refresh the trend + drivers when a run triggered from this page (or anywhere) completes — the
-  // global RunStatusProvider fires ww:run-complete on the terminal transition.
+  // Refresh when a run triggered from this page (or anywhere) completes — the global
+  // RunStatusProvider fires ww:run-complete on the terminal transition. No reset: each panel keeps
+  // its current value until its own read lands.
   useEffect(() => {
     const onComplete = () => void load();
     window.addEventListener("ww:run-complete", onComplete);
     return () => window.removeEventListener("ww:run-complete", onComplete);
   }, [load]);
+
+  // Read the panels only while they describe the measure the route names. A navigation A → B leaves
+  // B's fresh object in state one render later, so until it arrives the page shows its skeleton
+  // rather than A's numbers under B's heading.
+  const view = slices.measureId === measureId ? slices : freshSlices<TrendPoint>(measureId);
+  const { program, trend, drivers, outlook: riskOutlook, status } = view;
 
   // The program summary carries its own improvementNotation, so an inverse measure reads correctly
   // before (or without) /api/measures. When the identity row is present it wins (both come from the
@@ -181,9 +160,12 @@ export default function ProgramDetailPage() {
   const rate: DisplayRate = program
     ? displayRate(program, identity)
     : { label: "Compliance", value: 0, lowerIsBetter: false, numerator: 0, denominator: 0 };
-  const prevCounts = trend.length > 1 ? trend[1] : program;
+  // Null until the trend is ready AND has a previous point. The old fallback compared the current
+  // rate against the current summary, which renders "↑ 0.0 from previous" for a measure whose history
+  // holds one run — a claim about a run that does not exist.
+  const prevCounts = previousTrendPoint(view);
   const prevRate = prevCounts ? displayRate(prevCounts, identity) : null;
-  const delta = program && prevRate ? rate.value - prevRate.value : 0;
+  const delta = program && prevRate ? rate.value - prevRate.value : null;
 
   const outcomeBreakdown = program
     ? [
@@ -217,20 +199,39 @@ export default function ProgramDetailPage() {
                   <p id="lower-is-better-note" className="text-xs text-neutral-500 dark:text-neutral-400">Lower is better</p>
                 ) : null}
               </div>
-              <p
-                aria-describedby={rate.lowerIsBetter ? "lower-is-better-note" : undefined}
-                className={`text-sm font-medium ${(isDecrease ? delta <= 0 : delta >= 0) ? "text-emerald-700 dark:text-emerald-400" : "text-rose-700 dark:text-rose-400"}`}
-              >
-                {delta >= 0 ? "↑" : "↓"} {Math.abs(delta).toFixed(1)} from previous
-                <span className="sr-only"> ({rate.lowerIsBetter ? "lower is better" : "higher is better"})</span>
-              </p>
+              {delta !== null ? (
+                <p
+                  aria-describedby={rate.lowerIsBetter ? "lower-is-better-note" : undefined}
+                  className={`text-sm font-medium ${(isDecrease ? delta <= 0 : delta >= 0) ? "text-emerald-700 dark:text-emerald-400" : "text-rose-700 dark:text-rose-400"}`}
+                >
+                  {delta >= 0 ? "↑" : "↓"} {Math.abs(delta).toFixed(1)} from previous
+                  <span className="sr-only"> ({rate.lowerIsBetter ? "lower is better" : "higher is better"})</span>
+                </p>
+              ) : null}
             </div>
           </div>
 
           <div className="grid gap-4 lg:grid-cols-2">
             <div className="rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4">
               <p className="mb-2 text-xs font-semibold uppercase tracking-[0.15em] text-neutral-500 dark:text-neutral-400">{rate.label} trend (last 10 runs)</p>
-              <ComplianceTrendChart points={[...trend].sort((a, b) => new Date(a.startedAt).getTime() - new Date(b.startedAt).getTime())} identity={identity} />
+              {/* The largest panel, and the one this change nearly broke. `ComplianceTrendChart`
+                  answers an empty `points` array with "No run history for this measure yet" — a
+                  positive claim about the measure. While the whole page waited on all four reads that
+                  was unreachable; now that each panel lands on its own, `/api/programs` (a memoized
+                  read) answers before `/trend`, so the chart asserted a measure had no history while
+                  its history was still loading, and permanently if the read failed. Found by the
+                  project's own reviewer, which the seven mutations and two external lanes all missed. */}
+              {status.trend === "loading" ? (
+                <div className="flex h-[160px] items-center justify-center rounded border border-dashed border-neutral-300 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800/50">
+                  <span className="text-xs text-neutral-500 dark:text-neutral-400">Loading trend…</span>
+                </div>
+              ) : status.trend === "failed" ? (
+                <div className="flex h-[160px] items-center justify-center rounded border border-dashed border-neutral-300 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800/50">
+                  <span className="text-xs text-neutral-500 dark:text-neutral-400">Trend unavailable</span>
+                </div>
+              ) : (
+                <ComplianceTrendChart points={[...trend].sort((a, b) => new Date(a.startedAt).getTime() - new Date(b.startedAt).getTime())} identity={identity} />
+              )}
             </div>
             <div className="rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4">
               <p className="mb-2 text-xs font-semibold uppercase tracking-[0.15em] text-neutral-500 dark:text-neutral-400">Outcome breakdown (latest run)</p>
@@ -287,19 +288,26 @@ export default function ProgramDetailPage() {
 
           <div className="rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4">
             <p className="text-xs font-semibold uppercase tracking-[0.15em] text-neutral-500 dark:text-neutral-400">Risk outlook (next 90 days)</p>
-            <div className="mt-3 grid gap-3 sm:grid-cols-3">
+            {status.outlook === "loading" ? (
+              <p className="mt-3 text-xs text-neutral-500 dark:text-neutral-400">Loading risk outlook…</p>
+            ) : status.outlook === "failed" || !riskOutlook ? (
+              // A named absence. Before this, a 504 on `risk-outlook` rendered as three zeroes and a
+              // dash, which reads as a measure with nothing coming due rather than as a read that
+              // never answered.
+              <p className="mt-3 text-xs text-neutral-500 dark:text-neutral-400">Risk outlook unavailable</p>
+            ) : (
+              <>
+            <div className="mt-3 grid gap-3 sm:grid-cols-2">
               <div className="rounded border border-orange-200 bg-orange-50 p-3 dark:border-orange-900 dark:bg-orange-950/40">
                 <p className="text-xs text-orange-800 dark:text-orange-300">Upcoming due soon</p>
                 <p className="text-2xl font-semibold text-orange-900 dark:text-orange-200">
                   {riskOutlook?.upcomingNonCompliantCount ?? 0}
                 </p>
               </div>
-              <div className="rounded border border-rose-200 bg-rose-50 p-3 dark:border-rose-900 dark:bg-rose-950/40">
-                <p className="text-xs text-rose-800 dark:text-rose-300">Repeat non-compliers</p>
-                <p className="text-2xl font-semibold text-rose-900 dark:text-rose-200">
-                  {riskOutlook?.repeatNonCompliers.length ?? 0}
-                </p>
-              </div>
+              {/* The "Repeat non-compliers" tile and its table are GONE (ADR-081): the streak they
+                  showed could only be computed by scanning the measure's whole retained history, and
+                  under a 400-day retention window an annual measure cannot reach three periods at
+                  all. The API key remains and is always empty, so nothing else changes. */}
               <div className="rounded border border-amber-200 bg-amber-50 p-3 dark:border-amber-900 dark:bg-amber-950/40">
                 <p className="text-xs text-amber-800 dark:text-amber-300">Highest-risk site</p>
                 <p className="text-lg font-semibold text-amber-900 dark:text-amber-200">
@@ -307,38 +315,6 @@ export default function ProgramDetailPage() {
                 </p>
               </div>
             </div>
-
-            {riskOutlook?.repeatNonCompliers && riskOutlook.repeatNonCompliers.length > 0 ? (
-              <div className="mt-4">
-                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-neutral-500 dark:text-neutral-400">Repeat non-compliers</p>
-                <div className="mt-2 overflow-x-auto">
-                  <table className="min-w-full text-xs">
-                    <thead className="text-left text-neutral-600 dark:text-neutral-400">
-                      <tr>
-                        <th scope="col" className="py-1 pr-3">{SUBJECT.Singular}</th>
-                        <th scope="col" className="py-1 pr-3">Site</th>
-                        <th scope="col" className="py-1 pr-3">Streak</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {riskOutlook.repeatNonCompliers.map((item) => (
-                        <tr key={`${item.externalId}-${item.streakCount}`} className="border-t border-neutral-200 dark:border-neutral-800">
-                          <td className="py-1 pr-3">
-                            <Link href={`/employees/${item.externalId}`} className="font-medium text-primary-700 dark:text-primary-400 hover:underline">
-                              {item.name}
-                            </Link>
-                          </td>
-                          <td className="py-1 pr-3">{item.site}</td>
-                          <td className="py-1 pr-3 text-rose-700 dark:text-rose-400">{item.streakCount}x</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            ) : (
-              <p className="mt-4 text-xs text-neutral-500 dark:text-neutral-400">No repeat non-compliers detected at the moment.</p>
-            )}
 
             {riskOutlook?.siteComplianceRates && riskOutlook.siteComplianceRates.length > 0 ? (
               <div className="mt-4">
@@ -370,22 +346,37 @@ export default function ProgramDetailPage() {
                 </div>
               </div>
             ) : null}
+              </>
+            )}
           </div>
 
           <div className={`grid gap-4 ${isPatientTerm ? "lg:grid-cols-2" : "lg:grid-cols-3"}`}>
             <div className="rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4">
               <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Top sites</p>
-              {drivers.bySite.length === 0 ? <p className="mt-2 text-xs text-neutral-500 dark:text-neutral-400">No site concentration in the latest run.</p> : drivers.bySite.map((s) => <p key={s.site} className="mt-1 text-xs">{s.site}: {s.overdueCount}</p>)}
+              {/* `loading` is distinguished from `no concentration` on all three driver panels: the
+                  empty state used to flash in as soon as `program` landed, asserting there was no
+                  concentration before anything had been read. */}
+              {status.drivers === "loading" ? <p className="mt-2 text-xs text-neutral-500 dark:text-neutral-400">Loading…</p>
+                : status.drivers === "failed" ? <p className="mt-2 text-xs text-neutral-500 dark:text-neutral-400">Unavailable</p>
+                : drivers.bySite.length === 0 ? <p className="mt-2 text-xs text-neutral-500 dark:text-neutral-400">No site concentration in the latest run.</p>
+                : drivers.bySite.map((s) => <p key={s.site} className="mt-1 text-xs">{s.site}: {s.overdueCount}</p>)}
             </div>
             {!isPatientTerm ? (
               <div className="rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4">
                 <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Top roles</p>
-                {drivers.byRole.length === 0 ? <p className="mt-2 text-xs text-neutral-500 dark:text-neutral-400">No role concentration in the latest run.</p> : drivers.byRole.map((r) => <p key={r.role} className="mt-1 text-xs">{labelFor(ROLE_LABELS, r.role)}: {r.overdueCount}</p>)}
+                {status.drivers === "loading" ? <p className="mt-2 text-xs text-neutral-500 dark:text-neutral-400">Loading…</p>
+                  : status.drivers === "failed" ? <p className="mt-2 text-xs text-neutral-500 dark:text-neutral-400">Unavailable</p>
+                  : drivers.byRole.length === 0 ? <p className="mt-2 text-xs text-neutral-500 dark:text-neutral-400">No role concentration in the latest run.</p>
+                  : drivers.byRole.map((r) => <p key={r.role} className="mt-1 text-xs">{labelFor(ROLE_LABELS, r.role)}: {r.overdueCount}</p>)}
               </div>
             ) : null}
             <div className="rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4">
               <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Reason mix</p>
-              {drivers.byOutcomeReason.length === 0 ? (
+              {status.drivers === "loading" ? (
+                <p className="mt-2 text-xs text-neutral-500 dark:text-neutral-400">Loading…</p>
+              ) : status.drivers === "failed" ? (
+                <p className="mt-2 text-xs text-neutral-500 dark:text-neutral-400">Unavailable</p>
+              ) : drivers.byOutcomeReason.length === 0 ? (
                 <p className="mt-2 text-xs text-neutral-500 dark:text-neutral-400">No flagged reasons in the latest run.</p>
               ) : (
                 <div className="mt-2 space-y-2">
@@ -418,7 +409,11 @@ export default function ProgramDetailPage() {
                 View all runs →
               </Link>
             </div>
-            {runHistory.length === 0 ? (
+            {status.trend === "loading" ? (
+              <p className="mt-2 text-xs text-neutral-500 dark:text-neutral-400">Loading…</p>
+            ) : status.trend === "failed" ? (
+              <p className="mt-2 text-xs text-neutral-500 dark:text-neutral-400">Run history unavailable</p>
+            ) : runHistory.length === 0 ? (
               <p className="mt-2 text-xs text-neutral-500 dark:text-neutral-400">No runs recorded for this measure yet.</p>
             ) : (
               <div className="mt-2 overflow-x-auto">
@@ -511,13 +506,23 @@ export default function ProgramDetailPage() {
             ) : null}
           </div>
         </>
-      ) : (
+      ) : status.program === "loading" ? (
         <div className="grid gap-3 md:grid-cols-2" role="status" aria-live="polite">
           <span className="sr-only">Loading measure detail…</span>
           {[0, 1].map((i) => (
             <SkeletonCard key={i} />
           ))}
         </div>
+      ) : (
+        /* The skeleton is now gated on the STATUS rather than on `program` being truthy. It used to
+           run whenever `program` was null, which includes two cases that are not loading at all: an
+           unknown or inactive measureId (`/api/programs` answers, `find` returns undefined) and a
+           failed programs read, where the error banner appeared with a skeleton spinning under it
+           forever. Both announced "Loading measure detail…" to a screen reader indefinitely. Found by
+           an external review lane; the `status` this PR introduces is what makes it a one-line fix. */
+        <p className="text-sm text-neutral-600 dark:text-neutral-400">
+          {error ? "This measure could not be loaded." : "No active measure with this id."}
+        </p>
       )}
     </section>
   );
