@@ -1,5 +1,48 @@
 # Journal
 
+## 2026-09-15 (evening) — the after-numbers for the measure page, and a second window that makes a number worthless
+
+#571 merged as `183105d9` and deployed to both stacks. Measured on the live sandbox at ~19:30Z —
+outside the nightly recompute window, and on a WARM worker, which is the new half of that rule.
+
+| read | BEFORE (2026-09-13) | AFTER (2026-09-15 evening) |
+|---|---|---|
+| `risk-outlook` cms125 | **504 cold**, 8.2 s warm | **3.43 s cold, 0.60 s warm** |
+| `risk-outlook` cms122 | not measured | 1.68 s cold, 0.55 s warm |
+| the same, `horizonDays=30` | — | **0.58 s**, off the entry warmed at 90 |
+| `/api/programs` (warm) | 3.6 s | 2.9 s |
+| `/api/programs/cms125/trend` | — | 2.0 s |
+| `/top-drivers` | 0.57 s warm | 0.47 s |
+| `/programs/cms125` page HTML | — | 0.93 s |
+
+**The horizon row is the design measured rather than argued.** `horizonDays=30` is served in 0.58 s
+from the entry warmed at 90, because the memo holds what the RUN determines and the horizon is applied
+per request over it. Had the horizon been in the key, that request would have paid the cold read.
+
+**The Maui read-only e2e project is 29/29 with no retries — the first fully green run against the
+sandbox.** It was 27 passed / 2 failed before #560 and 28 passed / 1 flaky this morning. The flake was
+`/programs/cms125` rendering no heading within 20 s, which is exactly what this change was written to
+fix; it now passes in 16.6 s.
+
+**And a second measurement window, learned by getting it wrong twice in one day.** The first
+post-deploy suite run reported `measures.spec.ts` failing on BOTH attempts — `/measures` not showing
+the MIPS crosswalk — and a follow-up single-spec run timed out in e2e global setup, on the sign-in
+navigation that allows 30 s. Neither was a defect. A restarted worker has **no warm memos at all**:
+`/api/programs` measured **22.6 s cold against 2.9 s warm**, because `warmReadModels` runs after a RUN
+completes and not after a deploy. `/api/measures` returns the right identity in 0.26 s and every
+dashboard read was healthy throughout, and a warm re-run came back 29/29. So: **the nightly window is
+not the only window** — the first minutes after a deploy are the other one, and a number taken in
+either is worth nothing. Both are now stated in guide ch.9 rather than remembered.
+
+The honest reading of "paints before its slowest read": `risk-outlook` is no longer the blocker and no
+panel holds the heading, but the heading still waits on `/api/programs`, which is the slowest of the
+four (2.9 s warm, 22.6 s on a cold worker) and cannot be otherwise — with no summary there is no
+heading and no KPI. The badge read behind it is #561; a warm pass triggered by a deploy rather than
+only by a run is the obvious companion and is not filed, because nobody has measured whether the
+restart cost is worth a startup job.
+
+#557 updated: its ADR is **ADR-082**, since ADR-081 went to the streak retirement.
+
 ## 2026-09-15 (later) — the measure page reads the winning run, and paints before its slowest read
 
 The second of the two read-path fixes the 2026-09-13 sweep measured, and the last read model still
