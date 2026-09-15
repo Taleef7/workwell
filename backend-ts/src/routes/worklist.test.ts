@@ -307,6 +307,41 @@ test("bulk assign by subject: a selection with no active case for that measure i
   assert.deepEqual(await res.json(), { assigned: 0, unchanged: 0, conflicted: 0, missing: [], closed: [] });
 });
 
+test("bulk assign by subject resolves an IN_PROGRESS case, not only OPEN ones", async () => {
+  // The mutation four mutation rounds missed, and the one this project has ALREADY shipped once:
+  // DATA_MODEL_CONTRACTS §4 records four readers that mapped "open" to ["OPEN"] alone and had to be
+  // corrected together. Narrowing this resolution the same way would mean an operator cannot assign
+  // a case a colleague has already picked up — from the one screen the practice asked for.
+  await cases.patchCase(omarHazwoper, { status: "IN_PROGRESS" });
+  assert.equal((await cases.getCase(omarHazwoper))?.status, "IN_PROGRESS");
+  await bulk({ assignee: null, measureId: "hazwoper", subjectIds: ["emp-006"] });
+
+  const res = (await bulk({ assignee: CM, measureId: "hazwoper", subjectIds: ["emp-006"] }))!;
+  assert.equal(res.status, 200);
+  assert.equal(((await res.json()) as { assigned: number }).assigned, 1, "an IN_PROGRESS case is still assignable");
+  assert.equal((await cases.getCase(omarHazwoper))?.assignee, CM);
+  await cases.patchCase(omarHazwoper, { status: "OPEN" });
+  await bulk({ assignee: null, measureId: "hazwoper", subjectIds: ["emp-006"] });
+});
+
+test("bulk assign by subject rejects non-string members instead of coercing them", async () => {
+  // A subject external id is guessable where a case UUID is not, so a permissive contract here
+  // masks a client type bug against a wider surface.
+  for (const bad of [[42], [null], [{}], [["emp-006"]]]) {
+    const res = (await bulk({ assignee: CM, measureId: "hazwoper", subjectIds: bad }))!;
+    assert.equal(res.status, 400, `${JSON.stringify(bad)} must be refused`);
+    assert.equal(((await res.json()) as { parameter?: string }).parameter, "subjectIds");
+  }
+});
+
+test("bulk assign by subject refuses a subject list over the cap before it reads anything", async () => {
+  // The subject cap is checked on the REQUEST, so an oversized selection never reaches the store.
+  const tooMany = Array.from({ length: BULK_ASSIGN_MAX + 1 }, (_, i) => `emp-${i}`);
+  const res = (await bulk({ assignee: CM, measureId: "hazwoper", subjectIds: tooMany }))!;
+  assert.equal(res.status, 400);
+  assert.equal(((await res.json()) as { parameter?: string }).parameter, "subjectIds");
+});
+
 test("bulk assign refuses an ambiguous or incomplete subject-form body", async () => {
   // Both shapes at once: the server would have to guess which the operator meant.
   const both = (await bulk({ assignee: CM, caseIds: [omarAudiogram], measureId: "audiogram", subjectIds: ["emp-006"] }))!;

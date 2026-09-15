@@ -121,6 +121,42 @@ export async function handleWorklist(req: Request, env: WorklistEnv, actor = "sy
  * **An unchanged row writes NO event.** Re-assigning a case to the person it is already assigned to is
  * not a state change, and a ledger full of those makes the ones that matter harder to find.
  */
+/**
+ * The roster form's resolution, as a pure function so both of its rules are testable without a
+ * deployment-profile child process — on the default profile `profileSubjectMatcher` passes
+ * everything, so a route test cannot exercise the scoping at all and a guard nothing can fail is
+ * this repository's most common defect.
+ *
+ * Two rules, both found in review:
+ *
+ * 1. **The deployment profile's subject scoping**, which every READ surface applies and neither
+ *    write path did. Not a new hole — the `caseIds` path never had it — but a WIDER one: a case UUID
+ *    can realistically only be obtained from a filtered read, while a subject external id
+ *    (`emp-001`, `pat-00123`) is guessable, so without this a case manager on a scoped deployment
+ *    could assign, mutate and thereby confirm the existence of a case for a subject that deployment
+ *    hides from every list.
+ * 2. **One case per subject, the NEWEST evaluation period.** The roster cell the operator ticked
+ *    describes a single period; the query is not period-scoped, so where a prior cycle's case
+ *    survived (the rollover close-out is best-effort and scoped to the subjects that run evaluated,
+ *    DATA_MODEL_CONTRACTS §4) one tick would assign two. The count would merely confuse; the durable
+ *    harm is that `assignCases(…, "OPERATOR")` stamps `assignment_source='OPERATOR'` and ADR-080 d3's
+ *    `planPanelBackfill` then never moves that row again — a case nobody chose, operator-owned
+ *    permanently. Collapsing rather than refusing, because a second active period is a data
+ *    condition the operator can neither see nor fix from this screen.
+ */
+export function resolveSubjectCaseIds(
+  matching: readonly { id: string; employeeId: string; evaluationPeriod: string }[],
+  profileMatch: (subjectId: string) => boolean,
+): string[] {
+  const newestBySubject = new Map<string, { id: string; evaluationPeriod: string }>();
+  for (const c of matching) {
+    if (!profileMatch(c.employeeId)) continue;
+    const held = newestBySubject.get(c.employeeId);
+    if (!held || c.evaluationPeriod > held.evaluationPeriod) newestBySubject.set(c.employeeId, c);
+  }
+  return [...new Set([...newestBySubject.values()].map((c) => c.id))];
+}
+
 async function bulkAssign(req: Request, env: WorklistEnv, actor: string): Promise<Response> {
   let body: unknown;
   try {
@@ -163,7 +199,14 @@ async function bulkAssign(req: Request, env: WorklistEnv, actor: string): Promis
     if (!Array.isArray(input.subjectIds)) {
       return json({ error: "invalid_request", parameter: "subjectIds", message: "subjectIds must be an array of subject external ids" }, 400);
     }
-    const subjectIds = [...new Set(input.subjectIds.map((id) => String(id).trim()).filter(Boolean))];
+    // Strings, not coercions. The `caseIds` path below uses `String(id)`, which silently accepts a
+    // number, a boolean or an object — and a subject external id is guessable in a way a case UUID is
+    // not, so a permissive contract here masks a client type bug against a wider surface. The legacy
+    // path keeps its coercion rather than becoming a breaking change in a roster PR.
+    if (!input.subjectIds.every((id) => typeof id === "string")) {
+      return json({ error: "invalid_request", parameter: "subjectIds", message: "every subjectId must be a string" }, 400);
+    }
+    const subjectIds = [...new Set(input.subjectIds.map((id) => id.trim()).filter(Boolean))];
     if (subjectIds.length === 0) {
       return json({ error: "invalid_request", parameter: "subjectIds", message: "subjectIds must contain at least one id" }, 400);
     }
@@ -174,14 +217,46 @@ async function bulkAssign(req: Request, env: WorklistEnv, actor: string): Promis
       );
     }
     const resolver = await getStores(env);
+    // Read ONE MORE than the cap, so a truncation is detectable instead of silent.
+    //
+    // N subjects do not resolve to N cases. `cases` is unique on
+    // `(employee_id, measure_id, evaluation_period)`, so one subject can hold several ACTIVE cases for
+    // one measure across cycles — and the rollover close-out that would have retired the older ones is
+    // best-effort by design (DATA_MODEL_CONTRACTS §4: a read or audit failure logs a WARN rather than
+    // aborting the run). Capping the READ at `BULK_ASSIGN_MAX` therefore dropped whatever sorted last
+    // and still answered with a success count, which is the worst available outcome: the operator sees
+    // "500 assigned" over a selection where some patients were silently not assigned at all.
     const matching = await resolver.cases.listCases({
       measureId,
       employeeIds: subjectIds,
       statuses: [...ACTIVE_CASE_STATUSES],
-      limit: BULK_ASSIGN_MAX,
+      limit: BULK_ASSIGN_MAX + 1,
       offset: 0,
     });
-    ids = [...new Set(matching.map((c) => c.id))];
+    if (matching.length > BULK_ASSIGN_MAX) {
+      return json(
+        {
+          error: "invalid_request",
+          parameter: "subjectIds",
+          message: `those ${subjectIds.length} subjects resolve to more than ${BULK_ASSIGN_MAX} active cases for ${measureId}; select fewer`,
+        },
+        400,
+      );
+    }
+
+    // ONE case per subject — the NEWEST evaluation period — and the rest are left alone.
+    //
+    // The roster cell the operator ticked describes a single period: the winning run's. The query
+    // above is not period-scoped, so where a prior cycle's case survived (the rollover close-out at
+    // run finish is best-effort and scoped to the subjects that run evaluated —
+    // DATA_MODEL_CONTRACTS §4) one tick would otherwise assign two cases. The count would merely be
+    // confusing; the durable part is not, because `assignCases(…, "OPERATOR")` stamps
+    // `assignment_source='OPERATOR'` and ADR-080 d3's `planPanelBackfill` then never moves that row
+    // again. A stale case nobody chose would become operator-owned permanently.
+    //
+    // Collapsing rather than refusing: a second active period is a data condition the operator cannot
+    // see or fix from this screen, and refusing would block a legitimate action over it.
+    ids = resolveSubjectCaseIds(matching, profileSubjectMatcher(employeeById));
     if (ids.length === 0) {
       // Not an error: the selection was legitimate and none of those patients has an active case for
       // this measure right now (all compliant, all outside the population, or already closed). Answer

@@ -65,7 +65,14 @@ export function usePanelPayers(): {
         // down: `groups` would build an entry whose `subjectCount` is undefined and the render died on
         // `.toLocaleString()`. An optional filter's endpoint returning an unexpected shape must cost
         // that filter, not the roster behind it.
-        if (!cancelled) setPayers((Array.isArray(rows) ? rows : []).filter(isPanelPayer));
+        const kept = (Array.isArray(rows) ? rows : []).filter(isPanelPayer);
+        // Same signal as `use-assignable-users`: a payload that arrived and was wholly unusable is a
+        // server contract change, and it renders identically to "this deployment records no payer"
+        // — which is what the hidden-filter branch is supposed to mean.
+        if (Array.isArray(rows) && rows.length > 0 && kept.length === 0) {
+          console.warn("[workwell] /api/payers returned rows in an unrecognised shape; the insurance filter is hidden");
+        }
+        if (!cancelled) setPayers(kept);
       })
       // A payer list that fails to load leaves the filter empty rather than breaking the page — and an
       // empty list is also the honest answer on a deployment whose roster records no payer.

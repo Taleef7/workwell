@@ -22,7 +22,7 @@ import { RosterMobileCards } from "@/features/compliance/RosterMobileCards";
 import { usePanelCache } from "@/features/compliance/usePanelCache";
 import { SLOW_LOAD_HINT, useSlowLoadHint } from "@/lib/useSlowLoadHint";
 import { useMeasureIdentities } from "@/lib/measure-identity";
-import { PANEL_OPTIONS, type PanelId, type Roster, type TenantOption } from "@/features/compliance/types";
+import { PANEL_OPTIONS, type DisplayState, type PanelId, type Roster, type TenantOption } from "@/features/compliance/types";
 
 const STATUS_FILTER_OPTIONS = Object.keys(COMPLIANCE_STATUS_LABELS);
 const STATUS_FILTER_VALUES = new Set(STATUS_FILTER_OPTIONS);
@@ -34,6 +34,33 @@ function normalizeStatusFilter(raw: string | null): string {
 
 /** The bands the backend accepts (compliance/subject-filters.ts). Kept in this order for the select. */
 const AGE_BAND_OPTIONS = ["0-17", "18-44", "45-64", "65+"] as const;
+
+/**
+ * Which roster cell states can have an ACTIVE case, and therefore which rows are worth ticking.
+ *
+ * **DECLINED belongs here, and leaving it out was a real defect** caught by three reviewers. A
+ * documented refusal does not change the canonical bucket — `roster-vocabulary.ts` applies DECLINED
+ * only when the canonical status is NOT compliant, and `MEASURES.md` says a declination "keeps the
+ * case open". So a nurse filtering the roster for patients who refused a vaccine, which is exactly
+ * the list worth calling, would have found every one of those checkboxes dead.
+ *
+ * COMPLIANT has nothing open. EXCLUDED is a closed outcome. NA is "not evaluated". NOT_APPLICABLE is
+ * the segment overlay and is excluded as POLICY rather than because no case exists — a subject who
+ * left a cohort keeps their open case (DATA_MODEL_CONTRACTS §4: resolution is never segment-gated),
+ * and out-of-cohort wins over any real outcome in the read model, so the cell cannot say what the
+ * underlying status is. Assigning work the roster is actively refusing to describe is the wrong
+ * default; the work list shows those rows.
+ *
+ * Module scope, so the `useMemo` dependency comment below is TRUE — it was declared inside the
+ * component and rebuilt every render, which made the eslint-disable justification false.
+ */
+const ASSIGNABLE_CELL_STATES: ReadonlySet<DisplayState> = new Set<DisplayState>([
+  "OVERDUE",
+  "DUE_SOON",
+  "MISSING_DATA",
+  "IN_PROGRESS",
+  "DECLINED",
+]);
 
 function normalizePanelFilter(raw: string | null): PanelId {
   return raw && PANEL_OPTIONS.some((option) => option.id === raw)
@@ -86,16 +113,24 @@ export default function CompliancePage() {
    * nobody ticks a row that cannot move, not a correctness guard.
    */
   const canAssignFromRoster = canManageCases(user?.role);
-  const { options: assignableOptions, canonicalFor } = useAssignableUsers(canAssignFromRoster);
+  const { options: assignableOptions, canonicalFor, hasAccounts } = useAssignableUsers(canAssignFromRoster);
   /**
-   * The selection carries the measure it was made under, the same way the measure page's slices
-   * carry theirs. Without the tag, switching from measure A to B keeps ticks the operator made
-   * about A live over B's column — and clearing it in an effect is a synchronous setState in an
-   * effect body (`react-hooks/set-state-in-effect`), so the tag is both the correct answer and the
-   * one the linter allows. Rows that leave under a filter change need no handling at all: the
-   * selectability filter below drops them.
+   * The selection carries the WHOLE VIEW it was made in, not just the measure.
+   *
+   * The first cut tagged only `measureId`, and three reviewers found the same two holes in it. Tick
+   * Alice, filter her away, then remove the filter: she is back in `selectableIds`, so she silently
+   * returns to the selection and would be POSTed. And ticking ten rows on page 1, paging to page 2 and
+   * pressing Assign posted only page 2's, discarding ten deliberate ticks without a word.
+   *
+   * Scoping to the full view answers both: any change to the measure, panel, status, site, panel
+   * filters, insurance, search, segment, tenant or page empties the selection, and the bar says
+   * "Select patients…" again rather than holding rows nobody can see. Selection is per view, which is
+   * the only version of this that never assigns something the operator is not looking at.
+   *
+   * A tag, not an effect: clearing in an effect is a synchronous setState in an effect body, which
+   * `react-hooks/set-state-in-effect` forbids for the reason it exists.
    */
-  const [selection, setSelection] = useState<{ measureId: string; ids: string[] }>({ measureId: "", ids: [] });
+  const [selection, setSelection] = useState<{ scope: string; ids: string[] }>({ scope: "", ids: [] });
   const [bulkAssignee, setBulkAssignee] = useState("");
   const [assigning, setAssigning] = useState(false);
   const [q, setQ] = useState<string>("");
@@ -130,8 +165,8 @@ export default function CompliancePage() {
   // not only through their selects — the same render-adjust reset covers both paths.
   const [prevPanel, setPrevPanel] = useState(panel);
   const [prevStatus, setPrevStatus] = useState(status);
-  const [prevSubjectFilters, setPrevSubjectFilters] = useState(`${providerId}|${ageBand}|${sex}`);
-  const subjectFilterKey = `${providerId}|${ageBand}|${sex}`;
+  const [prevSubjectFilters, setPrevSubjectFilters] = useState(`${providerId}|${ageBand}|${sex}|${payerFilter.join(",")}`);
+  const subjectFilterKey = `${providerId}|${ageBand}|${sex}|${payerFilter.join(",")}`;
   if (panel !== prevPanel || status !== prevStatus || subjectFilterKey !== prevSubjectFilters) {
     setPrevPanel(panel);
     setPrevStatus(status);
@@ -384,46 +419,43 @@ export default function CompliancePage() {
   const notInPopulation = roster?.notInPopulation ?? 0;
   const emptyPanels = roster?.availablePanels !== undefined && roster.availablePanels.length === 0;
 
-  /**
-   * Which statuses can have an ACTIVE case, and therefore which rows are worth ticking.
-   *
-   * COMPLIANT has nothing open. EXCLUDED and DECLINED are closed outcomes. NA is "not evaluated" and
-   * NOT_APPLICABLE is the segment overlay — neither describes work. An out-of-population patient
-   * persists as MISSING_DATA but opens NO case (ADR-078), which is precisely why the SERVER decides:
-   * it answers 0 for a selection with nothing active rather than inventing one.
-   */
-  const ASSIGNABLE_CELL_STATES: ReadonlySet<string> = new Set(["OVERDUE", "DUE_SOON", "MISSING_DATA", "IN_PROGRESS"]);
+
   const assignMeasureId = measureId.trim();
+  /** Everything that decides WHICH rows are on screen. A change to any of it invalidates a tick. */
+  const selectionScopeKey = [assignMeasureId, panel, status, siteId, providerId, ageBand, sex, payerFilter.join(","), debouncedQ, segment, tenant, page].join("|");
   /** One measure in scope, a seat that may assign, and a list of accounts to assign to. */
-  const assignEnabled = Boolean(assignMeasureId) && canAssignFromRoster && assignableOptions.length > 0;
+  // `hasAccounts`, never `assignableOptions.length` — that is always at least two (a placeholder and
+  // "Unassign"), so the length test was a guard that could not fire, and with the endpoint returning
+  // nothing the bar still rendered offering only to CLEAR assignments. Caught in review; it is also
+  // the mutation four earlier rounds missed, because deleting a dead clause changes nothing.
+  const assignEnabled = Boolean(assignMeasureId) && canAssignFromRoster && hasAccounts;
   const selectableIds = useMemo(
     () => (
       assignEnabled
         ? rows
-            .filter((r) => ASSIGNABLE_CELL_STATES.has(String(r.cells[assignMeasureId]?.status ?? "NA")))
+            .filter((r) => ASSIGNABLE_CELL_STATES.has((r.cells[assignMeasureId]?.status ?? "NA") as DisplayState))
             .map((r) => r.subject.externalId)
         : []
     ),
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- ASSIGNABLE_CELL_STATES is a module-stable literal
     [assignEnabled, rows, assignMeasureId],
   );
   const selectedHere = useMemo(
-    () => (selection.measureId === assignMeasureId ? selection.ids.filter((id) => selectableIds.includes(id)) : []),
-    [selection, assignMeasureId, selectableIds],
+    () => (selection.scope === selectionScopeKey ? selection.ids.filter((id) => selectableIds.includes(id)) : []),
+    [selection, selectionScopeKey, selectableIds],
   );
   const allSelectableSelected = selectableIds.length > 0 && selectableIds.every((id) => selectedHere.includes(id));
   const toggleOne = useCallback((externalId: string, on: boolean) => {
     setSelection((current) => {
-      const ids = current.measureId === assignMeasureId ? current.ids : [];
+      const ids = current.scope === selectionScopeKey ? current.ids : [];
       const next = new Set(ids);
       if (on) next.add(externalId);
       else next.delete(externalId);
-      return { measureId: assignMeasureId, ids: [...next] };
+      return { scope: selectionScopeKey, ids: [...next] };
     });
-  }, [assignMeasureId]);
+  }, [selectionScopeKey]);
   const toggleAll = useCallback((on: boolean) => {
-    setSelection({ measureId: assignMeasureId, ids: on ? [...selectableIds] : [] });
-  }, [assignMeasureId, selectableIds]);
+    setSelection({ scope: selectionScopeKey, ids: on ? [...selectableIds] : [] });
+  }, [selectionScopeKey, selectableIds]);
 
   const assignSelected = useCallback(async () => {
     if (!assignEnabled || selectedHere.length === 0 || !bulkAssignee) return;
@@ -445,7 +477,7 @@ export default function CompliancePage() {
       });
       cache.clear();
       await load();
-      setSelection({ measureId: assignMeasureId, ids: [] });
+      setSelection({ scope: selectionScopeKey, ids: [] });
       setBulkAssignee("");
       const moved = result?.assigned ?? 0;
       const conflicted = result?.conflicted ?? 0;
@@ -463,7 +495,7 @@ export default function CompliancePage() {
     } finally {
       setAssigning(false);
     }
-  }, [api, assignEnabled, assignMeasureId, bulkAssignee, cache, canonicalFor, load, selectedHere]);
+  }, [api, assignEnabled, assignMeasureId, bulkAssignee, cache, canonicalFor, load, selectedHere, selectionScopeKey]);
 
   return (
     <div className="space-y-4">
@@ -726,7 +758,12 @@ export default function CompliancePage() {
           "assign these" is ambiguous until a measure is named.
         */}
         {assignEnabled ? (
-          <div className="flex flex-wrap items-center gap-3 rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-2 text-sm dark:border-neutral-800 dark:bg-neutral-900/60">
+          // `md:flex`, because every selection checkbox lives in the desktop table (`hidden md:block`)
+          // and `RosterMobileCards` has none. Below `md` this bar rendered a live-looking control with
+          // nothing on screen able to change its state — a vacuous control, and on a tablet, which is
+          // what the pilot's quality lead is most likely to open. Selection on the mobile cards is the
+          // better answer and is its own piece of work.
+          <div className="hidden flex-wrap items-center gap-3 rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-2 text-sm md:flex dark:border-neutral-800 dark:bg-neutral-900/60">
             <span className="font-medium">
               {selectedHere.length === 0
                 ? `Select ${SUBJECT.plural} to assign their ${measureLabelFor(assignMeasureId, assignMeasureId)} case`
@@ -741,7 +778,8 @@ export default function CompliancePage() {
                 disabled={selectedHere.length === 0 || assigning}
                 className="rounded border border-neutral-300 bg-transparent px-2 py-1 text-sm dark:border-neutral-700"
               >
-                <option value="">Assign to…</option>
+                {/* The hook already supplies its own placeholder as `options[0]`; a hardcoded one
+                    here rendered TWO options with `value=""`. */}
                 {assignableOptions.map((o) => (<option key={o.value} value={o.value}>{o.label}</option>))}
               </select>
             </label>

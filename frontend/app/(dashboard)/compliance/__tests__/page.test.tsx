@@ -317,9 +317,13 @@ describe("CompliancePage", () => {
           subject: { externalId: "pat-2", name: "Compliant Patient", role: "Patient", site: "HQ", tenantName: "Acme" },
           cells: { cms125: { status: "COMPLIANT", method: "Mammogram on file" } },
         },
+        {
+          subject: { externalId: "pat-3", name: "Declined Patient", role: "Patient", site: "HQ", tenantName: "Acme" },
+          cells: { cms125: { status: "DECLINED", method: "Declination on file" } },
+        },
       ],
     },
-    headers: new Headers({ "X-Total-Count": "2" }),
+    headers: new Headers({ "X-Total-Count": "3" }),
   };
   const oneMeasureMocks = () => {
     navHolder.current.setUrl("/compliance?panel=wellness&measureId=cms125");
@@ -338,7 +342,45 @@ describe("CompliancePage", () => {
     // A compliant patient is not work: the checkbox is present but dead, so the row reads as
     // deliberately unavailable rather than missing.
     expect(screen.getByLabelText("Select Compliant Patient")).toBeDisabled();
-    expect(screen.getByText(/1 of 2 on this page have an open case/)).toBeInTheDocument();
+    expect(screen.getByText(/2 of 3 on this page have an open case/)).toBeInTheDocument();
+  });
+
+  it("a DECLINED row is selectable, because a documented refusal keeps the case OPEN", async () => {
+    // Three reviewers found this independently. `roster-vocabulary.ts` applies DECLINED only when the
+    // canonical status is NOT compliant, and MEASURES.md says a declination "keeps the case open" —
+    // so the patients who refused, which is exactly the list worth calling, had dead checkboxes.
+    oneMeasureMocks();
+    render(<CompliancePage />);
+    expect(await screen.findByLabelText("Select Declined Patient")).toBeEnabled();
+  });
+
+  it("the assign bar is absent when no account can be assigned to", async () => {
+    // `assignableOptions.length` is ALWAYS at least two — a placeholder and "Unassign" — so gating on
+    // it was a guard that could not fire, and with the endpoint empty the bar still rendered offering
+    // only to CLEAR assignments. It gates on the account count now.
+    navHolder.current.setUrl("/compliance?panel=wellness&measureId=cms125");
+    get.mockImplementation(() => Promise.resolve([]));
+    getWithHeaders.mockReset().mockResolvedValue(rosterOneMeasure);
+    render(<CompliancePage />);
+    await screen.findByRole("columnheader", { name: /Breast Cancer Screening/ });
+    expect(screen.queryByLabelText("Assign to")).toBeNull();
+    expect(screen.queryByLabelText("Select Overdue Patient")).toBeNull();
+  });
+
+  it("a selection does not survive a change to the view it was made in", async () => {
+    // Tick a row, change a filter so the row leaves, change it back: the tick must NOT return. The
+    // first cut tagged the selection by measure alone, so it did — and would have been POSTed.
+    oneMeasureMocks();
+    post.mockReset().mockResolvedValue({ assigned: 1, unchanged: 0, conflicted: 0, missing: [], closed: [] });
+    render(<CompliancePage />);
+    await userEvent.click(await screen.findByLabelText("Select Overdue Patient"));
+    expect(screen.getByText("1 selected")).toBeInTheDocument();
+
+    // A page change is part of the scope, so it empties the selection rather than hiding it.
+    navHolder.current.setUrl("/compliance?panel=wellness&measureId=cms125&sex=F");
+    await waitFor(() => expect(screen.queryByText("1 selected")).toBeNull());
+    navHolder.current.setUrl("/compliance?panel=wellness&measureId=cms125");
+    await waitFor(() => expect(screen.queryByText("1 selected")).toBeNull());
   });
 
   it("assign is absent when no single measure is in scope", async () => {
@@ -368,9 +410,12 @@ describe("CompliancePage", () => {
     post.mockReset().mockResolvedValue({ assigned: 1, unchanged: 0, conflicted: 0, missing: [], closed: [] });
     render(<CompliancePage />);
     await userEvent.click(await screen.findByLabelText(/Select all/));
+    // Both actionable rows — the OVERDUE one and the DECLINED one, whose case is open — and not the
+    // compliant one.
     expect(screen.getByLabelText("Select Overdue Patient")).toBeChecked();
+    expect(screen.getByLabelText("Select Declined Patient")).toBeChecked();
     expect(screen.getByLabelText("Select Compliant Patient")).not.toBeChecked();
-    expect(screen.getByText("1 selected")).toBeInTheDocument();
+    expect(screen.getByText("2 selected")).toBeInTheDocument();
   });
 
   it("shows an error alert when the roster fetch fails", async () => {
