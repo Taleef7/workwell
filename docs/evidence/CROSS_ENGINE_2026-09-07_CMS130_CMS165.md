@@ -64,6 +64,15 @@ with an explicit `onsetDateTime` well inside the period.
 **Until that is answered, CMS165 has no cross-engine number**, and none is quoted anywhere. It is the
 one pilot measure that must not be routed for an unrelated reason as well (ADR-076 d1 and issue #533).
 
+## Reproduced 2026-09-15
+
+Both sweeps were dispatched again on 2026-09-15, eight days later, on fresh containers from the same
+credentialed workflow. **Both returned exactly the numbers above** — CMS130 63/64 and CMS165 11/68,
+all 64 and all 68 cases evaluated cleanly, CMS130 loading 31/31 completed value sets and CMS165
+33/33. Nothing here changed; the reproduction is recorded because a figure that only ever appeared
+once is a figure nobody has tested, and because CMS165's 11/68 is the kind of result that invites
+"it was probably a bad run". It was not a bad run.
+
 ## Running total
 
 **362 of 387 cases agree across EIGHT measures** — the previous 299/323 across seven, plus CMS130's
