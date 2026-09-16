@@ -101,6 +101,12 @@ beforeEach(() => {
 });
 afterEach(() => vi.clearAllMocks());
 
+const PAYERS = [
+  { code: "1", name: "Medicare", group: "medicare", groupName: "Medicare", subjectCount: 3927 },
+  { code: "11", name: "Medicare Advantage", group: "medicare", groupName: "Medicare", subjectCount: 2900 },
+  { code: "5", name: "Commercial", group: "commercial", groupName: "Commercial", subjectCount: 1200 },
+];
+
 describe("CompliancePage out-of-population count", () => {
   // A roster scoped to one measure withholds the patients that measure does not describe (ADR-078),
   // and says how many. The saying is the point: a list that is quietly shorter is the failure this
@@ -256,6 +262,203 @@ describe("CompliancePage", () => {
     expect(btn).toBeDisabled();
     await userEvent.click(btn);
     expect(post).not.toHaveBeenCalled();
+  });
+
+  it("the insurance filter is on the ROSTER now, and a selection reaches the roster query", async () => {
+    // #567: the practice asked for provider + measure + insurance and then assign, framed on this
+    // screen. Two of the three were already here; the insurance control existed only on the work
+    // list, which from the other side of the call is indistinguishable from it not existing.
+    get.mockImplementation((url: string) => (
+      url === "/api/payers" ? Promise.resolve(PAYERS) : Promise.resolve([])
+    ));
+    render(<CompliancePage />);
+    const medicare = await screen.findByLabelText("Medicare (3,927)");
+    await userEvent.click(medicare);
+    await waitFor(() => {
+      const urls = getWithHeaders.mock.calls.map((c) => String(c[0]));
+      expect(urls.some((u) => u.includes("payer=1"))).toBe(true);
+    });
+  });
+
+  it("hides the insurance filter entirely when the deployment records no payer", async () => {
+    // The occupational directory has never carried one. An empty control is worse than no control:
+    // it reads as "no insurance matches" rather than "this deployment does not track insurance".
+    get.mockImplementation(() => Promise.resolve([]));
+    render(<CompliancePage />);
+    await screen.findByRole("columnheader", { name: /^MMR/ });
+    // The FIELDSET itself, not just its options: with no payers the control would render EMPTY, and
+    // asserting only that no option is present passes whether the guard fires or not — verified by
+    // mutation. An empty "Insurance" box reads as "no insurance matches".
+    expect(screen.queryByRole("group", { name: /Insurance/i })).toBeNull();
+    expect(screen.queryByLabelText(/Medicare Advantage/)).toBeNull();
+  });
+
+  it("survives an /api/payers response that is not payers at all", async () => {
+    // Found by an existing test whose blanket mock answered EVERY url with segments. The hook
+    // guarded a FAILED fetch and not a successful one carrying the wrong shape, so `groups` built an
+    // entry with an undefined `subjectCount` and the render died on `.toLocaleString()` — one
+    // optional filter taking down the whole roster behind it.
+    get.mockImplementation(() => Promise.resolve([{ id: "s1", name: "Clinical Staff", enabled: true }]));
+    render(<CompliancePage />);
+    expect(await screen.findByRole("columnheader", { name: /^MMR/ })).toBeInTheDocument();
+  });
+
+  const ASSIGNABLE = [{ email: "cm@workwell.dev", role: "ROLE_CASE_MANAGER" }];
+  const rosterOneMeasure = {
+    data: {
+      panel: "wellness",
+      columns: [{ measureId: "cms125", name: "Breast Cancer Screening", complianceClass: "RECURRING" }],
+      rows: [
+        {
+          subject: { externalId: "pat-1", name: "Overdue Patient", role: "Patient", site: "HQ", tenantName: "Acme" },
+          cells: { cms125: { status: "OVERDUE", method: "No mammogram on file" } },
+        },
+        {
+          subject: { externalId: "pat-2", name: "Compliant Patient", role: "Patient", site: "HQ", tenantName: "Acme" },
+          cells: { cms125: { status: "COMPLIANT", method: "Mammogram on file" } },
+        },
+        {
+          subject: { externalId: "pat-3", name: "Declined Patient", role: "Patient", site: "HQ", tenantName: "Acme" },
+          cells: { cms125: { status: "DECLINED", method: "Declination on file" } },
+        },
+      ],
+    },
+    headers: new Headers({ "X-Total-Count": "3" }),
+  };
+  const oneMeasureMocks = () => {
+    navHolder.current.setUrl("/compliance?panel=wellness&measureId=cms125");
+    get.mockImplementation((url: string) => (
+      url === "/api/users/assignable" ? Promise.resolve(ASSIGNABLE) : Promise.resolve([])
+    ));
+    getWithHeaders.mockReset().mockResolvedValue(rosterOneMeasure);
+  };
+
+  it("assign appears only with ONE measure in scope, and only rows with an open case are selectable", async () => {
+    // #567. A roster cell is an outcome reference and a patient row spans every column, so "assign
+    // these" is meaningless until a measure is named — the control is absent otherwise.
+    oneMeasureMocks();
+    render(<CompliancePage />);
+    expect(await screen.findByLabelText("Select Overdue Patient")).toBeEnabled();
+    // A compliant patient is not work: the checkbox is present but dead, so the row reads as
+    // deliberately unavailable rather than missing.
+    expect(screen.getByLabelText("Select Compliant Patient")).toBeDisabled();
+    expect(screen.getByText(/2 of 3 on this page have an open case/)).toBeInTheDocument();
+  });
+
+  it("a DECLINED row is selectable, because a documented refusal keeps the case OPEN", async () => {
+    // Three reviewers found this independently. `roster-vocabulary.ts` applies DECLINED only when the
+    // canonical status is NOT compliant, and MEASURES.md says a declination "keeps the case open" —
+    // so the patients who refused, which is exactly the list worth calling, had dead checkboxes.
+    oneMeasureMocks();
+    render(<CompliancePage />);
+    expect(await screen.findByLabelText("Select Declined Patient")).toBeEnabled();
+  });
+
+  it("the assign bar is absent when no account can be assigned to", async () => {
+    // `assignableOptions.length` is ALWAYS at least two — a placeholder and "Unassign" — so gating on
+    // it was a guard that could not fire, and with the endpoint empty the bar still rendered offering
+    // only to CLEAR assignments. It gates on the account count now.
+    navHolder.current.setUrl("/compliance?panel=wellness&measureId=cms125");
+    get.mockImplementation(() => Promise.resolve([]));
+    getWithHeaders.mockReset().mockResolvedValue(rosterOneMeasure);
+    render(<CompliancePage />);
+    await screen.findByRole("columnheader", { name: /Breast Cancer Screening/ });
+    expect(screen.queryByLabelText("Assign to")).toBeNull();
+    expect(screen.queryByLabelText("Select Overdue Patient")).toBeNull();
+  });
+
+  it("a selection does not survive a change to the view it was made in", async () => {
+    // Tick a row, change a filter so the row leaves, change it back: the tick must NOT return. The
+    // first cut tagged the selection by measure alone, so it did — and would have been POSTed.
+    oneMeasureMocks();
+    post.mockReset().mockResolvedValue({ assigned: 1, unchanged: 0, conflicted: 0, missing: [], closed: [] });
+    render(<CompliancePage />);
+    await userEvent.click(await screen.findByLabelText("Select Overdue Patient"));
+    expect(screen.getByText("1 selected")).toBeInTheDocument();
+
+    // A page change is part of the scope, so it empties the selection rather than hiding it.
+    navHolder.current.setUrl("/compliance?panel=wellness&measureId=cms125&sex=F");
+    await waitFor(() => expect(screen.queryByText("1 selected")).toBeNull());
+    navHolder.current.setUrl("/compliance?panel=wellness&measureId=cms125");
+    await waitFor(() => expect(screen.queryByText("1 selected")).toBeNull());
+  });
+
+  it("changing the PAGE SIZE clears the selection too, not only the page number", async () => {
+    // Codex caught `pageSize` missing from the scope key: select row 40 at size 50, switch to 25,
+    // switch back, and the tick returns — because only `selectedHere` was filtering it out meanwhile.
+    // Every pagination control has to invalidate a selection, not just the page number.
+    oneMeasureMocks();
+    render(<CompliancePage />);
+    await userEvent.click(await screen.findByLabelText("Select Overdue Patient"));
+    expect(screen.getByText("1 selected")).toBeInTheDocument();
+
+    await userEvent.selectOptions(screen.getByLabelText("Page size"), "100");
+    await waitFor(() => expect(screen.queryByText("1 selected")).toBeNull());
+  });
+
+  it("does not repaint the OLD roster when the view changed while the assignment was in flight", async () => {
+    // Codex caught this: `load` is the callback captured at click time. If a filter changes while the
+    // POST is pending, calling it re-runs the OLD query, bumps the stale-fetch counter so the NEW
+    // view's own request is discarded, and repaints the previous roster under the new URL with
+    // nothing left to correct it.
+    oneMeasureMocks();
+    let resolvePost!: (v: unknown) => void;
+    post.mockReset().mockImplementation(() => new Promise((r) => { resolvePost = r; }));
+
+    render(<CompliancePage />);
+    await userEvent.click(await screen.findByLabelText("Select Overdue Patient"));
+    await userEvent.selectOptions(screen.getByLabelText("Assign to"), "cm@workwell.dev");
+    await userEvent.click(screen.getByRole("button", { name: /Assign selected/ }));
+    await waitFor(() => expect(post).toHaveBeenCalled());
+
+    // The operator moves on while the POST is still pending.
+    navHolder.current.setUrl("/compliance?panel=wellness&measureId=cms125&sex=F");
+    await waitFor(() => {
+      expect(getWithHeaders.mock.calls.some((c) => String(c[0]).includes("sex=F"))).toBe(true);
+    });
+    const callsBefore = getWithHeaders.mock.calls.length;
+
+    resolvePost({ assigned: 1, unchanged: 0, conflicted: 0, missing: [], closed: [] });
+    await waitFor(() => expect(screen.queryByText("Assigning…")).toBeNull());
+
+    // No further roster read at all — and certainly not one for the view the operator left.
+    const added = getWithHeaders.mock.calls.slice(callsBefore).map((c) => String(c[0]));
+    expect(added.filter((u) => !u.includes("sex=F"))).toEqual([]);
+  });
+
+  it("assign is absent when no single measure is in scope", async () => {
+    render(<CompliancePage />);
+    await screen.findByRole("columnheader", { name: /^MMR/ });
+    expect(screen.queryByLabelText("Assign to")).toBeNull();
+  });
+
+  it("assigning posts the MEASURE and the SUBJECTS, not case ids the roster does not have", async () => {
+    oneMeasureMocks();
+    post.mockReset().mockResolvedValue({ assigned: 1, unchanged: 0, conflicted: 0, missing: [], closed: [] });
+    render(<CompliancePage />);
+    await userEvent.click(await screen.findByLabelText("Select Overdue Patient"));
+    await userEvent.selectOptions(screen.getByLabelText("Assign to"), "cm@workwell.dev");
+    await userEvent.click(screen.getByRole("button", { name: /Assign selected/ }));
+    await waitFor(() => expect(post).toHaveBeenCalled());
+    expect(post.mock.calls[0]![0]).toBe("/api/cases/bulk-assign");
+    expect(post.mock.calls[0]![1]).toEqual({
+      assignee: "cm@workwell.dev",
+      measureId: "cms125",
+      subjectIds: ["pat-1"],
+    });
+  });
+
+  it("select-all ticks only the rows that have an open case", async () => {
+    oneMeasureMocks();
+    post.mockReset().mockResolvedValue({ assigned: 1, unchanged: 0, conflicted: 0, missing: [], closed: [] });
+    render(<CompliancePage />);
+    await userEvent.click(await screen.findByLabelText(/Select all/));
+    // Both actionable rows — the OVERDUE one and the DECLINED one, whose case is open — and not the
+    // compliant one.
+    expect(screen.getByLabelText("Select Overdue Patient")).toBeChecked();
+    expect(screen.getByLabelText("Select Declined Patient")).toBeChecked();
+    expect(screen.getByLabelText("Select Compliant Patient")).not.toBeChecked();
+    expect(screen.getByText("2 selected")).toBeInTheDocument();
   });
 
   it("shows an error alert when the roster fetch fails", async () => {

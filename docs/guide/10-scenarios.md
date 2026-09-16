@@ -82,7 +82,14 @@ What happens, in order:
 5. **Results surface through WorkWell's interface today.** A quality manager reads dashboards,
    pass rates and trends; a coordinator works the case list — either **by gap** (`/cases`, one row
    per patient-measure) or **by patient** (`/worklist`, one row per person with every open gap on
-   it, so one phone call can close what one call can close); CSV exports feed anything
+   it, so one phone call can close what one call can close). The **measure roster** (`/compliance`) is
+   the third view — every patient against every measure, compliant ones included — and since
+   2026-09-15 it filters by primary insurance and assigns from the row, which is how the practice
+   described the job: filter for a provider, a measure and an insurance, then hand that list to
+   somebody. Assigning there needs ONE measure in scope, because a roster cell references an outcome
+   rather than a case and a patient row spans every column; with one named, the server resolves that
+   measure's active case per selected patient, and rows with nothing open (compliant, excluded, or
+   outside the population) are visibly unselectable rather than absent. CSV exports feed anything
    spreadsheet-shaped; and other MIE systems read the same answer machine-readably from the
    versioned compliance API — which answers **404 when no run has covered a patient**, never an
    empty success, because "not yet evaluated" and "compliant" must not be confusable.

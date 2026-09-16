@@ -1,5 +1,110 @@
 # Journal
 
+## 2026-09-15 (later still) — the roster gets the two controls the ask was framed around, and two hooks stop taking the page down
+
+#567. The practice described the job on the 2026-09-10 call as one sentence — filter for a provider, a
+measure and an insurance, then assign that report — and said it while looking at the measure roster.
+Two of those three were already there. The insurance filter and the assign control existed only on
+`/worklist`, which from the other side of the call is indistinguishable from their not existing.
+
+**Assigning from a roster needed a decision before it needed code.** A roster CELL is an outcome
+reference — `{ runId, outcomeId }`, `frontend/features/compliance/types.ts` — not a case, so the page
+has no case id to send, and a patient ROW spans every routed column, so "assign these patients" without
+a measure named would mean six different pieces of work. So `POST /api/cases/bulk-assign` gained a
+second body shape, `{ assignee, measureId, subjectIds[] }`, and the server resolves the ACTIVE case for
+each subject in that one measure in a single bounded read. Everything after the resolution is the
+`caseIds` path unchanged: the same assignable-account check, the same compare-and-set, the same
+`case_actions` and audit rows, the same response shape. The cap is the same NUMBER on a different
+QUANTITY, which matters: `caseIds` bounds cases and this bounds SUBJECTS, and n subjects are not n
+cases — so the resolution reads one over the cap and REFUSES rather than truncating, collapses to the
+newest evaluation period per subject, and applies the deployment profile's subject scoping.
+Sending both shapes at once is a 400 rather than a guess. A selection where nobody has an active case
+answers `assigned: 0` **in the success shape** — the operator ticked real rows and pressed a real
+button, and a caller must not parse two shapes to learn that nothing moved.
+
+**The UI says what it can do and what it cannot.** The control appears only with one measure in scope.
+Rows whose cell is COMPLIANT, EXCLUDED, NA or NOT_APPLICABLE are rendered with a dead
+checkbox rather than omitted, so the row reads as deliberately unavailable instead of missing, and the
+bar states `N of M on this page have an open case for this measure`. **DECLINED is selectable**: three reviewers
+caught that a documented refusal does not change the canonical bucket and keeps the case open, so the
+patients who refused — exactly the list worth calling — would have had dead checkboxes. That rule is an **affordance, not
+a guard**: an out-of-population patient persists as MISSING_DATA and opens no case at all (ADR-078), so
+the server stays the authority and answers 0 rather than inventing one.
+
+**The selection carries the whole VIEW it was made in.** The first cut tagged only the measure, and
+three reviewers found the same two holes: tick a row, filter it away, remove the filter, and the tick
+silently returned and would have been posted; and ticking ten rows on page 1 then paging and pressing
+Assign posted only page 2's, discarding ten deliberate ticks without a word. The scope is now measure,
+panel, status, site, panel filters, insurance, search, segment, tenant AND page. Clearing it in an effect is a synchronous
+setState in an effect body, which the lint rule forbids for the reason it exists — so the tag is both
+the correct answer and the permitted one, and it is the same shape the measure page's slices use. Rows
+that leave under a filter change need no handling at all: the selectability filter drops them.
+
+**The insurance filter is a SET, and reads the last-written URL.** Same semantics as the work list,
+because the typology is hierarchical and a single-valued control would let someone ask for Medicare and
+silently receive only traditional Medicare while 2,900 Medicare Advantage patients were withheld under
+a heading claiming to contain them. The writer reads the last-written URL rather than the render's
+`searchParams`, because two checkbox clicks land faster than `searchParams` updates and the snapshot
+form makes the second clobber the first. That is deliberately **not** unit-tested: the jsdom
+`next/navigation` mock updates synchronously, so a test passes over either spelling and pins nothing.
+Mutation-checked by hand instead.
+
+**And the session's own finding: two hooks could white-screen the page, and one of them did.** An
+existing test's blanket mock answers every URL with segments, which fed `/api/payers` a payload of the
+wrong shape — and `usePanelPayers` guarded a FAILED fetch but not a SUCCESSFUL one carrying garbage, so
+`groups` built an entry whose `subjectCount` was undefined and the render died on `.toLocaleString()`.
+The whole roster, taken down by one optional filter's endpoint. `useAssignableUsers` had the identical
+hole on `u.email.toLowerCase()`, and it became reachable the moment the roster started calling it.
+Both now keep only rows that ARE what they claim to be. The rule both comments state: an optional
+control's endpoint returning an unexpected payload must cost that control, not the page behind it.
+
+**Four reviewers, nineteen findings, and the worst of them was a guard that could not fire.**
+`assignEnabled` gated the whole control on `assignableOptions.length > 0` — and that hook always
+returns a placeholder plus "Unassign", so the length is never below two. With `/api/users/assignable`
+empty, or returning the changed shape the new hardening was written for, the bar still rendered and
+the only action it offered was to CLEAR assignments. Deleting the clause changed nothing and failed
+no test, which is why four rounds of mutation missed it: a dead clause has no mutant. The hook now
+exposes the account count and the page gates on that.
+
+Also fixed from that round: the resolution was not period-scoped (a surviving prior cycle would be
+assigned and permanently OPERATOR-stamped); the 500 cap bounded subjects while the read bounded
+cases, so a large selection truncated silently and still answered success; the subject form skipped
+the deployment profile's subject scoping, which is not a new hole but a WIDER one because external
+ids are guessable where case UUIDs are not; non-string members were coerced rather than refused; the
+assign bar rendered on phones where no checkbox exists; the `<select>` carried two options with an
+empty value; the page-reset key omitted the payer filter, so Clear-filters left "Page 5 of 1"; and
+both hooks dropped malformed rows in total silence, which renders identically to "this deployment
+records none" — they warn now.
+
+**And a mutation the reviewers found that four rounds had missed:** narrowing the resolution's
+`statuses` to `["OPEN"]` alone broke nothing, because every fixture case was OPEN. That is the exact
+bug DATA_MODEL_CONTRACTS §4 records this project shipping across four readers once already. There is
+an IN_PROGRESS fixture now. Two more guards had no test at all — the profile filter and the period
+collapse are invisible on the default profile with one period — so the resolution was extracted as a
+pure function and both are pinned there.
+
+**Verification.** Backend 2,651 tests, one failure — `corpus-membership`, the standing stale
+sparse-checkout one, green in CI. Frontend lint clean, 461 tests, build compiled. Seven mutations, each
+caught by the test named for it: drop the measure narrowing from the server-side resolution; accept
+both body shapes at once; make every row selectable; show assign with no measure in scope; post an
+empty subject list; drop each of the two hook shape-guards. One fixture bug found on the way — a panel
+id that does not normalize sent the page into an infinite render loop through an existing
+URL-reconciliation effect, which is a real trap for the next person writing a roster test.
+
+**Then Codex reviewed the review-fix commit and found two more, both in what that commit had just
+written.** The scope key had gained `page` and not `pageSize`, so the two pagination controls behaved
+differently: select row 40 at size 50, switch to 25, switch back, and the tick returns and is
+postable — `selectedHere` filtered it off screen in between, which is what made it invisible rather
+than absent. And the post-assign reload called the `load()` captured at click time, so a filter or
+page change while the POST was in flight re-ran the OLD query, bumped `reqIdRef` so the newer view's
+own request was discarded as stale, and repainted the previous roster under the new URL and filter
+controls with nothing left to correct it. The reload is now gated on the view still being the one the
+assignment was made in, and the scope key is read from a ref because the closure's copy is precisely
+the one that cannot be trusted there. Final frontend numbers: lint clean, **466 tests**, build
+compiled; two more mutations, each caught. The standing lesson holds a fourth time — **a review round
+is itself a change that needs reviewing**, and the lane that finds the fix's defect is not always the
+lane that found the defect.
+
 ## 2026-09-15 (evening) — the after-numbers for the measure page, and a second window that makes a number worthless
 
 #571 merged as `183105d9` and deployed to both stacks. Measured on the live sandbox at ~19:30Z —

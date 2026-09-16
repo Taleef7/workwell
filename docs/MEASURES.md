@@ -66,7 +66,7 @@ CMS125's — attributed by signature, not yet by mutation. **CMS165 returned 11 
 a cross-engine number:** the Java engine puts 56 of 68 patients out of the initial population entirely,
 which is the shape of a harness difference rather than a disagreement about the measure, and CMS137's
 period-boundary mechanism was ruled out (nine cases whose every encounter sits at the period's first
-millisecond were admitted anyway). Diagnosing it is what remains of #532; the running cross-engine total
+millisecond were admitted anyway). Diagnosing it is #572 (#532 closed with the sweeps done); the running cross-engine total
 is **362 of 387 across eight measures**, CMS165 deliberately excluded.
 
 > **CMS165 is blocked on more than verification, and the block moved on 2026-09-07.** CMS165 is the only
@@ -87,7 +87,7 @@ is **362 of 387 across eight measures**, CMS165 deliberately excluded.
 > `qicore-patient`, `qicore-encounter`, both Condition profiles and more. The corpus stamps fourteen,
 > which is why cms165 runs there and only there. A second blocker sits behind that one: WebChart exports
 > its BP panel with `status: "unknown"` while the measure admits only `final | amended | corrected`.
-> And CMS165's own cross-engine sweep is unexplained (#532). The failure mode is louder now, though not unconditionally: the batch-level retrieve refusal fires
+> And CMS165's own cross-engine sweep is unexplained (#572). The failure mode is louder now, though not unconditionally: the batch-level retrieve refusal fires
 > only for a roster of more than one subject, so a nightly run would refuse while `/simulate` and
 > rerun-to-verify would quietly return MISSING_DATA. Better than a plausible wrong number, and not a
 > guarantee. **cms165 is routed on the SANDBOX since 2026-09-08 (ADR-078)** — it runs there because the

@@ -394,7 +394,7 @@ been the whole worklist.
   measurement; if it does not fit the anchor window the chunk size and the anchor hour are the knobs.
 - Existing out-of-population cases on the sandbox — roughly 15,000 — are closed by the first run after
   deploy under `OUT_OF_POPULATION`, each with an audit event. That is one large ledger write, once.
-- cms165's cross-engine number is still open (#532). Routing it on the sandbox does not settle that
+- cms165's cross-engine number is still open (#572; #532 closed once the sweeps were run). Routing it on the sandbox does not settle that
   question and does not claim to; the measure's own MADiE deck is the verification it carries.
 - The flip gate is now runnable where its sidecars resolve (`flip-gate.yml`), which removes the
   "run it somewhere credentialed" instruction from the runbook's list of things a person has to know.
