@@ -188,6 +188,9 @@ with status forced to `MISSING_DATA`.
 
 ## 6) CSV Export Contracts
 
+> §6.6 (the attributed list's report) and §6.7 (`?listId=` on the filtered surfaces) were APPENDED
+> 2026-09-16 (ADR-082). Neither changes a column in §6.1–§6.5.
+
 ### 6.1 `GET /api/exports/runs?format=csv`
 Columns:
 `runId, measureName, measureVersion, scopeType, triggerType, status, startedAt, completedAt, durationMs, totalEvaluated, compliant, dueSoon, overdue, missingData, excluded, passRate, dataFreshAsOf, notInPopulation`
@@ -310,3 +313,68 @@ intent event, never the run's own counts — `totalEvaluated` is a count of the 
 comparing it with the surviving rows is circular. Long-run history is the quality-over-time snapshot
 store, which compaction never touches. `evidence_json` for a deleted row is gone with it — a case's own
 evidence is preserved by the `last_run_id` pin.
+
+### 6.6 `GET /api/subject-lists/{id}/report?measurementYear=YYYY&format=csv` (ADR-082)
+
+The ACO's attributed list, scored for one measurement year, with the patient-level evidence. Columns:
+
+`listId, listRevision, generatedAt, rawIdentifier, patientExternalId, patientName, resolution,
+rowStatus, measureId, ecqmId, measureVersion, runId, measurementPeriodStart, measurementPeriodEnd,
+evaluatedAt, rate, initialPopulation, denominator, denominatorExclusion, denominatorException,
+numerator, status, outOfPopulation, evaluationError, providerId, payer`
+
+The two subject columns follow `subjectHeaders(DEPLOYMENT_PROFILE.subjectTerm)` exactly as §6.2/§6.3
+do (the list above is the patient-deployment spelling; TWH emits `employeeExternalId`,
+`employeeName`). **The header is pinned by a test**, because the ACO's tooling reads it by name and a
+renamed or inserted column surfaces downstream as wrong numbers rather than as an error.
+
+> **`measurementYear` is REQUIRED and has no default.** An officially routed run is scored over the
+> calendar year containing its evaluation date (ADR-072), so "the latest numbers" would answer a
+> PY2027 question with PY2028's first nightly the moment January arrives — and would look exactly like
+> a correct answer. The run chosen per measure is the newest reportable whole-population run whose own
+> period is that year.
+
+**Three row shapes, and the two non-evaluated ones are contract, not convenience.**
+- `rowStatus=EVALUATED` — **one row per (measure, rate)**. A multi-rate measure (cms137) yields two
+  rows for one patient, under the reviewed `rateLabels` of its semantics entry (ADR-074 d13).
+- `rowStatus=MISSING_FROM_RUN` — a MATCHED member the selected run never evaluated. **One row per
+  MEASURE, not per rate.** The patient, provider and payer columns are filled; every population,
+  status and rate column is **the empty string — never `0` or `false`**, which a consumer would read
+  as a scored result of zero rather than as an absence.
+- `rowStatus=NOT_MATCHED` — a NOT_FOUND or AMBIGUOUS member. **Exactly ONE row**, after all evaluated
+  rows, with every patient and measure column empty. One row per measure would multiply a single
+  unresolved identifier by six and read as six separate failures.
+
+**Every JSON count is recomputable from these rows**, and a test does it. The JSON summary states, per
+measure: `matchedSubjects = distinctSubjectsSeen + missingFromRun` and
+`distinctSubjectsSeen = scoredSubjects + unmeasured + evaluationErrors + outOfPopulation`.
+`missingFromRun` is reported BESIDE the rates and **never subtracted from a denominator** — a member
+the run never saw is a gap in the evidence, not an exclusion, and folding them in would let a smaller
+run produce a higher score. The score is `numerator / (denominator − denominatorExclusion −
+denominatorException)`; `status=EXCLUDED` is the workflow vocabulary while the two `denominator*`
+columns are the artifact's populations, and the ACO's word "exclusions" covers both, so both are
+emitted separately rather than summed.
+
+> **Compaction refuses PER MEASURE (ADR-077, ADR-082 d5).** A measure whose selected run predates a
+> compaction cutoff is returned with `compactionStatus: "compacted"`, no rates and no rows, and is
+> named in the JSON and in the `X-WorkWell-Compacted-Measures` response header (exposed through
+> `config/cors.ts`); the other measures' complete numbers are served with HTTP 200. The whole request
+> is **409 `run_compacted`** only when EVERY selected run is exposed. Exposure is checked before the
+> reads and again after them, and every derived row is computed before anything is serialised — a
+> streamed CSV cannot change its status after the first byte, so a pass starting mid-report yields a
+> 409 or a complete file, never a truncated 200.
+
+> **Text a person supplied is neutralised against spreadsheet formula injection.** `rawIdentifier`,
+> the subject name and the rate label go through `csvTextCell` (`export/csv.ts`), which prefixes a
+> leading `=`, `+`, `-`, `@`, tab or CR with an apostrophe. `csvCell` quotes correctly and does not
+> defuse, and a CSV of somebody's uploaded identifiers must not become code when the ACO opens it.
+
+### 6.7 `?listId=` on the filtered surfaces (ADR-082)
+
+`?listId=` restricts the roster, the cases route, the work list, both §6.2/§6.3 CSVs and the MCP
+`list_noncompliant` tool to a list's MATCHED members. It is a **resolved membership, not a token the
+predicate parses**: the parameter names an immutable list and the server turns it into subjects, so a
+client can ask for a list but cannot spell a membership. An unknown id is a **404** on every surface
+(`LIST_NOT_FOUND` on the MCP tool) — never an unfiltered answer under a heading naming the ACO's
+population. A list none of whose identifiers resolved is an **active filter matching nobody**, not an
+absent one.

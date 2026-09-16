@@ -752,6 +752,56 @@ OWNER-APPROVED DDL: Taleef explicitly authorized this table in-session (#263 Pha
 
 ## 4) – 6) Contracts → moved
 
+### 3.29 Attributed lists — `subject_lists` + `subject_list_members` (MM-2 PR 3 / ADR-082) — NEW owner-approved tables
+
+The patients an ACO attributes to this group. Every other population question this deployment answers
+is "the patients in our directory"; this one is "the patients somebody else says are ours", and on an
+MSSP attribution those are different populations.
+
+```sql
+subject_lists (
+  id           <uuid> PRIMARY KEY,
+  name         TEXT NOT NULL CHECK (trimmed name <> ''),
+  revision     INTEGER NOT NULL CHECK (revision > 0),   -- 1 + max(revision) for this name
+  status       TEXT NOT NULL CHECK (status IN ('IMPORTING','COMPLETE')),
+  source       TEXT,                                    -- who supplied it, in the operator's words
+  note         TEXT,
+  created_by   TEXT NOT NULL,
+  created_at   <ts> NOT NULL,
+  completed_at <ts>,
+  UNIQUE (name, revision)
+)
+
+subject_list_members (
+  list_id        <uuid> NOT NULL REFERENCES subject_lists(id),   -- RESTRICT: no delete path exists
+  raw_identifier TEXT NOT NULL CHECK (trimmed <> '' AND length <= 128),
+  subject_id     TEXT,
+  resolution     TEXT NOT NULL CHECK (resolution IN ('MATCHED','NOT_FOUND','AMBIGUOUS')),
+  CHECK ((resolution = 'MATCHED') = (subject_id IS NOT NULL)),
+  PRIMARY KEY (list_id, raw_identifier)
+)
+-- partial unique index: (list_id, subject_id) WHERE resolution = 'MATCHED'
+-- covering index:       (list_id, resolution, subject_id)   [index-only scan for matchedSubjectIds]
+```
+
+- **IMMUTABLE.** No UPDATE and no DELETE exists in the store interface, the routes or the UI. A
+  re-import of the same name is a NEW row with `revision + 1`; a manual resolution of a non-match is
+  also a new revision. A report is a function of (list revision, run ids), so a list that could be
+  edited underneath one would make every filed number unverifiable (ADR-082 d1).
+- **Nothing is visible until the import finished.** The header is written `IMPORTING`, the members
+  follow in chunks (500 on the ceiling, 200 on the floor), the audit event is written, and only then
+  does the row flip to `COMPLETE` — which every read filters on. "One transaction" was never available
+  on the floor (D1 caps a batch at ~90 statements), so rather than let the ceiling be quietly safer
+  both backends rely on the flip. A crash leaves an invisible partial row, never a short list
+  masquerading as whole.
+- **NOT_FOUND rows are KEPT** — an identifier the directory cannot resolve is the ACO and the practice
+  disagreeing about who a patient is, which is a review-queue finding rather than a row to drop. The
+  partial unique index refuses a second MATCHED row for one subject, so an alias lands AMBIGUOUS
+  instead of doubling a patient in every denominator the list feeds (ADR-082 d3).
+- **The revision allocation is the only transactional part**, because it is the only part with a race:
+  an advisory *xact* lock on the ceiling (never the session form — Neon's pooler is PgBouncer in
+  transaction mode), a single `INSERT … SELECT MAX(revision)+1` with one retry on the floor.
+
 ### 3.28 Provider panels — `panel_assignments` (MM-2 PR 2 / ADR-080) — NEW owner-approved table
 
 Which staff account works which provider's patients — the practice's own division of labour, written

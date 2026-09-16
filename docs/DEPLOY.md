@@ -1624,6 +1624,45 @@ moved, then confirm the next nightly opens that provider's new cases already ass
 the live WebChart directory every subject is still attributed to one hardcoded provider (#556), so
 panels are only meaningful against the corpus roster.
 
+## Attributed lists — `subject_lists` + `subject_list_members` (ADR-082, 2026-09-16)
+
+**Nothing to run.** Both tables are additive and self-create on boot — `CREATE TABLE IF NOT EXISTS` in
+`schema-pg.ts` on the ceiling, the same in the floor DDL. Every deploy recreates the container, so the
+DDL lands with the code. **There is no backfill and there is nothing to backfill:** the tables start
+empty, and a list only exists once somebody imports one. **Rolling back to an older binary leaves the
+tables in place, unused** — no other table references them, and nothing reads them unless a route
+asks.
+
+**The import is REFUSED on this stack if WebChart is ever configured.** `POST /api/subject-lists`
+answers 403 `not_enabled_on_this_deployment` whenever `WORKWELL_WEBCHART_BASE_URL` plus a credential
+is set, and that is deliberate rather than incomplete: the live directory is a worker-local
+last-known registry that fabricates a minimal profile for any `wc|` id, so matching an attribution
+file against it would be silently incomplete — every row MATCHED and every denominator wrong. It
+stays off until the PHI phase supplies an authoritative resolver (`PRODUCTION_READINESS` §4 item 11).
+
+**On the synthetic stacks the namespace gate is what keeps a real file out.** An identifier outside
+the deployment's own directory namespace (`pat-NNN`/`pat-NNNNN` on Maui, `emp-NNN` on TWH) refuses the
+WHOLE upload before anything is written, and the error names a COUNT, never the values.
+
+**Request budgets.** An import is one header write, `ceil(n/500)` member statements on the ceiling
+(`ceil(n/200)` on the floor), one audit write and one status flip — about 100 statements for the
+50,000-member cap. A report is one `listLatestPopulationRuns` probe plus up to 12 `getRun` reads per
+measure to find the year's run, then that run's rows paged at 2,000, plus two compaction-ledger
+reads per measure. Neither is on a page-load path; both are operator-initiated.
+
+**The retained-report stopgap is an OPS step, and it is the ACO's audit trail until the archive
+ships.** ADR-082 defers the per-run report archive to the PHI gate. Until then: every report actually
+handed to the ACO is downloaded as CSV and kept as a dated file in the R2 evidence bucket, beside the
+backup step. Its rows carry the list revision and the run ids, so a question in December about March's
+numbers has an artifact to point at — a live re-render would be refused once those runs pass the
+400-day cutoff (ADR-077). This is a manual stopgap, not a system of record; say so when handing a
+report over.
+
+**What to check after the first deploy.** Sign in as a CASE_MANAGER, open `/lists`, import three
+corpus ids (one of them nonexistent, e.g. `pat-99999`) and confirm the counts read 2 matched / 1 not
+found; then paste one `emp-001` and confirm the whole upload is refused with nothing written. Confirm
+a VIEWER seat gets 403 on `/api/subject-lists` — the reads are gated too, unlike panels.
+
 ## Database compute cost (read before changing any polling interval)
 
 Neon compute is billed by **CU-hours**, and a compute that is merely *awake* bills whether or not it

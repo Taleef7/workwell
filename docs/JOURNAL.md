@@ -1,5 +1,95 @@
 # Journal
 
+## 2026-09-16 — the ACO's attributed list, and a gate that had to be wrong twice before it was right
+
+#557, ADR-082. The 2026-09-09 working session produced exactly one concrete ask: hand WorkWell the
+list of patients the ACO attributes to the group, run the measures over that subset, and return
+numerator, denominator and exclusions with the patient-level result and its date. Everything else this
+deployment answers is "the patients in our directory". This is "the patients somebody else says are
+ours", and on an MSSP attribution those are different populations — the practice sees patients the ACO
+does not attribute, and the ACO attributes patients the practice has not seen this year.
+
+**The plan split this into two PRs and it shipped as one.** The reviewers who asked for the split made
+the case that the security-sensitive import surface deserves its own review round; the owner's
+standing instruction is fewer and larger PRs, and a list without a report is not a finished unit for
+anybody. The import surface gets its own section in the review brief instead, which is what the split
+was actually for.
+
+**A list is IMMUTABLE, and that is the design rather than a tidiness preference.** A report is a
+function of (list revision, run ids). If a list could be edited underneath a report, every number the
+ACO had already filed would become unverifiable — there would be no way to answer "what was the list
+when you computed this?". So there is no UPDATE and no DELETE anywhere in the store interface, a
+re-import of the same name allocates revision + 1, and a manual resolution of a non-match will also be
+a new revision. That immutability is what makes the `?listId=` memo safe, and it is the first thing
+that breaks if the rule is ever relaxed.
+
+**NOT_FOUND members are kept, and the database enforces the coupling.** An identifier the directory
+cannot resolve is the ACO and the practice disagreeing about who a patient is — a review-queue finding,
+not a row to drop, because dropping it removes the patient from the denominator AND from the evidence
+they were ever claimed. `resolution` and `subject_id` are coupled by a CHECK rather than a convention,
+and a partial unique index refuses a second MATCHED row for one subject, so an alias lands AMBIGUOUS
+instead of doubling that patient in every denominator the list feeds. Both are exercised against the
+real database, not only against the validator.
+
+**The sandbox data boundary, and the two ways one pattern would have been wrong.** M-M authorises a
+synthetic sandbox, so an import that persists arbitrary identifiers is a path for a real attribution
+file to reach Neon, its backups and its exports before #267/#265/#264 exist. An identifier outside the
+deployment's namespace therefore refuses the WHOLE upload before anything is written, reporting a
+COUNT and never the values — an error body is logged and kept by the browser, so echoing them would
+persist them by another route. Writing that namespace as one regex was the first thing that would have
+been wrong, twice: the Maui corpus is 48 hand-written fixtures with THREE-digit ids (`pat-001`)
+followed by generated five-digit ones, so a pattern built from the generated form alone would have
+refused the first 48 real patients in the sandbox; and the default deployment is a different synthetic
+roster entirely (`emp-NNN`), where the corpus pattern refuses everything. It is a NAMESPACE test, not
+an existence test — `pat-99999` conforms and is simply NOT_FOUND, which is what keeps the review queue
+reachable with synthetic-shaped ids. There are now two route tests, one per profile, each asserting
+that the OTHER profile's namespace is the outsider.
+
+A live-directory deployment cannot import at all. That directory is a worker-local last-known registry
+that fabricates a minimal profile for any `wc|` id, so matching against it would be *silently*
+incomplete — every row MATCHED and every denominator wrong — rather than merely unavailable. The gate
+runs before the body is read.
+
+**Every method on the route is CM/ADMIN, metadata included.** Deliberately not split into a GET rule
+and a write rule the way panels is: a member row is a raw patient identifier another system asserted,
+the list's existence says which patients an ACO claims, and the public `/sandbox` signs in as a
+read-only VIEWER that may browse every AUTHENTICATED GET — on Maui the clinician seat is a VIEWER too.
+The identity routes are restricted for exactly this reason.
+
+**The report is for a measurement YEAR, with no default.** An officially routed run is scored over the
+calendar year containing its evaluation date (ADR-072), so "the latest numbers" answers a PY2027
+question with PY2028's first nightly the moment January arrives — and looks exactly like a correct
+answer. The selector walks past a newer run from the wrong year; a test proves it.
+
+**Compaction refuses per MEASURE.** ADR-077 refuses a report built over rows that may be incomplete,
+but the refusal belongs to the measure whose run aged out; withholding five complete measures because
+the sixth did would be a second wrong answer. Exposure is checked before the reads and AGAIN after
+them, because a pass beginning mid-report would have deleted rows the earlier pages already counted —
+and every derived row is computed before anything is serialised, since a streamed CSV cannot change
+its status after the first byte.
+
+**`missingFromRun` is reported beside the rates and never subtracted.** A member the run never
+evaluated is a gap in the evidence, not an exclusion, and folding them into a denominator would let a
+SMALLER run produce a HIGHER score — the one direction a quality number must not move by accident. Two
+reconciliations are stated in the contract and pinned by test.
+
+**Two hazards this session hit that are worth the next person's time.** A literal U+FEFF and a literal
+tab + CR ended up inside regexes in source, because the shell tooling collapses `\\uFEFF` and `\\t` to
+the characters they name before the file is written. Both were invisible on screen, one was inside a
+character class where a stray CR would not have survived line-ending normalisation, and both were
+caught only by dumping bytes. The rule that already exists for `sed` on UTF-8 source extends to any
+scripted write: verify the bytes, not the rendering.
+
+**Verification.** Backend typecheck clean; 2,724 tests, one failure — the standing `corpus-membership`
+stale sparse-checkout one, green in CI. Frontend lint clean, 471 tests, build compiled. Six mutations,
+each caught by the test named for it: `.size > 0` in the active-filter guard revives the
+empty-list hole; dropping the resolution from the cases CSV breaks all three cross-surface tests;
+dropping the post-read compaction check fails three report tests; taking the newest run regardless of
+year fails five; dropping the frontend row shape-guard fails the picker test. **The Postgres ceiling's
+store contract runs in CI only** — Docker is down on this host and free RAM was 1.3 GB, and the SQLite
+floor cannot catch Pg-only SQL, which is how two defects reached #544. That is the one thing about
+this PR that is not verified locally, and it is stated rather than implied.
+
 ## 2026-09-15 (later still) — the roster gets the two controls the ask was framed around, and two hooks stop taking the page down
 
 #567. The practice described the job on the 2026-09-10 call as one sentence — filter for a provider, a

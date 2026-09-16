@@ -114,11 +114,19 @@ Returns: `employeeExternalId`, `name`, `role`, `site`, `active`, `latestOutcomes
   "ageBand": "65+",
   "sex": "F",
   "payer": ["1", "11"],
+  "listId": "9f1c2b3a-0000-4000-8000-000000000001",
   "limit": 25
 }
 ```
 Valid `status` values: `DUE_SOON`, `OVERDUE`, `MISSING_DATA`. Default limit 25, max 100. Each result
 row carries `providerId` and `payer` alongside the case fields.
+
+`listId` (ADR-082) restricts the answer to an attributed list's MATCHED members — the patients an ACO
+says are this group's. It **exposes nothing this tool's role gate did not already expose**: the tool is
+CASE_MANAGER/ADMIN-restricted and already returns these cases; the argument only narrows which. An
+unknown id is `LIST_NOT_FOUND`, never an unfiltered list, and a list none of whose identifiers
+resolved returns nothing rather than everyone. The resolution goes through the same helper the HTTP
+surfaces use, so a client and a screen cannot disagree about who is in a list.
 
 The panel filters are the same ones the roster and the CSV exports apply, through one predicate
 (`compliance/subject-filters.ts`), so a client and a screen cannot disagree about what a panel is.
