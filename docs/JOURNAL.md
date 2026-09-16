@@ -91,6 +91,20 @@ empty subject list; drop each of the two hook shape-guards. One fixture bug foun
 id that does not normalize sent the page into an infinite render loop through an existing
 URL-reconciliation effect, which is a real trap for the next person writing a roster test.
 
+**Then Codex reviewed the review-fix commit and found two more, both in what that commit had just
+written.** The scope key had gained `page` and not `pageSize`, so the two pagination controls behaved
+differently: select row 40 at size 50, switch to 25, switch back, and the tick returns and is
+postable — `selectedHere` filtered it off screen in between, which is what made it invisible rather
+than absent. And the post-assign reload called the `load()` captured at click time, so a filter or
+page change while the POST was in flight re-ran the OLD query, bumped `reqIdRef` so the newer view's
+own request was discarded as stale, and repainted the previous roster under the new URL and filter
+controls with nothing left to correct it. The reload is now gated on the view still being the one the
+assignment was made in, and the scope key is read from a ref because the closure's copy is precisely
+the one that cannot be trusted there. Final frontend numbers: lint clean, **466 tests**, build
+compiled; two more mutations, each caught. The standing lesson holds a fourth time — **a review round
+is itself a change that needs reviewing**, and the lane that finds the fix's defect is not always the
+lane that found the defect.
+
 ## 2026-09-15 (evening) — the after-numbers for the measure page, and a second window that makes a number worthless
 
 #571 merged as `183105d9` and deployed to both stacks. Measured on the live sandbox at ~19:30Z —
