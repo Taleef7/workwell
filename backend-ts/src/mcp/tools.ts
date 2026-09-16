@@ -29,12 +29,23 @@ import type { JsonRecord } from "./tool-audit.ts";
 import { outcomeForCase } from "../case/case-outcome.ts";
 import { MEASURE_CATALOG } from "../measure/measure-catalog.ts";
 import { latestPopulationSnapshot } from "../program/latest-population.ts";
+import type { SubjectListStore } from "../stores/subject-list-store.ts";
+import { resolveListFilter } from "../compliance/subject-list-filter.ts";
 
 export interface McpToolDeps {
   caseStore: CaseStore;
   outcomeStore: OutcomeStore;
   runStore: RunStore;
   measureStore: MeasureStore;
+  /**
+   * The ACO's attributed lists (ADR-082), for `list_noncompliant`'s `listId` argument.
+   *
+   * Optional so an existing embedding that builds deps by hand keeps compiling; absent means a client
+   * passing `listId` gets LIST_NOT_FOUND rather than an unfiltered work list, which is the same
+   * refusal an unknown list earns. This tool is already CM/ADMIN/MCP_CLIENT-gated, so the argument
+   * exposes nothing the role gate did not.
+   */
+  subjectListStore?: SubjectListStore;
   webChartEnv?: DataSourceEnv;
 }
 
@@ -504,6 +515,16 @@ async function listNoncompliant(args: JsonRecord, deps: McpToolDeps): Promise<un
   if (statusFilter && !NON_COMPLIANT.includes(statusFilter)) {
     return safeError("INVALID_ARGUMENT", "status must be one of: DUE_SOON, OVERDUE, MISSING_DATA");
   }
+  // The ACO's attributed list (ADR-082) — a real predicate site, so it is resolved through the same
+  // helper the HTTP surfaces use. An unknown list errors rather than returning everyone, the leak
+  // guard `measureName` documents below.
+  const listIdArg = args.listId != null ? String(args.listId).trim() : "";
+  if (listIdArg) {
+    if (!deps.subjectListStore) return safeError("LIST_NOT_FOUND", `Subject list not found: ${listIdArg}`);
+    const resolved = await resolveListFilter(deps.subjectListStore, listIdArg);
+    if (!resolved.found) return safeError("LIST_NOT_FOUND", `Subject list not found: ${listIdArg}`);
+    (panelFilters as { listSubjectIds?: ReadonlySet<string> }).listSubjectIds = resolved.subjectIds;
+  }
   const measure = measureNameFilter ? await resolveMeasure(deps, { measureName: measureNameFilter }) : null;
   // Same leak guard as list_cases: an unresolved measure filter must error, not return all cases.
   if (measureNameFilter && !measure) return safeError("MEASURE_NOT_FOUND", `Measure not found: ${measureNameFilter}`);
@@ -685,8 +706,8 @@ export const MCP_TOOLS: McpTool[] = [
   },
   {
     name: "list_noncompliant",
-    description: "List non-compliant open cases filtered by measureName, site, providerId (the PCP's external id, e.g. maui-prov-012), ageBand, sex, payer, and outcome status. Payer is one or more Source of Payment Typology codes (comma list or array); the typology is hierarchical, so Medicare is BOTH \"1\" and \"11\" (managed care) and asking for only one of them silently omits the other. Default limit 25, max 100.",
-    inputSchema: { type: "object", properties: { measureName: { type: "string" }, site: { type: "string" }, providerId: { type: "string" }, ageBand: { type: "string", enum: ["0-17", "18-44", "45-64", "65+"] }, sex: { type: "string", enum: ["F", "M"] }, payer: { type: ["string", "array"], items: { type: "string" }, description: "Source of Payment Typology code(s) — a comma list or an array. Open terminology: an unknown code matches nobody rather than erroring. Medicare is \"1\" + \"11\"." }, status: { type: "string", enum: ["DUE_SOON", "OVERDUE", "MISSING_DATA"] }, limit: { type: "number" } } },
+    description: "List non-compliant open cases filtered by measureName, site, providerId (the PCP's external id, e.g. maui-prov-012), ageBand, sex, payer, an attributed listId, and outcome status. Payer is one or more Source of Payment Typology codes (comma list or array); the typology is hierarchical, so Medicare is BOTH \"1\" and \"11\" (managed care) and asking for only one of them silently omits the other. Default limit 25, max 100.",
+    inputSchema: { type: "object", properties: { measureName: { type: "string" }, site: { type: "string" }, providerId: { type: "string" }, ageBand: { type: "string", enum: ["0-17", "18-44", "45-64", "65+"] }, sex: { type: "string", enum: ["F", "M"] }, payer: { type: ["string", "array"], items: { type: "string" }, description: "Source of Payment Typology code(s) — a comma list or an array. Open terminology: an unknown code matches nobody rather than erroring. Medicare is \"1\" + \"11\"." }, listId: { type: "string", description: "An attributed subject list's id (ADR-082). Restricts the answer to that list's MATCHED members; an unknown id is an error, never an unfiltered list." }, status: { type: "string", enum: ["DUE_SOON", "OVERDUE", "MISSING_DATA"] }, limit: { type: "number" } } },
     roles: [CM, ADMIN],
     sensitivity: "restricted",
     handler: listNoncompliant,

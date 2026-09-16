@@ -11,6 +11,7 @@
  */
 import type { CloudDatabase } from "@mieweb/cloud";
 import { getStores } from "../stores/factory.ts";
+import { listNotFoundBody, withListFilter } from "../compliance/subject-list-filter.ts";
 import { runsCsv, outcomesCsvStream, casesCsv, auditCsvStream } from "../export/export-csv.ts";
 import { subjectFiltersFromQuery, subjectFilterErrorBody, SubjectFilterError } from "../compliance/subject-filters.ts";
 import type { DataSourceEnv } from "../engine/ingress/data-source.ts";
@@ -43,6 +44,13 @@ function subjectFiltersOr400(q: URLSearchParams): ReturnType<typeof subjectFilte
     throw error;
   }
 }
+
+/** The 404 an unknown `?listId=` earns, in the same JSON shape every other surface uses. */
+const listNotFound = (listId: string): Response =>
+  new Response(JSON.stringify(listNotFoundBody(listId)), {
+    status: 404,
+    headers: { "content-type": "application/json" },
+  });
 
 /**
  * Statuses mapping, mirroring the cases worklist: blank/"all"→all, "open"→the ACTIVE set, else the
@@ -86,9 +94,14 @@ export async function handleExports(req: Request, env: ExportsEnv): Promise<Resp
 
   if (pathname === "/api/exports/outcomes") {
     if (!isCsv) return badFormat();
-    const subjectFilters = subjectFiltersOr400(q);
-    if (subjectFilters instanceof Response) return subjectFilters;
+    const parsed = subjectFiltersOr400(q);
+    if (parsed instanceof Response) return parsed;
     const s = await getStores(env);
+    // A CSV under a list that does not exist is the worst version of the silent-filter failure: it
+    // leaves the application and gets forwarded, so an unknown list is a 404 rather than everybody.
+    const listedOutcomes = await withListFilter(s.subjectLists, q, parsed);
+    if (!listedOutcomes.ok) return listNotFound(listedOutcomes.listId);
+    const subjectFilters = listedOutcomes.filters;
     // Streamed + paged (Fable H4) — bounded memory so a seed:scale run's 120k outcomes never
     // materialize at once (parity with the audit-events streaming export below).
     const stream = outcomesCsvStream(s.outcomes, s.runs, q.get("runId") ?? undefined, env, {
@@ -103,9 +116,12 @@ export async function handleExports(req: Request, env: ExportsEnv): Promise<Resp
 
   if (pathname === "/api/exports/cases") {
     if (!isCsv) return badFormat();
-    const subjectFilters = subjectFiltersOr400(q);
-    if (subjectFilters instanceof Response) return subjectFilters;
+    const parsed = subjectFiltersOr400(q);
+    if (parsed instanceof Response) return parsed;
     const s = await getStores(env);
+    const listedCases = await withListFilter(s.subjectLists, q, parsed);
+    if (!listedCases.ok) return listNotFound(listedCases.listId);
+    const subjectFilters = listedCases.filters;
     const caseIds = q.get("caseIds")?.split(",").map((c) => c.trim()).filter(Boolean);
     const csv = await casesCsv(s.cases, s.events, {
       statuses: caseStatuses(q.get("status")),

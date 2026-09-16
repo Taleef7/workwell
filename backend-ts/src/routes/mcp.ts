@@ -67,6 +67,7 @@ async function dispatchCtx(env: McpEnv, auth: McpAuth): Promise<DispatchCtx> {
       outcomeStore: s.outcomes,
       runStore: s.runs,
       measureStore,
+      subjectListStore: s.subjectLists,
       webChartEnv: env,
     },
     events: s.events,

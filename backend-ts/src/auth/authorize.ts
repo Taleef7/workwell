@@ -172,6 +172,14 @@ const RULES: Rule[] = [
   // Both must precede the /api/** catch-alls below, which would otherwise answer first.
   { method: "GET", pattern: rx("/api/panels/**"), access: "AUTHENTICATED" },
   { pattern: rx("/api/panels/**"), access: [CM, A] },
+  // Attributed patient lists (MM-2 PR 3, ADR-082). EVERY method is CM/ADMIN, metadata included — not
+  // split into a GET rule and a write rule the way panels is. A member row is a raw patient
+  // identifier somebody else's system asserted, the list's existence says which patients an ACO
+  // claims, and the report carries names, memberships, providers and payers. The public /sandbox
+  // signs in as a read-only VIEWER that may browse every AUTHENTICATED GET, and on Maui the clinician
+  // seat is a VIEWER too, so leaving the reads to the /api/** catch-all would expose all of it. The
+  // identity routes are restricted for exactly this reason. Must precede the catch-alls below.
+  { pattern: rx("/api/subject-lists/**"), access: [CM, A] },
   { method: "GET", pattern: rx("/api/worklist/**"), access: "AUTHENTICATED" },
   { method: "GET", pattern: rx("/api/**"), access: "AUTHENTICATED" },
   { pattern: rx("/api/**"), access: "AUTHENTICATED" },
