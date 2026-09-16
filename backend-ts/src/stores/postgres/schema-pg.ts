@@ -461,4 +461,69 @@ CREATE TABLE IF NOT EXISTS ${SPIKE_SCHEMA}.panel_assignments (
 -- staff account. It is a scan of a table with one row per provider (~40 at the pilot), so the index is
 -- about intent as much as cost: the column the read filters on is the one that is indexed.
 CREATE INDEX IF NOT EXISTS spike_panel_assignments_assignee_idx ON ${SPIKE_SCHEMA}.panel_assignments (assignee);
+
+-- The ACO's attributed patient list (MM-2 PR 3, ADR-082). The one concrete ask from the 2026-09-09
+-- working session: hand WorkWell the list of patients the ACO attributes to the group, run the
+-- measures over exactly that subset, and get numerator/denominator/exclusions back with patient-level
+-- results. Everything else on this deployment answers "the patients in our directory"; this answers
+-- "the patients somebody else says are ours", and those are different populations.
+--
+-- IMMUTABLE. A re-import is a NEW row with revision+1 under the same name; nothing updates a list or
+-- its members, and the store interface exposes no mutator. That is what makes a report reproducible:
+-- a report is a function of (list revision, run ids), so a list that could be edited underneath one
+-- would make every number ever filed unverifiable. A manual resolution of a non-match is therefore
+-- also a new revision, never an UPDATE — the same rule ADR-022 applies to identity matching.
+--
+-- A list is an ATTRIBUTION someone else asserts. A panel (ADR-080 d6) is WorkWell's own assignment
+-- map and never an attribution; the two must not be conflated, and neither is a denominator by
+-- itself — the denominator is what the measure's own logic computes over the list's members.
+--
+-- OWNER-APPROVED DDL: Taleef explicitly authorized these tables in-session (2026-09-15), conditional
+-- on external review. Additive (CREATE IF NOT EXISTS), reversible (DROP TABLE), no data migration.
+CREATE TABLE IF NOT EXISTS ${SPIKE_SCHEMA}.subject_lists (
+  id           UUID PRIMARY KEY,
+  name         TEXT NOT NULL CHECK (btrim(name) <> ''),
+  -- 1 + max(revision) for this name, allocated under an advisory lock on the lowercased name.
+  revision     INTEGER NOT NULL CHECK (revision > 0),
+  -- Every read filters COMPLETE. An import that dies between the header row and the last member chunk
+  -- therefore leaves nothing visible rather than a list that is silently short — a short attribution
+  -- list reads as a smaller ACO population, which is a wrong number wearing a real list's name.
+  status       TEXT NOT NULL CHECK (status IN ('IMPORTING','COMPLETE')),
+  source       TEXT,
+  note         TEXT,
+  created_by   TEXT NOT NULL,
+  created_at   TIMESTAMPTZ NOT NULL,
+  completed_at TIMESTAMPTZ,
+  UNIQUE (name, revision)
+);
+
+-- One row per DISTINCT trimmed identifier the file carried. NOT_FOUND rows are KEPT, and that is the
+-- point of the table rather than a tolerance: an identifier the directory cannot resolve is the ACO
+-- and the practice disagreeing about who a patient is, which is a finding for the review queue. A
+-- silently dropped row would remove the patient from the denominator and from the evidence that they
+-- were ever claimed.
+--
+-- The resolution and subject_id columns are coupled by a CHECK rather than by convention, so a row
+-- can never claim MATCHED while naming nobody. A second raw identifier resolving to a subject already
+-- MATCHED in the same list is stored AMBIGUOUS with a NULL subject — an alias is a data-quality signal,
+-- never a silent collapse — which is exactly what the partial unique index below enforces.
+CREATE TABLE IF NOT EXISTS ${SPIKE_SCHEMA}.subject_list_members (
+  -- RESTRICT (the default), not CASCADE: no delete path exists, and CASCADE would quietly contradict
+  -- the immutability the whole design rests on.
+  list_id        UUID NOT NULL REFERENCES ${SPIKE_SCHEMA}.subject_lists(id),
+  raw_identifier TEXT NOT NULL CHECK (btrim(raw_identifier) <> '' AND length(raw_identifier) <= 128),
+  subject_id     TEXT,
+  resolution     TEXT NOT NULL CHECK (resolution IN ('MATCHED','NOT_FOUND','AMBIGUOUS')),
+  CHECK ((resolution = 'MATCHED') = (subject_id IS NOT NULL)),
+  PRIMARY KEY (list_id, raw_identifier)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS spike_subject_list_members_subject_uidx
+  ON ${SPIKE_SCHEMA}.subject_list_members (list_id, subject_id) WHERE resolution = 'MATCHED';
+
+-- Covers matchedSubjectIds as an index-only scan: (list_id, resolution) selects, subject_id is
+-- returned from the index. Up to 50,000 rows per report or filter resolution without heap fetches,
+-- which is the read every listId-filtered surface pays.
+CREATE INDEX IF NOT EXISTS spike_subject_list_members_resolution_idx
+  ON ${SPIKE_SCHEMA}.subject_list_members (list_id, resolution, subject_id);
 `;
