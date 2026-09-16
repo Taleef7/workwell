@@ -79,6 +79,18 @@ SQLite floor and the Pg ceiling read the current row and apply the shared pure `
   carries the provenance the caller saw; without it an operator re-asserting the same assignee (which
   makes the row theirs) would be overwritten by a backfill that still matched on the assignee alone.
   A change of source alone is a real change, so an operator can claim a case the panel already placed.
+  **`POST /api/cases/bulk-assign` takes TWO body shapes, and the second names no case at all**
+  (MM-2, 2026-09-15). `{ assignee, caseIds[] }` is the work list's, where every row IS a case.
+  `{ assignee, measureId, subjectIds[] }` is the measure roster's: a roster CELL is an outcome
+  reference (`{ runId, outcomeId }`), not a case, so that page has no case id to send. The server
+  resolves them — the ACTIVE case for each subject in that ONE measure, in a single bounded read —
+  and everything after the resolution is the `caseIds` path unchanged: the same 500 cap, the same
+  assignable-account check, the same compare-and-set, the same `case_actions` and audit rows, the
+  same response shape. `measureId` is REQUIRED and single: a patient row spans every routed measure,
+  so "assign these patients" without one would mean six different pieces of work. Sending both shapes
+  at once is a 400 rather than a guess. A selection where nobody has an active case for that measure
+  answers `assigned: 0` in the success shape — the operator ticked real rows and pressed a real
+  button, and a caller must not parse two shapes to learn that nothing moved.
 - **An OPERATOR's `next_action` is not overwritten by a run that learned nothing new** (ADR-076 d2).
   `cases.next_action_source` records who wrote it: `patchCase` is the operator surface (escalate,
   manual resolve, outreach) and marks `OPERATOR`; `upsertFromOutcome` marks `SYSTEM`. **Rerun-to-verify

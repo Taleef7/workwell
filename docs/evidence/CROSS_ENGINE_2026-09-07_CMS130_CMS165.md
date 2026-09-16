@@ -61,8 +61,21 @@ first six months of the period. `QICoreCommon.toInterval` over a `Condition` who
 are absent or open-ended is the first place to look, and the discriminating experiment is a single case
 with an explicit `onsetDateTime` well inside the period.
 
-**Until that is answered, CMS165 has no cross-engine number**, and none is quoted anywhere. It is the
-one pilot measure that must not be routed for an unrelated reason as well (ADR-076 d1 and issue #533).
+**Until that is answered, CMS165 has no cross-engine number**, and none is quoted anywhere. It also
+carries a separate blocker for an unrelated reason (ADR-076 d1 and issue #533) — which gates the PHI
+phase, NOT the sandbox: the owner routed cms165 on Maui on 2026-09-08 under ADR-078, and this
+sentence predates that. Neither blocker is a runtime defect; the measure passes its own MADiE deck
+68/68. *(Qualified 2026-09-15 — the original read as though cms165 were unrouted anywhere.)*
+
+## Reproduced 2026-09-15
+
+Both sweeps were dispatched again on 2026-09-15, eight days later, on fresh containers from the same
+credentialed workflow — GitHub Actions runs **35015606977** (cms130) and **35015954837** (cms165), on
+commit `183105d9`. **Both returned exactly the numbers above** — CMS130 63/64 and CMS165 11/68,
+all 64 and all 68 cases evaluated cleanly, CMS130 loading 31/31 completed value sets and CMS165
+33/33. Nothing here changed; the reproduction is recorded because a figure that only ever appeared
+once is a figure nobody has tested, and because CMS165's 11/68 is the kind of result that invites
+"it was probably a bad run". It was not a bad run.
 
 ## Running total
 
