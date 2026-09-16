@@ -35,6 +35,7 @@
     "gen-cql": "node --import tsx scripts/gen-cql.mjs",
     "generate:sql": "tsx src/engine/cql/codegen/generate-sql-bin.ts",
     "test": "node --import tsx --test \"src/**/*.test.ts\" \"packages/*/src/**/*.test.ts\" \"scripts/**/*.test.mjs\" \"scripts/**/*.test.ts\"",
+    "test:shards:verify": "node scripts/test-shards.mjs --verify 3",
     "build:packages": "node scripts/build-packages.mjs",
     "verify:publish": "node scripts/verify-publish.mjs",
     "openapi:emit": "node --import tsx scripts/openapi-emit.mjs",
