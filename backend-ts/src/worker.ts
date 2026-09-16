@@ -51,7 +51,7 @@ import { handleMcp } from "./routes/mcp.ts";
 import { handleAuditor } from "./routes/auditor.ts";
 import { createAuthHandler, type AuthHandler, type RefreshTokenRevocation } from "./routes/auth.ts";
 import { createJwt, type JwtService } from "./auth/jwt.ts";
-import { authorize, extractPrincipal } from "./auth/authorize.ts";
+import { authorize, extractPrincipal, listFilterAuthorized } from "./auth/authorize.ts";
 import { isDemoAccountRefusedOnProfile } from "./auth/demo-users.ts";
 import { assertSafeStartup, type StartupEnv } from "./config/startup-safety.ts";
 import { parseAllowedOrigins, preflightResponse, withCors } from "./config/cors.ts";
@@ -253,6 +253,20 @@ async function route(req: Request, env: Env, ctx: CloudExecutionContext): Promis
     }
     if (principal?.email) actor = principal.email;
     principalRole = principal?.role ?? null;
+    // `?listId=` narrows a read to an ACO's attributed membership, which is the same disclosure the
+    // CM/ADMIN gate on /api/subject-lists exists to make — so it carries the same gate, once, here
+    // (ADR-082). Without this the gate reads as present and cannot fire for the widest read: a VIEWER
+    // with a list id could take the whole membership out of /api/exports/cases as a CSV.
+    if (new URL(req.url).searchParams.has("listId") && !listFilterAuthorized(principalRole)) {
+      return json(
+        {
+          error: "forbidden",
+          parameter: "listId",
+          message: "narrowing a read to an attributed list requires a case-manager or admin seat",
+        },
+        403,
+      );
+    }
   }
 
   // Auth — login/refresh/logout, JVM-free JWT + PBKDF2 (#105).

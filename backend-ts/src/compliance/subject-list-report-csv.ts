@@ -95,9 +95,11 @@ function rowCells(
     csvCell(measure?.measurementPeriod?.start ?? ""),
     csvCell(measure?.measurementPeriod?.end ?? ""),
   ];
+  // Neutralised too: on a live directory these are somebody else's strings, not ours. A payer
+  // typology code cannot lead with a formula character, but a provider id from an external system can.
   const tail = [
-    csvCell(row.rowStatus === "NOT_MATCHED" ? "" : (profile?.providerId ?? "")),
-    csvCell(row.rowStatus === "NOT_MATCHED" ? "" : (profile?.payer ?? "")),
+    csvTextCell(row.rowStatus === "NOT_MATCHED" ? "" : (profile?.providerId ?? "")),
+    csvTextCell(row.rowStatus === "NOT_MATCHED" ? "" : (profile?.payer ?? "")),
   ];
   // evaluatedAt, rate, the five populations, status, outOfPopulation, evaluationError.
   const EVALUATION_COLUMNS = 10;

@@ -1661,7 +1661,8 @@ report over.
 **What to check after the first deploy.** Sign in as a CASE_MANAGER, open `/lists`, import three
 corpus ids (one of them nonexistent, e.g. `pat-99999`) and confirm the counts read 2 matched / 1 not
 found; then paste one `emp-001` and confirm the whole upload is refused with nothing written. Confirm
-a VIEWER seat gets 403 on `/api/subject-lists` — the reads are gated too, unlike panels.
+a VIEWER seat gets 403 on `/api/subject-lists` — the reads are gated too, unlike panels — and 403 on
+`/api/exports/cases?format=csv&listId=<any-uuid>`, which is the read that gate exists for.
 
 ## Database compute cost (read before changing any polling interval)
 

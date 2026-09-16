@@ -155,8 +155,9 @@ export class SqliteSubjectListStore implements SubjectListStore {
     const placeholders = listIds.map(() => "?").join(", ");
     const { results } = await this.db
       .prepare(
-        `SELECT list_id, resolution, COUNT(*) AS n FROM subject_list_members
-         WHERE list_id IN (${placeholders}) GROUP BY list_id, resolution`,
+        `SELECT m.list_id AS list_id, m.resolution AS resolution, COUNT(*) AS n FROM subject_list_members m
+         JOIN subject_lists l ON l.id = m.list_id AND l.status = 'COMPLETE'
+         WHERE m.list_id IN (${placeholders}) GROUP BY m.list_id, m.resolution`,
       )
       .bind(...listIds)
       .all<{ list_id: string; resolution: string; n: number }>();
@@ -172,17 +173,21 @@ export class SqliteSubjectListStore implements SubjectListStore {
     const binds: unknown[] = [listId];
     let filter = "";
     if (options.resolution) {
-      filter = ` AND resolution = ?`;
+      filter = ` AND m.resolution = ?`;
       binds.push(options.resolution);
     }
+    // Joined to the header, like every other read here — the interface says every read filters
+    // COMPLETE, and "safe because every caller checks first" is a claim about callers.
+    const complete = `JOIN subject_lists l ON l.id = m.list_id AND l.status = 'COMPLETE'`;
     const { results: countRows } = await this.db
-      .prepare(`SELECT COUNT(*) AS n FROM subject_list_members WHERE list_id = ?${filter}`)
+      .prepare(`SELECT COUNT(*) AS n FROM subject_list_members m ${complete} WHERE m.list_id = ?${filter}`)
       .bind(...binds)
       .all<{ n: number }>();
     const { results } = await this.db
       .prepare(
-        `SELECT raw_identifier, subject_id, resolution FROM subject_list_members
-         WHERE list_id = ?${filter} ORDER BY raw_identifier ASC LIMIT ? OFFSET ?`,
+        `SELECT m.raw_identifier AS raw_identifier, m.subject_id AS subject_id, m.resolution AS resolution
+         FROM subject_list_members m ${complete}
+         WHERE m.list_id = ?${filter} ORDER BY m.raw_identifier ASC LIMIT ? OFFSET ?`,
       )
       .bind(...binds, options.limit, options.offset)
       .all<MemberRow>();

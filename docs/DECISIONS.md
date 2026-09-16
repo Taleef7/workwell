@@ -103,9 +103,20 @@ is serialised, because a streamed CSV cannot change its status after the first b
 
 A list member the run never evaluated is a gap in the evidence, not an exclusion. Folding them into a
 denominator would let a SMALLER run produce a HIGHER score, which is the one direction a quality
-number must never move by accident. Two reconciliations are stated and tested:
+number must never move by accident. Two identities are stated and tested, and they hold for EVERY
+input including a measure with no usable run:
 `matchedSubjects = distinctSubjectsSeen + missingFromRun`, and
 `distinctSubjectsSeen = scoredSubjects + unmeasured + evaluationErrors + outOfPopulation`.
+
+**The four not-scored buckets are disjoint BY CONSTRUCTION, not by assumption.**
+`createRateAggregator`'s own `unmeasured` is a SUPERSET of its `evaluationErrors`, and
+`outcomes.out_of_population` is an independent column that can be true on a row the aggregator also
+calls unmeasured — so deriving these by subtraction double-counts every error and can make
+`scoredSubjects` NEGATIVE. Each seen subject is classified into exactly one bucket in a stated order
+(error, then out-of-population, then in-no-rate, then scored), so the identities hold on a
+PARTIAL_FAILURE run — an ordinary night on the pilot rather than a corner case. The first version did
+not, and the test that "pinned" the identity used a fixture with all three counts at zero, which
+passes for any implementation.
 
 The score stays `numer / (denom − denex − denexcep)` — what `createRateAggregator` already computes
 and what the eCQM proportion convention specifies. `status=EXCLUDED` is the workflow vocabulary;

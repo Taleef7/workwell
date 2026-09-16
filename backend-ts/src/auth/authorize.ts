@@ -190,6 +190,25 @@ export interface AuthzDecision {
   status?: 401 | 403;
 }
 
+/**
+ * Who may narrow a read to an attributed list — `?listId=` (ADR-082).
+ *
+ * **This exists because the CM/ADMIN gate on `/api/subject-lists/**` was otherwise a guard that could
+ * not fire for the read that matters most.** Five of the six surfaces that accept `?listId=` are
+ * AUTHENTICATED (the roster, the work list, the cases route and both CSV exports), so a VIEWER holding
+ * a list id could ask `GET /api/exports/cases?format=csv&listId=<uuid>` and receive the membership —
+ * names, provider, payer and per-measure status — which is strictly MORE than the members endpoint the
+ * gate protects. And the id is not a secret by construction: it sits in the query string of every
+ * filtered screen, so it reaches shareable URLs, browser history and access logs.
+ *
+ * Enforced once in the worker rather than per route, for the reason `compliance/subject-list-filter.ts`
+ * gives for resolving the parameter in one place: six copies of an authorization rule is five chances
+ * for one of them to be forgotten.
+ */
+export function listFilterAuthorized(role: string | null | undefined): boolean {
+  return role === CM || role === A;
+}
+
 export function authorize(method: string, pathname: string, principal: JwtPrincipal | null): AuthzDecision {
   for (const rule of RULES) {
     if (rule.method && rule.method !== method) continue;

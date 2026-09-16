@@ -34,7 +34,7 @@ test("the sandbox namespace admits BOTH corpus spellings — the 48 fixtures and
   // The fixture prefix is three digits (pat-001) and the generated corpus is five (pat-00049). A gate
   // written for the generated form alone would refuse the first 48 real patients in the sandbox: a
   // control that rejects exactly the data it exists to admit.
-  const maui = sandboxIdentifierPattern("maui");
+  const maui = sandboxIdentifierPattern("maui")!;
   assert.ok(maui.test("pat-001"), "the first fixture patient conforms");
   assert.ok(maui.test("pat-048"), "the last fixture patient conforms");
   assert.ok(maui.test("pat-00049"), "the first generated patient conforms");
@@ -44,19 +44,27 @@ test("the sandbox namespace admits BOTH corpus spellings — the 48 fixtures and
   assert.ok(maui.test("pat-99999"));
 });
 
-test("the DEFAULT profile has its own namespace — the occupational roster is emp-NNN, not pat-", () => {
+test("the DEFAULT profile admits BOTH of its tenants' rosters, and an unknown profile has NO namespace", () => {
   // One hardcoded pattern would have refused every legitimate identifier on the TWH deployment while
-  // reading as a working gate. The two profiles are different synthetic rosters; the gate's job on
-  // each is the same one.
-  const dflt = sandboxIdentifierPattern("default");
+  // reading as a working gate. And the default directory spans two tenants: omitting `ihn-emp-`
+  // refused fifty synthetic members of the very directory this gate resolves against, which is the
+  // same defect as refusing the 48 Maui fixtures.
+  const dflt = sandboxIdentifierPattern("default")!;
   assert.ok(dflt.test("emp-001"));
   assert.ok(dflt.test("emp-00150"));
+  assert.ok(dflt.test("ihn-emp-001"), "the IHN roster is in this deployment's directory too");
+  assert.ok(dflt.test("ihn-emp-050"));
   assert.equal(dflt.test("pat-001"), false, "a corpus id is outside the occupational namespace");
-  assert.equal(sandboxIdentifierPattern("twh"), SANDBOX_IDENTIFIER_PATTERNS.default, "an unknown profile is not Maui");
+  assert.equal(dflt.test("ihn-001"), false, "and a near-miss is not admitted by accident");
+  // NULL, never another profile's pattern. A fallback is a guess about somebody else's directory: it
+  // would either refuse every legitimate identifier on a new profile or admit a set nobody reviewed.
+  assert.equal(sandboxIdentifierPattern("some-future-profile"), null);
+  assert.equal(sandboxIdentifierPattern("twh"), null, "even a name that looks familiar has no namespace");
+  assert.equal(SANDBOX_IDENTIFIER_PATTERNS.default.source, dflt.source);
 });
 
 test("the sandbox namespace refuses the shapes a REAL attribution file carries", () => {
-  const maui = sandboxIdentifierPattern("maui");
+  const maui = sandboxIdentifierPattern("maui")!;
   const outside = ["emp-001", "MRN-40182", "1EG4-TE5-MK73", "Ari Wren", "pat-", "pat-abcde", "wc|991", "PAT-00001"];
   for (const id of outside) assert.equal(maui.test(id), false, `${id} must not conform`);
   assert.equal(countOutsideSandboxNamespace(["pat-001", ...outside], maui), outside.length);

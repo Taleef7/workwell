@@ -429,11 +429,11 @@ CREATE INDEX IF NOT EXISTS panel_assignments_assignee_idx ON panel_assignments (
    (Block comment: this DDL is newline-flattened, so a line comment would swallow the rest of it.) */
 CREATE TABLE IF NOT EXISTS subject_lists (
   id           TEXT PRIMARY KEY,
-  name         TEXT NOT NULL CHECK (trim(name) <> ''),
+  name         TEXT NOT NULL CHECK (trim(name) <> '' AND length(name) <= 200),
   revision     INTEGER NOT NULL CHECK (revision > 0),
   status       TEXT NOT NULL CHECK (status IN ('IMPORTING','COMPLETE')),
-  source       TEXT,
-  note         TEXT,
+  source       TEXT CHECK (source IS NULL OR length(source) <= 200),
+  note         TEXT CHECK (note IS NULL OR length(note) <= 200),
   created_by   TEXT NOT NULL,
   created_at   TEXT NOT NULL,
   completed_at TEXT,

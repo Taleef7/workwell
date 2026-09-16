@@ -193,6 +193,55 @@ test("an unknown list is a 404 on every read, and a malformed id is a 404 rather
   assert.equal((await get("/api/subject-lists/not-a-uuid/members?limit=999999"))!.status, 404);
 });
 
+test("operator metadata is length-capped — the one channel the namespace gate does not cover", async () => {
+  // `name` and `source` are copied into the SUBJECT_LIST_IMPORTED audit payload, and audit_events is
+  // exported wholesale. An import called "ACO attribution — J. Smith MRN 88123456" would put exactly
+  // the data the identifier gate refuses into the database by the side door. A bound on blast radius,
+  // not a claim that free text is safe.
+  const long = "x".repeat(201);
+  for (const [field, body] of [
+    ["name", { name: long, identifiers: ["emp-006"] }],
+    ["source", { name: "ok", source: long, identifiers: ["emp-006"] }],
+    ["note", { name: "ok", note: long, identifiers: ["emp-006"] }],
+  ] as const) {
+    const res = (await post(body))!;
+    assert.equal(res.status, 400, field);
+    assert.equal(((await res.json()) as { parameter: string }).parameter, field);
+  }
+  // 200 exactly is accepted — the cap is the documented number, not an approximation of it.
+  assert.equal((await post({ name: "x".repeat(200), identifiers: ["emp-006"] }))!.status, 201);
+});
+
+test("an upload that DECLARES more than the cap is refused before its body is read", async () => {
+  // The first cut buffered the whole body and then measured it, so an oversized upload reached the
+  // worker's memory before being refused. A declared length is checked first; the post-read check
+  // stays for a chunked request that declares none.
+  let bodyRead = false;
+  const req = new Request("http://x/api/subject-lists", {
+    method: "POST",
+    headers: { "content-type": "application/json", "content-length": String(3 * 1024 * 1024) },
+    body: JSON.stringify({ name: "huge", identifiers: ["emp-006"] }),
+  });
+  const guarded = new Proxy(req, {
+    get(target, prop) {
+      if (prop === "text") {
+        return async () => {
+          bodyRead = true;
+          return target.text();
+        };
+      }
+      // The receiver is the TARGET, not the proxy: `Request`'s accessors read private fields, and
+      // routing them through the proxy throws "Cannot read private member #state".
+      const value = Reflect.get(target, prop, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+  const res = (await handleSubjectLists(guarded as Request, env as never, LEAD))!;
+  assert.equal(res.status, 413);
+  assert.equal(((await res.json()) as { error: string }).error, "payload_too_large");
+  assert.equal(bodyRead, false, "the body was refused, not buffered");
+});
+
 test("a live-directory deployment cannot import at all, and the body is never read", async () => {
   // The live directory is a worker-local last-known registry that also fabricates profiles for
   // persisted `wc|` ids, so matching against it would be silently incomplete rather than merely
@@ -202,17 +251,32 @@ test("a live-directory deployment cannot import at all, and the body is never re
     WORKWELL_WEBCHART_BASE_URL: "https://example.invalid/fhir",
     WORKWELL_WEBCHART_API_KEY: "k",
   };
-  const res = (await handleSubjectLists(
-    new Request("http://x/api/subject-lists", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name: "live", identifiers: ["emp-006"] }),
-    }),
-    liveEnv as never,
-    LEAD,
-  ))!;
+  // The title used to be the only thing asserting "the body is never read" — moving the gate below
+  // `await req.text()` left the test green. It is asserted now.
+  let bodyRead = false;
+  const req = new Request("http://x/api/subject-lists", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ name: "live", identifiers: ["emp-006"] }),
+  });
+  const guarded = new Proxy(req, {
+    get(target, prop) {
+      if (prop === "text") {
+        return async () => {
+          bodyRead = true;
+          return target.text();
+        };
+      }
+      // The receiver is the TARGET, not the proxy: `Request`'s accessors read private fields, and
+      // routing them through the proxy throws "Cannot read private member #state".
+      const value = Reflect.get(target, prop, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+  const res = (await handleSubjectLists(guarded as Request, liveEnv as never, LEAD))!;
   assert.equal(res.status, 403);
   assert.equal(((await res.json()) as { error: string }).error, "not_enabled_on_this_deployment");
+  assert.equal(bodyRead, false, "the identifiers never entered the process");
 });
 
 test("the route declines paths it does not own, so the worker chain continues", async () => {

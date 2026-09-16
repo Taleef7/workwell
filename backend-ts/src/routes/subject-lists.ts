@@ -56,6 +56,11 @@ const json = (data: unknown, status = 200): Response =>
 
 const RESOLUTIONS: readonly SubjectListResolution[] = ["MATCHED", "NOT_FOUND", "AMBIGUOUS"];
 const MEMBERS_PAGE_MAX = 500;
+/** `name`, `source` and `note` — operator prose, not identifiers. Mirrored by a CHECK in both schemas. */
+export const MAX_METADATA_LENGTH = 200;
+
+const tooLarge = (): Response =>
+  json({ error: "payload_too_large", message: `the upload must be at most ${MAX_IMPORT_BYTES} bytes` }, 413);
 
 export async function handleSubjectLists(
   req: Request,
@@ -183,15 +188,15 @@ async function importList(req: Request, env: SubjectListsEnv, actor: string): Pr
   const contentType = (req.headers.get("content-type") ?? "").toLowerCase();
   const isText = contentType.startsWith("text/plain");
 
+  // Checked BEFORE the body is read where the client declares a length, so an oversized upload is
+  // refused without buffering it into the worker. The post-read check stays as the backstop for a
+  // chunked request that declares none — byte length, not character count, since a cap measured in
+  // UTF-16 units would admit a larger payload than it names for any file with non-ASCII in it.
+  const declared = Number(req.headers.get("content-length") ?? "");
+  if (Number.isFinite(declared) && declared > MAX_IMPORT_BYTES) return tooLarge();
+
   const raw = await req.text();
-  // Byte length, not character count: a 2 MB cap that measured UTF-16 units would admit a larger
-  // payload than it names for any file with non-ASCII in it.
-  if (new TextEncoder().encode(raw).length > MAX_IMPORT_BYTES) {
-    return json(
-      { error: "payload_too_large", message: `the upload must be at most ${MAX_IMPORT_BYTES} bytes` },
-      413,
-    );
-  }
+  if (new TextEncoder().encode(raw).length > MAX_IMPORT_BYTES) return tooLarge();
 
   let name = "";
   let source: string | null = null;
@@ -222,12 +227,39 @@ async function importList(req: Request, env: SubjectListsEnv, actor: string): Pr
   if (!name) {
     return json({ error: "invalid_request", parameter: "name", message: "name is required" }, 400);
   }
-  if (!parsed.ok) return json(parsed.failure, parsed.failure.error === "payload_too_large" ? 413 : 400);
+  // The operator's own text is the one channel into the database the namespace gate does not cover —
+  // and `name` and `source` are copied into the audit payload, which is exported wholesale. An import
+  // called "ACO attribution — J. Smith MRN 88123456" would put exactly the data the gate refuses into
+  // Neon by the side door. Capped here and by a CHECK in both schemas, so the validator and the
+  // database agree; it is a bound on blast radius, not a claim that free text is safe.
+  for (const [parameter, value] of [["name", name], ["source", source], ["note", note]] as const) {
+    if (value && value.length > MAX_METADATA_LENGTH) {
+      return json(
+        {
+          error: "invalid_request",
+          parameter,
+          message: `${parameter} must be at most ${MAX_METADATA_LENGTH} characters`,
+        },
+        400,
+      );
+    }
+  }
+  if (!parsed.ok) return json(parsed.failure, 400);
 
-  const outside = countOutsideSandboxNamespace(
-    parsed.value.identifiers,
-    sandboxIdentifierPattern(DEPLOYMENT_PROFILE.id),
-  );
+  const namespace = sandboxIdentifierPattern(DEPLOYMENT_PROFILE.id);
+  if (!namespace) {
+    // A deployment profile with no namespace recorded refuses outright rather than borrowing another
+    // profile's. Reachable only by adding a profile without adding its pattern, which is exactly when
+    // a silent guess would be worst.
+    return json(
+      {
+        error: "not_enabled_on_this_deployment",
+        message: `no sandbox identifier namespace is recorded for deployment profile "${DEPLOYMENT_PROFILE.id}"`,
+      },
+      403,
+    );
+  }
+  const outside = countOutsideSandboxNamespace(parsed.value.identifiers, namespace);
   if (outside > 0) {
     // The COUNT, never the values. Refusing exists so the identifiers are not persisted, and an error
     // body is logged and kept by the browser — echoing them back would persist them by another route.

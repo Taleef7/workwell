@@ -262,7 +262,7 @@ test("compaction is per MEASURE: one exposed run does not withhold the other mea
   });
   assert.equal(all.ok, false);
   assert.equal((all as { status: number }).status, 409);
-  assert.equal((all as { body: { error: string } }).body.error, "run_compacted");
+  assert.equal((all as unknown as { body: { error: string } }).body.error, "run_compacted");
 });
 
 test("a compaction intent landing MID-REPORT refuses, rather than serving a truncated 200", async () => {
@@ -291,7 +291,7 @@ test("a row whose evidence names a DIFFERENT measurement period refuses the repo
   });
   assert.equal(result.ok, false);
   assert.equal((result as { status: number }).status, 409);
-  assert.equal((result as { body: { error: string } }).body.error, "period_mismatch");
+  assert.equal((result as unknown as { body: { error: string } }).body.error, "period_mismatch");
 });
 
 test("two rows for one subject collapse to the NEWEST, whatever order the store returned them", async () => {
@@ -336,6 +336,118 @@ test("an unknown list is a 404 before any evidence is read", async () => {
   const result = await subjectListReport(deps, "22222222-2222-4222-8222-222222222222", 2027, ["cms122"]);
   assert.equal(result.ok, false);
   assert.equal((result as { status: number }).status, 404);
+});
+
+
+test("the four not-scored buckets are DISJOINT, so the reconciliation holds with errors in the run", async () => {
+  // The defect the first cut shipped: `createRateAggregator`'s `unmeasured` is a SUPERSET of its
+  // `evaluationErrors` (it starts the count at the error count), so subtracting both from the subject
+  // count double-counted every error — and the test that "pinned" the identity used a fixture with
+  // zero errors, zero unmeasured and zero out-of-population, which makes it `2 === 2 + 0 + 0 + 0` and
+  // passes for any implementation. PARTIAL_FAILURE runs are ordinary on the pilot.
+  const result = await runReport({
+    members: [
+      { rawIdentifier: "pat-001", subjectId: "pat-001", resolution: "MATCHED" },
+      { rawIdentifier: "pat-002", subjectId: "pat-002", resolution: "MATCHED" },
+      { rawIdentifier: "pat-003", subjectId: "pat-003", resolution: "MATCHED" },
+      { rawIdentifier: "pat-004", subjectId: "pat-004", resolution: "MATCHED" },
+    ],
+    rows: [
+      row("pat-001", official({ ipp: true, denom: true, numer: true, denex: false, denexcep: false })),
+      row("pat-002", { evaluationError: "engine threw", message: "boom" }, { status: "MISSING_DATA" }),
+      row("pat-003", official({ ipp: false, denom: false, numer: false, denex: false, denexcep: false }), {
+        status: "MISSING_DATA",
+        outOfPopulation: true,
+      }),
+      // Not in the run at all — pat-004 is missingFromRun.
+    ],
+  });
+  assert.equal(result.ok, true);
+  const entry = (result as { report: import("./subject-list-report.ts").SubjectListReport }).report.measures[0]!;
+  assert.equal(entry.distinctSubjectsSeen, 3);
+  assert.equal(entry.missingFromRun, 1);
+  assert.equal(entry.evaluationErrors, 1);
+  assert.equal(entry.outOfPopulation, 1);
+  assert.equal(entry.scoredSubjects, 1, "one subject was actually scored");
+  assert.equal(
+    entry.distinctSubjectsSeen,
+    entry.scoredSubjects + entry.unmeasured + entry.evaluationErrors + entry.outOfPopulation,
+    "the identity holds WITH errors present, which is what the first version could not do",
+  );
+  assert.equal(entry.matchedSubjects, entry.distinctSubjectsSeen + entry.missingFromRun);
+});
+
+test("scoredSubjects cannot go negative when one row is both out of population and an error", async () => {
+  // `outcomes.out_of_population` is an independently persisted column; nothing stops it being true on
+  // a row whose evidence is an evaluation error. Subtracting both from the subject count gave -1,
+  // served to the ACO as JSON. Classifying each row into ONE bucket makes that unreachable.
+  const result = await runReport({
+    members: [{ rawIdentifier: "pat-001", subjectId: "pat-001", resolution: "MATCHED" }],
+    rows: [
+      row("pat-001", { evaluationError: "engine threw", message: "boom" }, {
+        status: "MISSING_DATA",
+        outOfPopulation: true,
+      }),
+    ],
+  });
+  const entry = (result as { report: import("./subject-list-report.ts").SubjectListReport }).report.measures[0]!;
+  assert.ok(entry.scoredSubjects >= 0, `scoredSubjects must not be negative, got ${entry.scoredSubjects}`);
+  assert.equal(entry.scoredSubjects, 0);
+  // An error is an error FIRST: no engine spoke for the subject, so nothing else about it is known.
+  assert.equal(entry.evaluationErrors, 1);
+  assert.equal(entry.outOfPopulation, 0);
+  assert.equal(
+    entry.distinctSubjectsSeen,
+    entry.scoredSubjects + entry.unmeasured + entry.evaluationErrors + entry.outOfPopulation,
+  );
+});
+
+test("a measure with NO usable run still satisfies matchedSubjects = seen + missingFromRun", async () => {
+  // §6.6 states that identity unconditionally, so it has to hold for the entries a reader is most
+  // likely to be checking: the ones with no numbers. A measure that saw nobody is missing everybody.
+  const result = await runReport({ runs: [{ runId: "run-2026", startedAt: "2026-12-31T00:00:00.000Z", year: 2026 }] }, 2027);
+  const entry = (result as { report: import("./subject-list-report.ts").SubjectListReport }).report.measures[0]!;
+  assert.equal(entry.compactionStatus, "no_run");
+  assert.equal(entry.matchedSubjects, entry.distinctSubjectsSeen + entry.missingFromRun);
+  assert.equal(entry.missingFromRun, entry.matchedSubjects);
+});
+
+test("the run search is scoped to the YEAR, so a year of newer nightlies cannot hide it", async () => {
+  // The first cut took the twelve most recent runs outright, which on a nightly deployment is twelve
+  // DAYS: by mid-January a PY2027 report answered `no_completed_population_run_for_year` while the
+  // year's runs sat uncompacted in the table. The window is the mechanism; the count is not.
+  const manyNewer = Array.from({ length: 30 }, (_, i) => ({
+    runId: `run-2028-${i}`,
+    startedAt: `2028-02-${String(i + 1).padStart(2, "0")}T00:00:00.000Z`,
+    year: 2028,
+  }));
+  const { deps } = fakeDeps({
+    runs: [...manyNewer, { runId: "run-2027", startedAt: "2027-12-31T00:00:00.000Z", year: 2027 }],
+    rows: [row("pat-001", official({ ipp: true, denom: true, numer: true, denex: false, denexcep: false }), { runId: "run-2027" })],
+  });
+  const result = await subjectListReport(deps, LIST.id, 2027, ["cms122"], () => "x");
+  assert.equal(result.ok, true);
+  const entry = (result as { report: import("./subject-list-report.ts").SubjectListReport }).report.measures[0]!;
+  assert.equal(entry.runId, "run-2027", "thirty newer nightlies do not hide the year's run");
+});
+
+test("the CSV carries the identifier the ACO SENT, not the subject id we resolved it to", async () => {
+  // Equal today, because matching is exact `externalId`. The moment the format changes — name+DOB, an
+  // MBI, the seam `subject-list-import.ts` names — this is the only column that lets the ACO
+  // reconcile the file they sent against the file they get back.
+  const result = await runReport({
+    members: [
+      { rawIdentifier: "MBI-1EG4TE5MK73", subjectId: "pat-001", resolution: "MATCHED" },
+      { rawIdentifier: "MBI-9XY2QW1ZZ08", subjectId: "pat-009", resolution: "MATCHED" },
+    ],
+    rows: [row("pat-001", official({ ipp: true, denom: true, numer: true, denex: false, denexcep: false }))],
+  });
+  const report = (result as { report: import("./subject-list-report.ts").SubjectListReport }).report;
+  const evaluated = report.rows.find((r) => r.rowStatus === "EVALUATED")!;
+  const missing = report.rows.find((r) => r.rowStatus === "MISSING_FROM_RUN")!;
+  assert.equal(evaluated.rawIdentifier, "MBI-1EG4TE5MK73");
+  assert.equal(evaluated.subjectId, "pat-001", "and the resolved id is still carried, in its own column");
+  assert.equal(missing.rawIdentifier, "MBI-9XY2QW1ZZ08", "the unevaluated member too");
 });
 
 // ---- the CSV contract (DATA_MODEL_CONTRACTS §6.6) ---------------------------------------------

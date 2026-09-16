@@ -3118,6 +3118,40 @@ export function subjectListStoreContract(label: string, freshStore: () => Promis
     );
   });
 
+  test(`[${label}] subject lists: the DATABASE caps the operator's own text as well as the identifiers`, async () => {
+    // The identifier namespace gate does not cover `name`/`source`/`note`, and `name` and `source` are
+    // copied into an audit payload that is exported wholesale — so the cap is in the schema too, not
+    // only in the route's validator. A validator-only rule is a rule a second caller can skip.
+    const store = await freshStore();
+    const long = "x".repeat(201);
+    await assert.rejects(create(store, { name: long, members: [member("x", "x")] }));
+    await assert.rejects(create(store, { source: long, members: [member("x", "x")] }));
+    await assert.rejects(create(store, { note: long, members: [member("x", "x")] }));
+    // Exactly at the cap is accepted — the number is the documented one, not an approximation.
+    const ok = await create(store, { name: "x".repeat(200), members: [member("x", "x")] });
+    assert.equal(ok.name.length, 200);
+  });
+
+  test(`[${label}] subject lists: an in-flight import's members are invisible to EVERY read, not just getList`, async () => {
+    // `getList`, `listLists` and `matchedSubjectIds` filtered COMPLETE; `listMembers` and
+    // `countMembers` did not, and were safe only because every route calls `getList` first. That is a
+    // claim about callers rather than about the store, and the interface says every read filters.
+    const store = await freshStore();
+    const id = crypto.randomUUID();
+    await assert.rejects(
+      create(store, {
+        id,
+        members: [member("pat-00001", "pat-00001"), member("pat-99999")],
+        beforeComplete: async () => {
+          throw new Error("audit write failed");
+        },
+      }),
+      /audit write failed/,
+    );
+    assert.deepEqual(await store.listMembers(id, { limit: 10, offset: 0 }), { members: [], total: 0 });
+    assert.equal((await store.countMembers([id])).size, 0);
+  });
+
   test(`[${label}] subject lists: the DATABASE refuses a blank name and an unknown resolution`, async () => {
     const store = await freshStore();
     await assert.rejects(create(store, { name: "   ", members: [member("x", "x")] }));

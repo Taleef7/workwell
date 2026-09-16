@@ -80,12 +80,55 @@ character class where a stray CR would not have survived line-ending normalisati
 caught only by dumping bytes. The rule that already exists for `sed` on UTF-8 source extends to any
 scripted write: verify the bytes, not the rendering.
 
-**Verification.** Backend typecheck clean; 2,724 tests, one failure — the standing `corpus-membership`
-stale sparse-checkout one, green in CI. Frontend lint clean, 471 tests, build compiled. Six mutations,
-each caught by the test named for it: `.size > 0` in the active-filter guard revives the
-empty-list hole; dropping the resolution from the cases CSV breaks all three cross-surface tests;
-dropping the post-read compaction check fails three report tests; taking the newest run regardless of
-year fails five; dropping the frontend row shape-guard fails the picker test. **The Postgres ceiling's
+**The review round found a hole I had built, and it is the one worth writing down.** Every method on
+`/api/subject-lists/**` is CM/ADMIN, and the rule's own comment says why: the list's existence says
+which patients an ACO claims. But FIVE of the six surfaces that accept `?listId=` are AUTHENTICATED,
+so a read-only VIEWER holding a list id could ask `GET /api/exports/cases?format=csv&listId=<uuid>`
+and receive the whole membership — names, provider, payer, per-measure status — which is strictly MORE
+than the members endpoint the gate protects. And the id is not a secret by construction: it sits in
+the query string of every filtered screen, so it reaches shareable URLs, browser history and access
+logs. A gate that reads as present and cannot fire for the widest read is this repository's own
+vacuous-guard shape, applied at the system level instead of inside a function. It is enforced once in
+the worker now, and the mutation that removes it fails three tests.
+
+**And the reconciliation I documented was arithmetically false.** `createRateAggregator`'s
+`unmeasured` is a SUPERSET of its `evaluationErrors` — it starts the count at the error count — so
+`distinctSubjectsSeen = scoredSubjects + unmeasured + evaluationErrors + outOfPopulation` double-counts
+every error, and a row that is both out-of-population and an evaluation error made `scoredSubjects`
+NEGATIVE. It held in the test only because the fixture had all three counts at zero, which makes the
+assertion `2 === 2 + 0 + 0 + 0` and passes for any implementation. **That is the missed mutation the
+brief asked the lanes for, and two of them found it independently.** Each seen subject is classified
+into exactly one bucket now, in a stated order, so the identity holds on a PARTIAL_FAILURE run — an
+ordinary night on the pilot.
+
+Also from that round, each verified before folding: the default profile's namespace refused fifty
+legitimate `ihn-emp-NNN` members of its own directory (the same defect as refusing Maui's 48 fixtures,
+in the other deployment); the run search took the twelve most recent runs outright, which on a nightly
+deployment is twelve DAYS, so from mid-January a report for the closed year answered "no run" while
+the year's runs sat uncompacted — it is scoped to the year's window now, and `listLatestPopulationRuns`
+walks at most 25 runs whatever count it is given, so the window was the only mechanism that could
+work; the per-row flags built a whole aggregator per row (300,000 of them at the cap across six
+measures) where `membershipRatesFor` was the thing wanted; `name`/`source`/`note` were the one
+unvalidated channel into Neon and into an audit table that is exported wholesale; `listMembers` and
+`countMembers` did not filter COMPLETE, safe only because every caller checked first, which is a claim
+about callers; the duplicate collapse compared timestamps as STRINGS, so an offset-form `evaluatedAt`
+could pick the older evaluation; the CSV carried the resolved subject id in the `rawIdentifier` column,
+which is right only while matching is exact and wrong the moment the format changes — which is the
+whole point of that column; and a test titled "the body is never read" asserted nothing of the sort.
+
+**One reviewer claim was checked and REJECTED.** A lane reported that an unrecognised deployment
+profile would "fail open" and admit real identifiers. It would not — the fallback was the `emp-`
+pattern, which refuses an MRN — and `DeploymentProfileId` is a closed union, so an unknown profile
+cannot exist without a code change. The underlying point was still worth taking: the map is explicit
+now and an unrecorded profile is refused rather than lent somebody else's namespace.
+
+**Verification.** Backend typecheck clean; 2,738 tests, one failure — the standing `corpus-membership`
+stale sparse-checkout one, green in CI. Frontend lint clean, 471 tests, build compiled. Seven mutations,
+each caught by the test named for it: `.size > 0` in the active-filter guard revives the empty-list
+hole; dropping the resolution from the cases CSV breaks all three cross-surface tests; dropping the
+post-read compaction check fails three report tests; taking the newest run regardless of year fails
+five; dropping the frontend row shape-guard fails the picker test; and removing the `?listId=`
+authorization gate fails three worker tests. **The Postgres ceiling's
 store contract runs in CI only** — Docker is down on this host and free RAM was 1.3 GB, and the SQLite
 floor cannot catch Pg-only SQL, which is how two defects reached #544. That is the one thing about
 this PR that is not verified locally, and it is stated rather than implied.

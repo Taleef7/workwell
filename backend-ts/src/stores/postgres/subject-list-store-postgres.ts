@@ -176,9 +176,13 @@ export class PgSubjectListStore implements SubjectListStore {
     const ids = listIds.filter(isUuid);
     const out = new Map<string, MemberCounts>();
     if (ids.length === 0) return out;
+    // Joined to the header, like every other read here. The route reaches this only through lists it
+    // already resolved, but "safe because every caller checks first" is a claim about callers rather
+    // than about the store, and the interface's own header says every read filters COMPLETE.
     const { rows } = await this.pool.query<{ list_id: string; resolution: string; n: string }>(
-      `SELECT list_id, resolution, COUNT(*) AS n FROM ${S}.subject_list_members
-       WHERE list_id = ANY($1::uuid[]) GROUP BY list_id, resolution`,
+      `SELECT m.list_id, m.resolution, COUNT(*) AS n FROM ${S}.subject_list_members m
+       JOIN ${S}.subject_lists l ON l.id = m.list_id AND l.status = 'COMPLETE'
+       WHERE m.list_id = ANY($1::uuid[]) GROUP BY m.list_id, m.resolution`,
       [ids],
     );
     for (const r of rows) {
@@ -195,16 +199,17 @@ export class PgSubjectListStore implements SubjectListStore {
     let filter = "";
     if (options.resolution) {
       binds.push(options.resolution);
-      filter = ` AND resolution = $${binds.length}`;
+      filter = ` AND m.resolution = $${binds.length}`;
     }
+    const complete = `JOIN ${S}.subject_lists l ON l.id = m.list_id AND l.status = 'COMPLETE'`;
     const { rows: countRows } = await this.pool.query<{ n: string }>(
-      `SELECT COUNT(*) AS n FROM ${S}.subject_list_members WHERE list_id = $1::uuid${filter}`,
+      `SELECT COUNT(*) AS n FROM ${S}.subject_list_members m ${complete} WHERE m.list_id = $1::uuid${filter}`,
       binds,
     );
     const { rows } = await this.pool.query<MemberRow>(
-      `SELECT raw_identifier, subject_id, resolution FROM ${S}.subject_list_members
-       WHERE list_id = $1::uuid${filter}
-       ORDER BY raw_identifier ASC
+      `SELECT m.raw_identifier, m.subject_id, m.resolution FROM ${S}.subject_list_members m ${complete}
+       WHERE m.list_id = $1::uuid${filter}
+       ORDER BY m.raw_identifier ASC
        LIMIT $${binds.length + 1} OFFSET $${binds.length + 2}`,
       [...binds, options.limit, options.offset],
     );

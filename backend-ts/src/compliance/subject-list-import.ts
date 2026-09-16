@@ -39,12 +39,28 @@ export const MAX_IMPORT_BYTES = 2 * 1024 * 1024;
  * the review queue is still exercised with synthetic-shaped identifiers.
  */
 export const SANDBOX_IDENTIFIER_PATTERNS = {
+  // The Maui corpus: 48 hand-written fixtures (pat-001) then generated ones (pat-00049).
   maui: /^pat-\d{3,5}$/,
-  default: /^emp-\d{3,5}$/,
+  // The default deployment's synthetic directory spans TWO tenants — the occupational roster
+  // (`emp-001`) and the Indus Hospital Network roster (`ihn-emp-001`, the E15 cross-system people).
+  // Omitting `ihn-emp-` refused fifty legitimate synthetic members of the very directory this gate
+  // resolves against, which is the same defect as refusing the 48 Maui fixtures.
+  default: /^(?:emp|ihn-emp)-\d{3,5}$/,
 } as const satisfies Record<string, RegExp>;
 
-export function sandboxIdentifierPattern(profileId: string): RegExp {
-  return profileId === "maui" ? SANDBOX_IDENTIFIER_PATTERNS.maui : SANDBOX_IDENTIFIER_PATTERNS.default;
+/**
+ * The namespace for a profile, or `null` when the profile has none recorded.
+ *
+ * **Null rather than a fallback.** The first cut answered an unrecognised profile with the default
+ * profile's pattern, which is a guess about somebody else's directory: on a future profile it would
+ * either refuse every legitimate identifier or — if that profile's roster happened to look like
+ * `emp-NNN` — admit a set nobody had reviewed. The caller turns null into a refusal, so adding a
+ * deployment profile without adding its namespace fails loudly at the gate instead of silently at it.
+ */
+export function sandboxIdentifierPattern(profileId: string): RegExp | null {
+  if (profileId === "maui") return SANDBOX_IDENTIFIER_PATTERNS.maui;
+  if (profileId === "default") return SANDBOX_IDENTIFIER_PATTERNS.default;
+  return null;
 }
 
 export interface ParsedIdentifiers {
@@ -53,9 +69,12 @@ export interface ParsedIdentifiers {
   duplicatesDropped: number;
 }
 
-export type ParseFailure =
-  | { error: "invalid_request"; parameter: string; message: string }
-  | { error: "payload_too_large"; message: string };
+/**
+ * What a parse can refuse with. `payload_too_large` is deliberately NOT here: the size cap is the
+ * route's, checked against `content-length` before the body is read, and a union member the parser
+ * can never return is a branch every caller has to handle and no test can reach.
+ */
+export type ParseFailure = { error: "invalid_request"; parameter: string; message: string };
 
 export type ParseResult = { ok: true; value: ParsedIdentifiers } | { ok: false; failure: ParseFailure };
 

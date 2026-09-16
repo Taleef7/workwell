@@ -482,15 +482,19 @@ CREATE INDEX IF NOT EXISTS spike_panel_assignments_assignee_idx ON ${SPIKE_SCHEM
 -- on external review. Additive (CREATE IF NOT EXISTS), reversible (DROP TABLE), no data migration.
 CREATE TABLE IF NOT EXISTS ${SPIKE_SCHEMA}.subject_lists (
   id           UUID PRIMARY KEY,
-  name         TEXT NOT NULL CHECK (btrim(name) <> ''),
+  -- Length-capped as well as non-empty. The name and source are copied into the SUBJECT_LIST_IMPORTED
+  -- audit payload, and audit_events is exported wholesale — so operator prose is the one channel into
+  -- this database the identifier namespace gate does not cover. A bound on blast radius, not a claim
+  -- that free text is safe.
+  name         TEXT NOT NULL CHECK (btrim(name) <> '' AND length(name) <= 200),
   -- 1 + max(revision) for this name, allocated under an advisory lock on the lowercased name.
   revision     INTEGER NOT NULL CHECK (revision > 0),
   -- Every read filters COMPLETE. An import that dies between the header row and the last member chunk
   -- therefore leaves nothing visible rather than a list that is silently short — a short attribution
   -- list reads as a smaller ACO population, which is a wrong number wearing a real list's name.
   status       TEXT NOT NULL CHECK (status IN ('IMPORTING','COMPLETE')),
-  source       TEXT,
-  note         TEXT,
+  source       TEXT CHECK (source IS NULL OR length(source) <= 200),
+  note         TEXT CHECK (note IS NULL OR length(note) <= 200),
   created_by   TEXT NOT NULL,
   created_at   TIMESTAMPTZ NOT NULL,
   completed_at TIMESTAMPTZ,

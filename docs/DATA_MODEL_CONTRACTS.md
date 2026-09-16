@@ -346,8 +346,20 @@ renamed or inserted column surfaces downstream as wrong numbers rather than as a
   unresolved identifier by six and read as six separate failures.
 
 **Every JSON count is recomputable from these rows**, and a test does it. The JSON summary states, per
-measure: `matchedSubjects = distinctSubjectsSeen + missingFromRun` and
+measure, two identities that hold for EVERY input including a measure with no usable run:
+`matchedSubjects = distinctSubjectsSeen + missingFromRun` and
 `distinctSubjectsSeen = scoredSubjects + unmeasured + evaluationErrors + outOfPopulation`.
+
+> **The four not-scored buckets are DISJOINT, and `unmeasured` here is narrower than the aggregator's.**
+> `createRateAggregator.finish()` returns an `unmeasured` that is a SUPERSET of its own
+> `evaluationErrors` (it starts the count at the error count), and `outcomes.out_of_population` is an
+> independently persisted column that can be true on a row the aggregator also calls unmeasured — so
+> deriving these by subtraction double-counts every error and can make `scoredSubjects` NEGATIVE. Each
+> seen subject is classified into exactly one bucket, in this order: an **evaluation error** first (no
+> engine spoke for the subject, so nothing else about it is known), then **out of population**, then
+> **in no rate** for any other reason, and only what survives all three is **scored**. `unmeasured` in
+> this report therefore means "in no rate for a reason other than an error or being out of
+> population".
 `missingFromRun` is reported BESIDE the rates and **never subtracted from a denominator** — a member
 the run never saw is a gap in the evidence, not an exclusion, and folding them in would let a smaller
 run produce a higher score. The score is `numerator / (denominator − denominatorExclusion −
@@ -370,6 +382,16 @@ emitted separately rather than summed.
 > defuse, and a CSV of somebody's uploaded identifiers must not become code when the ACO opens it.
 
 ### 6.7 `?listId=` on the filtered surfaces (ADR-082)
+
+> **`?listId=` requires a CASE_MANAGER or ADMIN seat on every surface, enforced once in the worker.**
+> Five of the six surfaces are otherwise AUTHENTICATED, so without it the CM/ADMIN gate on
+> `/api/subject-lists/**` was a control that could not fire for the widest read: a VIEWER holding a
+> list id could take the whole membership — names, provider, payer, per-measure status — out of
+> `GET /api/exports/cases?format=csv&listId=…`, which is strictly more than the members endpoint the
+> gate protects. The id is not a secret by construction: it is in the query string of every filtered
+> screen, so it reaches shareable URLs, browser history and access logs. A request naming a list
+> without that seat is **403** with `parameter: "listId"`; the same surfaces are unchanged for a
+> VIEWER when no list is named.
 
 `?listId=` restricts the roster, the cases route, the work list, both §6.2/§6.3 CSVs and the MCP
 `list_noncompliant` tool to a list's MATCHED members. It is a **resolved membership, not a token the
