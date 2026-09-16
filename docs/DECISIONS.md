@@ -92,6 +92,15 @@ January arrives — and would look exactly like a correct answer. `measurementYe
 no default**, and the run selected per measure is the newest reportable whole-population run whose own
 period is that year.
 
+**Selected by the run's MEASUREMENT PERIOD, never by when it started** — `RunStore.listPopulationRunsForPeriod`.
+A manual run takes an arbitrary `evaluationDate`, so a rerun-to-verify of a closed year begins in the
+following one and legitimately scores the closed one; a start-date filter drops exactly that run and
+answers "no completed population run for year" with it sitting in the table. (The start-date window was
+itself a fix for something worse: `listLatestPopulationRuns` caps its walk at 25 runs whatever
+candidate count it is given, so an unscoped search reaches back about twelve days on a nightly
+deployment and a mid-January report for the closed year found nothing. A period-scoped read has no
+such cap and is simpler as well as correct.)
+
 ADR-077 refuses a report built over rows that may be incomplete. That refusal belongs to the **measure
 whose run is exposed**, not to the request: withholding five complete measures because the sixth's run
 aged out would be a second wrong answer. Exposure is checked before the reads and again after them (a
@@ -117,6 +126,13 @@ calls unmeasured — so deriving these by subtraction double-counts every error 
 PARTIAL_FAILURE run — an ordinary night on the pilot rather than a corner case. The first version did
 not, and the test that "pinned" the identity used a fixture with all three counts at zero, which
 passes for any implementation.
+
+**A measure with NO usable run emits its rows too.** The CSV serialises rows alone, so an entry
+claiming N members were missing while the patient-level artifact named none of them would break the
+"every count is recomputable" rule and leave the ACO unable to see WHO. A **compacted** measure is the
+one exception and claims nothing per subject — no rows, `missingFromRun: 0` — because ADR-077 refuses
+numbers built over rows that may be incomplete, and "how many of your patients did this measure miss?"
+is such a number. §6.6 scopes the identities accordingly.
 
 The score stays `numer / (denom − denex − denexcep)` — what `createRateAggregator` already computes
 and what the eCQM proportion convention specifies. `status=EXCLUDED` is the workflow vocabulary;

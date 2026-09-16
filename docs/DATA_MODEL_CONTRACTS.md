@@ -332,7 +332,11 @@ renamed or inserted column surfaces downstream as wrong numbers rather than as a
 > calendar year containing its evaluation date (ADR-072), so "the latest numbers" would answer a
 > PY2027 question with PY2028's first nightly the moment January arrives — and would look exactly like
 > a correct answer. The run chosen per measure is the newest reportable whole-population run whose own
-> period is that year.
+> **measurement period** is that year, selected through
+> `RunStore.listPopulationRunsForPeriod` — never by when the run STARTED. A manual run takes an
+> arbitrary `evaluationDate`, so a rerun-to-verify of a closed year begins in the following one and
+> legitimately scores the closed one; a start-date filter drops it and the report then answers "no run
+> for this year" with that run sitting in the table.
 
 **Three row shapes, and the two non-evaluated ones are contract, not convenience.**
 - `rowStatus=EVALUATED` — **one row per (measure, rate)**. A multi-rate measure (cms137) yields two
@@ -345,8 +349,14 @@ renamed or inserted column surfaces downstream as wrong numbers rather than as a
   rows, with every patient and measure column empty. One row per measure would multiply a single
   unresolved identifier by six and read as six separate failures.
 
-**Every JSON count is recomputable from these rows**, and a test does it. The JSON summary states, per
-measure, two identities that hold for EVERY input including a measure with no usable run:
+**Every JSON count is recomputable from these rows**, and a test does it — including for a measure
+with **no usable run**, which emits one `MISSING_FROM_RUN` row per matched member rather than an entry
+with a count and no rows. A **compacted** measure is the one exception and claims nothing per subject:
+no rows, and `missingFromRun: 0`, because ADR-077 refuses numbers built over rows that may be
+incomplete and "how many of your patients did this measure miss?" is such a number.
+
+The JSON summary states, per measure, two identities that hold for every entry whose
+`compactionStatus` is not `compacted`:
 `matchedSubjects = distinctSubjectsSeen + missingFromRun` and
 `distinctSubjectsSeen = scoredSubjects + unmeasured + evaluationErrors + outOfPopulation`.
 

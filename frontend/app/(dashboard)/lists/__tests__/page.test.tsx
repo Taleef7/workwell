@@ -111,6 +111,51 @@ it("the report is never requested without a measurement year", async () => {
   });
 });
 
+it("changing the year clears the report, so the table and the Download button cannot disagree", async () => {
+  // `download` reads the CURRENT year. Leaving the computed table up after a year change put two
+  // different years on one screen, neither labelled — an operator could read 2026 and download 2027.
+  get.mockImplementation(async (path: string) => {
+    if (path === "/api/subject-lists") return [LIST];
+    if (path.includes("/report")) {
+      return {
+        measurementYear: 2027, generatedAt: "x",
+        members: { matched: 1, notFound: 0, ambiguous: 0, total: 1 },
+        compactedMeasures: [],
+        measures: [{
+          measureId: "cms125", ecqmId: "CMS125", runId: "run-1",
+          measurementPeriod: { start: "2027-01-01", end: "2027-12-31" },
+          compactionStatus: "complete", matchedSubjects: 1, distinctSubjectsSeen: 1, missingFromRun: 0,
+          rates: [{ label: null, ipp: 1, denom: 1, denex: 0, denexcep: 0, numer: 1, effectiveDenominator: 1, score: 1 }],
+        }],
+      };
+    }
+    throw new Error(`unexpected GET ${path}`);
+  });
+  render(<ListsPage />);
+  await screen.findByText("ACO Q3 attribution");
+  await userEvent.click(screen.getByRole("button", { name: "Open" }));
+  await userEvent.click(await screen.findByRole("button", { name: "Compute" }));
+  await screen.findByText("100.0%");
+  expect(screen.getByRole("button", { name: /Download/ })).toBeInTheDocument();
+
+  const yearSelect = screen.getByLabelText(/Measurement year/i);
+  await userEvent.selectOptions(yearSelect, String(new Date().getUTCFullYear() - 1));
+  await waitFor(() => expect(screen.queryByText("100.0%")).not.toBeInTheDocument());
+  expect(screen.queryByRole("button", { name: /Download/ })).not.toBeInTheDocument();
+});
+
+it("the year select offers the NEXT year — the pilot's target is PY2027 while the clock says 2026", async () => {
+  // A list of past years alone would make the one year the pilot exists for unreachable from this
+  // page until the clock caught up, even though a run can already be created with that evaluation date.
+  render(<ListsPage />);
+  await screen.findByText("ACO Q3 attribution");
+  await userEvent.click(screen.getByRole("button", { name: "Open" }));
+  const yearSelect = await screen.findByLabelText(/Measurement year/i);
+  const offered = Array.from(yearSelect.querySelectorAll("option")).map((o) => o.textContent);
+  expect(offered).toContain(String(new Date().getUTCFullYear() + 1));
+  expect(offered).toContain(String(new Date().getUTCFullYear()));
+});
+
 it("a measure whose run aged out is named, with the reason, beside the ones that reported", async () => {
   // ADR-077's refusal belongs to the measure whose evidence may be incomplete. Withholding the other
   // five would be a second wrong answer, and showing this one's numbers would be the first.

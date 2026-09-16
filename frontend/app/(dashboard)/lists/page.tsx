@@ -15,8 +15,8 @@
  * its calendar year (ADR-072), so "the latest numbers" would answer a PY2027 question with PY2028's
  * first nightly the moment January arrives — and it would look right. The select is the only way in.
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { Badge, Button, Input, Select } from "@mieweb/ui";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Badge, Button, Input } from "@mieweb/ui";
 import { emitToast } from "@/lib/toast";
 import { SUBJECT } from "@/lib/terminology";
 import { useApi } from "@/lib/api/hooks";
@@ -139,8 +139,8 @@ export default function ListsPage() {
 
       {selected ? (
         <>
-          <MembersTable key={selected.id} list={selected} api={api} />
-          <ReportPanel key={selected.id} list={selected} api={api} />
+          <MembersTable key={`members-${selected.id}`} list={selected} api={api} />
+          <ReportPanel key={`report-${selected.id}`} list={selected} api={api} />
         </>
       ) : null}
     </div>
@@ -299,22 +299,20 @@ function MembersTable({ list, api }: { list: SubjectListRow; api: ReturnType<typ
         <h2 className="text-lg font-medium">
           Members · {list.name} v{list.revision}
         </h2>
-        <Select
-          label="Resolution"
-          size="sm"
-          className="w-48"
+        <select
+          aria-label="Resolution"
+          className="rounded border border-neutral-300 bg-transparent px-2 py-1 text-sm dark:border-neutral-700"
           value={resolution}
-          onValueChange={(v) => {
-            setResolution(v as "" | Resolution);
+          onChange={(e) => {
+            setResolution(e.target.value as "" | Resolution);
             setPage(0);
           }}
-          options={[
-            { value: "", label: "All members" },
-            { value: "MATCHED", label: "Matched" },
-            { value: "NOT_FOUND", label: "Not found" },
-            { value: "AMBIGUOUS", label: "Ambiguous" },
-          ]}
-        />
+        >
+          <option value="">All members</option>
+          <option value="MATCHED">Matched</option>
+          <option value="NOT_FOUND">Not found</option>
+          <option value="AMBIGUOUS">Ambiguous</option>
+        </select>
         <span className="text-muted-foreground text-sm">{total.toLocaleString()} rows</span>
       </div>
       <div className="overflow-x-auto rounded-lg border">
@@ -374,23 +372,39 @@ function MembersTable({ list, api }: { list: SubjectListRow; api: ReturnType<typ
 
 function ReportPanel({ list, api }: { list: SubjectListRow; api: ReturnType<typeof useApi> }) {
   const thisYear = new Date().getUTCFullYear();
-  const years = [thisYear, thisYear - 1, thisYear - 2];
+  // The NEXT year is offered too. The pilot's target is PY2027 while the clock says 2026, and a run
+  // can already be created with a 2027 evaluation date — so a list offering only past years would
+  // make the one year the pilot exists for unreachable from this page until the clock caught up.
+  const years = [thisYear + 1, thisYear, thisYear - 1, thisYear - 2];
   const [year, setYear] = useState(thisYear);
   const [report, setReport] = useState<ReportSummary | null>(null);
   const [refusal, setRefusal] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // The year the operator is looking at NOW, readable from a continuation that closed over an older
+  // one. Written in an effect, not during render — React 19 forbids the latter, and the value only
+  // has to be correct by the time an await resumes.
+  const yearRef = useRef(year);
+  useEffect(() => {
+    yearRef.current = year;
+  }, [year]);
 
   const run = useCallback(async () => {
     setBusy(true);
     setRefusal(null);
+    const asked = year;
     try {
       const data = await api.get<ReportSummary>(
-        `/api/subject-lists/${list.id}/report?measurementYear=${year}`,
+        `/api/subject-lists/${list.id}/report?measurementYear=${asked}`,
       );
+      // Discarded if the operator moved on. Without this an in-flight compute for 2026 could land
+      // after they switched to 2027 and repopulate the table under the new selector — the same
+      // stale-response shape the roster's request-id guard exists for.
+      if (asked !== yearRef.current) return;
       setReport(data);
     } catch (error) {
       // A 409 body is rendered VERBATIM. `run_compacted` means the evidence may be incomplete, and
       // paraphrasing it into "unavailable" would lose the reason a filed number cannot be reproduced.
+      if (asked !== yearRef.current) return;
       setReport(null);
       setRefusal(error instanceof Error ? error.message : "unknown error");
     } finally {
@@ -412,14 +426,27 @@ function ReportPanel({ list, api }: { list: SubjectListRow; api: ReturnType<type
     <section className="space-y-3">
       <div className="flex flex-wrap items-center gap-3">
         <h2 className="text-lg font-medium">Measurement-year report</h2>
-        <Select
-          label="Measurement year"
-          size="sm"
-          className="w-44"
+        {/* Native, like the roster's page-size control: `@mieweb/ui`'s Select renders a custom combobox
+            whose options are not in the DOM, and this one has behaviour worth a test. */}
+        <select
+          aria-label="Measurement year"
+          className="rounded border border-neutral-300 bg-transparent px-2 py-1 text-sm dark:border-neutral-700"
           value={String(year)}
-          onValueChange={(v) => setYear(Number(v))}
-          options={years.map((y) => ({ value: String(y), label: String(y) }))}
-        />
+          onChange={(e) => {
+            // The shown report and the Download button go with the year they were computed for.
+            // Leaving them up let an operator read 2026's table and download 2027's CSV, because
+            // `download` reads the CURRENT year — two different years on one screen, neither labelled.
+            setYear(Number(e.target.value));
+            setReport(null);
+            setRefusal(null);
+          }}
+        >
+          {years.map((y) => (
+            <option key={y} value={y}>
+              {y}
+            </option>
+          ))}
+        </select>
         <Button size="sm" onClick={run} disabled={busy}>
           {busy ? "Computing…" : "Compute"}
         </Button>

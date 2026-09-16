@@ -113,14 +113,25 @@ function fakeDeps(options: FakeOptions): { deps: SubjectListReportDeps; measureI
         })),
     } as unknown as SubjectListReportDeps["outcomes"],
     runs: {
-      getRun: async (runId: string) => {
-        const r = runs.find((x) => x.runId === runId);
-        if (!r) return null;
-        return {
-          id: r.runId,
-          measurementPeriodStart: `${r.year}-01-01T00:00:00.000Z`,
-          measurementPeriodEnd: `${r.year}-12-31T23:59:59.999Z`,
-        };
+      // Period-scoped, newest-first — the real store filters on `measurement_period_start`, so the fake
+      // keys on the run's YEAR rather than on when it started. That is the distinction the method
+      // exists for: a run started in 2028 can legitimately score PY2027.
+      listPopulationRunsForPeriod: async (from: string, _to: string, limit = 50) => {
+        const year = new Date(from).getUTCFullYear();
+        return runs
+          .filter((r) => r.year === year)
+          // `measureId` on a fixture run means "only this measure's rows live here"; the real store
+          // returns every run and the caller probes, which is what the outcomes fake reproduces.
+          .filter((r) => (r.status ?? "COMPLETED") !== "FAILED")
+          .slice(0, limit)
+          .map((r) => ({
+            id: r.runId,
+            status: r.status ?? "COMPLETED",
+            scopeType: r.scopeType ?? "ALL_PROGRAMS",
+            startedAt: r.startedAt,
+            measurementPeriodStart: `${r.year}-01-01T00:00:00.000Z`,
+            measurementPeriodEnd: `${r.year}-12-31T23:59:59.999Z`,
+          }));
       },
     } as unknown as SubjectListReportDeps["runs"],
     events: {
@@ -429,6 +440,79 @@ test("the run search is scoped to the YEAR, so a year of newer nightlies cannot 
   assert.equal(result.ok, true);
   const entry = (result as { report: import("./subject-list-report.ts").SubjectListReport }).report.measures[0]!;
   assert.equal(entry.runId, "run-2027", "thirty newer nightlies do not hide the year's run");
+});
+
+test("a run STARTED in a later year still reports the year it SCORES", async () => {
+  // A manual run takes an arbitrary `evaluationDate`, so a rerun-to-verify of a closed year starts in
+  // the following one and legitimately scores the closed year. Selecting candidates by start date
+  // dropped it and the report answered "no run for this year" with that run sitting in the table —
+  // which is the shape of wrong answer this project refuses, because it looks exactly like a right one.
+  const result = await runReport({
+    runs: [
+      // Started 2028-03-01, scores PY2027. The fake keys on the run's YEAR, like the real store's
+      // `measurement_period_start` filter.
+      { runId: "rerun-for-2027", startedAt: "2028-03-01T00:00:00.000Z", year: 2027 },
+    ],
+    rows: [
+      row("pat-001", official({ ipp: true, denom: true, numer: true, denex: false, denexcep: false }), {
+        runId: "rerun-for-2027",
+      }),
+    ],
+  });
+  assert.equal(result.ok, true);
+  const entry = (result as { report: import("./subject-list-report.ts").SubjectListReport }).report.measures[0]!;
+  assert.equal(entry.runId, "rerun-for-2027");
+  assert.equal(entry.rates[0]!.numer, 1);
+});
+
+test("a measure with NO run still emits its patient rows, so the CSV can reconstruct the count", async () => {
+  // The CSV serialises `rows` alone. Without these the summary claims N patients were missing from a
+  // measure while the patient-level artifact names none of them — and §6.6 says every JSON count is
+  // recomputable from the rows. The ACO needs the list of WHO, not the number.
+  const result = await runReport(
+    {
+      members: [
+        { rawIdentifier: "pat-001", subjectId: "pat-001", resolution: "MATCHED" },
+        { rawIdentifier: "pat-002", subjectId: "pat-002", resolution: "MATCHED" },
+      ],
+      runs: [{ runId: "run-2026", startedAt: "2026-12-31T00:00:00.000Z", year: 2026 }],
+    },
+    2027,
+  );
+  const report = (result as { report: import("./subject-list-report.ts").SubjectListReport }).report;
+  const entry = report.measures[0]!;
+  assert.equal(entry.compactionStatus, "no_run");
+  assert.equal(entry.missingFromRun, 2);
+  const missing = report.rows.filter((r) => r.rowStatus === "MISSING_FROM_RUN" && r.measureId === "cms122");
+  assert.equal(missing.length, 2, "one row per matched member, so the count is reconstructable");
+  assert.deepEqual(missing.map((r) => r.subjectId).sort(), ["pat-001", "pat-002"]);
+  // And it survives the CSV: the header plus two rows.
+  const csv = subjectListReportCsv(report, profile, "patient");
+  assert.equal(csv.split("\r\n").filter((l) => l.includes("MISSING_FROM_RUN")).length, 2);
+});
+
+test("a COMPACTED measure claims nothing per subject — no rows AND no missingFromRun", async () => {
+  // ADR-077 refuses numbers built over rows that may be incomplete, and "how many of your patients did
+  // this measure miss?" is such a number. Reporting `missingFromRun = N` with no rows would assert a
+  // per-subject fact from evidence we have just said we cannot read.
+  const result = await runReport({
+    runs: [
+      { runId: "run-old", startedAt: "2027-01-02T00:00:00.000Z", year: 2027, measureId: "cms122" },
+      { runId: "run-fresh", startedAt: "2027-12-31T00:00:00.000Z", year: 2027, measureId: "cms125" },
+    ],
+    rows: [
+      row("pat-001", official({ ipp: true, denom: true, numer: true, denex: false, denexcep: false }), { runId: "run-old" }),
+      row("pat-001", official({ ipp: true, denom: true, numer: false, denex: false, denexcep: false }), { runId: "run-fresh", measureId: "cms125" }),
+    ],
+    compactionCutoffs: ["2027-06-01T00:00:00.000Z"],
+    measureIds: ["cms122", "cms125"],
+  });
+  // cms125's run postdates the cutoff, so the request is not wholly compacted.
+  assert.equal(result.ok, true);
+  const report = (result as { report: import("./subject-list-report.ts").SubjectListReport }).report;
+  const compacted = report.measures.find((m) => m.compactionStatus === "compacted")!;
+  assert.equal(compacted.missingFromRun, 0, "no per-subject claim at all");
+  assert.equal(report.rows.some((r) => r.measureId === compacted.measureId), false, "and no rows");
 });
 
 test("the CSV carries the identifier the ACO SENT, not the subject id we resolved it to", async () => {

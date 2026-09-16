@@ -45,6 +45,41 @@ export const sampleRun = (scopeId?: string): CreateRunInput => ({
 
 /** Registers the RunStore contract for one backend. `freshStore` → isolated, empty. */
 export function runStoreContract(label: string, freshStore: () => Promise<RunStore>): void {
+  test(`[${label}] listPopulationRunsForPeriod selects by the run's PERIOD, not by when it started`, async () => {
+    // The distinction the method exists for (ADR-082): a manual run takes an arbitrary
+    // `evaluationDate`, so a rerun-to-verify of a closed year STARTS in the following one and
+    // legitimately scores the closed one. Filtering on `started_at` drops it, and the attributed-list
+    // report then answers "no run for this year" with that run sitting in the table.
+    const store = await freshStore();
+    const period = (year: number) => ({
+      measurementPeriodStart: `${year}-01-01T00:00:00.000Z`,
+      measurementPeriodEnd: `${year}-12-31T23:59:59.999Z`,
+    });
+    const nightly = await store.createRun({ ...sampleRun("cms122"), scopeType: "ALL_PROGRAMS", ...period(2027) });
+    const rerun = await store.createRun({ ...sampleRun("cms122"), scopeType: "ALL_PROGRAMS", ...period(2027) });
+    const nextYear = await store.createRun({ ...sampleRun("cms122"), scopeType: "ALL_PROGRAMS", ...period(2028) });
+    const caseRerun = await store.createRun({ ...sampleRun("cms122"), scopeType: "CASE", ...period(2027) });
+    for (const r of [nightly, rerun, nextYear, caseRerun]) await store.finalizeRun(r.id, "COMPLETED");
+    // A run that never finished is not reportable, whatever its period says.
+    const unfinished = await store.createRun({ ...sampleRun("cms122"), scopeType: "ALL_PROGRAMS", ...period(2027) });
+
+    const found = await store.listPopulationRunsForPeriod("2027-01-01T00:00:00.000Z", "2028-01-01T00:00:00.000Z", 50);
+    const ids = found.map((r) => r.id);
+    assert.ok(ids.includes(nightly.id) && ids.includes(rerun.id), "both of the year's population runs");
+    assert.equal(ids.includes(nextYear.id), false, "the next year's run is outside the window");
+    assert.equal(ids.includes(caseRerun.id), false, "a CASE-scope rerun is a fragment, not the measure's numbers");
+    assert.equal(ids.includes(unfinished.id), false, "an unfinished run is not reportable");
+    // Newest-first by started_at, because the caller takes the first that holds its measure's rows.
+    const startedAts = found.map((r) => r.startedAt);
+    assert.deepEqual(startedAts, [...startedAts].sort().reverse());
+    // The window is half-open: a run whose period starts exactly at the upper bound is the NEXT year's.
+    assert.equal(
+      (await store.listPopulationRunsForPeriod("2028-01-01T00:00:00.000Z", "2029-01-01T00:00:00.000Z", 50))
+        .some((r) => r.id === nextYear.id),
+      true,
+    );
+  });
+
   test(`[${label}] createRun inserts a QUEUED run and getRun reads it back`, async () => {
     const store = await freshStore();
     const created = await store.createRun(sampleRun("audiogram"));

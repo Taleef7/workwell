@@ -122,8 +122,27 @@ pattern, which refuses an MRN — and `DeploymentProfileId` is a closed union, s
 cannot exist without a code change. The underlying point was still worth taking: the map is explicit
 now and an unrecorded profile is refused rather than lent somebody else's namespace.
 
-**Verification.** Backend typecheck clean; 2,738 tests, one failure — the standing `corpus-membership`
-stale sparse-checkout one, green in CI. Frontend lint clean, 471 tests, build compiled. Seven mutations,
+**Then Codex found four more on the open PR, and two were P1.** The run selection I had just fixed was
+still filtering candidates by when a run STARTED — and a manual run takes an arbitrary
+`evaluationDate`, so a rerun-to-verify of a closed year begins in the following one and legitimately
+scores the closed one. I had written that limit into the ADR as acceptable; it is not, because a
+backdated rerun is a supported path rather than a hypothetical, and the report would answer "no run
+for this year" with the run sitting in the table. `RunStore.listPopulationRunsForPeriod` filters on the
+run's own `measurement_period_start` now, which removes the 25-run walk cap entirely and is simpler
+than what it replaced. And a measure with no usable run emitted no patient rows while its summary
+claimed N members were missing — the CSV serialises rows alone, so the count was unreconstructable and
+the ACO could not see who. Two P2s on the screen: the year select offered only past years, making
+PY2027 — the year the pilot exists for — unreachable until the clock caught up; and changing the year
+left the computed table and the Download button up while `download` read the NEW year, so an operator
+could read one year and download another.
+
+One thing the fix surfaced: `@mieweb/ui`'s `Select` renders a custom combobox whose options are not in
+the DOM, so `userEvent.selectOptions` cannot drive it. The roster's page-size control is a native
+`<select>` with an `aria-label` for exactly this reason, and the two selects on this page follow it —
+a control with behaviour worth pinning needs to be drivable by a test.
+
+**Verification.** Backend typecheck clean; 2,742 tests, one failure — the standing `corpus-membership`
+stale sparse-checkout one, green in CI. Frontend lint clean, 473 tests, build compiled. Seven mutations,
 each caught by the test named for it: `.size > 0` in the active-filter guard revives the empty-list
 hole; dropping the resolution from the cases CSV breaks all three cross-surface tests; dropping the
 post-read compaction check fails three report tests; taking the newest run regardless of year fails

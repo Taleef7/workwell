@@ -58,14 +58,13 @@ import type { MeasureRateGroup } from "../program/measure-rate.ts";
 /** One page of outcome rows per read. Matches `fhir/run-aggregate.ts`'s page so the two agree. */
 const PAGE = 2000;
 /**
- * How many candidate runs per measure are examined WITHIN the year's window.
+ * How many runs OF THE MEASUREMENT YEAR are examined for one that holds this measure's rows.
  *
- * Twelve is generous only because the window below already excludes every other year. The first cut
- * had no window and took the twelve most recent runs outright — which on a nightly deployment is
- * twelve DAYS, so by mid-January a report for the previous year silently answered
- * `no_completed_population_run_for_year` while the year's runs sat uncompacted in the table.
+ * Fifty is generous because the read is already period-scoped: these are the year's own runs,
+ * newest-first, and an ALL_PROGRAMS run holds every routed measure, so the first is almost always the
+ * answer. The count matters only for a measure routed partway through a year.
  */
-const RUN_CANDIDATES = 12;
+const RUN_CANDIDATES = 50;
 
 export interface SubjectListReportDeps {
   lists: SubjectListStore;
@@ -173,6 +172,23 @@ export async function subjectListReport(
     const winner = await selectRunForYear(deps, measureId, measurementYear);
     if (!winner) {
       entries.push(emptyEntry(measureId, matchedIds.size, "no_run", `no_completed_population_run_for_year`));
+      // The rows go out too. The CSV serialises `rows` alone, so without them the summary would claim
+      // N patients were missing from a measure while the patient-level artifact named none of them —
+      // and DATA_MODEL_CONTRACTS §6.6 says every JSON count is recomputable from the rows. A measure
+      // with no usable run saw nobody, so every matched member is missing from it, and the ACO needs
+      // the list of who.
+      for (const subjectId of matchedIds) {
+        rows.push({
+          rawIdentifier: rawIdentifierOf(subjectId),
+          subjectId,
+          resolution: "MATCHED",
+          rowStatus: "MISSING_FROM_RUN",
+          measureId,
+          outcome: null,
+          rates: [],
+          evaluationError: false,
+        });
+      }
       continue;
     }
     measuresWithARun += 1;
@@ -315,11 +331,14 @@ const emptyEntry = (
   reason,
   matchedSubjects,
   distinctSubjectsSeen: 0,
-  // `matchedSubjects = distinctSubjectsSeen + missingFromRun` is stated UNCONDITIONALLY in
-  // DATA_MODEL_CONTRACTS §6.6, so it has to hold here too: a measure with no usable run saw nobody,
-  // which means every matched member is missing from it. Leaving this 0 made the identity false for
-  // exactly the entries a reader is most likely to be checking.
-  missingFromRun: matchedSubjects,
+  // A measure with NO RUN saw nobody, so every matched member is missing from it — and the rows are
+  // emitted to match, so the count is reconstructable from the CSV.
+  //
+  // A COMPACTED measure claims NOTHING per subject. ADR-077 refuses numbers built over rows that may
+  // be incomplete, and "how many of your patients did this measure miss?" is such a number; emitting
+  // `missingFromRun = N` with no rows would assert a per-subject fact from evidence we have just said
+  // we cannot read. DATA_MODEL_CONTRACTS §6.6 scopes the identity accordingly.
+  missingFromRun: compactionStatus === "compacted" ? 0 : matchedSubjects,
   scoredSubjects: 0,
   unmeasured: 0,
   evaluationErrors: 0,
@@ -341,37 +360,32 @@ async function selectRunForYear(
   measureId: string,
   measurementYear: number,
 ): Promise<{ runId: string; startedAt: string; measurementPeriodStart: string; measurementPeriodEnd: string } | null> {
-  // Scoped to runs STARTED in the year, which is what keeps this bounded. `listLatestPopulationRuns`
-  // walks at most `LATEST_RUN_PROBE_BUDGET` (25) runs newest-first whatever `per` says, so widening
-  // the candidate count cannot reach past a couple of weeks of nightlies on its own — the window is
-  // the mechanism, not the count.
+  // Selected by the run's own MEASUREMENT PERIOD, never by when it started. A manual run takes an
+  // arbitrary `evaluationDate` (`run/run-pipeline.ts`), so a run STARTED in 2028 can legitimately
+  // score PY2027 — a rerun-to-verify of a closed year is exactly that — and a start-date window drops
+  // it while the report answers "no run for this year" with that run sitting in the table.
   //
-  // **The stated limit:** a run BACKDATED into a different calendar year than it scores is not
-  // selected. For an officially routed measure ADR-072 makes the period the calendar year containing
-  // the evaluation date, and a scheduled run evaluates the day it starts, so the two agree for every
-  // nightly. A hand-backdated rerun is the exception, and reproducing a historical filing is what the
-  // per-run report archive is for (PRODUCTION_READINESS §4 item 12).
-  const candidates = await deps.outcomes.listLatestPopulationRuns(
-    [measureId],
-    {
-      excludeScale: true,
-      excludeTrendHistory: true,
-      from: `${measurementYear}-01-01`,
-      to: `${measurementYear}-12-31`,
-    },
+  // The earlier attempt filtered `listLatestPopulationRuns` by start date because that call caps its
+  // walk at 25 runs whatever candidate count it is given. A period-scoped read has no such cap and is
+  // the simpler thing as well as the correct one.
+  const candidates = await deps.runs.listPopulationRunsForPeriod(
+    `${measurementYear}-01-01T00:00:00.000Z`,
+    `${measurementYear + 1}-01-01T00:00:00.000Z`,
     RUN_CANDIDATES,
   );
-  for (const candidate of candidates) {
-    if (!isReportableRunStatus(candidate.runStatus)) continue;
-    if (!isPopulationRun(candidate.runScopeType)) continue;
-    const run = await deps.runs.getRun(candidate.runId);
-    if (!run) continue;
-    // Confirmed against the run's OWN period rather than trusting the window: the window bounds the
-    // scan, the period decides the answer.
-    if (new Date(run.measurementPeriodStart).getUTCFullYear() !== measurementYear) continue;
+  for (const run of candidates) {
+    // The store already filtered status and scope; re-asserted here because this function's contract
+    // is "a reportable whole-population run" and a second reader should not have to trust a join.
+    if (!isReportableRunStatus(run.status)) continue;
+    if (!isPopulationRun(run.scopeType)) continue;
+    // Newest-first, so the FIRST run that holds this measure's rows is the answer. An ALL_PROGRAMS run
+    // holds every routed measure, so this is one probe in the common case; a measure routed later than
+    // the newest run is found further down rather than reported as absent.
+    const probe = await deps.outcomes.listOutcomes(run.id, { measureId, limit: 1, offset: 0 });
+    if (probe.length === 0) continue;
     return {
-      runId: candidate.runId,
-      startedAt: candidate.runStartedAt,
+      runId: run.id,
+      startedAt: run.startedAt,
       measurementPeriodStart: run.measurementPeriodStart,
       measurementPeriodEnd: run.measurementPeriodEnd,
     };
