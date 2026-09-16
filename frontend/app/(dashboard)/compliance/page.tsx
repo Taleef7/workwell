@@ -421,8 +421,14 @@ export default function CompliancePage() {
 
 
   const assignMeasureId = measureId.trim();
-  /** Everything that decides WHICH rows are on screen. A change to any of it invalidates a tick. */
-  const selectionScopeKey = [assignMeasureId, panel, status, siteId, providerId, ageBand, sex, payerFilter.join(","), debouncedQ, segment, tenant, page].join("|");
+  /**
+   * Everything that decides WHICH rows are on screen. A change to any of it invalidates a tick.
+   *
+   * `pageSize` belongs here for the same reason `page` does, and Codex caught its absence: select row
+   * 40 at size 50, switch to 25, switch back, and the tick returns — because only `selectedHere` was
+   * filtering it out meanwhile. Every pagination control has to invalidate, not just the page number.
+   */
+  const selectionScopeKey = [assignMeasureId, panel, status, siteId, providerId, ageBand, sex, payerFilter.join(","), debouncedQ, segment, tenant, page, pageSize].join("|");
   /** One measure in scope, a seat that may assign, and a list of accounts to assign to. */
   // `hasAccounts`, never `assignableOptions.length` — that is always at least two (a placeholder and
   // "Unassign"), so the length test was a guard that could not fire, and with the endpoint returning
@@ -439,6 +445,13 @@ export default function CompliancePage() {
     ),
     [assignEnabled, rows, assignMeasureId],
   );
+  // The CURRENT view, readable from an async continuation that closed over an older one. Written in
+  // an effect, not during render — React 19 forbids the latter, and an effect is the right place
+  // anyway: the value only has to be correct by the time an await resumes.
+  const scopeRef = useRef(selectionScopeKey);
+  useEffect(() => {
+    scopeRef.current = selectionScopeKey;
+  }, [selectionScopeKey]);
   const selectedHere = useMemo(
     () => (selection.scope === selectionScopeKey ? selection.ids.filter((id) => selectableIds.includes(id)) : []),
     [selection, selectionScopeKey, selectableIds],
@@ -476,7 +489,18 @@ export default function CompliancePage() {
         subjectIds: selectedHere,
       });
       cache.clear();
-      await load();
+      // Only reload if the operator is still looking at the view this assignment was made in.
+      //
+      // `load` is the callback captured when the button was clicked. If a filter or page changed
+      // while the POST was in flight, calling it re-runs the OLD query, bumps `reqIdRef` so the newer
+      // view's own request is discarded as stale, and repaints the previous roster underneath the new
+      // URL and filter controls — with nothing left to correct it. Caught by Codex on the PR.
+      //
+      // The scope key is read from a ref rather than the closure for the same reason: the closure's
+      // copy is the one from click time, which is exactly what cannot be trusted here.
+      if (scopeRef.current === selectionScopeKey) {
+        await load();
+      }
       setSelection({ scope: selectionScopeKey, ids: [] });
       setBulkAssignee("");
       const moved = result?.assigned ?? 0;

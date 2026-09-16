@@ -383,6 +383,49 @@ describe("CompliancePage", () => {
     await waitFor(() => expect(screen.queryByText("1 selected")).toBeNull());
   });
 
+  it("changing the PAGE SIZE clears the selection too, not only the page number", async () => {
+    // Codex caught `pageSize` missing from the scope key: select row 40 at size 50, switch to 25,
+    // switch back, and the tick returns — because only `selectedHere` was filtering it out meanwhile.
+    // Every pagination control has to invalidate a selection, not just the page number.
+    oneMeasureMocks();
+    render(<CompliancePage />);
+    await userEvent.click(await screen.findByLabelText("Select Overdue Patient"));
+    expect(screen.getByText("1 selected")).toBeInTheDocument();
+
+    await userEvent.selectOptions(screen.getByLabelText("Page size"), "100");
+    await waitFor(() => expect(screen.queryByText("1 selected")).toBeNull());
+  });
+
+  it("does not repaint the OLD roster when the view changed while the assignment was in flight", async () => {
+    // Codex caught this: `load` is the callback captured at click time. If a filter changes while the
+    // POST is pending, calling it re-runs the OLD query, bumps the stale-fetch counter so the NEW
+    // view's own request is discarded, and repaints the previous roster under the new URL with
+    // nothing left to correct it.
+    oneMeasureMocks();
+    let resolvePost!: (v: unknown) => void;
+    post.mockReset().mockImplementation(() => new Promise((r) => { resolvePost = r; }));
+
+    render(<CompliancePage />);
+    await userEvent.click(await screen.findByLabelText("Select Overdue Patient"));
+    await userEvent.selectOptions(screen.getByLabelText("Assign to"), "cm@workwell.dev");
+    await userEvent.click(screen.getByRole("button", { name: /Assign selected/ }));
+    await waitFor(() => expect(post).toHaveBeenCalled());
+
+    // The operator moves on while the POST is still pending.
+    navHolder.current.setUrl("/compliance?panel=wellness&measureId=cms125&sex=F");
+    await waitFor(() => {
+      expect(getWithHeaders.mock.calls.some((c) => String(c[0]).includes("sex=F"))).toBe(true);
+    });
+    const callsBefore = getWithHeaders.mock.calls.length;
+
+    resolvePost({ assigned: 1, unchanged: 0, conflicted: 0, missing: [], closed: [] });
+    await waitFor(() => expect(screen.queryByText("Assigning…")).toBeNull());
+
+    // No further roster read at all — and certainly not one for the view the operator left.
+    const added = getWithHeaders.mock.calls.slice(callsBefore).map((c) => String(c[0]));
+    expect(added.filter((u) => !u.includes("sex=F"))).toEqual([]);
+  });
+
   it("assign is absent when no single measure is in scope", async () => {
     render(<CompliancePage />);
     await screen.findByRole("columnheader", { name: /^MMR/ });
