@@ -32,6 +32,7 @@ import { SqliteOutcomeStore } from "../stores/sqlite/outcome-store-sqlite.ts";
 import { SqliteMeasureStore } from "../stores/sqlite/measure-store-sqlite.ts";
 import { SubjectListMemo, resolveListFilter, withListFilter } from "./subject-list-filter.ts";
 import type { SubjectListStore } from "../stores/subject-list-store.ts";
+import type { SubjectFilters } from "./subject-filters.ts";
 
 const TODAY = new Date().toISOString().slice(0, 10);
 const CYCLE = bucketPeriodForMeasure("audiogram", TODAY);
@@ -209,7 +210,7 @@ test("the memo serves the second read without touching the store, and evicts the
 
 test("withListFilter leaves filters untouched when no listId is present", async () => {
   const memo = new SubjectListMemo();
-  const base = { providerId: "maui-prov-001" };
+  const base: SubjectFilters = { providerId: "maui-prov-001" };
   const result = await withListFilter(lists, new URLSearchParams(""), base, memo);
   assert.equal(result.ok, true);
   assert.deepEqual(result.ok && result.filters, base);

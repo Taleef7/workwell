@@ -223,3 +223,74 @@ test("the route declines paths it does not own, so the worker chain continues", 
     "there is no delete path — immutability is the absence of one, not a 405",
   );
 });
+
+test("the report REQUIRES a measurement year, and there is no default", async () => {
+  // An officially routed run is scored over the calendar year containing its evaluation date
+  // (ADR-072). "The latest numbers" in January 2028 would answer a PY2027 question with next year's
+  // first nightly, and it would look exactly like a correct answer — so the caller states the year.
+  const created = (await post({ name: "for a report", identifiers: ["emp-006"] }))!;
+  const { list } = (await created.json()) as { list: { id: string } };
+
+  const noYear = (await get(`/api/subject-lists/${list.id}/report`))!;
+  assert.equal(noYear.status, 400);
+  const body = (await noYear.json()) as { parameter: string; message: string };
+  assert.equal(body.parameter, "measurementYear");
+  assert.match(body.message, /no default/);
+
+  for (const bad of ["latest", "27", "2027.5", "-2027"]) {
+    assert.equal((await get(`/api/subject-lists/${list.id}/report?measurementYear=${bad}`))!.status, 400, bad);
+  }
+});
+
+test("the report answers for the year asked, naming the measures with no run rather than erroring", async () => {
+  // This deployment has no official runs at all, so every measure reports why it has no numbers. An
+  // ACO asking about a year the sandbox never ran is asking a legitimate question; 409 is reserved
+  // for "the evidence may be incomplete", and this is "there is no evidence".
+  const created = (await post({ name: "year report", identifiers: ["emp-006", "emp-99999"] }))!;
+  const { list } = (await created.json()) as { list: { id: string } };
+  const res = (await get(`/api/subject-lists/${list.id}/report?measurementYear=2027`))!;
+  assert.equal(res.status, 200);
+  const report = (await res.json()) as {
+    measurementYear: number;
+    members: { matched: number; notFound: number; total: number };
+    measures: { compactionStatus: string; reason?: string }[];
+    rows?: unknown[];
+  };
+  assert.equal(report.measurementYear, 2027);
+  assert.equal(report.members.matched, 1);
+  assert.equal(report.members.notFound, 1);
+  assert.equal(report.rows, undefined, "the JSON is the summary; the rows are the CSV's job");
+  for (const measure of report.measures) {
+    assert.equal(measure.compactionStatus, "no_run");
+    assert.equal(measure.reason, "no_completed_population_run_for_year");
+  }
+});
+
+test("the report is audited with the runs and counts, and NO identifier", async () => {
+  const created = (await post({ name: "audited report", identifiers: ["emp-006"] }))!;
+  const { list } = (await created.json()) as { list: { id: string } };
+  await get(`/api/subject-lists/${list.id}/report?measurementYear=2027`);
+  const rows = await events.recentAuditEventsByType("SUBJECT_LIST_REPORT_READ", 5);
+  const row = rows[0]!;
+  assert.equal(row.actor, LEAD);
+  const serialized = JSON.stringify(row.payload);
+  assert.match(serialized, /"measurementYear":2027/);
+  assert.match(serialized, /"format":"json"/);
+  assert.doesNotMatch(serialized, /emp-006/, "a patient identifier never reaches the ledger");
+});
+
+test("format=csv returns a CSV with the pinned header; any other format is a 400", async () => {
+  const created = (await post({ name: "csv report", identifiers: ["emp-006"] }))!;
+  const { list } = (await created.json()) as { list: { id: string } };
+  const csvRes = (await get(`/api/subject-lists/${list.id}/report?measurementYear=2027&format=csv`))!;
+  assert.equal(csvRes.status, 200);
+  assert.match(csvRes.headers.get("content-type") ?? "", /text\/csv/);
+  const csv = await csvRes.text();
+  assert.match(csv.split("\r\n")[0]!, /^listId,listRevision,generatedAt,rawIdentifier,/);
+  assert.equal((await get(`/api/subject-lists/${list.id}/report?measurementYear=2027&format=xlsx`))!.status, 400);
+});
+
+test("the report on an unknown list is a 404, like every other read of it", async () => {
+  assert.equal((await get(`/api/subject-lists/${crypto.randomUUID()}/report?measurementYear=2027`))!.status, 404);
+  assert.equal((await get("/api/subject-lists/not-a-uuid/report?measurementYear=2027"))!.status, 404);
+});

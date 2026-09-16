@@ -5,6 +5,7 @@
  *   GET  /api/subject-lists                the lists, newest first, with member counts → 200
  *   GET  /api/subject-lists/{id}           one list → 200 | 404
  *   GET  /api/subject-lists/{id}/members   paged, filterable by resolution → 200 | 400 | 404
+ *   GET  /api/subject-lists/{id}/report    the measurement year's numbers → 200 | 400 | 404 | 409
  *
  * **Every method here is CASE_MANAGER/ADMIN, metadata included** (`auth/authorize.ts`). The public
  * `/sandbox` signs in as a read-only VIEWER that may browse every AUTHENTICATED GET, and on Maui the
@@ -23,7 +24,7 @@
  */
 import type { CloudDatabase } from "@mieweb/cloud";
 import { getStores } from "../stores/factory.ts";
-import { DEPLOYMENT_PROFILE, employees } from "../config/deployment-profile.ts";
+import { DEPLOYMENT_PROFILE, employees, isRunnableMeasure } from "../config/deployment-profile.ts";
 import { isWebChartConfigured, type DataSourceEnv } from "../engine/ingress/data-source.ts";
 import {
   MAX_IMPORT_BYTES,
@@ -40,6 +41,10 @@ import {
   SubjectListRevisionConflictError,
   type SubjectListResolution,
 } from "../stores/subject-list-store.ts";
+import { subjectListReport } from "../compliance/subject-list-report.ts";
+import { subjectListReportCsv } from "../compliance/subject-list-report-csv.ts";
+import { MEASURE_CATALOG } from "../measure/measure-catalog.ts";
+import { isOfficialRouted } from "../wiring/official-routing.ts";
 
 export interface SubjectListsEnv extends DataSourceEnv {
   DB: CloudDatabase;
@@ -72,7 +77,92 @@ export async function handleSubjectLists(
   const members = url.pathname.match(/^\/api\/subject-lists\/([^/]+)\/members$/)?.[1];
   if (members && req.method === "GET") return getMembers(env, decodeURIComponent(members), url.searchParams);
 
+  const report = url.pathname.match(/^\/api\/subject-lists\/([^/]+)\/report$/)?.[1];
+  if (report && req.method === "GET") return getReport(env, decodeURIComponent(report), url.searchParams, actor);
+
   return null;
+}
+
+async function getReport(
+  env: SubjectListsEnv,
+  id: string,
+  params: URLSearchParams,
+  actor: string,
+): Promise<Response> {
+  // REQUIRED, with no default (ADR-082). An officially routed run is scored over the calendar year
+  // containing its evaluation date (ADR-072), so "the latest numbers" in January 2028 would answer a
+  // PY2027 question with next year's partial data — and it would look exactly like a correct answer.
+  const rawYear = params.get("measurementYear")?.trim() ?? "";
+  const measurementYear = Number(rawYear);
+  if (!/^\d{4}$/.test(rawYear) || !Number.isInteger(measurementYear)) {
+    return json(
+      {
+        error: "invalid_request",
+        parameter: "measurementYear",
+        message: "measurementYear is required and must be a four-digit year; there is no default",
+      },
+      400,
+    );
+  }
+  const format = params.get("format")?.trim().toLowerCase() ?? "";
+  if (format && format !== "csv") {
+    return json({ error: "invalid_request", parameter: "format", message: "format must be csv, or omitted for JSON" }, 400);
+  }
+
+  const stores = await getStores(env);
+  // Runnable AND official-routed: an authored measure's membership is status-derived rather than
+  // population-based, so there is no numerator to report for one.
+  const measureIds = MEASURE_CATALOG
+    .filter((m) => m.status === "Active" && isRunnableMeasure(m.id) && isOfficialRouted(m.id))
+    .map((m) => m.id);
+
+  const result = await subjectListReport(
+    { lists: stores.subjectLists, outcomes: stores.outcomes, runs: stores.runs, events: stores.events },
+    id,
+    measurementYear,
+    measureIds,
+  );
+  if (!result.ok) return json(result.body, result.status);
+  const { report } = result;
+
+  // A patient-level clinical read, audited like COMPLIANCE_API_READ. The payload names the list, the
+  // revision and the runs — what a later question ("where did March's numbers come from?") needs —
+  // and no identifier.
+  await stores.events.appendAudit({
+    eventType: "SUBJECT_LIST_REPORT_READ",
+    entityType: "subject_list",
+    entityId: report.list.id,
+    actor,
+    refRunId: null,
+    refCaseId: null,
+    refMeasureVersionId: null,
+    payload: {
+      revision: report.list.revision,
+      measurementYear,
+      format: format === "csv" ? "csv" : "json",
+      runIds: report.measures.map((m) => m.runId).filter((r): r is string => r !== null),
+      compactedMeasures: report.compactedMeasures,
+      members: report.members,
+      rows: report.rows.length,
+    },
+  });
+
+  if (format === "csv") {
+    const byExternalId = new Map(employees().map((e) => [e.externalId, e]));
+    const csv = subjectListReportCsv(report, (externalId) => byExternalId.get(externalId) ?? null);
+    return new Response(csv, {
+      status: 200,
+      headers: {
+        "content-type": "text/csv",
+        "content-disposition": `attachment; filename="subject-list-report-${measurementYear}.csv"`,
+        // Exposed through config/cors.ts so a browser client can actually read it.
+        "x-workwell-compacted-measures": report.compactedMeasures.join(","),
+      },
+    });
+  }
+  // The ROWS are the CSV's job; the JSON is the summary a screen renders.
+  const { rows: _rows, ...summary } = report;
+  return json(summary);
 }
 
 async function importList(req: Request, env: SubjectListsEnv, actor: string): Promise<Response> {
