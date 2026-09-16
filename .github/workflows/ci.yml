@@ -16,7 +16,7 @@ on:
   # UNDIAGNOSED. Adding the prefix makes checks appear, which masks the symptom — so if a PR ever again
   # shows zero checks, do not assume this line covers it.
   push:
-    branches: [main, "claude/**", "fix/**", "feat/**", "perf/**", "chore/**", "docs/**"]
+    branches: [main, "claude/**", "fix/**", "feat/**", "perf/**", "chore/**", "docs/**", "ci/**", "test/**"]
   pull_request:
     branches: [main]
   workflow_dispatch:
