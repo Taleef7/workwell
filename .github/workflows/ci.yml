@@ -250,11 +250,24 @@ jobs:
       - name: Test (SQLite floor + Postgres ceiling)
         env:
           WORKWELL_TEST_PG_URL: postgres://workwell:workwell@localhost:5432/workwell
-        # The command substitution is meant to word-split: the script prints one path per line and no
-        # test path contains a space. Teed because the next step reads the output rather than trusting
-        # the exit code; the default shell sets `pipefail`, so a failing suite still fails the step.
+        # The file list is resolved into a variable and checked BEFORE it is used, because an empty one
+        # does not fail: `node --test` with no path arguments falls back to discovering tests from the
+        # cwd, so a broken shard script would silently run the WHOLE suite on all three shards --
+        # green, three times the work, and sharding defeated with nothing to show it. `set -e` does not
+        # catch it either: a failing command substitution inside another command's arguments does not
+        # abort the shell.
+        #
+        # `$files` is then deliberately word-split: the script prints one path per line and no test path
+        # contains a space. Teed because the next step reads the output rather than trusting the exit
+        # code; the default shell sets `pipefail`, so a failing suite still fails the step.
         run: |
-          node --import tsx --test $(node scripts/test-shards.mjs ${{ matrix.shard }} 3) 2>&1 \
+          files=$(node scripts/test-shards.mjs ${{ matrix.shard }} 3)
+          if [ -z "$files" ]; then
+            echo "::error::test-shards.mjs produced no files for shard ${{ matrix.shard }}/3. Refusing to call node --test with no paths -- it would discover and run the entire suite instead, which passes while silently undoing the sharding."
+            exit 1
+          fi
+          echo "shard ${{ matrix.shard }}/3: $(echo "$files" | wc -l) test files"
+          node --import tsx --test $files 2>&1 \
             | tee "$RUNNER_TEMP/test-shard-${{ matrix.shard }}.log"
       # The store contract self-skips when it cannot reach Postgres, so "the job is green" has never
       # been evidence that the ceiling was exercised — on 2026-09-16 that had to be confirmed by hand,
