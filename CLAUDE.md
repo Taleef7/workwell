@@ -18,6 +18,7 @@ sprint context — read them for background, never act on them.
 
 ## Build & verify
 - Backend: `cd backend-ts; pnpm install --frozen-lockfile; pnpm typecheck; pnpm test` (SQLite floor; the Pg-ceiling store contract runs against a local `postgres:16`, else self-skips). Gated in `ci.yml`.
+  - **CI shards `pnpm test` across three runners** (`scripts/test-shards.mjs`); `pnpm test` still runs everything locally. Two consequences bind: a **new Pg-dependent test file must live under `src/stores/postgres/`** — that is the only shard whose "the ceiling ran rather than self-skipping" assertion covers it, and `pnpm test:shards:verify` fails the build otherwise — and a file the split cannot place fails that same gate rather than silently never running.
 - Frontend: `cd frontend; npm run lint; npm run build`
 - Run the app: backend `cd backend-ts; pnpm dev`; frontend `npm run dev`
 
