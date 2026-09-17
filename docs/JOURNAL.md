@@ -1,5 +1,70 @@
 # Journal
 
+## 2026-09-17 — the backend suite is sharded, and the three ways sharding passes while doing less are closed
+
+#575. The backend test step was 12m20s and it **was** the CI wall-clock: every other job in `ci.yml`
+finishes inside two minutes, so a push cost 14m3s of which 13 was one step. Measured on the branch,
+three shards bring the run to **5.3–6.8m** (runner variance across three green runs: 4.2/4.9/5.3,
+3.8/6.2/6.8, 3.5/6.6/5.0).
+
+**Not `node --test --test-shard=i/N`.** It assigns files round-robin by index in the sorted glob, and
+the expensive files here sit at adjacent indices — the three webchart suites at 71/72/80, the three
+run/route suites at 176/188/189. Measured against the real list, `i % 3` put FOUR of the six heaviest
+on one shard and none on another. It is also unstable under insertion: adding a test file anywhere
+earlier shifts every index, so the balance and the wall-clock would reshuffle on unrelated PRs.
+`backend-ts/scripts/test-shards.mjs` packs by weight instead (longest-processing-time-first), which
+lands at 546/546/545 units with the three heaviest files on three different shards.
+
+**The weights are seconds measured ONE FILE AT A TIME on an idle machine, not read off a CI log** —
+every number there is inflated by contention with the files running beside it, and `routes/runs.test.ts`
+reads as 279s in CI and is 238s alone. The eight that matter: `batch-evaluate-scale` 346,
+`routes/runs` 238, `mock-http-conformance` 169, `backfill-trend-history` 102, `devdb-eval` 100,
+`run-pipeline` 89, `devdb-cli` 61, `routes/measures` 40. The first pass had `batch-evaluate-scale` —
+**the single most expensive file in the suite** — at the default weight of 2, because the CI log's
+contended ordering had pointed at `runs.test.ts` as the worst and the measurement of the rest was
+still running. The first sharded run said so plainly: that shard came in at 6.6m against 3.5m and
+5.0m.
+
+**Three shards, and the floor is a FILE.** `node --test` parallelises across files and never within
+one, so the job cannot beat its longest single file — 5.8m for `batch-evaluate-scale`, which is what
+its shard's time now reflects. A fourth runner costs a runner and saves nothing. Splitting those two
+files is the only thing that moves the floor (batch-evaluate-scale first → ~4m, set by `runs.test.ts`;
+then that one → ~2.8m) and is deliberately not in this PR: it means changing what those files test,
+which is a different kind of change from moving them between runners.
+
+**Sharding introduces three ways to pass while doing less, and all three are silent.** Each is now
+guarded and each guard was mutation-checked:
+- **A file in no shard would never run**, and no single job sees the whole list any more to notice its
+  absence. `pnpm test:shards:verify` asserts the split is exhaustive and disjoint against the same
+  globs `pnpm test` resolves.
+- **The globs resolved against the CALLER's cwd.** Run from the repo root they matched nothing — and a
+  split of zero files is exhaustive and disjoint by vacuous default, so `--verify` would have reported
+  a healthy partition of nothing at all. The guard carried the defect class it exists to catch, inside
+  itself. Everything resolves against the package root now and `allTestFiles()` throws on an empty
+  result rather than letting every caller read "no files" as a valid answer.
+- **`node --test` with no path arguments does not fail** — it discovers tests from the cwd. So a broken
+  shard script would have left the command substitution empty and run the whole suite on all three
+  shards: green, three times the work, sharding undone. `set -e` does not cover it, because a failing
+  command substitution inside another command's arguments does not abort the shell. The list is
+  resolved into a variable and checked before use, and each step prints its file count so the split is
+  visible in the log rather than inferred from a duration.
+
+**The Postgres ceiling now proves it ran.** The store contract self-skips when it cannot reach a
+service rather than failing, so a green job has never been evidence that the Pg ceiling was exercised —
+on #574 that had to be confirmed by hand, grepping a job log for `[postgres]`. Shard 1 asserts it and
+the run reports the count (116 assertions). Pg-dependent files are pinned to `src/stores/postgres/` so
+the assertion has a static home, and the verify step fails if one drifts off it; every shard is given
+the service anyway, so that drift degrades to a failing gate rather than to a suite that skips in
+silence.
+
+`ci/**` and `test/**` were missing from the push-trigger list, so a branch whose entire content is a CI
+change was the one branch CI did not run on — added from the branch that needed them, which is what the
+comment above that list already instructs. Typecheck, the ELM recompile and the OpenAPI lint stay in one
+unsharded job running **in parallel** with the shards rather than gating them.
+
+No test was changed, added or removed: the diff is the workflow, one new script and one `package.json`
+line. Codex's one P1 on the open PR was this journal entry's absence, and it was right.
+
 ## 2026-09-15 (later still) — the roster gets the two controls the ask was framed around, and two hooks stop taking the page down
 
 #567. The practice described the job on the 2026-09-10 call as one sentence — filter for a provider, a
