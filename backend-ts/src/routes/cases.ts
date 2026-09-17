@@ -18,6 +18,7 @@
  */
 import type { CloudDatabase, CloudBucket } from "@mieweb/cloud";
 import { getStores } from "../stores/factory.ts";
+import { listNotFoundBody, withListFilter } from "../compliance/subject-list-filter.ts";
 import type { CaseStore } from "../stores/case-store.ts";
 import type { OutcomeStore } from "../stores/outcome-store.ts";
 import { routedEngineForEnv } from "../wiring/executor-router.ts";
@@ -337,6 +338,10 @@ export async function handleCases(req: Request, env: CasesEnv, actor = "system")
   // Everything from here is the shared work-list pipeline (`case/worklist-read-model.ts`) — the same
   // one `/api/worklist/patients` groups by patient. Two copies would disagree the first time either
   // was touched, and nothing would report the disagreement.
+  // The ACO's attributed list (ADR-082), resolved to subjects before the shared pipeline runs.
+  const listedCases = await withListFilter((await getStores(env)).subjectLists, q, subjectFilters);
+  if (!listedCases.ok) return json(listNotFoundBody(listedCases.listId), 404);
+  subjectFilters = listedCases.filters;
   const summaries = await loadWorklistCases(
     {
       cases: await caseStore(env),

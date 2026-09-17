@@ -71,6 +71,21 @@ export interface SubjectFilters {
    * display table is incomplete.
    */
   payer?: readonly string[] | string | null;
+  /**
+   * The MATCHED subjects of an attributed list (MM-2 PR 3, ADR-082) — the patients an ACO says are
+   * the group's. A subject matches when they are in the set.
+   *
+   * A RESOLVED set like `providerIds`, never parsed from the query string here: `?listId=` names a
+   * list, and turning that into subjects is a store read the route does once (and memoizes — lists
+   * are immutable, so the set cannot go stale). A client asks for a list by id; it cannot spell a
+   * membership.
+   *
+   * An EMPTY set is a real constraint meaning "nobody", exactly as for `providerIds`. A list none of
+   * whose identifiers resolved is a legitimate answer — an attribution file for patients this
+   * practice has never seen — and reading it as "no filter" would serve the whole practice under a
+   * heading naming the ACO's list.
+   */
+  listSubjectIds?: ReadonlySet<string> | null;
 }
 
 /** The payer filter as a normalised code set: trimmed, de-duplicated, empties dropped. */
@@ -109,7 +124,10 @@ export function hasActiveSubjectFilters(filters: SubjectFilters): boolean {
     filters.providerIds != null ||
     filters.ageBand?.trim() ||
     filters.sex?.trim() ||
-    payerCodesOf(filters.payer).length > 0,
+    payerCodesOf(filters.payer).length > 0 ||
+    // `!= null` again, and for the same reason: an attributed list that matched nobody is an ACTIVE
+    // filter. `.size > 0` would read it as absent and answer "the ACO's population" with everybody.
+    filters.listSubjectIds != null,
   );
 }
 
@@ -191,6 +209,11 @@ export function matchesSubjectFilters(
     // A roster that records no sex (the occupational directory) matches NOTHING rather than
     // everything. A filter that quietly returns the whole roster looks exactly like a working one.
     if (!employee.sex || employee.sex.toUpperCase() !== sex) return false;
+  }
+  if (filters.listSubjectIds != null) {
+    // An empty set matches NOBODY — see the field's own note. The set holds directory subject ids,
+    // which is what `employee.externalId` is, so this is a membership test and not a join.
+    if (!filters.listSubjectIds.has(employee.externalId)) return false;
   }
   if (payers.length > 0) {
     // A roster that records no payer (the occupational directory, and the live WebChart directory

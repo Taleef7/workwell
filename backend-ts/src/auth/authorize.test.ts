@@ -209,3 +209,27 @@ test("panels: anyone signed in may READ who works a panel; only CM/ADMIN may cha
     assert.deepEqual(authorize(method, "/api/panels/prov-001", null), { ok: false, status: 401 }, method);
   }
 });
+
+test("subject lists: EVERY method is CM/ADMIN, metadata included — the reads are not AUTHENTICATED (ADR-082)", () => {
+  // Deliberately NOT split into a GET rule and a write rule the way panels is. A member row is a raw
+  // patient identifier somebody else's system asserted, the list's mere existence says which patients
+  // an ACO claims, and the report carries names, memberships, providers and payers. The public
+  // /sandbox signs in as a read-only VIEWER that may browse every AUTHENTICATED GET, and on Maui the
+  // clinician seat is a VIEWER too — so leaving the reads to the /api/** catch-all would expose all of
+  // it to an anonymous visitor who pressed "explore the sandbox".
+  const paths = [
+    "/api/subject-lists",
+    "/api/subject-lists/9f1c2b3a-0000-4000-8000-000000000001",
+    "/api/subject-lists/9f1c2b3a-0000-4000-8000-000000000001/members",
+    "/api/subject-lists/9f1c2b3a-0000-4000-8000-000000000001/report",
+  ];
+  for (const path of paths) {
+    for (const method of ["GET", "POST"] as const) {
+      assert.equal(authorize(method, path, cm).ok, true, `${method} ${path} cm`);
+      assert.equal(authorize(method, path, admin).ok, true, `${method} ${path} admin`);
+      assert.deepEqual(authorize(method, path, viewer), { ok: false, status: 403 }, `${method} ${path} viewer`);
+      assert.deepEqual(authorize(method, path, author), { ok: false, status: 403 }, `${method} ${path} author`);
+      assert.deepEqual(authorize(method, path, null), { ok: false, status: 401 }, `${method} ${path} anonymous`);
+    }
+  }
+});

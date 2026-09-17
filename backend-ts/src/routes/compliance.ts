@@ -8,6 +8,7 @@
  */
 import type { CloudDatabase } from "@mieweb/cloud";
 import { getStores } from "../stores/factory.ts";
+import { listNotFoundBody, withListFilter } from "../compliance/subject-list-filter.ts";
 import { buildRoster, rosterCellCache } from "../compliance/roster-read-model.ts";
 import { subjectFiltersFromQuery, subjectFilterErrorBody, SubjectFilterError } from "../compliance/subject-filters.ts";
 import { isPanelId, PANELS } from "../compliance/panels.ts";
@@ -50,6 +51,11 @@ export async function handleCompliance(req: Request, env: ComplianceEnv): Promis
   }
   await ensureSegmentSeed(env);
   const stores = await getStores(env);
+  // `?listId=` is a RESOLVED membership, not a token the predicate parses (ADR-082): the parameter
+  // names an immutable list and the server turns it into subjects, so a client cannot spell one.
+  const listed = await withListFilter(stores.subjectLists, q, subjectFilters);
+  if (!listed.ok) return json(listNotFoundBody(listed.listId), 404);
+  subjectFilters = listed.filters;
   const segments = await stores.segments.listSegments();
   const roster = await buildRoster(
     {
