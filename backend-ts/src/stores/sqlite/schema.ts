@@ -412,6 +412,48 @@ CREATE TABLE IF NOT EXISTS panel_assignments (
   updated_at   TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS panel_assignments_assignee_idx ON panel_assignments (assignee);
+
+/* The ACO's attributed patient list (MM-2 PR 3, ADR-082). Floor analogue of subject_lists +
+   subject_list_members: TEXT ids and timestamps, INTEGER revision, the same CHECKs and the same
+   partial unique index (SQLite supports both). The one concrete ask from the 2026-09-09 working
+   session — run the measures over exactly the patients the ACO attributes to the group.
+   IMMUTABLE: a re-import is a NEW row with revision+1 under the same name, and the store interface
+   exposes no mutator, because a report is a function of (list revision, run ids) and a list that
+   could be edited underneath one would make every filed number unverifiable. NOT_FOUND rows are
+   KEPT — an unresolvable identifier is the ACO and the practice disagreeing about who a patient is,
+   which is a finding for the review queue, not a row to drop. resolution/subject_id are coupled by a
+   CHECK so a row can never claim MATCHED while naming nobody. A list is an ATTRIBUTION someone else
+   asserts; a panel (ADR-080 d6) is WorkWell's own assignment map and never one.
+   OWNER-APPROVED DDL: Taleef explicitly authorized these tables in-session (2026-09-15), conditional
+   on external review; additive (CREATE IF NOT EXISTS), reversible (DROP TABLE).
+   (Block comment: this DDL is newline-flattened, so a line comment would swallow the rest of it.) */
+CREATE TABLE IF NOT EXISTS subject_lists (
+  id           TEXT PRIMARY KEY,
+  name         TEXT NOT NULL CHECK (trim(name) <> '' AND length(name) <= 200),
+  revision     INTEGER NOT NULL CHECK (revision > 0),
+  status       TEXT NOT NULL CHECK (status IN ('IMPORTING','COMPLETE')),
+  source       TEXT CHECK (source IS NULL OR length(source) <= 200),
+  note         TEXT CHECK (note IS NULL OR length(note) <= 200),
+  created_by   TEXT NOT NULL,
+  created_at   TEXT NOT NULL,
+  completed_at TEXT,
+  UNIQUE (name, revision)
+);
+
+CREATE TABLE IF NOT EXISTS subject_list_members (
+  list_id        TEXT NOT NULL REFERENCES subject_lists(id),
+  raw_identifier TEXT NOT NULL CHECK (trim(raw_identifier) <> '' AND length(raw_identifier) <= 128),
+  subject_id     TEXT,
+  resolution     TEXT NOT NULL CHECK (resolution IN ('MATCHED','NOT_FOUND','AMBIGUOUS')),
+  CHECK ((resolution = 'MATCHED') = (subject_id IS NOT NULL)),
+  PRIMARY KEY (list_id, raw_identifier)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS subject_list_members_subject_uidx
+  ON subject_list_members (list_id, subject_id) WHERE resolution = 'MATCHED';
+
+CREATE INDEX IF NOT EXISTS subject_list_members_resolution_idx
+  ON subject_list_members (list_id, resolution, subject_id);
 `;
 
 /**

@@ -16,6 +16,7 @@ import {
   Settings,
   Shield,
   Users,
+  ListOrdered,
 } from "lucide-react";
 import {
   AppHeader,
@@ -56,6 +57,9 @@ const nav = [
   { href: "/worklist", label: "Worklist", icon: ClipboardList, roles: [ROLES.CASE_MANAGER, ROLES.ADMIN] },
   { href: "/compliance", label: "Compliance", icon: ListChecks },
   { href: "/people", label: "People", icon: Users, roles: [ROLES.CASE_MANAGER, ROLES.ADMIN] },
+  // The ACO's attributed lists (ADR-082). CM/ADMIN because EVERY method on /api/subject-lists is —
+  // a member row is a raw identifier another system asserted, so the reads are gated too.
+  { href: "/lists", label: "Lists", icon: ListOrdered, roles: [ROLES.CASE_MANAGER, ROLES.ADMIN] },
   { href: "/campaigns", label: "Campaigns", icon: Send, roles: [ROLES.CASE_MANAGER, ROLES.ADMIN] },
   { href: "/orders", label: "Orders", icon: ClipboardCheck, roles: [ROLES.CASE_MANAGER, ROLES.ADMIN] },
   { href: "/measures", label: "Measures", icon: BookOpen },

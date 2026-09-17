@@ -8,6 +8,7 @@
  * gap-centric list and the patient-centric one cannot disagree about who is being worked.
  */
 import { getStores } from "../stores/factory.ts";
+import { listNotFoundBody, withListFilter } from "../compliance/subject-list-filter.ts";
 import type { CloudDatabase, CloudBucket } from "@mieweb/cloud";
 import { loadWorklistCases } from "../case/worklist-read-model.ts";
 import { groupIntoPatients } from "../case/worklist-patients.ts";
@@ -56,6 +57,12 @@ export async function handleWorklist(req: Request, env: WorklistEnv, actor = "sy
     : employeeById;
 
   const stores = await getStores(env);
+
+  // The ACO's attributed list, resolved once and memoized (ADR-082). An unknown list is a 404 rather
+  // than an unfiltered work list under a heading naming the ACO's population.
+  const listed = await withListFilter(stores.subjectLists, q, subjectFilters);
+  if (!listed.ok) return json(listNotFoundBody(listed.listId), 404);
+  subjectFilters = listed.filters;
 
   /**
    * "My panel" (ADR-080 d5) — resolved from the MAPPINGS and the caller's own identity, never from a

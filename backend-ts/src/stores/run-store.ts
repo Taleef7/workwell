@@ -103,6 +103,21 @@ export interface RunStore {
   getRun(id: string): Promise<RunRecord | null>;
   /** Runs newest-first (by started_at), capped at `limit` — the /api/runs list read model. */
   listRuns(limit?: number): Promise<RunRecord[]>;
+  /**
+   * Reportable whole-population runs whose MEASUREMENT PERIOD starts within `[from, to)`, newest-first
+   * by `started_at` (ADR-082).
+   *
+   * Filtered on the period rather than on `started_at`, and that is the whole point of the method. A
+   * manual run takes an arbitrary `evaluationDate` (`run/run-pipeline.ts`), so a run STARTED in 2028
+   * can legitimately score PY2027 — a rerun-to-verify of a closed year is exactly that. Selecting
+   * candidates by start date drops it, and the attributed-list report would answer
+   * "no completed population run for year" for a year whose run is sitting in the table.
+   *
+   * "Reportable whole-population" is the same pair every rate read applies: scope MEASURE or
+   * ALL_PROGRAMS, status COMPLETED or PARTIAL_FAILURE. A CASE/EMPLOYEE rerun is a fragment whose
+   * numbers are not the measure's.
+   */
+  listPopulationRunsForPeriod(from: string, to: string, limit?: number): Promise<RunRecord[]>;
   /** Return the single most-recent run with the given `triggered_by` value, or null if none. */
   getLastRunByTriggeredBy(triggeredBy: string): Promise<RunRecord | null>;
   /**

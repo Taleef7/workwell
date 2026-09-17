@@ -109,6 +109,37 @@ environment. The demo/production stack routes official measures over its synthet
 WebChart-configured stack evaluates authored logic. Pairing them is a configuration change, not a
 build.
 
+## Reporting against somebody else's population (built 2026-09-16)
+
+The batch loop above answers *"how is our population doing?"* — where "our population" is whoever is in
+the directory. An ACO asks a different question: *"how are the patients WE attribute to you doing?"*
+On an MSSP attribution those are not the same people. The practice sees patients the ACO does not
+attribute, and the ACO attributes patients the practice has not seen this year, so a rate computed
+over the directory is a plausible-looking answer to a question nobody asked.
+
+So an attributed list is a first-class object (ADR-082). Somebody pastes or uploads the identifiers,
+the server resolves them against the enumerated directory, and what it could not resolve is KEPT —
+that is the ACO and the practice disagreeing about who a patient is, which is a phone call somebody
+has to make, not a rounding error. `/lists` shows the matched, the not-found and the ambiguous side by
+side for exactly that reason.
+
+Three things about it are worth knowing before you trust a number off it:
+
+1. **The list is immutable.** Re-uploading the same name makes revision 2; revision 1 is untouched.
+   That is what lets a report filed in March be traced, in December, to the exact list and the exact
+   runs it was computed over.
+2. **The report names a measurement YEAR.** An officially routed measure is scored over its calendar
+   year (ADR-072), so "the latest numbers" stops being the right answer on 1 January. The year is
+   required; there is no default.
+3. **Members the run never evaluated are shown, never subtracted.** They sit beside the rates as
+   "not measured". Folding them into a denominator would mean a smaller run produced a higher score,
+   and that is the one direction a quality number must not move by accident.
+
+A measure whose run has passed the retention window (ADR-073/077) is named with its reason rather than
+rendered — the other measures still report. And the whole thing is refused outright on a
+live-directory deployment, because matching an attribution file against a last-known registry that
+invents profiles for unknown ids would be *silently* incomplete. That is a PHI-phase gate, not a gap.
+
 ## S7 — Quality inside the encounter (target state)
 
 > **This flow is not built, but its delivery half now is.** The batch loop above is shipped

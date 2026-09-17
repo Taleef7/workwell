@@ -28,8 +28,11 @@ function originHeaders(req: Request, allowed: string[]): Record<string, string> 
   return {
     "access-control-allow-origin": origin,
     "access-control-allow-credentials": "true",
-    // Let the browser read pagination metadata cross-origin (#150 M10 — the worklist X-Total-Count).
-    "access-control-expose-headers": "X-Total-Count",
+    // Let the browser read pagination metadata cross-origin (#150 M10 — the worklist X-Total-Count),
+    // and the attributed-list report's partial-answer header (ADR-082): a CSV that omits a measure
+    // because its run was compacted says so here, and a header the browser cannot read is a header
+    // that does not exist for the page that needed it.
+    "access-control-expose-headers": "X-Total-Count, X-WorkWell-Compacted-Measures",
     vary: "Origin",
   };
 }

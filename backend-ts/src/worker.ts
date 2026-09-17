@@ -29,6 +29,7 @@ import { handleHierarchy } from "./routes/hierarchy.ts";
 import { handleTenants } from "./routes/tenants.ts";
 import { handleProviders } from "./routes/providers.ts";
 import { handlePanels } from "./routes/panels.ts";
+import { handleSubjectLists } from "./routes/subject-lists.ts";
 import { handlePayers } from "./routes/payers.ts";
 import { handleWorklist } from "./routes/worklist.ts";
 import { handleQuality } from "./routes/quality.ts";
@@ -50,7 +51,7 @@ import { handleMcp } from "./routes/mcp.ts";
 import { handleAuditor } from "./routes/auditor.ts";
 import { createAuthHandler, type AuthHandler, type RefreshTokenRevocation } from "./routes/auth.ts";
 import { createJwt, type JwtService } from "./auth/jwt.ts";
-import { authorize, extractPrincipal } from "./auth/authorize.ts";
+import { authorize, extractPrincipal, listFilterAuthorized } from "./auth/authorize.ts";
 import { isDemoAccountRefusedOnProfile } from "./auth/demo-users.ts";
 import { assertSafeStartup, type StartupEnv } from "./config/startup-safety.ts";
 import { parseAllowedOrigins, preflightResponse, withCors } from "./config/cors.ts";
@@ -252,6 +253,20 @@ async function route(req: Request, env: Env, ctx: CloudExecutionContext): Promis
     }
     if (principal?.email) actor = principal.email;
     principalRole = principal?.role ?? null;
+    // `?listId=` narrows a read to an ACO's attributed membership, which is the same disclosure the
+    // CM/ADMIN gate on /api/subject-lists exists to make — so it carries the same gate, once, here
+    // (ADR-082). Without this the gate reads as present and cannot fire for the widest read: a VIEWER
+    // with a list id could take the whole membership out of /api/exports/cases as a CSV.
+    if (new URL(req.url).searchParams.has("listId") && !listFilterAuthorized(principalRole)) {
+      return json(
+        {
+          error: "forbidden",
+          parameter: "listId",
+          message: "narrowing a read to an attributed list requires a case-manager or admin seat",
+        },
+        403,
+      );
+    }
   }
 
   // Auth — login/refresh/logout, JVM-free JWT + PBKDF2 (#105).
@@ -311,6 +326,12 @@ async function route(req: Request, env: Env, ctx: CloudExecutionContext): Promis
   // AUTHENTICATED like the rest of the directory; writes are CASE_MANAGER/ADMIN and audited.
   const panelsResponse = await handlePanels(req, env, actor);
   if (panelsResponse) return panelsResponse;
+
+  // Attributed patient lists (MM-2 PR 3, ADR-082) — the ACO's own list of who the group is
+  // responsible for. EVERY method is CM/ADMIN, metadata included: a member row is a raw identifier
+  // another system asserted. Import is refused outright on a live-directory deployment.
+  const subjectListsResponse = await handleSubjectLists(req, env, actor);
+  if (subjectListsResponse) return subjectListsResponse;
 
   // Payers — the insurance list the panel filters are populated from (MM-2). Profile-scoped and
   // empty on a deployment whose roster records no payer.

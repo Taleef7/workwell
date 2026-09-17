@@ -118,6 +118,19 @@ export class PgRunStore implements RunStore {
     return rows[0] ? toRecord(rows[0]) : null;
   }
 
+  async listPopulationRunsForPeriod(from: string, to: string, limit = 50): Promise<RunRecord[]> {
+    const { rows } = await this.pool.query<RunRow>(
+      `SELECT ${RUN_COLS} FROM ${T}
+        WHERE UPPER(scope_type) IN ('MEASURE','ALL_PROGRAMS')
+          AND UPPER(status) IN ('COMPLETED','PARTIAL_FAILURE')
+          AND measurement_period_start >= $1::timestamptz
+          AND measurement_period_start < $2::timestamptz
+        ORDER BY started_at DESC, id DESC LIMIT $3`,
+      [from, to, limit],
+    );
+    return rows.map(toRecord);
+  }
+
   async listRunsByTriggeredBy(triggeredBy: string, limit = 500): Promise<RunRecord[]> {
     const { rows } = await this.pool.query<RunRow>(
       `SELECT ${RUN_COLS}

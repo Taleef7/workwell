@@ -75,7 +75,11 @@ export async function runsCsv(runStore: RunStore, outcomeStore: OutcomeStore, li
   return toCsv(RUN_HEADERS, rows);
 }
 
-const subjectHeaders = (term: "employee" | "patient") => [`${term}ExternalId`, `${term}Name`] as const;
+/**
+ * The two subject columns, named by the deployment's own term (DATA_MODEL_CONTRACTS §6.2/§6.3).
+ * Exported so a new export cannot grow a second copy that drifts — the attributed-list report uses it.
+ */
+export const subjectHeaders = (term: "employee" | "patient") => [`${term}ExternalId`, `${term}Name`] as const;
 const outcomeDateHeader = DEPLOYMENT_PROFILE.subjectTerm === "patient" ? "lastResultDate" : "lastExamDate";
 const outcomeExclusionHeader = DEPLOYMENT_PROFILE.subjectTerm === "patient" ? "exclusionStatus" : "waiverStatus";
 
