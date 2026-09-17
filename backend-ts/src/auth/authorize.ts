@@ -172,6 +172,14 @@ const RULES: Rule[] = [
   // Both must precede the /api/** catch-alls below, which would otherwise answer first.
   { method: "GET", pattern: rx("/api/panels/**"), access: "AUTHENTICATED" },
   { pattern: rx("/api/panels/**"), access: [CM, A] },
+  // Attributed patient lists (MM-2 PR 3, ADR-082). EVERY method is CM/ADMIN, metadata included — not
+  // split into a GET rule and a write rule the way panels is. A member row is a raw patient
+  // identifier somebody else's system asserted, the list's existence says which patients an ACO
+  // claims, and the report carries names, memberships, providers and payers. The public /sandbox
+  // signs in as a read-only VIEWER that may browse every AUTHENTICATED GET, and on Maui the clinician
+  // seat is a VIEWER too, so leaving the reads to the /api/** catch-all would expose all of it. The
+  // identity routes are restricted for exactly this reason. Must precede the catch-alls below.
+  { pattern: rx("/api/subject-lists/**"), access: [CM, A] },
   { method: "GET", pattern: rx("/api/worklist/**"), access: "AUTHENTICATED" },
   { method: "GET", pattern: rx("/api/**"), access: "AUTHENTICATED" },
   { pattern: rx("/api/**"), access: "AUTHENTICATED" },
@@ -180,6 +188,25 @@ const RULES: Rule[] = [
 export interface AuthzDecision {
   ok: boolean;
   status?: 401 | 403;
+}
+
+/**
+ * Who may narrow a read to an attributed list — `?listId=` (ADR-082).
+ *
+ * **This exists because the CM/ADMIN gate on `/api/subject-lists/**` was otherwise a guard that could
+ * not fire for the read that matters most.** Five of the six surfaces that accept `?listId=` are
+ * AUTHENTICATED (the roster, the work list, the cases route and both CSV exports), so a VIEWER holding
+ * a list id could ask `GET /api/exports/cases?format=csv&listId=<uuid>` and receive the membership —
+ * names, provider, payer and per-measure status — which is strictly MORE than the members endpoint the
+ * gate protects. And the id is not a secret by construction: it sits in the query string of every
+ * filtered screen, so it reaches shareable URLs, browser history and access logs.
+ *
+ * Enforced once in the worker rather than per route, for the reason `compliance/subject-list-filter.ts`
+ * gives for resolving the parameter in one place: six copies of an authorization rule is five chances
+ * for one of them to be forgotten.
+ */
+export function listFilterAuthorized(role: string | null | undefined): boolean {
+  return role === CM || role === A;
 }
 
 export function authorize(method: string, pathname: string, principal: JwtPrincipal | null): AuthzDecision {

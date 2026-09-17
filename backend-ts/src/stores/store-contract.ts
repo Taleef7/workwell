@@ -24,6 +24,13 @@ import type { QualitySnapshotStore, QualitySnapshotInput } from "./quality-snaps
 import type { PersonLinkStore } from "./person-link-store.ts";
 import type { EvalStateStore, UpsertEvalStateInput } from "./eval-state-store.ts";
 import type { PanelStore } from "./panel-store.ts";
+import type {
+  CreateSubjectListInput,
+  SubjectList,
+  SubjectListMember,
+  SubjectListResolution,
+  SubjectListStore,
+} from "./subject-list-store.ts";
 import { LATEST_RUN_PROBE_BUDGET, type OutcomeMeasureFilter, type OutcomeWithRun } from "./outcome-store.ts";
 import { isCompletedRun, isPopulationRun, latestRunRows } from "../program/rollup-shared.ts";
 
@@ -38,6 +45,41 @@ export const sampleRun = (scopeId?: string): CreateRunInput => ({
 
 /** Registers the RunStore contract for one backend. `freshStore` → isolated, empty. */
 export function runStoreContract(label: string, freshStore: () => Promise<RunStore>): void {
+  test(`[${label}] listPopulationRunsForPeriod selects by the run's PERIOD, not by when it started`, async () => {
+    // The distinction the method exists for (ADR-082): a manual run takes an arbitrary
+    // `evaluationDate`, so a rerun-to-verify of a closed year STARTS in the following one and
+    // legitimately scores the closed one. Filtering on `started_at` drops it, and the attributed-list
+    // report then answers "no run for this year" with that run sitting in the table.
+    const store = await freshStore();
+    const period = (year: number) => ({
+      measurementPeriodStart: `${year}-01-01T00:00:00.000Z`,
+      measurementPeriodEnd: `${year}-12-31T23:59:59.999Z`,
+    });
+    const nightly = await store.createRun({ ...sampleRun("cms122"), scopeType: "ALL_PROGRAMS", ...period(2027) });
+    const rerun = await store.createRun({ ...sampleRun("cms122"), scopeType: "ALL_PROGRAMS", ...period(2027) });
+    const nextYear = await store.createRun({ ...sampleRun("cms122"), scopeType: "ALL_PROGRAMS", ...period(2028) });
+    const caseRerun = await store.createRun({ ...sampleRun("cms122"), scopeType: "CASE", ...period(2027) });
+    for (const r of [nightly, rerun, nextYear, caseRerun]) await store.finalizeRun(r.id, "COMPLETED");
+    // A run that never finished is not reportable, whatever its period says.
+    const unfinished = await store.createRun({ ...sampleRun("cms122"), scopeType: "ALL_PROGRAMS", ...period(2027) });
+
+    const found = await store.listPopulationRunsForPeriod("2027-01-01T00:00:00.000Z", "2028-01-01T00:00:00.000Z", 50);
+    const ids = found.map((r) => r.id);
+    assert.ok(ids.includes(nightly.id) && ids.includes(rerun.id), "both of the year's population runs");
+    assert.equal(ids.includes(nextYear.id), false, "the next year's run is outside the window");
+    assert.equal(ids.includes(caseRerun.id), false, "a CASE-scope rerun is a fragment, not the measure's numbers");
+    assert.equal(ids.includes(unfinished.id), false, "an unfinished run is not reportable");
+    // Newest-first by started_at, because the caller takes the first that holds its measure's rows.
+    const startedAts = found.map((r) => r.startedAt);
+    assert.deepEqual(startedAts, [...startedAts].sort().reverse());
+    // The window is half-open: a run whose period starts exactly at the upper bound is the NEXT year's.
+    assert.equal(
+      (await store.listPopulationRunsForPeriod("2028-01-01T00:00:00.000Z", "2029-01-01T00:00:00.000Z", 50))
+        .some((r) => r.id === nextYear.id),
+      true,
+    );
+  });
+
   test(`[${label}] createRun inserts a QUEUED run and getRun reads it back`, async () => {
     const store = await freshStore();
     const created = await store.createRun(sampleRun("audiogram"));
@@ -2947,5 +2989,251 @@ export function panelStoreContract(label: string, freshStore: () => Promise<Pane
     assert.equal(removed?.assignee, "cm@workwell.dev");
     assert.equal(await store.getPanelAssignment("maui-prov-012"), null);
     assert.deepEqual(await store.listAll(), []);
+  });
+}
+
+/** Registers the SubjectListStore contract (MM-2 PR 3, ADR-082) for one backend. */
+export function subjectListStoreContract(label: string, freshStore: () => Promise<SubjectListStore>): void {
+  const NOW = "2026-09-16T10:00:00.000Z";
+  const member = (rawIdentifier: string, subjectId: string | null = null): SubjectListMember =>
+    subjectId === null
+      ? { rawIdentifier, subjectId: null, resolution: "NOT_FOUND" }
+      : { rawIdentifier, subjectId, resolution: "MATCHED" };
+  const create = (
+    store: SubjectListStore,
+    over: Partial<CreateSubjectListInput> & { members: readonly SubjectListMember[] },
+  ): Promise<SubjectList> =>
+    store.createList({
+      id: crypto.randomUUID(),
+      name: "ACO attribution",
+      source: "the quarterly attribution file",
+      note: null,
+      createdBy: "quality-lead@workwell.dev",
+      now: NOW,
+      ...over,
+    });
+
+  test(`[${label}] subject lists: an unknown list is null / empty / absent, never an error`, async () => {
+    // Three callers ask three different ways, and none may learn "no such list" by catching an
+    // exception: the report 404s on it, the ?listId= filter 404s on it, and the picker shows nothing.
+    // A malformed id is the same answer — the ceiling's `id` is a native UUID, so `foo` would
+    // otherwise raise `invalid input syntax for type uuid` where the floor simply finds no row.
+    const store = await freshStore();
+    assert.equal(await store.getList(crypto.randomUUID()), null);
+    assert.equal(await store.getList("not-a-uuid"), null);
+    assert.deepEqual(await store.matchedSubjectIds("not-a-uuid"), []);
+    assert.deepEqual(await store.listLists(), []);
+    assert.deepEqual(await store.listMembers("not-a-uuid", { limit: 10, offset: 0 }), { members: [], total: 0 });
+    assert.equal((await store.countMembers(["not-a-uuid"])).size, 0);
+  });
+
+  test(`[${label}] subject lists: a list is written whole, and the NOT_FOUND members are KEPT`, async () => {
+    const store = await freshStore();
+    const list = await create(store, {
+      members: [member("pat-00001", "pat-00001"), member("pat-00002", "pat-00002"), member("pat-99999")],
+    });
+    assert.equal(list.revision, 1);
+    assert.equal(list.status, "COMPLETE");
+    assert.equal(list.completedAt, NOW);
+    assert.equal(list.createdBy, "quality-lead@workwell.dev");
+
+    // An identifier the directory cannot resolve is the ACO and the practice disagreeing about who a
+    // patient is. Dropping it would remove the patient from the evidence that they were ever claimed.
+    const page = await store.listMembers(list.id, { limit: 10, offset: 0 });
+    assert.equal(page.total, 3);
+    assert.deepEqual(page.members.map((m) => m.rawIdentifier), ["pat-00001", "pat-00002", "pat-99999"]);
+    const notFound = await store.listMembers(list.id, { resolution: "NOT_FOUND", limit: 10, offset: 0 });
+    assert.equal(notFound.total, 1);
+    assert.equal(notFound.members[0]!.subjectId, null, "a NOT_FOUND member names nobody");
+
+    assert.deepEqual((await store.matchedSubjectIds(list.id)).sort(), ["pat-00001", "pat-00002"]);
+    assert.deepEqual((await store.countMembers([list.id])).get(list.id), { MATCHED: 2, NOT_FOUND: 1, AMBIGUOUS: 0 });
+  });
+
+  test(`[${label}] subject lists: 1,100 members cross the chunk boundary and come back whole`, async () => {
+    // Both backends chunk (500 on the ceiling, 200 on the floor), so the count that matters is one
+    // that straddles more than one statement. A truncated import is the failure this table exists to
+    // make impossible, and it would be invisible in a three-member fixture.
+    const store = await freshStore();
+    const members = Array.from({ length: 1100 }, (_, i) => {
+      const id = `pat-${String(i).padStart(5, "0")}`;
+      return member(id, id);
+    });
+    const list = await create(store, { members });
+    assert.equal((await store.listMembers(list.id, { limit: 1, offset: 0 })).total, 1100);
+    assert.equal((await store.matchedSubjectIds(list.id)).length, 1100);
+  });
+
+  test(`[${label}] subject lists: paging is stable and ordered by identifier, and the total follows the filter`, async () => {
+    const store = await freshStore();
+    const list = await create(store, {
+      members: [member("c", "c"), member("a", "a"), member("d"), member("b", "b")],
+    });
+    const first = await store.listMembers(list.id, { limit: 2, offset: 0 });
+    const second = await store.listMembers(list.id, { limit: 2, offset: 2 });
+    assert.deepEqual(first.members.map((m) => m.rawIdentifier), ["a", "b"]);
+    assert.deepEqual(second.members.map((m) => m.rawIdentifier), ["c", "d"]);
+    assert.equal(first.total, 4);
+    // The total follows the FILTER, not the page — the members table pages on it, so a total that
+    // ignored the filter would offer pages that are empty.
+    const matched = await store.listMembers(list.id, { resolution: "MATCHED", limit: 2, offset: 0 });
+    assert.equal(matched.total, 3);
+  });
+
+  test(`[${label}] subject lists: re-importing a name allocates the NEXT revision and leaves the first alone`, async () => {
+    // Immutability is the whole design: a report is a function of (list revision, run ids), so a
+    // second upload must not touch the first. The revisions are consecutive so a person can say which
+    // file a number came from.
+    const store = await freshStore();
+    const first = await create(store, { members: [member("pat-00001", "pat-00001")] });
+    const second = await create(store, {
+      members: [member("pat-00001", "pat-00001"), member("pat-00002", "pat-00002")],
+    });
+    assert.equal(first.revision, 1);
+    assert.equal(second.revision, 2);
+    assert.notEqual(first.id, second.id);
+    assert.equal((await store.matchedSubjectIds(first.id)).length, 1, "revision 1 did not gain a member");
+    assert.equal((await store.matchedSubjectIds(second.id)).length, 2);
+
+    // A DIFFERENT name starts its own sequence — the uniqueness is (name, revision), not revision.
+    const other = await create(store, { name: "MSSP roster", members: [member("pat-00003", "pat-00003")] });
+    assert.equal(other.revision, 1);
+    assert.deepEqual(
+      (await store.listLists()).map((l) => `${l.name}#${l.revision}`).sort(),
+      ["ACO attribution#1", "ACO attribution#2", "MSSP roster#1"],
+    );
+  });
+
+  test(`[${label}] subject lists: nothing is visible until the import finished`, async () => {
+    // The audit runs between the members and the flip, so throwing there is the reachable form of "the
+    // import died half-written". Every read must answer as if it never happened — a SHORT list is
+    // worse than no list, because it reads as a smaller ACO population under a real list's name.
+    const store = await freshStore();
+    const id = crypto.randomUUID();
+    await assert.rejects(
+      create(store, {
+        id,
+        members: [member("pat-00001", "pat-00001"), member("pat-00002", "pat-00002")],
+        beforeComplete: async () => {
+          throw new Error("audit write failed");
+        },
+      }),
+      /audit write failed/,
+    );
+    assert.equal(await store.getList(id), null);
+    assert.deepEqual(await store.listLists(), []);
+    assert.deepEqual(await store.matchedSubjectIds(id), [], "an unfinished import filters nobody");
+    // Still recoverable for the admin surface — a stuck import is evidence, not litter.
+    assert.equal((await store.listLists({ includeIncomplete: true })).length, 1);
+  });
+
+  test(`[${label}] subject lists: a failure mid-chunk leaves nothing visible either`, async () => {
+    const store = await freshStore();
+    const id = crypto.randomUUID();
+    const members: SubjectListMember[] = Array.from({ length: 600 }, (_, i) => {
+      const raw = `pat-${String(i).padStart(5, "0")}`;
+      return member(raw, raw);
+    });
+    // Past the first chunk on BOTH backends (500 / 200), so the write fails partway through.
+    members[550] = { rawIdentifier: "pat-00550", subjectId: null, resolution: "MATCHED" };
+    await assert.rejects(create(store, { id, members }));
+    assert.equal(await store.getList(id), null);
+    assert.deepEqual(await store.matchedSubjectIds(id), []);
+  });
+
+  test(`[${label}] subject lists: the DATABASE refuses a member that claims MATCHED and names nobody`, async () => {
+    // Enforced by a CHECK rather than by the importer, because the coupling is what every downstream
+    // reader assumes: `matchedSubjectIds` would otherwise return an undefined, and a report row would
+    // carry an empty patient column while counting toward a denominator.
+    const store = await freshStore();
+    await assert.rejects(create(store, { members: [{ rawIdentifier: "x", subjectId: null, resolution: "MATCHED" }] }));
+    // Refused in the other direction too: a NOT_FOUND row that names a subject.
+    await assert.rejects(
+      create(store, { members: [{ rawIdentifier: "x", subjectId: "pat-00001", resolution: "NOT_FOUND" }] }),
+    );
+  });
+
+  test(`[${label}] subject lists: the DATABASE caps the operator's own text as well as the identifiers`, async () => {
+    // The identifier namespace gate does not cover `name`/`source`/`note`, and `name` and `source` are
+    // copied into an audit payload that is exported wholesale — so the cap is in the schema too, not
+    // only in the route's validator. A validator-only rule is a rule a second caller can skip.
+    const store = await freshStore();
+    const long = "x".repeat(201);
+    await assert.rejects(create(store, { name: long, members: [member("x", "x")] }));
+    await assert.rejects(create(store, { source: long, members: [member("x", "x")] }));
+    await assert.rejects(create(store, { note: long, members: [member("x", "x")] }));
+    // Exactly at the cap is accepted — the number is the documented one, not an approximation.
+    const ok = await create(store, { name: "x".repeat(200), members: [member("x", "x")] });
+    assert.equal(ok.name.length, 200);
+  });
+
+  test(`[${label}] subject lists: an in-flight import's members are invisible to EVERY read, not just getList`, async () => {
+    // `getList`, `listLists` and `matchedSubjectIds` filtered COMPLETE; `listMembers` and
+    // `countMembers` did not, and were safe only because every route calls `getList` first. That is a
+    // claim about callers rather than about the store, and the interface says every read filters.
+    const store = await freshStore();
+    const id = crypto.randomUUID();
+    await assert.rejects(
+      create(store, {
+        id,
+        members: [member("pat-00001", "pat-00001"), member("pat-99999")],
+        beforeComplete: async () => {
+          throw new Error("audit write failed");
+        },
+      }),
+      /audit write failed/,
+    );
+    assert.deepEqual(await store.listMembers(id, { limit: 10, offset: 0 }), { members: [], total: 0 });
+    assert.equal((await store.countMembers([id])).size, 0);
+  });
+
+  test(`[${label}] subject lists: the DATABASE refuses a blank name and an unknown resolution`, async () => {
+    const store = await freshStore();
+    await assert.rejects(create(store, { name: "   ", members: [member("x", "x")] }));
+    await assert.rejects(
+      create(store, {
+        members: [{ rawIdentifier: "x", subjectId: "pat-00001", resolution: "PROBABLY" as SubjectListResolution }],
+      }),
+    );
+  });
+
+  test(`[${label}] subject lists: one subject cannot be MATCHED twice in the same list`, async () => {
+    // The alias rule, enforced by the partial unique index rather than by the importer alone: two
+    // identifiers for one patient must land as MATCHED + AMBIGUOUS so the review queue sees the
+    // disagreement. Letting both match would double the patient in every denominator the list feeds.
+    const store = await freshStore();
+    await assert.rejects(
+      create(store, { members: [member("pat-00001", "pat-00001"), member("MRN-1", "pat-00001")] }),
+    );
+    // AMBIGUOUS rows carry no subject, so any number of them coexist with the one that matched.
+    const ok = await create(store, {
+      members: [
+        member("pat-00001", "pat-00001"),
+        { rawIdentifier: "MRN-1", subjectId: null, resolution: "AMBIGUOUS" },
+        { rawIdentifier: "MRN-2", subjectId: null, resolution: "AMBIGUOUS" },
+      ],
+    });
+    assert.deepEqual((await store.countMembers([ok.id])).get(ok.id), { MATCHED: 1, NOT_FOUND: 0, AMBIGUOUS: 2 });
+  });
+
+  test(`[${label}] subject lists: a list none of whose identifiers resolved is EMPTY, not missing`, async () => {
+    // An empty matched set is a legitimate answer — an attribution file for patients this practice has
+    // never seen — and every `?listId=` surface must then filter to nobody rather than fall back to
+    // everybody. The store distinguishes it from "no such list" by still returning the header.
+    const store = await freshStore();
+    const list = await create(store, { members: [member("pat-99998"), member("pat-99999")] });
+    assert.notEqual(await store.getList(list.id), null);
+    assert.deepEqual(await store.matchedSubjectIds(list.id), []);
+    assert.deepEqual((await store.countMembers([list.id])).get(list.id), { MATCHED: 0, NOT_FOUND: 2, AMBIGUOUS: 0 });
+  });
+
+  test(`[${label}] subject lists: countMembers answers for several lists in one call`, async () => {
+    const store = await freshStore();
+    const a = await create(store, { name: "A", members: [member("pat-00001", "pat-00001")] });
+    const b = await create(store, { name: "B", members: [member("pat-00002", "pat-00002"), member("pat-99999")] });
+    const counts = await store.countMembers([a.id, b.id, crypto.randomUUID()]);
+    assert.equal(counts.get(a.id)!.MATCHED, 1);
+    assert.equal(counts.get(b.id)!.NOT_FOUND, 1);
+    assert.equal(counts.size, 2, "a list id with no members has no key rather than a zeroed one");
   });
 }

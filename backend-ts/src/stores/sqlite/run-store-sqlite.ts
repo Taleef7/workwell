@@ -111,6 +111,24 @@ export class SqliteRunStore implements RunStore {
     return row ? toRecord(row) : null;
   }
 
+  async listPopulationRunsForPeriod(from: string, to: string, limit = 50): Promise<RunRecord[]> {
+    // ISO-8601 timestamps sort lexically in chronological order, which is what makes a TEXT column a
+    // usable period filter on the floor. `UPPER(...)` mirrors the ceiling so a lowercase legacy value
+    // is treated the same on both.
+    const { results } = await this.db
+      .prepare(
+        `SELECT ${RUN_COLS} FROM runs
+          WHERE UPPER(scope_type) IN ('MEASURE','ALL_PROGRAMS')
+            AND UPPER(status) IN ('COMPLETED','PARTIAL_FAILURE')
+            AND measurement_period_start >= ?
+            AND measurement_period_start < ?
+          ORDER BY started_at DESC, id DESC LIMIT ?`,
+      )
+      .bind(from, to, Math.max(1, limit))
+      .all<RunRow>();
+    return (results ?? []).map(toRecord);
+  }
+
   async listRunsByTriggeredBy(triggeredBy: string, limit = 500): Promise<RunRecord[]> {
     const { results } = await this.db
       .prepare(`SELECT ${RUN_COLS} FROM runs WHERE triggered_by = ? ORDER BY started_at DESC, id DESC LIMIT ?`)

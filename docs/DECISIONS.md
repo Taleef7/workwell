@@ -18,6 +18,152 @@
 >
 > **Sequence note:** ADR-033 does not exist — verified absent, and the number must not be reused.
 
+## ADR-082: an attributed list is an immutable assertion someone else made — and the sandbox refuses to hold a real one
+
+**Date:** 2026-09-16. **Status:** accepted. Milestone M-M, MM-2 PR 3. Implements the one concrete ask
+from the 2026-09-09 ACO working session. Builds on ADR-072 (calendar measurement period), ADR-073/077
+(retention window and the refusal it forces), ADR-074 (multi-rate), ADR-079 (out-of-population) and
+ADR-080 (a panel is assignment, never attribution).
+
+**Context.** The ACO asked for one thing, in one sentence: hand WorkWell the list of patients they
+attribute to the group, run the measures over exactly that subset, and give back numerator,
+denominator and exclusions with the patient-level result and its date. Every other population
+question this product answers is *"the patients in our directory"*. This one is *"the patients
+somebody else says are ours"*, and on an MSSP attribution those are different populations — the
+practice sees patients the ACO does not attribute, and the ACO attributes patients the practice has
+not seen this year. Nothing in the system could express the difference.
+
+### d1 — A list is IMMUTABLE, and a re-import is a new revision
+
+A report is a function of (list revision, run ids). If a list could be edited underneath a report,
+every number already filed would become unverifiable: there would be no way to answer *"what was the
+list when you computed this?"* So no UPDATE and no DELETE exists anywhere in `SubjectListStore`, a
+re-import of the same name allocates `revision + 1`, and a manual resolution of a non-match is
+**also** a new revision rather than an edit — the rule ADR-022 applies to identity matching (match,
+never silently rewrite what a source asserted).
+
+The guarantee is the tested absence of a mutator in the interface, routes and UI, not a database
+trigger. That is narrower than "the database forbids it" and is stated as such.
+
+### d2 — A list is an ATTRIBUTION; a panel is an ASSIGNMENT; neither is a denominator
+
+ADR-080 d6 already says a provider panel is never an attribution claim. The converse matters as much:
+a list is what an outside organisation asserts about responsibility, and it must not become an
+assignment decision. Neither is a denominator by itself — the denominator is what the measure's own
+logic computes over the list's members, and the list only decides whose rows are read.
+
+### d3 — NOT_FOUND members are KEPT, and an alias is AMBIGUOUS rather than a silent collapse
+
+An identifier the directory cannot resolve is the ACO and the practice disagreeing about who a patient
+is. That is a finding for a review queue, not a row to drop: dropping it would remove the patient from
+the denominator *and* from the evidence that they were ever claimed. `resolution` and `subject_id` are
+coupled by a CHECK rather than by convention, and a partial unique index refuses a second MATCHED row
+for one subject — so two identifiers for one patient land MATCHED + AMBIGUOUS, where allowing both to
+match would double that patient in every denominator the list feeds.
+
+### d4 — The SANDBOX DATA BOUNDARY: a real attribution file cannot be stored here
+
+Milestone M-M authorises a **synthetic sandbox** (LOCKED §4A.1); the PHI phase is a separate,
+`PRODUCTION_READINESS`-gated decision. An import route that persists arbitrary identifiers — even as
+unresolved rows — is a path for a real attribution file to reach Neon, its backups and its exports
+*before* the environment split (#267), the auth fork (#265) and observability (#264) exist. So:
+
+- On a synthetic-directory deployment, an identifier outside that deployment's **own** namespace
+  refuses the WHOLE upload before anything is written, reporting a COUNT and never the values (an
+  error body is logged and kept by the browser; echoing them would persist them by another route).
+  The namespace is per profile — Maui's corpus is `pat-NNN` **and** `pat-NNNNN` (48 hand-written
+  fixtures then generated ones), and the default deployment's occupational roster is `emp-NNN`. It is
+  a NAMESPACE test, not an existence test: `pat-99999` conforms and is simply NOT_FOUND, so the
+  review queue is exercised with synthetic-shaped identifiers.
+- On a LIVE-directory deployment the import answers 403 until the PHI phase supplies an authoritative
+  resolver. The live directory is a worker-local last-known registry that also fabricates a minimal
+  profile for any persisted `wc|` id, so matching against it would be *silently incomplete* — every
+  row MATCHED and every denominator wrong — rather than merely unavailable.
+
+**Every method** on `/api/subject-lists/**` is CASE_MANAGER/ADMIN, metadata included; the reads are
+not left to the AUTHENTICATED catch-all, because the public `/sandbox` signs in as a read-only VIEWER
+and on Maui the clinician seat is a VIEWER too.
+
+### d5 — The report is FOR A MEASUREMENT YEAR, and compaction refuses PER MEASURE
+
+An officially routed run is scored over the calendar year containing its evaluation date (ADR-072).
+"The latest numbers" would therefore answer a PY2027 question with PY2028's first nightly the moment
+January arrives — and would look exactly like a correct answer. `measurementYear` is **required with
+no default**, and the run selected per measure is the newest reportable whole-population run whose own
+period is that year.
+
+**Selected by the run's MEASUREMENT PERIOD, never by when it started** — `RunStore.listPopulationRunsForPeriod`.
+A manual run takes an arbitrary `evaluationDate`, so a rerun-to-verify of a closed year begins in the
+following one and legitimately scores the closed one; a start-date filter drops exactly that run and
+answers "no completed population run for year" with it sitting in the table. (The start-date window was
+itself a fix for something worse: `listLatestPopulationRuns` caps its walk at 25 runs whatever
+candidate count it is given, so an unscoped search reaches back about twelve days on a nightly
+deployment and a mid-January report for the closed year found nothing. A period-scoped read has no
+such cap and is simpler as well as correct.)
+
+ADR-077 refuses a report built over rows that may be incomplete. That refusal belongs to the **measure
+whose run is exposed**, not to the request: withholding five complete measures because the sixth's run
+aged out would be a second wrong answer. Exposure is checked before the reads and again after them (a
+pass beginning mid-report would have deleted rows the earlier pages already counted), and the whole
+request is 409 only when every selected run is exposed. Every derived row is computed before anything
+is serialised, because a streamed CSV cannot change its status after the first byte.
+
+### d6 — `missingFromRun` is reported BESIDE the rates, never subtracted
+
+A list member the run never evaluated is a gap in the evidence, not an exclusion. Folding them into a
+denominator would let a SMALLER run produce a HIGHER score, which is the one direction a quality
+number must never move by accident. Two identities are stated and tested, and they hold for EVERY
+input including a measure with no usable run:
+`matchedSubjects = distinctSubjectsSeen + missingFromRun`, and
+`distinctSubjectsSeen = scoredSubjects + unmeasured + evaluationErrors + outOfPopulation`.
+
+**The four not-scored buckets are disjoint BY CONSTRUCTION, not by assumption.**
+`createRateAggregator`'s own `unmeasured` is a SUPERSET of its `evaluationErrors`, and
+`outcomes.out_of_population` is an independent column that can be true on a row the aggregator also
+calls unmeasured — so deriving these by subtraction double-counts every error and can make
+`scoredSubjects` NEGATIVE. Each seen subject is classified into exactly one bucket in a stated order
+(error, then out-of-population, then in-no-rate, then scored), so the identities hold on a
+PARTIAL_FAILURE run — an ordinary night on the pilot rather than a corner case. The first version did
+not, and the test that "pinned" the identity used a fixture with all three counts at zero, which
+passes for any implementation.
+
+**A measure with NO usable run emits its rows too.** The CSV serialises rows alone, so an entry
+claiming N members were missing while the patient-level artifact named none of them would break the
+"every count is recomputable" rule and leave the ACO unable to see WHO. A **compacted** measure is the
+one exception and claims nothing per subject — no rows, `missingFromRun: 0` — because ADR-077 refuses
+numbers built over rows that may be incomplete, and "how many of your patients did this measure miss?"
+is such a number. §6.6 scopes the identities accordingly.
+
+The score stays `numer / (denom − denex − denexcep)` — what `createRateAggregator` already computes
+and what the eCQM proportion convention specifies. `status=EXCLUDED` is the workflow vocabulary;
+`denominatorExclusion` and `denominatorException` are the artifact's populations. The ACO's word
+"exclusions" covers both, so both are reported separately rather than summed.
+
+### d7 — The CSV is the patient-level artifact, and its header is a contract
+
+The ACO asked for the result *and its date* per patient; a paged patient-level JSON would be a second
+thing to build and keep in step, so the CSV carries the rows and the JSON carries the summary — every
+count in the summary is recomputable from the rows. The header is pinned by test because downstream
+tooling reads it by name, and the subject columns follow the deployment's own term exactly as
+DATA_MODEL_CONTRACTS §6.2/§6.3 do. Text a person supplied is neutralised against spreadsheet formula
+injection: a CSV of somebody's uploaded identifiers must not become code when the ACO opens it.
+
+### Consequences
+
+- `?listId=` joins the one subject predicate on all six filtered surfaces. The resolved set is
+  memoized (8-entry LRU) — safe ONLY because d1 makes a list immutable, and the first thing that
+  breaks if that is ever relaxed. `hasActiveSubjectFilters` tests `!= null`, not `.size > 0`: a list
+  none of whose identifiers resolved is an ACTIVE filter matching nobody.
+- **Deferred to the PHI gate: the per-run report ARCHIVE.** With a 400-day window the latest nightly is
+  never exposed, so a live report renders today; what is lost is REPRODUCIBILITY — by December the
+  runs behind March's filing are compacted. The design is recorded in `PRODUCTION_READINESS`; until it
+  ships, a report handed to the ACO is retained as a dated file outside the database (the R2 evidence
+  bucket), and every CSV row carries the list revision and run ids so the artifact can be pointed at.
+- The four ACO inputs still outstanding — identifier format, cadence, non-match handling, and whether
+  Medicare Advantage is in scope — change the importer's `resolve`, a scheduler job, the members UI
+  and a report-time payer intersection respectively. None changes the schema, which is why the tables
+  could be written before the answers arrived.
+
 ## ADR-081: the repeat-non-complier streak is retired, because a retention window cannot hold one
 
 **Date:** 2026-09-15. **Status:** accepted. Milestone M-M, the third read-path change. Follows
