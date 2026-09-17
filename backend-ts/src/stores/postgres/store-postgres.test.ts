@@ -71,18 +71,25 @@ let reachable = false;
   }
 }
 
+// The `[postgres]` prefix is RESERVED for tests that actually ran against Postgres, and the two
+// branches below deliberately do not carry it. CI asserts the ceiling was exercised by grepping
+// shard 1's output for that marker (`ci.yml`, "The Postgres ceiling ran"), and a skip notice wearing
+// the same prefix satisfied that grep — so removing WORKWELL_TEST_PG_URL from the workflow would have
+// produced a green job reporting one "[postgres] assertion" with nothing behind it, which is the exact
+// failure the assertion exists to catch. Naming is the guard here: keep the marker off any test that
+// does not connect.
 if (!reachable && process.env.WORKWELL_TEST_PG_URL) {
   // CI sets WORKWELL_TEST_PG_URL, so an unreachable Postgres there is a real FAILURE, not a skip —
   // otherwise the backend-ts gate silently degrades to floor-only and misses Postgres-ceiling
   // regressions (Codex #161 P2). Local dev with no Postgres and no env var still skips (below).
-  test("[postgres] store contract — Postgres UNREACHABLE despite WORKWELL_TEST_PG_URL", () => {
+  test("store contract — Postgres UNREACHABLE despite WORKWELL_TEST_PG_URL", () => {
     throw new Error(
       `WORKWELL_TEST_PG_URL is set (${url}) but Postgres is unreachable — the ceiling contract must run in CI; check the postgres service.`,
     );
   });
 } else if (!reachable) {
   test(
-    "[postgres] store contract — SKIPPED (no Postgres reachable)",
+    "store contract — SKIPPED (no Postgres reachable, so nothing from the ceiling ran)",
     { skip: `start it with: docker compose -f infra/docker-compose.yml up -d postgres (tried ${url})` },
     () => {},
   );

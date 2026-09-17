@@ -16,7 +16,7 @@ on:
   # UNDIAGNOSED. Adding the prefix makes checks appear, which masks the symptom — so if a PR ever again
   # shows zero checks, do not assume this line covers it.
   push:
-    branches: [main, "claude/**", "fix/**", "feat/**", "perf/**", "chore/**", "docs/**"]
+    branches: [main, "claude/**", "fix/**", "feat/**", "perf/**", "chore/**", "docs/**", "ci/**", "test/**"]
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -124,25 +124,12 @@ jobs:
         run: pnpm build
 
   backend-ts:
-    name: Backend-TS — Typecheck & Test
+    name: Backend-TS — Typecheck & gates
     runs-on: ubuntu-latest
-    # Production runs on the TypeScript backend (backend-ts/), so it must be gated like any other
-    # code path. Exercises BOTH the SQLite floor (default) and the Postgres ceiling — the postgres
-    # service + WORKWELL_TEST_PG_URL light up the store-contract suite, which otherwise self-skips.
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: workwell
-          POSTGRES_PASSWORD: workwell
-          POSTGRES_DB: workwell
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U workwell"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
+    # Production runs on the TypeScript backend (backend-ts/), so it must be gated like any other code
+    # path. The SUITE moved to backend-ts-test below, which shards it; what stays here is everything
+    # that runs once. The two jobs are deliberately independent (no `needs:`) so they run in parallel —
+    # gating the tests on a 30-second typecheck would just add 30 seconds to every push.
     defaults:
       run:
         working-directory: backend-ts
@@ -200,10 +187,118 @@ jobs:
         run: |
           node --import tsx scripts/openapi-emit.mjs "$RUNNER_TEMP/openapi.json"
           npx --yes @redocly/cli@2.46.1 lint "$RUNNER_TEMP/openapi.json"
+      # backend-ts-test runs the suite as three shards, so no single job sees the whole file list any
+      # more. A file that fell out of every shard would therefore never run, and nothing downstream
+      # would notice its absence — green, because nothing failed. This asserts the split is exhaustive
+      # and disjoint against the same globs `pnpm test` resolves, and that the Postgres-dependent files
+      # are still on the shard whose "did it actually run" assertion covers them.
+      - name: The test shards cover every test file exactly once
+        run: pnpm test:shards:verify
+
+  backend-ts-test:
+    name: Backend-TS — Test ${{ matrix.shard }}/3
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Sharded because this was a single 12m20s step and the whole CI wall-clock was it: every other job
+    # finishes inside two minutes. Exercises BOTH the SQLite floor (default) and the Postgres ceiling —
+    # the postgres service + WORKWELL_TEST_PG_URL light up the store-contract suite, which otherwise
+    # SELF-SKIPS rather than failing.
+    #
+    # Three shards, not more: `node --test` parallelises across files and never within one, so the job
+    # can never finish faster than its slowest single file (routes/runs.test.ts, 238 s measured alone).
+    # A fourth shard would cost a runner and save nothing. Splitting that file is the next lever.
+    strategy:
+      fail-fast: false # one shard's failure must not hide another's — they test disjoint code
+      matrix:
+        shard: [1, 2, 3]
+    # Every shard gets the service, though only shard 1 holds Pg-dependent files today: a stray file
+    # that drifts off shard 1 then still RUNS its Postgres tests (the verify step above fails the
+    # build to get it moved back). The alternative — service on shard 1 only — would make that same
+    # drift silently skip, which is the failure this whole arrangement exists to prevent.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: workwell
+          POSTGRES_PASSWORD: workwell
+          POSTGRES_DB: workwell
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U workwell"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    defaults:
+      run:
+        working-directory: backend-ts
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10.17.1
+          run_install: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: backend-ts/pnpm-lock.yaml
+      - name: Install deps
+        run: pnpm install --frozen-lockfile
       - name: Test (SQLite floor + Postgres ceiling)
         env:
           WORKWELL_TEST_PG_URL: postgres://workwell:workwell@localhost:5432/workwell
-        run: pnpm test
+        # The file list is resolved into a variable and checked BEFORE it is used, because an empty one
+        # does not fail: `node --test` with no path arguments falls back to discovering tests from the
+        # cwd, so a broken shard script would silently run the WHOLE suite on all three shards --
+        # green, three times the work, and sharding defeated with nothing to show it. `set -e` does not
+        # catch it either: a failing command substitution inside another command's arguments does not
+        # abort the shell.
+        #
+        # `$files` is then deliberately word-split: the script prints one path per line and no test path
+        # contains a space. Teed because the next step reads the output rather than trusting the exit
+        # code; the default shell sets `pipefail`, so a failing suite still fails the step.
+        run: |
+          files=$(node scripts/test-shards.mjs ${{ matrix.shard }} 3)
+          if [ -z "$files" ]; then
+            echo "::error::test-shards.mjs produced no files for shard ${{ matrix.shard }}/3. Refusing to call node --test with no paths -- it would discover and run the entire suite instead, which passes while silently undoing the sharding."
+            exit 1
+          fi
+          echo "shard ${{ matrix.shard }}/3: $(echo "$files" | wc -l) test files"
+          node --import tsx --test $files 2>&1 \
+            | tee "$RUNNER_TEMP/test-shard-${{ matrix.shard }}.log"
+      # The store contract self-skips when it cannot reach Postgres, so "the job is green" has never
+      # been evidence that the ceiling was exercised — on 2026-09-16 that had to be confirmed by hand,
+      # by grepping a job log for `[postgres]`. This makes the run itself assert it.
+      - name: The Postgres ceiling ran, rather than self-skipping
+        if: matrix.shard == 1
+        # Two conditions, because either alone can be satisfied by a job that connected to nothing.
+        #
+        # The skip notice used to be titled "[postgres] store contract — SKIPPED", which matched a bare
+        # `[postgres]` grep — so deleting WORKWELL_TEST_PG_URL from this workflow would have produced a
+        # green job claiming one assertion with nothing behind it. The marker is now reserved for tests
+        # that actually connect (store-postgres.test.ts says so at the branch), and this step rejects
+        # the skip notice explicitly as well: the naming rule is the fix, and this is what makes
+        # breaking it loud instead of silent.
+        #
+        # MIN is a floor far below the real count (116 at the time of writing) and the suite only grows.
+        # It is not a pin on the count — it is what distinguishes "the contract ran" from "one stray
+        # line happened to match".
+        run: |
+          log="$RUNNER_TEMP/test-shard-1.log"
+          if grep -q "store contract — SKIPPED" "$log"; then
+            echo "::error::The Postgres store contract SKIPPED. WORKWELL_TEST_PG_URL is set on this job, so the service did not come up or the variable was renamed — either way the Pg ceiling was not exercised, and the SQLite floor cannot catch Pg-only SQL."
+            exit 1
+          fi
+          found=$(grep -c "\[postgres\]" "$log" || true)
+          MIN=10
+          if [ "$found" -lt "$MIN" ]; then
+            echo "::error::Only $found [postgres] lines in the output, expected at least $MIN. The store contract self-skips rather than failing when it cannot reach the service, so a low count means this job passed WITHOUT exercising the Postgres ceiling."
+            exit 1
+          fi
+          echo "Postgres ceiling exercised: $found [postgres] assertions."
 
   official-cases:
     name: Official MADiE test cases — the eCQM gate
