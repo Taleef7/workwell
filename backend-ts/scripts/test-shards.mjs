@@ -30,13 +30,36 @@ import { fileURLToPath } from "node:url";
  */
 const PACKAGE_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
-/** The globs `pnpm test` runs. Kept identical on purpose — see the --verify note below. */
+/**
+ * The globs `pnpm test` runs. This list is a COPY of the one in package.json's `test` script, and
+ * `--verify` asserts the two agree — because drift here is silent in the worst direction: add a path
+ * or an extension to the canonical command and forget this copy, and `pnpm test` runs those files
+ * locally while every CI shard omits them, with verification still reporting an exhaustive split of
+ * the stale subset. The comparison is what makes this a copy rather than a second source of truth.
+ */
 export const TEST_GLOBS = [
   "src/**/*.test.ts",
   "packages/*/src/**/*.test.ts",
   "scripts/**/*.test.mjs",
   "scripts/**/*.test.ts",
 ];
+
+/**
+ * The glob arguments of package.json's `test` script. Quoted tokens that look like test paths — a
+ * quoted flag value (`--test-reporter "spec"`) is not one, and counting it would fail the gate for
+ * no reason. The filter is deliberately loose about SHAPE and strict about COMPARISON: anything
+ * path-like has to appear in TEST_GLOBS and vice versa.
+ */
+function canonicalTestGlobs() {
+  const pkg = JSON.parse(readFileSync(join(PACKAGE_ROOT, "package.json"), "utf8"));
+  const script = pkg.scripts?.test;
+  if (typeof script !== "string" || script.length === 0) {
+    throw new Error('package.json has no "test" script — nothing to compare the shard globs against');
+  }
+  return [...script.matchAll(/"([^"]+)"/g)]
+    .map((m) => m[1])
+    .filter((token) => token.includes("*") || /\.(ts|mjs|cts|mts|tsx)$/.test(token));
+}
 
 /**
  * Seconds, measured one file at a time on an idle machine (2026-09-15) — NOT read off a CI log, where
@@ -130,6 +153,21 @@ function verify(total) {
   const files = allTestFiles();
   const shards = shardFiles(total);
   const problems = [];
+
+  // The shard globs must still BE the canonical ones. Checked first, because every other assertion
+  // below is made against this list: verifying an exhaustive, disjoint split of the wrong file set
+  // reports health while CI silently omits whatever the canonical command gained.
+  const canonical = canonicalTestGlobs();
+  const missingGlobs = canonical.filter((g) => !TEST_GLOBS.includes(g));
+  const extraGlobs = TEST_GLOBS.filter((g) => !canonical.includes(g));
+  if (missingGlobs.length || extraGlobs.length) {
+    problems.push(
+      `TEST_GLOBS has drifted from the "test" script in package.json, so the shards cover a different file set than \`pnpm test\` does:\n` +
+        (missingGlobs.length ? `  in package.json but NOT sharded (these files run locally and in NO shard):\n    ${missingGlobs.join("\n    ")}\n` : "") +
+        (extraGlobs.length ? `  sharded but NOT in package.json:\n    ${extraGlobs.join("\n    ")}\n` : "") +
+        `  Fix: make the two lists identical.`,
+    );
+  }
 
   // Exhaustive and disjoint. A file in no shard is the failure that matters: it would never run, and
   // nothing else in CI would notice its absence.
