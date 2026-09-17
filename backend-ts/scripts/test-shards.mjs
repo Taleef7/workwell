@@ -10,16 +10,25 @@
  * unrelated PRs. This packs by measured weight instead, which is stable under insertion.
  *
  * THE FLOOR IS THE SLOWEST SINGLE FILE. `node --test` parallelises across files, never within one, so
- * no shard count takes the job below the longest file (`routes/runs.test.ts`, measured at 238 s alone).
- * Splitting that file is the next win if this stops being enough; adding shards past that point buys
- * nothing.
+ * no shard count takes the job below the longest file — `run/batch-evaluate-scale.test.ts`, 346 s when
+ * measured alone, with `routes/runs.test.ts` behind it at 238 s. Splitting THOSE TWO is the next win if
+ * this stops being enough; adding shards past that point buys nothing at all.
  *
  * Usage:
  *   node scripts/test-shards.mjs <shard> <total>   the files for that shard, one per line
  *   node scripts/test-shards.mjs --verify <total>  assert the split is exhaustive, disjoint and Pg-safe
  */
-import { globSync } from "node:fs";
-import { readFileSync } from "node:fs";
+import { globSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+/**
+ * Everything resolves against the package root, never the caller's cwd. Run from the repo root the
+ * globs matched NOTHING, and a split of zero files is exhaustive and disjoint by vacuous default —
+ * `--verify` would have reported a healthy partition of nothing at all. Anchoring here removes the
+ * footgun rather than documenting it; EMPTY_IS_A_BUG below is the belt to this braces.
+ */
+const PACKAGE_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
 /** The globs `pnpm test` runs. Kept identical on purpose — see the --verify note below. */
 export const TEST_GLOBS = [
@@ -40,10 +49,12 @@ export const TEST_GLOBS = [
  *   for f in <paths>; do /usr/bin/time -f "%e $f" node --import tsx --test "$f"; done
  */
 const WEIGHTS = new Map([
+  ["src/run/batch-evaluate-scale.test.ts", 346],
   ["src/routes/runs.test.ts", 238],
   ["src/engine/ingress/webchart/mock-http-conformance.test.ts", 169],
   ["src/run/backfill-trend-history.test.ts", 102],
   ["src/engine/ingress/webchart/devdb-eval.test.ts", 100],
+  ["src/run/run-pipeline.test.ts", 89],
   ["src/engine/ingress/webchart/devdb-cli.test.ts", 61],
   ["src/routes/measures.test.ts", 40],
 ]);
@@ -63,11 +74,21 @@ const PG_PIN_PREFIX = "src/stores/postgres/";
 const PG_ENV_MARKER = "WORKWELL_TEST_PG_URL";
 const PG_SHARD = 1;
 
-/** The glob result, normalised to forward slashes and sorted, so the split never depends on the OS. */
+/**
+ * The glob result, normalised to forward slashes and sorted, so the split never depends on the OS.
+ * Throws on an empty result: this suite has had 250+ test files for months, so zero means the globs
+ * stopped matching — a renamed directory, a changed convention — and every caller of this module
+ * treats "no files" as a valid answer. CI would run three shards of nothing and pass.
+ */
 export function allTestFiles() {
   const seen = new Set();
   for (const pattern of TEST_GLOBS) {
-    for (const file of globSync(pattern)) seen.add(file.split("\\").join("/"));
+    for (const file of globSync(pattern, { cwd: PACKAGE_ROOT })) seen.add(file.split("\\").join("/"));
+  }
+  if (seen.size === 0) {
+    throw new Error(
+      `no test files matched ${TEST_GLOBS.join(", ")} under ${PACKAGE_ROOT} — the globs here must stay identical to the "test" script in package.json`,
+    );
   }
   return [...seen].sort();
 }
@@ -124,7 +145,7 @@ function verify(total) {
   // ceiling actually ran looking at the wrong job, so the cover goes quiet without anything failing.
   const pgShardFiles = new Set(shards[Math.min(PG_SHARD, total) - 1].files);
   const strays = files.filter(
-    (f) => !pgShardFiles.has(f) && readFileSync(f, "utf8").includes(PG_ENV_MARKER),
+    (f) => !pgShardFiles.has(f) && readFileSync(join(PACKAGE_ROOT, f), "utf8").includes(PG_ENV_MARKER),
   );
   if (strays.length) {
     problems.push(
