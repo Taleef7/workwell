@@ -18,6 +18,27 @@ export type CaseDisposition = "OPEN" | "EXCLUDED" | "RESOLVE";
  */
 export const ACTIVE_CASE_STATUSES = ["OPEN", "IN_PROGRESS"] as const;
 
+/**
+ * Who closed a case — read off the same column the write side decides by (#569, ADR-083).
+ *
+ * `STAFF` is every closure a person made: a manual close (`MANUAL_RESOLVE`, which CQL does not
+ * corroborate — the patient is still a gap) AND a rerun-to-verify close (`RERUN_VERIFIED` /
+ * `RERUN_EXCLUDED`, which CQL does corroborate). `SYSTEM` is every closure the run made
+ * (`AUTO_RESOLVED`, `EXCLUDED`, `OUT_OF_POPULATION`, `CYCLE_ROLLED_OVER`). `NONE` is an active case.
+ *
+ * `closed_by` is the ONLY trustworthy discriminator: `planCaseUpsert` respects a closure iff it is set
+ * (a human closure is never reopened by a run; a system closure is), `status` is an untyped string
+ * that a manual close writes as `CLOSED` while a rerun writes as `RESOLVED`/`EXCLUDED`, and
+ * `closed_reason` is unvalidated text. A read model that keyed on either of the latter would drift
+ * from the write side the first time a reason was added. What tells the two STAFF closures apart on
+ * screen is the LIVE outcome and `closedReason` — never a second rule here.
+ */
+export type ClosureKind = "NONE" | "STAFF" | "SYSTEM";
+export function closureKindOf(c: { status: string; closedBy: string | null }): ClosureKind {
+  if ((ACTIVE_CASE_STATUSES as readonly string[]).includes(c.status)) return "NONE";
+  return c.closedBy != null ? "STAFF" : "SYSTEM";
+}
+
 /** EXCLUDED → an excluded case; DUE_SOON/OVERDUE/MISSING_DATA → an open case; else resolve. */
 export function dispositionFor(outcomeStatus: string): CaseDisposition {
   if (outcomeStatus === "EXCLUDED") return "EXCLUDED";

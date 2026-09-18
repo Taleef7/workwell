@@ -12,6 +12,8 @@ export type DisplayState =
   | "EXCLUDED"
   | "DECLINED"
   | "IN_PROGRESS"
+  // Evaluated and outside the measure's own initial population (ADR-078/079) — a result, not a gap.
+  | "OUT_OF_POPULATION"
   | "NA"
   // The E11.3 segment-applicability overlay (backend roster-read-model): a measure that doesn't apply to
   // a subject's cohort. Distinct from NA ("not evaluated"); rendered de-emphasized like NA (ComplianceChip).
@@ -23,10 +25,28 @@ export interface RosterColumn {
   complianceClass: "PERMANENT" | "RECURRING";
 }
 
+/** Who closed the case behind a cell CQL still counts, and when (#569). Display only. */
+export interface StaffClosure {
+  closedBy: string;
+  closedAt: string | null;
+  closedReason: string | null;
+}
+
 export interface RosterCell {
   status: DisplayState;
   method: string;
   evidenceRef?: { runId: string; outcomeId: string };
+  /** The canonical bucket the display state was derived from, and the outcome's cycle (#569). */
+  canonical?: string;
+  evaluationPeriod?: string;
+  /**
+   * Present only when a person closed this subject's case for this measure IN THIS CYCLE and the
+   * winning run still counts the patient as a gap (#569). `status` is unchanged, so every chip count
+   * and the status filter are unaffected — this says a person decided not to work the gap, which the
+   * grid has to show, because otherwise the patient is on the Overdue list and on nobody's work list
+   * with nothing on screen saying why.
+   */
+  staffClosure?: StaffClosure;
 }
 
 export interface RosterRow {

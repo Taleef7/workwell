@@ -24,7 +24,8 @@ import type { OutcomeStore } from "../stores/outcome-store.ts";
 import { routedEngineForEnv } from "../wiring/executor-router.ts";
 import type { CaseSummary } from "../case/case-read-models.ts";
 import { subjectFiltersFromQuery, subjectFilterErrorBody, SubjectFilterError } from "../compliance/subject-filters.ts";
-import { loadWorklistCases } from "../case/worklist-read-model.ts";
+import { loadWorklistCases, withLiveStatus, staffClosedCounts, STAFF_CLOSED_TOKEN } from "../case/worklist-read-model.ts";
+import { rosterCellCache } from "../compliance/roster-read-model.ts";
 import { toCaseDetail } from "../case/case-detail-read-model.ts";
 import { assignCase, escalateCase, resolveCase, CaseActionError, type CaseActionDeps } from "../case/case-actions.ts";
 import { previewOutreach, sendOutreach, updateOutreachDelivery, OutreachError } from "../case/case-outreach.ts";
@@ -355,6 +356,9 @@ export async function handleCases(req: Request, env: CasesEnv, actor = "system")
       // The frontend's worklist-gap badge counts open cases with no outreach, so this list pays for it.
       withOutreachCounts: true,
       profileMatch: profileSubjectMatcher(employeeLookup),
+      // On the staff-closed list the read model resolves the live status ITSELF, before the outcome
+      // filter — so the filter and the rendered value are the same thing (#569).
+      live: { outcomeStore: await outcomeStore(env), cellCache: rosterCellCache },
     },
     {
       status: q.get("status"),
@@ -367,5 +371,18 @@ export async function handleCases(req: Request, env: CasesEnv, actor = "system")
     },
   );
 
-  return json(summaries.slice(offset, offset + limit), 200, { "X-Total-Count": String(summaries.length) });
+  // What CQL says today for the rows a PERSON closed (#569). On the staff-closed list the read model
+  // has ALREADY resolved every row (it has to: the outcome filter reads the live value, and the three
+  // header counts describe the whole list rather than the page). On any other list only the page's
+  // staff-closed rows are resolved — they appear on the `closed` and `all` tabs.
+  const headers: Record<string, string> = { "X-Total-Count": String(summaries.length) };
+  if ((q.get("status") ?? "").trim().toLowerCase() === STAFF_CLOSED_TOKEN) {
+    const counts = staffClosedCounts(summaries);
+    headers["X-Staff-Closed-Gap"] = String(counts.gap);
+    headers["X-Staff-Closed-Verified"] = String(counts.verified);
+    headers["X-Staff-Closed-Unknown"] = String(counts.unknown);
+    return json(summaries.slice(offset, offset + limit), 200, headers);
+  }
+  const live = { outcomeStore: await outcomeStore(env), cellCache: rosterCellCache };
+  return json(await withLiveStatus(live, summaries.slice(offset, offset + limit)), 200, headers);
 }

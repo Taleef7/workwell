@@ -584,6 +584,32 @@ export function outcomeStoreContract(
     assert.deepEqual(await outcomeStore.listOutcomes("not-a-uuid"), []);
   });
 
+  test(`[${label}] listOutcomes({ subjectIds }) is the bounded point read — and an EMPTY set matches NOBODY (#569)`, async () => {
+    const { runStore, outcomeStore } = await fresh();
+    const run = await runStore.createRun(sampleRun("audiogram"));
+    await outcomeStore.recordOutcomes([
+      { runId: run.id, subjectId: "emp-001", measureId: "audiogram", status: "OVERDUE", evidence: {} },
+      { runId: run.id, subjectId: "emp-002", measureId: "audiogram", status: "COMPLIANT", evidence: {} },
+      { runId: run.id, subjectId: "emp-003", measureId: "audiogram", status: "DUE_SOON", evidence: {} },
+      { runId: run.id, subjectId: "emp-001", measureId: "hazwoper", status: "OVERDUE", evidence: {} },
+    ]);
+
+    const two = await outcomeStore.listOutcomes(run.id, { subjectIds: ["emp-001", "emp-003"] });
+    assert.deepEqual(two.map((o) => `${o.subjectId}/${o.measureId}`).sort(), ["emp-001/audiogram", "emp-001/hazwoper", "emp-003/audiogram"]);
+    // With a measure it is the single cell a staff-closed row needs: one subject, one measure.
+    assert.deepEqual(
+      (await outcomeStore.listOutcomes(run.id, { measureId: "audiogram", subjectIds: ["emp-002"] })).map((o) => o.status),
+      ["COMPLIANT"],
+      "subjectIds ∩ measureId",
+    );
+    assert.deepEqual(await outcomeStore.listOutcomes(run.id, { subjectIds: ["emp-404"] }), [], "a subject the run never evaluated matches nothing");
+    // THE case this exists for: an EMPTY set is the constraint "nobody", not an absent filter. The
+    // two stores reach it by different SQL — `= ANY('{}')` on the ceiling, a `1 = 0` predicate on the
+    // floor because `IN ()` is a syntax error — so this is the only thing holding them to one answer.
+    assert.deepEqual(await outcomeStore.listOutcomes(run.id, { subjectIds: [] }), []);
+    assert.equal((await outcomeStore.listOutcomes(run.id)).length, 4, "absent is still absent");
+  });
+
   test(`[${label}] listOutcomesWithRun joins started_at + filters by measure/date in the store`, async () => {
     const { runStore, outcomeStore } = await fresh();
     const run = await runStore.createRun(sampleRun("audiogram"));
@@ -1759,6 +1785,48 @@ export function caseStoreContract(label: string, freshStore: () => Promise<CaseS
     assert.equal(verified?.closedReason, "RERUN_VERIFIED");
     assert.equal(verified?.closedBy, "cm@workwell.dev");
     assert.ok(verified?.closedAt, "closed_at stamped");
+  });
+
+  test(`[${label}] listCases({ closure }) splits the closures a PERSON made from the run's — and an ACTIVE case is neither (#569)`, async () => {
+    const store = await freshStore();
+    // Four rows, one per closure state the classification has to tell apart.
+    const open = (await upsert(store, "OVERDUE", { subjectId: "open" }))!;
+    const inProgress = (await upsert(store, "OVERDUE", { subjectId: "in-progress" }))!;
+    await store.patchCase(inProgress.id, { status: "IN_PROGRESS" });
+    const manual = (await upsert(store, "OVERDUE", { subjectId: "manual" }))!;
+    await store.patchCase(manual.id, { status: "CLOSED", closedAt: new Date().toISOString(), closedReason: "MANUAL_RESOLVE", closedBy: "nurse@example.org" });
+    const rerun = (await upsert(store, "OVERDUE", { subjectId: "rerun" }))!;
+    await store.patchCase(rerun.id, { status: "RESOLVED", currentOutcomeStatus: "COMPLIANT", closedAt: new Date().toISOString(), closedReason: "RERUN_VERIFIED", closedBy: "cm@workwell.dev" });
+    // A SYSTEM closure: COMPLIANT resolves the case and leaves closed_by NULL.
+    const auto = (await upsert(store, "OVERDUE", { subjectId: "auto" }))!;
+    await upsert(store, "COMPLIANT", { subjectId: "auto" });
+
+    // THE assertion this test exists for: called WITHOUT `statuses`. `closed_by IS NULL` alone is
+    // true of every OPEN row, so a predicate missing its status half answers "system closure" for
+    // the whole active work list — a filter that reads as present and cannot fire, pointing the
+    // wrong way. Both open rows must be absent from BOTH answers.
+    const staff = await store.listCases({ closure: "staff", limit: 100 });
+    assert.deepEqual(staff.map((c) => c.employeeId).sort(), ["manual", "rerun"], "every closure a person made — manual AND rerun-verified");
+    const system = await store.listCases({ closure: "system", limit: 100 });
+    assert.deepEqual(system.map((c) => c.employeeId).sort(), ["auto"], "the run's closure only — no active row");
+    for (const rows of [staff, system]) {
+      assert.equal(rows.some((c) => c.employeeId === "open" || c.employeeId === "in-progress"), false, "an ACTIVE case is neither closure kind");
+    }
+    assert.equal((await store.listCases({ limit: 100 })).length, 5, "and the filter is absent when not asked for");
+    assert.ok(open.id && auto.id);
+
+    // It COMPOSES with the other predicates rather than replacing them.
+    assert.deepEqual(
+      (await store.listCases({ closure: "staff", statuses: ["CLOSED"], limit: 100 })).map((c) => c.employeeId),
+      ["manual"],
+      "closure ∩ statuses",
+    );
+    assert.deepEqual(await store.listCases({ closure: "staff", statuses: ["OPEN"], limit: 100 }), [], "no row is both active and staff-closed");
+    assert.deepEqual(
+      (await store.listCases({ closure: "staff", employeeIds: ["rerun"], limit: 100 })).map((c) => c.employeeId),
+      ["rerun"],
+      "closure ∩ employeeIds",
+    );
   });
 
   test(`[${label}] countByLastRun counts cases whose last_run_id matches`, async () => {

@@ -49,7 +49,46 @@ type WorklistGap = {
   evaluationPeriod: string;
   updatedAt: string;
   otherAssignee?: boolean;
+  /** Who closed it (#569) — NONE on the open view, STAFF on the "closed by staff" view. */
+  closure?: "NONE" | "STAFF" | "SYSTEM";
+  closedBy?: string | null;
+  closedAt?: string | null;
+  closedReason?: string | null;
+  /**
+   * What CQL says today, on a staff-closed gap only. `outcomeStatus` is the case row's value, which
+   * freezes the moment a person closes the case — so on that view this is what gets rendered.
+   */
+  liveState?: "GAP" | "CLEAR" | "UNKNOWN";
+  liveOutcomeStatus?: string | null;
+  /** The cell's DISPLAY state — what a chip renders; see the cases page for why both travel. */
+  liveDisplayStatus?: string | null;
 };
+
+/** The two views of the patient work list (#569). */
+type WorklistStatusView = "open" | "staff_closed";
+
+/**
+ * How a closed gap reads (#569) — the words follow the LIVE outcome, never the closure alone. A
+ * measure is satisfied by a result, never by an action, so a closure CQL does not corroborate says
+ * the patient is still counted and one it does says verified.
+ */
+function gapClosureNote(gap: WorklistGap): string | null {
+  if (gap.closure !== "STAFF" || !gap.closedBy) return null;
+  const when = gap.closedAt ? new Date(gap.closedAt).toLocaleDateString() : null;
+  const who = `closed by ${gap.closedBy}${when ? ` on ${when}` : ""}`;
+  if (gap.liveState === "CLEAR") {
+    // The DISPLAY state decides the word: out-of-population is canonical MISSING_DATA and is not a
+    // verification of anything.
+    const display = (gap.liveDisplayStatus ?? gap.liveOutcomeStatus ?? "").toUpperCase();
+    if (display === "OUT_OF_POPULATION") return `${who} — outside this measure's population`;
+    if (display === "EXCLUDED") return `verified excluded by ${gap.closedBy}${when ? ` on ${when}` : ""}`;
+    if (display === "COMPLIANT") return `verified compliant by ${gap.closedBy}${when ? ` on ${when}` : ""}`;
+    return `${who} — no longer counted by CQL`;
+  }
+  if (gap.liveState === "UNKNOWN") return `${who} — current CQL status unavailable`;
+  if (gap.liveState === "GAP") return `${who} — still counted by CQL`;
+  return who;
+}
 
 type WorklistPatientRow = {
   employeeId: string;
@@ -141,6 +180,19 @@ export default function WorklistPage() {
   );
   /** "patients" (default) or "panels" — the tab strip, kept in the URL so a link opens the same view. */
   const tab = searchParams.get("tab")?.trim() === "panels" ? "panels" : "patients";
+  /**
+   * Open work, or the cases somebody on the team already closed (#569).
+   *
+   * The second view exists because closing a case with a reason does not close the gap: CQL keeps
+   * counting the patient, and until now the row simply left this list with nothing to look at.
+   */
+  const statusView: WorklistStatusView = searchParams.get("status")?.trim().toLowerCase() === "staff_closed" ? "staff_closed" : "open";
+  /**
+   * Bulk actions belong to OPEN work only (#569). Assigning a closed case answers 0; escalating one
+   * writes `status: "OPEN"` (`case-actions.ts`) and silently reopens a case somebody deliberately
+   * closed with a reason.
+   */
+  const canBulkAct = canManage && statusView === "open";
   /**
    * Which view the URL asks for: "me", "all", or nothing said yet.
    *
@@ -256,7 +308,7 @@ export default function WorklistPage() {
     setLoading(true);
     setError(null);
     try {
-      const params = new URLSearchParams({ status: "open", limit: String(pageSize), offset: String(page * pageSize) });
+      const params = new URLSearchParams({ status: statusView, limit: String(pageSize), offset: String(page * pageSize) });
       if (providerFilter) params.set("providerId", providerFilter);
       if (assigneeFilter) params.set("assignee", assigneeFilter);
       if (outcomeFilter) params.set("outcome", outcomeFilter);
@@ -286,7 +338,7 @@ export default function WorklistPage() {
     } finally {
       if (ticket === requestSeq.current) setLoading(false);
     }
-  }, [api, providerFilter, assigneeFilter, outcomeFilter, measureFilter, searchFilter, payerFilter, effectivePanel, panelFilter, ownsPanel, siteId, from, to, pageSize, page]);
+  }, [api, providerFilter, assigneeFilter, outcomeFilter, measureFilter, searchFilter, payerFilter, effectivePanel, panelFilter, ownsPanel, siteId, from, to, pageSize, page, statusView]);
 
   // Deferred a tick, matching `/cases`: the lint rule forbids a synchronous setState inside an effect
   // (it cascades renders), and `load` sets loading/rows/total on entry.
@@ -455,6 +507,22 @@ export default function WorklistPage() {
             { value: "all", label: "Whole practice" },
           ]}
         />
+        {/*
+          Open work, or what the team has already closed (#569). Closing a case with a reason does
+          not close the gap — CQL keeps counting the patient — so the closed ones need somewhere to
+          be looked at rather than simply leaving the list.
+        */}
+        <Select
+          label="Work"
+          size="sm"
+          className="w-48"
+          value={statusView}
+          onValueChange={(v) => setParams((params) => (v === "staff_closed" ? params.set("status", "staff_closed") : params.delete("status")))}
+          options={[
+            { value: "open", label: "Open" },
+            { value: "staff_closed", label: "Closed by staff" },
+          ]}
+        />
         <Select
           label={providerFilterLabel()}
           size="sm"
@@ -583,7 +651,7 @@ export default function WorklistPage() {
         </div>
       ) : null}
 
-      {canManage && selected.length > 0 ? (
+      {canBulkAct && selected.length > 0 ? (
         <div className="rounded-xl border border-primary-200 bg-primary-50 p-3 dark:border-primary-800 dark:bg-primary-900/20">
           <div className="flex flex-wrap items-center gap-3 text-sm">
             <span className="font-semibold text-primary-900 dark:text-primary-200">
@@ -642,7 +710,7 @@ export default function WorklistPage() {
         <table className="w-full min-w-[56rem] text-sm">
           <thead className="border-b border-neutral-200 text-left text-xs uppercase tracking-wide text-neutral-500 dark:border-neutral-800 dark:text-neutral-400">
             <tr>
-              {canManage ? (
+              {canBulkAct ? (
                 <th className="w-10 p-3">
                   <input
                     type="checkbox"
@@ -674,7 +742,7 @@ export default function WorklistPage() {
                 const isExpanded = expanded.includes(row.employeeId);
                 return (
                   <tr key={row.employeeId} className="border-b border-neutral-100 align-top last:border-0 dark:border-neutral-800">
-                    {canManage ? (
+                    {canBulkAct ? (
                       <td className="p-3">
                         <input
                           type="checkbox"
@@ -701,20 +769,29 @@ export default function WorklistPage() {
                         <Badge variant={row.highestPriority === "HIGH" ? "danger" : "warning"}>
                           {row.gapCount} {labelFor(PRIORITY_LABELS, row.highestPriority)}
                         </Badge>
-                        {(isExpanded ? row.openGaps : row.openGaps.slice(0, 3)).map((gap) => (
-                          <Link
-                            key={gap.caseId}
-                            href={`/cases/${encodeURIComponent(gap.caseId)}`}
-                            className={`rounded px-1.5 py-0.5 text-xs ${outcomeStatusClass(gap.outcomeStatus)} ${gap.otherAssignee ? "opacity-60" : ""}`}
-                            title={
-                              gap.otherAssignee
-                                ? `${gap.measureName} — ${labelFor(OUTCOME_LABELS, gap.outcomeStatus)} (assigned to ${gap.assignee ?? "nobody"}, not the filtered assignee)`
-                                : `${gap.measureName} — ${labelFor(OUTCOME_LABELS, gap.outcomeStatus)}${gap.nextAction ? `: ${gap.nextAction}` : ""}`
-                            }
-                          >
-                            {gap.measureName}
-                          </Link>
-                        ))}
+                        {(isExpanded ? row.openGaps : row.openGaps.slice(0, 3)).map((gap) => {
+                          // On the staff-closed view the chip is the WINNING RUN's answer, not the
+                          // case row's — that one froze when the person closed the case (#569) — and
+                          // the tooltip says who closed it and whether CQL agrees.
+                          const shown = gap.closure === "STAFF" && gap.liveState && gap.liveState !== "UNKNOWN"
+                            ? (gap.liveDisplayStatus ?? gap.liveOutcomeStatus ?? gap.outcomeStatus)
+                            : gap.outcomeStatus;
+                          const closureNote = gapClosureNote(gap);
+                          return (
+                            <Link
+                              key={gap.caseId}
+                              href={`/cases/${encodeURIComponent(gap.caseId)}`}
+                              className={`rounded px-1.5 py-0.5 text-xs ${outcomeStatusClass(shown)} ${gap.otherAssignee ? "opacity-60" : ""}`}
+                              title={
+                                gap.otherAssignee
+                                  ? `${gap.measureName} — ${labelFor(OUTCOME_LABELS, shown)} (assigned to ${gap.assignee ?? "nobody"}, not the filtered assignee)`
+                                  : `${gap.measureName} — ${labelFor(OUTCOME_LABELS, shown)}${closureNote ? ` (${closureNote})` : ""}${gap.nextAction ? `: ${gap.nextAction}` : ""}`
+                              }
+                            >
+                              {gap.measureName}
+                            </Link>
+                          );
+                        })}
                         {!isExpanded && row.openGaps.length > 3 ? (
                           <button
                             type="button"

@@ -15,6 +15,8 @@ import type { EmployeeProfile } from "../engine/synthetic/employee-catalog.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
 import { toCsv, csvCell } from "./csv.ts";
+import { closureKindOf } from "../case/case-logic.ts";
+import { liveAnswerForCase, liveCellsFor, type LiveCellDeps } from "../compliance/live-cell.ts";
 
 const measureName = (measureId: string) => MEASURES[measureId]?.name ?? measureId;
 const authoredVersion = (measureId: string) => {
@@ -265,6 +267,15 @@ const CASE_HEADERS = [
   "closedAt", "latestOutreachDeliveryStatus",
   // APPENDED (MM-2), same rule as §6.2 above.
   "providerId", "payer",
+  // APPENDED (#569, ADR-083): who closed the case, and — for the rows a PERSON closed, whose
+  // `currentOutcomeStatus` is frozen at closure — what the winning run says today. Empty on every
+  // other row, where `currentOutcomeStatus` is already the live answer.
+  //
+  // `liveState` is the RECONCILIATION column and the reason the bucket alone is not enough: a
+  // consumer deriving "still a gap" from `liveOutcomeStatus` would apply `dispositionFor` and count
+  // an out-of-population row (canonical MISSING_DATA) as a gap, which is exactly what the programs
+  // chip, the staff-closed tab and the roster all do NOT do. This column is what those surfaces use.
+  "closedReason", "closedBy", "liveState", "liveOutcomeStatus", "liveOutcomeRunId",
 ] as const;
 
 export interface CaseExportFilter extends CaseQuery, SubjectFilters {
@@ -279,6 +290,8 @@ export async function casesCsv(
   eventStore: CaseEventStore,
   filter: CaseExportFilter,
   webChartEnv?: DataSourceEnv,
+  /** Where the two live columns come from (#569); without it they are empty and the row says so by being empty. */
+  liveDeps?: LiveCellDeps,
 ): Promise<string> {
   let cases = await caseStore.listCases({ ...filter, limit: 100000 });
   const directory = directoryForProfileRows(cases.map((c) => ({ subjectId: c.employeeId })), webChartEnv);
@@ -301,10 +314,25 @@ export async function casesCsv(
   // answered 504 at 60 s and held every connection while it did, so the deployment's other pages
   // timed out for the minute it ran (measured 2026-09-13).
   const deliveryStatuses = await eventStore.latestOutreachDeliveryStatuses(cases.map((c) => c.id));
+  // What the winning run says today, for the rows a PERSON closed (#569) — the only rows whose
+  // `currentOutcomeStatus` can be stale, and a set bounded by human activity. Bounded point reads
+  // through `liveCellsFor`; never a run read.
+  const staffClosed = cases.filter((c) => closureKindOf(c) === "STAFF");
+  const live = liveDeps && staffClosed.length > 0
+    ? await liveCellsFor(liveDeps, staffClosed.map((c) => ({ subjectId: c.employeeId, measureId: c.measureId })))
+    : null;
   const rows = cases.map((c) => {
     const emp = directory.employeeById(c.employeeId);
     // Absent key ⇒ no outreach action ⇒ null, the same cell the per-case call wrote.
     const latest = deliveryStatuses[c.id] ?? null;
+    // This export applies NO period filter (§6.3 — every row, all history), so it carries more
+    // prior-cycle closures than any other surface, and the cycle equality in `liveAnswerForCase` is
+    // what keeps a 2024 closure from being exported under the 2026 winner's answer. Without it the
+    // row states a `liveState`, a status and a run id that describe a different measurement year.
+    const answer = live && closureKindOf(c) === "STAFF" ? liveAnswerForCase(live, c) : undefined;
+    // UNKNOWN is written as the word, not as an empty cell: an empty cell means "not a staff closure".
+    const liveStatus = answer ? (answer.cell?.canonical ?? "UNKNOWN") : "";
+    const liveState = answer ? answer.state : "";
     return [
       c.id, c.employeeId, emp?.name ?? c.employeeId, emp?.role ?? "—", emp?.site ?? "—",
       // A case row carries no evidence, so this is the AUTHORED version even for a routed measure.
@@ -313,6 +341,7 @@ export async function casesCsv(
       measureName(c.measureId), authoredVersion(c.measureId), c.evaluationPeriod, c.status, c.priority, c.assignee,
       c.currentOutcomeStatus, c.nextAction, c.lastRunId, c.createdAt, c.updatedAt, c.closedAt, latest,
       emp?.providerId ?? "", emp?.payer ?? "",
+      c.closedReason ?? "", c.closedBy ?? "", liveState, liveStatus, answer?.runId ?? "",
     ];
   });
   return toCsv(CASE_HEADERS, rows);

@@ -10,7 +10,8 @@
 import { getStores } from "../stores/factory.ts";
 import { listNotFoundBody, withListFilter } from "../compliance/subject-list-filter.ts";
 import type { CloudDatabase, CloudBucket } from "@mieweb/cloud";
-import { loadWorklistCases } from "../case/worklist-read-model.ts";
+import { loadWorklistCases, withLiveStatus, STAFF_CLOSED_TOKEN } from "../case/worklist-read-model.ts";
+import { rosterCellCache } from "../compliance/roster-read-model.ts";
 import { groupIntoPatients } from "../case/worklist-patients.ts";
 import { employeeById, employees, providerById, profileSubjectMatcher, DIRECTORY } from "../config/deployment-profile.ts";
 import { isWebChartConfigured, type DataSourceEnv } from "../engine/ingress/data-source.ts";
@@ -89,6 +90,8 @@ export async function handleWorklist(req: Request, env: WorklistEnv, actor = "sy
       // This list shows gaps, not the outreach badge, so it does not pay for the grouped count query.
       withOutreachCounts: false,
       profileMatch: profileSubjectMatcher(employeeLookup),
+      // The staff-closed view resolves its live status in the read model, before the outcome filter.
+      live: { outcomeStore: stores.outcomes, cellCache: rosterCellCache },
     },
     {
       status: q.get("status"),
@@ -106,6 +109,9 @@ export async function handleWorklist(req: Request, env: WorklistEnv, actor = "sy
     },
   );
 
+  // The "closed by staff" view (#569) already carries what CQL says today for every gap on it — the
+  // read model resolved the whole (bounded) list before its own outcome filter — so a patient row's
+  // gaps say "still counted" or "verified" rather than the status frozen at closure.
   const rows = groupIntoPatients(summaries, { assignee: q.get("assignee"), viewerEmail: actor });
   // X-Total-Count is the PATIENT count, which is what this list pages. Reporting the case count here
   // would tell a client to page past the end of a shorter list.

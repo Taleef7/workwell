@@ -18,6 +18,8 @@ import { isWebChartConfigured, type DataSourceEnv } from "../engine/ingress/data
 import { toCaseDetail } from "../case/case-detail-read-model.ts";
 
 import { toCaseSummary } from "../case/case-read-models.ts";
+import { worklistQueryFor, withLiveStatus, STAFF_CLOSED_TOKEN } from "../case/worklist-read-model.ts";
+import { rosterCellCache } from "../compliance/roster-read-model.ts";
 import { toRunSummaryFromCounts, toRunListItemFromCounts } from "../run/read-models.ts";
 import { toMeasureDetail } from "../measure/measure-read-models.ts";
 import { generateTraceability } from "../measure/measure-traceability.ts";
@@ -136,23 +138,12 @@ async function resolveMeasure(deps: McpToolDeps, args: JsonRecord): Promise<Meas
   return null;
 }
 
-/** Map the MCP status filter to concrete case statuses (open default; closed = RESOLVED/CLOSED; all = any). */
-function caseStatusesFor(raw: string): string[] | undefined {
-  switch (raw.toLowerCase()) {
-    case "all":
-      return undefined;
-    case "closed":
-      return ["RESOLVED", "CLOSED"];
-    case "open":
-    case "":
-      // The ACTIVE set, matching the work list and the CSV export: a case an operator has started is
-      // still work, and a client asking for the open list must not be handed a shorter one than the
-      // screen shows.
-      return [...ACTIVE_CASE_STATUSES];
-    default:
-      return [raw.toUpperCase()];
-  }
-}
+/**
+ * The MCP status filter, through the ONE parser the work list and the CSV use (#569) — a blank token
+ * is the ACTIVE set here, as on the work list: a client asking for the open list must not be handed a
+ * shorter one than the screen shows, and `staff_closed` is every terminal case a person closed.
+ */
+const caseStatusQueryFor = (raw: string) => worklistQueryFor(raw, { blank: "active" });
 
 const OUTCOME_KEYS = ["COMPLIANT", "DUE_SOON", "OVERDUE", "MISSING_DATA", "EXCLUDED"] as const;
 const NON_COMPLIANT = ["DUE_SOON", "OVERDUE", "MISSING_DATA"];
@@ -228,29 +219,47 @@ async function listCases(args: JsonRecord, deps: McpToolDeps): Promise<unknown> 
   const ref = measureFilterRef(args);
   const measure = ref ? await resolveMeasure(deps, args) : null;
   if (ref && !measure) return safeError("MEASURE_NOT_FOUND", `Measure not found: ${ref}`);
-  let rows = await deps.caseStore.listCases({ statuses: caseStatusesFor(status), measureId: measure?.measureId, limit: 100000, offset: 0 });
+  let rows = await deps.caseStore.listCases({ ...caseStatusQueryFor(status), measureId: measure?.measureId, limit: 100000, offset: 0 });
   const directory = directoryForSubjects(deps, rows.map((c) => c.employeeId));
   const profileMatch = profileSubjectMatcher(directory.employeeById);
   rows = rows.filter((c) => profileMatch(c.employeeId));
-  const results = rows.map((c) => {
-    const s = toCaseSummary(c, 0, directory.employeeById);
-    return {
-      case_id: s.caseId,
-      employee_id: s.employeeId,
-      employee_name: s.employeeName,
-      site: s.site,
-      measure_name: s.measureName,
-      measure_version: s.measureVersion,
-      measure_version_id: s.measureVersionId,
-      evaluation_period: s.evaluationPeriod,
-      status: s.status,
-      priority: s.priority,
-      assignee: s.assignee ?? "",
-      current_outcome_status: s.currentOutcomeStatus,
-      last_run_id: s.lastRunId,
-      updated_at: s.updatedAt,
-    };
-  });
+  let summaries = rows.map((c) => toCaseSummary(c, 0, directory.employeeById));
+  // What CQL says today for any row a PERSON closed (#569) — on EVERY filter, not only the
+  // staff-closed one: `closed` and `all` return those rows too, and `current_outcome_status` on them
+  // is frozen at closure, potentially months stale, under a field name that reads as current. This
+  // mirrors `/api/cases`, which resolves the page slice whatever the tab.
+  if (summaries.some((s) => s.closure === "STAFF")) {
+    summaries = await withLiveStatus({ outcomeStore: deps.outcomeStore, cellCache: rosterCellCache }, summaries);
+  }
+  const results = summaries.map((s) => ({
+    case_id: s.caseId,
+    employee_id: s.employeeId,
+    employee_name: s.employeeName,
+    site: s.site,
+    measure_name: s.measureName,
+    measure_version: s.measureVersion,
+    measure_version_id: s.measureVersionId,
+    evaluation_period: s.evaluationPeriod,
+    status: s.status,
+    priority: s.priority,
+    assignee: s.assignee ?? "",
+    current_outcome_status: s.currentOutcomeStatus,
+    last_run_id: s.lastRunId,
+    updated_at: s.updatedAt,
+    closed_reason: s.closedReason ?? "",
+    closed_by: s.closedBy ?? "",
+    closure: s.closure,
+    // All THREE, or the client cannot reconcile: the canonical bucket alone calls an
+    // out-of-population patient (canonical MISSING_DATA) a gap, which is the same over-count the
+    // roster and the programs chip avoid by reading the display state. `MCP.md` documents the trio.
+    ...(s.liveState !== undefined
+      ? {
+          live_state: s.liveState,
+          live_outcome_status: s.liveOutcomeStatus ?? "",
+          live_display_status: s.liveDisplayStatus ?? "",
+        }
+      : {}),
+  }));
   return { results, returned: results.length, filters: { status, measureId: measure?.measureId ?? "" } };
 }
 
@@ -633,7 +642,7 @@ export const MCP_TOOLS: McpTool[] = [
   {
     name: "list_cases",
     description: "List case summaries with optional status and measure filter (measureId or measureName)",
-    inputSchema: { type: "object", properties: { status: { type: "string", enum: ["open", "closed", "all"] }, measureId: { type: "string" }, measureName: { type: "string" } } },
+    inputSchema: { type: "object", properties: { status: { type: "string", enum: ["open", "closed", "staff_closed", "all"] }, measureId: { type: "string" }, measureName: { type: "string" } } },
     roles: [CM, ADMIN],
     sensitivity: "restricted",
     handler: listCases,

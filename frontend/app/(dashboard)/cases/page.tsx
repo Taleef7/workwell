@@ -23,7 +23,7 @@ import { canManageCases } from "@/lib/rbac";
 import { SlaChip } from "@/components/SlaChip";
 import { ChevronRight } from "lucide-react";
 import { useMeasureIdentities } from "@/lib/measure-identity";
-import { formatEvaluationPeriod } from "@/lib/format";
+import { formatEvaluationPeriod, fmtCount } from "@/lib/format";
 import { providerFilterLabel, usePanelProviders } from "@/features/panel/use-panel-providers";
 import { UNASSIGN_VALUE, useAssignableUsers } from "@/features/panel/use-assignable-users";
 
@@ -48,6 +48,29 @@ type CaseSummary = {
   updatedAt: string;
   slaRemainingDays?: number | null;
   slaBreached?: boolean;
+  /**
+   * Who closed it (#569). `closure` is the derived kind — NONE for an active case, STAFF for every
+   * closure a person made (manual or rerun-verified), SYSTEM for the run's.
+   */
+  closedAt?: string | null;
+  closedReason?: string | null;
+  closedBy?: string | null;
+  closure?: "NONE" | "STAFF" | "SYSTEM";
+  /**
+   * What CQL says TODAY, present on STAFF-closed rows only. `currentOutcomeStatus` is frozen at the
+   * moment of closure for those rows (the nightly run never touches a human closure again), so it is
+   * the one field that can be months stale — these are what the row renders instead.
+   */
+  liveState?: "GAP" | "CLEAR" | "UNKNOWN";
+  liveOutcomeStatus?: string | null;
+  /**
+   * The cell's DISPLAY state, which is what this page renders. The canonical bucket alone cannot word
+   * a row: a patient the measure no longer describes is canonical MISSING_DATA and display
+   * OUT_OF_POPULATION, so a page reading only the bucket would show "Missing Data" beside a CLEAR
+   * state rendered as "verified compliant" — two false statements about one patient.
+   */
+  liveDisplayStatus?: string | null;
+  liveOutcomeRunId?: string | null;
 };
 
 type MeasureOption = {
@@ -56,7 +79,88 @@ type MeasureOption = {
   status: string;
 };
 
-type CaseStatusFilter = "open" | "closed" | "excluded" | "all";
+type CaseStatusFilter = "open" | "closed" | "staff_closed" | "excluded" | "all";
+
+/** The three counts the staff-closed tab's header shows, read from the response headers (#569). */
+type StaffClosedCounts = { gap: number; verified: number; unknown: number };
+
+const STATUS_TAB_LABELS: Record<CaseStatusFilter, string> = {
+  open: "Open",
+  closed: "Closed",
+  // Deliberately not "Resolved": resolving is what the run does when CQL agrees, and closing is what
+  // a person does. The distinction is the point of the tab.
+  staff_closed: "Closed by staff",
+  all: "All",
+  excluded: "Excluded",
+};
+
+/**
+ * How a staff closure reads on a row — the words follow the LIVE outcome, never the closure alone.
+ *
+ * The rule the practice's quality lead stated: a measure is satisfied by a RESULT, never by an
+ * action. So a person's closure that CQL does not corroborate says the patient is still counted, and
+ * one it does corroborate says verified. Getting this wrong in either direction is the whole defect
+ * #569 exists to fix, so the wording is computed in one place.
+ */
+function staffClosureLine(item: CaseSummary): string | null {
+  if (item.closure !== "STAFF" || !item.closedBy) return null;
+  const when = item.closedAt ? new Date(item.closedAt).toLocaleDateString() : null;
+  const who = `closed by ${item.closedBy}${when ? ` on ${when}` : ""}`;
+  if (item.liveState === "CLEAR") {
+    // CLEAR covers three different facts and only two of them are a verification. The word is chosen
+    // from the DISPLAY state, never from the canonical bucket: a patient who fell out of the measure's
+    // population is canonical MISSING_DATA, and calling that "verified compliant" would credit a
+    // person with a result nobody produced — the exact over-claim this change exists to remove.
+    const display = (item.liveDisplayStatus ?? item.liveOutcomeStatus ?? "").toUpperCase();
+    if (display === "OUT_OF_POPULATION") return `${who} — outside this measure's population`;
+    if (display === "EXCLUDED") return `verified excluded by ${item.closedBy}${when ? ` on ${when}` : ""}`;
+    if (display === "COMPLIANT") return `verified compliant by ${item.closedBy}${when ? ` on ${when}` : ""}`;
+    // Anything else CQL no longer counts: say that, rather than guessing at "compliant".
+    return `${who} — no longer counted by CQL`;
+  }
+  if (item.liveState === "UNKNOWN") return `${who} — current CQL status unavailable`;
+  if (item.liveState === "GAP") return `${who} — still counted by CQL`;
+  // No live status on the row at all — an older backend, or a row the server chose not to resolve.
+  // Say who closed it and stop, rather than claiming anything about a status nobody resolved.
+  return who;
+}
+
+/**
+ * The outcome status a row should SHOW (#569).
+ *
+ * For a staff-closed row that is the winning run's answer, not the case column: the column froze the
+ * moment a person closed the case and the run has written several answers since. For every other row
+ * the case column IS live, so it is used unchanged.
+ */
+function displayOutcomeOf(item: CaseSummary): string {
+  if (item.closure === "STAFF" && item.liveState && item.liveState !== "UNKNOWN") {
+    // The DISPLAY state first: it is the one that can say OUT_OF_POPULATION, which the canonical
+    // bucket (MISSING_DATA) cannot, and which the chip beside the closure line has to agree with.
+    return item.liveDisplayStatus ?? item.liveOutcomeStatus ?? item.currentOutcomeStatus;
+  }
+  return item.currentOutcomeStatus;
+}
+
+/** The closure line under a row, when there is one to show. */
+function StaffClosureNote({ item, className = "" }: { item: CaseSummary; className?: string }) {
+  const line = staffClosureLine(item);
+  if (!line) return null;
+  return <p className={`text-[11px] leading-tight text-neutral-500 dark:text-neutral-400 ${className}`}>{line}</p>;
+}
+
+/** "Closed by staff" / "Auto-resolved" — which KIND of closure a row on the Closed or All tab is. */
+function ClosureKindChip({ item }: { item: CaseSummary }) {
+  if (item.closure !== "STAFF" && item.closure !== "SYSTEM") return null;
+  const staff = item.closure === "STAFF";
+  return (
+    <span
+      className="inline-flex items-center rounded-full border border-neutral-200 bg-transparent px-2 py-0.5 text-[10px] font-medium text-neutral-600 dark:border-neutral-700 dark:text-neutral-300"
+      title={staff ? "A person closed this case" : "The nightly run closed this case"}
+    >
+      {staff ? "Closed by staff" : "Auto-resolved"}
+    </span>
+  );
+}
 
 /** The bulk-assign contract (`POST /api/cases/bulk-assign`). */
 type BulkAssignRequest = { assignee: string | null; caseIds: string[] };
@@ -73,6 +177,8 @@ function normalizeCaseStatusFilter(value: string | null): CaseStatusFilter {
   switch (value?.toLowerCase()) {
     case "closed":
       return "closed";
+    case "staff_closed":
+      return "staff_closed";
     case "excluded":
       return "excluded";
     case "all":
@@ -131,6 +237,7 @@ export default function CasesPage() {
   const [bulkActing, setBulkActing] = useState<"assign" | "escalate" | "export" | null>(null);
   const [hasMore, setHasMore] = useState(false);
   const [total, setTotal] = useState(0);
+  const [staffClosedCounts, setStaffClosedCounts] = useState<StaffClosedCounts | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const { siteId, from, to } = useGlobalFilters();
   const api = useApi();
@@ -216,6 +323,18 @@ export default function CasesPage() {
       const { data, headers } = await api.getWithHeaders<CaseSummary[]>(`/api/cases?${params.toString()}`);
       if (reqId !== casesReqIdRef.current) return;
       const matchTotal = Number(headers.get("X-Total-Count") ?? data.length);
+      // The staff-closed tab's three counts describe the WHOLE filtered list, not the page, so they
+      // come from headers rather than from a tally of the rows on screen — the same reason the total
+      // does (#150 M10). Absent on every other tab, and then the header line is not rendered.
+      setStaffClosedCounts(
+        statusFilter === "staff_closed"
+          ? {
+              gap: Number(headers.get("X-Staff-Closed-Gap") ?? 0) || 0,
+              verified: Number(headers.get("X-Staff-Closed-Verified") ?? 0) || 0,
+              unknown: Number(headers.get("X-Staff-Closed-Unknown") ?? 0) || 0,
+            }
+          : null,
+      );
       setCases(data);
       setTotal(Number.isFinite(matchTotal) ? matchTotal : data.length);
       setHasMore(data.length < (Number.isFinite(matchTotal) ? matchTotal : data.length));
@@ -243,6 +362,15 @@ export default function CasesPage() {
   }, [loadCases]);
 
   const filteredCases = cases;
+  /**
+   * Whether rows on THIS list can be bulk-actioned (#569).
+   *
+   * Not on a closed list. Assigning a closed case answers 0 — annoying but harmless — while
+   * ESCALATING one writes `status: "OPEN"` (`case-actions.ts`), silently reopening a case somebody
+   * deliberately closed with a reason. The roster gates the same affordance per cell; these lists gate
+   * it per view, because every row on them is closed.
+   */
+  const canBulkAct = canManage && statusFilter !== "staff_closed" && statusFilter !== "closed" && statusFilter !== "excluded";
 
   const allFilteredSelected = filteredCases.length > 0 && filteredCases.every((item) => selectedCaseIds.includes(item.caseId));
 
@@ -548,7 +676,7 @@ export default function CasesPage() {
       <div className="flex flex-wrap items-end gap-3 rounded-xl border border-neutral-200 bg-white p-3 dark:border-neutral-800 dark:bg-neutral-900">
         <div className="flex items-center gap-2 text-sm text-neutral-600 dark:text-neutral-400">
           <span>Status</span>
-          {(["open", "closed", "all", "excluded"] as const).map((status) => (
+          {(["open", "closed", "staff_closed", "all", "excluded"] as const).map((status) => (
             <Button
               key={status}
               type="button"
@@ -557,7 +685,7 @@ export default function CasesPage() {
               className="rounded-full"
               onClick={() => setStatusAndUrl(status)}
             >
-              {status === "open" ? "Open" : status === "closed" ? "Closed" : status === "all" ? "All" : "Excluded"}
+              {STATUS_TAB_LABELS[status]}
             </Button>
           ))}
         </div>
@@ -647,7 +775,23 @@ export default function CasesPage() {
         </div>
       </div>
 
-      {canManage && selectedCaseIds.length > 0 ? (
+      {/*
+        The staff-closed tab's header (#569). The three numbers describe the whole filtered list and
+        are the point of the tab: a coordinator needs to know how many of the cases their team closed
+        are still counted against them. "Not evaluated" is shown rather than folded into either of the
+        others — a patient no run has scored has not been verified.
+      */}
+      {staffClosedCounts && !loading && !error ? (
+        <p className="text-sm text-neutral-700 dark:text-neutral-300">
+          <strong>{fmtCount(staffClosedCounts.gap)}</strong> still counted by CQL
+          <span className="text-neutral-400 dark:text-neutral-500"> · </span>
+          <strong>{fmtCount(staffClosedCounts.verified)}</strong> verified
+          <span className="text-neutral-400 dark:text-neutral-500"> · </span>
+          <strong>{fmtCount(staffClosedCounts.unknown)}</strong> not evaluated
+        </p>
+      ) : null}
+
+      {canBulkAct && selectedCaseIds.length > 0 ? (
         <div className="rounded-xl border border-primary-200 bg-primary-50 p-3 dark:border-primary-800 dark:bg-primary-900/20">
           <div className="flex flex-wrap items-center gap-3 text-sm">
             <span className="font-semibold text-primary-900 dark:text-primary-200">{selectedCaseIds.length} selected</span>
@@ -702,7 +846,7 @@ export default function CasesPage() {
         </div>
       ) : null}
 
-      {canManage && filteredCases.length > 0 ? (
+      {canBulkAct && filteredCases.length > 0 ? (
         <label className="hidden items-center gap-2 text-sm text-neutral-600 md:flex dark:text-neutral-400">
           <input type="checkbox" checked={allFilteredSelected} onChange={toggleAllFiltered} />
           <span>Select all in current results</span>
@@ -711,7 +855,7 @@ export default function CasesPage() {
 
       <div className="space-y-2 md:hidden">
         {filteredCases.map((item) => {
-          const outcomeLabel = labelFor(OUTCOME_LABELS, item.currentOutcomeStatus);
+          const outcomeLabel = labelFor(OUTCOME_LABELS, displayOutcomeOf(item));
           return (
             <Link
               key={item.caseId}
@@ -721,9 +865,10 @@ export default function CasesPage() {
               <div className="min-w-0">
                 <p className="truncate text-sm font-semibold text-neutral-900 dark:text-neutral-100">{item.employeeName}</p>
                 <p className="truncate text-xs text-neutral-500 dark:text-neutral-400">{measureLabelFor(item.measureId, item.measureName)}</p>
+                <StaffClosureNote item={item} className="truncate" />
               </div>
               <div className="ml-3 flex items-center gap-2">
-                <span className={`rounded-full px-2 py-1 text-[10px] font-semibold ${outcomeStatusClass(item.currentOutcomeStatus)}`}>
+                <span className={`rounded-full px-2 py-1 text-[10px] font-semibold ${outcomeStatusClass(displayOutcomeOf(item))}`}>
                   {outcomeLabel}
                 </span>
                 <ChevronRight className="h-4 w-4 text-neutral-400" />
@@ -734,18 +879,17 @@ export default function CasesPage() {
       </div>
 
       {viewMode === "table" ? (
-        <CasesTable items={filteredCases} selectedCaseIds={selectedCaseIds} onToggle={toggleCase} canManage={canManage} measureLabelFor={measureLabelFor} />
+        <CasesTable items={filteredCases} selectedCaseIds={selectedCaseIds} onToggle={toggleCase} canManage={canBulkAct} measureLabelFor={measureLabelFor} />
       ) : (
       <div className="hidden gap-4 md:grid md:grid-cols-2 xl:grid-cols-3">
         {filteredCases.map((item) => {
           const caseStatus = normalizeEnumValue(item.status);
           const caseStatusLabel = labelFor(CASE_STATUS_LABELS, item.status);
           const priorityLabel = labelFor(PRIORITY_LABELS, item.priority);
-          const outcomeLabel = labelFor(OUTCOME_LABELS, item.currentOutcomeStatus);
           return (
             <div key={item.caseId} className="rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm dark:border-neutral-800 dark:bg-neutral-900">
               <div className="flex items-start justify-between gap-3">
-                {canManage ? (
+                {canBulkAct ? (
                   <label className="flex items-center gap-2 text-xs text-neutral-600 dark:text-neutral-400">
                     <input
                       type="checkbox"
@@ -760,6 +904,10 @@ export default function CasesPage() {
                 )}
                 <div className="flex flex-wrap justify-end gap-2">
                   <span className={`rounded-full px-3 py-1 text-xs font-semibold ${caseStatusClass(item.status)}`}>{caseStatusLabel}</span>
+                  {/* WHICH kind of closure this is (#569) — the status alone cannot say: a manual
+                      close writes CLOSED while a rerun-verified one writes RESOLVED, and the run's
+                      own auto-resolve writes RESOLVED too. */}
+                  <ClosureKindChip item={item} />
                   <Badge variant={PRIORITY_BADGE_VARIANT[normalizeEnumValue(item.priority)] ?? "secondary"}>{priorityLabel}</Badge>
                 </div>
               </div>
@@ -782,10 +930,14 @@ export default function CasesPage() {
                 </div>
                 <div className="flex items-center justify-between gap-3">
                   <dt className="text-neutral-500 dark:text-neutral-400">Why flagged</dt>
-                  <dd>
-                    <span className={`rounded-full px-2 py-1 text-xs font-semibold ${outcomeStatusClass(item.currentOutcomeStatus)}`}>
-                      {outcomeLabel}
+                  <dd className="text-right">
+                    {/* On a staff-closed row this is the WINNING RUN's answer, not the case column's
+                        frozen one (#569), and the line beneath says who closed it and whether CQL
+                        agrees. */}
+                    <span className={`rounded-full px-2 py-1 text-xs font-semibold ${outcomeStatusClass(displayOutcomeOf(item))}`}>
+                      {labelFor(OUTCOME_LABELS, displayOutcomeOf(item))}
                     </span>
+                    <StaffClosureNote item={item} className="mt-1" />
                   </dd>
                 </div>
                 <div className="flex items-center justify-between gap-3">
@@ -901,14 +1053,20 @@ function CasesTable({
               <td className="px-3 py-2 text-neutral-700 dark:text-neutral-300">{measureLabelFor(item.measureId, item.measureName)}</td>
               <td className="px-3 py-2 text-neutral-600 dark:text-neutral-400">{item.site}</td>
               <td className="px-3 py-2">
-                <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${caseStatusClass(item.status)}`}>
-                  {labelFor(CASE_STATUS_LABELS, item.status)}
-                </span>
+                <div className="flex flex-col items-start gap-1">
+                  <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${caseStatusClass(item.status)}`}>
+                    {labelFor(CASE_STATUS_LABELS, item.status)}
+                  </span>
+                  <ClosureKindChip item={item} />
+                </div>
               </td>
               <td className="px-3 py-2">
-                <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${outcomeStatusClass(item.currentOutcomeStatus)}`}>
-                  {labelFor(OUTCOME_LABELS, item.currentOutcomeStatus)}
+                {/* The winning run's answer on a staff-closed row, with the closure line beneath — the
+                    case column froze when the person closed it (#569). */}
+                <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${outcomeStatusClass(displayOutcomeOf(item))}`}>
+                  {labelFor(OUTCOME_LABELS, displayOutcomeOf(item))}
                 </span>
+                <StaffClosureNote item={item} className="mt-1" />
               </td>
               <td className="px-3 py-2">
                 <Badge variant={PRIORITY_BADGE_VARIANT[normalizeEnumValue(item.priority)] ?? "secondary"}>

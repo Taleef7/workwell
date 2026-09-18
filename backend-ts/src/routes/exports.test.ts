@@ -121,7 +121,11 @@ test("GET /api/exports/cases carries the case + latestOutreachDeliveryStatus col
     lines[0],
     "caseId,employeeExternalId,employeeName,role,site,measureName,measureVersion,evaluationPeriod,status," +
       "priority,assignee,currentOutcomeStatus,nextAction,lastRunId,createdAt,updatedAt,closedAt," +
-      "latestOutreachDeliveryStatus,providerId,payer",
+      "latestOutreachDeliveryStatus,providerId,payer," +
+      // APPENDED (#569, ADR-083), never inserted — every column a consumer reads by position keeps
+      // its index. The two `live*` cells are filled only for rows a PERSON closed, whose
+      // `currentOutcomeStatus` froze at closure.
+      "closedReason,closedBy,liveState,liveOutcomeStatus,liveOutcomeRunId",
   );
   assert.ok(lines.some((l) => l.includes("Omar Siddiq") && l.includes("OVERDUE")));
 });

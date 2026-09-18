@@ -136,7 +136,7 @@ export class SqliteOutcomeStore implements OutcomeStore {
 
   async listOutcomes(
     runId: string,
-    opts?: { limit?: number; offset?: number; measureId?: string; subjectId?: string },
+    opts?: { limit?: number; offset?: number; measureId?: string; subjectId?: string; subjectIds?: readonly string[] },
   ): Promise<OutcomeRecord[]> {
     // Optional LIMIT/OFFSET paging (Fable H4); the id tiebreak keeps paging deterministic when many
     // rows share an evaluated_at. SQLite requires a LIMIT before OFFSET, so emit -1 (all) when only an
@@ -151,6 +151,15 @@ export class SqliteOutcomeStore implements OutcomeStore {
     if (opts?.subjectId != null) {
       where += ` AND subject_id = ?`;
       binds.push(opts.subjectId);
+    }
+    if (opts?.subjectIds !== undefined) {
+      // An EMPTY set is "nobody matches" (#569): `IN ()` is a syntax error, so it becomes a predicate
+      // that is false for every row, the same answer the ceiling's `= ANY('{}')` gives.
+      if (opts.subjectIds.length === 0) where += ` AND 1 = 0`;
+      else {
+        where += ` AND subject_id IN (${opts.subjectIds.map(() => "?").join(", ")})`;
+        binds.push(...opts.subjectIds);
+      }
     }
     let page = "";
     if (opts?.limit != null || opts?.offset != null) {

@@ -135,6 +135,41 @@ test("list_cases returns snake_case rows; status filter scopes", async () => {
   assert.ok("case_id" in results[0]! && "employee_name" in results[0]! && "current_outcome_status" in results[0]!);
 });
 
+test("list_cases status=staff_closed returns the closures a PERSON made, with all three live fields", async () => {
+  // A subject of this test's own, so closing it cannot change what the other tests see.
+  const closed = await deps.caseStore.upsertFromOutcome({
+    runId, subjectId: "emp-042", measureId: "audiogram", evaluationPeriod: "2026-06-13", outcomeStatus: "OVERDUE",
+  });
+  await deps.caseStore.patchCase(closed!.id, {
+    status: "CLOSED", closedAt: "2026-06-14T00:00:00Z", closedReason: "MANUAL_RESOLVE", closedBy: "nurse@example.org",
+  });
+
+  const { payload } = await call("list_cases", { status: "staff_closed", period: "all" });
+  const rows = payload.results as JsonRecord[];
+  const row = rows.find((r) => r.employee_id === "emp-042");
+  assert.ok(row, "the case a person closed is on the staff_closed list");
+  assert.equal(row!.closure, "STAFF");
+  assert.equal(row!.closed_by, "nurse@example.org");
+  assert.equal(row!.closed_reason, "MANUAL_RESOLVE");
+
+  // All THREE, together. `MCP.md` promises the trio because the canonical bucket alone cannot
+  // distinguish an out-of-population patient (canonical MISSING_DATA, display OUT_OF_POPULATION) from
+  // a real gap — and `live_display_status` was documented while the tool emitted only the other two,
+  // which is a contract a reader would have believed.
+  for (const field of ["live_state", "live_outcome_status", "live_display_status"]) {
+    assert.ok(field in row!, `a staff_closed row carries ${field}`);
+  }
+  // `current_outcome_status` is the FROZEN value and keeps its own meaning beside them.
+  assert.equal(row!.current_outcome_status, "OVERDUE");
+
+  // And every row on every filter says which kind of closure it is, so a client never has to infer
+  // it from `status` — which cannot say it (a manual close writes CLOSED, a rerun-verified one
+  // RESOLVED, and the nightly run's auto-resolve writes RESOLVED too).
+  const open = await call("list_cases", { status: "open" });
+  assert.ok((open.payload.results as JsonRecord[]).every((r) => r.closure === "NONE"));
+  assert.ok(!(open.payload.results as JsonRecord[]).some((r) => r.employee_id === "emp-042"), "and it is off the open list");
+});
+
 test("list_cases with an unresolved measure filter errors (no silent leak of all cases)", async () => {
   const { payload } = await call("list_cases", { measureName: "No Such Measure" });
   assert.equal(payload.code, "MEASURE_NOT_FOUND");

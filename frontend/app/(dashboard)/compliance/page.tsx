@@ -439,12 +439,25 @@ export default function CompliancePage() {
     () => (
       assignEnabled
         ? rows
-            .filter((r) => ASSIGNABLE_CELL_STATES.has((r.cells[assignMeasureId]?.status ?? "NA") as DisplayState))
+            .filter((r) => {
+              const cell = r.cells[assignMeasureId];
+              // A cell a PERSON already closed has no open case to assign (#569). The server would
+              // answer `assigned: 0` and a toast would explain, which is a correction arriving after
+              // the click — and the caption below would have counted the row as assignable, so the
+              // number beside the button described a set the button could not act on.
+              if (cell?.staffClosure) return false;
+              return ASSIGNABLE_CELL_STATES.has((cell?.status ?? "NA") as DisplayState);
+            })
             .map((r) => r.subject.externalId)
         : []
     ),
     [assignEnabled, rows, assignMeasureId],
   );
+  // Whether anything on this page carries the marker — the legend is shown only then, so the grid
+  // does not explain a state that is not on screen. Computed per render rather than memoized: it is a
+  // scan of at most one page of cells, and `rows` is a fresh array each render (it defaults through
+  // `??`), so a `useMemo` on it would re-run anyway while adding a dependency warning.
+  const hasStaffClosures = rows.some((r) => Object.values(r.cells).some((c) => c.staffClosure));
   // The CURRENT view, readable from an async continuation that closed over an older one. Written in
   // an effect, not during render — React 19 forbids the latter, and an effect is the right place
   // anyway: the value only has to be correct by the time an await resumes.
@@ -816,8 +829,8 @@ export default function CompliancePage() {
             </Button>
             {/*
               Says what "selected" can mean here, because the checkbox column is deliberately dead on
-              rows with nothing open — a compliant patient is not work, and an out-of-population one
-              has no case at all (ADR-078).
+              rows with nothing open — a compliant patient is not work, an out-of-population one has
+              no case at all (ADR-078), and a case a person already closed has none either (#569).
             */}
             <span className="text-xs text-neutral-500 dark:text-neutral-400">
               {`${selectableIds.length} of ${rows.length} on this page have an open case for this measure`}
@@ -894,6 +907,19 @@ export default function CompliancePage() {
         </div>
 
         <RosterMobileCards columns={columns} rows={rows} loading={loading} labelFor={measureLabelFor} />
+
+        {/*
+          The legend for the third state (#569), shown only when a marker is actually on the page. A
+          coordinator who clicked the Overdue chip lands here, sees a row marked closed, and must be
+          able to read it as intended rather than as a bug: the count and the filter are CQL's, and
+          the marker says a person decided not to work the gap.
+        */}
+        {hasStaffClosures ? (
+          <p className="text-xs text-neutral-500 dark:text-neutral-400">
+            <span className="font-medium">Closed by staff</span>
+            {` — a person closed the case; CQL still counts the ${SUBJECT.singular} until the chart changes.`}
+          </p>
+        ) : null}
 
         <div className="flex items-center justify-between text-sm text-neutral-500 dark:text-neutral-400">
           <span>
