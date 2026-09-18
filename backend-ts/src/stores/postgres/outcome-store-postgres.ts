@@ -152,7 +152,7 @@ export class PgOutcomeStore implements OutcomeStore {
 
   async listOutcomes(
     runId: string,
-    opts?: { limit?: number; offset?: number; measureId?: string; subjectId?: string },
+    opts?: { limit?: number; offset?: number; measureId?: string; subjectId?: string; subjectIds?: readonly string[] },
   ): Promise<OutcomeRecord[]> {
     // Native UUID column: a malformed run id yields no rows on the floor, so don't
     // let Postgres throw `invalid input syntax for type uuid` — match the contract.
@@ -163,6 +163,9 @@ export class PgOutcomeStore implements OutcomeStore {
     // Narrowed BEFORE the page window, so offsets walk the measure's rows and not the run's.
     let where = opts?.measureId != null ? ` AND measure_id = $${binds.push(opts.measureId)}` : "";
     if (opts?.subjectId != null) where += ` AND subject_id = $${binds.push(opts.subjectId)}`;
+    // A set as ONE array bind (#569); `= ANY('{}')` is false for every row, which is the contract's
+    // "an empty set matches nobody".
+    if (opts?.subjectIds !== undefined) where += ` AND subject_id = ANY($${binds.push([...opts.subjectIds])}::text[])`;
     let page = "";
     if (opts?.limit != null) page += ` LIMIT $${binds.push(Math.max(0, opts.limit))}`;
     if (opts?.offset != null) page += ` OFFSET $${binds.push(Math.max(0, opts.offset))}`;

@@ -13,7 +13,8 @@
  * which is what `CaseQuery.employeeIds` is for; the shared read model applies it before we get here.
  */
 import type { CaseSummary } from "./case-read-models.ts";
-import { priorityRankOf } from "./case-logic.ts";
+import { priorityRankOf, type ClosureKind } from "./case-logic.ts";
+import type { LiveState } from "../compliance/roster-vocabulary.ts";
 
 /** One patient, with every open gap they have. */
 export interface WorklistPatientRow {
@@ -60,6 +61,15 @@ export interface WorklistGap {
    * gaps when one is mine, which is the count-not-describing-the-list defect again.
    */
   otherAssignee?: boolean;
+  /** Who closed it (#569) — `closure` is NONE on the open list; STAFF on the "closed by staff" view. */
+  closure: ClosureKind;
+  closedBy: string | null;
+  closedAt: string | null;
+  closedReason: string | null;
+  /** What CQL says today, on a STAFF-closed gap only (see `CaseSummary.liveState`). */
+  liveState?: LiveState;
+  liveOutcomeStatus?: string | null;
+  liveDisplayStatus?: string | null;
 }
 
 /** `assignee=me` resolves against the caller's own JWT `email` claim; `unassigned` is its own token. */
@@ -115,6 +125,13 @@ export function groupIntoPatients(
         updatedAt: c.updatedAt,
         // Marked only when an assignee filter is active AND this gap is not the reason the row is here.
         ...(wanted.kind !== "none" && !gapMatchesAssignee(c, wanted) ? { otherAssignee: true } : {}),
+        closure: c.closure,
+        closedBy: c.closedBy,
+        closedAt: c.closedAt,
+        closedReason: c.closedReason,
+        ...(c.liveState !== undefined
+          ? { liveState: c.liveState, liveOutcomeStatus: c.liveOutcomeStatus ?? null, liveDisplayStatus: c.liveDisplayStatus ?? null }
+          : {}),
       })),
       gapCount: sorted.length,
       highestPriority: first.priority,

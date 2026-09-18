@@ -47,6 +47,14 @@ type ProgramSummary = {
   /** Which way the measure improves; sent by the overview API so the rate never waits on /api/measures. */
   improvementNotation?: "increase" | "decrease";
   openCaseCount: number;
+  /**
+   * Cases a person closed this cycle whose patient the measure STILL counts as a gap (#569).
+   *
+   * The number that reconciles the Overdue chip above with the open-case link below: closing a case
+   * takes the row off the work list and changes nothing about what CQL counts, so without this the
+   * two figures disagreed and nothing on the card accounted for it.
+   */
+  staffClosedGapCount?: number;
   /** The evidence's rate for the latest run (the MeasureReport's own reduction), or null when the run
    *  carries no official evidence. A separate metric from `complianceRate`, the workflow-status rate. */
   measureRate?: {
@@ -449,10 +457,27 @@ export default function ProgramsPage() {
                 )}
               </div>
 
-              <div className="relative z-10 mt-4 flex items-center justify-between">
-                <Link href={`/cases?measureId=${encodeURIComponent(program.measureId)}`} className="text-sm font-medium text-primary-700 hover:underline dark:text-primary-400">
-                  Open Worklist ({program.openCaseCount})
-                </Link>
+              <div className="relative z-10 mt-4 flex flex-wrap items-center justify-between gap-2">
+                <div className="flex flex-wrap items-center gap-3">
+                  <Link href={`/cases?measureId=${encodeURIComponent(program.measureId)}`} className="text-sm font-medium text-primary-700 hover:underline dark:text-primary-400">
+                    Open Worklist ({program.openCaseCount})
+                  </Link>
+                  {/*
+                    The reconciliation (#569): patients a person closed whom CQL still counts. It goes
+                    to the cases list's own "Closed by staff" tab — NOT to the roster, which is where
+                    the status chips above lead and where these patients still appear as gaps.
+                    Hidden at zero: a row of zeroes teaches a reader to stop looking.
+                  */}
+                  {(program.staffClosedGapCount ?? 0) > 0 ? (
+                    <Link
+                      href={`/cases?status=staff_closed&measureId=${encodeURIComponent(program.measureId)}`}
+                      className="text-xs font-medium text-neutral-600 hover:underline dark:text-neutral-400"
+                      title="A person closed these cases; the measure still counts the patients until the chart changes."
+                    >
+                      Closed by staff, still counted: {program.staffClosedGapCount}
+                    </Link>
+                  ) : null}
+                </div>
                 <Link href={`/programs/${program.measureId}`} className="text-sm font-medium text-neutral-700 hover:underline dark:text-neutral-300">
                   View detail →
                 </Link>

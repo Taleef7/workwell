@@ -189,9 +189,26 @@ Every tool call writes an audit event regardless of success or failure:
 
 ## Operational notes
 
-- `list_cases` and `get_case` are the primary case inspection tools.
+- `list_cases` and `get_case` are the primary case inspection tools. `list_cases` takes
+  `status: open | closed | staff_closed | all`; **`staff_closed`** is every terminal case a PERSON
+  closed (#569, ADR-083), and on that filter each row additionally carries `live_state`
+  (`GAP | CLEAR | UNKNOWN`), `live_outcome_status` (the canonical bucket) and `live_display_status`
+  (what a surface renders — an out-of-population patient is canonical `MISSING_DATA` and display
+  `OUT_OF_POPULATION`, and a client given only the bucket would call them a gap). The live pair
+  exists because `current_outcome_status` on such a row is frozen at the moment of closure
+  (`DATA_MODEL_CONTRACTS` §4), so a client reading only that field would be handed a months-old status
+  under a field name that reads as current. Every row on every filter now carries `closure`
+  (`NONE | STAFF | SYSTEM`), `closed_by`, `closed_reason` and `closed_at`, so a client can tell a
+  person's closure from the nightly run's. **This tool applies no period filter**, so
+  `status=staff_closed` returns ALL history — each row's `live_state` is today's answer while its
+  `evaluation_period` may name a closed cycle. Same as the cases CSV (`DATA_MODEL_CONTRACTS` §6.3),
+  and unlike the work list's own staff-closed view, which defaults to the current cycle.
 - `get_run_summary`, `list_runs`, `list_measures`, `get_measure_version`, and `explain_outcome` expose the operational read surface.
 - `get_employee` and `check_compliance` are the primary employee-facing tools.
-- `list_noncompliant` is equivalent to a filtered worklist query.
+- `list_noncompliant` is equivalent to a filtered worklist query — it lists ACTIVE cases, which makes
+  it **the work queue, not the non-compliant population**. A patient whose case a person closed is
+  absent from it while the measure still counts them as a gap (ADR-083 d4); `list_cases` with
+  `status=staff_closed` is where those are. Deliberately unchanged: widening this tool would change
+  what "work" means for every existing client.
 - `explain_rule` replaces ad-hoc policy lookups with deterministic spec metadata.
 - Any future MCP write surface must go through a separate security review and documentation update.

@@ -18,6 +18,123 @@
 >
 > **Sequence note:** ADR-033 does not exist — verified absent, and the number must not be reused.
 
+## ADR-083: an exception is data the measure reads, never a status WorkWell flips — and a case a person closed is still a gap the run counts
+
+**Date:** 2026-09-18. **Status:** accepted. Milestone M-M, MM-3's design half (#569). Builds on ADR-008
+(CQL is the sole authority on compliance), ADR-016 (segments are applicability, never an exception),
+ADR-067 (a card renders a completed evaluation and carries nothing a human did not choose), ADR-070 d3
+/ LOCKED §4A.3 (cards resolve, not alert; exception documentation is structured data the measure reads
+next run), ADR-078 (a subject outside the initial population is a result, not a case) and ADR-082 d6
+(DENEX and DENEXCEP are the artifact's populations; `status=EXCLUDED` is the workflow's vocabulary).
+
+**Context.** The practice asked twice for the same thing in different words: on 2026-08-27, that a card
+offer more than "accept or dismiss" — *what orders resolve this?* — and that there is "a way to dismiss
+with a reason: document a contraindication"; on 2026-09-10, that uploading a record with the right
+document type should "fulfil the measure". What the sandbox actually had was a closure note on a case.
+Marking a case resolved required one, and then the row left the work list while the measure kept
+counting the patient — the roster showed them Overdue, the programs card counted them Overdue, and the
+open-case count did not. Both numbers were right and they disagreed, with nothing on any screen
+accounting for the difference. The system had no way to say whether a closure was an exception. It is
+not, and this ADR says what one would be.
+
+### d1 — Two vocabularies, and conflating them is the failure mode
+
+A **workflow closure** is `cases.closed_*`: free text, read by no measure, lasting for the compliance
+cycle (a new cycle inserts a new case). An **exception** is structured data in the evaluated bundle
+that the measure's own logic reads on the next run. The first is visible as "Closed by staff" (d4) and
+changes no number; the second changes the number and is the only thing that may.
+
+Two consequences of the write path are recorded here as deliberate invariants rather than accidents,
+because a future session reading only the code could "fix" either and break the first. A human-closed
+case's `current_outcome_status` is **frozen at closure** — `planCaseUpsert` no-ops on a closure with
+`closed_by` set (`case/case-logic.ts`), so the nightly run never touches the row again and CQL's
+current answer lives only in `outcomes`. And a person can close a case only from OPEN or IN_PROGRESS
+(`resolveCase`'s precondition), so an EXCLUDED or auto-resolved case is never "closed by staff": the
+workflow cannot override an exception any more than it can create one.
+
+### d2 — For an AUTHORED measure, a WorkWell-side waiver is legitimate — and is not wired
+
+Every authored measure reads its exception as a coded FHIR `Condition` carrying a `urn:workwell:*`
+code (`measure-bindings.ts`, the `waiver`/`refusal` entries), which is the right shape: the CQL
+decides, and WorkWell supplies data. What does NOT exist is the projection. The `waivers` table is
+record-keeping — `admin/waivers.ts` says so in its own header — and nothing turns a granted waiver into
+a `Condition` in an evaluated bundle; only the synthetic fixture generator emits those codes. So
+"a WorkWell waiver works" is true of the SHAPE and false of the wiring, and the difference is worth
+writing down before someone relies on it. Building the projection is legitimate and is filed as
+**#577**; it is TWH/occupational-content work, not pilot work, and is not built here.
+
+### d3 — For the SIX official measures, an exception is a coded chart resource in the artifact's own value set
+
+Three not-scored paths, and only two of them are exceptions. **INELIGIBLE** — outside the initial
+population — is not an exception at all but a statement that the measure does not describe the patient
+(ADR-078). **EXCLUDED** is a denominator exclusion (DENEX). **EXCEPTED** is a denominator exception
+(DENEXCEP). Each is decided by the artifact's own logic over chart data, which is why none of them is
+something WorkWell can grant.
+
+Read off the vendored manifests and their ELM, the pilot's six measures divide unevenly:
+
+| Measure | DENEX | DENEXCEP | What satisfies the exclusion |
+|---|---|---|---|
+| cms122 | yes | no | hospice, palliative care, 66+ in long-term nursing care, advanced illness + frailty |
+| cms125 | yes | no | the same four, plus bilateral (or paired unilateral) mastectomy |
+| cms2 | yes | **yes** | DENEX: bipolar diagnosis before the qualifying encounter. DENEXCEP: a medical or patient reason for not screening |
+| cms130 | yes | no | the same four, plus malignant colon neoplasm or total colectomy |
+| cms165 | yes | no | ESRD encounters/procedures, dialysis, kidney transplant, pregnancy, plus hospice/palliative/frailty |
+| cms137 | yes | no | hospice only, on both rates |
+
+**cms2 is the only one of the six with a refusal-shaped exception**, and its shape is specific: an
+`Observation` on the QI-Core `qicore-observationcancelled` profile whose CODE is the screening itself
+(LOINC 73831-0 / 73832-8) and whose not-done REASON carries the exception — not an interchangeable
+refusal code. Everything in the table above is chart documentation, and writing to the chart is the
+path MIE owes (#565).
+
+**Decision: no official-measure exception mutation is implemented in WorkWell.** No "dismiss with a
+reason" that removes a patient from a denominator, no `overrideReasons` vocabulary on a card
+(`CDS_HOOKS.md`'s refusal stands), and a CDS feedback `overridden` remains a record that a clinician
+dismissed a card — never an exception. The alternative — letting an operator mark an exception in
+WorkWell and reporting the adjusted rate — is exactly the ADR-008 violation this project exists not to
+commit, and it would be undetectable downstream: the number would look like a computed one.
+
+### d4 — What "dismiss with a reason" is allowed to mean, and it is display
+
+A workflow closure, visible as such on every surface that counts the patient, that never hides them
+from CQL's count. Implemented in #569 as a third state — "Closed by staff" — on the roster, the work
+list, the programs rollups, the cases CSV and the MCP `list_cases` tool. The rule those surfaces
+follow is that **a measure is satisfied by a RESULT, never by an action** (the practice's own words on
+2026-09-10, about orders), so the wording tracks what the winning run says TODAY rather than what the
+case row froze at closure: still counted by CQL, verified compliant/excluded, or — when no run has
+scored the patient — not evaluable, which is shown as its own answer rather than folded into either.
+
+### d5 — What is deferred, and the condition that unblocks each piece
+
+- **The official-measure exception path** — blocked on #565: the WebChart write API for
+  `Encounter`/`DocumentReference`/`Observation`, the document-type vocabulary, and whether a
+  WorkWell-written resource is acceptable and under whose credentials.
+- **Which exception forms clinicians actually use** — blocked on the clinical consultation
+  (ROADMAP §7.4). d3 says what an exception IS; the consultation says which ones the pilot documents.
+- **cms2's refusal mapping specifically** — the one measure where a coordinator's action could ever
+  legitimately produce an exception, and therefore the first to build when the write path lands.
+- **The authored-measure waiver projection** (d2) — unblocked, not pilot work, filed as **#577**.
+
+### Consequences
+
+- No new `case_actions.action_type` and no new `closed_reason`: a staff closure stays
+  `MANUAL_RESOLVE`, and the closure KIND is derived from `closed_by` (`closureKindOf`), which is the
+  same column `planCaseUpsert` already decides by. Nothing about the write path changed, which is what
+  makes #569 reviewable as display.
+- **CDS cards are unchanged, deliberately.** A card still renders for a patient whose case a person
+  closed, because the card renders CQL and a closure is workflow. That reads as a disagreement between
+  two surfaces and is not one; it is stated here so the next reader does not "fix" it by teaching the
+  card about cases.
+- **A known display defect is named rather than left implied:** `EXCLUDED` renders as one string —
+  "Documented exclusion on file" / "Contraindication / exemption on file" — for all three of DENEX,
+  DENEXCEP and out-of-denominator (`official-executor-adapter.ts`, `roster-vocabulary.ts`). The
+  vocabulary above is the ADR that makes the fix specifiable; it is filed as **#576**, not fixed
+  here.
+- The practice has to be TOLD that an upload cannot satisfy a measure, and what the honest forms are
+  (a coded result written back to the chart, or MIE's order/document-code mapping). That belongs in
+  the owner's next message to them, not in a release note.
+
 ## ADR-082: an attributed list is an immutable assertion someone else made — and the sandbox refuses to hold a real one
 
 **Date:** 2026-09-16. **Status:** accepted. Milestone M-M, MM-2 PR 3. Implements the one concrete ask

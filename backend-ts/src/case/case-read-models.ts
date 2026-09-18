@@ -8,6 +8,8 @@
  * slices); they are optional/nullable in the frontend type.
  */
 import type { CaseRecord } from "../stores/case-store.ts";
+import { closureKindOf, type ClosureKind } from "./case-logic.ts";
+import type { LiveState } from "../compliance/roster-vocabulary.ts";
 import { employeeById, providerById } from "../config/deployment-profile.ts";
 import { payerNameOf } from "../engine/synthetic/payer-display.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
@@ -59,6 +61,35 @@ export interface CaseSummary {
    * worklist-gap badge counts open cases with `outreachRecordCount === 0`.
    */
   outreachRecordCount: number;
+  /**
+   * Who closed the case and when (#569) — carried from the row so a list can say "closed by <person>
+   * on <date>" instead of lumping a manual close in with an auto-resolve. `closure` is the derived
+   * kind (`closureKindOf`): NONE for an active case, STAFF for every closure a person made, SYSTEM
+   * for the run's.
+   */
+  closedAt: string | null;
+  closedReason: string | null;
+  closedBy: string | null;
+  closure: ClosureKind;
+  /**
+   * What CQL says TODAY for this subject and measure (#569) — set only on STAFF-closed rows, by
+   * `withLiveStatus`, because a staff-closed row's `currentOutcomeStatus` is frozen at closure (the
+   * nightly upsert never touches a human closure again) and can therefore be wrong. Absent on every
+   * other row: an active row's `currentOutcomeStatus` IS live, and a system-closed row is either
+   * still compliant or has been reopened. `liveState` is the tri-state the winning run's cell gives
+   * (GAP / CLEAR / UNKNOWN — "not currently evaluable" is its own answer); `liveOutcomeStatus` is
+   * the canonical bucket behind it, null when UNKNOWN.
+   *
+   * **`liveDisplayStatus` is the cell's DISPLAY state, and is what a surface renders.** The canonical
+   * bucket alone cannot word a row: a patient the measure no longer describes is canonical
+   * `MISSING_DATA` and display `OUT_OF_POPULATION`, so a reader given only the bucket shows
+   * "Missing Data" while the CLEAR state reads as "verified compliant" — two false statements about
+   * one patient, which is the class of defect this change exists to remove. Both travel.
+   */
+  liveState?: LiveState;
+  liveOutcomeStatus?: string | null;
+  liveDisplayStatus?: string | null;
+  liveOutcomeRunId?: string | null;
 }
 
 function measureVersion(measureId: string): string {
@@ -104,5 +135,9 @@ export function toCaseSummary(
     slaRemainingDays: null,
     slaBreached: false,
     outreachRecordCount,
+    closedAt: c.closedAt,
+    closedReason: c.closedReason,
+    closedBy: c.closedBy,
+    closure: closureKindOf(c),
   };
 }

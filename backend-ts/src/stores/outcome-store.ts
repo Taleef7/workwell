@@ -204,7 +204,21 @@ export interface OutcomeStore {
    */
   listOutcomes(
     runId: string,
-    opts?: { limit?: number; offset?: number; measureId?: string; subjectId?: string },
+    opts?: {
+      limit?: number;
+      offset?: number;
+      measureId?: string;
+      subjectId?: string;
+      /**
+       * A SET of subjects (#569) — the bounded point read behind "what does CQL say today for these
+       * (subject, measure) pairs". A page of staff-closed cases needs the winning run's row for each
+       * of its subjects and nothing else; reading the run for the measure (20,000 rows on the pilot)
+       * to answer for fifty is the latency shape #561 exists to remove. One array bind on the
+       * ceiling, an `IN` list on the floor. An EMPTY set matches nobody — it is a constraint, not an
+       * absent filter, the same rule `CaseQuery.employeeIds` follows. Composes with `subjectId`.
+       */
+      subjectIds?: readonly string[];
+    },
   ): Promise<OutcomeRecord[]>;
   getOutcomeById(id: string): Promise<OutcomeRecord | null>;
   /**

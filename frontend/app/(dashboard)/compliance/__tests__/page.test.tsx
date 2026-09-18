@@ -345,6 +345,51 @@ describe("CompliancePage", () => {
     expect(screen.getByText(/2 of 3 on this page have an open case/)).toBeInTheDocument();
   });
 
+  it("a cell whose case a PERSON closed is NOT selectable, and the caption counts it out (#569)", async () => {
+    // There is no open case behind it, so "Assign selected" could only ever answer `assigned: 0`.
+    // Before this the checkbox was live and the correction arrived as a toast AFTER the click, while
+    // the caption beside the button counted the row as assignable — a number describing a set the
+    // button could not act on.
+    navHolder.current.setUrl("/compliance?panel=wellness&measureId=cms125");
+    get.mockImplementation((url: string) => (
+      url === "/api/users/assignable" ? Promise.resolve(ASSIGNABLE) : Promise.resolve([])
+    ));
+    getWithHeaders.mockReset().mockResolvedValue({
+      data: {
+        panel: "wellness",
+        columns: [{ measureId: "cms125", name: "Breast Cancer Screening", complianceClass: "RECURRING" }],
+        rows: [
+          {
+            subject: { externalId: "pat-1", name: "Overdue Patient", role: "Patient", site: "HQ", tenantName: "Acme" },
+            cells: { cms125: { status: "OVERDUE", method: "Overdue", canonical: "OVERDUE" } },
+          },
+          {
+            subject: { externalId: "pat-2", name: "Closed Patient", role: "Patient", site: "HQ", tenantName: "Acme" },
+            cells: {
+              cms125: {
+                status: "OVERDUE",
+                method: "Overdue",
+                canonical: "OVERDUE",
+                staffClosure: { closedBy: "nurse@example.org", closedAt: "2026-06-14T00:00:00Z", closedReason: "MANUAL_RESOLVE" },
+              },
+            },
+          },
+        ],
+      },
+      headers: new Headers({ "X-Total-Count": "2" }),
+    });
+    render(<CompliancePage />);
+
+    expect(await screen.findByLabelText("Select Overdue Patient")).toBeEnabled();
+    expect(screen.getByLabelText("Select Closed Patient")).toBeDisabled();
+    expect(screen.getByText(/1 of 2 on this page have an open case/)).toBeInTheDocument();
+    // The status pill is untouched — the count and the filter are still CQL's — and the marker plus
+    // the legend are what explain the row.
+    expect(screen.getAllByText("Overdue").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Closed by staff").length).toBeGreaterThan(0);
+    expect(screen.getByText(/CQL still counts the employee until the chart changes/)).toBeInTheDocument();
+  });
+
   it("a DECLINED row is selectable, because a documented refusal keeps the case OPEN", async () => {
     // Three reviewers found this independently. `roster-vocabulary.ts` applies DECLINED only when the
     // canonical status is NOT compliant, and MEASURES.md says a declination "keeps the case open" —

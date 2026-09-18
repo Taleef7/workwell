@@ -60,6 +60,8 @@ export async function handleCompliance(req: Request, env: ComplianceEnv): Promis
   const roster = await buildRoster(
     {
       outcomeStore: stores.outcomes,
+      // The staff-closure overlay (#569): one bounded read for the page's subjects, after paging.
+      caseStore: stores.cases,
       segments,
       cellCache: rosterCellCache,
       webChartEnv: env,

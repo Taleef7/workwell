@@ -171,6 +171,64 @@ describe("WorklistPage", () => {
     expect(screen.queryByRole("checkbox", { name: /medicare/i })).not.toBeInTheDocument();
   });
 
+  // #569 — the second view. Closing a case with a reason does not close the gap: CQL keeps counting
+  // the patient, and until now the row simply left this list with nowhere to be looked at.
+  it("sends status=staff_closed when the Work control is switched, and nothing when it is Open", async () => {
+    render(<WorklistPage />);
+    await waitFor(() => expect(listCalls().length).toBeGreaterThan(0));
+    // The default view asks for open work, which is the pre-#569 request unchanged.
+    expect(listCalls().at(-1)).toContain("status=open");
+
+    await userEvent.click(screen.getByRole("combobox", { name: /work/i }));
+    await userEvent.click(screen.getByRole("option", { name: "Closed by staff" }));
+    await waitFor(() => {
+      expect(navHolder.current.params.get("status")).toBe("staff_closed");
+      expect(listCalls().at(-1)).toContain("status=staff_closed");
+    });
+
+    // Back to Open REMOVES the parameter rather than spelling it: the absence is the default, and a
+    // URL someone sends a colleague should not carry a filter nobody chose.
+    await userEvent.click(screen.getByRole("combobox", { name: /work/i }));
+    await userEvent.click(screen.getByRole("option", { name: "Open" }));
+    await waitFor(() => {
+      expect(navHolder.current.params.get("status")).toBeNull();
+      expect(listCalls().at(-1)).toContain("status=open");
+    });
+  });
+
+  it("opens on the closed-by-staff view from a link, and words each gap by what CQL says today", async () => {
+    navHolder.current.setUrl("/worklist?status=staff_closed");
+    getWithHeaders.mockResolvedValue({
+      data: [{
+        ...TWO_GAP_PATIENT,
+        openGaps: [
+          // A person closed it and the measure still counts the patient.
+          {
+            ...TWO_GAP_PATIENT.openGaps[0], status: "CLOSED", closure: "STAFF", closedBy: "nurse@example.org",
+            closedAt: "2026-06-14T00:00:00Z", closedReason: "MANUAL_RESOLVE", liveState: "GAP", liveOutcomeStatus: "OVERDUE",
+          },
+          // A rerun-to-verify closure the measure corroborates.
+          {
+            ...TWO_GAP_PATIENT.openGaps[1], status: "RESOLVED", closure: "STAFF", closedBy: "cm@maui.workwell.dev",
+            closedAt: "2026-06-14T00:00:00Z", closedReason: "RERUN_VERIFIED", liveState: "CLEAR", liveOutcomeStatus: "COMPLIANT",
+          },
+        ],
+      }],
+      headers: new Headers({ "X-Total-Count": "1" }),
+    });
+    render(<WorklistPage />);
+    await waitFor(() => expect(listCalls().at(-1)).toContain("status=staff_closed"));
+
+    // The wording is carried on each gap chip's tooltip, and it follows the LIVE outcome: saying
+    // "still counted by CQL" about the verified one would be false.
+    const stillCounted = await screen.findByRole("link", { name: "Breast Cancer Screening" });
+    expect(stillCounted).toHaveAttribute("title", expect.stringContaining("still counted by CQL"));
+    expect(stillCounted).toHaveAttribute("title", expect.stringContaining("nurse@example.org"));
+    const verified = screen.getByRole("link", { name: "Diabetes HbA1c" });
+    expect(verified).toHaveAttribute("title", expect.stringContaining("verified compliant"));
+    expect(verified.getAttribute("title")).not.toContain("still counted by CQL");
+  });
+
   it("reads the PCP filter from the URL and sends it on", async () => {
     navHolder.current.setUrl("/worklist?providerId=maui-prov-012");
     render(<WorklistPage />);

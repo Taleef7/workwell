@@ -129,6 +129,15 @@ export interface CaseQuery {
    * here as a no-op so a caller forwarding it doesn't accidentally match a literal period.
    */
   period?: string;
+  /**
+   * Who closed the case (#569): `staff` = a terminal row with `closed_by` set (a person closed it —
+   * manually, or by rerun-to-verify); `system` = a terminal row with `closed_by` NULL (the run closed
+   * it). Implements the WHOLE classification, not half of it: `closed_by IS NULL` alone would match
+   * every OPEN row, so both values also require `status NOT IN` the active set, and an active row
+   * matches neither. Composes with `statuses`; the closure kind is the same rule `closureKindOf`
+   * applies in memory (`case/case-logic.ts`), so a row this returns is one that function calls STAFF.
+   */
+  closure?: "staff" | "system";
   limit?: number;
   offset?: number;
 }

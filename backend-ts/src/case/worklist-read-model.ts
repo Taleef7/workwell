@@ -18,8 +18,9 @@
  *   Postgres — so working a 150-case panel meant loading every case in the practice and discarding
  *   ~99% in JavaScript. The matching subject ids are resolved from the in-memory directory first and
  *   passed as `CaseQuery.employeeIds`.
- * - **Outreach counts only when someone renders them.** `outreachSentCounts` is a grouped query over
- *   every returned case id; the patient work list does not show the badge, so it does not pay for it.
+ * - **Outreach counts only when someone renders them OR filters on them.** `outreachSentCounts` is a
+ *   grouped query over every returned case id; the patient work list does not show the badge, so it
+ *   does not pay for it — but an `outreach=` filter reads the count, so the filter asks for it too.
  *
  * **The pre-filter is GATED, and the gate is not an optimisation detail.** It is only applied when the
  * caller says its roster is the COMPLETE set of subjects that can appear on a case. On a
@@ -39,6 +40,7 @@ import { bucketPeriodForMeasure } from "../run/compliance-period.ts";
 import {
   hasActiveSubjectFilters, matchesSubjectFilters, type SubjectFilters,
 } from "../compliance/subject-filters.ts";
+import { liveAnswerForCase, liveCellsFor, type LiveCellDeps } from "../compliance/live-cell.ts";
 
 /** Every filter the work list understands. `subjects` carries the panel filters (PCP, payer, age, sex). */
 export interface WorklistFilters {
@@ -80,29 +82,74 @@ export interface WorklistDeps {
   profileMatch?: (externalId: string) => boolean;
   /** Injectable clock, so the current-cycle default is testable. */
   today?: () => string;
+  /**
+   * Where "what does CQL say today" comes from (#569). Passed by the routes; omitted in tests that do
+   * not exercise the staff-closed list. Present ⇒ the staff-closed list resolves the live status
+   * before the outcome filter, so the filter and the rendered value are the same thing.
+   */
+  live?: LiveCellDeps;
+}
+
+/** The `?status=` token for the cases a PERSON closed (#569). */
+export const STAFF_CLOSED_TOKEN = "staff_closed";
+/** Every terminal status a person can have written — a manual close, a rerun-verified or -excluded one. */
+export const STAFF_CLOSED_STATUSES = ["CLOSED", "RESOLVED", "EXCLUDED"] as const;
+
+/** The store-side fragment a `?status=` token means: which statuses, and (for `staff_closed`) who closed them. */
+export interface WorklistStatusQuery {
+  statuses?: string[];
+  closure?: "staff";
 }
 
 /**
- * Map the `?status=` token to concrete case statuses.
+ * Map the `?status=` token to the store query it means — ONE function for the work list, the cases
+ * CSV and the MCP `list_cases` tool, which used to carry three copies of this switch and disagreed
+ * the first time one was touched (#551 was that disagreement).
  *
- * The default is the ACTIVE set — see the header. `all` is the explicit unfiltered view; anything
- * else is taken as a literal status so a caller can ask for one precisely.
+ * **What a BLANK token means is the caller's, not this function's.** The work list and the MCP tool
+ * default to the ACTIVE set (an operator's queue); the cases CSV applies no status filter by contract
+ * (`DATA_MODEL_CONTRACTS` §6.3 — 32,558 rows on the pilot, not the 15,309 open ones), so a fold that
+ * hard-coded either default would silently change the other caller's answer. `all` is the explicit
+ * unfiltered view; `staff_closed` is every terminal row a person closed (`closure: "staff"` — the
+ * store's whole classification, so an open row never qualifies); anything else is taken as a
+ * literal status so a caller can ask for one precisely.
  */
-export function statusesForWorklist(raw: string | null | undefined): string[] | undefined {
-  switch ((raw ?? "").toLowerCase()) {
-    case "all":
-      return undefined;
-    case "closed":
-      return ["RESOLVED", "CLOSED"];
-    case "excluded":
-      return ["EXCLUDED"];
+export function worklistQueryFor(raw: string | null | undefined, opts: { blank: "active" | "all" }): WorklistStatusQuery {
+  // Trimmed, because the ROUTES trim before comparing to the token and this did not: `?status=%20open`
+  // took the default branch and asked the store for a literal status " OPEN ", which matches no row.
+  switch ((raw ?? "").trim().toLowerCase()) {
     case "":
+      return opts.blank === "all" ? {} : { statuses: [...ACTIVE_CASE_STATUSES] };
+    case "all":
+      return {};
+    case "closed":
+      return { statuses: ["RESOLVED", "CLOSED"] };
+    case "excluded":
+      return { statuses: ["EXCLUDED"] };
     case "open":
-      return [...ACTIVE_CASE_STATUSES];
+      return { statuses: [...ACTIVE_CASE_STATUSES] };
+    case STAFF_CLOSED_TOKEN:
+      return { statuses: [...STAFF_CLOSED_STATUSES], closure: "staff" };
     default:
-      return [(raw as string).toUpperCase()];
+      return { statuses: [(raw as string).trim().toUpperCase()] };
   }
 }
+
+/** The work list's own reading of the token (blank ⇒ ACTIVE). Kept for the callers that only need statuses. */
+export function statusesForWorklist(raw: string | null | undefined): string[] | undefined {
+  return worklistQueryFor(raw, { blank: "active" }).statuses;
+}
+
+/** Whether this query is the "closed by staff" list (#569). */
+const isStaffClosedList = (filters: WorklistFilters): boolean =>
+  (filters.status ?? "").trim().toLowerCase() === STAFF_CLOSED_TOKEN;
+
+/**
+ * The status a SURFACE shows for a row: the live display state where one was resolved, else the case
+ * row's own column. Filtering and rendering must agree, so both read this.
+ */
+const liveOrFrozenStatus = (c: CaseSummary): string =>
+  c.liveDisplayStatus ?? c.liveOutcomeStatus ?? c.currentOutcomeStatus;
 
 /** Day portion (YYYY-MM-DD) for day-granular, inclusive comparison. */
 const day = (s: string): string => s.slice(0, 10);
@@ -165,7 +212,7 @@ export async function loadWorklistCases(deps: WorklistDeps, filters: WorklistFil
   const wantCurrentCycle = isCurrentCycleDefault(filters);
 
   const query: CaseQuery = {
-    statuses: statusesForWorklist(filters.status),
+    ...worklistQueryFor(filters.status, { blank: "active" }),
     measureId: filters.measureId,
     priority: filters.priority,
     assignee: filters.assignee,
@@ -207,7 +254,18 @@ export async function loadWorklistCases(deps: WorklistDeps, filters: WorklistFil
   if (filters.subjects && hasActiveSubjectFilters(filters.subjects)) {
     summaries = summaries.filter((c) => matchesSubjectFilters(deps.employeeLookup(c.employeeId), filters.subjects!, nowMs));
   }
-  if (filters.outcome) summaries = summaries.filter((c) => (c.currentOutcomeStatus ?? "").toUpperCase() === filters.outcome);
+  // The outcome filter reads what the SURFACE shows, which on the staff-closed list is not the case
+  // row's column. That column froze when the person closed the case, so filtering on it while the page
+  // paints the live value would put rows labelled "Compliant" under an Overdue filter and drop rows
+  // labelled "Overdue" from it — the same disagreement #569 exists to remove, one control over. The
+  // live pass therefore runs BEFORE this filter on that list, and costs nothing extra: the caller
+  // resolves the whole list for its header counts anyway.
+  if (filters.outcome || isStaffClosedList(filters)) {
+    if (deps.live && isStaffClosedList(filters)) summaries = await withLiveStatus(deps.live, summaries);
+    if (filters.outcome) {
+      summaries = summaries.filter((c) => (liveOrFrozenStatus(c) ?? "").toUpperCase() === filters.outcome);
+    }
+  }
   if (filters.search) {
     const needle = filters.search.toLowerCase();
     summaries = summaries.filter(
@@ -237,13 +295,64 @@ export async function loadWorklistCases(deps: WorklistDeps, filters: WorklistFil
 /**
  * Whether this query means "each measure's current compliance cycle".
  *
- * Only the OPEN list defaults to it; the closed/excluded/all tabs show full history. A BLANK
- * `?period=` (present but empty, which is what a cleared control sends) is the default rather than a
- * literal period — `??` alone would leak it through and reintroduce the flood this default prevents.
+ * The OPEN list and the STAFF-CLOSED list default to it — a closure from a prior cycle describes a
+ * prior cycle's gap, and the current cycle opened a new case (#569); the closed/excluded/all tabs
+ * show full history. A BLANK `?period=` (present but empty, which is what a cleared control sends)
+ * is the default rather than a literal period — `??` alone would leak it through and reintroduce the
+ * flood this default prevents.
  */
 function isCurrentCycleDefault(filters: WorklistFilters): boolean {
-  const status = (filters.status ?? "").toLowerCase();
-  const isOpenList = status === "" || status === "open";
+  const status = (filters.status ?? "").trim().toLowerCase();
+  const isCycleList = status === "" || status === "open" || status === STAFF_CLOSED_TOKEN;
   const period = filters.period?.trim() || undefined;
-  return isOpenList && (!period || period.toLowerCase() === "current");
+  return isCycleList && (!period || period.toLowerCase() === "current");
+}
+
+/**
+ * What CQL says TODAY for every STAFF-closed row in `summaries` (#569) — the winning run's cell for
+ * each (subject, measure), read through `liveCellsFor` (bounded point reads, never a cache fill).
+ *
+ * Only staff-closed rows are resolved, because only they can be stale: the nightly upsert refreshes
+ * an active row's `currentOutcomeStatus` and never touches a human closure again. Every other row is
+ * returned as it came. A row whose measure has no winning run, or whose subject the run did not
+ * evaluate, is `UNKNOWN` — shown as "current CQL status unavailable", never folded into "verified".
+ */
+export async function withLiveStatus(deps: LiveCellDeps, summaries: readonly CaseSummary[]): Promise<CaseSummary[]> {
+  const staffClosed = summaries.filter((c) => c.closure === "STAFF");
+  if (staffClosed.length === 0) return [...summaries];
+  const live = await liveCellsFor(
+    deps,
+    staffClosed.map((c) => ({ subjectId: c.employeeId, measureId: c.measureId })),
+  );
+  return summaries.map((c) => {
+    if (c.closure !== "STAFF") return c;
+    // The cycle equality lives in `liveAnswerForCase`, shared with the cases CSV and the programs
+    // chip: the winning run describes ITS cycle, so a case from a closed cycle reads UNKNOWN rather
+    // than taking today's answer. The roster overlay enforces the same rule on the cell.
+    const answer = liveAnswerForCase(live, c);
+    if (answer.cell == null) {
+      return { ...c, liveState: "UNKNOWN", liveOutcomeStatus: null, liveDisplayStatus: null, liveOutcomeRunId: answer.runId };
+    }
+    return {
+      ...c,
+      liveState: answer.state,
+      liveOutcomeStatus: answer.cell.canonical,
+      // The DISPLAY state as well as the bucket: out-of-population is canonical MISSING_DATA, and a
+      // surface handed only the bucket would say "Missing Data" and "verified compliant" at once.
+      liveDisplayStatus: answer.cell.status,
+      liveOutcomeRunId: answer.runId,
+    };
+  });
+}
+
+/** The three numbers the staff-closed tab shows in its header: still counted by CQL, verified, not evaluated. */
+export function staffClosedCounts(summaries: readonly CaseSummary[]): { gap: number; verified: number; unknown: number } {
+  const counts = { gap: 0, verified: 0, unknown: 0 };
+  for (const c of summaries) {
+    if (c.closure !== "STAFF") continue;
+    if (c.liveState === "GAP") counts.gap += 1;
+    else if (c.liveState === "CLEAR") counts.verified += 1;
+    else counts.unknown += 1;
+  }
+  return counts;
 }
