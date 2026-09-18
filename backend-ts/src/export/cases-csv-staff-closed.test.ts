@@ -176,3 +176,31 @@ test("without the live dependency the header is UNCHANGED and only the three liv
   assert.equal(rows.find((r) => r.caseId === "case-gap")!.closedBy, "nurse@example.org", "the closure columns do not depend on it");
   assert.equal(rows.find((r) => r.caseId === "case-gap")!.closedReason, "MANUAL_RESOLVE");
 });
+
+test("a closure from a PRIOR cycle is never labelled by today's run", async () => {
+  // This export applies NO period filter (§6.3 — every row, all history), so it carries more
+  // prior-cycle closures than any other surface: on the pilot, every closure anyone has ever made.
+  // The winning run describes ITS OWN cycle, so a 2024 gap somebody closed must not be exported as
+  // "CLEAR / COMPLIANT" because the patient became compliant two years later — a reconciliation
+  // column that answers about the wrong measurement year is worse than an absent one, since the
+  // consumer has no way to see which year it describes.
+  const priorCycle = [
+    caseRow({ id: "case-prior-gap", employeeId: "emp-006", evaluationPeriod: "2024-01-01" }),
+    caseRow({ id: "case-prior-verified", employeeId: "emp-007", evaluationPeriod: "2024-01-01", status: "RESOLVED", closedReason: "RERUN_VERIFIED", closedBy: "cm@workwell.dev", currentOutcomeStatus: "COMPLIANT" }),
+  ];
+  const store = { listCases: async () => priorCycle } as unknown as CaseStore;
+  const { rows } = parse(await casesCsv(store, eventStore(), {}, {}, liveDeps()));
+  const byId = new Map(rows.map((r) => [r.caseId!, r]));
+
+  for (const id of ["case-prior-gap", "case-prior-verified"]) {
+    const r = byId.get(id)!;
+    assert.equal(r.liveState, "UNKNOWN", `${id}: the winner describes another cycle, so it says nothing about this row`);
+    assert.equal(r.liveOutcomeStatus, "UNKNOWN");
+    assert.equal(r.liveOutcomeRunId, RUN, "the measure HAS a winning run — it simply describes another year");
+    assert.notEqual(r.closedBy, "", "the closure columns are read off the case row and do not depend on the cycle");
+  }
+  // The frozen value keeps its own column and its own meaning — it is what the last run that touched
+  // the row wrote, which for these rows is what CQL said in 2024.
+  assert.equal(byId.get("case-prior-gap")!.currentOutcomeStatus, "OVERDUE");
+  assert.equal(byId.get("case-prior-verified")!.currentOutcomeStatus, "COMPLIANT");
+});

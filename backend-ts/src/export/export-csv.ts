@@ -16,7 +16,7 @@ import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
 import { toCsv, csvCell } from "./csv.ts";
 import { closureKindOf } from "../case/case-logic.ts";
-import { liveCellsFor, livePairKey, type LiveCellDeps } from "../compliance/live-cell.ts";
+import { liveAnswerForCase, liveCellsFor, type LiveCellDeps } from "../compliance/live-cell.ts";
 
 const measureName = (measureId: string) => MEASURES[measureId]?.name ?? measureId;
 const authoredVersion = (measureId: string) => {
@@ -325,7 +325,11 @@ export async function casesCsv(
     const emp = directory.employeeById(c.employeeId);
     // Absent key ⇒ no outreach action ⇒ null, the same cell the per-case call wrote.
     const latest = deliveryStatuses[c.id] ?? null;
-    const answer = live && closureKindOf(c) === "STAFF" ? live.get(livePairKey(c.employeeId, c.measureId)) : undefined;
+    // This export applies NO period filter (§6.3 — every row, all history), so it carries more
+    // prior-cycle closures than any other surface, and the cycle equality in `liveAnswerForCase` is
+    // what keeps a 2024 closure from being exported under the 2026 winner's answer. Without it the
+    // row states a `liveState`, a status and a run id that describe a different measurement year.
+    const answer = live && closureKindOf(c) === "STAFF" ? liveAnswerForCase(live, c) : undefined;
     // UNKNOWN is written as the word, not as an empty cell: an empty cell means "not a staff closure".
     const liveStatus = answer ? (answer.cell?.canonical ?? "UNKNOWN") : "";
     const liveState = answer ? answer.state : "";

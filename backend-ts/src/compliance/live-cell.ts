@@ -45,6 +45,49 @@ export type LiveCellDeps = {
   cellCache?: RosterCellCache;
 };
 
+export interface LiveCellOptions {
+  /**
+   * The run to read per measure, when the CALLER has already chosen one.
+   *
+   * The programs overview is the case: its buckets are grouped from the rows a filtered snapshot
+   * returned, so a site- or tenant-scoped card can deliberately settle on an OLDER visible run than
+   * the newest global winner (`latestPopulationSnapshot`'s visibility fallback). Resolving winners
+   * again here would answer the chip from a different run than the `overdue`/`missingData` numbers
+   * it sits beside and is meant to reconcile with — two numbers from two runs, which is the very
+   * contradiction #569 exists to remove.
+   *
+   * When it is given it is AUTHORITATIVE and no winners read is issued: a measure the map does not
+   * name is UNKNOWN, because the caller has said which run speaks for each measure.
+   */
+  runByMeasure?: ReadonlyMap<string, string | null>;
+}
+
+/**
+ * The answer for ONE case — the same map, with the CYCLE equality applied.
+ *
+ * A winning run describes its own cycle. A case from a closed cycle — reachable through `?period=all`,
+ * the history tabs, and every row of the cases CSV, which applies no period filter at all (§6.3) —
+ * must not be labelled by today's answer, or a 2024 gap somebody closed reads as "verified compliant"
+ * because the patient became compliant in 2026.
+ *
+ * It lives here, and not in each caller, because three surfaces need the rule and a rule written out
+ * three times is a rule one surface ends up without: that is exactly what review found on the CSV,
+ * where the list and the MCP tool had the equality and the export did not. The run id survives a
+ * mismatch — the measure HAS a winner, it simply describes another cycle, and a null would read as
+ * "no run at all".
+ */
+export function liveAnswerForCase(
+  live: ReadonlyMap<string, LiveCell>,
+  c: { employeeId: string; measureId: string; evaluationPeriod: string },
+): LiveCell {
+  const answer = live.get(livePairKey(c.employeeId, c.measureId));
+  if (!answer) return { state: "UNKNOWN", runId: null, cell: null };
+  if (answer.cell == null || answer.cell.evaluationPeriod !== c.evaluationPeriod) {
+    return { state: "UNKNOWN", runId: answer.runId, cell: null };
+  }
+  return answer;
+}
+
 /**
  * How many subjects go into one `listOutcomes` call.
  *
@@ -69,7 +112,11 @@ const SUBJECT_CHUNK = 900;
 export const livePairKey = (subjectId: string, measureId: string): string =>
   `${subjectId.length}:${subjectId}:${measureId}`;
 
-export async function liveCellsFor(deps: LiveCellDeps, pairs: readonly LivePair[]): Promise<Map<string, LiveCell>> {
+export async function liveCellsFor(
+  deps: LiveCellDeps,
+  pairs: readonly LivePair[],
+  opts: LiveCellOptions = {},
+): Promise<Map<string, LiveCell>> {
   const out = new Map<string, LiveCell>();
   if (pairs.length === 0) return out;
 
@@ -80,12 +127,18 @@ export async function liveCellsFor(deps: LiveCellDeps, pairs: readonly LivePair[
   }
 
   // The winners, exactly as the roster resolves them (O(measures) rows from the runs table): terminal
-  // population runs only, scale and trend-history rows excluded, first per measure wins.
-  const winners = await deps.outcomeStore.listLatestPopulationRuns([...subjectsByMeasure.keys()], { excludeScale: true, excludeTrendHistory: true });
+  // population runs only, scale and trend-history rows excluded, first per measure wins — UNLESS the
+  // caller already chose the run each measure's other numbers came from, in which case that choice is
+  // authoritative and this read is not issued at all.
   const runByMeasure = new Map<string, string>();
-  for (const w of winners) {
-    if (!isPopulationRun(w.runScopeType) || !isCompletedRun(w.runStatus)) continue;
-    if (!runByMeasure.has(w.measureId)) runByMeasure.set(w.measureId, w.runId);
+  if (opts.runByMeasure) {
+    for (const [measureId, runId] of opts.runByMeasure) if (runId) runByMeasure.set(measureId, runId);
+  } else {
+    const winners = await deps.outcomeStore.listLatestPopulationRuns([...subjectsByMeasure.keys()], { excludeScale: true, excludeTrendHistory: true });
+    for (const w of winners) {
+      if (!isPopulationRun(w.runScopeType) || !isCompletedRun(w.runStatus)) continue;
+      if (!runByMeasure.has(w.measureId)) runByMeasure.set(w.measureId, w.runId);
+    }
   }
 
   for (const [measureId, subjects] of subjectsByMeasure) {

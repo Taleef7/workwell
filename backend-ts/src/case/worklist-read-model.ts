@@ -40,7 +40,7 @@ import { bucketPeriodForMeasure } from "../run/compliance-period.ts";
 import {
   hasActiveSubjectFilters, matchesSubjectFilters, type SubjectFilters,
 } from "../compliance/subject-filters.ts";
-import { liveCellsFor, livePairKey, type LiveCellDeps } from "../compliance/live-cell.ts";
+import { liveAnswerForCase, liveCellsFor, type LiveCellDeps } from "../compliance/live-cell.ts";
 
 /** Every filter the work list understands. `subjects` carries the panel filters (PCP, payer, age, sex). */
 export interface WorklistFilters {
@@ -326,22 +326,20 @@ export async function withLiveStatus(deps: LiveCellDeps, summaries: readonly Cas
   );
   return summaries.map((c) => {
     if (c.closure !== "STAFF") return c;
-    const answer = live.get(livePairKey(c.employeeId, c.measureId));
-    // The winning run describes ITS cycle. A case from a closed cycle — reachable through
-    // `?period=all` and the history tabs — must not be labelled by today's answer, or a 2024 gap
-    // somebody closed reads as "verified compliant" because the patient became compliant in 2026.
-    // The roster overlay enforces the same equality; this is the same rule on the list.
-    const describesThisCase = answer?.cell != null && answer.cell.evaluationPeriod === c.evaluationPeriod;
-    if (!answer || !describesThisCase) {
-      return { ...c, liveState: "UNKNOWN", liveOutcomeStatus: null, liveDisplayStatus: null, liveOutcomeRunId: answer?.runId ?? null };
+    // The cycle equality lives in `liveAnswerForCase`, shared with the cases CSV and the programs
+    // chip: the winning run describes ITS cycle, so a case from a closed cycle reads UNKNOWN rather
+    // than taking today's answer. The roster overlay enforces the same rule on the cell.
+    const answer = liveAnswerForCase(live, c);
+    if (answer.cell == null) {
+      return { ...c, liveState: "UNKNOWN", liveOutcomeStatus: null, liveDisplayStatus: null, liveOutcomeRunId: answer.runId };
     }
     return {
       ...c,
       liveState: answer.state,
-      liveOutcomeStatus: answer.cell?.canonical ?? null,
+      liveOutcomeStatus: answer.cell.canonical,
       // The DISPLAY state as well as the bucket: out-of-population is canonical MISSING_DATA, and a
       // surface handed only the bucket would say "Missing Data" and "verified compliant" at once.
-      liveDisplayStatus: answer.cell?.status ?? null,
+      liveDisplayStatus: answer.cell.status,
       liveOutcomeRunId: answer.runId,
     };
   });

@@ -167,3 +167,74 @@ test("staffClosedGapCount applies the same site filter as openCaseCount", async 
   assert.equal(elsewhere.staffClosedGapCount, 0, "a site nobody is at zeroes the staff-closed count");
   assert.equal(elsewhere.openCaseCount, 0, "exactly as it zeroes the open count");
 });
+
+test("the chip is answered from the run THIS CARD reports, not from a winner resolved again", async () => {
+  reset();
+  // A scoped overview (a site or tenant filter) can settle on an older visible run than the newest
+  // global winner — `latestPopulationSnapshot`'s visibility fallback, which fires when the newest
+  // population run wrote no rows anyone on this page can see. The card's `overdue` and `missingData`
+  // then describe that older run. A chip that resolved winners again, without the overview's
+  // filters, would reconcile against numbers nobody on the page can see — the same "one patient,
+  // two numbers, no explanation" contradiction this count exists to remove, one level up.
+  //
+  // The fixture drives that fallback for real rather than imitating it: the newest run wrote one row,
+  // for a patient at Plant B, and the overview is filtered to Plant A — so the card falls back to
+  // `run-1`, and the two runs disagree about the patient whose case a person closed.
+  const NEWER = "run-2";
+  const NEWER_AT = "2026-09-20T00:00:00.000Z";
+  const asked: string[] = [];
+  // Plant B, so the site filter hides it and the winner blanks — exactly the fallback's trigger.
+  const newerRow: OutcomeWithRun = { ...row("emp-011", "OVERDUE"), runId: NEWER, runStartedAt: NEWER_AT };
+  const deps = {
+    outcomeStore: {
+      listOutcomesWithRun: async (filter?: { runIds?: readonly string[] }) =>
+        // The winners read is by run id; the fallback's history read is not, and sees both runs.
+        (filter?.runIds?.length ? [newerRow] : [newerRow, row("emp-006", "OVERDUE")]),
+      listLatestPopulationRuns: async () => [{
+        runId: NEWER, runStartedAt: NEWER_AT, runScopeType: "ALL_PROGRAMS",
+        runStatus: "COMPLETED", runTriggeredBy: "manual", measureId: MEASURE,
+      }],
+      listOutcomes: async (runId: string) => {
+        asked.push(runId);
+        // `run-1` — the run this card reports — still counts the patient; the newer one says they
+        // became compliant. Reading the wrong one silently answers about a run nobody can see.
+        return runId === NEWER
+          ? [{ ...winRow("emp-006", "COMPLIANT"), id: "o-new", runId: NEWER }]
+          : [winRow("emp-006", "OVERDUE")];
+      },
+      aggregateScaleRun: async () => [],
+    } as unknown as OutcomeStore,
+    runStore: { listRuns: async () => [] } as unknown as RunStore,
+    caseStore: { listCases: async (q: CaseQuery) => (q.closure === "staff" ? [caseRow({ employeeId: "emp-006" })] : []) } as unknown as CaseStore,
+  };
+
+  const summary = (await programOverview(deps, { site: "Plant A" })).find((p) => p.measureId === MEASURE)!;
+
+  assert.equal(summary.latestRunId, RUN, "the card reports the run its buckets came from");
+  assert.equal(summary.overdue, 1, "and that run still counts the patient");
+  assert.equal(summary.staffClosedGapCount, 1, "so the chip does too — it reconciles with the number beside it");
+  assert.ok(!asked.includes(NEWER), `the newer run is never read for this card: ${asked.join(",") || "(no read)"}`);
+});
+
+test("a run that describes ANOTHER cycle says nothing about this cycle's closures", async () => {
+  reset();
+  // The card's run and the case can disagree about the measurement year — the run this measure last
+  // completed may predate the cycle the case belongs to. Its OVERDUE is a statement about 2019, and
+  // counting it as "still counted by CQL" today would put a number on the chip that no run supports.
+  // The same equality the work list and the cases CSV apply, through the same helper.
+  const stale = { ...winRow("emp-006", "OVERDUE"), evaluationPeriod: "2019-01-01" };
+  const deps = {
+    outcomeStore: {
+      listOutcomesWithRun: async () => [row("emp-006", "OVERDUE")],
+      listLatestPopulationRuns: latestRunsFromRows([row("emp-006", "OVERDUE")]),
+      listOutcomes: async () => [stale],
+      aggregateScaleRun: async () => [],
+    } as unknown as OutcomeStore,
+    runStore: { listRuns: async () => [] } as unknown as RunStore,
+    caseStore: { listCases: async (q: CaseQuery) => (q.closure === "staff" ? [caseRow({ employeeId: "emp-006" })] : []) } as unknown as CaseStore,
+  };
+
+  const summary = (await programOverview(deps, {})).find((p) => p.measureId === MEASURE)!;
+  assert.equal(summary.staffClosedGapCount, 0, "not a gap this cycle — the run answering is about another year");
+  assert.equal(summary.overdue, 1, "the bucket is unchanged: it reports what the run wrote");
+});

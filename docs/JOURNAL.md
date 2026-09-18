@@ -61,6 +61,23 @@ cases CSV silently shrank from every case to the active ones), reading the whole
 subject set, mutating the frozen cached cell instead of copying it, and dropping the live-gap test
 from the programs count.
 
+**The review rounds found the same defect class twice: a rule that existed on some surfaces and not
+on others.** My own reviewer found the cycle equality missing on the work list — a 2024 gap somebody
+closed could read "verified compliant" because the patient became compliant in 2026 — and it was
+added there. Codex, on the open PR, found the same rule still missing from the cases CSV, which is
+the surface that needs it most: that export applies no period filter at all (§6.3), so it carries
+every closure anyone has ever made, and a column that answers about the wrong measurement year looks
+exactly like a correct one. The fix was not a third copy. The equality moved into one
+`liveAnswerForCase`, which the work list, the CSV, the MCP tool and the programs chip all call;
+deleting it now fails four tests, one per surface, plus its own unit test. Codex's second finding was
+the programs chip resolving the winning run *again*, without the overview's filters — so a
+site-scoped card whose numbers came from an older visible run (the visibility fallback) would have
+had its chip answered from a run nobody on that page can see, reintroducing the two-numbers-one-
+patient contradiction one level up. `liveCellsFor` now takes the run per measure from the caller
+when the caller has already chosen one, and issues no winners read at all in that case. Both
+findings were real, both are P-severity by consequence rather than by frequency, and neither was
+reachable by any test that existed.
+
 **Not done here, deliberately.** CDS cards are unchanged — a card renders CQL and a closure is
 workflow — and `list_noncompliant` still lists active cases only; both are stated in the ADR so the
 next reader does not "fix" them. The single `EXCLUDED` display string that covers DENEX, DENEXCEP and

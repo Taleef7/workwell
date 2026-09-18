@@ -15,10 +15,13 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { OutcomeRecord, OutcomeWithRun } from "../stores/outcome-store.ts";
 import { latestRunsFromRows } from "../test-support/latest-runs.ts";
-import { liveCellsFor, livePairKey, type LiveCellDeps } from "./live-cell.ts";
+import { liveAnswerForCase, liveCellsFor, livePairKey, type LiveCellDeps } from "./live-cell.ts";
 import { cellFromOutcome, type RosterCellCache } from "./roster-read-model.ts";
 
 const ev = (results: Array<[string, unknown]>) => ({ expressionResults: results.map(([define, result]) => ({ define, result })) });
+
+/** The cycle every fixture row describes, unless a test deliberately dates one elsewhere. */
+const PERIOD = "2026-06-13";
 
 /** One outcome row. `measureId` defaults to audiogram, whose binding the vocabulary knows. */
 const outcome = (over: Partial<OutcomeRecord> & { subjectId: string; status: string }): OutcomeRecord => ({
@@ -249,4 +252,57 @@ test("liveCellsFor — a subject set larger than the chunk is SPLIT, and every s
   assert.equal(asked.reduce((a, b) => a + b, 0), PAIRS, "and every subject was asked about exactly once");
   assert.equal(live.get(livePairKey("p-0", "audiogram"))!.state, "GAP");
   assert.equal(live.get(livePairKey("p-2049", "audiogram"))!.state, "CLEAR");
+});
+
+test("runByMeasure is AUTHORITATIVE — the caller's run is read and no winner is resolved again", async () => {
+  // The programs overview passes the run each card's own numbers came from, which on a scoped
+  // overview can be an older visible run than the global winner. If this helper resolved winners
+  // anyway, the chip would answer from a different run than the buckets it sits beside.
+  let winnersRead = 0;
+  const asked: string[] = [];
+  const deps = {
+    outcomeStore: {
+      listLatestPopulationRuns: async () => { winnersRead += 1; return []; },
+      listOutcomes: async (runId: string) => { asked.push(runId); return [outcome({ subjectId: "p-1", status: "OVERDUE" })]; },
+    },
+  } as unknown as LiveCellDeps;
+
+  const live = await liveCellsFor(
+    deps,
+    [{ subjectId: "p-1", measureId: "audiogram" }, { subjectId: "p-2", measureId: "unnamed" }],
+    { runByMeasure: new Map([["audiogram", "chosen-run"]]) },
+  );
+
+  assert.equal(winnersRead, 0, "the winners walk is not issued at all — the caller has already chosen");
+  assert.deepEqual(asked, ["chosen-run"], "and the caller's run is the one read");
+  assert.equal(live.get(livePairKey("p-1", "audiogram"))!.runId, "chosen-run");
+  assert.equal(live.get(livePairKey("p-1", "audiogram"))!.state, "GAP");
+  // A measure the caller did not name has no run it is willing to stand behind, so the answer is
+  // UNKNOWN rather than one fetched from somewhere the caller did not ask about.
+  assert.equal(live.get(livePairKey("p-2", "unnamed"))!.state, "UNKNOWN");
+  assert.equal(live.get(livePairKey("p-2", "unnamed"))!.runId, null);
+});
+
+test("liveAnswerForCase — a cell from another cycle is not evidence about this one", async () => {
+  // The rule three surfaces need (the work list, the cases CSV, the programs chip) and therefore the
+  // rule that lives in ONE place: a rule written out three times is a rule one surface ends up
+  // without, which is what review found on the CSV.
+  const cell = cellFromOutcome(outcome({ subjectId: "p-1", status: "COMPLIANT" }), "audiogram", "win-1");
+  const live = new Map([[livePairKey("p-1", "audiogram"), { state: "CLEAR" as const, runId: "win-1", cell }]]);
+  const base = { employeeId: "p-1", measureId: "audiogram" };
+
+  assert.equal(cell.evaluationPeriod, PERIOD, "the derived cell records the cycle it describes");
+  const sameCycle = liveAnswerForCase(live, { ...base, evaluationPeriod: PERIOD });
+  assert.equal(sameCycle.state, "CLEAR");
+  assert.equal(sameCycle.cell, cell);
+
+  const otherCycle = liveAnswerForCase(live, { ...base, evaluationPeriod: "2019-01-01" });
+  assert.equal(otherCycle.state, "UNKNOWN", "never CLEAR: the patient became compliant in ANOTHER year");
+  assert.equal(otherCycle.cell, null);
+  assert.equal(otherCycle.runId, "win-1", "the run id survives — the measure has a winner, it describes another cycle");
+
+  // A pair the map never answered is UNKNOWN with no run at all, which is a different fact.
+  const absent = liveAnswerForCase(live, { employeeId: "p-9", measureId: "audiogram", evaluationPeriod: PERIOD });
+  assert.equal(absent.state, "UNKNOWN");
+  assert.equal(absent.runId, null);
 });

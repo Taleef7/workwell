@@ -13,7 +13,7 @@ import type { OutcomeStore, OutcomeWithRun, OutcomeMeasureFilter } from "../stor
 import type { CaseRecord, CaseStore } from "../stores/case-store.ts";
 import { EMPLOYEES, employeeById, type EmployeeProfile } from "../engine/synthetic/employee-catalog.ts";
 import { bucketPeriodForMeasure } from "../run/compliance-period.ts";
-import { liveCellsFor, livePairKey } from "../compliance/live-cell.ts";
+import { liveAnswerForCase, liveCellsFor } from "../compliance/live-cell.ts";
 import { rosterCellCache } from "../compliance/roster-read-model.ts";
 import type { QualitySnapshotStore, QualitySnapshotRow, QualityScopeLevel } from "../stores/quality-snapshot-store.ts";
 import { MEASURE_CATALOG } from "../measure/measure-catalog.ts";
@@ -442,9 +442,19 @@ export async function programOverview(deps: ProgramDeps, filters: ProgramFilters
   const staffClosed = await deps.caseStore.listCases({ closure: "staff", statuses: [...STAFF_CLOSED_STATUSES], limit: 100000 });
   const today = new Date().toISOString().slice(0, 10);
   const staffClosedThisCycle = staffClosed.filter((c) => c.evaluationPeriod === bucketPeriodForMeasure(c.measureId, today));
+  // The chip is read from the run EACH CARD's own numbers came from, never from a winner resolved
+  // again without the overview's filters. A site- or tenant-scoped card can settle on an older
+  // visible run (`latestPopulationSnapshot`'s fallback, e.g. when the newest population run wrote no
+  // rows for the selected site), and a chip answered from the global winner would then reconcile
+  // against numbers nobody on the page can see — the two-numbers-one-patient contradiction this
+  // whole change exists to remove, reintroduced one level up.
+  const runByMeasure = new Map<string, string | null>(
+    [...derived.buckets].map(([measureId, b]) => [measureId, b.latestRunId]),
+  );
   const live = await liveCellsFor(
     { outcomeStore: deps.outcomeStore, cellCache: rosterCellCache },
     staffClosedThisCycle.map((c) => ({ subjectId: c.employeeId, measureId: c.measureId })),
+    { runByMeasure },
   );
   const visibility = { webChartConfigured, profileMatch, siteMatch, tenantMatch, inPeriod };
 
@@ -457,8 +467,11 @@ export async function programOverview(deps: ProgramDeps, filters: ProgramFilters
     const denominator = total - excluded - notInPopulation;
     const visible = caseVisibleUnder(m.id, visibility);
     const openCaseCount = cases.filter((c) => (ACTIVE_CASE_STATUSES as readonly string[]).includes(c.status) && visible(c)).length;
+    // `liveAnswerForCase`, not the raw map: the run this card reports can describe another cycle
+    // (an older visible run on a scoped overview), and a cell from another cycle is not evidence
+    // about this one — the same equality the work list and the CSV apply.
     const staffClosedGapCount = staffClosedThisCycle.filter(
-      (c) => visible(c) && live.get(livePairKey(c.employeeId, c.measureId))?.state === "GAP",
+      (c) => visible(c) && liveAnswerForCase(live, c).state === "GAP",
     ).length;
     return {
       measureId: m.id,

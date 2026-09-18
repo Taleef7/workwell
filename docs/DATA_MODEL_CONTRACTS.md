@@ -243,6 +243,15 @@ Supports filters: `status`, `measureId`, `priority`, `assignee`, `site`, `caseId
 > and count an out-of-population row (canonical `MISSING_DATA`) as a gap, which the programs chip, the
 > staff-closed tab and the roster all do not — this column is the one those surfaces use.
 >
+> **The three `live*` columns describe the ROW's own cycle, or they say `UNKNOWN`.** A winning run
+> describes the measurement year it scored, and this export applies no period filter at all (below),
+> so it carries more prior-cycle closures than any other surface. A closure whose `evaluationPeriod`
+> the winning run does not describe therefore reads `UNKNOWN`/`UNKNOWN` with the run id still filled —
+> never that run's answer, which would report a 2026 result against a 2024 closure and look exactly
+> like a correct one. The same equality governs the work list, the MCP tool and the roster overlay;
+> all four apply it through one function, because a rule spelled out per surface is a rule one surface
+> ends up without.
+>
 > **`?status=` accepts `staff_closed`** — every terminal case a person closed (`CLOSED`, `RESOLVED` or
 > `EXCLUDED` with `closed_by` set). On this export it means ALL HISTORY: the export has no period
 > logic and the filter list above carries none, so unlike the work list's own `staff_closed` view it
