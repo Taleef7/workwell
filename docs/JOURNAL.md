@@ -78,6 +78,32 @@ when the caller has already chosen one, and issues no winners read at all in tha
 findings were real, both are P-severity by consequence rather than by frequency, and neither was
 reachable by any test that existed.
 
+**Verified on the sandbox against ONE DESIGNATED CLOSURE, by id.** Merged as `a1dc0b74`; both deploys
+green. Case **`ffce1e30-5ffb-48cd-b9d6-862876d310fb`** — subject `pat-19735`, cms130, cycle
+2026-01-01 — was closed by the admin seat with a note at 19:59 UTC, and then asserted BY THAT ID on
+all four surfaces: the `/cases` staff-closed row (`closure: STAFF`, `liveState: GAP`,
+`liveOutcomeStatus: OVERDUE` against a `currentOutcomeStatus` frozen at OVERDUE, and the
+`X-Staff-Closed-Gap: 1` header), the roster cell for that patient (the `staffClosure` marker present
+and `cell.status` still OVERDUE, so no chip count moved), the cms130 card, and the CSV row carrying
+all five appended columns. The card is the whole point in one line: **overdue 4,997 = open 4,996 +
+closed-by-staff 1**. Before this change those two numbers were 4,997 and 4,996 with nothing on the
+page accounting for the difference.
+
+The check is pinned by `e2e/tests/maui/staff-closed.spec.ts` in the READ-ONLY Maui project, and it is
+keyed on that id for a reason: "the tab returns a number" and "the chip renders" are both satisfied by
+zero, so the feature could be wholly broken and the suite still green. Proven by mutation — pointing
+`DESIGNATED` at an id the sandbox does not hold fails three of the five tests, and the two that survive
+are the ones keyed on the patient and on the chip-equals-tab identity rather than on the case id. The
+fixture EXPIRES at cycle rollover (a closed case is never rolled over, so the row becomes history and a
+new case is inserted), and the first test detects exactly that and says to designate a fresh closure —
+a loud failure rather than a quiet skip. 5/5 green against the sandbox.
+
+**After-numbers**, measured warm, outside the 12:10–13:40 UTC recompute window and ~15 minutes past the
+deploy: `/api/programs` 2.6–3.4 s, `/api/cases?status=staff_closed` 0.73–0.75 s,
+`/api/compliance/roster?measureId=cms130` 2.95–2.97 s, `/api/exports/cases?format=csv&status=staff_closed`
+0.73 s. The programs page is where the new work landed (one bounded case read plus the live cells,
+outside the memo) and it did not move off its pre-#569 warm figure.
+
 **Not done here, deliberately.** CDS cards are unchanged — a card renders CQL and a closure is
 workflow — and `list_noncompliant` still lists active cases only; both are stated in the ADR so the
 next reader does not "fix" them. The single `EXCLUDED` display string that covers DENEX, DENEXCEP and
@@ -1892,6 +1918,12 @@ pilot profile for the reason the 2026-09-09 entry gave. Issue #534 (the cms137 f
 *Recorded 2026-09-15. The session happened on 2026-09-09 and only reached this journal through three
 asks cited in the 09-12 entry; the rest — including the reporting answers and a contradiction worth an
 owner decision — was never written down. Roles, not names, per LOCKED §4A.6.*
+
+> **SINCE 2026-09-17:** the "one thing they actually asked for" — upload the attributed list, score the
+> six measures over that subset, hand back numerator/denominator/exclusions with the patient-level
+> result and date — **SHIPPED** as #574 (ADR-082), with `?listId=` on six read surfaces and the
+> measurement-year report in CSV and JSON. Read the paragraph below as the finding that produced the
+> work, not as current state; the four ACO inputs it names are still open.
 
 **The measure set is confirmed, one for one.** The six the ACO reports are the six the sandbox routes:
 001/CMS122, 134/CMS2, 236/CMS165, 112/CMS125, 113/CMS130, 305/CMS137. The other three in their program

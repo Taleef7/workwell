@@ -11,8 +11,8 @@ WorkWell Measure Studio implements the **Total Worker Health (TWH)** model: OSHA
 | HEDIS wellness — fully evaluated | 5 | Active | Full CQL, runnable |
 | Permanent immunization panel — fully evaluated | 3 | Active | Full CQL, runnable (series-completion; MMR, Varicella, Hep B) |
 | CMS eCQM — fully evaluated | 2 | Active | Full CQL, runnable (CMS125v14, CMS122v14) |
-| CMS eCQM — official-only (no authored CQL) | 3 | Active | CMS2, CMS130, CMS165 — the vendored artifact IS the logic (ADR-072) |
-| CMS eCQM catalog (2026 performance period) | 44 | Draft | Catalog entry only — CQL authoring pending |
+| CMS eCQM — official-only (no authored CQL) | 4 | Active | CMS2, CMS130, CMS165, CMS137 — the vendored artifact IS the logic (ADR-072) |
+| CMS eCQM catalog (2026 performance period) | 43 | Draft | Catalog entry only — CQL authoring pending |
 | **Total** | **63** | | |
 
 Runnable (full CQL): **14** — 4 OSHA + 5 HEDIS + 3 immunization panel + 2 CMS eCQM. Hepatitis B was promoted from an Approved catalog entry to Active (E10.6).
@@ -399,7 +399,7 @@ Outcome mapping (lower-is-better eCQM rate; NUMER maps to OVERDUE):
 > manifest's bare `catalogId` (`cms2`, `cms130`, `cms165`, like `cms122`/`cms125`); the CMS version
 > lives in `policyRef`. Legacy versioned rows on an existing database are deprecated once by the seed.
 
-47 official CMS electronic Clinical Quality Measures seeded as Draft v1.0 catalog entries (CMS125v14 and CMS122v14 are now Active with full CQL — see Category 3b). The `policy_ref` field stores the CMS eCQM ID (e.g., `CMS128v14`). The `spec_json` stores `cmsEcqmId` and `mipsQualityId` for downstream tooling. CQL authoring for the remaining catalog entries is future work.
+**49** official CMS electronic Clinical Quality Measures are seeded as v1.0 catalog entries, of which **43 remain Draft**: CMS125 and CMS122 are Active with full authored CQL (Category 3b), and CMS2, CMS130, CMS165 and CMS137 are Active official-only, where the vendored artifact IS the logic (ADR-072, ADR-078). The counts in the Category table at the top of this file are the same six and forty-three; **49** is also the number §"Terminology & standards currency" and the seeding note below both cite, so all four agree. The `policy_ref` field stores the CMS eCQM ID (e.g., `CMS128v14`). The `spec_json` stores `cmsEcqmId` and `mipsQualityId` for downstream tooling. CQL authoring for the remaining catalog entries is future work.
 
 The measures page renders CMS IDs as blue mono badges to distinguish them from OSHA CFR citations and HEDIS references.
 
