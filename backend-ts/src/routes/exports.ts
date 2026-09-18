@@ -12,10 +12,11 @@
 import type { CloudDatabase } from "@mieweb/cloud";
 import { getStores } from "../stores/factory.ts";
 import { listNotFoundBody, withListFilter } from "../compliance/subject-list-filter.ts";
+import { worklistQueryFor } from "../case/worklist-read-model.ts";
+import { rosterCellCache } from "../compliance/roster-read-model.ts";
 import { runsCsv, outcomesCsvStream, casesCsv, auditCsvStream } from "../export/export-csv.ts";
 import { subjectFiltersFromQuery, subjectFilterErrorBody, SubjectFilterError } from "../compliance/subject-filters.ts";
 import type { DataSourceEnv } from "../engine/ingress/data-source.ts";
-import { ACTIVE_CASE_STATUSES } from "../case/case-logic.ts";
 
 interface ExportsEnv extends DataSourceEnv {
   DB: CloudDatabase;
@@ -53,31 +54,24 @@ const listNotFound = (listId: string): Response =>
   });
 
 /**
- * Statuses mapping, mirroring the cases worklist: blank/"all"→all, "open"→the ACTIVE set, else the
- * literal.
+ * The status token this export understands, through the ONE parser the work list and the MCP tool
+ * share.
  *
  * **"open" is `ACTIVE_CASE_STATUSES`, not `["OPEN"]`.** This export is reached from the work list's
  * own "Export" button with the status it is currently showing, so the two must agree about what is
  * open. While this said `["OPEN"]` and the list said OPEN + IN_PROGRESS, scheduling an appointment
  * moved a case to IN_PROGRESS and it stayed on screen but vanished from the CSV taken off that
  * screen — a row missing from an export nobody can see is missing, which is the worse half of the
- * two failures this codebase names.
+ * two failures this codebase names. Sharing the parser is what keeps that agreement from drifting
+ * again.
+ *
+ * THIS caller's default is made explicit: the cases CSV applies no status filter by contract
+ * (§6.3 — every row, 32,558 on the pilot), where the work list's blank token means the ACTIVE set,
+ * so a shared switch that assumed either default would silently change the other caller's answer.
+ * `staff_closed` on the CSV means ALL history: the export has no period logic, and §6.3 lists no
+ * period filter.
  */
-function caseStatuses(raw: string | null): string[] | undefined {
-  switch ((raw ?? "").toLowerCase()) {
-    case "":
-    case "all":
-      return undefined;
-    case "open":
-      return [...ACTIVE_CASE_STATUSES];
-    case "closed":
-      return ["RESOLVED", "CLOSED"];
-    case "excluded":
-      return ["EXCLUDED"];
-    default:
-      return [(raw as string).toUpperCase()];
-  }
-}
+const caseStatusQuery = (raw: string | null) => worklistQueryFor(raw, { blank: "all" });
 
 export async function handleExports(req: Request, env: ExportsEnv): Promise<Response | null> {
   const url = new URL(req.url);
@@ -124,14 +118,14 @@ export async function handleExports(req: Request, env: ExportsEnv): Promise<Resp
     const subjectFilters = listedCases.filters;
     const caseIds = q.get("caseIds")?.split(",").map((c) => c.trim()).filter(Boolean);
     const csv = await casesCsv(s.cases, s.events, {
-      statuses: caseStatuses(q.get("status")),
+      ...caseStatusQuery(q.get("status")),
       measureId: q.get("measureId") ?? undefined,
       priority: q.get("priority") ?? undefined,
       assignee: q.get("assignee") ?? undefined,
       site: q.get("site")?.trim() || undefined,
       caseIds: caseIds?.length ? caseIds : undefined,
       ...subjectFilters,
-    }, env);
+    }, env, { outcomeStore: s.outcomes, cellCache: rosterCellCache });
     return csvResponse("cases.csv", csv);
   }
 

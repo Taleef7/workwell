@@ -30,6 +30,19 @@ SQLite floor and the Pg ceiling read the current row and apply the shared pure `
   auto-resolve (status `RESOLVED`) or an auto-exclusion (status `EXCLUDED`) whose waiver has since
   lapsed so CQL no longer returns EXCLUDED. Reopening a human-closed case is left an explicit, audited
   operator action.
+  **Two consequences of that no-op are contract, not incidental (#569, ADR-083 d1).** First,
+  `current_outcome_status` on a human-closed row is **FROZEN at closure** — the run never touches the
+  row again, so the column states what the last run before the closure said and can be months stale.
+  CQL's current answer for that `(subject, measure)` lives in `outcomes`, on the winning population
+  run, and any surface claiming to show "what CQL says" about such a row must read it there
+  (`compliance/live-cell.ts`, bounded point reads). Second, `closed_by` — never `status`, never
+  `closed_reason` — is the discriminator for WHO closed a case, because it is the column this rule
+  itself decides by: `closureKindOf` (`case/case-logic.ts`) reads it as `NONE` for an active case,
+  `STAFF` for every closure a person made (a manual `MANUAL_RESOLVE` close writes status `CLOSED`, a
+  rerun-to-verify writes `RESOLVED`/`EXCLUDED` — both are STAFF), and `SYSTEM` otherwise.
+  `CaseQuery.closure` (`'staff' | 'system'`) is the store-side form and implements the WHOLE
+  classification — terminal status AND who closed it — because `closed_by IS NULL` alone matches every
+  OPEN row.
 - **So do the open-case READERS, and that had to be propagated (MM-2).** The work list, its CSV export
   (`?status=open`) and the MCP `list_cases`/`list_noncompliant` tools each mapped "open" to `["OPEN"]`
   alone. A case an operator had started was therefore visible on the screen and absent from the CSV
@@ -211,10 +224,32 @@ Columns:
 
 ### 6.3 `GET /api/exports/cases?format=csv`
 Columns:
-`caseId, employeeExternalId, employeeName, role, site, measureName, measureVersion, evaluationPeriod, status, priority, assignee, currentOutcomeStatus, nextAction, lastRunId, createdAt, updatedAt, closedAt, latestOutreachDeliveryStatus, providerId, payer`
+`caseId, employeeExternalId, employeeName, role, site, measureName, measureVersion, evaluationPeriod, status, priority, assignee, currentOutcomeStatus, nextAction, lastRunId, createdAt, updatedAt, closedAt, latestOutreachDeliveryStatus, providerId, payer, closedReason, closedBy, liveState, liveOutcomeStatus, liveOutcomeRunId`
 
 Supports filters: `status`, `measureId`, `priority`, `assignee`, `site`, `caseIds`, `providerId`,
 `ageBand`, `sex`, `payer`.
+
+> **`closedReason`, `closedBy`, `liveState`, `liveOutcomeStatus` and `liveOutcomeRunId` were
+> APPENDED (#569, ADR-083)**, never inserted, so a consumer reading by position keeps every column it had — the same
+> rule `providerId`/`payer` and ADR-079's `notInPopulation` followed. The two `live*` columns are
+> populated **only for rows a PERSON closed** (`closed_by` non-NULL) and are the empty string on every
+> other row: an active row's `currentOutcomeStatus` IS live, and a system-closed row was closed by the
+> run that wrote it. A staff-closed row whose subject the winning run never evaluated carries the word
+> `UNKNOWN` rather than an empty cell, because empty means "not a staff closure" — "not evaluable" is
+> its own answer and must not read as "no longer a gap". `currentOutcomeStatus` keeps its meaning
+> exactly: what the last run that touched the row wrote, which for a staff-closed row is the value
+> frozen at closure (§4). **`liveState` is `GAP | CLEAR | UNKNOWN` and is the RECONCILIATION column**:
+> a consumer deriving "still a gap" from `liveOutcomeStatus` alone would apply the case-opening rule
+> and count an out-of-population row (canonical `MISSING_DATA`) as a gap, which the programs chip, the
+> staff-closed tab and the roster all do not — this column is the one those surfaces use.
+>
+> **`?status=` accepts `staff_closed`** — every terminal case a person closed (`CLOSED`, `RESOLVED` or
+> `EXCLUDED` with `closed_by` set). On this export it means ALL HISTORY: the export has no period
+> logic and the filter list above carries none, so unlike the work list's own `staff_closed` view it
+> is not scoped to the current compliance cycle. `status` is parsed by ONE function shared with the
+> work list and the MCP tool (`worklistQueryFor`), which takes the caller's default for a BLANK token
+> explicitly — this export's blank still means no status filter at all (every row), the work list's
+> still means the ACTIVE set.
 
 > **`latestOutreachDeliveryStatus` is resolved for the whole export in one pass, and the column is
 > unchanged (2026-09-13).** It is still the `deliveryStatus` of the newest `OUTREACH_DELIVERY_UPDATED`

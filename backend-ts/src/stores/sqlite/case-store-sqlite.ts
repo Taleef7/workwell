@@ -443,6 +443,13 @@ export class SqliteCaseStore implements CaseStore {
       where.push("evaluation_period = ?");
       binds.push(period);
     }
+    if (query.closure) {
+      // The whole classification (#569): terminal AND who closed it. Without the status half every
+      // open row — closed_by NULL by definition — would answer as a "system closure".
+      where.push(`status NOT IN (${ACTIVE_CASE_STATUSES.map(() => "?").join(", ")})`);
+      binds.push(...ACTIVE_CASE_STATUSES);
+      where.push(query.closure === "staff" ? "closed_by IS NOT NULL" : "closed_by IS NULL");
+    }
     const clause = where.length ? ` WHERE ${where.join(" AND ")}` : "";
     const limit = query.limit ?? 50;
     const offset = query.offset ?? 0;

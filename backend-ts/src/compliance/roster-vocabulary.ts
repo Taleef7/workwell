@@ -10,6 +10,7 @@ import { DEPLOYMENT_PROFILE } from "../config/deployment-profile.ts";
 import { isOfficialRouted } from "../wiring/official-routing.ts";
 import { officialDisplayFor } from "./official-display.ts";
 import { isEvaluationErrorEvidence, outsideEveryRate } from "../fhir/measure-report.ts";
+import { dispositionFor } from "../case/case-logic.ts";
 
 /**
  * `OUT_OF_POPULATION` (ADR-077 d7): evaluated by the official logic and found outside the measure's
@@ -23,6 +24,30 @@ export type DisplayState =
 export interface Cell {
   status: DisplayState;
   method: string;
+  /**
+   * The CANONICAL outcome bucket the display state was derived from, and the outcome's cycle (#569).
+   * Both are additive and absent on the synthetic `NA` / `NOT_APPLICABLE` cells. They exist because a
+   * question a cell must now answer — "is this patient still a gap the run counts?" — is decided by
+   * the canonical bucket (`dispositionFor`, the rule that opens a case), never by the display state:
+   * DECLINED is a refinement of a non-compliant bucket and counts, OUT_OF_POPULATION is a refinement
+   * of MISSING_DATA and does not.
+   */
+  canonical?: string;
+  evaluationPeriod?: string;
+}
+
+/**
+ * Whether the run still counts this patient as a gap — "GAP" (a case would be opened for it),
+ * "CLEAR" (compliant, excluded, or outside the population), or "UNKNOWN" (no canonical bucket: a
+ * cell that was never evaluated or that a segment marked not applicable). Evaluated on the canonical
+ * bucket, never on the display state, and "not currently evaluable" is its own answer rather than
+ * either of the other two (#569).
+ */
+export type LiveState = "GAP" | "CLEAR" | "UNKNOWN";
+export function liveStateOfCell(cell: Pick<Cell, "status" | "canonical">): LiveState {
+  if (cell.canonical == null) return "UNKNOWN";
+  if (cell.status === "OUT_OF_POPULATION") return "CLEAR";
+  return dispositionFor(cell.canonical) === "OPEN" ? "GAP" : "CLEAR";
 }
 
 /** Derive the display state + method for one (canonical status, evidence) of a measure. */

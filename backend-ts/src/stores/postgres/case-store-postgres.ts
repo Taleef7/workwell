@@ -616,6 +616,13 @@ export class PgCaseStore implements CaseStore {
       where.push(`evaluation_period = $${binds.length + 1}`);
       binds.push(period);
     }
+    if (query.closure) {
+      // The whole classification (#569): terminal AND who closed it. Without the status half every
+      // open row — closed_by NULL by definition — would answer as a "system closure".
+      where.push(`status <> ALL($${binds.length + 1}::text[])`);
+      binds.push([...ACTIVE_CASE_STATUSES]);
+      where.push(query.closure === "staff" ? "closed_by IS NOT NULL" : "closed_by IS NULL");
+    }
     const clause = where.length ? ` WHERE ${where.join(" AND ")}` : "";
     binds.push(query.limit ?? 50, query.offset ?? 0);
     const { rows } = await this.pool.query<CaseRow>(

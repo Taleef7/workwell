@@ -6,7 +6,8 @@
  * read to learn it), and each column's cells from `listOutcomes(runId, { measureId })`, derived once per
  * (measure, run) into the process-lifetime cell cache.
  */
-import type { OutcomeStore } from "../stores/outcome-store.ts";
+import type { OutcomeRecord, OutcomeStore } from "../stores/outcome-store.ts";
+import type { CaseStore } from "../stores/case-store.ts";
 import { MEASURE_CATALOG } from "../measure/measure-catalog.ts";
 import { isDemoPersona } from "../engine/synthetic/employee-catalog.ts";
 import { directoryForRows } from "../engine/ingress/webchart/live-directory.ts";
@@ -19,7 +20,7 @@ import { isCompletedRun, isPopulationRun } from "../program/rollup-shared.ts";
 import { isApplicable, matchesCohort } from "../segment/segment-applicability.ts";
 import type { HydratedSegment } from "../stores/segment-store.ts";
 import { isPanelId, ACTIVE_CATALOG_MEASURE_IDS, AVAILABLE_PANELS, PROFILE_DEFAULT_PANEL, RUNNABLE_PANELS, type PanelId } from "./panels.ts";
-import { deriveCell, type Cell } from "./roster-vocabulary.ts";
+import { deriveCell, liveStateOfCell, type Cell } from "./roster-vocabulary.ts";
 import { hasActiveSubjectFilters, matchesSubjectFilters, type SubjectFilters } from "./subject-filters.ts";
 
 export interface RosterColumn {
@@ -27,8 +28,32 @@ export interface RosterColumn {
   name: string;
   complianceClass: "PERMANENT" | "RECURRING";
 }
+/** The person who closed the case behind a cell CQL still counts (#569) — display only. */
+export interface StaffClosure {
+  closedBy: string;
+  closedAt: string | null;
+  closedReason: string | null;
+}
 export interface RosterCell extends Cell {
   evidenceRef?: { runId: string; outcomeId: string };
+  /**
+   * Present only when a person closed this subject's case for this measure IN THIS CYCLE and the
+   * winning run still counts the patient as a gap (#569). Additive: `status` is unchanged, so every
+   * chip count and the `?status=` filter reproduce exactly, and the row simply carries the fact that
+   * somebody decided not to work this gap — which the surface must say, because the alternative is a
+   * patient who is on the Overdue list and on nobody's work list, with nothing on screen saying why.
+   */
+  staffClosure?: StaffClosure;
+}
+
+/** One outcome row → its frozen cell, carrying the canonical bucket and the cycle the derivation used. */
+export function cellFromOutcome(o: OutcomeRecord, measureId: string, runId: string): RosterCell {
+  return Object.freeze({
+    ...deriveCell(o.status, o.evidence, measureId, o.evaluationPeriod),
+    canonical: o.status,
+    evaluationPeriod: o.evaluationPeriod,
+    evidenceRef: { runId, outcomeId: o.id },
+  });
 }
 export interface RosterRow {
   subject: {
@@ -83,6 +108,11 @@ export interface RosterDeps {
   segments?: HydratedSegment[];
   /** Optional persistent derived-cell cache (perf #233). Omit in tests for per-call isolation. */
   cellCache?: RosterCellCache;
+  /**
+   * The case store, for the staff-closure overlay (#569). Optional so a test that omits it derives a
+   * roster with no overlay; the route always passes it. Read AFTER paging, for the page's subjects only.
+   */
+  caseStore?: Pick<CaseStore, "listCases">;
 }
 /**
  * The roster's filters. **Extends `SubjectFilters` rather than restating it** — the panel filters used
@@ -182,7 +212,7 @@ export async function buildRoster(deps: RosterDeps, filters: RosterFilters): Pro
       // reference into each response's rows), so any accidental post-build mutation would silently
       // corrupt another request's view. Freezing makes that a loud throw instead — enforcing the
       // read-only invariant this cache relies on.
-      cells.set(o.subjectId, Object.freeze({ ...deriveCell(o.status, o.evidence, m, o.evaluationPeriod), evidenceRef: { runId, outcomeId: o.id } }));
+      cells.set(o.subjectId, cellFromOutcome(o, m, runId));
     }
     deps.cellCache?.set(m, { runId, cells }); // supersedes any older run's entry for this measure (bounded to #measures)
     cellByMeasureSubject.set(m, cells);
@@ -295,5 +325,43 @@ export async function buildRoster(deps: RosterDeps, filters: RosterFilters): Pro
   const page = Math.max(1, Math.trunc(filters.page ?? 1));
   const pageSize = Math.max(1, Math.min(Math.trunc(filters.pageSize ?? 50), 200));
   const start = (page - 1) * pageSize;
-  return { panel: resolvedPanel, availablePanels: AVAILABLE_PANELS, columns, rows: rows.slice(start, start + pageSize), total, notInPopulation };
+  const pageRows = rows.slice(start, start + pageSize);
+  // 5) the staff-closure overlay (#569) — AFTER the filters and the page, so it costs one bounded read
+  //    for the page's subjects and changes no count: `status` stays what CQL says, the marker is added.
+  if (deps.caseStore && pageRows.length > 0) await overlayStaffClosures(deps.caseStore, pageRows, measureIds);
+  return { panel: resolvedPanel, availablePanels: AVAILABLE_PANELS, columns, rows: pageRows, total, notInPopulation };
+}
+
+/**
+ * Mark the cells whose case a PERSON closed while the winning run still counts the patient (#569).
+ *
+ * Three conditions, each the guard against a different wrong marker: the case must be a staff closure
+ * (`closure: "staff"` — the store's whole classification, so an open row or a system closure never
+ * qualifies); its `evaluation_period` must equal the cell's, because a prior cycle's closure describes a
+ * prior cycle's gap and the current cycle opened a new case; and the cell's live state must be GAP —
+ * a rerun-verified closure sits on a COMPLIANT cell and gets no marker, since CQL corroborates it.
+ *
+ * The cell is REPLACED WITH A COPY, never mutated: the cached cell objects are frozen and shared by
+ * reference across requests (a mutation would throw, and an un-frozen one would corrupt another
+ * request's view). Only the row's own `cells` record — built per request — changes.
+ */
+async function overlayStaffClosures(caseStore: Pick<CaseStore, "listCases">, pageRows: RosterRow[], measureIds: readonly string[]): Promise<void> {
+  const closed = await caseStore.listCases({
+    closure: "staff",
+    employeeIds: pageRows.map((r) => r.subject.externalId),
+    limit: Number.MAX_SAFE_INTEGER,
+    offset: 0,
+  });
+  if (closed.length === 0) return;
+  const rowBySubject = new Map(pageRows.map((r) => [r.subject.externalId, r] as const));
+  const columns = new Set(measureIds);
+  for (const c of closed) {
+    if (c.closedBy == null || !columns.has(c.measureId)) continue;
+    const row = rowBySubject.get(c.employeeId);
+    const cell = row?.cells[c.measureId];
+    if (!row || !cell) continue;
+    if (cell.evaluationPeriod !== c.evaluationPeriod) continue;
+    if (liveStateOfCell(cell) !== "GAP") continue;
+    row.cells[c.measureId] = { ...cell, staffClosure: { closedBy: c.closedBy, closedAt: c.closedAt, closedReason: c.closedReason } };
+  }
 }

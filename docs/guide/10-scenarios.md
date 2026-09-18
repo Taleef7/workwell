@@ -89,7 +89,15 @@ What happens, in order:
    somebody. Assigning there needs ONE measure in scope, because a roster cell references an outcome
    rather than a case and a patient row spans every column; with one named, the server resolves that
    measure's active case per selected patient, and rows with nothing open (compliant, excluded, or
-   outside the population) are visibly unselectable rather than absent. CSV exports feed anything
+   outside the population) are visibly unselectable rather than absent. **Since 2026-09-18 a third
+   state is visible on all three views (#569, ADR-083):** when staff mark a case resolved with a
+   reason, the row leaves the open list but the measure keeps counting the patient — so the roster
+   marks that cell "Closed by staff", `/cases` and `/worklist` have a Closed-by-staff view whose rows
+   say what CQL says *today* (still counted, verified compliant/excluded, or not evaluable), and the
+   programs card carries a "Closed by staff, still counted" figure that reconciles its Overdue chip
+   with its open-case link. It is display only: no outcome is mutated, and a closure is never an
+   exception — for the six official measures only a chart-documented exclusion counts, which is the
+   write path MIE owes. CSV exports feed anything
    spreadsheet-shaped; and other MIE systems read the same answer machine-readably from the
    versioned compliance API — which answers **404 when no run has covered a patient**, never an
    empty success, because "not yet evaluated" and "compliant" must not be confusable.

@@ -1,5 +1,72 @@
 # Journal
 
+## 2026-09-18 — a case a person closed is still a gap the run counts, and the exception flow is written down
+
+#569, ADR-083 — MM-3's design half, which was never blocked and had the one real correctness problem
+in it. Marking a case resolved requires a closure note, server-enforced. What happened next was the
+defect: the row left the work list, and the measure kept counting the patient. The roster showed them
+Overdue, the programs card counted them Overdue, and the open-case count beside it did not. **Both
+numbers were right and they disagreed, with nothing on any screen accounting for the difference** —
+the sandbox quietly contradicting the number it reports, in the direction that flatters it.
+
+**The case row cannot answer "is this still a gap", and that is by design.** `planCaseUpsert` no-ops
+on a closure with `closed_by` set, so the nightly run never touches the row again: its
+`current_outcome_status` is frozen at the moment of closure and can be months stale. CQL's current
+answer lives in `outcomes`, on the winning population run. So `compliance/live-cell.ts` reads it there
+for a small set of (subject, measure) pairs — winners from the runs table, then only those subjects'
+rows via a new `listOutcomes(..., { subjectIds })` on both stores. It reads the roster's per-run cell
+cache through when that cache already holds the winning run, and **never fills it on a miss**: filling
+is a 20,000-row evidence read per measure, six of them on a cold page, to annotate a handful of rows,
+which is the latency shape #561 exists to remove. A test counts the queries a page issues.
+
+**Three answers, not two.** `GAP`, `CLEAR`, and `UNKNOWN` for a measure with no winning run or a
+subject it never evaluated. UNKNOWN is displayed and counted apart, because folding it into CLEAR
+would let a patient nobody has scored read as no longer a gap.
+
+**What each surface does now.** The roster marks the cell "Closed by staff" and leaves `cell.status`
+alone, so every chip count and the `?status=` filter reproduce exactly; the marker's own text carries
+"still counted by CQL" and a legend appears when any marker is on the page. That row is no longer
+selectable for bulk assign — there is no open case to assign, and the caption beside the button counts
+it out, where before the correction arrived as a toast after the click. `/cases` gained a **Closed by
+staff** tab whose header reads "N still counted by CQL · M verified · U not evaluated" (from response
+headers, so the counts describe the whole list and not the page), and every row words itself by the
+LIVE outcome. `/worklist` gained an Open | Closed by staff control. The programs card carries "Closed
+by staff, still counted: N", linking to the `/cases` tab rather than to the roster. The cases CSV
+appends four columns, and MCP `list_cases` gains the token and the same fields.
+
+**The wording rule, which took two reviewers to get right.** The first draft said "still counted by
+CQL" on every staff closure. That is false for a rerun-to-verify closure, where a person clicked and
+CQL agreed. The words now follow the live outcome: still counted / verified compliant / verified
+excluded / current CQL status unavailable. The practice's own rule, from the 09-10 call about orders:
+**a measure is satisfied by a result, never by an action.**
+
+**ADR-083** states what an exception would be. Three not-scored paths and only two are exceptions:
+outside the initial population is ineligibility (ADR-078), DENEX is an exclusion, DENEXCEP is an
+exception. Read off the vendored manifests, five of the six pilot measures have clinical-status DENEX
+only (hospice, palliative care, frailty with advanced illness, nursing home, mastectomy, colectomy,
+ESRD/pregnancy); **cms2 alone declares a DENEXCEP**, and its shape is an `Observation` on the
+`qicore-observationcancelled` profile whose code is the screening itself with the not-done reason
+carrying the exception. All of it is chart documentation, so: **no official-measure exception mutation
+is implemented in WorkWell** until #565's write path exists. The authored-measure waiver is the
+opposite finding — the CQL shape is right and the wiring does not exist: nothing projects a `waivers`
+row into an evaluated bundle, which `admin/waivers.ts` has said in its own header all along.
+
+**Verification.** Backend 152 tests across the six new and extended suites, both store contracts (the
+`closure` predicate and `subjectIds` run on the floor and the ceiling), frontend 487 tests over 84
+files, both typechecks and lint clean. **Seven mutations, each caught by the test named for it:**
+dropping the status half of the `closure` predicate (every OPEN row answered "system closure"),
+reading the display state instead of the canonical bucket (DECLINED stopped counting), dropping the
+overlay's period match (a 2025 closure marked a 2026 cell), hard-coding the blank status token (the
+cases CSV silently shrank from every case to the active ones), reading the whole run instead of the
+subject set, mutating the frozen cached cell instead of copying it, and dropping the live-gap test
+from the programs count.
+
+**Not done here, deliberately.** CDS cards are unchanged — a card renders CQL and a closure is
+workflow — and `list_noncompliant` still lists active cases only; both are stated in the ADR so the
+next reader does not "fix" them. The single `EXCLUDED` display string that covers DENEX, DENEXCEP and
+out-of-denominator alike is named in the ADR as a known defect and filed as #576, not fixed; the
+authored-measure waiver projection d2 found missing is #577.
+
 ## 2026-09-17 — the backend suite is sharded, and the three ways sharding passes while doing less are closed
 
 #575. The backend test step was 12m20s and it **was** the CI wall-clock: every other job in `ci.yml`

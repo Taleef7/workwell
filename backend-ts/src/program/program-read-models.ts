@@ -10,12 +10,16 @@
  */
 import type { RunStore } from "../stores/run-store.ts";
 import type { OutcomeStore, OutcomeWithRun, OutcomeMeasureFilter } from "../stores/outcome-store.ts";
-import type { CaseStore } from "../stores/case-store.ts";
+import type { CaseRecord, CaseStore } from "../stores/case-store.ts";
 import { EMPLOYEES, employeeById, type EmployeeProfile } from "../engine/synthetic/employee-catalog.ts";
+import { bucketPeriodForMeasure } from "../run/compliance-period.ts";
+import { liveCellsFor, livePairKey } from "../compliance/live-cell.ts";
+import { rosterCellCache } from "../compliance/roster-read-model.ts";
 import type { QualitySnapshotStore, QualitySnapshotRow, QualityScopeLevel } from "../stores/quality-snapshot-store.ts";
 import { MEASURE_CATALOG } from "../measure/measure-catalog.ts";
 import { measureIdentityFor } from "../measure/measure-identity.ts";
 import { ACTIVE_CASE_STATUSES } from "../case/case-logic.ts";
+import { STAFF_CLOSED_STATUSES } from "../case/worklist-read-model.ts";
 import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
 import { day, isCompletedRun, round1, complianceRateOf, type ComplianceRateCounts } from "./rollup-shared.ts";
 import { officialMeasureRate, type MeasureRate } from "./measure-rate.ts";
@@ -58,6 +62,16 @@ export interface ProgramSummary {
    */
   improvementNotation: "increase" | "decrease";
   openCaseCount: number;
+  /**
+   * Cases a PERSON closed this cycle whose patient the winning run STILL counts as a gap (#569).
+   * The number that reconciles the Overdue chip with the open-case count: a patient an operator
+   * marked resolved leaves the work list, but CQL keeps counting them until the chart changes, and
+   * without this the two figures disagreed with nothing on screen saying why. Display only; the
+   * rates are untouched. Same visibility predicates as `openCaseCount`, plus the current-cycle
+   * match (an active case is current by construction — the run's rollover closes prior-cycle ones —
+   * where a closed case is untouched by rollover and needs the explicit test).
+   */
+  staffClosedGapCount: number;
   /**
    * The EVIDENCE's rate for `latestRunId` — the measure's own populations reduced by the same
    * aggregator the MeasureReport uses — or null when the run carries no official evidence. Shown as a
@@ -306,6 +320,31 @@ interface OverviewBuckets {
 }
 const EMPTY_BUCKETS: OverviewBuckets = { latestRunId: null, latestRunAt: null, total: 0, compliant: 0, dueSoon: 0, overdue: 0, missingData: 0, notInPopulation: 0, excluded: 0 };
 const overviewMemo = new RunKeyedMemo<{ buckets: Map<string, OverviewBuckets>; directory: DirectorySnapshot; webChartConfigured: boolean }>(16);
+
+/**
+ * The visibility EVERY case-derived number on the overview applies — the measure, the seam's subject
+ * visibility, the deployment profile, site, tenant and the dashboard's date range over case creation
+ * — as ONE predicate, so the open count and the staff-closed count (#569) cannot drift: a copy that
+ * forgot `inPeriod` would put a chip beside a tab whose total it does not describe.
+ */
+function caseVisibleUnder(
+  measureId: string,
+  ctx: {
+    webChartConfigured: boolean;
+    profileMatch: (subjectId: string) => boolean;
+    siteMatch: (subjectId: string) => boolean;
+    tenantMatch: (subjectId: string) => boolean;
+    inPeriod: (iso: string) => boolean;
+  },
+): (c: CaseRecord) => boolean {
+  return (c) =>
+    c.measureId === measureId &&
+    subjectVisible(c.employeeId, ctx.webChartConfigured) &&
+    ctx.profileMatch(c.employeeId) &&
+    ctx.siteMatch(c.employeeId) &&
+    ctx.tenantMatch(c.employeeId) &&
+    ctx.inPeriod(c.createdAt);
+}
 export const __overviewMemo = overviewMemo;
 
 export async function programOverview(deps: ProgramDeps, filters: ProgramFilters): Promise<ProgramSummary[]> {
@@ -392,6 +431,22 @@ export async function programOverview(deps: ProgramDeps, filters: ProgramFilters
   // Active cases only: the count below keeps ACTIVE_CASE_STATUSES, so the closed majority (the pilot
   // closes ~15,000 under OUT_OF_POPULATION in one pass) was fetched to be discarded.
   const cases = await deps.caseStore.listCases({ statuses: [...ACTIVE_CASE_STATUSES], limit: 100000 });
+  // Every closure a PERSON made (#569) — a set bounded by human activity, read outside the memo like
+  // the open count because it is a mutable table. Only the current cycle's closures can describe the
+  // gap the winning run reports, and for those the run's own answer is read per (subject, measure):
+  // bounded point reads through `liveCellsFor`, never a run read.
+  // The terminal statuses are named explicitly as well as the closure kind: `status <> ALL(active)`
+  // is not index-servable, where `status = ANY(...)` can use `spike_cases_status_idx`. The two
+  // predicates are the same set by construction (a staff closure IS one of these three), so this is a
+  // plan hint, not a narrowing — the store contract pins the classification either way.
+  const staffClosed = await deps.caseStore.listCases({ closure: "staff", statuses: [...STAFF_CLOSED_STATUSES], limit: 100000 });
+  const today = new Date().toISOString().slice(0, 10);
+  const staffClosedThisCycle = staffClosed.filter((c) => c.evaluationPeriod === bucketPeriodForMeasure(c.measureId, today));
+  const live = await liveCellsFor(
+    { outcomeStore: deps.outcomeStore, cellCache: rosterCellCache },
+    staffClosedThisCycle.map((c) => ({ subjectId: c.employeeId, measureId: c.measureId })),
+  );
+  const visibility = { webChartConfigured, profileMatch, siteMatch, tenantMatch, inPeriod };
 
   const summaries = active.map((m): ProgramSummary => {
     const b = derived!.buckets.get(m.id) ?? EMPTY_BUCKETS;
@@ -400,15 +455,10 @@ export async function programOverview(deps: ProgramDeps, filters: ProgramFilters
     // The proportion denominator drops the subjects the measure does not describe as well as the
     // excluded ones — `totalEvaluated` still reports every row the run wrote.
     const denominator = total - excluded - notInPopulation;
-    const openCaseCount = cases.filter(
-      (c) =>
-        c.measureId === m.id &&
-        (ACTIVE_CASE_STATUSES as readonly string[]).includes(c.status) &&
-        subjectVisible(c.employeeId, webChartConfigured) &&
-        profileMatch(c.employeeId) &&
-        siteMatch(c.employeeId) &&
-        tenantMatch(c.employeeId) &&
-        inPeriod(c.createdAt),
+    const visible = caseVisibleUnder(m.id, visibility);
+    const openCaseCount = cases.filter((c) => (ACTIVE_CASE_STATUSES as readonly string[]).includes(c.status) && visible(c)).length;
+    const staffClosedGapCount = staffClosedThisCycle.filter(
+      (c) => visible(c) && live.get(livePairKey(c.employeeId, c.measureId))?.state === "GAP",
     ).length;
     return {
       measureId: m.id,
@@ -428,6 +478,7 @@ export async function programOverview(deps: ProgramDeps, filters: ProgramFilters
       complianceRate: complianceRateOf({ compliant, dueSoon, overdue, missingData, excluded }),
       improvementNotation: measureIdentityFor(m.id)?.improvementNotation ?? "increase",
       openCaseCount,
+      staffClosedGapCount,
       measureRate: null,
     };
   });
@@ -502,7 +553,8 @@ async function foldScaleCounts(deps: ProgramDeps, summaries: ProgramSummary[], f
 
 function zeroSummary(s: ProgramSummary): void {
   s.totalEvaluated = 0; s.denominator = 0; s.compliant = 0; s.dueSoon = 0; s.overdue = 0; s.missingData = 0;
-  s.notInPopulation = 0; s.excluded = 0; s.complianceRate = 0; s.latestRunId = null; s.latestRunAt = null; s.openCaseCount = 0;
+  s.notInPopulation = 0; s.excluded = 0; s.complianceRate = 0;
+  s.staffClosedGapCount = 0; s.latestRunId = null; s.latestRunAt = null; s.openCaseCount = 0;
 }
 
 /**
