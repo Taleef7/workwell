@@ -1724,6 +1724,45 @@ compute cost. A dedicated deep-health-check workflow was considered and rejected
 Do not use `neonctl projects create` unless it supports `pg_version=16`; the CLI defaults to
 Postgres 17 and is not compliant with the locked stack.
 
+### The statement timeout is a ROLE DEFAULT, set by hand, once per project (#562, ADR-084)
+
+**It cannot go in the pool configuration, and the failure mode is silent.** Measured against both
+projects on 2026-09-18: node-postgres puts `statement_timeout` in the connection's startup packet, and
+Neon's proxy **drops it without error on the pooled AND the direct endpoint** — the connection
+succeeds and `SHOW statement_timeout` still reads `0`. The other spelling,
+`options=-c statement_timeout=…`, is rejected outright by the pooler and fails every connection, the
+same way `search_path` did on the first shadow deploy. So a role default is the only form that
+survives, and `pg-database.test.ts` asserts the pool sets none of them.
+
+**Order matters: the app deploys FIRST.** The nightly outcome compaction is the one statement with no
+natural bound, and it opts out through `withStatementTimeoutDisabled`. Run the `ALTER ROLE` before
+that code is live and the first compaction is killed at 30 s.
+
+Per project (Maui first as the canary, then TWH), after the release carrying #562 is deployed:
+
+```sh
+# (a) Set it — on the DIRECT url. An ordinary role may set its own defaults.
+psql "<direct url>" -c "ALTER ROLE <app role> SET statement_timeout = '30s';"
+
+# (b) Verify THROUGH THE POOLED URL — that is the one the app uses, and the point of the exercise.
+psql "<pooled url>" -c "show statement_timeout"        # expect: 30s
+psql "<direct url>" -c "show statement_timeout"        # expect: 30s
+
+# (c) Rollback, if anything misbehaves:
+psql "<direct url>" -c "ALTER ROLE <app role> RESET statement_timeout;"
+```
+
+Then re-run the pool probe (three case exports in flight while `/api/panels` and `/api/version` are
+polled) and record the numbers in `docs/JOURNAL.md` before doing the same on the other project.
+
+- **30 s sits under the 60 s gateway cut**, so a runaway read comes back as SQLSTATE `57014`, which the
+  worker maps to a 503 naming itself, instead of as a gateway timeout with nothing in the log.
+- **`pg_dump` sets `statement_timeout = 0` on its own session**, so the nightly backup is unaffected —
+  confirm it rather than assume it, with one backup smoke test after step (a).
+- **Owner-run scripts on the direct URL should do the same** if they run anything long.
+- **Until step (a) is run on a project, that project's `57014` mapping is dead code.** State in the PR
+  description whether it has been.
+
 ## OpenAI
 
 1. Get API key from platform.openai.com

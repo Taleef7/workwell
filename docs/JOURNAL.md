@@ -1,5 +1,168 @@
 # Journal
 
+## 2026-09-19 — the open-case badge stops loading 15,000 rows to return one number, and the pool's failure modes name themselves
+
+#561 and #562, ADR-084. One PR, two commits, by owner decision: both are the read path, and each
+carries its own rollback paragraph so a timeout incident does not force reverting the count fix.
+
+**The badge.** The dashboard shell asks `?status=open&outreach=none&limit=1` on every navigation. To
+answer it the work list loaded every ACTIVE case — 15,309 on the pilot — built a `CaseSummary` for
+each, applied the filters in JavaScript, ran the grouped outreach count over the survivors, and the
+route sliced off one row. **Measured A/B at pilot scale against real Postgres over the same link:
+789 ms median (581–979) → 90 ms (90–136), and a real 50-row page costs 92 ms.** Both paths agreed on
+15,600. The rows are free next to the scan; it was never the page that cost anything.
+
+**Four predicates moved into SQL**, and the interesting one is the compliance cycle. Cadences differ
+per measure, so "the current cycle" is not a date — it is a table of (measure, period) pairs
+evaluated per row, with a separate anchor for a measure this process cannot name. The fallback branch
+excludes the named measures explicitly, because a row whose measure IS named and whose period is wrong
+has already failed and must not match the anchor instead — which would admit a prior cycle's rows for
+every measure on a 365-day cadence. That is the mutant both stores were checked against.
+
+**The page and the total come from one statement.** A COUNT then a SELECT is two snapshots of a table
+the nightly run is mutating, and a case closed between them makes `X-Total-Count` disagree with the
+page under it. An empty page carries no window value — which is NOT a total of zero, it is also every
+page past the end of a non-empty set — so that one case pays a bounded count rather than telling a
+client on the last page that everything vanished.
+
+**Three filters stay in memory, and the reason is structural rather than temporary**: `site`, `search`
+and an oversized panel selection read the in-memory directory, and there is no patients table to join
+(ADR-075). The staff-closed list stays too, because its outcome filter reads what CQL says today per
+row and its header counts describe the whole list. `sqlPageBlockedBy` returns WHICH one blocked: a
+fast path that silently stops being taken is indistinguishable from one that was never wired up.
+
+**The invariant is checked, not assumed.** On a scoped profile `profileMatch` hides subjects the
+directory does not hold and has no SQL form, so a SQL total is exact only while every case subject is
+in the directory. It is, on the pilot, by construction — and that is exactly the shape this codebase
+keeps paying for, so it is established from the data (`distinctCaseSubjectIds`, bounded by subjects
+not cases), once per process and again after every run, and a violation disables the fast path with a
+log line. **Both loaders remain in the code**, so a conformance test runs them over one fixture across
+18 filter combinations × 4 page positions and requires identical totals and page ids — with a counting
+proxy asserting the SQL path actually ran, since two calls that both fall back would agree perfectly
+and prove nothing.
+
+**The pool — where checking the facts changed the design.** Three things in the plan were wrong, and
+one of them was a defect that would have shipped looking correct:
+
+- **`statement_timeout` in the pool config is SILENTLY IGNORED**, on the pooled *and* the direct
+  endpoint: the connection succeeds and `SHOW statement_timeout` still reads `0`. The plan said it
+  would fail every connection. Configured that way the pool would have looked enforced and enforced
+  nothing. The other spelling, `options=-c statement_timeout=…`, IS hard-rejected by the pooler.
+- **`max_connections` is 901 on both projects**, not ~104 — Neon sizes it from the autoscaling
+  maximum (8 CU), not the 0.25 CU floor. So the "instances × 10 must fit the pooler's budget"
+  arithmetic does not bind at all. `max: 10` stays, justified by where the queue should form instead:
+  a deeper app pool does not make a slow read faster, it moves the wait to a database where a hundred
+  scans contend for the same quarter-vCPU.
+- **A session `SET` IS accepted by the pooler.** So the reason not to use it is that it leaks the
+  lifted timeout to whoever holds that connection next — not that it is refused.
+
+What ships: the timeout as a role default (`ALTER ROLE … SET statement_timeout = '30s'`, owner-run,
+runbook in `DEPLOY.md`), `withStatementTimeoutDisabled` on ONE checked-out client for the nightly
+compaction — the one statement with no natural bound — and SQLSTATE `57014` plus a pool-acquire
+timeout mapped to a 503 that names itself. `57014` is cancellation in general, so the timeout label is
+claimed only when the server's own message says so; pg-pool throws a plain `Error` with no SQLSTATE,
+so that one is matched by message or not at all. **Order matters**: the opt-out must be live before
+the role default exists, or the first compaction after it is killed at 30 s. Until the `ALTER ROLE` is
+run the mapping is dead code, which is why the PR says whether it has been.
+
+**Verification.** Floor 133/133; **ceiling 138/138 against real PostgreSQL 16**, including two tests
+that raise the REAL errors rather than fakes shaped like them — a held single-slot pool for the
+acquire timeout, and `SET statement_timeout = 50; SELECT pg_sleep(1)` for a genuine 57014. Full suite
+2784 tests, 2760 pass, 1 fail (the standing local `corpus-membership` stale-sparse-checkout failure).
+Mutation-checked: the cycles fallback exclusion on each store independently, the past-the-end page
+count, the conformance test's own vacuity guard, and the helper that must not let a statement bypass
+its checked-out client.
+
+**What review found, and the one that mattered most was not a logic bug.** Two lanes ran: an
+adversarial SQL pass and the code reviewer. The SQL pass verified the parameter numbering, the SQLite
+bind order, the empty-page slice and the outreach correlation term by term and found them correct —
+and then found the real defect one layer up. `?from=`/`?to=` reach SQL now and were **unvalidated**,
+and the two stores do not agree about anything that is not a plain calendar day: Postgres reads
+`yesterday`, `today` and `infinity` as date literals and `2026-9-1` as September 1st, while the floor's
+text comparison matches no row for any of them. `?from=yesterday` therefore filtered from yesterday on
+the ceiling and returned NOTHING on the floor — the same request, two answers, no error on either side
+to notice. Only outright garbage raised anything. Fixed at both ends: the route 400s on anything that
+is not `YYYY-MM-DD`, and the ceiling compares the UTC day as TEXT rather than casting to `::date`, so a
+bound that slips past any caller is a filter matching nothing on both stores instead of a different
+answer on each.
+
+**And the highest-severity finding was a NUL byte in my own source.** `worklist-read-model.ts` carried
+a literal `0x00` at offset 12726 — I wrote a unicode NUL escape in a string literal and the editor wrote the byte itself.
+The file compiled, every test passed, and nothing looked wrong; but git classified it BINARY, which
+meant CRLF normalisation was skipped so the CRLFs went into the committed blob, the diff rendered as a
+512-line whole-file rewrite rather than the ~150 lines actually changed, and `grep -n` answered
+"Binary file matches" with no line number **for the module that defines the read model**. Every
+reviewer read a diff that showed the change as a rewrite. This is the third time a control byte has
+reached a `.ts` file here, and the first time it did so without `sed` — so the standing rule needs
+widening: the hazard is any tool that interprets escape sequences on write, not only stream editors.
+The sentinel is spelled `__unknown-measure__` now. Checked with `git ls-files --eol` (`i/lf`) and by
+confirming `grep -n` prints line numbers again.
+
+**Six smaller review findings, all real, all fixed.** A client released back to the pool after a failed
+transaction is now DESTROYED rather than recycled (a severed connection mid-compaction would otherwise
+poison the next caller with `25P02` on an unrelated request). `invalidateCaseSubjectInvariant` is
+called on the FAILED run path too, because chunked evaluation means a failed run can have committed
+cases. The worker logs the error OBJECT alongside the classified message, since "canceling statement
+due to statement timeout" names neither the statement nor the call site. The client now gets a fixed
+phrase rather than the driver's string, restoring "no internals leaked". The in-memory outcome filter
+uppercases BOTH sides, as the SQL predicate does — `?outcome=overdue` returned nothing on one path and
+everything on the other, one caller away from being real. And the SQL path computes outreach counts on
+the same condition the uncapped path uses, so a caller filtering on outreach without asking for counts
+no longer gets a list of cases that provably have outreach with every badge reading 0. The last two
+are the interesting pair: **the conformance harness could not see either of them**, because it compares
+totals and row ids and not fields. It now has a field-level test as well, and both fixes are
+mutation-checked against it.
+
+**The one review finding the measurement did not support.** The 10 s acquire budget covers connection
+establishment as well as queueing, so a Neon cold resume that outran it would answer the first request
+after idle with a 503 blaming the pool. Measured against a genuinely suspended compute: **848 ms cold,
+283 ms warm** — about twelve times under the budget. Kept at 10 s, with the number written into the
+code so the next reader does not have to re-derive it.
+
+**A second review round, this time external.** Two cross-family lanes read the branch: GPT 5.6 at
+xhigh and GLM 5.3 Flash. GLM found no P0/P1 and confirmed the earlier fixes closed what they were
+written for. GPT found one P1 and six more, all real:
+
+- The invariant could go **stale in the safe-looking direction**. A scan that started before an
+  invalidation could land after it and publish `holds` from a snapshot taken before the writes that
+  invalidated it — re-enabling the fast path over data it never saw, with nothing to disturb it until
+  a restart. The in-flight promise cache added an hour earlier made this MORE likely, not less. Fixed
+  with a generation token: a scan captures it at start and publishes only if nothing invalidated
+  meanwhile.
+- `?limit=1.5` reached Postgres as a non-integer LIMIT and came back **500**, while the uncapped
+  loader handed the same value to `Array.slice`, coerced it, and answered 200. Every case page
+  behaved the JavaScript way before this branch, so it was both a regression and a fresh disagreement
+  between the two loaders. Truncated to integers at the route.
+- **The date guard added THAT MORNING was itself partial.** It rejected `yesterday` and then admitted
+  `2026-02-30`, `2026-99-99` and a bare trailing `T`, each filtering lexicographically by its first
+  ten characters under a heading claiming otherwise. A guard written to close a vacuous guard was a
+  vacuous guard. The components now round-trip through `Date.UTC` and a timestamp suffix must parse.
+- **The release test could not fail.** Its fake ignored `release()`'s argument, so changing
+  `release(err)` back to `release()` — the difference between destroying a poisoned client and
+  recycling it — would have passed. The fake records the argument now.
+- The **"two cadences" conformance fixture had one**: `audiogram`, `cms122` and the unknown slug all
+  anchor to 2026-01-01, so nothing in it could tell a per-measure cycle table from a single shared
+  date. `diabetes_hba1c` (180-day window, 2026-07-01) joins it, with an assertion that the two anchors
+  differ so the fixture cannot quietly collapse again.
+- `classifyDbFailure` matched pg-pool's wording by substring, so any adapter rejecting with similar
+  words would have answered "503, no database connection was available" for a subsystem that was never
+  involved. Anchored to the whole message.
+- The empty-page count is a second statement and the contract claimed one snapshot. The claim is
+  narrowed rather than the code restructured: one statement covers every page that HAS rows, which is
+  every page a client renders; an empty page — always a client already past the end — pays a bounded
+  count and the contract says so.
+
+Three of those are the same shape, and it is worth naming: a guard written to prevent a vacuous guard,
+a test written to prevent a vacuous test, and a fixture written to prove a per-measure rule were each
+themselves vacuous. Writing the intent down is not the same as checking it, and the check has to be
+adversarial to the thing you just wrote.
+
+**A note on how the Postgres runs were done.** Docker was not running and starting it is expensive
+here, so the ceiling suites and the benchmark ran against throwaway Neon branches of the STAGING
+project, created and deleted per run; only `production` remains on each project. That is also how the
+pooler facts above were established — measured against the real endpoints rather than inferred from
+documentation, which is what turned three plan assumptions over.
+
 ## 2026-09-18 — a case a person closed is still a gap the run counts, and the exception flow is written down
 
 #569, ADR-083 — MM-3's design half, which was never blocked and had the one real correctness problem

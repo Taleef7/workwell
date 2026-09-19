@@ -64,6 +64,7 @@ import { loadOfficialArtifact } from "./wiring/official-artifacts.ts";
 import { effectivePeriodWarning, officialMeasurementPeriod } from "./wiring/official-executor-adapter.ts";
 import { RUNNABLE_MEASURE_IDS, classifyRunnable } from "./config/deployment-profile.ts";
 import { isWebChartConfigured, webChartConfigFromEnv } from "./engine/ingress/data-source.ts";
+import { classifyDbFailure } from "./stores/postgres/pg-database.ts";
 
 /** Runtime bindings (wrangler.jsonc) + config. Injected per target; app code
  *  only ever sees these Cloudflare-shaped contracts, never a concrete driver. */
@@ -497,6 +498,13 @@ function logSeamInventoryOnce(env: Env): void {
   );
 }
 
+/** What a caller is told for each classified database failure — fixed text, never the driver's. */
+const DB_FAILURE_MESSAGE: Record<string, string> = {
+  statement_timeout: "The database cancelled this query for exceeding its time limit. Narrow the request or try again.",
+  query_canceled: "The database cancelled this query. Try again.",
+  pool_exhausted: "No database connection was available in time. Try again shortly.",
+};
+
 export default {
   async fetch(req: Request, env: Env, _ctx: CloudExecutionContext): Promise<Response> {
     logSeamInventoryOnce(env);
@@ -511,8 +519,30 @@ export default {
       // An unhandled error would otherwise surface as the host harness's bare, empty-body 500
       // (which made the Neon-pooler bug hard to diagnose). Log it with request context to the
       // container's stdout, and return a non-empty structured 500 (no internals leaked to clients).
-      console.error(`[workwell] unhandled error: ${req.method} ${new URL(req.url).pathname} —`, err);
-      response = json({ error: "internal_error" }, 500);
+      const path = new URL(req.url).pathname;
+      // Two database failures answer for themselves (#562). Before this they arrived as a generic 500,
+      // or — for pool starvation, which has no timeout of its own by default — as a 60 s gateway 504
+      // with nothing in the log at all. 503 rather than 500: both are "ask again", not "this request
+      // is wrong", and a caller can act on the difference.
+      const dbFailure = classifyDbFailure(err);
+      if (dbFailure) {
+        // `err` is passed too, not just the reason: for a statement timeout the reason is the fixed
+        // server string "canceling statement due to statement timeout", which names neither the
+        // statement nor the call site — and these routes issue many. The stack is the only thing that
+        // identifies WHICH query ran long, and losing it would defeat the point of classifying at all.
+        console.error(`[workwell] ${dbFailure.error}: ${req.method} ${path} — ${dbFailure.reason}`, err);
+        // The CLIENT gets the class and a fixed phrase. The branch this replaced returned
+        // `internal_error` with "no internals leaked to clients", and a driver or server string is an
+        // internal: today's three are harmless fixed text, but a future wrapped error's `.message`
+        // could carry query text, and it would ship straight through.
+        response = json({ error: dbFailure.error, message: DB_FAILURE_MESSAGE[dbFailure.error] }, 503);
+      } else {
+        // An unhandled error would otherwise surface as the host harness's bare, empty-body 500
+        // (which made the Neon-pooler bug hard to diagnose). Log it with request context to the
+        // container's stdout, and return a non-empty structured 500 (no internals leaked to clients).
+        console.error(`[workwell] unhandled error: ${req.method} ${path} —`, err);
+        response = json({ error: "internal_error" }, 500);
+      }
     }
     return withCors(response, req, origins);
   },

@@ -3,7 +3,7 @@
  * Same contract as the SQLite floor; `evidence` lives in a native JSONB column
  * (TEXT JSON on the floor). Schema-qualified to avoid the canonical `public.outcomes`.
  */
-import { isUuid, type PgPool } from "./pg-database.ts";
+import { isUuid, withStatementTimeoutDisabled, type PgPool } from "./pg-database.ts";
 import { SPIKE_SCHEMA } from "./schema-pg.ts";
 import { LATEST_RUN_PROBE_BUDGET } from "../outcome-store.ts";
 import type {
@@ -230,7 +230,13 @@ export class PgOutcomeStore implements OutcomeStore {
    * EXPLAIN ANALYZE at scale — recorded here as unmeasured, not as index-friendly, until it is.
    */
   async compactOlderThan(cutoff: string): Promise<number> {
-    const { rowCount } = await this.pool.query(
+    // The ONE statement in the system with no natural bound: it deletes a whole retention window's
+    // superseded history. The 30 s role default (#562, ADR-084) is sized for a request, so this opts
+    // out inside its own transaction — on ONE checked-out client, because `SET LOCAL` is
+    // transaction-scoped and `pool.query` could otherwise put the BEGIN, the SET and the DELETE on
+    // three different connections. Killed at 30 s instead, the window would never compact at all.
+    return withStatementTimeoutDisabled(this.pool, async (client) => {
+    const { rowCount } = await client.query(
       `DELETE FROM ${T} o
         WHERE o.evaluated_at < $1
           AND o.run_id IN (SELECT id FROM ${RUNS_TABLE} WHERE UPPER(status) IN ('COMPLETED','PARTIAL_FAILURE','FAILED','CANCELLED'))
@@ -256,6 +262,7 @@ export class PgOutcomeStore implements OutcomeStore {
       [cutoff],
     );
     return rowCount ?? 0;
+    });
   }
 
   async listOutcomesForEmployee(subjectId: string, limit: number): Promise<EmployeeOutcomeRow[]> {
