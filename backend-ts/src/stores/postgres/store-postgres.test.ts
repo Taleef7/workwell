@@ -16,7 +16,7 @@
 import test, { after } from "node:test";
 import pg from "pg";
 import assert from "node:assert/strict";
-import { createPgPool } from "./pg-database.ts";
+import { classifyDbFailure, createPgPool, withStatementTimeoutDisabled } from "./pg-database.ts";
 import { RUN_STORE_PG_DDL, SPIKE_SCHEMA } from "./schema-pg.ts";
 import { PgRunStore } from "./run-store-postgres.ts";
 import { PgOutcomeStore } from "./outcome-store-postgres.ts";
@@ -104,6 +104,83 @@ if (!reachable && process.env.WORKWELL_TEST_PG_URL) {
     pool.query(
       `TRUNCATE ${SPIKE_SCHEMA}.audit_events, ${SPIKE_SCHEMA}.case_actions, ${SPIKE_SCHEMA}.cases, ${SPIKE_SCHEMA}.outcomes, ${SPIKE_SCHEMA}.run_logs, ${SPIKE_SCHEMA}.runs, ${SPIKE_SCHEMA}.measure_versions, ${SPIKE_SCHEMA}.measures, ${SPIKE_SCHEMA}.evidence_attachments, ${SPIKE_SCHEMA}.scheduled_appointments, ${SPIKE_SCHEMA}.measure_value_set_links, ${SPIKE_SCHEMA}.value_sets, ${SPIKE_SCHEMA}.terminology_mappings, ${SPIKE_SCHEMA}.outreach_templates, ${SPIKE_SCHEMA}.waivers, ${SPIKE_SCHEMA}.segment_overrides, ${SPIKE_SCHEMA}.segment_measures, ${SPIKE_SCHEMA}.segments, ${SPIKE_SCHEMA}.quality_snapshots, ${SPIKE_SCHEMA}.person_links, ${SPIKE_SCHEMA}.eval_state, ${SPIKE_SCHEMA}.panel_assignments, ${SPIKE_SCHEMA}.subject_list_members, ${SPIKE_SCHEMA}.subject_lists RESTART IDENTITY CASCADE`,
     );
+
+  /**
+   * The two failures #562 maps to a 503, raised for REAL rather than faked into the right shape.
+   *
+   * A hand-built `{ code: "57014" }` proves only that the classifier reads the field it was written
+   * to read. These make Postgres and pg-pool produce the actual objects, so the codes and the message
+   * wording are the ones a live incident will carry.
+   */
+  test("[postgres] an exhausted pool and a cancelled statement raise what classifyDbFailure claims", async () => {
+    // Pool exhaustion: one slot, held, then a short acquire timeout for the SECOND request.
+    // The generous timeout on the first connect is not incidental — against a real server the TLS
+    // handshake alone outruns a 50 ms budget, so a pool created with the short value fails to start
+    // rather than to queue, and the test would pass for the wrong reason.
+    const starved = new pg.Pool({ connectionString: url, max: 1, connectionTimeoutMillis: 20_000 });
+    const held = await starved.connect();
+    (starved as unknown as { options: Record<string, unknown> }).options.connectionTimeoutMillis = 50;
+    try {
+      await assert.rejects(
+        starved.connect(),
+        (err: unknown) => {
+          const classified = classifyDbFailure(err);
+          assert.equal(classified?.error, "pool_exhausted", `the real acquire error must classify: ${(err as Error).message}`);
+          // pg-pool throws a plain Error — this is the assertion that a `code`-based matcher would fail.
+          assert.equal((err as { code?: unknown }).code, undefined, "pg-pool carries no SQLSTATE, so the matcher must read the message");
+          return true;
+        },
+      );
+    } finally {
+      held.release();
+      await starved.end().catch(() => {});
+    }
+
+    // A real statement timeout: SQLSTATE 57014 with the server's own wording.
+    const client = new pg.Client({ connectionString: url });
+    await client.connect();
+    try {
+      await client.query("SET statement_timeout = 50");
+      await assert.rejects(client.query("SELECT pg_sleep(1)"), (err: unknown) => {
+        assert.equal((err as { code?: string }).code, "57014");
+        assert.equal(classifyDbFailure(err)?.error, "statement_timeout");
+        return true;
+      });
+      // And the same SQLSTATE from a plain cancel is NOT labelled a timeout — the distinction the
+      // classifier exists to keep, checked against the server's real message for that case.
+      assert.equal(
+        classifyDbFailure({ code: "57014", message: "canceling statement due to user request" })?.error,
+        "query_canceled",
+      );
+    } finally {
+      await client.end().catch(() => {});
+    }
+  });
+
+  test("[postgres] withStatementTimeoutDisabled lifts a statement_timeout that is really set", async () => {
+    // The opt-out the nightly compaction relies on, against a session that really HAS the timeout —
+    // otherwise `SHOW statement_timeout` reads "0" inside the transaction because it was never set,
+    // and the assertion passes while proving nothing.
+    //
+    // ONE connection in the pool, so the session the SET lands on is the session the helper checks
+    // out. With the default ten it would usually be a different client, which is the same
+    // wrong-connection hazard `SET LOCAL` exists to avoid.
+    const single = new pg.Pool({ connectionString: url, max: 1, connectionTimeoutMillis: 20_000 });
+    try {
+      await single.query("SET statement_timeout = 7531");
+      assert.equal((await single.query<{ statement_timeout: string }>("SHOW statement_timeout")).rows[0]!.statement_timeout, "7531ms", "the fixture really set it");
+      const lifted = await withStatementTimeoutDisabled(single, async (client) => {
+        const { rows } = await client.query<{ statement_timeout: string }>("SHOW statement_timeout");
+        return rows[0]!.statement_timeout;
+      });
+      assert.equal(lifted, "0", "inside the transaction the timeout is lifted");
+      // And `SET LOCAL` is transaction-scoped, so the session gets its timeout back on COMMIT rather
+      // than leaking the lifted value to whoever holds this connection next.
+      assert.equal((await single.query<{ statement_timeout: string }>("SHOW statement_timeout")).rows[0]!.statement_timeout, "7531ms", "and restored afterwards");
+    } finally {
+      await single.end().catch(() => {});
+    }
+  });
 
   runStoreContract("postgres", async () => {
     await truncate();
