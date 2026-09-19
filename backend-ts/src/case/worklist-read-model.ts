@@ -37,6 +37,8 @@ import type { EmployeeProfile } from "../engine/synthetic/employee-catalog.ts";
 import { ACTIVE_CASE_STATUSES } from "./case-logic.ts";
 import { toCaseSummary, type CaseSummary } from "./case-read-models.ts";
 import { bucketPeriodForMeasure } from "../run/compliance-period.ts";
+import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
+import { VENDORED_OFFICIAL_MEASURE_IDS } from "../config/official-measure-ids.ts";
 import {
   hasActiveSubjectFilters, matchesSubjectFilters, type SubjectFilters,
 } from "../compliance/subject-filters.ts";
@@ -204,6 +206,62 @@ export function panelSubjectIds(
 }
 
 /**
+ * Every measure whose current cycle this process can name.
+ *
+ * `bucketPeriodForMeasure` is per-measure because cadences differ, so the SQL form of "the current
+ * cycle" is a TABLE of (measure, period) pairs rather than one date. This enumerates the measures the
+ * pair can be computed for; a case whose slug is not here takes the same 365-day fallback anchor the
+ * in-memory filter gives it, which is why the fallback is passed alongside rather than left implicit.
+ */
+/**
+ * A slug no registry can hold, used to ask `bucketPeriodForMeasure` what an UNKNOWN measure's anchor
+ * is — so the fallback comes from the same function the per-row filter uses instead of restating its
+ * 365-day rule here.
+ *
+ * Spelled with underscores rather than a control character. An earlier draft wrote a NUL escape, which the editor
+ * wrote as a literal NUL byte: the file compiled and every test passed, but git classified it
+ * as binary, skipped CRLF normalisation, rendered the commit as a whole-file rewrite, and `grep -n`
+ * answered "Binary file matches" with no line number for the module that DEFINES this read model.
+ * That is the third time a control byte has reached a `.ts` file here.
+ */
+const UNKNOWN_MEASURE_SENTINEL = "__unknown-measure__";
+
+function currentCyclesFor(today: string): { cycles: Array<{ measureId: string; evaluationPeriod: string }>; fallback: string } {
+  const ids = new Set<string>([...Object.keys(MEASURE_BINDINGS), ...VENDORED_OFFICIAL_MEASURE_IDS]);
+  return {
+    cycles: [...ids].map((measureId) => ({ measureId, evaluationPeriod: bucketPeriodForMeasure(measureId, today) })),
+    // The anchor an UNKNOWN slug gets. Computed through the same function, with a slug no registry
+    // holds, so it cannot drift from the rule it mirrors.
+    fallback: bucketPeriodForMeasure(UNKNOWN_MEASURE_SENTINEL, today),
+  };
+}
+
+/**
+ * Whether this query can be answered in SQL — and if not, WHY not, in a form a log line can carry.
+ *
+ * Three filters read the in-memory directory rather than the database and have no SQL form: `site`,
+ * `search`, and a panel selection too large to send as ids. The staff-closed list is excluded for a
+ * different reason: it resolves what CQL says today for EVERY row before filtering (the outcome
+ * filter reads the live value, and the tab's three header counts describe the whole list), so it
+ * needs the whole set by construction and a page would not shorten the work.
+ *
+ * Returning a REASON rather than a boolean is deliberate: a fast path that silently stops being taken
+ * is indistinguishable from one that was never wired up, and the badge would quietly cost a second
+ * again with nothing to look at.
+ */
+export function sqlPageBlockedBy(deps: WorklistDeps, filters: WorklistFilters, preFilter: readonly string[] | undefined): string | null {
+  if (!deps.roster) return "roster-not-authoritative";
+  if (isStaffClosedList(filters)) return "staff-closed-needs-whole-list";
+  if (filters.site) return "site-is-a-directory-join";
+  if (filters.search) return "search-is-a-directory-join";
+  // An ACTIVE panel selection that produced no id set is one too large to send (`panelSubjectIds`
+  // returns undefined past `PANEL_PREFILTER_MAX_IDS`); the post-filter is then the only thing that
+  // can apply it. An INACTIVE selection produces no set either, and is not a blocker.
+  if (filters.subjects && hasActiveSubjectFilters(filters.subjects) && preFilter === undefined) return "panel-too-large-to-bind";
+  return null;
+}
+
+/**
  * The filtered work list, newest-first, BEFORE paging — so a caller can page it or group it and still
  * report an exact total.
  */
@@ -263,7 +321,12 @@ export async function loadWorklistCases(deps: WorklistDeps, filters: WorklistFil
   if (filters.outcome || isStaffClosedList(filters)) {
     if (deps.live && isStaffClosedList(filters)) summaries = await withLiveStatus(deps.live, summaries);
     if (filters.outcome) {
-      summaries = summaries.filter((c) => (liveOrFrozenStatus(c) ?? "").toUpperCase() === filters.outcome);
+      // BOTH sides uppercased, because the SQL predicate is `UPPER(col) = UPPER($n)`. Comparing an
+      // uppercased cell against the caller's raw token made a lowercase `?outcome=overdue` return
+      // nothing here and everything on the SQL path — the routes happen to uppercase first, so it was
+      // one caller away from being real.
+      const wantOutcome = filters.outcome.toUpperCase();
+      summaries = summaries.filter((c) => (liveOrFrozenStatus(c) ?? "").toUpperCase() === wantOutcome);
     }
   }
   if (filters.search) {
@@ -290,6 +353,154 @@ export async function loadWorklistCases(deps: WorklistDeps, filters: WorklistFil
     summaries = summaries.filter((c) => (filters.outreach === "none") === ((c.outreachRecordCount ?? 0) === 0));
   }
   return summaries;
+}
+
+/** One page of the work list, and the exact size of the filtered set. */
+export interface WorklistPage {
+  total: number;
+  rows: CaseSummary[];
+}
+
+/**
+ * Whether the directory holds every subject that has a case — checked, never assumed.
+ *
+ * On a scoped deployment profile `profileMatch` hides any subject the directory does not know, and
+ * that predicate has no SQL form: there is no patients table to join. The SQL page path is therefore
+ * exact only while the invariant holds. It does hold on the pilot — the corpus is deterministic and
+ * the list import refuses identifiers outside its namespace (ADR-082) — but a flag that ASSUMES it is
+ * the vacuous-guard shape this codebase keeps paying for, so it is established from the data.
+ *
+ * Once per process, off the request path in the steady state, and re-established whenever a run has
+ * written new cases (`invalidateCaseSubjectInvariant`). A violation disables the fast path and says so
+ * in the log, rather than serving a total that counts people the page cannot show.
+ */
+let subjectInvariant: "unknown" | "holds" | "violated" = "unknown";
+/**
+ * The scan IN FLIGHT, so concurrent requests share one.
+ *
+ * Every run invalidates the answer, and the minutes after the nightly are exactly when the dashboard
+ * is busiest — without this, each request arriving before the first scan returned would issue its own
+ * `SELECT DISTINCT employee_id` (20,000 subjects on the pilot) through a ten-connection pool, which is
+ * the contention shape this whole change exists to remove.
+ */
+let subjectInvariantScan: Promise<boolean> | null = null;
+/**
+ * Bumped by every invalidation, and captured by a scan when it STARTS.
+ *
+ * Without it a scan could answer with a snapshot taken before the writes that invalidated it: a run
+ * commits a case for a foreign subject while a scan is in flight, the run then invalidates, and the
+ * older scan lands afterwards and writes `holds` — restoring a stale answer that no later event
+ * disturbs until a restart. A scan whose generation has moved therefore reports its result to its own
+ * caller and does NOT publish it.
+ */
+let subjectInvariantGeneration = 0;
+
+/** Called when new cases may have been written (the run pipeline, on both its finish paths) and by tests. */
+export function invalidateCaseSubjectInvariant(): void {
+  subjectInvariant = "unknown";
+  subjectInvariantScan = null;
+  subjectInvariantGeneration += 1;
+}
+
+async function directoryHoldsEveryCaseSubject(deps: WorklistDeps): Promise<boolean> {
+  if (!deps.profileMatch) return true;
+  if (subjectInvariant !== "unknown") return subjectInvariant === "holds";
+  const startedAt = subjectInvariantGeneration;
+  subjectInvariantScan ??= (async () => {
+    const profileMatch = deps.profileMatch!;
+    const subjects = await deps.cases.distinctCaseSubjectIds();
+    const foreign = subjects.filter((id) => !profileMatch(id));
+    const holds = foreign.length === 0;
+    if (foreign.length > 0) {
+      console.warn(
+        `[worklist] invariant: ${foreign.length} case subject(s) are not in the directory — the SQL page path is disabled until a restart or the next run finds it restored`,
+      );
+    }
+    // Only publish if nothing invalidated while this scan was running. A stale `holds` is the one
+    // answer that matters here: it re-enables the fast path over data the scan never saw.
+    if (subjectInvariantGeneration === startedAt) subjectInvariant = holds ? "holds" : "violated";
+    return holds && subjectInvariantGeneration === startedAt;
+  })().catch((err) => {
+    // The check exists to be CONSERVATIVE, so a failure to establish it must not fail the request —
+    // it means "not established", and the caller takes the slow path, which is always correct.
+    console.warn(`[worklist] invariant: could not be established (${(err as Error)?.message ?? err}); taking the uncapped path`);
+    subjectInvariantScan = null;
+    return false;
+  });
+  return subjectInvariantScan;
+}
+
+/**
+ * ONE page of the work list, answered in SQL where every active filter has a SQL form (#561).
+ *
+ * Why it exists: the dashboard's open-case badge asks for `?status=open&outreach=none&limit=1` on every
+ * navigation, and the uncapped path loads every active case (15,309 on the pilot), builds a summary for
+ * each, filters in JavaScript, counts outreach over the survivors, and hands back one row. About a
+ * second, on every page load, for a number.
+ *
+ * Where a filter has no SQL form the uncapped path still runs and the answer is identical — slower, and
+ * correct. Both paths consume the SAME `WorklistFilters`, and the conformance test runs them over one
+ * fixture and requires identical totals and identical page ids, so the next filter added lands in both
+ * or is caught.
+ */
+export async function loadWorklistPage(
+  deps: WorklistDeps,
+  filters: WorklistFilters,
+  page: { limit: number; offset: number },
+): Promise<WorklistPage> {
+  const nowMs = Date.now();
+  const preFilter = deps.roster ? panelSubjectIds(deps.roster(), filters.subjects, filters.site, nowMs) : undefined;
+  const slow = async (): Promise<WorklistPage> => {
+    const all = await loadWorklistCases(deps, filters);
+    return { total: all.length, rows: all.slice(page.offset, page.offset + page.limit) };
+  };
+  if (sqlPageBlockedBy(deps, filters, preFilter) !== null) return slow();
+  if (!(await directoryHoldsEveryCaseSubject(deps))) return slow();
+
+  const today = (deps.today ?? (() => new Date().toISOString().slice(0, 10)))();
+  const wantCurrentCycle = isCurrentCycleDefault(filters);
+  const query: CaseQuery = {
+    ...worklistQueryFor(filters.status, { blank: "active" }),
+    measureId: filters.measureId,
+    priority: filters.priority,
+    assignee: filters.assignee,
+    period: wantCurrentCycle ? "all" : filters.period || "all",
+    // The outcome filter compares the FROZEN column here, which is what the in-memory filter compares
+    // on every list this path serves: the live value is resolved only for the staff-closed list, and
+    // that list is not on this path (`sqlPageBlockedBy`). If it ever were, these two would disagree.
+    outcome: filters.outcome,
+    outreach: filters.outreach,
+    createdFrom: filters.from,
+    createdTo: filters.to,
+  };
+  if (preFilter !== undefined) query.employeeIds = preFilter;
+  if (wantCurrentCycle) {
+    const { cycles, fallback } = currentCyclesFor(today);
+    query.cycles = cycles;
+    query.cyclesFallbackPeriod = fallback;
+  }
+
+  const { total, rows } = await deps.cases.listCasesPage(query, page);
+  // The invariant was established from the data, but it can go stale between a run's writes and the
+  // next invalidation. A page row the profile would hide proves it has: the total already counted that
+  // row, so neither showing it nor silently dropping it is right. Re-establish and answer the slow way.
+  if (deps.profileMatch && rows.some((c) => !deps.profileMatch!(c.employeeId))) {
+    invalidateCaseSubjectInvariant();
+    return slow();
+  }
+
+  let summaries = rows.map((c) => toCaseSummary(c, 0, deps.employeeLookup, deps.providerLookup));
+  // For the PAGE only — the whole point. The uncapped path counts outreach for every survivor because
+  // its own filter needs it; here the filter is already applied in SQL.
+  // The SAME condition the uncapped path uses. The SQL path no longer NEEDS the count to filter, but a
+  // caller that filtered on outreach without asking for counts would otherwise get a list of cases that
+  // provably have outreach with every badge reading 0 — a field-level divergence the conformance test
+  // cannot see, because it compares totals and ids.
+  if (deps.withOutreachCounts || filters.outreach) {
+    const counts = await deps.events.outreachSentCounts(summaries.map((c) => c.caseId));
+    summaries = summaries.map((c) => ({ ...c, outreachRecordCount: counts[c.caseId] ?? 0 }));
+  }
+  return { total, rows: summaries };
 }
 
 /**

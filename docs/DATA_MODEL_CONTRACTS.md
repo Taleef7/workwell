@@ -121,6 +121,43 @@ SQLite floor and the Pg ceiling read the current row and apply the shared pure `
   instead of being left stuck RUNNING / marked FAILED after the case was already mutated (mirrors the
   `RUN_COMPLETED` best-effort write).
 
+### The work list is READ two ways, and they must answer the same question (#561, ADR-084)
+
+`/api/cases` takes ONE page and the exact total from a single statement (`CaseStore.listCasesPage`,
+rows plus `COUNT(*) OVER ()`), where every active filter has a SQL form. **One statement covers every
+page that has rows** — which is every page a client renders; an EMPTY page carries no window value and
+pays a second bounded `COUNT(*)`, because empty is not the same as "total zero" (it is also every page
+past the end of a non-empty set, and answering 0 there would tell a client on the last page that the
+set had vanished). Only that second statement can disagree with its page under concurrent writes. The four predicates that moved
+into SQL are the per-measure current cycle (`cycles` + `cyclesFallbackPeriod`), the frozen `outcome`,
+whether the case has an `OUTREACH_SENT` action (`outreach`), and the created-at day window
+(`createdFrom`/`createdTo`, UTC day, inclusive at both ends on both stores).
+
+**Three filters stay in memory because the database cannot see what they filter on**: `site`, `search`
+and a panel selection above `PANEL_PREFILTER_MAX_IDS`, all of which read the in-memory directory —
+there is no patients table to join (ADR-075). The staff-closed list stays too, for a different reason:
+its outcome filter reads what CQL says TODAY per row and its three header counts describe the whole
+list, so it needs the full set by construction. Where any of these is active the uncapped pipeline runs
+and the answer is identical, slower. `sqlPageBlockedBy` names WHICH one blocked, because a fast path
+that silently stops being taken is indistinguishable from one that was never wired up.
+
+**Both loaders remain in the code, so a conformance test runs them over one fixture** and requires
+identical totals and identical page ids across every filter combination and several page positions,
+with the SQL path asserted to have actually run. A predicate added to one and not the other is
+otherwise a filter that applies to the dashboard badge and not to the export taken from the same
+screen, and nothing would fail.
+
+**On a scoped deployment profile the SQL path rests on an INVARIANT, and the invariant is checked.**
+`profileMatch` hides any subject the directory does not hold and has no SQL form, so a total computed
+in SQL is exact only while every case subject is in the directory. That holds on the pilot by
+construction — a deterministic corpus, and an import that refuses identifiers outside its namespace
+(ADR-082) — and is nonetheless established from the data (`CaseStore.distinctCaseSubjectIds`, bounded
+by subjects rather than by cases), once per process and again after every run. A violation disables the
+fast path with a log line rather than serving a total that counts people no page can show.
+
+**`/api/worklist/patients` keeps the uncapped pipeline** — it groups every row — and is recorded as
+measured performance debt, not as "later".
+
 ### Resolution is not segment-gated; cycle rollover is closed out
 - **Resolution is never blocked by segment applicability.** The run pipeline gates case *creation* by
   `isApplicable`, but two **close-only** bypasses run the upsert even out-of-cohort so a subject who
