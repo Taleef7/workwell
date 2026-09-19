@@ -138,8 +138,39 @@ export interface CaseQuery {
    * applies in memory (`case/case-logic.ts`), so a row this returns is one that function calls STAFF.
    */
   closure?: "staff" | "system";
+  /**
+   * The work list's CURRENT-CYCLE default, expressed as SQL (#561).
+   *
+   * Each measure's current cycle is `bucketPeriodForMeasure(measureId, today)` — a per-measure answer,
+   * because cadences differ — so it cannot be one `evaluation_period = $1`. The caller computes the
+   * pair for every measure it knows and passes them here; a row matches when its own measure's pair
+   * matches. `cyclesFallbackPeriod` is the anchor for a measure the caller did NOT name (a slug from a
+   * deployment whose registry this process does not carry), which is the same 365-day fallback the
+   * in-memory filter applies — so an unknown measure is filtered, not silently admitted.
+   *
+   * Absent means no cycle filter, exactly as before. It composes with `period`, which stays the
+   * explicit single-cycle filter; a caller sets one or the other, never both.
+   */
+  cycles?: ReadonlyArray<{ measureId: string; evaluationPeriod: string }>;
+  cyclesFallbackPeriod?: string;
+  /** `current_outcome_status`, compared case-insensitively — the frozen column, not the live answer. */
+  outcome?: string;
+  /**
+   * Whether the case has any `OUTREACH_SENT` action. `none` is the dashboard badge's filter and the
+   * reason it is here: answering it in JavaScript means counting outreach for every row first.
+   */
+  outreach?: "none" | "any";
+  /** `created_at`, compared by UTC DAY and INCLUSIVE at both ends, as the in-memory filter does. */
+  createdFrom?: string;
+  createdTo?: string;
   limit?: number;
   offset?: number;
+}
+
+/** One page of cases AND the exact size of the filtered set, from one statement. */
+export interface CasePage {
+  total: number;
+  rows: CaseRecord[];
 }
 
 /**
@@ -249,6 +280,41 @@ export interface CaseStore {
     source: "PANEL" | "OPERATOR",
   ): Promise<string[]>;
   listCases(query: CaseQuery): Promise<CaseRecord[]>;
+  /**
+   * One page of the same query, PLUS the exact total — from ONE statement (#561).
+   *
+   * Why not a COUNT and then a SELECT: they are two statements against a table the nightly run is
+   * mutating, so a case closed between them makes `X-Total-Count` disagree with the page under it —
+   * the client pages past the end, or stops one short. The window count is taken over the same scan,
+   * so the number and the rows describe one snapshot.
+   *
+   * **The single-snapshot guarantee is for a NON-EMPTY page**, which is every page a client renders.
+   * An empty result carries no window value — and empty is not the same as "total zero", it is also
+   * every page PAST the end of a non-empty set, so answering 0 there would tell a client on page 9 of
+   * 8 that everything had vanished. That one case therefore pays a second, bounded `COUNT(*)`, and its
+   * total is that statement's: a concurrent insert or delete between the two can move it. Stated
+   * rather than glossed, because the cheap alternatives are worse — a CTE that counts and pages in one
+   * statement materialises the filtered set on both engines, and this branch is reached only by a
+   * client that has already paged past the end.
+   *
+   * `limit`/`offset` are the page's, taken from the second argument; any `limit`/`offset` on `query`
+   * is ignored, so a caller cannot half-page by setting both.
+   */
+  listCasesPage(query: CaseQuery, page: { limit: number; offset: number }): Promise<CasePage>;
+  /**
+   * Every distinct `employee_id` that has a case — the evidence for an INVARIANT, not a read surface.
+   *
+   * A deployment with a scoped profile (`WORKWELL_INSTANCE=maui`) hides any subject its directory does
+   * not hold, and that predicate cannot become SQL: there is no patients table. The SQL page path is
+   * therefore exact only while every case subject IS in the directory, which on the pilot is true by
+   * construction — the corpus is deterministic and the list import refuses identifiers outside its
+   * namespace (ADR-082). "True by construction" is what this method exists to stop us from assuming:
+   * it is checked, off the request path, and a violation disables the fast path loudly instead of
+   * producing a total that is quietly too large.
+   *
+   * Bounded by subjects, not by cases — ~20,000 short strings on the pilot against 32,558 cases.
+   */
+  distinctCaseSubjectIds(): Promise<string[]>;
   /** Patch mutable fields (always bumps updated_at); returns the updated row or null. */
   patchCase(id: string, patch: CasePatch): Promise<CaseRecord | null>;
   /** Count cases whose last_run_id is the given run (the run summary's totalCases). */
