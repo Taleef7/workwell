@@ -168,8 +168,12 @@ where additional testing is necessary or pathology is suspected. Both limbs are 
 time window attaches. A "referred after STS" numerator would have to invent its due date.
 
 **A8 — The exclusion may be clinically invisible, and it is bound to one shift.** The `(g)(8)(ii)`
-chapeau ("Unless a **physician** determines…") switches off every follow-up action, but 1910.95
-specifies no form, timing or retention for that determination. A worker legitimately excluded may look
+chapeau ("Unless a **physician** determines…") switches off the `(g)(8)(ii)` follow-up actions — **not
+every obligation.** `(g)(8)(i)`'s written notification of the affected employee within 21 days is a
+separate paragraph and is **unconditional**: it is not governed by the `(g)(8)(ii)` chapeau and survives
+a determination that the shift is not work related. This paragraph said "every follow-up action" until
+2026-09-20, which misstates the regulation. 1910.95 specifies no form, timing or retention for that
+determination. A worker legitimately excluded may look
 non-compliant, and vice versa.
 
 Because the determination concerns **one shift**, this measure requires its `recordedDate` to fall on

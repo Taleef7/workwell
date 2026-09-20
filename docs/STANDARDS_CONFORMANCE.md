@@ -37,7 +37,13 @@ What WorkWell emits across the eCQM toolchain, and the conformance level of each
 
 > **This section exists to stop the verification language above from carrying over by association.**
 > Everything else in this document describes measures graded against somebody else's answer key.
-> Occupational measures have no answer key, and cannot acquire one.
+> Occupational measures **have** no answer key.
+>
+> **"and cannot acquire one" was removed 2026-09-20** — it was stronger than anything we can support.
+> A route exists and has been named on the record: a steward could publish specifications and expected
+> results (the NCQA process MIE's quality lead described on 2026-07-24), or an independent
+> implementation could be built for ours to disagree with. Neither exists today and neither is in
+> progress, which is the claim that actually holds: **nothing in this repo is graded by anyone but us.**
 
 | | Official CMS eCQMs (M-A) | CQL engine (M-C) | **Authored OSHA measures (M-E1)** |
 |---|---|---|---|

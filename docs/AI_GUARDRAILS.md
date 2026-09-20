@@ -22,9 +22,11 @@ it the surface where the non-negotiable rule matters most. Three consequences, a
 - **`systemActions` is never emitted.** In CDS Hooks it is the array a client auto-applies with no user
   interaction. Nothing WorkWell returns may change a chart without a human choosing it, which is the
   human-in-the-loop contract of §7 applied to an outbound integration.
-- **`critical` is never emitted**, and is unrepresentable in the card type. It means *the user must not
-  proceed*; WorkWell is supplementary to WebChart and is not entitled to say that about someone else's
-  encounter.
+- **`critical` is never emitted**, and is unrepresentable in the card type. **What the spec actually
+  says (corrected 2026-09-20):** CDS Hooks 2.0 defines `critical` only as the top of an urgency ordering
+  — `info` < `warning` < `critical` — **not** as "the user must not proceed", which is what this file
+  asserted until now. The refusal is unchanged and rests on its own ground: WorkWell is supplementary to
+  WebChart and is not entitled to raise the loudest available signal inside someone else's encounter.
 
 A card `suggestion` is a *proposal* — a `ServiceRequest` with `intent=proposal`, `status=draft`, offered only
 where the order code carries an APPROVED terminology mapping, and accepted only by a clinician's explicit

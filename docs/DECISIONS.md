@@ -702,7 +702,8 @@ Eight days before the pilot group's quality lead was told the sandbox held her A
 showed two. cms2, cms130, cms165 and cms137 were vendored, MADiE-gated (36/36, 64/64, 68/68, 45/45),
 runnable under ADR-072, and unrouted, each waiting on a sequenced precondition: cms2's seven
 cross-engine disagreements (diagnosed 2026-09-07, #538), cms130's sweep (63/64, #539), cms137's flip
-after those two and after the final rule on Quality ID 305, and cms165's WebChart ingest half (#533).
+after those two and after the final rule on Quality ID 305, and cms165's WebChart ingest half (**#591**,
+formerly #533's).
 The owner's priority is every measure the pilot group sent us working and visible in the sandbox, and
 the sandbox evaluates a generated corpus, not WebChart data.
 
@@ -732,7 +733,7 @@ been the whole worklist.
    the sandbox unless the final rule removes 305, at which point it is un-routed by the same workflow
    edit. cms165 runs on the corpus's stamped profiles (ADR-076 d1, #539); before real data it needs
    every QI-Core profile it retrieves stamped at ingest and WebChart's BP status to arrive final
-   (#533). Neither is a sandbox blocker, and both are written into the PHI readiness gate.
+   (**#591**, formerly #533's). Neither is a sandbox blocker, and both are written into the PHI readiness gate.
 
 ### Consequences
 
@@ -926,7 +927,8 @@ in the store's own docstring so it is not attempted again.
 
 ### Consequences
 
-- cms165 still must NOT be routed (issue #533 stays open for the ingest-side stamping), and this is
+- cms165 still must NOT be routed over WebChart data (**#591** tracks the ingest-side stamping; #533 closed
+  2026-09-08 with that half unshipped), and this is
   now the reason rather than a blanket one: the measure is scoreable, our corpus can score it, real
   WebChart data cannot yet.
 - CMS2's seven cross-engine disagreements have a cause (`docs/evidence/CROSS_ENGINE_2026-09-07_CMS2.md`),

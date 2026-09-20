@@ -134,7 +134,12 @@ Deployment profile model: `WORKWELL_INSTANCE` selects which tenants are visible,
 1. Author updates CQL text in Studio.
 2. Compile API runs translator validation.
 3. Compile result persisted in `measure_versions.compile_status` + `compile_result`.
-4. Activation is blocked unless compile gate and test-fixture gate pass.
+4. Activation is blocked unless the compile gate and the test-fixture gate pass. **The test-fixture
+   gate is a STRUCTURAL check and does not execute the measure** — `validateTests`
+   (`backend-ts/src/measure/measure-read-models.ts`) asserts that fixtures exist and that each names a
+   fixture, a subject and an expected outcome. Studio's ✅ on that row therefore means *the fixtures are
+   well-formed*, not *the fixtures were run and passed*. This line read as if it executed them until
+   2026-09-20; the Studio label itself still overstates and is tracked separately.
 
 ### 5.3 CQL -> Run
 1. User triggers a scoped manual run (`/api/runs/manual`) or a case rerun using the shared CASE path.
