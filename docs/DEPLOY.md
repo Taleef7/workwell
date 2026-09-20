@@ -1744,13 +1744,45 @@ Per project (Maui first as the canary, then TWH), after the release carrying #56
 # (a) Set it — on the DIRECT url. An ordinary role may set its own defaults.
 psql "<direct url>" -c "ALTER ROLE <app role> SET statement_timeout = '30s';"
 
-# (b) Verify THROUGH THE POOLED URL — that is the one the app uses, and the point of the exercise.
-psql "<pooled url>" -c "show statement_timeout"        # expect: 30s
+# (b) Verify on the DIRECT url — a connection opened after (a) reads the new default.
 psql "<direct url>" -c "show statement_timeout"        # expect: 30s
 
-# (c) Rollback, if anything misbehaves:
+# (c) Verify THROUGH THE POOLED URL — the one the app uses, and the point of the exercise.
+#     ONE connection here is NOT a valid check: see the staleness note below.
+
+# (d) Rollback, if anything misbehaves:
 psql "<direct url>" -c "ALTER ROLE <app role> RESET statement_timeout;"
 ```
+
+> **A single pooled check reads `0` and looks like failure. It is not** (measured on both projects,
+> 2026-09-20, when this was actually run). A role default is applied when a BACKEND starts, and the
+> pooler keeps its existing server connections — so the first pooled query lands on a backend opened
+> before (a) and reports `statement_timeout=0`, `source=default`. The setting was not dropped; that
+> connection predates it. Immediately after the `ALTER ROLE` on Maui, the direct URL read `30s` while
+> six consecutive pooled queries all read `0` — every one of them routed to the same pre-existing
+> backend.
+>
+> **Verify with CONCURRENCY instead, and read `source` rather than the value.** Open ~10–20 clients at
+> once and hold them open, so the pooler must open backends beyond the warm ones it already has:
+> every NEW backend reports `30s` with `source=user` (the role default), while the pre-existing ones
+> keep `0`/`default` until they recycle. TWH needed a fan-out of 20 before a new backend appeared;
+> Maui needed 12.
+>
+> ```sql
+> select pg_backend_pid(), current_setting('statement_timeout'),
+>        (select source from pg_settings where name='statement_timeout');
+> ```
+>
+> **Then prove it FIRES, because a readable value is not an enforced one.** On a connection reporting
+> `30s`, `select pg_sleep(35)` must raise SQLSTATE `57014`. Measured: Maui cancelled at 30,034 ms and
+> TWH at 30,033 ms, both with the message `canceling statement due to statement timeout` — which is
+> the message the worker's classifier requires before it claims the timeout label, so this also
+> confirms the edge mapping has the string it matches on.
+>
+> **Coverage completes as connections recycle, and that is a real interval, not an instant.** Until
+> the pooler's pre-existing backends are retired, some of the app's statements still run unbounded.
+> This is a safety net taking effect gradually, not a correctness requirement, so it needs no forced
+> restart — but do not read an unbounded statement in the first minutes as the change having failed.
 
 Then re-run the pool probe (three case exports in flight while `/api/panels` and `/api/version` are
 polled) and record the numbers in `docs/JOURNAL.md` before doing the same on the other project.
@@ -1762,6 +1794,10 @@ polled) and record the numbers in `docs/JOURNAL.md` before doing the same on the
 - **Owner-run scripts on the direct URL should do the same** if they run anything long.
 - **Until step (a) is run on a project, that project's `57014` mapping is dead code.** State in the PR
   description whether it has been.
+- **DONE on both projects 2026-09-20**, after `b6d866fc` (#587) deployed: Maui first as the canary,
+  then TWH, each verified by concurrency and by a real `57014`, with the backup smoke test green on
+  both stacks between them. The mapping is live code now; what remains outstanding is only the
+  under-load pool probe, which needs sandbox credentials.
 
 ## OpenAI
 

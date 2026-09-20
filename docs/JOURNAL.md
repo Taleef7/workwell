@@ -1,5 +1,67 @@
 # Journal
 
+## 2026-09-20 — the read path merges, and the statement timeout is applied to both projects by hand
+
+#561 and #562 merged as **#587 (`b6d866fc`)**, and the `ALTER ROLE` that #562 was written around is
+now run on both Neon projects. Both deploys green, both stacks healthy afterwards
+(`/api/version` 0.29 s Maui, 0.24 s TWH).
+
+**#587 merged as a MERGE COMMIT rather than squashed, against the repo's own convention**, and
+deliberately. Every other PR here lands as one `… (#NNN)` commit, but each of this one's commits
+carries a rollback paragraph reading "revert this commit" — which is only true while they are
+separate. A timeout incident can now revert `9a30633e` (the pool) without losing `20155484` (the
+badge, 789 ms → 90 ms). The convention was the thing to bend, because the alternative was shipping
+two rollback instructions that had quietly stopped being executable.
+
+**A third review round on the open PR, and all three findings were inside guards the first two rounds
+had added.** `?limit=0.5` served fifty rows (`Math.trunc(0.5)` is zero, and `|| fallback` reads zero
+as unspecified — the opposite of what a sub-unit limit asks for, and a regression against the
+pre-#561 parsing); `?offset=1e20` was a 500 on both stores and a 200 on the uncapped loader, the same
+loader disagreement the truncation was written to close, at the other end of the range; and the
+outreach badge under `outreach=none` was a SECOND read of `case_actions`, so a concurrent
+`OUTREACH_SENT` returned a row *selected for having no outreach* carrying a badge that reads one.
+The last is the one worth keeping in mind: the fix added an hour earlier — compute counts on the same
+condition the uncapped path uses — closed one field-level divergence and opened a narrower one. The
+second read is skipped on that side now; zero is what `NOT EXISTS` selected the row for. **`any` is
+left reading it on purpose**, because `case_actions` is append-only, so a count that grew between the
+statements is fresher than the predicate rather than contradictory. Only the "none" side can be
+falsified by a concurrent write.
+
+**The runbook's own verification step was wrong, and wrong in the direction that looks like failure.**
+It said to check `show statement_timeout` through the pooled URL and expect `30s`. Immediately after
+the `ALTER ROLE` on Maui the direct URL read `30s` and **six consecutive pooled queries all read
+`0`** — every one of them routed to the same pre-existing backend (pid 1189, `source=default`). A
+role default is applied when a BACKEND starts, and the pooler keeps the server connections it already
+has. Nothing was dropped; that connection predated the change. Had the runbook been followed as
+written, the honest conclusion would have been that the pooler ate the setting exactly as it eats the
+startup-packet spelling — the failure #562 was built to avoid, diagnosed backwards.
+
+**What actually verifies it is concurrency plus `pg_settings.source`.** Holding 10–20 clients open at
+once forces the pooler past its warm set: every NEW backend reports `30s` with `source=user`, while
+the old ones keep `0`/`default` until they recycle. Maui needed a fan-out of 12, TWH 20 — TWH had
+three warm backends where Maui had one, which is why an 8-client probe on TWH found nothing and read
+as a failure on a project that was correctly configured.
+
+**And then it was proved to FIRE, because a readable value is not an enforced one.** On a connection
+reporting `30s`, `select pg_sleep(35)` raised SQLSTATE `57014` — **Maui at 30,034 ms, TWH at
+30,033 ms** — both with the message `canceling statement due to statement timeout`. That string
+matters beyond the timing: the worker claims the timeout label only when the server's own message
+says so, so this confirms the edge mapping has the text it matches on, rather than assuming it.
+
+**Coverage completes as connections recycle, and that interval is real.** Until the pooler retires its
+pre-existing backends, some of the app's statements still run unbounded. That is a safety net taking
+effect gradually rather than a correctness requirement, so no forced restart was done — but it means
+an unbounded statement in the first minutes is not evidence the change failed, and the DEPLOY.md
+runbook now says so.
+
+**The backup smoke test the runbook requires passed on both stacks** (dispatched between the two
+projects), confirming rather than assuming that `pg_dump` sets `statement_timeout = 0` on its own
+session, so the nightly dump is unaffected by a 30 s ceiling.
+
+**Still outstanding:** the under-load pool probe (three case exports in flight while `/api/panels` and
+`/api/version` are polled) needs sandbox credentials and has not been re-run, so the after-numbers for
+#562 under load are not yet recorded. Everything else in the runbook is done.
+
 ## 2026-09-19 — the open-case badge stops loading 15,000 rows to return one number, and the pool's failure modes name themselves
 
 #561 and #562, ADR-084. One PR, two commits, by owner decision: both are the read path, and each
