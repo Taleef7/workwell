@@ -1302,6 +1302,50 @@ Alert emission is best-effort — a webhook timeout never fails the run. Run met
 evaluated count, compliant/non-compliant, per-status `outcomeCounts`) remain on `GET /api/runs` and
 `GET /api/runs/:id` as before.
 
+### Run phase timing (#563) — `WORKWELL_RUNTIME`
+
+A **separate prefix from `WORKWELL_ALERT`, deliberately.** `WORKWELL_ALERT` is what an operator greps
+as an incident signal; this is a per-call cadence, and burying one in the other would make the alert
+grep useless. There is **no env var** — every batch call is logged, because the distribution is the
+point and a threshold would hide the baseline its outliers must be read against. On the pilot that is
+~240 lines per nightly (40 chunks × 6 measures).
+
+```
+WORKWELL_RUNTIME {"kind":"evaluateBatch","runId":"…","measureId":"cms122","subjects":500,
+                  "batchMs":6400,"bundleMs":900,"evalMs":5500,"msPerSubject":12.8,"outcome":"batched"}
+```
+
+**What it is for.** #563 measured `GET /api/version` — which opens no database connection — at 13.8 s
+and 22.0 s during the nightly recompute, against 0.20 s quiet. A request that opens no connection
+cannot be waiting for one, so that is **not** pool starvation and not the failure #560 fixed. Two
+readings fit and could not be told apart from outside the container: our own event loop blocked by
+synchronous work, or the host pausing a memory-pressured container. This line settles the first.
+
+**How to read it.** `evaluateBatch` is awaited once per (chunk × measure) with no yield inside it, so
+`batchMs` is an uninterrupted synchronous stretch — during which nothing else in the worker runs,
+including `/api/version`. Compare `msPerSubject` against the 11–16 ms that
+`wiring/official-executor-adapter.ts` records. `bundleMs` and `evalMs` are separated because they
+have **different fixes**: bundle construction points at the bundle source, CQL execution points at
+`WORKWELL_RUN_CHUNK_SIZE` or at yielding between measures.
+
+`outcome` is `batched`, `not-batchable` (the executor declined; the factory was never invoked, which
+is why `bundleMs` is 0) or `failed` (it threw — still timed, because a call that dies after 30 s is
+the interesting one).
+
+To collect a night's worth: `grep WORKWELL_RUNTIME` the container log and read `batchMs` — if the
+large values cluster, the block is ours and #563's first reading is confirmed.
+
+**The same numbers are on the run log, and that is the copy most people can reach.** The stdout line
+needs MIE container-log access; `GET /api/runs/:id` needs only an account. The INFO line each batched
+measure already wrote now carries them, at no extra round trip:
+
+```
+cms122: 500 subject(s) evaluated in one official batch [6400ms total; bundles 900ms; eval 5500ms; 12.8ms/subject]
+```
+
+So the quickest read is: deploy, `POST /api/runs/manual` an ALL_PROGRAMS run, then `GET /api/runs/:id`
+and look at the bracket. No container access, no waiting for 12:09 UTC.
+
 ### Immunization forecasting (ICE sidecar) — ADR-029, opt-in, NOT on the demo stack
 
 The advisory immunization forecast (`GET /api/immunization/forecast`, and the panel on an
