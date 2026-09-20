@@ -1,5 +1,63 @@
 # Journal
 
+## 2026-09-20 (evening) — #563 is answered: 94% of the run is one call that blocks the event loop for 21 seconds
+
+The instrument shipped this afternoon (`cf8ac8ce`, #588) was pointed at the pilot sandbox the same
+day, and the first numbers settle the question #563 could not answer from outside the container.
+
+**Measured on Maui, a MEASURE-scoped cms122 run over the full 20,000-patient corpus, uncontended
+(run `262c7ea3`, 900 s, 40 batch calls of 500 subjects):**
+
+| | median | min | p90 | max |
+|---|---|---|---|---|
+| `batchMs` | **21.0 s** | 19.2 s | 23.1 s | 25.8 s |
+| `bundleMs` | **68 ms** | — | — | 124 ms |
+| ms/subject | **42.0** | — | — | 51.7 |
+
+**`evaluateBatch` is 846 s of a 900 s run — 93.9%.** Each call is a single `await` with no yield
+inside it, so that is ~21 seconds during which nothing else in the worker runs. #563's control
+measurement was `GET /api/version` — a route that opens no database connection — at 13.8 s and 22.0 s
+during the nightly. Those numbers now have an obvious cause: a request arriving mid-batch waits out
+the remainder of the batch. **It is our own synchronous work, not a paused container.** The second
+hypothesis is not disproven so much as unnecessary.
+
+**Reproduced live while the clean run was in flight:** `/api/version` answered in **16.9 s**, against
+0.18 s on the same endpoint minutes earlier. That is the symptom itself, observed on demand rather
+than waited for.
+
+**Bundle construction is exonerated, and that is why the split was worth building.** `bundleMs` is
+**0.33%** of the batch. The fix is therefore `WORKWELL_RUN_CHUNK_SIZE` or a yield between measures —
+not the bundle source, which a single undifferentiated `batchMs` would have left as a live suspect.
+
+**A second finding, unlooked for: 42 ms per subject against the 11-16 ms recorded in
+`wiring/official-executor-adapter.ts`.** That figure was measured on the real vendored artifacts and
+is the basis of the batching claim. This is 2.6-3.5x worse, on the same artifacts, uncontended. Filed
+separately — it is not #563's question, and it changes the arithmetic of anything that plans around
+the batched cost.
+
+**Two things about the method that cost time and are worth recording.**
+
+First, **a MEASURE-scoped run is SYNCHRONOUS** (`ASYNC_SCOPES` is `ALL_PROGRAMS` and `SITE` only), so
+over 20,000 patients it always exceeds the 60 s gateway and returns 504 while continuing server-side.
+I chose MEASURE scope *to reduce load*, which was exactly backwards: SITE would have been async and
+lighter. Filed.
+
+Second, **the 504 makes the request look like it failed, so it invites a retry — and the retry runs
+too.** Two concurrent 20,000-patient runs saturated the ten-connection pool for half an hour, and
+every other endpoint answered `503 pool_exhausted`. That 503 is #562's own mapping working exactly as
+designed, naming the failure instead of dying at the gateway with nothing in the log — the first time
+it has fired in anger, one day after the `ALTER ROLE` went in. The contended pair is also a
+measurement worth keeping: per-call time rose only ~12% (21.0 s to 23.6 s) while the run's total
+doubled (900 s to 1858 s), because contention lands on the DATABASE phase, not the CPU phase. Batch
+share fell from 94% to 51% for the same reason.
+
+**What this does not settle.** The runtime sampler planned as §3 of the #563 work is now very likely
+unnecessary — the question it was going to answer has been answered by four lines of timing. Whether
+to build any of it is the owner's call, but the honest recommendation is to close that part of the
+plan rather than carry it. And the fix itself — chunk size versus an explicit yield — is a separate
+decision with its own trade-off: a smaller chunk shortens each block but costs more round trips,
+while a yield between measures leaves the per-measure block intact at ~21 s.
+
 ## 2026-09-20 (later) — the nightly's longest synchronous stretch is timed, because nothing had ever measured it
 
 #563's first step, planned to rev 3 through three adversarial review lanes and then cut down to the
