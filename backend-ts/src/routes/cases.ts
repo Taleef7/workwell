@@ -306,18 +306,30 @@ export async function handleCases(req: Request, env: CasesEnv, actor = "system")
   if (url.pathname !== "/api/cases" || req.method !== "GET") return null;
 
   const q = url.searchParams;
-  // TRUNCATED to integers, not merely clamped. These are SQL binds since #561, and Postgres refuses a
-  // non-integer LIMIT/OFFSET — so `?limit=1.5` raised an integer-conversion error that surfaced as a
-  // 500, while the uncapped loader handed the same value to `Array.slice`, which coerces it and
-  // answers 200. Every case page behaved the JavaScript way before this branch, so that is both a
-  // regression and a disagreement between the two loaders. `Math.trunc` of a NaN is NaN, which the
-  // `||` default below still catches.
+  // TRUNCATED to integers and BOUNDED to the safe-integer range, not merely clamped. These are SQL
+  // binds since #561, and Postgres refuses a non-integer LIMIT/OFFSET — so `?limit=1.5` raised an
+  // integer-conversion error that surfaced as a 500, while the uncapped loader handed the same value
+  // to `Array.slice`, which coerces it and answers 200: both a regression and a disagreement between
+  // the two loaders.
+  //
+  // `Number.MAX_SAFE_INTEGER` is the ceiling because it is the exact point where all three readings
+  // still agree. Past it a JS number stops being an exact integer, and the bind leaves what Postgres
+  // will take: `?offset=1e20` is `22003` (out of range for bigint) and `?offset=1e21` serializes as
+  // `1e+21` and is `22P02` (invalid syntax) — each a 500 — while `Array.slice` keeps answering 200
+  // with an empty page, so the ceiling closes a second loader disagreement as well as the error.
+  // Measured against PostgreSQL 16: `OFFSET 9007199254740991` is accepted and returns no rows.
+  //
+  // A value that is ABSENT is distinguished from one that TRUNCATED TO ZERO, because they mean
+  // opposite things. `?limit=0.5` asks for as few rows as possible; reading it through `|| fallback`
+  // called it unspecified and served fifty. Clamping before the fallback answers one, which is also
+  // what `?limit=0` now means (it was fifty) — the minimum a caller can ask for, never the default.
   const asCount = (raw: string | null, fallback: number) => {
-    const n = Math.trunc(Number(raw ?? fallback));
+    if (raw === null || raw.trim() === "") return fallback;
+    const n = Math.trunc(Number(raw));
     return Number.isFinite(n) ? n : fallback;
   };
-  const limit = Math.min(500, Math.max(1, asCount(q.get("limit"), 50) || 50));
-  const offset = Math.max(0, asCount(q.get("offset"), 0) || 0);
+  const limit = Math.min(500, Math.max(1, asCount(q.get("limit"), 50)));
+  const offset = Math.min(Number.MAX_SAFE_INTEGER, Math.max(0, asCount(q.get("offset"), 0)));
   const site = q.get("site")?.trim() || undefined;
   // An unrecognised panel-filter token is a 400 that names the accepted values — never a filter that
   // is quietly dropped, which would hand a staff member the whole practice under a heading that says
