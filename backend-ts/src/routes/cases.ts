@@ -24,7 +24,7 @@ import type { OutcomeStore } from "../stores/outcome-store.ts";
 import { routedEngineForEnv } from "../wiring/executor-router.ts";
 import type { CaseSummary } from "../case/case-read-models.ts";
 import { subjectFiltersFromQuery, subjectFilterErrorBody, SubjectFilterError } from "../compliance/subject-filters.ts";
-import { loadWorklistCases, withLiveStatus, staffClosedCounts, STAFF_CLOSED_TOKEN } from "../case/worklist-read-model.ts";
+import { loadWorklistCases, loadWorklistPage, withLiveStatus, staffClosedCounts, STAFF_CLOSED_TOKEN } from "../case/worklist-read-model.ts";
 import { rosterCellCache } from "../compliance/roster-read-model.ts";
 import { toCaseDetail } from "../case/case-detail-read-model.ts";
 import { assignCase, escalateCase, resolveCase, CaseActionError, type CaseActionDeps } from "../case/case-actions.ts";
@@ -306,8 +306,30 @@ export async function handleCases(req: Request, env: CasesEnv, actor = "system")
   if (url.pathname !== "/api/cases" || req.method !== "GET") return null;
 
   const q = url.searchParams;
-  const limit = Math.min(500, Math.max(1, Number(q.get("limit") ?? "50") || 50));
-  const offset = Math.max(0, Number(q.get("offset") ?? "0") || 0);
+  // TRUNCATED to integers and BOUNDED to the safe-integer range, not merely clamped. These are SQL
+  // binds since #561, and Postgres refuses a non-integer LIMIT/OFFSET — so `?limit=1.5` raised an
+  // integer-conversion error that surfaced as a 500, while the uncapped loader handed the same value
+  // to `Array.slice`, which coerces it and answers 200: both a regression and a disagreement between
+  // the two loaders.
+  //
+  // `Number.MAX_SAFE_INTEGER` is the ceiling because it is the exact point where all three readings
+  // still agree. Past it a JS number stops being an exact integer, and the bind leaves what Postgres
+  // will take: `?offset=1e20` is `22003` (out of range for bigint) and `?offset=1e21` serializes as
+  // `1e+21` and is `22P02` (invalid syntax) — each a 500 — while `Array.slice` keeps answering 200
+  // with an empty page, so the ceiling closes a second loader disagreement as well as the error.
+  // Measured against PostgreSQL 16: `OFFSET 9007199254740991` is accepted and returns no rows.
+  //
+  // A value that is ABSENT is distinguished from one that TRUNCATED TO ZERO, because they mean
+  // opposite things. `?limit=0.5` asks for as few rows as possible; reading it through `|| fallback`
+  // called it unspecified and served fifty. Clamping before the fallback answers one, which is also
+  // what `?limit=0` now means (it was fifty) — the minimum a caller can ask for, never the default.
+  const asCount = (raw: string | null, fallback: number) => {
+    if (raw === null || raw.trim() === "") return fallback;
+    const n = Math.trunc(Number(raw));
+    return Number.isFinite(n) ? n : fallback;
+  };
+  const limit = Math.min(500, Math.max(1, asCount(q.get("limit"), 50)));
+  const offset = Math.min(Number.MAX_SAFE_INTEGER, Math.max(0, asCount(q.get("offset"), 0)));
   const site = q.get("site")?.trim() || undefined;
   // An unrecognised panel-filter token is a 400 that names the accepted values — never a filter that
   // is quietly dropped, which would hand a staff member the whole practice under a heading that says
@@ -320,8 +342,37 @@ export async function handleCases(req: Request, env: CasesEnv, actor = "system")
     throw error;
   }
   const search = q.get("search")?.trim().toLowerCase() || undefined;
+  // The created-at window, VALIDATED — because since #561 it reaches SQL instead of being a JS
+  // post-filter, and the two stores disagree about anything that is not a plain calendar day.
+  // Postgres accepts `yesterday`, `today` and `infinity` as date literals, so `?from=yesterday`
+  // silently filtered from yesterday on the ceiling while the floor's text comparison matched NO row
+  // ('y' > '2') — opposite answers, no error on either side. `2026-9-1` diverges the same way, and
+  // only outright garbage raised anything (22007 → a 500). A day is `YYYY-MM-DD`, optionally carrying
+  // the rest of an ISO timestamp, and anything else is a 400 naming the format — the same treatment
+  // `outreach` and the panel filters already get, rather than a silently different filter.
+  // A REAL calendar day, not merely the shape of one. The first version of this guard was a regex
+  // alone, which admitted `2026-02-30`, `2026-99-99` and a bare trailing `T` — each then filtered
+  // lexicographically by its first ten characters instead of being refused, which is the partial
+  // guard this codebase keeps rediscovering. The components must round-trip through `Date.UTC`, and a
+  // timestamp suffix must itself parse.
+  const isCalendarDay = (value: string): boolean => {
+    const m = /^(\d{4})-(\d{2})-(\d{2})([T ].+)?$/.exec(value);
+    if (!m) return false;
+    const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])];
+    const utc = new Date(Date.UTC(y, mo - 1, d));
+    if (utc.getUTCFullYear() !== y || utc.getUTCMonth() !== mo - 1 || utc.getUTCDate() !== d) return false;
+    return m[4] === undefined || !Number.isNaN(Date.parse(value));
+  };
   const from = q.get("from")?.trim() || undefined;
   const to = q.get("to")?.trim() || undefined;
+  for (const [name, value] of [["from", from], ["to", to]] as const) {
+    if (value !== undefined && !isCalendarDay(value)) {
+      return json(
+        { error: "invalid_request", message: `${name} must be a date as YYYY-MM-DD (got '${value}')`, parameter: name },
+        400,
+      );
+    }
+  }
   // Outcome-bucket filter (OVERDUE/DUE_SOON/MISSING_DATA/COMPLIANT/EXCLUDED) — the worklist's
   // "why flagged" axis, distinct from case *status* (OPEN/CLOSED/…). Post-filtered in JS like
   // site/search so X-Total-Count stays exact for paging.
@@ -343,8 +394,7 @@ export async function handleCases(req: Request, env: CasesEnv, actor = "system")
   const listedCases = await withListFilter((await getStores(env)).subjectLists, q, subjectFilters);
   if (!listedCases.ok) return json(listNotFoundBody(listedCases.listId), 404);
   subjectFilters = listedCases.filters;
-  const summaries = await loadWorklistCases(
-    {
+  const worklistDeps = {
       cases: await caseStore(env),
       events: (await getStores(env)).events,
       employeeLookup,
@@ -359,8 +409,8 @@ export async function handleCases(req: Request, env: CasesEnv, actor = "system")
       // On the staff-closed list the read model resolves the live status ITSELF, before the outcome
       // filter — so the filter and the rendered value are the same thing (#569).
       live: { outcomeStore: await outcomeStore(env), cellCache: rosterCellCache },
-    },
-    {
+  };
+  const worklistFilters = {
       status: q.get("status"),
       measureId: q.get("measureId") ?? undefined,
       priority: q.get("priority") ?? undefined,
@@ -368,21 +418,28 @@ export async function handleCases(req: Request, env: CasesEnv, actor = "system")
       period: q.get("period")?.trim() || undefined,
       from, to, site, outcome, outreach, search,
       subjects: subjectFilters,
-    },
-  );
+  };
 
-  // What CQL says today for the rows a PERSON closed (#569). On the staff-closed list the read model
-  // has ALREADY resolved every row (it has to: the outcome filter reads the live value, and the three
-  // header counts describe the whole list rather than the page). On any other list only the page's
-  // staff-closed rows are resolved — they appear on the `closed` and `all` tabs.
-  const headers: Record<string, string> = { "X-Total-Count": String(summaries.length) };
+  // The STAFF-CLOSED list needs the whole set by construction and is the one list that cannot be
+  // paged in SQL: its outcome filter reads what CQL says TODAY (resolved per row), and its three
+  // header counts describe the whole list rather than the page. So it keeps the uncapped pipeline —
+  // and it is a set bounded by human activity, which is the reason that is affordable.
   if ((q.get("status") ?? "").trim().toLowerCase() === STAFF_CLOSED_TOKEN) {
+    const summaries = await loadWorklistCases(worklistDeps, worklistFilters);
     const counts = staffClosedCounts(summaries);
-    headers["X-Staff-Closed-Gap"] = String(counts.gap);
-    headers["X-Staff-Closed-Verified"] = String(counts.verified);
-    headers["X-Staff-Closed-Unknown"] = String(counts.unknown);
-    return json(summaries.slice(offset, offset + limit), 200, headers);
+    return json(summaries.slice(offset, offset + limit), 200, {
+      "X-Total-Count": String(summaries.length),
+      "X-Staff-Closed-Gap": String(counts.gap),
+      "X-Staff-Closed-Verified": String(counts.verified),
+      "X-Staff-Closed-Unknown": String(counts.unknown),
+    });
   }
+
+  // Every other list takes ONE page and the exact total (#561) — in SQL where every active filter has
+  // a SQL form, and through the uncapped pipeline where one does not. The badge this endpoint serves
+  // on every navigation is the first shape: `?status=open&outreach=none&limit=1`.
+  const page = await loadWorklistPage(worklistDeps, worklistFilters, { limit, offset });
+  // What CQL says today for the PAGE's staff-closed rows — they appear on the `closed` and `all` tabs.
   const live = { outcomeStore: await outcomeStore(env), cellCache: rosterCellCache };
-  return json(await withLiveStatus(live, summaries.slice(offset, offset + limit)), 200, headers);
+  return json(await withLiveStatus(live, page.rows), 200, { "X-Total-Count": String(page.total) });
 }

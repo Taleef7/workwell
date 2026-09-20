@@ -18,7 +18,7 @@ import { SqliteCaseStore } from "../stores/sqlite/case-store-sqlite.ts";
 import { SqliteCaseEventStore } from "../stores/sqlite/case-event-store-sqlite.ts";
 import { SqliteRunStore } from "../stores/sqlite/run-store-sqlite.ts";
 import { bucketPeriodForMeasure } from "../run/compliance-period.ts";
-import { loadWorklistCases, panelSubjectIds, statusesForWorklist, PANEL_PREFILTER_MAX_IDS, type WorklistDeps } from "./worklist-read-model.ts";
+import { loadWorklistCases, loadWorklistPage, panelSubjectIds, statusesForWorklist, PANEL_PREFILTER_MAX_IDS, type WorklistDeps } from "./worklist-read-model.ts";
 import { ACTIVE_CASE_STATUSES } from "./case-logic.ts";
 import type { EmployeeProfile } from "../engine/synthetic/employee-catalog.ts";
 import type { CaseQuery, CaseRecord, CaseStore } from "../stores/case-store.ts";
@@ -280,4 +280,49 @@ test("CaseRecord shape assumptions this suite relies on", async () => {
   const rows: CaseRecord[] = await cases.listCases({ limit: 10 });
   assert.ok(rows.length > 0);
   for (const r of rows) assert.equal(typeof r.employeeId, "string");
+});
+
+/**
+ * The page and its total come from ONE statement so they cannot describe two different snapshots.
+ * The outreach badge was a SECOND read of `case_actions`, which operators write to all day — so an
+ * `OUTREACH_SENT` landing between the two statements returned a row selected for having NO outreach
+ * carrying a badge that read one, under a heading saying there was none. The uncapped loader cannot
+ * do that: it filters on the very count it displays. That made it a field-level divergence between
+ * the two loaders, which the conformance suite cannot see because it compares totals and ids.
+ */
+test("under `outreach=none` the page statement's own answer is served, not a second read", async () => {
+  let calls = 0;
+  // A count that CONTRADICTS the predicate — exactly what a concurrent send looks like from here.
+  // `Object.create`, not a spread: `events` is a class instance (see the spy above).
+  const racingEvents: typeof events = Object.create(events, {
+    outreachSentCounts: {
+      value: async (ids: readonly string[]) => {
+        calls += 1;
+        return Object.fromEntries(ids.map((id) => [id, 1]));
+      },
+    },
+  });
+  const none = await loadWorklistPage(
+    deps({ events: racingEvents, withOutreachCounts: true }),
+    { outreach: "none" },
+    { offset: 0, limit: 10 },
+  );
+  assert.ok(none.rows.length > 0, "the fixture must return rows, or the badge assertion is vacuous");
+  assert.equal(calls, 0, "the page statement already answered; a second snapshot is not taken");
+  assert.deepEqual(
+    none.rows.map((r) => r.outreachRecordCount ?? 0),
+    none.rows.map(() => 0),
+    "every row reads zero — which is what NOT EXISTS selected it for",
+  );
+
+  // The OTHER side is still read, or `outreach=any` would show every row at zero under a heading
+  // promising the opposite. It needs no protection: `case_actions` is append-only, so a row selected
+  // for HAVING outreach still has some and a count that grew is fresher, not contradictory.
+  const any = await loadWorklistPage(
+    deps({ events: racingEvents, withOutreachCounts: true }),
+    { outreach: "any" },
+    { offset: 0, limit: 10 },
+  );
+  assert.equal(calls, 1, "`any` still reads the count");
+  for (const row of any.rows) assert.ok((row.outreachRecordCount ?? 0) > 0, "and shows a real number");
 });

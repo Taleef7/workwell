@@ -18,6 +18,89 @@
 >
 > **Sequence note:** ADR-033 does not exist — verified absent, and the number must not be reused.
 
+## ADR-084: a statement timeout is a role default the pooler cannot strip — and a filter belongs in SQL only where the database can see what it filters on
+
+**Date:** 2026-09-19. **Status:** accepted. Milestone M-M, read-path work (#561, #562). Builds on
+ADR-008 (the TypeScript worker on a long-lived host), ADR-020 (population scale by SQL aggregation
+rather than in-process reduction) and ADR-075 (the pilot's roster is a generated corpus the deployment
+composes lazily — the reason a subject predicate has no table to join).
+
+**Context.** The dashboard's open-case badge asked `?status=open&outreach=none&limit=1` on every
+navigation. To return that one number the work list loaded every active case — 15,309 on the pilot —
+built a summary object for each, applied the filters in JavaScript, counted outreach over the
+survivors, and handed back one row: about a second, on every page load, for a count. Separately,
+`pg.Pool` ran on node-postgres' defaults, so pool starvation surfaced as a 60-second gateway 504 with
+nothing in the log, and no statement had an upper bound of any kind.
+
+**d1 — The filters move into SQL, and the ones that cannot say so.** `CaseQuery` gains the four
+predicates the pipeline was applying in memory: the per-measure current cycle, the frozen outcome
+status, whether the case has an `OUTREACH_SENT` action, and the created-at day window. Three filters
+stay in JavaScript because the database cannot see what they filter on — `site`, `search` and a panel
+selection too large to send as ids all read the in-memory directory, and there is no patients table to
+join (ADR-075). `sqlPageBlockedBy` returns the REASON rather than a boolean: a fast path that silently
+stops being taken is indistinguishable from one that was never wired up.
+
+**d2 — The page and its total come from ONE statement.** `listCasesPage` returns the rows plus
+`COUNT(*) OVER ()`. A COUNT followed by a SELECT is two snapshots of a table the nightly run is
+mutating, and a case closed between them makes `X-Total-Count` disagree with the page under it — the
+client pages past the end, or stops one short. An empty page carries no window value, which is NOT the
+same as a total of zero: it is also every page past the end of a non-empty set, so that one case takes
+a bounded count rather than answering 0.
+
+**d3 — The current cycle is a TABLE of pairs, not a date.** Cadences differ per measure, so the SQL
+form of the work list's default is every (measure, period) pair the caller can name, plus a separate
+anchor for a measure it cannot. The fallback branch excludes the named measures explicitly: a row
+whose measure IS named and whose period is wrong has already failed, and must not match the fallback
+anchor instead — which would admit a prior cycle's rows for every measure on a 365-day cadence.
+
+**d4 — The scoped-profile invariant is CHECKED, not assumed.** On a patient deployment `profileMatch`
+hides any subject the directory does not hold, and that predicate has no SQL form. The SQL path is
+exact only while every case subject is in the directory. That is true on the pilot by construction —
+the corpus is deterministic and the list import refuses identifiers outside its namespace (ADR-082) —
+and "true by construction" is exactly what this decision refuses to encode as a flag. The invariant is
+established from the data (`distinctCaseSubjectIds`, bounded by subjects rather than by cases), once
+per process and again after every run, and a violation disables the fast path with a log line rather
+than serving a total that counts people no page can show. A page row that contradicts the cached
+answer re-establishes it and falls back for that request.
+
+**d5 — `statement_timeout` cannot come from the pool, and the reason is worse than a rejection.**
+Measured against both Neon projects on 2026-09-18: node-postgres places `statement_timeout`,
+`lock_timeout` and `idle_in_transaction_session_timeout` in the STARTUP PACKET, and Neon's proxy
+**silently drops them on the pooled AND the direct endpoint** — the connection succeeds and
+`SHOW statement_timeout` still reads `0`. A pool configured that way looks enforced and enforces
+nothing. The other spelling, `options=-c statement_timeout=…`, is hard-REJECTED by the pooler
+(`unsupported startup parameter in options`), failing every connection exactly as `search_path` did on
+the first shadow deploy. `query_timeout` is excluded for a third reason: it is a client-side timer that
+abandons the caller while the server keeps executing, which under transaction pooling leaves a server
+connection running a statement nobody awaits. **Decision: the timeout is a ROLE DEFAULT** — `ALTER
+ROLE <app role> SET statement_timeout = '30s'`, run once per project on the direct URL and verified
+through the pooled one (`DEPLOY.md`). 30 s sits under the 60 s gateway cut, so a runaway read fails as
+`57014` the edge can report instead of as a silent gateway timeout.
+
+**d6 — The one unbounded statement opts out, on ONE checked-out client.** The nightly outcome
+compaction deletes a whole retention window's superseded history and has no natural bound, so
+`withStatementTimeoutDisabled` lifts the timeout for its transaction. `SET LOCAL` is transaction-scoped,
+which is what survives PgBouncer's transaction pooling — but only if the `BEGIN`, the `SET LOCAL`, the
+work and the `COMMIT` are on the SAME connection, and `pool.query` may hand each statement a different
+one. A session-level `SET` is not the alternative: the pooler accepts it (measured), and it then leaks
+the lifted timeout to whoever holds that connection next. The opt-out must be live BEFORE the role
+default is set, or the first compaction after it is killed at 30 s.
+
+**d7 — `max: 10` is kept, for a different reason than the one first written down.** Both projects
+answer `max_connections = 901` (Neon sizes it from the autoscaling maximum, 8 CU, not the 0.25 CU
+floor), and the pooler's budget is ~0.9 × that per (user, database) — so connections are not scarce and
+the "instances × 10 must fit" arithmetic does not bind. Ten is where the QUEUE should form: a deeper
+app pool does not make a slow read faster, it moves the wait from a place with a timeout to a database
+where a hundred concurrent scans contend for the same quarter-vCPU.
+
+**Consequences.** `/api/worklist/patients` keeps the uncapped pipeline (it groups every row) and is
+tracked as measured debt rather than "later". The staff-closed list keeps it too, and for a reason
+rather than an omission: its outcome filter reads what CQL says today per row and its header counts
+describe the whole list, so a page would not shorten the work. Both loaders stay in the code, so a
+conformance test runs them over one fixture and requires identical totals and page ids — the only
+thing that stops the next filter from landing in one and not the other. Until the `ALTER ROLE` is run
+the `57014` mapping is dead code, which is why the PR description states whether it has been.
+
 ## ADR-083: an exception is data the measure reads, never a status WorkWell flips — and a case a person closed is still a gap the run counts
 
 **Date:** 2026-09-18. **Status:** accepted. Milestone M-M, MM-3's design half (#569). Builds on ADR-008

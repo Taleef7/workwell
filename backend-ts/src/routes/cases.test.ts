@@ -677,3 +677,91 @@ test("configured case worklist resolves live names and sites for search and site
     replaceLiveDirectory([]);
   }
 });
+
+/**
+ * `?from=`/`?to=` reach SQL since #561, and the two stores do not agree about anything that is not a
+ * plain calendar day: Postgres reads `yesterday`, `today` and `infinity` as date literals and
+ * `2026-9-1` as September 1st, while the SQLite floor's text comparison matches no row for any of
+ * them. The same request therefore answered differently on the two stores, with no error on either
+ * side to notice — which is worse than the one input that did raise (`garbage`, a 22007 that became a
+ * 500). A 400 naming the format is the same treatment `outreach` and the panel filters already get.
+ */
+test("GET /api/cases refuses a created-at bound that is not a calendar day", async () => {
+  for (const bad of ["yesterday", "today", "infinity", "2026-9-1", "garbage", "2026/09/18"]) {
+    for (const param of ["from", "to"]) {
+      const res = await getPath(`/api/cases?${param}=${encodeURIComponent(bad)}`);
+      assert.equal(res?.status, 400, `${param}=${bad} must be refused, not interpreted`);
+      const body = (await res!.json()) as { error: string; message: string; parameter: string };
+      assert.equal(body.error, "invalid_request");
+      assert.equal(body.parameter, param);
+      assert.match(body.message, /YYYY-MM-DD/);
+    }
+  }
+});
+
+test("GET /api/cases refuses a date that is SHAPED like a day but is not one", async () => {
+  // The first version of this guard was a regex alone, which is a partial guard: it rejected
+  // `yesterday` and then let `2026-02-30` through to be compared lexicographically by its first ten
+  // characters — filtering "after February" under a heading that says February 30th. A bare trailing
+  // `T` passed too. The components must round-trip through Date.UTC, and a timestamp suffix must parse.
+  for (const bad of ["2026-02-30", "2026-99-99", "2026-13-01", "2026-09-18T", "2026-09-18T99:99:99Z"]) {
+    const res = await getPath(`/api/cases?from=${encodeURIComponent(bad)}`);
+    assert.equal(res?.status, 400, `${bad} is not a real calendar day`);
+  }
+  // Feb 29 in a LEAP year is real and must still be accepted — a guard that rejected it would be
+  // wrong in the other direction.
+  assert.equal((await getPath("/api/cases?from=2024-02-29&limit=1"))?.status, 200);
+});
+
+test("GET /api/cases truncates fractional paging instead of handing Postgres a non-integer", async () => {
+  // These are SQL binds now, and Postgres refuses a non-integer LIMIT/OFFSET — `?limit=1.5` raised an
+  // integer-conversion error that surfaced as a 500, while the uncapped loader passed the same value
+  // to `Array.slice`, which coerces it and answers 200. Both a regression and a loader disagreement.
+  for (const q of ["limit=1.5", "offset=0.5", "limit=NaN", "limit=1e999", "offset=-3"]) {
+    const res = await getPath(`/api/cases?status=open&${q}`);
+    assert.equal(res?.status, 200, `${q} must be coerced, not 500`);
+    const rows = (await res!.json()) as unknown[];
+    assert.ok(Array.isArray(rows), `${q} returns a list`);
+  }
+});
+
+/**
+ * The truncation above answers 200 for every input, which is why it could not see either of these:
+ * the status code was the whole assertion, and both defects keep it at 200 or move it to 500 for a
+ * reason no case in that list reaches. What a page CONTAINS is the assertion that catches them.
+ */
+test("GET /api/cases asks for the minimum when a limit truncates to zero, and bounds an offset to what a database will take", async () => {
+  // A sub-unit limit asks for as FEW rows as possible. Truncating `?limit=0.5` to zero and then
+  // reading zero through `|| fallback` called it unspecified and served the default page of fifty —
+  // the opposite of the request. Clamping before the fallback answers one, and `?limit=0` means the
+  // same thing rather than fifty.
+  const one = (await getPath("/api/cases?status=open&limit=1").then((r) => r!.json())) as Array<{ caseId: string }>;
+  assert.equal(one.length, 1, "the fixture has at least one open case, or the comparison below is vacuous");
+  for (const q of ["limit=0.5", "limit=0.9", "limit=0"]) {
+    const rows = (await getPath(`/api/cases?status=open&${q}`).then((r) => r!.json())) as Array<{ caseId: string }>;
+    assert.deepEqual(rows.map((r) => r.caseId), one.map((r) => r.caseId), `${q} asks for the minimum, not the default page`);
+  }
+
+  // An offset past the safe-integer range is a value the DATABASE refuses on both stores — Postgres
+  // answers 22003 for `1e20` (out of range for bigint) and 22P02 for `1e21` (which serializes as
+  // `1e+21`), and the SQLite floor answers a datatype mismatch for either — so it left the SQL page
+  // path as a 500. The uncapped loader hands the same value to `Array.slice`, which coerces it and
+  // answers an empty 200, so this was a loader disagreement as well as an error. Both must answer the
+  // same empty page; `site=` is a directory-only filter, so it forces the uncapped path (`sqlPageBlockedBy`).
+  for (const q of ["offset=1e20", "offset=1e21"]) {
+    for (const [path, loader] of [["", "the SQL page path"], ["&site=Anywhere", "the uncapped loader"]] as const) {
+      const res = await getPath(`/api/cases?status=open&${q}${path}`);
+      assert.equal(res?.status, 200, `${q} on ${loader} must be bounded, not 500`);
+      assert.deepEqual(await res!.json(), [], `${q} on ${loader} is past the end of the set`);
+    }
+  }
+});
+
+test("GET /api/cases accepts a calendar day, with or without the rest of an ISO timestamp", async () => {
+  // The UI sends a bare day; a client forwarding a full instant must not be refused for it, and both
+  // spellings mean the same UTC day on both stores.
+  for (const good of ["2026-09-18", "2026-09-18T23:59:59.000Z", "2026-09-18 00:30:00"]) {
+    const res = await getPath(`/api/cases?from=${encodeURIComponent(good)}&limit=1`);
+    assert.equal(res?.status, 200, `${good} is a day and must be accepted`);
+  }
+});
