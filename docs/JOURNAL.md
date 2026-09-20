@@ -1,5 +1,80 @@
 # Journal
 
+## 2026-09-20 (later) — the nightly's longest synchronous stretch is timed, because nothing had ever measured it
+
+#563's first step, planned to rev 3 through three adversarial review lanes and then cut down to the
+smallest thing that can answer the question. **No sampler, no endpoint, no new environment variable.**
+
+**What the review changed, and it changed the shape rather than the details.** Rev 1 of the plan made
+a general runtime sampler the deliverable and claimed `process.cpuUsage()` against wall time
+classified #563's two hypotheses. Two lanes independently rejected that, and they were right:
+`process.cpuUsage()` is `getrusage(RUSAGE_SELF)` — summed over **every thread in the process**, not
+CPU given to the event loop. A ratio near 1 is equally consistent with our JS thread blocking, a busy
+libuv threadpool with an idle loop, and V8's concurrent marker during a large-heap GC; rev 1 read all
+three as "yield more", which fixes only the first. That is not hypothetical here —
+`auth/password.ts` runs PBKDF2 at 210,000 iterations on the threadpool, so the observed 39.7 s login
+has a threadpool component the model could not represent. Only the LOW branch survives intact:
+`cpuMs ≈ 0` across a 20 s gap means the process got no CPU on any thread, which nothing running in
+Node produces.
+
+**And the more useful finding was that the repo already nearly answers #563.**
+`wiring/official-executor-adapter.ts` records 11–16 ms per subject batched, measured on the real
+vendored artifacts. `evaluateBatch` is awaited **once per (chunk × measure) with no yield inside it**,
+at `DEFAULT_RUN_CHUNK_SIZE = 500`. That is **5.5–8 s of uninterrupted synchronous CPU per call**, and
+the pilot's six routed measures chain six of them through microtask continuations, which do not
+service I/O in between. Independently: 240 calls over 5,400 s is a 22.5 s mean, against observed
+stalls of 13.8 s and 22.0 s. So the instrument that settles this is not a sampler — it is a
+`Date.now()` bracket around one call, and it ships alone so the answer can decide how much of the
+rest is worth building.
+
+**`bundleMs` is separated from `evalMs`, and that is the one piece of design in it.** Bundle
+construction happens inside the subject FACTORY that `evaluateBatch` invokes, so timing only the await
+reports one number for two costs with **different fixes** — the bundle source, versus chunk size or
+yielding between measures. Timing the factory separately is what makes the number actionable instead
+of merely alarming. A test with a deliberately slow bundle source proves the attribution, and the
+mutant that collapses it (`bundleMs += 0`) fails exactly that test.
+
+**No threshold and no env knob, deliberately.** Every call is logged, because the DISTRIBUTION is the
+deliverable and a threshold hides the baseline its outliers must be read against. ~240 lines per
+nightly is nothing. It also means this change introduces no environment variable at all — so the
+`schedulerEnv` threading hazard, where omitting a key has shipped three times, cannot apply to it.
+`WORKWELL_RUNTIME`, not `WORKWELL_ALERT`: operators grep the latter as an incident signal, and a
+per-call cadence inside it would make that grep useless. `console.log`, never `appendLog` — every
+`appendLog` is an INSERT through the pool, and an instrument that writes to the resource it measures
+perturbs what it reports, besides having to work when the database path is the degraded one.
+
+**A guard I wrote myself that could not fire.** Rev 1 of the plan claimed invariant 7 (memory bounded
+by one chunk) "is asserted by `run-pipeline.chunking.test.ts:353`". It is not: 353 is the `test(...)`
+declaration, and the body at 360–364 says the opposite — *"NOT asserted: that the cache is dropped at
+the end of each chunk."* A retained chunk reference passes both of its assertions. The claim is
+removed rather than restated. Third time this defect class has been found here, and the first time it
+was in a sentence claiming to prevent it.
+
+**A caution about the third review lane.** It ran to ~1.85M tokens through two context compactions and
+cited `backend-ts/src/pipeline/…` repeatedly — **a directory that does not exist** — while asserting
+every citation had been verified against the tree. Three of its findings were real and were folded
+(the event-loop histogram as primary, a discriminated pool-counts result, a genuine internal
+contradiction in the plan); two were rejected with reasons. Its judgement survived compaction; its
+references did not. A long lane's reasoning is worth reading and its file:line claims are worth
+re-checking.
+
+**Verification.** 8 unit tests on the formatter and the arithmetic, 4 integration tests through the
+real pipeline (per-chunk emission sized to the chunk, the bundle/eval split, and the `failed` and
+`not-batchable` outcomes). **Mutation-checked, each mutant caught by exactly the test named for it:**
+`logPhaseTiming` re-throwing instead of swallowing, `bundleMs` never accumulating, the not-batchable
+line deleted, and the failed path mislabelled as batched.
+
+**The numbers ride on the run log too, and that is the copy most people can reach.** The stdout line
+needs MIE container-log access, which is Launchpad's; `GET /api/runs/:id` needs only an account. The
+INFO line each batched measure already wrote now carries the bracket `[6400ms total; bundles 900ms;
+eval 5500ms; 12.8ms/subject]` at no extra round trip — the objection to `appendLog` was that an
+instrument must not write to the pool it measures, and that does not apply to a line already being
+written. It also means the first reading does not wait for 12:09 UTC: deploy, trigger a manual
+ALL_PROGRAMS run, read the run detail.
+
+**Still open, and unchanged by this:** whether to build §3's sampler at all. That decision waits for
+the next nightly's numbers, which is the point of shipping this alone.
+
 ## 2026-09-20 — the read path merges, and the statement timeout is applied to both projects by hand
 
 #561 and #562 merged as **#587 (`b6d866fc`)**, and the `ALTER ROLE` that #562 was written around is
