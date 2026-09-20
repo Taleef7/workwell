@@ -327,7 +327,7 @@ Supports filters: `status`, `measureId`, `priority`, `assignee`, `site`, `caseId
 > reading by position keeps every column it had — the same rule ADR-079's `notInPopulation` followed.
 > Both are DIRECTORY facts resolved at export time, so both are EMPTY on a deployment whose roster
 > records none: the occupational directory has never carried a payer, and the live WebChart directory
-> discards Coverage until #533's ingest work lands. `payer` is a Source of Payment Typology code, the
+> discards Coverage until the WebChart ingest work lands (**#591**; #533 closed 2026-09-08 with that half unshipped). `payer` is a Source of Payment Typology code, the
 > same vocabulary the measures' `SDE Payer` reads.
 
 > **The payer filter is a SET, and that is not cosmetic.** `?payer=` accepts a repeated parameter or a
