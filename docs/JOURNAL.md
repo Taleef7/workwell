@@ -157,6 +157,32 @@ a test written to prevent a vacuous test, and a fixture written to prove a per-m
 themselves vacuous. Writing the intent down is not the same as checking it, and the check has to be
 adversarial to the thing you just wrote.
 
+**A third round, on the open PR, and all three findings were in the guards the first two rounds
+added.** Codex read the branch twice as it moved. Two findings were the paging guard turned on
+itself: `?limit=0.5` served **fifty** rows, because `Math.trunc(0.5)` is zero and reading zero
+through `|| fallback` calls the value unspecified — the opposite of what a sub-unit limit asks for,
+and a regression against the pre-#561 parsing, which clamped it to one. And `?offset=1e20` was a 500
+on both stores and a 200 on the uncapped loader — the same loader disagreement the truncation was
+written to close, at the other end of the range. Measured rather than assumed: PostgreSQL 16 answers
+`22003` for `1e20` and `22P02` for `1e21` (which serializes as `1e+21`), the floor answers
+`SQLITE_MISMATCH` for either, and `Array.slice` coerces both to an empty page. The bound is
+`Number.MAX_SAFE_INTEGER`, the exact point where all three readings still agree. Neither defect was
+reachable by the existing test, which asserted the status code and that the body was an array; what
+a page CONTAINS is the assertion that sees them.
+
+**The third was the outreach badge, and it is the field-level test's own subject.** Under
+`outreach=none` the count was read a SECOND time, from `case_actions` — a table operators write to
+all day. An `OUTREACH_SENT` landing between the page statement and the count comes back as a row
+selected for having no outreach, carrying a badge that reads one, under a heading that says there is
+none. The uncapped path cannot produce that: it filters on the very count it displays. So the fix
+added an hour earlier — compute counts on the same condition the uncapped path uses — closed one
+field-level divergence and opened a narrower one. The second read is now skipped entirely on that
+side; zero is what `NOT EXISTS` selected the row for, and `toCaseSummary` already seeded it. **The
+`any` side is left alone deliberately**, because `case_actions` is append-only: a row selected for
+HAVING outreach still has some, so a count that grew between the statements is fresher than the
+predicate rather than contradictory. Only the "none" side can be falsified by a concurrent write —
+and it is also the one the dashboard badge sends on every navigation, so the round trip goes with it.
+
 **A note on how the Postgres runs were done.** Docker was not running and starting it is expensive
 here, so the ceiling suites and the benchmark ran against throwaway Neon branches of the STAGING
 project, created and deleted per run; only `production` remains on each project. That is also how the

@@ -496,7 +496,22 @@ export async function loadWorklistPage(
   // caller that filtered on outreach without asking for counts would otherwise get a list of cases that
   // provably have outreach with every badge reading 0 — a field-level divergence the conformance test
   // cannot see, because it compares totals and ids.
-  if (deps.withOutreachCounts || filters.outreach) {
+  //
+  // EXCEPT under `outreach=none`, where the page statement ALREADY answered this and reading it again
+  // would be a SECOND snapshot of a table operators write to all day. An `OUTREACH_SENT` landing
+  // between the two statements comes back as a row that was selected for having no outreach, carrying
+  // a badge that reads one, under a heading that says there is none. The uncapped path cannot produce
+  // that — it filters on the very count it displays — so it would be a field-level divergence between
+  // the two loaders, which is the one thing they may not have. Zero is what `NOT EXISTS` selected the
+  // row for, and `toCaseSummary` already seeded it.
+  //
+  // `outreach=any` needs no such care, because `case_actions` is append-only: a row selected for
+  // HAVING outreach still has some, so a count that grew between the statements is fresher than the
+  // predicate, never contradictory. Only the "none" side can be falsified by a concurrent write.
+  //
+  // It also takes a round trip off `?status=open&outreach=none&limit=1` — the dashboard badge this
+  // whole path exists to make cheap, and the one request that fires on every navigation.
+  if (filters.outreach !== "none" && (deps.withOutreachCounts || filters.outreach)) {
     const counts = await deps.events.outreachSentCounts(summaries.map((c) => c.caseId));
     summaries = summaries.map((c) => ({ ...c, outreachRecordCount: counts[c.caseId] ?? 0 }));
   }
