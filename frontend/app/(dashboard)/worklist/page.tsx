@@ -33,7 +33,7 @@ import { useAuth } from "@/components/auth-provider";
 import { canManageCases } from "@/lib/rbac";
 import { providerFilterLabel, usePanelProviders } from "@/features/panel/use-panel-providers";
 import { UNASSIGN_VALUE, useAssignableUsers } from "@/features/panel/use-assignable-users";
-import { payerFilterLabel, usePanelPayers } from "@/features/panel/use-panel-payers";
+import { payerFilterLabel, payerGroupButtonLabel, usePanelPayers } from "@/features/panel/use-panel-payers";
 import { usePanelAssignments } from "@/features/panel/use-panel-assignments";
 import { PanelsTab } from "@/features/panel/PanelsTab";
 
@@ -619,7 +619,7 @@ export default function WorklistPage() {
                   onClick={() => togglePayerGroup(group.codes, !all)}
                   title={`${group.groupName} is ${group.codes.length} codes on this roster: ${group.codes.join(", ")}`}
                 >
-                  {all ? `Clear ${group.groupName}` : `All ${group.groupName} (${group.subjectCount.toLocaleString()})`}
+                  {payerGroupButtonLabel(group, all)}
                 </Button>
               );
             })}

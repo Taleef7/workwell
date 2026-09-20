@@ -14,7 +14,7 @@ import { canSeeEngineering } from "@/lib/public-demo";
 import { COMPLIANCE_STATUS_LABELS } from "@/lib/status";
 import { SUBJECT } from "@/lib/terminology";
 import { providerFilterLabel, usePanelProviders } from "@/features/panel/use-panel-providers";
-import { payerFilterLabel, usePanelPayers } from "@/features/panel/use-panel-payers";
+import { payerFilterLabel, payerGroupButtonLabel, usePanelPayers } from "@/features/panel/use-panel-payers";
 import { Button } from "@mieweb/ui";
 import { UNASSIGN_VALUE, useAssignableUsers } from "@/features/panel/use-assignable-users";
 import { ComplianceChip } from "@/features/compliance/ComplianceChip";
@@ -711,7 +711,7 @@ export default function CompliancePage() {
                     onClick={() => { setPage(1); togglePayerCodes(group.codes, !all); }}
                     title={`${group.groupName} is ${group.codes.length} codes on this roster: ${group.codes.join(", ")}`}
                   >
-                    {all ? `Clear ${group.groupName}` : `All ${group.groupName} (${group.subjectCount.toLocaleString()})`}
+                    {payerGroupButtonLabel(group, all)}
                   </Button>
                 );
               })}
