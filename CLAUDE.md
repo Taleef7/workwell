@@ -127,19 +127,25 @@ retelling. Naming policy: repo documents say "Maui" and "the pilot group" only.
   real blood pressures profile-stamped at ingest before real data (issue #533's ingest half); cms137
   stays routed unless the final rule removes Quality ID 305. An out-of-population official outcome no
   longer opens a case (ADR-078 d2). Read `docs/JOURNAL.md` for the newest entries, not this line.
-- MM-2/3/4 are blocked on externals (ROADMAP §7). The milestones deliver a **sandbox**; the pilot's
-  production/PHI phase is a separate `PRODUCTION_READINESS`-gated decision nothing in M-M authorizes.
+- **MM-2's build is COMPLETE** (#550/#551/#555/#573/#574) and **MM-3's design half shipped** (#569,
+  ADR-083); MM-3's *wiring* and **MM-4** are blocked on externals (ROADMAP §7). This line said all three
+  were blocked until 2026-09-20, which was false for MM-2 from 2026-09-12 on. The milestones deliver a
+  **sandbox**; the pilot's production/PHI phase is a separate `PRODUCTION_READINESS`-gated decision
+  nothing in M-M authorizes.
 - M-C (packaging) is complete and published; M-E1 (occupational content) is deferred behind M-M, not
   cancelled (locked decision 6). Open threads live in the newest JOURNAL entry's "still owner-owned"
   line and in GitHub issues, not here.
 
 ## Standing corrections
 Each is a claim the project got wrong once and would otherwise repeat.
-1. **The CMS FHIR-reporting timeline is CMS-attributable but PROPOSED.** The CY2027 PFS proposed rule
-   (CMS-1848-P, July 2026) *seeks comment on* a two-year transition — FHIR reporting voluntary
-   PY2028–29, mandatory PY2030 for applicable APP Plus measures, MIPS CQMs sunsetting ~PY2030. Cite it
-   as proposed/under comment, **never as final** (final rule ~Nov 2026). The same rule proposes removing
-   Quality IDs 305 (CMS137) and 493 from APP Plus for PY2027.
+1. **The CMS FHIR-reporting timeline is CMS-attributable, and it is an RFI — weaker than a proposal.**
+   The CY2027 PFS rule (CMS-1848-P, July 2026) *seeks comment on* a two-year transition — FHIR reporting
+   voluntary PY2028–29, mandatory PY2030 for applicable APP Plus measures. Cite it as **sought comment
+   on**, never as proposed and never as final (final rule ~Nov 2026). **Two things this entry itself got
+   wrong, corrected 2026-09-20 from the 2026-09-07 review:** MIPS CQMs are proposed to be **EXTENDED**
+   for PY2027+, not "sunsetting ~PY2030" as this line read; and the separate proposal to sunset
+   **traditional MIPS as a reporting option** after PY2028 is a *different* policy — do not merge the
+   two. The same rule proposes removing Quality IDs 305 (CMS137) and 493 from APP Plus for PY2027.
 2. **"QI-Core STU7 = US Core 7 = WebChart's exact surface" is half right.** The equality holds, but
    **CMS's shipping content is authored on QI-Core 6**, and the direction of travel is US Quality Core
    0.5.0 over US Core 6.1.0.

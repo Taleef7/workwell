@@ -78,7 +78,7 @@ is **362 of 387 across eight measures**, CMS165 deliberately excluded.
 > `trustMetaProfile` is now decided PER MEASURE and cms165 is the only measure that sets it (ADR-076 d1);
 > the default stays false because trusting profiles globally empties cms122's and cms125's populations,
 > and those are routed. That is possible because the ADR-075 corpus stamps the profile each retrieve
-> names. **It does not make cms165 routable, and #533's ingest half is still open.** On 2026-09-07
+> names. **It does not make cms165 routable, and the ingest half is still open (#591; #533 closed 2026-09-08 with that half unshipped).** On 2026-09-07
 > `prepareForQiCore` began deriving `us-core-blood-pressure` from codes a resource already carries —
 > one necessary piece, and the one no other layer can supply, since only the codes say what a resource
 > IS. It is nowhere near sufficient: `trustMetaProfile: true` filters EVERY profile-typed retrieve on
@@ -92,7 +92,7 @@ is **362 of 387 across eight measures**, CMS165 deliberately excluded.
 > rerun-to-verify would quietly return MISSING_DATA. Better than a plausible wrong number, and not a
 > guarantee. **cms165 is routed on the SANDBOX since 2026-09-08 (ADR-078)** — it runs there because the
 > corpus stamps every profile it retrieves and #539 stamps a blood pressure from its own codes — and
-> **must not be routed over WebChart data** until the ingest half of #533 (every QI-Core profile stamped
+> **must not be routed over WebChart data** until the ingest half (#591, formerly #533's; every QI-Core profile stamped
 > at ingest, BP status arriving final) is closed. That condition now sits in the PHI readiness gate.
 
 **An officially routed measure is scored over the calendar year** containing the evaluation date, not a

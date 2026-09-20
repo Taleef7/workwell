@@ -317,7 +317,7 @@ Per measure, per stack:
 > its retrieves name, and since #539 `prepareForQiCore` stamps `us-core-blood-pressure` from a
 > resource's own codes. That is what lets the sandbox route it (ADR-078). It is NOT sufficient for
 > WebChart data: the other QI-Core profiles must arrive stamped at ingest, and WebChart exports BP panels
-> with `status: "unknown"` (issue #533's open half). A green gate over the corpus says nothing about that.
+> with `status: "unknown"` (**#591**, formerly #533's open half). A green gate over the corpus says nothing about that.
 >
 > **The credentialed gate runs in CI:** `.github/workflows/flip-gate.yml` (manual) vendors the measure's
 > sidecar with the VSAC secret, sweeps the Maui roster, and uploads `.flip-gate/<id>-<date>.json`.

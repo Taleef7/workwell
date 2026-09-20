@@ -47,7 +47,7 @@ rather than a two-engine diff, because an official-only measure has no authored 
 
 | Claim | Number | Reproduce / evidence |
 |---|---|---|
-| Test suite | 1,940 total · 1,925 pass · 0 fail · 15 skip (2026-08-08, 279 s) | `cd backend-ts && pnpm test`. The 15 skips need the gitignored terminology sidecar or a local Postgres, and self-skip rather than passing vacuously. |
+| Test suite | 2,807 total · 2,783 pass · 1 fail · 23 skip (2026-09-20, measured on `main`'s backend) — the one failure is the standing local `corpus-membership` stale-sparse-checkout, not a product defect. CI shards it three ways since #575 (14.3m → 6.8m). | `cd backend-ts && pnpm test`. The **23** skips need the gitignored terminology sidecar or a local Postgres, and self-skip rather than passing vacuously — the count was 15 when this row was written on 2026-08-08 and this cell said so in one column while reporting 23 in the other. Both halves are the same run now. |
 | CMS measures vs their own test decks | 455 of 455, 9 measures (2026-09-06, CMS137's 45 added by #529) | `pnpm test:official-cases`, after the two-step setup below |
 | CQL language conformance | 1,612 pass of 1,823 cases (2026-08-05; corrected 2026-08-26 — the harness had graded 12 commented-out tests, `docs/evidence/CQL_RUNNER_HARNESS_DIFF_2026-08-26.md`) | `pnpm cql-tests:fetch` then `pnpm cql-tests`, against `cqframework/cql-tests`. Failures cluster in the shared translator and engine, not our measures; five of the sixteen files are perfect, and they are the constructs our measures use. |
 | SQL vs the CQL engine | zero divergence — 4 measures × 56 patients × 2 dates (2026-07-20) | the shim parity suite, [chapter 7](07-sql-and-the-bridge.md) |
@@ -163,7 +163,7 @@ owner-locked decisions constraining it are in `docs/LOCKED_DECISIONS.md` §4 and
    provider→staff mapping the practice already works by, applied to the cases a run OPENS and
    backfilled onto the ones it owns, with `cases.assignment_source` recording who chose so a panel
    edit never overrules a person (ADR-080), merged 2026-09-12; PR 3 is the ACO's attributed-list
-   import and report, #557, blocked on owner DDL and on three inputs the ACO has not yet supplied)
+   import and report, **#557 — MERGED 2026-09-16 as #574, ADR-082**; what remains open is not the build but four ACO-supplied inputs that decide its DEFAULTS, ROADMAP §7.5)
    → MM-3 (cards that resolve: order
    proposals + exception documentation, inside ADR-067's refusals) → MM-4 (encounter-time
    integration). Roadmap §7 tabulates the external dependencies.
