@@ -6,7 +6,7 @@
  */
 import { isUuid, type PgPool } from "./pg-database.ts";
 import { SPIKE_SCHEMA } from "./schema-pg.ts";
-import type { CaseAssignExpectation, CaseRecord, CaseQuery, CaseStore, CasePatch, UpsertCaseInput, UpsertedCase } from "../case-store.ts";
+import type { CaseAssignExpectation, CasePage, CaseRecord, CaseQuery, CaseStore, CasePatch, UpsertCaseInput, UpsertedCase } from "../case-store.ts";
 import { ACTIVE_CASE_STATUSES, planCaseUpsert, planNextAction, priorityFor, nextActionFor } from "../../case/case-logic.ts";
 
 interface CaseRow {
@@ -569,7 +569,14 @@ export class PgCaseStore implements CaseStore {
     return Number(rows[0]?.n ?? 0);
   }
 
-  async listCases(query: CaseQuery): Promise<CaseRecord[]> {
+  /**
+   * The WHERE clause and its binds, shared by `listCases` and `listCasesPage`.
+   *
+   * ONE builder, because the page path and the uncapped path must answer the same question: a
+   * predicate added to one and not the other is a filter that applies on page 1 of the badge and not
+   * in the export taken from the same screen, and nothing would fail.
+   */
+  private whereFor(query: CaseQuery): { clause: string; binds: unknown[] } {
     const where: string[] = [];
     const binds: unknown[] = [];
     if (query.statuses?.length) {
@@ -623,12 +630,98 @@ export class PgCaseStore implements CaseStore {
       binds.push([...ACTIVE_CASE_STATUSES]);
       where.push(query.closure === "staff" ? "closed_by IS NOT NULL" : "closed_by IS NULL");
     }
-    const clause = where.length ? ` WHERE ${where.join(" AND ")}` : "";
+    if (query.cycles !== undefined) {
+      // The per-measure current cycle, as ONE predicate over two parallel arrays. `unnest` pairs them
+      // positionally, so this is the same "measure X is current at period Y" table the caller built,
+      // evaluated in SQL — and the arrays are two binds whatever the measure count, where a generated
+      // OR-chain would re-plan per distinct length.
+      //
+      // The trailing branch is the fallback for a measure the caller did not name. It must be
+      // `<> ALL(named)` and not merely "else", because a row whose measure IS named and whose period
+      // is wrong has already failed the first branch and must not get a second chance at the fallback
+      // anchor — that would admit a prior cycle's rows for every measure whose cadence is 365 days.
+      const measures = query.cycles.map((c) => c.measureId);
+      const periods = query.cycles.map((c) => c.evaluationPeriod);
+      const m = binds.length + 1;
+      const p = binds.length + 2;
+      const f = binds.length + 3;
+      binds.push(measures, periods, query.cyclesFallbackPeriod ?? "");
+      where.push(
+        `(EXISTS (SELECT 1 FROM unnest($${m}::text[], $${p}::text[]) AS pair(m, e)
+                   WHERE pair.m = measure_id AND pair.e = evaluation_period)
+          OR (measure_id <> ALL($${m}::text[]) AND evaluation_period = $${f}))`,
+      );
+    }
+    if (query.outcome) {
+      where.push(`UPPER(COALESCE(current_outcome_status, '')) = UPPER($${binds.length + 1})`);
+      binds.push(query.outcome);
+    }
+    if (query.outreach) {
+      // The same definition `outreachSentCounts` uses — `action_type = 'OUTREACH_SENT'` — as a
+      // correlated EXISTS, so the badge stops counting outreach for rows it is about to discard.
+      const exists = `EXISTS (SELECT 1 FROM ${SPIKE_SCHEMA}.case_actions ca
+                               WHERE ca.case_id = ${T}.id AND ca.action_type = 'OUTREACH_SENT')`;
+      where.push(query.outreach === "none" ? `NOT ${exists}` : exists);
+    }
+    // `created_at` is TIMESTAMPTZ here and an ISO-Z string on the floor, so both sides compare the UTC
+    // DAY as TEXT: a bound of `2026-09-18` includes everything that happened on that day in UTC, at
+    // both ends, which is what the in-memory `day()` comparison does.
+    //
+    // **Text, not `::date`, and that is the point.** The cast made this store accept things the floor
+    // cannot: Postgres reads `yesterday`, `today` and `infinity` as date literals and `2026-9-1` as
+    // September 1st, while the floor's lexicographic compare matches no row for any of them — so the
+    // same request answered differently on the two stores, silently, with no error to notice. The
+    // route now rejects anything that is not a calendar day (400), and comparing as text means a bound
+    // that slips past any caller is merely a filter that matches nothing on BOTH stores rather than a
+    // different answer on each. `AT TIME ZONE 'UTC'` still runs first, so a session's `TimeZone`
+    // cannot move a row across a day boundary.
+    if (query.createdFrom) {
+      where.push(`to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD') >= $${binds.length + 1}`);
+      binds.push(query.createdFrom.slice(0, 10));
+    }
+    if (query.createdTo) {
+      where.push(`to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD') <= $${binds.length + 1}`);
+      binds.push(query.createdTo.slice(0, 10));
+    }
+    return { clause: where.length ? ` WHERE ${where.join(" AND ")}` : "", binds };
+  }
+
+  async listCases(query: CaseQuery): Promise<CaseRecord[]> {
+    const { clause, binds } = this.whereFor(query);
     binds.push(query.limit ?? 50, query.offset ?? 0);
     const { rows } = await this.pool.query<CaseRow>(
       `SELECT ${COLS} FROM ${T}${clause} ORDER BY updated_at DESC, id DESC LIMIT $${binds.length - 1} OFFSET $${binds.length}`,
       binds,
     );
     return rows.map(toRecord);
+  }
+
+  async listCasesPage(query: CaseQuery, page: { limit: number; offset: number }): Promise<CasePage> {
+    const { clause, binds } = this.whereFor(query);
+    binds.push(page.limit, page.offset);
+    // `COUNT(*) OVER ()` is computed over the same scan that produces the page, so the total and the
+    // rows describe ONE snapshot — see the interface doc for why two statements will not do.
+    const { rows } = await this.pool.query<CaseRow & { total_count: string }>(
+      `SELECT ${COLS}, COUNT(*) OVER () AS total_count FROM ${T}${clause}
+         ORDER BY updated_at DESC, id DESC LIMIT $${binds.length - 1} OFFSET $${binds.length}`,
+      binds,
+    );
+    // An empty page carries no window value — and that is not always a total of zero: it is also
+    // every page PAST the end of a non-empty set. The caller is paging, so answering 0 there would
+    // tell a client on page 9 of 8 that the set is empty. One bounded count settles it, and it is
+    // issued only on that empty page.
+    if (rows.length === 0) {
+      const { rows: counted } = await this.pool.query<{ n: string }>(
+        `SELECT COUNT(*) AS n FROM ${T}${clause}`,
+        binds.slice(0, binds.length - 2),
+      );
+      return { total: Number(counted[0]?.n ?? 0), rows: [] };
+    }
+    return { total: Number(rows[0]!.total_count), rows: rows.map(toRecord) };
+  }
+
+  async distinctCaseSubjectIds(): Promise<string[]> {
+    const { rows } = await this.pool.query<{ employee_id: string }>(`SELECT DISTINCT employee_id FROM ${T}`);
+    return rows.map((r) => r.employee_id);
   }
 }

@@ -17,6 +17,7 @@ import type { RunStore } from "../stores/run-store.ts";
 import type { OutcomeStore, OutcomeRecord } from "../stores/outcome-store.ts";
 import type { CaseStore, CaseRecord, UpsertCaseInput } from "../stores/case-store.ts";
 import { ACTIVE_CASE_STATUSES } from "../case/case-logic.ts";
+import { invalidateCaseSubjectInvariant } from "../case/worklist-read-model.ts";
 import type { EvaluateMeasureBinding, MeasureOutcome } from "@work-well/measure-engine";
 import { OFFICIAL_LOGIC_VERSION_PREFIX, type RoutedEngine } from "../wiring/executor-router.ts";
 import { isApplicable } from "../segment/segment-applicability.ts";
@@ -1434,6 +1435,11 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
 
   const terminalStatus = failures > 0 ? "PARTIAL_FAILURE" : "COMPLETED";
   await deps.runStore.finalizeRun(runId, terminalStatus);
+  // A run is the only thing that creates cases, so it is the only thing that can introduce a case
+  // subject the directory does not hold — the invariant the work list's SQL page path rests on (#561).
+  // Dropping the cached answer here means the next request re-establishes it from the data rather
+  // than trusting a check made before these rows existed.
+  invalidateCaseSubjectInvariant();
   // Audit the run's terminal state (Fable H1). The highest-volume state change in the system now
   // leaves a ledger record; run audit packets and the run timeline were previously near-empty.
   if (deps.events) {
@@ -1549,6 +1555,13 @@ async function reconcileEvaluatedFromStore(deps: RunPipelineDeps, planned: Plann
 }
 
 async function failPlannedRun(deps: RunPipelineDeps, planned: PlannedRun, err: unknown): Promise<void> {
+  // A FAILED run can still have COMMITTED cases: evaluation is chunked, so a persist failure in chunk 4
+  // lands here with chunks 1-3 already written. Those rows can carry a subject the directory does not
+  // hold, which is exactly the invariant the work list's SQL page path rests on (#561) — so the cached
+  // answer has to be dropped on this path too, not only on the success path. Resetting a flag costs a
+  // single DISTINCT scan on the next request, and a run that failed before writing anything loses
+  // nothing by it.
+  invalidateCaseSubjectInvariant();
   const errMsg = String((err as Error)?.message ?? err);
   const liveTenant = err instanceof LivePopulationPreparationError ? err.liveTenant : undefined;
   const liveSuffix = liveTenant

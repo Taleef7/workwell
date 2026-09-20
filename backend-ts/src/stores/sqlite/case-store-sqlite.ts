@@ -5,7 +5,7 @@
  * case invariant). COMPLIANT resolves an existing case without inserting a new one.
  */
 import type { CloudDatabase } from "@mieweb/cloud";
-import type { CaseAssignExpectation, CaseRecord, CaseQuery, CaseStore, CasePatch, UpsertCaseInput, UpsertedCase } from "../case-store.ts";
+import type { CaseAssignExpectation, CasePage, CaseRecord, CaseQuery, CaseStore, CasePatch, UpsertCaseInput, UpsertedCase } from "../case-store.ts";
 import { ACTIVE_CASE_STATUSES, planCaseUpsert, planNextAction, priorityFor, nextActionFor } from "../../case/case-logic.ts";
 
 interface CaseRow {
@@ -401,7 +401,11 @@ export class SqliteCaseStore implements CaseStore {
     return Number(row?.n ?? 0);
   }
 
-  async listCases(query: CaseQuery): Promise<CaseRecord[]> {
+  /**
+   * The WHERE clause and its binds, shared by `listCases` and `listCasesPage` — see the ceiling's
+   * copy for why it is one builder and not two.
+   */
+  private whereFor(query: CaseQuery): { clause: string; binds: unknown[] } {
     const where: string[] = [];
     const binds: unknown[] = [];
     if (query.statuses?.length) {
@@ -450,7 +454,48 @@ export class SqliteCaseStore implements CaseStore {
       binds.push(...ACTIVE_CASE_STATUSES);
       where.push(query.closure === "staff" ? "closed_by IS NOT NULL" : "closed_by IS NULL");
     }
-    const clause = where.length ? ` WHERE ${where.join(" AND ")}` : "";
+    if (query.cycles !== undefined) {
+      // The floor has no `unnest`, so the pairs expand to an OR-chain — two binds per measure, and the
+      // caller's measure list is the deployment's routed set (six on the pilot), never user input.
+      // An EMPTY cycles list means no measure is current, which is a real answer: only the fallback
+      // branch can match, exactly as the ceiling's `<> ALL('{}')` leaves it.
+      const pairs = query.cycles.map(() => "(measure_id = ? AND evaluation_period = ?)").join(" OR ");
+      const named = query.cycles.map(() => "?").join(", ");
+      // The fallback branch excludes every NAMED measure for the same reason the ceiling's does: a row
+      // whose measure is named and whose period is wrong has already failed above and must not match
+      // the fallback anchor instead.
+      const fallback = query.cycles.length
+        ? `(measure_id NOT IN (${named}) AND evaluation_period = ?)`
+        : "evaluation_period = ?";
+      where.push(`(${pairs ? `${pairs} OR ` : ""}${fallback})`);
+      for (const c of query.cycles) binds.push(c.measureId, c.evaluationPeriod);
+      if (query.cycles.length) for (const c of query.cycles) binds.push(c.measureId);
+      binds.push(query.cyclesFallbackPeriod ?? "");
+    }
+    if (query.outcome) {
+      where.push("UPPER(COALESCE(current_outcome_status, '')) = UPPER(?)");
+      binds.push(query.outcome);
+    }
+    if (query.outreach) {
+      // The same definition `outreachSentCounts` uses, as a correlated EXISTS.
+      const exists = "EXISTS (SELECT 1 FROM case_actions ca WHERE ca.case_id = cases.id AND ca.action_type = 'OUTREACH_SENT')";
+      where.push(query.outreach === "none" ? `NOT ${exists}` : exists);
+    }
+    // `created_at` is an ISO-8601 Z string here and TIMESTAMPTZ on the ceiling; both compare the UTC
+    // DAY, inclusive at both ends, which is what the in-memory `day()` filter does.
+    if (query.createdFrom) {
+      where.push("substr(created_at, 1, 10) >= ?");
+      binds.push(query.createdFrom.slice(0, 10));
+    }
+    if (query.createdTo) {
+      where.push("substr(created_at, 1, 10) <= ?");
+      binds.push(query.createdTo.slice(0, 10));
+    }
+    return { clause: where.length ? ` WHERE ${where.join(" AND ")}` : "", binds };
+  }
+
+  async listCases(query: CaseQuery): Promise<CaseRecord[]> {
+    const { clause, binds } = this.whereFor(query);
     const limit = query.limit ?? 50;
     const offset = query.offset ?? 0;
     const { results } = await this.db
@@ -458,5 +503,32 @@ export class SqliteCaseStore implements CaseStore {
       .bind(...binds, limit, offset)
       .all<CaseRow>();
     return (results ?? []).map(toRecord);
+  }
+
+  async listCasesPage(query: CaseQuery, page: { limit: number; offset: number }): Promise<CasePage> {
+    const { clause, binds } = this.whereFor(query);
+    const { results } = await this.db
+      .prepare(
+        `SELECT ${COLS}, COUNT(*) OVER () AS total_count FROM cases${clause}
+           ORDER BY updated_at DESC, id DESC LIMIT ? OFFSET ?`,
+      )
+      .bind(...binds, page.limit, page.offset)
+      .all<CaseRow & { total_count: number }>();
+    const rows = results ?? [];
+    // An empty page carries no window value, and that is not the same as a total of zero — it is also
+    // every page past the end of a non-empty set (see the interface doc).
+    if (rows.length === 0) {
+      const { results: counted } = await this.db
+        .prepare(`SELECT COUNT(*) AS n FROM cases${clause}`)
+        .bind(...binds)
+        .all<{ n: number }>();
+      return { total: Number(counted?.[0]?.n ?? 0), rows: [] };
+    }
+    return { total: Number(rows[0]!.total_count), rows: rows.map(toRecord) };
+  }
+
+  async distinctCaseSubjectIds(): Promise<string[]> {
+    const { results } = await this.db.prepare("SELECT DISTINCT employee_id FROM cases").all<{ employee_id: string }>();
+    return (results ?? []).map((r) => r.employee_id);
   }
 }

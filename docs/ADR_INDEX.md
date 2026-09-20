@@ -6,14 +6,15 @@
 > `grep -o '^#\+ ADR-[0-9]*.*' docs/DECISIONS.md`, newest first. If the highest number here is lower
 > than the highest there, this file is stale.
 >
-> **`·archived`** (14 of 83) means the BODY moved to `docs/archive/DECISIONS_ARCHIVE.md` — superseded,
+> **`·archived`** (14 of 84) means the BODY moved to `docs/archive/DECISIONS_ARCHIVE.md` — superseded,
 > or a historical *finding* rather than a decision that governs. `DECISIONS.md` keeps every heading plus
-> a pointer, so every cross-reference still resolves. The 69 unmarked titles are the record that governs.
+> a pointer, so every cross-reference still resolves. The 70 unmarked titles are the record that governs.
 >
 > **ADR-033 does not exist** — the sequence runs 031, 032, 034. Verified absent 2026-07-29. Do not reuse it.
 
 ## Titles (newest first)
 
+- ADR-084: a statement timeout is a role default the pooler cannot strip — and a filter belongs in SQL only where the database can see what it filters on
 - ADR-083: an exception is data the measure reads, never a status WorkWell flips — and a case a person closed is still a gap the run counts
 - ADR-082: an attributed list is an immutable assertion someone else made — and the sandbox refuses to hold a real one
 - ADR-081: the repeat-non-complier streak is retired, because a retention window cannot hold one

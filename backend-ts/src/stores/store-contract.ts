@@ -11,7 +11,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { CreateRunInput, RunStore } from "./run-store.ts";
 import type { OutcomeStore } from "./outcome-store.ts";
-import type { CaseStore, UpsertedCase } from "./case-store.ts";
+import type { CaseQuery, CaseRecord, CaseStore, UpsertedCase } from "./case-store.ts";
 import type { CaseEventStore } from "./case-event-store.ts";
 import type { MeasureStore, SeedMeasureInput } from "./measure-store.ts";
 import type { EvidenceStore } from "./evidence-store.ts";
@@ -1827,6 +1827,193 @@ export function caseStoreContract(label: string, freshStore: () => Promise<CaseS
       ["rerun"],
       "closure ∩ employeeIds",
     );
+  });
+
+  /**
+   * The #561 predicates, each checked against a JS reference filter over the same fixture.
+   *
+   * The point is not that the SQL "works" — it is that the SQL answer EQUALS the answer the in-memory
+   * pipeline gives, because both paths stay in the code and a request picks one. A predicate that is
+   * merely self-consistent would let the badge and the export disagree with nothing failing.
+   */
+  test(`[${label}] the SQL predicates answer exactly what the in-memory filters answer (#561)`, async () => {
+    const store = await freshStore();
+    const mk = async (over: { subjectId: string; measureId: string; period: string; status?: string }) => {
+      const c = await store.upsertFromOutcome({
+        runId: crypto.randomUUID(),
+        subjectId: over.subjectId,
+        measureId: over.measureId,
+        evaluationPeriod: over.period,
+        outcomeStatus: over.status ?? "OVERDUE",
+      });
+      return c!;
+    };
+    // Two measures at two cycles, plus a measure the caller will NOT name, so the fallback branch and
+    // the "named but wrong period" case are both live rather than assumed.
+    await mk({ subjectId: "a", measureId: "audiogram", period: "2026-01-01" });
+    await mk({ subjectId: "b", measureId: "audiogram", period: "2025-01-01" });
+    await mk({ subjectId: "c", measureId: "tb", period: "2026-01-01" });
+    await mk({ subjectId: "d", measureId: "tb", period: "2025-01-01" });
+    await mk({ subjectId: "e", measureId: "unknown-slug", period: "2026-01-01" });
+    await mk({ subjectId: "f", measureId: "unknown-slug", period: "2025-01-01" });
+    const all = await store.listCases({ limit: 1000 });
+    assert.equal(all.length, 6, "the fixture is what this test is about");
+
+    // CYCLES. The caller names audiogram@2026 and tb@2025 — deliberately DIFFERENT periods, so a
+    // mutant that collapses the pairs to one shared period is caught. The fallback anchors the
+    // measures it did not name.
+    const cycles = [
+      { measureId: "audiogram", evaluationPeriod: "2026-01-01" },
+      { measureId: "tb", evaluationPeriod: "2025-01-01" },
+    ];
+    const fallback = "2026-01-01";
+    const byCycle = (c: CaseRecord) => {
+      const named = cycles.find((p) => p.measureId === c.measureId);
+      return named ? c.evaluationPeriod === named.evaluationPeriod : c.evaluationPeriod === fallback;
+    };
+    assert.deepEqual(
+      (await store.listCases({ cycles, cyclesFallbackPeriod: fallback, limit: 1000 })).map((c) => c.employeeId).sort(),
+      all.filter(byCycle).map((c) => c.employeeId).sort(),
+      "SQL cycles == the per-measure filter in memory",
+    );
+    assert.deepEqual(
+      (await store.listCases({ cycles, cyclesFallbackPeriod: fallback, limit: 1000 })).map((c) => c.employeeId).sort(),
+      ["a", "d", "e"],
+      "audiogram@2026, tb@2025, and the unnamed measure at the fallback — not b, c or f",
+    );
+    // The named-measure exclusion on the fallback branch is load-bearing: `b` is audiogram@2025, and
+    // 2025 is not audiogram's named cycle. Without `measure_id <> ALL(named)` it would match the
+    // fallback anchor for any measure whose cycle happens to equal it.
+    assert.deepEqual(
+      (await store.listCases({ cycles, cyclesFallbackPeriod: "2025-01-01", limit: 1000 })).map((c) => c.employeeId).sort(),
+      ["a", "d", "f"],
+      "moving the fallback moves ONLY the unnamed measure's rows",
+    );
+    // An empty cycles list is a real filter — only the fallback can match — not an absent one.
+    assert.deepEqual(
+      (await store.listCases({ cycles: [], cyclesFallbackPeriod: "2026-01-01", limit: 1000 })).map((c) => c.employeeId).sort(),
+      ["a", "c", "e"],
+      "no measure is named, so every row is judged against the fallback anchor",
+    );
+
+    // OUTCOME, compared case-insensitively against the FROZEN column, as the in-memory filter does.
+    await store.patchCase(all.find((c) => c.employeeId === "a")!.id, { currentOutcomeStatus: "due_soon" });
+    assert.deepEqual(
+      (await store.listCases({ outcome: "DUE_SOON", limit: 1000 })).map((c) => c.employeeId),
+      ["a"],
+      "case-insensitive on both sides",
+    );
+    assert.deepEqual(await store.listCases({ outcome: "NOT_A_STATUS", limit: 1000 }), [], "an unknown value matches nobody, never everybody");
+
+    // CREATED window, by UTC DAY and INCLUSIVE at both ends. Both rows were created microseconds apart
+    // in this test run, so this checks inclusivity and the non-calendar bounds below — NOT the day
+    // boundary, which the interface gives no way to set. The across-midnight case is covered in
+    // `case/worklist-page-conformance.test.ts`, which owns its database and can write `created_at`.
+    const early = all.find((c) => c.employeeId === "c")!;
+    const late = all.find((c) => c.employeeId === "d")!;
+    await store.patchCase(early.id, {});
+    const dayOf = (iso: string) => iso.slice(0, 10);
+    const created = await store.listCases({ createdFrom: dayOf(early.createdAt), createdTo: dayOf(early.createdAt), limit: 1000 });
+    assert.equal(
+      created.length,
+      all.filter((c) => dayOf(c.createdAt) === dayOf(early.createdAt)).length,
+      "an inclusive single-day window equals the in-memory day comparison",
+    );
+    assert.ok(created.some((c) => c.id === early.id) && created.some((c) => c.id === late.id), "both ends are INCLUSIVE");
+    assert.deepEqual(await store.listCases({ createdFrom: "2099-01-01", limit: 1000 }), [], "a window after everything is empty");
+
+    // A bound that is not a plain calendar day must behave the SAME on both stores — match nothing,
+    // and above all not throw. The ceiling used to cast to `::date`, and Postgres reads `yesterday`,
+    // `today` and `infinity` as real date literals and `2026-9-1` as September 1st, while the floor's
+    // text comparison matched no row for any of them: the same request, two different answers, no
+    // error on either side to notice. The route rejects these with a 400 now; this is the store-level
+    // half of that, so a caller that slips one through cannot make the two stores disagree.
+    for (const bound of ["yesterday", "today", "infinity", "2026-9-1", "garbage"]) {
+      assert.deepEqual(
+        await store.listCases({ createdFrom: bound, limit: 1000 }),
+        [],
+        `a non-calendar bound matches nothing rather than being interpreted: ${bound}`,
+      );
+    }
+  });
+
+  test(`[${label}] the outreach predicate is answered in SQL, and NOT EXISTS is the whole active list`, async () => {
+    const store = await freshStore();
+    for (const subjectId of ["emp-006", "emp-007"]) {
+      await store.upsertFromOutcome({
+        runId: crypto.randomUUID(), subjectId, measureId: "audiogram", evaluationPeriod: "2026-06-13", outcomeStatus: "OVERDUE",
+      });
+    }
+    // No case has an OUTREACH_SENT action here, so this pins the two halves against each other: the
+    // correlated EXISTS must match nobody and its negation everybody. It is the only coverage the
+    // CEILING's schema-qualified correlation gets — the end-to-end outreach test is floor-only — and a
+    // correlation that failed to resolve would raise rather than answer.
+    assert.equal((await store.listCases({ outreach: "none", limit: 100 })).length, 2, "no outreach recorded ⇒ every case is on the none list");
+    assert.deepEqual(await store.listCases({ outreach: "any", limit: 100 }), [], "and none is on the any list");
+    // Composed with another predicate, so the EXISTS cannot be the only thing in the WHERE clause.
+    assert.equal((await store.listCases({ outreach: "none", statuses: ["OPEN"], limit: 100 })).length, 2);
+    assert.equal((await store.listCasesPage({ outreach: "none" }, { limit: 1, offset: 0 })).total, 2, "and the page path agrees");
+  });
+
+  test(`[${label}] listCasesPage returns the page and the EXACT total from one snapshot (#561)`, async () => {
+    const store = await freshStore();
+    for (let i = 0; i < 7; i++) {
+      await store.upsertFromOutcome({
+        runId: crypto.randomUUID(),
+        subjectId: `emp-${String(i).padStart(3, "0")}`,
+        measureId: "audiogram",
+        evaluationPeriod: "2026-06-13",
+        outcomeStatus: "OVERDUE",
+      });
+    }
+    const everything = await store.listCases({ limit: 1000 });
+    assert.equal(everything.length, 7);
+
+    // Every page reports the SAME total — the size of the filtered set, never the size of the page.
+    const pages = [];
+    for (let offset = 0; offset < 9; offset += 3) {
+      const page = await store.listCasesPage({}, { limit: 3, offset });
+      assert.equal(page.total, 7, `page at offset ${offset} reports the filtered total`);
+      pages.push(...page.rows.map((r) => r.id));
+    }
+    assert.deepEqual(pages, everything.map((c) => c.id), "the pages concatenate to the unpaged order, with no gap and no repeat");
+
+    // A page PAST the end is empty and still reports the total. This is the case the window count
+    // cannot answer on its own — no row means no window value — and answering 0 there would tell a
+    // client on the last page that everything had vanished.
+    const past = await store.listCasesPage({}, { limit: 3, offset: 99 });
+    assert.deepEqual(past.rows, []);
+    assert.equal(past.total, 7, "past the end is not the same as empty");
+
+    // A filter that genuinely matches nobody IS zero, and must not be confused with the above.
+    const none = await store.listCasesPage({ statuses: ["NO_SUCH_STATUS"] }, { limit: 3, offset: 0 });
+    assert.deepEqual(none.rows, []);
+    assert.equal(none.total, 0);
+
+    // The page applies the SAME predicates as `listCases` — one builder, and this is what proves it.
+    const filtered = await store.listCasesPage({ statuses: ["OPEN"], measureId: "audiogram" }, { limit: 100, offset: 0 });
+    assert.equal(filtered.total, (await store.listCases({ statuses: ["OPEN"], measureId: "audiogram", limit: 1000 })).length);
+    // `limit`/`offset` on the QUERY are ignored — the page argument is the page.
+    const ignored = await store.listCasesPage({ limit: 1, offset: 6 } as CaseQuery, { limit: 5, offset: 0 });
+    assert.equal(ignored.rows.length, 5, "the query's paging does not half-page the result");
+    assert.equal(ignored.total, 7);
+  });
+
+  test(`[${label}] distinctCaseSubjectIds reports each subject once, however many cases it has`, async () => {
+    const store = await freshStore();
+    assert.deepEqual(await store.distinctCaseSubjectIds(), [], "no cases, no subjects");
+    for (const measureId of ["audiogram", "tb"]) {
+      await store.upsertFromOutcome({
+        runId: crypto.randomUUID(), subjectId: "emp-006", measureId, evaluationPeriod: "2026-06-13", outcomeStatus: "OVERDUE",
+      });
+    }
+    await store.upsertFromOutcome({
+      runId: crypto.randomUUID(), subjectId: "emp-007", measureId: "audiogram", evaluationPeriod: "2026-06-13", outcomeStatus: "OVERDUE",
+    });
+    // DISTINCT by subject, not by case: the invariant this feeds asks "is every case subject in the
+    // directory", which is a question about subjects. A per-case answer would be 3 here and would
+    // grow with the case table rather than with the roster.
+    assert.deepEqual((await store.distinctCaseSubjectIds()).sort(), ["emp-006", "emp-007"]);
   });
 
   test(`[${label}] countByLastRun counts cases whose last_run_id matches`, async () => {
