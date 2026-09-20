@@ -828,6 +828,12 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
         const startedAtMs = Date.now();
         let bundleMs = 0;
         let offered = forMeasure.length;
+        // Stopped the moment the batch SETTLES, not where the timing is emitted. The emit point sits
+        // after the catch block, which awaits an `appendLog` INSERT — so on the failure path a
+        // `Date.now()` taken there would fold a database round trip into `batchMs` and relabel it
+        // executor time. In a degraded pool, which is the condition this instrument exists to
+        // diagnose, that round trip is seconds.
+        let settledAtMs = 0;
         try {
           // The subject list is a FACTORY, not an array, so a measure with no batch path costs nothing.
           // Passed eagerly, this would build every measure's bundles — 14 measures × N subjects — and
@@ -836,16 +842,24 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
             measureId,
             () => {
               const bundleStartedAtMs = Date.now();
-              const subjects = forMeasure.map((item) => ({
-                subjectId: item.employee.externalId,
-                patientBundle: bundleOf(item),
-              }));
-              bundleMs += Date.now() - bundleStartedAtMs;
-              offered = subjects.length;
-              return subjects;
+              // `finally`, because a `bundleOf` that throws partway would otherwise skip the
+              // accumulator entirely: hundreds of bundles already built would report `bundleMs: 0`
+              // and their whole elapsed cost would be relabelled executor time on the `failed`
+              // event. The failure path is exactly where the attribution matters most.
+              try {
+                const subjects = forMeasure.map((item) => ({
+                  subjectId: item.employee.externalId,
+                  patientBundle: bundleOf(item),
+                }));
+                offered = subjects.length;
+                return subjects;
+              } finally {
+                bundleMs += Date.now() - bundleStartedAtMs;
+              }
             },
             evalDate,
           );
+          settledAtMs = Date.now();
           if (!results) {
             // Not batchable — the loop evaluates it per subject, unchanged. Timed anyway, and the
             // `not-batchable` outcome is what proves the factory was never invoked rather than free.
@@ -854,7 +868,7 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
                 runId,
                 measureId,
                 subjects: offered,
-                batchMs: Date.now() - startedAtMs,
+                batchMs: settledAtMs - startedAtMs,
                 bundleMs,
                 outcome: "not-batchable",
               }),
@@ -868,6 +882,9 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
             if (outcome) prefetched.set(`${item.employee.externalId}|${measureId}`, outcome);
           }
         } catch (err) {
+          // Only if the batch had not already settled: a throw from the result-collection loop BELOW
+          // the await must not overwrite the real settle time with a later one.
+          settledAtMs ||= Date.now();
           // Never abort the run (runtime invariant). The failure is recorded against the MEASURE and
           // re-thrown per subject in the loop, so it lands in the existing per-subject isolation —
           // MISSING_DATA carrying this message, `failures++`, run PARTIAL_FAILURE, and therefore the #264
@@ -888,7 +905,7 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
           runId,
           measureId,
           subjects: offered,
-          batchMs: Date.now() - startedAtMs,
+          batchMs: settledAtMs - startedAtMs,
           bundleMs,
           outcome: batched ? "batched" : "failed",
         });
