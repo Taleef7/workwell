@@ -127,3 +127,30 @@ export function usePanelPayers(): {
 
 /** The label for the filter. "Insurance" is what the practice calls it; "payer" is what the data calls it. */
 export const payerFilterLabel = "Insurance";
+
+/**
+ * The group button's label — and it names the BREADTH, not just the family (#583).
+ *
+ * The button used to read "All Medicare (6,827)". On the pilot roster that one word selects
+ * typology code `1` (traditional Medicare, 3,927) **and** `11` (Medicare Advantage, 2,900) and every
+ * other Medicare-family code present, because the typology is hierarchical. A quality lead reading
+ * "Medicare" as the population their ACO attributed to them gets ~2,900 people who may well not be
+ * in it — and the screen gave no sign, because the member codes were only in a `title` tooltip.
+ *
+ * So the count of codes goes in the visible label. This says what the control does mechanically and
+ * stops there: **whether Medicare Advantage belongs in a given attributed population is a question
+ * for the ACO** (#583 / ROADMAP §7.5 input 4), not something a filter caption should assert.
+ *
+ * A single-code group is not ambiguous and keeps the plain name.
+ */
+export function payerGroupButtonLabel(
+  group: { groupName: string; codes: string[]; subjectCount: number },
+  selected: boolean,
+): string {
+  const multi = group.codes.length > 1;
+  if (selected) return multi ? `Clear ${group.groupName} codes` : `Clear ${group.groupName}`;
+  const count = group.subjectCount.toLocaleString();
+  return multi
+    ? `All ${group.codes.length} ${group.groupName} codes (${count})`
+    : `All ${group.groupName} (${count})`;
+}

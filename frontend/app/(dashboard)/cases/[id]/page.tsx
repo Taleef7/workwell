@@ -16,6 +16,7 @@ import { CopyableId } from "@/components/copyable-id";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { CqlExpressionResults, CqlWhyFlagged } from "@/features/evidence/CqlEvidence";
 import { EvidenceDropzone } from "@/features/evidence/EvidenceDropzone";
+import { LocalOnlyNotice } from "@/features/common/LocalOnlyNotice";
 import { DeliveryChip } from "@/features/outreach/DeliveryChip";
 import { useMeasureIdentities } from "@/lib/measure-identity";
 import { UNASSIGN_VALUE, useAssignableUsers } from "@/features/panel/use-assignable-users";
@@ -606,6 +607,11 @@ export default function CaseDetailPage() {
                 >
                   Send Outreach
                 </Button>
+                {/* §8E — the send is simulated AND nothing reaches the chart. Spans both columns so it
+                    reads as a statement about the pair of buttons, not a hint on the last one. */}
+                <div className="col-span-2">
+                  <LocalOnlyNotice action="Outreach" />
+                </div>
                 {canEngineering && (
                   <Button
                     type="button"
@@ -907,6 +913,13 @@ export default function CaseDetailPage() {
                     Schedule Appointment
                   </Button>
                 </div>
+                {/* §8E on the DESKTOP path. The first version of this change put the notice only in
+                    the `md:hidden` column above, so every desktop user — which is most of them — saw
+                    the same unlabelled "Send outreach" the change existed to label. Sits under the
+                    row rather than inside it because the row is `flex flex-wrap` and a paragraph
+                    between buttons wraps as a flex item. "Schedule Appointment" carries its own
+                    notice inside the modal, at the moment the belief actually forms. */}
+                <LocalOnlyNotice action="Outreach" className="mt-3" />
                 </>
                 )}
                 <Modal open={appointmentModalOpen} onOpenChange={(open) => { if (!open) setAppointmentModalOpen(false); }} size="md">
@@ -938,6 +951,9 @@ export default function CaseDetailPage() {
                         value={appointmentNotes}
                         onChange={(e) => setAppointmentNotes(e.target.value)}
                       />
+                      {/* §8E — inside the modal, before the save, because this is where someone forms
+                          the belief that the clinic now has the appointment. */}
+                      <LocalOnlyNotice action="This appointment" />
                     </div>
                   </ModalBody>
                   <ModalFooter>
@@ -1184,6 +1200,15 @@ export default function CaseDetailPage() {
                 >
                   Upload Evidence
                 </Button>
+                {/* §8E, plus the measure half. The practice asked directly on 2026-09-10 whether an
+                    uploaded result with the right document type fulfils the measure. It does not —
+                    CQL is the sole authority and closes a gap only when the qualifying RESULT data
+                    arrives and it re-evaluates (LOCKED §4A.3). Saying only "not sent to WebChart"
+                    would leave the more consequential belief standing. */}
+                <LocalOnlyNotice
+                  action="Uploaded evidence"
+                  also="It also does not satisfy the measure — a gap closes when the result is in the record the measure reads."
+                />
               </div>
               <div className="mt-4 space-y-2">
                 {evidence.length === 0 ? <p className="text-sm text-neutral-600 dark:text-neutral-400">No evidence uploaded.</p> : null}

@@ -140,13 +140,17 @@ describe("WorklistPage", () => {
     });
   });
 
-  it("'All Medicare' selects every code in the category that the roster actually has", async () => {
+  it("the Medicare group button selects every code in the category, and SAYS how many (#583)", async () => {
     render(<WorklistPage />);
     await waitFor(() => expect(listCalls().length).toBeGreaterThan(0));
 
-    // One control for the question a staff member actually asks. The count on it is the category's,
-    // not either code's.
-    await userEvent.click(await screen.findByRole("button", { name: /all medicare \(6,827\)/i }));
+    // One control for the question a staff member actually asks. The count of PEOPLE on it is the
+    // category's, not either code's — and since #583 the count of CODES is on it too, because
+    // "All Medicare (6,827)" took Medicare Advantage under a word that does not name it. The label
+    // states the mechanism only; whether Advantage belongs in an attributed population is the ACO's
+    // question, not a caption's.
+    expect(screen.queryByRole("button", { name: /^all medicare \(6,827\)$/i })).not.toBeInTheDocument();
+    await userEvent.click(await screen.findByRole("button", { name: /all 2 medicare codes \(6,827\)/i }));
     await waitFor(() => {
       const last = listCalls().at(-1)!;
       expect(last).toContain("payer=1");
