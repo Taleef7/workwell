@@ -35,6 +35,7 @@ import {
   subjectNoun,
   DIRECTORY,
 } from "../config/deployment-profile.ts";
+import { batchPhaseTiming, emitPhaseTiming, type PhaseTimingSink } from "./phase-timing.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { MEASURE_CATALOG } from "../measure/measure-catalog.ts";
 import { measureDisplayName } from "../measure/measure-name.ts";
@@ -110,6 +111,13 @@ export interface RunPipelineDeps {
    * dep is what makes the two structurally unable to disagree.
    */
   engine: EvaluateMeasureBinding & Pick<RoutedEngine, "logicVersionFor" | "evaluateBatch">;
+  /**
+   * Where per-call phase timings go (#563). Absent ⇒ one `WORKWELL_RUNTIME` line on stdout, which is
+   * what every deployment does. Injected rather than global for the same reason `alertChannels` is:
+   * a test that asserts on the timings should not have to reassign `console.log` and then be unable
+   * to tell "nothing was emitted" from "the run never got here".
+   */
+  onPhaseTiming?: PhaseTimingSink;
   /** When present, each outcome upserts/resolves a case (idempotent). */
   caseStore?: CaseStore;
   /** Enabled segments for case-creation applicability gating; empty/absent ⇒ all applicable (reversibility). */
@@ -813,26 +821,70 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
       for (const measureId of new Set(chunkItems.map((i) => i.measureId))) {
         const forMeasure = chunkItems.filter((i) => i.measureId === measureId);
         let batched = false;
+        // #563 — this await is the single longest synchronous stretch in the run, and nothing has ever
+        // measured it. `bundleMs` accumulates rather than assigns because the factory is the executor's
+        // to call: it is invoked once today, but an executor that called it twice would otherwise have
+        // the first invocation silently overwritten and its cost attributed to evaluation instead.
+        const startedAtMs = Date.now();
+        let bundleMs = 0;
+        let offered = forMeasure.length;
+        // Stopped the moment the batch SETTLES, not where the timing is emitted. The emit point sits
+        // after the catch block, which awaits an `appendLog` INSERT — so on the failure path a
+        // `Date.now()` taken there would fold a database round trip into `batchMs` and relabel it
+        // executor time. In a degraded pool, which is the condition this instrument exists to
+        // diagnose, that round trip is seconds.
+        let settledAtMs = 0;
         try {
           // The subject list is a FACTORY, not an array, so a measure with no batch path costs nothing.
           // Passed eagerly, this would build every measure's bundles — 14 measures × N subjects — and
           // discard 13/14 of them the moment official routing is on for one measure (review #3).
           const results = await deps.engine.evaluateBatch(
             measureId,
-            () =>
-              forMeasure.map((item) => ({
-                subjectId: item.employee.externalId,
-                patientBundle: bundleOf(item),
-              })),
+            () => {
+              const bundleStartedAtMs = Date.now();
+              // `finally`, because a `bundleOf` that throws partway would otherwise skip the
+              // accumulator entirely: hundreds of bundles already built would report `bundleMs: 0`
+              // and their whole elapsed cost would be relabelled executor time on the `failed`
+              // event. The failure path is exactly where the attribution matters most.
+              try {
+                const subjects = forMeasure.map((item) => ({
+                  subjectId: item.employee.externalId,
+                  patientBundle: bundleOf(item),
+                }));
+                offered = subjects.length;
+                return subjects;
+              } finally {
+                bundleMs += Date.now() - bundleStartedAtMs;
+              }
+            },
             evalDate,
           );
-          if (!results) continue; // not batchable — the loop evaluates it per subject, unchanged
+          settledAtMs = Date.now();
+          if (!results) {
+            // Not batchable — the loop evaluates it per subject, unchanged. Timed anyway, and the
+            // `not-batchable` outcome is what proves the factory was never invoked rather than free.
+            emitPhaseTiming(
+              batchPhaseTiming({
+                runId,
+                measureId,
+                subjects: offered,
+                batchMs: settledAtMs - startedAtMs,
+                bundleMs,
+                outcome: "not-batchable",
+              }),
+              deps.onPhaseTiming,
+            );
+            continue;
+          }
           batched = true;
           for (const item of forMeasure) {
             const outcome = results.get(item.employee.externalId);
             if (outcome) prefetched.set(`${item.employee.externalId}|${measureId}`, outcome);
           }
         } catch (err) {
+          // Only if the batch had not already settled: a throw from the result-collection loop BELOW
+          // the await must not overwrite the real settle time with a later one.
+          settledAtMs ||= Date.now();
           // Never abort the run (runtime invariant). The failure is recorded against the MEASURE and
           // re-thrown per subject in the loop, so it lands in the existing per-subject isolation —
           // MISSING_DATA carrying this message, `failures++`, run PARTIAL_FAILURE, and therefore the #264
@@ -845,14 +897,36 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
             .appendLog(runId, "ERROR", `${measureId}: official batch evaluation failed — ${String((err as Error)?.message ?? err)}`)
             .catch(() => {});
         }
+        // #563 — emitted for the batched AND failed paths alike, and outside the `try` for the same
+        // reason the log below is: an observability write must never author an outcome. `emitPhaseTiming`
+        // swallows its own throw, so this cannot become the thing that fails a chunk whose subjects are
+        // already evaluated.
+        const timing = batchPhaseTiming({
+          runId,
+          measureId,
+          subjects: offered,
+          batchMs: settledAtMs - startedAtMs,
+          bundleMs,
+          outcome: batched ? "batched" : "failed",
+        });
+        emitPhaseTiming(timing, deps.onPhaseTiming);
         // OUTSIDE the try, and best-effort. Inside it, a transient `run_logs` write failure would be
         // caught above and recorded as a batch failure — turning a successful evaluation, whose results are
         // already in `prefetched`, into a whole measure's worth of MISSING_DATA. An observability write must
         // never author an outcome (review #2); the same reason the case-audit and quality-snapshot writes in
         // this file are best-effort.
         if (batched) {
+          // #563 — the timings ride on the line this path ALREADY writes, so they cost no extra
+          // round trip and are readable at `GET /api/runs/:id` without MIE container-log access,
+          // which the `WORKWELL_RUNTIME` stdout line needs. That access is the reason this is here:
+          // an instrument nobody can read answers nothing.
           await deps.runStore
-            .appendLog(runId, "INFO", `${measureId}: ${forMeasure.length} subject(s) evaluated in one official batch`)
+            .appendLog(
+              runId,
+              "INFO",
+              `${measureId}: ${forMeasure.length} subject(s) evaluated in one official batch ` +
+                `[${timing.batchMs}ms total; bundles ${timing.bundleMs}ms; eval ${timing.evalMs}ms; ${timing.msPerSubject}ms/subject]`,
+            )
             .catch(() => {});
         }
       }

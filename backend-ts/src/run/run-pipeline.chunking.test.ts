@@ -23,6 +23,7 @@ import { SqliteRunStore } from "../stores/sqlite/run-store-sqlite.ts";
 import { SqliteOutcomeStore } from "../stores/sqlite/outcome-store-sqlite.ts";
 import { SqliteCaseStore } from "../stores/sqlite/case-store-sqlite.ts";
 import { planManualRun, finishOrFail, type ManualRunRequest, type RunPipelineDeps } from "./run-pipeline.ts";
+import type { BatchPhaseTiming } from "./phase-timing.ts";
 import { OFFICIAL_LOGIC_VERSION_PREFIX } from "../wiring/executor-router.ts";
 import type { EmployeeProfile } from "../engine/synthetic/employee-catalog.ts";
 import type { SubjectBundleSource } from "../wiring/subject-bundle-source.ts";
@@ -86,9 +87,22 @@ interface ChunkTestDeps extends RunPipelineDeps {
  * to `run-pipeline.ts`, and a harness reaching into it would prove something about the test rather
  * than about the caller.
  */
-function countingBundleSource(counters: Counters): SubjectBundleSource {
+function countingBundleSource(counters: Counters, buildDelayMs = 0, throwAfterBundles = 0): SubjectBundleSource {
   const note = (_subjectId: string) => {
     counters.bundlesBuilt += 1;
+    if (throwAfterBundles > 0 && counters.bundlesBuilt > throwAfterBundles) {
+      throw new Error("bundle source exploded partway through the chunk");
+    }
+    // #563's timing test needs bundle construction to cost something OBSERVABLE. A real bundle build
+    // takes milliseconds; a stub takes microseconds, so `bundleMs` would round to 0 and an assertion
+    // that it is non-zero would be flaky rather than wrong. Busy-wait, not a timer: the whole point is
+    // that this phase blocks the event loop, and an `await` would not reproduce that.
+    if (buildDelayMs > 0) {
+      const until = Date.now() + buildDelayMs;
+      while (Date.now() < until) {
+        /* deliberately synchronous */
+      }
+    }
   };
   return {
     targetFor: () => "COMPLIANT",
@@ -115,6 +129,10 @@ function makeTestDeps(opts: {
   partialRows?: number;
   /** Report an official logicVersion, which is what gates the ADR-043 empty-IPP check. */
   officialRouting?: boolean;
+  /** Make each bundle build cost observable wall time (#563 phase timing). */
+  bundleDelayMs?: number;
+  /** Throw from the bundle source after this many builds (#563 — partial-work attribution). */
+  throwAfterBundles?: number;
 }): ChunkTestDeps {
   const counters: Counters = {
     listCasesCalls: 0,
@@ -124,7 +142,7 @@ function makeTestDeps(opts: {
   };
   const auditEvents: Array<{ eventType: string; payload: Record<string, unknown> }> = [];
   const ipp = new Set(opts.ippSubjectIds ?? opts.subjects.map((s) => s.externalId));
-  const source = countingBundleSource(counters);
+  const source = countingBundleSource(counters, opts.bundleDelayMs ?? 0, opts.throwAfterBundles ?? 0);
   const realOutcomes = new SqliteOutcomeStore(db as never);
   const realCases = new SqliteCaseStore(db as never);
   const realRuns = new SqliteRunStore(db as never);
@@ -391,4 +409,142 @@ test("an unset chunk size still runs the whole roster, in one chunk", async () =
   const { run } = await runFully(deps, { scopeType: "MEASURE", measureId: OTHER });
   assert.equal((await deps.outcomeStore.listOutcomes(run.id)).length, 150);
   assert.deepEqual(deps.counters.recordOutcomesBatchSizes, [150]);
+});
+
+/**
+ * #563 — the phase timing, asserted through the REAL pipeline rather than by calling the formatter.
+ *
+ * The unit tests in `phase-timing.test.ts` cover the arithmetic. What they cannot show is that the
+ * pipeline actually emits a line per (chunk x measure), that the subject count is the chunk's, and
+ * that bundle construction is attributed to `bundleMs` rather than disappearing into `evalMs` — which
+ * is the whole reason the factory is timed separately.
+ */
+function collectTimings(deps: ChunkTestDeps): BatchPhaseTiming[] {
+  const seen: BatchPhaseTiming[] = [];
+  deps.onPhaseTiming = (t) => seen.push(t);
+  return seen;
+}
+
+/**
+ * Assert the run got far enough for the timing assertions to mean anything.
+ *
+ * The first version of these tests captured `console.log` globally and asserted only on the line
+ * count. It passed alone and FAILED in the full suite, reporting "0 lines" — which a reader would
+ * take for a broken instrument when it cannot actually distinguish that from a run that never
+ * reached the chunk loop. Asserting the run's own status first makes the two different failures.
+ */
+function assertRanChunks(run: { status: string }, timings: BatchPhaseTiming[], expected: number) {
+  assert.ok(run.status !== "FAILED", `the run must not have FAILED before the chunk loop (was ${run.status})`);
+  assert.equal(timings.length, expected, `${timings.length} timing(s) for ${expected} expected batch call(s)`);
+}
+
+test("#563: one timing line per chunk per measure, sized to the chunk", async () => {
+  const deps = makeTestDeps({ chunkSize: 100, subjects: seedSubjects(250) });
+  const timings = collectTimings(deps);
+  const { run } = await runFully(deps, { scopeType: "MEASURE", measureId: MEASURE });
+  assertRanChunks(run, timings, deps.counters.batchCalls.length);
+  assert.ok(timings.length > 0, "the fixture must emit timings, or every assertion below is vacuous");
+  assert.deepEqual(
+    timings.map((t) => t.subjects),
+    [100, 100, 50],
+    "the count is the CHUNK's subjects, not the roster's — a whole-roster number would hide chunking",
+  );
+  for (const t of timings) {
+    assert.equal(t.measureId, MEASURE);
+    assert.equal(t.outcome, "batched");
+    assert.ok(Number.isFinite(t.batchMs) && t.batchMs >= 0, "a real duration, not NaN");
+  }
+});
+
+test("#563: bundle construction is attributed to bundleMs, not buried in evalMs", async () => {
+  // 2 ms per bundle x 50 subjects is ~100 ms of bundle time the assertion can see. Without the
+  // factory being timed separately, this cost lands in evalMs and the operator is pointed at the CQL
+  // executor for a bundle-construction problem — two different fixes.
+  const deps = makeTestDeps({ chunkSize: 50, subjects: seedSubjects(50), bundleDelayMs: 2 });
+  const timings = collectTimings(deps);
+  const { run } = await runFully(deps, { scopeType: "MEASURE", measureId: MEASURE });
+  assertRanChunks(run, timings, 1);
+  const t = timings[0]!;
+  assert.ok(t.bundleMs >= 50, `bundleMs ${t.bundleMs} should carry the ~100 ms the source spent`);
+  assert.ok(t.batchMs >= t.bundleMs, "the total must contain the part");
+  assert.equal(t.evalMs, t.batchMs - t.bundleMs, "and the split must reconcile exactly");
+});
+
+test("#563: a batch FAILURE is still timed — a call that dies after 30 s is the interesting one", async () => {
+  const deps = makeTestDeps({ chunkSize: 100, subjects: seedSubjects(100) });
+  (deps.engine as { evaluateBatch: unknown }).evaluateBatch = async (
+    _measureId: string,
+    subjects: () => Array<{ subjectId: string }>,
+  ) => {
+    subjects();
+    throw new Error("executor exploded");
+  };
+  const timings = collectTimings(deps);
+  const { run } = await runFully(deps, { scopeType: "MEASURE", measureId: MEASURE });
+  assertRanChunks(run, timings, 1);
+  assert.equal(timings[0]!.outcome, "failed", "the outcome names what happened rather than omitting the line");
+});
+
+test("#563: a measure the engine cannot batch is timed as not-batchable", async () => {
+  const deps = makeTestDeps({ chunkSize: 100, subjects: seedSubjects(100) });
+  (deps.engine as { evaluateBatch: unknown }).evaluateBatch = async () => undefined;
+  const timings = collectTimings(deps);
+  const { run } = await runFully(deps, { scopeType: "MEASURE", measureId: MEASURE });
+  assertRanChunks(run, timings, 1);
+  assert.equal(timings[0]!.outcome, "not-batchable");
+  assert.equal(timings[0]!.bundleMs, 0, "the factory was never invoked, which is why this outcome exists");
+});
+
+test("#563: the timings ride on the run log, readable without container-log access", async () => {
+  // The WORKWELL_RUNTIME stdout line needs MIE container logs. This line is already written for every
+  // batched measure, so carrying the numbers on it costs no extra round trip and is readable at
+  // GET /api/runs/:id. Without it the instrument is only readable by whoever holds Launchpad.
+  const deps = makeTestDeps({ chunkSize: 50, subjects: seedSubjects(50), bundleDelayMs: 2 });
+  const timings = collectTimings(deps);
+  const { run } = await runFully(deps, { scopeType: "MEASURE", measureId: MEASURE });
+  assertRanChunks(run, timings, 1);
+  const line = (await deps.runStore.listLogs(run.id)).map((l) => l.message).find((m) => m.includes("one official batch"));
+  assert.ok(line, "the batched INFO line must exist, or this test is asserting about nothing");
+  assert.match(line!, /\[\d+ms total; bundles \d+ms; eval \d+ms; [\d.]+ms\/subject\]/, line!);
+  assert.ok(line!.includes(`${timings[0]!.batchMs}ms total`), "the logged total is the SAME measurement the sink saw");
+  assert.ok(line!.includes(`bundles ${timings[0]!.bundleMs}ms`), "and so is the bundle split");
+});
+
+test("#563: a factory that throws partway still reports the bundles it DID build", async () => {
+  // Without a `finally` around construction the accumulator is skipped entirely, so work that really
+  // happened reports bundleMs: 0 and its whole cost is relabelled executor time — on the failure path,
+  // which is where the attribution matters most. (Codex P2 on #588.)
+  const deps = makeTestDeps({ chunkSize: 50, subjects: seedSubjects(50), bundleDelayMs: 2, throwAfterBundles: 20 });
+  const timings = collectTimings(deps);
+  // The run itself FAILS here and that is correct: the per-subject loop calls the same throwing
+  // source, so every subject fails too. What is under test is the TIMING, so assert on it directly
+  // rather than through assertRanChunks, whose status guard exists for the other fixtures.
+  await runFully(deps, { scopeType: "MEASURE", measureId: MEASURE });
+  assert.equal(timings.length, 1, `${timings.length} timing(s); the batch must still have been timed`);
+  assert.equal(timings[0]!.outcome, "failed", "the factory threw, so the batch failed");
+  assert.ok(timings[0]!.bundleMs >= 20, `partial bundle work must survive the throw, got ${timings[0]!.bundleMs}ms`);
+});
+
+test("#563: batchMs stops when the batch settles, not after the error log's round trip", async () => {
+  // The emit point sits after a catch block that awaits an appendLog INSERT. Timing there folds a
+  // database round trip into batchMs and calls it executor time — and in the degraded pool this
+  // instrument exists to diagnose, that round trip is seconds. (Codex P2 on #588.)
+  const deps = makeTestDeps({ chunkSize: 50, subjects: seedSubjects(50) });
+  (deps.engine as { evaluateBatch: unknown }).evaluateBatch = async () => {
+    throw new Error("executor exploded");
+  };
+  const realAppendLog = deps.runStore.appendLog.bind(deps.runStore);
+  const SLOW_MS = 400;
+  (deps.runStore as { appendLog: unknown }).appendLog = async (id: string, level: string, message: string) => {
+    await new Promise((r) => setTimeout(r, SLOW_MS));
+    return realAppendLog(id, level, message);
+  };
+  const timings = collectTimings(deps);
+  const { run } = await runFully(deps, { scopeType: "MEASURE", measureId: MEASURE });
+  assertRanChunks(run, timings, 1);
+  assert.equal(timings[0]!.outcome, "failed");
+  assert.ok(
+    timings[0]!.batchMs < SLOW_MS,
+    `batchMs ${timings[0]!.batchMs}ms must exclude the ${SLOW_MS}ms log write, or a slow pool reads as slow CQL`,
+  );
 });
