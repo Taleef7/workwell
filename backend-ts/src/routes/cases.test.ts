@@ -725,6 +725,38 @@ test("GET /api/cases truncates fractional paging instead of handing Postgres a n
   }
 });
 
+/**
+ * The truncation above answers 200 for every input, which is why it could not see either of these:
+ * the status code was the whole assertion, and both defects keep it at 200 or move it to 500 for a
+ * reason no case in that list reaches. What a page CONTAINS is the assertion that catches them.
+ */
+test("GET /api/cases asks for the minimum when a limit truncates to zero, and bounds an offset to what a database will take", async () => {
+  // A sub-unit limit asks for as FEW rows as possible. Truncating `?limit=0.5` to zero and then
+  // reading zero through `|| fallback` called it unspecified and served the default page of fifty —
+  // the opposite of the request. Clamping before the fallback answers one, and `?limit=0` means the
+  // same thing rather than fifty.
+  const one = (await getPath("/api/cases?status=open&limit=1").then((r) => r!.json())) as Array<{ caseId: string }>;
+  assert.equal(one.length, 1, "the fixture has at least one open case, or the comparison below is vacuous");
+  for (const q of ["limit=0.5", "limit=0.9", "limit=0"]) {
+    const rows = (await getPath(`/api/cases?status=open&${q}`).then((r) => r!.json())) as Array<{ caseId: string }>;
+    assert.deepEqual(rows.map((r) => r.caseId), one.map((r) => r.caseId), `${q} asks for the minimum, not the default page`);
+  }
+
+  // An offset past the safe-integer range is a value the DATABASE refuses on both stores — Postgres
+  // answers 22003 for `1e20` (out of range for bigint) and 22P02 for `1e21` (which serializes as
+  // `1e+21`), and the SQLite floor answers a datatype mismatch for either — so it left the SQL page
+  // path as a 500. The uncapped loader hands the same value to `Array.slice`, which coerces it and
+  // answers an empty 200, so this was a loader disagreement as well as an error. Both must answer the
+  // same empty page; `site=` is a directory-only filter, so it forces the uncapped path (`sqlPageBlockedBy`).
+  for (const q of ["offset=1e20", "offset=1e21"]) {
+    for (const [path, loader] of [["", "the SQL page path"], ["&site=Anywhere", "the uncapped loader"]] as const) {
+      const res = await getPath(`/api/cases?status=open&${q}${path}`);
+      assert.equal(res?.status, 200, `${q} on ${loader} must be bounded, not 500`);
+      assert.deepEqual(await res!.json(), [], `${q} on ${loader} is past the end of the set`);
+    }
+  }
+});
+
 test("GET /api/cases accepts a calendar day, with or without the rest of an ISO timestamp", async () => {
   // The UI sends a bare day; a client forwarding a full instant must not be refused for it, and both
   // spellings mean the same UTC day on both stores.
