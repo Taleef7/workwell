@@ -913,6 +913,13 @@ export default function CaseDetailPage() {
                     Schedule Appointment
                   </Button>
                 </div>
+                {/* §8E on the DESKTOP path. The first version of this change put the notice only in
+                    the `md:hidden` column above, so every desktop user — which is most of them — saw
+                    the same unlabelled "Send outreach" the change existed to label. Sits under the
+                    row rather than inside it because the row is `flex flex-wrap` and a paragraph
+                    between buttons wraps as a flex item. "Schedule Appointment" carries its own
+                    notice inside the modal, at the moment the belief actually forms. */}
+                <LocalOnlyNotice action="Outreach" className="mt-3" />
                 </>
                 )}
                 <Modal open={appointmentModalOpen} onOpenChange={(open) => { if (!open) setAppointmentModalOpen(false); }} size="md">
