@@ -91,6 +91,19 @@ timeline is `audit_events WHERE ref_case_id = ?`, so a failed bucket write leave
 uploaded — <filename>" row with nothing to download. The rule picks the over-claim side for the LEDGER;
 whether a clinical-ops read should inherit it for a named file is an owner call.
 
+**Codex (#612).** Three findings; two were already closed by the round above (the recheck of
+`updateSegment`'s result, and §4's incomplete triage). The third was not.
+
+**The audit payload was a post-state GUESS.** Merging the request over a pre-read is wrong under
+concurrency: read `enabled: true`, let another admin set it false, change only the name, and
+`updateSegment` preserves the newer false while the event says true. The old post-write hydration could
+not be wrong about that because it re-read — and an audit-first event cannot re-read. So the payload is
+now **what this request CHANGES**: every field the body supplies, plus a `changed` list naming them, and
+nothing about the fields it does not set. A consumer wanting the resulting state reads the row; what the
+ledger is for is who changed what. Pinned by a deterministic race — another writer flips `enabled`
+between the pre-read and the write, and the event must say nothing about it.
+
+
 
 ## 2026-09-21 (night) — four paths flipped to audit-first, and the list was still wrong by three
 

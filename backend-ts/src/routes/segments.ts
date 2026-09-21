@@ -231,16 +231,26 @@ export async function handleSegments(req: Request, env: SegmentsEnv, actor: stri
     // existed until it had already tried to change it. The pre-read leaves a window in which the row
     // could vanish between the check and the write — an event for a change that then did not happen,
     // which is the side #598's rule deliberately picks.
-    const before = await store.getSegment(putId);
-    if (!before) return json({ error: "not_found", message: `Segment not found: ${putId}` }, 404);
-    // The post-state, resolved from the pre-state and the request rather than from a re-read: the
-    // payload describes the segment the three writes below are about to produce.
-    await audit(stores.events, "SEGMENT_UPDATED", putId, actor, {
-      name: (body.name as string | undefined) ?? before.name,
-      enabled: (body.enabled as boolean | undefined) ?? before.enabled,
-      // Deduped for the same reason as the create above; `before.measureIds` is already stored form.
-      measureIds: body.measureIds === undefined ? before.measureIds : storedMeasureIds(body.measureIds as string[]),
-    });
+    if (!(await store.getSegment(putId))) return json({ error: "not_found", message: `Segment not found: ${putId}` }, 404);
+    // **The payload is what THIS REQUEST CHANGES, not the resulting state** (Codex, #612).
+    //
+    // The first cut merged the request over a pre-read, so it reported a post-state — and under two
+    // concurrent admins that post-state is a guess: read `enabled: true`, let the other request set it
+    // false, change only the name, and `updateSegment` preserves the newer false while the event says
+    // true. The old post-write hydration could not be wrong about that, because it re-read; an
+    // audit-first event cannot re-read, so it must not claim the parts it does not set.
+    //
+    // A consumer wanting the resulting state reads the row. What the ledger is FOR is who changed what,
+    // and every field here is one this request supplies — knowable before the write and true after it.
+    const changes: Record<string, unknown> = {};
+    if (body.name !== undefined) changes.name = body.name;
+    if (body.description !== undefined) changes.description = body.description;
+    if (body.enabled !== undefined) changes.enabled = body.enabled;
+    if (body.rule !== undefined) changes.rule = body.rule;
+    // Deduped for the same reason as the create above: it is what the row will hold.
+    if (body.measureIds !== undefined) changes.measureIds = storedMeasureIds(body.measureIds as string[]);
+    if (body.overrides !== undefined) changes.overrides = body.overrides;
+    await audit(stores.events, "SEGMENT_UPDATED", putId, actor, { changed: Object.keys(changes).sort(), ...changes });
     // **`patched` is still checked, and dropping that check was a real regression** (review of #612).
     // The pre-read covers the ordinary not-found; this null covers the row VANISHING between the two,
     // and it guarded the two writes below as well. Without it a concurrent delete gave either a 500

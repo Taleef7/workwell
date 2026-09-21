@@ -229,33 +229,58 @@ test("SEGMENT_CREATED names the id the segment is created under (#598)", async (
   assert.equal((JSON.parse(row!.payload_json) as { name: string }).name, "Audit-order welders");
 });
 
-test("SEGMENT_UPDATED reports the post-state resolved from the pre-state and the request (#598)", async () => {
-  // The payload used to come from a re-read AFTER the three writes, which is what forced the audit to
-  // come second. It is now merged from the row as it was plus the fields the request carries — so a
-  // PARTIAL body must still report the unchanged fields, not drop them.
+test("SEGMENT_UPDATED reports what THIS REQUEST changes, not the resulting state (#598)", async () => {
+  // The payload came from a re-read AFTER the three writes, which is what forced the audit to come
+  // second. The first audit-first cut replaced that with a pre-read merged under the request — a
+  // post-state GUESS, and wrong under concurrency (Codex on #612): read `enabled: true`, let another
+  // admin set it false, change only the name, and `updateSegment` preserves the newer false while the
+  // event says true. An audit-first event cannot re-read, so it must not claim the parts it does not
+  // set.
   const created = (await (await post({ name: "Before", rule: welderRule, measureIds: ["audiogram"] }))!.json()) as { id: string };
-  const res = await put(created.id, { name: "After" }); // name only: measureIds and enabled are untouched
-  assert.equal(res?.status, 200);
-  const row = await (env.DB as { prepare: (s: string) => { bind: (...a: unknown[]) => { first: <T>() => Promise<T | null> } } })
-    .prepare("SELECT payload_json FROM audit_events WHERE event_type = 'SEGMENT_UPDATED' AND entity_id = ?")
-    .bind(created.id)
-    .first<{ payload_json: string }>();
-  assert.ok(row);
-  const payload = JSON.parse(row!.payload_json) as { name: string; enabled: boolean; measureIds: string[] };
-  assert.equal(payload.name, "After", "the requested change");
-  assert.deepEqual(payload.measureIds, ["audiogram"], "and the fields the request did not mention");
-  assert.equal(payload.enabled, true);
+  assert.equal((await put(created.id, { name: "After" }))?.status, 200); // name only
+  const payload = (await eventPayload("SEGMENT_UPDATED", created.id)) as Record<string, unknown>;
+  assert.equal(payload.name, "After", "the field the request supplies");
+  assert.deepEqual(payload.changed, ["name"], "and `changed` names exactly that set");
+  for (const untouched of ["enabled", "measureIds", "rule", "description", "overrides"]) {
+    assert.ok(!(untouched in payload), `${untouched} is ABSENT — the request said nothing about it`);
+  }
 
-  // DEDUPED and ORDERED, because that is what the row holds: `setMeasures` writes a Set and `hydrate`
-  // reads back ordered. Reporting the request array verbatim made the event name a list the segment
-  // never contained — harmless while the audit came second, a payload-accuracy regression once it
-  // comes first (#612 review).
+  // The concurrency case itself, made deterministic: another writer flips `enabled` between this
+  // request's pre-read and its write. The event must not have claimed a value for it.
+  const raced = (await (await post({ name: "Raced", rule: welderRule, measureIds: [] }))!.json()) as { id: string };
+  const realGet = SqliteSegmentStore.prototype.getSegment;
+  let flipped = false;
+  SqliteSegmentStore.prototype.getSegment = async function racy(this: SqliteSegmentStore, id: string) {
+    const row = await realGet.call(this, id);
+    if (!flipped && id === raced.id) {
+      flipped = true;
+      await realGet.call(this, id); // read-through, then the "other admin" writes
+      await SqliteSegmentStore.prototype.updateSegment.call(this, id, { enabled: false });
+    }
+    return row;
+  } as typeof realGet;
+  try {
+    assert.equal((await put(raced.id, { name: "Renamed" }))?.status, 200);
+  } finally {
+    SqliteSegmentStore.prototype.getSegment = realGet;
+  }
+  const racedPayload = (await eventPayload("SEGMENT_UPDATED", raced.id)) as Record<string, unknown>;
+  assert.ok(!("enabled" in racedPayload), "the event says nothing about a field it did not set");
+  const after = ((await (await getList())!.json()) as Array<{ id: string; enabled: boolean }>).find((x) => x.id === raced.id);
+  assert.equal(after?.enabled, false, "and the other writer's value survived, which is what the old merge would have mis-reported");
+});
+
+test("SEGMENT_CREATED reports the measure list the ROW will hold, deduped and ordered (#598)", async () => {
+  // `setMeasures` writes a Set and `hydrate` reads back ordered, so the request array can name a list
+  // the segment never contained. Harmless while the audit came second; a payload-accuracy regression
+  // once it comes first (#612 review).
   const dupes = (await (await post({ name: "Dupes", rule: welderRule, measureIds: ["tb_surveillance", "audiogram", "audiogram"] }))!.json()) as { id: string; measureIds: string[] };
   assert.deepEqual(
-    (await eventPayload("SEGMENT_CREATED", dupes.id) as { measureIds: string[] }).measureIds,
+    ((await eventPayload("SEGMENT_CREATED", dupes.id)) as { measureIds: string[] }).measureIds,
     dupes.measureIds,
     "the event's list is the row's list",
   );
+  assert.deepEqual(dupes.measureIds, ["audiogram", "tb_surveillance"], "and not vacuous: the request sent three, deduped");
 });
 
 test("DELETE audits BEFORE the row goes — the event survives a failed delete (#598)", async () => {
