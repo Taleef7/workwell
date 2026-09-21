@@ -6,6 +6,7 @@
 import { isUuid, withStatementTimeoutDisabled, type PgPool } from "./pg-database.ts";
 import { SPIKE_SCHEMA } from "./schema-pg.ts";
 import { LATEST_RUN_PROBE_BUDGET } from "../outcome-store.ts";
+import { ProbeCache } from "../probe-cache.ts";
 import type {
   OutcomeRecord,
   OutcomeStore,
@@ -65,7 +66,19 @@ export class PgOutcomeStore implements OutcomeStore {
    */
   private readonly scaleCache = new Map<string, ScaleGroupCount[]>();
 
+  /**
+   * The winners probe, memoized under the candidate run list — see `stores/probe-cache.ts` for why
+   * that identity is exact and what compaction does to it. Bounded at 32 (measureIds, perMeasure,
+   * date-window) combinations; the dashboard uses two.
+   */
+  private readonly latestRunCache = new ProbeCache<LatestPopulationRun[]>();
+
   async recordOutcome(input: RecordOutcomeInput): Promise<OutcomeRecord> {
+    // A write can add the first row of a measure to a run ALREADY in the candidate list, which the
+    // winners memo's key cannot see (`stores/probe-cache.ts`). Dropped on both sides of the insert:
+    // before, so a partially-applied failed write leaves nothing cached; after, so a read that landed
+    // mid-write does not leave a stale entry behind it.
+    this.latestRunCache.clear();
     const id = crypto.randomUUID();
     const evaluatedAt = input.evaluatedAt ?? new Date().toISOString();
     const evaluationPeriod = input.evaluationPeriod ?? "";
@@ -74,6 +87,7 @@ export class PgOutcomeStore implements OutcomeStore {
        VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9)`,
       [id, input.runId, input.subjectId, input.measureId, evaluationPeriod, input.status, JSON.stringify(input.evidence ?? {}), evaluatedAt, input.outOfPopulation ?? null],
     );
+    this.latestRunCache.clear();
     return {
       id,
       runId: input.runId,
@@ -89,6 +103,7 @@ export class PgOutcomeStore implements OutcomeStore {
 
   async recordOutcomes(inputs: RecordOutcomeInput[]): Promise<OutcomeRecord[]> {
     if (inputs.length === 0) return [];
+    this.latestRunCache.clear(); // see recordOutcome
     // Chunked multi-row INSERT so the trend-history backfill (~100 rows/run × weeks × measures)
     // is a handful of round-trips on Neon, not thousands. 9 columns/row × CHUNK must stay well
     // under Postgres' 65535 bind-parameter cap; 500 rows = 4500 params, comfortably safe.
@@ -146,13 +161,14 @@ export class PgOutcomeStore implements OutcomeStore {
       throw err;
     } finally {
       client.release();
+      this.latestRunCache.clear();
     }
     return records;
   }
 
   async listOutcomes(
     runId: string,
-    opts?: { limit?: number; offset?: number; measureId?: string; subjectId?: string; subjectIds?: readonly string[] },
+    opts?: { limit?: number; offset?: number; measureId?: string; subjectId?: string; subjectIds?: readonly string[]; order?: "none" },
   ): Promise<OutcomeRecord[]> {
     // Native UUID column: a malformed run id yields no rows on the floor, so don't
     // let Postgres throw `invalid input syntax for type uuid` — match the contract.
@@ -169,9 +185,15 @@ export class PgOutcomeStore implements OutcomeStore {
     let page = "";
     if (opts?.limit != null) page += ` LIMIT $${binds.push(Math.max(0, opts.limit))}`;
     if (opts?.offset != null) page += ` OFFSET $${binds.push(Math.max(0, opts.offset))}`;
+    // `order: "none"` drops the sort for a caller that FOLDS the rows (see the interface): no index
+    // serves `(evaluated_at, id)`, so an ordered read of one measure of a population run sorts the
+    // measure's whole evidence. A PAGED read KEEPS the ordering whatever the caller asked for, because
+    // paging an unordered relation may repeat or skip rows between pages — the option makes the read
+    // cheaper, never the paging wrong.
+    const order = opts?.order === "none" && page === "" ? "" : " ORDER BY evaluated_at ASC, id ASC";
     const { rows } = await this.pool.query<OutcomeRow>(
       `SELECT id, run_id, subject_id, measure_id, evaluation_period, status, evidence_json, evaluated_at, out_of_population
-         FROM ${T} WHERE run_id = $1${where} ORDER BY evaluated_at ASC, id ASC${page}`,
+         FROM ${T} WHERE run_id = $1${where}${order}${page}`,
       binds,
     );
     return rows.map(toRecord);
@@ -261,6 +283,10 @@ export class PgOutcomeStore implements OutcomeStore {
           )`,
       [cutoff],
     );
+    // The one thing that can change a winners probe's answer without changing the candidate run list:
+    // a run deeper in a `perMeasure` window can lose its last row for a measure here. A WINNER cannot
+    // (its rows are keep-set rows by construction), but the memo does not know that, so it is dropped.
+    this.latestRunCache.clear();
     return rowCount ?? 0;
     });
   }
@@ -526,49 +552,66 @@ export class PgOutcomeStore implements OutcomeStore {
         ORDER BY r.started_at DESC, r.id DESC LIMIT ${LATEST_RUN_PROBE_BUDGET}`,
       binds,
     );
-    const remaining = new Map<string, number>(wanted.map((m) => [m, per]));
-    const out: LatestPopulationRun[] = [];
-    for (const run of runs) {
-      if (remaining.size === 0) break;
-      const { rows: hits } = await this.pool.query<{ measure_id: string }>(
-        `SELECT m.measure_id FROM unnest($2::text[]) AS m(measure_id)
-          WHERE EXISTS (SELECT 1 FROM ${SPIKE_SCHEMA}.outcomes o WHERE o.run_id = $1 AND o.measure_id = m.measure_id)`,
-        [run.id, [...remaining.keys()]],
-      );
-      for (const hit of hits) {
-        const left = remaining.get(hit.measure_id);
-        if (left === undefined) continue;
-        out.push(toWinner(hit.measure_id, run));
-        if (left <= 1) remaining.delete(hit.measure_id);
-        else remaining.set(hit.measure_id, left - 1);
+    // Everything from here on is decided by the candidate list just read, the measures asked for and
+    // `per` — so it is memoized under exactly those, and the cheap statement above is the only one a
+    // warm call makes. `stores/probe-cache.ts` carries why that identity is exact; the measured cost
+    // of NOT doing this was 2.5–4 s per call, thirteen times per `/programs` page load.
+    const probeKey = JSON.stringify([
+      [...wanted].sort(),
+      per,
+      filter.from ?? null,
+      filter.to ?? null,
+      filter.excludeScale === true,
+      filter.excludeTrendHistory === true,
+      runs.map((r) => r.id),
+    ]);
+    const winners = await this.latestRunCache.resolve(probeKey, async () => {
+      const remaining = new Map<string, number>(wanted.map((m) => [m, per]));
+      const out: LatestPopulationRun[] = [];
+      for (const run of runs) {
+        if (remaining.size === 0) break;
+        const { rows: hits } = await this.pool.query<{ measure_id: string }>(
+          `SELECT m.measure_id FROM unnest($2::text[]) AS m(measure_id)
+            WHERE EXISTS (SELECT 1 FROM ${SPIKE_SCHEMA}.outcomes o WHERE o.run_id = $1 AND o.measure_id = m.measure_id)`,
+          [run.id, [...remaining.keys()]],
+        );
+        for (const hit of hits) {
+          const left = remaining.get(hit.measure_id);
+          if (left === undefined) continue;
+          out.push(toWinner(hit.measure_id, run));
+          if (left <= 1) remaining.delete(hit.measure_id);
+          else remaining.set(hit.measure_id, left - 1);
+        }
       }
-    }
-    if (remaining.size === 0 || runs.length < LATEST_RUN_PROBE_BUDGET) return out;
+      if (remaining.size === 0 || runs.length < LATEST_RUN_PROBE_BUDGET) return out;
 
-    // 2) The leftovers, each by ONE bounded query over its own index entries: the distinct (measure,
-    //    run) pairs of that measure, ranked newest-first under the same run predicates — the
-    //    reduction listLatestPopulationOutcomes performs, restricted to the measures the walk could not
-    //    settle. `rn` continues past what the walk already found so the window stays exact.
-    const leftover = [...remaining.keys()];
-    const lbinds: unknown[] = [...binds, leftover, per];
-    const { rows: ranked } = await this.pool.query<RunRow & { measure_id: string; rn: string }>(
-      `SELECT * FROM (
-         SELECT d.measure_id, r.id, r.started_at, r.scope_type, r.status, r.triggered_by,
-                ROW_NUMBER() OVER (PARTITION BY d.measure_id ORDER BY r.started_at DESC, r.id DESC) AS rn
-           FROM (SELECT DISTINCT o.measure_id, o.run_id FROM ${SPIKE_SCHEMA}.outcomes o WHERE o.measure_id = ANY($${binds.length + 1}::text[])) d
-           JOIN ${SPIKE_SCHEMA}.runs r ON r.id = d.run_id
-          WHERE ${runWhere.join(" AND ")}
-       ) x WHERE rn <= $${binds.length + 2}::int ORDER BY measure_id, rn`,
-      lbinds,
-    );
-    for (const row of ranked) {
-      const left = remaining.get(row.measure_id);
-      if (left === undefined) continue;
-      // The walk already banked (per - left) newest winners for this measure; skip those ranks.
-      if (Number(row.rn) <= per - left) continue;
-      out.push(toWinner(row.measure_id, row));
-    }
-    return out;
+      // 2) The leftovers, each by ONE bounded query over its own index entries: the distinct (measure,
+      //    run) pairs of that measure, ranked newest-first under the same run predicates — the
+      //    reduction listLatestPopulationOutcomes performs, restricted to the measures the walk could not
+      //    settle. `rn` continues past what the walk already found so the window stays exact.
+      const leftover = [...remaining.keys()];
+      const lbinds: unknown[] = [...binds, leftover, per];
+      const { rows: ranked } = await this.pool.query<RunRow & { measure_id: string; rn: string }>(
+        `SELECT * FROM (
+           SELECT d.measure_id, r.id, r.started_at, r.scope_type, r.status, r.triggered_by,
+                  ROW_NUMBER() OVER (PARTITION BY d.measure_id ORDER BY r.started_at DESC, r.id DESC) AS rn
+             FROM (SELECT DISTINCT o.measure_id, o.run_id FROM ${SPIKE_SCHEMA}.outcomes o WHERE o.measure_id = ANY($${binds.length + 1}::text[])) d
+             JOIN ${SPIKE_SCHEMA}.runs r ON r.id = d.run_id
+            WHERE ${runWhere.join(" AND ")}
+         ) x WHERE rn <= $${binds.length + 2}::int ORDER BY measure_id, rn`,
+        lbinds,
+      );
+      for (const row of ranked) {
+        const left = remaining.get(row.measure_id);
+        if (left === undefined) continue;
+        // The walk already banked (per - left) newest winners for this measure; skip those ranks.
+        if (Number(row.rn) <= per - left) continue;
+        out.push(toWinner(row.measure_id, row));
+      }
+      return out;
+    });
+    // A copy, so a caller that sorts or splices its answer cannot edit the cached one.
+    return [...winners];
   }
 
   async aggregateScaleRun(runId: string): Promise<ScaleGroupCount[]> {

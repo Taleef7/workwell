@@ -30,6 +30,16 @@ export const AGGREGATE_PAGE = 2000;
 export interface OfficialRunAggregate extends RateAggregate {
   /** The artifact identity read off the first evaluated row; null when no row carried one. */
   official: OfficialReportIdentity | null;
+  /**
+   * Whether the run's rows FOR THIS MEASURE carry official population evidence — the same question
+   * {@link runProducedOfficialEvidence} answers, decided by the same rule (the first EVALUATED row
+   * settles it; an errored row carries no engine's evidence and is skipped).
+   *
+   * It travels with the counts so a caller that is going to aggregate anyway reads the rows ONCE.
+   * `officialMeasureRate` asked the probe and then aggregated, which on the pilot was two reads of the
+   * same 20,000 evidence blobs per measure, six measures deep, on the programs overview's cold path.
+   */
+  producedOfficialEvidence: boolean;
 }
 
 /**
@@ -76,13 +86,30 @@ export async function aggregateOfficialRun(
   // unscoped scan sums every measure the run touched and returns that one number for whichever measure
   // was asked about. On the pilot's 2026-09-08 nightly that served CMS125's initial population, score
   // and `ecqmId` under CMS122's name on the programs overview.
-  for (let offset = 0; ; offset += AGGREGATE_PAGE) {
-    const page = await os.listOutcomes(runId, { limit: AGGREGATE_PAGE, offset, measureId });
-    for (const row of page) {
-      aggregator.add(row);
-      if (!identity && !isEvaluationErrorEvidence(row.evidence)) identity = officialReportIdentity(row.evidence);
+  // ONE unordered statement, not a LIMIT/OFFSET walk (2026-09-21). The walk cost one sort of the
+  // measure's whole evidence PER PAGE — `(evaluated_at, id)` has no index, and each page re-ran the
+  // same filter and sort to skip further into it — so ten pages did ten times the server work for the
+  // same bytes. On the pilot that made the programs overview's cold read the statement the 30 s role
+  // default cancelled: `/api/programs/overview` answered 503 `statement_timeout`.
+  //
+  // Nothing here reads the rows in order, so dropping the sort changes no answer. What it does change
+  // is the memory bound the paging gave: peak is now one (run, measure)'s rows rather than
+  // AGGREGATE_PAGE of them. That is a SMALLER read than the same request already makes — the overview
+  // reads the winning run's rows for every measure at once (`listOutcomesWithRun`), six times this —
+  // and the rows are folded as they arrive, so only the result set is held.
+  let producedOfficialEvidence = false;
+  let settled = false;
+  for (const row of await os.listOutcomes(runId, { measureId, order: "none" })) {
+    aggregator.add(row);
+    if (isEvaluationErrorEvidence(row.evidence)) continue;
+    if (!identity) identity = officialReportIdentity(row.evidence);
+    // The FIRST evaluated row settles provenance, exactly as `runProducedOfficialEvidence` does.
+    // Asking every row instead would re-alert on each unreadable blob (`officialMembership` warns),
+    // and would let one late official row relabel a run the first evaluated row called authored.
+    if (!settled) {
+      settled = true;
+      producedOfficialEvidence = officialMembership(row.evidence) !== null;
     }
-    if (page.length < AGGREGATE_PAGE) break;
   }
-  return { ...aggregator.finish(), official: identity };
+  return { ...aggregator.finish(), official: identity, producedOfficialEvidence };
 }

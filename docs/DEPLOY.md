@@ -975,6 +975,35 @@ Two operational consequences worth knowing before changing the deployment shape:
 Because live deployments do not run a separate claiming worker daemon, any run left queued without a worker
 is recovered to `FAILED` with an audited `RUN_RECOVERED` event and alert. An audit failure restores the run so the next boot retries.
 
+**Read-model warm at boot (ADR-087, 2026-09-21).** Beside the two sweeps above, boot starts a
+best-effort `warmReadModels` pass in the background: the programs overview, the site list, and each
+active measure's trend, top-drivers and risk outlook, at the UNFILTERED key the dashboard opens with.
+Every one of those memos lives in the process, so **a deploy empties all of them** — and until this
+existed the first person to open `/programs` after a release paid the whole cold derive. On 2026-09-21
+they did not pay it: `/api/programs/overview` answered `503 statement_timeout` at 30 s and the page
+rendered "Failed to load program data" over "No active measures".
+
+It is a SEPARATE background task from the run sweep (which retries a cold Neon three times over 45 s,
+and a warm that waited for it would leave the window open), runs twice if the first attempt fails,
+never starts once shutdown has begun, and computes nothing that is not computed on demand — so a
+failure costs only the warmth. Two log lines to grep after a deploy:
+
+```
+[workwell] read models warmed at boot in <ms>ms
+[workwell] boot read-model warm failed after <ms>ms: <reason> — the first /programs request pays the cold read
+```
+
+A post-run warm still runs after every population run, so the nightly's invalidation is covered too.
+**Gated on `DATABASE_URL`** for the same reason the sweep is: a stack without one has no pool to warm.
+
+> **The largest remaining `/programs` cost is an index that does not exist, and it is owner DDL.**
+> `outcomes` is indexed on `run_id` but not `(run_id, measure_id)`, so the winners walk's `EXISTS`
+> probe per (run, measure) walks the run's index entries — 2.5–4 s on the pilot — and the measure's
+> evidence read has no plan that avoids a sort. `CREATE INDEX IF NOT EXISTS
+> spike_outcomes_run_measure_idx ON <schema>.outcomes (run_id, measure_id);` is additive, reversible
+> (`DROP INDEX`) and needs no data migration — the same class as the three `OWNER-APPROVED DDL` blocks
+> in `schema-pg.ts`. ADR-087 records the measurements; the decision is Taleef's.
+
 **Backend image tags are namespaced, and that is load-bearing — do not "simplify" it.** Maui and TWH
 share one GHCR backend repository (`ghcr.io/taleef7/workwell-api-ts`), and
 `reconcile-twh-mieweb.yml` heals the live `twh-api-ts` container by recreating it from that

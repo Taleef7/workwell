@@ -7,7 +7,7 @@
  * (`complianceRateOf`), and no improvement is ever computed between the two (ADR-077 d5).
  */
 import type { OutcomeStore } from "../stores/outcome-store.ts";
-import { aggregateOfficialRun, runProducedOfficialEvidence } from "../fhir/run-aggregate.ts";
+import { aggregateOfficialRun } from "../fhir/run-aggregate.ts";
 import { officialMeasureSemantics } from "../wiring/official-measure-semantics.ts";
 
 export interface MeasureRateGroup {
@@ -57,11 +57,18 @@ export async function officialMeasureRate(
   const key = `${runId}|${measureId}`;
   const hit = memo.get(key);
   if (hit) return hit;
-  // One row decides whether there is official evidence to reduce; an authored measure is never paged.
-  // Scoped to the measure: on an ALL_PROGRAMS run every measure's rows share the run id, so an
-  // unscoped question is answered by whichever measure happened to sort first.
-  if (!(await runProducedOfficialEvidence(os, runId, measureId))) return null;
+  // ONE read of the measure's rows, which also answers whether there was official evidence to reduce
+  // (`producedOfficialEvidence`). It used to ask `runProducedOfficialEvidence` first and then
+  // aggregate — two reads of the same 20,000 evidence blobs per measure, six measures deep, on the
+  // programs overview's cold path. Scoped to the measure either way: on an ALL_PROGRAMS run every
+  // measure's rows share the run id, so an unscoped question is answered by whichever measure
+  // happened to sort first.
+  //
+  // An AUTHORED measure now pays the read rather than one row. That is the trade this makes, and it is
+  // the right way round: on the pilot every routed measure is official, so the authored case is TWH's
+  // small occupational rosters, while the official case is the 20,000-patient one that was timing out.
   const aggregate = await aggregateOfficialRun(os, runId, measureId);
+  if (!aggregate.producedOfficialEvidence) return null;
   const labels = officialMeasureSemantics(measureId)?.rateLabels;
   const rate: MeasureRate = {
     source: "official-evidence",

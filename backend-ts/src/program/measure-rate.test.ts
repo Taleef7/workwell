@@ -92,3 +92,49 @@ test("an ALL_PROGRAMS run is read PER MEASURE — each measure's rate is its own
   assert.equal(a?.official?.ecqmId, "122FHIR");
   assert.equal(b?.official?.ecqmId, "125FHIR", "the artifact identity is the measure's, not the first row of the run");
 });
+
+test("ONE read per (run, measure), unordered — the shape the statement timeout forced (2026-09-21)", async () => {
+  resetMeasureRateMemo();
+  // Until now this path asked `runProducedOfficialEvidence` and then aggregated: two reads of the same
+  // rows, the second a LIMIT/OFFSET walk that re-sorted the measure's whole evidence per page. On the
+  // pilot's 20,000-patient measures that was the statement the 30 s role default cancelled, and
+  // `/api/programs/overview` answered 503.
+  const rows = [
+    rec("OVERDUE", official({ ipp: true, denom: true, numer: true, denex: false, denexcep: false }), "cms122"),
+    rec("COMPLIANT", official({ ipp: true, denom: true, numer: false, denex: false, denexcep: false }), "cms122"),
+  ];
+  const seen: Array<{ measureId?: string; order?: string; limit?: number; offset?: number }> = [];
+  const os = {
+    listOutcomes: async (_runId: string, opts?: { limit?: number; offset?: number; measureId?: string; order?: "none" }) => {
+      seen.push({ measureId: opts?.measureId, order: opts?.order, limit: opts?.limit, offset: opts?.offset });
+      return opts?.measureId ? rows.filter((r) => r.measureId === opts.measureId) : rows;
+    },
+  };
+  const rate = await officialMeasureRate(os, "run-one-read", "cms122");
+  assert.deepEqual(rate?.rates.map((r) => [r.ipp, r.numer]), [[2, 1]]);
+  assert.equal(seen.length, 1, "one read, not a probe plus a page walk");
+  assert.deepEqual(seen[0], { measureId: "cms122", order: "none", limit: undefined, offset: undefined });
+});
+
+test("an ERRORED row first still settles provenance from the first EVALUATED row", async () => {
+  resetMeasureRateMemo();
+  // `listOutcomes` used to order by `(evaluated_at, id)`, and an evaluation failure REPLACES the
+  // evidence with `{ evaluationError }` — so an errored row sorting first once sent a whole official
+  // run down the authored path. Unordered reads make row order arbitrary rather than adverse, which is
+  // strictly more reason for the rule to hold: the FIRST EVALUATED row decides, wherever it lands.
+  const rows = [
+    rec("MISSING_DATA", { evaluationError: "engine threw", message: "boom" }, "cms122"),
+    rec("OVERDUE", official({ ipp: true, denom: true, numer: true, denex: false, denexcep: false }), "cms122"),
+  ];
+  const os = { listOutcomes: async () => rows };
+  const rate = await officialMeasureRate(os, "run-err-first", "cms122");
+  assert.ok(rate, "an errored row carries no engine's evidence and must not read as 'not official'");
+  assert.equal(rate.evaluationErrors, 1);
+  assert.deepEqual(rate.rates.map((r) => [r.ipp, r.numer]), [[1, 1]]);
+});
+
+test("a run whose EVERY row errored has no rate, and says so rather than reporting zeros", async () => {
+  resetMeasureRateMemo();
+  const os = { listOutcomes: async () => [rec("MISSING_DATA", { evaluationError: "boom" }, "cms122")] };
+  assert.equal(await officialMeasureRate(os, "run-all-err", "cms122"), null);
+});

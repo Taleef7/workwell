@@ -184,6 +184,58 @@ async function main(): Promise<void> {
     })().catch((e: unknown) =>
       console.error("[workwell] boot recovery failed", e instanceof Error ? e.message : e),
     );
+
+    // WARM THE DASHBOARD'S READ MODELS, once, off the request path.
+    //
+    // Every one of them is memoized IN PROCESS (`RunKeyedMemo`, the measure-rate memo, the winners
+    // probe), and a deploy throws all of it away — so until now the first person to open `/programs`
+    // after a release paid the whole cold derive while they watched a skeleton. On the pilot, on
+    // 2026-09-21, they did not pay it: `/api/programs/overview` answered **503 statement_timeout** at
+    // 30 s, twice, and the page rendered "Failed to load program data" over "No active measures".
+    // `warmReadModels` already existed and already ran after every population run (#547) — which
+    // covers the nightly and misses every restart, the one moment the caches are guaranteed empty.
+    //
+    // A SEPARATE task from the recovery sweep above, deliberately: the sweep retries a cold Neon three
+    // times over 45 s, and a warm that waited for it would leave the window it exists to close wide
+    // open. Both are best-effort and neither blocks the listener.
+    //
+    // It computes nothing that is not computed on demand, so a failure costs only the warmth — the
+    // same posture the retention pass takes. Under `stopping` it does not start: a warm is worthless
+    // to a process that is leaving, and the next boot warms from its own.
+    void (async () => {
+      // TWO attempts, 30 s apart, for the same reason the sweep above retries: the likeliest failure
+      // is a serverless Postgres refusing the first connection of a cold container, and losing the
+      // warm to that leaves the window this exists to close open until the next nightly.
+      for (const attempt of [0, 1]) {
+        if (stopping) return;
+        const started = Date.now();
+        try {
+          const { getStores } = await import("./stores/factory.ts");
+          const { warmReadModels } = await import("./program/warm-read-models.ts");
+          const stores = await getStores(schedulerEnv);
+          await warmReadModels({
+            runStore: stores.runs,
+            outcomeStore: stores.outcomes,
+            caseStore: stores.cases,
+            qualitySnapshots: stores.qualitySnapshots,
+            webChartEnv: schedulerEnv,
+          });
+          console.log(`[workwell] read models warmed at boot in ${Date.now() - started}ms`);
+          return;
+        } catch (err) {
+          const msg = String((err as Error)?.message ?? err);
+          if (attempt === 0) {
+            console.warn(`[workwell] boot read-model warm attempt 1 failed (${msg}) — retrying in 30s`);
+            await new Promise((r) => setTimeout(r, 30_000).unref());
+            continue;
+          }
+          console.warn(
+            `[workwell] boot read-model warm failed after ${Date.now() - started}ms: ${msg} — ` +
+              `the first /programs request pays the cold read`,
+          );
+        }
+      }
+    })();
   }
 
   const schedulerInterval = setInterval(() => {

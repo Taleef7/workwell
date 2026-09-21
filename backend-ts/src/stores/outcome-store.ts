@@ -218,6 +218,26 @@ export interface OutcomeStore {
        * absent filter, the same rule `CaseQuery.employeeIds` follows. Composes with `subjectId`.
        */
       subjectIds?: readonly string[];
+      /**
+       * Drop the `ORDER BY` — for a caller that FOLDS the rows and does not read them in order.
+       *
+       * The default ordering is `(evaluated_at, id)` and no index serves it, so every ordered read of
+       * one measure of a whole-population run sorts the measure's rows — on the pilot 20,000 of them,
+       * carrying `evidence_json`. `aggregateOfficialRun` paid that sort ELEVEN times per (run,
+       * measure): once for the one-row provenance probe and once per `LIMIT/OFFSET` page, each page
+       * re-running the same filter and the same sort to skip further into it. Six measures made the
+       * programs overview's cold read the slowest statement on the deployment, and on 2026-09-21 it
+       * was the one the 30 s role default (ADR-084) cancelled — `/api/programs/overview` answered 503
+       * `statement_timeout` on a cold process.
+       *
+       * Unordered is only correct where the ANSWER does not depend on order, which is why this is an
+       * opt-in on the read rather than a change to the default. A caller that pages MUST keep the
+       * ordering: paging an unordered relation may repeat or skip rows between pages.
+       *
+       * A test double that ignores this option returns the same rows in some order and every folded
+       * answer is unchanged — so the option cannot make a fake disagree with the stores.
+       */
+      order?: "none";
     },
   ): Promise<OutcomeRecord[]>;
   getOutcomeById(id: string): Promise<OutcomeRecord | null>;
