@@ -61,20 +61,9 @@ export async function scheduleAppointment(
   const notes = input.notes && input.notes.trim() !== "" ? input.notes.trim() : null;
   const appointmentId = crypto.randomUUID();
 
-  await deps.appointments.insert({
-    id: appointmentId,
-    caseId,
-    employeeId: existing.employeeId,
-    measureId: existing.measureId,
-    appointmentType,
-    scheduledAt,
-    location,
-    status: "PENDING",
-    notes,
-    createdBy: actor,
-  });
-
   const payload = { appointmentId, appointmentType, scheduledAt, location, notes: notes ?? "" };
+  // AUDIT BEFORE MUTATE (#598). `appointmentId` is minted above rather than by the insert, so the
+  // action and its audit — already one transaction inside `recordCaseEvent` — can precede the row.
   await deps.events.recordCaseEvent({
     action: { caseId, actionType: "SCHEDULE_APPOINTMENT", actor, payload: { type: "SCHEDULE_APPOINTMENT", ...payload } },
     audit: {
@@ -87,6 +76,18 @@ export async function scheduleAppointment(
       refMeasureVersionId: existing.measureId,
       payload,
     },
+  });
+  await deps.appointments.insert({
+    id: appointmentId,
+    caseId,
+    employeeId: existing.employeeId,
+    measureId: existing.measureId,
+    appointmentType,
+    scheduledAt,
+    location,
+    status: "PENDING",
+    notes,
+    createdBy: actor,
   });
 
   // An OPEN case moves to IN_PROGRESS; otherwise just bump updated_at (Java parity).
