@@ -191,11 +191,30 @@ function concept(node: CdaNode | undefined): { coding: Array<{ system: string; c
 }
 
 /** `<effectiveTime>` → `{ point, start, end }` in ISO, whichever the element expresses. */
-function times(node: CdaNode | undefined): { point?: string; start?: string; end?: string } {
+function times(node: CdaNode | undefined): { point?: string; start?: string; end?: string; endUnknown?: boolean } {
   if (!node) return {};
   const point = isoFromHl7(node.attrs.value);
   if (point) return { point };
-  return { start: isoFromHl7(child(node, "low")?.attrs.value), end: isoFromHl7(child(node, "high")?.attrs.value) };
+  const high = child(node, "high");
+  const end = isoFromHl7(high?.attrs.value);
+  // THREE states, not two (#594). An absent `<high>` and a `<high nullFlavor="UNK"/>` both yield no
+  // end date, and collapsing them loses the only thing that says whether the source made an
+  // assertion: `nullFlavor="UNK"` is an explicit "this has not ended, and I do not know when it
+  // will" - QDM open prevalence - while an absent element is silence. One licenses reporting the
+  // condition as active; the other licenses nothing.
+  //
+  // **It is the nullFlavor that says so, not the absence of a parsed date** (Codex review). The first
+  // cut asked `high !== undefined && end === undefined`, which is also true of `<high
+  // value="20240230"/>` - a value the source DID assert and this importer could not parse. Reading
+  // that as an open interval would report `active` for a diagnosis whose end date we simply failed to
+  // understand, and that status can put the condition into a measure population. A malformed value is
+  // neither a closed interval nor an open one: it is a parse failure, and it says nothing.
+  const endUnknown = end === undefined && typeof high?.attrs.nullFlavor === "string" && high.attrs.nullFlavor.length > 0;
+  return {
+    start: isoFromHl7(child(node, "low")?.attrs.value),
+    end,
+    ...(endUnknown ? { endUnknown: true } : {}),
+  };
 }
 
 /**
@@ -233,15 +252,46 @@ function encounterFrom(node: CdaNode, i: string): unknown {
   };
 }
 
+const CONDITION_CLINICAL = "http://terminology.hl7.org/CodeSystem/condition-clinical";
+
+/**
+ * The clinical status this document actually asserts, or nothing (#594).
+ *
+ * Until 2026-09-21 no `clinicalStatus` was emitted here at all and `prepareForQiCore` minted `active`
+ * for every imported Condition - including one carrying an `abatementDateTime`, i.e. one this very
+ * function had just recorded as ended. Preparation may no longer invent it, so the mapping belongs
+ * where the source semantics are known, which is here.
+ *
+ * Derived from the effective time and nothing else, because that is the only thing a QRDA-I Diagnosis
+ * entry says about it:
+ * - a `<high>` with a real value closes the interval, so the condition ENDED - `resolved`, matching
+ *   the `abatementDateTime` emitted from the same value;
+ * - a `<high nullFlavor="UNK"/>` is QDM open prevalence: the source states there is no known end, so
+ *   `active` is a faithful reading of an explicit assertion;
+ * - no `<high>` at all is SILENCE, and silence authorizes nothing. The field is omitted, the QI-Core
+ *   profile is unsatisfied, and the condition is not retrieved - the honest outcome for a document
+ *   that did not say.
+ *
+ * The system is written here rather than left for preparation to add, so the value this file emits is
+ * bindable on its own terms.
+ */
+function clinicalStatusFrom(t: { end?: string; endUnknown?: boolean }): unknown {
+  if (t.end) return { coding: [{ system: CONDITION_CLINICAL, code: "resolved" }] };
+  if (t.endUnknown) return { coding: [{ system: CONDITION_CLINICAL, code: "active" }] };
+  return undefined;
+}
+
 function conditionFrom(node: CdaNode, i: string): unknown {
   const t = times(child(node, "effectiveTime"));
   // The patient's condition is the VALUE; `<code>` says only "this entry is a diagnosis".
   const code = concept(child(node, "value"));
   if (!code) return undefined;
+  const clinicalStatus = clinicalStatusFrom(t);
   return {
     resourceType: "Condition",
     id: idOf(node, `qrda1-condition-${i}`),
     verificationStatus: { coding: [{ code: "confirmed" }] },
+    ...(clinicalStatus ? { clinicalStatus } : {}),
     code,
     ...(t.start ?? t.point ? { onsetDateTime: t.start ?? t.point } : {}),
     ...(t.end ? { abatementDateTime: t.end } : {}),

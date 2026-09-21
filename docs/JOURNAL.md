@@ -1,5 +1,69 @@
 # Journal
 
+## 2026-09-21 (later) — the review's one high-priority defect, and it was worse than the review said
+
+**#594** and **#595** were accepted on 2026-09-08, named "the next two slices", and then sat for
+twelve days with no issue number — which is why they stayed invisible rather than deferred. ADR-086.
+
+### #594 — preparation was supplying codes, not just systems
+
+`prepareForQiCore` filled four coded fields when it could not bind them. Its guard, `unbindable()`,
+is true of a **missing** field as well as a present-but-unbindable one, and both branches assigned a
+module-level default.
+
+The review named the first consequence: an absent field was invented. That is **live**, not latent —
+the QRDA-I import emits no `clinicalStatus`, no `category` and no `class`, so preparation minted them
+on a third party's document, including stamping `active` on a Condition the importer had just given
+an `abatementDateTime` from a closed interval. Two files in one pipeline disagreed about identical
+bytes: `qdm-entries.ts` honours a system-less `entered-in-error` as a negation while preparation
+rewrote it to `confirmed`.
+
+**The second consequence is worse and was not in the issue: a present code was DISCARDED.**
+`unbindable()` is as true of a system-less `resolved` as of a system-less `active`, so a corrected
+misdiagnosis became an active, confirmed problem — that patient enters CMS122's denominator and, with
+no HbA1c, its numerator. The file's own docstring claimed that hole was closed. It was not.
+
+So the rule is now: **this layer supplies a SYSTEM, never a CODE.** Normalize only when a value is
+present, cannot bind, and carries a code from that field's own value set — writing that same code
+back. Absent stays absent, bindable is untouched, an unrecognised code is left alone.
+
+**My first cut reproduced the exact bug it was fixing**, one field over: it replaced a
+present-but-unbindable value with the module default, turning an Encounter `{code: "IMP"}` into
+ambulatory — substituting a different clinical fact while claiming to normalize one. An existing test
+caught it, which is the argument for rewriting tests last.
+
+The mapping moved to where the source semantics live. `times()` now reports **three** states, because
+collapsing two of them made a faithful mapping impossible however it was written:
+
+| CDA `<high>` | means | Condition |
+|---|---|---|
+| `value="…"` | closed interval | `resolved`, beside its own `abatementDateTime` |
+| `nullFlavor="UNK"` | explicit: no known end | `active` |
+| absent | silence | **no `clinicalStatus`** |
+
+### #595 — a corpus that knew what had not happened
+
+A bundle built as of 2026-09-07 carried 19 future-dated events in the first 48 records. Facts are
+generated for the calendar year (correctly — ADR-072 scores a year), and nothing filtered what was
+emitted by the as-of.
+
+The cutoff filters on the date each fact was **recorded** — the value already handed to
+`provenanceFor` — rather than on "every date inside the resource is past", so a medication order
+known today keeps its future intended end. A resource and its Provenance are emitted together, so a
+filtered fact leaves no status, abatement, reference or provenance behind.
+
+### Why both were safe to ship, asserted rather than argued
+
+The ADR-075 corpus records all four fields itself, fully systemed, with `category` distinguishing an
+encounter diagnosis from a problem-list item — so the pilot's bundles never took the invented path.
+**cms122, cms125, cms2 and cms137 still find real populations after the change.** And the year-end
+cutoff is compared against an unbounded one and must be identical, which is the whole claim that no
+reported number moves.
+
+Ten mutations, all killed — including "code discarded, default substituted", which is the one that
+would have shipped if the tests had been rewritten to match the implementation instead of the other
+way round.
+
 ## 2026-09-21 — the microtask trap, and the profile that named a function I had not read
 
 Two issues, one PR: **#590** (a MEASURE run always 504'd and invited a retry that also ran) and

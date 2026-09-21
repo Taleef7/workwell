@@ -398,3 +398,74 @@ test("an engaged patient carries at least two engagement services, so rate 2's n
     }
   }
 });
+
+// ---------------------------------------------------------------------------------------------------
+// The knowledge cutoff (#595)
+//
+// A bundle must not know things that have not happened yet. Facts are generated for the calendar year
+// the evaluation date falls in, so before 31 December a bundle used to carry the rest of the year:
+// reproduced as of 2026-09-07, 19 future-dated events in the first 48 records.
+// ---------------------------------------------------------------------------------------------------
+
+/** Every date a Provenance records — i.e. when each fact in this bundle became known. */
+const recordedDays = (patient: Parameters<typeof bundleForPatient>[0], asOf: string): string[] =>
+  bundleForPatient(patient, asOf)
+    .entry.map((e) => e.resource as { resourceType: string; recorded?: string })
+    .filter((r) => r.resourceType === "Provenance")
+    .map((r) => String(r.recorded ?? "").slice(0, 10));
+
+test("no fact is dated after the as-of — the bundle has no foreknowledge (#595)", () => {
+  const asOf = "2027-09-07";
+  let checked = 0;
+  for (const patient of corpusPatients(DEFAULT_CORPUS_SEED, 48)) {
+    for (const day of recordedDays(patient, asOf)) {
+      assert.ok(day <= asOf, `${patient.externalId}: a fact recorded ${day} is after the as-of ${asOf}`);
+      checked += 1;
+    }
+  }
+  assert.ok(checked > 0, "the sweep saw facts at all — otherwise it proves nothing");
+});
+
+test("the cutoff actually removes something at mid-year, so the test above is not vacuous", () => {
+  // Without this, a bundle that happened to generate everything in January would satisfy the sweep
+  // while the filter did nothing at all. Measured on the first 48: the September cutoff drops facts.
+  const midYear = corpusPatients(DEFAULT_CORPUS_SEED, 48)
+    .reduce((n, p) => n + bundleForPatient(p, "2027-09-07").entry.length, 0);
+  const yearEnd = corpusPatients(DEFAULT_CORPUS_SEED, 48)
+    .reduce((n, p) => n + bundleForPatient(p, EVAL_DATE).entry.length, 0);
+  assert.ok(midYear < yearEnd, `a September as-of must carry fewer entries than 31 December (${midYear} vs ${yearEnd})`);
+});
+
+test("at 31 December the cutoff excludes NOTHING — no reported number moves", () => {
+  // This is the claim that makes #595 safe to ship: every official measurement is taken at year end
+  // (ADR-072), so the filter must be a no-op there. Compared against a cutoff far in the future
+  // rather than against a golden file, which is the same assertion without a fixture to rot: if the
+  // two bundles are identical, 31 December excluded nothing.
+  for (const patient of corpusPatients(DEFAULT_CORPUS_SEED, 60)) {
+    assert.deepEqual(
+      bundleForPatient(patient, EVAL_DATE),
+      bundleForPatient(patient, "2027-12-31T23:59:59Z"),
+      `${patient.externalId}: a timestamped year-end cutoff must behave as the plain day`,
+    );
+    const atYearEnd = bundleForPatient(patient, EVAL_DATE).entry.length;
+    const unbounded = bundleForPatient(patient, "2099-12-31").entry.length;
+    assert.equal(atYearEnd, unbounded, `${patient.externalId}: year end must exclude nothing`);
+  }
+});
+
+test("a dropped fact takes its Provenance with it — no back door (#595)", () => {
+  // The invariant the first test in this file asserts at year end, re-asserted at a mid-year cutoff:
+  // a resource and its Provenance are emitted together, so a filtered fact cannot leave a dangling
+  // record of itself behind. Status, abatement and references go the same way.
+  for (const patient of corpusPatients(DEFAULT_CORPUS_SEED, 48)) {
+    const entries = bundleForPatient(patient, "2027-09-07").entry.map((e) => e.resource as Res);
+    const ids = new Set(entries.map((r) => `${r.resourceType}/${r.id}`));
+    const provenances = entries.filter((r) => r.resourceType === "Provenance");
+    const clinical = entries.filter((r) => !ADMINISTRATIVE.has(r.resourceType));
+    assert.equal(provenances.length, clinical.length, `${patient.externalId}: one Provenance per surviving fact`);
+    for (const prov of provenances) {
+      const target = (prov.target as Array<{ reference: string }>)[0]!.reference;
+      assert.ok(ids.has(target), `${patient.externalId}: Provenance targets ${target}, which was filtered out`);
+    }
+  }
+});
