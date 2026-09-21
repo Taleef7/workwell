@@ -1346,6 +1346,66 @@ cms122: 500 subject(s) evaluated in one official batch [6400ms total; bundles 90
 So the quickest read is: deploy, `POST /api/runs/manual` an ALL_PROGRAMS run, then `GET /api/runs/:id`
 and look at the bracket. No container access, no waiting for 12:09 UTC.
 
+### Which run scopes are SCHEDULED, and which answer in the request (ADR-085, #590)
+
+`POST /api/runs/manual` behaves differently per scope, and nothing here used to say so — which is how
+an operator ended up retrying a run that was already running.
+
+| `scopeType` | behaviour | what you get back |
+|---|---|---|
+| `ALL_PROGRAMS` | scheduled (`ctx.waitUntil`) | **201** with `status: RUNNING` and a `runId` to poll |
+| `SITE` | scheduled | 201 RUNNING + `runId` |
+| `MEASURE` | scheduled **since 2026-09-21** | 201 RUNNING + `runId` |
+| `EMPLOYEE` | runs in the request (one subject) | 201 with the finished run |
+
+**Poll with `GET /api/runs/:id` until `status` leaves `RUNNING`.** A scheduled run's response is not
+its result.
+
+**Why MEASURE moved.** It used to run inside the request on the reasoning that it was "a few
+seconds" — true of the occupational roster, false of the pilot's 20,000 patients, where it is ~15
+minutes against the MIE gateway's 60 s cut. So the call **always** returned `504 Gateway Time-out`
+while the run continued server-side and finished normally a quarter of an hour later. The 504 is an
+nginx HTML page rather than a JSON body, so there was no `runId` to poll, and a 504 reads as "that
+failed" — which invites a retry, **and the retry also runs**. Two concurrent 20,000-patient runs held
+the ten-connection pool for ~30 minutes with every other endpoint answering `503 pool_exhausted`.
+
+**If you still see a 504 from a manual run**, it is not this: check for a second run in flight
+(`GET /api/runs?status=RUNNING`) before starting anything else.
+
+### If requests are slow WHILE a run is in flight, which knob depends on the measure (ADR-085)
+
+Two different stalls, and they have different fixes. Read the run log's per-measure INFO line (above)
+to tell them apart.
+
+**Authored measures** (TWH's occupational set). The pipeline evaluates these subject by subject, and
+it now yields the event loop after **every** subject — worst-case block falls from ~21 s to ~45 ms,
+for about 2% of run time. Nothing to configure; a deployment whose window is too tight for that 2%
+can raise `yieldEvery` in the evaluation options.
+
+**Official-routed measures** (all six on the Maui pilot). These are evaluated by **one call into
+`fqm-execution` per chunk**, with every bundle in the chunk. That call is 93.9% of the pilot's
+90-minute nightly, ~21 s each, and **no yield can interrupt it** — it is a third-party library's own
+loop. The only deploy-time lever is **`WORKWELL_RUN_CHUNK_SIZE`** (default 500): fewer bundles per
+call means proportionally shorter stalls, paid for with proportionally more database round trips,
+since the chunk boundary is where the pipeline writes and therefore where the event loop actually
+gets a turn.
+
+The other ~6% of an official run — reading each prefetched result and assembling its evidence — is
+the pipeline's own per-subject loop and **does** yield, so requests are served during it. That costs
+28 ms per 20,000 subjects (measured, no traffic), which is why it is not gated off.
+
+**No recommended value is printed here, deliberately.** `batchMs` is on the run log per chunk, so the
+trade is measurable on your own deployment in one run:
+
+```bash
+# set WORKWELL_RUN_CHUNK_SIZE=100, redeploy, then
+curl -s "$BASE/api/runs/manual" -X POST -H "$AUTH" -d '{"scopeType":"ALL_PROGRAMS"}'   # 201 RUNNING + runId
+curl -s "$BASE/api/runs/$RUN_ID" -H "$AUTH" | jq -r '.logs[] | select(.message|test("ms/subject"))'
+```
+
+Compare `batchMs` and the run's total duration against the previous value. A figure quoted from
+anywhere else is a guess.
+
 ### Immunization forecasting (ICE sidecar) — ADR-029, opt-in, NOT on the demo stack
 
 The advisory immunization forecast (`GET /api/immunization/forecast`, and the panel on an

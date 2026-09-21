@@ -13,7 +13,41 @@ export interface EvaluateBundleOptions {
   evaluationDate?: string;
   /** Injectable binding (tests); defaults to a lazily-created shared CqlExecutionEngine. */
   engine?: EvaluateMeasureBinding;
+  /**
+   * Yield to the event loop after every Nth bundle (#563). Default 1 — after every one. `0` disables
+   * it, for a caller that owns the whole process and wants the last 1.5%.
+   *
+   * Injected rather than read from the environment, because this file is the engine's DB-less shell
+   * and the engine takes its configuration from its caller (ADR-059).
+   */
+  yieldEvery?: number;
 }
+
+/**
+ * Hand the event loop a turn — a MACROTASK, which is the entire point.
+ *
+ * `await` on a sync-resolving promise schedules a MICROTASK, and Node drains the whole microtask
+ * queue before it ever reaches the poll phase. So the `await engine.evaluate(...)` chain below never
+ * lets a pending request be served: measured on this machine at 42 ms/bundle, a 60-bundle batch
+ * served **one** request in 2.5 s with a worst latency of 2,534 ms, and `queueMicrotask` changed
+ * neither number. That is #563's finding — `GET /api/version`, which opens no database connection
+ * and therefore cannot be waiting for one, degrading from 0.2 s to 22 s during a nightly run.
+ *
+ * `setImmediate` is the better primitive where it exists (worst latency 43.5 ms, +1.5% run time,
+ * versus 85.6 ms and +2.4% for the timer) but it does not exist on every `@mieweb/cloud` target —
+ * Workers has no `setImmediate` — and the header of this file promises portability. So: the better
+ * one on the host we deploy to, a correct one everywhere else.
+ *
+ * **How much better, measured, because "slightly worse" would be the wrong summary.** Bare cost per
+ * turn with no traffic: `setImmediate` **0.0014 ms**, `setTimeout(0)` **9.2 ms** — the timer's floor
+ * comes from the platform's clock granularity rather than the 1 ms the spec clamps to. Yielding after
+ * every bundle is therefore free on the host we deploy to and expensive on a target that lacks
+ * `setImmediate`; such a target should pass a larger `yieldEvery` rather than take this per bundle.
+ */
+const yieldToEventLoop = (): Promise<void> =>
+  typeof setImmediate === "function"
+    ? new Promise<void>((resolve) => setImmediate(resolve))
+    : new Promise<void>((resolve) => setTimeout(resolve, 0));
 
 export interface BatchItemResult {
   index: number;
@@ -65,12 +99,17 @@ export async function evaluateBatch(
   const evaluationDate = opts?.evaluationDate ?? today();
   const engine = engineOf(opts);
   const results: BatchItemResult[] = [];
+  const yieldEvery = opts?.yieldEvery ?? 1;
   for (let index = 0; index < bundles.length; index++) {
     try {
       const outcome = await engine.evaluate({ measureId, patientBundle: bundles[index], evaluationDate });
       results.push({ index, ok: true, outcome });
     } catch (e) {
       results.push({ index, ok: false, error: e instanceof Error ? e.message : String(e) });
+    }
+    // After the push, so a yield never sits between an evaluation and the recording of its result.
+    if (yieldEvery > 0 && (index + 1) % yieldEvery === 0 && index + 1 < bundles.length) {
+      await yieldToEventLoop();
     }
   }
   const succeeded = results.filter((r) => r.ok).length;
