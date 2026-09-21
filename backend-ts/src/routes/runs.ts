@@ -255,8 +255,12 @@ function measureIdentityFor(measureId: string): Set<string> {
  * must never materialize its 1.68M rows. An OFFICIAL-routed measure cannot: its populations live in
  * per-subject `evidence_json.official.populationResults`, which a status histogram cannot see, and
  * deriving them from the workflow status would invert the numerator for a lower-is-better measure.
- * So official runs read rows, bounded by the same subject cap the individual/bundle reports use;
- * over the cap we refuse rather than emit a status-derived (wrong) regulatory artifact.
+ * So official runs read rows. **The bound is the PROJECTION, not the subject cap** (corrected
+ * 2026-09-21): `MAX_INDIVIDUAL_REPORT_SUBJECTS` gates the individual and bundle variants only, so on
+ * the pilot's 20,000-patient run the summary MeasureReport and QRDA III are the reachable exports and
+ * neither is capped. What bounds them is that `aggregateOfficialRun` reads MEMBERSHIPS rather than
+ * whole evidence rows (`listOutcomeMembershipsForRun`) — a few dozen bytes per subject. An earlier
+ * version of this comment claimed the subject cap covered these two, which it never did.
  */
 /**
  * "Did THIS run's outcomes come from the official executor?" is answered by `runProducedOfficialEvidence`
@@ -284,6 +288,9 @@ async function aggregateCountsForRun(
   // The env flag is still consulted first, as a cheap way to skip a read for the overwhelmingly common
   // case; when it is off, the first EVALUATED row settles it (`runProducedOfficialEvidence` — an errored
   // row carries no engine's evidence and is skipped, never read as "not official").
+  // `runProducedOfficialEvidence` is the ONLY remaining caller of the paged scan, and it is reached
+  // only when the routing flag is off — so the sort that made the dashboard's read expensive is paid
+  // here at most once per export, never per page (review of #610 noted the export still pays it).
   const routedNow = isOfficialRouted(measureId, env as unknown as Record<string, unknown>);
   const official = routedNow || (await runProducedOfficialEvidence(os, runId, measureId));
   if (!official) {
@@ -1220,8 +1227,11 @@ export async function handleRuns(
     const measureId = measureIds[0]!;
     const aggregate = await aggregateCountsForRun(os, qrdaId, measureId, env);
     if ("error" in aggregate) return aggregate.error;
-    // Second exposure check AFTER the paged read: a pass starting mid-read deletes rows between pages
-    // and shifts the offsets, so the sum above could be short. Its intent event is visible here.
+    // Second exposure check AFTER the read: a pass that started while the sum was being computed can
+    // have deleted rows the sum did not see, so the number above could be short. Its intent event is
+    // visible here. (The read is no longer paged — that was the original reason, "deletes rows between
+    // pages and shifts the offsets" — but the exposure is unchanged: one statement can still begin
+    // before a compaction and be reduced after it.)
     const goneIiiAfter = await compacted(run, env);
     if (goneIiiAfter) return goneIiiAfter;
     // Every rate and every stratum (ADR-074). This route refused a multi-rate measure with a 501 until
@@ -1274,7 +1284,7 @@ export async function handleRuns(
     if (type === "summary") {
       const aggregate = await aggregateCountsForRun(os, mrId, measureId, env);
       if ("error" in aggregate) return aggregate.error;
-      // Second exposure check AFTER the paged read — see the QRDA III route for why.
+      // Second exposure check AFTER the read — see the QRDA III route for why.
       const goneMrAfter = await compacted(run, env);
       if (goneMrAfter) return goneMrAfter;
       return fhir(buildSummaryMeasureReportFromCounts(run, measureId, aggregate.counts, generatedAt, aggregate.official, aggregate.strata), {

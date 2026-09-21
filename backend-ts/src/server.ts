@@ -209,31 +209,42 @@ async function main(): Promise<void> {
       for (const attempt of [0, 1]) {
         if (stopping) return;
         const started = Date.now();
+        // The RESULT decides, never the absence of a throw. `warmReadModels` catches its own errors so
+        // a failed warm cannot affect a finished run — which meant this retry was keyed on the one
+        // failure it could never see, and the success line below was printed on failure (review of
+        // #610). It reports what it achieved instead.
+        let outcome: { ok: boolean; error?: string; failedMeasures: string[] };
         try {
           const { getStores } = await import("./stores/factory.ts");
           const { warmReadModels } = await import("./program/warm-read-models.ts");
           const stores = await getStores(schedulerEnv);
-          await warmReadModels({
+          outcome = await warmReadModels({
             runStore: stores.runs,
             outcomeStore: stores.outcomes,
             caseStore: stores.cases,
             qualitySnapshots: stores.qualitySnapshots,
             webChartEnv: schedulerEnv,
           });
-          console.log(`[workwell] read models warmed at boot in ${Date.now() - started}ms`);
-          return;
         } catch (err) {
-          const msg = String((err as Error)?.message ?? err);
-          if (attempt === 0) {
-            console.warn(`[workwell] boot read-model warm attempt 1 failed (${msg}) — retrying in 30s`);
-            await new Promise((r) => setTimeout(r, 30_000).unref());
-            continue;
-          }
-          console.warn(
-            `[workwell] boot read-model warm failed after ${Date.now() - started}ms: ${msg} — ` +
-              `the first /programs request pays the cold read`,
-          );
+          // Only the imports and `getStores` can land here — and `getStores` is very likely already
+          // resolved, because the boot sweep above called it with this same object and the factory
+          // caches the promise.
+          outcome = { ok: false, error: String((err as Error)?.message ?? err), failedMeasures: [] };
         }
+        if (outcome.ok) {
+          const partial = outcome.failedMeasures.length > 0 ? ` (${outcome.failedMeasures.join(", ")} did not warm)` : "";
+          console.log(`[workwell] read models warmed at boot in ${Date.now() - started}ms${partial}`);
+          return;
+        }
+        if (attempt === 0) {
+          console.warn(`[workwell] boot read-model warm attempt 1 failed (${outcome.error}) — retrying in 30s`);
+          await new Promise((r) => setTimeout(r, 30_000).unref());
+          continue;
+        }
+        console.warn(
+          `[workwell] boot read-model warm failed after ${Date.now() - started}ms: ${outcome.error} — ` +
+            `the first /programs request pays the cold read`,
+        );
       }
     })();
   }

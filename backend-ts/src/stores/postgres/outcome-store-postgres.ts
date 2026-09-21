@@ -6,7 +6,7 @@
 import { isUuid, withStatementTimeoutDisabled, type PgPool } from "./pg-database.ts";
 import { SPIKE_SCHEMA } from "./schema-pg.ts";
 import { LATEST_RUN_PROBE_BUDGET } from "../outcome-store.ts";
-import { ProbeCache } from "../probe-cache.ts";
+import { probeCacheFor, type ProbeCache } from "../probe-cache.ts";
 import type {
   OutcomeRecord,
   OutcomeStore,
@@ -54,7 +54,12 @@ const CASES_TABLE = `${SPIKE_SCHEMA}.cases`;
 const RUNS_TABLE = `${SPIKE_SCHEMA}.runs`;
 
 export class PgOutcomeStore implements OutcomeStore {
-  constructor(private readonly pool: PgPool) {}
+  constructor(private readonly pool: PgPool) {
+    // In the CONSTRUCTOR BODY, not a field initializer: a field initializer runs before the parameter
+    // property is assigned, so `this.pool` would be undefined and every store would get its own cache
+    // — silently undoing the whole point of keying by the handle.
+    this.latestRunCache = probeCacheFor(this.pool);
+  }
 
   /**
    * In-process memo of `aggregateScaleRun` (perf #233). A COMPLETED `seed:scale` run is written once
@@ -68,10 +73,10 @@ export class PgOutcomeStore implements OutcomeStore {
 
   /**
    * The winners probe, memoized under the candidate run list — see `stores/probe-cache.ts` for why
-   * that identity is exact and what compaction does to it. Bounded at 32 (measureIds, perMeasure,
-   * date-window) combinations; the dashboard uses two.
+   * that identity is exact, what compaction does to it, and why it is keyed by the POOL rather than by
+   * this instance (a live container holds two of these, and only one of them compacts).
    */
-  private readonly latestRunCache = new ProbeCache<LatestPopulationRun[]>();
+  private readonly latestRunCache: ProbeCache<LatestPopulationRun[]>;
 
   async recordOutcome(input: RecordOutcomeInput): Promise<OutcomeRecord> {
     // A write can add the first row of a measure to a run ALREADY in the candidate list, which the
@@ -197,6 +202,30 @@ export class PgOutcomeStore implements OutcomeStore {
       binds,
     );
     return rows.map(toRecord);
+  }
+
+  async listOutcomeMembershipsForRun(
+    runId: string,
+    measureId: string,
+  ): Promise<Array<Pick<OutcomeRecord, "status" | "evidence">>> {
+    if (!isUuid(runId)) return [];
+    // `jsonb_strip_nulls` is what keeps `evaluationError` ABSENT rather than null on a row that did
+    // not error — the aggregator tests key presence, so carrying the key with a null would read every
+    // row as a failure. The whole `official` object is kept (populations, rates, strata, ecqmId,
+    // version); `expressionResults` and `qrda1Import` are what this drops, and they are the bulk.
+    //
+    // No ORDER BY: the caller folds. See the interface for why that is safe here and why the page
+    // window it replaces was not a saving.
+    const { rows } = await this.pool.query<{ status: string; evidence: unknown }>(
+      `SELECT status,
+              jsonb_strip_nulls(jsonb_build_object(
+                'official', evidence_json -> 'official',
+                'evaluationError', evidence_json -> 'evaluationError'
+              )) AS evidence
+         FROM ${T} WHERE run_id = $1 AND measure_id = $2`,
+      [runId, measureId],
+    );
+    return rows.map((r) => ({ status: r.status, evidence: r.evidence }));
   }
 
   async distinctMeasuresForRun(runId: string, limit = 2): Promise<string[]> {

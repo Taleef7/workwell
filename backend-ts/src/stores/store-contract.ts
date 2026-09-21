@@ -1108,16 +1108,23 @@ export function outcomeStoreContract(
   test(`[${label}] listOutcomes order:"none" returns the same rows as the ordered read`, async () => {
     const { runStore, outcomeStore } = await fresh();
     const run = await runStore.createRun({ ...sampleRun("all"), status: "COMPLETED", scopeType: "ALL_PROGRAMS" });
+    // `evaluated_at` DESCENDING as inserted, so the sort order is the REVERSE of insertion order.
+    //
+    // That is the whole point of the stamps: the first cut of this test inserted three rows with no
+    // explicit `evaluated_at`, and on both stores an unordered scan of three freshly-inserted rows
+    // returns them in insertion order — which is also the sorted order — so the paged assertion below
+    // passed whether or not the `ORDER BY` survived (review of #610). The ceiling is separately pinned
+    // by its SQL-text test; the FLOOR had only this, and this could not see it.
     await outcomeStore.recordOutcomes([
-      { runId: run.id, subjectId: "emp-006", measureId: "audiogram", status: "COMPLIANT", evidence: { official: { populationResults: { ipp: true, denom: true, denex: false, numer: true } } } },
-      { runId: run.id, subjectId: "emp-001", measureId: "audiogram", status: "OVERDUE", evidence: { official: { populationResults: { ipp: true, denom: true, denex: false, numer: false } } } },
-      { runId: run.id, subjectId: "emp-002", measureId: "hazwoper", status: "OVERDUE", evidence: {} },
+      { runId: run.id, subjectId: "emp-006", measureId: "audiogram", status: "COMPLIANT", evaluatedAt: "2026-06-03T00:00:00.000Z", evidence: { official: { populationResults: { ipp: true, denom: true, denex: false, numer: true } } } },
+      { runId: run.id, subjectId: "emp-001", measureId: "audiogram", status: "OVERDUE", evaluatedAt: "2026-06-02T00:00:00.000Z", evidence: { official: { populationResults: { ipp: true, denom: true, denex: false, numer: false } } } },
+      { runId: run.id, subjectId: "emp-002", measureId: "hazwoper", status: "OVERDUE", evaluatedAt: "2026-06-01T00:00:00.000Z", evidence: {} },
     ]);
     const idsOf = (rows: OutcomeRecord[]) => rows.map((r) => r.id).sort();
     assert.deepEqual(
       idsOf(await outcomeStore.listOutcomes(run.id, { order: "none" })),
       idsOf(await outcomeStore.listOutcomes(run.id)),
-      "the whole run",
+      "the whole run — the same MULTISET, which is all an unordered relation promises",
     );
     assert.deepEqual(
       idsOf(await outcomeStore.listOutcomes(run.id, { measureId: "audiogram", order: "none" })),
@@ -1125,12 +1132,67 @@ export function outcomeStoreContract(
       "narrowed to one measure — the shape aggregateOfficialRun reads",
     );
     // A PAGED read keeps its ordering whatever the caller asks, because paging an unordered relation
-    // may repeat or skip rows. Asserted on the page CONTENTS, which is what a caller would lose.
+    // may repeat or skip rows between pages. Now that the stamps disagree with insertion order, the
+    // page's CONTENTS say so: the oldest two rows are the last two inserted.
+    const ordered = await outcomeStore.listOutcomes(run.id);
+    assert.deepEqual(ordered.map((r) => r.subjectId), ["emp-002", "emp-001", "emp-006"], "oldest first");
     assert.deepEqual(
-      (await outcomeStore.listOutcomes(run.id, { limit: 2, offset: 0, order: "none" })).map((r) => r.id),
-      (await outcomeStore.listOutcomes(run.id, { limit: 2, offset: 0 })).map((r) => r.id),
-      "a paged read is unaffected by the option",
+      (await outcomeStore.listOutcomes(run.id, { limit: 2, offset: 0, order: "none" })).map((r) => r.subjectId),
+      ["emp-002", "emp-001"],
+      "a paged read is unaffected by the option, and the page is the SORTED first two",
     );
+  });
+
+  /**
+   * The narrowed read behind `aggregateOfficialRun` (review of #610): memberships only, so the
+   * aggregate has a memory bound again without a page window re-sorting the measure's evidence.
+   *
+   * Two things are contract and neither is obvious. `evaluationError` must be ABSENT rather than null
+   * on a row that did not error, because `isEvaluationErrorEvidence` tests key PRESENCE — a projection
+   * that always carried the key would read every row as a failure and report every rate as zero. And
+   * `expressionResults` must be GONE, or the projection is not a bound.
+   */
+  test(`[${label}] listOutcomeMembershipsForRun carries the memberships and drops the rest`, async () => {
+    const { runStore, outcomeStore } = await fresh();
+    const run = await runStore.createRun({ ...sampleRun("all"), status: "COMPLETED", scopeType: "ALL_PROGRAMS" });
+    const populationResults = { ipp: true, denom: true, denex: false, numer: true };
+    await outcomeStore.recordOutcomes([
+      {
+        runId: run.id, subjectId: "emp-006", measureId: "audiogram", status: "COMPLIANT",
+        evidence: {
+          official: { ecqmId: "122FHIR", version: "14.0.000", populationResults, rates: [populationResults], strata: [] },
+          expressionResults: [{ define: "official:initial-population", result: true }],
+        },
+      },
+      {
+        runId: run.id, subjectId: "emp-001", measureId: "audiogram", status: "MISSING_DATA",
+        evidence: { evaluationError: "engine threw", message: "boom" },
+      },
+      // Another measure of the same run: must not appear.
+      { runId: run.id, subjectId: "emp-002", measureId: "hazwoper", status: "OVERDUE", evidence: { official: { populationResults } } },
+    ]);
+
+    const rows = await outcomeStore.listOutcomeMembershipsForRun(run.id, "audiogram");
+    assert.equal(rows.length, 2, "one measure's rows only");
+    const evaluated = rows.find((r) => r.status === "COMPLIANT")!;
+    const errored = rows.find((r) => r.status === "MISSING_DATA")!;
+
+    assert.deepEqual(
+      (evaluated.evidence as { official?: unknown }).official,
+      { ecqmId: "122FHIR", version: "14.0.000", populationResults, rates: [populationResults], strata: [] },
+      "the whole `official` object survives — populations, rates, strata AND the artifact identity",
+    );
+    assert.ok(!("expressionResults" in (evaluated.evidence as object)), "and the bulk is dropped");
+    assert.ok(
+      !("evaluationError" in (evaluated.evidence as object)),
+      "ABSENT, not null: isEvaluationErrorEvidence tests key presence, so a null here reads as a failed evaluation",
+    );
+    assert.equal((errored.evidence as { evaluationError?: unknown }).evaluationError, "engine threw");
+    assert.ok(!("official" in (errored.evidence as object)));
+
+    // An unknown run and an unknown measure are empty, never everything.
+    assert.deepEqual(await outcomeStore.listOutcomeMembershipsForRun(run.id, "never-run"), []);
+    assert.deepEqual(await outcomeStore.listOutcomeMembershipsForRun("00000000-0000-4000-8000-000000000000", "audiogram"), []);
   });
 }
 

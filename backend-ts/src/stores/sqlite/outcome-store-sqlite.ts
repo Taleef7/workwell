@@ -18,7 +18,7 @@ import type {
   MeasureScanOptions,
 } from "../outcome-store.ts";
 import { LATEST_RUN_PROBE_BUDGET } from "../outcome-store.ts";
-import { ProbeCache } from "../probe-cache.ts";
+import { probeCacheFor, type ProbeCache } from "../probe-cache.ts";
 
 interface OutcomeRow {
   id: string;
@@ -51,7 +51,10 @@ const toRecord = (r: OutcomeRow): OutcomeRecord => ({
 });
 
 export class SqliteOutcomeStore implements OutcomeStore {
-  constructor(private readonly db: CloudDatabase) {}
+  constructor(private readonly db: CloudDatabase) {
+    // Constructor body, not a field initializer — see the ceiling for why.
+    this.latestRunCache = probeCacheFor(this.db);
+  }
 
   /**
    * In-process memo of `aggregateScaleRun` (perf #233). A COMPLETED `seed:scale` run is written once
@@ -64,7 +67,7 @@ export class SqliteOutcomeStore implements OutcomeStore {
   private readonly scaleCache = new Map<string, ScaleGroupCount[]>();
 
   /** Mirror of the ceiling's winners-probe memo — `stores/probe-cache.ts` carries the reasoning. */
-  private readonly latestRunCache = new ProbeCache<LatestPopulationRun[]>();
+  private readonly latestRunCache: ProbeCache<LatestPopulationRun[]>;
 
   async recordOutcome(input: RecordOutcomeInput): Promise<OutcomeRecord> {
     // A write can add the first row of a measure to a run ALREADY in the candidate list, which the
@@ -199,6 +202,26 @@ export class SqliteOutcomeStore implements OutcomeStore {
       .bind(...binds)
       .all<OutcomeRow>();
     return (results ?? []).map(toRecord);
+  }
+
+  async listOutcomeMembershipsForRun(
+    runId: string,
+    measureId: string,
+  ): Promise<Array<Pick<OutcomeRecord, "status" | "evidence">>> {
+    // Narrowed in JS rather than with `json_extract`, because the floor stores `evidence_json` as TEXT
+    // and would have to parse it either way. The SHAPE is what the contract pins, and it is identical:
+    // `official` kept whole, `evaluationError` present only when the stored evidence had it.
+    const { results } = await this.db
+      .prepare(`SELECT status, evidence_json FROM outcomes WHERE run_id = ? AND measure_id = ?`)
+      .bind(runId, measureId)
+      .all<{ status: string; evidence_json: string }>();
+    return (results ?? []).map((r) => {
+      const full = JSON.parse(r.evidence_json) as Record<string, unknown>;
+      const evidence: Record<string, unknown> = {};
+      if (full?.official !== undefined && full.official !== null) evidence.official = full.official;
+      if (full && "evaluationError" in full && full.evaluationError !== null) evidence.evaluationError = full.evaluationError;
+      return { status: r.status, evidence };
+    });
   }
 
   async distinctMeasuresForRun(runId: string, limit = 2): Promise<string[]> {

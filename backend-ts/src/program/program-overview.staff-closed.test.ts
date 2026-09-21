@@ -19,6 +19,7 @@ import type { RunStore } from "../stores/run-store.ts";
 import type { CaseQuery, CaseRecord, CaseStore } from "../stores/case-store.ts";
 import { programOverview, __overviewMemo, __chartMemos } from "./program-read-models.ts";
 import { latestRunsFromRows } from "../test-support/latest-runs.ts";
+import { narrowToMemberships } from "../test-support/memberships.ts";
 import { bucketPeriodForMeasure } from "../run/compliance-period.ts";
 
 const MEASURE = "cms122";
@@ -74,6 +75,9 @@ function makeDeps(caseRows: CaseRecord[], onQuery?: (q: CaseQuery) => void) {
         }
         return rows;
       },
+      // The measure rate's read (#610 review): the SAME fixture, narrowed the way both stores narrow.
+      listOutcomeMembershipsForRun: async (runId: string, measureId: string) =>
+        (runId === RUN ? WIN_ROWS : []).filter((o) => o.measureId === measureId).map(narrowToMemberships),
       aggregateScaleRun: async () => [],
     } as unknown as OutcomeStore,
     runStore: { listRuns: async () => [] } as unknown as RunStore,
@@ -202,6 +206,15 @@ test("the chip is answered from the run THIS CARD reports, not from a winner res
           ? [{ ...winRow("emp-006", "COMPLIANT"), id: "o-new", runId: NEWER }]
           : [winRow("emp-006", "OVERDUE")];
       },
+      // Logged into `asked` as well, because the assertion below is "the newer run is never read for
+      // this card" and the measure rate is now one of the readers that could break it.
+      listOutcomeMembershipsForRun: async (runId: string, measureId: string) => {
+        asked.push(runId);
+        return (runId === NEWER
+          ? [{ ...winRow("emp-006", "COMPLIANT"), id: "o-new", runId: NEWER }]
+          : [winRow("emp-006", "OVERDUE")]
+        ).filter((o) => o.measureId === measureId).map(narrowToMemberships);
+      },
       aggregateScaleRun: async () => [],
     } as unknown as OutcomeStore,
     runStore: { listRuns: async () => [] } as unknown as RunStore,
@@ -228,6 +241,8 @@ test("a run that describes ANOTHER cycle says nothing about this cycle's closure
       listOutcomesWithRun: async () => [row("emp-006", "OVERDUE")],
       listLatestPopulationRuns: latestRunsFromRows([row("emp-006", "OVERDUE")]),
       listOutcomes: async () => [stale],
+      listOutcomeMembershipsForRun: async (_runId: string, measureId: string) =>
+        [stale].filter((o) => o.measureId === measureId).map(narrowToMemberships),
       aggregateScaleRun: async () => [],
     } as unknown as OutcomeStore,
     runStore: { listRuns: async () => [] } as unknown as RunStore,

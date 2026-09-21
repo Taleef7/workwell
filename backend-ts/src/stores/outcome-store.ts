@@ -240,6 +240,31 @@ export interface OutcomeStore {
       order?: "none";
     },
   ): Promise<OutcomeRecord[]>;
+  /**
+   * One measure's rows of one run, carrying ONLY what a rate aggregation reads — the population
+   * memberships and the evaluation-error marker. One unordered statement, never paged.
+   *
+   * **Why this exists rather than `listOutcomes(runId, { measureId })`** (review of #610). The
+   * aggregate used to page with `LIMIT/OFFSET`, and because no index serves the default
+   * `(evaluated_at, id)` ordering, every page re-sorted the measure's whole evidence — ten sorts of
+   * 20,000 `evidence_json` blobs per (run, measure) on the pilot, six measures deep on the programs
+   * overview's cold path. Dropping the paging removed the repeated sort and removed the MEMORY BOUND
+   * with it: `evidence_json` for an official outcome carries `expressionResults` — one entry per
+   * population per rate, with the define names — which is the bulk of the blob and which a sum does
+   * not read.
+   *
+   * So the bound comes back as a PROJECTION instead of a page window. `run-aggregate.ts` already said
+   * a sum "needs only each row's memberships, which the aggregator retains at a few dozen bytes
+   * each"; this returns those bytes and nothing else, in one statement with no sort.
+   *
+   * **`evaluationError` must be ABSENT, not null, when the row is not an error** — `isEvaluationErrorEvidence`
+   * tests key PRESENCE (`"evaluationError" in evidence`), so a projection that always carried the key
+   * would make every row read as an evaluation failure and every rate read as zero.
+   */
+  listOutcomeMembershipsForRun(
+    runId: string,
+    measureId: string,
+  ): Promise<Array<Pick<OutcomeRecord, "status" | "evidence">>>;
   getOutcomeById(id: string): Promise<OutcomeRecord | null>;
   /**
    * Delete outcome rows older than `cutoff`, KEEPING four things (ADR-073, amended by ADR-077 d3):

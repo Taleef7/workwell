@@ -43,20 +43,36 @@ export interface MeasureRate {
  * are a fragment whose "rate" is not the measure's. The programs overview only ever selects a
  * reportable run (`isCompletedRun`), and the reconciliation route gates on `isReportableRunStatus`.
  */
-const memo = new Map<string, MeasureRate>();
+/**
+ * `null` is memoized too, and it has to be (review of #610).
+ *
+ * The negative used to cost one row — `runProducedOfficialEvidence` with `LIMIT 1` — so not caching it
+ * was free. Since provenance and aggregation share ONE read it costs the measure's whole evidence, and
+ * `programOverview` runs this loop per request OUTSIDE its own memo. So a measure whose winning run
+ * carries no official evidence — a nightly that errored every subject, a run predating the measure's
+ * flip to official, any authored measure — would have re-read 20,000 rows on every single
+ * `/api/programs/overview` call, for the life of the process. That is the statement-timeout cliff this
+ * change exists to remove, reintroduced by the change itself.
+ */
+const memo = new Map<string, MeasureRate | null>();
 const MEMO_LIMIT = 32;
 export function resetMeasureRateMemo(): void {
   memo.clear();
 }
 
 export async function officialMeasureRate(
-  os: Pick<OutcomeStore, "listOutcomes">,
+  os: Pick<OutcomeStore, "listOutcomeMembershipsForRun">,
   runId: string,
   measureId: string,
 ): Promise<MeasureRate | null> {
   const key = `${runId}|${measureId}`;
-  const hit = memo.get(key);
-  if (hit) return hit;
+  // `has`, not a truthy check: `null` is a real cached answer and the whole point of caching it.
+  if (memo.has(key)) return memo.get(key) ?? null;
+  const remember = (rate: MeasureRate | null): MeasureRate | null => {
+    if (memo.size >= MEMO_LIMIT) memo.delete(memo.keys().next().value as string);
+    memo.set(key, rate);
+    return rate;
+  };
   // ONE read of the measure's rows, which also answers whether there was official evidence to reduce
   // (`producedOfficialEvidence`). It used to ask `runProducedOfficialEvidence` first and then
   // aggregate — two reads of the same 20,000 evidence blobs per measure, six measures deep, on the
@@ -68,7 +84,7 @@ export async function officialMeasureRate(
   // the right way round: on the pilot every routed measure is official, so the authored case is TWH's
   // small occupational rosters, while the official case is the 20,000-patient one that was timing out.
   const aggregate = await aggregateOfficialRun(os, runId, measureId);
-  if (!aggregate.producedOfficialEvidence) return null;
+  if (!aggregate.producedOfficialEvidence) return remember(null);
   const labels = officialMeasureSemantics(measureId)?.rateLabels;
   const rate: MeasureRate = {
     source: "official-evidence",
@@ -90,7 +106,5 @@ export async function officialMeasureRate(
     unmeasured: aggregate.unmeasured,
     evaluationErrors: aggregate.evaluationErrors,
   };
-  if (memo.size >= MEMO_LIMIT) memo.delete(memo.keys().next().value as string);
-  memo.set(key, rate);
-  return rate;
+  return remember(rate);
 }

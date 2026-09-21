@@ -66,12 +66,21 @@ after a release paid the cold derive; on 2026-09-21 they did not pay it, they go
 
 ### Decision
 
-1. **The winners probe is memoized under the CANDIDATE RUN LIST** (`stores/probe-cache.ts`), per store
-   INSTANCE. The cheap statement runs every call and IS the key; the probes run once per list. The
-   identity is exact rather than a TTL: a probe's answer depends only on which runs are in the list and
-   which rows they hold, a terminal population run's rows are immutable — the same fact every
-   `RunKeyedMemo` and the roster cell cache already rest on — and a run enters the list only once
+1. **The winners probe is memoized under the CANDIDATE RUN LIST** (`stores/probe-cache.ts`), keyed by
+   the DATABASE HANDLE. The cheap statement runs every call and IS the key; the probes run once per
+   list. The identity is exact rather than a TTL: a probe's answer depends only on which runs are in
+   the list and which rows they hold, a terminal population run's rows are immutable — the same fact
+   every `RunKeyedMemo` and the roster cell cache already rest on — and a run enters the list only once
    terminal.
+
+   > **Keyed by the handle, NOT by the store instance, and the first cut had this wrong** (review). A
+   > live container holds **two `PgOutcomeStore` instances**: `getStores` caches its bundle in a
+   > `WeakMap` keyed by the env OBJECT, and `server.ts` builds a `schedulerEnv` literal distinct from
+   > the env the host builds for the worker; only the pool is module-global. Per-instance, the
+   > compaction invalidation landed on the instance that does the DELETING and stayed open on the one
+   > that does the READING, and the boot warm filled a cache no request would ever hit. One cache per
+   > handle serves both — they are the same rows — while the ceiling and the floor stay separate, which
+   > is what the per-instance choice was defending.
 2. **Two writes can change a probe's answer without moving the key, and both invalidate it.** An
    outcome write can add the first row of a measure to a run ALREADY in the list (the import-driven
    finalize does exactly that), and compaction can delete a non-winner's last row for a measure. So
@@ -79,14 +88,56 @@ after a release paid the cold derive; on 2026-09-21 they did not pay it, they go
    cannot be affected by compaction — its rows are keep-set rows by construction (ADR-073) — but the
    memo does not know that, and a cache that has to reason about which of its entries is still safe is
    a cache nobody can audit.
-3. **`listOutcomes` takes `order: "none"`**, for a caller that FOLDS its rows. `aggregateOfficialRun`
-   is now ONE unordered statement per (run, measure), and it reports `producedOfficialEvidence` so
-   `officialMeasureRate` reads the rows once instead of probing and then aggregating. A PAGED read
-   keeps its ordering whatever the caller asks, because paging an unordered relation may repeat or
-   skip rows between pages — the option makes a read cheaper, never the paging wrong.
-4. **The read models are warmed at BOOT**, off the request path, twice if the first attempt fails, and
+
+   **A THIRD is possible and is left uninvalidated, named rather than fixed** (review). `finalizeRun`
+   flips a run's status into the qualifying set after its rows were written, so a run too old to sit in
+   the 25-run probe budget can enter step 2's reckoning without the candidate list moving; a probe
+   answered between the last chunk write and that status update would survive it. The window is two
+   adjacent statements of one finalize, and it takes a backdated rerun to reach. The fix would be
+   another invalidation on a path that has no reason to know this cache exists.
+3. **`listOutcomes` takes `order: "none"`**, for a caller that FOLDS its rows, and a PAGED read keeps
+   its ordering whatever the caller asks — paging an unordered relation may repeat or skip rows, so the
+   option makes a read cheaper, never the paging wrong.
+
+   `aggregateOfficialRun` is now ONE unordered statement per (run, measure) over a NARROWED projection
+   (`listOutcomeMembershipsForRun`: the `official` object and the `evaluationError` marker, nothing
+   else), and it reports `producedOfficialEvidence` so `officialMeasureRate` reads the rows once
+   instead of probing and then aggregating.
+
+   > **The projection is the memory bound, and it is here because dropping the page window removed
+   > one** (review). The first cut read whole rows unpaged and justified it as "smaller than the
+   > 120,000-row read the overview already makes"; both halves were false. `listOutcomesWithRun` has a
+   > LEAN projection carrying no `evidence_json` at all, and `for (const row of await …)` awaits the
+   > whole parsed array, so nothing is folded as it arrives. `run-aggregate.ts` had already said a sum
+   > "needs only each row's memberships, which the aggregator retains at a few dozen bytes each" — the
+   > read now returns exactly that. It matters beyond the dashboard: the subject cap gates the
+   > individual and bundle MeasureReport variants only, so on a 20,000-patient run the summary
+   > MeasureReport and QRDA III are the reachable exports and this is what bounds them.
+   >
+   > **`producedOfficialEvidence` is decided by ANY evaluated row, not the first.** Under the old
+   > ordering "first" was deterministic; unordered it is whatever the planner returns, and the answer
+   > is memoized — so one malformed `populationResults` arriving first would have made an official
+   > measure read as authored and dropped its rate off the dashboard, non-deterministically. The reason
+   > the first cut gave for keeping the first-row rule (that asking every row would duplicate the
+   > unreadable-evidence alerts) was false: `aggregator.add` already calls `officialMembership` on every
+   > non-error row.
+4. **`officialMeasureRate` memoizes `null`.** It used to cost one row, so leaving the negative uncached
+   was free; provenance and aggregation now share one read, and `programOverview` runs that loop per
+   request OUTSIDE its own memo — so an un-memoized null would have re-read a measure's whole
+   membership set on every dashboard load for the life of the process. That is the cliff this ADR
+   exists to remove, and the first cut reintroduced it (review).
+5. **The read models are warmed at BOOT**, off the request path, twice if the first attempt fails, and
    never once shutdown has begun. Best-effort exactly as the post-run warm is: it computes nothing that
    is not computed on demand, so a failure costs only the warmth.
+
+   > **`warmReadModels` returns a RESULT, because the retry was otherwise unreachable** (review). It
+   > swallows every error by design — a failed warm must not affect a run that has completed and been
+   > reported — and therefore swallowed them from its caller too: the retry was keyed on "a serverless
+   > Postgres refusing the first connection of a cold container", which is exactly what that `catch`
+   > absorbs, so it could never fire, and `read models warmed at boot` was logged on failure. `DEPLOY.md`
+   > points an operator at that line as the post-deploy check. A guard that reads as present and cannot
+   > fire is the defect class this project keeps finding; it was reintroduced here in the act of fixing
+   > three others.
 
 ### Alternatives rejected
 
@@ -116,12 +167,21 @@ after a release paid the cold derive; on 2026-09-21 they did not pay it, they go
 - An AUTHORED measure's rate now reads the measure's rows rather than one row, because provenance and
   aggregation share one read. That is the right way round: on the pilot every routed measure is
   official and 20,000-patient, while the authored case is TWH's small occupational rosters.
-- Peak memory for the aggregate is one (run, measure)'s rows rather than a page of them. That is a
-  SMALLER read than the same request already makes — the overview reads the winning run's rows for
-  every measure at once — and the rows are folded as they arrive.
-- The winners memo is per store INSTANCE, never module-global, because the ceiling and the floor run in
-  one process during the store contract tests and a shared key space would serve one store's answer to
-  the other.
+- Peak memory for the aggregate is one (run, measure)'s MEMBERSHIPS — the `official` object and the
+  error marker, a few dozen bytes per subject — held once, rather than a page of whole evidence rows.
+  What is NOT claimed: that this was measured at pilot scale. It is smaller than the read it replaces
+  by construction (a strict subset of the same rows' bytes, read once instead of eleven times).
+- The winners memo is keyed by the database HANDLE rather than per store instance or module-global: the
+  two instances a live container holds must share it, and the ceiling and the floor must not.
+- **Stratum ORDER within a rate is now row-order dependent**, because `finish()` returns a `Map`'s
+  insertion order. It differs only where rows of one (run, measure) carry heterogeneous stratifier sets
+  — which `measure-report.ts` says is reachable for rows persisted before 2026-09-06. Every stratum
+  carries its own `id`, so a consumer keying by id is unaffected; a positional one or a byte comparison
+  is not. Stated rather than fixed.
+- **The EXPORT path still pays the old sort once.** `aggregateCountsForRun` consults the routing flag
+  first and only falls back to `runProducedOfficialEvidence`, whose `LIMIT 1` still forces the full
+  sort. On the pilot every routed measure short-circuits, so this is TWH's authored rosters. Unchanged
+  by this ADR, and noted so nobody reads Context #2 as saying the paged probe is gone everywhere.
 - **The statement-level attribution in Context #2 is INFERRED, not profiled.** The endpoint timings are
   measured on the live stack; WHICH statement the server cancelled is reasoned from the read shapes,
   because this host cannot run a pilot-scale Postgres (`EXPLAIN ANALYZE` at 1.68M rows) and the
