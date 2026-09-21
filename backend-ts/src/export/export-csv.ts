@@ -315,9 +315,10 @@ export interface CaseExportFilter extends CaseQuery, SubjectFilters {
    * staff-closed lists do (#603). Decided by `wantsCurrentCycle` at the route, with this endpoint's
    * blank meaning `all` — so absent keeps the documented all-history behaviour (§6.3) byte for byte.
    *
-   * A BOOLEAN rather than the raw token, because `CaseQuery.period` already means "this literal
-   * evaluation period" and reaches the store: passing `"current"` through as a period would filter
-   * `evaluation_period = 'current'` and return an empty file under a heading naming a cycle.
+   * A BOOLEAN rather than the raw token, because `CaseQuery.period` means "this literal evaluation
+   * period" and a per-MEASURE cycle has no single value to put there. It would also be harmless to
+   * forward the token — both stores treat `"all"` and `"current"` as no-ops and say so — and the first
+   * cut of this comment wrongly claimed it would filter `evaluation_period = 'current'` (review).
    */
   currentCycleOnly?: boolean;
 }
@@ -376,7 +377,12 @@ export async function casesCsv(
     // `siteMatches`, shared with the work list (#603) — it compared exactly and this compared
     // case-insensitively, so a directory holding two sites differing only in case would export both
     // under a heading naming one.
-    cases = cases.filter((c) => siteMatches(directory.employeeById(c.employeeId)?.site, filter.site!));
+    // `?? "—"` is not cosmetic: the work list compares `CaseSummary.site`, which is
+    // `emp?.site ?? "—"`, and `—` is a SELECTABLE option in the filter (the control's options are the
+    // loaded rows' own site strings). A subject the directory does not hold is therefore visible on
+    // screen under Site = — while this comparison saw `""` and matched nothing — a header-only CSV
+    // taken off a screen with rows on it, which is this export's own defect class (review of #611).
+    cases = cases.filter((c) => siteMatches(directory.employeeById(c.employeeId)?.site ?? "—", filter.site!));
   }
   // `search` is a directory join like `site`, so it lands here rather than in SQL — and it uses the
   // work list's own predicate (`matchesCaseSearch`) over the same three fields, because this export
@@ -422,7 +428,7 @@ export async function casesCsv(
     const emp = directory.employeeById(c.employeeId);
     // Absent key ⇒ no outreach action ⇒ null, the same cell the per-case call wrote.
     const latest = deliveryStatuses[c.id] ?? null;
-    // This export applies NO period filter (§6.3 — every row, all history), so it carries more
+    // This export applies no period filter by DEFAULT (§6.3; `?period=current` narrows it since #603), so it carries more
     // prior-cycle closures than any other surface, and the cycle equality in `liveAnswerForCase` is
     // what keeps a 2024 closure from being exported under the 2026 winner's answer. Without it the
     // row states a `liveState`, a status and a run id that describe a different measurement year.

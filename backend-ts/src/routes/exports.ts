@@ -12,10 +12,9 @@
 import type { CloudDatabase } from "@mieweb/cloud";
 import { getStores } from "../stores/factory.ts";
 import { listNotFoundBody, withListFilter } from "../compliance/subject-list-filter.ts";
-import { worklistQueryFor } from "../case/worklist-read-model.ts";
+import { worklistQueryFor, wantsCurrentCycle } from "../case/worklist-read-model.ts";
 import { rosterCellCache } from "../compliance/roster-read-model.ts";
 import { runsCsv, outcomesCsvStream, casesCsv, auditCsvStream } from "../export/export-csv.ts";
-import { wantsCurrentCycle } from "../case/worklist-read-model.ts";
 import { subjectFiltersFromQuery, subjectFilterErrorBody, SubjectFilterError } from "../compliance/subject-filters.ts";
 import type { DataSourceEnv } from "../engine/ingress/data-source.ts";
 import { caseWindowFrom, calendarDayErrorBody } from "./query-dates.ts";
@@ -60,13 +59,18 @@ const clampExportLimit = (raw: string | null): number => {
   return Math.min(n, 10_000);
 };
 
-/** A 400 in the same JSON shape `/api/cases` returns, so a refusal reads the same on both surfaces. */
 /**
  * A literal `?period=` for the store, or undefined (#603).
  *
- * `current` is NOT a literal: it is the per-measure cycle rule, handled by `currentCycleOnly`. Passing
- * it through as a period would filter `evaluation_period = 'current'` and serve an empty file under a
- * heading naming a cycle — which is the failure a caller would be least likely to notice.
+ * `current` is NOT a literal: it is the per-measure cycle rule, handled by `currentCycleOnly`.
+ *
+ * **Defence in depth, not a requirement — and the first cut of this comment claimed otherwise.** It
+ * said passing `current` through would filter `evaluation_period = 'current'` and serve an empty file.
+ * It would not: `CaseQuery.period` documents `"all"` and `"current"` as NO-OPS and both stores
+ * implement that (`!["all","current"].includes(period.toLowerCase())`), for exactly this reason — "so
+ * a caller forwarding it doesn't accidentally match a literal period". Stripping it here means the
+ * route does not lean on that, which is worth keeping; claiming the store would do the wrong thing is
+ * not (review of #611).
  */
 const periodLiteral = (raw: string | null): string | undefined => {
   const value = raw?.trim();
@@ -74,6 +78,7 @@ const periodLiteral = (raw: string | null): string | undefined => {
   return value;
 };
 
+/** A 400 in the same JSON shape `/api/cases` returns, so a refusal reads the same on both surfaces. */
 const badRequest = (body: unknown): Response =>
   new Response(JSON.stringify(body), { status: 400, headers: { "content-type": "application/json" } });
 

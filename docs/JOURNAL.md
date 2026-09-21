@@ -37,6 +37,32 @@ the panel pre-filter.
 Both mutation-checked: restoring the lower-casing fails the site case, and removing the cycle filter
 fails two. Backend 2,850 tests, one pre-existing local failure; frontend 491/491; lint clean.
 
+**Review round (#611).** Five texts asserted a guard that does not exist: they said forwarding
+`period=current` to the store would filter `evaluation_period = 'current'` and match nothing. It would
+not — `CaseQuery.period` documents `"all"` and `"current"` as NO-OPS and both stores implement that, for
+exactly this reason. One of the five was in `DATA_MODEL_CONTRACTS` §6.3, an always-loaded file. The
+guards stay (the route should not lean on store behaviour); the claim is corrected to defence-in-depth.
+
+Two test gaps, both mutation-confirmed before and after:
+
+- **The fixture could not fail on a wrong measure identifier.** `bucketPeriodForMeasure`'s
+  unknown-measure fallback is 365 days → ANNUAL, and `audiogram` is also 365 → the same anchor, so
+  passing `c.id` or the literal "nonsense" left every assertion green. The fixture is `diabetes_hba1c`
+  now (180 d → BIANNUAL), and one test asserts the two anchors differ so the guard cannot go quiet.
+- **Nothing covered the route wiring.** The tests called `casesCsv` directly and passed
+  `currentCycleOnly` by hand; the frontend test only inspects a query string. Deleting the parameter
+  from `routes/exports.ts` left everything green. Three cases now drive `handleCases` and
+  `handleExports` over the fixture, including the staff-closed path §6.3 names specifically.
+
+And one hole the shared predicate did not close: the list compares `CaseSummary.site`, which is
+`emp?.site ?? "—"`, while the export compared the raw directory value. `—` is a SELECTABLE option, so a
+subject the directory does not hold was visible on screen under Site = — and absent from the file taken
+off it. One line, one test.
+
+`site` on the OUTCOMES CSV and the MCP tool still folds case — filed as #613 rather than widened into
+this change, with the `?? "—"` question named there because it is a decision rather than a copy.
+
+
 ## 2026-09-21 (night) — four paths flipped to audit-first, and the list was still wrong by three
 
 Owner decision on #598: where a path can audit before it mutates, it should — the ledger errs toward

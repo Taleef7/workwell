@@ -30,15 +30,33 @@ import { bucketPeriodForMeasure } from "../run/compliance-period.ts";
 import { loadWorklistCases, wantsCurrentCycle, siteMatches, type WorklistDeps } from "../case/worklist-read-model.ts";
 import type { EmployeeProfile } from "../engine/synthetic/employee-catalog.ts";
 import { casesCsv } from "./export-csv.ts";
+import { handleCases } from "../routes/cases.ts";
+import { handleExports } from "../routes/exports.ts";
 
 const TODAY = new Date().toISOString().slice(0, 10);
-const CYCLE = bucketPeriodForMeasure("audiogram", TODAY);
+
+/**
+ * `diabetes_hba1c`, not `audiogram` — and the choice is what makes the test able to fail.
+ *
+ * `bucketPeriodForMeasure`'s unknown-measure fallback is 365 days → ANNUAL, and `audiogram`'s binding
+ * is ALSO 365 days, so with that measure the correct anchor and the fallback's anchor are the same
+ * string: passing a wrong identifier — `c.id`, a stale `measureVersionId`, the literal "nonsense" —
+ * left every assertion green. `diabetes_hba1c` is 180 days → BIANNUAL, so its anchor differs from the
+ * fallback's for most of the year, and the measure half of the parity is actually pinned (review of
+ * #611).
+ */
+const MEASURE = "diabetes_hba1c";
+const CYCLE = bucketPeriodForMeasure(MEASURE, TODAY);
+/** What a WRONG identifier would bucket to. Asserted different, or this file proves less than it says. */
+const FALLBACK_CYCLE = bucketPeriodForMeasure("no-such-measure", TODAY);
 /** A period that is NOT the current cycle whatever today is — the row the screen hides. */
 const PRIOR = "2019-01-01";
 
 const dbPath = join(tmpdir(), `workwell-periodparity-${crypto.randomUUID()}.sqlite`);
 let cases: SqliteCaseStore;
 let events: SqliteCaseEventStore;
+/** Kept so the route tests can build an env over the SAME fixture the direct calls use. */
+let db: unknown;
 
 /**
  * Subject ids from the REAL static directory, and their real sites.
@@ -51,10 +69,16 @@ let events: SqliteCaseEventStore;
 const ROSTER: EmployeeProfile[] = [
   { externalId: "emp-006", name: "Ann Akana", role: "Welder", site: "Plant A", providerId: "prov-a", tenantId: "twh", payer: "1" },
   { externalId: "emp-007", name: "Ben Bright", role: "Welder", site: "Plant A", providerId: "prov-a", tenantId: "twh", payer: "1" },
+  { externalId: "emp-008", name: "Cara Chun", role: "Welder", site: "Plant A", providerId: "prov-a", tenantId: "twh", payer: "1" },
+  { externalId: "emp-009", name: "Dan Diaz", role: "Welder", site: "Plant A", providerId: "prov-a", tenantId: "twh", payer: "1" },
 ];
 const NOW = "emp-006";
 const THEN = "emp-007";
+const CLOSED_NOW = "emp-008";
+const CLOSED_THEN = "emp-009";
 const SITE = "Plant A";
+/** A subject the REAL static directory does not hold — so both surfaces must call its site "—". */
+const STRANGER = "cypress-mrn-unknown-9999";
 const lookup = (id: string): EmployeeProfile | null => ROSTER.find((e) => e.externalId === id) ?? null;
 const deps = (): WorklistDeps =>
   ({ cases, events, employeeLookup: lookup, roster: () => ROSTER, today: () => TODAY }) as unknown as WorklistDeps;
@@ -72,19 +96,26 @@ const exportSubjects = async (over: Parameters<typeof casesCsv>[2]): Promise<str
   csvSubjects(await casesCsv(cases, events, over));
 
 before(async () => {
-  const db = await createSqliteD1(dbPath);
-  await db.exec(RUN_STORE_FLOOR_DDL.replace(/\n/g, " "));
-  cases = new SqliteCaseStore(db);
-  events = new SqliteCaseEventStore(db);
-  const runId = (await new SqliteRunStore(db).createRun({
+  db = await createSqliteD1(dbPath);
+  await (db as { exec: (s: string) => Promise<unknown> }).exec(RUN_STORE_FLOOR_DDL.replace(/\n/g, " "));
+  cases = new SqliteCaseStore(db as never);
+  events = new SqliteCaseEventStore(db as never);
+  const runId = (await new SqliteRunStore(db as never).createRun({
     scopeType: "MEASURE", scopeId: "audiogram", triggeredBy: "test",
-    requestedScope: { measureId: "audiogram" },
+    requestedScope: { measureId: MEASURE },
     measurementPeriodStart: "2026-01-01T00:00:00.000Z", measurementPeriodEnd: "2026-01-01T00:00:00.000Z",
   })).id;
   // Two OPEN cases for one measure: one in the current cycle, one in a cycle long past. That second
   // row is the whole fixture — it is what the screen hides and the file used to carry.
-  await cases.upsertFromOutcome({ runId, subjectId: NOW, measureId: "audiogram", evaluationPeriod: CYCLE, outcomeStatus: "OVERDUE" });
-  await cases.upsertFromOutcome({ runId, subjectId: THEN, measureId: "audiogram", evaluationPeriod: PRIOR, outcomeStatus: "OVERDUE" });
+  await cases.upsertFromOutcome({ runId, subjectId: NOW, measureId: MEASURE, evaluationPeriod: CYCLE, outcomeStatus: "OVERDUE" });
+  await cases.upsertFromOutcome({ runId, subjectId: THEN, measureId: MEASURE, evaluationPeriod: PRIOR, outcomeStatus: "OVERDUE" });
+  // A staff closure in the current cycle and one in a prior year — the half §6.3 promises is fixed,
+  // and the path where the cycle filter decides which rows get a live answer at all.
+  for (const [subject, period] of [[CLOSED_NOW, CYCLE], [CLOSED_THEN, PRIOR]] as const) {
+    await cases.upsertFromOutcome({ runId, subjectId: subject, measureId: MEASURE, evaluationPeriod: period, outcomeStatus: "OVERDUE" });
+    const row = (await cases.listCases({ employeeIds: [subject], limit: 1 }))[0]!;
+    await cases.patchCase(row.id, { status: "CLOSED", closedAt: "2026-06-14T00:00:00Z", closedReason: "MANUAL_RESOLVE", closedBy: "nurse@example.org" });
+  }
 });
 after(() => { try { rmSync(dbPath, { force: true }); } catch { /* best effort */ } });
 
@@ -139,4 +170,81 @@ test("site is compared the same way on both surfaces, and it is EXACT", async ()
   assert.equal(siteMatches(SITE, SITE), true);
   assert.equal(siteMatches(SITE, SITE.toLowerCase()), false);
   assert.equal(siteMatches(null, SITE), false, "a roster that records no site matches nobody, not everybody");
+});
+
+
+test("the fixture can tell the RIGHT measure identifier from a wrong one", async () => {
+  // Not a behaviour assertion — a guard on this file. `bucketPeriodForMeasure` falls back to 365 days
+  // for an unknown measure, so a fixture whose measure is also 365 days cannot fail when the wrong
+  // identifier is passed. If these two ever coincide (a cadence change, a different TODAY), the three
+  // cycle assertions above go quiet and this one says so.
+  assert.notEqual(CYCLE, FALLBACK_CYCLE, `${MEASURE} must not bucket to the unknown-measure fallback`);
+});
+
+test("the ROUTE wires it: ?period=current on /api/exports/cases narrows the file (#603)", async () => {
+  // The gap the direct-call tests above cannot see. They pass `currentCycleOnly` by hand and the
+  // frontend test only inspects a query string, so deleting the parameter from `routes/exports.ts`
+  // left every test green — the string the screen sends and the filter the file applies were never
+  // connected (review of #611). This drives the real handlers over the real fixture.
+  const env = { DB: db } as never;
+  const casesRoute = (qs: string) => handleCases(new Request(`http://x/api/cases${qs}`), env, "admin@example.org");
+  const exportRoute = (qs: string) => handleExports(new Request(`http://x/api/exports/cases?format=csv${qs}`), env);
+
+  const listed = await casesRoute("?status=open");
+  assert.equal(listed?.status, 200);
+  const listedRows = (await listed!.json()) as Array<{ employeeId: string }>;
+  assert.deepEqual(listedRows.map((r) => r.employeeId), [NOW], "the list defaults to the current cycle");
+
+  const wide = await exportRoute("&status=open");
+  assert.equal(wide?.status, 200);
+  assert.deepEqual(csvSubjects(await wide!.text()), [NOW, THEN].sort(), "the endpoint's default is all history");
+
+  const narrow = await exportRoute("&status=open&period=current");
+  assert.equal(narrow?.status, 200);
+  assert.deepEqual(csvSubjects(await narrow!.text()), [NOW], "and ?period=current matches the list");
+
+  // A LITERAL period still reaches the store as one, so the token is not swallowed wholesale.
+  const literal = await exportRoute(`&status=open&period=${PRIOR}`);
+  assert.deepEqual(csvSubjects(await literal!.text()), [THEN]);
+});
+
+test("the ROUTE narrows the staff-closed export too — the half that accumulates across years", async () => {
+  // §6.3 promises this one specifically: the tab shows one cycle and its three header counts describe
+  // that cycle, while the CSV carried every prior year's closures beside them. Nothing exercised it.
+  const env = { DB: db } as never;
+  const exportRoute = (qs: string) => handleExports(new Request(`http://x/api/exports/cases?format=csv${qs}`), env);
+
+  assert.deepEqual(
+    csvSubjects(await (await exportRoute("&status=staff_closed"))!.text()),
+    [CLOSED_NOW, CLOSED_THEN].sort(),
+    "all history by default, as documented",
+  );
+  assert.deepEqual(
+    csvSubjects(await (await exportRoute("&status=staff_closed&period=current"))!.text()),
+    [CLOSED_NOW],
+    "and the prior year's closure is dropped when the screen's scope is sent",
+  );
+});
+
+// LAST in the file on purpose: it INSERTS a row, and the assertions above are whole-set
+// comparisons over this one fixture. Placed earlier, it broke the route test by being correct.
+test("a subject the directory does not hold is filterable as '—' on BOTH surfaces", async () => {
+  // The residual hole the shared predicate did NOT close (review of #611): the list compares
+  // `CaseSummary.site`, which is `emp?.site ?? "—"`, while the export compared the raw directory value
+  // — `""`. And `—` is a SELECTABLE option, because the control's options are the loaded rows' own
+  // site strings. So an operator picking Site = — saw rows on screen and took away a header-only file.
+  const runId = (await new SqliteRunStore(db as never).createRun({
+    scopeType: "MEASURE", scopeId: MEASURE, triggeredBy: "test",
+    requestedScope: { measureId: MEASURE },
+    measurementPeriodStart: "2026-01-01T00:00:00.000Z", measurementPeriodEnd: "2026-01-01T00:00:00.000Z",
+  })).id;
+  await cases.upsertFromOutcome({ runId, subjectId: STRANGER, measureId: MEASURE, evaluationPeriod: CYCLE, outcomeStatus: "OVERDUE" });
+
+  const listed = (await loadWorklistCases(deps(), { status: "open", site: "—" })).map((c) => c.employeeId);
+  assert.deepEqual(listed, [STRANGER], "the screen shows it under —");
+  assert.deepEqual(
+    await exportSubjects({ statuses: ["OPEN", "IN_PROGRESS"], currentCycleOnly: true, site: "—" }),
+    [STRANGER],
+    "and so does the file taken off that screen",
+  );
 });

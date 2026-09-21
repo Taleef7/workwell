@@ -581,6 +581,12 @@ export async function loadWorklistPage(
  *
  * The same shape as `worklistQueryFor`, and for the same reason: a default that differs per surface is
  * a parameter, not a second copy of the rule.
+ *
+ * **A non-cycle status answers false whatever is asked, and that is a NARROWING rather than a guard
+ * against a store behaviour** — said plainly because the first cut claimed the latter. `CaseQuery.period`
+ * treats `"all"` and `"current"` as no-ops on both stores, so forwarding the token to a closed/all/
+ * excluded list would return all history rather than nothing. Answering false keeps those tabs meaning
+ * what they meant before `?period=` existed.
  */
 export function wantsCurrentCycle(
   statusToken: string | null | undefined,

@@ -330,9 +330,12 @@ export default function CasesPage() {
     // a file with a prior-cycle row in it, and the staff-closed tab exported every past year's
     // closures beside three header counts describing one cycle.
     //
-    // Sent only for the tabs that HAVE the scope. On any other tab the server ignores it, but
-    // `/api/cases` would then treat a non-cycle `period` as a literal evaluation period and match
-    // nothing — so the condition is the rule's own, not a convenience.
+    // Sent only for the tabs that HAVE the scope, which is the server's own condition
+    // (`wantsCurrentCycle` answers false for closed/all/excluded whatever is asked). Not a guard
+    // against the store: `CaseQuery.period` treats `"current"` as a no-op on both stores, so sending
+    // it everywhere would be harmless rather than empty — the first cut of this comment said
+    // otherwise. Matching the server's condition keeps the two query strings identical, which is what
+    // the parity test reads.
     if (CYCLE_SCOPED_STATUSES.has(statusFilter)) params.set("period", "current");
     return params;
   }, [statusFilter, measureFilter, providerFilter, priorityFilter, view, user, assigneeFilter, siteFilter, siteId, from, to, outcomeFilter, urlSearch]);

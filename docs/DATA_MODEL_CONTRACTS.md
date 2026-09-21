@@ -342,7 +342,7 @@ Columns:
 `caseId, employeeExternalId, employeeName, role, site, measureName, measureVersion, evaluationPeriod, status, priority, assignee, currentOutcomeStatus, nextAction, lastRunId, createdAt, updatedAt, closedAt, latestOutreachDeliveryStatus, providerId, payer, closedReason, closedBy, liveState, liveOutcomeStatus, liveOutcomeRunId`
 
 Supports filters: `status`, `measureId`, `priority`, `assignee`, `site`, `caseIds`, `providerId`,
-`ageBand`, `sex`, `payer`, `from`/`to`, `outcome`, `search`.
+`ageBand`, `sex`, `payer`, `from`/`to`, `outcome`, `search`, `period`.
 
 > **The last four were added 2026-09-20, and the reason is the contract.** This export is reached
 > from the work list's own button with the filters that list is showing. The **button sent three** of
@@ -401,9 +401,12 @@ Supports filters: `status`, `measureId`, `priority`, `assignee`, `site`, `caseId
 > over one fixture holding a prior-cycle case, because a parameter comparison can only ever see
 > parameters.
 >
-> `period` is sent only for the cycle-scoped tabs, and that is the rule's own condition rather than a
-> tidy-up: on any other tab `/api/cases` would treat the token as a literal evaluation period and match
-> nothing.
+> `period` is sent only for the cycle-scoped tabs, which is the SERVER's own condition —
+> `wantsCurrentCycle` answers false for closed/all/excluded whatever is asked, so those tabs keep
+> meaning what they meant before `?period=` existed. **It is not a guard against the store**: `CaseQuery.period`
+> treats `"all"` and `"current"` as no-ops on both stores (and says so, for this exact reason), so
+> forwarding the token would be harmless rather than empty. An earlier version of this paragraph
+> claimed the store would match nothing, which was false in five places at once.
 
 > **`site` is compared EXACTLY on both surfaces** (#603). The work list compared exactly and this
 > export lower-cased both sides; before #602 the export's `site` was only reachable by hand-writing a
