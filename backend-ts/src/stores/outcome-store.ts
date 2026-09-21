@@ -218,8 +218,53 @@ export interface OutcomeStore {
        * absent filter, the same rule `CaseQuery.employeeIds` follows. Composes with `subjectId`.
        */
       subjectIds?: readonly string[];
+      /**
+       * Drop the `ORDER BY` — for a caller that FOLDS the rows and does not read them in order.
+       *
+       * The default ordering is `(evaluated_at, id)` and no index serves it, so every ordered read of
+       * one measure of a whole-population run sorts the measure's rows — on the pilot 20,000 of them,
+       * carrying `evidence_json`. `aggregateOfficialRun` paid that sort ELEVEN times per (run,
+       * measure): once for the one-row provenance probe and once per `LIMIT/OFFSET` page, each page
+       * re-running the same filter and the same sort to skip further into it. Six measures made the
+       * programs overview's cold read the slowest statement on the deployment, and on 2026-09-21 it
+       * was the one the 30 s role default (ADR-084) cancelled — `/api/programs/overview` answered 503
+       * `statement_timeout` on a cold process.
+       *
+       * Unordered is only correct where the ANSWER does not depend on order, which is why this is an
+       * opt-in on the read rather than a change to the default. A caller that pages MUST keep the
+       * ordering: paging an unordered relation may repeat or skip rows between pages.
+       *
+       * A test double that ignores this option returns the same rows in some order and every folded
+       * answer is unchanged — so the option cannot make a fake disagree with the stores.
+       */
+      order?: "none";
     },
   ): Promise<OutcomeRecord[]>;
+  /**
+   * One measure's rows of one run, carrying ONLY what a rate aggregation reads — the population
+   * memberships and the evaluation-error marker. One unordered statement, never paged.
+   *
+   * **Why this exists rather than `listOutcomes(runId, { measureId })`** (review of #610). The
+   * aggregate used to page with `LIMIT/OFFSET`, and because no index serves the default
+   * `(evaluated_at, id)` ordering, every page re-sorted the measure's whole evidence — ten sorts of
+   * 20,000 `evidence_json` blobs per (run, measure) on the pilot, six measures deep on the programs
+   * overview's cold path. Dropping the paging removed the repeated sort and removed the MEMORY BOUND
+   * with it: `evidence_json` for an official outcome carries `expressionResults` — one entry per
+   * population per rate, with the define names — which is the bulk of the blob and which a sum does
+   * not read.
+   *
+   * So the bound comes back as a PROJECTION instead of a page window. `run-aggregate.ts` already said
+   * a sum "needs only each row's memberships, which the aggregator retains at a few dozen bytes
+   * each"; this returns those bytes and nothing else, in one statement with no sort.
+   *
+   * **`evaluationError` must be ABSENT, not null, when the row is not an error** — `isEvaluationErrorEvidence`
+   * tests key PRESENCE (`"evaluationError" in evidence`), so a projection that always carried the key
+   * would make every row read as an evaluation failure and every rate read as zero.
+   */
+  listOutcomeMembershipsForRun(
+    runId: string,
+    measureId: string,
+  ): Promise<Array<Pick<OutcomeRecord, "status" | "evidence">>>;
   getOutcomeById(id: string): Promise<OutcomeRecord | null>;
   /**
    * Delete outcome rows older than `cutoff`, KEEPING four things (ADR-073, amended by ADR-077 d3):
