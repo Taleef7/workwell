@@ -76,6 +76,35 @@ export interface LiveCellOptions {
  * mismatch — the measure HAS a winner, it simply describes another cycle, and a null would read as
  * "no run at all".
  */
+/**
+ * The four `live*` fields a SURFACE carries for one staff-closed row, from that row's answer.
+ *
+ * One derivation, because three surfaces write these fields and the work list's outcome FILTER reads
+ * them back: the CSV row (`export/export-csv.ts`), the work-list summary (`withLiveStatus`) and the
+ * roster overlay. `displayStatus` is `cell.status` and `outcomeStatus` is `cell.canonical` — they are
+ * NOT interchangeable, and that is the whole reason this is one function. An out-of-population row is
+ * canonical `MISSING_DATA` and displays as out-of-population, so a filter comparing against the
+ * canonical bucket selects rows the screen labels something else. `cell == null` (no winning run, or
+ * a winner describing a different cycle) leaves both null and the state `UNKNOWN`, which is how a
+ * reader falls back to the frozen column rather than reading an absence as an answer.
+ */
+export function liveFieldsFor(answer: LiveCell): {
+  state: LiveState;
+  outcomeStatus: string | null;
+  displayStatus: string | null;
+  runId: string | null;
+} {
+  if (answer.cell == null) return { state: "UNKNOWN", outcomeStatus: null, displayStatus: null, runId: answer.runId };
+  return {
+    state: answer.state,
+    // `canonical` is OPTIONAL on a cell (absent on the synthetic NOT_APPLICABLE ones), and `null`
+    // here means the same thing `cell == null` does to a reader: no bucket, so fall back.
+    outcomeStatus: answer.cell.canonical ?? null,
+    displayStatus: answer.cell.status,
+    runId: answer.runId,
+  };
+}
+
 export function liveAnswerForCase(
   live: ReadonlyMap<string, LiveCell>,
   c: { employeeId: string; measureId: string; evaluationPeriod: string },

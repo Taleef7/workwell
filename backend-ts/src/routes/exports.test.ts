@@ -189,3 +189,48 @@ test("non-csv format → 400 with the Java parity message", async () => {
   assert.equal(res?.status, 400);
   assert.match(await res!.text(), /Unsupported format\. Use format=csv\./);
 });
+
+/**
+ * The export is reached from the work list's own button, so it must understand every filter that
+ * list is showing. Until 2026-09-20 it understood three of the nine — a CSV taken from a list
+ * narrowed by a date window, an outcome or a search was a WIDER file than the screen it came from,
+ * under a heading that said otherwise, and nothing failed.
+ *
+ * Each case below asserts BOTH directions: the matching value keeps the row and a non-matching one
+ * drops it. A one-directional assertion passes just as well against a filter that is ignored.
+ */
+const rows = async (query: string) => (await text(`/api/exports/cases?format=csv&${query}`)).filter((l) => l.length > 0);
+const hasCase = async (query: string) => (await rows(query)).some((l) => l.startsWith(caseId));
+
+test("cases export honors ?outcome, normalized exactly as /api/cases normalizes it", async () => {
+  assert.ok(await hasCase("outcome=OVERDUE"), "the case's current outcome is OVERDUE");
+  // `?outcome=over-due` is not a thing, but `due-soon` is how the UI spells DUE_SOON — the export
+  // must fold the separator the same way the list route does, or the two disagree on one screen.
+  assert.ok(await hasCase("outcome=overdue"), "case-insensitive");
+  assert.ok(!(await hasCase("outcome=due-soon")), "a different outcome drops the row");
+  assert.equal((await rows("outcome=due-soon")).length, 1, "header only");
+});
+
+test("cases export honors ?search over subject name, measure name and subject id", async () => {
+  for (const needle of ["Omar", "omar siddiq", "Audiogram", "emp-006"]) {
+    assert.ok(await hasCase(`search=${encodeURIComponent(needle)}`), `search=${needle} should match`);
+  }
+  assert.ok(!(await hasCase("search=nobody-by-this-name")), "a non-matching needle drops the row");
+});
+
+test("cases export honors the ?from/?to created-at window, inclusive at both ends", async () => {
+  const today = new Date().toISOString().slice(0, 10);
+  assert.ok(await hasCase(`from=${today}&to=${today}`), "a one-day window containing today is inclusive");
+  assert.ok(!(await hasCase("from=2020-01-01&to=2020-01-02")), "a window before the case drops it");
+  assert.ok(!(await hasCase("from=2099-01-01")), "a window after the case drops it");
+});
+
+test("a malformed ?from is a 400 naming the parameter, not a lexicographic filter on garbage", async () => {
+  for (const [param, value] of [["from", "2026-02-30"], ["to", "not-a-date"], ["from", "2026-99-99"]] as const) {
+    const res = await get(`/api/exports/cases?format=csv&${param}=${encodeURIComponent(value)}`);
+    assert.equal(res?.status, 400, `${param}=${value} should be refused`);
+    const body = JSON.parse(await res!.text()) as { parameter: string; message: string };
+    assert.equal(body.parameter, param);
+    assert.match(body.message, /YYYY-MM-DD/);
+  }
+});

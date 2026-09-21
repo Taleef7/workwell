@@ -49,6 +49,7 @@ import { profileForId } from "../engine/ingress/webchart/live-directory.ts";
 import { DIRECTORY, employeeById, employees, providerById, profileSubjectMatcher } from "../config/deployment-profile.ts";
 import { assignableUsers, resolveAssignable } from "../auth/demo-users.ts";
 import { outcomeForCase } from "../case/case-outcome.ts";
+import { caseWindowFrom, calendarDayErrorBody } from "./query-dates.ts";
 
 interface CasesEnv {
   DB: CloudDatabase;
@@ -350,29 +351,11 @@ export async function handleCases(req: Request, env: CasesEnv, actor = "system")
   // only outright garbage raised anything (22007 → a 500). A day is `YYYY-MM-DD`, optionally carrying
   // the rest of an ISO timestamp, and anything else is a 400 naming the format — the same treatment
   // `outreach` and the panel filters already get, rather than a silently different filter.
-  // A REAL calendar day, not merely the shape of one. The first version of this guard was a regex
-  // alone, which admitted `2026-02-30`, `2026-99-99` and a bare trailing `T` — each then filtered
-  // lexicographically by its first ten characters instead of being refused, which is the partial
-  // guard this codebase keeps rediscovering. The components must round-trip through `Date.UTC`, and a
-  // timestamp suffix must itself parse.
-  const isCalendarDay = (value: string): boolean => {
-    const m = /^(\d{4})-(\d{2})-(\d{2})([T ].+)?$/.exec(value);
-    if (!m) return false;
-    const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])];
-    const utc = new Date(Date.UTC(y, mo - 1, d));
-    if (utc.getUTCFullYear() !== y || utc.getUTCMonth() !== mo - 1 || utc.getUTCDate() !== d) return false;
-    return m[4] === undefined || !Number.isNaN(Date.parse(value));
-  };
-  const from = q.get("from")?.trim() || undefined;
-  const to = q.get("to")?.trim() || undefined;
-  for (const [name, value] of [["from", from], ["to", to]] as const) {
-    if (value !== undefined && !isCalendarDay(value)) {
-      return json(
-        { error: "invalid_request", message: `${name} must be a date as YYYY-MM-DD (got '${value}')`, parameter: name },
-        400,
-      );
-    }
-  }
+  // The predicate itself lives in `query-dates.ts`, because the cases CSV has to validate this same
+  // window identically — see `isCalendarDayOrTimestamp` there for why it is NOT `parseQueryDate`.
+  const window = caseWindowFrom(q);
+  if (!window.ok) return json(calendarDayErrorBody(window.name, window.value), 400);
+  const { from, to } = window;
   // Outcome-bucket filter (OVERDUE/DUE_SOON/MISSING_DATA/COMPLIANT/EXCLUDED) — the worklist's
   // "why flagged" axis, distinct from case *status* (OPEN/CLOSED/…). Post-filtered in JS like
   // site/search so X-Total-Count stays exact for paging.

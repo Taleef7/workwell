@@ -1,5 +1,84 @@
 # Journal
 
+## 2026-09-20 (late) — the CSV now describes the list it was taken from
+
+The work list sends nine filters to `/api/cases`. Its **Export cases CSV** button spelled its own URL
+with three of them — `status`, `measureId`, `providerId` — so a list narrowed by a site, a created-at
+window, a priority, an assignee, an outcome or a search produced a **wider file than the screen it
+came from**, under a heading that said otherwise. No error, nothing to notice: the same failure shape
+as `?status=open` returning `["OPEN"]` against a list showing OPEN + IN_PROGRESS, and the one the
+09-20 review named B-10.
+
+Half of it was the server: `/api/exports/cases` accepted neither `from`/`to` nor `outcome` nor
+`search`, so a caller that sent them got a broader export anyway. Both halves are closed.
+
+**What changed**
+- `/api/exports/cases` now takes `from`/`to`, `outcome` and `search` (DATA_MODEL_CONTRACTS §6.3).
+  `outcome` is folded exactly as `/api/cases` folds it, so `?outcome=due-soon` means the same thing
+  on both surfaces. `search` is a directory join applied with the work list's OWN predicate —
+  `matchesCaseSearch`, extracted from `worklist-read-model.ts` rather than copied, because a second
+  copy of a three-field list drifts the first time either is touched.
+- The created-at window is validated by one predicate shared with `/api/cases`
+  (`routes/query-dates.ts`: `isCalendarDayOrTimestamp` / `calendarDayErrorBody` / `caseWindowFrom`),
+  so `?from=2026-02-30` is a 400 naming the parameter on both surfaces instead of a lexicographic
+  filter on the first ten characters. It is deliberately NOT merged with `parseQueryDate`, which
+  serves the dashboard routes and accepts a day and nothing else — unifying them would change
+  behaviour on one side or the other while looking like a tidy-up.
+- The screen builds **one** parameter set for the list, its paging and the export (`caseFilterParams`
+  in `cases/page.tsx`). There were already two identical copies of that list — the initial load and
+  "load more" — which is how the third came to be three filters short.
+
+**The tests are the point, not the fix.** The frontend one does not enumerate parameter names: it
+compares the export's query string with the list request's, minus paging, so a filter added to one
+and not the other fails **without the test being edited**. Backend-side, each of the four new filters
+is asserted in both directions — a matching value keeps the row, a non-matching one drops it — because
+a one-directional assertion passes just as well against a filter that is ignored. Mutation-checked
+one at a time: dropping `outcome`, `search`, the window, or the 400 guard each fails exactly its own
+test and nothing else.
+
+**Review found the same defect one control over, and it is fixed in the same PR.** `?outcome` on the
+**staff-closed** tab means something different from `?outcome` everywhere else: that list resolves
+what CQL says today and filters on it, because `current_outcome_status` froze when the person closed
+the case. The export handed the token to the store, which compares the frozen column — so
+`?outcome=COMPLIANT` showed one row on screen and exported none, `?outcome=OVERDUE` showed none and
+exported one, and the exported row contradicted its own `liveOutcomeStatus` cell. Two clicks away,
+and the §6.3 paragraph written above asserted it was closed.
+
+The token is now withheld from the store on that one list and applied after the live pass the export
+already runs for those rows, so it costs nothing; every other list keeps the SQL predicate, because
+for an active or system-closed row the frozen column IS live. Both surfaces compare through
+`shownStatusFor` → `liveOrFrozenStatus`, and the four `live*` fields come from one `liveFieldsFor`
+shared with `withLiveStatus`.
+
+**One of the mutations survived, and that is why the shape changed.** Swapping `displayStatus` for
+`outcomeStatus` at the export's call site altered which rows it selected with every test still green
+— the codebase's own vacuous-guard shape, in the fix for a vacuous-guard bug. Rather than write a
+test around it, the mapping moved into `shownStatusFor` so there is no choice at the call site; the
+mutant now dies. Five of five die: withholding removed, live filter removed, fast path always
+bypassed, and either half of the display/canonical swap. (An out-of-population fixture would have
+killed it directly, but producing a cell whose display state differs from its bucket needs an
+official-routed measure and its `official.populationResults` evidence — that pins `deriveCell`, which
+has its own tests.)
+
+**Two things are stated rather than fixed, both in §6.3 and in #603.** The export applies no period
+logic while the open and staff-closed lists default to the current cycle — `?status=open` can show
+zero rows and export a prior-cycle case, and the parity test compares query strings so it cannot see
+a server-side default. And `site` is compared case-sensitively by the list, case-insensitively by the
+export. The first needs an owner decision about what the export should do; the second is reachable
+now only because the button started sending `site`.
+
+**Codex found the same staff-closed defect independently, and one more.** Its P2: the export read
+`limit: 100000` while `loadWorklistCases` reads `Number.MAX_SAFE_INTEGER` — and `site`, `search` and
+a large panel selection are all applied AFTER that read, so above the cap a searched subject visible
+on screen would be missing from the file taken off it, possibly leaving a header-only CSV. The pilot
+is 32,558 cases so nothing was wrong today; the number was a quiet failure scheduled for whenever the
+deployment outgrew it. The export now reads the same unbounded set the list does, which is also the
+only value that makes the two agree by construction. Pinned on the QUERY rather than through a
+fixture, deliberately: reproducing the truncation needs 100,000 seeded cases, and any smaller fixture
+passes against the bug.
+
+Suites: backend full, frontend `cases` 54/54, `npm run lint` clean (two pre-existing warnings).
+
 ## 2026-09-20 (evening) — #563 is answered: 94% of the run is one call that blocks the event loop for 21 seconds
 
 The instrument shipped this afternoon (`cf8ac8ce`, #588) was pointed at the pilot sandbox the same
