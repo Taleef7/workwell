@@ -31,6 +31,24 @@ run-created transitions.**
 The correction is in `DATA_MODEL_CONTRACTS` §4 beside the best-effort note and in `CLAUDE.md`'s rule
 itself, because a rule whose exception lives in a source file is a rule a session will contradict.
 
+**And the correction was itself too broad** (Codex, on the PR). It said "operator actions audit
+first and cannot lose the event" — true of CASE actions, false of several other operator surfaces.
+The same failure one level up, in a change whose entire subject is claims being wider than what is
+behind them.
+
+So the paths were enumerated by a sweep for the shape rather than recalled. **Audit-first:** every
+case action, rerun-to-verify's case patch, bulk assign and panel backfill. **Mutate-first, and so
+able to lose the event:** the run-created case transition, the measure lifecycle (create, approve,
+deprecate, transition), segment create, terminology-mapping create.
+
+`case-rerun.ts` looked like a violation to the sweep and is not — its first mutation creates a RUN
+row, and the case patch is explicitly after an audit-first `recordCaseEvent`, with a comment saying
+so. Worth the check: it would have been an easy thing to assert wrongly in the other direction.
+
+**Only the run's ordering is a considered trade.** The other six are the order they happened to be
+written in, which splits #598 into a cheap half — flip them, no seam needed — and the primitive that
+still needs a cross-store transaction.
+
 ### #599 — an approval gate that could not fail on the thing its label implied
 
 Studio rendered "Test Fixtures ✅" and blocked activation until it passed, which reads as *the
