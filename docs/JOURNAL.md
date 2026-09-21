@@ -1,5 +1,94 @@
 # Journal
 
+## 2026-09-21 — the microtask trap, and the profile that named a function I had not read
+
+Two issues, one PR: **#590** (a MEASURE run always 504'd and invited a retry that also ran) and
+**#563** (every endpoint degrades during the nightly, including ones that touch no database). ADR-085.
+
+### #590 — MEASURE is scheduled, not awaited
+
+`ASYNC_SCOPES` was `{ALL_PROGRAMS, SITE}` because MEASURE was "a few seconds". True of the
+occupational roster; false of 20,000 patients, where it is ~15 minutes against a 60 s gateway. So the
+call **always** returned 504 while the run continued and finished normally a quarter-hour later — and
+because a 504 is an nginx HTML page there was no run id to poll, so it read as a failure and invited a
+retry that **also ran**. Two of those held the pool for ~30 minutes.
+
+MEASURE joins the set; EMPLOYEE stays synchronous because it is genuinely one subject, and a test
+pins that too — a test that only checked MEASURE could not tell this from widening the set to
+everything. The `configuredMeasure` clause is **removed** rather than left dormant: with MEASURE async
+everywhere it could no longer change the answer.
+
+### #563 — the mechanism, measured
+
+`evaluateBatch` is 93.9% of a 90-minute run. The reason requests starve is not that the work is slow,
+it is **where it yields**: an `await` on a sync-resolving promise schedules a microtask, and Node
+drains the entire microtask queue before reaching the poll phase. 60 iterations x 42 ms of CPU, with a
+local server probed concurrently:
+
+| yield | requests served | worst latency | batch |
+|---|---|---|---|
+| none | 1 | 2,534 ms | — |
+| `queueMicrotask` | **1** | **2,523 ms** | +0.1% |
+| `setImmediate` | 31 | **43.5 ms** | +1.5% |
+| `setTimeout(0)` | 105 | 85.6 ms | +2.4% |
+
+The `queueMicrotask` row is the load-bearing one: it forecloses "just add an `await`". Only a
+macrotask works. `setImmediate` where it exists, `setTimeout(0)` otherwise, because the engine's
+DB-less shell promises portability and Workers has no `setImmediate`.
+
+### The correction, which is the part worth keeping
+
+**I recommended this fix against the wrong function, and said so mid-flight rather than shipping it.**
+The profile names `evaluateBatch`; I read `engine/ingress/evaluate-bundle.ts`, which exports a
+function by that name, and designed around its loop. The pipeline does not call it. It calls
+`deps.engine.evaluateBatch` → `executor-router.ts` → `runBatch` → `calculateOfficialWithSignal`,
+which is **one call into `fqm-execution` with every bundle in the chunk**. That call is what `batchMs`
+measures. We do not own that loop and cannot yield inside it.
+
+All six of the pilot's measures are official-routed (ADR-078), so **the yield does not touch Maui's
+nightly**. It fixes the loops we do own — the pipeline's per-subject loop (the authored path, which is
+TWH) and the ingress batch (CLI, flip gate, roster).
+
+So ADR-085 d4 now says the opposite of its first draft: on the official path the lever **is** chunk
+size, because a chunk boundary is a real database write and therefore a real yield point. **No number
+is recorded for it**, deliberately — #588 already reports `batchMs` per chunk on the live sandbox, so
+it is answerable by changing one environment variable and reading the run log, and anything else would
+be a guess wearing a measurement's clothes. `DEPLOY.md` now separates the two stalls and gives the
+command.
+
+**#604 files the real fix**: run the `fqm-execution` call in a worker thread. Its inputs and output are
+plain JSON, and the package is Node-only so d1's portability constraint does not bind it.
+
+The general lesson, cheaply learned this time: **confirm which function the profile names before
+designing around it.** Two functions shared a name, one was 93.9% of the run, and the other was the
+one I had open.
+
+### Codex review: a claim that was too broad, and a fallback that is 6,500x worse per turn
+
+Codex asked whether the per-subject yield should be gated to the authored branch, since the docs
+claimed the official path was unchanged and a 20,000-patient official measure still takes 20,000
+turns. Measuring rather than arguing settled both halves, and turned up something I had assumed
+wrongly.
+
+**Bare cost per turn, no traffic:** `setImmediate` **0.0014 ms**, `queueMicrotask` 0.0004 ms,
+`setTimeout(0)` **9.2 ms**.
+
+So the yield stays: 20,000 turns is **28 ms** against a 90-minute run, and gating it off would trade
+that for a blocked event loop during the ~6% of an official run that is the pipeline's own
+result-mapping loop — work we do control. The claim was what needed fixing, not the code: "the
+official path is unchanged" was too broad, because the per-subject loop is SHARED. ADR-085 and
+DEPLOY.md now say which 6% yields and what it costs.
+
+**The `setTimeout(0)` number is the unexpected one.** I assumed the spec's 1 ms clamp; the real floor
+is the platform's clock granularity, 9.2 ms here. Over the pilot's 120,000 pairs that is 0.17 s with
+`setImmediate` against **~18 minutes** with the timer. `setImmediate` exists on the node-24 host we
+deploy to, so the fallback is insurance for a target we do not ship to — but it is now written down in
+both helpers that such a target must yield less often rather than inherit a per-bundle timer.
+
+Codex's other finding was to split the PR per CLAUDE.md's one-task rule. Correctly reasoned from the
+repo's own rules, and declined: the owner asked for the two together. The independence is documented
+in the PR body and in ADR-085, which is what a future revert needs to know.
+
 ## 2026-09-20 (late) — the CSV now describes the list it was taken from
 
 The work list sends nine filters to `/api/cases`. Its **Export cases CSV** button spelled its own URL

@@ -1418,3 +1418,48 @@ test("population exports refuse a run a compaction pass could have reached (409 
     assert.equal((await get(`/api/runs/${after.id}${path}`))!.status, 200, `after ${path}`);
   }
 });
+
+/**
+ * A STATIC (not WebChart-configured) MEASURE run is scheduled, not run in the request (#590).
+ *
+ * MEASURE was synchronous on the reasoning that it was "≤ a few seconds" — true of a small
+ * occupational roster, false of the pilot's 20,000-patient corpus, where it is ~15 minutes against a
+ * 60 s gateway. `POST /api/runs/manual` therefore always answered 504 while the run continued
+ * server-side, and since a 504 is an nginx HTML page the caller had no run id to poll — so it read
+ * as a failure and invited a retry that also ran. Two of those saturated the pool for half an hour.
+ *
+ * The assertion that matters is `tasks.length === 1`: the work was HANDED to waitUntil rather than
+ * awaited. Asserting only on the 201 would pass against the synchronous path, which also returns
+ * 201 — just fifteen minutes later.
+ */
+test("a static MEASURE run is scheduled in waitUntil and answers RUNNING, not awaited in the request", async () => {
+  const { res, drain } = await postAsync("/api/runs/manual", {
+    scopeType: "MEASURE",
+    measureId: "audiogram",
+    evaluationDate: "2026-06-01",
+  });
+  assert.equal(res?.status, 201);
+  const body = (await res!.json()) as { runId: string; status: string };
+  assert.equal(body.status, "RUNNING", "the caller gets a run id it can poll");
+  assert.ok(body.runId, "and the id is present — a 504 HTML page is what used to arrive instead");
+
+  await drain();
+  const finished = await get(`/api/runs/${body.runId}`);
+  const run = (await finished!.json()) as { status: string; totalEvaluated: number };
+  assert.equal(run.status, "COMPLETED", "the background task finished it");
+  assert.ok(run.totalEvaluated > 0, "and it did the work");
+});
+
+test("EMPLOYEE stays synchronous — it is genuinely one subject", async () => {
+  // The counterpart assertion: #590 widened the async set by exactly one scope, and a test that only
+  // checked MEASURE could not tell that from widening it to everything.
+  const { res, drain } = await postAsync("/api/runs/manual", {
+    scopeType: "EMPLOYEE",
+    employeeExternalId: EVALUABLE_EMPLOYEES[0]!.externalId,
+    evaluationDate: "2026-06-01",
+  });
+  assert.equal(res?.status, 201);
+  const body = (await res!.json()) as { status: string };
+  assert.notEqual(body.status, "RUNNING", "finished in the request, so the response already states the outcome");
+  await drain();
+});
