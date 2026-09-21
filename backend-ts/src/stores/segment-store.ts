@@ -36,6 +36,13 @@ export interface HydratedSegment {
 }
 
 export interface CreateSegmentInput {
+  /**
+   * The id to insert under. Optional and minted by the store when absent, so every existing caller is
+   * unchanged — but the ROUTE passes one, because an event cannot name a row the store has not yet
+   * returned and #598's rule is audit-before-mutate. Same shape as `SubjectListStore.createList` and
+   * `createTerminologyMapping`.
+   */
+  id?: string;
   name: string;
   description?: string;
   enabled?: boolean;

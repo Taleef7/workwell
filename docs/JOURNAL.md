@@ -1,5 +1,55 @@
 # Journal
 
+## 2026-09-21 (late, III) — the audit-order sweep is fully triaged, and the rule finally has a test
+
+The owner's #598 decision was: where a path CAN audit before it mutates, it should. #607/#608 flipped
+the ones that were a plain reorder. This finishes the sweep's output — every candidate opened, none
+named from the tool's summary.
+
+**Flipped, each needing a one-field seam change rather than a reorder:** `createMeasure`, segment
+create, segment UPDATE, segment delete, and `uploadEvidence`. `CreateMeasureInput`,
+`CreateSegmentInput` and `InsertEvidenceInput` now ACCEPT the value the event keys on — optional, minted
+by the store when absent, so every other caller is unchanged. That is the whole obstacle these five
+shared: the store minted the id (or, for evidence, the `uploadedAt` the payload reports as
+`payload.timestamp`), so there was nothing to key an event on beforehand.
+
+Two details worth keeping. **Segment UPDATE needed three writes moved, not one** — `updateSegment`,
+`setMeasures`, `setOverrides` — so a failure after the first left a partly-updated segment with no event
+at all; and its 404 became an explicit pre-read, because `updateSegment` returning null WAS the
+not-found signal, which is what made the old order unavoidable. **`uploadEvidence` audits before the
+BUCKET write too**: an object in storage the ledger never mentions is harder to notice than a missing
+row.
+
+**`src/audit/audit-order.test.ts` exists because nothing tested the rule.** Nine call sites had been
+flipped across three commits and not one test could tell: every existing test asserts the event EXISTS
+after a SUCCEEDING operation, which is equally true in either order, so a reorder back was silent. Each
+case now makes the MUTATION fail and requires the event anyway — the only externally visible difference
+between the two orders. Mutation-checked on two of them.
+
+**Still mutate-first, and now every one has a reason at its call site:**
+- the run-created case transition and the import-driven finalize — the same deliberate pattern, an
+  event best-effort at the run boundary, because the alternative strands an otherwise-complete run;
+- **`dispatchOutreach`** — the only one that puts something OUTSIDE the system before the ledger.
+  `channel.send()` dispatches the message and the payload is built from the delivery result, so there
+  is nothing to record beforehand and nothing to retract after. Needs ADR-073 d4's intent-then-completion
+  pair, which adds an event type consumers read: an owner decision, not a reorder;
+- the three identity-link writes — and the reason is sharper than "the store mints the id":
+  `upsertLink` returns the EXISTING row's id on conflict, so a caller-minted id is not the id the event
+  would name. Keying those events on the PAIR would work and changes what `entity_id` means;
+- `backfill-scale` and `backfill-quality-history` — one-shot seeding tools, not operator surfaces.
+
+**Checked and NOT violations**, every one a matcher artifact: `audit-packet` (a hash), `materialize-run`
+and `backfill-trend-history` (reads), evidence DOWNLOAD (`arrayBuffer`), `measure-seed` (itself
+audit-first, flagged against a different write's audit), subject-list create (its audit is a
+`beforeComplete` callback that runs before the list becomes visible), and panel assignment, which audits
+before the mapping AND records each per-case event before `assignCases`.
+
+So the sweep's output is fully triaged — which is NOT the same as #598 closing. What remains is the
+missing cross-store `applyCaseAction` primitive, plus the two decisions above. `DATA_MODEL_CONTRACTS`
+§4 and CLAUDE.md now say exactly that.
+
+Backend 2,856 tests, one pre-existing local failure (`corpus-membership`).
+
 ## 2026-09-21 (night) — four paths flipped to audit-first, and the list was still wrong by three
 
 Owner decision on #598: where a path can audit before it mutates, it should — the ledger errs toward

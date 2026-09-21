@@ -137,35 +137,56 @@ SQLite floor and the Pg ceiling read the current row and apply the shared pure `
   > transaction, and the patch follows.
   >
   > **Verified and flipped (2026-09-21, owner decision on #598):** measure approve, deprecate and the
-  > explicit status transition; terminology-mapping create; value-set attach and detach; **`grantWaiver`
-  > and `scheduleAppointment`**. Every one of them could flip for the same reason — the id is minted
-  > caller-side rather than by the insert, so the event can name the row before it exists.
+  > explicit status transition; terminology-mapping create; value-set attach and detach; `grantWaiver`
+  > and `scheduleAppointment`; and — with a one-field seam change each — **`createMeasure`**, **segment
+  > create, update and delete**, and **`uploadEvidence`**. Every one could flip for the same reason:
+  > the value the event keys on is minted caller-side rather than by the insert. `CreateMeasureInput`,
+  > `CreateSegmentInput` and `InsertEvidenceInput` now ACCEPT that value (optional, minted by the store
+  > when absent, so every other caller is unchanged), which is the change that made a reorder possible.
+  > **`uploadEvidence` audits before the BUCKET write too** — an object in storage the ledger never
+  > mentions is harder to notice than a missing row. Segment UPDATE needed three writes moved rather
+  > than one (`updateSegment`, `setMeasures`, `setOverrides`), and its 404 became an explicit pre-read:
+  > `updateSegment` returning null WAS the not-found signal, which is what made the old order
+  > unavoidable.
   >
-  > **Known to still mutate first, with the reason at each call site:**
-  > - the **run-created case transition** — **deliberate**, because the alternative strands an
-  >   otherwise-complete run as RUNNING after the case was already mutated;
-  > - **`createMeasure`**, **segment create**, the three **identity-link** writes, and
-  >   **`uploadEvidence`** — all of which share one cause: the store mints something the event needs,
-  >   so there is nothing to key it on beforehand. For the first three that is the entity id; for
-  >   evidence it is `record.uploadedAt`, which the event carries as `payload.timestamp`. The fix is
-  >   to mint it caller-side (as `createTerminologyMapping` and now `grantWaiver` do) or ADR-073 d4's
-  >   intent-then-completion pair — a real change rather than a reorder.
-  >   **`uploadEvidence`'s exposure is wider than a row**: the BUCKET write lands first too, so a
-  >   failed audit can leave an object in storage the ledger never mentions.
+  > **`src/audit/audit-order.test.ts` is what holds this**, and it exists because nothing did: every
+  > other test asserts the event EXISTS after a SUCCEEDING operation, which is equally true in either
+  > order, so a reorder back was silent. Each case makes the MUTATION fail and requires the event
+  > anyway — the only externally visible difference between the two orders. A new audit-first path
+  > belongs in it.
   >
-  > **Checked and NOT a violation:** panel assignment already audits before `upsertPanelAssignment` —
-  > the sweep's hit there was `activeCasesForSubjects`, a read.
+  > **Still mutate-first, with the reason at each call site:**
+  > - the **run-created case transition** and the **import-driven finalize** (`routes/runs.ts`) —
+  >   **deliberate and the same pattern**: the event is best-effort at the run boundary, because the
+  >   alternative strands an otherwise-complete run after its rows were already written. A failed
+  >   write logs a run `WARN`;
+  > - **`dispatchOutreach`** — the only one whose ordering puts something OUTSIDE the system before the
+  >   ledger: `channel.send()` dispatches the message, and the event payload is built from the delivery
+  >   result (`status`, `messageId`, `provider`, `sentAt`), so there is nothing to record beforehand and
+  >   nothing to retract afterwards. It needs ADR-073 d4's **intent-then-completion pair**, which adds
+  >   an event type consumers read — an owner decision, not a reorder;
+  > - the three **identity-link** writes — and the reason is sharper than "the store mints the id":
+  >   `upsertLink` returns the EXISTING row's id on conflict, so a caller-minted id is not the id the
+  >   event would name. Keying these events on the PAIR — which IS known beforehand — would work, and
+  >   changes what `entity_id` means for a consumer;
+  > - **`backfill-scale`** and **`backfill-quality-history`** — one-shot seeding tools rather than
+  >   operator surfaces, each writing a run and its rows before a single completion event. Left as they
+  >   are on purpose, and said here so the sweep's output does not read as untriaged.
   >
-  > **This is NOT a complete inventory, and two earlier versions of this paragraph wrongly implied it
-  > was.** `backend-ts/scripts/audit-order-sweep.py` lists every `await` preceding an audit write.
-  > Its output on the current tree still contains untriaged candidates — the import-driven finalize in
-  > `routes/runs.ts` most of all, plus `materialize-run`, `measure-seed`, `case-outreach` and
-  > `audit-packet`, several of which are probably reads. **#598 owns that triage**, and nothing should
-  > read this section as licence to close it.
+  > **Checked and NOT violations** — every one a hit the matcher produced for a read, a pure
+  > computation, or a DIFFERENT write's audit: `audit-packet` (`sha256Hex`), `materialize-run` and
+  > `backfill-trend-history` (reads), `evidence-service`'s download (`arrayBuffer`), `measure-seed`
+  > (`repairHypertensionSeedRow`, itself audit-first), `subject-lists` create (its audit is a
+  > `beforeComplete` callback that runs before the list becomes visible), and **panel assignment**,
+  > which audits before `upsertPanelAssignment` AND records each per-case event before `assignCases` —
+  > the mapping-then-consequences order is by design.
   >
-  > **Keep this list in step with the code in the SAME change.** The commit that flipped waivers and
-  > appointments left them listed here as untriaged, which pointed the next reader at work already
-  > done — caught in review, and exactly the failure mode an always-loaded file has.
+  > **The sweep's output is now fully triaged, and that is NOT the same as #598 being closed.** What
+  > remains is the missing PRIMITIVE (below) plus the two decisions above.
+  > `backend-ts/scripts/audit-order-sweep.py` lists every `await` preceding an audit write; re-run it
+  > and **keep this list in step with the code in the SAME change** — the commit that flipped waivers
+  > and appointments left them listed here as untriaged, which pointed the next reader at work already
+  > done.
   >
   > Two things the corrections taught, both worth keeping:
   > - **A function can be on BOTH sides.** `rerunToVerify` records its action audit-first and then

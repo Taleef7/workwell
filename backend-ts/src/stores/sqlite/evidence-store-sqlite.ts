@@ -36,7 +36,7 @@ export class SqliteEvidenceStore implements EvidenceStore {
   constructor(private readonly db: CloudDatabase) {}
 
   async insert(input: InsertEvidenceInput): Promise<EvidenceRecord> {
-    const uploadedAt = new Date().toISOString();
+    const uploadedAt = input.uploadedAt ?? new Date().toISOString();
     await this.db
       .prepare(
         `INSERT INTO evidence_attachments

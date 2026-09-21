@@ -48,6 +48,14 @@ export interface CreateMeasureInput {
   name: string;
   policyRef: string;
   owner: string;
+  /**
+   * Ids to insert under. Optional and minted by the store when absent, so every existing caller is
+   * unchanged — but `createMeasure` (`measure/measure-lifecycle.ts`) passes both, because its audit
+   * event is keyed on the VERSION id and #598's rule is audit-before-mutate. The two are separate
+   * columns (`measures.id`, `measure_versions.id`) and the event names the version.
+   */
+  measureId?: string;
+  versionId?: string;
 }
 
 /** A lifecycle status change on a version (+ optional approver / activation stamp). */

@@ -188,3 +188,61 @@ test("POST /api/segments/preview → 400 on a malformed rule (op/value shape)", 
   );
   assert.equal(res?.status, 400);
 });
+
+/**
+ * The audit-first half of #598 for this route. The ORDER is not reachable from outside — the route
+ * resolves its stores from `env` rather than taking them injected, so no test here can make the insert
+ * fail and watch the event survive (`src/audit/audit-order.test.ts` does that for the injectable
+ * services). What IS reachable is the enabling change, and the way it could regress silently: mint an
+ * id for the event and let the store mint its own, leaving every SEGMENT_CREATED event pointing at a
+ * segment that never existed.
+ */
+test("SEGMENT_CREATED names the id the segment is created under (#598)", async () => {
+  const res = await post({ name: "Audit-order welders", rule: welderRule, measureIds: ["audiogram"] });
+  assert.equal(res?.status, 201);
+  const created = (await res!.json()) as { id: string; name: string };
+  const row = await (env.DB as { prepare: (s: string) => { bind: (...a: unknown[]) => { first: <T>() => Promise<T | null> } } })
+    .prepare("SELECT entity_id, entity_type, payload_json FROM audit_events WHERE event_type = 'SEGMENT_CREATED' AND entity_id = ?")
+    .bind(created.id)
+    .first<{ entity_id: string; entity_type: string; payload_json: string }>();
+  assert.ok(row, "the event names the created segment, not an id the store discarded");
+  assert.equal(row!.entity_type, "segment");
+  assert.equal((JSON.parse(row!.payload_json) as { name: string }).name, "Audit-order welders");
+});
+
+test("SEGMENT_UPDATED reports the post-state resolved from the pre-state and the request (#598)", async () => {
+  // The payload used to come from a re-read AFTER the three writes, which is what forced the audit to
+  // come second. It is now merged from the row as it was plus the fields the request carries — so a
+  // PARTIAL body must still report the unchanged fields, not drop them.
+  const created = (await (await post({ name: "Before", rule: welderRule, measureIds: ["audiogram"] }))!.json()) as { id: string };
+  const res = await put(created.id, { name: "After" }); // name only: measureIds and enabled are untouched
+  assert.equal(res?.status, 200);
+  const row = await (env.DB as { prepare: (s: string) => { bind: (...a: unknown[]) => { first: <T>() => Promise<T | null> } } })
+    .prepare("SELECT payload_json FROM audit_events WHERE event_type = 'SEGMENT_UPDATED' AND entity_id = ?")
+    .bind(created.id)
+    .first<{ payload_json: string }>();
+  assert.ok(row);
+  const payload = JSON.parse(row!.payload_json) as { name: string; enabled: boolean; measureIds: string[] };
+  assert.equal(payload.name, "After", "the requested change");
+  assert.deepEqual(payload.measureIds, ["audiogram"], "and the fields the request did not mention");
+  assert.equal(payload.enabled, true);
+});
+
+test("DELETE audits before the row goes, and a missing segment is still a 404 with no event (#598)", async () => {
+  const created = (await (await post({ name: "Doomed", rule: welderRule, measureIds: [] }))!.json()) as { id: string };
+  assert.equal((await del(created.id))?.status, 204);
+  const q = (env.DB as { prepare: (s: string) => { bind: (...a: unknown[]) => { first: <T>() => Promise<T | null> } } });
+  const row = await q
+    .prepare("SELECT payload_json FROM audit_events WHERE event_type = 'SEGMENT_DELETED' AND entity_id = ?")
+    .bind(created.id)
+    .first<{ payload_json: string }>();
+  assert.equal((JSON.parse(row!.payload_json) as { name: string }).name, "Doomed", "the name is read off the row before it is deleted");
+  // An unknown id refuses before it audits — an over-claim is the side the rule picks, but only for a
+  // change somebody actually asked for.
+  assert.equal((await del("00000000-0000-4000-8000-000000000000"))?.status, 404);
+  const none = await q
+    .prepare("SELECT COUNT(*) AS n FROM audit_events WHERE event_type = 'SEGMENT_DELETED' AND entity_id = ?")
+    .bind("00000000-0000-4000-8000-000000000000")
+    .first<{ n: number }>();
+  assert.equal(Number(none!.n), 0);
+});

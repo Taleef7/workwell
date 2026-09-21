@@ -169,19 +169,23 @@ export async function handleSegments(req: Request, env: SegmentsEnv, actor: stri
     const overrideErr = validateOverrides(body.overrides);
     if (overrideErr) return bad(overrideErr);
 
-    // Does NOT audit first (#598), and cannot without a store change: `createSegment` mints the id and
-    // returns it, so there is nothing to key an event on beforehand. The fix is the same one
-    // `createTerminologyMapping` already has — mint the id caller-side — or ADR-073 d4's
-    // intent-then-completion pair. Either is a real change rather than a reorder.
+    // AUDIT BEFORE MUTATE (#598). The id is minted HERE rather than by the insert — the store now
+    // accepts one — so the event can name the segment before it exists. The payload's two values come
+    // from the REQUEST rather than from the created row: they are the same values the insert is about
+    // to store, and reading them off the result is what forced the old order.
+    const id = crypto.randomUUID();
+    const name = body.name as string;
+    const measureIds = body.measureIds as string[];
+    await audit(stores.events, "SEGMENT_CREATED", id, actor, { name, measureIds });
     const created = await store.createSegment({
-      name: body.name,
+      id,
+      name,
       description: typeof body.description === "string" ? body.description : undefined,
       enabled: typeof body.enabled === "boolean" ? body.enabled : undefined,
       rule: body.rule as SegmentRule,
-      measureIds: body.measureIds as string[],
+      measureIds,
       overrides: body.overrides as SegmentOverride[] | undefined,
     });
-    await audit(stores.events, "SEGMENT_CREATED", created.id, actor, { name: created.name, measureIds: created.measureIds });
     return json(created, 201);
   }
 
@@ -203,23 +207,33 @@ export async function handleSegments(req: Request, env: SegmentsEnv, actor: stri
     const overrideErr = validateOverrides(body.overrides);
     if (overrideErr) return bad(overrideErr);
 
-    const patched = await store.updateSegment(putId, {
+    // AUDIT BEFORE MUTATE (#598), and it needed THREE writes moved, not one: `updateSegment` was
+    // followed by `setMeasures` and `setOverrides`, so a failure after the first left a partly-updated
+    // segment with no event at all.
+    //
+    // The 404 moved to an explicit pre-read. `updateSegment` returning null WAS the not-found signal,
+    // which is exactly what made the old order unavoidable: the route could not know the segment
+    // existed until it had already tried to change it. The pre-read leaves a window in which the row
+    // could vanish between the check and the write — an event for a change that then did not happen,
+    // which is the side #598's rule deliberately picks.
+    const before = await store.getSegment(putId);
+    if (!before) return json({ error: "not_found", message: `Segment not found: ${putId}` }, 404);
+    // The post-state, resolved from the pre-state and the request rather than from a re-read: the
+    // payload describes the segment the three writes below are about to produce.
+    await audit(stores.events, "SEGMENT_UPDATED", putId, actor, {
+      name: (body.name as string | undefined) ?? before.name,
+      enabled: (body.enabled as boolean | undefined) ?? before.enabled,
+      measureIds: (body.measureIds as string[] | undefined) ?? before.measureIds,
+    });
+    await store.updateSegment(putId, {
       name: body.name as string | undefined,
       description: body.description as string | undefined,
       enabled: body.enabled as boolean | undefined,
       rule: body.rule as SegmentRule | undefined,
     });
-    if (!patched) return json({ error: "not_found", message: `Segment not found: ${putId}` }, 404);
     if (body.measureIds !== undefined) await store.setMeasures(putId, body.measureIds as string[]);
     if (body.overrides !== undefined) await store.setOverrides(putId, body.overrides as SegmentOverride[]);
-
-    const hydrated = await store.getSegment(putId);
-    await audit(stores.events, "SEGMENT_UPDATED", putId, actor, {
-      name: hydrated?.name,
-      enabled: hydrated?.enabled,
-      measureIds: hydrated?.measureIds,
-    });
-    return json(hydrated);
+    return json(await store.getSegment(putId));
   }
 
   // DELETE /api/segments/:id
@@ -227,8 +241,10 @@ export async function handleSegments(req: Request, env: SegmentsEnv, actor: stri
   if (delId) {
     const seg = await store.getSegment(delId);
     if (!seg) return json({ error: "not_found", message: `Segment not found: ${delId}` }, 404);
-    await store.deleteSegment(delId);
+    // AUDIT BEFORE MUTATE (#598) — a plain reorder here: the id and the name both come from the row
+    // already read, so nothing the event needs is minted by the delete.
     await audit(stores.events, "SEGMENT_DELETED", delId, actor, { name: seg.name });
+    await store.deleteSegment(delId);
     return new Response(null, { status: 204 });
   }
 
