@@ -5,7 +5,8 @@
  *
  * Fidelity (synthetic directory): the TS EmployeeProfile carries only externalId/name/role/site,
  * so supervisorName/startDate/fhirPatientId are null and `active` is true; SLA fields aren't modeled
- * on the case row, so slaDueDate/slaRemainingDays are null and slaBreached is false. The compliance
+ * on the case row. SLA was removed entirely (#600) rather than reported as a null that reads as a
+ * checked condition; see `case/case-read-models.ts` for why. The compliance
  * data (outcomes, open cases, audit timeline) is real.
  */
 import type { CaseStore } from "../stores/case-store.ts";
@@ -39,8 +40,6 @@ export interface OpenCaseSummary {
   priority: string;
   assignee: string | null;
   slaDueDate: string | null;
-  slaRemainingDays: number | null;
-  slaBreached: boolean;
 }
 export interface AuditEventSummary {
   eventType: string;
@@ -192,8 +191,6 @@ export async function getEmployeeProfile(deps: EmployeeProfileDeps, externalId: 
       priority: c.priority,
       assignee: c.assignee,
       slaDueDate: null, // SLA not modeled on the TS case row
-      slaRemainingDays: null,
-      slaBreached: false,
     }));
 
   // Recent audit events for this employee's cases (last 20, newest-first) — reuse the single fetch

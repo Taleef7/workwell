@@ -72,8 +72,6 @@ const mockProfile = {
       priority: "HIGH",
       assignee: "cm@workwell.dev",
       slaDueDate: null,
-      slaRemainingDays: null,
-      slaBreached: false,
     },
   ],
   recentAuditEvents: [],

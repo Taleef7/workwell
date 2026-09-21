@@ -20,7 +20,6 @@ import { useApi } from "@/lib/api/hooks";
 import { SkeletonRow } from "@/components/skeleton-loader";
 import { useAuth } from "@/components/auth-provider";
 import { canManageCases } from "@/lib/rbac";
-import { SlaChip } from "@/components/SlaChip";
 import { ChevronRight } from "lucide-react";
 import { useMeasureIdentities } from "@/lib/measure-identity";
 import { formatEvaluationPeriod, fmtCount } from "@/lib/format";
@@ -46,8 +45,6 @@ type CaseSummary = {
   waiverExpiresAt: string | null;
   waiverExpired: boolean;
   updatedAt: string;
-  slaRemainingDays?: number | null;
-  slaBreached?: boolean;
   /**
    * Who closed it (#569). `closure` is the derived kind — NONE for an active case, STAFF for every
    * closure a person made (manual or rerun-verified), SYSTEM for the run's.
@@ -944,12 +941,6 @@ export default function CasesPage() {
                   <dt className="text-neutral-500 dark:text-neutral-400">{isPatientTerm ? "Measurement year" : "Period"}</dt>
                   <dd className="font-medium">{isPatientTerm ? formatEvaluationPeriod(item.evaluationPeriod) : item.evaluationPeriod}</dd>
                 </div>
-                {item.slaRemainingDays != null ? (
-                  <div className="flex items-center justify-between gap-3">
-                    <dt className="text-neutral-500 dark:text-neutral-400">SLA</dt>
-                    <SlaChip slaRemainingDays={item.slaRemainingDays} slaBreached={item.slaBreached} />
-                  </div>
-                ) : null}
                 {caseStatus === "EXCLUDED" ? (
                   <>
                     <div className="flex items-start justify-between gap-3">
