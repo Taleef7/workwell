@@ -18,6 +18,7 @@ import type {
   MeasureScanOptions,
 } from "../outcome-store.ts";
 import { LATEST_RUN_PROBE_BUDGET } from "../outcome-store.ts";
+import { probeCacheFor, type ProbeCache } from "../probe-cache.ts";
 
 interface OutcomeRow {
   id: string;
@@ -50,7 +51,10 @@ const toRecord = (r: OutcomeRow): OutcomeRecord => ({
 });
 
 export class SqliteOutcomeStore implements OutcomeStore {
-  constructor(private readonly db: CloudDatabase) {}
+  constructor(private readonly db: CloudDatabase) {
+    // Constructor body, not a field initializer — see the ceiling for why.
+    this.latestRunCache = probeCacheFor(this.db);
+  }
 
   /**
    * In-process memo of `aggregateScaleRun` (perf #233). A COMPLETED `seed:scale` run is written once
@@ -62,7 +66,15 @@ export class SqliteOutcomeStore implements OutcomeStore {
    */
   private readonly scaleCache = new Map<string, ScaleGroupCount[]>();
 
+  /** Mirror of the ceiling's winners-probe memo — `stores/probe-cache.ts` carries the reasoning. */
+  private readonly latestRunCache: ProbeCache<LatestPopulationRun[]>;
+
   async recordOutcome(input: RecordOutcomeInput): Promise<OutcomeRecord> {
+    // A write can add the first row of a measure to a run ALREADY in the candidate list, which the
+    // winners memo's key cannot see (`stores/probe-cache.ts`). Dropped on both sides of the insert:
+    // before, so a partially-applied failed write leaves nothing cached; after, so a read that landed
+    // mid-write does not leave a stale entry behind it.
+    this.latestRunCache.clear();
     const id = crypto.randomUUID();
     const evaluatedAt = input.evaluatedAt ?? new Date().toISOString();
     const evaluationPeriod = input.evaluationPeriod ?? "";
@@ -73,6 +85,7 @@ export class SqliteOutcomeStore implements OutcomeStore {
       )
       .bind(id, input.runId, input.subjectId, input.measureId, evaluationPeriod, input.status, JSON.stringify(input.evidence ?? {}), evaluatedAt, flagBind(input.outOfPopulation))
       .run();
+    this.latestRunCache.clear();
     return {
       id,
       runId: input.runId,
@@ -88,6 +101,7 @@ export class SqliteOutcomeStore implements OutcomeStore {
 
   async recordOutcomes(inputs: RecordOutcomeInput[]): Promise<OutcomeRecord[]> {
     if (inputs.length === 0) return [];
+    this.latestRunCache.clear(); // see recordOutcome
     // D1 runs a batch atomically (single transaction). `RETURNING id` is required for the batch
     // path (cloud-local executes batched statements via `.all()`, which throws on a non-returning
     // statement — same reason the case-event store appends `RETURNING id`).
@@ -128,15 +142,19 @@ export class SqliteOutcomeStore implements OutcomeStore {
     // within itself; the whole call is not, which is the same guarantee the Postgres adapter's chunked
     // multi-row INSERT gives.
     const BATCH = 90;
-    for (let start = 0; start < stmts.length; start += BATCH) {
-      await this.db.batch(stmts.slice(start, start + BATCH));
+    try {
+      for (let start = 0; start < stmts.length; start += BATCH) {
+        await this.db.batch(stmts.slice(start, start + BATCH));
+      }
+    } finally {
+      this.latestRunCache.clear();
     }
     return records;
   }
 
   async listOutcomes(
     runId: string,
-    opts?: { limit?: number; offset?: number; measureId?: string; subjectId?: string; subjectIds?: readonly string[] },
+    opts?: { limit?: number; offset?: number; measureId?: string; subjectId?: string; subjectIds?: readonly string[]; order?: "none" },
   ): Promise<OutcomeRecord[]> {
     // Optional LIMIT/OFFSET paging (Fable H4); the id tiebreak keeps paging deterministic when many
     // rows share an evaluated_at. SQLite requires a LIMIT before OFFSET, so emit -1 (all) when only an
@@ -170,14 +188,40 @@ export class SqliteOutcomeStore implements OutcomeStore {
         binds.push(Math.max(0, opts.offset));
       }
     }
+    // `order: "none"` drops the sort for a caller that FOLDS the rows (see the interface): no index
+    // serves `(evaluated_at, id)`, so an ordered read of one measure of a population run sorts the
+    // measure's whole evidence. A PAGED read KEEPS the ordering whatever the caller asked for, because
+    // paging an unordered relation may repeat or skip rows between pages — the option makes the read
+    // cheaper, never the paging wrong.
+    const order = opts?.order === "none" && page === "" ? "" : " ORDER BY evaluated_at ASC, id ASC";
     const { results } = await this.db
       .prepare(
         `SELECT id, run_id, subject_id, measure_id, evaluation_period, status, evidence_json, evaluated_at, out_of_population
-           FROM outcomes WHERE run_id = ?${where} ORDER BY evaluated_at ASC, id ASC${page}`,
+           FROM outcomes WHERE run_id = ?${where}${order}${page}`,
       )
       .bind(...binds)
       .all<OutcomeRow>();
     return (results ?? []).map(toRecord);
+  }
+
+  async listOutcomeMembershipsForRun(
+    runId: string,
+    measureId: string,
+  ): Promise<Array<Pick<OutcomeRecord, "status" | "evidence">>> {
+    // Narrowed in JS rather than with `json_extract`, because the floor stores `evidence_json` as TEXT
+    // and would have to parse it either way. The SHAPE is what the contract pins, and it is identical:
+    // `official` kept whole, `evaluationError` present only when the stored evidence had it.
+    const { results } = await this.db
+      .prepare(`SELECT status, evidence_json FROM outcomes WHERE run_id = ? AND measure_id = ?`)
+      .bind(runId, measureId)
+      .all<{ status: string; evidence_json: string }>();
+    return (results ?? []).map((r) => {
+      const full = JSON.parse(r.evidence_json) as Record<string, unknown>;
+      const evidence: Record<string, unknown> = {};
+      if (full?.official !== undefined && full.official !== null) evidence.official = full.official;
+      if (full && "evaluationError" in full && full.evaluationError !== null) evidence.evaluationError = full.evaluationError;
+      return { status: r.status, evidence };
+    });
   }
 
   async distinctMeasuresForRun(runId: string, limit = 2): Promise<string[]> {
@@ -263,6 +307,9 @@ export class SqliteOutcomeStore implements OutcomeStore {
       )
       .bind(cutoff)
       .all<{ id: string }>();
+    // See the ceiling: compaction is the one write that can change a winners probe without changing
+    // the candidate run list, so the memo is dropped.
+    this.latestRunCache.clear();
     return (results ?? []).length;
   }
 
@@ -477,47 +524,60 @@ export class SqliteOutcomeStore implements OutcomeStore {
       )
       .bind(...binds)
       .all<RunRow>();
-    const remaining = new Map<string, number>(wanted.map((m) => [m, per]));
-    const out: LatestPopulationRun[] = [];
-    for (const run of runs ?? []) {
-      if (remaining.size === 0) break;
-      const { results: hits } = await this.db
-        .prepare(
-          `SELECT value AS measure_id FROM json_each(?)
-            WHERE EXISTS (SELECT 1 FROM outcomes o WHERE o.run_id = ? AND o.measure_id = json_each.value)`,
-        )
-        .bind(JSON.stringify([...remaining.keys()]), run.id)
-        .all<{ measure_id: string }>();
-      for (const hit of hits ?? []) {
-        const left = remaining.get(hit.measure_id);
-        if (left === undefined) continue;
-        out.push(toWinner(hit.measure_id, run));
-        if (left <= 1) remaining.delete(hit.measure_id);
-        else remaining.set(hit.measure_id, left - 1);
+    // Memoized under the candidate list exactly as the ceiling is — see `stores/probe-cache.ts`.
+    const probeKey = JSON.stringify([
+      [...wanted].sort(),
+      per,
+      filter.from ?? null,
+      filter.to ?? null,
+      filter.excludeScale === true,
+      filter.excludeTrendHistory === true,
+      (runs ?? []).map((r) => r.id),
+    ]);
+    const winners = await this.latestRunCache.resolve(probeKey, async () => {
+      const remaining = new Map<string, number>(wanted.map((m) => [m, per]));
+      const out: LatestPopulationRun[] = [];
+      for (const run of runs ?? []) {
+        if (remaining.size === 0) break;
+        const { results: hits } = await this.db
+          .prepare(
+            `SELECT value AS measure_id FROM json_each(?)
+              WHERE EXISTS (SELECT 1 FROM outcomes o WHERE o.run_id = ? AND o.measure_id = json_each.value)`,
+          )
+          .bind(JSON.stringify([...remaining.keys()]), run.id)
+          .all<{ measure_id: string }>();
+        for (const hit of hits ?? []) {
+          const left = remaining.get(hit.measure_id);
+          if (left === undefined) continue;
+          out.push(toWinner(hit.measure_id, run));
+          if (left <= 1) remaining.delete(hit.measure_id);
+          else remaining.set(hit.measure_id, left - 1);
+        }
       }
-    }
-    if (remaining.size === 0 || (runs ?? []).length < LATEST_RUN_PROBE_BUDGET) return out;
+      if (remaining.size === 0 || (runs ?? []).length < LATEST_RUN_PROBE_BUDGET) return out;
 
-    const leftover = [...remaining.keys()];
-    const { results: ranked } = await this.db
-      .prepare(
-        `SELECT * FROM (
-           SELECT d.measure_id, r.id, r.started_at, r.scope_type, r.status, r.triggered_by,
-                  ROW_NUMBER() OVER (PARTITION BY d.measure_id ORDER BY r.started_at DESC, r.id DESC) AS rn
-             FROM (SELECT DISTINCT o.measure_id, o.run_id FROM outcomes o WHERE o.measure_id IN (SELECT value FROM json_each(?))) d
-             JOIN runs r ON r.id = d.run_id
-            WHERE ${runWhere.join(" AND ")}
-         ) x WHERE rn <= ? ORDER BY measure_id, rn`,
-      )
-      .bind(JSON.stringify(leftover), ...binds, per)
-      .all<RunRow & { measure_id: string; rn: number }>();
-    for (const row of ranked ?? []) {
-      const left = remaining.get(row.measure_id);
-      if (left === undefined) continue;
-      if (Number(row.rn) <= per - left) continue; // ranks the walk already banked
-      out.push(toWinner(row.measure_id, row));
-    }
-    return out;
+      const leftover = [...remaining.keys()];
+      const { results: ranked } = await this.db
+        .prepare(
+          `SELECT * FROM (
+             SELECT d.measure_id, r.id, r.started_at, r.scope_type, r.status, r.triggered_by,
+                    ROW_NUMBER() OVER (PARTITION BY d.measure_id ORDER BY r.started_at DESC, r.id DESC) AS rn
+               FROM (SELECT DISTINCT o.measure_id, o.run_id FROM outcomes o WHERE o.measure_id IN (SELECT value FROM json_each(?))) d
+               JOIN runs r ON r.id = d.run_id
+              WHERE ${runWhere.join(" AND ")}
+           ) x WHERE rn <= ? ORDER BY measure_id, rn`,
+        )
+        .bind(JSON.stringify(leftover), ...binds, per)
+        .all<RunRow & { measure_id: string; rn: number }>();
+      for (const row of ranked ?? []) {
+        const left = remaining.get(row.measure_id);
+        if (left === undefined) continue;
+        if (Number(row.rn) <= per - left) continue; // ranks the walk already banked
+        out.push(toWinner(row.measure_id, row));
+      }
+      return out;
+    });
+    return [...winners];
   }
 
   async aggregateScaleRun(runId: string): Promise<ScaleGroupCount[]> {

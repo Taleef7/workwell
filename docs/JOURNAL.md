@@ -104,6 +104,144 @@ ledger is for is who changed what. Pinned by a deterministic race — another wr
 between the pre-read and the write, and the event must say nothing about it.
 
 
+## 2026-09-21 (late, II) — the export's last width difference, which no query string could show
+
+#602 made the cases CSV carry every filter the work list sends, and a frontend test compares the two
+query strings so they cannot drift. **A server-side default appears in neither string**, so the one
+difference left was the one that test was structurally unable to see:
+
+```
+one OPEN case, evaluation_period 2025-01-01 (a prior cycle), nothing else
+
+GET /api/cases?status=open                      -> 0 rows, X-Total-Count: 0
+GET /api/exports/cases?format=csv&status=open   -> contains the case
+```
+
+The screen said "0 cases loaded" and the button under it downloaded a file with a row in it. On the
+staff-closed tab it was unbounded rather than incidental: closures accumulate across years,
+`CYCLE_ROLLED_OVER` never sweeps them, the tab shows one cycle and its three header counts describe
+that cycle, and the CSV carried every prior year's beside them.
+
+**Shipped the third of #603's three options, which is the one that changes no existing behaviour.**
+`?period=current` restricts the export to each measure's current cycle; blank or absent still means all
+history, because the endpoint is documented that way (§6.3) and something downstream may depend on it.
+The work list's blank still means `current`. Both read ONE rule — `wantsCurrentCycle` — which takes
+that default as an argument, the same shape `worklistQueryFor` already uses for `status`.
+
+**The screen now states its scope** instead of relying on a default the export does not share, so the
+query strings match and the existing parity test covers it. Beside it, a backend test compares the two
+RESULT SETS over a fixture holding a prior-cycle case, because a parameter comparison can only ever see
+parameters — the ADR-084 shape, where the two work-list loaders are pinned against each other.
+
+**`site` also disagreed**: exact on the list, case-insensitive on the export. One predicate now
+(`siteMatches`), and EXACT, because the options are built from the directory's own strings while
+folding case would merge two real sites into a file headed with one of them. Three call sites, including
+the panel pre-filter.
+
+Both mutation-checked: restoring the lower-casing fails the site case, and removing the cycle filter
+fails two. Backend 2,850 tests, one pre-existing local failure; frontend 491/491; lint clean.
+
+**Review round (#611).** Five texts asserted a guard that does not exist: they said forwarding
+`period=current` to the store would filter `evaluation_period = 'current'` and match nothing. It would
+not — `CaseQuery.period` documents `"all"` and `"current"` as NO-OPS and both stores implement that, for
+exactly this reason. One of the five was in `DATA_MODEL_CONTRACTS` §6.3, an always-loaded file. The
+guards stay (the route should not lean on store behaviour); the claim is corrected to defence-in-depth.
+
+Two test gaps, both mutation-confirmed before and after:
+
+- **The fixture could not fail on a wrong measure identifier.** `bucketPeriodForMeasure`'s
+  unknown-measure fallback is 365 days → ANNUAL, and `audiogram` is also 365 → the same anchor, so
+  passing `c.id` or the literal "nonsense" left every assertion green. The fixture is `diabetes_hba1c`
+  now (180 d → BIANNUAL), and one test asserts the two anchors differ so the guard cannot go quiet.
+- **Nothing covered the route wiring.** The tests called `casesCsv` directly and passed
+  `currentCycleOnly` by hand; the frontend test only inspects a query string. Deleting the parameter
+  from `routes/exports.ts` left everything green. Three cases now drive `handleCases` and
+  `handleExports` over the fixture, including the staff-closed path §6.3 names specifically.
+
+And one hole the shared predicate did not close: the list compares `CaseSummary.site`, which is
+`emp?.site ?? "—"`, while the export compared the raw directory value. `—` is a SELECTABLE option, so a
+subject the directory does not hold was visible on screen under Site = — and absent from the file taken
+off it. One line, one test.
+
+`site` on the OUTCOMES CSV and the MCP tool still folds case — filed as #613 rather than widened into
+this change, with the `?? "—"` question named there because it is a decision rather than a copy.
+
+**Codex (#611).** One finding, and it is the kind a parameter table makes visible: the status gate was
+applied to an EXPLICIT `period=current` as well as to the default, so the export answered two different
+things to two spellings of one question — `?period=current` narrowed to the cycle, while
+`?period=current&status=all` returned all history. On this endpoint a blank status and `all` are the
+SAME query (`worklistQueryFor` returns `{}` for both). The gate now decides only what SILENCE means; a
+caller who names a period gets it on any status. The screen's own condition is unchanged and now
+load-bearing rather than defensive: sending `period` on the closed tab would genuinely narrow it.
+
+
+## 2026-09-21 (late) — the programs page was not slow, it was failing, and the cost was in the walk
+
+The owner opened `/programs` on the Maui sandbox and got **"Failed to load program data: The database
+cancelled this query for exceeding its time limit"** over **"No active measures. Create and release a
+measure to begin."** — a statement timeout rendered as an empty catalog. Reproduced from here the same
+hour, outside the nightly window:
+
+| request | cold | warm |
+|---|---|---|
+| `GET /api/programs/overview` | **503 `statement_timeout` at 30 s** (twice) | 3.2-3.7 s |
+| `GET /api/programs/overview?include=detail&granularity=month` | - | **59.8 s** |
+| `GET /api/programs/sites` (asked on every page load) | 17.2 s | 2.5 s |
+| `GET /api/programs/:id/trend?granularity=month` | - | 3.0-4.8 s per measure |
+| `GET /api/programs/:id/top-drivers` | - | 0.42-0.72 s |
+| `GET /api/cases?status=open&limit=25` (the ADR-084 fast path) | - | 0.50 s |
+
+**The 59.8 s was measured with every downstream memo already warm.** That is the finding: the whole
+minute was the winners walk, paid thirteen times by one page load. `programSites` isolates it — warm,
+its only remaining work is `latestPopulationWinners`, and it takes 2.5 s.
+
+`listLatestPopulationRuns` is two questions in one method. The candidate runs are one indexed
+statement over `runs` (bounded `LIMIT`, milliseconds). Which of them holds a row for each measure is
+an `EXISTS` probe per (run, measure), and `outcomes` has no `(run_id, measure_id)` index — so the pair
+costs 2.5-4 s, and every read model resolved its own.
+
+The second cost is the one that actually returned the 503. `aggregateOfficialRun` read one measure's
+evidence through `LIMIT/OFFSET`, and `listOutcomes` orders by `(evaluated_at, id)`, which no index
+serves: **every page re-sorted the measure's whole 20,000 rows, `evidence_json` and all**, and
+`officialMeasureRate` ran a separate one-row provenance probe over the same sort first. Eleven sorts
+per (run, measure), six measures, on the overview's cold path. The other cold reads are each smaller
+than a request that already works - `/api/exports/outcomes` for the winning run returns 120,000 rows
+WITH evidence in one statement and does not time out.
+
+The third is why anyone met it at all: **every memo is in-process, and a deploy empties all of them.**
+`warmReadModels` has existed since #547 and runs after each population run - which covers the nightly
+and misses every restart, the one moment the caches are certainly empty.
+
+**Shipped (ADR-087).** The winners probe is memoized under the **candidate run list**, per store
+instance: the cheap statement runs every call and IS the key, and a terminal population run's rows are
+immutable, so the identity is exact rather than a TTL. Two writes can move the answer without moving
+the key - an outcome write adding a measure's first row to a run already in the list, and a compaction
+deleting a non-winner's last row - so `recordOutcome`, `recordOutcomes` and `compactOlderThan` drop
+it, on both stores. `listOutcomes` gained `order: "none"` for a caller that folds, and
+`aggregateOfficialRun` is now ONE unordered statement that also reports
+`producedOfficialEvidence`, so the rate reads the rows once. And the read models are warmed at boot,
+off the request path, with one retry.
+
+**The index is the owner's, and it is the biggest win left.** `CREATE INDEX ... ON outcomes (run_id,
+measure_id)` would take the probes to index lookups and give the evidence read a plan that does not
+sort. Additive, reversible, no data migration - the same class as the three `OWNER-APPROVED DDL` blocks
+already in `schema-pg.ts`. Recommended with the numbers above and not written. What shipped removes
+REPEATED work; the index would make each unit of work cheap, and they are not substitutes.
+
+**Deferred, named:** the overview's status buckets are a `GROUP BY measure_id, status,
+out_of_population` over the winners - 90 rows instead of 120,000 - and ADR-084's pattern applies, but
+the site/tenant/profile predicates read the in-memory directory and have no SQL form, so it is a
+fast-path-plus-fallback with a conformance test. Worth measuring this change first.
+
+**Honest about the method.** The endpoint timings are measured on the live stack. WHICH statement the
+server cancelled is *inferred* from the read shapes: this host cannot run a pilot-scale Postgres (2.0
+GB free of 15.2, Docker down) and the deployment gives no query log, so there is no `EXPLAIN ANALYZE`
+behind the attribution. It is recorded as inference in the ADR so nobody later cites it as a
+measurement.
+
+Backend suite 2,856 tests - 2,832 pass, 23 skip, 1 fail (`corpus-membership`, the local
+`.official-content` sparse checkout on this host, unrelated). Mutation-checked: removing the write-path
+invalidation fails the new store-contract case.
 
 ## 2026-09-21 (night) — four paths flipped to audit-first, and the list was still wrong by three
 

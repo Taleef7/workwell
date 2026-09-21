@@ -49,6 +49,9 @@ const makeDeps = (rows: OutcomeWithRun[] = ROWS) => ({
     listOutcomesWithRun: async () => rows,
     listLatestPopulationRuns: latestRunsFromRows(rows),
     listOutcomes: async () => [],
+    // Nothing to aggregate in this fixture, so the membership read is empty too - stated rather than
+    // inherited, because `aggregateOfficialRun` reads it and not `listOutcomes` (review of #610).
+    listOutcomeMembershipsForRun: async () => [],
     aggregateScaleRun: async () => [],
   } as unknown as OutcomeStore,
   runStore: { listRuns: async () => [] } as unknown as RunStore,
@@ -150,6 +153,9 @@ test("the risk outlook's site table is on the same basis, and the streak that mi
       listOutcomesWithRun: async () => ROWS,
       listLatestPopulationRuns: latestRunsFromRows(ROWS),
       listOutcomes: async () => [],
+      // Nothing to aggregate in this fixture, so the membership read is empty too - stated rather than
+      // inherited, because `aggregateOfficialRun` reads it and not `listOutcomes` (review of #610).
+      listOutcomeMembershipsForRun: async () => [],
       listOutcomesForMeasure: async () => {
         historyScans++;
         throw new Error("the risk outlook must not scan the measure's history (ADR-081 / #547)");

@@ -12,7 +12,7 @@
 import type { CloudDatabase } from "@mieweb/cloud";
 import { getStores } from "../stores/factory.ts";
 import { listNotFoundBody, withListFilter } from "../compliance/subject-list-filter.ts";
-import { worklistQueryFor } from "../case/worklist-read-model.ts";
+import { worklistQueryFor, wantsCurrentCycle } from "../case/worklist-read-model.ts";
 import { rosterCellCache } from "../compliance/roster-read-model.ts";
 import { runsCsv, outcomesCsvStream, casesCsv, auditCsvStream } from "../export/export-csv.ts";
 import { subjectFiltersFromQuery, subjectFilterErrorBody, SubjectFilterError } from "../compliance/subject-filters.ts";
@@ -57,6 +57,25 @@ const clampExportLimit = (raw: string | null): number => {
   const n = Number(raw);
   if (!Number.isInteger(n) || n <= 0) return 200;
   return Math.min(n, 10_000);
+};
+
+/**
+ * A literal `?period=` for the store, or undefined (#603).
+ *
+ * `current` is NOT a literal: it is the per-measure cycle rule, handled by `currentCycleOnly`.
+ *
+ * **Defence in depth, not a requirement — and the first cut of this comment claimed otherwise.** It
+ * said passing `current` through would filter `evaluation_period = 'current'` and serve an empty file.
+ * It would not: `CaseQuery.period` documents `"all"` and `"current"` as NO-OPS and both stores
+ * implement that (`!["all","current"].includes(period.toLowerCase())`), for exactly this reason — "so
+ * a caller forwarding it doesn't accidentally match a literal period". Stripping it here means the
+ * route does not lean on that, which is worth keeping; claiming the store would do the wrong thing is
+ * not (review of #611).
+ */
+const periodLiteral = (raw: string | null): string | undefined => {
+  const value = raw?.trim();
+  if (!value || value.toLowerCase() === "current") return undefined;
+  return value;
 };
 
 /** A 400 in the same JSON shape `/api/cases` returns, so a refusal reads the same on both surfaces. */
@@ -171,6 +190,13 @@ export async function handleExports(req: Request, env: ExportsEnv): Promise<Resp
       // Case-folded by `casesCsv` with the work list's own predicate, so both surfaces fold it once
       // and identically.
       search: q.get("search")?.trim() || undefined,
+      // `?period=` (#603). `current` means each measure's current compliance cycle, exactly as the
+      // work list's open and staff-closed lists mean it; ANY other non-blank value is a literal
+      // evaluation period and reaches the store as one. **Blank or absent means ALL HISTORY here** —
+      // `wantsCurrentCycle`'s `blankMeans` argument is where the two surfaces legitimately differ, and
+      // this endpoint is documented as all-history (§6.3), so its default is unchanged.
+      currentCycleOnly: wantsCurrentCycle(q.get("status") ?? undefined, q.get("period") ?? undefined, "all"),
+      period: periodLiteral(q.get("period")),
       ...subjectFilters,
     }, env, { outcomeStore: s.outcomes, cellCache: rosterCellCache });
     return csvResponse("cases.csv", csv);

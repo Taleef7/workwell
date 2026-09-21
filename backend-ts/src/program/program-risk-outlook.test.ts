@@ -276,6 +276,9 @@ test("a new winning run evicts the memo", async () => {
       },
       listLatestPopulationRuns: winnersOf,
       listOutcomes: async () => [],
+      // Nothing to aggregate in this fixture, so the membership read is empty too - stated rather than
+      // inherited, because `aggregateOfficialRun` reads it and not `listOutcomes` (review of #610).
+      listOutcomeMembershipsForRun: async () => [],
       listOutcomesForMeasure: async () => {
         throw new Error("no history scan");
       },
