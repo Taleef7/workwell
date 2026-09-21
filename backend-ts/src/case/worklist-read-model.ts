@@ -137,6 +137,27 @@ export function worklistQueryFor(raw: string | null | undefined, opts: { blank: 
   }
 }
 
+/**
+ * The free-text search, as ONE predicate — because the work list is not the only surface that runs it.
+ *
+ * The cases CSV is exported from this list and, until 2026-09-20, silently ignored `search` (along
+ * with five other active filters), so a file taken from a searched screen was a wider file. Adding
+ * the field to the export would have been enough to make the counts differ again the first time
+ * either copy of the three-field list was touched, so there is one copy and both callers take it.
+ *
+ * `needle` is expected already lower-cased by the caller; the fields are lower-cased here.
+ */
+export function matchesCaseSearch(
+  needle: string,
+  row: { employeeName: string; measureName: string; employeeId: string },
+): boolean {
+  return (
+    row.employeeName.toLowerCase().includes(needle) ||
+    row.measureName.toLowerCase().includes(needle) ||
+    row.employeeId.toLowerCase().includes(needle)
+  );
+}
+
 /** The work list's own reading of the token (blank ⇒ ACTIVE). Kept for the callers that only need statuses. */
 export function statusesForWorklist(raw: string | null | undefined): string[] | undefined {
   return worklistQueryFor(raw, { blank: "active" }).statuses;
@@ -331,12 +352,7 @@ export async function loadWorklistCases(deps: WorklistDeps, filters: WorklistFil
   }
   if (filters.search) {
     const needle = filters.search.toLowerCase();
-    summaries = summaries.filter(
-      (c) =>
-        c.employeeName.toLowerCase().includes(needle) ||
-        c.measureName.toLowerCase().includes(needle) ||
-        c.employeeId.toLowerCase().includes(needle),
-    );
+    summaries = summaries.filter((c) => matchesCaseSearch(needle, c));
   }
 
   // The count, for the rows that survived — and the filter that reads it, last.

@@ -16,6 +16,7 @@ import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
 import { toCsv, csvCell } from "./csv.ts";
 import { closureKindOf } from "../case/case-logic.ts";
+import { matchesCaseSearch } from "../case/worklist-read-model.ts";
 import { liveAnswerForCase, liveCellsFor, type LiveCellDeps } from "../compliance/live-cell.ts";
 
 const measureName = (measureId: string) => MEASURES[measureId]?.name ?? measureId;
@@ -283,6 +284,11 @@ export interface CaseExportFilter extends CaseQuery, SubjectFilters {
   caseIds?: string[];
   /** Employee site (resolved from the directory, not stored on the case). */
   site?: string;
+  /**
+   * Free text over subject name / measure name / subject id — a directory join, like `site`, which
+   * is why it is here rather than on `CaseQuery`. Applied with the work list's own predicate.
+   */
+  search?: string;
 }
 
 export async function casesCsv(
@@ -305,6 +311,20 @@ export async function casesCsv(
   if (filter.site) {
     const site = filter.site.toLowerCase();
     cases = cases.filter((c) => (directory.employeeById(c.employeeId)?.site ?? "").toLowerCase() === site);
+  }
+  // `search` is a directory join like `site`, so it lands here rather than in SQL — and it uses the
+  // work list's own predicate (`matchesCaseSearch`) over the same three fields, because this export
+  // is taken FROM that list. A second three-field list here would drift the first time either was
+  // touched, and the drift would show up as a file that disagrees with the screen it came from.
+  if (filter.search) {
+    const needle = filter.search.toLowerCase();
+    cases = cases.filter((c) =>
+      matchesCaseSearch(needle, {
+        employeeName: directory.employeeById(c.employeeId)?.name ?? c.employeeId,
+        measureName: measureName(c.measureId),
+        employeeId: c.employeeId,
+      }),
+    );
   }
   if (hasActiveSubjectFilters(filter)) {
     cases = cases.filter((c) => matchesSubjectFilters(directory.employeeById(c.employeeId), filter));

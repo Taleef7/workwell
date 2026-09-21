@@ -264,7 +264,25 @@ Columns:
 `caseId, employeeExternalId, employeeName, role, site, measureName, measureVersion, evaluationPeriod, status, priority, assignee, currentOutcomeStatus, nextAction, lastRunId, createdAt, updatedAt, closedAt, latestOutreachDeliveryStatus, providerId, payer, closedReason, closedBy, liveState, liveOutcomeStatus, liveOutcomeRunId`
 
 Supports filters: `status`, `measureId`, `priority`, `assignee`, `site`, `caseIds`, `providerId`,
-`ageBand`, `sex`, `payer`.
+`ageBand`, `sex`, `payer`, `from`/`to`, `outcome`, `search`.
+
+> **The last four were added 2026-09-20, and the reason is the contract.** This export is reached
+> from the work list's own button with the filters that list is showing, and it understood three of
+> the nine: a CSV taken from a list narrowed by a site, a created-at window, an outcome or a search
+> was a WIDER file than the screen it came from, under a heading that said otherwise, with no error
+> to notice — the reporting-integrity half of the `?status=open` defect above. `from`/`to` are the
+> `created_at` UTC-day window, inclusive at both ends, validated by the SAME predicate `/api/cases`
+> uses (`routes/query-dates.ts`) so a malformed value is a 400 naming the parameter on both surfaces
+> rather than a lexicographic filter on garbage. `outcome` is the frozen `current_outcome_status`,
+> folded exactly as `/api/cases` folds it (upper-cased, separators to `_`), so `?outcome=due-soon`
+> means the same thing on both. `search` is a directory join over subject name, measure name and
+> subject id, applied with the work list's own predicate (`matchesCaseSearch`) rather than a second
+> copy of the field list. **The screen builds ONE parameter set for the list, its paging and the
+> export** (`caseFilterParams`, `cases/page.tsx`), and a frontend test compares the two query
+> strings, so a filter added to one and not the other fails without the test being edited.
+>
+> `search` is NOT on `CaseQuery`: like `site`, it reads the in-memory directory, so it is applied
+> after the store read and does not take the SQL fast path (§"The work list is READ two ways").
 
 > **`closedReason`, `closedBy`, `liveState`, `liveOutcomeStatus` and `liveOutcomeRunId` were
 > APPENDED (#569, ADR-083)**, never inserted, so a consumer reading by position keeps every column it had — the same

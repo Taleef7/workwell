@@ -1,5 +1,43 @@
 # Journal
 
+## 2026-09-20 (late) — the CSV now describes the list it was taken from
+
+The work list sends nine filters to `/api/cases`. Its **Export cases CSV** button spelled its own URL
+with three of them — `status`, `measureId`, `providerId` — so a list narrowed by a site, a created-at
+window, a priority, an assignee, an outcome or a search produced a **wider file than the screen it
+came from**, under a heading that said otherwise. No error, nothing to notice: the same failure shape
+as `?status=open` returning `["OPEN"]` against a list showing OPEN + IN_PROGRESS, and the one the
+09-20 review named B-10.
+
+Half of it was the server: `/api/exports/cases` accepted neither `from`/`to` nor `outcome` nor
+`search`, so a caller that sent them got a broader export anyway. Both halves are closed.
+
+**What changed**
+- `/api/exports/cases` now takes `from`/`to`, `outcome` and `search` (DATA_MODEL_CONTRACTS §6.3).
+  `outcome` is folded exactly as `/api/cases` folds it, so `?outcome=due-soon` means the same thing
+  on both surfaces. `search` is a directory join applied with the work list's OWN predicate —
+  `matchesCaseSearch`, extracted from `worklist-read-model.ts` rather than copied, because a second
+  copy of a three-field list drifts the first time either is touched.
+- The created-at window is validated by one predicate shared with `/api/cases`
+  (`routes/query-dates.ts`: `isCalendarDayOrTimestamp` / `calendarDayErrorBody` / `caseWindowFrom`),
+  so `?from=2026-02-30` is a 400 naming the parameter on both surfaces instead of a lexicographic
+  filter on the first ten characters. It is deliberately NOT merged with `parseQueryDate`, which
+  serves the dashboard routes and accepts a day and nothing else — unifying them would change
+  behaviour on one side or the other while looking like a tidy-up.
+- The screen builds **one** parameter set for the list, its paging and the export (`caseFilterParams`
+  in `cases/page.tsx`). There were already two identical copies of that list — the initial load and
+  "load more" — which is how the third came to be three filters short.
+
+**The tests are the point, not the fix.** The frontend one does not enumerate parameter names: it
+compares the export's query string with the list request's, minus paging, so a filter added to one
+and not the other fails **without the test being edited**. Backend-side, each of the four new filters
+is asserted in both directions — a matching value keeps the row, a non-matching one drops it — because
+a one-directional assertion passes just as well against a filter that is ignored. Mutation-checked
+one at a time: dropping `outcome`, `search`, the window, or the 400 guard each fails exactly its own
+test and nothing else.
+
+Suites: backend full, frontend `cases` 54/54, `npm run lint` clean (two pre-existing warnings).
+
 ## 2026-09-20 (evening) — #563 is answered: 94% of the run is one call that blocks the event loop for 21 seconds
 
 The instrument shipped this afternoon (`cf8ac8ce`, #588) was pointed at the pilot sandbox the same

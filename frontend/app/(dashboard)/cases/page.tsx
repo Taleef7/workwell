@@ -292,6 +292,34 @@ export default function CasesPage() {
     }
   }, [api, setMeasures]);
 
+  /**
+   * The nine filters this screen is showing, as query params — built ONCE, for the list, the
+   * "load more" page AND the export.
+   *
+   * The export button used to spell its own URL with three of them (status, measureId, providerId),
+   * so a CSV taken from a list narrowed by site, priority, assignee, a date window, an outcome or a
+   * search was a WIDER file than the screen it came from, under a heading that said otherwise, with
+   * nothing to notice. Three copies of one list of filters is why: two of them drifted the moment a
+   * filter was added to the other. Paging is the caller's (`limit`/`offset` are set per call), because
+   * an export is not paged.
+   */
+  const caseFilterParams = useCallback(() => {
+    const params = new URLSearchParams();
+    params.set("status", statusFilter);
+    if (measureFilter) params.set("measureId", measureFilter);
+    if (providerFilter) params.set("providerId", providerFilter);
+    if (priorityFilter) params.set("priority", priorityFilter);
+    const effectiveAssignee = view === "mine" ? (user?.email ?? "") : assigneeFilter;
+    if (effectiveAssignee) params.set("assignee", effectiveAssignee);
+    if (siteFilter) params.set("site", siteFilter);
+    else if (siteId) params.set("site", siteId);
+    if (from) params.set("from", from);
+    if (to) params.set("to", to);
+    if (outcomeFilter) params.set("outcome", outcomeFilter);
+    if (urlSearch.trim()) params.set("search", urlSearch.trim());
+    return params;
+  }, [statusFilter, measureFilter, providerFilter, priorityFilter, view, user, assigneeFilter, siteFilter, siteId, from, to, outcomeFilter, urlSearch]);
+
   // Stale-fetch guard (Fable M20): a slow response for one filter set must not overwrite a newer one's
   // rows (or clobber the selection). Only the latest loadCases applies its result.
   const casesReqIdRef = useRef(0);
@@ -300,22 +328,7 @@ export default function CasesPage() {
     setLoading(true);
     setError(null);
     try {
-      const params = new URLSearchParams();
-      params.set("status", statusFilter);
-      if (measureFilter) params.set("measureId", measureFilter);
-      if (providerFilter) params.set("providerId", providerFilter);
-      if (priorityFilter) params.set("priority", priorityFilter);
-      const effectiveAssignee = view === "mine" ? (user?.email ?? "") : assigneeFilter;
-      if (effectiveAssignee) params.set("assignee", effectiveAssignee);
-      if (siteFilter) {
-        params.set("site", siteFilter);
-      } else if (siteId) {
-        params.set("site", siteId);
-      }
-      if (from) params.set("from", from);
-      if (to) params.set("to", to);
-      if (outcomeFilter) params.set("outcome", outcomeFilter);
-      if (urlSearch.trim()) params.set("search", urlSearch.trim());
+      const params = caseFilterParams();
       params.set("limit", String(pageSize));
       params.set("offset", "0");
       // #150 M10: X-Total-Count carries the full filtered match count, so paging is driven by the real
@@ -345,7 +358,7 @@ export default function CasesPage() {
     } finally {
       if (reqId === casesReqIdRef.current) setLoading(false);
     }
-  }, [api, assigneeFilter, measureFilter, providerFilter, priorityFilter, siteFilter, outcomeFilter, pageSize, siteId, from, to, urlSearch, statusFilter, view, user, setLoading, setError, setCases, setSelectedCaseIds]);
+  }, [api, caseFilterParams, pageSize, statusFilter, setLoading, setError, setCases, setSelectedCaseIds]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -485,19 +498,7 @@ export default function CasesPage() {
   async function loadMoreCases() {
     setLoadingMore(true);
     try {
-      const params = new URLSearchParams();
-      params.set("status", statusFilter);
-      if (measureFilter) params.set("measureId", measureFilter);
-      if (providerFilter) params.set("providerId", providerFilter);
-      if (priorityFilter) params.set("priority", priorityFilter);
-      const effectiveAssignee = view === "mine" ? (user?.email ?? "") : assigneeFilter;
-      if (effectiveAssignee) params.set("assignee", effectiveAssignee);
-      if (siteFilter) params.set("site", siteFilter);
-      else if (siteId) params.set("site", siteId);
-      if (from) params.set("from", from);
-      if (to) params.set("to", to);
-      if (outcomeFilter) params.set("outcome", outcomeFilter);
-      if (urlSearch.trim()) params.set("search", urlSearch.trim());
+      const params = caseFilterParams();
       params.set("limit", String(pageSize));
       params.set("offset", String(cases.length));
       const { data: next, headers } = await api.getWithHeaders<CaseSummary[]>(`/api/cases?${params.toString()}`);
@@ -630,12 +631,11 @@ export default function CasesPage() {
           <Button
             variant="outline"
             size="sm"
-            onClick={() =>
-              void exportCsv(
-                `/api/exports/cases?format=csv&status=${encodeURIComponent(statusFilter)}${measureFilter ? `&measureId=${encodeURIComponent(measureFilter)}` : ""}${providerFilter ? `&providerId=${encodeURIComponent(providerFilter)}` : ""}`,
-                "cases.csv"
-              )
-            }
+            onClick={() => {
+              const params = caseFilterParams();
+              params.set("format", "csv");
+              void exportCsv(`/api/exports/cases?${params.toString()}`, "cases.csv");
+            }}
           >
             Export cases CSV
           </Button>
