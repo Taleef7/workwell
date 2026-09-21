@@ -34,6 +34,16 @@ const json = (data: unknown, status = 200): Response =>
 
 const bad = (message: string): Response => json({ error: "invalid_request", message }, 400);
 
+/**
+ * The measure list AS THE ROW WILL HOLD IT — deduped and ordered.
+ *
+ * `setMeasures` inserts `[...new Set(measureIds)]` and `hydrate` reads back `ORDER BY measure_id ASC`,
+ * so a payload built from the request array can name a list the segment never contained. That did not
+ * matter while the audit came second (it reported the hydrated value); it does now that the event is
+ * written first, and it is a payload-accuracy regression in the direction #598 exists to close.
+ */
+const storedMeasureIds = (measureIds: readonly string[]): string[] => [...new Set(measureIds)].sort();
+
 /** Shared membership-preview projection used by BOTH preview surfaces (GET :id/preview + POST /preview)
  *  so they can't drift: filter the directory through the canonical matchesCohort, return { count, members }. */
 const previewResponse = (seg: HydratedSegment): Response => {
@@ -169,19 +179,28 @@ export async function handleSegments(req: Request, env: SegmentsEnv, actor: stri
     const overrideErr = validateOverrides(body.overrides);
     if (overrideErr) return bad(overrideErr);
 
-    // Does NOT audit first (#598), and cannot without a store change: `createSegment` mints the id and
-    // returns it, so there is nothing to key an event on beforehand. The fix is the same one
-    // `createTerminologyMapping` already has — mint the id caller-side — or ADR-073 d4's
-    // intent-then-completion pair. Either is a real change rather than a reorder.
+    // AUDIT BEFORE MUTATE (#598). The id is minted HERE rather than by the insert — the store now
+    // accepts one — so the event can name the segment before it exists. The payload's two values come
+    // from the REQUEST rather than from the created row: they are the same values the insert is about
+    // to store, and reading them off the result is what forced the old order.
+    const id = crypto.randomUUID();
+    const name = body.name as string;
+    const measureIds = body.measureIds as string[];
+    // DEDUPED, because that is what the row will hold: `setMeasures` writes `[...new Set(...)]` and
+    // `hydrate` reads back ordered by `measure_id`. Reporting the request array verbatim made the event
+    // describe something the segment never contained — which is a payload-accuracy regression in the
+    // direction this whole change exists to close (review of #612). `storedMeasureIds` is the one place
+    // the two agree.
+    await audit(stores.events, "SEGMENT_CREATED", id, actor, { name, measureIds: storedMeasureIds(measureIds) });
     const created = await store.createSegment({
-      name: body.name,
+      id,
+      name,
       description: typeof body.description === "string" ? body.description : undefined,
       enabled: typeof body.enabled === "boolean" ? body.enabled : undefined,
       rule: body.rule as SegmentRule,
-      measureIds: body.measureIds as string[],
+      measureIds,
       overrides: body.overrides as SegmentOverride[] | undefined,
     });
-    await audit(stores.events, "SEGMENT_CREATED", created.id, actor, { name: created.name, measureIds: created.measureIds });
     return json(created, 201);
   }
 
@@ -203,6 +222,41 @@ export async function handleSegments(req: Request, env: SegmentsEnv, actor: stri
     const overrideErr = validateOverrides(body.overrides);
     if (overrideErr) return bad(overrideErr);
 
+    // AUDIT BEFORE MUTATE (#598), and it needed THREE writes moved, not one: `updateSegment` was
+    // followed by `setMeasures` and `setOverrides`, so a failure after the first left a partly-updated
+    // segment with no event at all.
+    //
+    // The 404 moved to an explicit pre-read. `updateSegment` returning null WAS the not-found signal,
+    // which is exactly what made the old order unavoidable: the route could not know the segment
+    // existed until it had already tried to change it. The pre-read leaves a window in which the row
+    // could vanish between the check and the write — an event for a change that then did not happen,
+    // which is the side #598's rule deliberately picks.
+    if (!(await store.getSegment(putId))) return json({ error: "not_found", message: `Segment not found: ${putId}` }, 404);
+    // **The payload is what THIS REQUEST CHANGES, not the resulting state** (Codex, #612).
+    //
+    // The first cut merged the request over a pre-read, so it reported a post-state — and under two
+    // concurrent admins that post-state is a guess: read `enabled: true`, let the other request set it
+    // false, change only the name, and `updateSegment` preserves the newer false while the event says
+    // true. The old post-write hydration could not be wrong about that, because it re-read; an
+    // audit-first event cannot re-read, so it must not claim the parts it does not set.
+    //
+    // A consumer wanting the resulting state reads the row. What the ledger is FOR is who changed what,
+    // and every field here is one this request supplies — knowable before the write and true after it.
+    const changes: Record<string, unknown> = {};
+    if (body.name !== undefined) changes.name = body.name;
+    if (body.description !== undefined) changes.description = body.description;
+    if (body.enabled !== undefined) changes.enabled = body.enabled;
+    if (body.rule !== undefined) changes.rule = body.rule;
+    // Deduped for the same reason as the create above: it is what the row will hold.
+    if (body.measureIds !== undefined) changes.measureIds = storedMeasureIds(body.measureIds as string[]);
+    if (body.overrides !== undefined) changes.overrides = body.overrides;
+    await audit(stores.events, "SEGMENT_UPDATED", putId, actor, { changed: Object.keys(changes).sort(), ...changes });
+    // **`patched` is still checked, and dropping that check was a real regression** (review of #612).
+    // The pre-read covers the ordinary not-found; this null covers the row VANISHING between the two,
+    // and it guarded the two writes below as well. Without it a concurrent delete gave either a 500
+    // (`setMeasures` violating the `segment_measures` foreign key) or an HTTP 200 whose body is
+    // `null` — a client doing `(await res.json()).id` gets a TypeError on a success. The old order
+    // returned a clean 404 for both, and the audit-first reorder must not cost that.
     const patched = await store.updateSegment(putId, {
       name: body.name as string | undefined,
       description: body.description as string | undefined,
@@ -212,14 +266,7 @@ export async function handleSegments(req: Request, env: SegmentsEnv, actor: stri
     if (!patched) return json({ error: "not_found", message: `Segment not found: ${putId}` }, 404);
     if (body.measureIds !== undefined) await store.setMeasures(putId, body.measureIds as string[]);
     if (body.overrides !== undefined) await store.setOverrides(putId, body.overrides as SegmentOverride[]);
-
-    const hydrated = await store.getSegment(putId);
-    await audit(stores.events, "SEGMENT_UPDATED", putId, actor, {
-      name: hydrated?.name,
-      enabled: hydrated?.enabled,
-      measureIds: hydrated?.measureIds,
-    });
-    return json(hydrated);
+    return json(await store.getSegment(putId));
   }
 
   // DELETE /api/segments/:id
@@ -227,8 +274,10 @@ export async function handleSegments(req: Request, env: SegmentsEnv, actor: stri
   if (delId) {
     const seg = await store.getSegment(delId);
     if (!seg) return json({ error: "not_found", message: `Segment not found: ${delId}` }, 404);
-    await store.deleteSegment(delId);
+    // AUDIT BEFORE MUTATE (#598) — a plain reorder here: the id and the name both come from the row
+    // already read, so nothing the event needs is minted by the delete.
     await audit(stores.events, "SEGMENT_DELETED", delId, actor, { name: seg.name });
+    await store.deleteSegment(delId);
     return new Response(null, { status: 204 });
   }
 

@@ -37,7 +37,7 @@ export class PgEvidenceStore implements EvidenceStore {
   constructor(private readonly pool: PgPool) {}
 
   async insert(input: InsertEvidenceInput): Promise<EvidenceRecord> {
-    const uploadedAt = new Date().toISOString();
+    const uploadedAt = input.uploadedAt ?? new Date().toISOString();
     await this.pool.query(
       `INSERT INTO ${SPIKE_SCHEMA}.evidence_attachments
          (id, case_id, uploaded_by, file_name, file_size_bytes, mime_type, storage_key, description, uploaded_at)
