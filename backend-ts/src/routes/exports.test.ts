@@ -234,3 +234,72 @@ test("a malformed ?from is a 400 naming the parameter, not a lexicographic filte
     assert.match(body.message, /YYYY-MM-DD/);
   }
 });
+
+/**
+ * The run-history CSV carries the filters the screen is showing (#601).
+ *
+ * It took none, and `/api/exports/runs` accepted none — so narrowing the history to FAILED runs at
+ * one site last week and pressing Export downloaded the most recent 200 runs of everything. Same
+ * defect as the cases CSV one screen over, and the same shape of fix: one shared predicate
+ * (`matchesRunFilters`), and the page builds one parameter set for the list and the export.
+ *
+ * Both directions again: a matching value keeps the row, a non-matching one drops it. The fixture
+ * has runs of two scope types, so the assertions cannot pass against an ignored filter.
+ */
+const runLines = async (query: string) => (await text(`/api/exports/runs?format=csv&${query}`)).filter((l) => l.length > 0);
+
+test("runs export honors ?scopeType, and drops what does not match", async () => {
+  const all = await runLines("");
+  assert.ok(all.length >= 3, "the fixture has at least two runs plus a header");
+  assert.ok(all.some((l) => l.includes(runId)), "the audiogram MEASURE run is there");
+  assert.ok(all.some((l) => l.includes(latestRunId)), "and the hazwoper one");
+
+  // Both fixture runs are MEASURE-scoped, so a different scope must empty the file.
+  const none = await runLines("scopeType=ALL_PROGRAMS");
+  assert.equal(none.length, 1, "header only — no ALL_PROGRAMS run exists");
+  const measured = await runLines("scopeType=MEASURE");
+  assert.ok(measured.some((l) => l.includes(runId)));
+});
+
+test("runs export honors ?status and ?triggerType", async () => {
+  // The fixture's runs are REQUESTED/QUEUED rather than COMPLETED, so this asserts the filter runs
+  // at all rather than asserting a particular lifecycle.
+  const completed = await runLines("status=COMPLETED");
+  assert.ok(!completed.some((l) => l.includes(runId)), "a status no fixture run has drops every row");
+  const nonsense = await runLines("triggerType=NOT_A_TRIGGER");
+  assert.equal(nonsense.length, 1, "header only");
+});
+
+test("runs export honors the ?from/?to window and refuses a malformed one", async () => {
+  const today = new Date().toISOString().slice(0, 10);
+  assert.ok((await runLines(`from=${today}`)).some((l) => l.includes(runId)), "a run started today is in a window starting today");
+  assert.ok(!(await runLines("from=2099-01-01")).some((l) => l.includes(runId)), "and not in one starting in 2099");
+  assert.ok(!(await runLines("to=2020-01-01")).some((l) => l.includes(runId)));
+
+  const res = await get("/api/exports/runs?format=csv&from=2026-02-30");
+  assert.equal(res?.status, 400, "a malformed day is refused, not filtered lexicographically");
+  const body = JSON.parse(await res!.text()) as { parameter: string };
+  assert.equal(body.parameter, "from");
+});
+
+test("the runs export cap applies AFTER filtering, not to the read", async () => {
+  // The distinction the first version of this test could not see: with `limit` on the READ, the
+  // export fetches the newest N rows and then has only those to filter — so a matching run outside
+  // the newest N is unreachable under ANY filter, which is how a deployment with more than 200 runs
+  // could not export an older one at all. Making the OLDER fixture run the only FAILED one, and
+  // asking for one row, separates the two orderings: correct returns it, capped-read returns nothing.
+  const runStore = new SqliteRunStore((env as { DB: never }).DB);
+  await runStore.finalizeRun(runId, "FAILED");
+  try {
+    const one = await runLines("limit=1&status=FAILED");
+    assert.ok(
+      one.some((l) => l.includes(runId)),
+      "a matching run that is not among the newest `limit` rows must still be exported",
+    );
+    assert.equal(one.length, 2, "header + exactly the one matching run");
+  } finally {
+    await runStore.finalizeRun(runId, "COMPLETED");
+  }
+  const raised = await runLines("limit=5000");
+  assert.ok(raised.length >= 3, "a larger cap is honoured");
+});

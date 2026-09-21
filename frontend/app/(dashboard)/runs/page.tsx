@@ -258,18 +258,33 @@ export default function RunsPage() {
     }
   }, [api]);
 
+  /**
+   * The six filters this screen is showing, as query params — built ONCE, for the list AND the
+   * export (#601).
+   *
+   * "Export runs CSV" used to send none of them and the endpoint accepted none, so filtering the
+   * history to FAILED runs at one site last week and pressing Export downloaded the most recent 200
+   * runs of everything. No error, and a plausible-looking file — the same defect the cases CSV had
+   * (#602), which is why this is the same shape of fix. Paging is the caller's: an export is not
+   * paged, so it does not set `limit` from this.
+   */
+  const runFilterParams = useCallback(() => {
+    const query = new URLSearchParams();
+    if (statusFilter) query.set("status", statusFilter);
+    if (scopeFilter) query.set("scopeType", scopeFilter);
+    if (triggerFilter) query.set("triggerType", triggerFilter);
+    if (siteId) query.set("site", siteId);
+    if (from) query.set("from", from);
+    if (to) query.set("to", to);
+    return query;
+  }, [statusFilter, scopeFilter, triggerFilter, siteId, from, to]);
+
   const loadRuns = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const query = new URLSearchParams();
+      const query = runFilterParams();
       query.set("limit", String(limit));
-      if (statusFilter) query.set("status", statusFilter);
-      if (scopeFilter) query.set("scopeType", scopeFilter);
-      if (triggerFilter) query.set("triggerType", triggerFilter);
-      if (siteId) query.set("site", siteId);
-      if (from) query.set("from", from);
-      if (to) query.set("to", to);
       const data = await api.get<RunListItem[]>(`/api/runs?${query.toString()}`);
       setRuns(data);
       runsRef.current = data;
@@ -288,7 +303,7 @@ export default function RunsPage() {
     } finally {
       setLoading(false);
     }
-  }, [api, limit, statusFilter, scopeFilter, triggerFilter, siteId, from, to]);
+  }, [api, limit, runFilterParams]);
 
   const loadSelectedRun = useCallback(async () => {
     if (!selectedRunId) return;
@@ -689,7 +704,11 @@ export default function RunsPage() {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => void downloadFile("/api/exports/runs?format=csv", "runs-export.csv")}
+            onClick={() => {
+              const query = runFilterParams();
+              query.set("format", "csv");
+              void downloadFile(`/api/exports/runs?${query.toString()}`, "runs-export.csv");
+            }}
           >
             Export runs CSV
           </Button>
@@ -698,7 +717,9 @@ export default function RunsPage() {
             size="sm"
             onClick={() =>
               void downloadFile(
-                `/api/exports/outcomes?format=csv${selectedRunId ? `&runId=${encodeURIComponent(selectedRunId)}` : ""}`,
+                // `site` too: this screen holds one and `/api/exports/outcomes` accepts it (§6.2), so
+                // leaving it off made the outcomes file wider than the history it was taken from.
+                `/api/exports/outcomes?format=csv${selectedRunId ? `&runId=${encodeURIComponent(selectedRunId)}` : ""}${siteId ? `&site=${encodeURIComponent(siteId)}` : ""}`,
                 "outcomes.csv"
               )
             }

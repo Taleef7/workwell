@@ -6,7 +6,7 @@ import type { RunStore } from "../stores/run-store.ts";
 import type { OutcomeStore, OutcomeWithRun } from "../stores/outcome-store.ts";
 import type { CaseStore, CaseQuery } from "../stores/case-store.ts";
 import type { CaseEventStore } from "../stores/case-event-store.ts";
-import { toRunSummaryFromCounts } from "../run/read-models.ts";
+import { toRunSummaryFromCounts, matchesRunFilters, type RunFilters } from "../run/read-models.ts";
 import { DEPLOYMENT_PROFILE, DIRECTORY, employeeById, profileSubjectMatcher, subjectNoun } from "../config/deployment-profile.ts";
 import { directoryForRows } from "../engine/ingress/webchart/live-directory.ts";
 import { isWebChartConfigured, type DataSourceEnv } from "../engine/ingress/data-source.ts";
@@ -55,8 +55,29 @@ const RUN_HEADERS = [
   "notInPopulation",
 ] as const;
 
-export async function runsCsv(runStore: RunStore, outcomeStore: OutcomeStore, limit = 200): Promise<string> {
-  const runs = await runStore.listRuns(limit);
+/**
+ * The run-history CSV, filtered by the SAME predicate the screen filters by (#601).
+ *
+ * Until 2026-09-21 this took no filters at all and the button sent none, so a user who narrowed the
+ * history to FAILED runs at one site last week pressed Export and received the most recent 200 runs
+ * of everything — no error, and a plausible-looking file. Same defect as the cases CSV (#602), one
+ * screen over, and `matchesRunFilters` is shared for the same reason `matchesCaseSearch` is: a second
+ * copy of the predicate drifts the first time either is touched.
+ *
+ * **The candidate read is unbounded and the cap applies AFTER filtering**, which is also what
+ * `/api/runs` does. The old form read the newest 200 rows and then had nothing to filter, so a
+ * deployment with more than 200 runs could not export an older one at all — and the screen said
+ * nothing about 200.
+ */
+export async function runsCsv(
+  runStore: RunStore,
+  outcomeStore: OutcomeStore,
+  limit = 200,
+  filters: RunFilters = {},
+): Promise<string> {
+  const runs = (await runStore.listRuns(Number.MAX_SAFE_INTEGER))
+    .filter((r) => matchesRunFilters(r, filters))
+    .slice(0, limit);
   const rows: unknown[][] = [];
   // ONE query in flight at a time, for the same reason the cases CSV batches (2026-09-13). This was
   // `Promise.all` over the runs: up to 200 concurrent `countOutcomesByStatus` queries against a
