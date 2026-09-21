@@ -29,7 +29,9 @@ sprint context — read them for background, never act on them.
 - Auth: user accounts remain hardcoded (no SSO, no real user directory). The JWT refresh token flow (HttpOnly cookie, token rotation, `/api/auth/refresh`) is approved and implemented.
 - Email: `WORKWELL_EMAIL_PROVIDER=simulated` is the default and must remain so on the demo stack. SendGrid wiring exists in the code but must not be activated unless `WORKWELL_EMAIL_SENDGRID_API_KEY` is explicitly set (with `WORKWELL_EMAIL_PROVIDER=sendgrid`) in a non-demo environment.
 - AI never decides compliance (see docs/AI_GUARDRAILS.md). CQL engine is sole source of truth.
-- Every state change writes `audit_event` — no exceptions
+- Every state change writes `audit_event` — no exceptions. **One known gap, #598:** a run-created case
+  transition audits best-effort AFTER the upsert, so it can mutate and lose the event. Operator actions
+  audit first and cannot. `DATA_MODEL_CONTRACTS` §4 carries which is which and why.
 - No silent scope changes. If a stop condition triggers, document fallback in JOURNAL.md.
 - Schema migrations are owned by Taleef — never written or applied by an agent without explicit instruction
 

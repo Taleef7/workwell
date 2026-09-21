@@ -121,6 +121,29 @@ SQLite floor and the Pg ceiling read the current row and apply the shared pure `
   instead of being left stuck RUNNING / marked FAILED after the case was already mutated (mirrors the
   `RUN_COMPLETED` best-effort write).
 
+  > **So "every state change writes an `audit_event`" is TRUE OF OPERATOR ACTIONS and NOT of the
+  > run-created case transition (#598).** CLAUDE.md states the rule without that qualification, and
+  > the qualification was discoverable only by reading `run-pipeline.ts` — which is the shape of
+  > claim this file exists to stop. The two paths make opposite trades ON PURPOSE and both are
+  > deliberate:
+  >
+  > - **An operator action records the event FIRST, then applies the patch** (`case/case-actions.ts`;
+  >   `recordCaseEvent` makes the action row and the audit row one transaction). A failure between
+  >   the two leaves an action **recorded but not applied** — never an unaudited state change. Bulk
+  >   assign takes the same side, auditing before it mutates.
+  > - **A run upserts the case FIRST, then audits best-effort.** A failure there leaves a state change
+  >   **applied but unaudited**, which is the violation — accepted because the alternative strands an
+  >   otherwise-complete run as RUNNING after the case was already mutated.
+  >
+  > **What is missing is the primitive, not the ordering.** There is no `applyCaseAction({ patch,
+  > action, audit })` making all three one unit, and there cannot be one inside a single store: the
+  > action and audit rows belong to `CaseEventStore` (which already opens its own `BEGIN`/`COMMIT`)
+  > while the patch belongs to `CaseStore`, so a real fix needs a transaction seam spanning both.
+  > Until that exists, **do not build operational reliance on the ledger being complete for
+  > run-created transitions.** A reconciliation job is not a substitute: without durable operation
+  > identity, an expected version, a deadline and a visible failure state it is a second unreliable
+  > thing checking the first.
+
 ### The work list is READ two ways, and they must answer the same question (#561, ADR-084)
 
 `/api/cases` takes ONE page and the exact total from a single statement (`CaseStore.listCasesPage`,

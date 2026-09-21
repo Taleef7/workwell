@@ -171,7 +171,21 @@ export const compileAllowsActivation = (s: string) => s.toUpperCase() === "COMPI
 
 const OUTCOME_BUCKETS = new Set(["COMPLIANT", "DUE_SOON", "OVERDUE", "MISSING_DATA", "EXCLUDED"]);
 
-/** Port of MeasureService.validateTests: a fixture set passes when non-empty and each fixture is well-formed. */
+/**
+ * Port of MeasureService.validateTests: a fixture set passes when non-empty and each fixture is
+ * well-formed.
+ *
+ * **It does NOT execute anything (#599), and the name is the whole problem.** "Tests passed" reads as
+ * "the fixtures ran and the measure produced the expected outcomes". What is checked is that the list
+ * is non-empty and that each entry has a name, a subject and an `expectedOutcome` in the allowed set.
+ * A fixture asserting an impossible outcome passes this gate, and so does one whose expected outcome
+ * contradicts the CQL — so activation was blocked by a control that could not fail on the thing its
+ * label implied.
+ *
+ * Studio's row now reads "Fixtures Well-Formed … not executed against the measure". Executing them is
+ * the real fix (the engine is right there, and a fixture is a subject plus an expected outcome) and
+ * belongs with the next Studio work; #599 carries it.
+ */
 export function validateTests(fixtures: MeasureSpec["testFixtures"]): { passed: boolean; failures: string[] } {
   if (fixtures.length === 0) return { passed: false, failures: ["At least one test fixture is required before activation."] };
   const failures: string[] = [];
