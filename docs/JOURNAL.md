@@ -30,9 +30,14 @@ the cause: the sweep matched a **verb whitelist** (`create|update|set|insert|…
 
 Rebuilt without the whitelist (find the audit write, report every preceding non-read `await` in the
 function) and **committed as `backend-ts/scripts/audit-order-sweep.py`**, so the claim is reproducible
-rather than prose. Its current output still holds untriaged candidates — waivers, appointments,
-evidence upload, panel assignment, the import-driven finalize — all now listed on #598 as things to
-open rather than things to name.
+rather than prose. Its current output still holds untriaged candidates, all listed on #598 as
+things to open rather than things to name.
+
+**Since triaged (2026-09-21, same day):** waivers and appointments **flipped** — both could, because
+the id is minted caller-side. `uploadEvidence` **cannot** without a store change: its
+`payload.timestamp` is `record.uploadedAt`, which the store mints. Panel assignment was **checked and
+cleared** — it already audits first; the sweep's hit was a read. What remains untriaged is the
+import-driven finalize and a handful of probable reads.
 
 **And the shape of the answer was wrong too.** `rerunToVerify` records its action audit-first and
 then writes `CASE_RESOLVED` *after* the patch: a function can be on **both** sides. The contract now

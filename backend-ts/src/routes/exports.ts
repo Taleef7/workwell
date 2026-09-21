@@ -47,6 +47,18 @@ function subjectFiltersOr400(q: URLSearchParams): ReturnType<typeof subjectFilte
   }
 }
 
+/**
+ * How many runs the CSV carries. Defaults to 200 — what it has always been — but a caller can ask
+ * for more, which was previously impossible: the cap was applied to the READ, so a deployment with
+ * more than 200 runs could not export an older one under any filter. Bounded so a stray `?limit=1e9`
+ * cannot ask the store for everything.
+ */
+const clampExportLimit = (raw: string | null): number => {
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n <= 0) return 200;
+  return Math.min(n, 10_000);
+};
+
 /** A 400 in the same JSON shape `/api/cases` returns, so a refusal reads the same on both surfaces. */
 const badRequest = (body: unknown): Response =>
   new Response(JSON.stringify(body), { status: 400, headers: { "content-type": "application/json" } });
@@ -87,8 +99,23 @@ export async function handleExports(req: Request, env: ExportsEnv): Promise<Resp
 
   if (pathname === "/api/exports/runs") {
     if (!isCsv) return badFormat();
+    // The SAME six filters `/api/runs` takes, so the file describes the history the screen is
+    // showing (#601). `from`/`to` are validated by the shared calendar-day guard, as the cases CSV
+    // is, rather than filtering lexicographically on whatever arrived.
+    const runWindow = caseWindowFrom(q);
+    if (!runWindow.ok) return badRequest(calendarDayErrorBody(runWindow.name, runWindow.value));
     const s = await getStores(env);
-    return csvResponse("runs.csv", await runsCsv(s.runs, s.outcomes));
+    return csvResponse(
+      "runs.csv",
+      await runsCsv(s.runs, s.outcomes, clampExportLimit(q.get("limit")), {
+        status: q.get("status")?.trim() || undefined,
+        scopeType: q.get("scopeType")?.trim() || undefined,
+        triggerType: q.get("triggerType")?.trim() || undefined,
+        site: q.get("site")?.trim() || undefined,
+        from: runWindow.from,
+        to: runWindow.to,
+      }),
+    );
   }
 
   if (pathname === "/api/exports/outcomes") {

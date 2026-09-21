@@ -63,8 +63,6 @@ const profile = {
       priority: "HIGH",
       assignee: null,
       slaDueDate: null,
-      slaRemainingDays: null,
-      slaBreached: false,
     },
     {
       caseId: "case-2",
@@ -76,8 +74,6 @@ const profile = {
       // assigned rather than falling back to the placeholder over a case that has an owner.
       assignee: "Quality-Staff@Maui.WorkWell.dev",
       slaDueDate: null,
-      slaRemainingDays: null,
-      slaBreached: false,
     },
   ],
   recentAuditEvents: [],

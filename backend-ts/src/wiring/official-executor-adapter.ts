@@ -47,6 +47,26 @@
  *   comparison the roadmap worried about: unbatched official execution is ~2.5x SLOWER per subject than
  *   the authored engine's ~68 ms, and batched it is faster.
  *
+ *   **Re-measured 2026-09-21 on the current artifacts (#589), and the claim holds — but it is a claim
+ *   about THIS HARDWARE.** `scripts/batch-cost-curve.mjs`, bundles built once, 3 repeats per size:
+ *
+ *   | subjects | cms122 ms/subject | cms125 ms/subject |
+ *   |---|---|---|
+ *   | 25 | 27.2 | 21.9 |
+ *   | 100 | 16.9 | 20.6 |
+ *   | **500** | **14.4** | **14.2** |
+ *
+ *   The saving still grows with the roster (0.53x and 0.65x from 25 to 500), so the framing above is
+ *   right and **batch size does not bend the curve upward**.
+ *
+ *   **The Maui nightly measures 42 ms/subject at the same size on the same measure** (#588's phase
+ *   timing, run `262c7ea3`, 20,000-patient corpus). That is ~3x this host, and since batch size,
+ *   artifact drift and bundle construction are all excluded by the table above, what is left is the
+ *   production container's own CPU. So: **quote 11-16 ms only for a dev host, and size anything that
+ *   plans around the batched cost — chunk size, the #604 worker thread, any blocking window — against
+ *   42 ms.** ADR-085 d4 depends on this figure, which is why it is recorded here rather than in a
+ *   journal entry that ages out.
+ *
  *   The retrieve check rides with it, because it is only meaningful ACROSS subjects. Note it would NOT
  *   catch the more dangerous case — see `qicore-preparation.ts` on why preparation alone renders the
  *   synthetic corpus as 100% compliant for cms122. It catches "retrieved nothing at all", not

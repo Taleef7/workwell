@@ -4,7 +4,7 @@
  * and measure (name/version, from the registry).
  *
  * SLA + waiver/exclusion fields are surfaced as neutral defaults for this slice
- * (slaRemainingDays/slaBreached/exclusionReason/waiver* land with the SLA + actions
+ * (exclusionReason/waiver* land with the actions
  * slices); they are optional/nullable in the frontend type.
  */
 import type { CaseRecord } from "../stores/case-store.ts";
@@ -14,6 +14,20 @@ import { employeeById, providerById } from "../config/deployment-profile.ts";
 import { payerNameOf } from "../engine/synthetic/payer-display.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
 
+/**
+ * **SLA was REMOVED here, not forgotten (#600).** `slaRemainingDays: null` and `slaBreached: false`
+ * shipped hard-coded, so the field always answered "not breached" without anything having checked —
+ * a dead value that reads as a checked condition, which is worse than having neither. The `SlaChip`
+ * it fed could therefore never render.
+ *
+ * It is not that nobody built it. The Java implementation had `sla_due_date` and `sla_breached`
+ * columns and a six-hourly `escalateBreachedCases()` that bumped priority and wrote a
+ * `CASE_SLA_BREACHED` audit event (`docs/archive/JOURNAL_2026-04_06.md`). The de-Java port (ADR-008)
+ * carried the SHAPE across and left the computation behind.
+ *
+ * Reviving it is #600's review date under another name — a `reviewAt` on a closure disposition,
+ * which needs columns and is therefore the owner's. Until then the honest surface is no field.
+ */
 export interface CaseSummary {
   caseId: string;
   employeeId: string;
@@ -53,8 +67,6 @@ export interface CaseSummary {
   waiverExpiresAt: string | null;
   waiverExpired: boolean;
   updatedAt: string;
-  slaRemainingDays: number | null;
-  slaBreached: boolean;
   /**
    * Number of outreach sends recorded for this case (Java counts `outreach_records`;
    * the TS port derives it from the `OUTREACH_SENT` case_actions). The frontend
@@ -132,8 +144,6 @@ export function toCaseSummary(
     waiverExpiresAt: null,
     waiverExpired: false,
     updatedAt: c.updatedAt,
-    slaRemainingDays: null,
-    slaBreached: false,
     outreachRecordCount,
     closedAt: c.closedAt,
     closedReason: c.closedReason,
