@@ -18,6 +18,96 @@
 >
 > **Sequence note:** ADR-033 does not exist — verified absent, and the number must not be reused.
 
+## ADR-086: what the source did not say is not ours to supply — a code keeps its meaning, and a corpus keeps its knowledge cutoff
+
+**Date:** 2026-09-21. **Status:** accepted. Milestone M-M (#594, #595). Applies ADR-037
+("normalization only, never fabrication") to the two places that were quietly violating it, and
+sharpens ADR-075 (the generated corpus).
+
+### Context
+
+The 2026-09-07 expert review named one **high-priority correctness defect**, and a second finding
+beside it. Both were accepted on 2026-09-08, named "the next two slices", and then sat untouched for
+twelve days with no issue number — which is why they stayed invisible rather than being deferred on
+purpose.
+
+**#594.** `prepareForQiCore` filled four coded fields when it could not bind them:
+`Condition.clinicalStatus`, `Condition.verificationStatus`, `Condition.category` and
+`Encounter.class`. Its guard, `unbindable()`, returns true for a field that is **missing** as well as
+one that is present and unbindable, and in both cases the module assigned a module-level DEFAULT.
+
+Two consequences, and the second is worse than the review recorded:
+
+1. An absent field was invented. That is live rather than latent, because the QRDA-I import path
+   emits none of those three on a Condition and no `class` on an Encounter — so preparation minted
+   them **on a third party's document**, including stamping `active` on a Condition that the importer
+   had just given an `abatementDateTime` from a closed interval.
+2. **A present code was DISCARDED.** `unbindable()` is as true of a system-less `resolved` as of a
+   system-less `active`, and both took the same default — so a corrected misdiagnosis was reported as
+   an active, confirmed problem. The file's own docstring claimed this hole was closed; it was not.
+   The first cut of the fix reproduced the same mistake in a new place, turning an Encounter
+   `{code: "IMP"}` into ambulatory, and was caught by an existing test.
+
+It also put two files in one pipeline in direct contradiction: `engine/cql/qdm-entries.ts` honours a
+system-less `entered-in-error` as a negation while preparation rewrote those bytes to `confirmed`.
+
+**#595.** The generated corpus emitted facts dated after the evaluation date — reproduced at
+2026-09-07 as 19 future-dated events in the first 48 records. `corpus-bundle-source.ts` passes the
+measurement YEAR to generation (correctly: ADR-072 scores a calendar year), and nothing then filtered
+what was emitted by the as-of. Every official measurement is taken at 31 December, so the effect on
+every number we report is zero — which is exactly why it would have been found by a demo rather than
+by a test.
+
+### Decision
+
+**d1. This layer supplies a SYSTEM, never a CODE.** `prepareForQiCore` normalizes a coded field only
+when a value is present, cannot bind, and carries a code belonging to that field's own value set —
+and it writes that same code back with the system added. Absent stays absent; already-bindable is
+untouched; an unrecognised code is left alone, because we cannot claim to know which system it came
+from. The value sets are complete rather than "the codes the corpus emits": a set holding only
+`active` would decline to normalize `resolved` and leave it unretrievable, which reads as caution and
+is the old bug in a new coat.
+
+**d2. A required target field does not authorize inventing its value.** Where a profile needs a field
+the source never supplied, the resource goes unretrieved. That is the honest outcome, and it is the
+same rule the onset paragraph in that file already applied: if a measure genuinely cannot retrieve
+without a field, the answer is a **source that records it**, not a value minted in preparation.
+
+**d3. The QRDA-I importer derives `clinicalStatus`, because that is where the source semantics are
+known** — and `times()` now reports three states rather than two. A `<high>` with a value closes the
+interval (`resolved`, matching the `abatementDateTime` written from the same value); a
+`<high nullFlavor="UNK"/>` is QDM open prevalence, an explicit assertion of no known end (`active`);
+an absent `<high>` is silence and emits nothing. Collapsing the last two was what made a faithful
+mapping impossible to write however the mapping itself was expressed.
+
+**d4. A corpus bundle carries only what was KNOWN BY its as-of.** The filter is on the date each fact
+was recorded — the value already handed to `provenanceFor` — and not on "every date inside the
+resource is in the past": a medication order known today may legitimately carry a future intended
+end, and dropping it would be a different wrong answer. A resource and its Provenance are emitted
+together, so a filtered fact leaves no status, abatement, reference or provenance behind.
+
+**d5. Nothing that is currently reported moves, and that is asserted rather than argued.** For d1–d3,
+the ADR-075 corpus records all four fields itself, fully systemed and with `category` distinguishing
+an encounter diagnosis from a problem-list item — so the pilot's bundles never took the invented
+path, and cms122/125/2/137 still find real populations. For d4, the year-end cutoff is compared
+against an unbounded one and must be identical.
+
+### Consequences
+
+- **The QRDA-I import path changes**, which is the point: an imported Condition now carries the
+  status its document implies, or none. A document that says nothing produces a Condition that does
+  not satisfy the QI-Core profile and is not retrieved — visible as a smaller population rather than
+  as a confident wrong one.
+- **`Encounter.class` is no longer supplied for imported encounters.** QRDA-I carries an encounter
+  type, not a FHIR class, and asserting ambulatory would be the same defect this ADR removes. If a
+  measure turns out to need it, that is a gap to surface in the importer against the document's own
+  evidence.
+- A mid-year evaluation now returns different — correct — numbers from what it would have returned
+  before d4. No reported number is among them, because every official measurement is at year end.
+- The fixtures are deliberately adversarial per the review's own bar: refuted, resolved,
+  `entered-in-error`, an unrecognised code, an inpatient class, and the three interval shapes. A
+  fixture that cannot change the answer cannot distinguish a correct mapping from the previous one.
+
 ## ADR-085: a long run yields the event loop between subjects, and a run too long for a request is scheduled rather than awaited
 
 **Date:** 2026-09-21. **Status:** accepted. Milestone M-M (#563, #590). Builds on ADR-075 (chunked

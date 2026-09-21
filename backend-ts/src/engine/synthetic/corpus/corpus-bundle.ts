@@ -723,7 +723,32 @@ export function bundleForPatient(
     clinical.push({ resource, date: day, external: false });
   }
 
-  for (const item of clinical) {
+  // **The knowledge cutoff (#595).** A bundle must not know things that have not happened yet.
+  //
+  // Facts are generated for the calendar year the evaluation date falls in (ADR-072, and see
+  // `corpus-bundle-source.ts`, which passes the YEAR for exactly that reason), so a run evaluated on
+  // any day before 31 December used to see the rest of the year: reproduced on a bundle built as of
+  // 2026-09-07, 19 future-dated events in the first 48 records - a PHQ-9 on 8 October, a blood
+  // pressure on 14 October, mammography in October and November.
+  //
+  // The filter is on `item.date`, which is the day the fact was RECORDED - it is the date this
+  // corpus hands to `provenanceFor` as the recording instant. That is deliberately not "every date
+  // inside the resource is in the past": a medication order known today may legitimately carry a
+  // future intended end, and dropping it would be a second kind of wrong answer. What is excluded is
+  // a fact nobody could have known on the cutoff date.
+  //
+  // The back doors close with it, because a resource and its Provenance are pushed together below:
+  // a dropped fact leaves no status, no abatement, no reference and no provenance behind.
+  //
+  // **Nothing that is currently reported moves.** Every official measurement is taken at 31 December
+  // (ADR-072), and every generated fact falls inside that calendar year, so at year end this excludes
+  // nothing - which is asserted rather than asserted-about in `corpus-bundle.test.ts`. It starts to
+  // matter the moment anything evaluates at another date: a mid-year rerun, a demo "as of today", an
+  // encounter-time evaluation (MM-4), or an acceptance cohort built around a timing boundary.
+  const cutoff = evaluationDate.slice(0, 10);
+  const known = clinical.filter((item) => item.date.slice(0, 10) <= cutoff);
+
+  for (const item of known) {
     entry.push({ resource: item.resource });
     entry.push({
       resource: provenanceFor(
