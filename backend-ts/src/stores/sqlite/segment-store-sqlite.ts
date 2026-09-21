@@ -49,7 +49,7 @@ export class SqliteSegmentStore implements SegmentStore {
   }
 
   async createSegment(input: CreateSegmentInput): Promise<HydratedSegment> {
-    const id = crypto.randomUUID();
+    const id = input.id ?? crypto.randomUUID();
     const now = new Date().toISOString();
     await this.db
       .prepare("INSERT INTO segments (id, name, description, enabled, rule_json, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")

@@ -1,5 +1,109 @@
 # Journal
 
+## 2026-09-21 (late, III) — the audit-order sweep is fully triaged, and the rule finally has a test
+
+The owner's #598 decision was: where a path CAN audit before it mutates, it should. #607/#608 flipped
+the ones that were a plain reorder. This finishes the sweep's output — every candidate opened, none
+named from the tool's summary.
+
+**Flipped, each needing a one-field seam change rather than a reorder:** `createMeasure`, segment
+create, segment UPDATE, segment delete, and `uploadEvidence`. `CreateMeasureInput`,
+`CreateSegmentInput` and `InsertEvidenceInput` now ACCEPT the value the event keys on — optional, minted
+by the store when absent, so every other caller is unchanged. That is the whole obstacle these five
+shared: the store minted the id (or, for evidence, the `uploadedAt` the payload reports as
+`payload.timestamp`), so there was nothing to key an event on beforehand.
+
+Two details worth keeping. **Segment UPDATE needed three writes moved, not one** — `updateSegment`,
+`setMeasures`, `setOverrides` — so a failure after the first left a partly-updated segment with no event
+at all; and its 404 became an explicit pre-read, because `updateSegment` returning null WAS the
+not-found signal, which is what made the old order unavoidable. **`uploadEvidence` audits before the
+BUCKET write too**: an object in storage the ledger never mentions is harder to notice than a missing
+row.
+
+**`src/audit/audit-order.test.ts` exists because nothing tested the rule.** Nine call sites had been
+flipped across three commits and not one test could tell: every existing test asserts the event EXISTS
+after a SUCCEEDING operation, which is equally true in either order, so a reorder back was silent. Each
+case now makes the MUTATION fail and requires the event anyway — the only externally visible difference
+between the two orders. Mutation-checked on two of them.
+
+**Still mutate-first, and now every one has a reason at its call site:**
+- the run-created case transition and the import-driven finalize — the same deliberate pattern, an
+  event best-effort at the run boundary, because the alternative strands an otherwise-complete run;
+- **`dispatchOutreach`** — the only one that puts something OUTSIDE the system before the ledger.
+  `channel.send()` dispatches the message and the payload is built from the delivery result, so there
+  is nothing to record beforehand and nothing to retract after. Needs ADR-073 d4's intent-then-completion
+  pair, which adds an event type consumers read: an owner decision, not a reorder;
+- the three identity-link writes — and the reason is sharper than "the store mints the id":
+  `upsertLink` returns the EXISTING row's id on conflict, so a caller-minted id is not the id the event
+  would name. Keying those events on the PAIR would work and changes what `entity_id` means;
+- `backfill-scale` and `backfill-quality-history` — one-shot seeding tools, not operator surfaces.
+
+**Checked and NOT violations**, every one a matcher artifact: `audit-packet` (a hash), `materialize-run`
+and `backfill-trend-history` (reads), evidence DOWNLOAD (`arrayBuffer`), `measure-seed` (itself
+audit-first, flagged against a different write's audit), subject-list create (its audit is a
+`beforeComplete` callback that runs before the list becomes visible), and panel assignment, which audits
+before the mapping AND records each per-case event before `assignCases`.
+
+So the sweep's output is fully triaged — which is NOT the same as #598 closing. What remains is the
+missing cross-store `applyCaseAction` primitive, plus the two decisions above. `DATA_MODEL_CONTRACTS`
+§4 and CLAUDE.md now say exactly that.
+
+Backend 2,856 tests, one pre-existing local failure (`corpus-membership`).
+
+**Review round (#612).** Seven findings, one of them a regression I introduced and three of them tests
+that could not fail.
+
+**The PUT's relocated 404 dropped a guard that also protected the two later writes.** `updateSegment`
+returning null was the not-found signal, and moving the 404 to a pre-read discarded it — so a row
+vanishing between the check and the write gave either a **500** (`setMeasures` violating the
+`segment_measures` foreign key) or an **HTTP 200 whose body is `null`**, where the old order returned a
+clean 404 for both. Reachable by two concurrent admin requests. The return value is checked again.
+
+**All three new segments tests passed against the pre-change code**, and the reason was a false claim in
+my own header: that the route's ordering is unreachable because it resolves its stores from `env`. It is
+reachable — the store is a class, and patching its prototype makes a write fail against the real
+fixture. The DELETE case asserted only that the payload name came from a pre-read, which was true
+before too. Both now make the write fail and require the event to survive, and the PUT gets a case for
+the vanished-row 404. Mutation-confirmed: reverting the PUT to write-then-audit, dropping the null
+check, and reverting the dedupe each fail exactly one case.
+
+**The event reported a measure list the row would never hold.** `setMeasures` writes `[...new Set(...)]`
+and `hydrate` reads back ordered, so a payload built from the request array named something the segment
+never contained — harmless while the audit came second, a payload-accuracy regression once it comes
+first. One helper, `storedMeasureIds`.
+
+**None of the three new seams was exercised by the store contract**, so the deployed Postgres ceiling was
+asserted nowhere: deleting `input.id ??` from the SQLite adapter failed a test, and the identical edit to
+the Pg adapter failed nothing. Three contract cases now, which run on both stores.
+
+**Four existing audit-first paths had no ordering test** despite §4 saying one belongs — `transitionStatus`,
+`createTerminologyMapping`, and value-set attach/detach. Added.
+
+**And §4's completeness claim was wrong for the third time.** `backfill-trend-history` was filed under
+"not a violation (reads)" on the strength of two of its four hits; the other two are writes.
+`recover-stuck-runs`, `resolve-valuesets` and `batch-evaluate-scale` were absent altogether, and the
+PUT's own writes now appear as matcher artifacts against the DELETE's audit. Every time the prose was
+plausible and the arithmetic was not done, so §4 now carries the **count** — 55 hits across 20 files —
+and the one-line command that re-derives it.
+
+One thing recorded rather than fixed: **`EVIDENCE_UPLOADED` now reaches an operator surface.** The case
+timeline is `audit_events WHERE ref_case_id = ?`, so a failed bucket write leaves a permanent "Evidence
+uploaded — <filename>" row with nothing to download. The rule picks the over-claim side for the LEDGER;
+whether a clinical-ops read should inherit it for a named file is an owner call.
+
+**Codex (#612).** Three findings; two were already closed by the round above (the recheck of
+`updateSegment`'s result, and §4's incomplete triage). The third was not.
+
+**The audit payload was a post-state GUESS.** Merging the request over a pre-read is wrong under
+concurrency: read `enabled: true`, let another admin set it false, change only the name, and
+`updateSegment` preserves the newer false while the event says true. The old post-write hydration could
+not be wrong about that because it re-read — and an audit-first event cannot re-read. So the payload is
+now **what this request CHANGES**: every field the body supplies, plus a `changed` list naming them, and
+nothing about the fields it does not set. A consumer wanting the resulting state reads the row; what the
+ledger is for is who changed what. Pinned by a deterministic race — another writer flips `enabled`
+between the pre-read and the write, and the event must say nothing about it.
+
+
 ## 2026-09-21 (late, II) — the export's last width difference, which no query string could show
 
 #602 made the cases CSV carry every filter the work list sends, and a frontend test compares the two

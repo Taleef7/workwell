@@ -28,7 +28,15 @@ export class MeasureError extends Error {}
 // `/deprecate` route (reason required), not this APPROVER-reachable `/status` path (Fable M2).
 const ALLOWED_TRANSITIONS = new Set(["Draft->Approved", "Approved->Active"]);
 
-async function audit(deps: MeasureLifecycleDeps, eventType: string, r: MeasureRecord, actor: string, payload: Record<string, unknown>): Promise<void> {
+// `Pick<..., "versionId">` rather than the whole record, because that is the only field read — and
+// since #598 `createMeasure` audits BEFORE the insert, where no record exists yet to hand over.
+async function audit(
+  deps: MeasureLifecycleDeps,
+  eventType: string,
+  r: Pick<MeasureRecord, "versionId">,
+  actor: string,
+  payload: Record<string, unknown>,
+): Promise<void> {
   await deps.events.appendAudit({
     eventType,
     entityType: "measure_version",
@@ -51,13 +59,15 @@ export async function createMeasure(
   const policyRef = input.policyRef?.trim();
   const owner = input.owner?.trim();
   if (!name || !policyRef || !owner) throw new MeasureError("name, policyRef and owner are required");
-  // The one in this file that does NOT audit first (#598), and it cannot without a store change: the
-  // audit is keyed on `r.versionId`, which the insert mints. Minting the id caller-side (as
-  // `createTerminologyMapping` does) or an intent-then-completion pair (ADR-073 d4's compaction
-  // pattern) would both work; either is a real change rather than a reorder, so it stays on #598.
-  const r = await deps.measures.createMeasure({ name, policyRef, owner });
-  await audit(deps, "MEASURE_CREATED", r, actor, { measureId: r.measureId, name, policyRef, owner });
-  return r.measureId;
+  // AUDIT BEFORE MUTATE (#598). Both ids are minted HERE rather than by the insert — the store now
+  // accepts them — so the event can name the version before the row exists. `audit` takes the record
+  // it keys on, so it is handed the ids directly; every field in the payload is an input, not a
+  // read-back.
+  const measureId = crypto.randomUUID();
+  const versionId = crypto.randomUUID();
+  await audit(deps, "MEASURE_CREATED", { versionId }, actor, { measureId, name, policyRef, owner });
+  await deps.measures.createMeasure({ name, policyRef, owner, measureId, versionId });
+  return measureId;
 }
 
 /** POST /api/measures/:id/approve — Draft → Approved (gated on the activation readiness). */

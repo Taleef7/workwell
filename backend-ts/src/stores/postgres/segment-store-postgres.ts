@@ -49,7 +49,7 @@ export class PgSegmentStore implements SegmentStore {
   }
 
   async createSegment(input: CreateSegmentInput): Promise<HydratedSegment> {
-    const id = crypto.randomUUID();
+    const id = input.id ?? crypto.randomUUID();
     const now = new Date().toISOString();
     await this.pool.query(
       `INSERT INTO ${S}.segments (id, name, description, enabled, rule_json, created_by, created_at, updated_at)

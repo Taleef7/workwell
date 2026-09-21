@@ -24,6 +24,13 @@ export interface InsertEvidenceInput {
   mimeType: string;
   storageKey: string;
   description: string | null;
+  /**
+   * The upload stamp. Optional and minted by the store when absent, so every existing caller is
+   * unchanged — but `uploadEvidence` passes one, because its audit payload carries this exact value as
+   * `payload.timestamp` and #598's rule is audit-before-mutate. It was the last of the
+   * "the store mints something the event needs" cases that a seam change could reach.
+   */
+  uploadedAt?: string;
 }
 
 export interface EvidenceStore {

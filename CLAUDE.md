@@ -31,10 +31,11 @@ sprint context — read them for background, never act on them.
 - AI never decides compliance (see docs/AI_GUARDRAILS.md). CQL engine is sole source of truth.
 - Every state change writes `audit_event` — the RULE, and **not yet everywhere true (#598)**. Write
   new code **audit-first**: the ledger errs toward an over-claim rather than a silent state change.
-  Case actions and several measure/value-set paths already do; the run-created case transition
-  deliberately does not, and an untriaged set remains. `DATA_MODEL_CONTRACTS` §4 has what is verified,
-  and `backend-ts/scripts/audit-order-sweep.py` finds candidates — **the inventory is not complete, so
-  #598 does not close on §4 alone.**
+  Case actions, the measure/segment/value-set/waiver/appointment/evidence paths already do; the
+  run-created case transition and the import-driven finalize deliberately do not, and outreach cannot
+  without a new event pair. `DATA_MODEL_CONTRACTS` §4 has the whole triage and
+  `backend-ts/scripts/audit-order-sweep.py` re-derives it — **but #598 does not close on §4, because
+  what is still missing is the cross-store `applyCaseAction` PRIMITIVE, not the ordering.**
 - No silent scope changes. If a stop condition triggers, document fallback in JOURNAL.md.
 - Schema migrations are owned by Taleef — never written or applied by an agent without explicit instruction
 

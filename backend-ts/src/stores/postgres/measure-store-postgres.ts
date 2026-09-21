@@ -106,8 +106,8 @@ export class PgMeasureStore implements MeasureStore {
   }
 
   async createMeasure(input: CreateMeasureInput): Promise<MeasureRecord> {
-    const measureId = crypto.randomUUID();
-    const versionId = crypto.randomUUID();
+    const measureId = input.measureId ?? crypto.randomUUID();
+    const versionId = input.versionId ?? crypto.randomUUID();
     await this.seedMeasure({
       measureId,
       name: input.name,

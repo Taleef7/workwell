@@ -127,25 +127,14 @@ export async function uploadEvidence(deps: EvidenceDeps, caseId: string, input: 
   const storageKey = `${caseId}/${evidenceId}-${safeName}`;
   const description = input.description && input.description.trim() !== "" ? input.description.trim() : null;
 
-  // Does NOT audit first (#598), and cannot without a store change: the event's `payload.timestamp`
-  // reads `record.uploadedAt`, which `EvidenceStore.insert` mints — the same "the store mints the
-  // value" cause as `createMeasure` and segment create, one field over. Adding `uploadedAt` to
-  // `InsertEvidenceInput` would fix it on both stores; that is a seam change, not a reorder.
+  // AUDIT BEFORE MUTATE (#598), and before the BUCKET write as well as the row — the exposure here is
+  // wider than a row, because a failed audit could otherwise leave an object in storage the ledger
+  // never mentions.
   //
-  // Worth noting the exposure is wider here than a row: the BUCKET write lands first too, so a failed
-  // audit can leave an object in storage that the ledger never mentions.
-  await deps.bucket.put(storageKey, input.bytes, { httpMetadata: { contentType: mimeType } });
-  const record = await deps.evidence.insert({
-    id: evidenceId,
-    caseId,
-    uploadedBy: actor,
-    fileName: safeName,
-    fileSizeBytes: input.bytes.length,
-    mimeType,
-    storageKey,
-    description,
-  });
-
+  // `uploadedAt` is minted HERE rather than by the insert (the store now accepts one), which is what
+  // makes the order possible: the event's `payload.timestamp` IS this value, and reading it back off
+  // the record is what forced the old order.
+  const uploadedAt = new Date().toISOString();
   await deps.events.appendAudit({
     eventType: "EVIDENCE_UPLOADED",
     entityType: "evidence",
@@ -160,8 +149,21 @@ export async function uploadEvidence(deps: EvidenceDeps, caseId: string, input: 
       mimeType,
       fileSizeBytes: input.bytes.length,
       description: description ?? "",
-      timestamp: record.uploadedAt,
+      timestamp: uploadedAt,
     },
+  });
+
+  await deps.bucket.put(storageKey, input.bytes, { httpMetadata: { contentType: mimeType } });
+  const record = await deps.evidence.insert({
+    id: evidenceId,
+    caseId,
+    uploadedBy: actor,
+    fileName: safeName,
+    fileSizeBytes: input.bytes.length,
+    mimeType,
+    storageKey,
+    description,
+    uploadedAt,
   });
   return record;
 }
