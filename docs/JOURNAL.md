@@ -62,6 +62,15 @@ off it. One line, one test.
 `site` on the OUTCOMES CSV and the MCP tool still folds case — filed as #613 rather than widened into
 this change, with the `?? "—"` question named there because it is a decision rather than a copy.
 
+**Codex (#611).** One finding, and it is the kind a parameter table makes visible: the status gate was
+applied to an EXPLICIT `period=current` as well as to the default, so the export answered two different
+things to two spellings of one question — `?period=current` narrowed to the cycle, while
+`?period=current&status=all` returned all history. On this endpoint a blank status and `all` are the
+SAME query (`worklistQueryFor` returns `{}` for both). The gate now decides only what SILENCE means; a
+caller who names a period gets it on any status. The screen's own condition is unchanged and now
+load-bearing rather than defensive: sending `period` on the closed tab would genuinely narrow it.
+
+
 
 ## 2026-09-21 (night) — four paths flipped to audit-first, and the list was still wrong by three
 

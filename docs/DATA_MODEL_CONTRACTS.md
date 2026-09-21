@@ -401,12 +401,19 @@ Supports filters: `status`, `measureId`, `priority`, `assignee`, `site`, `caseId
 > over one fixture holding a prior-cycle case, because a parameter comparison can only ever see
 > parameters.
 >
-> `period` is sent only for the cycle-scoped tabs, which is the SERVER's own condition —
-> `wantsCurrentCycle` answers false for closed/all/excluded whatever is asked, so those tabs keep
-> meaning what they meant before `?period=` existed. **It is not a guard against the store**: `CaseQuery.period`
-> treats `"all"` and `"current"` as no-ops on both stores (and says so, for this exact reason), so
-> forwarding the token would be harmless rather than empty. An earlier version of this paragraph
-> claimed the store would match nothing, which was false in five places at once.
+> **An explicit `period=current` is honoured on EVERY status; the status gate decides only what a
+> blank one means.** The first cut gated both, which made this endpoint answer two different things to
+> two spellings of one question — `?period=current` narrowed to the cycle while
+> `?period=current&status=all` returned all history, and here a blank status and `all` are the SAME
+> query (`worklistQueryFor` returns `{}` for both). A caller who names a period has said what they
+> want.
+>
+> The screen still sends `period` only on its two cycle-scoped tabs, and now for a load-bearing reason
+> rather than a defensive one: sending it on the closed tab would genuinely narrow that tab. **It is
+> not a guard against the store** — `CaseQuery.period` treats `"all"` and `"current"` as no-ops on both
+> stores (and says so, for this exact reason), so forwarding the token would be harmless rather than
+> empty. An earlier version of this paragraph claimed the store would match nothing, which was false in
+> five places at once.
 
 > **`site` is compared EXACTLY on both surfaces** (#603). The work list compared exactly and this
 > export lower-cased both sides; before #602 the export's `site` was only reachable by hand-writing a

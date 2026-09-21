@@ -148,12 +148,24 @@ test("the rule that decides it is ONE function, and the two surfaces differ only
     assert.equal(wantsCurrentCycle(status, undefined, "all"), false, `${status || "(blank)"} export default`);
     assert.equal(wantsCurrentCycle(status, "current", "all"), true, `${status || "(blank)"} export asked`);
   }
-  // A tab with no cycle scope never has one, whatever is asked for — on either surface. `?period=` on
-  // such a tab reaches the store as a literal period, so answering true here would silently filter on
-  // the word "current".
+  // A tab with no cycle scope has none BY DEFAULT — but an explicit `current` is honoured on every
+  // status (Codex on #611). Gating both made the export answer two different things to two spellings
+  // of one question: on this endpoint a blank status and `all` are the SAME query, so
+  // `?period=current` narrowed while `?period=current&status=all` returned all history.
   for (const status of ["closed", "excluded", "all"]) {
-    assert.equal(wantsCurrentCycle(status, "current", "current"), false, `${status} has no cycle scope`);
     assert.equal(wantsCurrentCycle(status, undefined, "current"), false, `${status} default`);
+    assert.equal(wantsCurrentCycle(status, "", "current"), false, `${status} blank period`);
+    assert.equal(wantsCurrentCycle(status, "current", "all"), true, `${status} asked explicitly`);
+  }
+  // The two spellings of "every status" must agree, which is the defect itself.
+  assert.equal(
+    wantsCurrentCycle("all", "current", "all"),
+    wantsCurrentCycle("", "current", "all"),
+    "`status=all` and a blank status are one query on the export, so they cannot scope differently",
+  );
+  // And a LITERAL period is never the cycle rule, on any status.
+  for (const status of ["open", "closed", "", "all"]) {
+    assert.equal(wantsCurrentCycle(status, "2026-01-01", "current"), false, `${status} + a literal period`);
   }
 });
 

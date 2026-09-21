@@ -582,22 +582,30 @@ export async function loadWorklistPage(
  * The same shape as `worklistQueryFor`, and for the same reason: a default that differs per surface is
  * a parameter, not a second copy of the rule.
  *
- * **A non-cycle status answers false whatever is asked, and that is a NARROWING rather than a guard
- * against a store behaviour** — said plainly because the first cut claimed the latter. `CaseQuery.period`
- * treats `"all"` and `"current"` as no-ops on both stores, so forwarding the token to a closed/all/
- * excluded list would return all history rather than nothing. Answering false keeps those tabs meaning
- * what they meant before `?period=` existed.
+ * **The status gate applies to the DEFAULT only — an explicit `current` is honoured on every status**
+ * (Codex, #611). It gated both at first, which made the export answer two different things to two
+ * spellings of one question: `?period=current` narrowed to the cycle, while `?period=current&status=all`
+ * returned all history — and on this endpoint a blank status and `all` are the SAME query
+ * (`worklistQueryFor` returns `{}` for both). A caller who names a period has said what they want; the
+ * gate exists to decide what SILENCE means, and silence is all it should decide.
+ *
+ * The gate still matters, because it is what keeps the closed, excluded and all tabs showing history
+ * when nobody asks otherwise — which is what they meant before `?period=` existed. And it is a
+ * narrowing rather than a guard against the store: `CaseQuery.period` treats `"all"` and `"current"`
+ * as no-ops on both stores, so forwarding the token would return all history rather than nothing.
  */
 export function wantsCurrentCycle(
   statusToken: string | null | undefined,
   periodToken: string | null | undefined,
   blankMeans: "current" | "all",
 ): boolean {
+  const period = periodToken?.trim().toLowerCase() || undefined;
+  // Explicit wins, whatever the status. A literal period (`2026-01-01`) is not the cycle rule and
+  // reaches the store as itself.
+  if (period) return period === "current";
   const status = (statusToken ?? "").trim().toLowerCase();
   const isCycleList = status === "" || status === STAFF_CLOSED_TOKEN || status === "open";
-  if (!isCycleList) return false;
-  const period = periodToken?.trim() || undefined;
-  return period ? period.toLowerCase() === "current" : blankMeans === "current";
+  return isCycleList && blankMeans === "current";
 }
 
 /**
