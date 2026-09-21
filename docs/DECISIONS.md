@@ -18,6 +18,119 @@
 >
 > **Sequence note:** ADR-033 does not exist — verified absent, and the number must not be reused.
 
+## ADR-085: a long run yields the event loop between subjects, and a run too long for a request is scheduled rather than awaited
+
+**Date:** 2026-09-21. **Status:** accepted. Milestone M-M (#563, #590). Builds on ADR-075 (chunked
+evaluation over the generated corpus) and ADR-084 (the pool and statement timeout). Instrumented by
+#588.
+
+### Context
+
+#563 recorded that during the nightly `ALL_PROGRAMS` recompute every endpoint degraded — including
+`GET /api/version`, which opens no database connection and therefore cannot be waiting for one. That
+ruled out pool starvation, the failure ADR-084 addressed, and left two candidates that could not be
+told apart from outside the container: a blocked event loop, or the host pausing a memory-pressured
+container. The phase timing shipped in #588 answered it from inside: `evaluateBatch` is **93.9% of a
+90-minute run**, ~21 s per 500-subject call, while bundle construction is 0.33%.
+
+The mechanism is not that the work is slow; it is **where the work yields**. `evaluateBatch` is a
+sequential `for` loop of `await engine.evaluate(...)`, and the engine's work is CPU-bound, so each
+`await` resolves synchronously. An `await` on an already-resolved promise schedules a **microtask**,
+and Node drains the entire microtask queue before the loop reaches the timers or poll phase. Five
+hundred of them in a row is one uninterruptible stretch as far as any pending request is concerned.
+
+Measured on the development host, 60 bundles x 42 ms of synchronous work (the observed per-subject
+cost), with a local HTTP server probed concurrently:
+
+| yield between bundles | requests served | worst request latency | batch time |
+|---|---|---|---|
+| none | 1 | 2,534 ms | 2,521 ms |
+| `queueMicrotask` | 1 | 2,523 ms | +0.1% |
+| `setImmediate` | 31 | **43.5 ms** | +1.5% |
+| `setTimeout(0)` | 105 | 85.6 ms | +2.4% |
+
+The `queueMicrotask` row is the one that decides the shape of the fix: a microtask yield changes
+nothing, so no arrangement of `await`s inside that loop can help. Only a macrotask can.
+
+Separately, #590: `ASYNC_SCOPES` was `{ALL_PROGRAMS, SITE}`, on the reasoning that a MEASURE run was
+"a few seconds". On the pilot's 20,000-patient corpus it is ~15 minutes against a 60 s gateway, so
+`POST /api/runs/manual` with `scopeType: MEASURE` **always** returned 504 while the run continued and
+completed normally. The 504 is an nginx HTML page, so the caller had no run id and nothing to poll —
+and a 504 reads as failure, which invites a retry that also runs. Two concurrent 20,000-patient runs
+held the pool for ~30 minutes.
+
+### Decision
+
+**d1. The loops WE own yield a MACROTASK after every subject, by default** — the run pipeline's
+per-subject loop (`run/run-pipeline.ts`, which is the authored path) and the engine's DB-less batch
+shell (`engine/ingress/evaluate-bundle.ts`, used by the CLI, the flip gate and the roster paths). `setImmediate` where it
+exists, `setTimeout(0)` otherwise — the file is the engine's DB-less shell and its header promises
+portability across every `@mieweb/cloud` target, and Workers has no `setImmediate`. Worst-case
+event-loop block falls from ~21,000 ms to the cost of one evaluation (~45 ms), which is the floor
+without changing the engine.
+
+**d2. Every bundle, not every Nth.** Yielding every tenth is cheaper (+0.2% against +1.5–2.4%) but
+leaves 422 ms stalls, and "requests are unusable while a run is in flight" is the whole of #563. The
+cost is ~2% of a 90-minute nightly that runs at 02:09 Hawaii with eight hours of headroom — and part
+of that 2% is the requests it now serves rather than defers. `yieldEvery` is an option a caller can
+turn down, or off with `0`, for a process that owns the machine.
+
+**d3. The policy is INJECTED, not read from the environment.** `EvaluateBundleOptions.yieldEvery`,
+supplied by the caller. The engine takes its configuration from its caller (ADR-059); a `process.env`
+read inside it would be the boundary violation the containment tests exist to catch.
+
+**d4. On the OFFICIAL path none of the above applies, and the lever there is chunk size.** This was
+recorded the wrong way round in the first draft of this ADR, and the correction is the useful part.
+
+The pipeline does not reach the engine's own batch loop for a routed measure. It calls
+`deps.engine.evaluateBatch`, which resolves through `wiring/executor-router.ts` to `runBatch`
+(`wiring/official-executor-adapter.ts`) and then to `calculateOfficialWithSignal`
+(`packages/official-executor`), which makes **one call into `fqm-execution` with every patient bundle
+in the chunk**. That single call is what `batchMs` measures, and therefore what the 93.9% is. We do
+not own that loop and cannot yield inside it.
+
+So for a deployment whose measures are official-routed — which is the Maui pilot, all six since
+ADR-078 — the in-process levers are only:
+
+1. **Fewer bundles per call**, i.e. `WORKWELL_RUN_CHUNK_SIZE`. Between chunks the pipeline performs a
+   real database write, which IS I/O and does reach the poll phase, so the chunk boundary is a genuine
+   yield point. A smaller chunk buys proportionally shorter stalls for proportionally more round trips.
+   **No number is recorded here on purpose**: #588 already reports `batchMs` per chunk on the live
+   sandbox, so this is answerable by changing one environment variable and reading the run log, and a
+   figure derived any other way would be a guess wearing a measurement's clothes.
+2. **Moving the call off the event loop** (a worker thread), which is the only option that removes the
+   stall rather than dividing it. Filed separately with this evidence; it is a larger change than #563
+   scoped for, and `fqm-execution` is Node-only so the portability constraint in d1 does not bind it.
+
+The earlier reasoning — "chunk size cannot help, because the stall is a microtask chain" — is true of
+the loops in d1 and false of this one, and the two were conflated. The general lesson is the one this
+project keeps relearning: confirm which function the profile actually names before designing around it.
+
+The prior art about chunking (smaller chunks measured ~10x slower for a `= ANY($1)` bind) is about a
+STORE query, not this, and does not transfer.
+
+**d5. MEASURE joins `ASYNC_SCOPES`; EMPLOYEE does not.** A caller always receives a run id it can
+poll. EMPLOYEE is genuinely one subject and stays synchronous, so a response to it still states the
+outcome. The `configuredMeasure` clause that scheduled a WebChart-configured MEASURE is **removed**
+rather than left dormant: with MEASURE async everywhere it could no longer change the answer, and a
+condition that reads as present and cannot fire is the defect shape this codebase keeps finding.
+
+### Consequences
+
+- An AUTHORED run takes ~2% longer and the deployment stays responsive throughout. That trade is only
+  obviously right because the nightly window has hours of headroom; a deployment whose run barely fits
+  its window should turn `yieldEvery` up rather than discover this later.
+- **An OFFICIAL-routed run is unchanged by d1**, and the Maui pilot's nightly is entirely official. Its
+  stall is inside `fqm-execution` and is governed by d4. Saying so here is the point: a reader who took
+  d1 as "#563 is fixed" would stop measuring.
+- **The 42 ms/subject cost is untouched and remains a separate finding** — it is 2.6–3.5x the 11–16 ms
+  recorded in `wiring/official-executor-adapter.ts`, and it is what sets the 45 ms floor.
+- `/api/runs/manual` with `scopeType: MEASURE` changes shape for any existing caller: 201 RUNNING with
+  a run id, rather than a completed run (or, at pilot scale, a 504). `docs/DEPLOY.md` now states which
+  scopes are scheduled, which nothing previously let an operator predict.
+- The phase timing from #588 stays, and is how the next claim about run cost gets checked rather than
+  argued.
+
 ## ADR-084: a statement timeout is a role default the pooler cannot strip — and a filter belongs in SQL only where the database can see what it filters on
 
 **Date:** 2026-09-19. **Status:** accepted. Milestone M-M, read-path work (#561, #562). Builds on

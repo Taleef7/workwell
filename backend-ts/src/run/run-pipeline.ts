@@ -197,6 +197,18 @@ export class InvalidRunRequestError extends Error {}
 
 const NON_COMPLIANT = new Set(["DUE_SOON", "OVERDUE", "MISSING_DATA"]);
 
+/**
+ * Hand the event loop a turn — a MACROTASK, deliberately (#563, ADR-085).
+ *
+ * `setImmediate` where it exists, `setTimeout(0)` otherwise, mirroring the engine's own helper so the
+ * two loops yield the same way. Measured on the dev host at 42 ms/subject: worst request latency
+ * 43.5 ms with `setImmediate`, 85.6 ms with the timer, 2,534 ms with neither.
+ */
+const yieldToEventLoop = (): Promise<void> =>
+  typeof setImmediate === "function"
+    ? new Promise<void>((resolve) => setImmediate(resolve))
+    : new Promise<void>((resolve) => setTimeout(resolve, 0));
+
 export const DEFAULT_RUN_CHUNK_SIZE = 500;
 
 /**
@@ -345,11 +357,28 @@ function resolveScope(req: ManualRunRequest, employees: readonly EmployeeProfile
   }
 }
 
-/** ALL_PROGRAMS / SITE fan out to hundreds–thousands of evaluations (~1 min) — too long for a
- *  synchronous request, so the route runs them in the background (ctx.waitUntil) and the page polls.
- *  A configured WebChart MEASURE is also scheduled because its remote population load must not block
- *  the foreground response. Static MEASURE and EMPLOYEE stay synchronous (≤ a few seconds). */
-export const ASYNC_SCOPES: ReadonlySet<RunScopeType> = new Set(["ALL_PROGRAMS", "SITE"]);
+/**
+ * The scopes the route runs in the BACKGROUND (`ctx.waitUntil`), returning RUNNING immediately for
+ * the page to poll.
+ *
+ * **MEASURE joined them 2026-09-21 (#590), and the comment it replaces is why.** That comment said
+ * "static MEASURE and EMPLOYEE stay synchronous (≤ a few seconds)", which was true of a small
+ * occupational roster and false of the pilot: a MEASURE run over the 20,000-patient corpus takes
+ * ~15 minutes, and the MIE gateway cuts at 60 s. So `POST /api/runs/manual` with `scopeType: MEASURE`
+ * ALWAYS answered `504 Gateway Time-out` — while the run continued server-side and finished normally
+ * a quarter of an hour later.
+ *
+ * The 504 is an nginx HTML page, not a JSON body, so the caller got no run id and had nothing to
+ * poll. A 504 reads as "that failed", which invites a retry, and **the retry also runs**: two
+ * concurrent 20,000-patient runs held the ten-connection pool for ~30 minutes and every other
+ * endpoint answered `503 pool_exhausted` throughout, on a sandbox the pilot group has the URL for.
+ *
+ * The trap underneath it is that MEASURE *looks* like the gentle choice next to ALL_PROGRAMS, and is
+ * the one that behaves worst — SITE was both async and smaller. Nothing at the call site said so.
+ *
+ * EMPLOYEE stays synchronous because it is genuinely one subject.
+ */
+export const ASYNC_SCOPES: ReadonlySet<RunScopeType> = new Set(["ALL_PROGRAMS", "SITE", "MEASURE"]);
 
 /** A created + RUNNING run with its resolved work items — the fast first half of a manual run. */
 export interface PlannedRun {
@@ -1042,6 +1071,19 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
         }
       }
       pending.push({ item, period, status, evidence, plan, evaluatedNow, evaluationFailed, outOfPopulation });
+      // Hand the event loop a turn, after the result is recorded (#563, ADR-085 d1).
+      //
+      // Every `await` above resolves synchronously for an authored measure — the engine's work is
+      // CPU-bound — and an `await` on an already-resolved promise schedules a MICROTASK, which Node
+      // drains in full before it reaches the poll phase. So this loop, uninterrupted, is one stretch
+      // during which no pending request is served: measured, a 60-iteration loop at 42 ms each served
+      // ONE request in 2.5 s, and `queueMicrotask` did not change that number. `yieldToEventLoop` is a
+      // macrotask, which does.
+      //
+      // **This is the authored path.** For an OFFICIAL-routed measure the work already happened above,
+      // inside `deps.engine.evaluateBatch` — one call into fqm-execution with the whole chunk — and
+      // nothing here can interrupt that. See ADR-085 d4 for what governs that path instead.
+      await yieldToEventLoop();
     }
     // Invariant 7 / memory: this chunk's bundles are released here, before anything else happens and
     // certainly before the next chunk is built.
