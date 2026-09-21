@@ -67,6 +67,16 @@ a server-side default. And `site` is compared case-sensitively by the list, case
 export. The first needs an owner decision about what the export should do; the second is reachable
 now only because the button started sending `site`.
 
+**Codex found the same staff-closed defect independently, and one more.** Its P2: the export read
+`limit: 100000` while `loadWorklistCases` reads `Number.MAX_SAFE_INTEGER` — and `site`, `search` and
+a large panel selection are all applied AFTER that read, so above the cap a searched subject visible
+on screen would be missing from the file taken off it, possibly leaving a header-only CSV. The pilot
+is 32,558 cases so nothing was wrong today; the number was a quiet failure scheduled for whenever the
+deployment outgrew it. The export now reads the same unbounded set the list does, which is also the
+only value that makes the two agree by construction. Pinned on the QUERY rather than through a
+fixture, deliberately: reproducing the truncation needs 100,000 seeded cases, and any smaller fixture
+passes against the bug.
+
 Suites: backend full, frontend `cases` 54/54, `npm run lint` clean (two pre-existing warnings).
 
 ## 2026-09-20 (evening) — #563 is answered: 94% of the run is one call that blocks the event loop for 21 seconds

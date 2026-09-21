@@ -284,6 +284,12 @@ Supports filters: `status`, `measureId`, `priority`, `assignee`, `site`, `caseId
 >
 > `search` is NOT on `CaseQuery`: like `site`, it reads the in-memory directory, so it is applied
 > after the store read and does not take the SQL fast path (§"The work list is READ two ways").
+> **Because those filters run after the read, the export's candidate read is UNBOUNDED** — the same
+> `Number.MAX_SAFE_INTEGER` the work list uses for them. It was `100000`, which truncated the
+> candidate set before the predicate that decides which rows the caller asked for: above that a
+> searched subject visible on screen would be missing from the file taken off it, possibly leaving a
+> header-only CSV. A cap that only bites once a deployment outgrows it fails quietly and later, and
+> it protected nothing the list is not already exposed to at the same scale on the same table.
 
 > **`outcome` is the frozen column on every list EXCEPT the staff-closed one, where it is what CQL
 > says today.** The work list resolves the live answer for staff closures and filters on THAT

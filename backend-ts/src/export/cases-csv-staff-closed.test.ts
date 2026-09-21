@@ -355,3 +355,29 @@ test("liveOrFrozenStatus prefers the display status, then the bucket, then the f
   assert.equal(liveOrFrozenStatus({ ...frozen, liveDisplayStatus: null, liveOutcomeStatus: null }), "OVERDUE", "no live answer ⇒ the frozen column");
   assert.equal(liveOrFrozenStatus(frozen), "OVERDUE", "and absent fields behave as null, not as empty");
 });
+
+/**
+ * The export's candidate read is UNBOUNDED, because three of its filters are applied after it.
+ *
+ * `site`, `search` and a large panel selection are directory joins with no SQL form, so a cap on
+ * this read truncates the set before the predicate that decides which rows the caller asked for.
+ * The work list reads `Number.MAX_SAFE_INTEGER` for exactly those filters; this export read
+ * `100000`, so above that a searched subject visible on screen would be missing from the file taken
+ * off that screen.
+ *
+ * Asserted on the QUERY rather than through a fixture, and deliberately: reproducing the truncation
+ * needs more than 100,000 seeded cases, and a fixture smaller than the old cap would pass against
+ * the bug — the vacuous shape this codebase keeps finding. The number itself is the contract, so the
+ * number is what is pinned.
+ */
+test("the cases CSV reads the same unbounded candidate set the work list does", async () => {
+  const queries: CaseQuery[] = [];
+  await casesCsv(caseStore((q) => queries.push(q)), eventStore(), { search: "omar" }, {}, liveDeps());
+  assert.equal(queries.length, 1);
+  assert.equal(
+    queries[0]!.limit,
+    Number.MAX_SAFE_INTEGER,
+    "a finite cap truncates before `search`/`site`/panel are applied, so the file would disagree with the screen",
+  );
+  assert.ok(queries[0]!.offset === undefined || queries[0]!.offset === 0, "and it is not a page");
+});

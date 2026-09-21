@@ -312,7 +312,18 @@ export async function casesCsv(
   let cases = await caseStore.listCases({
     ...filter,
     outcome: staffClosedList ? undefined : filter.outcome,
-    limit: 100000,
+    // **The same unbounded read the work list takes, and it has to be the same number.**
+    //
+    // `site`, `search` and a large panel selection are directory joins applied AFTER this read
+    // (there is no patients table to join — ADR-075), so a cap here truncates the candidate set
+    // before the predicate that decides which rows the caller asked for. This said `100000` while
+    // `loadWorklistCases` reads `Number.MAX_SAFE_INTEGER` for exactly these filters: above the cap a
+    // searched subject the screen shows would be silently missing from the file taken off that
+    // screen — possibly a header-only CSV — which is this export's own defect class at a scale the
+    // pilot (32,558 cases) has not reached. The cap protected nothing the list is not already
+    // exposed to at the same scale on the same table, and a magic number that only bites once the
+    // deployment grows is worse than no number: it fails quietly, later, on somebody else's watch.
+    limit: Number.MAX_SAFE_INTEGER,
   });
   const directory = directoryForProfileRows(cases.map((c) => ({ subjectId: c.employeeId })), webChartEnv);
   const profileMatch = profileSubjectMatcher(directory.employeeById);
