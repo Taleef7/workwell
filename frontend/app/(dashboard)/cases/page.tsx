@@ -78,6 +78,13 @@ type MeasureOption = {
 
 type CaseStatusFilter = "open" | "closed" | "staff_closed" | "excluded" | "all";
 
+/**
+ * The tabs whose list is scoped to each measure's current compliance cycle (#569, #603) — the server's
+ * own rule (`wantsCurrentCycle`), mirrored here because the screen now STATES its scope rather than
+ * relying on a default the export does not share.
+ */
+const CYCLE_SCOPED_STATUSES = new Set<CaseStatusFilter>(["open", "staff_closed"]);
+
 /** The three counts the staff-closed tab's header shows, read from the response headers (#569). */
 type StaffClosedCounts = { gap: number; verified: number; unknown: number };
 
@@ -314,6 +321,22 @@ export default function CasesPage() {
     if (to) params.set("to", to);
     if (outcomeFilter) params.set("outcome", outcomeFilter);
     if (urlSearch.trim()) params.set("search", urlSearch.trim());
+    // The per-measure current-cycle scope, sent EXPLICITLY (#603).
+    //
+    // `/api/cases` DEFAULTS the open and staff-closed lists to it, and `/api/exports/cases` defaults
+    // to all history — documented, and something downstream may depend on it (§6.3). A server-side
+    // default appears in no query string, so it was the one width difference the parity test below
+    // cannot see: `?status=open` showed "0 cases loaded" while the Export button under it downloaded
+    // a file with a prior-cycle row in it, and the staff-closed tab exported every past year's
+    // closures beside three header counts describing one cycle.
+    //
+    // Sent only for the tabs that HAVE the scope, which is the server's own condition
+    // (`wantsCurrentCycle` answers false for closed/all/excluded whatever is asked). Not a guard
+    // against the store: `CaseQuery.period` treats `"current"` as a no-op on both stores, so sending
+    // it everywhere would be harmless rather than empty — the first cut of this comment said
+    // otherwise. Matching the server's condition keeps the two query strings identical, which is what
+    // the parity test reads.
+    if (CYCLE_SCOPED_STATUSES.has(statusFilter)) params.set("period", "current");
     return params;
   }, [statusFilter, measureFilter, providerFilter, priorityFilter, view, user, assigneeFilter, siteFilter, siteId, from, to, outcomeFilter, urlSearch]);
 

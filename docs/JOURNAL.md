@@ -1,5 +1,76 @@
 # Journal
 
+## 2026-09-21 (late, II) — the export's last width difference, which no query string could show
+
+#602 made the cases CSV carry every filter the work list sends, and a frontend test compares the two
+query strings so they cannot drift. **A server-side default appears in neither string**, so the one
+difference left was the one that test was structurally unable to see:
+
+```
+one OPEN case, evaluation_period 2025-01-01 (a prior cycle), nothing else
+
+GET /api/cases?status=open                      -> 0 rows, X-Total-Count: 0
+GET /api/exports/cases?format=csv&status=open   -> contains the case
+```
+
+The screen said "0 cases loaded" and the button under it downloaded a file with a row in it. On the
+staff-closed tab it was unbounded rather than incidental: closures accumulate across years,
+`CYCLE_ROLLED_OVER` never sweeps them, the tab shows one cycle and its three header counts describe
+that cycle, and the CSV carried every prior year's beside them.
+
+**Shipped the third of #603's three options, which is the one that changes no existing behaviour.**
+`?period=current` restricts the export to each measure's current cycle; blank or absent still means all
+history, because the endpoint is documented that way (§6.3) and something downstream may depend on it.
+The work list's blank still means `current`. Both read ONE rule — `wantsCurrentCycle` — which takes
+that default as an argument, the same shape `worklistQueryFor` already uses for `status`.
+
+**The screen now states its scope** instead of relying on a default the export does not share, so the
+query strings match and the existing parity test covers it. Beside it, a backend test compares the two
+RESULT SETS over a fixture holding a prior-cycle case, because a parameter comparison can only ever see
+parameters — the ADR-084 shape, where the two work-list loaders are pinned against each other.
+
+**`site` also disagreed**: exact on the list, case-insensitive on the export. One predicate now
+(`siteMatches`), and EXACT, because the options are built from the directory's own strings while
+folding case would merge two real sites into a file headed with one of them. Three call sites, including
+the panel pre-filter.
+
+Both mutation-checked: restoring the lower-casing fails the site case, and removing the cycle filter
+fails two. Backend 2,850 tests, one pre-existing local failure; frontend 491/491; lint clean.
+
+**Review round (#611).** Five texts asserted a guard that does not exist: they said forwarding
+`period=current` to the store would filter `evaluation_period = 'current'` and match nothing. It would
+not — `CaseQuery.period` documents `"all"` and `"current"` as NO-OPS and both stores implement that, for
+exactly this reason. One of the five was in `DATA_MODEL_CONTRACTS` §6.3, an always-loaded file. The
+guards stay (the route should not lean on store behaviour); the claim is corrected to defence-in-depth.
+
+Two test gaps, both mutation-confirmed before and after:
+
+- **The fixture could not fail on a wrong measure identifier.** `bucketPeriodForMeasure`'s
+  unknown-measure fallback is 365 days → ANNUAL, and `audiogram` is also 365 → the same anchor, so
+  passing `c.id` or the literal "nonsense" left every assertion green. The fixture is `diabetes_hba1c`
+  now (180 d → BIANNUAL), and one test asserts the two anchors differ so the guard cannot go quiet.
+- **Nothing covered the route wiring.** The tests called `casesCsv` directly and passed
+  `currentCycleOnly` by hand; the frontend test only inspects a query string. Deleting the parameter
+  from `routes/exports.ts` left everything green. Three cases now drive `handleCases` and
+  `handleExports` over the fixture, including the staff-closed path §6.3 names specifically.
+
+And one hole the shared predicate did not close: the list compares `CaseSummary.site`, which is
+`emp?.site ?? "—"`, while the export compared the raw directory value. `—` is a SELECTABLE option, so a
+subject the directory does not hold was visible on screen under Site = — and absent from the file taken
+off it. One line, one test.
+
+`site` on the OUTCOMES CSV and the MCP tool still folds case — filed as #613 rather than widened into
+this change, with the `?? "—"` question named there because it is a decision rather than a copy.
+
+**Codex (#611).** One finding, and it is the kind a parameter table makes visible: the status gate was
+applied to an EXPLICIT `period=current` as well as to the default, so the export answered two different
+things to two spellings of one question — `?period=current` narrowed to the cycle, while
+`?period=current&status=all` returned all history. On this endpoint a blank status and `all` are the
+SAME query (`worklistQueryFor` returns `{}` for both). The gate now decides only what SILENCE means; a
+caller who names a period gets it on any status. The screen's own condition is unchanged and now
+load-bearing rather than defensive: sending `period` on the closed tab would genuinely narrow it.
+
+
 ## 2026-09-21 (late) — the programs page was not slow, it was failing, and the cost was in the walk
 
 The owner opened `/programs` on the Maui sandbox and got **"Failed to load program data: The database
