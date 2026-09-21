@@ -34,6 +34,16 @@ const json = (data: unknown, status = 200): Response =>
 
 const bad = (message: string): Response => json({ error: "invalid_request", message }, 400);
 
+/**
+ * The measure list AS THE ROW WILL HOLD IT — deduped and ordered.
+ *
+ * `setMeasures` inserts `[...new Set(measureIds)]` and `hydrate` reads back `ORDER BY measure_id ASC`,
+ * so a payload built from the request array can name a list the segment never contained. That did not
+ * matter while the audit came second (it reported the hydrated value); it does now that the event is
+ * written first, and it is a payload-accuracy regression in the direction #598 exists to close.
+ */
+const storedMeasureIds = (measureIds: readonly string[]): string[] => [...new Set(measureIds)].sort();
+
 /** Shared membership-preview projection used by BOTH preview surfaces (GET :id/preview + POST /preview)
  *  so they can't drift: filter the directory through the canonical matchesCohort, return { count, members }. */
 const previewResponse = (seg: HydratedSegment): Response => {
@@ -176,7 +186,12 @@ export async function handleSegments(req: Request, env: SegmentsEnv, actor: stri
     const id = crypto.randomUUID();
     const name = body.name as string;
     const measureIds = body.measureIds as string[];
-    await audit(stores.events, "SEGMENT_CREATED", id, actor, { name, measureIds });
+    // DEDUPED, because that is what the row will hold: `setMeasures` writes `[...new Set(...)]` and
+    // `hydrate` reads back ordered by `measure_id`. Reporting the request array verbatim made the event
+    // describe something the segment never contained — which is a payload-accuracy regression in the
+    // direction this whole change exists to close (review of #612). `storedMeasureIds` is the one place
+    // the two agree.
+    await audit(stores.events, "SEGMENT_CREATED", id, actor, { name, measureIds: storedMeasureIds(measureIds) });
     const created = await store.createSegment({
       id,
       name,
@@ -223,14 +238,22 @@ export async function handleSegments(req: Request, env: SegmentsEnv, actor: stri
     await audit(stores.events, "SEGMENT_UPDATED", putId, actor, {
       name: (body.name as string | undefined) ?? before.name,
       enabled: (body.enabled as boolean | undefined) ?? before.enabled,
-      measureIds: (body.measureIds as string[] | undefined) ?? before.measureIds,
+      // Deduped for the same reason as the create above; `before.measureIds` is already stored form.
+      measureIds: body.measureIds === undefined ? before.measureIds : storedMeasureIds(body.measureIds as string[]),
     });
-    await store.updateSegment(putId, {
+    // **`patched` is still checked, and dropping that check was a real regression** (review of #612).
+    // The pre-read covers the ordinary not-found; this null covers the row VANISHING between the two,
+    // and it guarded the two writes below as well. Without it a concurrent delete gave either a 500
+    // (`setMeasures` violating the `segment_measures` foreign key) or an HTTP 200 whose body is
+    // `null` — a client doing `(await res.json()).id` gets a TypeError on a success. The old order
+    // returned a clean 404 for both, and the audit-first reorder must not cost that.
+    const patched = await store.updateSegment(putId, {
       name: body.name as string | undefined,
       description: body.description as string | undefined,
       enabled: body.enabled as boolean | undefined,
       rule: body.rule as SegmentRule | undefined,
     });
+    if (!patched) return json({ error: "not_found", message: `Segment not found: ${putId}` }, 404);
     if (body.measureIds !== undefined) await store.setMeasures(putId, body.measureIds as string[]);
     if (body.overrides !== undefined) await store.setOverrides(putId, body.overrides as SegmentOverride[]);
     return json(await store.getSegment(putId));

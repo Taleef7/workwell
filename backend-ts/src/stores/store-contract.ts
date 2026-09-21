@@ -2575,6 +2575,21 @@ export function measureStoreContract(label: string, freshStore: () => Promise<Me
     assert.equal(await store.updateSpec("missing", newSpec), null);
     assert.equal(await store.updateCql("missing", "x"), null);
   });
+
+  test(`[${label}] createMeasure honours caller-minted ids (#598 audit-first seam)`, async () => {
+    const store = await freshStore();
+    const measureId = crypto.randomUUID();
+    const versionId = crypto.randomUUID();
+    const created = await store.createMeasure({ name: "Caller-minted", policyRef: "POL-1", owner: "safety", measureId, versionId });
+    // BOTH ids, because the event is keyed on the VERSION and the response carries the MEASURE.
+    assert.equal(created.measureId, measureId);
+    assert.equal(created.versionId, versionId, "the audit event names this one");
+    assert.equal((await store.getLatest(measureId))?.versionId, versionId, "and the row is readable under it");
+    const auto = await store.createMeasure({ name: "Store-minted", policyRef: "POL-2", owner: "safety" });
+    assert.ok(auto.measureId && auto.measureId !== measureId);
+    assert.ok(auto.versionId && auto.versionId !== versionId);
+  });
+
 }
 
 /** Registers the EvidenceStore contract — metadata insert/list/get (bytes live in the BUCKET). */
@@ -2619,6 +2634,32 @@ export function evidenceStoreContract(label: string, freshStore: () => Promise<E
     assert.equal(list[0]!.id, b.id, "newest-first (uploaded_at DESC)");
     assert.deepEqual(await store.listByCase("case-none"), []);
   });
+
+  test(`[${label}] insert honours a caller-minted uploadedAt (#598 audit-first seam)`, async () => {
+    const store = await freshStore();
+    // The event's `payload.timestamp` IS this value, so a store that re-stamped would put the ledger
+    // and the attachment on different clocks — silently, since both would look like real timestamps.
+    const uploadedAt = "2026-03-04T05:06:07.000Z";
+    const record = await store.insert({
+      id: crypto.randomUUID(),
+      caseId: "case-stamp",
+      uploadedBy: "cm@x",
+      fileName: "stamped.pdf",
+      fileSizeBytes: 9,
+      mimeType: "application/pdf",
+      storageKey: "case-stamp/stamped.pdf",
+      description: null,
+      uploadedAt,
+    });
+    assert.equal(record.uploadedAt, uploadedAt, "the returned record");
+    assert.equal((await store.getById(record.id))!.uploadedAt, uploadedAt, "and the persisted column");
+    const auto = await store.insert({
+      id: crypto.randomUUID(), caseId: "case-stamp", uploadedBy: "cm@x", fileName: "auto.pdf",
+      fileSizeBytes: 9, mimeType: "application/pdf", storageKey: "case-stamp/auto.pdf", description: null,
+    });
+    assert.ok(auto.uploadedAt && auto.uploadedAt !== uploadedAt, "omitted still stamps now");
+  });
+
 }
 
 /** Registers the AppointmentStore contract — insert + newest-first list. */
@@ -2984,6 +3025,27 @@ export function segmentStoreContract(label: string, freshStore: () => Promise<Se
     assert.equal(after!.overrides.length, 1, "duplicate externalId collapses to a single override row");
     assert.equal(after!.overrides[0]!.externalId, "emp-003");
   });
+
+  test(`[${label}] createSegment honours a caller-minted id (#598 audit-first seam)`, async () => {
+    const store = await freshStore();
+    const id = crypto.randomUUID();
+    const created = await store.createSegment({
+      id,
+      name: "Caller-minted",
+      rule: { match: "ANY", conditions: [] },
+      measureIds: ["audiogram"],
+      overrides: [{ externalId: "emp-001", mode: "INCLUDE" }],
+    });
+    assert.equal(created.id, id, "the row is created under the id the event already named");
+    // And the id reached the CHILD writes too, not just the parent row.
+    const back = (await store.getSegment(id))!;
+    assert.deepEqual(back.measureIds, ["audiogram"]);
+    assert.deepEqual(back.overrides, [{ externalId: "emp-001", mode: "INCLUDE" }]);
+    // Omitted still mints one, so every other caller is unchanged.
+    const auto = await store.createSegment({ name: "Store-minted", rule: { match: "ANY", conditions: [] }, measureIds: [] });
+    assert.ok(auto.id && auto.id !== id);
+  });
+
 }
 
 /** Registers the QualitySnapshotStore contract for one backend (#E16). `freshStore` → isolated, empty. */

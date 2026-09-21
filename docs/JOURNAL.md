@@ -50,6 +50,48 @@ missing cross-store `applyCaseAction` primitive, plus the two decisions above. `
 
 Backend 2,856 tests, one pre-existing local failure (`corpus-membership`).
 
+**Review round (#612).** Seven findings, one of them a regression I introduced and three of them tests
+that could not fail.
+
+**The PUT's relocated 404 dropped a guard that also protected the two later writes.** `updateSegment`
+returning null was the not-found signal, and moving the 404 to a pre-read discarded it — so a row
+vanishing between the check and the write gave either a **500** (`setMeasures` violating the
+`segment_measures` foreign key) or an **HTTP 200 whose body is `null`**, where the old order returned a
+clean 404 for both. Reachable by two concurrent admin requests. The return value is checked again.
+
+**All three new segments tests passed against the pre-change code**, and the reason was a false claim in
+my own header: that the route's ordering is unreachable because it resolves its stores from `env`. It is
+reachable — the store is a class, and patching its prototype makes a write fail against the real
+fixture. The DELETE case asserted only that the payload name came from a pre-read, which was true
+before too. Both now make the write fail and require the event to survive, and the PUT gets a case for
+the vanished-row 404. Mutation-confirmed: reverting the PUT to write-then-audit, dropping the null
+check, and reverting the dedupe each fail exactly one case.
+
+**The event reported a measure list the row would never hold.** `setMeasures` writes `[...new Set(...)]`
+and `hydrate` reads back ordered, so a payload built from the request array named something the segment
+never contained — harmless while the audit came second, a payload-accuracy regression once it comes
+first. One helper, `storedMeasureIds`.
+
+**None of the three new seams was exercised by the store contract**, so the deployed Postgres ceiling was
+asserted nowhere: deleting `input.id ??` from the SQLite adapter failed a test, and the identical edit to
+the Pg adapter failed nothing. Three contract cases now, which run on both stores.
+
+**Four existing audit-first paths had no ordering test** despite §4 saying one belongs — `transitionStatus`,
+`createTerminologyMapping`, and value-set attach/detach. Added.
+
+**And §4's completeness claim was wrong for the third time.** `backfill-trend-history` was filed under
+"not a violation (reads)" on the strength of two of its four hits; the other two are writes.
+`recover-stuck-runs`, `resolve-valuesets` and `batch-evaluate-scale` were absent altogether, and the
+PUT's own writes now appear as matcher artifacts against the DELETE's audit. Every time the prose was
+plausible and the arithmetic was not done, so §4 now carries the **count** — 55 hits across 20 files —
+and the one-line command that re-derives it.
+
+One thing recorded rather than fixed: **`EVIDENCE_UPLOADED` now reaches an operator surface.** The case
+timeline is `audit_events WHERE ref_case_id = ?`, so a failed bucket write leaves a permanent "Evidence
+uploaded — <filename>" row with nothing to download. The rule picks the over-claim side for the LEDGER;
+whether a clinical-ops read should inherit it for a named file is an owner call.
+
+
 ## 2026-09-21 (night) — four paths flipped to audit-first, and the list was still wrong by three
 
 Owner decision on #598: where a path can audit before it mutates, it should — the ledger errs toward

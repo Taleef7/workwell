@@ -11,6 +11,9 @@ import { rmSync } from "node:fs";
 import { createSqliteD1 } from "@mieweb/cloud-local";
 import { RUN_STORE_FLOOR_DDL } from "../stores/sqlite/schema.ts";
 import { handleSegments } from "./segments.ts";
+// Patched per case to make a WRITE fail: the route resolves its own stores, so the prototype is the
+// only seam — and it is enough to assert the ordering the comments claim.
+import { SqliteSegmentStore } from "../stores/sqlite/segment-store-sqlite.ts";
 
 const dbPath = join(tmpdir(), `workwell-segroute-${crypto.randomUUID()}.sqlite`);
 let env: { DB: unknown };
@@ -26,6 +29,18 @@ const getList = () => handleSegments(new Request("http://x/api/segments", { meth
 const getPreview = (id: string) => handleSegments(new Request(`http://x/api/segments/${id}/preview`, { method: "GET" }), env as never, actor);
 
 const welderRule = { match: "ANY", conditions: [{ attr: "role", op: "contains", value: "Welder" }] };
+
+/** The audit rows the #598 cases read, so each assertion is one line rather than five. */
+const dbq = () => env.DB as {
+  prepare: (sql: string) => { bind: (...a: unknown[]) => { first: <T>() => Promise<T | null> } };
+};
+const eventCount = async (eventType: string, entityId: string): Promise<number> =>
+  Number((await dbq().prepare("SELECT COUNT(*) AS n FROM audit_events WHERE event_type = ? AND entity_id = ?").bind(eventType, entityId).first<{ n: number }>())!.n);
+const eventPayload = async (eventType: string, entityId: string): Promise<unknown> =>
+  JSON.parse((await dbq().prepare("SELECT payload_json FROM audit_events WHERE event_type = ? AND entity_id = ? ORDER BY id DESC LIMIT 1").bind(eventType, entityId).first<{ payload_json: string }>())!.payload_json);
+const countSegments = async (id: string): Promise<number> =>
+  Number((await dbq().prepare("SELECT COUNT(*) AS n FROM segments WHERE id = ?").bind(id).first<{ n: number }>())!.n);
+
 
 before(async () => {
   const db = await createSqliteD1(dbPath);
@@ -190,12 +205,16 @@ test("POST /api/segments/preview → 400 on a malformed rule (op/value shape)", 
 });
 
 /**
- * The audit-first half of #598 for this route. The ORDER is not reachable from outside — the route
- * resolves its stores from `env` rather than taking them injected, so no test here can make the insert
- * fail and watch the event survive (`src/audit/audit-order.test.ts` does that for the injectable
- * services). What IS reachable is the enabling change, and the way it could regress silently: mint an
- * id for the event and let the store mint its own, leaving every SEGMENT_CREATED event pointing at a
- * segment that never existed.
+ * The audit-first half of #598 for this route (#612 review).
+ *
+ * **The order IS reachable from here, and the first cut of this file said it was not.** The route
+ * resolves its stores from `env`, so it cannot be handed a failing fake — but the store is a class, and
+ * patching its prototype makes a write fail against the real fixture. Every case below that names an
+ * order now asserts one: reverting the route to write-then-audit fails them. Before that correction all
+ * three passed against the pre-change code, which is the shape of test this project keeps finding.
+ *
+ * The seam itself is covered separately and differently: `store-contract.ts` asserts the caller-minted
+ * id is honoured on BOTH stores, because a route test on the SQLite floor cannot speak for the ceiling.
  */
 test("SEGMENT_CREATED names the id the segment is created under (#598)", async () => {
   const res = await post({ name: "Audit-order welders", rule: welderRule, measureIds: ["audiogram"] });
@@ -226,23 +245,71 @@ test("SEGMENT_UPDATED reports the post-state resolved from the pre-state and the
   assert.equal(payload.name, "After", "the requested change");
   assert.deepEqual(payload.measureIds, ["audiogram"], "and the fields the request did not mention");
   assert.equal(payload.enabled, true);
+
+  // DEDUPED and ORDERED, because that is what the row holds: `setMeasures` writes a Set and `hydrate`
+  // reads back ordered. Reporting the request array verbatim made the event name a list the segment
+  // never contained — harmless while the audit came second, a payload-accuracy regression once it
+  // comes first (#612 review).
+  const dupes = (await (await post({ name: "Dupes", rule: welderRule, measureIds: ["tb_surveillance", "audiogram", "audiogram"] }))!.json()) as { id: string; measureIds: string[] };
+  assert.deepEqual(
+    (await eventPayload("SEGMENT_CREATED", dupes.id) as { measureIds: string[] }).measureIds,
+    dupes.measureIds,
+    "the event's list is the row's list",
+  );
 });
 
-test("DELETE audits before the row goes, and a missing segment is still a 404 with no event (#598)", async () => {
+test("DELETE audits BEFORE the row goes — the event survives a failed delete (#598)", async () => {
+  // The only externally visible difference between the two orders, and what the first cut of this case
+  // did not test: it asserted the payload name came from a pre-read, which was true before the change
+  // too, so it passed against the code it was written to guard (#612 review).
   const created = (await (await post({ name: "Doomed", rule: welderRule, measureIds: [] }))!.json()) as { id: string };
-  assert.equal((await del(created.id))?.status, 204);
-  const q = (env.DB as { prepare: (s: string) => { bind: (...a: unknown[]) => { first: <T>() => Promise<T | null> } } });
-  const row = await q
-    .prepare("SELECT payload_json FROM audit_events WHERE event_type = 'SEGMENT_DELETED' AND entity_id = ?")
-    .bind(created.id)
-    .first<{ payload_json: string }>();
-  assert.equal((JSON.parse(row!.payload_json) as { name: string }).name, "Doomed", "the name is read off the row before it is deleted");
-  // An unknown id refuses before it audits — an over-claim is the side the rule picks, but only for a
-  // change somebody actually asked for.
+  const real = SqliteSegmentStore.prototype.deleteSegment;
+  SqliteSegmentStore.prototype.deleteSegment = async () => { throw new Error("the delete failed"); };
+  try {
+    await assert.rejects(() => del(created.id) as Promise<unknown>, /the delete failed/);
+  } finally {
+    SqliteSegmentStore.prototype.deleteSegment = real;
+  }
+  assert.equal(await eventCount("SEGMENT_DELETED", created.id), 1, "the event is there although the row is not gone");
+  assert.equal((await countSegments(created.id)), 1, "and the segment really did survive");
+  const payload = await eventPayload("SEGMENT_DELETED", created.id);
+  assert.equal((payload as { name: string }).name, "Doomed");
+
+  // An unknown id refuses before it audits — the over-claim is for a change somebody actually asked for.
   assert.equal((await del("00000000-0000-4000-8000-000000000000"))?.status, 404);
-  const none = await q
-    .prepare("SELECT COUNT(*) AS n FROM audit_events WHERE event_type = 'SEGMENT_DELETED' AND entity_id = ?")
-    .bind("00000000-0000-4000-8000-000000000000")
-    .first<{ n: number }>();
-  assert.equal(Number(none!.n), 0);
+  assert.equal(await eventCount("SEGMENT_DELETED", "00000000-0000-4000-8000-000000000000"), 0);
+});
+
+test("PUT audits BEFORE its three writes, and a row that vanishes mid-update is a 404 (#598)", async () => {
+  // The PR's largest behaviour change — three writes moved and a relocated 404 — and the part that had
+  // no test of either property (#612 review).
+  const created = (await (await post({ name: "Before", rule: welderRule, measureIds: ["audiogram"] }))!.json()) as { id: string };
+  const real = SqliteSegmentStore.prototype.updateSegment;
+
+  // (a) the audit survives a failed update
+  SqliteSegmentStore.prototype.updateSegment = async () => { throw new Error("the update failed"); };
+  try {
+    await assert.rejects(() => put(created.id, { name: "After" }) as Promise<unknown>, /the update failed/);
+  } finally {
+    SqliteSegmentStore.prototype.updateSegment = real;
+  }
+  assert.equal(await eventCount("SEGMENT_UPDATED", created.id), 1);
+  assert.equal(((await (await getList())!.json()) as Array<{ id: string; name: string }>).find((x) => x.id === created.id)?.name, "Before",
+    "the row is unchanged, so the event is an over-claim — which is the side the rule picks");
+
+  // (b) the row VANISHING between the pre-read and the write is a clean 404, not a 500 and not a
+  //     200-with-null. `updateSegment` returning null is what says so, and dropping that check was a
+  //     real regression: `setMeasures` then violates the segment_measures foreign key.
+  SqliteSegmentStore.prototype.updateSegment = async function vanished(this: SqliteSegmentStore, id: string) {
+    await real.call(this, id, {});          // keep the timestamp behaviour honest
+    await this.deleteSegment(id);           // ...and then the row goes, as a concurrent DELETE would
+    return null;
+  } as typeof real;
+  try {
+    const res = await put(created.id, { name: "Racing", measureIds: ["hazwoper"] });
+    assert.equal(res?.status, 404, "a vanished row is 404 — never a 500 from the child insert");
+    assert.equal(((await res!.json()) as { error: string }).error, "not_found");
+  } finally {
+    SqliteSegmentStore.prototype.updateSegment = real;
+  }
 });

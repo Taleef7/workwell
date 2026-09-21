@@ -11,9 +11,11 @@
  * the property the rule promises, it is the only externally visible difference between the two orders,
  * and reversing any one call site fails the corresponding case.
  *
- * The route-level surfaces (segments, subject lists) resolve their stores from `env` rather than taking
- * them injected, so their ordering is not reachable this way; `routes/segments.test.ts` pins the
- * enabling half instead — that the audited entity id is the id the row is created under.
+ * The route-level surfaces resolve their stores from `env` rather than taking them injected, so they
+ * are not reachable THIS way — but they are reachable (`routes/segments.test.ts` patches the store's
+ * prototype to make a write fail, and asserts the same property). An earlier version of this comment
+ * said their ordering was not testable at all, and three cases were written to a weaker property as a
+ * result (#612 review).
  *
  *   node --import tsx --test src/audit/audit-order.test.ts
  */
@@ -23,7 +25,8 @@ import type { AppendAuditInput } from "../stores/case-event-store.ts";
 import { grantWaiver } from "../admin/waivers.ts";
 import { scheduleAppointment } from "../case/appointment-service.ts";
 import { uploadEvidence } from "../case/evidence-service.ts";
-import { createMeasure, approveMeasure, deprecateMeasure } from "../measure/measure-lifecycle.ts";
+import { createMeasure, approveMeasure, deprecateMeasure, transitionStatus } from "../measure/measure-lifecycle.ts";
+import { attachValueSet, detachValueSet, createTerminologyMapping } from "../measure/value-set-governance.ts";
 
 /** A ledger that records what it was asked to append, in order. */
 function ledger() {
@@ -255,5 +258,65 @@ test("approveMeasure / deprecateMeasure: the event survives a failed status writ
       /the write failed/,
     );
     assert.deepEqual(log.types(), [label], `${label} is written before the status changes`);
+  }
+});
+
+/**
+ * The four audit-first paths flipped in #607/#608 that this file did not cover (#612 review).
+ *
+ * §4 says "a new audit-first path belongs in it", and four existing ones did not — so a reorder back on
+ * any of them was as silent as the five this file was written for. They are cheap to add because all
+ * four take their deps injected.
+ */
+test("transitionStatus: the event survives a failed status write", async () => {
+  const log = ledger();
+  await assert.rejects(
+    () =>
+      transitionStatus(
+        { measures: { getLatest: async () => MEASURE, setVersionStatus: explode } as never, events: log as never },
+        "audiogram",
+        "Approved",
+        "approver",
+      ),
+    /the write failed/,
+  );
+  assert.deepEqual(log.types(), ["MEASURE_VERSION_STATUS_CHANGED"]);
+});
+
+test("createTerminologyMapping: the event survives a failed insert, and names the id it would have made", async () => {
+  const log = ledger();
+  await assert.rejects(
+    () =>
+      createTerminologyMapping(
+        { valueSets: { createTerminologyMapping: explode } as never, events: log as never },
+        {
+          localCode: "L1", localSystem: "urn:local", standardCode: "S1", standardSystem: "http://loinc.org",
+          localDisplay: null, standardDisplay: null, mappingStatus: null, mappingConfidence: null, notes: null,
+        },
+        "admin",
+      ),
+    /the write failed/,
+  );
+  assert.deepEqual(log.types(), ["TERMINOLOGY_MAPPING_CREATED"]);
+  assert.match(String(log.events[0]!.entityId), /^[0-9a-f-]{36}$/, "minted caller-side — the property that let it flip");
+});
+
+test("attachValueSet / detachValueSet: the event survives a failed link write", async () => {
+  for (const [label, run] of [
+    ["MEASURE_VALUE_SET_LINKED", (deps: never) => attachValueSet(deps, "audiogram", "vs-1", "admin")],
+    ["MEASURE_VALUE_SET_UNLINKED", (deps: never) => detachValueSet(deps, "audiogram", "vs-1", "admin")],
+  ] as const) {
+    const log = ledger();
+    await assert.rejects(
+      () =>
+        run({
+          measures: { getLatest: async () => MEASURE } as never,
+          valueSets: { link: explode, unlink: explode } as never,
+          events: log as never,
+        } as never),
+      /the write failed/,
+    );
+    assert.deepEqual(log.types(), [label]);
+    assert.equal(log.events[0]!.entityId, MEASURE.versionId, "keyed on the version the link belongs to");
   }
 });
