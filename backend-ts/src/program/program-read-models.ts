@@ -501,10 +501,17 @@ export async function programOverview(deps: ProgramDeps, filters: ProgramFilters
   // with the scale ones; otherwise ADD them. Skipped when scoped to a non-mhn tenant.
   await foldScaleCounts(deps, summaries, filters);
 
-  // The evidence's rate, per measure, off the winning run (ADR-077 d5). Sequential and memoized: one
-  // paged read per (run, measure) for the life of the process, and an authored run costs one row
-  // (`runProducedOfficialEvidence`). Deliberately NOT site/tenant-filtered: it is the run's whole
-  // population, which is what the export reports; a filtered view keeps the status buckets only.
+  // The evidence's rate, per measure, off the winning run (ADR-077 d5). Sequential and memoized: ONE
+  // narrowed read per (run, measure) for the life of the process — memberships only, never the whole
+  // `evidence_json` — and the `null` answer is memoized too, because since 2026-09-21 provenance and
+  // aggregation share that read and an authored measure no longer costs a single row.
+  //
+  // **This loop is OUTSIDE `overviewMemo`, so it runs on every request**, which is why memoizing the
+  // negative is load-bearing rather than tidy: without it a measure with no official evidence would
+  // re-read its whole membership set on every dashboard load.
+  //
+  // Deliberately NOT site/tenant-filtered: it is the run's whole population, which is what the export
+  // reports; a filtered view keeps the status buckets only.
   for (const s of summaries) {
     if (s.latestRunId) s.measureRate = await officialMeasureRate(deps.outcomeStore, s.latestRunId, s.measureId);
   }

@@ -28,15 +28,36 @@ import {
  */
 const UNFILTERED = { site: null, tenant: null } as const;
 
-export async function warmReadModels(deps: ProgramDeps): Promise<void> {
+/**
+ * What the pass achieved, so a CALLER can tell success from failure (review of #610).
+ *
+ * This function swallows every error by design — a failure must never affect a run that has completed
+ * and been reported. The consequence was that it also swallowed them from its own callers: the boot
+ * warm wrapped it in a two-attempt retry keyed on "a serverless Postgres refusing the first
+ * connection of a cold container", and that is precisely the failure this `catch` absorbs, so the
+ * retry could never fire and the success line was logged on failure. `DEPLOY.md` points an operator at
+ * that line as the post-deploy check.
+ */
+export interface WarmResult {
+  /** The overview pass completed. False means nothing below it ran either. */
+  ok: boolean;
+  /** Why not, when `ok` is false. */
+  error?: string;
+  /** Measures whose per-measure panels failed while the overview succeeded. */
+  failedMeasures: string[];
+}
+
+export async function warmReadModels(deps: ProgramDeps): Promise<WarmResult> {
   let summaries;
   try {
     await programSites(deps);
     summaries = await programOverview(deps, { ...UNFILTERED });
   } catch (err) {
-    console.warn(`[workwell] read-model warm failed: ${String((err as Error)?.message ?? err)}`);
-    return;
+    const error = String((err as Error)?.message ?? err);
+    console.warn(`[workwell] read-model warm failed: ${error}`);
+    return { ok: false, error, failedMeasures: [] };
   }
+  const failedMeasures: string[] = [];
   for (const summary of summaries) {
     // Per measure, so one measure's failure leaves the other twelve warm rather than aborting the
     // pass at whichever happened to sort first.
@@ -53,7 +74,9 @@ export async function warmReadModels(deps: ProgramDeps): Promise<void> {
       // horizon too.
       await programRiskOutlook(deps, summary.measureId, 90);
     } catch (err) {
+      failedMeasures.push(summary.measureId);
       console.warn(`[workwell] read-model warm failed for ${summary.measureId}: ${String((err as Error)?.message ?? err)}`);
     }
   }
+  return { ok: true, failedMeasures };
 }

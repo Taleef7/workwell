@@ -6,14 +6,15 @@
 > `grep -o '^#\+ ADR-[0-9]*.*' docs/DECISIONS.md`, newest first. If the highest number here is lower
 > than the highest there, this file is stale.
 >
-> **`·archived`** (14 of 86) means the BODY moved to `docs/archive/DECISIONS_ARCHIVE.md` — superseded,
+> **`·archived`** (14 of 87) means the BODY moved to `docs/archive/DECISIONS_ARCHIVE.md` — superseded,
 > or a historical *finding* rather than a decision that governs. `DECISIONS.md` keeps every heading plus
-> a pointer, so every cross-reference still resolves. The 70 unmarked titles are the record that governs.
+> a pointer, so every cross-reference still resolves. The 71 unmarked titles are the record that governs.
 >
 > **ADR-033 does not exist** — the sequence runs 031, 032, 034. Verified absent 2026-07-29. Do not reuse it.
 
 ## Titles (newest first)
 
+- ADR-087: a dashboard resolves its winning runs ONCE, and a read that folds its rows does not pay to sort them
 - ADR-086: what the source did not say is not ours to supply — a code keeps its meaning, and a corpus keeps its knowledge cutoff
 - ADR-085: a long run yields the event loop between subjects, and a run too long for a request is scheduled rather than awaited
 - ADR-084: a statement timeout is a role default the pooler cannot strip — and a filter belongs in SQL only where the database can see what it filters on
