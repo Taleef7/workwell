@@ -24,17 +24,62 @@ const bundleWith = (...resources: Array<Record<string, unknown>>): PreparableBun
   entry: resources.map((resource) => ({ resource })),
 });
 
-test("a Condition gets the status QI-Core binds - and no invented onset", () => {
+test("an ABSENT status stays absent - nothing is invented (#594)", () => {
+  // This test asserted the opposite until 2026-09-21: a Condition with no `clinicalStatus` was given
+  // `active`, no `verificationStatus` became `confirmed`, no `category` became a problem-list item.
+  // That is fabrication (ADR-037 forbids it here) and it was LIVE, not latent - the QRDA-I import
+  // emits none of those three, so preparation minted all three on a third party document.
   const bundle = bundleWith({ resourceType: "Condition", id: "c1" });
   prepareForQiCore(bundle);
   const condition = bundle.entry[0]!.resource;
-  assert.deepEqual(condition.clinicalStatus, {
-    coding: [{ system: "http://terminology.hl7.org/CodeSystem/condition-clinical", code: "active" }],
-  });
+  assert.equal(condition.clinicalStatus, undefined, "the source said nothing; so does the prepared bundle");
+  assert.equal(condition.verificationStatus, undefined);
+  assert.equal(condition.category, undefined);
   // An onset date is the date of a real event. CMS165 gates denominator membership on hypertension
   // onset relative to the measurement period, so minting one here would decide who is in the measure.
-  // Measured, it also buys nothing: status alone already yields IPP=25/25 on the CMS122 artifact.
   assert.equal(condition.onsetDateTime, undefined, "onset is never fabricated");
+});
+
+test("an absent Encounter class stays absent too", () => {
+  const bundle = bundleWith({ resourceType: "Encounter", id: "e1" });
+  prepareForQiCore(bundle);
+  assert.equal(bundle.entry[0]!.resource.class, undefined, "not silently ambulatory");
+});
+
+test("a system-less code keeps its CODE and gains the system - resolved does not become active", () => {
+  // The bug the old behaviour actually had, as opposed to the one its docstring claimed to have fixed.
+  // `unbindable()` is true of a system-less `resolved` exactly as it is of a system-less `active`, and
+  // both took the same module-level default - so a corrected misdiagnosis was reported as an active,
+  // confirmed problem. That patient enters the CMS122 denominator and, with no HbA1c, its numerator.
+  const bundle = bundleWith({
+    resourceType: "Condition",
+    clinicalStatus: { coding: [{ code: "resolved" }] },
+    verificationStatus: { coding: [{ code: "entered-in-error" }] },
+    category: [{ coding: [{ code: "encounter-diagnosis" }] }],
+  });
+  prepareForQiCore(bundle);
+  const condition = bundle.entry[0]!.resource;
+  assert.deepEqual(condition.clinicalStatus, {
+    coding: [{ system: "http://terminology.hl7.org/CodeSystem/condition-clinical", code: "resolved" }],
+  });
+  assert.deepEqual(condition.verificationStatus, {
+    coding: [{ system: "http://terminology.hl7.org/CodeSystem/condition-ver-status", code: "entered-in-error" }],
+  });
+  assert.deepEqual(condition.category, [
+    { coding: [{ system: "http://terminology.hl7.org/CodeSystem/condition-category", code: "encounter-diagnosis" }] },
+  ], "an encounter diagnosis is not relabelled a problem-list item");
+});
+
+test("a code outside the value set for its field is left ALONE rather than guessed at", () => {
+  // We cannot claim to know which system an unrecognised code came from, and stamping one would assert
+  // a binding the source never made. It stays unbindable, which means it is not retrieved - the honest
+  // outcome for a source that wrote something we do not understand.
+  const bundle = bundleWith({
+    resourceType: "Condition",
+    clinicalStatus: { coding: [{ code: "wibble" }] },
+  });
+  prepareForQiCore(bundle);
+  assert.deepEqual(bundle.entry[0]!.resource.clinicalStatus, { coding: [{ code: "wibble" }] });
 });
 
 test("a REAL clinicalStatus is preserved - resolved does not silently become active", () => {
@@ -52,8 +97,10 @@ test("a REAL clinicalStatus is preserved - resolved does not silently become act
 test("prepared bundles never share a mutable object", () => {
   // Module-level constants assigned by reference would alias ONE object into every prepared bundle,
   // so a single downstream mutation would reach all of them at once.
-  const a = bundleWith({ resourceType: "Condition" });
-  const b = bundleWith({ resourceType: "Condition" });
+  // Present-but-unbindable, since an ABSENT status is now left absent and would give two `undefined`
+  // values - which are equal, so the test would pass for the wrong reason.
+  const a = bundleWith({ resourceType: "Condition", clinicalStatus: { coding: [{ code: "active" }] } });
+  const b = bundleWith({ resourceType: "Condition", clinicalStatus: { coding: [{ code: "active" }] } });
   prepareForQiCore(a);
   prepareForQiCore(b);
   assert.notEqual(a.entry[0]!.resource.clinicalStatus, b.entry[0]!.resource.clinicalStatus);
@@ -76,11 +123,24 @@ test("data that already carries onset, category or Encounter class is left ALONE
   const bundle = bundleWith(
     { resourceType: "Condition", onsetDateTime: "2019-04-04", category: [{ text: "real" }] },
     { resourceType: "Encounter", class: { code: "IMP" } },
+    { resourceType: "Encounter", class: { system: "http://terminology.hl7.org/CodeSystem/v3-ActCode", code: "IMP" } },
   );
   prepareForQiCore(bundle);
   assert.equal(bundle.entry[0]!.resource.onsetDateTime, "2019-04-04");
+  // Text with no code: nothing to recognise, so nothing is claimed about it.
   assert.deepEqual(bundle.entry[0]!.resource.category, [{ text: "real" }]);
-  assert.deepEqual(bundle.entry[1]!.resource.class, { code: "IMP" });
+  // **INPATIENT STAYS INPATIENT.** The first cut of #594 replaced a present-but-unbindable value with
+  // the module default and turned this into `AMB` - substituting a different clinical fact while
+  // claiming to normalize one. The code is the source, only the system is ours.
+  assert.deepEqual(bundle.entry[1]!.resource.class, {
+    system: "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+    code: "IMP",
+  });
+  // Already bindable, so untouched rather than re-stamped.
+  assert.deepEqual(bundle.entry[2]!.resource.class, {
+    system: "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+    code: "IMP",
+  });
 });
 
 test("it normalizes structure and never touches a clinical fact", () => {
@@ -96,7 +156,8 @@ test("it normalizes structure and never touches a clinical fact", () => {
 test("the copying form leaves its input untouched", () => {
   // The runtime executor needs this: the authored engine may evaluate the same bundle, and ADR-008
   // requires its outcome to be byte-identical whether or not official routing is on.
-  const bundle = bundleWith({ resourceType: "Condition", id: "c1" });
+  // Something preparation actually changes, now that an absent field is left absent.
+  const bundle = bundleWith({ resourceType: "Condition", id: "c1", clinicalStatus: { coding: [{ code: "active" }] } });
   const original = JSON.stringify(bundle);
   const prepared = preparedForQiCore(bundle);
   assert.equal(JSON.stringify(bundle), original, "the input must not be mutated");

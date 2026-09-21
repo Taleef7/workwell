@@ -832,3 +832,81 @@ test("import: a birthTime with an OFFSET keeps its own calendar day, not the UTC
     .find((r) => r.resourceType === "Patient")!;
   assert.equal(patient.birthDate, "2000-01-01", "the day the document states, not the UTC-normalized one");
 });
+
+// ---------------------------------------------------------------------------------------------------
+// clinicalStatus comes from what the document SAYS about the interval (#594)
+//
+// Until 2026-09-21 this file emitted no `clinicalStatus` and `prepareForQiCore` minted `active` for
+// every imported Condition - including one carrying an `abatementDateTime` that this importer had
+// just written from a closed interval. Two files in one pipeline disagreed about identical bytes:
+// `qdm-entries.ts` honours a system-less `entered-in-error` as a negation while preparation rewrote
+// it to `confirmed`.
+//
+// The three cases below are the three things a QRDA-I `<effectiveTime>` can say, and they must not
+// collapse into one. Each asserts a DIFFERENT result, which is the bar #594 set: a fixture that
+// cannot change the answer cannot tell a correct mapping from the previous one.
+// ---------------------------------------------------------------------------------------------------
+
+const diagnosisDocument = (effectiveTime: string) => `<ClinicalDocument xmlns="urn:hl7-org:v3">
+  <recordTarget><patientRole><id root="urn:workwell:employee" extension="emp-006"/>
+    <patient><birthTime value="19750312"/></patient></patientRole></recordTarget>
+  <component><structuredBody><component><section>
+    <templateId root="2.16.840.1.113883.10.20.24.2.1" extension="2021-08-01"/>
+    <entry typeCode="DRIV"><observation classCode="OBS" moodCode="EVN">
+      <templateId root="2.16.840.1.113883.10.20.24.3.135" extension="2021-08-01"/>
+      <code code="282291009" codeSystem="2.16.840.1.113883.6.96"/>
+      ${effectiveTime}
+      <value xsi:type="CD" code="44054006" codeSystem="2.16.840.1.113883.6.96"
+             xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"/>
+    </observation></entry>
+  </section></component></structuredBody></component>
+</ClinicalDocument>`;
+
+const conditionFromDoc = (effectiveTime: string) => {
+  const entries = importQrda1Document(diagnosisDocument(effectiveTime)).bundle.entry;
+  return entries
+    .map((e) => e.resource as { resourceType?: string; clinicalStatus?: unknown; abatementDateTime?: string })
+    .find((r) => r.resourceType === "Condition");
+};
+
+const CLINICAL = "http://terminology.hl7.org/CodeSystem/condition-clinical";
+
+test("import: a CLOSED interval is resolved, and says so beside its own abatement date", () => {
+  const condition = conditionFromDoc(`<effectiveTime><low value="20240101"/><high value="20240630"/></effectiveTime>`);
+  assert.ok(condition, "the diagnosis imported");
+  assert.equal(condition!.abatementDateTime, "2024-06-30", "the interval ended, which this already recorded");
+  // The contradiction #594 named: preparation used to stamp `active` on exactly this resource.
+  assert.deepEqual(condition!.clinicalStatus, { coding: [{ system: CLINICAL, code: "resolved" }] });
+});
+
+test("import: high nullFlavor=UNK is open prevalence, so active is a faithful reading", () => {
+  const condition = conditionFromDoc(
+    `<effectiveTime><low value="20240101"/><high nullFlavor="UNK"/></effectiveTime>`,
+  );
+  assert.ok(condition);
+  assert.equal(condition!.abatementDateTime, undefined, "no end date, because none is known");
+  // The source made an explicit assertion - there is no known end - and that is what licenses this.
+  assert.deepEqual(condition!.clinicalStatus, { coding: [{ system: CLINICAL, code: "active" }] });
+});
+
+test("import: no high element at all is SILENCE, and nothing is asserted", () => {
+  const condition = conditionFromDoc(`<effectiveTime><low value="20240101"/></effectiveTime>`);
+  assert.ok(condition);
+  assert.equal(condition!.abatementDateTime, undefined);
+  // The whole of #594 in one assertion. An absent element and `nullFlavor="UNK"` both yield no end
+  // date; only one of them is a statement about the patient. The QI-Core profile goes unsatisfied and
+  // the condition is not retrieved, which is the honest outcome for a document that did not say.
+  assert.equal(condition!.clinicalStatus, undefined, "not active, not resolved - absent");
+});
+
+test("import: the three interval shapes produce three DIFFERENT statuses", () => {
+  // Guards the collapse itself rather than each case: `times()` returned no end for both the
+  // nullFlavor and the absent form, so any mapping built on its output alone could not separate them
+  // however it was written.
+  const statuses = [
+    `<effectiveTime><low value="20240101"/><high value="20240630"/></effectiveTime>`,
+    `<effectiveTime><low value="20240101"/><high nullFlavor="UNK"/></effectiveTime>`,
+    `<effectiveTime><low value="20240101"/></effectiveTime>`,
+  ].map((t) => JSON.stringify(conditionFromDoc(t)?.clinicalStatus ?? null));
+  assert.equal(new Set(statuses).size, 3, `expected three distinct statuses, got ${statuses.join(" | ")}`);
+});
