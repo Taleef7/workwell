@@ -243,7 +243,7 @@ export function panelSubjectIds(
   if (!panelActive && !siteActive) return undefined;
   const ids: string[] = [];
   for (const employee of roster) {
-    if (siteActive && employee.site !== site) continue;
+    if (siteActive && !siteMatches(employee.site, site!)) continue;
     if (panelActive && !matchesSubjectFilters(employee, subjects!, nowMs)) continue;
     ids.push(employee.externalId);
     // Stop the moment the set is too large to be worth sending, rather than building a list of
@@ -357,7 +357,7 @@ export async function loadWorklistCases(deps: WorklistDeps, filters: WorklistFil
   }
   // The post-filters stay authoritative even where the pre-filter ran: they are the same predicate over
   // the same directory, so the pre-filter can only narrow the fetch, never change the answer.
-  if (filters.site) summaries = summaries.filter((c) => c.site === filters.site);
+  if (filters.site) summaries = summaries.filter((c) => siteMatches(c.site, filters.site!));
   if (filters.subjects && hasActiveSubjectFilters(filters.subjects)) {
     summaries = summaries.filter((c) => matchesSubjectFilters(deps.employeeLookup(c.employeeId), filters.subjects!, nowMs));
   }
@@ -563,19 +563,52 @@ export async function loadWorklistPage(
 }
 
 /**
- * Whether this query means "each measure's current compliance cycle".
+ * Whether this query means "each measure's current compliance cycle" — the ONE rule, read by the work
+ * list and by the cases CSV.
  *
- * The OPEN list and the STAFF-CLOSED list default to it — a closure from a prior cycle describes a
- * prior cycle's gap, and the current cycle opened a new case (#569); the closed/excluded/all tabs
- * show full history. A BLANK `?period=` (present but empty, which is what a cleared control sends)
- * is the default rather than a literal period — `??` alone would leak it through and reintroduce the
- * flood this default prevents.
+ * Only the OPEN, BLANK and STAFF-CLOSED lists can mean it: a closure from a prior cycle describes a
+ * prior cycle's gap, and the current cycle opened a new case (#569); the closed/excluded/all tabs show
+ * full history. `current` names it explicitly, and a BLANK `?period=` (present but empty, which is
+ * what a cleared control sends) takes `blankMeans` — `??` alone would leak the empty string through as
+ * a literal period.
+ *
+ * **`blankMeans` is the caller's, and the two callers differ — which is the whole of #603.** The work
+ * list's blank means `current`, because that is what the screen shows. The cases CSV's blank means
+ * `all`, because the endpoint is documented as all-history (§6.3) and something downstream may depend
+ * on that. Before this, the export had no rule at all: `?status=open` showed 0 rows on screen while
+ * the button under it downloaded a file containing a prior-cycle case, and the staff-closed tab
+ * exported every prior year's closures beside three header counts describing one cycle.
+ *
+ * The same shape as `worklistQueryFor`, and for the same reason: a default that differs per surface is
+ * a parameter, not a second copy of the rule.
  */
+export function wantsCurrentCycle(
+  statusToken: string | null | undefined,
+  periodToken: string | null | undefined,
+  blankMeans: "current" | "all",
+): boolean {
+  const status = (statusToken ?? "").trim().toLowerCase();
+  const isCycleList = status === "" || status === STAFF_CLOSED_TOKEN || status === "open";
+  if (!isCycleList) return false;
+  const period = periodToken?.trim() || undefined;
+  return period ? period.toLowerCase() === "current" : blankMeans === "current";
+}
+
+/**
+ * Does this subject's site match the filter? EXACT, and shared so the two surfaces cannot differ.
+ *
+ * The work list compared exactly and the CSV lower-cased both sides (#603). Before #602 the export's
+ * `site` was only reachable by hand-writing a URL, so the difference was theoretical; the button now
+ * sends it on every export. Exact is the side to standardise on: the control's options are built from
+ * the directory's own strings, so an exact compare always matches what a user can pick, while a
+ * case-insensitive one would fold two directory sites differing only in case into a file served under
+ * a heading naming one of them.
+ */
+export const siteMatches = (employeeSite: string | null | undefined, filterSite: string): boolean =>
+  (employeeSite ?? "") === filterSite;
+
 function isCurrentCycleDefault(filters: WorklistFilters): boolean {
-  const status = (filters.status ?? "").trim().toLowerCase();
-  const isCycleList = status === "" || status === "open" || status === STAFF_CLOSED_TOKEN;
-  const period = filters.period?.trim() || undefined;
-  return isCycleList && (!period || period.toLowerCase() === "current");
+  return wantsCurrentCycle(filters.status, filters.period, "current");
 }
 
 /**

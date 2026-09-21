@@ -1,5 +1,42 @@
 # Journal
 
+## 2026-09-21 (late, II) — the export's last width difference, which no query string could show
+
+#602 made the cases CSV carry every filter the work list sends, and a frontend test compares the two
+query strings so they cannot drift. **A server-side default appears in neither string**, so the one
+difference left was the one that test was structurally unable to see:
+
+```
+one OPEN case, evaluation_period 2025-01-01 (a prior cycle), nothing else
+
+GET /api/cases?status=open                      -> 0 rows, X-Total-Count: 0
+GET /api/exports/cases?format=csv&status=open   -> contains the case
+```
+
+The screen said "0 cases loaded" and the button under it downloaded a file with a row in it. On the
+staff-closed tab it was unbounded rather than incidental: closures accumulate across years,
+`CYCLE_ROLLED_OVER` never sweeps them, the tab shows one cycle and its three header counts describe
+that cycle, and the CSV carried every prior year's beside them.
+
+**Shipped the third of #603's three options, which is the one that changes no existing behaviour.**
+`?period=current` restricts the export to each measure's current cycle; blank or absent still means all
+history, because the endpoint is documented that way (§6.3) and something downstream may depend on it.
+The work list's blank still means `current`. Both read ONE rule — `wantsCurrentCycle` — which takes
+that default as an argument, the same shape `worklistQueryFor` already uses for `status`.
+
+**The screen now states its scope** instead of relying on a default the export does not share, so the
+query strings match and the existing parity test covers it. Beside it, a backend test compares the two
+RESULT SETS over a fixture holding a prior-cycle case, because a parameter comparison can only ever see
+parameters — the ADR-084 shape, where the two work-list loaders are pinned against each other.
+
+**`site` also disagreed**: exact on the list, case-insensitive on the export. One predicate now
+(`siteMatches`), and EXACT, because the options are built from the directory's own strings while
+folding case would merge two real sites into a file headed with one of them. Three call sites, including
+the panel pre-filter.
+
+Both mutation-checked: restoring the lower-casing fails the site case, and removing the cycle filter
+fails two. Backend 2,850 tests, one pre-existing local failure; frontend 491/491; lint clean.
+
 ## 2026-09-21 (night) — four paths flipped to audit-first, and the list was still wrong by three
 
 Owner decision on #598: where a path can audit before it mutates, it should — the ledger errs toward

@@ -15,6 +15,7 @@ import { listNotFoundBody, withListFilter } from "../compliance/subject-list-fil
 import { worklistQueryFor } from "../case/worklist-read-model.ts";
 import { rosterCellCache } from "../compliance/roster-read-model.ts";
 import { runsCsv, outcomesCsvStream, casesCsv, auditCsvStream } from "../export/export-csv.ts";
+import { wantsCurrentCycle } from "../case/worklist-read-model.ts";
 import { subjectFiltersFromQuery, subjectFilterErrorBody, SubjectFilterError } from "../compliance/subject-filters.ts";
 import type { DataSourceEnv } from "../engine/ingress/data-source.ts";
 import { caseWindowFrom, calendarDayErrorBody } from "./query-dates.ts";
@@ -60,6 +61,19 @@ const clampExportLimit = (raw: string | null): number => {
 };
 
 /** A 400 in the same JSON shape `/api/cases` returns, so a refusal reads the same on both surfaces. */
+/**
+ * A literal `?period=` for the store, or undefined (#603).
+ *
+ * `current` is NOT a literal: it is the per-measure cycle rule, handled by `currentCycleOnly`. Passing
+ * it through as a period would filter `evaluation_period = 'current'` and serve an empty file under a
+ * heading naming a cycle — which is the failure a caller would be least likely to notice.
+ */
+const periodLiteral = (raw: string | null): string | undefined => {
+  const value = raw?.trim();
+  if (!value || value.toLowerCase() === "current") return undefined;
+  return value;
+};
+
 const badRequest = (body: unknown): Response =>
   new Response(JSON.stringify(body), { status: 400, headers: { "content-type": "application/json" } });
 
@@ -171,6 +185,13 @@ export async function handleExports(req: Request, env: ExportsEnv): Promise<Resp
       // Case-folded by `casesCsv` with the work list's own predicate, so both surfaces fold it once
       // and identically.
       search: q.get("search")?.trim() || undefined,
+      // `?period=` (#603). `current` means each measure's current compliance cycle, exactly as the
+      // work list's open and staff-closed lists mean it; ANY other non-blank value is a literal
+      // evaluation period and reaches the store as one. **Blank or absent means ALL HISTORY here** —
+      // `wantsCurrentCycle`'s `blankMeans` argument is where the two surfaces legitimately differ, and
+      // this endpoint is documented as all-history (§6.3), so its default is unchanged.
+      currentCycleOnly: wantsCurrentCycle(q.get("status") ?? undefined, q.get("period") ?? undefined, "all"),
+      period: periodLiteral(q.get("period")),
       ...subjectFilters,
     }, env, { outcomeStore: s.outcomes, cellCache: rosterCellCache });
     return csvResponse("cases.csv", csv);

@@ -79,6 +79,29 @@ describe("cases export carries the filters the list is showing", () => {
     for (const key of ["site", "from", "to", "outcome", "search", "status", "measureId", "providerId"]) {
       expect(exported.has(key)).toBe(true);
     }
+    // And the period SCOPE, which used to be a server-side default present in neither string and was
+    // therefore the one width difference this comparison could not see (#603). `/api/cases` defaults
+    // the open list to the current cycle; `/api/exports/cases` defaults to all history, documented.
+    expect(exported.get("period")).toBe("current");
+  });
+
+  it("sends the period scope only on the tabs that HAVE one (#603)", async () => {
+    // On a non-cycle tab `period` would reach the store as a LITERAL evaluation period and match
+    // nothing, so this is the rule's own condition rather than a tidy-up.
+    for (const [status, expected] of [["open", "current"], ["staff_closed", "current"], ["closed", null], ["all", null]] as const) {
+      get.mockClear();
+      getWithHeaders.mockClear();
+      downloadBlob.mockClear();
+      navHolder.current.setUrl(`/cases?status=${status}`);
+      const view = render(<CasesPage />);
+      await waitFor(() => expect(listCalls().length).toBeGreaterThan(0));
+      expect(paramsOf(listCalls().at(-1)!).get("period")).toBe(expected);
+
+      await userEvent.click(screen.getByRole("button", { name: /export cases csv/i }));
+      await waitFor(() => expect(exportCalls().length).toBe(1));
+      expect(paramsOf(exportCalls()[0]!).get("period")).toBe(expected);
+      view.unmount();
+    }
   });
 
   it("follows the list when a filter changes, rather than exporting the first one it saw", async () => {

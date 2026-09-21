@@ -382,14 +382,35 @@ Supports filters: `status`, `measureId`, `priority`, `assignee`, `site`, `caseId
 > out-of-population row is canonical `MISSING_DATA` and displays as out-of-population, so the two
 > select different rows.
 
-> **This export applies NO period logic, and the open and staff-closed LISTS default to the current
-> compliance cycle.** That difference is not expressible as a query parameter and is therefore the
-> one width difference the filter parity above does not close: `?status=open` can show zero rows on
-> screen while the CSV taken from that screen carries a prior-cycle case, and the staff-closed tab —
-> whose three header counts describe the current cycle — exports every prior year's closures beside
-> them. Stated rather than fixed: what the export SHOULD do about a cycle is an owner decision, filed
-> as an issue, and the frontend parity test compares query strings so it cannot see a server-side
-> default.
+> **`?period=` closes the last width difference, and the two surfaces differ only in what BLANK
+> means** (2026-09-21, #603). `current` restricts to each measure's current compliance cycle, exactly
+> as the work list's open and staff-closed lists mean it; any other non-blank value is a literal
+> evaluation period and reaches the store as one. **Blank or absent still means ALL HISTORY here** —
+> this endpoint is documented as all-history and something downstream may depend on it — while the
+> work list's blank still means `current`. Both call ONE rule, `wantsCurrentCycle`
+> (`case/worklist-read-model.ts`), which takes that default as an argument, the same shape
+> `worklistQueryFor` uses for `status`.
+>
+> **It had to be a parameter rather than a shared default, because a server-side default appears in no
+> query string.** The frontend parity test compares the list's query string with the export's, so it
+> could not see this one: `?status=open` showed "0 cases loaded" while the Export button under it
+> downloaded a file containing a prior-cycle case, and the staff-closed tab — whose three header counts
+> describe the current cycle — exported every prior year's closures beside them. **The screen now
+> STATES its scope** (`caseFilterParams` sends `period=current` on the two tabs that have one), so the
+> strings match and the comparison covers it. A backend test additionally compares the two RESULT SETS
+> over one fixture holding a prior-cycle case, because a parameter comparison can only ever see
+> parameters.
+>
+> `period` is sent only for the cycle-scoped tabs, and that is the rule's own condition rather than a
+> tidy-up: on any other tab `/api/cases` would treat the token as a literal evaluation period and match
+> nothing.
+
+> **`site` is compared EXACTLY on both surfaces** (#603). The work list compared exactly and this
+> export lower-cased both sides; before #602 the export's `site` was only reachable by hand-writing a
+> URL, so the difference was theoretical, and the button now sends it on every export. One predicate,
+> `siteMatches`, and exact is the side to standardise on: the control's options are built from the
+> directory's own strings, so an exact compare always matches what a user can pick, while folding case
+> would merge two real directory sites into a file served under a heading naming one of them.
 
 > **`closedReason`, `closedBy`, `liveState`, `liveOutcomeStatus` and `liveOutcomeRunId` were
 > APPENDED (#569, ADR-083)**, never inserted, so a consumer reading by position keeps every column it had — the same
