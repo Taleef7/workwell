@@ -71,6 +71,73 @@ caller who names a period gets it on any status. The screen's own condition is u
 load-bearing rather than defensive: sending `period` on the closed tab would genuinely narrow it.
 
 
+## 2026-09-21 (late) — the programs page was not slow, it was failing, and the cost was in the walk
+
+The owner opened `/programs` on the Maui sandbox and got **"Failed to load program data: The database
+cancelled this query for exceeding its time limit"** over **"No active measures. Create and release a
+measure to begin."** — a statement timeout rendered as an empty catalog. Reproduced from here the same
+hour, outside the nightly window:
+
+| request | cold | warm |
+|---|---|---|
+| `GET /api/programs/overview` | **503 `statement_timeout` at 30 s** (twice) | 3.2-3.7 s |
+| `GET /api/programs/overview?include=detail&granularity=month` | - | **59.8 s** |
+| `GET /api/programs/sites` (asked on every page load) | 17.2 s | 2.5 s |
+| `GET /api/programs/:id/trend?granularity=month` | - | 3.0-4.8 s per measure |
+| `GET /api/programs/:id/top-drivers` | - | 0.42-0.72 s |
+| `GET /api/cases?status=open&limit=25` (the ADR-084 fast path) | - | 0.50 s |
+
+**The 59.8 s was measured with every downstream memo already warm.** That is the finding: the whole
+minute was the winners walk, paid thirteen times by one page load. `programSites` isolates it — warm,
+its only remaining work is `latestPopulationWinners`, and it takes 2.5 s.
+
+`listLatestPopulationRuns` is two questions in one method. The candidate runs are one indexed
+statement over `runs` (bounded `LIMIT`, milliseconds). Which of them holds a row for each measure is
+an `EXISTS` probe per (run, measure), and `outcomes` has no `(run_id, measure_id)` index — so the pair
+costs 2.5-4 s, and every read model resolved its own.
+
+The second cost is the one that actually returned the 503. `aggregateOfficialRun` read one measure's
+evidence through `LIMIT/OFFSET`, and `listOutcomes` orders by `(evaluated_at, id)`, which no index
+serves: **every page re-sorted the measure's whole 20,000 rows, `evidence_json` and all**, and
+`officialMeasureRate` ran a separate one-row provenance probe over the same sort first. Eleven sorts
+per (run, measure), six measures, on the overview's cold path. The other cold reads are each smaller
+than a request that already works - `/api/exports/outcomes` for the winning run returns 120,000 rows
+WITH evidence in one statement and does not time out.
+
+The third is why anyone met it at all: **every memo is in-process, and a deploy empties all of them.**
+`warmReadModels` has existed since #547 and runs after each population run - which covers the nightly
+and misses every restart, the one moment the caches are certainly empty.
+
+**Shipped (ADR-087).** The winners probe is memoized under the **candidate run list**, per store
+instance: the cheap statement runs every call and IS the key, and a terminal population run's rows are
+immutable, so the identity is exact rather than a TTL. Two writes can move the answer without moving
+the key - an outcome write adding a measure's first row to a run already in the list, and a compaction
+deleting a non-winner's last row - so `recordOutcome`, `recordOutcomes` and `compactOlderThan` drop
+it, on both stores. `listOutcomes` gained `order: "none"` for a caller that folds, and
+`aggregateOfficialRun` is now ONE unordered statement that also reports
+`producedOfficialEvidence`, so the rate reads the rows once. And the read models are warmed at boot,
+off the request path, with one retry.
+
+**The index is the owner's, and it is the biggest win left.** `CREATE INDEX ... ON outcomes (run_id,
+measure_id)` would take the probes to index lookups and give the evidence read a plan that does not
+sort. Additive, reversible, no data migration - the same class as the three `OWNER-APPROVED DDL` blocks
+already in `schema-pg.ts`. Recommended with the numbers above and not written. What shipped removes
+REPEATED work; the index would make each unit of work cheap, and they are not substitutes.
+
+**Deferred, named:** the overview's status buckets are a `GROUP BY measure_id, status,
+out_of_population` over the winners - 90 rows instead of 120,000 - and ADR-084's pattern applies, but
+the site/tenant/profile predicates read the in-memory directory and have no SQL form, so it is a
+fast-path-plus-fallback with a conformance test. Worth measuring this change first.
+
+**Honest about the method.** The endpoint timings are measured on the live stack. WHICH statement the
+server cancelled is *inferred* from the read shapes: this host cannot run a pilot-scale Postgres (2.0
+GB free of 15.2, Docker down) and the deployment gives no query log, so there is no `EXPLAIN ANALYZE`
+behind the attribution. It is recorded as inference in the ADR so nobody later cites it as a
+measurement.
+
+Backend suite 2,856 tests - 2,832 pass, 23 skip, 1 fail (`corpus-membership`, the local
+`.official-content` sparse checkout on this host, unrelated). Mutation-checked: removing the write-path
+invalidation fails the new store-contract case.
 
 ## 2026-09-21 (night) — four paths flipped to audit-first, and the list was still wrong by three
 

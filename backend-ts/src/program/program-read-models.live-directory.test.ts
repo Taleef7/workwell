@@ -8,6 +8,7 @@ import type { QualitySnapshotRow, QualitySnapshotStore } from "../stores/quality
 import { programOverview, programRiskOutlook, programTopDrivers, programTrend } from "./program-read-models.ts";
 import { replaceLiveDirectory } from "../engine/ingress/webchart/live-directory.ts";
 import { latestRunsFromRows } from "../test-support/latest-runs.ts";
+import { narrowToMemberships } from "../test-support/memberships.ts";
 
 const wcRow: OutcomeWithRun = {
   runId: "run-wc-program", runStartedAt: "2026-07-17T00:00:00.000Z", runScopeType: "MEASURE",
@@ -34,6 +35,13 @@ function deps(
     listOutcomes: async (runId: string) => {
       if (options.calls) options.calls.byRun++;
       return options.byRun?.[runId] ?? [];
+    },
+    // Derived from the SAME fixture as `listOutcomes`, narrowed the way both stores narrow (#610
+    // review): `aggregateOfficialRun` reads memberships, not whole evidence rows, so a fake that
+    // handed back full records would be gentler than the shipped query.
+    listOutcomeMembershipsForRun: async (runId: string, measureId: string) => {
+      if (options.calls) options.calls.byRun++;
+      return (options.byRun?.[runId] ?? []).filter((r) => r.measureId === measureId).map(narrowToMemberships);
     },
     listOutcomesForMeasure: async (_measureId: string, scanOptions?: MeasureScanOptions) => {
       if (options.calls) {
@@ -446,6 +454,19 @@ test("scoped profile (Maui) — isolates data by excluding foreign and unresolve
           );
           return typeof opts.limit === "number" ? matched.slice(0, opts.limit) : matched;
         },
+        // The measure rate's read since the #610 review: memberships only, same fixture. Narrowed
+        // inline because this block is inside the template literal above and cannot import — and no
+        // backticks, for the same reason.
+        listOutcomeMembershipsForRun: async (runId, measureId) =>
+          riskRows
+            .filter((r) => r.runId === runId && r.measureId === measureId)
+            .map((r) => {
+              const full = r.evidence ?? {};
+              const evidence = {};
+              if (full.official !== undefined && full.official !== null) evidence.official = full.official;
+              if ("evaluationError" in full) evidence.evaluationError = full.evaluationError;
+              return { status: r.status, evidence };
+            }),
         aggregateScaleRun: async () => [],
       },
       runStore: { listRuns: async () => [] },
@@ -512,6 +533,10 @@ test("foldScaleCounts — completed seed:scale run skipped on Maui profile and f
         listOutcomesWithRun: async () => [mauiRow],
         listLatestPopulationRuns: latestRunsFromRows([mauiRow]),
         listOutcomes: async () => [],
+        // Empty here too: aggregateOfficialRun reads this and not listOutcomes (#610 review).
+        // NOTE no backticks in this block — it is inside the template literal above, which holds the
+        // source this test runs in a subprocess, and a backtick here closes it.
+        listOutcomeMembershipsForRun: async () => [],
         aggregateScaleRun: async () => [
           { status: "COMPLIANT", count: 50 },
           { status: "OVERDUE", count: 10 },

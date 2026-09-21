@@ -1,13 +1,19 @@
 /**
- * One run's official evidence, summed page by page — shared by the MeasureReport/QRDA III exporters
+ * One run's official evidence, summed — shared by the MeasureReport/QRDA III exporters
  * (`routes/runs.ts`) and the programs overview (`program/measure-rate.ts`), so the dashboard and the
  * regulatory export cannot disagree because they reduced the same rows differently (ADR-077 d5).
  *
- * PAGED, never one `listOutcomes(runId)`. Until 2026-09-06 the export path refused any run over the
+ * NEVER an unnarrowed `listOutcomes(runId)`. Until 2026-09-06 the export path refused any run over the
  * individual-report cap with a 422 — so on the 20,000-patient pilot the two regulatory exports were
  * unreachable for every official measure. The cap protects the INDIVIDUAL report, which builds one
  * document per subject; a sum needs only each row's memberships, which the aggregator retains at a few
- * dozen bytes each, so it is read in pages.
+ * dozen bytes each.
+ *
+ * **That last sentence is now what bounds the read, rather than a page window** (2026-09-21, review of
+ * #610). `LIMIT/OFFSET` paging bounded memory but re-sorted the measure's whole evidence once per page
+ * — no index serves `(evaluated_at, id)` — which on the pilot made this the slowest statement on the
+ * deployment. `listOutcomeMembershipsForRun` is ONE unordered statement that returns only the
+ * memberships and the error marker, so the bound is the same few dozen bytes per subject, held once.
  *
  * Per RATE, not a single vector (ADR-074): `?type=summary` returned ONE group for cms137 while
  * `?type=bundle` returned two. Strata ride along from the same memberships. `unmeasured` — the subjects
@@ -24,12 +30,26 @@ import {
   type RateAggregate,
 } from "./measure-report.ts";
 
-/** Rows per page when summing a run's official evidence; bounded memory at any roster size. */
+/**
+ * Rows per page for {@link runProducedOfficialEvidence}'s scan, which still pages because it stops at
+ * the first evaluated row and is not the hot path. `aggregateOfficialRun` no longer pages at all — see
+ * its own note.
+ */
 export const AGGREGATE_PAGE = 2000;
 
 export interface OfficialRunAggregate extends RateAggregate {
   /** The artifact identity read off the first evaluated row; null when no row carried one. */
   official: OfficialReportIdentity | null;
+  /**
+   * Whether the run's rows FOR THIS MEASURE carry official population evidence — the same question
+   * {@link runProducedOfficialEvidence} answers, decided by the same rule (the first EVALUATED row
+   * settles it; an errored row carries no engine's evidence and is skipped).
+   *
+   * It travels with the counts so a caller that is going to aggregate anyway reads the rows ONCE.
+   * `officialMeasureRate` asked the probe and then aggregated, which on the pilot was two reads of the
+   * same 20,000 evidence blobs per measure, six measures deep, on the programs overview's cold path.
+   */
+  producedOfficialEvidence: boolean;
 }
 
 /**
@@ -62,7 +82,7 @@ export async function runProducedOfficialEvidence(
 }
 
 export async function aggregateOfficialRun(
-  os: Pick<OutcomeStore, "listOutcomes">,
+  os: Pick<OutcomeStore, "listOutcomeMembershipsForRun">,
   runId: string,
   measureId: string,
 ): Promise<OfficialRunAggregate> {
@@ -76,13 +96,37 @@ export async function aggregateOfficialRun(
   // unscoped scan sums every measure the run touched and returns that one number for whichever measure
   // was asked about. On the pilot's 2026-09-08 nightly that served CMS125's initial population, score
   // and `ecqmId` under CMS122's name on the programs overview.
-  for (let offset = 0; ; offset += AGGREGATE_PAGE) {
-    const page = await os.listOutcomes(runId, { limit: AGGREGATE_PAGE, offset, measureId });
-    for (const row of page) {
-      aggregator.add(row);
-      if (!identity && !isEvaluationErrorEvidence(row.evidence)) identity = officialReportIdentity(row.evidence);
-    }
-    if (page.length < AGGREGATE_PAGE) break;
+  // ONE unordered statement over a NARROWED projection, not a LIMIT/OFFSET walk (2026-09-21). The
+  // walk cost one sort of the measure's whole evidence PER PAGE — `(evaluated_at, id)` has no index,
+  // and each page re-ran the same filter and sort to skip further into it — so ten pages did ten times
+  // the server work for the same bytes. On the pilot that made the programs overview's cold read the
+  // statement the 30 s role default cancelled: `/api/programs/overview` answered 503.
+  //
+  // Nothing here reads the rows in order, so dropping the sort changes no answer. It DOES drop the
+  // memory bound the page window gave, which is why the read is narrowed to the memberships
+  // (`listOutcomeMembershipsForRun`) rather than simply unpaged. A first cut of this justified the
+  // unpaged full read as "smaller than the 120,000-row read the overview already makes"; that was
+  // wrong twice over, and both halves were caught in review: `listOutcomesWithRun` has a LEAN
+  // projection with no `evidence_json` at all, and `for (const row of await …)` awaits the whole
+  // parsed array, so nothing is folded as it arrives.
+  // ORDER-INDEPENDENT, and it had to become so (review of #610). `runProducedOfficialEvidence` lets
+  // the FIRST evaluated row settle provenance, which was deterministic under `ORDER BY evaluated_at,
+  // id`; with the sort dropped "first" is whatever the planner returns, and `officialMeasureRate`
+  // memoizes whichever answer landed — so one `(run, measure)` could yield a rate on one process and
+  // `null` on another. `officialMembership` returns null for an unreadable `populationResults` as well
+  // as for authored evidence, so a single malformed row arriving first would have made a whole
+  // official measure read as authored and dropped its rate off the dashboard.
+  //
+  // ANY evaluated row carrying official membership settles it. The reason the first cut gave for not
+  // doing this — that asking every row would re-alert on each unreadable blob — was simply false:
+  // `aggregator.add` already calls `officialMembership` on every non-error row (`membershipRatesFor` →
+  // `membershipFor`), so every alert was already being emitted.
+  let producedOfficialEvidence = false;
+  for (const row of await os.listOutcomeMembershipsForRun(runId, measureId)) {
+    aggregator.add(row);
+    if (isEvaluationErrorEvidence(row.evidence)) continue;
+    if (!identity) identity = officialReportIdentity(row.evidence);
+    producedOfficialEvidence ||= officialMembership(row.evidence) !== null;
   }
-  return { ...aggregator.finish(), official: identity };
+  return { ...aggregator.finish(), official: identity, producedOfficialEvidence };
 }
