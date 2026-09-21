@@ -63,6 +63,32 @@ The general lesson, cheaply learned this time: **confirm which function the prof
 designing around it.** Two functions shared a name, one was 93.9% of the run, and the other was the
 one I had open.
 
+### Codex review: a claim that was too broad, and a fallback that is 6,500x worse per turn
+
+Codex asked whether the per-subject yield should be gated to the authored branch, since the docs
+claimed the official path was unchanged and a 20,000-patient official measure still takes 20,000
+turns. Measuring rather than arguing settled both halves, and turned up something I had assumed
+wrongly.
+
+**Bare cost per turn, no traffic:** `setImmediate` **0.0014 ms**, `queueMicrotask` 0.0004 ms,
+`setTimeout(0)` **9.2 ms**.
+
+So the yield stays: 20,000 turns is **28 ms** against a 90-minute run, and gating it off would trade
+that for a blocked event loop during the ~6% of an official run that is the pipeline's own
+result-mapping loop — work we do control. The claim was what needed fixing, not the code: "the
+official path is unchanged" was too broad, because the per-subject loop is SHARED. ADR-085 and
+DEPLOY.md now say which 6% yields and what it costs.
+
+**The `setTimeout(0)` number is the unexpected one.** I assumed the spec's 1 ms clamp; the real floor
+is the platform's clock granularity, 9.2 ms here. Over the pilot's 120,000 pairs that is 0.17 s with
+`setImmediate` against **~18 minutes** with the timer. `setImmediate` exists on the node-24 host we
+deploy to, so the fallback is insurance for a target we do not ship to — but it is now written down in
+both helpers that such a target must yield less often rather than inherit a per-bundle timer.
+
+Codex's other finding was to split the PR per CLAUDE.md's one-task rule. Correctly reasoned from the
+repo's own rules, and declined: the owner asked for the two together. The independence is documented
+in the PR body and in ADR-085, which is what a future revert needs to know.
+
 ## 2026-09-20 (late) — the CSV now describes the list it was taken from
 
 The work list sends nine filters to `/api/cases`. Its **Export cases CSV** button spelled its own URL

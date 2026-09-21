@@ -37,6 +37,12 @@ export interface EvaluateBundleOptions {
  * versus 85.6 ms and +2.4% for the timer) but it does not exist on every `@mieweb/cloud` target —
  * Workers has no `setImmediate` — and the header of this file promises portability. So: the better
  * one on the host we deploy to, a correct one everywhere else.
+ *
+ * **How much better, measured, because "slightly worse" would be the wrong summary.** Bare cost per
+ * turn with no traffic: `setImmediate` **0.0014 ms**, `setTimeout(0)` **9.2 ms** — the timer's floor
+ * comes from the platform's clock granularity rather than the 1 ms the spec clamps to. Yielding after
+ * every bundle is therefore free on the host we deploy to and expensive on a target that lacks
+ * `setImmediate`; such a target should pass a larger `yieldEvery` rather than take this per bundle.
  */
 const yieldToEventLoop = (): Promise<void> =>
   typeof setImmediate === "function"

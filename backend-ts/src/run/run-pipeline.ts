@@ -203,6 +203,13 @@ const NON_COMPLIANT = new Set(["DUE_SOON", "OVERDUE", "MISSING_DATA"]);
  * `setImmediate` where it exists, `setTimeout(0)` otherwise, mirroring the engine's own helper so the
  * two loops yield the same way. Measured on the dev host at 42 ms/subject: worst request latency
  * 43.5 ms with `setImmediate`, 85.6 ms with the timer, 2,534 ms with neither.
+ *
+ * **The two are not interchangeable at scale, and the gap is not small.** Bare cost per turn, no
+ * traffic: `setImmediate` **0.0014 ms**, `setTimeout(0)` **9.2 ms** — a timer floor set by the
+ * platform's clock granularity, not by the 1 ms the spec clamps to. Over the pilot's 120,000
+ * subject-measure pairs that is 0.17 s against ~18 minutes. `setImmediate` exists on the node-24 host
+ * this deploys to, so the fallback is a correctness measure for a target we do not currently ship to;
+ * anyone who makes that target real must yield less often there rather than inherit this.
  */
 const yieldToEventLoop = (): Promise<void> =>
   typeof setImmediate === "function"

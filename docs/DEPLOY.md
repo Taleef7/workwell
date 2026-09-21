@@ -1390,6 +1390,10 @@ call means proportionally shorter stalls, paid for with proportionally more data
 since the chunk boundary is where the pipeline writes and therefore where the event loop actually
 gets a turn.
 
+The other ~6% of an official run — reading each prefetched result and assembling its evidence — is
+the pipeline's own per-subject loop and **does** yield, so requests are served during it. That costs
+28 ms per 20,000 subjects (measured, no traffic), which is why it is not gated off.
+
 **No recommended value is printed here, deliberately.** `batchMs` is on the run log per chunk, so the
 trade is measurable on your own deployment in one run:
 

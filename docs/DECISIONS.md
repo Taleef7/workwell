@@ -61,7 +61,9 @@ held the pool for ~30 minutes.
 
 ### Decision
 
-**d1. The loops WE own yield a MACROTASK after every subject, by default** — the run pipeline's
+**d1. The loops WE own yield a MACROTASK after every subject, by default** — and the per-subject loop
+is shared, so this reaches an official run's result-mapping phase as well as an authored run's
+evaluation; see the consequences for what that costs (28 ms per 20,000 subjects, measured) — the run pipeline's
 per-subject loop (`run/run-pipeline.ts`, which is the authored path) and the engine's DB-less batch
 shell (`engine/ingress/evaluate-bundle.ts`, used by the CLI, the flip gate and the roster paths). `setImmediate` where it
 exists, `setTimeout(0)` otherwise — the file is the engine's DB-less shell and its header promises
@@ -120,9 +122,18 @@ condition that reads as present and cannot fire is the defect shape this codebas
 - An AUTHORED run takes ~2% longer and the deployment stays responsive throughout. That trade is only
   obviously right because the nightly window has hours of headroom; a deployment whose run barely fits
   its window should turn `yieldEvery` up rather than discover this later.
-- **An OFFICIAL-routed run is unchanged by d1**, and the Maui pilot's nightly is entirely official. Its
-  stall is inside `fqm-execution` and is governed by d4. Saying so here is the point: a reader who took
-  d1 as "#563 is fixed" would stop measuring.
+- **An official-routed run's 21-second stall is unchanged by d1**, and the Maui pilot's nightly is
+  entirely official. That stall is inside `fqm-execution` and is governed by d4. Saying so is the
+  point: a reader who took d1 as "#563 is fixed" would stop measuring.
+  **Precisely, though — "the official path is unchanged" was too broad and is corrected here** (Codex
+  review). The pipeline's per-subject loop is SHARED: for a routed measure the evaluation already
+  happened in the batch, but the loop still runs per subject to read the prefetched result, plan the
+  incremental cache and assemble evidence — synchronous work, part of the ~6% of the run that is not
+  `batchMs`, and it now yields like everything else. So an official run IS more responsive during that
+  6%, and pays for it. **Measured, that price is 28 ms per 20,000 yields** (`setImmediate` at 0.0014 ms
+  a turn, no traffic) — 0.17 s across the pilot's 120,000 pairs, against a 90-minute run. Gating the
+  yield to the authored branch was the alternative; it was rejected because it would trade a
+  measured 0.17 s for a blocked event loop during the one phase of an official run we do control.
 - **The 42 ms/subject cost is untouched and remains a separate finding** — it is 2.6–3.5x the 11–16 ms
   recorded in `wiring/official-executor-adapter.ts`, and it is what sets the 45 ms floor.
 - `/api/runs/manual` with `scopeType: MEASURE` changes shape for any existing caller: 201 RUNNING with
