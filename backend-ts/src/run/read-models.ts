@@ -292,6 +292,26 @@ export interface RunFilters {
 /** Day portion of an ISO/date string, for day-granular from/to comparison. */
 const day = (s: string): string => s.slice(0, 10);
 
+/**
+ * The candidate set both run-history surfaces filter, read ONCE and identically (#601, review).
+ *
+ * The list route capped its read at 1,000 and the CSV was changed to read unbounded — which fixed the
+ * export's own truncation and immediately recreated the parity defect from the other side: past 1,000
+ * runs, a filter matching only older rows would export runs the screen had never shown. Two surfaces
+ * answering one question have to scan one set, so they call this.
+ *
+ * Unbounded is the right side of that trade here, and the runs table is why: it grows by one nightly
+ * plus the occasional manual run, where `cases` and `outcomes` grow per subject per measure. The cap
+ * this replaces bounded nothing a deployment would notice and hid rows a filter had legitimately
+ * selected.
+ */
+export async function runCandidates(
+  runStore: { listRuns(limit: number): Promise<RunRecord[]> },
+  filters: RunFilters,
+): Promise<RunRecord[]> {
+  return (await runStore.listRuns(Number.MAX_SAFE_INTEGER)).filter((r) => matchesRunFilters(r, filters));
+}
+
 export function matchesRunFilters(run: RunRecord, f: RunFilters): boolean {
   if (f.status && run.status !== f.status) return false;
   if (f.scopeType && run.scopeType !== f.scopeType) return false;

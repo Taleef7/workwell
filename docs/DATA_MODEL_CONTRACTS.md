@@ -137,21 +137,35 @@ SQLite floor and the Pg ceiling read the current row and apply the shared pure `
   > transaction, and the patch follows.
   >
   > **Verified and flipped (2026-09-21, owner decision on #598):** measure approve, deprecate and the
-  > explicit status transition; terminology-mapping create; value-set attach and detach.
+  > explicit status transition; terminology-mapping create; value-set attach and detach; **`grantWaiver`
+  > and `scheduleAppointment`**. Every one of them could flip for the same reason — the id is minted
+  > caller-side rather than by the insert, so the event can name the row before it exists.
   >
   > **Known to still mutate first, with the reason at each call site:**
   > - the **run-created case transition** — **deliberate**, because the alternative strands an
   >   otherwise-complete run as RUNNING after the case was already mutated;
-  > - **`createMeasure`**, **segment create** and the three **identity-link** writes, which share one
-  >   cause: the store mints the entity id, so there is nothing to key an event on beforehand. The fix
-  >   is to mint it caller-side (as `createTerminologyMapping` does) or ADR-073 d4's
+  > - **`createMeasure`**, **segment create**, the three **identity-link** writes, and
+  >   **`uploadEvidence`** — all of which share one cause: the store mints something the event needs,
+  >   so there is nothing to key it on beforehand. For the first three that is the entity id; for
+  >   evidence it is `record.uploadedAt`, which the event carries as `payload.timestamp`. The fix is
+  >   to mint it caller-side (as `createTerminologyMapping` and now `grantWaiver` do) or ADR-073 d4's
   >   intent-then-completion pair — a real change rather than a reorder.
+  >   **`uploadEvidence`'s exposure is wider than a row**: the BUCKET write lands first too, so a
+  >   failed audit can leave an object in storage the ledger never mentions.
+  >
+  > **Checked and NOT a violation:** panel assignment already audits before `upsertPanelAssignment` —
+  > the sweep's hit there was `activeCasesForSubjects`, a read.
   >
   > **This is NOT a complete inventory, and two earlier versions of this paragraph wrongly implied it
-  > was.** `backend-ts/scripts/audit-order-sweep.py` lists every `await` preceding an audit write, and
-  > its output on the current tree still contains untriaged candidates — waivers, appointments,
-  > evidence upload, panel assignment, the import-driven finalize and others. **#598 owns that
-  > triage**, and nothing should read this section as licence to close it.
+  > was.** `backend-ts/scripts/audit-order-sweep.py` lists every `await` preceding an audit write.
+  > Its output on the current tree still contains untriaged candidates — the import-driven finalize in
+  > `routes/runs.ts` most of all, plus `materialize-run`, `measure-seed`, `case-outreach` and
+  > `audit-packet`, several of which are probably reads. **#598 owns that triage**, and nothing should
+  > read this section as licence to close it.
+  >
+  > **Keep this list in step with the code in the SAME change.** The commit that flipped waivers and
+  > appointments left them listed here as untriaged, which pointed the next reader at work already
+  > done — caught in review, and exactly the failure mode an always-loaded file has.
   >
   > Two things the corrections taught, both worth keeping:
   > - **A function can be on BOTH sides.** `rerunToVerify` records its action audit-first and then
@@ -293,6 +307,19 @@ with status forced to `MISSING_DATA`.
 > 2026-09-16 (ADR-082). Neither changes a column in §6.1–§6.5.
 
 ### 6.1 `GET /api/exports/runs?format=csv`
+Supports filters: `status`, `scopeType`, `triggerType`, `site`, `from`/`to`, and `limit`.
+
+> **Added 2026-09-21 (#601).** It previously took none, and the screen's Export button sent none — so
+> a history narrowed to FAILED runs at one site last week exported the most recent 200 runs of
+> everything, with no error. The six are exactly `/api/runs`'s, applied through the same predicate
+> (`matchesRunFilters`) over the same candidate read (`runCandidates`), because two surfaces
+> answering one question must scan one set: unbounded here against a 1,000-row cap there would
+> export rows the screen never showed. `from`/`to` compare `startedAt` by UTC day and are validated
+> by the shared calendar-day guard, so a malformed value is a 400 naming the parameter rather than a
+> lexicographic filter. **`limit` defaults to 200 and applies AFTER filtering** — it used to cap the
+> READ, which made any matching run outside the newest 200 unreachable under every filter; it is
+> bounded at 10,000.
+
 Columns:
 `runId, measureName, measureVersion, scopeType, triggerType, status, startedAt, completedAt, durationMs, totalEvaluated, compliant, dueSoon, overdue, missingData, excluded, passRate, dataFreshAsOf, notInPopulation`
 

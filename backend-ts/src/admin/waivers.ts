@@ -106,27 +106,34 @@ export async function grantWaiver(deps: WaiverDeps, req: GrantWaiverRequest, act
   }
   const expiresAt = req.expiresAt && req.expiresAt.trim() !== "" ? new Date(req.expiresAt).toISOString() : null;
 
-  const row = await deps.waivers.insert({
-    id: crypto.randomUUID(),
-    employeeExternalId,
-    measureId: measure.measureId,
-    measureVersionId: measure.versionId,
-    exclusionReason: req.exclusionReason.trim(),
-    grantedBy: actor,
-    expiresAt,
-    notes: req.notes && req.notes.trim() !== "" ? req.notes.trim() : null,
-    active: req.active == null ? true : req.active,
-  });
-
+  // AUDIT BEFORE MUTATE (#598). The id is minted here rather than by the insert, which is what makes
+  // that possible — the same shape `createTerminologyMapping` uses.
+  const waiverId = crypto.randomUUID();
+  // The values the event reports, resolved BEFORE either write — they were read off the inserted row,
+  // which is exactly what forced the audit to come second. Each is the input the insert is about to
+  // store, so the event describes the same waiver the row will.
+  const exclusionReason = req.exclusionReason.trim();
+  const active = req.active == null ? true : req.active;
   await deps.events.appendAudit({
     eventType: "WAIVER_GRANTED",
     entityType: "waiver",
-    entityId: row.id,
+    entityId: waiverId,
     actor,
     refRunId: null,
     refCaseId: null,
-    refMeasureVersionId: row.measureVersionId,
-    payload: { waiverId: row.id, employeeExternalId, measureId: row.measureId, exclusionReason: row.exclusionReason, active: row.active },
+    refMeasureVersionId: measure.versionId,
+    payload: { waiverId, employeeExternalId, measureId: measure.measureId, exclusionReason, active },
+  });
+  const row = await deps.waivers.insert({
+    id: waiverId,
+    employeeExternalId,
+    measureId: measure.measureId,
+    measureVersionId: measure.versionId,
+    exclusionReason,
+    grantedBy: actor,
+    expiresAt,
+    notes: req.notes && req.notes.trim() !== "" ? req.notes.trim() : null,
+    active,
   });
 
   return toRecord(deps, row, Date.now());

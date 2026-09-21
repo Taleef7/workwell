@@ -15,7 +15,6 @@ import { ComplianceSummaryBar } from '@/features/employee/components/ComplianceS
 import { IndividualComplianceStatus } from '@/features/employee/components/IndividualComplianceStatus';
 import { SimulateComplianceHistory } from '@/features/employee/components/SimulateComplianceHistory';
 import { SkeletonCard } from '@/components/skeleton-loader';
-import { SlaChip } from '@/components/SlaChip';
 import { OUTCOME_LABELS, labelFor, outcomeStatusClass } from '@/lib/status';
 import { useMeasureIdentities } from '@/lib/measure-identity';
 
@@ -126,8 +125,6 @@ export default function EmployeeProfilePage() {
   const startDate = profile.startDate
     ? new Date(profile.startDate).toLocaleDateString()
     : null;
-  // SLA fields are null on the synthetic directory — only show the column if any case has a value.
-  const hasSla = profile.openCases.some((c) => c.slaRemainingDays != null);
 
   return (
     <div className="p-6 space-y-6 max-w-6xl mx-auto">
@@ -174,7 +171,6 @@ export default function EmployeeProfilePage() {
                 <th scope="col" className="pb-2 font-medium">Status</th>
                 <th scope="col" className="pb-2 font-medium">Priority</th>
                 <th scope="col" className="pb-2 font-medium">Assignee</th>
-                {hasSla ? <th scope="col" className="pb-2 font-medium">SLA</th> : null}
               </tr>
             </thead>
             <tbody>
@@ -208,11 +204,6 @@ export default function EmployeeProfilePage() {
                       onAssigned={refetch}
                     />
                   </td>
-                  {hasSla ? (
-                    <td className="py-2">
-                      <SlaChip slaRemainingDays={c.slaRemainingDays} slaBreached={c.slaBreached} />
-                    </td>
-                  ) : null}
                 </tr>
               ))}
             </tbody>
