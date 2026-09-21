@@ -1,5 +1,71 @@
 # Journal
 
+## 2026-09-21 (evening) — two controls that promised more than they did
+
+**#598** and **#599**, both from the 2026-09-07 review, both about a claim being wider than the thing
+behind it. Neither is a behaviour change; both are the always-loaded contract and a label catching up
+with the code.
+
+### #598 — "every state change writes an audit_event" is true of operator actions, and not of runs
+
+`CLAUDE.md` states the rule with "no exceptions". The run path is an exception, and it was
+discoverable only by reading `run-pipeline.ts`.
+
+The two paths make **opposite trades on purpose**:
+
+- An **operator action** records the event first, then applies the patch (`recordCaseEvent` makes the
+  action row and the audit row one transaction). A failure between them leaves an action recorded but
+  not applied — never an unaudited state change.
+- A **run** upserts the case first, then audits best-effort. A failure there leaves a state change
+  applied but unaudited, accepted because the alternative strands an otherwise-complete run as
+  RUNNING after the case was already mutated.
+
+Both orderings stay. What is missing is the **primitive**, and it cannot live in one store: the action
+and audit rows belong to `CaseEventStore` (which already opens its own `BEGIN`/`COMMIT`) while the
+patch belongs to `CaseStore`, so a real `applyCaseAction({ patch, action, audit })` needs a
+transaction seam spanning both. That is deferred deliberately, not forgotten — it wants local
+Postgres, since the SQLite floor cannot catch Pg-only SQL, and #598 carries it with the line that
+until it exists **nothing should build operational reliance on the ledger being complete for
+run-created transitions.**
+
+The correction is in `DATA_MODEL_CONTRACTS` §4 beside the best-effort note and in `CLAUDE.md`'s rule
+itself, because a rule whose exception lives in a source file is a rule a session will contradict.
+
+**And the correction was itself too broad** (Codex, on the PR). It said "operator actions audit
+first and cannot lose the event" — true of CASE actions, false of several other operator surfaces.
+The same failure one level up, in a change whose entire subject is claims being wider than what is
+behind them.
+
+So the paths were enumerated by a sweep for the shape rather than recalled. **Audit-first:** every
+case action, rerun-to-verify's case patch, bulk assign and panel backfill. **Mutate-first, and so
+able to lose the event:** the run-created case transition, the measure lifecycle (create, approve,
+deprecate, transition), segment create, terminology-mapping create.
+
+`case-rerun.ts` looked like a violation to the sweep and is not — its first mutation creates a RUN
+row, and the case patch is explicitly after an audit-first `recordCaseEvent`, with a comment saying
+so. Worth the check: it would have been an easy thing to assert wrongly in the other direction.
+
+**Only the run's ordering is a considered trade.** The other six are the order they happened to be
+written in, which splits #598 into a cheap half — flip them, no seam needed — and the primitive that
+still needs a cross-store transaction.
+
+### #599 — an approval gate that could not fail on the thing its label implied
+
+Studio rendered "Test Fixtures ✅" and blocked activation until it passed, which reads as *the
+fixtures ran and the measure produced the expected outcomes*. `validateTests` never executes
+anything: it checks the list is non-empty and that each entry has a name, a subject, and an
+`expectedOutcome` in the allowed set.
+
+The row now reads **"Fixtures Well-Formed — present and well-formed; not executed against the
+measure"**, and the function's docstring says the same.
+
+**The guard went on the semantics, not the copy.** A render test asserting label text would need four
+child panels mocked to check a string, and would pin the wording rather than the meaning. Instead
+three backend tests pin the *limitation*: a fixture naming a subject that exists nowhere still
+passes, and two fixtures asserting opposite outcomes for the same subject both pass. If someone
+implements execution — #599's option 2, the real fix — **those tests fail**, which forces the label
+and the behaviour to move together instead of drifting apart again.
+
 ## 2026-09-21 (later) — the review's one high-priority defect, and it was worse than the review said
 
 **#594** and **#595** were accepted on 2026-09-08, named "the next two slices", and then sat for

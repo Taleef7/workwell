@@ -121,6 +121,46 @@ SQLite floor and the Pg ceiling read the current row and apply the shared pure `
   instead of being left stuck RUNNING / marked FAILED after the case was already mutated (mirrors the
   `RUN_COMPLETED` best-effort write).
 
+  > **So "every state change writes an `audit_event`" is the RULE, and it is not everywhere true
+  > today (#598).** CLAUDE.md stated it with "no exceptions", and the exceptions were discoverable
+  > only by reading the source — which is the shape of claim this file exists to stop.
+  >
+  > **This correction was itself too broad on its first cut** (Codex review), which is worth recording
+  > because it is the same failure one level up: it said "operator actions audit first and cannot lose
+  > the event", true of CASE actions and false of several other operator surfaces. The list below came
+  > from a sweep for the mutate-before-audit shape rather than from memory.
+  >
+  > **AUDIT FIRST — cannot produce an unaudited state change:**
+  > - every case action (`case/case-actions.ts`), where `recordCaseEvent` makes the action row and the
+  >   audit row one transaction and the patch follows;
+  > - rerun-to-verify's case patch (`case/case-rerun.ts`), which says so at the call site;
+  > - bulk assign and panel backfill, through the batch `recordCaseEvents`.
+  >
+  > A failure between the two leaves an action **recorded but not applied** — recoverable, and never a
+  > silent state change.
+  >
+  > **MUTATE FIRST — can apply a change and lose the event:**
+  > - the **run-created case transition** (`run/run-pipeline.ts`), which audits best-effort after the
+  >   upsert. **This one is deliberate**: the alternative strands an otherwise-complete run as RUNNING
+  >   after the case was already mutated;
+  > - the **measure lifecycle** — create, approve, deprecate and the explicit status transition
+  >   (`measure/measure-lifecycle.ts`);
+  > - **segment create** (`routes/segments.ts`) and **terminology-mapping create**
+  >   (`measure/value-set-governance.ts`).
+  >
+  > Only the first is a considered trade. The rest are simply the order they were written in, and new
+  > code should audit first.
+  >
+  > **What is missing is the primitive, not the ordering** (for the run; for the others the ordering
+  > is missing too)**.** There is no `applyCaseAction({ patch,
+  > action, audit })` making all three one unit, and there cannot be one inside a single store: the
+  > action and audit rows belong to `CaseEventStore` (which already opens its own `BEGIN`/`COMMIT`)
+  > while the patch belongs to `CaseStore`, so a real fix needs a transaction seam spanning both.
+  > Until that exists, **do not build operational reliance on the ledger being complete for
+  > run-created transitions.** A reconciliation job is not a substitute: without durable operation
+  > identity, an expected version, a deadline and a visible failure state it is a second unreliable
+  > thing checking the first.
+
 ### The work list is READ two ways, and they must answer the same question (#561, ADR-084)
 
 `/api/cases` takes ONE page and the exact total from a single statement (`CaseStore.listCasesPage`,

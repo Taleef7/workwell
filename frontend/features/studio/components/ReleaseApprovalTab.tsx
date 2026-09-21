@@ -140,7 +140,26 @@ export function ReleaseApprovalTab({
         <h3 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Readiness Checklist</h3>
         <div className="grid gap-2 text-sm">
           <p>Compile Status: <span className={compileReady ? "text-emerald-700" : "text-red-700"}>{compileReady ? "✅" : "❌"} {formatStatusLabel(activationReadiness?.compileStatus ?? "UNKNOWN")}</span></p>
-          <p>Test Fixtures: <span className={testsReady ? "text-emerald-700" : "text-red-700"}>{testsReady ? "✅" : "❌"} {activationReadiness?.testFixtureCount ?? 0} fixtures</span></p>
+          {/*
+            * "Test Fixtures ✅" read as "the fixtures ran and the measure produced the expected
+            * outcomes" (#599). It never meant that: `validateTests` checks the list is non-empty and
+            * each entry is well-formed - a name, a subject, an outcome in the allowed set - and never
+            * executes the measure. A fixture asserting an impossible outcome passes, and so does one
+            * that contradicts the CQL, so this was an approval gate that could not fail on the thing
+            * its name implied.
+            *
+            * The label now says what is checked. Actually running them is the real fix and belongs
+            * with the next Studio work; until then the row must not imply a verification nobody did.
+            */}
+          <p>
+            Fixtures Well-Formed:{" "}
+            <span className={testsReady ? "text-emerald-700" : "text-red-700"}>
+              {testsReady ? "✅" : "❌"} {activationReadiness?.testFixtureCount ?? 0} fixtures
+            </span>
+            <span className="ml-2 text-xs text-neutral-500 dark:text-neutral-400">
+              — present and well-formed; not executed against the measure
+            </span>
+          </p>
           <p>
             Value Set Resolvability:{" "}
             {hasValueSets ? (
