@@ -1,5 +1,64 @@
 # Journal
 
+## 2026-09-21 (close) — three merged, and the reviews were worth more than the changes
+
+#610, #611 and #612 merged; the sandbox is on all three.
+
+**What the day was actually about.** The owner opened `/programs` and got *"Failed to load program data:
+The database cancelled this query for exceeding its time limit"* over *"No active measures"* — a
+statement timeout rendered as an empty catalog. Measured after the deploy, same account, same stack:
+
+| request | before | after (warm) |
+|---|---|---|
+| `GET /api/programs/overview` | **503 at 30 s** cold, 3.2-3.7 s warm | **0.74-0.89 s** |
+| `?include=detail` (what the page loads) | **59.8 s** | **1.57-2.58 s** |
+| `/api/programs/sites` (every page load) | 17.2 s cold, 2.5 s warm | **0.28 s** |
+| `/trend` per measure | 3.0-4.8 s | 0.28 s |
+
+No 503 anywhere, including the first request on a cold container. Browser-verified: 120,000 evaluations,
+61.9% compliance, 15,298 open cases, six measure cards with rates, trends and drivers.
+
+**Three reviews, eighteen findings, six of them defects in work written the same hour.** Worth recording
+as a pattern rather than a tally:
+
+- **A cache keyed by the wrong thing.** `getStores` caches its bundle by ENV OBJECT, and a container
+  builds two env objects — so there are two `PgOutcomeStore` instances. Per-instance, the compaction
+  invalidation landed on the instance that DELETES and stayed open on the one that READS, and the boot
+  warm filled a cache no request would hit. The cold path the change existed to fix was unimproved.
+- **A negative that was not memoized.** `officialMeasureRate` returned `null` before its `memo.set`,
+  and since the change that null costs a full evidence read — per request, outside the overview's own
+  memo. The 30-second cliff, reintroduced by the fix for it.
+- **A guard that could not fire.** The boot warm's retry was keyed on the exact failure its callee
+  swallows, and its success line printed on failure — while `DEPLOY.md` points an operator at that line.
+- **A 404 dropped.** Relocating the segments PUT's not-found check discarded the null return that also
+  guarded two later writes: a concurrent delete gave a 500 or an HTTP 200 with body `null`.
+- **Two fixtures that could not fail.** One where a wrong measure identifier bucketed to the same anchor
+  as the right one; one where deleting the route's parameter left every test green.
+- **A claim asserted in five places that was false in all five**, including an always-loaded file: that
+  forwarding `period=current` to the store would match nothing. Both stores treat it as a no-op and say
+  so.
+
+**And §4's completeness claim was wrong for the third time.** First by implying an inventory it did not
+have; then by filing two of `backfill-trend-history`'s four hits under "reads" because the other two
+were; then by omitting `batch-evaluate-scale` while listing its two siblings. Each time the prose was
+plausible and the arithmetic was not done. It carries the COUNT now — 55 hits across 20 files — and the
+one-line command that re-derives it. That is the only form of this claim that has survived.
+
+**Shipped beside the perf work:** the cases CSV takes the cycle scope the screen shows (#603, closed),
+`site` compared one way across three surfaces, and #598's sweep fully accounted for — five more paths
+audit-first, and `src/audit/audit-order.test.ts`, the first test in the repo that can tell the two
+orders apart. Ten cases, every one mutation-confirmed.
+
+**What is left is filed.** #614 carries the ordered list: what we can close with no input (the
+scoped-profile leaks #501/#508 first — the only open correctness risk — then #604's worker thread),
+what needs the owner (the `outcomes (run_id, measure_id)` index most of all, #600's three columns,
+#598's cross-store primitive), what is blocked on WebChart, and what is Tier 0.
+
+**Two honest caveats.** The first request after a deploy is still ~47 s if a caller beats the boot warm
+— a 200 now rather than a 503, but the index is what would make it fast. And the sandbox has exactly one
+compliance cycle, so `?period=` is correctly inert there: #611's behaviour is pinned by its fixture, not
+demonstrable on the pilot's data.
+
 ## 2026-09-21 (late, III) — the audit-order sweep is fully triaged, and the rule finally has a test
 
 The owner's #598 decision was: where a path CAN audit before it mutates, it should. #607/#608 flipped
