@@ -17,6 +17,7 @@ import { rosterCellCache } from "../compliance/roster-read-model.ts";
 import { runsCsv, outcomesCsvStream, casesCsv, auditCsvStream } from "../export/export-csv.ts";
 import { subjectFiltersFromQuery, subjectFilterErrorBody, SubjectFilterError } from "../compliance/subject-filters.ts";
 import type { DataSourceEnv } from "../engine/ingress/data-source.ts";
+import { caseWindowFrom, calendarDayErrorBody } from "./query-dates.ts";
 
 interface ExportsEnv extends DataSourceEnv {
   DB: CloudDatabase;
@@ -45,6 +46,10 @@ function subjectFiltersOr400(q: URLSearchParams): ReturnType<typeof subjectFilte
     throw error;
   }
 }
+
+/** A 400 in the same JSON shape `/api/cases` returns, so a refusal reads the same on both surfaces. */
+const badRequest = (body: unknown): Response =>
+  new Response(JSON.stringify(body), { status: 400, headers: { "content-type": "application/json" } });
 
 /** The 404 an unknown `?listId=` earns, in the same JSON shape every other surface uses. */
 const listNotFound = (listId: string): Response =>
@@ -117,6 +122,13 @@ export async function handleExports(req: Request, env: ExportsEnv): Promise<Resp
     if (!listedCases.ok) return listNotFound(listedCases.listId);
     const subjectFilters = listedCases.filters;
     const caseIds = q.get("caseIds")?.split(",").map((c) => c.trim()).filter(Boolean);
+    // The created-at window, validated by the SAME predicate `/api/cases` uses (`query-dates.ts`).
+    // Until 2026-09-20 this export accepted neither `from`/`to` nor `outcome`/`search`, while the
+    // screen it is exported from carries all four — so a CSV taken from a narrowed list was a WIDER
+    // file, with no error to notice. A caller that sent them got a broader export under a heading
+    // that said otherwise, which is the reporting-integrity half of the same defect.
+    const window = caseWindowFrom(q);
+    if (!window.ok) return badRequest(calendarDayErrorBody(window.name, window.value));
     const csv = await casesCsv(s.cases, s.events, {
       ...caseStatusQuery(q.get("status")),
       measureId: q.get("measureId") ?? undefined,
@@ -124,6 +136,14 @@ export async function handleExports(req: Request, env: ExportsEnv): Promise<Resp
       assignee: q.get("assignee") ?? undefined,
       site: q.get("site")?.trim() || undefined,
       caseIds: caseIds?.length ? caseIds : undefined,
+      createdFrom: window.from,
+      createdTo: window.to,
+      // Normalized exactly as `/api/cases` normalizes it — upper-cased with separators folded — so
+      // `?outcome=due-soon` means the same thing on both surfaces rather than matching on one.
+      outcome: q.get("outcome")?.trim().toUpperCase().replace(/[\s-]+/g, "_") || undefined,
+      // Case-folded by `casesCsv` with the work list's own predicate, so both surfaces fold it once
+      // and identically.
+      search: q.get("search")?.trim() || undefined,
       ...subjectFilters,
     }, env, { outcomeStore: s.outcomes, cellCache: rosterCellCache });
     return csvResponse("cases.csv", csv);
