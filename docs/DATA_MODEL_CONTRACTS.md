@@ -267,10 +267,11 @@ Supports filters: `status`, `measureId`, `priority`, `assignee`, `site`, `caseId
 `ageBand`, `sex`, `payer`, `from`/`to`, `outcome`, `search`.
 
 > **The last four were added 2026-09-20, and the reason is the contract.** This export is reached
-> from the work list's own button with the filters that list is showing, and it understood three of
-> the nine: a CSV taken from a list narrowed by a site, a created-at window, an outcome or a search
-> was a WIDER file than the screen it came from, under a heading that said otherwise, with no error
-> to notice — the reporting-integrity half of the `?status=open` defect above. `from`/`to` are the
+> from the work list's own button with the filters that list is showing. The **button sent three** of
+> the nine and the **endpoint understood six**, so a CSV taken from a list narrowed by a created-at
+> window, an outcome or a search was a WIDER file than the screen it came from, under a heading that
+> said otherwise, with no error to notice — the reporting-integrity half of the `?status=open` defect
+> above. `from`/`to` are the
 > `created_at` UTC-day window, inclusive at both ends, validated by the SAME predicate `/api/cases`
 > uses (`routes/query-dates.ts`) so a malformed value is a 400 naming the parameter on both surfaces
 > rather than a lexicographic filter on garbage. `outcome` is the frozen `current_outcome_status`,
@@ -283,6 +284,28 @@ Supports filters: `status`, `measureId`, `priority`, `assignee`, `site`, `caseId
 >
 > `search` is NOT on `CaseQuery`: like `site`, it reads the in-memory directory, so it is applied
 > after the store read and does not take the SQL fast path (§"The work list is READ two ways").
+
+> **`outcome` is the frozen column on every list EXCEPT the staff-closed one, where it is what CQL
+> says today.** The work list resolves the live answer for staff closures and filters on THAT
+> (§4: `current_outcome_status` froze when the person closed the case), so handing the same token to
+> the store here omitted a row the screen showed and carried one it did not — and the carried row
+> contradicted its own `liveOutcomeStatus` cell. On `?status=staff_closed` the token is therefore
+> withheld from the store and applied after the live pass the export already runs for those rows, so
+> it costs nothing extra; on every other list the frozen column IS live (a run refreshes an active
+> row and wrote a system-closed one) and the SQL predicate stands. Both surfaces compare through one
+> function, `shownStatusFor` → `liveOrFrozenStatus` (`case/worklist-read-model.ts`), which takes the
+> **display** status and not the canonical bucket the `liveOutcomeStatus` column carries — an
+> out-of-population row is canonical `MISSING_DATA` and displays as out-of-population, so the two
+> select different rows.
+
+> **This export applies NO period logic, and the open and staff-closed LISTS default to the current
+> compliance cycle.** That difference is not expressible as a query parameter and is therefore the
+> one width difference the filter parity above does not close: `?status=open` can show zero rows on
+> screen while the CSV taken from that screen carries a prior-cycle case, and the staff-closed tab —
+> whose three header counts describe the current cycle — exports every prior year's closures beside
+> them. Stated rather than fixed: what the export SHOULD do about a cycle is an owner decision, filed
+> as an issue, and the frontend parity test compares query strings so it cannot see a server-side
+> default.
 
 > **`closedReason`, `closedBy`, `liveState`, `liveOutcomeStatus` and `liveOutcomeRunId` were
 > APPENDED (#569, ADR-083)**, never inserted, so a consumer reading by position keeps every column it had — the same

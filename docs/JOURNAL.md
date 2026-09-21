@@ -36,6 +36,37 @@ a one-directional assertion passes just as well against a filter that is ignored
 one at a time: dropping `outcome`, `search`, the window, or the 400 guard each fails exactly its own
 test and nothing else.
 
+**Review found the same defect one control over, and it is fixed in the same PR.** `?outcome` on the
+**staff-closed** tab means something different from `?outcome` everywhere else: that list resolves
+what CQL says today and filters on it, because `current_outcome_status` froze when the person closed
+the case. The export handed the token to the store, which compares the frozen column — so
+`?outcome=COMPLIANT` showed one row on screen and exported none, `?outcome=OVERDUE` showed none and
+exported one, and the exported row contradicted its own `liveOutcomeStatus` cell. Two clicks away,
+and the §6.3 paragraph written above asserted it was closed.
+
+The token is now withheld from the store on that one list and applied after the live pass the export
+already runs for those rows, so it costs nothing; every other list keeps the SQL predicate, because
+for an active or system-closed row the frozen column IS live. Both surfaces compare through
+`shownStatusFor` → `liveOrFrozenStatus`, and the four `live*` fields come from one `liveFieldsFor`
+shared with `withLiveStatus`.
+
+**One of the mutations survived, and that is why the shape changed.** Swapping `displayStatus` for
+`outcomeStatus` at the export's call site altered which rows it selected with every test still green
+— the codebase's own vacuous-guard shape, in the fix for a vacuous-guard bug. Rather than write a
+test around it, the mapping moved into `shownStatusFor` so there is no choice at the call site; the
+mutant now dies. Five of five die: withholding removed, live filter removed, fast path always
+bypassed, and either half of the display/canonical swap. (An out-of-population fixture would have
+killed it directly, but producing a cell whose display state differs from its bucket needs an
+official-routed measure and its `official.populationResults` evidence — that pins `deriveCell`, which
+has its own tests.)
+
+**Two things are stated rather than fixed, both in §6.3 and in #603.** The export applies no period
+logic while the open and staff-closed lists default to the current cycle — `?status=open` can show
+zero rows and export a prior-cycle case, and the parity test compares query strings so it cannot see
+a server-side default. And `site` is compared case-sensitively by the list, case-insensitively by the
+export. The first needs an owner decision about what the export should do; the second is reachable
+now only because the button started sending `site`.
+
 Suites: backend full, frontend `cases` 54/54, `npm run lint` clean (two pre-existing warnings).
 
 ## 2026-09-20 (evening) — #563 is answered: 94% of the run is one call that blocks the event loop for 21 seconds

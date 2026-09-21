@@ -42,7 +42,7 @@ import { VENDORED_OFFICIAL_MEASURE_IDS } from "../config/official-measure-ids.ts
 import {
   hasActiveSubjectFilters, matchesSubjectFilters, type SubjectFilters,
 } from "../compliance/subject-filters.ts";
-import { liveAnswerForCase, liveCellsFor, type LiveCellDeps } from "../compliance/live-cell.ts";
+import { liveAnswerForCase, liveCellsFor, liveFieldsFor, type LiveCellDeps } from "../compliance/live-cell.ts";
 
 /** Every filter the work list understands. `subjects` carries the panel filters (PCP, payer, age, sex). */
 export interface WorklistFilters {
@@ -170,9 +170,37 @@ const isStaffClosedList = (filters: WorklistFilters): boolean =>
 /**
  * The status a SURFACE shows for a row: the live display state where one was resolved, else the case
  * row's own column. Filtering and rendering must agree, so both read this.
+ *
+ * **Exported, and the cases CSV is the other caller (2026-09-20).** The CSV is taken from this list
+ * with this list's `?outcome=`, and it applied that token to the frozen `current_outcome_status` in
+ * SQL — so on the staff-closed tab a row the screen labelled Compliant was absent from the file and a
+ * row it did not show was in it, which is the defect the comment at the filter below describes, one
+ * surface over. The structural parameter is what lets the CSV pass its own row shape.
  */
-const liveOrFrozenStatus = (c: CaseSummary): string =>
-  c.liveDisplayStatus ?? c.liveOutcomeStatus ?? c.currentOutcomeStatus;
+export const liveOrFrozenStatus = (c: {
+  liveDisplayStatus?: string | null;
+  liveOutcomeStatus?: string | null;
+  currentOutcomeStatus: string;
+}): string => c.liveDisplayStatus ?? c.liveOutcomeStatus ?? c.currentOutcomeStatus;
+
+/**
+ * The same rule, for a caller holding a `liveFieldsFor` result rather than a merged summary row.
+ *
+ * It exists so the mapping from those fields to this one is written ONCE. The cases CSV built the
+ * argument object itself, which left `displayStatus` versus `outcomeStatus` as a choice at the call
+ * site — and swapping them there changed which rows the export selected while every test still
+ * passed. A choice nothing can fail on is the vacuous guard this codebase keeps finding; there is now
+ * no choice to make.
+ */
+export const shownStatusFor = (
+  currentOutcomeStatus: string,
+  fields: { displayStatus?: string | null; outcomeStatus?: string | null } | null | undefined,
+): string =>
+  liveOrFrozenStatus({
+    liveDisplayStatus: fields?.displayStatus,
+    liveOutcomeStatus: fields?.outcomeStatus,
+    currentOutcomeStatus,
+  });
 
 /** Day portion (YYYY-MM-DD) for day-granular, inclusive comparison. */
 const day = (s: string): string => s.slice(0, 10);
@@ -571,18 +599,16 @@ export async function withLiveStatus(deps: LiveCellDeps, summaries: readonly Cas
     // The cycle equality lives in `liveAnswerForCase`, shared with the cases CSV and the programs
     // chip: the winning run describes ITS cycle, so a case from a closed cycle reads UNKNOWN rather
     // than taking today's answer. The roster overlay enforces the same rule on the cell.
-    const answer = liveAnswerForCase(live, c);
-    if (answer.cell == null) {
-      return { ...c, liveState: "UNKNOWN", liveOutcomeStatus: null, liveDisplayStatus: null, liveOutcomeRunId: answer.runId };
-    }
+    // The DISPLAY status as well as the bucket — out-of-population is canonical `MISSING_DATA` and a
+    // surface handed only the bucket would say "Missing Data" and "verified compliant" at once. The
+    // derivation is `liveFieldsFor`, shared with the cases CSV so both write the same four fields.
+    const f = liveFieldsFor(liveAnswerForCase(live, c));
     return {
       ...c,
-      liveState: answer.state,
-      liveOutcomeStatus: answer.cell.canonical,
-      // The DISPLAY state as well as the bucket: out-of-population is canonical MISSING_DATA, and a
-      // surface handed only the bucket would say "Missing Data" and "verified compliant" at once.
-      liveDisplayStatus: answer.cell.status,
-      liveOutcomeRunId: answer.runId,
+      liveState: f.state,
+      liveOutcomeStatus: f.outcomeStatus,
+      liveDisplayStatus: f.displayStatus,
+      liveOutcomeRunId: f.runId,
     };
   });
 }

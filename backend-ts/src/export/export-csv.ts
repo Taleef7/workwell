@@ -16,8 +16,8 @@ import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
 import { toCsv, csvCell } from "./csv.ts";
 import { closureKindOf } from "../case/case-logic.ts";
-import { matchesCaseSearch } from "../case/worklist-read-model.ts";
-import { liveAnswerForCase, liveCellsFor, type LiveCellDeps } from "../compliance/live-cell.ts";
+import { matchesCaseSearch, shownStatusFor } from "../case/worklist-read-model.ts";
+import { liveAnswerForCase, liveCellsFor, liveFieldsFor, type LiveCellDeps } from "../compliance/live-cell.ts";
 
 const measureName = (measureId: string) => MEASURES[measureId]?.name ?? measureId;
 const authoredVersion = (measureId: string) => {
@@ -299,7 +299,21 @@ export async function casesCsv(
   /** Where the two live columns come from (#569); without it they are empty and the row says so by being empty. */
   liveDeps?: LiveCellDeps,
 ): Promise<string> {
-  let cases = await caseStore.listCases({ ...filter, limit: 100000 });
+  // **`outcome` is withheld from the STORE on the staff-closed list, and only there** (2026-09-20).
+  //
+  // The store compares `current_outcome_status`, which froze when the person closed the case (§4).
+  // For every other row that column IS live — the run refreshes an active row and wrote a
+  // system-closed one — so the SQL predicate is right and stays. On the staff-closed list the screen
+  // filters on what CQL says TODAY (`worklist-read-model.ts`, the comment beside its own outcome
+  // filter), so applying the token in SQL here put a row labelled Compliant in the file under an
+  // Overdue filter and dropped the row the screen showed — a file disagreeing with the list it was
+  // taken from, which is the defect this whole export change exists to close.
+  const staffClosedList = filter.closure === "staff";
+  let cases = await caseStore.listCases({
+    ...filter,
+    outcome: staffClosedList ? undefined : filter.outcome,
+    limit: 100000,
+  });
   const directory = directoryForProfileRows(cases.map((c) => ({ subjectId: c.employeeId })), webChartEnv);
   const profileMatch = profileSubjectMatcher(directory.employeeById);
   cases = cases.filter((c) => profileMatch(c.employeeId));
@@ -329,11 +343,6 @@ export async function casesCsv(
   if (hasActiveSubjectFilters(filter)) {
     cases = cases.filter((c) => matchesSubjectFilters(directory.employeeById(c.employeeId), filter));
   }
-  // ONE lookup for the whole export, not one per case. The per-case form fired a query per row
-  // through `Promise.all` — ~15,300 of them on the pilot, against a ten-connection pool — which
-  // answered 504 at 60 s and held every connection while it did, so the deployment's other pages
-  // timed out for the minute it ran (measured 2026-09-13).
-  const deliveryStatuses = await eventStore.latestOutreachDeliveryStatuses(cases.map((c) => c.id));
   // What the winning run says today, for the rows a PERSON closed (#569) — the only rows whose
   // `currentOutcomeStatus` can be stale, and a set bounded by human activity. Bounded point reads
   // through `liveCellsFor`; never a run read.
@@ -341,6 +350,22 @@ export async function casesCsv(
   const live = liveDeps && staffClosed.length > 0
     ? await liveCellsFor(liveDeps, staffClosed.map((c) => ({ subjectId: c.employeeId, measureId: c.measureId })))
     : null;
+  // The withheld `outcome`, applied to what the SCREEN shows — through the work list's own rule
+  // (`liveOrFrozenStatus`), so the two cannot answer differently. It runs BEFORE the outreach batch
+  // so that read is over the surviving rows, and it costs nothing extra: these rows were resolved
+  // above for the `live*` columns regardless.
+  if (staffClosedList && filter.outcome) {
+    const wantOutcome = filter.outcome.toUpperCase();
+    cases = cases.filter((c) => {
+      const f = live && closureKindOf(c) === "STAFF" ? liveFieldsFor(liveAnswerForCase(live, c)) : null;
+      return shownStatusFor(c.currentOutcomeStatus, f).toUpperCase() === wantOutcome;
+    });
+  }
+  // ONE lookup for the whole export, not one per case. The per-case form fired a query per row
+  // through `Promise.all` — ~15,300 of them on the pilot, against a ten-connection pool — which
+  // answered 504 at 60 s and held every connection while it did, so the deployment's other pages
+  // timed out for the minute it ran (measured 2026-09-13).
+  const deliveryStatuses = await eventStore.latestOutreachDeliveryStatuses(cases.map((c) => c.id));
   const rows = cases.map((c) => {
     const emp = directory.employeeById(c.employeeId);
     // Absent key ⇒ no outreach action ⇒ null, the same cell the per-case call wrote.
@@ -349,10 +374,10 @@ export async function casesCsv(
     // prior-cycle closures than any other surface, and the cycle equality in `liveAnswerForCase` is
     // what keeps a 2024 closure from being exported under the 2026 winner's answer. Without it the
     // row states a `liveState`, a status and a run id that describe a different measurement year.
-    const answer = live && closureKindOf(c) === "STAFF" ? liveAnswerForCase(live, c) : undefined;
+    const fields = live && closureKindOf(c) === "STAFF" ? liveFieldsFor(liveAnswerForCase(live, c)) : undefined;
     // UNKNOWN is written as the word, not as an empty cell: an empty cell means "not a staff closure".
-    const liveStatus = answer ? (answer.cell?.canonical ?? "UNKNOWN") : "";
-    const liveState = answer ? answer.state : "";
+    const liveStatus = fields ? (fields.outcomeStatus ?? "UNKNOWN") : "";
+    const liveState = fields ? fields.state : "";
     return [
       c.id, c.employeeId, emp?.name ?? c.employeeId, emp?.role ?? "—", emp?.site ?? "—",
       // A case row carries no evidence, so this is the AUTHORED version even for a routed measure.
@@ -361,7 +386,7 @@ export async function casesCsv(
       measureName(c.measureId), authoredVersion(c.measureId), c.evaluationPeriod, c.status, c.priority, c.assignee,
       c.currentOutcomeStatus, c.nextAction, c.lastRunId, c.createdAt, c.updatedAt, c.closedAt, latest,
       emp?.providerId ?? "", emp?.payer ?? "",
-      c.closedReason ?? "", c.closedBy ?? "", liveState, liveStatus, answer?.runId ?? "",
+      c.closedReason ?? "", c.closedBy ?? "", liveState, liveStatus, fields?.runId ?? "",
     ];
   });
   return toCsv(CASE_HEADERS, rows);

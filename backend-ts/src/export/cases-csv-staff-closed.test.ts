@@ -19,6 +19,8 @@ import type { OutcomeRecord, OutcomeWithRun } from "../stores/outcome-store.ts";
 import type { LiveCellDeps } from "../compliance/live-cell.ts";
 import { latestRunsFromRows } from "../test-support/latest-runs.ts";
 import { casesCsv } from "./export-csv.ts";
+import { liveFieldsFor } from "../compliance/live-cell.ts";
+import { liveOrFrozenStatus, shownStatusFor } from "../case/worklist-read-model.ts";
 
 const PERIOD = "2026-06-13";
 const RUN = "win-1";
@@ -203,4 +205,153 @@ test("a closure from a PRIOR cycle is never labelled by today's run", async () =
   // the row wrote, which for these rows is what CQL said in 2024.
   assert.equal(byId.get("case-prior-gap")!.currentOutcomeStatus, "OVERDUE");
   assert.equal(byId.get("case-prior-verified")!.currentOutcomeStatus, "COMPLIANT");
+});
+
+/**
+ * `?outcome` on the staff-closed list (2026-09-20).
+ *
+ * The work list resolves what CQL says TODAY for these rows and filters on THAT (`worklist-read-model`,
+ * `liveOrFrozenStatus`), because `current_outcome_status` froze when the person closed the case. The
+ * export took the same token from the same screen and handed it to the store, which compares the
+ * frozen column — so the file both omitted a row the screen showed and carried one it did not, and
+ * the carried row contradicted its own `liveOutcomeStatus` cell.
+ *
+ * The store stub below applies `q.outcome` the way the real stores do. That is what makes these
+ * assertions real: if the export stops withholding the token, the stub filters on the frozen value
+ * and the rows change.
+ */
+const FROZEN_OVERDUE_RUN = "win-2";
+const MOVED: CaseRecord[] = [
+  // A person closed it as OVERDUE; the winning run now says COMPLIANT.
+  caseRow({ id: "case-moved", employeeId: "emp-006", currentOutcomeStatus: "OVERDUE", lastRunId: FROZEN_OVERDUE_RUN }),
+  // A person closed it as OVERDUE and the winning run still says OVERDUE.
+  caseRow({ id: "case-still", employeeId: "emp-007", currentOutcomeStatus: "OVERDUE", lastRunId: FROZEN_OVERDUE_RUN }),
+];
+const MOVED_WINNERS: OutcomeWithRun[] = [{
+  runId: FROZEN_OVERDUE_RUN, runStartedAt: "2026-06-13T00:00:00Z", runScopeType: "ALL_PROGRAMS", runStatus: "COMPLETED",
+  runTriggeredBy: "manual", subjectId: "emp-006", measureId: "audiogram", status: "COMPLIANT",
+}];
+const MOVED_ROWS: OutcomeRecord[] = [
+  { id: "m-1", runId: FROZEN_OVERDUE_RUN, subjectId: "emp-006", measureId: "audiogram", evaluationPeriod: PERIOD, status: "COMPLIANT", evidence: ev("COMPLIANT"), evaluatedAt: "2026-06-13T00:00:00Z" },
+  { id: "m-2", runId: FROZEN_OVERDUE_RUN, subjectId: "emp-007", measureId: "audiogram", evaluationPeriod: PERIOD, status: "OVERDUE", evidence: ev("OVERDUE"), evaluatedAt: "2026-06-13T00:00:00Z" },
+];
+
+const movedLiveDeps = (rows: OutcomeRecord[] = MOVED_ROWS): LiveCellDeps => ({
+  outcomeStore: {
+    listLatestPopulationRuns: latestRunsFromRows(MOVED_WINNERS),
+    listOutcomes: async (runId: string, opts?: { measureId?: string; subjectIds?: readonly string[] }) => {
+      let out = runId === FROZEN_OVERDUE_RUN ? rows : [];
+      if (opts?.measureId != null) out = out.filter((o) => o.measureId === opts.measureId);
+      if (opts?.subjectIds !== undefined) {
+        const wanted = new Set(opts.subjectIds);
+        out = out.filter((o) => wanted.has(o.subjectId));
+      }
+      return out;
+    },
+  },
+} as unknown as LiveCellDeps);
+
+/** A store that applies `outcome` against the FROZEN column, exactly as both real stores do. */
+const frozenFilteringStore = (all: CaseRecord[], onQuery?: (q: CaseQuery) => void) =>
+  ({
+    listCases: async (q: CaseQuery) => {
+      onQuery?.(q);
+      if (!q.outcome) return all;
+      const want = q.outcome.toUpperCase();
+      return all.filter((c) => (c.currentOutcomeStatus ?? "").toUpperCase() === want);
+    },
+  }) as unknown as CaseStore;
+
+const idsOf = (csv: string) => parse(csv).rows.map((r) => r.caseId!).sort();
+
+test("?outcome on the staff-closed export selects on what CQL says TODAY, as the screen does", async () => {
+  const queries: CaseQuery[] = [];
+  const store = () => frozenFilteringStore(MOVED, (q) => queries.push(q));
+
+  // The screen shows `case-moved` as Compliant, so the CSV taken from it must contain that row and
+  // only that row. Filtering on the frozen column would answer the exact opposite pair.
+  assert.deepEqual(
+    idsOf(await casesCsv(store(), eventStore(), { closure: "staff", outcome: "COMPLIANT" }, {}, movedLiveDeps())),
+    ["case-moved"],
+  );
+  assert.deepEqual(
+    idsOf(await casesCsv(store(), eventStore(), { closure: "staff", outcome: "OVERDUE" }, {}, movedLiveDeps())),
+    ["case-still"],
+  );
+  // Lower-case, as `/api/cases` accepts it: both sides are folded, not just the caller's.
+  assert.deepEqual(
+    idsOf(await casesCsv(store(), eventStore(), { closure: "staff", outcome: "compliant" }, {}, movedLiveDeps())),
+    ["case-moved"],
+  );
+  assert.ok(queries.length > 0 && queries.every((q) => q.outcome === undefined), "the token is withheld from the store on this list");
+});
+
+test("every other list keeps the SQL predicate on the frozen column", async () => {
+  // For an active row the run refreshes `current_outcome_status`, and a system-closed row was closed
+  // by the run that wrote it — so the frozen column IS live there and the fast path is correct. This
+  // is the assertion that keeps the fix from quietly becoming "filter everything in memory".
+  const queries: CaseQuery[] = [];
+  const csv = await casesCsv(frozenFilteringStore(MOVED, (q) => queries.push(q)), eventStore(), { outcome: "OVERDUE" }, {}, movedLiveDeps());
+  assert.equal(queries[0]?.outcome, "OVERDUE", "handed to the store, not applied in memory");
+  assert.deepEqual(idsOf(csv), ["case-moved", "case-still"], "both rows are frozen OVERDUE");
+});
+
+/**
+ * The filter reads the DISPLAY status; the COLUMN carries the canonical bucket. They are different
+ * fields and the difference is load-bearing: an out-of-population row is canonical `MISSING_DATA`
+ * and displays as out-of-population (ADR-079), so a filter comparing the canonical bucket would
+ * select it under a heading saying Missing Data — a different claim about the patient than the one
+ * the screen makes.
+ *
+ * Pinned on `liveFieldsFor` rather than through a fixture, because producing a cell whose display
+ * state differs from its bucket needs an official-routed measure and its `official.populationResults`
+ * evidence; a test that built one would be pinning `deriveCell`, which has its own. What matters
+ * here is that the two fields stay distinct and keep their sources, since the export filter reads one
+ * and the CSV column the other.
+ */
+test("liveFieldsFor keeps the display status and the canonical bucket apart", () => {
+  const fields = liveFieldsFor({
+    state: "CLEAR",
+    runId: "run-9",
+    cell: { status: "OUT_OF_POPULATION", method: "m", canonical: "MISSING_DATA", evaluationPeriod: PERIOD },
+  });
+  assert.equal(fields.displayStatus, "OUT_OF_POPULATION", "what a surface SHOWS, and what the outcome filter compares");
+  assert.equal(fields.outcomeStatus, "MISSING_DATA", "the canonical bucket, which is the CSV's liveOutcomeStatus column");
+  assert.equal(fields.state, "CLEAR");
+  assert.equal(fields.runId, "run-9");
+
+  // No cell (no winning run, or a winner describing another cycle) leaves BOTH null, which is how a
+  // reader falls back to the frozen column instead of reading an absence as an answer.
+  const none = liveFieldsFor({ state: "CLEAR", runId: "run-9", cell: null });
+  assert.equal(none.displayStatus, null);
+  assert.equal(none.outcomeStatus, null);
+  assert.equal(none.state, "UNKNOWN", "and the state says so");
+  assert.equal(none.runId, "run-9", "the run is still named, so the absence can be traced");
+});
+
+/**
+ * The adapter the cases CSV filters through, and the assertion that kills the one mutant the
+ * fixtures could not: swapping the display status for the canonical bucket here changes which rows
+ * the export selects, so it has to fail something.
+ */
+test("shownStatusFor takes the DISPLAY status from a liveFieldsFor result, never the bucket", () => {
+  const fields = liveFieldsFor({
+    state: "CLEAR",
+    runId: "run-9",
+    cell: { status: "OUT_OF_POPULATION", method: "m", canonical: "MISSING_DATA", evaluationPeriod: PERIOD },
+  });
+  assert.equal(shownStatusFor("OVERDUE", fields), "OUT_OF_POPULATION", "the word the screen shows");
+  assert.notEqual(shownStatusFor("OVERDUE", fields), "MISSING_DATA", "and not the bucket the CSV column carries");
+  // No live answer at all ⇒ the frozen column, which is what every non-staff-closed row gets.
+  assert.equal(shownStatusFor("OVERDUE", null), "OVERDUE");
+  assert.equal(shownStatusFor("OVERDUE", liveFieldsFor({ state: "CLEAR", runId: null, cell: null })), "OVERDUE");
+});
+
+// The work list's own rule, applied to the same three fields — the function BOTH surfaces filter on.
+test("liveOrFrozenStatus prefers the display status, then the bucket, then the frozen column", () => {
+  const frozen = { currentOutcomeStatus: "OVERDUE" };
+  assert.equal(liveOrFrozenStatus({ ...frozen, liveDisplayStatus: "OUT_OF_POPULATION", liveOutcomeStatus: "MISSING_DATA" }), "OUT_OF_POPULATION");
+  assert.equal(liveOrFrozenStatus({ ...frozen, liveDisplayStatus: null, liveOutcomeStatus: "COMPLIANT" }), "COMPLIANT");
+  assert.equal(liveOrFrozenStatus({ ...frozen, liveDisplayStatus: null, liveOutcomeStatus: null }), "OVERDUE", "no live answer ⇒ the frozen column");
+  assert.equal(liveOrFrozenStatus(frozen), "OVERDUE", "and absent fields behave as null, not as empty");
 });
