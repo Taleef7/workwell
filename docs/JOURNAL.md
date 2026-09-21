@@ -1,5 +1,60 @@
 # Journal
 
+## 2026-09-21 (night) — four paths flipped to audit-first, and the list was still wrong by three
+
+Owner decision on #598: where a path can audit before it mutates, it should — the ledger errs toward
+an **over-claim** (an event for a change that then failed to commit) rather than toward a silent state
+change. That is the side the hard rule picks and the side every case action already took.
+
+**Flipped:** measure approve, deprecate, the explicit status transition, and terminology-mapping
+create.
+
+Two things had to be true first, and both were checked rather than assumed. `setVersionStatus` is an
+UPDATE on the same `versionId`, so keying an event on the PRE-state record still names the entity the
+mutation touches. And `approveMeasure` audited with `updated ?? r` — the mutation's own result — which
+is exactly the detail that would have made a blind reorder wrong.
+
+**Still mutate-first, and now for a stated reason:** the run-created case transition (deliberate —
+the alternative strands a complete run as RUNNING), `createMeasure`, segment create, and the three
+identity-link writes. The last four share one cause: **the store mints the entity id**, so there is
+nothing to key an event on beforehand. The terminology mapping could flip precisely because it mints
+its own with `crypto.randomUUID()` first — which is also the fix for the others, alongside ADR-073
+d4's intent-then-completion pair.
+
+### Then it was wrong again, and the tool was why
+
+Codex found `attachValueSet` and `detachValueSet` missing from the "complete" list. They are flipped
+now — everything the event needs is known before the link is written — but the interesting part is
+the cause: the sweep matched a **verb whitelist** (`create|update|set|insert|…`), so
+`valueSets.link(...)` and `unlink(...)` never matched anything at all.
+
+Rebuilt without the whitelist (find the audit write, report every preceding non-read `await` in the
+function) and **committed as `backend-ts/scripts/audit-order-sweep.py`**, so the claim is reproducible
+rather than prose. Its current output still holds untriaged candidates — waivers, appointments,
+evidence upload, panel assignment, the import-driven finalize — all now listed on #598 as things to
+open rather than things to name.
+
+**And the shape of the answer was wrong too.** `rerunToVerify` records its action audit-first and
+then writes `CASE_RESOLVED` *after* the patch: a function can be on **both** sides. The contract now
+states the rule per WRITE rather than per function, and says outright that it is not a complete
+inventory and that #598 does not close on it.
+
+Twice in one evening an "authoritative" enumeration in an always-loaded file turned out to be an
+artifact of the matcher that produced it. The lesson that stuck is narrower than "check your work": a
+sweep is worth exactly its matcher, and a list in a document that a session must not contradict
+should either be complete or say loudly that it is not.
+
+### The list was wrong by three, and the reason is worth keeping
+
+The identity writes were in the sweep output all along, attributed to a local helper named `audit`,
+so they read as a false positive. Opening the file showed `upsertLink` mutating and the audit keyed on
+`link.id` from its result — the same shape as the creates, three times over.
+
+That is the third time in one day that opening the file changed the answer: the `IMP` substitution in
+#594, the parse failure read as an assertion, and now this. Recorded in the contract next to the list,
+including *why* it was missed, because "found by a sweep" is worth exactly as much as the sweep's
+attribution.
+
 ## 2026-09-21 (evening) — two controls that promised more than they did
 
 **#598** and **#599**, both from the 2026-09-07 review, both about a claim being wider than the thing

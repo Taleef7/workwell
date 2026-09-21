@@ -169,6 +169,10 @@ export async function handleSegments(req: Request, env: SegmentsEnv, actor: stri
     const overrideErr = validateOverrides(body.overrides);
     if (overrideErr) return bad(overrideErr);
 
+    // Does NOT audit first (#598), and cannot without a store change: `createSegment` mints the id and
+    // returns it, so there is nothing to key an event on beforehand. The fix is the same one
+    // `createTerminologyMapping` already has — mint the id caller-side — or ADR-073 d4's
+    // intent-then-completion pair. Either is a real change rather than a reorder.
     const created = await store.createSegment({
       name: body.name,
       description: typeof body.description === "string" ? body.description : undefined,

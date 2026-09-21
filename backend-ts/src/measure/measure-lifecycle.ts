@@ -51,6 +51,10 @@ export async function createMeasure(
   const policyRef = input.policyRef?.trim();
   const owner = input.owner?.trim();
   if (!name || !policyRef || !owner) throw new MeasureError("name, policyRef and owner are required");
+  // The one in this file that does NOT audit first (#598), and it cannot without a store change: the
+  // audit is keyed on `r.versionId`, which the insert mints. Minting the id caller-side (as
+  // `createTerminologyMapping` does) or an intent-then-completion pair (ADR-073 d4's compaction
+  // pattern) would both work; either is a real change rather than a reorder, so it stays on #598.
   const r = await deps.measures.createMeasure({ name, policyRef, owner });
   await audit(deps, "MEASURE_CREATED", r, actor, { measureId: r.measureId, name, policyRef, owner });
   return r.measureId;
@@ -66,8 +70,12 @@ export async function approveMeasure(deps: MeasureLifecycleDeps, measureId: stri
     throw new MeasureError("Measure cannot be approved until compile status is COMPILED or WARNINGS.");
   }
   if (!readiness.testValidationPassed) throw new MeasureError("Measure cannot be approved until test fixtures pass validation.");
-  const updated = await deps.measures.setVersionStatus(measureId, r.versionId, { status: "Approved", approvedBy: actor });
-  await audit(deps, "MEASURE_APPROVED", updated ?? r, actor, {
+  // AUDIT BEFORE MUTATE (#598, owner decision 2026-09-21). The ledger errs toward an over-claim — a
+  // mutation that then fails leaves an event for a change that did not commit — rather than toward a
+  // silent state change. That is the side the hard rule picks and the side every case action takes.
+  // Safe to key on the PRE-state record: `setVersionStatus` is an UPDATE on the same `versionId`, so
+  // the entity this event names is the one the mutation touches.
+  await audit(deps, "MEASURE_APPROVED", r, actor, {
     measureId,
     version: r.version,
     approvedBy: actor,
@@ -75,6 +83,7 @@ export async function approveMeasure(deps: MeasureLifecycleDeps, measureId: stri
     testFixtureCount: readiness.testFixtureCount,
     testValidationPassed: readiness.testValidationPassed,
   });
+  await deps.measures.setVersionStatus(measureId, r.versionId, { status: "Approved", approvedBy: actor });
   return "Approved";
 }
 
@@ -84,8 +93,13 @@ export async function deprecateMeasure(deps: MeasureLifecycleDeps, measureId: st
   const r = await deps.measures.getLatest(measureId);
   if (!r) return null;
   if (r.status !== "Active") throw new MeasureError("Only Active measures can be deprecated.");
-  await deps.measures.setVersionStatus(measureId, r.versionId, { status: "Deprecated" });
+  // AUDIT BEFORE MUTATE (#598, owner decision 2026-09-21). The ledger errs toward an over-claim — a
+  // mutation that then fails leaves an event for a change that did not commit — rather than toward a
+  // silent state change. That is the side the hard rule picks and the side every case action takes.
+  // Safe to key on the PRE-state record: `setVersionStatus` is an UPDATE on the same `versionId`, so
+  // the entity this event names is the one the mutation touches.
   await audit(deps, "MEASURE_DEPRECATED", r, actor, { measureId, version: r.version, reason: reason.trim(), deprecatedBy: actor });
+  await deps.measures.setVersionStatus(measureId, r.versionId, { status: "Deprecated" });
   return "Deprecated";
 }
 
@@ -115,7 +129,11 @@ export async function transitionStatus(deps: MeasureLifecycleDeps, measureId: st
     }
     if (!readiness.ready) throw new MeasureError("Measure cannot be activated until test fixtures pass validation");
   }
-  await deps.measures.setVersionStatus(measureId, r.versionId, { status: targetStatus, activate: targetStatus === "Active" });
+  // AUDIT BEFORE MUTATE (#598, owner decision 2026-09-21). The ledger errs toward an over-claim — a
+  // mutation that then fails leaves an event for a change that did not commit — rather than toward a
+  // silent state change. That is the side the hard rule picks and the side every case action takes.
+  // Safe to key on the PRE-state record: `setVersionStatus` is an UPDATE on the same `versionId`, so
+  // the entity this event names is the one the mutation touches.
   await audit(deps, "MEASURE_VERSION_STATUS_CHANGED", r, actor, {
     measureId,
     fromStatus: r.status,
@@ -126,5 +144,6 @@ export async function transitionStatus(deps: MeasureLifecycleDeps, measureId: st
     testValidationPassed: readiness.testValidationPassed,
     activationBlockers: readiness.activationBlockers,
   });
+  await deps.measures.setVersionStatus(measureId, r.versionId, { status: targetStatus, activate: targetStatus === "Active" });
   return targetStatus;
 }

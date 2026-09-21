@@ -29,11 +29,12 @@ sprint context — read them for background, never act on them.
 - Auth: user accounts remain hardcoded (no SSO, no real user directory). The JWT refresh token flow (HttpOnly cookie, token rotation, `/api/auth/refresh`) is approved and implemented.
 - Email: `WORKWELL_EMAIL_PROVIDER=simulated` is the default and must remain so on the demo stack. SendGrid wiring exists in the code but must not be activated unless `WORKWELL_EMAIL_SENDGRID_API_KEY` is explicitly set (with `WORKWELL_EMAIL_PROVIDER=sendgrid`) in a non-demo environment.
 - AI never decides compliance (see docs/AI_GUARDRAILS.md). CQL engine is sole source of truth.
-- Every state change writes `audit_event` — the RULE, and it is not everywhere true today (#598).
-  **CASE actions audit first and cannot lose the event.** The run-created case transition, the measure
-  lifecycle, segment create and terminology-mapping create all MUTATE first and audit after, so each
-  can. Write new code audit-first; `DATA_MODEL_CONTRACTS` §4 carries the list and why the run's
-  ordering is deliberate.
+- Every state change writes `audit_event` — the RULE, and **not yet everywhere true (#598)**. Write
+  new code **audit-first**: the ledger errs toward an over-claim rather than a silent state change.
+  Case actions and several measure/value-set paths already do; the run-created case transition
+  deliberately does not, and an untriaged set remains. `DATA_MODEL_CONTRACTS` §4 has what is verified,
+  and `backend-ts/scripts/audit-order-sweep.py` finds candidates — **the inventory is not complete, so
+  #598 does not close on §4 alone.**
 - No silent scope changes. If a stop condition triggers, document fallback in JOURNAL.md.
 - Schema migrations are owned by Taleef — never written or applied by an agent without explicit instruction
 
