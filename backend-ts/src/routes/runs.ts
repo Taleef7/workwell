@@ -37,7 +37,7 @@ import type { CaseStore } from "../stores/case-store.ts";
 import type { HydratedSegment } from "../stores/segment-store.ts";
 import { ensureSegmentSeed } from "../segment/segment-seed.ts";
 import { OFFICIAL_LOGIC_VERSION_PREFIX, routedEngineForEnv } from "../wiring/executor-router.ts";
-import { toRunListItemFromCounts, toRunSummaryFromCounts, toRunLogEntries, toRunOutcomeRows, matchesRunFilters, type RunFilters } from "../run/read-models.ts";
+import { toRunListItemFromCounts, toRunSummaryFromCounts, toRunLogEntries, toRunOutcomeRows, runCandidates, type RunFilters } from "../run/read-models.ts";
 import { recoverStuckRuns } from "../run/recover-stuck-runs.ts";
 import { isReportableRunStatus } from "../run/reportable.ts";
 import { compactionExposure } from "../run/compaction-evidence.ts";
@@ -515,9 +515,11 @@ export async function handleRuns(
     };
     const runStore = await store(env);
     const outcomeStore = await outcomes(env);
-    // Filter first, then cap, so `limit` bounds the *matching* rows (matches the Java
-    // endpoint) rather than pre-truncating before filters apply.
-    const matching = (await runStore.listRuns(1000)).filter((r) => matchesRunFilters(r, filters)).slice(0, limit);
+    // Filter first, then cap, so `limit` bounds the *matching* rows (matches the Java endpoint)
+    // rather than pre-truncating before filters apply. The candidate read is SHARED with the CSV
+    // (`runCandidates`) — it was 1,000 here and unbounded there, which past 1,000 runs would have
+    // exported rows this screen never showed (#601, review).
+    const matching = (await runCandidates(runStore, filters)).slice(0, limit);
     // Bounded GROUP BY per run (not listOutcomes) so the list never materializes the 120k-row
     // seed:scale outcomes — the previous per-run full-row load pushed ?limit=20 past the 60s gateway
     // timeout once scale was seeded on Neon (post-audit perf fix).

@@ -15,6 +15,8 @@ import { SqliteOutcomeStore } from "../stores/sqlite/outcome-store-sqlite.ts";
 import { SqliteCaseStore } from "../stores/sqlite/case-store-sqlite.ts";
 import { SqliteCaseEventStore } from "../stores/sqlite/case-event-store-sqlite.ts";
 import { handleExports } from "./exports.ts";
+import { runsCsv } from "../export/export-csv.ts";
+import { runCandidates } from "../run/read-models.ts";
 
 const dbPath = join(tmpdir(), `workwell-exports-${crypto.randomUUID()}.sqlite`);
 let env: { DB: unknown };
@@ -302,4 +304,30 @@ test("the runs export cap applies AFTER filtering, not to the read", async () =>
   }
   const raised = await runLines("limit=5000");
   assert.ok(raised.length >= 3, "a larger cap is honoured");
+});
+
+test("the runs CSV and /api/runs scan the SAME candidate set (#601, review)", async () => {
+  // The first cut of #601 made the export's read unbounded and left the list route at 1,000 — which
+  // fixed the export's own truncation and recreated the parity defect from the other side: past
+  // 1,000 runs, a filter matching only older rows would export runs the screen had never shown.
+  // Both now go through `runCandidates`, and this asks the store what each surface actually
+  // requested rather than trusting that they still share a helper.
+  const asked: number[] = [];
+  const spyStore = {
+    listRuns: async (limit: number) => {
+      asked.push(limit);
+      return [];
+    },
+  } as unknown as Parameters<typeof runsCsv>[0];
+  const noOutcomes = { countOutcomesByStatus: async () => [] } as unknown as Parameters<typeof runsCsv>[1];
+
+  await runsCsv(spyStore, noOutcomes, 200, { status: "FAILED" });
+  assert.deepEqual(asked, [Number.MAX_SAFE_INTEGER], "the export scans every candidate, then caps");
+
+  // And the list route asks for the same thing — the request it issues is the observable proof, so a
+  // future edit that re-caps one of them fails here rather than in a user's CSV.
+  const runStore = new SqliteRunStore((env as { DB: never }).DB);
+  const viaHelper = await runCandidates(runStore, { status: "FAILED" });
+  const viaExport = (await text("/api/exports/runs?format=csv&status=FAILED")).filter((l) => l.length > 0);
+  assert.equal(viaExport.length - 1, viaHelper.length, "same filter, same number of rows on both paths");
 });
