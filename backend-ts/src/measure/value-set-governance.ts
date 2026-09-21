@@ -332,18 +332,9 @@ export async function createTerminologyMapping(
   }
   const id = crypto.randomUUID();
   const mappingStatus = req.mappingStatus ?? "PROPOSED";
-  const record = await deps.valueSets.createTerminologyMapping({
-    id,
-    localCode: req.localCode,
-    localDisplay: req.localDisplay,
-    localSystem: req.localSystem,
-    standardCode: req.standardCode,
-    standardDisplay: req.standardDisplay,
-    standardSystem: req.standardSystem,
-    mappingStatus,
-    mappingConfidence: req.mappingConfidence,
-    notes: req.notes,
-  });
+  // AUDIT BEFORE MUTATE (#598, owner decision 2026-09-21). The ledger errs toward an over-claim over a
+  // silent state change. Possible HERE precisely because the id is minted above rather than by the
+  // insert — which is the shape the two remaining create paths would need before they can follow.
   await deps.events.appendAudit({
     eventType: "TERMINOLOGY_MAPPING_CREATED",
     entityType: "terminology_mapping",
@@ -361,6 +352,18 @@ export async function createTerminologyMapping(
       mappingStatus,
       mappingConfidence: req.mappingConfidence,
     },
+  });
+  const record = await deps.valueSets.createTerminologyMapping({
+    id,
+    localCode: req.localCode,
+    localDisplay: req.localDisplay,
+    localSystem: req.localSystem,
+    standardCode: req.standardCode,
+    standardDisplay: req.standardDisplay,
+    standardSystem: req.standardSystem,
+    mappingStatus,
+    mappingConfidence: req.mappingConfidence,
+    notes: req.notes,
   });
   return record;
 }

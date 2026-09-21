@@ -134,22 +134,32 @@ SQLite floor and the Pg ceiling read the current row and apply the shared pure `
   > - every case action (`case/case-actions.ts`), where `recordCaseEvent` makes the action row and the
   >   audit row one transaction and the patch follows;
   > - rerun-to-verify's case patch (`case/case-rerun.ts`), which says so at the call site;
-  > - bulk assign and panel backfill, through the batch `recordCaseEvents`.
+  > - bulk assign and panel backfill, through the batch `recordCaseEvents`;
+  > - **measure approve, deprecate and the explicit status transition**, and **terminology-mapping
+  >   create** — flipped 2026-09-21 (owner decision on #598). The ledger errs toward an **over-claim**
+  >   (an event for a change that then failed to commit) rather than toward a silent state change.
+  >   Keying the event on the PRE-state record is sound because `setVersionStatus` is an UPDATE on the
+  >   same `versionId`; the mapping could flip because it mints its own id with `crypto.randomUUID()`
+  >   **before** the insert.
   >
-  > A failure between the two leaves an action **recorded but not applied** — recoverable, and never a
+  > A failure between the two leaves the change **recorded but not applied** — visible, and never a
   > silent state change.
   >
-  > **MUTATE FIRST — can apply a change and lose the event:**
+  > **MUTATE FIRST — can apply a change and lose the event. All that remain, and why:**
   > - the **run-created case transition** (`run/run-pipeline.ts`), which audits best-effort after the
   >   upsert. **This one is deliberate**: the alternative strands an otherwise-complete run as RUNNING
   >   after the case was already mutated;
-  > - the **measure lifecycle** — create, approve, deprecate and the explicit status transition
-  >   (`measure/measure-lifecycle.ts`);
-  > - **segment create** (`routes/segments.ts`) and **terminology-mapping create**
-  >   (`measure/value-set-governance.ts`).
+  > - **`createMeasure`** (`measure/measure-lifecycle.ts`), **segment create** (`routes/segments.ts`)
+  >   and the three **identity link** writes — confirm, break and re-assert (`routes/identity.ts`).
   >
-  > Only the first is a considered trade. The rest are simply the order they were written in, and new
-  > code should audit first.
+  > The last four share one cause: **the store mints the entity id**, so there is nothing to key an
+  > event on beforehand. Fixing them means minting the id caller-side (as the terminology mapping
+  > does) or the intent-then-completion pair ADR-073 d4 already runs for compaction — a real change
+  > rather than a reorder, tracked on #598.
+  >
+  > **New code audits first.** And the list above was built by sweeping for the shape rather than from
+  > memory, twice: the identity writes were missed on the first pass because the sweep attributed them
+  > to a local helper named `audit` and they read as a false positive until opened.
   >
   > **What is missing is the primitive, not the ordering** (for the run; for the others the ordering
   > is missing too)**.** There is no `applyCaseAction({ patch,

@@ -169,6 +169,10 @@ async function reconcile(req: Request, env: IdentityEnv, actor: string, personId
     // Pair the target with a DISTINCT member of the person (its primary, unless that IS the target).
     const anchor = person.sources.find((sr) => !isTarget(sr));
     if (!anchor) return json({ error: "invalid_request", message: "no distinct record to link the target to" }, 400);
+    // Does NOT audit first (#598), and cannot without a store change: the event is keyed on `link.id`,
+    // which `upsertLink` mints. Same cause and same fix as `createMeasure` and segment create — mint
+    // the id caller-side, or ADR-073 d4's intent-then-completion pair. All three identity writes below
+    // share it.
     const link = await s.personLinks.upsertLink({ a: anchor, b: target, linkType: "CONFIRMED", createdBy: actor });
     await audit("IDENTITY_LINK_CONFIRMED", link.id, { personId, action, anchor, target });
     const after = resolvePeople(undefined, await s.personLinks.listLinks());
