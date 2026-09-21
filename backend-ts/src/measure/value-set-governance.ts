@@ -164,14 +164,17 @@ export async function createValueSet(
 
 export async function attachValueSet(deps: ValueSetGovernanceDeps, measureId: string, valueSetId: string, actor = "system"): Promise<void> {
   const versionId = await latestVersionId(deps, measureId);
-  await deps.valueSets.link(versionId, valueSetId);
+  // AUDIT BEFORE MUTATE (#598). Everything the event needs — the version, the measure, the value set —
+  // is known before the link is written.
   await deps.events.appendAudit(auditLink("MEASURE_VALUE_SET_LINKED", versionId, measureId, valueSetId, actor));
+  await deps.valueSets.link(versionId, valueSetId);
 }
 
 export async function detachValueSet(deps: ValueSetGovernanceDeps, measureId: string, valueSetId: string, actor = "system"): Promise<void> {
   const versionId = await latestVersionId(deps, measureId);
-  await deps.valueSets.unlink(versionId, valueSetId);
+  // AUDIT BEFORE MUTATE (#598), as `attachValueSet` above.
   await deps.events.appendAudit(auditLink("MEASURE_VALUE_SET_UNLINKED", versionId, measureId, valueSetId, actor));
+  await deps.valueSets.unlink(versionId, valueSetId);
 }
 
 function auditLink(eventType: string, versionId: string, measureId: string, valueSetId: string, actor: string) {

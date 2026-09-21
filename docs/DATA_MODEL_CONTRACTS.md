@@ -130,36 +130,37 @@ SQLite floor and the Pg ceiling read the current row and apply the shared pure `
   > the event", true of CASE actions and false of several other operator surfaces. The list below came
   > from a sweep for the mutate-before-audit shape rather than from memory.
   >
-  > **AUDIT FIRST — cannot produce an unaudited state change:**
-  > - every case action (`case/case-actions.ts`), where `recordCaseEvent` makes the action row and the
-  >   audit row one transaction and the patch follows;
-  > - rerun-to-verify's case patch (`case/case-rerun.ts`), which says so at the call site;
-  > - bulk assign and panel backfill, through the batch `recordCaseEvents`;
-  > - **measure approve, deprecate and the explicit status transition**, and **terminology-mapping
-  >   create** — flipped 2026-09-21 (owner decision on #598). The ledger errs toward an **over-claim**
-  >   (an event for a change that then failed to commit) rather than toward a silent state change.
-  >   Keying the event on the PRE-state record is sound because `setVersionStatus` is an UPDATE on the
-  >   same `versionId`; the mapping could flip because it mints its own id with `crypto.randomUUID()`
-  >   **before** the insert.
+  > **THE RULE FOR NEW CODE: audit before you mutate.** The ledger errs toward an over-claim — an
+  > event for a change that then failed to commit — rather than toward a silent state change. That is
+  > the side the hard rule picks (it constrains missing entries, and says nothing about extra ones),
+  > and the side every case action takes: `recordCaseEvent` makes the action row and the audit row one
+  > transaction, and the patch follows.
   >
-  > A failure between the two leaves the change **recorded but not applied** — visible, and never a
-  > silent state change.
+  > **Verified and flipped (2026-09-21, owner decision on #598):** measure approve, deprecate and the
+  > explicit status transition; terminology-mapping create; value-set attach and detach.
   >
-  > **MUTATE FIRST — can apply a change and lose the event. All that remain, and why:**
-  > - the **run-created case transition** (`run/run-pipeline.ts`), which audits best-effort after the
-  >   upsert. **This one is deliberate**: the alternative strands an otherwise-complete run as RUNNING
-  >   after the case was already mutated;
-  > - **`createMeasure`** (`measure/measure-lifecycle.ts`), **segment create** (`routes/segments.ts`)
-  >   and the three **identity link** writes — confirm, break and re-assert (`routes/identity.ts`).
+  > **Known to still mutate first, with the reason at each call site:**
+  > - the **run-created case transition** — **deliberate**, because the alternative strands an
+  >   otherwise-complete run as RUNNING after the case was already mutated;
+  > - **`createMeasure`**, **segment create** and the three **identity-link** writes, which share one
+  >   cause: the store mints the entity id, so there is nothing to key an event on beforehand. The fix
+  >   is to mint it caller-side (as `createTerminologyMapping` does) or ADR-073 d4's
+  >   intent-then-completion pair — a real change rather than a reorder.
   >
-  > The last four share one cause: **the store mints the entity id**, so there is nothing to key an
-  > event on beforehand. Fixing them means minting the id caller-side (as the terminology mapping
-  > does) or the intent-then-completion pair ADR-073 d4 already runs for compaction — a real change
-  > rather than a reorder, tracked on #598.
+  > **This is NOT a complete inventory, and two earlier versions of this paragraph wrongly implied it
+  > was.** `backend-ts/scripts/audit-order-sweep.py` lists every `await` preceding an audit write, and
+  > its output on the current tree still contains untriaged candidates — waivers, appointments,
+  > evidence upload, panel assignment, the import-driven finalize and others. **#598 owns that
+  > triage**, and nothing should read this section as licence to close it.
   >
-  > **New code audits first.** And the list above was built by sweeping for the shape rather than from
-  > memory, twice: the identity writes were missed on the first pass because the sweep attributed them
-  > to a local helper named `audit` and they read as a false positive until opened.
+  > Two things the corrections taught, both worth keeping:
+  > - **A function can be on BOTH sides.** `rerunToVerify` records its action audit-first and then
+  >   writes `CASE_RESOLVED` after the patch. A per-path binary list cannot express that, which is why
+  >   the rule above is stated per WRITE rather than per function.
+  > - **A sweep is worth exactly its matcher.** The first one used a verb whitelist and missed
+  >   `valueSets.link`/`unlink` entirely; it also attributed the identity writes to a local helper
+  >   named `audit`, so they read as false positives until opened. Both were caught in review, not by
+  >   the tool.
   >
   > **What is missing is the primitive, not the ordering** (for the run; for the others the ordering
   > is missing too)**.** There is no `applyCaseAction({ patch,
