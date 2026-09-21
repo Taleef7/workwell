@@ -910,3 +910,37 @@ test("import: the three interval shapes produce three DIFFERENT statuses", () =>
   ].map((t) => JSON.stringify(conditionFromDoc(t)?.clinicalStatus ?? null));
   assert.equal(new Set(statuses).size, 3, `expected three distinct statuses, got ${statuses.join(" | ")}`);
 });
+
+test("import: a MALFORMED high value is a parse failure, not an open interval", () => {
+  // `20240230` is a date the source asserted and this importer cannot parse - 30 February. The first
+  // cut of #594 inferred `endUnknown` from "a <high> exists and produced no date", which is true here
+  // too, so it reported the diagnosis as `active`: a status the document never asserted, on a
+  // condition whose end date we simply failed to understand, and one that can put the patient into a
+  // measure population. It is the nullFlavor that says "open", not our own failure to read a value.
+  const condition = conditionFromDoc(`<effectiveTime><low value="20240101"/><high value="20240230"/></effectiveTime>`);
+  assert.ok(condition);
+  assert.equal(condition!.abatementDateTime, undefined, "nothing parseable to record");
+  assert.equal(condition!.clinicalStatus, undefined, "not active, not resolved - the document was not understood");
+});
+
+test("import: an EMPTY high element asserts nothing either", () => {
+  // No value and no nullFlavor: the element is there but says nothing at all.
+  const condition = conditionFromDoc(`<effectiveTime><low value="20240101"/><high/></effectiveTime>`);
+  assert.ok(condition);
+  assert.equal(condition!.clinicalStatus, undefined);
+});
+
+test("import: other nullFlavor spellings are open intervals too, not just UNK", () => {
+  // `NI`, `NA`, `ASKU` all say the same thing for this purpose: the source addressed the end and
+  // recorded no value for it. Keying on UNK alone would read the rest as silence.
+  for (const flavor of ["UNK", "NI", "NA", "ASKU"]) {
+    const condition = conditionFromDoc(
+      `<effectiveTime><low value="20240101"/><high nullFlavor="${flavor}"/></effectiveTime>`,
+    );
+    assert.deepEqual(
+      condition!.clinicalStatus,
+      { coding: [{ system: CLINICAL, code: "active" }] },
+      `nullFlavor="${flavor}" is an explicit open interval`,
+    );
+  }
+});

@@ -202,7 +202,14 @@ function times(node: CdaNode | undefined): { point?: string; start?: string; end
   // assertion: `nullFlavor="UNK"` is an explicit "this has not ended, and I do not know when it
   // will" - QDM open prevalence - while an absent element is silence. One licenses reporting the
   // condition as active; the other licenses nothing.
-  const endUnknown = high !== undefined && end === undefined;
+  //
+  // **It is the nullFlavor that says so, not the absence of a parsed date** (Codex review). The first
+  // cut asked `high !== undefined && end === undefined`, which is also true of `<high
+  // value="20240230"/>` - a value the source DID assert and this importer could not parse. Reading
+  // that as an open interval would report `active` for a diagnosis whose end date we simply failed to
+  // understand, and that status can put the condition into a measure population. A malformed value is
+  // neither a closed interval nor an open one: it is a parse failure, and it says nothing.
+  const endUnknown = end === undefined && typeof high?.attrs.nullFlavor === "string" && high.attrs.nullFlavor.length > 0;
   return {
     start: isoFromHl7(child(node, "low")?.attrs.value),
     end,

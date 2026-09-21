@@ -397,3 +397,41 @@ test("stamping does not leak into the caller's bundle (ADR-008: the authored out
   preparedForQiCore(bundle as never);
   assert.equal((resource as { meta?: unknown }).meta, undefined, "the caller's own bundle is untouched");
 });
+
+test("normalizing one category entry does not discard the others (#594, review)", () => {
+  // The first cut flattened every entry's codings into one list, picked a single recognised code and
+  // assigned the result AS the whole array - so a Condition carrying two categories kept one and lost
+  // the other, with any text or extension on it. That is data loss dressed as normalization, which is
+  // the defect this change exists to remove.
+  const bundle = bundleWith({
+    resourceType: "Condition",
+    category: [
+      { coding: [{ code: "encounter-diagnosis" }] },
+      { text: "the practice's own label" },
+      { coding: [{ code: "wibble" }], text: "unrecognised, and kept" },
+    ],
+  });
+  prepareForQiCore(bundle);
+  const category = bundle.entry[0]!.resource.category as Array<Record<string, unknown>>;
+  assert.equal(category.length, 3, "every entry survives");
+  assert.deepEqual(category[0], {
+    coding: [{ system: "http://terminology.hl7.org/CodeSystem/condition-category", code: "encounter-diagnosis" }],
+  });
+  assert.deepEqual(category[1], { text: "the practice's own label" }, "text-only entries are untouched");
+  assert.deepEqual(
+    category[2],
+    { coding: [{ code: "wibble" }], text: "unrecognised, and kept" },
+    "an unrecognised code is left exactly as it came, alongside its text",
+  );
+});
+
+test("a normalized category entry keeps its own text and extensions", () => {
+  const bundle = bundleWith({
+    resourceType: "Condition",
+    category: [{ coding: [{ code: "problem-list-item" }], text: "Problem list", id: "cat-1" }],
+  });
+  prepareForQiCore(bundle);
+  const entry = (bundle.entry[0]!.resource.category as Array<Record<string, unknown>>)[0]!;
+  assert.equal(entry.text, "Problem list", "only `coding` is replaced");
+  assert.equal(entry.id, "cat-1");
+});

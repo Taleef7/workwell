@@ -68,6 +68,15 @@ from. The value sets are complete rather than "the codes the corpus emits": a se
 `active` would decline to normalize `resolved` and leave it unretrievable, which reads as caution and
 is the old bug in a new coat.
 
+**d1a. Normalizing an entry may not discard its neighbours** (review). `Condition.category` is an
+array, and the first cut flattened every entry's codings, chose one recognised code and assigned the
+result as the whole array — so a Condition carrying two categories kept one and lost the other, along
+with any `text` or extension on it. Each entry is normalized on its own and everything else it
+carries is preserved; an entry that cannot be normalized passes through unchanged rather than being
+dropped, for the same reason an unrecognised code is left alone. Data loss dressed as normalization
+is the defect this ADR removes, and it must not appear inside the fix — which, twice now, is exactly
+where it appeared.
+
 **d2. A required target field does not authorize inventing its value.** Where a profile needs a field
 the source never supplied, the resource goes unretrieved. That is the honest outcome, and it is the
 same rule the onset paragraph in that file already applied: if a measure genuinely cannot retrieve
@@ -75,10 +84,18 @@ without a field, the answer is a **source that records it**, not a value minted 
 
 **d3. The QRDA-I importer derives `clinicalStatus`, because that is where the source semantics are
 known** — and `times()` now reports three states rather than two. A `<high>` with a value closes the
-interval (`resolved`, matching the `abatementDateTime` written from the same value); a
-`<high nullFlavor="UNK"/>` is QDM open prevalence, an explicit assertion of no known end (`active`);
-an absent `<high>` is silence and emits nothing. Collapsing the last two was what made a faithful
+interval (`resolved`, matching the `abatementDateTime` written from the same value); a `<high>`
+carrying a `nullFlavor` is QDM open prevalence, an explicit assertion of no known end (`active`); an
+absent `<high>` is silence and emits nothing. Collapsing the last two was what made a faithful
 mapping impossible to write however the mapping itself was expressed.
+
+**It is the `nullFlavor` that says "open", not our own failure to parse a value** (review). The first
+cut asked "a `<high>` exists and produced no date", which is equally true of `<high
+value="20240230"/>` — a date the source asserted and the importer could not read. Reporting that as
+`active` would assert a status the document never made, about a condition whose end we simply failed
+to understand, and that status can put the patient into a measure population. A parse failure is a
+third thing, and it says nothing. Any `nullFlavor` counts, not `UNK` alone: `NI`, `NA` and `ASKU` all
+mean the source addressed the end and recorded no value for it.
 
 **d4. A corpus bundle carries only what was KNOWN BY its as-of.** The filter is on the date each fact
 was recorded — the value already handed to `provenanceFor` — and not on "every date inside the
@@ -105,8 +122,13 @@ against an unbounded one and must be identical.
 - A mid-year evaluation now returns different — correct — numbers from what it would have returned
   before d4. No reported number is among them, because every official measurement is at year end.
 - The fixtures are deliberately adversarial per the review's own bar: refuted, resolved,
-  `entered-in-error`, an unrecognised code, an inpatient class, and the three interval shapes. A
-  fixture that cannot change the answer cannot distinguish a correct mapping from the previous one.
+  `entered-in-error`, an unrecognised code, an inpatient class, a malformed `20240230`, a
+  multi-entry category, and the three interval shapes. A fixture that cannot change the answer cannot
+  distinguish a correct mapping from the previous one.
+- **Three separate cuts of this change re-committed the error it exists to remove** — substituting a
+  default code for `IMP`, reading a parse failure as an assertion, and replacing an array to
+  normalize one of its entries. Each was caught by a test rather than by review of the idea, which is
+  the argument for writing the adversarial fixture first and the convenient one never.
 
 ## ADR-085: a long run yields the event loop between subjects, and a run too long for a request is scheduled rather than awaited
 

@@ -107,14 +107,36 @@ function unbindable(concept: unknown): boolean {
  */
 function withSystem(value: unknown, system: string, allowed: ReadonlySet<string>): { coding: Array<{ system: string; code: string }> } | undefined {
   if (value === undefined || value === null) return undefined;
-  const codings = Array.isArray(value)
-    ? (value as Array<{ coding?: Array<{ system?: unknown; code?: unknown }> }>).flatMap((entry) => entry?.coding ?? [])
-    : ((value as { coding?: Array<{ system?: unknown; code?: unknown }> }).coding ?? []);
+  const codings = (value as { coding?: Array<{ system?: unknown; code?: unknown }> }).coding ?? [];
   if (!Array.isArray(codings) || codings.length === 0) return undefined;
   if (codings.some((coding) => typeof coding?.system === "string" && coding.system.length > 0)) return undefined;
   const code = codings.find((coding) => typeof coding?.code === "string" && allowed.has(coding.code as string))?.code;
   if (typeof code !== "string") return undefined;
   return { coding: [{ system, code }] };
+}
+
+/**
+ * The same rule over an ARRAY field (`Condition.category`), entry by entry (Codex review).
+ *
+ * The first cut flattened every entry's codings into one list, picked a single recognised code and
+ * assigned the result as the whole array - so a Condition carrying two categories kept one and lost
+ * the other, along with any `text` or extension on it. That is data loss dressed as normalization,
+ * which is the defect this change exists to remove, so it must not appear inside the fix.
+ *
+ * An entry that cannot be normalized is passed through UNCHANGED rather than dropped: the same reason
+ * an unrecognised code is left alone, one level up.
+ */
+function eachWithSystem(value: unknown, system: string, allowed: ReadonlySet<string>): unknown[] | undefined {
+  if (!Array.isArray(value) || value.length === 0) return undefined;
+  let changed = false;
+  const next = value.map((entry) => {
+    const normalized = withSystem(entry, system, allowed);
+    if (!normalized) return entry;
+    changed = true;
+    // Preserve everything else the entry carried; only its `coding` is replaced.
+    return { ...(entry as Record<string, unknown>), coding: normalized.coding };
+  });
+  return changed ? next : undefined;
 }
 
 /** As `withSystem`, for a bare Coding (`Encounter.class`) rather than a CodeableConcept. */
@@ -280,10 +302,9 @@ export function prepareForQiCore(bundle: PreparableBundle): void {
       if (clinical) resource.clinicalStatus = clinical;
       const verification = withSystem(resource.verificationStatus, CONDITION_VER_STATUS, CONDITION_VERIFICATION_CODES);
       if (verification) resource.verificationStatus = verification;
-      const category = withSystem(resource.category, CONDITION_CATEGORY, CONDITION_CATEGORY_CODES);
-      // An ARRAY field: one normalized entry, because the input's codings were all unbindable and
-      // carried one recognisable code between them.
-      if (category) resource.category = [category];
+      // An ARRAY field, normalized entry by entry so nothing else in it is lost.
+      const category = eachWithSystem(resource.category, CONDITION_CATEGORY, CONDITION_CATEGORY_CODES);
+      if (category) resource.category = category;
     } else if (resource.resourceType === "Encounter") {
       const encounterClass = codingWithSystem(resource.class, V3_ACT_CODE, ENCOUNTER_CLASS_CODES);
       if (encounterClass) resource.class = encounterClass;
