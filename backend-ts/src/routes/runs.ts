@@ -411,8 +411,11 @@ async function scheduleAsyncRun(
   body: ManualRunRequest,
   waitUntil: WaitUntil | undefined,
 ): Promise<ManualRunResponse | null> {
-  const configuredMeasure = body.scopeType === "MEASURE" && isWebChartConfigured(deps.webChartEnv ?? {});
-  if (!waitUntil || (!ASYNC_SCOPES.has(body.scopeType) && !configuredMeasure)) return null;
+  // The `|| configuredMeasure` that used to sit here scheduled a WebChart-configured MEASURE so its
+  // remote population load would not block the response. MEASURE is now async on every deployment
+  // (#590), so that clause could no longer change the answer — and a condition that reads as present
+  // and cannot fire is the guard shape this codebase keeps finding. It is gone rather than dormant.
+  if (!waitUntil || !ASYNC_SCOPES.has(body.scopeType)) return null;
   const planned = await planManualRun(deps, body);
   // finishOrFail finalizes FAILED on a post-response error. The warm follows it inside the SAME
   // background task so it cannot run against a half-written run — a Recalculate invalidates every
