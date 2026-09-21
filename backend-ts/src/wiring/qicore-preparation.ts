@@ -66,23 +66,107 @@ export interface PreparableBundle {
   entry: Array<{ resource: Record<string, unknown> }>;
 }
 
-const clinicalActive = () => ({
-  coding: [{ system: "http://terminology.hl7.org/CodeSystem/condition-clinical", code: "active" }],
-});
-const verificationConfirmed = () => ({
-  coding: [{ system: "http://terminology.hl7.org/CodeSystem/condition-ver-status", code: "confirmed" }],
-});
-const problemCategory = () => [
-  { coding: [{ system: "http://terminology.hl7.org/CodeSystem/condition-category", code: "problem-list-item" }] },
-];
-const ambulatoryClass = () => ({ system: "http://terminology.hl7.org/CodeSystem/v3-ActCode", code: "AMB" });
+// The systems these four fields bind. They are the ONLY thing this module supplies for a coded field:
+// the code always comes from the source (#594). Constants rather than inline strings because
+// `withSystem` takes the system and the value set as a pair and they must not drift apart.
+const CONDITION_CLINICAL = "http://terminology.hl7.org/CodeSystem/condition-clinical";
+const CONDITION_VER_STATUS = "http://terminology.hl7.org/CodeSystem/condition-ver-status";
+const CONDITION_CATEGORY = "http://terminology.hl7.org/CodeSystem/condition-category";
+const V3_ACT_CODE = "http://terminology.hl7.org/CodeSystem/v3-ActCode";
 
-/** True when a CodeableConcept carries no coding that names a system — i.e. nothing that can bind. */
+/**
+ * True when a CodeableConcept carries no coding that names a system — i.e. nothing that can bind.
+ *
+ * ABSENT is not unbindable, and the distinction is the whole of #594. This returned `true` for a
+ * missing field too, so every caller below read "there is a code here that cannot bind" and
+ * "the source said nothing" as the same condition — and answered both by minting a value.
+ */
 function unbindable(concept: unknown): boolean {
   const codings = (concept as { coding?: Array<{ system?: unknown }> } | undefined)?.coding;
   if (!Array.isArray(codings) || codings.length === 0) return true;
   return !codings.some((coding) => typeof coding?.system === "string" && coding.system.length > 0);
 }
+
+/**
+ * Stamp the field's system onto a code that is ALREADY THERE, preserving the code (#594).
+ *
+ * This is the whole of what this module is allowed to do to a coded field, and the shape matters more
+ * than it looks. The previous form asked only "can this bind?" and, when it could not, assigned a
+ * module-level DEFAULT — so the code the source wrote was discarded. A system-less `resolved` became
+ * `active`; a system-less `refuted` or `entered-in-error` became `confirmed`. The docstring above
+ * claimed that hole was closed and it was not: `unbindable()` is true of a system-less `resolved` just
+ * as it is of a system-less `active`, and both took the same default.
+ *
+ * Returns the normalized concept, or `undefined` meaning "leave this alone", for three distinct
+ * reasons that must not be conflated:
+ * - **absent** — the source said nothing, and a required target field does not authorize inventing a
+ *   value (ADR-037; the whole of #594);
+ * - **already bindable** — something names a system, so there is nothing to fix;
+ * - **a code we do not recognise** — we cannot claim to know which system it came from. `{text: "real"}`
+ *   with no code at all is this case, and so is any code outside the field's own value set.
+ */
+function withSystem(value: unknown, system: string, allowed: ReadonlySet<string>): { coding: Array<{ system: string; code: string }> } | undefined {
+  if (value === undefined || value === null) return undefined;
+  const codings = (value as { coding?: Array<{ system?: unknown; code?: unknown }> }).coding ?? [];
+  if (!Array.isArray(codings) || codings.length === 0) return undefined;
+  if (codings.some((coding) => typeof coding?.system === "string" && coding.system.length > 0)) return undefined;
+  const code = codings.find((coding) => typeof coding?.code === "string" && allowed.has(coding.code as string))?.code;
+  if (typeof code !== "string") return undefined;
+  return { coding: [{ system, code }] };
+}
+
+/**
+ * The same rule over an ARRAY field (`Condition.category`), entry by entry (Codex review).
+ *
+ * The first cut flattened every entry's codings into one list, picked a single recognised code and
+ * assigned the result as the whole array - so a Condition carrying two categories kept one and lost
+ * the other, along with any `text` or extension on it. That is data loss dressed as normalization,
+ * which is the defect this change exists to remove, so it must not appear inside the fix.
+ *
+ * An entry that cannot be normalized is passed through UNCHANGED rather than dropped: the same reason
+ * an unrecognised code is left alone, one level up.
+ */
+function eachWithSystem(value: unknown, system: string, allowed: ReadonlySet<string>): unknown[] | undefined {
+  if (!Array.isArray(value) || value.length === 0) return undefined;
+  let changed = false;
+  const next = value.map((entry) => {
+    const normalized = withSystem(entry, system, allowed);
+    if (!normalized) return entry;
+    changed = true;
+    // Preserve everything else the entry carried; only its `coding` is replaced.
+    return { ...(entry as Record<string, unknown>), coding: normalized.coding };
+  });
+  return changed ? next : undefined;
+}
+
+/** As `withSystem`, for a bare Coding (`Encounter.class`) rather than a CodeableConcept. */
+function codingWithSystem(value: unknown, system: string, allowed: ReadonlySet<string>): { system: string; code: string } | undefined {
+  if (value === undefined || value === null) return undefined;
+  const coding = value as { system?: unknown; code?: unknown };
+  if (typeof coding.system === "string" && coding.system.length > 0) return undefined;
+  if (typeof coding.code !== "string" || !allowed.has(coding.code)) return undefined;
+  return { system, code: coding.code };
+}
+
+/**
+ * The value sets these three fields bind, so a code can be recognised as belonging to one.
+ *
+ * Complete rather than "the ones the corpus emits": a set holding only `active` would silently decline
+ * to normalize a system-less `resolved` and leave it unbindable, which reads as caution and is really
+ * just the old bug wearing a different coat — the condition would drop out of every retrieve instead
+ * of being retrieved as resolved.
+ */
+const CONDITION_CLINICAL_CODES: ReadonlySet<string> = new Set([
+  "active", "recurrence", "relapse", "inactive", "remission", "resolved",
+]);
+const CONDITION_VERIFICATION_CODES: ReadonlySet<string> = new Set([
+  "unconfirmed", "provisional", "differential", "confirmed", "refuted", "entered-in-error",
+]);
+const CONDITION_CATEGORY_CODES: ReadonlySet<string> = new Set(["problem-list-item", "encounter-diagnosis"]);
+/** v3 ActCode's encounter classes — `IMP` must stay inpatient, which is what caught the first cut. */
+const ENCOUNTER_CLASS_CODES: ReadonlySet<string> = new Set([
+  "AMB", "IMP", "EMER", "FLD", "HH", "ACUTE", "NONAC", "OBSENC", "PRENC", "SS", "VR",
+]);
 
 const US_CORE_BLOOD_PRESSURE = "http://hl7.org/fhir/us/core/StructureDefinition/us-core-blood-pressure";
 /** The two LOINC panel codes a blood pressure is recorded under. Same set `normalize.ts` verified
@@ -177,6 +261,25 @@ function stampProfile(resource: Record<string, unknown>, profile: string): void 
  * misdiagnosis was corrected would enter CMS122's denominator and, having no HbA1c, its numerator.
  * The defect being fixed is an unbindable coding, so that is what the condition tests.
  *
+ * **And an ABSENT field is left absent (#594).** This is the correction to the paragraph above, which
+ * closed half the hole and described the other half as out of scope. `unbindable()` returns true for a
+ * missing field as well as an unbindable one, so until now a Condition with no `clinicalStatus` at all
+ * was given `active`, no `verificationStatus` became `confirmed`, no `category` became a problem-list
+ * item, and an Encounter with no `class` became ambulatory.
+ *
+ * That is fabrication, which ADR-037 forbids this layer, and it was **live** rather than latent: the
+ * QRDA-I import path (`fhir/qrda1-import.ts`) emits none of those three fields, so preparation was
+ * minting them on a third party's document — including stamping `active` on a Condition that carries
+ * an `abatementDateTime`, i.e. one the source said had ended. It also put this file in direct
+ * contradiction with `engine/cql/qdm-entries.ts`, which honours a system-less `entered-in-error` as a
+ * negation while this rewrote the same bytes to `confirmed`.
+ *
+ * **Nothing about the pilot moves**, because the ADR-075 corpus records all four itself, fully
+ * systemed and with `category` correctly distinguishing an encounter diagnosis from a problem-list
+ * item (`corpus/corpus-bundle.ts`). That is the shape the onset rule below already prescribes: where a
+ * measure genuinely cannot retrieve without a field, the answer is a source that records it, not a
+ * value minted here. A source that records nothing now retrieves nothing, which is the honest result.
+ *
  * **Onset is NOT invented**, which is why this takes no evaluation date at all. An earlier cut
  * anchored a missing onset three years before the evaluation date, which
  * this module's own rule forbids: an onset date is the date of an actual event, and CMS165 — on the
@@ -192,13 +295,19 @@ export function prepareForQiCore(bundle: PreparableBundle): void {
     const resource = entry?.resource;
     if (!resource) continue;
     if (resource.resourceType === "Condition") {
-      // Fresh objects per resource: a shared constant assigned by reference would alias one object into
-      // every prepared bundle, so a single downstream mutation would reach all of them at once.
-      if (unbindable(resource.clinicalStatus)) resource.clinicalStatus = clinicalActive();
-      if (unbindable(resource.verificationStatus)) resource.verificationStatus = verificationConfirmed();
-      if (!resource.category) resource.category = problemCategory();
+      // PRESENT-BUT-UNBINDABLE only, never absent (#594). Fresh objects per resource: a shared
+      // constant assigned by reference would alias one object into every prepared bundle, so a single
+      // downstream mutation would reach all of them at once.
+      const clinical = withSystem(resource.clinicalStatus, CONDITION_CLINICAL, CONDITION_CLINICAL_CODES);
+      if (clinical) resource.clinicalStatus = clinical;
+      const verification = withSystem(resource.verificationStatus, CONDITION_VER_STATUS, CONDITION_VERIFICATION_CODES);
+      if (verification) resource.verificationStatus = verification;
+      // An ARRAY field, normalized entry by entry so nothing else in it is lost.
+      const category = eachWithSystem(resource.category, CONDITION_CATEGORY, CONDITION_CATEGORY_CODES);
+      if (category) resource.category = category;
     } else if (resource.resourceType === "Encounter") {
-      if (!resource.class) resource.class = ambulatoryClass();
+      const encounterClass = codingWithSystem(resource.class, V3_ACT_CODE, ENCOUNTER_CLASS_CODES);
+      if (encounterClass) resource.class = encounterClass;
     } else if (resource.resourceType === "Observation" && isBloodPressure(resource)) {
       // CMS165 identifies a blood pressure by PROFILE ALONE — it is the only Observation retrieve in
       // that artifact with no code filter — so it is the one measure the executor runs with
