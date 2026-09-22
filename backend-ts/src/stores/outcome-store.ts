@@ -55,9 +55,9 @@ export interface OutcomeRecord {
 /**
  * Per-subject outcome history row for a measure: status + period + evidence.
  *
- * Consumers since 2026-09-15 are `measure/data-readiness.ts` and `run/backfill-trend-history.ts`.
- * The risk outlook was the original caller and no longer reads history at all (ADR-081), so do not
- * treat this shape as serving it.
+ * The only consumer since 2026-09-22 is `run/backfill-trend-history.ts`, a tool path. The risk outlook
+ * (ADR-081) and data readiness (#664) both stopped reading history, so do not treat this shape as
+ * serving either.
  */
 export interface MeasureOutcomeRow {
   subjectId: string;
@@ -360,9 +360,10 @@ export interface OutcomeStore {
    * All outcomes for a measure (bounded scan), with status + evaluation_period + evidence. Pass
    * `successfulPopulationOnly` to filter to terminal successful population runs in the same query.
    *
-   * Callers: `measure/data-readiness.ts` and `run/backfill-trend-history.ts`. **Not** the risk
-   * outlook, which stopped scanning history on 2026-09-15 (ADR-081) — this is the read whose ~1M-row
-   * cost on the pilot that change removed, so think twice before adding a request-path caller.
+   * Caller: `run/backfill-trend-history.ts` only, a tool path. **Not** the risk outlook, which stopped
+   * scanning history on 2026-09-15 (ADR-081) — this is the read whose ~1M-row cost on the pilot that
+   * change removed — and not data readiness, which was the last request-path caller until #664 (it was
+   * one of the two reads open when the API stopped answering). Do not add a request-path caller.
    */
   listOutcomesForMeasure(measureId: string, opts?: MeasureScanOptions): Promise<MeasureOutcomeRow[]>;
   /**

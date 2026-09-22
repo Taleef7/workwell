@@ -42,7 +42,7 @@ import {
   listValueSets, listValueSetsByVersion, createValueSet, attachValueSet, detachValueSet, resolveCheck, diffValueSets, getValueSetDetail, ValueSetError, type ValueSetGovernanceDeps, } from "../measure/value-set-governance.ts";
 import { referenceFor } from "../standards/references/index.ts";
 import { computeFidelity } from "../standards/measure-fidelity.ts";
-import { isCompletedRun, isPopulationRun, latestRunRows } from "../program/rollup-shared.ts";
+import { isCompletedRun, isPopulationRun } from "../program/rollup-shared.ts";
 import { computeOutcomeDiff } from "../standards/outcome-diff.ts";
 import { computeExecutionDiff } from "../standards/execution-diff.ts";
 import { computeLiteralDiff, literalDiffAvailable } from "../standards/literal-diff.ts";
@@ -63,6 +63,24 @@ function measureCql(measureId: string): string {
   const elm = meta ? ELM_LIBRARIES[meta.library] : undefined;
   return elm ? reconstructCql(elm) : "";
 }
+
+/**
+ * The most subjects an EXECUTION-tier fidelity diff (literal or subset) may evaluate inside one request
+ * (#664). Both tiers are synchronous CPU for the length of the population, and a Node worker answers
+ * nothing else — not `/health` — while it runs. On the pilot a 20,000-subject cms125 diff held the API
+ * for more than 30 minutes.
+ *
+ * Sized from a measurement, not a guess: locally the per-subject cost is ~130 ms for the WorkWell engine
+ * alone (20 subjects, stubbed fqm: 2.6 s) and ~150 ms with the real fqm-execution (8 subjects: 1.2 s). So
+ * 20 bounds a request's stall to about 3 s. It also means the default 100-employee roster (TWH) gets the
+ * estimate too: at 100 subjects the stall would be ~15 s, which is an outage of its own.
+ *
+ * A stopgap, not the design: a diff over a real population belongs in an offline job whose report the
+ * tab reads. Until that exists, a population above the cap gets the criteria ESTIMATE, marked
+ * `executionSkipped` so the tab can say the full diff was not run rather than presenting the estimate
+ * as if it were one.
+ */
+export const IN_REQUEST_EXECUTION_MAX_SUBJECTS = 20;
 
 /**
  * Three-tier diff-mode ladder (#258): `literal` → `subset` → `estimate`.
@@ -494,8 +512,18 @@ export async function handleMeasures(req: Request, env: MeasuresEnv, actor = "sy
     const ref = referenceFor(diffId);
     if (!ref) return json({ available: false });
     const stores = await getStores(env);
-    const allOutcomes = await stores.outcomes.listOutcomesWithRun({ measureId: diffId, excludeScale: true });
-    const latestRows = latestRunRows(allOutcomes.filter((o) => isPopulationRun(o.runScopeType) && isCompletedRun(o.runStatus)));
+    // #664: name the latest terminal population run from the runs table, then read ONLY its rows.
+    // This read every retained run's outcomes and reduced to the newest in JS — on the pilot ~17
+    // nightlies × 20,000 rows to keep one run's worth. Same predicates (POPULATION_SCOPES, terminal
+    // status, excludeScale), so the same run wins; ADR-087 moved the program read models to it.
+    const [winner] = await stores.outcomes.listLatestPopulationRuns([diffId], { excludeScale: true });
+    // The scope/status filter restates what the store already enforced, as the sibling reads do
+    // (`program/latest-population.ts`): defence in depth, so a store change cannot hand an in-flight or
+    // single-subject run to a report about the population.
+    const latestRows = winner
+      ? (await stores.outcomes.listOutcomesWithRun({ measureId: diffId, runIds: [winner.runId], excludeScale: true }))
+          .filter((o) => isPopulationRun(o.runScopeType) && isCompletedRun(o.runStatus))
+      : [];
     const resolver = new StoreValueSetResolver(stores.valueSets);
     // Real execution diff for ANY measure with a vendored official artifact + recorded semantics — the
     // literal tier was gated on `diffId === "cms122"` while the roadmap called the shadow period a
@@ -508,6 +536,33 @@ export async function handleMeasures(req: Request, env: MeasuresEnv, actor = "sy
     const literalAvailable = literalDiffAvailable(diffId);
     if ((diffId === "cms122" || literalAvailable) && latestRows.length > 0) {
       const mode = await chooseDiffMode(resolver, literalAvailable);
+      // #664: an execution tier re-evaluates every subject of the run inside this request — the WorkWell
+      // engine per subject, then fqm-execution over all of them in one synchronous call. On the pilot's
+      // 20,000-subject runs that blocked the event loop for over half an hour, `/health` included, and any
+      // signed-in account could start it by opening Studio → Standards. Above the cap the tier is refused
+      // and the estimate answers instead, SAYING so — a silent fallback would read as the full diff.
+      //
+      // Decided AFTER the ladder, not before it: `executionSkipped` claims an execution tier was
+      // available and refused. On a stack where the ladder already says "estimate" (no value sets and no
+      // artifact), nothing was refused, and the note would be false.
+      if (mode !== "estimate" && latestRows.length > IN_REQUEST_EXECUTION_MAX_SUBJECTS) {
+        // Anchored to the run's STORED measurement period, as the execution tier it stands in for is
+        // (below): the estimate's age criteria are year-sensitive, and a backdated or future run must be
+        // judged at its own as-of date, not today's (Codex P2 on #674).
+        const run = await stores.runs.getRun(latestRows[0]!.runId);
+        const periodEnd = run?.measurementPeriodEnd?.slice(0, 10) ?? null;
+        const evalYear = periodEnd ? Number(periodEnd.slice(0, 4)) : new Date().getUTCFullYear();
+        const estimate = computeOutcomeDiff(ref, latestRows, evalYear);
+        return json({
+          ...estimate,
+          asOf: periodEnd ?? estimate.asOf,
+          executionSkipped: {
+            reason: "population_too_large",
+            subjects: latestRows.length,
+            limit: IN_REQUEST_EXECUTION_MAX_SUBJECTS,
+          },
+        });
+      }
       if (mode !== "estimate") {
         // Use the run's STORED evaluation date (measurement-period end), not started_at: a backdated/future
         // run persisted its outcomes at its requested as-of date, so diffing must re-evaluate at that same

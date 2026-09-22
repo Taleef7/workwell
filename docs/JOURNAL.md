@@ -1,5 +1,27 @@
 # Journal
 
+## 2026-09-22 — the sandbox went down twice, and one of the causes was a tab
+
+The 2026-09-22 audit (tracker #655, 57 findings) walked the sandbox as four personas. The API stopped
+answering twice while it did — about an hour in total, each time recovered only by a manual reconcile.
+
+**The second outage has a reproduced cause (#664).** Opening Studio → Standards on cms125 called
+`/fidelity/diff`, which re-executes the official measure for every subject of the latest run inside the
+request: the WorkWell engine per subject, then fqm-execution over all 20,000 in one synchronous call. A
+Node worker answers nothing else while that runs, `/health` included, and the route sits under the
+AUTHENTICATED catch-all — so any signed-in account could take the pilot's sandbox down with one click.
+The result was cached per run in memory, so every nightly and every restart re-armed it.
+
+**Fixed on `fix/664-no-population-execution-in-request`:** an execution tier is refused above 20 subjects
+and the estimate answers, marked `executionSkipped` so the tab says it is an estimate. The route and
+`data-readiness` now read only the winning run's rows instead of every retained run's. Data readiness
+also stops counting out-of-population subjects as missing data. A full diff over a real population needs
+an offline job, which is not built.
+
+**The first outage (#663) has no confirmed trigger.** No request from any walker touched Studio or a
+heavy route in the window, and 18:00 UTC is the start of the pilot group's working day. The restart
+destroyed the logs, which is its own finding.
+
 ## 2026-09-21 (close) — three merged, and the reviews were worth more than the changes
 
 #610, #611 and #612 merged; the sandbox is on all three.

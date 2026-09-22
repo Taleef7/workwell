@@ -43,6 +43,12 @@ export interface OutcomeDiffReport {
   criterionImpacts: CriterionImpact[];
   headline: string;
   disclaimer: string;
+  /**
+   * Present when an execution tier (literal/subset) was eligible and REFUSED because the run is larger
+   * than a request may evaluate (#664) — so this estimate is standing in for a full diff, and a reader
+   * must be told. Absent when the estimate is the only tier this measure has.
+   */
+  executionSkipped?: { reason: "population_too_large"; subjects: number; limit: number };
 }
 
 // --- implementation ----------------------------------------------------------------
