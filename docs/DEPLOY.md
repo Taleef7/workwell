@@ -1331,6 +1331,32 @@ Alert emission is best-effort — a webhook timeout never fails the run. Run met
 evaluated count, compliant/non-compliant, per-status `outcomeCounts`) remain on `GET /api/runs` and
 `GET /api/runs/:id` as before.
 
+### The API answers nothing, `/health` included (#663)
+
+That signature — TCP and TLS complete, then no response on any route while the frontend is fine — is a
+**blocked event loop**, not a crash and not the database: `/health` does no I/O, so only a thread that
+cannot run anything misses it. It happened twice on the pilot on 2026-09-22; one cause was a request
+doing population-sized CPU (#664), the other was never identified because the heal took the logs.
+
+**Before you heal, read the container log.** Since #663 the host logs two alerts:
+
+- `WORKWELL_ALERT {"kind":"EVENT_LOOP_STALL_ONGOING","stalledForMs":…,"requests":[…]}` — written by a
+  watchdog on a separate thread **while the stall is happening**, 5 s in and every 30 s after, naming
+  the longest-running requests (route shapes only: every identifier masked as `:id`, no query string). This is the one that
+  survives into the log before a recreate discards the process, so it is the evidence to copy out.
+- `WORKWELL_ALERT {"kind":"EVENT_LOOP_STALL","durationMs":…,"requests":[…]}` — logged by the main
+  thread once a stall of more than 1 s **ends**, including requests that finished during it (the culprit
+  usually finishes the moment the stall does). At most one line a minute, so the nightly recompute's
+  stalls do not bury an incident; `notLoggedSinceLastAlert` says how many were counted and not logged.
+
+Once the process answers again, `GET /health` carries the same facts: `build.sha` (which commit is
+running — baked into the image, so a reconciler recreate reports its own), `startedAt` and
+`uptimeSeconds` (whether the process was replaced), and `eventLoop` (`stallsSinceStart`, the last
+stall's duration, and the last minute's p99/max delay) — counts only, because `/health` is public.
+**What was running** during each recent stall is on `GET /api/admin/runtime` (ADMIN). A `startedAt` newer than the
+outage means the process was replaced and the in-memory record went with it; the log is then the only
+record.
+
 ### Run phase timing (#563) — `WORKWELL_RUNTIME`
 
 A **separate prefix from `WORKWELL_ALERT`, deliberately.** `WORKWELL_ALERT` is what an operator greps

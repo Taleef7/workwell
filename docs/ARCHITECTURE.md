@@ -362,8 +362,12 @@ No microservice decomposition is used in MVP; package boundaries are the future 
 
 ## 9) API Versioning Convention
 - The current API contract is **v1**. `GET /api/version` returns
-  `{"api":"v1","stack":"typescript","build":"workwell-api-ts"}` and is unauthenticated for
-  health/discovery use. *(Corrected 2026-08-17: this row claimed an `uptime` field for years. The worker
+  `{"api":"v1","stack":"typescript","build":"workwell-api-ts","sha":…,"startedAt":…}` and is
+  unauthenticated for health/discovery use. `build` is the image name and constant across deploys; `sha`
+  (the commit, baked into the image at build time, null when built by hand) and `startedAt` were added by
+  #625 so a caller can tell which build is answering and whether the process was replaced. `/health`
+  carries the same plus uptime and the event-loop stall counts (#663); what was running during a stall
+  is on the ADMIN-gated `/api/admin/runtime`. *(Corrected 2026-08-17: this row claimed an `uptime` field for years. The worker
   emits none — writing the OpenAPI document surfaced it, because the document describes what the route
   actually returns and a test compares the two.)*
 - Existing endpoints remain under the unprefixed `/api/...` path for the MVP

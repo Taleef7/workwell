@@ -84,6 +84,12 @@ ENV MIEWEB_TARGET=mieweb
 #   docker run -e MIEWEB_TARGET=local -e WORKWELL_ENVIRONMENT=development -p 8080:8080 ...
 ENV WORKWELL_ENVIRONMENT=production
 
+# The commit this image was built from, served on /health and /api/version (#625). Baked into the IMAGE
+# rather than set on the container, so the self-heal reconciler — which recreates from `*-latest` with
+# its own env array — reports the sha of the image it actually started. Empty when built by hand.
+ARG WORKWELL_BUILD_SHA=""
+ENV WORKWELL_BUILD_SHA=${WORKWELL_BUILD_SHA}
+
 EXPOSE 8082
 # Run node directly as PID 1 (not `pnpm start`) so SIGTERM/SIGINT reach the process and the graceful
 # shutdown in src/server.ts actually runs — a package-manager wrapper as PID 1 swallows the signal.

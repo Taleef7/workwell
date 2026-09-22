@@ -128,6 +128,9 @@ jobs:
           context: .
           file: ./backend-ts/Dockerfile
           push: true
+          # The commit, baked into the image and served on /health (#625).
+          build-args: |
+            WORKWELL_BUILD_SHA=${{ github.sha }}
           tags: |
             ${{ env.BACKEND_TS_IMAGE }}:latest
             ${{ env.BACKEND_TS_IMAGE }}:sha-${{ github.sha }}

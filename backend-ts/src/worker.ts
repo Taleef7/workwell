@@ -65,6 +65,7 @@ import { effectivePeriodWarning, officialMeasurementPeriod } from "./wiring/offi
 import { RUNNABLE_MEASURE_IDS, classifyRunnable } from "./config/deployment-profile.ts";
 import { isWebChartConfigured, webChartConfigFromEnv } from "./engine/ingress/data-source.ts";
 import { classifyDbFailure } from "./stores/postgres/pg-database.ts";
+import { runtimeDetail, runtimeHealth, trackRequest } from "./admin/runtime-health.ts";
 
 /** Runtime bindings (wrangler.jsonc) + config. Injected per target; app code
  *  only ever sees these Cloudflare-shaped contracts, never a concrete driver. */
@@ -221,13 +222,19 @@ async function route(req: Request, env: Env, ctx: CloudExecutionContext): Promis
   if (unsafe) return json({ error: "unsafe_configuration", message: unsafe }, 503);
 
   // Health — parity with the Java backend's GET /actuator/health.
+  // Since #663/#625 it also says WHICH build is answering, since when, and whether the event loop has
+  // stalled — counts and timings only. Still DB-free and answered before the auth gate, because a
+  // liveness probe cannot hold a token; WHAT was running during a stall is on the ADMIN-gated
+  // `/api/admin/runtime` and in the log, never here (runtime-health.ts, "WHAT IS PUBLIC").
   if (pathname === "/actuator/health" || pathname === "/health") {
-    return json({ status: "UP", stack: "workwell-ts" });
+    return json({ status: "UP", stack: "workwell-ts", ...runtimeHealth() });
   }
 
-  // Version — parity with GET /api/version (unauthenticated discovery).
+  // Version — parity with GET /api/version (unauthenticated discovery). `build` stays the image name it
+  // always was, so a consumer reading it is unchanged; `sha` and `startedAt` are the identity it lacked.
   if (pathname === "/api/version") {
-    return json({ api: "v1", stack: "typescript", build: "workwell-api-ts" });
+    const rt = runtimeHealth();
+    return json({ api: "v1", stack: "typescript", build: "workwell-api-ts", sha: rt.build.sha, startedAt: rt.startedAt });
   }
 
   // The OpenAPI document (ADR-068) — served before the auth gate, like health and version, because it is
@@ -278,6 +285,10 @@ async function route(req: Request, env: Env, ctx: CloudExecutionContext): Promis
   } else if (pathname.startsWith("/api/auth/")) {
     return json({ error: "auth_not_configured", hint: "WORKWELL_AUTH_JWT_SECRET is unset" }, 503);
   }
+
+  // Runtime detail (#663): the recent stalls WITH the requests that were running, and what is running
+  // now. ADMIN-only by the `/api/admin/**` rule above; `/health` carries only the counts.
+  if (pathname === "/api/admin/runtime" && req.method === "GET") return json(runtimeDetail());
 
   // Measures — catalog + authoring (persisted store) + live CQL/eCQM evaluation (no JVM), #106/#107.
   const measuresResponse = await handleMeasures(req, env, actor);
@@ -505,6 +516,49 @@ const DB_FAILURE_MESSAGE: Record<string, string> = {
   pool_exhausted: "No database connection was available in time. Try again shortly.",
 };
 
+/**
+ * Keep a request registered as in flight until its BODY has been read or cancelled, not merely until
+ * the handler returned (#663). The CSV exports stream — their work happens as the body is pulled, long
+ * after `route` resolved — and a request that never finishes streaming is exactly what a stall needs to
+ * be attributed to.
+ */
+function untrackWhenBodySettles(response: Response, settle: () => void): Response {
+  // Headers FIRST: on the host's lightweight Response, reading `.body` rebuilds the real response from
+  // its original init and would drop any header changed after construction.
+  const { status, statusText, headers } = response;
+  if (!response.body) {
+    settle();
+    return response;
+  }
+  let settled = false;
+  const once = () => {
+    if (!settled) {
+      settled = true;
+      settle();
+    }
+  };
+  const reader = response.body.getReader();
+  const body = new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      try {
+        const { done, value } = await reader.read();
+        if (done) {
+          once();
+          controller.close();
+        } else controller.enqueue(value);
+      } catch (err) {
+        once();
+        controller.error(err);
+      }
+    },
+    cancel(reason) {
+      once();
+      return reader.cancel(reason);
+    },
+  });
+  return new Response(body, { status, statusText, headers });
+}
+
 export default {
   async fetch(req: Request, env: Env, _ctx: CloudExecutionContext): Promise<Response> {
     logSeamInventoryOnce(env);
@@ -512,6 +566,27 @@ export default {
     // CORS preflight must be answered before auth — browsers send OPTIONS without
     // credentials, so the real cross-site login/API call is blocked otherwise.
     if (req.method === "OPTIONS") return preflightResponse(req, origins);
+    // Health polls are the one request that is never a stall's cause, and they arrive every few seconds
+    // from probes: registering them would only crowd the in-flight list a stall report reads.
+    const { pathname } = new URL(req.url);
+    if (pathname === "/health" || pathname === "/actuator/health") {
+      return withCors(await route(req, env, _ctx), req, origins);
+    }
+    const settle = trackRequest(req.method, req.url);
+    // A client that disconnects before its response is ready leaves a body the host never reads or
+    // cancels, so the body-settle path below would never fire and the request would read as running
+    // for hours in every later stall report. Settle on disconnect — but only once the handler has
+    // returned: a handler still burning CPU after its client left is exactly a stall's cause.
+    let handlerReturned = false;
+    let clientGone = false;
+    req.signal?.addEventListener(
+      "abort",
+      () => {
+        clientGone = true;
+        if (handlerReturned) settle();
+      },
+      { once: true },
+    );
     let response: Response;
     try {
       response = await route(req, env, _ctx);
@@ -544,6 +619,11 @@ export default {
         response = json({ error: "internal_error" }, 500);
       }
     }
-    return withCors(response, req, origins);
+    handlerReturned = true;
+    if (clientGone) {
+      settle();
+      return withCors(response, req, origins);
+    }
+    return untrackWhenBodySettles(withCors(response, req, origins), settle);
   },
 };

@@ -507,12 +507,55 @@ export function openApiDocument(): OpenApiDocument {
         Health: {
           type: "object",
           required: ["status", "stack"],
-          properties: { status: { type: "string", enum: ["UP"] }, stack: str("Implementation identifier.", "workwell-ts") },
+          properties: {
+            status: { type: "string", enum: ["UP"] },
+            stack: str("Implementation identifier.", "workwell-ts"),
+            build: {
+              type: "object",
+              description: "The build answering (#625).",
+              properties: { sha: { type: ["string", "null"], description: "The commit the image was built from; null when built by hand." } },
+            },
+            startedAt: { type: "string", format: "date-time", description: "When this process started." },
+            uptimeSeconds: { type: "integer" },
+            eventLoop: {
+              type: "object",
+              description:
+                "Event-loop stall monitor (#663). A stall is a period the process could answer nothing, this route included.",
+              properties: {
+                monitored: { type: "boolean", description: "False when the monitor is not running (tests, tools)." },
+                watchdog: { type: "boolean", description: "Whether the watchdog thread that reports a stall WHILE it lasts is running." },
+                lastMinute: {
+                  type: ["object", "null"],
+                  description: "Event-loop delay over the last completed one-minute window; null until one has completed.",
+                  properties: { p99Ms: { type: "number" }, maxMs: { type: "number" } },
+                },
+                stallsSinceStart: { type: "integer" },
+                thresholdMs: { type: "integer", description: "The delay above which a heartbeat counts as a stall." },
+                lastStall: {
+                  type: ["object", "null"],
+                  description:
+                    "Counts and timings only: this route is unauthenticated. Which requests were running is on the ADMIN-gated /api/admin/runtime and in the log.",
+                  required: ["endedAt", "durationMs", "requestsInvolved"],
+                  properties: {
+                    endedAt: { type: "string", format: "date-time" },
+                    durationMs: { type: "number" },
+                    requestsInvolved: { type: "integer", description: "Requests running at some point during the stall." },
+                  },
+                },
+              },
+            },
+          },
         },
         Version: {
           type: "object",
           required: ["api", "stack", "build"],
-          properties: { api: str("The API contract version.", "v1"), stack: str("Implementation.", "typescript"), build: str("Build identifier.", "workwell-api-ts") },
+          properties: {
+            api: str("The API contract version.", "v1"),
+            stack: str("Implementation.", "typescript"),
+            build: str("Build identifier (the image name; constant across deploys).", "workwell-api-ts"),
+            sha: { type: ["string", "null"], description: "The commit the image was built from (#625); null when built by hand." },
+            startedAt: { type: "string", format: "date-time", description: "When this process started." },
+          },
         },
       },
     },

@@ -18,16 +18,36 @@ export type LoginResponse = {
   role: string;
 };
 
+/** How long sign-in waits for the server before saying it did not answer (#663). */
+export const LOGIN_TIMEOUT_MS = 20_000;
+
+export const SERVER_DID_NOT_RESPOND =
+  "The WorkWell server did not respond. It may be restarting — try again in a minute. If this keeps happening, tell your WorkWell contact.";
+
 export async function signInWithCredentials(email: string, password: string): Promise<LoginResponse> {
-  const response = await fetch(`${API_BASE}/api/auth/login`, {
-    method: "POST",
-    credentials: "include",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, password })
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}/api/auth/login`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password }),
+      signal: AbortSignal.timeout(LOGIN_TIMEOUT_MS),
+    });
+  } catch {
+    // A network failure, a CORS failure (a gateway error page carries no CORS headers) or the timeout.
+    // All three mean the server did not answer; the browser's own text ("Failed to fetch") says none of
+    // that, and on 2026-09-22 it was all a pilot user saw during a half-hour outage (#663).
+    throw new Error(SERVER_DID_NOT_RESPOND);
+  }
 
   if (!response.ok) {
-    let message = "Invalid email or password.";
+    // A 5xx is the server's problem, never the user's password. The default below used to apply to
+    // every status, so a gateway 502/504 with a non-JSON body told the user their password was wrong.
+    let message =
+      response.status >= 500
+        ? `The WorkWell server is having trouble (error ${response.status}). Try again in a minute.`
+        : "Invalid email or password.";
     try {
       const json = (await response.json()) as { message?: string; error?: string };
       if (json.message) message = json.message;

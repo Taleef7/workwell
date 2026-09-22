@@ -14,6 +14,7 @@ import { rmSync } from "node:fs";
 import { createSqliteD1 } from "@mieweb/cloud-local";
 import worker from "./worker.ts";
 import type { Env } from "./worker.ts";
+import { inFlightRequests } from "./admin/runtime-health.ts";
 
 const dbPath = join(tmpdir(), `workwell-worker-${crypto.randomUUID()}.sqlite`);
 const env = { WORKWELL_AUTH_JWT_SECRET: "x".repeat(40) } as unknown as Env;
@@ -32,6 +33,55 @@ const call = (path: string, init?: RequestInit) => worker.fetch(new Request(`htt
 
 test("health is public", async () => {
   assert.equal((await call("/actuator/health")).status, 200);
+});
+
+test("#663/#625: health and version say which build is answering, since when, and whether the loop stalled", async () => {
+  const health = (await (await call("/health")).json()) as Record<string, unknown> & {
+    build: { sha: string | null };
+    startedAt: string;
+    uptimeSeconds: number;
+    eventLoop: { stallsSinceStart: number; thresholdMs: number };
+  };
+  assert.equal(health.status, "UP");
+  assert.equal(health.stack, "workwell-ts", "the original two fields are unchanged");
+  assert.ok("sha" in health.build);
+  assert.ok(!Number.isNaN(Date.parse(health.startedAt)));
+  assert.equal(typeof health.uptimeSeconds, "number");
+  assert.equal(typeof health.eventLoop.stallsSinceStart, "number");
+
+  const version = (await (await call("/api/version")).json()) as Record<string, unknown>;
+  assert.equal(version.build, "workwell-api-ts", "unchanged for existing readers");
+  assert.ok("sha" in version && "startedAt" in version);
+});
+
+test("#663: a request stays in flight until its BODY is read — a streaming export is attributed while it streams", async () => {
+  const count = () => inFlightRequests().filter((r) => r.path === "/api/version").length;
+  const before = count();
+  const res = await call("/api/version");
+  assert.equal(count(), before + 1, "handler returned, body unread: still in flight");
+  await res.text();
+  assert.equal(count(), before, "settled once the body was consumed");
+});
+
+test("#663: a client that disconnects before reading the body does not leave the request 'in flight' forever", async () => {
+  const count = () => inFlightRequests().filter((r) => r.path === "/api/version").length;
+  const before = count();
+  const client = new AbortController();
+  const res = await worker.fetch(new Request("http://x/api/version", { signal: client.signal }), env, ctx);
+  assert.equal(count(), before + 1);
+  client.abort(); // the host never reads or cancels this body once the socket is gone
+  assert.equal(count(), before, "settled on disconnect");
+  void res;
+});
+
+test("#663: /api/admin/runtime is ADMIN-only — the paths stay off the public route", async () => {
+  assert.equal((await call("/api/admin/runtime")).status, 401);
+});
+
+test("#663: health polls are not registered — they are never a stall's cause and would crowd the report", async () => {
+  const before = inFlightRequests().length;
+  await call("/health"); // body deliberately unread
+  assert.equal(inFlightRequests().length, before);
 });
 
 test("CORS preflight on login is answered (204 + allow-origin) before auth", async () => {
