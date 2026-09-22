@@ -227,6 +227,22 @@ what was emitted by the as-of. Every official measurement is taken at 31 Decembe
 every number we report is zero — which is exactly why it would have been found by a demo rather than
 by a test.
 
+> **CORRECTED 2026-09-22 (#637): the effect was not zero.** The sentence above confuses the
+> measurement period's END with the run's EVALUATION DATE. The corpus cutoff keys on the evaluation
+> date (`corpus-bundle.ts`), and the nightly passes none, so `run-pipeline.ts` defaults it to TODAY.
+> On the first nightly after this ADR shipped (2026-09-22), every fact dated 09-23..12-31 left the
+> bundles (35,246 of 231,890 entries) and every pilot rate fell: cms122 72.4 → 52.8%, cms165
+> 62.4 → 45.2%, cms125 72.1 → 63.7%. Every change was a loss, and a full local reproduction matches
+> both nights exactly. d1–d3 moved nothing: the corpus already carries the fields they stopped
+> inventing (0 of 20,000 bundles differ). The tests missed it because they only build bundles at 12-31.
+>
+> **The new number is the honest one, and it stays (owner decision, 2026-09-22).** Before, the nightly
+> reported the full-year result from facts dated as late as December; now it reports year to date as
+> of the run. Two consequences follow. Rates climb nightly until 12-31. And on 2027-01-01, the pilot's
+> first measurement day, a corpus with no prior-year history would empty almost every population.
+> **Decided:** give the corpus prior-year history rather than score the nightly at 12-31, which would
+> reinstate knowledge of the future. The gate that would have caught this is designed on #637.
+
 ### Decision
 
 **d1. This layer supplies a SYSTEM, never a CODE.** `prepareForQiCore` normalizes a coded field only
