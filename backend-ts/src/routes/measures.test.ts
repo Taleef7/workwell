@@ -323,6 +323,7 @@ test("GET /api/measures/cms122/fidelity/diff returns a valid OutcomeDiffReport w
 type DiffBody = {
   mode: string;
   runId: string;
+  asOf: string | null;
   totalSubjectsEvaluated: number;
   executionSkipped?: { reason: string; subjects: number; limit: number };
 };
@@ -381,6 +382,9 @@ test("#664: an execution tier that IS available is refused above the cap, and th
   assert.equal(body.mode, "estimate", "no execution tier above the cap");
   assert.deepEqual(body.executionSkipped, { reason: "population_too_large", subjects: OVER_CAP, limit: IN_REQUEST_EXECUTION_MAX_SUBJECTS });
   assert.equal(body.runId, overCapRunId, "the newest run");
+  // The run started today but describes 2026-06-30: the estimate is anchored to the STORED period, as
+  // the execution tier it replaces is, not to the day it ran (Codex P2 on #674).
+  assert.equal(body.asOf, "2026-06-30");
   assert.equal(body.totalSubjectsEvaluated, OVER_CAP, "only the newest run's rows");
 });
 

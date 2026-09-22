@@ -546,8 +546,16 @@ export async function handleMeasures(req: Request, env: MeasuresEnv, actor = "sy
       // available and refused. On a stack where the ladder already says "estimate" (no value sets and no
       // artifact), nothing was refused, and the note would be false.
       if (mode !== "estimate" && latestRows.length > IN_REQUEST_EXECUTION_MAX_SUBJECTS) {
+        // Anchored to the run's STORED measurement period, as the execution tier it stands in for is
+        // (below): the estimate's age criteria are year-sensitive, and a backdated or future run must be
+        // judged at its own as-of date, not today's (Codex P2 on #674).
+        const run = await stores.runs.getRun(latestRows[0]!.runId);
+        const periodEnd = run?.measurementPeriodEnd?.slice(0, 10) ?? null;
+        const evalYear = periodEnd ? Number(periodEnd.slice(0, 4)) : new Date().getUTCFullYear();
+        const estimate = computeOutcomeDiff(ref, latestRows, evalYear);
         return json({
-          ...computeOutcomeDiff(ref, latestRows, new Date().getUTCFullYear()),
+          ...estimate,
+          asOf: periodEnd ?? estimate.asOf,
           executionSkipped: {
             reason: "population_too_large",
             subjects: latestRows.length,
