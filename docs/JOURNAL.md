@@ -12,7 +12,7 @@ Node worker answers nothing else while that runs, `/health` included, and the ro
 AUTHENTICATED catch-all — so any signed-in account could take the pilot's sandbox down with one click.
 The result was cached per run in memory, so every nightly and every restart re-armed it.
 
-**Fixed on `fix/664-no-population-execution-in-request`:** an execution tier is refused above 20 subjects
+**Fixed in #674 (merged):** an execution tier is refused above 20 subjects
 and the estimate answers, marked `executionSkipped` so the tab says it is an estimate. The route and
 `data-readiness` now read only the winning run's rows instead of every retained run's. Data readiness
 also stops counting out-of-population subjects as missing data. A full diff over a real population needs
@@ -21,6 +21,19 @@ an offline job, which is not built.
 **The first outage (#663) has no confirmed trigger.** No request from any walker touched Studio or a
 heavy route in the window, and 18:00 UTC is the start of the pilot group's working day. The restart
 destroyed the logs, which is its own finding.
+
+**So the next one will not be anonymous (#675, closes #625).** A stall monitor: an in-flight request
+registry, a heartbeat that attributes every stall over 1 s once it ends, and a watchdog on a worker
+thread that writes `EVENT_LOOP_STALL_ONGOING` to the log WHILE the main thread is stuck — the only thing
+that can, and the line that is in the log before anyone heals. `/health` now says which commit is
+running (baked into the image), since when, and how many stalls; what was running is ADMIN-only. Two
+things the review caught that the first cut got wrong, both worth keeping: the culprit of a CPU stall
+usually FINISHES the instant the stall ends, so a record of "what is in flight now" names everything but
+it; and `/health` is public, so a request path — `/api/v1/compliance/pat-00082/cms122` — is an
+identifier paired with health context the moment real patients arrive.
+
+The login page also stopped telling people their password was wrong during an outage: a gateway 504 with
+an HTML body fell through to "Invalid email or password."
 
 ## 2026-09-21 (close) — three merged, and the reviews were worth more than the changes
 
