@@ -74,6 +74,15 @@ test("#663: a client that disconnects before reading the body does not leave the
   void res;
 });
 
+test("#663: a request whose client was ALREADY gone when it arrived is not left in flight", async () => {
+  const count = () => inFlightRequests().filter((r) => r.path === "/api/version").length;
+  const before = count();
+  const client = new AbortController();
+  client.abort(); // an aborted signal never fires its listener again
+  await worker.fetch(new Request("http://x/api/version", { signal: client.signal }), env, ctx);
+  assert.equal(count(), before);
+});
+
 test("#663: /api/admin/runtime is ADMIN-only — the paths stay off the public route", async () => {
   assert.equal((await call("/api/admin/runtime")).status, 401);
 });

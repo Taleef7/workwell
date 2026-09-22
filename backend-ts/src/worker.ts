@@ -542,6 +542,9 @@ function untrackWhenBodySettles(response: Response, settle: () => void): Respons
     async pull(controller) {
       try {
         const { done, value } = await reader.read();
+        // Cancelled while this read was pending: the stream is closed, and touching the controller
+        // again would throw into the catch below for nothing.
+        if (settled) return;
         if (done) {
           once();
           controller.close();
@@ -578,7 +581,8 @@ export default {
     // for hours in every later stall report. Settle on disconnect — but only once the handler has
     // returned: a handler still burning CPU after its client left is exactly a stall's cause.
     let handlerReturned = false;
-    let clientGone = false;
+    // A signal already aborted never fires its listener, so read the state too (Gemini review, #675).
+    let clientGone = req.signal?.aborted === true;
     req.signal?.addEventListener(
       "abort",
       () => {
