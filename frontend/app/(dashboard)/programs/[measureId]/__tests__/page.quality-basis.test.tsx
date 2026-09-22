@@ -73,10 +73,7 @@ describe("Quality over time — the snapshot basis (#642)", () => {
     expect(screen.queryByText(/source of truth/i)).not.toBeInTheDocument();
   });
 
-  it("a failure that is not THIS refusal — a 500, or some other 409 — is not shown as a basis problem", async () => {
-    // Only what the basis note must NOT do is pinned here. How a plain failure should render is a
-    // separate question: today it falls back to the empty state, which is itself an error shown as an
-    // absence, and this test deliberately does not lock that in.
+  it("a failure that is not THIS refusal — a 500, or some other 409 — is shown as a failure, never as 'no data' or a basis problem", async () => {
     for (const err of [
       new ApiError(500, "", "Request failed (500)"),
       new ApiError(409, JSON.stringify({ error: "something_else", message: "Other conflict" }), "Other conflict"),
@@ -84,9 +81,9 @@ describe("Quality over time — the snapshot basis (#642)", () => {
       mockApi(() => Promise.reject(err));
       const { unmount } = render(<ProgramDetailPage />);
       await waitFor(() => expect(get).toHaveBeenCalledWith(expect.stringContaining("/quality/history")));
-      await waitFor(() => expect(screen.queryByText(/Loading quality history/)).not.toBeInTheDocument());
+      expect(await screen.findByText(`Monthly history could not be loaded (${err.message}). Try again shortly.`)).toBeInTheDocument();
+      expect(screen.queryByText(/No materialized quality snapshots yet/)).not.toBeInTheDocument();
       expect(screen.queryByText(/Monthly history is not available/)).not.toBeInTheDocument();
-      expect(screen.queryByText(/Other conflict/)).not.toBeInTheDocument();
       unmount();
     }
   });

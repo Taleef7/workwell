@@ -578,6 +578,9 @@ function QualityOverTime({
   // they count patients outside the measure's population in the denominator. Kept apart from "no
   // snapshots yet": one is an absence, the other is a wrong number the page must not show.
   const [withheld, setWithheld] = useState<string | null>(null);
+  // Any OTHER failure is a failure, and says so. It used to fall through to "no snapshots yet", which
+  // turned an outage into a claim that there was no data (review of #677).
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     void api.get<Tenant[]>("/api/tenants").then(setTenants).catch(() => setTenants([]));
@@ -594,12 +597,15 @@ function QualityOverTime({
       const rows = await api.get<QualitySnapshot[]>(`/api/quality/history?${qs.toString()}`);
       if (reqId !== reqIdRef.current) return;
       setWithheld(null);
+      setLoadError(null);
       setSnapshots(rows);
       setAsOf((prev) => (prev && rows.some((r) => r.period === prev) ? prev : rows.at(-1)?.period ?? ""));
     } catch (err) {
       if (reqId !== reqIdRef.current) return;
       setSnapshots([]);
-      setWithheld(isBasisRefusal(err) ? (err as ApiError).message : null);
+      const refused = isBasisRefusal(err);
+      setWithheld(refused ? (err as ApiError).message : null);
+      setLoadError(refused ? null : err instanceof Error ? err.message : "Request failed");
     } finally {
       if (reqId === reqIdRef.current) setLoaded(true);
     }
@@ -728,9 +734,11 @@ function QualityOverTime({
       ) : (
         <div className="mt-3 flex h-[120px] items-center justify-center rounded border border-dashed border-neutral-300 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800/50 text-center">
           <span className="max-w-md text-xs text-neutral-500 dark:text-neutral-400">
-            {loaded
-              ? "No materialized quality snapshots yet for this scope. Snapshots accrue on every population run, or run pnpm seed:quality-history to backfill months of history."
-              : "Loading quality history…"}
+            {!loaded
+              ? "Loading quality history…"
+              : loadError
+                ? `Monthly history could not be loaded (${loadError}). Try again shortly.`
+                : "No materialized quality snapshots yet for this scope. Snapshots accrue on every population run, or run pnpm seed:quality-history to backfill months of history."}
           </span>
         </div>
       )}
