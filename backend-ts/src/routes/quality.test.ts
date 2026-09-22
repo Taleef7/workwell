@@ -15,6 +15,8 @@ import { RUN_STORE_FLOOR_DDL } from "../stores/sqlite/schema.ts";
 import { SqliteQualitySnapshotStore } from "../stores/sqlite/quality-snapshot-store-sqlite.ts";
 import type { QualitySnapshotInput } from "../stores/quality-snapshot-store.ts";
 import { handleQuality } from "./quality.ts";
+import { SqliteRunStore } from "../stores/sqlite/run-store-sqlite.ts";
+import { SqliteOutcomeStore } from "../stores/sqlite/outcome-store-sqlite.ts";
 
 const dbPath = join(tmpdir(), `workwell-quality-route-${crypto.randomUUID()}.sqlite`);
 let env: { DB: unknown };
@@ -83,4 +85,47 @@ test("bad scopeLevel → 400", async () => {
 test("non-GET and unrelated path → null", async () => {
   assert.equal(await handleQuality(new Request("http://x/api/quality/history", { method: "POST" }), env as never), null);
   assert.equal(await handleQuality(new Request("http://x/api/other", { method: "GET" }), env as never), null);
+});
+
+// ── #642: the history is refused for a measure whose snapshots understate its rate ──────────────────
+
+test("#642: an officially routed measure's monthly history is refused (409), never served as its rate", async () => {
+  const store = new SqliteQualitySnapshotStore(env.DB as never);
+  // What the pilot served: 3,388 / 19,636 = 17.3% for a measure whose population rate is 41.9%.
+  await store.upsertSnapshots([snap({ measureId: "cms130", numerator: 3388, denominator: 19636, compliant: 3388, missingData: 11543 })]);
+  const prev = process.env.WORKWELL_OFFICIAL_MEASURES;
+  process.env.WORKWELL_OFFICIAL_MEASURES = "cms130";
+  try {
+    const res = await get("?measureId=cms130&scopeLevel=all");
+    assert.equal(res?.status, 409);
+    const body = (await res!.json()) as { error: string; message: string };
+    assert.equal(body.error, "snapshot_basis_unsafe");
+    assert.match(body.message, /(employees|patients) outside the measure's population/);
+  } finally {
+    if (prev === undefined) delete process.env.WORKWELL_OFFICIAL_MEASURES;
+    else process.env.WORKWELL_OFFICIAL_MEASURES = prev;
+  }
+});
+
+test("#642: the ROWS decide too — an authored measure whose latest run has out-of-population subjects is refused", async () => {
+  // A routing rollback after official runs were written: today's env says authored, the data says not.
+  const runs = new SqliteRunStore(env.DB as never);
+  const outcomes = new SqliteOutcomeStore(env.DB as never);
+  const run = await runs.createRun({ scopeType: "ALL_PROGRAMS", triggeredBy: "test", requestedScope: {}, measurementPeriodStart: "2026-06-30T00:00:00.000Z", measurementPeriodEnd: "2026-06-30T00:00:00.000Z" });
+  await outcomes.recordOutcome({ runId: run.id, subjectId: "emp-001", measureId: "hazwoper", status: "COMPLIANT", evidence: {} });
+  await outcomes.recordOutcome({ runId: run.id, subjectId: "emp-002", measureId: "hazwoper", status: "MISSING_DATA", evidence: {}, outOfPopulation: true });
+  await runs.finalizeRun(run.id, "COMPLETED");
+  assert.equal((await get("?measureId=hazwoper&scopeLevel=all"))?.status, 409);
+});
+
+test("#642: a measure with no out-of-population subjects still gets its history", async () => {
+  const runs = new SqliteRunStore(env.DB as never);
+  const outcomes = new SqliteOutcomeStore(env.DB as never);
+  const run = await runs.createRun({ scopeType: "ALL_PROGRAMS", triggeredBy: "test", requestedScope: {}, measurementPeriodStart: "2026-06-30T00:00:00.000Z", measurementPeriodEnd: "2026-06-30T00:00:00.000Z" });
+  await outcomes.recordOutcome({ runId: run.id, subjectId: "emp-001", measureId: "audiogram", status: "COMPLIANT", evidence: {} });
+  await outcomes.recordOutcome({ runId: run.id, subjectId: "emp-002", measureId: "audiogram", status: "MISSING_DATA", evidence: {}, outOfPopulation: false });
+  await runs.finalizeRun(run.id, "COMPLETED");
+  const res = await get("?measureId=audiogram&scopeLevel=all");
+  assert.equal(res?.status, 200);
+  assert.equal(((await res!.json()) as Row[]).length, 2);
 });
