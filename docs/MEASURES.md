@@ -537,6 +537,12 @@ Each outcome evidence payload includes:
   imported VSAC `value_sets` (`source="VSAC"`) rows from the store, so **no runtime VSAC key is needed**
   (the key was only for the one-time `pnpm resolve-valuesets` import); when those rows are absent (e.g.
   local/dev), the route degrades to the unchanged PR-2 criteria-impact **estimate**.
+  **Since #664 (2026-09-22), only for a run of at most 20 subjects** (`IN_REQUEST_EXECUTION_MAX_SUBJECTS`): the
+  execution tiers are synchronous CPU per subject (~130–150 ms measured locally) and run inside the request,
+  and on the pilot's 20,000-subject runs one diff held the worker, `/health` included, for over half an hour.
+  Above the cap the estimate answers with `executionSkipped: { reason, subjects, limit }`, decided after the
+  ladder so it never claims a tier the stack lacks, and the Standards tab says it is showing an estimate.
+  That includes the 100-employee default roster. Moving the diff to the nightly run is #673.
   The official measure is a **faithful official-SUBSET** — `measures/cms122_official.cql`,
   `using FHIR '4.0.1'` in the proven value-set-retrieve style, driven by the VSAC OID value sets and
   compiled to committed ELM (`DiabetesHbA1cPoorControlOfficialCQL-1.0.0`) — **not** the literal

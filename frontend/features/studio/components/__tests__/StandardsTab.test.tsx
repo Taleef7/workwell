@@ -73,6 +73,27 @@ describe("StandardsTab", () => {
     expect(screen.getByText(/1 Omitted/)).toBeInTheDocument();
     expect(screen.getByText(/18 of 21 represented/)).toBeInTheDocument();
     expect(await screen.findByText(/12 subjects would change/)).toBeInTheDocument();
+    // An estimate that is the measure's only tier says nothing about a skipped comparison.
+    expect(screen.queryByRole("note")).not.toBeInTheDocument();
+  });
+
+  it("#664: says the estimate is standing in for a full comparison the server refused to run", async () => {
+    render(
+      <StandardsTab
+        measureId="cms122"
+        api={mockApi({
+          "/api/measures/cms122/fidelity": fidelity,
+          "/api/measures/cms122/fidelity/diff": {
+            ...diff,
+            executionSkipped: { reason: "population_too_large", subjects: 20000, limit: 50 },
+          },
+        }) as ApiClient}
+      />,
+    );
+    const note = await screen.findByRole("note");
+    expect(note).toHaveTextContent(/estimate, not a full comparison/);
+    expect(note).toHaveTextContent(/20,000 subjects/);
+    expect(note).toHaveTextContent(/limit is 50/);
   });
 
   it("renders the per-subject execution divergence when the diff is in execution mode", async () => {

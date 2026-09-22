@@ -13,11 +13,14 @@ import { join } from "node:path";
 import { rmSync } from "node:fs";
 // @ts-expect-error — @mieweb/cloud-local ships .mjs without types
 import { createSqliteD1 } from "@mieweb/cloud-local";
-import { handleMeasures } from "./measures.ts";
+import { handleMeasures, IN_REQUEST_EXECUTION_MAX_SUBJECTS } from "./measures.ts";
 import { SqliteCaseEventStore } from "../stores/sqlite/case-event-store-sqlite.ts";
 import { SqliteMeasureStore } from "../stores/sqlite/measure-store-sqlite.ts";
 import { SqliteRunStore } from "../stores/sqlite/run-store-sqlite.ts";
 import { SqliteOutcomeStore } from "../stores/sqlite/outcome-store-sqlite.ts";
+import { SqliteValueSetStore } from "../stores/sqlite/value-set-store-sqlite.ts";
+import { CMS122_OFFICIAL_META } from "../standards/cms122-official.ts";
+import { literalDiffAvailable } from "../standards/literal-diff.ts";
 import { runProfileChild } from "../test-support/run-profile-child.ts";
 
 const dbPath = join(tmpdir(), `workwell-measures-${crypto.randomUUID()}.sqlite`);
@@ -312,6 +315,77 @@ test("GET /api/measures/cms122/fidelity/diff returns a valid OutcomeDiffReport w
   } else {
     assert.ok((body.criterionImpacts ?? []).length > 0, "criterionImpacts must not be empty");
   }
+});
+
+// #664 — both cases below run over one run larger than a request may execute, seeded here. They run
+// after the test above, so that test's 1-subject run is the OLDER one and the counts also pin that the
+// diff reads the newest run alone.
+type DiffBody = {
+  mode: string;
+  runId: string;
+  asOf: string | null;
+  totalSubjectsEvaluated: number;
+  executionSkipped?: { reason: string; subjects: number; limit: number };
+};
+const OVER_CAP = IN_REQUEST_EXECUTION_MAX_SUBJECTS + 1;
+let overCapRunId = "";
+
+test("#664 (setup): a cms122 run one subject over the in-request cap", async () => {
+  const runStore = new SqliteRunStore(env.DB as never);
+  const outStore = new SqliteOutcomeStore(env.DB as never);
+  const run = await runStore.createRun({
+    scopeType: "MEASURE",
+    triggeredBy: "test",
+    requestedScope: {},
+    measurementPeriodStart: "2026-06-30T00:00:00.000Z",
+    measurementPeriodEnd: "2026-06-30T00:00:00.000Z",
+  });
+  for (let i = 0; i < OVER_CAP; i++) {
+    await outStore.recordOutcome({ runId: run.id, subjectId: `big-${i}`, measureId: "cms122", status: "COMPLIANT", evidence: {} });
+  }
+  await runStore.finalizeRun(run.id, "COMPLETED");
+  overCapRunId = run.id;
+});
+
+test("#664: when the ladder already answers 'estimate', nothing was refused — no executionSkipped", async (t) => {
+  // No VSAC rows are seeded yet, so the cms122 SUBSET tier is unavailable. Where the vendored literal
+  // artifact is present (a working tree that ran `pnpm vendor:official`) the literal tier is still
+  // available and this case does not describe that stack.
+  if (literalDiffAvailable("cms122")) return t.skip("literal tier available in this working tree");
+  const body = (await (await get("/api/measures/cms122/fidelity/diff"))!.json()) as DiffBody;
+  assert.equal(body.mode, "estimate");
+  assert.equal(body.executionSkipped, undefined, "the note would claim a full comparison was possible and refused");
+  assert.equal(body.totalSubjectsEvaluated, OVER_CAP, "the newest run only");
+});
+
+test("#664: an execution tier that IS available is refused above the cap, and the estimate says so", async () => {
+  // Make the subset tier genuinely available on every stack, CI included: every VSAC value set the
+  // official CMS122 retrieves must resolve non-empty (chooseDiffMode's gate). Without this the test
+  // would only pass on a working tree that holds the literal sidecar.
+  const valueSets = new SqliteValueSetStore(env.DB as never);
+  for (const oid of CMS122_OFFICIAL_META.valueSets ?? []) {
+    await valueSets.upsertResolvedValueSet({
+      oid,
+      name: oid,
+      version: null,
+      source: "VSAC",
+      codes: [{ code: "test-code", system: "http://snomed.info/sct", display: "test" }],
+      resolutionStatus: "RESOLVED",
+      resolutionError: null,
+      expansionHash: null,
+      lastResolvedAt: "2026-06-30T00:00:00.000Z",
+    });
+  }
+  const res = await get("/api/measures/cms122/fidelity/diff");
+  assert.equal(res?.status, 200);
+  const body = (await res!.json()) as DiffBody;
+  assert.equal(body.mode, "estimate", "no execution tier above the cap");
+  assert.deepEqual(body.executionSkipped, { reason: "population_too_large", subjects: OVER_CAP, limit: IN_REQUEST_EXECUTION_MAX_SUBJECTS });
+  assert.equal(body.runId, overCapRunId, "the newest run");
+  // The run started today but describes 2026-06-30: the estimate is anchored to the STORED period, as
+  // the execution tier it replaces is, not to the day it ran (Codex P2 on #674).
+  assert.equal(body.asOf, "2026-06-30");
+  assert.equal(body.totalSubjectsEvaluated, OVER_CAP, "only the newest run's rows");
 });
 
 test("GET /api/measures/:id/elm returns the compiled ELM (AST) for the measure", async () => {
