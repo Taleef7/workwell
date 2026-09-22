@@ -66,6 +66,9 @@ interface OutcomeDiffReport {
   criterionImpacts: CriterionImpact[];
   headline: string;
   disclaimer: string;
+  // Set when the full execution diff was refused because the run is too large to evaluate inside a
+  // request (#664): this estimate is standing in for it, and the tab has to say so.
+  executionSkipped?: { reason: "population_too_large"; subjects: number; limit: number };
 }
 interface ExecutionSubject {
   subjectId: string;
@@ -218,6 +221,13 @@ export function StandardsTab({ measureId, api }: Props) {
       {divergent ? (
         <div className="rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3">
           <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-400">Criteria-impact outcome diff</p>
+          {divergent.executionSkipped ? (
+            <p role="note" className="mt-1 rounded border border-amber-300 bg-amber-50 px-2 py-1 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
+              This is an estimate, not a full comparison. Re-running the official logic for all{" "}
+              {divergent.executionSkipped.subjects.toLocaleString()} subjects in the latest run would stall the server for
+              everyone, so it is not run when this page opens (the limit is {divergent.executionSkipped.limit}).
+            </p>
+          ) : null}
           <p className="mt-1 text-sm text-neutral-700 dark:text-neutral-300">{divergent.headline}</p>
           {divergent.runId ? (
             <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">

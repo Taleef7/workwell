@@ -332,7 +332,14 @@ four route groups are the ones an integrator builds against, and the only ones t
 - Standards fidelity (#186 / E14; ADR-018, ADR-024, ADR-026): `GET /api/measures/:id/fidelity` → the structural
   COVERED/SIMPLIFIED/OMITTED criterion coverage + value-set fidelity (`{ available: false }` for measures
   with no vendored official reference), and `GET /api/measures/:id/fidelity/diff` → the outcome diff over
-  the latest population run. For **`cms122`** the diff runs a **real subject-by-subject execution diff**
+  the latest population run. **An execution tier (literal or subset) runs inside the request only for a run
+  of at most `IN_REQUEST_EXECUTION_MAX_SUBJECTS` (20) subjects (#664)**: both tiers are synchronous CPU per
+  subject, and on the pilot's 20,000-subject runs one diff held the worker — `/health` included — for over
+  half an hour. Above the cap the criteria estimate answers, carrying `executionSkipped` so the Standards
+  tab says a full comparison was not run. The route reads only the winning run's rows
+  (`listLatestPopulationRuns` → `listOutcomesWithRun({ runIds })`), as does `data-readiness`, which also
+  leaves out-of-population subjects out of its missingness rate (ADR-079). A diff over a real population
+  belongs in an offline job; that is not built. For **`cms122`** the diff runs a **real subject-by-subject execution diff**
   when the imported VSAC `value_sets` rows are present (store-backed resolution via `StoreValueSetResolver`
   — **no runtime VSAC key**; `chooseDiffMode` requires EVERY official value set to resolve non-empty),
   on a **three-tier ladder (#258)** surfaced by an additive `mode` response field: **`"literal"`** —

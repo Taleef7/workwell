@@ -6,7 +6,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { MeasureRecord } from "../stores/measure-store.ts";
-import type { OutcomeStore, MeasureOutcomeRow } from "../stores/outcome-store.ts";
+import type { OutcomeStore, OutcomeWithRun, OutcomeMeasureFilter } from "../stores/outcome-store.ts";
 import { computeDataReadiness } from "./data-readiness.ts";
 
 function record(requiredDataElements: string[], measureId = "audiogram"): MeasureRecord {
@@ -30,12 +30,33 @@ function record(requiredDataElements: string[], measureId = "audiogram"): Measur
   };
 }
 
-/** Stub OutcomeStore returning a fixed measure-outcome history. */
-function outcomesStub(rows: Array<{ subjectId: string; status: string }>): OutcomeStore {
-  const measureRows: MeasureOutcomeRow[] = rows.map((r) => ({ subjectId: r.subjectId, status: r.status, evaluationPeriod: "2026-06-13", evaluatedAt: "2026-06-13T00:00:00.000Z", evidence: {} }));
-  return {
-    listOutcomesForMeasure: async () => measureRows,
+/** Stub OutcomeStore: one winning run ("run-latest") holding the given rows. Records the calls made. */
+function outcomesStub(rows: Array<{ subjectId: string; status: string; outOfPopulation?: boolean }>) {
+  const calls: { runIds?: readonly string[] }[] = [];
+  const runRows: OutcomeWithRun[] = rows.map((r) => ({
+    runId: "run-latest",
+    runStartedAt: "2026-06-13T00:00:00.000Z",
+    runScopeType: "ALL_PROGRAMS",
+    runStatus: "COMPLETED",
+    runTriggeredBy: "scheduler",
+    subjectId: r.subjectId,
+    measureId: "audiogram",
+    status: r.status,
+    ...(r.outOfPopulation === undefined ? {} : { outOfPopulation: r.outOfPopulation }),
+  }));
+  const store = {
+    listLatestPopulationRuns: async (measureIds: readonly string[]) =>
+      rows.length === 0 ? [] : measureIds.map((measureId) => ({ measureId, runId: "run-latest", runStartedAt: "2026-06-13T00:00:00.000Z", runScopeType: "ALL_PROGRAMS", runStatus: "COMPLETED", runTriggeredBy: "scheduler" })),
+    listOutcomesWithRun: async (filter: OutcomeMeasureFilter) => {
+      calls.push({ runIds: filter.runIds });
+      return runRows.filter((r) => !filter.runIds || filter.runIds.includes(r.runId));
+    },
+    // The unbounded history scan this module used to make (#664). Present so a regression is loud.
+    listOutcomesForMeasure: async () => {
+      throw new Error("data readiness must not scan the measure's whole outcome history (#664)");
+    },
   } as unknown as OutcomeStore;
+  return Object.assign(store, { calls });
 }
 
 test("all required elements resolve to MAPPED + FRESH → READY when no missingness", async () => {
@@ -107,4 +128,33 @@ test("missingness > 5% raises a warning on clinical elements → READY_WITH_WARN
   // non-clinical element (role) carries no missingness
   const role = r.requiredElements.find((e) => e.canonicalElement === "employee.role")!;
   assert.equal(role.missingnessRate, 0);
+});
+
+test("#664: reads only the winning run's rows, never the measure's whole history", async () => {
+  const outcomes = outcomesStub([{ subjectId: "emp-001", status: "COMPLIANT" }]);
+  await computeDataReadiness({ outcomes }, record(["Last audiogram date"]));
+  assert.equal(outcomes.calls.length, 1, "one bounded read");
+  assert.deepEqual(outcomes.calls[0]!.runIds, ["run-latest"], "restricted to the winning run in SQL");
+});
+
+test("#664: an out-of-population subject is not missing data (ADR-079)", async () => {
+  // 1 in-population MISSING_DATA of 2 in population = 50%; the two out-of-population rows are neither
+  // numerator nor denominator. Counting them would read 75% and name them as the missing subjects.
+  const deps = { outcomes: outcomesStub([
+    { subjectId: "emp-001", status: "COMPLIANT" },
+    { subjectId: "emp-002", status: "MISSING_DATA" },
+    { subjectId: "emp-003", status: "MISSING_DATA", outOfPopulation: true },
+    { subjectId: "emp-004", status: "MISSING_DATA", outOfPopulation: true },
+  ]) };
+  const r = await computeDataReadiness(deps, record(["Last audiogram date"]));
+  const clinical = r.requiredElements.find((e) => e.canonicalElement === "procedure.audiogram")!;
+  assert.equal(clinical.missingnessRate, 0.5);
+  assert.deepEqual(clinical.sampleMissingEmployees, ["emp-002"]);
+});
+
+test("no population run yet → the rate is UNKNOWN: a warning, never a silent READY", async () => {
+  const r = await computeDataReadiness({ outcomes: outcomesStub([]) }, record(["Last audiogram date"]));
+  assert.equal(r.requiredElements[0]!.missingnessRate, 0);
+  assert.ok(r.warnings.some((w) => /no completed population run/i.test(w)));
+  assert.equal(r.overallStatus, "READY_WITH_WARNINGS", "an unmeasured measure is not READY");
 });
