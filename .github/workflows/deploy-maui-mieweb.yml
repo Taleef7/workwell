@@ -128,6 +128,9 @@ jobs:
           context: .
           file: ./backend-ts/Dockerfile
           push: true
+          # The commit, baked into the image and served on /health (#625).
+          build-args: |
+            WORKWELL_BUILD_SHA=${{ github.sha }}
           # Only the IMMUTABLE tag is pushed here. `maui-latest` is the tag the self-heal reconciler
           # recreates from, so it must mean "the last image that DEPLOYED successfully", not "the last
           # image that BUILT" — otherwise a build that deploys badly poisons the recovery path, and the

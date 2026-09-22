@@ -47,6 +47,14 @@ async function main(): Promise<void> {
   const host = await startLocalHost({ config });
   console.log(`[workwell] backend-ts host listening on :${host.port} (target=${target})`);
 
+  // Event-loop stall monitor + watchdog thread (#663). Started here, by the production host only, so
+  // importing the worker (every test does) starts no timers and no threads. A stall is logged as
+  // `WORKWELL_ALERT {"kind":"EVENT_LOOP_STALL",…}` when it ends, and — from a worker thread, while it is
+  // still going — as `EVENT_LOOP_STALL_ONGOING`, naming the requests in flight.
+  const { startRuntimeMonitor, buildSha } = await import("./admin/runtime-health.ts");
+  const stopRuntimeMonitor = startRuntimeMonitor();
+  console.log(`[workwell] runtime monitor on (build=${buildSha() ?? "unknown"})`);
+
   // Scheduled cron recompute (E13 PR-3): fires an ALL_PROGRAMS run once the 23.5h cooldown
   // expires. The 5-min poll is shorter than the cooldown so the window is never missed; runTick
   // is idempotent — two concurrent ticks are safe (the cooldown check inside runTick debounces).
@@ -265,6 +273,7 @@ async function main(): Promise<void> {
     stopping = true;
     console.log(`[workwell] ${signal} received — draining for up to ${shutdownGraceMs}ms, then exiting`);
     clearInterval(schedulerInterval); // stop the in-process scheduler tick before draining
+    void stopRuntimeMonitor();
     host.stop(); // stops accepting new connections + clears the cron tick
     // host.stop() does NOT await in-flight responses (nor ctx.waitUntil run-jobs — a host-harness
     // limitation that doesn't expose the underlying server), so give them a bounded drain window and
