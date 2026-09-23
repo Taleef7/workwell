@@ -10,9 +10,9 @@
  * unrelated PRs. This packs by measured weight instead, which is stable under insertion.
  *
  * THE FLOOR IS THE SLOWEST SINGLE FILE. `node --test` parallelises across files, never within one, so
- * no shard count takes the job below the longest file — `run/batch-evaluate-scale.test.ts`, 346 s when
- * measured alone, with `routes/runs.test.ts` behind it at 238 s. Splitting THOSE TWO is the next win if
- * this stops being enough; adding shards past that point buys nothing at all.
+ * no shard count takes the job below the longest file (WEIGHTS below). When a file dominates, first
+ * look for a test evaluating far more patients or measures than its assertion needs, or recomputing the
+ * same deterministic result per test: that is what took this floor from 346 s to ~120 s on 2026-09-23.
  *
  * Usage:
  *   node scripts/test-shards.mjs <shard> <total>   the files for that shard, one per line
@@ -62,24 +62,23 @@ function canonicalTestGlobs() {
 }
 
 /**
- * Seconds, measured one file at a time on an idle machine (2026-09-15) — NOT read off a CI log, where
- * every number is inflated by contention with the other files running beside it (`runs.test.ts` reads
- * as 279 s there and is 238 s alone).
+ * Seconds, measured one file at a time on an idle machine (2026-09-23) — NOT read off a CI log, where
+ * every number is inflated by contention with the other files running beside it.
  *
- * Only files worth more than a few seconds need an entry; everything else takes DEFAULT_WEIGHT, which
- * is deliberately ~1 file ≈ 1 unit. A stale entry costs balance, never correctness: the split stays
- * exhaustive whatever the weights say. Re-measure with:
+ * Only files worth more than a few seconds need an entry; everything else takes DEFAULT_WEIGHT (a small
+ * file measured ~1.5 s alone, process start included). A stale entry costs balance, never correctness:
+ * the split stays exhaustive whatever the weights say. Re-measure with:
  *   for f in <paths>; do /usr/bin/time -f "%e $f" node --import tsx --test "$f"; done
  */
 const WEIGHTS = new Map([
-  ["src/run/batch-evaluate-scale.test.ts", 346],
-  ["src/routes/runs.test.ts", 238],
-  ["src/engine/ingress/webchart/mock-http-conformance.test.ts", 169],
-  ["src/run/backfill-trend-history.test.ts", 102],
-  ["src/engine/ingress/webchart/devdb-eval.test.ts", 100],
-  ["src/run/run-pipeline.test.ts", 89],
-  ["src/engine/ingress/webchart/devdb-cli.test.ts", 61],
-  ["src/routes/measures.test.ts", 40],
+  ["src/run/batch-evaluate-scale.test.ts", 120],
+  ["src/routes/runs.test.ts", 54],
+  ["src/engine/ingress/webchart/devdb-eval.test.ts", 52],
+  ["src/engine/ingress/webchart/mock-http-conformance.test.ts", 51],
+  ["src/run/backfill-trend-history.test.ts", 39],
+  ["src/run/run-pipeline.test.ts", 36],
+  ["src/engine/ingress/webchart/devdb-cli.test.ts", 19],
+  ["src/routes/measures.test.ts", 18],
 ]);
 
 const DEFAULT_WEIGHT = 2;

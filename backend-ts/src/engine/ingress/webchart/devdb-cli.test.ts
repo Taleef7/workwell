@@ -11,8 +11,12 @@ import assert from "node:assert/strict";
 import { evaluateDevDb, renderReport, DEVDB_EXCLUDED } from "./devdb-cli.ts";
 import { DEVDB_WHITELIST } from "./report-table.ts";
 
+/** Evaluated once for the file: the result is deterministic and every test only reads it. */
+let report: ReturnType<typeof evaluateDevDb> | undefined;
+const devDb = () => (report ??= evaluateDevDb({ evaluationDate: "2024-06-01" }));
+
 test("evaluateDevDb: per-measure bucket counts reconcile to the total, over the whole sample", async () => {
-  const r = await evaluateDevDb({ evaluationDate: "2024-06-01" });
+  const r = await devDb();
   assert.equal(r.population, 56);
   assert.deepEqual(
     r.whitelist.map((m) => m.measureId),
@@ -26,7 +30,7 @@ test("evaluateDevDb: per-measure bucket counts reconcile to the total, over the 
 });
 
 test("evaluateDevDb: the sample produces real (non-MISSING_DATA) outcomes — the proof isn't degenerate", async () => {
-  const r = await evaluateDevDb({ evaluationDate: "2024-06-01" });
+  const r = await devDb();
   const nonMissing = r.whitelist.reduce((a, m) => a + (m.total - m.counts.MISSING_DATA), 0);
   // 31 after eCQI-faithful CMS125 (roster visit stamp + age 42–74 IPP): cms125 contributes 4 OVERDUE
   // age-in-band subjects (wc-8/36/45/47); the pre-eCQI total of 28 counted only the simplified
@@ -38,7 +42,7 @@ test("evaluateDevDb: the sample produces real (non-MISSING_DATA) outcomes — th
 });
 
 test("renderReport: names every excluded measure (no silent caps) + a real-outcomes headline", async () => {
-  const out = renderReport(await evaluateDevDb({ evaluationDate: "2024-06-01" }));
+  const out = renderReport(await devDb());
   for (const m of DEVDB_EXCLUDED) assert.ok(out.includes(m), `report must name excluded measure ${m}`);
   assert.match(out, /real \(non-MISSING_DATA\) outcomes/);
   for (const m of DEVDB_WHITELIST) assert.ok(out.includes(m), `report must list whitelist measure ${m}`);
