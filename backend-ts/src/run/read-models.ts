@@ -24,7 +24,7 @@ import { MEASURE_CATALOG } from "../measure/measure-catalog.ts";
 
 export interface RunListItem {
   runId: string;
-  /** What the run covered, in words: a measure's name, `Site: …`, `Patient: …`, or "All Programs". */
+  /** What the run covered, in words: a measure's name, `Site: …`, "Single patient", or "All Programs". */
   measureName: string;
   /** The measure a MEASURE/CASE run evaluated; null for runs over every measure (#644, #668). */
   measureId: string | null;
@@ -79,7 +79,7 @@ export interface RunOutcomeRow {
   /**
    * What to SHOW: a MISSING_DATA row the measure's logic put outside its population reads
    * OUT_OF_POPULATION (ADR-079). The same column test as the summary's `notInPopulation`, so the
-   * grid and the counts above it agree (#668).
+   * grid and that count judge each outcome the same way (#668).
    */
   displayStatus: string;
   daysSinceExam: string | null;
@@ -90,7 +90,6 @@ export interface RunOutcomeRow {
 const NON_COMPLIANT = new Set(["DUE_SOON", "OVERDUE", "MISSING_DATA"]);
 
 const SUBJECT_SINGULAR = subjectNoun(DEPLOYMENT_PROFILE).singular;
-const SUBJECT_LABEL = SUBJECT_SINGULAR.charAt(0).toUpperCase() + SUBJECT_SINGULAR.slice(1);
 
 /** The measure a MEASURE/CASE run evaluated, from the stored scope (the manual path writes both). */
 function runMeasureId(run: Pick<RunRecord, "scopeType" | "scopeId" | "requestedScope">): string | null {
@@ -102,7 +101,8 @@ function runMeasureId(run: Pick<RunRecord, "scopeType" | "scopeId" | "requestedS
 /**
  * What the run covered, as a title. It used to look the name up in the AUTHORED registry only, so a
  * run of an official-only measure (cms2, cms130, cms165, cms137 on Maui) and every SITE/patient run
- * were all titled "All Programs" (#668). The labels mirror `resolveScope`'s in `run-pipeline.ts`.
+ * were all titled "All Programs" (#668). A patient run says so without the identifier: the title also
+ * goes into the run-insight prompt sent to OpenAI.
  */
 function measureLabel(run: Pick<RunRecord, "scopeType" | "scopeId" | "site" | "requestedScope">): { name: string; version: string } {
   const measureId = runMeasureId(run);
@@ -115,8 +115,7 @@ function measureLabel(run: Pick<RunRecord, "scopeType" | "scopeId" | "site" | "r
     return { name: measureDisplayName(measureId), version };
   }
   if (run.scopeType === "SITE" && run.site) return { name: `Site: ${run.site}`, version: "" };
-  const subject = run.requestedScope?.employeeExternalId;
-  if (run.scopeType === "EMPLOYEE" && typeof subject === "string") return { name: `${SUBJECT_LABEL}: ${subject}`, version: "" };
+  if (run.scopeType === "EMPLOYEE") return { name: `Single ${SUBJECT_SINGULAR}`, version: "" };
   return { name: "All Programs", version: "" };
 }
 

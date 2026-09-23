@@ -1,5 +1,5 @@
 import React from "react";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
@@ -135,6 +135,21 @@ describe("RunsPage says what a run is and what its numbers mean (#668)", () => {
     await waitFor(() => expect(listCalls().length).toBeGreaterThan(0));
     expect(listCalls().every((u) => !new URLSearchParams(u.split("?")[1]).has("site"))).toBe(true);
     expect(screen.getByText("Runs cover every site, so the site filter doesn't narrow this list.")).toBeInTheDocument();
+    // The grid is every site's rows; the outcomes CSV keeps the site, and the note says so.
+    expect(await screen.findByTestId("outcomes-capped")).toHaveTextContent("Showing 2 of 20,000. The outcomes CSV has every Kihei Clinic row.");
+  });
+
+  it("Refresh clears an error left by a failed detail load", async () => {
+    let failDetail = true;
+    const base = get.getMockImplementation()!;
+    get.mockImplementation((url: string) =>
+      url === "/api/runs/run-1" && failDetail ? Promise.reject(new Error("Detail load failed")) : base(url),
+    );
+    render(<RunsPage />);
+    expect(await screen.findByText("Detail load failed")).toBeInTheDocument();
+    failDetail = false;
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    await waitFor(() => expect(screen.queryByText("Detail load failed")).not.toBeInTheDocument());
   });
 
   it("clears the detail when filters remove the selected run, with no live '0s ●'", async () => {

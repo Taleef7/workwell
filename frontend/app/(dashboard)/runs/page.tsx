@@ -298,6 +298,7 @@ export default function RunsPage() {
 
   const loadRuns = useCallback(async () => {
     setLoading(true);
+    setError(null);
     setListError(null);
     try {
       const query = runFilterParams();
@@ -433,17 +434,22 @@ export default function RunsPage() {
                   api.get<RunSummary>(`/api/runs/${activeRunId}`),
                   api.get<RunLogEntry[]>(`/api/runs/${activeRunId}/logs?limit=200`),
                 ]);
+                // The list reload above can drop this run (a status filter) and clear its detail while
+                // these were in flight; a late write here would bring the detail back (#668).
+                const stillSelected = () => selectedRunIdRef.current === activeRunId;
+                if (!stillSelected()) return;
                 setSelectedRun(summary);
                 setRunLogs(logs);
                 void loadOutcomes(activeRunId).then((outcomes) => {
+                  if (!stillSelected()) return;
                   setRunOutcomes(outcomes.rows);
                   setRunOutcomesTotal(outcomes.total);
                 });
                 // The run just became terminal, so the ladder exists now; the initial fetch got a 409.
                 api
                   .get<unknown>(`/api/runs/${activeRunId}/reconciliation`)
-                  .then((ladder) => setReconciliation(asReconciliation(ladder)))
-                  .catch(() => setReconciliation(null));
+                  .then((ladder) => stillSelected() && setReconciliation(asReconciliation(ladder)))
+                  .catch(() => stillSelected() && setReconciliation(null));
               } catch {
                 // ignore transient error on completion reload
               }
@@ -761,8 +767,8 @@ export default function RunsPage() {
             size="sm"
             onClick={() =>
               void downloadFile(
-                // `site` too: this screen holds one and `/api/exports/outcomes` accepts it (§6.2), so
-                // leaving it off made the outcomes file wider than the history it was taken from.
+                // `site` too: outcomes belong to sites and `/api/exports/outcomes` accepts it (§6.2). The
+                // runs list and the grid are not narrowed by it (#668), so the grid's note names the site.
                 `/api/exports/outcomes?format=csv${selectedRunId ? `&runId=${encodeURIComponent(selectedRunId)}` : ""}${siteId ? `&site=${encodeURIComponent(siteId)}` : ""}`,
                 "outcomes.csv"
               )
@@ -986,7 +992,7 @@ export default function RunsPage() {
                   <td className="px-3 py-2 align-top">
                     {run.runId === activeRunId ? (
                       <span className="tabular-nums">
-                        {runElapsedSec}s <span className="animate-pulse text-neutral-400" aria-hidden="true">●</span>
+                        {formatRunDuration(runElapsedSec * 1000)} <span className="animate-pulse text-neutral-400" aria-hidden="true">●</span>
                       </span>
                     ) : (
                       formatRunDuration(run.durationMs, run.status)
@@ -1057,7 +1063,7 @@ export default function RunsPage() {
                 Duration:{" "}
                 {activeRunId !== null && selectedRunId === activeRunId ? (
                   <span className="tabular-nums">
-                    {runElapsedSec}s <span className="animate-pulse text-neutral-400" aria-hidden="true">●</span>
+                    {formatRunDuration(runElapsedSec * 1000)} <span className="animate-pulse text-neutral-400" aria-hidden="true">●</span>
                   </span>
                 ) : (
                   formatRunDuration(selectedRun.durationMs, selectedRun.status)
@@ -1198,7 +1204,8 @@ export default function RunsPage() {
         <h3 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Outcomes</h3>
         {runOutcomesTotal !== null && runOutcomesTotal > runOutcomes.length ? (
           <p className="text-xs text-neutral-500 dark:text-neutral-400" data-testid="outcomes-capped">
-            Showing {runOutcomes.length.toLocaleString()} of {runOutcomesTotal.toLocaleString()}. The outcomes CSV has every row.
+            Showing {runOutcomes.length.toLocaleString()} of {runOutcomesTotal.toLocaleString()}.{" "}
+            {siteId ? `The outcomes CSV has every ${siteId} row.` : "The outcomes CSV has every row."}
           </p>
         ) : null}
         {runOutcomes.length === 0 ? (
