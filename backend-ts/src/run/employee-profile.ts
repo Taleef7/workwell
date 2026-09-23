@@ -23,6 +23,8 @@ import { ACTIVE_CASE_STATUSES } from "../case/case-logic.ts";
 import { deriveCell, type DisplayState } from "../compliance/roster-vocabulary.ts";
 import { isCatalogActiveRunnable } from "../compliance/panels.ts";
 import { measureDisplayName } from "../measure/measure-name.ts";
+import { isApplicable } from "../segment/segment-applicability.ts";
+import type { HydratedSegment } from "../stores/segment-store.ts";
 
 export interface MeasureOutcomeSummary {
   measureId: string;
@@ -95,6 +97,8 @@ export interface EmployeeProfileDeps {
   cases: CaseStore;
   events: CaseEventStore;
   webChartEnv?: DataSourceEnv;
+  /** Configured segments: a measure the subject is in no enabled segment for reads NOT_APPLICABLE, as on the roster. */
+  segments?: HydratedSegment[];
 }
 
 const measureVersionOf = (measureId: string): string => {
@@ -189,7 +193,10 @@ export async function getEmployeeProfile(deps: EmployeeProfileDeps, externalId: 
       measureName: measureNameOf(o.measureId),
       measureVersion: measureVersionOf(o.measureId),
       outcomeStatus: o.status,
-      displayStatus: deriveCell(o.status, o.evidence, o.measureId, o.evaluationPeriod).status,
+      // The roster's overlay, in the roster's order: out of cohort wins over any real outcome (E11.3).
+      displayStatus: isApplicable(emp, o.measureId, deps.segments ?? [])
+        ? deriveCell(o.status, o.evidence, o.measureId, o.evaluationPeriod).status
+        : "NOT_APPLICABLE",
       lastRunDate: o.evaluatedAt,
       daysSinceLastExam: daysSince,
       daysUntilDue: daysSince !== null && window !== null ? window - daysSince : null,

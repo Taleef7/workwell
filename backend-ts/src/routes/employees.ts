@@ -43,7 +43,9 @@ export async function handleEmployees(req: Request, env: EmployeesEnv): Promise<
     } catch {
       return json({ error: "not_found", externalId: rawProfileId }, 404); // malformed %-encoding → unknown id
     }
-    const profile = await getEmployeeProfile(await deps(env), profileId);
+    // Segments only here: the posture applies the roster's applicability overlay; search does not need it.
+    const segments = await (await getStores(env)).segments.listSegments();
+    const profile = await getEmployeeProfile({ ...(await deps(env)), segments }, profileId);
     return profile ? json(profile) : json({ error: "not_found", externalId: profileId }, 404);
   }
 

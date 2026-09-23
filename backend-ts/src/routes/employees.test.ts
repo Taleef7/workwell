@@ -15,6 +15,7 @@ import { SqliteRunStore } from "../stores/sqlite/run-store-sqlite.ts";
 import { SqliteOutcomeStore } from "../stores/sqlite/outcome-store-sqlite.ts";
 import { SqliteCaseStore } from "../stores/sqlite/case-store-sqlite.ts";
 import { SqliteCaseEventStore } from "../stores/sqlite/case-event-store-sqlite.ts";
+import { SqliteSegmentStore } from "../stores/sqlite/segment-store-sqlite.ts";
 import { handleEmployees } from "./employees.ts";
 import { replaceLiveDirectory } from "../engine/ingress/webchart/live-directory.ts";
 
@@ -153,6 +154,29 @@ test("profile shows what the roster shows: out-of-population MISSING_DATA reads 
   assert.equal(cms122.displayStatus, "OUT_OF_POPULATION", "and the page is told what the table shows");
   // In the population with nothing on file stays a real gap.
   assert.equal(p.measureOutcomes.find((o) => o.measureId === "cms125")!.displayStatus, "MISSING_DATA");
+});
+
+test("profile applies the roster's segment overlay: a measure outside the subject's groups reads NOT_APPLICABLE (#671)", async () => {
+  // One enabled segment holding emp-006 (by override) for the audiogram only: on the roster every other
+  // measure is NOT_APPLICABLE for them, and the posture must not show a gap the table calls not applicable.
+  const segments = new SqliteSegmentStore(env.DB as never);
+  const seg = await segments.createSegment({
+    name: "Audiogram only",
+    enabled: true,
+    rule: { match: "ANY", conditions: [] },
+    measureIds: ["audiogram"],
+    overrides: [{ externalId: "emp-006", mode: "INCLUDE" }],
+  });
+  try {
+    const p = (await (await get("/api/employees/emp-006/profile"))!.json()) as {
+      measureOutcomes: Array<{ measureId: string; displayStatus: string }>;
+    };
+    const by = new Map(p.measureOutcomes.map((o) => [o.measureId, o.displayStatus]));
+    assert.equal(by.get("audiogram"), "OVERDUE", "the segment's own measure keeps its reading");
+    assert.equal(by.get("cms125"), "NOT_APPLICABLE", "outside every enabled group, as the roster shows it");
+  } finally {
+    await segments.deleteSegment(seg.id);
+  }
 });
 
 test("GET /api/employees/:id/profile → 404 for an unknown employee", async () => {
