@@ -1,55 +1,23 @@
 name: CI
 
 on:
-  # A branch prefix that is NOT in this list gets no push CI, and gets it SILENTLY — the PR simply shows
-  # no checks, which reads the same as "nothing to run" rather than "nothing ran". `chore/**` and
-  # `docs/**` were missing, which is how #403 was noticed. The list stays explicit rather than becoming
-  # "every branch" because the `official-cases` job clones ~34 MB of upstream content and takes up to 20
-  # minutes; paying that on every scratch branch is a real cost. If you use a prefix that is not here,
-  # add it in the same push — for a push event GitHub reads the workflow file from the commit being
-  # pushed, so it takes effect immediately.
-  #
-  # HONEST LIMIT OF THIS FIX: it explains the missing PUSH run and NOT the missing pull_request run.
-  # `pull_request.branches` filters on the BASE branch, so it is prefix-agnostic and should have fired
-  # for #403 regardless. PRs #399–#402 each produced both a push run and a pull_request run; #403
-  # produced neither, with Actions enabled, no `[skip ci]`, and a mergeable PR. That second cause is
-  # UNDIAGNOSED. Adding the prefix makes checks appear, which masks the symptom — so if a PR ever again
-  # shows zero checks, do not assume this line covers it.
+  # Every branch push, and no pull_request trigger: a PR's checks are the push run of its head commit.
+  # Both triggers ran every PR commit twice, and the pull_request one is the one that silently failed to
+  # fire (a PR that conflicts, or one retargeted from another branch: #403, #538, #611). A fork's push
+  # runs in the fork, so a fork PR gets no CI here; this is a single-developer repository.
+  # CI tests the branch head, not the head merged into main: update a branch that is behind main
+  # before merging it, or the squash-merged result is first tested after the deploy has started.
   push:
-    branches: [main, "claude/**", "fix/**", "feat/**", "perf/**", "chore/**", "docs/**", "ci/**", "test/**"]
-  pull_request:
-    branches: [main]
+    branches: ["**"]
   workflow_dispatch:
-    inputs:
-      e2e_base_url:
-        description: "E2E target. Allowlisted in .github/scripts/e2e-target-allowed.sh — production is REFUSED, the suite mutates. Default: staging."
-        type: string
-        required: false
-      e2e_profile:
-        description: "Which Playwright project to run: 'twh' (the existing suite against e2e_base_url) or 'maui' (the Maui pilot project against a stack the runner boots itself as WORKWELL_INSTANCE=maui — no external target, nothing shared is mutated)."
-        type: choice
-        options: [twh, maui]
-        default: twh
-        required: false
-      run_scale_maui:
-        description: "Run the 20,000-patient scale job (measures the pipeline's wall clock; ~5 min, no VSAC needed)."
-        type: boolean
-        default: false
-        required: false
-  # Weekly rather than nightly: the scale job measures a wall clock, and a number that only ever moves
-  # when somebody happens to look is worth less than one on a fixed cadence. Sunday 03:00 UTC keeps it
-  # clear of the deploy windows.
-  schedule:
-    - cron: "0 3 * * 0"
 
-# The event name is part of the group so a manual dispatch (the e2e jobs) is not cancelled by the push
-# or pull_request run that a `git push` of the same branch starts a second later — measured 2026-09-02:
-# three dispatches in a row were "cancelled" before their first step for exactly this reason.
+# The event name is part of the group so a manual dispatch is not cancelled by the push run that a
+# `git push` of the same branch starts a second later.
 concurrency:
   group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
-# Least privilege for all eight jobs. Nothing in this workflow uses GITHUB_TOKEN — no `gh` call, no
+# Least privilege for every job. Nothing in this workflow uses GITHUB_TOKEN — no `gh` call, no
 # registry push, no commit back — so read access to the code is the whole requirement. Declaring it
 # here rather than per job means a job added later inherits the floor instead of silently taking
 # whatever the repository default happens to grant. Any job that genuinely needs more overrides this
@@ -84,11 +52,6 @@ jobs:
       # the production deploy step into a parse error; nothing before merge could see it (#356).
       - name: Every workflow run-block parses as shell
         run: bash .github/scripts/workflow-run-blocks.test.sh
-      # The E2E allowlist is the only thing standing between a dispatched E2E run and the production
-      # audit log, and the e2e job itself runs on dispatch only — so nothing on a PR would exercise it.
-      # Testing it here means a change that weakens the refusal fails on the PR that makes it.
-      - name: The E2E target allowlist refuses production
-        run: bash .github/scripts/e2e-target-allowed.test.sh
 
   frontend:
     name: Frontend — Lint, Test, Build
@@ -205,8 +168,9 @@ jobs:
     # SELF-SKIPS rather than failing.
     #
     # Three shards, not more: `node --test` parallelises across files and never within one, so the job
-    # can never finish faster than its slowest single file (routes/runs.test.ts, 238 s measured alone).
-    # A fourth shard would cost a runner and save nothing. Splitting that file is the next lever.
+    # can never finish faster than its slowest single file (see scripts/test-shards.mjs). A test that
+    # needs minutes usually evaluates far more patients or measures than its assertion needs — shrink
+    # the input before adding a shard.
     strategy:
       fail-fast: false # one shard's failure must not hide another's — they test disjoint code
       matrix:
@@ -226,9 +190,9 @@ jobs:
           - 5432:5432
         options: >-
           --health-cmd "pg_isready -U workwell"
-          --health-interval 10s
+          --health-interval 2s
           --health-timeout 5s
-          --health-retries 5
+          --health-retries 25
     defaults:
       run:
         working-directory: backend-ts
@@ -356,11 +320,10 @@ jobs:
       # AdvancedIllness, 1000 of 1997, feeding a DENEX in both measures) from VSAC at a pinned release.
       #
       # It is passed ONLY when the credential is actually present, and that is not merely an
-      # optimization. GitHub withholds repository secrets from workflows triggered by a FORK pull
-      # request (Dependabot likewise). Passing the flag unconditionally there would regenerate the
-      # capped manifests while Git records the completed ones, and the reproducibility check below
-      # would then fail every outside contributor's PR for a reason that has nothing to do with their
-      # change. So the step reports whether it ran credentialed, and the check adapts.
+      # optimization. GitHub withholds repository secrets from Dependabot's pushes. Passing the flag
+      # unconditionally there would regenerate the capped manifests while Git records the completed
+      # ones, and the reproducibility check below would then fail every Dependabot run for a reason
+      # that has nothing to do with its change. So the step reports whether it ran credentialed, and the check adapts.
       - name: Vendor official terminology (the runtime's own expansions, same pin)
         id: vendor
         env:
@@ -372,7 +335,7 @@ jobs:
           else
             echo "credentialed=false" >> "$GITHUB_OUTPUT"
             COMPLETE=
-            echo "::notice::No VSAC credential in this context (expected for a fork PR). Vendoring without expansion completion; the reproducibility check will verify bundle bytes only."
+            echo "::notice::No VSAC credential in this context (expected on Dependabot's pushes). Vendoring without expansion completion; the reproducibility check will verify bundle bytes only."
           fi
           # $COMPLETE is deliberately UNQUOTED: it is either one flag or nothing, and quoting it passes
           # an empty string that the script's parseArgs rejects as `unknown argument:`. Leave it bare.
@@ -453,10 +416,10 @@ jobs:
             src/fhir/qrda1-import-official.test.ts \
             scripts/valueset-parity.test.mjs \
             scripts/vendor-official-measure.test.mjs
-      # `--allow-missing-terminology` ONLY where the credential is genuinely absent (fork PRs,
-      # Dependabot — GitHub withholds the secret there). Without it, the uncredentialed re-vendor above
+      # `--allow-missing-terminology` ONLY where the credential is genuinely absent (Dependabot's
+      # pushes — GitHub withholds the secret there). Without it, the uncredentialed re-vendor above
       # produces a cms138 sidecar that omits the value set upstream does not ship, the deck cannot
-      # resolve it, and every external contributor's PR goes red for a reason unrelated to their change
+      # resolve it, and every Dependabot run goes red for a reason unrelated to its change
       # (review of #366). The credentialed run on merge passes NOTHING and therefore skips nothing —
       # there, an unresolvable value set means a broken artifact, which is what the gate is for.
       - name: Run the official MADiE test-case gate
@@ -474,7 +437,7 @@ jobs:
       # ignore this job — the worst possible failure mode for a gate.
       # Credentialed runs only. An uncredentialed run may skip a measure, which makes it a PARTIAL run —
       # the CLI deliberately does not rewrite the committed report there, so comparing against it would
-      # always differ and would fail every fork PR (review of #366).
+      # always differ and would fail every uncredentialed (Dependabot) run (review of #366).
       - name: Committed evidence report is current (results, not timestamp)
         if: steps.vendor.outputs.credentialed == 'true'
         working-directory: ${{ github.workspace }}
@@ -606,121 +569,24 @@ jobs:
       - name: Pack, install, run and typecheck outside the workspace
         run: pnpm verify:publish
 
-  e2e:
-    name: Playwright E2E (manual)
-    runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch' && (inputs.e2e_profile || 'twh') == 'twh'
-    steps:
-      - uses: actions/checkout@v7
-      - uses: pnpm/action-setup@v6
-        with:
-          version: 10.17.1
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 24
-      - name: Install e2e dependencies
-        working-directory: e2e
-        run: pnpm install
-      - name: Install Playwright browsers
-        working-directory: e2e
-        run: npx playwright install chromium --with-deps
-      # THE TARGET IS STAGING, NEVER PRODUCTION — this suite MUTATES. `runs.spec.ts` triggers a manual
-      # run and `case-outreach.spec.ts` POSTs `/actions/outreach`, so against the live TWH stack it would
-      # create real runs and case actions, and CLAUDE.md's hard rule means every one of those writes an
-      # `audit_event`. A test suite that pollutes the production audit log is worse than no suite.
-      #
-      # It previously pointed at `workwell-measure-studio.vercel.app` — the Vercel stack decommissioned
-      # when MIE TWH became the sole live one. That host now 404s, so every test burned its full 60s
-      # timeout plus a retry and the job hung ~14 minutes before being cancelled. It read as E2E coverage
-      # and could not pass. The preflight below makes that failure mode take seconds and name itself.
-      # TWO checks, and the ORDER matters. The allowlist runs first and is the one with teeth: a
-      # reachability check alone approves production, because production is reachable. The description
-      # on the `e2e_base_url` input is not an enforcement mechanism (review, #407).
-      - name: Refuse a target that is not on the allowlist
-        env:
-          PLAYWRIGHT_BASE_URL: ${{ inputs.e2e_base_url || 'https://twh-staging.os.mieweb.org' }}
-        run: bash .github/scripts/e2e-target-allowed.sh "${PLAYWRIGHT_BASE_URL}"
-      - name: Refuse to run against an unreachable target
-        working-directory: e2e
-        env:
-          PLAYWRIGHT_BASE_URL: ${{ inputs.e2e_base_url || 'https://twh-staging.os.mieweb.org' }}
-        run: |
-          set -euo pipefail
-          code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 "${PLAYWRIGHT_BASE_URL}" || true)"
-          echo "${PLAYWRIGHT_BASE_URL} -> HTTP ${code}"
-          case "${code}" in
-            2*|3*) ;;
-            *)
-              echo "::error::E2E target ${PLAYWRIGHT_BASE_URL} is not reachable (HTTP ${code}). Deploy staging first, or pass e2e_base_url."
-              exit 1
-              ;;
-          esac
-      - name: Run E2E tests
-        working-directory: e2e
-        timeout-minutes: 20
-        env:
-          PLAYWRIGHT_BASE_URL: ${{ inputs.e2e_base_url || 'https://twh-staging.os.mieweb.org' }}
-        run: npx playwright test
-      - name: Upload Playwright report
-        uses: actions/upload-artifact@v7
-        if: always()
-        with:
-          name: playwright-report
-          path: e2e/playwright-report/
-
-  run-scale-maui:
-    name: Scale — 20,000-patient run (weekly / manual)
-    runs-on: ubuntu-latest
-    # Never on a push or a PR. It takes minutes and measures a wall clock, which on a shared runner is
-    # noisy enough that gating merges on it would produce flakes rather than findings. The number is
-    # tracked on a cadence and read by a human.
-    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.run_scale_maui)
-    timeout-minutes: 30
-    # No VSAC secret and no `.official-content` checkout: this job measures the PIPELINE — corpus
-    # generation, bundle construction, chunking, the case upserts, batched persistence — with a stub
-    # engine, and says so in the test's own header. CQL time against the real artifacts is measured in
-    # `official-cases`, which has the credential.
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          submodules: recursive
-      - uses: pnpm/action-setup@v6
-        with:
-          version: 10.17.1
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 24
-      - name: Install backend dependencies
-        working-directory: backend-ts
-        run: pnpm install --frozen-lockfile
-      - name: 20,000-patient run
-        working-directory: backend-ts
-        env:
-          WORKWELL_RUN_SCALE_MAUI: "1"
-          WORKWELL_MAUI_CORPUS_SIZE: "20000"
-          # The same chunk size the Maui deploy ships, so the measurement describes the deployment
-          # rather than a default nobody runs.
-          WORKWELL_RUN_CHUNK_SIZE: "500"
-        run: pnpm exec node --import tsx --test src/run/run-scale-maui.test.ts
-
   e2e-maui:
-    name: Playwright E2E — Maui pilot (manual)
+    name: Playwright E2E — Maui pilot
     runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch' && inputs.e2e_profile == 'maui'
+    # Every push and every dispatch. Not Dependabot's pushes: they get no secrets, and the vendor step
+    # below refuses to run without the VSAC key. It finishes inside the backend shards, so it adds no
+    # wait; it was dispatch-only until 2026-09-23, and twice a broken screen went unnoticed that way.
+    if: github.actor != 'dependabot[bot]'
     timeout-minutes: 45
     # The Maui project runs against a stack THIS RUNNER boots — backend on the SQLite floor with
     # WORKWELL_INSTANCE=maui, frontend built in patient terminology with the public-demo affordances
-    # off — so nothing shared is mutated and the allowlist never comes into play. Browser e2e lives
+    # off — so nothing shared is mutated. Browser e2e lives
     # here rather than on a developer box because Chromium + two dev servers + a test worker exhaust a
     # Windows desktop heap long before they exhaust RAM (measured 2026-09-02).
     #
-    # SINCE 2026-09-08 this job runs the ROUTED configuration — all six of the ACO's measures, the same
-    # WORKWELL_OFFICIAL_MEASURES the deployed sandbox ships (ADR-078) — by vendoring each measure's
-    # terminology sidecar with the VSAC credential, exactly as flip-gate.yml does. It previously ran
-    # authored cms122/cms125 with no VSAC key, which meant the suite's green was about a configuration
-    # nobody deploys: the four official-only measures sat `official-pending`, and the specs that
-    # enumerate them failed silently from 2026-09-06 (when #528 added them) until the next manual
-    # dispatch five days later. A stack that is not the one the pilot runs is not a pilot test.
+    # It runs the ROUTED configuration — all six of the ACO's measures, the same
+    # WORKWELL_OFFICIAL_MEASURES the deployed sandbox ships — by vendoring each measure's terminology
+    # sidecar with the VSAC credential, exactly as flip-gate.yml does. A stack that is not the one the
+    # pilot runs is not a pilot test.
     env:
       ROUTED_MEASURES: cms122,cms125,cms2,cms130,cms165,cms137
     steps:
@@ -738,8 +604,8 @@ jobs:
         working-directory: backend-ts
         run: pnpm install --frozen-lockfile
       # ---- The credentialed steps run HERE, before the frontend and e2e dependency trees are on disk.
-      # This job is public-repo CI, and the one exposure that is not covered by "workflow_dispatch needs
-      # write access" is supply chain: anything in an installed node_modules can read the environment of
+      # This job is public-repo CI, and the one exposure that is not covered by "only a push to this
+      # repository runs it, which needs write access" is supply chain: anything in an installed node_modules can read the environment of
       # a step it runs in. The VSAC key is therefore scoped to a single step (never job-level `env`),
       # and that step executes with the BACKEND tree only — not Chromium, not Next.js, not the e2e tree.
       #

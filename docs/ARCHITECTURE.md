@@ -45,7 +45,6 @@ Browser -> <stack>.os.mieweb.org          Next.js frontend (MIE Create-a-Contain
 
 - Reconcilers (cron every 15 min; GitHub runs them less often) recreate a down container from
   `:latest` with the same env as the deploy (`backend-ts/src/wiring/official-flip-config.test.ts`).
-- `deploy-workwell-redirect-mieweb.yml` redirects `workwell.os.mieweb.org` to TWH.
 - Stack env that shapes behaviour:
   - both: `WORKWELL_SCHEDULER_ENABLED=true`, `WORKWELL_BUCKET_S3_*`.
   - TWH: `WORKWELL_INSTANCE=twh`, `WORKWELL_OFFICIAL_MEASURES=cms122,cms125`.
@@ -316,7 +315,7 @@ the dev database through `wcdb-fhir-shim/`. See `docs/WEBCHART_FHIR_MAPPING.md` 
 - Neon: all relational data, `workwell_spike` schema, one database per stack (`workwell-twh` for TWH).
 - Cloudflare R2: uploaded evidence via the `bucket-s3` seam (`workwell-evidence-twh`, `-maui`).
 - GHCR images: `ghcr.io/taleef7/workwell-api-ts` (one backend image for every stack),
-  `workwell-twh-frontend`, `workwell-maui-frontend`, `workwell-redirect`.
+  `workwell-twh-frontend`, `workwell-maui-frontend`.
 - Backups: `backup-neon-nightly.yml`; runbook `docs/BACKUP_DR_RUNBOOK.md`.
 
 ## 9) API Versioning Convention

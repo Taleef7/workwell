@@ -55,10 +55,22 @@ const RUNNABLE = Object.keys(MEASURES);
 const WEEKS = 4; // small for test speed; the backfill itself defaults to 12
 const ASOF = "2026-06-20";
 
+/**
+ * One backfill shared by the tests that only READ what it wrote (each backfill is ~10 s of real CQL).
+ * A test that writes — backfills again, or seeds runs of its own — must use freshDb() instead.
+ */
+let seeded: Promise<{ db: Awaited<ReturnType<typeof freshDb>>; d: ReturnType<typeof deps>; summary: Awaited<ReturnType<typeof backfillTrendHistory>> }> | undefined;
+function seededOnce() {
+  return (seeded ??= (async () => {
+    const db = await freshDb();
+    const d = deps(db);
+    const summary = await backfillTrendHistory(d, { weeks: WEEKS, asOf: ASOF });
+    return { db, d, summary };
+  })());
+}
+
 test("backfillTrendHistory creates weeks × measures COMPLETED runs, all triggered by seed:trend-history", async () => {
-  const db = await freshDb();
-  const d = deps(db);
-  const summary = await backfillTrendHistory(d, { weeks: WEEKS, asOf: ASOF });
+  const { d, summary } = await seededOnce();
 
   const runs = await d.runStore.listRuns(100000);
   assert.equal(runs.length, WEEKS * RUNNABLE.length, "one run per (measure × week)");
@@ -75,9 +87,7 @@ test("backfillTrendHistory creates weeks × measures COMPLETED runs, all trigger
 });
 
 test("backfilled runs are backdated with strictly increasing started_at per measure (oldest→newest)", async () => {
-  const db = await freshDb();
-  const d = deps(db);
-  await backfillTrendHistory(d, { weeks: WEEKS, asOf: ASOF });
+  const { d } = await seededOnce();
 
   const runs = await d.runStore.listRuns(100000);
   // group by measure (scopeId), assert started_at increases oldest→newest and all are < asOf
@@ -97,9 +107,7 @@ test("backfilled runs are backdated with strictly increasing started_at per meas
 });
 
 test("each backfilled run records ~100 outcomes (one per employee)", async () => {
-  const db = await freshDb();
-  const d = deps(db);
-  await backfillTrendHistory(d, { weeks: WEEKS, asOf: ASOF });
+  const { d } = await seededOnce();
 
   const runs = await d.runStore.listRuns(100000);
   for (const r of runs.slice(0, 5)) {
@@ -113,9 +121,7 @@ test("each backfilled run records ~100 outcomes (one per employee)", async () =>
 });
 
 test("backfilled outcomes are stamped with the run's BACKDATED evaluatedAt, not now (Codex P1)", async () => {
-  const db = await freshDb();
-  const d = deps(db);
-  await backfillTrendHistory(d, { weeks: WEEKS, asOf: ASOF });
+  const { d } = await seededOnce();
 
   const runs = await d.runStore.listRuns(100000);
   // The oldest run is (WEEKS-1) weeks before asOf — unambiguously historical.
@@ -272,9 +278,7 @@ test("backfillTrendHistory resumes at week level — a larger --weeks adds only 
 });
 
 test("backfillTrendHistory writes a TREND_HISTORY_SEEDED audit event per seeded measure (Codex P2 / audit rule)", async () => {
-  const db = await freshDb();
-  const d = deps(db);
-  await backfillTrendHistory(d, { weeks: WEEKS, asOf: ASOF });
+  const { d } = await seededOnce();
 
   const events = await d.auditStore.recentAuditEventsByType("TREND_HISTORY_SEEDED", 1000);
   assert.equal(events.length, RUNNABLE.length, "one audit event per seeded measure");
@@ -285,18 +289,14 @@ test("backfillTrendHistory writes a TREND_HISTORY_SEEDED audit event per seeded 
 });
 
 test("the case store is never touched by the backfill", async () => {
-  const db = await freshDb();
-  const d = deps(db);
-  await backfillTrendHistory(d, { weeks: WEEKS, asOf: ASOF });
+  const { db, d } = await seededOnce();
   // No caseStore was passed; assert the cases table is empty (nothing leaked in).
   const caseStore = new SqliteCaseStore(db);
   assert.equal((await caseStore.listCases({ limit: 100000 })).length, 0, "no cases created by the backfill");
 });
 
 test("programTrend then yields more than one distinct complianceRate (a wavy line, not flat)", async () => {
-  const db = await freshDb();
-  const d = deps(db);
-  await backfillTrendHistory(d, { weeks: WEEKS, asOf: ASOF });
+  const { db, d } = await seededOnce();
 
   const caseStore = new SqliteCaseStore(db);
   const trend = await programTrend(

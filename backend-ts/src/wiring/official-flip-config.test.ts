@@ -50,10 +50,10 @@ import { buildSummaryMeasureReport } from "../fhir/measure-report.ts";
  *
  * A workflow is in scope when it (a) deploys a container through the shared deploy script and
  * (b) runs a WorkWell APP instance — the second half keyed on `WORKWELL_INSTANCE`, which every app
- * deployment sets and the redirect-container workflow does not. Both conditions are needed: the
- * script reference alone also matches `deploy-workwell-redirect-mieweb.yml`, which ships no measure
- * routing at all, so including it would pass vacuously and dilute what this guard claims to check.
- * Keyed on semantics rather than on an image variable name, which a future workflow could rename.
+ * deployment sets. Both conditions are needed: a container that is not the app (a redirect, say)
+ * ships no measure routing at all, so including it would pass vacuously and dilute what this guard
+ * claims to check. Keyed on semantics rather than on an image variable name, which a future
+ * workflow could rename.
  */
 const WORKFLOW_DIR = fileURLToPath(new URL("../../../.github/workflows/", import.meta.url));
 const WORKFLOWS = readdirSync(WORKFLOW_DIR)
@@ -64,7 +64,7 @@ const WORKFLOWS = readdirSync(WORKFLOW_DIR)
   })
   .sort();
 
-test("workflow discovery finds every WorkWell app deployment and excludes the redirect container", () => {
+test("workflow discovery finds every WorkWell app deployment", () => {
   assert.deepEqual(WORKFLOWS, [
     "deploy-maui-mieweb.yml",
     "deploy-staging-mieweb.yml",

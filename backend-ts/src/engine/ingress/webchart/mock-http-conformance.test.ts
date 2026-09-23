@@ -16,7 +16,6 @@ import path from "node:path";
 import type { OutcomeStatus } from "@work-well/measure-engine";
 import { webChartDataSource, type WebChartConfig } from "../data-source.ts";
 import { parseEnrollmentRoster, evaluateSourceWithRoster } from "../enrollment/roster.ts";
-import { DEVDB_EXCLUDED as EXCLUDED } from "./devdb-cli.ts";
 import { DEVDB_WHITELIST as WHITELIST } from "./report-table.ts";
 import {
   fixtureWebChartClient,
@@ -291,13 +290,13 @@ test("scoped HTTP outcomes match the full-crawl outcome for the same subject", a
 });
 
 test("per-resource HTTP path is outcome-identical to the fixture WebChart path for dev-DB goldens", async () => {
-  for (const measureId of [...WHITELIST, ...EXCLUDED]) {
+  // WHITELIST only: the EXCLUDED measures read MISSING_DATA for every patient on both paths, so they
+  // cannot tell a faithful transport from one that dropped data (devdb-eval.test.ts still checks that
+  // they evaluate without error).
+  for (const measureId of WHITELIST) {
     const expected = await outcomes(fixtureSource(), measureId);
     const actual = await outcomes(httpSource(devDbHttpFetch()), measureId);
     assert.deepEqual(actual, expected, `${measureId}: per-resource HTTP outcomes must match fixture outcomes`);
-    if (EXCLUDED.includes(measureId)) {
-      assert.deepEqual([...new Set(actual.map(([, outcome]) => outcome))], ["MISSING_DATA"]);
-    }
   }
 });
 
@@ -738,11 +737,12 @@ test("teatea quirks: with an explicit patientSearch, the fallback fetches the wh
   const bundles = await httpSource(fetchShim(teateaRoutes(counters)), { maxRetries: 0 }, cfg).loadBundles();
   assert.equal(bundles.length, patientResources.length, "the full population is fetched via the operator-supplied enumeration");
   assert.equal(counters.patientRequests, 2, "one _count probe (rejected) + one enumeration retry");
-  for (const measureId of WHITELIST) {
-    const expected = await outcomes(fixtureSource(), measureId);
-    const actual = await outcomes(httpSource(fetchShim(teateaRoutes()), { maxRetries: 0 }, cfg), measureId);
-    assert.deepEqual(actual, expected, `${measureId}: enumeration-fallback outcomes must match fixture outcomes`);
-  }
+  // Outcomes are a function of the bundles, and the standard HTTP path is proven outcome-identical to the
+  // fixture path above, so bundle equality with it is the whole claim. It also covers every resource type
+  // the dropped `_count` touches, which one measure's outcomes would not.
+  const byPatient = (bs: unknown[]) => [...bs].sort((a, b) => String(patientResource(a).id).localeCompare(String(patientResource(b).id)));
+  const standard = await httpSource(devDbHttpFetch()).loadBundles();
+  assert.deepEqual(byPatient(bundles), byPatient(standard), "enumeration-fallback bundles must match the standard HTTP path's");
 });
 
 test("a server that rejects _count but serves a bare /Patient: the fallback drops _count automatically (no config needed)", async () => {

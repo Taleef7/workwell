@@ -3,7 +3,7 @@
 # Two related things are enabled in repository SETTINGS rather than here, and this file
 # does not control either of them:
 #   * Dependabot vulnerability ALERTS — repo-wide, every ecosystem, every dependency,
-#     including the four named below.
+#     including the four named below. (Automatic security-fix PRs are OFF.)
 #   * CodeQL default setup — `actions` + `javascript-typescript`, on push/PR to main.
 # What follows governs only the routine "a newer version exists" pull requests.
 #
@@ -38,7 +38,7 @@ version: 2
 
 updates:
   # ---------------------------------------------------------------------------
-  # GitHub Actions. The highest-value entry here: eight workflows, and the deploy
+  # GitHub Actions. The highest-value entry here: the deploy
   # and publish jobs hold real credentials (container registry, Neon, VSAC, npm).
   # Action versions are the part of this supply chain with the widest blast radius
   # and the least routine review.
@@ -82,51 +82,11 @@ updates:
   # members — vendoring @mieweb/cloud, or consuming it from a registry. Do not
   # re-add it on the theory that Dependabot might cope; it was tried.
   # ---------------------------------------------------------------------------
-  # frontend. `datavis` is a file: link to vendored source (ADR-007) and has no
-  # registry version to bump, so Dependabot leaves it alone without being told to.
-  # ---------------------------------------------------------------------------
-  - package-ecosystem: npm
-    directory: /frontend
-    schedule:
-      interval: weekly
-      day: monday
-    open-pull-requests-limit: 5
-    commit-message:
-      prefix: chore
-      include: scope
-    groups:
-      # `next` and `eslint-config-next` are the only two exact-pinned dependencies in
-      # frontend/package.json, and they are deliberately pinned to the SAME version — the
-      # lint rules are published per framework release. Nothing enforced that, and the
-      # first `frontend-dev` group PR quietly proposed moving `eslint-config-next` alone,
-      # leaving the linter a minor ahead of the framework it lints. Grouping them means
-      # Dependabot can only ever propose them together. `applies-to: version-updates` is
-      # the default and is stated so the security-update path is not accidentally grouped:
-      # a security fix for one should not wait on the other.
-      nextjs:
-        applies-to: version-updates
-        patterns:
-          - next
-          - eslint-config-next
-      # Same shape, found the same way. Dependabot proposed `react` 19.2.4 -> 19.2.8 while leaving
-      # `react-dom` at 19.2.4, and React refuses to start: "Incompatible React versions: the react
-      # and react-dom packages must have the exact same version." All 35 frontend test files failed
-      # at collection. That one at least fails loudly — the eslint-config-next split above would
-      # have merged green — but it is the same defect, an exact-pinned pair moved by half.
-      # The `@types/*` packages ride along so the types cannot drift from the runtime either.
-      react:
-        applies-to: version-updates
-        patterns:
-          - react
-          - react-dom
-          - "@types/react"
-          - "@types/react-dom"
-      # Declared AFTER `nextjs` deliberately. Dependabot assigns a dependency to the first
-      # group whose patterns match, so a broad dependency-type group listed first would
-      # swallow `eslint-config-next` (a devDependency) before the pair could claim it.
-      frontend-dev:
-        dependency-type: development
-        update-types: ["minor", "patch"]
+  # frontend has NO entry either. Its updater failed on every weekly run from 2026-09-07
+  # ("Skipping next@16.3.5: it doesn't satisfy 16.3.0"), proposing nothing while reading as
+  # coverage. `next`/`eslint-config-next` and `react`/`react-dom`/`@types/react*` are exact-pinned
+  # PAIRS: bump each pair together, by hand. Dependabot SECURITY updates are off in repository
+  # settings, so an alert against the frontend is acted on by hand too.
 
   # ---------------------------------------------------------------------------
   # wcdb-fhir-shim. The only holder of a MariaDB driver in the repository
@@ -144,8 +104,8 @@ updates:
       include: scope
 
   # ---------------------------------------------------------------------------
-  # e2e — Playwright only, and it runs against staging rather than in the merge
-  # path, so a bump here cannot block a PR.
+  # e2e — Playwright only. The Maui suite runs on every push (not Dependabot's own,
+  # which get no VSAC secret), so a bump here is exercised once a person pushes it.
   # ---------------------------------------------------------------------------
   - package-ecosystem: npm
     directory: /e2e

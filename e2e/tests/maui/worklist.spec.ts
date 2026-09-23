@@ -321,7 +321,10 @@ test.describe("Maui work list — the default view", () => {
     await waitForDataRows(page);
     await expect.poll(() => statedTotal(page), { timeout: 30_000 }).toBe(before);
 
-    const groupButton = page.getByRole("button", { name: new RegExp(`^All ${escapeRegex(groupName)} \\(`) });
+    // A multi-code group names its breadth: "All 2 Medicare codes (13)" (#593, `payerGroupButtonLabel`).
+    const groupButton = page.getByRole("button", {
+      name: new RegExp(`^All ${codes.length} ${escapeRegex(groupName)} codes \\(`),
+    });
     await expect(groupButton).toBeVisible({ timeout: 30_000 });
     await groupButton.click();
 
@@ -331,7 +334,7 @@ test.describe("Maui work list — the default view", () => {
         { timeout: 30_000 },
       );
     }
-    await expect(page.getByRole("button", { name: `Clear ${groupName}` })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByRole("button", { name: `Clear ${groupName} codes` })).toBeVisible({ timeout: 30_000 });
     // The server's number for exactly this set of codes. "Not more than the practice" would also be
     // satisfied by a filter the server ignored entirely, which is the failure this test exists for.
     const { total: filtered } = await fetchWorklist(request, token, codes.map((c) => `&payer=${c}`).join(""));
@@ -339,7 +342,7 @@ test.describe("Maui work list — the default view", () => {
     expect(filtered, "a payer category is a subset of the practice").toBeLessThanOrEqual(before);
 
     // And it clears as a set too, or the operator is left holding a filter they cannot see or remove.
-    await page.getByRole("button", { name: `Clear ${groupName}` }).click();
+    await page.getByRole("button", { name: `Clear ${groupName} codes` }).click();
     await expect(page).not.toHaveURL(/payer=/, { timeout: 30_000 });
     await expectNoErrorPage(page);
   });

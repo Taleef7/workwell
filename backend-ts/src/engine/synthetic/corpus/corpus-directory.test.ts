@@ -59,3 +59,22 @@ test("the fixture prefix spreads across its clinics' panels, not onto one PCP ea
   assert.ok(panels.size >= 8, `48 fixture patients sit on only ${panels.size} panels`);
   for (const e of dir.EMPLOYEES) assert.equal(dir.providerById(e.providerId)!.location, e.site);
 });
+
+test("corpus generation is linear in the roster size", () => {
+  // Identity disambiguation consults every lower index's (name, DOB), so a naive implementation is
+  // O(n²): invisible at 150 patients, fatal at the sandbox's 20,000. 10x the patients must cost well
+  // under 20x the time. 2,000 rather than 1,000 as the small size, because a thousand is mostly JIT
+  // warm-up; the best of three runs per size, because CI runs this beside other test files.
+  const best = (size: number) => {
+    let fastest = Infinity;
+    for (let i = 0; i < 3; i++) {
+      const start = performance.now();
+      corpusDirectory(DEFAULT_CORPUS_SEED, size);
+      fastest = Math.min(fastest, performance.now() - start);
+    }
+    return Math.max(fastest, 1);
+  };
+  const small = best(2000);
+  const big = best(20000);
+  assert.ok(big / small < 20, `10x the patients took ${(big / small).toFixed(1)}x the time (${small.toFixed(0)} ms -> ${big.toFixed(0)} ms): generation is not linear`);
+});

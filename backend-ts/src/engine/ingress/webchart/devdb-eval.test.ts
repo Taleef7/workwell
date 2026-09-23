@@ -36,10 +36,20 @@ const EVAL = "2024-06-01";
 
 const source = () => webChartDataSource({ baseUrl: "x", apiKey: "k" }, fixtureWebChartClient(payloads));
 
-async function runWithRoster(measureId: string): Promise<Map<string, OutcomeStatus>> {
-  const res = await evaluateSourceWithRoster(source(), measureId, roster, { evaluationDate: EVAL });
-  assert.equal(res.failed, 0, `${measureId}: no evaluation should error (${res.failed} failed)`);
-  return new Map(res.results.filter((r) => r.ok && r.outcome).map((r) => [r.outcome!.subjectId, r.outcome!.outcome]));
+/** Each measure is evaluated once per file: the outcomes are deterministic and the tests only read them. */
+const evaluated = new Map<string, Promise<Map<string, OutcomeStatus>>>();
+
+function runWithRoster(measureId: string): Promise<Map<string, OutcomeStatus>> {
+  let result = evaluated.get(measureId);
+  if (!result) {
+    result = (async () => {
+      const res = await evaluateSourceWithRoster(source(), measureId, roster, { evaluationDate: EVAL });
+      assert.equal(res.failed, 0, `${measureId}: no evaluation should error (${res.failed} failed)`);
+      return new Map(res.results.filter((r) => r.ok && r.outcome).map((r) => [r.outcome!.subjectId, r.outcome!.outcome]));
+    })();
+    evaluated.set(measureId, result);
+  }
+  return result;
 }
 
 test("fixtures loaded: full 56-patient dev-DB corpus + a roster", () => {

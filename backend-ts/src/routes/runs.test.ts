@@ -621,14 +621,24 @@ test("GET /api/runs/:id/outcomes → whole run by default, X-Total-Count + expli
 });
 
 test("GET /api/runs/:id/measure-report → 422 for a multi-measure (ALL_PROGRAMS) run", async () => {
-  const { res, drain } = await postAsync("/api/runs/manual", { scopeType: "ALL_PROGRAMS" });
-  await drain(); // let the async ctx.waitUntil task persist outcomes across all measures
-  const created = (await res!.json()) as { runId?: string; id?: string };
-  const runId = created.runId ?? created.id;
+  // The refusal reads only how many measures the run's outcomes name, so a completed run holding two
+  // measures' outcomes is the whole input. Running every measure over the population took ~3 minutes of
+  // CI for this; ALL_PROGRAMS execution itself is covered by run-pipeline.test.ts.
+  const tbBundle = JSON.parse(
+    readFileSync(fileURLToPath(new URL("../../spike/synthetic/tb_surveillance/present_recent.json", import.meta.url)), "utf8"),
+  );
+  const created = await post("/api/runs", { scopeType: "ALL_PROGRAMS", triggeredBy: "test" });
+  const runId = ((await created!.json()) as { id: string }).id;
+  for (const [measureId, patientBundle] of [["audiogram", bundle], ["tb_surveillance", tbBundle]] as const) {
+    const evaluated = await post(`/api/runs/${runId}/evaluate`, { measureId, patientBundle, evaluationDate: "2026-06-12" });
+    assert.equal(evaluated?.status, 201, `${measureId} outcome recorded`);
+  }
+  await new SqliteRunStore(env.DB as never).finalizeRun(runId, "COMPLETED");
   const r = (await get(`/api/runs/${runId}/measure-report`))!;
   assert.equal(r.status, 422);
-  const body = (await r.json()) as { error: string };
+  const body = (await r.json()) as { error: string; measures: number };
   assert.equal(body.error, "unsupported_run_scope");
+  assert.equal(body.measures, 2, "refused for holding two measures, not for holding none");
 });
 
 test("GET /api/runs/:id/qrda → well-formed QRDA III XML; 404 unknown run", async () => {
