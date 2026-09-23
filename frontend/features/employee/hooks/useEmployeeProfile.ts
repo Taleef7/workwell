@@ -6,7 +6,10 @@ export interface MeasureOutcomeSummary {
   measureVersionId: string;
   measureName: string;
   measureVersion: string;
+  /** The stored bucket. Show `displayStatus` instead. */
   outcomeStatus: string;
+  /** What the roster table shows (#671): out of population reads OUT_OF_POPULATION, not MISSING_DATA. */
+  displayStatus?: string;
   lastRunDate: string | null;
   daysSinceLastExam: number | null;
   daysUntilDue: number | null;

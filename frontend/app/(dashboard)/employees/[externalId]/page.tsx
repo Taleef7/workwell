@@ -11,11 +11,11 @@ import { UNASSIGN_VALUE, useAssignableUsers } from '@/features/panel/use-assigna
 import { SUBJECT } from "@/lib/terminology";
 import Link from 'next/link';
 import { useEmployeeProfile } from '@/features/employee/hooks/useEmployeeProfile';
-import { ComplianceSummaryBar } from '@/features/employee/components/ComplianceSummaryBar';
+import { ComplianceSummaryBar, shownStatusOf } from '@/features/employee/components/ComplianceSummaryBar';
 import { IndividualComplianceStatus } from '@/features/employee/components/IndividualComplianceStatus';
 import { SimulateComplianceHistory } from '@/features/employee/components/SimulateComplianceHistory';
 import { SkeletonCard } from '@/components/skeleton-loader';
-import { OUTCOME_LABELS, labelFor, outcomeStatusClass } from '@/lib/status';
+import { COMPLIANCE_STATUS_LABELS, OUTCOME_LABELS, complianceStatusClass, labelFor, outcomeStatusClass } from '@/lib/status';
 import { useMeasureIdentities } from '@/lib/measure-identity';
 
 const PRIORITY_COLORS: Record<string, string> = {
@@ -159,7 +159,7 @@ export default function EmployeeProfilePage() {
       <div className="grid gap-6 lg:grid-cols-3">
       <div className="space-y-6 lg:col-span-2">
       <IndividualComplianceStatus externalId={externalId} onRecalculated={refetch} labelFor={measureLabelFor} />
-      <SimulateComplianceHistory externalId={externalId} />
+      <SimulateComplianceHistory key={externalId} externalId={externalId} labelFor={measureLabelFor} />
       {/* Open cases */}
       {profile.openCases.length > 0 && (
         <div className="rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-5 shadow-sm">
@@ -229,8 +229,8 @@ export default function EmployeeProfilePage() {
                   <span>{measureLabelFor(o.measureId, o.measureName)}</span>{' '}
                   <span className="text-xs font-normal text-neutral-600 dark:text-neutral-400">{o.measureVersion}</span>
                 </span>
-                <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${outcomeStatusClass(o.outcomeStatus)}`}>
-                  {labelFor(OUTCOME_LABELS, o.outcomeStatus)}
+                <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${complianceStatusClass(shownStatusOf(o))}`}>
+                  {labelFor(COMPLIANCE_STATUS_LABELS, shownStatusOf(o))}
                 </span>
               </div>
               <div className="mt-2 flex flex-wrap gap-4 text-xs text-neutral-500 dark:text-neutral-400">
