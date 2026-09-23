@@ -42,6 +42,20 @@ that series for the same reason since ADR-079. The rule now lives in one place (
 On the pilot that is every measure, which is right and is also a gap: making the snapshots correct needs a
 basis marker on the row, which is schema (#676).
 
+## 2026-09-22 (close) — verified live, and one rate movement explained
+
+**Merged, deployed and verified on the sandbox:**
+- **#674 (#664).** Studio → Standards and Release & Approval were opened on all six measures while `/health` was polled every second: 0 failures, max 0.41 s. The same click had held the API for 30+ minutes that morning.
+- **#675 (#625, #663).** `/health` reports the commit that is answering (the merge sha), with the stall monitor and watchdog on. `/api/admin/runtime` is ADMIN-only (401 / 403 / 200). #663 stays open until a real stall on this build is recorded, most likely at the next nightly, and until the logs survive a recreate, which needs container-log access from MIE.
+
+**In review:** #677 (#642). Its CI is held by the MADiE gate's terminology-vendoring step, which timed out against VSAC three runs in a row while passing on `main` minutes earlier; this PR touches nothing that step reads.
+
+**#637, explained, and the issue's own hypothesis was wrong.** The 09-22 rate drop came from ADR-086's corpus cutoff (#595), not from its code-fabrication fix (#594): the cutoff keys on the run's evaluation date, which for a nightly is today. The investigation reproduced both nights exactly over all 20,000 subjects. **Owner decision:** keep the new year-to-date numbers, give the corpus prior-year history before 2027-01-01, and hold the message to the pilot group for now. ADR-086 carries the correction and the guide's numbers table has the new rates.
+
+**Reviews this session:** Codex hit its usage limit mid-session, and Gemini took the second lane on #675 and #677. Browser checks now run through `agent-browser`, one isolated session per agent; about three at once fit in this host's free memory.
+
+**Next:** the corpus prior-year history (#637), then the tracker from #616/#617/#621/#671.
+
 ## 2026-09-21 (close) — three merged, and the reviews were worth more than the changes
 
 #610, #611 and #612 merged; the sandbox is on all three.
