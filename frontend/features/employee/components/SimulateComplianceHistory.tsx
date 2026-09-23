@@ -16,7 +16,7 @@ interface Snapshot {
   externalId: string;
   asOf: string;
   evaluations: SnapshotEvaluation[];
-  /** Measures this deployment runs that the simulation cannot replay (CMS's own logic). */
+  /** Measures this deployment runs that the simulation cannot replay (no test-data recipe for them yet). */
   notSimulated?: Array<{ measureId: string; name: string }>;
 }
 
@@ -92,6 +92,7 @@ export function SimulateComplianceHistory({
         </div>
       </div>
 
+      <div aria-live="polite">
       {error ? (
         <p role="alert" className="mt-3 rounded border border-rose-300 bg-rose-50 p-2 text-xs text-rose-700 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-300">
           {error}
@@ -118,16 +119,17 @@ export function SimulateComplianceHistory({
           )}
           {notSimulated.length > 0 && (
             <p data-testid="not-simulated" className="text-xs text-neutral-500 dark:text-neutral-400">
-              Not simulated: {notSimulated.map((m) => labelFor(m.measureId, m.name)).join(", ")}. These run CMS&apos;s
-              published logic, which this preview cannot replay.
+              Not simulated: {notSimulated.map((m) => labelFor(m.measureId, m.name)).join(", ")}. The preview
+              can&apos;t build test data for these measures yet.
             </p>
           )}
         </div>
       ) : (
         <p className="mt-3 text-sm text-neutral-500 dark:text-neutral-400">
-          Choose a date and run the simulation. Nothing is evaluated until you do.
+          {loading ? "Simulating…" : "Choose a date and run the simulation. Nothing is evaluated until you do."}
         </p>
       )}
+      </div>
     </section>
   );
 }

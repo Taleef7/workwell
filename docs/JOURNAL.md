@@ -33,7 +33,7 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
   docs-only merges no longer redeploy both stacks. The Maui Playwright suite now runs on every push.
   Deleted: the stale TWH Playwright suite (it targeted a July staging build), the weekly stub-engine
   scale job, the never-run redirect workflow, and the always-failing frontend Dependabot entry.
-- **#671: the patient page agrees with itself.** Its posture and Measure Details now show the same status as
-  its table (out of population reads "Not in population", not "Missing Data"), list only the measures the
+- **#671: the patient page agrees with itself.** Its posture and Measure Details now read an outcome the way
+  its table does (out of population is "Not in population", not "Missing Data"), list only the measures the
   deployment runs (no old Hypertension on Maui), and name the official-only measures instead of `cms130`.
   The simulation runs only when asked, and names the four measures it cannot replay.

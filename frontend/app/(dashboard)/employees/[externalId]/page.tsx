@@ -104,7 +104,10 @@ export default function EmployeeProfilePage() {
   const { labelFor: measureLabelFor } = useMeasureIdentities();
   const isPatientTerm = SUBJECT.singular === 'patient';
 
-  if (loading) {
+  // Skeletons on the first load of THIS patient only. A refresh (after Recalculate or any finished run)
+  // keeps the page mounted, so a simulation result and the chosen date survive it; a different
+  // patient's profile is never shown under this patient's address.
+  if (loading && (!profile || profile.externalId !== externalId)) {
     return (
       <div className="p-6 space-y-4 max-w-5xl mx-auto">
         <SkeletonCard />

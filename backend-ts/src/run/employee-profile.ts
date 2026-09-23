@@ -32,8 +32,10 @@ export interface MeasureOutcomeSummary {
   /** The stored bucket. `displayStatus` is what to SHOW (#671). */
   outcomeStatus: string;
   /**
-   * What the roster table on the same page shows for this outcome: `deriveCell`, so an
-   * out-of-population MISSING_DATA reads OUT_OF_POPULATION here too, not "missing data" (#671).
+   * This outcome read the way the roster table reads an outcome (`deriveCell`), so an
+   * out-of-population MISSING_DATA shows OUT_OF_POPULATION here too, not "missing data" (#671).
+   * Same reading, not always the same row: this is the newest outcome from any run, while the table
+   * reads the latest completed population run, so a single-patient rerun can differ until the next.
    */
   displayStatus: DisplayState;
   lastRunDate: string;

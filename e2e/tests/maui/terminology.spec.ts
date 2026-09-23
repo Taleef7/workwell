@@ -49,7 +49,9 @@ test.describe("Maui terminology — the quality lead's pages", () => {
   });
 
   // #671: opening a patient ran a simulation nobody asked for, and the posture named four measures by
-  // their raw ids. The simulation is now a button, and every posture chip carries a measure name.
+  // their raw ids. The simulation is now a button, and every posture chip carries a measure name. (The
+  // posture's filter to the six measures is guarded by employees.maui.test.ts: CI's fresh stack never
+  // ran the old Hypertension measure, so an e2e check for it could not fail.)
   test("the patient page runs no simulation on open, and names every measure", async ({ page }) => {
     const simulateCalls: string[] = [];
     page.on("request", (req) => {
@@ -65,7 +67,6 @@ test.describe("Maui terminology — the quality lead's pages", () => {
     await expect(posture.getByRole("link").first()).toBeVisible({ timeout: 20_000 });
     const postureText = await posture.innerText();
     expect(postureText, "a posture chip names its measure, not a raw id").not.toMatch(/\bcms\d+\b/);
-    expect(postureText, "only the ACO's measures").not.toMatch(/Hypertension BP Screening/);
     await expect(page.getByRole("button", { name: /run simulation/i })).toBeVisible();
     // The old component fetched 300 ms after mount; give it well past that.
     await page.waitForTimeout(1_500);

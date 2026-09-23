@@ -67,7 +67,7 @@ describe("SimulateComplianceHistory", () => {
     run();
     const note = await screen.findByTestId("not-simulated");
     expect(note).toHaveTextContent("CMS2 · Depression Screening, CMS130 · Colorectal Cancer Screening");
-    expect(note).toHaveTextContent(/cannot replay/i);
+    expect(note).toHaveTextContent(/can't build test data/i);
   });
 
   it("shows no not-simulated line when every measure was simulated", async () => {
@@ -91,6 +91,8 @@ describe("SimulateComplianceHistory", () => {
     run();
     const button = await screen.findByRole("button", { name: /simulating/i });
     expect(button).toBeDisabled();
+    // The first run says it is running, not "nothing is evaluated until you do".
+    expect(screen.queryByText(/nothing is evaluated until you do/i)).not.toBeInTheDocument();
     resolve(snapshotFor("2026-09-23"));
     expect(await screen.findByRole("button", { name: /run simulation/i })).toBeEnabled();
     expect(get).toHaveBeenCalledTimes(1);
