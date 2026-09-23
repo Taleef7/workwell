@@ -58,8 +58,8 @@ describe("ProgramsPage status chips", () => {
       "href", "/compliance?measureId=cms125&status=DUE_SOON");
     expect(screen.getByRole("link", { name: /missing data/i })).toHaveAttribute(
       "href", "/compliance?measureId=cms125&status=MISSING_DATA");
-    expect(screen.getByRole("link", { name: /not in population/i })).toHaveAttribute(
-      "href", "/compliance?measureId=cms125&status=OUT_OF_POPULATION");
+    // Patients outside the measure's population are not the measure's concern and get no chip (#637).
+    expect(screen.queryByRole("link", { name: /not in population/i })).toBeNull();
   });
 
   it("loads the page in TWO requests, not 1 + 2N — and paints on the first", async () => {
@@ -72,9 +72,9 @@ describe("ProgramsPage status chips", () => {
     const programCalls = () => get.mock.calls.map(([url]) => url as string).filter((url) => url.startsWith("/api/programs"));
 
     // The card is on screen after the plain overview — the detail call has not been awaited for it.
-    expect(programCalls()[0]).not.toContain("include=detail");
+    expect(programCalls()[0]).not.toContain("include=");
     await waitFor(() => expect(programCalls()).toHaveLength(2));
-    expect(programCalls()[1]).toContain("include=detail");
+    expect(programCalls()[1]).toContain("include=trend");
     expect(programCalls().some((url) => url.includes("/top-drivers") || url.includes("/trend"))).toBe(false);
   });
 

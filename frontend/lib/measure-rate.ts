@@ -4,7 +4,8 @@ export interface RateCounts {
   overdue: number;
   missingData: number;
   excluded: number;
-  complianceRate: number;
+  /** The backend's workflow rate; null when nobody is counted yet (#637). */
+  complianceRate: number | null;
 }
 
 export interface TrendPoint extends RateCounts {
@@ -14,6 +15,8 @@ export interface TrendPoint extends RateCounts {
   period?: string;
   totalEvaluated: number;
   denominator?: number;
+  /** The year the point's run scored (#637); points are compared within one year only. */
+  measurementYear?: number;
 }
 
 /**
@@ -27,7 +30,8 @@ export interface NotationSource {
 
 export interface DisplayRate {
   label: "Compliance" | "Poor control";
-  value: number;
+  /** null when nobody is counted yet: "no data", never 0% (#637). */
+  value: number | null;
   lowerIsBetter: boolean;
   /** The count the displayed percentage is made of: compliant for increase, overdue for decrease. */
   numerator: number;
@@ -49,9 +53,25 @@ export interface DisplayRate {
 export function displayRate(counts: RateCounts, notation: NotationSource | null | undefined): DisplayRate {
   if (notation?.improvementNotation === "decrease") {
     const denominator = counts.compliant + counts.dueSoon + counts.overdue + counts.missingData;
-    const value = denominator === 0 ? 0 : Math.round((counts.overdue / denominator) * 1000) / 10;
+    const value = denominator === 0 ? null : Math.round((counts.overdue / denominator) * 1000) / 10;
     return { label: "Poor control", value, lowerIsBetter: true, numerator: counts.overdue, denominator };
   }
   const denominator = counts.compliant + counts.dueSoon + counts.overdue + counts.missingData;
-  return { label: "Compliance", value: counts.complianceRate, lowerIsBetter: false, numerator: counts.compliant, denominator };
+  return { label: "Compliance", value: denominator === 0 ? null : counts.complianceRate, lowerIsBetter: false, numerator: counts.compliant, denominator };
+}
+
+/**
+ * Below this many patients a rate is shown with a "based on N patients so far" note (#637). 20 is
+ * CMS's case minimum for scoring a MIPS quality measure — the same point at which CMS itself stops
+ * treating a rate as meaningful. Early in a measurement year every measure starts under it.
+ */
+export const SMALL_NUMBERS_BELOW = 20;
+
+export function isSmallNumbers(rate: Pick<DisplayRate, "denominator">): boolean {
+  return rate.denominator > 0 && rate.denominator < SMALL_NUMBERS_BELOW;
+}
+
+/** A rate for display: `—` when there is none (#637). */
+export function formatRate(value: number | null): string {
+  return value === null ? "—" : `${value.toFixed(1)}%`;
 }

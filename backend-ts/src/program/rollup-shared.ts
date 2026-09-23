@@ -24,20 +24,22 @@ export interface ComplianceRateCounts {
 
 /**
  * The WORKFLOW-STATUS rate: compliant / (compliant + dueSoon + overdue + missingData), as a percentage
- * rounded to 1 decimal (round1); 0 when the denominator is 0.
+ * rounded to 1 decimal (round1); **null when the denominator is 0** — nobody counted yet is "no data",
+ * not 0% (#637: on 1 January every measure starts with a handful of patients or none, and a 0 read as
+ * "failing everything").
  *
  * This is NOT the CMS proportion — it reduces the five operational buckets, not the measure's
  * population membership, and for an inverse measure (cms122) "compliant" is not its numerator. The
  * evidence-based rate is `officialMeasureRate` (`program/measure-rate.ts`), and the two are shown as
- * different metrics (ADR-077 d5); an earlier comment here calling this "the way CMS scores it" was wrong.
+ * different metrics (ADR-077 d5).
  */
-export function complianceRateOf(counts: ComplianceRateCounts): number {
+export function complianceRateOf(counts: ComplianceRateCounts): number | null {
   const denominator =
     (counts.compliant ?? 0) +
     (counts.dueSoon ?? 0) +
     (counts.overdue ?? 0) +
     (counts.missingData ?? 0);
-  if (denominator <= 0) return 0;
+  if (denominator <= 0) return null;
   return round1(counts.compliant, denominator);
 }
 

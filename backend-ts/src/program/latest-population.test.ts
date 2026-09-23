@@ -117,7 +117,7 @@ function programDeps(rows: OutcomeWithRun[], counters: { rowReads: number }) {
       listOutcomeMembershipsForRun: async () => [],
       aggregateScaleRun: async () => [],
     } as unknown as OutcomeStore,
-    runStore: { listRuns: async () => [] } as unknown as RunStore,
+    runStore: { listRuns: async () => [], getRun: async () => null } as unknown as RunStore,
     caseStore: { listCases: async () => [] } as unknown as CaseStore,
     webChartEnv: {},
   };
@@ -219,7 +219,7 @@ test("the trend widens its window until ten displayable points exist, so a filte
     listOutcomeMembershipsForRun: async () => [],
     aggregateScaleRun: async () => [],
   } as unknown as OutcomeStore;
-  const deps = { outcomeStore: store, runStore: { listRuns: async () => [] } as unknown as RunStore, caseStore: { listCases: async () => [] } as unknown as CaseStore, webChartEnv: {} };
+  const deps = { outcomeStore: store, runStore: { listRuns: async () => [], getRun: async () => null } as unknown as RunStore, caseStore: { listCases: async () => [] } as unknown as CaseStore, webChartEnv: {} };
   const trend = await programTrend(deps, "audiogram", { site: null, tenant: null });
   assert.equal(trend.length, 10, "ten points, as the all-history read gave");
   assert.equal(trend[0]!.runId, "run-11", "the newest VISIBLE day leads");

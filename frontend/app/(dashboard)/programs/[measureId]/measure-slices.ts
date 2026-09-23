@@ -40,13 +40,24 @@ export type ProgramSummary = {
   dueSoon: number;
   overdue: number;
   missingData: number;
-  /** Patients the measure's logic put outside its initial population — not missing data, not work. */
-  notInPopulation?: number;
   excluded: number;
-  complianceRate: number;
+  /** The workflow rate; null when nobody is counted yet (#637). */
+  complianceRate: number | null;
   /** Which way the measure improves; sent by the programs API so the rate never waits on /api/measures. */
   improvementNotation?: "increase" | "decrease";
   openCaseCount: number;
+  /** Cases a person closed this cycle whose patient the measure STILL counts as a gap (#569). */
+  staffClosedGapCount?: number;
+  /** The measure's own rate — the MeasureReport's reduction of the run's evidence — or null when the
+   *  run carries no official evidence. Shown apart from the workflow rate (ADR-077 d5). */
+  measureRate?: {
+    rates: Array<{ label: string | null; ipp: number; denom: number; denex: number; denexcep: number; numer: number; effectiveDenominator: number; score: number | null }>;
+    unmeasured: number;
+    evaluationErrors: number;
+  } | null;
+  /** The year the latest run scored and the day it describes (#637). */
+  measurementYear?: number | null;
+  asOf?: string | null;
 };
 
 export type TopDrivers = {
@@ -85,8 +96,9 @@ export type RiskOutlook = {
     total: number;
     compliant: number;
     upcomingExpirations: number;
-    currentComplianceRate: number;
-    predictedComplianceRate: number;
+    /** null for a site with nobody counted yet (#637); the server sorts such a site last. */
+    currentComplianceRate: number | null;
+    predictedComplianceRate: number | null;
   }>;
 };
 
@@ -218,9 +230,14 @@ export function applySlice<TrendPoint>(
  * held steady since a run that does not exist. The delta is now absent until there is something to
  * compare with, and it waits for the trend to be `ready` so it does not flash in while loading.
  */
-export function previousTrendPoint<TrendPoint>(
+export function previousTrendPoint<TrendPoint extends { measurementYear?: number }>(
   slices: Pick<MeasureSlices<TrendPoint>, "trend" | "status">,
 ): TrendPoint | null {
   if (slices.status.trend !== "ready") return null;
-  return slices.trend.length > 1 ? (slices.trend[1] ?? null) : null;
+  const [latest, previous] = slices.trend;
+  if (!latest || !previous) return null;
+  // Never across a measurement-year boundary (#637): a new year's first run against last year's final
+  // one is not "from previous", it is two different years.
+  if (latest.measurementYear !== undefined && previous.measurementYear !== undefined && latest.measurementYear !== previous.measurementYear) return null;
+  return previous;
 }

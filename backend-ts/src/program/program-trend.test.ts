@@ -7,7 +7,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 // Task 2 adds `monthlyTrendPoints` and Task 3 adds `programDeps`/`ProgramDeps` + `programTrend` to this
 // import as those tasks are implemented. Task 1 uses only `snapshotScopeFor`.
-import { snapshotScopeFor, monthlyTrendPoints, programTrend, isWholeMonthRange, complianceRateOf } from "./program-read-models.ts";
+import { snapshotScopeFor, monthlyTrendPoints, programTrend, isWholeMonthRange, complianceRateOf, runPeriodOf } from "./program-read-models.ts";
 import type { ProgramDeps } from "./program-read-models.ts";
 import type { QualitySnapshotRow } from "../stores/quality-snapshot-store.ts";
 import type { OutcomeWithRun } from "../stores/outcome-store.ts";
@@ -93,7 +93,7 @@ test("monthlyTrendPoints — rate uses CMS denominator (excluded removed), stamp
 
 test("complianceRateOf — pins CMS denominator (e.g. 38 compliant, 7 overdue, 3 excluded -> 84.4)", () => {
   assert.equal(complianceRateOf({ compliant: 38, dueSoon: 0, overdue: 7, missingData: 0, excluded: 3 }), 84.4);
-  assert.equal(complianceRateOf({ compliant: 0, dueSoon: 0, overdue: 0, missingData: 0, excluded: 5 }), 0); // 0 when denominator is 0
+  assert.equal(complianceRateOf({ compliant: 0, dueSoon: 0, overdue: 0, missingData: 0, excluded: 5 }), null); // no rate when nobody is counted (#637)
 });
 
 // Minimal fakes: programTrend only touches outcomeStore.listOutcomesWithRun (per-run path) and
@@ -249,4 +249,26 @@ test("programTrend — timezone-correct day collapse (Pacific/Honolulu collapses
   // Invalid tz: falls back to UTC -> TWO points.
   const invalidPts = await programTrend(deps, "audiogram", {}, { tz: "Invalid/Timezone" });
   assert.equal(invalidPts.length, 2, "invalid tz falls back to UTC (2 points)");
+});
+
+test("runPeriodOf — the year a run SCORED, read from its record, not the day it started (#637)", async () => {
+  const runs: Record<string, { measurementPeriodStart: string; measurementPeriodEnd: string; startedAt: string; requestedScope: Record<string, unknown> }> = {
+    // A nightly inside the year: an official-only run's period is the calendar year; it describes today.
+    nightly: { measurementPeriodStart: "2027-01-01T00:00:00.000Z", measurementPeriodEnd: "2027-12-31T23:59:59.999Z", startedAt: "2027-01-06T12:03:00.000Z", requestedScope: { evaluationDate: "2027-01-06" } },
+    // A rerun started in January that scores the year before: labelled the OLD year.
+    rerun: { measurementPeriodStart: "2026-01-01T00:00:00.000Z", measurementPeriodEnd: "2026-12-31T23:59:59.999Z", startedAt: "2027-01-05T09:00:00.000Z", requestedScope: { evaluationDate: "2026-12-31" } },
+    // A run started late in December that evaluates a date in the next year: the NEXT year.
+    ahead: { measurementPeriodStart: "2027-01-01T00:00:00.000Z", measurementPeriodEnd: "2027-12-31T23:59:59.999Z", startedAt: "2026-12-30T09:00:00.000Z", requestedScope: { evaluationDate: "2027-01-02" } },
+    // An authored (rolling-window) run: its period ends on its evaluation date, and it is not a
+    // calendar year, so nothing compares its points within one.
+    authored: { measurementPeriodStart: "2026-06-13T00:00:00.000Z", measurementPeriodEnd: "2026-06-13T00:00:00.000Z", startedAt: "2026-06-13T12:00:00.000Z", requestedScope: {} },
+  };
+  const runStore = { getRun: async (id: string) => (id === "boom" ? Promise.reject(new Error("down")) : (runs[id] ?? null)) } as unknown as ProgramDeps["runStore"];
+  assert.deepEqual(await runPeriodOf(runStore, "nightly"), { measurementYear: 2027, asOf: "2027-01-06", calendarYear: true });
+  assert.deepEqual(await runPeriodOf(runStore, "rerun"), { measurementYear: 2026, asOf: "2026-12-31", calendarYear: true });
+  assert.deepEqual(await runPeriodOf(runStore, "ahead"), { measurementYear: 2027, asOf: "2027-01-02", calendarYear: true });
+  assert.deepEqual(await runPeriodOf(runStore, "authored"), { measurementYear: 2026, asOf: "2026-06-13", calendarYear: false });
+  assert.equal(await runPeriodOf(runStore, "missing"), null);
+  // A label fails soft: an unreadable run leaves the year unstated rather than failing the dashboard.
+  assert.equal(await runPeriodOf(runStore, "boom"), null);
 });

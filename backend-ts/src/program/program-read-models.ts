@@ -55,7 +55,8 @@ export interface ProgramSummary {
    */
   notInPopulation: number;
   excluded: number;
-  complianceRate: number;
+  /** The workflow-status rate; null when nobody is counted yet (#637). */
+  complianceRate: number | null;
   /**
    * Which way the measure improves (`MEASURE_IDENTITY`; "increase" when the measure has no identity
    * row). Carried on the summary so a client can render an inverse measure (cms122: the numerator is
@@ -79,6 +80,13 @@ export interface ProgramSummary {
    * separate metric from `complianceRate`, which is the workflow-status rate (ADR-077 d5).
    */
   measureRate: MeasureRate | null;
+  /**
+   * The year the winning run SCORED and the day its numbers describe (#637), read from the run's own
+   * record rather than its start date — a rerun started in January that scores the year before is
+   * labelled that year, not the new one. Null with no winning run.
+   */
+  measurementYear: number | null;
+  asOf: string | null;
 }
 
 export interface ProgramFilters {
@@ -173,7 +181,8 @@ export interface ProgramTrendPoint {
   startedAt: string;
   /** Present only for monthly (quality_snapshots) points — `YYYY-MM` (UX-8). Absent ⇒ per-run point. */
   period?: string;
-  complianceRate: number;
+  /** null when nobody is counted yet (#637) — no data, not 0%. */
+  complianceRate: number | null;
   totalEvaluated: number;
   denominator: number;
   compliant: number;
@@ -187,6 +196,8 @@ export interface ProgramTrendPoint {
    */
   notInPopulation: number;
   excluded: number;
+  /** The year this point's run scored (#637) — a client compares points within one year only. */
+  measurementYear?: number;
 }
 
 export interface TopDrivers {
@@ -214,8 +225,9 @@ export interface RiskOutlook {
     total: number;
     compliant: number;
     upcomingExpirations: number;
-    currentComplianceRate: number;
-    predictedComplianceRate: number;
+    /** null for a site with nobody counted yet (#637); such a site sorts last, never "highest risk". */
+    currentComplianceRate: number | null;
+    predictedComplianceRate: number | null;
   }>;
 }
 
@@ -494,6 +506,8 @@ export async function programOverview(deps: ProgramDeps, filters: ProgramFilters
       openCaseCount,
       staffClosedGapCount,
       measureRate: null,
+      measurementYear: null,
+      asOf: null,
     };
   });
 
@@ -515,6 +529,9 @@ export async function programOverview(deps: ProgramDeps, filters: ProgramFilters
   // reports; a filtered view keeps the status buckets only.
   for (const s of summaries) {
     if (s.latestRunId) s.measureRate = await officialMeasureRate(deps.outcomeStore, s.latestRunId, s.measureId);
+    const period = s.latestRunId ? await runPeriodOf(deps.runStore, s.latestRunId) : null;
+    s.measurementYear = period?.measurementYear ?? null;
+    s.asOf = period?.asOf ?? null;
   }
 
   return summaries.sort((a, b) => a.measureName.localeCompare(b.measureName));
@@ -574,7 +591,7 @@ async function foldScaleCounts(deps: ProgramDeps, summaries: ProgramSummary[], f
 
 function zeroSummary(s: ProgramSummary): void {
   s.totalEvaluated = 0; s.denominator = 0; s.compliant = 0; s.dueSoon = 0; s.overdue = 0; s.missingData = 0;
-  s.notInPopulation = 0; s.excluded = 0; s.complianceRate = 0;
+  s.notInPopulation = 0; s.excluded = 0; s.complianceRate = null;
   s.staffClosedGapCount = 0; s.latestRunId = null; s.latestRunAt = null; s.openCaseCount = 0;
 }
 
@@ -781,6 +798,8 @@ export async function programTrend(
       from: from?.slice(0, 7),
       to: to?.slice(0, 7),
     });
+    // Unstamped: the monthly series only ever serves a rolling-window (authored) measure, which has no
+    // measurement year to compare within (#637 review).
     const monthly = monthlyTrendPoints(snaps);
     if (monthly.length >= 2) return monthly;
   }
@@ -803,8 +822,83 @@ export async function programTrend(
     read = await runsWithOutcomes(deps, measureId, filters, window);
     points = trendPointsOf(read.groups, opts?.tz);
   }
-  return monthlyPossible ? points : trendMemo.set(memoKey, runKey, points);
+  const stamped = await withMeasurementYears(deps.runStore, points);
+  // A point whose run could not be read is unstamped, and an unstamped NEWEST point turns the year
+  // filter off for the chart — so a partial answer is served but never memoized for the cycle.
+  if (monthlyPossible || !stamped.complete) return stamped.points;
+  return trendMemo.set(memoKey, runKey, stamped.points);
 }
+
+/**
+ * Stamp each per-run point with the year its run scored (#637) — only where the run scored a
+ * CALENDAR year (an official measurement period). A rolling-window (authored) run has no year to
+ * compare within, and stamping it would cut the occupational deployment's trends every January.
+ */
+async function withMeasurementYears(runStore: RunStore, points: ProgramTrendPoint[]): Promise<{ points: ProgramTrendPoint[]; complete: boolean }> {
+  const out: ProgramTrendPoint[] = [];
+  let complete = true;
+  for (const p of points) {
+    const period = await readRunPeriod(runStore, p.runId);
+    if (period === UNREADABLE) {
+      complete = false;
+      out.push(p);
+      continue;
+    }
+    out.push(period?.calendarYear ? { ...p, measurementYear: period.measurementYear } : p);
+  }
+  return { points: out, complete };
+}
+
+/**
+ * What a run scored, from its own record (#637): the year, the day the numbers describe, and whether
+ * the period is a calendar year.
+ *
+ * `measurementPeriodEnd` is 31 December of the scored year on an official-only run (ADR-072) and the
+ * evaluation date on an authored or mixed one, so its year is the year scored in both cases — a
+ * rerun started on 5 January that evaluates 31 December reads as the old year. The day described is
+ * the evaluation date the run recorded (`requestedScope.evaluationDate`), falling back to the earlier
+ * of the period end and the start date. `calendarYear` is true only for a 1 January – 31 December
+ * period: the only kind a year line or a within-year comparison means anything for. A completed run's
+ * record never changes, so the answer is cached.
+ *
+ * A LABEL, so it fails soft: a read that throws leaves the year unstated rather than failing the
+ * dashboard it decorates.
+ */
+export async function runPeriodOf(runStore: RunStore, runId: string): Promise<RunPeriod | null> {
+  const period = await readRunPeriod(runStore, runId);
+  return period === UNREADABLE ? null : period;
+}
+
+/** A read that failed, as distinct from a run that does not exist: only the first may not be memoized. */
+const UNREADABLE = Symbol("unreadable");
+
+async function readRunPeriod(runStore: RunStore, runId: string): Promise<RunPeriod | null | typeof UNREADABLE> {
+  const cached = runPeriodCache.get(runId);
+  if (cached) return cached;
+  let run: Awaited<ReturnType<RunStore["getRun"]>>;
+  try {
+    run = await runStore.getRun(runId);
+  } catch {
+    return UNREADABLE;
+  }
+  if (!run) return null;
+  const start = run.measurementPeriodStart.slice(0, 10);
+  const end = run.measurementPeriodEnd.slice(0, 10);
+  const started = run.startedAt.slice(0, 10);
+  const recorded = run.requestedScope?.evaluationDate;
+  const asOf = typeof recorded === "string" && /^\d{4}-\d{2}-\d{2}/.test(recorded) ? recorded.slice(0, 10) : end < started ? end : started;
+  const calendarYear = start.slice(5) === "01-01" && end.slice(5) === "12-31" && start.slice(0, 4) === end.slice(0, 4);
+  const period: RunPeriod = { measurementYear: Number(end.slice(0, 4)), asOf, calendarYear };
+  if (runPeriodCache.size >= 5000) runPeriodCache.clear();
+  runPeriodCache.set(runId, period);
+  return period;
+}
+export interface RunPeriod {
+  measurementYear: number;
+  asOf: string;
+  calendarYear: boolean;
+}
+const runPeriodCache = new Map<string, RunPeriod>();
 
 /** How far the trend widens its run window looking for ten displayable points. */
 const TREND_RUN_WINDOW_MAX = 80;
@@ -1033,7 +1127,9 @@ function renderOutlook(
         }),
       };
     })
-    .sort((a, b) => a.currentComplianceRate - b.currentComplianceRate);
+    // Lowest rate first; a site with nobody counted yet has no rate and sorts last, so it can never
+    // be named the highest-risk site on a tie at "0%" (#637).
+    .sort((a, b) => (a.currentComplianceRate ?? Infinity) - (b.currentComplianceRate ?? Infinity));
 
   return {
     upcomingNonCompliantCount: upcomingExpirations.length,

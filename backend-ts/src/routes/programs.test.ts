@@ -101,12 +101,14 @@ test("overview rows carry the measure's improvementNotation so the UI never has 
   assert.equal(rows.find((p) => p.measureId === "audiogram")!.improvementNotation, "increase", "no identity row ⇒ increase");
 });
 
-test("a measure with no outcomes reports zeros + null latest run", async () => {
+test("a measure with no outcomes reports zeros, NO rate and null latest run", async () => {
   const rows = (await get("/overview").then((r) => r!.json())) as Summary[];
   const empty = rows.find((p) => p.measureId === "flu_vaccine")!;
   assert.equal(empty.totalEvaluated, 0);
-  assert.equal(empty.complianceRate, 0);
+  // Nobody counted is "no data", never 0% (#637) — contrast Plant A below, a real 0 of 1.
+  assert.equal(empty.complianceRate, null);
   assert.equal(empty.latestRunId, null);
+  assert.equal((empty as unknown as { measurementYear: number | null }).measurementYear, null);
 });
 
 test("site filter scopes the outcomes (Plant A keeps only emp-006 → overdue, 0% compliant)", async () => {
@@ -402,4 +404,16 @@ test("?include=detail carries the trend and top-drivers the dashboard would othe
   const ownDrivers = await get(`/${one.measureId}/top-drivers`).then((r) => r!.json());
   assert.deepEqual(one.trend, ownTrend);
   assert.deepEqual(one.topDrivers, ownDrivers);
+});
+
+test("?include=trend carries the trend only — the programs page shows no drivers (#637)", async () => {
+  const plain = (await get("/overview").then((r) => r!.json())) as Summary[];
+  const withTrend = (await get("/overview?include=trend&granularity=month").then((r) => r!.json())) as Array<
+    Summary & { trend?: unknown[]; topDrivers?: unknown }
+  >;
+  assert.deepEqual(withTrend.map((p) => p.measureId), plain.map((p) => p.measureId));
+  for (const summary of withTrend) {
+    assert.ok(Array.isArray(summary.trend), `${summary.measureId} carries a trend`);
+    assert.ok(!("topDrivers" in summary), `${summary.measureId} is not charged for drivers it will not show`);
+  }
 });

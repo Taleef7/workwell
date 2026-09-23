@@ -40,9 +40,12 @@ describe("displayRate", () => {
     expect(displayRate(baseCounts, {}).label).toBe("Compliance");
   });
 
-  it("returns zero poor control when the denominator is zero", () => {
-    const r = displayRate({ ...baseCounts, compliant: 0, dueSoon: 0, overdue: 0, complianceRate: 0 }, decrease);
-    expect(r).toMatchObject({ label: "Poor control", value: 0, numerator: 0, denominator: 0 });
+  it("returns NO rate — not 0% — when nobody is counted yet (#637)", () => {
+    // Poor control 0% on an empty measure reads as perfect; it is "no data yet".
+    const r = displayRate({ ...baseCounts, compliant: 0, dueSoon: 0, overdue: 0, missingData: 0, complianceRate: null }, decrease);
+    expect(r).toMatchObject({ label: "Poor control", value: null, numerator: 0, denominator: 0 });
+    const c = displayRate({ ...baseCounts, compliant: 0, dueSoon: 0, overdue: 0, missingData: 0, complianceRate: null }, increase);
+    expect(c.value).toBeNull();
   });
 
   it("counts missingData in the denominator for decrease notation — it is in-population work", () => {
