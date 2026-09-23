@@ -107,19 +107,24 @@ export function flattenExpansion(contains, out = []) {
 }
 
 /**
- * Bounded retry on transport errors and 5xx; 4xx fails immediately.
+ * Bounded retry on transport errors, 5xx, 401 and 429; any other 4xx fails immediately.
  *
- * Same policy as the vendor script's bundle fetch and for the same reason: a transient blip must not
- * be the thing that makes a build ship a capped expansion, while a 401 (bad key) or 404 (wrong OID)
- * cannot be fixed by asking again. The URL is safe to log — the credential rides in a header.
+ * A transient blip must not be the thing that makes a build ship a capped expansion. 401 is retried
+ * because VSAC answers it intermittently for a VALID key (2026-09-22: one 401, then the same key
+ * completed the same set seconds later), and the capped fallback then fails the MADiE gate's
+ * reproducibility check with a misleading "does not match the pin". A genuinely bad key still fails,
+ * after four attempts. A 404 (wrong OID) cannot be fixed by asking again. The URL is safe to log — the
+ * credential rides in a header.
  */
+const RETRYABLE_4XX = new Set([401, 429]);
+
 async function fetchVsacJson(url, headers, attempts = 4) {
   let lastError;
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     try {
       const response = await fetch(url, { headers });
       if (response.ok) return JSON.parse(await response.text());
-      if (response.status < 500) throw new Error(`HTTP ${response.status}`);
+      if (response.status < 500 && !RETRYABLE_4XX.has(response.status)) throw new Error(`HTTP ${response.status}`);
       lastError = new Error(`HTTP ${response.status}`);
     } catch (err) {
       if (/^HTTP 4/.test(String(err.message))) throw err;
