@@ -25,19 +25,12 @@ export default defineConfig({
   workers: process.env.CI ? 4 : undefined,
   reporter: [["html", { open: "never" }], ["list"]],
   use: {
-    // Resolved in `base-url.ts`, which the Maui write guard reads too: the two used to fall back to
-    // different hosts, so a run with no environment set drove a browser against staging while the
-    // guard read `http://localhost:3000` and concluded writes were safe.
+    // Resolved in `base-url.ts`, which the Maui write guard reads too, so the two cannot disagree.
     baseURL: BASE_URL,
     screenshot: "only-on-failure",
     video: "retain-on-failure",
   },
   projects: [
-    {
-      name: "chromium",
-      use: { ...devices["Desktop Chrome"] },
-      testIgnore: "tests/maui/**",
-    },
     // The Maui project is split by whether a spec DISTURBS the stack it reads.
     //
     // `runs.spec` triggers an ALL_PROGRAMS run from the UI and `worklist-writes.spec` maps a provider

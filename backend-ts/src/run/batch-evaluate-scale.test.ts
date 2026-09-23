@@ -62,11 +62,11 @@ test("batchEvaluateScalePopulation writes one COMPLETED run + N real outcomes pe
   const { dbPath, runs, outcomes, events } = await fresh();
   try {
     const deps = { runStore: runs, outcomeStore: outcomes, auditStore: events, generator: directSyntheticGenerator() };
-    const r = await batchEvaluateScalePopulation(deps, { subjects: 20, asOf: "2026-06-26", chunkSize: 5 });
+    const r = await batchEvaluateScalePopulation(deps, { subjects: 5, asOf: "2026-06-26", chunkSize: 2 });
     const measures = Object.keys(MEASURES).length;
     assert.equal(r.skipped, false);
     assert.equal(r.runsCreated, measures, "one run per runnable measure");
-    assert.equal(r.outcomesCreated, measures * 20, "outcomesCreated === runsCreated * subjects");
+    assert.equal(r.outcomesCreated, measures * 5, "outcomesCreated === runsCreated * subjects");
 
     const scaleRuns = (await runs.listRuns(1000)).filter((x) => x.triggeredBy === SCALE_TRIGGER);
     assert.equal(scaleRuns.length, measures);
@@ -80,7 +80,7 @@ test("batchEvaluateScalePopulation writes valid CQL bucket statuses (real evalua
   const { dbPath, runs, outcomes, events } = await fresh();
   try {
     const deps = { runStore: runs, outcomeStore: outcomes, auditStore: events, generator: directSyntheticGenerator() };
-    await batchEvaluateScalePopulation(deps, { subjects: 20, asOf: "2026-06-26", chunkSize: 5 });
+    await batchEvaluateScalePopulation(deps, { subjects: 5, asOf: "2026-06-26", chunkSize: 2 });
 
     const scaleRun = (await runs.listRuns(1000)).find((x) => x.triggeredBy === SCALE_TRIGGER)!;
     const rows = await outcomes.listOutcomes(scaleRun.id);
@@ -97,10 +97,10 @@ test("batchEvaluateScalePopulation is resumable — a second identical call is a
   const { dbPath, runs, outcomes, events } = await fresh();
   try {
     const deps = { runStore: runs, outcomeStore: outcomes, auditStore: events, generator: directSyntheticGenerator() };
-    const r1 = await batchEvaluateScalePopulation(deps, { subjects: 20, asOf: "2026-06-26", chunkSize: 5 });
+    const r1 = await batchEvaluateScalePopulation(deps, { subjects: 3, asOf: "2026-06-26", chunkSize: 2 });
     assert.equal(r1.skipped, false);
 
-    const r2 = await batchEvaluateScalePopulation(deps, { subjects: 20, asOf: "2026-06-26", chunkSize: 5 });
+    const r2 = await batchEvaluateScalePopulation(deps, { subjects: 3, asOf: "2026-06-26", chunkSize: 2 });
     assert.equal(r2.skipped, true);
     assert.equal(r2.runsCreated, 0);
   } finally {
@@ -245,15 +245,15 @@ test("batchEvaluateScalePopulation handles a remainder chunk (subjects not divis
   const { dbPath, runs, outcomes, events } = await fresh();
   try {
     const deps = { runStore: runs, outcomeStore: outcomes, auditStore: events, generator: directSyntheticGenerator() };
-    // 20 / 7 = chunks of 7, 7, 6 — the trailing remainder chunk must still flush.
-    const r = await batchEvaluateScalePopulation(deps, { subjects: 20, asOf: "2026-06-26", chunkSize: 7 });
+    // 5 / 2 = chunks of 2, 2, 1 — the trailing remainder chunk must still flush.
+    const r = await batchEvaluateScalePopulation(deps, { subjects: 5, asOf: "2026-06-26", chunkSize: 2 });
     const measures = Object.keys(MEASURES).length;
     assert.equal(r.runsCreated, measures);
-    assert.equal(r.outcomesCreated, measures * 20, "outcomesCreated === runsCreated * subjects across the remainder");
+    assert.equal(r.outcomesCreated, measures * 5, "outcomesCreated === runsCreated * subjects across the remainder");
 
     // Each measure's run holds exactly `subjects` rows (no drops, no dupes at the chunk boundary).
     const scaleRun = (await runs.listRuns(1000)).find((x) => x.triggeredBy === SCALE_TRIGGER)!;
-    assert.equal((await outcomes.listOutcomes(scaleRun.id)).length, 20);
+    assert.equal((await outcomes.listOutcomes(scaleRun.id)).length, 5);
   } finally {
     try { rmSync(dbPath, { force: true }); } catch { /* best effort */ }
   }
@@ -403,11 +403,11 @@ test("batchEvaluateScalePopulation outcomes reconcile via bounded aggregateScale
   const { dbPath, runs, outcomes, events } = await fresh();
   try {
     const deps = { runStore: runs, outcomeStore: outcomes, auditStore: events, generator: directSyntheticGenerator() };
-    await batchEvaluateScalePopulation(deps, { subjects: 40, asOf: "2026-06-26", chunkSize: 10 });
+    await batchEvaluateScalePopulation(deps, { subjects: 10, asOf: "2026-06-26", chunkSize: 4 });
 
     const scaleRun = (await runs.listRuns(1000)).find((x) => x.triggeredBy === SCALE_TRIGGER)!;
     const groups = await outcomes.aggregateScaleRun(scaleRun.id);
-    assert.equal(groups.reduce((s, g) => s + g.count, 0), 40, "group counts sum to the subject count");
+    assert.equal(groups.reduce((s, g) => s + g.count, 0), 10, "group counts sum to the subject count");
   } finally {
     try { rmSync(dbPath, { force: true }); } catch { /* best effort */ }
   }

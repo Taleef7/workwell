@@ -63,7 +63,8 @@ npm run dev
 CodeQL analyses this repository on every push and pull request to `main`, covering both the
 TypeScript sources and the workflow files themselves. Findings appear in the Security tab.
 Dependabot vulnerability alerts are on for every ecosystem. Version-update PRs run for GitHub
-Actions, `frontend`, `wcdb-fhir-shim` and `e2e`. They do **not** run for `backend-ts`: its pnpm
+Actions, `wcdb-fhir-shim` and `e2e`. Not for `frontend`: its updater failed every week, and its
+exact-pinned `next`/`react` pairs are bumped by hand. Not for `backend-ts` either: its pnpm
 workspace takes members from a git submodule, which Dependabot never initializes, so an updater
 there fails at workspace resolution before it reaches any dependency.
 [`.github/dependabot.yml`](.github/dependabot.yml) carries the reproduction. Backend dependencies are

@@ -53,7 +53,7 @@ belongs app-side by the same rule that keeps the content out.
 
 ## How we know the packages work outside this repository
 
-`pnpm verify:publish` runs in CI on every pull request. It packs real tarballs, installs them into
+`pnpm verify:publish` runs in CI on every push. It packs real tarballs, installs them into
 a temporary directory with a plain `npm install` and no knowledge of this repo, runs the engine
 there on real measure content, and type-checks a TypeScript consumer against the packed type
 definitions. After publication, the same exercise was repeated installing from npm into an empty

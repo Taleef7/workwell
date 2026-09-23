@@ -21,12 +21,12 @@ schema self-creates on boot; there are no migration files.
 | Staging (live WebChart) | `twh-staging.os.mieweb.org` | `twh-staging-api-ts.os.mieweb.org` | dispatch only | none |
 
 Images: backend `ghcr.io/taleef7/workwell-api-ts` (shared; tags namespaced per stack), frontends
-`…/workwell-twh-frontend` and `…/workwell-maui-frontend`. `deploy-workwell-redirect-mieweb.yml`
-(dispatch) serves a 301 from `workwell.os.mieweb.org` to TWH (`infra/redirect/README.md`).
+`…/workwell-twh-frontend` and `…/workwell-maui-frontend`.
 
 ### Deployment workflow
 
-A push to `main` runs `deploy-twh-mieweb.yml` and `deploy-maui-mieweb.yml`. Each:
+A push to `main` runs `deploy-twh-mieweb.yml` and `deploy-maui-mieweb.yml`, unless it changes only `docs/`
+or root `*.md` files (no image contains them). Each:
 
 1. **Builds the backend**: vendors official terminology (Step 1), runs the reproducibility gate
    `git diff --exit-code backend-ts/measures/official`, bakes `WORKWELL_BUILD_SHA` into the image.
@@ -215,8 +215,7 @@ Deploy and reconcile must ship **identical** values (`official-flip-config.test.
 | `WORKWELL_OUTCOME_RETENTION_DAYS` | **`400`** | unset (off) | ADR-073/077. Keeps each subject's newest row per `(measure, period)`, run rows and case-cited rows. Needs the keep-set indexes `schema-pg.ts` creates. |
 
 Clinical facts follow the calendar year of each run's evaluation date. Turning retention on deletes a lot
-at once: run the first pass by hand with `pnpm outcomes:compact`. CI's weekly `run-scale-maui` job uses a
-stub engine — it measures the pipeline, not CQL.
+at once: run the first pass by hand with `pnpm outcomes:compact`.
 
 #### Segment repair after adding a tenant, site or routed measure (owner-gated)
 
@@ -531,10 +530,11 @@ Set a hard monthly usage limit and store the key only as the `OPENAI_API_KEY` se
 
 ## CI/CD
 
-- `ci.yml` (push, PR, dispatch, weekly): frontend lint/test/build; backend typecheck, gates and tests in
-  3 shards; the credentialed MADiE gate; packages; manual e2e; weekly `run-scale-maui`. Never deploys.
-- Deploy: `deploy-twh-mieweb.yml`, `deploy-maui-mieweb.yml` (push + dispatch), `deploy-staging-mieweb.yml`,
-  `deploy-workwell-redirect-mieweb.yml` (dispatch). Self-heal: the two `reconcile-*` workflows.
+- `ci.yml` (every branch push, dispatch; no `pull_request` trigger, so a PR's checks are its head
+  commit's push run): frontend lint/test/build; backend typecheck, gates and tests in 3 shards; the
+  credentialed MADiE gate; packages; the Maui Playwright suite. Never deploys.
+- Deploy: `deploy-twh-mieweb.yml`, `deploy-maui-mieweb.yml` (push + dispatch; docs-only pushes skip),
+  `deploy-staging-mieweb.yml` (dispatch). Self-heal: the two `reconcile-*` workflows.
 - `backup-neon-nightly.yml` (nightly). Credentialed manual jobs: `vendor-official-measure.yml`,
   `flip-gate.yml`, `cross-engine-sweep.yml`. `publish-packages.yml` (dispatch, dry run by default;
   irreversible — `docs/PACKAGES.md`).

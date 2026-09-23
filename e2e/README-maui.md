@@ -5,13 +5,9 @@ primary-care quality team working **by provider panel and by patient**, using
 status chips ("jelly beans") as pre-filtered work lists and thinking in MIPS
 Quality IDs.
 
-- `cms122` — Diabetes — **MIPS 001 · CMS122**
-- `cms125` — Breast Cancer Screening — **MIPS 112 · CMS125**
-- `hypertension` — Hypertension BP Screening — **no MIPS label**
-
-The existing TWH suite (`e2e/tests/*.spec.ts`, project `chromium`) is
-untouched: the `maui` project only runs `tests/maui/**`, and the `chromium`
-project ignores `tests/maui/**`.
+In CI the stack routes the six ACO measures the sandbox runs — cms122, cms125,
+cms2, cms130, cms165 and cms137 — labelled by MIPS Quality ID (for example
+**MIPS 001 · CMS122**).
 
 ## Accounts
 
@@ -86,8 +82,8 @@ corepack pnpm@10 dev
 ```
 
 The backend serves on http://localhost:8080 — verify with `GET /api/version`.
-This boot runs the authored cms122/cms125, the same setup the CI job uses. Do
-NOT set `WORKWELL_OFFICIAL_MEASURES` on a clean checkout: the official
+This boot runs the authored cms122/cms125 (CI routes all six officially, with
+the VSAC credential). Do NOT set `WORKWELL_OFFICIAL_MEASURES` on a clean checkout: the official
 artifacts need their vendored terminology sidecars
 (`measures/official/*/terminology.json`, gitignored), and without them
 `officialRoutingProblems()` refuses every evaluation route the global setup
@@ -124,14 +120,11 @@ $env:PLAYWRIGHT_API_BASE_URL = "http://localhost:8080"
 npx playwright test --project=maui --project=maui-writes
 ```
 
-**Set both URLs.** `PLAYWRIGHT_PROFILE=maui` is REQUIRED — every Maui spec skips
-itself when it is unset, and the global setup seeds no run, so Playwright exits
-green with every test skipped. The two URLs are required in practice as well:
-`PLAYWRIGHT_BASE_URL` falls back to the **staging host**, not to localhost
-(`base-url.ts`), so omitting it drives a browser against staging while the API
-calls go to your local backend, and every failure then looks like a product
-defect. Omitting them also means writes are denied, since the guard above needs
-both to be local.
+`PLAYWRIGHT_PROFILE=maui` is REQUIRED — every Maui spec skips itself when it is
+unset, and the global setup seeds no run, so Playwright exits green with every
+test skipped. The two URLs default to the local stack (`base-url.ts`,
+`tests/maui/helpers.ts`); set them only to point somewhere else, and remember
+the write guard above then denies writes.
 
 Name both projects, or the write specs never run: `--project=maui` alone is the
 read-only half.
@@ -141,4 +134,4 @@ When you are done, stop the backend and frontend dev servers.
 
 ## Running in CI
 
-Actions → CI → Run workflow → `e2e_profile: maui`. The `e2e-maui` job boots the backend (`WORKWELL_INSTANCE=maui`, SQLite) and a patient-mode frontend build on the runner and runs this project against them; nothing shared is touched. It runs the authored cms122/cms125 (no official routing) because the vendored terminology sidecars are not available in CI; with no VSAC key the authored path yields the same 38/7/3 distribution. Local runs on a Windows developer box tend to die with `0xC0000142` (desktop-heap exhaustion) — use CI.
+The `e2e-maui` job in `ci.yml` runs on every push (not Dependabot's, which get no secrets) and on a manual dispatch. It boots the backend (`WORKWELL_INSTANCE=maui`, SQLite) and a patient-mode frontend build on the runner and runs both projects against them; nothing shared is touched. It routes all six ACO measures, vendoring their terminology with the VSAC credential first. Local runs on a Windows developer box tend to die with `0xC0000142` — use CI.

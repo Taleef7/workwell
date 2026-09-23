@@ -110,7 +110,7 @@ pnpm cql-tests
 **The full 455 of 455 needs a VSAC credential.** Two measures (CMS122 and CMS125) depend on a value
 set upstream ships capped at 1,000 codes; completing it means re-expanding from VSAC, which needs
 `WORKWELL_VSAC_API_KEY_VENDOR` and the `--complete-terminology` flag. Without the key those two
-measures vendor with the capped expansion — CI does exactly this on fork pull requests and says so
+measures vendor with the capped expansion — CI does exactly this on Dependabot's pushes and says so
 rather than reporting a pass it did not earn. The other six are byte-identical either way.
 
 ## Open gaps, named

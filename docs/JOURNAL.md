@@ -24,3 +24,10 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
 - **Programs cards streamlined**: one rate, the chips (no "Not in population"), the trend and the
   worklist link. The CMS measure rate and the staff-closed link moved to the measure page; the
   drivers were already there. The attributed-list report keeps its "Not measured" column.
+- **CI made faster and quieter.** About ten oversized backend tests evaluated far more patients than their
+  assertions needed, or recomputed the same result per test; they now use a handful or compute once, with
+  every check kept (the slowest file went from ~346 s to ~120 s alone). CI runs once per push (the
+  duplicate `pull_request` run is gone), a hung VSAC request is abandoned after 90 s instead of 300, and
+  docs-only merges no longer redeploy both stacks. The Maui Playwright suite now runs on every push.
+  Deleted: the stale TWH Playwright suite (it targeted a July staging build), the weekly stub-engine
+  scale job, the never-run redirect workflow, and the always-failing frontend Dependabot entry.
