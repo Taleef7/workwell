@@ -39,6 +39,10 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
   adapter close most of the rest (68 open alerts -> ~14). Left on purpose: hono and vite (installed as
   peers, which pnpm will not move; their advisories are in features we do not use), and csv-parse and
   uuid (major bumps the pinned engine libraries do not allow).
+- **The AI surfaces now ask `gpt-6-luna` first and `gpt-5.4-nano` second.** The client sent `max_tokens`
+  and a temperature, both rejected by GPT-5-era models, so the old primary most likely failed on every
+  call and `gpt-4o-mini` answered. It now turns reasoning off and sends `max_completion_tokens`. The
+  audit records the model that answered, not the one configured.
 - **#671: the patient page agrees with itself.** Its posture and Measure Details now read an outcome the way
   its table does (out of population is "Not in population", not "Missing Data"), list only the measures the
   deployment runs (no old Hypertension on Maui), and name the official-only measures instead of `cms130`.
