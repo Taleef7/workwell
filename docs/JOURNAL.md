@@ -35,6 +35,13 @@ identifier paired with health context the moment real patients arrive.
 The login page also stopped telling people their password was wrong during an outage: a gateway 504 with
 an HTML body fell through to "Invalid email or password."
 
+**The "source of truth" panel was the one surface still on the pre-ADR-079 rate (#642).** It read the
+monthly snapshots directly — 17.3% for cms130 beneath a 41.9% headline — while `programTrend` had refused
+that series for the same reason since ADR-079. The rule now lives in one place (`quality/snapshot-basis.ts`),
+`/api/quality/history` answers 409 for such a measure, and the panel says why instead of showing a number.
+On the pilot that is every measure, which is right and is also a gap: making the snapshots correct needs a
+basis marker on the row, which is schema (#676).
+
 ## 2026-09-22 (close) — verified live, and one rate movement explained
 
 **Merged, deployed and verified on the sandbox:**

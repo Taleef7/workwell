@@ -138,14 +138,25 @@ describe("expandFromVsac", () => {
     );
   });
 
-  it("does not retry a 4xx — a bad key cannot be fixed by asking again", async () => {
+  it("does not retry a 404 — a wrong OID cannot be fixed by asking again", async () => {
     globalThis.fetch = async (url) => {
       calls.push({ url: String(url) });
-      return { ok: false, status: 401, text: async () => "" };
+      return { ok: false, status: 404, text: async () => "" };
     };
 
-    await assert.rejects(() => expandFromVsac(OID, { ...ARGS, apiKey: "bad" }), /HTTP 401/);
+    await assert.rejects(() => expandFromVsac(OID, { ...ARGS, apiKey: "test-key" }), /HTTP 404/);
     assert.equal(calls.length, 1);
+  });
+
+  it("retries a 401 — VSAC answers one intermittently for a valid key", async () => {
+    globalThis.fetch = async (url) => {
+      calls.push({ url: String(url) });
+      return calls.length === 1 ? { ok: false, status: 401, text: async () => "" } : expansionPage(["c1"], 1);
+    };
+
+    const result = await expandFromVsac(OID, { ...ARGS, apiKey: "test-key" });
+    assert.equal(result.codes.length, 1);
+    assert.equal(calls.length, 2);
   });
 });
 
