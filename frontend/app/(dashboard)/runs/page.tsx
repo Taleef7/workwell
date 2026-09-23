@@ -282,8 +282,10 @@ export default function RunsPage() {
    * (#602), which is why this is the same shape of fix. Paging is the caller's: an export is not
    * paged, so it does not set `limit` from this.
    *
-   * Not the global SITE filter (#668): a run carries a site only when it was a SITE run, so any site
-   * selection hid every all-programs, measure and patient run — each of which covers that site. The
+   * Not the global SITE filter (#668): only a SITE run carries a site, so any site selection hid every
+   * all-programs and measure run, though each covers every site. The list is not site-filtered at all,
+   * and says so: a SITE or patient run elsewhere still shows. Telling which patient or case run
+   * touched a site would take a directory lookup per run, for runs the pilot rarely starts. The
    * outcomes export below keeps `site`, because outcomes do belong to sites.
    */
   const runFilterParams = useCallback(() => {
@@ -909,7 +911,7 @@ export default function RunsPage() {
       ) : null}
       {siteId ? (
         <p className="text-xs text-neutral-500 dark:text-neutral-400">
-          Runs cover every site, so the site filter doesn&apos;t narrow this list.
+          Run history isn&apos;t filtered by site: most runs cover every site.
         </p>
       ) : null}
       {selectedRun && !rerunSupported ? (

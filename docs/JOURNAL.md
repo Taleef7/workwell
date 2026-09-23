@@ -53,4 +53,4 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
   - The outcomes table says "Showing 5,000 of 20,000", and runs over an hour show their duration.
   - A failed load, and filters that exclude every run, no longer read "No runs yet", and a run the filters
     remove no longer leaves its detail behind.
-  - The global site filter no longer empties the list: runs cover every site.
+  - The global site filter no longer empties the list; the list says it isn't filtered by site.
