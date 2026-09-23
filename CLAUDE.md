@@ -8,7 +8,7 @@
 The GitHub milestone **"Ready for January"** (`gh issue list --milestone "Ready for January"`) is the work.
 `docs/JOURNAL.md` (newest entry on top) is the short log of recent changes; `README.md` is the public overview.
 
-## Tech stack (immutable without ADR in docs/DECISIONS.md)
+## Tech stack (changed only by an owner decision, recorded in docs/LOCKED_DECISIONS.md)
 - Backend: TypeScript on `@mieweb/cloud` (`backend-ts/`) — a Cloudflare-style worker on a long-lived node-24 host; JVM-free CQL→ELM (build-time); PostgreSQL 16 (Neon, `Pg*Store` ceiling, `workwell_spike` schema; SQLite floor for tests/local)
 - Frontend: Next.js 16 App Router + React 19 + TypeScript + Tailwind 4 + `@mieweb/ui` (ADR-004) + Monaco
 - AI: OpenAI via the backend-ts AI surfaces (deterministic fallbacks); MCP read-only tools served from the worker
@@ -27,6 +27,10 @@ The GitHub milestone **"Ready for January"** (`gh issue list --milestone "Ready 
 - Auth: user accounts remain hardcoded (no SSO, no real user directory). The JWT refresh flow (HttpOnly cookie, rotation, `/api/auth/refresh`) is approved and implemented.
 - Email: `WORKWELL_EMAIL_PROVIDER=simulated` is the default and must remain so on the demo stacks. SendGrid must not be activated unless `WORKWELL_EMAIL_SENDGRID_API_KEY` is set (with `WORKWELL_EMAIL_PROVIDER=sendgrid`) in a non-demo environment.
 - AI never decides compliance (see docs/AI_GUARDRAILS.md). The CQL engine is the sole source of truth.
+- Nothing invents clinical data. Bundle preparation may add a missing system to a recognised code but never
+  supplies or replaces a code (an absent field stays absent), and the synthetic corpus holds no fact dated
+  after its as-of. WebChart ingest's derivations from real rows (us-core-sex from gender, the mammogram
+  Observation from its Procedure) are mappings, not exceptions.
 - Every state change writes an `audit_event` — the rule, **not yet everywhere true (#598, open)**. Write new code **audit-first** (the event before the mutation). Some paths are still mutate-first: run-boundary ones by design, outreach and the identity links pending owner decisions — `DATA_MODEL_CONTRACTS` §4 lists them. #598 stays open until the cross-store `applyCaseAction` primitive exists.
 - No silent scope changes; if a plan's stop condition triggers, record the fallback in JOURNAL.md
 - Schema migrations are owned by Taleef — never written or applied by an agent without explicit instruction
@@ -56,12 +60,10 @@ The GitHub milestone **"Ready for January"** (`gh issue list --milestone "Ready 
 ## Always-loaded docs (`@`-imported — keep this list small)
 - @docs/AI_GUARDRAILS.md — the "AI never decides compliance" rule. Prompt templates are on demand in `docs/AI_PROMPTS.md`
 - @docs/DATA_MODEL_CONTRACTS.md — idempotency + `evidence_json` + CSV contracts, mandatory on every PR
-- @docs/ADR_INDEX.md — ADR titles only; the entries are in DECISIONS.md
 - @docs/LOCKED_DECISIONS.md — owner-locked decisions (§4, §4A)
 
 ## Other docs, on demand
 - `docs/guide/` — the readable explanation of the whole system (10 chapters)
-- `docs/DECISIONS.md` — every ADR, condensed; an `ADR-0NN` or `ADR-0NN dN` reference anywhere resolves there
 - `docs/ROADMAP_2026-08-30.md` — the approved plan (the Maui pilot). `docs/ROADMAP_2026-08-04.md` keeps only its §4 verification set (still the bar, locked decision 2) and §6
 - `docs/OPEN_QUESTIONS.md` — questions waiting on the pilot group, the ACO or the owner
 - `docs/DEPLOY.md` + `docs/BACKUP_DR_RUNBOOK.md` — the runbooks → prefer the `deploy` skill
@@ -73,8 +75,10 @@ The GitHub milestone **"Ready for January"** (`gh issue list --milestone "Ready 
 - `docs/PRODUCTION_READINESS_2026-07.md` — PHI/HIPAA posture and the production gap list (#261)
 - Table schemas: `backend-ts/src/stores/postgres/schema-pg.ts` (the SQLite floor mirrors it)
 
-`docs/archive/` was deleted on 2026-09-23. A reference to it anywhere (code comments, old docs) resolves
-from git history: `git show before-docs-trim:docs/archive/<file>`.
+`docs/archive/` was deleted on 2026-09-23, and the ADRs (`docs/DECISIONS.md`) were retired the same day. A
+reference to either anywhere (code comments, old docs) resolves from git history:
+`git show before-docs-trim:docs/archive/<file>`, and an `ADR-0NN` / `ADR-0NN dN` id via
+`git show fd243d34:docs/DECISIONS.md` (the condensed set, original dN numbering).
 
 ## Current focus
 **The Maui pilot sandbox, before PY2027 starts on 2027-01-01.** The work is the "Ready for January"

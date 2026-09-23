@@ -99,5 +99,7 @@ The following actions remain explicitly human-controlled:
 - Measure activation/deprecation.
 - Outreach send/escalate/assign/rerun case actions.
 - Spec edits and save decisions.
+- Linking or unlinking two person records (`CONFIRM_LINK` / `UNLINK`). Identity matching only groups
+  records at read time and suggests; nothing auto-merges.
 
 AI suggestions can inform operator decisions but cannot execute compliance decisions or state transitions autonomously.

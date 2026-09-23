@@ -2,7 +2,8 @@
 
 > **This is the compact module and boundary reference**: where things live, and which rules the code
 > or CI enforces. The readable explanation of how the system works is [`docs/guide/`](guide/README.md).
-> Decisions and their reasons are in [`docs/DECISIONS.md`](DECISIONS.md) (titles in `ADR_INDEX.md`).
+> The owner's locked decisions are in [`LOCKED_DECISIONS.md`](LOCKED_DECISIONS.md); an `ADR-0NN` id resolves
+> from git history (CLAUDE.md says how).
 > Section numbers are stable: source code cites §6, §7 and §10.
 
 ## 1) System Overview
