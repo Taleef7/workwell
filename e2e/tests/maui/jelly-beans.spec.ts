@@ -65,6 +65,7 @@ test.describe("Maui status chips (jelly beans)", () => {
   // the worklist link beside them. This replaces a per-measure drill-down that navigated and reloaded
   // once per chip — six measures × three buckets × two page loads was most of the project's runtime.
   test("every routed measure renders status chips consistent with its worklist", async ({ page }) => {
+    let compared = 0;
     for (const measure of ROUTED_MEASURES) {
       // `readChips` waits for the measure's card itself, which is also the assertion that a routed
       // measure renders one at all.
@@ -73,10 +74,14 @@ test.describe("Maui status chips (jelly beans)", () => {
 
       const worklistLink = page.locator(`a[href*="measureId=${measure.id}"]`).filter({ hasText: /Open Worklist/i });
       await expect(worklistLink.first()).toBeVisible({ timeout: 10_000 });
-      const worklistTotal = Number(((await worklistLink.first().textContent()) ?? "").match(/(\d+)/)?.[1]);
-      // Without this, `chipSum >= worklistTotal` is satisfied by any chip sum whenever the worklist
-      // renders 0 — including a sum computed from nothing.
-      expect(worklistTotal, `${measure.cms} should have open cases to compare against`).toBeGreaterThan(0);
+      const worklistText = (await worklistLink.first().textContent()) ?? "";
+      const worklistTotal = Number(worklistText.match(/([\d,]+)/)?.[1]?.replace(/,/g, ""));
+      expect(Number.isFinite(worklistTotal), `${measure.cms}: the worklist link states a count ("${worklistText}")`).toBe(true);
+      // A measure can have no open gaps on CI's 48-patient year-to-date corpus (CMS122 counts one
+      // diabetic so far this year, in control). It has nothing to compare; the test as a whole must
+      // still compare something, or `chipSum >= 0` would pass on nothing (checked after the loop).
+      if (worklistTotal === 0) continue;
+      compared += 1;
 
       // NOT equality. A chip counts OUTCOMES in a bucket; the worklist counts CASES. Since ADR-078 a
       // subject the official executor puts outside the initial population is persisted MISSING_DATA
@@ -88,6 +93,7 @@ test.describe("Maui status chips (jelly beans)", () => {
         `${measure.cms}: chip sum (${chipSum}) must cover the open worklist (${worklistTotal}); the gap is out-of-population subjects`,
       ).toBeGreaterThanOrEqual(worklistTotal);
     }
+    expect(compared, "at least one routed measure has open cases to compare against").toBeGreaterThan(0);
   });
 
   // The EXPENSIVE structural check — that a chip's href really filters the list it lands on — is worth
