@@ -436,8 +436,10 @@ export async function draftCql(
       "- Map outcome status to: COMPLIANT | DUE_SOON | OVERDUE | MISSING_DATA | EXCLUDED\n";
 
   let response: DraftCqlResponse;
+  let model = deps.model;
   try {
     const reply = await deps.chat(activeDraftCqlSystemPrompt, userPrompt);
+    model = reply.model;
     const cql = stripCodeFences(reply.text);
     if (!cql) throw new Error("Empty CQL response from model");
     response = { success: true, cql, provider: reply.model, fallbackUsed: false };
@@ -447,7 +449,7 @@ export async function draftCql(
   await insertAiAudit(deps, "AI_DRAFT_CQL_GENERATED", actor, null, null, {
     measureId: input.measureId,
     measureName,
-    model: response.provider,
+    model,
     promptLength: userPrompt.length,
     outputLength: response.cql.length,
     fallbackUsed: response.fallbackUsed,
@@ -522,8 +524,10 @@ export async function generateTestFixtures(
   let fixtures: GeneratedTestFixture[];
   let fallbackUsed: boolean;
   let provider: string;
+  let model = deps.model;
   try {
     const reply = await deps.chat(activeFixtureSystemPrompt, prompt);
+    model = reply.model;
     fixtures = parseGeneratedFixtures(reply.text);
     fallbackUsed = false;
     provider = reply.model;
@@ -536,7 +540,7 @@ export async function generateTestFixtures(
     measureId: input.measureId,
     measureName: input.measureName,
     count: fixtures.length,
-    model: provider,
+    model,
     fallbackUsed,
   });
   return fixtures;

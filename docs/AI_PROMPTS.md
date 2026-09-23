@@ -108,8 +108,8 @@ Invocation behavior:
 
 Every AI call writes `audit_events` with `entity_type='ai'`, a random AI entity UUID, the actor, and the
 payload wrapper `{ "timestamp": "ISO-8601", "payload": { ... } }` (`AI_GUARDRAILS.md` §4).
-`model` is the model that answered: the primary, or the fallback model after the primary failed. When
-no model answered, the three payloads below record the configured primary.
+`model` is the model that answered: the primary, or the fallback model after the primary failed (the
+worker logs a warning when that happens). When no model answered, it is the configured primary.
 
 ### 4.1 `AI_DRAFT_SPEC_GENERATED`
 `measureName`, `measureId`, `promptLength`, `outputLength`, `model`, `tokensUsed` (currently `-1`

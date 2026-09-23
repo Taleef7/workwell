@@ -60,7 +60,10 @@ async function callModel(cfg: ChatConfig, model: string, system: string, user: s
     }),
   });
   if (!res.ok) {
-    throw new Error(`OpenAI chat call failed: HTTP ${res.status}`);
+    // OpenAI's error body names the rejected parameter; without it a model that refuses every call
+    // looks, in the logs, like a flaky network.
+    const detail = (await res.text().catch(() => "")).slice(0, 300);
+    throw new Error(`OpenAI chat call failed: HTTP ${res.status}${detail ? ` ${detail}` : ""}`);
   }
   const data = (await res.json()) as { choices?: Array<{ message?: { content?: unknown } }> };
   const content = data.choices?.[0]?.message?.content;
@@ -82,6 +85,8 @@ export function createChat(cfg: ChatConfig): ChatFn {
           `Primary model call failed and no fallback configured: ${(primaryError as Error).message}`,
         );
       }
+      // Say so: the answer still arrives, so nothing else shows the primary failing.
+      console.warn(`[ai] primary model ${cfg.model} failed, asking ${fb}: ${(primaryError as Error).message}`);
       return callModel(cfg, fb, system, user);
     }
   };
