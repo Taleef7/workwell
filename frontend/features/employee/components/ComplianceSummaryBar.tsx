@@ -1,12 +1,13 @@
 import type { MeasureOutcomeSummary } from '../hooks/useEmployeeProfile';
+import { COMPLIANCE_STATUS_LABELS, complianceStatusClass, labelFor as statusLabelFor } from '@/lib/status';
 
-const STATUS_COLORS: Record<string, string> = {
-  COMPLIANT: 'bg-green-100 text-green-800 border border-green-200 dark:bg-green-900/30 dark:text-green-300 dark:border-green-900',
-  DUE_SOON: 'bg-yellow-100 text-yellow-800 border border-yellow-200 dark:bg-yellow-900/30 dark:text-yellow-300 dark:border-yellow-900',
-  OVERDUE: 'bg-red-100 text-red-800 border border-red-200 dark:bg-red-900/30 dark:text-red-300 dark:border-red-900',
-  MISSING_DATA: 'bg-neutral-100 text-neutral-700 border border-neutral-200 dark:bg-neutral-800 dark:text-neutral-300 dark:border-neutral-700',
-  EXCLUDED: 'bg-neutral-50 text-neutral-500 border border-neutral-100 dark:bg-neutral-800/50 dark:text-neutral-400 dark:border-neutral-800',
-};
+/**
+ * The status to SHOW: the server's display status, the same one the roster table on this page uses, so
+ * a patient outside a measure's population reads "Not in population" here too, not "Missing Data"
+ * (#671). The stored bucket is the fallback for a server that predates the field.
+ */
+export const shownStatusOf = (o: Pick<MeasureOutcomeSummary, 'displayStatus' | 'outcomeStatus'>): string =>
+  o.displayStatus ?? o.outcomeStatus;
 
 export function ComplianceSummaryBar({
   outcomes,
@@ -21,9 +22,9 @@ export function ComplianceSummaryBar({
         <a
           key={o.measureVersionId}
           href={`#measure-${o.measureVersionId}`}
-          className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-medium transition-opacity hover:opacity-80 ${STATUS_COLORS[o.outcomeStatus] ?? 'bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-400'}`}
+          className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-medium transition-opacity hover:opacity-80 ${complianceStatusClass(shownStatusOf(o))}`}
         >
-          {labelFor(o.measureId, o.measureName)} — {o.outcomeStatus.replace(/_/g, ' ')}
+          {labelFor(o.measureId, o.measureName)} — {statusLabelFor(COMPLIANCE_STATUS_LABELS, shownStatusOf(o))}
         </a>
       ))}
       {outcomes.length === 0 && (

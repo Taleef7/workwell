@@ -19,6 +19,7 @@ import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
 import { compositeBundleSource } from "../wiring/subject-bundle-source.ts";
 import { deriveCell, type DisplayState } from "../compliance/roster-vocabulary.ts";
+import { measureDisplayName } from "../measure/measure-name.ts";
 
 export interface SnapshotEvaluation {
   measureId: string;
@@ -31,6 +32,12 @@ export interface EmployeeComplianceSnapshot {
   externalId: string;
   asOf: string;
   evaluations: SnapshotEvaluation[];
+  /**
+   * Measures this deployment runs that the simulation CANNOT replay: the official-only ones, whose
+   * logic is CMS's vendored artifact with no authored binding to build a synthetic bundle from. Named
+   * so the page can say so, instead of showing two of six as if they were the whole picture (#671).
+   */
+  notSimulated: Array<{ measureId: string; name: string }>;
 }
 /** Structural engine type so tests can pass a fake; the real CqlExecutionEngine satisfies it. */
 export interface SnapshotEngine {
@@ -52,12 +59,16 @@ export async function simulateComplianceAsOf(
   if (!employee) return null;
 
   const evaluations: SnapshotEvaluation[] = [];
+  const notSimulated: EmployeeComplianceSnapshot["notSimulated"] = [];
   const bundleSource = compositeBundleSource(process.env as Record<string, unknown>);
   for (const measureId of RUNNABLE_MEASURE_IDS.filter(isRunnableMeasure)) {
     // Official-only ids are runnable but have no binding (so no complianceClass) until Task 3; the
     // snapshot's class-parity shape keeps them out for now rather than inventing a class.
     const binding = MEASURE_BINDINGS[measureId];
-    if (!binding) continue;
+    if (!binding) {
+      notSimulated.push({ measureId, name: measureDisplayName(measureId) });
+      continue;
+    }
     const name = MEASURES[measureId]!.name;
     try {
       const target = bundleSource.targetFor(employees, measureId, externalId) ?? "MISSING_DATA";
@@ -70,5 +81,5 @@ export async function simulateComplianceAsOf(
       evaluations.push({ measureId, name, complianceClass: binding.complianceClass, status: "MISSING_DATA", method: "Evaluation error" });
     }
   }
-  return { externalId, asOf, evaluations };
+  return { externalId, asOf, evaluations, notSimulated };
 }

@@ -39,3 +39,7 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
   adapter close most of the rest (68 open alerts -> ~14). Left on purpose: hono and vite (installed as
   peers, which pnpm will not move; their advisories are in features we do not use), and csv-parse and
   uuid (major bumps the pinned engine libraries do not allow).
+- **#671: the patient page agrees with itself.** Its posture and Measure Details now read an outcome the way
+  its table does (out of population is "Not in population", not "Missing Data"), list only the measures the
+  deployment runs (no old Hypertension on Maui), and name the official-only measures instead of `cms130`.
+  The simulation runs only when asked, and names the four measures it cannot replay.

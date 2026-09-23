@@ -1,7 +1,8 @@
 /**
  * Compliance-simulation route — GET /api/employees/:externalId/simulate?asOf=YYYY-MM-DD →
- * { externalId, asOf, evaluations[] }. An advisory, non-persisted, as-of-date re-evaluation of one
- * employee's compliance across every active measure (#197). Authenticated read-only under /api/**
+ * { externalId, asOf, evaluations[], notSimulated[] }. An advisory, non-persisted, as-of-date
+ * re-evaluation of one employee's compliance across every runnable measure with an authored binding;
+ * `notSimulated` names the rest (#197, #671). Authenticated read-only under /api/**
  * (all roles, like the immunization forecast). Writes nothing; no schema. handleEmployees only matches
  * `/profile` + `/search`, so this `/simulate` path is not intercepted.
  */

@@ -27,7 +27,8 @@ export const ACTIVE_CATALOG_MEASURE_IDS = new Set(
   MEASURE_CATALOG.filter((m) => m.status === "Active").map((m) => m.id),
 );
 
-const isCatalogActiveRunnable = (measureId: string): boolean =>
+/** A measure this deployment actually runs: active in the catalog AND routed/authored here. */
+export const isCatalogActiveRunnable = (measureId: string): boolean =>
   ACTIVE_CATALOG_MEASURE_IDS.has(measureId) && isRunnableMeasure(measureId);
 
 export const RUNNABLE_PANELS: Record<PanelId, string[]> = Object.fromEntries(

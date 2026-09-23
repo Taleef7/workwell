@@ -110,10 +110,10 @@ describe("EmployeeProfilePage crosswalk identity rendering", () => {
 
     const summaryBar = screen.getByText("Compliance Posture").parentElement!;
     expect(within(summaryBar).getByText(
-      "MIPS 112 · CMS125 · Breast Cancer Screening — OVERDUE",
+      "MIPS 112 · CMS125 · Breast Cancer Screening — Overdue",
       { exact: true },
     )).toBeInTheDocument();
-    expect(within(summaryBar).getByText("Annual Audiogram Completed — COMPLIANT", { exact: true })).toBeInTheDocument();
+    expect(within(summaryBar).getByText("Annual Audiogram Completed — Compliant", { exact: true })).toBeInTheDocument();
 
     // Open-case row: assert CMS label on the open-case link/row (page.tsx ~110)
     const openCaseLink = screen.getByRole("link", { name: "MIPS 112 · CMS125 · Breast Cancer Screening" });
@@ -156,5 +156,35 @@ describe("EmployeeProfilePage crosswalk identity rendering", () => {
     setSubject("employee");
     render(<EmployeeProfilePage />);
     expect(await screen.findByText("Days since exam: 100", { exact: true })).toBeInTheDocument();
+  });
+
+  it("shows the table's reading, not the stored bucket: out of population is never 'Missing Data' (#671)", async () => {
+    const outOfPopulation = {
+      ...mockProfile.measureOutcomes[0]!,
+      outcomeStatus: "MISSING_DATA",
+      displayStatus: "OUT_OF_POPULATION",
+      openCaseId: null,
+    };
+    get.mockImplementation((url: string) => {
+      if (url === "/api/employees/emp-001/profile") {
+        return Promise.resolve({ ...mockProfile, measureOutcomes: [outOfPopulation], openCases: [] });
+      }
+      if (url === "/api/measures") {
+        return Promise.resolve([
+          { id: "cms125", name: "Breast Cancer Screening", status: "Active", identity: { cmsId: "CMS125", mipsQualityId: "112" } },
+        ]);
+      }
+      return Promise.resolve([]);
+    });
+    render(<EmployeeProfilePage />);
+    await waitFor(() => expect(screen.getByText("Compliance Posture")).toBeInTheDocument());
+
+    const summaryBar = screen.getByText("Compliance Posture").parentElement!;
+    expect(within(summaryBar).getByText("MIPS 112 · CMS125 · Breast Cancer Screening — Not in population", { exact: true })).toBeInTheDocument();
+    const detailRow = document.getElementById("measure-cms125")!;
+    expect(within(detailRow).getByText("Not in population", { exact: true })).toBeInTheDocument();
+    for (const section of [summaryBar, detailRow]) {
+      expect(within(section).queryByText(/missing data/i)).not.toBeInTheDocument();
+    }
   });
 });

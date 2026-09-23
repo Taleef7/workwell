@@ -15,6 +15,7 @@ import { SqliteRunStore } from "../stores/sqlite/run-store-sqlite.ts";
 import { SqliteOutcomeStore } from "../stores/sqlite/outcome-store-sqlite.ts";
 import { SqliteCaseStore } from "../stores/sqlite/case-store-sqlite.ts";
 import { SqliteCaseEventStore } from "../stores/sqlite/case-event-store-sqlite.ts";
+import { SqliteSegmentStore } from "../stores/sqlite/segment-store-sqlite.ts";
 import { handleEmployees } from "./employees.ts";
 import { replaceLiveDirectory } from "../engine/ingress/webchart/live-directory.ts";
 
@@ -121,6 +122,61 @@ test("GET /api/employees/:id/profile returns identity + outcomes + open cases + 
   assert.ok(cmsCase);
   assert.equal(cmsCase.measureId, "cms125");
   assert.ok(p.recentAuditEvents.some((e) => e.eventType === "CASE_CREATED" && /opened a case/.test(e.summary)));
+});
+
+test("profile shows what the roster shows: out-of-population MISSING_DATA reads OUT_OF_POPULATION (#671)", async () => {
+  const db = env.DB as never;
+  const run = await new SqliteRunStore(db).createRun({
+    scopeType: "MEASURE",
+    scopeId: "cms122",
+    triggeredBy: "test",
+    requestedScope: { measureId: "cms122" },
+    measurementPeriodStart: "2026-01-01T00:00:00.000Z",
+    measurementPeriodEnd: "2026-12-31T23:59:59.999Z",
+  });
+  // Outside every rate's initial population: stored as MISSING_DATA (ADR-078), displayed as not in
+  // population by the roster (`deriveCell`). The same evidence shape as roster-vocabulary.test.ts.
+  await new SqliteOutcomeStore(db).recordOutcome({
+    runId: run.id,
+    subjectId: "emp-006",
+    measureId: "cms122",
+    evaluationPeriod: "2026-06-13",
+    status: "MISSING_DATA",
+    evidence: { expressionResults: [], official: { populationResults: { ipp: false, denom: false, denex: false, numer: false, denexcep: false } } },
+    // Older than the fixture's rows, so the search test's "latest outcome" stays the audiogram's.
+    evaluatedAt: "2026-06-01T00:00:00.000Z",
+  });
+  const p = (await (await get("/api/employees/emp-006/profile"))!.json()) as {
+    measureOutcomes: Array<{ measureId: string; outcomeStatus: string; displayStatus: string }>;
+  };
+  const cms122 = p.measureOutcomes.find((o) => o.measureId === "cms122")!;
+  assert.equal(cms122.outcomeStatus, "MISSING_DATA", "the stored bucket is unchanged");
+  assert.equal(cms122.displayStatus, "OUT_OF_POPULATION", "and the page is told what the table shows");
+  // In the population with nothing on file stays a real gap.
+  assert.equal(p.measureOutcomes.find((o) => o.measureId === "cms125")!.displayStatus, "MISSING_DATA");
+});
+
+test("profile applies the roster's segment overlay: a measure outside the subject's groups reads NOT_APPLICABLE (#671)", async () => {
+  // One enabled segment holding emp-006 (by override) for the audiogram only: on the roster every other
+  // measure is NOT_APPLICABLE for them, and the posture must not show a gap the table calls not applicable.
+  const segments = new SqliteSegmentStore(env.DB as never);
+  const seg = await segments.createSegment({
+    name: "Audiogram only",
+    enabled: true,
+    rule: { match: "ANY", conditions: [] },
+    measureIds: ["audiogram"],
+    overrides: [{ externalId: "emp-006", mode: "INCLUDE" }],
+  });
+  try {
+    const p = (await (await get("/api/employees/emp-006/profile"))!.json()) as {
+      measureOutcomes: Array<{ measureId: string; displayStatus: string }>;
+    };
+    const by = new Map(p.measureOutcomes.map((o) => [o.measureId, o.displayStatus]));
+    assert.equal(by.get("audiogram"), "OVERDUE", "the segment's own measure keeps its reading");
+    assert.equal(by.get("cms125"), "NOT_APPLICABLE", "outside every enabled group, as the roster shows it");
+  } finally {
+    await segments.deleteSegment(seg.id);
+  }
 });
 
 test("GET /api/employees/:id/profile → 404 for an unknown employee", async () => {

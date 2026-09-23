@@ -47,6 +47,31 @@ test.describe("Maui terminology — the quality lead's pages", () => {
     await expectNoEmployeeWording(page);
     await expectNoErrorPage(page);
   });
+
+  // #671: opening a patient ran a simulation nobody asked for, and the posture named four measures by
+  // their raw ids. The simulation is now a button, and every posture chip carries a measure name. (The
+  // posture's filter to the six measures is guarded by employees.maui.test.ts: CI's fresh stack never
+  // ran the old Hypertension measure, so an e2e check for it could not fail.)
+  test("the patient page runs no simulation on open, and names every measure", async ({ page }) => {
+    const simulateCalls: string[] = [];
+    page.on("request", (req) => {
+      if (/\/simulate\b/.test(req.url())) simulateCalls.push(req.url());
+    });
+    await page.goto("/compliance");
+    const patientLink = page.locator("a[href^='/employees/']").filter({ visible: true }).first();
+    await expect(patientLink).toBeVisible({ timeout: 20_000 });
+    await patientLink.click();
+    await expect(page).toHaveURL(/\/employees\//);
+
+    const posture = page.getByText("Compliance Posture", { exact: true }).locator("..");
+    await expect(posture.getByRole("link").first()).toBeVisible({ timeout: 20_000 });
+    const postureText = await posture.innerText();
+    expect(postureText, "a posture chip names its measure, not a raw id").not.toMatch(/\bcms\d+\b/);
+    await expect(page.getByRole("button", { name: /run simulation/i })).toBeVisible();
+    // The old component fetched 300 ms after mount; give it well past that.
+    await page.waitForTimeout(1_500);
+    expect(simulateCalls, "opening the page must not run a simulation").toEqual([]);
+  });
 });
 
 test.describe("Maui terminology — the engineering surfaces", () => {
