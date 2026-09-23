@@ -40,8 +40,8 @@ interface AiEnv {
   WORKWELL_AI_OPENAI_FALLBACK_MODEL?: string;
 }
 
-const DEFAULT_MODEL = "gpt-5.4-nano";
-const DEFAULT_FALLBACK_MODEL = "gpt-4o-mini";
+const DEFAULT_MODEL = "gpt-6-luna";
+const DEFAULT_FALLBACK_MODEL = "gpt-5.4-nano";
 
 const json = (data: unknown, status = 200): Response =>
   new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json" } });
