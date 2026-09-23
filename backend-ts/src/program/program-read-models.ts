@@ -55,7 +55,8 @@ export interface ProgramSummary {
    */
   notInPopulation: number;
   excluded: number;
-  complianceRate: number;
+  /** The workflow-status rate; null when nobody is counted yet (#637). */
+  complianceRate: number | null;
   /**
    * Which way the measure improves (`MEASURE_IDENTITY`; "increase" when the measure has no identity
    * row). Carried on the summary so a client can render an inverse measure (cms122: the numerator is
@@ -79,6 +80,13 @@ export interface ProgramSummary {
    * separate metric from `complianceRate`, which is the workflow-status rate (ADR-077 d5).
    */
   measureRate: MeasureRate | null;
+  /**
+   * The year the winning run SCORED and the day its numbers describe (#637), read from the run's own
+   * record rather than its start date — a rerun started in January that scores the year before is
+   * labelled that year, not the new one. Null with no winning run.
+   */
+  measurementYear: number | null;
+  asOf: string | null;
 }
 
 export interface ProgramFilters {
@@ -173,7 +181,8 @@ export interface ProgramTrendPoint {
   startedAt: string;
   /** Present only for monthly (quality_snapshots) points — `YYYY-MM` (UX-8). Absent ⇒ per-run point. */
   period?: string;
-  complianceRate: number;
+  /** null when nobody is counted yet (#637) — no data, not 0%. */
+  complianceRate: number | null;
   totalEvaluated: number;
   denominator: number;
   compliant: number;
@@ -187,6 +196,8 @@ export interface ProgramTrendPoint {
    */
   notInPopulation: number;
   excluded: number;
+  /** The year this point's run scored (#637) — a client compares points within one year only. */
+  measurementYear?: number;
 }
 
 export interface TopDrivers {
@@ -214,8 +225,9 @@ export interface RiskOutlook {
     total: number;
     compliant: number;
     upcomingExpirations: number;
-    currentComplianceRate: number;
-    predictedComplianceRate: number;
+    /** null for a site with nobody counted yet (#637); such a site sorts last, never "highest risk". */
+    currentComplianceRate: number | null;
+    predictedComplianceRate: number | null;
   }>;
 }
 
@@ -494,6 +506,8 @@ export async function programOverview(deps: ProgramDeps, filters: ProgramFilters
       openCaseCount,
       staffClosedGapCount,
       measureRate: null,
+      measurementYear: null,
+      asOf: null,
     };
   });
 
@@ -515,6 +529,9 @@ export async function programOverview(deps: ProgramDeps, filters: ProgramFilters
   // reports; a filtered view keeps the status buckets only.
   for (const s of summaries) {
     if (s.latestRunId) s.measureRate = await officialMeasureRate(deps.outcomeStore, s.latestRunId, s.measureId);
+    const period = s.latestRunId ? await runPeriodOf(deps.runStore, s.latestRunId) : null;
+    s.measurementYear = period?.measurementYear ?? null;
+    s.asOf = period?.asOf ?? null;
   }
 
   return summaries.sort((a, b) => a.measureName.localeCompare(b.measureName));
@@ -574,7 +591,7 @@ async function foldScaleCounts(deps: ProgramDeps, summaries: ProgramSummary[], f
 
 function zeroSummary(s: ProgramSummary): void {
   s.totalEvaluated = 0; s.denominator = 0; s.compliant = 0; s.dueSoon = 0; s.overdue = 0; s.missingData = 0;
-  s.notInPopulation = 0; s.excluded = 0; s.complianceRate = 0;
+  s.notInPopulation = 0; s.excluded = 0; s.complianceRate = null;
   s.staffClosedGapCount = 0; s.latestRunId = null; s.latestRunAt = null; s.openCaseCount = 0;
 }
 
@@ -781,7 +798,7 @@ export async function programTrend(
       from: from?.slice(0, 7),
       to: to?.slice(0, 7),
     });
-    const monthly = monthlyTrendPoints(snaps);
+    const monthly = monthlyTrendPoints(snaps).map((p) => ({ ...p, measurementYear: Number(p.period!.slice(0, 4)) }));
     if (monthly.length >= 2) return monthly;
   }
 
@@ -803,8 +820,51 @@ export async function programTrend(
     read = await runsWithOutcomes(deps, measureId, filters, window);
     points = trendPointsOf(read.groups, opts?.tz);
   }
+  points = await withMeasurementYears(deps.runStore, points);
   return monthlyPossible ? points : trendMemo.set(memoKey, runKey, points);
 }
+
+/** Stamp each per-run point with the year its run scored (#637). */
+async function withMeasurementYears(runStore: RunStore, points: ProgramTrendPoint[]): Promise<ProgramTrendPoint[]> {
+  const out: ProgramTrendPoint[] = [];
+  for (const p of points) {
+    const period = await runPeriodOf(runStore, p.runId);
+    out.push(period ? { ...p, measurementYear: period.measurementYear } : p);
+  }
+  return out;
+}
+
+/**
+ * What a run scored, from its own record (#637): the year, and the day the numbers describe.
+ *
+ * `measurementPeriodEnd` is 31 December of the scored year on an official-only run (ADR-072) and the
+ * evaluation date on an authored or mixed one; the start date bounds it for a run still inside its
+ * year. The earlier of the two is the day the run describes, and its year is the year it scored — so
+ * a rerun started on 5 January that evaluates 31 December reads as the old year, and a nightly on
+ * 6 January reads as the new one. A completed run's record never changes, so the answer is cached.
+ *
+ * A LABEL, so it fails soft: a read that throws leaves the year unstated rather than failing the
+ * dashboard it decorates.
+ */
+export async function runPeriodOf(runStore: RunStore, runId: string): Promise<{ measurementYear: number; asOf: string } | null> {
+  const cached = runPeriodCache.get(runId);
+  if (cached) return cached;
+  let run: Awaited<ReturnType<RunStore["getRun"]>>;
+  try {
+    run = await runStore.getRun(runId);
+  } catch {
+    return null;
+  }
+  if (!run) return null;
+  const end = run.measurementPeriodEnd.slice(0, 10);
+  const started = run.startedAt.slice(0, 10);
+  const asOf = end < started ? end : started;
+  const period = { measurementYear: Number(asOf.slice(0, 4)), asOf };
+  if (runPeriodCache.size >= 5000) runPeriodCache.clear();
+  runPeriodCache.set(runId, period);
+  return period;
+}
+const runPeriodCache = new Map<string, { measurementYear: number; asOf: string }>();
 
 /** How far the trend widens its run window looking for ten displayable points. */
 const TREND_RUN_WINDOW_MAX = 80;
@@ -1033,7 +1093,9 @@ function renderOutlook(
         }),
       };
     })
-    .sort((a, b) => a.currentComplianceRate - b.currentComplianceRate);
+    // Lowest rate first; a site with nobody counted yet has no rate and sorts last, so it can never
+    // be named the highest-risk site on a tie at "0%" (#637).
+    .sort((a, b) => (a.currentComplianceRate ?? Infinity) - (b.currentComplianceRate ?? Infinity));
 
   return {
     upcomingNonCompliantCount: upcomingExpirations.length,

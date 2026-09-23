@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { useApi } from "@/lib/api/hooks";
 import { fmtCount } from "@/lib/format";
+import { formatRate } from "@/lib/measure-rate";
 import { useGlobalFilters } from "@/components/global-filter-context";
 import { useAuth } from "@/components/auth-provider";
 import { canSeeEngineering } from "@/lib/public-demo";
@@ -26,7 +27,8 @@ interface Totals {
   overdue: number;
   missingData: number;
   excluded: number;
-  complianceRate: number;
+  /** null when nobody is counted yet (#637). */
+  complianceRate: number | null;
   openCases: number;
 }
 
@@ -293,7 +295,7 @@ export default function HierarchyPage() {
                       {fmtCount(node.totals.compliant)}
                     </td>
                     <td className="px-4 py-2 text-right tabular-nums text-neutral-900 dark:text-neutral-100">
-                      {node.totals.complianceRate}%
+                      {formatRate(node.totals.complianceRate)}
                     </td>
                     <td className="px-4 py-2 text-right tabular-nums text-neutral-700 dark:text-neutral-300">
                       {fmtCount(node.totals.openCases)}

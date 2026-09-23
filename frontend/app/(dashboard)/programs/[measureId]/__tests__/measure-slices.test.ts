@@ -13,7 +13,7 @@
 import { describe, expect, it } from "vitest";
 import { applySlice, beginLoad, freshSlices, previousTrendPoint, type RiskOutlook } from "../measure-slices";
 
-type Point = { runId: string; startedAt: string; complianceRate: number };
+type Point = { runId: string; startedAt: string; complianceRate: number; measurementYear?: number };
 
 const point = (runId: string, complianceRate: number): Point => ({ runId, startedAt: "2026-09-01T00:00:00Z", complianceRate });
 
@@ -149,5 +149,15 @@ describe("previousTrendPoint", () => {
       value: [point("run-1", 50), point("run-0", 40)],
     });
     expect(previousTrendPoint(s)).toEqual(point("run-0", 40));
+  });
+
+  it("is null across a measurement-year boundary — a new year's first run is not 'from previous' (#637)", () => {
+    const s = applySlice(freshSlices<Point>("cms125"), {
+      measureId: "cms125",
+      loadId: 0,
+      key: "trend",
+      value: [{ ...point("run-1", 0.5), measurementYear: 2027 }, { ...point("run-0", 72), measurementYear: 2026 }],
+    });
+    expect(previousTrendPoint(s)).toBeNull();
   });
 });

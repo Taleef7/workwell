@@ -16,4 +16,11 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
   `DATA_MODEL_CONTRACTS.md` were condensed.
 - **#677 (#642)** was failing CI because VSAC intermittently answers 401 for a valid key and the vendoring
   script treated that as final. 401 and 429 are now retried.
-- **Next:** merge #677, then #637 (prior-year history for the corpus before 2027-01-01).
+- **#637 decided: no prior-year history.** The corpus stays current-year only; 1 January starts near
+  zero, as a real year-to-date report does. The work became "January readiness": no rate (not 0.0%)
+  when nobody is counted, a year line on the programs page, trends and "from previous" kept within one
+  measurement year (read from the run's own record, so a January rerun of the old year is labelled
+  the old year), and a "based on N patients so far" note under 20 (CMS's case minimum).
+- **Programs cards streamlined**: one rate, the chips (no "Not in population"), the trend and the
+  worklist link. The CMS measure rate and the staff-closed link moved to the measure page; the
+  drivers were already there. The attributed-list report keeps its "Not measured" column.

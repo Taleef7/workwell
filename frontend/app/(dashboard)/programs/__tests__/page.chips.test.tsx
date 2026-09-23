@@ -58,8 +58,8 @@ describe("ProgramsPage status chips", () => {
       "href", "/compliance?measureId=cms125&status=DUE_SOON");
     expect(screen.getByRole("link", { name: /missing data/i })).toHaveAttribute(
       "href", "/compliance?measureId=cms125&status=MISSING_DATA");
-    expect(screen.getByRole("link", { name: /not in population/i })).toHaveAttribute(
-      "href", "/compliance?measureId=cms125&status=OUT_OF_POPULATION");
+    // Patients outside the measure's population are not the measure's concern and get no chip (#637).
+    expect(screen.queryByRole("link", { name: /not in population/i })).toBeNull();
   });
 
   it("loads the page in TWO requests, not 1 + 2N — and paints on the first", async () => {

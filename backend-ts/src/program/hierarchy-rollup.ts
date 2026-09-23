@@ -38,7 +38,8 @@ export interface HierarchyTotals {
    */
   notInPopulation: number;
   excluded: number;
-  complianceRate: number;
+  /** null when nobody is counted yet (#637). */
+  complianceRate: number | null;
   openCases: number;
 }
 

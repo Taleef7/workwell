@@ -14,7 +14,7 @@ import { canRunMeasures } from "@/lib/rbac";
 import { canSeeEngineering } from "@/lib/public-demo";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import type { TenantOption } from "@/features/compliance/types";
-import { OUTCOME_LABELS, ROLE_LABELS, labelFor } from "@/lib/status";
+import { OUTCOME_LABELS, labelFor } from "@/lib/status";
 import { SUBJECT } from "@/lib/terminology";
 import { niceDomain, chartTooltipStyle } from "@/lib/charts";
 import { useTheme } from "@/lib/useTheme";
@@ -24,8 +24,9 @@ import {
 } from "recharts";
 import { ChartDataTable } from "@/components/chart-data-table";
 import { useMeasureIdentities } from "@/lib/measure-identity";
-import { displayRate, type NotationSource } from "@/lib/measure-rate";
-import { trendMeta, type TrendPoint } from "./trend-meta";
+import { displayRate, formatRate, isSmallNumbers, type NotationSource } from "@/lib/measure-rate";
+import { chartablePoints, trendMeta, type TrendPoint } from "./trend-meta";
+import { yearLineFor } from "./year-line";
 
 type ProgramSummary = {
   measureId: string;
@@ -40,43 +41,32 @@ type ProgramSummary = {
   dueSoon: number;
   overdue: number;
   missingData: number;
-  /** Patients the measure's logic put outside its initial population — not missing data, not work. */
-  notInPopulation?: number;
   excluded: number;
-  complianceRate: number;
+  /** The workflow rate; null when nobody is counted yet (#637). */
+  complianceRate: number | null;
   /** Which way the measure improves; sent by the overview API so the rate never waits on /api/measures. */
   improvementNotation?: "increase" | "decrease";
   openCaseCount: number;
-  /**
-   * Cases a person closed this cycle whose patient the measure STILL counts as a gap (#569).
-   *
-   * The number that reconciles the Overdue chip above with the open-case link below: closing a case
-   * takes the row off the work list and changes nothing about what CQL counts, so without this the
-   * two figures disagreed and nothing on the card accounted for it.
-   */
-  staffClosedGapCount?: number;
-  /** The evidence's rate for the latest run (the MeasureReport's own reduction), or null when the run
-   *  carries no official evidence. A separate metric from `complianceRate`, the workflow-status rate. */
-  measureRate?: {
-    source: "official-evidence";
-    runId: string;
-    official: { ecqmId: string | null; version: string | null } | null;
-    rates: Array<{ label: string | null; ipp: number; denom: number; denex: number; denexcep: number; numer: number; effectiveDenominator: number; score: number | null }>;
-    unmeasured: number;
-    evaluationErrors: number;
-  } | null;
+  /** The year the latest run scored and the day it describes (#637); absent from an older server. */
+  measurementYear?: number | null;
+  asOf?: string | null;
 };
 
-const EMPTY_DRIVERS: TopDrivers = { bySite: [], byRole: [], byOutcomeReason: [] };
+/** `?include=detail` attaches the per-measure trend to each summary. */
+type DetailedSummary = ProgramSummary & { trend?: TrendPoint[] };
 
-type TopDrivers = {
-  bySite: Array<{ site: string; overdueCount: number; note: string }>;
-  byRole: Array<{ role: string; overdueCount: number }>;
-  byOutcomeReason: Array<{ reason: string; count: number; pct: number }>;
-};
-
-/** `?include=detail` attaches both per-measure panels to each summary. */
-type DetailedSummary = ProgramSummary & { trend?: TrendPoint[]; topDrivers?: TopDrivers };
+/**
+ * The chips a card shows: the patients a panel can act on, plus Excluded. Patients outside the
+ * measure's population are not shown at all — they are not the measure's concern — and stay in the
+ * exports and the run's reconciliation.
+ */
+const CARD_CHIPS = [
+  ["COMPLIANT", "green", "compliant"],
+  ["DUE_SOON", "amber", "dueSoon"],
+  ["OVERDUE", "red", "overdue"],
+  ["MISSING_DATA", "violet", "missingData"],
+  ["EXCLUDED", "slate", "excluded"],
+] as const;
 
 export default function ProgramsPage() {
   const api = useApi();
@@ -90,7 +80,6 @@ export default function ProgramsPage() {
   const [tenant, setTenant] = useState("");
   const [tenantOptions, setTenantOptions] = useState<TenantOption[]>([]);
   const [trendByMeasure, setTrendByMeasure] = useState<Record<string, TrendPoint[]>>({});
-  const [driversByMeasure, setDriversByMeasure] = useState<Record<string, TopDrivers>>({});
   const [error, setError] = useState<string | null>(null);
   const [runError, setRunError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -100,20 +89,14 @@ export default function ProgramsPage() {
 
   const loadAll = useCallback(async () => {
     // Stale-response guard: the two calls below are not cancellable, and a user switching site or
-    // tenant quickly can have a slow response for the OLD scope land after the new one's. Without
-    // this the page shows Site B's headline over Site A's sparkline, with nothing saying so.
+    // tenant quickly can have a slow response for the OLD scope land after the new one's.
     const reqId = ++reqIdRef.current;
     setLoading(true);
     setError(null);
     // Reset here, not only in the detail phase's finally: a PREVIOUS scope's detail call may have left
-    // this true, and its own reset is guarded by `reqId === reqIdRef.current`, which no longer holds
-    // once this call bumped the ref. Without this, an overview failure on the new scope leaves the
-    // cards showing loading skeletons forever (Codex review, #548).
+    // this true, and its own reset is guarded by `reqId === reqIdRef.current` (Codex review, #548).
     setDetailsLoading(false);
-    // The panels belong to the scope that is being replaced; keep showing them and they read as this
-    // scope's answer for as long as the detail call takes.
     setTrendByMeasure({});
-    setDriversByMeasure({});
 
     const params = new URLSearchParams();
     if (siteId) params.set("site", siteId);
@@ -122,15 +105,7 @@ export default function ProgramsPage() {
     if (to) params.set("to", to);
     const suffix = params.toString() ? `?${params.toString()}` : "";
 
-    // TWO requests, not the 1 + 2N (13 on the pilot) this used to make: the overview, then a trend
-    // AND a top-drivers call per measure. Those were fired concurrently, but the backend is a
-    // single-process worker so they queued anyway — and each one re-resolved the same winning runs
-    // and re-read the same directory before hitting the same memo.
-    //
-    // Still two rather than one, because the overview alone is the cheap half and painting it is
-    // what makes the page feel loaded. Collapsing to a single `include=detail` call held the KPIs
-    // and every measure card behind the slowest panel on the page, which on a cold process is the
-    // whole roster's derive. The second request fills the panels in place.
+    // TWO requests: the cheap overview paints the page, then the trends fill in place.
     let data: ProgramSummary[];
     try {
       data = await api.get<ProgramSummary[]>(`/api/programs/overview${suffix}`);
@@ -151,13 +126,10 @@ export default function ProgramsPage() {
       );
       if (reqId !== reqIdRef.current) return;
       setTrendByMeasure(Object.fromEntries(detailed.map((p) => [p.measureId, p.trend ?? []])));
-      setDriversByMeasure(Object.fromEntries(detailed.map((p) => [p.measureId, p.topDrivers ?? EMPTY_DRIVERS])));
     } catch {
       if (reqId !== reqIdRef.current) return;
-      // The panels are supporting detail; the page is already usable without them. This used to be a
-      // per-measure catch that degraded to an empty panel, and it must not become a whole-page error.
+      // The trends are supporting detail; the page is already usable without them.
       setTrendByMeasure({});
-      setDriversByMeasure({});
     }
     if (reqId === reqIdRef.current) setDetailsLoading(false);
   }, [api, siteId, tenant, from, to]);
@@ -200,28 +172,31 @@ export default function ProgramsPage() {
     }
   }
 
-  const totalEvaluations = programs.reduce((sum, p) => sum + p.totalEvaluated, 0);
   const totalCompliant = programs.reduce((sum, p) => sum + p.compliant, 0);
   const totalDenominator = programs.reduce(
     (sum, p) => sum + (p.denominator ?? (p.totalEvaluated - p.excluded)),
     0
   );
+  // Nobody counted yet is no rate, not 0% (#637).
   const overallComplianceRate =
-    totalDenominator === 0 ? 0 : Math.round((totalCompliant * 1000) / totalDenominator) / 10;
+    totalDenominator === 0 ? null : Math.round((totalCompliant * 1000) / totalDenominator) / 10;
   const openCases = programs.reduce((sum, p) => sum + p.openCaseCount, 0);
   const lastRunTimestamp = programs
     .map((p) => p.latestRunAt)
     .filter((ts): ts is string => Boolean(ts))
     .sort()
     .at(-1);
-  // On the very first load (no data yet) show an em-dash instead of the computed zeros, which would
-  // otherwise flash "0.0% compliance / 0 open cases" — reading as "everything broken" for a beat.
+  // On the very first load show an em-dash instead of computed zeros, which read as "everything broken".
   const initialLoad = loading && programs.length === 0;
+  const yearLine = yearLineFor(programs, isPatientTerm);
 
   return (
     <section className="space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-semibold text-neutral-900 dark:text-neutral-100">Programs Overview</h2>
+        <div>
+          <h2 className="text-2xl font-semibold text-neutral-900 dark:text-neutral-100">Programs Overview</h2>
+          {yearLine ? <p className="text-sm text-neutral-500 dark:text-neutral-400">{yearLine}</p> : null}
+        </div>
         <div className="flex items-center gap-3">
           {canSeeEngineering(user?.role) && (
             <label className="flex items-center gap-1.5 text-xs uppercase tracking-[0.15em] text-neutral-500 dark:text-neutral-400">
@@ -260,9 +235,8 @@ export default function ProgramsPage() {
         </div>
       </div>
 
-      <div className="grid gap-3 md:grid-cols-4">
-        <KpiCard label="Evaluations (latest runs)" value={initialLoad ? "—" : fmtCount(totalEvaluations)} />
-        <KpiCard label="Overall workflow compliance" value={initialLoad ? "—" : `${overallComplianceRate.toFixed(1)}%`} />
+      <div className="grid gap-3 md:grid-cols-3">
+        <KpiCard label="Overall compliance" value={initialLoad ? "—" : formatRate(overallComplianceRate)} />
         <KpiCard label="Open cases" value={initialLoad ? "—" : fmtCount(openCases)} />
         <KpiCard label="Last run" value={initialLoad ? "—" : lastRunTimestamp ? new Date(lastRunTimestamp).toLocaleString() : "-"} />
       </div>
@@ -299,187 +273,78 @@ export default function ProgramsPage() {
       <div className="grid gap-4 lg:grid-cols-2">
         {programs.map((program) => {
           const trend = trendByMeasure[program.measureId] ?? [];
-          const drivers = driversByMeasure[program.measureId] ?? { bySite: [], byRole: [], byOutcomeReason: [] };
           // The summary carries its own improvementNotation, so an inverse measure reads correctly
-          // before (or without) /api/measures. When the identity row is present it wins (both come from
-          // the backend's MEASURE_IDENTITY table, so they agree) and it also supplies the MIPS/CMS label.
-          const programIdentity = identities[program.measureId];
-          const notation = programIdentity ?? program;
+          // before (or without) /api/measures. When the identity row is present it wins.
+          const notation = identities[program.measureId] ?? program;
           const programRate = displayRate(program, notation);
           const noteId = `lower-note-${program.measureId}`;
+          const label = measureLabelFor(program.measureId, program.measureName);
+          const nothingYet = CARD_CHIPS.every(([, , field]) => program[field] === 0);
           return (
-            <div key={program.measureId} className="group relative rounded-md border border-neutral-200 bg-white p-4 transition hover:border-primary-400 hover:shadow-sm dark:border-neutral-800 dark:bg-neutral-900 dark:hover:border-primary-600">
-              {/* Stretched link makes the whole card open the measure detail; interactive
-                  children below carry `relative z-10` so they keep their own click targets. */}
+            <div key={program.measureId} className="group relative cursor-pointer rounded-lg border border-neutral-200 bg-white p-4 transition hover:border-primary-400 hover:shadow-sm dark:border-neutral-800 dark:bg-neutral-900 dark:hover:border-primary-600">
+              {/* Stretched link: the whole card opens the measure page; interactive children below
+                  carry `relative z-10` so they keep their own click targets. */}
               <Link
                 href={`/programs/${program.measureId}`}
-                aria-label={`View ${measureLabelFor(program.measureId, program.measureName)} detail`}
-                className="absolute inset-0 z-0 rounded-md focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500"
+                aria-label={`View ${label} detail`}
+                className="absolute inset-0 z-0 rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500"
               />
-              <div className="flex items-start justify-between">
-                <div>
-                  <h3 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">{measureLabelFor(program.measureId, program.measureName)}</h3>
-                  <p className="text-xs text-neutral-600 dark:text-neutral-400">{program.policyRef} • {program.version}</p>
-                </div>
-                <div className="text-right">
+              <div className="flex items-start justify-between gap-3">
+                <h3 className="text-base font-semibold text-neutral-900 group-hover:text-primary-700 dark:text-neutral-100 dark:group-hover:text-primary-400">{label}</h3>
+                <div className="shrink-0 text-right">
                   <p
                     aria-describedby={programRate.lowerIsBetter ? noteId : undefined}
                     className="text-2xl font-semibold text-neutral-900 dark:text-neutral-100"
                   >
-                    {programRate.label} {programRate.value.toFixed(1)}%
+                    {programRate.value === null ? "—" : `${programRate.label} ${programRate.value.toFixed(1)}%`}
                   </p>
-                  {/* The five workflow buckets reduced to a percentage — an operational figure. The
-                      measure's own rate, when the run carries official evidence, is the tile below. */}
-                  <p className="text-xs text-neutral-500 dark:text-neutral-400">Workflow status</p>
                   {programRate.lowerIsBetter ? (
                     <p id={noteId} className="text-xs text-neutral-500 dark:text-neutral-400">Lower is better</p>
                   ) : null}
-                  {program.denominator !== undefined ? (
+                  {programRate.value === null ? (
+                    <p className="text-xs text-neutral-500 dark:text-neutral-400">No {SUBJECT.plural} counted yet</p>
+                  ) : program.denominator !== undefined ? (
                     <p className="text-xs text-neutral-500 dark:text-neutral-400">
                       {fmtCount(programRate.numerator)} / {fmtCount(programRate.denominator)}
                     </p>
                   ) : null}
                 </div>
               </div>
+              {isSmallNumbers(programRate) ? (
+                <p className="mt-2 rounded bg-amber-50 px-2 py-1 text-xs text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
+                  Based on {fmtCount(programRate.denominator)} {programRate.denominator === 1 ? SUBJECT.singular : SUBJECT.plural} so far
+                </p>
+              ) : null}
 
               <div className="mt-3 flex flex-wrap gap-2 text-xs">
-                {([
-                  ["COMPLIANT", "green", program.compliant],
-                  ["DUE_SOON", "amber", program.dueSoon],
-                  ["OVERDUE", "red", program.overdue],
-                  ["MISSING_DATA", "violet", program.missingData],
-                  ["OUT_OF_POPULATION", "neutral", program.notInPopulation ?? 0],
-                  ["EXCLUDED", "slate", program.excluded],
-                ] as const).map(([bucket, tone, count]) => {
-                  const text = `${labelFor(OUTCOME_LABELS, bucket)} ${fmtCount(count)}`;
+                {nothingYet ? (
+                  <Badge label="No results yet" tone="neutral" />
+                ) : CARD_CHIPS.map(([bucket, tone, field]) => {
+                  const text = `${labelFor(OUTCOME_LABELS, bucket)} ${fmtCount(program[field])}`;
                   return (
                     <Badge
                       key={bucket}
                       label={text}
                       tone={tone}
                       href={chipHref(program.measureId, bucket, { siteId, tenant, from, to })}
-                      ariaLabel={`${measureLabelFor(program.measureId, program.measureName)}: ${text}`}
+                      ariaLabel={`${label}: ${text}`}
                     />
                   );
                 })}
               </div>
 
-              {/* The measure's OWN rate: the run's official evidence reduced by the same aggregator the
-                  MeasureReport uses, so this tile and the export cannot disagree. Shown apart from the
-                  workflow-status headline above and never drawn on its trend line (ADR-077 d5). */}
-              {program.measureRate && Array.isArray(program.measureRate.rates) ? (
-                <div className="mt-3 rounded border border-neutral-200 p-2 dark:border-neutral-800" data-testid={`measure-rate-${program.measureId}`}>
-                  <p className="text-xs font-semibold uppercase tracking-[0.15em] text-neutral-500 dark:text-neutral-400">Measure rate (official evidence)</p>
-                  {program.measureRate.rates.map((rate, index) => (
-                    <p key={rate.label ?? index} className="text-sm text-neutral-900 dark:text-neutral-100">
-                      {rate.label ?? "Rate"}: {rate.score === null ? "n/a" : `${(rate.score * 100).toFixed(1)}%`}
-                      <span className="ml-1 text-xs text-neutral-500 dark:text-neutral-400">
-                        {fmtCount(rate.numer)} / {fmtCount(rate.effectiveDenominator)} (initial population {fmtCount(rate.ipp)}, removed {fmtCount(rate.denex + rate.denexcep)})
-                      </span>
-                    </p>
-                  ))}
-                  {program.measureRate.evaluationErrors > 0 ? (
-                    <p className="text-xs text-rose-700 dark:text-rose-300">{program.measureRate.evaluationErrors} evaluation errors not counted</p>
-                  ) : null}
-                  {program.measureRate.unmeasured > program.measureRate.evaluationErrors ? (
-                    <p className="text-xs text-amber-700 dark:text-amber-300">{program.measureRate.unmeasured - program.measureRate.evaluationErrors} counted in no rate</p>
-                  ) : null}
-                </div>
-              ) : null}
-
               <div className="relative z-10 mt-4">
-                <p className="mb-1 text-xs font-semibold uppercase tracking-[0.15em] text-neutral-500 dark:text-neutral-400">Workflow status trend</p>
                 <TrendChart
                   data={trend}
                   loading={detailsLoading}
-                  caption={`${program.measureName} workflow status history (${programRate.label.toLowerCase()})`}
+                  caption={`${program.measureName} trend (${programRate.label.toLowerCase()})`}
                   identity={notation}
                 />
               </div>
 
-              <div className="mt-4 grid gap-2 text-xs text-neutral-700 sm:grid-cols-2 dark:text-neutral-300">
-                <div className={isPatientTerm ? "sm:col-span-2" : undefined}>
-                  <p className="font-semibold text-neutral-800 dark:text-neutral-200">Top Sites</p>
-                  {drivers.bySite.length === 0 ? (
-                    <p className="text-neutral-400">—</p>
-                  ) : (
-                    drivers.bySite.map((s) => (
-                      <p key={s.site} className="flex justify-between">
-                        <span>{s.site}</span>
-                        <span className="text-neutral-500 dark:text-neutral-400">{s.overdueCount} overdue</span>
-                      </p>
-                    ))
-                  )}
-                </div>
-                {!isPatientTerm ? (
-                  <div>
-                    <p className="font-semibold text-neutral-800 dark:text-neutral-200">Top Roles</p>
-                    {drivers.byRole.length === 0 ? (
-                      <p className="text-neutral-400">—</p>
-                    ) : (
-                      drivers.byRole.map((r) => (
-                        <p key={r.role} className="flex justify-between">
-                          <span>{labelFor(ROLE_LABELS, r.role)}</span>
-                          <span className="text-neutral-500 dark:text-neutral-400">{r.overdueCount} overdue</span>
-                        </p>
-                      ))
-                    )}
-                  </div>
-                ) : null}
-              </div>
-
-              {/* Always render this block so card heights stay stable while driver detail
-                  streams in (previously the section vanished when empty, leaving a gap that
-                  filled in only after the next run — confusing). */}
-              <div className="mt-3 border-t border-neutral-100 pt-3 dark:border-neutral-800">
-                <p className="mb-1.5 text-xs font-semibold uppercase tracking-[0.12em] text-neutral-500 dark:text-neutral-400">By Reason</p>
-                {detailsLoading && drivers.byOutcomeReason.length === 0 ? (
-                  <div className="h-4 w-2/3 animate-pulse rounded bg-neutral-100 dark:bg-neutral-800" />
-                ) : drivers.byOutcomeReason.length > 0 ? (
-                  <div className="space-y-1">
-                    {drivers.byOutcomeReason.map((r) => (
-                      <div key={r.reason} className="flex items-center justify-between text-xs">
-                        <span className={`rounded px-1.5 py-0.5 font-medium ${
-                          r.reason === "OVERDUE"
-                            ? "bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300"
-                            : r.reason === "DUE_SOON"
-                            ? "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300"
-                            : "bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300"
-                        }`}>
-                          {labelFor(OUTCOME_LABELS, r.reason)}
-                        </span>
-                        <span className="text-neutral-500 dark:text-neutral-400">{fmtCount(r.count)} cases ({r.pct}%)</span>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-xs text-neutral-500 dark:text-neutral-400">No non-compliance reasons for the latest run.</p>
-                )}
-              </div>
-
-              <div className="relative z-10 mt-4 flex flex-wrap items-center justify-between gap-2">
-                <div className="flex flex-wrap items-center gap-3">
-                  <Link href={`/cases?measureId=${encodeURIComponent(program.measureId)}`} className="text-sm font-medium text-primary-700 hover:underline dark:text-primary-400">
-                    Open Worklist ({program.openCaseCount})
-                  </Link>
-                  {/*
-                    The reconciliation (#569): patients a person closed whom CQL still counts. It goes
-                    to the cases list's own "Closed by staff" tab — NOT to the roster, which is where
-                    the status chips above lead and where these patients still appear as gaps.
-                    Hidden at zero: a row of zeroes teaches a reader to stop looking.
-                  */}
-                  {(program.staffClosedGapCount ?? 0) > 0 ? (
-                    <Link
-                      href={`/cases?status=staff_closed&measureId=${encodeURIComponent(program.measureId)}`}
-                      className="text-xs font-medium text-neutral-600 hover:underline dark:text-neutral-400"
-                      title="A person closed these cases; the measure still counts the patients until the chart changes."
-                    >
-                      Closed by staff, still counted: {program.staffClosedGapCount}
-                    </Link>
-                  ) : null}
-                </div>
-                <Link href={`/programs/${program.measureId}`} className="text-sm font-medium text-neutral-700 hover:underline dark:text-neutral-300">
-                  View detail →
+              <div className="relative z-10 mt-4">
+                <Link href={`/cases?measureId=${encodeURIComponent(program.measureId)}`} className="text-sm font-medium text-primary-700 hover:underline dark:text-primary-400">
+                  Open Worklist ({program.openCaseCount})
                 </Link>
               </div>
             </div>
@@ -514,19 +379,16 @@ function KpiCard({ label, value }: { label: string; value: string }) {
 
 function chipHref(
   measureId: string,
-  bucket: "COMPLIANT" | "DUE_SOON" | "OVERDUE" | "MISSING_DATA" | "OUT_OF_POPULATION" | "EXCLUDED",
+  bucket: "COMPLIANT" | "DUE_SOON" | "OVERDUE" | "MISSING_DATA" | "EXCLUDED",
   scope: { siteId: string; tenant: string; from: string; to: string },
 ): string | undefined {
   // The generated scale tenant has counts but NO roster: `buildRoster` excludes scale runs and
   // subjects entirely, so every chip would land on an empty grid under a badge reading thousands.
-  // A plain badge says "this number has no list behind it"; a link that lies does not. The page
-  // already explains why, just above the cards.
+  // A plain badge says "this number has no list behind it"; a link that lies does not.
   if (scope.tenant === "mhn") return undefined;
   // EVERY chip drills into the compliance roster, scoped to that measure's column — the destination
-  // names each patient, which is what the tile is being asked for: the count already knows the
-  // cohort, so clicking it must not hand back a screen the user has to re-filter. Overdue/Due
-  // Soon/Missing Data used to land on the cases worklist instead, which is a different surface
-  // organised around case state rather than a patient list.
+  // names each patient, which is what the chip is being asked for: the count already knows the
+  // cohort, so clicking it must not hand back a screen the user has to re-filter.
   const params = new URLSearchParams();
   params.set("measureId", measureId);
   params.set("status", bucket);
@@ -534,8 +396,7 @@ function chipHref(
   // cannot apply and the destination would not reproduce the clicked count.
   if (scope.siteId) params.set("site", scope.siteId);
   // The card's counts are tenant-scoped when the System selector is set, so the destination has to
-  // be too — otherwise the roster answers across every system and the list contradicts the number
-  // that was clicked. (The roster reads `tenant` from the URL for exactly this.)
+  // be too — otherwise the roster answers across every system and contradicts the clicked number.
   if (scope.tenant) params.set("tenant", scope.tenant);
   return `/compliance?${params.toString()}`;
 }
@@ -549,9 +410,7 @@ function Badge({ label, tone, href, ariaLabel }: { label: string; tone: "green" 
     ? "bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300"
     : tone === "violet"
     ? "bg-violet-100 text-violet-800 dark:bg-violet-900/30 dark:text-violet-300"
-    // Excluded is indigo and Not-in-population is plain neutral, the SAME pairing the roster cell
-    // uses (lib/status.ts). Both were slate here, so the card's two quietest chips were
-    // indistinguishable from each other while disagreeing with the grid they link to.
+    // Excluded is indigo, the SAME colour the roster cell uses (lib/status.ts).
     : tone === "slate"
     ? "bg-indigo-100 text-indigo-900 dark:bg-indigo-900/30 dark:text-indigo-200"
     : "bg-neutral-100 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300";
@@ -575,9 +434,9 @@ function TrendChart({
   identity?: NotationSource | null;
 }) {
   const { theme } = useTheme();
-  const sorted = [...(data ?? [])]
-    .filter((t) => t.totalEvaluated > 0)
-    .sort((a, b) => new Date(a.startedAt).getTime() - new Date(b.startedAt).getTime());
+  // This year's points with a rate, oldest first (#637) — never a line from last year's final run
+  // down to this year's first.
+  const sorted = chartablePoints(data, identity);
 
   if (loading && sorted.length === 0) {
     return <div className="h-[90px] animate-pulse rounded border border-neutral-200 bg-neutral-100 dark:border-neutral-800 dark:bg-neutral-800/50" />;
@@ -586,7 +445,7 @@ function TrendChart({
   if (sorted.length < 2) {
     return (
       <div className="flex h-[90px] items-center justify-center rounded border border-dashed border-neutral-300 bg-neutral-50 dark:border-neutral-700 dark:bg-neutral-800/50">
-        <span className="text-xs text-neutral-500 dark:text-neutral-400">Not enough run history for trend</span>
+        <span className="text-xs text-neutral-500 dark:text-neutral-400">Trend appears after a few more runs</span>
       </div>
     );
   }

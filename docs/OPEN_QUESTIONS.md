@@ -51,8 +51,8 @@ work. Designing against a general case first would be designing against nothing.
 
 ### 1.3 The pilot group has not been told their numbers changed — twice
 
-**Raised:** not a question. An outstanding communication. **Status:** unsent. **Held by the owner** on
-2026-09-22 until the corpus fix below lands, so the message can describe a settled state.
+**Raised:** not a question. An outstanding communication. **Status:** unsent, and **no longer held**:
+it waited on a corpus change that was decided against on 2026-09-23, so it can go now.
 **Related issue:** #637.
 
 | when | what moved | cause |
@@ -64,10 +64,13 @@ Both movements are corrections. The first removed people who were never in the m
 from its denominator; the second stopped the sandbox knowing about visits and results that had not
 happened yet. Neither has been explained to the people reading the dashboard.
 
-**What the message must also say, once it is sent:** the rates now rise a little every night until
-31 December, because the year is filling in, not because care is improving. And the corpus is getting
-prior-year history (#637) so that 1 January 2027, the first day of the measurement year, does not
-empty the populations.
+**What the message must also say:** the rates now rise a little every night until 31 December,
+because the year is filling in, not because care is improving. And **on 1 January 2027 every measure
+starts again near zero** — each counts only patients seen during the measurement year, so the first
+days hold a handful of patients and fill in through January, as a real year-to-date report does. The
+page says which year it shows, gives no rate until someone is counted, and flags rates resting on a
+handful of patients. The 2026 results stay reachable: the attributed-list report's year selector and
+the run history's 31 December run.
 
 **This is the most time-sensitive item in this file.** One unexplained movement is a question. Two is
 the point at which somebody stops believing the number, and a dashboard nobody believes is worth

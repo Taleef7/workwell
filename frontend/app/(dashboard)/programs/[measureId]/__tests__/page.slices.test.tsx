@@ -94,7 +94,7 @@ describe("ProgramDetailPage — per-slice paint", () => {
 
   it("never claims a measure has NO run history while the trend read is in flight", async () => {
     // The P1 the mutations and both external lanes missed. `ComplianceTrendChart` answers an empty
-    // `points` array with "No run history for this measure yet" — a positive claim about the
+    // `points` array with "No runs with results this year yet" — a positive claim about the
     // measure. While the page gated its first paint on all four reads that was unreachable; with
     // per-panel paint, /api/programs (memoized) answers before /trend, so the largest panel on the
     // page asserted a measure had no history while its history was loading.
@@ -110,11 +110,11 @@ describe("ProgramDetailPage — per-slice paint", () => {
     render(<ProgramDetailPage />);
     expect(await screen.findByRole("heading", { name: /Breast Cancer Screening/ })).toBeInTheDocument();
     expect(screen.getByText("Loading trend…")).toBeInTheDocument();
-    expect(screen.queryByText("No run history for this measure yet")).toBeNull();
+    expect(screen.queryByText("No runs with results this year yet")).toBeNull();
 
     // Once it answers empty, the claim is legitimate.
     stuckTrend.resolve([]);
-    await waitFor(() => expect(screen.getByText("No run history for this measure yet")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("No runs with results this year yet")).toBeInTheDocument());
   });
 
   it("says the trend is UNAVAILABLE when it fails, rather than that there is no history", async () => {
@@ -128,7 +128,7 @@ describe("ProgramDetailPage — per-slice paint", () => {
 
     render(<ProgramDetailPage />);
     expect(await screen.findByText("Trend unavailable")).toBeInTheDocument();
-    expect(screen.queryByText("No run history for this measure yet")).toBeNull();
+    expect(screen.queryByText("No runs with results this year yet")).toBeNull();
   });
 
   it("shows 'Risk outlook unavailable' when the read REJECTS, not a zero", async () => {

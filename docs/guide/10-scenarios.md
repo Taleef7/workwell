@@ -94,7 +94,7 @@ What happens, in order:
    reason, the row leaves the open list but the measure keeps counting the patient — so the roster
    marks that cell "Closed by staff", `/cases` and `/worklist` have a Closed-by-staff view whose rows
    say what CQL says *today* (still counted, verified compliant/excluded, or not evaluable), and the
-   programs card carries a "Closed by staff, still counted" figure that reconciles its Overdue chip
+   measure page carries a "Closed by staff, still counted" figure that reconciles its Overdue count
    with its open-case link. It is display only: no outcome is mutated, and a closure is never an
    exception — for the six official measures only a chart-documented exclusion counts, which is the
    write path MIE owes. CSV exports feed anything

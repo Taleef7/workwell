@@ -22,7 +22,9 @@ import { niceDomain, chartTooltipStyle } from "@/lib/charts";
 import { useTheme } from "@/lib/useTheme";
 import { ChartDataTable } from "@/components/chart-data-table";
 import { useMeasureIdentities } from "@/lib/measure-identity";
-import { displayRate, type DisplayRate, type NotationSource, type TrendPoint } from "@/lib/measure-rate";
+import { displayRate, formatRate, isSmallNumbers, type DisplayRate, type NotationSource, type TrendPoint } from "@/lib/measure-rate";
+import { chartablePoints } from "../trend-meta";
+import { yearLineFor } from "../year-line";
 import {
   applySlice,
   beginLoad,
@@ -160,13 +162,14 @@ export default function ProgramDetailPage() {
   const isDecrease = identity?.improvementNotation === "decrease";
   const rate: DisplayRate = program
     ? displayRate(program, identity)
-    : { label: "Compliance", value: 0, lowerIsBetter: false, numerator: 0, denominator: 0 };
+    : { label: "Compliance", value: null, lowerIsBetter: false, numerator: 0, denominator: 0 };
   // Null until the trend is ready AND has a previous point. The old fallback compared the current
   // rate against the current summary, which renders "↑ 0.0 from previous" for a measure whose history
   // holds one run — a claim about a run that does not exist.
   const prevCounts = previousTrendPoint(view);
   const prevRate = prevCounts ? displayRate(prevCounts, identity) : null;
-  const delta = program && prevRate ? rate.value - prevRate.value : null;
+  const delta = program && prevRate && rate.value !== null && prevRate.value !== null ? rate.value - prevRate.value : null;
+  const yearLine = program ? yearLineFor([program], isPatientTerm) : null;
 
   const outcomeBreakdown = program
     ? [
@@ -174,7 +177,6 @@ export default function ProgramDetailPage() {
         { key: "DUE_SOON", value: program.dueSoon },
         { key: "OVERDUE", value: program.overdue },
         { key: "MISSING_DATA", value: program.missingData },
-        { key: "OUT_OF_POPULATION", value: program.notInPopulation ?? 0 },
         { key: "EXCLUDED", value: program.excluded }
       ].filter((slice) => slice.value > 0)
     : [];
@@ -192,12 +194,20 @@ export default function ProgramDetailPage() {
           <div className="rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4">
             <p className="text-xs uppercase tracking-[0.15em] text-neutral-500 dark:text-neutral-400">{program.policyRef}</p>
             <h2 className="text-2xl font-semibold text-neutral-900 dark:text-neutral-100">{measureLabelFor(measureId, program.measureName)}</h2>
-            <p className="text-sm text-neutral-600 dark:text-neutral-400">Version {program.version}</p>
+            <p className="text-sm text-neutral-600 dark:text-neutral-400">Version {program.version}{yearLine ? ` · ${yearLine}` : ""}</p>
             <div className="mt-3 flex items-end gap-3">
               <div>
-                <p className="text-4xl font-semibold text-neutral-900 dark:text-neutral-100">{rate.label} {rate.value.toFixed(1)}%</p>
+                <p className="text-4xl font-semibold text-neutral-900 dark:text-neutral-100">{rate.value === null ? "—" : `${rate.label} ${rate.value.toFixed(1)}%`}</p>
                 {rate.lowerIsBetter ? (
                   <p id="lower-is-better-note" className="text-xs text-neutral-500 dark:text-neutral-400">Lower is better</p>
+                ) : null}
+                <p className="text-xs text-neutral-500 dark:text-neutral-400">
+                  {rate.value === null ? `No ${SUBJECT.plural} counted yet` : `${fmtCount(rate.numerator)} / ${fmtCount(rate.denominator)}`}
+                </p>
+                {isSmallNumbers(rate) ? (
+                  <p className="mt-1 rounded bg-amber-50 px-2 py-1 text-xs text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
+                    Based on {fmtCount(rate.denominator)} {rate.denominator === 1 ? SUBJECT.singular : SUBJECT.plural} so far
+                  </p>
                 ) : null}
               </div>
               {delta !== null ? (
@@ -210,11 +220,43 @@ export default function ProgramDetailPage() {
                 </p>
               ) : null}
             </div>
+            {(program.staffClosedGapCount ?? 0) > 0 ? (
+              <Link
+                href={`/cases?status=staff_closed&measureId=${encodeURIComponent(program.measureId)}`}
+                className="mt-2 inline-block text-xs font-medium text-neutral-600 hover:underline dark:text-neutral-400"
+                title="A person closed these cases; the measure still counts the patients until the chart changes."
+              >
+                Closed by staff, still counted: {program.staffClosedGapCount}
+              </Link>
+            ) : null}
           </div>
+
+          {/* The measure's OWN rate (ADR-077 d5): the run's official evidence reduced by the same
+              aggregator the MeasureReport uses, so this and the export cannot disagree. Moved here
+              from the programs card, which shows one rate (#637). */}
+          {program.measureRate && Array.isArray(program.measureRate.rates) ? (
+            <div className="rounded-md border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900" data-testid={`measure-rate-${program.measureId}`}>
+              <p className="text-xs font-semibold uppercase tracking-[0.15em] text-neutral-500 dark:text-neutral-400">CMS measure rate</p>
+              {program.measureRate.rates.map((r, index) => (
+                <p key={r.label ?? index} className="mt-1 text-sm text-neutral-900 dark:text-neutral-100">
+                  {r.label ?? "Rate"}: {r.score === null ? "—" : `${(r.score * 100).toFixed(1)}%`}
+                  <span className="ml-1 text-xs text-neutral-500 dark:text-neutral-400">
+                    {fmtCount(r.numer)} / {fmtCount(r.effectiveDenominator)} (initial population {fmtCount(r.ipp)}, excluded {fmtCount(r.denex + r.denexcep)})
+                  </span>
+                </p>
+              ))}
+              <p className="mt-2 text-xs text-neutral-500 dark:text-neutral-400">
+                Scored the way CMS reports it: the measure&apos;s own numerator over its denominator, less exclusions and exceptions. The rate above is the work list&apos;s view of the same patients, so the two can differ.
+              </p>
+              {program.measureRate.evaluationErrors > 0 ? (
+                <p className="mt-1 text-xs text-rose-700 dark:text-rose-300">{program.measureRate.evaluationErrors} evaluation errors not counted</p>
+              ) : null}
+            </div>
+          ) : null}
 
           <div className="grid gap-4 lg:grid-cols-2">
             <div className="rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4">
-              <p className="mb-2 text-xs font-semibold uppercase tracking-[0.15em] text-neutral-500 dark:text-neutral-400">{rate.label} trend (last 10 runs)</p>
+              <p className="mb-2 text-xs font-semibold uppercase tracking-[0.15em] text-neutral-500 dark:text-neutral-400">{rate.label} trend (this year)</p>
               {/* The largest panel, and the one this change nearly broke. `ComplianceTrendChart`
                   answers an empty `points` array with "No run history for this measure yet" — a
                   positive claim about the measure. While the whole page waited on all four reads that
@@ -231,7 +273,7 @@ export default function ProgramDetailPage() {
                   <span className="text-xs text-neutral-500 dark:text-neutral-400">Trend unavailable</span>
                 </div>
               ) : (
-                <ComplianceTrendChart points={[...trend].sort((a, b) => new Date(a.startedAt).getTime() - new Date(b.startedAt).getTime())} identity={identity} />
+                <ComplianceTrendChart points={chartablePoints(trend, identity)} identity={identity} />
               )}
             </div>
             <div className="rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4">
@@ -313,7 +355,7 @@ export default function ProgramDetailPage() {
               <div className="rounded border border-amber-200 bg-amber-50 p-3 dark:border-amber-900 dark:bg-amber-950/40">
                 <p className="text-xs text-amber-800 dark:text-amber-300">Highest-risk site</p>
                 <p className="text-lg font-semibold text-amber-900 dark:text-amber-200">
-                  {riskOutlook?.siteComplianceRates?.[0]?.site ?? "—"}
+                  {riskOutlook?.siteComplianceRates?.find((s) => s.currentComplianceRate !== null)?.site ?? "—"}
                 </p>
               </div>
             </div>
@@ -338,8 +380,8 @@ export default function ProgramDetailPage() {
                       {riskOutlook.siteComplianceRates.map((site) => (
                         <tr key={site.site} className="border-t border-neutral-200 dark:border-neutral-800">
                           <td className="py-1 pr-3">{site.site}</td>
-                          <td className="py-1 pr-3">{site.currentComplianceRate.toFixed(1)}%</td>
-                          <td className="py-1 pr-3">{site.predictedComplianceRate.toFixed(1)}%</td>
+                          <td className="py-1 pr-3">{formatRate(site.currentComplianceRate)}</td>
+                          <td className="py-1 pr-3">{formatRate(site.predictedComplianceRate)}</td>
                           <td className="py-1 pr-3">{site.upcomingExpirations}</td>
                         </tr>
                       ))}
@@ -441,7 +483,7 @@ export default function ProgramDetailPage() {
                           </Link>
                         </td>
                         <td className="py-1 pr-3 text-neutral-600 dark:text-neutral-400">{formatTimestamp(run.startedAt)}</td>
-                        <td className="py-1 pr-3">{displayRate(run, identity).value.toFixed(1)}%</td>
+                        <td className="py-1 pr-3">{formatRate(displayRate(run, identity).value)}</td>
                         <td className="py-1 pr-3">{run.totalEvaluated}</td>
                       </tr>
                     ))}
@@ -461,7 +503,6 @@ export default function ProgramDetailPage() {
                   <th scope="col" className="py-1">Due Soon</th>
                   <th scope="col" className="py-1">Overdue</th>
                   <th scope="col" className="py-1">Missing</th>
-                  <th scope="col" className="py-1">Not in population</th>
                   <th scope="col" className="py-1">Excluded</th>
                 </tr>
               </thead>
@@ -472,7 +513,6 @@ export default function ProgramDetailPage() {
                   <td className="py-1">{program.dueSoon}</td>
                   <td className="py-1">{program.overdue}</td>
                   <td className="py-1">{program.missingData}</td>
-                  <td className="py-1">{program.notInPopulation ?? 0}</td>
                   <td className="py-1">{program.excluded}</td>
                 </tr>
               </tbody>
@@ -530,8 +570,8 @@ export default function ProgramDetailPage() {
   );
 }
 
-const rateOf = (s: QualitySnapshot): number =>
-  s.denominator > 0 ? Math.round((s.numerator / s.denominator) * 1000) / 10 : 0;
+const rateOf = (s: QualitySnapshot): number | null =>
+  s.denominator > 0 ? Math.round((s.numerator / s.denominator) * 1000) / 10 : null;
 
 const monthLabel = (period: string): string => {
   const [y, m] = period.split("-").map(Number);
@@ -635,7 +675,7 @@ function QualityOverTime({
     label: monthLabel(s.period),
     rate: viewOf(s).value,
   }));
-  const [lo, hi] = niceDomain(data.map((d) => d.rate));
+  const [lo, hi] = niceDomain(data.flatMap((d) => (d.rate === null ? [] : [d.rate])));
 
   return (
     <div className="rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4">
@@ -685,7 +725,7 @@ function QualityOverTime({
           <div className="rounded border border-emerald-200 bg-emerald-50 p-3 dark:border-emerald-900 dark:bg-emerald-950/40">
             <p className="text-xs text-emerald-800 dark:text-emerald-300">{rateLabel} on {monthLabel(selected.period)}</p>
             <p className="text-2xl font-semibold text-emerald-900 dark:text-emerald-200">
-              {selectedView.value.toFixed(1)}%
+              {formatRate(selectedView.value)}
             </p>
           </div>
           <div className="rounded border border-neutral-200 bg-neutral-50 p-3 dark:border-neutral-800 dark:bg-neutral-800/40">
@@ -727,7 +767,7 @@ function QualityOverTime({
             columns={["Month", rateLabel, "Numerator", "Denominator"]}
             rows={snapshots.map((s) => {
               const v = viewOf(s);
-              return [monthLabel(s.period), `${v.value.toFixed(1)}%`, fmtCount(v.numerator), fmtCount(v.denominator)];
+              return [monthLabel(s.period), formatRate(v.value), fmtCount(v.numerator), fmtCount(v.denominator)];
             })}
           />
         </div>
@@ -751,7 +791,7 @@ function ComplianceTrendChart({ points, identity }: { points: TrendPoint[]; iden
   if (!points.length) {
     return (
       <div className="flex h-[160px] items-center justify-center rounded border border-dashed border-neutral-300 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800/50">
-        <span className="text-xs text-neutral-500 dark:text-neutral-400">No run history for this measure yet</span>
+        <span className="text-xs text-neutral-500 dark:text-neutral-400">No runs with results this year yet</span>
       </div>
     );
   }
@@ -760,9 +800,10 @@ function ComplianceTrendChart({ points, identity }: { points: TrendPoint[]; iden
   // and read as noise — the pie + reason-mix below already break down the buckets). A
   // dynamic, padded domain makes real week-to-week variation visible.
   const rateLabel = identity?.improvementNotation === "decrease" ? "Poor control" : "Compliance";
+  // `points` are chartablePoints: every one has a rate.
   const data = points.map((p) => ({
     label: new Date(p.startedAt).toLocaleDateString(undefined, { month: "short", day: "numeric" }),
-    rate: displayRate(p, identity).value,
+    rate: displayRate(p, identity).value ?? 0,
   }));
   const [lo, hi] = niceDomain(data.map((d) => d.rate));
 
@@ -800,7 +841,7 @@ function ComplianceTrendChart({ points, identity }: { points: TrendPoint[]; iden
         </ResponsiveContainer>
       </div>
       <ChartDataTable
-        caption={`${rateLabel} trend by run (last 10 runs)`}
+        caption={`${rateLabel} trend by run (this year)`}
         columns={["Run date", rateLabel]}
         rows={data.map((d) => [d.label, `${d.rate}%`])}
       />

@@ -42,7 +42,8 @@ function assertReconciles(node: HierarchyNode): void {
   const t = node.totals;
   // Updated to CMS rate: denominator excludes excluded count (compliant / (total - excluded))
   const den = t.evaluated - t.excluded;
-  const expectedRate = den <= 0 ? 0 : Math.round((t.compliant / den) * 1000) / 10;
+  // Nobody counted is no rate at all (#637), not 0%.
+  const expectedRate = den <= 0 ? null : Math.round((t.compliant / den) * 1000) / 10;
   assert.equal(t.complianceRate, expectedRate, `${node.level}:${node.id} rate recomputed`);
   node.children.forEach(assertReconciles);
 }
@@ -98,7 +99,7 @@ test("empty scope (unknown measure) → All-Systems node with zeros and no child
   const root = await buildHierarchyRollup({ outcomeStore: outcomes, caseStore: cases }, { measureId: "does-not-exist" });
   assert.equal(root.level, "all");
   assert.equal(root.totals.evaluated, 0);
-  assert.equal(root.totals.complianceRate, 0);
+  assert.equal(root.totals.complianceRate, null); // nobody counted is no rate (#637)
   assert.equal(root.children.length, 0);
 });
 
@@ -382,7 +383,7 @@ test("open-case-only subject (no outcome row in scope) is a leaf with evaluated:
     assert.equal(emp009.level, "patient");
     assert.equal(emp009.totals.evaluated, 0);
     assert.equal(emp009.totals.openCases, 1);
-    assert.equal(emp009.totals.complianceRate, 0);
+    assert.equal(emp009.totals.complianceRate, null); // nobody counted is no rate (#637)
 
     // Parents count the open case but NOT a phantom evaluation.
     assert.equal(prov1.totals.openCases, 1);
