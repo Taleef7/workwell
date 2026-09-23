@@ -92,4 +92,23 @@ describe("ProgramsPage on 1 January (#637)", () => {
     expect(await screen.findByText("Trend appears after a few more runs")).toBeInTheDocument();
     expect(screen.queryByText(/from last run/)).toBeNull();
   });
+
+  it("does not fall back to last year's history when this year's first run has nobody counted (Codex on #679)", async () => {
+    // Last year's points carry REAL rates, so the only thing that can keep them off the chart is the
+    // year chosen from this year's (empty) first run — a fixture of null rates would pass either way.
+    const pt = (runId: string, startedAt: string, measurementYear: number, compliant: number, overdue: number) => ({
+      runId, startedAt, measurementYear, totalEvaluated: 20000, denominator: compliant + overdue, compliant, dueSoon: 0, overdue, missingData: 0, excluded: 0,
+      complianceRate: compliant + overdue === 0 ? null : Math.round((compliant * 1000) / (compliant + overdue)) / 10,
+    });
+    mockOverview([empty], {
+      cms137: [
+        pt("run-a", "2026-12-30T12:03:00Z", 2026, 80, 520),
+        pt("run-b", "2026-12-31T12:03:00Z", 2026, 81, 519),
+        pt("run-c", "2027-01-01T12:03:00Z", 2027, 0, 0),
+      ],
+    });
+    render(<ProgramsPage />);
+    expect(await screen.findByText("Trend appears after a few more runs")).toBeInTheDocument();
+    expect(screen.queryByText(/from last run/)).toBeNull();
+  });
 });

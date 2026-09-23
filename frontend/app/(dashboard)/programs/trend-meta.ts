@@ -23,10 +23,14 @@ export interface TrendMeta {
  */
 export function chartablePoints(data: TrendPoint[], notation?: NotationSource | null): TrendPoint[] {
   const sorted = [...(data ?? [])]
-    .filter((t) => t.totalEvaluated > 0 && displayRate(t, notation).value !== null)
+    .filter((t) => t.totalEvaluated > 0)
     .sort((a, b) => new Date(a.startedAt).getTime() - new Date(b.startedAt).getTime());
+  // The NEWEST run decides the year, whether or not it has a rate yet. Dropping rate-less points first
+  // made a new year's empty first run vanish and last year's history draw under this year's
+  // "no patients counted yet" headline (Codex on #679).
   const year = sorted.at(-1)?.measurementYear;
-  return year === undefined ? sorted : sorted.filter((t) => t.measurementYear === undefined || t.measurementYear === year);
+  const inYear = year === undefined ? sorted : sorted.filter((t) => t.measurementYear === undefined || t.measurementYear === year);
+  return inYear.filter((t) => displayRate(t, notation).value !== null);
 }
 
 /** `data` must already be `chartablePoints(...)`. */
