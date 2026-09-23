@@ -405,3 +405,15 @@ test("?include=detail carries the trend and top-drivers the dashboard would othe
   assert.deepEqual(one.trend, ownTrend);
   assert.deepEqual(one.topDrivers, ownDrivers);
 });
+
+test("?include=trend carries the trend only — the programs page shows no drivers (#637)", async () => {
+  const plain = (await get("/overview").then((r) => r!.json())) as Summary[];
+  const withTrend = (await get("/overview?include=trend&granularity=month").then((r) => r!.json())) as Array<
+    Summary & { trend?: unknown[]; topDrivers?: unknown }
+  >;
+  assert.deepEqual(withTrend.map((p) => p.measureId), plain.map((p) => p.measureId));
+  for (const summary of withTrend) {
+    assert.ok(Array.isArray(summary.trend), `${summary.measureId} carries a trend`);
+    assert.ok(!("topDrivers" in summary), `${summary.measureId} is not charged for drivers it will not show`);
+  }
+});

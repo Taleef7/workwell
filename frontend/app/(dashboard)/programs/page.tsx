@@ -52,7 +52,7 @@ type ProgramSummary = {
   asOf?: string | null;
 };
 
-/** `?include=detail` attaches the per-measure trend to each summary. */
+/** `?include=trend` attaches the per-measure trend to each summary. */
 type DetailedSummary = ProgramSummary & { trend?: TrendPoint[] };
 
 /**
@@ -122,7 +122,7 @@ export default function ProgramsPage() {
     setDetailsLoading(true);
     try {
       const detailed = await api.get<DetailedSummary[]>(
-        `/api/programs/overview${suffix}${suffix ? "&" : "?"}include=detail&granularity=month`,
+        `/api/programs/overview${suffix}${suffix ? "&" : "?"}include=trend&granularity=month`,
       );
       if (reqId !== reqIdRef.current) return;
       setTrendByMeasure(Object.fromEntries(detailed.map((p) => [p.measureId, p.trend ?? []])));
@@ -278,6 +278,8 @@ export default function ProgramsPage() {
           const notation = identities[program.measureId] ?? program;
           const programRate = displayRate(program, notation);
           const noteId = `lower-note-${program.measureId}`;
+          const countedId = `counted-${program.measureId}`;
+          const describedBy = [programRate.lowerIsBetter ? noteId : null, programRate.value === null ? countedId : null].filter(Boolean).join(" ") || undefined;
           const label = measureLabelFor(program.measureId, program.measureName);
           const nothingYet = CARD_CHIPS.every(([, , field]) => program[field] === 0);
           return (
@@ -293,16 +295,16 @@ export default function ProgramsPage() {
                 <h3 className="text-base font-semibold text-neutral-900 group-hover:text-primary-700 dark:text-neutral-100 dark:group-hover:text-primary-400">{label}</h3>
                 <div className="shrink-0 text-right">
                   <p
-                    aria-describedby={programRate.lowerIsBetter ? noteId : undefined}
+                    aria-describedby={describedBy}
                     className="text-2xl font-semibold text-neutral-900 dark:text-neutral-100"
                   >
-                    {programRate.value === null ? "—" : `${programRate.label} ${programRate.value.toFixed(1)}%`}
+                    {programRate.value === null ? `${programRate.label} —` : `${programRate.label} ${programRate.value.toFixed(1)}%`}
                   </p>
                   {programRate.lowerIsBetter ? (
                     <p id={noteId} className="text-xs text-neutral-500 dark:text-neutral-400">Lower is better</p>
                   ) : null}
                   {programRate.value === null ? (
-                    <p className="text-xs text-neutral-500 dark:text-neutral-400">No {SUBJECT.plural} counted yet</p>
+                    <p id={countedId} className="text-xs text-neutral-500 dark:text-neutral-400">No {SUBJECT.plural} counted yet</p>
                   ) : program.denominator !== undefined ? (
                     <p className="text-xs text-neutral-500 dark:text-neutral-400">
                       {fmtCount(programRate.numerator)} / {fmtCount(programRate.denominator)}
@@ -310,7 +312,9 @@ export default function ProgramsPage() {
                   ) : null}
                 </div>
               </div>
-              {isSmallNumbers(programRate) ? (
+              {/* Calendar-year (pilot) deployments only: "so far" and CMS's case minimum mean nothing
+                  for a rolling-window occupational measure on a small roster (#637 review). */}
+              {isPatientTerm && isSmallNumbers(programRate) ? (
                 <p className="mt-2 rounded bg-amber-50 px-2 py-1 text-xs text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
                   Based on {fmtCount(programRate.denominator)} {programRate.denominator === 1 ? SUBJECT.singular : SUBJECT.plural} so far
                 </p>

@@ -44,7 +44,7 @@ const small = summary({ measureId: "cms122", measureName: "Diabetes", improvemen
 function mockOverview(programs: unknown[], trend: Record<string, unknown[]> = {}) {
   get.mockReset().mockImplementation((url: string) => {
     if (url === "/api/measures") return Promise.resolve([]);
-    if (url.includes("include=detail")) return Promise.resolve((programs as Array<{ measureId: string }>).map((p) => ({ ...p, trend: trend[p.measureId] ?? [] })));
+    if (url.includes("include=trend")) return Promise.resolve((programs as Array<{ measureId: string }>).map((p) => ({ ...p, trend: trend[p.measureId] ?? [] })));
     if (url.startsWith("/api/programs/overview")) return Promise.resolve(programs);
     return Promise.resolve([]);
   });

@@ -252,18 +252,22 @@ test("programTrend — timezone-correct day collapse (Pacific/Honolulu collapses
 });
 
 test("runPeriodOf — the year a run SCORED, read from its record, not the day it started (#637)", async () => {
-  const runs: Record<string, { measurementPeriodEnd: string; startedAt: string }> = {
-    // A nightly inside the year: an official-only run's period ends 31 December; it describes today.
-    nightly: { measurementPeriodEnd: "2027-12-31T23:59:59.999Z", startedAt: "2027-01-06T12:03:00.000Z" },
+  const runs: Record<string, { measurementPeriodStart: string; measurementPeriodEnd: string; startedAt: string; requestedScope: Record<string, unknown> }> = {
+    // A nightly inside the year: an official-only run's period is the calendar year; it describes today.
+    nightly: { measurementPeriodStart: "2027-01-01T00:00:00.000Z", measurementPeriodEnd: "2027-12-31T23:59:59.999Z", startedAt: "2027-01-06T12:03:00.000Z", requestedScope: { evaluationDate: "2027-01-06" } },
     // A rerun started in January that scores the year before: labelled the OLD year.
-    rerun: { measurementPeriodEnd: "2026-12-31T23:59:59.999Z", startedAt: "2027-01-05T09:00:00.000Z" },
-    // An authored run's period ends on its evaluation date.
-    authored: { measurementPeriodEnd: "2026-06-13T00:00:00.000Z", startedAt: "2026-06-13T12:00:00.000Z" },
+    rerun: { measurementPeriodStart: "2026-01-01T00:00:00.000Z", measurementPeriodEnd: "2026-12-31T23:59:59.999Z", startedAt: "2027-01-05T09:00:00.000Z", requestedScope: { evaluationDate: "2026-12-31" } },
+    // A run started late in December that evaluates a date in the next year: the NEXT year.
+    ahead: { measurementPeriodStart: "2027-01-01T00:00:00.000Z", measurementPeriodEnd: "2027-12-31T23:59:59.999Z", startedAt: "2026-12-30T09:00:00.000Z", requestedScope: { evaluationDate: "2027-01-02" } },
+    // An authored (rolling-window) run: its period ends on its evaluation date, and it is not a
+    // calendar year, so nothing compares its points within one.
+    authored: { measurementPeriodStart: "2026-06-13T00:00:00.000Z", measurementPeriodEnd: "2026-06-13T00:00:00.000Z", startedAt: "2026-06-13T12:00:00.000Z", requestedScope: {} },
   };
   const runStore = { getRun: async (id: string) => (id === "boom" ? Promise.reject(new Error("down")) : (runs[id] ?? null)) } as unknown as ProgramDeps["runStore"];
-  assert.deepEqual(await runPeriodOf(runStore, "nightly"), { measurementYear: 2027, asOf: "2027-01-06" });
-  assert.deepEqual(await runPeriodOf(runStore, "rerun"), { measurementYear: 2026, asOf: "2026-12-31" });
-  assert.deepEqual(await runPeriodOf(runStore, "authored"), { measurementYear: 2026, asOf: "2026-06-13" });
+  assert.deepEqual(await runPeriodOf(runStore, "nightly"), { measurementYear: 2027, asOf: "2027-01-06", calendarYear: true });
+  assert.deepEqual(await runPeriodOf(runStore, "rerun"), { measurementYear: 2026, asOf: "2026-12-31", calendarYear: true });
+  assert.deepEqual(await runPeriodOf(runStore, "ahead"), { measurementYear: 2027, asOf: "2027-01-02", calendarYear: true });
+  assert.deepEqual(await runPeriodOf(runStore, "authored"), { measurementYear: 2026, asOf: "2026-06-13", calendarYear: false });
   assert.equal(await runPeriodOf(runStore, "missing"), null);
   // A label fails soft: an unreadable run leaves the year unstated rather than failing the dashboard.
   assert.equal(await runPeriodOf(runStore, "boom"), null);

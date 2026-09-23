@@ -197,14 +197,14 @@ export default function ProgramDetailPage() {
             <p className="text-sm text-neutral-600 dark:text-neutral-400">Version {program.version}{yearLine ? ` · ${yearLine}` : ""}</p>
             <div className="mt-3 flex items-end gap-3">
               <div>
-                <p className="text-4xl font-semibold text-neutral-900 dark:text-neutral-100">{rate.value === null ? "—" : `${rate.label} ${rate.value.toFixed(1)}%`}</p>
+                <p aria-describedby={rate.value === null ? "counted-yet-note" : undefined} className="text-4xl font-semibold text-neutral-900 dark:text-neutral-100">{rate.value === null ? `${rate.label} —` : `${rate.label} ${rate.value.toFixed(1)}%`}</p>
                 {rate.lowerIsBetter ? (
                   <p id="lower-is-better-note" className="text-xs text-neutral-500 dark:text-neutral-400">Lower is better</p>
                 ) : null}
-                <p className="text-xs text-neutral-500 dark:text-neutral-400">
+                <p id={rate.value === null ? "counted-yet-note" : undefined} className="text-xs text-neutral-500 dark:text-neutral-400">
                   {rate.value === null ? `No ${SUBJECT.plural} counted yet` : `${fmtCount(rate.numerator)} / ${fmtCount(rate.denominator)}`}
                 </p>
-                {isSmallNumbers(rate) ? (
+                {isPatientTerm && isSmallNumbers(rate) ? (
                   <p className="mt-1 rounded bg-amber-50 px-2 py-1 text-xs text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
                     Based on {fmtCount(rate.denominator)} {rate.denominator === 1 ? SUBJECT.singular : SUBJECT.plural} so far
                   </p>
@@ -256,7 +256,7 @@ export default function ProgramDetailPage() {
 
           <div className="grid gap-4 lg:grid-cols-2">
             <div className="rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4">
-              <p className="mb-2 text-xs font-semibold uppercase tracking-[0.15em] text-neutral-500 dark:text-neutral-400">{rate.label} trend (this year)</p>
+              <p className="mb-2 text-xs font-semibold uppercase tracking-[0.15em] text-neutral-500 dark:text-neutral-400">{rate.label} trend</p>
               {/* The largest panel, and the one this change nearly broke. `ComplianceTrendChart`
                   answers an empty `points` array with "No run history for this measure yet" — a
                   positive claim about the measure. While the whole page waited on all four reads that
@@ -791,7 +791,7 @@ function ComplianceTrendChart({ points, identity }: { points: TrendPoint[]; iden
   if (!points.length) {
     return (
       <div className="flex h-[160px] items-center justify-center rounded border border-dashed border-neutral-300 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800/50">
-        <span className="text-xs text-neutral-500 dark:text-neutral-400">No runs with results this year yet</span>
+        <span className="text-xs text-neutral-500 dark:text-neutral-400">No runs with results yet</span>
       </div>
     );
   }
@@ -841,7 +841,7 @@ function ComplianceTrendChart({ points, identity }: { points: TrendPoint[]; iden
         </ResponsiveContainer>
       </div>
       <ChartDataTable
-        caption={`${rateLabel} trend by run (this year)`}
+        caption={`${rateLabel} trend by run`}
         columns={["Run date", rateLabel]}
         rows={data.map((d) => [d.label, `${d.rate}%`])}
       />

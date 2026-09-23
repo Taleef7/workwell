@@ -72,9 +72,9 @@ describe("ProgramsPage status chips", () => {
     const programCalls = () => get.mock.calls.map(([url]) => url as string).filter((url) => url.startsWith("/api/programs"));
 
     // The card is on screen after the plain overview — the detail call has not been awaited for it.
-    expect(programCalls()[0]).not.toContain("include=detail");
+    expect(programCalls()[0]).not.toContain("include=");
     await waitFor(() => expect(programCalls()).toHaveLength(2));
-    expect(programCalls()[1]).toContain("include=detail");
+    expect(programCalls()[1]).toContain("include=trend");
     expect(programCalls().some((url) => url.includes("/top-drivers") || url.includes("/trend"))).toBe(false);
   });
 

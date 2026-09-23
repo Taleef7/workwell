@@ -4,6 +4,7 @@
  *   GET /api/programs                   overview (alias of /overview, Java parity)   → ProgramSummary[]
  *   GET /api/programs/overview          per-Active-measure KPIs + open case count    → ProgramSummary[]
  *     ?include=detail&granularity=&tz=  each summary additionally carries `trend` + `topDrivers`
+ *     ?include=trend&granularity=&tz=   each summary additionally carries `trend` only (the programs page)
  *   GET /api/programs/sites             distinct employee sites (global site filter) → string[]
  *   GET /api/programs/:id/trend         per-run compliance trend (newest 10)         → ProgramTrendPoint[]
  *   GET /api/programs/:id/top-drivers   overdue site/role + flagged-reason mix       → TopDrivers
@@ -73,7 +74,9 @@ export async function handlePrograms(req: Request, env: ProgramsEnv): Promise<Re
   if (pathname === "/api/programs" || pathname === "/api/programs/overview") {
     const d = await deps(env);
     const summaries = await programOverview(d, filters);
-    if (q.get("include") !== "detail") return json(summaries);
+    const include = q.get("include");
+    if (include !== "detail" && include !== "trend") return json(summaries);
+    // `trend` is the programs page's own request (#637): its cards show the trend and no drivers.
     // Sequential, and NOT because these are memo hits — `programOverview` fills only its own memo,
     // so on a cold process every one of these is a real read. Sequential because they are reads of
     // the same winning runs on a single-process worker: running them together interleaves the misses
@@ -92,6 +95,10 @@ export async function handlePrograms(req: Request, env: ProgramsEnv): Promise<Re
         trend = await programTrend(d, summary.measureId, filters, { monthly, tz });
       } catch (err) {
         console.warn(`[workwell] trend failed for ${summary.measureId}: ${String((err as Error)?.message ?? err)}`);
+      }
+      if (include === "trend") {
+        detailed.push({ ...summary, trend });
+        continue;
       }
       try {
         topDrivers = await programTopDrivers(d, summary.measureId, filters);

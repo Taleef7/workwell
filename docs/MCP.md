@@ -72,7 +72,7 @@ The table below shows **tool-execution** roles (transport access is separate —
 | `get_case` | CASE_MANAGER, ADMIN | Restricted — employee/case data |
 | `list_cases` | CASE_MANAGER, ADMIN | Restricted — employee/case data |
 | `get_run_summary` | CASE_MANAGER, ADMIN | Restricted — run/outcome data |
-| `list_runs` | CASE_MANAGER, ADMIN | Restricted — run/outcome data |
+| `list_runs` | CASE_MANAGER, ADMIN | Restricted — run/outcome data. `compliance_rate` is `null` when nobody is in the workflow denominator (e.g. a queued run, or the first days of a measurement year) |
 | `explain_outcome` | CASE_MANAGER, ADMIN | Restricted — employee/case evidence |
 | `get_employee` | CASE_MANAGER, ADMIN | Restricted — employee/compliance data |
 | `check_compliance` | CASE_MANAGER, ADMIN | Restricted — employee/compliance data |

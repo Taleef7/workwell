@@ -140,9 +140,9 @@ and a score computed over the survivors would be a different number under the ru
 none is built; the evidence is the pass's own intent event in the audit ledger, never the run's
 counts. Both aggregate exports also carry two headers the FHIR and QRDA shapes have no element for:
 `x-workwell-unmeasured-subjects` (subjects in no rate, ADR-074) and `x-workwell-evaluation-errors`
-(subjects no engine spoke for, who are in no population). The programs overview's "measure rate"
-tile is the same aggregate as the summary MeasureReport, reduced by the same code, and is shown
-apart from the workflow-status percentage.
+(subjects no engine spoke for, who are in no population). The measure page's "CMS measure rate"
+box is the same aggregate as the summary MeasureReport, reduced by the same code, and is shown
+apart from the workflow-status percentage the programs card leads with.
 
 **QRDA Category I and III** are HL7's XML document formats for quality reporting — patient-level
 and aggregate. Both export types validate at zero findings against the HL7 base rulers (XSD and

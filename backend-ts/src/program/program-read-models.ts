@@ -798,7 +798,9 @@ export async function programTrend(
       from: from?.slice(0, 7),
       to: to?.slice(0, 7),
     });
-    const monthly = monthlyTrendPoints(snaps).map((p) => ({ ...p, measurementYear: Number(p.period!.slice(0, 4)) }));
+    // Unstamped: the monthly series only ever serves a rolling-window (authored) measure, which has no
+    // measurement year to compare within (#637 review).
+    const monthly = monthlyTrendPoints(snaps);
     if (monthly.length >= 2) return monthly;
   }
 
@@ -820,51 +822,83 @@ export async function programTrend(
     read = await runsWithOutcomes(deps, measureId, filters, window);
     points = trendPointsOf(read.groups, opts?.tz);
   }
-  points = await withMeasurementYears(deps.runStore, points);
-  return monthlyPossible ? points : trendMemo.set(memoKey, runKey, points);
-}
-
-/** Stamp each per-run point with the year its run scored (#637). */
-async function withMeasurementYears(runStore: RunStore, points: ProgramTrendPoint[]): Promise<ProgramTrendPoint[]> {
-  const out: ProgramTrendPoint[] = [];
-  for (const p of points) {
-    const period = await runPeriodOf(runStore, p.runId);
-    out.push(period ? { ...p, measurementYear: period.measurementYear } : p);
-  }
-  return out;
+  const stamped = await withMeasurementYears(deps.runStore, points);
+  // A point whose run could not be read is unstamped, and an unstamped NEWEST point turns the year
+  // filter off for the chart — so a partial answer is served but never memoized for the cycle.
+  if (monthlyPossible || !stamped.complete) return stamped.points;
+  return trendMemo.set(memoKey, runKey, stamped.points);
 }
 
 /**
- * What a run scored, from its own record (#637): the year, and the day the numbers describe.
+ * Stamp each per-run point with the year its run scored (#637) — only where the run scored a
+ * CALENDAR year (an official measurement period). A rolling-window (authored) run has no year to
+ * compare within, and stamping it would cut the occupational deployment's trends every January.
+ */
+async function withMeasurementYears(runStore: RunStore, points: ProgramTrendPoint[]): Promise<{ points: ProgramTrendPoint[]; complete: boolean }> {
+  const out: ProgramTrendPoint[] = [];
+  let complete = true;
+  for (const p of points) {
+    const period = await readRunPeriod(runStore, p.runId);
+    if (period === UNREADABLE) {
+      complete = false;
+      out.push(p);
+      continue;
+    }
+    out.push(period?.calendarYear ? { ...p, measurementYear: period.measurementYear } : p);
+  }
+  return { points: out, complete };
+}
+
+/**
+ * What a run scored, from its own record (#637): the year, the day the numbers describe, and whether
+ * the period is a calendar year.
  *
  * `measurementPeriodEnd` is 31 December of the scored year on an official-only run (ADR-072) and the
- * evaluation date on an authored or mixed one; the start date bounds it for a run still inside its
- * year. The earlier of the two is the day the run describes, and its year is the year it scored — so
- * a rerun started on 5 January that evaluates 31 December reads as the old year, and a nightly on
- * 6 January reads as the new one. A completed run's record never changes, so the answer is cached.
+ * evaluation date on an authored or mixed one, so its year is the year scored in both cases — a
+ * rerun started on 5 January that evaluates 31 December reads as the old year. The day described is
+ * the evaluation date the run recorded (`requestedScope.evaluationDate`), falling back to the earlier
+ * of the period end and the start date. `calendarYear` is true only for a 1 January – 31 December
+ * period: the only kind a year line or a within-year comparison means anything for. A completed run's
+ * record never changes, so the answer is cached.
  *
  * A LABEL, so it fails soft: a read that throws leaves the year unstated rather than failing the
  * dashboard it decorates.
  */
-export async function runPeriodOf(runStore: RunStore, runId: string): Promise<{ measurementYear: number; asOf: string } | null> {
+export async function runPeriodOf(runStore: RunStore, runId: string): Promise<RunPeriod | null> {
+  const period = await readRunPeriod(runStore, runId);
+  return period === UNREADABLE ? null : period;
+}
+
+/** A read that failed, as distinct from a run that does not exist: only the first may not be memoized. */
+const UNREADABLE = Symbol("unreadable");
+
+async function readRunPeriod(runStore: RunStore, runId: string): Promise<RunPeriod | null | typeof UNREADABLE> {
   const cached = runPeriodCache.get(runId);
   if (cached) return cached;
   let run: Awaited<ReturnType<RunStore["getRun"]>>;
   try {
     run = await runStore.getRun(runId);
   } catch {
-    return null;
+    return UNREADABLE;
   }
   if (!run) return null;
+  const start = run.measurementPeriodStart.slice(0, 10);
   const end = run.measurementPeriodEnd.slice(0, 10);
   const started = run.startedAt.slice(0, 10);
-  const asOf = end < started ? end : started;
-  const period = { measurementYear: Number(asOf.slice(0, 4)), asOf };
+  const recorded = run.requestedScope?.evaluationDate;
+  const asOf = typeof recorded === "string" && /^\d{4}-\d{2}-\d{2}/.test(recorded) ? recorded.slice(0, 10) : end < started ? end : started;
+  const calendarYear = start.slice(5) === "01-01" && end.slice(5) === "12-31" && start.slice(0, 4) === end.slice(0, 4);
+  const period: RunPeriod = { measurementYear: Number(end.slice(0, 4)), asOf, calendarYear };
   if (runPeriodCache.size >= 5000) runPeriodCache.clear();
   runPeriodCache.set(runId, period);
   return period;
 }
-const runPeriodCache = new Map<string, { measurementYear: number; asOf: string }>();
+export interface RunPeriod {
+  measurementYear: number;
+  asOf: string;
+  calendarYear: boolean;
+}
+const runPeriodCache = new Map<string, RunPeriod>();
 
 /** How far the trend widens its run window looking for ten displayable points. */
 const TREND_RUN_WINDOW_MAX = 80;
