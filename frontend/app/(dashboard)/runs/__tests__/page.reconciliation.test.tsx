@@ -3,7 +3,7 @@ import { render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const get = vi.fn();
-const apiMock = { get, post: vi.fn(), downloadBlob: vi.fn() };
+const apiMock = { get, getWithHeaders: vi.fn(async (url: string) => ({ data: await get(url), headers: new Headers() })), post: vi.fn(), downloadBlob: vi.fn() };
 const routerMock = vi.hoisted(() => ({ push: vi.fn(), replace: vi.fn() }));
 const searchParamsMock = vi.hoisted(() => new URLSearchParams());
 vi.mock("@/lib/api/hooks", () => ({ useApi: () => apiMock }));
@@ -55,7 +55,7 @@ describe("RunsPage reconciliation", () => {
     expect(within(block).getByText("Rows persisted: 4")).toBeInTheDocument();
     expect(within(block).getByText("Evaluation errors (in no population): 1")).toBeInTheDocument();
     expect(within(block).getByText("Evaluated, not in population: 1")).toBeInTheDocument();
-    expect(within(block).getByText(/score 50\.0%/)).toBeInTheDocument();
+    expect(within(block).getByText(/CMS measure rate 50\.0% of the measure's population/)).toBeInTheDocument();
     expect(within(block).getByText("Cases citing this run: 1")).toBeInTheDocument();
   });
 });

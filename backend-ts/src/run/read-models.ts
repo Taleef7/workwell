@@ -7,7 +7,8 @@
  *   - passRate = compliant * 100 / totalEvaluated   (percentage, 0 when none)
  *   - nonCompliant = DUE_SOON | OVERDUE | MISSING_DATA  (EXCLUDED is neither)
  *   - dataFreshAsOf = MAX(evaluated_at); dataFreshnessMinutes = -1 when no outcomes
- *   - measureName/Version resolved from scopeId (null → "All Programs" / "")
+ *   - measureName/Version: the run's own scope — the measure's name for a MEASURE/CASE run, the site
+ *     or subject for a SITE/EMPLOYEE run, "All Programs" only for an ALL_PROGRAMS run (#668)
  *
  * Note: `totalCases` is supplied by the caller (COUNT of cases with last_run_id = runId,
  * matching Java); it defaults to 0 for callers that don't compute it. `triggerType` is
@@ -17,11 +18,16 @@ import type { RunRecord, RunLogRow } from "../stores/run-store.ts";
 import { retentionDaysFromEnv } from "./outcome-compaction.ts";
 import type { OutcomeRecord, OutcomeStatusCount } from "../stores/outcome-store.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
-import { employeeById, profileSubjectMatcher } from "../config/deployment-profile.ts";
+import { DEPLOYMENT_PROFILE, employeeById, profileSubjectMatcher, subjectNoun } from "../config/deployment-profile.ts";
+import { measureDisplayName } from "../measure/measure-name.ts";
+import { MEASURE_CATALOG } from "../measure/measure-catalog.ts";
 
 export interface RunListItem {
   runId: string;
+  /** What the run covered, in words: a measure's name, `Site: …`, "Single patient", or "All Programs". */
   measureName: string;
+  /** The measure a MEASURE/CASE run evaluated; null for runs over every measure (#644, #668). */
+  measureId: string | null;
   status: string;
   scopeType: string;
   triggerType: string;
@@ -68,7 +74,14 @@ export interface RunOutcomeRow {
   employeeExternalId: string;
   role: string;
   site: string;
+  /** The stored status. */
   outcomeStatus: string;
+  /**
+   * What to SHOW: a MISSING_DATA row the measure's logic put outside its population reads
+   * OUT_OF_POPULATION (ADR-079). The same column test as the summary's `notInPopulation`, so the
+   * grid and that count judge each outcome the same way (#668).
+   */
+  displayStatus: string;
   daysSinceExam: string | null;
   waiverStatus: string | null;
   caseId: string | null;
@@ -76,11 +89,34 @@ export interface RunOutcomeRow {
 
 const NON_COMPLIANT = new Set(["DUE_SOON", "OVERDUE", "MISSING_DATA"]);
 
-function measureLabel(scopeId: string | null): { name: string; version: string } {
-  const m = scopeId ? MEASURES[scopeId] : undefined;
-  if (!m) return { name: "All Programs", version: "" };
-  const dash = m.library.lastIndexOf("-");
-  return { name: m.name, version: dash >= 0 ? m.library.slice(dash + 1) : "" };
+const SUBJECT_SINGULAR = subjectNoun(DEPLOYMENT_PROFILE).singular;
+
+/** The measure a MEASURE/CASE run evaluated, from the stored scope (the manual path writes both). */
+function runMeasureId(run: Pick<RunRecord, "scopeType" | "scopeId" | "requestedScope">): string | null {
+  if (run.scopeType !== "MEASURE" && run.scopeType !== "CASE") return null;
+  const requested = run.requestedScope?.measureId;
+  return run.scopeId ?? (typeof requested === "string" ? requested : null);
+}
+
+/**
+ * What the run covered, as a title. It used to look the name up in the AUTHORED registry only, so a
+ * run of an official-only measure (cms2, cms130, cms165, cms137 on Maui) and every SITE/patient run
+ * were all titled "All Programs" (#668). A patient run says so without the identifier: the title also
+ * goes into the run-insight prompt sent to OpenAI.
+ */
+function measureLabel(run: Pick<RunRecord, "scopeType" | "scopeId" | "site" | "requestedScope">): { name: string; version: string } {
+  const measureId = runMeasureId(run);
+  if (measureId) {
+    const authored = MEASURES[measureId];
+    const dash = authored ? authored.library.lastIndexOf("-") : -1;
+    const version = authored
+      ? (dash >= 0 ? authored.library.slice(dash + 1) : "")
+      : (MEASURE_CATALOG.find((m) => m.id === measureId)?.version ?? "");
+    return { name: measureDisplayName(measureId), version };
+  }
+  if (run.scopeType === "SITE" && run.site) return { name: `Site: ${run.site}`, version: "" };
+  if (run.scopeType === "EMPLOYEE") return { name: `Single ${SUBJECT_SINGULAR}`, version: "" };
+  return { name: "All Programs", version: "" };
 }
 
 function tally(outcomes: OutcomeRecord[]) {
@@ -139,7 +175,8 @@ export function triggerTypeOf(run: RunRecord): string {
 function buildListItem(run: RunRecord, t: Tally): RunListItem {
   return {
     runId: run.id,
-    measureName: measureLabel(run.scopeId).name,
+    measureName: measureLabel(run).name,
+    measureId: runMeasureId(run),
     status: run.status,
     scopeType: run.scopeType,
     triggerType: triggerTypeOf(run),
@@ -183,7 +220,7 @@ export function retentionNoticeFor(
 }
 
 function buildSummary(run: RunRecord, t: Tally, totalCases: number, retentionDays?: number): RunSummary {
-  const { name, version } = measureLabel(run.scopeId);
+  const { name, version } = measureLabel(run);
   return {
     ...buildListItem(run, t),
     measureName: name,
@@ -264,6 +301,7 @@ export function toRunOutcomeRow(outcome: OutcomeRecord, employeeLookup = employe
     role: emp?.role ?? "—",
     site: emp?.site ?? "—",
     outcomeStatus: outcome.status,
+    displayStatus: outcome.status === "MISSING_DATA" && outcome.outOfPopulation === true ? "OUT_OF_POPULATION" : outcome.status,
     daysSinceExam: daysSinceExam(outcome.evidence),
     waiverStatus: waiverStatus(outcome.evidence),
     caseId: null, // cases module not ported yet (later #107 slice)

@@ -120,6 +120,55 @@ test("an ALL_PROGRAMS run (no scopeId) is labelled 'All Programs', and empty run
   assert.equal(s.dataFreshnessMinutes, -1);
 });
 
+test("a run is titled by what it covered, never 'All Programs' for one measure, site or subject (#668)", () => {
+  // cms130 is official-only: it is in the catalog, not the authored registry the title used to read.
+  const measureRun = toRunSummary(run({ scopeType: "MEASURE", scopeId: "cms130" }), []);
+  assert.equal(measureRun.measureName, "Colorectal Cancer Screening");
+  assert.equal(measureRun.measureId, "cms130");
+  assert.equal(measureRun.measureVersion, "v1.0", "the catalog's version when there is no authored library");
+  // An authored measure keeps its registry name and library version.
+  assert.equal(toRunSummary(run(), []).measureName, "Audiogram");
+  // A CASE rerun names its measure too.
+  assert.equal(toRunListItem(run({ scopeType: "CASE", scopeId: "cms130" }), []).measureName, "Colorectal Cancer Screening");
+  // A SITE run names its site; a patient run says it covered one, without the identifier.
+  const siteRun = toRunListItem(run({ scopeType: "SITE", scopeId: null, site: "Kihei Clinic" }), []);
+  assert.equal(siteRun.measureName, "Site: Kihei Clinic");
+  assert.equal(siteRun.measureId, null);
+  const subjectRun = toRunListItem(run({ scopeType: "EMPLOYEE", scopeId: null, requestedScope: { employeeExternalId: "emp-006" } }), []);
+  assert.match(subjectRun.measureName, /^Single (employee|patient)$/);
+  assert.doesNotMatch(subjectRun.measureName, /emp-006/, "no subject identifier in a title the insight prompt sends out");
+  // Only a run over every measure is "All Programs".
+  const all = toRunListItem(run({ scopeType: "ALL_PROGRAMS", scopeId: null }), []);
+  assert.equal(all.measureName, "All Programs");
+  assert.equal(all.measureId, null);
+});
+
+test("an outcome row outside the population shows OUT_OF_POPULATION; the stored status stays (#668)", () => {
+  const rows = toRunOutcomeRows([
+    { ...outcome("MISSING_DATA", "2026-06-13T10:00:00.000Z"), subjectId: "emp-006", outOfPopulation: true },
+    { ...outcome("MISSING_DATA", "2026-06-13T10:00:00.000Z"), subjectId: "emp-007", outOfPopulation: false },
+    { ...outcome("OVERDUE", "2026-06-13T10:00:00.000Z"), subjectId: "emp-008" },
+  ]);
+  const by = new Map(rows.map((r) => [r.employeeExternalId, r]));
+  assert.equal(by.get("emp-006")!.displayStatus, "OUT_OF_POPULATION");
+  assert.equal(by.get("emp-006")!.outcomeStatus, "MISSING_DATA", "the stored status is unchanged");
+  assert.equal(by.get("emp-007")!.displayStatus, "MISSING_DATA", "in the population with nothing on file is a real gap");
+  assert.equal(by.get("emp-008")!.displayStatus, "OVERDUE");
+});
+
+test("the grid rows and the summary count judge 'not in population' the same way (#668)", () => {
+  const outcomes: OutcomeRecord[] = [
+    { ...outcome("MISSING_DATA", "2026-06-13T10:00:00.000Z"), subjectId: "emp-006", outOfPopulation: true },
+    { ...outcome("MISSING_DATA", "2026-06-13T10:00:01.000Z"), subjectId: "emp-007", outOfPopulation: true },
+    { ...outcome("MISSING_DATA", "2026-06-13T10:00:02.000Z"), subjectId: "emp-008", outOfPopulation: false },
+    { ...outcome("COMPLIANT", "2026-06-13T10:00:03.000Z"), subjectId: "emp-009", outOfPopulation: true },
+  ];
+  const shown = toRunOutcomeRows(outcomes).filter((r) => r.displayStatus === "OUT_OF_POPULATION").length;
+  const counted = toRunSummary(run(), outcomes).notInPopulation;
+  assert.equal(counted, 2, "only a MISSING_DATA row outside the population counts");
+  assert.equal(shown, counted);
+});
+
 test("an in-flight run (no completedAt) has durationMs 0", () => {
   assert.equal(toRunListItem(run({ completedAt: null, status: "RUNNING" }), []).durationMs, 0);
 });

@@ -47,3 +47,14 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
   its table does (out of population is "Not in population", not "Missing Data"), list only the measures the
   deployment runs (no old Hypertension on Maui), and name the official-only measures instead of `cms130`.
   The simulation runs only when asked, and names the four measures it cannot replay.
+- **#668: Run History says what a run is and what its numbers mean.**
+  - A measure run is titled by its measure. It used to say "All Programs" for the four official-only
+    measures, and for site and patient runs too.
+  - The two rates are labelled: compliant of everyone evaluated, and the CMS measure rate of the measure's
+    population.
+  - Patients outside the population are counted on their own line and shown that way row by row, where
+    they used to read "Missing Data".
+  - The outcomes table says "Showing 5,000 of 20,000", and runs over an hour show their duration.
+  - A failed load, and filters that exclude every run, no longer read "No runs yet", and a run the filters
+    remove no longer leaves its detail behind.
+  - The global site filter no longer empties the list; the list says it isn't filtered by site.

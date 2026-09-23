@@ -3,7 +3,7 @@ import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const get = vi.fn();
-const apiMock = { get, post: vi.fn(), downloadBlob: vi.fn() };
+const apiMock = { get, getWithHeaders: vi.fn(async (url: string) => ({ data: await get(url), headers: new Headers() })), post: vi.fn(), downloadBlob: vi.fn() };
 const routerMock = vi.hoisted(() => ({ push: vi.fn(), replace: vi.fn() }));
 const searchParamsMock = vi.hoisted(() => new URLSearchParams());
 vi.mock("@/lib/api/hooks", () => ({ useApi: () => apiMock }));

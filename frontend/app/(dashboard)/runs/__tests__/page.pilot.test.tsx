@@ -20,7 +20,7 @@ vi.mock("next/navigation", () => ({
 const get = vi.fn();
 const post = vi.fn();
 vi.mock("@/lib/api/hooks", () => ({
-  useApi: () => ({ get, post }),
+  useApi: () => ({ get, post, getWithHeaders: vi.fn(async (url: string) => ({ data: await get(url), headers: new Headers() })) }),
 }));
 
 vi.mock("@/components/global-filter-context", () => ({
