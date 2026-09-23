@@ -123,7 +123,7 @@ const RETRYABLE_4XX = new Set([401, 429]);
  * stalled, which is what turned every CI run over 10 minutes into 13–16 (and 50 once re-run). Healthy
  * pages answer in under 20 s. The signal bounds reading the body too.
  */
-const VSAC_TIMEOUT_MS = 90_000;
+export const VSAC_TIMEOUT_MS = 90_000;
 
 async function fetchVsacJson(url, headers, attempts = 4) {
   let lastError;

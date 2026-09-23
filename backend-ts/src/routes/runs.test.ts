@@ -636,8 +636,9 @@ test("GET /api/runs/:id/measure-report → 422 for a multi-measure (ALL_PROGRAMS
   await new SqliteRunStore(env.DB as never).finalizeRun(runId, "COMPLETED");
   const r = (await get(`/api/runs/${runId}/measure-report`))!;
   assert.equal(r.status, 422);
-  const body = (await r.json()) as { error: string };
+  const body = (await r.json()) as { error: string; measures: number };
   assert.equal(body.error, "unsupported_run_scope");
+  assert.equal(body.measures, 2, "refused for holding two measures, not for holding none");
 });
 
 test("GET /api/runs/:id/qrda → well-formed QRDA III XML; 404 unknown run", async () => {

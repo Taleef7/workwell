@@ -3,7 +3,10 @@ name: CI
 on:
   # Every branch push, and no pull_request trigger: a PR's checks are the push run of its head commit.
   # Both triggers ran every PR commit twice, and the pull_request one is the one that silently failed to
-  # fire (a PR that conflicts, or one retargeted from another branch: #403, #538, #611).
+  # fire (a PR that conflicts, or one retargeted from another branch: #403, #538, #611). A fork's push
+  # runs in the fork, so a fork PR gets no CI here; this is a single-developer repository.
+  # CI tests the branch head, not the head merged into main: update a branch that is behind main
+  # before merging it, or the squash-merged result is first tested after the deploy has started.
   push:
     branches: ["**"]
   workflow_dispatch:
@@ -317,11 +320,10 @@ jobs:
       # AdvancedIllness, 1000 of 1997, feeding a DENEX in both measures) from VSAC at a pinned release.
       #
       # It is passed ONLY when the credential is actually present, and that is not merely an
-      # optimization. GitHub withholds repository secrets from workflows triggered by a FORK pull
-      # request (Dependabot likewise). Passing the flag unconditionally there would regenerate the
-      # capped manifests while Git records the completed ones, and the reproducibility check below
-      # would then fail every outside contributor's PR for a reason that has nothing to do with their
-      # change. So the step reports whether it ran credentialed, and the check adapts.
+      # optimization. GitHub withholds repository secrets from Dependabot's pushes. Passing the flag
+      # unconditionally there would regenerate the capped manifests while Git records the completed
+      # ones, and the reproducibility check below would then fail every Dependabot run for a reason
+      # that has nothing to do with its change. So the step reports whether it ran credentialed, and the check adapts.
       - name: Vendor official terminology (the runtime's own expansions, same pin)
         id: vendor
         env:
@@ -333,7 +335,7 @@ jobs:
           else
             echo "credentialed=false" >> "$GITHUB_OUTPUT"
             COMPLETE=
-            echo "::notice::No VSAC credential in this context (expected for a fork PR). Vendoring without expansion completion; the reproducibility check will verify bundle bytes only."
+            echo "::notice::No VSAC credential in this context (expected on Dependabot's pushes). Vendoring without expansion completion; the reproducibility check will verify bundle bytes only."
           fi
           # $COMPLETE is deliberately UNQUOTED: it is either one flag or nothing, and quoting it passes
           # an empty string that the script's parseArgs rejects as `unknown argument:`. Leave it bare.
@@ -414,10 +416,10 @@ jobs:
             src/fhir/qrda1-import-official.test.ts \
             scripts/valueset-parity.test.mjs \
             scripts/vendor-official-measure.test.mjs
-      # `--allow-missing-terminology` ONLY where the credential is genuinely absent (fork PRs,
-      # Dependabot — GitHub withholds the secret there). Without it, the uncredentialed re-vendor above
+      # `--allow-missing-terminology` ONLY where the credential is genuinely absent (Dependabot's
+      # pushes — GitHub withholds the secret there). Without it, the uncredentialed re-vendor above
       # produces a cms138 sidecar that omits the value set upstream does not ship, the deck cannot
-      # resolve it, and every external contributor's PR goes red for a reason unrelated to their change
+      # resolve it, and every Dependabot run goes red for a reason unrelated to its change
       # (review of #366). The credentialed run on merge passes NOTHING and therefore skips nothing —
       # there, an unresolvable value set means a broken artifact, which is what the gate is for.
       - name: Run the official MADiE test-case gate
@@ -435,7 +437,7 @@ jobs:
       # ignore this job — the worst possible failure mode for a gate.
       # Credentialed runs only. An uncredentialed run may skip a measure, which makes it a PARTIAL run —
       # the CLI deliberately does not rewrite the committed report there, so comparing against it would
-      # always differ and would fail every fork PR (review of #366).
+      # always differ and would fail every uncredentialed (Dependabot) run (review of #366).
       - name: Committed evidence report is current (results, not timestamp)
         if: steps.vendor.outputs.credentialed == 'true'
         working-directory: ${{ github.workspace }}
@@ -577,7 +579,7 @@ jobs:
     timeout-minutes: 45
     # The Maui project runs against a stack THIS RUNNER boots — backend on the SQLite floor with
     # WORKWELL_INSTANCE=maui, frontend built in patient terminology with the public-demo affordances
-    # off — so nothing shared is mutated and the allowlist never comes into play. Browser e2e lives
+    # off — so nothing shared is mutated. Browser e2e lives
     # here rather than on a developer box because Chromium + two dev servers + a test worker exhaust a
     # Windows desktop heap long before they exhaust RAM (measured 2026-09-02).
     #
@@ -602,8 +604,8 @@ jobs:
         working-directory: backend-ts
         run: pnpm install --frozen-lockfile
       # ---- The credentialed steps run HERE, before the frontend and e2e dependency trees are on disk.
-      # This job is public-repo CI, and the one exposure that is not covered by "workflow_dispatch needs
-      # write access" is supply chain: anything in an installed node_modules can read the environment of
+      # This job is public-repo CI, and the one exposure that is not covered by "only a push to this
+      # repository runs it, which needs write access" is supply chain: anything in an installed node_modules can read the environment of
       # a step it runs in. The VSAC key is therefore scoped to a single step (never job-level `env`),
       # and that step executes with the BACKEND tree only — not Chromium, not Next.js, not the e2e tree.
       #

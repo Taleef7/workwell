@@ -17,6 +17,7 @@ import {
   expandFromVsac,
   oidFromValueSetUrl,
   sortValueSets,
+  VSAC_TIMEOUT_MS,
 } from "./vsac-expansion.mjs";
 
 const OID = "2.16.840.1.113883.3.464.1003.110.12.1082";
@@ -170,6 +171,8 @@ describe("expandFromVsac", () => {
     assert.equal(result.codes.length, 1);
     assert.equal(calls.length, 2, "the timed-out attempt is retried");
     assert.ok(calls.every((c) => c.init.signal instanceof AbortSignal), "every request carries a timeout signal");
+    // A signal that never fires would pass the line above; the bound must sit well under the 300 s hang.
+    assert.ok(VSAC_TIMEOUT_MS > 0 && VSAC_TIMEOUT_MS < 300_000, `timeout ${VSAC_TIMEOUT_MS} ms`);
   });
 });
 
