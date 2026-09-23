@@ -16,7 +16,7 @@ import type { ChatFn } from "./openai-chat.ts";
 export interface AiDeps {
   /** OpenAI chat call (throws on failure → deterministic fallback). */
   chat: ChatFn;
-  /** Primary model name, recorded in the audit payload. */
+  /** The configured primary model: the audit records it when no model answered. */
   model: string;
   /** Audit ledger writer (CaseEventStore.appendAudit). */
   events: Pick<CaseEventStore, "appendAudit">;
@@ -279,9 +279,11 @@ export async function draftSpec(
   const promptLength = text.length;
 
   let response: DraftSpecResponse;
+  let model = deps.model;
   try {
-    const modelResponse = await deps.chat(activeDraftSpecSystemPrompt, `Measure: ${resolvedMeasure}\nPolicy text:\n${text}`);
-    const suggestion = parseSuggestionJson(modelResponse);
+    const reply = await deps.chat(activeDraftSpecSystemPrompt, `Measure: ${resolvedMeasure}\nPolicy text:\n${text}`);
+    model = reply.model;
+    const suggestion = parseSuggestionJson(reply.text);
     if (Object.keys(suggestion).length === 0) {
       throw new Error("Model response did not include valid JSON spec fields.");
     }
@@ -310,7 +312,7 @@ export async function draftSpec(
     measureId: input.measureId ?? "",
     promptLength,
     outputLength: JSON.stringify(response.suggestion).length,
-    model: deps.model,
+    model,
     tokensUsed: -1,
     provider: response.provider,
     fallbackUsed: response.fallbackUsed,
@@ -434,18 +436,20 @@ export async function draftCql(
       "- Map outcome status to: COMPLIANT | DUE_SOON | OVERDUE | MISSING_DATA | EXCLUDED\n";
 
   let response: DraftCqlResponse;
+  let model = deps.model;
   try {
-    const raw = await deps.chat(activeDraftCqlSystemPrompt, userPrompt);
-    const cql = stripCodeFences(raw);
+    const reply = await deps.chat(activeDraftCqlSystemPrompt, userPrompt);
+    model = reply.model;
+    const cql = stripCodeFences(reply.text);
     if (!cql) throw new Error("Empty CQL response from model");
-    response = { success: true, cql, provider: deps.model, fallbackUsed: false };
+    response = { success: true, cql, provider: reply.model, fallbackUsed: false };
   } catch {
     response = { success: false, cql: buildFallbackCqlTemplate(safeMeasureName), provider: "fallback-template", fallbackUsed: true };
   }
   await insertAiAudit(deps, "AI_DRAFT_CQL_GENERATED", actor, null, null, {
     measureId: input.measureId,
     measureName,
-    model: response.provider,
+    model,
     promptLength: userPrompt.length,
     outputLength: response.cql.length,
     fallbackUsed: response.fallbackUsed,
@@ -520,10 +524,13 @@ export async function generateTestFixtures(
   let fixtures: GeneratedTestFixture[];
   let fallbackUsed: boolean;
   let provider: string;
+  let model = deps.model;
   try {
-    fixtures = parseGeneratedFixtures(await deps.chat(activeFixtureSystemPrompt, prompt));
+    const reply = await deps.chat(activeFixtureSystemPrompt, prompt);
+    model = reply.model;
+    fixtures = parseGeneratedFixtures(reply.text);
     fallbackUsed = false;
-    provider = deps.model;
+    provider = reply.model;
   } catch {
     fixtures = buildFallbackFixtures();
     fallbackUsed = true;
@@ -533,7 +540,7 @@ export async function generateTestFixtures(
     measureId: input.measureId,
     measureName: input.measureName,
     count: fixtures.length,
-    model: provider,
+    model,
     fallbackUsed,
   });
   return fixtures;
@@ -584,12 +591,14 @@ export async function explainCase(deps: AiDeps, input: CaseExplanationInput, act
   let explanation: string;
   let provider: string;
   let fallbackUsed: boolean;
+  let model = deps.model;
   try {
-    const modelResponse = await deps.chat(
+    const reply = await deps.chat(
       activeExplainSystemPrompt,
       buildExplainUserPrompt(input.currentOutcomeStatus, input.evidenceJson),
     );
-    explanation = (modelResponse ?? "").trim();
+    model = reply.model;
+    explanation = reply.text.trim();
     if (!explanation) throw new Error("Empty model response");
     provider = "openai";
     fallbackUsed = false;
@@ -602,6 +611,7 @@ export async function explainCase(deps: AiDeps, input: CaseExplanationInput, act
     measureName: input.measureName,
     outcomeStatus: input.currentOutcomeStatus,
     provider,
+    model,
     fallbackUsed,
   });
   return {
@@ -640,13 +650,15 @@ export async function runInsight(deps: AiDeps, input: RunInsightInput, actor: st
     `nonCompliant=${input.nonCompliantCount}\n` +
     `passRate=${input.passRate}\n` +
     `outcomeCounts=${outcomeCounts}`;
+  let model = deps.model;
   try {
-    const content = await deps.chat(INSIGHT_SYSTEM_PROMPT, prompt);
-    const bullets = parseBullets(content);
+    const reply = await deps.chat(INSIGHT_SYSTEM_PROMPT, prompt);
+    model = reply.model;
+    const bullets = parseBullets(reply.text);
     await insertAiAudit(deps, "AI_RUN_INSIGHT_GENERATED", actor, input.runId, null, {
       runId: input.runId,
       measureName: input.measureName,
-      model: deps.model,
+      model,
       fallbackUsed: false,
       bulletCount: bullets.length,
     });
@@ -655,7 +667,7 @@ export async function runInsight(deps: AiDeps, input: RunInsightInput, actor: st
     await insertAiAudit(deps, "AI_RUN_INSIGHT_GENERATED", actor, input.runId, null, {
       runId: input.runId,
       measureName: input.measureName,
-      model: deps.model,
+      model,
       fallbackUsed: true,
       bulletCount: 0,
     });

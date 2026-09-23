@@ -19,13 +19,22 @@ import {
   type AiDeps,
 } from "./ai-assist.ts";
 
-function recorder(): { deps: (chat: AiDeps["chat"]) => AiDeps; events: AppendAuditInput[] } {
+/** A stubbed model: text in, text out. The recorder says the fallback model answered it. */
+type StubChat = (system: string, user: string) => Promise<string>;
+
+function recorder(): { deps: (chat: StubChat) => AiDeps; events: AppendAuditInput[] } {
   const events: AppendAuditInput[] = [];
   return {
     events,
-    deps: (chat) => ({ chat, model: "test-model", events: { appendAudit: async (e) => void events.push(e) } }),
+    deps: (chat) => ({
+      chat: async (system, user) => ({ text: await chat(system, user), model: "answering-model" }),
+      model: "test-model",
+      events: { appendAudit: async (e) => void events.push(e) },
+    }),
   };
 }
+
+const auditPayload = (e: AppendAuditInput) => (e.payload as { payload: Record<string, unknown> }).payload;
 
 test("draftSpec parses model JSON → success + openai provider + audit", async () => {
   const r = recorder();
@@ -151,7 +160,7 @@ test("buildExplainUserPrompt: size-caps oversized evidence (bounds token use)", 
 test("explainCase: an injection string inside evidence stays inside the fence, not a bare instruction", async () => {
   let captured = "";
   const r = recorder();
-  const chat: AiDeps["chat"] = async (_system, user) => { captured = user; return "ok"; };
+  const chat: StubChat = async (_system, user) => { captured = user; return "ok"; };
   await explainCase(
     r.deps(chat),
     {
@@ -358,6 +367,32 @@ test("runInsight parses bullets (dash + numbered) capped at 5", async () => {
   assert.deepEqual(res.insights, ["one", "two", "three", "four", "five"]);
 });
 
+test("the audit records the model that answered, and the configured one when none did", async () => {
+  // It used to record the configured primary always, so a primary that failed on every call (the
+  // fallback answering each time) looked, in the ledger, like the primary at work.
+  const insight = { runId: "run1", measureName: "Audiogram", measureVersion: "v1.0", status: "COMPLETED", totalEvaluated: 1, compliantCount: 1, nonCompliantCount: 0, passRate: 100, outcomeCounts: [] };
+  const explainInput = { caseId: "c1", measureName: "Audiogram", measureVersion: "v1.0", currentOutcomeStatus: "OVERDUE", lastRunId: "run1", employeeName: "Omar", evidenceJson: {} };
+  const answered = recorder();
+  await runInsight(answered.deps(async () => "- one"), insight, "cm@x");
+  await explainCase(answered.deps(async () => "Flagged."), explainInput, "cm@x");
+  await draftSpec(answered.deps(async () => '{"description":"d"}'), { policyText: "p" }, "a@x");
+  assert.deepEqual(answered.events.map((e) => auditPayload(e).model), ["answering-model", "answering-model", "answering-model"]);
+
+  const cql = await draftCql(answered.deps(async () => "library FooCQL version '1.0.0'"), { measureId: "m1", measureName: "Foo", specJson: "{}" }, "a@x");
+  assert.equal(cql.provider, "answering-model");
+  // A model that answered with something unusable is still the model that answered.
+  await generateTestFixtures(answered.deps(async () => "not fixtures"), { measureId: "m1", measureName: "Foo", cqlText: "" }, "a@x");
+  assert.deepEqual(answered.events.slice(3).map((e) => [auditPayload(e).model, auditPayload(e).fallbackUsed]), [["answering-model", false], ["answering-model", true]]);
+
+  const failed = recorder();
+  await runInsight(failed.deps(async () => { throw new Error("down"); }), insight, "cm@x");
+  await explainCase(failed.deps(async () => { throw new Error("down"); }), explainInput, "cm@x");
+  await draftSpec(failed.deps(async () => { throw new Error("down"); }), { policyText: "p" }, "a@x");
+  await draftCql(failed.deps(async () => { throw new Error("down"); }), { measureId: "m1", measureName: "Foo", specJson: "{}" }, "a@x");
+  assert.deepEqual(failed.events.map((e) => auditPayload(e).model), ["test-model", "test-model", "test-model", "test-model"]);
+  assert.deepEqual(failed.events.map((e) => auditPayload(e).fallbackUsed), [true, true, true, true]);
+});
+
 test("runInsight returns empty fallback on model failure", async () => {
   const r = recorder();
   const res = await runInsight(
@@ -385,12 +420,35 @@ test("createChat falls back to the fallback model on primary failure", async () 
     return { ok: true, status: 200, json: async () => ({ choices: [{ message: { content: "ok" } }] }) } as Response;
   }) as unknown as typeof fetch;
   const chat = createChat({ apiKey: "k", model: "primary", fallbackModel: "fallback", fetchImpl: fakeFetch });
-  assert.equal(await chat("s", "u"), "ok");
+  assert.deepEqual(await chat("s", "u"), { text: "ok", model: "fallback" });
   assert.deepEqual(calls, ["primary", "fallback"]);
+});
+
+test("createChat's error carries OpenAI's reason, so a rejected parameter is visible", async () => {
+  const fakeFetch = (async () => ({
+    ok: false, status: 400, json: async () => ({}),
+    text: async () => '{"error":{"message":"Unsupported parameter: \'max_tokens\'"}}',
+  }) as unknown as Response) as unknown as typeof fetch;
+  const chat = createChat({ apiKey: "k", model: "primary", fallbackModel: "primary", fetchImpl: fakeFetch });
+  await assert.rejects(() => chat("s", "u"), /HTTP 400 .*Unsupported parameter/);
 });
 
 test("createChat returns primary content on success", async () => {
   const fakeFetch = (async () => ({ ok: true, status: 200, json: async () => ({ choices: [{ message: { content: "hi" } }] }) }) as Response) as unknown as typeof fetch;
   const chat = createChat({ apiKey: "k", model: "primary", fallbackModel: "fallback", fetchImpl: fakeFetch });
-  assert.equal(await chat("s", "u"), "hi");
+  assert.deepEqual(await chat("s", "u"), { text: "hi", model: "primary" });
+});
+
+test("createChat sends options a GPT-5-era model accepts: no max_tokens, reasoning off, so temperature is allowed", async () => {
+  let body: Record<string, unknown> = {};
+  const fakeFetch = (async (_url: string, init: { body: string }) => {
+    body = JSON.parse(init.body) as Record<string, unknown>;
+    return { ok: true, status: 200, json: async () => ({ choices: [{ message: { content: "hi" } }] }) } as Response;
+  }) as unknown as typeof fetch;
+  await createChat({ apiKey: "k", model: "gpt-6-luna", fallbackModel: "fallback", fetchImpl: fakeFetch })("s", "u");
+  assert.equal(body.model, "gpt-6-luna");
+  assert.equal(body.reasoning_effort, "none");
+  assert.equal(body.temperature, 0.3);
+  assert.equal(body.max_completion_tokens, 1000);
+  assert.ok(!("max_tokens" in body), "max_tokens is rejected by every GPT-5-era model");
 });

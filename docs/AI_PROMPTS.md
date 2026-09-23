@@ -92,10 +92,12 @@ outcomeCounts={outcomeCounts}
 ## 3 Model, options, and fallback model
 
 Configured in `backend-ts/src/routes/ai.ts` (defaults) and `backend-ts/src/ai/openai-chat.ts`:
-- Primary model: `gpt-5.4-nano`
-- Fallback model: `gpt-4o-mini`
+- Primary model: `gpt-6-luna`
+- Fallback model: `gpt-5.4-nano`
+- Reasoning effort: `none`. GPT-5-era models reject `temperature` unless reasoning is off, and reject
+  `max_tokens` outright, so both configured models must accept these options.
 - Temperature: `0.3`
-- Max tokens: `1000`
+- Max completion tokens: `1000`
 
 Invocation behavior:
 1. Call primary model.
@@ -106,13 +108,15 @@ Invocation behavior:
 
 Every AI call writes `audit_events` with `entity_type='ai'`, a random AI entity UUID, the actor, and the
 payload wrapper `{ "timestamp": "ISO-8601", "payload": { ... } }` (`AI_GUARDRAILS.md` §4).
+`model` is the model that answered: the primary, or the fallback model after the primary failed (the
+worker logs a warning when that happens). When no model answered, it is the configured primary.
 
 ### 4.1 `AI_DRAFT_SPEC_GENERATED`
 `measureName`, `measureId`, `promptLength`, `outputLength`, `model`, `tokensUsed` (currently `-1`
 placeholder), `provider` (`openai` or `fallback-rules`), `fallbackUsed` (boolean).
 
 ### 4.2 `AI_CASE_EXPLANATION_GENERATED`
-`measureName`, `outcomeStatus`, `provider` (`openai` or `fallback-rules`), `fallbackUsed` (boolean).
+`measureName`, `outcomeStatus`, `provider` (`openai` or `fallback-rules`), `model`, `fallbackUsed` (boolean).
 References: `ref_run_id = case.lastRunId`, `ref_case_id = caseId`.
 
 ### 4.3 `AI_RUN_INSIGHT_GENERATED`

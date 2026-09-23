@@ -1,23 +1,30 @@
 /**
  * OpenAI chat client (#108 AI surfaces) — JVM-free replacement for Spring AI's
  * ChatClient. A plain `fetch` against the OpenAI Chat Completions REST API (no new
- * dependency, Cloudflare/Node-native), with the same primary→fallback model behavior
- * and options (temperature 0.3, max_tokens 1000) as the Java AiAssistService.
+ * dependency, Cloudflare/Node-native): a primary model, then a fallback model, with fixed
+ * options (no reasoning, temperature 0.3, at most 1000 completion tokens).
  *
  * `createChat` returns a `ChatFn` that throws on any failure (missing key, non-2xx,
  * empty content) AND after both models are exhausted — exactly the signal the AI
  * surfaces use to fall back to their deterministic, never-decides-compliance text.
+ * A reply names the model that gave it, so the audit ledger records which one answered.
  */
 
-/** A single system+user turn → assistant text. Throws on failure (→ deterministic fallback). */
-export type ChatFn = (systemPrompt: string, userPrompt: string) => Promise<string>;
+/** A model's answer, and which model gave it: the primary, or the fallback after the primary failed. */
+export interface ChatReply {
+  text: string;
+  model: string;
+}
+
+/** A single system+user turn → the answer. Throws on failure (→ deterministic fallback). */
+export type ChatFn = (systemPrompt: string, userPrompt: string) => Promise<ChatReply>;
 
 export interface ChatConfig {
   /** OpenAI API key; when unset every call throws → callers use their fallback. */
   apiKey?: string;
-  /** Primary model (Java default gpt-5.4-nano). */
+  /** Primary model (default in `routes/ai.ts`). */
   model: string;
-  /** Fallback model tried on primary failure (Java default gpt-4o-mini). */
+  /** Fallback model tried on primary failure. It must accept the same options as the primary. */
   fallbackModel: string;
   /** API base; override in tests. */
   baseUrl?: string;
@@ -27,7 +34,7 @@ export interface ChatConfig {
 
 const DEFAULT_BASE_URL = "https://api.openai.com/v1";
 
-async function callModel(cfg: ChatConfig, model: string, system: string, user: string): Promise<string> {
+async function callModel(cfg: ChatConfig, model: string, system: string, user: string): Promise<ChatReply> {
   if (!cfg.apiKey || !cfg.apiKey.trim()) {
     throw new Error("OpenAI API key is not configured.");
   }
@@ -40,8 +47,12 @@ async function callModel(cfg: ChatConfig, model: string, system: string, user: s
     },
     body: JSON.stringify({
       model,
+      // GPT-5-era models reject `max_tokens`, and reject `temperature` unless reasoning is off. These
+      // surfaces are short, templated text, so reasoning stays off: fast, cheap, and the whole token
+      // budget goes to the answer.
+      reasoning_effort: "none",
       temperature: 0.3,
-      max_tokens: 1000,
+      max_completion_tokens: 1000,
       messages: [
         { role: "system", content: system },
         { role: "user", content: user },
@@ -49,19 +60,22 @@ async function callModel(cfg: ChatConfig, model: string, system: string, user: s
     }),
   });
   if (!res.ok) {
-    throw new Error(`OpenAI chat call failed: HTTP ${res.status}`);
+    // OpenAI's error body names the rejected parameter; without it a model that refuses every call
+    // looks, in the logs, like a flaky network.
+    const detail = (await res.text().catch(() => "")).slice(0, 300);
+    throw new Error(`OpenAI chat call failed: HTTP ${res.status}${detail ? ` ${detail}` : ""}`);
   }
   const data = (await res.json()) as { choices?: Array<{ message?: { content?: unknown } }> };
   const content = data.choices?.[0]?.message?.content;
   if (typeof content !== "string" || !content.trim()) {
     throw new Error("OpenAI chat call returned empty content.");
   }
-  return content;
+  return { text: content, model };
 }
 
 /** Build a ChatFn that tries the primary model, then the fallback model (if distinct). */
 export function createChat(cfg: ChatConfig): ChatFn {
-  return async (system: string, user: string): Promise<string> => {
+  return async (system: string, user: string): Promise<ChatReply> => {
     try {
       return await callModel(cfg, cfg.model, system, user);
     } catch (primaryError) {
@@ -71,6 +85,8 @@ export function createChat(cfg: ChatConfig): ChatFn {
           `Primary model call failed and no fallback configured: ${(primaryError as Error).message}`,
         );
       }
+      // Say so: the answer still arrives, so nothing else shows the primary failing.
+      console.warn(`[ai] primary model ${cfg.model} failed, asking ${fb}: ${(primaryError as Error).message}`);
       return callModel(cfg, fb, system, user);
     }
   };

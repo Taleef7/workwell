@@ -355,7 +355,7 @@ delivers scheduled runs hours apart; to heal now, run the reconcile workflow by 
 | `DATABASE_URL` | B | Pooled Neon URL ⇒ Pg ceiling; unset ⇒ SQLite floor (`WORKWELL_SQLITE_PATH`). |
 | `WORKWELL_ENVIRONMENT` | B | `production` arms startup safety (`SPRING_PROFILES_ACTIVE=prod` and `NODE_ENV=production` also count). |
 | `WORKWELL_INSTANCE` | B | Deployment profile. |
-| `OPENAI_API_KEY` | B | AI surfaces (deterministic fallbacks, `AI_GUARDRAILS.md` §5); `WORKWELL_AI_OPENAI_MODEL` / `_FALLBACK_MODEL` override models. |
+| `OPENAI_API_KEY` | B | AI surfaces (deterministic fallbacks, `AI_GUARDRAILS.md` §5); `WORKWELL_AI_OPENAI_MODEL` / `_FALLBACK_MODEL` override models; both must accept the options in `AI_PROMPTS.md` §3. |
 | `WORKWELL_AUTH_ENABLED`, `WORKWELL_AUTH_JWT_SECRET` | B | Auth defaults on; `false` refused in production. |
 | `WORKWELL_AUTH_COOKIE_SAME_SITE` / `_SECURE` | B | **`None` / `true` in production**; defaults `Lax` / `false` locally. |
 | `WORKWELL_CORS_ALLOWED_ORIGINS` | B | Exact origins; production refuses wildcard/blank/`localhost` with **503 `unsafe_configuration`**. First origin = Studio link in CDS cards; add a browser CDS client's origin deliberately (ADR-067). |
