@@ -27,6 +27,7 @@ import { directoryForRows, type DirectorySnapshot } from "../engine/ingress/webc
 import { DEPLOYMENT_PROFILE, DIRECTORY, isRunnableMeasure, profileSubjectMatcher, tenantById } from "../config/deployment-profile.ts";
 import { isWebChartConfigured, type DataSourceEnv } from "../engine/ingress/data-source.ts";
 import { isOfficialRouted } from "../wiring/official-routing.ts";
+import { snapshotsUnderstateRate } from "../quality/snapshot-basis.ts";
 import { latestPopulationSnapshot, latestPopulationWinners, RunKeyedMemo, type VisibilityContext } from "./latest-population.ts";
 import type { LatestPopulationRun } from "../stores/outcome-store.ts";
 
@@ -769,8 +770,8 @@ export async function programTrend(
     opts?.monthly &&
     deps.qualitySnapshots &&
     scope &&
-    !isOfficialRouted(measureId) &&
-    !producedOutOfPopulation &&
+    // The one rule the history route applies too (#642: that route used to go around this one).
+    !snapshotsUnderstateRate(measureId, producedOutOfPopulation) &&
     monthlySnapshotScopeIsSafe(scope, webChartConfigured, hasWebChartRows)
   ) {
     const snaps = await deps.qualitySnapshots.querySnapshots({

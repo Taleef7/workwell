@@ -5,7 +5,12 @@
  * Authenticated under /api/** by the worker's security matrix; read-only (all roles).
  *
  *   GET /api/quality/history?measureId=&scopeLevel=&scopeId=&tenant=&from=&to=
- *     → QualitySnapshotRow[] (period ASC), the time-series for the selected measure + scope.
+ *     → QualitySnapshotRow[] (period ASC), the time-series for the selected measure + scope;
+ *     → 409 `snapshot_basis_unsafe` for a measure whose snapshots would understate its rate (#642).
+ *
+ * The series itself is still never a re-scan of the outcome history. The #642 check reads at most ONE
+ * run's rows for the measure (none at all for an officially routed one) to learn whether the measure
+ * produces out-of-population subjects — see `quality/snapshot-basis.ts`.
  *
  * `from`/`to` are inclusive `YYYY-MM` calendar-month bounds (400 on malformed — parity with the
  * `/api/programs` YYYY-MM-DD validator). Descriptive only — CQL `Outcome Status` stays authoritative
@@ -14,6 +19,7 @@
 import type { CloudDatabase } from "@mieweb/cloud";
 import { getStores } from "../stores/factory.ts";
 import type { QualityScopeLevel } from "../stores/quality-snapshot-store.ts";
+import { monthlySnapshotsUnderstateRate, SNAPSHOT_BASIS_REFUSAL } from "../quality/snapshot-basis.ts";
 
 interface QualityEnv {
   DB: CloudDatabase;
@@ -66,6 +72,10 @@ export async function handleQuality(req: Request, env: QualityEnv): Promise<Resp
   }
 
   const s = await getStores(env);
+  // #642: refuse rather than serve a series that understates the rate. A 409 and not an empty array:
+  // "no history yet" and "history exists but would be wrong" are different answers, and the panel must
+  // be able to say which (the same shape as ADR-077's `run_compacted`).
+  if (await monthlySnapshotsUnderstateRate(s.outcomes, measureId)) return json(SNAPSHOT_BASIS_REFUSAL, 409);
   const rows = await s.qualitySnapshots.querySnapshots({
     measureId,
     scopeLevel: (scopeLevelRaw as QualityScopeLevel) ?? undefined,
