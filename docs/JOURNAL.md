@@ -12,8 +12,10 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
   report can be demonstrated, and PY2027 is ready. Asks blocked on MIE, the practice or the ACO carry the
   `waiting` label; minor findings are one checklist in #655. Open issues went from 108 to 52.
 - **Docs trimmed.** `docs/archive/`, finished plans, proposals, the July trial runbook and the stale
-  `DATA_MODEL.md` were deleted (git history keeps them). ADRs, `ARCHITECTURE.md`, `DEPLOY.md` and
-  `DATA_MODEL_CONTRACTS.md` were condensed.
+  `DATA_MODEL.md` were deleted (git history keeps them). `ARCHITECTURE.md`, `DEPLOY.md` and
+  `DATA_MODEL_CONTRACTS.md` were condensed. **The ADRs were retired**: `DECISIONS.md` and `ADR_INDEX.md`
+  are deleted, the three rules that governed and lived nowhere else moved to CLAUDE.md, AI_GUARDRAILS §7
+  and LOCKED_DECISIONS §4A.7, and an old `ADR-0NN` id resolves with `git show fd243d34:docs/DECISIONS.md`.
 - **#677 (#642)** was failing CI because VSAC intermittently answers 401 for a valid key and the vendoring
   script treated that as final. 401 and 429 are now retried.
 - **#637 decided: no prior-year history.** The corpus stays current-year only; 1 January starts near
