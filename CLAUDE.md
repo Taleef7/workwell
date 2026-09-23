@@ -74,7 +74,7 @@ The GitHub milestone **"Ready for January"** (`gh issue list --milestone "Ready 
 - Table schemas: `backend-ts/src/stores/postgres/schema-pg.ts` (the SQLite floor mirrors it)
 
 `docs/archive/` was deleted on 2026-09-23. A reference to it anywhere (code comments, old docs) resolves
-from git history: `git show a387cb52:docs/archive/<file>`.
+from git history: `git show before-docs-trim:docs/archive/<file>`.
 
 ## Current focus
 **The Maui pilot sandbox, before PY2027 starts on 2027-01-01.** The work is the "Ready for January"

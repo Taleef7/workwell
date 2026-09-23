@@ -1,8 +1,8 @@
 # Decisions
 
 Architecture decision records, newest first. Condensed on 2026-09-23 to what was decided and why; the
-full original text of any ADR is in git history (`git show a387cb52:docs/DECISIONS.md`, and
-`git show a387cb52:docs/archive/DECISIONS_ARCHIVE.md` for the ones that had been archived).
+full original text of any ADR is in git history (`git show before-docs-trim:docs/DECISIONS.md`, and
+`git show before-docs-trim:docs/archive/DECISIONS_ARCHIVE.md` for the ones that had been archived).
 
 Code cites numbered sub-decisions (`ADR-074 d13`, `ADR-046 decision 3`, `ADR-060 §5`); those numbers are
 the originals and are kept as they were. One ADR number was assigned during the condensing: ADR-033,
