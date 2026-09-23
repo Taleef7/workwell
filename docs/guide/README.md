@@ -161,4 +161,4 @@ The guide explains; these specify. [`ARCHITECTURE.md`](../ARCHITECTURE.md) (modu
 [`STANDARDS_CONFORMANCE.md`](../STANDARDS_CONFORMANCE.md) (what we claim and refuse to claim),
 [`ROADMAP_2026-08-30.md`](../ROADMAP_2026-08-30.md) (the approved plan — the Maui pilot;
 [`ROADMAP_2026-08-04.md`](../ROADMAP_2026-08-04.md) §4 remains the verification bar), and
-[`DECISIONS.md`](../DECISIONS.md) (the ADR record).
+[`LOCKED_DECISIONS.md`](../LOCKED_DECISIONS.md) (the owner's locked decisions).

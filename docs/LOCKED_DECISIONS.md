@@ -1,8 +1,9 @@
 # Locked decisions (always-loaded)
 
 > The owner's locked decisions — the things a session must not silently contradict. Stated as they stand
-> today; the dated amendments that got them here are in git history and in the ADRs named. Section and item
-> numbers are cited elsewhere ("locked decision 2", "§4A.3") and stay fixed.
+> today; the dated amendments that got them here are in git history (an `ADR-0NN` id resolves as CLAUDE.md
+> says). Section and item numbers are cited elsewhere ("locked decision 2", "§4A.3") and stay fixed; a
+> new decision is APPENDED.
 
 ## 4. Owner decisions (locked 2026-08-04, ADR-058)
 
@@ -51,3 +52,5 @@ The plan is `docs/ROADMAP_2026-08-30.md`; the verification bar stays §4 decisio
 6. **Naming policy:** repo documents say "Maui" (the deployment) and "the pilot group" only — no
    client-side legal or staff names and no client-provided documents (MIE-side names are fine); pilot user
    accounts use pseudonymous identifiers; source materials stay under the gitignored local-only path.
+7. **Which staff member works each provider's panel is kept in WorkWell**, not taken from WebChart
+   departments; MIE data may only seed it through a reviewed import (owner decision, 2026-09-12).

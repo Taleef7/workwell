@@ -1,7 +1,6 @@
 # `backend-ts/` — WorkWell TypeScript backend on `@mieweb/cloud`
 
-Phase 0 skeleton for **issue #96** (de-Java re-platform). See **ADR-008**
-(`../docs/DECISIONS.md`).
+Phase 0 skeleton for **issue #96** (de-Java re-platform). See **ADR-008**.
 
 This worker-style TypeScript app replaces the Java/Spring `backend/` **incrementally**
 (strangler-fig). The Java `backend/` and the `frontend/` stay untouched as the reference
