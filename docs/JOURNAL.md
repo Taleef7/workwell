@@ -33,6 +33,12 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
   docs-only merges no longer redeploy both stacks. The Maui Playwright suite now runs on every push.
   Deleted: the stale TWH Playwright suite (it targeted a July staging build), the weekly stub-engine
   scale job, the never-run redirect workflow, and the always-failing frontend Dependabot entry.
+- **Security cleanup.** Next.js 16.3.0 -> 16.3.6 closes two critical advisories (remote code execution via
+  the AVIF image optimizer; the other applies only to Windows hosts), and patched versions of sharp,
+  dompurify, undici, js-yaml, brace-expansion, browserslist, Babel, Vitest, immutable and the Hono server
+  adapter close most of the rest (68 open alerts -> ~14). Left on purpose: hono and vite (installed as
+  peers, which pnpm will not move; their advisories are in features we do not use), and csv-parse and
+  uuid (major bumps the pinned engine libraries do not allow).
 - **#671: the patient page agrees with itself.** Its posture and Measure Details now read an outcome the way
   its table does (out of population is "Not in population", not "Missing Data"), list only the measures the
   deployment runs (no old Hypertension on Maui), and name the official-only measures instead of `cms130`.
