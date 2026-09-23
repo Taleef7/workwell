@@ -42,8 +42,6 @@ defaults to empty and every API call resolves against the frontend's own origin 
 - Brand stylesheets live in `public/brands/*.css`; re-sync them from the package with `pnpm sync:brands` after upgrading `@mieweb/ui`.
 - Import `@mieweb/ui` only from `"use client"` modules — its barrel runs `React.createContext` at load and breaks Server Component builds (see `components/client-providers.tsx`).
 - **DataVis NITRO data grid** drives the large operational/audit tables (`/measures`, `/runs` Outcomes, `/admin`). It is consumed via `@mieweb/ui/datavis` + a vendored `datavis` source (`vendor/datavis`, aliased `file:`) — see `vendor/datavis/VENDORING.md` and ADR-007. Use it through the client-only `features/datavis/NitroGrid` wrapper (never import `@mieweb/ui/datavis` directly); rich cells via `formatCell`. Small in-card tables stay semantic.
-- Full migration details + remaining `@mieweb/ui` control-swap gaps (issue #99): `MIEWEB-UI-MIGRATION.md`.
-
 ## Notes
 
 - The app uses the Next.js App Router.

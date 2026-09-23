@@ -69,8 +69,7 @@ export function parseCdsPath(
 /**
  * A hook's `context.patientId` is a bare EHR id; WorkWell persists live subjects as `wc|<patientId>`
  * (`live-directory.ts`, `run-pipeline.ts`) and the synthetic directory as `emp-006`. Both are tried, live
- * namespace first, so a WebChart client does not silently read as "no gaps" — the trap
- * `docs/PROPOSALS_2026-08.md` §P1 names.
+ * namespace first, so a WebChart client does not silently read as "no gaps".
  */
 export function candidateSubjectIds(patientId: string): string[] {
   return patientId.startsWith("wc|") ? [patientId] : [`wc|${patientId}`, patientId];

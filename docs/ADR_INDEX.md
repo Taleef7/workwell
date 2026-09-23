@@ -1,102 +1,93 @@
-# ADR Index (always-loaded extract)
+# ADR Index (always-loaded)
 
-> **Titles only.** `docs/DECISIONS.md` is authoritative and may be ahead of this file; open it for the
-> reasoning, alternatives and consequences. This exists so a session knows a decision *exists* and
-> roughly what it says (~1.1k tokens, vs ~44k for the bodies). Regenerate after adding an ADR:
-> `grep -o '^#\+ ADR-[0-9]*.*' docs/DECISIONS.md`, newest first. If the highest number here is lower
-> than the highest there, this file is stale.
->
-> **`·archived`** (14 of 87) means the BODY moved to `docs/archive/DECISIONS_ARCHIVE.md` — superseded,
-> or a historical *finding* rather than a decision that governs. `DECISIONS.md` keeps every heading plus
-> a pointer, so every cross-reference still resolves. The 71 unmarked titles are the record that governs.
->
-> **ADR-033 does not exist** — the sequence runs 031, 032, 034. Verified absent 2026-07-29. Do not reuse it.
+> Titles only, newest first, so a session knows a decision exists. The entries are in `docs/DECISIONS.md`.
+> Regenerate after adding an ADR: `grep -o '^## ADR-[0-9]*.*' docs/DECISIONS.md`. A tag after a title marks
+> an ADR that is superseded or a historical finding rather than a decision that governs.
 
-## Titles (newest first)
-
-- ADR-087: a dashboard resolves its winning runs ONCE, and a read that folds its rows does not pay to sort them
-- ADR-086: what the source did not say is not ours to supply — a code keeps its meaning, and a corpus keeps its knowledge cutoff
-- ADR-085: a long run yields the event loop between subjects, and a run too long for a request is scheduled rather than awaited
-- ADR-084: a statement timeout is a role default the pooler cannot strip — and a filter belongs in SQL only where the database can see what it filters on
-- ADR-083: an exception is data the measure reads, never a status WorkWell flips — and a case a person closed is still a gap the run counts
-- ADR-082: an attributed list is an immutable assertion someone else made — and the sandbox refuses to hold a real one
-- ADR-081: the repeat-non-complier streak is retired, because a retention window cannot hold one
-- ADR-080: a provider panel is a durable mapping WorkWell owns and applies, and who chose an assignee is written down
-- ADR-079: the population membership a run already knew is WRITTEN DOWN — and a subject outside the population is subtracted from the rate, not counted as a gap
-- ADR-078: the sandbox routes the ACO's whole computable set — and a subject outside a measure's population is a result, not a case
-- ADR-077: a report is refused rather than rendered from rows that may be incomplete — and a dashboard rate is the evidence's rate, shown apart from the workflow's
-- ADR-076: profile trust is a per-measure fact, and an operator's next action outranks the wording table
-- ADR-075: the pilot's roster is a generated corpus the deployment composes lazily, and evaluation runs in subject chunks
-- ADR-074: a multi-rate measure is read as every one of its rates — and a subject is compliant only where each rate they are in is met
-- ADR-073: per-subject outcome history is a retention WINDOW, and the durable history is the aggregate
-- ADR-072: a measure is runnable when it is authored OR official-only-and-routed — and an eCQM is scored over its calendar year, not a rolling window
-- ADR-071: official-only measures take the vendored manifest's id — and a legacy catalog row is deprecated, never rewritten
-- ADR-070: the spearhead moves to a patient-driven pilot deployment — and the ACO's measure set finds the engine five-sixths already built
-- ADR-069: population membership applies the CQM IG's formulas per subject — and spec application is silent where corruption is loud
-- ADR-068: the OpenAPI document covers the PROMISED surface only, and a routed-path test is what makes hand-authoring defensible
-- ADR-067: CDS Hooks cards render a completed evaluation and never trigger one — and the outcome-to-card mapping is ours, which is stated rather than implied
-- ADR-066: the documentation splits into a maintained guide and a dated archive — because a doc that explains and a doc that records rot at different speeds
-- ADR-065: an authored regulatory measure is verified by traceability and adversarial cases — no external oracle exists, and none can be manufactured
-- ADR-064: one UCUM validator, shared by every translator we run — and an honest table rather than a new dependency
-- ADR-063: a package is publishable when its tarball runs outside the workspace — not when it is published
-- ADR-062: codegen is not the engine, and a consumer that shares no code with the app is the only proof the split worked
-- ADR-061: the compliance API says where its numbers came from, and 404s rather than answering an absence
-- ADR-060: a translator gap and an engine gap are different findings, so the conformance harness never merges them
-- ADR-059: the engine takes its measure content INJECTED — and the test-edge blocker dissolved rather than being paid
-- ADR-058: QRDA III carries QDM identity, which the FHIR lineage does not have — so the verification bar moves to the FHIR column rather than the label moving to the QDM one
-- ADR-057: The live third-party WebChart path derives the two elements our SQL mappers add — because reading a server's own "female" as not-female is also an inference, and a worse one
-- ADR-056: A batch import and an import-driven finalize — the two routes the certification loop needed, and the guard that keeps finalize from being a "finish this run" button  ·archived
-- ADR-055: What a QDM datatype becomes in FHIR is read off the artifact's own ELM retrieves — and the importer is now measured against a third party's answers  ·archived
-- ADR-054: CMS130 and CMS165 onboard clean — the credentialed workflow's completion flag was already doing the capped-expansion work ADR-041 built it for  ·archived
-- ADR-053: "the terminology is complete" was only ever a claim about what the bundle DECLARED
-- ADR-052: the app-side exclusions are decided and enforced; what the package does with CONTENT is not
-- ADR-051: QRDA Category I import is a mapping into the unchanged engine — and it proved the export only works in real terminology  ·archived
-- ADR-050: QRDA Category I is a patient-DATA document, measured against the HL7 base IG — not the CMS Hospital one
-- ADR-049: QRDA Category I exists, reports population membership only, and says so in the document *(central claim superseded by ADR-050)*  ·archived
-- ADR-048: The TRANSLATOR debt is paid; the CLI-surface debt is not, and the split is not a file move  ·archived
-- ADR-047: A measure is onboarded when its MADiE gate is green — vendoring is not onboarding
-- ADR-046: Canonical, improvementNotation and membership all derive from the outcome's own evidence
-- ADR-045: The flip is a WORKFLOW edit, gated by tests that read what the workflow ships — and cms125 goes alone
-- ADR-044: One real mammogram is emitted in BOTH vocabularies — dual-stamping is normalization, and the flip gate gets a command
-- ADR-043: A whole roster out of the initial population is SURFACED at runtime and ENFORCED at the flip gate — never refused mid-run
-- ADR-042: The WebChart↔official IPP gap is closed by mapping and guarded by a parity gate — not by refusing the configuration (the NUMERATOR gap stays open)
-- ADR-041: A capped official expansion is completed at vendor time, from a pinned VSAC release, or not at all
-- ADR-040: The engine declares the logic it runs; the incremental cache never infers it
-- ADR-039: The shadow diff is a shadow of the runtime, not a study of its own  ·archived
-- ADR-038: The synthetic corpus is verified against the official artifact's own terminology  ·archived
-- ADR-037: Official execution prepares bundles for QI-Core — normalization only, never fabrication
-- ADR-036: Official terminology is the artifact's own, fetched at build and pinned by hash — not our VSAC import
-- ADR-035: Incremental/delta batch evaluation is a descriptive, inert-unless-configured cache (#263)
-- ADR-034: Standalone WCDB FHIR shim package (`wcdb-fhir-shim/`) owns the MariaDB driver; CQL→SQL generation stays pure in backend-ts
-- ADR-032: A local HAPI FHIR server is the WebChart simulator ("fake WebChart")
-- ADR-031: MeasureReport exports use membership-label counts and binding-owned measure semantics
-- ADR-030: Durable evidence storage is an app-level S3 seam (`resolveBucket`), not a binding-config change (#167 / #270)
-- ADR-029: Immunization forecasting is a self-hosted ICE sidecar behind the existing port — the stub is replaced by a real adapter (#76 / D18)
-- ADR-028: WebChart transport implements the verified public FHIR contract — SMART Backend Services auth (dual-mode) + per-resource composition — E12 PR-2c (#262)
-- ADR-027: Production CMS122/CMS125 evaluate eCQI v14 faithful-subset CQL (not toy day-count rules); literal QICore remains diagnostic — 2026-07  ·archived
-- ADR-026: `fqm-execution` as a diagnostic-only dependency for the LITERAL official-CQL execution diff (pre-shipped ELM, no translation) — E14 literal diff (#258)
-- ADR-025: Measure execution is pluggable behind a `MeasureExecutor` seam; FHIR-native is the default + correctness oracle, CQL→SQL is a parity-gated future executor — E9 (#78)
-- ADR-024: Official CMS122 fidelity via a faithful subset, not the literal QICore CQL — E14 PR-3 (#186)  ·archived
-- ADR-023: Live VSAC value-set resolution behind the `ValueSetResolver` port (composite, inert-unless-configured, descriptive-only) — E14 PR-3 on-ramp
-- ADR-022: Cross-system identity is a read-time resolution layer (match-don't-auto-merge; human-in-the-loop) — E15 PR-1 (#187)
-- ADR-021: Quality-over-time is a materialized AGGREGATE snapshot store (numerator/denominator per measure/month/scope) — E16 PR-1
-- ADR-020: Population scale via generated outcomes + encoded `subject_id` + SQL aggregation (provider-leaf) — E13 PR-2 (#185)
-- ADR-019: Multi-tenant rollup modeled in the read-time synthetic directory; cross-system aggregate root — E13 PR-1 (#185)
-- ADR-018: Standards fidelity is structural/definitional-first; official-CQL execution deferred — E14 (#186)  ·archived
-- ADR-017: E12 data ingress is FHIR-native-first; adapters feed the unchanged engine (no CQL→SQL transpile) — E12 (#184)
-- ADR-016: Segments / risk-groups are an applicability layer, not a compliance authority — E11.3 (#183)
-- ADR-015: CQL is canonical; rule-params compile to CQL (codegen) — E11.1 (#183)
-- ADR-014: CQL→SQL bridge (charter Q2) — recommendation recorded, decision DEFERRED to Doug  ·archived
-- ADR-013: E7 order-proposal engine — `ProposedOrder`/`StandingOrderProvider` port (EH-ready, simulated by default)
-- ADR-012: E6 immunization & forecasting — `ImmunizationForecast` port (ICE-ready, simulated by default) + AIS-E Td/Tdap measure
-- ADR-011: E5 outreach at scale — multi-channel `OutreachChannel` port + staged (audit-backed → Pg) campaign persistence
-- ADR-010: E4 multi-level hierarchy — provider = attributed clinician, modeled in the synthetic directory (no DB schema)
-- ADR-009: Emit eCQM artifacts JVM-free; QRDA III as a structurally-representative stub  ·archived
-- ADR-008: De-Java the backend — re-platform onto TypeScript / `@mieweb/cloud` (strangler-fig)
-- ADR-007: Vendor `@mieweb/datavis` (NITRO grid) source to unblock the data grid
-- ADR-006: Declarative YAML measure definitions + headless evaluator CLI
-- ADR-005: Measure engine ports/adapters (same module, synthetic default adapter)
-- ADR-004: Adopt `@mieweb/ui` as the frontend component library (dark mode + Enterprise Health brand)
-- ADR-001: Single Spring Boot deployable with modular package boundaries  ·archived
-- ADR-003: Single all-encompassing TWH instance (consolidation from three-instance model)
-- ADR-002: evidence_json shape and define-level traceability
+- ADR-087: The dashboard resolves winning runs once and skips needless sorts
+- ADR-086: Preparation never invents codes, and the corpus never knows the future
+- ADR-085: Long runs yield the event loop, and MEASURE runs are scheduled
+- ADR-084: Statement timeout is a role default; filter in SQL where possible
+- ADR-083: An exception is data the measure reads; staff closures change no number
+- ADR-082: The ACO's attributed list is immutable; the sandbox refuses real ones
+- ADR-081: The repeat-non-complier streak is retired
+- ADR-080: Provider panels assign new cases, and assignment source is recorded
+- ADR-079: Record out-of-population and remove it from rate denominators
+- ADR-078: The sandbox routes all six ACO measures; out-of-population opens no case
+- ADR-077: Refuse reports from incomplete rows; show the evidence rate separately
+- ADR-076: Profile trust is per measure; operator next actions survive reruns
+- ADR-075: The pilot roster is a generated corpus, evaluated in subject chunks
+- ADR-074: Multi-rate measures are read on every rate
+- ADR-073: Outcome rows live in a retention window; history is the aggregate
+- ADR-072: Runnable means authored or official-routed; eCQMs score calendar years
+- ADR-071: Official-only measures use the manifest's bare id
+- ADR-070: The Maui patient pilot becomes the spearhead
+- ADR-069: Population membership follows the CQM IG formulas per subject
+- ADR-068: A hand-authored OpenAPI document for the promised API only
+- ADR-067: CDS Hooks cards render finished evaluations, via our own mapping
+- ADR-066: Docs split into a maintained guide and a dated archive
+- ADR-065: Authored regulatory measures are verified by traceability and adversarial tests
+- ADR-064: One shared UCUM validator for every CQL translator
+- ADR-063: Packages are verified by packing and consuming the tarball
+- ADR-062: Codegen leaves the engine; an app-independent consumer proves the split
+- ADR-061: The compliance API names its evidence source and 404s on absence
+- ADR-060: The CQL conformance harness keeps translator and engine failures separate
+- ADR-059: The engine package receives measure content injected and ships none
+- ADR-058: The verification bar is FHIR-column checks, not relabelling for Cypress
+- ADR-057: The live WebChart path derives us-core-sex and the imaging mammogram Observation
+- ADR-056: QRDA I batch import and an import-only finalize route  · Finding (historical)
+- ADR-055: QRDA I import maps each QDM datatype to what the ELM retrieves  · Finding (historical)
+- ADR-054: CMS130 and CMS165 onboarded on their first credentialed vendor run  · Finding (historical)
+- ADR-053: The vendor step reports value sets the upstream bundle never shipped
+- ADR-052: Synthetic, ingress, immunization and CLI code are app content
+- ADR-051: QRDA I import maps documents into the unchanged engine  · Finding (historical)
+- ADR-050: QRDA Category I carries patient data, checked against the HL7 base IG
+- ADR-049: QRDA I reported population membership (superseded)  · Superseded by ADR-050
+- ADR-048: The CQL translator moved out of the engine tree  · Finding (historical)
+- ADR-047: A measure is onboarded only when its MADiE gate passes
+- ADR-046: Report canonical, improvementNotation and membership come from the outcome's evidence
+- ADR-045: Official routing is switched by a reviewed, test-gated workflow edit
+- ADR-044: Mammograms are dual-stamped for both engines; flip-snapshot compares engines before a flip
+- ADR-043: A whole roster outside the population is warned, never refused mid-run
+- ADR-042: Close the WebChart–official population gap by mapping, not refusal
+- ADR-041: Complete VSAC-capped official expansions at vendor time, pinned, or not at all
+- ADR-040: The engine declares its logic identity; the cache never infers it
+- ADR-039: The shadow diff evaluates exactly what the runtime evaluates  · Finding (historical)
+- ADR-038: Corpus codes are verified against the official artifact's terminology  · Finding (historical)
+- ADR-037: Prepare bundles for QI-Core by normalization, never fabrication
+- ADR-036: Official terminology is the artifact's own, fetched at build and hash-pinned
+- ADR-035: Incremental evaluation is an opt-in cache that never changes answers
+- ADR-034: The WCDB FHIR shim is a standalone package that owns the MariaDB driver
+- ADR-033: Inject a schema-free live WebChart directory into population read models
+- ADR-032: A local HAPI FHIR server stands in for WebChart
+- ADR-031: MeasureReport counts use membership labels and per-measure semantics
+- ADR-030: Durable evidence storage is an app-level S3 seam
+- ADR-029: Immunization forecasting uses a self-hosted ICE sidecar behind the port
+- ADR-028: WebChart transport follows its verified public FHIR contract and SMART auth
+- ADR-027: Production CMS122/CMS125 ran eCQI v14 faithful-subset CQL  · Superseded by the flip (ADR-045/ADR-046)
+- ADR-026: fqm-execution runs CMS's pre-compiled ELM, quarantined in one package
+- ADR-025: Measure execution is pluggable behind a MeasureExecutor seam
+- ADR-024: Official CMS122 fidelity via a hand-authored faithful subset  · Superseded by ADR-026 and ADR-027
+- ADR-023: Live VSAC value-set resolution behind the ValueSetResolver port
+- ADR-022: Cross-system identity is a read-time layer that matches but never auto-merges
+- ADR-021: Quality over time is a materialized aggregate snapshot store
+- ADR-020: Population scale via encoded subject ids and SQL aggregation
+- ADR-019: Multi-tenant rollup lives in the read-time synthetic directory
+- ADR-018: Standards fidelity started structural, deferring official-CQL execution  · Overtaken by official-CQL execution (ADR-025/ADR-026)
+- ADR-017: Real EHR data enters as FHIR bundles into the unchanged engine
+- ADR-016: Segments decide applicability, never compliance
+- ADR-015: CQL is canonical; rule params compile to CQL
+- ADR-014: CQL→SQL bridge recommendation, left to Doug  · Superseded by ADR-025
+- ADR-013: Order proposals are advisory, deduplicated, and never auto-submitted
+- ADR-012: Immunization forecasting is an advisory port; AIS-E Td/Tdap is the measure
+- ADR-011: Outreach goes through a multi-channel port; campaigns are audit-backed for now
+- ADR-010: Provider is the attributed clinician, modeled in the synthetic directory
+- ADR-009: eCQM artifacts are emitted JVM-free; QRDA III began as a stub  · Partly superseded by ADR-058 (the QRDA III stub half; JVM-free emission stands)
+- ADR-008: Re-platform the backend onto TypeScript and @mieweb/cloud, JVM-free
+- ADR-007: Vendor the @mieweb/datavis NITRO grid source
+- ADR-006: Measures are declared in YAML and run by a headless evaluator
+- ADR-005: The measure engine reads its inputs through ports
+- ADR-004: Adopt @mieweb/ui as the frontend component library
+- ADR-003: One all-encompassing TWH instance replaces three
+- ADR-002: evidence_json keeps define-level results; the rule path is derived
+- ADR-001: Single Spring Boot deployable with modular packages  · Superseded by ADR-008

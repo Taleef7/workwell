@@ -1,7 +1,7 @@
 /**
  * SQLite/D1 portable-floor DDL for the run store (spike, #103).
  *
- * Mirrors the shape of the Postgres `runs` + `run_logs` tables (docs/DATA_MODEL.md)
+ * Mirrors the shape of the Postgres `runs` + `run_logs` tables (postgres/schema-pg.ts)
  * reduced to the SQLite floor: TEXT timestamps/UUIDs, INTEGER autoincrement log id,
  * TEXT JSON column. The Postgres ceiling adapter (#104) keeps TIMESTAMPTZ/JSONB/uuid.
  *
@@ -55,7 +55,7 @@ CREATE INDEX IF NOT EXISTS outcomes_run_id_idx ON outcomes (run_id);
 CREATE INDEX IF NOT EXISTS outcomes_subject_idx ON outcomes (subject_id, evaluated_at DESC);
 CREATE INDEX IF NOT EXISTS outcomes_measure_idx ON outcomes (measure_id, evaluated_at);
 
-/* Cases (#107). Floor analogue of the canonical cases table (docs/DATA_MODEL.md):
+/* Cases (#107). Floor analogue of the canonical cases table (postgres/schema-pg.ts):
    measure_id (slug) stands in for the canonical measure_version_id UUID. The
    idempotency invariant is UNIQUE (employee_id, measure_id, evaluation_period) — a
    rerun upserts, never duplicates. (Block comment: this DDL is newline-flattened.) */
@@ -91,7 +91,7 @@ CREATE TABLE IF NOT EXISTS cases (
 
 CREATE INDEX IF NOT EXISTS cases_status_idx ON cases (status);
 
-/* Case actions (#107). Floor analogue of case_actions (docs/DATA_MODEL.md): one row per
+/* Case actions (#107). Floor analogue of case_actions (postgres/schema-pg.ts): one row per
    operator/system action on a case (ASSIGNED, ESCALATED, OUTREACH_SENT, …). payload_json
    is the action detail. INTEGER autoincrement id doubles as the stable tiebreak sort_key. */
 CREATE TABLE IF NOT EXISTS case_actions (
@@ -105,7 +105,7 @@ CREATE TABLE IF NOT EXISTS case_actions (
 
 CREATE INDEX IF NOT EXISTS case_actions_case_id_idx ON case_actions (case_id);
 
-/* Audit events (#107). Append-only ledger (docs/DATA_MODEL.md): every state change writes
+/* Audit events (#107). Append-only ledger (postgres/schema-pg.ts): every state change writes
    one row (CLAUDE.md hard rule). measure_version_id holds the floor measure slug. The
    case timeline is audit_events (excl CASE_VIEWED) UNION case_actions ordered by occurred_at. */
 CREATE TABLE IF NOT EXISTS audit_events (
@@ -130,7 +130,7 @@ CREATE INDEX IF NOT EXISTS audit_events_event_type_idx ON audit_events (event_ty
 CREATE INDEX IF NOT EXISTS audit_events_ref_run_id_idx ON audit_events (ref_run_id);
 
 /* Measures + measure_versions (#107 authoring). Floor analogue of the canonical tables
-   (docs/DATA_MODEL.md): tags + spec_json are JSON TEXT on the floor (TEXT[]/JSONB on the
+   (postgres/schema-pg.ts): tags + spec_json are JSON TEXT on the floor (TEXT[]/JSONB on the
    ceiling). Seeded from MEASURE_CATALOG on first use; create/lifecycle mutate these rows.
    One latest version per measure for the catalog seed (version cloning is a later slice). */
 CREATE TABLE IF NOT EXISTS measures (
@@ -160,7 +160,7 @@ CREATE TABLE IF NOT EXISTS measure_versions (
 CREATE INDEX IF NOT EXISTS measure_versions_measure_id_idx ON measure_versions (measure_id);
 
 /* Audit packet exports (#108 auditor packets). Floor analogue of audit_packet_exports
-   (docs/DATA_MODEL.md): one row per generated auditor packet (RUN / MEASURE_VERSION / CASE),
+   (postgres/schema-pg.ts): one row per generated auditor packet (RUN / MEASURE_VERSION / CASE),
    recording type, entity, format, actor, the SHA-256 payload hash + byte size for integrity.
    Written alongside an AUDIT_PACKET_GENERATED audit_event on every packet build. */
 CREATE TABLE IF NOT EXISTS audit_packet_exports (
@@ -174,7 +174,7 @@ CREATE TABLE IF NOT EXISTS audit_packet_exports (
   payload_size_bytes INTEGER
 );
 
-/* Evidence attachments (#108). Floor analogue of evidence_attachments (docs/DATA_MODEL.md /
+/* Evidence attachments (#108). Floor analogue of evidence_attachments (postgres/schema-pg.ts /
    canonical V006): file METADATA only — the bytes live in the BUCKET binding under storage_key.
    case_id is the floor case id (TEXT). */
 CREATE TABLE IF NOT EXISTS evidence_attachments (

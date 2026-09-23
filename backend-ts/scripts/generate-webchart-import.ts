@@ -1,6 +1,6 @@
 /**
  * `pnpm generate:webchart-import` — derive WebChart bulk-import files (synthetic ~30-patient
- * population) for the teatea trial (`docs/WEBCHART_TEATEA_RUNBOOK_2026-07-16.md` §4).
+ * population) for the July 2026 teatea WebChart trial.
  *
  *   pnpm generate:webchart-import [--patients 30] [--as-of YYYY-MM-DD] [--out ../webchart-import] [--format csv|checklist|all]
  *
@@ -196,7 +196,7 @@ function isValidDate(s: string): boolean {
 // PHI). The teatea trial's Chart Data CSV API validates `patients.zip_code` against a `12345`/`12345-6789`
 // regex on EVERY row and rejects the header when it is absent — verified live 2026-07-16 (the exact error
 // was "Patient zip code must be formatted either 12345-6789 or 12345"; `@patient_mrns.MR` and all other
-// `patients.*` columns validated). See docs/WEBCHART_TEATEA_RUNBOOK_2026-07-16.md §4.
+// `patients.*` columns validated).
 const DEMO_ZIP = "46514";
 
 function patientsCsv(people: Person[]): string {

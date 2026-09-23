@@ -1,6 +1,6 @@
 /**
  * Storage contract — `OutcomeStore` (#104). Per-subject evaluated results for a run.
- * Mirrors the shape of the Postgres `outcomes` table (docs/DATA_MODEL.md), reduced
+ * Mirrors the shape of the Postgres `outcomes` table (`postgres/schema-pg.ts`), reduced
  * to what the run→evaluate→persist slice needs. Each backend adapter implements it;
  * application code never sees SQL. Canonical schema/migrations stay Taleef-owned.
  */

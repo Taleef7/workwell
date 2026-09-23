@@ -50,7 +50,7 @@ export interface AuditEventRow {
   payload: Record<string, unknown>;
 }
 
-/** One audit_packet_exports row to record (#108 auditor packets) — see docs/DATA_MODEL.md §3.15. */
+/** One audit_packet_exports row to record (#108 auditor packets) — see the table in `postgres/schema-pg.ts`. */
 export interface PacketExportInput {
   packetType: string;
   entityId: string;

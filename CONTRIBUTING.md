@@ -6,12 +6,9 @@ Thanks for contributing. This repository values small, verifiable, and well-docu
 
 1. Read [`docs/guide/`](docs/guide/README.md) — the maintained explanation of how the system works,
    in ten chapters. Start there before the reference docs.
-2. Check [`docs/ROADMAP_2026-08-04.md`](docs/ROADMAP_2026-08-04.md) for what is planned, and
+2. Check the **Ready for January** milestone on GitHub for what is being worked on, and
    [`docs/JOURNAL.md`](docs/JOURNAL.md) for what happened recently.
 3. Search existing issues and PRs to avoid duplicate effort.
-
-Sprints 0–7 are all merged. [`docs/archive/sprints/`](docs/archive/sprints/README.md) is kept as
-historical context — it is not a work queue, and nothing in it is waiting to be picked up.
 
 ## Development setup
 

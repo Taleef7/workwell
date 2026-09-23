@@ -1,5770 +1,796 @@
-# Architecture Decision Records
-
-> **Two of the four ADR classes were moved out of this file on 2026-08-05.** Every record that is
-> **superseded** (7) or that turned out to be a **historical finding written in ADR form** (7) now lives in
-> [`docs/archive/DECISIONS_ARCHIVE.md`](archive/DECISIONS_ARCHIVE.md), with a dated one-line pointer left
-> here so every `ADR-0NN` cross-reference in the codebase still resolves and nobody has to guess where a
-> body went. **Nothing was deleted** — `git log -p docs/DECISIONS.md` and the archive both hold the full text.
->
-> What remains here is the record that still governs: decisions that **constrain what may be done next**,
-> and design records that **explain how a built thing works**. A map of all 58 with that classification is
-> recorded in the `docs/JOURNAL.md` entry for 2026-08-05.
->
-> **Six records were moved back on review (#396):** ADR-041, 042, 044, 045, 053 and 057 were first filed
-> as findings, but each is cited as *current* behaviour by code or a runbook — six test names begin
-> `"ADR-044:"`, `normalize.ts` states the ADR-042 mapping rule in its doc comments, `run-pipeline.ts`
-> names ADR-057 in an operator-facing warning, and `DEPLOY.md` builds the vendoring runbook on ADR-041
-> and ADR-053. They are **design records**, and design records stay here.
->
-> **Sequence note:** ADR-033 does not exist — verified absent, and the number must not be reused.
-
-## ADR-087: a dashboard resolves its winning runs ONCE, and a read that folds its rows does not pay to sort them
-
-**Date:** 2026-09-21. **Status:** accepted. Milestone M-M. Extends ADR-084 (the statement timeout is a
-role default; a filter belongs in SQL only where the database can see what it filters on) and #547's
-read-model memos.
-
-### Context
-
-The pilot's `/programs` — the first screen anybody opens — was **failing**, not merely slow. Measured
-against the live Maui sandbox on 2026-09-21, outside the nightly recompute window:
-
-| request | cold process | warm |
-|---|---|---|
-| `GET /api/programs/overview` | **503 `statement_timeout` at 30 s** | 3.2–3.7 s |
-| `GET /api/programs/overview?include=detail&granularity=month` | — | **59.8 s** |
-| `GET /api/programs/sites` (asked on every page load) | 17.2 s | 2.5 s |
-
-The page renders "Failed to load program data" over "No active measures. Create and release a measure
-to begin." — a database timeout presented to a quality lead as an empty catalog.
-
-Three separate costs, and only the first was where it looked.
-
-**1. The winners walk is not memoized, and the page pays it thirteen times.**
-`listLatestPopulationRuns` asks two questions: WHICH runs qualify (one indexed statement over `runs`,
-a bounded `LIMIT`, ~ms) and WHICH of them holds a row per measure (an `EXISTS` probe per (run,
-measure), over an `outcomes` table with no `(run_id, measure_id)` index). The pair measures **2.5–4 s**
-on the pilot. Every read model resolves its own winners — the overview once, then a trend and a
-top-drivers pass per measure — so `?include=detail` walked thirteen times. **The 59.8 s was measured
-with every downstream memo already warm**: the whole minute was the walk. `programSites`' warm 2.5 s is
-the walk alone and nothing else, which is what isolates it.
-
-**2. `aggregateOfficialRun` sorted one measure's whole evidence eleven times per (run, measure).**
-`listOutcomes` orders by `(evaluated_at, id)` and no index serves it, so an ordered read of one measure
-of a whole-population run sorts the measure's 20,000 rows — carrying `evidence_json`. The aggregate
-paid that once for a one-row provenance probe (`runProducedOfficialEvidence`) and once per
-`LIMIT/OFFSET` page, each page re-running the same filter and the same sort to skip further into it.
-Six measures deep, on the overview's cold path. This is the statement the 30 s role default cancelled:
-the overview's other reads are each smaller than one request that already works —
-`/api/exports/outcomes` for the winning run returned 120,000 rows WITH evidence, in one statement,
-without timing out.
-
-**3. Every memo is in-process, so a DEPLOY guarantees a cold dashboard.** `warmReadModels` (#547)
-already existed and already ran after each population run — which covers the nightly and misses every
-restart, the one moment the caches are certainly empty. Nothing warmed at boot, so the first person
-after a release paid the cold derive; on 2026-09-21 they did not pay it, they got the 503.
-
-### Decision
-
-1. **The winners probe is memoized under the CANDIDATE RUN LIST** (`stores/probe-cache.ts`), keyed by
-   the DATABASE HANDLE. The cheap statement runs every call and IS the key; the probes run once per
-   list. The identity is exact rather than a TTL: a probe's answer depends only on which runs are in
-   the list and which rows they hold, a terminal population run's rows are immutable — the same fact
-   every `RunKeyedMemo` and the roster cell cache already rest on — and a run enters the list only once
-   terminal.
-
-   > **Keyed by the handle, NOT by the store instance, and the first cut had this wrong** (review). A
-   > live container holds **two `PgOutcomeStore` instances**: `getStores` caches its bundle in a
-   > `WeakMap` keyed by the env OBJECT, and `server.ts` builds a `schedulerEnv` literal distinct from
-   > the env the host builds for the worker; only the pool is module-global. Per-instance, the
-   > compaction invalidation landed on the instance that does the DELETING and stayed open on the one
-   > that does the READING, and the boot warm filled a cache no request would ever hit. One cache per
-   > handle serves both — they are the same rows — while the ceiling and the floor stay separate, which
-   > is what the per-instance choice was defending.
-2. **Two writes can change a probe's answer without moving the key, and both invalidate it.** An
-   outcome write can add the first row of a measure to a run ALREADY in the list (the import-driven
-   finalize does exactly that), and compaction can delete a non-winner's last row for a measure. So
-   `recordOutcome`, `recordOutcomes` and `compactOlderThan` drop the memo, on both stores. A winner
-   cannot be affected by compaction — its rows are keep-set rows by construction (ADR-073) — but the
-   memo does not know that, and a cache that has to reason about which of its entries is still safe is
-   a cache nobody can audit.
-
-   **A THIRD is possible and is left uninvalidated, named rather than fixed** (review). `finalizeRun`
-   flips a run's status into the qualifying set after its rows were written, so a run too old to sit in
-   the 25-run probe budget can enter step 2's reckoning without the candidate list moving; a probe
-   answered between the last chunk write and that status update would survive it. The window is two
-   adjacent statements of one finalize, and it takes a backdated rerun to reach. The fix would be
-   another invalidation on a path that has no reason to know this cache exists.
-3. **`listOutcomes` takes `order: "none"`**, for a caller that FOLDS its rows, and a PAGED read keeps
-   its ordering whatever the caller asks — paging an unordered relation may repeat or skip rows, so the
-   option makes a read cheaper, never the paging wrong.
-
-   `aggregateOfficialRun` is now ONE unordered statement per (run, measure) over a NARROWED projection
-   (`listOutcomeMembershipsForRun`: the `official` object and the `evaluationError` marker, nothing
-   else), and it reports `producedOfficialEvidence` so `officialMeasureRate` reads the rows once
-   instead of probing and then aggregating.
-
-   > **The projection is the memory bound, and it is here because dropping the page window removed
-   > one** (review). The first cut read whole rows unpaged and justified it as "smaller than the
-   > 120,000-row read the overview already makes"; both halves were false. `listOutcomesWithRun` has a
-   > LEAN projection carrying no `evidence_json` at all, and `for (const row of await …)` awaits the
-   > whole parsed array, so nothing is folded as it arrives. `run-aggregate.ts` had already said a sum
-   > "needs only each row's memberships, which the aggregator retains at a few dozen bytes each" — the
-   > read now returns exactly that. It matters beyond the dashboard: the subject cap gates the
-   > individual and bundle MeasureReport variants only, so on a 20,000-patient run the summary
-   > MeasureReport and QRDA III are the reachable exports and this is what bounds them.
-   >
-   > **`producedOfficialEvidence` is decided by ANY evaluated row, not the first.** Under the old
-   > ordering "first" was deterministic; unordered it is whatever the planner returns, and the answer
-   > is memoized — so one malformed `populationResults` arriving first would have made an official
-   > measure read as authored and dropped its rate off the dashboard, non-deterministically. The reason
-   > the first cut gave for keeping the first-row rule (that asking every row would duplicate the
-   > unreadable-evidence alerts) was false: `aggregator.add` already calls `officialMembership` on every
-   > non-error row.
-4. **`officialMeasureRate` memoizes `null`.** It used to cost one row, so leaving the negative uncached
-   was free; provenance and aggregation now share one read, and `programOverview` runs that loop per
-   request OUTSIDE its own memo — so an un-memoized null would have re-read a measure's whole
-   membership set on every dashboard load for the life of the process. That is the cliff this ADR
-   exists to remove, and the first cut reintroduced it (review).
-5. **The read models are warmed at BOOT**, off the request path, twice if the first attempt fails, and
-   never once shutdown has begun. Best-effort exactly as the post-run warm is: it computes nothing that
-   is not computed on demand, so a failure costs only the warmth.
-
-   > **`warmReadModels` returns a RESULT, because the retry was otherwise unreachable** (review). It
-   > swallows every error by design — a failed warm must not affect a run that has completed and been
-   > reported — and therefore swallowed them from its caller too: the retry was keyed on "a serverless
-   > Postgres refusing the first connection of a cold container", which is exactly what that `catch`
-   > absorbs, so it could never fire, and `read models warmed at boot` was logged on failure. `DEPLOY.md`
-   > points an operator at that line as the post-deploy check. A guard that reads as present and cannot
-   > fire is the defect class this project keeps finding; it was reintroduced here in the act of fixing
-   > three others.
-
-### Alternatives rejected
-
-- **`CREATE INDEX … ON outcomes (run_id, measure_id)`.** Almost certainly the largest single win
-  available — it would take the probes from 2.5–4 s to index lookups and would also give the evidence
-  read a plan that does not sort — and it is additive, reversible and needs no data migration, like the
-  three OWNER-APPROVED indexes already in `schema-pg.ts`. **Schema is the owner's** (CLAUDE.md), so it
-  is recommended with the numbers above and NOT written here. The changes in this ADR stand on their
-  own and are not a substitute for it: they remove repeated work, where the index would make each unit
-  of work cheap.
-- **Aggregating the overview's status buckets in SQL** (`GROUP BY measure_id, status, out_of_population`
-  over the winners — about 90 rows instead of 120,000), which is ADR-084's own pattern. Deferred rather
-  than rejected: the site, tenant and profile predicates read the in-memory directory and have no SQL
-  form, so it is a fast-path-plus-fallback with a conformance test — real work, and worth measuring
-  what is here first rather than shipping two performance stories in one breath.
-- **Deriving the measure rate from a persisted column instead of evidence.** ADR-079 considered and
-  REJECTED an evidence-derived cache for population membership; the rate's semantics (multi-rate folds,
-  NUMEX, strata) live in `createRateAggregator`, and moving them into SQL would put the regulatory
-  reduction in two places.
-- **A TTL on the winners memo.** A TTL is a promise about time and the question is about identity: it
-  would serve a stale winner for the TTL after a nightly, and re-pay the walk for nothing in between.
-- **Filling `measureRate` lazily and letting the number appear later.** A panel that reads as computed
-  and is not is the defect class this project keeps finding; refused.
-
-### Consequences
-
-- An AUTHORED measure's rate now reads the measure's rows rather than one row, because provenance and
-  aggregation share one read. That is the right way round: on the pilot every routed measure is
-  official and 20,000-patient, while the authored case is TWH's small occupational rosters.
-- Peak memory for the aggregate is one (run, measure)'s MEMBERSHIPS — the `official` object and the
-  error marker, a few dozen bytes per subject — held once, rather than a page of whole evidence rows.
-  What is NOT claimed: that this was measured at pilot scale. It is smaller than the read it replaces
-  by construction (a strict subset of the same rows' bytes, read once instead of eleven times).
-- The winners memo is keyed by the database HANDLE rather than per store instance or module-global: the
-  two instances a live container holds must share it, and the ceiling and the floor must not.
-- **Stratum ORDER within a rate is now row-order dependent**, because `finish()` returns a `Map`'s
-  insertion order. It differs only where rows of one (run, measure) carry heterogeneous stratifier sets
-  — which `measure-report.ts` says is reachable for rows persisted before 2026-09-06. Every stratum
-  carries its own `id`, so a consumer keying by id is unaffected; a positional one or a byte comparison
-  is not. Stated rather than fixed.
-- **The EXPORT path still pays the old sort once.** `aggregateCountsForRun` consults the routing flag
-  first and only falls back to `runProducedOfficialEvidence`, whose `LIMIT 1` still forces the full
-  sort. On the pilot every routed measure short-circuits, so this is TWH's authored rosters. Unchanged
-  by this ADR, and noted so nobody reads Context #2 as saying the paged probe is gone everywhere.
-- **The statement-level attribution in Context #2 is INFERRED, not profiled.** The endpoint timings are
-  measured on the live stack; WHICH statement the server cancelled is reasoned from the read shapes,
-  because this host cannot run a pilot-scale Postgres (`EXPLAIN ANALYZE` at 1.68M rows) and the
-  deployment gives no query log. Recorded as inference so nobody later cites it as a measurement.
-
-## ADR-086: what the source did not say is not ours to supply — a code keeps its meaning, and a corpus keeps its knowledge cutoff
-
-**Date:** 2026-09-21. **Status:** accepted. Milestone M-M (#594, #595). Applies ADR-037
-("normalization only, never fabrication") to the two places that were quietly violating it, and
-sharpens ADR-075 (the generated corpus).
-
-### Context
-
-The 2026-09-07 expert review named one **high-priority correctness defect**, and a second finding
-beside it. Both were accepted on 2026-09-08, named "the next two slices", and then sat untouched for
-twelve days with no issue number — which is why they stayed invisible rather than being deferred on
-purpose.
-
-**#594.** `prepareForQiCore` filled four coded fields when it could not bind them:
-`Condition.clinicalStatus`, `Condition.verificationStatus`, `Condition.category` and
-`Encounter.class`. Its guard, `unbindable()`, returns true for a field that is **missing** as well as
-one that is present and unbindable, and in both cases the module assigned a module-level DEFAULT.
-
-Two consequences, and the second is worse than the review recorded:
-
-1. An absent field was invented. That is live rather than latent, because the QRDA-I import path
-   emits none of those three on a Condition and no `class` on an Encounter — so preparation minted
-   them **on a third party's document**, including stamping `active` on a Condition that the importer
-   had just given an `abatementDateTime` from a closed interval.
-2. **A present code was DISCARDED.** `unbindable()` is as true of a system-less `resolved` as of a
-   system-less `active`, and both took the same default — so a corrected misdiagnosis was reported as
-   an active, confirmed problem. The file's own docstring claimed this hole was closed; it was not.
-   The first cut of the fix reproduced the same mistake in a new place, turning an Encounter
-   `{code: "IMP"}` into ambulatory, and was caught by an existing test.
-
-It also put two files in one pipeline in direct contradiction: `engine/cql/qdm-entries.ts` honours a
-system-less `entered-in-error` as a negation while preparation rewrote those bytes to `confirmed`.
-
-**#595.** The generated corpus emitted facts dated after the evaluation date — reproduced at
-2026-09-07 as 19 future-dated events in the first 48 records. `corpus-bundle-source.ts` passes the
-measurement YEAR to generation (correctly: ADR-072 scores a calendar year), and nothing then filtered
-what was emitted by the as-of. Every official measurement is taken at 31 December, so the effect on
-every number we report is zero — which is exactly why it would have been found by a demo rather than
-by a test.
-
-> **CORRECTED 2026-09-22 (#637): the effect was not zero.** The sentence above confuses the
-> measurement period's END with the run's EVALUATION DATE. The corpus cutoff keys on the evaluation
-> date (`corpus-bundle.ts`), and the nightly passes none, so `run-pipeline.ts` defaults it to TODAY.
-> On the first nightly after this ADR shipped (2026-09-22), every fact dated 09-23..12-31 left the
-> bundles (35,246 of 231,890 entries) and every pilot rate fell: cms122 72.4 → 52.8%, cms165
-> 62.4 → 45.2%, cms125 72.1 → 63.7%. Every change was a loss, and a full local reproduction matches
-> both nights exactly. d1–d3 moved nothing: the corpus already carries the fields they stopped
-> inventing (0 of 20,000 bundles differ). The tests missed it because they only build bundles at 12-31.
->
-> **The new number is the honest one, and it stays (owner decision, 2026-09-22).** Before, the nightly
-> reported the full-year result from facts dated as late as December; now it reports year to date as
-> of the run. Two consequences follow. Rates climb nightly until 12-31. And on 2027-01-01, the pilot's
-> first measurement day, a corpus with no prior-year history would empty almost every population.
-> **Decided:** give the corpus prior-year history rather than score the nightly at 12-31, which would
-> reinstate knowledge of the future. The gate that would have caught this is designed on #637.
-
-### Decision
-
-**d1. This layer supplies a SYSTEM, never a CODE.** `prepareForQiCore` normalizes a coded field only
-when a value is present, cannot bind, and carries a code belonging to that field's own value set —
-and it writes that same code back with the system added. Absent stays absent; already-bindable is
-untouched; an unrecognised code is left alone, because we cannot claim to know which system it came
-from. The value sets are complete rather than "the codes the corpus emits": a set holding only
-`active` would decline to normalize `resolved` and leave it unretrievable, which reads as caution and
-is the old bug in a new coat.
-
-**d1a. Normalizing an entry may not discard its neighbours** (review). `Condition.category` is an
-array, and the first cut flattened every entry's codings, chose one recognised code and assigned the
-result as the whole array — so a Condition carrying two categories kept one and lost the other, along
-with any `text` or extension on it. Each entry is normalized on its own and everything else it
-carries is preserved; an entry that cannot be normalized passes through unchanged rather than being
-dropped, for the same reason an unrecognised code is left alone. Data loss dressed as normalization
-is the defect this ADR removes, and it must not appear inside the fix — which, twice now, is exactly
-where it appeared.
-
-**d2. A required target field does not authorize inventing its value.** Where a profile needs a field
-the source never supplied, the resource goes unretrieved. That is the honest outcome, and it is the
-same rule the onset paragraph in that file already applied: if a measure genuinely cannot retrieve
-without a field, the answer is a **source that records it**, not a value minted in preparation.
-
-**d3. The QRDA-I importer derives `clinicalStatus`, because that is where the source semantics are
-known** — and `times()` now reports three states rather than two. A `<high>` with a value closes the
-interval (`resolved`, matching the `abatementDateTime` written from the same value); a `<high>`
-carrying a `nullFlavor` is QDM open prevalence, an explicit assertion of no known end (`active`); an
-absent `<high>` is silence and emits nothing. Collapsing the last two was what made a faithful
-mapping impossible to write however the mapping itself was expressed.
-
-**It is the `nullFlavor` that says "open", not our own failure to parse a value** (review). The first
-cut asked "a `<high>` exists and produced no date", which is equally true of `<high
-value="20240230"/>` — a date the source asserted and the importer could not read. Reporting that as
-`active` would assert a status the document never made, about a condition whose end we simply failed
-to understand, and that status can put the patient into a measure population. A parse failure is a
-third thing, and it says nothing. Any `nullFlavor` counts, not `UNK` alone: `NI`, `NA` and `ASKU` all
-mean the source addressed the end and recorded no value for it.
-
-**d4. A corpus bundle carries only what was KNOWN BY its as-of.** The filter is on the date each fact
-was recorded — the value already handed to `provenanceFor` — and not on "every date inside the
-resource is in the past": a medication order known today may legitimately carry a future intended
-end, and dropping it would be a different wrong answer. A resource and its Provenance are emitted
-together, so a filtered fact leaves no status, abatement, reference or provenance behind.
-
-**d5. Nothing that is currently reported moves, and that is asserted rather than argued.** For d1–d3,
-the ADR-075 corpus records all four fields itself, fully systemed and with `category` distinguishing
-an encounter diagnosis from a problem-list item — so the pilot's bundles never took the invented
-path, and cms122/125/2/137 still find real populations. For d4, the year-end cutoff is compared
-against an unbounded one and must be identical.
-
-### Consequences
-
-- **The QRDA-I import path changes**, which is the point: an imported Condition now carries the
-  status its document implies, or none. A document that says nothing produces a Condition that does
-  not satisfy the QI-Core profile and is not retrieved — visible as a smaller population rather than
-  as a confident wrong one.
-- **`Encounter.class` is no longer supplied for imported encounters.** QRDA-I carries an encounter
-  type, not a FHIR class, and asserting ambulatory would be the same defect this ADR removes. If a
-  measure turns out to need it, that is a gap to surface in the importer against the document's own
-  evidence.
-- A mid-year evaluation now returns different — correct — numbers from what it would have returned
-  before d4. No reported number is among them, because every official measurement is at year end.
-- The fixtures are deliberately adversarial per the review's own bar: refuted, resolved,
-  `entered-in-error`, an unrecognised code, an inpatient class, a malformed `20240230`, a
-  multi-entry category, and the three interval shapes. A fixture that cannot change the answer cannot
-  distinguish a correct mapping from the previous one.
-- **Three separate cuts of this change re-committed the error it exists to remove** — substituting a
-  default code for `IMP`, reading a parse failure as an assertion, and replacing an array to
-  normalize one of its entries. Each was caught by a test rather than by review of the idea, which is
-  the argument for writing the adversarial fixture first and the convenient one never.
-
-## ADR-085: a long run yields the event loop between subjects, and a run too long for a request is scheduled rather than awaited
-
-**Date:** 2026-09-21. **Status:** accepted. Milestone M-M (#563, #590). Builds on ADR-075 (chunked
-evaluation over the generated corpus) and ADR-084 (the pool and statement timeout). Instrumented by
-#588.
-
-### Context
-
-#563 recorded that during the nightly `ALL_PROGRAMS` recompute every endpoint degraded — including
-`GET /api/version`, which opens no database connection and therefore cannot be waiting for one. That
-ruled out pool starvation, the failure ADR-084 addressed, and left two candidates that could not be
-told apart from outside the container: a blocked event loop, or the host pausing a memory-pressured
-container. The phase timing shipped in #588 answered it from inside: `evaluateBatch` is **93.9% of a
-90-minute run**, ~21 s per 500-subject call, while bundle construction is 0.33%.
-
-The mechanism is not that the work is slow; it is **where the work yields**. `evaluateBatch` is a
-sequential `for` loop of `await engine.evaluate(...)`, and the engine's work is CPU-bound, so each
-`await` resolves synchronously. An `await` on an already-resolved promise schedules a **microtask**,
-and Node drains the entire microtask queue before the loop reaches the timers or poll phase. Five
-hundred of them in a row is one uninterruptible stretch as far as any pending request is concerned.
-
-Measured on the development host, 60 bundles x 42 ms of synchronous work (the observed per-subject
-cost), with a local HTTP server probed concurrently:
-
-| yield between bundles | requests served | worst request latency | batch time |
-|---|---|---|---|
-| none | 1 | 2,534 ms | 2,521 ms |
-| `queueMicrotask` | 1 | 2,523 ms | +0.1% |
-| `setImmediate` | 31 | **43.5 ms** | +1.5% |
-| `setTimeout(0)` | 105 | 85.6 ms | +2.4% |
-
-The `queueMicrotask` row is the one that decides the shape of the fix: a microtask yield changes
-nothing, so no arrangement of `await`s inside that loop can help. Only a macrotask can.
-
-Separately, #590: `ASYNC_SCOPES` was `{ALL_PROGRAMS, SITE}`, on the reasoning that a MEASURE run was
-"a few seconds". On the pilot's 20,000-patient corpus it is ~15 minutes against a 60 s gateway, so
-`POST /api/runs/manual` with `scopeType: MEASURE` **always** returned 504 while the run continued and
-completed normally. The 504 is an nginx HTML page, so the caller had no run id and nothing to poll —
-and a 504 reads as failure, which invites a retry that also runs. Two concurrent 20,000-patient runs
-held the pool for ~30 minutes.
-
-### Decision
-
-**d1. The loops WE own yield a MACROTASK after every subject, by default** — and the per-subject loop
-is shared, so this reaches an official run's result-mapping phase as well as an authored run's
-evaluation; see the consequences for what that costs (28 ms per 20,000 subjects, measured) — the run pipeline's
-per-subject loop (`run/run-pipeline.ts`, which is the authored path) and the engine's DB-less batch
-shell (`engine/ingress/evaluate-bundle.ts`, used by the CLI, the flip gate and the roster paths). `setImmediate` where it
-exists, `setTimeout(0)` otherwise — the file is the engine's DB-less shell and its header promises
-portability across every `@mieweb/cloud` target, and Workers has no `setImmediate`. Worst-case
-event-loop block falls from ~21,000 ms to the cost of one evaluation (~45 ms), which is the floor
-without changing the engine.
-
-**d2. Every bundle, not every Nth.** Yielding every tenth is cheaper (+0.2% against +1.5–2.4%) but
-leaves 422 ms stalls, and "requests are unusable while a run is in flight" is the whole of #563. The
-cost is ~2% of a 90-minute nightly that runs at 02:09 Hawaii with eight hours of headroom — and part
-of that 2% is the requests it now serves rather than defers. `yieldEvery` is an option a caller can
-turn down, or off with `0`, for a process that owns the machine.
-
-**d3. The policy is INJECTED, not read from the environment.** `EvaluateBundleOptions.yieldEvery`,
-supplied by the caller. The engine takes its configuration from its caller (ADR-059); a `process.env`
-read inside it would be the boundary violation the containment tests exist to catch.
-
-**d4. On the OFFICIAL path none of the above applies, and the lever there is chunk size.** This was
-recorded the wrong way round in the first draft of this ADR, and the correction is the useful part.
-
-The pipeline does not reach the engine's own batch loop for a routed measure. It calls
-`deps.engine.evaluateBatch`, which resolves through `wiring/executor-router.ts` to `runBatch`
-(`wiring/official-executor-adapter.ts`) and then to `calculateOfficialWithSignal`
-(`packages/official-executor`), which makes **one call into `fqm-execution` with every patient bundle
-in the chunk**. That single call is what `batchMs` measures, and therefore what the 93.9% is. We do
-not own that loop and cannot yield inside it.
-
-So for a deployment whose measures are official-routed — which is the Maui pilot, all six since
-ADR-078 — the in-process levers are only:
-
-1. **Fewer bundles per call**, i.e. `WORKWELL_RUN_CHUNK_SIZE`. Between chunks the pipeline performs a
-   real database write, which IS I/O and does reach the poll phase, so the chunk boundary is a genuine
-   yield point. A smaller chunk buys proportionally shorter stalls for proportionally more round trips.
-   **No number is recorded here on purpose**: #588 already reports `batchMs` per chunk on the live
-   sandbox, so this is answerable by changing one environment variable and reading the run log, and a
-   figure derived any other way would be a guess wearing a measurement's clothes.
-2. **Moving the call off the event loop** (a worker thread), which is the only option that removes the
-   stall rather than dividing it. Filed separately with this evidence; it is a larger change than #563
-   scoped for, and `fqm-execution` is Node-only so the portability constraint in d1 does not bind it.
-
-The earlier reasoning — "chunk size cannot help, because the stall is a microtask chain" — is true of
-the loops in d1 and false of this one, and the two were conflated. The general lesson is the one this
-project keeps relearning: confirm which function the profile actually names before designing around it.
-
-The prior art about chunking (smaller chunks measured ~10x slower for a `= ANY($1)` bind) is about a
-STORE query, not this, and does not transfer.
-
-**d5. MEASURE joins `ASYNC_SCOPES`; EMPLOYEE does not.** A caller always receives a run id it can
-poll. EMPLOYEE is genuinely one subject and stays synchronous, so a response to it still states the
-outcome. The `configuredMeasure` clause that scheduled a WebChart-configured MEASURE is **removed**
-rather than left dormant: with MEASURE async everywhere it could no longer change the answer, and a
-condition that reads as present and cannot fire is the defect shape this codebase keeps finding.
-
-### Consequences
-
-- An AUTHORED run takes ~2% longer and the deployment stays responsive throughout. That trade is only
-  obviously right because the nightly window has hours of headroom; a deployment whose run barely fits
-  its window should turn `yieldEvery` up rather than discover this later.
-- **An official-routed run's 21-second stall is unchanged by d1**, and the Maui pilot's nightly is
-  entirely official. That stall is inside `fqm-execution` and is governed by d4. Saying so is the
-  point: a reader who took d1 as "#563 is fixed" would stop measuring.
-  **Precisely, though — "the official path is unchanged" was too broad and is corrected here** (Codex
-  review). The pipeline's per-subject loop is SHARED: for a routed measure the evaluation already
-  happened in the batch, but the loop still runs per subject to read the prefetched result, plan the
-  incremental cache and assemble evidence — synchronous work, part of the ~6% of the run that is not
-  `batchMs`, and it now yields like everything else. So an official run IS more responsive during that
-  6%, and pays for it. **Measured, that price is 28 ms per 20,000 yields** (`setImmediate` at 0.0014 ms
-  a turn, no traffic) — 0.17 s across the pilot's 120,000 pairs, against a 90-minute run. Gating the
-  yield to the authored branch was the alternative; it was rejected because it would trade a
-  measured 0.17 s for a blocked event loop during the one phase of an official run we do control.
-- **The 42 ms/subject cost is untouched and remains a separate finding** — it is 2.6–3.5x the 11–16 ms
-  recorded in `wiring/official-executor-adapter.ts`, and it is what sets the 45 ms floor.
-- `/api/runs/manual` with `scopeType: MEASURE` changes shape for any existing caller: 201 RUNNING with
-  a run id, rather than a completed run (or, at pilot scale, a 504). `docs/DEPLOY.md` now states which
-  scopes are scheduled, which nothing previously let an operator predict.
-- The phase timing from #588 stays, and is how the next claim about run cost gets checked rather than
-  argued.
-
-## ADR-084: a statement timeout is a role default the pooler cannot strip — and a filter belongs in SQL only where the database can see what it filters on
-
-**Date:** 2026-09-19. **Status:** accepted. Milestone M-M, read-path work (#561, #562). Builds on
-ADR-008 (the TypeScript worker on a long-lived host), ADR-020 (population scale by SQL aggregation
-rather than in-process reduction) and ADR-075 (the pilot's roster is a generated corpus the deployment
-composes lazily — the reason a subject predicate has no table to join).
-
-**Context.** The dashboard's open-case badge asked `?status=open&outreach=none&limit=1` on every
-navigation. To return that one number the work list loaded every active case — 15,309 on the pilot —
-built a summary object for each, applied the filters in JavaScript, counted outreach over the
-survivors, and handed back one row: about a second, on every page load, for a count. Separately,
-`pg.Pool` ran on node-postgres' defaults, so pool starvation surfaced as a 60-second gateway 504 with
-nothing in the log, and no statement had an upper bound of any kind.
-
-**d1 — The filters move into SQL, and the ones that cannot say so.** `CaseQuery` gains the four
-predicates the pipeline was applying in memory: the per-measure current cycle, the frozen outcome
-status, whether the case has an `OUTREACH_SENT` action, and the created-at day window. Three filters
-stay in JavaScript because the database cannot see what they filter on — `site`, `search` and a panel
-selection too large to send as ids all read the in-memory directory, and there is no patients table to
-join (ADR-075). `sqlPageBlockedBy` returns the REASON rather than a boolean: a fast path that silently
-stops being taken is indistinguishable from one that was never wired up.
-
-**d2 — The page and its total come from ONE statement.** `listCasesPage` returns the rows plus
-`COUNT(*) OVER ()`. A COUNT followed by a SELECT is two snapshots of a table the nightly run is
-mutating, and a case closed between them makes `X-Total-Count` disagree with the page under it — the
-client pages past the end, or stops one short. An empty page carries no window value, which is NOT the
-same as a total of zero: it is also every page past the end of a non-empty set, so that one case takes
-a bounded count rather than answering 0.
-
-**d3 — The current cycle is a TABLE of pairs, not a date.** Cadences differ per measure, so the SQL
-form of the work list's default is every (measure, period) pair the caller can name, plus a separate
-anchor for a measure it cannot. The fallback branch excludes the named measures explicitly: a row
-whose measure IS named and whose period is wrong has already failed, and must not match the fallback
-anchor instead — which would admit a prior cycle's rows for every measure on a 365-day cadence.
-
-**d4 — The scoped-profile invariant is CHECKED, not assumed.** On a patient deployment `profileMatch`
-hides any subject the directory does not hold, and that predicate has no SQL form. The SQL path is
-exact only while every case subject is in the directory. That is true on the pilot by construction —
-the corpus is deterministic and the list import refuses identifiers outside its namespace (ADR-082) —
-and "true by construction" is exactly what this decision refuses to encode as a flag. The invariant is
-established from the data (`distinctCaseSubjectIds`, bounded by subjects rather than by cases), once
-per process and again after every run, and a violation disables the fast path with a log line rather
-than serving a total that counts people no page can show. A page row that contradicts the cached
-answer re-establishes it and falls back for that request.
-
-**d5 — `statement_timeout` cannot come from the pool, and the reason is worse than a rejection.**
-Measured against both Neon projects on 2026-09-18: node-postgres places `statement_timeout`,
-`lock_timeout` and `idle_in_transaction_session_timeout` in the STARTUP PACKET, and Neon's proxy
-**silently drops them on the pooled AND the direct endpoint** — the connection succeeds and
-`SHOW statement_timeout` still reads `0`. A pool configured that way looks enforced and enforces
-nothing. The other spelling, `options=-c statement_timeout=…`, is hard-REJECTED by the pooler
-(`unsupported startup parameter in options`), failing every connection exactly as `search_path` did on
-the first shadow deploy. `query_timeout` is excluded for a third reason: it is a client-side timer that
-abandons the caller while the server keeps executing, which under transaction pooling leaves a server
-connection running a statement nobody awaits. **Decision: the timeout is a ROLE DEFAULT** — `ALTER
-ROLE <app role> SET statement_timeout = '30s'`, run once per project on the direct URL and verified
-through the pooled one (`DEPLOY.md`). 30 s sits under the 60 s gateway cut, so a runaway read fails as
-`57014` the edge can report instead of as a silent gateway timeout.
-
-**d6 — The one unbounded statement opts out, on ONE checked-out client.** The nightly outcome
-compaction deletes a whole retention window's superseded history and has no natural bound, so
-`withStatementTimeoutDisabled` lifts the timeout for its transaction. `SET LOCAL` is transaction-scoped,
-which is what survives PgBouncer's transaction pooling — but only if the `BEGIN`, the `SET LOCAL`, the
-work and the `COMMIT` are on the SAME connection, and `pool.query` may hand each statement a different
-one. A session-level `SET` is not the alternative: the pooler accepts it (measured), and it then leaks
-the lifted timeout to whoever holds that connection next. The opt-out must be live BEFORE the role
-default is set, or the first compaction after it is killed at 30 s.
-
-**d7 — `max: 10` is kept, for a different reason than the one first written down.** Both projects
-answer `max_connections = 901` (Neon sizes it from the autoscaling maximum, 8 CU, not the 0.25 CU
-floor), and the pooler's budget is ~0.9 × that per (user, database) — so connections are not scarce and
-the "instances × 10 must fit" arithmetic does not bind. Ten is where the QUEUE should form: a deeper
-app pool does not make a slow read faster, it moves the wait from a place with a timeout to a database
-where a hundred concurrent scans contend for the same quarter-vCPU.
-
-**Consequences.** `/api/worklist/patients` keeps the uncapped pipeline (it groups every row) and is
-tracked as measured debt rather than "later". The staff-closed list keeps it too, and for a reason
-rather than an omission: its outcome filter reads what CQL says today per row and its header counts
-describe the whole list, so a page would not shorten the work. Both loaders stay in the code, so a
-conformance test runs them over one fixture and requires identical totals and page ids — the only
-thing that stops the next filter from landing in one and not the other. Until the `ALTER ROLE` is run
-the `57014` mapping is dead code, which is why the PR description states whether it has been.
-
-## ADR-083: an exception is data the measure reads, never a status WorkWell flips — and a case a person closed is still a gap the run counts
-
-**Date:** 2026-09-18. **Status:** accepted. Milestone M-M, MM-3's design half (#569). Builds on ADR-008
-(CQL is the sole authority on compliance), ADR-016 (segments are applicability, never an exception),
-ADR-067 (a card renders a completed evaluation and carries nothing a human did not choose), ADR-070 d3
-/ LOCKED §4A.3 (cards resolve, not alert; exception documentation is structured data the measure reads
-next run), ADR-078 (a subject outside the initial population is a result, not a case) and ADR-082 d6
-(DENEX and DENEXCEP are the artifact's populations; `status=EXCLUDED` is the workflow's vocabulary).
-
-**Context.** The practice asked twice for the same thing in different words: on 2026-08-27, that a card
-offer more than "accept or dismiss" — *what orders resolve this?* — and that there is "a way to dismiss
-with a reason: document a contraindication"; on 2026-09-10, that uploading a record with the right
-document type should "fulfil the measure". What the sandbox actually had was a closure note on a case.
-Marking a case resolved required one, and then the row left the work list while the measure kept
-counting the patient — the roster showed them Overdue, the programs card counted them Overdue, and the
-open-case count did not. Both numbers were right and they disagreed, with nothing on any screen
-accounting for the difference. The system had no way to say whether a closure was an exception. It is
-not, and this ADR says what one would be.
-
-### d1 — Two vocabularies, and conflating them is the failure mode
-
-A **workflow closure** is `cases.closed_*`: free text, read by no measure, lasting for the compliance
-cycle (a new cycle inserts a new case). An **exception** is structured data in the evaluated bundle
-that the measure's own logic reads on the next run. The first is visible as "Closed by staff" (d4) and
-changes no number; the second changes the number and is the only thing that may.
-
-Two consequences of the write path are recorded here as deliberate invariants rather than accidents,
-because a future session reading only the code could "fix" either and break the first. A human-closed
-case's `current_outcome_status` is **frozen at closure** — `planCaseUpsert` no-ops on a closure with
-`closed_by` set (`case/case-logic.ts`), so the nightly run never touches the row again and CQL's
-current answer lives only in `outcomes`. And a person can close a case only from OPEN or IN_PROGRESS
-(`resolveCase`'s precondition), so an EXCLUDED or auto-resolved case is never "closed by staff": the
-workflow cannot override an exception any more than it can create one.
-
-### d2 — For an AUTHORED measure, a WorkWell-side waiver is legitimate — and is not wired
-
-Every authored measure reads its exception as a coded FHIR `Condition` carrying a `urn:workwell:*`
-code (`measure-bindings.ts`, the `waiver`/`refusal` entries), which is the right shape: the CQL
-decides, and WorkWell supplies data. What does NOT exist is the projection. The `waivers` table is
-record-keeping — `admin/waivers.ts` says so in its own header — and nothing turns a granted waiver into
-a `Condition` in an evaluated bundle; only the synthetic fixture generator emits those codes. So
-"a WorkWell waiver works" is true of the SHAPE and false of the wiring, and the difference is worth
-writing down before someone relies on it. Building the projection is legitimate and is filed as
-**#577**; it is TWH/occupational-content work, not pilot work, and is not built here.
-
-### d3 — For the SIX official measures, an exception is a coded chart resource in the artifact's own value set
-
-Three not-scored paths, and only two of them are exceptions. **INELIGIBLE** — outside the initial
-population — is not an exception at all but a statement that the measure does not describe the patient
-(ADR-078). **EXCLUDED** is a denominator exclusion (DENEX). **EXCEPTED** is a denominator exception
-(DENEXCEP). Each is decided by the artifact's own logic over chart data, which is why none of them is
-something WorkWell can grant.
-
-Read off the vendored manifests and their ELM, the pilot's six measures divide unevenly:
-
-| Measure | DENEX | DENEXCEP | What satisfies the exclusion |
-|---|---|---|---|
-| cms122 | yes | no | hospice, palliative care, 66+ in long-term nursing care, advanced illness + frailty |
-| cms125 | yes | no | the same four, plus bilateral (or paired unilateral) mastectomy |
-| cms2 | yes | **yes** | DENEX: bipolar diagnosis before the qualifying encounter. DENEXCEP: a medical or patient reason for not screening |
-| cms130 | yes | no | the same four, plus malignant colon neoplasm or total colectomy |
-| cms165 | yes | no | ESRD encounters/procedures, dialysis, kidney transplant, pregnancy, plus hospice/palliative/frailty |
-| cms137 | yes | no | hospice only, on both rates |
-
-**cms2 is the only one of the six with a refusal-shaped exception**, and its shape is specific: an
-`Observation` on the QI-Core `qicore-observationcancelled` profile whose CODE is the screening itself
-(LOINC 73831-0 / 73832-8) and whose not-done REASON carries the exception — not an interchangeable
-refusal code. Everything in the table above is chart documentation, and writing to the chart is the
-path MIE owes (#565).
-
-**Decision: no official-measure exception mutation is implemented in WorkWell.** No "dismiss with a
-reason" that removes a patient from a denominator, no `overrideReasons` vocabulary on a card
-(`CDS_HOOKS.md`'s refusal stands), and a CDS feedback `overridden` remains a record that a clinician
-dismissed a card — never an exception. The alternative — letting an operator mark an exception in
-WorkWell and reporting the adjusted rate — is exactly the ADR-008 violation this project exists not to
-commit, and it would be undetectable downstream: the number would look like a computed one.
-
-### d4 — What "dismiss with a reason" is allowed to mean, and it is display
-
-A workflow closure, visible as such on every surface that counts the patient, that never hides them
-from CQL's count. Implemented in #569 as a third state — "Closed by staff" — on the roster, the work
-list, the programs rollups, the cases CSV and the MCP `list_cases` tool. The rule those surfaces
-follow is that **a measure is satisfied by a RESULT, never by an action** (the practice's own words on
-2026-09-10, about orders), so the wording tracks what the winning run says TODAY rather than what the
-case row froze at closure: still counted by CQL, verified compliant/excluded, or — when no run has
-scored the patient — not evaluable, which is shown as its own answer rather than folded into either.
-
-### d5 — What is deferred, and the condition that unblocks each piece
-
-- **The official-measure exception path** — blocked on #565: the WebChart write API for
-  `Encounter`/`DocumentReference`/`Observation`, the document-type vocabulary, and whether a
-  WorkWell-written resource is acceptable and under whose credentials.
-- **Which exception forms clinicians actually use** — blocked on the clinical consultation
-  (ROADMAP §7.4). d3 says what an exception IS; the consultation says which ones the pilot documents.
-- **cms2's refusal mapping specifically** — the one measure where a coordinator's action could ever
-  legitimately produce an exception, and therefore the first to build when the write path lands.
-- **The authored-measure waiver projection** (d2) — unblocked, not pilot work, filed as **#577**.
-
-### Consequences
-
-- No new `case_actions.action_type` and no new `closed_reason`: a staff closure stays
-  `MANUAL_RESOLVE`, and the closure KIND is derived from `closed_by` (`closureKindOf`), which is the
-  same column `planCaseUpsert` already decides by. Nothing about the write path changed, which is what
-  makes #569 reviewable as display.
-- **CDS cards are unchanged, deliberately.** A card still renders for a patient whose case a person
-  closed, because the card renders CQL and a closure is workflow. That reads as a disagreement between
-  two surfaces and is not one; it is stated here so the next reader does not "fix" it by teaching the
-  card about cases.
-- **A known display defect is named rather than left implied:** `EXCLUDED` renders as one string —
-  "Documented exclusion on file" / "Contraindication / exemption on file" — for all three of DENEX,
-  DENEXCEP and out-of-denominator (`official-executor-adapter.ts`, `roster-vocabulary.ts`). The
-  vocabulary above is the ADR that makes the fix specifiable; it is filed as **#576**, not fixed
-  here.
-- The practice has to be TOLD that an upload cannot satisfy a measure, and what the honest forms are
-  (a coded result written back to the chart, or MIE's order/document-code mapping). That belongs in
-  the owner's next message to them, not in a release note.
-
-## ADR-082: an attributed list is an immutable assertion someone else made — and the sandbox refuses to hold a real one
-
-**Date:** 2026-09-16. **Status:** accepted. Milestone M-M, MM-2 PR 3. Implements the one concrete ask
-from the 2026-09-09 ACO working session. Builds on ADR-072 (calendar measurement period), ADR-073/077
-(retention window and the refusal it forces), ADR-074 (multi-rate), ADR-079 (out-of-population) and
-ADR-080 (a panel is assignment, never attribution).
-
-**Context.** The ACO asked for one thing, in one sentence: hand WorkWell the list of patients they
-attribute to the group, run the measures over exactly that subset, and give back numerator,
-denominator and exclusions with the patient-level result and its date. Every other population
-question this product answers is *"the patients in our directory"*. This one is *"the patients
-somebody else says are ours"*, and on an MSSP attribution those are different populations — the
-practice sees patients the ACO does not attribute, and the ACO attributes patients the practice has
-not seen this year. Nothing in the system could express the difference.
-
-### d1 — A list is IMMUTABLE, and a re-import is a new revision
-
-A report is a function of (list revision, run ids). If a list could be edited underneath a report,
-every number already filed would become unverifiable: there would be no way to answer *"what was the
-list when you computed this?"* So no UPDATE and no DELETE exists anywhere in `SubjectListStore`, a
-re-import of the same name allocates `revision + 1`, and a manual resolution of a non-match is
-**also** a new revision rather than an edit — the rule ADR-022 applies to identity matching (match,
-never silently rewrite what a source asserted).
-
-The guarantee is the tested absence of a mutator in the interface, routes and UI, not a database
-trigger. That is narrower than "the database forbids it" and is stated as such.
-
-### d2 — A list is an ATTRIBUTION; a panel is an ASSIGNMENT; neither is a denominator
-
-ADR-080 d6 already says a provider panel is never an attribution claim. The converse matters as much:
-a list is what an outside organisation asserts about responsibility, and it must not become an
-assignment decision. Neither is a denominator by itself — the denominator is what the measure's own
-logic computes over the list's members, and the list only decides whose rows are read.
-
-### d3 — NOT_FOUND members are KEPT, and an alias is AMBIGUOUS rather than a silent collapse
-
-An identifier the directory cannot resolve is the ACO and the practice disagreeing about who a patient
-is. That is a finding for a review queue, not a row to drop: dropping it would remove the patient from
-the denominator *and* from the evidence that they were ever claimed. `resolution` and `subject_id` are
-coupled by a CHECK rather than by convention, and a partial unique index refuses a second MATCHED row
-for one subject — so two identifiers for one patient land MATCHED + AMBIGUOUS, where allowing both to
-match would double that patient in every denominator the list feeds.
-
-### d4 — The SANDBOX DATA BOUNDARY: a real attribution file cannot be stored here
-
-Milestone M-M authorises a **synthetic sandbox** (LOCKED §4A.1); the PHI phase is a separate,
-`PRODUCTION_READINESS`-gated decision. An import route that persists arbitrary identifiers — even as
-unresolved rows — is a path for a real attribution file to reach Neon, its backups and its exports
-*before* the environment split (#267), the auth fork (#265) and observability (#264) exist. So:
-
-- On a synthetic-directory deployment, an identifier outside that deployment's **own** namespace
-  refuses the WHOLE upload before anything is written, reporting a COUNT and never the values (an
-  error body is logged and kept by the browser; echoing them would persist them by another route).
-  The namespace is per profile — Maui's corpus is `pat-NNN` **and** `pat-NNNNN` (48 hand-written
-  fixtures then generated ones), and the default deployment's occupational roster is `emp-NNN`. It is
-  a NAMESPACE test, not an existence test: `pat-99999` conforms and is simply NOT_FOUND, so the
-  review queue is exercised with synthetic-shaped identifiers.
-- On a LIVE-directory deployment the import answers 403 until the PHI phase supplies an authoritative
-  resolver. The live directory is a worker-local last-known registry that also fabricates a minimal
-  profile for any persisted `wc|` id, so matching against it would be *silently incomplete* — every
-  row MATCHED and every denominator wrong — rather than merely unavailable.
-
-**Every method** on `/api/subject-lists/**` is CASE_MANAGER/ADMIN, metadata included; the reads are
-not left to the AUTHENTICATED catch-all, because the public `/sandbox` signs in as a read-only VIEWER
-and on Maui the clinician seat is a VIEWER too.
-
-### d5 — The report is FOR A MEASUREMENT YEAR, and compaction refuses PER MEASURE
-
-An officially routed run is scored over the calendar year containing its evaluation date (ADR-072).
-"The latest numbers" would therefore answer a PY2027 question with PY2028's first nightly the moment
-January arrives — and would look exactly like a correct answer. `measurementYear` is **required with
-no default**, and the run selected per measure is the newest reportable whole-population run whose own
-period is that year.
-
-**Selected by the run's MEASUREMENT PERIOD, never by when it started** — `RunStore.listPopulationRunsForPeriod`.
-A manual run takes an arbitrary `evaluationDate`, so a rerun-to-verify of a closed year begins in the
-following one and legitimately scores the closed one; a start-date filter drops exactly that run and
-answers "no completed population run for year" with it sitting in the table. (The start-date window was
-itself a fix for something worse: `listLatestPopulationRuns` caps its walk at 25 runs whatever
-candidate count it is given, so an unscoped search reaches back about twelve days on a nightly
-deployment and a mid-January report for the closed year found nothing. A period-scoped read has no
-such cap and is simpler as well as correct.)
-
-ADR-077 refuses a report built over rows that may be incomplete. That refusal belongs to the **measure
-whose run is exposed**, not to the request: withholding five complete measures because the sixth's run
-aged out would be a second wrong answer. Exposure is checked before the reads and again after them (a
-pass beginning mid-report would have deleted rows the earlier pages already counted), and the whole
-request is 409 only when every selected run is exposed. Every derived row is computed before anything
-is serialised, because a streamed CSV cannot change its status after the first byte.
-
-### d6 — `missingFromRun` is reported BESIDE the rates, never subtracted
-
-A list member the run never evaluated is a gap in the evidence, not an exclusion. Folding them into a
-denominator would let a SMALLER run produce a HIGHER score, which is the one direction a quality
-number must never move by accident. Two identities are stated and tested, and they hold for EVERY
-input including a measure with no usable run:
-`matchedSubjects = distinctSubjectsSeen + missingFromRun`, and
-`distinctSubjectsSeen = scoredSubjects + unmeasured + evaluationErrors + outOfPopulation`.
-
-**The four not-scored buckets are disjoint BY CONSTRUCTION, not by assumption.**
-`createRateAggregator`'s own `unmeasured` is a SUPERSET of its `evaluationErrors`, and
-`outcomes.out_of_population` is an independent column that can be true on a row the aggregator also
-calls unmeasured — so deriving these by subtraction double-counts every error and can make
-`scoredSubjects` NEGATIVE. Each seen subject is classified into exactly one bucket in a stated order
-(error, then out-of-population, then in-no-rate, then scored), so the identities hold on a
-PARTIAL_FAILURE run — an ordinary night on the pilot rather than a corner case. The first version did
-not, and the test that "pinned" the identity used a fixture with all three counts at zero, which
-passes for any implementation.
-
-**A measure with NO usable run emits its rows too.** The CSV serialises rows alone, so an entry
-claiming N members were missing while the patient-level artifact named none of them would break the
-"every count is recomputable" rule and leave the ACO unable to see WHO. A **compacted** measure is the
-one exception and claims nothing per subject — no rows, `missingFromRun: 0` — because ADR-077 refuses
-numbers built over rows that may be incomplete, and "how many of your patients did this measure miss?"
-is such a number. §6.6 scopes the identities accordingly.
-
-The score stays `numer / (denom − denex − denexcep)` — what `createRateAggregator` already computes
-and what the eCQM proportion convention specifies. `status=EXCLUDED` is the workflow vocabulary;
-`denominatorExclusion` and `denominatorException` are the artifact's populations. The ACO's word
-"exclusions" covers both, so both are reported separately rather than summed.
-
-### d7 — The CSV is the patient-level artifact, and its header is a contract
-
-The ACO asked for the result *and its date* per patient; a paged patient-level JSON would be a second
-thing to build and keep in step, so the CSV carries the rows and the JSON carries the summary — every
-count in the summary is recomputable from the rows. The header is pinned by test because downstream
-tooling reads it by name, and the subject columns follow the deployment's own term exactly as
-DATA_MODEL_CONTRACTS §6.2/§6.3 do. Text a person supplied is neutralised against spreadsheet formula
-injection: a CSV of somebody's uploaded identifiers must not become code when the ACO opens it.
-
-### Consequences
-
-- `?listId=` joins the one subject predicate on all six filtered surfaces. The resolved set is
-  memoized (8-entry LRU) — safe ONLY because d1 makes a list immutable, and the first thing that
-  breaks if that is ever relaxed. `hasActiveSubjectFilters` tests `!= null`, not `.size > 0`: a list
-  none of whose identifiers resolved is an ACTIVE filter matching nobody.
-- **Deferred to the PHI gate: the per-run report ARCHIVE.** With a 400-day window the latest nightly is
-  never exposed, so a live report renders today; what is lost is REPRODUCIBILITY — by December the
-  runs behind March's filing are compacted. The design is recorded in `PRODUCTION_READINESS`; until it
-  ships, a report handed to the ACO is retained as a dated file outside the database (the R2 evidence
-  bucket), and every CSV row carries the list revision and run ids so the artifact can be pointed at.
-- The four ACO inputs still outstanding — identifier format, cadence, non-match handling, and whether
-  Medicare Advantage is in scope — change the importer's `resolve`, a scheduler job, the members UI
-  and a report-time payer intersection respectively. None changes the schema, which is why the tables
-  could be written before the answers arrived.
-
-## ADR-081: the repeat-non-complier streak is retired, because a retention window cannot hold one
-
-**Date:** 2026-09-15. **Status:** accepted. Milestone M-M, the third read-path change. Follows
-ADR-073 (per-subject history is a retention window) and #547 (roster-wide reads resolve the winning
-run first).
-
-**Context.** `programRiskOutlook` was the last roster-wide read model still scanning a measure's whole
-retained history. It called `listOutcomesForMeasure` with evidence — every run, every period — which on
-the pilot is about a million rows growing by 120,000 a night, and it answered **504 cold and 8.2 s
-warm**. Every other surface had moved onto the winning run in #547; this one had not, because one of
-the three things it computed genuinely needed the history.
-
-That thing is `repeatNonCompliers`: per subject, the leading run of OVERDUE or MISSING_DATA outcomes
-across **distinct evaluation periods**, kept at three or more and shown as a named top-ten list.
-
-**The obstacle is structural, not an implementation gap.** Three designs were tried in a day and each
-had the same hole:
-
-- A nightly deployment's newest N runs **share one evaluation period** for any N. An officially routed
-  measure is scored over its calendar year (ADR-072), so every run in 2027 writes
-  `evaluation_period = 2027`. "Three periods" is therefore unreachable from the winning run, or from
-  the newest ten, or from any window defined in runs.
-- Reaching three periods means either scanning the measure's whole history — which is the 504 — or a
-  new per-period store query with an index to support it. New SQL is an owner decision, and it would be
-  built for a panel nobody asked for.
-- **ADR-073 has already decided the shape of per-subject history**: it is a retention WINDOW, and the
-  durable history is the aggregate snapshot store. Maui ships 400 days. An annual measure under a
-  400-day window holds **at most two** periods, so on the pilot the list is empty by construction — the
-  read was a million rows to compute a list that cannot be non-empty.
-- It was also wrong twice. ADR-079's out-of-population flag had to be threaded into it after Codex
-  found (#548) that a non-diabetic evaluated for cms122 across three periods earned a streak of 3 and
-  was named in a top-ten list of people nothing could be done about.
-
-**Decision.** `repeatNonCompliers` is **retired**. The key stays in the API response as `[]`, so the
-route contract, the page and the e2e suite are unchanged and no consumer has to be migrated. The
-measure page's "Repeat non-compliers" tile and its table are removed. `programRiskOutlook` reads the
-winning run like every other roster-wide model, and what the run determines is memoized under the
-winners' `runKey`.
-
-**Consequences.**
-
-- The outlook's remaining two answers — upcoming expirations and per-site current-vs-predicted
-  compliance — are computed from **one run's rows**, so the site table now describes the subjects the
-  winning run evaluated. A subject present only in a superseded run drops out. That is the same
-  semantic change #547 made everywhere else, and the outlook joins it rather than staying the one
-  surface with a different basis.
-- The winners walk excludes a run whose `triggered_by` is NULL under `excludeScale`, where the old
-  outlook's subject-prefix exclusion kept it. Also shared with every read model since #547.
-- `today` and `horizonDays` are **not** in the memo key. The memoized value is what the run
-  determines; the horizon and the date are applied per request over it. So a warmed entry survives
-  until the next run rather than expiring at UTC midnight, and two people asking for different
-  horizons share one read.
-- Evidence is read only where a recency date can exist. Whether the winner's outcomes carry one is a
-  fact about **those rows**, not about today's routing flag: one row is peeked, and an `official`
-  evidence block means there are no expirations to compute without a second read. A process restarted
-  after an authored→official flip would otherwise zero an authored winner's expirations, and a warm
-  process would serve the authored answer under an unchanged key.
-- **What is lost.** Nothing on the pilot, where the list was necessarily empty. On a deployment with
-  no retention window and a measure whose cadence produces several periods inside the window, a
-  genuinely repeated non-complier is no longer named. Nobody has asked for that, and the honest
-  replacement is below.
-
-**The condition under which it returns.** Either (a) the aggregate snapshot store (ADR-021) grows a
-per-subject dimension, which is where ADR-073 says durable per-subject history belongs, or (b) an
-indexed per-period query over `outcomes` that the owner approves as schema. Either is its own unit of
-work with its own measurement, and neither is justified by a panel the pilot has not asked for.
-
-**Stated limits, each raised in review and left as a limit rather than papered over.**
-
-- **Which duplicate wins is unspecified.** The per-subject reduction is last-write-wins over the
-  winning run's rows, and the lean projection carries neither `evaluated_at` nor `id` and has no
-  `ORDER BY` — so IF a run ever held two rows for one `(subject, measure)`, which one lands is
-  whatever the store returned last. There is no UNIQUE constraint on `(run_id, subject_id,
-  measure_id)` to forbid it, and `programOverview` differs again by COUNTING rows where this dedupes.
-  The run pipeline writes one row per key, so this is a stated assumption, not an observed bug.
-  Ordering it would widen `OutcomeWithRun` for every caller; the real remedy is a uniqueness
-  constraint, which is owner schema. **Owner question.**
-- **Directory-derived display values are frozen with the memo.** Site names, and the subject names in
-  the expirations, are resolved when the base is built. On a live-WebChart deployment the directory is
-  mutable, so an ingest that names a previously-raw `wc|` subject is not reflected until a new run
-  wins. This is the sibling behaviour rather than a deviation — `overviewMemo` memoizes the
-  `DirectorySnapshot` itself — and resolving this one surface per request would make it disagree with
-  the other three. It self-heals nightly.
-- **An AUTHORED winner's evidence read is one unpaged query**, bounded by that run's rows for that one
-  measure. It is never taken on the pilot, where all six routed measures are official and the peek
-  settles it in one row. It would need paging the day an authored measure runs on a roster of pilot
-  size; the trigger to watch is an authored measure appearing in a large deployment, not a number of
-  rows guessed in advance.
-- **The evidence peek names a COMPLIANT subject's row, not the run's first.** All three review lanes
-  found the first-row form independently: `listOutcomes` orders by `(evaluated_at, id)` ASC, an
-  evaluation failure REPLACES the evidence with `{ evaluationError, message }`, and a PARTIAL_FAILURE
-  run can win — so an error row sorting first classified an official winner as authored and triggered
-  the unpaged read the peek exists to avoid. A COMPLIANT row cannot be an evaluation error, because an
-  error forces MISSING_DATA.
-
-**Alternatives rejected.** Computing the streak from the newest ten runs (they share one period, so it
-is always empty — a control that reads as present and cannot fire, which is this repository's most
-common defect). Keeping the history scan behind a feature flag (the 504 is the default path, and a
-flag nobody sets is a slow default). Deriving a streak from `cases` instead (a case's lifecycle is the
-workflow's, not the measure's — a human closure would read as compliance).
-
-## ADR-080: a provider panel is a durable mapping WorkWell owns and applies, and who chose an assignee is written down
-
-**Date:** 2026-09-12. **Status:** accepted. The SCHEMA is an owner decision (CLAUDE.md), authorized
-in-session. Milestone M-M, MM-2 PR 2. Builds on ADR-076 d2, whose `next_action_source` is the
-provenance pattern this reuses.
-
-**Context.** The pilot group already divides its work by provider panel, and has described that
-arrangement consistently: their staff are assigned to particular providers, and because a patient sits
-in one provider's panel, one person closes everything that patient is due for rather than five people
-touching five measures. WorkWell knew nothing about it. Every case a nightly run opened arrived
-unassigned, so a mapping that existed only in the practice's own working knowledge had to be
-re-applied by hand every morning, and MM-2 PR 1's bulk assign made that re-application faster without
-making it unnecessary.
-
-The obvious implementation — a table mapping provider to staff account, applied when a case is created
-— is most of the answer. The part that needed deciding is what happens to cases that ALREADY exist
-when a mapping changes, because that is where an automatic rule can silently overrule a person.
-
-**d1. `cases.assignment_source` records WHO chose the assignee: `PANEL`, `OPERATOR`, or NULL.**
-
-Without it, a panel change's only available test for "is this case mine to move?" is *assignee equals
-the previous panel owner*. That is also true of a case a supervisor deliberately handed to that same
-person, and of every case assigned before panels existed. Moving those would overrule a human decision
-at panel scale — a few hundred cases at a time — with the only evidence being a ledger nobody reads
-until something has already gone wrong.
-
-NULL is the truth for a row written before the column existed, and for an unassigned row. A NULL
-source that HAS an assignee is read as operator-owned, because between two readings of an unknown the
-safe one is the one that declines to move the row. Clearing an assignee clears the source with it:
-"unassigned, chosen by the panel" is not a state, and a backfill reading it could not say what the
-null assignee meant.
-
-**d2. The panel owner is applied when a case is CREATED, and never to one that exists.**
-
-`UpsertCaseInput.panelAssignee` is honoured on the insert branch only. The field is named for where
-the value came from rather than for the column it lands in, so no caller can route an operator's
-choice through the insert path and have it recorded as a panel's. An update does not touch the
-assignee; nor does a REOPEN, because a reopen is within the same compliance cycle and is therefore the
-same piece of work, which somebody may already be holding. A NEW cycle is an insert and picks up
-whatever the map says then.
-
-The run reads the map ONCE, at the start of the evaluation loop. Re-reading per chunk would let a
-mapping edited mid-run apply to some of the run's cases and not others — a run that assigned one
-provider's patients two different ways depending on when the chunk happened to execute.
-
-**A mid-run edit is reconciled at run FINISH, not left to the edit's own backfill.** That was the first
-answer and it does not work: the supervisor's PUT moves what exists at that moment, and the run then
-keeps inserting from its older snapshot, so those late cases sit on the previous owner indefinitely —
-a later run's update branch preserves assignees by design, and nobody re-saves a panel they already
-set. The nightly runs for hours on the pilot, so the window is wide rather than theoretical. At finish
-the run re-reads the map, compares it with its own snapshot, and reconciles only the providers whose
-owner actually changed, over only the subjects it evaluated. An unchanged map costs one small read and
-touches nothing, which is the path almost every run takes.
-
-Reading the panels is best-effort in both places: panels decide who work lands on, never whether it
-exists, so a store failure logs a WARN and the cases open unassigned exactly as they did before.
-
-**d3. Mapping a panel moves the open cases it owns — unowned work, and the panel's own earlier
-assignment. Nothing else.**
-
-`planPanelBackfill` is pure, so the rule can be argued with rather than inferred from a mutation. It
-selects active cases whose assignee is NULL, and active cases whose source is `PANEL` — **any of
-them, not only those on the previous owner.** The narrower rule was tried first and stranded work:
-a run that snapshotted the old owner can insert its case AFTER the backfill has scanned, leaving a
-PANEL-sourced row on somebody who no longer owns the panel, which no later save could reach because
-by then the previous owner and the current owner were the same person. A PANEL-sourced row belongs to
-whoever owns the panel now; that is what the source means. Operator-sourced and unknown-sourced rows
-stay where they are, so the protection d1 exists for is unchanged.
-
-Each selection carries **both columns that were read** — the assignee and the source — and the
-store's compare-and-set guards both. Guarding only the assignee was a hole two reviewers found
-independently: the backfill reads `Alice/PANEL` and plans to move it, an operator then re-asserts
-Alice deliberately making it `Alice/OPERATOR`, the assignee still matches, and the row is moved —
-the write the rule exists to prevent, let through by the rule's own guard. For the same reason a
-change of source alone IS a change: an operator assigning a case to the person the panel already
-chose is claiming it, and refusing that write left their choice recorded as the panel's.
-
-**Re-saving the same assignee leaves the mapping alone but still sweeps the panel's unassigned cases.**
-Because the panel read during a run is best-effort, a run CAN open unassigned cases on a mapped panel;
-without the sweep the only recovery would be to un-map the panel and map it again. The response
-reports `changed` for the mapping and `backfilled` for the cases, so both numbers stay true and a
-re-save that moves twelve cases says twelve.
-
-**d4. Un-mapping a panel leaves its open cases assigned.**
-
-`DELETE` says who owns FUTURE work. Silently unassigning a few hundred cases because a supervisor
-tidied a mapping would lose work somebody is in the middle of, and the operation that moves open cases
-already exists and is audited per case. The consequence is stated rather than hidden: after a DELETE
-then a PUT, the previous owner is null, so only unassigned cases move.
-
-**d5. The work list's default view depends on whether the viewer owns a panel.**
-
-A viewer mapped to at least one provider opens on "My panel"; everyone else opens on the whole
-practice. The practice described exactly this split — line staff work their own providers, while a
-supervisor wants to see everything — and defaulting an unmapped supervisor to an empty panel would
-read as "no work". The mappings are read before the decision is made, so a third state ("not yet
-known") falls back to the whole practice rather than flashing an empty list. An explicit choice in the
-URL always wins, or a mapped staffer could never look at the practice.
-
-`?panel=me` is resolved server-side from the mappings and the caller's own identity, never from a
-client-supplied list, so nobody can ask for somebody else's panel by spelling it in a URL. A viewer
-who owns no panel gets an EMPTY set, which matches nobody: serving the whole practice under a heading
-that says "My panel" would tell someone that several thousand other people's patients are their
-responsibility. `SubjectFilters.providerIds` is therefore tested with `!= null` in
-`hasActiveSubjectFilters` — an empty panel is an ACTIVE filter, and reading it as inactive is the
-vacuous-guard shape this codebase keeps finding.
-
-**d7. The mapping is WorkWell's, and stays WorkWell's** (owner decision, 2026-09-12).
-
-WebChart has a department construct keyed to a provider, and it was considered as the source of this
-mapping instead of a table here. It is not adopted, for three reasons. The two things change on
-different schedules and by different hands: a panel moves when someone takes leave or covers a
-colleague, and a quality supervisor must be able to change that without an administrator. The
-cardinality does not obviously line up — this table is one provider to one assignee, where a
-department may hold several providers or a staff member several departments — so it is not a clean
-import. And it is the wrong dependency to pursue: a panel only means anything once the system knows
-which patients belong to which provider, which on the live directory it does not, because every
-subject is attributed to a single hardcoded provider. That is the real ask of MIE, tracked as #556,
-and it is about patient-to-provider attribution rather than staff assignment. (It is NOT #533, which
-covered the cms165 blood-pressure stamping half of WebChart ingest and is closed — a different field
-with a different consumer.)
-
-If MIE does hold staff-to-provider data, the compliant shape is an IMPORT that SEEDS this table and
-leaves it editable, never a live read-through. Externally supplied data lands in a workflow a person
-reviews rather than applying itself, which is the same rule ADR-022 set for identity links.
-
-**d6. A panel is an assignment mechanism. It is not an attributed population.**
-
-Who works a patient and who is accountable for them under a contract are different questions with
-different sources. The ACO's attributed list is supplied by the ACO, is versioned, and is a separate
-relationship (MM-2 PR 3); a panel is the practice's own internal division of labour, edited by a
-supervisor. Nothing here may be read as a denominator, and no report derives one from it.
-
-**The audit window is wider here than on the operator path, and is accepted.** Events for a chunk are
-written before that chunk's update, and chunks are sequential, so a case an operator grabs mid-backfill
-loses the compare-and-set and stays put while a `CASE_ASSIGNED` naming a transition that did not happen
-is already in the ledger. That is the same recorded-but-unapplied trade `case-actions.ts` chose, spread
-over a panel rather than a request; the alternative — mutating first — risks an unaudited state change,
-which the hard rule forbids. `backfilled` is reported separately from `backfillPlanned` so the
-discrepancy is visible rather than inferred.
-
-**Consequences.** `panel_assignments` is a new owner-approved table; `cases.assignment_source` is a new
-nullable column on both schema files. `GET /api/panels` is AUTHENTICATED (the same gate the provider
-list carries), `PUT`/`DELETE` are CASE_MANAGER/ADMIN. The live WebChart directory still attributes
-every subject to one hardcoded provider, so panels are meaningful on the corpus roster only until
-#556's attribution work lands; that is a data gap, not a design one, and d7 records why closing it is
-the request that matters rather than moving this mapping into WebChart.
-
-## ADR-079: the population membership a run already knew is WRITTEN DOWN — and a subject outside the population is subtracted from the rate, not counted as a gap
-
-**Date:** 2026-09-10. **Status:** accepted. The ORDER-PROPOSAL half is an OWNER decision (issue #546,
-which recorded both readings and decided neither); the SCHEMA is an owner decision (CLAUDE.md).
-Completes ADR-078, which settled what an out-of-population outcome means for a CASE and left open what
-it means for a RATE and for an ORDER.
-
-**Context.** ADR-078 persists an out-of-population subject's outcome as `MISSING_DATA` — CQL is
-authoritative, and the engine's answer is "not this measure's concern this period" rather than a
-bucket of its own. The distinction survived only inside `evidence_json.official`, and only the roster
-read it (`deriveCell` → `OUT_OF_POPULATION`, ADR-077 d7). Everything that counted statuses therefore
-counted those subjects as unmet gaps. On the pilot, measured 2026-09-10, that was not a rounding
-error: for all six routed measures `missingData` equalled `total − initialPopulation` exactly, so the
-*entire* Missing Data column was out-of-population and in-population missing data was zero. Because
-`complianceRateOf` puts `missingData` in its denominator, the dashboard reported CMS125 at 18.0% for a
-population that scores 72.1%, and CMS137 at 0.4% against 13.5%. Order proposals read the same bucket
-and offered 33,963 orders to a 20,000-patient roster — an HbA1c for every non-diabetic, a mammogram
-for every man.
-
-**Decision.**
-
-1. **The flag is a COLUMN — `outcomes.out_of_population`, nullable.** The run pipeline already
-   computes it per subject (`inInitialPopulation`, official-routed measures only) and threw it away
-   after deciding the case. Writing it down is what makes every other decision here affordable: a
-   reader answers "is this a gap?" from the projection it already fetches, at a byte instead of a JSON
-   blob, at any filter granularity, and it keeps working after ADR-073 compaction because the flag
-   travels with its row. The rejected alternative — deriving it from evidence per read — cost a full
-   evidence pass per (measure, run) on surfaces whose whole purpose this quarter was to stop reading
-   evidence, and could not correct a TREND at all: ten runs' evidence per measure, for a sparkline.
-   **NULLABLE on purpose.** NULL means "this run did not record it", which is the truth for every row
-   written before the column existed; `NOT NULL DEFAULT FALSE` would assert that ~90,000 pilot rows
-   are in-population when they are not. `false` is a CLAIM — the official logic ran and placed this
-   subject inside the population — so it is written ONLY when that happened: an authored measure, a
-   copy-forward reuse and an evaluation that threw all persist NULL. That is not fastidiousness about
-   vocabulary: the backfill below only touches `IS NULL` rows, so a `false` written where nothing was
-   evaluated would be permanently beyond its reach (found by Codex on #548, after two earlier reviews
-   read the same code and called it accurate). Readers treat NULL as not-out-of-population, so an
-   un-backfilled deployment reports exactly what it reported before rather than something new and
-   wrong, and `docs/DEPLOY.md` carries the one-time backfill that resolves the NULLs from evidence.
-2. **Out of population is its own count, and it is not in the rate's denominator.** `ProgramSummary`
-   and `ProgramTrendPoint` carry `notInPopulation`; `missingData` is the remainder, which is the
-   number a panel can act on; `denominator` is `total − excluded − notInPopulation`. `totalEvaluated`
-   still reports every row the run wrote, because it is a count of work done, not a denominator.
-   Top-drivers drops those rows from the flagged-reason mix for the same reason: a driver panel is a
-   list of things to do. The subtraction is applied only to rows whose persisted status is
-   `MISSING_DATA` — there is no UNIQUE on `(run_id, subject_id, measure_id)`, and an argued invariant
-   that a count cannot go negative is worth less than a structural one.
-3. **Every surface that reports a population rate moves together**: the programs overview, both trend
-   paths, top-drivers, the hierarchy rollup, the risk outlook's site table, and order proposals. A
-   half-migrated basis is worse than the defect, because two screens then disagree and neither says
-   so. The monthly (quality-snapshot) trend has no column for the split and is therefore NOT served
-   for an official-routed measure: `programTrend` falls through to the per-run points, which read the
-   flag. The RUN-level surfaces — the runs list, the runs CSV, the MCP run summary — keep reporting
-   persisted statuses and `passRate = compliant / totalEvaluated`, because those state what a RUN
-   wrote rather than describing a population; the CSV gains an APPENDED `notInPopulation` column so a
-   reader can reconcile the two.
-4. **An order proposal reads population membership** (#546 reading (b), owner-chosen). The rejected
-   alternative — deriving proposals from active cases — would have made a human closing a case
-   silently withdraw a clinical order, and would have coupled an advisory clinical surface to workflow
-   state it does not describe.
-5. **"Outside the population" means every rate's initial population**, shared as
-   `outsideEveryRate` (`fhir/measure-report.ts`). `official.populationResults` holds rate 1 verbatim on
-   a multi-rate measure (ADR-074), so reading it alone called a CMS137 patient out of population on
-   Initiation while Engagement still admitted them — while the CDS card, which already read every
-   rate, would have carded that same patient. The card and the cell held byte-identical copies of the
-   expression; they now hold one.
-
-**Consequences.** Every headline rate on the pilot moves up, sharply and correctly, once the backfill
-runs — CMS125 18.0% → 72.1%, CMS130 19.5% → 43.3%, CMS165 20.5% → 62.4%, CMS122 7.4% → 72.4%
-(inverse: poor control), CMS137 0.4% → 13.5%, CMS2 60.9% → 68.7%. Anyone who recorded an earlier
-figure will see a discontinuity, and it is not a data change: the same runs, counted against the
-population the measure actually describes. The stored outcomes are otherwise untouched, and the
-regulatory rate (`officialMeasureRate`, ADR-077 d5) never had this defect — it always reduced the
-evidence's own populations, which is why the two numbers disagreed so visibly on the same card. The
-frontend's `displayRate` workaround, which dropped `missingData` from an inverse measure's denominator
-*because* of this defect, is removed with it; keeping it would now drop real work.
-
-## ADR-078: the sandbox routes the ACO's whole computable set — and a subject outside a measure's population is a result, not a case
-
-**Date:** 2026-09-08. **Status:** accepted — an OWNER decision, recorded in `LOCKED_DECISIONS.md` §4A.2
-as a SINCE note. Amends ADR-043 (the case fan-out it recorded) and reads ADR-072's cms165 consequence
-and §4A.5's "known-unverified" bar as governing the PHI phase.
-
-### Context
-
-Eight days before the pilot group's quality lead was told the sandbox held her ACO's measure set, it
-showed two. cms2, cms130, cms165 and cms137 were vendored, MADiE-gated (36/36, 64/64, 68/68, 45/45),
-runnable under ADR-072, and unrouted, each waiting on a sequenced precondition: cms2's seven
-cross-engine disagreements (diagnosed 2026-09-07, #538), cms130's sweep (63/64, #539), cms137's flip
-after those two and after the final rule on Quality ID 305, and cms165's WebChart ingest half (**#591**,
-formerly #533's).
-The owner's priority is every measure the pilot group sent us working and visible in the sandbox, and
-the sandbox evaluates a generated corpus, not WebChart data.
-
-Routing all six exposed the second problem at scale. An official outcome outside the initial
-population persists as MISSING_DATA and, through `dispositionFor`, opened a MEDIUM "collect the
-documentation" case — ADR-043 recorded this as "real operational noise" and left it. With two measures
-it was 16,581 open cases, 91–97 % of them patients the measure does not concern; with six it would have
-been the whole worklist.
-
-### Decision
-
-1. **The Maui sandbox routes cms122, cms125, cms2, cms130, cms165 and cms137** (`deploy-maui-mieweb.yml`
-   and `reconcile-maui-mieweb.yml`, which must agree). Evidence attached to the flip: cms2's whole-roster
-   gate (36/36, 17,795/20,000 in the initial population, 5,413 actionable, 0 errors), cms137's
-   (`docs/evidence/FLIP_GATE_2026-09-07_CMS137.md`), the cross-engine sweeps, and the credentialed
-   gates for cms130 (64/64, 9,257 in the initial population, 4,997 actionable) and cms165 (68/68,
-   6,837 and 2,431), run through the `flip-gate.yml` workflow because their pinned sidecars are
-   VSAC-completed and do not resolve locally (`FLIP_GATE_2026-09-08_CMS130.md`, `_CMS165.md`).
-2. **A subject the executor finds outside the initial population never opens a case.** The pipeline
-   reads the executor's own `inInitialPopulation: false` — never re-derived from evidence, so an
-   authored MISSING_DATA ("no record") keeps opening cases — and treats it as a close-only outcome:
-   no case where none exists; an active case is closed by the system with
-   `closed_reason='OUT_OF_POPULATION'`, audited `CASE_RESOLVED`, reopenable by a later in-population
-   outcome. The CDS card surface applies the same rule off the persisted evidence. The outcome row is
-   unchanged: CQL stays the authority (ADR-008), and the roster shows OUT_OF_POPULATION (ADR-077 d7).
-3. **The two conditions the locked decision named move to the PHI phase.** cms137 stays routed on
-   the sandbox unless the final rule removes 305, at which point it is un-routed by the same workflow
-   edit. cms165 runs on the corpus's stamped profiles (ADR-076 d1, #539); before real data it needs
-   every QI-Core profile it retrieves stamped at ingest and WebChart's BP status to arrive final
-   (**#591**, formerly #533's). Neither is a sandbox blocker, and both are written into the PHI readiness gate.
-
-### Consequences
-
-- The nightly run evaluates 120,000 subject-measure pairs instead of 40,000. The first such run is the
-  measurement; if it does not fit the anchor window the chunk size and the anchor hour are the knobs.
-- Existing out-of-population cases on the sandbox — roughly 15,000 — are closed by the first run after
-  deploy under `OUT_OF_POPULATION`, each with an audit event. That is one large ledger write, once.
-- cms165's cross-engine number is still open (#572; #532 closed once the sweeps were run). Routing it on the sandbox does not settle that
-  question and does not claim to; the measure's own MADiE deck is the verification it carries.
-- The flip gate is now runnable where its sidecars resolve (`flip-gate.yml`), which removes the
-  "run it somewhere credentialed" instruction from the runbook's list of things a person has to know.
-
-## ADR-077: a report is refused rather than rendered from rows that may be incomplete — and a dashboard rate is the evidence's rate, shown apart from the workflow's
-
-**Status:** Accepted (2026-09-08). Amends ADR-031, ADR-073 and ADR-074 d12.
-
-### Context
-
-An external review of the pilot sandbox (2026-09-07) found four ways a number could be shown with a
-meaning it did not have, all reproduced against `564d5d93` before anything changed:
-
-- every MeasureReport variant returned `status: "complete"` for REQUESTED, QUEUED, RUNNING, FAILED and
-  CANCELLED runs while QRDA I/III refused them, and the UI offered the export for every *terminal*
-  run, FAILED included;
-- a COMPLETED SITE recheck of one clinic became the whole practice's population snapshot — on the
-  roster, the programs overview and the hierarchy rollup;
-- outcome compaction (ADR-073) changed a historical run's score from 1/2 to 0/1 while the run's own
-  "total" fell in step, because `RunSummary.totalEvaluated` is a count of the surviving rows;
-- a FAILED rerun's row evicted the last finalized answer from the keep set, which selected by age alone.
-
-Separately, the programs dashboard's headline was the five workflow buckets reduced to a percentage
-and labelled as if it were the CMS rate (its own comment said "the way CMS scores it"); and an
-evaluation error fell through to the authored status rule and was counted as a subject in the
-denominator who failed — for a lower-is-better measure, the opposite of its numerator.
-
-The first fix proposed for compaction — compare the run's total with its surviving rows — was circular
-and would have detected nothing; the aggregator was about to have the proportion formula applied on
-top of an output that already folds numerator exclusions. Both were caught in review before tests
-encoded them.
-
-### Decision
-
-1. **One reportability predicate.** `src/run/reportable.ts` (COMPLETED, PARTIAL_FAILURE) governs
-   MeasureReport (all three variants), QRDA I and QRDA III, applied before any outcome row is read; the
-   UI's export buttons mirror the same set. A FAILED or CANCELLED run is terminal and not reportable.
-   (Extends ADR-074 d12 to every MeasureReport variant.)
-2. **Completeness evidence is the ledger, never the surviving rows.** `compactOutcomes` awaits an
-   `OUTCOMES_COMPACTION_STARTED` intent event before deleting (ADR-073 d4), and each event carries the
-   cutoff its pass applied, so the FURTHEST cutoff any pass has ever applied bounds what any pass
-   could have reached — the maximum over the ledger, not the newest event, because widening the
-   retention window moves the next cutoff backwards. A population export from a run that started
-   before that cutoff is refused with 409 `run_compacted` — checked before any row is read AND again
-   after the last read, because the stores share no transaction and a pass that starts mid-read
-   deletes under it; the intent precedes every delete, so the second check sees it. Conservative
-   by design: a run whose rows all survived is still refused, because the alternative is a score wearing
-   an identity it no longer earns. `compactOutcomes` is the only deletion path, and that is what makes
-   the evidence sufficient. Comparing `totalEvaluated` with surviving rows was rejected as circular, and
-   `RUN_COMPLETED`'s payload count is best-effort and counts work items including out-of-population
-   subjects, so equality there proves nothing either.
-3. **The keep set protects the newest USABLE row** — from a COMPLETED or PARTIAL_FAILURE run, not an
-   evaluation error — AND the newest row regardless, per (subject, measure, period), plus every row a
-   case cites. Two keep sets, because a FAILED rerun or an engine failure must not evict the last
-   finalized answer, while a key with no usable row still keeps its newest so no roster cell goes blank
-   and a newer failure stays visible beside the last good answer. Rows of an in-flight run are never
-   candidates. (Amends ADR-073 d2.)
-4. **A population winner is a whole-roster run.** `POPULATION_SCOPES` = MEASURE, ALL_PROGRAMS — an
-   allowlist, replacing "everything but CASE and EMPLOYEE". SITE, CASE and EMPLOYEE runs are visible in
-   case detail and never replace the snapshot; the quality snapshot and the per-measure scan behind
-   the risk outlook (`listOutcomesForMeasure` with `successfulPopulationOnly`) use the same set.
-5. **The dashboard's measure rate is the evidence's rate**, reduced by `createRateAggregator` — the same
-   reducer the MeasureReport uses, whose `normalizeMembership` already applies the CQM IG folds, so
-   nothing is subtracted twice — and shown as a SEPARATE metric from the workflow-status rate, which
-   keeps its history under its own name. No improvement is computed between the two, and an inverse
-   measure's workflow history is never read as a trend in its official rate.
-6. **An evaluation error is in no population.** `membershipFor` returns no membership for
-   `evaluationError` evidence on every measure; the aggregate counts it (`evaluationErrors`, and also
-   `unmeasured`, since it is in no rate), both exports carry it as `x-workwell-evaluation-errors`, and
-   the dashboard tile and reconciliation endpoint show it. An errored subject gets NO individual
-   MeasureReport in the bundle (a per-subject document asserting any membership would be a claim
-   about a record the engine never read; the bundle response carries the same header), and the
-   compliance API labels the row `populationsSource: "evaluation-error"` — an additive third value
-   (ADR-061). (Amends ADR-031's status-rule fallback.)
-7. **The roster distinguishes** OUT_OF_POPULATION (evaluated by the official logic, outside the
-   initial population) from MISSING_DATA (in the population, data missing) and from an evaluation
-   failure (MISSING_DATA with a failure method); and `GET /api/runs/:id/reconciliation` states every
-   count on a terminal run in one unit — subject-measure pairs — with the population figures beside
-   them.
-
-### Consequences
-
-- A run older than the retention window can no longer export a MeasureReport or QRDA; its counts, its
-  quality-history snapshot and the surviving outcomes CSV remain. A durable per-run report archive is
-  what would keep old reports exportable, and it is an owner decision (schema).
-- The Postgres keep set now joins `runs`. Its cost at pilot scale is recorded as UNMEASURED in the
-  store's comment, and an EXPLAIN ANALYZE before the pilot's table grows is a follow-up, not a claim.
-- A SITE run's fresher result is not reflected on the roster until the next whole-roster run; a
-  "newer check available" overlay is deferred to the panel-worklist slice. The same allowlist now
-  governs the order-proposal route and the measure-detail latest-run read, which also stop seeing
-  SITE runs — deliberately: neither describes one clinic as the practice either.
-- The measure-rate memo is dropped after every compaction pass, so a warm and a cold process cannot
-  show different rates for the same run; and `/reconciliation` never pages a run's rows — its error
-  count comes from the ledger's `RUN_COMPLETED` payload or the official aggregate, or reads as "not
-  recorded".
-- An out-of-population subject still opens a MISSING_DATA case (ADR-043 recorded the fan-out) and the
-  CDS card mirrors the case. Closing that is a case-model contract for the worklist slice, not a
-  display change, and is deliberately not smuggled in here.
-- The review's reproduction script bypasses `compactOutcomes`, so its compaction check cannot observe
-  decision 2; the store contract and the route test carry the equivalent through the policy layer.
-
-## ADR-076: profile trust is a per-measure fact, and an operator's next action outranks the wording table
-
-**Status:** Accepted (2026-09-07). Closing the flags MM-1 left open (issues #530–#537).
-
-### Context
-
-Three things the pilot could not do correctly shared a shape: a global setting was carrying a
-per-case fact, and the failure was silent in every one.
-
-1. **`trustMetaProfile` was one switch for every measure.** It is false, deliberately — trusting
-   QI-Core profiles empties the population for cms122 and cms125, which are routed. But cms165's
-   decisive retrieve is `[Observation: us-core-blood-pressure]`, the only Observation retrieve in that
-   artifact with no code filter; the other four each name a code or a value set. With profiles ignored,
-   every final Observation is a candidate blood pressure, and whichever is newest is read as the
-   patient's latest reading. The old synthetic fixture emitted one Observation per subject, which is
-   the only shape that hides it.
-2. **`next_action` was recomputed and rewritten on every run.** An escalation, a manual resolution, an
-   outreach send's "wait for the follow-up" — each replaced by the wording table's line the next
-   morning. ADR-074 d13 made that overwrite AUDITED, which made it visible without making it right.
-3. **The segment gate dropped subjects silently.** Case creation is gated by segment applicability, and
-   a subject nobody's segment covers gets an outcome and no case. Correct when the segment means it;
-   indistinguishable from a segment left behind by a roster that grew, which is what the pilot had —
-   `All Patients` listed two clinics while the corpus spans five.
-
-### Decision
-
-**d1. `trustMetaProfile` is decided per measure, in `OFFICIAL_MEASURE_SEMANTICS`, and cms165 is the
-only measure that sets it.** The default stays false and the reasoning for that default is unchanged.
-This is available only because ADR-075's corpus stamps the profile each artifact retrieve names — a
-thing it was already doing deliberately, for this. It does NOT make cms165 routable: a bundle whose
-resources are not stamped retrieves nothing under it, so a WebChart-derived roster needs its blood
-pressures stamped at ingest first. That failure is louder than the current one, though not unconditionally: the executor's batch-level retrieve refusal fires only for a roster of MORE than one subject, since a single subject retrieving nothing is a legitimate answer. A nightly Maui run is a roster and would refuse; `/simulate`, the CLI and rerun-to-verify evaluate one subject and would quietly return MISSING_DATA.
-
-**d2. An operator-written `next_action` outranks the computed one while the outcome it was written
-about still holds.** A new `cases.next_action_source` column records who wrote it: `patchCase` is the
-operator surface and marks OPERATOR, `upsertFromOutcome` is the system's and marks SYSTEM. When the
-outcome status changes, ownership reverts and the computed action takes over — an instruction written
-about being OVERDUE is stale advice once CQL says something else. This is the rule `IN_PROGRESS`
-already had, applied to the other column an operator writes.
-
-The boundary is the surface, with one stated exception: `patchCase` marks OPERATOR because it is the
-surface people write through, and **rerun-to-verify passes `SYSTEM` explicitly** because the action it
-writes is `nextActionFor(...)` — the very string a run computes. Marking that OPERATOR would freeze it,
-pinning the rate a multi-rate case missed on the day it was reverified and never following the rate
-afterwards, which is the ADR-074 d13 behaviour this decision promises to leave alone. A caller that
-computes an action the way a run would says so; the type carries the field for exactly that.
-
-Deliberately NOT done: keeping an operator-owned action fresh against a wording-table edit or a moved
-missed rate. Both still reach every SYSTEM-owned case. The case page and roster cell show the missed
-rate regardless, because they read the outcome's evidence live rather than `next_action`.
-
-**d3. A run reports how many subjects the segment gate dropped, and never mutates a segment to fix
-it.** Seeding still creates and never mutates, so widening a segment stays a human act with an audit
-row. What the run adds is the size of the drop, the measures and the sites, in a WARN — the same
-remedy ADR-043 applies to a whole roster leaving the initial population, for the same reason. The
-count is of distinct SUBJECTS and, separately, of evaluations: the loop is over (subject, measure)
-pairs, so one patient gated on three measures is one person to chase, and reporting three would
-overstate the drop against the runbook's own "52 % of patients".
-
-**d4. Retention turns on with its index, as ADR-073 d1 required, and the coupling is now a test.**
-`spike_outcomes_keepset_idx` covers the keep-set's `(subject, measure, period, evaluated_at DESC,
-id DESC)` and `spike_cases_cited_outcome_idx` covers the "no case cites this row" anti-join. Maui ships
-a 400-day window in the same commit. `official-flip-config.test.ts` asserts a shipped window implies
-BOTH indexes, so the dangerous direction — dropping one while the window stays set — fails a test
-rather than being remembered.
-
-**The query is unchanged, and that is a measured decision rather than an omission.** The obvious
-companion change was to rewrite the keep-set as a correlated `EXISTS (a newer row for this key)`,
-which reads like the more index-friendly form. It was written and then measured on postgres:16 over
-300,000 outcome rows (the pilot's shape: 20,000 subjects x 5 measures x 3 runs), each variant deleting
-the same 200,000 rows under `EXPLAIN ANALYZE` in a rolled-back transaction:
-
-| form | plan | time |
-|---|---|---|
-| `DISTINCT ON`, no index | external merge `Sort`, 19 MB to disk | 523 ms |
-| `DISTINCT ON`, with the index | `Index Only Scan using spike_outcomes_keepset_idx` | **274 ms** |
-| `EXISTS`, with the index | `Hash Semi Join`, two sequential scans, index unused | 516 ms |
-
-So the whole-table sort ADR-073 d1 named is real, the INDEX is what removes it, and the rewrite is a
-pessimization the planner declines to use the index for. It was reverted. The measurement is recorded
-in the store's own docstring so it is not attempted again.
-
-### Consequences
-
-- cms165 still must NOT be routed over WebChart data (**#591** tracks the ingest-side stamping; #533 closed
-  2026-09-08 with that half unshipped), and this is
-  now the reason rather than a blanket one: the measure is scoreable, our corpus can score it, real
-  WebChart data cannot yet.
-- CMS2's seven cross-engine disagreements have a cause (`docs/evidence/CROSS_ENGINE_2026-09-07_CMS2.md`),
-  which is the MM-1c precondition on its flip. The cause is one helper,
-  `CumulativeMedicationDuration.medicationRequestPeriod` — the same one CMS122's and CMS125's
-  disagreements were isolated to. That helper is now implicated in **22 of the 25** known cross-engine
-  disagreements (CMS122 6, CMS125 8, CMS2 7, CMS130 1) — of which **8 are proven by construction** (one
-  CMS125 case in August, all 7 CMS2 cases here) and **14 are consistent-with by inventory**. Two CMS125 cases
-  are `Procedure`-only and stay unexplained; CMS137's single one is a separate and separately proven
-  period boundary. The August evidence put 9 of 23 unattributed; it is now 2 of 25.
-- A case's audit trail gains a `next_action_source`-shaped distinction it did not have: a run that
-  changes an action is still `UPDATED` and audited; a run that declines to overwrite one is
-  `UNCHANGED`, because the persisted row did not change. The hard rule is unmoved — every state change
-  writes an audit event, and this is the absence of a state change.
-- 400 days deletes nothing on Maui today; the instance is two months old. The window starts protecting
-  the table later, which is the safest moment to turn such a thing on.
-
-## ADR-075: the pilot's roster is a generated corpus the deployment composes lazily, and evaluation runs in subject chunks
-
-**Status:** Accepted (2026-09-06). Milestone MM-1, unit U2 (`docs/ROADMAP_2026-08-30.md` §5).
-
-**Context.** ADR-072 made the ACO's five measures runnable. What they had to run against was a
-48-row fixture: `pat-001..pat-048`, two clinics, four providers, and a *seeded distribution* that
-assigned each subject a target bucket before any CQL ran. That fixture is why the pilot's numbers
-could not be believed. It is too small to show a rate, too uniform to show a panel, and — decisively —
-its clinical data is generated FROM the answer, so every measure it is asked scores exactly as it was
-built to score. A corpus like that cannot surface a defect in the measure logic, because it was
-constructed from the same assumption the logic is being tested for.
-
-The pilot also asked a question the fixture cannot answer at all. Its quality staff work by provider
-panel, never by measure, so a roster has to have panels in it; and an ACO's rates are only meaningful
-at population scale.
-
-Separately, the run pipeline was written for 150 people. At 20,000 subjects and five measures it is
-100,000 work items, and three of its properties stop being acceptable: the measure-major batch
-pre-pass materialises one measure's bundles for the whole roster at once, the per-item loop rebuilds
-each bundle a second time, and every outcome is a single-row `INSERT`.
-
-**Decision.**
-
-1. **The corpus is data-first, and generates no outcomes.** `patientAt(seed, index)` is pure and emits
-   clinical FACTS at published population rates — conditions by age band, visits, observations,
-   procedures, documented exceptions. It never computes, stores or implies a measure result. CQL alone
-   decides every outcome (ADR-008, `docs/AI_GUARDRAILS.md` §1). The `SubjectBundleSource` seam still
-   carries a seeded `target`, and the corpus's implementation returns `COMPLIANT` for everyone: that
-   value is inert, threaded through because the signature requires it, and it is not a claim about
-   anybody.
-
-2. **Determinism is per subject, not per generation.** Every draw for a patient comes from that
-   patient's own SplitMix64 stream keyed by `(seed, index)`, so `patientAt(seed, i)` and
-   `corpusPatients(seed, n)[i]` are the same record and batch boundaries never move anybody. Identity
-   disambiguation — the one thing that genuinely depends on who came before — draws from a SEPARATE
-   stream so it costs the patient's own stream nothing. `CORPUS_GENERATOR_VERSION` is bumped by hand
-   with any change to the draw order or the parameter table, and a pinned SHA-256 of the first 100
-   patients fails CI on a silent drift.
-
-3. **The first 48 records are the existing fixture rows, verbatim.** Ids, names, dates of birth and
-   clinics are unchanged, so every fixture, saved filter, screenshot and e2e expectation that names a
-   patient keeps naming the same person. What the prefix does NOT preserve is stated plainly: their
-   clinical data is generated data-first like everybody else's, so the designed 38/7/3 outcome buckets
-   are replaced by whatever the measures compute. Those pins are re-recorded, not defended.
-
-4. **The Maui directory IS the corpus, composed on first access.** `composeDeploymentDirectory` builds
-   the Maui roster from `corpusDirectory(seed, size)`; `WORKWELL_MAUI_CORPUS_SIZE` defaults to **48**,
-   so a deployment that has not opted in sees exactly what it saw before, and the Maui workflows set
-   20000 explicitly. The composition is memoized behind `getDeploymentDirectory()` rather than run at
-   module load, so a process configures its size before paying for it and no test generates 20,000
-   profiles by accident.
-
-5. **Evaluation runs in SUBJECT chunks** (`WORKWELL_RUN_CHUNK_SIZE`, default 500). A chunk builds its
-   bundles, evaluates every measure over them, persists in one `recordOutcomes` call, and drops the
-   cache before the next chunk exists. Membership is by subject so a subject's every measure shares one
-   bundle — which is what the optional `bundleForSubject(employee, evaluationDate)` on
-   `SubjectBundleSource` is for. A source whose bundle genuinely differs per measure simply omits it and
-   is built per item exactly as before.
-
-6. **A chunk's outcomes commit together; its case upserts do not join that transaction.** This is a
-   deliberate departure from the spec's §6, which asked for outcomes, case upserts and their audit
-   events to commit as one unit where the store supports it. Outcomes go first, in one batch, and the
-   case upserts follow per item. The reason is the direction of the failure: a crash between the two
-   leaves outcomes with no cases, which a rerun repairs by upserting them, whereas the reverse leaves
-   cases citing outcome rows that do not exist. The wider transaction is worth revisiting — it would
-   make a chunk genuinely atomic — but not at the cost of the recoverable direction.
-
-7. **Four things stay whole-roster, and that is the substance of the decision.** ADR-043's
-   empty-initial-population judgement, the active-case snapshot, the cycle rollover, and the single
-   terminal audit event. A chunk is an arbitrary sample of the roster; judging any of them per chunk
-   produces a statement about the chunking, not about the population.
-
-**Alternatives rejected.**
-
-- *Growing the seeded distribution to 20,000.* Rejected: it scales the fixture's central defect. A
-  roster whose outcomes are decided before CQL runs is exactly as uninformative at 20,000 as at 48, and
-  more convincing, which is worse.
-- *Sourcing a public synthetic corpus (Synthea and similar).* Rejected for the pilot's purpose: we would
-  not control the panel structure the quality staff work by, the terminology would not be pinned to the
-  artifacts' own expansions (ADR-036), and the corpus could not be regenerated byte-identically from a
-  seed recorded in a manifest.
-- *Keeping the array exports and making only `DIRECTORY` lazy.* Rejected: an exported `const` binding is
-  evaluated at import in ESM and cannot be made lazy, so the arrays became accessor calls. Eleven modules
-  read the roster through `DIRECTORY`, whose members are getters, so those call sites are unchanged.
-- *Chunking measure-major* (all subjects for one measure, then the next). Rejected: it holds the whole
-  roster's bundles for the measure being evaluated, which is the memory problem restated, and it rebuilds
-  every subject's bundle once per measure.
-- *Streaming outcomes per item and keeping single-row inserts.* Rejected on the Neon path: 100,000
-  round trips is the dominant cost of a full run, and batching per chunk also makes the failure boundary
-  a chunk rather than a row.
-
-**Consequences.**
-
-- **Maui reports 40 providers rather than 4**, across five clinics rather than two, and the fixture's 48
-  patients spread across their clinic's panel in `externalId` order — the rule the catalog itself used.
-  Handing every patient at a clinic its first PCP would collapse forty providers into two panels on the
-  DEFAULT deployment, which is the one the pilot's staff are using.
-- **A run's outcome ordering changes** for a roster larger than one chunk: chunks are persisted as they
-  finish. Within a chunk the items keep the order they had.
-- **`recordOutcomes` returns its records in input order** so the incremental cache can still fingerprint
-  the row it just wrote. Both store implementations mint the ids locally rather than reading them back.
-- **A hard FAILED run now writes a terminal audit event.** It previously wrote one only when the failure
-  was a live-WebChart preparation failure, so an ordinary failure finalized the run row and left
-  `audit_events` empty — against a hard rule that admits no exceptions. Chunking makes that path much
-  easier to reach, since a persist failure in any chunk lands there.
-- **The corpus's official population counts are a CREDENTIALED-CI fact, not a local one.** Every
-  assertion that consults an artifact's own terminology self-skips without the gitignored sidecar, so
-  `corpus-official-population.test.ts` is registered in the workflow step that has the VSAC credential.
-  A test that loads a sidecar and is not listed there is permanently skipped while reading as covered —
-  which has happened before.
-- **The 20,000-patient corpus is a SANDBOX artifact.** Nothing here authorizes the pilot's PHI phase,
-  which stays a separate `PRODUCTION_READINESS`-gated decision (locked decision §4A.1).
-
-**Amended 2026-09-06 — generator 4.0.0: identity is fixed, clinical facts follow the year the run
-scores.** The second review pass (own reviewer, a clinical reviewer, GLM 5.3 Flash and Gemini 3.8 Flash
-with shell access) found that the corpus as first shipped put the ENTIRE roster out of every initial
-population on the deployed sandbox, for a reason no test asked about: the clinical facts were pinned to
-calendar 2027 while a nightly run scores the calendar year of its evaluation date (ADR-072) — 2026,
-today. Every encounter fell outside the measurement period; the `effectivePeriodWarning` did not fire
-because the 2026 artifacts matched the 2026 period exactly; the run completed. Three more defects of the
-same class were found in the credentialed job's own log and by reading the artifacts' ELM against what
-the corpus emitted: CMS125 read `inIPP=0` because its initial population compares the `us-core-sex`
-extension, not `Patient.gender`; CMS137 read `inIPP=0` because its denominator is an encounter DURING
-which an encounter-diagnosis Condition starts, and the corpus emitted a problem-list Condition at
-midnight with no encounter; and CMS2's documented refusals were a final Observation coded with the
-refusal, where the exception retrieves a CANCELLED observation of the screening instrument with the
-refusal as its `notDoneReason` — 170 refusing patients read OVERDUE.
-
-8. **Identity is drawn against `CORPUS_IDENTITY_YEAR` (2027, fixed) and clinical facts against the
-   measurement year of the evaluation date.** A patient is the same person — id, name, date of birth,
-   sex, clinic, PCP, payer, race, ethnicity — in every year the corpus is ever asked about; their age,
-   conditions, visits and events are generated for the year the run scores. `bundleForSubject` takes
-   the year from the run's evaluation date, so a sandbox evaluated in 2026 shows 2026 encounters and the
-   same roster shows 2027's when PY2027 begins. The identity cross-check in `corpusBundleSource`
-   (DOB/site/PCP/sex) is valid across years by construction. `corpus-official-population.test.ts` asks
-   its question about the CURRENT UTC year, not a pinned one.
-9. **The Patient carries what the artifacts read.** `us-core-sex`, `us-core-race` and `us-core-ethnicity`
-   extensions in the steward's own shape, and one active `Coverage` typed from the Source of Payment
-   Typology with a resolvable payer `Organization` — the four supplemental data elements every vendored
-   artifact declares, and the element CMS125's initial population actually compares.
-10. **Every resource carries the profile its retrieve names.** A mammogram is
-    `qicore-observation-clinical-result` (it was the lab profile with an imaging category, a resource
-    contradicting itself); the SUD episode is an `Encounter` plus a `qicore-condition-encounter-diagnosis`
-    whose onset falls inside the encounter's period; a refusal is `qicore-observationcancelled`. The
-    Provenance informant is a resolvable `Organization`, not a display-only string.
-11. **Every denominator exclusion the ACO's measures share has data that can fire it.** Frailty is
-    emitted (with the dementia medication or advanced-illness diagnosis the 66+ exclusion also needs,
-    drawn among the frail at published shares), and palliative care, a bilateral mastectomy history and a
-    total colectomy history are drawn and emitted as the Procedures the artifacts retrieve. `pregnancy`,
-    which no vendored measure reads, was removed rather than kept as a count nothing could act on.
-12. **The pinned digest moved, and says why.** Draw order changed (payer, race, ethnicity and three
-    exclusion conditions are drawn; pregnancy is not), so every generated patient's clinical facts moved;
-    the fixture prefix's identity did not.
-13. **Age gates follow the artifact's anchor, per measure.** CMS2 and CMS137 compute age at the START
-    of the period; the screening instrument is banded and the manifest's cohorts are estimated with
-    `ageAtPeriodStart`, not the record's end-of-year `age`. The SUD episode draw is capped at Nov 14,
-    CMS137's own last admissible day. Diabetes is stamped `qicore-condition-encounter-diagnosis`,
-    the only profile CMS122 retrieves it through. Realized at 20,000 for 2027: SUD episodes 604, frailty 573,
-    palliative care 47, bilateral mastectomy 63, total colectomy 21; payer Medicare 3,927 / Medicare
-    Advantage 2,900 / Medicaid 3,277 / commercial 9,896.
-
-## ADR-074: a multi-rate measure is read as every one of its rates — and a subject is compliant only where each rate they are in is met
-
-**Status:** Accepted (2026-09-06). Milestone MM-1, unit U3 (`docs/ROADMAP_2026-08-30.md` §5, MM-1e).
-
-**Context.** Every measure WorkWell had onboarded declares exactly one `Measure.group`, and the code
-grew around that: the executor adapter read `populationResults` (group 1), `MeasureReport` emitted one
-group, the summary route counted one set of populations, and the MADiE gate compared one. None of it
-was wrong, and none of it said it was assuming anything.
-
-CMS137 (SUD treatment initiation and engagement, MIPS Quality ID 305) is blue on the ACO's list and
-declares **two** groups over the same denominator expression: *Initiation* — treatment begun within 14
-days of a new SUD episode — and *Engagement* — two or more further services within 34 days of
-initiating. They are not two views of one answer. In **8 of the 45 steward-published test cases the
-two rates disagree**, and every one of those is the same clinical story: a patient who initiated
-treatment and then did not engage.
-
-That is the whole reason to be careful. Reading group 1 alone reports those eight patients as
-compliant and drops them off the worklist — hiding exactly the follow-up gap the measure exists to
-surface. The failure is silent at every layer: a run completes, every subject gets an outcome, the
-rate looks plausible, and nothing anywhere says a second rate was discarded.
-
-**Decision.**
-
-1. **Every rate is read.** `OfficialSubjectResult` carries `rates: FqmPopulationResult[][]`, and the
-   adapter maps each rate to its own outcome. The single-rate path is `rates` of length one, so there
-   is no separate code path to keep in step.
-
-2. **The workflow bucket is the WORST measuring rate.** A subject is COMPLIANT only where every rate
-   they are in the denominator for is met. The reduction considers only rates that actually measure the
-   subject: `outcomeFromPopulations` returns `MISSING_DATA` for out-of-population, and `MISSING_DATA` is
-   the most severe outcome, so a naive worst-of-all would take a subject the measure had fully answered
-   on rate 1 and, because they fall outside rate 2's population, open a case saying "we cannot tell".
-
-3. **Regulatory truth is not the bucket.** Every rate's populations are persisted losslessly in
-   `evidence_json.official`, and `MeasureReport` and the exports read that rather than the bucket. The
-   five-value workflow enum does not grow (roadmap §7.3): it answers "does this person need outreach",
-   which is a different question from "what does this measure report".
-
-4. **`MeasureReport` emits one group per rate**, with `Group_1`/`Group_2` ids on multi-rate reports only
-   — so a consumer can tell Initiation from Engagement by something other than array position — and
-   single-rate reports keep the id-less shape they have today.
-
-5. **A subject who cannot supply every rate is counted in NONE of them.** Rates whose denominators come
-   from the same expression must have aligned columns; letting an errored or unreadable subject
-   contribute to rate 1 only inflates one denominator against the other, and nothing in the output
-   would show it. An unreadable rate contributes zeros rather than a copy of rate 1.
-
-6. **QRDA III REFUSES a multi-rate measure (501) rather than emitting rate 1.** That document goes to
-   CMS. A single-rate QRDA III carrying a multi-rate measure's identity is a wrong submission that looks
-   entirely normal. Multi-rate QRDA is tracked as follow-up work.
-
-7. **The MADiE gate compares every rate**, and reports which rate diverged when they disagree.
-
-**Alternatives rejected.**
-
-- *Reduce to rate 1 and note the limitation in the docs.* Rejected: the limitation is invisible in the
-  output, and eight of forty-five cases is not an edge. A documented silent wrong answer is still a
-  silent wrong answer.
-- *Reduce to the BEST rate*, so a patient who met either is compliant. Rejected: it is the same defect
-  in the direction that empties the worklist, and the measure exists to populate one.
-- *Grow the outcome enum to carry per-rate state.* Rejected per roadmap §7.3 — the enum is the operator's
-  vocabulary for outreach, the per-rate detail is already persisted losslessly, and widening it would
-  reach every read surface for a distinction only the reporting artifacts need.
-- *Emit a multi-rate QRDA III now.* Rejected as out of scope for MM-1e and refused loudly instead. A
-  refusal an operator sees beats a document CMS accepts and misreads.
-
-**Consequences.**
-
-- **CMS137 gates at 45/45** against its steward deck, raw and reference-adjusted, with zero unexpected
-  mismatches and zero errors — the six blue ACO measures now have committed evidence across 455 cases.
-- `?type=summary` and `?type=bundle` **agree**. They did not: the summary route counted one group while
-  the bundle emitted two, for the same run, with nothing to say which was right — and the summary route
-  is the one that survives the individual-report cap, so it is the one a real roster uses.
-- **The synthetic corpus had to emit a second engagement service.** Rate 2 requires two or more further
-  services within 34 days; the generator emitted one, so Engagement would have read **0% across the
-  entire corpus** — the exact rate this decision exists to surface. 82 of 564 episodes now engage.
-- `official-flip-gate.ts` and `compliance-api.ts` **read every rate** (since 2026-09-06 — they read
-  rate 1 only when this ADR was first written). The flip gate reports each rate's initial population,
-  denominator and numerator and treats a rate whose denominator is populated and whose numerator is
-  empty as a finding; the compliance API adds an ADDITIVE `rates` block, one entry per `Group_N`, and
-  leaves `populations` as rate 1 so no existing consumer changes (ADR-061).
-
-**Amended 2026-09-06 — decision 6 is SUPERSEDED, and strata are read.** The second review pass found
-what decision 6's refusal was standing in for, and built it:
-
-8. **QRDA III emits every group and every stratum.** One Performance Rate observation per group, each
-   `reference`ing ITS numerator criterion (`Numerator_2`, never `Numerator_1` for Engagement); one
-   Measure Data observation per population per group under the group's own criterion ids; and, where the
-   group declares stratifiers, one Reporting Stratum (V2) observation (`…27.3.4`, extension
-   `2016-09-01`) per stratum nested in each Measure Data observation, with its own Aggregate Count and a
-   `reference` naming the stratum criterion (`Stratification_1_1`). The 501 is gone. The stratum shape is
-   derived from the QRDA III R2.1 IG and the `cqm-reports` reference exporter's template, NOT yet from a
-   CVU+ run — and because cms125 (routed in production) declares two age strata, the production cms125
-   document is now stratified too. `STANDARDS_CONFORMANCE.md`'s 0-findings claim describes the
-   unstratified document of 2026-08-02; a stratified document must be re-validated before it is extended.
-9. **Stratifier results are persisted and reported.** `@work-well/official-executor` surfaces fqm's
-   `stratifierResults` per group (it never had), the adapter persists them as `evidence_json.official.strata`
-   keyed by the artifact's `Measure.group.stratifier.id`, and the summary and individual `MeasureReport`s
-   carry a `stratifier` element per group in the steward's own true/false-stratum shape. CMS137 declares
-   three age strata per group and CMS125 two; a report without them declares less than the measure does.
-10. **The aggregate exports do not inherit the individual report's cap.** The summary MeasureReport and
-    the QRDA III are sums, and are summed from PAGED reads; until this amendment they returned 422
-    `run_too_large` for any official measure on a run over 5,000 subjects — every export on the
-    20,000-patient pilot — while this ADR's own consequences said the summary route "survives the cap".
-    The cap stays on the per-subject bundle, which really does build a document per subject.
-11. **A subject counted in no rate is counted.** `aggregateByRate` reports `unmeasured` — the subjects
-    decision 5 leaves out of every rate — and the summary MeasureReport and QRDA III responses carry it
-    as the `X-WorkWell-Unmeasured-Subjects` header, so the gap between the roster and the denominators
-    has a number rather than being inferred. A header rather than a document element, because neither
-    FHIR MeasureReport nor QRDA III has a standard place for it and an invented extension would be a
-    claim the profiles do not make.
-12. **A run's provenance is read off the first row an engine actually evaluated — never off an errored
-    one.** *(SINCE 2026-09-08, ADR-077 d1: the reportable set this decision names — COMPLETED and
-    PARTIAL_FAILURE — now guards every MeasureReport variant as well as QRDA I/III, from
-    `src/run/reportable.ts`, and the UI mirrors it.)* The gate that decides whether an export sums
-    official memberships or the authored status histogram read ONE row, whichever sorted first. A subject whose evaluation threw persists
-    `{ evaluationError }` with no `official` block, and a `PARTIAL_FAILURE` run is reportable — so one
-    errored subject in first position sent a whole official run down the status path: one group where
-    the measure has two, no strata, and an inverted numerator for a lower-is-better measure (GLM review).
-    Errored rows say nothing about the engine and are skipped; the scan pages on until an evaluated row
-    answers, and only a run in which every subject errored reads to its end. The single-rate QRDA III's
-    byte shape is now pinned (UUIDs and clock stamps scrubbed, the rest hashed) after a diff against the
-    pre-multi-rate builder found it unchanged, so "identical to before" is enforced rather than asserted.
-
-**Amended 2026-09-06 (MM-1 U3) — the staff member sees WHICH rate was missed, and the gate reads the
-deployment's own roster.** Decision 2's bucket is the worst rate, so OVERDUE alone covered two clinically
-different patients — a new episode nobody treated, and a patient who initiated and never came back — and
-the display table's comment promised "the evidence shows which", while the case page rendered rate 1's
-populations and the raw JSON. Two consequences:
-
-13. **A multi-rate measure's OVERDUE wording names the missed rate.** `officialDisplayFor` takes the
-    outcome's `evidence_json` and, where `official.rates` is present, selects the wording of the first
-    rate the subject is in the denominator of, not excluded or excepted from, and whose numerator reads
-    as the miss under the measure's own `numeratorMeansCompliant` — out of it on a higher-is-better
-    measure, in it on an inverse one, the same reading `outcomeFromPopulations` applies.
-    Every reader passes it — the roster cell, the case detail's `official_summary`, the case row's
-    `next_action` (the case store now receives the evidence; it persists nothing from it) and, through
-    `nextActionFor`, the CDS card. Without rates the combined wording stands byte-for-byte, and a
-    single-rate measure ignores the argument. The persisted `expressionResults` carry EVERY rate, each
-    population under its rate's label (`official:Initiation:numerator`, `official:Engagement:numerator`),
-    the labels being `OFFICIAL_MEASURE_SEMANTICS[id].rateLabels` in `Measure.group` order — reviewed
-    with the measure like `numeratorMeansCompliant` is. Single-rate measures keep the unlabelled shape.
-    Prose about a persisted CQL result, never a rule (AI_GUARDRAILS §1).
-14. **The flip gate's roster reading is the deployment's own roster** (amends ADR-072 decision 6's "the
-    roster"). The CLI built its subjects from the 48-row occupational fixture filtered to the maui tenant
-    through the official-only fixture bundles — a roster Maui stopped running when ADR-075 made the corpus
-    its directory — so a corpus shape the artifact could not read would have passed the gate. It now
-    composes `composeDeploymentDirectory` and `compositeBundleSource` exactly as the run pipeline does,
-    under an env that routes the measure under test the way the flip would (the composite refuses an
-    unrouted measure, and the gate exists precisely because the measure is not routed yet), and the
-    report records `roster.source` — profile, directory size, subjects evaluated, and the hypothetical
-    `WORKWELL_OFFICIAL_MEASURES` — so the JSON on a flip PR says whose roster it describes.
-    `compositeBundleSource` takes the profile explicitly for this; its corpus seed stays the DEPLOYMENT's
-    (the `env` argument carries routing and is often partial — a test pins that), so the gate hands it a
-    corpus source built from the same seed its own directory was composed from, and the two cannot
-    disagree about who a subject is (the seed-mismatch class ADR-075 closed in the directory). The gate
-    refuses a measure outside the profile's set up front, with the profile named, rather than building a
-    corpus for it. Evaluation runs in the run pipeline's own chunks (`WORKWELL_RUN_CHUNK_SIZE`), so the
-    reading is a shadow of the run rather than one 20,000-subject batch; every bundle is still
-    materialised up front, which is why `--subjects` caps the reading (2,000 by default in the CLI;
-    `all` lifts it).
-
-## ADR-073: per-subject outcome history is a retention WINDOW, and the durable history is the aggregate
-
-**Status:** Accepted (2026-09-06). Milestone MM-1, unit U2 Stage D (`docs/ROADMAP_2026-08-30.md` §5).
-
-**Context.** A nightly ALL_PROGRAMS run over the pilot's 20,000 patients at five measures writes
-**100,000 outcome rows a night** — 36 million in a year, each carrying an `evidence_json` blob. The
-storage is a serverless Postgres and it is the pilot's actual bill. Almost every question anyone asks of
-those rows is about the CURRENT state of a panel: who is overdue today, whose result came back this
-month, which patients on this PCP's list need outreach. The historical rows answer a different
-question — how the practice's rate moved over time — and that question is already answered, better and
-in constant space, by the quality-over-time snapshot store (#E16, ADR-021), which materializes a
-numerator/denominator per measure per month per scope.
-
-Keeping 36 million rows to answer a question an aggregate already answers is paying for the same
-history twice, once in a form nobody reads.
-
-**Decision.**
-
-1. **`WORKWELL_OUTCOME_RETENTION_DAYS` defines a window; outside it, outcome rows are deleted.** 90 is
-   the intended Maui value — **but it ships UNSET on Maui until the Postgres index below exists** (the
-   keep-set's `DISTINCT ON … ORDER BY` has no supporting index, so on a table of nightly 20,000-patient
-   runs the DELETE would sort the whole thing inline during the nightly tick; the first workflows set 90
-   while `DEPLOY.md` said to wait — Codex review, #528 — and `official-flip-config.test.ts` now pins the
-   absence). **Unset everywhere else, and unset means OFF** — TWH keeps its history whole, and a
-   deployment that has not opted in can never lose a row.
-
-2. **Three things are never deleted, and they are the substance of this decision.**
-   - **The newest row per `(subject, measure, EVALUATION PERIOD)`, at any age.** Per period, not merely
-     per measure: a calendar-year eCQM's whole 2027 evidence is superseded by the first 2028 run, so a
-     newest-per-measure rule would delete every PY2027 row in about April 2028 — months before anyone
-     could be asked to justify a PY2027 rate, and years inside the audit window. Per period the cost is
-     one row per subject per measure per year, and a closed year stays answerable.
-   - **Every row a CASE cites**, matched on `(run_id, subject_id, measure_id)` — that case's own row,
-     not the other 99,999 its run contains. **Every case, not only open ones:** a closed case's detail
-     page still resolves its outcome through `last_run_id`, and a case somebody resolved is exactly the
-     record re-read when a number is challenged.
-   - **Every run row and its counts.** A compacted run still reports what it found; only its
-     per-subject detail thins.
-
-   > **SINCE 2026-09-08 (ADR-077 d2/d3):** the first keep set is now the newest USABLE row (from a
-   > COMPLETED/PARTIAL_FAILURE run, not an evaluation error) AS WELL AS the newest row regardless; rows of
-   > an in-flight run are never candidates; and the `OUTCOMES_COMPACTION_STARTED` intent event of
-   > decision 4 is the completeness evidence a population export checks before it renders — a run that
-   > started before the furthest cutoff any pass has applied is refused with 409 `run_compacted` rather
-   > than reported from its survivors.
-
-   Both exclusions are evaluated IN SQL. The first version read the open cases into memory with
-   `limit: 100000` and passed their run ids down — which truncates silently at pilot scale (120,000
-   possible open cases, ordered `updated_at DESC`, so the rows dropped are the least recently updated:
-   precisely the long-open cases whose run is old enough to be deleted on the next line), and which
-   pinned by RUN, so one case open past the window protected 100,000 rows.
-
-3. **Compaction runs AFTER the quality snapshot, never before.** The snapshot is computed from the
-   per-subject rows, so compacting first would build the durable aggregate from a roster with holes in
-   it — and the error would be permanent, because the rows it needed are gone. The scheduler enforces
-   the order and a test pins it.
-
-4. **The ledger entry PRECEDES the delete.** `OUTCOMES_COMPACTION_STARTED` (cutoff, window) is written
-   before `compactOlderThan` runs, and `OUTCOMES_COMPACTED` (cutoff, rows deleted, duration, window)
-   after it. The two stores share no transaction, so "delete, then audit" left a window in which rows
-   were irreversibly gone and the only record was a rejected promise the scheduler logs and moves past
-   (Codex review, #528). Written first: no ledger entry, no deletion; and a pass whose completion write
-   fails still names the cutoff its rows were deleted against, from which the keep-set — a deterministic
-   function of the table — reconstructs what went. A deletion is a state change and is audited — no
-   exceptions (CLAUDE.md). One event per pass rather than per row: the payload answers "what was removed
-   and what was protected", and 100,000 events answering that individually would answer nothing.
-
-5. **`backfill-trend-history` REFUSES to run under a retention window.** It writes synthetic outcome
-   rows dated weeks in the past which are nobody's newest — exactly what the next compaction deletes. It
-   would report success, the chart would look right until the nightly run, and the operator would have
-   no reason to connect the disappearance to the tool.
-
-6. **The compacted-run notice states what it can prove and no more.** A run older than the window shows
-   that its per-subject results may have been compacted and that the counts on the page are survivors.
-   It does NOT state how many rows went: the true evaluated count is not on the run row, putting it
-   there is a schema change (owner-owned), and deriving it from the surviving rows is circular. The
-   notice exists to stop a lower number being misread as a smaller run.
-
-**Alternatives rejected.**
-
-- *Keep everything and pay for the storage.* Rejected on cost, and because the value is asymmetric: the
-  aggregate answers the historical question better than 36 million rows do.
-- *Delete by run — drop whole old runs.* Rejected: it takes a subject's current answer with it whenever
-  that answer happens to come from an old run, which is exactly the case for a measure with a long
-  compliance cycle. The keep-rule has to be per `(subject, measure)`, not per run.
-- *Archive to object storage instead of deleting.* Rejected for now as a bigger commitment than the
-  problem needs (an export format, a lifecycle policy, a restore path). ADR-030's S3 seam exists if the
-  pilot ever asks for it; nothing here forecloses it.
-- *A schema column holding the evaluated count* so the notice could report exactly what was lost.
-  Rejected as owner-gated: migrations are Taleef's, and the notice is honest without it.
-
-**Consequences.**
-
-- **The quality-over-time snapshots become load-bearing.** They were a convenience for a chart; under
-  retention they are the long-run record. Nothing in compaction touches them, and that is now a
-  property to protect rather than an implementation detail.
-- **Per-subject outcome history on the pilot is a 90-day window.** A consumer of the outcomes CSV who
-  asks for a run older than that gets the surviving rows, not an error — and the run detail says so.
-- **The Postgres keep-set wants an index this schema does not have.** The subquery orders by
-  `(subject_id, measure_id, evaluation_period, evaluated_at DESC)` and the nearest existing index is
-  `(subject_id, evaluated_at DESC)`, so the planner sorts the table. On a 36-million-row table inside an
-  unbatched `DELETE` run inline in the nightly tick, that is a long lock and a plausible stall. An index
-  is a migration and migrations are owner-owned (CLAUDE.md), so it is **flagged here, not added**, and
-  the retention window stays off everywhere until it is decided.
-- **Lowering the window is the storage lever, with no code change.** 90 → 30 is one environment
-  variable on the two Maui workflows, which `official-flip-config.test.ts` requires to agree.
-- **This is calibrated for a SANDBOX, and would need revisiting before the pilot's real year.** MIPS and
-  MSSP data-validation policy expects supporting documentation to be retained for years after a
-  performance period, not ninety days. Two things make ninety defensible here and both must stay true:
-  the pilot phase this unit serves is a sandbox on synthetic data (locked decision §4A.1), and the
-  SOURCE clinical data lives in WebChart, which is the legal record under its own retention — so a
-  PY2027 rate is reconstructible by re-running the pinned artifact against it. The per-period keep-rule
-  above is what makes the WorkWell side answerable in the meantime. **The aggregate alone is not a
-  substitute**: a numerator/denominator per month cannot evidence one patient's membership, and this
-  ADR should not be read as claiming it can.
-- **Enabling retention on an instance that has been accumulating rows deletes a lot at once.** The
-  `pnpm outcomes:compact` CLI exists for that first pass, so it happens deliberately and under the same
-  audit event rather than inside a nightly run somebody is not watching.
-
-## ADR-072: a measure is runnable when it is authored OR official-only-and-routed — and an eCQM is scored over its calendar year, not a rolling window
-
-**Status:** Accepted (2026-09-05). Milestone MM-1b (`docs/ROADMAP_2026-08-30.md` §5).
-
-**Context.** ADR-047 established that a measure is onboarded when its MADiE gate is green. That turned
-out to be necessary and not sufficient, and the pilot found the gap: `cms2`, `cms130` and `cms165` were
-vendored, gated at 410/410 and (after ADR-071) carried semantics, yet none of them could actually run.
-The run pipeline derived its runnable set from the AUTHORED registry — a measure needed a
-`MEASURE_BINDINGS` row to get a subject bundle at all — so the three official-only measures were gated,
-routable and still not runnable. "Gated ≠ routable ≠ runnable" was the sequencing problem underneath
-MM-1, and it was invisible because each of the three states reads like the others from a distance.
-
-Separately, the official path inherited the authored path's rolling 365-day window. An eCQM is defined
-on a calendar measurement period, so a measure CMS defined on 2027 was being scored over a window CMS
-never defined it on, and the authored and official paths' population counts were not describing the
-same year.
-
-**Decision.**
-
-1. **The runnable rule is one pure function**, `classifyRunnable(id, env)`, returning `authored`,
-   `official`, `official-pending` or `invalid`. A measure is runnable when it is **authored** (registry
-   + synthetic binding) **or official-only** (vendored under `measures/official/` + an
-   `OFFICIAL_MEASURE_SEMANTICS` entry + named in `WORKWELL_OFFICIAL_MEASURES` on this deployment). An id
-   that is both authored and routed classifies as `official` — routing wins, which is what the router
-   already did. `env` is a parameter rather than a `process.env` read, so the flag is evaluated at call
-   time and a test can state the deployment it is describing.
-
-2. **`official-pending` is a first-class answer, not an error.** A measure that is vendored and has
-   semantics but is not routed *here* is correctly configured and simply not turned on for this
-   deployment. Collapsing it into `invalid` would make the default profile look broken for measures the
-   pilot has not flipped yet, and would have hidden the distinction the flip gate now reports on.
-
-3. **Subject bundles come from a `SubjectBundleSource` seam.** The pipeline no longer reaches into
-   `MEASURE_BINDINGS` for a bundle; it asks the seam, which dispatches on `classifyRunnable`. The
-   official-only measures get QI-Core shapes written directly against each artifact's own ELM
-   (`official-only-bundles.ts`) rather than a binding row that does not exist for them.
-
-4. **An officially-routed measure is scored over the calendar year containing the evaluation date.**
-   The period is derived through the existing `normalizePeriodEnd` and recorded on the run row, in
-   `evidence_json.official`, and in the compliance bucket. `planManualRun` switches only when EVERY
-   measure in the run is official-routed; a mixed run keeps today's behaviour rather than silently
-   re-scoping the authored half.
-
-5. **A stale artifact vintage is surfaced on the run, not just the console.** The vendored artifacts are
-   a 2026 vintage and the pilot's year is 2027, so `effectivePeriodWarning` names both periods and the
-   pipeline appends it as a run `WARN`. This is the mechanical detector for the MM-1d re-vendor.
-
-6. **A measure with no authored counterpart is gated by `official-flip-gate`, not `flip-snapshot`.**
-   `flip-snapshot` judges a flip by diffing the authored engine against the official artifact over the
-   same subjects; for cms2/cms130/cms165 that comparison has no BEFORE and cannot run. The gate replaces
-   it with three independent readings — the MADiE deck (through the same `runOfficialMeasure` CI calls),
-   the roster through `evaluateLikeTheRunPipeline`, and the artifact's `effectivePeriod` — each able to
-   fail the flip alone. It is descriptive: exit code 0 always, verdict in prose, and routing stays a
-   deliberate workflow edit (locked decision §4A.5).
-
-**Alternatives rejected.**
-
-- *Importing the gate module into the config layer* so `classifyRunnable` could ask the MADiE gate
-  directly. Rejected: it inverts the dependency (config would depend on the standards harness) and would
-  drag the content checkout into module load. The vendored-artifact check is a filesystem fact the config
-  layer can already see; the MADiE result is evidence a human reads before editing the workflow.
-- *Keeping the rolling 365-day window for official measures* to avoid two period rules. Rejected: it
-  scores a measure over a period its steward never defined, and no amount of consistency is worth a
-  number that answers a different question than the one asked.
-- *Promising CMS137 alongside the five.* Rejected per MM-1a: CMS-1848-P proposes removing Quality ID 305
-  from APP Plus for PY2027, so confirmation precedes the multi-rate spike, which precedes any promise.
-  ADR-047's MADiE-gate precondition applies to it unchanged.
-
-**Two terminology corrections this work surfaced (2026-09-05 pre-PR audit).** Neither is caused by
-ADR-072; both were pre-existing and would have shipped to the pilot with it.
-
-- `bipolarDisorder` was SNOMED **13746000**, which is not a valid SCTID at all — its Verhoeff check
-  digit fails and `tx.fhir.org $lookup` returns not-found in both the international and US editions.
-  A code that exists in no code system is a member of no expansion, so CMS2's bipolar DENOMINATOR
-  EXCLUSION never fired: every excluded patient sat in the denominator. Corrected to **13746004**.
-- `colonoscopy` was SNOMED **44441009**, which resolves to *Flexible fiberoptic sigmoidoscopy* — the
-  wrong procedure, registered under the Colonoscopy value set, carrying the display "Colonoscopy".
-  CMS130 gives colonoscopy a nine-year lookback and sigmoidoscopy four, so a real colonoscopy between
-  five and nine years old read as OVERDUE. Corrected to **73761001**. Two fabricated LOINC displays on
-  the depression-screening codes were replaced with the real ones at the same time.
-
-Both were caught by reading the artifacts' own ELM and checking every code against an external
-terminology server, not by any test — `corpus-membership.test.ts`, the guard that exists precisely for
-this, self-skips without the gitignored terminology sidecar and so had never run against them. Making
-that test unable to skip in a credentialed CI run is the follow-up this most needs.
-**Consequences.**
-
-- The **default profile is unchanged**: its runnable set is still the authored registry, and
-  `validateRunnableMeasureIds` proves both profiles' lists at module load.
-- **TWH's cms122/cms125 change measurement period** from a rolling window to the calendar year. Their
-  population counts move accordingly; this is a correction, not a regression.
-- A **re-vendor is now detectable rather than remembered** — every run of a 2026-vintage artifact over a
-  2027 period logs the warning until MM-1d lands.
-- **CMS165 has a HARD flip blocker that is not terminology and not a sweep** (found in the 2026-09-05
-  pre-PR audit). The official executor runs with `trustMetaProfile: false` — deliberately, because our
-  bundles stamp different QI-Core profiles than the artifacts name, and turning it on empties the
-  population for cms122/cms125 (see the rationale at the call site in `official-executor-adapter.ts`).
-  CMS165 is the only one of the five whose clinically decisive retrieve is `[Observation:
-  us-core-blood-pressure]` — identity by PROFILE ALONE, no code filter — and `Status.isObservationBP`
-  filters only on `status`. With the profile ignored, "a blood pressure" becomes "any final
-  Observation": `Most Recent Blood Pressure Day` resolves to the most recent Observation of ANY kind,
-  the systolic component is then null, and the numerator is silently false. Executed against the
-  vendored artifact, adding one later HbA1c to an otherwise-compliant patient flips NUMER true→false,
-  and a same-day non-BP Observation makes cql-execution throw (forcing MISSING_DATA). Every real
-  patient has other labs, so routing CMS165 as configured would report a BP-control rate near zero.
-  The synthetic fixture emits exactly one Observation per subject, which is the single shape that
-  hides this. **CMS165 must not be routed until this is resolved** — by stamping
-  `us-core-blood-pressure` on real BP Observations and trusting profiles for official routing, by a
-  WorkWell-side pre-filter, or by accepting the measure is not routable. Tracked as the first item of
-  MM-1c for cms165.
-- `cms130` and `cms165` are **gated but not yet routed**. Both pass their full MADiE deck against the
-  runtime — 64/64 and 68/68, zero unexpected mismatches, zero errors — so ADR-047's precondition is met.
-  What remains before a flip is the second-engine sweep (MM-1c) and a `flip-gate` run in a context that
-  resolves the terminology sidecar; on a machine without it every value set expands empty and the gate
-  correctly reports a zero initial population. That refusal is the rule working, not a defect.
-## ADR-071: official-only measures take the vendored manifest's id — and a legacy catalog row is deprecated, never rewritten
-
-**Status:** Accepted (2026-09-01). Milestone MM-1b slice 1 (`docs/ROADMAP_2026-08-30.md` §5).
-
-**Context.** `cms2`, `cms130` and `cms165` are vendored and MADiE-gated but had catalog rows keyed
-`cms2v15`, `cms130v14`, `cms165v14`, while the official executor requires the requested id to equal the
-manifest's `catalogId` (bare). The two runnable official measures, `cms122` and `cms125`, already use
-bare ids. No outcome, case or run anywhere references the versioned ids — the three measures have never
-been runnable — so the only persisted rows are the seeded catalog rows on each deployment's database.
-
-**Decision.** The catalog ids are **renamed to the bare manifest ids**; `policyRef` and the version
-string keep the CMS version (`CMS2v15`). `seedMeasureStore` deprecates a legacy versioned row **once**
-(reason: "superseded by `<bare id>` (catalog id rename, 2026-09)"), writes one `MEASURE_DEPRECATED`
-audit event for it, and only touches rows that still carry the exact seed fingerprint — a legacy row
-anyone edited is left alone and coexists as a Draft. Nothing is deleted. `OFFICIAL_MEASURE_SEMANTICS`
-gains `cms130` and `cms165` (numerator ⇒ COMPLIANT, both artifacts `improvementNotation: increase`),
-so the routing construction no longer refuses them for missing semantics.
-
-**Alternative rejected.** An alias layer mapping the versioned catalog id to the bare execution id.
-Rejected because it would have to be applied on every read, filter, upsert and rerun (the stores
-filter on exact `measure_id` and cases are unique on it) to protect data that does not exist.
-
-**Consequences.** The three rows stay `Draft` / `NOT_COMPILED` in this slice; runnable-ness, the
-official-only `Active` state, synthetic corpus and the flip gate are later MM-1b slices. Catalog
-visibility of the three rows is deployment-global (TWH sees them too); execution on the default
-profile is unchanged.
-
-## ADR-070: the spearhead moves to a patient-driven pilot deployment — and the ACO's measure set finds the engine five-sixths already built
-
-**Status:** Accepted (2026-08-30). Active plan: `docs/ROADMAP_2026-08-30.md` (supersedes
-`ROADMAP_2026-08-04.md` as direction; that document's §4 verification set remains the bar per locked
-decision 2).
-
-**Context.** A primary-care group on WebChart (repo name: **the pilot group**; deployment name: **Maui**)
-is entering an MSSP ACO for PY2027 (measurement begins 2027-01-01). Its proposed quality set is the APP
-Plus set; the six EMR-computable measures decode from MIPS quality IDs to CMS122, CMS2, CMS165, CMS125,
-CMS130 and CMS137. Five of the six are already vendored and MADiE-gated in this tree, and two run CMS's
-official artifacts in production — the 2026-07-24 priority-measure selection turns out to match what an
-MSSP ACO demands. The 2026-08-27 working session with MIE and the pilot's quality team established the
-consumer's actual shape: a quality staff organized by **provider panel** (never by measure), needing
-patient-centric work lists, pre-filtered drill-downs from every dashboard count, and — the substantive
-product finding — **cards that resolve rather than alert**: the card actions are *place the order that
-closes the gap* (a standing order for simple measures; a discretion-requiring pick list for colorectal and
-breast screening) and *document a denominator exclusion/exception*, never accept/dismiss. The hard
-integration problem is that **orders are local** — practice order catalogs carry local names and billing
-codes, frequently no LOINC, and imaging centers are not obliged to return LOINC on results; MIE's plan
-(mapping LOINC onto order rows so pick lists derive from value sets, results inheriting the order's code)
-is MIE-side work WorkWell will consume.
-
-**Decision.**
-
-1. **Milestone M-M (the Maui pilot) supersedes M-E1 as the spearhead.** M-E1 defers; locked decision 6
-   (occupational content as the long-term differentiator) stands. Sequencing is cheap-first: MM-0
-   (second deployment, patient terminology as deployment config extending ADR-004's switcher, clickable
-   status-chip drill-downs, sandbox accounts, primary-care synthetic roster, MIPS↔CMS crosswalk in the
-   UI) before the externally-blocked milestones.
-2. **The pilot's catalog is the ACO's computable set — with its two gaps named rather than assumed
-   away.** *Gap one:* gated ≠ routable ≠ runnable. The run pipeline derives its runnable set from the
-   authored registry (`RUNNABLE_MEASURE_IDS = Object.keys(MEASURES)`), CMS2/CMS130/CMS165 exist
-   product-side only as Draft/NOT_COMPILED catalog rows, and CMS130/CMS165 have no
-   `OFFICIAL_MEASURE_SEMANTICS` entry, so routing construction refuses them — a workflow edit alone flips
-   only cms122/cms125. **Official-only measure onboarding** (runnable-set derivation, catalog activation,
-   owner-reviewed semantics entries, product surfaces, the official-only flip-snapshot successor, and
-   extending `official-flip-config.test.ts`'s hardcoded `WORKFLOWS` + TWH-only sidecar predicates to the
-   Maui workflow) is therefore MM-1's substance, and **no known-unverified measure is routed to the
-   pilot** — CMS2's 7 unexplained mismatches are run down and CMS130/CMS165 swept before their flips.
-   *Gap two:* **CMS137 is conditional, then spiked.** The CY2027 proposed rule (CMS-1848-P) proposes
-   removing Quality ID 305 from APP Plus for PY2027, so ACO/final-rule confirmation precedes the spike;
-   if it survives, the spike precedes any promise — it is multi-rate (initiation ≤14d; engagement ≤34d),
-   which every routed surface currently assumes away, and ADR-047's MADiE-gate precondition applies
-   unchanged. *Also found in review:* every vendored artifact declares `effectivePeriod`
-   2026-01-01..2026-12-31 and the runtime does not validate it — PY2027 requires a re-vendor and full
-   re-gate (ROADMAP MM-1d) plus an interim window-vs-effectivePeriod warning.
-3. **Cards resolve, not alert — inside ADR-067's unchanged refusals.** Order suggestions stay gated on
-   APPROVED terminology mappings; `critical`/`systemActions` stay never-emitted; a card remains a
-   rendering of a completed evaluation (encounter-time freshness comes from evaluating sooner on ingest,
-   never from card-triggered evaluation — if that line cannot hold, ADR-067 is revisited explicitly).
-   And precisely, because the wording matters clinically: **an offered order is a proposal and never
-   changes compliance** — the gap closes only when the qualifying *result* reaches the chart and CQL
-   re-evaluates. The exception path must produce **structured data the measure logic reads on the next
-   run** — WorkWell never overrides CQL (ADR-008, AI_GUARDRAILS §1).
-4. **The versioned compliance API is demoted from "the contract MIE consumes" to a served surface.**
-   The 2026-08-04 decision 5 framing is superseded: the integration contract is the card/CDS surface plus
-   the Maui deployment. The API is kept — versioned, documented, tested — and nothing is deleted; no new
-   work is justified by the API contract alone.
-5. **Naming policy:** repository documents use the deployment name "Maui" and "the pilot group" only — no
-   **client-side** legal or staff names, no client-provided documents (MIE-side names are unaffected);
-   pilot user accounts use pseudonymous identifiers in configuration; source materials stay under the
-   gitignored local-only path.
-
-**Consequences.** `docs/ROADMAP_2026-08-30.md` carries the milestone detail, verification gates, and the
-named external dependencies (MIE's order-mapping documentation, new-UI access, container provisioning,
-and the CDS Hooks client-auth answer ADR-067 already names; the Nicole exceptions consultation; ACO
-answers on attribution, reporting mechanism, and measure 305's fate; the CY2027 final rule ~Nov 2026; the
-PY2027 artifact publication). `LOCKED_DECISIONS.md` §4A records the complete locked set (six decisions,
-matching ROADMAP §2; the API demotion is additionally annotated as a SINCE note on §4 decision 5).
-ADR-058 decisions 1–4, the QRDA bridge, and the published packages are all untouched. The milestones
-deliver a **sandbox**; the pilot's production/PHI phase is a separate decision gated on
-`PRODUCTION_READINESS_2026-07.md` and is not authorized here. The known risks are honest: CMS137 may be
-removed from the requirement entirely (cancelling, not deferring, its line items), and if kept, its
-multi-rate support is sized only after the spike — the pilot can launch on five measures and say so.
-
-## ADR-069: population membership applies the CQM IG's formulas per subject — and spec application is silent where corruption is loud
-
-**Status:** Accepted (2026-08-25). Issue #476.
-
-**Context.** The exporters compute the proportion score from marginal counts —
-`numer / (denom − denex − denexcep)` in both `buildSummaryMeasureReportFromCounts` and the QRDA III
-exporter. The CQM IG (`hl7.fhir.uv.cqm` v1.0.0 STU1, published 2025-09-11, measure-conformance.html
-§ "Subject-based Calculation") defines proportion membership normatively:
-*Denominator Membership = IP and Denominator and not DENEX and not (DENEXCEP and not Numerator)*;
-*Numerator Membership = IP and Denominator and not DENEX and Numerator and not NUMEX*. Marginal
-arithmetic equals those formulas **only if the per-subject flags already encode the interactions**.
-Ours did not: a DENEXCEP∧NUMER subject was subtracted from the effective denominator while staying in
-the numerator (a score that can exceed 1.0), a DENEX∧NUMER subject kept a numerator the spec removes,
-and `numerator-exclusion` was absent from `POPULATION_CODE_TO_KEY` entirely — an unrecognized entry is
-*skipped*, so a NUMEX'd subject silently kept an overstated numerator (the same
-unrecognized-input-reads-as-covered shape as #380/#400). In practice every measured surface was
-unaffected — fqm-execution zeroes the interactions it computes before we read them, and the authored
-status rule (one status per subject) cannot produce co-true flags — which is precisely why nothing
-external ever caught it: the defect was reachable only through evidence some *other* writer produced.
-
-**Decision.**
-
-1. **`normalizeMembership` has two stages with different loudness.** Subset clamps
-   (`numer/denex/denexcep ⊆ denom ⊆ ipp`) stay ALERTED — no spec formula produces a violation, so one
-   indicates an unreadable writer. The CQM IG interaction folds
-   (`numer := numer ∧ ¬denex ∧ ¬numex`; `denexcep := denexcep ∧ ¬denex ∧ ¬numer_RAW`) are SILENT — a
-   writer reporting raw co-true flags is behaving; which interactions a given engine pre-applies is
-   its implementation detail, and the reader must not depend on it. The exception folds against the
-   **raw** (subset-clamped) numerator, not the NUMEX-folded one: the DM formula negates the exception
-   on the "Numerator" criteria result, and NUMEX applies only inside Numerator Membership — so a
-   DENEXCEP∧NUMER∧NUMEX subject stays in the effective denominator as a scored failure. (The first
-   cut folded against the NUMEX-adjusted numerator; review caught the divergence on exactly that
-   triple, the one combination the hand-picked cohort omitted.)
-2. **The fold is per subject, not at the score.** With normalized flags,
-   `denom − denex − denexcep = |Denominator Membership|` and `numer = |Numerator Membership|` hold by
-   construction — **exhaustively verified over all 64 raw flag combinations**, subset-violating
-   vectors included, not claimed from a hand-picked cohort — so both existing score sites become
-   exact without changing their arithmetic, and the population COUNTS still report populations as
-   evaluated (DENOM includes DENEX'd subjects), preserving the Cypress-verified reconciliation
-   contract.
-3. **NUMEX is an input, not a reported population.** `numerator-exclusion` is now recognized in both
-   evidence shapes and folds into `numer`; it is deliberately NOT added to `PopulationMembership` —
-   no shipped measure declares one, so a NUMEX population count would be plumbing with no consumer.
-   Widen the public shape when a measure with a numerator exclusion ships. Because it is a modifier
-   rather than a membership population, a results array recognizing ONLY `numerator-exclusion` is
-   still an unreadable writer (alert + `null` → status-rule fallback), not a valid all-false vector.
-4. **The formulas are pinned verbatim** in `src/fhir/cqm-membership-formulas.test.ts`, with an
-   in-test oracle computing the IG formulas independently over a mixed cohort — so a future revision
-   of the IG's formulas, or a regression in ours, fails a test that QUOTES its ruler (#476's
-   acceptance criterion: a spec change is a visible diff, not silent drift).
-
-**Consequences.** Inert on every existing surface (suite 2,018, 0 fail, no snapshot moved): the folds
-only fire on flag combinations no current writer emits. This converts "agrees with fqm-execution" into
-"agrees with the specification" for the membership reduction — fqm's zeroing behaviour, observed
-during the Cypress work, is now something we implement from the spec text rather than inherit as a
-side effect of one dependency's internals.
-
-## ADR-068: the OpenAPI document covers the PROMISED surface only, and a routed-path test is what makes hand-authoring defensible
-
-**Status:** Accepted (2026-08-17). Closes the tracked TODO at the top of `docs/JOURNAL.md`.
-
-**Context.** Doug asked whether WorkWell has a Swagger API. It did not: authenticated probes against
-production and staging returned `501 not_implemented` from `/api/openapi.json`, `/api/swagger`,
-`/swagger-ui` and `/api/docs`, while `ARCHITECTURE.md` §9 asserted *"The OpenAPI document
-(`workwell.swagger.enabled=true`) advertises version `v1`"* — a springdoc property belonging to the Java
-backend retired in #109 PR4. §7 did not mention `/api/v1/compliance` at all. So the repository was
-simultaneously claiming a document it did not serve and omitting the one contract it does.
-
-**Decision.**
-
-1. **Serve a hand-authored OpenAPI 3.1.1 document at one canonical path**, `GET /api/v1/openapi.json`,
-   built by `backend-ts/src/openapi/spec.ts`. PERMIT: reading a contract should not require credentials, and
-   the document carries shapes and role names, not patient data.
-2. **Scope is the PROMISED surface** — `/api/v1/compliance`, the three `/cds-services` operations, this
-   document itself, health and version: **seven operations** — and the document *says so*. The ~40 internal
-   `/api/**` routes are excluded because
-   `COMPLIANCE_API.md` already draws that line ("everything else under `/api/` is internal and moves with
-   the frontend"), and documenting them would advertise stability over paths that carry none.
-3. **Hand-authored, guarded by a contract test.** The alternatives each cost a dependency or a rewrite: zod
-   earns its keep only as a *runtime* validator, `@hono/zod-openapi` presupposes Hono and a router we do not
-   have, and TypeSpec would add a second hand-maintained source of truth with no coupling to a hand-rolled
-   dispatcher. The recognised risk of hand-authoring is drift and the recognised answer is a contract test,
-   so the test is treated as the other half of this decision rather than as optional garnish.
-4. **The guard is two-way coverage, and the second direction is bounded.** Every `(path, method, status)` the
-   document declares is produced by a real request through the real worker — that direction is complete, and a
-   documented path that is not routed fails with `documented but NOT ROUTED`. The reverse direction sees only
-   statuses some probe produced, so a real status no test exercises is neither documented nor caught: a
-   path-level `405`, a `500` on a DB outage, a `503` from `startupGuard`. Stating the bound rather than
-   implying completeness (review). Mutation-checked three ways — deleting the route, removing a produced
-   status, and requiring an absent property each fail the intended assertion.
-5. **Redocly lints the document in CI**, pinned exactly, telemetry off, with **no ignore file**, because it
-   catches a class the contract test cannot. It did so immediately: five uses of `nullable`, which OpenAPI
-   3.1 removed in favour of type unions. The five remaining warnings are explained in `spec.ts` rather than
-   silenced. **Stated precisely, because "pinned exactly" overstates it:** the *top-level* version is pinned,
-   but `npx --yes` resolves that package's transitive tree fresh on each run with no lockfile, in a job that
-   holds repository credentials. Elsewhere this repo pins by SHA-256 and gates on byte-reproducibility. The
-   trade taken here is a non-reproducible dev tree in exchange for not adding a `package.json` dependency;
-   if that becomes unacceptable, the alternative is a committed devDependency, not a different linter
-   (review).
-6. **3.1.1, not 3.2.** Renderer support for 3.2 is worse than absent, it is *silent* — Redoc 2.5.3 accepts a
-   3.2 document by aliasing it to 3.1, so 3.2-only constructs are ignored rather than flagged, and Spectral
-   caps at 3.1. 3.1's Schema Objects are literal JSON Schema 2020-12, which is what makes a zero-dependency
-   response check tractable.
-7. **The reference page is hand-rolled and public** (`frontend/app/api-docs`). Not only on the
-   no-new-dependency rule: `swagger-ui-react` peers on `react@">=16.8 <19"` and this app is on React 19, so
-   the React integration does not exist for us; Swagger UI's dark mode is a hard-coded `html.dark-mode` class
-   that would contest ownership of `<html>`; and Scalar and Redoc both default to a CDN script the CSP and
-   the offline demo rule out. The trade is no try-it-out console — a copyable `curl` instead.
-
-**Consequences.** A 405 is **not representable** under a `get` operation, so the four unauthenticated GETs
-keep an `operation-4xx-response` warning rather than mis-modelling their path-level 405 — the coverage test
-refused the mis-modelling on the first attempt, which is the guard working. Adding a route to the promised
-surface now means adding it to the document, because CI fails otherwise. Writing the document also exposed
-a second stale ARCHITECTURE claim (§9 said `/api/version` returns `uptime`; it does not), corrected here.
-
----
-
-## ADR-067: CDS Hooks cards render a completed evaluation and never trigger one — and the outcome-to-card mapping is ours, which is stated rather than implied
-
-**Status:** Accepted (2026-08-17). Implements the 2026-08-14 decision that CDS Hooks is adopted as a
-*specification* (ADR-008 stands; `cqf-fhir-cr` does not enter the runtime). Partially delivers proposal P1
-(#458).
-
-**Context.** WorkWell did not alert providers at all: verified by search, there was no CDS Hooks
-implementation, no `PlanDefinition`, no `$apply`, and no hook fired anywhere — the alerts existed only on
-WorkWell's own screens, which is the gap guide S7 describes. CDS Hooks is a JSON request/response contract
-over HTTPS, so serving it requires no Java: two routes on the worker that already exists. Nicole's concern
-was reinventing wheels, and adopting the community standard is the direct answer; adopting its *reference
-implementation* at runtime would have replaced a working engine with a second one.
-
-**Decision.**
-
-1. **One service, `patient-view`.** In the separately versioned CDS Hooks Library IG (v1.0.1, 2025-03-12)
-   it carries maturity 5; `encounter-start`, the other hook that fits an in-encounter check, is at maturity
-   1 and would return the same cards from the same outcomes. A second hook is a discovery entry and a
-   validation branch when a client asks for one.
-2. **Cards render persisted outcomes of a FINALIZED run.** Never a preview, never a synthetic bundle. This
-   is why no `501` twin of ADR-061's `preview_unavailable` is needed — the answer is truthful on any stack —
-   and it answers P1's latency question by not incurring it. The cost, stated: a card is as fresh as the
-   last run, not as fresh as this encounter.
-3. **No `prefetch` is declared, because none is evaluated**, and `usageRequirements` — the spec's own field
-   for telling a caller what it must know — says so in the machine-readable contract. `fhirServer`,
-   `fhirAuthorization` and `prefetch` are accepted and ignored. Declaring a template we would ignore would
-   make a client fetch and transmit data for nothing; *honouring* it means evaluating a caller-supplied
-   bundle per request, which is a different capability and is where S7's step 2 would land.
-4. **An absence is a CARD, not an empty list.** A patient with no finalized outcome — including one whose id
-   did not resolve — gets one `info` card saying so. `{"cards": []}` at the point of care reads as "no
-   gaps", the confusion ADR-061's 404 exists to prevent, and because a hook's `context.patientId` is a bare
-   EHR id while WorkWell persists live subjects as `wc|<patientId>`, a namespace mismatch would otherwise be
-   indistinguishable from a clean bill of health. Silence is reserved for a subject we *did* evaluate and
-   found compliant. Not `412`, which means a failure to retrieve FHIR data.
-5. **`critical` is never emitted, and is unrepresentable in the card type.** In CDS Hooks it means the user
-   must not proceed; WorkWell is supplementary to WebChart (locked decision 1) and is not entitled to say
-   that about someone else's encounter. `systemActions` is likewise never emitted — nothing WorkWell returns
-   may change a chart without a human choosing it.
-6. **A suggestion is offered only where the order code carries an APPROVED terminology mapping**, read from
-   the store rather than the seed array so that approving a mapping unlocks it without a code change.
-   `order-catalog.ts` describes its codes as "representative (demo, not billing-certified)", and a CDS
-   suggestion is a one-click order into a certified EHR. **The consequence is deliberate: `cms122` and
-   `cms125` get no suggestion**, because their CPT codes have no mapping at all — so the two
-   officially-routed CMS measures carry information and a link. Getting them a suggestion is a terminology
-   review, not a code change.
-7. **The measure-outcome-to-card mapping is OURS.** HL7's blessed route is `PlanDefinition/$apply` →
-   `RequestOrchestration` → cards; DEQM's `$care-gaps` stops at a `DetectedIssue`, and **no published mapping
-   carries a care gap into a card**. We map `outcomes.evidence_json` directly, reusing the readers the roster
-   and case detail already use, and `STANDARDS_CONFORMANCE.md` records that the gap-to-card leg is local.
-8. **Discovery is public; invoke and feedback are not.** `/cds-services` matches no `/api/**` rule and
-   `authorize` ends in permitAll for non-`/api` paths, so the two rules are mandatory rather than a
-   refinement — asserted both as a unit call and end-to-end through the worker, and both assertions fail when
-   either rule is removed. Invoke reuses the `/sse` and `/mcp/**` authority (`ROLE_MCP_CLIENT` /
-   `CASE_MANAGER` / `ADMIN`) rather than inventing a role, since the user directory stays hardcoded.
-9. **Authentication is WorkWell's bearer token, and the spec's JWT profile is a NAMED GAP.** CDS Hooks
-   defines its own scheme — a JWT the *client* signs, verified against a JWKS, with `aud` equal to the
-   invoked endpoint and an `iss`/`jku` allowlist — and it **SHALL NOT** be signed with a symmetric algorithm,
-   so our HS256 token can never be a conformant CDS Hooks JWT. The profile is not built: `jku` fetching is
-   SSRF-by-design, and a verifier whose allowlist nobody has populated is a control that reads as present
-   and cannot fire. This becomes a precise question for MIE — *does WebChart act as a CDS Hooks client, and
-   if so what are its `iss` and JWKS URL?*
-10. **The feedback endpoint is built, with no schema change.** `card.uuid` and `suggestion.uuid` derive from
-    `(runId, subjectId, measureId)`, so correlating feedback is a recomputation over the subject's own
-    outcomes rather than a lookup in a table — and schema is the owner's alone. Deterministic ids also mean a
-    client re-firing the hook for an unchanged run gets the same uuid, so repeat feedback does not fragment.
-    The handler records the uuid verbatim and asserts nothing about what it referred to.
-
-11. **A FAILED evaluation is reported as ours.** `PARTIAL_FAILURE` is terminal, so its rows are served, and a
-    subject whose evaluation threw is persisted `MISSING_DATA` with an `evaluationError`
-    (`DATA_MODEL_CONTRACTS.md` §5). `deriveCell` has no branch for that and falls through to "No record on
-    file", after which `nextActionFor` says "Collect the missing documentation" — asserting a fact about the
-    **patient** when the truth is that our engine threw. Tolerable on a dashboard; in someone else's chart it
-    is the same confusion decision 4 exists to prevent. Such a row now gets a "could not be evaluated" card,
-    `info`, with no suggested order (review).
-12. **A suggested resource references the id the CLIENT sent.** `toServiceRequest` writes
-    `Patient/<workwell subject id>`, which is right for `GET /api/orders/proposals` and wrong the moment the
-    resource crosses into an EHR: on a live tenant that is `Patient/wc|4821`, which names nothing the client
-    can resolve and is not a legal FHIR id. Re-pointed at the hook's `patientId` in the CDS layer only, so
-    the existing orders surface is unchanged. Card identity still uses the internal id (Codex review).
-13. **Feedback fails loudly, and is bounded.** Because the audit event is the only record, a failed write
-    returns **503** with `recorded`/`of` rather than a `200` that tells the client never to retry — invoke
-    stays best-effort, since its cards are correct regardless. And a request carries at most 100 entries with
-    `userComment` capped at 8000 characters, because each entry is an append to the append-only ledger by a
-    machine credential (review; both reviewers raised the first independently).
-
-**Consequences.** WorkWell can now be pointed at by any conformant CDS client, which changes the joint-call
-question from "should we do this?" to "does WebChart speak it?". The card-selection predicate
-(`dispositionFor(...) === "OPEN"`) and the order-proposal predicate (`AT_RISK`) must stay the same set, or a
-carded measure could claim a proposal created for a different one; a test now pins that equality, since
-nothing in either file mentioned the other. `userComment` is the first path putting unstructured clinical
-prose into `audit_events`, which reaches `GET /api/audit-events/export` — noted in
-`PRODUCTION_READINESS_2026-07.md`. CORS is **not** relaxed: production keeps its
-exact-origin allowlist, so a browser-based client's origin must be added deliberately — the spec requires CORS
-support but explicitly declines to specify an allowlist rule. Nothing here is justified by certification: ONC's
-(b)(11) DSI criterion does not name CDS Hooks.
-
----
-
-## ADR-066: the documentation splits into a maintained guide and a dated archive — because a doc that explains and a doc that records rot at different speeds
-
-**Status:** Accepted (2026-08-10). Implements the owner directive to trim the documentation and
-maintain one clear explanation of the whole system.
-
-**Context.** `docs/` had grown to 255 files / 34.9 MB. Only ~14 of 47 top-level markdown files were
-live reference; 12 were explicitly superseded (three roadmaps carrying "do not act on this"
-banners), and 28 were referenced by nothing. The best explanatory document — the 2026-08-08 system
-walkthrough — was a dated monolith that was never even committed. Meanwhile only 3 files in the
-whole repo contained a mermaid diagram, and `ARCHITECTURE.md` (95 KB, zero diagrams) still carried
-a Java-era `com.workwell.*` heading. Explanation was scattered across records, and records were
-posing as explanation.
-
-**Decision 1 — `docs/guide/` is the maintained explanatory layer.** Ten chapters, one per topic
-(big picture, CQL/authoring, compiler/ELM, engine/routing, FHIR, data/databases, SQL, packages,
-state/roadmap), each with at least one mermaid diagram, written from the walkthrough, with four
-gaps filled fresh: the YAML→`generateCql` authoring mechanics, an ELM node reference with real
-JSON, a FHIR primer, and the SQLite-floor/Pg-ceiling store design. The Definition of Done now
-includes updating the affected chapter in the same PR.
-
-**Decision 2 — volatile numbers live in exactly one chapter.** Test counts, gate counts and routing
-state rot fastest, so chapter 9 owns them, each with its measurement date and reproducing command.
-The other chapters cite mechanisms, which are stable.
-
-**Decision 3 — dated, superseded and finished work moves to `docs/archive/`, never deleted.**
-23 top-level files (the three superseded roadmaps, the Java-era `CQF_FHIR_CR_REFERENCE.md`, five
-demo docs, the May-era walkthrough, dated research/QA snapshots, both source PDFs) plus five whole
-directories (`sprints/`, `superpowers/{plans,specs}`, `new instructions/`, `FABLE_REVIEW`,
-`mieweb-ui-migration/`). `OFFICIAL_TESTCASE_REPORT_2026-07.md` moved to `docs/evidence/` instead —
-it is regenerated by CI, so the test and workflow paths that read and write it moved with it in the
-same change. Live cross-references were updated in place; historical records (`JOURNAL.md`, ADR
-bodies, `CHANGELOG.md`) keep their original wording, because a record quoting the path that was
-true at the time is correct.
-
-**Decision 4 — `CQF_FHIR_CR_REFERENCE.md` leaves the always-loaded set.** It pinned Java Maven
-coordinates for a backend retired in #109 PR4; its stop condition ("a library version doesn't match
-what it says works") died with the JVM, and carrying it in every session's context contradicted the
-list's own rule that each entry must be load-bearing.
-
-**Consequences.** Top-level `docs/` drops from 47 markdown files to 20 tracked, all live. A reader
-sent to `docs/` now finds the guide first. The cost is accepted churn in cross-references (updated
-and link-checked in the restructure PR) and one more standing obligation: guide chapters are part
-of every PR's documentation duty, which is the point.
-
-## ADR-065: an authored regulatory measure is verified by traceability and adversarial cases — because no external oracle exists, and none can be manufactured
-
-**Status:** Accepted (2026-08-07). Roadmap M-E1, first content. Traceability:
-`docs/measures/OSHA_1910_95_STS.md`. Answers the question filed as #405.
-
-**Context.** Locked decision 6 makes occupational content the differentiator — "the measures nobody
-publishes". That is now evidenced rather than assumed: the 2026 CMS eligible-clinician eCQMs (49), the
-hospital eCQMs (17), HEDIS MY2026 (93), every public `.cql` file on GitHub, the entire `cqframework`
-organisation and the complete HL7 FHIR IG registry contain **zero** occupational-health quality
-measures. The field has *indicators* — CSTE/NIOSH count events across a state workforce from discharge
-and workers-comp data — and no *measures*: what should happen to a named worker by a named date.
-
-Every previous milestone had an external oracle. M-A had the measure stewards' own MADiE expected
-results (410/410). M-C had `cqframework/cql-tests`. M-B had the HL7 schematron. **OSHA publishes
-regulations, not computable artifacts**, so M-E1 has none and cannot acquire one.
-
-**Decision 1 — the author of the CQL is the author of the test cases, and that is the normal state for
-an undefined measure rather than a compromise.** Measures with no official definition do not go
-through the measure-authoring or certification pipeline at all; the value of expressing them in CQL is
-that CQL is standardised, not that someone else has graded them. What converts author-owned content
-into *credible* content is the community route — publishing the measure and its cases in the standard
-shape, with the documentation that lets an organisation act as steward and put it through the
-acceptance process. So the deliverable is not "a measure that passes an external check"; it is **a
-measure packaged so it could be stewarded**.
-
-**Decision 2 — scope is ONE obligation.** 1910.95 creates several: baseline timing `(g)(5)(i)`, annual
-testing `(g)(6)`, STS detection `(g)(10)(i)`, 21-day notification `(g)(8)(i)`, protector refitting
-`(g)(8)(ii)(A)-(B)`, referral `(g)(8)(ii)(C)`. Each has a different trigger, deadline and evidence. A
-single "hearing conservation compliance" percentage would hide partial failure — a programme could
-refit every worker and notify none and still score well. This measure implements **STS detection**,
-the one fully computable from clinical data, and the traceability document lists the others as
-explicitly not implemented with the reason for each. **A traceability table that lists only what was
-built is how a measure ends up a coherent implementation of the wrong legal object.**
-
-**Decision 3 — where the regulation is discretionary, refuse rather than default silently.** Age
-correction is optional under `(g)(10)(ii)`, Appendix F is informational only, and OSHA has since
-permitted tables derived from other datasets — so **two employers can lawfully reach opposite
-conclusions on identical audiograms**, and STS is not a pure function of the audiogram but of the
-audiogram *and employer policy*. This measure applies **no** age correction, which detects more
-workers and is the protective direction, and says so where a reader will see it. Silently applying
-Appendix F would present one employer's lawful policy choice as an objective finding. Correspondingly,
-incomplete data yields `MISSING_DATA` rather than a conclusion: a shift computed from two of the three
-named frequencies is not the regulation's shift.
-
-**Decision 4 — determinability is ASYMMETRIC.** A positive STS is definitive from one ear; a negative
-finding requires both ears complete, because concluding "no shift" while an ear is unmeasured asserts
-something about data nobody has. The first implementation used OR across ears and returned COMPLIANT
-for a worker with an incomplete right ear and a clean left one. **An adversarial test caught it**, and
-that bug is the shape that makes a compliance product dangerous: it improves the apparent rate by
-absorbing the people whose data is incomplete. A second adversarial test caught a missing
-initial-population gate that reported OVERDUE for a worker with no noise exposure at all.
-
-**Decision 5 — real terminology, with the one exception named.** The thresholds are LOINC codes from
-panel **89015-2**, all members of `us-core-clinical-test-codes` — so an audiogram already has a
-US-Core-conformant representation and no data shape had to be invented. The cohort is the exception
-and cannot be otherwise: `(c)(1)`'s trigger is an 8-hour TWA at or above 85 dBA, an industrial-hygiene
-measurement absent from every clinical feed. ICD-10-CM **Z57.0** is used as a documented proxy, with
-employer assertion accepted as an alternative. Structurally the same gap as ADR-042's `us-core-sex`
-problem: clinical data present, eligibility attribute absent.
-
-**Decision 6 — it is NOT in the measure registry.** Registering it would place it in
-`RUNNABLE_MEASURE_IDS` and therefore in every population run, where the synthetic corpus cannot
-produce what it reads — two dated audiograms carrying six LOINC threshold observations each. The
-rule-params bindings that generate every other measure's corpus data describe a recency window
-(enrolment + waiver + one event) and cannot express that shape; **this is the first authored measure
-the codegen template cannot generate.** It is verified through the engine's own consumer path,
-`evaluate({ elm, metaOverride })` — the same surface an external integrator uses for content we do not
-ship. Wiring it into the roster with data that cannot exercise it would report MISSING_DATA for the
-whole population and look integrated while proving nothing.
-
-**What this verification does and does not establish.** The suite establishes that the measure
-computes **what we read the CFR to require**, not that our reading is right — a weaker evidentiary
-position than CMS122/125 enjoy, stated in `STANDARDS_CONFORMANCE.md` in those words so the M-A/M-B
-language does not carry over by association. What is made rigorous is the *choice* of cases: boundary
-cases at the regulation's own numbers (9.99 negative, 10.0 positive) and adversarially
-wrong-by-construction cases, two of which found real bugs.
-
-**Review found four more defects after the ADR was first written, and they are recorded because three
-of them are the under-detection this ADR claims the measure never commits.** (1) Baseline and current
-dates were derived from **both ears combined**, so an unrelated right-ear-only recheck moved the shared
-current date, nulled the left ear's average and made a **confirmed left-ear shift vanish** — dates are
-now per ear. (2) The `(g)(8)(ii)` exclusion was **permanent**: a worker excused once had every later
-shift suppressed; it is now bound to the current shift by `recordedDate`, and an undated determination
-does not exclude. (3) Non-final Observations could anchor the baseline, which is the *earliest* record
-— a `final | amended | corrected` gate now applies. (4) `Numerator` was not conjoined with
-`Denominator`, so it was true outside the initial population; latent in the app under ADR-031, but not
-latent for the IG publication this ADR describes, where a consumer computes `group.population[].count`
-straight from these defines. Duplicate thresholds now **refuse** rather than resolving by bundle order,
-and a threshold in an unexpected unit is refused rather than coerced.
-
-**Three documentation corrections**, on a document whose entire value is traceability: the
-`(g)(8)(ii)` chapeau says "Unless a **physician** determines", not "physician or audiologist";
-`(g)(9)`'s **per-ear** baseline revision is an OSHA interpretation, not CFR text; and the LOINC codes
-do **not** encode conduction method — the bone-conduction panel shares the same 22 members, so a bare
-Observation is ambiguous and the measure cannot currently tell air from bone. That last one is now a
-stated limitation rather than an unnoticed gap.
-
-**Named and not done: independent re-derivation.** The strongest available verification is a second
-author building a decision table from the CFR without seeing this CQL and comparing — disagreement
-would identify an unresolved specification question rather than a coding error.
-
-**Consequences.** Suite 1932, 0 fail (+11). `compile-measures` emits 17 libraries. Follow-up, in
-order: corpus generation so the measure can join the roster; independent re-derivation; then the
-remaining 1910.95 obligations as separate measures. The `1904.10` recordability rule is flagged in the
-traceability doc for whoever extends this — it needs an STS **and** a 25 dB total level, with age
-correction permitted for the first test and forbidden for the second.
-
-## ADR-064: one UCUM validator, shared by every translator we run — and an honest table rather than a new dependency
-
-**Status:** Accepted (2026-08-05). Closes #397, the follow-up ADR-060 named and deliberately did not bundle.
-
-**Context.** `LibraryManager(modelManager, options, cache, lazyUcumService, …)` takes the UCUM service as
-its **fourth** argument and defaults to one that *throws* `No default UCUM service available`. Every
-translator we build passed three arguments. So no CQL containing a quantity literal — `5 'mg'`, `1.0'cm'`,
-any `Quantity` comparison — could be translated at all.
-
-The user-visible surface was the Studio's **ELM Explorer**, which recompiles as the author types: valid
-unit-bearing CQL produced an error naming a missing service rather than anything about their code.
-
-**What makes this worth an ADR is how it hid.** It was invisible to the entire test suite and to
-`pnpm compile-measures` alike, because **no committed measure uses a unit**. Every gate was green and the
-feature was broken. It surfaced only when the V7 conformance harness ran CQL somebody else wrote, where it
-produced **155 of 183 apparent translation errors** — and was very nearly published as "the JS translator
-delta" (ADR-060). A defect that only third-party content can reach is an argument for running third-party
-content, which is the standing case for the conformance suite.
-
-**Decision 1 — one validator, in `src/measure/ucum.ts`, used by all three call sites.** The runtime
-translator, `scripts/compile-measures.mjs` and the conformance harness now share it. They must agree: a
-measure that compiles at build time and fails in the authoring UI — or the reverse — is a defect whose
-cause is invisible from either side. It moved out of `scripts/` because it is production code now.
-
-Consequence: `compile-measures` runs under `node --import tsx` (it imports a `.ts` module), following
-`gen-cql`'s precedent. Bare `node scripts/compile-measures.mjs` now fails, and the script header says so.
-
-**Decision 2 — it does not live in `@workwell/measure-engine`.** UCUM validation is a *translation-time*
-concern and the engine executes pre-compiled ELM; it never translates. Putting it there would add surface
-to a package whose whole claim is a two-dependency manifest, for a consumer that cannot use it.
-
-**Decision 3 — an honest grammar-plus-table, not a UCUM dependency, and it errs toward rejection.** A
-complete UCUM implementation is a new dependency, which CLAUDE.md makes an owner call. The table validates
-UCUM grammar plus a list of atoms and prefixes and **refuses an unrecognized atom rather than waving it
-through**. Now that this gates authoring, the direction of the error matters and this is the safe one:
-rejecting a legitimate unit is a visible complaint an author reports, while accepting a malformed one lets
-bad CQL through the gate and surfaces later as a wrong number. The remedy for a false rejection is adding
-the atom with the case that needed it. Limits are written in the module rather than implied.
-
-**Decision 4 — the previous behaviour stays reachable as `NO_UCUM_SERVICE`.** Not for production, which
-never passes it, but so the fix can be watched failing: the regression test asserts the same library
-compiles under the default and **fails** under it. A fix nobody can watch fail is a fix nobody can verify,
-and this codebase has now caught three guards that could not fire.
-
-**What review changed, and one place it was wrong.** The first cut's table was a flat `ATOMS` set split
-on `.` and `/` by regex, and code review found three defects in it — two of which are the two directions
-this ADR claims to weigh, so they are recorded rather than quietly patched:
-
-1. **A false REJECTION: grouped denominators.** `mg/(kg.d)` — an ordinary dose rate — split into
-   `["mg", "(kg", "d)"]` and was refused. Parenthesised subterms are now parsed recursively. The same
-   rewrite fixed a case review did not report: a **leading solidus** (`/min`, `/uL`) was refused, and it
-   is UCUM's `<main-term> ::= "/" <term> | <term>`.
-2. **A false ACCEPTANCE: prefixes on non-metric atoms.** `m[lb_av]` validated because `m` is a prefix and
-   `[lb_av]` an atom — but UCUM permits prefixes on **metric** units only, and there is no millipound.
-   The table is now split into `METRIC_ATOMS` and `NON_METRIC_ATOMS`. Time units above the second are the
-   same trap: `s` is metric, `min`/`h`/`d`/`wk`/`mo`/`a` are not. `mmHg` was also removed — it is not a
-   UCUM symbol; `mm[Hg]` is milli + the metric atom `m[Hg]`.
-3. **A false ACCEPTANCE: internal whitespace.** Per-component `trim()` accepted `mg / dL`. UCUM codes
-   contain no whitespace; trimming the outside is our hygiene, whitespace inside is the author's error.
-
-**Rejected, with the grammar as the reason:** the same review held that an ungrouped expression permits
-only one division operator, making `mg/kg/d` invalid. It does not — `<term>` is left-recursive
-(`<term> ::= <term> "." <component> | <term> "/" <component> | <component>`), so `mg/kg/d` parses as
-`(mg/kg)/d`. "Fixing" it would have introduced a fourth false rejection. It is pinned as a test so nobody
-re-derives the wrong conclusion.
-
-Writing the tests for (1) then caught a defect of my own: applying the leading-solidus allowance inside
-`validTerm` rather than at the main term accepted the empty group `mg/()`.
-
-**Verification.** `pnpm compile-measures` output is **byte-identical** — 16 measures + FHIRHelpers, not one
-file moved — so no committed measure's ELM changed. The conformance suite is unchanged (1622 pass, 213
-known non-passing, no regressions). A unit-free library compiles to identical ELM with and without the
-service, which is what licenses calling this change inert for everything already in the tree.
-
-**What this does NOT do.** It does not make any existing measure use units, and it does not claim complete
-UCUM conformance. It removes a wall an author would hit on their first unit-bearing measure.
-
-## ADR-063: a package is publishable when its tarball runs outside the workspace — not when it is published
-
-**Status:** Accepted (2026-08-05). Roadmap M-C / C4. **Completes M-C.** Positioning + semver policy:
-`docs/PACKAGES.md`.
-
-**Context.** C1 made `@workwell/measure-engine` content-free (ADR-059) and C2 split codegen out and added
-a consumer that shares no code with the app (ADR-062). Both proofs are about the *source tree*: an
-import-graph assertion and a `workspace:*` consumer. `example-consumer`'s own README says so — it is a
-consumer outside the **app**, not outside the **repo**.
-
-Everything the workspace supplies for free is therefore untested. The workspace resolves these packages
-straight from `src/*.ts` under `moduleResolution: Bundler` with `allowImportingTsExtensions`; no registry
-consumer has either. Whether `files` ships what the code needs, whether the declared `dependencies` are
-sufficient, whether the emitted JavaScript resolves at all — each fails silently in-repo and loudly for
-the first integrator.
-
-**Decision 1 — the packages build to `dist/`, and the workspace keeps resolving source.** `publishConfig`
-repoints `exports`/`types`/`main` at `dist/` **at pack time only**. In the tree, `exports` still names
-`src/index.ts`, so `pnpm typecheck` checks real sources rather than stale build output and a change is
-visible to the app without a build step. The alternative — pointing `exports` at `dist/` permanently —
-makes a fresh clone fail to typecheck until someone runs a build, and makes it possible to ship code that
-no longer matches its own source.
-
-Note this fixes the package manager: `publishConfig` field rewriting is a **pnpm** feature. npm's
-`publishConfig` understands only `registry`, `access` and `tag`, so `npm pack` here would ship a manifest
-still pointing at `src/*.ts`.
-
-**Decision 2 — the verification is packing and consuming, not publishing.** `scripts/verify-publish.mjs`
-packs real tarballs, installs them into a temp directory under the OS temp dir with a plain `npm install`
-and no knowledge of this repo, then runs the engine there on `example-consumer`'s measure content and
-typechecks a TypeScript consumer against the packed declarations. It is CI's `packages` job, **on every
-PR** — a manifest regression should fail when it is introduced, not when someone finally dispatches the
-publish workflow.
-
-Reusing `example-consumer`'s content rather than inventing a second toy measure keeps both proofs about
-the same artifact.
-
-**Decision 3 — nothing is published, and the workflow says why.** `publish-packages.yml` is
-`workflow_dispatch` only, defaults to a dry run, and refuses without `NPM_TOKEN`. Publishing is
-irreversible in a way nothing else here is: npm permits unpublish only within 72 hours and never permits
-reusing a version, so a mistake cannot be fixed by a revert the way a bad deploy can. It also *cannot*
-succeed today — the `@workwell` scope does not exist and the secret is unset — and `docs/PACKAGES.md`
-states that rather than glossing it, because "published" is a claim with a trivial external check. This
-follows ADR-041's pattern: inert until the owner creates the secret, with the owner steps written down.
-
-**Decision 4 — `official-executor` is not published.** It is the sole home of `fqm-execution` and the
-package boundary *is* the ADR-026 quarantine. Publishing it would advertise, as a `@workwell` product,
-precisely the dependency the engine package's manifest exists to exclude.
-
-**Decision 5 — the positioning is "composes `fqm-execution`, does not compete with it", and WorkWell's
-own routing is the evidence.** `fqm-execution` calculates a published FHIR Measure **bundle** end to end;
-this engine executes compiled **ELM** and returns per-define evidence. Both sit on `cql-execution`. The
-claim is credible because we made the choice against our own package: official CMS eCQMs route through
-`fqm-execution` on the production stack (ADR-045/046), because Nicole's *run the official published CQL,
-never reauthor* is a standing rule. **No performance or conformance comparison against `fqm-execution`
-has been run, so none is claimed** — `docs/PACKAGES.md` says that in those words.
-
-**Decision 6 — pre-1.0 with a stricter-than-semver reading**, and 1.0 gated on a consumer outside MIE
-rather than on a date. `0.x` under plain semver promises nothing, which is too vague to hold anyone to;
-the operating rule is that removals, retypes and semantic changes take the **minor**, so a patch never
-breaks you. Integrators are told to pin `~0.1.0`.
-
-**A claim of mine that measurement killed, recorded because the reasoning was plausible and wrong.**
-`rewriteRelativeImportExtensions` rewrites `./x.ts` → `./x.js` in emitted JS but **not** in emitted
-`.d.ts`. I built a post-pass for it and wrote that the TypeScript consumer check (step 5) was what caught
-the failure. Mutation-checking that — disabling the rewrite — showed **step 5 still passes**: `tsc`
-substitutes `.ts` → `.d.ts` when resolving and finds the declaration beside it, so TypeScript consumers
-were never broken. The post-pass is kept (a dangling `.ts` specifier is false on its face and only works
-by a TypeScript-specific rule that non-`tsc` declaration readers do not implement), but it is documented
-as defensive rather than as a bug fix, and the load-bearing assertion is the one covering **`.js`**, where
-dropping the flag would break every consumer at runtime. This is the same guard-scope shape as #380 and
-#400: a check cited for more than it covers.
-
-**Consequences.** M-C is complete. `pnpm build:packages` and `pnpm verify:publish` are the two new
-commands; `verify:publish` needs the network and is a separate CI job for the reason `official-cases` and
-`cql-conformance` are. First publish is an owner step, listed in the workflow header. Scope stays neutral
-`@workwell/*`; `@mieweb/*` remains a pitch for later, which is cheap precisely because there are no
-external consumers yet.
-
-**Amendment (2026-08-06) — the scope is `@work-well/*`. The body above is left as written**, because it
-records what was decided on 2026-08-05 and a dated record that quietly changes its own wording is worth
-less than one that says why it moved.
-
-`@workwell` was never obtainable: an unrelated **unscoped** package named `workwell` already exists on
-npm, and npm refuses an **org** name that collides with an existing **package** name. Hyphen rather than
-underscore because npm scopes conventionally use hyphens and `@work_well` reads as a typo in an install
-command. **The decision is unchanged** — a neutral scope rather than `@mieweb/*`.
-
-**The check that missed this looked thorough, which is the part worth keeping.** Before choosing the name
-I verified `@workwell/measure-engine` (404), the `scope:workwell` registry search (empty) and
-`registry.npmjs.org/-/org/workwell` (404), and called the scope unclaimed. All three were true and **none
-of them is the gate** — `registry.npmjs.org/workwell` returns **200**. It could only fail at org-creation
-time in a browser, which is nowhere a test reaches. Same shape as this ADR's other finding: a check cited
-for more than it covers.
-
-**Three misses in the rename itself, each caught by a different mechanism, all the same shape.** A guard
-caught the first — `fqm-isolation.test.ts` writes the specifier as an escaped regex
-(`@workwell\/official-executor`), so a search for `@workwell/` skipped it and test 5/5, the ADR-026
-quarantine door, **failed with an empty importer list** rather than passing vacuously. Review caught the
-second, bare `@workwell` with no trailing slash in `publish-packages.yml`'s owner steps and three places
-in `CLAUDE.md`. Review caught the third and worst: the mechanical replace rewrote **every dated record** —
-this ADR's body, `DECISIONS_ARCHIVE.md`, both roadmaps and the JOURNAL back to 2026-07-24 — after I had
-deliberately not done that to `LOCKED_DECISIONS.md`. All are restored; `LOCKED_DECISIONS.md` §4.5 and this
-amendment carry the change instead.
-
-**Prerequisites are now done and nothing is published.** The `work-well` org exists and `NPM_TOKEN` is
-set, so `publish-packages.yml` can succeed for the first time; the dry run remains the first step. Note
-the dry run **does not exercise the token** — it stops before the publish step — so a token whose scope
-selection misses `@work-well` passes it and fails the real run. That is a deliberate trade, not a gap.
-
-## ADR-062: codegen is not the engine, and a consumer that shares no code with the app is the only proof the split worked
-
-**Status:** Accepted (2026-08-05). Roadmap M-C / C2. Completes what ADR-059 started; C4 (publish) remains.
-
-**Context.** ADR-059 made `@workwell/measure-engine` content-free and proved it with a boundary test over
-the import graph. Two things were still missing before the packaging claim is real: the package carried
-something that is not evaluation, and nothing demonstrated that a consumer *without* WorkWell's content
-could actually use it. An import-graph assertion proves the source tree's shape; it does not prove the
-package works.
-
-**Decision 1 — `generate-cql.ts` moves to `@workwell/measure-codegen`, with zero dependencies.** The
-engine answers "is this patient compliant?" from compiled ELM; codegen answers "what CQL expresses this
-rule?". They shared a directory, not code — **`generate-cql.ts` has zero imports** — so the split costs
-nothing and states something true: codegen is authoring-time, the engine is runtime. A consumer
-evaluating measures should not have to take a CQL emitter; a browser-side rule builder should not have to
-take a CQL runtime. Being dependency-free, the new package can run in one.
-
-`src/engine/`'s allowlist gains the new specifier, with the reason: `cql/codegen/generate-sql.ts`
-validates a rule with it before templating SQL. It emits text; it never evaluates. Adding it was forced
-by the boundary guard rather than anticipated — the guard failed the moment the import appeared, which is
-the guard working.
-
-**Decision 2 — `@workwell/example-consumer` exists, and it is a test, not a sample.** It declares one
-dependency, ships its own measure (`tetanus-booster.cql` plus the ELM compiled from it, neither referenced
-by the app), builds its own FHIR bundle, and evaluates — asserting all three of its own outcomes and that
-`audiogram` is **unknown** to it. If the engine ever re-acquires WorkWell's catalog, this stops evaluating.
-That is a stronger signal than the import-graph assertion because it exercises the path a real integrator
-takes.
-
-**It found an API fact no document stated:** `CqlExecutionEngine`'s constructor loads `FHIRHelpers-4.0.1`
-eagerly, so **every** consumer must supply it in `elmLibraries` or construction throws. Discovered by
-writing the consumer, not by reading the API, and now pinned as its own test — which is the argument for
-building this at all rather than asserting consumability in prose.
-
-**The limitation is stated rather than glossed.** It resolves the engine through `workspace:*`, so it is a
-consumer **outside the app**, not outside the repo. Whether the published tarball contains what a consumer
-needs is a different question and belongs to C4. Calling this "an external consumer" without that caveat
-would be exactly the overclaim this codebase keeps catching in its own docs.
-
-**A defect the move caused, and the detection gap behind it (Codex, #400).** `scripts/gen-cql.mjs` still
-imported `generateCql` from `@workwell/measure-engine`, so `pnpm gen-cql` would have thrown on a missing
-export. The repoint codemod walked `.ts` only — and more importantly **nothing in CI could have caught it**:
-`tsc` does not typecheck `.mjs`, and `measure-engine-api.test.ts`, whose whole job is verifying that every
-imported name is actually exported, walked `.ts` under `src/` only. An API check that inspects only the
-files the compiler already checks is checking the wrong half. It now walks `scripts/` as well and includes
-`.mjs`/`.js`, with a non-degeneracy assertion that at least one `.mjs` was seen.
-
-**Consequences.** Three packages in the workspace: `measure-engine` (2 deps), `measure-codegen` (0), and
-`example-consumer` (1, unpublished). The engine's `index.ts` no longer exports codegen — a breaking change
-to a `private: true` package, taken now rather than after C4 makes it a promise. Suite 1885 → 1890.
-
-## ADR-061: the compliance API says where its numbers came from, and 404s rather than answering an absence
-
-**Status:** Accepted (2026-08-05). Roadmap M-C / C3, locked decision #5 — *"the versioned compliance API is
-the contract MIE consumes."* Consumes ADR-031/ADR-046's evidence readers; adds no new one.
-
-**Context.** Three surfaces nearly answer *"is this patient compliant for this measure?"* and none is a
-contract: the roster grid is a UI read model shaped by the frontend, MCP's `check_compliance` is
-Claude-facing and role-gated to CM/ADMIN, and a run answers for a population and writes records. C1 made
-the engine constructible without WorkWell's content and V7 made it defensible; this is the first piece
-that makes it **consumable**.
-
-**Decision 1 — `/api/v1/` in the path, and exactly one route under it.** Everything else under `/api/` is
-an internal contract that moves with the frontend. `v1` is a promise — fields are never removed or
-retyped — so the existing surface is *not* renamed into a guarantee nobody has audited. A path segment
-beats a header or media type here for an unglamorous reason: an integrator evaluating us pastes a URL into
-a browser, and it is greppable in a log.
-
-**Decision 2 — the response carries `populationsSource`, and this is the honesty-critical field.** The
-owner chose an eCQM-native shape: population membership booleans rather than a bare status. But for a
-WorkWell-**authored** measure only `initialPopulation` is measured — the other four are *inferred from
-`OutcomeStatus`*. The numbers alone cannot distinguish that from an official artifact's own population
-vector, and a consumer treating the second as measured eCQM membership would be wrong with nothing in the
-response to warn them. `populationsSource` is read off the **same field** `membershipFor` branches on, so
-the label cannot disagree with the numbers it describes.
-
-**Decision 3 — `latest` with nothing persisted is a 404, never an empty 200.** *"No run has covered this
-subject"* and *"this subject is compliant"* must not be confusable. The 404 body says which absence it is
-and points at `preview`. This is the single easiest way to make a compliance API dangerous, and it is
-worth spending an error code on.
-
-**Decision 4 — `preview` routes through `routedEngineForEnv`, and REFUSES on a live stack.** Same engine
-as a run: previewing cms125 against authored logic where production runs CMS's artifact would answer a
-different question — a confidently wrong answer. **The first draft of this decision also claimed "preview
-and a run see identical input", and review proved that false on exactly the stack the API exists to
-serve** (#399): the run pipeline's `bundleFor` uses the patient's real `liveBundle` when WebChart is
-configured, while preview composed a bundle from `seededTargetFor` + `buildSyntheticBundle` — which picks
-the intended outcome from a hash of the subject id and manufactures data to produce it. That is
-deterministic demo playback, and reporting it as an evaluation through the contract MIE consumes is the
-worst thing this route could do. Preview now returns **501 on a WebChart-configured deployment**, naming
-the reason. A live composition path is a different design with different failure modes and belongs in its
-own change; refusing is a limitation, answering would have been a lie.
-
-**Decision 6 — every answered request writes a `COMPLIANCE_API_READ` audit event, 404s included.** MCP
-records one for every tool call with its sensitivity label, and `check_compliance` is this same question
-over this same data. Without it there would be no record that anyone read a patient's compliance status
-through a public contract — a larger gap than the role matrix. Best-effort at the response boundary: an
-audit failure logs loudly rather than turning a correct read into a 500.
-
-**Decision 7 — `period` is the ANSWER's measurement window; `filter` echoes the caller's bounds.** The
-first cut returned the request filter as `period`, undocumented, directly above
-`provenance.evaluationPeriod`. In a contract where a field may never change meaning, that had to be fixed
-before merge rather than after.
-
-**Decision 5 — no new evidence reader.** `membershipFor` and `officialReportIdentity`
-(`src/fhir/measure-report.ts`) are the same functions the MeasureReport and QRDA III exporters use. Two
-readers of `evidence_json` that can disagree is the defect class ADR-031 exists to prevent, and a new API
-is exactly where a second one gets written by accident. A test asserts the API's population block agrees
-with `buildIndividualMeasureReport`'s output **for the same record**, against the exporter's real output
-rather than a hand-written expectation.
-
-**Three review findings, all P2, all fixed — and one of them is the field's own failure mode (#399).**
-
-1. **`populationsSource` could lie.** It tested whether `evidence.official.populationResults` was
-   *present*; `membershipFor` branches on whether `officialMembership` can *parse* it, and a malformed
-   vector falls back to status-derived booleans. The label would have read `official-evidence` over
-   inferred numbers — precisely the misleading signal the field exists to prevent. Both now derive from
-   the same `officialMembership` call and are incapable of disagreeing.
-2. **`latest` served mid-run rows.** An outcome exists before its run is terminal and before `/finalize`
-   in the import flow, so the contract could publish a partial result that a later `FAILED` would make
-   wrong. `latest` now requires `COMPLETED` or `PARTIAL_FAILURE`, reports `runId`, and its 404 carries
-   `pendingRuns` rather than pretending nothing was found. This needed `runId` on
-   `EmployeeOutcomeRow` — a projection widening in both adapters, no DDL.
-3. **`preview` let a read-only role trigger compute.** `authorize.ts` states the viewer posture as "may
-   GET but never write … or trigger compute", and a GET costing a CQL evaluation is the loophole in that
-   sentence. `preview` is now gated to CASE_MANAGER/ADMIN — the bar MCP's `check_compliance` already sets
-   for the same question over the same data, so there is one answer to "who may ask the engine about a
-   patient" rather than a quieter second one.
-
-**A plan correction, recorded because it inverted a security claim.** The plan asserted that
-`authorize.ts` falls through to *permit* for an unmatched path, and therefore that a new rule was
-mandatory. Verified false: `RULES` ends with a generic `/api/**` → `AUTHENTICATED` pair, so the new route
-was already gated and the permit default applies only to non-`/api` paths. **No rule was added** — a
-redundant one is noise. A test asserts the 401 anyway, because `RULES` is first-match-wins and a later
-reordering could put a `PERMIT` ahead of it on a route that returns per-subject clinical status.
-
-**Consequences.** `GET /api/v1/compliance/{subject}/{measure}?start&end&mode`, documented as a contract in
-`docs/COMPLIANCE_API.md` with an explicit stability statement. No machine-to-machine credential — that is
-the SSO fork (#265, blocked on MIE) and inventing one here would pre-empt it. No cohort endpoint: a
-population question has different performance characteristics and deserves its own design.
-
-## ADR-060: a translator gap and an engine gap are different findings, so the conformance harness never merges them
-
-**Status:** Accepted (2026-08-05). Roadmap M-C / V7, issue #296. Extends ADR-059 (adds one export to
-`@workwell/measure-engine`). **Corrects ADR-048's remaining item** — see decision 5.
-
-**Context.** Locked decision 2 makes the FHIR-column verification SET the bar. V7 is a member of it, and
-the reason it is worth doing is specific: `cql-execution` 3.3.x — our exact runtime — has **published**
-results (1,533 / 81 / 113 / 4), but that run used the **Java** translator. We translate with
-`@cqframework/cql` 4.0.0-beta.1. **That delta is unpublished**, and measuring it costs a day.
-
-**Decision 1 — `translation-error` is a first-class outcome, never folded into `fail`.** A case can fail
-because the engine computed the wrong value, or because our translator would not compile CQL the corpus
-considers valid. Merging them would attribute a translator gap to `cql-execution`, whose own posted
-results say otherwise. **The difference between those two columns is the entire deliverable**, so the
-runner carries seven outcomes and the report prints all of them.
-
-**Decision 1b — an `invalid` case is EXECUTED when it translates, because that is what the corpus means.**
-The first cut graded `invalid` purely on whether the expression translated; `cql-tests-runner` grades it a
-pass when the request fails for **any** reason, translation or evaluation. Measured: 5 of our 36
-"accepted" cases threw at runtime and are upstream passes, and the finding's headline example was one of
-only 2 `invalid="syntax"` cases, which upstream does not route through that branch at all. Corrected to
-**11 refused (6 at translation, 5 at runtime) / 31 accepted**, and the upstream-comparable total is stated
-as **1,633** alongside our 1,622 (review, #398). A published finding that misstates the rule it is
-measuring against is worse than no finding.
-
-**Decision 2 — a case is graded by CQL, not by JavaScript.** Each becomes
-`define Actual: <expr>` / `define Expected: <output>` / `define Passed: Actual ~ Expected`, executed
-**unfiltered** (no patient). Writing a CQL literal parser in TypeScript would mean re-implementing CQL
-semantics in order to test CQL semantics — the comparison would then share defects with the thing under
-test. This required one small genuine addition to the package: **`evaluateExpressions`**, data-free
-execution. That is a real engine capability (the whole language suite is defined in the data-free subset),
-not a test hook, and it keeps the harness app-side where the translator lives rather than reaching into
-the package or declaring a second `cql-execution` dependency.
-
-**Decision 3 — the SkipList is the CAPABILITY SET we claim, and it is EMPTY.** The corpus declares
-`<capability>` at file, group and test level; issue #296 proposed a list of test names over the known-weak
-clusters. Names rot. More importantly, skipping the weak clusters would delete the finding — `system.long`
-is 33 cases and the `Long` type is where the most serious defect lives. We claim everything, grade all
-1,835, and report 0 skipped. The mechanism exists and is unit-tested against a fixture so it is not
-vacuous, but adding a real entry needs a PR that says why.
-
-**Decision 4 — the CI gate is a PER-CASE baseline, not a threshold and not per file.** "≥N passing" goes
-green while a translator upgrade trades 30 passes for 30 different ones. The first cut fixed that with
-per-FILE tallies — and **review (#398) found the identical hole one level down**: inside a single XML
-file, one case can go `pass`→`fail` while another goes `fail`→`pass`, leaving every count identical and CI
-green. `regressions()` now compares by `file/group/name`. Only the **non-passing** cases are stored (213
-rather than 1,835), which loses nothing: a case absent from that map was passing, so "used to pass, now
-does not" stays decidable for all 1,835. A change between two non-passing outcomes is reported without
-failing, because the evidence document enumerates those buckets and silent drift between them would leave
-it stale. A pre-#398 baseline is **refused** rather than silently compared with the weaker rule.
-
-**Decision 5 — ADR-048's `node:` CLI debt is REFRAMED, not paid; and its stated basis had expired.**
-ADR-048 planned to split library values out of the four `*-cli.ts` files because `devdb-cli.ts` exported
-to five modules *"including production `live-cli.ts`"*. **Measured 2026-08-05: `live-cli.ts` now takes
-`DEVDB_WHITELIST` from `report-table.ts`, and every remaining importer of the four is a test or a `bin.ts`
-shim.** The split therefore buys nothing. The real hazard was elsewhere and untouched by it:
-`engine-boundary.test.ts` keyed its `node:` carve-out on the **filename** (`/-cli\.ts$/`), so a module the
-worker request path genuinely reaches would have passed merely by being named that way. It is now keyed on
-**reachability** — the request path is *derived* (any engine module imported by a production file outside
-`src/engine/`, plus its closure), never listed, so it cannot drift. Mutation-checked both directions.
-
-**Two harness defects are recorded in the evidence rather than quietly fixed, because they nearly became
-the published headline.** The first full run reported **183 translation errors; 171 were ours.** 155 were
-`No default UCUM service available` — `LibraryManager` takes the UCUM service as its **fourth** argument
-and defaults to one that throws, so every quantity literal failed to translate; 16 were our own
-`Actual ~ Expected` line refusing to type-check when the two sides have different static types. The real
-figure is **12**. Publishing 183 as "the JS translator delta" would have been wrong by a factor of 15,
-and the only reason it was caught is that the plan required clustering the diagnostics before believing
-the number.
-
-**A production gap this uncovered, deliberately NOT fixed here.** The runtime translator has no UCUM
-service either, so the Studio's ELM Explorer **cannot compile any CQL containing a quantity literal**.
-`compileCql` now takes an optional `validateUnit` and the harness passes one; production passes none, so
-its behaviour is byte-identical. Wiring it in is a real behaviour change and belongs in its own PR — filed
-as a follow-up issue.
-
-**Consequences.** `pnpm cql-tests` + a CI job mirroring `official-cases` (pinned fetch, cached, out of
-`pnpm test` so an offline local run stays green). The runner **refuses to report** unless it parsed all 16
-files and 1,835 cases with every case in exactly one bucket — a conformance harness that grades a subset
-publishes a flattering number, which is the specific way this could be worse than useless. Results:
-**1,622 pass / 155 fail / 12 translation-error / 4 runtime-error / 11 invalid-refused / 31 invalid-accepted
-/ 0 skipped** — 1,835 exactly, and **1,633 on the upstream rule**. *(CORRECTED 2026-08-26: the reader was parsing through XML comments, so 12 upstream-disabled tests were graded as live — true corpus 1,823, pass 1,612, invalid-accepted 29; `docs/evidence/CQL_RUNNER_HARNESS_DIFF_2026-08-26.md`.)* **16 cases are compared in JS rather
-than by CQL `~`**; that count is printed, serialized and baselined, because a first draft claimed it was
-zero after reading a field `runnerJson` never wrote. `scripts/**/*.ts` is now inside `tsconfig.json`'s
-`include` — the harness that produces a published number was not being typechecked at all, which is how a
-`Baseline` literal missing a required field reached CI. Findings and limits in
-`docs/evidence/CQL_TESTS_2026-08-05.md`. Phase 2 — a dev-only `$cql` operation so the stock
-`cql-tests-runner` drives us, the entry ticket to posting official vendor results — is not built.
-
-## ADR-059: the engine takes its measure content INJECTED — and the test-edge blocker dissolved rather than being paid
-
-**Status:** Accepted (2026-08-05). **Answers the question ADR-052 explicitly deferred.** Roadmap M-C / C1,
-locked decision #5. Supersedes ADR-052's open question; ADR-052's *decided* half (what is app content)
-stands unchanged.
-
-**Context.** `packages/measure-engine` has been promised since the 2026-07-24 roadmap and deferred twice —
-resequenced out of PR-2, then blocked by a question nobody had answered. `engine-core-boundary.test.ts`
-already decided and enforced *where* the boundary sits. What was open was **what the package contains**:
-`cql-execution-engine.ts` hard-imported `MEASURES` (our 15-measure catalog), `ELM_LIBRARIES` (17 compiled
-WorkWell libraries, 1.2 MB, 17 of the 29 closure members) and `withBundledEcqmFallback`, whose own docblock
-begins *"the codes **the synthetic corpus** stamps"*. ADR-052 named the tension precisely and declined to
-resolve it: the argument that excludes `synthetic/employee-catalog.ts` applies to those three with equal
-force, and the engine would not construct without them.
-
-**Decision 1 — content is INJECTED. The package ships none of it.** `CqlExecutionEngine`'s constructor
-takes `MeasureContent = { measures, elmLibraries, expansionFallback? }`. WorkWell's catalog, ELM and corpus
-expansions stay app-side under `src/engine/cql/`, wired in exactly one place —
-`src/engine/cql/workwell-engine.ts`'s `createWorkwellEngine()`, which the ~45 former `new
-CqlExecutionEngine()` sites now call. `LOCKED_DECISIONS` §5 already recorded that
-`evaluate(input.elm, input.metaOverride)` supports consumer-supplied measures, so the registry and ELM were
-always a **default**, never a necessity.
-
-**Content is REQUIRED, not defaulted to empty.** An engine with an empty catalog returns `MISSING_DATA` for
-every subject, which is indistinguishable from a genuinely ineligible roster — the exact failure mode
-ADR-043 exists to keep visible, and one that PR-8f's retrieve check provably cannot see. A compile error is
-the cheapest place to catch it, and it is verified as one: `new CqlExecutionEngine()` is `TS2554`.
-
-**Decision 2 — the app remainder does NOT move.** `measure-registry.ts` has ~30 importers,
-`bundled-ecqm-expansions.ts` 10, `elm/index.ts` 6. Relocating them to `src/measure/` (ADR-048's precedent)
-would churn ~45 files and buy no boundary. `src/engine/` is now a coherent app area — *WorkWell's measure
-content, data ingress, the synthetic corpus, and the CLI edge* — 33 production files where it was 43.
-`compile-measures.mjs` is untouched for the same reason, and re-running it produced a byte-identical `elm/`.
-
-**Decision 3 — `fhirNativeExecutor` and `resolveMeasureExecutor` now REQUIRE their engine binding.** This
-was forced, not chosen. Both defaulted to a lazily-constructed shared `CqlExecutionEngine`, which was only
-possible while the engine imported content at module level; an executor that manufactures its own engine
-would have to manufacture a catalog, and the only catalog it could invent is an empty one. Both had zero
-production callers — the seam is exercised solely by its own test — so the change is a signature widening
-with no behavioural surface.
-
-**Decision 4 — offline expansion is gated on the fallback being SUPPLIED, not on the OIDs looking
-eCQM-shaped.** `canExpandOffline` used to mean "every value set is a `2.16.*` OID", which was sufficient
-while `withBundledEcqmFallback` was a module-level import and therefore always present. Left as it was, a
-consumer injecting neither resolver nor fallback would enter expansion mode against an empty `CodeService`
-and zero-match every retrieve. It now also requires `expansionFallback != null`, so that consumer gets the
-base library instead: a **limited** answer rather than a **silently wrong** one. WorkWell always injects the
-fallback, so this changes nothing here — verified by `flip-snapshot`, unchanged at cms125 5/5 in the
-official initial population and agreeing with authored across the corpus.
-
-**What ADR-052 called the extraction's real blocker DISSOLVED — it was not paid.** ADR-052 recorded nine
-core-test→app edges and concluded: *"the move must either strand those tests or give the package a
-devDependency pointing back at the app."* Neither happened, because under content injection every one of
-those tests is testing *content-configured* behaviour and is therefore app-side by the same rule that
-excludes the content. `cql-execution-engine.test.ts` (→ `synthetic/` ×4), `foreign-condition-scoping.test.ts`,
-`generate-sql.test.ts`, `value-set-resolver.test.ts` and `audiogram-vsac-parity.test.ts` (→ `stores/sqlite/`)
-all stay in `src/engine/cql/`, now importing the engine by its package name; `measure-executor.test.ts` stays
-for the same reason. **Four** package tests had no app edges and moved with their subjects
-(`composite-value-set-resolver`, `resolve-value-set-resolver`, `vsac-client`, `vsac-value-set-resolver`);
-`package-boundary.test.ts` is a fifth test in the package but is **new**, not moved — git renders it as a
-rename of `engine-core-boundary.test.ts` on a similarity heuristic, and a first draft of this ADR repeated
-that as "five moved" (review, #395). **Stated
-plainly because it is the interesting part: the blocker was an artefact of the undecided question, not an
-independent obstacle.** Deciding content resolved it at no cost.
-
-**Enforcement moved with the files, and neither test survived unchanged — by its own prediction.**
-`engine-core-boundary.test.ts` said in its docblock that the move would leave it unresolvable if left behind
-and structurally vacuous if moved verbatim. It is therefore split:
-`packages/measure-engine/src/package-boundary.test.ts` recomputes the closure from `index.ts` and refuses a
-third dependency, any `node:` builtin, any escape, and **any import of WorkWell content by name** — that last
-one is what keeps decision 1 from being quietly reverted. `src/engine/measure-engine-api.test.ts` keeps the
-half only checkable from outside: no deep import past the entry point, no relative reach-around into
-`packages/`, and every imported name present in `index.ts` — **read from the file**, so the check cannot
-drift from the real surface. `CORE_ENTRY_POINTS`, an eleven-name list restating an API, is deleted.
-`engine-boundary.test.ts` keeps policing `src/engine/` but its allowlist no longer admits `cql-execution` or
-`cql-exec-fhir`: a file there reaching for the CQL runtime directly would be evaluating measures *beside*
-the engine rather than through it.
-
-**All eight new or rewritten assertions were mutation-checked** — each broken deliberately, confirmed red,
-restored. That is not ceremony here: the boundary-test-that-survives-its-own-subject-moving is exactly the
-vacuous-guard shape this codebase has caught four times (#350, #354, #363, #365).
-
-**And review found a NINTH thing the eight could not see (Codex, #395) — the portability claim was wider
-than its guard.** `httpVsacClient` built its HTTP Basic header with **`Buffer`**, a Node global that
-arrives through no import, so "the package is NODE-FREE" was green while a VSAC-configured Worker or
-browser consumer would have thrown before issuing a request. Not theoretical, and not introduced by this
-change either — the same `node:`-only check has lived in `engine-boundary.test.ts` since PR-1 with the
-same blind spot. What this change did was **widen the claim** the guard is cited for, from "file I/O
-stays at the CLI edge" to "publishable and portable", which is precisely the shape #380 found in
-`qrda-schematron-check.py`: a control whose SCOPE is narrower than the sentence quoting it. Both halves
-fixed — a `TextEncoder` + `btoa` encoder (verified byte-identical to `Buffer` output, and correct rather
-than merely portable, since bare `btoa` throws above U+00FF), and the guard now scans the closure's
-SOURCE for `Buffer`, `process.*`, `__dirname`, `__filename` and `require(`, with its own non-degeneracy
-assertion because the source map is a second thing that can silently be empty. Mutation-checked.
-
-**Consequences.**
-- `@workwell/measure-engine` is a workspace member with `cql-execution` + `cql-exec-fhir` as its entire
-  manifest. Those two left the root `package.json`. `private: true` until C4 publishes.
-- **Not yet done, and named rather than implied:** the `node:` allowlist for the four `*-cli.ts` entrypoints
-  (ADR-048's second debt) is C2's, not this change's — those files stayed app-side, so the debt did not move.
-  `packages/measure-codegen`, the external consumer, the `cql-tests` harness and the compliance API are
-  C2/C3/C4.
-- Verification: suite **1859 → 1863** tests (0 fail), the +4 being the 6→10 boundary-test split, so no test
-  was stranded; `compile-measures` and `generate:sql` produce byte-identical output; `pnpm evaluate` and
-  `pnpm flip-snapshot` unchanged.
-
-## ADR-058: QRDA III carries QDM identity, which the FHIR lineage does not have — so the verification bar moves to the FHIR column rather than the label moving to the QDM one
-
-**Status:** Accepted (2026-08-04). **Supersedes locked decision #2's "Cypress CVU+ green" bar**
-(`docs/LOCKED_DECISIONS.md` §4). Drives `docs/ROADMAP_2026-08-04.md`.
-
-**Context.** M-B built the whole certification-shaped loop and it runs through the product API over a third
-party's archive, producing Cypress's own expected counts exactly (ADR-055, ADR-056). Cypress graded it
-**red**. The cause was read out of `projecttacoma/cqm-validators` rather than inferred:
-`extract_results_by_ids` calls `find_measure_node(measure.hqmf_id, doc)` and **returns `{}` immediately**
-when the document's measure identity is not the one Cypress holds. Cypress has **CMS125v14** (QDM lineage);
-we execute and report **CMS125FHIR v1.0.000** (QI-Core lineage). The two "invalid id" errors it emitted are
-**exactly our own vendored artifact's version-specific and version-independent UUIDs** — the document is
-internally honest; Cypress simply holds a different measure.
-
-Three things the first reading of that result got wrong, each corrected here:
-
-1. **The 45/53 supplemental-data errors are NOT an independent second gap.** Supplemental data is built only
-   inside the matched node and read back as `(reported_result[:supplemental_data] || {})[pop_key]`. With an
-   empty extraction there is nothing to key into. `CVU_C2_SUBMISSION_2026-08-03.md` §4 called this a
-   separate end-to-end gap and said "separately from the lineage problem, this alone would fail a
-   submission" — true, and it would *also* fail with perfect supplemental data, which is the half that
-   decides sequencing. **Building it would not have moved the verdict by one error.**
-2. **It is not a two-identifier relabel.** `extract_component_value` matches each population on
-   `reference/externalObservation/id[@root = <population hqmf_id UUID>]`. **The QI-Core artifact has no
-   per-population UUIDs at all** — read from the vendored bundles, its populations are *named*
-   (`InitialPopulation_1`, `Numerator_1`, …). There is nothing in our lineage to put in `@root`. Making
-   Cypress read us would mean importing the QDM measure's **entire** identifier surface via a hand-asserted
-   crosswalk, taken from the answer key's own internals, with no CMS-published correspondence to cite.
-3. **No FHIR-lineage grader exists to switch to.** `projecttacoma/cvu-fhir` — MITRE's fork of Cypress,
-   README verbatim *"An open source tool for testing electronic Clinical Quality Measure calculation"* —
-   has 3,771 commits and was **last pushed 13 April 2023**. Cypress itself is actively maintained (v7.5.1,
-   30 Jul 2026) and contains **zero** mentions of FHIR, QI-Core or dQM.
-
-**The structural statement:** **QRDA Category III is an HQMF/QDM-identity format.** Its identity model has
-no counterpart in the FHIR measure lineage. That is a property of the format, not a defect in our work.
-
-**Decision.**
-
-1. **The measure identity in every export continues to derive from the artifact that produced the outcome.**
-   ADR-046 decisions 3 and 4 are reaffirmed, not carved out. Emitting `CMS125v14`'s HQMF id over counts
-   `CMS125FHIR v1.0.000` produced would assert a provenance that never existed, and a receiver resolving it
-   would fetch different CQL.
-2. **The deciding argument is informational, not only ethical.** A green obtained by relabelling would teach
-   us **nothing we do not already have**: #388 measured 64/64 and 150/150 subject-level agreement against
-   Cypress's own per-patient expected results (ADR-055). The badge would add no evidence and would put a
-   false provenance claim into a document that leaves the building.
-3. **The bar moves to a NAMED SET of FHIR-column checks** (`ROADMAP_2026-08-04.md` §4), each with a stated
-   scope and limit, replacing one external pass/fail. Immediate additions: the **FHIR validator + DEQM STU5
-   package** against our MeasureReports (structure), and **cross-execution against Java `cqf-fhir-cr`**
-   (arithmetic, against a second independently written engine). **`fqm-testify` and `deqm-test-server` are
-   NOT independent** — both wrap `fqm-execution`, the library we run.
-4. **A Cypress Calculation Check green is retired as a goal**, because reaching it requires a QDM execution
-   path we are not building. **We do not build one**, because WorkWell is supplementary to WebChart and does
-   not pursue ONC certification — WebChart already carries it. Revisit only if MIE states that certification
-   of WorkWell's engine is a business goal.
-5. **The QRDA I/III machinery is KEPT, re-scoped from certification target to interoperability bridge.** It
-   is built, both document types validate at **0 findings** against the HL7 base ruler (#380/#381/#384), and
-   it is what lets WorkWell speak to an EHR audience at all. Nothing is deleted.
-6. **Supplemental data (RACE/ETHNICITY/SEX/PAYER) is DEFERRED, not cancelled** — a real end-to-end gap
-   (import drops Patient Characteristic Payer; race/ethnicity ride unread in `<recordTarget>`; the Cat III
-   emits none), but one that changes **no external number today**: Cypress cannot read past the identity
-   check, and the HL7 base Cat III ruler does not require it. Do it when a receiver reads it, or alongside
-   DEQM supplemental-data elements.
-
-**Consequences.**
-
-- **Locked decision #2 is rewritten** in `docs/LOCKED_DECISIONS.md`, and `docs/STANDARDS_CONFORMANCE.md`
-  plus the `conformance` skill lose the line "Cypress CVU+ is the verification bar." Left stale, that line
-  is a gate quietly enforcing a retired goal.
-- **Issue #385's remaining scope is retired.** The Calculation Check comparison it asked for was **done**
-  offline and passed exactly (ADR-055); what stays undone is the submission verdict, which this ADR says is
-  not obtainable in our lineage.
-- **The claim we can now make is stronger than the one we gave up.** "Two independently written engines
-  agree on CMS's own test cases" (V4, once run) beats "a QDM certification tool read a document we labelled
-  as a measure we did not execute."
-- **What none of this establishes.** No FHIR-column check produces a certificate; every claim must name who
-  graded what. And nothing to date measures our calculations over **real patient data** — every measurement
-  is over synthetic corpora, a WebChart dev-DB fixture, or Cypress's generated patients.
-- **Evidence:** `docs/evidence/FHIR_VERIFICATION_LANDSCAPE_2026-08-04.md` (mechanism, tooling landscape,
-  regulatory position, live-endpoint probes) and `docs/evidence/CVU_C2_SUBMISSION_2026-08-03.md` (the run
-  that produced the red).
-
-## ADR-057: The live third-party WebChart path derives the two elements our SQL mappers add — because reading a server's own "female" as not-female is also an inference, and a worse one
-
-**Status:** Accepted (2026-08-03). **Closes the open item in ADR-042 decision 3 and ADR-044.**
-
-**Context.** ADR-042 mapped `us-core-sex` and ADR-044 dual-stamped mammography, both in the two SQL→FHIR
-sites (`wcdb-fhir-shim`, `scripts/webchart-devdb-export.ts`). Both sit **upstream of the live FHIR
-transport**, and `normalizeWebChartBundle` was left untouched deliberately — so a third-party WebChart
-server, which supplies only what its own FHIR API emits, got neither. Both ADRs recorded the consequence
-and left it open: official CMS125 puts a live tenant's ENTIRE roster out of its initial population (100%
-MISSING_DATA, silently), and a woman who WAS screened reads OVERDUE — which `case-logic.ts` escalates to
-HIGH. It was inert only because no WebChart-configured stack routes officially; the day one does, both fire.
-
-**Decision — derive both, on the ADR-037/ADR-044 normalization terms, and say what is inferred.**
-
-`us-core-sex` is asserted from `Patient.gender` when the server states one and not the other: an explicit
-two-value allowlist (`male`/`female` → the SNOMED concept ids — `other`, `unknown` and anything else assert
-NOTHING, because there is no concept to assert and guessing is precisely what this must not do), never
-overwriting an extension the server supplied, and tagged `derived-from-gender`.
-
-A LOINC imaging `Observation` is derived from a CPT/HCPCS mammography `Procedure`: a two-code allowlist
-rather than a category sweep, only from a `completed` Procedure (a `not-done` screening did not happen),
-carrying the `category ~ imaging` that `Status.isDiagnosticStudyPerformed` also requires, and **suppressed
-entirely when the bundle already carries the LOINC Observation** — checked at bundle level precisely so it
-can see the whole patient. Both numerators are `exists(...)`, so neither can inflate; for a counting
-measure the duplicate would, which is why the allowlist is two codes.
-
-**ADR-042 declined to infer sex here, and this reverses that for a stated reason.** That refusal was
-generalized from the configuration it fixed to one it had not measured (ADR-042 decision 3 says so). The
-symmetry is the argument: administrative gender and recorded sex can legitimately differ, so deriving is an
-inference — but reading a server's own `female` as not-female is *also* an inference, and a worse one,
-because it is silent and it empties the measure. ADR-043 established that a whole roster out of the initial
-population is the hazard, not the safe answer.
-
-**The residual, which is the one thing a reader of the symmetry argument would not learn.** There IS an
-individual the old behaviour got right and this one gets wrong: a person whose administrative gender reads
-`female` while their recorded sex is male — a transgender man whose administrative field was never updated,
-or a plain data-entry error. Before, they had no extension, fell out of the initial population, and read
-MISSING_DATA. Now they enter the denominator, read OVERDUE, and `case-logic.ts` escalates to HIGH, sending
-"escalate mammogram follow-up immediately" to someone for whom it may be clinically inappropriate.
-
-That is still the right trade, and the reason is sharper than symmetry: **it converts a systematic,
-roster-wide, individually-invisible failure into a rare, individual, human-reviewable one.** A case that
-reaches an operator is recoverable; a roster silently reporting 100% MISSING_DATA is not. The
-`derived-from-gender` tag exists so that case can be told apart — and it currently has **no reader**:
-nothing in `evidence_json`, the case surfaces or the QRDA export distinguishes an asserted sex from a
-recorded one. "Tagged so a reader can tell" is true of the bytes, not yet of the system.
-
-**The `male` half of the allowlist is a deliberate choice, not a side effect of the table having two rows.**
-It buys nothing measured — for CMS125's initial population, absent and `248153007` are equally excluding —
-but the extension is not measure-scoped, so every derived male extension is an assertion a future official
-measure reading `us-core-sex` will consume. Kept for symmetry; recorded so the next measure's author knows.
-
-**Consequences.** `live-official-parity.test.ts` is the gate the skill's trap #4 said did not exist: it
-strips exactly those two elements from the committed fixture to reproduce the live shape, then pins that
-official CMS125 admits **4 of 56** with normalization and **0** without — so the test cannot pass on data
-that never needed the fix. Every derivation also pins its negative (a non-final Procedure, a non-mammogram
-Procedure, an unmapped gender, a server that already supplies the element). What remains untested is the
-live HTTP transport itself: this exercises every transformation a routed run applies to a WebChart payload
-and none of the request shaping, exactly as `devdb-official-eval.test.ts` says of itself.
-
-**Suppression is keyed on (subject, DAY) and counts only an Observation the measure could actually use.**
-Presence of the mammography code is not usability: an Observation that is `preliminary`/`entered-in-error`,
-or carries no `category ~ imaging`, or is simply an old screening from years ago, would otherwise suppress
-derivation for a RECENT valid Procedure — and the patient reads OVERDUE and is escalated HIGH, which is the
-failure this whole derivation exists to remove (Codex, #390).
-
-**Two limits found in review (#390) and left open rather than papered over.** The suppression check
-matches the one canonical LOINC `24606-6`, not the 92-member value set, so a server using one of the other
-91 gets a derived duplicate for the same day (widening it would mean reaching the official terminology
-sidecar from inside the engine, which the boundary forbids). Only **Procedure to Observation** is derived — a server recording
-mammography as a LOINC Observation and no CPT Procedure leaves the AUTHORED engine blind, which is a live
-configuration on staging today. And a live tenant's QRDA Category I now carries the screening as two QDM
-entries, since `qdm-entries.ts` routes the imaging Observation and the Procedure separately and `meta.tag`
-does not survive into CDA.
-
-**One defect this change introduced, caught in review before it shipped:** the mammography allowlist
-compared `system|code` exactly while the crosswalk fifty lines away normalizes system aliases and upcases
-the code. Measured on a CPT-as-OID mammogram — the commonest alternate form — the crosswalk recognised it
-and the authored engine read COMPLIANT while the derivation did not fire and official read OVERDUE. The
-derivation created the divergence it exists to remove. Both now go through one exported `codingKey`.
-
-
-## ADR-056: A batch import and an import-driven finalize — the two routes the certification loop needed, and the guard that keeps finalize from being a "finish this run" button
-
-**Historical finding — full text in [`docs/archive/DECISIONS_ARCHIVE.md`](archive/DECISIONS_ARCHIVE.md#adr-056).** Mechanism: import is a batch because identity resolution spans documents; finalize refuses a run whose outcomes are not all import-derived.
-
-## ADR-055: What a QDM datatype becomes in FHIR is read off the artifact's own ELM retrieves — and the importer is now measured against a third party's answers
-
-**Historical finding — full text in [`docs/archive/DECISIONS_ARCHIVE.md`](archive/DECISIONS_ARCHIVE.md#adr-055).** Mechanism: QDM datatypes are mapped by reading the artifact's own ELM retrieves; the importer then matched a third party's answers exactly.
-
-## ADR-054: CMS130 and CMS165 onboard clean — the credentialed workflow's completion flag was already doing the capped-expansion work ADR-041 built it for
-
-**Historical finding — full text in [`docs/archive/DECISIONS_ARCHIVE.md`](archive/DECISIONS_ARCHIVE.md#adr-054).** CMS130 and CMS165 onboarded clean on the first credentialed dispatch.
-
-## ADR-053: "the terminology is complete" was only ever a claim about what the bundle DECLARED
-
-**Status:** Accepted (2026-07-31). Task #11. Closes a blind spot in the vendor step and, more usefully,
-answers a question ADR-047 recorded as open.
-
-**Context.** ADR-047 onboarded CMS2, CMS68 and CMS951 and recorded that three of six candidates did not,
-CMS138 among them. Its table reads *"CMS138 tobacco screening | **0/47, 47 errors** — one value set
-(…3.526.3.1278) will not expand"*, and — to its credit — it did **not** claim to know why: *"Whether
-that is an upstream packaging gap or something our reducer drops is unknown."* CLAUDE.md's summary
-dropped that hedge, and "will not expand" is a symptom that points at the wrong system: it reads as a
-failure of our expander, our gitignored sidecar, or our VSAC release pin — every one of which is a thing
-an engineer can go and check, at length, without getting closer. So this ADR answers ADR-047's open
-question rather than correcting a wrong answer.
-
-(The first draft of this ADR quoted that sentence as ADR-047's own words. It was CLAUDE.md's phrasing,
-not ADR-047's — the same misattribution class review caught on #363 one PR earlier. Corrected above,
-against the text.)
-
-**What was actually measured (2026-07-31, at pin `ca4b4951`, by `pnpm official:terminology-audit`).**
-
-| measure | value sets the ELM retrieves | ValueSet resources the bundle ships |
-|---|---:|---:|
-| CMS122 / CMS125 / CMS2 / CMS68 / CMS951 | 26 / 32 / 15 / 5 / 26 | identical |
-| **CMS138** | **32** | **31** |
-
-`2.16.840.1.113883.3.526.3.1278` ("Tobacco Use Screening") is **not in the bundle**. There is nothing to
-expand. Three further facts settle what to do about it, and each one changes the answer:
-
-- **The measure is fine.** Upstream's own discrepancy report at HEAD (2026-07-15; 72 measures, 5826 test
-  cases) lists CMS138 under *Measures with No Discrepancies*. Their environment resolves the set from the
-  NLM terminology package their README names — `vsac.nlm.nih.gov/download/manifest?rel=20251117` — and
-  our vendor step never asked for it. So this is not an upstream bug to file, exactly as ADR-041 found
-  for the 1000-code cap; it is the same licensing boundary in a different shape.
-- **Re-pinning cannot fix it.** The only commit after our pin (`f705ee60`) adds two connectathon report
-  documents and changes no bundle. Checked before writing any code, because "upstream already fixed it"
-  and "we must source it ourselves" are different PRs.
-- **VSAC is the remedy**, so vendoring CMS138 needs `WORKWELL_VSAC_API_KEY_VENDOR` and is an owner step
-  beside CMS130/CMS165 (task #10). CMS138 is deliberately still **not vendored** — the same call ADR-047
-  made for those two: an artifact committed in a state that can never be routed is worse than none.
-
-**Decision 1 — the vendor step reports what it cannot see, instead of writing a manifest that reads as
-complete.** `collectTerminology` enumerated the ValueSets a bundle SHIPS, so an absent one produced no
-sidecar entry, no `truncated` row and no warning. It now diffs the value sets the ELM RETRIEVES against
-those, using the same `library.valueSets.def` read the executor makes, over the same reduced bundle
-`requiredOids` reads at runtime — so the vendor-time record and the routing refusal are computed from one
-input by one algorithm rather than kept in step by hand. The diff is one-directional on purpose: a value
-set shipped but never retrieved is not a problem, because upstream bundles carry dependency closures.
-
-The manifest's existing sentence — *"a manifest with an empty `truncated` is a manifest whose sidecar
-holds every code the bundle declared"* — was **true and narrow**. "Every code the bundle DECLARED" says
-nothing about a value set the bundle never declared. It was doing duty as a completeness record, and
-`official-flip-config.test.ts` read it as one.
-
-**Decision 2 — absent is NOT recorded in the manifest; it is recomputed at runtime.** The list is
-derivable from the artifact's own two committed-or-pinned files (the ELM names what it retrieves, the
-sidecar names what we hold), so persisting it would create a second authority that can disagree with the
-artifact it describes — the exact drift `official-terminology.test.ts` guards `truncated` against, in a
-field that never needed to exist. `truncated` genuinely cannot be recomputed (upstream's declared totals
-are not in the sidecar); this can. Two consequences, both good: the check applies retroactively to
-artifacts vendored before it existed, and it adds nothing to the committed artifacts.
-
-**One claim in this ADR's first version was false, and the way it failed is worth keeping.** It said
-the change "moved no committed byte", verified by re-vendoring cms2 to an empty `git diff` and an
-unchanged sidecar hash. The verification was real and the conclusion did not follow. The first cut also
-tagged CAPPED completions with `reason: "capped"`, and the two credentialed artifacts (cms122, cms125)
-carry a `completion` block recording exactly `{oid, had, now, declaredTotal}` — so a credentialed
-re-vendor produced a different `manifest.json`, and CI's *"The committed artifact is reproducible from
-its pin"* step failed, which is a **deploy-blocking** gate that no contributor can clear locally
-(`WORKWELL_VSAC_API_KEY_VENDOR` is a GitHub secret). cms2 provably could not have caught it: vendored
-without the credential, it has no completion block at all. The check was run against the one artifact
-class the change could not affect.
-
-Fixed by emitting `reason` only for `absent-upstream`, and guarded by a test that compares the record
-the code PRODUCES against the records already COMMITTED — code-versus-artifact rather than
-code-versus-itself, with a non-degeneracy assertion so it cannot pass by finding no completion block.
-
-**Decision 3 — capped and absent are completed by one flag but never conflated.** `--complete-terminology`
-(was `--complete-capped-expansions`, still accepted with a notice, and that alias is *tested* rather than
-asserted in a docblock) now sources absent sets too. They are not equally evidenced, and the code keeps
-them apart:
-
-- A **capped** set is checked against upstream's declared total AND against containment of the codes
-  upstream shipped (ADR-041's two guards).
-- An **absent** set has neither — upstream shipped nothing to contain, and declared no total to fall
-  short of. Its only baseline is VSAC's own `expansion.total`, which is enforced; an empty expansion is
-  refused outright, because an empty value set matches nothing and produces the whole-roster-out-of-
-  population silence of ADR-043. `completion.valueSets[].reason` is emitted **only** as
-  `absent-upstream`, and `declaredTotal` is `null` for it, because that field means "what the bundle
-  declared" and an absent set declared nothing. Its ABSENCE means `capped` — which is what every
-  completion before this ADR was, so the field marks the weaker provenance rather than labelling both.
-  That asymmetry is forced, not stylistic: see the reproducibility consequence below.
-
-**The check on a sourced value set was claimed to be the MADiE gate. MEASURED 2026-07-31, that claim is
-FALSE as written, and the correction matters.** The gate executes each measure against **the upstream
-bundle's own ValueSet resources** — the report says so in its own words: *"ValueSets are consumed
-directly from each official measure Bundle; no VSAC network call or key is used."* For an ABSENT value
-set the bundle is precisely what does not have it, so the gate cannot resolve it however good our
-sourced codes are. Run with cms138 in the gate: **0/47, 47 errors, every one of them
-`Missing the following valuesets: …3.526.3.1278`** — byte-for-byte the pre-ADR-053 result, with a
-complete sidecar sitting beside it.
-
-So a sourced-absent value set was validated by neither the vendoring (no containment or declared-total
-baseline) nor the gate as it stood. **Built in the same PR, and then measured: CMS138 went 0/47 →
-47/47, 0 unexpected mismatches, 0 errors.**
-
-`runOfficialMeasureCases` takes the artifact's runtime terminology and **narrows it to the OIDs the
-bundle does not ship**. The narrowing lives next to the `calculate` call rather than at the call site,
-because the natural thing for a caller to do is pass the whole cache — which would silently convert this
-gate from "upstream's terminology" into "ours" for every measure, with the deck still green and nothing
-to notice it. With nothing missing, `calculate` is invoked with three arguments exactly as before, so
-the five complete measures are provably unaffected.
-
-**What 47/47 licenses, stated precisely, because it is not the claim the other five carry.** For that
-one value set the CODES are ours, sourced from VSAC at the pinned release. What stays upstream's is the
-**answer key** — the expected population vectors in the MADiE deck. Agreement is therefore real evidence
-that the four sourced codes are right, and is *not* evidence about upstream's terminology. The report
-says so on the measure's own line rather than in a footnote, and `supplementedOids` carries it in the
-data so nothing downstream can round it off to "47/47 like the others".
-
-**Decision 4 — routing's diagnosis changes; its verdict does not.** `expandArtifactTerminology` already
-refused an unexpandable value set, so nothing was ever routed on one, and this ADR does not claim to have
-closed a live hazard. What it changes is the sentence an operator gets: "N of M value sets could not be
-expanded" becomes a named OID, "the upstream bundle ships no ValueSet resource for it", and "re-pinning
-will not fix it". Reported alongside checks 1-6 rather than left to the lazy expansion pass, for the same
-reason `scoring` and the sidecar check were moved up — a precise sentence at boot beats an accurate one
-later.
-
-**Consequences, including the one that bit during implementation.**
-
-- The routing check exposed an **incoherent test stub**. `executor-router.test.ts` returned
-  `{ok: true, codesByOid: new Map()}` for "terminology present" — an artifact whose sidecar loads and
-  holds nothing, which is not a state a real artifact can be in. Once the router could notice it, that
-  stub meant "all 26 of this measure's value sets are absent" and nine routing tests failed on a
-  condition none of them was about. Fixed by making the stub describe a COMPLETE artifact (a code per
-  retrieved OID) rather than by adding a third thing to remember to stub — the `offlineChecks` docblock
-  is already a warning about forgetting one.
-- **Two implementations of "what does this ELM retrieve" now exist**, and that is forced: the vendor
-  script runs as bare `node` on the deploy path with no install, so it cannot import
-  `@workwell/official-executor`. `scripts/valueset-parity.test.mjs` pins them against each other over the
-  real committed artifacts, with a non-degeneracy assertion so it cannot pass by comparing nothing.
-- `pnpm official:terminology-audit` is a **measurement, not a gate** — exit 0 whatever it finds, and
-  deliberately not in CI, because it reads the gitignored `.official-content` checkout and would
-  otherwise be a self-skipping job that reads as covered. Enforcement lives where it can actually run:
-  `absentValueSets` + `officialRoutingProblems`, against the artifact's own files.
-- **What this does not catch:** a value set that is present, fully expanded, and *wrong* — the
-  membership-defect class ADR-038 found in the synthetic corpus. Size and presence are not identity.
-
----
-
-
-## ADR-052: the app-side exclusions are decided and enforced; what the package does with CONTENT is not
-
-**Status:** Accepted (2026-07-31), **narrowed after review**. Roadmap M-C, locked decision #3. It decides
-less than its first draft claimed, because measurement contradicted three of that draft's statements.
-
-**Context.** M-C promises `@workwell/measure-engine` with `cql-execution` + `cql-exec-fhir` as its only
-dependencies. The workspace and `packages/official-executor` exist and `engine-boundary.test.ts` proves
-`src/engine/` is self-contained, so the open question was never "can it be lifted" but **what belongs in
-it** — task #4's published-API decision, which nothing had decided.
-
-**What IS decided (measured, and enforced by `engine-core-boundary.test.ts`).**
-
-1. **`synthetic/`, `ingress/`, `immunization/` and `cli/` are APP content, not package content.** Every
-   cross-area edge among **production** files runs app to core, with exactly one exception:
-   `cql/codegen/generate-sql-cli.ts` imports `ingress/webchart/terminology.ts`, and that is a CLI
-   entrypoint, so app-side too. `synthetic/employee-catalog.ts` is a fictional employee directory and the
-   single most-imported module in the tree (**51** call sites, verified in review); shipping the directory
-   as the package would publish our fixtures as API.
-2. **`CORE_ENTRY_POINTS` is the published API, and app imports are checked against it.** Eleven modules.
-   Verified independently: all eleven have an external importer, and the only closure module *not* listed
-   (`cql/vsac-value-set-resolver.ts`) is reachable solely through `resolve-value-set-resolver.ts`. The
-   check was **missing from the first cut** (Codex, #363): the docblock called the list "every module the
-   app is allowed to import" while nothing verified it, so an app import of a core internal left all
-   assertions green. A list that reads as an API and constrains nobody is the vacuous-guard shape, inside
-   the test written to pre-empt that class. Zero violations today; mutation-checked.
-
-**What is NOT decided, and this is the substantive one (review, #363).**
-
-**Does the package ship WorkWell's measure CONTENT, or take it injected?** `cql-execution-engine.ts`
-hard-imports `MEASURES` (our own 15-measure catalog), `ELM_LIBRARIES` (**17 compiled WorkWell libraries —
-17 of the 29 closure members**) and `withBundledEcqmFallback`, whose own docblock begins "the codes **the
-synthetic corpus** stamps". The argument this ADR uses to exclude `synthetic/` — that no consumer of a
-measure engine wants our fixtures — applies to those three with equal force, and the engine will not
-construct without them.
-
-Two things already on the record make that omission worse rather than better: ROADMAP §7.4 scoped the
-clean-core claim to a **9-file closure**, which the first draft widened to 29 without reconciling; and
-`LOCKED_DECISIONS` records that `evaluate(input.elm, input.metaOverride)` **already supports
-consumer-supplied measures**, so the registry and ELM are a default, not a necessity. Deciding this is
-task #4's actual question. It is deferred, not answered — and the boundary test measures the closure as
-it stands rather than blessing it as final.
-
-**Three first-draft claims were FALSE, and are withdrawn rather than softened.**
-
-- *"Moving `DEVDB_WHITELIST` is what lets the package rule be 'no `node:` at all'."* **Measured false.**
-  Running the identical closure algorithm against `main` gives a byte-identical 29-file closure with zero
-  `node:` imports. The closure contains no `ingress/` file, so relocating a constant between two files it
-  cannot reach could not have affected it. The move is still a tidy-up worth having; it is not
-  load-bearing, and presenting it as the enabling step was the "guard whose premise is false" shape in an
-  ADR rather than in code.
-- *"The four `*-cli.ts` files are now true leaves."* **False.** `cql/codegen/generate-sql-cli.ts` still
-  exports `WCDB_SQL_MEASURES` to two modules, and `engine-boundary.test.ts`'s `node:` carve-out
-  (`onlyIn: /-cli\.ts$/`) is untouched here. ADR-048 said explicitly that the `node:` allowlist entry
-  survives; the first draft read as though this change had discharged that debt.
-- *The ADR-048 "correction".* The first draft put a sentence in quotation marks that **ADR-048 does not
-  contain**. What ADR-048 actually says is that `generate-sql-cli.ts` exports to two test modules and
-  `devdb-cli.ts` exports to five "including **production** `live-cli.ts`" — both counts exact, with the
-  production one already flagged. So the finding **restates** ADR-048 rather than refuting it. What is
-  fair to say: ADR-048's *count* was right, and its *characterization* ("not a `git mv`") was pessimistic
-  **for `devdb-cli.ts` only**.
-
-**Scope of the "exactly one exception" claim, stated because the first draft did not.** It covers
-**production** files. There are **seven** further core-to-app edges from TEST files (four from
-`cql-execution-engine.test.ts` into `synthetic/`, two into `ingress/evaluate-bundle.ts`, one into
-`ingress/webchart/terminology.ts`), plus **two** core tests reaching `stores/sqlite/**`, outside the
-engine tree entirely. The closure starts at production entry points and structurally cannot see any of
-them. ADR-048 §5 already named this hazard for `cql-translator.ts`: the move must either strand those
-tests or give the package a devDependency pointing back at the app. That is the extraction's real
-blocker, and it remains undecided.
-
-**Consequences, corrected.**
-
-- **The move is bigger than the first draft said.** The 29 closure members are **12 TypeScript modules +
-  17 `.elm.json` data files**. "~87 import sites" counted only external imports of the eleven entry
-  points; including engine app-area files and core-area non-closure files it is **125 statements across
-  85 files**. `cql/codegen/` does not move as a unit — `generate-cql.ts` goes, `generate-sql*.ts` stays,
-  and they import each other. And `cql/cql-libs.d.ts` must move too: nothing imports it (it is picked up
-  by `tsconfig` `include`), so a closure computed from imports **cannot see it** — a reminder that an
-  import closure is the wrong instrument for enumerating what moves.
-- **The move will NOT "satisfy an already-green test".** The test resolves paths from its own location,
-  so leaving it behind makes every entry point unresolvable, while moving it into the package makes the
-  app-area assertion structurally vacuous (those directories will not exist there) and blinds the API
-  check (app imports become the bare specifier `@workwell/measure-engine`, and it inspects only relative
-  ones). Both tests need rewriting as part of the move. That is a real cost of this sequencing, and it is
-  better known now than discovered.
-- What the sequencing does buy, and it is smaller than the first draft claimed: between now and the move,
-  the app cannot quietly acquire a core-internal import, and the core cannot quietly acquire an app
-  dependency or a third-party one.
-- `measure-executor.ts` is on the published list although its headline export `sqlPushdownExecutor` is a
-  documented inert stub that throws on use. Publishing a function that exists to reject is a deliberate
-  choice, to revisit alongside the content question.
-- **Known limit of the instrument**, carried rather than hidden: `stripComments` treats `/*` inside a
-  string literal as a comment opener, so an import after one can drop out of the scan. Inert today, and
-  `cql/codegen/generate-cql.ts` — which is in the closure — emits CQL, whose block-comment syntax is
-  exactly that. Noted in the test.
-
----
-
-## ADR-051: QRDA Category I import is a mapping into the unchanged engine — and it proved the export only works in real terminology
-
-**Historical finding — full text in [`docs/archive/DECISIONS_ARCHIVE.md`](archive/DECISIONS_ARCHIVE.md#adr-051).** Mechanism of QRDA I import, and the export defect the round trip exposed.
-
-## ADR-050: QRDA Category I is a patient-DATA document, measured against the HL7 base IG — not the CMS Hospital one
-
-**Status:** Accepted (2026-07-30). Roadmap M-B. **Supersedes the central claim of ADR-049**, which is
-now marked. Still **not CVU+-validated** — that bar is unmet and this ADR does not claim it.
-
-**Context.** ADR-049 shipped a QRDA Category I export that reported per-subject population membership and
-carried an empty Patient Data section, and recorded its conformance against the **CMS 2026 QRDA I
-Schematron**. Two things about that turned out to be wrong, and both were found by measurement rather
-than by re-reading the code.
-
-*First, the ruler.* The CMS QRDA I IG is titled "for Hospital Quality Reporting" and governs IQR /
-Medicare PI / OQR. CMS122 and CMS125 are **Eligible Clinician** measures, whose CMS submission format is
-Category **III** (the 2026 CMS QRDA III EC IG covers MIPS/MVP/APP/SSP PI). But QRDA Category I is not
-therefore out of scope for us: §170.315**(c)(1)** "record and export" and **(c)(2)** "import and
-calculate" both require QRDA Category I per §170.205(h)(2) — the **HL7 QRDA I R1 STU 5.3 US Realm** IG —
-setting-neutral, with (c)(1) in the Base EHR definition. Only §170.315**(c)(3)** "report" splits by
-setting. Cypress supports 56 EP/EC eCQMs with Category I test data and validates Category I against the
-HL7 standard, explicitly **not** the additional CMS constraints. So Category I is squarely our path; we
-were simply holding it to the hospital ruler.
-
-*Second, and more seriously, the content.* QRDA Category I **does not report population membership at
-all**. Measured: not one of the four CMS RY2026 Category I sample files contains a single `IPOP`,
-`DENOM`, `NUMER` or `MSRAGG`. The document carries the patient's clinical data plus a reference to the
-measure, and the receiving engine **recalculates** — which is precisely what "(c)(2) import and
-calculate" means. What ADR-049 shipped was Category III machinery (`…27.3.24` Measure Data observations)
-inside a Category I envelope, plus an empty Patient Data section — while the Patient Data Section QDM
-**SHALL contain at least one entry** (CONF:67-14567). It was the inverse of a QRDA I on both axes.
-
-**Decision.**
-
-1. **The bar is the HL7 base IG, and the measurement is a command.** `scripts/qrda-schematron-check.py`
-   runs the published Schematron and **partitions** failures by conformance-number prefix: `CONF:1198-*`
-   (US Realm Header), `CONF:3343-*` (QRDA I), `CONF:4509-*`/`1098-*`/`81-*`/`67-*` (C-CDA + QDM entries)
-   are **base HL7 — our bar**; `CONF:CMS-*` is **Hospital-only — not our bar**. This works because the
-   CMS Schematron embeds the base conformance statements it inherits. #360 measured by hand in a scratch
-   directory, which is why one of its findings could be wrong without anyone being able to see it.
-2. **Population membership comes out.** It is exported by the two artifacts that have a place for it —
-   the FHIR MeasureReport and QRDA Category III. Keeping it in Category I as a non-standard extra risks a
-   receiver rejecting the document, and states something the format does not mean.
-3. **The Patient Data section carries real QDM entries, translated from the evaluated FHIR bundle.**
-   `src/fhir/qdm-entries.ts` maps the five datatypes CMS122/CMS125 consume — Encounter Performed,
-   Diagnosis (inside a **Diagnosis Concern Act**, which is a SHALL, CONF:4509-28885), Laboratory Test
-   Performed (result in the nested Result observation), Diagnostic Study Performed (outer `value`, SHALL,
-   CONF:4509-29332), Procedure Performed. An `Observation` routes on **`category`** — the same
-   discriminator CMS125's official numerator uses (ADR-044) — and an unclassifiable resource is
-   **skipped, not guessed**: absent is visible, wrong-datatype is not.
-4. **We do not claim the CMS document template.** `…24.1.3` is "QRDA Category I Report CMS". Claiming a
-   template whose IG we do not conform to is a misdeclaration, so it is gone. Four CMS-only findings
-   remain and are *expected* — all four are template-declaration rules. (The count moved 3 → 4 because
-   the new QDM entries trip entry-level CMS rules an empty section could not, **not** because the
-   template was dropped; an earlier draft of this ADR had that causation backwards.)
-5. **The header is completed with `nullFlavor`, never with invention.** `author` is an
-   `assignedAuthoringDevice` (WorkWell is software; naming a clinician would be a fabricated
-   attestation), `custodian` is the WorkWell instance, and `raceCode`/`ethnicGroupCode` are `UNK`.
-   There is deliberately **no `legalAuthenticator`**: it is only a SHOULD (CONF:1198-5579) and including
-   it forces an `assignedPerson` with a US Realm name that no real person stands behind.
-6. **A document with no bundle is emitted, marked, and counted.** The route returns `nonConformant` and
-   each document carries a `conformant` flag; the empty section says in prose that it is not conformant
-   and cannot be recalculated from. Bundles are **not** reconstructed from the persisted outcome:
-   `deriveExamConfig`'s own contract says the target is a distribution BUCKET that can converge to a
-   different status (CMS122 DUE_SOON → MISSING_DATA), so status → bundle is not injective and a
-   reconstruction would be fiction wearing provenance.
-
-**Measured.** Against the CMS RY2026 Schematron, a document with patient data went from **27 findings
-(14 base-HL7 errors)** to **0 base-HL7 errors** + 4 CMS-hospital-only findings + warnings. Without a
-bundle it has exactly **one** base error — the missing entry — which is the honest signal.
-
-**Two #360 findings are corrected, both by measurement.**
-
-- **`<addr>` DOES have a nullFlavor escape.** #360 recorded "a hard-error `1..*` with no nullFlavor
-  escape, so a patient without an address cannot validate (an INGEST prerequisite)". Element-level
-  `<addr nullFlavor="NI"/>` indeed fails CONF:81-7291/7292 — but an `<addr>` whose **children** carry
-  `nullFlavor` passes both. Address is **not** an ingest prerequisite. The same is true of
-  `raceCode`/`ethnicGroupCode` via `nullFlavor="UNK"`.
-- **`legalAuthenticator`, `custodian`-with-CCN and the CMS EHR Certification ID `participant` were
-  filed as one undifferentiated gap list.** Partitioned: only 3 of 27 findings were CMS-hospital-only,
-  so the hypothesis that re-targeting would shrink the list was **wrong** — every substantive gap
-  (`author`, `custodian`, race, ethnicity, address, the QDM sections) was base HL7 all along. Two
-  genuinely new SHALLs surfaced that #360 never recorded at all: `raceCode` and `ethnicGroupCode`.
-
-**Review found four defects, three of them P1, and one is answered by DISAGREEING (Codex, #361).**
-
-1. **The live lookup could never fire.** A live run persists `subjectId` as the roster external id
-   `wc|<patientId>`, while the bundle carries the bare `Patient.id`. The map was keyed on the bare id,
-   so `bundleFor(outcome.subjectId)` missed every time — on the *only* path meant to produce conformant
-   documents. Present, plausible, structurally incapable of firing: the vacuous-guard shape again. Now
-   keyed both ways.
-2. **A retracted record became a *Performed* entry.** Every entry asserts `statusCode="completed"`, so
-   an `entered-in-error` mammogram would have handed a recalculating receiver a numerator hit off a
-   record WorkWell excludes. Now filtered — as a **denylist** (`entered-in-error`, `not-done`,
-   `cancelled`, …) rather than an allowlist, because real WebChart data carries `status: "unknown"` on
-   genuine clinical rows (measured on teatea), and an allowlist would silently drop them and make a
-   receiver recalculate LOW. Fail closed on retraction, open on ambiguity.
-3. **An identifier was used as a patient name.** `employeeById` knows only the synthetic catalog, so a
-   live subject's name became `wc|123`. The name (and birth date) now come from the FHIR Patient first —
-   which is the better source regardless, being the record the measure was computed from.
-4. **Roster-derived evidence: review asked us to re-stamp; we do not.** The pipeline evaluates
-   `stampEnrollment(bundle, …)`, which overlays a roster enrollment Condition and — for cms125 — a
-   **synthesized CPT 99213 Encounter**, because WebChart supplies none (ADR-042). Re-applying it at
-   export would make a receiver reproduce our answer, which is a real benefit. We decline it: a QDM
-   `Encounter, Performed` asserts a clinical encounter **happened**, the roster's did not, and a
-   receiver cannot tell which entry was inferred. That is precisely ADR-037's normalization-not-
-   fabrication rule, inside a regulatory artifact. So the document exports real data only and **names
-   the omission**, in the section text and in a `caveats` array on the response. The cost is stated
-   rather than hidden: a receiver recalculating from these entries alone may place the subject outside
-   the initial population we scored them in.
-
-   **`caveats` is deliberately a separate axis from `conformant`.** A document omitting roster evidence
-   is still a structurally valid QRDA I; folding the two together would mark every live cms125 document
-   non-conformant for something no validator would ever raise, and would make one boolean mean two
-   different things.
-
-**A second review pass changed what the headline number MEANS, and four more defects.**
-
-- **The partition was too coarse, and it could hide a broken document.** Classifying every `CONF:CMS-*`
-  assert as "not our bar" is wrong for two families that carry CMS numbers while binding *any* conformant
-  CDA: **CMS_0105–0113** (HL7 abstract datatype rules — `@value` xor `@nullFlavor`, non-empty `ST`, …)
-  and **CMS_0115–0120** (NPI/TIN validity, including the Luhn checksum). Demonstrated on the real
-  artifact: a lab result emitted as `<value xsi:type="PQ" value="not-a-number" nullFlavor="NI"/>` tripped
-  only `a-CMS_0110` and was reported as **0 base-HL7 errors, exit 0** — the number quoted in three
-  documents. Now classified as base, and the script exits non-zero. Kept OUT of that list on purpose:
-  **CMS_0121** ("a UTC offset should not be used anywhere in a QRDA Category I"), which directly
-  *contradicts* base HL7's CONF:81-10130 ("SHOULD include time-zone offset") — the clearest evidence the
-  partition is doing real work. The classifier now also reads every `CONF:` reference in a message rather
-  than the first, prefers the SVRL `role`/`flag` over guessing severity from the assert id, and reports
-  anything it cannot classify as an error rather than silently dropping it.
-- **One malformed date or numeric id 500'd the whole export.** `hl7Ts` throws by design and `esc` called
-  `.replace` on its input; both now see third-party FHIR. A MariaDB zero-date on subject 200 of 500 lost
-  all 500 documents. Each resource is now translated inside its own try/catch, `esc` coerces, and
-  `hl7TsOrNull` degrades one field to `nullFlavor` — which is what the module's own docblock had claimed
-  ("skipping the item loses one") while implementing it for structural junk only.
-- **The retraction guard could not fire for Conditions.** FHIR `Condition` has no `status`; retraction is
-  `verificationStatus`. So a retracted diabetes diagnosis still became a `Diagnosis` with
-  `statusCode="completed"` — the datatype CMS122's denominator is built on. The vacuous-guard shape, in
-  the fix for the previous vacuous guard.
-- **`effectiveTime` had a dead branch and two lossy ones**: an `abatementDateTime` fallback unreachable
-  for every mapped type, a period carrying only `end` silently discarded, and `Condition.onsetPeriod`
-  never read.
-
-**Consequences.**
-
-- QRDA I now depends on the subject's FHIR bundle at export time, supplied only where the stack can
-  really re-read it (a WebChart-configured seam). The synthetic default exports non-conformant documents
-  that say so. Bundles are read **as of now**, not as of the run — making it as-evaluated means
-  persisting bundles, which is a schema change and the owner's call.
-- **`loadBundles()` crawls the whole tenant**, sequentially, uncached, and is not scoped to the run's
-  subjects — `MAX_INDIVIDUAL_REPORT_SUBJECTS` bounds the documents, not the fetch. Fine on the dev
-  fixture; this is the request that times out on a production-sized tenant. Scoping it needs a by-id read
-  the transport does not expose. Recorded here rather than discovered later.
-- The Schematron is **not vendored** (585 KB of yearly third-party artifact) and is **not fetched
-  automatically either** — it is downloaded by hand from ecqi.healthit.gov and hash-checked, with a
-  mismatch warning rather than a refusal. That is weaker than ADR-036's build-time fetch pinned by a
-  committed manifest, and this ADR previously described it as if it were the same thing. The script is
-  **not in CI**: it needs Python + lxml, which must not become backend-ts dependencies. The structural
-  regressions it would catch are pinned in TypeScript instead, each assertion citing the CONF number it
-  stands for.
-- **The measured numbers are for ONE document per state**, generated from a hand-built bundle — not a
-  sweep of an endpoint response. Evidence: `docs/evidence/QRDA1_SCHEMATRON_2026-07-31.md`.
-- **PHI posture, for the owner rather than a defect.** This endpoint's sensitivity changed materially: it
-  used to emit population flags and now emits per-patient diagnoses, lab results, procedures and
-  encounters as CDA. It sits behind the global JWT middleware with no role gate and writes no audit
-  event — consistent with the other export endpoints, so no rule is breached, but the right frame for
-  deciding that is `docs/PRODUCTION_READINESS_2026-07.md`, not inheritance.
-- **Still open:** QRDA I **import** does not exist, and **Cypress CVU+ has not run** — it needs Docker
-  and remains the M-B bar. Nothing here may be described as certified or CVU+-validated.
-
----
-
-## ADR-049: QRDA Category I exists, reports population membership only, and says so in the document
-
-**Superseded — full text in [`docs/archive/DECISIONS_ARCHIVE.md`](archive/DECISIONS_ARCHIVE.md#adr-049).** Its central claim was wrong and ADR-050 says so. Kept as the record of how the error was found.
-
-## ADR-048: The TRANSLATOR debt is paid; the CLI-surface debt is not, and the split is not a file move
-
-**Historical finding — full text in [`docs/archive/DECISIONS_ARCHIVE.md`](archive/DECISIONS_ARCHIVE.md#adr-048).** Half of an extraction debt paid; the other half turned out smaller than recorded (see ADR-059).
-
-## ADR-047: A measure is onboarded when its MADiE gate is green — vendoring is not onboarding
-
-**Status:** Accepted (2026-07-30). Roadmap M-A. **CMS2, CMS68 and CMS951 are vendored, gated and
-ROUTABLE.** None is routed; `WORKWELL_OFFICIAL_MEASURES` still names only cms122 + cms125.
-*(Status correction 2026-08-24: "routable" holds for CMS2 and CMS951 only — CMS68 is refused at
-construction as an episode-of-care measure, exactly as decision point 6 below records; this line
-over-claimed relative to the ADR's own body.)*
-
-**Context.** With cms122 and cms125 running CMS's published artifacts in production, the remaining six
-priority measures were meant to follow. Vendoring all six took minutes. Deciding which could actually be
-onboarded took the gate — and it disqualified half of them, for three different reasons.
-
-| measure | outcome |
-|---|---|
-| **CMS2** depression screening | **36/36** — onboarded |
-| **CMS68** current medications | **19/19** — onboarded |
-| **CMS951** kidney health eval | **55/55** — onboarded |
-| CMS138 tobacco screening | **0/47, 47 errors** — one value set (…3.526.3.1278) will not expand |
-| CMS130 colorectal screening | capped `AdvancedIllness` expansion — needs the VSAC key |
-| CMS165 controlling high BP | **two** capped expansions — needs the VSAC key |
-
-**Decision.**
-
-1. **Onboard exactly the three the gate passes.** A vendored artifact is not evidence of anything; the
-   MADiE deck is. CMS138 vendors cleanly, loads cleanly, and produces **47 errors out of 47 cases** —
-   there is no version of "ship it and watch" that improves on not shipping it.
-2. **CMS130 and CMS165 are not vendored at all, rather than vendored-but-capped.** Both need
-   `--complete-capped-expansions` with `WORKWELL_VSAC_API_KEY_VENDOR`, which exists only as a GitHub
-   secret. Committing a capped artifact would put a permanently-unroutable measure in the tree whose
-   manifest CI would then rewrite the moment it was added to the vendor list — reproducibility churn for
-   an artifact nobody can use. They wait for a credentialed vendoring run (an owner step, exactly as
-   ADR-041's "Step 1a" was for cms122/cms125).
-3. **The gate harness is driven by `OFFICIAL_GATED_MEASURES`, not by a hardcoded pair.** `parseArgs`
-   defaulted to `["cms122", "cms125"]` and rejected anything else; the sparse checkout fetched two
-   measures' cases; the committed-report predicate was `measures.length === 2`. Every one of those
-   silently stopped meaning "the full gate" the moment a third measure existed — the report predicate
-   most dangerously, since a full run would have written nothing and CI's staleness check would compare
-   a five-measure run against a two-measure file.
-4. **The compared population vector now includes DENEXCEP.** *(Added after review, #358.)* The gate
-   compared IPP/DENOM/DENEX/NUMER only. **CMS68 declares no `denominator-exclusion` at all** — its
-   populations are IPP, DENOM, NUMER, DENEXCEP — so the gate was comparing a population the measure does
-   not have while ignoring the one it does; CMS2 declares both and the exception was ignored there too. A
-   green 19/19 could therefore coexist with broken exception handling, which flows into the runtime
-   EXCLUDED outcome and into MeasureReport/QRDA (`denexcep` leaves the effective denominator, so it moves
-   the score). Not hypothetical arithmetic: **9 of the 55 expected reports carry a non-zero DENEXCEP**,
-   and forcing the actual value to zero drops CMS2 to **28/36** and CMS68 to **18/19**. It was green
-   before that mutation and after it — which is the definition of a check that was not being made.
-   cms122/cms125 declare no exception, so both sides are 0 and their decks are unchanged.
-5. **`OfficialMeasureId` is derived from the gate map** (`keyof typeof MEASURES`) rather than hand-listed
-   as a union. The union had to be edited in a second place, and forgetting was a compile error at best
-   and a silently ungated measure at worst.
-6. **An EPISODE-OF-CARE measure is refused at construction — so CMS68 is gated but NOT routable.**
-   *(Added after review, #358.)* CMS68 declares `populationBasis: "Encounter"`: one patient with N
-   qualifying encounters is N denominator units, and `outcomeFromPopulations` maps exactly one boolean
-   vector per **subject**. Routing it would collapse four office visits into one outcome, so
-   MeasureReport would count subjects where the measure counts encounters — a wrong denominator with
-   nothing to signal it.
-
-   **The MADiE deck provably cannot catch this**, which is why it needed a refusal rather than a note:
-   all 19 CMS68 cases have a max expected count of 1 for every population, and not one subject produces
-   more than a single episode. `19/19` is evidence about single-encounter patients, and a green gate over
-   exactly the shape that hides the defect is the most dangerous kind. Episode support is unbuilt;
-   `officialRoutingProblems` now says so at construction. cms2 and cms951 are `populationBasis: boolean`
-   and stay routable.
-7. **Nothing is routed by this change.** Routable and routed stay separate steps: these three have no
-   authored counterpart, so a flip has no oracle to be compared against, and `flip-snapshot`'s
-   authored-vs-official comparison — the thing every flip so far has been judged on — cannot run for
-   them. What that comparison should be replaced by is the open question the next flip has to answer.
-
-**Consequences.**
-
-- **The gate now covers five measures: 231/231** (55 + 66 + 36 + 19 + 55), 0 unexpected, 0 errors, and it
-  is a permanent CI gate for all five.
-- **Three routable measures with no authored implementation is a new state**, and the roster/catalog do
-  not yet model it: `MEASURE_BINDINGS`, the measure registry and the compliance grid all assume an
-  authored measure exists. That is why this PR stops at routable. Onboarding the *product* surfaces is
-  separate work from onboarding the *artifact*.
-- **CMS138's failure is recorded, not hidden.** One value set will not expand from the artifact's own
-  terminology. Whether that is an upstream packaging gap or something our reducer drops is unknown; the
-  gate says only that the measure cannot be executed today, which is enough to keep it out.
-- **Two measures now depend on an owner step**, and the dependency is narrow and stated: a credentialed
-  `pnpm vendor:official --complete-terminology` run for CMS130 and CMS165 — and, since ADR-053, for
-  CMS138 too, which needs the wider behaviour only the new flag name describes (the old
-  `--complete-capped-expansions` still works but would read as if the narrower behaviour were what
-  is wanted).
-
-## ADR-046: Canonical, improvementNotation and membership all derive from the outcome's own evidence
-
-**Status:** Accepted (2026-07-30). Discharges the PR-7 obligation `fhir/measure-report.ts` has carried
-since PR-3, and unblocks routing **cms122** (PR-9c shipped cms125 alone because of this).
-
-**Context.** PR-3 made MeasureReport membership *evidence-first*: an official-routed outcome's populations
-come from `evidence.official.populationResults`, which is the regulatory truth. But two sibling fields
-stayed static — `measureCanonical` always emitted `urn:workwell:measure:<id>`, and `improvementNotation`
-always read the authored `MEASURE_BINDINGS` table. The file wrote the consequence down itself:
-
-> *"A report that declares higher-is-better over a poor-control numerator is self-contradictory, so the
-> measure that flips MUST switch all three together — canonical, improvementNotation, and membership."*
-
-For cms122 this is not cosmetic. Its official numerator is **poor glycemic control** — being in it is the
-failure — so `improvementNotation: increase` asserts higher-is-better about a numerator counting harm. On
-the 150-employee directory the numerator moves **~120 → ~27**. QRDA III carries **no `improvementNotation`
-element at all**, so there the inverted count would ship with nothing marking it.
-
-The guard that supposedly pinned this could not fail: its fixtures carried no official evidence, so it
-only ever exercised the authored path. Review of #356 caught that PR-9c was the flip obliged to discharge
-this and had not — which is why cms122 was held back and cms125 flipped alone.
-
-**Decision.**
-
-1. **All three derive from the outcome's own `evidence.official`.** Not from the environment: a report
-   describes the run it is built from, and a run's provenance does not change because someone later
-   flipped a flag or re-vendored. Asking `WORKWELL_OFFICIAL_MEASURES` at export time would mislabel every
-   historical export the day the config moves — the same reasoning `aggregateCountsForRun` already
-   applies to counts.
-2. **`improvementNotation` comes from `OFFICIAL_MEASURE_SEMANTICS`, not from the artifact.** For cms122
-   the artifact itself says `increase`, which contradicts eCQI's own description of the measure;
-   `official-measure-semantics.ts` records that human-reviewed decision with its rationale. A routed
-   measure with no recorded semantics emits the greppable `WORKWELL_ALERT` rather than guessing — there is
-   no safe default, since guessing one way reports every failure as compliant.
-3. **The canonical is claimed only for the artifact that actually produced the outcome.** If the vendored
-   artifact's `sha256` no longer matches the `artifactSha256` in the evidence — a re-vendor between run
-   and export — the report falls back to `urn:workwell:measure:<id>:official:<version>`. Labelling an old
-   report with a new canonical would assert a provenance that never existed.
-4. **QRDA III gets the official measure IDENTITY, not a new element — and specifically the eMeasure
-   UUIDs.** QRDA III has no notation field by design; a receiver derives direction from the measure
-   identity. So emitting `urn:workwell:measure|cms122` over counts whose numerator is CMS's poor-control
-   one is the actual defect. *(Corrected after review, #357: the first version emitted
-   `manifest.cmsId` — `"122FHIR"` — which is the **publisher** identifier and resolves to nothing.)* The
-   published Measure carries the two identifiers a receiver actually resolves, typed by
-   `artifact-identifier-type`: the **version-specific** UUID as `id/@extension` under the eMeasure
-   Identifier root `2.16.840.1.113883.4.738`, and the **version-independent** UUID as `setId/@root`, plus
-   `versionNumber`. They are read from the vendored **bundle** rather than the manifest, so no re-vendor
-   and no reproducibility-gate churn is needed — the bundle IS the published artifact. If they are absent
-   the export falls back to WorkWell's urn: a wrong official identity is worse than an honest local one,
-   because a receiver would resolve it to the wrong measure. The counts were already correct.
-5. **The flip guard asserts the BUILT REPORT, not the binding table.** ADR-046 moved the source, so
-   comparing `MEASURE_BINDINGS` would now check the wrong thing — the authored binding still says
-   `increase` for cms122 and correctly so. `official-flip-config.test.ts` builds a summary report from a
-   synthetic official outcome for every shipped measure and asserts the notation matches the semantics.
-
-**Consequences.**
-
-- **cms122 is now routed** alongside cms125 on the demo/production stack. Its MeasureReport declares
-  `decrease` and CMS's canonical; its QRDA III carries the official eCQM identity and version.
-- **Authored reports are byte-identical.** Every non-routed measure takes the same path it always did —
-  the trio only moves when `evidence.official` is present.
-- **A mixed-provenance run labels itself by the artifact its scored subjects used.** A run where some
-  subjects errored (no `official` block) still names the artifact the rest were scored by. That is a
-  deliberate choice over labelling the whole report authored, and it matches the mixed-provenance
-  trade-off `membershipFor` already documents.
-- **The scale/aggregate path is unchanged and still authored-only.** `populationCountsFromStatus` reduces
-  status buckets, which are authored semantics by construction; its caller passes no identity. That path
-  is `seed:scale` demo data, never official-routed, and `aggregateCountsForRun` routes official runs to
-  the per-subject path instead.
-- **Four consumer surfaces were saying the wrong thing about a routed cms122 patient, and are fixed
-  here** *(added after review, #357 — the original consequences list called these "UI-surface work,
-  tracked separately", which understated two of them badly).*
-  - **The CQL Evidence Explorer inverted the colours.** Its `INTERNAL_DEFINES` hide-list matches the
-    capitalised authored names exactly, and official defines are `official:numerator` — lowercase and
-    prefixed — so the prefix chosen to make them *honest* is what defeated the filter. Rendered through
-    the generic true/false chips, a cms122 patient in the numerator got a **green ✓ true** under a
-    heading reading "Why Flagged". Green meant "this patient's diabetes is uncontrolled". Population
-    membership is neither good news nor bad news, so it now renders on its own path as a neutral
-    **in / not in** chip with the population spelled out.
-  - **The MCP `explain_outcome` tool asserted a recency finding that cms122 does not compute.** The
-    sentence was unconditional concatenation, so a routed outcome produced *"their last qualifying exam
-    was unknown date (unknown days ago), which exceeds the 365-day compliance window"* — no recency rule
-    exists, no window was exceeded, and the 365 came from the authored binding. Asserted to an external
-    client, labelled deterministic, no human in the loop, and the only path rather than a fallback. The
-    clause is now conditional, and official outcomes state population membership instead.
-  - **The outcomes CSV stamped the authored library version.** `measureVersion` answers "what computed
-    this", and the CSV is what people mail around; it read `2.0.0` for rows CMS122FHIR **v1.0.000**
-    produced. It now reads `evidence.official.version` when present — the same evidence-first rule this
-    ADR applies to MeasureReport and QRDA. The **cases** CSV still shows the authored version and says so
-    in a comment: a case row carries no evidence, and it is an operational worklist keyed on `lastRunId`.
-  - **The catalog described cms125 as "women 50–74".** Both the authored subset and the official IPP are
-    **42–74**. Pre-existing, but it is the Studio Spec-tab copy an operator reads beside outcomes the
-    artifact now produces.
-- **Genuinely still deferred:** the **fidelity/Standards tab**. Verified NOT vacuous — `routes/measures.ts`
-  constructs its own `CqlExecutionEngine`, so it still runs the authored engine and the comparison is
-  real. What is stale is `literal-diff.ts`'s disclaimer, which says the diff "forecasts the flip rather
-  than describing a configuration that will never exist"; the flip has happened, so it now forecasts the
-  present. Wording only.
-- **One low-severity item recorded rather than fixed:** `case-detail-read-model.ts`'s unanchored
-  `/waiver|exemption|exclusion|contraindication/i` matches `official:denominator-exclusion`, mapping DENEX
-  to `waiver_status: "active"`. For cms122/cms125 that DENEX genuinely is hospice/palliative/mastectomy,
-  so the result is roughly correct — but the adapter's safety comment reads as an exhaustive argument
-  about which matchers the `official:` prefix avoids, and it is not exhaustive.
-
-## ADR-045: The flip is a WORKFLOW edit, gated by tests that read what the workflow ships — and cms125 goes alone
-
-**Status:** Accepted (2026-07-30). Roadmap §7.4 PR-9c. **cms125 now evaluates CMS's published QI-Core
-artifact on the demo/production stack.** cms122 is routable and agrees with authored, but is held back
-until its reporting trio is discharged (decision 1) — so M-A is complete for one of its two ready
-measures, not both.
-
-**Context.** Everything since ADR-036 built toward one configuration change. The machinery was complete
-and dark: artifacts vendored at v1.0.000, terminology pinned by SHA-256 and completed from VSAC, a
-per-measure router with construction-time validation, measure-major batching, an engine-declared
-`logic_version`, and a MADiE gate at 121/121. `WORKWELL_OFFICIAL_MEASURES` was unset everywhere, so
-`routedEngineForEnv` returned the authored engine *by identity* and no measure had ever been routed.
-
-Two things made the flip decidable rather than a leap. The **mammography numerator gap** closed
-(ADR-044), which was the last known way official could contradict authored on data this stack holds. And
-`pnpm flip-snapshot` turned "confirm a non-zero initial population" from a prose instruction into a
-measurement: both measures admit **5 of 5** corpus subjects to the official initial population and agree
-with the authored engine on every one, across COMPLIANT / OVERDUE / EXCLUDED.
-
-**Decision.**
-
-1. **Flip cms125 ONLY.** *(Narrowed from "cms122 + cms125" after review, #356.)* cms122 is routable, and
-   ADR-043 decision 6 correctly established that its stack-dependent WebChart blindness does not bind
-   here — `deploy-twh-mieweb.yml` carries **no** `WORKWELL_WEBCHART_*`, so this stack evaluates the
-   synthetic roster where cms122 scores across all five corpus targets. A **different** blocker stops it:
-   its official numerator means **failure** (`numeratorMeansCompliant: false` — HbA1c > 9% or no
-   assessment), while `measure-bindings.ts` still declares `improvementNotation: "increase"` and
-   `measure-report.ts` still emits the WorkWell canonical. `measure-report.ts:246-252` had already written
-   this down as a **PR-7 obligation** — "the measure that flips MUST switch all three together" — and
-   PR-9c was the flip that had to discharge it and did not. Routing cms122 would ship a MeasureReport
-   declaring higher-is-better over a poor-control numerator (~120 → ~27 on the 150-employee directory),
-   and QRDA III carries **no** `improvementNotation` field at all, so the inverted count would go out
-   unmarked. cms125's trio is already consistent, so it flips alone; cms122 follows once the trio is
-   discharged. **Enforced, not remembered:** `official-flip-config.test.ts` fails if a measure whose
-   official numerator means failure is shipped with `increase`. Staging is unchanged.
-2. **The flag is set in the WORKFLOW, not on the container.** `CONTAINER_ENV_VARS_JSON` is a fixed `jq`
-   array and the deploy deletes-and-recreates the container, so a hand-set value is wiped on the next
-   deploy. This makes the flip a reviewed, merged, revertable change rather than an operator action —
-   which is the right shape for something that changes what the compliance engine *is*.
-3. **A test reads what the workflow ships and refuses an unroutable configuration.** Every existing check
-   validated a configuration passed in by a test; nothing validated the string that reaches production.
-   `official-flip-config.test.ts` parses `WORKWELL_OFFICIAL_MEASURES` out of both deploy workflows and
-   asserts every id named is MADiE-gated, vendored, proportion-scored, and — with the sidecar — produces
-   no `officialRoutingProblems` at all.
-4. **That test is split in two, deliberately.** The structural half is pure and always runs; the
-   terminology half needs the gitignored sidecar, self-skips without it, and is wired into CI's
-   `official-cases` job. A single test would have self-skipped in `pnpm test` and read as covered — the
-   defect class this branch has been pulled up on four times (#350, #352, #354, #355).
-5. **The reconciler ships the SAME value, and a test asserts it does.** *(Added after review, #356.)*
-   `reconcile-twh-mieweb.yml` recreates twh-api-ts from `:latest` on a health event, using its own
-   mirrored env array. It did not carry `WORKWELL_OFFICIAL_MEASURES`, so the **first self-heal after this
-   flip would have silently reverted both measures to authored CQL** — container healthy, image
-   unchanged, no signal at any layer. The two workflows must agree on the *value*, not merely both
-   mention the flag: a reconciler shipping a different subset would flip measures on or off during an
-   incident nobody initiated.
-6. **The routability assertion excuses capped expansions when — and only when — the tree is capped.**
-   Fork and Dependabot PRs get no VSAC secret, so CI deliberately re-vendors without
-   `--complete-capped-expansions` and the working-tree artifacts become capped. `officialRoutingProblems`
-   refuses a capped expansion by design (ADR-041), so an unconditional assertion would have failed every
-   outside contributor's PR for a condition unrelated to their change. Every other problem class is
-   asserted always; the credentialed run on merge covers the capped class for real.
-7. **Every workflow `run:` block is syntax-checked in CI.** *(Added after review, #356 — this PR shipped
-   a broken production deploy step and nothing could see it.)* The flag was added inside a `jq` program
-   that lives in a **single-quoted shell string**, and the surrounding comment contained apostrophes
-   (`CMS's`, `WorkWell's`). The first one CLOSED the quote and turned the whole step into a bash syntax
-   error. Deploy workflows only run on push to `main`, so no PR check could catch it; the new
-   `official-flip-config.test.ts` passed 3/3 because it validates the *semantics* of a line the shell
-   would never execute; and verifying by extracting the jq program and running it standalone — which is
-   what was done — bypasses the shell quoting entirely. The program was always fine; the string
-   containing it was not.
-
-   The second-order effect is why this warranted a guard rather than a fix. `build-backend-ts` would have
-   succeeded and pushed a new `:latest`; the deploy step would have died *before* the delete/recreate, so
-   the live container survives on the old image; and then the 15-minute self-heal reconciler — which now
-   carries the flag and parses cleanly — would have recreated it from the new `:latest`, **delivering the
-   flip unattended through a path nobody reviewed as the delivery mechanism, while the deploy pipeline was
-   red.** Exactly the silent-delivery class this PR exists to prevent.
-   `.github/scripts/workflow-run-blocks.test.sh` now `bash -n`s all 54 run-blocks in the `deploy-helper`
-   CI job. It carries a minimum-block floor, because its own first version reported "all parse" after
-   checking **zero**.
-8. **The test does not pin WHICH measures are flipped.** Asserting the literal value would make every
-   future flip a two-file change guarded by a test that only says "you changed what you changed". The
-   property that matters is that whatever is shipped is **routable**.
-
-**Consequences.**
-
-- **The flip is inert on this stack's data, and that is the expected result, not a disappointment.** No
-  roster row changes. The value is that official execution is now *running in production* — the
-  precondition for onboarding the remaining six priority measures, and for any claim that WorkWell
-  executes published eCQMs rather than reimplementing them.
-- **A misconfiguration does NOT refuse at boot.** The throw is at engine construction, per request, while
-  the deliberately DB-free `/actuator/health` keeps answering 200 — so the container reads green, the
-  self-heal reconciler stays quiet, and every evaluating route 500s. `worker.ts` logs
-  `OFFICIAL_ROUTING_MISCONFIGURED` on the first request; that log line is the signal, and the post-deploy
-  checklist says to grep for it rather than trust the health probe.
-- **The nightly scheduler exercises this without anyone asking.** `WORKWELL_SCHEDULER_ENABLED=true` on
-  this stack, so the first scheduled `ALL_PROGRAMS` run after the deploy evaluates both measures
-  officially. Verification cannot wait for someone to click a button.
-- **Deploys are now coupled to NLM VSAC availability** for these two measures — already true since
-  ADR-041, but it bites harder now: the vendor step fails closed, the reproducibility gate fails the
-  deploy, and rolling *forward* during a VSAC outage is blocked (rolling back to a pre-ADR-041 image
-  still works). DEPLOY.md "Step 1a" records this.
-- **Rollback is one line and a redeploy.** `logic_version` carries the artifact identity (ADR-040), so
-  flip-on, flip-off and re-vendor each invalidate `eval_state` by construction — no manual cache `DELETE`,
-  and no possibility of serving an authored outcome for a routed measure.
-- **The authored cms125 subset is now dead weight in the catalog** and retires to the fidelity lab per
-  locked owner decision #4 — after the flip is observed running, not in the change that starts it. The
-  authored cms122 subset is still LIVE and must stay until cms122 itself flips.
-- **What this does not establish.** The oracle is our own authored engine, so agreement means the flip
-  changes nothing for this data — not that either engine is correct. The external check remains the MADiE
-  gate, which runs over CMS's test patients rather than ours. **Cypress CVU+ has not run** and stays the
-  verification bar (M-B).
-
-
-## ADR-044: One real mammogram is emitted in BOTH vocabularies — dual-stamping is normalization, and the flip gate gets a command
-
-**Status:** Accepted (2026-07-30). Roadmap §7.4 PR-9 (the numerator prerequisite to PR-9c). Nothing routes
-officially yet.
-
-**Context.** ADR-042 closed the WebChart↔official *initial population* gap and left the **numerator** gap
-open, with the failure direction recorded as the dangerous one. The two engines retrieve different FHIR
-resource types for the same clinical fact:
-
-| | retrieves | value set |
-|---|---|---|
-| authored `cms125.cql` | `[Procedure: "Mammography"]` | includes CPT / HCPCS |
-| official CMS125 ELM | `isDiagnosticStudyPerformed([Observation: "Mammography"])` — additionally requires `status in {final, amended, corrected}` **and** `exists(category ~ imaging)` | **92 LOINC codes and nothing else** |
-
-WebChart records a mammogram as a CPT/HCPCS **procedure** (`77067` / legacy `G0202`). Measured: one
-crosswalk-shaped mammogram → authored COMPLIANT, official **OVERDUE**. That is a *false non-compliance on
-an already-screened woman*, and `case-logic.ts` escalates it to a HIGH-priority "escalate mammogram
-follow-up immediately". A confident wrong answer on the ordinary case — worse than the out-of-population
-read ADR-043 handles, because nothing detects it: those subjects **are** in the initial population, so the
-ADR-043 WARN is silent by design.
-
-Neither representation alone works, and they fail in **opposite directions** — the Procedure clears
-authored and not official; a LOINC Observation clears official and not authored; and a LOINC Observation
-*without* `category` clears neither, which is the trap in the obvious fix.
-
-**Decision.**
-
-1. **The crosswalk dual-stamps.** A screening-mammogram procedure row emits the CPT/HCPCS `Procedure` it
-   always did **and** a LOINC `Observation` (`24606-6`, a verified member of the official value set)
-   carrying `category ~ imaging` and `status = final`. Both mapping sites change —
-   `wcdb-fhir-shim/src/fhir-mapping.ts` and the by-design duplicate
-   `backend-ts/scripts/webchart-devdb-export.ts` — exactly as `us-core-sex` did in ADR-042.
-2. **Served from `/Observation`, and `/Procedure` is untouched.** The derived resource appears where its
-   FHIR type says it belongs, so the authored engine sees byte-identical input to before. Dual-stamping
-   **adds** a representation; it never moves or replaces one.
-3. **This is normalization, not fabrication (ADR-037).** No clinical event is invented — one real,
-   recorded mammogram is expressed in the two vocabularies the two engines read, which is what the
-   synthetic corpus has done since ADR-038. Three properties keep that honest, each tested:
-   - **derived strictly from a real row** — no procedure row, no Observation; the date is the procedure's
-     own, never today's;
-   - **an explicit allowlist, not a category sweep** — only codes that mean "a screening mammogram was
-     performed" dual-stamp, so an unrelated CPT can never mint a diagnostic study;
-   - **non-inflating** — both numerators are `exists(...)`, so one event in two vocabularies is still one
-     event. **This would NOT be safe for a counting measure — nor for a most-recent-value one.** `cms122.cql`
-     does a bare unfiltered `Last([Observation] …)` and reads `.value`; a valueless Observation that
-     became "most recent" drives it to a falsely-COMPLIANT outcome, and `Status.isLaboratoryTestPerformed`
-     has no category gate, so the `imaging` category protecting CMS125 protects nothing there. Today the
-     only barrier is value-set membership, which is runtime-resolvable. Stated in
-     `WEBCHART_FHIR_MAPPING.md` §3.6 rather than left to be rediscovered.
-4. **The flip gate gets a COMMAND: `pnpm flip-snapshot`.** ADR-043 moved enforcement onto "the flip gate",
-   and review of #354 made the fair objection that the half which can see a tenant — confirm a non-zero
-   initial population (step 2), take a before/after distribution snapshot (step 4) — shipped as prose with
-   no command, no tooling and no artifact. That is the vacuous-guard shape this branch has now been pulled
-   up on three times. The CLI evaluates a measure both ways over the same bundles and reports the before/
-   after distribution, the official IPP count, and every subject whose roster row would change.
-5. **The snapshot reads the CONFIGURED TENANT, not a fixture.** *(Corrected 2026-07-30 after review.)* The
-   first version's `--source webchart` always loaded the committed 56-patient sample, so the command
-   DEPLOY.md sends an operator to for "confirm a non-zero initial population against the tenant's own
-   data" could not see a tenant at all — a tenant whose live mapping still omits `us-core-sex` would have
-   received a healthy verdict computed from our frozen fixture (Codex, #355). A gate that cannot see the
-   thing it gates is the exact failure this tool exists to stop. `--source live` now reads
-   `WORKWELL_WEBCHART_*` over the real ingress path and **refuses loudly when the seam is unset** rather
-   than falling back; the frozen sample is `--source fixture`, named so nobody reaches it by accident.
-6. **`--source live` requires `--roster`, and refuses a roster that enrolls nobody.** *(Added after
-   review, #355 — this was the most serious defect in the PR, and my own fix for the finding above
-   introduced it.)* The committed `enrollment-roster.json` is keyed by the dev-DB's `wc-N` ids, and
-   `stampEnrollment` is a **silent no-op** for any subject absent from the roster. Pointed at a real
-   tenant it would enroll nobody, so the OH roster's synthesized CPT-99213 Encounter — the conjunct
-   authored CMS125's `Has Qualifying Visit` depends on — would never be stamped, `authoredActionable`
-   would collapse to ~0, and the report would print **"the flip is inert rather than wrong"** for a tenant
-   whose official roster reads empty. A **false all-clear on precisely the configuration ADR-042/044
-   document as broken**, and the DO-NOT-FLIP verdict is the tool's whole reason to exist. `live-cli.ts`
-   has always required `--roster`; this now does too.
-7. **The report NAMES its source under every measure.** `--source synthetic` is **five designed corpus
-   probes**, one per intended outcome — *not* the synthetic employee directory the demo/production stack
-   evaluates through the run pipeline, and the five collapse into three buckets because `DUE_SOON` and
-   `MISSING_DATA` both score OVERDUE. It is the right default (the cheapest way to ask "do the two engines
-   agree across the outcome space", which is what a flip turns on) but it is **not a roster forecast**,
-   and an earlier draft of DEPLOY.md said it was. Only `--source live` produces a roster forecast.
-8. **The official side is evaluated batch-then-fallback, exactly as a run evaluates it.** `evaluateBatch`
-   omits a subject it returned nothing for and the run pipeline re-evaluates each one individually; a
-   snapshot that skipped that step would not forecast the run it claims to forecast, and a roster whose
-   omitted subjects DO qualify could report zero-in-IPP and earn a spurious DO-NOT-FLIP. Also review
-   (#355) — and the same incomplete-roster mistake ADR-043 decision 2 records, which suggests "did you
-   model the omission fallback?" belongs on the checklist for anything reading `evaluateBatch`.
-9. **The snapshot renders a verdict but gates nothing**, and exits 0 even on DO-NOT-FLIP. The judgement it
-   supports is the one ADR-043 established a machine cannot make from shape alone. What it *can* do is
-   compute the comparison a human needs: `authoredActionable > 0 && officialInIpp === 0` means the cohort
-   is not the explanation. Where both engines find nobody it reports **INCONCLUSIVE** rather than picking
-   a side. Wiring it into CI as pass/fail would re-assert exactly the automated judgement ADR-043 rejected.
-
-**Consequences.**
-
-- **The last numerator blocker to PR-9c is closed.** Measured after the change: a dual-stamped mammogram
-  makes both engines report COMPLIANT, and all four failure states stay pinned as tests — three of them
-  are the ways a future "simplification" would silently reopen the gap.
-- **The committed fixture moved by exactly one resource.** Its only mammography record (wc-49, HCPCS
-  `G0202`, 2015) belongs to a 33-year-old outside the `[42..74]` IPP, so **no outcome changed** — which is
-  precisely why the dual stamp is asserted directly rather than inferred from an unchanged distribution.
-- **Measured with the new tool, and it confirms the flip list.** On the **synthetic** roster the
-  demo/production stack evaluates, cms122 and cms125 both admit **5 of 5** subjects to the initial
-  population and agree with authored on every one. Over **WebChart** data cms125 admits 4 of 56 and agrees
-  on all 56, while cms122 admits 0 of 56 and reports INCONCLUSIVE — a data gap (zero Conditions in the
-  seed), not a divergence. Consistent with ADR-043 decision 6: cms122's routability is stack-dependent and
-  it stays in the flip list.
-- **The fixture was NOT re-exported from the dev DB** — Docker was unavailable, so the generator's own
-  insertion rule was replayed over the committed artifact and the diff verified to be exactly the 28 lines
-  of one added Observation. A re-export when the dev DB is up should be a no-op; if it is not, the
-  generator and the fixture have drifted and the fixture is wrong.
-- **Three copies of the mapping now exist** (shim, export script, and the test's injected shapes), and
-  **no drift guard covers the pair that matters.** *(Corrected after review, #355.)* `hapi-live.test.ts` is
-  named as that guard here and in two code comments, and it demonstrably cannot be one: it loads a HAPI
-  server from the committed fixture and compares against the same committed fixture, so both sides
-  originate from one file — it never runs the export script's SQL and never touches the shim. The
-  `us-core-sex` docstring had already retracted the same claim for its own field; reasserting it
-  un-caveated for mammography was a regression in load-bearing safety documentation, which is the kind
-  that gets believed later. What actually guards this today is `devdb-official-eval.test.ts` asserting the
-  dual stamp on the committed fixture — covering the **export script only**; the shim side is covered by
-  its own unit tests against a stubbed DB. A genuine shim-vs-generator comparison does not exist, and the
-  honest place to remove the need for one is M-C's package extraction, not a cross-package import ADR-034
-  forbids.
-- **What this does NOT close:** the live third-party path still supplies neither `us-core-sex` nor
-  dual-stamped mammography, because both mapping sites sit upstream of the live FHIR transport and
-  `normalizeWebChartBundle` is untouched by design. For a real WebChart tenant the gap is open exactly as
-  ADR-042 consequence 5 describes. Cypress CVU+ remains the verification bar and has not run.
-
-
-## ADR-043: A whole roster out of the initial population is SURFACED at runtime and ENFORCED at the flip gate — never refused mid-run
-
-**Status:** Accepted (2026-07-30). Roadmap §7.4 PR-9 (the PR-9c precondition). Nothing routes officially yet.
-
-**Context.** ADR-042 consequence 5 recorded a limit it could only assert in prose: both `us-core-sex` mapping
-fixes sit upstream of the live FHIR transport, so a third-party WebChart FHIR server still supplies no
-extension and its whole roster reads out-of-population for official CMS125 — silently, as 100% MISSING_DATA
-rather than an error. `deploy-staging-mieweb.yml` sets `WORKWELL_WEBCHART_BASE_URL`, so staging is exactly
-where official routing and a live seam can coexist.
-
-PR-8f's batch retrieve refusal cannot catch this, and that is measured rather than argued: official CMS125
-matched **236 LOINC Observations** on the WebChart fixture and still put all 56 subjects out of the initial
-population, because the IPP also reads the extension. `retrieveSignal` was true throughout. The refusal
-catches *retrieved nothing at all*; this is *retrieved the wrong thing*, which ADR-038 established it is
-blind to.
-
-**The first version of this ADR got the remedy wrong, and the reason is worth keeping.** It refused inside
-`evaluateBatch` — a batch of >1 with nobody in the IPP threw, reaching the run pipeline's existing
-batch-failure isolation. Review (Codex P1) showed that **converts a valid result into corruption.** For a
-site- or program-scoped CMS125 run over an all-male cohort, zero-in-IPP is the *correct* answer. A batch
-failure re-throws per subject, so every outcome becomes MISSING_DATA carrying an `evaluationError` **in place
-of** its `official.populationResults` evidence — the blob MeasureReport and QRDA read (ADR-031) — the run
-terminal becomes `PARTIAL_FAILURE`, and the #264 alert fires. A zero-denominator MeasureReport is a
-legitimate, reportable artifact, not an engine failure.
-
-The decisive argument is that **cohort composition varies by run**, so "stop routing this measure" is not a
-remedy an operator can apply: the same measure over the same tenant may be correct next week. A guard whose
-false positive recurs and whose prescribed fix does not exist is worse than the silence it replaces.
-
-**Decision.**
-
-1. **The executor reports; it does not refuse.** `evaluateBatch` returns the honest outcomes for a whole
-   roster out of the IPP, evidence intact. The two causes — data missing an element the IPP reads, versus
-   nobody qualifying — are indistinguishable from inside the executor, and a check that cannot tell them
-   apart must not destroy the benign one.
-2. **The run pipeline surfaces it as a `WARN`**, naming both possible causes and pointing at
-   `WEBCHART_FHIR_MAPPING.md` §3.1 for the known one. Best-effort, like every other observability write
-   there: an observability write must never author an outcome.
-
-   **Read AFTER the evaluation loop, from the final per-subject outcomes — not in the batch pre-pass.**
-   *(Corrected 2026-07-30; the first version concluded in the pre-pass, off the prefetched map alone.)* A
-   subject the executor returns nothing for is deliberately absent from the batch result and is
-   re-evaluated individually later in the loop, so a pre-pass conclusion judges an **incomplete roster**
-   and is wrong in both directions: a batch of two out-of-IPP outcomes plus one omission warns even when
-   the omitted subject then lands squarely in the population, and one out-of-IPP outcome plus two
-   omissions stays silent because the sample size failed its own `> 1` guard — the exact silence this ADR
-   exists to end. Membership is a property of the finished roster, so it is decided where the roster is
-   finished. Both directions are pinned as tests that fail against the pre-pass version.
-
-   A consequence of moving it: the check is **no longer gated on the batch path**. An official measure
-   evaluated one subject at a time reports membership just the same, and the hazard is identical.
-3. **Only an OFFICIALLY-ROUTED measure is checked**, and `undefined` membership means UNKNOWN rather than
-   out-of-population.
-
-   *(Corrected 2026-07-30 after review; both halves of the first version's reasoning here were wrong.)* It
-   claimed "the authored engine never sets `inInitialPopulation`", and therefore that no gate on official
-   routing was needed. **The authored engine sets it always:** `deriveInInitialPopulation`
-   (`engine/cql/cql-execution-engine.ts`) emits the field for every measure carrying a boolean
-   `Initial Population` define — all 16 of ours — and its own docstring says so. Ungated, an authored
-   measure whose evaluated cohort happened to sit wholly outside its own IPP would be told nobody entered
-   the **official** initial population and pointed at the `us-core-sex` extension, for a measure with no
-   official artifact and nothing to do with WebChart. It did not fire only because the synthetic roster
-   puts somebody in every measure's IPP — a property of the fixture, not an invariant. **An
-   official-specific message needs an official-specific trigger.**
-
-   The gate is the engine's own declared identity (ADR-040): `logicVersionFor` returns
-   `official-fqm:…` for a routed measure, the authored ELM hash otherwise. Asking the engine what it ran
-   beats re-reading the environment at the point of use. `undefined` membership is still treated as
-   unknown — absence of evidence, not evidence of absence.
-4. **`> 1`, as with the retrieve check.** For one subject, "not in the initial population" is an ordinary
-   correct answer — `/simulate` on somebody outside the age band.
-5. **Enforcement lives at the FLIP GATE, not at runtime.** `devdb-official-eval.test.ts` compares official
-   against the authored engine over known data, which is the only place the two causes *can* be told apart:
-   when authored finds four actionable women in the same bundles official finds nobody in, "this cohort is
-   ineligible" is demonstrably false. That comparison is not available at runtime at acceptable cost — it
-   would mean evaluating BOTH engines for every subject of a measure whose whole purpose is to replace one of
-   them. (Not literally impossible: `standards/literal-diff.ts` does exactly this as a diagnostic. Per run,
-   over a live roster, it is prohibitive.)
-6. **cms122's official routability is STACK-DEPENDENT — and the flip target is the stack where it works.**
-   *(Corrected 2026-07-30 after review; the first version of this decision removed cms122 from the flip list
-   outright, and that was wrong.)* Official cms122 over **WebChart** data puts all 56 subjects out of the IPP,
-   because the dev seed carries zero Conditions and cms122 is deliberately outside
-   `ROSTER_ELIGIBLE_MEASURES` (its "enrollment" is a diabetes *diagnosis* the roster must never fabricate).
-   But **PR-9c flips the demo/production stack, which has no WebChart seam at all** —
-   `deploy-twh-mieweb.yml` contains zero `WORKWELL_WEBCHART_*` (verified), so it evaluates the **synthetic**
-   roster, where `official-corpus-outcomes.test.ts` records official cms122 scoring
-   COMPLIANT/OVERDUE/EXCLUDED across all five targets and **agreeing with authored on every one**.
-
-   So: **cms122 stays in the flip list.** What the finding actually establishes is narrower — routing
-   official cms122 on the **WebChart-configured staging** stack (`deploy-staging-mieweb.yml`, 11
-   `WORKWELL_WEBCHART_*` references) produces nothing useful, and the WARN above will say so on every run.
-   Also corrected: the claim "nothing is lost, authored is equally blind" holds only over WebChart data — on
-   the synthetic roster authored is not blind at all; the two engines simply agree.
-
-**Consequences.**
-
-- The ADR-042 residual limit is no longer silent: a live third-party tenant routed for official CMS125 gets a
-  `WARN` in `run_logs` naming the likely cause. It is **not** enforced at runtime, and that is the deliberate
-  outcome of decision 1 rather than an omission — the honest conclusion is that this hazard is **not
-  runtime-detectable without false positives.**
-- **The run terminal and all evidence are preserved.** A zero-denominator run reports `COMPLETED` with real
-  `official.populationResults` on every outcome.
-- **A `WARN` is weaker than the #264 alert**, which fires only on `FAILED`/`PARTIAL_FAILURE` terminals. That
-  is the price of not corrupting valid runs. If a stronger non-failing signal is wanted later, the right
-  shape is a run-summary warning count, not a terminal change. (Precisely: the alert takes `runMessage` as
-  its body, so on a run that is *independently* PARTIAL_FAILURE the ADR-043 sentence does ride along. "The
-  alert stays silent" is true of COMPLETED runs — which is every run this check fires on by itself.)
-- **The enforcement is one automated test over FROZEN data plus one unautomated prose step.**
-  `devdb-official-eval.test.ts` pins the committed 56-patient fixture and cannot see a tenant; confirming a
-  non-zero initial population against the tenant's own data (DEPLOY.md step 2) ships no command, no tooling
-  and no artifact. That is a real reduction in enforcement strength against the refusal it replaced, and it
-  is accepted only because the refusal's false positives were unfixable-by-the-operator. Worth revisiting
-  if a tenant-facing dry-run tool ever exists.
-- **How far the warning actually reaches, stated exactly — the first version overclaimed it** (Codex, #354).
-  It is echoed into the run **message**, but that message is returned on the **synchronous** response only.
-  Every `ALL_PROGRAMS` and `SITE` run, and a `MEASURE` run on a WebChart-configured stack — *precisely the
-  configuration this warning exists for* — goes through `scheduleAsyncRun`, which answers the POST with the
-  `RUNNING` response and discards the finishing one. `RunRecord` has no message column and neither
-  `RunListItem` nor `RunSummary` carries a message, so the polling UI shows only `COMPLETED`. For those runs
-  the warning lives in `run_logs`, which **is** reachable (`GET /api/runs/:id/logs`, and the runs page
-  fetches it for the selected run) but only as a timeline entry an operator opens — not on the run list.
-  So "no longer silent" is accurate; "visible on the run list" was not. Persisting it onto the run needs a
-  `runs` column, and **schema is owner-owned** — recorded here as a follow-up rather than smuggled in.
-- **A PARTIAL collapse is not caught, and that is the more likely live failure.** The check is
-  all-or-nothing: one subject in the initial population silences it entirely (deliberately — a
-  mostly-ineligible roster is the ordinary shape of a screening measure, and tested as such). But the
-  realistic third-party-tenant shape is a **partially** populated `us-core-sex` column, not an absent one:
-  55 of 56 silently MISSING_DATA, and nothing fires. Raised by review; no check is proposed for it here
-  because the same indistinguishability argument applies with less signal, which is another reason the flip
-  gate rather than runtime is where this is settled.
-- **A WARNed run still opens N cases.** `dispositionFor` sends MISSING_DATA to `OPEN` and `priorityFor` to
-  `MEDIUM`, so a whole-roster-out-of-IPP run publishes a full set of MEDIUM "collect the documentation"
-  cases. That is the same mis-signalling ADR-042's own review correction was about, and it is unchanged by
-  this ADR — the outcomes are honest, but the case fan-out is real operational noise.
-- **The enforcement is itself gated.** Decision 5 makes `devdb-official-eval.test.ts` the enforcement, and
-  that test runs only in the `official-cases` CI job, behind a gitignored terminology sidecar. This branch
-  already lost 4 of 6 tests in that exact file to exactly that mechanism once (ADR-042 review). Worth
-  re-checking whenever the job's explicit file list changes.
-- **What this does not catch:** an IPP that IS satisfied while the *numerator* reads the wrong shape. That is
-  the open mammography gap (ADR-042 consequence 3), where official reports a screened woman OVERDUE, subjects
-  are in the population, and nothing here fires. Dual-stamping the crosswalk remains outstanding.
-- The pre-flip checklist therefore gains a step: **run the gate against the tenant's own data and confirm a
-  non-zero initial population before flipping a measure for it.** That checklist did not exist as anything
-  but a phrase in this ADR when it was first written — decision 5 named a control that was half prose, which
-  is the same vacuous-guard shape flagged on #350 and #352. It is now written down, per measure and per
-  stack, in `DEPLOY.md` §"Flipping a measure to official execution", together with the
-  `WORKWELL_OFFICIAL_MEASURES` row that was missing from the environment reference entirely.
-
-## ADR-042: The WebChart↔official IPP gap is closed by mapping and guarded by a parity gate — not by refusing the configuration (the NUMERATOR gap stays open)
-
-**Status:** Accepted (2026-07-30). Roadmap §7.4 PR-9 (PR-9b). Nothing routes officially yet.
-
-**Context.** No test anywhere evaluated real WebChart data through an official artifact. Every piece of
-evidence that official execution works runs over CMS's MADiE patients (121/121) or over our synthetic
-corpus (ADR-038) — both are bundles *built to be evaluated*. WebChart data is what a real EHR happens to
-hold, and that is where the flip's risk lives.
-
-The plan of record for this step was a **construction-time refusal**: throw when
-`WORKWELL_OFFICIAL_MEASURES` is set while the WebChart seam is configured. That plan predated any
-measurement. It came from a structural inventory of the committed dev-DB fixture — 0 Conditions, 0
-Encounters, no `Patient.extension`, no `Observation.category` across 56 patients — which counted what was
-*absent* rather than testing what the measures actually *read*.
-
-Measuring changed the picture in three ways:
-
-1. **The cms125 INITIAL-POPULATION gap was one field.** The official IPP is
-   `AgeAt(end of MP) in [42..74] AND us-core-sex = SNOMED 248152002 AND exists Qualifying Encounters`.
-   Age passed and the roster's CPT 99213 visit satisfied the encounter. The sole failing conjunct was the
-   extension: 0 of 56 patients carried it. Of three other candidates, only `Condition.onsetDateTime` is
-   genuinely inapplicable (cms125's IPP reads no Condition — only its mastectomy exclusions do). A LOINC
-   mammography `Observation` and `Observation.category` moved no outcome **only because no in-IPP subject
-   in this fixture has a mammogram at all** — both are live NUMERATOR blockers (consequence 3 below).
-   "One fix, not four" is scoped to the initial population; it is not a claim that the rest are retired.
-   Review caught this file making exactly that elision, which is why the scope is now in the title.
-2. **cms122 has no divergence to refuse.** Official and authored both return MISSING_DATA for all 56, for
-   the same reason: no Conditions in the seed, and cms122 is deliberately outside
-   `ROSTER_ELIGIBLE_MEASURES` because its "enrollment" is a diabetes *diagnosis* the roster must never
-   fabricate. Routing it over this data changes nothing.
-3. **The seam-keyed predicate outlives the problem it describes.** "Both env vars are set" stands in for
-   "this data cannot satisfy the IPP". Fix the mapping and the predicate stays true while the property goes
-   false, so the check refuses a *correct* configuration until someone deletes it. This is the argument that
-   survives; the two below it were weaker than first written.
-
-   **Correction (review, 2026-07-30).** The first version of this ADR also argued that the effect —
-   four subjects moving `OVERDUE → MISSING_DATA` — left the roster "noisier, not rosier", since both
-   buckets open a case. **That is wrong on the axis operators triage by.** From `case/case-logic.ts`:
-   `dispositionFor` sends both to `OPEN` (so the case *count* is identical — nothing got noisier), but
-   `priorityFor` maps `OVERDUE → HIGH` and `MISSING_DATA → MEDIUM`, and `nextActionFor` swaps *"Escalate
-   mammogram follow-up immediately"* for *"Collect the missing mammogram documentation"*. So the pre-fix
-   behaviour **downgraded four genuinely-overdue screenings from HIGH to MEDIUM and misdirected the
-   operator toward paperwork.** That is rosier, and closer to ADR-038's hazard than this ADR first allowed.
-   The decision not to build the refusal still holds — on the predicate argument above, not on this one.
-
-**Decision.**
-
-1. **Emit `us-core-sex` from WebChart's `patients.sex`, alongside `Patient.gender`.** Both mapping sites
-   change together (`wcdb-fhir-shim/src/fhir-mapping.ts` and the by-design duplicate in
-   `backend-ts/scripts/webchart-devdb-export.ts`). The SNOMED concept id is load-bearing: the ELM compares
-   against `248152002`, so an extension carrying `"F"` is indistinguishable from one absent — a distinction
-   that cost a measurement pass to find.
-
-   **On the drift guard, corrected (review, 2026-07-30).** The first version of this ADR repeated
-   `fhir-mapping.ts`'s header claim that `hapi-live.test.ts` bucket parity guards this duplication. **It
-   cannot see this field.** That test compares authored-engine bucket counts, and the authored engine reads
-   `Patient.gender` and never the extension — which is exactly how both sites came to omit it. Real
-   coverage: `server.test.ts` pins the shim's output, `devdb-official-eval.test.ts` pins the export
-   script's committed output. Nothing cross-checks the two sites against each other.
-2. **We assert `us-core-sex` where the SOURCE SYSTEM records a sex value; we do not synthesize it from a
-   FHIR `gender` we did not map ourselves.** So `normalizeWebChartBundle` does not stamp it for third-party
-   WebChart FHIR servers, and such a server's roster reads out-of-population for CMS125 — fail closed,
-   because reading nobody beats guessing.
-
-   **The reason, stated more carefully than at first (review, 2026-07-30).** The original wording claimed
-   `patients.sex` *is* recorded sex rather than administrative gender, making this "normalization, not
-   derivation". `docs/WEBCHART_FHIR_MAPPING.md` §3.1 contradicts that — it calls `patients.sex` the
-   `administrative-gender` source — and a single F/M column in a 675-table schema does not settle the
-   question either way. The rule above needs no such semantic claim: the distinction it draws is between
-   reading a source column and inferring from another system's mapping. The fail-closed conclusion is
-   unchanged; the justification is narrower and defensible.
-3. **No construction-time refusal keyed on the seam being configured** — on the predicate-rot argument in
-   context 3, which is the one that holds. See consequence 5 for the case this decision does *not* cover.
-4. **The guard is a live-path parity gate instead** (`devdb-official-eval.test.ts`): official vs authored
-   outcomes, per subject, over the committed fixture through the real ingress path, using
-   `evaluateBatch` — the primitive a routed run uses. The load-bearing assertion is a **divergence map**;
-   empty means routing is inert for this data, populated names every subject whose roster row would change
-   and how. A shift is then either progress or a regression, and both are deliberate.
-5. **The cause is pinned by removal, not by presence.** A separate test strips the extension and asserts
-   official collapses to 56 MISSING_DATA while authored is unaffected. Asserting the field is present only
-   proves the mapping emits it; stripping it proves that is what holds the agreement up — and it preserves
-   the pre-fix measurement as the historical record.
-
-**Consequences.**
-
-1. Official CMS125 now produces the same outcomes as the authored implementation on all 56 subjects of real
-   WebChart-derived data. This is the first official artifact to do so on anything other than purpose-built
-   bundles.
-2. **What this is not.** The oracle is our own authored engine, not an external expected answer, so
-   agreement is evidence the flip is safe *for this data* — not that either engine is right. And 52 of 56
-   outcomes are MISSING_DATA, so **only 4 subjects carry discriminating signal**, all in one bucket for one
-   reason. The id-set comparison in `devdb-official-eval.test.ts` is what protects against a collapsed
-   distribution (the `assert.ok` non-degeneracy line is implied by it and is insurance, not the guard — the
-   first version of this ADR cited the wrong one). Cypress CVU+ remains the verification bar (locked
-   decision 2) and has not run.
-3. **The NUMERATOR gap is OPEN, and it fails in the dangerous direction.** Everything above concerns
-   initial-population membership. The two engines read different resource types for the numerator —
-   authored `[Procedure: "Mammography"]`, official `isDiagnosticStudyPerformed([Observation: "Mammography"])`
-   — and the WebChart crosswalk emits mammography as CPT `77067` / HCPCS `G0202` on a **`Procedure`**, while
-   the official `Mammography` value set (OID …108.12.1018) is **92 LOINC codes and nothing else**. Measured
-   on `wc-8` with one crosswalk-shaped mammogram inside the period: **authored COMPLIANT, official
-   OVERDUE** — a confident false non-compliance on the ordinary case, which `case-logic.ts` turns into a
-   HIGH-priority "escalate mammogram follow-up immediately" for a woman already screened.
-
-   The obvious fix is a trap worth recording: a correctly-coded LOINC `Observation` **alone changes
-   nothing**, because `Status.isDiagnosticStudyPerformed` also requires `exists(category ~ imaging)`. And
-   the Observation alone (with category) flips the error the other way — official COMPLIANT, authored
-   OVERDUE. **The remedy is dual-stamping both representations**, as the synthetic corpus already does
-   (ADR-038). All four states are pinned as tests. Closing it is a crosswalk change (M-D), not an edit here.
-4. PR-8f's batch retrieve refusal does **not** fire on either measure — confirmed by the batch returning
-   all 56 subjects. It catches "retrieved nothing at all", and these retrieves matched plenty (236 LOINC
-   observations); they just did not match the conjunct deciding membership. The ADR-038 lesson holds on
-   real data as it did on the corpus.
-5. **This fix does not reach a live third-party WebChart tenant, and nothing enforces that.** Both changed
-   mapping sites are upstream of the live FHIR transport: the shim (dev MariaDB) and the offline export
-   script. `normalizeWebChartBundle` is untouched by design (decision 2), so the teatea trial — the only
-   live integration — still supplies no `us-core-sex` and its whole roster would read out-of-population for
-   official CMS125. `deploy-staging-mieweb.yml` sets `WORKWELL_WEBCHART_BASE_URL`, so staging is exactly
-   where official routing and a live seam can coexist.
-
-   Review's point, which stands: for the live third-party path the seam-keyed predicate retired in
-   decision 3 **is** still an accurate predicate — decision 3 reasons about the configuration this ADR
-   fixed and generalizes to one it did not. The residual limit is asserted in prose here and guarded by
-   nothing. Enforcing it (a first-run check that a WebChart-derived roster carries the elements an
-   officially-routed measure's IPP reads, failing the *measure* per PR-8f's MISSING_DATA + PARTIAL_FAILURE
-   pattern rather than the run) is a **PR-9c precondition**, deliberately not taken here.
-6. The WebChart gap is **narrower than recorded** for cms125's IPP (one field, now closed) and **wider in
-   kind** for cms122 (no diagnoses at all, blocking both engines — an M-D ingest question, not a flip risk).
-   The earlier note that official cms122 "would read out-of-population over live data too" was true but
-   omitted that authored does the same, which is the half that decides whether the flip changes anything.
-7. **The pipeline this ADR validates already fabricates one of the three IPP conjuncts.**
-   `engine/ingress/enrollment/roster.ts` synthesizes a CPT 99213 `Encounter` for every cms125-enrolled
-   subject because WebChart supplies none (the fixture has 0 Encounters and 0 Conditions), and that
-   Encounter is what satisfies `exists Qualifying Encounters`. Without it nobody is in population and the
-   whole measured result vanishes. That decision is pre-existing and argued in `roster.ts` (program-visit
-   evidence, not a fabricated clinical mammogram), and this ADR does not reopen it — but an argument about
-   never inventing facts to satisfy an IPP should say plainly that the path being validated invents one.
-
-
-## ADR-041: A capped official expansion is completed at vendor time, from a pinned VSAC release, or not at all
-
-**Status:** Accepted (2026-07-29). Roadmap §7.3 (terminology) + §7.4 PR-9. Nothing routes officially yet.
-
-**Context.** `officialRoutingProblems` refuses to route any measure whose ELM retrieves a value set the
-manifest records as capped (ADR-036, decision 7). Both vendored artifacts trip it on the same OID:
-`AdvancedIllness` (2.16.840.1.113883.3.464.1003.110.12.1082) ships **1000 of a declared 1997 codes** in
-each bundle and feeds the 66+/advanced-illness denominator exclusion in both. That refusal is the only
-thing standing between cms122/cms125 and the PR-9 flip, and it is correct: a half-expanded exclusion set
-does not error, it silently leaves subjects who should have been excluded in the denominator to be
-scored. The empty-set preflight cannot see it, because half-expanded is not empty.
-
-Two facts settled the shape of the fix. First, **the cap is upstream policy, not a defect** — the
-content repo's README says so outright (*"The value sets in this repository are limited to expansions of
-1000"*; full expansions require an NLM licence), so there is nothing to raise upstream and no version of
-this that is fixed by waiting. Second, **VSAC's `$expand` supports `offset`/`count`**, confirmed against
-its published `OperationDefinition`, and `engine/cql/vsac-client.ts` has been paging it correctly for the
-authored path since #295. The missing piece was never the capability; it was that the two terminology
-paths have no bridge, deliberately — ADR-036 forbids the runtime mixing them, and `resolve-valuesets`
-writes DB rows the official executor must never read.
-
-**Decision.**
-
-1. **The completion happens at VENDOR time, in `vendor-official-measure.mjs`, behind
-   `--complete-capped-expansions`.** This is roadmap §7.3's own rule — *bundle-shipped expansions
-   PRIMARY, VSAC-patched at VENDOR time, no runtime fallback* — and it keeps ADR-036's single authority
-   intact: the sidecar remains the one thing the runtime reads, and it is still pinned by a SHA-256 in
-   the committed manifest. A runtime fallback to VSAC would have been the easy version and would have
-   reintroduced exactly the split PR-8a closed.
-
-2. **Only the OIDs upstream actually capped are re-expanded** — today one, two pages. This is not an
-   import. The 25 or 31 other value sets in each artifact come from the bundle, unchanged and unasked
-   about, so the blast radius of the network call is one value set per measure.
-
-3. **Pinned to `Library/ecqm-fhir-update-2025`**, the release the upstream content repo itself names as
-   the terminology package supporting its measures — and the same eCQM release CVU+ validates the 2026
-   reporting period against, so M-A and M-B stay on one terminology story rather than two. Unpinned,
-   VSAC serves latest-active: a republish would move our expansions, the terminology digest, and
-   therefore `officialLogicVersion` (ADR-040), with the bundle bytes unchanged. CI's
-   `git diff --exit-code measures/official` would catch it — after the fact, on an unrelated PR.
-
-4. **Completed codes are sorted by `system|code` and deduped before they are written.** The sidecar is
-   pinned by hash, so its byte ORDER is part of the artifact and VSAC's page order is not a contract.
-   Code-point comparison rather than `localeCompare`, for the reason `collectTerminology`'s own sort
-   already spells out.
-
-5. **Every failure leaves upstream's codes exactly as shipped.** No flag, no key, VSAC unreachable after
-   the bounded retry — each warns and returns, the manifest's `truncated` entry survives, and routing
-   keeps refusing. There is no path that yields a set which *looks* complete and is not: `truncated` is
-   recomputed from the codes actually present after completion, by the same comparison as before.
-
-6. **A VSAC expansion that comes back SHORT of the declared total, or that does not CONTAIN upstream's
-   shipped codes, is rejected outright rather than merged.** These are the non-obvious ones and the
-   reason they are written down. The short comparison is made AFTER dedupe, so a response padded with
-   duplicate `system|code` pairs cannot clear the bar and then shrink below it — comparing the raw page
-   total was the original mistake, caught in review. The containment check exists because a count cannot
-   distinguish "the full version of this set" from "a different set that happens to be bigger", and that
-   difference is a wrong release pin scoring real patients; it is also what empirically confirms the pin,
-   since VSAC's 2000 codes do contain all 1000 upstream shipped. Merging a shorter, different
-   set would swap upstream's 1000 codes for someone else's 800 — a narrowing dressed as a fix, and the
-   only outcome worse than staying capped. Staying capped is loud; a wrong 800 is not.
-
-7. **The vendor-time credential is a DIFFERENT GitHub secret from the runtime one**
-   (`WORKWELL_VSAC_API_KEY_VENDOR`, not `WORKWELL_VSAC_API_KEY_TWH`), even though both hold the same UMLS
-   key. They serve the two terminology authorities ADR-036 exists to keep apart: one vendors the official
-   artifact's own expansions, the other drives the authored engine's live resolver. Giving them one name
-   would invite precisely the conflation that ADR forbids.
-
-**Consequences.**
-
-- Completing the expansion changes `manifest.terminology.sha256`, and therefore `officialLogicVersion`
-  (`official-fqm:<version>:<artifactSha>:<terminologySha>`), and therefore invalidates every cached
-  `eval_state` row for that measure. Designed behaviour, not a regression — the terminology digest is in
-  that identity for exactly this case.
-- **Landing order is load-bearing.** The flag ships first and is a no-op without the secret, so CI stays
-  green; the secret and the re-vendored manifests must then land *together*. Adding the secret alone
-  means CI completes the expansion while Git still records it as capped, and the reproducibility step
-  goes red on every unrelated PR. The step now says so in its own error message.
-- The MADiE gate is expected to stay 121/121 — its own analysis already reports "Value-set-cap effects:
-  0 observed" across the deck. If a case does move, that is the finding: the cap was load-bearing for a
-  test subject, and the report's own classification rule covers it.
-- Two tests stopped asserting that the cap EXISTS. They were scheduled to be deleted by their own fix —
-  `assert.ok(capped.length > 0)` is only true while the blocker is unfixed. The mechanism is now pinned
-  against a synthetic manifest (never vacuous, never state-dependent), and the real artifacts are checked
-  for the invariant that holds in *both* states: the manifest's caps, the sidecar's own shortfalls, and
-  the routing decision agree. Review caught that this covered `cappedExpansions` the HELPER while leaving
-  `officialRoutingProblems` the GUARD vacuous — with both artifacts now complete, deleting its
-  capped-expansion loop left the suite green. A test stubbing `cappedFor` non-empty now pins the refusal
-  itself, verified by mutation; without it this would have repeated the ADR-036 decision-7 finding
-  (recorded, documented as a guard, and never actually exercised). That last one is a new guard, and it is the one that matters — a manifest
-  claiming `truncated: []` over a still-short sidecar would clear the refusal on a lie.
-- The paging loop is a second implementation of `httpVsacClient`'s, deliberately. The vendor script runs
-  as plain `node` on the deploy path with no install and no build step, which is what makes the deploy's
-  terminology fetch cheap and hard to break; importing TypeScript from `src/` would end that.
-
-**Rejected.** *Completing it in the runtime* — reintroduces the two-authority split of ADR-036.
-*Committing the completed expansion* — it is licensed VSAC/CPT/SNOMED content in a public Apache-2.0
-repo, which is the whole reason the sidecar is gitignored. *Hosting the completed sidecar in the
-`workwell-twh-evidence` bucket and fetching it at build* — workable, and it would keep the UMLS key off
-CI, but it adds a second artifact to keep in sync with the pin and an owner step to every re-vendor, to
-avoid two HTTP requests. *Raising the cap upstream* — it is documented policy with a licensing reason.
-
-
-## ADR-040: The engine declares the logic it runs; the incremental cache never infers it
-
-**Status:** Accepted (2026-07-28). Roadmap §7.4, PR-8 (remaining). Nothing routes officially yet.
-
-**Context.** Incremental evaluation (ADR-035) reuses a subject's prior CQL outcome when its data and its
-*logic* are unchanged. "Logic unchanged" is decided by `logic_version`, which `incremental-eval.ts`
-derives by hashing `ELM_LIBRARIES[libraryName]` — **WorkWell's authored ELM**.
-
-That derivation stops being true the moment a measure is routed to the official published artifact. The
-authored ELM is still there and still hashes identically, so the fingerprint reports "same logic" about
-two engines that answer differently, and the `eval_state` cache copies **authored outcomes forward for a
-measure now running official CQL**. Re-vendoring that artifact would not invalidate them either: nothing
-in the fingerprint knows the artifact exists.
-
-This is the one input to the fingerprint whose absence is *silent*. Every other signal degrades
-pessimistically — a missing value-set hash makes `logic_version` change when it needn't, and costs a
-re-evaluation. This one degrades toward a wrong answer that no test, log line, or alert would show,
-because a reused outcome looks exactly like a computed one.
-
-It is inert today (`WORKWELL_INCREMENTAL_EVAL` is unset everywhere, and so is
-`WORKWELL_OFFICIAL_MEASURES`), which is why it is being closed *before* PR-9 rather than after. Two
-independently-off flags is not a safety property; it is a coincidence with a deadline.
-
-**Decision.**
-
-1. **The engine declares its own logic identity.** `RoutedEngine` gains an optional
-   `logicVersionFor(measureId)`, returning the artifact's identity for a routed measure and `undefined`
-   — meaning "authored" — for everything else. The incremental cache consults it first and falls back to
-   the ELM hash unchanged.
-2. **It travels ON the engine, not beside it.** The obvious alternative is another optional field on
-   `RunPipelineDeps` passed by each caller. That is precisely the shape of the bug PR-7b's review caught:
-   a call site that forgot to pass the official flag, so the nightly run used a different engine than the
-   manual one — a mistake the same block of code had already documented twice. Hanging the identity off
-   the engine makes the logic identity and the thing that computes the outcome *the same object*, so they
-   cannot disagree, and a future call site gets it without having to remember it.
-3. **The identity is a readable composite, not a hash:**
-   `official-fqm:<version>:<artifactSha>:<terminologySha>`. The roadmap sketched `sha256(...)`; every
-   input is already a digest, so re-hashing buys no collision resistance and only makes an `eval_state`
-   row unreadable at the moment someone is asking which artifact produced it. The `official-fqm:` prefix
-   is disjoint from the authored side's `sha256:<hex>` **by construction**, so the two spaces can never
-   collide however the authored hash is later computed.
-4. **The terminology digest is part of the identity.** This is the input the roadmap's sketch omitted.
-   Since ADR-036 the executor retrieves against the artifact's *own* expansions, fetched at build and
-   pinned in the committed manifest — so re-fetching at a different upstream ref can move value-set
-   membership, and therefore outcomes, with the bundle bytes unchanged. Version + artifact sha alone
-   would call that "same logic".
-5. **An official-routed outcome is same-day-only, structurally.** `computeNextTransition` — which decides
-   how long a cached status may be reused — reasons in authored terms: it keys on `MEASURE_BINDINGS` and
-   reads a `"Days Since"` define out of authored evidence. Two of its branches would over-reuse an
-   official outcome: a binding marked `PERMANENT` returns `null` (terminal ⇒ *unbounded* across-day
-   reuse) before the boundary table is consulted, and a measure in `BOUNDARY_SAFE` would have thresholds
-   derived from the **authored** CQL applied to an **official** status. Neither is sound, because the
-   official measurement period is a rolling window (ADR-039) — the same bundle can score differently as
-   the eval date moves the period, so nothing about an official outcome is terminal on unchanged data.
-   The cache therefore bounds an official outcome to its own evaluation date. This changes nothing today
-   (cms122/cms125 are both `RECURRING` and neither is boundary-safe, so they already fall through to the
-   same-day default) — it converts that from a coincidence of how two measures happen to be classified
-   into a property of routing. It also keeps `recomputeEvidenceAsOf` a no-op on official evidence, since
-   the copy-forward delta can then only ever be zero.
-6. **And, for now, an official-routed outcome is not reused at all.** `logic_version` identifies the
-   measure *definition*, never the code that executes it — true of the authored side too, where it hashes
-   ELM rather than `cql-execution-engine.ts`, and harmless there because that engine is old and stable.
-   The official adapter is neither: `preparedForQiCore`, `officialMeasurementPeriod`,
-   `officialMeasureSemantics` and `outcomeFromPopulations` all move the answer, all shipped or changed
-   within a week, and ADR-037 *measured* preparation swinging a roster from IPP=0 to IPP=25. A same-day
-   redeploy would therefore leave rows reusable that the previous adapter produced. The identity cannot
-   close that by itself — there is no build sha or package version available at runtime to fold in
-   (`/api/version` reports a literal; `package.json` is `0.0.0`), and a hand-bumped "adapter contract"
-   constant is the remember-to-do-it failure mode decision (2) exists to avoid. So the cache declines the
-   work instead of guessing.
-
-   **What that costs, exactly.** Official rows are same-day-only by (5), so the entire benefit forgone is
-   *a second run on the same day skipping CQL*; across-day reuse — incremental evaluation's actual payoff
-   — was never available to them. Rows are still committed (they record which artifact produced the
-   outcome, and they are what a re-enabled reuse path consumes, so lifting the policy rebuilds no cache),
-   but they are **write-only today**. The exit condition is named rather than "later": either the identity
-   grows a digest covering the adapter's output-affecting surface, or that surface stops moving once
-   PR-10..12 finish onboarding the remaining six measures. Re-enabling is deleting one branch in `plan`.
-
-   The cost this does **not** avoid is the write: one `eval_state` row per routed subject per run that
-   can never be read while the policy stands, and writes are billed on the Neon stack (DEPLOY.md →
-   "Database compute cost"). That is deliberate — the warm fingerprint is what makes re-enabling a
-   one-line change rather than a cold cache — but it is an option worth paying for only while the exit is
-   near. If the policy outlives PR-12, skip the commit for official rows too.
-7. **Officialness travels ON the fingerprint, not re-derived at each use.** `plan` decides it once and
-   carries it (`EvaluatePlan.engineDeclaredLogic`) to `commit`, which governs the temporal bound in (5).
-   Asking the engine a second time would make the bound and the identity it is stored beside two
-   independent evaluations of one fact — the same coupling (2) removes between the engine and the cache,
-   reintroduced one layer down. The field is **required**, not defaulted: a caller that hand-builds a
-   fingerprint is exactly the one that would otherwise get an authored bound on an official row, and the
-   compiler should make it say which it means.
-
-**Consequences.**
-
-- Flipping a measure **on**, flipping it **off**, and **re-vendoring** it while it stays routed all
-  invalidate reuse, by construction rather than by care: the two identity spaces are disjoint, and every
-  vendor-time input is inside the official one. All three are tested against the real engine and a real
-  SQLite `eval_state`, in a setup where every *other* reason to re-evaluate has been removed (same day,
-  identical bundle, terminal status) — with a baseline test proving that setup does reuse, so the tests
-  isolate `logic_version` and nothing else.
-- Unchanged on every environment today. `WORKWELL_OFFICIAL_MEASURES` unset ⇒ `routedEngineForEnv` returns
-  the authored engine itself, which has no `logicVersionFor`, so the cache reaches the identical ELM-hash
-  path. The demo/default run loop is byte-identical.
-- **The identity tracks what the MANIFEST records about the bundle, not the bundle bytes.**
-  `loadOfficialArtifact` parses `bundle.json` without checking it against `manifest.sha256` (unlike
-  terminology, which ADR-036 verifies against its pin at load, because that sidecar is gitignored). So a
-  hand-edited `bundle.json` would execute new logic under the old identity. `bundle.json` is committed and
-  CI runs `git diff --exit-code measures/official` after re-vendoring, which is what actually closes this
-  on the normal path; the precise claim is therefore "a **re-vendored** artifact is a logic change", since
-  vendoring regenerates the manifest alongside the bundle.
-- **The compiler does not enforce the wiring; the runtime does.** `Pick<RoutedEngine, "logicVersionFor">`
-  has an optional member, so a future caller could pass an unrouted engine and typecheck. That is
-  self-correcting rather than dangerous — an unrouted engine yields authored evaluation *and* an authored
-  identity, so the two stay consistent — but "cannot disagree" is a statement about the runtime object,
-  not about the type. The pipeline's single read of `deps.engine.logicVersionFor` is covered by a test
-  that fails when that line is deleted; it is the only place this can now go wrong.
-- **Scoped to the measure, not to the input.** The router's `elm`/`metaOverride` escape evaluates a routed
-  measure with the authored engine, which `logicVersionFor` cannot see. Sound only because the two callers
-  cannot meet — the escape belongs to the fidelity lab and the Rule Builder, neither of which is a
-  population run, and the cache exists only inside `finishManualRun`. Recorded here because a future caller
-  that both overrides the library *and* caches must key on the library it asked for.
-- Descriptive only (ADR-008), unchanged: this decides *whether* to re-ask the engine, never the answer.
-
-**Alternatives rejected.** *Disable incremental evaluation whenever any measure is routed* — a blunt
-correctness fix, but it turns the two features into mutually exclusive ones exactly where their value
-overlaps (the WebChart tenant, whose fixed exam dates are what makes across-day reuse pay off, is also
-where official execution is headed). *Fold the artifact sha into the existing ELM hash* — keeps one code
-path, but produces an opaque `sha256:` that silently changes meaning depending on configuration, and
-still leaves the cache inferring routing rather than being told it.
-
-## ADR-039: The shadow diff is a shadow of the runtime, not a study of its own
-
-**Historical finding — full text in [`docs/archive/DECISIONS_ARCHIVE.md`](archive/DECISIONS_ARCHIVE.md#adr-039).** Diagnosis: the shadow diff used a different date window and enriched inputs, so it was not a shadow of the runtime.
-
-## ADR-038: The synthetic corpus is verified against the official artifact's own terminology
-
-**Historical finding — full text in [`docs/archive/DECISIONS_ARCHIVE.md`](archive/DECISIONS_ARCHIVE.md#adr-038).** Diagnosis: 12 of 24 corpus codes were registered under the wrong value set, invisible because one file supplied both sides of the comparison.
-
-## ADR-037: Official execution prepares bundles for QI-Core — normalization only, never fabrication
-
-**Status:** Accepted (2026-07-27). Roadmap §7.4 PR-8. Nothing routes officially yet.
-
-**Context.** Official artifacts retrieve against QI-Core profiles, which are materially stricter than
-the plain FHIR this repo emits: a diabetes `Condition` must be an ACTIVE, CONFIRMED problem whose
-prevalence period overlaps the measurement period, and an `Encounter` is expected to carry a `class`.
-Our synthetic Conditions ship a system-less `clinicalStatus` and no `onsetDateTime`.
-
-`standards/literal-diff.ts` had a private `stampQiCoreStructure` for this, and the router's docstring
-carried "must call it, or the whole population reads out-of-population" as an unmeasured obligation.
-Measured against the vendored CMS122 artifact over 25 synthetic subjects:
-
-| bundle | IPP | DENOM | NUMER |
-|---|---|---|---|
-| raw synthetic | **0** | 0 | 0 |
-| + preparation | 25 | 25 | **0** |
-| + preparation + harness enrichment | 22 | 22 | 4 |
-
-**Decision.**
-
-1. **One preparation, used by both paths.** `wiring/qicore-preparation.ts` — the diff and the runtime
-   executor call the same function. Two implementations of this could not be compared, and comparing
-   them is the entire purpose of the shadow period.
-2. **The runtime prepares a COPY.** The authored engine may evaluate the same bundle object, and ADR-008
-   requires its outcome to be byte-identical whether or not official routing is on.
-3. **Normalization, never fabrication**, and review tightened this twice before it held:
-   - **No invented onset.** The first cut anchored a missing `onsetDateTime` three years before the
-     evaluation date. That is a date of an actual event — exactly what this rule forbids — and CMS165, on
-     the priority list, decides denominator membership on hypertension onset relative to the measurement
-     period. Isolating the parts showed it also bought nothing: **status alone yields IPP=25/25**,
-     identical to applying everything, while onset alone yields 0/25. Removed.
-   - **`clinicalStatus`/`verificationStatus` are replaced only when nothing in them names a system.**
-     The first cut overwrote unconditionally, justified by the synthetic coding being system-less — true
-     of our corpus, false as a rule. It would have turned a `resolved`, `refuted` or `entered-in-error`
-     Condition into an active confirmed one, putting a corrected misdiagnosis into CMS122's denominator
-     and, with no HbA1c, its numerator. The defect is an unbindable coding, so that is the condition.
-
-   Everything else (`category`, Encounter `class`) is filled only when absent, so data that already
-   carries a real value is never rewritten — which is the basis for running this over WebChart data and
-   not only over the synthetic corpus.
-4. **The literal diff uses the artifact's own terminology (ADR-036), with no fallback.** It was the last
-   call site still expanding from our VSAC import. A diff that expands one terminology while the runtime
-   expands another forecasts a configuration that will never exist, which defeats the point of running it
-   before a flip. When the sidecar is absent, `literalDiffAvailable()` reports false and the route
-   degrades to the subset tier **visibly, in its `mode` field**, rather than silently swapping sources.
-5. **Both deploy workflows vendor terminology into the build context** — production and staging. Not
-   doing so would have silently downgraded the live stack's `mode:"literal"` to `"subset"`, a regression
-   of a shipped capability; staging matters more rather than less, since it is where the PR-9 flip gets
-   validated against live teatea data. Deliberately not fail-soft on a MISSING sidecar — but the fetch
-   itself retries with backoff on transport errors and 5xx, because an emergency rollback rebuilds the
-   image and a thirty-second GitHub blip must not block the fix for an unrelated incident. A 4xx at an
-   immutable pin means the path is wrong and is never retried.
-
-**Consequences.**
-
-- **This does NOT make the synthetic corpus sufficient for official cms122, and that gates PR-9.** With
-  preparation alone the 25 subjects score IPP=25 / DENOM=25 / NUMER=0, and cms122's numerator is *poor
-  glycemic control* — so the roster renders as **100% compliant**. A wrong answer that looks like good
-  news is worse than an obviously broken one, and no automatic check distinguishes it from a genuinely
-  well-controlled population: `hasRetrieveSignal` passes, because retrieves DID match.
-  The gap is that our corpus carries `urn:workwell:*` codes where the official numerator retrieves real
-  LOINC. `standards/cms122-official.ts` closes it with a harness-local enrichment for the diff, and that
-  enrichment must **never** move into the runtime — synthesising clinical codes at evaluation time is
-  fabrication. The real fix is a synthetic corpus that emits real codes, which the roadmap already
-  schedules per measure at PR-10..12.
-- The shadow period (PR-8) is therefore the gate that catches this class, not a formality.
-- Descriptive only (ADR-008): preparation changes what the official artifact can see, never what CQL
-  decides. Nothing routes officially, so no current outcome changes.
-
-## ADR-036: Official terminology is the artifact's own, fetched at build and pinned by hash — not our VSAC import
-
-**Status:** Accepted (2026-07-27). Roadmap §7.3 called this in advance ("bundle-shipped expansions
-PRIMARY, VSAC-patched at VENDOR time, no runtime fallback. Runtime never mixes two terminology
-authorities"); PR-6a and PR-7a drifted from it, and this ADR records the correction.
-
-**Context.** Two PRs, each locally reasonable, together split terminology into two authorities:
-
-- **PR-6a** stripped `ValueSet` resources out of the vendored `bundle.json`. That was a **licensing**
-  decision, not a size one: 26 expansions per bundle carry thousands of AMA CPT and SNOMED CT codes,
-  and this repository is public.
-- **PR-7a** then filled the resulting hole by expanding from our imported VSAC `value_sets` rows at
-  runtime.
-
-The consequence was only visible from a distance. The MADiE gate (`official-cases.ts`) validated the
-official artifact against the **upstream bundle's own** expansions, while the runtime expanded from
-**VSAC store rows** — a configuration no gate had ever executed. So 121/121 green proved nothing about
-the path production would take, which is the single thing that gate exists to do. It also made PR-9
-depend on an owner-only UMLS import, and it is the failure mode most likely to be silent: fqm treats an
-unexpandable value set as *empty rather than missing*, an empty set matches nothing, and the measure
-then reports every subject out-of-population — indistinguishable downstream from a genuinely ineligible
-roster.
-
-Restoring the ValueSets to `bundle.json` was measured (+605 KB cms122, +464 KB cms125 — affordable) and
-**rejected**: it would commit redistribution of licensed terminology from a public repo.
-
-**Decision.**
-
-1. **The artifact's own expansions are the only official terminology.** `vendor-official-measure.mjs`
-   writes them to `measures/official/<catalogId>/terminology.json` at the same pinned upstream commit as
-   the ELM. Our VSAC import (`pnpm resolve-valuesets`) serves the authored measures and the fidelity
-   lab; it has no role in official execution.
-2. **Fetched at build, never committed.** The sidecar is gitignored — the same fetch-not-vendor pattern
-   `.official-content/` already uses for the test deck. Nothing licensed enters Git.
-3. **Pinned by hash.** The **committed** `manifest.json` records the sidecar's SHA-256, so bytes that
-   are not stored are still pinned: a regenerated sidecar either hashes identically or is refused at
-   load. That is what makes "fetched" as trustworthy as "vendored" without the redistribution.
-4. **The expander is keyed by measure, not by a flat OID map.** CMS122 and CMS125 share 23 of their
-   canonicals today, so a flat map works — until two artifacts are pinned at different commits and
-   disagree about one expansion, at which point whichever loaded first silently wins for both.
-5. **The MADiE reduction check executes the runtime configuration.** It now runs our reduced artifact
-   plus its own sidecar, built through the same `expandArtifactTerminology` the router uses, against the
-   upstream bundle and upstream ValueSets. Verified 2026-07-27: **0/55 and 0/66 cases changed
-   population vector**. The report records which terminology mode ran, so a weaker check can never be
-   mistaken for the stronger one.
-6. **A missing sidecar refuses routing, and names the command that fixes it.** `officialRoutingProblems`
-   reports it as one build step rather than as 26 separate expansion failures.
-7. **A VSAC-CAPPED expansion refuses routing too.** This is the same failure one notch weaker, and the
-   empty-set guard cannot see it: it refuses on empty, and half-expanded is not empty. Review of this
-   PR found `cappedExpansions` recording caps while documenting a guard that had zero callers — so a
-   capped set would have sailed through preflight. It is now a routing problem, filtered to the sets the
-   measure's ELM actually retrieves so an unused cap cannot block a measure.
-
-**Consequences.**
-
-- A fresh clone cannot route officially until `pnpm vendor:official` has run. That is the correct
-  failure: the alternative is evaluating a measure with terminology nobody validated.
-- **PR-9 obligation:** the deploy workflow must run the fetch before `docker build`, since the image
-  needs the sidecar. Routing is off in production today, so nothing is broken meanwhile — but a flip
-  without that build step would fail closed at boot.
-- **`AdvancedIllness` blocks the flip, by design.** VSAC caps expansions at 1000 codes, and
-  `2.16.840.1.113883.3.464.1003.110.12.1082` (1000 of 1997) is capped in **both** upstream bundles,
-  where it feeds the 66+/advanced-illness denominator exclusion. It changes none of the 121 official
-  cases — that is the claim we can support, and all of it — but "changes none of the test cases" is not
-  "changes no patient", so decision 7 refuses to route either measure until it is completed from VSAC at
-  vendor time (§7.3). **cms122 and cms125 are therefore NOT routable today**, and PR-9 must do that
-  expansion, not merely remember it.
-- Descriptive only (ADR-008): terminology feeds the engine's retrieves; it never sets an `Outcome
-  Status`. Nothing routes officially yet, so no current outcome changes.
-
-## ADR-035: Incremental/delta batch evaluation is a descriptive, inert-unless-configured cache (#263)
-
-**Status:** Accepted (2026-07-24). Owner-approved the `eval_state` DDL + the scope decisions in-session.
-
-**Context.** A recurring population run re-evaluates every subject × measure whether or not anything
-changed — ~1.68M CQL evaluations at the 120k scale, ≈68 ms each (#253). Most of that recomputes an
-answer that cannot have moved. #263's design (`docs/superpowers/specs/2026-07-13-e263-incremental-evaluation-design.md`)
-was gated on WebChart's change signal; the 2026-07-13 research answered enough to build the
-content-hash tier now.
-
-**Decision.**
-1. **Reuse the EVALUATION, never the OUTCOME ROW.** Every read model reads "the outcomes of the latest
-   run per measure"; skipping rows would break them all. A reused subject still gets an outcome row
-   (copy-forward: prior status + date-corrected evidence, new run id), so every read model is untouched
-   and DB write volume is unchanged — we save only the ~68 ms of CQL, the cost that matters.
-2. **Two tiers.** `data_hash` (canonical hash of the evaluated bundle) + `logic_version` (hash of the
-   measure ELM + referenced value-set expansion hashes) gate reuse; **status-boundary caching**
-   (`next_transition_at`) extends it across days for measures whose status is a monotone step function of
-   days-since-event (windowed-recency OSHA/wellness + PERMANENT series). `flu_vaccine` (seasonal) and
-   `cms122`/`cms125` (period-based) are EXCLUDED from across-day reuse — same-day-hash only — because a
-   stale copy could ship a wrong status when the season/period rolls. The `next_transition_at` threshold
-   table is **golden-verified against the real CQL engine** so it can never silently drift.
-3. **Copy-forward evidence is date-corrected, not verbatim** (design §3 option 1): each `"Days Since …"`
-   define is advanced by the elapsed days (measure-agnostic; same-day copy is byte-identical), so
-   `deriveWhyFlagged`'s `days_overdue` stays honest and the parity guarantee holds.
-4. **Inert-unless-configured** (`WORKWELL_INCREMENTAL_EVAL=true`; the 10th boot-inventory seam) and
-   **scoped to the live-tenant pipeline** (`finishManualRun`) — the scale batch path and the demo/default
-   stack are byte-identical to today (no `eval_state` row is ever written).
-5. **The `eval_state` table is a pure cache** (DATA_MODEL §3.27): reversible with `DELETE FROM eval_state`,
-   no row references it.
-
-**Correctness invariant (ADR-008).** Reuse decides only WHETHER to re-ask the CQL engine, never the
-answer. A cache miss on ANY uncertainty falls back to a full evaluation. The acceptance criterion is the
-parity suite (`run/incremental/parity.test.ts`): on identical data an incremental run is byte-identical
-to a full run, and it re-evaluates exactly when (and only when) the answer could have changed.
-
-**Two correctness holes caught in code review (both P1, fixed pre-merge) — worth recording because they
-are the non-obvious ways this feature can go wrong:**
-- **Backdated runs.** The whole `next_transition_at` scheme assumes the clock only moves forward. A
-  rerun of an *older* run (which reuses that run's persisted `evaluationDate`) after a newer run advanced
-  the cache would otherwise copy a future-computed status backward (July's OVERDUE into a June rerun).
-  Fix: reuse requires `evalDate >= source_eval_date`; a backdated run always re-evaluates.
-- **`logic_version` must reflect the EXECUTED library + value-set membership.** Hashing only the base ELM
-  would let a VSAC toggle/re-import or an operator value-set edit slip through (same `data_hash`, same
-  base ELM, different codes). Fix: hash the engine-selected library (base vs `expansionLibrary`) plus the
-  referenced value sets' store `expansion_hash`. Byte-identical on the demo/scoped path.
-
-**Scope decisions (owner, 2026-07-24):** live tenants only (exclude the synthetic scale tenant — ~2,100
-rows vs ~1.7M of no-real-value cache); build `next_transition_at` (the ~90% saving, vs ~21% hash-only);
-recompute evidence at copy time. Tier 1 (`Group/$export?_since=` transport pre-filter) remains MIE-gated
-and unbuilt.
-
-## ADR-034: Standalone WCDB FHIR shim package (`wcdb-fhir-shim/`) owns the MariaDB driver; CQL→SQL generation stays pure in backend-ts
-
-**Status:** Accepted (2026-07-20).
-
-**Context:** The 2026-07-19 Doug call gave two build directives that supersede the 2026-07-15 D17
-position ("CQL runs our side; CQL→SQL parked"): (1) build our **own** small FHIR R4 facade directly
-over the WebChart MariaDB dev database (`ghcr.io/mieweb/dev-wcdb`, 56 synthetic patients) — a "shim"
-proving the layered/swappable-API contract — and (2) translate CQL measures + the WCDB schema into
-**SQL that runs against the WebChart database itself**, returning numerator/denominator behind a
-simple compliance API ("is this patient compliant for this measure in this range?"). Directive (2)
-activates epic #292 (E9 Option B) ahead of its recorded trigger conditions — Doug's direct request
-plus the in-hand dev-wcdb schema satisfy the gate. Executing SQL requires a MySQL/MariaDB client,
-but backend-ts is deliberately driver-free (locked 2026-07-03: the dev-DB export shells
-`docker exec … mysql`), and the `MeasureExecutor` port (ADR-025) is bundle-in/DB-less by design —
-an impedance mismatch with set-at-a-time SQL.
-
-**Decision:** A new top-level **standalone package `wcdb-fhir-shim/`** hosts both directives'
-runtime: the FHIR facade (plain `node:http`; endpoints matching the verified WebChart client
-contract — `{base}/fhir` root, paged `Patient` search with same-origin `link[next]`, per-resource
-`?patient=` composition, `/fhir/metadata`) and the compliance API that executes generated SQL.
-**`mysql2` is approved as a dependency of this package only** — backend-ts remains
-MariaDB-driver-free. CQL→SQL **generation** (`generateSql`, sibling to `generateCql`) lives in
-backend-ts as pure, dependency-free templating over the existing rule-param shapes and terminology
-crosswalk; its output is committed as reviewed `.sql` artifacts in `wcdb-fhir-shim/sql/`
-(freshness-tested), which the shim executes with bound parameters. The bundle-shaped
-`sqlPushdownExecutor` stub stays inert; wiring SQL into the app's executor seam remains gated on
-per-measure golden parity (ADR-025), which this wave proves externally: the CQL engine evaluating
-the shim's FHIR output is the parity oracle for the SQL results over the same 56 patients.
-Scope v1 = windowed-recency measures only (WCDB has no immunization table, so series-completion
-SQL could never reach parity there).
-
-**Consequences:** The app is byte-identical when the WebChart seam is unset; the shim + `wcdb`
-containers join `infra/docker-compose.yml` under an opt-in `wcdb` profile. One new dependency
-(`mysql2`), isolated in a package the deployed stack never loads. The shim is dev/demo-grade by
-declared intent (no auth enforcement, synthetic data only, never deployed to the live stack —
-mirrors Doug's "you don't even need security"). CQL remains the sole compliance authority
-(ADR-008): SQL results serve only the shim's demo API until parity-gated per ADR-025.
-Reversal = delete the package + compose profile; backend-ts codegen additions are pure and inert.
-
-**Addendum (2026-07-20, PR #316 — YAML ingest):** the shim additionally takes **`yaml`** (parsing
-only, for the AI-patient ingest CLI) and moves **`tsx`** to runtime dependencies (it always executed
-the package; now the lockfile/Docker image pin it). Same scoping as `mysql2` — shim-only, never
-backend-ts, never the deployed stack. The ingest tool's safety contract: writes are
-model-catalog-validated (existence + declared type), transactional (one BEGIN…COMMIT per run),
-manifest-reversible (`<file>.ingested.json` records exactly the created pat_ids; `--rollback`
-refuses natural-key guessing), guarded to local `wc_*` targets, and logged to an append-only
-`ingest-audit.log` (the dev-tool analogue of the app's `audit_events` rule — the WCDB has no
-WorkWell audit table to write to).
-
-**Status:** Accepted (2026-07-17).
-
-**Context:** A configured WebChart population can be evaluated through the existing FHIR/CQL ingress,
-but persisted outcomes carry only subject ids. The static synthetic directory therefore dropped live
-subjects from roster, hierarchy, programs, case identity, and quality scopes. Persisting a second
-clinical/directory model would add owner-gated DDL and risk making stale clinical data look current.
-
-**Decision:** Keep a per-worker, atomically replaced last-known-good registry of live identity profiles
-(`wc|Patient.id`, display name, birth date, and fixed `wc`/`WebChart`/`wc-provider-1` placement). It is
-a directory cache only; clinical bundles are never cached for verification. Every population read or
-materialization first loads its persisted latest/run outcome rows, constructs exactly one
-`directoryForRows(rows)` snapshot, and threads that snapshot's lookup closures through the operation.
-The snapshot merges the static catalog, the registry, and minimal profiles for unknown persisted `wc|`
-ids (`name = raw Patient.id`). A successful population fetch replaces the registry; a fetch failure
-aborts the configured population run before any outcomes, leaving the prior successful run and registry
-authoritative. Read models ignore FAILED runs.
-
-Clinical eligibility and `Outcome Status` remain exclusively CQL-owned (ADR-008). The live enrollment
-override is optional; the default is enroll-all within the existing fail-closed eligible-measure list.
-Existing site-specific segments do not match `WebChart`, so they create no live cases unless an
-administrator adds that site. Fetch-one-subject is not available in phase 1: `wc|` CASE reruns return a
-controlled, non-mutating 409, and `SITE=WebChart` remains unsupported rather than superseding a whole
-population with a partial latest run.
-
-**Consequences:** No schema, dependency, frontend, or clinical-cache change is introduced. A worker
-restart temporarily shows raw Patient ids until the next successful population refresh, while persisted
-rows and hierarchy/quality totals remain visible and reconciling. Unsetting the WebChart configuration
-restores the byte-identical static path; stored outcome history remains but the live tenant is no longer
-selected. Reversal is therefore environment-only plus an ordinary code revert. Real provider/site
-attribution, fetch-one CASE/EMPLOYEE, safe SITE latest-run semantics, and identity linking are deferred.
-
-## ADR-032: A local HAPI FHIR server is the WebChart simulator ("fake WebChart")
-
-**Status:** Accepted (2026-07-16).
-
-**Context:** The 2026-07-15 Doug meeting confirmed the integration contract (FHIR R4 + SMART
-Backend Services; data flows WebChart→WorkWell) and suggested standing up a HAPI FHIR server over
-the dev-DB data to simulate WebChart. Until now the live transport (`httpWebChartClient`, ADR-028)
-had only ever run against in-process shims — the fixture client and a mock-`fetch` conformance
-suite — so real-HTTP behaviors (server-minted pagination links, the off-origin guard, header
-handling against a genuine server) were untested in anger. Separately, the real teatea trial
-instance is remote, read-only via FHIR, and rate-limited by courtesy — unsuitable as a
-development/CI hammer.
-
-**Decision:** The official `hapiproject/hapi` image (already in `infra/docker-compose.yml`, R4,
-port 8081) is the local WebChart stand-in, populated from the committed dev-DB fixtures by
-`pnpm load:hapi` via a pure collection→transaction transform (`hapi-transform.ts`): `PUT` with
-preserved patient ids (roster keying) and deterministic minted ids for id-less clinical resources
-(idempotent re-loads). The `jamesagnew/hapi-fhir` fork Doug pointed at is a stale personal fork of
-upstream with no MIE-specific code — the official image is used instead. Stock HAPI stays open
-(no auth): the static-bearer path exercises the Authorization header, while the SMART
-backend-services flow is proven against the real trial. Division of labor: **HAPI = local/CI
-real-HTTP + rich-clinical-data proof; teatea = real-contract auth + live-instance proof.**
-
-**Consequences:** Development and self-skipping live tests never depend on the remote trial;
-re-loads are idempotent (verified 293 created → 293 updated, no growth); the simulator is one
-`docker compose up` away. HAPI is not WebChart — contract quirks (scope forms, grant types, paging
-behavior) are still verified against teatea and recorded in the #254 answer log. Descriptive only
-(ADR-008): the simulator feeds data; the CQL engine remains the sole compliance authority.
-
-## ADR-031: MeasureReport exports use membership-label counts and binding-owned measure semantics
-
-**Status:** Accepted (2026-07-15).
-
-**Context:** Connectathon review found two export-only conformance defects. First, WorkWell reported
-`DENOM = IPP - DENEX`, even though the clarified calculation example on the `fhir-cqm` ballot branch
-`br-57509` treats denominator populations as membership labels: exclusion members remain in the
-reported DENOM and subtract only in the score (`score=(3-1)/(6-1-1)` over `DENOM=6`). This is a
-ballot-branch QM IG clarification, not yet published normative text, but the worked arithmetic is
-unambiguous. Second, the generic outcome mapping counted every `MISSING_DATA` subject in IPP/DENOM;
-that is correct for WorkWell's OSHA/HEDIS-style measures, but `cms122.cql` and `cms125.cql` explicitly
-emit `MISSING_DATA` for `not Initial Population`. Both defects affected FHIR/QRDA export numbers only;
-stored outcomes and compliance decisions were correct.
-
-The same review found a fragile semantic coupling: the exporter hardcoded `improvementNotation` to
-`increase`. That is internally correct only because WorkWell defines every numerator as
-compliance-oriented (including an inverted CMS122 numerator) and claims a WorkWell canonical rather
-than the official CMS canonical.
-
-**Decision:**
-
-1. `countPopulations`, the bounded status-histogram path, individual memberships, FHIR summary score,
-   and the QRDA performance rate share membership-label semantics: `DENOM = IPP`, `EXCLUDED` contributes
-   to both DENOM and DENEX, and the effective score denominator is `DENOM - DENEX` (guarded above zero).
-2. Measure-specific export semantics live in the YAML-generated `MEASURE_BINDINGS`. All current
-   measures explicitly declare `improvementNotation: increase`; only `cms122` and `cms125` declare
-   `missingDataMeansOutOfPopulation: true`, mapping `MISSING_DATA` to all-zero populations in both
-   count paths and individual reports.
-3. MeasureReport export must continue to claim `urn:workwell:measure:*`. Switching to an official CMS
-   canonical is forbidden unless numerator orientation and improvement notation are changed together;
-   a guard test pins this invariant.
-4. Add base-R4 identity/provenance elements (`MeasureReport.id`, report-generation `date`, contained
-   WorkWell Organization `reporter`, and Bundle-entry `urn:uuid:*` `fullUrl`) without claiming DEQM
-   profiles. The route injects one generation timestamp so the timestamp field remains deterministic
-   under test; the run's measurement timeframe remains in `period`.
-
-**Consequences:** Exported DENOM values increase by the DENEX count, while scores are unchanged for
-OSHA/HEDIS-style measures because exclusions still subtract in the rate. CMS122/CMS125 IPP and DENOM
-now omit out-of-population `MISSING_DATA` rows, correcting their previously deflated exported scores.
-Individual populations still sum exactly to the summary. QRDA inherits the same corrected count/rate
-semantics. CQL `Outcome Status` remains the sole compliance authority (ADR-008); no schema, dependency,
-or stored-outcome change is introduced. Accepted limitation: the run pipeline forces a per-subject
-evaluation failure to `MISSING_DATA`, with `evidence_json.evaluationError`; for `cms122`/`cms125`, the
-FHIR/QRDA exports consequently omit that subject from IPP/DENOM, indistinguishable from verified
-not-in-IPP. A future refinement may distinguish those cases using the persisted evaluation-error
-evidence. Revisit the count interpretation if the final published QM IG materially differs from the
-cited ballot-branch clarification.
-
-**Amendment (2026-07-24, roadmap §7.4 PR-3) — membership is evidence-first.** Point 2 above does not
-scale: it needs one hand-written binding flag per measure, and the eight incoming official CMS measures
-would each need one guessed from their CQL. It also cannot express DENEXCEP/NUMEX, and it inverts for
-lower-is-better measures (cms122's numerator is poor control, so an official NUMER subject carries the
-workflow status OVERDUE). So `membershipFor(outcome, measureId)` now reads
-`evidence_json.official.populationResults` **first** and uses it verbatim when present — that is the
-measure's own logic reporting its own populations, and it is authoritative over any status heuristic.
-When absent (every measure today, and every authored measure forever) the point-2 rule applies
-unchanged, so this amendment is **behavior-neutral until the official flip**; malformed evidence
-degrades to the status rule rather than throwing inside an export. `denominator-exception` is emitted
-and subtracted from the effective score denominator in **both** MeasureReport and QRDA III, but only
-when non-zero — so authored exports remain byte-identical. Two deliberate limits: (a)
-`populationCountsFromStatus`, the bounded histogram behind 120k `seed:scale` summaries, has no
-per-subject evidence and stays valid for authored measures only; (b) keying out-of-IPP off each
-measure's own `"Initial Population"` define — which **is** persisted, and is defined by all 16
-`.cql` artifacts (the 14 runnable measures plus `cms122_official`/`audiogram_vs`) — was
-considered and **rejected for now**: it would change exported IPP/DENOM for the 12 OSHA/HEDIS measures
-(e.g. audiogram's IPP is `In Hearing Conservation Program or Has Active Waiver`, so non-enrolled
-subjects currently inflate the denominator) *and* break the documented 1:1 reconciliation with the
-histogram path. That is a real correctness finding, but it is a deliberate reporting change that
-deserves its own decision, not a silent side effect of this one.
-
-## ADR-030: Durable evidence storage is an app-level S3 seam (`resolveBucket`), not a binding-config change (#167 / #270)
-
-**Status:** Accepted (2026-07-14).
-
-**Context:** Evidence bytes lived behind the `CloudBucket` port on the live stack's in-container `fs`
-`BUCKET` binding — lost on every container recreate (deploy/heal). DEPLOY.md's documented recipe was
-"point the `BUCKET` binding at the s3 driver", but the `@mieweb/cloud` config loader
-(`external/mieweb-cloud/packages/cli/src/config.mjs`) parses `mieweb.jsonc` bindings as **literal
-JSON — no env substitution** — so a committed binding cannot carry credentials, and the config-level
-route is unreachable without forking the platform CLI. Separately, the #270 runbook found the live
-Neon PITR window is the **Free-plan-capped six hours** with **no second recovery line**; one managed
-bucket unblocks both evidence durability (#167) and a nightly `pg_dump` (#270).
-
-**Decision:** Select the durable backend **at app level**, exactly like the `DATABASE_URL` store
-override (stores/factory.ts): a `resolveBucket(env)` seam (`backend-ts/src/case/resolve-bucket.ts`)
-that constructs an S3-backed `CloudBucket` via `createS3Bucket` (`@mieweb/cloud-os` — the same adapter
-the mieweb target's binding uses) **only** when ALL THREE of `WORKWELL_BUCKET_S3_BUCKET` +
-`WORKWELL_BUCKET_S3_ACCESS_KEY_ID` + `WORKWELL_BUCKET_S3_SECRET_ACCESS_KEY` are set
-(inert-unless-configured, the 9th inventory seam `bucket-s3`; region defaults us-east-1; `endpoint`
-only for non-AWS S3 — it also flips to path-style). `createIfMissing: false` — bucket provisioning is
-owner-gated infra and the app's IAM policy deliberately cannot create buckets. The provisioned bucket
-is `workwell-twh-evidence` (us-east-1, public-access-blocked, versioned; least-privilege IAM user
-`workwell-twh-app`; 30-day lifecycle on `db-dumps/`). A nightly `backup-neon-nightly.yml` workflow
-dumps the `workwell_spike` schema to the same bucket. **`@aws-sdk/client-s3` is an approved dependency
-add** — it is the platform package's own declared optionalDependency for this adapter, promoted to a
-direct dep so the seam works on the `local` target the live container runs.
-
-**Consequences:** evidence survives container recreates on the live stack with zero `EvidenceService`
-changes (the `CloudBucket` contract is unchanged); unset env ⇒ byte-identical fs-binding behavior
-(tested); the remaining #270 gap — the 6-hour PITR window itself — is a Neon **plan-upgrade decision**
-(owner/billing), tracked for the MIE conversation.
-
-## ADR-029: Immunization forecasting is a self-hosted ICE sidecar behind the existing port — the stub is replaced by a real adapter (#76 / D18)
-
-**Status:** Accepted (2026-07-13).
-
-**Context:** `iceForecaster` had been an **inert stub** since E6 (#76) — it returned "ICE not wired
-(Doug Q5)" for every series — because the transport question (CDS Hooks vs ICE API vs a WebChart-ICE
-bridge) was deferred to MIE. The 2026-07-13 research pass
-(`docs/INTEGRATION_RESEARCH_2026-07-13.md` §4) established that ICE is **self-hostable today**: HLN
-publishes an official, actively ACIP-maintained Docker image (`hlnconsulting/ice`), and its OpenCDS
-DSS REST endpoint answers real forecasts. That answers #254 Q D18 ourselves — no MIE dependency. A
-Java→TS port of ICE remains infeasible (a continuously-updated Drools rule base is the product).
-
-**Decision:**
-1. Replace the stub with a **real HTTP adapter** (`engine/immunization/ice-forecaster.ts`) speaking
-   the DSS contract (`/api/resources/evaluate`, `/api/resources/evaluateAtSpecifiedTime` for an as-of
-   date) over a pure vMR codec (`ice-vmr.ts` — string-template `CDSInput` build + regex `CDSOutput`
-   parse; **no new deps**, the same hand-rolled-XML pattern as the QRDA stub). ICE runs as a
-   **long-lived sidecar** (~2–3 GB, tens-of-seconds Drools cold start) — never per-request.
-2. **The seam predicate relaxes to BASE_URL-only.** A self-hosted sidecar has no API key;
-   `WORKWELL_IMMZ_ICE_API_KEY` stays optional (a bearer token if a deployment fronts ICE with an
-   authenticating proxy) and can never by itself select the seam. Inert-unless-configured holds: with
-   no `WORKWELL_IMMZ_ICE_BASE_URL` the simulated forecaster serves and behavior is byte-identical.
-3. **Any failure falls back to `simulatedForecaster`** (injected, so no import cycle): transport
-   error, non-2xx, timeout, unparseable body, or a vaccine group missing from the response. The
-   forecast is an *advisory* panel — it must degrade, never error the case-detail read (ADR-012).
-   The fallback is deliberately **all-or-nothing**: a half-ICE/half-simulated forecast would be an
-   unattributable mix of two schedules.
-4. The port's `forecast()` becomes **async** (it is now a network call); selection moves to
-   `resolve-forecaster.ts` (above both port and adapter).
-5. Forecasting stays **advisory only** — it never sets or overrides an `Outcome Status`. CQL remains
-   the sole compliance authority (ADR-008/ADR-012). ICE and WorkWell can legitimately disagree (ICE
-   scores full ACIP; a WorkWell measure scores its own rule) and that is not a defect.
-
-**Operational hardening (from the whole-branch review):**
-- **The request-path timeout is 3 s, not a cold-start budget** (a warm ICE answers in ~50–300 ms), and
-  a **60 s circuit breaker** trips on failure. Without it, an unhealthy sidecar would charge *every*
-  `GET /api/cases/:id` the full timeout, forever — an interactive-latency incident whose only symptom
-  is a slow page. With it, an unhealthy ICE costs one timeout per TTL.
-- **ICE's clock is ALWAYS pinned** (`/evaluateAtSpecifiedTime` with `specifiedTime = asOf`, even when
-  `asOf` is today). `/evaluate` evaluates at the *container's* clock, so a TZ-skewed or drifting ICE
-  host would shift "today" forecasts by a day while as-of forecasts stayed correct. Verified live:
-  pinning today returns byte-identical proposals, so this costs nothing.
-- **`CONDITIONAL` is deliberately NOT surfaced as DUE.** ICE emits it for risk-conditional
-  recommendations, and an occupational-health cohort often *is* that high-risk group — but we do not
-  send ICE a risk group, so it cannot have applied one, and we must not assert one on its behalf.
-  Rendering every CONDITIONAL as DUE would manufacture work items ICE did not unconditionally
-  recommend. The reason string carries it verbatim (`ICE CONDITIONAL (HIGH_RISK)`); a risk-group-aware
-  mapping is future work, and needs the OH risk cohort in the CDSInput first.
-- **`dosesRequired` on the ICE path follows the CVX we actually report** (HepB = 3, the traditional
-  adult series we send as CVX 43 — not the Heplisav 2 the simulated forecaster models), so the card
-  cannot read the self-contradictory "2 of 2 doses — OVERDUE".
-
-**Two contract facts the live engine taught us** (both regression-tested, and neither documented
-where we looked):
-- The **request's** `base64EncodedPayload` is an **ARRAY**, not a string — a bare string is rejected
-  `400 Bad Request`.
-- A proposal's **vaccine group is on `<observationFocus>`, not `<substanceCode>`**: ICE proposes a
-  concrete *product* for some groups (CVX 115 Tdap under focus group 200 DTP; CVX 187 Shingrix under
-  focus 620 Zoster). Keying on the substance loses TDAP entirely for any subject with **no DTP
-  history** — i.e. exactly the adult occupational-health population — and (per decision 3) that
-  silently degraded the whole forecast to simulated.
-
-**Consequences:** D18 is answered without MIE. The demo/live stacks stay unchanged (no
-`WORKWELL_IMMZ_ICE_BASE_URL` ⇒ simulated); `infra/docker-compose.yml` gains an opt-in `ice` service
-for local/self-hosted use. The dose-history source is **injectable** (`historySource`) — the synthetic
-history is today's demo source and real WebChart immunization history is the E12 drop-in. Reversible
-by reverting the adapter commits (the port shape, minus `async`, is unchanged). Verified against a
-real `hlnconsulting/ice` container: 5 live tests (self-skipping without the env var) plus a golden
-fixture captured from that container.
-
-## ADR-028: WebChart transport implements the verified public FHIR contract — SMART Backend Services auth (dual-mode) + per-resource composition — E12 PR-2c (#262)
-
-**Status:** Accepted (2026-07-13).
-
-**Context:** The #255 pre-build coded `httpWebChartClient` against an *assumed* contract (static bearer
-API key + `Patient/$everything`), pending MIE's #254 answers. A 2026-07-13 public-sources research pass
-(`docs/INTEGRATION_RESEARCH_2026-07-13.md`) live-verified WebChart's real contract from its public FHIR
-sandbox and published docs: auth is **SMART Bulk Backend Services** (`client_credentials` + RS384
-`private_key_jwt` verified against a registered JWKS — not an API key), and the CapabilityStatement
-exposes **no `Patient/$everything`** (per-resource `?patient={id}` searches; the only operation is
-`Group/$export`). Waiting for MIE to restate publicly documented facts was the wrong trade.
-
-**Decision:**
-1. `httpWebChartClient` implements the **verified** contract: population `GET /fhir/Patient` (searchset
-   `link[next]` paging) + per-patient composition from paged
-   `GET /fhir/{Observation|Condition|Procedure|Immunization|Encounter}?patient={id}` searches into one
-   collection Bundle.
-2. **Auth is dual-mode behind a `WebChartAuthProvider` port** (`smart-backend-auth.ts`):
-   `smartBackendServicesAuth` (smart-configuration discovery or `tokenUrl` override; RS384
-   `private_key_jwt` assertion; token cache + expiry skew; single-flight refresh; 401 → invalidate +
-   one retry) is selected when `WORKWELL_WEBCHART_CLIENT_ID` + `WORKWELL_WEBCHART_PRIVATE_KEY` are set;
-   the legacy static bearer (`WORKWELL_WEBCHART_API_KEY`) is retained for fixtures/tests/proxies.
-   Signing uses **WebCrypto only** (portable, mirrors `auth/password.ts`; no `node:crypto`, no new deps).
-3. **Any per-resource fetch failure degrades the whole patient** to the Patient-only fallback bundle
-   (⇒ MISSING_DATA downstream): partial clinical data must never evaluate — a missing
-   Condition/Observation page could silently flip an outcome. The off-origin pagination guard now also
-   covers resource searches (it protects the OAuth token, not just the legacy key).
-4. Pagination semantics remain **unverified** with MIE (#254 A2): `_count` + `link[next]` are the
-   standard-FHIR conservative default; `Group/$export` (bulk) is future scope tied to #263.
-
-**Consequences:** PR-2c is no longer blocked on #254 for request shaping — only for credentials
-(registration/service account) and the residual unknowns (pagination, `$export _since`). The seam
-predicate (`isWebChartConfigured`) accepts BASE_URL + (API_KEY or CLIENT_ID+PRIVATE_KEY); the deployed
-default stays inert (no env vars → JSON source, byte-identical). Reversible by reverting the client
-commits (the `WebChartClient` port is unchanged).
-
-## ADR-027: Production CMS122/CMS125 evaluate eCQI v14 faithful-subset CQL (not toy day-count rules); literal QICore remains diagnostic — 2026-07
-
-**Superseded — full text in [`docs/archive/DECISIONS_ARCHIVE.md`](archive/DECISIONS_ARCHIVE.md#adr-027).** Production no longer runs the faithful subsets; both measures run CMS's own artifacts. The subsets retire to the standards lab (#377).
-
-## ADR-026: `fqm-execution` as a diagnostic-only dependency for the LITERAL official-CQL execution diff (pre-shipped ELM, no translation) — E14 literal diff (#258)
-
-**Status:** Accepted (2026-07-09). **Supersedes ADR-024's "revisit when the translator ships a stable multi-model release" clause** — the literal official CMS122 measure now runs today, without any translator.
-
-**Context:** ADR-024 shipped a faithful official-**SUBSET** CMS122 because compiling the literal multi-library QICore CMS122v14 CQL was intractable under the pinned JVM-free translator `@cqframework/cql` 4.0.0-beta.1 (its modelinfo loader can't resolve cross-model `FHIR.*`/`USCore.*` refs), and it parked the literal path pending a stable multi-model translator. Research (2026-07-09) established two facts that reopen it: (1) `@cqframework/cql` 4.0.0-beta.1 is the **only** version ever published to npm — that train may never arrive; (2) **translation is unnecessary.** Official CMS/MADiE *computable* FHIR measure bundles ship **pre-compiled ELM** (base64 `application/elm+json`) inside `Library.content`, and MITRE's `fqm-execution` (npm) *executes* those bundles on `cql-execution` + `cql-exec-fhir` — the exact runtime stack this repo already depends on. **Gate result (#258, verified before any code):** the official CMS122v14 MADiE FHIR bundle (`cqframework/ecqm-content-cms-2025` @ `30a627013f1c…`, measure `CMS122FHIRDiabetesAssessGreaterThan9Percent` v0.5.000, `using QICore '6.0.0'`) carries base64 `application/elm+json` for the Measure **and all 9 chained libraries** — `MISSING ELM: NONE`. A feasibility probe then executed the literal artifact end-to-end via fqm-execution against a plain-FHIR patient (IPP/DENOM/DENEX/NUMER all computed). So the ADR-024 blocker is irrelevant: **we run pre-compiled ELM, we do not translate.**
-
-**Decision:** Add **`fqm-execution` pinned to `1.8.5`** as a **DIAGNOSTIC-ONLY** dependency and build the LITERAL execution-diff tier on it.
-- **Isolation is a hard invariant.** `fqm-execution` is imported from **exactly one** module — `backend-ts/src/standards/literal-diff.ts` (a lazy `await import("fqm-execution")`) — and reached **only** from the `/api/measures/cms122/fidelity/diff` route. It must **never** be imported by the run pipeline, `engine/ingress/`, or `worker.ts`. An arch/grep test (`standards/fqm-isolation.test.ts`) asserts the single owner and the empty forbidden set; CI fails if the import leaks.
-- **Transitive deps.** `fqm-execution` pulls `axios`, `handlebars`, `moment`, `lodash`, `cql-exec-fhir`, `cql-execution`, `fhir-spec-tools`, `commander`, `core-js`, `uuid`. Two (`cql-exec-fhir ^2.1.6`, `cql-execution ^3.3.2`) are **already** direct deps at the same versions — no runtime-stack fork. The rest are diagnostic-path only (never loaded unless the literal fidelity-diff route runs), and the pinned version freezes the whole graph.
-- **Three-tier ladder** (`chooseDiffMode(resolver, literalAvailable)` in `routes/measures.ts`): **literal** (vendored official bundle present + every VSAC value set resolves non-empty from the imported `value_sets`) → **subset** (ADR-024 official-subset, when the bundle is absent) → **estimate** (PR-2 criteria-impact, when the value sets don't resolve). The `GET /api/measures/cms122/fidelity/diff` response carries an additive `mode: "literal" | "subset" | "estimate"`. A runtime literal failure (fqm fighting the runtime) is caught and degrades to the subset tier rather than failing the route.
-- **Vendored artifact.** ⚠ **SUPERSEDED by the PR-5 amendment below — do not follow this bullet.** *(As written 2026-07-09:)* The official bundle is committed under `backend-ts/measures/official/cms122v14/` (README with provenance URLs + SHA). Redundant `application/elm+xml` content blobs (which fqm-execution never reads) were stripped to keep the vendored file lean; every library retains its `application/elm+json` + `text/cql`. *(Now: `measures/official/cms122/` under a manifest; `text/cql` is stripped too — only `application/elm+json` survives.)*
-
-**Descriptive-only, structurally guaranteed (ADR-008).** The literal diff **writes nothing** and never sets an `Outcome Status`. It reuses ADR-024's harness-local `enrichForOfficialCms122` (real VSAC codings **appended** to the diff harness's own bundle copy, never the shared `fhir-bundle-builder.ts`, never the live run path) plus a literal-only `stampQiCoreStructure` (normalizes the synthetic Conditions to QICore-active/confirmed with an in-past onset, and adds Encounter `class`) — all fields WorkWell's plain-FHIR cms122 CQL ignores. So WorkWell's cms122 outcomes stay **byte-identical** (guard test `literal-diff.test.ts` + the pre-existing `cms122-official.test.ts`). fqm-execution runs with `trustMetaProfile:false` (retrieve by base FHIR type, since our bundles are plain FHIR) and a `valueSetCache` built from the imported VSAC rows (no runtime VSAC key; the key was only for the one-time `pnpm resolve-valuesets` import). Per-subject population membership (IPP/DENEX/NUMER) maps to WorkWell's outcome vocabulary; divergence attribution is population-level (`initial-population` / `denominator-exclusion` / `numerator-glycemic-status` / `workwell-exclusion`) — the finer per-define attribution remains in the subset path.
-
-**Consequences:** The literal official CMS122v14 QICore artifact now runs as a real, subject-by-subject execution diff — no translator, no VSAC key, **no schema**. New dependency `fqm-execution@1.8.5` (owner-pre-approved for the diagnostic path via the 2026-07-09 roadmap; this ADR records the terms). Reversible: revert the PR (drop the dep + the vendored bundle + `literal-diff.ts`); the ladder degrades to subset/estimate exactly as before. **#251 is superseded/closeable.** Full suite green — 1065 pass / 1 pg-skip / 0 fail. Known bounds: literal diff is **CMS122-only**; gate attribution is population-level; ~~the vendored measure is v0.5.000~~ **(superseded — v1.0.000 since PR-5; see the amendment below)**.
-
-**Amendment (2026-07-24, roadmap §7.4 PR-5) — the vendored artifact moved SOURCE REPOSITORY, not just
-version.** This ADR pinned `cqframework/ecqm-content-cms-2025 @ 30a627013f1c…`, measure
-`CMS122FHIRDiabetesAssessGreaterThan9Percent` **v0.5.000**. The artifact is now
-`cqframework/dqm-content-qicore-2025 @ ca4b4951…`, measure `CMS122FHIRDiabetesAssessGT9Pct`
-**v1.0.000** — a different repository, measure name, and canonical URL, so this is not the version bump
-it looks like. The move follows the 2026-07-24 recalibration: `dqm-content-qicore-2025` is the QI-Core
-content line that also publishes the MADiE test decks we gate on, and all eight priority measures were
-verified present there, so bundle and test deck now come from one pinned source. The fidelity-diff
-response's `officialMeasure.url` changes accordingly — a deliberate, visible API change.
-Two further corrections to this ADR's text: the vendored bundle no longer retains `text/cql` (only
-`application/elm+json` survives reduction), and the artifact lives at `measures/official/cms122/` under
-a manifest, not at `measures/official/cms122v14/` under a versioned filename. **Licensing:** the
-reduction drops all ValueSet resources and their expansions, but the compiled ELM still embeds the
-direct-reference codes the official CQL declares inline (CPT + SNOMED, with descriptions), so
-`measures/official/NOTICE.md` records those terms — including NCQA's commercial-use clause, which is an
-open owner/legal question.
-
-**Amendment (2026-07-24, roadmap §7.4 PR-4) — the quarantine is now a PACKAGE BOUNDARY.** The invariant
-was never "fqm-execution is diagnostic-only"; it was **"its heavy transitive deps must not reach the
-worker's cold-start or request path, and CQL remains the sole outcome authority."** A file allowlist was
-the cheapest way to express that at the time, but it could not survive official-first execution, where
-fqm legitimately becomes a *production* evaluation path (PR-7). The dependency now lives in
-**`@workwell/official-executor`** — one `package.json`, pinned `1.8.5` — whose entry point imports it only
-through a lazy `await import`, so consuming the package costs nothing until something calculates. The
-single allowlist test is replaced by three that are harder to defeat than one grep: the **manifest**
-(no workspace package other than the executor may declare fqm; the app declares none), the **app tree**
-(no `src/` file — nor any other package's source — imports it directly), and the **lazy-import check**
-(every fqm reference in the package entry, comments stripped, must be the dynamic `import(...)` form, so
-the multi-line `import { … } from "fqm-execution"` shape a formatter produces cannot slip past — plus a
-positive assertion that the app cannot even *resolve* fqm under pnpm's strict linking). Both original protections therefore survive, and
-the "diagnostic-only" framing is retired rather than the invariant.
-
-## ADR-025: Measure execution is pluggable behind a `MeasureExecutor` seam; FHIR-native is the default + correctness oracle, CQL→SQL is a parity-gated future executor — E9 (#78)
-
-**Status:** Accepted (2026-07-08). Supersedes the *Deferred-to-Doug* status of **ADR-014**; makes concrete the "opt-in second executor as future work" that **ADR-017** parked.
-
-**Context:** E9 (#78) is the charter's biggest architectural fork (Doug **Q2**): do we **transpile CQL→SQL** so measures run *inside* WebChart's MariaDB report engine (data never leaves — "run where the data lives"), keep the **CQF/FHIR engine** as the report engine (data adapted *out* to FHIR bundles — ADR-017's chosen direction), or a **hybrid**? ADR-014 recorded the recommendation (hybrid, FHIR-native-first) but left the decision *deferred pending Doug's Q2*. Proceeding on our own, the decision has to be robust to **either** answer Doug could give, and E9's own charter says it ships *"a decision, not a build"* (full transpilation is research-grade). So the deliverable is the **decision + the seam shape**, not a transpiler.
-
-**Decision:** Adopt the **hybrid (Option C)** as the architecture, commit **Option A** as the built default, and stub **Option B** behind the seam:
-- **One `MeasureExecutor` port** (`backend-ts/src/engine/measure-executor.ts`) — a pluggable measure-execution strategy that **extends `EvaluateMeasureBinding`** (the headless patient+measure → `MeasureOutcome` contract), so any executor is directly injectable into `evaluateBundle`/`evaluateBatch` (`opts.engine`) and the run pipeline **with no new plumbing**. `resolveMeasureExecutor(env)` selects config-driven, mirroring `resolveDataSource`/`resolveForecaster`/`resolveChannel`/`resolveStandingOrderProvider`.
-- **Option A — `fhirNativeExecutor` (built, DEFAULT + correctness oracle).** Adapt data into a FHIR bundle, evaluate with the existing JVM-free CQL→ELM engine. It IS the engine the run pipeline + E12 ingress already use, so the default introduces **no second evaluation path** and changes **no outcome** (parity-tested against the direct engine path). Full eCQM fidelity; CQL `Outcome Status` stays the sole compliance authority (ADR-008).
-- **Option B — `sqlPushdownExecutor` (INERT stub, research-grade).** Run a measure as SQL inside WebChart's MariaDB. **Not built:** general CQL→SQL (interval/temporal algebra, FHIRPath navigation, value-set expansion, 3-valued null logic) does not map to portable SQL, and the only concrete CQL→SQL transpiler (VA) is Databricks/Spark-only, not transactional MariaDB. Inert-unless-built (mirrors the inert `webChartDataSource`): it constructs so the seam is fully wired and selection is testable, but `evaluate` **rejects loudly**. Selected only on an explicit `WORKWELL_MEASURE_EXECUTOR=sql-pushdown` opt-in — so the deployed default is byte-identical to today.
-
-**Why this is right even without Doug's answer.** It can't be wrong either way: if Doug requires in-WebChart execution, the seam is already there for a **scoped, per-measure** SQL executor; if "CQL→SQL" was shorthand for "replace hand-written SQL reports with a measure engine," that's Option A, which we're already building. A's weakness is **scale** (materializing bundles + per-subject evaluation at population size — E13 PR-2 sidestepped it by *generating* the 120k tenant's outcomes rather than live-evaluating 1.68M/run), which is ordinary batch/incremental engineering; B's weakness is **fidelity**, which is research-grade and possibly unsolvable — so B can never be the correctness *authority*, only a parity-gated optimization for a narrow measure subset (existence/recency/simple counts). A compliance engine that is only right for the easy measures is not defensible (ADR-008, and the standards exports MeasureReport/QRDA/QI-Core all depend on the real CQL engine).
-
-**Guardrail — parity gate.** Any future SQL-pushdown executor must pass **golden parity** against `fhirNativeExecutor` (the oracle), **per measure**, before it is allowed to serve. Never trusted on assertion.
-
-**Consequences:** Descriptive only (ADR-008) — the executor decides *how* a measure is computed, never that anything but CQL sets `Outcome Status`. **No schema, no new dependencies, no engine change** (the seam is additive; the default delegates to the existing engine). *Future-wiring note:* when a live route is switched onto this seam it must thread the env-built engine through — `resolveMeasureExecutor(env, await engineForEnv(env))` — so the keyed VSAC path (ADR-023) is preserved; a bare `resolveMeasureExecutor(env)` builds a resolver-less engine (correct for the unwired default today, byte-equal for the `urn:workwell:*` measures, but it would silently drop VSAC expansion on the keyed path). B is deferred as its own research-grade epic (revisit when a concrete high-volume WebChart measure demonstrates A can't serve it economically, and once the WebChart schema — the same gating unknown as E12 PR-2c — is confirmed). Reversible by reverting the PR.
-
-## ADR-024: Official CMS122 fidelity via a faithful subset, not the literal QICore CQL — E14 PR-3 (#186)
-
-**Superseded — full text in [`docs/archive/DECISIONS_ARCHIVE.md`](archive/DECISIONS_ARCHIVE.md#adr-024).** The faithful-subset approach to CMS122, correct while the translator could not handle the official artifact. Superseded by ADR-026/027.
-
-## ADR-023: Live VSAC value-set resolution behind the `ValueSetResolver` port (composite, inert-unless-configured, descriptive-only) — E14 PR-3 on-ramp
-
-**Status:** Accepted (2026-07-05). **Context:** The engine's `ValueSetResolver` seam (ADR/E3.2, #90) could feed a populated `cql.CodeService` from a store-backed adapter, but a **live** VSAC (NLM UMLS) expansion was still a "future drop-in" — the value sets referenced by real eCQMs (the ~21 VSAC OIDs in the E14 CMS122v14 reference) resolved only against locally-seeded `value_sets`, not the authoritative NLM terminology service. E14 PR-3 (the official-CQL execution/outcome diff) needs real value-set membership, and the CMS122 fidelity report already flags SIMPLIFIED criteria that a true value-set window would tighten. The bar: add live VSAC without any risk of drifting a current measure's `Outcome Status`.
-
-**Decision:** A live VSAC resolver behind the existing port, layered so it is **strictly additive**:
-- **Transport seam** — `VsacClient` (`backend-ts/src/engine/cql/vsac-client.ts`): `fixtureVsacClient` for tests + `httpVsacClient` (live NLM FHIR terminology service `GET {base}/ValueSet/{oid}/$expand`, HTTP Basic auth username `apikey` + password = the UMLS API key, pages `expansion.contains`, throws on non-2xx). Uses global `fetch` — **no new dependency**.
-- **Resolver** — `VsacValueSetResolver` (`vsac-value-set-resolver.ts`): expands an OID via the client, memoized per-OID, and **propagates errors** — never a silent empty set (a masked empty expansion would quietly change a retrieve's membership).
-- **Composite routing** — `CompositeValueSetResolver` + `vsacOid`/`isVsacOid` (`composite-value-set-resolver.ts`): VSAC OIDs — bare (`2.16.840…`) **or** the `urn:oid:2.16.840…` form the repo's authored/exported/official CQL emits (`ai-assist.ts`, `mat-export.ts`) — route to the VSAC tier, normalized to the bare OID VSAC's `$expand` expects; `urn:workwell:*` / canonical URLs / names → the local `StoreValueSetResolver`. So the synthetic measures' `urn:workwell:vs:*` references keep resolving locally exactly as before, and a `urn:oid:` reference no longer silently falls through to an empty store lookup (Codex P2).
-- **Inert-unless-configured selection** — `resolveValueSetResolver(env, store)` (`resolve-value-set-resolver.ts`): plain `StoreValueSetResolver` by default; the composite **only** when `WORKWELL_VSAC_API_KEY` is set (mirrors `resolveForecaster`/`resolveChannel`/`resolveDataSource`).
-- **Key-gated engine builder** — `engineForEnv(env)` (`engine-factory.ts`). With **no** `WORKWELL_VSAC_API_KEY` it returns a single shared stateless `CqlExecutionEngine` with **no resolver** — byte-identical to today's inline-code path (the store is not even consulted). Only with the key set does it attach the composite resolver. The VSAC credentials are read from the worker **`env` first** (how `DATABASE_URL`/auth/CORS and every other `WORKWELL_*` flag arrive on @mieweb/cloud), with a `process.env` fallback for Node-host/CLI contexts — reading `process.env` alone would leave a worker deployment that sets only `env.WORKWELL_VSAC_API_KEY` on the inline path (Codex P2). A **seed guard** keeps the inline engine when the local `value_sets` are not yet seeded (`stores.valueSets.isEmpty()`): the `urn:workwell:*` seed runs lazily via /api/measures, so a run/scheduler as the first op on a fresh DB would otherwise expand audiogram's set to `[]` and mis-evaluate — inline is byte-equal for those measures until the seed lands (Codex P2). And on the keyed path it builds a **fresh engine + resolver per call** rather than caching one process-wide: the composite's `StoreValueSetResolver` tier snapshots `store.listAll()` for its lifetime, so a process-cached resolver would freeze that snapshot (an operator value-set edit would then serve stale expansions until restart — Codex P1). A per-evaluation resolver (one consistent snapshot per run; fresh next run) always reflects current value sets; engine construction is cheap (FHIRHelpers ELM is a bundled lookup, not a parse). Wired into every runtime evaluation path — the `runs`/`cases`/`measures` routes, `compliance-simulation`, **and** the nightly `schedulerTick` (ALL_PROGRAMS). Deliberately **not** wired into the DB-less `evaluate-bundle.ts` ingress library or the seed CLIs (they stay portable/offline).
-
-**Owner-run import CLI, no DDL.** `pnpm resolve-valuesets` (`backend-ts/src/run/cli/resolve-valuesets.ts`) `$expand`s each target OID via VSAC and upserts the real codes into the **existing** `value_sets` columns (`source="VSAC"`, `status=ACTIVE`, `resolution_status` RESOLVED/ERROR, `resolution_error`, `expansion_hash`, `last_resolved_at`) via `upsertResolvedValueSet` — idempotent per-OID, a failed OID → an ERROR row + continue, audited `VALUE_SETS_RESOLVED` per OID. Default target = the 21 CMS122v14 reference OIDs; `--oid <oid>` (repeatable) / `--measure cms122` override. Owner-run **on demand** (honors `DATABASE_URL` for Neon), **not** on deploy; requires `WORKWELL_VSAC_API_KEY`. **No schema change** — existing columns only (DATA_MODEL §3.4).
-
-**Descriptive only (ADR-008).** VSAC expansion changes *how a value set is populated*, never *how compliance is decided*. Because the composite falls back to the local store for `urn:workwell:*`, enabling the key does **not** change any current measure's `Outcome Status` — guarded by `audiogram-vsac-parity.test.ts` (audiogram inline == composite-with-VSAC-key-on == expected across all scenarios). New env vars: `WORKWELL_VSAC_API_KEY` (the UMLS API key; **the demo stack leaves it unset**) and `WORKWELL_VSAC_BASE_URL` (default `https://cts.nlm.nih.gov/fhir`).
-
-**Rationale:** unblocks real value-set expansion and the E14 official-CQL on-ramp without any compliance drift or new dependency, and keeps the unkeyed (demo) path provably unchanged.
-
-**Consequences:** Full backend suite green — 958 pass / 1 pg-skip / 0 fail; no new deps. Reversible: unset the key → plain `StoreValueSetResolver` (pre-change behavior); remove imported rows with `DELETE FROM workwell_spike.value_sets WHERE source = 'VSAC';` (schema-qualify on Postgres). **Out of scope (the E14 PR-3 follow-on, not done here):** executing the official CMS122 CQL and diffing outcomes subject-by-subject — that needs the official CQL→ELM plus synthetic-data enrichment (encounters/hospice/frailty) so the official denominator populations resolve.
-
-**Notes (2026-07-05 hardening):**
-- The CLI-persisted `source='VSAC'` rows are the **governance catalog** (resolution status / provenance / expansion hash in `value_sets`) — the runtime `CompositeValueSetResolver` live-fetches dotted OIDs via HTTP and does **not** currently read these persisted rows as an evaluation cache. A store-then-VSAC fallback (read the persisted expansion when present, live-fetch only on a miss) is a possible E14 PR-3 enhancement.
-- `evaluate-bundle.ts` (the DB-less ingress library) and the seed CLIs intentionally stay on the **inline** engine (no resolver). So if a future measure is added whose CQL references a **real dotted VSAC OID**, historical snapshots/exports produced via the inline path and live runs produced via the VSAC path could **diverge for that measure** — to be reconciled when PR-3 wires the first such measure.
-- `httpVsacClient` now guards the response: a **200 with an empty expansion but `total > 0`** (the ADR-008 silent-drift case) throws, as does a malformed response with no `expansion` object and a paging loop that exceeds the max-iteration guard; a legitimately-empty value set (`total === 0`, no members) still returns `[]`.
-
-## ADR-022: Cross-system identity is a read-time resolution layer (match-don't-auto-merge; human-in-the-loop) — E15 PR-1 (#187)
-
-**Status:** Accepted (2026-07-01). **Context:** Doug's June-15 feedback — *"same employee in two different systems,"* *"an expatriate might move from one country to another,"* *"someone might move from one oncologist to another,"* plus the DUPLICATE-badge / cross-system employee-search mockups. WorkWell assumed a single directory; E13 (ADR-019) added a tenant/system dimension, but each person still belonged to exactly one system keyed by a system-local `externalId`. Reality: one human is a patient in ≥2 WebChart systems, those records may not obviously be the same person (so they must be *flagged*, not silently merged), and a person's compliance history must **follow** them across a move rather than restarting.
-
-**Decision:** A pure, read-time **person-identity layer** (`backend-ts/src/identity/`) above the existing tenant→enterprise→location→provider→patient hierarchy. A `Person` is a resolved *view* over ≥1 source-system records grouped by a **deterministic match key** (a shared national/MRN identifier; absent one, a record keys uniquely and never groups by accident — the documented seam where a real EMPI/probabilistic matcher drops in, E15 PR-3). `duplicateCandidates` = people whose links span >1 tenant (the DUPLICATE surface). `mergedComplianceTimeline` = the union of each linked record's outcomes, time-ordered and system-tagged, with a mobility annotation (PRIOR → ACTIVE + move date). Exposed read-only via `GET /api/identity/people`, `/people/:id`, `/duplicates`.
-
-**Match, don't auto-merge; human-in-the-loop.** Deterministic candidate keys produce *suggestions*; the confirm/unlink WRITE path (audited `IDENTITY_LINK_*`) is E15 PR-2, owner-gated. EMPI-grade probabilistic matching is explicitly out of scope for PR-1.
-
-**Descriptive only; E13 reconciliation preserved.** Identity groups and follows — it never recomputes compliance (`Outcome Status` per (subject, measure, system) stays authoritative, ADR-008) and never re-aggregates tenant counts: each source record still belongs to exactly one tenant, so All = Σ tenants (ADR-019) holds. A guard test asserts this.
-
-**Consequences:** **No schema in PR-1** — cross-system people are modeled in the read-time synthetic directory (mirrors E13/ADR-019): a shared synthetic `nationalId`/`dateOfBirth` on a couple of existing twh↔ihn employee pairs (zero count change; one pair is the mobility subject, `emp-006` moved twh→ihn). PR-3 = wire the resolver to real WebChart sources via the E12 PR-2 adapter seam (blocked on MIE's WebChart schema). Frontend: a new `/people` route (search + DUPLICATE badge + unified person view + mobility banner). No new deps.
-
-**PR-2 (this slice) — the owner-gated reconcile write path.** A `person_links` table (owner-approved DDL, floor + ceiling, `workwell_spike`; DATA_MODEL §3.26) records a human-confirmed assertion that two source records ARE (`CONFIRMED`) or are NOT (`BROKEN`) the same person. `resolvePeople` becomes **override-aware**: over the auto matchKey grouping (via union-find), a CONFIRMED pair **unions** two records (links even without a shared identifier), a BROKEN pair **removes** the direct auto/confirmed edge (undo a bad shared-id auto-match, or unlink a prior CONFIRM). Pairs are normalized `(a) <= (b)` so the key is direction-independent and UNLINK re-upserts to BROKEN (last write wins). The component's `personId` is the smallest **record ref-key** in it (unique per component — a match-key-based id could not distinguish the two halves of a BROKEN split). Write path: `POST /api/identity/people/:personId/reconcile` (body `{action: CONFIRM_LINK|UNLINK, tenantId, externalId}`), **CASE_MANAGER/ADMIN-gated** + audited (`IDENTITY_LINK_CONFIRMED`/`IDENTITY_LINK_BROKEN`). Frontend: an "unlink" reconcile action on the person view (CM/ADMIN). Still descriptive only — the link overrides read-time grouping, never `Outcome Status`; still match-don't-auto-merge (a human asserts every link). Reversible: `DELETE FROM person_links`. A full merge-picker UI (CONFIRM_LINK across two separately-resolved people) is API-ready but a follow-up. PR-3 remains blocked on E12 PR-2.
-
-## ADR-021: Quality-over-time is a materialized AGGREGATE snapshot store (numerator/denominator per measure/month/scope) — E16 PR-1
-
-**Status:** Accepted (2026-06-30). **Context:** Doug's June-24 ask — *"your system is the source of truth for quality over time… how to know if they were compliant in December? October? August?… you can dump into a table and get the numerators and denominators"* — for 160k patients. The product had **no** persisted historical-quality store: every `/programs` trend recomputed live by re-aggregating `outcomes` grouped by `run`, which only exists for dates a run executed and does not scale (1.68M outcome rows/run at population scale; the per-person Simulate #197 is advisory + non-persisted).
-
-**Decision:** Materialize an AGGREGATE snapshot — one `quality_snapshots` row per (measure, calendar month, scope: all → tenant → site → provider) with numerator/denominator + the 5 bucket counts — on completion of every population run (ALL_PROGRAMS/MEASURE), read back as a bounded table query (DATA_MODEL §3.24). numerator/denominator reuse the existing proportion model (`fhir/measure-report.ts` `countPopulations`: numerator = COMPLIANT, denominator = IPP − EXCLUDED). The scale tenant folds in via the bounded `aggregateScaleRun` GROUP BY (O(providers), **never** the 120k rows). Idempotent (UNIQUE (measure_id, period, scope_level, scope_id), last-write-wins), audited (`QUALITY_SNAPSHOT_MATERIALIZED`), best-effort (a snapshot failure never fails the run — it is hooked AFTER `finalizeRun`).
-
-**Aggregate-only — explicitly NOT per-employee.** A per-subject historical store would reintroduce the very 160k-row scan the table exists to avoid; the per-person "Simulate Compliance History" path (#197) already covers the individual case.
-
-**Descriptive only.** A snapshot counts what CQL already decided; it never sets or overrides `Outcome Status` (ADR-008). Reconciles All = Σ tenants = Σ sites = Σ providers at every (measure, period) — the same invariant as the live hierarchy rollup (ADR-019).
-
-**Consequences:** the first E16 schema (one new owner-applied table; additive `CREATE … IF NOT EXISTS`; reversible by `DELETE`). PR-1 = the table + `QualitySnapshotStore` port (floor + ceiling) + the pure `buildSnapshotRows` core + `materializeRun` + the run-completion hook. PR-2 = the `GET /api/quality/history` read API + an as-of backfill CLI (replacing the synthetic sine-wave trend-history, #180) + the `/programs` trend rewired to read snapshots. PR-3 = the UI (scope selector + as-of month picker; a "compliance on date D" KPI). Real-data (vs synthetic) materialization rides on the same path once a real `PatientDataProvider` lands (E12 PR-2).
-
-## ADR-020: Population scale via generated outcomes + encoded `subject_id` + SQL aggregation (provider-leaf) — E13 PR-2 (#185)
-
-Date: 2026-06-26
-Status: Accepted
-
-**Decision.** E13 PR-2 proves the multi-tenant rollup scales to a ~120k-subject tenant (`mhn` /
-"MetroHealth Network") on the live stack. Because live-evaluating 120k×14 ≈ **1.68M CQL evaluations per
-run** is infeasible (and storing/serving millions of rows in app memory worse), the scale tenant's
-compliance is **generated, not live-evaluated**, seeded **once on-demand** (`pnpm seed:scale`, modeled
-on `seed:trend-history` — NOT on deploy), and **aggregated in SQL**:
-- The 120k subjects are **not** in the in-memory directory. They exist only as `outcomes` rows whose
-  `subject_id` **encodes the hierarchy** — `mhn|Lxx|Pxx|nnnnnnn` (`scale-structure.ts` is the codec +
-  the small ~240-provider structure that names the rollup nodes).
-- A new `OutcomeStore.aggregateScaleRun(runId)` does a single `GROUP BY` (Postgres `split_part`, SQLite
-  `substr` over the fixed-width id) → O(locations×providers×statuses) rows (~1.2k), **never** the
-  per-subject rows. This is the one path that must scale.
-- The hierarchy rollup + programs overview **exclude `seed:scale` runs from the existing in-memory
-  scan** (`runTriggeredBy !== 'seed:scale'`) so the live 150-employee tenants keep their exact
-  directory-resolved path and the 120k rows are never materialized in app memory; the scale tenant is
-  built/folded in from `aggregateScaleRun`. `?tenant=mhn` returns the scale subtree only.
-
-**Provider-leaf.** The scale subtree stops at **provider** (no patient level) — enumerating 120k
-patient nodes would defeat the purpose. Reconciliation (parent = Σ children) holds for the levels that
-exist: All = Σ tenants; `mhn` = Σ locations = Σ providers. The roster (`/compliance`) is **excluded**
-(no paging through 120k individuals).
-
-**Consequences.** **No DDL** (encoded `subject_id` + `GROUP BY` over existing columns), **no new deps**.
-The default demo stays 150 live employees until the owner runs `seed:scale`; **reversible** by deleting
-the `seed:scale` runs+outcomes (documented SQL). Every scale-seed write is audited
-(`SCALE_POPULATION_SEEDED`). CQL `Outcome Status` stays the sole compliance authority for the
-live-evaluated subjects (ADR-008) — the scale tenant is generated demo data and never sets a live
-subject's status. **Deferred:** the scale tenant in the roster / per-patient drill-down /
-trend·top-drivers; live CQL evaluation of the scale tenant; PR-3 scheduled cron recompute.
-
-**Update (2026-07-08, `feat/scale-batch-eval`) — the fabricated-outcome path is superseded by real
-batch evaluation.** The formerly-deferred "live CQL evaluation of the scale tenant" is now the
-default: `batchEvaluateScalePopulation` (`backend-ts/src/run/batch-evaluate-scale.ts`) produces the
-`mhn` outcomes by **real CQL evaluation** — subject-major (each subject's bundle generated once via a
-`ScaleSubjectGenerator`, default `webChartRealisticGenerator` emitting real LOINC/CVX/CPT codes routed
-through the WebChart terminology crosswalk, evaluated against all runnable measures, fanned out to the
-per-measure runs), bounded-memory, whole-batch resumable, per-subject error-isolated (failure ⇒
-MISSING_DATA), audited `SCALE_POPULATION_EVALUATED`. **What ADR-020 keeps unchanged:** the
-`mhn|Lxx|Pxx|n` `subject_id` encoding, `aggregateScaleRun`'s content-agnostic SQL `GROUP BY`, the
-provider-leaf rollup, and the reversibility (same `triggered_by='seed:scale'` rollback SQL) — so only
-the outcomes' provenance changed (fabricated distribution → real evaluation). `pnpm seed:scale`
-defaults to `--mode evaluate`; `--mode fabricated` keeps the legacy instant path one more release;
-`--trim-evidence` stores minimal `{scale:true}` evidence for a large run. No schema, no new deps;
-descriptive (ADR-008 preserved). Spec/plan:
-`docs/superpowers/specs/2026-07-08-option-a-scale-batch-eval-design.md`,
-`docs/superpowers/plans/2026-07-08-option-a-scale-batch-eval.md`.
-
-## ADR-019: Multi-tenant rollup modeled in the read-time synthetic directory; cross-system aggregate root — E13 PR-1 (#185)
-
-Date: 2026-06-26
-Status: Accepted
-
-**Decision.** E13 PR-1 adds a **tenant/system dimension** above the existing
-enterprise→location→provider→patient hierarchy (#74 E4) so compliance from **multiple WebChart systems**
-rolls up into one dashboard. The dimension is modeled **entirely in the read-time synthetic directory**
-(`backend-ts/src/engine/synthetic/employee-catalog.ts`): a `Tenant`/`Enterprise` model + `tenantId` on
-`EmployeeProfile`/`Provider`, exactly like `site`/`providerId` today. A second synthetic system —
-**Indus Hospital Network** (`ihn`, 50 employees across 3 campuses) — joins the existing 100-employee
-**Total Worker Health** (`twh`) tenant; `EMPLOYEES` spans both, so the run pipeline evaluates everyone and
-both systems carry real outcomes. **No schema, no new dependencies** — `outcomes`/`cases` still persist only
-`subjectId`; the hierarchy above a subject is resolved in code (the #93 schema stop-and-ask gate is satisfied
-with no migration, consistent with ADR-010).
-
-**Cross-system aggregate root.** The rollup (`hierarchy-rollup.ts`) returns a single reconciling
-**"All Systems"** root (`level:"all"`) whose children are **tenant** nodes, each →
-enterprise → location → provider → patient. The E4 reconciliation invariant (parent totals = Σ children at
-every level) extends to the two new top edges (All = Σ tenants; tenant = its enterprise). Internal
-accumulation maps are **tenant-qualified** (`${tenantId}|…`) so same-named locations/providers never merge
-across systems. `?tenant=<id>` returns that single tenant's subtree as the root (an empty zero-node when the
-tenant has no data).
-
-**Multi-tenant everywhere via an optional filter.** Every read surface (`/api/hierarchy/rollup`,
-`/api/compliance/roster`, `/api/programs/*`) gains an **optional `?tenant=<id>`** filter (default = all
-systems), plus a new read-only `GET /api/tenants` for the UI selector (authenticated under the catch-all
-`GET /api/**`). Omitting `tenant` preserves prior behavior aggregated across all systems, so existing callers
-keep working; the live demo numbers grow because the second tenant is now evaluated (accepted trade-off).
-
-**Consequences.** Tenant resolution is **display/grouping only** — it never sets or overrides an outcome; CQL
-`Outcome Status` remains the sole compliance authority (ADR-008). Reversible by reverting the PR (Tenant 2 is
-purely additive synthetic data). **Deferred to later E13 PRs:** population-scale batch (~120k) + a seed/scale
-harness (PR-2), and scheduled cron recompute wiring the inert `/api/admin/scheduler` stub (PR-3); the real
-WebChart/MariaDB→FHIR adapter is E12 PR-2 (blocked on MIE's schema).
-
-## ADR-018: Standards fidelity is structural/definitional-first; official-CQL execution deferred — E14 (#186)
-
-**Superseded — full text in [`docs/archive/DECISIONS_ARCHIVE.md`](archive/DECISIONS_ARCHIVE.md#adr-018).** 'Official-CQL execution deferred' — overtaken entirely; CMS's published artifacts run in production.
-
-## ADR-017: E12 data ingress is FHIR-native-first; adapters feed the unchanged engine (no CQL→SQL transpile) — E12 (#184)
-
-Date: 2026-06-26
-Status: Accepted
-
-**Decision.** E12 (pluggable data adapters) resolves the E9 (#78) architectural fork — how real
-WebChart/EHR data reaches the measure engine — in favor of **FHIR-native-first**. A new patient-data
-**ingress seam** sits *above* the unchanged `CqlExecutionEngine`: data sources adapt their native
-representation into FHIR bundles, which the existing JVM-free CQL→ELM engine evaluates. We do **not**
-transpile CQL→SQL to run measures inside WebChart's MariaDB.
-
-**The fork (E9 / #78).** Three options were on the table (ADR-014's recommendation memo): (A) a
-FHIR-native adapter feeding the existing engine; (B) a wholesale CQL→MariaDB transpiler; (C) hybrid.
-We choose **FHIR-native-first (A, opening the door to C later)** because the engine is already built,
-golden-parity-proven across all runnable measures (ADR-008), and JVM-free — so the adapter is the only
-new surface. A CQL→SQL transpiler is research-grade/high-risk (the only concrete transpiler is
-Databricks-only/partial, targets Spark not transactional MariaDB) and would fork the execution path. The
-adapter seam is fully reversible — it adds a layer, it does not touch the engine. A bounded SQL-on-FHIR
-opt-in second executor stays available as future work (ADR-014 Option C) but is not built here.
-
-**PR-1 deliverable.** A new `backend-ts/src/engine/ingress/` module: a `PatientDataSource` port + a
-DB-less, fs-less JSON-bucket library entry — `evaluateBundle(bundle, measureId)` (single) and
-`evaluateBatch(bundles, measureId)` (a "bucket", with per-item error isolation). `resolveDataSource(env)`
-selects the source config-driven (mirrors `resolveForecaster`/`resolveChannel`/`resolveStandingOrderProvider`:
-JSON by default). The headless CLI is refactored to reuse `evaluateBundle` (one evaluation path). The
-library path imports no DB and no `node:fs`, so it stays portable across every `@mieweb/cloud` target.
-
-**WebChart adapter is an inert stub now.** `webChartDataSource` is **inert-unless-configured** —
-selected only when both `WORKWELL_WEBCHART_BASE_URL` + `WORKWELL_WEBCHART_API_KEY` are set, and it
-rejects with a clear "not yet wired (E12 PR-2)" message. The real WebChart/MariaDB→FHIR mapping is **PR-2**.
-
-**Consequences.** CQL `Outcome Status` remains the sole compliance authority (ADR-008) — the ingress
-seam only feeds bundles in, it never decides compliance. **No schema, no new dependencies.** The engine
-is unmodified. PR-2 adds the real WebChart adapter behind the same port; deeper data depth and the
-optional SQL-on-FHIR executor are later epics.
-
-## ADR-016: Segments / risk-groups are an applicability layer, not a compliance authority — E11.3 (#183)
-
-Date: 2026-06-25
-Status: Accepted
-
-**Decision.** A *segment* (risk-group) maps a cohort to an applicable rule-set. The cohort is a `role`/`site`
-predicate rule (`{match: ANY|ALL, conditions:[{attr, op, value}]}`) plus per-employee INCLUDE/EXCLUDE
-overrides (hybrid membership; EXCLUDE wins over INCLUDE). The rule-set is a list of measure ids. A subject's
-**applicable measures** = the union of the rule-sets of every **enabled** segment the subject belongs to.
-
-Segment applicability gates two things only: **case creation** (the run→case upsert is skipped for an
-out-of-cohort `(subject, measure)`) and **display** (the roster + per-employee card show `NOT_APPLICABLE`).
-It **never** changes CQL evaluation or `Outcome Status` — the outcome is always computed and persisted with
-full evidence even when no case is created (ADR-008 holds; CQL is the sole compliance authority). The single
-applicability definition lives in `backend-ts/src/segment/segment-applicability.ts` and is consumed by both
-the roster read model and the run pipeline.
-
-**Reversibility invariant.** With **zero enabled segments, every measure is applicable to everyone** — i.e.
-the exact pre-E11.3 behavior. Disabling or deleting all segments fully reverts the feature, so it is a safe
-additive overlay. A *disabled* segment is also not selectable as a roster column/row scope (it is not in
-effect).
-
-**Persistence.** Three owner-gated tables on both the SQLite floor and the Postgres ceiling
-(`segments`, `segment_measures`, `segment_overrides`; see DATA_MODEL §3.22) behind a `SegmentStore` port —
-the first E11 feature to add schema (the rule-builder halves were schema-free). CRUD is exposed at
-`/api/segments` (writes ADMIN-only + audited `SEGMENT_*`; reads authenticated). The Configure Groups editor
-UI is E11.3 PR-2.
-
-**Scope.** Predicates are `role`/`site` only for now; richer (FHIR-data, program-enrollment) predicates and
-WebChart-group import are deferred to later epics (E12+).
-
-## ADR-015: CQL is canonical; rule-params compile to CQL (codegen) — E11.1 (#183)
-
-**Decision.** Answering Doug's "is CQL or YAML canonical?": **CQL/ELM is the sole execution + standards-
-fidelity layer** (ADR-008 holds — `Outcome Status` is the only compliance authority). Structured
-**rule-params** (a new `rule:` block in a measure's YAML) are the canonical *authoring* surface for
-parametric measures; a deterministic **codegen** (`backend-ts/src/engine/cql/codegen/generate-cql.ts`)
-compiles `rule:` (+ the existing `bindings:` codes) → CQL → ELM via the existing pipeline. **One execution
-path — no second evaluator.** Codegen is **opt-in per measure**: a measure with no `rule:` block keeps its
-hand-written `.cql` (eCQM/complex measures stay hand-authored; E14 import/diff unaffected).
-
-**Scope (E11.1).** Two rule shapes: `series-completion` (mmr/varicella/hepatitis_b) and `windowed-recency`
-(audiogram/hypertension/cholesterol_ldl — the code-scoped uniform windowed measures). The generated CQL
-uses canonical define names and is proven **`Outcome Status`-equivalent** to the hand-written CQL across the
-synthetic scenarios (`codegen-parity.test.ts`, 6 measures × 4 scenarios). **No cutover** — the hand-written
-`.cql` remains the build source; `measures/generated/<id>.cql` is the parity artifact. Legacy non-code-scoped
-measures (hazwoper, tb_surveillance) are excluded pending a code-scope migration. The Rule Builder UI (E11.2)
-emits the `rule:` params; segments/risk-groups (E11.3) are separate.
-
-**Consequences.** Non-CQL authors can change a rule's thresholds via params (E11.2 builds the form); CQL
-remains the standards layer; no schema/DDL (rule-params are build-time YAML); no new runtime deps.
-
-**E11.2a (codegen extensions).** Added three additive, back-compatible rule capabilities to the codegen:
-**grace** (windowed — `overdueThreshold = windowDays + gracePeriodDays`, extends the Due-Soon band before
-OVERDUE), **titer** (series — `allowPositiveTiter` + a titer Observation binding ORs `Has Positive Titer`
-into `Series Complete`, a real immunity path), and **declination** (a `Refused` define wherever a refusal
-binding is present — read by the roster's DECLINED display, never changes `Outcome Status`). All fields are
-optional; absent ⇒ E11.1 output byte-for-byte, so the parity proof is unaffected. Proven by behavioral
-goldens (`generate-cql-extensions.test.ts`). The Hep B multi-alternative-series with min-interval validation
-+ multi-CVX is deferred. The E11.2b Rule Builder UI emits these params.
-
-**E11.2c (multi-alternative series).** The `series-completion` codegen now supports **multi-alternative
-series** — an OR of alternative dose series (real Hep B = Heplisav-B 2-dose CVX 189 OR traditional 3-dose
-CVX 08/43/44/45) — each alternative carrying a **multi-CVX code set** and optional **per-alternative
-minimum dose intervals** (an ordered multi-source `exists` with inclusive `>=` day gaps between doses).
-Additive and back-compatible: absent `alternatives` ⇒ byte-identical to E11.1, so the `codegen-parity.test.ts`
-proof is unchanged. CQL stays canonical (ADR-015) — this is the codegen capability only; no live measure is
-repointed in PR-1 (PR #203).
-
-**E11.2c PR-2 (live Hep B repoint).** The live `hepatitis_b_vaccination_series` measure is now repointed
-onto this capability (Heplisav-B 2-dose CVX 189 ≥28d OR traditional 3-dose CVX 08/43/44/45, ACIP intervals
-28/56d). This is **additive seed/app data — no DB schema/DDL** (value-set CVX 44/45 + YAML rule +
-alternative-aware synthetic dose model); the hand-written + generated Hep B CQL/ELM were regenerated. Hep B's
-demo compliance semantics shift to Heplisav-vs-traditional by design (called out in JOURNAL + MEASURES);
-reversible by reverting the PR. CQL `Outcome Status` stays the sole compliance authority (ADR-008).
-
-## ADR-014: CQL→SQL bridge (charter Q2) — recommendation recorded, decision DEFERRED to Doug
-
-**Superseded — full text in [`docs/archive/DECISIONS_ARCHIVE.md`](archive/DECISIONS_ARCHIVE.md#adr-014).** Deferred to Doug and never returned as a decision; ADR-025 settled it by building the seam with the SQL path inert.
-
-## ADR-013: E7 order-proposal engine — `ProposedOrder`/`StandingOrderProvider` port (EH-ready, simulated by default)
-
-- **Date:** 2026-06-19
-- **Status:** Accepted
-- **Epic:** #77 (E7 order generation)
-- **Context:** The TWH charter's "Action Evaluators → orders" layer calls for generating proposed
-  orders from non-compliant measure findings — audiogram overdue → propose audiogram; TB screening
-  overdue → propose TB screen. Three design questions had to be resolved up front.
-
-  **1. Advisory vs. auto-submit.** Orders in clinical systems (EHR, EH) are actionable: submitting
-  one can schedule an appointment, trigger a workflow, or notify a provider. Auto-submitting from a
-  compliance system without a human review step violates the spirit of the AI_GUARDRAILS rule and the
-  project's human-in-the-loop contract. Proposed orders must be advisory — generated for a human
-  reviewer who decides to submit or discard.
-
-  **2. Standing-order deduplication.** Duplicate orders are a patient-safety concern (and flagged in
-  the charter). The engine must detect when a qualifying standing order already exists for a subject
-  and suppress a new proposal for that subject rather than adding a redundant one.
-
-  **3. EH integration.** The real standing-order query and the real order-submission write are EH
-  FHIR API calls. Those require credentials and a live EH instance (Doug Q6), and are inert stubs
-  today. The `OutreachChannel`/`ImmunizationForecast` port pattern applies: simulated by default,
-  inert-unless-configured.
-
-- **Decision:**
-  - **`ProposedOrder` domain type** (`backend-ts/src/order/proposed-order.ts`): `{subjectId,
-    measureId, order, reasonOutcome, priority, status, dedupeKey, authoredOn,
-    suppressedByStandingOrder?}` (`order` is `{code, system, display}`). `toServiceRequest()`
-    emits a FHIR R4 `ServiceRequest` (`intent:"proposal"`, `status:"draft"`) hand-built as JSON (no
-    FHIR runtime dependency — same pattern as `MeasureReport`/QRDA). `bundleOf()` wraps a set into a
-    collection `Bundle`.
-  - **`order-catalog.ts` — action-evaluator map:** runnable measure → `OrderCode` (system + code +
-    display). Reuses the `terminology_mappings` seed standard codes where present (audiogram → CPT
-    92557; tb_surveillance → CPT 86580; flu_vaccine → CVX 141; hazwoper → `hazwoper-exam` in
-    `urn:workwell:vs:hazwoper-exams`). LOCAL codes (`urn:workwell:orders`) for measures without a
-    seed mapping (e.g., BMI screening). No new DB dependency.
-  - **Panel=Risk selection:** `proposeOrders(outcomes, provider)` in `order-proposal.ts` classifies
-    the Denominator − Numerator subset: OVERDUE/DUE_SOON/MISSING_DATA outcomes propose; COMPLIANT and
-    EXCLUDED do not. Risk maps to `priority`: OVERDUE → `urgent`; DUE_SOON or MISSING_DATA →
-    `routine`. The engine is pure and trigger-agnostic — read-time today, callable from the run
-    pipeline later without changes.
-  - **Dedupe contract:** in-batch per-subject deduplication (one proposal per subject per measure);
-    standing-order suppression (subjects with a qualifying standing order are excluded from
-    `proposed`, returned separately in `suppressed`). Prevents the "duplicate orders" safety concern
-    from the charter.
-  - **`StandingOrderProvider` port** (`backend-ts/src/order/standing-order-provider.ts`):
-    `simulatedStandingOrderProvider` (default — deterministic ~1/5 of subjects have a standing order,
-    no HTTP) + inert `ehStandingOrderProvider` stub (selected only when both
-    `WORKWELL_EH_FHIR_BASE_URL` + `WORKWELL_EH_FHIR_API_KEY` are set; performs no real HTTP; returns
-    empty). `resolveStandingOrderProvider(env)` selects between them. **Inert-unless-configured**,
-    mirroring ADR-011 (SendGrid/DataChaser) and ADR-012 (ICE).
-  - **Proposals are advisory — never auto-submitted.** A human reviews and submits. This is the
-    order-generation analog of "AI never decides compliance": the engine proposes, the operator acts.
-    The real EH write path (`OrderSubmitter`) is **named but deferred** (documented drop-in) — when
-    Doug Q6 is answered and EH credentials are available, it drops in without touching the proposal
-    engine.
-  - **`GET /api/orders/proposals?measureId=&subjectId=&from=&to=&format=domain|fhir`** — gated
-    CASE_MANAGER/ADMIN (`authorize.ts` `rx("/api/orders/**") → [CM, A]`). Selects the latest
-    population run per Active measure (reuses `rollup-shared.ts` `isPopulationRun` + `latestRunRows`).
-    `format=domain` → `{proposed, suppressed}` JSON; `format=fhir` → FHIR R4 ServiceRequest
-    `Bundle` (proposed only). Read-time; **no schema change**.
-  - **No schema change.** Proposals are derived read-time from `outcomes`; nothing is persisted. The
-    production drop-in is an `OrderSubmitter` EH FHIR write + a `submitted_orders` audit table
-    (owner-gated, not built today). The emitted `ServiceRequest` carries no resource `id` today
-    (the collection `Bundle` is non-transactional, advisory read output); the `OrderSubmitter` will
-    assign a stable `id` (e.g. a UUID) per resource when it POSTs to EH so EH can dedupe on re-send.
-
-- **Consequences:**
-  - Adding the real EH standing-order query and the real `OrderSubmitter` write are port adapter swaps
-    behind `resolveStandingOrderProvider` and a future `OrderSubmitter` port, env-gated; the demo
-    stays simulated by default with zero config (CLAUDE.md hard rule preserved).
-  - No schema migration today. No compliance-logic change — proposals never set or override
-    `Outcome Status`. CQL `Outcome Status` remains the sole source of truth.
-  - Proposals are advisory: human submits, system proposes. This invariant is documented in
-    `docs/ARCHITECTURE.md` §6 and enforced by the endpoint returning read-only data with no write
-    side-effects.
-  - Ships on `feat/issue-77-order-generation`; deploys on merge to `main`.
-
-## ADR-012: E6 immunization & forecasting — `ImmunizationForecast` port (ICE-ready, simulated by default) + AIS-E Td/Tdap measure
-
-- **Date:** 2026-06-19
-- **Status:** Accepted
-- **Epic:** #76 (E6 immunization & forecasting)
-- **Context:** E6 adds immunization forecasting alongside a new runnable measure for adult immunization
-  status. Three design questions had to be resolved up front.
-
-  **1. Port shape and ICE integration.** Immunization forecasting in clinical quality uses the
-  Immunization Calculation Engine (ICE), a CDC-supported CDS service. The demo stack must stay
-  simulated by default (CLAUDE.md hard rule), and the exact ICE integration surface (CDS Hooks
-  vs. the REST API vs. a WebChart-ICE bridge) is an open question deferred to Doug (#76 Q5). The
-  `OutreachChannel` port pattern from ADR-011 applies directly: simulated adapter by default, inert
-  stub when real env vars are set.
-
-  **2. Measure vs. forecast split.** The synthetic data model is single-event per subject per
-  measure — one enrollment/waiver/event Condition. A true multi-series composite immunization measure
-  (Td/Tdap + Influenza + Hepatitis B) would require reworking the shared synthetic infra used by all
-  10+ existing measures. Forcing a composite on the existing infra would be a wide blast radius with
-  no correctness benefit.
-
-  **3. Measure choice.** NCQA HEDIS AIS-E (Adult Immunization Status) is the natural fit for a TWH
-  employer wellness platform. CMS117 (Pneumococcal Vaccination, pediatric) is a mismatch for an
-  adult workforce. CMS127 (Pneumococcal Vaccination for adults 65+) was explicitly considered and
-  rejected: it covers a narrow age cohort, measures ever-received not time-to-next, and forecasting
-  is ill-suited to a near-permanent binary outcome. AIS-E Td/Tdap single-series (10-year window) is
-  the correct real NCQA measure, implementable within the existing single-event model.
-
-- **Decision:**
-  - **`ImmunizationForecast` port** (`backend-ts/src/engine/immunization/immunization-forecast.ts`):
-    `ImmunizationForecast` interface + `simulatedForecaster` default (ACIP-style "next dose due" over
-    the port's OWN deterministic per-subject synthetic immunization history — `syntheticImmunizationHistory`,
-    epoch-anchored — covering 3 series: Td/Tdap 10y, Influenza annual, Hepatitis B 3-dose series) +
-    an inert `iceForecaster` stub (selected only when both `WORKWELL_IMMZ_ICE_API_KEY` +
-    `WORKWELL_IMMZ_ICE_BASE_URL` are set; returns a "ICE not wired (Doug Q5)" reason; **no real HTTP**).
-    `resolveForecaster(env)` selects between them. Mirroring ADR-011's SendGrid/DataChaser posture:
-    **simulated by default, inert-unless-configured**.
-  - **Forecasting is advisory only** — an analog to the AI_GUARDRAILS rule. `ImmunizationForecast`
-    output is labelled advisory on every surface; `CQL Outcome Status` remains the sole compliance
-    authority. The forecaster never sets or overrides a case status.
-  - **`adult_immunization` measure** — AIS-E Td/Tdap single-series: CQL `backend-ts/measures/adult_immunization.cql`
-    + YAML, seeded Active in the HEDIS wellness category. 10-year window (3650 days); Td/Tdap
-    contraindication → EXCLUDED; refusal (documented `tdap-refusal` Condition) stays open (a `Refused`
-    define flags it but does not exclude — refusals need case-manager intervention). Outcomes: COMPLIANT
-    ≤3590 days, DUE_SOON 3591–3650, OVERDUE >3650, MISSING_DATA no record. Catalog total: **61 measures,
-    11 runnable**.
-  - **Measure vs. forecast split** is the correct model: the measure covers the NCQA single-series
-    Td/Tdap obligation (answering "is this worker current?"); the forecaster covers all 3 series
-    advisory-only (answering "when is the next dose due?"). A composite multi-series measure and
-    age-gated indicators (zoster 50+, pneumococcal 65+) are documented follow-ups.
-  - **Case-detail enrichment:** `GET /api/cases/:id` attaches an advisory `immunizationForecast` (the
-    3-series forecast) for `adult_immunization` cases only; rendered as an advisory panel on `/cases/[id]`.
-  - **Endpoint:** `GET /api/immunization/forecast?subjectId=&asOf=` → `ImmunizationForecast` JSON;
-    `asOf` defaults to today, validated YYYY-MM-DD (400 on malformed); authenticated under `/api/**`.
-    Read-time; **no schema change**.
-  - **Doug Q5 deferred** behind `iceForecaster` stub. When Doug's answer arrives, the production ICE
-    adapter drops in behind `resolveForecaster` with zero impact on the measure or case logic.
-
-- **Consequences:**
-  - Adding a real ICE adapter is a port adapter swap behind `resolveForecaster`, env-gated; the demo
-    stays simulated by default with zero config (CLAUDE.md hard rule preserved). ICE is inert until
-    configured — no live HTTP, no overclaim.
-  - No schema migration today. The production drop-in is an `immunization_forecasts` cache table fed
-    by a real ICE adapter (analogous to the §3.17 E5 `PgCampaignStore` drop-in). `adult_immunization`
-    adds no new columns.
-  - Forecasting is advisory; the `ImmunizationForecast` port never influences `Outcome Status`. This
-    is the immunization analog of "AI never decides compliance."
-  - Ships on `feat/issue-76-immunization-forecasting`; deploys on merge to `main`.
-
-## ADR-011: E5 outreach at scale — multi-channel `OutreachChannel` port + staged (audit-backed → Pg) campaign persistence
-
-- **Date:** 2026-06-19
-- **Status:** Accepted
-- **Epic:** #75 (E5 outreach at scale)
-- **Context:** E5 generalizes per-case outreach into (a) multiple delivery channels and (b) bulk
-  campaigns over many cases. Two design questions follow: how to add SMS/PHONE and a real outreach
-  vendor (DataChaser) without violating the CLAUDE.md "simulated by default on the demo stack" hard
-  rule, and how to persist a campaign given that schema is owner-gated (both the SQLite floor
-  `schema.ts` **and** the Pg ceiling `schema-pg.ts`) and the actual sends are still simulated. Contrast
-  with E4 (ADR-010), where the hierarchy was a **derived** read-time view — so adding no schema was
-  the *correct* model there. A campaign is different: it is **created state** (an operator launches it
-  with specific filters/channel and gets back a result), not derivable from existing rows.
-- **Decision:**
-  - **Multi-channel `OutreachChannel` port** (`backend-ts/src/case/outreach-channel.ts`):
-    `ChannelType` EMAIL/SMS/PHONE, each with a **simulated** adapter (EMAIL delegates to the existing
-    simulated email service; SMS/PHONE body-only), plus an inert **DataChaser stub** (`dataChaserChannel`
-    — returns QUEUED with a self-describing stub note, **no real HTTP**). `resolveChannel(type, env)`
-    returns the simulated adapter **by default** and the DataChaser stub **only** when both
-    `WORKWELL_OUTREACH_DATACHASER_API_KEY` + `WORKWELL_OUTREACH_DATACHASER_BASE_URL` are set
-    (inert-unless-configured, mirroring the SendGrid posture). `dispatchOutreach` (`case-outreach.ts`)
-    is the shared send core for both single-case send and campaigns; the per-case action and
-    `POST /api/cases/:id/actions/outreach?channel=` honor a channel (default EMAIL; PHONE → `tel:`,
-    SMS → `sms:`, EMAIL → `@workwell-demo.dev` synthetic addresses).
-  - **Staged campaign persistence behind a `CampaignStore` port — audit-backed NOW, Pg tables LATER.**
-    A campaign persists as a single `OUTREACH_CAMPAIGN_COMPLETED` audit event (payload =
-    `{campaign, recipients}`); the demo adapter (`audit-campaign-store.ts`) reads by scanning
-    `listAuditEvents` and filtering by event type (O(ledger-size), demo-scale). **No new DDL** on either
-    floor or ceiling. The documented production drop-in is a `PgCampaignStore` over `outreach_campaigns`
-    + `outreach_delivery_log` (+ an owner migration). **Why staged rather than just writing the tables:**
-    because the campaign *is* created state it cannot be derived (so ADR-010's no-schema rationale does
-    not transfer), **but** the sends are simulated, DataChaser is a stub, and the schema is owner-gated
-    on both stores — so writing real tables now would add DDL the simulated layer can't actually
-    exercise. A port stages the decision: the demo runs audit-backed today; the Pg store drops in when
-    real sends + owner-approved schema land together.
-  - **`POST /api/campaigns` gated to CASE_MANAGER/ADMIN** (`authorize.ts` rule
-    `rx("/api/campaigns/**") → [CM, A]`), matching per-case outreach — this also closed an authz gap
-    found in review (campaigns must not be more permissive than the single-case action they batch).
-- **Consequences:**
-  - Adding a real channel/vendor is a port adapter swap behind `resolveChannel`, env-gated; the demo
-    stays simulated by default with zero config (CLAUDE.md hard rule preserved). DataChaser is an inert
-    stub until configured — no live HTTP, no overclaim.
-  - Campaign reads are O(ledger-size) on the audit adapter — acceptable at demo scale, and the reason
-    the Pg drop-in exists for production.
-  - No schema migration today; no AI/compliance-logic change — campaigns send outreach, they never
-    decide compliance. CQL `Outcome Status` remains the sole source of truth.
-  - Ships on `feat/issue-75-outreach-at-scale`; deploys on merge to `main` (not yet live).
-
-## ADR-010: E4 multi-level hierarchy — provider = attributed clinician, modeled in the synthetic directory (no DB schema)
-
-- **Date:** 2026-06-18
-- **Status:** Accepted
-- **Epic:** #74 (E4 multi-level dashboards); sub-issues #93 (E4.1 hierarchy model) + #94 (E4.2 rollups + UI)
-- **Context:** E4 needs a multi-level compliance view above the per-measure programs overview —
-  enterprise → location → provider → patient. The roadmap flagged E4.1 (#93, "org/provider hierarchy
-  data model") as a likely **schema change = stop-and-ask**. The key finding on inspection: `backend-ts`
-  has **no `employees` DB table** — the workforce is the synthetic directory
-  (`engine/synthetic/employee-catalog.ts`), and `outcomes`/`cases` persist only `subjectId`. So the
-  hierarchy can be added entirely as read-time structure over the existing synthetic data with **no
-  migration**, which satisfies the #93 stop-and-ask gate without writing any SQL.
-- **Decision:**
-  - **Provider = the attributed occupational-health clinician** (eCQM/MIPS-authentic: quality measures
-    roll up by attributed provider), strictly **nested under location** (`site`). Each `EmployeeProfile`
-    gains a `providerId`; new exports `ENTERPRISE` (root), `PROVIDERS` (8 synthetic clinicians, 2 per
-    location across Plant A / Plant B / HQ / Clinic), `providerById`, `providersForLocation`. The
-    enterprise→location→provider→patient levels live **only in the synthetic directory** — **no DB
-    schema change, no `employees` table, no migration**.
-  - The rollup is a **read-time read model** (`backend-ts/src/program/hierarchy-rollup.ts`,
-    `buildHierarchyRollup`) over the same outcome rows the programs overview uses (latest population run
-    per Active measure; CASE/EMPLOYEE reruns excluded). Exposed via `GET /api/hierarchy/rollup`. Shared
-    helpers extracted to `rollup-shared.ts`; the date-param parser to `routes/query-dates.ts`.
-  - **UI:** a semantic nested expandable drill-down table at `/programs/hierarchy` (NITRO grid deferred
-    until `@mieweb/datavis` is published — ADR-007).
-- **Consequences:**
-  - **Reconciliation invariant is the testable backbone:** because providers are strictly nested under
-    locations (and locations under the enterprise), parent count totals = Σ children at **every** level.
-    This is the property the rollup tests assert.
-  - A future real `EmployeeDirectory`/org-hierarchy adapter (ADR-005 ports) can supply the same
-    enterprise→location→provider→patient shape behind the read model without touching the rollup or the
-    API. If a relational org-hierarchy table is ever introduced, that **would** be a schema change and a
-    fresh stop-and-ask.
-  - No AI/compliance-logic change; CQL `Outcome Status` remains the sole source of truth.
-
-## ADR-009: Emit eCQM artifacts JVM-free; QRDA III as a structurally-representative stub
-
-**Superseded — full text in [`docs/archive/DECISIONS_ARCHIVE.md`](archive/DECISIONS_ARCHIVE.md#adr-009).** JVM-free artifact emission holds (restated by ADR-008); the 'QRDA III is a stub' half is long overtaken — it validates clean against the HL7 base ruler.
-
-## ADR-008: De-Java the backend — re-platform onto TypeScript / `@mieweb/cloud` (strangler-fig)
-
-- **Date:** 2026-06-12
-- **Status:** Accepted — **DONE (2026-06-17).** `twh.os.mieweb.org` is served by the TS backend (`twh-api-ts`) on Neon (Pg ceiling, `workwell_spike` schema). The blue-green flip went live (#109 PR #159), and **#109 PR4 retired the JVM**: `backend/` deleted, Java build/deploy jobs + the shadow workflow removed, `backend-ts` is the CI-gated sole backend, and a self-heal reconciler covers reboot/crash recovery. The zero-Java end state is reached.
-- **Stakeholder:** Doug Horner (`horner`) — issue [#96](https://github.com/Taleef7/workwell/issues/96)
-- **Plan:** `docs/superpowers/plans/2026-06-12-issue-96-dejava-replatform.md`
-- **Context:** Doug's #96 changes the repo direction: the backend must **not require Java/Spring Boot,
-  a JVM, Spring DI, Spring Data, or Spring MVC** to run, test, or deploy. `@mieweb/cloud` (a v0.0.0
-  Cloudflare-shaped portability layer) becomes the pluggable backend; application code calls explicit
-  repository contracts (e.g. `runStore.createRun(input)`, `runStore.claimNextQueuedRun(workerId)`) and
-  each runtime adapter (Cloudflare native / local Node / SQLite / D1 / Postgres / S3-MinIO / Valkey)
-  implements them. Principle: **"SQLite/D1 define the portable floor; Postgres provides the
-  performance ceiling."** A lightweight query builder (Drizzle or Kysely) handles schema/migrations/
-  CRUD, **not** the portability layer. This supersedes the ADR-001 "single Spring Boot deployable"
-  decision for the backend runtime (ADR-001 remains the historical record of why the monolith was
-  right for the MVP timeline). The frontend (ADR-004/007) is unaffected.
-- **Decision:**
-  - **Strangler-fig re-platform**, not a big-bang rewrite. Port the backend to TypeScript
-    module-by-module **behind the unchanged frontend API contract** (`frontend/lib/api/client.ts` URL
-    + request/response shapes are the seam); nothing is deleted until its TS replacement passes parity.
-  - **CQL engine = Path C (confirmed by Taleef 2026-06-12).** Keep CQL and eCQM standards-compliance;
-    run the Java `cql-to-elm` translator **offline at authoring/build time only** (committing ELM JSON +
-    FHIRHelpers + ModelInfo + expanded value sets) and **execute ELM in Node** via
-    `cql-execution`/`fqm-execution`. Java thus leaves the **runtime/deploy-required** path entirely,
-    surviving only as a build tool. Rejected: Path B (FHIRPath, zero Java but abandons CQL/MAT — gives up
-    the differentiator). Fallback if Path C fails parity: keep the Java engine as an isolated evaluation
-    microservice (Java stays required to deploy — last resort).
-  - **Live CQL authoring is preserved (no functionality compromise).** The Studio CQL compile gate
-    stays; CQL→ELM translation runs in Node (see the 2026-06-12 update) — never requiring a JVM.
-
-- **Update 2026-06-12 — Phase-1 spike GO + zero-Java end state (Taleef, per Doug's #96):**
-  The Phase-1 vertical-slice spike (#103) cleared the gate on evidence:
-  - The TS worker runs on the `@mieweb/cloud` local Node host; `RunStore` works over `CloudDatabase`
-    (SQLite floor) with an atomic queue-claim; live `POST /api/runs` · `GET /api/runs/:id` · `claim`.
-  - **CQL Path C golden parity across all 10 runnable measures × 4 scenarios — 40/40 exact** (452
-    define comparisons) vs the Java engine, incl. the eCQMs (CMS122 value-based, CMS125 820-day),
-    season-based flu (`Measurement Period`), and count-based hazwoper/tb. The feared ValueSet-expansion
-    risk is **absent** — all 10 measures use inline code filters (no `in "ValueSet"`), so no terminology
-    service is needed.
-  - **Zero Java is achievable with no functional compromise, so we take it (Doug's stated end state).**
-    `@cqframework/cql` (v4.0.0-beta.1, Apache-2.0) — the cqframework reference translator compiled to
-    **pure Node via Kotlin Multiplatform, no JVM** — translates all 10 measures' CQL→ELM (errors=0), and
-    that Node-translated ELM evaluates **40/40 exact** against the Java golden. So CQL→ELM, the last Java
-    touchpoint, **also runs in Node**: Java/Spring Boot leaves the project **entirely** — runtime, build,
-    and authoring. The earlier "JVM evaluator sidecar / build-time Java" fallbacks are demoted to
-    contingency only (used solely if `@cqframework/cql` regresses before cutover).
-  - **Guardrails:** the `@cqframework/cql` beta version is **pinned**; the full-catalog golden-parity
-    harness (`backend-ts/spike/compare-all.mjs`) is the **regression gate** on every bump/measure change;
-    the Java `ElmCompilerCli` is retained transitionally as a cross-check, removed with the rest of Java
-    when the TS engine binding lands (#106). Three standard version-stable resources (System + FHIR-R4
-    model-info XML, FHIRHelpers CQL) are committed config, not a Java dependency.
-  - Evidence + reproduce: `backend-ts/spike/README.md` (PR #112).
-  - **Reusable-module mandate (Vision Doc, Doug 2026-06-08):** each layer ships as a reusable MIE
-    package (frontend on `@mieweb/ui`, backend on `@mieweb/cloud`), and the headless
-    `evaluate(patient, measure.yaml)` evaluator (ADR-006) survives as a first-class reusable TS artifact.
-  - **Engine as an explicit swappable compute binding (not the app framework).** The worker calls an
-    `EvaluateMeasure` binding like an AI/vector provider; the portability layer is JVM-free regardless.
-    Path C (Node-ELM execution) is the **preferred** binding implementation; a **JVM evaluator sidecar**
-    is the fallback implementation (decided by the Phase-1 parity spike). A target with no CQL binding
-    **raises `UnsupportedBindingError`, never guesses a status** — same invariant as "AI never decides
-    compliance." Full storage decomposition into `RunStore`/`CaseStore`/`OutcomeStore`/`MeasureStore`/
-    `AuditStore` contracts, the answers to Doug's 9 questions, and the repo-grounded Spring footprint are
-    detailed in the companion memo `docs/MIEWEB_CLOUD_REFACTOR_MEMO.md`. The eventual zero-JVM endgame
-    (no sidecar) ties to roadmap epic **E9/#78 (CQL→SQL / transpile)**, tracked separately.
-  - **Not a FHIR server.** Postgres stays the system of record; FHIR R4 bundles remain transient,
-    synthesized in-memory only to feed the engine. We adopt TS FHIR *typing* (`@types/fhir`), not a TS
-    FHIR server. `node-on-fhir/honeycomb` (Meteor + MongoDB + AGPL-3.0, no CQL) is **not adopted**;
-    Medplum (monolithic platform) is overkill.
-  - **Deploy target:** Node container on MIE Create-a-Container (not Cloudflare Workers yet) — same
-    `deploy-twh-mieweb.yml` v1 Container Manager flow with the JVM image swapped for a Node image.
-  - **`@mieweb/cloud` added as a git submodule** and co-developed: `@mieweb/cloud-postgres` does not
-    exist yet and is built as part of Phase 2.
-  - **Parity is the gate.** A Phase-1 vertical-slice spike must show one measure's TS output equals the
-    Java engine's `Outcome Status` + key `expressionResults` for the shared employee fixtures before the
-    expensive phases proceed (GO/NO-GO).
-- **Consequences:**
-  - Tracked as epic sub-issues under #96 (Phases 0–5) on the "WorkWell #96 — De-Java Re-platform" board.
-  - The `evidence_json` contract (ADR-002), the `audit_event`-on-every-state-change invariant, case
-    idempotency, and "AI never decides compliance" all carry forward unchanged into the TS backend.
-  - **JSONB-floor tension:** the schema's Postgres JSON ops must either be reworked to the SQLite/D1
-    floor or surfaced as honest `UnsupportedBindingError` on constrained adapters — resolved per-target.
-  - Schema migrations remain **Taleef-owned**; no agent writes `V0xx`/new migrations without explicit
-    instruction. The 21 existing migrations define the data model the Drizzle/Kysely schema mirrors.
-  - End state: Java/Spring/Gradle removed from the backend; `CLAUDE.md`/`README.md` stack lines change
-    from "Java 21 + Spring Boot" to the TS/`@mieweb/cloud` stack when Phase 5 lands (a future ADR amends
-    the "immutable stack" line at that point).
-
-## ADR-007: Vendor `@mieweb/datavis` (NITRO grid) source to unblock the data grid
-
-- **Date:** 2026-06-11
-- **Status:** Accepted
-- **Stakeholder:** Doug (direction 2026-06-08: "use nitro for all tables"); supersedes the "deferred" stance in ADR-004.
-- **Context:** ADR-004 deferred the DataVis NITRO grid as "not npm-consumable." On closer inspection that was incomplete: the published `@mieweb/ui@0.6.1` **does** ship the NITRO bundle (`dist/datavis.js` + the `./datavis` export), but that bundle imports from a **bare `datavis` specifier** (raw `datavis/src/...` `.ts`/`.tsx`) plus `datavis-ace`. `datavis-ace@=4.0.0-PRE.2` **is** on public npm; the `datavis` UI source is **not** published, but the `github.com/mieweb/datavis` repo is **public**, and `@mieweb/ui`'s own build marks `/^datavis\//` external — expecting the consumer to provide `datavis`, exactly as the upstream monorepo does via a `file:` link. So NITRO is consumable today by mirroring that.
-- **Decision:**
-  - **Vendor the `datavis` source** into `frontend/vendor/datavis` (pinned to upstream commit `52c27cc`, matching `@mieweb/ui@0.6.1`) and alias it `"datavis": "file:./vendor/datavis"`. Runtime deps added: `datavis-ace@=4.0.0-PRE.2`, `@dnd-kit/*`, `i18next`, `react-i18next`. Provenance + upgrade recipe in `frontend/vendor/datavis/VENDORING.md`.
-  - **Wiring:** `transpilePackages: ["datavis", "@mieweb/ui"]` (Next must transpile both so the extensionless deep imports resolve); Tailwind `@source "../vendor/datavis/src"` + the `.wcdv-*` custom classes. Both Dockerfiles `COPY vendor` before `pnpm install`.
-  - **Integration seam:** `features/datavis/NitroGrid*.tsx` — client-only (`next/dynamic`, `ssr:false`, because the engine touches `window` at module load), local in-memory data via the upstream `createMockView` pattern (no `http` fetch; the authed API client still owns data loading). Pages import the wrapper, never `@mieweb/ui/datavis` directly. Rich cells preserved via NITRO's `formatCell` (returns `ReactNode`).
-  - **Applied to the strong-fit operational/audit tables:** `/measures`, `/runs` (Outcomes), `/admin` ×3 (data mappings, terminology mappings, delivery log). Small in-card tables (`/programs/[measureId]`, studio panels, `/employees/[externalId]`) intentionally stay semantic — NITRO chrome too heavy.
-- **Consequences:**
-  - Vendored MIE-internal source now lives in the tree (public, used under its license). Brittle on `@mieweb/ui` upgrades — the deep import paths are the contract to re-verify; VENDORING.md documents the re-vendor step. The clean long-term fix (MIE publishes a built `@mieweb/datavis` to npm so `vendor/` can be deleted) remains tracked in `questions_for_doug.md`.
-  - Vendored source is excluded from our eslint (`vendor/**`).
-  - Landed on `feat/datavis-nitro-unblock`. The remaining `@mieweb/ui` form-control component-swap is split out as issue #99.
-  - No backend/schema/API/compliance change.
-
-## ADR-006: Declarative YAML measure definitions + headless evaluator CLI
-
-- **Date:** 2026-06-10
-- **Status:** Accepted
-- **Epic:** #72 (sub-issues #85–#88); spec `docs/superpowers/specs/2026-06-10-e2-yaml-measures-design.md`
-- **Context:** After E1 (ADR-005), measure bindings still lived in a hardcoded Java switch
-  (`SyntheticMeasureDefinitionProvider`), and there was no way to evaluate an arbitrary patient
-  outside the web app. Doug's most concrete ask is a "programming layer, no UI: given this patient
-  and this YAML file, are they compliant?".
-- **Decision:**
-  - **YAML is the single source of measure bindings.** One `measures/<id>.yaml` per runnable measure
-    (sibling to its `.cql`), schema v1: metadata (`id`, `name` = exact catalog name, `version`,
-    `title`, `policyRef`, `tags`) + `cql:` file ref + `bindings:` (enrollment/waiver/event code +
-    value set, `event.type: procedure|immunization|observation` replacing the two raw booleans,
-    `complianceWindowDays` defaulting to 365). `YamlMeasureDefinitionProvider` loads
-    `classpath*:measures/*.yaml` at construction (Spring-core resource resolver as plain library
-    code — no ApplicationContext; the no-Spring guard still constructs it with `new`) and is the
-    default bean. The hardcoded switch is **deleted**; no `yaml|java` fallback flag (dual sources
-    were the #82 smell). Golden parity (100 employees × 10 measures) gates the swap.
-  - **Population logic and bucket thresholds stay in the CQL** (`Outcome Status` define) — CQL is
-    the single source of logic; YAML is the binding/metadata envelope. Aspirational eCQM packaging
-    fields were deliberately not added (extension path documented in the spec for E3).
-  - **Headless surface:** public `CqlEvaluationService.evaluateBundle(...)` evaluates an arbitrary
-    FHIR `Bundle` and returns `BundleOutcome` (normalized bucket + define-level expression results);
-    the synthetic path delegates to the same core. `HeadlessEvaluatorCli` (plain `main`, no Spring,
-    no DB) + the Gradle `evaluateMeasure` task expose it:
-    `./gradlew.bat evaluateMeasure --args="patient.json measures/audiogram.yaml"` (Java-era form; post-#109
-    this is realized JVM-free in `backend-ts` as `pnpm evaluate --patient <bundle.json> --measure <id>`, #72/E2).
-    A REST endpoint was deferred (trivial later atop `evaluateBundle`).
-  - **No new dependencies:** SnakeYAML (Boot), HAPI JSON parser, Jackson — all already shipped.
-- **Consequences:**
-  - Authoring a new runnable measure = a `.cql` + a `.yaml` file; no Java changes for bindings.
-  - Headless evidence is `expressionResults` + outcome only — the synthetic `why_flagged` block
-    derives from `ExamConfig`, which doesn't exist for real bundles (intentional, documented).
-  - E3 (#73) plugs MeasureReport/value-set expansion into the same seam; a future real
-    `PatientDataProvider` feeds `evaluateBundle` directly.
-
-## ADR-005: Measure engine ports/adapters (same module, synthetic default adapter)
-
-- **Date:** 2026-06-10
-- **Status:** Accepted
-- **Epic:** #71 (sub-issues #79–#84); spec `docs/superpowers/specs/2026-06-10-e1-measure-engine-ports-design.md`
-- **Context:** `CqlEvaluationService` hard-wired its inputs to the synthetic demo: `new SyntheticFhirBundleBuilder()`, the static `SyntheticEmployeeCatalog`, and the per-measure binding switch `measureSeedSpecFor()`. This blocked plugging in real EHR/FHIR data and a declarative measure format (E2) without editing the core. The roadmap (`docs/PLAN.md`) calls for inverting these onto ports so synthetic data today and real data later share one seam.
-- **Decision:**
-  - Introduce four input ports — `PatientDataProvider`, `EmployeeDirectory`, `MeasureDefinitionProvider`, `EvaluationConfigProvider` — in `com.workwell.engine.port`, with `MeasureDefinition` in `engine.model`. `CqlEvaluationService` is constructed from these ports.
-  - The synthetic demo becomes the **default adapter set** in `engine.synthetic` (`@Component` beans). The live TWH demo runs on them unchanged; a future real-data adapter is added as an alternative bean selected by profile/config (the `EngineConfig` seam), with the synthetic beans remaining default (`docs/PLAN.md` principle 5).
-  - **Same Gradle module**, not a separate `:engine` project — keeps CI sharding, Docker build, and the OneDrive binary-results workaround untouched. The "Spring-free core" guarantee is enforced by `EngineNoSpringContextTest`, which constructs and runs the engine with plain `new` and no `ApplicationContext`. Future extraction to a dedicated module stays mechanical because the package boundary has no Spring imports.
-  - **`OutreachChannel` deferred to E5** (no consumer yet — YAGNI). Four ports now.
-  - **Outcome parity is the gate:** a golden-file characterization test captures the deterministic (employee → outcome-status) mapping for all 100 employees × 10 measures and asserts it is unchanged by the refactor.
-- **On the "#82 single source of truth":** the value-set/code **bindings** that were duplicated lived only in `CqlEvaluationService.measureSeedSpecFor()`; they are now solely in `SyntheticMeasureDefinitionProvider`. `MeasureService.ensure*Seed()` holds catalog/UI metadata (`spec_json`) and CQL filenames — a separate concern, not the binding data — so no further dedup was warranted there. A speculative name→file catalog was intentionally **not** added (YAGNI; E2's YAML carries the CQL reference).
-- **Consequences:**
-  - `CqlEvaluationService` public methods (`evaluate`, `evaluateSubject`) are unchanged, so callers (`AllProgramsRunService`, `CaseFlowService`, `MeasureImpactPreviewService`, `SeedHistoricalRunsService`) are unaffected.
-  - E2 adds a YAML-backed `MeasureDefinitionProvider`; later epics add real `PatientDataProvider`/`EmployeeDirectory` adapters behind the same ports.
-  - No schema migration; no AI/compliance-logic change. AI still never decides compliance; CQL `Outcome Status` remains the sole source of truth.
-
-## ADR-004: Adopt `@mieweb/ui` as the frontend component library (dark mode + Enterprise Health brand)
-
-- **Date:** 2026-06-09
-- **Status:** Accepted
-- **Stakeholder:** Doug (direction 2026-06-08: "Mieweb UI" + "use nitro for all tables")
-- **Context:** The frontend was built on hand-rolled primitives (CVA + clsx + tailwind-merge) styled with hardcoded `slate-*` Tailwind classes, light-only. Doug's direction is for WorkWell to consume MIE's own component library so the work is reusable across MIE's internal projects and products. `@mieweb/ui` (v0.6.1, public npm, ui.mieweb.org) provides themeable React components (Tailwind 4, dark mode, brand theming incl. Enterprise Health) plus a DataVis NITRO data-grid entry.
-- **Decision:**
-  - Adopt `@mieweb/ui` as the frontend component library. Primary surfaces use its components (`Button`, `Select`, `Input`, `Badge`, `Modal`, `Toast`, `Skeleton`, `Sidebar`, `AppHeader`).
-  - **Brand:** Enterprise Health is the default brand; a runtime brand switcher lives in the header (`useBrand` injects `/brands/{brand}.css`).
-  - **Theming:** full semantic-token migration + dark mode (`useTheme` sets `.dark` + `data-theme`; persisted). Status-color helpers in `lib/status.ts` carry `dark:` variants app-wide.
-  - **Tables:** DataVis NITRO was deferred here, then **unblocked via vendoring** — see **ADR-007**. The strong-fit operational/audit tables now use the real NITRO grid; small in-card tables stay themed semantic tables.
-  - **Kept:** Monaco (CQL editor) and recharts (rethemed) — no `@mieweb/ui` equivalent.
-  - **Exceptions:** `/login` and `/sandbox` remain bespoke pre-auth pages (not part of the themed dashboard surface).
-- **Consequences:**
-  - The frontend stack line in `CLAUDE.md`, `README.md`, and `AGENTS.md` changes from `shadcn/ui` to `@mieweb/ui` (this ADR authorizes that stack change).
-  - New runtime dependency: `@mieweb/ui` (+ its `lucide-react`/CVA peers already present). `@mieweb/ui` must only be imported from `"use client"` modules — its barrel evaluates `React.createContext` at load, which breaks Server Component builds (hence the `components/client-providers.tsx` boundary).
-  - Implementation landed phased on `feat/mieweb-ui-migration` → **PR #68**; report-first living doc at `frontend/MIEWEB-UI-MIGRATION.md`; design spec at `docs/superpowers/specs/2026-06-08-mieweb-ui-migration-design.md`.
-  - Follow-ups: publish/consume NITRO once available; component-purity swap of native controls on the dense table pages + studio tabs; brand Jost-font fidelity.
-
-## ADR-001: Single Spring Boot deployable with modular package boundaries
-
-**Superseded — full text in [`docs/archive/DECISIONS_ARCHIVE.md`](archive/DECISIONS_ARCHIVE.md#adr-001).** The original Spring Boot architecture. ADR-008 retired the JVM and deleted `backend/`.
-
-## ADR-003: Single all-encompassing TWH instance (consolidation from three-instance model)
-
-- **Date:** 2026-05-21
-- **Status:** Accepted
-- **Stakeholder:** Doug (confirmed direction 2026-05-21)
-- **Context:** During the sprint build-out (May 2–17), three separate deployment instances were created to isolate concerns during development: `workwell` (base skeleton), `ecqm` (CMS eCQM catalog seeding), and `twh` (Total Worker Health — OSHA safety measures). Each had its own workflow, frontend image, and partially-seeded database. Doug's May 21 review surfaced that these were not separate products — they were a development stepping stone. From the JOURNAL 2026-05-21 entry:
-  > "Doug clarified the product direction: TWH (Total Worker Health) is all-encompassing. OSHA occupational safety compliance and clinical quality (eCQMs, HEDIS wellness) are not separate products — they are two sides of the same coin and belong in one platform. The three-instance deployment model (workwell, ecqm, twh) was a development stepping stone, not the product architecture. One TWH instance covers everything."
-  >
-  > "NIOSH's TWH framework is the conceptual foundation: worker health is shaped by both workplace hazards (OSHA safety programs) and general health promotion (chronic disease, preventive care). WorkWell is the platform that manages both in one system with a shared measure catalog, shared case workflow, shared audit trail, and shared CQL evaluation engine."
-- **Decision:** Consolidate to a single TWH deployment. Delete the `deploy-os-mieweb.yml` (workwell instance) and `deploy-ecqm-mieweb.yml` (eCQM instance) workflows. The sole active workflow is `deploy-twh-mieweb.yml`, which builds the backend (`ghcr.io/taleef7/workwell-api`) and TWH-branded frontend (`ghcr.io/taleef7/workwell-twh-frontend`) and sets `WORKWELL_INSTANCE=twh` to seed all three measure categories on startup: OSHA safety (4 active CQL + 3 catalog-only), HEDIS wellness (4 active CQL), and CMS eCQM catalog (49 Draft entries). The old `workwell` and `workwell-api` MIE containers were deleted from the manager UI. Fly.io `workwell-measure-studio-api` was destroyed (stale secondary stack from the Fly era). The production URLs are `https://twh.os.mieweb.org` (frontend) and `https://twh-api.os.mieweb.org` (backend).
-- **Consequences:**
-  - `ecqm.os.mieweb.org` and `workwell.os.mieweb.org` are intentionally offline. The workwell hostname currently returns a 404; a 301 redirect to `twh.os.mieweb.org` is the documented follow-up (see infra/redirect/).
-  - The eCQM seeding path (`ensureCmsEcqmCatalogSeed()`), the `workwell-ecqm-frontend` image build config, and the `*_ECQM` GitHub secrets are retained as a restore-later capability in case a separate eCQM-only instance is needed in future.
-  - Every push to `main` deploys the single TWH environment, giving a clear signal that `main` is always production.
-  - The platform can expand its catalog (more OSHA measures, more HEDIS measures, more CMS eCQMs) without any infrastructure change — it is all one seeded database with one shared catalog, case workflow, and audit trail.
-  - Cost: reduced — one container pair instead of three.
-
-## ADR-002: evidence_json shape and define-level traceability
-
-- **Date:** 2026-05-01
-- **Status:** Accepted
-- **Context:** For "Explain Why Flagged", we need to decide whether to keep raw `evaluatedResource` evidence only, add explicit `rule_path[]`, or derive rule path automatically from CQL define results. D1 rechecked this against the repository CQF reference in `docs/CQF_FHIR_CR_REFERENCE.md`, which is the durable source of truth for `cqf-fhir-cr` behavior used by this ADR.
-- **Decision:** Adopt the processor two-step composite flow as the canonical run pipeline:
-  1. `R4MeasureProcessor.evaluateMeasureWithCqlEngine(...)` to compute `CompositeEvaluationResultsPerMeasure` (including define-level `expressionResults`).
-  2. `R4MeasureProcessor.evaluateMeasure(..., compositeResults)` to materialize the standard `MeasureReport` from the same computed results.
-- **Evidence from probe:**
-  - `R4MeasureService.evaluate(...)` returns `MeasureReport` only; no define-result map is present on `MeasureReport`.
-  - `R4MeasureProcessor.evaluateMeasureWithCqlEngine(...)` returns `CompositeEvaluationResultsPerMeasure` containing per-subject `EvaluationResult`.
-  - `EvaluationResult.expressionResults` contains define-name/value pairs (probe output included `Denominator`, `Initial Population`, `Numerator` with boolean values).
-  - Dual-evaluation cost probe (2026-05-01): `serviceEvaluateMs=5` vs composite flow `combinedMs=2` (`engineEvalMs=2`, `reportBuildFromCompositeMs=0`), so the composite path is a cheaper primary path, not a workaround.
-- **Consequences:**
-  - `evidence_json` shape is now structured as `{ expressionResults: {...}, evaluatedResource: [...] }`.
-  - `rule_path[]` is derived at render time from CQL define names + `expressionResults`; it is not persisted as a stored field.
-  - "Why Flagged" UI is structured-first: render `expressionResults` deterministically as the base case; AI natural-language wrapping is optional polish.
-  - Outstanding Week 5 confirmation: run this same composite flow against the JPA-backed repository path. Expected yes, not yet tested in this exact combination.
+# Decisions
+
+Architecture decision records, newest first. Condensed on 2026-09-23 to what was decided and why; the
+full original text of any ADR is in git history (`git show before-docs-trim:docs/DECISIONS.md`, and
+`git show before-docs-trim:docs/archive/DECISIONS_ARCHIVE.md` for the ones that had been archived).
+
+Code cites numbered sub-decisions (`ADR-074 d13`, `ADR-046 decision 3`, `ADR-060 §5`); those numbers are
+the originals and are kept as they were. One ADR number was assigned during the condensing: ADR-033,
+whose record had lost its heading (see its status line).
+
+## ADR-087: The dashboard resolves winning runs once and skips needless sorts
+*2026-09-21 · Accepted*
+
+**Decision.** Memoize the "which runs win" probes, read folded rows unordered over a narrow projection, and warm read models at boot. Extends ADR-084.
+d1. The winners probe is memoized in `stores/probe-cache.ts`, keyed by the candidate run list and scoped per database handle (not per store instance, not module-global). No TTL.
+d2. `recordOutcome`, `recordOutcomes` and `compactOlderThan` invalidate the memo on both stores. A `finalizeRun` status flip is a known, narrow, uninvalidated case (named, not fixed).
+d3. `listOutcomes` accepts `order: "none"` for callers that fold rows; paged reads keep their ordering. `aggregateOfficialRun` is one unordered read per (run, measure) over `listOutcomeMembershipsForRun` and reports `producedOfficialEvidence`, decided by any evaluated row, not the first.
+d4. `officialMeasureRate` memoizes `null` results too.
+d5. Read models are warmed at boot, off the request path, retried once on failure, never after shutdown begins. `warmReadModels` returns a result so the retry and the boot log line are truthful.
+**Why.** `/programs` was failing (503 at the 30 s statement timeout) because each read model re-walked the winners and re-sorted a measure's evidence many times, and every deploy left the caches cold. An `outcomes (run_id, measure_id)` index is recommended but is owner schema and not written here.
+
+## ADR-086: Preparation never invents codes, and the corpus never knows the future
+*2026-09-21 · Accepted*
+
+**Decision.** Normalization may add a missing system to a recognised code but never supplies or replaces a code, and a corpus bundle holds only facts recorded by its as-of. Applies ADR-037.
+d1. `prepareForQiCore` normalizes a coded field only when it is present, cannot bind, and its code is in that field's own complete value set, writing the same code back with the system. Absent stays absent; unrecognised codes are left alone.
+d1a. Normalizing one array entry (e.g. `Condition.category`) keeps the other entries and their text/extensions; an entry that cannot be normalized passes through unchanged.
+d2. A profile-required field the source never supplied is not invented; the resource goes unretrieved. `Encounter.class` is no longer supplied for QRDA-I imports.
+d3. The QRDA-I importer derives `clinicalStatus`: `<high>` with a value is `resolved`, with any `nullFlavor` is `active`, absent or unparseable gives nothing. `times()` now reports three states, not two.
+d4. A corpus bundle holds only facts whose recorded date (the value passed to `provenanceFor`) is on or before its as-of; a resource and its Provenance leave together.
+d5. Tests assert d1–d3 change no corpus result and that a year-end cutoff equals an unbounded one.
+Owner decision 2026-09-22 (#637): d4 did move reported numbers, because the nightly's cutoff is today, so pilot rates are year to date. That stays; the corpus gets prior-year history instead of scoring the nightly at 12-31.
+**Why.** Defaults were inventing, and even overwriting, clinical status on third-party documents, and the corpus emitted future-dated events.
+
+## ADR-085: Long runs yield the event loop, and MEASURE runs are scheduled
+*2026-09-21 · Accepted*
+
+**Decision.** Loops WorkWell owns yield a macrotask after each subject; on the official path the lever is chunk size; a MEASURE-scope manual run is scheduled and returns a run id.
+d1. The run pipeline's per-subject loop (`run/run-pipeline.ts`) and the engine's DB-less batch shell (`engine/ingress/evaluate-bundle.ts`) yield a macrotask after every subject by default: `setImmediate` where it exists, else `setTimeout(0)`. A microtask yield does not help.
+d2. Yield after every bundle, not every Nth. `yieldEvery` can be raised, or set to `0` to disable.
+d3. The policy is injected (`EvaluateBundleOptions.yieldEvery`), never read from `process.env` inside the engine (ADR-059).
+d4. Official-routed measures evaluate a whole chunk in one `fqm-execution` call we cannot yield inside, so d1 does not remove that stall. The levers are `WORKWELL_RUN_CHUNK_SIZE` (the chunk's DB write is a real yield) or a worker thread (filed separately).
+d5. MEASURE joins `ASYNC_SCOPES`: `/api/runs/manual` returns 201 RUNNING with a run id. EMPLOYEE stays synchronous. The `configuredMeasure` clause is removed.
+**Why.** During the nightly every endpoint stalled because CPU-bound awaits never reached the poll phase, and a 20,000-patient MEASURE run always hit the 60 s gateway as a 504 with no run id, inviting duplicate retries.
+
+## ADR-084: Statement timeout is a role default; filter in SQL where possible
+*2026-09-19 · Accepted*
+
+**Decision.** Move work-list filters into SQL where the database can see the data, return page and total from one statement, and enforce the statement timeout as a Postgres role default.
+d1. `CaseQuery` gains current cycle, frozen outcome status, `OUTREACH_SENT` presence and created-at day window in SQL. `site`, `search` and oversized panel selections stay in JS (directory-only data). `sqlPageBlockedBy` returns the blocking reason.
+d2. `listCasesPage` returns rows plus `COUNT(*) OVER ()`; an empty page takes a bounded separate count instead of answering 0.
+d3. The current cycle in SQL is a table of (measure, period) pairs plus a fallback anchor that excludes the named measures.
+d4. On scoped profiles the fast path needs every case subject in the directory; this is checked from data (`distinctCaseSubjectIds`) per process and after every run, and a violation disables the fast path with a log line.
+d5. `ALTER ROLE <app role> SET statement_timeout = '30s'`, run per Neon project on the direct URL and verified through the pooled one (`DEPLOY.md`). Neon silently drops startup-packet timeouts, rejects `options=-c`, `query_timeout` is not used.
+d6. Outcome compaction opts out via `withStatementTimeoutDisabled`: `BEGIN`, `SET LOCAL`, work and `COMMIT` on one checked-out client, never a session `SET`. It must ship before the role default.
+d7. Pool `max: 10` stays, so the queue forms where a timeout exists.
+**Why.** The open-case badge loaded every active case to return one count, and pool starvation surfaced as silent 60 s gateway 504s. A conformance test keeps the SQL and in-memory loaders in agreement.
+
+## ADR-083: An exception is data the measure reads; staff closures change no number
+*2026-09-18 · Accepted*
+
+**Decision.** A workflow closure is not a measure exception. WorkWell never records an official-measure exception, and a staff-closed case is still counted by CQL.
+d1. A workflow closure (`cases.closed_*`) is free text no measure reads; an exception is structured data in the evaluated bundle. A human-closed case's `current_outcome_status` is frozen at closure (`planCaseUpsert` no-ops when `closed_by` is set), and a person can close only an OPEN or IN_PROGRESS case.
+d2. For authored measures a WorkWell waiver is legitimate as a coded `Condition` with a `urn:workwell:*` code, but nothing projects the `waivers` table into bundles yet (#577, not pilot work).
+d3. For the six official measures an exception (DENEX or DENEXCEP) is a coded chart resource in the artifact's own value set; out of population is not an exception. cms2 alone has a denominator exception. No official-measure exception mutation in WorkWell, no `overrideReasons` on cards, and CDS `overridden` feedback is never an exception.
+d4. "Dismiss with a reason" is display only: a "Closed by staff" state on the roster, work list, programs rollups, cases CSV and MCP `list_cases`, worded from what the winning run says today.
+d5. Deferred: the official exception path (#565, WebChart write API), which exception forms clinicians use, cms2's refusal mapping (first once writes land), and the authored waiver projection (#577).
+**Why.** Closing a case hid it from the work list while the measure still counted the patient; a WorkWell-marked exception would violate ADR-008 undetectably. Closure kind comes from `closed_by` (`closureKindOf`); CDS cards deliberately ignore closures.
+
+## ADR-082: The ACO's attributed list is immutable; the sandbox refuses real ones
+*2026-09-16 · Accepted*
+
+**Decision.** An attributed list is an immutable, revisioned assertion by an outside party, reported per measurement year; a synthetic sandbox refuses to store a real one.
+d1. No UPDATE or DELETE in `SubjectListStore`, routes or UI; a re-import or manual resolution of a non-match creates `revision + 1`.
+d2. A list is an attribution, a panel an assignment; neither is a denominator.
+d3. NOT_FOUND members are kept for review; a partial unique index allows one MATCHED row per subject, so a second identifier for a patient lands AMBIGUOUS.
+d4. On a synthetic directory, an identifier outside the deployment's namespace (Maui `pat-NNN`/`pat-NNNNN`, default `emp-NNN`) refuses the whole upload, reporting a count, never values; on a live directory import is 403 until the PHI phase. All `/api/subject-lists/**` methods need CASE_MANAGER/ADMIN.
+d5. `measurementYear` is required, no default; each measure's run is chosen by measurement period (`RunStore.listPopulationRunsForPeriod`), never start date. Compaction refuses per measure; 409 only when every selected run is exposed.
+d6. `missingFromRun` is reported beside the rates, never subtracted; not-scored buckets are disjoint (error, out of population, in no rate, then scored). Score = `numer / (denom − denex − denexcep)`, with DENEX and DENEXCEP reported separately.
+d7. The CSV carries patient-level rows under a test-pinned header; the JSON summary is recomputable from them; supplied text is neutralised against formula injection.
+**Why.** The ACO asked for measures over the patients it attributes, a different population from the directory, and a real attribution file must not reach the sandbox before PHI-phase controls exist.
+
+## ADR-081: The repeat-non-complier streak is retired
+*2026-09-15 · Accepted*
+
+**Decision.** `repeatNonCompliers` is retired: the key stays in the API response as `[]`, the measure page's tile and table are removed, and `programRiskOutlook` reads only the winning run, memoized under the winners' `runKey`, with `today` and `horizonDays` applied per request. It returns only if the aggregate snapshot store (ADR-021) gains a per-subject dimension or the owner approves an indexed per-period query on `outcomes`.
+**Why.** A streak needs three distinct evaluation periods, but nightly runs of an annual measure share one period and a 400-day retention window (ADR-073) holds at most two, so the list was always empty while its history scan caused a 504.
+
+## ADR-080: Provider panels assign new cases, and assignment source is recorded
+*2026-09-12 · Accepted*
+
+**Decision.** WorkWell owns a provider-to-staff `panel_assignments` table (owner-approved schema) that assigns new cases, and `cases.assignment_source` records who chose each assignee.
+d1. `assignment_source` is `PANEL`, `OPERATOR` or NULL. A NULL source with an assignee counts as operator-owned; clearing an assignee clears its source.
+d2. The panel owner is applied on case insert only (`UpsertCaseInput.panelAssignee`), never on update or reopen. A run reads the map once at loop start and at finish reconciles providers whose owner changed mid-run, for the subjects it evaluated. Panel reads are best-effort.
+d3. Mapping a panel moves only active cases that are unassigned or `PANEL`-sourced, via pure `planPanelBackfill`. The compare-and-set guards assignee and source; a source-only change is a change. Re-saving a mapping still sweeps unassigned cases (`changed` vs `backfilled`).
+d4. Un-mapping a panel leaves its open cases assigned.
+d5. The work list opens on "My panel" for a mapped viewer, else the whole practice; an explicit URL choice wins. `?panel=me` resolves server-side; no panel means an empty, active filter.
+d6. A panel is assignment, never an attributed population or denominator.
+d7. Owner decision: the mapping stays in WorkWell, not WebChart departments; MIE data could only seed it through a reviewed import.
+**Why.** The practice works by provider panel and was re-assigning every new case by hand; recording the source stops an automatic rule from overruling a person. Backfill audits before each chunk's update, so a lost compare-and-set can leave an event for an unapplied move.
+
+## ADR-079: Record out-of-population and remove it from rate denominators
+*2026-09-10 · Accepted*
+
+**Decision.** Owner decisions (schema and #546's order-proposal reading): persist the out-of-population flag and exclude those subjects from every population rate.
+d1. `outcomes.out_of_population` is nullable, written from the executor's `inInitialPopulation` for official-routed measures. `false` only when the official logic placed the subject in the population; authored, copy-forward and errored rows stay NULL, read as not out of population. A one-time backfill (`docs/DEPLOY.md`) resolves NULLs from evidence.
+d2. `ProgramSummary`/`ProgramTrendPoint` carry `notInPopulation`; `missingData` is the remainder; `denominator = total − excluded − notInPopulation`, subtracting only persisted `MISSING_DATA` rows. `totalEvaluated` still counts every row; top-drivers drops these.
+d3. Every population-rate surface moves together (overview, both trends, top-drivers, hierarchy, risk-outlook sites, order proposals); the monthly snapshot trend is not served for official measures. Run-level surfaces keep `passRate = compliant / totalEvaluated`; the runs CSV appends `notInPopulation`.
+d4. Order proposals read population membership, not active cases.
+d5. "Out of population" means outside every rate's initial population (`outsideEveryRate`, `fhir/measure-report.ts`).
+**Why.** Out-of-population subjects were counted as missing data, so rates read far too low (CMS125 18% vs 72%) and orders were proposed to people the measure does not concern.
+
+## ADR-078: The sandbox routes all six ACO measures; out-of-population opens no case
+*2026-09-08 · Accepted*
+
+**Decision.** Owner decision, recorded in `LOCKED_DECISIONS.md` §4A.2. Amends ADR-043.
+d1. The Maui sandbox routes cms122, cms125, cms2, cms130, cms165 and cms137; `deploy-maui-mieweb.yml` and `reconcile-maui-mieweb.yml` must agree. cms130 and cms165 gates run in `flip-gate.yml`.
+d2. When the executor reports `inInitialPopulation: false`, no case opens; an active one is system-closed with `closed_reason='OUT_OF_POPULATION'`, audited `CASE_RESOLVED`, reopenable later. It is never re-derived from evidence, so authored MISSING_DATA still opens cases. The outcome stays MISSING_DATA; CDS cards follow the same rule.
+d3. The locked conditions move to the PHI phase: cms137 is un-routed if the final rule drops Quality ID 305; cms165 on real data needs ingest-stamped profiles and final BP status (#591).
+**Why.** The owner wants every measure the pilot group sent working in the sandbox, which runs on a generated corpus, not WebChart data; out-of-population cases would otherwise fill the work list.
+
+## ADR-077: Refuse reports from incomplete rows; show the evidence rate separately
+*2026-09-08 · Accepted*
+
+**Decision.** Exports are refused for unreportable or possibly compacted runs, and the dashboard shows the evidence's rate apart from the workflow rate. Amends ADR-031, ADR-073 and ADR-074 d12.
+d1. `src/run/reportable.ts` (COMPLETED, PARTIAL_FAILURE) gates every MeasureReport variant, QRDA I and QRDA III before any row is read; UI export buttons mirror it.
+d2. Completeness evidence is the ledger: `compactOutcomes`, the only deletion path, writes `OUTCOMES_COMPACTION_STARTED` with its cutoff first; an export of a run started before the furthest cutoff is 409 `run_compacted`, checked before and after the reads.
+d3. The keep set holds, per (subject, measure, period), the newest usable row (from a reportable run, not an error) and the newest row regardless, plus every case-cited row; in-flight runs are never compacted.
+d4. `POPULATION_SCOPES` = MEASURE, ALL_PROGRAMS; SITE, CASE and EMPLOYEE runs never replace the population snapshot.
+d5. The dashboard measure rate comes from `createRateAggregator` (the MeasureReport reducer), shown apart from the workflow-status rate; no improvement is computed between them.
+d6. An evaluation error is in no population: counted in `evaluationErrors` (and `unmeasured`), exported as `x-workwell-evaluation-errors`, no individual MeasureReport, `populationsSource: "evaluation-error"`.
+d7. The roster separates OUT_OF_POPULATION, MISSING_DATA and evaluation failure; `GET /api/runs/:id/reconciliation` states a terminal run's counts in subject-measure pairs.
+**Why.** Failed runs exported as "complete", a one-clinic run replaced the practice snapshot, compaction silently changed old scores, and a workflow number was labelled as the CMS rate.
+
+## ADR-076: Profile trust is per measure; operator next actions survive reruns
+*2026-09-07 · Accepted*
+
+**Decision.** Facts that were global settings or overwritten each run become per-measure or per-case, and silent drops are reported.
+d1. `trustMetaProfile` is set per measure in `OFFICIAL_MEASURE_SEMANTICS`; only cms165 sets it (default false). It relies on the corpus stamping profiles, so cms165 cannot run over WebChart data until blood pressures are profile-stamped at ingest (#591).
+d2. `cases.next_action_source`: `patchCase` marks OPERATOR, `upsertFromOutcome` marks SYSTEM, rerun-to-verify passes SYSTEM explicitly. An OPERATOR action stands while the outcome status is unchanged; when the status moves, the computed action takes over and ownership reverts to SYSTEM.
+d3. A run WARNs how many distinct subjects (and evaluations) the segment gate dropped, with measures and sites, and never mutates a segment.
+d4. Retention ships only with `spike_outcomes_keepset_idx` and `spike_cases_cited_outcome_idx`; Maui sets 400 days; `official-flip-config.test.ts` asserts a window implies both. The keep-set query stays `DISTINCT ON`.
+**Why.** Ignoring profiles misread cms165's blood pressures, runs overwrote operators' next actions nightly, and the segment gate dropped subjects without trace.
+
+## ADR-075: The pilot roster is a generated corpus, evaluated in subject chunks
+*2026-09-06 · Accepted*
+
+**Decision.** The Maui roster is a seeded generated corpus that never pre-decides outcomes; runs evaluate it in subject chunks. Sandbox only.
+d1. `patientAt(seed, index)` emits clinical facts at published rates, never a result; the seam's `target` is an inert `COMPLIANT`.
+d2. One SplitMix64 stream per `(seed, index)`; bump `CORPUS_GENERATOR_VERSION` on draw changes; CI pins a digest of the first 100.
+d3. The first 48 records keep the old fixture identities; their clinical data is generated.
+d4. `composeDeploymentDirectory` builds Maui from `corpusDirectory(seed, size)`, lazily; `WORKWELL_MAUI_CORPUS_SIZE` defaults to 48, Maui sets 20000.
+d5. Chunks of `WORKWELL_RUN_CHUNK_SIZE` subjects (default 500), each persisted by one `recordOutcomes`; optional `bundleForSubject` shares a bundle across measures.
+d6. Outcomes commit per chunk; case upserts follow per item outside that transaction.
+d7. Whole-roster, never per chunk: ADR-043's empty-population check, active-case snapshot, cycle rollover, terminal audit event.
+d8. Identity uses fixed `CORPUS_IDENTITY_YEAR` (2027); clinical facts follow the run's measurement year.
+d9. Patients carry `us-core-sex`/`-race`/`-ethnicity` and an active `Coverage` with a payer `Organization`.
+d10. Each resource carries the profile its artifact retrieve names.
+d11. Each shared denominator exclusion has data that can fire it; pregnancy is dropped.
+d12. The pinned digest moved; fixture identities did not.
+d13. Age gates follow each artifact's anchor (CMS2/CMS137 at period start); SUD episode draws are capped at Nov 14; diabetes is `qicore-condition-encounter-diagnosis`.
+**Why.** The 48-row fixture was built from the answers, so it exposed no measure defect; the pipeline was sized for 150 people.
+
+## ADR-074: Multi-rate measures are read on every rate
+*2026-09-06 · Accepted*
+
+**Decision.** A multi-rate measure (CMS137: Initiation, Engagement) is evaluated and reported on every rate, never rate 1 alone. The compliance API adds an additive `rates` block; its `populations` stays rate 1.
+d1. Every rate is read (`OfficialSubjectResult.rates: FqmPopulationResult[][]`); single-rate is length one.
+d2. The workflow bucket is the worst MEASURING rate: COMPLIANT only if every rate whose denominator holds the subject is met; out-of-population rates are ignored.
+d3. All rates persist in `evidence_json.official`, which reports read; the outcome enum does not grow.
+d4. MeasureReport emits one group per rate, with `Group_1`/`Group_2` ids on multi-rate reports only.
+d5. A subject who cannot supply every rate is counted in none; an unreadable rate contributes zeros, never a copy of rate 1.
+d6. Superseded by d8 (QRDA III used to refuse a multi-rate measure with 501).
+d7. The MADiE gate compares every rate and names the one that diverged.
+d8. QRDA III emits every group and every stratum (Reporting Stratum V2); stratified documents, cms125 included, are not yet re-validated.
+d9. Strata persist as `evidence_json.official.strata`, keyed by `Measure.group.stratifier.id`, and appear as a `stratifier` per group in MeasureReports.
+d10. Summary MeasureReport and QRDA III sum paged reads; the 5,000-subject `run_too_large` cap applies only to the per-subject bundle.
+d11. `aggregateByRate` reports `unmeasured` (subjects in no rate); summary MeasureReport and QRDA III return it as the `X-WorkWell-Unmeasured-Subjects` header.
+d12. Export provenance (official memberships vs authored status histogram) is read from the first evaluated row, skipping errored ones. (ADR-077 d1 extends the reportable set.)
+d13. OVERDUE wording names the missed rate: `officialDisplayFor(evidence)` picks the first rate the subject is in the denominator of (not excluded or excepted) whose numerator is a miss under `numeratorMeansCompliant`; every reader, `next_action` and the CDS card included, passes it. `expressionResults` use `official:<Rate label>:<population>`, labels from `OFFICIAL_MEASURE_SEMANTICS[id].rateLabels`.
+d14. The flip gate reads the deployment's own roster (amends ADR-072 d6) via `composeDeploymentDirectory` + `compositeBundleSource`, in `WORKWELL_RUN_CHUNK_SIZE` chunks; `--subjects` caps it (default 2,000).
+**Why.** In 8 of CMS137's 45 steward cases the rates disagree; reading rate 1 alone marks patients who initiated treatment but never engaged as compliant, hiding the gap.
+
+## ADR-073: Outcome rows live in a retention window; history is the aggregate
+*2026-09-06 · Accepted*
+
+**Decision.** `WORKWELL_OUTCOME_RETENTION_DAYS` sets a window beyond which per-subject `outcomes` rows are deleted. Unset means off. Durable history is the quality-over-time snapshot store (ADR-021), which compaction never touches.
+d1. Unset everywhere by default (TWH keeps full history), and not to be set until the Postgres keep-set index exists. (ADR-076 d4: Maui ships 400 days together with `spike_outcomes_keepset_idx` and `spike_cases_cited_outcome_idx`.)
+d2. Never deleted: the newest row per `(subject, measure, evaluation period)` at any age; every row any case (open or closed) cites, matched on `(run_id, subject_id, measure_id)`; every run row and its counts. Both exclusions are evaluated in SQL. (ADR-077 d3 adds the newest USABLE row alongside the newest overall, and exempts in-flight runs.)
+d3. Compaction runs after the quality snapshot, never before; the scheduler enforces the order.
+d4. The ledger precedes the delete: `OUTCOMES_COMPACTION_STARTED` (cutoff, window) is written before `compactOlderThan`, `OUTCOMES_COMPACTED` (cutoff, rows deleted, duration, window) after; one event per pass. (ADR-077 d2 makes the intent event the evidence behind 409 `run_compacted`.)
+d5. `backfill-trend-history` refuses to run under a retention window.
+d6. A run older than the window shows a notice that its per-subject results may be compacted and its counts are survivors; it does not claim how many rows went.
+**Why.** The pilot writes roughly 100,000 outcome rows a night, and the aggregate already answers the historical question. The window is calibrated for a sandbox and needs revisiting before a real performance year.
+
+## ADR-072: Runnable means authored or official-routed; eCQMs score calendar years
+*2026-09-05 · Accepted*
+
+**Decision.** One pure function decides whether a measure runs on a deployment, and an officially routed measure is scored over the calendar year of the evaluation date, not a rolling 365-day window. CMS165 caveat: under `trustMetaProfile: false` its profile-only BP retrieve misreads; ADR-078 routes it in the sandbox on stamped profiles, and real BPs need profile stamps before PHI.
+d1. `classifyRunnable(id, env)` returns `authored` | `official` | `official-pending` | `invalid`. Runnable = authored (registry + synthetic binding) or official-only (vendored in `measures/official/` + `OFFICIAL_MEASURE_SEMANTICS` entry + listed in `WORKWELL_OFFICIAL_MEASURES`); both ⇒ `official`. `env` is a parameter, not a `process.env` read.
+d2. `official-pending` (vendored with semantics, not routed here) is a valid answer, not an error.
+d3. Subject bundles come from the `SubjectBundleSource` seam; official-only measures get QI-Core shapes from `official-only-bundles.ts`.
+d4. Official-routed measures use the evaluation date's calendar year (`normalizePeriodEnd`), recorded on the run row and in `evidence_json.official`. `planManualRun` switches only if every measure in the run is official-routed. TWH's cms122/cms125 moved too.
+d5. A stale artifact vintage becomes a run WARN via `effectivePeriodWarning`.
+d6. Measures with no authored counterpart are gated by `official-flip-gate` (MADiE deck, roster, artifact `effectivePeriod`, each able to fail alone), not `flip-snapshot`; it is descriptive (exit 0) and routing stays a workflow edit. (See ADR-074 d14.)
+**Why.** cms2/cms130/cms165 were gated but could not run, because the runnable set came from the authored registry. A rolling window scores a period the eCQM's steward never defined.
+
+## ADR-071: Official-only measures use the manifest's bare id
+*2026-09-01 · Accepted*
+
+**Decision.** The catalog ids for cms2, cms130 and cms165 are the vendored manifest's bare `catalogId`, with `policyRef` and the version string keeping the CMS version (`CMS2v15`). `seedMeasureStore` deprecates a legacy versioned row (`cms2v15` etc.) once, with one `MEASURE_DEPRECATED` audit event, and only if it still carries the exact seed fingerprint (an edited row stays as a Draft); nothing is deleted. `OFFICIAL_MEASURE_SEMANTICS` gains `cms130` and `cms165` (numerator ⇒ COMPLIANT).
+**Why.** The official executor requires the requested id to equal the manifest's `catalogId`. An alias layer would have to be applied on every read, filter, upsert and rerun to protect data that did not exist.
+
+## ADR-070: The Maui patient pilot becomes the spearhead
+*2026-08-30 · Accepted*
+
+**Decision.** Milestone M-M, the Maui pilot (a primary-care group on WebChart entering an MSSP ACO for PY2027), is the spearhead; the plan is `docs/ROADMAP_2026-08-30.md` and the locked set is `LOCKED_DECISIONS.md` §4A. The milestones deliver a sandbox; the production/PHI phase is a separate `PRODUCTION_READINESS`-gated decision.
+d1. M-M supersedes M-E1 (deferred, not cancelled). Cheap-first: MM-0 (second deployment, patient terminology, status-chip drill-downs, sandbox accounts, primary-care roster, MIPS↔CMS crosswalk) before externally blocked work.
+d2. The catalog is the ACO's computable set: CMS122, CMS2, CMS165, CMS125, CMS130, plus CMS137 only if Quality ID 305 survives and after a multi-rate spike. No known-unverified measure is routed to the pilot, and PY2027 needs a re-vendor and re-gate. (Since ADR-072/ADR-078: official-only onboarding is built and the sandbox routes all six.)
+d3. Cards resolve, not alert, inside ADR-067's refusals: order suggestions only on APPROVED terminology mappings; an offered order is a proposal that never changes compliance (the gap closes when the result arrives and CQL re-evaluates); exceptions are structured data the measure reads next run.
+d4. The versioned compliance API is demoted to a kept, served surface; the integration contract is the card/CDS surface plus the Maui deployment, and no work is justified by the API alone.
+d5. Naming: repo documents say "Maui" and "the pilot group" only, with no client-side names or client documents; pilot accounts are pseudonymous; source materials stay local-only and gitignored.
+**Why.** Five of the ACO's six EMR-computable measures were already vendored and MADiE-gated, and the pilot's quality staff need panel-centric work lists and cards that close gaps rather than raise alerts.
+
+## ADR-069: Population membership follows the CQM IG formulas per subject
+*2026-08-25 · Accepted*
+
+**Decision.** `normalizeMembership` applies the CQM IG (`hl7.fhir.uv.cqm` v1.0.0) subject-based membership formulas to each subject's flags, so the existing score arithmetic `numer / (denom − denex − denexcep)` becomes exact without changing.
+d1. Two stages: subset clamps (`numer/denex/denexcep ⊆ denom ⊆ ipp`) stay alerted, since a violation means an unreadable writer. The IG interaction folds are silent: `numer := numer ∧ ¬denex ∧ ¬numex`; `denexcep := denexcep ∧ ¬denex ∧ ¬numer_RAW`, using the raw (subset-clamped) numerator, not the NUMEX-folded one.
+d2. The fold is per subject, not at the score, verified over all 64 flag combinations. Population counts still report populations as evaluated (DENOM includes DENEX'd subjects).
+d3. NUMEX (`numerator-exclusion`) is an input folded into `numer` in both evidence shapes, not a reported population in `PopulationMembership`. A results array with only `numerator-exclusion` is still an unreadable writer (alert, `null`, status-rule fallback).
+d4. The formulas are pinned verbatim in `src/fhir/cqm-membership-formulas.test.ts` with an independent in-test oracle.
+**Why.** Marginal arithmetic matches the spec only if per-subject flags already encode the interactions. Ours did not (a score could exceed 1.0, NUMEX was skipped), though no current writer emits those combinations.
+
+## ADR-068: A hand-authored OpenAPI document for the promised API only
+*2026-08-17 · Accepted*
+
+**Decision.** WorkWell serves a hand-authored OpenAPI 3.1.1 document for the promised surface only, guarded by a routed-path contract test and a Redocly lint. Adding a route to that surface means adding it to the document, or CI fails.
+d1. `GET /api/v1/openapi.json`, built by `backend-ts/src/openapi/spec.ts`; public (PERMIT).
+d2. Scope: `/api/v1/compliance`, the three `/cds-services` operations, the document itself, health and version (seven operations). Internal `/api/**` routes are excluded, and the document says so.
+d3. Hand-authored (no zod, `@hono/zod-openapi` or TypeSpec), with the contract test as its required other half.
+d4. Every documented `(path, method, status)` must be produced by a real request through the worker (else `documented but NOT ROUTED`); the reverse direction covers only statuses some probe produces.
+d5. Redocly lints it in CI: top-level version pinned, telemetry off, no ignore file; remaining warnings are explained in `spec.ts`.
+d6. OpenAPI 3.1.1, not 3.2 (renderers silently treat 3.2 as 3.1).
+d7. The reference page is hand-rolled and public at `frontend/app/api-docs`, with a copyable `curl` instead of a try-it console.
+**Why.** The repo claimed an OpenAPI document it did not serve and omitted the one contract it does. Hand-authoring avoids new dependencies, and the contract test catches drift.
+
+## ADR-067: CDS Hooks cards render finished evaluations, via our own mapping
+*2026-08-17 · Accepted*
+
+**Decision.** The worker serves CDS Hooks as a spec (no `cqf-fhir-cr` at runtime); cards render persisted outcomes and never trigger an evaluation.
+d1. One service, `patient-view`.
+d2. Cards render outcomes of a FINALIZED run only; a card is as fresh as the last run.
+d3. No `prefetch` is declared (`usageRequirements` says so); `fhirServer`, `fhirAuthorization`, `prefetch` are ignored.
+d4. An absence is an `info` card (including an unresolved id); an empty list means evaluated and compliant.
+d5. `critical` and `systemActions` are never emitted; `critical` cannot be represented in the card type.
+d6. Suggestions only where the order code has an APPROVED terminology mapping (read from the store). The card predicate (`dispositionFor(...) === "OPEN"`) and proposal predicate (`AT_RISK`) must stay one set; a test pins it.
+d7. The outcome-to-card mapping is ours (none is published), recorded as local in `STANDARDS_CONFORMANCE.md`.
+d8. Discovery is public; invoke and feedback need `ROLE_MCP_CLIENT`, `CASE_MANAGER` or `ADMIN` via explicit rules (non-`/api` paths otherwise permit).
+d9. Auth is WorkWell's bearer token; the spec's JWT profile is a named gap.
+d10. Feedback needs no schema change: `card.uuid`/`suggestion.uuid` derive from `(runId, subjectId, measureId)` and are recorded verbatim.
+d11. A failed evaluation (`evaluationError`) gets an `info` "could not be evaluated" card with no suggestion.
+d12. Suggested resources reference the hook's `patientId`, not the internal subject id.
+d13. Feedback fails loudly (503 with `recorded`/`of`) and is bounded (100 entries, 8,000-char `userComment`).
+**Why.** CDS Hooks is plain JSON over HTTPS the worker can serve without Java; WorkWell is supplementary to WebChart, so it informs but never blocks an encounter or changes a chart itself.
+
+## ADR-066: Docs split into a maintained guide and a dated archive
+*2026-08-10 · Accepted*
+
+**Decision.** Documentation is split into a maintained explanatory guide and a dated archive of records.
+d1. `docs/guide/` is the maintained explanation: ten chapters, each with a mermaid diagram. Updating the affected chapter is part of every PR's Definition of Done.
+d2. Volatile numbers (test counts, gate counts, routing state) live only in chapter 9, each with its date and reproducing command.
+d3. *Superseded 2026-09-23 (owner): `docs/archive/` was deleted; git history is the archive, and finished work is deleted rather than moved.* `OFFICIAL_TESTCASE_REPORT_2026-07.md` stays in `docs/evidence/` because CI regenerates it.
+d4. `CQF_FHIR_CR_REFERENCE.md` leaves the always-loaded set.
+**Why.** A doc that explains and a doc that records go stale at different speeds. Mixing them left explanation scattered and records posing as explanation.
+
+## ADR-065: Authored regulatory measures are verified by traceability and adversarial tests
+*2026-08-07 · Accepted*
+
+**Decision.** An authored regulatory measure with no external oracle is verified by a traceability document plus boundary and adversarial test cases, and packaged so an organisation could steward it. The first is OSHA 1910.95 standard threshold shift (`docs/measures/OSHA_1910_95_STS.md`). This shows the measure computes what we read the CFR to require, not that the reading is right, and `STANDARDS_CONFORMANCE.md` says so.
+d1. The CQL author also writes the test cases, which is normal for a measure nobody else defines; the deliverable is a measure that could be stewarded.
+d2. Scope is one obligation, STS detection `(g)(10)(i)`; the traceability doc lists the other 1910.95 obligations as not implemented, with reasons.
+d3. Where the regulation is discretionary, refuse rather than default silently: no age correction (stated visibly), and incomplete data yields `MISSING_DATA`.
+d4. Determinability is asymmetric: a positive STS is definitive from one ear, while a negative finding needs both ears complete.
+d5. Thresholds use real LOINC codes from panel 89015-2; the cohort uses ICD-10-CM Z57.0 as a documented proxy for noise exposure, with employer assertion accepted.
+d6. It is NOT in the measure registry (so not in `RUNNABLE_MEASURE_IDS`); it is verified through `evaluate({ elm, metaOverride })` because the synthetic corpus cannot produce its data.
+**Why.** OSHA publishes regulations, not computable artifacts, so no external oracle exists. Adversarial cases found real under-detection bugs that would have inflated the apparent compliance rate.
+
+## ADR-064: One shared UCUM validator for every CQL translator
+*2026-08-05 · Accepted*
+
+**Decision.** Every CQL-to-ELM translator passes a UCUM service to `LibraryManager` (its fourth argument), so CQL with quantity literals translates.
+d1. One validator in `src/measure/ucum.ts`, shared by the runtime translator, `scripts/compile-measures.mjs` and the conformance harness. `compile-measures` therefore runs under `node --import tsx`.
+d2. It does not live in `@work-well/measure-engine`, which executes pre-compiled ELM and never translates.
+d3. A UCUM grammar plus an atom/prefix table (`METRIC_ATOMS`, `NON_METRIC_ATOMS`), not a new dependency. It refuses unrecognised atoms; a false rejection is fixed by adding the atom. `mg/kg/d` is valid UCUM, and a test pins it.
+d4. The old behaviour stays reachable as `NO_UCUM_SERVICE` so the regression test can show it failing.
+**Why.** The default UCUM service throws, so any unit-bearing CQL failed to translate (including in the Studio's ELM Explorer), yet no committed measure used a unit and every gate stayed green. Rejecting unknown units gives the author a visible error instead of a wrong number later.
+
+## ADR-063: Packages are verified by packing and consuming the tarball
+*2026-08-05 · Accepted*
+
+**Decision.** A package is publishable when its packed tarball installs and runs outside the workspace. The scope is `@work-well/*` (amended 2026-08-06: npm refuses the `@workwell` org because an unrelated unscoped `workwell` package exists).
+d1. Packages build to `dist/`; `publishConfig` repoints `exports`/`types`/`main` at `dist/` at pack time only. That is a pnpm feature, so pack with pnpm, not npm. In the tree, `exports` still names `src/index.ts`.
+d2. `scripts/verify-publish.mjs` (`pnpm verify:publish`) packs tarballs, installs them with plain `npm install` in a temp dir, runs the engine on `example-consumer`'s content and typechecks a TS consumer against the packed declarations. It is CI's `packages` job on every PR.
+d3. Publishing is manual: `publish-packages.yml` is `workflow_dispatch` only, defaults to a dry run (which does not exercise the token), and refuses without `NPM_TOKEN`.
+d4. `official-executor` is not published; its package boundary is the ADR-026 `fqm-execution` quarantine.
+d5. Positioning: the engine composes `fqm-execution` rather than competing with it. No performance or conformance comparison is claimed.
+d6. Pre-1.0 with a stricter reading than semver: removals, retypes and semantic changes take the minor; integrators pin `~0.1.0`; 1.0 waits for a consumer outside MIE.
+**Why.** Inside the workspace, packages resolve from source, so nothing showed whether `files`, `dependencies` or the emitted JS work for a registry consumer. npm publishing cannot be undone (versions are never reusable), so verification must not depend on publishing.
+
+## ADR-062: Codegen leaves the engine; an app-independent consumer proves the split
+*2026-08-05 · Accepted*
+
+**Decision.** CQL generation is split from the evaluation engine, and a consumer package that shares no code with the app shows the engine works without WorkWell's content.
+d1. `generate-cql.ts` moves to `@work-well/measure-codegen`, with zero dependencies, and the engine no longer exports codegen. `src/engine/`'s allowlist admits it for `cql/codegen/generate-sql.ts`.
+d2. `@work-well/example-consumer` is a test, not a sample: one dependency, its own measure (`tetanus-booster.cql` + ELM) and bundle, asserting its outcomes and that `audiogram` is unknown. It resolves the engine through `workspace:*`, so it proves a consumer outside the app, not outside the repo. Every consumer must supply `FHIRHelpers-4.0.1` in `elmLibraries` (pinned by a test).
+**Why.** Codegen (authoring time) and the engine (runtime) shared a directory, not code. An import-graph assertion proves the source tree's shape, not that a consumer can use the package. `measure-engine-api.test.ts` also checks `.mjs`/`.js` under `scripts/`, since `tsc` does not.
+
+## ADR-061: The compliance API names its evidence source and 404s on absence
+*2026-08-05 · Accepted*
+
+**Decision.** `GET /api/v1/compliance/{subject}/{measure}?start&end&mode` is a versioned contract (`docs/COMPLIANCE_API.md`) for one subject's compliance on one measure; `v1` fields are never removed or retyped. Since ADR-070 d4 it is a kept, served surface, not the contract MIE consumes.
+d1. `/api/v1/` in the path, with exactly one route under it; everything else under `/api/` is internal. The generic `/api/**` AUTHENTICATED rule covers it, and a test asserts the 401.
+d2. The response carries `populationsSource`, derived from the same `officialMembership` call `membershipFor` uses, so it cannot disagree with the numbers. An authored measure measures only `initialPopulation`; its other populations are inferred from status.
+d3. `latest` with nothing persisted is a 404 saying which absence it is (with `pendingRuns`), never an empty 200. It serves only COMPLETED or PARTIAL_FAILURE runs and reports `runId`.
+d4. `preview` routes through `routedEngineForEnv`, returns 501 on a WebChart-configured deployment, and is limited to CASE_MANAGER/ADMIN.
+d5. No new evidence reader: it uses `membershipFor` and `officialReportIdentity` (`src/fhir/measure-report.ts`), and a test asserts agreement with `buildIndividualMeasureReport`.
+d6. Every answered request, 404s included, writes a `COMPLIANCE_API_READ` audit event (best-effort; a failure logs loudly).
+d7. `period` is the answer's measurement window; `filter` echoes the caller's bounds.
+**Why.** "No run covered this subject" must never read as "compliant", and a consumer must be able to tell measured eCQM membership from status-inferred booleans.
+
+## ADR-060: The CQL conformance harness keeps translator and engine failures separate
+*2026-08-05 · Accepted*
+
+**Decision.** `pnpm cql-tests` runs the HL7 `cqframework/cql-tests` suite through our translator (`@cqframework/cql`) and engine (`cql-execution`). It reports only if every case in the corpus lands in exactly one outcome bucket.
+Decision 1 — `translation-error` is its own outcome and is never folded into `fail`. The runner has seven outcomes and reports all of them.
+Decision 1b — an `invalid` case is executed when it translates. It counts as refused if it fails at translation or at runtime, which is the `cql-tests-runner` rule.
+Decision 2 — cases are graded in CQL (`define Passed: Actual ~ Expected`) and run unfiltered, with no patient. This added data-free `evaluateExpressions` to the engine package. Cases compared in JS instead are counted and baselined.
+Decision 3 — the SkipList is the capability set we claim, and it is empty. Adding an entry needs a PR that says why.
+Decision 4 — the CI gate fails on any per-case regression against a committed baseline, keyed on `file/group/name`, that stores only non-passing cases. A move between two non-passing outcomes is reported but does not fail. A baseline in the older format is refused.
+Decision 5 — ADR-048's `*-cli.ts` split is dropped because it buys nothing. `engine-boundary.test.ts` now allows `node:` based on reachability from the production request path, which is derived rather than listed, instead of on the `-cli.ts` filename.
+**Why.** The published `cql-execution` results used the Java translator, so the gap in our JS translator is exactly what is being measured. Merging the two would blame the engine for translator gaps, and a threshold can stay green while passes trade places.
+
+## ADR-059: The engine package receives measure content injected and ships none
+*2026-08-05 · Accepted*
+
+**Decision.** `@work-well/measure-engine` depends only on `cql-execution` and `cql-exec-fhir`, and it ships no WorkWell measures, ELM or corpus expansions. The app wires those in one place: `createWorkwellEngine()` in `src/engine/cql/workwell-engine.ts`. This answers the question ADR-052 left open; ADR-052's decided half stands.
+Decision 1 — content is injected. The `CqlExecutionEngine` constructor requires `MeasureContent = { measures, elmLibraries, expansionFallback? }`, with no empty default, so `new CqlExecutionEngine()` is a compile error.
+Decision 2 — the app's remaining content (`measure-registry.ts`, `bundled-ecqm-expansions.ts`, `elm/`) stays under `src/engine/` and does not move.
+Decision 3 — `fhirNativeExecutor` and `resolveMeasureExecutor` require their engine binding. They no longer build a shared engine lazily.
+Decision 4 — offline expansion requires an `expansionFallback` to be supplied, not just eCQM-shaped OIDs. Without one, a consumer gets the base library: a limited answer, not a silently wrong one.
+Enforcement: `packages/measure-engine/src/package-boundary.test.ts` allows no third dependency, no `node:` builtin, no `Buffer`/`process`/`__dirname`/`require(`, and no import of WorkWell content by name. `src/engine/measure-engine-api.test.ts` allows no deep import past `index.ts` and requires every imported name to exist in `index.ts`. `engine-boundary.test.ts` stops `src/engine/` from importing `cql-execution` or `cql-exec-fhir` directly.
+**Why.** No consumer of a measure engine wants WorkWell's catalog or fixtures. An empty catalog would return MISSING_DATA for everyone, with no signal.
+
+## ADR-058: The verification bar is FHIR-column checks, not relabelling for Cypress
+*2026-08-04 · Accepted*
+
+**Decision.** QRDA III is an HQMF/QDM-identity format, and our QI-Core measures have no QDM identity, so Cypress cannot grade our documents. We do not relabel, and we do not build a QDM engine. This supersedes the "Cypress CVU+ green" bar in locked decision 2.
+1. Every export's measure identity comes from the artifact that produced the outcome (reaffirms ADR-046 decisions 3 and 4).
+2. A green obtained by relabelling would add no evidence and would put a false provenance claim into an outbound document.
+3. The bar is a named set of FHIR-column checks (`ROADMAP_2026-08-04.md` §4), each with a stated scope and limit. Examples: the FHIR validator with the DEQM STU5 package on our MeasureReports, and cross-execution against Java `cqf-fhir-cr`. `fqm-testify` and `deqm-test-server` are not independent because both wrap `fqm-execution`.
+4. A Cypress Calculation Check green is retired as a goal, and no QDM execution path will be built. Revisit only if MIE makes certification of WorkWell's engine a business goal.
+5. The QRDA I/III machinery is kept as an interoperability bridge, not a certification target.
+6. Supplemental data (RACE/ETHNICITY/SEX/PAYER) is deferred, not cancelled. Build it when a receiver reads it or alongside DEQM supplemental data.
+**Why.** Cypress extracts nothing from a document whose measure identity is not the QDM one it holds. The QI-Core artifact has no per-population UUIDs to relabel with, and no maintained FHIR-lineage grader exists. No FHIR-column check produces a certificate, so every claim must name who graded what.
+
+## ADR-057: The live WebChart path derives us-core-sex and the imaging mammogram Observation
+*2026-08-03 · Accepted*
+
+**Decision.** For data from a third-party WebChart FHIR server, `src/engine/ingress/webchart/normalize.ts` derives the two elements the SQL mappers add (closes ADR-042 decision 3). `us-core-sex` comes from `Patient.gender`, for `male`/`female` only; it never overwrites a server's extension and is tagged `derived-from-gender`. A LOINC imaging `Observation` comes from a `completed` CPT/HCPCS mammography `Procedure` on a two-code allowlist, matched via `codingKey`. It is skipped when a usable `24606-6` Observation exists for that subject and day. The gate is `live-official-parity.test.ts`.
+**Why.** Reading a server's own `female` as not-female is also an inference, and a worse one: it silently empties official CMS125 and marks screened women OVERDUE. Deriving the elements turns a roster-wide, invisible failure into a rare individual one that an operator can review.
+
+## ADR-056: QRDA I batch import and an import-only finalize route
+*2026-08-03 · Finding (historical)*
+`POST /api/runs/:id/import` groups documents into people only by shared `<recordTarget>` identifiers and reports demographic conflicts without resolving them. `POST /api/runs/:id/finalize` finalizes only a run created with `requestedScope.importDriven` in which every outcome carries `qrda1Import` evidence. A cross-lineage measure id is accepted only as an explicit, recorded `assertMeasureIdentifiers`.
+
+## ADR-055: QRDA I import maps each QDM datatype to what the ELM retrieves
+*2026-08-03 · Finding (historical)*
+Each QDM datatype is imported as the FHIR type the official artifacts' ELM actually retrieves, not from a QDM→QI-Core table. `<translation>` codes become extra codings, system URLs match the vendored expansions exactly, and negated acts are skipped. After these changes the importer matched Cypress's expected populations on every patient in two archives.
+
+## ADR-054: CMS130 and CMS165 onboarded on their first credentialed vendor run
+*2026-07-31 · Finding (historical)*
+Both were added to `OFFICIAL_GATED_MEASURES` and the MADiE/deploy vendor lists after one credentialed `vendor-official-measure.yml` dispatch each. Their terminology was complete and their MADiE decks were fully green. Routing was left unchanged.
+
+## ADR-053: The vendor step reports value sets the upstream bundle never shipped
+*2026-07-31 · Accepted*
+
+**Decision.** A value set the ELM retrieves but the upstream bundle does not ship is "absent", which is different from "capped". It is detected, sourced from VSAC with the same credentialed flag, and reported by name. The MADiE gate (`runOfficialMeasureCases`) swaps in our terminology only for the OIDs the bundle does not ship; everything else still runs on upstream's. `supplementedOids` marks the measures where this happens.
+Decision 1 — the vendor step compares the value sets the ELM retrieves against those the bundle ships, in one direction only, and reports the missing ones. It no longer writes a manifest that looks complete.
+Decision 2 — absent value sets are not recorded in the manifest. `absentValueSets` recomputes them at runtime from the ELM and the sidecar.
+Decision 3 — `--complete-terminology` completes both capped and absent sets but keeps them apart. (The old name `--complete-capped-expansions` is still accepted.) An absent set is checked only against VSAC's `expansion.total`, and an empty expansion is refused. `completion.valueSets[].reason` is written only as `absent-upstream` (with `declaredTotal: null`); a missing `reason` means capped.
+Decision 4 — routing's verdict does not change. `officialRoutingProblems` now names the absent OID and says re-pinning will not fix it.
+**Why.** "Complete terminology" only ever meant every code the bundle declared. A value set the bundle never declared (CMS138's tobacco screening set) was invisible and looked like an expander failure.
+
+## ADR-052: Synthetic, ingress, immunization and CLI code are app content
+*2026-07-31 · Accepted*
+
+**Decision.** Under `src/engine/`, `synthetic/`, `ingress/`, `immunization/` and `cli/` are app content and never part of the engine package. `cql/codegen/generate-sql-cli.ts` is app-side too. ADR-059 answered this ADR's open question, whether the package ships WorkWell's measure content: it does not.
+1. `synthetic/`, `ingress/`, `immunization/` and `cli/` are APP content, not package content.
+2. `CORE_ENTRY_POINTS` is the published API, and app imports are checked against it. (Since ADR-059 the list is deleted. The API is the package's `index.ts`, checked by `src/engine/measure-engine-api.test.ts`.)
+**Why.** Shipping the whole directory would publish our fixtures, such as the fictional employee directory `synthetic/employee-catalog.ts`, as API.
+
+## ADR-051: QRDA I import maps documents into the unchanged engine
+*2026-07-31 · Finding (historical)*
+`POST /api/runs/:id/evaluate` accepts `{ measureId, qrda1 }`. `qrda1-import.ts`, with the hand-rolled `cda-parse.ts`, maps QDM entries back into FHIR for the existing engine. An unreadable document gets a 400, and untranslated datatypes are named and persisted in `evidence.qrda1Import`. QRDA I only works for measures in real terminology.
+
+## ADR-050: QRDA Category I carries patient data, checked against the HL7 base IG
+*2026-07-30 · Accepted*
+
+**Decision.** A QRDA I is a patient-data document that the receiver recalculates from. It carries QDM entries translated from the subject's evaluated FHIR bundle and no population membership. It is measured against HL7 QRDA I R1 STU 5.3 (US Realm), not the CMS Hospital IG. This supersedes ADR-049's central claim.
+1. `backend-ts/scripts/qrda-schematron-check.py` checks against the base IG by sorting Schematron findings into groups. The base-HL7 groups (`CONF:1198/3343/4509/1098/81/67-*`, plus CMS_0105–0113 and CMS_0115–0120) are our bar. Other `CONF:CMS-*` findings are Hospital-only. Anything it cannot classify counts as an error.
+2. Population membership is removed. It is exported only by MeasureReport and QRDA III.
+3. The Patient Data section carries real QDM entries built by `src/fhir/qdm-entries.ts`. A resource that cannot be classified is skipped, not guessed, and retracted records are excluded.
+4. We do not claim the CMS document template (`…24.1.3`).
+5. Missing header data is filled with `nullFlavor`, never invented: an `assignedAuthoringDevice` author, the WorkWell instance as custodian, race/ethnicity `UNK`, and no `legalAuthenticator`.
+6. A document without a bundle is still emitted but flagged (`conformant`/`nonConformant`). A bundle is never reconstructed from an outcome.
+Roster-derived evidence (the synthesized encounter) is not re-stamped at export. The omission is stated in the section text and in `caveats`, which is separate from `conformant`.
+**Why.** Category I has no place for population membership: the receiver recalculates, per §170.315(c)(2). CMS122/CMS125 are Eligible Clinician measures, so the Hospital IG is the wrong standard.
+
+## ADR-049: QRDA I reported population membership (superseded)
+*2026-07-30 · Superseded by ADR-050*
+Its central claim, that QRDA I reports per-subject population membership, was wrong. Three things survive: the sha-checked measure identity (`qrdaMeasureReference`), the 409 refusal to export a run that is not finished, and the rule that a document states its own limits in prose.
+
+## ADR-048: The CQL translator moved out of the engine tree
+*2026-07-30 · Finding (historical)*
+`cql-translator.ts`, the ELM Explorer's live-compile path, moved to `src/measure/`. That leaves the engine depending only on `cql-execution` and `cql-exec-fhir`. The `*-cli.ts` split it planned was later dropped (ADR-060 decision 5).
+
+## ADR-047: A measure is onboarded only when its MADiE gate passes
+*2026-07-30 · Accepted*
+
+**Decision.** Vendoring is not onboarding. An official measure is onboarded when its MADiE deck passes in the gate, and gated, routable and routed are separate steps. (At the time CMS2, CMS68 and CMS951 passed and CMS138 failed. Of those three, only CMS2 and CMS951 are routable.)
+1. Onboard exactly the measures the gate passes.
+2. Do not commit a vendored but capped artifact. Measures that need VSAC completion wait for a credentialed vendor run.
+3. `OFFICIAL_GATED_MEASURES` drives the gate harness, not a hardcoded pair.
+4. The compared population vector includes DENEXCEP.
+5. `OfficialMeasureId` is derived from the gate map (`keyof typeof MEASURES`), not from a hand-written union.
+6. `officialRoutingProblems` refuses an episode-of-care measure (`populationBasis: "Encounter"`, e.g. CMS68) at construction. Such a measure is gated but not routable.
+7. Nothing is routed by this change.
+**Why.** A vendored artifact proves nothing; the MADiE deck does. CMS68's deck could not catch per-encounter counting, because every case has one episode, so that case is refused rather than trusted.
+
+## ADR-046: Report canonical, improvementNotation and membership come from the outcome's evidence
+*2026-07-30 · Accepted*
+
+**Decision.** For an official-routed outcome, the MeasureReport canonical, `improvementNotation` and population membership, and the QRDA measure identity, all come from the outcome's own `evidence.official`. They never come from the environment at export time. Authored reports are unchanged. The outcomes CSV's `measureVersion` follows the same rule (`evidence.official.version`).
+1. All three come from `evidence.official`, not from `WORKWELL_OFFICIAL_MEASURES` at export time.
+2. `improvementNotation` comes from the human-reviewed `OFFICIAL_MEASURE_SEMANTICS` (`official-measure-semantics.ts`), not from the artifact. A routed measure with no recorded semantics emits `WORKWELL_ALERT` instead of guessing.
+3. The official canonical is claimed only when the vendored artifact's `sha256` matches the outcome's `artifactSha256`. Otherwise it falls back to `urn:workwell:measure:<id>:official:<version>`.
+4. QRDA III carries the official eMeasure identity, read from the vendored bundle: the version-specific UUID as `id/@extension` under root `2.16.840.1.113883.4.738`, the version-independent UUID as `setId/@root`, and `versionNumber`. If these are absent it falls back to WorkWell's urn.
+5. The flip guard (`official-flip-config.test.ts`) checks the notation in the built report, not the binding table.
+**Why.** A report describes the run it was built from. Labelling it from current config or a newer artifact claims a provenance that never existed. QRDA III has no notation field, so the identity is what tells a receiver the direction (cms122's numerator is poor control).
+
+## ADR-045: Official routing is switched by a reviewed, test-gated workflow edit
+*2026-07-30 · Accepted*
+
+**Decision.** `WORKWELL_OFFICIAL_MEASURES` is set in the deploy workflow, and the self-heal reconciler carries the same value. It is never set by hand on the container. `official-flip-config.test.ts` reads the shipped value and fails on any measure that is not routable. Rollback is a one-line edit and a redeploy. A misconfiguration does not fail boot: grep for `OFFICIAL_ROUTING_MISCONFIGURED` after a deploy.
+1. Flip cms125 only (cms122 waited for ADR-046). A measure whose official numerator means failure may not ship with `improvementNotation: "increase"`.
+2. The flag is set in the workflow, not on the container.
+3. A test parses the flag out of the deploy workflows. It asserts every id is MADiE-gated, vendored and proportion-scored, and that with the sidecar there are no `officialRoutingProblems`.
+4. That test is split in two. The structural half always runs; the terminology half needs the sidecar and runs in CI's `official-cases` job.
+5. `reconcile-twh-mieweb.yml` ships the same value as the deploy workflow, and a test asserts it.
+6. Capped expansions are excused only when the working tree is capped (PRs without the VSAC secret).
+7. Every workflow `run:` block is syntax-checked with `bash -n` by `.github/scripts/workflow-run-blocks.test.sh`, which has a minimum-block floor.
+8. The test does not pin which measures are flipped, only that whatever ships is routable.
+**Why.** A flip changes what the compliance engine is, so it must be reviewed and revertable. A reconciler carrying a different value would silently change routing during self-heal.
+
+## ADR-044: Mammograms are dual-stamped for both engines; flip-snapshot compares engines before a flip
+*2026-07-30 · Accepted*
+
+**Decision.** The WebChart SQL→FHIR crosswalk emits each screening mammogram both as its CPT/HCPCS `Procedure` and as a derived LOINC `24606-6` imaging `Observation`, so authored and official CMS125 both see it. `pnpm flip-snapshot` is the pre-flip comparison tool.
+1. The crosswalk dual-stamps. The Observation has `category ~ imaging` and `status = final`, and is emitted in both `wcdb-fhir-shim/src/fhir-mapping.ts` and `backend-ts/scripts/webchart-devdb-export.ts`.
+2. The Observation is served from `/Observation`, and `/Procedure` is untouched.
+3. This is normalization, not fabrication: it comes only from a real row, keeps that row's date, and uses an explicit code allowlist. It is non-inflating only because both numerators are `exists(...)`; it is not safe for counting or most-recent-value measures.
+4. The flip gate gets a command, `pnpm flip-snapshot`.
+5. `--source live` reads the configured tenant (`WORKWELL_WEBCHART_*`) and refuses if that is unset. The committed sample is `--source fixture`.
+6. `--source live` requires `--roster` and refuses a roster that enrolls nobody.
+7. The report names its source for every measure. The default, `--source synthetic`, is five designed probes, not a roster forecast.
+8. The official side is evaluated batch-then-fallback, the same way a run does it.
+9. The snapshot gives a verdict (including INCONCLUSIVE) but gates nothing, and it exits 0.
+**Why.** Official CMS125 reads only LOINC imaging Observations. A WebChart CPT mammogram therefore marked a screened woman OVERDUE and escalated her case to HIGH, and nothing detected it.
+
+## ADR-043: A whole roster outside the population is warned, never refused mid-run
+*2026-07-30 · Accepted*
+
+**Decision.** When an officially routed measure puts a whole multi-subject roster outside its initial population, the run keeps the outcomes and their evidence and logs a `WARN`. The run is never failed. Enforcement happens at the flip gate instead.
+1. The executor reports and does not refuse: `evaluateBatch` returns the out-of-population outcomes with evidence intact.
+2. The run pipeline writes a best-effort `WARN` to `run_logs` that names both possible causes. It is decided after the evaluation loop from the final per-subject outcomes, not in the batch pre-pass.
+3. Only officially routed measures are checked, meaning `logicVersionFor` returns `official-fqm:…`. `undefined` membership means unknown.
+4. The check applies only to more than one subject (`> 1`).
+5. Enforcement is at the flip gate: `devdb-official-eval.test.ts` plus the DEPLOY.md pre-flip step (step 2), which confirms a non-zero initial population on the tenant's own data.
+6. cms122's official routability depends on the stack. It works on the synthetic roster and is useless on WebChart-configured staging, and it stays in the flip list.
+**Why.** An empty initial population can be the correct answer for some cohorts, and cohorts change from run to run. A runtime refusal would corrupt valid runs with a false positive the operator cannot fix.
+
+## ADR-042: Close the WebChart–official population gap by mapping, not refusal
+*2026-07-30 · Accepted*
+
+**Decision.** WebChart data gets the `us-core-sex` element official CMS125's initial population reads, and official routing over it is guarded by a per-subject parity test, not a startup refusal. ADR-057 later reversed decision 2 for the live third-party path.
+1. Emit `us-core-sex` from WebChart `patients.sex` alongside `Patient.gender`, as the SNOMED concept id (the ELM compares against `248152002`, so an extension carrying "F" reads as absent). Change both mapping sites together: `wcdb-fhir-shim/src/fhir-mapping.ts` and `backend-ts/scripts/webchart-devdb-export.ts`.
+2. Assert `us-core-sex` only where the source system records a sex value; `normalizeWebChartBundle` does not synthesize it from a third-party server's `gender`, so such a roster reads out-of-population for CMS125 (fail closed).
+3. No construction-time refusal keyed on `WORKWELL_OFFICIAL_MEASURES` and the WebChart seam both being set.
+4. The guard is a live-path parity gate (`devdb-official-eval.test.ts`): official vs authored outcomes per subject over the committed fixture through `evaluateBatch`, asserted as a divergence map (empty = routing is inert for this data).
+5. A separate test strips the extension and asserts official collapses to all MISSING_DATA while authored is unaffected, pinning the cause by removal.
+Consequence 3 (the mammography numerator gap) was closed by ADR-044 and ADR-057; consequence 5 (none of this reaches a live third-party WebChart server) was surfaced by ADR-043 and closed by ADR-057.
+**Why.** A predicate keyed on "both env vars are set" stays true after the mapping is fixed, so it would refuse a correct configuration; the cms125 initial-population gap was one missing field.
+
+## ADR-041: Complete VSAC-capped official expansions at vendor time, pinned, or not at all
+*2026-07-29 · Accepted*
+
+**Decision.** A value set upstream ships capped at 1000 codes is completed from VSAC only at vendor time, into the hash-pinned terminology sidecar; the runtime never falls back to VSAC. Any failure leaves upstream's codes as shipped, the manifest keeps its `truncated` entry, and routing keeps refusing the measure.
+1. Completion runs in `vendor-official-measure.mjs` behind `--complete-capped-expansions`; the sidecar stays the only terminology the runtime reads, pinned by SHA-256 in the committed manifest.
+2. Only OIDs upstream actually capped are re-expanded; every other value set comes from the bundle unchanged.
+3. Expansions are pinned to `Library/ecqm-fhir-update-2025`, never VSAC's latest-active.
+4. Completed codes are deduped and sorted by `system|code` in code-point order before writing, because byte order is part of the hashed artifact.
+5. Every failure (no flag, no key, VSAC unreachable after a bounded retry) warns and returns; `truncated` is recomputed from the codes actually present.
+6. A VSAC expansion that is short of the declared total (counted after dedupe), or that does not contain every upstream-shipped code, is rejected rather than merged.
+7. The vendor-time credential is its own secret, `WORKWELL_VSAC_API_KEY_VENDOR`, separate from the runtime `WORKWELL_VSAC_API_KEY_TWH`.
+**Why.** A half-expanded exclusion set does not error; it silently leaves subjects in the denominator. The cap is upstream licensing policy, so waiting will not fix it.
+
+## ADR-040: The engine declares its logic identity; the cache never infers it
+*2026-07-28 · Accepted*
+
+**Decision.** For an officially routed measure, the incremental-evaluation cache takes `logic_version` from the engine rather than hashing WorkWell's authored ELM. Official-routed outcomes are currently written to `eval_state` but never reused.
+1. `RoutedEngine` has an optional `logicVersionFor(measureId)`: the artifact identity for a routed measure, `undefined` (meaning authored) otherwise. The cache consults it first and falls back to the ELM hash.
+2. The identity travels on the engine object, not as a separate `RunPipelineDeps` field each caller must remember to pass.
+3. The identity is a readable composite, `official-fqm:<version>:<artifactSha>:<terminologySha>`, disjoint by prefix from the authored `sha256:<hex>`.
+4. The terminology digest is part of the identity, since a re-fetched sidecar can change outcomes with the bundle unchanged.
+5. An official-routed outcome is reusable only on its own evaluation date; `computeNextTransition`'s authored-terms rules (PERMANENT, boundary tables) never apply to it.
+6. For now an official-routed outcome is not reused at all, because `logic_version` does not cover adapter code that changes answers. Rows are still committed (write-only). Exit: the identity gains an adapter digest, or the adapter stops changing; re-enabling is deleting one branch in `plan`.
+7. Officialness is decided once in `plan` and carried to `commit` on the required field `EvaluatePlan.engineDeclaredLogic`.
+**Why.** Otherwise the cache would copy authored outcomes forward for a measure now running official CQL, and a reused outcome looks exactly like a computed one.
+
+## ADR-039: The shadow diff evaluates exactly what the runtime evaluates
+*2026-07-27 · Finding (historical)*
+
+**Decision.** The literal diff (`standards/literal-diff.ts`) now uses the runtime's own measurement period, plain bundle, copy-preparation, `officialMeasureSemantics` and `outcomeFromPopulations`, is offered for any vendored measure, and memoizes by `measureId|runId`; the subset tier stays cms122-only and the fidelity lab keeps its enrichment.
+**Why.** The diff had used a different period and enriched inputs, so it forecast divergence the flip would never produce.
+
+## ADR-038: Corpus codes are verified against the official artifact's terminology
+*2026-07-27 · Finding (historical)*
+
+**Decision.** Every code the synthetic corpus stamps must be a member of the official expansion of the value set it is registered under (`CANONICAL_CODE_VALUE_SETS`, checked by `wiring/corpus-membership.test.ts`), one constant per value set; the corpus dual-stamps (CPT Procedure plus LOINC Observation mammogram; `gender` plus `us-core-sex`) and may author a Condition onset, while preparation and `stampEnrollment` may not.
+**Why.** 12 of 24 corpus codes sat in the wrong value set, invisible because one table supplied both the stamped code and the offline expansion.
+
+## ADR-037: Prepare bundles for QI-Core by normalization, never fabrication
+*2026-07-27 · Accepted*
+
+**Decision.** Official execution passes bundles through one QI-Core preparation, `wiring/qicore-preparation.ts`, which normalizes structure but never invents clinical facts. Harness-local code enrichment for the diff must never move into the runtime.
+1. One preparation function, used by both the literal diff and the runtime executor.
+2. The runtime prepares a copy, so the authored engine's outcome is byte-identical whether or not official routing is on.
+3. Normalization, never fabrication: no invented `onsetDateTime`; `clinicalStatus`/`verificationStatus` are replaced only when no coding in them names a system; `category` and Encounter `class` are filled only when absent.
+4. The literal diff uses the artifact's own terminology (ADR-036) with no fallback; without the sidecar, `literalDiffAvailable()` is false and the route degrades to the subset tier, visibly in its `mode` field.
+5. Both deploy workflows (production and staging) vendor terminology into the build context. A missing sidecar is not fail-soft; the fetch retries transport errors and 5xx with backoff but never a 4xx.
+**Why.** QI-Core retrieves are stricter than our plain FHIR (unprepared synthetic bundles put nobody in the initial population), but synthesizing clinical data at evaluation time would be fabrication.
+
+## ADR-036: Official terminology is the artifact's own, fetched at build and hash-pinned
+*2026-07-27 · Accepted*
+
+**Decision.** Officially routed measures expand value sets only from the artifact's own expansions, written at vendor time to a gitignored sidecar and pinned by hash in the committed manifest. Our VSAC import (`pnpm resolve-valuesets`) has no role in official execution.
+1. `vendor-official-measure.mjs` writes the expansions to `measures/official/<catalogId>/terminology.json` at the same pinned upstream commit as the ELM.
+2. The sidecar is fetched at build and never committed (licensed CPT/SNOMED content in a public repo).
+3. The committed `manifest.json` records the sidecar's SHA-256; a sidecar that does not match is refused at load.
+4. The expander is keyed by measure, not by a flat OID map.
+5. The MADiE reduction check runs the reduced artifact plus its own sidecar through the same `expandArtifactTerminology` the router uses, and records which terminology mode ran.
+6. A missing sidecar refuses routing (`officialRoutingProblems`) as one build step naming the fix (`pnpm vendor:official`).
+7. A VSAC-capped expansion of a value set the measure's ELM actually retrieves also refuses routing (completion: ADR-041).
+**Why.** fqm treats an unexpandable value set as empty, which silently reads every subject out-of-population, and the gate had validated a terminology path production never took.
+
+## ADR-035: Incremental evaluation is an opt-in cache that never changes answers
+*2026-07-24 · Accepted*
+
+**Decision.** With `WORKWELL_INCREMENTAL_EVAL=true`, the live-tenant pipeline may skip re-running CQL for a subject whose data and logic are unchanged. Reuse decides only whether to re-ask the engine; any uncertainty is a miss and a full evaluation. The parity suite (`run/incremental/parity.test.ts`) is the acceptance bar. Official-routed measures follow ADR-040.
+1. Reuse the evaluation, never skip the outcome row: a reused subject gets a copy-forward row (prior status, date-corrected evidence, new run id).
+2. Two tiers: `data_hash` + `logic_version` gate reuse; `next_transition_at` extends it across days only for measures whose status is a monotone step function of days-since-event, with the threshold table golden-verified against the real engine. Seasonal `flu_vaccine` and period-based `cms122`/`cms125` get same-day reuse only.
+3. Copy-forward evidence advances each `"Days Since …"` define by the elapsed days.
+4. Inert unless configured, and scoped to `finishManualRun`; the scale batch path and default stack never write `eval_state`.
+5. `eval_state` is a pure cache, reversible with `DELETE FROM eval_state`.
+Also binding: a backdated run (`evalDate < source_eval_date`) always re-evaluates, and `logic_version` hashes the executed library plus the referenced value sets' `expansion_hash`.
+**Why.** Most of a recurring population run recomputes answers that cannot have moved.
+
+## ADR-034: The WCDB FHIR shim is a standalone package that owns the MariaDB driver
+*2026-07-20 · Accepted*
+
+**Decision.** `wcdb-fhir-shim/` is a standalone dev/demo package: a FHIR R4 facade over the WebChart MariaDB dev database plus a compliance API that runs generated SQL. `mysql2`, `yaml` and runtime `tsx` are approved for this package only; backend-ts stays driver-free. CQL→SQL generation (`generateSql`) is pure templating in backend-ts, committed as reviewed, freshness-tested `.sql` in `wcdb-fhir-shim/sql/`; wiring SQL into the app still needs per-measure golden parity (ADR-025). The shim is never deployed, has no auth, holds synthetic data only, and never sets compliance. Its YAML ingest CLI is transactional, reversible only via its `<file>.ingested.json` manifest, limited to local `wc_*` targets, and logged to an append-only `ingest-audit.log`.
+**Why.** Doug asked for our own FHIR facade and for SQL running against WebChart itself, while backend-ts is deliberately driver-free and the executor port is bundle-in and DB-less.
+
+## ADR-033: Inject a schema-free live WebChart directory into population read models
+*2026-07-17 · Accepted · number assigned 2026-09-23: this record lost its heading inside ADR-034 on 2026-07-20 and was restored as ADR-033*
+
+**Decision.** Live WebChart subjects are named through a per-worker, atomically replaced last-known-good registry of identity profiles (`wc|Patient.id`, name, birth date, fixed `wc`/`WebChart`/`wc-provider-1` placement), not a new table; clinical bundles are never cached. Each population read loads its outcome rows and builds one `directoryForRows(rows)` snapshot (static catalog, registry, and a minimal profile for unknown `wc|` ids) used for the whole operation. A successful population fetch replaces the registry; a failed fetch aborts the run before any outcomes, and read models ignore FAILED runs. `wc|` CASE reruns return a non-mutating 409.
+**Why.** Outcomes carry only subject ids, so the static directory dropped live subjects from every read model, and a persisted directory would need owner-gated DDL and could make stale data look current.
+
+## ADR-032: A local HAPI FHIR server stands in for WebChart
+*2026-07-16 · Accepted*
+
+**Decision.** The official `hapiproject/hapi` image (R4, port 8081, in `infra/docker-compose.yml`) is the local WebChart simulator, loaded from the committed dev-DB fixtures by `pnpm load:hapi` (`hapi-transform.ts`: `PUT` with preserved patient ids and deterministic minted ids, so reloads are idempotent). HAPI stays unauthenticated. HAPI proves real-HTTP behaviour locally and in CI; the teatea trial proves real auth and live-instance behaviour.
+**Why.** The live transport had only run against in-process shims, and the remote trial is read-only and rate-limited by courtesy, so it is unsuitable as a dev/CI target.
+
+## ADR-031: MeasureReport counts use membership labels and per-measure semantics
+*2026-07-15 · Accepted*
+
+**Decision.** Exports treat populations as membership labels: exclusion members stay in DENOM and subtract only in the score. Since the 2026-07-24 amendment, `membershipFor(outcome, measureId)` uses `evidence_json.official.populationResults` verbatim when present and falls back to the status rule in point 2; `denominator-exception` is emitted and subtracted in MeasureReport and QRDA III only when non-zero; `populationCountsFromStatus` stays authored-only.
+1. `countPopulations`, the status-histogram path, individual memberships, the FHIR score and the QRDA rate all use `DENOM = IPP`; `EXCLUDED` counts in both DENOM and DENEX; the score denominator is `DENOM - DENEX`, guarded above zero.
+2. Per-measure export semantics live in the YAML-generated `MEASURE_BINDINGS`: every measure declares `improvementNotation` (all `increase` at the time); only `cms122`/`cms125` declare `missingDataMeansOutOfPopulation: true` (MISSING_DATA maps to all-zero populations).
+3. MeasureReport claims `urn:workwell:measure:*`; switching to a CMS canonical requires changing numerator orientation and improvement notation together (guard test).
+4. Add base-R4 `MeasureReport.id`, generation `date`, a contained WorkWell Organization `reporter` and `urn:uuid:*` `fullUrl`s, without claiming DEQM profiles.
+Later: ADR-046 derives canonical, improvementNotation and membership together from the outcome's evidence; ADR-077 d6 puts an evaluation error in no population.
+**Why.** The QM IG ballot-branch clarification counts exclusions inside DENOM, and a generic status mapping mis-counted out-of-population subjects for the CMS measures.
+
+## ADR-030: Durable evidence storage is an app-level S3 seam
+*2026-07-14 · Accepted*
+
+**Decision.** `resolveBucket(env)` (`backend-ts/src/case/resolve-bucket.ts`) builds an S3-backed `CloudBucket` via `createS3Bucket` only when `WORKWELL_BUCKET_S3_BUCKET`, `WORKWELL_BUCKET_S3_ACCESS_KEY_ID` and `WORKWELL_BUCKET_S3_SECRET_ACCESS_KEY` are all set; otherwise the fs `BUCKET` binding serves unchanged. Region defaults to us-east-1; `endpoint` is for non-AWS S3 and switches to path-style; `createIfMissing: false`, because bucket provisioning is owner-gated. `@aws-sdk/client-s3` is an approved direct dependency. The same bucket holds the nightly schema dump from `backup-neon-nightly.yml`.
+**Why.** `mieweb.jsonc` bindings are literal JSON with no env substitution, so the binding cannot carry credentials, and in-container fs storage was lost on every container recreate.
+
+## ADR-029: Immunization forecasting uses a self-hosted ICE sidecar behind the port
+*2026-07-13 · Accepted*
+
+**Decision.** `engine/immunization/ice-forecaster.ts` is a real HTTP adapter for HLN's self-hosted ICE (`hlnconsulting/ice`), run as a long-lived sidecar, with a hand-rolled vMR codec (`ice-vmr.ts`) and no new dependencies.
+1. The adapter speaks the DSS contract: `/api/resources/evaluate` and `/api/resources/evaluateAtSpecifiedTime`.
+2. The seam is selected by `WORKWELL_IMMZ_ICE_BASE_URL` alone; `WORKWELL_IMMZ_ICE_API_KEY` is an optional bearer that never selects it. Unset means the simulated forecaster.
+3. Any failure (transport, non-2xx, timeout, unparseable body, missing vaccine group) falls back to `simulatedForecaster` for the whole forecast, never a half-ICE mix.
+4. The port's `forecast()` is async; selection lives in `resolve-forecaster.ts`.
+5. Forecasts stay advisory and never set an `Outcome Status`.
+Operational rules: a 3 s request timeout plus a 60 s circuit breaker; ICE's clock is always pinned (`evaluateAtSpecifiedTime`, `specifiedTime = asOf`); ICE `CONDITIONAL` is not shown as DUE; `dosesRequired` follows the CVX we report (HepB = 3). The request's `base64EncodedPayload` is an array, and a proposal's vaccine group is read from `<observationFocus>`, not `<substanceCode>`.
+**Why.** ICE is self-hostable and ACIP-maintained, so the stub could be replaced without waiting on MIE; porting its rule base to TypeScript is infeasible.
+
+## ADR-028: WebChart transport follows its verified public FHIR contract and SMART auth
+*2026-07-13 · Accepted*
+
+**Decision.** `httpWebChartClient` implements WebChart's verified contract, with auth behind a `WebChartAuthProvider` port. `isWebChartConfigured` requires `WORKWELL_WEBCHART_BASE_URL` plus either the API key or client id + private key; unset means the JSON source.
+1. Population via `GET /fhir/Patient` (`link[next]` paging) plus paged per-patient `GET /fhir/{Observation|Condition|Procedure|Immunization|Encounter}?patient={id}`, composed into one collection Bundle.
+2. SMART Backend Services (`smartBackendServicesAuth`: discovery or `tokenUrl` override, RS384 `private_key_jwt`, token cache, single-flight refresh, one retry on 401) when `WORKWELL_WEBCHART_CLIENT_ID` + `WORKWELL_WEBCHART_PRIVATE_KEY` are set; the static bearer `WORKWELL_WEBCHART_API_KEY` stays for fixtures, tests and proxies. Signing uses WebCrypto only.
+3. Any per-resource fetch failure degrades the whole patient to the Patient-only bundle (MISSING_DATA downstream); the off-origin pagination guard covers resource searches too.
+4. Pagination uses standard `_count` + `link[next]`; `Group/$export` is future scope.
+**Why.** WebChart's public sandbox showed the real contract (SMART Backend Services, no `Patient/$everything`), so there was no reason to wait for MIE to restate it.
+
+## ADR-027: Production CMS122/CMS125 ran eCQI v14 faithful-subset CQL
+*2026-07-10 · Superseded by the flip (ADR-045/ADR-046)*
+
+**Decision.** Production cms122/cms125 ran hand-authored faithful subsets of eCQI CMS122v14/CMS125v14 with committed offline VSAC expansions and dual-coded synthetic data. Production now runs CMS's own artifacts, and the subsets retire to the standards lab (#377).
+**Why.** The earlier toy day-count rules could not support the claim of running real eCQMs.
+
+## ADR-026: fqm-execution runs CMS's pre-compiled ELM, quarantined in one package
+*2026-07-09 · Accepted*
+
+**Decision.** Official measure bundles run from their shipped pre-compiled ELM on `fqm-execution` pinned to `1.8.5`, with no CQL translation. fqm is declared only in `@work-well/official-executor` and loaded through a lazy `await import`, off the worker's cold-start and request path until something calculates. Tests enforce that no other manifest declares fqm, no other source imports it, and every fqm reference in the executor entry is a dynamic `import(...)`. The CMS122 artifact is vendored from `cqframework/dqm-content-qicore-2025` at `measures/official/cms122/` with a manifest, reduced to `application/elm+json`; `measures/official/NOTICE.md` records the terms of codes embedded in the ELM. Supersedes ADR-024's "revisit when the translator matures" clause.
+**Why.** Official bundles already carry ELM for every library and the only JVM-free translator release cannot compile them; the lazy boundary keeps fqm's heavy dependency tree off the request path while allowing it in production.
+
+## ADR-025: Measure execution is pluggable behind a MeasureExecutor seam
+*2026-07-08 · Accepted*
+
+**Decision.** One `MeasureExecutor` port (`measure-executor.ts`, extending `EvaluateMeasureBinding`) is selected by `resolveMeasureExecutor(env)`. The default `fhirNativeExecutor` adapts data to FHIR bundles and runs the CQL engine; it is the correctness oracle. `sqlPushdownExecutor` is an inert stub that rejects loudly, selected only by `WORKWELL_MEASURE_EXECUTOR=sql-pushdown`. Any future SQL executor must pass per-measure golden parity against `fhirNativeExecutor` before serving. A live route switched onto this seam must pass the env-built engine, `resolveMeasureExecutor(env, await engineForEnv(env))`, or it silently loses VSAC expansion. Supersedes ADR-014's deferral.
+**Why.** General CQL→SQL does not map to portable SQL and can never be the correctness authority, but a seam keeps a scoped per-measure SQL executor possible if WebChart needs one.
+
+## ADR-024: Official CMS122 fidelity via a hand-authored faithful subset
+*2026-07-05 · Superseded by ADR-026 and ADR-027*
+
+**Decision.** Ran a hand-authored official-subset `cms122_official.cql` beside WorkWell's cms122 for a subject-by-subject diff (`execution-diff.ts`), kept out of `MEASURES` via a `metaOverride` seam, because the JVM-free translator could not compile the literal QI-Core CQL.
+**Why.** ADR-026 runs the official pre-compiled ELM directly; the subset survives only as the cms122 subset tier.
+
+## ADR-023: Live VSAC value-set resolution behind the ValueSetResolver port
+*2026-07-05 · Accepted*
+
+**Decision.** For authored measures (official ones use ADR-036), live VSAC expansion is on only when `WORKWELL_VSAC_API_KEY` is set: `engineForEnv(env)` then attaches a `CompositeValueSetResolver` that sends VSAC OIDs (bare or `urn:oid:`, normalized to bare) to `VsacValueSetResolver` over `httpVsacClient` (`$expand`, paged) and everything else to the local `StoreValueSetResolver`. Without the key, or before `value_sets` is seeded, the engine has no resolver. The keyed path builds a fresh engine and resolver per evaluation so edits are never stale, and VSAC errors propagate rather than becoming empty sets. `pnpm resolve-valuesets` (owner-run, not on deploy) upserts expansions into `value_sets` (`source='VSAC'`), audited `VALUE_SETS_RESOLVED`; the runtime does not read those rows as a cache.
+**Why.** Real eCQM value sets need authoritative NLM expansion, but turning it on must not move any current measure's outcome.
+
+## ADR-022: Cross-system identity is a read-time layer that matches but never auto-merges
+*2026-07-01 · Accepted*
+
+**Decision.** `backend-ts/src/identity/` resolves a `Person` at read time over source records grouped by a deterministic match key (a shared national/MRN identifier; with none, a record stands alone). Records spanning tenants are duplicate candidates; `mergedComplianceTimeline` unions their outcomes with a mobility annotation. Reads: `GET /api/identity/people`, `/people/:id`, `/duplicates`. Matches are suggestions; only a human links, via `POST /api/identity/people/:personId/reconcile` (`CONFIRM_LINK | UNLINK`, CASE_MANAGER/ADMIN, audited `IDENTITY_LINK_*`), stored in `person_links` as CONFIRMED or BROKEN pairs, last write wins. A component's `personId` is its smallest record ref-key. Identity never recomputes compliance or re-aggregates tenant counts.
+**Why.** One person can be a patient in several systems whose records are not obviously the same, so a human must confirm links, and history must follow a person across a move.
+
+## ADR-021: Quality over time is a materialized aggregate snapshot store
+*2026-06-30 · Accepted*
+
+**Decision.** After every population run (ALL_PROGRAMS/MEASURE) finalizes, write one `quality_snapshots` row per (measure, calendar month, scope: all/tenant/site/provider) with numerator, denominator and the five bucket counts, using `countPopulations` (numerator = COMPLIANT, denominator = IPP − EXCLUDED). The scale tenant folds in through `aggregateScaleRun`. Writes are idempotent on UNIQUE (measure_id, period, scope_level, scope_id), last write wins, audited `QUALITY_SNAPSHOT_MATERIALIZED`, and best-effort (hooked after `finalizeRun`, never failing the run). Aggregate only, never per subject; All = Σ tenants = Σ sites = Σ providers.
+**Why.** Trends were recomputed live from `outcomes`, which exists only for dates a run executed and does not scale to 160k patients.
+
+## ADR-020: Population scale via encoded subject ids and SQL aggregation
+*2026-06-26 · Accepted*
+
+**Decision.** The ~120k-subject `mhn` scale tenant exists only as `outcomes` rows whose `subject_id` encodes the hierarchy (`mhn|Lxx|Pxx|nnnnnnn`, codec in `scale-structure.ts`), seeded on demand by `pnpm seed:scale` (never on deploy) and aggregated by one SQL `GROUP BY` in `OutcomeStore.aggregateScaleRun(runId)`. In-memory rollups exclude `seed:scale` runs; the subtree stops at provider and the roster excludes it. Since 2026-07-08 the outcomes come from real batch CQL evaluation (`batchEvaluateScalePopulation`; `--mode evaluate` is the default); encoding, aggregation and rollback are unchanged. Writes are audited (`SCALE_POPULATION_SEEDED` / `SCALE_POPULATION_EVALUATED`); rollback deletes the `triggered_by='seed:scale'` runs and outcomes.
+**Why.** 120k subjects cannot be materialized in app memory, so the one path that must scale is an O(providers) SQL aggregate.
+
+## ADR-019: Multi-tenant rollup lives in the read-time synthetic directory
+*2026-06-26 · Accepted*
+
+**Decision.** A tenant/system level sits above enterprise → location → provider → patient, modeled only in the synthetic directory (`employee-catalog.ts`: `Tenant`, `tenantId` on `EmployeeProfile`/`Provider`), with no schema change. `hierarchy-rollup.ts` returns an "All Systems" root (`level:"all"`) over tenant nodes; accumulation keys are tenant-qualified so same-named nodes never merge across systems, and parent = Σ children at every level. Rollup, roster and programs endpoints take an optional `?tenant=<id>` (default all); `GET /api/tenants` feeds the selector. Tenant resolution is display and grouping only.
+**Why.** Compliance from several WebChart systems must roll up into one dashboard, and outcomes persist only `subjectId`, so the hierarchy can be resolved in code without a migration.
+
+## ADR-018: Standards fidelity started structural, deferring official-CQL execution
+*2026-06-26 · Overtaken by official-CQL execution (ADR-025/ADR-026)*
+
+**Decision.** Shipped a sourced structural fidelity report of each authored measure against the official definition (`GET /api/measures/:id/fidelity`, `backend-ts/src/standards/`) and deferred executing official CQL; `jurisdiction` became measure metadata (default `"US"`).
+**Why.** The deferral is overtaken: CMS's published artifacts now execute, first diagnostically (ADR-026) and then in production.
+
+## ADR-017: Real EHR data enters as FHIR bundles into the unchanged engine
+*2026-06-26 · Accepted*
+
+**Decision.** Data sources adapt native data into FHIR bundles through the `PatientDataSource` ingress port (`backend-ts/src/engine/ingress/`), and the existing CQL engine evaluates them; measures are not transpiled to SQL to run inside WebChart. The ingress library (`evaluateBundle`, and `evaluateBatch` with per-item error isolation) imports no DB and no `node:fs`, and the headless CLI reuses it. `resolveDataSource(env)` picks JSON by default; the WebChart source is inert unless configured (real transport: ADR-028).
+**Why.** The engine was already built, parity-proven and JVM-free, while a CQL→SQL transpiler is research-grade and would fork the execution path.
+
+## ADR-016: Segments decide applicability, never compliance
+*2026-06-25 · Accepted*
+
+**Decision.** A segment maps a cohort (a `role`/`site` predicate rule `{match: ANY|ALL, conditions}` plus per-subject INCLUDE/EXCLUDE overrides, EXCLUDE winning) to a list of measure ids; a subject's applicable measures are the union over every enabled segment they belong to. Applicability gates only case creation and display (`NOT_APPLICABLE`); CQL still evaluates and persists every outcome. The single definition is `segment/segment-applicability.ts`. With zero enabled segments every measure applies to everyone. Stored in `segments`, `segment_measures`, `segment_overrides` behind `SegmentStore`; `/api/segments` writes are ADMIN-only and audited `SEGMENT_*`.
+**Why.** Risk groups change what work is created and shown, not what CQL decides, and disabling all segments must fully revert the feature.
+
+## ADR-015: CQL is canonical; rule params compile to CQL
+*2026-06-24 · Accepted*
+
+**Decision.** CQL/ELM is the only execution and standards layer. A measure's optional YAML `rule:` block is the authoring surface for parametric measures, compiled deterministically to CQL by `generate-cql.ts` and then to ELM through the normal pipeline; a measure with no `rule:` keeps its hand-written `.cql`. Shapes: `series-completion` and `windowed-recency`, extended additively with grace (`gracePeriodDays`), titer (`allowPositiveTiter`), declination (a `Refused` define that never changes `Outcome Status`) and multi-alternative series with per-alternative CVX sets and minimum dose intervals. Absent fields yield byte-identical output, and `codegen-parity.test.ts` proves generated CQL is `Outcome Status`-equivalent to the hand-written CQL (at E11.1 there was no cutover: the hand-written `.cql` stayed the build source).
+**Why.** Non-CQL authors can change thresholds through params while there is still one execution path and no second evaluator.
+
+## ADR-014: CQL→SQL bridge recommendation, left to Doug
+*2026-06-19 · Superseded by ADR-025*
+
+**Decision.** Recommended a hybrid, FHIR-native-first approach (a real WebChart data adapter feeding the CQL engine, SQL only as a bounded parity-checked opt-in executor, no wholesale CQL→MariaDB transpiler) but left the decision to Doug.
+**Why.** No decision came back; ADR-025 settled it by building the executor seam with the SQL path inert.
+
+## ADR-013: Order proposals are advisory, deduplicated, and never auto-submitted
+*2026-06-19 · Accepted*
+
+**Decision.** `proposeOrders(outcomes, provider)` (`order/order-proposal.ts`) proposes one order per subject per measure for OVERDUE (`urgent`), DUE_SOON and MISSING_DATA (`routine`) outcomes, never for COMPLIANT or EXCLUDED, using the measure-to-code map in `order-catalog.ts`. Subjects with a qualifying standing order (from the `StandingOrderProvider` port: simulated by default, an inert EH stub only when `WORKWELL_EH_FHIR_BASE_URL` + `WORKWELL_EH_FHIR_API_KEY` are set) are returned as `suppressed`. `GET /api/orders/proposals` (CASE_MANAGER/ADMIN; `format=domain|fhir`) returns `{proposed, suppressed}` or a Bundle of `ServiceRequest` (`intent:"proposal"`, `status:"draft"`). Read-time only: nothing is persisted or submitted; a future `OrderSubmitter` is the named write path.
+**Why.** Submitting orders from a compliance system without human review breaks the human-in-the-loop rule, and duplicate orders are a patient-safety risk.
+
+## ADR-012: Immunization forecasting is an advisory port; AIS-E Td/Tdap is the measure
+*2026-06-19 · Accepted*
+
+**Decision.** The `ImmunizationForecast` port (`engine/immunization/immunization-forecast.ts`) forecasts next doses for Td/Tdap, influenza and Hepatitis B; `resolveForecaster(env)` serves the simulated forecaster by default (the real ICE adapter is ADR-029). Forecasts are advisory everywhere and never set a case or `Outcome Status`. Compliance is the separate `adult_immunization` measure (NCQA AIS-E Td/Tdap, 3650-day window; COMPLIANT ≤3590 days, DUE_SOON to 3650, then OVERDUE): contraindication → EXCLUDED, and a documented refusal stays open, flagged by a `Refused` define. `GET /api/immunization/forecast?subjectId=&asOf=` serves forecasts; case detail attaches one for `adult_immunization` cases only.
+**Why.** A composite multi-series measure would have required reworking the single-event synthetic model every measure shares; splitting "is this worker current?" from "when is the next dose due?" avoids that.
+
+## ADR-011: Outreach goes through a multi-channel port; campaigns are audit-backed for now
+*2026-06-19 · Accepted*
+
+**Decision.** `OutreachChannel` (`case/outreach-channel.ts`) supports EMAIL, SMS and PHONE with simulated adapters by default; `resolveChannel(type, env)` selects the inert DataChaser stub only when `WORKWELL_OUTREACH_DATACHASER_API_KEY` + `WORKWELL_OUTREACH_DATACHASER_BASE_URL` are set. `dispatchOutreach` is the shared send core for single-case outreach (`POST /api/cases/:id/actions/outreach?channel=`, default EMAIL) and campaigns. A campaign persists behind a `CampaignStore` port as one `OUTREACH_CAMPAIGN_COMPLETED` audit event (no DDL); a `PgCampaignStore` is the drop-in once real sends and owner-approved schema land. `POST /api/campaigns` is CASE_MANAGER/ADMIN.
+**Why.** A campaign is created state and cannot be derived, but real tables were not worth adding while sends are simulated and schema is owner-gated.
+
+## ADR-010: Provider is the attributed clinician, modeled in the synthetic directory
+*2026-06-18 · Accepted*
+
+**Decision.** The hierarchy is enterprise → location (`site`) → provider → patient, where provider is the attributed clinician strictly nested under one location. It lives only in the synthetic directory (`EmployeeProfile.providerId`, `ENTERPRISE`, `PROVIDERS`, `providerById`, `providersForLocation`), with no DB table or migration. `buildHierarchyRollup` (`program/hierarchy-rollup.ts`) is a read model over the latest population run per Active measure, served at `GET /api/hierarchy/rollup` and shown at `/programs/hierarchy`; parent totals equal the sum of children at every level. A relational org-hierarchy table would be a schema change and a fresh stop-and-ask.
+**Why.** There is no `employees` table (outcomes persist only `subjectId`), so the hierarchy fits as read-time structure, and quality measures roll up by attributed provider.
+
+## ADR-009: eCQM artifacts are emitted JVM-free; QRDA III began as a stub
+*2026-06-18 · Partly superseded by ADR-058 (the QRDA III stub half; JVM-free emission stands)*
+
+**Decision.** eCQM artifacts (FHIR MeasureReport, QRDA III) are hand-built with no FHIR/CDA runtime or Java validator, with counts from one shared `countPopulations`; that half still holds. The "QRDA III is an unvalidated stub" half is overtaken: QRDA I/III now validate at 0 findings against the HL7 base ruler (ADR-058 decision 5).
+**Why.** The stack is JVM-free with a no-new-dependency rule, and the reference validators are Java tools.
+
+## ADR-008: Re-platform the backend onto TypeScript and @mieweb/cloud, JVM-free
+*2026-06-12 · Accepted*
+
+**Decision.** The backend is TypeScript on `@mieweb/cloud` with no Java, JVM or Spring in runtime, build or authoring (done 2026-06-17; `backend/` deleted in #109 PR4). CQL stays: the pinned `@cqframework/cql` beta translates CQL→ELM in Node, ELM executes in Node, and a golden-parity harness gates every translator bump or measure change. The engine is a swappable `EvaluateMeasure` binding; a target without one raises `UnsupportedBindingError` rather than guessing a status. SQLite/D1 are the portable floor, Postgres the ceiling and system of record; FHIR bundles are transient inputs (not a FHIR server). The `evidence_json` contract, audit on every state change, case idempotency and "AI never decides compliance" carry forward; migrations stay owner-owned. Supersedes ADR-001.
+**Why.** Doug (#96) required the backend to run, test and deploy without Java/Spring, and a Node CQL→ELM translator matched the Java engine exactly.
+
+## ADR-007: Vendor the @mieweb/datavis NITRO grid source
+*2026-06-11 · Accepted*
+
+**Decision.** The `datavis` source is vendored at `frontend/vendor/datavis` (pinned to upstream `52c27cc`, matching `@mieweb/ui@0.6.1`) and aliased as `"datavis": "file:./vendor/datavis"`, with `transpilePackages: ["datavis", "@mieweb/ui"]` and a Tailwind `@source` for it; provenance and re-vendor steps are in `frontend/vendor/datavis/VENDORING.md`. Pages use the client-only `features/datavis/NitroGrid*` wrapper (`ssr:false`, local in-memory data), never `@mieweb/ui/datavis` directly. NITRO serves the operational and audit tables; small in-card tables stay semantic. Vendored code is excluded from eslint. Supersedes ADR-004's deferral of NITRO.
+**Why.** `@mieweb/ui` ships the NITRO bundle but imports a bare `datavis` specifier that is not on npm, and the upstream repo is public.
+
+## ADR-006: Measures are declared in YAML and run by a headless evaluator
+*2026-06-10 · Accepted*
+
+**Decision.** Each runnable measure is a `measures/<id>.yaml` beside its `.cql`: metadata (`id`, `name` = exact catalog name, `version`, `title`, `policyRef`, `tags`), a `cql:` file reference and `bindings:` (enrollment/waiver/event codes and value sets, `event.type: procedure|immunization|observation`, `complianceWindowDays` default 365). YAML is the only source of bindings, with no fallback; population logic and thresholds stay in CQL. A headless evaluator takes any FHIR bundle and a measure and returns the outcome plus define-level `expressionResults`: `pnpm evaluate --patient <bundle.json> --measure <id>`. Headless evidence has no `why_flagged`.
+**Why.** Doug asked for a programming layer with no UI ("given this patient and this YAML file, are they compliant?"), and bindings had lived in a hardcoded switch.
+
+## ADR-005: The measure engine reads its inputs through ports
+*2026-06-10 · Accepted*
+
+**Decision.** The engine takes its inputs through four ports (`PatientDataProvider`, `EmployeeDirectory`, `MeasureDefinitionProvider`, `EvaluationConfigProvider`), with the synthetic demo as the default adapter set and real-data adapters added behind the same seam. The engine core must construct and run without framework wiring, and a golden (employee → outcome) parity test gated the refactor.
+**Why.** The evaluation service was hard-wired to synthetic data and a per-measure switch, which blocked real EHR data and declarative measures.
+
+## ADR-004: Adopt @mieweb/ui as the frontend component library
+*2026-06-09 · Accepted*
+
+**Decision.** The frontend uses `@mieweb/ui` components with Enterprise Health as the default brand, a runtime brand switcher (`useBrand` loads `/brands/{brand}.css`), semantic tokens and dark mode (`useTheme` sets `.dark` + `data-theme`, persisted; status colours in `lib/status.ts` carry `dark:` variants). `@mieweb/ui` may only be imported from `"use client"` modules (boundary: `components/client-providers.tsx`). Monaco and recharts stay; `/login` and `/sandbox` stay bespoke. Tables: ADR-007.
+**Why.** Doug directed WorkWell onto MIE's own component library so the work is reusable across MIE products.
+
+## ADR-003: One all-encompassing TWH instance replaces three
+*2026-05-21 · Accepted*
+
+**Decision.** WorkWell runs as a single TWH deployment covering OSHA safety, HEDIS wellness and the CMS eCQM catalog in one seeded database, catalog, case workflow and audit trail (`WORKWELL_INSTANCE=twh`, `deploy-twh-mieweb.yml`). The separate `workwell` and `ecqm` instances were removed; the eCQM seed path and `*_ECQM` secrets are kept to restore later. Production is `https://twh.os.mieweb.org` (frontend) and `https://twh-api.os.mieweb.org` (backend), and every push to `main` deploys it. ADR-070 later adds a separate Maui pilot deployment.
+**Why.** Doug clarified that occupational safety and clinical quality are one product under NIOSH's Total Worker Health framework.
+
+## ADR-002: evidence_json keeps define-level results; the rule path is derived
+*2026-05-01 · Accepted*
+
+**Decision.** Evaluation evidence stores the CQL engine's define-level `expressionResults`; the rule path is derived at render time from define names and results and never persisted, and "Why Flagged" renders `expressionResults` deterministically first, with AI wording as optional polish. The original Java two-step `R4MeasureProcessor` flow retired with the JVM (ADR-008); the current stored and read shapes are in `DATA_MODEL_CONTRACTS.md` §5.
+**Why.** An explanation must trace to what CQL actually computed, not to a separately maintained rule path.
+
+## ADR-001: Single Spring Boot deployable with modular packages
+*2026-04-29 · Superseded by ADR-008*
+
+**Decision.** The MVP backend was one Spring Boot deployable organized by domain packages rather than microservices.
+**Why.** ADR-008 retired the JVM and deleted `backend/`; the one-worker, modular-packages, no-microservices rule survives in CLAUDE.md.

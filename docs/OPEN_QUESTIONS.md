@@ -14,7 +14,7 @@
 > already answered. This file exists because an unanswered question with no home decays silently —
 > every entry below had been raised at least once, some three times, with no record of an answer.
 
-**As of 2026-09-22.** Seven open.
+**As of 2026-09-23.** Eight open.
 
 ---
 
@@ -130,6 +130,15 @@ surface — which settles its *priority* and not its *existence*.
 **Why it is worth one question rather than leaving it:** it is a documented public surface. If it is
 going away, it should not be demonstrated to anyone first; if it is staying, the ambiguity should stop
 costing a paragraph in every roadmap revision.
+
+### 3.2 Should a failed evidence upload still show on the case timeline?
+
+**Raised:** 2026-09-21 (review of #612). **Status:** unresolved.
+
+`uploadEvidence` writes its audit event before the storage write, which is the audit-first rule. The case
+timeline reads audit events, so an upload that then fails leaves an "Evidence uploaded — <filename>" row
+with nothing to download. The rule picks the over-claim side for the ledger; whether an operator screen
+should show it is a separate call.
 
 ---
 

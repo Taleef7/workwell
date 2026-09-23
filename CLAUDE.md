@@ -1,24 +1,22 @@
 # CLAUDE.md — WorkWell Measure Studio
 
 ## What this is
-- Single-developer TypeScript + Next.js monorepo (backend re-platformed off Java/Spring — ADR-008; the JVM was retired in #109 PR4)
-- Goal: keep the merged WorkWell Measure Studio MVP stable, showcaseable, and easy to review
-- The active spearhead is the Maui pilot — see "Current focus" below
+- Single-developer TypeScript + Next.js monorepo (re-platformed off Java/Spring — ADR-008)
+- A clinical-quality-measure engine for MIE's WebChart. The active work is the Maui pilot sandbox — see "Current focus"
 
 ## Read first, every session
-`docs/JOURNAL.md` (newest entry on top) is the source of truth for recent work; `README.md` is the
-public-facing overview. `docs/archive/SPIKE_PLAN.md` and `docs/archive/PROJECT_PLAN_v1.md` are archived
-sprint context — read them for background, never act on them.
+The GitHub milestone **"Ready for January"** (`gh issue list --milestone "Ready for January"`) is the work.
+`docs/JOURNAL.md` (newest entry on top) is the short log of recent changes; `README.md` is the public overview.
 
 ## Tech stack (immutable without ADR in docs/DECISIONS.md)
 - Backend: TypeScript on `@mieweb/cloud` (`backend-ts/`) — a Cloudflare-style worker on a long-lived node-24 host; JVM-free CQL→ELM (build-time); PostgreSQL 16 (Neon, `Pg*Store` ceiling, `workwell_spike` schema; SQLite floor for tests/local)
-- Frontend: Next.js 16 App Router + React 19 + TypeScript + Tailwind 4 + `@mieweb/ui` (dark mode + Enterprise Health brand + runtime brand switcher; ADR-004) + Monaco
+- Frontend: Next.js 16 App Router + React 19 + TypeScript + Tailwind 4 + `@mieweb/ui` (ADR-004) + Monaco
 - AI: OpenAI via the backend-ts AI surfaces (deterministic fallbacks); MCP read-only tools served from the worker
-- Infra: MIE Create-a-Container + Neon (the MIE TWH and Maui stacks are the live ones; Fly.io + Vercel are decommissioned); GitHub Actions CI + a self-heal reconciler; pnpm
+- Infra: MIE Create-a-Container + Neon (the TWH and Maui stacks are live); GitHub Actions CI + a self-heal reconciler; pnpm
 
 ## Build & verify
 - Backend: `cd backend-ts; pnpm install --frozen-lockfile; pnpm typecheck; pnpm test` (SQLite floor; the Pg-ceiling store contract runs against a local `postgres:16`, else self-skips). Gated in `ci.yml`.
-  - **CI shards `pnpm test` across three runners** (`scripts/test-shards.mjs`); `pnpm test` still runs everything locally. Two consequences bind: a **new Pg-dependent test file must live under `src/stores/postgres/`** — that is the only shard whose "the ceiling ran rather than self-skipping" assertion covers it, and `pnpm test:shards:verify` fails the build otherwise — and a file the split cannot place fails that same gate rather than silently never running.
+  - CI shards `pnpm test` across three runners (`scripts/test-shards.mjs`). A **new Pg-dependent test file must live under `src/stores/postgres/`**, or `pnpm test:shards:verify` fails the build.
 - Frontend: `cd frontend; npm run lint; npm run build`
 - Run the app: backend `cd backend-ts; pnpm dev`; frontend `npm run dev`
 
@@ -26,145 +24,78 @@ sprint context — read them for background, never act on them.
 - Avoid new dependencies unless they are explicitly approved and documented
 - One backend-ts worker, modular `src/` packages — no microservices
 - Application events + direct DB audit log (`audit_events` via the store layer) — no Kafka or external streaming
-- Auth: user accounts remain hardcoded (no SSO, no real user directory). The JWT refresh token flow (HttpOnly cookie, token rotation, `/api/auth/refresh`) is approved and implemented.
-- Email: `WORKWELL_EMAIL_PROVIDER=simulated` is the default and must remain so on the demo stack. SendGrid wiring exists in the code but must not be activated unless `WORKWELL_EMAIL_SENDGRID_API_KEY` is explicitly set (with `WORKWELL_EMAIL_PROVIDER=sendgrid`) in a non-demo environment.
-- AI never decides compliance (see docs/AI_GUARDRAILS.md). CQL engine is sole source of truth.
-- Every state change writes `audit_event` — the RULE, and **not yet everywhere true (#598)**. Write
-  new code **audit-first**: the ledger errs toward an over-claim rather than a silent state change.
-  Case actions, the measure/segment/value-set/waiver/appointment/evidence paths already do; the
-  run-created case transition and the import-driven finalize deliberately do not, and outreach cannot
-  without a new event pair. `DATA_MODEL_CONTRACTS` §4 has the whole triage and
-  `backend-ts/scripts/audit-order-sweep.py` re-derives it — **but #598 does not close on §4, because
-  what is still missing is the cross-store `applyCaseAction` PRIMITIVE, not the ordering.**
-- No silent scope changes. If a stop condition triggers, document fallback in JOURNAL.md.
+- Auth: user accounts remain hardcoded (no SSO, no real user directory). The JWT refresh flow (HttpOnly cookie, rotation, `/api/auth/refresh`) is approved and implemented.
+- Email: `WORKWELL_EMAIL_PROVIDER=simulated` is the default and must remain so on the demo stacks. SendGrid must not be activated unless `WORKWELL_EMAIL_SENDGRID_API_KEY` is set (with `WORKWELL_EMAIL_PROVIDER=sendgrid`) in a non-demo environment.
+- AI never decides compliance (see docs/AI_GUARDRAILS.md). The CQL engine is the sole source of truth.
+- Every state change writes an `audit_event` — the rule, **not yet everywhere true (#598, open)**. Write new code **audit-first** (the event before the mutation). Some paths are still mutate-first: run-boundary ones by design, outreach and the identity links pending owner decisions — `DATA_MODEL_CONTRACTS` §4 lists them. #598 stays open until the cross-store `applyCaseAction` primitive exists.
+- No silent scope changes; if a plan's stop condition triggers, record the fallback in JOURNAL.md
 - Schema migrations are owned by Taleef — never written or applied by an agent without explicit instruction
 
 ## Branch + ownership
-- Backend agent owns `backend-ts/` only
-- Frontend agent owns `frontend/` only
-- Schema/DDL is mine, never delegated — the self-creating `workwell_spike` schema (`backend-ts/src/stores/postgres/schema-pg.ts` + the SQLite floor `schema.ts`)
-- Use a feature branch per task, named `feat/<slug>` or `fix/<slug>`
-- Merge after my review — no auto-merge
-- Work **one task at a time**; keep changes small and focused
-- One PR per task — do not batch unrelated changes. Tightly coupled changes (e.g. a schema change
-  plus the service that uses it) may share a PR
+- Schema/DDL is Taleef's, never delegated — `backend-ts/src/stores/postgres/schema-pg.ts` + the SQLite floor `schema.ts`
+- Feature branch per task, named `feat/<slug>` or `fix/<slug>`; one PR per task (tightly coupled changes may share one)
+- Merge after Taleef's review — no auto-merge
 
 ## Definition of done (every PR)
-- Tests pass (idempotency + audit invariants are mandatory; rest smoke-only)
-- CI green
-- Affected docs updated in same PR (docs/guide/ chapters, ARCHITECTURE, DATA_MODEL, MEASURES, DECISIONS, DEPLOY)
-- JOURNAL.md entry started for the day
-- ADR added to DECISIONS.md if non-obvious
-- Conventional commit with a clear scope: `feat(measure): catalog CRUD`
+- Tests pass (idempotency + audit invariants are mandatory; rest smoke-only) and CI is green
+- A doc is updated only where the behaviour it describes changed
+- A few lines in `docs/JOURNAL.md`
+- Conventional commit with a clear scope: `fix(worklist): …`
 
 ## Working style
 - Plan mode for any task touching >2 files
 - Confirm before destructive ops (`rm -rf`, force-push, schema drops, secret rotation)
-- Commit per ticket, push every 2 hours
 - Ask before guessing — cost of asking < cost of building wrong
-- Many small commits over few large ones
-
-## File conventions
-- backend-ts modules: `backend-ts/src/<area>/` (measure, run, case, audit, fhir, engine, mcp, ai, admin, program, export, auth, config, stores, routes)
-- Frontend routes under `app/(dashboard)/`
-- Daily log: `docs/JOURNAL.md` (newest entry on top, dated YYYY-MM-DD)
-- Decisions: `docs/DECISIONS.md` (numbered ADRs, dated)
-
-## Daily rhythm
-- **Morning:** review `docs/JOURNAL.md` and the current focus block before starting
-- **Throughout:** keep changes small and verify what you touch
-- **End of day:** make sure `docs/JOURNAL.md` and affected docs are current
 
 ## Stop and ask if
-- A new workstream is about to start — I review before you proceed
-- A spike's stop condition (in `docs/archive/SPIKE_PLAN.md`) appears to trigger
+- A new workstream is about to start
 - A schema migration would break existing data
 - An AI call is being asked to return a compliance decision
 - An audit log entry would be skipped for "performance" reasons
-- The plan would slip more than half a day
 
 ## Always-loaded docs (`@`-imported — keep this list small)
-Each is load-bearing for a rule above: a rule whose criteria live in an unread file is unenforceable,
-and its absence is **silent**. Do not add to this list without deleting from it. **The test for a line
-in any of these files is whether a session must not silently contradict it** — history, dated snapshots
-and retellings of `DECISIONS.md` / `JOURNAL.md` fail it and come out whole; a rule is never compressed
-to save tokens.
-- @docs/AI_GUARDRAILS.md — the "AI never decides compliance" hard rule lives or dies on this. The verbatim prompt templates, model config and audit payload fields are on demand in `docs/AI_PROMPTS.md`
-- @docs/DATA_MODEL_CONTRACTS.md — idempotency + `evidence_json` + CSV contracts; Definition of Done makes these mandatory on EVERY PR
-- @docs/ADR_INDEX.md — ADR titles only, so a session knows a decision exists; bodies stay in DECISIONS.md
-- @docs/LOCKED_DECISIONS.md — owner-locked decisions only (§4 per ADR-058, §4A per ADR-070)
+- @docs/AI_GUARDRAILS.md — the "AI never decides compliance" rule. Prompt templates are on demand in `docs/AI_PROMPTS.md`
+- @docs/DATA_MODEL_CONTRACTS.md — idempotency + `evidence_json` + CSV contracts, mandatory on every PR
+- @docs/ADR_INDEX.md — ADR titles only; the entries are in DECISIONS.md
+- @docs/LOCKED_DECISIONS.md — owner-locked decisions (§4, §4A)
 
-## Other docs to consult on demand
-Read these when the task needs them. They are deliberately NOT `@`-imported.
-- `docs/guide/` — **the maintained explanation of the whole system** (10 chapters, mermaid per flow; ADR-066). The Definition of Done includes updating the affected chapter when behaviour it describes changes. Chapter 9 owns the volatile numbers, dated
-- `docs/JOURNAL.md` — the running narrative; source of truth for recent work. Older months live **verbatim** in `docs/archive/JOURNAL_<period>.md`
-- `docs/DECISIONS.md` — the ADR bodies that still GOVERN. 14 superseded/finding bodies live in `docs/archive/DECISIONS_ARCHIVE.md`; every heading + a one-line pointer stays in `DECISIONS.md`, so an `ADR-0NN` reference anywhere still resolves
-- `docs/ROADMAP_2026-08-30.md` — **the APPROVED active plan** (the Maui pilot). `docs/ROADMAP_2026-08-04.md` is superseded as direction but **stays in docs/**: its §4 verification set remains the bar (locked decision 2). `docs/archive/ROADMAP_2026-07-24.md` is kept only for its §7 target architecture — **do not act on it**
-- `docs/PROPOSALS_2026-08.md` — feature proposals awaiting owner/MIE review. **None is approved or scheduled** — read it to know an idea has been written down, never as a work queue
-- `docs/DEPLOY.md` — MIE Create-a-Container + Neon setup, env vars, rollback, the flip runbook → prefer the `deploy` skill
-- `docs/ARCHITECTURE.md` — system architecture + boundaries (the engine boundary is enforced mechanically by containment and boundary tests, so CI catches drift)
-- `docs/DATA_MODEL.md` — §1–3: scope, core tables, full table schemas (derivable from `schema-pg.ts` / `schema.ts`)
-- `docs/MEASURES.md` — the measure catalog in plain English, including the pilot's official measures and their flip blockers
-- `docs/COMPLIANCE_API.md` + `docs/PACKAGES.md` — the versioned HTTP surface (ADR-061) and the published `@work-well/*` library surface. Read them before changing anything either one names
-- `docs/STANDARDS_CONFORMANCE.md` — what we may and may not claim to conform to → prefer the `conformance` skill
-- `docs/WEBCHART_API_ASSUMPTIONS_2026-07.md` + `docs/WEBCHART_FHIR_MAPPING.md` — Variant A is BUILT, Variant B is documented-not-built → prefer the `webchart` skill
-- `docs/MCP.md` — MCP security boundary + tool posture → prefer the `mcp` skill
-- `docs/PRODUCTION_READINESS_2026-07.md` — PHI/HIPAA posture, environment split, auth fork, tenancy, and the ordered production gap list (#261)
-- `docs/CDS_HOOKS.md` — the card surface and its refusals (ADR-067)
+## Other docs, on demand
+- `docs/guide/` — the readable explanation of the whole system (10 chapters)
+- `docs/DECISIONS.md` — every ADR, condensed; an `ADR-0NN` or `ADR-0NN dN` reference anywhere resolves there
+- `docs/ROADMAP_2026-08-30.md` — the approved plan (the Maui pilot). `docs/ROADMAP_2026-08-04.md` keeps only its §4 verification set (still the bar, locked decision 2) and §6
+- `docs/OPEN_QUESTIONS.md` — questions waiting on the pilot group, the ACO or the owner
+- `docs/DEPLOY.md` + `docs/BACKUP_DR_RUNBOOK.md` — the runbooks → prefer the `deploy` skill
+- `docs/ARCHITECTURE.md` — the compact module/boundary reference
+- `docs/MEASURES.md` — the measure catalog in plain English
+- `docs/COMPLIANCE_API.md`, `docs/PACKAGES.md`, `docs/CDS_HOOKS.md`, `docs/MCP.md` — the external surfaces. Read before changing anything they name
+- `docs/STANDARDS_CONFORMANCE.md` — what we may and may not claim → prefer the `conformance` skill
+- `docs/WEBCHART_API_ASSUMPTIONS_2026-07.md` + `docs/WEBCHART_FHIR_MAPPING.md` → prefer the `webchart` skill
+- `docs/PRODUCTION_READINESS_2026-07.md` — PHI/HIPAA posture and the production gap list (#261)
+- Table schemas: `backend-ts/src/stores/postgres/schema-pg.ts` (the SQLite floor mirrors it)
 
-## Do NOT read these unless I ask
-Dated, write-once records of finished work. They are history, not instructions, and reading them burns
-context without changing what you should do. Consult `docs/JOURNAL.md` for what happened instead.
-- `docs/archive/superpowers/plans/` and `docs/archive/superpowers/specs/`
-- `docs/archive/sprints/` (sprints 0–7, all merged)
-- `docs/archive/DECISIONS_ARCHIVE.md` — read a single ADR when a pointer in `DECISIONS.md` sends you there; never the file
-- the rest of `docs/archive/` — everything dated, superseded or finished lives there (ADR-066)
+`docs/archive/` was deleted on 2026-09-23. A reference to it anywhere (code comments, old docs) resolves
+from git history: `git show before-docs-trim:docs/archive/<file>`.
 
-## Current focus (as of 2026-09-07)
-**The Maui pilot (milestone M-M) is the spearhead.** `docs/ROADMAP_2026-08-30.md` is the APPROVED active
-plan, ADR-070 drives it, and the owner decisions are `LOCKED_DECISIONS.md` §4A — read those, not a
-retelling. Naming policy: repo documents say "Maui" and "the pilot group" only.
-- **MM-0 shipped** (#496–#500). **MM-1 is in progress:** U1 (#526, ADR-072 — the runnable rule, the
-  calendar measurement period, the flip gate) and U2 (#528, ADR-073/074/075 — the 20,000-patient
-  corpus, multi-rate execution, outcome retention) merged 2026-09-05/06. **Since 2026-09-08 (ADR-078,
-  owner decision) the Maui sandbox routes the ACO's whole computable set — cms122, cms125, cms2,
-  cms130, cms165 and cms137.** The flip is a reviewed workflow edit (ADR-045). Two caveats travel with
-  it and govern the PHI phase, not the sandbox: cms165 runs on the corpus's stamped profiles and needs
-  real blood pressures profile-stamped at ingest before real data (issue #533's ingest half); cms137
-  stays routed unless the final rule removes Quality ID 305. An out-of-population official outcome no
-  longer opens a case (ADR-078 d2). Read `docs/JOURNAL.md` for the newest entries, not this line.
-- **MM-2's build is COMPLETE** (#550/#551/#555/#573/#574) and **MM-3's design half shipped** (#569,
-  ADR-083); MM-3's *wiring* and **MM-4** are blocked on externals (ROADMAP §7). This line said all three
-  were blocked until 2026-09-20, which was false for MM-2 from 2026-09-12 on. The milestones deliver a
-  **sandbox**; the pilot's production/PHI phase is a separate `PRODUCTION_READINESS`-gated decision
-  nothing in M-M authorizes.
-- M-C (packaging) is complete and published; M-E1 (occupational content) is deferred behind M-M, not
-  cancelled (locked decision 6). Open threads live in the newest JOURNAL entry's "still owner-owned"
-  line and in GitHub issues, not here.
+## Current focus
+**The Maui pilot sandbox, before PY2027 starts on 2027-01-01.** The work is the "Ready for January"
+milestone; asks blocked on MIE, the practice or the ACO carry the `waiting` label; minor findings are the
+checklist in #655. The plan is `docs/ROADMAP_2026-08-30.md` (ADR-070) and the owner decisions are
+`LOCKED_DECISIONS.md` §4A. The sandbox routes all six ACO measures — cms122, cms125, cms2, cms130, cms165,
+cms137 (ADR-078). It is a sandbox: the pilot's real-data (PHI) phase is a separate decision gated by
+`PRODUCTION_READINESS`. Naming policy: repo documents say "Maui" and "the pilot group" only.
 
 ## Standing corrections
 Each is a claim the project got wrong once and would otherwise repeat.
-1. **The CMS FHIR-reporting timeline is CMS-attributable, and it is an RFI — weaker than a proposal.**
-   The CY2027 PFS rule (CMS-1848-P, July 2026) *seeks comment on* a two-year transition — FHIR reporting
-   voluntary PY2028–29, mandatory PY2030 for applicable APP Plus measures. Cite it as **sought comment
-   on**, never as proposed and never as final (final rule ~Nov 2026). **Two things this entry itself got
-   wrong, corrected 2026-09-20 from the 2026-09-07 review:** MIPS CQMs are proposed to be **EXTENDED**
-   for PY2027+, not "sunsetting ~PY2030" as this line read; and the separate proposal to sunset
-   **traditional MIPS as a reporting option** after PY2028 is a *different* policy — do not merge the
-   two. The same rule proposes removing Quality IDs 305 (CMS137) and 493 from APP Plus for PY2027.
-2. **"QI-Core STU7 = US Core 7 = WebChart's exact surface" is half right.** The equality holds, but
-   **CMS's shipping content is authored on QI-Core 6**, and the direction of travel is US Quality Core
-   0.5.0 over US Core 6.1.0.
-3. **"Cypress CVU+ is the verification bar" is removed.** The bar is the FHIR-column verification set
+1. **The CMS FHIR-reporting timeline is an RFI.** The CY2027 PFS proposed rule (CMS-1848-P) *seeks comment
+   on* FHIR reporting voluntary PY2028–29, mandatory PY2030 for applicable APP Plus measures. Cite it as
+   **sought comment on**, never as proposed or final (final rule ~Nov 2026). MIPS CQMs are proposed to be
+   **extended** for PY2027+; sunsetting traditional MIPS after PY2028 is a *different* proposal. The same
+   rule proposes removing Quality IDs 305 (CMS137) and 493 from APP Plus for PY2027.
+2. **"QI-Core STU7 = US Core 7 = WebChart's exact surface" is half right.** CMS's shipping content is
+   authored on QI-Core 6; the direction of travel is US Quality Core 0.5.0 over US Core 6.1.0.
+3. **Cypress CVU+ is not the verification bar.** The bar is the FHIR-column verification set
    (`ROADMAP_2026-08-04.md` §4, locked decision 2).
 
-Two traps from the conformance harness, invisible until they have wasted an afternoon: `cqf-fhir-cr`
-retrieval is QI-Core **`meta.profile`-sensitive** — an unstamped hand-PUT resource is silently never
-retrieved — and `$evaluate-measure` **caches per subject for the server's life**, so every changed input
-needs a fresh container.
-
-## History
-Status blocks and milestone tables that used to sit here were removed (2026-07-29, 2026-09-01,
-2026-09-06) because they retold, in less detail, what `docs/JOURNAL.md`, `docs/DECISIONS.md` and the
-roadmap hold authoritatively. The removed text is recoverable from git (`git show 5f29d373:CLAUDE.md`
-for the 2026-06→08 blocks, `git show 598ff25c:CLAUDE.md` for the 2026-08-30 Current Focus block).
+Two conformance-harness traps: `cqf-fhir-cr` retrieval is QI-Core **`meta.profile`-sensitive** (an
+unstamped resource is silently never retrieved), and `$evaluate-measure` **caches per subject for the
+server's life**, so every changed input needs a fresh container.
