@@ -123,6 +123,38 @@ test("GET /api/employees/:id/profile returns identity + outcomes + open cases + 
   assert.ok(p.recentAuditEvents.some((e) => e.eventType === "CASE_CREATED" && /opened a case/.test(e.summary)));
 });
 
+test("profile shows what the roster shows: out-of-population MISSING_DATA reads OUT_OF_POPULATION (#671)", async () => {
+  const db = env.DB as never;
+  const run = await new SqliteRunStore(db).createRun({
+    scopeType: "MEASURE",
+    scopeId: "cms122",
+    triggeredBy: "test",
+    requestedScope: { measureId: "cms122" },
+    measurementPeriodStart: "2026-01-01T00:00:00.000Z",
+    measurementPeriodEnd: "2026-12-31T23:59:59.999Z",
+  });
+  // Outside every rate's initial population: stored as MISSING_DATA (ADR-078), displayed as not in
+  // population by the roster (`deriveCell`). The same evidence shape as roster-vocabulary.test.ts.
+  await new SqliteOutcomeStore(db).recordOutcome({
+    runId: run.id,
+    subjectId: "emp-006",
+    measureId: "cms122",
+    evaluationPeriod: "2026-06-13",
+    status: "MISSING_DATA",
+    evidence: { expressionResults: [], official: { populationResults: { ipp: false, denom: false, denex: false, numer: false, denexcep: false } } },
+    // Older than the fixture's rows, so the search test's "latest outcome" stays the audiogram's.
+    evaluatedAt: "2026-06-01T00:00:00.000Z",
+  });
+  const p = (await (await get("/api/employees/emp-006/profile"))!.json()) as {
+    measureOutcomes: Array<{ measureId: string; outcomeStatus: string; displayStatus: string }>;
+  };
+  const cms122 = p.measureOutcomes.find((o) => o.measureId === "cms122")!;
+  assert.equal(cms122.outcomeStatus, "MISSING_DATA", "the stored bucket is unchanged");
+  assert.equal(cms122.displayStatus, "OUT_OF_POPULATION", "and the page is told what the table shows");
+  // In the population with nothing on file stays a real gap.
+  assert.equal(p.measureOutcomes.find((o) => o.measureId === "cms125")!.displayStatus, "MISSING_DATA");
+});
+
 test("GET /api/employees/:id/profile → 404 for an unknown employee", async () => {
   assert.equal((await get("/api/employees/emp-999/profile"))?.status, 404);
 });

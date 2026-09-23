@@ -8,6 +8,7 @@ import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { seededTargetFor } from "./distribution.ts";
 import { simulateComplianceAsOf } from "./employee-compliance-snapshot.ts";
 import { createWorkwellEngine } from "../engine/cql/workwell-engine.ts";
+import { runProfileChild } from "../test-support/run-profile-child.ts";
 
 const engine = createWorkwellEngine();
 const TODAY = "2026-06-24";
@@ -22,6 +23,7 @@ test("snapshot covers every runnable measure with a valid display state", async 
   assert.equal(snap!.externalId, emp.externalId);
   assert.equal(snap!.asOf, TODAY);
   assert.equal(snap!.evaluations.length, Object.keys(MEASURES).length);
+  assert.deepEqual(snap!.notSimulated, [], "every measure this profile runs has an authored binding");
   for (const ev of snap!.evaluations) {
     assert.ok(typeof ev.method === "string");
     assert.ok(["COMPLIANT", "DUE_SOON", "OVERDUE", "MISSING_DATA", "EXCLUDED", "DECLINED", "IN_PROGRESS", "NA"].includes(ev.status));
@@ -42,4 +44,23 @@ test("scrubbing the date forward ages a RECURRING measure but leaves PERMANENT u
 
 test("unknown employee → null", async () => {
   assert.equal(await simulateComplianceAsOf("nobody-999", TODAY, { engine, today: TODAY }), null);
+});
+
+test("Maui: the measures the simulation cannot replay are named, not silently dropped (#671)", () => {
+  // The four official-only measures have no authored binding to build a synthetic bundle from. The page
+  // showed two of six results as if they were the whole picture.
+  const output = runProfileChild(
+    "maui",
+    `
+    import { simulateComplianceAsOf } from "./src/run/employee-compliance-snapshot.ts";
+    const engine = { evaluate: async () => ({ outcome: "COMPLIANT", evidence: {} }) };
+    const snap = await simulateComplianceAsOf("pat-003", "2026-09-23", { engine, today: "2026-09-23" });
+    console.log(JSON.stringify({ evaluated: snap.evaluations.map((e) => e.measureId), notSimulated: snap.notSimulated }));
+  `,
+    { WORKWELL_OFFICIAL_MEASURES: "cms122,cms125,cms2,cms130,cms165,cms137" },
+  );
+  assert.deepEqual(output.evaluated, ["cms122", "cms125"]);
+  const notSimulated = output.notSimulated as Array<{ measureId: string; name: string }>;
+  assert.deepEqual(notSimulated.map((m) => m.measureId), ["cms2", "cms130", "cms165", "cms137"]);
+  assert.equal(notSimulated.find((m) => m.measureId === "cms130")?.name, "Colorectal Cancer Screening");
 });

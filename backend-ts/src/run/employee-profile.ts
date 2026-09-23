@@ -20,13 +20,22 @@ import { isWebChartConfigured, type DataSourceEnv } from "../engine/ingress/data
 import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { deriveWhyFlagged } from "../case/case-detail-read-model.ts";
 import { ACTIVE_CASE_STATUSES } from "../case/case-logic.ts";
+import { deriveCell, type DisplayState } from "../compliance/roster-vocabulary.ts";
+import { isCatalogActiveRunnable } from "../compliance/panels.ts";
+import { measureDisplayName } from "../measure/measure-name.ts";
 
 export interface MeasureOutcomeSummary {
   measureId: string;
   measureVersionId: string;
   measureName: string;
   measureVersion: string;
+  /** The stored bucket. `displayStatus` is what to SHOW (#671). */
   outcomeStatus: string;
+  /**
+   * What the roster table on the same page shows for this outcome: `deriveCell`, so an
+   * out-of-population MISSING_DATA reads OUT_OF_POPULATION here too, not "missing data" (#671).
+   */
+  displayStatus: DisplayState;
   lastRunDate: string;
   daysSinceLastExam: number | null;
   daysUntilDue: number | null;
@@ -91,7 +100,9 @@ const measureVersionOf = (measureId: string): string => {
   const dash = lib.lastIndexOf("-");
   return dash >= 0 ? lib.slice(dash + 1) : "";
 };
-const measureNameOf = (measureId: string): string => MEASURES[measureId]?.name ?? measureId;
+// The catalog carries a name for the official-only measures too; the authored registry alone left
+// cms2/cms130/cms165/cms137 named by their ids (#671).
+const measureNameOf = measureDisplayName;
 
 interface ExprResult {
   define: string;
@@ -158,11 +169,13 @@ export async function getEmployeeProfile(deps: EmployeeProfileDeps, externalId: 
   const openCaseByMeasure = new Map<string, string>();
   for (const c of openCases) openCaseByMeasure.set(c.measureId, c.id);
 
-  // Latest outcome per measure (newest-first history, dedupe by measure).
+  // Latest outcome per measure (newest-first history, dedupe by measure), for the measures this
+  // deployment runs: the roster table beside it shows only those, and an old authored measure's last
+  // outcome read as one more quality measure the practice is scored on (#671).
   const seen = new Set<string>();
   const measureOutcomes: MeasureOutcomeSummary[] = [];
   for (const o of history) {
-    if (seen.has(o.measureId)) continue;
+    if (seen.has(o.measureId) || !isCatalogActiveRunnable(o.measureId)) continue;
     seen.add(o.measureId);
     const wf = deriveWhyFlagged(o.evidence, o.measureId, o.evaluationPeriod, o.status);
     const window = typeof wf.compliance_window_days === "number" ? wf.compliance_window_days : null;
@@ -174,6 +187,7 @@ export async function getEmployeeProfile(deps: EmployeeProfileDeps, externalId: 
       measureName: measureNameOf(o.measureId),
       measureVersion: measureVersionOf(o.measureId),
       outcomeStatus: o.status,
+      displayStatus: deriveCell(o.status, o.evidence, o.measureId, o.evaluationPeriod).status,
       lastRunDate: o.evaluatedAt,
       daysSinceLastExam: daysSince,
       daysUntilDue: daysSince !== null && window !== null ? window - daysSince : null,
