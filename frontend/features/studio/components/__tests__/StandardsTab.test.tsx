@@ -94,6 +94,8 @@ describe("StandardsTab", () => {
     expect(note).toHaveTextContent(/estimate, not a full comparison/);
     expect(note).toHaveTextContent(/20,000 subjects/);
     expect(note).toHaveTextContent(/limit is 50/);
+    // The date is the as-of the run was scored at, not the run's date, and the label says so.
+    expect(screen.getByText(/evaluated as of 2026-06-30/)).toBeInTheDocument();
   });
 
   it("renders the per-subject execution divergence when the diff is in execution mode", async () => {

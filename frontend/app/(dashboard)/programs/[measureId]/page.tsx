@@ -10,6 +10,7 @@ import {
 import { Button } from "@mieweb/ui";
 import { emitToast } from "@/lib/toast";
 import { useApi } from "@/lib/api/hooks";
+import { ApiError } from "@/lib/api/errors";
 import { fmtCount } from "@/lib/format";
 import { useAuth } from "@/components/auth-provider";
 import { useRunStatus } from "@/components/run-status-provider";
@@ -284,7 +285,8 @@ export default function ProgramDetailPage() {
             </div>
           </div>
 
-          <QualityOverTime measureId={measureId} measureName={program.measureName} identity={identity} />
+          {/* keyed: a refusal or series for one measure must never paint under the next one's heading */}
+          <QualityOverTime key={measureId} measureId={measureId} measureName={program.measureName} identity={identity} />
 
           <div className="rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4">
             <p className="text-xs font-semibold uppercase tracking-[0.15em] text-neutral-500 dark:text-neutral-400">Risk outlook (next 90 days)</p>
@@ -540,12 +542,22 @@ const monthLabel = (period: string): string => {
 };
 
 /**
- * E16 PR-3 — "Quality over time (source of truth)". Reads the materialized `quality_snapshots` via
+ * E16 PR-3 — "Quality over time". Reads the materialized `quality_snapshots` via
  * GET /api/quality/history: a scope selector (All Systems / per WebChart system), an as-of month
  * picker, and a "compliance on month M" numerator/denominator KPI. Answers Doug's "were they
  * compliant in December? October?" from the persisted aggregate, not a live re-scan. Descriptive
  * only — the numbers are counts of what CQL already decided (ADR-008/ADR-021).
  */
+/** The #642 refusal specifically — not any 409 a future change to the route might add. */
+function isBasisRefusal(err: unknown): boolean {
+  if (!(err instanceof ApiError) || err.status !== 409) return false;
+  try {
+    return (JSON.parse(err.body) as { error?: string }).error === "snapshot_basis_unsafe";
+  } catch {
+    return false;
+  }
+}
+
 function QualityOverTime({
   measureId,
   measureName,
@@ -562,6 +574,13 @@ function QualityOverTime({
   const [snapshots, setSnapshots] = useState<QualitySnapshot[]>([]);
   const [asOf, setAsOf] = useState<string>("");
   const [loaded, setLoaded] = useState(false);
+  // #642: the server REFUSES the series (409) for a measure whose snapshots would understate its rate —
+  // they count patients outside the measure's population in the denominator. Kept apart from "no
+  // snapshots yet": one is an absence, the other is a wrong number the page must not show.
+  const [withheld, setWithheld] = useState<string | null>(null);
+  // Any OTHER failure is a failure, and says so. It used to fall through to "no snapshots yet", which
+  // turned an outage into a claim that there was no data (review of #677).
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     void api.get<Tenant[]>("/api/tenants").then(setTenants).catch(() => setTenants([]));
@@ -577,11 +596,16 @@ function QualityOverTime({
     try {
       const rows = await api.get<QualitySnapshot[]>(`/api/quality/history?${qs.toString()}`);
       if (reqId !== reqIdRef.current) return;
+      setWithheld(null);
+      setLoadError(null);
       setSnapshots(rows);
       setAsOf((prev) => (prev && rows.some((r) => r.period === prev) ? prev : rows.at(-1)?.period ?? ""));
-    } catch {
+    } catch (err) {
       if (reqId !== reqIdRef.current) return;
       setSnapshots([]);
+      const refused = isBasisRefusal(err);
+      setWithheld(refused ? (err as ApiError).message : null);
+      setLoadError(refused ? null : err instanceof Error ? err.message : "Request failed");
     } finally {
       if (reqId === reqIdRef.current) setLoaded(true);
     }
@@ -617,9 +641,9 @@ function QualityOverTime({
     <div className="rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-xs font-semibold uppercase tracking-[0.15em] text-neutral-500 dark:text-neutral-400">
-          Quality over time <span className="normal-case text-neutral-400">(source of truth)</span>
+          Quality over time <span className="normal-case text-neutral-400">(monthly snapshots)</span>
         </p>
-        <div className="flex flex-wrap items-center gap-2">
+        {withheld ? null : <div className="flex flex-wrap items-center gap-2">
           <label className="text-xs text-neutral-500 dark:text-neutral-400">
             Scope{" "}
             <select
@@ -647,10 +671,16 @@ function QualityOverTime({
               </select>
             </label>
           ) : null}
-        </div>
+        </div>}
       </div>
 
-      {selected && selectedView ? (
+      {withheld ? (
+        <p role="note" className="mt-3 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
+          {withheld}
+        </p>
+      ) : null}
+
+      {withheld ? null : selected && selectedView ? (
         <div className="mt-3 grid gap-3 sm:grid-cols-3">
           <div className="rounded border border-emerald-200 bg-emerald-50 p-3 dark:border-emerald-900 dark:bg-emerald-950/40">
             <p className="text-xs text-emerald-800 dark:text-emerald-300">{rateLabel} on {monthLabel(selected.period)}</p>
@@ -669,7 +699,7 @@ function QualityOverTime({
         </div>
       ) : null}
 
-      {snapshots.length > 0 ? (
+      {withheld ? null : snapshots.length > 0 ? (
         <div className="mt-4">
           {/* aria-hidden — sr-only ChartDataTable below is the accessible alternative. */}
           <div aria-hidden="true">
@@ -704,9 +734,11 @@ function QualityOverTime({
       ) : (
         <div className="mt-3 flex h-[120px] items-center justify-center rounded border border-dashed border-neutral-300 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800/50 text-center">
           <span className="max-w-md text-xs text-neutral-500 dark:text-neutral-400">
-            {loaded
-              ? "No materialized quality snapshots yet for this scope. Snapshots accrue on every population run, or run pnpm seed:quality-history to backfill months of history."
-              : "Loading quality history…"}
+            {!loaded
+              ? "Loading quality history…"
+              : loadError
+                ? `Monthly history could not be loaded (${loadError}). Try again shortly.`
+                : "No materialized quality snapshots yet for this scope. Snapshots accrue on every population run, or run pnpm seed:quality-history to backfill months of history."}
           </span>
         </div>
       )}

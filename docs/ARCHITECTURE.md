@@ -123,6 +123,9 @@ Browser -> <stack>.os.mieweb.org          Next.js frontend (MIE Create-a-Contain
   hierarchy and scale rollups, winning-run resolution (`latest-population.ts`), post-run memo warm-up
   (`warm-read-models.ts`).
 - `quality/` - quality-over-time snapshots (`buildSnapshotRows`, `materializeRun`; ADR-021).
+  `snapshot-basis.ts` refuses a measure's monthly series (`GET /api/quality/history` → 409
+  `snapshot_basis_unsafe`, #642) when its snapshots would understate the rate, because they still count
+  out-of-population subjects; fixing the stored rows needs a basis marker (#676, schema).
 - `routes/` - one file per route group. Each file's header comment lists its routes.
 - `run/` - the run pipeline (`run-pipeline.ts`: planning, `finishManualRun`, case upsert, cycle
   rollover), run read models, measurement periods (`compliance-period.ts`, `run-period.ts`), outcome

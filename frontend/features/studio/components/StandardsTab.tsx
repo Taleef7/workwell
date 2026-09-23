@@ -231,7 +231,13 @@ export function StandardsTab({ measureId, api }: Props) {
           <p className="mt-1 text-sm text-neutral-700 dark:text-neutral-300">{divergent.headline}</p>
           {divergent.runId ? (
             <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
-              Based on the latest population run ({divergent.asOf}); {divergent.totalSubjectsEvaluated} subjects evaluated,
+              {/* asOf is the run's DATE for a plain estimate. When the estimate stands in for a refused
+                  execution tier it is the as-of date the run was scored at — the stored period end, or the
+                  run's date where none was stored (#664) — so the label says "as of", never "period ending". */}
+              {divergent.executionSkipped
+                ? `Based on the latest population run, evaluated as of ${divergent.asOf}; `
+                : `Based on the latest population run (${divergent.asOf}); `}
+              {divergent.totalSubjectsEvaluated} subjects evaluated,
               <span className="font-semibold text-red-700 dark:text-red-400"> {divergent.totalDivergent}</span> would change if the official criteria were applied.
             </p>
           ) : (
@@ -247,7 +253,7 @@ export function StandardsTab({ measureId, api }: Props) {
             <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-400">Official-CQL execution diff</p>
             <p className="mt-1 text-sm text-neutral-700 dark:text-neutral-300">{execution.headline}</p>
             <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
-              {execution.asOf ? `Based on the latest population run (${execution.asOf}); ` : ""}
+              {execution.asOf ? `Based on the latest population run, evaluated as of ${execution.asOf}; ` : ""}
               <span className="font-semibold text-red-700 dark:text-red-400">{execution.totalDivergent} of {execution.totalSubjectsEvaluated}</span> subjects diverge from the {execution.mode === "literal" ? "literal official" : "official-subset"} CQL execution.
             </p>
             {execution.totalErrors > 0 ? (
