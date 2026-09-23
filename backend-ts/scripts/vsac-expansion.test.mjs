@@ -158,6 +158,19 @@ describe("expandFromVsac", () => {
     assert.equal(result.codes.length, 1);
     assert.equal(calls.length, 2);
   });
+
+  it("bounds every request with a timeout, and retries one that timed out", async () => {
+    globalThis.fetch = async (url, init) => {
+      calls.push({ url: String(url), init });
+      if (calls.length === 1) throw new DOMException("The operation was aborted due to timeout", "TimeoutError");
+      return expansionPage(["c1"], 1);
+    };
+
+    const result = await expandFromVsac(OID, { ...ARGS, apiKey: "test-key" });
+    assert.equal(result.codes.length, 1);
+    assert.equal(calls.length, 2, "the timed-out attempt is retried");
+    assert.ok(calls.every((c) => c.init.signal instanceof AbortSignal), "every request carries a timeout signal");
+  });
 });
 
 describe("completeTerminology — capped sets (ADR-041)", () => {

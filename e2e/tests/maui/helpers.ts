@@ -49,11 +49,10 @@ export function storageStatePath(email: string, tag: string): string {
  * (`frontend/lib/public-demo.ts`), so `/runs` and `/measures` render AccessDenied for the quality lead.
  * A spec about those pages adopts this state; one about the quality lead's own workflow must not.
  *
- * EMPTY off the maui profile, and that is load-bearing. The twh job runs `npx playwright test` with no
- * `--project`, which loads BOTH projects — and Playwright resolves the `page` fixture (and therefore
- * `storageState`) BEFORE the `beforeEach` that calls `test.skip`. Naming a file that global setup only
- * writes on the maui profile would fail these specs with `ENOENT` on the twh run instead of skipping
- * them, which is what they did before this existed.
+ * EMPTY off the maui profile, and that is load-bearing. Playwright resolves the `page` fixture (and
+ * therefore `storageState`) BEFORE the `beforeEach` that calls `test.skip`, so on a run without
+ * `PLAYWRIGHT_PROFILE=maui`, naming a file that global setup only writes on the maui profile would fail
+ * these specs with `ENOENT` instead of skipping them.
  */
 // Declared above the session table that reads them. MAUI_ACCOUNTS below carries the same addresses
 // with their roles, but it is defined further down the file and a const cannot be read before its

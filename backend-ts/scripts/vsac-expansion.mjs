@@ -118,11 +118,18 @@ export function flattenExpansion(contains, out = []) {
  */
 const RETRYABLE_4XX = new Set([401, 429]);
 
+/**
+ * A hung request is abandoned and retried. With no bound, fetch waited 300 s per attempt when VSAC
+ * stalled, which is what turned every CI run over 10 minutes into 13–16 (and 50 once re-run). Healthy
+ * pages answer in under 20 s. The signal bounds reading the body too.
+ */
+const VSAC_TIMEOUT_MS = 90_000;
+
 async function fetchVsacJson(url, headers, attempts = 4) {
   let lastError;
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     try {
-      const response = await fetch(url, { headers });
+      const response = await fetch(url, { headers, signal: AbortSignal.timeout(VSAC_TIMEOUT_MS) });
       if (response.ok) return JSON.parse(await response.text());
       if (response.status < 500 && !RETRYABLE_4XX.has(response.status)) throw new Error(`HTTP ${response.status}`);
       lastError = new Error(`HTTP ${response.status}`);

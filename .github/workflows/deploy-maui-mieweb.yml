@@ -9,6 +9,9 @@ name: Deploy Maui OS MIEWeb
 on:
   push:
     branches: [main]
+    # A docs-only merge ships nothing (no image contains docs/ or a root *.md), and a push deploy
+    # recreates the containers, so skipping it saves ~30-120 s of downtime per stack.
+    paths-ignore: ["docs/**", "*.md"]
   workflow_dispatch:
     inputs:
       replace_existing:
