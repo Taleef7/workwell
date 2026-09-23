@@ -196,7 +196,7 @@ This project is deliberately careful about what it claims. [`docs/STANDARDS_CONF
 
 The parts of this repo worth reading if you care about how it is built:
 
-- **68 Architecture Decision Records** ([`docs/DECISIONS.md`](docs/DECISIONS.md)) — every non-obvious decision, with the alternatives and the consequences. Several record a decision being *reversed* by measurement or review, with the original reasoning kept rather than deleted.
+- **Architecture Decision Records** ([`docs/DECISIONS.md`](docs/DECISIONS.md)) — the decisions that shape the system, each condensed to what was decided and why.
 - **Measure-first, then decide.** Repeatedly, a planned refusal or guard was killed because measuring showed it would fire on correct inputs. Those reversals are documented as such — the reasoning that was wrong is the useful part.
 - **Guards are mutation-tested.** A check that cannot fail is worse than no check, because it reads as covered. New safety conditions are verified by breaking them and confirming exactly the intended test fails.
 - **Vacuous-guard hunting.** Tests that self-skip when a fixture is missing are treated as a defect class in their own right — a suite that reads green because it never ran is worse than a red one. The sidecar-dependent gates are named explicitly in a CI step so they cannot silently drop out, and the flip checklist tells the operator to read the `skipped` count, not just `fail`.
@@ -318,8 +318,8 @@ The approved active plan is [`docs/ROADMAP_2026-08-30.md`](docs/ROADMAP_2026-08-
 | [What WorkWell is](docs/WHAT_WORKWELL_IS.md) | one-page stakeholder explainer for non-engineers |
 | [Normalization](docs/guide/normalization-for-quality-teams.md) | how clinical records move from the clinic EHR to a quality result |
 | [Architecture](docs/ARCHITECTURE.md) | system boundaries, module map |
-| [Decisions](docs/DECISIONS.md) | 69 ADRs, newest first |
-| [Data Model](docs/DATA_MODEL.md) | tables, idempotency + evidence contracts |
+| [Decisions](docs/DECISIONS.md) | the ADRs, newest first |
+| [Data contracts](docs/DATA_MODEL_CONTRACTS.md) | idempotency, evidence and CSV contracts |
 | [Measures](docs/MEASURES.md) | the TWH measure catalog in plain English |
 | [Standards Conformance](docs/STANDARDS_CONFORMANCE.md) | what we may and may not claim |
 | [WebChart Mapping](docs/WEBCHART_FHIR_MAPPING.md) | EHR → FHIR crosswalk |

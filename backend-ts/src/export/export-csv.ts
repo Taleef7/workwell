@@ -1,6 +1,6 @@
 /**
  * CSV export builders (#108 exports) — runs / outcomes / cases / audit, matching the column
- * contracts in docs/DATA_MODEL.md §6. Read from the existing stores + directories; no new data.
+ * contracts in docs/DATA_MODEL_CONTRACTS.md §6. Read from the existing stores + directories; no new data.
  */
 import type { RunStore } from "../stores/run-store.ts";
 import type { OutcomeStore, OutcomeWithRun } from "../stores/outcome-store.ts";

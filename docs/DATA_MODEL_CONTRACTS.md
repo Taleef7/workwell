@@ -1,312 +1,83 @@
-# DATA_MODEL — Contracts (always-loaded extract)
+# DATA_MODEL — Contracts (always-loaded)
 
-> **Authoritative.** These three contracts are extracted from `docs/DATA_MODEL.md` so they can be
-> `@`-imported into every session — the Definition of Done makes idempotency + audit invariants
-> mandatory on every PR, so they are load-bearing on every change.
->
-> The rest of `docs/DATA_MODEL.md` (§1 Scope, §2 Core Tables, §3 Full Table Schemas) stays on demand:
-> it is derivable from `backend-ts/src/stores/postgres/schema-pg.ts` and the SQLite floor `schema.ts`.
-> Read it when touching schema; do not duplicate it here.
->
-> Edit this file, not a copy in `DATA_MODEL.md` — §4–6 there point here. Section numbers are cited from
-> source comments (§4, §5, §6.2, §6.3) and stay fixed.
+> **Authoritative**; mandatory on every PR. Bare paths are under `backend-ts/src/`. Schemas:
+`stores/postgres/schema-pg.ts` (Pg ceiling), `stores/sqlite/schema.ts` (SQLite floor). § numbers are
+cited from source; keep them. CSV columns are only APPENDED, never inserted.
 
 ## 4) Idempotency Contract for Case Upsert
-Constraint: `UNIQUE(employee_id, measure_version_id, evaluation_period)`.
-
-- A non-compliant outcome with no existing row inserts a new `cases` row (`status=OPEN`, priority from the outcome).
-- The same key on a later run updates the same row (`updated_at`, `last_run_id`, `next_action`, …). No duplicate case is ever created.
-- A `COMPLIANT` outcome on the same key resolves the row (`status=RESOLVED`, `closed_at=NOW()`,
-  `closed_reason='AUTO_RESOLVED'`, `closed_by=NULL` — a **system** closure).
+Key `UNIQUE(employee_id, measure_version_id, evaluation_period)`; never a duplicate case. Non-compliant,
+no row: insert `OPEN` (priority from the outcome); later runs update that row. `COMPLIANT`: `RESOLVED`,
+`closed_at=NOW()`, `closed_reason='AUTO_RESOLVED'`, `closed_by=NULL` (a system closure); a no-op on a
+terminal case.
 
 ### State-aware upsert
-`upsertFromOutcome` is not a blanket `ON CONFLICT DO UPDATE SET status = excluded.status`. Both the
-SQLite floor and the Pg ceiling read the current row and apply the shared pure `planCaseUpsert`
-(`backend-ts/src/case/case-logic.ts`):
-- **IN_PROGRESS is preserved** on a still-non-compliant run (an operator's "scheduling" state is never
-  clobbered back to OPEN).
-- **Human closures are respected.** A case a person closed (`closed_by` set) is **not** reopened by a
-  later non-compliant run; only a **system** closure (`closed_by IS NULL`) reopens — either a prior
-  auto-resolve (status `RESOLVED`) or an auto-exclusion (status `EXCLUDED`) whose waiver has since
-  lapsed so CQL no longer returns EXCLUDED. Reopening a human-closed case is left an explicit, audited
-  operator action.
-  **Two consequences of that no-op are contract, not incidental (#569, ADR-083 d1).** First,
-  `current_outcome_status` on a human-closed row is **FROZEN at closure** — the run never touches the
-  row again, so the column states what the last run before the closure said and can be months stale.
-  CQL's current answer for that `(subject, measure)` lives in `outcomes`, on the winning population
-  run, and any surface claiming to show "what CQL says" about such a row must read it there
-  (`compliance/live-cell.ts`, bounded point reads). Second, `closed_by` — never `status`, never
-  `closed_reason` — is the discriminator for WHO closed a case, because it is the column this rule
-  itself decides by: `closureKindOf` (`case/case-logic.ts`) reads it as `NONE` for an active case,
-  `STAFF` for every closure a person made (a manual `MANUAL_RESOLVE` close writes status `CLOSED`, a
-  rerun-to-verify writes `RESOLVED`/`EXCLUDED` — both are STAFF), and `SYSTEM` otherwise.
-  `CaseQuery.closure` (`'staff' | 'system'`) is the store-side form and implements the WHOLE
-  classification — terminal status AND who closed it — because `closed_by IS NULL` alone matches every
-  OPEN row.
-- **So do the open-case READERS, and that had to be propagated (MM-2).** The work list, its CSV export
-  (`?status=open`) and the MCP `list_cases`/`list_noncompliant` tools each mapped "open" to `["OPEN"]`
-  alone. A case an operator had started was therefore visible on the screen and absent from the CSV
-  taken off that screen, and absent from the tool serving the same list to a client — a row missing
-  from an export is missing without anyone being told. All four now use `ACTIVE_CASE_STATUSES`.
-  **Two readers still scope to `OPEN` only and are left alone deliberately**: outreach-campaign
-  targeting (`case/outreach-campaign.ts`) and the case attached to an MCP compliance answer
-  (`mcp/tools.ts`). Both predate this and neither is the work list; whether a case someone has already
-  picked up should also receive automated outreach is a question for the owner, not a silent widening.
-- **Active-case counts include `IN_PROGRESS`.** Because the upsert preserves `IN_PROGRESS` (rather than
-  flipping it to OPEN), every "active/open case" rollup (`ACTIVE_CASE_STATUSES` = `OPEN` +
-  `IN_PROGRESS`) counts both — otherwise a reconfirmed IN_PROGRESS case would silently drop out of the
-  hierarchy/programs open-case count.
-- **No `closed_at` drift.** A COMPLIANT outcome on an already-terminal case is a no-op.
-- **A subject OUTSIDE the initial population never opens a case (ADR-078).** The run pipeline sets
-  `outOfPopulation` on the upsert from the executor's own `inInitialPopulation: false`; the outcome is
-  still persisted as MISSING_DATA (CQL is authoritative), but `planCaseUpsert` returns a no-op where
-  no case exists and closes an active one with `status=RESOLVED`, `closed_reason='OUT_OF_POPULATION'`,
-  `closed_by=NULL` (a system closure, audited `CASE_RESOLVED`). In-population MISSING_DATA still opens
-  a case. Before this, every non-diabetic opened a CMS122 case (ADR-043's recorded fan-out).
-- The upsert returns an `UpsertedCase` (a `CaseRecord` superset carrying a `disposition` of
-  `CREATED | UPDATED | REOPENED | RESOLVED | EXCLUDED | UNCHANGED`). The run pipeline emits a matching
-  `CASE_*` audit event for every disposition except `UNCHANGED` (an idempotent re-confirm of the same open
-  outcome — refreshed silently, so a nightly run records one `RUN_COMPLETED`, not hundreds of noise
-  events). A re-confirm whose persisted `next_action` MOVED is `UPDATED`, not `UNCHANGED`: on a
-  multi-rate measure the action names the rate the subject missed (ADR-074 d13), so the same OVERDUE
-  can carry a new action, and that is a state change the pipeline audits — the `CASE_UPDATED` payload
-  carries the new `nextAction`. The rule compares strings, so a change to a wording table
-  (`OFFICIAL_DISPLAY`, the next-action overrides, the subject-term prose) re-audits every open case ONCE
-  on the next run, and a legacy row whose `next_action` is NULL does so on first contact. Deliberate:
-  the persisted row changed.
-- **A case is CREATED on its provider's panel, and never re-owned afterwards (ADR-080 d2).**
-  `UpsertCaseInput.panelAssignee` is applied on the **insert branch only**: the row is written with
-  `assignee` set and `assignment_source='PANEL'`. The UPDATE branch never touches `assignee` or
-  `assignment_source` — not on a re-confirm, and not on a REOPEN, because a reopen is within the same
-  cycle and is therefore the same piece of work somebody may already be holding. A NEW cycle is an
-  insert and picks up whatever the map says then. Absent ⇒ `NULL/NULL`, which is exactly the behaviour
-  of every deployment with no panel mappings.
-  **`cases.assignment_source` records WHO chose** — `PANEL`, `OPERATOR`, or NULL. `patchCase({assignee})`
-  is the operator surface and writes `OPERATOR`; `assignCases(…, source)` takes it explicitly, and
-  clearing an assignee clears the source with it. A NULL source on a row that HAS an assignee is read
-  as operator-owned, so a panel backfill never moves work a person placed by hand. The rule that
-  decides what a panel change may move is the pure `planPanelBackfill` (`case/panel-assignment.ts`):
-  unowned cases, and every PANEL-sourced case — whoever it currently names, since a PANEL-sourced row
-  belongs to whoever owns the panel now. Nothing else moves.
-  **The compare-and-set guards BOTH columns the rule read.** `CaseAssignExpectation.expectedSource`
-  carries the provenance the caller saw; without it an operator re-asserting the same assignee (which
-  makes the row theirs) would be overwritten by a backfill that still matched on the assignee alone.
-  A change of source alone is a real change, so an operator can claim a case the panel already placed.
-  **`POST /api/cases/bulk-assign` takes TWO body shapes, and the second names no case at all**
-  (MM-2, 2026-09-15). `{ assignee, caseIds[] }` is the work list's, where every row IS a case.
-  `{ assignee, measureId, subjectIds[] }` is the measure roster's: a roster CELL is an outcome
-  reference (`{ runId, outcomeId }`), not a case, so that page has no case id to send. The server
-  resolves them — the ACTIVE case for each subject in that ONE measure, in a single bounded read —
-  and everything after the resolution is the `caseIds` path unchanged: the same 500 cap, the same
-  assignable-account check, the same compare-and-set, the same `case_actions` and audit rows, the
-  same response shape. `measureId` is REQUIRED and single: a patient row spans every routed measure,
-  so "assign these patients" without one would mean six different pieces of work. Sending both shapes
-  at once is a 400 rather than a guess. A selection where nobody has an active case for that measure
-  answers `assigned: 0` in the success shape — the operator ticked real rows and pressed a real
-  button, and a caller must not parse two shapes to learn that nothing moved.
-- **An OPERATOR's `next_action` is not overwritten by a run that learned nothing new** (ADR-076 d2).
-  `cases.next_action_source` records who wrote it: `patchCase` is the operator surface (escalate,
-  manual resolve, outreach) and marks `OPERATOR`; `upsertFromOutcome` marks `SYSTEM`. **Rerun-to-verify
-  passes `SYSTEM` explicitly**, because the action it writes is `nextActionFor(...)` — the string a run
-  would compute — and freezing that would pin a multi-rate case to the rate it missed the day it was
-  reverified. Any caller computing an action the way a run does must say so the same way.
-  While the outcome status is re-confirmed unchanged, an OPERATOR action stands and the disposition is
-  `UNCHANGED` — the persisted row did not change, so there is no state change to audit. The moment the
-  status moves, the computed action takes over and ownership reverts to `SYSTEM`, because an
-  instruction written about being OVERDUE is stale once CQL says something else. Wording-table edits
-  and a moved missed rate still reach every SYSTEM-owned case; the case page and roster cell show the
-  missed rate either way, since they read the outcome's evidence rather than `next_action`. The per-case audit is **best-effort at the run boundary**: it is written after the upsert
-  (the disposition is only known post-mutation), and a transient `audit_events` failure is caught and
-  logged as a run `WARN` rather than aborting the run — so an otherwise-complete run still finalizes
-  instead of being left stuck RUNNING / marked FAILED after the case was already mutated (mirrors the
-  `RUN_COMPLETED` best-effort write).
+`upsertFromOutcome` (both stores) applies the pure `planCaseUpsert` (`case/case-logic.ts`) to the current
+row, never a blanket `ON CONFLICT` status overwrite.
+- **IN_PROGRESS is preserved**; every open-case reader and count uses `ACTIVE_CASE_STATUSES`
+(`OPEN`+`IN_PROGRESS`). Deliberately `OPEN`-only (widening is an owner call): outreach-campaign targeting
+and the case on an MCP compliance answer.
+- **A human closure (`closed_by` set) is never reopened by a run**; only a system closure (auto-`RESOLVED`,
+or `EXCLUDED` whose waiver lapsed) reopens, and reopening a human one is an audited operator action. Its
+`current_outcome_status` is FROZEN at closure; CQL's current answer is read from `outcomes` on the winning
+run (`compliance/live-cell.ts`).
+- **`closed_by` decides who closed**, never `status`/`closed_reason`: `closureKindOf` = `NONE` | `STAFF`
+(any person's closure: `MANUAL_RESOLVE`->`CLOSED`, rerun-to-verify->`RESOLVED`/`EXCLUDED`) | `SYSTEM`.
+`CaseQuery.closure` also requires a terminal status (`closed_by IS NULL` matches every OPEN row).
+- **Out-of-population never opens a case (ADR-078):** the outcome persists as MISSING_DATA;
+`planCaseUpsert` no-ops, or closes an active case `RESOLVED`, `closed_reason='OUT_OF_POPULATION'`,
+`closed_by=NULL` (audited `CASE_RESOLVED`). In-population MISSING_DATA opens one.
+- **Dispositions** (`UpsertedCase`): `CREATED|UPDATED|REOPENED|RESOLVED|EXCLUDED|UNCHANGED`; each but
+`UNCHANGED` emits its `CASE_*` event. A re-confirm whose persisted `next_action` string changed (new
+missed rate, wording-table edit, NULL legacy value) is `UPDATED`, payload `nextAction`.
+- **`next_action_source` (ADR-076 d2):** `patchCase` writes `OPERATOR`; `upsertFromOutcome` and
+rerun-to-verify (any caller computing a run's action) write `SYSTEM`. An OPERATOR action stands while the
+status is re-confirmed (`UNCHANGED`); a status change restores the computed action and `SYSTEM`.
+- **Panel assignment on INSERT only (ADR-080 d2):** `UpsertCaseInput.panelAssignee` sets `assignee` +
+`assignment_source='PANEL'` on insert; UPDATE/REOPEN never touch them. Source = `PANEL` | `OPERATOR`
+(`patchCase({assignee})`, `assignCases(…, source)`) | NULL (with an assignee = operator-owned; cleared
+with the assignee). `planPanelBackfill` moves only unowned and PANEL cases; its compare-and-set checks
+assignee and `expectedSource`.
+- **`POST /api/cases/bulk-assign`:** `{ assignee, caseIds[] }` or `{ assignee, measureId, subjectIds[] }`,
+resolved in one bounded read to each subject's ACTIVE case in that ONE measure, then the `caseIds` path
+unchanged (500 cap included). `measureId` is required and single; both shapes = 400; nothing found =
+`assigned: 0` in the success shape.
 
-  > **So "every state change writes an `audit_event`" is the RULE, and it is not everywhere true
-  > today (#598).** CLAUDE.md stated it with "no exceptions", and the exceptions were discoverable
-  > only by reading the source — which is the shape of claim this file exists to stop.
-  >
-  > **This correction was itself too broad on its first cut** (Codex review), which is worth recording
-  > because it is the same failure one level up: it said "operator actions audit first and cannot lose
-  > the event", true of CASE actions and false of several other operator surfaces. The list below came
-  > from a sweep for the mutate-before-audit shape rather than from memory.
-  >
-  > **THE RULE FOR NEW CODE: audit before you mutate.** The ledger errs toward an over-claim — an
-  > event for a change that then failed to commit — rather than toward a silent state change. That is
-  > the side the hard rule picks (it constrains missing entries, and says nothing about extra ones),
-  > and the side every case action takes: `recordCaseEvent` makes the action row and the audit row one
-  > transaction, and the patch follows.
-  >
-  > **Verified and flipped (2026-09-21, owner decision on #598):** measure approve, deprecate and the
-  > explicit status transition; terminology-mapping create; value-set attach and detach; `grantWaiver`
-  > and `scheduleAppointment`; and — with a one-field seam change each — **`createMeasure`**, **segment
-  > create, update and delete**, and **`uploadEvidence`**. Every one could flip for the same reason:
-  > the value the event keys on is minted caller-side rather than by the insert. `CreateMeasureInput`,
-  > `CreateSegmentInput` and `InsertEvidenceInput` now ACCEPT that value (optional, minted by the store
-  > when absent, so every other caller is unchanged), which is the change that made a reorder possible.
-  > **`uploadEvidence` audits before the BUCKET write too** — an object in storage the ledger never
-  > mentions is harder to notice than a missing row.
-  >
-  > **And that over-claim reaches an OPERATOR surface, not only the ledger** (review of #612). The case
-  > timeline is `audit_events WHERE ref_case_id = ?`, so a failed bucket write or a failed insert now
-  > leaves a permanent "Evidence uploaded — <filename>" row on case detail with nothing in
-  > `listEvidence` and nothing to download. The rule picks the over-claim side for the LEDGER; whether
-  > a clinical-ops read surface should inherit it for a named file is a different question, and an
-  > owner one. Recorded rather than assumed, because the code comment argues only the storage side. Segment UPDATE needed three writes moved rather
-  > than one (`updateSegment`, `setMeasures`, `setOverrides`), and its 404 became an explicit pre-read:
-  > `updateSegment` returning null WAS the not-found signal, which is what made the old order
-  > unavoidable.
-  >
-  > **`src/audit/audit-order.test.ts` is what holds this**, and it exists because nothing did: every
-  > other test asserts the event EXISTS after a SUCCEEDING operation, which is equally true in either
-  > order, so a reorder back was silent. Each case makes the MUTATION fail and requires the event
-  > anyway — the only externally visible difference between the two orders. A new audit-first path
-  > belongs in it.
-  >
-  > **Still mutate-first, with the reason at each call site:**
-  > - the **run-created case transition** and the **import-driven finalize** (`routes/runs.ts`) —
-  >   **deliberate and the same pattern**: the event is best-effort at the run boundary, because the
-  >   alternative strands an otherwise-complete run after its rows were already written. A failed
-  >   write logs a run `WARN`;
-  > - **`dispatchOutreach`** — the only one whose ordering puts something OUTSIDE the system before the
-  >   ledger: `channel.send()` dispatches the message, and the event payload is built from the delivery
-  >   result (`status`, `messageId`, `provider`, `sentAt`), so there is nothing to record beforehand and
-  >   nothing to retract afterwards. It needs ADR-073 d4's **intent-then-completion pair**, which adds
-  >   an event type consumers read — an owner decision, not a reorder;
-  > - the three **identity-link** writes — and the reason is sharper than "the store mints the id":
-  >   `upsertLink` returns the EXISTING row's id on conflict, so a caller-minted id is not the id the
-  >   event would name. Keying these events on the PAIR — which IS known beforehand — would work, and
-  >   changes what `entity_id` means for a consumer;
-  > - **`backfill-scale`**, **`backfill-quality-history`** and **`backfill-trend-history`** — one-shot
-  >   seeding tools rather than operator surfaces, each writing a run and its rows before a single
-  >   completion event. Left as they are on purpose, and said here so the sweep's output does not read
-  >   as untriaged. (`backfill-trend-history` was listed under "not a violation" one revision of this
-  >   paragraph ago, on the strength of its two READ hits; it has two WRITE hits as well.)
-  > - **`recover-stuck-runs`** — `failStuckRuns` flips RUNNING→FAILED before `RUN_RECOVERED`. Same
-  >   class as the run boundary above and for the same reason: the sweep exists so a stuck run does not
-  >   stay visible as RUNNING, and losing the sweep to a failed audit write would defeat it.
-  > - **`resolve-valuesets`** (the CLI) — `upsertResolvedValueSet` before its audit, twice. A
-  >   build-time tool, not a served surface.
-  > - **`batch-evaluate-scale`** — `finalizeRun` before `SCALE_EVALUATED`, best-effort with a `WARN`,
-  >   and the comment at the call site says so: the run is already COMPLETED, so aborting would strand
-  >   every remaining measure unfinalized. The run-boundary class again.
-  >
-  > **Checked and NOT violations** — every one a hit the matcher produced for a read, a pure
-  > computation, or a DIFFERENT write's audit: `audit-packet` (`sha256Hex`), `materialize-run` (a read),
-  > `evidence-service`'s download (`arrayBuffer`), `measure-seed` (`repairHypertensionSeedRow`, itself
-  > audit-first), `subject-lists` create (its audit is a `beforeComplete` callback that runs before the
-  > list becomes visible), and **panel assignment**, which audits before `upsertPanelAssignment` AND
-  > records each per-case event before `assignCases` — the mapping-then-consequences order is by design.
-  >
-  > Two whole FILES are artifacts and always will be: `stores/postgres/case-event-store-postgres.ts`
-  > (the audit writer itself — its own `pool.query` calls match against its own audit statement) and
-  > `stores/store-contract.ts` (the test that drives them).
-  >
-  > **Every hit the sweep reports is accounted for above, and that is NOT the same as #598 being
-  > closed.** What remains is the missing PRIMITIVE (below) plus the two decisions above.
-  >
-  > **Two things a re-run will show that are NOT new work.** `outcome-compaction`'s hit is the
-  > COMPLETION event of ADR-073 d4's intent/completion pair — the intent is written before the delete,
-  > which is the rule satisfied rather than broken. And `routes/segments.ts` still reports three hits
-  > for the PUT's writes, matched against the DELETE's audit further down the file and attributed to a
-  > local helper: that route is audit-first, and those are matcher artifacts.
-  >
-  > `backend-ts/scripts/audit-order-sweep.py` lists every `await` preceding an audit write; re-run it
-  > and **keep this list in step with the code in the SAME change**.
-  >
-  > **CHECK THE COUNT, NOT THE LABELS.** On 2026-09-21 the sweep reports **55 hits across 20 files**,
-  > and every file above is one of those 20. This paragraph has claimed completeness three times and
-  > been wrong three times: first by implying an inventory it did not have; then by filing two of
-  > `backfill-trend-history`'s four hits under "reads" because the other two were; then by leaving
-  > `batch-evaluate-scale` out altogether while listing its two siblings. Each time the prose was
-  > plausible and the arithmetic was not done. `python scripts/audit-order-sweep.py | sed 's/:.*//' |
-  > sort -u` is the check, and it takes a second.
-  >
-  > Two things the corrections taught, both worth keeping:
-  > - **A function can be on BOTH sides.** `rerunToVerify` records its action audit-first and then
-  >   writes `CASE_RESOLVED` after the patch. A per-path binary list cannot express that, which is why
-  >   the rule above is stated per WRITE rather than per function.
-  > - **A sweep is worth exactly its matcher.** The first one used a verb whitelist and missed
-  >   `valueSets.link`/`unlink` entirely; it also attributed the identity writes to a local helper
-  >   named `audit`, so they read as false positives until opened. Both were caught in review, not by
-  >   the tool.
-  >
-  > **What is missing is the primitive, not the ordering** (for the run; for the others the ordering
-  > is missing too)**.** There is no `applyCaseAction({ patch,
-  > action, audit })` making all three one unit, and there cannot be one inside a single store: the
-  > action and audit rows belong to `CaseEventStore` (which already opens its own `BEGIN`/`COMMIT`)
-  > while the patch belongs to `CaseStore`, so a real fix needs a transaction seam spanning both.
-  > Until that exists, **do not build operational reliance on the ledger being complete for
-  > run-created transitions.** A reconciliation job is not a substitute: without durable operation
-  > identity, an expected version, a deadline and a visible failure state it is a second unreliable
-  > thing checking the first.
+### Audit ordering (#598, open)
+- **New code audits BEFORE it mutates**; the ledger errs toward an over-claim, never a silent change.
+`audit/audit-order.test.ts` holds it (the mutation fails; the event is still required); add new
+audit-first paths there. `backend-ts/scripts/audit-order-sweep.py` lists every `await` before an audit
+write; keep the list below in step with it in the SAME change.
+- **Mutate-first exceptions:** the run-created case transition, import-driven finalize (`routes/runs.ts`),
+`recover-stuck-runs`, `batch-evaluate-scale` — run-boundary best-effort (`WARN`), so a finished run is
+never stranded. `dispatchOutreach` — the payload is `channel.send()`'s result; needs ADR-073 d4's
+intent/completion pair (owner call). The three identity-link writes — `upsertLink` returns the existing id
+on conflict (owner call). `backfill-scale`, `backfill-quality-history`, `backfill-trend-history` —
+one-shot seeding. `resolve-valuesets` — build-time CLI. `rerunToVerify` — action audit-first,
+`CASE_RESOLVED` after the patch.
+- **Missing primitive:** no cross-store `applyCaseAction({ patch, action, audit })` (`CaseEventStore` +
+`CaseStore`). Until it exists, do not rely on the ledger being complete for run-created transitions; a
+reconciliation job is no substitute.
 
-### The work list is READ two ways, and they must answer the same question (#561, ADR-084)
-
-`/api/cases` takes ONE page and the exact total from a single statement (`CaseStore.listCasesPage`,
-rows plus `COUNT(*) OVER ()`), where every active filter has a SQL form. **One statement covers every
-page that has rows** — which is every page a client renders; an EMPTY page carries no window value and
-pays a second bounded `COUNT(*)`, because empty is not the same as "total zero" (it is also every page
-past the end of a non-empty set, and answering 0 there would tell a client on the last page that the
-set had vanished). Only that second statement can disagree with its page under concurrent writes. The four predicates that moved
-into SQL are the per-measure current cycle (`cycles` + `cyclesFallbackPeriod`), the frozen `outcome`,
-whether the case has an `OUTREACH_SENT` action (`outreach`), and the created-at day window
-(`createdFrom`/`createdTo`, UTC day, inclusive at both ends on both stores).
-
-**Three filters stay in memory because the database cannot see what they filter on**: `site`, `search`
-and a panel selection above `PANEL_PREFILTER_MAX_IDS`, all of which read the in-memory directory —
-there is no patients table to join (ADR-075). The staff-closed list stays too, for a different reason:
-its outcome filter reads what CQL says TODAY per row and its three header counts describe the whole
-list, so it needs the full set by construction. Where any of these is active the uncapped pipeline runs
-and the answer is identical, slower. `sqlPageBlockedBy` names WHICH one blocked, because a fast path
-that silently stops being taken is indistinguishable from one that was never wired up.
-
-**Both loaders remain in the code, so a conformance test runs them over one fixture** and requires
-identical totals and identical page ids across every filter combination and several page positions,
-with the SQL path asserted to have actually run. A predicate added to one and not the other is
-otherwise a filter that applies to the dashboard badge and not to the export taken from the same
-screen, and nothing would fail.
-
-**On a scoped deployment profile the SQL path rests on an INVARIANT, and the invariant is checked.**
-`profileMatch` hides any subject the directory does not hold and has no SQL form, so a total computed
-in SQL is exact only while every case subject is in the directory. That holds on the pilot by
-construction — a deterministic corpus, and an import that refuses identifiers outside its namespace
-(ADR-082) — and is nonetheless established from the data (`CaseStore.distinctCaseSubjectIds`, bounded
-by subjects rather than by cases), once per process and again after every run. A violation disables the
-fast path with a log line rather than serving a total that counts people no page can show.
-
-**`/api/worklist/patients` keeps the uncapped pipeline** — it groups every row — and is recorded as
-measured performance debt, not as "later".
+### The work list is read two ways; both must agree (ADR-084)
+`/api/cases` takes page + exact total in one statement (`CaseStore.listCasesPage`, `COUNT(*) OVER ()`)
+when every filter has a SQL form (current cycle, frozen `outcome`, `outreach`, `createdFrom`/`createdTo`).
+`site`, `search`, a panel above `PANEL_PREFILTER_MAX_IDS` (in-memory directory) and the staff-closed list
+take the uncapped pipeline; `sqlPageBlockedBy` names the blocker. A conformance test requires identical
+totals and page ids from both loaders. On a scoped profile `CaseStore.distinctCaseSubjectIds` checks every
+case subject is in the directory; a violation disables the fast path.
 
 ### Resolution is not segment-gated; cycle rollover is closed out
-- **Resolution is never blocked by segment applicability.** The run pipeline gates case *creation* by
-  `isApplicable`, but two **close-only** bypasses run the upsert even out-of-cohort so a subject who
-  left a cohort still has their open case resolved: (1) **COMPLIANT** — a `planCaseUpsert` no-op when no
-  case exists, so always safe; (2) **EXCLUDED** — but only when an active case already exists for that
-  `(subject, measure, period)` (a run-start snapshot of active cases keys this check), so a fresh waiver
-  excuses an existing open case. EXCLUDED with *no* existing case stays applicability-gated (it would
-  otherwise *insert* a new EXCLUDED case, re-polluting the excluded lists the gate keeps clear). Every
-  non-compliant (case-creating) outcome stays gated.
-- **Strictly-older-cycle cases are closed out at run finish.** After a population run's evaluation
-  loop, any OPEN/`IN_PROGRESS` case for a `(subject, measure)` the run evaluated whose `evaluation_period`
-  is **strictly older** than the run's own compliance cycle is closed with `status='RESOLVED'`,
-  `closed_reason='CYCLE_ROLLED_OVER'`, `closed_by=NULL` (a **system** closure), and an audited
-  `CASE_RESOLVED` event. Comparing cycle *order* (not mere inequality) means a backdated/historical rerun
-  never resolves today's actionable case. This prevents a cycle rollover from orphaning the prior
-  period's OPEN case (surfaced by `?status=open`, campaigns with no period filter, CSV exports, MCP
-  `list_noncompliant`). Best-effort (a read/audit failure logs a WARN, never aborts the run); scoped to
-  the subjects the run actually evaluated (a SITE/EMPLOYEE run never touches out-of-scope cases).
-  Display/routing only — CQL `Outcome Status` stays authoritative (ADR-008).
+- `isApplicable` gates creation only. Out-of-cohort close-only upserts: COMPLIANT, and EXCLUDED only where
+an active case exists (run-start snapshot).
+- After a population run, OPEN/`IN_PROGRESS` cases of an evaluated `(subject, measure)` in a strictly
+OLDER cycle (order, not inequality) close `RESOLVED`, `closed_reason='CYCLE_ROLLED_OVER'`,
+`closed_by=NULL`, audited `CASE_RESOLVED`; best-effort. CQL `Outcome Status` stays authoritative.
 
 ## 5) `evidence_json` Contract (authoritative)
+Official measures score the evaluation date's calendar year, authored ones a rolling window; on a mixed
+run only `evidence_json.official.measurementPeriod` names an official outcome's year (ADR-072).
 
-> **The run-level period and the outcome-level period are different things (ADR-072).** An officially
-> routed measure is scored over the **calendar year** containing the evaluation date — recorded on the
-> run row (`measurementPeriodStart`/`End`) and inside `evidence_json.official` — while an authored
-> measure keeps its rolling registry window. A run mixing both keeps the authored behaviour rather than
-> re-scoping half of itself, so `evidence_json.official.measurementPeriod` is the only place that states
-> which year a given official outcome actually describes; do not infer it from the run row on a mixed run.
-
-### Canonical shape (what a consumer sees on read surfaces)
+### Canonical shape (read surfaces)
 ```json
 {
   "expressionResults": [
@@ -317,76 +88,36 @@ measured performance debt, not as "later".
     { "define": "Outcome Status", "result": "OVERDUE" }
   ],
   "why_flagged": {
-    "last_exam_date": "2025-03-10",
-    "compliance_window_days": 365,
-    "days_overdue": 55,
-    "role_eligible": true,
-    "site_eligible": true,
-    "waiver_status": "NONE",
-    "outcome_status": "OVERDUE"
+    "last_exam_date": "2025-03-10", "compliance_window_days": 365, "days_overdue": 55,
+    "role_eligible": true, "site_eligible": true, "waiver_status": "NONE", "outcome_status": "OVERDUE"
   }
 }
 ```
-
-- `expressionResults`: raw define outputs from the CQL engine used for traceability.
-- `why_flagged`: derived/explainer fields used by UI for readable case diagnostics.
-
-> **`why_flagged` is DERIVED AT READ TIME, not persisted (#463).** The persisted `evidence_json` carries
-> **`expressionResults`** — plus **`official`** when the measure is official-routed (load-bearing:
-> MeasureReport/QRDA read `evidence_json.official.populationResults`, ADR-031/046; a MULTI-RATE measure
-> also carries `official.rates`, one population array per group, and a STRATIFIED one `official.strata`,
-> one array per group of `{ id, code, result, appliesResult }` keyed by the artifact's
-> `Measure.group.stratifier.id` — ADR-074; both absent for every single-rate, unstratified measure so
-> their evidence is byte-identical. On an official outcome `expressionResults` is the POPULATION
-> membership, named `official:<population>` for a single-rate measure and `official:<Rate label>:<population>`
-> for a multi-rate one — every rate, under the reviewed `rateLabels` of its semantics entry (ADR-074 d13))
-> and **`qrda1Import`** when the outcome arrived through the QRDA-I
-> import path (ADR-051/056 — finalize refuses a run unless every outcome carries it). On an evaluation
-> failure the normal evidence is **replaced** by `{ evaluationError, message }` with status forced to
-> `MISSING_DATA` (`backend-ts/src/run/run-pipeline.ts`; the import path additionally retains its
-> `qrda1Import` provenance). `why_flagged` is computed on read by `deriveWhyFlagged`
-> (`backend-ts/src/case/case-detail-read-model.ts`) from the expression results and measure config.
-> The canonical shape above is the *logical* contract a consumer sees on read surfaces (case detail,
-> exports, MCP tools), not the stored bytes.
-
-If evaluation fails for one subject, `evidence_json` includes:
-```json
-{ "evaluationError": "CQL engine failure", "message": "<error text>" }
-```
-with status forced to `MISSING_DATA`.
+- `why_flagged` is **derived at read time** (`deriveWhyFlagged`, `case/case-detail-read-model.ts`), never
+persisted.
+- **Persisted:** `expressionResults` (raw defines; on an official outcome, population membership
+`official:<population>` or multi-rate `official:<Rate label>:<population>`); `official` when
+official-routed (`populationResults`, read by MeasureReport/QRDA; multi-rate adds `rates`, stratified adds
+`strata` of `{ id, code, result, appliesResult }` keyed by `Measure.group.stratifier.id`, both otherwise
+absent); `qrda1Import` on QRDA-I imports (finalize requires it on every outcome).
+- **Evaluation failure** replaces the evidence with `{ "evaluationError": "CQL engine failure",
+"message": "<error text>" }` and forces `MISSING_DATA` (`run/run-pipeline.ts`); imports keep `qrda1Import`.
 
 ## 6) CSV Export Contracts
 
-> §6.6 (the attributed list's report) and §6.7 (`?listId=` on the filtered surfaces) were APPENDED
-> 2026-09-16 (ADR-082). Neither changes a column in §6.1–§6.5.
-
 ### 6.1 `GET /api/exports/runs?format=csv`
-Supports filters: `status`, `scopeType`, `triggerType`, `site`, `from`/`to`, and `limit`.
-
-> **Added 2026-09-21 (#601).** It previously took none, and the screen's Export button sent none — so
-> a history narrowed to FAILED runs at one site last week exported the most recent 200 runs of
-> everything, with no error. The six are exactly `/api/runs`'s, applied through the same predicate
-> (`matchesRunFilters`) over the same candidate read (`runCandidates`), because two surfaces
-> answering one question must scan one set: unbounded here against a 1,000-row cap there would
-> export rows the screen never showed. `from`/`to` compare `startedAt` by UTC day and are validated
-> by the shared calendar-day guard, so a malformed value is a 400 naming the parameter rather than a
-> lexicographic filter. **`limit` defaults to 200 and applies AFTER filtering** — it used to cap the
-> READ, which made any matching run outside the newest 200 unreachable under every filter; it is
-> bounded at 10,000.
+Filters `status`, `scopeType`, `triggerType`, `site`, `from`/`to`, `limit`: `/api/runs`'s
+(`matchesRunFilters`). `from`/`to` = `startedAt` UTC day, malformed = 400. `limit` default 200, max
+10,000, applied after filtering.
 
 Columns:
 `runId, measureName, measureVersion, scopeType, triggerType, status, startedAt, completedAt, durationMs, totalEvaluated, compliant, dueSoon, overdue, missingData, excluded, passRate, dataFreshAsOf, notInPopulation`
 
-> **`notInPopulation` was APPENDED (ADR-079, 2026-09-10)**, never inserted, so a consumer reading by
-> position keeps every column it had. It is the subset of `missingData` whose subjects the measure's
-> own logic put OUTSIDE its initial population — 0 for an authored measure and for any run written
-> before the `outcomes.out_of_population` column existed. `missingData` still counts every persisted
-> MISSING_DATA row, and `passRate` is still `compliant / totalEvaluated`: both state what the RUN
-> wrote. The rate that describes a POPULATION is the programs overview's, and that one drops these
-> subjects from its denominator — which is what `notInPopulation` lets a reader reconcile.
+`notInPopulation` was appended, never inserted (ADR-079): the `missingData` subset outside the initial
+population; `missingData`/`passRate` unchanged.
 
 ### 6.2 `GET /api/exports/outcomes?format=csv&runId={optional}`
-Supports filters: `runId`, `site`, `providerId`, `ageBand`, `sex`, `payer`.
+Filters: `runId`, `site`, `providerId`, `ageBand`, `sex`, `payer`.
 
 Columns:
 `outcomeId, runId, employeeExternalId, employeeName, role, site, measureName, measureVersion, evaluationPeriod, status, lastExamDate, complianceWindowDays, daysOverdue, roleEligible, siteEligible, waiverStatus, evaluatedAt, providerId, payer`
@@ -395,309 +126,84 @@ Columns:
 Columns:
 `caseId, employeeExternalId, employeeName, role, site, measureName, measureVersion, evaluationPeriod, status, priority, assignee, currentOutcomeStatus, nextAction, lastRunId, createdAt, updatedAt, closedAt, latestOutreachDeliveryStatus, providerId, payer, closedReason, closedBy, liveState, liveOutcomeStatus, liveOutcomeRunId`
 
-Supports filters: `status`, `measureId`, `priority`, `assignee`, `site`, `caseIds`, `providerId`,
-`ageBand`, `sex`, `payer`, `from`/`to`, `outcome`, `search`, `period`.
+Filters: `status`, `measureId`, `priority`, `assignee`, `site`, `caseIds`, `providerId`, `ageBand`,
+`sex`, `payer`, `from`/`to`, `outcome`, `search`, `period`. **The export returns exactly the rows of the
+work-list screen it came from** (one `caseFilterParams` set; tests compare query strings and result sets).
+- `from`/`to`: `created_at` UTC day, inclusive, `/api/cases`'s validator (`routes/query-dates.ts`; 400).
+- `outcome`: folded like `/api/cases`; the frozen `current_outcome_status`, except on `staff_closed`, where
+it filters today's CQL answer. Both compare the display status, not the canonical bucket (`shownStatusFor`).
+- `search` (`matchesCaseSearch`) and `site` (EXACT, `siteMatches`) filter the directory after an unbounded
+store read.
+- `period`: `current` = each measure's current cycle; any other value = a literal period; **blank = ALL
+HISTORY here**, `current` on the work list (`wantsCurrentCycle`). Explicit `current` applies on every status.
+- `status` (`worklistQueryFor`): blank or `all` = every row here, the ACTIVE set on the work list;
+`staff_closed` = terminal with `closed_by` set.
+- `providerId`, `payer` were appended, never inserted (also §6.2): directory facts, empty where unrecorded
+(WebChart Coverage: #591); `payer` is a Source of Payment Typology code.
+- `closedReason`, `closedBy`, `liveState`, `liveOutcomeStatus`, `liveOutcomeRunId` were appended, never
+inserted (ADR-083). `live*` only on person-closed rows (else empty); not evaluated = `UNKNOWN`; a winning
+run describing another `evaluationPeriod` = `UNKNOWN`/`UNKNOWN`, run id filled. `liveState`
+(`GAP|CLEAR|UNKNOWN`) is the reconciliation column (out-of-population is not a gap).
+- `latestOutreachDeliveryStatus`: `deliveryStatus` of the newest `OUTREACH_DELIVERY_UPDATED`/`OUTREACH_SENT`
+action (empty if none, never an older one), read in one batch.
 
-> **The last four were added 2026-09-20, and the reason is the contract.** This export is reached
-> from the work list's own button with the filters that list is showing. The **button sent three** of
-> the nine and the **endpoint understood six**, so a CSV taken from a list narrowed by a created-at
-> window, an outcome or a search was a WIDER file than the screen it came from, under a heading that
-> said otherwise, with no error to notice — the reporting-integrity half of the `?status=open` defect
-> above. `from`/`to` are the
-> `created_at` UTC-day window, inclusive at both ends, validated by the SAME predicate `/api/cases`
-> uses (`routes/query-dates.ts`) so a malformed value is a 400 naming the parameter on both surfaces
-> rather than a lexicographic filter on garbage. `outcome` is the frozen `current_outcome_status`,
-> folded exactly as `/api/cases` folds it (upper-cased, separators to `_`), so `?outcome=due-soon`
-> means the same thing on both. `search` is a directory join over subject name, measure name and
-> subject id, applied with the work list's own predicate (`matchesCaseSearch`) rather than a second
-> copy of the field list. **The screen builds ONE parameter set for the list, its paging and the
-> export** (`caseFilterParams`, `cases/page.tsx`), and a frontend test compares the two query
-> strings, so a filter added to one and not the other fails without the test being edited.
->
-> `search` is NOT on `CaseQuery`: like `site`, it reads the in-memory directory, so it is applied
-> after the store read and does not take the SQL fast path (§"The work list is READ two ways").
-> **Because those filters run after the read, the export's candidate read is UNBOUNDED** — the same
-> `Number.MAX_SAFE_INTEGER` the work list uses for them. It was `100000`, which truncated the
-> candidate set before the predicate that decides which rows the caller asked for: above that a
-> searched subject visible on screen would be missing from the file taken off it, possibly leaving a
-> header-only CSV. A cap that only bites once a deployment outgrows it fails quietly and later, and
-> it protected nothing the list is not already exposed to at the same scale on the same table.
+**Subject headers** (§6.2/§6.3, `subjectHeaders`): a patient deployment (`WORKWELL_INSTANCE=maui`,
+`subjectTerm === "patient"`) names the subject columns `patientExternalId`/`patientName`, and in §6.2
+`lastExamDate`/`waiverStatus` as `lastResultDate`/`exclusionStatus`; nothing else changes (`role`,
+`roleEligible`, `siteEligible` stay).
 
-> **`outcome` is the frozen column on every list EXCEPT the staff-closed one, where it is what CQL
-> says today.** The work list resolves the live answer for staff closures and filters on THAT
-> (§4: `current_outcome_status` froze when the person closed the case), so handing the same token to
-> the store here omitted a row the screen showed and carried one it did not — and the carried row
-> contradicted its own `liveOutcomeStatus` cell. On `?status=staff_closed` the token is therefore
-> withheld from the store and applied after the live pass the export already runs for those rows, so
-> it costs nothing extra; on every other list the frozen column IS live (a run refreshes an active
-> row and wrote a system-closed one) and the SQL predicate stands. Both surfaces compare through one
-> function, `shownStatusFor` → `liveOrFrozenStatus` (`case/worklist-read-model.ts`), which takes the
-> **display** status and not the canonical bucket the `liveOutcomeStatus` column carries — an
-> out-of-population row is canonical `MISSING_DATA` and displays as out-of-population, so the two
-> select different rows.
+**`payer` is a SET** (`?payer=1&payer=11` = `?payer=1,11`; OR within, AND across filters). Codes match
+exactly (`1` never matches `11`); grouping is opt-in (`payerCodesInGroup`); an unknown code matches nobody.
 
-> **`?period=` closes the last width difference, and the two surfaces differ only in what BLANK
-> means** (2026-09-21, #603). `current` restricts to each measure's current compliance cycle, exactly
-> as the work list's open and staff-closed lists mean it; any other non-blank value is a literal
-> evaluation period and reaches the store as one. **Blank or absent still means ALL HISTORY here** —
-> this endpoint is documented as all-history and something downstream may depend on it — while the
-> work list's blank still means `current`. Both call ONE rule, `wantsCurrentCycle`
-> (`case/worklist-read-model.ts`), which takes that default as an argument, the same shape
-> `worklistQueryFor` uses for `status`.
->
-> **It had to be a parameter rather than a shared default, because a server-side default appears in no
-> query string.** The frontend parity test compares the list's query string with the export's, so it
-> could not see this one: `?status=open` showed "0 cases loaded" while the Export button under it
-> downloaded a file containing a prior-cycle case, and the staff-closed tab — whose three header counts
-> describe the current cycle — exported every prior year's closures beside them. **The screen now
-> STATES its scope** (`caseFilterParams` sends `period=current` on the two tabs that have one), so the
-> strings match and the comparison covers it. A backend test additionally compares the two RESULT SETS
-> over one fixture holding a prior-cycle case, because a parameter comparison can only ever see
-> parameters.
->
-> **An explicit `period=current` is honoured on EVERY status; the status gate decides only what a
-> blank one means.** The first cut gated both, which made this endpoint answer two different things to
-> two spellings of one question — `?period=current` narrowed to the cycle while
-> `?period=current&status=all` returned all history, and here a blank status and `all` are the SAME
-> query (`worklistQueryFor` returns `{}` for both). A caller who names a period has said what they
-> want.
->
-> The screen still sends `period` only on its two cycle-scoped tabs, and now for a load-bearing reason
-> rather than a defensive one: sending it on the closed tab would genuinely narrow that tab. **It is
-> not a guard against the store** — `CaseQuery.period` treats `"all"` and `"current"` as no-ops on both
-> stores (and says so, for this exact reason), so forwarding the token would be harmless rather than
-> empty. An earlier version of this paragraph claimed the store would match nothing, which was false in
-> five places at once.
-
-> **`site` is compared EXACTLY on both surfaces** (#603). The work list compared exactly and this
-> export lower-cased both sides; before #602 the export's `site` was only reachable by hand-writing a
-> URL, so the difference was theoretical, and the button now sends it on every export. One predicate,
-> `siteMatches`, and exact is the side to standardise on: the control's options are built from the
-> directory's own strings, so an exact compare always matches what a user can pick, while folding case
-> would merge two real directory sites into a file served under a heading naming one of them.
-
-> **`closedReason`, `closedBy`, `liveState`, `liveOutcomeStatus` and `liveOutcomeRunId` were
-> APPENDED (#569, ADR-083)**, never inserted, so a consumer reading by position keeps every column it had — the same
-> rule `providerId`/`payer` and ADR-079's `notInPopulation` followed. The two `live*` columns are
-> populated **only for rows a PERSON closed** (`closed_by` non-NULL) and are the empty string on every
-> other row: an active row's `currentOutcomeStatus` IS live, and a system-closed row was closed by the
-> run that wrote it. A staff-closed row whose subject the winning run never evaluated carries the word
-> `UNKNOWN` rather than an empty cell, because empty means "not a staff closure" — "not evaluable" is
-> its own answer and must not read as "no longer a gap". `currentOutcomeStatus` keeps its meaning
-> exactly: what the last run that touched the row wrote, which for a staff-closed row is the value
-> frozen at closure (§4). **`liveState` is `GAP | CLEAR | UNKNOWN` and is the RECONCILIATION column**:
-> a consumer deriving "still a gap" from `liveOutcomeStatus` alone would apply the case-opening rule
-> and count an out-of-population row (canonical `MISSING_DATA`) as a gap, which the programs chip, the
-> staff-closed tab and the roster all do not — this column is the one those surfaces use.
->
-> **The three `live*` columns describe the ROW's own cycle, or they say `UNKNOWN`.** A winning run
-> describes the measurement year it scored, and this export applies no period filter at all (below),
-> so it carries more prior-cycle closures than any other surface. A closure whose `evaluationPeriod`
-> the winning run does not describe therefore reads `UNKNOWN`/`UNKNOWN` with the run id still filled —
-> never that run's answer, which would report a 2026 result against a 2024 closure and look exactly
-> like a correct one. The same equality governs the work list, the MCP tool and the roster overlay;
-> all four apply it through one function, because a rule spelled out per surface is a rule one surface
-> ends up without.
->
-> **`?status=` accepts `staff_closed`** — every terminal case a person closed (`CLOSED`, `RESOLVED` or
-> `EXCLUDED` with `closed_by` set). On this export it means ALL HISTORY: the export has no period
-> logic and the filter list above carries none, so unlike the work list's own `staff_closed` view it
-> is not scoped to the current compliance cycle. `status` is parsed by ONE function shared with the
-> work list and the MCP tool (`worklistQueryFor`), which takes the caller's default for a BLANK token
-> explicitly — this export's blank still means no status filter at all (every row), the work list's
-> still means the ACTIVE set.
-
-> **`latestOutreachDeliveryStatus` is resolved for the whole export in one pass, and the column is
-> unchanged (2026-09-13).** It is still the `deliveryStatus` of the newest `OUTREACH_DELIVERY_UPDATED`
-> / `OUTREACH_SENT` action, still empty where a case has none, and still in the same position. Only the
-> READ changed: `CaseEventStore.latestOutreachDeliveryStatuses(caseIds)` answers for a set, because the
-> per-case form issued one query per row — **~32,600 on the pilot** through a ten-connection pool — which
-> answered 504 at 60 s and held every connection while it ran, so every other database-backed endpoint
-> timed out for the minute the export took. A store contract test compares the batched answer with the
-> per-case one case by case, including the case where the newest action carries no `deliveryStatus`
-> (both return null, rather than an older status the case has moved on from).
->
-> **This export applies no status filter, and the row count is the whole `cases` table** (corrected
-> 2026-09-15). The pilot's 32,558 cases are 15,309 OPEN, 15,676 RESOLVED and 1,573 EXCLUDED; earlier
-> notes said "~15,300", which is the OPEN count and so the count of what `?status=open` would return,
-> not what this endpoint does. At the ceiling's `OUTREACH_STATUS_CHUNK = 10_000` the batched form is
-> therefore **four** statements on the pilot, not two. Measured after the deploy: 7.7 s cold, 6.5 s
-> warm for 10,654,867 bytes, and `/api/panels` stays at 0.26–0.68 s with three exports in flight.
-
-> **Subject headers follow the deployment profile.** On a patient deployment
-> (`WORKWELL_INSTANCE=maui`, `DEPLOYMENT_PROFILE.subjectTerm === "patient"`) the two subject columns in
-> §6.2 and §6.3 are named `patientExternalId` and `patientName`, and in §6.2 `lastExamDate` and
-> `waiverStatus` are named `lastResultDate` and `exclusionStatus`; column order and every other header
-> are unchanged, and the default profile keeps the names above byte-for-byte
-> (`backend-ts/src/export/export-csv.ts`, `subjectHeaders`). The remaining occupational columns
-> (`role`, `roleEligible`, `siteEligible`) are still emitted on a patient deployment; dropping them is a
-> contract change deferred until the pilot's export needs are known.
-
-> **`providerId` and `payer` were APPENDED to both CSVs (MM-2)**, never inserted, so a consumer
-> reading by position keeps every column it had — the same rule ADR-079's `notInPopulation` followed.
-> Both are DIRECTORY facts resolved at export time, so both are EMPTY on a deployment whose roster
-> records none: the occupational directory has never carried a payer, and the live WebChart directory
-> discards Coverage until the WebChart ingest work lands (**#591**; #533 closed 2026-09-08 with that half unshipped). `payer` is a Source of Payment Typology code, the
-> same vocabulary the measures' `SDE Payer` reads.
-
-> **The payer filter is a SET, and that is not cosmetic.** `?payer=` accepts a repeated parameter or a
-> comma list (`?payer=1&payer=11` and `?payer=1,11` are the same query), matching a subject whose code
-> equals ANY of them — OR within the filter, AND against the others. The typology is HIERARCHICAL:
-> `1` is Medicare and `11` is its managed-care child (Medicare Advantage), which on the pilot corpus is
-> 3,927 and 2,900 patients. A single-valued filter would let someone ask for Medicare, receive the
-> smaller set, and never learn the rest were withheld under a heading claiming to contain them. The
-> PREDICATE still compares exact codes — `1` never matches `11` — and grouping is something a caller
-> opts into by selecting several; `payerCodesInGroup`
-> (`backend-ts/src/engine/synthetic/payer-display.ts`) is what turns "Medicare" into the codes actually
-> present in the directory. Unlike `ageBand` and `sex`, payer terminology is OPEN: any non-empty token
-> is accepted and an unknown one matches nobody, because refusing it would mean refusing a real
-> Coverage code our display table has not been taught.
-
-> **The panel filters are DIRECTORY joins, not stored columns** (`compliance/subject-filters.ts`).
-> `providerId` matches `EmployeeProfile.providerId` — the PCP's external id (`maui-prov-012`), never a
-> display name. `ageBand` is one of `0-17 | 18-44 | 45-64 | 65+`, derived from `dateOfBirth` against
-> today's **UTC** date at query time, so a row's band can change between two exports taken either side
-> of a birthday. `sex` is `F | M` and matches nothing on a roster that records none (the occupational
-> directory), rather than matching everyone. An unrecognised token for `ageBand` or `sex` is a **400**
-> naming the accepted values — never a silently unfiltered export served under a heading that says
-> "65+". The same filters apply to the roster, the cases route and the MCP `list_noncompliant` tool,
-> through one predicate; column names and order are unchanged. **Whether ANY of them is active is
-> also one question** (`hasActiveSubjectFilters`): each of those four surfaces used to carry its own
-> copy of `providerId || ageBand || sex`, which silently skips the predicate for every filter added
-> afterwards — a guard that reads as present and cannot fire.
+**Panel filters are directory joins** (`compliance/subject-filters.ts`, one predicate on every surface;
+`hasActiveSubjectFilters`): `providerId` = the PCP's external id; `ageBand` `0-17|18-44|45-64|65+` from
+`dateOfBirth` vs today (UTC); `sex` `F|M`, matching nothing where unrecorded. A bad `ageBand`/`sex` is a
+**400** naming the accepted values.
 
 ### 6.4 `GET /api/audit-events/export?format=csv`
-Audit event export is append-only and includes event metadata + payload snapshot for timeline reconstruction.
+Append-only: event metadata + payload snapshot.
 
 ### 6.5 Outcome Retention Contract (ADR-073)
-
-**Inert unless `WORKWELL_OUTCOME_RETENTION_DAYS` is set**, and unset means OFF. **Maui ships 400 days
-since 2026-09-07** (ADR-076 d4), in the same commit as the Postgres keep-set index ADR-073 d1 required;
-TWH and every other deployment leave it unset, so their history stays whole. 400 days keeps a full
-measurement year plus a margin, and removes nothing on an instance younger than that. Where it is set,
-one pass runs after each nightly recompute — after that run's quality snapshot, never before — and the
-`OUTCOMES_COMPACTION_STARTED` intent event is written BEFORE the delete and the `OUTCOMES_COMPACTED`
-completion event after it, so nothing is deleted without a ledger entry (ADR-073 d4).
-
-**Never deleted, at any age (ADR-073, amended by ADR-077 d3):**
-- the newest USABLE `outcomes` row per `(subject_id, measure_id, evaluation_period)` — from a
-  COMPLETED or PARTIAL_FAILURE run and not an evaluation error — AND the newest row regardless. Two keep
-  sets: a FAILED rerun or an engine failure never evicts the last finalized answer, and a key with no
-  usable row still keeps its newest so no roster cell goes blank. Per PERIOD, so a closed measurement
-  year's evidence is not swept away by the first run of the next one;
-- every row of a run that is still QUEUED/RUNNING/REQUESTED — an in-flight run is never compacted;
-- every row any case cites, matched on `(run_id, subject_id, measure_id)` — open or closed;
-- every `runs` row and its counts — a compacted run still reports what it found.
-
-**Deleted:** every other `outcomes` row with `evaluated_at` before the cutoff — the superseded
-intermediate history. **The only deletion path is `compactOutcomes`**, which awaits the
-`OUTCOMES_COMPACTION_STARTED` intent event before deleting; that event is the completeness evidence
-below.
-
-**What a consumer sees after the window.** §6.2's outcomes CSV for a run older than the window returns
-the SURVIVING rows, not an error and not a padded set; the run-detail read model carries a
-`retentionNotice` saying so, because a lower count would otherwise read as a smaller run.
-**MeasureReport (every variant), QRDA I and QRDA III answer 409 `run_compacted`** for a run that
-started before the furthest cutoff any compaction pass has applied (ADR-077 d2): a score computed over a keep set is a
-different number wearing the run's identity, so none is built. The evidence for that refusal is the
-intent event, never the run's own counts — `totalEvaluated` is a count of the surviving rows, so
-comparing it with the surviving rows is circular. Long-run history is the quality-over-time snapshot
-store, which compaction never touches. `evidence_json` for a deleted row is gone with it — a case's own
-evidence is preserved by the `last_run_id` pin.
+Inert unless `WORKWELL_OUTCOME_RETENTION_DAYS` is set. Runs after each nightly recompute and its quality
+snapshot; `compactOutcomes` is the only delete path, with `OUTCOMES_COMPACTION_STARTED` before the delete
+and `OUTCOMES_COMPACTED` after.
+**Never deleted (ADR-077 d3):** per `(subject_id, measure_id, evaluation_period)` the newest USABLE row
+(COMPLETED/PARTIAL_FAILURE run, no evaluation error) AND the newest row; rows of QUEUED/RUNNING/REQUESTED
+runs; rows any case cites (`run_id, subject_id, measure_id`); every `runs` row and its counts. Every other
+row with `evaluated_at` before the cutoff is deleted.
+§6.2 then returns the surviving rows (run detail shows a `retentionNotice`); MeasureReport, QRDA I and
+QRDA III answer **409 `run_compacted`** for a run started before the furthest applied cutoff, judged by the
+intent event, never the run's counts. The quality-over-time snapshot store is never compacted.
 
 ### 6.6 `GET /api/subject-lists/{id}/report?measurementYear=YYYY&format=csv` (ADR-082)
-
-The ACO's attributed list, scored for one measurement year, with the patient-level evidence. Columns:
+Columns (pinned by a test; subject pair per `subjectHeaders`, TWH `employeeExternalId`/`employeeName`):
 
 `listId, listRevision, generatedAt, rawIdentifier, patientExternalId, patientName, resolution,
 rowStatus, measureId, ecqmId, measureVersion, runId, measurementPeriodStart, measurementPeriodEnd,
 evaluatedAt, rate, initialPopulation, denominator, denominatorExclusion, denominatorException,
 numerator, status, outOfPopulation, evaluationError, providerId, payer`
 
-The two subject columns follow `subjectHeaders(DEPLOYMENT_PROFILE.subjectTerm)` exactly as §6.2/§6.3
-do (the list above is the patient-deployment spelling; TWH emits `employeeExternalId`,
-`employeeName`). **The header is pinned by a test**, because the ACO's tooling reads it by name and a
-renamed or inserted column surfaces downstream as wrong numbers rather than as an error.
-
-> **`measurementYear` is REQUIRED and has no default.** An officially routed run is scored over the
-> calendar year containing its evaluation date (ADR-072), so "the latest numbers" would answer a
-> PY2027 question with PY2028's first nightly the moment January arrives — and would look exactly like
-> a correct answer. The run chosen per measure is the newest reportable whole-population run whose own
-> **measurement period** is that year, selected through
-> `RunStore.listPopulationRunsForPeriod` — never by when the run STARTED. A manual run takes an
-> arbitrary `evaluationDate`, so a rerun-to-verify of a closed year begins in the following one and
-> legitimately scores the closed one; a start-date filter drops it and the report then answers "no run
-> for this year" with that run sitting in the table.
-
-**Three row shapes, and the two non-evaluated ones are contract, not convenience.**
-- `rowStatus=EVALUATED` — **one row per (measure, rate)**. A multi-rate measure (cms137) yields two
-  rows for one patient, under the reviewed `rateLabels` of its semantics entry (ADR-074 d13).
-- `rowStatus=MISSING_FROM_RUN` — a MATCHED member the selected run never evaluated. **One row per
-  MEASURE, not per rate.** The patient, provider and payer columns are filled; every population,
-  status and rate column is **the empty string — never `0` or `false`**, which a consumer would read
-  as a scored result of zero rather than as an absence.
-- `rowStatus=NOT_MATCHED` — a NOT_FOUND or AMBIGUOUS member. **Exactly ONE row**, after all evaluated
-  rows, with every patient and measure column empty. One row per measure would multiply a single
-  unresolved identifier by six and read as six separate failures.
-
-**Every JSON count is recomputable from these rows**, and a test does it — including for a measure
-with **no usable run**, which emits one `MISSING_FROM_RUN` row per matched member rather than an entry
-with a count and no rows. A **compacted** measure is the one exception and claims nothing per subject:
-no rows, and `missingFromRun: 0`, because ADR-077 refuses numbers built over rows that may be
-incomplete and "how many of your patients did this measure miss?" is such a number.
-
-The JSON summary states, per measure, two identities that hold for every entry whose
-`compactionStatus` is not `compacted`:
-`matchedSubjects = distinctSubjectsSeen + missingFromRun` and
-`distinctSubjectsSeen = scoredSubjects + unmeasured + evaluationErrors + outOfPopulation`.
-
-> **The four not-scored buckets are DISJOINT, and `unmeasured` here is narrower than the aggregator's.**
-> `createRateAggregator.finish()` returns an `unmeasured` that is a SUPERSET of its own
-> `evaluationErrors` (it starts the count at the error count), and `outcomes.out_of_population` is an
-> independently persisted column that can be true on a row the aggregator also calls unmeasured — so
-> deriving these by subtraction double-counts every error and can make `scoredSubjects` NEGATIVE. Each
-> seen subject is classified into exactly one bucket, in this order: an **evaluation error** first (no
-> engine spoke for the subject, so nothing else about it is known), then **out of population**, then
-> **in no rate** for any other reason, and only what survives all three is **scored**. `unmeasured` in
-> this report therefore means "in no rate for a reason other than an error or being out of
-> population".
-`missingFromRun` is reported BESIDE the rates and **never subtracted from a denominator** — a member
-the run never saw is a gap in the evidence, not an exclusion, and folding them in would let a smaller
-run produce a higher score. The score is `numerator / (denominator − denominatorExclusion −
-denominatorException)`; `status=EXCLUDED` is the workflow vocabulary while the two `denominator*`
-columns are the artifact's populations, and the ACO's word "exclusions" covers both, so both are
-emitted separately rather than summed.
-
-> **Compaction refuses PER MEASURE (ADR-077, ADR-082 d5).** A measure whose selected run predates a
-> compaction cutoff is returned with `compactionStatus: "compacted"`, no rates and no rows, and is
-> named in the JSON and in the `X-WorkWell-Compacted-Measures` response header (exposed through
-> `config/cors.ts`); the other measures' complete numbers are served with HTTP 200. The whole request
-> is **409 `run_compacted`** only when EVERY selected run is exposed. Exposure is checked before the
-> reads and again after them, and every derived row is computed before anything is serialised — a
-> streamed CSV cannot change its status after the first byte, so a pass starting mid-report yields a
-> 409 or a complete file, never a truncated 200.
-
-> **Text a person supplied is neutralised against spreadsheet formula injection.** `rawIdentifier`,
-> the subject name and the rate label go through `csvTextCell` (`export/csv.ts`), which prefixes a
-> leading `=`, `+`, `-`, `@`, tab or CR with an apostrophe. `csvCell` quotes correctly and does not
-> defuse, and a CSV of somebody's uploaded identifiers must not become code when the ACO opens it.
+- `measurementYear` is REQUIRED. Per measure: the newest reportable population run whose own measurement
+period is that year (`RunStore.listPopulationRunsForPeriod`), never chosen by start date.
+- `rowStatus`: `EVALUATED`, one row per (measure, rate); `MISSING_FROM_RUN`, a matched member the run never
+evaluated, one row per measure, patient/provider/payer filled, population/status/rate columns empty
+(never `0`/`false`); `NOT_MATCHED` (NOT_FOUND/AMBIGUOUS), ONE row after all others, patient and measure
+columns empty.
+- Every JSON count is recomputable from the rows (no usable run = one `MISSING_FROM_RUN` per matched
+member). Unless compacted: `matchedSubjects = distinctSubjectsSeen + missingFromRun`,
+`distinctSubjectsSeen = scoredSubjects + unmeasured + evaluationErrors + outOfPopulation`; buckets are
+disjoint, assigned in order error -> out of population -> no rate -> scored, never by subtraction.
+- `missingFromRun` is never subtracted from a denominator. Score =
+`numerator / (denominator − denominatorExclusion − denominatorException)`; the two `denominator*` columns
+stay separate.
+- Compaction refuses per measure: `compactionStatus: "compacted"`, no rows, `missingFromRun: 0`, named in
+the CORS-exposed `X-WorkWell-Compacted-Measures`; **409 `run_compacted`** only when every run is exposed;
+never a truncated 200.
+- `rawIdentifier`, subject name and rate label pass through `csvTextCell` (defuses a leading `=`, `+`,
+`-`, `@`, tab, CR).
 
 ### 6.7 `?listId=` on the filtered surfaces (ADR-082)
-
-> **`?listId=` requires a CASE_MANAGER or ADMIN seat on every surface, enforced once in the worker.**
-> Five of the six surfaces are otherwise AUTHENTICATED, so without it the CM/ADMIN gate on
-> `/api/subject-lists/**` was a control that could not fire for the widest read: a VIEWER holding a
-> list id could take the whole membership — names, provider, payer, per-measure status — out of
-> `GET /api/exports/cases?format=csv&listId=…`, which is strictly more than the members endpoint the
-> gate protects. The id is not a secret by construction: it is in the query string of every filtered
-> screen, so it reaches shareable URLs, browser history and access logs. A request naming a list
-> without that seat is **403** with `parameter: "listId"`; the same surfaces are unchanged for a
-> VIEWER when no list is named.
-
-`?listId=` restricts the roster, the cases route, the work list, both §6.2/§6.3 CSVs and the MCP
-`list_noncompliant` tool to a list's MATCHED members. It is a **resolved membership, not a token the
-predicate parses**: the parameter names an immutable list and the server turns it into subjects, so a
-client can ask for a list but cannot spell a membership. An unknown id is a **404** on every surface
-(`LIST_NOT_FOUND` on the MCP tool) — never an unfiltered answer under a heading naming the ACO's
-population. A list none of whose identifiers resolved is an **active filter matching nobody**, not an
-absent one.
+Restricts the roster, cases route, work list, §6.2/§6.3 CSVs and MCP `list_noncompliant` to a list's
+MATCHED members (server-resolved). Requires CASE_MANAGER/ADMIN on every surface (else **403**,
+`parameter: "listId"`); unknown id = **404** (`LIST_NOT_FOUND` on MCP), never unfiltered; a list with no
+resolved member matches nobody.
