@@ -12,12 +12,13 @@
    external pass/fail. A Cypress Calculation Check green is **retired as a goal** — it needs a QDM execution
    path we are deliberately not building.
 3. **We do not relabel, and we do not build a QDM engine.** Emitting a QDM-lineage measure identity over
-   QI-Core-executed counts is forbidden (ADR-046 d3/d4, ADR-058). Revisit only if MIE states that
-   certifying WorkWell's engine is a business goal.
+   QI-Core-executed counts is forbidden, unconditionally (ADR-046 d3/d4, ADR-058). The no-QDM-engine half
+   (ADR-058 decision 4) is revisited only if MIE states that certifying WorkWell's engine is a business goal.
 4. **QRDA I/III is kept as an interoperability bridge**, not a certification target (both validate at 0
    findings against the HL7 base ruler).
-5. **Packaging:** a pnpm workspace under the neutral npm scope **`@work-well/*`** (not `@workwell/*`, which
-   npm refuses; not `@mieweb/*` for now). Complete and published. *(Its other half — "the versioned
+5. **The engine and its packaging are the primary deliverable** (M-C was promoted ahead of measure
+   breadth, and is complete and published): a pnpm workspace under the neutral npm scope **`@work-well/*`**
+   (not `@workwell/*`, which npm refuses; not `@mieweb/*` for now). *(Its other half — "the versioned
    compliance API is the contract MIE consumes" — is superseded by §4A.4.)*
 6. **The long-term differentiator is the measures nobody publishes** (occupational/OSHA, M-E). M-E1's
    execution is **deferred behind the Maui pilot — deferred, not cancelled** (ADR-070).
@@ -45,7 +46,8 @@ The plan is `docs/ROADMAP_2026-08-30.md`; the verification bar stays §4 decisio
 4. **The compliance API is a kept, versioned, served surface — not the integration contract.** The
    contract is the card/CDS surface plus the Maui deployment; no work is justified by the API alone.
 5. **No known-unverified measure runs over the pilot's real data.** (Read against the PHI phase since
-   ADR-078; cheap, unblocked work goes before externally blocked work.)
+   ADR-078 — e.g. cms165's cross-engine gap, #572, must be closed first. Cheap, unblocked work goes before
+   externally blocked work.)
 6. **Naming policy:** repo documents say "Maui" (the deployment) and "the pilot group" only — no
    client-side legal or staff names and no client-provided documents (MIE-side names are fine); pilot user
    accounts use pseudonymous identifiers; source materials stay under the gitignored local-only path.

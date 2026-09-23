@@ -35,8 +35,9 @@ status is re-confirmed (`UNCHANGED`); a status change restores the computed acti
 - **Panel assignment on INSERT only (ADR-080 d2):** `UpsertCaseInput.panelAssignee` sets `assignee` +
 `assignment_source='PANEL'` on insert; UPDATE/REOPEN never touch them. Source = `PANEL` | `OPERATOR`
 (`patchCase({assignee})`, `assignCases(…, source)`) | NULL (with an assignee = operator-owned; cleared
-with the assignee). `planPanelBackfill` moves only unowned and PANEL cases; its compare-and-set checks
-assignee and `expectedSource`.
+with the assignee). No `panelAssignee` ⇒ `NULL/NULL`. `planPanelBackfill` moves only unowned and PANEL
+cases; its compare-and-set checks assignee and `expectedSource`, and a change of source alone is a real
+change (an operator can claim a case the panel placed).
 - **`POST /api/cases/bulk-assign`:** `{ assignee, caseIds[] }` or `{ assignee, measureId, subjectIds[] }`,
 resolved in one bounded read to each subject's ACTIVE case in that ONE measure, then the `caseIds` path
 unchanged (500 cap included). `measureId` is required and single; both shapes = 400; nothing found =
@@ -53,7 +54,14 @@ never stranded. `dispatchOutreach` — the payload is `channel.send()`'s result;
 intent/completion pair (owner call). The three identity-link writes — `upsertLink` returns the existing id
 on conflict (owner call). `backfill-scale`, `backfill-quality-history`, `backfill-trend-history` —
 one-shot seeding. `resolve-valuesets` — build-time CLI. `rerunToVerify` — action audit-first,
-`CASE_RESOLVED` after the patch.
+`CASE_RESOLVED` after the patch. `uploadEvidence` audits before the bucket write, so a failed upload can
+leave an "Evidence uploaded" row on the case timeline (an owner question, `OPEN_QUESTIONS.md`).
+- **The sweep reports 55 hits across 20 files (2026-09-21); check the count, not the labels.** The files
+above account for 10; the other 10 are not violations: `panel-assignment` (mapping before consequences),
+`segments` and `outcome-compaction` (matcher artifacts / the ADR-073 d4 completion event),
+`subject-lists` (audit in `beforeComplete`), `evidence-service`, `audit-packet`, `materialize-run`,
+`measure-seed` (reads or pure computation), `case-event-store-postgres` (the audit writer itself) and
+`store-contract` (the test that drives them).
 - **Missing primitive:** no cross-store `applyCaseAction({ patch, action, audit })` (`CaseEventStore` +
 `CaseStore`). Until it exists, do not rely on the ledger being complete for run-created transitions; a
 reconciliation job is no substitute.
@@ -61,6 +69,7 @@ reconciliation job is no substitute.
 ### The work list is read two ways; both must agree (ADR-084)
 `/api/cases` takes page + exact total in one statement (`CaseStore.listCasesPage`, `COUNT(*) OVER ()`)
 when every filter has a SQL form (current cycle, frozen `outcome`, `outreach`, `createdFrom`/`createdTo`).
+An EMPTY page carries no window value and takes a bounded second `COUNT(*)` — empty is not "total zero".
 `site`, `search`, a panel above `PANEL_PREFILTER_MAX_IDS` (in-memory directory) and the staff-closed list
 take the uncapped pipeline; `sqlPageBlockedBy` names the blocker. A conformance test requires identical
 totals and page ids from both loaders. On a scoped profile `CaseStore.distinctCaseSubjectIds` checks every
@@ -114,7 +123,8 @@ Columns:
 `runId, measureName, measureVersion, scopeType, triggerType, status, startedAt, completedAt, durationMs, totalEvaluated, compliant, dueSoon, overdue, missingData, excluded, passRate, dataFreshAsOf, notInPopulation`
 
 `notInPopulation` was appended, never inserted (ADR-079): the `missingData` subset outside the initial
-population; `missingData`/`passRate` unchanged.
+population. `missingData` still counts every persisted MISSING_DATA row and `passRate` is still
+`compliant / totalEvaluated`.
 
 ### 6.2 `GET /api/exports/outcomes?format=csv&runId={optional}`
 Filters: `runId`, `site`, `providerId`, `ageBand`, `sex`, `payer`.
@@ -136,8 +146,8 @@ it filters today's CQL answer. Both compare the display status, not the canonica
 store read.
 - `period`: `current` = each measure's current cycle; any other value = a literal period; **blank = ALL
 HISTORY here**, `current` on the work list (`wantsCurrentCycle`). Explicit `current` applies on every status.
-- `status` (`worklistQueryFor`): blank or `all` = every row here, the ACTIVE set on the work list;
-`staff_closed` = terminal with `closed_by` set.
+- `status` (`worklistQueryFor`): blank = every row here and the ACTIVE set on the work list; `all` =
+every row on both; `staff_closed` = terminal with `closed_by` set.
 - `providerId`, `payer` were appended, never inserted (also §6.2): directory facts, empty where unrecorded
 (WebChart Coverage: #591); `payer` is a Source of Payment Typology code.
 - `closedReason`, `closedBy`, `liveState`, `liveOutcomeStatus`, `liveOutcomeRunId` were appended, never
@@ -187,8 +197,8 @@ numerator, status, outOfPopulation, evaluationError, providerId, payer`
 period is that year (`RunStore.listPopulationRunsForPeriod`), never chosen by start date.
 - `rowStatus`: `EVALUATED`, one row per (measure, rate); `MISSING_FROM_RUN`, a matched member the run never
 evaluated, one row per measure, patient/provider/payer filled, population/status/rate columns empty
-(never `0`/`false`); `NOT_MATCHED` (NOT_FOUND/AMBIGUOUS), ONE row after all others, patient and measure
-columns empty.
+(never `0`/`false`); `NOT_MATCHED` (NOT_FOUND/AMBIGUOUS), exactly ONE row per unmatched member (never
+one per measure), after all evaluated rows, patient and measure columns empty.
 - Every JSON count is recomputable from the rows (no usable run = one `MISSING_FROM_RUN` per matched
 member). Unless compacted: `matchedSubjects = distinctSubjectsSeen + missingFromRun`,
 `distinctSubjectsSeen = scoredSubjects + unmeasured + evaluationErrors + outOfPopulation`; buckets are

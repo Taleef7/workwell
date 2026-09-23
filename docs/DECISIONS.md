@@ -5,7 +5,8 @@ full original text of any ADR is in git history (`git show a387cb52:docs/DECISIO
 `git show a387cb52:docs/archive/DECISIONS_ARCHIVE.md` for the ones that had been archived).
 
 Code cites numbered sub-decisions (`ADR-074 d13`, `ADR-046 decision 3`, `ADR-060 §5`); those numbers are
-the originals and are kept as they were.
+the originals and are kept as they were. One ADR number was assigned during the condensing: ADR-033,
+whose record had lost its heading (see its status line).
 
 ## ADR-087: The dashboard resolves winning runs once and skips needless sorts
 *2026-09-21 · Accepted*
@@ -582,7 +583,7 @@ Also binding: a backdated run (`evalDate < source_eval_date`) always re-evaluate
 **Why.** Doug asked for our own FHIR facade and for SQL running against WebChart itself, while backend-ts is deliberately driver-free and the executor port is bundle-in and DB-less.
 
 ## ADR-033: Inject a schema-free live WebChart directory into population read models
-*2026-07-17 · Accepted*
+*2026-07-17 · Accepted · number assigned 2026-09-23: this record lost its heading inside ADR-034 on 2026-07-20 and was restored as ADR-033*
 
 **Decision.** Live WebChart subjects are named through a per-worker, atomically replaced last-known-good registry of identity profiles (`wc|Patient.id`, name, birth date, fixed `wc`/`WebChart`/`wc-provider-1` placement), not a new table; clinical bundles are never cached. Each population read loads its outcome rows and builds one `directoryForRows(rows)` snapshot (static catalog, registry, and a minimal profile for unknown `wc|` ids) used for the whole operation. A successful population fetch replaces the registry; a failed fetch aborts the run before any outcomes, and read models ignore FAILED runs. `wc|` CASE reruns return a non-mutating 409.
 **Why.** Outcomes carry only subject ids, so the static directory dropped live subjects from every read model, and a persisted directory would need owner-gated DDL and could make stale data look current.
@@ -633,7 +634,7 @@ Operational rules: a 3 s request timeout plus a 60 s circuit breaker; ICE's cloc
 **Why.** WebChart's public sandbox showed the real contract (SMART Backend Services, no `Patient/$everything`), so there was no reason to wait for MIE to restate it.
 
 ## ADR-027: Production CMS122/CMS125 ran eCQI v14 faithful-subset CQL
-*2026-07-10 · Superseded by ADR-045*
+*2026-07-10 · Superseded by the flip (ADR-045/ADR-046)*
 
 **Decision.** Production cms122/cms125 ran hand-authored faithful subsets of eCQI CMS122v14/CMS125v14 with committed offline VSAC expansions and dual-coded synthetic data. Production now runs CMS's own artifacts, and the subsets retire to the standards lab (#377).
 **Why.** The earlier toy day-count rules could not support the claim of running real eCQMs.
@@ -687,7 +688,7 @@ Operational rules: a 3 s request timeout plus a 60 s circuit breaker; ICE's cloc
 **Why.** Compliance from several WebChart systems must roll up into one dashboard, and outcomes persist only `subjectId`, so the hierarchy can be resolved in code without a migration.
 
 ## ADR-018: Standards fidelity started structural, deferring official-CQL execution
-*2026-06-26 · Superseded by ADR-026*
+*2026-06-26 · Overtaken by official-CQL execution (ADR-025/ADR-026)*
 
 **Decision.** Shipped a sourced structural fidelity report of each authored measure against the official definition (`GET /api/measures/:id/fidelity`, `backend-ts/src/standards/`) and deferred executing official CQL; `jurisdiction` became measure metadata (default `"US"`).
 **Why.** The deferral is overtaken: CMS's published artifacts now execute, first diagnostically (ADR-026) and then in production.
@@ -741,7 +742,7 @@ Operational rules: a 3 s request timeout plus a 60 s circuit breaker; ICE's cloc
 **Why.** There is no `employees` table (outcomes persist only `subjectId`), so the hierarchy fits as read-time structure, and quality measures roll up by attributed provider.
 
 ## ADR-009: eCQM artifacts are emitted JVM-free; QRDA III began as a stub
-*2026-06-18 · Superseded by ADR-058*
+*2026-06-18 · Partly superseded by ADR-058 (the QRDA III stub half; JVM-free emission stands)*
 
 **Decision.** eCQM artifacts (FHIR MeasureReport, QRDA III) are hand-built with no FHIR/CDA runtime or Java validator, with counts from one shared `countPopulations`; that half still holds. The "QRDA III is an unvalidated stub" half is overtaken: QRDA I/III now validate at 0 findings against the HL7 base ruler (ADR-058 decision 5).
 **Why.** The stack is JVM-free with a no-new-dependency rule, and the reference validators are Java tools.

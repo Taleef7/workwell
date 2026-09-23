@@ -27,8 +27,8 @@ The GitHub milestone **"Ready for January"** (`gh issue list --milestone "Ready 
 - Auth: user accounts remain hardcoded (no SSO, no real user directory). The JWT refresh flow (HttpOnly cookie, rotation, `/api/auth/refresh`) is approved and implemented.
 - Email: `WORKWELL_EMAIL_PROVIDER=simulated` is the default and must remain so on the demo stacks. SendGrid must not be activated unless `WORKWELL_EMAIL_SENDGRID_API_KEY` is set (with `WORKWELL_EMAIL_PROVIDER=sendgrid`) in a non-demo environment.
 - AI never decides compliance (see docs/AI_GUARDRAILS.md). The CQL engine is the sole source of truth.
-- Every state change writes an `audit_event`. Write new code **audit-first** (the event before the mutation). A few run-boundary paths are still mutate-first by design — `DATA_MODEL_CONTRACTS` §4 lists them (#598).
-- No silent scope changes
+- Every state change writes an `audit_event` — the rule, **not yet everywhere true (#598, open)**. Write new code **audit-first** (the event before the mutation). Some paths are still mutate-first: run-boundary ones by design, outreach and the identity links pending owner decisions — `DATA_MODEL_CONTRACTS` §4 lists them. #598 stays open until the cross-store `applyCaseAction` primitive exists.
+- No silent scope changes; if a plan's stop condition triggers, record the fallback in JOURNAL.md
 - Schema migrations are owned by Taleef — never written or applied by an agent without explicit instruction
 
 ## Branch + ownership

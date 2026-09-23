@@ -64,7 +64,7 @@
 - ADR-030: Durable evidence storage is an app-level S3 seam
 - ADR-029: Immunization forecasting uses a self-hosted ICE sidecar behind the port
 - ADR-028: WebChart transport follows its verified public FHIR contract and SMART auth
-- ADR-027: Production CMS122/CMS125 ran eCQI v14 faithful-subset CQL  · Superseded by ADR-045
+- ADR-027: Production CMS122/CMS125 ran eCQI v14 faithful-subset CQL  · Superseded by the flip (ADR-045/ADR-046)
 - ADR-026: fqm-execution runs CMS's pre-compiled ELM, quarantined in one package
 - ADR-025: Measure execution is pluggable behind a MeasureExecutor seam
 - ADR-024: Official CMS122 fidelity via a hand-authored faithful subset  · Superseded by ADR-026 and ADR-027
@@ -73,7 +73,7 @@
 - ADR-021: Quality over time is a materialized aggregate snapshot store
 - ADR-020: Population scale via encoded subject ids and SQL aggregation
 - ADR-019: Multi-tenant rollup lives in the read-time synthetic directory
-- ADR-018: Standards fidelity started structural, deferring official-CQL execution  · Superseded by ADR-026
+- ADR-018: Standards fidelity started structural, deferring official-CQL execution  · Overtaken by official-CQL execution (ADR-025/ADR-026)
 - ADR-017: Real EHR data enters as FHIR bundles into the unchanged engine
 - ADR-016: Segments decide applicability, never compliance
 - ADR-015: CQL is canonical; rule params compile to CQL
@@ -82,7 +82,7 @@
 - ADR-012: Immunization forecasting is an advisory port; AIS-E Td/Tdap is the measure
 - ADR-011: Outreach goes through a multi-channel port; campaigns are audit-backed for now
 - ADR-010: Provider is the attributed clinician, modeled in the synthetic directory
-- ADR-009: eCQM artifacts are emitted JVM-free; QRDA III began as a stub  · Superseded by ADR-058
+- ADR-009: eCQM artifacts are emitted JVM-free; QRDA III began as a stub  · Partly superseded by ADR-058 (the QRDA III stub half; JVM-free emission stands)
 - ADR-008: Re-platform the backend onto TypeScript and @mieweb/cloud, JVM-free
 - ADR-007: Vendor the @mieweb/datavis NITRO grid source
 - ADR-006: Measures are declared in YAML and run by a headless evaluator
