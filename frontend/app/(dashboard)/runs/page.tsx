@@ -16,7 +16,7 @@ import {
   formatStatusLabel,
   labelFor,
   normalizeEnumValue,
-  outcomeStatusClass,
+  complianceStatusClass,
   runStatusClass,
   triggerBadgeClass
 } from "@/lib/status";
@@ -63,6 +63,8 @@ type RunSummary = {
   passRate: number;
   durationMs: number;
   outcomeCounts: Array<{ status: string; count: number }>;
+  /** Of the MISSING_DATA rows, those the measure put outside its population (ADR-079). */
+  notInPopulation?: number;
   dataFreshAsOf: string | null;
   dataFreshnessMinutes: number;
   /** ADR-073: set when the run predates the retention window, so the counts are survivors. */
@@ -116,6 +118,8 @@ type RunOutcomeRow = {
   role: string;
   site: string;
   outcomeStatus: string;
+  /** What to show: OUT_OF_POPULATION for a MISSING_DATA row outside the population (#668). */
+  displayStatus?: string;
   daysSinceExam: string | null;
   waiverStatus: string | null;
   caseId: string | null;
@@ -186,12 +190,18 @@ function formatRelativeTimestamp(dateString: string | null): string {
   return date.toLocaleDateString();
 }
 
+/**
+ * A finished run's duration, in hours and minutes once it is long. It used to show "-" past an hour,
+ * a cap from when runs took five minutes; the pilot's nightly takes longer, so every one read "-" (#668).
+ */
 function formatRunDuration(durationMs: number, status?: string): string {
   if (!Number.isFinite(durationMs) || durationMs < 0) return "-";
-  if (durationMs > MAX_DISPLAY_DURATION_MS) {
-    return normalizeEnumValue(status ?? "") === "RUNNING" ? "Stalled" : "-";
-  }
-  return `${Math.round(durationMs / 1000)}s`;
+  if (normalizeEnumValue(status ?? "") === "RUNNING" && durationMs > MAX_DISPLAY_DURATION_MS) return "Stalled";
+  const totalSec = Math.round(durationMs / 1000);
+  if (totalSec < 60) return `${totalSec}s`;
+  const hours = Math.floor(totalSec / 3600);
+  const minutes = Math.floor((totalSec % 3600) / 60);
+  return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m ${totalSec % 60}s`;
 }
 
 export default function RunsPage() {
@@ -217,6 +227,10 @@ export default function RunsPage() {
   const [reconciliation, setReconciliation] = useState<Reconciliation | null>(null);
   const [runLogs, setRunLogs] = useState<RunLogEntry[]>([]);
   const [runOutcomes, setRunOutcomes] = useState<RunOutcomeRow[]>([]);
+  // The run's full outcome count (X-Total-Count): the grid holds at most the first 5,000 (#668).
+  const [runOutcomesTotal, setRunOutcomesTotal] = useState<number | null>(null);
+  // The LIST's own load error, apart from action errors: a failed load is not "no runs yet" (#668).
+  const [listError, setListError] = useState<string | null>(null);
   const [measures, setMeasures] = useState<MeasureOption[]>([]);
   const [runScopeType, setRunScopeType] = useState<RunScopeType>("ALL_PROGRAMS");
   const [runMeasureId, setRunMeasureId] = useState("");
@@ -259,7 +273,7 @@ export default function RunsPage() {
   }, [api]);
 
   /**
-   * The six filters this screen is showing, as query params — built ONCE, for the list AND the
+   * The filters this screen is showing, as query params — built ONCE, for the list AND the
    * export (#601).
    *
    * "Export runs CSV" used to send none of them and the endpoint accepted none, so filtering the
@@ -267,21 +281,24 @@ export default function RunsPage() {
    * runs of everything. No error, and a plausible-looking file — the same defect the cases CSV had
    * (#602), which is why this is the same shape of fix. Paging is the caller's: an export is not
    * paged, so it does not set `limit` from this.
+   *
+   * Not the global SITE filter (#668): a run carries a site only when it was a SITE run, so any site
+   * selection hid every all-programs, measure and patient run — each of which covers that site. The
+   * outcomes export below keeps `site`, because outcomes do belong to sites.
    */
   const runFilterParams = useCallback(() => {
     const query = new URLSearchParams();
     if (statusFilter) query.set("status", statusFilter);
     if (scopeFilter) query.set("scopeType", scopeFilter);
     if (triggerFilter) query.set("triggerType", triggerFilter);
-    if (siteId) query.set("site", siteId);
     if (from) query.set("from", from);
     if (to) query.set("to", to);
     return query;
-  }, [statusFilter, scopeFilter, triggerFilter, siteId, from, to]);
+  }, [statusFilter, scopeFilter, triggerFilter, from, to]);
 
   const loadRuns = useCallback(async () => {
     setLoading(true);
-    setError(null);
+    setListError(null);
     try {
       const query = runFilterParams();
       query.set("limit", String(limit));
@@ -298,12 +315,36 @@ export default function RunsPage() {
       if (nextSelectedRunId !== currentSelectedRunId) {
         setSelectedRunId(nextSelectedRunId);
       }
+      if (nextSelectedRunId === null) {
+        // The selected run left the list (filters now exclude it): its detail must go too, or it sits
+        // under an empty list describing a run that matches none of them (#668).
+        setSelectedRun(null);
+        setRunLogs([]);
+        setRunOutcomes([]);
+        setRunOutcomesTotal(null);
+        setReconciliation(null);
+        setRunInsight(null);
+      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unknown error");
+      setListError(err instanceof Error ? err.message : "Unknown error");
     } finally {
       setLoading(false);
     }
   }, [api, limit, runFilterParams]);
+
+  /** A run's outcome rows plus the full count the server reports: the grid gets at most 5,000. */
+  const loadOutcomes = useCallback(
+    async (runId: string): Promise<{ rows: RunOutcomeRow[]; total: number | null }> => {
+      try {
+        const { data, headers } = await api.getWithHeaders<RunOutcomeRow[]>(`/api/runs/${runId}/outcomes`);
+        const total = Number(headers.get("X-Total-Count"));
+        return { rows: data, total: Number.isFinite(total) && headers.has("X-Total-Count") ? total : null };
+      } catch {
+        return { rows: [], total: null };
+      }
+    },
+    [api],
+  );
 
   const loadSelectedRun = useCallback(async () => {
     if (!selectedRunId) return;
@@ -311,13 +352,14 @@ export default function RunsPage() {
     // showing under the newly-selected run (#150 M5). Then fetch summary + logs + outcomes together
     // and set them atomically.
     setRunOutcomes([]);
+    setRunOutcomesTotal(null);
     setRunLogs([]);
     setReconciliation(null);
     try {
       const [summary, logs, outcomes, ladder] = await Promise.all([
         api.get<RunSummary>(`/api/runs/${selectedRunId}`),
         api.get<RunLogEntry[]>(`/api/runs/${selectedRunId}/logs?limit=200`),
-        api.get<RunOutcomeRow[]>(`/api/runs/${selectedRunId}/outcomes`).catch(() => [] as RunOutcomeRow[]),
+        loadOutcomes(selectedRunId),
         // 409 for a run that is still moving (nothing to reconcile yet) — shown as absent, not as an error.
         api.get<unknown>(`/api/runs/${selectedRunId}/reconciliation`).then(asReconciliation).catch(() => null),
       ]);
@@ -326,7 +368,8 @@ export default function RunsPage() {
       if (selectedRunIdRef.current !== selectedRunId) return;
       setSelectedRun(summary);
       setRunLogs(logs);
-      setRunOutcomes(outcomes);
+      setRunOutcomes(outcomes.rows);
+      setRunOutcomesTotal(outcomes.total);
       setReconciliation(ladder);
       setInsightDismissed(false);
     } catch (err) {
@@ -345,7 +388,7 @@ export default function RunsPage() {
       }
       setError(err instanceof Error ? err.message : "Unknown error");
     }
-  }, [api, router, selectedRunId]);
+  }, [api, loadOutcomes, router, selectedRunId]);
 
   const loadRunInsight = useCallback(async () => {
     const forRunId = selectedRunId;
@@ -392,10 +435,10 @@ export default function RunsPage() {
                 ]);
                 setSelectedRun(summary);
                 setRunLogs(logs);
-                api
-                  .get<RunOutcomeRow[]>(`/api/runs/${activeRunId}/outcomes`)
-                  .then(setRunOutcomes)
-                  .catch(() => setRunOutcomes([]));
+                void loadOutcomes(activeRunId).then((outcomes) => {
+                  setRunOutcomes(outcomes.rows);
+                  setRunOutcomesTotal(outcomes.total);
+                });
                 // The run just became terminal, so the ladder exists now; the initial fetch got a 409.
                 api
                   .get<unknown>(`/api/runs/${activeRunId}/reconciliation`)
@@ -412,7 +455,7 @@ export default function RunsPage() {
       }
     }, 2000);
     return () => clearInterval(interval);
-  }, [activeRunId, api, loadRuns]);
+  }, [activeRunId, api, loadOutcomes, loadRuns]);
 
   // Live elapsed-second timer while a run is in progress.
   useEffect(() => {
@@ -567,7 +610,8 @@ export default function RunsPage() {
         employeeExternalId: row.employeeExternalId,
         role: labelFor(ROLE_LABELS, row.role),
         site: row.site,
-        outcome: labelFor(OUTCOME_LABELS, row.outcomeStatus),
+        outcome: labelFor(OUTCOME_LABELS, row.displayStatus ?? row.outcomeStatus),
+        shownOutcome: row.displayStatus ?? row.outcomeStatus,
         rawOutcome: row.outcomeStatus,
         daysSinceExam: row.daysSinceExam ?? "-",
         waiver: formatStatusLabel(row.waiverStatus),
@@ -595,9 +639,9 @@ export default function RunsPage() {
         );
       }
       if (column.field === "outcome") {
-        const raw = String(row.rawOutcome ?? "");
+        const shown = String(row.shownOutcome ?? row.rawOutcome ?? "");
         return (
-          <span className={`rounded-full px-2 py-1 text-[11px] font-semibold ${outcomeStatusClass(raw)}`}>
+          <span className={`rounded-full px-2 py-1 text-[11px] font-semibold ${complianceStatusClass(shown)}`}>
             {String(value ?? "")}
           </span>
         );
@@ -849,6 +893,19 @@ export default function RunsPage() {
       ) : null}
 
       {error ? <p role="alert" className="text-sm text-red-700 dark:text-red-400">{error}</p> : null}
+      {listError ? (
+        <p role="alert" className="text-sm text-red-700 dark:text-red-400">
+          Couldn&apos;t load runs: {listError}{" "}
+          <button type="button" onClick={() => void loadRuns()} className="underline">
+            Retry
+          </button>
+        </p>
+      ) : null}
+      {siteId ? (
+        <p className="text-xs text-neutral-500 dark:text-neutral-400">
+          Runs cover every site, so the site filter doesn&apos;t narrow this list.
+        </p>
+      ) : null}
       {selectedRun && !rerunSupported ? (
         <p className="text-xs text-amber-700">{`Rerun is available only for all-programs, measure-scoped, site-scoped, ${SUBJECT.singular}-scoped, or case-scoped runs.`}</p>
       ) : null}
@@ -859,7 +916,13 @@ export default function RunsPage() {
           </table>
         </div>
       ) : null}
-      {!loading && runs.length === 0 ? <p className="text-sm text-neutral-600 dark:text-neutral-400">No runs yet. Use the run controls above to start one.</p> : null}
+      {!loading && !listError && runs.length === 0 ? (
+        <p className="text-sm text-neutral-600 dark:text-neutral-400">
+          {runFilterParams().toString() !== ""
+            ? "No runs match these filters."
+            : "No runs yet. Use the run controls above to start one."}
+        </p>
+      ) : null}
 
       <div className="grid gap-4 lg:grid-cols-2">
         <div className="rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900">
@@ -992,7 +1055,7 @@ export default function RunsPage() {
               <p className="text-xs text-neutral-600 dark:text-neutral-400">Completed: {selectedRun.completedAt ? new Date(selectedRun.completedAt).toLocaleString() : "-"}</p>
               <p className="text-xs text-neutral-600 dark:text-neutral-400">
                 Duration:{" "}
-                {selectedRunId === activeRunId ? (
+                {activeRunId !== null && selectedRunId === activeRunId ? (
                   <span className="tabular-nums">
                     {runElapsedSec}s <span className="animate-pulse text-neutral-400" aria-hidden="true">●</span>
                   </span>
@@ -1008,8 +1071,14 @@ export default function RunsPage() {
                 </p>
               ) : null}
               <p className="text-xs text-neutral-600 dark:text-neutral-400">Evaluated: {selectedRun.totalEvaluated}</p>
-              <p className="text-xs text-neutral-600 dark:text-neutral-400">Cases: {selectedRun.totalCases}</p>
-              <p className="text-xs text-neutral-600 dark:text-neutral-400">Pass Rate: {selectedRun.passRate.toFixed(1)}%</p>
+              {/* Cases whose LATEST run is this one: a later run over the same patients takes them over. */}
+              <p className="text-xs text-neutral-600 dark:text-neutral-400">Cases last updated by this run: {selectedRun.totalCases}</p>
+              {/* Of every row the run wrote, out-of-population patients included. The CMS measure rate,
+                  over the measure's own population, is in the reconciliation below (#668). */}
+              <p className="text-xs text-neutral-600 dark:text-neutral-400">
+                Compliant: {selectedRun.passRate.toFixed(1)}% of everyone evaluated ({selectedRun.compliantCount.toLocaleString()} of{" "}
+                {selectedRun.totalEvaluated.toLocaleString()})
+              </p>
               <p className="text-xs text-neutral-600 dark:text-neutral-400">
                 Data Freshness: {selectedRun.dataFreshnessMinutes >= 0 ? `${selectedRun.dataFreshnessMinutes} min old` : "unknown"}
               </p>
@@ -1021,9 +1090,17 @@ export default function RunsPage() {
                 <ul className="text-xs text-neutral-600 dark:text-neutral-400">
                   {selectedRun.outcomeCounts.map((item) => (
                     <li key={item.status}>
-                      {labelFor(OUTCOME_LABELS, item.status)}: {item.count}
+                      {/* MISSING_DATA folds in the patients outside the population; they are shown on
+                          their own line, so "missing data" means a gap in the chart (#668). */}
+                      {labelFor(OUTCOME_LABELS, item.status)}:{" "}
+                      {item.status === "MISSING_DATA" ? item.count - (selectedRun.notInPopulation ?? 0) : item.count}
                     </li>
                   ))}
+                  {(selectedRun.notInPopulation ?? 0) > 0 ? (
+                    <li>
+                      {OUTCOME_LABELS.OUT_OF_POPULATION}: {selectedRun.notInPopulation}
+                    </li>
+                  ) : null}
                 </ul>
               </div>
               {reconciliation ? (
@@ -1044,7 +1121,7 @@ export default function RunsPage() {
                         {reconciliation.official.rates.map((rate, index) => (
                           <li key={rate.label ?? index}>
                             {rate.label ?? "Rate"}: initial population {rate.ipp}, denominator {rate.denom}, removed {rate.denex + rate.denexcep}, numerator {rate.numer}
-                            {rate.score === null ? "" : `, score ${(rate.score * 100).toFixed(1)}%`}
+                            {rate.score === null ? "" : `, CMS measure rate ${(rate.score * 100).toFixed(1)}% of the measure's population`}
                           </li>
                         ))}
                       </>
@@ -1119,6 +1196,11 @@ export default function RunsPage() {
 
       <div className="rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3">
         <h3 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Outcomes</h3>
+        {runOutcomesTotal !== null && runOutcomesTotal > runOutcomes.length ? (
+          <p className="text-xs text-neutral-500 dark:text-neutral-400" data-testid="outcomes-capped">
+            Showing {runOutcomes.length.toLocaleString()} of {runOutcomesTotal.toLocaleString()}. The outcomes CSV has every row.
+          </p>
+        ) : null}
         {runOutcomes.length === 0 ? (
           <p className="text-sm text-neutral-600 dark:text-neutral-400">No outcomes for this run.</p>
         ) : (

@@ -16,7 +16,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const get = vi.fn();
 const downloadBlob = vi.fn();
-const apiMock = { get, post: vi.fn(), downloadBlob };
+const apiMock = { get, getWithHeaders: vi.fn(async (url: string) => ({ data: await get(url), headers: new Headers() })), post: vi.fn(), downloadBlob };
 const routerMock = vi.hoisted(() => ({ push: vi.fn(), replace: vi.fn() }));
 const searchParamsMock = vi.hoisted(() => new URLSearchParams());
 const globals = vi.hoisted(() => ({ current: { siteId: "", from: "", to: "" } }));
@@ -61,8 +61,12 @@ describe("runs export carries the filters the history is showing", () => {
     const exportedFilters = [...exported.entries()].filter(([k]) => k !== "format").sort();
     expect(exportedFilters).toEqual(listedFilters);
 
-    // Not vacuous: the three the old URL dropped are actually present.
-    for (const key of ["site", "from", "to"]) expect(exported.has(key)).toBe(true);
+    // Not vacuous: the two the old URL dropped are actually present.
+    for (const key of ["from", "to"]) expect(exported.has(key)).toBe(true);
+    // The global SITE filter is NOT a run filter (#668): a run carries a site only when it was a SITE
+    // run, so sending it hid every run that covers the site. Neither the list nor its export sends it.
+    expect(listed.has("site")).toBe(false);
+    expect(exported.has("site")).toBe(false);
   });
 
   it("the outcomes export on the same screen carries the site filter too", async () => {
