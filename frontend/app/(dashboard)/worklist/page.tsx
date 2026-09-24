@@ -760,7 +760,11 @@ export default function WorklistPage() {
                       <Link href={`/employees/${encodeURIComponent(row.employeeId)}`} className="font-medium text-primary-700 hover:underline dark:text-primary-300">
                         {row.employeeName}
                       </Link>
-                      <div className="text-xs text-neutral-500 dark:text-neutral-400">{row.site}</div>
+                      {/* A second identifier beside the name: two patients can share a name, a clinic and a
+                          provider, and the next step is phoning one of them (#660). */}
+                      <div className="text-xs text-neutral-500 dark:text-neutral-400">
+                        <span data-testid="worklist-patient-id">{row.employeeId}</span> · {row.site}
+                      </div>
                     </td>
                     <td className="p-3 text-neutral-700 dark:text-neutral-300">{row.providerName ?? "—"}</td>
                     {payersAvailable ? <td className="p-3 text-neutral-700 dark:text-neutral-300">{row.payerName ?? "—"}</td> : null}

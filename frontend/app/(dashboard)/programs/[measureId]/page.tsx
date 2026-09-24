@@ -15,6 +15,7 @@ import { fmtCount } from "@/lib/format";
 import { useAuth } from "@/components/auth-provider";
 import { useRunStatus } from "@/components/run-status-provider";
 import { SkeletonCard } from "@/components/skeleton-loader";
+import { ConfirmDialog } from "@/components/confirm-dialog";
 import { canRunMeasures } from "@/lib/rbac";
 import { OUTCOME_LABELS, ROLE_LABELS, labelFor } from "@/lib/status";
 import { SUBJECT } from "@/lib/terminology";
@@ -82,6 +83,8 @@ export default function ProgramDetailPage() {
 
   const [slices, setSlices] = useState<MeasureSlices<TrendPoint>>(() => freshSlices<TrendPoint>(measureId));
   const [error, setError] = useState<string | null>(null);
+  // One click used to start a whole-practice run with no warning, slowing every page for ~15 minutes (#644).
+  const [runConfirmOpen, setRunConfirmOpen] = useState(false);
 
   // Every panel lands on its own, and every landing is tagged with the measure it describes. See
   // `measure-slices.ts` for why the tag travels with the data rather than living in a ref: the page
@@ -524,29 +527,35 @@ export default function ProgramDetailPage() {
               Open Worklist (Filtered)
             </Link>
             {mayRun ? (
-              <Button
-                variant="primary"
-                size="sm"
-                onClick={() => {
-                  void (async () => {
-                    try {
-                      setError(null);
-                      const res = await api.post<{ scopeType: string; measureId: string }, { runId: string; status?: string }>(
-                        "/api/runs/manual",
-                        { scopeType: "MEASURE", measureId },
-                      );
-                      startTracking(res.runId, res.status ?? "REQUESTED");
-                      emitToast(`${program.measureName} run started`);
-                    } catch (err) {
-                      setError(err instanceof Error ? err.message : "Unknown error");
-                    }
-                  })();
-                }}
-              >
+              <Button variant="primary" size="sm" onClick={() => setRunConfirmOpen(true)}>
                 Run This Measure
               </Button>
             ) : null}
           </div>
+          <ConfirmDialog
+            open={runConfirmOpen}
+            title="Run this measure now?"
+            description={`This evaluates every ${SUBJECT.singular} for ${program.measureName}. On a large practice it can take about 15 minutes, and other pages are slower while it runs. The nightly run already does this every day.`}
+            confirmLabel="Start run"
+            cancelLabel="Cancel"
+            onCancel={() => setRunConfirmOpen(false)}
+            onConfirm={() => {
+              setRunConfirmOpen(false);
+              void (async () => {
+                try {
+                  setError(null);
+                  const res = await api.post<{ scopeType: string; measureId: string }, { runId: string; status?: string }>(
+                    "/api/runs/manual",
+                    { scopeType: "MEASURE", measureId },
+                  );
+                  startTracking(res.runId, res.status ?? "REQUESTED");
+                  emitToast(`${program.measureName} run started`);
+                } catch (err) {
+                  setError(err instanceof Error ? err.message : "Unknown error");
+                }
+              })();
+            }}
+          />
         </>
       ) : status.program === "loading" ? (
         <div className="grid gap-3 md:grid-cols-2" role="status" aria-live="polite">

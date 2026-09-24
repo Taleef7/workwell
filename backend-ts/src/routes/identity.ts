@@ -17,7 +17,7 @@ import type { CloudDatabase } from "@mieweb/cloud";
 import { getStores } from "../stores/factory.ts";
 import { resolvePeople, duplicateCandidates, personById, type Person } from "../identity/identity-model.ts";
 import { mergedComplianceTimeline, type TimelineOutcome } from "../identity/compliance-timeline.ts";
-import { MEASURES } from "../engine/cql/measure-registry.ts";
+import { measureDisplayName } from "../measure/measure-name.ts";
 import { employeeById } from "../config/deployment-profile.ts";
 import { normalizePair, type PersonLinkRef } from "../stores/person-link-store.ts";
 
@@ -102,7 +102,7 @@ export async function handleIdentity(req: Request, env: IdentityEnv, actor: stri
       const rows = await s.outcomes.listOutcomesForEmployee(src.externalId, 100000);
       outcomesByExternalId.set(
         src.externalId,
-        rows.map((r) => ({ measureId: r.measureId, measureName: MEASURES[r.measureId]?.name, status: r.status, evaluatedAt: r.evaluatedAt })),
+        rows.map((r) => ({ measureId: r.measureId, measureName: measureDisplayName(r.measureId), status: r.status, evaluatedAt: r.evaluatedAt })),
       );
     }
     return json({ person, timeline: mergedComplianceTimeline(person, outcomesByExternalId) });
