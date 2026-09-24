@@ -624,7 +624,7 @@ export default function CaseDetailPage() {
                   variant="primary"
                   size="sm"
                   onClick={() => void runAction("rerun")}
-                  disabled={acting !== null}
+                  disabled={acting !== null || caseStatus === "CLOSED"}
                   isLoading={acting === "rerun"}
                   loadingText="Verifying..."
                 >

@@ -134,6 +134,23 @@ describe("CaseDetailPage pilot mode controls", () => {
     expect(screen.queryAllByRole("button", { name: /^Escalate$/ })).toHaveLength(0);
   });
 
+  it("disables Rerun on a staff-closed case in both layouts: a noncompliant result would reopen it", async () => {
+    setPublicDemo(false);
+    currentRole = "ROLE_CASE_MANAGER";
+    get.mockImplementation((url: string) => {
+      if (url === "/api/cases/case-001") return Promise.resolve({ ...caseData, status: "CLOSED" });
+      return Promise.resolve([]);
+    });
+
+    render(<CaseDetailPage />);
+    await waitFor(() => {
+      expect(screen.getAllByText("Alice Walker").length).toBeGreaterThan(0);
+    });
+
+    expect(screen.getByRole("button", { name: "Rerun to Verify" })).toBeDisabled(); // wide layout
+    expect(screen.getByRole("button", { name: "Rerun to verify" })).toBeDisabled(); // narrow layout
+  });
+
   it("gives a read-only viewer none of the case actions", async () => {
     setPublicDemo(false);
     currentRole = "ROLE_VIEWER";
