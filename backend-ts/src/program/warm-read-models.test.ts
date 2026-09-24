@@ -102,3 +102,31 @@ test("every pass is recorded on the runtime view, failed or not, under the trigg
   assert.deepEqual(detail.map((w) => [w.trigger, w.ok]), [["boot", false], ["nightly", true]], "newest first");
   assert.match(detail[0]!.error ?? "", /store is down/, "the admin view says why");
 });
+
+test("the per-measure panels are warmed even when the overview fails (#615)", async () => {
+  // On the pilot's cold database the overview ran past the 30 s role timeout, and the pass used to
+  // stop there: every measure page then paid its own cold read after a nightly meant to prevent it.
+  clearAll();
+  const deps = { ...makeDeps(), caseStore: { listCases: async () => { throw new Error("statement timeout"); } } as unknown as CaseStore };
+  const result = await warmReadModels(deps);
+  assert.equal(result.ok, false, "the overview's failure is still reported");
+  assert.match(result.error ?? "", /statement timeout/);
+  assert.ok(__chartMemos.driversMemo.size > 0, "the drivers were warmed anyway");
+  assert.ok(__chartMemos.outlookMemo.size > 0, "and the outlook");
+});
+
+test("one panel failing does not skip the measure's other panels (#615)", async () => {
+  clearAll();
+  // Only the trend asks for a window of runs (perMeasure > 1); the overview and the other panels ask for one.
+  const latest = latestRunsFromRows(rows);
+  const failingTrend = makeDeps({
+    listLatestPopulationRuns: (async (ids: readonly string[], filter: unknown, per = 1) => {
+      if (per > 1) throw new Error("trend window read failed");
+      return latest(ids, filter as never, per);
+    }) as OutcomeStore["listLatestPopulationRuns"],
+  });
+  const result = await warmReadModels(failingTrend);
+  assert.ok(__chartMemos.driversMemo.size > 0 && __chartMemos.outlookMemo.size > 0, "drivers and outlook warmed after the trend failed");
+  assert.equal(__chartMemos.trendMemo.size, 0, "the failing panel is the only one missing");
+  assert.ok(result.failedMeasures.length > 0, "and the measure is named as failed");
+});

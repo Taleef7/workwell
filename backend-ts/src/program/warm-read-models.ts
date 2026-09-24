@@ -12,6 +12,7 @@
  * swallowed with a WARN — the same posture as the retention pass that runs beside it.
  */
 import {
+  activeRunnableIds,
   programOverview,
   programRiskOutlook,
   programSites,
@@ -40,11 +41,14 @@ const UNFILTERED = { site: null, tenant: null } as const;
  * that line as the post-deploy check.
  */
 export interface WarmResult {
-  /** The overview pass completed. False means nothing below it ran either. */
+  /**
+   * The overview pass completed. False does NOT mean nothing else ran: since #615 the per-measure
+   * panels are attempted either way.
+   */
   ok: boolean;
   /** Why not, when `ok` is false. */
   error?: string;
-  /** Measures whose per-measure panels failed while the overview succeeded. */
+  /** Measures with at least one panel (trend, drivers, outlook) that failed to warm. */
   failedMeasures: string[];
 }
 
@@ -70,35 +74,47 @@ export async function warmReadModels(deps: ProgramDeps, trigger: WarmRecord["tri
 }
 
 async function warmPass(deps: ProgramDeps): Promise<WarmResult> {
-  let summaries;
+  let error: string | undefined;
+  let measureIds: string[];
   try {
     await programSites(deps);
-    summaries = await programOverview(deps, { ...UNFILTERED });
+    measureIds = (await programOverview(deps, { ...UNFILTERED })).map((s) => s.measureId);
   } catch (err) {
-    const error = String((err as Error)?.message ?? err);
+    // The overview failing used to end the pass here, so nothing per-measure was warmed either. On the
+    // pilot's cold database the overview ran past the 30 s role timeout (#615), and every measure page
+    // then paid its own cold read. The panels below do not need the overview's answer, only the list
+    // of measures it shows, so they are attempted regardless.
+    error = String((err as Error)?.message ?? err);
     console.warn(`[workwell] read-model warm failed: ${error}`);
-    return { ok: false, error, failedMeasures: [] };
+    measureIds = activeRunnableIds();
   }
   const failedMeasures: string[] = [];
-  for (const summary of summaries) {
-    // Per measure, so one measure's failure leaves the other twelve warm rather than aborting the
-    // pass at whichever happened to sort first.
-    try {
+  for (const measureId of measureIds) {
+    // Per measure AND per panel, so one failure leaves every other panel warm rather than aborting at
+    // whichever happened to come first.
+    const panels: Array<[string, () => Promise<unknown>]> = [
       // Monthly is what the dashboard asks for; the per-run trend the measure detail page uses is
       // left cold, because warming it would double this pass for a page one person opens at a time.
-      await programTrend(deps, summary.measureId, { ...UNFILTERED }, { monthly: true });
-      await programTopDrivers(deps, summary.measureId, { ...UNFILTERED });
+      ["trend", () => programTrend(deps, measureId, { ...UNFILTERED }, { monthly: true })],
+      ["drivers", () => programTopDrivers(deps, measureId, { ...UNFILTERED })],
       // The measure page's third panel, warmed since 2026-09-15 because it now costs what the other
       // two do: the winner's lean row read, plus ONE peeked row to learn whether the run's evidence
       // carries a recency define. On the pilot every routed measure is official, so that peek is the
       // whole evidence cost; on TWH the authored measures' rosters are small. `90` is the horizon the
       // page opens with — and it is not in the memo key, so an entry warmed here serves every other
       // horizon too.
-      await programRiskOutlook(deps, summary.measureId, 90);
-    } catch (err) {
-      failedMeasures.push(summary.measureId);
-      console.warn(`[workwell] read-model warm failed for ${summary.measureId}: ${String((err as Error)?.message ?? err)}`);
+      ["outlook", () => programRiskOutlook(deps, measureId, 90)],
+    ];
+    let failed = false;
+    for (const [panel, warm] of panels) {
+      try {
+        await warm();
+      } catch (err) {
+        failed = true;
+        console.warn(`[workwell] read-model warm failed for ${measureId} ${panel}: ${String((err as Error)?.message ?? err)}`);
+      }
     }
+    if (failed) failedMeasures.push(measureId);
   }
-  return { ok: true, failedMeasures };
+  return error ? { ok: false, error, failedMeasures } : { ok: true, failedMeasures };
 }
