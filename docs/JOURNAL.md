@@ -31,7 +31,7 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
   token are now audit events (`AUTH_LOGIN`, `AUTH_LOGOUT`, `AUTH_REFRESH_REUSE_DETECTED`, written before the
   store change); the 15-minute rotation inside a login is not (owner decision). Found on the way: the 30-day
   `WORKWELL_AUTH_ACCESS_TTL_SECONDS` the workflows set is read by nothing (tokens last 15 minutes);
-  flagged separately.
+  removed above (#703).
 - **#604: the nightly no longer freezes the server.** Each 500-patient chunk of an official measure was one
   synchronous `fqm-execution` call (~21 s), so the server could answer nothing for 20 to 25 s at a time
   through the ~80-minute nightly (a sign-in failed this morning). The calculation now runs in one worker
