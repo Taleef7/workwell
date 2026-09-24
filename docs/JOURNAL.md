@@ -45,6 +45,9 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
   the simulated delivery-state controls stay admin-only. The next step follows the delivery state: verify
   after a send, retry a failed one, nothing while queued.
   Escalating a closed, resolved or excluded case is refused (it used to reopen it silently) and not offered.
+- **Two tabs no longer sign the user out.** A refresh rotates the login cookie and the server ends the login
+  on a replayed one; two tabs refreshing at once (the work list in one, a patient in another) did exactly
+  that. Every refresh now takes a cross-tab lock (Web Locks API), so the second tab sends the new cookie.
 - **Case managers see findings, not engineering detail.** From a live walk-through of the pilot: the case
   page no longer shows a case manager raw JSON, value-set OIDs or a `why_flagged` heading; the patient page
   drops the FHIR id and its "Recalculate", which started a whole-practice run of every measure; "View
