@@ -13,6 +13,7 @@ import type { CaseRecord } from "../stores/case-store.ts";
 import type { OutcomeRecord } from "../stores/outcome-store.ts";
 import { DEPLOYMENT_PROFILE, employeeById } from "../config/deployment-profile.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
+import { measureDisplayName } from "../measure/measure-name.ts";
 import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
 import { type ImmunizationForecast } from "../engine/immunization/immunization-forecast.ts";
 import { isOfficialRouted } from "../wiring/official-routing.ts";
@@ -184,7 +185,7 @@ export function toCaseDetail(
     employeeId: c.employeeId,
     employeeName: emp?.name ?? c.employeeId,
     measureId: c.measureId,
-    measureName: MEASURES[c.measureId]?.name ?? c.measureId,
+    measureName: measureDisplayName(c.measureId),
     measureVersionId: c.measureId,
     measureVersion: measureVersion(c.measureId),
     evaluationPeriod: c.evaluationPeriod,

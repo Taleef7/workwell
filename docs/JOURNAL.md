@@ -61,3 +61,7 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
   - A failed load, and filters that exclude every run, no longer read "No runs yet", and a run the filters
     remove no longer leaves its detail behind.
   - The global site filter no longer empties the list; the list says it isn't filtered by site.
+- **#659, #660: the work list names the measure and the patient.** Four of the six measures read as raw
+  ids (`cms130`) on the work list and case page, and in the cases CSV, two MCP tools and the People page;
+  every one now uses the catalog name. Each work-list row shows the patient's ID beside the name, since
+  two patients can share a name, clinic and provider.

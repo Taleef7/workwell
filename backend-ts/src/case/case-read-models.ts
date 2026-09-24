@@ -13,6 +13,7 @@ import type { LiveState } from "../compliance/roster-vocabulary.ts";
 import { employeeById, providerById } from "../config/deployment-profile.ts";
 import { payerNameOf } from "../engine/synthetic/payer-display.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
+import { measureDisplayName } from "../measure/measure-name.ts";
 
 /**
  * **SLA was REMOVED here, not forgotten (#600).** `slaRemainingDays: null` and `slaBreached: false`
@@ -131,7 +132,9 @@ export function toCaseSummary(
     payerName: emp?.payer ? payerNameOf(emp.payer) : null,
     measureId: c.measureId,
     measureVersionId: c.measureId, // slug stands in for the canonical version UUID
-    measureName: MEASURES[c.measureId]?.name ?? c.measureId,
+    // Any runnable measure's name: the authored registry alone left the four official-only measures
+    // as raw ids on the work list and case pages (#659).
+    measureName: measureDisplayName(c.measureId),
     measureVersion: measureVersion(c.measureId),
     evaluationPeriod: c.evaluationPeriod,
     status: c.status,

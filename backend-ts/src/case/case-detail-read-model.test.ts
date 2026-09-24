@@ -38,6 +38,13 @@ const CASE: CaseRecord = {
 // simulated one still resolves synchronously in practice, so awaiting it once here is enough.
 const FORECAST = await simulatedForecaster.forecast("emp-006", "2026-06-19");
 
+test("the case page names every pilot measure, the four official-only ones included (#659)", () => {
+  for (const id of ["cms122", "cms125", "cms2", "cms130", "cms165", "cms137"]) {
+    assert.notEqual(toCaseDetail({ ...CASE, measureId: id }, null).measureName, id, `${id} renders as a raw id`);
+  }
+  assert.equal(toCaseDetail({ ...CASE, measureId: "cms165" }, null).measureName, "Controlling High Blood Pressure");
+});
+
 test("toCaseDetail includes measureId matching the case record", () => {
   const detail = toCaseDetail(CASE, null);
   assert.equal(detail.measureId, "adult_immunization");
