@@ -27,6 +27,8 @@ import { scheduleAppointment } from "../case/appointment-service.ts";
 import { uploadEvidence } from "../case/evidence-service.ts";
 import { createMeasure, approveMeasure, deprecateMeasure, transitionStatus } from "../measure/measure-lifecycle.ts";
 import { attachValueSet, detachValueSet, createTerminologyMapping } from "../measure/value-set-governance.ts";
+import { createAuthHandler } from "../routes/auth.ts";
+import { createJwt } from "../auth/jwt.ts";
 
 /** A ledger that records what it was asked to append, in order. */
 function ledger() {
@@ -319,4 +321,32 @@ test("attachValueSet / detachValueSet: the event survives a failed link write", 
     assert.deepEqual(log.types(), [label]);
     assert.equal(log.events[0]!.entityId, MEASURE.versionId, "keyed on the version the link belongs to");
   }
+});
+
+test("auth login families (#688): each event survives a failed store write", async () => {
+  const events: string[] = [];
+  const failing = {
+    async currentJti() {
+      return "jti-current";
+    },
+    async rotate() {
+      throw new Error("family write failed");
+    },
+    async revoke() {
+      throw new Error("family delete failed");
+    },
+  };
+  const h = createAuthHandler({ secret: "audit-order-auth", revocation: failing, audit: async (e) => void events.push(e.type) });
+  const post = (path: string, cookie?: string, body?: unknown) =>
+    h(new Request(`http://x${path}`, { method: "POST", headers: cookie ? { cookie: `refresh_token=${cookie}` } : {}, body: body ? JSON.stringify(body) : undefined }));
+
+  assert.equal((await post("/api/auth/login", undefined, { email: "cm@workwell.dev", password: "Workwell123!" }))?.status, 200);
+  assert.deepEqual(events, ["AUTH_LOGIN"], "the login's event is written although its family write failed");
+
+  // A tracked token whose jti is not the current one is a replay; its revocation fails, the event stays.
+  const jwt = createJwt({ secret: "audit-order-auth" });
+  const replayed = jwt.issueRefreshToken("cm@workwell.dev", { jti: "jti-old", fam: "fam-1" });
+  assert.equal((await post("/api/auth/refresh", replayed))?.status, 401);
+  assert.equal((await post("/api/auth/logout", replayed))?.status, 204);
+  assert.deepEqual(events, ["AUTH_LOGIN", "AUTH_REFRESH_REUSE_DETECTED", "AUTH_LOGOUT"]);
 });

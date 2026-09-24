@@ -49,7 +49,7 @@ import { handleAdmin } from "./routes/admin.ts";
 import { handleAi } from "./routes/ai.ts";
 import { handleMcp } from "./routes/mcp.ts";
 import { handleAuditor } from "./routes/auditor.ts";
-import { createAuthHandler, type AuthHandler, type RefreshTokenRevocation } from "./routes/auth.ts";
+import { createAuthHandler, type AuthAuditEvent, type AuthHandler, type RefreshTokenRevocation } from "./routes/auth.ts";
 import { getStores } from "./stores/factory.ts";
 import { storeRefreshRevocation } from "./auth/store-refresh-revocation.ts";
 import { createJwt, type JwtService } from "./auth/jwt.ts";
@@ -165,6 +165,7 @@ function rebuildAuthIfNeeded(env: Env): void {
     cookieSameSite: env.WORKWELL_AUTH_COOKIE_SAME_SITE,
     cookieSecure: env.WORKWELL_AUTH_COOKIE_SECURE === "true",
     revocation: refreshRevocation(env), // server-side refresh rotation/logout revocation (M5), in the database (#688)
+    audit: authAudit(env), // login-family events in audit_events, written before the store change (#688)
   });
   verifier = createJwt({ secret: env.WORKWELL_AUTH_JWT_SECRET! });
 }
@@ -176,6 +177,27 @@ function rebuildAuthIfNeeded(env: Env): void {
 export function refreshRevocation(env: Pick<Env, "DATABASE_URL" | "DB" | "CACHE">): RefreshTokenRevocation | undefined {
   if (!(env.DATABASE_URL ?? "").trim() && !env.DB) return kvRefreshRevocation(env.CACHE);
   return storeRefreshRevocation(async () => (await getStores(env)).authFamilies);
+}
+
+/**
+ * The login-family audit writer (#688): `entity_type='auth'`, the family as the entity, the account as
+ * the actor. Only where the families themselves are in the database; the KV fallback holds nothing a
+ * ledger entry would describe.
+ */
+export function authAudit(env: Pick<Env, "DATABASE_URL" | "DB">): ((event: AuthAuditEvent) => Promise<void>) | undefined {
+  if (!(env.DATABASE_URL ?? "").trim() && !env.DB) return undefined;
+  return async (event) => {
+    await (await getStores(env)).events.appendAudit({
+      eventType: event.type,
+      entityType: "auth",
+      entityId: event.family,
+      actor: event.actor,
+      refRunId: null,
+      refCaseId: null,
+      refMeasureVersionId: null,
+      payload: event.via ? { via: event.via } : {},
+    });
+  };
 }
 
 /**

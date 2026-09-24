@@ -13,8 +13,8 @@ import { rmSync } from "node:fs";
 import { createSqliteD1 } from "@mieweb/cloud-local";
 import { RUN_STORE_FLOOR_DDL } from "../stores/sqlite/schema.ts";
 import { SqliteAuthFamilyStore } from "../stores/sqlite/auth-family-store-sqlite.ts";
-import { createAuthHandler } from "../routes/auth.ts";
-import { refreshRevocation, type Env } from "../worker.ts";
+import { createAuthHandler, type AuthAuditEvent } from "../routes/auth.ts";
+import { authAudit, refreshRevocation, type Env } from "../worker.ts";
 
 const SECRET = "store-refresh-revocation-test-secret";
 const dbPaths: string[] = [];
@@ -46,9 +46,9 @@ function emptyKv(): Env["CACHE"] {
   } as unknown as Env["CACHE"];
 }
 
-/** One "process": an auth handler whose revocation is chosen exactly as the worker chooses it. */
-function processOver(db: Env["DB"]) {
-  const h = createAuthHandler({ secret: SECRET, revocation: refreshRevocation({ DB: db, CACHE: emptyKv() }) });
+/** One "process": an auth handler whose revocation and audit are chosen exactly as the worker chooses them. */
+function processOver(db: Env["DB"], audit: ((e: AuthAuditEvent) => Promise<void>) | undefined = authAudit({ DB: db })) {
+  const h = createAuthHandler({ secret: SECRET, revocation: refreshRevocation({ DB: db, CACHE: emptyKv() }), audit });
   return (path: string, cookie?: string) =>
     h(
       new Request(`http://x${path}`, {
@@ -102,4 +102,49 @@ test("the family store forgets a family at its expiry and drops lapsed rows on t
 
   await store.revoke("fam-b");
   assert.equal(await store.currentJti("fam-b", "2026-09-24T21:00:01.000Z"), null);
+});
+
+const authEvents = async (db: Env["DB"]) =>
+  (
+    (
+      await db
+        .prepare("SELECT event_type AS type, actor, entity_id AS family FROM audit_events WHERE entity_type = 'auth' ORDER BY id")
+        .all<{ type: string; actor: string; family: string }>()
+    ).results ?? []
+  ).map((r) => ({ type: r.type, actor: r.actor, family: r.family }));
+const familyRows = async (db: Env["DB"]) =>
+  ((await db.prepare("SELECT family FROM auth_refresh_families").all<{ family: string }>()).results ?? []).map((r) => r.family);
+
+test("login, logout and a replayed token are audited; a rotation inside a family is not (#688)", async () => {
+  const db = await freshDb();
+  const p = processOver(db);
+  const token1 = cookieOf(await p("/api/auth/login"));
+  const [family] = await familyRows(db);
+  const token2 = cookieOf(await p("/api/auth/refresh", token1));
+  cookieOf(await p("/api/auth/refresh", token2));
+  assert.deepEqual(await authEvents(db), [{ type: "AUTH_LOGIN", actor: "cm@workwell.dev", family }], "one login, two rotations: one event");
+
+  assert.equal((await p("/api/auth/refresh", token1))?.status, 401);
+  const token3 = cookieOf(await p("/api/auth/login"));
+  const family3 = (await familyRows(db))[0];
+  assert.equal((await p("/api/auth/logout", token3))?.status, 204);
+  assert.deepEqual(
+    (await authEvents(db)).map((e) => [e.type, e.family]),
+    [["AUTH_LOGIN", family], ["AUTH_REFRESH_REUSE_DETECTED", family], ["AUTH_LOGIN", family3], ["AUTH_LOGOUT", family3]],
+  );
+});
+
+test("audit-first: a login whose event cannot be written records no family; a logout still revokes (#688)", async () => {
+  const db = await freshDb();
+  const failing = async () => {
+    throw new Error("audit store down");
+  };
+  const token = cookieOf(await processOver(db, failing)("/api/auth/login"));
+  assert.deepEqual(await familyRows(db), [], "no family the ledger does not know about");
+  assert.equal((await processOver(db)("/api/auth/refresh", token))?.status, 200, "the login still works, untracked (the store-outage degradation)");
+
+  const tracked = cookieOf(await processOver(db)("/api/auth/login"));
+  assert.equal((await familyRows(db)).length, 2, "the untracked token was upgraded into a family on refresh, and the new login opened one");
+  assert.equal((await processOver(db, failing)("/api/auth/logout", tracked))?.status, 204);
+  assert.equal((await processOver(db)("/api/auth/refresh", tracked))?.status, 401, "a logout ends the session even when its event could not be written");
 });
