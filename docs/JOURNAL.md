@@ -45,6 +45,10 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
   the simulated delivery-state controls stay admin-only. The next step follows the delivery state: verify
   after a send, retry a failed one, nothing while queued.
   Escalating a closed, resolved or excluded case is refused (it used to reopen it silently) and not offered.
+- **Case managers see findings, not engineering detail.** From a live walk-through of the pilot: the case
+  page no longer shows a case manager raw JSON, value-set OIDs or a `why_flagged` heading; the patient page
+  drops the FHIR id and its "Recalculate", which started a whole-practice run of every measure; "View
+  hierarchy" and a CLI hint on the measure page are gone. Admins keep all of it.
 - **The AI surfaces now ask `gpt-6-luna` first and `gpt-5.4-nano` second.** The client sent `max_tokens`
   and a temperature, both rejected by GPT-5-era models, so the old primary most likely failed on every
   call and `gpt-4o-mini` answered. It now turns reasoning off and sends `max_completion_tokens`. The

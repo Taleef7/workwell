@@ -151,6 +151,27 @@ describe("CaseDetailPage pilot mode controls", () => {
     expect(screen.getByRole("button", { name: "Rerun to verify" })).toBeDisabled(); // narrow layout
   });
 
+  it.each([
+    ["ROLE_CASE_MANAGER", false],
+    ["ROLE_ADMIN", true],
+  ])("engineering detail (raw evidence, evaluated resource) for %s in pilot mode: %s", async (role, shown) => {
+    setPublicDemo(false);
+    currentRole = role;
+    get.mockImplementation((url: string) => {
+      if (url === "/api/cases/case-001") return Promise.resolve({ ...caseData, evidenceJson: { expressionResults: [], evaluatedResource: { resourceType: "Patient" } } });
+      return Promise.resolve([]);
+    });
+
+    render(<CaseDetailPage />);
+    await waitFor(() => {
+      expect(screen.getAllByText("Alice Walker").length).toBeGreaterThan(0);
+    });
+
+    expect(screen.getByText("What the measure found")).toBeInTheDocument();
+    expect(screen.queryAllByRole("button", { name: "View Raw Evidence" }).length > 0).toBe(shown);
+    expect(screen.queryAllByText("Evaluated resource").length > 0).toBe(shown);
+  });
+
   it("gives a read-only viewer none of the case actions", async () => {
     setPublicDemo(false);
     currentRole = "ROLE_VIEWER";

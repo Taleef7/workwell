@@ -67,6 +67,8 @@ describe("ProgramsPage pilot mode controls", () => {
 
     expect(screen.queryByRole("button", { name: /Run All Measures Now/i })).toBeNull();
     expect(screen.queryByLabelText("System")).toBeNull();
+    // The multi-tenant rollup is an engineering view.
+    expect(screen.queryByRole("link", { name: "View hierarchy" })).toBeNull();
   });
 
   it("shows Run All Measures Now and System selector for admin in pilot mode", async () => {
@@ -81,6 +83,7 @@ describe("ProgramsPage pilot mode controls", () => {
 
     expect(screen.getByRole("button", { name: /Run All Measures Now/i })).toBeInTheDocument();
     expect(screen.getByLabelText("System")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "View hierarchy" })).toBeInTheDocument();
   });
 
   it("companion: shows controls for non-admin when PUBLIC_DEMO is true", async () => {

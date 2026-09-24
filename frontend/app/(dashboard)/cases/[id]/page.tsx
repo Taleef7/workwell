@@ -1040,12 +1040,14 @@ export default function CaseDetailPage() {
 
             <div className="rounded-3xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-6 shadow-sm">
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500 dark:text-neutral-400">Why Flagged</p>
-              <h4 className="mt-2 text-xl font-semibold">CQL Evidence Explorer</h4>
+              <h4 className="mt-2 text-xl font-semibold">What the measure found</h4>
               <div className="mt-4">
                 <CqlExpressionResults results={caseDetail.evidenceJson.expressionResults} />
               </div>
 
-              {linkedValueSets.length > 0 ? (
+              {/* Raw value-set OIDs, the raw evidence and the evaluated resource are engineering detail: a
+                  pilot case manager gets the findings above and the plain-language explanation. */}
+              {canEngineering && linkedValueSets.length > 0 ? (
                 <div className="mt-6 rounded-2xl border border-indigo-100 bg-indigo-50 p-4 dark:border-indigo-900 dark:bg-indigo-950/30">
                   <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-700 dark:text-indigo-300">Declared value sets</p>
                   <p className="mt-1 text-xs text-indigo-600 dark:text-indigo-400">These are the code sets the CQL was evaluating against for this measure version.</p>
@@ -1069,13 +1071,14 @@ export default function CaseDetailPage() {
               ) : null}
 
               <div className="mt-6 rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800/50 p-4">
-                <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">why_flagged</p>
+                <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Evidence details</p>
                 <CqlWhyFlagged whyFlagged={caseDetail.evidenceJson.why_flagged} />
                 {!isPatientTerm ? (
                   <pre className="mt-3 overflow-x-auto whitespace-pre-wrap text-xs leading-5 text-neutral-700 dark:text-neutral-300">
                     {JSON.stringify(caseDetail.evidenceJson.why_flagged ?? {}, null, 2)}
                   </pre>
                 ) : null}
+                {canEngineering ? (
                 <div className="mt-4">
                   <Button
                     type="button"
@@ -1086,7 +1089,8 @@ export default function CaseDetailPage() {
                     {showRawEvidence ? "Hide Raw Evidence" : "View Raw Evidence"}
                   </Button>
                 </div>
-                {showRawEvidence ? (
+                ) : null}
+                {canEngineering && showRawEvidence ? (
                   <pre className="mt-3 overflow-x-auto whitespace-pre-wrap rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3 text-xs leading-5 text-neutral-700 dark:text-neutral-300">
                     {JSON.stringify(caseDetail.evidenceJson ?? {}, null, 2)}
                   </pre>
@@ -1118,12 +1122,14 @@ export default function CaseDetailPage() {
                 </div>
               </div>
 
+              {canEngineering ? (
               <div className="mt-6 rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800/50 p-4">
                 <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Evaluated resource</p>
                 <pre className="mt-3 overflow-x-auto whitespace-pre-wrap text-xs leading-5 text-neutral-700 dark:text-neutral-300">
                   {JSON.stringify(caseDetail.evidenceJson.evaluatedResource ?? {}, null, 2)}
                 </pre>
               </div>
+              ) : null}
             </div>
           </div>
 
