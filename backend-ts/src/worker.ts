@@ -175,7 +175,7 @@ function rebuildAuthIfNeeded(env: Env): void {
  */
 export function refreshRevocation(env: Pick<Env, "DATABASE_URL" | "DB" | "CACHE">): RefreshTokenRevocation | undefined {
   if (!(env.DATABASE_URL ?? "").trim() && !env.DB) return kvRefreshRevocation(env.CACHE);
-  return storeRefreshRevocation(async () => (await getStores(env as Env)).authFamilies);
+  return storeRefreshRevocation(async () => (await getStores(env)).authFamilies);
 }
 
 /**
