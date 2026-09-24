@@ -49,7 +49,9 @@ import { handleAdmin } from "./routes/admin.ts";
 import { handleAi } from "./routes/ai.ts";
 import { handleMcp } from "./routes/mcp.ts";
 import { handleAuditor } from "./routes/auditor.ts";
-import { createAuthHandler, type AuthHandler, type RefreshTokenRevocation } from "./routes/auth.ts";
+import { createAuthHandler, type AuthAuditEvent, type AuthHandler, type RefreshTokenRevocation } from "./routes/auth.ts";
+import { getStores } from "./stores/factory.ts";
+import { storeRefreshRevocation } from "./auth/store-refresh-revocation.ts";
 import { createJwt, type JwtService } from "./auth/jwt.ts";
 import { authorize, extractPrincipal, listFilterAuthorized } from "./auth/authorize.ts";
 import { isDemoAccountRefusedOnProfile } from "./auth/demo-users.ts";
@@ -162,13 +164,44 @@ function rebuildAuthIfNeeded(env: Env): void {
     secret: env.WORKWELL_AUTH_JWT_SECRET!,
     cookieSameSite: env.WORKWELL_AUTH_COOKIE_SAME_SITE,
     cookieSecure: env.WORKWELL_AUTH_COOKIE_SECURE === "true",
-    revocation: kvRefreshRevocation(env.CACHE), // server-side refresh rotation/logout revocation (M5)
+    revocation: refreshRevocation(env), // server-side refresh rotation/logout revocation (M5), in the database (#688)
+    audit: authAudit(env), // login-family events in audit_events, written before the store change (#688)
   });
   verifier = createJwt({ secret: env.WORKWELL_AUTH_JWT_SECRET! });
 }
 
 /**
- * Refresh-token revocation backed by the KV binding (Fable M5). Keyed by token family; the value is
+ * Refresh-token revocation in the DATABASE (#688) wherever one is configured, so a deploy or restart no
+ * longer signs every user out; the in-memory KV binding below only where there is no database.
+ */
+export function refreshRevocation(env: Pick<Env, "DATABASE_URL" | "DB" | "CACHE">): RefreshTokenRevocation | undefined {
+  if (!(env.DATABASE_URL ?? "").trim() && !env.DB) return kvRefreshRevocation(env.CACHE);
+  return storeRefreshRevocation(async () => (await getStores(env)).authFamilies);
+}
+
+/**
+ * The login-family audit writer (#688): `entity_type='auth'`, the family as the entity, the account as
+ * the actor. Only where the families themselves are in the database; the KV fallback holds nothing a
+ * ledger entry would describe.
+ */
+export function authAudit(env: Pick<Env, "DATABASE_URL" | "DB">): ((event: AuthAuditEvent) => Promise<void>) | undefined {
+  if (!(env.DATABASE_URL ?? "").trim() && !env.DB) return undefined;
+  return async (event) => {
+    await (await getStores(env)).events.appendAudit({
+      eventType: event.type,
+      entityType: "auth",
+      entityId: event.family,
+      actor: event.actor,
+      refRunId: null,
+      refCaseId: null,
+      refMeasureVersionId: null,
+      payload: event.via ? { via: event.via } : {},
+    });
+  };
+}
+
+/**
+ * Refresh-token revocation backed by the KV binding (Fable M5), used only when no database is configured. Keyed by token family; the value is
  * the family's current jti. A missing binding (or any op that throws) degrades to stateless auth —
  * the auth handler treats a throw as "store unavailable" and never hard-logs-out on it.
  */
