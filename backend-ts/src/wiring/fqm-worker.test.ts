@@ -87,7 +87,7 @@ test("a crashed worker's exit does not fail the next chunk, already sent to its 
   }
 });
 
-test("overlapping chunks each get their own answer, in any order (#604)", async () => {
+test("chunks submitted together each get their own answer (the worker runs them one at a time) (#604)", async () => {
   const worker = createFqmWorker({ calculatorModule: FIXTURE });
   try {
     const [slow, fast, failing] = await Promise.allSettled([

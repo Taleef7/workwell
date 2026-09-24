@@ -30,7 +30,7 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
 - **#604: the nightly no longer freezes the server.** Each 500-patient chunk of an official measure was one
   synchronous `fqm-execution` call (~21 s), so the server could answer nothing for 20 to 25 s at a time
   through the ~80-minute nightly (a sign-in failed this morning). The calculation now runs in one worker
-  thread and the main thread keeps serving; results are identical (checked on CMS125).
+  thread and the main thread keeps serving; results are identical (checked on the Maui corpus for every routed measure, CMS137's rates and strata included).
   `WORKWELL_FQM_WORKER=off` puts it back in-process. `/api/admin/runtime` reports the container's cores
   and memory limit, which decide whether a pool could also shorten the run and how to bound the worker.
   Known limit: a single-patient official read during the nightly (`/simulate`, a rerun) still waits
