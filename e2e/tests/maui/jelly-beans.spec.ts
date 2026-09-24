@@ -72,7 +72,7 @@ test.describe("Maui status chips (jelly beans)", () => {
       const chips = await readChips(page, measure.id);
       expect(chips.length, `${measure.cms} should have at least one open-bucket chip`).toBeGreaterThan(0);
 
-      const worklistLink = page.locator(`a[href*="measureId=${measure.id}"]`).filter({ hasText: /Open Worklist/i });
+      const worklistLink = page.locator(`a[href*="measureId=${measure.id}"]`).filter({ hasText: /Open cases/i });
       await expect(worklistLink.first()).toBeVisible({ timeout: 10_000 });
       const worklistText = (await worklistLink.first().textContent()) ?? "";
       const worklistTotal = Number(worklistText.match(/([\d,]+)/)?.[1]?.replace(/,/g, ""));

@@ -289,11 +289,13 @@ export default function EmployeeProfilePage() {
 
       {/* Back link */}
       <div>
+        {/* The work list is where staff reach a patient from, and the link says so ("Back to Cases" sent them
+            to /cases). A history-based "Back" could leave WorkWell when the page was opened from a link. */}
         <Link
-          href="/cases"
+          href="/worklist"
           className="rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2 text-xs font-semibold text-neutral-700 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-800/50"
         >
-          ← Back to Cases
+          ← Back to the work list
         </Link>
       </div>
       </aside>

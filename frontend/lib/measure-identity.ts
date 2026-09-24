@@ -86,5 +86,12 @@ export function useMeasureIdentities() {
     [identities],
   );
 
-  return { identities, measures, labelFor, loading, error, refetch: fetchIdentities };
+  // The label when only the id is at hand: the catalog's own name after the identity, never the id twice
+  // ("MIPS 112 · CMS125 · cms125" was the result of passing the id as the fallback name).
+  const labelForId = useCallback(
+    (measureId: string): string => labelFor(measureId, measures.find((m) => m.id === measureId)?.name ?? measureId),
+    [labelFor, measures],
+  );
+
+  return { identities, measures, labelFor, labelForId, loading, error, refetch: fetchIdentities };
 }

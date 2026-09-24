@@ -21,6 +21,17 @@ describe("CqlEvidence", () => {
     expect(screen.queryByText("Numerator")).not.toBeInTheDocument();
   });
 
+  it("shows a dash, never \"0\", when days overdue was not computed, and claims nothing about a result", () => {
+    render(<CqlEvidence evidence={{ why_flagged: {
+      last_exam_date: null, compliance_window_days: 365, days_overdue: null,
+      role_eligible: true, site_eligible: true, waiver_status: "NONE"
+    } }} />);
+    const row = screen.getByText("Days overdue").parentElement!;
+    expect(row).toHaveTextContent("—");
+    expect(row).not.toHaveTextContent("0");
+    expect(screen.queryByText("No result on file")).toBeNull();
+  });
+
   it("renders the why_flagged summary rows", () => {
     render(<CqlEvidence evidence={{ why_flagged: {
       last_exam_date: "2025-08-10", compliance_window_days: 365, days_overdue: 12,

@@ -24,6 +24,7 @@ import { useAuth } from "@/components/auth-provider";
 import { canManageCases } from "@/lib/rbac";
 import { SkeletonRow } from "@/components/skeleton-loader";
 import { useSubjectLists, type SubjectListRow } from "@/features/subject-list/use-subject-lists";
+import { useMeasureIdentities } from "@/lib/measure-identity";
 
 type Resolution = "MATCHED" | "NOT_FOUND" | "AMBIGUOUS";
 
@@ -371,6 +372,8 @@ function MembersTable({ list, api }: { list: SubjectListRow; api: ReturnType<typ
 }
 
 function ReportPanel({ list, api }: { list: SubjectListRow; api: ReturnType<typeof useApi> }) {
+  // The measure's name, as every other page shows it, not its id ("cms122").
+  const { labelForId } = useMeasureIdentities();
   const thisYear = new Date().getUTCFullYear();
   // The NEXT year is offered too. The pilot's target is PY2027 while the clock says 2026, and a run
   // can already be created with a 2027 evaluation date — so a list offering only past years would
@@ -476,7 +479,7 @@ function ReportPanel({ list, api }: { list: SubjectListRow; api: ReturnType<type
                 <tr>
                   <th className="p-3">Measure</th>
                   <th className="p-3">Rate</th>
-                  <th className="p-3">IPP</th>
+                  <th className="p-3">Initial population</th>
                   <th className="p-3">Denominator</th>
                   <th className="p-3">Exclusions</th>
                   <th className="p-3">Exceptions</th>
@@ -489,7 +492,7 @@ function ReportPanel({ list, api }: { list: SubjectListRow; api: ReturnType<type
                 {report.measures.map((measure) =>
                   measure.rates.length === 0 ? (
                     <tr key={measure.measureId}>
-                      <td className="p-3 font-medium">{measure.measureId}</td>
+                      <td className="p-3 font-medium">{labelForId(measure.measureId)}</td>
                       <td className="text-muted-foreground p-3" colSpan={8}>
                         {measure.compactionStatus === "compacted"
                           ? "Refused — the run predates a retention cutoff"
@@ -499,7 +502,7 @@ function ReportPanel({ list, api }: { list: SubjectListRow; api: ReturnType<type
                   ) : (
                     measure.rates.map((rate, i) => (
                       <tr key={`${measure.measureId}-${rate.label ?? i}`}>
-                        <td className="p-3 font-medium">{i === 0 ? measure.measureId : ""}</td>
+                        <td className="p-3 font-medium">{i === 0 ? labelForId(measure.measureId) : ""}</td>
                         <td className="p-3">{rate.label ?? "—"}</td>
                         <td className="p-3">{rate.ipp.toLocaleString()}</td>
                         <td className="p-3">{rate.effectiveDenominator.toLocaleString()}</td>

@@ -69,7 +69,7 @@ describe("ProgramsPage — one rate per card (#637)", () => {
       expect(screen.queryByText(gone)).toBeNull();
     }
     // What stays: the worklist link, and the whole card still opens the measure page.
-    expect(screen.getByRole("link", { name: /Open Worklist \(6\)/ })).toHaveAttribute("href", "/cases?measureId=cms137");
+    expect(screen.getByRole("link", { name: /Open cases \(6\)/ })).toHaveAttribute("href", "/cases?measureId=cms137");
     expect(screen.getByRole("link", { name: /View .* detail/ })).toHaveAttribute("href", "/programs/cms137");
   });
 });

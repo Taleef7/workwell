@@ -49,7 +49,7 @@ describe("ProgramsPage — the staff-closed reconciliation (#569)", () => {
     await screen.findByText("Compliance 50.0%");
     expect(screen.queryByText(/closed by staff/i)).not.toBeInTheDocument();
     // The card keeps its worklist link and its chips.
-    expect(screen.getByRole("link", { name: /Open Worklist \(3\)/ })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Open cases \(3\)/ })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /overdue/i })).toHaveAttribute("href", "/compliance?measureId=cms125&status=OVERDUE");
   });
 });

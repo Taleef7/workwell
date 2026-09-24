@@ -173,7 +173,9 @@ export function CqlWhyFlagged({ whyFlagged }: { whyFlagged?: EvidenceJson["why_f
       ) : null}
       <WhyFlaggedRow label={isPatient ? "Last result date" : "Last exam date"} value={whyFlagged.last_exam_date ?? "None"} />
       <WhyFlaggedRow label="Window (days)" value={String(whyFlagged.compliance_window_days)} />
-      <WhyFlaggedRow label="Days overdue" value={String(whyFlagged.days_overdue ?? 0)} />
+      {/* Not computed (no result, or an official measure with no recency rule) is a dash, never "0": "0 days
+          overdue" beside an Overdue badge contradicted it. The dash makes no claim about whether a result exists. */}
+      <WhyFlaggedRow label="Days overdue" value={whyFlagged.days_overdue == null ? "—" : String(whyFlagged.days_overdue)} />
       {!isPatient ? <WhyFlaggedRow label="Role eligible" value={whyFlagged.role_eligible ? "Yes" : "No"} /> : null}
       {!isPatient ? <WhyFlaggedRow label="Site eligible" value={whyFlagged.site_eligible ? "Yes" : "No"} /> : null}
       <WhyFlaggedRow label={isPatient ? "Exclusion status" : "Waiver status"} value={whyFlagged.waiver_status} />

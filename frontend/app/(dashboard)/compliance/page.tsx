@@ -79,7 +79,7 @@ export default function CompliancePage() {
   // cases & programs pages — not a page-local field, so the global filter actually applies here.
   const { siteId } = useGlobalFilters();
   const canRecalc = canRunMeasures(user?.role) && canSeeEngineering(user?.role);
-  const { labelFor: measureLabelFor } = useMeasureIdentities();
+  const { labelFor: measureLabelFor, labelForId: measureLabelForId } = useMeasureIdentities();
 
   // Derived from the URL rather than useState-initialized, so browser back/forward between two
   // filtered /compliance URLs re-renders with the right filter.
@@ -803,7 +803,7 @@ export default function CompliancePage() {
           <div className="hidden flex-wrap items-center gap-3 rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-2 text-sm md:flex dark:border-neutral-800 dark:bg-neutral-900/60">
             <span className="font-medium">
               {selectedHere.length === 0
-                ? `Select ${SUBJECT.plural} to assign their ${measureLabelFor(assignMeasureId, assignMeasureId)} case`
+                ? `Select ${SUBJECT.plural} to assign their ${measureLabelForId(assignMeasureId)} case`
                 : `${selectedHere.length} selected`}
             </span>
             <label className="flex items-center gap-2">

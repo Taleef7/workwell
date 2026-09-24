@@ -630,7 +630,7 @@ export default function CasesPage() {
     <section className="space-y-6">
       <div className="rounded-3xl border border-neutral-800 bg-gradient-to-br from-neutral-900 via-neutral-800 to-neutral-950 p-8 text-white shadow-lg">
         <p className="text-sm uppercase tracking-[0.3em] text-neutral-300">Caseflow</p>
-        <h2 className="mt-2 text-3xl font-semibold text-white">Why Flagged cases</h2>
+        <h2 className="mt-2 text-3xl font-semibold text-white">Cases</h2>
         <p className="mt-3 max-w-2xl text-neutral-300">
           Your daily worklist of {SUBJECT.plural} flagged by the latest measure runs. Each card links to the structured
           evidence that explains why the case is open, including {isPatientTerm ? "exclusion" : "waiver"} context when an exclusion applies.
@@ -643,9 +643,12 @@ export default function CasesPage() {
           <p className="text-sm text-neutral-500 dark:text-neutral-400">Filter, search, and bulk-act on flagged cases.</p>
         </div>
         <p className="text-sm text-neutral-500 dark:text-neutral-400">
-          {total > cases.length
-            ? `${cases.length} of ${total} cases`
-            : `${cases.length} case${cases.length !== 1 ? "s" : ""} loaded`}
+          {/* Not "0 cases loaded" while the first page is still coming: that reads as an empty list. */}
+          {loading && cases.length === 0
+            ? "Loading cases…"
+            : total > cases.length
+              ? `${cases.length} of ${total} cases`
+              : `${cases.length} case${cases.length !== 1 ? "s" : ""} loaded`}
         </p>
         <div className="flex items-center gap-2">
           <Button
