@@ -6,6 +6,7 @@ import { useApi } from "@/lib/api/hooks";
 import { useAuth } from "@/components/auth-provider";
 import { useRunStatus } from "@/components/run-status-provider";
 import { canRunMeasures } from "@/lib/rbac";
+import { canSeeEngineering } from "@/lib/public-demo";
 import { ComplianceChip } from "@/features/compliance/ComplianceChip";
 import { CqlEvidence, type EvidenceJson } from "@/features/evidence/CqlEvidence";
 import { PANEL_OPTIONS, type PanelId, type Roster, type RosterCell } from "@/features/compliance/types";
@@ -38,7 +39,9 @@ export function IndividualComplianceStatus({
   const api = useApi();
   const { user } = useAuth();
   const { startTracking, isActive } = useRunStatus();
-  const canRecalc = canRunMeasures(user?.role);
+  // Recalculate starts a whole-practice run of every measure (over an hour on the pilot), so it follows
+  // the Programs page's "Run All Measures": engineering only in pilot mode, not a per-patient refresh.
+  const canRecalc = canRunMeasures(user?.role) && canSeeEngineering(user?.role);
 
   const [rows, setRows] = useState<Row[]>([]);
   const [emptyPanels, setEmptyPanels] = useState(false);

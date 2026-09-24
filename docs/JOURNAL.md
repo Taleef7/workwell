@@ -48,6 +48,10 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
 - **Two tabs no longer sign the user out.** A refresh rotates the login cookie and the server ends the login
   on a replayed one; two tabs refreshing at once (the work list in one, a patient in another) did exactly
   that. Every refresh now takes a cross-tab lock (Web Locks API), so the second tab sends the new cookie.
+- **Case managers see findings, not engineering detail.** From a live walk-through of the pilot: the case
+  page no longer shows a case manager raw JSON, value-set OIDs or a `why_flagged` heading; the patient page
+  drops the FHIR id and its "Recalculate", which started a whole-practice run of every measure; "View
+  hierarchy" and a CLI hint on the measure page are gone. Admins keep all of it.
 - **The AI surfaces now ask `gpt-6-luna` first and `gpt-5.4-nano` second.** The client sent `max_tokens`
   and a temperature, both rejected by GPT-5-era models, so the old primary most likely failed on every
   call and `gpt-4o-mini` answered. It now turns reasoning off and sends `max_completion_tokens`. The

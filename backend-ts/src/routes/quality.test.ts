@@ -100,7 +100,7 @@ test("#642: an officially routed measure's monthly history is refused (409), nev
     assert.equal(res?.status, 409);
     const body = (await res!.json()) as { error: string; message: string };
     assert.equal(body.error, "snapshot_basis_unsafe");
-    assert.match(body.message, /(employees|patients) outside the measure's population/);
+    assert.match(body.message, /(employees|patients) the measure does not apply to/);
   } finally {
     if (prev === undefined) delete process.env.WORKWELL_OFFICIAL_MEASURES;
     else process.env.WORKWELL_OFFICIAL_MEASURES = prev;

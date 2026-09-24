@@ -10,6 +10,8 @@ const apiMock = { getWithHeaders, get, post };
 vi.mock("@/lib/api/hooks", () => ({ useApi: () => apiMock }));
 
 const authState = { role: "ROLE_ADMIN" as string | null };
+vi.mock("@/lib/public-demo", () => import("@/test/mocks/public-demo"));
+import { setPublicDemo } from "@/test/mocks/public-demo";
 vi.mock("@/components/auth-provider", () => ({ useAuth: () => ({ user: authState.role ? { role: authState.role } : null }) }));
 
 const startTracking = vi.fn();
@@ -34,6 +36,7 @@ function rosterFor(panel: string, measureId: string, name: string, status: strin
 
 beforeEach(() => {
   authState.role = "ROLE_ADMIN";
+  setPublicDemo(true);
   startTracking.mockReset();
   runState.isActive = false;
   getWithHeaders.mockReset().mockImplementation((url: string) => {
@@ -89,6 +92,14 @@ describe("IndividualComplianceStatus", () => {
     expect(btn).toBeDisabled();
     await userEvent.click(btn);
     expect(post).not.toHaveBeenCalled();
+  });
+
+  it("hides Recalculate from a pilot case manager: it starts a whole-practice run of every measure", async () => {
+    setPublicDemo(false);
+    authState.role = "ROLE_CASE_MANAGER";
+    render(<IndividualComplianceStatus externalId="emp-001" />);
+    await screen.findByText("MMR");
+    expect(screen.queryByRole("button", { name: /recalculate/i })).not.toBeInTheDocument();
   });
 
   it("hides Recalculate for roles that cannot run measures", async () => {

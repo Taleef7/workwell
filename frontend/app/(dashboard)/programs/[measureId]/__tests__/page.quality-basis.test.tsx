@@ -69,7 +69,7 @@ describe("Quality over time — the snapshot basis (#642)", () => {
     mockApi(() => Promise.resolve([]));
     render(<ProgramDetailPage />);
     await waitFor(() => expect(screen.getByText(/Quality over time/)).toBeInTheDocument());
-    expect(await screen.findByText(/No materialized quality snapshots yet/)).toBeInTheDocument();
+    expect(await screen.findByText(/No monthly history yet/)).toBeInTheDocument();
     expect(screen.queryByText(/source of truth/i)).not.toBeInTheDocument();
   });
 
