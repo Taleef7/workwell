@@ -7,6 +7,11 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
 
 ## 2026-09-24
 
+- **`WORKWELL_AUTH_ACCESS_TTL_SECONDS` removed from the five deploy/reconcile workflows.** It set a 30-day
+  access token for MCP, but only the Java backend read it; the TypeScript port dropped the reader, so
+  tokens have lasted 15 minutes since. Kept that way (a 30-day access token cannot be revoked, and #688
+  makes logout a real revocation). `MCP.md` now says 15 minutes and how to re-mint.
+
 - **#615: every dashboard cache warm is now recorded.** The first Programs load after a quiet stretch still
   timed out on the pilot (the overview ran 33 to 60 s), and the nightly's warm had not filled the caches it
   exists to fill, but nothing could say whether it had run. `/health` now shows the last warm (`lastWarm`:
