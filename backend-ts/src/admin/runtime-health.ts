@@ -24,7 +24,7 @@
  */
 import { monitorEventLoopDelay, type IntervalHistogram } from "node:perf_hooks";
 import { Worker } from "node:worker_threads";
-import { availableParallelism } from "node:os";
+import { availableParallelism, totalmem } from "node:os";
 
 /** When this process started serving code (module load ≈ boot). */
 export const PROCESS_STARTED_AT = new Date().toISOString();
@@ -426,6 +426,9 @@ export function runtimeDetail(now: number = Date.now()) {
     // The cores this process may use (#604): whether a pool of calculation workers could also shorten
     // the nightly, or whether one worker's gain is responsiveness only.
     cpus: availableParallelism(),
+    // The memory this process may use: the container's cgroup limit where Node can read one, else the
+    // host's. What a heap limit on the calculation worker would have to be sized against (#604).
+    memoryLimitMb: Math.round((process.constrainedMemory?.() || totalmem()) / (1024 * 1024)),
     stalls: [...stalls].reverse(),
     warms: [...warms].reverse(),
     inFlight: { total: current.length, requests: current.slice(0, MAX_REPORTED_REQUESTS).map(({ method, path, runningMs }) => ({ method, path, runningMs })) },

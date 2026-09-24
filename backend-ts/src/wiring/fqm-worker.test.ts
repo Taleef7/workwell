@@ -8,8 +8,9 @@ import { createFqmWorker } from "./fqm-worker.ts";
 import { officialMeasureExecutor } from "./official-executor-adapter.ts";
 import { officialTerminologyExpander, loadOfficialTerminology } from "./official-terminology.ts";
 import { loadOfficialArtifact } from "./official-artifacts.ts";
-import { directSyntheticGenerator } from "../run/scale-generator.ts";
-import type { TargetOutcome } from "../engine/synthetic/exam-config.ts";
+import { corpusBundleSource } from "./corpus-bundle-source.ts";
+import { corpusDirectory } from "../engine/synthetic/corpus/corpus-directory.ts";
+import { DEFAULT_CORPUS_SEED } from "../engine/synthetic/corpus/corpus-parameters.ts";
 
 const FIXTURE = new URL("./fqm-worker.fixture-calculator.ts", import.meta.url).href;
 const PERIOD = { start: "2026-01-01", end: "2026-12-31" };
@@ -50,22 +51,40 @@ const skipWithout = (id: string) => {
   return artifact && loadOfficialTerminology(artifact).ok ? false : `run 'pnpm vendor:official' to fetch ${id}'s terminology sidecar`;
 };
 
-test("the worker scores a real official measure exactly as the in-process call does (#604)", { skip: skipWithout("cms125") }, async () => {
-  const generator = directSyntheticGenerator();
-  const targets: TargetOutcome[] = ["COMPLIANT", "OVERDUE", "MISSING_DATA", "EXCLUDED"];
-  const subjects = Array.from({ length: 24 }, (_, i) => {
-    const subjectId = `w604-${i}`;
-    return { subjectId, patientBundle: generator.bundleFor(subjectId, "cms125", targets[i % targets.length]!, "2026-07-27") };
+// The data the nightly actually scores (the Maui corpus), for every measure it routes — including cms137,
+// the one with two rates and age strata, the richest shape that has to survive the thread boundary.
+const CORPUS_DATE = `${new Date().getUTCFullYear()}-12-31`;
+const CORPUS = corpusDirectory(DEFAULT_CORPUS_SEED, 80).EMPLOYEES;
+for (const measureId of ["cms122", "cms125", "cms2", "cms130", "cms165", "cms137"]) {
+  test(`the worker scores official ${measureId} exactly as the in-process call does (#604)`, { skip: skipWithout(measureId) }, async () => {
+    const source = corpusBundleSource();
+    const subjects = CORPUS.map((e) => ({ subjectId: e.externalId, patientBundle: source.bundleForSubject!(e, CORPUS_DATE) }));
+    const expand = officialTerminologyExpander(loadOfficialArtifact);
+    const worker = createFqmWorker();
+    try {
+      const inProcess = await officialMeasureExecutor({ expand }).evaluateBatch(measureId, subjects, CORPUS_DATE);
+      const inWorker = await officialMeasureExecutor({ expand, calculateBatch: worker.calculate }).evaluateBatch(measureId, subjects, CORPUS_DATE);
+      assert.equal(worker.requests, 1, "the second executor really calculated in the worker");
+      assert.ok([...inProcess.values()].some((o) => o.inInitialPopulation), "someone is in the population, so the comparison says something");
+      assert.deepEqual(inWorker, inProcess, "outcomes and evidence are identical");
+    } finally {
+      await worker.close();
+    }
   });
-  const expand = officialTerminologyExpander(loadOfficialArtifact);
-  const worker = createFqmWorker();
+}
+
+test("overlapping chunks each get their own answer, in any order (#604)", async () => {
+  const worker = createFqmWorker({ calculatorModule: FIXTURE });
   try {
-    const inProcess = await officialMeasureExecutor({ expand }).evaluateBatch("cms125", subjects, "2026-07-27");
-    const inWorker = await officialMeasureExecutor({ expand, calculateBatch: worker.calculate }).evaluateBatch("cms125", subjects, "2026-07-27");
-    assert.equal(worker.requests, 1, "the second executor really calculated in the worker");
-    assert.equal(inProcess.size, subjects.length);
-    assert.ok(new Set([...inProcess.values()].map((o) => o.outcome)).size > 1, "the roster is not degenerate");
-    assert.deepEqual(inWorker, inProcess, "outcomes and evidence are identical");
+    const [slow, fast, failing] = await Promise.allSettled([
+      worker.calculate(input([{ mode: "busy", cpuMs: 300 }, {}, {}])),
+      worker.calculate(input([{}])),
+      worker.calculate(input([{ mode: "throw" }])),
+    ]);
+    assert.equal(slow.status === "fulfilled" && slow.value.bySubject.size, 3);
+    assert.equal(fast.status === "fulfilled" && fast.value.bySubject.size, 1);
+    assert.equal(failing.status, "rejected", "one chunk's failure stays that chunk's");
+    assert.equal(worker.requests, 3);
   } finally {
     await worker.close();
   }

@@ -19,6 +19,13 @@
  *
  * The worker holds the process open only while a chunk is in flight, so a CLI or a test that used it
  * still exits when it is done.
+ *
+ * Known limit: the worker runs one chunk at a time, so a single-subject official read (`/simulate`, a
+ * rerun) arriving during the nightly waits behind the chunk in flight, up to its ~21–42 s. That is no
+ * worse than before (everything waited then) and only inside the nightly window; a second worker for
+ * interactive reads is the fix if it matters. A hung fqm call still hangs its chunk, as it did
+ * in-process; the worker has no heap limit of its own yet (`memoryLimitMb` on /api/admin/runtime is
+ * what to size one against).
  */
 import { Worker } from "node:worker_threads";
 import type { OfficialBatchResult, OfficialCalculationInput, OfficialSubjectResult } from "@work-well/official-executor";

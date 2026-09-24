@@ -1,9 +1,9 @@
 /**
  * The worker thread the official calculation runs in (#604). See `fqm-worker.ts` for why.
  *
- * It runs `calculateOfficialWithSignal` whole, not the raw `fqm-execution` call, so the reduction
- * happens here: fqm's raw output carries every resource each patient's retrieves touched, and only the
- * reduced per-subject results cross back to the main thread.
+ * It runs `calculateOfficialWithSignal` whole, not the raw `fqm-execution` call: that function already
+ * reduces fqm's raw output (which carries every resource each patient's retrieves touched), and running
+ * it here means the raw output never has to cross back to the main thread.
  */
 import { parentPort } from "node:worker_threads";
 import { calculateOfficialWithSignal, type FqmCalculate, type OfficialCalculationInput } from "@work-well/official-executor";

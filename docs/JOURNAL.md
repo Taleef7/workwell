@@ -31,8 +31,10 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
   synchronous `fqm-execution` call (~21 s), so the server could answer nothing for 20 to 25 s at a time
   through the ~80-minute nightly (a sign-in failed this morning). The calculation now runs in one worker
   thread and the main thread keeps serving; results are identical (checked on CMS125).
-  `WORKWELL_FQM_WORKER=off` puts it back in-process. `/api/admin/runtime` reports the container's cores,
-  which decides whether a pool could also shorten the run.
+  `WORKWELL_FQM_WORKER=off` puts it back in-process. `/api/admin/runtime` reports the container's cores
+  and memory limit, which decide whether a pool could also shorten the run and how to bound the worker.
+  Known limit: a single-patient official read during the nightly (`/simulate`, a rerun) still waits
+  behind the chunk in flight, no worse than before.
 
 ## 2026-09-23
 
