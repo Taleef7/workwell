@@ -12,6 +12,7 @@ import { requiredOids } from "./official-executor-adapter.ts";
 import type { EvaluateMeasureBinding, MeasureOutcome } from "@work-well/measure-engine";
 import type { LoadedTerminology } from "./official-terminology.ts";
 import type { FqmCalculate } from "@work-well/official-executor";
+import { sharedFqmWorker } from "./fqm-worker.ts";
 
 /**
  * Terminology lives in a gitignored, fetched-at-build sidecar, so whether it is present is a fact about
@@ -445,4 +446,17 @@ test("ADR-047: an EPISODE-OF-CARE measure is refused at construction", () => {
       `${id} has populationBasis boolean and must not be refused as an episode measure`,
     );
   }
+});
+
+test("#604: official measures are calculated in the shared worker thread by default, and in-process with WORKWELL_FQM_WORKER=off", async () => {
+  const authored = authoredEngine();
+  const deps = { authored, ...offlineChecks, expand: async () => [{ code: "a", system: "s" }] };
+  const before = sharedFqmWorker().requests;
+  const routed = await routedEngineForEnv({ WORKWELL_OFFICIAL_MEASURES: "cms122" } as never, deps);
+  await routed.evaluate({ measureId: "cms122", patientBundle: patientBundle("s1") });
+  assert.equal(sharedFqmWorker().requests, before + 1, "the production default posts the chunk to the worker");
+
+  const off = await routedEngineForEnv({ WORKWELL_OFFICIAL_MEASURES: "cms122", WORKWELL_FQM_WORKER: "off" } as never, deps);
+  await off.evaluate({ measureId: "cms122", patientBundle: patientBundle("s1") });
+  assert.equal(sharedFqmWorker().requests, before + 1, "the escape hatch keeps it in-process");
 });

@@ -183,6 +183,13 @@ test("4/5 module graph: fqm resolves FROM the package, not from the app, and sta
 const EXECUTOR_IMPORTERS_ALLOWLIST = [
   "standards/literal-diff.ts",
   "standards/official-cases.ts",
+  // #604. The worker thread the official calculation runs in, so fqm's synchronous CPU no longer stalls
+  // the event loop. This is the quarantine made stronger, not weaker: fqm's graph now loads in a
+  // separate thread, never on the main thread's request path.
+  "wiring/fqm-worker-entry.ts",
+  // #604. The main-thread client of that worker. TYPE-only imports (erased at runtime); it never loads
+  // the package.
+  "wiring/fqm-worker.ts",
   "wiring/official-artifacts.ts",
   // PR-7a. The FIRST production-path consumer: this one exists to be routed to, unlike the three above
   // (two diagnostics and a file loader). Everything it costs — fqm's dependency tree, its memory, its
