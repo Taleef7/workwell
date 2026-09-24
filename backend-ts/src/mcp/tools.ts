@@ -12,6 +12,7 @@ import type { OutcomeStore } from "../stores/outcome-store.ts";
 import type { RunStore } from "../stores/run-store.ts";
 import type { MeasureStore, MeasureRecord } from "../stores/measure-store.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
+import { measureDisplayName } from "../measure/measure-name.ts";
 import { DEPLOYMENT_PROFILE, DIRECTORY, isRunnableMeasure, profileSubjectMatcher } from "../config/deployment-profile.ts";
 import { directoryForRows } from "../engine/ingress/webchart/live-directory.ts";
 import { isWebChartConfigured, type DataSourceEnv } from "../engine/ingress/data-source.ts";
@@ -426,7 +427,7 @@ async function getEmployee(args: JsonRecord, deps: McpToolDeps): Promise<unknown
     .sort((a, b) => b.evaluatedAt.localeCompare(a.evaluatedAt) || a.measureId.localeCompare(b.measureId))
     .slice(0, 5);
   const latestOutcomes = outcomes.map((o) => ({
-    measureName: MEASURES[o.measureId]?.name ?? o.measureId,
+    measureName: measureDisplayName(o.measureId),
     version: measureVersionOf(o.measureId),
     status: o.status,
     evaluationPeriod: o.evaluationPeriod,
@@ -560,7 +561,7 @@ async function listNoncompliant(args: JsonRecord, deps: McpToolDeps): Promise<un
       employeeExternalId: c.employeeId,
       employeeName: emp?.name ?? c.employeeId,
       site: emp?.site ?? null,
-      measureName: MEASURES[c.measureId]?.name ?? c.measureId,
+      measureName: measureDisplayName(c.measureId),
       measureVersion: measureVersionOf(c.measureId),
       evaluationPeriod: c.evaluationPeriod,
       outcomeStatus: c.currentOutcomeStatus,

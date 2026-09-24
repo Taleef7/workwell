@@ -276,6 +276,22 @@ test("the cases CSV asks for every delivery status in ONE call, and an absent on
   assert.equal(cellFor("case-3"), "", "and so is a case the batch never named");
 });
 
+test("the cases CSV names an official-only measure instead of printing its id (#659)", () => {
+  const output = runProfileChild(undefined, `
+    import { casesCsv } from "./src/export/export-csv.ts";
+    const base = { employeeId: "emp-001", evaluationPeriod: "2026-01-01", status: "OPEN", priority: "HIGH", assignee: null,
+      nextAction: null, currentOutcomeStatus: "OVERDUE", lastRunId: "run-1", createdAt: "2026-07-17T00:00:00.000Z",
+      updatedAt: "2026-07-17T00:00:00.000Z", closedAt: null };
+    const cases = [{ ...base, id: "case-130", measureId: "cms130" }, { ...base, id: "case-137", measureId: "cms137" }];
+    const csv = await casesCsv({ listCases: async () => cases }, { latestOutreachDeliveryStatuses: async () => ({}) }, {});
+    console.log(JSON.stringify({ csv }));
+  `);
+  const csv = output.csv as string;
+  assert.match(csv, /Colorectal Cancer Screening/);
+  assert.match(csv, /Initiation and Engagement of Substance Use Disorder Treatment/);
+  assert.doesNotMatch(csv, /,cms130,|,cms137,/, "no raw id in the measureName column");
+});
+
 test("the runs CSV asks its per-run aggregate one at a time, not all at once", () => {
   // 200 bounded GROUP BYs fired together still take every connection in a ten-connection pool, so a
   // report nobody is waiting on makes the pages somebody IS waiting on time out. The CSV text is

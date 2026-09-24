@@ -33,6 +33,14 @@ test("toCaseSummary includes measureId matching the case record", () => {
   assert.equal(summary.measureId, "adult_immunization");
 });
 
+test("every pilot measure is named, the four official-only ones included (#659)", () => {
+  // The authored registry holds cms122/cms125 only, so the work list read `cms130`, `cms2`, ...
+  for (const id of ["cms122", "cms125", "cms2", "cms130", "cms165", "cms137"]) {
+    assert.notEqual(toCaseSummary({ ...CASE, measureId: id }).measureName, id, `${id} renders as a raw id`);
+  }
+  assert.equal(toCaseSummary({ ...CASE, measureId: "cms130" }).measureName, "Colorectal Cancer Screening");
+});
+
 test("toCaseSummary preserves a CMS catalog measureId", () => {
   const summary = toCaseSummary({ ...CASE, measureId: "cms125" });
   assert.equal(summary.measureId, "cms125");
