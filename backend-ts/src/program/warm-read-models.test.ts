@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import type { OutcomeStore, OutcomeWithRun } from "../stores/outcome-store.ts";
 import type { RunStore } from "../stores/run-store.ts";
 import type { CaseStore } from "../stores/case-store.ts";
-import { warmReadModels } from "./warm-read-models.ts";
+import { MAX_CONSECUTIVE_PANEL_FAILURES, warmReadModels } from "./warm-read-models.ts";
 import { programOverview, programRiskOutlook, __overviewMemo, __chartMemos, __sitesMemo } from "./program-read-models.ts";
 import { latestRunsFromRows } from "../test-support/latest-runs.ts";
 import { __resetRuntimeHealth, runtimeDetail, runtimeHealth } from "../admin/runtime-health.ts";
@@ -129,4 +129,18 @@ test("one panel failing does not skip the measure's other panels (#615)", async 
   assert.ok(__chartMemos.driversMemo.size > 0 && __chartMemos.outlookMemo.size > 0, "drivers and outlook warmed after the trend failed");
   assert.equal(__chartMemos.trendMemo.size, 0, "the failing panel is the only one missing");
   assert.ok(result.failedMeasures.length > 0, "and the measure is named as failed");
+});
+
+test("a database that is not answering stops the pass after a few failures, not after every panel (#615 review)", async () => {
+  // Attempting every panel after an overview failure is for a SLOW database. A down one made each
+  // attempt wait out the pool's acquire budget, one panel at a time, for every measure.
+  clearAll();
+  let reads = 0;
+  const down = makeDeps({
+    listLatestPopulationRuns: (async () => { reads += 1; throw new Error("No database connection was available in time"); }) as OutcomeStore["listLatestPopulationRuns"],
+  });
+  const result = await warmReadModels(down);
+  assert.equal(result.ok, false);
+  assert.equal(reads, 1 + MAX_CONSECUTIVE_PANEL_FAILURES, "the overview, then the breaker's worth of panels, then stop");
+  assert.ok(result.failedMeasures.length > 1, "every measure it did not reach is reported unwarmed");
 });

@@ -31,6 +31,15 @@ import { recordWarm, type WarmRecord } from "../admin/runtime-health.ts";
 const UNFILTERED = { site: null, tenant: null } as const;
 
 /**
+ * Consecutive panel failures after which the pass stops (#615 review). Attempting every panel after an
+ * overview failure is right for a database that is up but slow — the pilot's case, where the panels
+ * succeed — and wrong for one that is down: each attempt then waits out the pool's 10 s acquire budget,
+ * 18 panels on Maui and 42 on the default profile, one at a time, and the boot warm retries the whole
+ * pass. Three failures in a row is a database that is not answering; the rest are reported unwarmed.
+ */
+export const MAX_CONSECUTIVE_PANEL_FAILURES = 3;
+
+/**
  * What the pass achieved, so a CALLER can tell success from failure (review of #610).
  *
  * This function swallows every error by design — a failure must never affect a run that has completed
@@ -89,7 +98,13 @@ async function warmPass(deps: ProgramDeps): Promise<WarmResult> {
     measureIds = activeRunnableIds();
   }
   const failedMeasures: string[] = [];
-  for (const measureId of measureIds) {
+  let consecutiveFailures = 0;
+  for (const [index, measureId] of measureIds.entries()) {
+    if (consecutiveFailures >= MAX_CONSECUTIVE_PANEL_FAILURES) {
+      console.warn(`[workwell] read-model warm stopped after ${consecutiveFailures} consecutive failures; ${measureIds.length - index} measure(s) not warmed`);
+      failedMeasures.push(...measureIds.slice(index));
+      break;
+    }
     // Per measure AND per panel, so one failure leaves every other panel warm rather than aborting at
     // whichever happened to come first.
     const panels: Array<[string, () => Promise<unknown>]> = [
@@ -107,9 +122,12 @@ async function warmPass(deps: ProgramDeps): Promise<WarmResult> {
     ];
     let failed = false;
     for (const [panel, warm] of panels) {
+      if (consecutiveFailures >= MAX_CONSECUTIVE_PANEL_FAILURES) break;
       try {
         await warm();
+        consecutiveFailures = 0;
       } catch (err) {
+        consecutiveFailures += 1;
         failed = true;
         console.warn(`[workwell] read-model warm failed for ${measureId} ${panel}: ${String((err as Error)?.message ?? err)}`);
       }
