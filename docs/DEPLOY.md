@@ -274,6 +274,10 @@ Each official batch logs `WORKWELL_RUNTIME {"kind":"evaluateBatch",…,"batchMs"
 synchronous stretch; `bundleMs` points at the bundle source, `evalMs` at chunk size. The same numbers are
 on the run log's per-measure INFO line (`GET /api/runs/:id`) for anyone without container-log access.
 
+Since #604 that stretch runs in a worker thread (`wiring/fqm-worker.ts`), so it no longer stalls the event
+loop; `batchMs` still measures it. `WORKWELL_FQM_WORKER=off` runs it in-process again (the escape hatch if
+the worker misbehaves). `cpus` on `/api/admin/runtime` is the core count a worker pool would need.
+
 ### Failed-run alerts (#264)
 
 A FAILED/PARTIAL_FAILURE population run, a stuck-run recovery or a scheduler tick throw emits one

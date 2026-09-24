@@ -117,6 +117,7 @@ import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { loadOfficialArtifact, type OfficialArtifact } from "./official-artifacts.ts";
 import { officialMeasureSemantics } from "./official-measure-semantics.ts";
 import { preparedForQiCore, type PreparableBundle } from "./qicore-preparation.ts";
+import type { BatchCalculator } from "./fqm-worker.ts";
 
 /**
  * Expand one value-set OID to its codes, for a named measure.
@@ -188,6 +189,12 @@ export interface OfficialExecutorDeps {
   expand: ExpandValueSet;
   /** Injectable for tests; defaults to the real (lazily imported) fqm calculator. */
   calculate?: FqmCalculate;
+  /**
+   * Runs the whole calculation somewhere else — the worker thread in production (#604), so fqm's
+   * synchronous CPU does not stall the event loop. Ignored when `calculate` is injected: a test that
+   * supplies a calculator function means to run it here, and a function cannot cross to a worker.
+   */
+  calculateBatch?: BatchCalculator;
   /** Injectable for tests; defaults to the vendored-artifact loader. */
   loadArtifact?: (catalogId: string) => OfficialArtifact | null;
   /**
@@ -582,12 +589,11 @@ export function officialMeasureExecutor(deps: OfficialExecutorDeps): OfficialMea
       }
       subjectIdByPatientId.set(patientId, s.subjectId);
     }
-    const { bySubject, retrieveSignal } = await calculateOfficialWithSignal({
+    const calculationInput = {
       bundle: artifact.bundle,
       patientBundles,
       period,
       valueSetCache,
-      ...(deps.calculate ? { calculate: deps.calculate } : {}),
       // PER MEASURE since 2026-09-07 (`OfficialMeasureSemantics.trustMetaProfile`), default FALSE —
       // everything below still describes what false means and why it is the default. cms165 is the one
       // exception and the field's own note says why: its blood-pressure retrieve carries no code
@@ -607,7 +613,11 @@ export function officialMeasureExecutor(deps: OfficialExecutorDeps): OfficialMea
       // it. NOT "the 121/121 gate proves false works": the MADiE harness starts at false and RETRIES
       // at true when no retrieve matches, so the green gate run lands on true for the profile-tagged
       // test-case bundles. It says nothing about our own data shape either way.
-    });
+    };
+    const { bySubject, retrieveSignal } =
+      deps.calculateBatch && !deps.calculate
+        ? await deps.calculateBatch(calculationInput)
+        : await calculateOfficialWithSignal({ ...calculationInput, ...(deps.calculate ? { calculate: deps.calculate } : {}) });
 
     // The batch-level safety net (roadmap §7.4). fqm does not error when every retrieve comes back
     // empty: it returns a complete-looking result with nobody in any population, which reads downstream

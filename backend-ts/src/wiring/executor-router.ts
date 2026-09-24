@@ -100,6 +100,7 @@ import {
   type OfficialMeasuresEnv,
 } from "./official-routing.ts";
 import { officialMeasureSemantics } from "./official-measure-semantics.ts";
+import { fqmWorkerEnabled, sharedFqmWorker, type BatchCalculator } from "./fqm-worker.ts";
 
 /** The extended shape the authored engine accepts — diagnostics pass an explicit library to run. */
 export type RoutableInput = EvaluateMeasureInput & { elm?: unknown; metaOverride?: MeasureMeta };
@@ -330,6 +331,8 @@ export interface RoutedEngineOptions extends RoutingCheckDeps {
   authored?: EvaluateMeasureBinding;
   /** Injectable for tests; defaults to the real (lazily imported) fqm calculator. */
   calculate?: FqmCalculate;
+  /** Where the calculation runs. Defaults to the process's worker thread (#604) unless `WORKWELL_FQM_WORKER=off`. */
+  calculateBatch?: BatchCalculator;
   /** Routed, not swallowed: the run pipeline appends each warning as a WARN run-log line. */
   onWarning?: (message: string) => void;
 }
@@ -357,6 +360,11 @@ export async function routedEngineForEnv(
   const executor = officialMeasureExecutor({
     expand,
     ...(options.calculate ? { calculate: options.calculate } : {}),
+    ...(options.calculateBatch
+      ? { calculateBatch: options.calculateBatch }
+      : fqmWorkerEnabled(env as Record<string, unknown>)
+        ? { calculateBatch: sharedFqmWorker().calculate }
+        : {}),
     ...(options.onWarning ? { onWarning: options.onWarning } : {}),
   });
   // Terminology, up front. Serially rather than in parallel: these hit the same snapshot and the first
