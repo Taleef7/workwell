@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useEffect, useMemo, useRef, useSyncExternalStore } from "react";
 import { usePathname, useRouter } from "next/navigation";
+import { withRefreshLock } from "@/lib/api/refresh-lock";
 
 const TOKEN_KEY = "ww_token";
 const USER_KEY = "ww_user";
@@ -181,10 +182,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       notifySessionChange();
     }
 
-    fetch(`${API_BASE}/api/auth/refresh`, {
-      method: "POST",
-      credentials: "include",
-    })
+    // One tab at a time (lib/api/refresh-lock.ts): opening a second tab while another refreshed
+    // replayed a rotated-away cookie, and the server then ended the login everywhere.
+    withRefreshLock(() =>
+      fetch(`${API_BASE}/api/auth/refresh`, {
+        method: "POST",
+        credentials: "include",
+      }),
+    )
       .then((r) => (r.ok ? (r.json() as Promise<{ token?: string; email?: string; role?: string }>) : null))
       .then((payload) => {
         if (payload?.token && payload.email && payload.role) {

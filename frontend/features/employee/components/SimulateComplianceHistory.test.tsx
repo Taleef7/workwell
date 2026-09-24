@@ -67,7 +67,7 @@ describe("SimulateComplianceHistory", () => {
     run();
     const note = await screen.findByTestId("not-simulated");
     expect(note).toHaveTextContent("CMS2 · Depression Screening, CMS130 · Colorectal Cancer Screening");
-    expect(note).toHaveTextContent(/can't build test data/i);
+    expect(note).toHaveTextContent(/can't cover these measures yet/i);
   });
 
   it("shows no not-simulated line when every measure was simulated", async () => {

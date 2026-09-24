@@ -787,7 +787,7 @@ function QualityOverTime({
               ? "Loading quality history…"
               : loadError
                 ? `Monthly history could not be loaded (${loadError}). Try again shortly.`
-                : "No materialized quality snapshots yet for this scope. Snapshots accrue on every population run, or run pnpm seed:quality-history to backfill months of history."}
+                : "No monthly history yet for this scope. It builds up with each nightly run."}
           </span>
         </div>
       )}

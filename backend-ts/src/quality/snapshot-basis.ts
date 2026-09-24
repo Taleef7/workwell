@@ -49,7 +49,7 @@ export async function monthlySnapshotsUnderstateRate(
 export const SNAPSHOT_BASIS_REFUSAL = {
   error: "snapshot_basis_unsafe",
   message:
-    `Monthly history is not available for this measure. The stored monthly snapshots count ${subjectNoun(DEPLOYMENT_PROFILE).plural} ` +
-    "outside the measure's population in the denominator, so they would show a lower rate than the " +
-    "measure's real one. The trend chart on this page uses the corrected basis.",
+    `Monthly history is not available for this measure. The older monthly figures counted ${subjectNoun(DEPLOYMENT_PROFILE).plural} ` +
+    "the measure does not apply to, so they would show a lower rate than the real one. The trend chart " +
+    "on this page shows the correct rate.",
 } as const;

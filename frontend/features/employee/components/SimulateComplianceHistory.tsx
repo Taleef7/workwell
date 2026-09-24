@@ -119,8 +119,8 @@ export function SimulateComplianceHistory({
           )}
           {notSimulated.length > 0 && (
             <p data-testid="not-simulated" className="text-xs text-neutral-500 dark:text-neutral-400">
-              Not simulated: {notSimulated.map((m) => labelFor(m.measureId, m.name)).join(", ")}. The preview
-              can&apos;t build test data for these measures yet.
+              Not simulated: {notSimulated.map((m) => labelFor(m.measureId, m.name)).join(", ")}. The simulation
+              can&apos;t cover these measures yet; their real results are in the table above.
             </p>
           )}
         </div>

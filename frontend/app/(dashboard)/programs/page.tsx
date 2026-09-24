@@ -214,12 +214,15 @@ export default function ProgramsPage() {
               </select>
             </label>
           )}
-          <Link
-            href="/programs/hierarchy"
-            className="text-sm font-medium text-primary-700 hover:underline dark:text-primary-400"
-          >
-            View hierarchy
-          </Link>
+          {/* The multi-tenant rollup is an engineering view; a single practice has nothing to roll up. */}
+          {canSeeEngineering(user?.role) ? (
+            <Link
+              href="/programs/hierarchy"
+              className="text-sm font-medium text-primary-700 hover:underline dark:text-primary-400"
+            >
+              View hierarchy
+            </Link>
+          ) : null}
           {mayRun ? (
             runActive ? (
               <span role="status" className="flex items-center gap-2 text-sm text-neutral-500 dark:text-neutral-400">

@@ -326,7 +326,7 @@ describe("CaseDetailPage crosswalk identity rendering", () => {
     );
 
     render(<CaseDetailPage />);
-    await screen.findByText("why_flagged");
+    await screen.findByText("Evidence details");
     expect(screen.getByRole("button", { name: "View Raw Evidence" })).toBeInTheDocument();
     if (rendersRawJson) {
       expect(screen.getByText(/"last_exam_date"/)).toBeInTheDocument();

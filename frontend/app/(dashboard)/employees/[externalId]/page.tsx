@@ -6,6 +6,7 @@ import { Select } from '@mieweb/ui';
 import { useApi } from '@/lib/api/hooks';
 import { useAuth } from '@/components/auth-provider';
 import { canManageCases } from '@/lib/rbac';
+import { canSeeEngineering } from '@/lib/public-demo';
 import { emitToast } from '@/lib/toast';
 import { UNASSIGN_VALUE, useAssignableUsers } from '@/features/panel/use-assignable-users';
 import { SUBJECT } from "@/lib/terminology";
@@ -142,7 +143,8 @@ export default function EmployeeProfilePage() {
           </p>
           <p className="text-xs text-neutral-600 dark:text-neutral-400 mt-1">
             ID: {profile.externalId}
-            {profile.fhirPatientId ? ` · FHIR: ${profile.fhirPatientId}` : ''}
+            {/* The FHIR resource id is an engineering detail; the patient ID above is the one staff use. */}
+            {profile.fhirPatientId && canSeeEngineering(user?.role) ? ` · FHIR: ${profile.fhirPatientId}` : ''}
             {startDate ? ` · Started: ${startDate}` : ''}
           </p>
         </div>
