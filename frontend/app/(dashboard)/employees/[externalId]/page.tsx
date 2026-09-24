@@ -1,6 +1,6 @@
 'use client';
 
-import { useParams, useRouter } from 'next/navigation';
+import { useParams } from 'next/navigation';
 import { useState } from 'react';
 import { Select } from '@mieweb/ui';
 import { useApi } from '@/lib/api/hooks';
@@ -98,7 +98,6 @@ export default function EmployeeProfilePage() {
   const externalId = decodeURIComponent(rawExternalId ?? '');
   const { profile, loading, error, refetch } = useEmployeeProfile(externalId);
   const { user } = useAuth();
-  const router = useRouter();
   const canManageThisCase = canManageCases(user?.role);
   // One fetch for the page, not one per open gap.
   const { options: assignableOptions, canonicalFor } = useAssignableUsers(canManageThisCase);
@@ -288,15 +287,14 @@ export default function EmployeeProfilePage() {
 
       {/* Back link */}
       <div>
-        {/* Back to wherever the user came from (the work list, the roster, a case); "Back to Cases"
-            sent everyone to /cases. A page opened directly falls back to the work list. */}
-        <button
-          type="button"
-          onClick={() => (window.history.length > 1 ? router.back() : router.push("/worklist"))}
+        {/* The work list is where staff reach a patient from, and the link says so ("Back to Cases" sent them
+            to /cases). A history-based "Back" could leave WorkWell when the page was opened from a link. */}
+        <Link
+          href="/worklist"
           className="rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2 text-xs font-semibold text-neutral-700 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-800/50"
         >
-          ← Back
-        </button>
+          ← Back to the work list
+        </Link>
       </div>
       </aside>
       </div>
