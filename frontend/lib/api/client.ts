@@ -1,4 +1,5 @@
 import { ApiError } from "./errors";
+import { withRefreshLock } from "./refresh-lock";
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "").trim().replace(/\/+$/, "");
 
@@ -27,7 +28,8 @@ function refreshAccessToken(): Promise<string | null> {
   if (refreshInFlight) return refreshInFlight;
   const p = (async (): Promise<string | null> => {
     try {
-      const res = await fetch(`${API_BASE}/api/auth/refresh`, { method: "POST", credentials: "include" });
+      // Held across tabs too (refresh-lock.ts): a second tab refreshing at once signed everyone out.
+      const res = await withRefreshLock(() => fetch(`${API_BASE}/api/auth/refresh`, { method: "POST", credentials: "include" }));
       if (!res.ok) return null;
       const payload = (await res.json()) as { token?: string };
       return payload.token ?? null;
