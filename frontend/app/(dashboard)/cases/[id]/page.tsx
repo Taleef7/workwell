@@ -164,6 +164,10 @@ export default function CaseDetailPage() {
   // backend; read-only roles previously saw every control and got a guaranteed 403 (Fable H9). Mirror
   // the API gate so those controls simply don't render for read roles.
   const canManage = canManageCases(user?.role);
+  // Rerun to Verify and Escalate are case work, so they render wherever the case actions do (`canManage`)
+  // (#618): behind the engineering gate the pilot's case managers were refused them, and the next-step
+  // panel went blank once outreach was sent. Only the simulated delivery-state controls (Mark queued /
+  // sent / failed) stay behind it.
   const canEngineering = canSeeEngineering(user?.role);
   const { labelFor: measureLabelFor } = useMeasureIdentities();
   const [caseDetail, setCaseDetail] = useState<CaseDetail | null>(null);
@@ -228,6 +232,9 @@ export default function CaseDetailPage() {
       ? storedAssignee === ""
       : assigneeValue.toLowerCase() === storedAssignee.toLowerCase());
   const caseStatus = caseDetail ? normalizeEnumValue(caseDetail.status) : "";
+  // Escalating a finished case would reopen it (the API refuses it too), so neither layout offers it.
+  const caseIsFinished = caseStatus === "CLOSED" || caseStatus === "RESOLVED" || caseStatus === "EXCLUDED";
+  const deliveryState = caseDetail?.latestOutreachDeliveryStatus ? normalizeEnumValue(caseDetail.latestOutreachDeliveryStatus) : null;
 
   // Option lists for @mieweb/ui Select controls.
   // The empty-value option is the default: no templateId is sent, so the backend picks the
@@ -612,20 +619,18 @@ export default function CaseDetailPage() {
                 <div className="col-span-2">
                   <LocalOnlyNotice action="Outreach" />
                 </div>
-                {canEngineering && (
-                  <Button
-                    type="button"
-                    variant="primary"
-                    size="sm"
-                    onClick={() => void runAction("rerun")}
-                    disabled={acting !== null}
-                    isLoading={acting === "rerun"}
-                    loadingText="Verifying..."
-                  >
-                    Rerun to Verify
-                  </Button>
-                )}
-                {canEngineering && (
+                <Button
+                  type="button"
+                  variant="primary"
+                  size="sm"
+                  onClick={() => void runAction("rerun")}
+                  disabled={acting !== null || caseStatus === "CLOSED"}
+                  isLoading={acting === "rerun"}
+                  loadingText="Verifying..."
+                >
+                  Rerun to Verify
+                </Button>
+                {!caseIsFinished && (
                   <Button
                     type="button"
                     variant="danger"
@@ -765,21 +770,22 @@ export default function CaseDetailPage() {
                     this makes the *recommended* one a single click from the next-action panel). */}
                 {canManage && caseStatus !== "CLOSED" && caseStatus !== "EXCLUDED" && caseStatus !== "RESOLVED" ? (
                   <div className="mt-3">
-                    {caseDetail.latestOutreachDeliveryStatus ? (
-                      canEngineering ? (
-                        <Button
-                          type="button"
-                          variant="primary"
-                          size="sm"
-                          onClick={() => void runAction("rerun")}
-                          disabled={acting !== null}
-                          isLoading={acting === "rerun"}
-                          loadingText="Verifying..."
-                        >
-                          Rerun to verify →
-                        </Button>
-                      ) : null
-                    ) : (
+                    {/* The step follows the delivery state, as the backend's next-action wording does:
+                        verify only once the patient was contacted, retry a failed send, and wait on a
+                        queued one. Offering a rerun for every state let staff verify before any contact. */}
+                    {deliveryState === "SENT" || deliveryState === "SIMULATED" ? (
+                      <Button
+                        type="button"
+                        variant="primary"
+                        size="sm"
+                        onClick={() => void runAction("rerun")}
+                        disabled={acting !== null}
+                        isLoading={acting === "rerun"}
+                        loadingText="Verifying..."
+                      >
+                        Rerun to verify →
+                      </Button>
+                    ) : deliveryState === "QUEUED" ? null : (
                       <Button
                         type="button"
                         variant="primary"
@@ -789,7 +795,7 @@ export default function CaseDetailPage() {
                         isLoading={previewing}
                         loadingText="Preparing..."
                       >
-                        Prepare outreach →
+                        {deliveryState === "FAILED" ? "Retry outreach →" : "Prepare outreach →"}
                       </Button>
                     )}
                   </div>
@@ -873,7 +879,7 @@ export default function CaseDetailPage() {
                   >
                     Send outreach
                   </Button>
-                  {canEngineering && (
+                  {!caseIsFinished && (
                     <Button
                       type="button"
                       variant="danger"
@@ -885,18 +891,16 @@ export default function CaseDetailPage() {
                       Escalate
                     </Button>
                   )}
-                  {canEngineering && (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() => void runAction("rerun")}
-                      disabled={acting !== null || caseStatus === "CLOSED"}
-                      isLoading={acting === "rerun"}
-                      loadingText="Verifying..."
-                    >
-                      Rerun to verify
-                    </Button>
-                  )}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => void runAction("rerun")}
+                    disabled={acting !== null || caseStatus === "CLOSED"}
+                    isLoading={acting === "rerun"}
+                    loadingText="Verifying..."
+                  >
+                    Rerun to verify
+                  </Button>
                   <Button
                     type="button"
                     variant="outline"

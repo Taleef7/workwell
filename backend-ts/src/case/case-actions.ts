@@ -74,10 +74,17 @@ export async function assignCase(
   return buildDetail(deps, caseId);
 }
 
-/** Escalate: force priority HIGH + status OPEN with the supervisor-queue next action. */
+/**
+ * Escalate: force priority HIGH + status OPEN with the supervisor-queue next action. Only an active
+ * case: escalating a CLOSED / RESOLVED / EXCLUDED one would reopen it silently, with its closure
+ * fields still set. Throws CaseActionError (→ 400) on that; returns null when the case is unknown.
+ */
 export async function escalateCase(deps: CaseActionDeps, caseId: string, actor: string): Promise<CaseDetail | null> {
   const existing = await deps.cases.getCase(caseId);
   if (!existing) return null;
+  if (existing.status !== "OPEN" && existing.status !== "IN_PROGRESS") {
+    throw new CaseActionError("Only OPEN or IN_PROGRESS cases can be escalated");
+  }
 
   const payload = {
     priority: "HIGH",
