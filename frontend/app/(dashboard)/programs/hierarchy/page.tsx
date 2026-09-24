@@ -8,6 +8,7 @@ import { formatRate } from "@/lib/measure-rate";
 import { useGlobalFilters } from "@/components/global-filter-context";
 import { useAuth } from "@/components/auth-provider";
 import { canSeeEngineering } from "@/lib/public-demo";
+import { AccessDenied } from "@/components/access-denied";
 import type { TenantOption } from "@/features/compliance/types";
 import { SkeletonRow } from "@/components/skeleton-loader";
 import { SLOW_LOAD_HINT, useSlowLoadHint } from "@/lib/useSlowLoadHint";
@@ -58,6 +59,9 @@ export default function HierarchyPage() {
   const { user } = useAuth();
   const api = useApi();
   const { from, to } = useGlobalFilters();
+  // An engineering view, as Runs and Measures are: in pilot mode a case manager who types the URL gets
+  // the same access-denied page, and none of the rollup is fetched (the Programs link is hidden too).
+  const mayView = canSeeEngineering(user?.role);
 
   const [root, setRoot] = useState<HierarchyNode | null>(null);
   const [loading, setLoading] = useState(true);
@@ -74,6 +78,7 @@ export default function HierarchyPage() {
 
   // Measure dropdown is sourced the same way /programs sources its measures.
   useEffect(() => {
+    if (!mayView) return;
     let cancelled = false;
     api
       .get<ProgramSummary[]>("/api/programs/overview")
@@ -86,17 +91,18 @@ export default function HierarchyPage() {
     return () => {
       cancelled = true;
     };
-  }, [api]);
+  }, [api, mayView]);
 
   // Tenants/systems for the optional System filter (E13 PR-1). Best-effort; never blocks the rollup.
   useEffect(() => {
+    if (!mayView) return;
     let cancelled = false;
     api
       .get<TenantOption[]>("/api/tenants")
       .then((data) => { if (!cancelled) setTenantOptions(Array.isArray(data) ? data : []); })
       .catch(() => { if (!cancelled) setTenantOptions([]); });
     return () => { cancelled = true; };
-  }, [api]);
+  }, [api, mayView]);
 
   const loadRollup = useCallback(async () => {
     setLoading(true);
@@ -121,11 +127,12 @@ export default function HierarchyPage() {
   }, [api, measureId, tenant, from, to]);
 
   useEffect(() => {
+    if (!mayView) return;
     const timer = setTimeout(() => {
       void loadRollup();
     }, 0);
     return () => clearTimeout(timer);
-  }, [loadRollup]);
+  }, [loadRollup, mayView]);
 
   const toggle = (id: string) =>
     setOpen((s) => {
@@ -145,6 +152,10 @@ export default function HierarchyPage() {
   if (root) walk(root, 0);
 
   const isEmpty = !loading && !error && root != null && root.children.length === 0;
+
+  if (!mayView) {
+    return <AccessDenied title="Hierarchy" message="Your current role does not have access to this section." />;
+  }
 
   return (
     <section className="space-y-4">

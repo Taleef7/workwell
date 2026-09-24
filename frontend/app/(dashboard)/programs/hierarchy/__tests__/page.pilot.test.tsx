@@ -48,17 +48,15 @@ describe("HierarchyPage pilot mode controls", () => {
     });
   });
 
-  it("hides System selector for non-admin in pilot mode", async () => {
+  it("is an engineering view: a pilot case manager who types the URL is refused, and nothing is fetched", async () => {
     setPublicDemo(false);
     currentRole = "ROLE_CASE_MANAGER";
 
     render(<HierarchyPage />);
 
-    await waitFor(() => {
-      expect(screen.getByText("Compliance Hierarchy")).toBeInTheDocument();
-    });
-
-    expect(screen.queryByLabelText("System")).toBeNull();
+    expect(await screen.findByText("Your current role does not have access to this section.")).toBeInTheDocument();
+    expect(screen.queryByText("Compliance Hierarchy")).toBeNull();
+    expect(get.mock.calls.some(([path]) => String(path).startsWith("/api/hierarchy/rollup"))).toBe(false);
   });
 
   it("shows System selector for admin in pilot mode", async () => {
