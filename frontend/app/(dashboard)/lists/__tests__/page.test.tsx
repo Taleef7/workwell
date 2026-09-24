@@ -156,6 +156,35 @@ it("the year select offers the NEXT year — the pilot's target is PY2027 while 
   expect(offered).toContain(String(new Date().getUTCFullYear()));
 });
 
+it("the report names each measure as every other page does, never by its id", async () => {
+  get.mockImplementation(async (path: string) => {
+    if (path === "/api/subject-lists") return [LIST];
+    if (path === "/api/measures") return [{ id: "cms125", name: "Breast Cancer Screening", identity: { cmsId: "CMS125", mipsQualityId: "112" } }];
+    if (path.includes("/report")) {
+      return {
+        measurementYear: 2027,
+        generatedAt: "2027-06-01T00:00:00.000Z",
+        members: { matched: 2, notFound: 0, ambiguous: 0, total: 2 },
+        compactedMeasures: [],
+        measures: [{
+          measureId: "cms125", ecqmId: "CMS125", runId: "run-1",
+          measurementPeriod: { start: "2027-01-01", end: "2027-12-31" },
+          compactionStatus: "complete", matchedSubjects: 2, distinctSubjectsSeen: 2, missingFromRun: 0,
+          rates: [{ label: null, ipp: 2, denom: 2, denex: 0, denexcep: 0, numer: 1, effectiveDenominator: 2, score: 0.5 }],
+        }],
+      };
+    }
+    throw new Error(`unexpected GET ${path}`);
+  });
+  render(<ListsPage />);
+  await screen.findByText("ACO Q3 attribution");
+  await userEvent.click(screen.getByRole("button", { name: "Open" }));
+  await userEvent.click(await screen.findByRole("button", { name: "Compute" }));
+  expect(await screen.findByText(/CMS125 · Breast Cancer Screening/)).toBeInTheDocument();
+  expect(screen.queryByText("cms125")).not.toBeInTheDocument();
+  expect(screen.getByRole("columnheader", { name: "Initial population" })).toBeInTheDocument();
+});
+
 it("a measure whose run aged out is named, with the reason, beside the ones that reported", async () => {
   // ADR-077's refusal belongs to the measure whose evidence may be incomplete. Withholding the other
   // five would be a second wrong answer, and showing this one's numbers would be the first.

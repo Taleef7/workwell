@@ -21,6 +21,14 @@ describe("CqlEvidence", () => {
     expect(screen.queryByText("Numerator")).not.toBeInTheDocument();
   });
 
+  it("says there is no result on file, not \"0 days overdue\", when the patient has no result", () => {
+    render(<CqlEvidence evidence={{ why_flagged: {
+      last_exam_date: null, compliance_window_days: 365, days_overdue: null,
+      role_eligible: true, site_eligible: true, waiver_status: "NONE"
+    } }} />);
+    expect(screen.getByText("No result on file")).toBeInTheDocument();
+  });
+
   it("renders the why_flagged summary rows", () => {
     render(<CqlEvidence evidence={{ why_flagged: {
       last_exam_date: "2025-08-10", compliance_window_days: 365, days_overdue: 12,

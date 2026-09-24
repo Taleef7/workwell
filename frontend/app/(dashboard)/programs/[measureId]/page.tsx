@@ -524,7 +524,7 @@ export default function ProgramDetailPage() {
 
           <div className="flex items-center gap-3">
             <Link href={`/cases?measureId=${encodeURIComponent(program.measureId)}`} className="rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2 text-sm font-medium text-neutral-800 dark:text-neutral-200">
-              Open Worklist (Filtered)
+              Open cases for this measure
             </Link>
             {mayRun ? (
               <Button variant="primary" size="sm" onClick={() => setRunConfirmOpen(true)}>
@@ -825,8 +825,8 @@ function ComplianceTrendChart({ points, identity }: { points: TrendPoint[]; iden
           <AreaChart data={data} accessibilityLayer={false} margin={{ top: 8, right: 8, bottom: 0, left: -8 }}>
             <defs>
               <linearGradient id="complianceGrad" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor="#059669" stopOpacity={0.25} />
-                <stop offset="95%" stopColor="#059669" stopOpacity={0.02} />
+                <stop offset="5%" stopColor="#2563eb" stopOpacity={0.25} />
+                <stop offset="95%" stopColor="#2563eb" stopOpacity={0.02} />
               </linearGradient>
             </defs>
             <CartesianGrid strokeDasharray="3 3" stroke="#94a3b8" strokeOpacity={0.2} vertical={false} />
@@ -840,10 +840,12 @@ function ComplianceTrendChart({ points, identity }: { points: TrendPoint[]; iden
               type="monotone"
               dataKey="rate"
               name={rateLabel}
-              stroke="#059669"
+              // Neutral, like the monthly chart: green read as good news on CMS122, where a rising line is
+              // worse. Whether the move is good is the coloured "from previous" line's job.
+              stroke="#2563eb"
               strokeWidth={2.5}
               fill="url(#complianceGrad)"
-              dot={{ r: 3, fill: "#059669", strokeWidth: 0 }}
+              dot={{ r: 3, fill: "#2563eb", strokeWidth: 0 }}
               activeDot={{ r: 5 }}
             />
           </AreaChart>

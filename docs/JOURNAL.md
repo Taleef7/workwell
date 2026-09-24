@@ -71,3 +71,9 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
   ids (`cms130`) on the work list and case page, and in the cases CSV, two MCP tools and the People page;
   every one now uses the catalog name. Each work-list row shows the patient's ID beside the name, since
   two patients can share a name, clinic and provider.
+- **Links, labels and numbers say what they mean** (live walk-through): "Open Worklist" links that went to
+  /cases now say "Open cases"; the patient page's back button returns to where you came from; the ACO
+  list report and the roster's assign line name the measure (no `cms122`, no id twice); search results
+  show the patient ID; /cases says "Loading cases…" instead of "0 cases loaded"; a case with no result
+  says so instead of "0 days overdue"; the measure trend line is neutral, since green read as good news on
+  CMS122.

@@ -209,6 +209,6 @@ describe("CasesPage crosswalk identity rendering", () => {
     setSubject(term);
     render(<CasesPage />);
     await screen.findByRole("heading", { name: "Alice Walker" });
-    expect(screen.getByRole("heading", { name: "Why Flagged cases" }).parentElement).toHaveTextContent(copy);
+    expect(screen.getByRole("heading", { name: "Cases" }).parentElement).toHaveTextContent(copy);
   });
 });

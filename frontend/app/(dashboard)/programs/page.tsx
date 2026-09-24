@@ -348,7 +348,7 @@ export default function ProgramsPage() {
 
               <div className="relative z-10 mt-4">
                 <Link href={`/cases?measureId=${encodeURIComponent(program.measureId)}`} className="text-sm font-medium text-primary-700 hover:underline dark:text-primary-400">
-                  Open Worklist ({program.openCaseCount})
+                  Open cases ({program.openCaseCount})
                 </Link>
               </div>
             </div>

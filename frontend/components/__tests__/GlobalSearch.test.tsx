@@ -2,8 +2,10 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { server } from "../../test/msw/server";
+import { setSubject, subject } from "@/test/mocks/terminology";
+vi.mock("@/lib/terminology", () => ({ SUBJECT: subject }));
 import { GlobalSearch } from "../GlobalSearch";
-import { SUBJECT } from "@/lib/terminology";
+const SUBJECT = subject;
 
 const mockPush = vi.fn();
 vi.mock("next/navigation", () => ({
@@ -74,6 +76,15 @@ describe("GlobalSearch", () => {
     const input = screen.getByRole("textbox", { name: new RegExp(`Search ${SUBJECT.plural}`, "i") });
     expect(input).toBeInTheDocument();
     expect(input).toHaveAttribute("placeholder", `Search ${SUBJECT.plural}…`);
+  });
+
+  it("shows each patient's ID in the result, so two patients with the same name can be told apart", async () => {
+    setSubject("patient");
+    render(<GlobalSearch />);
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "Nilo" } });
+    expect(await screen.findByText("Nilo Gray")).toBeInTheDocument();
+    expect(screen.getByText("pat-048 · Kihei Clinic")).toBeInTheDocument();
+    setSubject("employee");
   });
 
   it("shows search results when query matches", async () => {
