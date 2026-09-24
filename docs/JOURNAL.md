@@ -17,8 +17,8 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
   panels even when the overview fails. The `outcomes (run_id, measure_id)` index turns that check into a
   lookup (the cold warm then succeeds, and a measure's drivers load in 0.04 s instead of 16 s); it is added
   (owner DDL, built at boot, about 6 s on the pilot's data). Retention is not the cause (3.5 to 6 s a night).
-  Deployed: the index is live; both boot warms still hit the 30 s timeout (cause not yet known, the
-  panels warmed anyway), so tonight's nightly record is the next evidence.
+  Deployed: the index is live. The boot that built it timed out on both warm attempts (the panels warmed
+  anyway); the next boot (#688) warmed in 80 s with `ok: true`. Tonight's nightly record is the next evidence.
 - **#688: a deploy no longer signs everyone out.** Each login's current refresh-token id was kept in an
   in-memory store that every deploy or restart emptied, so the next refresh was refused and the user was
   sent to the login page. It is now a small database table (`auth_refresh_families`, owner DDL), and
@@ -30,7 +30,8 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
 - **#604: the nightly no longer freezes the server.** Each 500-patient chunk of an official measure was one
   synchronous `fqm-execution` call (~21 s), so the server could answer nothing for 20 to 25 s at a time
   through the ~80-minute nightly (a sign-in failed this morning). The calculation now runs in one worker
-  thread and the main thread keeps serving; results are identical (checked on the Maui corpus for every routed measure, CMS137's rates and strata included).
+  thread and the main thread keeps serving; results are identical (checked on the Maui corpus for every
+  routed measure, CMS137's rates and strata included).
   `WORKWELL_FQM_WORKER=off` puts it back in-process. `/api/admin/runtime` reports the container's cores
   and memory limit, which decide whether a pool could also shorten the run and how to bound the worker.
   Known limit: a single-patient official read during the nightly (`/simulate`, a rerun) still waits
