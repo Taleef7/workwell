@@ -232,6 +232,8 @@ export default function CaseDetailPage() {
       ? storedAssignee === ""
       : assigneeValue.toLowerCase() === storedAssignee.toLowerCase());
   const caseStatus = caseDetail ? normalizeEnumValue(caseDetail.status) : "";
+  // Escalating a finished case would reopen it (the API refuses it too), so neither layout offers it.
+  const caseIsFinished = caseStatus === "CLOSED" || caseStatus === "RESOLVED" || caseStatus === "EXCLUDED";
   const deliveryState = caseDetail?.latestOutreachDeliveryStatus ? normalizeEnumValue(caseDetail.latestOutreachDeliveryStatus) : null;
 
   // Option lists for @mieweb/ui Select controls.
@@ -628,17 +630,19 @@ export default function CaseDetailPage() {
                 >
                   Rerun to Verify
                 </Button>
-                <Button
-                  type="button"
-                  variant="danger"
-                  size="sm"
-                  onClick={() => setEscalationConfirmOpen(true)}
-                  disabled={escalating}
-                  isLoading={escalating}
-                  loadingText="Escalating..."
-                >
-                  Escalate
-                </Button>
+                {!caseIsFinished && (
+                  <Button
+                    type="button"
+                    variant="danger"
+                    size="sm"
+                    onClick={() => setEscalationConfirmOpen(true)}
+                    disabled={escalating}
+                    isLoading={escalating}
+                    loadingText="Escalating..."
+                  >
+                    Escalate
+                  </Button>
+                )}
               </div>
               <div className="grid gap-2">
                 <Select
@@ -875,16 +879,18 @@ export default function CaseDetailPage() {
                   >
                     Send outreach
                   </Button>
-                  <Button
-                    type="button"
-                    variant="danger"
-                    onClick={() => setEscalationConfirmOpen(true)}
-                    disabled={escalating}
-                    isLoading={escalating}
-                    loadingText="Escalating..."
-                  >
-                    Escalate
-                  </Button>
+                  {!caseIsFinished && (
+                    <Button
+                      type="button"
+                      variant="danger"
+                      onClick={() => setEscalationConfirmOpen(true)}
+                      disabled={escalating}
+                      isLoading={escalating}
+                      loadingText="Escalating..."
+                    >
+                      Escalate
+                    </Button>
+                  )}
                   <Button
                     type="button"
                     variant="outline"

@@ -7,7 +7,7 @@
  *   GET  /api/cases             newest-first case summaries (filtered) → 200 CaseSummary[]
  *   GET  /api/cases/:id         case detail + evidence/why_flagged + timeline → 200 | 404
  *   POST /api/cases/:id/assign  ?assignee=…  set/clear the case owner    → 200 CaseDetail | 404
- *   POST /api/cases/:id/escalate              force HIGH/OPEN            → 200 CaseDetail | 404
+ *   POST /api/cases/:id/escalate              force HIGH/OPEN            → 200 CaseDetail | 400 | 404
  *   GET  /api/cases/:id/actions/outreach/preview ?templateId=…           → 200 OutreachPreview | 404
  *   POST /api/cases/:id/actions/outreach         ?templateId=…  send     → 200 CaseDetail | 404
  *   POST /api/cases/:id/actions/outreach/delivery ?deliveryStatus=…      → 200 CaseDetail | 400 | 404
@@ -150,8 +150,13 @@ export async function handleCases(req: Request, env: CasesEnv, actor = "system")
     }
     const escalateId = url.pathname.match(/^\/api\/cases\/([^/]+)\/escalate$/)?.[1];
     if (escalateId) {
-      const detail = await escalateCase(await actionDeps(env), escalateId, actor);
-      return detail ? json(detail) : json({ error: "not_found", id: escalateId }, 404);
+      try {
+        const detail = await escalateCase(await actionDeps(env), escalateId, actor);
+        return detail ? json(detail) : json({ error: "not_found", id: escalateId }, 404);
+      } catch (err) {
+        if (err instanceof CaseActionError) return json({ error: "bad_request", message: err.message }, 400);
+        throw err;
+      }
     }
     const deliveryId = url.pathname.match(/^\/api\/cases\/([^/]+)\/actions\/outreach\/delivery$/)?.[1];
     if (deliveryId) {

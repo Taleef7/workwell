@@ -118,6 +118,22 @@ describe("CaseDetailPage pilot mode controls", () => {
     }
   });
 
+  it.each(["CLOSED", "RESOLVED", "EXCLUDED"])("offers no Escalate on a %s case, in either layout: it would reopen it", async (status) => {
+    setPublicDemo(false);
+    currentRole = "ROLE_CASE_MANAGER";
+    get.mockImplementation((url: string) => {
+      if (url === "/api/cases/case-001") return Promise.resolve({ ...caseData, status });
+      return Promise.resolve([]);
+    });
+
+    render(<CaseDetailPage />);
+    await waitFor(() => {
+      expect(screen.getAllByText("Alice Walker").length).toBeGreaterThan(0);
+    });
+
+    expect(screen.queryAllByRole("button", { name: /^Escalate$/ })).toHaveLength(0);
+  });
+
   it("gives a read-only viewer none of the case actions", async () => {
     setPublicDemo(false);
     currentRole = "ROLE_VIEWER";
