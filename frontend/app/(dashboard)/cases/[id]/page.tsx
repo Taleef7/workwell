@@ -232,6 +232,7 @@ export default function CaseDetailPage() {
       ? storedAssignee === ""
       : assigneeValue.toLowerCase() === storedAssignee.toLowerCase());
   const caseStatus = caseDetail ? normalizeEnumValue(caseDetail.status) : "";
+  const deliveryState = caseDetail?.latestOutreachDeliveryStatus ? normalizeEnumValue(caseDetail.latestOutreachDeliveryStatus) : null;
 
   // Option lists for @mieweb/ui Select controls.
   // The empty-value option is the default: no templateId is sent, so the backend picks the
@@ -765,7 +766,10 @@ export default function CaseDetailPage() {
                     this makes the *recommended* one a single click from the next-action panel). */}
                 {canManage && caseStatus !== "CLOSED" && caseStatus !== "EXCLUDED" && caseStatus !== "RESOLVED" ? (
                   <div className="mt-3">
-                    {caseDetail.latestOutreachDeliveryStatus ? (
+                    {/* The step follows the delivery state, as the backend's next-action wording does:
+                        verify only once the patient was contacted, retry a failed send, and wait on a
+                        queued one. Offering a rerun for every state let staff verify before any contact. */}
+                    {deliveryState === "SENT" || deliveryState === "SIMULATED" ? (
                       <Button
                         type="button"
                         variant="primary"
@@ -777,7 +781,7 @@ export default function CaseDetailPage() {
                       >
                         Rerun to verify →
                       </Button>
-                    ) : (
+                    ) : deliveryState === "QUEUED" ? null : (
                       <Button
                         type="button"
                         variant="primary"
@@ -787,7 +791,7 @@ export default function CaseDetailPage() {
                         isLoading={previewing}
                         loadingText="Preparing..."
                       >
-                        Prepare outreach →
+                        {deliveryState === "FAILED" ? "Retry outreach →" : "Prepare outreach →"}
                       </Button>
                     )}
                   </div>

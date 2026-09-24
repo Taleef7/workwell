@@ -93,6 +93,31 @@ describe("CaseDetailPage pilot mode controls", () => {
     expect(screen.queryByRole("button", { name: /Mark failed/i })).toBeNull();
   });
 
+  it.each([
+    ["SENT", "Rerun to verify →"],
+    ["SIMULATED", "Rerun to verify →"],
+    ["FAILED", "Retry outreach →"],
+    ["QUEUED", null],
+  ])("the next step follows the delivery state: %s", async (deliveryStatus, expected) => {
+    setPublicDemo(false);
+    currentRole = "ROLE_CASE_MANAGER";
+    get.mockImplementation((url: string) => {
+      if (url === "/api/cases/case-001") return Promise.resolve({ ...caseData, latestOutreachDeliveryStatus: deliveryStatus });
+      return Promise.resolve([]);
+    });
+
+    render(<CaseDetailPage />);
+    await waitFor(() => {
+      expect(screen.getAllByText("Alice Walker").length).toBeGreaterThan(0);
+    });
+
+    // Verify only once the patient was contacted; retry a failed send; wait on a queued one.
+    for (const label of ["Rerun to verify →", "Retry outreach →", "Prepare outreach →"]) {
+      if (label === expected) expect(screen.getByRole("button", { name: label })).toBeInTheDocument();
+      else expect(screen.queryByRole("button", { name: label })).toBeNull();
+    }
+  });
+
   it("gives a read-only viewer none of the case actions", async () => {
     setPublicDemo(false);
     currentRole = "ROLE_VIEWER";

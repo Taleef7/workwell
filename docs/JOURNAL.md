@@ -42,7 +42,8 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
 - **#618: the pilot's case managers can escalate and rerun a case.** Rerun to Verify, Escalate and the
   next-step "Rerun to verify" were behind an admin-only gate, so both pilot accounts lost them and the
   next-step panel went blank once outreach was sent. They now show wherever the case actions do; only
-  the simulated delivery-state controls stay admin-only.
+  the simulated delivery-state controls stay admin-only. The next step follows the delivery state: verify
+  after a send, retry a failed one, nothing while queued.
 - **The AI surfaces now ask `gpt-6-luna` first and `gpt-5.4-nano` second.** The client sent `max_tokens`
   and a temperature, both rejected by GPT-5-era models, so the old primary most likely failed on every
   call and `gpt-4o-mini` answered. It now turns reasoning off and sends `max_completion_tokens`. The
