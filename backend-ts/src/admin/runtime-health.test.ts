@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 import {
   __resetRuntimeHealth,
   recordWarm,
+  memoryLimitBytes,
   buildSha,
   inFlightRequests,
   loggablePath,
@@ -174,4 +175,12 @@ test("the warm record keeps the newest ten passes, and /health shows only the ne
     ok: false,
     failedMeasures: 0,
   });
+});
+
+test("the memory limit is the container's only when it is a real limit (#604)", () => {
+  const host = 16 * 1024 ** 3;
+  assert.equal(memoryLimitBytes(4 * 1024 ** 3, host), 4 * 1024 ** 3, "a cgroup limit below the host's memory is the limit");
+  assert.equal(memoryLimitBytes(2 ** 64, host), host, "an unlimited cgroup reports ~2^64: the host's total is the ceiling");
+  assert.equal(memoryLimitBytes(0, host), host, "no cgroup at all");
+  assert.equal(memoryLimitBytes(undefined, host), host, "an older Node without constrainedMemory");
 });
