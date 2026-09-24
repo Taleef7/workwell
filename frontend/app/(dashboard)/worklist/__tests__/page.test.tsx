@@ -90,6 +90,8 @@ describe("WorklistPage", () => {
     expect(screen.getByRole("link", { name: "Diabetes HbA1c" })).toBeInTheDocument();
     // And the row is one row, not two.
     expect(screen.getAllByRole("link", { name: "Lisa Carter" })).toHaveLength(1);
+    // A second identifier beside the name: two patients can share a name, a clinic and a provider (#660).
+    expect(screen.getByTestId("worklist-patient-id")).toHaveTextContent("maui-pat-00001");
     // Singular for one. "1 patients with open gaps" is the kind of thing a pilot user screenshots.
     expect(screen.getByText(/1 (patient|employee) with open gaps/i)).toBeInTheDocument();
   });

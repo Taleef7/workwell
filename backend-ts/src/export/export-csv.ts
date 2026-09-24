@@ -13,6 +13,7 @@ import { isWebChartConfigured, type DataSourceEnv } from "../engine/ingress/data
 import { hasActiveSubjectFilters, matchesSubjectFilters, type SubjectFilters } from "../compliance/subject-filters.ts";
 import type { EmployeeProfile } from "../engine/synthetic/employee-catalog.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
+import { measureDisplayName } from "../measure/measure-name.ts";
 import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
 import { toCsv, csvCell } from "./csv.ts";
 import { closureKindOf } from "../case/case-logic.ts";
@@ -20,7 +21,7 @@ import { matchesCaseSearch, shownStatusFor, siteMatches } from "../case/worklist
 import { bucketPeriodForMeasure } from "../run/compliance-period.ts";
 import { liveAnswerForCase, liveCellsFor, liveFieldsFor, type LiveCellDeps } from "../compliance/live-cell.ts";
 
-const measureName = (measureId: string) => MEASURES[measureId]?.name ?? measureId;
+const measureName = (measureId: string) => measureDisplayName(measureId);
 const authoredVersion = (measureId: string) => {
   const lib = MEASURES[measureId]?.library ?? "";
   const dash = lib.lastIndexOf("-");
