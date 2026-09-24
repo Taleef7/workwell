@@ -46,7 +46,8 @@ Use a JWT minted from `/api/auth/login` for a `ROLE_ADMIN` or `ROLE_CASE_MANAGER
 ```
 
 Use `Authorization:${AUTH_HEADER}` rather than `Authorization: Bearer ...` directly in `args` on Windows, because Claude Desktop / `npx` can mangle spaces in the command line.
-If the token expires, mint a fresh JWT and update the environment value.
+An access token lasts 15 minutes, and `mcp-remote` cannot refresh a fixed header, so when calls start
+answering 401, mint a fresh JWT from `/api/auth/login` and update the environment value.
 
 ## Tool posture
 
