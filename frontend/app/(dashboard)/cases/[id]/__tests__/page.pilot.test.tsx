@@ -71,7 +71,7 @@ describe("CaseDetailPage pilot mode controls", () => {
     });
   });
 
-  it("hides Escalate, Rerun to verify, Mark queued, Mark sent, Mark failed for non-admin in pilot mode", async () => {
+  it("gives a pilot case manager Escalate and Rerun in both layouts and the next step, but not the delivery-state controls (#618)", async () => {
     setPublicDemo(false);
     currentRole = "ROLE_CASE_MANAGER";
 
@@ -81,11 +81,30 @@ describe("CaseDetailPage pilot mode controls", () => {
       expect(screen.getAllByText("Alice Walker").length).toBeGreaterThan(0);
     });
 
-    expect(screen.queryAllByRole("button", { name: /^Escalate/i })).toHaveLength(0);
-    expect(screen.queryAllByRole("button", { name: /Rerun to verify/i })).toHaveLength(0);
+    // jsdom renders both layouts; each is pinned by its own label so a fix that lands on one only fails.
+    expect(screen.getByRole("button", { name: "Rerun to Verify" })).toBeInTheDocument(); // wide layout
+    expect(screen.getByRole("button", { name: "Rerun to verify" })).toBeInTheDocument(); // narrow layout
+    expect(screen.getAllByRole("button", { name: /^Escalate$/ })).toHaveLength(2);
+    // Outreach was sent, so the next-step panel offers the verify, where it used to go blank.
+    expect(screen.getByRole("button", { name: "Rerun to verify →" })).toBeInTheDocument();
+    // The simulated delivery-state controls stay engineering-only.
     expect(screen.queryByRole("button", { name: /Mark queued/i })).toBeNull();
     expect(screen.queryByRole("button", { name: /Mark sent/i })).toBeNull();
     expect(screen.queryByRole("button", { name: /Mark failed/i })).toBeNull();
+  });
+
+  it("gives a read-only viewer none of the case actions", async () => {
+    setPublicDemo(false);
+    currentRole = "ROLE_VIEWER";
+
+    render(<CaseDetailPage />);
+
+    await waitFor(() => {
+      expect(screen.getAllByText("Alice Walker").length).toBeGreaterThan(0);
+    });
+
+    expect(screen.queryAllByRole("button", { name: /^Escalate/i })).toHaveLength(0);
+    expect(screen.queryAllByRole("button", { name: /Rerun to verify/i })).toHaveLength(0);
   });
 
   it("companion: shows controls for non-admin when PUBLIC_DEMO is true", async () => {

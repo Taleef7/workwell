@@ -164,6 +164,10 @@ export default function CaseDetailPage() {
   // backend; read-only roles previously saw every control and got a guaranteed 403 (Fable H9). Mirror
   // the API gate so those controls simply don't render for read roles.
   const canManage = canManageCases(user?.role);
+  // Rerun to Verify and Escalate are case work, so they render wherever the case actions do (`canManage`)
+  // (#618): behind the engineering gate the pilot's case managers were refused them, and the next-step
+  // panel went blank once outreach was sent. Only the simulated delivery-state controls (Mark queued /
+  // sent / failed) stay behind it.
   const canEngineering = canSeeEngineering(user?.role);
   const { labelFor: measureLabelFor } = useMeasureIdentities();
   const [caseDetail, setCaseDetail] = useState<CaseDetail | null>(null);
@@ -612,32 +616,28 @@ export default function CaseDetailPage() {
                 <div className="col-span-2">
                   <LocalOnlyNotice action="Outreach" />
                 </div>
-                {canEngineering && (
-                  <Button
-                    type="button"
-                    variant="primary"
-                    size="sm"
-                    onClick={() => void runAction("rerun")}
-                    disabled={acting !== null}
-                    isLoading={acting === "rerun"}
-                    loadingText="Verifying..."
-                  >
-                    Rerun to Verify
-                  </Button>
-                )}
-                {canEngineering && (
-                  <Button
-                    type="button"
-                    variant="danger"
-                    size="sm"
-                    onClick={() => setEscalationConfirmOpen(true)}
-                    disabled={escalating}
-                    isLoading={escalating}
-                    loadingText="Escalating..."
-                  >
-                    Escalate
-                  </Button>
-                )}
+                <Button
+                  type="button"
+                  variant="primary"
+                  size="sm"
+                  onClick={() => void runAction("rerun")}
+                  disabled={acting !== null}
+                  isLoading={acting === "rerun"}
+                  loadingText="Verifying..."
+                >
+                  Rerun to Verify
+                </Button>
+                <Button
+                  type="button"
+                  variant="danger"
+                  size="sm"
+                  onClick={() => setEscalationConfirmOpen(true)}
+                  disabled={escalating}
+                  isLoading={escalating}
+                  loadingText="Escalating..."
+                >
+                  Escalate
+                </Button>
               </div>
               <div className="grid gap-2">
                 <Select
@@ -766,19 +766,17 @@ export default function CaseDetailPage() {
                 {canManage && caseStatus !== "CLOSED" && caseStatus !== "EXCLUDED" && caseStatus !== "RESOLVED" ? (
                   <div className="mt-3">
                     {caseDetail.latestOutreachDeliveryStatus ? (
-                      canEngineering ? (
-                        <Button
-                          type="button"
-                          variant="primary"
-                          size="sm"
-                          onClick={() => void runAction("rerun")}
-                          disabled={acting !== null}
-                          isLoading={acting === "rerun"}
-                          loadingText="Verifying..."
-                        >
-                          Rerun to verify →
-                        </Button>
-                      ) : null
+                      <Button
+                        type="button"
+                        variant="primary"
+                        size="sm"
+                        onClick={() => void runAction("rerun")}
+                        disabled={acting !== null}
+                        isLoading={acting === "rerun"}
+                        loadingText="Verifying..."
+                      >
+                        Rerun to verify →
+                      </Button>
                     ) : (
                       <Button
                         type="button"
@@ -873,30 +871,26 @@ export default function CaseDetailPage() {
                   >
                     Send outreach
                   </Button>
-                  {canEngineering && (
-                    <Button
-                      type="button"
-                      variant="danger"
-                      onClick={() => setEscalationConfirmOpen(true)}
-                      disabled={escalating}
-                      isLoading={escalating}
-                      loadingText="Escalating..."
-                    >
-                      Escalate
-                    </Button>
-                  )}
-                  {canEngineering && (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() => void runAction("rerun")}
-                      disabled={acting !== null || caseStatus === "CLOSED"}
-                      isLoading={acting === "rerun"}
-                      loadingText="Verifying..."
-                    >
-                      Rerun to verify
-                    </Button>
-                  )}
+                  <Button
+                    type="button"
+                    variant="danger"
+                    onClick={() => setEscalationConfirmOpen(true)}
+                    disabled={escalating}
+                    isLoading={escalating}
+                    loadingText="Escalating..."
+                  >
+                    Escalate
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => void runAction("rerun")}
+                    disabled={acting !== null || caseStatus === "CLOSED"}
+                    isLoading={acting === "rerun"}
+                    loadingText="Verifying..."
+                  >
+                    Rerun to verify
+                  </Button>
                   <Button
                     type="button"
                     variant="outline"
