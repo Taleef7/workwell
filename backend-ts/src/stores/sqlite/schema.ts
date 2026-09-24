@@ -415,6 +415,15 @@ CREATE TABLE IF NOT EXISTS panel_assignments (
 );
 CREATE INDEX IF NOT EXISTS panel_assignments_assignee_idx ON panel_assignments (assignee);
 
+/* Login families (#688). Floor analogue of auth_refresh_families: each refresh-token family's current
+   jti, so a restart no longer signs every user out. ISO-8601 UTC TEXT timestamps. OWNER-APPROVED DDL
+   (2026-09-24); additive, reversible. */
+CREATE TABLE IF NOT EXISTS auth_refresh_families (
+  family      TEXT PRIMARY KEY,
+  jti         TEXT NOT NULL,
+  expires_at  TEXT NOT NULL
+);
+
 /* The ACO's attributed patient list (MM-2 PR 3, ADR-082). Floor analogue of subject_lists +
    subject_list_members: TEXT ids and timestamps, INTEGER revision, the same CHECKs and the same
    partial unique index (SQLite supports both). The one concrete ask from the 2026-09-09 working

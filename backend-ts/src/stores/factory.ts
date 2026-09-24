@@ -69,6 +69,9 @@ import type { SubjectListStore } from "./subject-list-store.ts";
 import { SqliteSubjectListStore } from "./sqlite/subject-list-store-sqlite.ts";
 import { PgSubjectListStore } from "./postgres/subject-list-store-postgres.ts";
 import type { CampaignStore } from "./campaign-store.ts";
+import type { AuthFamilyStore } from "./auth-family-store.ts";
+import { SqliteAuthFamilyStore } from "./sqlite/auth-family-store-sqlite.ts";
+import { PgAuthFamilyStore } from "./postgres/auth-family-store-postgres.ts";
 import { AuditBackedCampaignStore } from "./audit-campaign-store.ts";
 
 /** The full set of persistence ports, resolved to one backend (floor or ceiling). */
@@ -96,6 +99,8 @@ export interface Stores {
   subjectLists: SubjectListStore;
   /** Audit-backed demo adapter; production drop-in = PgCampaignStore over outreach_campaigns + outreach_delivery_log. */
   campaigns: CampaignStore;
+  /** Login families (#688) — each refresh-token family's current jti, so a restart does not sign users out. */
+  authFamilies: AuthFamilyStore;
 }
 
 /** Minimal env the factory needs: the SQLite floor binding + an optional Postgres URL (the ceiling). */
@@ -169,6 +174,7 @@ async function buildPostgres(url: string): Promise<Stores> {
     panels: new PgPanelStore(pool),
     subjectLists: new PgSubjectListStore(pool),
     campaigns: new AuditBackedCampaignStore(events),
+    authFamilies: new PgAuthFamilyStore(pool),
   };
 }
 
@@ -212,5 +218,6 @@ async function buildSqlite(db: CloudDatabase): Promise<Stores> {
     panels: new SqlitePanelStore(db),
     subjectLists: new SqliteSubjectListStore(db),
     campaigns: new AuditBackedCampaignStore(events),
+    authFamilies: new SqliteAuthFamilyStore(db),
   };
 }
