@@ -572,7 +572,7 @@ export class PgOutcomeStore implements OutcomeStore {
     //    newest-first and ask each which of the still-unsatisfied measures it holds a row for: one
     //    EXISTS probe per (run, measure) inside ONE query per run, stopping as soon as every measure has
     //    its `per` winners. The common case (the newest ALL_PROGRAMS run holds every routed measure) is
-    //    one probe. A negative probe walks the run's index entries (no (run_id, measure_id) index), so
+    //    one probe. A probe is one lookup in `spike_outcomes_run_measure_idx` (#615), and the walk is still bounded, so
     //    the walk is bounded: a measure the budget cannot settle — routed today and not yet run, or
     //    last evaluated further back than the budget — is resolved by step 2 instead.
     const { rows: runs } = await this.pool.query<RunRow>(

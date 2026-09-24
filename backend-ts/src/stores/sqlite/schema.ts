@@ -54,6 +54,8 @@ CREATE INDEX IF NOT EXISTS outcomes_run_id_idx ON outcomes (run_id);
    the floor so listOutcomesForEmployee / listOutcomesForMeasure don't seq-scan. Additive, reversible. */
 CREATE INDEX IF NOT EXISTS outcomes_subject_idx ON outcomes (subject_id, evaluated_at DESC);
 CREATE INDEX IF NOT EXISTS outcomes_measure_idx ON outcomes (measure_id, evaluated_at);
+/* #615: mirror of the ceiling's (run, measure) index — the winners probe and every per-measure run read. */
+CREATE INDEX IF NOT EXISTS outcomes_run_measure_idx ON outcomes (run_id, measure_id);
 
 /* Cases (#107). Floor analogue of the canonical cases table (postgres/schema-pg.ts):
    measure_id (slug) stands in for the canonical measure_version_id UUID. The

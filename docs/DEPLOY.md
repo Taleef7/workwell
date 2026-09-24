@@ -236,8 +236,8 @@ writes a `WARN` containing `no segment makes them applicable` when this is owed.
   background. Grep `read models warmed at boot in <ms>ms` or `boot read-model warm failed after …`, or
   read `lastWarm` on `/health` (every pass: `boot`, `nightly`, `run`) and `warms`, with the error, on
   `/api/admin/runtime` (#615).
-  Pending owner DDL that would speed the cold path: `CREATE INDEX IF NOT EXISTS
-  spike_outcomes_run_measure_idx ON <schema>.outcomes (run_id, measure_id);`.
+  The cold path's worst statement, the winners probe, is served by `spike_outcomes_run_measure_idx`
+  (#615; created at boot by the schema DDL).
 - **Measure performance on a quiet, warm worker** — not during the nightly (12:00 UTC, ~90 min on Maui)
   and not in the first minutes after a deploy.
 

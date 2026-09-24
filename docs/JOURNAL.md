@@ -15,8 +15,8 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
   because the overview's "does this run hold this measure?" check took 26.6 s and the overview passed the
   30 s limit, and the pass then gave up before warming any measure page. It now warms each measure's
   panels even when the overview fails. The `outcomes (run_id, measure_id)` index turns that check into a
-  lookup (the cold warm then succeeds, and a measure's drivers load in 0.04 s instead of 16 s); it is the
-  owner's DDL to add. Retention is not the cause (3.5 to 6 s a night).
+  lookup (the cold warm then succeeds, and a measure's drivers load in 0.04 s instead of 16 s); it is added
+  (owner DDL, built at boot, about 6 s on the pilot's data). Retention is not the cause (3.5 to 6 s a night).
 
 ## 2026-09-23
 
