@@ -434,7 +434,7 @@ async function runTickLocked(deps: SchedulerTickDeps, nowMs: number): Promise<bo
     qualitySnapshots: deps.stores.qualitySnapshots,
     employees: deps.employees,
     webChartEnv: deps.webChartEnv,
-  });
+  }, "nightly");
 
   return true;
 }

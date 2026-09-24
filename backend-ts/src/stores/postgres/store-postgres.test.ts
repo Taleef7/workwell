@@ -416,4 +416,27 @@ if (!reachable && process.env.WORKWELL_TEST_PG_URL) {
     assert.equal(reread.status, "IN_PROGRESS", "§4: the operator's IN_PROGRESS survived the batch's stale plan");
     assert.equal((await store.listCases({ employeeId: "y1", limit: 10 }))[0]!.lastRunId, runId, "y1 still landed");
   });
+
+  test("[postgres] the winners probe's (run, measure) check is answered by spike_outcomes_run_measure_idx (#615)", async () => {
+    // Without the index this EXISTS walked a whole run's run_id entries and fetched heap pages until one
+    // matched: 26.6 s cold on the pilot's data, which put the overview past the 30 s role timeout. Seq
+    // and bitmap scans are switched off so the plan names the index the planner would use at scale,
+    // not what it prefers over an empty table.
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("SET LOCAL enable_seqscan = off");
+      await client.query("SET LOCAL enable_bitmapscan = off");
+      const { rows } = await client.query<{ "QUERY PLAN": string }>(
+        `EXPLAIN SELECT m.measure_id FROM unnest($2::text[]) AS m(measure_id)
+          WHERE EXISTS (SELECT 1 FROM ${SPIKE_SCHEMA}.outcomes o WHERE o.run_id = $1 AND o.measure_id = m.measure_id)`,
+        ["00000000-0000-4000-8000-000000000001", ["cms125", "cms130"]],
+      );
+      const plan = rows.map((r) => r["QUERY PLAN"]).join("\n");
+      assert.match(plan, /spike_outcomes_run_measure_idx/, `the probe must use the (run_id, measure_id) index:\n${plan}`);
+    } finally {
+      await client.query("ROLLBACK").catch(() => {});
+      client.release();
+    }
+  });
 }

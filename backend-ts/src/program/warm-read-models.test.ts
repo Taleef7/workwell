@@ -8,9 +8,10 @@ import assert from "node:assert/strict";
 import type { OutcomeStore, OutcomeWithRun } from "../stores/outcome-store.ts";
 import type { RunStore } from "../stores/run-store.ts";
 import type { CaseStore } from "../stores/case-store.ts";
-import { warmReadModels } from "./warm-read-models.ts";
+import { MAX_CONSECUTIVE_PANEL_FAILURES, warmReadModels } from "./warm-read-models.ts";
 import { programOverview, programRiskOutlook, __overviewMemo, __chartMemos, __sitesMemo } from "./program-read-models.ts";
 import { latestRunsFromRows } from "../test-support/latest-runs.ts";
+import { __resetRuntimeHealth, runtimeDetail, runtimeHealth } from "../admin/runtime-health.ts";
 
 const rows: OutcomeWithRun[] = [
   { runId: "run-1", runStartedAt: "2026-09-01T00:00:00.000Z", runScopeType: "ALL_PROGRAMS", runStatus: "COMPLETED", runTriggeredBy: "manual", subjectId: "emp-006", measureId: "audiogram", status: "OVERDUE" },
@@ -72,4 +73,74 @@ test("a warm failure is swallowed: a completed run is never failed by cache main
   clearAll();
   const exploding = makeDeps({ listOutcomesWithRun: async () => { throw new Error("store is down"); } });
   await assert.doesNotReject(() => warmReadModels(exploding));
+});
+
+test("every pass is recorded on the runtime view, failed or not, under the trigger that started it (#615)", async () => {
+  // The nightly awaited this and dropped the result, so on 2026-09-24 nobody could say whether the
+  // pass that should have warmed the pilot's dashboard had run, failed, or never started.
+  clearAll();
+  __resetRuntimeHealth();
+  assert.equal(runtimeHealth().lastWarm, null, "nothing recorded before a pass");
+
+  await warmReadModels(makeDeps(), "nightly");
+  const ok = runtimeHealth().lastWarm!;
+  assert.equal(ok.trigger, "nightly");
+  assert.equal(ok.ok, true);
+  assert.equal(ok.failedMeasures, 0);
+  assert.ok(ok.durationMs >= 0 && Date.parse(ok.finishedAt) > 0);
+
+  clearAll();
+  const exploding = makeDeps({ listOutcomesWithRun: async () => { throw new Error("store is down"); } });
+  const result = await warmReadModels(exploding, "boot");
+  assert.equal(result.ok, false);
+  const failed = runtimeHealth().lastWarm!;
+  assert.equal(failed.trigger, "boot");
+  assert.equal(failed.ok, false, "a failed pass is recorded as failed, not skipped");
+  assert.equal("error" in failed, false, "the public view carries no error text");
+
+  const detail = runtimeDetail().warms;
+  assert.deepEqual(detail.map((w) => [w.trigger, w.ok]), [["boot", false], ["nightly", true]], "newest first");
+  assert.match(detail[0]!.error ?? "", /store is down/, "the admin view says why");
+});
+
+test("the per-measure panels are warmed even when the overview fails (#615)", async () => {
+  // On the pilot's cold database the overview ran past the 30 s role timeout, and the pass used to
+  // stop there: every measure page then paid its own cold read after a nightly meant to prevent it.
+  clearAll();
+  const deps = { ...makeDeps(), caseStore: { listCases: async () => { throw new Error("statement timeout"); } } as unknown as CaseStore };
+  const result = await warmReadModels(deps);
+  assert.equal(result.ok, false, "the overview's failure is still reported");
+  assert.match(result.error ?? "", /statement timeout/);
+  assert.ok(__chartMemos.driversMemo.size > 0, "the drivers were warmed anyway");
+  assert.ok(__chartMemos.outlookMemo.size > 0, "and the outlook");
+});
+
+test("one panel failing does not skip the measure's other panels (#615)", async () => {
+  clearAll();
+  // Only the trend asks for a window of runs (perMeasure > 1); the overview and the other panels ask for one.
+  const latest = latestRunsFromRows(rows);
+  const failingTrend = makeDeps({
+    listLatestPopulationRuns: (async (ids: readonly string[], filter: unknown, per = 1) => {
+      if (per > 1) throw new Error("trend window read failed");
+      return latest(ids, filter as never, per);
+    }) as OutcomeStore["listLatestPopulationRuns"],
+  });
+  const result = await warmReadModels(failingTrend);
+  assert.ok(__chartMemos.driversMemo.size > 0 && __chartMemos.outlookMemo.size > 0, "drivers and outlook warmed after the trend failed");
+  assert.equal(__chartMemos.trendMemo.size, 0, "the failing panel is the only one missing");
+  assert.ok(result.failedMeasures.length > 0, "and the measure is named as failed");
+});
+
+test("a database that is not answering stops the pass after a few failures, not after every panel (#615 review)", async () => {
+  // Attempting every panel after an overview failure is for a SLOW database. A down one made each
+  // attempt wait out the pool's acquire budget, one panel at a time, for every measure.
+  clearAll();
+  let reads = 0;
+  const down = makeDeps({
+    listLatestPopulationRuns: (async () => { reads += 1; throw new Error("No database connection was available in time"); }) as OutcomeStore["listLatestPopulationRuns"],
+  });
+  const result = await warmReadModels(down);
+  assert.equal(result.ok, false);
+  assert.equal(reads, 1 + MAX_CONSECUTIVE_PANEL_FAILURES, "the overview, then the breaker's worth of panels, then stop");
+  assert.ok(result.failedMeasures.length > 1, "every measure it did not reach is reported unwarmed");
 });

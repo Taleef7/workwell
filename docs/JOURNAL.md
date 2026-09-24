@@ -5,6 +5,19 @@ Newest first. A few lines per working day: what changed, and what's next.
 Entries before 2026-09-23 are in git history: `git show before-docs-trim:docs/JOURNAL.md` is the last long-form
 version, and earlier months were in `docs/archive/` (`git show before-docs-trim:docs/archive/JOURNAL_2026-07.md`).
 
+## 2026-09-24
+
+- **#615: every dashboard cache warm is now recorded.** The first Programs load after a quiet stretch still
+  timed out on the pilot (the overview ran 33 to 60 s), and the nightly's warm had not filled the caches it
+  exists to fill, but nothing could say whether it had run. `/health` now shows the last warm (`lastWarm`:
+  boot, nightly or after a run, how long, whether it worked) and `/api/admin/runtime` the last ten, with the
+  error. Measured on a Neon branch of the pilot's database with its cache emptied: the warm itself failed,
+  because the overview's "does this run hold this measure?" check took 26.6 s and the overview passed the
+  30 s limit, and the pass then gave up before warming any measure page. It now warms each measure's
+  panels even when the overview fails. The `outcomes (run_id, measure_id)` index turns that check into a
+  lookup (the cold warm then succeeds, and a measure's drivers load in 0.04 s instead of 16 s); it is added
+  (owner DDL, built at boot, about 6 s on the pilot's data). Retention is not the cause (3.5 to 6 s a night).
+
 ## 2026-09-23
 
 - **The work is now one GitHub milestone, "Ready for January"** (24 issues): the Maui sandbox's numbers

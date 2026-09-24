@@ -81,6 +81,16 @@ CREATE INDEX IF NOT EXISTS spike_outcomes_measure_idx
 CREATE INDEX IF NOT EXISTS spike_outcomes_keepset_idx
   ON ${SPIKE_SCHEMA}.outcomes (subject_id, measure_id, evaluation_period, evaluated_at DESC, id DESC);
 
+-- OWNER-APPROVED DDL (#615, 2026-09-24): "does this run hold a row for this measure?" — the winners
+-- probe every dashboard read starts with (listLatestPopulationRuns), and every (run, measure) read.
+-- Without it the probe walked the run's run_id entries and fetched heap pages until one matched: on a
+-- Neon branch of the pilot's database (3.3 GB of outcomes, suspended to empty its cache) that one
+-- statement took 26.6 s, the overview hit the 30 s role timeout, and the post-run warm failed. With it
+-- the probe is an index lookup, the cold overview completes and the full warm succeeds cold.
+-- 16 MB; built in 5.8 s there. Additive, reversible (DROP INDEX), no data migration.
+CREATE INDEX IF NOT EXISTS spike_outcomes_run_measure_idx
+  ON ${SPIKE_SCHEMA}.outcomes (run_id, measure_id);
+
 CREATE TABLE IF NOT EXISTS ${SPIKE_SCHEMA}.cases (
   id                     UUID PRIMARY KEY,
   employee_id            TEXT NOT NULL,

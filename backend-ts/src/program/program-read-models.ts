@@ -239,7 +239,7 @@ export function listSites(employees: readonly EmployeeProfile[] = EMPLOYEES): st
 }
 
 /** The measures a roster-wide read model shows: catalog-Active AND runnable on this deployment. */
-const activeRunnableIds = (): string[] =>
+export const activeRunnableIds = (): string[] =>
   MEASURE_CATALOG.filter((m) => m.status === "Active" && isRunnableMeasure(m.id)).map((m) => m.id);
 
 const LATEST_FILTER = { excludeScale: true, excludeTrendHistory: true } as const;

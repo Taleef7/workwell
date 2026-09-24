@@ -31,6 +31,7 @@ import { OPENAPI_PATH } from "./openapi.ts";
 import { PATIENT_VIEW_SERVICE_ID } from "../cds/discovery.ts";
 import { authorize } from "../auth/authorize.ts";
 import worker from "../worker.ts";
+import { runtimeHealth } from "../admin/runtime-health.ts";
 import type { Env } from "../worker.ts";
 
 const dbPath = join(tmpdir(), `ww-openapi-${crypto.randomUUID()}.sqlite`);
@@ -411,3 +412,12 @@ function validate(value: unknown, schema: OpenApiSchema, where: string): void {
       return; // untyped (an open object) — nothing to assert
   }
 }
+
+test("the published Health schema declares every key /health returns (#615)", () => {
+  // `lastWarm` shipped on the route before it was in the schema, so generated clients dropped it.
+  const health = doc.components?.schemas?.["Health"] as OpenApiSchema;
+  const declared = Object.keys(health.properties ?? {});
+  for (const key of ["status", "stack", ...Object.keys(runtimeHealth())]) {
+    assert.ok(declared.includes(key), `/health returns '${key}', which the Health schema does not declare`);
+  }
+});

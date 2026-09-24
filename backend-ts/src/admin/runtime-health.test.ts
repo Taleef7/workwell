@@ -6,6 +6,7 @@ import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import {
   __resetRuntimeHealth,
+  recordWarm,
   buildSha,
   inFlightRequests,
   loggablePath,
@@ -148,4 +149,29 @@ test("a REAL blocked event loop: the watchdog reports it WHILE it lasts, and the
   }
   assert.equal(runtimeHealth().eventLoop.monitored, false, "stop tears the monitor down");
   assert.equal(runtimeHealth().eventLoop.watchdog, false);
+});
+
+test("the warm record keeps the newest ten passes, and /health shows only the newest, without error text (#615)", () => {
+  for (let i = 0; i < 12; i += 1) {
+    recordWarm({
+      trigger: i % 2 ? "nightly" : "boot",
+      startedAt: new Date(Date.UTC(2026, 8, 24, 13, i)).toISOString(),
+      finishedAt: new Date(Date.UTC(2026, 8, 24, 13, i, 30)).toISOString(),
+      durationMs: 30_000,
+      ok: i !== 11,
+      failedMeasures: i === 10 ? ["cms125"] : [],
+      ...(i === 11 ? { error: "statement timeout" } : {}),
+    });
+  }
+  const warms = runtimeDetail().warms;
+  assert.equal(warms.length, 10, "bounded");
+  assert.equal(warms[0]!.startedAt, new Date(Date.UTC(2026, 8, 24, 13, 11)).toISOString(), "newest first");
+  assert.equal(warms.at(-1)!.startedAt, new Date(Date.UTC(2026, 8, 24, 13, 2)).toISOString(), "the two oldest dropped");
+  assert.deepEqual(runtimeHealth().lastWarm, {
+    trigger: "nightly",
+    finishedAt: new Date(Date.UTC(2026, 8, 24, 13, 11, 30)).toISOString(),
+    durationMs: 30_000,
+    ok: false,
+    failedMeasures: 0,
+  });
 });
