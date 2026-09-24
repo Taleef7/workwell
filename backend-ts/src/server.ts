@@ -238,6 +238,11 @@ async function main(): Promise<void> {
           // resolved, because the boot sweep above called it with this same object and the factory
           // caches the promise.
           outcome = { ok: false, error: String((err as Error)?.message ?? err), failedMeasures: [] };
+          // `warmReadModels` never ran, so it recorded nothing: without this a boot whose stores failed
+          // to open read as a warm that never started (Codex on #701).
+          const { recordWarm } = await import("./admin/runtime-health.ts");
+          const now = new Date().toISOString();
+          recordWarm({ trigger: "boot", startedAt: new Date(started).toISOString(), finishedAt: now, durationMs: Date.now() - started, ok: false, failedMeasures: [], error: outcome.error });
         }
         if (outcome.ok) {
           const partial = outcome.failedMeasures.length > 0 ? ` (${outcome.failedMeasures.join(", ")} did not warm)` : "";

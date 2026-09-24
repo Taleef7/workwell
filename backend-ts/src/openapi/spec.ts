@@ -544,6 +544,19 @@ export function openApiDocument(): OpenApiDocument {
                 },
               },
             },
+            lastWarm: {
+              type: ["object", "null"],
+              description:
+                "The newest dashboard read-model warm (#615): at boot, after the nightly run, or after a population run. Null until one has finished. The error, if any, is on the ADMIN-gated /api/admin/runtime.",
+              required: ["trigger", "finishedAt", "durationMs", "ok", "failedMeasures"],
+              properties: {
+                trigger: { type: "string", enum: ["boot", "nightly", "run"] },
+                finishedAt: { type: "string", format: "date-time" },
+                durationMs: { type: "number" },
+                ok: { type: "boolean", description: "Whether the overview warmed. The per-measure panels are attempted either way." },
+                failedMeasures: { type: "integer", description: "Measures with at least one panel that did not warm." },
+              },
+            },
           },
         },
         Version: {
