@@ -232,7 +232,7 @@ async function main(): Promise<void> {
             caseStore: stores.cases,
             qualitySnapshots: stores.qualitySnapshots,
             webChartEnv: schedulerEnv,
-          });
+          }, "boot");
         } catch (err) {
           // Only the imports and `getStores` can land here — and `getStores` is very likely already
           // resolved, because the boot sweep above called it with this same object and the factory

@@ -19,6 +19,7 @@ import {
   programTrend,
   type ProgramDeps,
 } from "./program-read-models.ts";
+import { recordWarm, type WarmRecord } from "../admin/runtime-health.ts";
 
 /**
  * The filter set the dashboard opens with — no site, no tenant, no date window. Deliberately the
@@ -47,7 +48,28 @@ export interface WarmResult {
   failedMeasures: string[];
 }
 
-export async function warmReadModels(deps: ProgramDeps): Promise<WarmResult> {
+/**
+ * Warm, and record the pass on the runtime view (`/health`'s `lastWarm`, `/api/admin/runtime`'s
+ * `warms`) whatever the caller does with the result (#615). The scheduler awaited this and dropped
+ * the answer, so "did last night's warm run?" had no answer anywhere an operator could read.
+ */
+export async function warmReadModels(deps: ProgramDeps, trigger: WarmRecord["trigger"] = "run"): Promise<WarmResult> {
+  const started = Date.now();
+  const result = await warmPass(deps);
+  const finished = Date.now();
+  recordWarm({
+    trigger,
+    startedAt: new Date(started).toISOString(),
+    finishedAt: new Date(finished).toISOString(),
+    durationMs: finished - started,
+    ok: result.ok,
+    failedMeasures: result.failedMeasures,
+    ...(result.error ? { error: result.error } : {}),
+  });
+  return result;
+}
+
+async function warmPass(deps: ProgramDeps): Promise<WarmResult> {
   let summaries;
   try {
     await programSites(deps);

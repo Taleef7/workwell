@@ -347,6 +347,35 @@ export function startRuntimeMonitor(opts: MonitorOptions = {}): () => Promise<vo
   };
 }
 
+// ── 4. Read-model warms (#615) ─────────────────────────────────────────────────────────────────────
+
+/**
+ * One pass of `warmReadModels`, whoever started it. The dashboard's memos are only as warm as the last
+ * pass that succeeded, and until this record existed nothing an operator could read said whether the
+ * nightly's pass had run at all: the scheduler discarded its result, and its WARN went to a container
+ * log nobody reads. On 2026-09-24 the pilot's first dashboard request after the nightly missed the memo
+ * the pass exists to fill, and there was no way to tell a failed pass from one that never started.
+ */
+export interface WarmRecord {
+  trigger: "boot" | "nightly" | "run";
+  startedAt: string;
+  finishedAt: string;
+  durationMs: number;
+  ok: boolean;
+  /** Measures whose per-measure panels failed while the overview succeeded. */
+  failedMeasures: string[];
+  /** Why the overview pass failed; admin view only. */
+  error?: string;
+}
+
+const MAX_WARM_RECORDS = 10;
+const warms: WarmRecord[] = [];
+
+export function recordWarm(record: WarmRecord): void {
+  warms.push(record);
+  if (warms.length > MAX_WARM_RECORDS) warms.shift();
+}
+
 // ── Snapshots ──────────────────────────────────────────────────────────────────────────────────────
 
 /** The public `/health` view: counts and timings only (see WHAT IS PUBLIC above). */
@@ -363,10 +392,13 @@ export interface RuntimeHealth {
     thresholdMs: number;
     lastStall: { endedAt: string; durationMs: number; requestsInvolved: number } | null;
   };
+  /** The newest read-model warm: when, how long, and whether it worked. Null until one has finished. */
+  lastWarm: { trigger: WarmRecord["trigger"]; finishedAt: string; durationMs: number; ok: boolean; failedMeasures: number } | null;
 }
 
 export function runtimeHealth(now: number = Date.now()): RuntimeHealth {
   const last = stalls.at(-1);
+  const lastWarm = warms.at(-1);
   return {
     build: { sha: buildSha() },
     startedAt: PROCESS_STARTED_AT,
@@ -379,6 +411,9 @@ export function runtimeHealth(now: number = Date.now()): RuntimeHealth {
       thresholdMs: STALL_THRESHOLD_MS,
       lastStall: last ? { endedAt: last.endedAt, durationMs: last.durationMs, requestsInvolved: last.requestsInvolved } : null,
     },
+    lastWarm: lastWarm
+      ? { trigger: lastWarm.trigger, finishedAt: lastWarm.finishedAt, durationMs: lastWarm.durationMs, ok: lastWarm.ok, failedMeasures: lastWarm.failedMeasures.length }
+      : null,
   };
 }
 
@@ -388,6 +423,7 @@ export function runtimeDetail(now: number = Date.now()) {
   return {
     ...runtimeHealth(now),
     stalls: [...stalls].reverse(),
+    warms: [...warms].reverse(),
     inFlight: { total: current.length, requests: current.slice(0, MAX_REPORTED_REQUESTS).map(({ method, path, runningMs }) => ({ method, path, runningMs })) },
   };
 }
@@ -397,6 +433,7 @@ export function __resetRuntimeHealth(): void {
   inFlight.clear();
   recentlySettled.length = 0;
   stalls.length = 0;
+  warms.length = 0;
   stallCount = 0;
   lastWindow = null;
   lastAlertAt = 0;

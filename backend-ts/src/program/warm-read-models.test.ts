@@ -11,6 +11,7 @@ import type { CaseStore } from "../stores/case-store.ts";
 import { warmReadModels } from "./warm-read-models.ts";
 import { programOverview, programRiskOutlook, __overviewMemo, __chartMemos, __sitesMemo } from "./program-read-models.ts";
 import { latestRunsFromRows } from "../test-support/latest-runs.ts";
+import { __resetRuntimeHealth, runtimeDetail, runtimeHealth } from "../admin/runtime-health.ts";
 
 const rows: OutcomeWithRun[] = [
   { runId: "run-1", runStartedAt: "2026-09-01T00:00:00.000Z", runScopeType: "ALL_PROGRAMS", runStatus: "COMPLETED", runTriggeredBy: "manual", subjectId: "emp-006", measureId: "audiogram", status: "OVERDUE" },
@@ -72,4 +73,32 @@ test("a warm failure is swallowed: a completed run is never failed by cache main
   clearAll();
   const exploding = makeDeps({ listOutcomesWithRun: async () => { throw new Error("store is down"); } });
   await assert.doesNotReject(() => warmReadModels(exploding));
+});
+
+test("every pass is recorded on the runtime view, failed or not, under the trigger that started it (#615)", async () => {
+  // The nightly awaited this and dropped the result, so on 2026-09-24 nobody could say whether the
+  // pass that should have warmed the pilot's dashboard had run, failed, or never started.
+  clearAll();
+  __resetRuntimeHealth();
+  assert.equal(runtimeHealth().lastWarm, null, "nothing recorded before a pass");
+
+  await warmReadModels(makeDeps(), "nightly");
+  const ok = runtimeHealth().lastWarm!;
+  assert.equal(ok.trigger, "nightly");
+  assert.equal(ok.ok, true);
+  assert.equal(ok.failedMeasures, 0);
+  assert.ok(ok.durationMs >= 0 && Date.parse(ok.finishedAt) > 0);
+
+  clearAll();
+  const exploding = makeDeps({ listOutcomesWithRun: async () => { throw new Error("store is down"); } });
+  const result = await warmReadModels(exploding, "boot");
+  assert.equal(result.ok, false);
+  const failed = runtimeHealth().lastWarm!;
+  assert.equal(failed.trigger, "boot");
+  assert.equal(failed.ok, false, "a failed pass is recorded as failed, not skipped");
+  assert.equal("error" in failed, false, "the public view carries no error text");
+
+  const detail = runtimeDetail().warms;
+  assert.deepEqual(detail.map((w) => [w.trigger, w.ok]), [["boot", false], ["nightly", true]], "newest first");
+  assert.match(detail[0]!.error ?? "", /store is down/, "the admin view says why");
 });

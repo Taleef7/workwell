@@ -27,6 +27,7 @@ import {
   computeNextFireAt,
   shouldFireAt,
 } from "./scheduler.ts";
+import { __resetRuntimeHealth, runtimeHealth } from "./runtime-health.ts";
 
 const dbPaths: string[] = [];
 
@@ -183,6 +184,18 @@ test("every fired scheduler tick records SCHEDULER_RUN_TRIGGERED in audit_events
   const events = await schedulerTriggerEvents(stores);
   assert.equal(events.length, 1);
   assert.equal(events[0]?.actor, "scheduler");
+});
+
+test("a fired tick records its read-model warm as the nightly's, so /health can say whether it ran (#615)", async () => {
+  const stores = await freshStores();
+  __resetRuntimeHealth();
+
+  setSchedulerEnabled(true);
+  assert.equal(await runTick(deps(stores)), true);
+
+  const warm = runtimeHealth().lastWarm;
+  assert.ok(warm, "the pass is recorded");
+  assert.equal(warm.trigger, "nightly");
 });
 
 test("a configured scheduler tick includes the live WebChart population", async () => {
