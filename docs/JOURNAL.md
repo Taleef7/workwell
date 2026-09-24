@@ -27,6 +27,12 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
   store change); the 15-minute rotation inside a login is not (owner decision). Found on the way: the 30-day
   `WORKWELL_AUTH_ACCESS_TTL_SECONDS` the workflows set is read by nothing (tokens last 15 minutes);
   flagged separately.
+- **#604: the nightly no longer freezes the server.** Each 500-patient chunk of an official measure was one
+  synchronous `fqm-execution` call (~21 s), so the server could answer nothing for 20 to 25 s at a time
+  through the ~80-minute nightly (a sign-in failed this morning). The calculation now runs in one worker
+  thread and the main thread keeps serving; results are identical (checked on CMS125).
+  `WORKWELL_FQM_WORKER=off` puts it back in-process. `/api/admin/runtime` reports the container's cores,
+  which decides whether a pool could also shorten the run.
 
 ## 2026-09-23
 
