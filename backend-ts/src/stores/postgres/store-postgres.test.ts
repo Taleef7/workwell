@@ -34,6 +34,7 @@ import { PgPersonLinkStore } from "./person-link-store-postgres.ts";
 import { PgEvalStateStore } from "./eval-state-store-postgres.ts";
 import { PgPanelStore } from "./panel-store-postgres.ts";
 import { PgSubjectListStore } from "./subject-list-store-postgres.ts";
+import { PgAuthFamilyStore } from "./auth-family-store-postgres.ts";
 import { MEASURE_CATALOG } from "../../measure/measure-catalog.ts";
 import { seedMeasureStore } from "../../measure/measure-seed.ts";
 import { OFFICIAL_ONLY_PRE_CHANGE } from "../../measure/measure-seed.ts";
@@ -437,6 +438,26 @@ if (!reachable && process.env.WORKWELL_TEST_PG_URL) {
     } finally {
       await client.query("ROLLBACK").catch(() => {});
       client.release();
+    }
+  });
+
+  test("[postgres] login families: expiry, rotation, lapsed-row cleanup and revocation (#688)", async () => {
+    const store = new PgAuthFamilyStore(pool);
+    const fam = `test-fam-${crypto.randomUUID()}`;
+    const other = `test-fam-${crypto.randomUUID()}`;
+    try {
+      await store.rotate(fam, "jti-1", "2026-09-24T12:00:00.000Z", "2026-09-24T04:00:00.000Z");
+      assert.equal(await store.currentJti(fam, "2026-09-24T11:59:59.000Z"), "jti-1");
+      assert.equal(await store.currentJti(fam, "2026-09-24T12:00:00.000Z"), null, "lapsed at its expiry");
+      await store.rotate(fam, "jti-2", "2026-09-24T20:00:00.000Z", "2026-09-24T12:00:00.000Z");
+      assert.equal(await store.currentJti(fam, "2026-09-24T12:00:01.000Z"), "jti-2", "one row per family, replaced and extended");
+      await store.rotate(other, "jti-o", "2026-09-25T04:00:00.000Z", "2026-09-24T21:00:00.000Z");
+      const { rows } = await pool.query<{ n: string }>(`SELECT count(*) AS n FROM ${SPIKE_SCHEMA}.auth_refresh_families WHERE family = $1`, [fam]);
+      assert.equal(rows[0]!.n, "0", "the lapsed family was dropped by the later rotation");
+      await store.revoke(other);
+      assert.equal(await store.currentJti(other, "2026-09-24T21:00:01.000Z"), null);
+    } finally {
+      await pool.query(`DELETE FROM ${SPIKE_SCHEMA}.auth_refresh_families WHERE family = ANY($1)`, [[fam, other]]);
     }
   });
 }

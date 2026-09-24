@@ -46,6 +46,24 @@ export interface AuthConfig {
   refreshTtlSeconds?: number;
   /** Optional refresh-token revocation store (M5). Absent ⇒ stateless (prior behavior). */
   revocation?: RefreshTokenRevocation;
+  /** Optional audit writer for the login-family events (#688). Absent ⇒ nothing is recorded. */
+  audit?: (event: AuthAuditEvent) => Promise<void>;
+}
+
+/**
+ * The login-family events that reach the audit ledger (#688, owner decision 2026-09-24): a family
+ * opened (a login, or an untracked token upgraded into a family), ended by logout, or revoked because a
+ * rotated-away token was replayed. Each is written BEFORE the store change it describes. The 15-minute
+ * rotation inside a live family is not audited: it is token bookkeeping, about 32 rows per active user
+ * per 8 hours, and would bury the events that matter.
+ */
+export interface AuthAuditEvent {
+  type: "AUTH_LOGIN" | "AUTH_LOGOUT" | "AUTH_REFRESH_REUSE_DETECTED";
+  /** The account's email. */
+  actor: string;
+  family: string;
+  /** How a family was opened: a password login, or an untracked token upgraded on refresh. */
+  via?: "login" | "untracked-token-upgrade";
 }
 
 function normalizeSameSite(raw: string | undefined): "Lax" | "Strict" | "None" {
@@ -104,6 +122,30 @@ export function createAuthHandler(config: AuthConfig): AuthHandler {
     return jwt.issueRefreshToken(email, { jti, fam: family });
   };
 
+  // Audit-first (CLAUDE.md, #598): the event is written before the store change. Returns false when the
+  // write failed, so a caller that would OPEN a family can decline to (see `openFamily`).
+  const audited = async (event: AuthAuditEvent): Promise<boolean> => {
+    if (!config.audit) return true;
+    try {
+      await config.audit(event);
+      return true;
+    } catch (err) {
+      console.warn(`[workwell] auth audit write failed (${event.type}): ${String((err as Error)?.message ?? err)}`);
+      return false;
+    }
+  };
+
+  // Open a new family, audited first. If the event cannot be written, no family is recorded either: the
+  // token is issued untracked, which is the same stateless degradation a store outage already produces,
+  // so the ledger never misses a family the store holds.
+  const openFamily = async (email: string, via: NonNullable<AuthAuditEvent["via"]>): Promise<string> => {
+    const family = randomUUID();
+    if (revocation && !(await audited({ type: "AUTH_LOGIN", actor: email, family, via }))) {
+      return jwt.issueRefreshToken(email);
+    }
+    return issueRotatedRefresh(email, family);
+  };
+
   const json = (data: unknown, status = 200, headers: Record<string, string> = {}): Response =>
     new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json", ...headers } });
 
@@ -130,7 +172,7 @@ export function createAuthHandler(config: AuthConfig): AuthHandler {
       const user = await authenticate(email, password);
       if (!user) return json({ error: "invalid_credentials" }, 401);
       // A fresh login opens a new token family.
-      const refresh = await issueRotatedRefresh(user.email, randomUUID());
+      const refresh = await openFamily(user.email, "login");
       return json(
         { token: jwt.issueAccessToken(user.email, user.role), email: user.email, role: user.role },
         200,
@@ -159,7 +201,10 @@ export function createAuthHandler(config: AuthConfig): AuthHandler {
             return json({ error: "invalid_refresh_token" }, 401);
           }
           if (current !== claims.jti) {
-            // A rotated-away jti was replayed → token reuse. Revoke the whole family.
+            // A rotated-away jti was replayed → token reuse. Revoke the whole family. Audited first; the
+            // revocation happens even if that write failed, because leaving a possibly-stolen family
+            // usable is worse than a ledger gap (the WARN names it).
+            await audited({ type: "AUTH_REFRESH_REUSE_DETECTED", actor: user.email, family: claims.fam });
             try {
               await revocation.revoke(claims.fam);
             } catch {
@@ -170,8 +215,11 @@ export function createAuthHandler(config: AuthConfig): AuthHandler {
         }
       }
 
-      const family = claims.fam ?? randomUUID(); // upgrade a legacy (family-less) token into a family
-      const refresh = await issueRotatedRefresh(user.email, family);
+      // Rotate within the family; a legacy (family-less) token is upgraded into a NEW family, which is an
+      // opening like a login and is audited as one.
+      const refresh = claims.fam
+        ? await issueRotatedRefresh(user.email, claims.fam)
+        : await openFamily(user.email, "untracked-token-upgrade");
       return json(
         { token: jwt.issueAccessToken(user.email, user.role), email: user.email, role: user.role },
         200,
@@ -185,6 +233,9 @@ export function createAuthHandler(config: AuthConfig): AuthHandler {
         const cookie = readCookie(req, REFRESH_COOKIE);
         const claims = cookie ? jwt.readRefreshToken(cookie) : null;
         if (claims?.fam) {
+          // Audited first; the revocation happens even if that write failed (a logout must end the
+          // session).
+          await audited({ type: "AUTH_LOGOUT", actor: claims.email, family: claims.fam });
           try {
             await revocation.revoke(claims.fam);
           } catch {

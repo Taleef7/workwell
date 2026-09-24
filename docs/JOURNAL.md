@@ -17,6 +17,16 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
   panels even when the overview fails. The `outcomes (run_id, measure_id)` index turns that check into a
   lookup (the cold warm then succeeds, and a measure's drivers load in 0.04 s instead of 16 s); it is added
   (owner DDL, built at boot, about 6 s on the pilot's data). Retention is not the cause (3.5 to 6 s a night).
+  Deployed: the index is live; both boot warms still hit the 30 s timeout (cause not yet known, the
+  panels warmed anyway), so tonight's nightly record is the next evidence.
+- **#688: a deploy no longer signs everyone out.** Each login's current refresh-token id was kept in an
+  in-memory store that every deploy or restart emptied, so the next refresh was refused and the user was
+  sent to the login page. It is now a small database table (`auth_refresh_families`, owner DDL), and
+  rotation, reuse detection and logout work as before, across a restart too. Login, logout and a replayed
+  token are now audit events (`AUTH_LOGIN`, `AUTH_LOGOUT`, `AUTH_REFRESH_REUSE_DETECTED`, written before the
+  store change); the 15-minute rotation inside a login is not (owner decision). Found on the way: the 30-day
+  `WORKWELL_AUTH_ACCESS_TTL_SECONDS` the workflows set is read by nothing (tokens last 15 minutes);
+  flagged separately.
 
 ## 2026-09-23
 

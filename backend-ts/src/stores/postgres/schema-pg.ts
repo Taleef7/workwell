@@ -472,6 +472,19 @@ CREATE TABLE IF NOT EXISTS ${SPIKE_SCHEMA}.panel_assignments (
 -- about intent as much as cost: the column the read filters on is the one that is indexed.
 CREATE INDEX IF NOT EXISTS spike_panel_assignments_assignee_idx ON ${SPIKE_SCHEMA}.panel_assignments (assignee);
 
+-- Login families (#688): each refresh-token family's CURRENT jti, which refresh rotation and logout
+-- revocation check (Fable M5). It lived in the in-memory CACHE KV, so every deploy or restart emptied it
+-- and signed every user out within one access-token lifetime. No credential is stored: a random family
+-- id, the id of the newest token issued in it, and when the family lapses (the refresh TTL, renewed on
+-- each rotation). One row per active login; lapsed rows are deleted on the next rotation.
+-- OWNER-APPROVED DDL: Taleef explicitly authorized schema changes in-session (2026-09-24).
+-- Additive (CREATE IF NOT EXISTS), reversible (DROP TABLE); losing it only signs users out, as before.
+CREATE TABLE IF NOT EXISTS ${SPIKE_SCHEMA}.auth_refresh_families (
+  family      TEXT PRIMARY KEY,
+  jti         TEXT NOT NULL,
+  expires_at  TIMESTAMPTZ NOT NULL
+);
+
 -- The ACO's attributed patient list (MM-2 PR 3, ADR-082). The one concrete ask from the 2026-09-09
 -- working session: hand WorkWell the list of patients the ACO attributes to the group, run the
 -- measures over exactly that subset, and get numerator/denominator/exclusions back with patient-level
