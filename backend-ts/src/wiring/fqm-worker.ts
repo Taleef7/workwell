@@ -61,12 +61,19 @@ export function createFqmWorker(options: { calculatorModule?: string } = {}): Fq
   let worker: Worker | null = null;
   let nextId = 1;
   let requests = 0;
-  const pending = new Map<number, { resolve: (r: OfficialBatchResult) => void; reject: (e: Error) => void }>();
+  // Each chunk remembers the worker it was posted to. A crash emits `error` and then `exit`, and between
+  // the two a rejected chunk's caller can already have posted the NEXT chunk to a fresh worker; the old
+  // worker's `exit` must not fail that one (Codex on #705). So a worker only ever fails its own chunks.
+  const pending = new Map<number, { owner: Worker | null; resolve: (r: OfficialBatchResult) => void; reject: (e: Error) => void }>();
 
-  const failAll = (error: Error): void => {
-    for (const { reject } of pending.values()) reject(error);
-    pending.clear();
+  const failAll = (error: Error, owner?: Worker): void => {
+    for (const [id, waiter] of pending) {
+      if (owner && waiter.owner !== owner) continue;
+      pending.delete(id);
+      waiter.reject(error);
+    }
   };
+  const holdsWork = (owner: Worker): boolean => [...pending.values()].some((w) => w.owner === owner);
 
   const ensure = (): Worker => {
     if (worker) return worker;
@@ -77,7 +84,7 @@ export function createFqmWorker(options: { calculatorModule?: string } = {}): Fq
       const waiter = pending.get(response.id);
       if (!waiter) return;
       pending.delete(response.id);
-      if (pending.size === 0) w.unref();
+      if (!holdsWork(w)) w.unref();
       if (response.ok) {
         waiter.resolve({ bySubject: new Map(response.bySubject), retrieveSignal: response.retrieveSignal });
       } else {
@@ -88,11 +95,11 @@ export function createFqmWorker(options: { calculatorModule?: string } = {}): Fq
     });
     w.on("error", (err) => {
       if (worker === w) worker = null;
-      failAll(new Error(`official calculation worker failed: ${err.message}`));
+      failAll(new Error(`official calculation worker failed: ${err.message}`), w);
     });
     w.on("exit", (code) => {
       if (worker === w) worker = null;
-      if (pending.size > 0) failAll(new Error(`official calculation worker exited (code ${code}) with a chunk in flight`));
+      if (holdsWork(w)) failAll(new Error(`official calculation worker exited (code ${code}) with a chunk in flight`), w);
     });
     worker = w;
     return w;
@@ -107,7 +114,7 @@ export function createFqmWorker(options: { calculatorModule?: string } = {}): Fq
       const id = nextId++;
       requests += 1;
       return new Promise<OfficialBatchResult>((resolve, reject) => {
-        pending.set(id, { resolve, reject });
+        pending.set(id, { owner: w, resolve, reject });
         w.ref();
         const request: WorkerRequest = { id, input, ...(options.calculatorModule ? { calculatorModule: options.calculatorModule } : {}) };
         try {
@@ -115,7 +122,7 @@ export function createFqmWorker(options: { calculatorModule?: string } = {}): Fq
         } catch (err) {
           // An input that cannot be cloned fails here, synchronously, as a thrown error would in-process.
           pending.delete(id);
-          if (pending.size === 0) w.unref();
+          if (!holdsWork(w)) w.unref();
           reject(err as Error);
         }
       });

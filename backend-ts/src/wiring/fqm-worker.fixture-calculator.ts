@@ -6,6 +6,13 @@ export async function calculate(_measure: unknown, patientBundles: Array<{ mode?
   const first = patientBundles[0] ?? {};
   if (first.mode === "throw") throw new Error("fqm could not parse the measure");
   if (first.mode === "exit") process.exit(3); // in a worker this ends the thread, as a fatal crash would
+  if (first.mode === "uncaught") {
+    // An exception outside any promise the worker awaits: the thread emits `error`, then `exit`.
+    setTimeout(() => {
+      throw new Error("uncaught inside fqm");
+    }, 0);
+    return new Promise(() => {});
+  }
   if (first.mode === "busy") {
     // Synchronous CPU, like fqm's own loop: nothing yields until it is done.
     const until = Date.now() + (first.cpuMs ?? 1000);

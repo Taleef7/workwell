@@ -93,6 +93,10 @@ async function main(): Promise<void> {
     // officially: two engines, two answers for the same measure, latest-run-wins, with
     // `official-measures=on` on the boot line the whole time.
     WORKWELL_OFFICIAL_MEASURES: process.env.WORKWELL_OFFICIAL_MEASURES,
+    // #604's escape hatch. The nightly is the workload the calculation worker exists for, so a flag that
+    // reached request-triggered runs but not this allowlist could not switch it off where it matters
+    // (Codex on #705).
+    WORKWELL_FQM_WORKER: process.env.WORKWELL_FQM_WORKER,
   };
 
   // Declared HERE rather than beside `shutdown()` below, because the boot-recovery retry loop reads

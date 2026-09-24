@@ -73,6 +73,20 @@ for (const measureId of ["cms122", "cms125", "cms2", "cms130", "cms165", "cms137
   });
 }
 
+test("a crashed worker's exit does not fail the next chunk, already sent to its replacement (#604, Codex)", async () => {
+  const worker = createFqmWorker({ calculatorModule: FIXTURE });
+  try {
+    const crashed = worker.calculate(input([{ mode: "uncaught" }]));
+    // The retry is posted from the rejection handler, i.e. between the old worker's `error` and `exit`.
+    const retried = crashed.catch(() => worker.calculate(input([{}, {}])));
+    await assert.rejects(crashed, /uncaught inside fqm/);
+    const result = await retried;
+    assert.equal(result.bySubject.size, 2, "the replacement worker's chunk survived the old worker's exit");
+  } finally {
+    await worker.close();
+  }
+});
+
 test("overlapping chunks each get their own answer, in any order (#604)", async () => {
   const worker = createFqmWorker({ calculatorModule: FIXTURE });
   try {
