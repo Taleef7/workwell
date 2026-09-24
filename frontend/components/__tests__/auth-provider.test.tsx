@@ -74,6 +74,36 @@ function renderProvider(onAuth?: (ctx: ReturnType<typeof useAuth>) => void) {
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 describe("AuthProvider — silent refresh on page load", () => {
+  it("refreshes on page load only while holding the cross-tab lock", async () => {
+    storeExpiredSession();
+    let held = false;
+    let refreshedInsideLock: boolean | null = null;
+    const request = vi.fn(async (_name: string, cb: () => Promise<unknown>) => {
+      held = true;
+      try {
+        return await cb();
+      } finally {
+        held = false;
+      }
+    });
+    vi.stubGlobal("navigator", { ...navigator, locks: { request } });
+    server.use(
+      http.post("*/api/auth/refresh", () => {
+        refreshedInsideLock = held;
+        return HttpResponse.json({ token: freshToken, email: "admin@workwell.dev", role: "ADMIN" });
+      })
+    );
+
+    renderProvider();
+
+    await waitFor(() => {
+      expect(localStorage.getItem(TOKEN_KEY)).toBe(JSON.stringify(freshToken));
+    });
+    expect(request).toHaveBeenCalledWith("workwell-auth-refresh", expect.any(Function));
+    expect(refreshedInsideLock).toBe(true);
+    vi.unstubAllGlobals();
+  });
+
   it("keeps an already-valid local session without forcing refresh or redirect", async () => {
     const validToken = freshToken;
     localStorage.setItem(TOKEN_KEY, JSON.stringify(validToken));
