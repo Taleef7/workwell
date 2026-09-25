@@ -4,7 +4,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createFqmPool, createFqmWorker, fqmWorkerCount } from "./fqm-worker.ts";
+import { __resetSharedFqmWorker, createFqmPool, createFqmWorker, fqmWorkerCount, sharedFqmPoolSize, sharedFqmWorker } from "./fqm-worker.ts";
 import { officialMeasureExecutor } from "./official-executor-adapter.ts";
 import { officialTerminologyExpander, loadOfficialTerminology } from "./official-terminology.ts";
 import { loadOfficialArtifact } from "./official-artifacts.ts";
@@ -142,4 +142,23 @@ test("the pool size: 2 by default, WORKWELL_FQM_WORKERS to change it, never more
   assert.equal(fqmWorkerCount({ WORKWELL_FQM_WORKERS: "abc" }, 4), 2);
   assert.equal(fqmWorkerCount({}, 2), 1, "a two-core host gets one worker");
   assert.equal(fqmWorkerCount({}, 1), 1);
+});
+
+test("the shared pool takes its size from the first caller, and says so when a later one asks for another (#707 review)", async () => {
+  await __resetSharedFqmWorker();
+  const warnings: string[] = [];
+  const warn = console.warn;
+  console.warn = (msg: string) => void warnings.push(msg);
+  try {
+    assert.equal(sharedFqmPoolSize(), null, "nothing until something uses it");
+    const pool = sharedFqmWorker(2);
+    assert.equal(sharedFqmPoolSize(), 2);
+    assert.equal(sharedFqmWorker(), pool, "a caller that names no size gets the pool as it is, silently");
+    assert.deepEqual(warnings, []);
+    assert.equal(sharedFqmWorker(3), pool, "the pool is not resized");
+    assert.match(warnings[0] ?? "", /already has 2 worker\(s\); a request for 3 is ignored/);
+  } finally {
+    console.warn = warn;
+    await __resetSharedFqmWorker();
+  }
 });

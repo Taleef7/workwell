@@ -217,10 +217,36 @@ export function fqmWorkerCount(env: Record<string, unknown>, cores: number = ava
 }
 
 let shared: FqmWorker | null = null;
+let sharedSize: number | null = null;
 
-/** The process's calculation pool, created on first use at the size the first caller asks for. */
-export function sharedFqmWorker(size = 1): FqmWorker {
-  return (shared ??= createFqmPool(size));
+/**
+ * The process's calculation pool, created on first use at the size that caller asks for (the router
+ * passes `fqmWorkerCount(env)`). A later caller cannot resize it; one that asks for a different size
+ * is told so in the log rather than silently given the first size (#707 review). Called with no size,
+ * it returns the pool as it is (creating a single worker only if nothing exists yet).
+ */
+export function sharedFqmWorker(size?: number): FqmWorker {
+  if (!shared) {
+    sharedSize = Math.max(1, Math.floor(size ?? 1));
+    shared = createFqmPool(sharedSize);
+    console.log(`[workwell] official calculation pool: ${sharedSize} worker(s)`);
+  } else if (size !== undefined && Math.max(1, Math.floor(size)) !== sharedSize) {
+    console.warn(`[workwell] official calculation pool already has ${sharedSize} worker(s); a request for ${size} is ignored`);
+  }
+  return shared;
+}
+
+/** The shared pool's size, or null before anything has used it — for `/api/admin/runtime`. */
+export function sharedFqmPoolSize(): number | null {
+  return sharedSize;
+}
+
+/** @internal test hook */
+export async function __resetSharedFqmWorker(): Promise<void> {
+  const pool = shared;
+  shared = null;
+  sharedSize = null;
+  if (pool) await pool.close();
 }
 
 /** On unless `WORKWELL_FQM_WORKER=off` — the escape hatch back to the in-process call. */
