@@ -167,8 +167,34 @@ test("#617: an official winner with nobody compliant yet is still not forecastab
   const outlook = await programRiskOutlook(deps, MEASURE, 90);
   assert.ok(outlook);
   assert.equal(outlook!.forecastable, false);
-  assert.deepEqual(calls.byRun, [{ runId: "run-january", measureId: MEASURE, subjectId: undefined, limit: 1 }],
-    "one row of the run, and never the unpaged read");
+  assert.deepEqual(calls.byRun, [{ runId: "run-january", measureId: MEASURE, subjectId: "emp-006", limit: 1 }],
+    "one NAMED row of the run (the indexed lookup), and never the unpaged read");
+});
+
+test("#617: with nobody compliant, the peek names a row that cannot be an evaluation error", async () => {
+  reset();
+  // An error forces MISSING_DATA and replaces the evidence, so it carries no `official` block: peeking
+  // it would read an official measure as forecastable. It sorts first in the store here, as a failed
+  // first chunk would; the peek must name the OVERDUE subject instead.
+  const joined = [
+    joinedRow("run-partial-jan", "2027-01-02T00:00:00.000Z", "emp-001", "MISSING_DATA"),
+    joinedRow("run-partial-jan", "2027-01-02T00:00:00.000Z", "emp-009", "OVERDUE"),
+  ];
+  const official = {
+    official: { measurementPeriod: { start: "2027-01-01", end: "2027-12-31" }, populationResults: [] },
+    expressionResults: [{ define: "official:initial-population", result: true }],
+  };
+  const { deps, calls } = makeDeps(joined, {
+    "run-partial-jan": [
+      evidenceRow("run-partial-jan", "emp-001", "MISSING_DATA", { evaluationError: "CQL engine failure", message: "boom" }),
+      evidenceRow("run-partial-jan", "emp-009", "OVERDUE", official),
+    ],
+  });
+
+  const outlook = await programRiskOutlook(deps, MEASURE, 90);
+  assert.ok(outlook);
+  assert.equal(outlook!.forecastable, false);
+  assert.deepEqual(calls.byRun, [{ runId: "run-partial-jan", measureId: MEASURE, subjectId: "emp-009", limit: 1 }]);
 });
 
 test("#617: an authored winner with nobody compliant stays forecastable and reads no more than a peek", async () => {

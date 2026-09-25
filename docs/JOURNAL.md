@@ -10,10 +10,12 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
 - **#617: no forecast where there is nothing to forecast.** The measure page's "Risk outlook (next 90
   days)" projects from a last-exam date and a window. Official evidence has neither, so on all six Maui
   measures it showed "Upcoming due soon: 0" and a "Predicted 90d" column equal to "Current". The outlook
-  now reports `forecastable`, and the panel says there is no 90-day forecast for such a measure, and
-  why. The case the issue missed: with nobody compliant yet (early January), the evidence was never
-  looked at, so the zeros read as a forecast there too; one row is now peeked either way. Deriving real
-  expiries from the measure logic stays the follow-up.
+  now reports `forecastable`. For such a measure the panel says why there is no 90-day forecast (the
+  official result records whether a patient met the measure, not when the qualifying test was done) and
+  keeps only the real per-site current rate. The case the issue missed: with nobody compliant yet
+  (early January), the evidence was never looked at, so the zeros read as a forecast there too. One row
+  is now peeked either way, named by subject so it stays an indexed lookup. Deriving real expiries from
+  the measure logic stays the follow-up.
 - **#621: the Orders page names the measures it cannot propose for.** The patient-page simulation already
   named the four measures it cannot replay (#671). The order catalog still dropped them silently: CMS2,
   CMS130, CMS165 and CMS137 have no catalog order, so their at-risk patients got no proposal, and

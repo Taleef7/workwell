@@ -9,7 +9,7 @@
  * condition, and the heading and KPI must still be on screen.
  */
 import React from "react";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { setSubject, subject } from "@/test/mocks/terminology";
 vi.mock("@/lib/terminology", () => ({ SUBJECT: subject }));
@@ -149,9 +149,17 @@ describe("ProgramDetailPage — per-slice paint", () => {
     });
 
     const first = render(<ProgramDetailPage />);
-    expect(await screen.findByTestId("outlook-not-forecastable")).toHaveTextContent("No 90-day forecast for this measure.");
+    const note = await screen.findByTestId("outlook-not-forecastable");
+    expect(note).toHaveTextContent("No 90-day forecast for this measure.");
+    expect(note).toHaveTextContent("not when the qualifying test was done");
+    expect(within(note).getByRole("link", { name: "work list" })).toHaveAttribute("href", "/cases?measureId=cms125");
     expect(screen.queryByText("Upcoming due soon")).toBeNull();
     expect(screen.queryByText("Predicted 90d")).toBeNull();
+    expect(screen.queryByText("Expiring")).toBeNull();
+    // The per-site CURRENT rate is real and stays, with the highest-risk site it is ranked by.
+    expect(screen.getByText("Current rate")).toBeInTheDocument();
+    expect(screen.getByText("Highest-risk site")).toBeInTheDocument();
+    expect(screen.getAllByText("Kihei Clinic").length).toBeGreaterThan(0);
     first.unmount();
 
     // An authored measure (true), or a backend that predates the field, still shows the outlook.
@@ -159,6 +167,7 @@ describe("ProgramDetailPage — per-slice paint", () => {
       answer = outlook(forecastable);
       const view = render(<ProgramDetailPage />);
       expect(await screen.findByText("Upcoming due soon")).toBeInTheDocument();
+      expect(screen.getByText("Predicted 90d")).toBeInTheDocument();
       expect(screen.queryByTestId("outlook-not-forecastable")).toBeNull();
       view.unmount();
     }

@@ -157,6 +157,8 @@ export default function ProgramDetailPage() {
   // rather than A's numbers under B's heading.
   const view = slices.measureId === measureId ? slices : freshSlices<TrendPoint>(measureId);
   const { program, trend, drivers, outlook: riskOutlook, status } = view;
+  // #617: absent (an older backend) keeps the forecast; only an explicit false removes it.
+  const forecastable = riskOutlook?.forecastable !== false;
 
   // The program summary carries its own improvementNotation, so an inverse measure reads correctly
   // before (or without) /api/measures. When the identity row is present it wins (both come from the
@@ -342,24 +344,29 @@ export default function ProgramDetailPage() {
               // dash, which reads as a measure with nothing coming due rather than as a read that
               // never answered.
               <p className="mt-3 text-xs text-neutral-500 dark:text-neutral-400">Risk outlook unavailable</p>
-            ) : riskOutlook.forecastable === false ? (
-              // #617: an official measure scores the measurement year and records no exam date that
-              // expires, so every projection would be zero and "predicted" would equal "current". Said,
-              // rather than shown as a forecast.
-              <p data-testid="outlook-not-forecastable" className="mt-3 text-xs text-neutral-600 dark:text-neutral-400">
-                No 90-day forecast for this measure. It is scored over the measurement year by the CMS measure
-                logic, with no exam date that expires, so there is nothing to project forward. Today&apos;s gaps
-                are on the work list.
-              </p>
             ) : (
               <>
+            {/* #617: an official outcome records whether a patient met the measure, not when the
+                qualifying test was done, so there is no date to count forward from: every projection
+                would be zero and "predicted" would equal "current". The note replaces the forecast
+                parts; the per-site CURRENT rate is real and stays. */}
+            {!forecastable ? (
+              <p data-testid="outlook-not-forecastable" className="mt-3 text-xs text-neutral-600 dark:text-neutral-400">
+                No 90-day forecast for this measure. The CMS measure logic scores the measurement year, counting
+                some tests from earlier years, and its result records whether a patient met the measure but not
+                when the qualifying test was done, so there is no date to count forward from. Today&apos;s gaps are
+                on the <Link href={`/cases?measureId=${encodeURIComponent(measureId)}`} className="underline">work list</Link>.
+              </p>
+            ) : null}
             <div className="mt-3 grid gap-3 sm:grid-cols-2">
+              {forecastable ? (
               <div className="rounded border border-orange-200 bg-orange-50 p-3 dark:border-orange-900 dark:bg-orange-950/40">
                 <p className="text-xs text-orange-800 dark:text-orange-300">Upcoming due soon</p>
                 <p className="text-2xl font-semibold text-orange-900 dark:text-orange-200">
                   {riskOutlook?.upcomingNonCompliantCount ?? 0}
                 </p>
               </div>
+              ) : null}
               {/* The "Repeat non-compliers" tile and its table are GONE (ADR-081): the streak they
                   showed could only be computed by scanning the measure's whole retained history, and
                   under a 400-day retention window an annual measure cannot reach three periods at
@@ -384,8 +391,12 @@ export default function ProgramDetailPage() {
                             measure "compliant" is the in-control bucket, so say that rather than showing a
                             compliance-looking number under a "Poor control" headline. */}
                         <th scope="col" className="py-1 pr-3">{isDecrease ? "In control now" : "Current rate"}</th>
-                        <th scope="col" className="py-1 pr-3">{isDecrease ? "In control in 90d" : "Predicted 90d"}</th>
-                        <th scope="col" className="py-1 pr-3">Expiring</th>
+                        {forecastable ? (
+                          <>
+                            <th scope="col" className="py-1 pr-3">{isDecrease ? "In control in 90d" : "Predicted 90d"}</th>
+                            <th scope="col" className="py-1 pr-3">Expiring</th>
+                          </>
+                        ) : null}
                       </tr>
                     </thead>
                     <tbody>
@@ -393,8 +404,12 @@ export default function ProgramDetailPage() {
                         <tr key={site.site} className="border-t border-neutral-200 dark:border-neutral-800">
                           <td className="py-1 pr-3">{site.site}</td>
                           <td className="py-1 pr-3">{formatRate(site.currentComplianceRate)}</td>
-                          <td className="py-1 pr-3">{formatRate(site.predictedComplianceRate)}</td>
-                          <td className="py-1 pr-3">{site.upcomingExpirations}</td>
+                          {forecastable ? (
+                            <>
+                              <td className="py-1 pr-3">{formatRate(site.predictedComplianceRate)}</td>
+                              <td className="py-1 pr-3">{site.upcomingExpirations}</td>
+                            </>
+                          ) : null}
                         </tr>
                       ))}
                     </tbody>

@@ -1276,18 +1276,24 @@ export async function programRiskOutlook(
     // forces MISSING_DATA, so asking for one is exact rather than probabilistic. `subjectId` +
     // `measureId` + `limit: 1` is the single-row lookup the store documents as index-friendly.
     //
-    // With NO compliant subject (early in a measurement year) the peek still runs, on any row of the
-    // run, because the answer is also whether this outcome can be projected at all (#617): skipping
-    // it rendered an official measure's structural zeros as a forecast. Any row may be an evaluation
-    // error, which carries no `official` block; that reads as forecastable, the pre-#617 behaviour.
-    const peekSubject = compliantSubjects[0]?.subjectId;
-    const peek = await deps.outcomeStore.listOutcomes(evidenceRunId, {
-      measureId,
-      ...(peekSubject ? { subjectId: peekSubject } : {}),
-      limit: 1,
-    });
+    // With NO compliant subject (early in a measurement year) the peek still runs, because the answer
+    // is also whether this outcome can be projected at all (#617): skipping it rendered an official
+    // measure's structural zeros as a forecast. It still names ONE subject, so it stays the indexed
+    // single-row lookup: a peek by run + measure alone is `ORDER BY (evaluated_at, id) LIMIT 1`, which
+    // no index serves (#617 review). The subject is chosen so its row cannot be an evaluation error
+    // (which forces MISSING_DATA and carries no `official` block): compliant first, then any other
+    // non-MISSING_DATA status, then an out-of-population row, then whatever is left.
+    const visible = [...latestBySubject.values()];
+    const peekRow =
+      compliantSubjects[0] ??
+      visible.find((row) => row.status !== "MISSING_DATA") ??
+      visible.find((row) => row.outOfPopulation === true) ??
+      visible[0];
+    const peek = peekRow
+      ? await deps.outcomeStore.listOutcomes(evidenceRunId, { measureId, subjectId: peekRow.subjectId, limit: 1 })
+      : [];
     forecastable = !(peek.length > 0 && hasOfficialEvidence(peek[0]!.evidence));
-    if (peekSubject && peek.length > 0 && forecastable) {
+    if (compliantSubjects.length > 0 && peek.length > 0 && forecastable) {
       const evidenceBySubject = new Map<string, unknown>();
       for (const outcome of await deps.outcomeStore.listOutcomes(evidenceRunId, { measureId })) {
         evidenceBySubject.set(outcome.subjectId, outcome.evidence);
