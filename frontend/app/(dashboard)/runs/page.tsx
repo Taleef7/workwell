@@ -209,8 +209,8 @@ function formatRunDuration(durationMs: number, status?: string): string {
  * the list showed "0s" for the nightly or any run this page did not start itself (#644, #655). Its
  * elapsed time comes from its own start instead.
  */
-function shownDurationMs(run: { status: string; durationMs: number; startedAt?: string | null }, now: number = Date.now()): number {
-  if (normalizeEnumValue(run.status) !== "RUNNING" || !run.startedAt) return run.durationMs;
+function shownDurationMs(run: { status?: string; durationMs: number; startedAt?: string | null }, now: number = Date.now()): number {
+  if (normalizeEnumValue(run.status ?? "") !== "RUNNING" || !run.startedAt) return run.durationMs;
   const started = Date.parse(run.startedAt);
   return Number.isFinite(started) ? Math.max(0, now - started) : run.durationMs;
 }
@@ -489,6 +489,17 @@ export default function RunsPage() {
     }, 1000);
     return () => clearInterval(interval);
   }, [activeRunStartedAt]);
+
+  // A running run this page did not start (the nightly, or one started elsewhere) has no ticker of its
+  // own: its elapsed time is computed at render (`shownDurationMs`), so re-render once a second while
+  // any listed run is running, or the clock would stop at the value it had when the list loaded (#644).
+  const [, setClockTick] = useState(0);
+  const anyUntrackedRunning = runs.some((r) => normalizeEnumValue(r.status ?? "") === "RUNNING" && r.runId !== activeRunId);
+  useEffect(() => {
+    if (!anyUntrackedRunning) return;
+    const interval = setInterval(() => setClockTick((t) => t + 1), 1000);
+    return () => clearInterval(interval);
+  }, [anyUntrackedRunning]);
 
   useEffect(() => {
     urlRunIdRef.current = urlRunId;

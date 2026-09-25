@@ -85,3 +85,19 @@ test("a list's counts come back in the runs' order with at most three queries in
   assert.deepEqual(out.map((c) => c[0]!.count), [0, 1, 2, 3, 4, 5, 6, 7, 8, 9], "in the runs' order");
   assert.equal(maxInFlight, 3, "never the whole pool");
 });
+
+test("one failed count fails the whole list read, as the unbounded Promise.all did, and keeps nothing (#644 review)", async () => {
+  const reads: string[] = [];
+  const store = {
+    async countOutcomesByStatus(runId: string) {
+      reads.push(runId);
+      if (runId === "r-2") throw new Error("statement timeout");
+      return counted(1);
+    },
+  };
+  const runs = Array.from({ length: 5 }, (_, i) => ({ id: `r-${i}`, status: "COMPLETED" }));
+  await assert.rejects(() => runOutcomeCountsFor(store, runs), /statement timeout/);
+  const before = reads.length;
+  await runOutcomeCounts(store, { id: "r-2", status: "COMPLETED" }).catch(() => {});
+  assert.equal(reads.length, before + 1, "the failed run's count was not kept");
+});

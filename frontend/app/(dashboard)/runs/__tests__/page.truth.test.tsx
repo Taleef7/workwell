@@ -105,11 +105,18 @@ describe("RunsPage says what a run is and what its numbers mean (#668)", () => {
 
   it("shows a running run's elapsed time, not '0s', when this page did not start it (#644)", async () => {
     const started = new Date(Date.now() - 15 * 60_000 - 5_000).toISOString();
-    answer([{ ...nightly, runId: "run-3", status: "RUNNING", completedAt: null, durationMs: 0, startedAt: started }, run]);
+    const running = { ...nightly, runId: "run-3", status: "RUNNING", completedAt: null, durationMs: 0, startedAt: started };
+    answer([running, run]);
+    const listed = get.getMockImplementation()!;
+    get.mockImplementation((url: string) => (url === "/api/runs/run-3" ? Promise.resolve({ ...summary, ...running }) : listed(url)));
     render(<RunsPage />);
-    const row = (await screen.findAllByText(/^15m \d+s$/))[0];
+    const row = (await screen.findAllByText(/^15m \d+s$/))[0]!;
     expect(row).toBeInTheDocument();
     expect(screen.queryByText("0s")).not.toBeInTheDocument();
+    // And it keeps counting while the page is open, not frozen at load time.
+    const before = row.textContent;
+    await new Promise((r) => setTimeout(r, 2_100));
+    expect((await screen.findAllByText(/^15m \d+s$/))[0]!.textContent).not.toBe(before);
   });
 
   it("shows a finished run's duration past an hour, not '-'", async () => {
