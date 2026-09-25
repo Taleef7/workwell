@@ -28,6 +28,8 @@ type ProposalsResponse = {
   proposed: ProposedOrder[];
   suppressed: ProposedOrder[];
   totals?: { proposed: number; suppressed: number };
+  /** Whether orders already placed were looked at (#616). Absent or false: they were not. */
+  standingOrdersChecked?: boolean;
 };
 
 // A page of proposals, not the whole set: the pilot's domain view was ~34k items (10.7 MB) rendered
@@ -204,6 +206,15 @@ export default function OrdersPage() {
         Advisory only — these proposals never auto-submit and never change compliance status. CQL remains the sole
         compliance authority. Nothing here reaches WebChart: the only action is copying the bundle to use elsewhere,
         and no order is placed from this page.
+        {/* #616: until an order source is connected, a proposal is not known to be new. Said only once
+            the answer arrives, and never when the server did look. */}
+        {data && data.standingOrdersChecked !== true ? (
+          <>
+            {" "}
+            WorkWell cannot see orders already placed in WebChart, so a proposal here may repeat one; check the
+            chart before ordering.
+          </>
+        ) : null}
       </div>
 
       {error ? (

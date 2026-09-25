@@ -1,7 +1,7 @@
 /**
  * Order proposals route (#77 E7) — advisory "Action Evaluators → orders" over the latest population
  * run per Active measure. Read-time; no schema. Gated to CASE_MANAGER/ADMIN by the auth matrix
- * (orders are clinical). format=domain (default) → {proposed, suppressed, totals}, optionally windowed
+ * (orders are clinical). format=domain (default) → {proposed, suppressed, totals, standingOrdersChecked}, optionally windowed
  * by ?limit=1..1000&offset= (both lists, same window; totals are the pre-window counts; proposals are
  * in (subject, measure) order); format=fhir → ServiceRequest Bundle of every proposed order, never windowed.
  *
@@ -97,7 +97,8 @@ export async function handleOrders(req: Request, env: OrdersEnv): Promise<Respon
     // measure seen) is fed (subject, measure) order. That also makes the dedupe winner deterministic.
     atRisk.sort((a, b) => a.subjectId.localeCompare(b.subjectId) || a.measureId.localeCompare(b.measureId));
   }
-  const { proposed, suppressed } = proposeOrders(atRisk, resolveStandingOrderProvider(env));
+  const standingOrders = resolveStandingOrderProvider(env);
+  const { proposed, suppressed } = proposeOrders(atRisk, standingOrders);
   // FHIR output carries only `proposed` — a standing-order-suppressed item must NOT emit a duplicate
   // ServiceRequest (the charter's "duplicate orders are bad") — and is never windowed: it is the
   // bundle a clinician copies whole. The domain view returns both so callers can see why an at-risk
@@ -105,5 +106,8 @@ export async function handleOrders(req: Request, env: OrdersEnv): Promise<Respon
   if (fhir) return json(bundleOf(proposed));
   const totals = { proposed: proposed.length, suppressed: suppressed.length };
   const page = <T>(xs: T[]): T[] => (limit === null ? xs : xs.slice(offset, offset + limit));
-  return json({ proposed: page(proposed), suppressed: page(suppressed), totals });
+  // #616: whether orders already placed were looked at. False on every deployment today (no order
+  // source is connected), and the page then says a proposal may repeat an order already on the chart.
+  const standingOrdersChecked = standingOrders.checksExistingOrders;
+  return json({ proposed: page(proposed), suppressed: page(suppressed), totals, standingOrdersChecked });
 }

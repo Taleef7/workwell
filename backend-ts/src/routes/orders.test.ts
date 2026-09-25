@@ -39,10 +39,12 @@ before(async () => {
   });
   await outcomes.recordOutcome({ runId: run.id, subjectId: "emp-006", measureId: "audiogram", status: "OVERDUE", evidence: {} });
   await outcomes.recordOutcome({ runId: run.id, subjectId: "emp-007", measureId: "audiogram", status: "COMPLIANT", evidence: {} });
-  // Two more at-risk subjects, so the windowing test has a set to page and the simulated standing-order
-  // provider (which suppresses by hash) is unlikely to leave `proposed` empty — and it asserts that.
+  // Two more at-risk subjects, so the windowing test has a set to page.
   await outcomes.recordOutcome({ runId: run.id, subjectId: "emp-008", measureId: "audiogram", status: "OVERDUE", evidence: {} });
   await outcomes.recordOutcome({ runId: run.id, subjectId: "emp-013", measureId: "audiogram", status: "DUE_SOON", evidence: {} });
+  // #616: the old default invented an audiogram standing order for emp-014 (from a hash of its id), so
+  // this proposal was withheld. It holds the route to proposing it.
+  await outcomes.recordOutcome({ runId: run.id, subjectId: "emp-014", measureId: "audiogram", status: "OVERDUE", evidence: {} });
   // #546: two patients whose official evaluation persisted MISSING_DATA (ADR-078) — one INSIDE
   // cms122's initial population and one outside, as the run recorded it (ADR-079). Only the first is
   // at risk of anything.
@@ -60,22 +62,36 @@ test("returns domain proposals for at-risk outcomes (default format)", async () 
   assert.equal(res!.status, 200);
   const body = await res!.json() as { proposed: Array<{ subjectId: string }>; suppressed: Array<{ subjectId: string }> };
   assert.ok(Array.isArray(body.proposed));
-  // emp-006 is OVERDUE → should appear in proposed (unless simulated standing-order suppresses; hash-check)
-  // emp-007 is COMPLIANT → must not appear in proposed or suppressed
-  const allSubjects = [...body.proposed, ...body.suppressed].map((p) => p.subjectId);
+  // emp-006 is OVERDUE → proposed; emp-007 is COMPLIANT → neither proposed nor suppressed
   assert.ok(!body.proposed.some((p) => p.subjectId === "emp-007"), "COMPLIANT subject must not be proposed");
   assert.ok(!body.suppressed.some((p) => p.subjectId === "emp-007"), "COMPLIANT subject must not be suppressed");
-  // emp-006 must appear in proposed OR suppressed (simulated may suppress ~1 in 5)
-  assert.ok(allSubjects.includes("emp-006"), "at-risk subject must appear in proposed or suppressed");
+  assert.ok(body.proposed.some((p) => p.subjectId === "emp-006"), "at-risk subject is proposed");
+});
+
+test("#616: with no order source connected, no proposal is withheld and the answer says nothing was checked", async () => {
+  const body = (await get("").then((r) => r!.json())) as {
+    proposed: Array<{ subjectId: string }>;
+    suppressed: unknown[];
+    totals: { proposed: number; suppressed: number };
+    standingOrdersChecked: boolean;
+  };
+  // The invented standing orders withheld 46 at-risk patients on the pilot, and emp-014 here.
+  assert.deepEqual(body.suppressed, []);
+  assert.equal(body.totals.suppressed, 0);
+  assert.deepEqual(body.proposed.map((p) => p.subjectId).sort(), ["emp-006", "emp-008", "emp-013", "emp-014", "emp-020"], "every at-risk subject is proposed, emp-014 included");
+  assert.equal(body.standingOrdersChecked, false, "orders already on the chart were not looked at, and the page is told so");
+  // The FHIR bundle carries the same proposals: none left out behind an order that does not exist.
+  const fhir = (await get("?format=fhir").then((r) => r!.json())) as { entry?: unknown[] };
+  assert.equal((fhir.entry ?? []).length, 5);
 });
 
 test("the domain view carries totals, and ?limit/?offset window both lists without changing the totals", async () => {
   const whole = (await get("").then((r) => r!.json())) as { proposed: unknown[]; suppressed: unknown[]; totals: { proposed: number; suppressed: number } };
   assert.deepEqual(whole.totals, { proposed: whole.proposed.length, suppressed: whole.suppressed.length }, "no window → whole arrays, totals alongside");
-  // emp-006/008/013 on audiogram, plus emp-020 — the cms122 patient who IS in the population.
+  // emp-006/008/013/014 on audiogram, plus emp-020 — the cms122 patient who IS in the population.
   // emp-021 is the same status on the same measure and is absent, which is the #546 rule.
-  assert.equal(whole.totals.proposed + whole.totals.suppressed, 4, "the four at-risk subjects, and not the out-of-population one");
-  assert.ok(whole.totals.proposed >= 1, "fixture: at least one proposal survives suppression (else the FHIR assertion below is vacuous)");
+  assert.equal(whole.totals.proposed + whole.totals.suppressed, 5, "the five at-risk subjects, and not the out-of-population one");
+  assert.ok(whole.totals.proposed >= 2, "fixture: at least two proposals (else the paging and FHIR assertions below are vacuous)");
   const ids = (xs: Array<{ subjectId: string }>) => xs.map((x) => x.subjectId);
   assert.deepEqual(ids(whole.proposed as Array<{ subjectId: string }>), [...ids(whole.proposed as Array<{ subjectId: string }>)].sort(), "proposals are in subject order, so a page is a page");
 
@@ -126,12 +142,11 @@ test("measureId filter: unknown Active measure returns empty lists", async () =>
 });
 
 test("subjectId filter narrows to that subject", async () => {
-  // emp-006 (OVERDUE) → present in proposed or suppressed; emp-007 (COMPLIANT) → empty
+  // emp-006 (OVERDUE) → proposed, alone; emp-007 (COMPLIANT) → empty
   const r6 = await get("?subjectId=emp-006");
   const b6 = await r6!.json() as { proposed: Array<{ subjectId: string }>; suppressed: Array<{ subjectId: string }> };
-  const subjects6 = [...b6.proposed, ...b6.suppressed].map((p) => p.subjectId);
-  assert.ok(subjects6.includes("emp-006"));
-  assert.ok(subjects6.every((s) => s === "emp-006"), "only emp-006 should be present");
+  assert.deepEqual(b6.proposed.map((p) => p.subjectId), ["emp-006"], "only emp-006 should be present");
+  assert.deepEqual(b6.suppressed, []);
 
   const r7 = await get("?subjectId=emp-007");
   const b7 = await r7!.json() as { proposed: unknown[]; suppressed: unknown[] };

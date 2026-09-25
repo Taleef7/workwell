@@ -7,13 +7,21 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
 
 ## 2026-09-25
 
+- **#616: Order Proposals no longer invents standing orders.** With no order source connected, the
+  default made up a standing order for about one patient in five from a hash of the ID. When it matched a
+  patient's own gap, their proposal was hidden under "standing order on file" and left out of the FHIR
+  bundle. That hid 46 of 2,509 at-risk patients on the pilot, all CMS122 or CMS125, the only two routed
+  measures with an order. Nothing is invented now, and every at-risk patient is proposed. Because
+  WorkWell cannot see orders already placed in WebChart, the page says a proposal may repeat one; the API
+  reports this as `standingOrdersChecked`. The deduplication itself stays, for when a WebChart order
+  source is connected.
 - **#623: Maui's failure alerts now reach the owner by email.** The webhook URL is a secret that both the
   deploy and the self-heal pass to the container (a test holds the two together). It points at a small
   Google Apps Script that emails the alert's one-line summary. TWH still alerts nobody. Review found the
   request carried the whole alert, including a single-patient run's "Patient: <id>" label and raw error
   text, although only the summary is shown. It is now limited to fields that cannot name a patient. A
-  webhook that answers with an error is now logged as a failed delivery. A value that is not a URL is no
-  longer printed into the log.
+  webhook that answers with an error is now logged as a failed delivery. A value that is not an https URL
+  turns the webhook off and is never printed into the log.
 
 ## 2026-09-24
 

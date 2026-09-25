@@ -2,7 +2,7 @@
  * Inert-seam inventory + boot-time active-seam log line (#260/#264).
  *
  * The repo has 10 "inert-unless-configured" seams (ADR-011/012/013/017/023/025/029/030/035 + #264 alert webhook):
- * each has a simulated or store-backed default and an inert/stub adapter that only activates when its
+ * each has a simulated, store-backed or empty default (eh-fhir's is empty since #616) and an inert/stub adapter that only activates when its
  * env var(s) are set. Individually each is correct and reviewed; collectively they're untested-in-anger
  * surface that can rot silently (a var typo'd in a deploy secret, a seam nobody remembers exists). This
  * module is the cheap insurance: a single pure `describeSeams(env)` that reports each seam's
