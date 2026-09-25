@@ -183,7 +183,8 @@ function detailFor(row: CardInput, method: string): string {
   const facts: string[] = [];
   if (wf.last_exam_date) facts.push(`Last completed: ${wf.last_exam_date}`);
   if (wf.days_overdue != null && wf.days_overdue > 0) facts.push(`Days overdue: ${wf.days_overdue}`);
-  facts.push(`Compliance window: ${wf.compliance_window_days} days`);
+  // #650: an official measure has no single window, so none is stated in the clinician's workflow.
+  if (wf.compliance_window_days != null) facts.push(`Compliance window: ${wf.compliance_window_days} days`);
   if (wf.waiver_status !== "none") facts.push(`${WAIVER_FACT_LABEL}: ${wf.waiver_status}`);
   lines.push(facts.map((f) => `- ${f}`).join("\n"));
   lines.push(`_Computed by CQL and evaluated ${row.evaluatedAt} (WorkWell run ${row.runId})._`);

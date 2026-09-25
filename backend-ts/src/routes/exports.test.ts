@@ -49,6 +49,18 @@ before(async () => {
     status: "OVERDUE",
     evidence: { expressionResults: [{ define: "Most Recent Audiogram Date", result: "2025-04-19" }, { define: "Days Since Last Audiogram", result: 420 }] },
   });
+  // #650: an official outcome in the same run, whose complianceWindowDays must be empty.
+  await oc.recordOutcome({
+    runId,
+    subjectId: "emp-007",
+    measureId: "cms125",
+    evaluationPeriod: "2026-06-13",
+    status: "OVERDUE",
+    evidence: {
+      official: { measurementPeriod: { start: "2026-01-01", end: "2026-12-31" }, populationResults: [] },
+      expressionResults: [{ define: "official:numerator", result: false }],
+    },
+  });
   const caseRec = await new SqliteCaseStore(db).upsertFromOutcome({ runId, subjectId: "emp-006", measureId: "audiogram", evaluationPeriod: "2026-06-13", outcomeStatus: "OVERDUE" });
   caseId = caseRec!.id;
   const events = new SqliteCaseEventStore(db);
@@ -114,6 +126,17 @@ test("GET /api/exports/outcomes?runId carries derived why_flagged columns", asyn
   assert.ok(row.includes("2025-04-19"));
   assert.ok(row.includes("55"));
   assert.ok(row.includes("Omar Siddiq"));
+  const header = lines[0]!.split(",");
+  const col = header.indexOf("complianceWindowDays");
+  assert.equal(row.split(",")[col], "365", "an authored outcome keeps its window");
+  // #650: an official outcome has no single window, so the column is empty, not the 365 default.
+  const officialRow = lines.find((l) => l.includes("emp-007"))!;
+  assert.ok(officialRow, "the official outcome row is present");
+  const officialCells = officialRow.split(",");
+  // Alignment pinned by a neighbour that is NOT empty, so a comma shifting the columns cannot make an
+  // empty `lastExamDate` stand in for the window: `status` two to the left must read OVERDUE.
+  assert.equal(officialCells[col - 2], "OVERDUE", "columns aligned");
+  assert.equal(officialCells[col], "", "no window for an official outcome");
 });
 
 test("GET /api/exports/cases carries the case + latestOutreachDeliveryStatus column", async () => {

@@ -336,3 +336,22 @@ test("multi-rate: a subject in ANY rate's initial population is still carded —
   const wholly = row("cms137", "MISSING_DATA", { evidence: { expressionResults: [], official: { populationResults: rateOut, rates: [rateOut, rateOut] } } });
   assert.deepEqual(await buildComplianceCards([wholly], opts()), [], "outside every rate → no card");
 });
+
+test("#650: a card for an official gap states no compliance window; an authored card keeps its own", async () => {
+  // The card is text in a clinician's encounter; "Compliance window: 365 days" on a colorectal gap
+  // (FIT yearly, FIT-DNA 3 years, colonoscopy 10) was a wrong fact in the one place it matters most.
+  const official = {
+    official: { measurementPeriod: { start: "2026-01-01", end: "2026-12-31" }, populationResults: [] },
+    expressionResults: [
+      { define: "official:initial-population", result: true },
+      { define: "official:denominator", result: true },
+      { define: "official:numerator", result: false },
+    ],
+  };
+  const [officialCard] = await buildComplianceCards([row("cms125", "OVERDUE", { evidence: official })], opts());
+  assert.ok(officialCard);
+  assert.doesNotMatch(officialCard!.detail ?? "", /Compliance window/);
+
+  const [authoredCard] = await buildComplianceCards([row("audiogram", "OVERDUE")], opts());
+  assert.match(authoredCard!.detail ?? "", /Compliance window: 365 days/);
+});

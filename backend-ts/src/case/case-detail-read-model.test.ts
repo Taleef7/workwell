@@ -145,3 +145,39 @@ test("overdueDays is grace-aware: overdue is measured past windowDays + gracePer
   assert.equal(overdueDays(395, 365, 30), 0); // exactly at the graced deadline
   assert.equal(overdueDays(410, 365, 30), 15); // 410 - (365 + 30)
 });
+
+test("#650: an official outcome has no single window, so why_flagged carries none; an authored one keeps its own", () => {
+  // CMS130 qualifies on FIT yearly, FIT-DNA at 3 years or a colonoscopy at 10; the old 365 described
+  // none of them. Decided by the row's own `official` block.
+  const official = {
+    official: { measurementPeriod: { start: "2026-01-01", end: "2026-12-31" }, populationResults: [] },
+    expressionResults: [{ define: "official:numerator", result: false }],
+  };
+  const wf = deriveWhyFlagged(official, "cms130", "2026-01-01", "OVERDUE");
+  assert.equal(wf.compliance_window_days, null);
+  assert.equal(wf.days_overdue, null);
+  assert.equal(wf.last_exam_date, null);
+
+  const authored = deriveWhyFlagged(
+    { expressionResults: [{ define: "Most Recent Audiogram Date", result: "2025-04-19" }, { define: "Days Since Last Audiogram", result: 420 }] },
+    "audiogram",
+    "2026-01-01",
+    "OVERDUE",
+  );
+  assert.equal(authored.compliance_window_days, 365);
+});
+
+test("#650: an official measure's evaluation-error row states no window either; an authored error row keeps it", () => {
+  // An error replaces the evidence with `{ evaluationError, message }`, so no `official` block is left to
+  // say which engine ran; today's routing decides. Before, a failed CMS130 evaluation showed "365".
+  const errorEvidence = { evaluationError: "CQL engine failure", message: "boom" };
+  const before = process.env.WORKWELL_OFFICIAL_MEASURES;
+  process.env.WORKWELL_OFFICIAL_MEASURES = "cms130";
+  try {
+    assert.equal(deriveWhyFlagged(errorEvidence, "cms130", "2026-01-01", "MISSING_DATA").compliance_window_days, null);
+    assert.equal(deriveWhyFlagged(errorEvidence, "audiogram", "2026-01-01", "MISSING_DATA").compliance_window_days, 365);
+  } finally {
+    if (before === undefined) delete process.env.WORKWELL_OFFICIAL_MEASURES;
+    else process.env.WORKWELL_OFFICIAL_MEASURES = before;
+  }
+});

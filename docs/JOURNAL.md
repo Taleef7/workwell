@@ -7,6 +7,13 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
 
 ## 2026-09-25
 
+- **#650: no window where a measure has none.** A CMS130 case's evidence read "Window (days): 365", the
+  authored default, though CMS130 qualifies on FIT yearly, FIT-DNA at 3 years or a colonoscopy at 10. The
+  same number reached the clinician's CDS card ("Compliance window: 365 days"), the outcomes CSV and the
+  AI fallback explanation. An outcome with official evidence now carries no window, and all four say
+  nothing about one. The case and patient pages show the "Why flagged" summary and the exclusion status,
+  without the window, days-overdue and "Last result date: None" rows (official evidence records no result
+  date, so "None" contradicted a patient flagged by a reading). Checked live first on the desktop layout.
 - **#617: no forecast where there is nothing to forecast.** The measure page's "Risk outlook (next 90
   days)" projects from a last-exam date and a window. Official evidence has neither, so on all six Maui
   measures it showed "Upcoming due soon: 0" and a "Predicted 90d" column equal to "Current". The outlook
