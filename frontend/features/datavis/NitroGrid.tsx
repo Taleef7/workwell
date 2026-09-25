@@ -86,9 +86,15 @@ export default function NitroGrid({
     [rows, columns, sourceName],
   );
 
+  // `relative` gives the grid's own absolutely positioned pieces (its screen-reader "Skip to table" link and
+  // caption, the column resize handles) a containing block INSIDE the page's scrolling <main>. Without it
+  // they are placed against the document, escape <main>'s clipping, and stretch the page: on /runs a
+  // second, outer scrollbar that scrolled into empty space below the app.
   return (
-    <DataVisNitroContext.Provider value={view}>
-      <DataVisNitroGrid columns={columns} {...gridProps} />
-    </DataVisNitroContext.Provider>
+    <div className="relative" data-testid="nitro-grid-frame">
+      <DataVisNitroContext.Provider value={view}>
+        <DataVisNitroGrid columns={columns} {...gridProps} />
+      </DataVisNitroContext.Provider>
+    </div>
   );
 }

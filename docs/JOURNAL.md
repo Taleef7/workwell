@@ -7,6 +7,11 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
 
 ## 2026-09-25
 
+- **Run History no longer has a second scrollbar into empty space.** The outcomes grid's hidden
+  "Skip to table" link, absolutely positioned with no positioned ancestor, was placed against the document,
+  escaped the scrolling content area and stretched the page to 3,099px in a 900px window. The grid wrapper is
+  now a positioned box; checked in the browser (3,099px to 900px). Admin and Measures use the same grid and
+  are covered.
 - **#650: no window where a measure has none.** A CMS130 case's evidence read "Window (days): 365", the
   authored default, though CMS130 qualifies on FIT yearly, FIT-DNA at 3 years or a colonoscopy at 10. The
   same number reached the clinician's CDS card ("Compliance window: 365 days"), the outcomes CSV and the
