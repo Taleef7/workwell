@@ -13,6 +13,14 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
   for 36 hours. The failure alert's webhook body now carries a one-line summary that Slack, Teams and
   Discord accept as it is, built only from fields that cannot name a patient; which channel it goes to is
   still to be chosen.
+- **#644: Run History no longer takes every database connection.** Loading the list counted every listed
+  run's results at once (38 runs, each a count over up to 120,000 rows): 9.3 s cold, and during an
+  all-programs run it used up all ten connections, so the page said "No database connection was available
+  in time". A finished run's counts cannot change, so they are now kept (reset by outcome compaction, and
+  expired after 10 minutes in case a maintenance script changed them from another process); the rest are
+  read three at a time. A running run's duration shows its elapsed time instead of "0s".
+- **The worker pool, measured live:** an all-programs run (the nightly's 120,000 evaluations) took 48.7
+  minutes, against 88 for the in-process nightly, with no stall over 1.5 s.
 
 - **#663: a frozen API leaves its evidence behind.** The 22 September hang could never be explained,
   because the self-heal deleted the container and its logs. The watchdog thread, which keeps running

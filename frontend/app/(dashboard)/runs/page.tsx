@@ -153,7 +153,12 @@ type RunInsightResponse = {
 };
 
 const RUN_PAGE_SIZE = 20;
-const MAX_DISPLAY_DURATION_MS = 60 * 60 * 1000;
+/**
+ * A RUNNING run older than this reads "Stalled". Well past any legitimate run: the in-process nightly
+ * took 88 minutes, the pooled one 49. It was one hour, which never fired while a running run's duration
+ * read 0 and would have called every long nightly stalled once it showed real elapsed time (#709).
+ */
+const MAX_DISPLAY_DURATION_MS = 3 * 60 * 60 * 1000;
 
 function formatAbsoluteTimestamp(dateString: string | null): string {
   if (!dateString) return "-";
@@ -202,6 +207,17 @@ function formatRunDuration(durationMs: number, status?: string): string {
   const hours = Math.floor(totalSec / 3600);
   const minutes = Math.floor((totalSec % 3600) / 60);
   return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m ${totalSec % 60}s`;
+}
+
+/**
+ * A row's duration. A RUNNING run has no `durationMs` yet (the server reports 0 until it completes), so
+ * the list showed "0s" for the nightly or any run this page did not start itself (#644, #655). Its
+ * elapsed time comes from its own start instead.
+ */
+function shownDurationMs(run: { status?: string; durationMs: number; startedAt?: string | null }, now: number = Date.now()): number {
+  if (normalizeEnumValue(run.status ?? "") !== "RUNNING" || !run.startedAt) return run.durationMs;
+  const started = Date.parse(run.startedAt);
+  return Number.isFinite(started) ? Math.max(0, now - started) : run.durationMs;
 }
 
 export default function RunsPage() {
@@ -478,6 +494,17 @@ export default function RunsPage() {
     }, 1000);
     return () => clearInterval(interval);
   }, [activeRunStartedAt]);
+
+  // A running run this page did not start (the nightly, or one started elsewhere) has no ticker of its
+  // own: its elapsed time is computed at render (`shownDurationMs`), so re-render once a second while
+  // any listed run is running, or the clock would stop at the value it had when the list loaded (#644).
+  const [, setClockTick] = useState(0);
+  const anyUntrackedRunning = runs.some((r) => normalizeEnumValue(r.status ?? "") === "RUNNING" && r.runId !== activeRunId);
+  useEffect(() => {
+    if (!anyUntrackedRunning) return;
+    const interval = setInterval(() => setClockTick((t) => t + 1), 1000);
+    return () => clearInterval(interval);
+  }, [anyUntrackedRunning]);
 
   useEffect(() => {
     urlRunIdRef.current = urlRunId;
@@ -997,7 +1024,7 @@ export default function RunsPage() {
                         {formatRunDuration(runElapsedSec * 1000)} <span className="animate-pulse text-neutral-400" aria-hidden="true">●</span>
                       </span>
                     ) : (
-                      formatRunDuration(run.durationMs, run.status)
+                      formatRunDuration(shownDurationMs(run), run.status)
                     )}
                   </td>
                   <td className="px-3 py-2 align-top text-neutral-600 dark:text-neutral-400" title={formatAbsoluteTimestamp(run.startedAt)}>
@@ -1068,7 +1095,7 @@ export default function RunsPage() {
                     {formatRunDuration(runElapsedSec * 1000)} <span className="animate-pulse text-neutral-400" aria-hidden="true">●</span>
                   </span>
                 ) : (
-                  formatRunDuration(selectedRun.durationMs, selectedRun.status)
+                  formatRunDuration(shownDurationMs(selectedRun), selectedRun.status)
                 )}
               </p>
               {selectedRun.retentionNotice ? (
