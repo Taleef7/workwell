@@ -157,17 +157,19 @@ export function webhookAlertChannel(
 }
 
 /**
- * Pure predicate: webhook alert channel is active only when WORKWELL_ALERT_WEBHOOK_URL is a URL.
+ * Pure predicate: webhook alert channel is active only when WORKWELL_ALERT_WEBHOOK_URL is an https URL.
  * Single source of truth for `resolveAlertChannels` and the boot-time seam inventory (#260/#264).
  *
- * "Parses" and not merely "non-blank" (#623 review): fetch rejects a malformed value with "Failed to
- * parse URL from <the value>", which the channel's failure line would print on every alert, and the
- * value is the credential.
+ * "An https URL" and not merely "non-blank" (#623 review). fetch rejects a malformed value with "Failed
+ * to parse URL from <the value>", which the channel's failure line would print on every alert, and the
+ * value is the credential. And any other scheme parses but cannot deliver: a `htps://` typo fails on
+ * every alert, and a `data:` URL answers 200 having sent nothing (Codex on #711). Every service this
+ * posts to (Slack, Teams, Discord, the Apps Script relay) is https, which also keeps the credential
+ * off the wire in clear text.
  */
 export function isAlertWebhookConfigured(env: AlertEnv): boolean {
   try {
-    new URL((env.WORKWELL_ALERT_WEBHOOK_URL ?? "").trim());
-    return true;
+    return new URL((env.WORKWELL_ALERT_WEBHOOK_URL ?? "").trim()).protocol === "https:";
   } catch {
     return false;
   }
@@ -186,7 +188,7 @@ export function resolveAlertChannels(env: AlertEnv, opts?: { fetch?: FetchLike; 
   } else if (url) {
     // Set but unusable: said, without the value, rather than silently off.
     (opts?.log ?? ((line: string) => console.error(line)))(
-      "[workwell] WORKWELL_ALERT_WEBHOOK_URL is set but is not a URL (value not logged); alerts go to the log only",
+      "[workwell] WORKWELL_ALERT_WEBHOOK_URL is set but is not an https URL (value not logged); alerts go to the log only",
     );
   }
   return channels;

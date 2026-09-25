@@ -297,8 +297,8 @@ tick throw or an unreachable evidence bucket emits one `WORKWELL_ALERT {"kind":â
 alert, plus a JSON POST to `WORKWELL_ALERT_WEBHOOK_URL` when set. The POST carries only fields that cannot
 name a patient (kind, time, status, run id, scope type, counts; never the scope label or error text) and
 a one-line summary as `text` and `content`, so a Slack, Teams or Discord incoming-webhook URL works as it
-is (#623). A non-2xx answer is logged as a failed delivery; a value that is not a URL turns the webhook
-off with a log line that does not print it.
+is (#623). A non-2xx answer is logged as a failed delivery; a value that is not an https URL turns the
+webhook off with a log line that does not print it.
 
 **Set on Maui only**, from the `WORKWELL_ALERT_WEBHOOK_URL` secret (the deploy and the self-heal both carry
 it; a test holds them together). It points at a Google Apps Script web app that emails the owner the

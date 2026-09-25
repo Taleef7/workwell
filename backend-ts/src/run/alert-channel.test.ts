@@ -273,6 +273,16 @@ test("a webhook URL that does not parse turns the channel off and is never print
   const channels = resolveAlertChannels({ WORKWELL_ALERT_WEBHOOK_URL: malformed }, { log: (l) => lines.push(l) });
   assert.deepEqual(channels.map((c) => c.name), ["console"]);
   assert.equal(lines.length, 1, "said once, rather than silently off");
-  assert.match(lines[0]!, /not a URL \(value not logged\)/);
+  assert.match(lines[0]!, /not an https URL \(value not logged\)/);
   assert.ok(!lines.some((l) => l.includes("SECRET-DEPLOYMENT-ID")), "the credential never reaches the log");
+});
+
+test("only an https webhook URL turns the channel on: other schemes parse but cannot deliver (Codex on #711)", () => {
+  // A scheme typo fails on every alert; a data: URL "answers" 200 having sent nothing; plain http
+  // would send the credential in clear text. None of them may read as configured.
+  for (const url of ["htps://script.example/exec", "data:text/plain,ok", "http://script.example/exec", "ftp://script.example/exec"]) {
+    assert.equal(isAlertWebhookConfigured({ WORKWELL_ALERT_WEBHOOK_URL: url }), false, url);
+    assert.deepEqual(resolveAlertChannels({ WORKWELL_ALERT_WEBHOOK_URL: url }, { log: () => {} }).map((c) => c.name), ["console"], url);
+  }
+  assert.equal(isAlertWebhookConfigured({ WORKWELL_ALERT_WEBHOOK_URL: "  https://script.example/exec  " }), true);
 });
