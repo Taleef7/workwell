@@ -86,7 +86,29 @@ export function consoleAlertChannel(log: (line: string) => void = (line) => cons
 }
 
 /**
- * Optional webhook channel — POSTs the alert JSON body. Only constructed when a URL is configured
+ * One human line for a chat channel (#623). A Slack incoming webhook rejects a body without `text`,
+ * Discord one without `content`, and Teams shows `text`; each ignores the other fields. So the webhook
+ * body is the alert itself plus this line under both names, and one URL of any of the three works
+ * without an adapter in between.
+ *
+ * Built from fields that cannot name a patient (#710 review): the kind, the SCOPE TYPE, the counts and
+ * the run id. Never `scopeLabel` (a patient-scoped run's is "Patient: <id>") and never `message` (it
+ * carries raw engine and WebChart error text), because this is the line a chat service renders and
+ * keeps. The run id leads to the rest on Run History. Capped under Discord's 2000-character limit,
+ * which it cannot reach today, so a future field can never make the whole alert bounce.
+ */
+export const ALERT_SUMMARY_MAX = 1_900;
+export function alertSummary(alert: RunAlert): string {
+  const counts =
+    alert.totalEvaluated !== undefined
+      ? ` (${alert.totalEvaluated.toLocaleString("en")} evaluated${alert.failures ? `, ${alert.failures.toLocaleString("en")} failed` : ""})`
+      : "";
+  const line = `WorkWell ${alert.kind}${alert.scopeType ? ` [${alert.scopeType}]` : ""}: ${alert.status}${counts}${alert.runId ? `. Run ${alert.runId}; details on Run History.` : ""}`;
+  return line.length > ALERT_SUMMARY_MAX ? `${line.slice(0, ALERT_SUMMARY_MAX - 1)}…` : line;
+}
+
+/**
+ * Optional webhook channel — POSTs the alert JSON body, with a one-line summary for chat (see alertSummary). Only constructed when a URL is configured
  * (inert-unless-configured). Real HTTP via fetch; inject `fetchImpl` in tests.
  *
  * Bound by {@link WEBHOOK_TIMEOUT_MS} via AbortSignal so a slow/hung endpoint cannot stall the
@@ -106,7 +128,7 @@ export function webhookAlertChannel(
         await fetchImpl(url, {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify(alert),
+          body: JSON.stringify({ ...alert, text: alertSummary(alert), content: alertSummary(alert) }),
           signal: controller.signal,
         });
       } finally {

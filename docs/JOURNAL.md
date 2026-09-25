@@ -7,6 +7,12 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
 
 ## 2026-09-24
 
+- **#623: the dashboard says when its numbers are stale.** A failed nightly leaves the previous results in
+  place, which is right, and said nothing. /programs now shows a banner when the latest overnight update
+  did not finish (naming the last complete one), finished with errors for some patients, or has not run
+  for 36 hours. The failure alert's webhook body now carries a one-line summary that Slack, Teams and
+  Discord accept as it is, built only from fields that cannot name a patient; which channel it goes to is
+  still to be chosen.
 - **#644: Run History no longer takes every database connection.** Loading the list counted every listed
   run's results at once (38 runs, each a count over up to 120,000 rows): 9.3 s cold, and during an
   all-programs run it used up all ten connections, so the page said "No database connection was available

@@ -291,7 +291,11 @@ calculation in-process again (the escape hatch if the workers misbehave). `cpus`
 ### Failed-run alerts (#264)
 
 A FAILED/PARTIAL_FAILURE population run, a stuck-run recovery or a scheduler tick throw emits one
-`WORKWELL_ALERT {"kind":…}` log line, plus a JSON POST to `WORKWELL_ALERT_WEBHOOK_URL` when set.
+`WORKWELL_ALERT {"kind":…}` log line, plus a JSON POST to `WORKWELL_ALERT_WEBHOOK_URL` when set. The body
+also carries a one-line summary as `text` and `content`, so a Slack, Teams or Discord incoming-webhook URL
+works as it is (#623). **Not set on any stack yet**, so the alert reaches nobody; the reader is told
+instead by the banner on `/programs` when the latest overnight update failed, finished with errors, or
+has not run for 36 hours.
 
 ### On-demand data tools (never run on deploy; owner-run)
 
