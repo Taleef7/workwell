@@ -293,9 +293,12 @@ calculation in-process again (the escape hatch if the workers misbehave). `cpus`
 A FAILED/PARTIAL_FAILURE population run, a stuck-run recovery or a scheduler tick throw emits one
 `WORKWELL_ALERT {"kind":…}` log line, plus a JSON POST to `WORKWELL_ALERT_WEBHOOK_URL` when set. The body
 also carries a one-line summary as `text` and `content`, so a Slack, Teams or Discord incoming-webhook URL
-works as it is (#623). **Not set on any stack yet**, so the alert reaches nobody; the reader is told
-instead by the banner on `/programs` when the latest overnight update failed, finished with errors, or
-has not run for 36 hours.
+works as it is (#623). **Set on Maui only**, from the `WORKWELL_ALERT_WEBHOOK_URL` secret (the deploy and
+the self-heal both carry it). It points at a Google Apps Script web app that emails the owner the
+body's `text`: `doPost(e)` parses `e.postData.contents` and calls `MailApp.sendEmail` (deployed as a web
+app, "Execute as: Me", "Anyone"; the URL is the only credential). On TWH the alert reaches nobody. Either
+way, `/programs` shows a banner when the latest overnight update failed, finished with errors, or has not
+run for 36 hours.
 
 ### On-demand data tools (never run on deploy; owner-run)
 

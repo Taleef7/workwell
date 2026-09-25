@@ -5,6 +5,12 @@ Newest first. A few lines per working day: what changed, and what's next.
 Entries before 2026-09-23 are in git history: `git show before-docs-trim:docs/JOURNAL.md` is the last long-form
 version, and earlier months were in `docs/archive/` (`git show before-docs-trim:docs/archive/JOURNAL_2026-07.md`).
 
+## 2026-09-25
+
+- **#623: Maui's failure alerts now reach the owner by email.** The webhook URL is a secret that both the
+  deploy and the self-heal pass to the container (a test holds the two together). It points at a small
+  Google Apps Script that emails the alert's one-line summary. TWH still alerts nobody.
+
 ## 2026-09-24
 
 - **#623: the dashboard says when its numbers are stale.** A failed nightly leaves the previous results in
