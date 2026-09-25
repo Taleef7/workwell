@@ -84,7 +84,12 @@ test("webhook channel fires when configured (stubbed fetch) and is inert otherwi
   assert.equal(posts.length, 1);
   assert.equal(posts[0]!.url, "https://hooks.example/alert");
   assert.equal(posts[0]!.method, "POST");
-  assert.equal(JSON.parse(posts[0]!.body).runId, "run-1");
+  const sent = JSON.parse(posts[0]!.body);
+  assert.equal(sent.runId, "run-1");
+  // #623: one chat line under the names Slack/Teams (`text`) and Discord (`content`) require.
+  assert.match(sent.text, /^WorkWell RUN_PARTIAL_FAILURE/);
+  assert.match(sent.text, /3 failed/);
+  assert.equal(sent.content, sent.text);
   assert.equal(posts[0]!.hasSignal, true, "webhook POST carries AbortSignal for the timeout bound");
 
   // Unconfigured resolve → no webhook channel → fetch never called again.

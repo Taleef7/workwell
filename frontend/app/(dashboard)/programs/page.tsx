@@ -27,6 +27,7 @@ import { useMeasureIdentities } from "@/lib/measure-identity";
 import { displayRate, formatRate, isSmallNumbers, type NotationSource } from "@/lib/measure-rate";
 import { chartablePoints, trendMeta, type TrendPoint } from "./trend-meta";
 import { yearLineFor } from "./year-line";
+import { RunFreshnessBanner } from "./run-freshness-banner";
 
 type ProgramSummary = {
   measureId: string;
@@ -237,6 +238,8 @@ export default function ProgramsPage() {
           ) : null}
         </div>
       </div>
+
+      <RunFreshnessBanner />
 
       <div className="grid gap-3 md:grid-cols-3">
         <KpiCard label="Overall compliance" value={initialLoad ? "—" : formatRate(overallComplianceRate)} />
