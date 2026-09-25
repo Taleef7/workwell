@@ -41,6 +41,14 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
   and memory limit, which decide whether a pool could also shorten the run and how to bound the worker.
   Known limit: a single-patient official read during the nightly (`/simulate`, a rerun) still waits
   behind the chunk in flight, no worse than before.
+  Verified live the same evening: a manual CMS125 run over 20,000 patients (22:44 to 22:56 UTC) caused no
+  event-loop stall at all (the only one since the deploy was the 1 s at boot), and the warm after it
+  succeeded.
+- **A pool of calculation workers.** The container has 4 cores, and a chunk's six measures were still
+  calculated one after another. They now go side by side to a pool of 2 workers (`WORKWELL_FQM_WORKERS`,
+  capped at the cores minus one): measured locally on 500 corpus patients, a chunk went from 27.5 s to
+  17.9 s (1.5 to 1.7x), so the ~80-minute nightly should take roughly 45 to 55. Each worker holds about
+  500 MB while busy and is released after 5 idle minutes; a third worker bought nothing measurable.
 
 ## 2026-09-23
 

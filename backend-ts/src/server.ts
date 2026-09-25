@@ -97,6 +97,7 @@ async function main(): Promise<void> {
     // reached request-triggered runs but not this allowlist could not switch it off where it matters
     // (Codex on #705).
     WORKWELL_FQM_WORKER: process.env.WORKWELL_FQM_WORKER,
+    WORKWELL_FQM_WORKERS: process.env.WORKWELL_FQM_WORKERS,
   };
 
   // Declared HERE rather than beside `shutdown()` below, because the boot-recovery retry loop reads

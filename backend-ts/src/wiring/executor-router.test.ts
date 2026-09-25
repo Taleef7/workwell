@@ -343,7 +343,7 @@ test("the scheduler's env allowlist carries the flag — the nightly run must ro
   const server = readFileSync(new URL("../server.ts", import.meta.url), "utf8");
   const allowlist = server.slice(server.indexOf("const schedulerEnv"), server.indexOf("const schedulerInterval"));
   // WORKWELL_FQM_WORKER since #604: the escape hatch must reach the nightly, the workload it exists for.
-  for (const key of ["WORKWELL_OFFICIAL_MEASURES", "WORKWELL_INCREMENTAL_EVAL", "WORKWELL_VSAC_API_KEY", "WORKWELL_FQM_WORKER"]) {
+  for (const key of ["WORKWELL_OFFICIAL_MEASURES", "WORKWELL_INCREMENTAL_EVAL", "WORKWELL_VSAC_API_KEY", "WORKWELL_FQM_WORKER", "WORKWELL_FQM_WORKERS"]) {
     assert.ok(
       allowlist.includes(`${key}: process.env.${key}`),
       `${key} must be threaded to schedulerTick, or the nightly run behaves differently from a manual one`,

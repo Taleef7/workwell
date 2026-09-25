@@ -1800,3 +1800,28 @@ test("an UNCHANGED panel map costs a run nothing at finish", async () => {
   assert.equal(recorded, 0, "an unchanged map moves no case and writes no event");
   assert.equal((await caseStore.listCases({ limit: 10 }))[0]?.assignee, "cm@workwell.dev");
 });
+
+test("a chunk's measures are calculated side by side, so a worker pool can take them at once (#604 follow-up)", async () => {
+  let inFlight = 0;
+  let maxInFlight = 0;
+  const measures = new Set<string>();
+  const engine: RunPipelineDeps["engine"] = {
+    logicVersionFor: () => "official-fqm:1.0.000:artifact-sha:terminology-sha",
+    async evaluate(input) {
+      return { subjectId: "ignored", measure: input.measureId, outcome: "COMPLIANT" as const, evidence: { expressionResults: [] } };
+    },
+    async evaluateBatch(measureId, subjectsFactory) {
+      const subjects = subjectsFactory();
+      measures.add(measureId);
+      inFlight += 1;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      await new Promise((r) => setTimeout(r, 30)); // a worker's calculation: the main thread is free meanwhile
+      inFlight -= 1;
+      return new Map(subjects.map((s) => [s.subjectId, { subjectId: s.subjectId, measure: measureId, outcome: "COMPLIANT" as const, inInitialPopulation: true, evidence: { expressionResults: [] } }]));
+    },
+  };
+  const { res, outcomes } = await runWithProbe({ engine, batches: [], singles: [] }, { scopeType: "ALL_PROGRAMS", evaluationDate: "2026-06-15" });
+  assert.ok(measures.size >= 2, `the scope must span several measures to say anything (${measures.size})`);
+  assert.equal(maxInFlight, measures.size, "every measure of the chunk was in flight at once");
+  assert.ok(outcomes.length > 0 && outcomes.every((o) => o.status === "COMPLIANT"), `and every result landed (${res.status})`);
+});

@@ -4,7 +4,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createFqmWorker } from "./fqm-worker.ts";
+import { __resetSharedFqmWorker, createFqmPool, createFqmWorker, fqmWorkerCount, sharedFqmPoolSize, sharedFqmWorker } from "./fqm-worker.ts";
 import { officialMeasureExecutor } from "./official-executor-adapter.ts";
 import { officialTerminologyExpander, loadOfficialTerminology } from "./official-terminology.ts";
 import { loadOfficialArtifact } from "./official-artifacts.ts";
@@ -101,5 +101,83 @@ test("chunks submitted together each get their own answer (the worker runs them 
     assert.equal(worker.requests, 3);
   } finally {
     await worker.close();
+  }
+});
+
+test("a pool of two calculates two chunks at the same time (#604 follow-up)", async () => {
+  const pool = createFqmPool(2, { calculatorModule: FIXTURE });
+  try {
+    await Promise.all([pool.calculate(input([{}])), pool.calculate(input([{}]))]); // start both threads first
+    const started = Date.now();
+    await Promise.all([pool.calculate(input([{ mode: "busy", cpuMs: 800 }])), pool.calculate(input([{ mode: "busy", cpuMs: 800 }]))]);
+    const elapsed = Date.now() - started;
+    assert.ok(elapsed < 1400, `two 800 ms chunks took ${elapsed} ms: one per worker, side by side`);
+    assert.equal(pool.alive, 2);
+    assert.equal(pool.requests, 4);
+  } finally {
+    await pool.close();
+  }
+});
+
+test("a pool holds chunks beyond its workers on the main thread, one per worker at a time (#707, Codex)", async () => {
+  const pool = createFqmPool(2, { calculatorModule: FIXTURE });
+  try {
+    const jobs = [0, 1, 2, 3, 4, 5].map((i) => pool.calculate(input(Array.from({ length: i + 1 }, (_, k) => (k === 0 ? { mode: "busy", cpuMs: 150 } : {})))));
+    assert.equal(pool.queued, 4, "six chunks on two workers: two posted, four waiting as references");
+    assert.equal(pool.inFlight, 6);
+    const results = await Promise.all(jobs);
+    assert.deepEqual(results.map((r) => r.bySubject.size), [1, 2, 3, 4, 5, 6], "each chunk got its own answer");
+    assert.equal(pool.queued, 0);
+    assert.equal(pool.requests, 6, "every chunk reached a worker");
+    const failing = pool.calculate(input([{ mode: "throw" }]));
+    const after = pool.calculate(input([{}]));
+    await assert.rejects(failing, /fqm could not parse/);
+    assert.equal((await after).bySubject.size, 1, "a failed chunk frees its worker for the next");
+  } finally {
+    await pool.close();
+  }
+});
+
+test("an idle worker is released and the next chunk starts a fresh one (#604 follow-up)", async () => {
+  const worker = createFqmWorker({ calculatorModule: FIXTURE, idleMs: 100 });
+  try {
+    await worker.calculate(input([{}]));
+    assert.equal(worker.alive, 1);
+    await new Promise((r) => setTimeout(r, 400));
+    assert.equal(worker.alive, 0, "released after its idle time, so its memory is too");
+    assert.equal((await worker.calculate(input([{}, {}]))).bySubject.size, 2, "and a new chunk still runs");
+    assert.equal(worker.alive, 1);
+  } finally {
+    await worker.close();
+  }
+});
+
+test("the pool size: 2 by default, WORKWELL_FQM_WORKERS to change it, never more than the cores minus one (#604 follow-up)", () => {
+  assert.equal(fqmWorkerCount({}, 4), 2);
+  assert.equal(fqmWorkerCount({ WORKWELL_FQM_WORKERS: "3" }, 4), 3);
+  assert.equal(fqmWorkerCount({ WORKWELL_FQM_WORKERS: "8" }, 4), 3, "the main thread keeps a core");
+  assert.equal(fqmWorkerCount({ WORKWELL_FQM_WORKERS: "1" }, 4), 1, "the single worker #604 shipped with");
+  assert.equal(fqmWorkerCount({ WORKWELL_FQM_WORKERS: "0" }, 4), 2, "nonsense falls back to the default");
+  assert.equal(fqmWorkerCount({ WORKWELL_FQM_WORKERS: "abc" }, 4), 2);
+  assert.equal(fqmWorkerCount({}, 2), 1, "a two-core host gets one worker");
+  assert.equal(fqmWorkerCount({}, 1), 1);
+});
+
+test("the shared pool takes its size from the first caller, and says so when a later one asks for another (#707 review)", async () => {
+  await __resetSharedFqmWorker();
+  const warnings: string[] = [];
+  const warn = console.warn;
+  console.warn = (msg: string) => void warnings.push(msg);
+  try {
+    assert.equal(sharedFqmPoolSize(), null, "nothing until something uses it");
+    const pool = sharedFqmWorker(2);
+    assert.equal(sharedFqmPoolSize(), 2);
+    assert.equal(sharedFqmWorker(), pool, "a caller that names no size gets the pool as it is, silently");
+    assert.deepEqual(warnings, []);
+    assert.equal(sharedFqmWorker(3), pool, "the pool is not resized");
+    assert.match(warnings[0] ?? "", /already has 2 worker\(s\); a request for 3 is ignored/);
+  } finally {
+    console.warn = warn;
+    await __resetSharedFqmWorker();
   }
 });

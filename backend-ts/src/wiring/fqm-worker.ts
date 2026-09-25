@@ -28,6 +28,7 @@
  * what to size one against).
  */
 import { Worker } from "node:worker_threads";
+import { availableParallelism } from "node:os";
 import type { OfficialBatchResult, OfficialCalculationInput, OfficialSubjectResult } from "@work-well/official-executor";
 
 /** What crosses to the worker: the calculation input minus the injectable function, which cannot be cloned. */
@@ -51,16 +52,36 @@ export interface FqmWorker {
   calculate: BatchCalculator;
   /** Chunks posted to the worker since it was created. */
   readonly requests: number;
+  /** Chunks posted and not yet answered. */
+  readonly inFlight: number;
+  /** Threads currently running (idle ones are released after `idleMs`). */
+  readonly alive: number;
+  /** Chunks waiting on the main thread for a free worker (a pool only; a lone worker is always 0). */
+  readonly queued: number;
   /** Stop the worker; chunks still in flight reject. */
   close(): Promise<void>;
 }
 
 const ENTRY = new URL("./fqm-worker-entry.ts", import.meta.url);
 
-export function createFqmWorker(options: { calculatorModule?: string } = {}): FqmWorker {
+/**
+ * How long an idle worker is kept. Each one holds fqm-execution and a measure's parsed ELM, about 500 MB
+ * measured, and a nightly uses them for ~an hour a day; kept forever they would hold that memory for the
+ * other 23. Five minutes bridges the gaps between one run's chunks and a person's back-to-back reads;
+ * after that the next chunk pays a fresh worker's start (fqm's load, about 2 s).
+ */
+export const DEFAULT_WORKER_IDLE_MS = 5 * 60_000;
+
+export function createFqmWorker(options: { calculatorModule?: string; idleMs?: number } = {}): FqmWorker {
   let worker: Worker | null = null;
   let nextId = 1;
   let requests = 0;
+  let idleTimer: NodeJS.Timeout | null = null;
+  const idleMs = options.idleMs ?? DEFAULT_WORKER_IDLE_MS;
+  const cancelIdle = (): void => {
+    if (idleTimer) clearTimeout(idleTimer);
+    idleTimer = null;
+  };
   // Each chunk remembers the worker it was posted to. A crash emits `error` and then `exit`, and between
   // the two a rejected chunk's caller can already have posted the NEXT chunk to a fresh worker; the old
   // worker's `exit` must not fail that one (Codex on #705). So a worker only ever fails its own chunks.
@@ -84,7 +105,19 @@ export function createFqmWorker(options: { calculatorModule?: string } = {}): Fq
       const waiter = pending.get(response.id);
       if (!waiter) return;
       pending.delete(response.id);
-      if (!holdsWork(w)) w.unref();
+      if (!holdsWork(w)) {
+        w.unref();
+        cancelIdle();
+        idleTimer = setTimeout(() => {
+          idleTimer = null;
+          // Still this worker, and still idle: release it. Its `exit` finds no chunk to fail.
+          if (worker === w && !holdsWork(w)) {
+            worker = null;
+            void w.terminate();
+          }
+        }, idleMs);
+        idleTimer.unref();
+      }
       if (response.ok) {
         waiter.resolve({ bySubject: new Map(response.bySubject), retrieveSignal: response.retrieveSignal });
       } else {
@@ -109,7 +142,17 @@ export function createFqmWorker(options: { calculatorModule?: string } = {}): Fq
     get requests() {
       return requests;
     },
+    get inFlight() {
+      return pending.size;
+    },
+    get alive() {
+      return worker ? 1 : 0;
+    },
+    get queued() {
+      return 0;
+    },
     calculate(input) {
+      cancelIdle();
       const w = ensure();
       const id = nextId++;
       requests += 1;
@@ -128,6 +171,7 @@ export function createFqmWorker(options: { calculatorModule?: string } = {}): Fq
       });
     },
     async close() {
+      cancelIdle();
       const w = worker;
       worker = null;
       if (w) await w.terminate();
@@ -136,11 +180,98 @@ export function createFqmWorker(options: { calculatorModule?: string } = {}): Fq
   };
 }
 
-let shared: FqmWorker | null = null;
+/**
+ * A pool of calculation workers, each chunk to the one with the fewest chunks in flight. The run
+ * pipeline posts a chunk's measures together, so N workers calculate N measures side by side: measured
+ * locally on 500 corpus subjects, 2 workers took a chunk from 27.5 s to 17.9 s (1.5–1.7x) at ~500 MB
+ * more memory.
+ */
+export function createFqmPool(size: number, options: { calculatorModule?: string; idleMs?: number } = {}): FqmWorker {
+  const workers = Array.from({ length: Math.max(1, Math.floor(size)) }, () => createFqmWorker(options));
+  // Each worker takes ONE chunk at a time; the rest wait here, on the main thread, as references (Codex on
+  // #707). Posted straight to a busy worker, every waiting chunk's ~500 patient bundles would be cloned
+  // into that worker's inbox while it could only work on one, so a six-measure chunk on two workers held
+  // four extra copies for nothing. And a chunk goes to whichever worker frees up first.
+  const queue: Array<{ input: WorkerCalculationInput; resolve: (r: OfficialBatchResult) => void; reject: (e: Error) => void }> = [];
+  const pump = (): void => {
+    for (const w of workers) {
+      if (queue.length === 0) return;
+      if (w.inFlight > 0) continue;
+      const job = queue.shift()!;
+      // `calculate` registers the chunk synchronously, so this worker reads as busy for the rest of the loop.
+      w.calculate(job.input).then(job.resolve, job.reject).finally(pump);
+    }
+  };
+  return {
+    get requests() {
+      return workers.reduce((n, w) => n + w.requests, 0);
+    },
+    get inFlight() {
+      return workers.reduce((n, w) => n + w.inFlight, 0) + queue.length;
+    },
+    get alive() {
+      return workers.reduce((n, w) => n + w.alive, 0);
+    },
+    get queued() {
+      return queue.length;
+    },
+    calculate(input) {
+      return new Promise<OfficialBatchResult>((resolve, reject) => {
+        queue.push({ input, resolve, reject });
+        pump();
+      });
+    },
+    async close() {
+      for (const job of queue.splice(0)) job.reject(new Error("official calculation worker closed"));
+      await Promise.all(workers.map((w) => w.close()));
+    },
+  };
+}
 
-/** The process's one calculation worker, created on first use. */
-export function sharedFqmWorker(): FqmWorker {
-  return (shared ??= createFqmWorker());
+/**
+ * How many workers: `WORKWELL_FQM_WORKERS`, default 2, never more than the cores minus one — the main
+ * thread (requests, the database, the run's own bookkeeping) keeps a core. On the pilot's 4-core
+ * container that allows 3; 2 is the default because a third bought nothing measurable locally and costs
+ * another ~500 MB. `1` is the single worker #604 shipped with.
+ */
+export function fqmWorkerCount(env: Record<string, unknown>, cores: number = availableParallelism()): number {
+  const ceiling = Math.max(1, cores - 1);
+  const raw = Number.parseInt(String(env.WORKWELL_FQM_WORKERS ?? ""), 10);
+  const wanted = Number.isFinite(raw) && raw >= 1 ? raw : 2;
+  return Math.min(wanted, ceiling);
+}
+
+let shared: FqmWorker | null = null;
+let sharedSize: number | null = null;
+
+/**
+ * The process's calculation pool, created on first use at the size that caller asks for (the router
+ * passes `fqmWorkerCount(env)`). A later caller cannot resize it; one that asks for a different size
+ * is told so in the log rather than silently given the first size (#707 review). Called with no size,
+ * it returns the pool as it is (creating a single worker only if nothing exists yet).
+ */
+export function sharedFqmWorker(size?: number): FqmWorker {
+  if (!shared) {
+    sharedSize = Math.max(1, Math.floor(size ?? 1));
+    shared = createFqmPool(sharedSize);
+    console.log(`[workwell] official calculation pool: ${sharedSize} worker(s)`);
+  } else if (size !== undefined && Math.max(1, Math.floor(size)) !== sharedSize) {
+    console.warn(`[workwell] official calculation pool already has ${sharedSize} worker(s); a request for ${size} is ignored`);
+  }
+  return shared;
+}
+
+/** The shared pool's size, or null before anything has used it — for `/api/admin/runtime`. */
+export function sharedFqmPoolSize(): number | null {
+  return sharedSize;
+}
+
+/** @internal test hook */
+export async function __resetSharedFqmWorker(): Promise<void> {
+  const pool = shared;
+  shared = null;
+  sharedSize = null;
+  if (pool) await pool.close();
 }
 
 /** On unless `WORKWELL_FQM_WORKER=off` — the escape hatch back to the in-process call. */
