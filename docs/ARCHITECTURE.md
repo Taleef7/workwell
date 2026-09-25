@@ -346,7 +346,7 @@ The inventory reports only; it never selects a seam. Test: `backend-ts/src/confi
 | `sendgrid` | `isSendgridConfigured` (`case/email-service.ts`) | `WORKWELL_EMAIL_PROVIDER=sendgrid` and `WORKWELL_EMAIL_SENDGRID_API_KEY` | simulated email |
 | `datachaser` | `isDataChaserConfigured` (`case/outreach-channel.ts`) | `WORKWELL_OUTREACH_DATACHASER_API_KEY` and `..._BASE_URL` | simulated channels |
 | `ice` | `isIceConfigured` (`engine/immunization/immunization-forecast.ts`) | `WORKWELL_IMMZ_ICE_BASE_URL` alone | simulated forecaster |
-| `eh-fhir` | `isEhFhirConfigured` (`order/standing-order-provider.ts`) | `WORKWELL_EH_FHIR_BASE_URL` and `WORKWELL_EH_FHIR_API_KEY` | no standing orders; nothing is deduplicated (#616) |
+| `eh-fhir` | `isEhFhirConfigured` (`order/standing-order-provider.ts`) | `WORKWELL_EH_FHIR_BASE_URL` and `WORKWELL_EH_FHIR_API_KEY` | no standing orders; proposals are not checked against orders already placed (#616) |
 | `webchart` | `isWebChartConfigured` (`engine/ingress/data-source.ts`) | `WORKWELL_WEBCHART_BASE_URL` and either `WORKWELL_WEBCHART_API_KEY` or `WORKWELL_WEBCHART_CLIENT_ID` plus a private key (`..._PRIVATE_KEY_B64` deployed, `..._PRIVATE_KEY` local) | JSON-bucket source |
 | `sql-executor` | `isSqlPushdownSelected` (`packages/measure-engine/src/measure-executor.ts`) | `WORKWELL_MEASURE_EXECUTOR=sql-pushdown` (a stub; rejects on use) | `fhirNativeExecutor` |
 | `vsac` | `isVsacConfigured` (`packages/measure-engine/src/cql/resolve-value-set-resolver.ts`; gated in `wiring/engine-factory.ts`) | `WORKWELL_VSAC_API_KEY` | local value sets |
