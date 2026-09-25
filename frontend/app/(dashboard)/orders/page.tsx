@@ -73,6 +73,9 @@ export default function OrdersPage() {
   const { measures, labelFor: measureLabelFor } = useMeasureIdentities();
 
   const [data, setData] = useState<ProposalsResponse | null>(null);
+  // The measure filter `data` was loaded for. A reply belongs to the scope that asked for it, so a
+  // note read from it must not outlive a filter change (Codex on #715).
+  const [dataFilter, setDataFilter] = useState<string | null>(null);
   const [measureFilter, setMeasureFilter] = useState("");
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
@@ -103,6 +106,7 @@ export default function OrdersPage() {
       const res = await api.get<ProposalsResponse>(`/api/orders/proposals?${params.toString()}`);
       if (reqId !== reqIdRef.current) return;
       setData(res);
+      setDataFilter(measureFilter);
       // The totals may have shrunk under us (a nightly run, a narrower filter): never show
       // "Page 4 of 2". Clamping triggers one reload of the last real page, which is the point.
       const pages = pageCount(res);
@@ -165,7 +169,7 @@ export default function OrdersPage() {
   }
 
   const proposed = data?.proposed ?? [];
-  const withoutOrder = data?.measuresWithoutOrder ?? [];
+  const withoutOrder = data && dataFilter === measureFilter ? (data.measuresWithoutOrder ?? []) : [];
   const suppressed = data?.suppressed ?? [];
   const proposedTotal = data?.totals?.proposed ?? proposed.length;
   const suppressedTotal = data?.totals?.suppressed ?? suppressed.length;

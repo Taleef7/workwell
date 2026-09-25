@@ -230,11 +230,24 @@ describe("OrdersPage paging + measure labels", () => {
       expect(screen.queryByText("No order proposals for the current scope.")).not.toBeInTheDocument();
     });
 
-    // A measure that has an order, with nobody at risk, keeps the plain empty state and no note. Both
-    // are asserted together, so a render still holding the previous answer cannot satisfy them.
+    // While the next filter's answer is still on its way, the note from the previous scope is gone
+    // at once rather than naming measures the selector no longer shows (Codex on #715).
+    const listed = get.getMockImplementation()!;
+    let release: () => void = () => {};
+    get.mockImplementation((url: string) =>
+      url.includes("measureId=cms125") ? new Promise((resolve) => { release = () => resolve(listed(url)); }) : listed(url),
+    );
+    await userEvent.click(screen.getByRole("combobox", { name: /measure/i }));
+    await userEvent.click(screen.getByRole("option", { name: "All measures" }));
+    await waitFor(() => expect(screen.getByTestId("measures-without-order")).toBeInTheDocument());
     await userEvent.click(screen.getByRole("combobox", { name: /measure/i }));
     await userEvent.click(screen.getByRole("option", { name: "Breast Cancer Screening" }));
     await waitFor(() => expect(proposalsQuery(proposalCalls().at(-1)!).get("measureId")).toBe("cms125"));
+    expect(screen.queryByTestId("measures-without-order")).not.toBeInTheDocument();
+    await act(async () => release());
+
+    // A measure that has an order, with nobody at risk, keeps the plain empty state and no note. Both
+    // are asserted together, so a render still holding the previous answer cannot satisfy them.
     await waitFor(() => {
       expect(screen.getByText("No order proposals for the current scope.")).toBeInTheDocument();
       expect(screen.queryByTestId("measures-without-order")).not.toBeInTheDocument();
