@@ -267,6 +267,13 @@ written by a watchdog thread *during* the stall and names the longest-running re
 `{"kind":"EVENT_LOOP_STALL",…}` follows once it ends (max one a minute). Afterwards `GET /health` shows
 `build.sha`, `startedAt`/`uptimeSeconds` and `eventLoop`; `GET /api/admin/runtime` (ADMIN) shows what ran.
 
+A stall past 30 s also writes its report to `var/stall-evidence.json` on the container's disk
+(`WORKWELL_STALL_EVIDENCE_PATH`). **Heal by restarting, not recreating:** the reconcilers now send a
+restart-only request (`PUT /sites/{site}/containers/{id}` with `{"restart": true}`) and recreate only if the
+API is still down after it. A restart keeps the disk, so the next boot logs
+`WORKWELL_ALERT {"kind":"PREVIOUS_PROCESS_STALLED",…}` and shows the report as `previousStall` on
+`/api/admin/runtime` (timings on `/health`). A recreate deletes it, as it deletes the logs.
+
 ### Run phase timing (#563) — `WORKWELL_RUNTIME`
 
 Each official batch logs `WORKWELL_RUNTIME {"kind":"evaluateBatch",…,"batchMs","bundleMs","evalMs",

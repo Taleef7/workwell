@@ -89,3 +89,6 @@ validator_cli.jar
 db-dumps/
 *.dump
 .wrangler/
+
+# A long event-loop stall's report, written by the runtime monitor (#663)
+backend-ts/var/

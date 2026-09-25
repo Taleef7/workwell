@@ -47,6 +47,11 @@ jobs:
       # drives the real request() under the deploy's own `set -euo pipefail` and fakes only curl.
       - name: The confirmed delete survives a real transport failure
         run: bash .github/scripts/mieweb-delete-confirmed.integration.test.sh
+      # The self-heal restarts in place before it recreates (#663), because a recreate deletes the
+      # stall report the runtime monitor keeps on the container's disk. Like every deploy script, the
+      # decision between the two is invisible to PR CI unless it is tested here.
+      - name: The self-heal restarts in place before it recreates
+        run: bash .github/scripts/mieweb-restart-first.test.sh
       # Deploy workflows only RUN on push to main — i.e. after merge — so a shell syntax error in one is
       # invisible to every PR check. PR-9c put an apostrophe inside a single-quoted jq program and turned
       # the production deploy step into a parse error; nothing before merge could see it (#356).

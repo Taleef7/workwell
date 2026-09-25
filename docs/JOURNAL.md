@@ -7,6 +7,14 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
 
 ## 2026-09-24
 
+- **#663: a frozen API leaves its evidence behind.** The 22 September hang could never be explained,
+  because the self-heal deleted the container and its logs. The watchdog thread, which keeps running
+  while the server is stuck, now also writes its report (the requests in flight, how long, memory, the
+  build) to a file on the container's disk once a freeze passes 30 s; the next boot shows it on the admin
+  runtime view. And both self-heals now restart the container in place first (the platform's restart
+  keeps the disk), recreating only if that fails. Recovery still waits for GitHub's slow schedule; a
+  faster restart depends on whether the platform restarts an app whose process exits (asked of MIE).
+
 - **`WORKWELL_AUTH_ACCESS_TTL_SECONDS` removed from the five deploy/reconcile workflows.** It set a 30-day
   access token for MCP, but only the Java backend read it; the TypeScript port dropped the reader, so
   tokens have lasted 15 minutes since. Kept that way (a 30-day access token cannot be revoked, and #688

@@ -90,7 +90,7 @@ jobs:
           if [ "$backend_down" = false ] && [ "$frontend_down" = false ]; then
             echo "✓ stack healthy — nothing to do"
           else
-            echo "::warning::Unhealthy surface(s) — backend_down=$backend_down frontend_down=$frontend_down → recreating from :latest"
+            echo "::warning::Unhealthy surface(s) — backend_down=$backend_down frontend_down=$frontend_down → restarting in place, recreating from :latest if that fails"
           fi
 
   heal-backend-ts:
@@ -125,7 +125,21 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # #663: restart IN PLACE first. A restart keeps the container's disk, and with it the report the
+      # runtime monitor writes during a long event-loop stall (var/stall-evidence.json), which the next
+      # boot shows on /api/admin/runtime. The recreate below deletes both, so it runs only if the
+      # restart could not be requested or the API is still down after it.
+      - name: Restart twh-api-ts in place first (keeps the stall report on its disk)
+        id: restart
+        continue-on-error: true
+        env:
+          CONTAINER_HOSTNAME: ${{ env.API_TS_HOSTNAME }}
+          HEALTH_URL: ${{ env.BACKEND_TS_URL }}/actuator/health
+          HEALTH_EXPECT: '"status":"UP"'
+        run: bash .github/scripts/mieweb-restart-first.sh
+
       - name: Validate required secrets
+        if: steps.restart.outcome != 'success'
         run: |
           missing=()
           [ -z "$MIEWEB_API_URL" ] && missing+=("LAUNCHPAD_API_URL")
@@ -139,6 +153,7 @@ jobs:
           fi
 
       - name: Prepare backend-ts environment variables
+        if: steps.restart.outcome != 'success'
         id: backend-ts-env
         # KEEP IN SYNC with deploy-twh-mieweb.yml → "Prepare backend-ts environment variables".
         # A recreate must produce the exact same container env, so this mirrors the §7 TS env block.
@@ -194,6 +209,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Recreate twh-api-ts from :latest
+        if: steps.restart.outcome != 'success'
         env:
           CONTAINER_HOSTNAME: ${{ env.API_TS_HOSTNAME }}
           CONTAINER_IMAGE: ${{ env.BACKEND_TS_IMAGE }}:latest

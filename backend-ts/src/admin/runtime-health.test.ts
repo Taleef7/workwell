@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 import {
   __resetRuntimeHealth,
   recordWarm,
+  takePreviousStall,
   memoryLimitBytes,
   buildSha,
   inFlightRequests,
@@ -183,4 +184,143 @@ test("the memory limit is the container's only when it is a real limit (#604)", 
   assert.equal(memoryLimitBytes(2 ** 64, host), host, "an unlimited cgroup reports ~2^64: the host's total is the ceiling");
   assert.equal(memoryLimitBytes(0, host), host, "no cgroup at all");
   assert.equal(memoryLimitBytes(undefined, host), host, "an older Node without constrainedMemory");
+});
+
+test("a long stall's report is written to disk while it lasts, and deleted when the stall ends on its own (#663)", async () => {
+  const { mkdtempSync, existsSync, readFileSync, rmSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  const { tmpdir } = await import("node:os");
+  const dir = mkdtempSync(join(tmpdir(), "workwell-stall-"));
+  const file = join(dir, "var", "stall-evidence.json");
+  const stop = startRuntimeMonitor({
+    thresholdMs: 200,
+    heartbeatMs: 50,
+    watchdogReportAfterMs: 300,
+    watchdogCheckEveryMs: 50,
+    watchdogRepeatEveryMs: 100,
+    stallEvidencePath: file,
+    stallEvidenceAfterMs: 400,
+  });
+  try {
+    await new Promise((r) => setTimeout(r, 300)); // the watchdog thread boots
+    const settle = trackRequest("GET", "http://x/api/programs/overview");
+    await new Promise((r) => setTimeout(r, 50));
+    const until = Date.now() + 1200;
+    while (Date.now() < until) {
+      /* a stall long enough to reach the disk */
+    }
+    // Still inside the stall's turn: the main thread has not run its heartbeat, so the file is what a
+    // restart at this moment would leave behind.
+    assert.ok(existsSync(file), "the report reached the disk while the main thread was blocked");
+    const report = JSON.parse(readFileSync(file, "utf8"));
+    assert.equal(report.kind, "EVENT_LOOP_STALL_ONGOING");
+    assert.ok(report.stalledForMs >= 400);
+    assert.deepEqual(report.requests.map((r: { path: string }) => r.path), ["/api/programs/overview"]);
+    assert.equal(typeof report.rssMb, "number");
+    assert.equal(existsSync(`${file}.tmp`), false, "written by rename, never left half-done");
+    settle();
+    await new Promise((r) => setTimeout(r, 300));
+    assert.equal(existsSync(file), false, "the stall ended on its own, so the report is not a previous process's");
+  } finally {
+    await stop();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("the report reaches the disk at its own threshold, not after the log line's longer throttle (#708 review)", async () => {
+  const { mkdtempSync, existsSync, rmSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  const { tmpdir } = await import("node:os");
+  const dir = mkdtempSync(join(tmpdir(), "workwell-stall-"));
+  const file = join(dir, "stall-evidence.json");
+  // The log line fires at 100 ms and then not again for 10 s; the file is due at 300 ms regardless.
+  const stop = startRuntimeMonitor({
+    thresholdMs: 200,
+    heartbeatMs: 50,
+    watchdogReportAfterMs: 100,
+    watchdogCheckEveryMs: 25,
+    watchdogRepeatEveryMs: 10_000,
+    stallEvidencePath: file,
+    stallEvidenceAfterMs: 300,
+    stallEvidenceEveryMs: 50,
+  });
+  try {
+    await new Promise((r) => setTimeout(r, 300));
+    const until = Date.now() + 800;
+    while (Date.now() < until) {
+      /* blocked */
+    }
+    assert.ok(existsSync(file), "on disk by 800 ms although the log line would not repeat for 10 s");
+  } finally {
+    await stop();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a report that cannot be written says so, once (#708 review)", async () => {
+  const { mkdtempSync, writeFileSync, rmSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  const { tmpdir } = await import("node:os");
+  const dir = mkdtempSync(join(tmpdir(), "workwell-stall-"));
+  writeFileSync(join(dir, "not-a-dir"), "x"); // a FILE where the report's directory should be
+  const reports: Array<{ kind: string; path?: string }> = [];
+  const stop = startRuntimeMonitor({
+    thresholdMs: 200,
+    heartbeatMs: 50,
+    watchdogReportAfterMs: 100,
+    watchdogCheckEveryMs: 25,
+    watchdogRepeatEveryMs: 10_000,
+    stallEvidencePath: join(dir, "not-a-dir", "stall-evidence.json"),
+    stallEvidenceAfterMs: 200,
+    stallEvidenceEveryMs: 50,
+    onWatchdogReport: (r) => reports.push(r as (typeof reports)[number]),
+  });
+  try {
+    await new Promise((r) => setTimeout(r, 300));
+    const until = Date.now() + 800;
+    while (Date.now() < until) {
+      /* blocked */
+    }
+    await new Promise((r) => setTimeout(r, 200));
+    const failures = reports.filter((r) => r.kind === "STALL_EVIDENCE_WRITE_FAILED");
+    assert.equal(failures.length, 1, "reported once per stall, not on every retry");
+    assert.match(failures[0]!.path ?? "", /stall-evidence\.json$/);
+  } finally {
+    await stop();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("the next boot reads a report the previous process left, shows it once, and sets it aside (#663)", async () => {
+  const { mkdtempSync, existsSync, writeFileSync, rmSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  const { tmpdir } = await import("node:os");
+  const dir = mkdtempSync(join(tmpdir(), "workwell-stall-"));
+  const file = join(dir, "stall-evidence.json");
+  const left = {
+    kind: "EVENT_LOOP_STALL_ONGOING",
+    at: "2026-09-22T18:05:00.000Z",
+    stalledForMs: 1_740_000,
+    requestsInFlight: 3,
+    requests: [{ method: "GET", path: "/api/measures/cms125/fidelity/diff", runningMs: 1_750_000 }],
+    build: "abc123",
+    rssMb: 912,
+  };
+  writeFileSync(file, JSON.stringify(left));
+  const errors: string[] = [];
+  const error = console.error;
+  console.error = (msg: string) => void errors.push(String(msg));
+  const stop = startRuntimeMonitor({ stallEvidencePath: file });
+  try {
+    assert.deepEqual(runtimeDetail().previousStall, left, "the admin view has the whole report, paths included");
+    assert.deepEqual(runtimeHealth().previousStall, { at: left.at, stalledForMs: left.stalledForMs, requestsInFlight: 3 }, "/health has timings only");
+    assert.ok(errors.some((e) => e.startsWith("WORKWELL_ALERT") && e.includes("PREVIOUS_PROCESS_STALLED")), "and the log says so");
+    assert.equal(existsSync(file), false);
+    assert.ok(existsSync(`${file}.previous`), "kept, under another name");
+    assert.equal(takePreviousStall(file), null, "a second boot finds nothing to report");
+  } finally {
+    console.error = error;
+    await stop();
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
