@@ -136,6 +136,9 @@ jobs:
       PROD_DATABASE_URL: ${{ secrets.DATABASE_URL_TWH }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       WORKWELL_AUTH_JWT_SECRET: ${{ secrets.WORKWELL_AUTH_JWT_SECRET_MAUI }}
+      # Optional (#623): the failed-run alert webhook. KEEP IN SYNC with deploy-maui-mieweb.yml — a self-heal
+      # that dropped it would silence the alerts exactly when the stack has just been unwell.
+      WORKWELL_ALERT_WEBHOOK_URL: ${{ secrets.WORKWELL_ALERT_WEBHOOK_URL }}
       # Optional (E14/ADR-023): inert when the WORKWELL_VSAC_API_KEY_TWH secret is unset. KEEP IN SYNC with deploy-maui-mieweb.yml.
       WORKWELL_VSAC_API_KEY: ${{ secrets.WORKWELL_VSAC_API_KEY_TWH }}
       # Durable evidence (#167/ADR-030, R2 since #473). KEEP IN SYNC with deploy-maui-mieweb.yml —
@@ -219,6 +222,7 @@ jobs:
               --arg bucket_secret "$WORKWELL_BUCKET_S3_SECRET_ACCESS_KEY" \
               --arg bucket_region "$WORKWELL_BUCKET_S3_REGION" \
               --arg bucket_endpoint "$WORKWELL_BUCKET_S3_ENDPOINT" \
+              --arg alert_webhook_url "$WORKWELL_ALERT_WEBHOOK_URL" \
               '[
                 {key: "MIEWEB_TARGET", value: "local"},
                 {key: "WORKWELL_ENVIRONMENT", value: "production"},
@@ -259,7 +263,8 @@ jobs:
                 {key: "WORKWELL_BUCKET_S3_ACCESS_KEY_ID", value: $bucket_key_id},
                 {key: "WORKWELL_BUCKET_S3_SECRET_ACCESS_KEY", value: $bucket_secret},
                 {key: "WORKWELL_BUCKET_S3_REGION", value: $bucket_region},
-                {key: "WORKWELL_BUCKET_S3_ENDPOINT", value: $bucket_endpoint}
+                {key: "WORKWELL_BUCKET_S3_ENDPOINT", value: $bucket_endpoint},
+                {key: "WORKWELL_ALERT_WEBHOOK_URL", value: $alert_webhook_url}
               ]'
             echo EOF
           } >> "$GITHUB_OUTPUT"

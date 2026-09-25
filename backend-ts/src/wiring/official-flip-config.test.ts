@@ -457,6 +457,19 @@ test("#473: and every one of them actually reaches the container", () => {
   }
 });
 
+test("#623: the pilot's failed-run alerts reach the webhook, from a deploy and from a self-heal", () => {
+  // The alert fired on every failed nightly and reached nobody, because no stack set the URL. Both
+  // Maui files carry it: a self-heal that recreated the container without it would silence the alerts
+  // right after the stack had been unwell.
+  const key = "WORKWELL_ALERT_WEBHOOK_URL";
+  for (const workflow of ["deploy-maui-mieweb.yml", "reconcile-maui-mieweb.yml"]) {
+    assert.match(jobEnvValue(workflow, key) ?? "", /secrets\.WORKWELL_ALERT_WEBHOOK_URL\b/, `${workflow} binds no ${key}`);
+    const argName = shippedFromArg(workflow, key);
+    assert.ok(argName, `${workflow} binds ${key} but never puts it in the container env array`);
+    assert.equal(argDeclaration(workflow, argName!.slice(1)), key, `${workflow} ships ${key} from a jq arg not declared from $${key}`);
+  }
+});
+
 test("#473: the TWH evidence bucket is the R2 one, addressed path-style", () => {
   // The AWS bucket these replaced was on an account that expired 2026-08-24; S3 answers
   // `AllAccessDisabled` for it and every key it ever issued is dead. Naming the live values here

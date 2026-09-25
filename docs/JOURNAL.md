@@ -15,6 +15,13 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
   WorkWell cannot see orders already placed in WebChart, the page says a proposal may repeat one; the API
   reports this as `standingOrdersChecked`. The deduplication itself stays, for when a WebChart order
   source is connected.
+- **#623: Maui's failure alerts now reach the owner by email.** The webhook URL is a secret that both the
+  deploy and the self-heal pass to the container (a test holds the two together). It points at a small
+  Google Apps Script that emails the alert's one-line summary. TWH still alerts nobody. Review found the
+  request carried the whole alert, including a single-patient run's "Patient: <id>" label and raw error
+  text, although only the summary is shown. It is now limited to fields that cannot name a patient. A
+  webhook that answers with an error is now logged as a failed delivery. A value that is not an https URL
+  turns the webhook off and is never printed into the log.
 
 ## 2026-09-24
 

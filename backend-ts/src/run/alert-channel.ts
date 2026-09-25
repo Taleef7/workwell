@@ -56,11 +56,11 @@ export interface AlertEnv {
   WORKWELL_ALERT_WEBHOOK_URL?: string;
 }
 
-/** Injectable fetch for tests (webhook channel only). */
+/** Injectable fetch for tests (webhook channel only). The response is read for `ok`/`status` only. */
 export type FetchLike = (
   input: string,
   init?: { method?: string; headers?: Record<string, string>; body?: string; signal?: AbortSignal },
-) => Promise<unknown>;
+) => Promise<{ ok: boolean; status?: number; body?: { cancel(): Promise<unknown> } | null }>;
 
 /** Stable prefix — greppable in MIE container logs (`grep WORKWELL_ALERT`). */
 export const WORKWELL_ALERT_PREFIX = "WORKWELL_ALERT";
@@ -108,7 +108,20 @@ export function alertSummary(alert: RunAlert): string {
 }
 
 /**
- * Optional webhook channel — POSTs the alert JSON body, with a one-line summary for chat (see alertSummary). Only constructed when a URL is configured
+ * What the webhook is sent (#623 review): the alert's fields that cannot name a patient, plus the
+ * summary line as `text` and `content`. Never `scopeLabel`, `message` or `detail`, for alertSummary's
+ * reason, applied to the whole request: the endpoint receives every field it is sent, whether or not it
+ * shows more than `text` (the pilot's is a mail relay on Google). The full alert stays in the container
+ * log, through the console channel.
+ */
+export function webhookBody(alert: RunAlert): Record<string, unknown> {
+  const text = alertSummary(alert);
+  const { kind, at, status, runId, scopeType, totalEvaluated, failures } = alert;
+  return { kind, at, status, runId, scopeType, totalEvaluated, failures, text, content: text };
+}
+
+/**
+ * Optional webhook channel — POSTs {@link webhookBody}. Only constructed when a URL is configured
  * (inert-unless-configured). Real HTTP via fetch; inject `fetchImpl` in tests.
  *
  * Bound by {@link WEBHOOK_TIMEOUT_MS} via AbortSignal so a slow/hung endpoint cannot stall the
@@ -125,12 +138,17 @@ export function webhookAlertChannel(
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), timeoutMs);
       try {
-        await fetchImpl(url, {
+        const res = await fetchImpl(url, {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ ...alert, text: alertSummary(alert), content: alertSummary(alert) }),
+          body: JSON.stringify(webhookBody(alert)),
           signal: controller.signal,
         });
+        void res.body?.cancel().catch(() => undefined);
+        // fetch resolves on any HTTP answer, so a deleted endpoint's 404 used to count as delivered and
+        // left no trace (#623 review). A redirect (Apps Script answers a POST with one) is followed and
+        // ends 200. The error names the status, never the URL: the URL is the credential.
+        if (!res.ok) throw new Error(`webhook answered HTTP ${res.status ?? "(no status)"}`);
       } finally {
         clearTimeout(timer);
       }
@@ -139,11 +157,22 @@ export function webhookAlertChannel(
 }
 
 /**
- * Pure predicate: webhook alert channel is active only when WORKWELL_ALERT_WEBHOOK_URL is non-blank.
+ * Pure predicate: webhook alert channel is active only when WORKWELL_ALERT_WEBHOOK_URL is an https URL.
  * Single source of truth for `resolveAlertChannels` and the boot-time seam inventory (#260/#264).
+ *
+ * "An https URL" and not merely "non-blank" (#623 review). fetch rejects a malformed value with "Failed
+ * to parse URL from <the value>", which the channel's failure line would print on every alert, and the
+ * value is the credential. And any other scheme parses but cannot deliver: a `htps://` typo fails on
+ * every alert, and a `data:` URL answers 200 having sent nothing (Codex on #711). Every service this
+ * posts to (Slack, Teams, Discord, the Apps Script relay) is https, which also keeps the credential
+ * off the wire in clear text.
  */
 export function isAlertWebhookConfigured(env: AlertEnv): boolean {
-  return Boolean((env.WORKWELL_ALERT_WEBHOOK_URL ?? "").trim());
+  try {
+    return new URL((env.WORKWELL_ALERT_WEBHOOK_URL ?? "").trim()).protocol === "https:";
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -153,9 +182,14 @@ export function isAlertWebhookConfigured(env: AlertEnv): boolean {
  */
 export function resolveAlertChannels(env: AlertEnv, opts?: { fetch?: FetchLike; log?: (line: string) => void }): AlertChannel[] {
   const channels: AlertChannel[] = [consoleAlertChannel(opts?.log)];
+  const url = (env.WORKWELL_ALERT_WEBHOOK_URL ?? "").trim();
   if (isAlertWebhookConfigured(env)) {
-    const url = (env.WORKWELL_ALERT_WEBHOOK_URL ?? "").trim();
     channels.push(webhookAlertChannel(url, opts?.fetch ?? globalThis.fetch.bind(globalThis)));
+  } else if (url) {
+    // Set but unusable: said, without the value, rather than silently off.
+    (opts?.log ?? ((line: string) => console.error(line)))(
+      "[workwell] WORKWELL_ALERT_WEBHOOK_URL is set but is not an https URL (value not logged); alerts go to the log only",
+    );
   }
   return channels;
 }
