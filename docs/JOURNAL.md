@@ -9,9 +9,10 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
 
 - **#623: the dashboard says when its numbers are stale.** A failed nightly leaves the previous results in
   place, which is right, and said nothing. /programs now shows a banner when the latest overnight update
-  did not finish (naming the update whose numbers are shown), finished with errors for some patients, or
-  has not run for 36 hours. The failure alert's webhook body now carries a one-line summary that Slack,
-  Teams and Discord accept as it is; which channel it goes to is still to be chosen.
+  did not finish (naming the last complete one), finished with errors for some patients, or has not run
+  for 36 hours. The failure alert's webhook body now carries a one-line summary that Slack, Teams and
+  Discord accept as it is, built only from fields that cannot name a patient; which channel it goes to is
+  still to be chosen.
 
 - **#663: a frozen API leaves its evidence behind.** The 22 September hang could never be explained,
   because the self-heal deleted the container and its logs. The watchdog thread, which keeps running

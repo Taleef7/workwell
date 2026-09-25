@@ -90,14 +90,21 @@ export function consoleAlertChannel(log: (line: string) => void = (line) => cons
  * Discord one without `content`, and Teams shows `text`; each ignores the other fields. So the webhook
  * body is the alert itself plus this line under both names, and one URL of any of the three works
  * without an adapter in between.
+ *
+ * Built from fields that cannot name a patient (#710 review): the kind, the SCOPE TYPE, the counts and
+ * the run id. Never `scopeLabel` (a patient-scoped run's is "Patient: <id>") and never `message` (it
+ * carries raw engine and WebChart error text), because this is the line a chat service renders and
+ * keeps. The run id leads to the rest on Run History. Capped under Discord's 2000-character limit,
+ * which it cannot reach today, so a future field can never make the whole alert bounce.
  */
+export const ALERT_SUMMARY_MAX = 1_900;
 export function alertSummary(alert: RunAlert): string {
-  const what = alert.scopeLabel ?? alert.scopeType ?? "";
   const counts =
     alert.totalEvaluated !== undefined
       ? ` (${alert.totalEvaluated.toLocaleString("en")} evaluated${alert.failures ? `, ${alert.failures.toLocaleString("en")} failed` : ""})`
       : "";
-  return `WorkWell ${alert.kind}${what ? ` [${what}]` : ""}: ${alert.message}${counts}${alert.runId ? ` run ${alert.runId}` : ""}`;
+  const line = `WorkWell ${alert.kind}${alert.scopeType ? ` [${alert.scopeType}]` : ""}: ${alert.status}${counts}${alert.runId ? `. Run ${alert.runId}; details on Run History.` : ""}`;
+  return line.length > ALERT_SUMMARY_MAX ? `${line.slice(0, ALERT_SUMMARY_MAX - 1)}…` : line;
 }
 
 /**

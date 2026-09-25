@@ -45,7 +45,7 @@ describe("ProgramsPage says when its numbers are stale (#623)", () => {
       { status: "COMPLETED", startedAt: new Date(Date.now() - 26 * 3600_000).toISOString() },
     ]);
     render(<ProgramsPage />);
-    expect(await screen.findByTestId("run-freshness-banner")).toHaveTextContent(/did not finish, so these numbers are from the update of/);
+    expect(await screen.findByTestId("run-freshness-banner")).toHaveTextContent(/did not finish, so the numbers below are from earlier updates\. The last complete update of every measure started/);
   });
 
   it("stays quiet when the latest update completed, and when the read fails", async () => {

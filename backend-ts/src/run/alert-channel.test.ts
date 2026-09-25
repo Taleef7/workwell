@@ -5,6 +5,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  alertSummary,
+  ALERT_SUMMARY_MAX,
   WORKWELL_ALERT_PREFIX,
   WEBHOOK_TIMEOUT_MS,
   consoleAlertChannel,
@@ -87,8 +89,7 @@ test("webhook channel fires when configured (stubbed fetch) and is inert otherwi
   const sent = JSON.parse(posts[0]!.body);
   assert.equal(sent.runId, "run-1");
   // #623: one chat line under the names Slack/Teams (`text`) and Discord (`content`) require.
-  assert.match(sent.text, /^WorkWell RUN_PARTIAL_FAILURE/);
-  assert.match(sent.text, /3 failed/);
+  assert.match(sent.text, /^WorkWell RUN_PARTIAL_FAILURE \[ALL_PROGRAMS\]: PARTIAL_FAILURE \(100 evaluated, 3 failed\)\. Run run-1/);
   assert.equal(sent.content, sent.text);
   assert.equal(posts[0]!.hasSignal, true, "webhook POST carries AbortSignal for the timeout bound");
 
@@ -209,4 +210,21 @@ test("alertForTerminalRun: FAILED/PARTIAL_FAILURE → alert; COMPLETED → null"
   });
   assert.ok(failed);
   assert.equal(failed!.kind, "RUN_FAILED");
+});
+
+test("the chat line never names a patient or carries raw error text, and stays under Discord's limit (#710 review)", () => {
+  const patientRun: RunAlert = {
+    ...sample,
+    kind: "RUN_FAILED",
+    status: "FAILED",
+    scopeType: "EMPLOYEE",
+    scopeLabel: "Patient: pat-01565",
+    message: "cms125: subjects 'pat-01565' and 'pat-01566' share Patient.id " + "x".repeat(5_000),
+  };
+  const line = alertSummary(patientRun);
+  assert.doesNotMatch(line, /pat-015/, "no patient identifier");
+  assert.doesNotMatch(line, /share Patient\.id/, "no raw error text");
+  assert.match(line, /\[EMPLOYEE\]: FAILED/);
+  assert.ok(line.length <= ALERT_SUMMARY_MAX);
+  assert.ok(alertSummary({ ...sample, runId: "r".repeat(3_000) }).length <= ALERT_SUMMARY_MAX, "capped whatever a field holds");
 });

@@ -4,15 +4,19 @@ import { useEffect, useState } from "react";
 import { useApi } from "@/lib/api/hooks";
 import { freshnessNotice, type FreshnessNotice, type FreshnessRun } from "./freshness";
 
+// The viewer's own clock, with its zone named, so it cannot be read as UTC or as the practice's zone.
 const when = (iso: string): string =>
-  new Date(iso).toLocaleString("en", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+  new Date(iso).toLocaleString("en", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short" });
 
 export function freshnessMessage(notice: FreshnessNotice): string {
   switch (notice.kind) {
     case "failed":
+      // Each card shows its own measure's newest finished run, which a later single-measure run can make
+      // newer than any whole-practice update, so this names the last complete update without claiming
+      // every card is from it (#710 review).
       return notice.dataFromAt
-        ? `The latest update (${when(notice.latestAt)}) did not finish, so these numbers are from the update of ${when(notice.dataFromAt)}.`
-        : `The latest update (${when(notice.latestAt)}) did not finish, so these numbers are from an earlier update.`;
+        ? `The latest update (${when(notice.latestAt)}) did not finish, so the numbers below are from earlier updates. The last complete update of every measure started ${when(notice.dataFromAt)}.`
+        : `The latest update (${when(notice.latestAt)}) did not finish, so the numbers below are from earlier updates.`;
     case "partial":
       return `The latest update (${when(notice.latestAt)}) finished with errors for some patients, so some of these numbers may be incomplete.`;
     case "overdue":
