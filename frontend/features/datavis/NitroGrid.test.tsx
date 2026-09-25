@@ -24,7 +24,8 @@ describe("NitroGrid frame", () => {
     // contract; verified in a browser on 2026-09-25 (document height 3,099px -> 900px, the viewport).
     render(<NitroGrid rows={[]} columns={[]} />);
     const frame = screen.getByTestId("nitro-grid-frame");
-    expect(frame).toHaveClass("relative");
+    // The style itself, not a class name a later merge could drop or override.
+    expect(getComputedStyle(frame).position).toBe("relative");
     expect(frame).toContainElement(screen.getByText("Skip to table"));
   });
 });
