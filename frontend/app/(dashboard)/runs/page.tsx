@@ -204,6 +204,17 @@ function formatRunDuration(durationMs: number, status?: string): string {
   return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m ${totalSec % 60}s`;
 }
 
+/**
+ * A row's duration. A RUNNING run has no `durationMs` yet (the server reports 0 until it completes), so
+ * the list showed "0s" for the nightly or any run this page did not start itself (#644, #655). Its
+ * elapsed time comes from its own start instead.
+ */
+function shownDurationMs(run: { status: string; durationMs: number; startedAt?: string | null }, now: number = Date.now()): number {
+  if (normalizeEnumValue(run.status) !== "RUNNING" || !run.startedAt) return run.durationMs;
+  const started = Date.parse(run.startedAt);
+  return Number.isFinite(started) ? Math.max(0, now - started) : run.durationMs;
+}
+
 export default function RunsPage() {
   const api = useApi();
   const router = useRouter();
@@ -997,7 +1008,7 @@ export default function RunsPage() {
                         {formatRunDuration(runElapsedSec * 1000)} <span className="animate-pulse text-neutral-400" aria-hidden="true">●</span>
                       </span>
                     ) : (
-                      formatRunDuration(run.durationMs, run.status)
+                      formatRunDuration(shownDurationMs(run), run.status)
                     )}
                   </td>
                   <td className="px-3 py-2 align-top text-neutral-600 dark:text-neutral-400" title={formatAbsoluteTimestamp(run.startedAt)}>
@@ -1068,7 +1079,7 @@ export default function RunsPage() {
                     {formatRunDuration(runElapsedSec * 1000)} <span className="animate-pulse text-neutral-400" aria-hidden="true">●</span>
                   </span>
                 ) : (
-                  formatRunDuration(selectedRun.durationMs, selectedRun.status)
+                  formatRunDuration(shownDurationMs(selectedRun), selectedRun.status)
                 )}
               </p>
               {selectedRun.retentionNotice ? (

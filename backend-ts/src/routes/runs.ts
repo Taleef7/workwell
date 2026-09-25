@@ -80,6 +80,7 @@ import { isWebChartConfigured, resolveDataSource, type DataSourceEnv } from "../
 import { directoryForRows } from "../engine/ingress/webchart/live-directory.ts";
 import { DEPLOYMENT_PROFILE, DIRECTORY, profileSubjectMatcher } from "../config/deployment-profile.ts";
 import { subjectIdOf } from "../engine/ingress/enrollment/roster.ts";
+import { runOutcomeCountsFor } from "../run/run-counts.ts";
 
 interface RunsEnv extends DataSourceEnv {
   DB: CloudDatabase;
@@ -530,7 +531,10 @@ export async function handleRuns(
     // Bounded GROUP BY per run (not listOutcomes) so the list never materializes the 120k-row
     // seed:scale outcomes — the previous per-run full-row load pushed ?limit=20 past the 60s gateway
     // timeout once scale was seeded on Neon (post-audit perf fix).
-    const items = await Promise.all(matching.map(async (r) => toRunListItemFromCounts(r, await outcomeStore.countOutcomesByStatus(r.id))));
+    // A finished run's counts are kept, the rest read a few at a time (#644): this was `Promise.all` over
+    // every listed run, which held all ten pool connections while a run was in progress.
+    const counts = await runOutcomeCountsFor(outcomeStore, matching);
+    const items = matching.map((r, i) => toRunListItemFromCounts(r, counts[i]!));
     return json(items);
   }
 

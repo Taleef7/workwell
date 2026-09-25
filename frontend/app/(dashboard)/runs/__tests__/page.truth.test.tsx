@@ -103,6 +103,15 @@ describe("RunsPage says what a run is and what its numbers mean (#668)", () => {
     expect(cells).toEqual(["Not in population", "Missing Data"]);
   });
 
+  it("shows a running run's elapsed time, not '0s', when this page did not start it (#644)", async () => {
+    const started = new Date(Date.now() - 15 * 60_000 - 5_000).toISOString();
+    answer([{ ...nightly, runId: "run-3", status: "RUNNING", completedAt: null, durationMs: 0, startedAt: started }, run]);
+    render(<RunsPage />);
+    const row = (await screen.findAllByText(/^15m \d+s$/))[0];
+    expect(row).toBeInTheDocument();
+    expect(screen.queryByText("0s")).not.toBeInTheDocument();
+  });
+
   it("shows a finished run's duration past an hour, not '-'", async () => {
     render(<RunsPage />);
     expect(await screen.findByText("1h 12m")).toBeInTheDocument();
