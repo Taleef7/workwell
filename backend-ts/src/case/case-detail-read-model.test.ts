@@ -166,3 +166,18 @@ test("#650: an official outcome has no single window, so why_flagged carries non
   );
   assert.equal(authored.compliance_window_days, 365);
 });
+
+test("#650: an official measure's evaluation-error row states no window either; an authored error row keeps it", () => {
+  // An error replaces the evidence with `{ evaluationError, message }`, so no `official` block is left to
+  // say which engine ran; today's routing decides. Before, a failed CMS130 evaluation showed "365".
+  const errorEvidence = { evaluationError: "CQL engine failure", message: "boom" };
+  const before = process.env.WORKWELL_OFFICIAL_MEASURES;
+  process.env.WORKWELL_OFFICIAL_MEASURES = "cms130";
+  try {
+    assert.equal(deriveWhyFlagged(errorEvidence, "cms130", "2026-01-01", "MISSING_DATA").compliance_window_days, null);
+    assert.equal(deriveWhyFlagged(errorEvidence, "audiogram", "2026-01-01", "MISSING_DATA").compliance_window_days, 365);
+  } finally {
+    if (before === undefined) delete process.env.WORKWELL_OFFICIAL_MEASURES;
+    else process.env.WORKWELL_OFFICIAL_MEASURES = before;
+  }
+});

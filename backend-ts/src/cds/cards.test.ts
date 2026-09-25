@@ -350,8 +350,8 @@ test("#650: a card for an official gap states no compliance window; an authored 
   };
   const [officialCard] = await buildComplianceCards([row("cms125", "OVERDUE", { evidence: official })], opts());
   assert.ok(officialCard);
-  assert.doesNotMatch(officialCard!.detail, /Compliance window/);
+  assert.doesNotMatch(officialCard!.detail ?? "", /Compliance window/);
 
   const [authoredCard] = await buildComplianceCards([row("audiogram", "OVERDUE")], opts());
-  assert.match(authoredCard!.detail, /Compliance window: 365 days/);
+  assert.match(authoredCard!.detail ?? "", /Compliance window: 365 days/);
 });

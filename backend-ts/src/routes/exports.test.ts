@@ -132,7 +132,11 @@ test("GET /api/exports/outcomes?runId carries derived why_flagged columns", asyn
   // #650: an official outcome has no single window, so the column is empty, not the 365 default.
   const officialRow = lines.find((l) => l.includes("emp-007"))!;
   assert.ok(officialRow, "the official outcome row is present");
-  assert.equal(officialRow.split(",")[col], "", "no window for an official outcome");
+  const officialCells = officialRow.split(",");
+  // Alignment pinned by a neighbour that is NOT empty, so a comma shifting the columns cannot make an
+  // empty `lastExamDate` stand in for the window: `status` two to the left must read OVERDUE.
+  assert.equal(officialCells[col - 2], "OVERDUE", "columns aligned");
+  assert.equal(officialCells[col], "", "no window for an official outcome");
 });
 
 test("GET /api/exports/cases carries the case + latestOutreachDeliveryStatus column", async () => {

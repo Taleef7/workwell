@@ -101,6 +101,19 @@ export function overdueDays(daysSince: number, windowDays: number, gracePeriodDa
 }
 
 /** Derive the why_flagged block (matching the Java shape) from the CQL define results. */
+/**
+ * Whether an outcome has no single compliance window (#650): an official one, whose qualifying intervals
+ * live in the measure logic (CMS130: FIT yearly, FIT-DNA 3 years, colonoscopy 10). The row's own
+ * `official` block decides; an evaluation-error row carries none (its evidence was replaced), so for it
+ * today's routing does (#650 review) - otherwise a failed official evaluation showed the authored 365.
+ * Shared by `deriveWhyFlagged` and the outcomes CSV so the two cannot drift.
+ */
+export function hasNoSingleWindow(evidence: unknown, measureId: string): boolean {
+  const e = evidence as { official?: unknown; evaluationError?: unknown } | null | undefined;
+  if (e?.official != null) return true;
+  return e?.evaluationError != null && isOfficialRouted(measureId);
+}
+
 export function deriveWhyFlagged(evidence: unknown, measureId: string, evaluationPeriod: string, outcomeStatus: string) {
   const ers = expressionResults(evidence);
   const binding = MEASURE_BINDINGS[measureId];
@@ -156,7 +169,7 @@ export function deriveWhyFlagged(evidence: unknown, measureId: string, evaluatio
   // and depend on which test qualified (CMS130: FIT yearly, FIT-DNA 3 years, colonoscopy 10), so the
   // authored binding's window (or the 365 default) described nothing about it. Decided by the row's own
   // evidence, as the rate readers are, not by today's routing.
-  const officialEvidence = (evidence as { official?: unknown } | null | undefined)?.official != null;
+  const officialEvidence = hasNoSingleWindow(evidence, measureId);
   return {
     last_exam_date: lastExamDate,
     compliance_window_days: officialEvidence ? null : window,
