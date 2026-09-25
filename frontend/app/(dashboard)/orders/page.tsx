@@ -8,6 +8,7 @@ import { useApi } from "@/lib/api/hooks";
 import { useAuth } from "@/components/auth-provider";
 import { AccessDenied } from "@/components/access-denied";
 import { canViewOrders } from "@/lib/rbac";
+import { SUBJECT } from "@/lib/terminology";
 import { useMeasureIdentities } from "@/lib/measure-identity";
 import { OUTCOME_LABELS, labelFor, normalizeEnumValue, outcomeStatusClass } from "@/lib/status";
 
@@ -30,6 +31,8 @@ type ProposalsResponse = {
   totals?: { proposed: number; suppressed: number };
   /** Whether orders already placed were looked at (#616). Absent or false: they were not. */
   standingOrdersChecked?: boolean;
+  /** Measures in scope with no order to propose (#621): their at-risk patients get no proposal. */
+  measuresWithoutOrder?: string[];
 };
 
 // A page of proposals, not the whole set: the pilot's domain view was ~34k items (10.7 MB) rendered
@@ -70,6 +73,9 @@ export default function OrdersPage() {
   const { measures, labelFor: measureLabelFor } = useMeasureIdentities();
 
   const [data, setData] = useState<ProposalsResponse | null>(null);
+  // The measure filter `data` was loaded for. A reply belongs to the scope that asked for it, so a
+  // note read from it must not outlive a filter change (Codex on #715).
+  const [dataFilter, setDataFilter] = useState<string | null>(null);
   const [measureFilter, setMeasureFilter] = useState("");
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
@@ -100,6 +106,7 @@ export default function OrdersPage() {
       const res = await api.get<ProposalsResponse>(`/api/orders/proposals?${params.toString()}`);
       if (reqId !== reqIdRef.current) return;
       setData(res);
+      setDataFilter(measureFilter);
       // The totals may have shrunk under us (a nightly run, a narrower filter): never show
       // "Page 4 of 2". Clamping triggers one reload of the last real page, which is the point.
       const pages = pageCount(res);
@@ -162,6 +169,7 @@ export default function OrdersPage() {
   }
 
   const proposed = data?.proposed ?? [];
+  const withoutOrder = data && dataFilter === measureFilter ? (data.measuresWithoutOrder ?? []) : [];
   const suppressed = data?.suppressed ?? [];
   const proposedTotal = data?.totals?.proposed ?? proposed.length;
   const suppressedTotal = data?.totals?.suppressed ?? suppressed.length;
@@ -217,6 +225,15 @@ export default function OrdersPage() {
         ) : null}
       </div>
 
+      {/* #621: a measure with no order defined proposes nothing, which an empty list would pass off as
+          "nobody at risk". Named instead. */}
+      {withoutOrder.length > 0 ? (
+        <p data-testid="measures-without-order" className="text-xs text-neutral-600 dark:text-neutral-400">
+          No order is defined for {withoutOrder.map(measureLabel).join(", ")}, so {withoutOrder.length === 1 ? "its" : "their"}{" "}
+          at-risk {SUBJECT.plural} get no proposal here. Their gaps are tracked as cases on the work list.
+        </p>
+      ) : null}
+
       {error ? (
         <p className="rounded-md border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
           {error}
@@ -233,7 +250,11 @@ export default function OrdersPage() {
             </h3>
             {proposed.length === 0 ? (
               <div className="rounded-2xl border border-dashed border-neutral-300 bg-white p-6 text-sm text-neutral-600 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-400">
-                {proposedTotal > 0 ? "No proposed orders on this page." : "No order proposals for the current scope."}
+                {proposedTotal > 0
+                  ? "No proposed orders on this page."
+                  : measureFilter && withoutOrder.includes(measureFilter)
+                    ? "No order is defined for this measure, so none is proposed."
+                    : "No order proposals for the current scope."}
               </div>
             ) : (
               <div className="overflow-x-auto rounded-2xl border border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-900">

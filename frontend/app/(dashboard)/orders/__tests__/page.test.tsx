@@ -3,6 +3,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import OrdersPage from "../page";
+import { SUBJECT } from "@/lib/terminology";
 
 const get = vi.fn();
 const apiMock = { get };
@@ -190,6 +191,67 @@ describe("OrdersPage paging + measure labels", () => {
     render(<OrdersPage />);
     await waitFor(() => expect(screen.getByText("subj-1")).toBeInTheDocument());
     expect(screen.queryByText(CAVEAT)).not.toBeInTheDocument();
+  });
+
+  it("#621: names the measures with no order, and never lets an empty list read as 'nobody at risk'", async () => {
+    // Mirrors the route: a measure filter narrows the named set to that measure, or to nothing.
+    const withoutOrder = ["cms130"];
+    let rows = [proposal(1)];
+    get.mockImplementation((url: string) => {
+      if (url === "/api/measures") {
+        return Promise.resolve([
+          { id: "cms125", name: "Breast Cancer Screening", status: "Active", identity: { cmsId: "CMS125", mipsQualityId: "112" } },
+          { id: "cms130", name: "Colorectal Cancer Screening", status: "Active", identity: { cmsId: "CMS130", mipsQualityId: "113" } },
+        ]);
+      }
+      if (url.startsWith("/api/orders/proposals?")) {
+        const filter = proposalsQuery(url).get("measureId");
+        const named = filter ? withoutOrder.filter((m) => m === filter) : withoutOrder;
+        return Promise.resolve({ proposed: rows, suppressed: [], totals: { proposed: rows.length, suppressed: 0 }, measuresWithoutOrder: named });
+      }
+      return Promise.reject(new Error(`unexpected GET ${url}`));
+    });
+
+    const first = render(<OrdersPage />);
+    await waitFor(() => expect(screen.getByText("subj-1")).toBeInTheDocument());
+    expect(screen.getByTestId("measures-without-order")).toHaveTextContent(
+      `No order is defined for MIPS 113 · CMS130 · Colorectal Cancer Screening, so its at-risk ${SUBJECT.plural} get no proposal here.`,
+    );
+    first.unmount();
+
+    // Filtered to that measure: the empty list says why, not "no proposals for the current scope".
+    rows = [];
+    render(<OrdersPage />);
+    await userEvent.click(await screen.findByRole("combobox", { name: /measure/i }));
+    await userEvent.click(screen.getByRole("option", { name: "Colorectal Cancer Screening" }));
+    await waitFor(() => expect(proposalsQuery(proposalCalls().at(-1)!).get("measureId")).toBe("cms130"));
+    await waitFor(() => {
+      expect(screen.getByText("No order is defined for this measure, so none is proposed.")).toBeInTheDocument();
+      expect(screen.queryByText("No order proposals for the current scope.")).not.toBeInTheDocument();
+    });
+
+    // While the next filter's answer is still on its way, the note from the previous scope is gone
+    // at once rather than naming measures the selector no longer shows (Codex on #715).
+    const listed = get.getMockImplementation()!;
+    let release: () => void = () => {};
+    get.mockImplementation((url: string) =>
+      url.includes("measureId=cms125") ? new Promise((resolve) => { release = () => resolve(listed(url)); }) : listed(url),
+    );
+    await userEvent.click(screen.getByRole("combobox", { name: /measure/i }));
+    await userEvent.click(screen.getByRole("option", { name: "All measures" }));
+    await waitFor(() => expect(screen.getByTestId("measures-without-order")).toBeInTheDocument());
+    await userEvent.click(screen.getByRole("combobox", { name: /measure/i }));
+    await userEvent.click(screen.getByRole("option", { name: "Breast Cancer Screening" }));
+    await waitFor(() => expect(proposalsQuery(proposalCalls().at(-1)!).get("measureId")).toBe("cms125"));
+    expect(screen.queryByTestId("measures-without-order")).not.toBeInTheDocument();
+    await act(async () => release());
+
+    // A measure that has an order, with nobody at risk, keeps the plain empty state and no note. Both
+    // are asserted together, so a render still holding the previous answer cannot satisfy them.
+    await waitFor(() => {
+      expect(screen.getByText("No order proposals for the current scope.")).toBeInTheDocument();
+      expect(screen.queryByTestId("measures-without-order")).not.toBeInTheDocument();
+    });
   });
 
   it("labels rows from the measure catalog (crosswalk identity) and never reads the programs overview", async () => {
