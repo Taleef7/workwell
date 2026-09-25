@@ -342,6 +342,15 @@ export default function ProgramDetailPage() {
               // dash, which reads as a measure with nothing coming due rather than as a read that
               // never answered.
               <p className="mt-3 text-xs text-neutral-500 dark:text-neutral-400">Risk outlook unavailable</p>
+            ) : riskOutlook.forecastable === false ? (
+              // #617: an official measure scores the measurement year and records no exam date that
+              // expires, so every projection would be zero and "predicted" would equal "current". Said,
+              // rather than shown as a forecast.
+              <p data-testid="outlook-not-forecastable" className="mt-3 text-xs text-neutral-600 dark:text-neutral-400">
+                No 90-day forecast for this measure. It is scored over the measurement year by the CMS measure
+                logic, with no exam date that expires, so there is nothing to project forward. Today&apos;s gaps
+                are on the work list.
+              </p>
             ) : (
               <>
             <div className="mt-3 grid gap-3 sm:grid-cols-2">

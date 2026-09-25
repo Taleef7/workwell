@@ -295,10 +295,10 @@ test("programRiskOutlook — the winning run decides the site table, a newer FAI
     }]);
     // ADR-081: retired, and the key stays so the page and the route contract are unchanged.
     assert.deepEqual(outlook!.repeatNonCompliers, []);
-    // The winner's rows are read once through the joined read; the measure's history is never
-    // scanned, and the evidence peek is skipped entirely because no visible row is COMPLIANT, so no
-    // expiration can exist for it to inform.
-    assert.deepEqual(calls, { joined: 1, byRun: 0, measureScan: 0 },
+    // The winner's rows are read once through the joined read and the measure's history is never
+    // scanned. With no visible row COMPLIANT there is no expiration to find, but the evidence is still
+    // peeked ONCE, one row, since #617: whether the outcome can be projected at all is decided there.
+    assert.deepEqual(calls, { joined: 1, byRun: 1, measureScan: 0 },
       "the outlook reads the winning run once and never scans the measure's history");
   } finally {
     replaceLiveDirectory([]);

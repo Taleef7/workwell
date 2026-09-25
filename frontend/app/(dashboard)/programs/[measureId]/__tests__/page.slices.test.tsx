@@ -131,6 +131,39 @@ describe("ProgramDetailPage — per-slice paint", () => {
     expect(screen.queryByText("No runs with results yet")).toBeNull();
   });
 
+  it("#617: a measure whose outcomes cannot be projected says so, instead of zeros shown as a forecast", async () => {
+    const outlook = (forecastable: boolean | undefined) => ({
+      ...(forecastable === undefined ? {} : { forecastable }),
+      upcomingNonCompliantCount: 0,
+      upcomingExpirations: [],
+      repeatNonCompliers: [],
+      siteComplianceRates: [{ site: "Kihei Clinic", total: 10, compliant: 4, upcomingExpirations: 0, currentComplianceRate: 40, predictedComplianceRate: 40 }],
+    });
+    let answer = outlook(false);
+    get.mockImplementation((url: string) => {
+      if (url === "/api/programs" || url.startsWith("/api/programs?")) return Promise.resolve(PROGRAMS);
+      if (url.includes("/risk-outlook")) return Promise.resolve(answer);
+      if (url.includes("/trend")) return Promise.resolve([]);
+      if (url.includes("/top-drivers")) return Promise.resolve(EMPTY_DRIVERS);
+      return Promise.resolve([]);
+    });
+
+    const first = render(<ProgramDetailPage />);
+    expect(await screen.findByTestId("outlook-not-forecastable")).toHaveTextContent("No 90-day forecast for this measure.");
+    expect(screen.queryByText("Upcoming due soon")).toBeNull();
+    expect(screen.queryByText("Predicted 90d")).toBeNull();
+    first.unmount();
+
+    // An authored measure (true), or a backend that predates the field, still shows the outlook.
+    for (const forecastable of [true, undefined]) {
+      answer = outlook(forecastable);
+      const view = render(<ProgramDetailPage />);
+      expect(await screen.findByText("Upcoming due soon")).toBeInTheDocument();
+      expect(screen.queryByTestId("outlook-not-forecastable")).toBeNull();
+      view.unmount();
+    }
+  });
+
   it("shows 'Risk outlook unavailable' when the read REJECTS, not a zero", async () => {
     get.mockImplementation((url: string) => {
       if (url === "/api/programs" || url.startsWith("/api/programs?")) return Promise.resolve(PROGRAMS);

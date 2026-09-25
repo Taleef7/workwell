@@ -67,6 +67,8 @@ export type TopDrivers = {
 };
 
 export type RiskOutlook = {
+  /** False when the measure's outcomes cannot be projected forward (#617). Absent: an older backend. */
+  forecastable?: boolean;
   upcomingNonCompliantCount: number;
   upcomingExpirations: Array<{
     externalId: string;

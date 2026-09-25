@@ -142,9 +142,44 @@ test("an OFFICIAL winner costs one peeked row and reports no expirations", async
   assert.ok(outlook);
   assert.deepEqual(outlook!.upcomingExpirations, [], "an official run carries no recency define");
   assert.equal(outlook!.upcomingNonCompliantCount, 0);
+  assert.equal(outlook!.forecastable, false, "#617: its zeros are structural, and the page must say so");
   assert.equal(calls.history, 0);
   assert.deepEqual(calls.byRun, [{ runId: "run-official", measureId: MEASURE, subjectId: "emp-006", limit: 1 }],
     "exactly one evidence read, of exactly one row");
+});
+
+test("#617: an official winner with nobody compliant yet is still not forecastable, for one peeked row", async () => {
+  reset();
+  // Early in a measurement year a measure can have no COMPLIANT subject. The peek used to be skipped
+  // then, so an official measure's structural zeros were served as a forecast.
+  const joined = [
+    joinedRow("run-january", "2027-01-02T00:00:00.000Z", "emp-006", "OVERDUE"),
+    joinedRow("run-january", "2027-01-02T00:00:00.000Z", "emp-007", "MISSING_DATA"),
+  ];
+  const official = {
+    official: { measurementPeriod: { start: "2027-01-01", end: "2027-12-31" }, populationResults: [] },
+    expressionResults: [{ define: "official:initial-population", result: true }],
+  };
+  const { deps, calls } = makeDeps(joined, {
+    "run-january": [evidenceRow("run-january", "emp-006", "OVERDUE", official), evidenceRow("run-january", "emp-007", "MISSING_DATA", official)],
+  });
+
+  const outlook = await programRiskOutlook(deps, MEASURE, 90);
+  assert.ok(outlook);
+  assert.equal(outlook!.forecastable, false);
+  assert.deepEqual(calls.byRun, [{ runId: "run-january", measureId: MEASURE, subjectId: undefined, limit: 1 }],
+    "one row of the run, and never the unpaged read");
+});
+
+test("#617: an authored winner with nobody compliant stays forecastable and reads no more than a peek", async () => {
+  reset();
+  const joined = [joinedRow("run-authored-0", "2026-09-01T00:00:00.000Z", "emp-006", "OVERDUE")];
+  const { deps, calls } = makeDeps(joined, { "run-authored-0": [evidenceRow("run-authored-0", "emp-006", "OVERDUE", authoredEvidence(400))] });
+
+  const outlook = await programRiskOutlook(deps, MEASURE, 90);
+  assert.ok(outlook);
+  assert.equal(outlook!.forecastable, true, "an authored measure's zero is a real answer");
+  assert.equal(calls.byRun.length, 1);
 });
 
 test("an AUTHORED winner peeks, then reads the run's evidence once, narrowed to the measure", async () => {
@@ -167,6 +202,7 @@ test("an AUTHORED winner peeks, then reads the run's evidence once, narrowed to 
 
   const near = await programRiskOutlook(deps, MEASURE, 30);
   assert.ok(near);
+  assert.equal(near!.forecastable, true);
   assert.deepEqual(near!.upcomingExpirations.map((e) => e.externalId), ["emp-006"]);
   assert.equal(near!.upcomingExpirations[0]!.daysUntilDueSoon, THRESHOLD - 320);
   assert.equal(near!.upcomingExpirations[0]!.complianceWindowDays, 365);
