@@ -854,7 +854,12 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
      * is absence of evidence.
      */
     if (deps.engine.evaluateBatch) {
-      for (const measureId of new Set(chunkItems.map((i) => i.measureId))) {
+      // The chunk's measures are calculated SIDE BY SIDE: each is an independent call whose results
+      // land in maps keyed by measure, read only by the loop below once every call has settled. With
+      // the calculation pool (#604 follow-up) N workers take N measures at once; an in-process or
+      // authored engine still runs them one at a time, since each call holds the thread until done.
+      const evaluateBatch = deps.engine.evaluateBatch.bind(deps.engine);
+      await Promise.all([...new Set(chunkItems.map((i) => i.measureId))].map(async (measureId) => {
         const forMeasure = chunkItems.filter((i) => i.measureId === measureId);
         let batched = false;
         // #563 — this await is the single longest synchronous stretch in the run, and nothing has ever
@@ -874,7 +879,7 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
           // The subject list is a FACTORY, not an array, so a measure with no batch path costs nothing.
           // Passed eagerly, this would build every measure's bundles — 14 measures × N subjects — and
           // discard 13/14 of them the moment official routing is on for one measure (review #3).
-          const results = await deps.engine.evaluateBatch(
+          const results = await evaluateBatch(
             measureId,
             () => {
               const bundleStartedAtMs = Date.now();
@@ -910,7 +915,7 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
               }),
               deps.onPhaseTiming,
             );
-            continue;
+            return;
           }
           batched = true;
           for (const item of forMeasure) {
@@ -965,7 +970,7 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
             )
             .catch(() => {});
         }
-      }
+      }));
     }
 
 
