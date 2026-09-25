@@ -18,7 +18,7 @@ import type { StandingOrderProvider } from "../order/standing-order-provider.ts"
 import { runProfileChild } from "../test-support/run-profile-child.ts";
 
 /** No standing orders, so suppression never confounds a suggestion assertion. */
-const NO_STANDING_ORDERS: StandingOrderProvider = { activeOrdersFor: () => [] };
+const NO_STANDING_ORDERS: StandingOrderProvider = { checksExistingOrders: true, activeOrdersFor: () => [] };
 
 const CPT = "http://www.ama-assn.org/go/cpt";
 /** The three APPROVED mappings in `value-set-seed.ts`, as the route would compute them from the store. */
@@ -66,7 +66,7 @@ const profileScript = `
     subjectId: "emp-006",
     patientId: "emp-006",
     approvedOrderCodes: new Set(),
-    standingOrders: { activeOrdersFor: () => [] },
+    standingOrders: { checksExistingOrders: true, activeOrdersFor: () => [] },
   });
   console.log(JSON.stringify({ detail: cards[0].detail, service: CDS_SERVICES[0] }));
 `;

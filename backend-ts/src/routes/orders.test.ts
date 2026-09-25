@@ -39,8 +39,7 @@ before(async () => {
   });
   await outcomes.recordOutcome({ runId: run.id, subjectId: "emp-006", measureId: "audiogram", status: "OVERDUE", evidence: {} });
   await outcomes.recordOutcome({ runId: run.id, subjectId: "emp-007", measureId: "audiogram", status: "COMPLIANT", evidence: {} });
-  // Two more at-risk subjects, so the windowing test has a set to page and the simulated standing-order
-  // provider (which suppresses by hash) is unlikely to leave `proposed` empty — and it asserts that.
+  // Two more at-risk subjects, so the windowing test has a set to page.
   await outcomes.recordOutcome({ runId: run.id, subjectId: "emp-008", measureId: "audiogram", status: "OVERDUE", evidence: {} });
   await outcomes.recordOutcome({ runId: run.id, subjectId: "emp-013", measureId: "audiogram", status: "DUE_SOON", evidence: {} });
   // #546: two patients whose official evaluation persisted MISSING_DATA (ADR-078) — one INSIDE
@@ -60,13 +59,28 @@ test("returns domain proposals for at-risk outcomes (default format)", async () 
   assert.equal(res!.status, 200);
   const body = await res!.json() as { proposed: Array<{ subjectId: string }>; suppressed: Array<{ subjectId: string }> };
   assert.ok(Array.isArray(body.proposed));
-  // emp-006 is OVERDUE → should appear in proposed (unless simulated standing-order suppresses; hash-check)
-  // emp-007 is COMPLIANT → must not appear in proposed or suppressed
-  const allSubjects = [...body.proposed, ...body.suppressed].map((p) => p.subjectId);
+  // emp-006 is OVERDUE → proposed; emp-007 is COMPLIANT → neither proposed nor suppressed
   assert.ok(!body.proposed.some((p) => p.subjectId === "emp-007"), "COMPLIANT subject must not be proposed");
   assert.ok(!body.suppressed.some((p) => p.subjectId === "emp-007"), "COMPLIANT subject must not be suppressed");
-  // emp-006 must appear in proposed OR suppressed (simulated may suppress ~1 in 5)
-  assert.ok(allSubjects.includes("emp-006"), "at-risk subject must appear in proposed or suppressed");
+  assert.ok(body.proposed.some((p) => p.subjectId === "emp-006"), "at-risk subject is proposed");
+});
+
+test("#616: with no order source connected, no proposal is withheld and the answer says nothing was checked", async () => {
+  const body = (await get("").then((r) => r!.json())) as {
+    proposed: Array<{ subjectId: string }>;
+    suppressed: unknown[];
+    totals: { proposed: number; suppressed: number };
+    standingOrdersChecked: boolean;
+  };
+  // The invented standing orders withheld 46 at-risk patients on the pilot; that the default invents
+  // none is held in standing-order-provider.test.ts, and this holds the route to what it returns.
+  assert.deepEqual(body.suppressed, []);
+  assert.equal(body.totals.suppressed, 0);
+  assert.deepEqual(body.proposed.map((p) => p.subjectId).sort(), ["emp-006", "emp-008", "emp-013", "emp-020"], "every at-risk subject is proposed");
+  assert.equal(body.standingOrdersChecked, false, "orders already on the chart were not looked at, and the page is told so");
+  // The FHIR bundle carries the same proposals: none left out behind an order that does not exist.
+  const fhir = (await get("?format=fhir").then((r) => r!.json())) as { entry?: unknown[] };
+  assert.equal((fhir.entry ?? []).length, 4);
 });
 
 test("the domain view carries totals, and ?limit/?offset window both lists without changing the totals", async () => {

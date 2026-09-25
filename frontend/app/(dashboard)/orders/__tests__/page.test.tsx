@@ -162,6 +162,36 @@ describe("OrdersPage paging + measure labels", () => {
     expect(screen.getByText("subj-1")).toBeInTheDocument();
   });
 
+  it("#616: says a proposal may repeat an order on the chart unless the server looked at existing orders", async () => {
+    const CAVEAT = /cannot see orders already placed in WebChart/;
+    let checked: boolean | undefined = false;
+    get.mockImplementation((url: string) => {
+      if (url === "/api/measures") return Promise.resolve([]);
+      if (url.startsWith("/api/orders/proposals?")) {
+        return Promise.resolve({ proposed: [proposal(1)], suppressed: [], totals: { proposed: 1, suppressed: 0 }, standingOrdersChecked: checked });
+      }
+      return Promise.reject(new Error(`unexpected GET ${url}`));
+    });
+
+    const first = render(<OrdersPage />);
+    await waitFor(() => expect(screen.getByText("subj-1")).toBeInTheDocument());
+    expect(screen.getByText(CAVEAT)).toBeInTheDocument();
+    first.unmount();
+
+    // A backend that predates the field has not looked either.
+    checked = undefined;
+    const second = render(<OrdersPage />);
+    await waitFor(() => expect(screen.getByText("subj-1")).toBeInTheDocument());
+    expect(screen.getByText(CAVEAT)).toBeInTheDocument();
+    second.unmount();
+
+    // Once an order source is connected and checked, the caveat would be false, so it goes.
+    checked = true;
+    render(<OrdersPage />);
+    await waitFor(() => expect(screen.getByText("subj-1")).toBeInTheDocument());
+    expect(screen.queryByText(CAVEAT)).not.toBeInTheDocument();
+  });
+
   it("labels rows from the measure catalog (crosswalk identity) and never reads the programs overview", async () => {
     render(<OrdersPage />);
 

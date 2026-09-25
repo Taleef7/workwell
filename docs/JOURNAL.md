@@ -5,6 +5,17 @@ Newest first. A few lines per working day: what changed, and what's next.
 Entries before 2026-09-23 are in git history: `git show before-docs-trim:docs/JOURNAL.md` is the last long-form
 version, and earlier months were in `docs/archive/` (`git show before-docs-trim:docs/archive/JOURNAL_2026-07.md`).
 
+## 2026-09-25
+
+- **#616: Order Proposals no longer invents standing orders.** With no order source connected, the
+  default made up a standing order for about one patient in five from a hash of the ID. When it matched a
+  patient's own gap, their proposal was hidden under "standing order on file" and left out of the FHIR
+  bundle. That hid 46 of 2,509 at-risk patients on the pilot, all CMS122 or CMS125, the only two routed
+  measures with an order. Nothing is invented now, and every at-risk patient is proposed. Because
+  WorkWell cannot see orders already placed in WebChart, the page says a proposal may repeat one; the API
+  reports this as `standingOrdersChecked`. The deduplication itself stays, for when a WebChart order
+  source is connected.
+
 ## 2026-09-24
 
 - **#623: the dashboard says when its numbers are stale.** A failed nightly leaves the previous results in

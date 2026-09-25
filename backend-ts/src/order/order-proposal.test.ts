@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { proposeOrders, type AtRiskOutcome } from "./order-proposal.ts";
 import type { StandingOrderProvider } from "./standing-order-provider.ts";
 
-const noStanding: StandingOrderProvider = { activeOrdersFor: () => [] };
+const noStanding: StandingOrderProvider = { checksExistingOrders: true, activeOrdersFor: () => [] };
 
 test("Panel=Risk: only OVERDUE/DUE_SOON/MISSING_DATA propose; COMPLIANT/EXCLUDED do not", () => {
   const rows: AtRiskOutcome[] = [
@@ -73,6 +73,7 @@ test("in-batch dedupe priority upgrade: urgent first then routine → stays urge
 
 test("standing-order suppression moves a proposal to suppressed[]", () => {
   const standing: StandingOrderProvider = {
+    checksExistingOrders: true,
     activeOrdersFor: (id) => (id === "e1" ? [{ subjectId: "e1", order: { code: "92557", system: "http://www.ama-assn.org/go/cpt", display: "x" } }] : []),
   };
   const rows: AtRiskOutcome[] = [{ subjectId: "e1", measureId: "audiogram", status: "OVERDUE" }];
