@@ -121,10 +121,18 @@ describe("RunsPage says what a run is and what its numbers mean (#668)", () => {
 
   it("a nightly running past an hour shows its time, and only one past three hours reads 'Stalled' (#709)", async () => {
     const at = (ms: number) => new Date(Date.now() - ms).toISOString();
-    answer([
-      { ...nightly, runId: "run-4", status: "RUNNING", completedAt: null, durationMs: 0, startedAt: at(90 * 60_000) },
-      { ...nightly, runId: "run-5", status: "RUNNING", completedAt: null, durationMs: 0, startedAt: at(4 * 3600_000) },
-    ]);
+    const hourAndHalf = { ...nightly, runId: "run-4", status: "RUNNING", completedAt: null, durationMs: 0, startedAt: at(90 * 60_000) };
+    const fourHours = { ...nightly, runId: "run-5", status: "RUNNING", completedAt: null, durationMs: 0, startedAt: at(4 * 3600_000) };
+    answer([hourAndHalf, fourHours]);
+    // The first run is selected, so its detail is read. Without these, the mock's default answer (`[]`)
+    // became the selected run and the page threw on its missing fields, before or after the assertions
+    // below depending on timing: green on #709's CI, red on the next PR's.
+    const listed = get.getMockImplementation()!;
+    get.mockImplementation((url: string) =>
+      url === "/api/runs/run-4" ? Promise.resolve({ ...summary, ...hourAndHalf })
+      : url === "/api/runs/run-5" ? Promise.resolve({ ...summary, ...fourHours })
+      : listed(url),
+    );
     render(<RunsPage />);
     // The list row, and the detail pane once the first run is selected: never "Stalled" for this one.
     expect((await screen.findAllByText("1h 30m")).length).toBeGreaterThan(0);
