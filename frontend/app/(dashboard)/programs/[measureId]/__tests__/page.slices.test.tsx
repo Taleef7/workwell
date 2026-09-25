@@ -9,7 +9,7 @@
  * condition, and the heading and KPI must still be on screen.
  */
 import React from "react";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { setSubject, subject } from "@/test/mocks/terminology";
 vi.mock("@/lib/terminology", () => ({ SUBJECT: subject }));
@@ -129,6 +129,48 @@ describe("ProgramDetailPage — per-slice paint", () => {
     render(<ProgramDetailPage />);
     expect(await screen.findByText("Trend unavailable")).toBeInTheDocument();
     expect(screen.queryByText("No runs with results yet")).toBeNull();
+  });
+
+  it("#617: a measure whose outcomes cannot be projected says so, instead of zeros shown as a forecast", async () => {
+    const outlook = (forecastable: boolean | undefined) => ({
+      ...(forecastable === undefined ? {} : { forecastable }),
+      upcomingNonCompliantCount: 0,
+      upcomingExpirations: [],
+      repeatNonCompliers: [],
+      siteComplianceRates: [{ site: "Kihei Clinic", total: 10, compliant: 4, upcomingExpirations: 0, currentComplianceRate: 40, predictedComplianceRate: 40 }],
+    });
+    let answer = outlook(false);
+    get.mockImplementation((url: string) => {
+      if (url === "/api/programs" || url.startsWith("/api/programs?")) return Promise.resolve(PROGRAMS);
+      if (url.includes("/risk-outlook")) return Promise.resolve(answer);
+      if (url.includes("/trend")) return Promise.resolve([]);
+      if (url.includes("/top-drivers")) return Promise.resolve(EMPTY_DRIVERS);
+      return Promise.resolve([]);
+    });
+
+    const first = render(<ProgramDetailPage />);
+    const note = await screen.findByTestId("outlook-not-forecastable");
+    expect(note).toHaveTextContent("No 90-day forecast for this measure.");
+    expect(note).toHaveTextContent("not when the qualifying test was done");
+    expect(within(note).getByRole("link", { name: "work list" })).toHaveAttribute("href", "/cases?measureId=cms125");
+    expect(screen.queryByText("Upcoming due soon")).toBeNull();
+    expect(screen.queryByText("Predicted 90d")).toBeNull();
+    expect(screen.queryByText("Expiring")).toBeNull();
+    // The per-site CURRENT rate is real and stays, with the highest-risk site it is ranked by.
+    expect(screen.getByText("Current rate")).toBeInTheDocument();
+    expect(screen.getByText("Highest-risk site")).toBeInTheDocument();
+    expect(screen.getAllByText("Kihei Clinic").length).toBeGreaterThan(0);
+    first.unmount();
+
+    // An authored measure (true), or a backend that predates the field, still shows the outlook.
+    for (const forecastable of [true, undefined]) {
+      answer = outlook(forecastable);
+      const view = render(<ProgramDetailPage />);
+      expect(await screen.findByText("Upcoming due soon")).toBeInTheDocument();
+      expect(screen.getByText("Predicted 90d")).toBeInTheDocument();
+      expect(screen.queryByTestId("outlook-not-forecastable")).toBeNull();
+      view.unmount();
+    }
   });
 
   it("shows 'Risk outlook unavailable' when the read REJECTS, not a zero", async () => {

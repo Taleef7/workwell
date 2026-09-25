@@ -207,6 +207,13 @@ export interface TopDrivers {
 }
 
 export interface RiskOutlook {
+  /**
+   * Whether this measure's outcomes can be projected forward at all (#617). False for an officially
+   * routed winner: official evidence records population membership over the measurement year, with no
+   * last-exam date and window to count forward from, so every projection below would be structural
+   * zeros and "predicted = current". The page says so instead of showing them.
+   */
+  forecastable: boolean;
   upcomingNonCompliantCount: number;
   upcomingExpirations: Array<{
     externalId: string;
@@ -1065,9 +1072,24 @@ interface OutlookBase {
    * `expressionResults` are named `official:<population>` and carry no recency define at all.
    */
   compliantExams: Array<{ subjectId: string; name: string; site: string; lastExam: string }>;
+  /** False when the winning run's evidence is official (see {@link RiskOutlook.forecastable}). */
+  forecastable: boolean;
 }
 
-const EMPTY_OUTLOOK_BASE: OutlookBase = { sites: [], compliantExams: [] };
+const EMPTY_OUTLOOK_BASE: Omit<OutlookBase, "forecastable"> = { sites: [], compliantExams: [] };
+
+/**
+ * Whether an outcome can be projected, decided by the ROWS where they can decide it (#617): official
+ * evidence cannot, authored evidence can. Only where no row settles it (a measure that has never run, a
+ * winner with no visible row, or a peeked row that is an evaluation error, whose evidence was replaced
+ * and so proves nothing) does today's routing answer (Codex on #716). A failed official batch must not
+ * read as authored and put its structural zeros back on screen.
+ */
+function forecastableFrom(measureId: string, peekedEvidence: unknown): boolean {
+  if (peekedEvidence != null && hasOfficialEvidence(peekedEvidence)) return false;
+  const decisive = peekedEvidence != null && (peekedEvidence as { evaluationError?: unknown }).evaluationError == null;
+  return decisive ? true : !isOfficialRouted(measureId);
+}
 
 /** Whether an outcome's evidence is an officially routed measure's (the ADR-046 `official` block). */
 const hasOfficialEvidence = (evidence: unknown): boolean =>
@@ -1132,6 +1154,7 @@ function renderOutlook(
     .sort((a, b) => (a.currentComplianceRate ?? Infinity) - (b.currentComplianceRate ?? Infinity));
 
   return {
+    forecastable: base.forecastable,
     upcomingNonCompliantCount: upcomingExpirations.length,
     upcomingExpirations,
     // RETIRED (ADR-081), and the key is kept with an empty array so the page, the route contract and
@@ -1192,7 +1215,7 @@ export async function programRiskOutlook(
   //   2. "It saves a row read." No: `readWinnersRows` already returns early on an empty winners list.
   // What it actually saves is one `directoryForRows` call and one memo slot per unrun measure. Keep
   // it or delete it; do not add a claim to it that a test cannot hold.
-  if (winners.length === 0) return render(EMPTY_OUTLOOK_BASE);
+  if (winners.length === 0) return render({ ...EMPTY_OUTLOOK_BASE, forecastable: forecastableFrom(measureId, null) });
 
   // The seam decides which subjects are visible at all, so it keys the memo beside the measure.
   const memoKey = `${measureId}|${webChartConfigured}`;
@@ -1248,7 +1271,8 @@ export async function programRiskOutlook(
   // reports the replacement, so reading the precomputed run would pair an older visible snapshot with
   // evidence from a newer invisible run. Empty when the winner held no row we can see.
   const evidenceRunId = snap.winners[0]?.runId ?? null;
-  if (compliantSubjects.length > 0 && evidenceRunId) {
+  let forecastable = forecastableFrom(measureId, null);
+  if (evidenceRunId) {
     // Whether the winner's outcomes carry a recency define is a fact about THOSE ROWS, not about
     // today's routing flag. Reading the flag instead would zero an authored winner's expirations in a
     // process restarted after an authored→official flip, and would serve the authored answer from a
@@ -1264,12 +1288,25 @@ export async function programRiskOutlook(
     // cost this peek exists to avoid. A COMPLIANT row cannot be an evaluation error, because an error
     // forces MISSING_DATA, so asking for one is exact rather than probabilistic. `subjectId` +
     // `measureId` + `limit: 1` is the single-row lookup the store documents as index-friendly.
-    const peek = await deps.outcomeStore.listOutcomes(evidenceRunId, {
-      measureId,
-      subjectId: compliantSubjects[0]!.subjectId,
-      limit: 1,
-    });
-    if (peek.length > 0 && !hasOfficialEvidence(peek[0]!.evidence)) {
+    //
+    // With NO compliant subject (early in a measurement year) the peek still runs, because the answer
+    // is also whether this outcome can be projected at all (#617): skipping it rendered an official
+    // measure's structural zeros as a forecast. It still names ONE subject, so it stays the indexed
+    // single-row lookup: a peek by run + measure alone is `ORDER BY (evaluated_at, id) LIMIT 1`, which
+    // no index serves (#617 review). The subject is chosen so its row cannot be an evaluation error
+    // (which forces MISSING_DATA and carries no `official` block): compliant first, then any other
+    // non-MISSING_DATA status, then an out-of-population row, then whatever is left.
+    const visible = [...latestBySubject.values()];
+    const peekRow =
+      compliantSubjects[0] ??
+      visible.find((row) => row.status !== "MISSING_DATA") ??
+      visible.find((row) => row.outOfPopulation === true) ??
+      visible[0];
+    const peek = peekRow
+      ? await deps.outcomeStore.listOutcomes(evidenceRunId, { measureId, subjectId: peekRow.subjectId, limit: 1 })
+      : [];
+    forecastable = forecastableFrom(measureId, peek[0]?.evidence ?? null);
+    if (compliantSubjects.length > 0 && peek.length > 0 && forecastable) {
       const evidenceBySubject = new Map<string, unknown>();
       for (const outcome of await deps.outcomeStore.listOutcomes(evidenceRunId, { measureId })) {
         evidenceBySubject.set(outcome.subjectId, outcome.evidence);
@@ -1291,6 +1328,7 @@ export async function programRiskOutlook(
   const base: OutlookBase = {
     sites: [...siteAcc.entries()].map(([site, counts]) => ({ site, counts })),
     compliantExams,
+    forecastable,
   };
   // A fallback result is never memoized (see `fellBack`): its answer can move while the winners stay.
   if (!snap.fellBack) outlookMemo.set(memoKey, runKey, base);

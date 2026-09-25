@@ -142,9 +142,70 @@ test("an OFFICIAL winner costs one peeked row and reports no expirations", async
   assert.ok(outlook);
   assert.deepEqual(outlook!.upcomingExpirations, [], "an official run carries no recency define");
   assert.equal(outlook!.upcomingNonCompliantCount, 0);
+  assert.equal(outlook!.forecastable, false, "#617: its zeros are structural, and the page must say so");
   assert.equal(calls.history, 0);
   assert.deepEqual(calls.byRun, [{ runId: "run-official", measureId: MEASURE, subjectId: "emp-006", limit: 1 }],
     "exactly one evidence read, of exactly one row");
+});
+
+test("#617: an official winner with nobody compliant yet is still not forecastable, for one peeked row", async () => {
+  reset();
+  // Early in a measurement year a measure can have no COMPLIANT subject. The peek used to be skipped
+  // then, so an official measure's structural zeros were served as a forecast.
+  const joined = [
+    joinedRow("run-january", "2027-01-02T00:00:00.000Z", "emp-006", "OVERDUE"),
+    joinedRow("run-january", "2027-01-02T00:00:00.000Z", "emp-007", "MISSING_DATA"),
+  ];
+  const official = {
+    official: { measurementPeriod: { start: "2027-01-01", end: "2027-12-31" }, populationResults: [] },
+    expressionResults: [{ define: "official:initial-population", result: true }],
+  };
+  const { deps, calls } = makeDeps(joined, {
+    "run-january": [evidenceRow("run-january", "emp-006", "OVERDUE", official), evidenceRow("run-january", "emp-007", "MISSING_DATA", official)],
+  });
+
+  const outlook = await programRiskOutlook(deps, MEASURE, 90);
+  assert.ok(outlook);
+  assert.equal(outlook!.forecastable, false);
+  assert.deepEqual(calls.byRun, [{ runId: "run-january", measureId: MEASURE, subjectId: "emp-006", limit: 1 }],
+    "one NAMED row of the run (the indexed lookup), and never the unpaged read");
+});
+
+test("#617: with nobody compliant, the peek names a row that cannot be an evaluation error", async () => {
+  reset();
+  // An error forces MISSING_DATA and replaces the evidence, so it carries no `official` block: peeking
+  // it would read an official measure as forecastable. It sorts first in the store here, as a failed
+  // first chunk would; the peek must name the OVERDUE subject instead.
+  const joined = [
+    joinedRow("run-partial-jan", "2027-01-02T00:00:00.000Z", "emp-001", "MISSING_DATA"),
+    joinedRow("run-partial-jan", "2027-01-02T00:00:00.000Z", "emp-009", "OVERDUE"),
+  ];
+  const official = {
+    official: { measurementPeriod: { start: "2027-01-01", end: "2027-12-31" }, populationResults: [] },
+    expressionResults: [{ define: "official:initial-population", result: true }],
+  };
+  const { deps, calls } = makeDeps(joined, {
+    "run-partial-jan": [
+      evidenceRow("run-partial-jan", "emp-001", "MISSING_DATA", { evaluationError: "CQL engine failure", message: "boom" }),
+      evidenceRow("run-partial-jan", "emp-009", "OVERDUE", official),
+    ],
+  });
+
+  const outlook = await programRiskOutlook(deps, MEASURE, 90);
+  assert.ok(outlook);
+  assert.equal(outlook!.forecastable, false);
+  assert.deepEqual(calls.byRun, [{ runId: "run-partial-jan", measureId: MEASURE, subjectId: "emp-009", limit: 1 }]);
+});
+
+test("#617: an authored winner with nobody compliant stays forecastable and reads no more than a peek", async () => {
+  reset();
+  const joined = [joinedRow("run-authored-0", "2026-09-01T00:00:00.000Z", "emp-006", "OVERDUE")];
+  const { deps, calls } = makeDeps(joined, { "run-authored-0": [evidenceRow("run-authored-0", "emp-006", "OVERDUE", authoredEvidence(400))] });
+
+  const outlook = await programRiskOutlook(deps, MEASURE, 90);
+  assert.ok(outlook);
+  assert.equal(outlook!.forecastable, true, "an authored measure's zero is a real answer");
+  assert.equal(calls.byRun.length, 1);
 });
 
 test("an AUTHORED winner peeks, then reads the run's evidence once, narrowed to the measure", async () => {
@@ -167,6 +228,7 @@ test("an AUTHORED winner peeks, then reads the run's evidence once, narrowed to 
 
   const near = await programRiskOutlook(deps, MEASURE, 30);
   assert.ok(near);
+  assert.equal(near!.forecastable, true);
   assert.deepEqual(near!.upcomingExpirations.map((e) => e.externalId), ["emp-006"]);
   assert.equal(near!.upcomingExpirations[0]!.daysUntilDueSoon, THRESHOLD - 320);
   assert.equal(near!.upcomingExpirations[0]!.complianceWindowDays, 365);
@@ -358,4 +420,61 @@ test("after a visibility fallback the evidence names the run the ROWS came from,
   const second = await programRiskOutlook(deps, MEASURE, 30);
   assert.ok(calls.byRun.length > readsAfterFirst, "a fallback result is recomputed, never served from the memo");
   assert.deepEqual(second!.upcomingExpirations.map((e) => e.externalId), ["emp-006"]);
+});
+
+/** Runs `fn` with `WORKWELL_OFFICIAL_MEASURES` set to `ids`, restoring whatever was there. */
+async function withRouting<T>(ids: string | undefined, fn: () => Promise<T>): Promise<T> {
+  const before = process.env.WORKWELL_OFFICIAL_MEASURES;
+  if (ids === undefined) delete process.env.WORKWELL_OFFICIAL_MEASURES;
+  else process.env.WORKWELL_OFFICIAL_MEASURES = ids;
+  try {
+    return await fn();
+  } finally {
+    if (before === undefined) delete process.env.WORKWELL_OFFICIAL_MEASURES;
+    else process.env.WORKWELL_OFFICIAL_MEASURES = before;
+  }
+}
+
+test("#617: where no row can decide, routing does — a never-run official measure is not forecastable (Codex on #716)", async () => {
+  // A fresh pilot deployment: every measure official, none run yet. No row says so, so routing must.
+  reset();
+  const routed = await withRouting(MEASURE, () => programRiskOutlook(makeDeps([]).deps, MEASURE, 90));
+  assert.equal(routed!.forecastable, false);
+  reset();
+  const authored = await withRouting(undefined, () => programRiskOutlook(makeDeps([]).deps, MEASURE, 90));
+  assert.equal(authored!.forecastable, true, "an authored measure that has not run yet keeps the panel");
+});
+
+test("#617: a run whose every row is an evaluation error proves nothing, so routing decides (Codex on #716)", async () => {
+  // A failed official batch persists MISSING_DATA rows whose evidence is replaced by the error, with
+  // no `official` block; the PARTIAL_FAILURE run can still win. That must not read as authored.
+  const joined = [joinedRow("run-outage", "2026-09-01T00:00:00.000Z", "emp-006", "MISSING_DATA", { runStatus: "PARTIAL_FAILURE" })];
+  const byRun = { "run-outage": [evidenceRow("run-outage", "emp-006", "MISSING_DATA", { evaluationError: "CQL engine failure", message: "boom" })] };
+
+  reset();
+  const routed = await withRouting(MEASURE, () => programRiskOutlook(makeDeps(joined, byRun).deps, MEASURE, 90));
+  assert.equal(routed!.forecastable, false, "an official measure's outage is not a forecast of zero");
+  reset();
+  const authored = await withRouting(undefined, () => programRiskOutlook(makeDeps(joined, byRun).deps, MEASURE, 90));
+  assert.equal(authored!.forecastable, true);
+});
+
+test("#617: a decisive row outranks routing both ways", async () => {
+  // Rows are facts about the run being described; routing is today's flag. An authored winner still
+  // on screen after a flip to official keeps its forecast, and an official winner after a flip back
+  // does not get one.
+  const authoredRows = [joinedRow("run-a", "2026-09-01T00:00:00.000Z", "emp-006", "COMPLIANT")];
+  reset();
+  const a = await withRouting(MEASURE, () =>
+    programRiskOutlook(makeDeps(authoredRows, { "run-a": [evidenceRow("run-a", "emp-006", "COMPLIANT", authoredEvidence(100))] }).deps, MEASURE, 90));
+  assert.equal(a!.forecastable, true);
+
+  const official = {
+    official: { measurementPeriod: { start: "2026-01-01", end: "2026-12-31" }, populationResults: [] },
+    expressionResults: [{ define: "official:initial-population", result: true }],
+  };
+  reset();
+  const o = await withRouting(undefined, () =>
+    programRiskOutlook(makeDeps(authoredRows, { "run-a": [evidenceRow("run-a", "emp-006", "COMPLIANT", official)] }).deps, MEASURE, 90));
+  assert.equal(o!.forecastable, false);
 });
