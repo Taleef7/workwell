@@ -228,40 +228,68 @@ const fs = require("node:fs");
 const beat = new BigInt64Array(workerData.heartbeat);
 const inFlight = new Map();
 let lastReportedAt = 0;
+let lastEvidenceAt = 0;
+let evidenceFailed = false;
 parentPort.on("message", (m) => {
   if (m.type === "start") inFlight.set(m.id, { method: m.method, path: m.path, startedAt: m.startedAt });
   else if (m.type === "end") inFlight.delete(m.id);
 });
-setInterval(() => {
-  const now = Date.now();
-  const silentMs = now - Number(Atomics.load(beat, 0));
-  if (silentMs < workerData.reportAfterMs) { lastReportedAt = 0; return; }
-  if (lastReportedAt && now - lastReportedAt < workerData.repeatEveryMs) return;
-  lastReportedAt = now;
+const reportAt = (now, silentMs) => {
   const all = [...inFlight.values()]
     .map((r) => ({ method: r.method, path: r.path, runningMs: now - r.startedAt }))
     .sort((a, b) => b.runningMs - a.runningMs);
-  const report = {
+  return {
     kind: "EVENT_LOOP_STALL_ONGOING",
     stalledForMs: silentMs,
     at: new Date(now).toISOString(),
     requestsInFlight: all.length,
     requests: all.slice(0, workerData.maxReported),
   };
-  try { fs.writeSync(2, "WORKWELL_ALERT " + JSON.stringify(report) + "\\n"); } catch {}
-  // #663: past evidenceAfterMs the same report also goes to a FILE on the container's disk, which a
-  // restart keeps and a recreate does not. Written to a temporary name and renamed, so a process killed
-  // mid-write never leaves half a report. The main thread deletes it if the stall ends on its own.
-  if (workerData.evidencePath && silentMs >= workerData.evidenceAfterMs) {
-    try {
-      const path = require("node:path");
-      fs.mkdirSync(path.dirname(workerData.evidencePath), { recursive: true });
-      const evidence = { ...report, build: workerData.build, processStartedAt: workerData.processStartedAt, rssMb: Math.round(process.memoryUsage().rss / 1048576) };
-      fs.writeFileSync(workerData.evidencePath + ".tmp", JSON.stringify(evidence));
-      fs.renameSync(workerData.evidencePath + ".tmp", workerData.evidencePath);
-    } catch {}
+};
+// #663: past evidenceAfterMs the report also goes to a FILE on the container's disk, which a restart keeps
+// and a recreate does not. On its OWN schedule, not the log line's throttle, so it is on disk from the
+// threshold on rather than up to repeatEveryMs later. Written to a temporary name and renamed, so a
+// process killed mid-write never leaves half a report. The heartbeat is read again around the rename: if
+// the main thread recovered meanwhile (it deletes the file when a stall ends), a report renamed into
+// place after that delete would describe a stall that ended, so it is withdrawn.
+const writeEvidence = (report, beatSeen) => {
+  const p = workerData.evidencePath;
+  const recovered = () => Atomics.load(beat, 0) !== beatSeen;
+  try {
+    const path = require("node:path");
+    fs.mkdirSync(path.dirname(p), { recursive: true });
+    const evidence = { ...report, build: workerData.build, processStartedAt: workerData.processStartedAt, rssMb: Math.round(process.memoryUsage().rss / 1048576) };
+    fs.writeFileSync(p + ".tmp", JSON.stringify(evidence));
+    if (recovered()) { fs.rmSync(p + ".tmp", { force: true }); return; }
+    fs.renameSync(p + ".tmp", p);
+    if (recovered()) fs.rmSync(p, { force: true });
+  } catch (err) {
+    // Said once per stall, on the log the recreate would delete anyway, because the durable copy is the
+    // whole point: a silently failing write would look exactly like a stall that left nothing.
+    if (!evidenceFailed) {
+      evidenceFailed = true;
+      const failure = { kind: "STALL_EVIDENCE_WRITE_FAILED", path: p, error: String((err && err.message) || err) };
+      try { fs.writeSync(2, "WORKWELL_ALERT " + JSON.stringify(failure) + "\\n"); } catch {}
+      parentPort.postMessage(failure);
+    }
   }
-  parentPort.postMessage(report);
+};
+setInterval(() => {
+  const now = Date.now();
+  const beatSeen = Atomics.load(beat, 0);
+  const silentMs = now - Number(beatSeen);
+  if (silentMs < workerData.reportAfterMs) { lastReportedAt = 0; lastEvidenceAt = 0; evidenceFailed = false; return; }
+  let report = null;
+  if (!lastReportedAt || now - lastReportedAt >= workerData.repeatEveryMs) {
+    lastReportedAt = now;
+    report = reportAt(now, silentMs);
+    try { fs.writeSync(2, "WORKWELL_ALERT " + JSON.stringify(report) + "\\n"); } catch {}
+    parentPort.postMessage(report);
+  }
+  if (workerData.evidencePath && silentMs >= workerData.evidenceAfterMs && (!lastEvidenceAt || now - lastEvidenceAt >= workerData.evidenceEveryMs)) {
+    lastEvidenceAt = now;
+    writeEvidence(report || reportAt(now, silentMs), beatSeen);
+  }
 }, workerData.checkEveryMs).unref();
 `;
 
@@ -280,6 +308,8 @@ export interface MonitorOptions {
   stallEvidencePath?: string | null;
   /** How long a stall must last before its report goes to disk. */
   stallEvidenceAfterMs?: number;
+  /** How often the on-disk report is refreshed while the stall lasts. */
+  stallEvidenceEveryMs?: number;
 }
 
 /** A stall long enough to put its report on disk: past anything the sandbox does legitimately (1.7 s). */
@@ -388,6 +418,7 @@ export function startRuntimeMonitor(opts: MonitorOptions = {}): () => Promise<vo
         maxReported: MAX_REPORTED_REQUESTS,
         evidencePath,
         evidenceAfterMs: opts.stallEvidenceAfterMs ?? STALL_EVIDENCE_AFTER_MS,
+        evidenceEveryMs: opts.stallEvidenceEveryMs ?? 5_000,
         build: buildSha(),
         processStartedAt: PROCESS_STARTED_AT,
       },

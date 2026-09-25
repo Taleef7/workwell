@@ -227,6 +227,70 @@ test("a long stall's report is written to disk while it lasts, and deleted when 
   }
 });
 
+test("the report reaches the disk at its own threshold, not after the log line's longer throttle (#708 review)", async () => {
+  const { mkdtempSync, existsSync, rmSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  const { tmpdir } = await import("node:os");
+  const dir = mkdtempSync(join(tmpdir(), "workwell-stall-"));
+  const file = join(dir, "stall-evidence.json");
+  // The log line fires at 100 ms and then not again for 10 s; the file is due at 300 ms regardless.
+  const stop = startRuntimeMonitor({
+    thresholdMs: 200,
+    heartbeatMs: 50,
+    watchdogReportAfterMs: 100,
+    watchdogCheckEveryMs: 25,
+    watchdogRepeatEveryMs: 10_000,
+    stallEvidencePath: file,
+    stallEvidenceAfterMs: 300,
+    stallEvidenceEveryMs: 50,
+  });
+  try {
+    await new Promise((r) => setTimeout(r, 300));
+    const until = Date.now() + 800;
+    while (Date.now() < until) {
+      /* blocked */
+    }
+    assert.ok(existsSync(file), "on disk by 800 ms although the log line would not repeat for 10 s");
+  } finally {
+    await stop();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a report that cannot be written says so, once (#708 review)", async () => {
+  const { mkdtempSync, writeFileSync, rmSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  const { tmpdir } = await import("node:os");
+  const dir = mkdtempSync(join(tmpdir(), "workwell-stall-"));
+  writeFileSync(join(dir, "not-a-dir"), "x"); // a FILE where the report's directory should be
+  const reports: Array<{ kind: string; path?: string }> = [];
+  const stop = startRuntimeMonitor({
+    thresholdMs: 200,
+    heartbeatMs: 50,
+    watchdogReportAfterMs: 100,
+    watchdogCheckEveryMs: 25,
+    watchdogRepeatEveryMs: 10_000,
+    stallEvidencePath: join(dir, "not-a-dir", "stall-evidence.json"),
+    stallEvidenceAfterMs: 200,
+    stallEvidenceEveryMs: 50,
+    onWatchdogReport: (r) => reports.push(r as (typeof reports)[number]),
+  });
+  try {
+    await new Promise((r) => setTimeout(r, 300));
+    const until = Date.now() + 800;
+    while (Date.now() < until) {
+      /* blocked */
+    }
+    await new Promise((r) => setTimeout(r, 200));
+    const failures = reports.filter((r) => r.kind === "STALL_EVIDENCE_WRITE_FAILED");
+    assert.equal(failures.length, 1, "reported once per stall, not on every retry");
+    assert.match(failures[0]!.path ?? "", /stall-evidence\.json$/);
+  } finally {
+    await stop();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("the next boot reads a report the previous process left, shows it once, and sets it aside (#663)", async () => {
   const { mkdtempSync, existsSync, writeFileSync, rmSync } = await import("node:fs");
   const { join } = await import("node:path");
