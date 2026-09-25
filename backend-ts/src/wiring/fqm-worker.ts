@@ -56,6 +56,8 @@ export interface FqmWorker {
   readonly inFlight: number;
   /** Threads currently running (idle ones are released after `idleMs`). */
   readonly alive: number;
+  /** Chunks waiting on the main thread for a free worker (a pool only; a lone worker is always 0). */
+  readonly queued: number;
   /** Stop the worker; chunks still in flight reject. */
   close(): Promise<void>;
 }
@@ -146,6 +148,9 @@ export function createFqmWorker(options: { calculatorModule?: string; idleMs?: n
     get alive() {
       return worker ? 1 : 0;
     },
+    get queued() {
+      return 0;
+    },
     calculate(input) {
       cancelIdle();
       const w = ensure();
@@ -183,21 +188,41 @@ export function createFqmWorker(options: { calculatorModule?: string; idleMs?: n
  */
 export function createFqmPool(size: number, options: { calculatorModule?: string; idleMs?: number } = {}): FqmWorker {
   const workers = Array.from({ length: Math.max(1, Math.floor(size)) }, () => createFqmWorker(options));
+  // Each worker takes ONE chunk at a time; the rest wait here, on the main thread, as references (Codex on
+  // #707). Posted straight to a busy worker, every waiting chunk's ~500 patient bundles would be cloned
+  // into that worker's inbox while it could only work on one, so a six-measure chunk on two workers held
+  // four extra copies for nothing. And a chunk goes to whichever worker frees up first.
+  const queue: Array<{ input: WorkerCalculationInput; resolve: (r: OfficialBatchResult) => void; reject: (e: Error) => void }> = [];
+  const pump = (): void => {
+    for (const w of workers) {
+      if (queue.length === 0) return;
+      if (w.inFlight > 0) continue;
+      const job = queue.shift()!;
+      // `calculate` registers the chunk synchronously, so this worker reads as busy for the rest of the loop.
+      w.calculate(job.input).then(job.resolve, job.reject).finally(pump);
+    }
+  };
   return {
     get requests() {
       return workers.reduce((n, w) => n + w.requests, 0);
     },
     get inFlight() {
-      return workers.reduce((n, w) => n + w.inFlight, 0);
+      return workers.reduce((n, w) => n + w.inFlight, 0) + queue.length;
     },
     get alive() {
       return workers.reduce((n, w) => n + w.alive, 0);
     },
+    get queued() {
+      return queue.length;
+    },
     calculate(input) {
-      const least = workers.reduce((best, w) => (w.inFlight < best.inFlight ? w : best));
-      return least.calculate(input);
+      return new Promise<OfficialBatchResult>((resolve, reject) => {
+        queue.push({ input, resolve, reject });
+        pump();
+      });
     },
     async close() {
+      for (const job of queue.splice(0)) job.reject(new Error("official calculation worker closed"));
       await Promise.all(workers.map((w) => w.close()));
     },
   };

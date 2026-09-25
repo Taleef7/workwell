@@ -119,6 +119,25 @@ test("a pool of two calculates two chunks at the same time (#604 follow-up)", as
   }
 });
 
+test("a pool holds chunks beyond its workers on the main thread, one per worker at a time (#707, Codex)", async () => {
+  const pool = createFqmPool(2, { calculatorModule: FIXTURE });
+  try {
+    const jobs = [0, 1, 2, 3, 4, 5].map((i) => pool.calculate(input(Array.from({ length: i + 1 }, (_, k) => (k === 0 ? { mode: "busy", cpuMs: 150 } : {})))));
+    assert.equal(pool.queued, 4, "six chunks on two workers: two posted, four waiting as references");
+    assert.equal(pool.inFlight, 6);
+    const results = await Promise.all(jobs);
+    assert.deepEqual(results.map((r) => r.bySubject.size), [1, 2, 3, 4, 5, 6], "each chunk got its own answer");
+    assert.equal(pool.queued, 0);
+    assert.equal(pool.requests, 6, "every chunk reached a worker");
+    const failing = pool.calculate(input([{ mode: "throw" }]));
+    const after = pool.calculate(input([{}]));
+    await assert.rejects(failing, /fqm could not parse/);
+    assert.equal((await after).bySubject.size, 1, "a failed chunk frees its worker for the next");
+  } finally {
+    await pool.close();
+  }
+});
+
 test("an idle worker is released and the next chunk starts a fresh one (#604 follow-up)", async () => {
   const worker = createFqmWorker({ calculatorModule: FIXTURE, idleMs: 100 });
   try {
