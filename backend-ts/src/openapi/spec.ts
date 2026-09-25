@@ -544,6 +544,17 @@ export function openApiDocument(): OpenApiDocument {
                 },
               },
             },
+            previousStall: {
+              type: ["object", "null"],
+              description:
+                "The previous process was still stalled when it stopped, so it was restarted mid-stall (#663): when its report was written and how long the stall had lasted. Which requests were running is on the ADMIN-gated /api/admin/runtime.",
+              required: ["at", "stalledForMs", "requestsInFlight"],
+              properties: {
+                at: { type: "string", format: "date-time" },
+                stalledForMs: { type: "number" },
+                requestsInFlight: { type: "integer" },
+              },
+            },
             lastWarm: {
               type: ["object", "null"],
               description:

@@ -24,6 +24,7 @@
  */
 import { monitorEventLoopDelay, type IntervalHistogram } from "node:perf_hooks";
 import { Worker } from "node:worker_threads";
+import { existsSync, readFileSync, renameSync, rmSync } from "node:fs";
 import { availableParallelism, totalmem } from "node:os";
 import { sharedFqmPoolSize } from "../wiring/fqm-worker.ts";
 
@@ -248,6 +249,18 @@ setInterval(() => {
     requests: all.slice(0, workerData.maxReported),
   };
   try { fs.writeSync(2, "WORKWELL_ALERT " + JSON.stringify(report) + "\\n"); } catch {}
+  // #663: past evidenceAfterMs the same report also goes to a FILE on the container's disk, which a
+  // restart keeps and a recreate does not. Written to a temporary name and renamed, so a process killed
+  // mid-write never leaves half a report. The main thread deletes it if the stall ends on its own.
+  if (workerData.evidencePath && silentMs >= workerData.evidenceAfterMs) {
+    try {
+      const path = require("node:path");
+      fs.mkdirSync(path.dirname(workerData.evidencePath), { recursive: true });
+      const evidence = { ...report, build: workerData.build, processStartedAt: workerData.processStartedAt, rssMb: Math.round(process.memoryUsage().rss / 1048576) };
+      fs.writeFileSync(workerData.evidencePath + ".tmp", JSON.stringify(evidence));
+      fs.renameSync(workerData.evidencePath + ".tmp", workerData.evidencePath);
+    } catch {}
+  }
   parentPort.postMessage(report);
 }, workerData.checkEveryMs).unref();
 `;
@@ -260,6 +273,54 @@ export interface MonitorOptions {
   watchdogRepeatEveryMs?: number;
   /** Receives each ongoing-stall report the watchdog makes (tests; production logs to fd 2). */
   onWatchdogReport?: (report: unknown) => void;
+  /**
+   * Where a long stall's report is kept on disk (#663). Absent means none is written or read.
+   * `server.ts` passes it, so a test that starts the monitor touches no file unless it asks to.
+   */
+  stallEvidencePath?: string | null;
+  /** How long a stall must last before its report goes to disk. */
+  stallEvidenceAfterMs?: number;
+}
+
+/** A stall long enough to put its report on disk: past anything the sandbox does legitimately (1.7 s). */
+export const STALL_EVIDENCE_AFTER_MS = 30_000;
+
+/**
+ * The report the previous process left on disk: it was still stalled when it stopped, so it was
+ * restarted or killed mid-stall (#663). The 2026-09-22 hang left nothing, because the heal deleted the
+ * container and its logs; a restart keeps this file, and the next boot reads it here.
+ */
+export interface PreviousStall {
+  kind: string;
+  at: string;
+  stalledForMs: number;
+  requestsInFlight: number;
+  requests: StallCandidate[];
+  build?: string | null;
+  processStartedAt?: string;
+  rssMb?: number;
+}
+let previousStall: PreviousStall | null = null;
+
+/** Read, keep and set aside the report a stalled previous process left; null when there is none. */
+export function takePreviousStall(path: string): PreviousStall | null {
+  if (!existsSync(path)) return null;
+  let found: PreviousStall | null = null;
+  try {
+    found = JSON.parse(readFileSync(path, "utf8")) as PreviousStall;
+  } catch (err) {
+    console.error(`[workwell] a stall report was left at ${path} but could not be read`, err);
+  }
+  try {
+    renameSync(path, `${path}.previous`); // read once: the next clean boot must not report it again
+  } catch {
+    /* best-effort */
+  }
+  if (found) {
+    const summary = { kind: "PREVIOUS_PROCESS_STALLED", at: found.at, stalledForMs: found.stalledForMs, requestsInFlight: found.requestsInFlight, build: found.build ?? null };
+    console.error(`WORKWELL_ALERT ${JSON.stringify(summary)}`);
+  }
+  return found;
 }
 
 let histogram: IntervalHistogram | null = null;
@@ -276,6 +337,8 @@ let watchdogRunning = false;
 export function startRuntimeMonitor(opts: MonitorOptions = {}): () => Promise<void> {
   const thresholdMs = opts.thresholdMs ?? STALL_THRESHOLD_MS;
   const heartbeatMs = opts.heartbeatMs ?? HEARTBEAT_MS;
+  const evidencePath = opts.stallEvidencePath ?? null;
+  if (evidencePath) previousStall = takePreviousStall(evidencePath);
 
   histogram = monitorEventLoopDelay({ resolution: 20 });
   histogram.enable();
@@ -297,7 +360,18 @@ export function startRuntimeMonitor(opts: MonitorOptions = {}): () => Promise<vo
     const ranAt = Date.now();
     Atomics.store(beat, 0, BigInt(ranAt));
     const stalled = stallDurationMs(dueAt, ranAt, thresholdMs);
-    if (stalled !== null) recordStall(stalled, ranAt);
+    if (stalled !== null) {
+      recordStall(stalled, ranAt);
+      // The stall ended on its own, so any report the watchdog put on disk describes a process that
+      // recovered. Only a process that never got here leaves one for the next boot.
+      if (evidencePath) {
+        try {
+          rmSync(evidencePath, { force: true });
+        } catch {
+          /* best-effort */
+        }
+      }
+    }
     dueAt = ranAt + heartbeatMs;
   }, heartbeatMs);
   beatTimer.unref();
@@ -312,6 +386,10 @@ export function startRuntimeMonitor(opts: MonitorOptions = {}): () => Promise<vo
         checkEveryMs: opts.watchdogCheckEveryMs ?? 1000,
         repeatEveryMs: opts.watchdogRepeatEveryMs ?? 30_000,
         maxReported: MAX_REPORTED_REQUESTS,
+        evidencePath,
+        evidenceAfterMs: opts.stallEvidenceAfterMs ?? STALL_EVIDENCE_AFTER_MS,
+        build: buildSha(),
+        processStartedAt: PROCESS_STARTED_AT,
       },
     });
     w.unref();
@@ -403,6 +481,8 @@ export interface RuntimeHealth {
     thresholdMs: number;
     lastStall: { endedAt: string; durationMs: number; requestsInvolved: number } | null;
   };
+  /** The previous process was still stalled when it stopped (#663): when, and for how long. Paths are admin-only. */
+  previousStall: { at: string; stalledForMs: number; requestsInFlight: number } | null;
   /** The newest read-model warm: when, how long, and whether it worked. Null until one has finished. */
   lastWarm: { trigger: WarmRecord["trigger"]; finishedAt: string; durationMs: number; ok: boolean; failedMeasures: number } | null;
 }
@@ -422,6 +502,9 @@ export function runtimeHealth(now: number = Date.now()): RuntimeHealth {
       thresholdMs: STALL_THRESHOLD_MS,
       lastStall: last ? { endedAt: last.endedAt, durationMs: last.durationMs, requestsInvolved: last.requestsInvolved } : null,
     },
+    previousStall: previousStall
+      ? { at: previousStall.at, stalledForMs: previousStall.stalledForMs, requestsInFlight: previousStall.requestsInFlight }
+      : null,
     lastWarm: lastWarm
       ? { trigger: lastWarm.trigger, finishedAt: lastWarm.finishedAt, durationMs: lastWarm.durationMs, ok: lastWarm.ok, failedMeasures: lastWarm.failedMeasures.length }
       : null,
@@ -443,6 +526,7 @@ export function runtimeDetail(now: number = Date.now()) {
     // host's. What a heap limit on the calculation worker would have to be sized against (#604).
     memoryLimitMb: Math.round(memoryLimitBytes(process.constrainedMemory?.(), totalmem()) / (1024 * 1024)),
     stalls: [...stalls].reverse(),
+    previousStall,
     warms: [...warms].reverse(),
     inFlight: { total: current.length, requests: current.slice(0, MAX_REPORTED_REQUESTS).map(({ method, path, runningMs }) => ({ method, path, runningMs })) },
   };
@@ -454,6 +538,7 @@ export function __resetRuntimeHealth(): void {
   recentlySettled.length = 0;
   stalls.length = 0;
   warms.length = 0;
+  previousStall = null;
   stallCount = 0;
   lastWindow = null;
   lastAlertAt = 0;

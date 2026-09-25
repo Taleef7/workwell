@@ -52,7 +52,11 @@ async function main(): Promise<void> {
   // `WORKWELL_ALERT {"kind":"EVENT_LOOP_STALL",…}` when it ends, and — from a worker thread, while it is
   // still going — as `EVENT_LOOP_STALL_ONGOING`, naming the requests in flight.
   const { startRuntimeMonitor, buildSha } = await import("./admin/runtime-health.ts");
-  const stopRuntimeMonitor = startRuntimeMonitor();
+  // A stall past 30 s also writes its report to this file (#663). A restart keeps the file, and the
+  // next boot shows it on /api/admin/runtime; the self-heal restarts before it recreates for that reason.
+  const stopRuntimeMonitor = startRuntimeMonitor({
+    stallEvidencePath: process.env.WORKWELL_STALL_EVIDENCE_PATH || "var/stall-evidence.json",
+  });
   console.log(`[workwell] runtime monitor on (build=${buildSha() ?? "unknown"})`);
 
   // Scheduled cron recompute (E13 PR-3): fires an ALL_PROGRAMS run once the 23.5h cooldown
