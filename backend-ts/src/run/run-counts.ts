@@ -25,6 +25,12 @@ export const COUNTS_CONCURRENCY = 3;
 const MAX_ENTRIES = 2_000;
 
 const memo = new Map<string, { counts: OutcomeStatusCount[]; at: number }>();
+/**
+ * Bumped by every reset. A count read that started before a reset may carry the pre-compaction rows
+ * (its query saw the old snapshot), so it is not kept if the generation moved while it was in flight
+ * (Codex on #709): otherwise it would restore the stale count for the whole TTL.
+ */
+let generation = 0;
 
 export function isFinishedRunStatus(status: string): boolean {
   return FINISHED.has(status.toUpperCase());
@@ -41,8 +47,9 @@ export async function runOutcomeCounts(
     const hit = memo.get(run.id);
     if (hit && now - hit.at < COUNTS_TTL_MS) return hit.counts;
   }
+  const startedIn = generation;
   const counts = await store.countOutcomesByStatus(run.id);
-  if (finished) {
+  if (finished && startedIn === generation) {
     memo.delete(run.id);
     memo.set(run.id, { counts, at: now });
     while (memo.size > MAX_ENTRIES) {
@@ -74,5 +81,6 @@ export async function runOutcomeCountsFor(
 
 /** Outcome compaction deleted rows from finished runs: every kept count may now be wrong. */
 export function resetRunOutcomeCounts(): void {
+  generation += 1;
   memo.clear();
 }

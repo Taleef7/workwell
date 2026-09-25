@@ -119,6 +119,18 @@ describe("RunsPage says what a run is and what its numbers mean (#668)", () => {
     expect((await screen.findAllByText(/^15m \d+s$/))[0]!.textContent).not.toBe(before);
   });
 
+  it("a nightly running past an hour shows its time, and only one past three hours reads 'Stalled' (#709)", async () => {
+    const at = (ms: number) => new Date(Date.now() - ms).toISOString();
+    answer([
+      { ...nightly, runId: "run-4", status: "RUNNING", completedAt: null, durationMs: 0, startedAt: at(90 * 60_000) },
+      { ...nightly, runId: "run-5", status: "RUNNING", completedAt: null, durationMs: 0, startedAt: at(4 * 3600_000) },
+    ]);
+    render(<RunsPage />);
+    // The list row, and the detail pane once the first run is selected: never "Stalled" for this one.
+    expect((await screen.findAllByText("1h 30m")).length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Stalled")).toHaveLength(1);
+  });
+
   it("shows a finished run's duration past an hour, not '-'", async () => {
     render(<RunsPage />);
     expect(await screen.findByText("1h 12m")).toBeInTheDocument();

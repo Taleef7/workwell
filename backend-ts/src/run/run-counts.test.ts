@@ -101,3 +101,23 @@ test("one failed count fails the whole list read, as the unbounded Promise.all d
   await runOutcomeCounts(store, { id: "r-2", status: "COMPLETED" }).catch(() => {});
   assert.equal(reads.length, before + 1, "the failed run's count was not kept");
 });
+
+test("a count that was in flight when compaction reset the counts is not kept (#709, Codex)", async () => {
+  let release!: () => void;
+  const gate = new Promise<void>((r) => (release = r));
+  const reads: string[] = [];
+  const store = {
+    async countOutcomesByStatus(runId: string) {
+      reads.push(runId);
+      if (reads.length === 1) await gate; // the first read saw the pre-compaction rows
+      return counted(reads.length);
+    },
+  };
+  const done = { id: "r-done", status: "COMPLETED" };
+  const inFlight = runOutcomeCounts(store, done);
+  resetRunOutcomeCounts(); // compaction lands while that read is outstanding
+  release();
+  await inFlight;
+  await runOutcomeCounts(store, done);
+  assert.equal(reads.length, 2, "the stale read was not kept, so the next load counts again");
+});

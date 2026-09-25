@@ -153,7 +153,12 @@ type RunInsightResponse = {
 };
 
 const RUN_PAGE_SIZE = 20;
-const MAX_DISPLAY_DURATION_MS = 60 * 60 * 1000;
+/**
+ * A RUNNING run older than this reads "Stalled". Well past any legitimate run: the in-process nightly
+ * took 88 minutes, the pooled one 49. It was one hour, which never fired while a running run's duration
+ * read 0 and would have called every long nightly stalled once it showed real elapsed time (#709).
+ */
+const MAX_DISPLAY_DURATION_MS = 3 * 60 * 60 * 1000;
 
 function formatAbsoluteTimestamp(dateString: string | null): string {
   if (!dateString) return "-";
