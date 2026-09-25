@@ -176,6 +176,7 @@ The deploy fails if a required secret is missing. Suffixed secrets map to unsuff
 | `WORKWELL_R2_S3_ENDPOINT` | R2 endpoint (secret because it embeds the account id; the repo is public) |
 | `WORKWELL_BACKUP_S3_ACCESS_KEY_ID` / `SECRET_ACCESS_KEY` | R2 token for `workwell-backups` |
 | `WORKWELL_WEBCHART_PRIVATE_KEY_STAGING` | teatea SMART key (staging) |
+| `WORKWELL_ALERT_WEBHOOK_URL` | Maui's failed-run alert webhook (optional; see "Failed-run alerts") |
 | `NPM_TOKEN` | `publish-packages.yml` |
 
 ### Backend runtime configuration (set by the workflow / container)
@@ -184,7 +185,8 @@ Both live stacks ship: `MIEWEB_TARGET=local`, `WORKWELL_ENVIRONMENT=production`,
 `OPENAI_API_KEY`, `WORKWELL_CORS_ALLOWED_ORIGINS` + `CORS_ALLOWED_ORIGINS` (the frontend URL),
 `WORKWELL_AUTH_COOKIE_SAME_SITE=None`, `WORKWELL_AUTH_COOKIE_SECURE=true`, `WORKWELL_AUTH_JWT_SECRET`,
 `WORKWELL_INSTANCE`, `WORKWELL_SCHEDULER_ENABLED=true`, `WORKWELL_OFFICIAL_MEASURES`,
-`WORKWELL_VSAC_API_KEY` and the five `WORKWELL_BUCKET_S3_*`; Maui adds the corpus variables.
+`WORKWELL_VSAC_API_KEY` and the five `WORKWELL_BUCKET_S3_*`; Maui adds the corpus variables and
+`WORKWELL_ALERT_WEBHOOK_URL`.
 `WORKWELL_EMAIL_PROVIDER` is unset, so email stays simulated. The reconcilers duplicate this array —
 **keep-in-sync**.
 
@@ -290,12 +292,29 @@ calculation in-process again (the escape hatch if the workers misbehave). `cpus`
 
 ### Failed-run alerts (#264)
 
-A FAILED/PARTIAL_FAILURE population run, a stuck-run recovery or a scheduler tick throw emits one
-`WORKWELL_ALERT {"kind":…}` log line, plus a JSON POST to `WORKWELL_ALERT_WEBHOOK_URL` when set. The body
-also carries a one-line summary as `text` and `content`, so a Slack, Teams or Discord incoming-webhook URL
-works as it is (#623). **Not set on any stack yet**, so the alert reaches nobody; the reader is told
-instead by the banner on `/programs` when the latest overnight update failed, finished with errors, or
-has not run for 36 hours.
+A FAILED/PARTIAL_FAILURE run (any scope, a single patient's included), a stuck-run recovery, a scheduler
+tick throw or an unreachable evidence bucket emits one `WORKWELL_ALERT {"kind":…}` log line with the whole
+alert, plus a JSON POST to `WORKWELL_ALERT_WEBHOOK_URL` when set. The POST carries only fields that cannot
+name a patient (kind, time, status, run id, scope type, counts; never the scope label or error text) and
+a one-line summary as `text` and `content`, so a Slack, Teams or Discord incoming-webhook URL works as it
+is (#623). A non-2xx answer is logged as a failed delivery; a value that is not an https URL turns the
+webhook off with a log line that does not print it.
+
+**Set on Maui only**, from the `WORKWELL_ALERT_WEBHOOK_URL` secret (the deploy and the self-heal both carry
+it; a test holds them together). It points at a Google Apps Script web app that emails the owner the
+summary line, deployed with "Execute as: Me" and access "Anyone" (the URL is the only credential):
+
+```js
+function doPost(e) {
+  const alert = JSON.parse(e.postData.contents);
+  MailApp.sendEmail(Session.getEffectiveUser().getEmail(), "WorkWell alert: " + alert.kind, alert.text);
+  return ContentService.createTextOutput("ok");
+}
+```
+
+A new Apps Script deployment gets a new URL: update the secret, then redeploy Maui (a restart in place
+keeps the old environment). On TWH the alert reaches nobody. Either way, `/programs` shows a banner when
+the latest overnight update failed, finished with errors, or has not run for 36 hours.
 
 ### On-demand data tools (never run on deploy; owner-run)
 
