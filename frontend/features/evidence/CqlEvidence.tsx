@@ -6,7 +6,8 @@ export interface EvidenceJson {
   evaluatedResource?: Record<string, unknown>;
   why_flagged?: {
     last_exam_date: string | null;
-    compliance_window_days: number;
+    /** Null for an official outcome (#650): it has no single window. */
+    compliance_window_days: number | null;
     days_overdue: number | null;
     role_eligible: boolean;
     site_eligible: boolean;
@@ -163,6 +164,9 @@ export function CqlExpressionResults({ results }: { results?: Array<Record<strin
 export function CqlWhyFlagged({ whyFlagged }: { whyFlagged?: EvidenceJson["why_flagged"] }) {
   if (!whyFlagged) return null;
   const isPatient = SUBJECT.singular === "patient";
+  // An explicit null window is the backend's mark of an official outcome (#650); an older backend that
+  // still sends a number keeps the full set of rows.
+  const officialOutcome = whyFlagged.compliance_window_days === null;
   return (
     <dl className="grid gap-2 text-xs text-neutral-700 dark:text-neutral-300 sm:grid-cols-2">
       {whyFlagged.official_summary ? (
@@ -171,11 +175,19 @@ export function CqlWhyFlagged({ whyFlagged }: { whyFlagged?: EvidenceJson["why_f
           <dd className="mt-1 text-sm font-medium text-neutral-900 dark:text-neutral-100">{whyFlagged.official_summary}</dd>
         </div>
       ) : null}
-      <WhyFlaggedRow label={isPatient ? "Last result date" : "Last exam date"} value={whyFlagged.last_exam_date ?? "None"} />
-      <WhyFlaggedRow label="Window (days)" value={String(whyFlagged.compliance_window_days)} />
-      {/* Not computed (no result, or an official measure with no recency rule) is a dash, never "0": "0 days
-          overdue" beside an Overdue badge contradicted it. The dash makes no claim about whether a result exists. */}
-      <WhyFlaggedRow label="Days overdue" value={whyFlagged.days_overdue == null ? "—" : String(whyFlagged.days_overdue)} />
+      {/* #650: an official outcome records population membership, not a result date, a window or a count of
+          days: CMS130 alone qualifies on FIT yearly, FIT-DNA at 3 years or a colonoscopy at 10. Those rows are
+          left out rather than filled with the authored default ("Window (days) 365") or a "None" that reads as
+          "no result" beside a patient flagged BECAUSE of a result. The summary above says why. */}
+      {officialOutcome ? null : (
+        <>
+          <WhyFlaggedRow label={isPatient ? "Last result date" : "Last exam date"} value={whyFlagged.last_exam_date ?? "None"} />
+          <WhyFlaggedRow label="Window (days)" value={String(whyFlagged.compliance_window_days)} />
+          {/* Not computed (no result) is a dash, never "0": "0 days overdue" beside an Overdue badge
+              contradicted it. The dash makes no claim about whether a result exists. */}
+          <WhyFlaggedRow label="Days overdue" value={whyFlagged.days_overdue == null ? "—" : String(whyFlagged.days_overdue)} />
+        </>
+      )}
       {!isPatient ? <WhyFlaggedRow label="Role eligible" value={whyFlagged.role_eligible ? "Yes" : "No"} /> : null}
       {!isPatient ? <WhyFlaggedRow label="Site eligible" value={whyFlagged.site_eligible ? "Yes" : "No"} /> : null}
       <WhyFlaggedRow label={isPatient ? "Exclusion status" : "Waiver status"} value={whyFlagged.waiver_status} />

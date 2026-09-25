@@ -452,3 +452,19 @@ test("createChat sends options a GPT-5-era model accepts: no max_tokens, reasoni
   assert.equal(body.max_completion_tokens, 1000);
   assert.ok(!("max_tokens" in body), "max_tokens is rejected by every GPT-5-era model");
 });
+
+test("#650: the deterministic fallback states no window for an official outcome, and keeps the sentence for an authored one", async () => {
+  const run = async (why: Record<string, unknown>) => {
+    const r = recorder();
+    return (await explainCase(
+      r.deps(async () => { throw new Error("no key"); }),
+      { caseId: "c1", measureName: "Colorectal Cancer Screening", measureVersion: "v1.0", currentOutcomeStatus: "OVERDUE", lastRunId: "run1", employeeName: "Keiko Reyes", evidenceJson: { why_flagged: why, expressionResults: [] } },
+      "cm@x",
+    )).explanation;
+  };
+  const official = await run({ last_exam_date: null, days_overdue: null, compliance_window_days: null, waiver_status: "none" });
+  assert.doesNotMatch(official, /-day window/);
+  assert.match(official, /status: none\./);
+  const authored = await run({ last_exam_date: "2025-04-19", days_overdue: 55, compliance_window_days: 365, waiver_status: "none" });
+  assert.match(authored, /with a 365-day window/);
+});

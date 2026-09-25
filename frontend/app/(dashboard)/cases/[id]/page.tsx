@@ -75,7 +75,7 @@ type CaseDetail = {
     evaluatedResource?: Record<string, unknown>;
     why_flagged?: {
       last_exam_date: string | null;
-      compliance_window_days: number;
+      compliance_window_days: number | null;
       days_overdue: number | null;
       role_eligible: boolean;
       site_eligible: boolean;

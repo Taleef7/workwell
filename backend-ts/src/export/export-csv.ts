@@ -130,6 +130,8 @@ const exprResults = (evidence: unknown): ExprResult[] => {
 /** why_flagged fields derived from the CQL defines (same derivation as case detail). */
 function whyFlagged(evidence: unknown, measureId: string) {
   const ers = exprResults(evidence);
+  // #650: empty for an official outcome, which has no single window (the column stays; §6.2 appends only).
+  const official = (evidence as { official?: unknown } | null | undefined)?.official != null;
   const window = MEASURE_BINDINGS[measureId]?.complianceWindowDays ?? 365;
   const recent = ers.find((r) => /^most recent .*date$/i.test(r.define));
   const hadExam = recent != null && recent.result != null;
@@ -138,7 +140,7 @@ function whyFlagged(evidence: unknown, measureId: string) {
   const waiver = ers.find((r) => /waiver|exemption|exclusion/i.test(r.define));
   return {
     lastExamDate: hadExam && typeof recent!.result === "string" ? recent!.result.slice(0, 10) : null,
-    complianceWindowDays: window,
+    complianceWindowDays: official ? null : window,
     daysOverdue: days !== null ? Math.max(days - window, 0) : null,
     waiverStatus: typeof waiver?.result === "boolean" ? (waiver.result ? "active" : "none") : "none",
   };

@@ -103,7 +103,8 @@ run only `evidence_json.official.measurementPeriod` names an official outcome's 
 }
 ```
 - `why_flagged` is **derived at read time** (`deriveWhyFlagged`, `case/case-detail-read-model.ts`), never
-persisted.
+persisted. On an outcome with `official` evidence `compliance_window_days` is `null`: an official measure has
+no single window (#650), so no screen, card, CSV or AI fallback states one.
 - **Persisted:** `expressionResults` (raw defines; on an official outcome, population membership
 `official:<population>` or multi-rate `official:<Rate label>:<population>`); `official` when
 official-routed (`populationResults`, read by MeasureReport/QRDA; multi-rate adds `rates`, stratified adds
@@ -131,6 +132,8 @@ Filters: `runId`, `site`, `providerId`, `ageBand`, `sex`, `payer`.
 
 Columns:
 `outcomeId, runId, employeeExternalId, employeeName, role, site, measureName, measureVersion, evaluationPeriod, status, lastExamDate, complianceWindowDays, daysOverdue, roleEligible, siteEligible, waiverStatus, evaluatedAt, providerId, payer`
+
+`complianceWindowDays` is empty on an official outcome (#650), as in `why_flagged`.
 
 ### 6.3 `GET /api/exports/cases?format=csv`
 Columns:

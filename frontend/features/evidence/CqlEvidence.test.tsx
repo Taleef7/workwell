@@ -84,4 +84,18 @@ describe("CqlEvidence", () => {
     expect(screen.getByText("Why flagged")).toBeInTheDocument();
     expect(screen.getByText(/treatment was initiated within 14 days but not engaged/)).toBeInTheDocument();
   });
+
+  it("#650: an official outcome shows no window, days overdue or last result date, only the summary and exclusion", () => {
+    setSubject("patient");
+    render(<CqlEvidence evidence={{ why_flagged: {
+      last_exam_date: null, compliance_window_days: null, days_overdue: null,
+      role_eligible: true, site_eligible: true, waiver_status: "none",
+      official_summary: "Flagged: no colorectal cancer screening within the accepted interval for this measurement period.",
+    } }} />);
+    expect(screen.getByText(/no colorectal cancer screening within the accepted interval/)).toBeInTheDocument();
+    expect(screen.queryByText("Window (days)")).toBeNull();
+    expect(screen.queryByText("Days overdue")).toBeNull();
+    expect(screen.queryByText("Last result date")).toBeNull();
+    expect(screen.getByText("Exclusion status")).toBeInTheDocument();
+  });
 });

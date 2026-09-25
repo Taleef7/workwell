@@ -152,9 +152,14 @@ export function deriveWhyFlagged(evidence: unknown, measureId: string, evaluatio
   // date), so subtracting days from that anchor would fabricate a last_exam_date months too early
   // (Codex P1 #327). `days_overdue` below still comes from the CQL "Days Since", which IS correctly
   // anchored — so an OVERDUE cell shows the accurate overdue count without inventing an exam date.
+  // #650: an official outcome has no single window. Its qualifying intervals live in the measure logic
+  // and depend on which test qualified (CMS130: FIT yearly, FIT-DNA 3 years, colonoscopy 10), so the
+  // authored binding's window (or the 365 default) described nothing about it. Decided by the row's own
+  // evidence, as the rate readers are, not by today's routing.
+  const officialEvidence = (evidence as { official?: unknown } | null | undefined)?.official != null;
   return {
     last_exam_date: lastExamDate,
-    compliance_window_days: window,
+    compliance_window_days: officialEvidence ? null : window,
     days_overdue: days !== null ? overdueDays(days, window, grace) : null,
     role_eligible: true,
     site_eligible: true,

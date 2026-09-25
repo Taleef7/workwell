@@ -574,7 +574,13 @@ function buildDeterministicExplanation(input: CaseExplanationInput, subjectTerm:
       .join(", ") || "no define-level results available";
   // The employee wording is the original, byte-identical text; the patient wording drops the
   // occupational vocabulary (exam/vaccine, waiver) a clinic reader would trip over.
-  const evidenceSentence = singular === "patient"
+  // #650: an official outcome carries no window, result date or days overdue (why_flagged sets the
+  // window null), so it gets no "with a 365-day window" sentence built from the authored default.
+  // An ABSENT why_flagged (older callers) keeps the original wording; only an explicit null is official.
+  const noWindow = "compliance_window_days" in whyFlagged && whyFlagged.compliance_window_days === null;
+  const evidenceSentence = noWindow
+    ? `${singular === "patient" ? "Exclusion" : "Waiver"} status: ${waiver}. `
+    : singular === "patient"
     ? `The ${singular}'s last recorded result date is ${lastExamDate} with a ${window}` +
       `-day window, days overdue ${daysOverdue}, and exclusion status ${waiver}. `
     : `The last recorded exam/vaccine date is ${lastExamDate} with a ${window}` +
